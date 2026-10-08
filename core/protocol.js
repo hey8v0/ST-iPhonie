@@ -64,4 +64,27 @@ export function promptPlan(settings,rules,only=null){const p=settings.presets.fi
 // leaving the translation as written, so the card looks as it was made (the lines still play from 整条播放 and 听取).
 const FRAMED = /```[\s\S]*?(?:```|$)|<(?:!doctype\s+html|html)\b[\s\S]*?(?:<\/html\s*>|$)/gi;
 const WAVE = /<span class="sttts-utterance"[^>]*><span class="sttts-translation"[^>]*>([\s\S]*?)<\/span> <button type="button" class="sttts-play"[^>]*>[\s\S]*?<\/button><\/span>/g;
-export function unwaveFramed(text){return String(text).replace(FRAMED,block=>block.replace(WAVE,'$1'));}
+export function unwaveFramed(text){return String(text).replace(FRAMED,block=>unmark(block.replace(WAVE,'$1')));}
+// Marks before markup: a 前端美化 card's regex often wraps runs of plain text (each paragraph in its own card); a wave
+// button put in before the regex is a tag in the middle of the run and cuts the card in two. So before the regex each
+// line is only “译文” between invisible marks (Unicode private use: OPEN, the line's number, MID … CLOSE), which the
+// regex and Markdown read as ordinary text; once they have run, waveMarks turns the marks into the wave.
+const MARK_OPEN = '', MARK_MID = '', MARK_CLOSE = '', MARK_BASE = 0xE100;
+const MARKED = /([-])([\s\S]*?)/g, MARK_LEFT = /[-]??|/g;
+const waveButton = role => `<button type="button" class="sttts-play" data-sttts-action="line" data-sttts-state="ungenerated" aria-label="生成并朗读 ${escapeHTML(role)} 的台词"><span data-sttts-wave aria-hidden="true"><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i></span></button>`;
+/** Each tagged line as its “translation” between marks, for the stage before a card's regex. */
+export function markDialogue(message, format) {
+  const lines = parseDialogue(message, format); let out = '', at = 0;
+  lines.forEach((line, index) => { out += message.slice(at, line.start) + MARK_OPEN + String.fromCharCode(MARK_BASE + index) + MARK_MID + `“${escapeHTML(line.translation)}”` + MARK_CLOSE; at = line.end; });
+  return out + message.slice(at);
+}
+/** After the regex and Markdown: the marks become the waves (roles: the lines' speakers, for the button's label). Marks a
+ *  card's regex pulled apart are only taken away. */
+export function waveMarks(html, marker, roles = []) {
+  return String(html).replace(MARKED, (m, n, text) => { const index = n.charCodeAt(0) - MARK_BASE;
+    // A line the regex cut into (a tag left open or closed inside it) keeps its text and gets no wave.
+    if (text.replace(/<(em|strong|i|b|u|s|del|code)>[^<]*<\/\1>/g, '').includes('<')) return text;
+    return `<span class="sttts-utterance" data-sttts-line="${index}" data-sttts-token="${marker}"><span class="sttts-translation" data-sttts-translation>${text}</span> ${waveButton(roles[index] || '')}</span>`; }).replace(MARK_LEFT, '');
+}
+/** Marks without their waves (inside a framed block, or when nothing turns them into waves). */
+export const unmark = text => String(text).replace(MARKED, '$2').replace(MARK_LEFT, '');

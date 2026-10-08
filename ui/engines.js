@@ -432,10 +432,12 @@ export function enginesApp(ctx) {
     v.root.dataset.carried = '';
     ctx.win.setTimeout(() => delete v.root.dataset.carried, 700);
   }
+  // Back on the wallet where it was left, so the card flies back into its own pocket.
+  let listScroll = 0;
   v.back = () => {
     if (!engine) return false;
     const id = engine, from = v.root.querySelector('.detail-card')?.getBoundingClientRect();
-    engine = null; render();
+    engine = null; render(); v.root.scrollTop = listScroll;
     fly(ctx.win, v.root.querySelector(`.wallet [data-engine="${id}"]`), from, {duration: 340, easing: 'bounce'});
     return true;
   };
@@ -517,7 +519,7 @@ export function enginesApp(ctx) {
         if (await ctx.confirm('删除这组连接？', `「${p.name}」的地址和密钥会一起删掉，其他组保留。`)) { api.deleteImageConnection(engine, p.id); imageSaved(); ctx.notify('已删除这组连接'); }
         break;
       }
-      case 'engine': if (frontOf(el.dataset.engine) === el.dataset.engine) { const from = el.getBoundingClientRect(); edit(el.dataset.engine); lift(from); } else bringFront(el.dataset.engine); break;
+      case 'engine': if (frontOf(el.dataset.engine) === el.dataset.engine) { const from = el.getBoundingClientRect(); listScroll = v.root.scrollTop; edit(el.dataset.engine); lift(from); } else bringFront(el.dataset.engine); break;
       case 'text-source': textDraft.source = el.dataset.source; changed(); dirty = true; render(); break;
       case 'text-preset': if (textDraft.active !== el.dataset.id) { textDraft.active = el.dataset.id; models = []; changed(); dirty = true; render(); } break;
       case 'text-new': {

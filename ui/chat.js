@@ -1081,6 +1081,7 @@ export function chatApp(ctx) {
       case 'open': {
         // The contact's picture in the list flies up to the top of the chat (ui/carry.js).
         const from = el.firstElementChild?.getBoundingClientRect();
+        listScroll = v.root.scrollTop;
         Promise.resolve(open(el.dataset.id)).then(() => fly(ctx.win, v.root.querySelector('.th-head')?.firstElementChild, from, {duration: 360, easing: 'soft'}));
         break;
       }
@@ -1209,6 +1210,8 @@ export function chatApp(ctx) {
     }
   });
 
+  // The chat list is back where it was left when a chat is closed.
+  let listScroll = 0;
   v.back = () => {
     if (mode === 'thread' && panel) { panel = null; syncPanel(); return true; }
     if (mode === 'thread' && selecting) { selecting = null; render(); return true; }
@@ -1216,7 +1219,7 @@ export function chatApp(ctx) {
       // From a chat: its picture flies back down into its row.
       const was = mode === 'thread' ? threadId : null, from = was ? v.root.querySelector('.th-head')?.firstElementChild?.getBoundingClientRect() : null;
       mode = 'list'; threadId = null; selecting = null; quote = null; contactDraft = null;
-      Promise.resolve(render()).then(() => { if (from) fly(ctx.win, v.root.querySelector(`.conv[data-conv="${was}"]`)?.firstElementChild, from, {duration: 320, easing: 'bounce'}); });
+      Promise.resolve(render()).then(() => { if (was) v.root.scrollTop = listScroll; if (from) fly(ctx.win, v.root.querySelector(`.conv[data-conv="${was}"]`)?.firstElementChild, from, {duration: 320, easing: 'bounce'}); });
       return true;
     }
     if (tab !== 'msgs') { tab = 'msgs'; render(); return true; }

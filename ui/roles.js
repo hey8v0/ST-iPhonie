@@ -169,11 +169,13 @@ export function rolesApp(ctx) {
   }
 
   function edit(id) {
+    if (!current) listScroll = v.root.scrollTop;
     const saved = api.getState().routes.find(r => r.id === id);
     if (!saved) { ctx.notify('角色已不存在'); return; }
     current = drafts.get(id) || structuredClone(saved);
     drafts.set(id, current);
     render();
+    v.root.scrollTop = 0;
   }
   // Starts a new draft for a speaker that appeared in chat without a voice.
   function create(name = '') {
@@ -184,7 +186,9 @@ export function rolesApp(ctx) {
   }
   v.edit = edit;
   v.create = create;
-  v.back = () => { if (!current) return false; current = null; render(); return true; };
+  // Back on the list where it was left.
+  let listScroll = 0;
+  v.back = () => { if (!current) return false; current = null; render(); v.root.scrollTop = listScroll; return true; };
   v.refresh = () => { if (!current) render(); };
 
   v.on('change', '[data-field=autoVoice]', el => { api.updateGeneral({autoVoice: el.checked}); ctx.notify(el.checked ? '新角色第一次说话时会自动挑音色' : '已关闭自动挑音色'); });
