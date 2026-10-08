@@ -26,7 +26,7 @@ export function normalizeSounds(value) {
     ambienceVolume: unit(value.ambienceVolume, base.ambienceVolume),
     sfxVolume: unit(value.sfxVolume, base.sfxVolume),
     vary: value.vary !== false,
-    // 音效只在点的时候放: sound effects wait for a tap on their ♪ (ambience still starts by itself).
+    // 只在点的时候放: sound effects and ambience wait for a tap on their ♪.
     tapOnly: value.tapOnly === true,
     generate: value.generate === true,
     versions: Number.isFinite(versions) ? Math.min(SOUND_LIMITS.versions[1], Math.max(SOUND_LIMITS.versions[0], versions)) : base.versions,

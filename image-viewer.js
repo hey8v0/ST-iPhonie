@@ -2,13 +2,14 @@
 // It grows from where the picture was on the page (`from`) to the whole screen (as big as fits, small pictures too),
 // then zooms freely: wheel, pinch or the buttons; drag to move; double-click or double-tap switches between that size
 // and 2.5x; a single tap hides or shows the bars. As on a phone, there is no reset button: pinched (or wheeled)
-// smaller than the screen, the picture springs back to it when let go.
+// smaller than the screen, the picture springs back to it when let go. Not zoomed in, a swipe down puts the picture
+// away (back into its place on the page) and a swipe up shows its details (参数); down again hides them.
 // The picture sits between the top bar and the bottom bar, so the bars never cover it at its opening size.
 // It brings its own styles, so it works in any document.
 
 const STYLE_ID = 'sttts-viewer-style';
 const CSS = `
-.sttts-viewer{position:fixed;top:0;left:0;width:100vw;height:100vh;height:100dvh;z-index:40000;background:rgba(8,10,20,.94);touch-action:none;user-select:none;-webkit-user-select:none;overscroll-behavior:contain;font:14px/1.4 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#fff}
+.sttts-viewer{position:fixed;top:0;left:0;width:100vw;height:100vh;height:100dvh;z-index:40000;background-color:rgba(8,10,20,.94);touch-action:none;user-select:none;-webkit-user-select:none;overscroll-behavior:contain;font:14px/1.4 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#fff}
 .sttts-viewer img{position:absolute;left:0;top:0;max-width:none;max-height:none;transform-origin:0 0;will-change:transform;cursor:grab;-webkit-user-drag:none}
 .sttts-viewer[data-dragging] img{cursor:grabbing}
 .sttts-viewer-top{position:absolute;top:max(12px,env(safe-area-inset-top));left:12px;right:12px;display:flex;align-items:center;gap:8px;pointer-events:none}
@@ -17,7 +18,10 @@ const CSS = `
 .sttts-viewer-bar{position:absolute;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;align-items:center;gap:2px;padding:4px;border-radius:24px;background:rgba(20,24,40,.8);box-shadow:0 8px 24px rgba(0,0,0,.4);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);max-width:calc(100vw - 24px);flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
 .sttts-viewer-bar::-webkit-scrollbar{display:none}
 .sttts-viewer-top,.sttts-viewer-bar,.sttts-viewer-info,.sttts-viewer-caption{transition:opacity .2s}
-.sttts-viewer[data-chrome=off] .sttts-viewer-top,.sttts-viewer[data-chrome=off] .sttts-viewer-bar,.sttts-viewer[data-chrome=off] .sttts-viewer-info,.sttts-viewer[data-chrome=off] .sttts-viewer-caption{opacity:0;pointer-events:none}
+.sttts-viewer:not([data-pulling]){transition:background-color .25s}
+.sttts-viewer:is([data-chrome=off],[data-pulling],[data-leaving]) :is(.sttts-viewer-top,.sttts-viewer-bar,.sttts-viewer-info,.sttts-viewer-caption){opacity:0;pointer-events:none}
+.sttts-viewer[data-leaving] img{transition:transform .28s cubic-bezier(.23,1,.32,1),opacity .2s}
+.sttts-viewer[data-info] .sttts-viewer-caption{display:none}
 .sttts-viewer-caption{position:absolute;left:12px;right:12px;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 66px);max-height:30%;overflow:auto;margin:0;padding:9px 13px;border-radius:14px;background:rgba(20,24,40,.78);color:#fff;font-size:13px;line-height:1.6;white-space:pre-wrap;user-select:text;-webkit-user-select:text}
 /* all:unset makes pointer-events inherit (none from the top bar): buttons say auto themselves, and none while hidden. */
 .sttts-viewer[data-chrome=off] button{pointer-events:none}
@@ -32,7 +36,10 @@ const CSS = `
 .sttts-viewer .sttts-viewer-close{margin-left:auto;font-size:22px}
 .sttts-viewer [data-v=prev],.sttts-viewer [data-v=next]{font-size:24px;font-weight:400}
 .sttts-viewer output{flex-shrink:0;min-width:48px;text-align:center;font-variant-numeric:tabular-nums;opacity:.85}
-.sttts-viewer-info{position:absolute;left:12px;right:12px;top:calc(max(12px,env(safe-area-inset-top)) + 54px);max-height:min(52vh,420px);overflow:auto;padding:12px 14px;border-radius:16px;background:rgba(20,24,40,.92);box-shadow:0 8px 24px rgba(0,0,0,.4);font-size:13px;line-height:1.6;user-select:text;-webkit-user-select:text;touch-action:pan-y}
+.sttts-viewer-info{position:absolute;left:12px;right:12px;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 60px);max-height:min(45vh,380px);overflow:auto;padding:12px 14px;border-radius:16px;background:rgba(20,24,40,.92);box-shadow:0 8px 24px rgba(0,0,0,.4);font-size:13px;line-height:1.6;user-select:text;-webkit-user-select:text;touch-action:pan-y}
+.sttts-viewer[data-nobar] .sttts-viewer-info{bottom:max(12px,env(safe-area-inset-bottom))}
+@media(prefers-reduced-motion:no-preference){.sttts-viewer-info{animation:sttts-sheet .28s cubic-bezier(.23,1,.32,1)}}
+@keyframes sttts-sheet{from{transform:translateY(24px);opacity:0}}
 .sttts-viewer-info dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0}
 .sttts-viewer-info dt{opacity:.65;white-space:nowrap}
 .sttts-viewer-info dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -79,11 +86,13 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
   // On a phone the zoom buttons are hidden: with nothing else on it, there is no bottom bar.
   const narrow = !!win.matchMedia?.('(max-width:480px)').matches, barKept = paged || actions.length > 0 || !narrow;
   bar.hidden = !barKept;
+  root.toggleAttribute('data-nobar', !barKept);
   actions.forEach((a, i) => { root.querySelector(`[data-action="${i}"]`).textContent = a.label; });
   doc.body.append(root);
 
   let s = 1, tx = 0, ty = 0, fit = 1, base = 1, closed = false, opened = false, chrome = true, tapTimer = 0, wheelTimer = 0;
   let start = from?.getBoundingClientRect?.();
+  const first = index;
   const pointers = new Map();
   let gesture = null, lastTap = null;
   // The tavern puts a transform on <html>, which makes a fixed box with only `inset` collapse to 0 height:
@@ -94,7 +103,9 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
   function band() {
     const {h} = size();
     if (!chrome || h < 240) return {top: 0, bottom: h};
-    const top = Math.min(h / 4, 64), bottom = h - (barKept ? Math.min(h / 4, (bar.offsetHeight || 52) + 26) : 12);
+    const top = Math.min(h / 4, 64), below = h - (barKept ? Math.min(h / 4, (bar.offsetHeight || 52) + 26) : 12);
+    // The details open: the picture sits above them.
+    const bottom = panel.hidden || !panel.offsetHeight ? below : Math.max(top + 80, Math.min(below, panel.offsetTop - 10));
     return {top, bottom};
   }
 
@@ -148,7 +159,7 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     const details = item.info ?? info;
     infoButton.hidden = !details;
     panel.innerHTML = details ? infoHTML(details) : '';
-    if (!details) { panel.hidden = true; infoButton.setAttribute('aria-pressed', 'false'); }
+    if (!details) setInfo(false);
     if (count) count.textContent = `${index + 1} / ${items.length}`;
     const prev = root.querySelector('[data-v=prev]'), next = root.querySelector('[data-v=next]');
     if (prev) prev.disabled = index === 0;
@@ -168,6 +179,39 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     win.removeEventListener('resize', onResize);
     doc.removeEventListener('keydown', onKey, true);
     if (focus?.isConnected) focus.focus?.({preventScroll: true});
+  }
+  /** The details (参数) open or shut; the picture makes room for them. false when there are none. */
+  function setInfo(open) {
+    if (open && !panel.innerHTML) return false;
+    panel.hidden = !open;
+    infoButton.setAttribute('aria-pressed', String(open));
+    root.toggleAttribute('data-info', open);
+    if (open && !chrome) setChrome(true);
+    else if (opened && s <= Math.max(base, fit) * 1.01) home(true);
+    return true;
+  }
+  /** A finger pulling the picture (not zoomed in): down, it shrinks and the dark goes; up, or down to hide the details, it only gives a little. */
+  function pull(dx, dy) {
+    const {h} = size(), n = nat();
+    img.removeAttribute('data-animate');
+    root.toggleAttribute('data-pulling', true);
+    if (dy > 0 && panel.hidden) {
+      const k = Math.max(.55, 1 - dy / (h * 1.4)), iw = n.w * s, ih = n.h * s;
+      img.style.transform = `translate(${tx + iw * (1 - k) / 2 + dx}px,${ty + ih * (1 - k) / 2 + dy}px) scale(${s * k})`;
+      root.style.backgroundColor = `rgba(8,10,20,${(.94 * Math.max(0, 1 - dy / (h * .5))).toFixed(3)})`;
+    } else img.style.transform = `translate(${tx}px,${ty + dy * .3}px) scale(${s})`;
+  }
+  function unpull() { root.removeAttribute('data-pulling'); root.style.backgroundColor = ''; }
+  /** Swiped down: the picture goes back where it was on the page (or drops away), then the viewer closes. */
+  function dismiss() {
+    const back = index === first && from?.isConnected ? from.getBoundingClientRect() : null;
+    if (win.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) { close(); return; }
+    root.toggleAttribute('data-leaving', true);
+    root.removeAttribute('data-pulling');
+    root.style.backgroundColor = 'rgba(8,10,20,0)';
+    if (back?.width > 0) img.style.transform = `translate(${back.left}px,${back.top}px) scale(${back.width / nat().w})`;
+    else { img.style.transform = `translate(${tx}px,${ty + size().h * .4}px) scale(${s * .7})`; img.style.opacity = '0'; }
+    win.setTimeout(close, 280);
   }
   function setChrome(on) {
     chrome = on;
@@ -196,7 +240,9 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
   }, {passive: false});
   root.addEventListener('pointerdown', e => {
     if (onChrome(e)) return;
-    pointers.set(e.pointerId, {x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY});
+    pointers.set(e.pointerId, {x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: Date.now()});
+    // A second finger: a pinch, not a pull.
+    if (pointers.size > 1) { for (const q of pointers.values()) q.axis = 'free'; if (root.hasAttribute('data-pulling')) { unpull(); apply(); } }
     try { root.setPointerCapture?.(e.pointerId); } catch { /* a pointer the browser no longer tracks */ }
     root.toggleAttribute('data-dragging', true);
     gesture = null;
@@ -206,6 +252,10 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     if (!p) return;
     const r = root.getBoundingClientRect();
     if (pointers.size === 1) {
+      const dx = e.clientX - p.x0, dy = e.clientY - p.y0;
+      // Not zoomed in, a mostly-up-or-down move pulls the picture (to put it away, or for its details).
+      if (!p.axis && Math.hypot(dx, dy) > 10) p.axis = s <= Math.max(base, fit) * 1.05 && Math.abs(dy) > Math.abs(dx) * 1.2 ? 'y' : 'free';
+      if (p.axis === 'y') { p.moved = true; pull(dx, dy); return; }
       tx += e.clientX - p.x; ty += e.clientY - p.y;
       p.x = e.clientX; p.y = e.clientY;
       if (Math.hypot(e.clientX - p.x0, e.clientY - p.y0) > 10) p.moved = true;
@@ -231,6 +281,14 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     if (!pointers.size) root.removeAttribute('data-dragging');
     // A pinch let go below the screen size: back to it, like a phone's album.
     if (pinched) { settle(); return; }
+    if (p.axis === 'y') {
+      const dy = e.clientY - p.y0, fast = Math.abs(dy) / Math.max(1, Date.now() - p.t0) > .5;
+      const far = e.type === 'pointerup' && (Math.abs(dy) > 110 || (fast && Math.abs(dy) > 40));
+      if (far && dy > 0 && panel.hidden) { dismiss(); return; }
+      unpull();
+      if (!(far && setInfo(dy < 0))) apply(true);
+      return;
+    }
     // Several pictures, not zoomed in: a swipe sideways is the one before or after.
     if (paged && e.type === 'pointerup' && p.moved && !pointers.size && s <= Math.max(base, fit) * 1.05) {
       const dx = e.clientX - p.x0, dy = e.clientY - p.y0;
@@ -260,7 +318,7 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     if (!b) return;
     const v = b.dataset.v;
     if (v === 'close') close();
-    else if (v === 'info') { panel.hidden = !panel.hidden; b.setAttribute('aria-pressed', String(!panel.hidden)); }
+    else if (v === 'info') setInfo(panel.hidden);
     else if (v === 'prev' && index > 0) { start = null; show(index - 1); }
     else if (v === 'next' && index < items.length - 1) { start = null; show(index + 1); }
     else if (v === 'in') zoomAt(s * 1.5, ...center(), true);

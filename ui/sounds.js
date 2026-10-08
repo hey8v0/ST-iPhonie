@@ -45,7 +45,7 @@ export function soundsApp(ctx) {
     v.draw(heading('音效', btn('sound-tools', icon('more'), 'round-button', 'aria-label="导入、导出音效包"'), `Ambience · ${rows.length} 个声音`)
       + `<div class="group">${toggle('enabled', '正文音效', s.enabled, '打开后，剧情模型会在正文里写氛围音和音效的标签，插件按读的速度放出来；开着朗读时跟着台词走。标签发给模型前会去掉，旧楼层不占上下文；每次只多一段说明和声音名单。声音库是空的、也没开 ElevenLabs 生成时，什么都不加。')}
         ${s.enabled ? `<div class="list-row static">${playing}</div>${slider('ambienceVolume', '氛围音音量', s.ambienceVolume)}${slider('sfxVolume', '音效音量', s.sfxVolume)}
-        ${toggle('tapOnly', '音效只在点的时候放', s.tapOnly, '打开后，音效不再跟着读的速度或朗读自己放，只有点正文里的 ♪ 才放；氛围音照旧自己开始。')}
+        ${toggle('tapOnly', '只在点的时候放', s.tapOnly, '打开后，音效和氛围音都不再跟着读的速度、朗读或换聊天自己放，只有点正文里的 ♪ 才放；点氛围音的 ♪ 开始循环，再点一次停下。')}
         ${toggle('vary', '每次放得稍有不同', s.vary, '同一个声音每次稍微快一点或慢一点、轻一点或响一点；氛围音每次从不同的地方开始。听起来不像同一段录音反复放。')}` : ''}</div>${making}`
       + groupTitle('ElevenLabs 生成')
       + `<div class="group">${toggle('generate', '缺的声音让 ElevenLabs 做', s.generate, '剧情写了声音库里没有的声音时，模型会附一句英文描述，ElevenLabs 照着做出来存进声音库，下次直接用。会用掉 ElevenLabs 的额度。')}

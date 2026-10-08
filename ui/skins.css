@@ -28,8 +28,8 @@
 }
 :root[data-skin=aero] .device{background:linear-gradient(135deg,#ffffff,#bfe9fb 30%,#f4fcff 52%,#8fd3ef 78%,#e9f9ff);box-shadow:0 0 0 1px #7cc3e0,inset 0 2px 0 #fff,0 24px 50px -20px rgba(0,90,140,.5)}
 :root[data-skin=aero][data-theme=dark] .device{background:linear-gradient(135deg,#1c5a75,#062536 35%,#155069 60%,#031a26);box-shadow:0 0 0 1px #2a7593,0 24px 50px -20px #000}
-:root[data-skin=aero] .app-frame{background:radial-gradient(130% 55% at 50% -12%,#bdeeff 0,#bdeeff00 70%),radial-gradient(90% 40% at 100% 110%,#d8f7c4 0,#d8f7c400 70%),var(--bg)}
-:root[data-skin=aero][data-theme=dark] .app-frame{background:radial-gradient(130% 55% at 50% -12%,#0b4a66 0,#0b4a6600 70%),radial-gradient(90% 40% at 100% 110%,#0d4a3a 0,#0d4a3a00 70%),var(--bg)}
+:root[data-skin=aero] .app-window{background:radial-gradient(130% 55% at 50% -12%,#bdeeff 0,#bdeeff00 70%),radial-gradient(90% 40% at 100% 110%,#d8f7c4 0,#d8f7c400 70%),var(--bg)}
+:root[data-skin=aero][data-theme=dark] .app-window{background:radial-gradient(130% 55% at 50% -12%,#0b4a66 0,#0b4a6600 70%),radial-gradient(90% 40% at 100% 110%,#0d4a3a 0,#0d4a3a00 70%),var(--bg)}
 :root[data-skin=aero] .view:before{background-image:radial-gradient(circle 16px at 70% 30%,#ffffff00 0 60%,var(--aero-edge) 80%,#fff0 100%),radial-gradient(circle 9px at 40% 60%,#ffffff00 0 55%,var(--aero-edge) 80%,#fff0 100%),radial-gradient(circle 6px at 88% 72%,#ffffff00 0 50%,var(--aero-edge) 80%,#fff0 100%);background-size:120px 110px;opacity:.9}
 :root[data-skin=aero] .group,:root[data-skin=aero] details,:root[data-skin=aero] .role-card,:root[data-skin=aero] .code-preview{background:var(--aero-gloss),var(--card);border:1px solid var(--aero-edge);box-shadow:inset 0 1px 0 var(--aero-edge),var(--shadow)}
 :root[data-skin=aero] .page-heading h1 span{background:none;padding:0;color:var(--accent-ink);text-shadow:0 1px 0 #fff,0 0 14px rgba(40,180,240,.35)}
@@ -92,7 +92,7 @@
 }
 :root[data-skin=fresh] .device{background:linear-gradient(135deg,#fbf9f2,#e3ddcc 34%,#f6f2e7 56%,#d7d0bd 80%,#f1ece0);box-shadow:0 0 0 1px #c9c1ab,0 24px 50px -22px rgba(70,70,50,.45)}
 :root[data-skin=fresh][data-theme=dark] .device{background:linear-gradient(135deg,#3a342d,#1c1915 36%,#2d2822 60%,#141210);box-shadow:0 0 0 1px #3d372f,0 24px 50px -20px #000}
-:root[data-skin=fresh] .app-frame{background:radial-gradient(80% 36% at 100% 0,color-mix(in srgb,var(--accent) 16%,transparent) 0,transparent 70%),radial-gradient(70% 30% at 0 100%,color-mix(in srgb,var(--pink) 14%,transparent) 0,transparent 70%),var(--bg)}
+:root[data-skin=fresh] .app-window{background:radial-gradient(80% 36% at 100% 0,color-mix(in srgb,var(--accent) 16%,transparent) 0,transparent 70%),radial-gradient(70% 30% at 0 100%,color-mix(in srgb,var(--pink) 14%,transparent) 0,transparent 70%),var(--bg)}
 :root[data-skin=fresh] .view:before{top:4px;right:6px;width:118px;height:102px;background:var(--leaf) no-repeat right top/118px 102px;-webkit-mask-image:none;mask-image:none;opacity:.75}
 :root[data-skin=fresh] .eyebrow{font-family:Georgia,"Times New Roman",var(--serif);font-style:italic;font-weight:400;font-size:13px;letter-spacing:.06em;text-transform:none;color:var(--ink2)}
 :root[data-skin=fresh] .page-heading h1{font-family:var(--serif);font-weight:700;letter-spacing:.12em}

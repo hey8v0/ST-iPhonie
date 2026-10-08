@@ -102,6 +102,7 @@ export function galleryApp(ctx) {
     album?.close();
     let changed = false;
     album = openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: shown, index: Math.max(0, shown.indexOf(id)), from,
+      to: id => [...v.root.querySelectorAll('.photo-grid [data-id]')].find(b => b.dataset.id === id)?.getBoundingClientRect(),
       load: id => api.getPhoto(id),
       actions: [
         {key: 'wallpaper', icon: 'image', label: '设为壁纸', run: async id => { await api.savePhone({wallpaper: {kind: 'photo', photoId: id}}); ctx.notify('已设为壁纸'); }},

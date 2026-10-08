@@ -17,7 +17,7 @@ import {soundsApp} from './sounds.js';
 import {momentsNew, momentsSeen} from './moments.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
-import {grow, bloom, nudge, within, visible, islandIn} from './carry.js';
+import {grow, launch, nudge, within, visible, islandIn} from './carry.js';
 
 // App factories, keyed by the ids in apps.js.
 const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp};
@@ -67,7 +67,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
             <div class="dots" aria-hidden="true"></div>
             <nav class="phone-dock" aria-label="常用应用"></nav>
           </main>
-          <section class="app-frame" hidden><header class="app-nav"><button class="nav-button" data-system="back" aria-label="返回">${icon('back')}</button><button class="nav-button" data-system="home" aria-label="返回桌面">${icon('home')}</button></header><div class="app-content"></div></section>
+          <section class="app-frame" hidden><div class="app-window"><header class="app-nav"><button class="nav-button" data-system="back" aria-label="返回">${icon('back')}</button><button class="nav-button" data-system="home" aria-label="返回桌面">${icon('home')}</button></header><div class="app-content"></div></div></section>
           <button class="home-indicator" data-system="home" aria-label="返回桌面"></button>
           <section class="lockscreen" role="dialog" aria-modal="true" aria-label="锁屏" hidden></section>
           <div class="toast" role="status" hidden></div>
@@ -75,7 +75,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       </div>
     </div>`;
   const $ = s => mount.querySelector(s);
-  const screen = $('.screen'), home = $('.home'), frame = $('.app-frame'), content = $('.app-content'), lockscreen = $('.lockscreen');
+  const screen = $('.screen'), home = $('.home'), frame = $('.app-frame'), appWindow = $('.app-window'), content = $('.app-content'), lockscreen = $('.lockscreen');
 
   /** A short note out of the island (it grows out of it and goes back in). Errors stay longer (20 s), can be closed
    *  with ×, and can be selected to copy. */
@@ -225,16 +225,17 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
 
   // ---------- Navigation ----------
   // An app grows out of what opened it (its icon, the island) and shrinks back into it, or into its icon, on the way
-  // home (ui/carry.js); the home screen falls back behind it meanwhile. Without motion it just shows.
-  let carrying = [], openedFrom = null;
-  function stopCarry() { for (const a of carrying) a?.cancel(); carrying = []; delete screen.dataset.carrying; }
+  // home, as on an iPhone (ui/carry.js launch); the home screen zooms past behind it. Turning round halfway (home
+  // while it opens, or the icon again while it closes) carries on from where the window is. Without motion it just shows.
+  let carrying = [], openedFrom = null, launching = null;
+  function stopCarry() { const o = launching ? {at: launching.openness(), speed: launching.speed()} : null; for (const a of carrying) a?.cancel(); carrying = []; launching = null; delete screen.dataset.carrying; return o; }
   const iconOf = name => home.querySelector(`.app-icon[data-app="${name}"] .icon-tile`);
   function open(name, roleId, from = null) {
     if (!FACTORIES[name]) return;
     sheet?.close(null);
     unlock();
     const source = from || (!active && !home.hidden ? iconOf(name) : null);
-    stopCarry();
+    const was = stopCarry();
     active = name;
     let v = views.get(name);
     if (!v) { v = FACTORIES[name](ctx); views.set(name, v); content.append(v.root); }
@@ -243,16 +244,18 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     frame.hidden = false;
     screen.dataset.view = 'app';
     openedFrom = source;
-    const grown = source && !home.hidden ? bloom(win, screen, frame, source) : null;
+    const grown = source && !home.hidden ? launch(win, screen, frame, appWindow, source, {home, ...(was || {})}) : null;
     if (grown) {
       screen.dataset.carrying = '';
-      const away = nudge(win, home, [{transform: 'scale(1)', opacity: 1}, {transform: 'scale(1.06)', opacity: 0}], {duration: 380, easing: 'out', fill: 'forwards'});
-      carrying = [grown, away];
-      grown.finished.then(ok => { if (!ok) return; if (active === name) home.hidden = true; away?.cancel(); delete screen.dataset.carrying; carrying = []; });
-    } else home.hidden = true;
-    screen.dataset.opening = 'true';
-    win.clearTimeout(openTimer);
-    openTimer = win.setTimeout(() => delete screen.dataset.opening, 260);
+      carrying = [grown]; launching = grown;
+      grown.finished.then(ok => { if (!ok || launching !== grown) return; if (active === name) home.hidden = true; grown.cancel(); delete screen.dataset.carrying; carrying = []; launching = null; });
+    } else {
+      // Not out of an icon: the page rises in.
+      home.hidden = true;
+      screen.dataset.opening = 'true';
+      win.clearTimeout(openTimer);
+      openTimer = win.setTimeout(() => delete screen.dataset.opening, 260);
+    }
     syncInert();
     $('.app-nav [data-system=back]').focus({preventScroll: true});
     if (roleId && v.edit) v.edit(roleId);
@@ -261,8 +264,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   function showHome() {
     sheet?.close(null);
     if (locked) return;
-    const leaving = active;
-    stopCarry();
+    const leaving = active, was = stopCarry();
     active = null;
     home.hidden = false;
     screen.dataset.view = 'home';
@@ -270,13 +272,20 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (!leaving) { frame.hidden = true; return; }
     // Back into what it came out of, or its own icon on the page showing; else it sinks away in the middle.
     const target = [openedFrom, iconOf(leaving)].find(el => el?.isConnected && visible(within(el, frame)));
-    const shrink = target ? bloom(win, screen, frame, target, {back: true})
-      : nudge(win, frame, [{transform: 'scale(1)', opacity: 1}, {transform: 'scale(.9)', opacity: 0}], {duration: 240, easing: 'out', fill: 'forwards'});
-    if (!shrink) { frame.hidden = true; homeIn(); return; }
+    const shrink = target ? launch(win, screen, frame, appWindow, target, {back: true, home, ...(was || {})}) : null;
+    if (shrink) {
+      screen.dataset.carrying = '';
+      carrying = [shrink]; launching = shrink;
+      shrink.finished.then(ok => { if (!ok || launching !== shrink) return; if (!active) frame.hidden = true; shrink.cancel(); delete screen.dataset.carrying; carrying = []; launching = null; });
+      return;
+    }
+    // No icon to go back into: it sinks away in the middle.
+    const sink = nudge(win, frame, [{transform: 'scale(1)', opacity: 1}, {transform: 'scale(.9)', opacity: 0}], {duration: 240, easing: 'out', fill: 'forwards'});
+    if (!sink) { frame.hidden = true; homeIn(); return; }
     screen.dataset.carrying = '';
     const back = nudge(win, home, [{transform: 'scale(1.06)', opacity: 0}, {transform: 'scale(1)', opacity: 1}], {duration: 340, easing: 'out'});
-    carrying = [shrink, back];
-    shrink.finished.then(ok => { if (ok === false) return; if (!active) frame.hidden = true; shrink.cancel(); delete screen.dataset.carrying; carrying = []; }, () => {});
+    carrying = [sink, back];
+    sink.finished.then(() => { if (carrying[0] !== sink) return; if (!active) frame.hidden = true; sink.cancel(); delete screen.dataset.carrying; carrying = []; }, () => {});
   }
   // Icons and widgets come in one after another when the home screen appears (not when a badge redraws it).
   let homeTimer = 0;

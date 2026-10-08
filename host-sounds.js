@@ -219,8 +219,8 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     return true;
   }
 
-  /** Whether a sound plays by itself (reading, voice): ambience always; sound effects unless they wait for a tap. */
-  const byItself = tag => tag.kind === 'ambience' || opts().tapOnly !== true;
+  /** Whether sounds play by themselves (reading, voice, another chat): not when they wait for a tap on their ♪. */
+  const byItself = () => opts().tapOnly !== true;
 
   // ---------- A new reply, at reading pace ----------
   const message = id => context()?.chat?.[id];
@@ -293,7 +293,7 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
   function chatChanged() {
     cancelAll(); fresh.clear(); voicing = null;
     const chat = context()?.chat || [];
-    const name = on() ? latestAmbience(chat.slice(-30).filter(m => m && !m.is_user && !m.is_system).map(m => String(m.mes ?? ''))) : '';
+    const name = on() && byItself() ? latestAmbience(chat.slice(-30).filter(m => m && !m.is_user && !m.is_system).map(m => String(m.mes ?? ''))) : '';
     if (name) setAmbience(name); else { wanted = ''; stopAmbience(1); }
   }
   /** A message changed or went away: its sounds stop coming. */

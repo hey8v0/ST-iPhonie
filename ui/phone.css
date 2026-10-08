@@ -154,7 +154,9 @@ a{color:var(--accent-ink)}
 .phone-dock .app-label{display:none}
 
 /* ---------- App frame ---------- */
-.app-frame{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg)}
+.app-frame{position:absolute;inset:0;overflow:hidden}
+/* The app's own page, background and all: while the window opens it is scaled as one, never stretched (ui/carry.js launch). */
+.app-window{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg)}
 .app-nav{height:92px;padding:46px 8px 0;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .nav-button{width:44px;height:44px;display:grid;place-items:center;border-radius:50%;color:var(--accent-ink)}
 .nav-button svg{width:24px;height:24px}
@@ -165,7 +167,7 @@ a{color:var(--accent-ink)}
 .screen[data-opening=true]:not([data-carrying]) .app-frame{animation:app-open .26s cubic-bezier(.2,.8,.2,1)}
 /* 接住 (ui/carry.js): while an app grows out of its icon or shrinks back, the home screen and wallpaper stay behind it. */
 .screen[data-carrying] .wallpaper{opacity:1}
-.screen[data-carrying] .app-frame,.screen[data-carrying] .home{will-change:transform,opacity}
+.screen[data-carrying] .app-frame,.screen[data-carrying] .app-window,.screen[data-carrying] .home{will-change:transform,opacity}
 @keyframes app-open{from{opacity:.2;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
 
 /* ---------- Shared components ---------- */
@@ -1713,7 +1715,16 @@ button.gift-item[data-short]{opacity:.55}
 .album-bar button svg{width:22px;height:22px}
 .album-bar button.album-danger{color:#ff9a9a}
 .album-bar button:disabled{opacity:.5}
-.album-viewer[data-chrome=off] .album-top,.album-viewer[data-chrome=off] .album-bar,.album-viewer[data-chrome=off] .album-arrow{opacity:0;pointer-events:none}
+.album-viewer:is([data-chrome=off],[data-pulling],[data-leaving]) :is(.album-top,.album-bar,.album-arrow),.album-viewer[data-info] .album-bar,.album-viewer[data-leaving] .album-info{opacity:0;pointer-events:none}
+/* A swipe down: the black lightens with the pull, and the photo goes back into the grid. A swipe up: the details. */
+.album-viewer:not([data-pulling]){transition:background-color .25s}
+.album-viewer[data-leaving] .album-slide img{transition:transform .28s cubic-bezier(.23,1,.32,1),opacity .28s}
+.album-stage{transition:transform .32s var(--spring-soft)}
+.album-info{position:absolute;left:10px;right:10px;bottom:max(14px,env(safe-area-inset-bottom));z-index:3;max-height:45%;overflow:auto;padding:12px 14px;border-radius:18px;background:rgba(36,36,40,.94);font-size:12.5px;line-height:1.6;user-select:text;-webkit-user-select:text;touch-action:pan-y;transition:opacity .2s;animation:album-sheet .3s var(--spring-soft)}
+@keyframes album-sheet{from{transform:translateY(28px);opacity:0}}
+.album-info dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0}
+.album-info dt{opacity:.6;white-space:nowrap}
+.album-info dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 @media (pointer:coarse){.album-arrow{display:none}}
 
 /* 表情包: the panel's two tabs, the grid to send from, a sticker in the chat (no bubble), the manager. */

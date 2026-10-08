@@ -409,17 +409,21 @@ export function chatApp(ctx) {
     }
   }
 
+  // Leaving a list (消息 or 联系人) for a chat, a profile or a form remembers where it was; coming back to the same tab puts it there again.
+  let shownMode = 'list', left = null;
   function render() {
     const ticket = ++epoch;
+    if (shownMode === 'list' && mode !== 'list') left = {tab, top: v.root.scrollTop};
+    const back = shownMode !== 'list' && mode === 'list' && left?.tab === tab ? left.top : null;
+    shownMode = mode;
     v.root.classList.toggle('chat-mode', mode === 'thread');
     v.root.classList.toggle('qq-mode', mode === 'list');
     if (mode === 'thread') return renderThread(ticket);
     if (mode === 'profile') return renderProfile();
     if (mode === 'me') return renderMe();
     if (mode === 'contact-edit') return renderContactForm();
-    if (tab === 'contacts') return renderContactsTab(ticket);
-    if (tab === 'moments') return counts().then(() => { if (ticket === epoch) return moments.render(); });
-    return renderMessages(ticket);
+    const done = tab === 'contacts' ? renderContactsTab(ticket) : tab === 'moments' ? counts().then(() => { if (ticket === epoch) return moments.render(); }) : renderMessages(ticket);
+    return back === null ? done : Promise.resolve(done).then(() => { if (ticket === epoch) v.root.scrollTop = back; });
   }
   function open(id) {
     threadId = id; mode = 'thread'; selecting = null; stick = true; panel = null; quote = null;
@@ -1081,7 +1085,6 @@ export function chatApp(ctx) {
       case 'open': {
         // The contact's picture in the list flies up to the top of the chat (ui/carry.js).
         const from = el.firstElementChild?.getBoundingClientRect();
-        listScroll = v.root.scrollTop;
         Promise.resolve(open(el.dataset.id)).then(() => fly(ctx.win, v.root.querySelector('.th-head')?.firstElementChild, from, {duration: 360, easing: 'soft'}));
         break;
       }
@@ -1210,8 +1213,6 @@ export function chatApp(ctx) {
     }
   });
 
-  // The chat list is back where it was left when a chat is closed.
-  let listScroll = 0;
   v.back = () => {
     if (mode === 'thread' && panel) { panel = null; syncPanel(); return true; }
     if (mode === 'thread' && selecting) { selecting = null; render(); return true; }
@@ -1219,7 +1220,7 @@ export function chatApp(ctx) {
       // From a chat: its picture flies back down into its row.
       const was = mode === 'thread' ? threadId : null, from = was ? v.root.querySelector('.th-head')?.firstElementChild?.getBoundingClientRect() : null;
       mode = 'list'; threadId = null; selecting = null; quote = null; contactDraft = null;
-      Promise.resolve(render()).then(() => { if (was) v.root.scrollTop = listScroll; if (from) fly(ctx.win, v.root.querySelector(`.conv[data-conv="${was}"]`)?.firstElementChild, from, {duration: 320, easing: 'bounce'}); });
+      Promise.resolve(render()).then(() => { if (from) fly(ctx.win, v.root.querySelector(`.conv[data-conv="${was}"]`)?.firstElementChild, from, {duration: 320, easing: 'bounce'}); });
       return true;
     }
     if (tab !== 'msgs') { tab = 'msgs'; render(); return true; }

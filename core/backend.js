@@ -1235,8 +1235,9 @@ export class TTSBackend {
         return job;
     }
     // ---------- Chat ----------
-    /** The voice tag format used for voice messages: the active voice preset's format. */
-    voiceFormat() { return (this.settings.presets.find(p => p.id === this.settings.activePreset) || this.settings.presets[0]).format || DEFAULT_FORMAT; }
+    // Voice messages and calls on the phone are read by the plugin and shown as bubbles, never as text: they keep the built-in
+    // format, whatever the 配音预设 asks of the story (a format made for a beautified card has no place in a chat bubble).
+    voiceFormat() { return DEFAULT_FORMAT; }
     saveChatPreset(value) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('聊天预设格式无效');
         const next = this.getState(), preset = validateChatPreset(normalizeChatPreset({ ...clone(value), id: value.id || crypto.randomUUID() }));
