@@ -291,6 +291,8 @@ export class TTSBackend {
         if (!value || typeof value.name !== 'string' || !value.name.trim() || isPlaceholderRole(value.name)) throw Error('请填写实际角色名');
         const id = value.id || crypto.randomUUID(), index = next.routes.findIndex(route => route.id === id);
         const route = normalizeRoute({ ...(index >= 0 ? next.routes[index] : { engine: 'fish', voice: '', model: '', language: '' }), ...clone(value), id, name: value.name.trim() });
+        // 角色资料: who they are, for the phone's apps when the tavern has no card for them.
+        if (typeof route.persona === 'string') { route.persona = route.persona.slice(0, 4000); if (!route.persona.trim()) delete route.persona; } else delete route.persona;
         // A new role belongs to the card it was made in (分区); one made with no card open is everyone's.
         if (index < 0 && this.cardKey() && !route.cards?.length) route.cards = [this.cardKey()];
         if (index >= 0) next.routes[index] = route; else next.routes.push(route);
