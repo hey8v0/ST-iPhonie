@@ -20,7 +20,7 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
       .replaceAll('{{char}}', name).replaceAll('{{user}}', userName()).slice(0, 1500);
   }
   /** Everyone who can post: story roles first, then manual contacts, at most MOMENTS_LIMITS.people. */
-  const people = () => backend.contacts().slice(0, MOMENTS_LIMITS.people).map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
+  const people = () => backend.crowd().slice(0, MOMENTS_LIMITS.people).map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
   const emit = extra => backend.emit('moments', {busy: !!busy, ...extra});
   /** 世界书 for these people: scanned over their names, the recent story and the posts in question. */
   const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
@@ -49,13 +49,13 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   /** New posts from the characters. auto: made by the story counter, not by the user. */
   function refresh({auto = false} = {}) {
     return run('refresh', async ctx => {
-      const {s, preset, crowd, user, names} = base();
+      const space = backend.cardKey(), {s, preset, crowd, user, names} = base();
       const recent = (await backend.moments.list()).filter(p => inSpace(p, backend.here())).slice(0, 6);
       const story = storyLines(ctx.chat, preset, user);
       const request = buildMomentsRequest({preset, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, images: s.moments.images, memory: await remembered(crowd.map(p => p.name)), lore: await lore(preset, crowd, story, recent.map(p => `${p.author}: ${p.text}`))});
       const found = parseMoments(await ask(ctx, request), {names, user, mode: 'posts'});
       if (!found.posts.length) throw Error('这次没有收到新动态，可以再刷新一次');
-      const posts = await backend.momentsMutate(() => backend.moments.add(found.posts.map(p => ({...p, space: backend.spaceKey(), source: auto ? 'auto' : 'manual', imageState: p.imageTags && s.moments.images ? 'waiting' : undefined}))));
+      const posts = await backend.momentsMutate(() => backend.moments.add(found.posts.map(p => ({...p, space, source: auto ? 'auto' : 'manual', imageState: p.imageTags && s.moments.images ? 'waiting' : undefined}))));
       for (const post of posts) if (post.imageTags && s.moments.images) drawImage(post.id).catch(() => {});
       return posts;
     });

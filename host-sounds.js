@@ -219,6 +219,9 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     return true;
   }
 
+  /** Whether a sound plays by itself (reading, voice): ambience always; sound effects unless they wait for a tap. */
+  const byItself = tag => tag.kind === 'ambience' || opts().tapOnly !== true;
+
   // ---------- A new reply, at reading pace ----------
   const message = id => context()?.chat?.[id];
   const rawOf = id => { const m = message(id); return m && !m.is_user && !m.is_system ? String(m.mes ?? '') : null; };
@@ -253,7 +256,7 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
       const tag = tags[i];
       if (below(id, tag.index) && waited < 60000) { waited += 500; plan.timer = setTimer(step, 500); return; }
       waited = 0;
-      if (once(id, raw, tag)) cue(tag);
+      if (byItself(tag) && once(id, raw, tag)) cue(tag);
       if (++i >= tags.length) { plans.delete(id); return; }
       plan.timer = setTimer(step, gaps[i] * 1000);
     };
@@ -275,12 +278,12 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
       const k = Number.isInteger(line.uiIndex) ? line.uiIndex : lines.findIndex(l => l.start === line.start);
       voicing.index = k;
       const from = k > 0 && lines[k - 1] ? lines[k - 1].end : 0;
-      for (const tag of voicing.tags) if (tag.start >= from && tag.start < line.start && once(snap.id, snap.raw, tag, VOICE_AGAIN)) cue(tag);
+      for (const tag of voicing.tags) if (tag.start >= from && tag.start < line.start && byItself(tag) && once(snap.id, snap.raw, tag, VOICE_AGAIN)) cue(tag);
       return;
     }
     if (status.phase === 'idle' && voicing && voicing.id === snap.id && voicing.raw === snap.raw && /^播放完成/.test(status.message || '')) {
       const lastLine = lines.at(-1);
-      if (lastLine && voicing.index === lines.length - 1) for (const tag of voicing.tags) if (tag.start >= lastLine.end && once(snap.id, snap.raw, tag, VOICE_AGAIN)) cue(tag);
+      if (lastLine && voicing.index === lines.length - 1) for (const tag of voicing.tags) if (tag.start >= lastLine.end && byItself(tag) && once(snap.id, snap.raw, tag, VOICE_AGAIN)) cue(tag);
       voicing = null;
     }
   }

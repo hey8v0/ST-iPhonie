@@ -1,6 +1,7 @@
 import { validateKey, MULTI_KEY, keyTail } from './keys.js';
 import { languageCode } from './languages.js';
 import { TTSParameters as P } from './parameters.js';
+import { speakable } from './voice-fx.js';
 const names={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'小米 MiMo'};
 export const miniBase=c=>'https://'+(c.region==='cn'?'api.minimaxi.com':c.region==='uw'?'api-uw.minimax.io':'api.minimax.io');
 const object=value=>Object.prototype.toString.call(value)==='[object Object]';
@@ -30,7 +31,7 @@ function checkedConnection(engine,connection,route,line,references){
  }
  return c;
 }
-export function buildRequest(engine,connection,route,line,references=new Map()){
+export function buildRequest(engine,connection,route,line,references=new Map()){line=speakable(line);// 心声/电话 are played, not read: off the emotion before the engine sees it.
  const c=checkedConnection(engine,connection,route,line,references);
  // MiMo's preset model knows only its own voices. A 音色 that names a clone sample is drawn with the clone model;
  // any other name is explained here instead of MiMo's English "Unknown voice".

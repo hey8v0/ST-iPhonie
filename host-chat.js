@@ -75,7 +75,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     let latest = thread;
     for (const item of items) {
       // 「[朋友圈] …」: posted to 朋友圈 while chatting, not a chat message.
-      if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, source: 'chat'}); continue; }
+      if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, source: 'chat', space: thread?.space || backend.cardKey()}); continue; }
       // 「[打电话] …」: the contact calls right after this reply (private chats only; one call).
       if (item.kind === 'call') { if (thread.type === 'dm' && !calling) calling = item; continue; }
       if (item.kind !== 'claim') { out.push(item); continue; }

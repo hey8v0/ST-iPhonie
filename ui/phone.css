@@ -388,6 +388,24 @@ details>div{padding-bottom:10px}
   -webkit-mask:radial-gradient(46px 18px at 50% 0,transparent 97%,#000);mask:radial-gradient(46px 18px at 50% 0,transparent 97%,#000);transition:background .45s}
 .pocket-lip:before{content:"";position:absolute;left:18px;right:18px;top:12px;border-top:2px dashed color-mix(in srgb,var(--e) 45%,transparent);-webkit-mask:radial-gradient(56px 24px at 50% -12px,transparent 97%,#000);mask:radial-gradient(56px 24px at 50% -12px,transparent 97%,#000)}
 :root[data-theme=dark] .pocket-lip{box-shadow:0 -10px 16px -12px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.08)}
+/* The lip's notch mask also clips its own shadow, so the shadow it casts on the cards is drawn on the wallet instead
+   (above the cards, under the lip; it shows through the notch too). */
+.card-pocket .wallet:after{content:"";position:absolute;left:-12px;right:-12px;bottom:10px;height:46px;pointer-events:none;
+  background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--e) 18%,rgba(0,0,0,.16)) 56%,color-mix(in srgb,var(--e) 22%,rgba(0,0,0,.3)))}
+:root[data-theme=dark] .card-pocket .wallet:after{background:linear-gradient(180deg,transparent,rgba(0,0,0,.38) 56%,rgba(0,0,0,.55))}
+/* Default skin: a stitched, grained leather pocket in the front card's colour. */
+:root:not([data-skin=aero]):not([data-skin=fresh]) .card-pocket{--grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .13 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background:var(--grain),radial-gradient(130% 70% at 50% 0,rgba(255,255,255,.45),transparent 70%),linear-gradient(180deg,color-mix(in srgb,var(--e) 14%,var(--card)),color-mix(in srgb,var(--e) 26%,var(--card)));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e) 32%,transparent),inset 0 2px 0 rgba(255,255,255,.6),0 2px 0 color-mix(in srgb,var(--e) 30%,transparent),0 20px 30px -20px color-mix(in srgb,var(--e) 75%,#000),var(--shadow)}
+:root:not([data-skin=aero]):not([data-skin=fresh]) .card-pocket:before{content:"";position:absolute;inset:6px;border-radius:24px;border:1.5px dashed color-mix(in srgb,var(--e) 42%,transparent);pointer-events:none}
+:root:not([data-skin=aero]):not([data-skin=fresh]) .pocket-lip{height:56px;
+  background:var(--grain),radial-gradient(54px 25px at 50% 0,color-mix(in srgb,var(--e) 45%,transparent) 84%,transparent),linear-gradient(180deg,color-mix(in srgb,var(--e) 30%,var(--card)),color-mix(in srgb,var(--e) 42%,var(--card)) 70%,color-mix(in srgb,var(--e) 48%,var(--card)));
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.7),inset 0 3px 0 color-mix(in srgb,var(--e) 30%,transparent),inset 0 8px 8px -6px rgba(255,255,255,.35),inset 0 -6px 10px -6px color-mix(in srgb,var(--e) 55%,#000)}
+:root:not([data-skin=aero]):not([data-skin=fresh]) .pocket-lip:before{left:6px;right:6px;top:12px;bottom:6px;border:1.5px dashed color-mix(in srgb,var(--e) 55%,transparent);border-top-width:2px;border-radius:0 0 24px 24px;-webkit-mask:radial-gradient(56px 26px at 50% -12px,transparent 97%,#000);mask:radial-gradient(56px 26px at 50% -12px,transparent 97%,#000)}
+:root[data-theme=dark]:not([data-skin=aero]):not([data-skin=fresh]) .card-pocket{background:var(--grain),radial-gradient(130% 70% at 50% 0,rgba(255,255,255,.06),transparent 70%),linear-gradient(180deg,color-mix(in srgb,var(--e) 14%,var(--card)),color-mix(in srgb,var(--e) 24%,var(--card)));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e) 32%,transparent),inset 0 1px 0 rgba(255,255,255,.1),0 20px 30px -18px #000,var(--shadow)}
+:root[data-theme=dark]:not([data-skin=aero]):not([data-skin=fresh]) .pocket-lip{background:var(--grain),radial-gradient(54px 25px at 50% 0,rgba(0,0,0,.45) 84%,transparent),linear-gradient(180deg,color-mix(in srgb,var(--e) 26%,var(--card)),color-mix(in srgb,var(--e) 18%,var(--card)));
+  box-shadow:inset 0 1.5px 0 rgba(255,255,255,.16),inset 0 -6px 10px -6px #000}
 .bank-card{position:relative;display:flex;flex-direction:column;width:100%;height:200px;padding:16px 20px;text-align:left;overflow:hidden;border-radius:24px;color:var(--e-on);background:radial-gradient(circle at 88% 120%,rgba(255,255,255,.25) 0 22%,transparent 22.5%),radial-gradient(circle at 100% 0,rgba(255,255,255,.19) 0 18%,transparent 18.5%),repeating-linear-gradient(-45deg,rgba(255,255,255,.08) 0 10px,transparent 10px 20px),linear-gradient(135deg,var(--e-btn),color-mix(in srgb,var(--e) 70%,#fff));box-shadow:0 -6px 18px -8px rgba(0,0,0,.25),0 12px 24px -12px var(--e)}
 .wallet .bank-card+.bank-card{margin-top:-146px}
 .wallet .bank-card{transition:transform .55s cubic-bezier(.2,.9,.25,1.04),box-shadow .35s,filter .35s}
@@ -1596,12 +1614,12 @@ button.gift-item[data-short]{opacity:.55}
 /* 想画什么 (ui/draw.js): grows with long requests instead of hiding them */
 .idea-box{width:100%;box-sizing:border-box;min-height:64px;max-height:260px;resize:vertical;line-height:1.55;field-sizing:content}
 /* 剧情记忆来源 in the chat preset (ui/presets.js) */
-.story-sources{display:grid;gap:6px;margin-top:8px}
-.story-sources .story-source{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:14px;background:var(--card2);cursor:pointer}
+.story-sources{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;margin-top:8px}
+.story-sources .story-source{display:flex;align-items:center;gap:10px;min-width:0;padding:9px 12px;border-radius:14px;background:var(--card2);cursor:pointer}
 .story-source>span{flex:1;display:grid;gap:2px;min-width:0}
-.story-source b{font-size:13.5px;display:block}
-.story-source small{font-size:11.5px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.story-source small.mono{display:block;-webkit-line-clamp:1}
+.story-source b{font-size:13.5px;display:block;overflow-wrap:anywhere}
+.story-source small{font-size:11.5px;color:var(--ink2);overflow-wrap:anywhere;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.story-source small.mono{display:block;white-space:nowrap}
 .story-source .switch{flex-shrink:0}
 .story-field{display:flex;flex-direction:column;gap:7px;margin:14px 0;min-width:0}
 .story-field>span:first-child{font-size:13px;font-weight:800;display:flex;align-items:center;gap:6px}
@@ -1715,3 +1733,17 @@ button.gift-item[data-short]{opacity:.55}
 .sticker-row>span{flex:1;min-width:0;display:grid}
 .sticker-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink2);font-size:11px}
 .sound-search{margin:6px 0 2px}
+
+/* ---------- 音色收藏夹 ---------- */
+.voice-choice{padding:0;gap:4px}
+.voice-choice-pick{flex:1;min-width:0;display:flex;align-items:center;gap:12px;min-height:64px;padding:12px 0;text-align:left}
+.voice-choice-pick>span:last-child{flex:1;min-width:0}
+.fav-toggle{flex-shrink:0;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:var(--ink2)}
+.fav-toggle svg{width:22px;height:22px}
+.fav-toggle[aria-pressed=true]{color:#e8557a}
+.fav-toggle:active{transform:scale(.9)}
+.fav-actions{margin:0 0 8px;justify-content:flex-start;flex-wrap:wrap;gap:8px}
+.fav-actions .hint{margin:0}
+.fav-actions .chip-button svg{color:#e8557a}
+.fav-id{display:block;padding:10px 12px;border-radius:12px;background:var(--card2);overflow-wrap:anywhere;font-size:12.5px}
+.list-row>.disc{flex:none}

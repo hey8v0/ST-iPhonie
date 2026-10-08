@@ -19,7 +19,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
     return [c.description, c.personality && '性格：' + c.personality].filter(Boolean).join('\n')
       .replaceAll('{{char}}', name).replaceAll('{{user}}', userName()).slice(0, 1500);
   }
-  const people = () => backend.contacts().slice(0, PEOPLE).map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
+  const people = () => backend.crowd().slice(0, PEOPLE).map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
   const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
     texts: [crowd.map(p => p.name).join('、'), ...story.map(r => `${r.name}: ${r.text}`), ...texts]});
   async function ask(ctx, prompt, preset) {
@@ -40,14 +40,15 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   /** New posts and the 热搜. */
   function forumRefresh() {
     return run('forum', async ctx => {
-      const {preset, crowd, user} = base();
-      const recent = (await backend.apps.list('forum')).filter(p => inSpace(p, backend.here())).slice(0, 8), hot = (await backend.apps.get(backend.hotId()))?.topics || [];
+      // The card asked for: the tavern may move to another one while the model writes.
+      const space = backend.cardKey(), hotId = backend.hotId(), {preset, crowd, user} = base();
+      const recent = (await backend.apps.list('forum')).filter(p => inSpace(p, backend.here())).slice(0, 8), hot = (await backend.apps.get(hotId))?.topics || [];
       const story = storyLines(ctx.chat, preset, user);
       const prompt = buildForumRequest({preset, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, hot, lore: await lore(preset, crowd, story, [...hot, ...recent.map(p => p.title)])});
       const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'posts'});
       if (!found.posts.length) throw Error('这次没有刷出新帖子，可以再刷新一次');
-      if (found.hot.length) await backend.setForumHot(found.hot);
-      return backend.addForumPosts(found.posts);
+      if (found.hot.length) await backend.setForumHot(found.hot, hotId);
+      return backend.addForumPosts(found.posts, {space});
     });
   }
   /** Replies to the user's new post. */
@@ -81,17 +82,17 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   /** Looks into a character's phone: a new snapshot, or (keep) what is new since last time put onto the old one. */
   function peekLook(name, {keep = false} = {}) {
     return run('peek', async ctx => {
-      const {preset, user} = base(), contact = backend.contacts().find(c => c.name === name);
+      const key = backend.spaceKey(), {preset, user} = base(), contact = backend.contacts().find(c => c.name === name);
       if (!contact) throw Error(`联系人里没有「${name}」`);
       const person = {name, persona: contact.persona, card: contact.persona ? '' : card(name)};
       const thread = (await backend.threads()).find(t => t.type === 'dm' && t.members[0] === name);
       const history = thread ? (await backend.chats.get(thread.id)).messages.filter(m => m.kind !== 'system').slice(-20) : [];
       const story = storyLines(ctx.chat, preset, user);
       const remembered = memory ? await memory.aboutPeople([name]).catch(() => '') : '';
-      const key = backend.spaceKey(), before = keep ? (await backend.apps.get(peekId(name, key))) || (key ? await backend.apps.get(peekId(name)) : null) : null;
+      const before = keep ? (await backend.apps.get(peekId(name, key))) || (key ? await backend.apps.get(peekId(name)) : null) : null;
       const prompt = buildPeekRequest({preset, before, earlier: memory?.storyMemory() || '', person, story, user, userPersona: userPersona(), history, memory: remembered, images: !!backend.drawReady(), lore: await lore(preset, [person], story, history.map(m => m.text || ''))});
       const found = parsePeek(await ask(ctx, prompt, preset), {name, user});
-      return backend.savePeek({name, ...mergePeek(before, found)});
+      return backend.savePeek({name, ...mergePeek(before, found)}, key);
     });
   }
 

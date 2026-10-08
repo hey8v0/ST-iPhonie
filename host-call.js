@@ -160,7 +160,7 @@ export function createCallHost({context, settings, backend, notice, ringing = ()
     emit();
     if (c.voiced && lines.length) {
       c.speaking = true; emit();
-      try { await backend.player.start(lines.map(l => ({role: c.name, emotion: l.emotion, text: l.text, translation: l.translation})), () => live(id)); } catch { /* the words are on screen */ }
+      try { await backend.player.start(lines.map(l => ({role: c.name, emotion: l.emotion, text: l.text, translation: l.translation, effect: 'phone'})), () => live(id)); } catch { /* the words are on screen */ }
       if (call?.id === id) { c.speaking = false; emit(); }
     }
     if (found.hangup && live(id)) {

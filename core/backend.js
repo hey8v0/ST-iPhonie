@@ -291,6 +291,8 @@ export class TTSBackend {
         if (!value || typeof value.name !== 'string' || !value.name.trim() || isPlaceholderRole(value.name)) throw Error('请填写实际角色名');
         const id = value.id || crypto.randomUUID(), index = next.routes.findIndex(route => route.id === id);
         const route = normalizeRoute({ ...(index >= 0 ? next.routes[index] : { engine: 'fish', voice: '', model: '', language: '' }), ...clone(value), id, name: value.name.trim() });
+        // A new role belongs to the card it was made in (分区); one made with no card open is everyone's.
+        if (index < 0 && this.cardKey() && !route.cards?.length) route.cards = [this.cardKey()];
         if (index >= 0) next.routes[index] = route; else next.routes.push(route);
         next.selected = id;
         this.save(next);
@@ -1246,7 +1248,7 @@ export class TTSBackend {
         const next = this.getState(), contact = validateContact(normalizeContact(clone(value || {})), next.routes);
         if (next.chat.contacts.some(c => c.name === contact.name && c.id !== contact.id)) throw Error('已经有同名的联系人');
         const index = next.chat.contacts.findIndex(c => c.id === contact.id);
-        if (index < 0 && this.spaceKey()) contact.space = this.spaceKey();
+        if (index < 0 && this.cardKey()) contact.space = this.cardKey();
         if (index >= 0 && next.chat.contacts[index].space) contact.space = next.chat.contacts[index].space;
         if (index < 0) next.chat.contacts.push(contact); else next.chat.contacts[index] = contact;
         this.save(next);
@@ -1305,9 +1307,9 @@ export class TTSBackend {
         return this.save(next).calls;
     }
     // ---------- 音效 ----------
-    /** {enabled, ambienceVolume, sfxVolume, vary, generate, versions}. */
+    /** {enabled, ambienceVolume, sfxVolume, vary, tapOnly, generate, versions}. */
     saveSounds(patch) {
-        const next = this.getState(), allowed = ['enabled', 'ambienceVolume', 'sfxVolume', 'vary', 'generate', 'versions', 'pack', 'packHidden'];
+        const next = this.getState(), allowed = ['enabled', 'ambienceVolume', 'sfxVolume', 'vary', 'tapOnly', 'generate', 'versions', 'pack', 'packHidden'];
         next.sounds = normalizeSounds({ ...next.sounds, ...Object.fromEntries(Object.entries(patch || {}).filter(([key]) => allowed.includes(key))) });
         return this.save(next).sounds;
     }
@@ -1448,8 +1450,11 @@ export class TTSBackend {
     }
     /** The space lists are filtered by, or null when 分区 is off (or no card is open). */
     here() { return activeSpace(this.settings, this.space); }
-    /** The key new items are made under ('' = shared). */
+    /** The key lists are filtered and 查手机 is stored by ('' = shared, also when 分区 is off). */
     spaceKey() { return this.here()?.key || ''; }
+    /** The card open now, whether 分区 is on or not: new things remember the card they were made in, so turning 分区 on
+     *  later sorts them. ('' when no card is open: shared.) */
+    cardKey() { return this.space.key || ''; }
     /** The roles that speak in a card's story belong to that card's contacts. Saved only when something changed. */
     tagRoles(names, key = this.space.key) {
         if (!key || !names?.length) return false;
@@ -1465,6 +1470,15 @@ export class TTSBackend {
     }
     /** Contacts of the card open now (all of them when 分区 is off). */
     contacts() { return chatContacts(this.settings, this.here()); }
+    /** Who 论坛 and 朋友圈 write about. With 分区 on: the open card's own people (its characters, roles met in its
+     *  story or added to it, contacts added under it), not the roles no story has met yet, which only stay in every
+     *  card's contacts so they can be found. All contacts when that leaves no one. */
+    crowd() {
+        const here = this.here(), all = this.contacts();
+        if (!here) return all;
+        const own = all.filter(c => c.source === 'manual' || (here.members || []).includes(c.name) || this.settings.routes.some(r => r.name === c.name && Array.isArray(r.cards) && r.cards.includes(here.key)));
+        return own.length ? own : all;
+    }
     /** Phone chats of the card open now. */
     async threads() { const here = this.here(); return (await this.chats.list()).filter(t => inSpace(t, here)); }
     /** Removes what was made under the open card (or everything, with 分区 off). */
@@ -1486,16 +1500,17 @@ export class TTSBackend {
         return result;
     }
     /** New posts from the board (characters and strangers), with made-up likes and 热度; the oldest go past the limit. */
-    async addForumPosts(posts, { source = 'auto' } = {}) {
+    async addForumPosts(posts, { source = 'auto', space = this.cardKey() } = {}) {
         // The first post the model wrote is shown on top (newest first).
         const now = Date.now(), id = () => crypto.randomUUID();
-        const docs = posts.map((p, i) => cleanForumPost({ ...p, source, space: this.spaceKey(), ...(source === 'me' ? { likes: 0, heat: 1 } : startingHeat(p)) }, id(), now - i * 10, id));
+        const docs = posts.map((p, i) => cleanForumPost({ ...p, source, space, ...(source === 'me' ? { likes: 0, heat: 1 } : startingHeat(p)) }, id(), now - i * 10, id));
         return this.appsMutate('forum', () => this.apps.put(docs, { keep: FORUM_LIMITS.posts }));
     }
-    async setForumHot(topics) {
+    /** id: the 热搜 of the card the request was made for (hotId() when it was asked). */
+    async setForumHot(topics, id = this.hotId()) {
         const list = [...new Set((topics || []).map(t => String(t).trim().slice(0, 40)).filter(Boolean))].slice(0, FORUM_LIMITS.hot);
         if (!list.length) return [];
-        await this.appsMutate('forum', () => this.apps.put([{ id: this.hotId(), kind: 'forum-hot', at: Date.now(), topics: list }]));
+        await this.appsMutate('forum', () => this.apps.put([{ id, kind: 'forum-hot', at: Date.now(), topics: list }]));
         return list;
     }
     /** Replies added under a post; each one makes it a little hotter. */
@@ -1510,8 +1525,9 @@ export class TTSBackend {
         }));
     }
     // ---------- 查手机 ----------
-    /** A character's phone as the model made it up; replaces the earlier one of the same person. */
-    async savePeek(snapshot) { const doc = cleanPeek({ ...snapshot, space: this.spaceKey() }, Date.now()); return (await this.appsMutate('peek', () => this.apps.put([doc])))[0]; }
+    /** A character's phone as the model made it up; replaces the earlier one of the same person. space: the card it was
+     *  looked at under (spaceKey() when the look began; the tavern may have moved to another card while it was written). */
+    async savePeek(snapshot, space = this.spaceKey()) { const doc = cleanPeek({ ...snapshot, space }, Date.now()); return (await this.appsMutate('peek', () => this.apps.put([doc])))[0]; }
 
     /** Runs a change to the moments and tells the phone. */
     async momentsMutate(task) {
@@ -1787,7 +1803,7 @@ export class TTSBackend {
             saveText: patch => this.saveText(clone(patch)), setTextKey: (id, key) => this.setTextKey(id, key), clearTextKey: id => this.clearTextKey(id), textKeyHint: id => this.textKeyHint(id), textModels: draft => this.textModels(clone(draft || {})),
             syncStatus: () => this.syncStatus(), saveSync: patch => this.saveSync(clone(patch)), syncNow: () => this.syncNow().then(() => this.syncStatus()), clearSyncFiles: () => this.clearSyncFiles(),
             listMoments: async () => { const here = this.here(); return (await this.moments.list()).filter(p => inSpace(p, here)); }, getMoment: id => this.moments.get(id),
-            postMoment: ({ text, photoId } = {}) => this.momentsMutate(async () => (await this.moments.add([{ author: 'me', source: 'me', text, photoId, space: this.spaceKey() }]))[0]),
+            postMoment: ({ text, photoId } = {}) => this.momentsMutate(async () => (await this.moments.add([{ author: 'me', source: 'me', text, photoId, space: this.cardKey() }]))[0]),
             likeMoment: (id, on = true) => this.momentsMutate(() => this.moments.like(id, 'me', on)),
             commentMoment: (id, { text, to } = {}) => this.momentsMutate(() => this.moments.comment(id, { from: 'me', text, to })),
             deleteMoment: id => this.momentsMutate(() => this.moments.remove(id)), deleteMomentComment: (id, commentId) => this.momentsMutate(() => this.moments.removeComment(id, commentId)),
@@ -1813,7 +1829,7 @@ export class TTSBackend {
             sendPaid: (threadId, message) => this.sendPaid(threadId, message), takeSent: (threadId, messageId, accept) => this.takeSent(threadId, messageId, accept !== false),
             shopCatalog: () => clone({ premium: PREMIUM, kinds: DECOR_KINDS, gifts: shopGifts(this.settings.chat.wallet), ledgerKinds: LEDGER_KINDS }), saveContact: contact => this.saveContact(contact), deleteContact: id => this.deleteContact(id), chatContacts: all => clone(all ? chatContacts(this.settings) : this.contacts()), addRoleContact: name => this.addRoleContact(name),
             listThreads: () => this.threads(), getThread: id => this.chats.get(id), chatUnread: async () => (await this.threads()).reduce((n, t) => n + (t.muted ? 0 : t.unread), 0),
-            createThread: value => this.chatMutate(null, () => this.chats.create({ ...clone(value), space: this.spaceKey() })),
+            createThread: value => this.chatMutate(null, () => this.chats.create({ ...clone(value), space: this.cardKey() })),
             updateThread: (id, patch) => this.chatMutate(id, () => this.chats.update(id, clone(patch))),
             deleteThread: id => this.chatMutate(id, async () => { const done = await this.chats.remove(id); await this.memoryForget(id).catch(() => {}); return done; }),
             // 记忆: what a chat remembers; a summary can be corrected or deleted (what it covered is used again).

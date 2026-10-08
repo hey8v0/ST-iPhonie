@@ -1,5 +1,6 @@
 import { buildRequest } from './providers.js';
 import { requestHash } from './cache.js';
+import { effectChain, lineEffect } from './voice-fx.js';
 
 const stopped = () => new DOMException('已停止', 'AbortError');
 const copyLine = line => line ? { role: '', text: '', translation: '', emotion: '', ...structuredClone(line) } : null;
@@ -42,7 +43,8 @@ export class BrowserAudio {
   return this.volume;
  }
  getVolume() { return this.volume; }
- async play(blob, signal = new AbortController().signal) {
+ /** effect: 'phone' | 'inner' | '' (core/voice-fx.js), put between the line and the volume. */
+ async play(blob, signal = new AbortController().signal, { effect = '' } = {}) {
   signal.throwIfAborted();
   const ctx = this.context;
   if (!ctx || ctx.state !== 'running') throw Error('请再点一次播放，允许浏览器开启声音');
@@ -63,7 +65,7 @@ export class BrowserAudio {
   }
   check();
   return new Promise((resolve, reject) => {
-   const source = ctx.createBufferSource();
+   const source = ctx.createBufferSource(), fx = effectChain(ctx, effect, this.gain);
    let settled = false;
    const finish = error => {
     if (settled) return;
@@ -71,6 +73,8 @@ export class BrowserAudio {
     signal.removeEventListener('abort', abort);
     source.onended = null;
     try { source.disconnect(); } catch {}
+    // An echo rings on a little after the line; stopped, it stops with it.
+    if (fx) { if (error) fx.dispose(); else setTimeout(() => fx.dispose(), fx.tail * 1000 + 200); }
     if (this.source === source) this.source = null;
     if (this.finish === finish) this.finish = null;
     if (error) reject(error); else resolve();
@@ -82,7 +86,7 @@ export class BrowserAudio {
    };
    try {
     source.buffer = buffer;
-    source.connect(this.gain);
+    source.connect(fx ? fx.input : this.gain);
     this.source = source;
     this.finish = finish;
     source.onended = () => finish();
@@ -261,7 +265,7 @@ export class DialoguePlayer {
     await this.prepared({ key, blob, line: copyLine(line), route: structuredClone(effective), request: structuredClone(request), fromCache });
     if (!await this.waitForResume(epoch)) return;
     this.emit('playing', '正在播放 · ' + line.role + (fromCache ? ' · 缓存' : ''));
-    await this.sink.play(blob, signal);
+    await this.sink.play(blob, signal, { effect: lineEffect(line) });
     if (!this.canContinue(epoch)) return;
     this.played.add(key);
     this.index++;
@@ -302,7 +306,7 @@ export class DialoguePlayer {
    await this.sink.unlock();
    if (!this.canContinue(epoch) || !await this.waitForResume(epoch)) return;
    this.emit('playing', '正在播放 · ' + (this.speaker || '收藏音频'));
-   await this.sink.play(blob, signal);
+   await this.sink.play(blob, signal, { effect: lineEffect(line) });
    if (!this.canContinue(epoch)) return;
    if (this.requestKey) this.played.add(this.requestKey);
    this.complete();

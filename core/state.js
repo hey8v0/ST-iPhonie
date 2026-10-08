@@ -44,4 +44,4 @@ export function modelRules(s,only=null){const {FISH_S1_EMOTIONS,FISH_S1_TONES,FI
   const same=output.find(o=>o.rule===rule),who=String(r.name),label=(ENGINE_NAMES[r.engine]||r.engine)+' '+model;
   if(same){const group=same.groups.find(g=>g.label===label);if(group){if(!group.names.includes(who))group.names.push(who);}else same.groups.push({label,names:[who]});}
   else output.push({rule,groups:[{label,names:[who]}]});}
- return '各说话者的朗读规则（只用于台词，不改变人物设定）：\n'+output.map(o=>'· '+o.groups.map(g=>g.names.join('、')+'（'+g.label+'）').join('、')+'：\n  '+o.rule).join('\n');}
+ return '各说话者的朗读规则（只用于台词，不改变人物设定）：\n'+output.map(o=>'· '+o.groups.map(g=>g.names.join('、')+'（'+g.label+'）').join('、')+'：\n  '+o.rule).join('\n')+'\n· 心声和电话（所有说话者）：要念出来的心声，情绪字段开头写「心声·」（如 心声·难过）；隔着电话、听筒传来的话，开头写「电话·」（如 电话·开心）。插件把它做成心声的回响或电话里的声音，后面的情绪照上面的规则写。';}

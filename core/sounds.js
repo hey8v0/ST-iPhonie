@@ -14,7 +14,7 @@ export const STRENGTHS = Object.freeze(['', '轻', '重']);
 export const SOUND_LIMITS = Object.freeze({file: 20 * 1024 * 1024, names: 150, versions: [1, 5]});
 
 export function defaultSounds() {
-  return {enabled: false, ambienceVolume: 0.45, sfxVolume: 0.8, vary: true, generate: false, versions: 2, pack: true, packHidden: []};
+  return {enabled: false, ambienceVolume: 0.45, sfxVolume: 0.8, vary: true, tapOnly: false, generate: false, versions: 2, pack: true, packHidden: []};
 }
 const unit = (value, fallback) => { const n = Number(value); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : fallback; };
 export function normalizeSounds(value) {
@@ -26,6 +26,8 @@ export function normalizeSounds(value) {
     ambienceVolume: unit(value.ambienceVolume, base.ambienceVolume),
     sfxVolume: unit(value.sfxVolume, base.sfxVolume),
     vary: value.vary !== false,
+    // 音效只在点的时候放: sound effects wait for a tap on their ♪ (ambience still starts by itself).
+    tapOnly: value.tapOnly === true,
     generate: value.generate === true,
     versions: Number.isFinite(versions) ? Math.min(SOUND_LIMITS.versions[1], Math.max(SOUND_LIMITS.versions[0], versions)) : base.versions,
     pack: value.pack !== false,
