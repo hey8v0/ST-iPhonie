@@ -17,6 +17,7 @@ import {soundsApp} from './sounds.js';
 import {momentsNew, momentsSeen} from './moments.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
+import {grow, nudge, within, visible, islandIn} from './carry.js';
 
 // App factories, keyed by the ids in apps.js.
 const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp};
@@ -59,6 +60,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
           <div class="statusbar"><time data-clock="small"></time><button class="status-icons" data-system="control" aria-label="打开控制中心，或向下拖动"><span class="net" data-net></span><span class="battery" data-battery aria-hidden="true"></span></button></div>
           <button class="pull-tab" data-system="control" aria-label="打开控制中心，也可以从屏幕顶端往下拉"></button><span class="safe-probe" aria-hidden="true"></span>
           <button class="island" data-system="island" aria-label="打开听取"><span class="island-avatar"></span><span class="island-title"></span><span class="island-wave" hidden>${wave}</span><span class="camera"></span></button>
+          <div class="island-card" role="dialog" aria-label="正在播放" hidden><div class="ic-head"><span class="ic-avatar"></span><div><strong data-playing-speaker></strong><small data-playing-message></small></div><span class="island-wave ic-wave">${wave}</span></div><div class="ic-actions"><button data-system="toggle" aria-label="暂停或继续"></button><button data-system="stop" aria-label="停止播放">${icon('stop', true)}</button><button class="ic-open" data-app="listen">打开听取</button></div></div>
           <main class="home">
             <button class="home-close" data-system="close" aria-label="返回酒馆">${icon('close')}</button>
             <div class="home-pages"></div>
@@ -75,7 +77,19 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const $ = s => mount.querySelector(s);
   const screen = $('.screen'), home = $('.home'), frame = $('.app-frame'), content = $('.app-content'), lockscreen = $('.lockscreen');
 
-  /** A short note at the bottom. Errors stay longer (20 s), can be closed with ×, and can be selected to copy. */
+  /** A short note out of the island (it grows out of it and goes back in). Errors stay longer (20 s), can be closed
+   *  with ×, and can be selected to copy. */
+  let toastMove = null;
+  function hideToast() {
+    const el = $('.toast');
+    win.clearTimeout(toastTimer);
+    if (el.hidden) return;
+    toastMove?.cancel();
+    toastMove = grow(win, el, islandIn($('.island'), el), {back: true, radius: 16, duration: 300});
+    if (!toastMove) { el.hidden = true; return; }
+    const move = toastMove;
+    move.finished.then(() => { if (toastMove !== move) return; el.hidden = true; move.cancel(); toastMove = null; }, () => {});
+  }
   function notify(text, {error = false} = {}) {
     if (disposed) return;
     if (error) api.noteError?.(text || '操作未完成');
@@ -83,9 +97,18 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     el.innerHTML = `<span class="toast-text">${esc(text || '操作未完成')}</span>${error ? `<button type="button" class="toast-close" data-toast-close aria-label="关闭提示">${icon('close')}</button>` : ''}`;
     el.classList.toggle('error', error);
     el.setAttribute('role', error ? 'alert' : 'status');
+    const fresh = el.hidden || !!toastMove;
+    toastMove?.cancel(); toastMove = null;
     el.hidden = false;
+    if (fresh) {
+      const island = $('.island');
+      toastMove = grow(win, el, islandIn(island, el), {radius: 16, duration: 560, easing: 'bounce', fade: 1});
+      const move = toastMove;
+      move?.finished.then(() => { if (toastMove === move) toastMove = null; }, () => {});
+      nudge(win, island, [{scale: '1'}, {scale: '1.07 1.12'}, {scale: '1'}], {duration: 360, easing: 'soft'});
+    }
     win.clearTimeout(toastTimer);
-    toastTimer = win.setTimeout(() => el.hidden = true, error ? 20000 : 4500);
+    toastTimer = win.setTimeout(hideToast, error ? 20000 : 4500);
   }
   const fail = error => notify(error?.message, {error: true});
   function run(fn) {
@@ -97,8 +120,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
   mount.addEventListener('click', e => {
     if (!e.target.closest('[data-toast-close]')) return;
-    win.clearTimeout(toastTimer);
-    $('.toast').hidden = true;
+    hideToast();
   });
   function syncInert() {
     home.inert = !!active || locked || !!sheet;
@@ -202,18 +224,33 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const callState = () => { try { const c = api.callStatus?.() || null; calls.update(c?.state === 'ended' ? null : c); } catch { /* not in the tavern */ } };
 
   // ---------- Navigation ----------
-  function open(name, roleId) {
+  // An app grows out of what opened it (its icon, the island) and shrinks back into it, or into its icon, on the way
+  // home (ui/carry.js); the home screen falls back behind it meanwhile. Without motion it just shows.
+  let carrying = [], openedFrom = null;
+  function stopCarry() { for (const a of carrying) a?.cancel(); carrying = []; delete screen.dataset.carrying; }
+  const iconOf = name => home.querySelector(`.app-icon[data-app="${name}"] .icon-tile`);
+  const corner = el => parseFloat(win.getComputedStyle(el).borderTopLeftRadius) || 16;
+  function open(name, roleId, from = null) {
     if (!FACTORIES[name]) return;
     sheet?.close(null);
     unlock();
+    const source = from || (!active && !home.hidden ? iconOf(name) : null);
+    stopCarry();
     active = name;
     let v = views.get(name);
     if (!v) { v = FACTORIES[name](ctx); views.set(name, v); content.append(v.root); }
     else run(() => v.refresh());
     for (const [id, view] of views) view.root.hidden = id !== name;
-    home.hidden = true;
     frame.hidden = false;
     screen.dataset.view = 'app';
+    openedFrom = source;
+    const grown = source && !home.hidden ? grow(win, frame, source, {radius: corner(source)}) : null;
+    if (grown) {
+      screen.dataset.carrying = '';
+      const away = nudge(win, home, [{transform: 'scale(1)', opacity: 1}, {transform: 'scale(1.08)', opacity: 0}], {duration: 420, easing: 'out', fill: 'forwards'});
+      carrying = [grown, away];
+      grown.finished.then(() => { if (active === name) home.hidden = true; away?.cancel(); delete screen.dataset.carrying; carrying = []; }, () => {});
+    } else home.hidden = true;
     screen.dataset.opening = 'true';
     win.clearTimeout(openTimer);
     openTimer = win.setTimeout(() => delete screen.dataset.opening, 260);
@@ -225,13 +262,22 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   function showHome() {
     sheet?.close(null);
     if (locked) return;
-    const arriving = active !== null;
+    const leaving = active;
+    stopCarry();
     active = null;
     home.hidden = false;
-    frame.hidden = true;
     screen.dataset.view = 'home';
     syncInert();
-    if (arriving) homeIn();
+    if (!leaving) { frame.hidden = true; return; }
+    // Back into what it came out of, or its own icon on the page showing; else it sinks away in the middle.
+    const target = [openedFrom, iconOf(leaving)].find(el => el?.isConnected && visible(within(el, frame)));
+    const shrink = target ? grow(win, frame, target, {back: true, radius: corner(target)})
+      : nudge(win, frame, [{transform: 'scale(1)', opacity: 1}, {transform: 'scale(.86)', opacity: 0}], {duration: 300, easing: 'out', fill: 'forwards'});
+    if (!shrink) { frame.hidden = true; homeIn(); return; }
+    screen.dataset.carrying = '';
+    const back = nudge(win, home, [{transform: 'scale(1.08)', opacity: 0}, {transform: 'scale(1)', opacity: 1}], {duration: 480, easing: 'soft'});
+    carrying = [shrink, back];
+    shrink.finished.then(() => { if (!active) frame.hidden = true; shrink.cancel(); delete screen.dataset.carrying; carrying = []; }, () => {});
   }
   // Icons and widgets come in one after another when the home screen appears (not when a badge redraws it).
   let homeTimer = 0;
@@ -366,6 +412,34 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   /** 动态壁纸 on or off (settings); the CSS also stops it for reduced motion and while an app is open. */
   function wallMotion() { screen.dataset.wallMotion = api.getState().general.wallpaperMotion === false ? 'off' : 'on'; }
 
+  // ---------- The island's mini player ----------
+  // A tap on the island while something plays opens it into a small player (who, the line, pause, stop, 听取); a tap
+  // anywhere else, or the playing ending, takes it back in.
+  let cardMove = null;
+  const card = () => $('.island-card');
+  function openCard() {
+    const el = card();
+    if (!el.hidden && !cardMove) return;
+    cardMove?.cancel(); cardMove = null;
+    el.hidden = false;
+    $('.island').dataset.open = '';
+    cardMove = grow(win, el, islandIn($('.island'), el), {radius: 16, duration: 560, easing: 'bounce', fade: 1});
+    const move = cardMove;
+    move?.finished.then(() => { if (cardMove === move) cardMove = null; }, () => {});
+    el.querySelector('[data-system=toggle]')?.focus({preventScroll: true});
+  }
+  function closeCard({now = false} = {}) {
+    const el = card();
+    if (el.hidden) return;
+    cardMove?.cancel();
+    cardMove = now ? null : grow(win, el, islandIn($('.island'), el), {back: true, radius: 16, duration: 320});
+    const done = () => { el.hidden = true; delete $('.island').dataset.open; };
+    if (!cardMove) { done(); return; }
+    const move = cardMove;
+    move.finished.then(() => { if (cardMove !== move) return; done(); move.cancel(); cardMove = null; }, () => {});
+  }
+  mount.addEventListener('pointerdown', e => { if (!card().hidden && !e.target.closest('.island-card,.island')) closeCard(); }, {signal, capture: true});
+
   // ---------- Playback ----------
   function animate() {
     win.cancelAnimationFrame(animation);
@@ -402,6 +476,10 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     $('.island-avatar').textContent = (state.speaker || '').slice(0, 1);
     $('.island-title').textContent = on ? (state.phase === 'waiting' ? '等待 ' + state.speaker : state.speaker || '听取') : '';
     $('.island-wave').hidden = !on || state.phase === 'waiting';
+    const c = card();
+    c.dataset.engine = island.dataset.engine;
+    c.querySelector('.ic-avatar').innerHTML = on && state.speaker ? avatar(state.speaker, engineOf(state.speaker), 40) : '';
+    if (!on || !state.speaker) closeCard();
     island.setAttribute('aria-label', on ? '查看 ' + state.speaker + ' 的播放状态' : '打开听取');
     renderWidgets();
     for (const el of mount.querySelectorAll('[data-playing-speaker]')) el.textContent = state.speaker || '等待播放';
@@ -590,7 +668,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   mount.addEventListener('click', event => {
     const b = event.target.closest('button');
     if (!b || b.disabled) return;
-    if (b.dataset.app) { open(b.dataset.app); return; }
+    if (b.dataset.app) { open(b.dataset.app, undefined, b.closest('.island-card') || b.querySelector('.icon-tile') || b); closeCard({now: true}); return; }
     if (b.dataset.openRole) { open('roles', b.dataset.openRole); return; }
     if (b.hasAttribute('data-slot')) { notify('这个位置留给以后的新 App'); return; }
     if (!b.dataset.system) return;
@@ -603,12 +681,15 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
         case 'unlock': unlock(); break;
         case 'island': {
           const pending = playback.phase === 'waiting' && api.pendingRole();
-          if (pending) openPendingRole(pending); else open('listen');
+          if (pending) openPendingRole(pending);
+          else if (b.hasAttribute('data-active') && b.classList.contains('island')) { if (card().hidden) openCard(); else closeCard(); }
+          else open('listen', undefined, b);
           break;
         }
         case 'control': if (Date.now() - pulledAt > 400) control(); break;
         case 'size': b.textContent = api.panelSize?.() || b.textContent; break;
         case 'toggle': api.toggle(); break;
+        case 'stop': api.stop(); break;
         case 'help': help('桌面左右滑动翻页，图标打开对应应用；底部横条或左上角返回键回到桌面。\n从屏幕顶端往下拉（或点右上角的信号和电量）打开控制中心，往上推收起。侧键可以看锁屏，锁屏随时可以跳过。\n\n信号和电量是你设备上的真实状态（有的浏览器不提供电量，比如 Safari、Firefox）。语音只在点击台词、播放或试听时生成。'); break;
       }
     });

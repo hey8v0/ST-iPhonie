@@ -320,7 +320,7 @@ export function drawApp(ctx) {
       case 'remove-char': characters.splice(index, 1); render(); break;
       case 'add-custom': characters.push({name: '角色', prompt: '', position: -1}); render(); break;
       case 'add-char': pickCharacter(); break;
-      case 'zoom': { const img = el.querySelector('img'), shown = results[current]; if (img) openImageViewer({doc: ctx.doc, src: img.src, alt: '生成的图片', from: img, actions: shown ? [downloadAction(ctx.doc, () => resultFile(shown), ctx.notify), {label: '删除', danger: true, run: () => {
+      case 'zoom': { const img = el.querySelector('img'), shown = results[current]; if (img) openImageViewer({doc: ctx.doc, src: img.src, alt: '生成的图片', from: img, info: shown?.info || null, actions: shown ? [downloadAction(ctx.doc, () => resultFile(shown), ctx.notify), {label: '删除', danger: true, run: () => {
           // The viewer closes first, so the question is not under it.
           ctx.win.setTimeout(async () => {
             if (!await ctx.confirm('删除这张图？', '相册里的这张也会一起删掉。')) return;

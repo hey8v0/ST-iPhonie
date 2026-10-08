@@ -1,6 +1,8 @@
 // Full-screen image viewer shared by the tavern page (pictures in the chat) and the phone (album, drawing app).
-// It opens at the size the picture had on the page (`from`), then zooms freely: wheel, pinch or the buttons;
-// drag to move; double-click or double-tap switches between that size and 2.5x; a single tap hides or shows the bars.
+// It grows from where the picture was on the page (`from`) to the whole screen (as big as fits, small pictures too),
+// then zooms freely: wheel, pinch or the buttons; drag to move; double-click or double-tap switches between that size
+// and 2.5x; a single tap hides or shows the bars. As on a phone, there is no reset button: pinched (or wheeled)
+// smaller than the screen, the picture springs back to it when let go.
 // The picture sits between the top bar and the bottom bar, so the bars never cover it at its opening size.
 // It brings its own styles, so it works in any document.
 
@@ -24,6 +26,7 @@ const CSS = `
 .sttts-viewer button:focus-visible{outline:2px solid #7cc4ff;outline-offset:2px}
 .sttts-viewer button:disabled{opacity:.35;cursor:default}
 .sttts-viewer button[data-danger]{color:#ff9cb8}
+.sttts-viewer button[hidden],.sttts-viewer-bar[hidden]{display:none}
 .sttts-viewer-top button{background:rgba(20,24,40,.7)}
 .sttts-viewer-top button[aria-pressed=true]{background:rgba(124,196,255,.3)}
 .sttts-viewer .sttts-viewer-close{margin-left:auto;font-size:22px}
@@ -34,7 +37,7 @@ const CSS = `
 .sttts-viewer-info dt{opacity:.65;white-space:nowrap}
 .sttts-viewer-info dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:480px){.sttts-viewer [data-v=full],.sttts-viewer [data-v=in],.sttts-viewer [data-v=out],.sttts-viewer output{display:none}}
-@media(prefers-reduced-motion:no-preference){.sttts-viewer img[data-animate]{transition:transform .2s ease}}
+@media(prefers-reduced-motion:no-preference){.sttts-viewer img[data-animate]{transition:transform .3s cubic-bezier(.22,1,.36,1.08)}}
 `;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const infoHTML = info => Array.isArray(info)
@@ -70,13 +73,16 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
   root.innerHTML = `<img alt="">
     <div class="sttts-viewer-top"><button data-v="info" aria-pressed="false" hidden>参数</button>${paged ? '<span class="sttts-viewer-count" aria-live="polite"></span>' : ''}<button class="sttts-viewer-close" data-v="close" aria-label="关闭">×</button></div>
     <div class="sttts-viewer-info" hidden></div>${caption ? `<p class="sttts-viewer-caption">${esc(caption)}</p>` : ''}
-    <div class="sttts-viewer-bar">${paged ? '<button data-v="prev" aria-label="上一个版本">‹</button><button data-v="next" aria-label="下一个版本">›</button>' : ''}<button data-v="out" aria-label="缩小">－</button><output aria-live="polite"></output><button data-v="in" aria-label="放大">＋</button><button data-v="home">复原</button><button data-v="fit">适应屏幕</button><button data-v="full">实际像素</button>${actions.map((a, i) => `<button data-action="${i}"${a.danger ? ' data-danger' : ''}></button>`).join('')}</div>`;
+    <div class="sttts-viewer-bar">${paged ? '<button data-v="prev" aria-label="上一个版本">‹</button><button data-v="next" aria-label="下一个版本">›</button>' : ''}<button data-v="out" aria-label="缩小">－</button><output aria-live="polite"></output><button data-v="in" aria-label="放大">＋</button><button data-v="full">实际像素</button>${actions.map((a, i) => `<button data-action="${i}"${a.danger ? ' data-danger' : ''}></button>`).join('')}</div>`;
   const img = root.querySelector('img'), label = root.querySelector('output'), bar = root.querySelector('.sttts-viewer-bar');
   const panel = root.querySelector('.sttts-viewer-info'), infoButton = root.querySelector('[data-v=info]'), count = root.querySelector('.sttts-viewer-count');
+  // On a phone the zoom buttons are hidden: with nothing else on it, there is no bottom bar.
+  const narrow = !!win.matchMedia?.('(max-width:480px)').matches, barKept = paged || actions.length > 0 || !narrow;
+  bar.hidden = !barKept;
   actions.forEach((a, i) => { root.querySelector(`[data-action="${i}"]`).textContent = a.label; });
   doc.body.append(root);
 
-  let s = 1, tx = 0, ty = 0, fit = 1, base = 1, closed = false, opened = false, chrome = true, tapTimer = 0;
+  let s = 1, tx = 0, ty = 0, fit = 1, base = 1, closed = false, opened = false, chrome = true, tapTimer = 0, wheelTimer = 0;
   let start = from?.getBoundingClientRect?.();
   const pointers = new Map();
   let gesture = null, lastTap = null;
@@ -88,7 +94,7 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
   function band() {
     const {h} = size();
     if (!chrome || h < 240) return {top: 0, bottom: h};
-    const top = Math.min(h / 4, 64), bottom = h - Math.min(h / 4, (bar.offsetHeight || 52) + 26);
+    const top = Math.min(h / 4, 64), bottom = h - (barKept ? Math.min(h / 4, (bar.offsetHeight || 52) + 26) : 12);
     return {top, bottom};
   }
 
@@ -104,8 +110,9 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     img.style.transform = `translate(${tx}px,${ty}px) scale(${s})`;
     label.textContent = Math.round(s * 100) + '%';
   }
-  function zoomAt(next, x, y, animate) {
-    const max = Math.max(4, fit * 8, base * 8), min = Math.min(fit, base, 1) * .5;
+  /** loose: a pinch or the wheel may go below the screen size for a moment (it springs back); buttons and keys stop there. */
+  function zoomAt(next, x, y, animate, loose = false) {
+    const max = Math.max(4, fit * 8, base * 8), min = loose ? base * .45 : base;
     next = Math.min(max, Math.max(min, next));
     tx = x - (x - tx) * next / s;
     ty = y - (y - ty) * next / s;
@@ -116,13 +123,13 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     const {w} = size(), {top, bottom} = band(), n = nat(), room = bottom - top;
     // A hidden viewer (0×0) keeps 100%.
     fit = w > 0 && room > 0 ? Math.min(w / n.w, room / n.h, 1) : 1;
-    // The page size, but never bigger than the band, so the bars do not cover the picture when it opens.
-    const whole = w > 0 && room > 0 ? Math.min(w / n.w, room / n.h) : Infinity;
-    base = start?.width > 0 ? Math.min(start.width / n.w, whole) : fit;
+    // Opens as big as the band holds (small pictures grown to it too), so the bars do not cover it.
+    base = w > 0 && room > 0 ? Math.min(w / n.w, room / n.h) : fit;
   }
-  /** Back to the size the picture had on the page, centred. */
+  /** Smaller than the screen and let go: springs back. */
+  function settle() { if (s < base * .99) home(true); }
+  /** Back to the opening size: the whole band, centred. */
   function home(animate = false) { measure(); s = base; tx = 0; ty = 0; apply(animate); }
-  function fitView(animate = false) { measure(); s = fit; tx = 0; ty = 0; apply(animate); }
   function reset() {
     if (opened) { home(); return; }
     opened = true;
@@ -156,7 +163,7 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
   function close() {
     if (closed) return;
     closed = true;
-    win.clearTimeout(tapTimer);
+    win.clearTimeout(tapTimer); win.clearTimeout(wheelTimer);
     root.remove();
     win.removeEventListener('resize', onResize);
     doc.removeEventListener('keydown', onKey, true);
@@ -183,7 +190,9 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     if (onChrome(e)) return;
     e.preventDefault();
     const r = root.getBoundingClientRect();
-    zoomAt(s * Math.exp(-e.deltaY * .0015), e.clientX - r.left, e.clientY - r.top);
+    zoomAt(s * Math.exp(-e.deltaY * .0015), e.clientX - r.left, e.clientY - r.top, false, true);
+    win.clearTimeout(wheelTimer);
+    wheelTimer = win.setTimeout(settle, 220);
   }, {passive: false});
   root.addEventListener('pointerdown', e => {
     if (onChrome(e)) return;
@@ -208,7 +217,7 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     const dist = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top;
     if (gesture) {
       tx += mx - gesture.mx; ty += my - gesture.my;
-      zoomAt(s * dist / gesture.dist, mx, my);
+      zoomAt(s * dist / gesture.dist, mx, my, false, true);
     }
     gesture = {dist, mx, my};
     lastTap = null;
@@ -216,10 +225,12 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
   const end = e => {
     const p = pointers.get(e.pointerId);
     if (!p) return;
-    const tap = pointers.size === 1 && gesture === null && !p.moved;
+    const tap = pointers.size === 1 && gesture === null && !p.moved, pinched = pointers.size >= 2;
     pointers.delete(e.pointerId);
     gesture = null;
     if (!pointers.size) root.removeAttribute('data-dragging');
+    // A pinch let go below the screen size: back to it, like a phone's album.
+    if (pinched) { settle(); return; }
     // Several pictures, not zoomed in: a swipe sideways is the one before or after.
     if (paged && e.type === 'pointerup' && p.moved && !pointers.size && s <= Math.max(base, fit) * 1.05) {
       const dx = e.clientX - p.x0, dy = e.clientY - p.y0;
@@ -254,8 +265,6 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     else if (v === 'next' && index < items.length - 1) { start = null; show(index + 1); }
     else if (v === 'in') zoomAt(s * 1.5, ...center(), true);
     else if (v === 'out') zoomAt(s / 1.5, ...center(), true);
-    else if (v === 'home') home(true);
-    else if (v === 'fit') fitView(true);
     else if (v === 'full') zoomAt(1, ...center(), true);
     else if (b.dataset.action !== undefined) {
       const result = await actions[Number(b.dataset.action)].run(index);

@@ -142,12 +142,14 @@ export class LocalLibrary {
  }
  async deleteNote(id){return this.#remove('notes',id);}
  async listPhotos(){return this.#list('photos',true);}
+ /** info: how a drawn picture was made, [[label, value]] (shown under 参数 when it is opened). */
  async addPhoto(input){
-  fields(input,['name','blob']);const name=string(input.name??'图片','图片名称',512,true),blob=blobValue(input.blob,LIBRARY_LIMITS.photo,'图片','image');
-  return this.#saveMedia('photos',{id:this.#makeId(),name,blob});
+  fields(input,['name','blob','info']);const name=string(input.name??'图片','图片名称',512,true),blob=blobValue(input.blob,LIBRARY_LIMITS.photo,'图片','image');
+  const info=(Array.isArray(input.info)?input.info:[]).filter(r=>Array.isArray(r)&&r[1]!==undefined&&r[1]!==null&&String(r[1]).trim()).slice(0,20).map(([k,v])=>[String(k).slice(0,20),String(v).slice(0,4000)]);
+  return this.#saveMedia('photos',{id:this.#makeId(),name,blob,info});
  }
- async #saveMedia(store,{id,name,blob}){
-  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,name,blob,type:blob.type,size:blob.size,createdAt:rows[store].get(id)?.createdAt??now,updatedAt:now};put(store,row);return publicRow(row);});
+ async #saveMedia(store,{id,name,blob,info}){
+  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,name,blob,type:blob.type,size:blob.size,...(info?.length?{info}:{}),createdAt:rows[store].get(id)?.createdAt??now,updatedAt:now};put(store,row);return publicRow(row);});
  }
  async getPhoto(id){return publicRow(await this.#read('photos',identifier(id)));}
  async deletePhoto(id){

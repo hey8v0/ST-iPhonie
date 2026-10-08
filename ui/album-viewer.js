@@ -4,17 +4,19 @@
 import {icon} from './icons.js';
 import {esc} from './common.js';
 import {openImageViewer} from '../image-viewer.js';
+import {fly} from './carry.js';
 
 const SLIDE = 100 / 3;
 
 /**
  * ids: the photos in order; load(id) → {blob, name, size}. actions: [{key, icon, label, danger, run(id)}]; a run that
- * resolves to 'removed' takes the photo out of the row (the next one shows; none left closes).
+ * resolves to 'removed' takes the photo out of the row (the next one shows; none left closes). from: where the photo
+ * was tapped (a rect); the picture grows out of it once it has loaded (ui/carry.js).
  */
-export function openAlbum({ctx, host, ids, index = 0, load, actions = [], onClose = () => {}}) {
+export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from = null, onClose = () => {}}) {
   const {doc, win} = ctx;
   let list = ids.slice(), at = Math.min(list.length - 1, Math.max(0, index)), closed = false, moving = false, chrome = true;
-  const urls = new Map(), names = new Map();
+  const urls = new Map(), names = new Map(), infos = new Map();
   const root = doc.createElement('div');
   root.className = 'album-viewer';
   root.setAttribute('role', 'dialog');
@@ -34,8 +36,16 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], onClos
     if (closed || !photo) return null;
     if (urls.has(id)) return urls.get(id);
     const url = win.URL.createObjectURL(photo.blob);
-    urls.set(id, url); names.set(id, photo.name || '');
+    urls.set(id, url); names.set(id, photo.name || ''); if (photo.info?.length) infos.set(id, photo.info);
     return url;
+  }
+  /** The first picture grows out of the tapped thumbnail, once, when it can be measured. */
+  let start = from;
+  function grown(img) {
+    if (!start) return;
+    const rect = start; start = null;
+    const go = () => fly(win, img, rect, {duration: 480, easing: 'soft'});
+    if (img.complete && img.naturalWidth) go(); else img.addEventListener('load', go, {once: true});
   }
   /** The three slides: the one before, this one, the one after; pictures further away are let go. */
   function fill() {
@@ -48,7 +58,7 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], onClos
       if (ready) { img.src = ready; img.hidden = false; img.alt = names.get(id) || ''; }
       else {
         img.hidden = true;
-        ensure(id).then(url => { if (url && img.dataset.id === id) { img.src = url; img.hidden = false; img.alt = names.get(id) || ''; if (id === list[at]) title(); } }).catch(() => {});
+        ensure(id).then(url => { if (url && img.dataset.id === id) { img.src = url; img.hidden = false; img.alt = names.get(id) || ''; if (id === list[at]) { title(); grown(img); } } }).catch(() => {});
       }
     });
     for (const [id, url] of urls) if (Math.abs(list.indexOf(id) - at) > 2) { win.URL.revokeObjectURL(url); urls.delete(id); }
@@ -78,7 +88,8 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], onClos
   function zoom() {
     const img = slots[1];
     if (!img.getAttribute('src')) return;
-    openImageViewer({doc, src: img.src, alt: img.alt, from: img});
+    // A drawn picture shows how it was made under 参数.
+    openImageViewer({doc, src: img.src, alt: img.alt, from: img, info: infos.get(img.dataset.id) || null});
   }
 
   // ---------- Swiping and tapping ----------

@@ -128,11 +128,11 @@ export function rolesApp(ctx) {
   }
   function poolSheet() {
     const draw = () => { const pool = favorites(); return pool.length
-      ? `<div class="group">${pool.map((v, i) => `<button class="list-row" data-engine="${v.engine}" data-action="pool-edit" data-index="${i}"><span>${plate(engines[v.engine])}</span><span style="flex:1;min-width:0"><strong>${esc(v.name)}</strong><small>${esc(poolLine({...v, name: ''}) || '没有备注')}</small><small class="mono">${esc(v.voice)}</small></span>${icon('next')}</button>`).join('')}</div>`
+      ? `<div class="group">${pool.map((v, i) => `<button class="list-row" data-engine="${v.engine}" data-action="pool-edit" data-index="${i}"><span style="flex:none">${plate(engines[v.engine])}</span><span style="flex:1;min-width:0"><strong>${esc(v.name)}</strong><small>${esc(poolLine({...v, name: ''}) || '没有备注')}</small><small class="mono">${esc(v.voice)}</small></span>${icon('next')}</button>`).join('')}</div>`
       : '<p class="hint">还没有音色。在角色页「从列表选」里点 ♡ 收藏，或点上面的「添加音色」填音色 ID。</p>'; };
-    const d = ctx.dialog('音色收藏夹', `<p class="help-copy">收藏用得上的音色，名字和备注随便写。角色页填音色时点「从收藏夹选」；自动挑音色也先从这里挑（标了性别和年龄的更容易挑中）。</p>
-      <div class="actions">${btn('pool-manual', icon('add') + '添加音色', 'secondary')}<label class="secondary file-button">${icon('import')}导入<input type="file" data-pool-file accept=".json,application/json" aria-label="选择音色收藏文件"></label>${btn('pool-export', icon('download') + '导出', 'secondary')}</div>
-      <p class="hint">可以导入别人分享的音色文件（ST-iPhonie 导出的，或 FishDialogue 的音色库 JSON）。文件里没写男女和年龄的，按名字和描述猜（少女、大叔、妈妈……），猜不出就留空。</p><div data-pool>${draw()}</div>`);
+    const d = ctx.dialog('音色收藏夹', `<div class="actions">${btn('pool-manual', icon('add') + '添加音色', 'secondary')}<label class="secondary file-button">${icon('import')}导入<input type="file" data-pool-file accept=".json,application/json" aria-label="选择音色收藏文件"></label>${btn('pool-export', icon('download') + '导出', 'secondary')}</div>
+      <div class="row-heading fav-heading"><span>收藏的音色 ${help('收藏用得上的音色，名字和备注随便写。角色页填音色时点「从收藏夹选」；自动挑音色也先从这里挑（标了性别和年龄的更容易挑中）。\n\n可以导入别人分享的音色文件（ST-iPhonie 导出的，或 FishDialogue 的音色库 JSON）。文件里没写男女和年龄的，按名字和描述猜（少女、大叔、妈妈……），猜不出就留空。')}</span></div>
+      <div data-pool>${draw()}</div>`);
     const redraw = () => { if (!d.live) return; d.body.querySelector('[data-pool]').innerHTML = draw(); if (!current) render(); };
     // A pool file adds its voices (those already in the pool stay as they are).
     d.body.addEventListener('change', e => {

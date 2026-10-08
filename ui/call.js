@@ -4,6 +4,7 @@
 import {esc, avatar} from './common.js';
 import {icon} from './icons.js';
 import {motionLayer} from './wallpapers.js';
+import {grow, islandIn} from './carry.js';
 
 // The moving background of the call screen: the phone skin's own wallpaper scene (day / night), laid out at random for
 // each call like the home screen's moving wallpaper, instead of a repeating pattern.
@@ -134,11 +135,26 @@ export function callScreen(ctx, host) {
     send.disabled = ask && !!call.thinking;
   }
 
+  // The call comes out of the island and goes back into it when it is over (ui/carry.js).
+  let move = null;
+  const island = () => host.querySelector('.island');
   function update(next) {
     win.clearTimeout(hideTimer);
     call = next || null;
-    if (!call) { tone.stop(); layer.hidden = true; drawnKey = ''; win.clearInterval(tick); tick = 0; return; }
+    if (!call) {
+      tone.stop(); drawnKey = ''; win.clearInterval(tick); tick = 0;
+      if (layer.hidden) return;
+      move?.cancel();
+      move = grow(win, layer, islandIn(island(), layer), {back: true, radius: 16, duration: 360});
+      if (!move) { layer.hidden = true; return; }
+      const going = move;
+      going.finished.then(() => { if (move !== going) return; layer.hidden = true; going.cancel(); move = null; }, () => {});
+      return;
+    }
+    const appearing = layer.hidden || !!move;
+    move?.cancel(); move = null;
     layer.hidden = false;
+    if (appearing) { layer.dataset.carried = ''; move = grow(win, layer, islandIn(island(), layer), {radius: 16, duration: 620, easing: 'soft'}); const coming = move; coming?.finished.then(() => { if (move === coming) move = null; delete layer.dataset.carried; }, () => {}); if (!coming) delete layer.dataset.carried; }
     if (call.state === 'ringing') tone.start(call.dir); else tone.stop();
     if (call.state === 'talking' && !tick) tick = win.setInterval(() => { if (call?.state === 'talking') layer.querySelector('[data-call-status]').textContent = status(call); }, 1000);
     if (call.state !== 'talking') { win.clearInterval(tick); tick = 0; }

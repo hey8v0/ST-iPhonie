@@ -1,5 +1,6 @@
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, avatar, avatarPicture, empty, help, copyText} from './common.js';
 import {icon} from './icons.js';
+import {fly} from './carry.js';
 import {openImageViewer} from '../image-viewer.js';
 import {saveFile, downloadAction} from '../download.js';
 import {momentsPanel, momentsNew, momentsSeen} from './moments.js';
@@ -1077,7 +1078,12 @@ export function chatApp(ctx) {
         if (tab !== el.dataset.tab) { v.root.dataset.switching = el.dataset.tab; ctx.win.clearTimeout(switchTimer); switchTimer = ctx.win.setTimeout(() => delete v.root.dataset.switching, 420); }
         tab = el.dataset.tab; search = ''; if (tab === 'moments') moments.only(''); v.root.scrollTop = 0; render(); break;
       }
-      case 'open': open(el.dataset.id); break;
+      case 'open': {
+        // The contact's picture in the list flies up to the top of the chat (ui/carry.js).
+        const from = el.firstElementChild?.getBoundingClientRect();
+        Promise.resolve(open(el.dataset.id)).then(() => fly(ctx.win, v.root.querySelector('.th-head')?.firstElementChild, from, {duration: 520, easing: 'soft'}));
+        break;
+      }
       case 'new-chat': newChat(); break;
       case 'plus-menu': plusMenu(); break;
       case 'me': mode = 'me'; render(); break;
@@ -1206,7 +1212,13 @@ export function chatApp(ctx) {
   v.back = () => {
     if (mode === 'thread' && panel) { panel = null; syncPanel(); return true; }
     if (mode === 'thread' && selecting) { selecting = null; render(); return true; }
-    if (mode !== 'list') { mode = 'list'; threadId = null; selecting = null; quote = null; contactDraft = null; render(); return true; }
+    if (mode !== 'list') {
+      // From a chat: its picture flies back down into its row.
+      const was = mode === 'thread' ? threadId : null, from = was ? v.root.querySelector('.th-head')?.firstElementChild?.getBoundingClientRect() : null;
+      mode = 'list'; threadId = null; selecting = null; quote = null; contactDraft = null;
+      Promise.resolve(render()).then(() => { if (from) fly(ctx.win, v.root.querySelector(`.conv[data-conv="${was}"]`)?.firstElementChild, from, {duration: 460, easing: 'bounce'}); });
+      return true;
+    }
     if (tab !== 'msgs') { tab = 'msgs'; render(); return true; }
     return false;
   };

@@ -98,10 +98,10 @@ export function galleryApp(ctx) {
     if (del) del.disabled = !selecting.size;
   }
   /** Opens a photo full screen; the others of the grid are a swipe away. */
-  function openPhoto(id) {
+  function openPhoto(id, from = null) {
     album?.close();
     let changed = false;
-    album = openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: shown, index: Math.max(0, shown.indexOf(id)),
+    album = openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: shown, index: Math.max(0, shown.indexOf(id)), from,
       load: id => api.getPhoto(id),
       actions: [
         {key: 'wallpaper', icon: 'image', label: '设为壁纸', run: async id => { await api.savePhone({wallpaper: {kind: 'photo', photoId: id}}); ctx.notify('已设为壁纸'); }},
@@ -134,7 +134,7 @@ export function galleryApp(ctx) {
     switch (el.dataset.action) {
       case 'photo':
         if (selecting) { const id = el.dataset.id; if (selecting.has(id)) selecting.delete(id); else selecting.add(id); syncSelection(); break; }
-        openPhoto(el.dataset.id); break;
+        openPhoto(el.dataset.id, (el.querySelector('img') || el).getBoundingClientRect()); break;
       case 'select': selecting = new Set(); await render(); break;
       case 'select-cancel': selecting = null; await render(); break;
       case 'select-all': selecting = selecting.size === shown.length ? new Set() : new Set(shown); syncSelection(); break;

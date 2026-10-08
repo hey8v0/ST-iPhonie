@@ -134,8 +134,8 @@ a{color:var(--accent-ink)}
 .cast button>span:last-child{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .apps-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 6px;padding:4px 14px 8px}
 .app-icon{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:0;min-height:84px;color:inherit}
-.app-icon:active .icon-tile{transform:scale(.92)}
-.icon-tile{position:relative;width:60px;height:60px;border-radius:19px;display:grid;place-items:center;overflow:hidden;color:#fff;transition:transform .15s;background:linear-gradient(160deg,var(--t1),var(--t2));box-shadow:inset 0 2px 0 rgba(255,255,255,.55),inset 0 -3px 0 rgba(0,0,0,.08),0 6px 14px -6px color-mix(in srgb,var(--t2) 80%,#000)}
+.app-icon:active .icon-tile{transform:scale(.88);transition-duration:.1s}
+.icon-tile{position:relative;width:60px;height:60px;border-radius:19px;display:grid;place-items:center;overflow:hidden;color:#fff;transition:transform .5s var(--spring);background:linear-gradient(160deg,var(--t1),var(--t2));box-shadow:inset 0 2px 0 rgba(255,255,255,.55),inset 0 -3px 0 rgba(0,0,0,.08),0 6px 14px -6px color-mix(in srgb,var(--t2) 80%,#000)}
 .icon-tile:after{content:"";position:absolute;inset:3px 3px 50% 3px;border-radius:16px 16px 40% 40%;background:linear-gradient(rgba(255,255,255,.33),rgba(255,255,255,0));pointer-events:none}
 .icon-tile .glyph{width:46px;height:46px}
 .icon-tile img{width:100%;height:100%;object-fit:cover}
@@ -162,7 +162,10 @@ a{color:var(--accent-ink)}
 .view{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;padding:0 16px 40px;scrollbar-width:none}
 .view::-webkit-scrollbar{display:none}
 .view:before{content:"";position:absolute;top:-92px;right:0;width:230px;height:200px;pointer-events:none;background-image:radial-gradient(var(--dot) 1.5px,transparent 1.9px);background-size:11px 11px;-webkit-mask-image:radial-gradient(circle at 100% 0,#000 15%,transparent 70%);mask-image:radial-gradient(circle at 100% 0,#000 15%,transparent 70%)}
-.screen[data-opening=true] .app-frame{animation:app-open .26s cubic-bezier(.2,.8,.2,1)}
+.screen[data-opening=true]:not([data-carrying]) .app-frame{animation:app-open .26s cubic-bezier(.2,.8,.2,1)}
+/* 接住 (ui/carry.js): while an app grows out of its icon or shrinks back, the home screen and wallpaper stay behind it. */
+.screen[data-carrying] .wallpaper{opacity:1}
+.screen[data-carrying] .app-frame{will-change:transform,clip-path;box-shadow:0 20px 50px -20px rgba(0,0,0,.45)}
 @keyframes app-open{from{opacity:.2;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
 
 /* ---------- Shared components ---------- */
@@ -268,7 +271,7 @@ details>div{padding-bottom:10px}
 .overlay{position:absolute;inset:0;z-index:60;display:flex;align-items:flex-end;padding:10px 10px 22px;background:rgba(10,20,40,.36);animation:fade .2s}
 .overlay.top{align-items:flex-start;padding-top:52px;background:rgba(20,40,80,.3);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
 @keyframes fade{from{opacity:0}}
-.sheet{width:100%;max-height:84%;display:flex;flex-direction:column;background:var(--bg);border-radius:28px;box-shadow:0 10px 40px rgba(0,0,0,.25);animation:sheet-in .28s cubic-bezier(.2,.9,.3,1.1)}
+.sheet{width:100%;max-height:84%;display:flex;flex-direction:column;background:var(--bg);border-radius:28px;box-shadow:0 10px 40px rgba(0,0,0,.25);animation:sheet-in .42s var(--spring-soft)}
 .overlay.top .sheet{animation-name:sheet-drop;background:transparent;box-shadow:none}
 @keyframes sheet-in{from{opacity:.3;transform:translateY(30px)}}
 @keyframes sheet-drop{from{opacity:.3;transform:translateY(-30px)}}
@@ -279,12 +282,13 @@ details>div{padding-bottom:10px}
 .overlay.top .sheet{max-height:100%}
 .help-copy{white-space:pre-wrap;font-size:14px;color:var(--ink2);overflow-wrap:anywhere}
 .sheet-body .actions{margin-bottom:0}
-.toast{display:flex;align-items:flex-start;gap:6px;position:absolute;bottom:40px;left:50%;transform:translateX(-50%);z-index:80;width:max-content;max-width:calc(100% - 40px);padding:11px 18px;border-radius:22px;background:var(--ink);color:var(--bg);font-size:13px;font-weight:700;line-height:1.5;text-align:center;white-space:pre-wrap;pointer-events:none;animation:toast-in .25s cubic-bezier(.3,1.4,.5,1)}
-.toast.error{pointer-events:auto;text-align:left;max-height:40%;overflow:auto;padding:11px 8px 11px 16px;border-radius:18px;background:var(--danger-soft);color:var(--danger);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--danger) 40%,transparent),0 10px 24px -10px rgba(0,0,0,.4);user-select:text;-webkit-user-select:text}
+/* Notes come out of the island (phone.js notify): black like it, at its place, and go back into it. */
+.toast{display:flex;align-items:flex-start;gap:6px;position:absolute;top:10px;left:0;right:0;margin:0 auto;z-index:80;box-sizing:border-box;width:max-content;min-width:118px;min-height:33px;max-width:calc(100% - 40px);padding:7px 18px;border-radius:18px;background:#000;color:#fff;font-size:13px;font-weight:700;line-height:1.5;text-align:center;white-space:pre-wrap;pointer-events:none;box-shadow:0 12px 30px -14px rgba(0,0,0,.6);transform-origin:50% 0}
+.toast.error{pointer-events:auto;text-align:left;max-height:40%;overflow:auto;padding:7px 8px 7px 16px;border-radius:18px;background:#1c0709;color:#ffa3ad;box-shadow:inset 0 0 0 1.5px rgba(255,90,110,.45),0 12px 30px -14px rgba(0,0,0,.6);user-select:text;-webkit-user-select:text}
 .toast .toast-text{flex:1;min-width:0;overflow-wrap:anywhere}
 .toast-close{flex-shrink:0;width:28px;height:28px;margin:-3px 0;border-radius:50%;display:grid;place-items:center;color:inherit}
 .toast-close svg{width:16px;height:16px}
-@keyframes toast-in{from{opacity:0;transform:translate(-50%,14px)}}
+
 .lockscreen{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;text-align:center;padding:64px 20px 36px;color:var(--wall-ink);background:var(--wall);background-size:var(--wall-size,cover);background-position:var(--wall-pos,center)}
 .lockscreen>.icon{width:22px;height:22px;margin-bottom:6px}
 .lockscreen .widget{align-self:stretch;min-height:auto;margin-top:24px}
@@ -642,6 +646,7 @@ details>div{padding-bottom:10px}
   :root:not([data-floating]) .view:before{top:-50px}
   :root:not([data-floating]) .island{top:calc(env(safe-area-inset-top,0px) + 6px);display:none;box-shadow:0 8px 20px -6px rgba(0,0,0,.5)}
   :root:not([data-floating]) .island[data-active]{display:flex}
+  :root:not([data-floating]) .toast{top:calc(env(safe-area-inset-top,0px) + 6px)}
   :root:not([data-floating]) .home-indicator{bottom:calc(env(safe-area-inset-bottom,0px) + 2px)}
   :root:not([data-floating]) .savebar{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 40px)}
   :root:not([data-floating]) .lockscreen{padding-top:calc(env(safe-area-inset-top,0px) + 40px)}
@@ -742,7 +747,7 @@ details>div{padding-bottom:10px}
 .quote-bar .round-button{width:30px;height:30px;box-shadow:none;background:transparent}
 .quote-bar .round-button svg{width:16px;height:16px}
 .chat-panel{padding:6px 14px 26px;border-top:1px solid var(--line)}
-.chat-panel.enter{animation:panel-in .2s ease-out}
+.chat-panel.enter{animation:panel-in .3s var(--spring-soft)}
 @keyframes panel-in{from{opacity:0;transform:translateY(12px)}}
 .tool-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 8px;padding:10px 0 0}
 .tool{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--ink2);min-width:0}
@@ -829,21 +834,21 @@ details>div{padding-bottom:10px}
 @keyframes rise-in{from{opacity:0;transform:translateY(14px) scale(.985)}}
 @keyframes blur-in{from{opacity:0;filter:blur(8px);transform:scale(.99)}}
 @keyframes pop-in{0%{opacity:0;transform:scale(.6)}70%{transform:scale(1.06)}100%{opacity:1;transform:none}}
-.screen[data-opening=true] .app-content>.view>*{animation:rise-in .46s cubic-bezier(.2,.85,.25,1) both}
+.screen[data-opening=true] .app-content>.view>*{animation:rise-in .52s var(--spring-soft) both}
 .screen[data-opening=true] .app-content>.view>:nth-child(2){animation-delay:.04s}
 .screen[data-opening=true] .app-content>.view>:nth-child(3){animation-delay:.08s}
 .screen[data-opening=true] .app-content>.view>:nth-child(4){animation-delay:.12s}
 .screen[data-opening=true] .app-content>.view>:nth-child(5){animation-delay:.16s}
 .screen[data-opening=true] .app-content>.view>:nth-child(6){animation-delay:.2s}
 .screen[data-opening=true] .app-content>.view>:nth-child(n+7){animation-delay:.24s}
-.screen[data-home-in] .home-page .app-icon{animation:pop-in .5s cubic-bezier(.2,.9,.3,1.2) both}
+.screen[data-home-in] .home-page .app-icon{animation:pop-in .56s var(--spring) both}
 .screen[data-home-in] .home-page .app-icon:nth-child(2){animation-delay:.03s}
 .screen[data-home-in] .home-page .app-icon:nth-child(3){animation-delay:.06s}
 .screen[data-home-in] .home-page .app-icon:nth-child(4){animation-delay:.09s}
 .screen[data-home-in] .home-page .app-icon:nth-child(5){animation-delay:.12s}
 .screen[data-home-in] .home-page .app-icon:nth-child(6){animation-delay:.15s}
 .screen[data-home-in] .home-page .app-icon:nth-child(n+7){animation-delay:.18s}
-.screen[data-home-in] .widget{animation:rise-in .5s cubic-bezier(.2,.85,.25,1) both}
+.screen[data-home-in] .widget{animation:rise-in .5s var(--spring-soft) both}
 .screen[data-home-in] .widget+.widget{animation-delay:.06s}
 .view[data-switching] .qq-page{animation:blur-in .34s cubic-bezier(.2,.8,.2,1)}
 /* Presses: sink a little, spring back past rest */
@@ -1089,6 +1094,7 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
    fresh: petals / fireflies). */
 .call-screen{position:absolute;inset:0;z-index:70;display:flex;flex-direction:column;align-items:center;padding:74px 18px calc(env(safe-area-inset-bottom,0px) + 34px);color:var(--ink);overflow:hidden;animation:call-in .38s cubic-bezier(.2,.9,.3,1.05)}
 .call-screen[hidden]{display:none}
+.call-screen[data-carried]{animation:none}
 @keyframes call-in{from{opacity:0;transform:scale(1.04);filter:blur(6px)}}
 .call-bg{position:absolute;inset:0;z-index:-1;overflow:hidden;background:radial-gradient(90% 55% at 50% 18%,color-mix(in srgb,var(--accent) 42%,transparent),transparent 70%),radial-gradient(70% 45% at 88% 92%,color-mix(in srgb,var(--pink) 34%,transparent),transparent 72%),linear-gradient(180deg,var(--bg),var(--page))}
 .call-bg:before,.call-bg:after{content:"";position:absolute;inset:-20% -10%;pointer-events:none}
@@ -1747,3 +1753,32 @@ button.gift-item[data-short]{opacity:.55}
 .fav-actions .chip-button svg{color:#e8557a}
 .fav-id{display:block;padding:10px 12px;border-radius:12px;background:var(--card2);overflow-wrap:anywhere;font-size:12.5px}
 .list-row>.disc{flex:none}
+.fav-heading{color:var(--ink2);margin:0 0 4px}.fav-heading>span{display:flex;align-items:center;gap:6px}
+
+/* ---------- 灵动 (ui/carry.js) ---------- */
+/* Spring curves for CSS moves; linear() draws a real spring where the browser knows it. */
+:root{--spring:cubic-bezier(.34,1.4,.64,1);--spring-soft:cubic-bezier(.2,.9,.25,1.04)}
+@supports (transition-timing-function:linear(0,1)){:root{--spring:linear(0,.009,.035 2.1%,.141,.281 6.7%,.723 12.9%,.938 16.7%,1.017,1.077,1.121,1.149 24.3%,1.159,1.163,1.161,1.154 29.9%,1.129 32.8%,1.051 39.6%,1.017 43.1%,.991,.977 51%,.974 53.8%,.975 57.1%,.997 69.8%,1.003 76.9%,1);--spring-soft:linear(0,.007,.028 2.4%,.113 5%,.508 13.6%,.711 19.4%,.856 25.6%,.948 32.1%,.996 39%,1.018 46.6%,1.022 54.5%,1.012 67.6%,1.003 81.8%,1)}}
+/* The island stretches out (and back) on a spring as playing starts and stops. */
+.island{transition:min-width .6s var(--spring),max-width .6s var(--spring),padding .45s var(--spring),background-color .3s}
+.island[data-open]{opacity:0}
+/* Its mini player: what plays, the line, pause / stop, 听取. */
+.island-card{position:absolute;z-index:45;top:10px;left:10px;right:10px;padding:14px 14px 12px 16px;border-radius:30px;background:#000;color:#fff;box-shadow:0 18px 40px -16px rgba(0,0,0,.65);display:flex;flex-direction:column;gap:12px}
+.island-card[hidden]{display:none}
+.ic-head{display:flex;align-items:center;gap:12px;min-width:0}
+.ic-head>div{flex:1;min-width:0;display:grid;gap:2px}
+.ic-head strong{font-size:15px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ic-head small{font-size:12.5px;line-height:1.45;color:rgba(255,255,255,.72);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ic-avatar{flex-shrink:0;display:grid}
+.ic-wave{display:flex;flex-shrink:0}
+.ic-wave .wave{height:22px;width:auto;color:var(--e,#fff)}
+.ic-actions{display:flex;align-items:center;gap:10px}
+.ic-actions button{flex-shrink:0;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.14);color:#fff;transition:transform .35s var(--spring)}
+.ic-actions button:active{transform:scale(.88)}
+.ic-actions button svg{width:20px;height:20px}
+.ic-actions .ic-open{width:auto;margin-left:auto;padding:0 18px;border-radius:999px;font-size:13px;font-weight:800;background:var(--e-btn,#0a84ff);color:var(--e-on,#fff)}
+@media (pointer:coarse) and (max-width:540px),(max-width:360px){:root:not([data-floating]) .island-card{top:calc(env(safe-area-inset-top,0px) + 6px)}}
+/* A page opened out of a card: the card flies to its place, the rest follows a beat later. */
+.view[data-carried]>:nth-child(n+3){animation:rise-in .55s var(--spring-soft) both;animation-delay:.12s}
+.view[data-carried]>:nth-child(n+4){animation-delay:.18s}
+.view[data-carried]>:nth-child(n+5){animation-delay:.24s}

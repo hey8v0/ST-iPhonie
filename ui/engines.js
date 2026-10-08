@@ -2,6 +2,7 @@ import {createView, esc, engines, btn, field, input, select, textArea, toggle, h
 
 const TIERS = {0: '未订阅', 1: 'Tablet', 2: 'Scroll', 3: 'Opus'};
 import {icon, spark} from './icons.js';
+import {fly} from './carry.js';
 
 export function enginesApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'engines'), drafts = new Map();
@@ -424,7 +425,20 @@ export function enginesApp(ctx) {
     v.root.scrollTop = 0;
   }
   v.edit = edit;
-  v.back = () => { if (!engine) return false; engine = null; render(); return true; };
+  // The card in front of its pocket lifts out and becomes the card on top of its page, and goes back in (ui/carry.js).
+  function lift(from) {
+    const to = v.root.querySelector('.detail-card');
+    if (!fly(ctx.win, to, from, {duration: 560, easing: 'soft'})) return;
+    v.root.dataset.carried = '';
+    ctx.win.setTimeout(() => delete v.root.dataset.carried, 700);
+  }
+  v.back = () => {
+    if (!engine) return false;
+    const id = engine, from = v.root.querySelector('.detail-card')?.getBoundingClientRect();
+    engine = null; render();
+    fly(ctx.win, v.root.querySelector(`.wallet [data-engine="${id}"]`), from, {duration: 480, easing: 'bounce'});
+    return true;
+  };
   v.refresh = () => { if (!engine) render(); };
   if (api.keyStatus('nai')) loadSubscription(false);
 
@@ -503,7 +517,7 @@ export function enginesApp(ctx) {
         if (await ctx.confirm('删除这组连接？', `「${p.name}」的地址和密钥会一起删掉，其他组保留。`)) { api.deleteImageConnection(engine, p.id); imageSaved(); ctx.notify('已删除这组连接'); }
         break;
       }
-      case 'engine': if (frontOf(el.dataset.engine) === el.dataset.engine) edit(el.dataset.engine); else bringFront(el.dataset.engine); break;
+      case 'engine': if (frontOf(el.dataset.engine) === el.dataset.engine) { const from = el.getBoundingClientRect(); edit(el.dataset.engine); lift(from); } else bringFront(el.dataset.engine); break;
       case 'text-source': textDraft.source = el.dataset.source; changed(); dirty = true; render(); break;
       case 'text-preset': if (textDraft.active !== el.dataset.id) { textDraft.active = el.dataset.id; models = []; changed(); dirty = true; render(); } break;
       case 'text-new': {
