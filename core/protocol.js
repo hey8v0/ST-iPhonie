@@ -59,3 +59,9 @@ export function dialogueContract(format){return [
 ].join('\n');}
 /** Prompt entries for the story request. only: names of this chat's speakers; the language line lists just them. */
 export function promptPlan(settings,rules,only=null){const p=settings.presets.find(p=>p.id===settings.activePreset);if(!p)return [];validatePreset(p);const named=(()=>{const all=settings.routes.filter(r=>!isPlaceholderRole(r.name));if(!Array.isArray(only))return all;const wanted=new Set(only.map(n=>String(n).trim()));return all.filter(r=>wanted.has(r.name));})();const language='默认台词语言：'+settings.general.defaultLanguage+(named.length?'；'+named.map(r=>`${r.name}：${r.language||settings.general.defaultLanguage}`).join('；'):'');const entries=p.entries.filter(e=>e.enabled&&e.text.trim());const plan=entries.map((e,index)=>{const i=e.injection||p.injection;return {key:'sttts.entry.'+String(index).padStart(4,'0'),text:e.text.replaceAll('{{格式}}',p.format).replaceAll('{{语言}}',language),position:{in_chat:1,in_prompt:0,before_prompt:2}[i.position],depth:i.position==='in_chat'?i.depth:0,role:i.position==='in_chat'?{system:0,user:1,assistant:2}[i.role]:0};});const tail=plan[0];if(tail)tail.text+='\n\n'+rules+'\n\n'+dialogueContract(p.format);return plan;}
+// 前端美化 cards: their regex may put the reply into a code block or a whole HTML page that 酒馆助手 draws in a frame of
+// its own, where the plugin's styles and clicks do not reach. The waves that landed in such places are taken back out,
+// leaving the translation as written, so the card looks as it was made (the lines still play from 整条播放 and 听取).
+const FRAMED = /```[\s\S]*?(?:```|$)|<(?:!doctype\s+html|html)\b[\s\S]*?(?:<\/html\s*>|$)/gi;
+const WAVE = /<span class="sttts-utterance"[^>]*><span class="sttts-translation"[^>]*>([\s\S]*?)<\/span> <button type="button" class="sttts-play"[^>]*>[\s\S]*?<\/button><\/span>/g;
+export function unwaveFramed(text){return String(text).replace(FRAMED,block=>block.replace(WAVE,'$1'));}
