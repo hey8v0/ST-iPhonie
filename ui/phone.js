@@ -17,7 +17,7 @@ import {soundsApp} from './sounds.js';
 import {momentsNew, momentsSeen} from './moments.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
-import {grow, nudge, within, visible, islandIn} from './carry.js';
+import {grow, bloom, nudge, within, visible, islandIn} from './carry.js';
 
 // App factories, keyed by the ids in apps.js.
 const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp};
@@ -85,7 +85,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     win.clearTimeout(toastTimer);
     if (el.hidden) return;
     toastMove?.cancel();
-    toastMove = grow(win, el, islandIn($('.island'), el), {back: true, radius: 16, duration: 300});
+    toastMove = grow(win, el, islandIn($('.island'), el), {back: true, radius: 16, duration: 240});
     if (!toastMove) { el.hidden = true; return; }
     const move = toastMove;
     move.finished.then(() => { if (toastMove !== move) return; el.hidden = true; move.cancel(); toastMove = null; }, () => {});
@@ -102,7 +102,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     el.hidden = false;
     if (fresh) {
       const island = $('.island');
-      toastMove = grow(win, el, islandIn(island, el), {radius: 16, duration: 560, easing: 'bounce', fade: 1});
+      toastMove = grow(win, el, islandIn(island, el), {radius: 16, duration: 380, easing: 'bounce', fade: 1});
       const move = toastMove;
       move?.finished.then(() => { if (toastMove === move) toastMove = null; }, () => {});
       nudge(win, island, [{scale: '1'}, {scale: '1.07 1.12'}, {scale: '1'}], {duration: 360, easing: 'soft'});
@@ -229,7 +229,6 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   let carrying = [], openedFrom = null;
   function stopCarry() { for (const a of carrying) a?.cancel(); carrying = []; delete screen.dataset.carrying; }
   const iconOf = name => home.querySelector(`.app-icon[data-app="${name}"] .icon-tile`);
-  const corner = el => parseFloat(win.getComputedStyle(el).borderTopLeftRadius) || 16;
   function open(name, roleId, from = null) {
     if (!FACTORIES[name]) return;
     sheet?.close(null);
@@ -244,12 +243,12 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     frame.hidden = false;
     screen.dataset.view = 'app';
     openedFrom = source;
-    const grown = source && !home.hidden ? grow(win, frame, source, {radius: corner(source)}) : null;
+    const grown = source && !home.hidden ? bloom(win, screen, frame, source) : null;
     if (grown) {
       screen.dataset.carrying = '';
-      const away = nudge(win, home, [{transform: 'scale(1)', opacity: 1}, {transform: 'scale(1.08)', opacity: 0}], {duration: 420, easing: 'out', fill: 'forwards'});
+      const away = nudge(win, home, [{transform: 'scale(1)', opacity: 1}, {transform: 'scale(1.06)', opacity: 0}], {duration: 380, easing: 'out', fill: 'forwards'});
       carrying = [grown, away];
-      grown.finished.then(() => { if (active === name) home.hidden = true; away?.cancel(); delete screen.dataset.carrying; carrying = []; }, () => {});
+      grown.finished.then(ok => { if (!ok) return; if (active === name) home.hidden = true; away?.cancel(); delete screen.dataset.carrying; carrying = []; });
     } else home.hidden = true;
     screen.dataset.opening = 'true';
     win.clearTimeout(openTimer);
@@ -271,13 +270,13 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (!leaving) { frame.hidden = true; return; }
     // Back into what it came out of, or its own icon on the page showing; else it sinks away in the middle.
     const target = [openedFrom, iconOf(leaving)].find(el => el?.isConnected && visible(within(el, frame)));
-    const shrink = target ? grow(win, frame, target, {back: true, radius: corner(target)})
-      : nudge(win, frame, [{transform: 'scale(1)', opacity: 1}, {transform: 'scale(.86)', opacity: 0}], {duration: 300, easing: 'out', fill: 'forwards'});
+    const shrink = target ? bloom(win, screen, frame, target, {back: true})
+      : nudge(win, frame, [{transform: 'scale(1)', opacity: 1}, {transform: 'scale(.9)', opacity: 0}], {duration: 240, easing: 'out', fill: 'forwards'});
     if (!shrink) { frame.hidden = true; homeIn(); return; }
     screen.dataset.carrying = '';
-    const back = nudge(win, home, [{transform: 'scale(1.08)', opacity: 0}, {transform: 'scale(1)', opacity: 1}], {duration: 480, easing: 'soft'});
+    const back = nudge(win, home, [{transform: 'scale(1.06)', opacity: 0}, {transform: 'scale(1)', opacity: 1}], {duration: 340, easing: 'out'});
     carrying = [shrink, back];
-    shrink.finished.then(() => { if (!active) frame.hidden = true; shrink.cancel(); delete screen.dataset.carrying; carrying = []; }, () => {});
+    shrink.finished.then(ok => { if (ok === false) return; if (!active) frame.hidden = true; shrink.cancel(); delete screen.dataset.carrying; carrying = []; }, () => {});
   }
   // Icons and widgets come in one after another when the home screen appears (not when a badge redraws it).
   let homeTimer = 0;
@@ -423,7 +422,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     cardMove?.cancel(); cardMove = null;
     el.hidden = false;
     $('.island').dataset.open = '';
-    cardMove = grow(win, el, islandIn($('.island'), el), {radius: 16, duration: 560, easing: 'bounce', fade: 1});
+    cardMove = grow(win, el, islandIn($('.island'), el), {radius: 16, duration: 380, easing: 'bounce', fade: 1});
     const move = cardMove;
     move?.finished.then(() => { if (cardMove === move) cardMove = null; }, () => {});
     el.querySelector('[data-system=toggle]')?.focus({preventScroll: true});
@@ -432,7 +431,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const el = card();
     if (el.hidden) return;
     cardMove?.cancel();
-    cardMove = now ? null : grow(win, el, islandIn($('.island'), el), {back: true, radius: 16, duration: 320});
+    cardMove = now ? null : grow(win, el, islandIn($('.island'), el), {back: true, radius: 16, duration: 240});
     const done = () => { el.hidden = true; delete $('.island').dataset.open; };
     if (!cardMove) { done(); return; }
     const move = cardMove;

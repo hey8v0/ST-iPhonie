@@ -1081,7 +1081,7 @@ export function chatApp(ctx) {
       case 'open': {
         // The contact's picture in the list flies up to the top of the chat (ui/carry.js).
         const from = el.firstElementChild?.getBoundingClientRect();
-        Promise.resolve(open(el.dataset.id)).then(() => fly(ctx.win, v.root.querySelector('.th-head')?.firstElementChild, from, {duration: 520, easing: 'soft'}));
+        Promise.resolve(open(el.dataset.id)).then(() => fly(ctx.win, v.root.querySelector('.th-head')?.firstElementChild, from, {duration: 360, easing: 'soft'}));
         break;
       }
       case 'new-chat': newChat(); break;
@@ -1216,7 +1216,7 @@ export function chatApp(ctx) {
       // From a chat: its picture flies back down into its row.
       const was = mode === 'thread' ? threadId : null, from = was ? v.root.querySelector('.th-head')?.firstElementChild?.getBoundingClientRect() : null;
       mode = 'list'; threadId = null; selecting = null; quote = null; contactDraft = null;
-      Promise.resolve(render()).then(() => { if (from) fly(ctx.win, v.root.querySelector(`.conv[data-conv="${was}"]`)?.firstElementChild, from, {duration: 460, easing: 'bounce'}); });
+      Promise.resolve(render()).then(() => { if (from) fly(ctx.win, v.root.querySelector(`.conv[data-conv="${was}"]`)?.firstElementChild, from, {duration: 320, easing: 'bounce'}); });
       return true;
     }
     if (tab !== 'msgs') { tab = 'msgs'; render(); return true; }

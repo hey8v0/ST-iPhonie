@@ -428,7 +428,7 @@ export function enginesApp(ctx) {
   // The card in front of its pocket lifts out and becomes the card on top of its page, and goes back in (ui/carry.js).
   function lift(from) {
     const to = v.root.querySelector('.detail-card');
-    if (!fly(ctx.win, to, from, {duration: 560, easing: 'soft'})) return;
+    if (!fly(ctx.win, to, from, {duration: 380, easing: 'soft'})) return;
     v.root.dataset.carried = '';
     ctx.win.setTimeout(() => delete v.root.dataset.carried, 700);
   }
@@ -436,7 +436,7 @@ export function enginesApp(ctx) {
     if (!engine) return false;
     const id = engine, from = v.root.querySelector('.detail-card')?.getBoundingClientRect();
     engine = null; render();
-    fly(ctx.win, v.root.querySelector(`.wallet [data-engine="${id}"]`), from, {duration: 480, easing: 'bounce'});
+    fly(ctx.win, v.root.querySelector(`.wallet [data-engine="${id}"]`), from, {duration: 340, easing: 'bounce'});
     return true;
   };
   v.refresh = () => { if (!engine) render(); };

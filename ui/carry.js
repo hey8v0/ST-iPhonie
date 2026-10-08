@@ -1,17 +1,18 @@
 // 接住 (carry): a screen change keeps hold of what started it. What is tapped grows into what it opens (an app out of
 // its icon, the call and the notes out of the island, a page out of a card) and shrinks back into it on the way out,
-// so the screen is never just swapped for another. The moves run on spring curves: quick out, a small overshoot, then
-// still. With reduced motion, or where element.animate is missing (old browsers, the tests), nothing moves and
-// everything works the same.
+// so the screen is never just swapped for another. Only transform and opacity move (they need no repaint, so the
+// phone stays smooth while an app is being built); moves stay short (0.2–0.45 s) and overshoot only a little.
+// With reduced motion, or where element.animate is missing (old browsers, the tests), nothing moves and everything
+// works the same.
 
 // Springs as CSS linear() curves; browsers without linear() get a cubic-bezier close to them.
 const CURVES = {
-  // Lands with one small bounce: things that pop out (a note from the island, a card lifting).
-  bounce: ['linear(0, 0.009, 0.035 2.1%, 0.141, 0.281 6.7%, 0.723 12.9%, 0.938 16.7%, 1.017, 1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%, 1.051 39.6%, 1.017 43.1%, 0.991, 0.977 51%, 0.974 53.8%, 0.975 57.1%, 0.997 69.8%, 1.003 76.9%, 1)', 'cubic-bezier(.34,1.4,.64,1)'],
+  // Lands just past its place and back: things that pop out (a note from the island, a card lifting).
+  bounce: ['', 'cubic-bezier(.34,1.3,.64,1)'],
   // Settles with a hint of overshoot: big things growing (an app, the call screen).
   soft: ['linear(0, 0.007, 0.028 2.4%, 0.113 5%, 0.508 13.6%, 0.711 19.4%, 0.856 25.6%, 0.948 32.1%, 0.996 39%, 1.018 46.6%, 1.022 54.5%, 1.012 67.6%, 1.003 81.8%, 1)', 'cubic-bezier(.2,.9,.25,1.04)'],
-  // Going away: no bounce, quick at the end.
-  out: ['', 'cubic-bezier(.4,0,.2,1)'],
+  // Going away: a strong ease-out, no bounce.
+  out: ['', 'cubic-bezier(.23,1,.32,1)'],
 };
 export function curve(win, name) {
   const [spring, plain] = CURVES[name] || CURVES.soft;
@@ -46,7 +47,7 @@ export function islandIn(island, el) {
  * the layer (an app zooming out of its icon). radius: the source's corners; to: the layer's own.
  * Returns the Animation, or null when nothing moves (then the caller just shows or hides the layer).
  */
-export function grow(win, el, from, {back = false, radius = 16, to = 0, duration = back ? 380 : 540, easing = back ? 'out' : 'soft', fade = back ? 0 : .6} = {}) {
+export function grow(win, el, from, {back = false, radius = 16, to = 0, duration = back ? 260 : 400, easing = back ? 'out' : 'soft', fade = back ? 0 : .6} = {}) {
   if (!moving(win)) return null;
   const r = from?.getBoundingClientRect ? within(from, el) : from;
   if (!r || !visible(r)) return null;
@@ -60,8 +61,37 @@ export function grow(win, el, from, {back = false, radius = 16, to = 0, duration
     return el.animate(back ? [whole, {...small, opacity: fade || 0}] : [small, whole], {duration, easing: curve(win, easing), fill: back ? 'forwards' : 'none'});
   } catch { return null; }
 }
+/**
+ * A full layer (an app, the call screen) opens out of `from` cheaply: a plain stand-in in the source's colours grows
+ * from the source to the layer's place (transform only), and the layer fades in over it as it lands; back does the
+ * reverse. host: where the stand-in is put (the screen). Returns a promise for the end (null when nothing moves).
+ */
+export function bloom(win, host, layer, from, {back = false, duration = back ? 300 : 420, paint = null} = {}) {
+  if (!moving(win)) return null;
+  const r = from?.getBoundingClientRect ? within(from, layer) : from, L = within(layer, host);
+  if (!r || !L || !visible(r)) return null;
+  const doc = host.ownerDocument, look = from?.getBoundingClientRect ? win.getComputedStyle(from) : null;
+  const radius = parseFloat(look?.borderTopLeftRadius) || 16, sx = Math.max(.02, r.width / L.width), sy = Math.max(.02, r.height / L.height);
+  const proxy = doc.createElement('div');
+  proxy.className = 'carry-proxy';
+  proxy.style.cssText = `position:absolute;z-index:60;pointer-events:none;left:${L.left}px;top:${L.top}px;width:${L.width}px;height:${L.height}px;transform-origin:0 0;will-change:transform,opacity;border-radius:${radius / sx}px / ${radius / sy}px;`
+    + `background:${paint || (look && look.backgroundImage !== 'none' ? look.backgroundImage + ',' : '') + (look?.backgroundColor && look.backgroundColor !== 'rgba(0, 0, 0, 0)' ? look.backgroundColor : '#000')}`;
+  host.append(proxy);
+  // The corners: the source's while small (undoing the stretch), the screen's when whole.
+  const end = parseFloat(win.getComputedStyle(host).borderTopLeftRadius) || 0;
+  const small = {transform: `translate(${r.left}px,${r.top}px) scale(${sx},${sy})`, borderRadius: `${radius / sx}px / ${radius / sy}px`}, whole = {transform: 'translate(0px,0px) scale(1,1)', borderRadius: `${end}px / ${end}px`};
+  const ease = curve(win, back ? 'out' : 'soft');
+  let grown, shown;
+  try {
+    grown = proxy.animate(back ? [{...whole, opacity: 0}, {...whole, opacity: 1, offset: .25}, {...small, opacity: 1, offset: .9}, {...small, opacity: 0}] : [{...small, opacity: 1}, {...whole, opacity: 1, offset: .85}, {...whole, opacity: 0}], {duration, easing: ease, fill: 'forwards'});
+    shown = layer.animate(back ? [{opacity: 1, transform: 'scale(1)'}, {opacity: 0, transform: 'scale(.94)', offset: .3}, {opacity: 0, transform: 'scale(.94)'}] : [{opacity: 0, transform: 'scale(.94)'}, {opacity: 0, transform: 'scale(.94)', offset: .35}, {opacity: 1, transform: 'scale(1)'}], {duration, easing: 'cubic-bezier(.23,1,.32,1)', fill: back ? 'forwards' : 'none'});
+  } catch { proxy.remove(); return null; }
+  let stopped = false;
+  const done = grown.finished.then(() => { proxy.remove(); return true; }, () => { proxy.remove(); return false; });
+  return {finished: done, cancel() { if (stopped) return; stopped = true; grown.cancel(); shown.cancel(); proxy.remove(); }, layer: shown};
+}
 /** An element flies from where `rect` (a getBoundingClientRect from before) was to where it is now (FLIP). */
-export function fly(win, el, rect, {duration = 520, easing = 'bounce'} = {}) {
+export function fly(win, el, rect, {duration = 360, easing = 'bounce'} = {}) {
   if (!moving(win) || !rect?.width || !el) return null;
   const now = el.getBoundingClientRect();
   if (!now.width) return null;

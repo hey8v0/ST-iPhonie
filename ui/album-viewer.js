@@ -1,5 +1,7 @@
 // 相册浏览: a photo full screen inside the phone, like a phone's own album. Swipe (or ‹ ›, or the arrow keys) for the one
-// before and after; a tap hides the bars; a double tap (or 放大) opens the zoom viewer. Pictures load as they are needed:
+// before and after; a tap hides the bars. The photo zooms where it is: pinch (or the wheel), a double tap to 2.5× and
+// back, drag to look around while zoomed; pinched smaller than the screen it springs back. 放大 opens the zoom viewer
+// (with 参数 for a drawn picture). Pictures load as they are needed:
 // the one shown and the ones beside it.
 import {icon} from './icons.js';
 import {esc} from './common.js';
@@ -44,7 +46,7 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
   function grown(img) {
     if (!start) return;
     const rect = start; start = null;
-    const go = () => fly(win, img, rect, {duration: 480, easing: 'soft'});
+    const go = () => fly(win, img, rect, {duration: 340, easing: 'soft'});
     if (img.complete && img.naturalWidth) go(); else img.addEventListener('load', go, {once: true});
   }
   /** The three slides: the one before, this one, the one after; pictures further away are let go. */
@@ -63,6 +65,8 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
     });
     for (const [id, url] of urls) if (Math.abs(list.indexOf(id) - at) > 2) { win.URL.revokeObjectURL(url); urls.delete(id); }
     track.style.transform = `translateX(-${SLIDE}%)`;
+    for (const img of slots) { img.style.transform = ''; img.style.transition = ''; }
+    z = 1; zx = 0; zy = 0; root.removeAttribute('data-zoomed');
     title();
   }
   function title() {
@@ -83,6 +87,39 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
     track.addEventListener('transitionend', finish, {once: true});
     win.setTimeout(finish, 320);
   }
+  // ---------- Zooming in place ----------
+  let z = 1, zx = 0, zy = 0, pinch = null, wheelTimer = 0;
+  const pointers = new Map();
+  const box = () => ({w: stage.clientWidth || 1, h: stage.clientHeight || 1});
+  function paint(animate = false) {
+    const img = slots[1];
+    img.style.transition = animate ? 'transform .32s var(--spring-soft, cubic-bezier(.23,1,.32,1))' : 'none';
+    img.style.transform = z === 1 && !zx && !zy ? '' : `translate(${zx}px,${zy}px) scale(${z})`;
+    root.toggleAttribute('data-zoomed', z > 1.01);
+  }
+  /** Keeps the zoomed photo over the screen: no empty band where it could still cover. */
+  function bound() {
+    const img = slots[1], {w, h} = box(), mx = Math.max(0, (img.offsetWidth * z - w) / 2), my = Math.max(0, (img.offsetHeight * z - h) / 2);
+    zx = Math.min(mx, Math.max(-mx, zx)); zy = Math.min(my, Math.max(-my, zy));
+  }
+  /** To scale `next`, keeping the point (x, y) of the stage where it is. loose: a pinch may go below 1 for a moment. */
+  function zoomAt(next, x, y, {loose = false, animate = false} = {}) {
+    next = Math.min(5, Math.max(loose ? .6 : 1, next));
+    const r = stage.getBoundingClientRect(), cx = x - r.left - box().w / 2, cy = y - r.top - box().h / 2;
+    zx = cx - (cx - zx) * next / z; zy = cy - (cy - zy) * next / z; z = next;
+    if (!loose) bound();
+    paint(animate);
+  }
+  function unzoom(animate = true) { z = 1; zx = 0; zy = 0; paint(animate); }
+  /** Let go smaller than the screen: back to it. */
+  function release() { if (z < 1) unzoom(); else { bound(); paint(true); } }
+  stage.addEventListener('wheel', e => {
+    e.preventDefault();
+    zoomAt(z * Math.exp(-e.deltaY * .0015), e.clientX, e.clientY, {loose: true});
+    win.clearTimeout(wheelTimer);
+    wheelTimer = win.setTimeout(release, 220);
+  }, {passive: false});
+
   function settle() { track.classList.add('settle'); track.style.transform = `translateX(-${SLIDE}%)`; win.setTimeout(() => track.classList.remove('settle'), 300); }
   function setChrome(on) { chrome = on; root.dataset.chrome = on ? 'on' : 'off'; }
   function zoom() {
@@ -96,11 +133,32 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
   let drag = null, lastTap = 0, tapTimer = 0;
   stage.addEventListener('pointerdown', e => {
     if (e.button > 0 || moving) return;
-    drag = {id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: Date.now(), dx: 0, side: false};
-    stage.setPointerCapture?.(e.pointerId);
+    pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+    try { stage.setPointerCapture?.(e.pointerId); } catch { /* a pointer the browser no longer tracks */ }
+    if (pointers.size === 2) {
+      // Two fingers: a pinch, not a swipe.
+      if (drag?.side) settle();
+      drag = null; lastTap = 0;
+      const [a, b] = [...pointers.values()];
+      pinch = {dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
+      return;
+    }
+    if (pointers.size > 2) return;
+    drag = {id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, t0: Date.now(), dx: 0, side: false, pan: z > 1.01};
   });
   stage.addEventListener('pointermove', e => {
+    const p = pointers.get(e.pointerId);
+    if (p) { p.x = e.clientX; p.y = e.clientY; }
+    if (pinch && pointers.size >= 2) {
+      const [a, b] = [...pointers.values()], dist = Math.hypot(a.x - b.x, a.y - b.y) || 1, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      zx += mx - pinch.x; zy += my - pinch.y;
+      zoomAt(z * dist / pinch.dist, mx, my, {loose: true});
+      pinch = {dist, x: mx, y: my};
+      return;
+    }
     if (!drag || e.pointerId !== drag.id) return;
+    // Zoomed in: the finger moves the photo around instead of turning to the next one.
+    if (drag.pan) { zx += e.clientX - drag.x; zy += e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY; bound(); paint(); if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 10) drag.moved = true; return; }
     const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
     if (!drag.side && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) drag.side = true;
     if (!drag.side) return;
@@ -110,9 +168,14 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
     track.style.transform = `translateX(calc(-${SLIDE}% + ${drag.dx}px))`;
   });
   const end = e => {
+    const pinched = !!pinch;
+    pointers.delete(e.pointerId);
+    if (pinch && pointers.size < 2) { pinch = null; release(); }
+    if (pinched) { drag = null; return; }
     if (!drag || e.pointerId !== drag.id) return;
     const d = drag;
     drag = null;
+    if (d.pan && d.moved) return;
     if (d.side) {
       const width = stage.clientWidth || 300, fast = Math.abs(d.dx) / Math.max(1, Date.now() - d.t0) > 0.5;
       if (e.type === 'pointerup' && (Math.abs(d.dx) > width * 0.18 || (fast && Math.abs(d.dx) > 30))) go(d.dx < 0 ? 1 : -1);
@@ -120,10 +183,10 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
       return;
     }
     if (e.type !== 'pointerup' || Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 10) return;
-    // One tap hides or shows the bars; two quick taps open the zoom viewer.
+    // One tap hides or shows the bars; two quick taps zoom in there, or back out.
     const now = Date.now();
     win.clearTimeout(tapTimer);
-    if (now - lastTap < 300) { lastTap = 0; zoom(); return; }
+    if (now - lastTap < 300) { lastTap = 0; if (z > 1.01) unzoom(); else zoomAt(2.5, e.clientX, e.clientY, {animate: true}); return; }
     lastTap = now;
     tapTimer = win.setTimeout(() => { if (lastTap === now) setChrome(!chrome); }, 300);
   };
@@ -166,7 +229,7 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
   function close() {
     if (closed) return;
     closed = true;
-    win.clearTimeout(tapTimer);
+    win.clearTimeout(tapTimer); win.clearTimeout(wheelTimer);
     doc.removeEventListener('keydown', onKey, true);
     for (const url of urls.values()) win.URL.revokeObjectURL(url);
     urls.clear();

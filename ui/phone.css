@@ -135,7 +135,7 @@ a{color:var(--accent-ink)}
 .apps-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 6px;padding:4px 14px 8px}
 .app-icon{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:0;min-height:84px;color:inherit}
 .app-icon:active .icon-tile{transform:scale(.88);transition-duration:.1s}
-.icon-tile{position:relative;width:60px;height:60px;border-radius:19px;display:grid;place-items:center;overflow:hidden;color:#fff;transition:transform .5s var(--spring);background:linear-gradient(160deg,var(--t1),var(--t2));box-shadow:inset 0 2px 0 rgba(255,255,255,.55),inset 0 -3px 0 rgba(0,0,0,.08),0 6px 14px -6px color-mix(in srgb,var(--t2) 80%,#000)}
+.icon-tile{position:relative;width:60px;height:60px;border-radius:19px;display:grid;place-items:center;overflow:hidden;color:#fff;transition:transform .3s var(--spring);background:linear-gradient(160deg,var(--t1),var(--t2));box-shadow:inset 0 2px 0 rgba(255,255,255,.55),inset 0 -3px 0 rgba(0,0,0,.08),0 6px 14px -6px color-mix(in srgb,var(--t2) 80%,#000)}
 .icon-tile:after{content:"";position:absolute;inset:3px 3px 50% 3px;border-radius:16px 16px 40% 40%;background:linear-gradient(rgba(255,255,255,.33),rgba(255,255,255,0));pointer-events:none}
 .icon-tile .glyph{width:46px;height:46px}
 .icon-tile img{width:100%;height:100%;object-fit:cover}
@@ -165,7 +165,7 @@ a{color:var(--accent-ink)}
 .screen[data-opening=true]:not([data-carrying]) .app-frame{animation:app-open .26s cubic-bezier(.2,.8,.2,1)}
 /* 接住 (ui/carry.js): while an app grows out of its icon or shrinks back, the home screen and wallpaper stay behind it. */
 .screen[data-carrying] .wallpaper{opacity:1}
-.screen[data-carrying] .app-frame{will-change:transform,clip-path;box-shadow:0 20px 50px -20px rgba(0,0,0,.45)}
+.screen[data-carrying] .app-frame,.screen[data-carrying] .home{will-change:transform,opacity}
 @keyframes app-open{from{opacity:.2;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
 
 /* ---------- Shared components ---------- */
@@ -271,7 +271,7 @@ details>div{padding-bottom:10px}
 .overlay{position:absolute;inset:0;z-index:60;display:flex;align-items:flex-end;padding:10px 10px 22px;background:rgba(10,20,40,.36);animation:fade .2s}
 .overlay.top{align-items:flex-start;padding-top:52px;background:rgba(20,40,80,.3);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
 @keyframes fade{from{opacity:0}}
-.sheet{width:100%;max-height:84%;display:flex;flex-direction:column;background:var(--bg);border-radius:28px;box-shadow:0 10px 40px rgba(0,0,0,.25);animation:sheet-in .42s var(--spring-soft)}
+.sheet{width:100%;max-height:84%;display:flex;flex-direction:column;background:var(--bg);border-radius:28px;box-shadow:0 10px 40px rgba(0,0,0,.25);animation:sheet-in .32s var(--spring-soft)}
 .overlay.top .sheet{animation-name:sheet-drop;background:transparent;box-shadow:none}
 @keyframes sheet-in{from{opacity:.3;transform:translateY(30px)}}
 @keyframes sheet-drop{from{opacity:.3;transform:translateY(-30px)}}
@@ -834,21 +834,21 @@ details>div{padding-bottom:10px}
 @keyframes rise-in{from{opacity:0;transform:translateY(14px) scale(.985)}}
 @keyframes blur-in{from{opacity:0;filter:blur(8px);transform:scale(.99)}}
 @keyframes pop-in{0%{opacity:0;transform:scale(.6)}70%{transform:scale(1.06)}100%{opacity:1;transform:none}}
-.screen[data-opening=true] .app-content>.view>*{animation:rise-in .52s var(--spring-soft) both}
+.screen[data-opening=true] .app-content>.view>*{animation:rise-in .32s var(--spring-soft) both}
 .screen[data-opening=true] .app-content>.view>:nth-child(2){animation-delay:.04s}
 .screen[data-opening=true] .app-content>.view>:nth-child(3){animation-delay:.08s}
 .screen[data-opening=true] .app-content>.view>:nth-child(4){animation-delay:.12s}
 .screen[data-opening=true] .app-content>.view>:nth-child(5){animation-delay:.16s}
 .screen[data-opening=true] .app-content>.view>:nth-child(6){animation-delay:.2s}
 .screen[data-opening=true] .app-content>.view>:nth-child(n+7){animation-delay:.24s}
-.screen[data-home-in] .home-page .app-icon{animation:pop-in .56s var(--spring) both}
+.screen[data-home-in] .home-page .app-icon{animation:pop-in .4s var(--spring) both}
 .screen[data-home-in] .home-page .app-icon:nth-child(2){animation-delay:.03s}
 .screen[data-home-in] .home-page .app-icon:nth-child(3){animation-delay:.06s}
 .screen[data-home-in] .home-page .app-icon:nth-child(4){animation-delay:.09s}
 .screen[data-home-in] .home-page .app-icon:nth-child(5){animation-delay:.12s}
 .screen[data-home-in] .home-page .app-icon:nth-child(6){animation-delay:.15s}
 .screen[data-home-in] .home-page .app-icon:nth-child(n+7){animation-delay:.18s}
-.screen[data-home-in] .widget{animation:rise-in .5s var(--spring-soft) both}
+.screen[data-home-in] .widget{animation:rise-in .34s var(--spring-soft) both}
 .screen[data-home-in] .widget+.widget{animation-delay:.06s}
 .view[data-switching] .qq-page{animation:blur-in .34s cubic-bezier(.2,.8,.2,1)}
 /* Presses: sink a little, spring back past rest */
@@ -1693,7 +1693,7 @@ button.gift-item[data-short]{opacity:.55}
 
 /* 相册浏览: one photo full screen, black like a phone's album; the bars float over it and fade out on a tap. */
 .album-viewer{position:absolute;inset:0;z-index:55;background:#000;color:#fff;overflow:hidden;animation:fade .2s;user-select:none;-webkit-user-select:none}
-.album-stage{position:absolute;inset:0;overflow:hidden;touch-action:pan-y pinch-zoom}
+.album-stage{position:absolute;inset:0;overflow:hidden;touch-action:none}
 .album-track{display:flex;width:300%;height:100%;transform:translateX(-33.3333%);will-change:transform}
 .album-track.settle{transition:transform .28s cubic-bezier(.2,.9,.3,1)}
 .album-slide{flex:0 0 33.3333%;height:100%;margin:0;display:grid;place-items:center;overflow:hidden}
@@ -1756,11 +1756,12 @@ button.gift-item[data-short]{opacity:.55}
 .fav-heading{color:var(--ink2);margin:0 0 4px}.fav-heading>span{display:flex;align-items:center;gap:6px}
 
 /* ---------- 灵动 (ui/carry.js) ---------- */
-/* Spring curves for CSS moves; linear() draws a real spring where the browser knows it. */
-:root{--spring:cubic-bezier(.34,1.4,.64,1);--spring-soft:cubic-bezier(.2,.9,.25,1.04)}
-@supports (transition-timing-function:linear(0,1)){:root{--spring:linear(0,.009,.035 2.1%,.141,.281 6.7%,.723 12.9%,.938 16.7%,1.017,1.077,1.121,1.149 24.3%,1.159,1.163,1.161,1.154 29.9%,1.129 32.8%,1.051 39.6%,1.017 43.1%,.991,.977 51%,.974 53.8%,.975 57.1%,.997 69.8%,1.003 76.9%,1);--spring-soft:linear(0,.007,.028 2.4%,.113 5%,.508 13.6%,.711 19.4%,.856 25.6%,.948 32.1%,.996 39%,1.018 46.6%,1.022 54.5%,1.012 67.6%,1.003 81.8%,1)}}
+/* Motion curves: --spring lands just past its place and back (small things popping out); --spring-soft settles with a
+   hint of overshoot (linear() spring where the browser knows it, else a strong ease-out). Kept short: 0.2–0.45 s. */
+:root{--spring:cubic-bezier(.34,1.3,.64,1);--spring-soft:cubic-bezier(.23,1,.32,1)}
+@supports (transition-timing-function:linear(0,1)){:root{--spring-soft:linear(0,.007,.028 2.4%,.113 5%,.508 13.6%,.711 19.4%,.856 25.6%,.948 32.1%,.996 39%,1.018 46.6%,1.022 54.5%,1.012 67.6%,1.003 81.8%,1)}}
 /* The island stretches out (and back) on a spring as playing starts and stops. */
-.island{transition:min-width .6s var(--spring),max-width .6s var(--spring),padding .45s var(--spring),background-color .3s}
+.island{transition:min-width .45s var(--spring),max-width .45s var(--spring),padding .35s var(--spring),background-color .3s}
 .island[data-open]{opacity:0}
 /* Its mini player: what plays, the line, pause / stop, 听取. */
 .island-card{position:absolute;z-index:45;top:10px;left:10px;right:10px;padding:14px 14px 12px 16px;border-radius:30px;background:#000;color:#fff;box-shadow:0 18px 40px -16px rgba(0,0,0,.65);display:flex;flex-direction:column;gap:12px}
@@ -1779,6 +1780,6 @@ button.gift-item[data-short]{opacity:.55}
 .ic-actions .ic-open{width:auto;margin-left:auto;padding:0 18px;border-radius:999px;font-size:13px;font-weight:800;background:var(--e-btn,#0a84ff);color:var(--e-on,#fff)}
 @media (pointer:coarse) and (max-width:540px),(max-width:360px){:root:not([data-floating]) .island-card{top:calc(env(safe-area-inset-top,0px) + 6px)}}
 /* A page opened out of a card: the card flies to its place, the rest follows a beat later. */
-.view[data-carried]>:nth-child(n+3){animation:rise-in .55s var(--spring-soft) both;animation-delay:.12s}
-.view[data-carried]>:nth-child(n+4){animation-delay:.18s}
-.view[data-carried]>:nth-child(n+5){animation-delay:.24s}
+.view[data-carried]>:nth-child(n+3){animation:rise-in .32s var(--spring-soft) both;animation-delay:.06s}
+.view[data-carried]>:nth-child(n+4){animation-delay:.1s}
+.view[data-carried]>:nth-child(n+5){animation-delay:.14s}

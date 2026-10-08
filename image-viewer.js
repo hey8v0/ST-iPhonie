@@ -196,8 +196,8 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
   }, {passive: false});
   root.addEventListener('pointerdown', e => {
     if (onChrome(e)) return;
-    root.setPointerCapture?.(e.pointerId);
     pointers.set(e.pointerId, {x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY});
+    try { root.setPointerCapture?.(e.pointerId); } catch { /* a pointer the browser no longer tracks */ }
     root.toggleAttribute('data-dragging', true);
     gesture = null;
   });
