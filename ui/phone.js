@@ -806,7 +806,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (event.type === 'audio-ready') views.get('listen')?.onPlayback?.(api.status());
     if (event.type === 'draw') views.get('draw')?.onDraw?.(event);
     if (event.type === 'balance') run(() => views.get('engines')?.onBalance?.(event));
-    if (event.type === 'chat') { run(() => views.get('chat')?.onChat?.(event)); countUnread(); }
+    if (event.type === 'chat') { run(() => views.get('chat')?.onChat?.(event)); countUnread(); if (event.incoming && !(active === 'chat' && views.get('chat')?.showing?.() === event.threadId)) notify(`${event.incoming.from}：${event.incoming.kind === 'text' ? event.incoming.text : '发来' + (event.incoming.count > 1 ? ` ${event.incoming.count} 条` : '一条') + '消息'}`.slice(0, 80)); }
     if (event.type === 'moments') { views.get('chat')?.onMoments?.(event); countMoments(); }
     if (event.type === 'call') calls.update(event.call);
     if (event.type === 'forum' || event.type === 'peek') { const app = event.type; if (active === app) run(() => views.get(app)?.refresh()); }

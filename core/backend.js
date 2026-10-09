@@ -19,6 +19,7 @@ import {activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pic
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
 import { normalizeRoute, switchRouteEngine, removeRoute } from './routes.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
+import { normalizeMarks, withMarks } from './voice-fx.js';
 import { TTSParameters } from './parameters.js';
 import { KeyStore, keyTail, validateKey, parseTextKeys, joinTextKeys } from './keys.js';
 import { Providers, buildRequest } from './providers.js';
@@ -27,7 +28,7 @@ import { DialoguePlayer } from './player.js';
 import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS } from './library.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, guardParams, isFree, isV5, normalizeDrawParams } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
-import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars } from './chat.js';
+import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeProactive } from './chat.js';
 import { ChatStore, money } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
 import { CloudQueue, KeyHashQueue, newRoomCode, validRoom, sha256Hex } from './cloud-queue.js';
@@ -329,6 +330,7 @@ export class TTSBackend {
         if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('预设格式无效');
         const next = this.getState(), preset = clone(value);
         preset.id ||= crypto.randomUUID();
+        preset.marks = normalizeMarks(preset.marks);
         validatePreset(preset);
         const index = next.presets.findIndex(item => item.id === preset.id);
         if (index < 0) next.presets.push(preset); else next.presets[index] = preset;
@@ -353,8 +355,9 @@ export class TTSBackend {
         return promptPlan(state, modelRules(state)).map(entry => entry.text).join('\n\n');
     }
     parse(text) {
-        const formats = knownFormats(this.settings);
-        for (const format of formats) { const lines = parseDialogue(text, format); if (lines.length) return { format, lines }; }
+        // 心声 and 电话 written the story's own way (*…* and the like, as the 配音预设 says) play as such.
+        const formats = knownFormats(this.settings), marks = this.settings.presets.find(p => p.id === this.settings.activePreset)?.marks;
+        for (const format of formats) { const lines = parseDialogue(text, format); if (lines.length) return { format, lines: withMarks(text, lines, marks) }; }
         return { format: formats[0], lines: [] };
     }
     setKey(engine, key) {
@@ -1279,6 +1282,8 @@ export class TTSBackend {
         }
         if (Array.isArray(patch?.starred)) next.chat.starred = patch.starred;
         if (patch?.pace !== undefined) next.chat.pace = patch.pace !== false;
+        // 主动发消息: {on, every, dailyMax}.
+        if (patch?.proactive && typeof patch.proactive === 'object') next.chat.proactive = normalizeProactive({ ...next.chat.proactive, ...patch.proactive });
         if (Array.isArray(patch?.stickers)) next.chat.stickers = normalizeStickers(patch.stickers);
         if (patch?.partition !== undefined) { if (!['none', 'card'].includes(patch.partition)) throw Error('分区方式无效'); next.chat.partition = patch.partition; }
         // avatars: {name: choice | null}; null goes back to the tavern's avatar (or the first letter).

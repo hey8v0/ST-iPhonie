@@ -112,3 +112,5 @@
 #chat [data-sttts-action="sound"][data-sttts-kind="ambience"]::before{content:"≋"}
 #chat [data-sttts-action="sound"]:hover{color:var(--sttts-body);background:color-mix(in srgb,var(--sttts-body) 14%,transparent)}
 #chat [data-sttts-action="sound"]:focus-visible{outline:2px solid color-mix(in srgb,var(--sttts-body) 60%,transparent);outline-offset:1px}
+/* 主动发消息: where a story reply sent messages to the phone (the messages themselves are only on the phone). */
+.sttts-phone-note{display:inline-flex;align-items:center;gap:4px;margin:4px 0;padding:3px 10px;border-radius:999px;font-size:.85em;opacity:.75;background:color-mix(in srgb,currentColor 10%,transparent)}

@@ -1,5 +1,6 @@
 // 电话 and 心声: how a line sounds after it is made. The story marks a line by starting its emotion with 「心声」 or
-// 「电话」 (心声·难过, 电话·开心); the word is taken off before the engine reads the emotion (so the voice and its cache
+// 「电话」 (心声·难过, 电话·开心), or the way the user's own story preset writes them (a line inside *…*, `…` and the
+// like, as the 配音预设 says: markedEffect); the word is taken off before the engine reads the emotion (so the voice and its cache
 // are the same as without it), and the line plays through a phone's narrow band, or close and with the echo of a
 // voice heard inside one's head. Calls in the phone's 电话 App always sound like a phone.
 
@@ -27,6 +28,65 @@ export function speakable(line) {
 }
 /** The effect a line plays with: one it was given (a phone call), else the one its emotion asks for. */
 export const lineEffect = line => VOICE_EFFECTS[line?.effect] ? line.effect : voiceEffect(line?.emotion).effect;
+
+// ---------- The story's own way of writing 心声 and 电话 ----------
+/** The rule sent with the story (an entry of the 配音预设, which the user can change or turn off). */
+export const EFFECTS_PROMPT = '【心声和电话】要念出来的心声，台词照样写成 {{格式}}，情绪字段开头写「心声·」（如 心声·难过）；隔着电话、听筒传来的话，情绪字段开头写「电话·」（如 电话·开心）。插件会把它做成心声的回响或电话里的声音，后面的情绪照朗读规则写。';
+/** Ways a story may wrap 心声 or 电话, offered as choices (open…close). */
+export const MARK_CHOICES = Object.freeze(['*…*', '`…`', '（…）', '【…】', '『…』', '「…」', '~…~']);
+const MARK_LIMIT = 8;
+/** One way of wrapping, as written in the 配音预设 ("*…*", "『 』", "<i>...</i>"): [open, close], or null. */
+export function markPair(value) {
+  const text = String(value ?? '').trim();
+  if (!text || text.length > 24) return null;
+  const parts = text.includes('…') ? text.split('…') : text.includes('...') ? text.split('...') : /\s/.test(text) ? text.split(/\s+/) : text.length === 2 ? [...text] : [text, text];
+  if (parts.length !== 2) return null;
+  const [open, close] = parts.map(t => t.trim());
+  return open && close && open.length <= 10 && close.length <= 10 ? [open, close] : null;
+}
+/** {inner: ['*…*', …], phone: […]}: known, written the same way, no repeats. */
+export function normalizeMarks(value) {
+  const list = v => [...new Set((Array.isArray(v) ? v : String(v ?? '').split(/[\s,，、]+/)).map(markPair).filter(Boolean).map(([o, c]) => o + '…' + c))].slice(0, MARK_LIMIT);
+  return {inner: list(value?.inner), phone: list(value?.phone)};
+}
+/** Where text wrapped by [open, close] sits: [[from, to]] (inside one paragraph; ** and `` are bold and code, not marks). */
+function spans(text, [open, close]) {
+  const out = [];
+  let at = 0;
+  while (out.length < 200) {
+    const from = text.indexOf(open, at);
+    if (from < 0) break;
+    if (open === close && text.startsWith(open, from + open.length)) { at = from + open.length * 2; while (text.startsWith(open, at)) at += open.length; continue; }
+    const to = text.indexOf(close, from + open.length);
+    if (to < 0) break;
+    const inside = text.slice(from + open.length, to);
+    if (/\n\s*\n/.test(inside) || inside.length > 3000) { at = from + open.length; continue; }
+    out.push([from, to + close.length]);
+    at = to + close.length;
+  }
+  return out;
+}
+/**
+ * 'inner' or 'phone' when the story wrapped this line (lines from parseDialogue: start, end, translation) the way the
+ * preset's marks say — the whole line inside the marks, or its words inside them — else ''.
+ */
+export function markedEffect(text, line, marks) {
+  const m = normalizeMarks(marks), raw = String(text ?? '');
+  for (const effect of ['inner', 'phone']) {
+    for (const pair of m[effect].map(markPair)) {
+      const said = String(line?.translation ?? '').trim();
+      if (said.length > pair[0].length + pair[1].length && said.startsWith(pair[0]) && said.endsWith(pair[1])) return effect;
+      if (Number.isFinite(line?.start) && spans(raw, pair).some(([a, b]) => line.start >= a && line.end <= b)) return effect;
+    }
+  }
+  return '';
+}
+/** Lines with the effect the story's marks give them (an effect a line already has stays). */
+export const withMarks = (text, lines, marks) => {
+  const m = normalizeMarks(marks);
+  return m.inner.length || m.phone.length ? lines.map(l => l.effect ? l : (e => e ? {...l, effect: e} : l)(markedEffect(text, l, m))) : lines;
+};
+
 
 // A room's tail, made once per audio context: noise that dies away, a little different in each ear.
 const rooms = new WeakMap();

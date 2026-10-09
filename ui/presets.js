@@ -1,13 +1,14 @@
 import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, empty} from './common.js';
 import {icon, glyph} from './icons.js';
 import {APPS} from './apps.js';
+import {MARK_CHOICES} from '../core/voice-fx.js';
 
 const positions = [['in_chat', '聊天内'], ['before_prompt', '主提示词之前'], ['in_prompt', '主提示词之后']];
 const roles = [['system', '系统'], ['user', '用户'], ['assistant', '助手']];
 // Preset kinds: voice (dialogue tags), chat (phone chat replies, 朋友圈, and bringing chats into the story), drawing
 // (<img> tags in the chat text). A chat rule says where it is used: 私聊, 群聊, 朋友圈.
 const KINDS = [['tts', '配音', 'listen'], ['chat', '聊天', 'chat'], ['draw', '绘图', 'draw']];
-const USES = [['dm', '私聊'], ['group', '群聊'], ['moments', '朋友圈'], ['call', '电话'], ['forum', '论坛'], ['peek', '查手机']];
+const USES = [['dm', '私聊'], ['group', '群聊'], ['moments', '朋友圈'], ['call', '电话'], ['forum', '论坛'], ['peek', '查手机'], ['story', '正文']];
 // Drawing rules: which engines an entry is sent with (none ticked or all ticked: every engine).
 const ENGINE_USES = [['nai', 'NovelAI'], ['gpt', 'GPT 生图'], ['comfy', 'ComfyUI']];
 const engineScope = e => e.engines?.length ? ' · 只给 ' + ENGINE_USES.filter(([k]) => e.engines.includes(k)).map(([, l]) => l).join('、') : '';
@@ -132,6 +133,16 @@ export function presetsApp(ctx) {
       ${api.storySources ? `<div class="actions" style="margin:6px 0 0">${btn('story-sources', icon('refresh') + (list ? '重新读取' : '读取当前注入的内容'), 'secondary')}</div>` : ''}
       ${list ? `<div class="story-sources">${rows}</div>` : ''}</div>`;
   }
+  /** How this preset's story writes 心声 and 电话 besides the emotion word: the marks wrapped around them. */
+  function marksFields(p) {
+    const m = p.marks || {inner: [], phone: []};
+    const row = (kind, label, info) => {
+      const mine = m[kind] || [], own = mine.filter(x => !MARK_CHOICES.includes(x));
+      return `<div class="field"><span>${label}${help(info)}</span><div class="use-row">${MARK_CHOICES.map(c => `<label class="use-chip"><input type="checkbox" data-mark="${kind}" data-pair="${esc(c)}" ${mine.includes(c) ? 'checked' : ''}><span>${esc(c)}</span></label>`).join('')}</div><input type="text" data-mark-own="${kind}" aria-label="${label}：其他写法" value="${esc(own.join(' '))}" placeholder="其他写法，如 《…》"></div>`;
+    };
+    return row('inner', '心声怎么认', '台词的情绪字段写了「心声·」的，一直会当心声念（带回响）。\n\n有的正文预设有自己的心声写法，比如用 *星号* 或 `反引号` 包住心声：勾上对应的写法，包在里面的台词也当心声念；列表里没有的，在下面的框里写开头和结尾，中间用 … 隔开。\n\n很多预设用 *星号* 写动作，那样就别勾星号。正文预设根本不写心声的话，可以停用下面的「心声和电话」条目。')
+      + row('phone', '电话怎么认', '情绪字段写了「电话·」的，会念成电话听筒里的声音。正文预设用别的符号标电话里的话（比如【…】）的话，在这里勾上它。');
+  }
   const storyName = key => storyList?.find(x => x.key === key)?.name || ({bakemono_memory: '剧情剪辑台', '1_memory': '酒馆总结'})[key] || key;
   let storyList = null;
   function renderEditor() {
@@ -144,7 +155,7 @@ export function presetsApp(ctx) {
           ${field('世界书最多（字）', input('loreMax', p.loreMax ?? 30000, 'number', 'min="0" step="1000"'), '手机读世界书时最多放这么多字，只放整条。0 表示插件不另外限制，只按酒馆「世界书」设置里的预算（占上下文的百分比）来。手机的每次请求（聊天、朋友圈、论坛、查手机、电话）都会带上世界书，放得越多越费 token，也越慢。')}${field('每次刷新朋友圈最多几条', input('posts', p.posts ?? 2, 'number', 'min="1" max="5" step="1"'), '在动态里刷新时，由模型挑 1 到这么多个人发动态。')}${toggle('lore', '带上世界书', p.lore !== false, '聊天、电话和朋友圈也带上酒馆的世界书：和写正文时一样，常驻的条目，以及在名字、最近的正文和聊天里触发关键词的条目（当前角色卡的世界书、全局和聊天绑定的世界书都算）。人设写在世界书里的话要打开。\n\n条目多的话会多占一些上下文。')}${p.lore !== false ? loreFields(p) : ''}${field('带进剧情的写法', textArea('bring', p.bring, 'class="code" rows="4"'), '选中的聊天消息会按这段文字注入下一次正文，只用一次。需要包含 {{聊天记录}}；也可以用 {{用户}}、{{对象}}。')}`
         : draw
         ? `${field('每条回复出图数量', input('count', p.count ?? 1, 'number', `min="1" max="${api.drawCountMax}" step="1"`), '每条回复固定出这么多张图。规则里写 {{出图数量}} 会换成这个数字；插件还会在规则最后加一段硬性要求，让张数更稳定。张数越多，出图越久。')}<div class="field"><span>出图块格式${help('规则里写 {{出图格式}} 会换成下面这段（回复后单独配图时，还会多一行「位置」）；{{角色列表}} 会换成已登记的角色和他们的固定外貌；{{出图数量}} 换成张数。别的插件要排除出图内容时，排除标签填 <img></img>。')}</span><pre class="code-preview" style="margin:0">${esc(api.picTagFormat)}</pre></div>`
-        : field('台词格式', textArea('format', p.format, 'class="code"'), '{译文}、{角色}、{情绪}、{文本} 各保留一次。译文供阅读，原语言供语音生成。默认格式是成对的 <tts></tts>，别的插件要排除语音原文时，排除标签填 <tts></tts>。\n\n这里的格式只管正文；手机里的语音消息和电话固定用默认格式，不跟着改。')}</div>
+        : field('台词格式', textArea('format', p.format, 'class="code"'), '{译文}、{角色}、{情绪}、{文本} 各保留一次。译文供阅读，原语言供语音生成。默认格式是成对的 <tts></tts>，别的插件要排除语音原文时，排除标签填 <tts></tts>。\n\n这里的格式只管正文；手机里的语音消息和电话固定用默认格式，不跟着改。') + marksFields(p)}</div>
         ${chat ? memoryFields(p) : ''}
         <details data-group="preset-injection"><summary>${chat ? '带进剧情的插入位置' : '默认插入设置'} ${help(chat ? '带进剧情的文字插在正文请求的哪里。深度与身份仅在聊天内插入时生效。' : '深度与身份仅在聊天内插入时生效；条目可以单独覆盖。')}</summary><div>${injection(p.injection)}</div></details>
         ${groupTitle(draw ? '出图规则' : chat ? '聊天与朋友圈规则' : '提示词条目', btn('add-entry', icon('add') + '条目', 'chip-button'))}
@@ -216,6 +227,16 @@ export function presetsApp(ctx) {
   v.on('change', '[data-field]', el => {
     if (current && (el.type === 'checkbox' || el.tagName === 'SELECT')) update(el, true);
   });
+  /** 心声怎么认 / 电话怎么认: the ticked marks and the user's own, kept on the draft. */
+  function setMarks(kind) {
+    if (!current) return;
+    const ticked = [...v.root.querySelectorAll(`[data-mark="${kind}"]`)].filter(x => x.checked).map(x => x.dataset.pair);
+    const own = (v.root.querySelector(`[data-mark-own="${kind}"]`)?.value || '').split(/[\s,，、]+/).filter(Boolean);
+    current.marks = {inner: [], phone: [], ...current.marks, [kind]: [...new Set([...ticked, ...own])]};
+    mark();
+  }
+  v.on('change', '[data-mark]', el => setMarks(el.dataset.mark));
+  v.on('input', '[data-mark-own]', el => setMarks(el.dataset.markOwn));
   function save() {
     const key = currentKind + ':' + (current.id || 'new');
     current = ops(currentKind).save(current);

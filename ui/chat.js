@@ -239,7 +239,7 @@ export function chatApp(ctx) {
       + `<div class="group pad"><div class="field"><span>聊天气泡</span>${chips('bubble', BUBBLES, p.bubble)}</div><div class="field"><span>头像挂件</span>${chips('frame', FRAMES, p.frame)}</div><div class="field"><span>聊天背景</span>${chips('background', BACKGROUNDS, p.background)}</div>
         <div class="actions" style="margin-top:0">${btn('me-bg-photo', icon('image') + (p.backgroundPhoto ? '换一张照片当背景' : '用相册里的照片当背景'), 'secondary')}${p.backgroundPhoto ? btn('me-bg-clear', '不用照片', 'text-button') : ''}</div></div>`
       + groupTitle('聊天设置')
-      + `<div class="group"><button class="list-row" data-action="me-voice">${icon('book')}<span><strong>语音消息</strong><small>转文字显示什么、要不要自动转</small></span>${icon('next')}</button><button class="list-row" data-action="me-calls">${icon('phone')}<span><strong>来电</strong><small>角色会不会自己打来、响铃多久</small></span>${icon('next')}</button><button class="list-row" data-action="me-presets">${icon('edit')}<span><strong>聊天预设</strong><small>怎么回消息、朋友圈怎么发、电话里怎么说</small></span>${icon('next')}</button></div>`);
+      + `<div class="group"><button class="list-row" data-action="me-voice">${icon('book')}<span><strong>语音消息</strong><small>转文字显示什么、要不要自动转</small></span>${icon('next')}</button><button class="list-row" data-action="me-calls">${icon('phone')}<span><strong>来电</strong><small>角色会不会自己打来、响铃多久</small></span>${icon('next')}</button><button class="list-row" data-action="me-proactive">${icon('bubble')}<span><strong>主动发消息</strong><small>${api.getState().chat.proactive?.on ? '开着' : '关着'}：角色会不会自己给你发消息</small></span>${icon('next')}</button><button class="list-row" data-action="me-presets">${icon('edit')}<span><strong>聊天预设</strong><small>怎么回消息、朋友圈怎么发、电话里怎么说</small></span>${icon('next')}</button></div>`);
   }
 
   // ---------- Thread ----------
@@ -873,6 +873,19 @@ export function chatApp(ctx) {
       try { api.saveCalls({[key]: key === 'auto' ? e.target.checked : Number(e.target.value)}); d.body.querySelector('.calls-body').innerHTML = draw(); } catch (error) { ctx.notify(error.message); }
     });
   }
+  /** 主动发消息: characters text the user from the story, and (if wanted) now and then on their own. */
+  function proactiveSheet() {
+    const o = () => api.getState().chat.proactive || {on: false, every: 0, dailyMax: 3};
+    const draw = () => `<div class="setting-row"><span>角色主动发消息${help('打开后，正文里发生了什么（刚分开、说好到家报平安、在别处想起你、有事找你……），角色会在手机上给你发消息：正文模型在回复最后写好，插件把它送进手机聊天，正文里只留一行「📱 谁给你发了消息」。这部分不用多花一次请求。\n\n怎么发、什么时候发，在预设 App 的聊天预设里改「正文里主动发消息」这条规则（用在「正文」）。')}</span><input class="switch" type="checkbox" data-field="p-on" aria-label="角色主动发消息" ${o().on ? 'checked' : ''}></div>
+      <div class="field"><span>正文里没发的话，每几条正文主动找你一次${help('0 表示只在正文里发。设成几，就每隔这么多条正文回复，让一个角色（优先是当前卡的角色）主动给你发消息，每次用文字模型请求一次。')}</span><input data-field="p-every" type="number" min="0" max="100" value="${o().every}" ${o().on ? '' : 'disabled'}></div>
+      <div class="field"><span>这样主动找你，每天最多</span><input data-field="p-dailyMax" type="number" min="1" max="20" value="${o().dailyMax}" ${o().on && o().every ? '' : 'disabled'}></div>`;
+    const d = sheet('主动发消息', `<div class="proactive-body">${draw()}</div>`, {});
+    d.body.addEventListener('change', e => {
+      const key = e.target.dataset.field?.replace(/^p-/, '');
+      if (!key) return;
+      try { api.saveChatOptions({proactive: {[key]: key === 'on' ? e.target.checked : Number(e.target.value)}}); d.body.querySelector('.proactive-body').innerHTML = draw(); render(); } catch (error) { ctx.notify(error.message); }
+    });
+  }
   /** A finished call: what was said, the voice message of a missed call, and calling back. */
   function callLog(m) {
     const name = m.from === 'me' ? thread.members[0] : m.from, who = l => l.from === 'me' ? '你' : l.from;
@@ -1106,6 +1119,7 @@ export function chatApp(ctx) {
       case 'me-bg-clear': api.saveChatOptions({profile: {backgroundPhoto: ''}}); render(); break;
       case 'me-voice': voiceTextSheet(); break;
       case 'me-calls': callsSheet(); break;
+      case 'me-proactive': proactiveSheet(); break;
       case 'avatar-pick': await avatarSheet(el.dataset.key); break;
       case 'call': await api.callDial(thread.members[0]); break;
       case 'profile-call': await api.callDial(profileOf); break;
@@ -1229,6 +1243,8 @@ export function chatApp(ctx) {
   v.refresh = () => render();
   v.onAvatars = () => render();
   v.openThread = open;
+  /** The chat on screen (null on the lists). */
+  v.showing = () => mode === 'thread' ? threadId : null;
   v.onChat = event => {
     if (mode === 'list' && tab !== 'moments') return render();
     if (mode === 'thread' && (!event.threadId || event.threadId === threadId)) return render();

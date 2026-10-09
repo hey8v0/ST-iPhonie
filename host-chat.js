@@ -2,7 +2,7 @@
 // (generateRaw): the prompt carries the chat preset, each contact's persona or character card, the user's persona,
 // recent story messages and the chat history. Nothing is written into the story unless the user brings a chat
 // into it; that text is injected once, into the next story reply.
-import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts} from './core/chat.js';
+import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneBlocks} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs} from './core/draw.js';
 import {storyLines} from './core/moments.js';
@@ -147,8 +147,86 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     }
   }
 
+  // ---------- 主动发消息 ----------
+  /** The 正文 rule for the story request while 主动发消息 is on: who can text, and how (<phone>). */
+  function storyPlan() {
+    const s = settings();
+    if (!s.chat.proactive?.on) return [];
+    const text = storyTextRule(activeChatPreset(s.chat), {user: userName(), names: backend.contacts().map(c => c.name)});
+    return text ? [{key: 'sttts.entry.phone', text, position: 1, depth: 0, role: 0}] : [];
+  }
+  const SENT_KEY = 'sttts.phoneSent', DAY_KEY = 'sttts.phoneDay';
+  const hash = text => { let h = 0; for (const c of String(text)) h = (h * 31 + c.codePointAt(0)) | 0; return (h >>> 0).toString(36); };
+  function sentBefore(key) {
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(SENT_KEY) || '[]'); } catch { /* none kept */ }
+    if (list.includes(key)) return true;
+    try { localStorage.setItem(SENT_KEY, JSON.stringify([...list, key].slice(-300))); } catch { /* this session only */ }
+    return false;
+  }
+  /** The private chat with `name` here (this card, with 分区), made when there is none yet. */
+  async function dmWith(name) {
+    const here = (await backend.threads()).find(t => t.type === 'dm' && t.members.length === 1 && t.members[0] === name);
+    return here || backend.chatMutate(null, () => backend.chats.create({type: 'dm', members: [name], space: backend.cardKey()}));
+  }
+  /** Messages that came to the phone: kept unread, said on the island, and photos drawn when that costs nothing. */
+  async function arrive(threadId, items) {
+    const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
+    const saved = await backend.chatMutate(threadId, () => settle(threadId, items));
+    const fresh = (saved?.messages || []).filter(m => !before.has(m.id) && m.from !== 'me');
+    for (const m of fresh) if (m.kind === 'photo' && m.imageTags && !m.photoId) drawPhoto(threadId, m.id).catch(() => {});
+    const last = fresh.at(-1);
+    if (last) backend.emit('chat', {threadId, incoming: {from: last.from, text: last.text || '', kind: last.kind, count: fresh.length}});
+    return fresh.length;
+  }
+  let since = 0;
+  /**
+   * A story reply finished: what it sent to the phone (<phone>) arrives, once per version of the reply; and, when
+   * `every` is set, every that many replies someone may text first (one phone request, at most dailyMax a day).
+   */
+  async function storyReplied(id) {
+    const ctx = context(), s = settings(), o = s.chat.proactive || {};
+    if (!o.on) { since = 0; return; }
+    const index = Number.isInteger(Number(id)) ? Number(id) : (ctx?.chat?.length || 0) - 1, m = ctx?.chat?.[index];
+    let sent = 0;
+    if (m && !m.is_user && !m.is_system && typeof m.mes === 'string') {
+      const blocks = phoneBlocks(m.mes);
+      const key = [ctx.getCurrentChatId?.() || ctx.chatId || '', index, hash(blocks.join('\n'))].join('|');
+      if (blocks.length && !sentBefore(key)) {
+        const contacts = backend.contacts(), people = contacts.map(c => ({name: c.name, voice: false}));
+        // A line from someone who is not in the phone (a passer-by, the user) is left out, not given to the one before.
+        const known = new Set(contacts.map(c => c.name)), named = line => line.match(/^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]/)?.[1]?.trim();
+        const kept = b => b.split(/\r?\n/).filter(line => { const who = named(line); return !who || known.has(who); }).join('\n');
+        const items = blocks.flatMap(b => parseChatReply(kept(b), {members: people, user: userName(), voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []}));
+        const byName = new Map();
+        for (const item of items) if (contacts.some(c => c.name === item.from)) byName.set(item.from, [...(byName.get(item.from) || []), item]);
+        for (const [name, list] of byName) {
+          try { const thread = await dmWith(name); const n = await arrive(thread.id, list); if (n) { sent += n; notice(`${name} 给你发来 ${n} 条消息`); } } catch { /* a failed delivery is not worth interrupting the story */ }
+        }
+      }
+    }
+    if (sent || !(o.every > 0)) { since = 0; return; }
+    if (++since < o.every) return;
+    since = 0;
+    let day = {day: new Date().toDateString(), n: 0};
+    try { const saved = JSON.parse(localStorage.getItem(DAY_KEY) || 'null'); if (saved?.day === day.day) day = saved; } catch { /* this session only */ }
+    if (day.n >= o.dailyMax) return;
+    // The card's own character first, else someone from the 角色 App.
+    const roles = backend.contacts().filter(c => c.source === 'role'), now = ctx?.name2;
+    const name = roles.find(c => c.name === now)?.name || roles[Math.floor(Math.random() * roles.length)]?.name;
+    if (!name) return;
+    try {
+      const thread = await dmWith(name), before = new Set((await backend.chats.get(thread.id))?.messages.map(x => x.id) || []);
+      const saved = await reply(thread.id);
+      const fresh = (saved?.messages || []).filter(x => !before.has(x.id) && x.from !== 'me');
+      if (fresh.length) { notice(`${name} 给你发来 ${fresh.length} 条消息`); backend.emit('chat', {threadId: thread.id, incoming: {from: name, text: fresh.at(-1).text || '', kind: fresh.at(-1).kind, count: fresh.length}}); }
+      day.n++;
+      try { localStorage.setItem(DAY_KEY, JSON.stringify(day)); } catch { /* counted for this session */ }
+    } catch { /* not worth interrupting the story */ }
+  }
+
   return {
-    reply, bring, bringPlan, drawPhoto,
+    reply, bring, bringPlan, drawPhoto, storyPlan, storyReplied,
     typing: threadId => busy.has(threadId),
     pendingBring: () => pending && {threadId: pending.threadId, name: pending.name, count: pending.count},
     cancelBring: () => { const threadId = pending?.threadId; pending = null; if (threadId) backend.emit('chat', {threadId, bring: false}); }
