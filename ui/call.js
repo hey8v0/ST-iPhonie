@@ -105,6 +105,7 @@ export function callScreen(ctx, host) {
       layer.dataset.state = c.state;
       layer.dataset.engine = engine(c.name);
       layer.innerHTML = `<div class="call-bg" aria-hidden="true">${background(c.id)}</div>
+        ${c.state !== 'ended' && api.close ? `<button type="button" class="call-mini" data-call="mini" aria-label="缩成小窗，回去看正文">${icon('down')}<span>小窗</span></button>` : ''}
         <div class="call-top"><div class="call-av${c.state === 'ringing' ? ' ringing' : ''}">${avatar(c.name, engine(c.name), talking ? 64 : 104)}</div><h2>${esc(c.name)}</h2><p class="call-status" data-call-status></p><p class="call-note" data-call-note></p></div>
         <div class="call-lines" data-call-lines aria-live="polite"></div>
         <div class="call-error" data-call-error hidden></div>
@@ -164,7 +165,7 @@ export function callScreen(ctx, host) {
     if (call.state !== 'talking') { win.clearInterval(tick); tick = 0; }
     if (call.state === 'ended') { typed = ''; hideTimer = win.setTimeout(() => update(null), 1800); }
     draw();
-    if (call.state === 'talking' && !call.thinking) layer.querySelector('[data-call-input]')?.focus({preventScroll: true});
+    if (call.state === 'talking' && !call.thinking && win.matchMedia?.('(pointer:fine)').matches) layer.querySelector('[data-call-input]')?.focus({preventScroll: true});
   }
 
   const run = task => { try { const r = task(); r?.catch?.(e => ctx.notify(e.message, {error: true})); } catch (e) { ctx.notify(e.message, {error: true}); } };
@@ -175,6 +176,7 @@ export function callScreen(ctx, host) {
     if (what === 'answer') run(() => api.callAnswer());
     if (what === 'decline' || what === 'hangup') run(() => call?.state === 'ringing' && call.dir === 'in' ? api.callDecline() : api.callHangup());
     if (what === 'retry') run(() => api.callRetry());
+    if (what === 'mini') run(() => api.close());
   });
   const replay = el => { const line = el?.closest('.cl[data-line][role=button]'); if (line) run(() => api.callReplay?.(Number(line.dataset.line))); };
   layer.addEventListener('click', e => replay(e.target));
