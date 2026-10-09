@@ -114,25 +114,48 @@
 #chat [data-sttts-action="sound"]:focus-visible{outline:2px solid color-mix(in srgb,var(--sttts-body) 60%,transparent);outline-offset:1px}
 /* 主动发消息: where a story reply sent messages to the phone (the messages themselves are only on the phone). */
 .sttts-phone-note{display:inline-flex;align-items:center;gap:4px;margin:4px 0;padding:3px 10px;border-radius:999px;font-size:.85em;opacity:.75;background:color-mix(in srgb,currentColor 10%,transparent)}
-/* 通话小窗 (call-island.js): a call going on while the phone is away, as a dynamic island over the story. */
-.sttts-call-island{position:fixed;z-index:31000;display:flex;align-items:center;gap:10px;min-width:200px;max-width:min(360px,calc(100vw - 16px));padding:8px 8px 8px 9px;border-radius:30px;background:#000;color:#fff;box-shadow:0 10px 30px -8px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.08);font:13px/1.35 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;animation:sttts-ci-in .45s cubic-bezier(.34,1.3,.64,1)}
+/* 通话小窗 (call-island.js): a call going on while the phone is away, as a dynamic island over the story — a pill
+   while it rings, a small card while talking (the lines so far, and a box to answer from). Dragged by its top. */
+.sttts-call-island{position:fixed;z-index:31000;display:flex;flex-direction:column;gap:8px;width:min(320px,calc(100vw - 16px));padding:8px;border-radius:30px;background:#000;color:#fff;box-shadow:0 10px 30px -8px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.08);font:13px/1.4 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;animation:sttts-ci-in .45s cubic-bezier(.34,1.3,.64,1)}
+.sttts-call-island[data-kind=talking]{border-radius:26px;padding-bottom:10px}
 .sttts-call-island[hidden]{display:none}
-.sttts-call-island[data-dragging]{cursor:grabbing;transition:none;box-shadow:0 18px 40px -10px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.12)}
-.sttts-call-island:focus-visible{outline:2px solid #7cc4ff;outline-offset:2px}
+.sttts-call-island[data-dragging]{box-shadow:0 18px 40px -10px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.12)}
+.sttts-call-island .ci-head{display:flex;align-items:center;gap:10px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+.sttts-call-island[data-dragging] .ci-head{cursor:grabbing}
 .sttts-call-island .ci-av{flex-shrink:0;width:36px;height:36px;border-radius:50%;overflow:hidden;display:grid;place-items:center;background:linear-gradient(135deg,#4a93ea,#7d80f2);font-weight:800;font-size:15px}
 .sttts-call-island .ci-av img{width:100%;height:100%;object-fit:cover}
 .sttts-call-island .ci-text{flex:1;min-width:0;display:grid}
 .sttts-call-island .ci-text b{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sttts-call-island .ci-text small{font-size:11.5px;color:#34c759;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sttts-call-island .ci-text em{font-style:normal;font-size:11.5px;color:rgba(255,255,255,.72);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sttts-call-island .ci-wave{display:flex;align-items:center;gap:2px;height:16px;color:#34c759;opacity:.35}
 .sttts-call-island .ci-wave i{display:block;width:3px;height:6px;border-radius:2px;background:currentColor}
 .sttts-call-island .ci-wave.on{opacity:1}
 .sttts-call-island .ci-wave.on i{animation:sttts-ci-wave .8s ease-in-out infinite}
 .sttts-call-island .ci-wave.on i:nth-child(2){animation-delay:-.25s}.sttts-call-island .ci-wave.on i:nth-child(3){animation-delay:-.5s}.sttts-call-island .ci-wave.on i:nth-child(4){animation-delay:-.1s}
-.sttts-call-island .ci-end{all:unset;flex-shrink:0;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#ff3b30;color:#fff;cursor:pointer}
+.sttts-call-island button{all:unset;box-sizing:border-box;cursor:pointer}
+.sttts-call-island .ci-end{flex-shrink:0;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#ff3b30;color:#fff}
 .sttts-call-island .ci-end svg{width:20px;height:20px}
-.sttts-call-island .ci-end:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.sttts-call-island button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.sttts-call-island .ci-lines{max-height:min(150px,28vh);overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;display:flex;flex-direction:column;gap:5px;padding:2px 4px;scrollbar-width:none;-webkit-mask-image:linear-gradient(transparent,#000 14px);mask-image:linear-gradient(transparent,#000 14px)}
+.sttts-call-island .ci-lines::-webkit-scrollbar{display:none}
+.sttts-call-island .ci-lines p{margin:0;align-self:flex-start;max-width:90%;padding:5px 10px;border-radius:14px 14px 14px 4px;background:rgba(255,255,255,.12);font-size:12.5px;line-height:1.45;user-select:text;-webkit-user-select:text}
+.sttts-call-island .ci-lines p.me{align-self:flex-end;border-radius:14px 14px 4px 14px;background:#0a84ff}
+.sttts-call-island .ci-lines p[data-heard]{position:relative;padding-left:20px}
+.sttts-call-island .ci-dot{position:absolute;left:8px;top:11px;width:6px;height:6px;border-radius:50%;background:#34c759}
+.sttts-call-island .ci-lines p[data-heard=pending]{opacity:.6}
+.sttts-call-island .ci-lines p[data-heard=pending] .ci-dot{background:rgba(255,255,255,.4)}
+.sttts-call-island .ci-lines p[data-heard=generating] .ci-dot{animation:sttts-ci-blink 1s ease-in-out infinite}
+.sttts-call-island .ci-lines p[data-heard=playing]{background:rgba(52,199,89,.25);box-shadow:inset 0 0 0 1px rgba(52,199,89,.6)}
+.sttts-call-island .ci-lines p[data-heard=playing] .ci-dot{animation:sttts-ci-blink .6s ease-in-out infinite}
+.sttts-call-island .ci-lines p[data-heard=played] .ci-dot{background:rgba(255,255,255,.45)}
+.sttts-call-island .ci-say{display:flex;gap:6px;align-items:center}
+.sttts-call-island .ci-say input{flex:1;min-width:0;height:36px;padding:0 14px;border:0;border-radius:18px;background:rgba(255,255,255,.14);color:#fff;font:inherit;font-size:14px;outline:none}
+.sttts-call-island .ci-say input::placeholder{color:rgba(255,255,255,.5)}
+.sttts-call-island .ci-send{flex-shrink:0;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#0a84ff;color:#fff}
+.sttts-call-island .ci-send.ask{background:#34c759}
+.sttts-call-island .ci-send:disabled{opacity:.4;cursor:default}
+.sttts-call-island .ci-send svg{width:18px;height:18px}
 @keyframes sttts-ci-wave{0%,100%{height:5px}50%{height:15px}}
+@keyframes sttts-ci-blink{50%{opacity:.3}}
 @keyframes sttts-ci-in{from{transform:var(--ci-from,translateX(-50%)) scale(.6);opacity:0}}
-@media (prefers-reduced-motion:reduce){.sttts-call-island,.sttts-call-island .ci-wave.on i{animation:none}}
+@media (prefers-reduced-motion:reduce){.sttts-call-island,.sttts-call-island .ci-wave.on i,.sttts-call-island .ci-dot{animation:none!important}}

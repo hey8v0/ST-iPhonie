@@ -49,7 +49,7 @@ export function createCallHost({context, settings, backend, notice, ringing = ()
     const id = c.id;
     playing = lines;
     c.speaking = true; emit();
-    try { await backend.player.start(lines.map(l => ({role: c.name, emotion: l.emotion, text: l.text, translation: l.translation, effect: 'phone'})), () => live(id)); } catch { /* the words are on screen */ }
+    try { await backend.player.start(lines.map(l => ({role: c.name, emotion: l.emotion, text: l.text, translation: l.translation, effect: 'phone'})), () => live(id), null, {ahead: true}); } catch { /* the words are on screen */ }
     // Read to the end (not stopped): every line was heard.
     if (playing === lines && /^播放完成/.test(backend.player.snapshot?.().message || '') && live(id)) for (const l of lines) l.heard = 'played';
     if (playing === lines) playing = null;

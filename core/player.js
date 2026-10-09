@@ -181,6 +181,7 @@ export class DialoguePlayer {
  }
  stop(message = '已停止') {
   this.epoch++;
+  this.ahead = null;
   this.controller?.abort();
   this.controller = null;
   this.sink.stop();
@@ -195,9 +196,11 @@ export class DialoguePlayer {
   this.clearMetadata();
   this.emit('idle', message);
  }
- start(lines, valid = () => true, settingsOverride = null) {
+ /** ahead: while a line plays, the next one is already being made (a call: no pause between its sentences). */
+ start(lines, valid = () => true, settingsOverride = null, {ahead = false} = {}) {
   this.stop();
   this.settingsOverride = settingsOverride;
+  this.lookahead = ahead;
   if (!lines.length) return;
   this.valid = valid;
   this.queue = lines.map(copyLine);
@@ -218,6 +221,34 @@ export class DialoguePlayer {
   if (!this.canContinue(epoch)) return false;
   if (this.phase === 'paused') await new Promise(resolve => { this.wake = resolve; });
   return this.canContinue(epoch);
+ }
+ /** A line's audio: from the cache, or made and kept. found(fromCache, key) is told before any making starts. */
+ async make(line, route, s, signal, found = () => {}, still = () => !signal.aborted) {
+  const effective = { ...structuredClone(route), language: route.language || s.general.defaultLanguage, model: route.model || s.connections[route.engine].model };
+  const request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
+  const key = await requestHash(request);
+  if (!still()) return null;
+  const cacheEpoch = this.cache.epoch;
+  let blob = s.general.cacheEnabled ? await this.cache.get(key) : null;
+  if (!still()) return null;
+  const fromCache = !!blob;
+  found(fromCache, key);
+  if (!blob) {
+   blob = await this.providers.synthesize(request, signal);
+   if (!still()) return null;
+   if (this.settings().general.cacheEnabled) await this.cache.put(key, blob, cacheEpoch, {
+    line: copyLine(line), route: { name: effective.name, engine: effective.engine, model: effective.model, voice: effective.voice }, requestKey: key
+   });
+  }
+  return { key, blob, fromCache, effective, request };
+ }
+ /** Starts making the line at `index` now (one ahead of the one about to play); null when there is nothing to make. */
+ makeAhead(index, signal) {
+  const line = this.queue[index], s = this.settingsOverride || this.settings(), route = line && s.routes.find(r => r.name === line.role);
+  if (!route?.voice?.trim() && !(route?.engine === 'fish' && s.connections.fish.params.references.length) && !(route?.engine === 'mini' && s.connections.mini.params.timbre_weights.length)) return null;
+  const made = this.make(line, route, s, signal, () => {}, () => !signal.aborted && this.valid());
+  made.catch(() => {});
+  return { index, made };
  }
  async run(epoch) {
   const signal = this.controller.signal;
@@ -244,25 +275,20 @@ export class DialoguePlayer {
      return;
     }
     this.pending = null;
-    const effective = { ...structuredClone(route), language: route.language || s.general.defaultLanguage, model: route.model || s.connections[route.engine].model };
-    const request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
-    const key = await requestHash(request);
+    // Made while the line before played (ahead): ready now. A failed one is tried again here, where its error shows.
+    const early = this.ahead?.index === this.index ? await this.ahead.made.catch(() => null) : null;
+    this.ahead = null;
     if (!this.canContinue(epoch)) return;
-    this.requestKey = key;
-    const cacheEpoch = this.cache.epoch;
-    let blob = s.general.cacheEnabled ? await this.cache.get(key) : null;
-    if (!this.canContinue(epoch)) return;
-    const fromCache = !!blob;
-    this.emit(this.phase === 'paused' ? 'paused' : 'generating', (fromCache ? '读取缓存 · ' : '正在生成 · ') + line.role);
-    if (!blob) {
-     blob = await this.providers.synthesize(request, signal);
+    const made = early || await this.make(line, route, s, signal, (fromCache, key) => {
      if (!this.canContinue(epoch)) return;
-     if (this.settings().general.cacheEnabled) await this.cache.put(key, blob, cacheEpoch, {
-      line: copyLine(line), route: { name: effective.name, engine: effective.engine, model: effective.model, voice: effective.voice }, requestKey: key
-     });
-    }
-    if (!this.canContinue(epoch)) return;
+     this.requestKey = key;
+     this.emit(this.phase === 'paused' ? 'paused' : 'generating', (fromCache ? '读取缓存 · ' : '正在生成 · ') + line.role);
+    }, () => this.canContinue(epoch));
+    if (!made || !this.canContinue(epoch)) return;
+    const { key, blob, fromCache, effective, request } = made;
+    this.requestKey = key;
     await this.prepared({ key, blob, line: copyLine(line), route: structuredClone(effective), request: structuredClone(request), fromCache });
+    if (this.lookahead) this.ahead = this.makeAhead(this.index + 1, signal);
     if (!await this.waitForResume(epoch)) return;
     this.emit('playing', '正在播放 · ' + line.role + (fromCache ? ' · 缓存' : ''));
     await this.sink.play(blob, signal, { effect: lineEffect(line) });
