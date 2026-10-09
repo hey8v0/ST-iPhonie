@@ -4,7 +4,7 @@
 import {esc, avatar} from './common.js';
 import {icon} from './icons.js';
 import {motionLayer} from './wallpapers.js';
-import {bloom, islandIn} from './carry.js';
+import {bloom, islandIn, nudge} from './carry.js';
 
 // The moving background of the call screen: the phone skin's own wallpaper scene (day / night), laid out at random for
 // each call like the home screen's moving wallpaper, instead of a repeating pattern.
@@ -62,6 +62,74 @@ export function callScreen(ctx, host) {
   layer.setAttribute('aria-label', '语音通话');
   host.append(layer);
   const tone = ringtone(win, () => api.getVolume?.() ?? 1);
+  // 悬浮球: the call shrunk to a ball over the phone, to go on using the apps (the forum, the chat…) while talking. It
+  // shows how long the call has run and breathes while they speak; dragged anywhere, it settles against the nearer
+  // side; a tap brings the call back.
+  const ball = doc.createElement('button');
+  ball.type = 'button';
+  ball.className = 'call-ball';
+  ball.hidden = true;
+  ball.innerHTML = `<span class="cb-icon">${icon('phone', true)}</span><span class="cb-time" data-ball-time></span>`;
+  host.append(ball);
+  let mini = false, ballAt = {side: 'right', y: 0.3}, ballTick = 0;
+  function placeBall() {
+    const H = host.clientHeight || 600, W = host.clientWidth || 360, size = ball.offsetWidth || 64;
+    ball.style.top = Math.min(H - size - 40, Math.max(44, ballAt.y * H)) + 'px';
+    ball.style.left = ballAt.side === 'left' ? '10px' : (W - size - 10) + 'px';
+  }
+  function paintBall() {
+    const c = call;
+    ball.querySelector('[data-ball-time]').textContent = c?.answeredAt ? clock((Date.now() - c.answeredAt) / 1000) : '';
+    ball.classList.toggle('speaking', !!c?.speaking);
+    ball.classList.toggle('thinking', !!c?.thinking);
+    ball.setAttribute('aria-label', `和${c?.name || ''}通话中${c?.speaking ? '，TA 正在说' : c?.thinking ? '，TA 在想' : ''}。点一下回到通话`);
+  }
+  function toBall() {
+    if (call?.state !== 'talking') return;
+    mini = true;
+    layer.hidden = true;
+    ball.hidden = false;
+    placeBall(); paintBall();
+    win.clearInterval(ballTick); ballTick = win.setInterval(paintBall, 1000);
+    nudge(win, ball, [{transform: 'scale(.3)', opacity: 0}, {transform: 'scale(1)', opacity: 1}], {duration: 380, easing: 'bounce'});
+  }
+  function fromBall() {
+    mini = false;
+    ball.hidden = true;
+    win.clearInterval(ballTick); ballTick = 0;
+    if (call) update(call);
+  }
+  let ballDrag = null, ballMoved = 0;
+  ball.addEventListener('pointerdown', e => {
+    if (e.button > 0) return;
+    const r = ball.getBoundingClientRect();
+    ballDrag = {id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top, x0: e.clientX, y0: e.clientY, live: false};
+    try { ball.setPointerCapture(e.pointerId); } catch { /* a pointer the browser no longer tracks */ }
+  });
+  ball.addEventListener('pointermove', e => {
+    if (!ballDrag || e.pointerId !== ballDrag.id) return;
+    if (!ballDrag.live && Math.hypot(e.clientX - ballDrag.x0, e.clientY - ballDrag.y0) < 6) return;
+    ballDrag.live = true;
+    ball.dataset.dragging = '';
+    const box = host.getBoundingClientRect(), k = box.width / (host.clientWidth || box.width || 1);
+    ball.style.left = (e.clientX - box.left - ballDrag.dx) / k + 'px';
+    ball.style.top = (e.clientY - box.top - ballDrag.dy) / k + 'px';
+  });
+  const ballDrop = e => {
+    if (!ballDrag || e.pointerId !== ballDrag.id) return;
+    const was = ballDrag.live;
+    ballDrag = null;
+    delete ball.dataset.dragging;
+    if (!was) return;
+    ballMoved = Date.now();
+    // Settles against the nearer side, like a phone's call bubble.
+    const W = host.clientWidth || 360, H = host.clientHeight || 600, left = parseFloat(ball.style.left) || 0, top = parseFloat(ball.style.top) || 0;
+    ballAt = {side: left + (ball.offsetWidth || 64) / 2 < W / 2 ? 'left' : 'right', y: top / H};
+    placeBall();
+  };
+  ball.addEventListener('pointerup', ballDrop);
+  ball.addEventListener('pointercancel', ballDrop);
+  ball.addEventListener('click', () => { if (Date.now() - ballMoved > 300) fromBall(); });
   let call = null, tick = 0, hideTimer = 0, drawnKey = '', typed = '';
 
   const engine = name => ctx.engineOf?.(name) || 'none';
@@ -105,7 +173,7 @@ export function callScreen(ctx, host) {
       layer.dataset.state = c.state;
       layer.dataset.engine = engine(c.name);
       layer.innerHTML = `<div class="call-bg" aria-hidden="true">${background(c.id)}</div>
-        ${c.state !== 'ended' && api.close ? `<button type="button" class="call-mini" data-call="mini" aria-label="缩成小窗，回去看正文">${icon('down')}<span>小窗</span></button>` : ''}
+        ${talking ? `<button type="button" class="call-mini" data-call="ball" aria-label="缩成悬浮球，接着用小手机">${icon('down')}<span>小窗</span></button>` : ''}${c.state !== 'ended' && api.close ? `<button type="button" class="call-mini story" data-call="mini" aria-label="收起小手机，回去看正文（通话在酒馆页面的小窗里继续）">${icon('book')}<span>看正文</span></button>` : ''}
         <div class="call-top"><div class="call-av${c.state === 'ringing' ? ' ringing' : ''}">${avatar(c.name, engine(c.name), talking ? 64 : 104)}</div><h2>${esc(c.name)}</h2><p class="call-status" data-call-status></p><p class="call-note" data-call-note></p></div>
         <div class="call-lines" data-call-lines aria-live="polite"></div>
         <div class="call-error" data-call-error hidden></div>
@@ -146,6 +214,10 @@ export function callScreen(ctx, host) {
   function update(next) {
     win.clearTimeout(hideTimer);
     call = next || null;
+    if (mini) {
+      if (call?.state === 'talking') { tone.stop(); paintBall(); return; }
+      mini = false; ball.hidden = true; win.clearInterval(ballTick); ballTick = 0;
+    }
     if (!call) {
       tone.stop(); drawnKey = ''; win.clearInterval(tick); tick = 0;
       if (layer.hidden) return;
@@ -177,6 +249,7 @@ export function callScreen(ctx, host) {
     if (what === 'decline' || what === 'hangup') run(() => call?.state === 'ringing' && call.dir === 'in' ? api.callDecline() : api.callHangup());
     if (what === 'retry') run(() => api.callRetry());
     if (what === 'mini') run(() => api.close());
+    if (what === 'ball') toBall();
   });
   const replay = el => { const line = el?.closest('.cl[data-line][role=button]'); if (line) run(() => api.callReplay?.(Number(line.dataset.line))); };
   layer.addEventListener('click', e => replay(e.target));
@@ -194,6 +267,7 @@ export function callScreen(ctx, host) {
   return {
     update,
     get active() { return !!call && call.state !== 'ended'; },
-    dispose() { tone.stop(); win.clearInterval(tick); win.clearTimeout(hideTimer); layer.remove(); }
+    get mini() { return mini; },
+    dispose() { tone.stop(); win.clearInterval(tick); win.clearTimeout(hideTimer); layer.remove(); win.clearInterval(ballTick); ball.remove(); }
   };
 }

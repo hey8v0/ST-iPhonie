@@ -1115,6 +1115,18 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 /* 小窗: shrink the call to the island on the tavern page, to read the story while it goes on. */
 .call-mini{position:absolute;top:calc(env(safe-area-inset-top,0px) + 48px);left:16px;z-index:2;display:flex;align-items:center;gap:4px;padding:7px 12px 7px 9px;border-radius:999px;font-size:13px;font-weight:800;color:var(--ink);background:color-mix(in srgb,var(--card) 60%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
 .call-mini svg{width:18px;height:18px}
+.call-mini.story{left:auto;right:16px}
+/* 悬浮球: the call as a ball over the apps; it breathes while they speak. */
+.call-ball{position:absolute;z-index:66;width:64px;height:64px;border-radius:50%;display:grid;place-items:center;align-content:center;gap:1px;padding:0;color:#fff;background:linear-gradient(160deg,#3ad46f,#1fa94f);box-shadow:0 10px 24px -8px rgba(0,0,0,.45),inset 0 0 0 1.5px rgba(255,255,255,.35);cursor:grab;touch-action:none;transition:left .32s var(--spring-soft),top .32s var(--spring-soft)}
+.call-ball[hidden]{display:none}
+.call-ball[data-dragging]{transition:none;cursor:grabbing;transform:scale(1.06)}
+.call-ball .cb-icon svg{width:22px;height:22px}
+.call-ball .cb-time{font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+.call-ball.speaking{animation:cb-breathe 1.4s ease-in-out infinite}
+.call-ball.thinking .cb-icon{animation:cb-think 1s ease-in-out infinite}
+@keyframes cb-breathe{0%,100%{box-shadow:0 10px 24px -8px rgba(0,0,0,.45),0 0 0 0 rgba(58,212,111,.55),inset 0 0 0 1.5px rgba(255,255,255,.35)}50%{box-shadow:0 10px 24px -8px rgba(0,0,0,.45),0 0 0 10px rgba(58,212,111,0),inset 0 0 0 1.5px rgba(255,255,255,.35)}}
+@keyframes cb-think{50%{opacity:.4}}
+@media (prefers-reduced-motion:reduce){.call-ball,.call-ball .cb-icon{animation:none!important;transition:none}}
 .call-top h2{margin:10px 0 0;font-size:26px;font-weight:900;color:var(--ink)}
 .call-status{margin:0;font-size:15px;font-weight:700;color:var(--ink2);font-variant-numeric:tabular-nums}
 .call-note{margin:0;min-height:18px;font-size:12px;color:var(--ink2)}
