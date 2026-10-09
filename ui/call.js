@@ -78,10 +78,14 @@ export function callScreen(ctx, host) {
     if (c.lines.at(-1)?.from === 'me') return `说完了点右边的气泡，${c.name} 才会回`;
     return c.voiced ? '轮到你了，打字说话' : `${c.name} 还没有配音，只显示字幕`;
   }
+  // The contact's lines carry a small wave, like the story's: not played yet, being made, playing, played. A line
+  // already heard plays again on a tap (not while the contact is thinking or speaking).
+  const HEARD = {pending: '还没播', generating: '正在生成', playing: '正在播放', played: '播过了，点一下再听'};
   function linesHTML(c) {
-    return c.lines.slice(-8).map(l => l.from === 'me'
+    const shown = c.lines.slice(-8), from = c.lines.length - shown.length, free = c.state === 'talking' && !c.thinking && !c.speaking;
+    return shown.map((l, i) => l.from === 'me'
       ? `<p class="cl me">${esc(l.text)}</p>`
-      : `<p class="cl"><span>${esc(l.translation || l.text)}</span>${l.text && l.translation && l.text !== l.translation ? `<small>${esc(l.text)}</small>` : ''}</p>`).join('');
+      : `<p class="cl"${l.heard ? ` data-heard="${l.heard}" data-line="${from + i}"${free ? ' role="button" tabindex="0"' : ''} aria-label="${esc(HEARD[l.heard] || '')}：${esc(l.translation || l.text)}"` : ''}>${l.heard ? `<i class="cl-wave" aria-hidden="true"><b></b><b></b><b></b><b></b></i>` : ''}<span>${esc(l.translation || l.text)}</span>${l.text && l.translation && l.text !== l.translation ? `<small>${esc(l.text)}</small>` : ''}</p>`).join('');
   }
   // One layout per call (and per look), so answering does not reshuffle it.
   let backdrop = {key: '', html: ''};
@@ -172,6 +176,9 @@ export function callScreen(ctx, host) {
     if (what === 'decline' || what === 'hangup') run(() => call?.state === 'ringing' && call.dir === 'in' ? api.callDecline() : api.callHangup());
     if (what === 'retry') run(() => api.callRetry());
   });
+  const replay = el => { const line = el?.closest('.cl[data-line][role=button]'); if (line) run(() => api.callReplay?.(Number(line.dataset.line))); };
+  layer.addEventListener('click', e => replay(e.target));
+  layer.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('.cl[data-line]')) { e.preventDefault(); replay(e.target); } });
   layer.addEventListener('submit', e => {
     e.preventDefault();
     const input = layer.querySelector('[data-call-input]'), words = input?.value.trim();

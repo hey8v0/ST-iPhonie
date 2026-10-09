@@ -1127,6 +1127,24 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .cl{align-self:flex-start;max-width:88%;margin:0;padding:9px 13px;border-radius:18px 18px 18px 6px;background:color-mix(in srgb,var(--card) 72%,transparent);color:var(--ink);font-size:15px;line-height:1.5;box-shadow:0 6px 16px -10px #0005;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);animation:cl-in .32s cubic-bezier(.2,.9,.3,1.2)}
 @keyframes cl-in{from{opacity:0;transform:translateY(8px) scale(.96)}}
 .cl small{display:block;margin-top:3px;font-size:12px;color:var(--ink2)}
+/* A call line's wave, in the story's four states. */
+.cl[data-heard]{position:relative;padding-left:34px;transition:box-shadow .2s,background-color .2s}
+.cl[data-heard][role=button]{cursor:pointer}
+.cl-wave{position:absolute;left:12px;top:12px;display:flex;align-items:center;gap:2px;height:14px;color:var(--accent)}
+.cl-wave b{display:block;width:2.5px;height:7px;border-radius:2px;background:currentColor}
+.cl-wave b:nth-child(2){height:12px}.cl-wave b:nth-child(3){height:14px}.cl-wave b:nth-child(4){height:9px}
+.cl[data-heard=pending] .cl-wave{opacity:.4}
+.cl[data-heard=pending]>span{opacity:.75}
+.cl[data-heard=generating] .cl-wave b{animation:cl-think 1s ease-in-out infinite}
+.cl[data-heard=generating] .cl-wave b:nth-child(2n){animation-delay:-.5s}
+.cl[data-heard=playing]{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent),0 6px 16px -10px #0005;background:color-mix(in srgb,var(--accent) 16%,var(--card))}
+.cl[data-heard=playing] .cl-wave b{animation:cl-play .7s ease-in-out infinite}
+.cl[data-heard=playing] .cl-wave b:nth-child(2){animation-delay:-.2s}.cl[data-heard=playing] .cl-wave b:nth-child(3){animation-delay:-.45s}.cl[data-heard=playing] .cl-wave b:nth-child(4){animation-delay:-.1s}
+.cl[data-heard=played] .cl-wave{color:var(--ink2)}
+.cl[data-heard=played] .cl-wave:after{content:"";position:absolute;left:0;right:0;bottom:-4px;height:2px;border-radius:1px;background:currentColor;opacity:.6}
+@keyframes cl-think{50%{transform:scaleY(.45)}}
+@keyframes cl-play{0%,100%{transform:scaleY(.5)}50%{transform:scaleY(1.15)}}
+@media (prefers-reduced-motion:reduce){.cl-wave b{animation:none!important}}
 .cl.me{align-self:flex-end;border-radius:18px 18px 6px 18px;background:var(--accent-btn);color:var(--on-accent)}
 .call-error{display:flex;align-items:center;gap:8px;width:100%;margin-bottom:8px;padding:8px 12px;border-radius:14px;background:var(--danger-soft);color:var(--danger);font-size:13px}
 .call-error[hidden]{display:none}
