@@ -844,7 +844,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
 
   // ---------- Host hooks ----------
-  const previousOpenRole = win.stTtsOpenRole, previousVisibility = win.stTtsPanelVisibility, previousOpenDraw = win.stTtsOpenDraw;
+  const previousOpenRole = win.stTtsOpenRole, previousVisibility = win.stTtsPanelVisibility, previousOpenDraw = win.stTtsOpenDraw, previousOpenThread = win.stTtsOpenThread;
   win.stTtsOpenRole = id => open('roles', id);
   function takeDraw() {
     const request = api.takeDraw?.();
@@ -854,11 +854,21 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     return true;
   }
   win.stTtsOpenDraw = () => run(takeDraw);
+  /** The chat a message card on the tavern page was double-tapped for (msg-island.js). */
+  function takeThread() {
+    const id = api.takeThread?.();
+    if (!id) return false;
+    open('chat');
+    views.get('chat')?.openThread?.(id);
+    return true;
+  }
+  win.stTtsOpenThread = () => run(takeThread);
   win.stTtsPanelVisibility = visible => {
     panelVisible = visible;
     if (visible) { callState(); run(refreshAvatars); floatingBar(); }
     if (!visible) sheet?.close(null);
     else if (takeDraw()) { /* opened from a chat picture */ }
+    else if (takeThread()) { /* opened from a message card */ }
     else if (preferences?.lockOnOpen && !api.pendingRole()) lock();
     animate();
   };
@@ -884,6 +894,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     win.stTtsOpenRole = previousOpenRole;
     win.stTtsPanelVisibility = previousVisibility;
     win.stTtsOpenDraw = previousOpenDraw;
+    win.stTtsOpenThread = previousOpenThread;
   }
   win.addEventListener('pagehide', dispose, {signal});
   today = todayPage({doc, win, api, open, confirm, dialog, notify, signal, engineOf, appIcon, playback: () => playback, battery: () => batteryState(battery),

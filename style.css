@@ -159,3 +159,8 @@
 @keyframes sttts-ci-blink{50%{opacity:.3}}
 @keyframes sttts-ci-in{from{transform:var(--ci-from,translateX(-50%)) scale(.6);opacity:0}}
 @media (prefers-reduced-motion:reduce){.sttts-call-island,.sttts-call-island .ci-wave.on i,.sttts-call-island .ci-dot{animation:none!important}}
+/* 消息小窗 (msg-island.js): the call island's look, for a message that came while the phone was away. */
+.sttts-call-island .ci-close{background:rgba(255,255,255,.16)}
+.sttts-call-island .ci-close svg{width:16px;height:16px}
+.sttts-msg-island .ci-text small{color:rgba(255,255,255,.6)}
+.sttts-msg-island .mi-from{font-weight:800;color:#64d2ff}
