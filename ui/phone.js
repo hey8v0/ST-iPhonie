@@ -17,7 +17,8 @@ import {soundsApp} from './sounds.js';
 import {momentsNew, momentsSeen} from './moments.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
-import {grow, launch, nudge, within, visible, islandIn} from './carry.js';
+import {grow, launch, nudge, within, visible, islandIn, moving} from './carry.js';
+import {todayPage} from './today.js';
 
 // App factories, keyed by the ids in apps.js.
 const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp};
@@ -45,6 +46,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const doc = win.document;
   const controller = new win.AbortController(), signal = controller.signal;
   const views = new Map(), assets = new Map();
+  let today = null;
   const media = win.matchMedia('(prefers-color-scheme: dark)'), motion = win.matchMedia('(prefers-reduced-motion: reduce)');
   let panelVisible = true, active = null, locked = false, sheet = null, disposed = false;
   let lastPhase = '', preferences = null, appearanceKey = '', appearanceEpoch = 0, toastTimer, animation, openTimer, unread = 0, unreadTimer, fresh = 0, freshTimer;
@@ -61,7 +63,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
           <button class="pull-tab" data-system="control" aria-label="打开控制中心，也可以从屏幕顶端往下拉"></button><span class="safe-probe" aria-hidden="true"></span>
           <button class="island" data-system="island" aria-label="打开听取"><span class="island-avatar"></span><span class="island-title"></span><span class="island-wave" hidden>${wave}</span><span class="camera"></span></button>
           <div class="island-card" role="dialog" aria-label="正在播放" hidden><div class="ic-head"><span class="ic-avatar"></span><div><strong data-playing-speaker></strong><small data-playing-message></small></div><span class="island-wave ic-wave">${wave}</span></div><div class="ic-actions"><button data-system="toggle" aria-label="暂停或继续"></button><button data-system="stop" aria-label="停止播放">${icon('stop', true)}</button><button class="ic-open" data-app="listen">打开听取</button></div></div>
-          <main class="home">
+          <main class="home"><div class="today-veil" aria-hidden="true"></div>
             <button class="home-close" data-system="close" aria-label="返回酒馆">${icon('close')}</button>
             <div class="home-pages"></div>
             <div class="dots" aria-hidden="true"></div>
@@ -268,8 +270,9 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     active = null;
     home.hidden = false;
     screen.dataset.view = 'home';
+    placeHome();
     syncInert();
-    if (!leaving) { frame.hidden = true; return; }
+    if (!leaving) { frame.hidden = true; today?.leave(); const pagesEl = $('.home-pages'); pagesEl.scrollTo({left: pagesEl.clientWidth, behavior: moving(win) ? 'smooth' : 'auto'}); return; }
     // Back into what it came out of, or its own icon on the page showing; else it sinks away in the middle.
     const target = [openedFrom, iconOf(leaving)].find(el => el?.isConnected && visible(within(el, frame)));
     const shrink = target ? launch(win, screen, frame, appWindow, target, {back: true, home, ...(was || {})}) : null;
@@ -287,6 +290,15 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     carrying = [sink, back];
     sink.finished.then(() => { if (carrying[0] !== sink) return; if (!active) frame.hidden = true; sink.cancel(); delete screen.dataset.carrying; carrying = []; }, () => {});
   }
+  /** The first app page shows first, the first time the home screen can be seen (not while an app hides it); 今天 is a swipe to the right. */
+  let placed = false;
+  function placeHome() { const el = $('.home-pages'); if (placed || !today || home.hidden || !el.clientWidth) return; el.scrollLeft = el.clientWidth; placed = true; }
+  // The phone may open hidden (a closed panel): placed when it first has a size.
+  if (win.ResizeObserver) { const watch = new win.ResizeObserver(() => { placeHome(); if (placed) watch.disconnect(); }); watch.observe($('.home-pages')); signal.addEventListener('abort', () => watch.disconnect()); }
+  /** The app page showing (0: the first), 今天 not counted; -1 on 今天. */
+  function pageNow() { const el = $('.home-pages'); return Math.round(el.scrollLeft / (el.clientWidth || 1)) - (today ? 1 : 0); }
+  let todayTimer = 0;
+  function todayLater() { win.clearTimeout(todayTimer); todayTimer = win.setTimeout(() => run(() => today?.refresh()), 300); }
   // Icons and widgets come in one after another when the home screen appears (not when a badge redraws it).
   let homeTimer = 0;
   function homeIn() {
@@ -327,11 +339,14 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
 
   // ---------- Clock and theme ----------
+  let lastClock = '';
   function clock() {
     const now = new Date();
     const time = now.toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit', hour12: false});
     const date = now.toLocaleDateString('zh-CN', {month: 'long', day: 'numeric', weekday: 'long'});
     for (const el of mount.querySelectorAll('[data-clock]')) el.textContent = el.dataset.clock === 'date' ? date : time;
+    // The 今天 clock and calendar move on with the minute.
+    if (time !== lastClock) { lastClock = time; today?.paint(['clock', 'calendar']); }
   }
   const isDark = () => doc.documentElement.dataset.theme === 'dark';
   function applyThemeMode() {
@@ -360,8 +375,13 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const pages = shown.map((ids, index) => `<div class="home-page">${index === 0
       ? `<div class="clock-block"><p class="home-date" data-clock="date"></p><p class="home-clock" data-clock="large"></p></div><div class="widgets"><button class="widget live-wave" data-system="island" data-widget="playing"></button><div class="widget" data-widget="cast"></div></div>`
       : ''}<div class="apps-grid">${ids.map(appIcon).join('')}</div></div>`).join('');
-    $('.home-pages').innerHTML = pages;
-    $('.dots').innerHTML = shown.length > 1 ? shown.map((_, i) => `<i${i === 0 ? ' data-on' : ''}></i>`).join('') : '';
+    // 今天 (ui/today.js) stays first and is not drawn again; the app pages after it are.
+    const pagesEl = $('.home-pages'), made = doc.createElement('template');
+    made.innerHTML = pages;
+    pagesEl.replaceChildren(...(today ? [today.root] : []), ...made.content.children);
+    placeHome();
+    $('.dots').innerHTML = shown.length > 1 ? shown.map((_, i) => `<i${i === pageNow() ? ' data-on' : ''}></i>`).join('') : '';
+    today?.paint();
     $('.phone-dock').innerHTML = HOME.dock.map(appIcon).join('');
     clock();
     renderWidgets();
@@ -392,6 +412,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
 
   async function appearance(phone) {
     preferences = phone;
+    today?.setList(phone.widgets);
     applyThemeMode();
     const dark = isDark();
     const key = JSON.stringify([phone.wallpaper, phone.icons, phone.iconStyle, dark]);
@@ -490,6 +511,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (!on || !state.speaker) closeCard();
     island.setAttribute('aria-label', on ? '查看 ' + state.speaker + ' 的播放状态' : '打开听取');
     renderWidgets();
+    today?.paint(['playing']);
     for (const el of mount.querySelectorAll('[data-playing-speaker]')) el.textContent = state.speaker || '等待播放';
     for (const el of mount.querySelectorAll('[data-playing-message]')) el.textContent = state.line?.translation || state.message || '点击台词开始';
     for (const el of mount.querySelectorAll('[data-system=toggle]')) {
@@ -550,6 +572,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     for (const el of mount.querySelectorAll('[data-net-label]')) el.textContent = n.label;
     for (const el of mount.querySelectorAll('[data-battery-label]')) el.textContent = b ? `${b.level}%${b.charging ? ' · 充电中' : b.low ? ' · 电量低' : ''}` : '电量未知';
     $('.status-icons').setAttribute('aria-label', `打开控制中心，或向下拖动（${n.label}，${batteryText}）`);
+    today?.paint(['battery']);
   }
   win.addEventListener('online', paintDevice, {signal});
   win.addEventListener('offline', paintDevice, {signal});
@@ -698,7 +721,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
         case 'size': b.textContent = api.panelSize?.() || b.textContent; break;
         case 'toggle': api.toggle(); break;
         case 'stop': api.stop(); break;
-        case 'help': help('桌面左右滑动翻页，图标打开对应应用；底部横条或左上角返回键回到桌面。\n从屏幕顶端往下拉（或点右上角的信号和电量）打开控制中心，往上推收起。侧键可以看锁屏，锁屏随时可以跳过。\n\n信号和电量是你设备上的真实状态（有的浏览器不提供电量，比如 Safari、Firefox）。语音只在点击台词、播放或试听时生成。'); break;
+        case 'help': help('桌面左右滑动翻页，图标打开对应应用；第一页再往右滑是「今天」小组件页，点「编辑」或长按小组件可以添加、移除、拖动换位置；底部横条或左上角返回键回到桌面。\n从屏幕顶端往下拉（或点右上角的信号和电量）打开控制中心，往上推收起。侧键可以看锁屏，锁屏随时可以跳过。\n\n信号和电量是你设备上的真实状态（有的浏览器不提供电量，比如 Safari、Firefox）。语音只在点击台词、播放或试听时生成。'); break;
       }
     });
   }, {signal});
@@ -706,7 +729,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   {
     const pagesEl = $('.home-pages');
     let drag = null, dragged = 0;
-    pagesEl.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse' && e.button === 0 && pagesEl.children.length > 1) drag = {id: e.pointerId, x: e.clientX, left: pagesEl.scrollLeft, moved: false}; }, {signal});
+    pagesEl.addEventListener('pointerdown', e => { if (e.target.closest('.today-page[data-editing] .tw, .today-page input')) return; if (e.pointerType === 'mouse' && e.button === 0 && pagesEl.children.length > 1) drag = {id: e.pointerId, x: e.clientX, left: pagesEl.scrollLeft, moved: false}; }, {signal});
     win.addEventListener('pointermove', e => {
       if (!drag || e.pointerId !== drag.id) return;
       const dx = e.clientX - drag.x;
@@ -727,9 +750,13 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     }, {signal});
     pagesEl.addEventListener('click', e => { if (Date.now() - dragged < 350) { e.stopPropagation(); e.preventDefault(); } }, {signal, capture: true});
   }
+  // How far 今天 is in (1: all of it): the wallpaper blurs and the dock and dots go, following the finger.
   $('.home-pages').addEventListener('scroll', e => {
-    const i = Math.round(e.target.scrollLeft / (e.target.clientWidth || 1));
+    const w = e.target.clientWidth || 1, i = pageNow(), into = today ? Math.min(1, Math.max(0, 1 - e.target.scrollLeft / w)) : 0;
     mount.querySelectorAll('.dots i').forEach((dot, k) => dot.toggleAttribute('data-on', k === i));
+    home.style.setProperty('--today', into.toFixed(3));
+    home.toggleAttribute('data-today', into > .5);
+    if (into < .2 && today?.editing) today.leave();
   }, {signal, passive: true});
   // Mouse and pen through pointer events; fingers through touch events, whose moves can be held back from scrolling.
   mount.addEventListener('pointerdown', e => { if (e.pointerType !== 'touch' && e.button === 0) gestureStart(e.target, e.clientX, e.clientY); }, {signal});
@@ -765,8 +792,9 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       lastPhase = event.phase;
       paintPlayback(event);
     }
-    if (event.type === 'settings') { theme(); renderWidgets(); animate(); wallMotion(); run(refreshAvatars); }
+    if (event.type === 'settings') { theme(); renderWidgets(); today?.paint(['cast', 'wallet']); animate(); wallMotion(); run(refreshAvatars); }
     if (event.type === 'phone') run(() => appearance(event.preferences));
+    if (['chat', 'library', 'space'].includes(event.type)) todayLater();
     if (event.type === 'library') {
       const key = ({favorites: 'library', cache: 'library', photos: 'gallery', notes: 'notes'})[event.collection];
       if (active === key) run(() => views.get(key)?.refresh());
@@ -843,7 +871,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     setAvatarPictures({});
     for (const url of assets.values()) win.URL.revokeObjectURL(url);
     assets.clear();
-    win.clearInterval(clockTimer);
+    win.clearInterval(clockTimer); win.clearTimeout(todayTimer);
+    today?.dispose();
     win.clearTimeout(toastTimer);
     win.clearTimeout(openTimer);
     win.clearTimeout(unreadTimer); win.clearTimeout(freshTimer);
@@ -853,8 +882,11 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     win.stTtsOpenDraw = previousOpenDraw;
   }
   win.addEventListener('pagehide', dispose, {signal});
+  today = todayPage({doc, win, api, open, confirm, dialog, notify, signal, engineOf, appIcon, playback: () => playback, battery: () => batteryState(battery),
+    openThread: (id, from) => { open('chat', undefined, from); views.get('chat')?.openThread?.(id); }});
   applyThemeMode();
   renderHome();
+  run(() => today.refresh());
   const clockTimer = win.setInterval(clock, 15000);
   paintDevice();
   countUnread();

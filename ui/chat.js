@@ -36,7 +36,7 @@ const patText = m => `${you(m.from)} 拍了拍 ${you(m.target)}`;
 const noticeText = m => you(m.from) + String(m.text).replaceAll('{对方}', you(m.target));
 // Messages drawn as a centred line instead of a bubble.
 const LINE_KINDS = ['system', 'pat', 'notice', 'recall'];
-function preview(m) {
+export function preview(m) {
   if (!m) return '还没有消息';
   switch (m.kind) {
     case 'voice': return `[语音] ${seconds(m)}″`;
