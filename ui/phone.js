@@ -77,7 +77,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       </div>
     </div>`;
   const $ = s => mount.querySelector(s);
-  const screen = $('.screen'), home = $('.home'), frame = $('.app-frame'), appWindow = $('.app-window'), content = $('.app-content'), lockscreen = $('.lockscreen');
+  const screen = $('.screen'), home = $('.home'), frame = $('.app-frame'), content = $('.app-content'), lockscreen = $('.lockscreen');
 
   /** A short note out of the island (it grows out of it and goes back in). Errors stay longer (20 s), can be closed
    *  with ×, and can be selected to copy. */
@@ -246,7 +246,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     frame.hidden = false;
     screen.dataset.view = 'app';
     openedFrom = source;
-    const grown = source && !home.hidden ? launch(win, screen, frame, appWindow, source, {home, ...(was || {})}) : null;
+    const grown = source && !home.hidden ? launch(win, screen, frame, source, {home, ...(was || {})}) : null;
     if (grown) {
       screen.dataset.carrying = '';
       carrying = [grown]; launching = grown;
@@ -275,7 +275,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (!leaving) { frame.hidden = true; today?.leave(); const pagesEl = $('.home-pages'); pagesEl.scrollTo({left: pagesEl.clientWidth, behavior: moving(win) ? 'smooth' : 'auto'}); return; }
     // Back into what it came out of, or its own icon on the page showing; else it sinks away in the middle.
     const target = [openedFrom, iconOf(leaving)].find(el => el?.isConnected && visible(within(el, frame)));
-    const shrink = target ? launch(win, screen, frame, appWindow, target, {back: true, home, ...(was || {})}) : null;
+    const shrink = target ? launch(win, screen, frame, target, {back: true, home, ...(was || {})}) : null;
     if (shrink) {
       screen.dataset.carrying = '';
       carrying = [shrink]; launching = shrink;
@@ -759,6 +759,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     mount.querySelectorAll('.dots i').forEach((dot, k) => dot.toggleAttribute('data-on', k === i));
     home.style.setProperty('--today', into.toFixed(3));
     home.toggleAttribute('data-today', into > .5);
+    home.toggleAttribute('data-today-in', into > .002);
     if (into < .2 && today?.editing) today.leave();
   }, {signal, passive: true});
   // Mouse and pen through pointer events; fingers through touch events, whose moves can be held back from scrolling.

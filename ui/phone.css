@@ -1800,8 +1800,10 @@ button.gift-item[data-short]{opacity:.55}
 /* ---------- 今天 (ui/today.js): swipe right from the first home page ---------- */
 /* As it comes in (--today, 0 → 1, set while the pages scroll) the wallpaper blurs behind it and the dock and dots go. */
 .home{--today:0}
-.today-veil{position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:var(--today);background:color-mix(in srgb,var(--bg) 28%,transparent);-webkit-backdrop-filter:blur(24px) saturate(1.25);backdrop-filter:blur(24px) saturate(1.25)}
+.today-veil{display:none;position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:var(--today);background:color-mix(in srgb,var(--bg) 28%,transparent);-webkit-backdrop-filter:blur(24px) saturate(1.25);backdrop-filter:blur(24px) saturate(1.25)}
 .home .dots,.home .phone-dock{opacity:calc(1 - var(--today));transform:translateY(calc(var(--today) * 26px))}
+/* A full-screen blur costs a phone every frame something moves over it: only there while 今天 is coming in. */
+.home[data-today-in] .today-veil{display:block}
 .home[data-today] .home-foot,.home[data-today] .dots,.home[data-today] .phone-dock{pointer-events:none}
 .today-page{flex:0 0 100%;scroll-snap-align:start;position:relative;overflow-y:auto;overflow-x:hidden;padding:52px 14px calc(env(safe-area-inset-bottom,0px) + 36px);scrollbar-width:none;overscroll-behavior-y:contain;color:var(--ink);container-type:inline-size;-webkit-mask-image:linear-gradient(#000 calc(100% - 26px),transparent);mask-image:linear-gradient(#000 calc(100% - 26px),transparent)}
 .today-page::-webkit-scrollbar{display:none}
