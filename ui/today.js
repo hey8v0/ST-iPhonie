@@ -61,7 +61,7 @@ export function todayPage(deps) {
   }
   function threadRow(t) {
     const face = t.type === 'group' ? avatar(t.name, 'none', 32) : avatar(t.members?.[0] || t.name, deps.engineOf(t.members?.[0] || t.name), 32);
-    return `<button type="button" class="tw-thread" data-thread="${esc(t.id)}">${face}<span><b>${esc(t.name)}</b><small>${esc(preview(t.last))}</small></span>${t.unread ? `<i class="tw-badge${t.muted ? ' muted' : ''}">${t.unread > 99 ? '99+' : t.unread}</i>` : ''}</button>`;
+    return `<button type="button" class="tw-thread" data-thread="${esc(t.id)}">${face}<span class="tw-text"><b>${esc(t.name)}</b><small>${esc(preview(t.last))}</small></span>${t.unread ? `<i class="tw-badge${t.muted ? ' muted' : ''}">${t.unread > 99 ? '99+' : t.unread}</i>` : ''}</button>`;
   }
   function chatBody(size) {
     const threads = data.threads, unread = threads.reduce((n, t) => n + (t.muted ? 0 : t.unread || 0), 0);
@@ -75,7 +75,7 @@ export function todayPage(deps) {
   function castBody(size) {
     const routes = api.getState().routes.filter(r => r.name?.trim()).slice(0, size === 'm' ? 4 : 8);
     if (!routes.length) return '<span class="tw-head"><span class="tw-eyebrow">角色</span></span><span class="tw-line">还没有角色</span><small class="tw-dim">点一下去角色 App 新增</small>';
-    return `<span class="tw-head"><span class="tw-eyebrow">角色</span></span><div class="tw-cast">${routes.map(r => `<button type="button" data-open-role="${esc(r.id)}" aria-label="打开 ${esc(r.name)} 的配音">${avatar(r.name, r.voice ? r.engine : 'none', size === 'm' ? 40 : 46)}<span>${esc(r.name)}</span></button>`).join('')}</div>`;
+    return `<span class="tw-head"><span class="tw-eyebrow">角色</span></span><div class="tw-cast">${routes.map(r => `<button type="button" data-open-role="${esc(r.id)}" aria-label="打开 ${esc(r.name)} 的配音">${avatar(r.name, r.voice ? r.engine : 'none', size === 'm' ? 40 : 46)}<span class="tw-name">${esc(r.name)}</span></button>`).join('')}</div>`;
   }
   function photoBody() {
     if (!data.photo) return `<span class="tw-head"><span class="tw-eyebrow">相册</span></span><span class="tw-line">相册里还没有照片</span><small class="tw-dim">绘图 App 画的图会存进来</small>`;

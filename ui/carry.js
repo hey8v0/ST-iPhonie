@@ -107,7 +107,8 @@ const mix = (a, b, o) => a + (b - a) * o, clamp01 = n => Math.min(1, Math.max(0,
 /**
  * An app opens the way iPhone apps do: its window grows out of the icon, the app already drawn inside it at full
  * size, scaled to the window's width and cut to its height (an outer box stretched to the window, the app inside
- * stretched back), while the icon on top of it fades; the home screen zooms past, toward the icon. back: the window
+ * stretched back), while the icon on top of it fades; the home screen zooms past, toward the icon (only zooms: a
+ * fade would cut the frosted glass on it off from the wallpaper, and it would jump when the fade ends). back: the window
  * shrinks into the icon and the icon comes back over it. Every frame is worked out from a spring and given as
  * keyframes, so only transform and opacity change on the app (it is never redrawn) and the window never looks stretched.
  * frame: the window (fills host); inner: its one child holding the app; home: the home screen behind.
@@ -148,7 +149,7 @@ export function launch(win, host, frame, inner, from, {back = false, at = back ?
     corners.push({borderRadius: `${round / sx}px / ${round / sy}px`});
     inside.push({transform: `translate(0px,${(height - H * sx) / 2 / sy}px) scale(1,${sx / sy})`});
     fade.push({opacity: clamp01(1 - o / .4)});
-    behind.push({transform: `scale(${mix(1, 1.12, clamp01(o))})`, opacity: clamp01(1 - o * 1.1)});
+    behind.push({transform: `scale(${mix(1, 1.12, clamp01(o))})`});
   }
   const timing = {duration, easing: 'linear', fill: 'both'}, started = win.performance?.now?.() ?? Date.now();
   let moves;

@@ -66,8 +66,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
           <main class="home"><div class="today-veil" aria-hidden="true"></div>
             <button class="home-close" data-system="close" aria-label="返回酒馆">${icon('close')}</button>
             <div class="home-pages"></div>
-            <div class="dots" aria-hidden="true"></div>
-            <nav class="phone-dock" aria-label="常用应用"></nav>
+            <div class="home-foot"><div class="dots" aria-hidden="true"></div>
+            <nav class="phone-dock" aria-label="常用应用"></nav></div>
           </main>
           <section class="app-frame" hidden><div class="app-window"><header class="app-nav"><button class="nav-button" data-system="back" aria-label="返回">${icon('back')}</button><button class="nav-button" data-system="home" aria-label="返回桌面">${icon('home')}</button></header><div class="app-content"></div></div></section>
           <button class="home-indicator" data-system="home" aria-label="返回桌面"></button>
@@ -293,6 +293,9 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   /** The first app page shows first, the first time the home screen can be seen (not while an app hides it); 今天 is a swipe to the right. */
   let placed = false;
   function placeHome() { const el = $('.home-pages'); if (placed || !today || home.hidden || !el.clientWidth) return; el.scrollLeft = el.clientWidth; placed = true; }
+  // The dots and the dock float over the bottom of the pages: the app pages keep their height clear.
+  const foot = $('.home-foot'), footRoom = () => { if (foot.offsetHeight) home.style.setProperty('--home-foot', foot.offsetHeight + 'px'); };
+  if (win.ResizeObserver) { const watch = new win.ResizeObserver(footRoom); watch.observe(foot); signal.addEventListener('abort', () => watch.disconnect()); }
   // The phone may open hidden (a closed panel): placed when it first has a size.
   if (win.ResizeObserver) { const watch = new win.ResizeObserver(() => { placeHome(); if (placed) watch.disconnect(); }); watch.observe($('.home-pages')); signal.addEventListener('abort', () => watch.disconnect()); }
   /** The app page showing (0: the first), 今天 not counted; -1 on 今天. */
