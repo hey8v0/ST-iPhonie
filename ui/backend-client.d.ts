@@ -499,6 +499,8 @@ export interface BackendFacade {
     drawMissing(): string;
     /** What to ask before a picture that costs money with the engine in use. note: the line shown on a picture left undrawn. */
     paidPrompt(): { title: string; text: string; note: string };
+    /** Models offered by the saved GPT image connection. Reads /models without generating an image. */
+    gptModels(): Promise<string[]>;
     /** ComfyUI through the tavern: connection check and what it offers. url: an address not saved yet. */
     comfyCatalog(url?: string): Promise<{ models: Array<{ value: string; text: string }>; samplers: string[]; schedulers: string[] }>;
     /** Workflows saved in the tavern's own image generation (file names), and one of them as text. */

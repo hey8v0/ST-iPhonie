@@ -9,6 +9,7 @@ export function enginesApp(ctx) {
   let engine = null, dirty = false, subscription = null, subscriptionError = '', subscriptionStatus = 0, textDraft = null, models = [], subscriptionLoad = 0;
   // ComfyUI: what the last connection check found ({models, samplers, schedulers} or {error}), and the tavern's workflows.
   let comfyInfo = null, comfyRequest = 0;
+  let gptList = [], gptStatus = '', gptRequest = 0;
   // The wallet is a stack: the last card is the one in front. A tap on another card draws it to the front; a tap on
   // the front card opens it.
   // The cards come in three pockets: 图像 (the drawing engines), 语音 (the voice engines), 文字 (text and vector models).
@@ -124,6 +125,7 @@ export function enginesApp(ctx) {
   }
   function imageSaved() {
     subscriptionLoad++; subscription = null; subscriptionError = ''; subscriptionStatus = 0;
+    resetGptModels();
     render(); if (engine === 'nai' && api.keyStatus('nai')) loadSubscription(true);
   }
   function saveImageForm() {
@@ -188,11 +190,24 @@ export function enginesApp(ctx) {
       + groupTitle('接口', help('留空就直连 OpenAI（https://api.openai.com/v1）。用中转时填中转给的地址，写到 /v1 为止；插件请求的是「地址/images/generations」。\n\n中转要允许跨域（CORS）；酒馆用 HTTPS 打开时，中转也要用 HTTPS。'))
       + `<div class="group pad">
           ${field('接口地址', input('gpt-url', g.url, 'url', 'autocomplete="off" placeholder="留空直连 OpenAI，例如 https://relay.example.com/v1"'))}
-          <div class="key-actions">${btn('save-gpt-url', g.url ? '保存地址' : '使用中转', 'primary')}</div>
-          ${field('模型', input('gpt-model', g.model, 'text', `list="sttts-gpt-models" autocomplete="off" spellcheck="false"`) + `<datalist id="sttts-gpt-models">${api.drawCatalog.gptModels.map(m => `<option value="${esc(m)}">`).join('')}</datalist>`, 'gpt-image 系列画得最好；dall-e-3 便宜一些但不太听 tag。中转上别的模型名（只要是 OpenAI 的 images 接口）也可以直接填。')}
+          <div class="key-actions">${btn('save-gpt-url', g.url ? '保存地址' : '使用中转', 'primary')}${btn('gpt-models', icon('refresh') + '读取模型列表', 'secondary')}</div>
+          <p class="hint" data-gpt-status aria-live="polite">${esc(gptStatus)}</p>
+          <div class="combo-menu model-list" data-gpt-model-list ${gptList.length ? '' : 'hidden'}>${gptModelButtons(g.model)}</div>
+          ${field('模型', input('gpt-model', g.model, 'text', `list="sttts-gpt-models" autocomplete="off" spellcheck="false"`) + `<datalist id="sttts-gpt-models">${gptModelOptions()}</datalist>`, '读取当前已保存连接提供的模型；列表可能包含文字模型，请选择支持 images 接口的模型。中转的自定义名称（例如 image2.5）也可以直接填，名称以中转提供的为准。')}
         </div>
         <p class="hint">GPT 读不懂 NovelAI 的写法：插件会把出图块里的英文 tag 和每个人的外貌整理成一段英文描述再发过去；画师串、权重括号和负面不会发。GPT 的内容审核比较严，被拒时会显示它给的原因。画质、画幅和要不要每张先问，在绘图 App 的「参数」里改。</p>
         <div class="actions">${btn('open-draw', icon('paint') + '打开绘图', 'primary')}</div>`);
+  }
+  const gptModelButtons = model => gptList.map(m => `<button type="button" class="combo-chip" data-action="gpt-pick" data-model="${esc(m)}" aria-pressed="${m === model}">${esc(m)}</button>`).join('');
+  const gptModelOptions = () => [...new Set([...gptList, ...api.drawCatalog.gptModels])].map(m => `<option value="${esc(m)}">`).join('');
+  function resetGptModels() { gptRequest++; gptList = []; gptStatus = ''; }
+  // Only replace the result area: a delayed response must not erase the connection form being edited.
+  function updateGptModels() {
+    if (v.disposed || engine !== 'gpt') return;
+    const status = v.root.querySelector('[data-gpt-status]'), list = v.root.querySelector('[data-gpt-model-list]'), options = v.root.querySelector('#sttts-gpt-models');
+    if (status) status.textContent = gptStatus;
+    if (list) { list.hidden = !gptList.length; list.innerHTML = gptModelButtons(v.root.querySelector('[data-field=gpt-model]')?.value); }
+    if (options) options.innerHTML = gptModelOptions();
   }
   function renderComfy() {
     const c = api.getState().draw.comfy, info = comfyInfo;
@@ -413,6 +428,7 @@ export function enginesApp(ctx) {
 
   const render = () => engine === 'nai' ? renderNovelAI() : engine === 'gpt' ? renderGpt() : engine === 'comfy' ? renderComfy() : engine === 'llm' ? renderText() : engine === 'embed' ? renderEmbed() : engine ? renderDetail() : renderList();
   function edit(id) {
+    resetGptModels();
     engine = id;
     if (!order.length || order.at(-1) !== id) order = [...order.filter(x => x !== id), id];
     if (id === 'llm') { textDraft = structuredClone(api.getState().text); dirty = false; render(); v.root.scrollTop = 0; return; }
@@ -437,6 +453,7 @@ export function enginesApp(ctx) {
   v.back = () => {
     if (!engine) return false;
     const id = engine, from = v.root.querySelector('.detail-card')?.getBoundingClientRect();
+    resetGptModels();
     engine = null; render(); v.root.scrollTop = listScroll;
     fly(ctx.win, v.root.querySelector(`.wallet [data-engine="${id}"]`), from, {duration: 340, easing: 'bounce'});
     return true;
@@ -444,6 +461,10 @@ export function enginesApp(ctx) {
   v.refresh = () => { if (!engine) render(); };
   if (api.keyStatus('nai')) loadSubscription(false);
 
+  v.on('input', '[data-field]', el => {
+    if (engine !== 'gpt' || !['key', 'gpt-url'].includes(el.dataset.field)) return;
+    resetGptModels(); updateGptModels();
+  });
   v.on('change', '[data-field]', el => {
     if (el.dataset.field === 'key') return;
     if (el.dataset.field === 'image-name') return;
@@ -461,7 +482,7 @@ export function enginesApp(ctx) {
       changed();
       return;
     }
-    if (el.dataset.field === 'gpt-model') { api.saveDraw({gpt: {model: el.value.trim()}}); return; }
+    if (el.dataset.field === 'gpt-model') { api.saveDraw({gpt: {model: el.value.trim()}}); updateGptModels(); return; }
     if (el.dataset.field === 'comfy-transport') { api.saveDraw({comfy: {loraTransport: el.value}}); return; }
     if (['gpt-url', 'comfy-url'].includes(el.dataset.field)) return;
     if (el.dataset.field === 'guard') { api.saveDraw({guard: el.checked}); return; }
@@ -574,6 +595,33 @@ export function enginesApp(ctx) {
         if (box) box.value = textPreset().model;
         for (const chip of v.root.querySelectorAll('[data-action=text-pick]')) chip.setAttribute('aria-pressed', String(chip === el));
         changed();
+        break;
+      }
+      case 'gpt-models': {
+        const saved = api.getState().draw, id = saved.connections.gpt.active, url = saved.gpt.url;
+        if (v.root.querySelector('[data-field=gpt-url]')?.value.trim() !== url || v.root.querySelector('[data-field=key]')?.value.trim()) {
+          resetGptModels(); gptStatus = '地址或密钥还没保存，请先点「保存这组连接」，再读取模型列表'; updateGptModels(); break;
+        }
+        const token = ++gptRequest;
+        const current = () => !v.disposed && engine === 'gpt' && token === gptRequest && api.getState().draw.connections.gpt.active === id && api.getState().draw.gpt.url === url;
+        gptList = []; gptStatus = '正在读取模型列表…'; updateGptModels();
+        await v.busy(el, async () => {
+          try {
+            const result = await api.gptModels();
+            if (!current()) return;
+            gptList = result;
+            gptStatus = gptList.length ? `读到 ${gptList.length} 个模型，点一个就能选上` : '连接成功，但没有列出模型，直接在「模型」里填就好';
+            updateGptModels();
+          } catch (error) { if (current()) { gptStatus = error.message; updateGptModels(); } }
+        });
+        break;
+      }
+      case 'gpt-pick': {
+        api.saveDraw({gpt: {model: el.dataset.model}});
+        const input = v.root.querySelector('[data-field=gpt-model]');
+        if (input) input.value = el.dataset.model;
+        for (const chip of v.root.querySelectorAll('[data-action=gpt-pick]')) chip.setAttribute('aria-pressed', String(chip === el));
+        ctx.notify('已选 ' + el.dataset.model);
         break;
       }
       case 'text-models': {

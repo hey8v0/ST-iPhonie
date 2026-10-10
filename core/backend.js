@@ -14,7 +14,7 @@ import { normalizeSounds, soundRow, readPack, missingKey, soundName, packRows, P
 import { decodeMono, encodeWav } from './audio-join.js';
 import { BACKUP_PARTS, PART_STORES, writeBackup, readBackup, sealKeys, openKeys } from './backup.js';
 import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, SHOP_GIFTS, LEDGER_KINDS, premiumOf, decorKey, cents, yuan, shopGifts, normalizeGift, validateGift } from './wallet.js';
-import { DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, normalizeGpt, gptBase, gptSize, gptPrompt, gptGenerate, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS, applyComfyWorkflow } from './image-engines.js';
+import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, normalizeGpt, gptBase, gptSize, gptPrompt, gptGenerate, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS, applyComfyWorkflow } from './image-engines.js';
 import {activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource} from './comfy-loras.js';
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
 import { normalizeRoute, switchRouteEngine, removeRoute } from './routes.js';
@@ -1160,6 +1160,8 @@ export class TTSBackend {
     /** What to ask before a picture that costs money, for the engine in use: {title, text, note}. */
     paidPrompt() { return this.settings.draw.engine === 'gpt' ? { title: 'GPT 生图要花钱', text: '每张图都按 OpenAI（或中转）的价格收费，确认后再画。', note: 'GPT 生图要花钱，点一下确认后再画' } : { title: '这张图会扣 Anlas', text: '超出了 NovelAI 的免费档，确认后再画。', note: '这张图会扣 Anlas，点一下确认后再画' }; }
     drawMissing() { const engine = this.settings.draw.engine; return this.drawReady() ? '' : engine === 'gpt' ? '还没有填写 GPT 生图的密钥' : engine === 'comfy' ? '还没有填写 ComfyUI 地址' : '还没有填写 NovelAI 密钥'; }
+    /** The GPT drawing models the saved relay (or OpenAI) offers. */
+    async gptModels() { this.assertOpen(); return gptModels({ fetch: this.imageFetch, settings: this.settings.draw.gpt, key: this.gptKey }); }
     /** ComfyUI: connection check and what it offers (models, samplers, schedulers). url: an address not saved yet. */
     async comfyCatalog(url) { this.assertOpen(); return comfyCatalog({ fetch: this.imageFetch, headers: this.tavernHeaders(), url: comfyUrl(url ?? this.settings.draw.comfy.url) }); }
     async comfyLoras({transport, signal} = {}) { this.assertOpen(); const c = this.settings.draw.comfy; return comfyLoras({fetch: this.imageFetch, url: c.url, transport: transport ?? c.loraTransport, signal}); }
@@ -1857,6 +1859,7 @@ export class TTSBackend {
             memoryRemove: (threadId, nodeId) => this.memoryChange(threadId, book => removeNode(book, nodeId)),
             memoryForget: threadId => this.memoryForget(threadId),
             saveEmbed: patch => this.saveEmbed(clone(patch)), embedReady: () => this.embedReady(), embedModels: draft => this.embedModels(clone(draft || {})),
+            gptModels: () => this.gptModels(),
             embedTest: async draft => { const [v] = await this.embed(['测试一下向量模型'], clone(draft || {})); return v.length; },
             appendChat: (id, messages, options) => this.chatMutate(id, () => this.chats.append(id, clone(messages), clone(options || {}))),
             deleteChatMessages: (id, ids) => this.chatMutate(id, () => this.chats.removeMessages(id, clone(ids))),

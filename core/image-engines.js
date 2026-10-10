@@ -14,7 +14,7 @@ export const DRAW_ENGINE_NAMES = {nai: 'NovelAI', gpt: 'GPT 生图', comfy: 'Com
 
 // ---------- GPT ----------
 export const OPENAI_BASE = 'https://api.openai.com/v1';
-export const GPT_IMAGE_MODELS = ['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3'];
+export const GPT_IMAGE_MODELS = ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2', 'gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3'];
 export const GPT_QUALITIES = ['auto', 'low', 'medium', 'high'];
 export const GPT_ORIENTATIONS = ['portrait', 'landscape', 'square'];
 export const defaultGpt = () => ({url: '', model: 'gpt-image-1', quality: 'auto', orientation: 'portrait', ask: true, style: ''});
@@ -100,17 +100,107 @@ const base64Blob = (data, type = 'image/png') => {
 };
 const imageType = format => ({jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', png: 'image/png'})[String(format || 'png').toLowerCase()] || 'image/png';
 
+/**
+ * The models the relay (or OpenAI) offers, drawing ones first: names with image, dall-e, imagen, flux, seedream,
+ * banana… Keep other names too: a relay may name its image models its own way.
+ */
+export async function gptModels({fetch = globalThis.fetch, settings, key}) {
+  const base = settings.url || OPENAI_BASE, url = base + '/models';
+  const headers = key ? {Authorization: 'Bearer ' + key} : {};
+  let response;
+  try { response = await fetch(url, {headers}); }
+  catch {
+    try { response = await fetch('/proxy/' + encodeURIComponent(url), {headers, credentials: 'same-origin'}); }
+    catch { throw Error('读不到模型列表：连不上这个接口，或者它不允许网页直接访问（CORS），酒馆代理也无法连接。也可以直接在「模型」里填模型名'); }
+  }
+  const raw = await response.text().catch(() => '');
+  if (!response.ok && /CORS proxy is disabled/i.test(raw)) throw Error('读不到模型列表：接口不允许跨域（CORS），酒馆代理尚未开启。请在 config.yaml 设置 enableCorsProxy: true 后重启，或直接在「模型」里填模型名');
+  if (response.status === 401 || response.status === 403) throw Error('读不到模型列表：密钥不对或没有权限，先保存密钥再读');
+  if (!response.ok) throw Error(`读不到模型列表（${response.status}）：这个接口可能没有模型列表，直接在「模型」里填模型名就行`);
+  let json; try { json = JSON.parse(raw); } catch { throw Error('读不到模型列表：返回的不是列表，直接在「模型」里填模型名就行'); }
+  const list = Array.isArray(json?.data) ? json.data : Array.isArray(json?.models) ? json.models : Array.isArray(json) ? json : [];
+  const names = [...new Set(list.map(m => typeof m === 'string' ? m : m?.id || m?.name).filter(Boolean).map(String))].sort();
+  const drawing = n => /image|dall-?e|imagen|flux|seedream|banana|kolors|ideogram|recraft|midjourney|\bmj\b|sdxl|stable-?diffusion|cogview|wanx|hunyuan-?image|jimeng/i.test(n);
+  return [...names.filter(drawing), ...names.filter(n => !drawing(n))].slice(0, 500);
+}
+
+// Only an explicit parameter rejection warrants a second generation request. Auth, quota, moderation and
+// ambiguous failures must not cause another paid POST just because the response mentions response_format.
+function rejectsResponseFormat(status, text) {
+  if (![400, 422].includes(status)) return false;
+  let error;
+  try { error = JSON.parse(text)?.error; } catch { error = text; }
+  if (error?.param && error.param !== 'response_format') return false;
+  if (error?.param === 'response_format' && ['unknown_parameter', 'unsupported_parameter'].includes(error.code)) return true;
+  const message = typeof error === 'string' ? error : String(error?.message || '');
+  return /(?:unknown|unrecognized|unexpected|unsupported)\s+(?:request\s+)?(?:parameter|field|argument)\s*[:=]?\s*['"`]?response_format\b|\bresponse_format['"`]?\s+(?:parameter\s+)?(?:is\s+)?(?:not\s+(?:currently\s+)?supported|unsupported)|(?:does not support|doesn't support)\s+(?:the\s+)?(?:parameter\s+)?['"`]?response_format\b|不支持(?:的)?(?:参数)?[:：\s]*['"`]?response_format\b/i.test(message);
+}
+
+async function pictureBlob(response) {
+  const blob = await response.blob();
+  // SillyTavern's proxy can omit Content-Type. Inspect common image signatures instead of rejecting small
+  // valid images, or treating a large HTML error page as a successful picture.
+  const bytes = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+  const starts = values => values.every((n, i) => bytes[i] === n);
+  const text = String.fromCharCode(...bytes);
+  const type = starts([137, 80, 78, 71, 13, 10, 26, 10]) ? 'image/png'
+    : starts([255, 216, 255]) ? 'image/jpeg'
+    : /^GIF8[79]a/.test(text) ? 'image/gif'
+    : text.startsWith('RIFF') && text.slice(8, 12) === 'WEBP' ? 'image/webp'
+    : text.slice(4, 8) === 'ftyp' && /^avi[fs]$/.test(text.slice(8, 12)) ? 'image/avif' : '';
+  if (!type) throw Error('中转给的图片链接没有取到图片');
+  return blob.type === type ? blob : new Blob([blob], {type});
+}
+
+async function gptPicture({fetch, url, signal}) {
+  let parsed;
+  try { parsed = new URL(url); } catch { throw Error('中转给的图片链接格式不正确'); }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw Error('中转给的图片链接格式不正确');
+  const read = async (target, proxy = false) => {
+    signal?.throwIfAborted();
+    // The generation key belongs to the API, never to the image CDN.
+    const response = await fetch(target, {signal, credentials: proxy ? 'same-origin' : 'omit'});
+    if (!response.ok) {
+      const text = proxy ? await response.text() : '';
+      if (/CORS proxy is disabled/i.test(text)) throw Error('中转给的是图片链接，但浏览器打不开它（链接不允许跨域）。请在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆，插件会通过酒馆去取；或者请中转直接返回图片数据（b64_json）');
+      throw Error(`中转给的图片链接打不开（${response.status}）`);
+    }
+    return pictureBlob(response);
+  };
+  try { return await read(url); }
+  catch (error) { signal?.throwIfAborted(); if (error?.name === 'AbortError') throw error; }
+  // Encode the entire URL: otherwise Express treats a signed CDN query as the proxy's own query and loses it.
+  try { return await read('/proxy/' + encodeURIComponent(url), true); }
+  catch (error) {
+    signal?.throwIfAborted(); if (error?.name === 'AbortError') throw error;
+    if (error instanceof TypeError) throw Error('中转图片下载失败：浏览器和酒馆代理都无法读取链接。请检查网络、链接是否过期，以及酒馆是否已开启 enableCorsProxy；也可以请中转直接返回 b64_json');
+    throw error;
+  }
+}
+
 /** Draws one picture with a GPT image model. Returns a Blob. */
 export async function gptGenerate({fetch = globalThis.fetch, settings, key, prompt, size, signal}) {
   if (!key) throw Error('还没有填写 GPT 生图的密钥');
-  const base = settings.url || OPENAI_BASE, relay = !!settings.url;
+  const base = settings.url || OPENAI_BASE, relay = base !== OPENAI_BASE;
   const body = {model: settings.model, prompt, n: 1, size};
   if (dalle(settings.model)) { body.response_format = 'b64_json'; if (/dall-e-3/i.test(settings.model)) body.quality = settings.quality === 'high' ? 'hd' : 'standard'; }
   else if (settings.quality !== 'auto') body.quality = settings.quality;
-  let response;
-  try { response = await fetch(base + '/images/generations', {method: 'POST', headers: {Authorization: 'Bearer ' + key, 'Content-Type': 'application/json'}, body: JSON.stringify(body), signal}); }
-  catch (error) { if (error?.name === 'AbortError') throw error; throw Error(relay ? '连不上中转：请确认地址正确、中转允许跨域（CORS）' : '连不上 OpenAI，请检查网络'); }
-  const text = await response.text().catch(() => '');
+  // Prefer inline image data from relays, with one compatibility retry on an explicit unsupported parameter.
+  if (relay) body.response_format = 'b64_json';
+  const post = async payload => {
+    signal?.throwIfAborted();
+    try { return await fetch(base + '/images/generations', {method: 'POST', headers: {Authorization: 'Bearer ' + key, 'Content-Type': 'application/json'}, body: JSON.stringify(payload), signal}); }
+    catch (error) { signal?.throwIfAborted(); if (error?.name === 'AbortError') throw error; throw Error(relay ? '连不上中转：请确认地址正确、中转允许跨域（CORS）' : '连不上 OpenAI，请检查网络'); }
+  };
+  const read = async response => {
+    try { const text = await response.text(); signal?.throwIfAborted(); return text; }
+    catch (error) { signal?.throwIfAborted(); if (error?.name === 'AbortError') throw error; throw Error('图片接口的响应读取中断，请检查网络'); }
+  };
+  let response = await post(body), text = await read(response);
+  if (relay && !dalle(settings.model) && rejectsResponseFormat(response.status, text)) {
+    const {response_format: unknown, ...plain} = body;
+    response = await post(plain); text = await read(response);
+  }
   if (!response.ok) throw gptFailure(response.status, text, relay);
   let data; try { data = JSON.parse(text); } catch { throw Error((relay ? '中转' : 'OpenAI') + '返回的内容不是图片数据'); }
   const item = data?.data?.[0];
@@ -118,10 +208,7 @@ export async function gptGenerate({fetch = globalThis.fetch, settings, key, prom
   if (item?.url) {
     // Some relays answer with a link: fetched here (a link the browser may not open says so).
     if (/^data:image\//.test(item.url)) return base64Blob(item.url.split(',')[1] || '', item.url.slice(5, item.url.indexOf(';')));
-    let picture;
-    try { picture = await fetch(item.url, {signal}); } catch (error) { if (error?.name === 'AbortError') throw error; throw Error('中转给的是图片链接，但浏览器打不开它（链接不允许跨域）'); }
-    if (!picture.ok) throw Error(`中转给的图片链接打不开（${picture.status}）`);
-    return await picture.blob();
+    return gptPicture({fetch, url: item.url, signal});
   }
   throw Error((relay ? '中转' : 'OpenAI') + '没有返回图片' + (data?.error?.message ? '：' + data.error.message : ''));
 }
