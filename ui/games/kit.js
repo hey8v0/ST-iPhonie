@@ -35,7 +35,7 @@ export function canvas(doc, w, h) {
 }
 
 /**
- * Swipes on el: fn('up'|'down'|'left'|'right'). Short taps are left alone (tap(x, y) if given, in el's pixels).
+ * Swipes on el: fn('up'|'down'|'left'|'right'). Short taps are left alone (tap(x, y, event) if given, in el's pixels).
  * The page does not scroll under the finger.
  */
 export function swipes(el, fn, {tap = null, min = 22} = {}) {
@@ -48,7 +48,7 @@ export function swipes(el, fn, {tap = null, min = 22} = {}) {
     if (!start || e.pointerId !== start.id) return;
     const dx = e.clientX - start.x, dy = e.clientY - start.y;
     start = null;
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < min) { if (tap) { const r = el.getBoundingClientRect(); tap(e.clientX - r.left, e.clientY - r.top); } return; }
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < min) { if (tap) { const r = el.getBoundingClientRect(); tap(e.clientX - r.left, e.clientY - r.top, e); } return; }
     swiped = Date.now();
     fn(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
   });

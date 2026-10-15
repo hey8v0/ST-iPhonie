@@ -1,22 +1,26 @@
-// 贪吃蛇: eat to grow; the wall or your own tail ends it. A little faster with every few bites.
+// 贪吃蛇: eat to grow; only your own tail ends it (out of one side, in at the other). A little faster with every
+// few bites.
 import {swipes, pad, padKeys, ARROWS, canvas, color, loop, rand} from './kit.js';
 
 const N = 17;
 const STEP = {up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0]};
 const OPPOSITE = {up: 'down', down: 'up', left: 'right', right: 'left'};
 
-/** One step: {snake, ate, dead}. snake: [[x, y]…] head first; dir: where it goes; food: [x, y]. */
+/**
+ * One step: {snake, ate, dead}. snake: [[x, y]…] head first; dir: where it goes; food: [x, y]. Going over an edge
+ * comes back in from the other side.
+ */
 export function stepSnake(snake, dir, food, n = N) {
-  const [dx, dy] = STEP[dir], head = [snake[0][0] + dx, snake[0][1] + dy];
+  const [dx, dy] = STEP[dir], head = [(snake[0][0] + dx + n) % n, (snake[0][1] + dy + n) % n];
   const ate = head[0] === food[0] && head[1] === food[1];
   const body = ate ? snake : snake.slice(0, -1);
-  const dead = head[0] < 0 || head[1] < 0 || head[0] >= n || head[1] >= n || body.some(([x, y]) => x === head[0] && y === head[1]);
+  const dead = body.some(([x, y]) => x === head[0] && y === head[1]);
   return {snake: dead ? snake : [head, ...body], ate, dead};
 }
 
 export default {
   id: 'snake', name: '贪吃蛇', icon: '🐍', colors: ['#9be7a6', '#2f9e5b'], note: '越吃越长', live: true,
-  how: '滑动、方向键或下面的按钮转向；撞墙或咬到自己就结束。',
+  how: '滑动、方向键或下面的按钮转向；从一边出去会从另一边回来，咬到自己才结束。',
   make({doc, win, host, api, saved}) {
     const view = host.closest('.view'), room = view ? view.clientHeight - (host.getBoundingClientRect().top - view.getBoundingClientRect().top) - 190 : 340;
     const size = Math.min(340, Math.max(200, host.clientWidth || 300), room > 200 ? room : 340), cell = size / N;
@@ -34,7 +38,7 @@ export default {
       const done = stepSnake(snake, dir, food);
       if (done.dead) { over = true; tick.stop(); draw(); api.over({score, text: `长到了 ${snake.length} 节`}); return; }
       snake = done.snake;
-      if (done.ate) { score++; api.score(score); speed = Math.max(70, 160 - score * 3); placeFood(); }
+      if (done.ate) { score++; api.score(score); api.sound?.('eat'); speed = Math.max(70, 160 - score * 3); placeFood(); }
       draw();
     });
     function placeFood() {

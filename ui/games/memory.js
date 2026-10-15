@@ -18,16 +18,17 @@ export default {
     function flip(i) {
       const c = cards[i];
       if (wait || c.up || c.done || open.length >= 2) return;
-      c.up = true; open.push(i); draw();
+      c.up = true; open.push(i); draw(); api.sound?.('flip');
       if (open.length < 2) return;
       turns++; api.score(turns);
       const [a, b] = open.map(k => cards[k]);
       if (a.face === b.face) {
         a.done = b.done = true; open = []; draw();
+        if (!cards.every(x => x.done)) api.sound?.('match');
         if (cards.every(x => x.done)) api.over({score: turns, win: true, text: `${turns} 步翻完了全部`});
         return;
       }
-      wait = win.setTimeout(() => { a.up = b.up = false; open = []; wait = 0; draw(); }, 750);
+      wait = win.setTimeout(() => { a.up = b.up = false; open = []; wait = 0; draw(); api.sound?.('miss'); }, 750);
     }
     el.addEventListener('click', e => { const b = e.target.closest('[data-card]'); if (b) flip(Number(b.dataset.card)); });
     function restart() {

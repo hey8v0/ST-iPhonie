@@ -65,6 +65,7 @@ export default {
       const done = move(board, dir);
       if (!done.moved) return;
       board = done.board; score += done.gained;
+      api.sound?.(done.gained ? 'merge' : 'slide', {value: done.gained});
       fresh = addTile(board);
       draw();
       if (!won && board.flat().includes(2048)) { won = true; api.over({score, win: true, goOn: true, text: '合出了 2048！可以接着玩，冲更高分。'}); }

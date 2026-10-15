@@ -2319,11 +2319,13 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .game-page{position:relative;display:flex;flex-direction:column;align-items:center;padding-top:6px}
 .game-title{align-self:flex-start;margin:2px 4px 8px;font-size:22px;font-weight:900;color:var(--ink)}
 .game-bar{align-self:stretch;display:flex;align-items:center;gap:8px;margin-bottom:12px}
-.game-score{display:flex;flex-direction:column;min-width:64px;padding:6px 12px;border-radius:14px;background:var(--card);box-shadow:var(--shadow)}
+.game-score{display:flex;flex-direction:column;flex:1 1 0;min-width:0;max-width:110px;padding:6px 10px;border-radius:14px;background:var(--card);box-shadow:var(--shadow)}
 .game-score small{font-size:10.5px;font-weight:800;color:var(--ink2);letter-spacing:.06em}
 .game-score b{font-size:18px;font-weight:900;color:var(--ink);font-variant-numeric:tabular-nums}
-.game-bar .chip-button{margin-left:auto}
-.game-host{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;user-select:none;-webkit-user-select:none}
+.game-bar .chip-button{margin-left:auto;flex:none;padding:0 12px}
+.game-host{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.game-bar .game-sound{min-width:34px;padding:0 6px;font-size:15px}
+.game-bar .game-sound+.chip-button{margin-left:0}
 .game-canvas{display:block;border-radius:16px;box-shadow:var(--shadow)}
 .game-how{text-align:center;margin-top:14px}
 .game-status{margin:0;font-size:13px;font-weight:800;color:var(--ink2);text-align:center}

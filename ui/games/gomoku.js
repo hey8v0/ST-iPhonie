@@ -81,7 +81,7 @@ export default {
         thinking = false;
         const m = bestMove(b, 2);
         if (!m) { over = true; draw(); api.over({text: '下满了，平局'}); return; }
-        place(m[0], m[1], 2); draw();
+        place(m[0], m[1], 2); api.sound?.('place'); draw();
         if (five(b, m[0], m[1])) { over = true; say('手机赢了'); api.over({text: '手机连成了五个，再来一局？'}); return; }
         say('轮到你（黑）');
       }, 260);
@@ -90,7 +90,7 @@ export default {
       if (over || thinking) return;
       const r = c.getBoundingClientRect(), x = Math.floor((e.clientX - r.left) / (r.width / N)), y = Math.floor((e.clientY - r.top) / (r.height / N));
       if (x < 0 || y < 0 || x >= N || y >= N || b[y][x]) return;
-      place(x, y, 1); draw();
+      place(x, y, 1); api.sound?.('place'); draw();
       const mine = moves.filter((_, i) => i % 2 === 0).length;
       api.score(mine);
       if (five(b, x, y)) { over = true; say('你赢了！'); api.over({score: mine, win: true, text: `用了 ${mine} 步赢下手机`}); return; }

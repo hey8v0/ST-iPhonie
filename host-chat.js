@@ -42,7 +42,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
 
   /** Asks the model for the contact's next messages and stores them. One request per chat at a time. */
-  function reply(threadId) {
+  /** nudge: 主动找你 — the contact may also choose not to text (null then), and no 正在输入 shows meanwhile. */
+  function reply(threadId, {nudge = false} = {}) {
     if (busy.has(threadId)) return busy.get(threadId);
     const job = (async () => {
       const ctx = context();
@@ -53,7 +54,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       const s = settings(), preset = activeChatPreset(s.chat), people = members(thread), voiceFormat = backend.voiceFormat(), user = userName();
       // Voice switched off: nobody sends voice messages.
       if (s.general.voiceEnabled === false) for (const p of people) p.voice = false;
-      backend.emit('chat', {threadId, typing: true});
+      if (!nudge) backend.emit('chat', {threadId, typing: true});
       const recent = story(preset);
       // 世界书: scanned over who is in the chat, the recent story and the chat itself, as the story's own request would be.
       const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
@@ -61,9 +62,12 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       // 记忆: the written-up older chat, and older messages that match the latest ones.
       const query = thread.messages.filter(m => m.kind !== 'system').slice(-6).map(m => messageLine(m, user)).join('\n');
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
-      const prompt = buildChatRequest({preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}});
-      const text = cleanTagged(await backend.generateText(ctx, {prompt, trimNames: false}), preset.cleanTags);
+      const prompt = buildChatRequest({preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}});
+      const answer = cleanTagged(await backend.generateText(ctx, {prompt, trimNames: false}), preset.cleanTags);
+      // 「[不发]」 (also as 「名字：[不发]」) is a no, not a message.
+      const text = nudge ? answer.split('\n').filter(line => !/\[不发\]/.test(line)).join('\n') : answer;
       const items = parseChatReply(text, {members: people, user, voiceFormat, voiceNames: people.filter(p => p.voice).map(p => p.name), stickers: settings().chat.stickers || []});
+      if (!items.length && nudge) return null;
       if (!items.length) throw Error('这次没有收到消息，可以再试一次');
       const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
       const saved = await backend.chatMutate(threadId, () => settle(threadId, items));
@@ -331,14 +335,17 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     }
     return sent;
   }
-  /** Every `every` story replies with nothing sent, someone may text first (one phone request, at most dailyMax a day). */
+  /**
+   * Every `every` story replies with nothing sent, someone is asked whether they would text first now (one phone
+   * request; they may say no). At most dailyMax messages a day (0: no limit).
+   */
   async function nudge() {
     const ctx = context(), o = settings().chat.proactive || {};
     if (++since < o.every) return;
     since = 0;
     let day = {day: new Date().toDateString(), n: 0};
     try { const saved = JSON.parse(localStorage.getItem(DAY_KEY) || 'null'); if (saved?.day === day.day) day = saved; } catch { /* this session only */ }
-    if (day.n >= o.dailyMax) return;
+    if (o.dailyMax > 0 && day.n >= o.dailyMax) return;
     // The card's own character first, else someone from the 角色 App.
     // Not someone who is not friends with the user right now (either way).
     const apart = new Set((await backend.threads()).filter(t => t.type === 'dm' && t.friend).map(t => t.members[0]));
@@ -347,9 +354,11 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     if (!name) return;
     try {
       const thread = await dmWith(name), before = new Set((await backend.chats.get(thread.id))?.messages.map(x => x.id) || []);
-      const saved = await reply(thread.id);
+      const saved = await reply(thread.id, {nudge: true});
       const fresh = (saved?.messages || []).filter(x => !before.has(x.id) && x.from !== 'me');
-      if (fresh.length) { notice(`${name} 给你发来 ${fresh.length} 条消息`); backend.emit('chat', {threadId: thread.id, incoming: {from: name, text: fresh.at(-1).text || '', kind: fresh.at(-1).kind, count: fresh.length}}); }
+      // Only messages sent count toward the day; 「[不发]」 does not.
+      if (!fresh.length) return;
+      notice(`${name} 给你发来 ${fresh.length} 条消息`); backend.emit('chat', {threadId: thread.id, incoming: {from: name, text: fresh.at(-1).text || '', kind: fresh.at(-1).kind, count: fresh.length}});
       day.n++;
       try { localStorage.setItem(DAY_KEY, JSON.stringify(day)); } catch { /* counted for this session */ }
     } catch { /* not worth interrupting the story */ }

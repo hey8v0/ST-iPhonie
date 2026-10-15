@@ -52,6 +52,7 @@ export default {
     }
     function finish(won) {
       over = true; win.clearInterval(clock); draw();
+      if (!won) api.sound?.('boom');
       api.over(won ? {score: seconds(), win: true, text: `用了 ${seconds()} 秒排完了雷`} : {text: '踩到雷了'});
     }
     function check() { if (grid.flat().every(c => c.mine || c.open)) finish(true); }
@@ -59,7 +60,7 @@ export default {
       if (over) return;
       if (!grid) { grid = layMines(x, y); started = Date.now(); clock = win.setInterval(() => api.score(seconds()), 1000); api.score(1); }
       const c = grid[y][x];
-      if (flagging && !c.open) { c.flag = !c.flag; draw(); return; }
+      if (flagging && !c.open) { c.flag = !c.flag; api.sound?.('flag'); draw(); return; }
       if (c.open && c.n) {
         // A number with its mines flagged: the rest around it opens.
         const near = around(x, y);
@@ -67,9 +68,9 @@ export default {
         draw(); check(); return;
       }
       if (openAt(grid, x, y) < 0) return finish(false);
-      draw(); check();
+      api.sound?.('open'); draw(); check();
     }
-    function flag(x, y) { if (over || !grid || grid[y][x].open) return; grid[y][x].flag = !grid[y][x].flag; draw(); }
+    function flag(x, y) { if (over || !grid || grid[y][x].open) return; grid[y][x].flag = !grid[y][x].flag; api.sound?.('flag'); draw(); }
     const cellOf = e => { const b = e.target.closest('.mine'); return b ? [Number(b.dataset.x), Number(b.dataset.y)] : null; };
     el.addEventListener('pointerdown', e => { const at = cellOf(e); if (!at || e.button > 0) return; press = {at, timer: win.setTimeout(() => { press.long = true; flag(...at); }, 420)}; });
     for (const t of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(t, () => { if (press) win.clearTimeout(press.timer); });

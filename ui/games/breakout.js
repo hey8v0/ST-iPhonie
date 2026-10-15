@@ -36,12 +36,12 @@ export default {
       if (ball[0] > w - r) { ball[0] = w - r; vx = -Math.abs(vx); }
       if (ball[1] < r) { ball[1] = r; vy = Math.abs(vy); }
       if (vy > 0 && ball[1] + r >= py && ball[1] + r <= py + ph + 6 && Math.abs(ball[0] - paddle) <= pw / 2 + r) {
-        [vx, vy] = bounce((ball[0] - paddle) / (pw / 2), speed); ball[1] = py - r;
+        [vx, vy] = bounce((ball[0] - paddle) / (pw / 2), speed); ball[1] = py - r; api.sound?.('bounce');
       }
-      if (ball[1] > h + r) { lives--; if (lives <= 0) { over = true; tick.stop(); draw(); api.over({score, text: `打到了第 ${level} 关`}); } else held = true; return; }
+      if (ball[1] > h + r) { lives--; if (lives <= 0) { over = true; tick.stop(); draw(); api.over({score, text: `打到了第 ${level} 关`}); } else { held = true; api.sound?.('miss'); } return; }
       const col = Math.floor(ball[0] / bw), row = Math.floor((ball[1] - top) / bh);
       if (row >= 0 && row < ROWS && col >= 0 && col < COLS && bricks[row][col]) {
-        bricks[row][col] = 0; score += (ROWS - row) * 10; api.score(score);
+        bricks[row][col] = 0; score += (ROWS - row) * 10; api.score(score); api.sound?.('brick');
         // From the side or from above/below: whichever edge is nearer.
         const cx = (col + .5) * bw, cy = top + (row + .5) * bh;
         if (Math.abs(ball[0] - cx) / bw > Math.abs(ball[1] - cy) / bh) vx = -vx; else vy = -vy;

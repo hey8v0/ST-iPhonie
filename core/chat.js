@@ -221,8 +221,9 @@ export function normalizeChat(value) {
  * on: the story may have characters text the user (<phone> in a story reply, no request of its own); every: besides,
  * every this many story replies someone may text first (0: never; one phone request each), at most dailyMax a day.
  */
+// dailyMax 0: no limit a day.
 export function normalizeProactive(value = {}) {
-  return {on: value?.on === true, every: count(value?.every, 0, 100, 0), dailyMax: count(value?.dailyMax, 1, 20, 3)};
+  return {on: value?.on === true, every: count(value?.every, 0, 100, 0), dailyMax: count(value?.dailyMax, 0, 99, 3)};
 }
 export const PHONE_TAG = /<phone\b([^>]*)>([\s\S]*?)<\/phone\s*>/gi;
 /**
@@ -385,7 +386,7 @@ export function knowsRule(names, user, {group = false} = {}) {
     `- 自己在场经历的事，自然记得，可以聊起来。剧情里看不出${names.length === 1 ? names[0] : '一个人'}在不在场的，就当不知道。`,
     group ? `- 群里的消息大家都看得到：各人知道的不一样，私事一般不在群里说。` : ''].filter(Boolean).join('\n');
 }
-export function buildChatRequest({preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null}) {
+export function buildChatRequest({preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, nudge = false}) {
   const group = thread.type === 'group';
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
@@ -423,7 +424,10 @@ export function buildChatRequest({preset, thread, members, story = [], user = '�
   ].filter(Boolean).join('\n\n');
   const history = thread.messages.filter(m => m.kind !== 'system').slice(-preset.history);
   const last = history.at(-1);
-  const turn = asking ? `（${user}发来了好友申请，现在由${partner}决定。）` : !history.length ? `（聊天刚开始：${group ? '群里有人' : partner}主动给${user}发消息。）`
+  // 主动找你: whether to text at all is the model's to judge, by the preset's 「正文里主动发消息」 rule; [不发] is no.
+  const when = nudge ? preset.entries.find(e => e.id === 's-text' && e.enabled && e.text.trim()) : null;
+  const turn = nudge ? [`（剧情走到这里。${partner}这时会不会主动在手机上给${user}发消息？`, when ? `什么时候会发：${fill(when.text, values)}` : '有合适的理由才发：刚分开、想起对方、有事要说、关系有变化……', `会就照上面的格式写；这时没有合适的理由，就只写一行「[不发]」。不用每次都发。）`].join('\n')
+    : asking ? `（${user}发来了好友申请，现在由${partner}决定。）` : !history.length ? `（聊天刚开始：${group ? '群里有人' : partner}主动给${user}发消息。）`
     : last.from === 'me' ? `（现在轮到${group ? '群里的成员' : partner}回复${user}。）`
     : `（${group ? '群里' : partner}可以继续说，或者换个话题。）`;
   const transcript = history.length ? `【${group ? thread.name + '（群聊）' : '和' + partner}的聊天记录】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}\n\n` : '';

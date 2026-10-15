@@ -59,6 +59,7 @@ export default {
       const done = clearRows(board);
       board = done.board;
       if (done.cleared) { lines += done.cleared; score += POINTS[done.cleared] * level; level = 1 + Math.floor(lines / 10); api.score(score); }
+      api.sound?.(done.cleared ? 'line' : 'drop', {count: done.cleared});
       spawn();
     }
     function act(what) {
@@ -69,7 +70,7 @@ export default {
       else if (what === 'turn') {
         const cells = turned(piece.kind, piece.cells);
         // Against a wall it steps aside to turn.
-        for (const kick of [0, -1, 1, -2, 2]) if (fits(board, cells, piece.x + kick, piece.y)) { piece.cells = cells; piece.x += kick; break; }
+        for (const kick of [0, -1, 1, -2, 2]) if (fits(board, cells, piece.x + kick, piece.y)) { piece.cells = cells; piece.x += kick; api.sound?.('turn'); break; }
       }
       draw();
     }

@@ -4,6 +4,7 @@
 // Best scores are kept in this browser (ui/games/kit.js store).
 import {createView, esc, heading} from './common.js';
 import {store} from './games/kit.js';
+import {gameSounds} from './games/sound.js';
 import g2048 from './games/g2048.js';
 import snake from './games/snake.js';
 import tetris from './games/tetris.js';
@@ -17,7 +18,7 @@ export const GAMES = [g2048, snake, tetris, gomoku, mines, memory, slide, breako
 const scoreText = (game, n) => game.unit === '秒' ? `${n} 秒` : game.unit === '步' ? `${n} 步` : String(n);
 
 export function gamesApp(ctx) {
-  const v = createView(ctx, 'games'), best = store(ctx.win), keys = new ctx.win.AbortController();
+  const v = createView(ctx, 'games'), best = store(ctx.win), keys = new ctx.win.AbortController(), sounds = gameSounds(ctx.win);
   let game = null, play = null, paused = false;
 
   function renderList() {
@@ -30,7 +31,7 @@ export function gamesApp(ctx) {
   }
   function bar() {
     const b = best.best(game.id);
-    return `<div class="game-bar"><div class="game-score"><small>${game.unit === '秒' ? '用时' : game.unit === '步' ? '步数' : '分数'}</small><b data-game-score>0</b></div><div class="game-score"><small>${game.lower ? '最好' : '最高'}</small><b data-game-best>${b ? esc(scoreText(game, b)) : '—'}</b></div><button type="button" class="chip-button" data-action="game-restart">重新开始</button></div>`;
+    return `<div class="game-bar"><div class="game-score"><small>${game.unit === '秒' ? '用时' : game.unit === '步' ? '步数' : '分数'}</small><b data-game-score>0</b></div><div class="game-score"><small>${game.lower ? '最好' : '最高'}</small><b data-game-best>${b ? esc(scoreText(game, b)) : '—'}</b></div><button type="button" class="chip-button game-sound" data-action="game-sound" aria-pressed="${sounds.on}" aria-label="音效">${sounds.on ? '🔊' : '🔇'}</button><button type="button" class="chip-button" data-action="game-restart">重新开始</button></div>`;
   }
   /** The game as it is now is kept (or forgotten when it is over), to go on with next time. */
   function persist() { if (game && play?.state) best.keep(game.id, play.state()); }
@@ -44,10 +45,13 @@ export function gamesApp(ctx) {
     paused = false;
     if (!saved) best.played(game.id);
     play = game.make({doc: ctx.doc, win: ctx.win, host, saved, api: {
+      /** A sound of the game (ui/games/sound.js), when sound is on. */
+      sound: (name, options) => sounds.play(name, options),
       score: n => { const el = v.root.querySelector('[data-game-score]'); if (el) el.textContent = scoreText(game, n); },
       /** The game ended: the score is offered as a best; the card says so. win: it was won (not lost). */
       over: ({score = 0, win = false, text = '', goOn = false} = {}) => {
         const record = best.offer(game.id, score, {lower: !!game.lower});
+        sounds.play(record || win ? 'win' : 'lose');
         const el = v.root.querySelector('[data-game-over]');
         if (!el) return;
         el.innerHTML = `<div class="game-over-card"><strong>${record ? '新纪录！' : win ? '赢啦！' : '游戏结束'}</strong>${text ? `<p>${esc(text)}</p>` : ''}${score ? `<p class="game-over-score">${esc(scoreText(game, score))}</p>` : ''}<div class="actions">${goOn ? '<button type="button" class="secondary" data-action="game-go-on">接着玩</button>' : ''}<button type="button" class="primary" data-action="game-restart">再来一局</button></div></div>`;
@@ -77,6 +81,7 @@ export function gamesApp(ctx) {
 
   v.on('click', '[data-game]', el => open(el.dataset.game));
   v.on('click', '[data-action=game-restart]', () => restart());
+  v.on('click', '[data-action=game-sound]', el => { sounds.on = !sounds.on; el.textContent = sounds.on ? '🔊' : '🔇'; el.setAttribute('aria-pressed', String(sounds.on)); if (sounds.on) sounds.play('tap'); });
   v.on('click', '[data-action=game-go-on]', () => { v.root.querySelector('[data-game-over]').hidden = true; paused = false; play?.resume?.(); });
   // Keys while the game is on screen (not while typing somewhere).
   ctx.doc.addEventListener('keydown', e => {
@@ -94,7 +99,7 @@ export function gamesApp(ctx) {
   ctx.doc.addEventListener('keyup', e => { if (play && !paused && !e.target.closest?.('input, textarea')) later(); }, {signal: keys.signal});
   v.refresh = () => { if (!game) renderList(); };
   const dispose = v.dispose;
-  v.dispose = () => { close(); keys.abort(); dispose(); };
+  v.dispose = () => { close(); keys.abort(); sounds.close(); dispose(); };
   renderList();
   return v;
 }

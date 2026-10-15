@@ -35,7 +35,7 @@ export default {
       if (done) return;
       const next = slideTile(tiles, i);
       if (!next) return;
-      tiles = next; moves++; api.score(moves); draw();
+      tiles = next; moves++; api.score(moves); api.sound?.('slide'); draw();
       if (solved(tiles)) { done = true; api.over({score: moves, win: true, text: `${moves} 步排好了`}); }
     }
     // A swipe or an arrow moves the tile on that side of the hole the other way, into it.
@@ -44,8 +44,13 @@ export default {
       const i = {up: e + N, down: e - N, left: x < N - 1 ? e + 1 : -1, right: x ? e - 1 : -1}[dir];
       if (i >= 0 && i < N * N) push(i);
     }
-    el.addEventListener('click', e => { const b = e.target.closest('[data-tile]'); if (b) push(Number(b.dataset.tile)); });
-    swipes(el, go, {min: 30});
+    // A tap moves the tile under the finger as the finger lifts, not by the click after it: the board is drawn anew
+    // after every move, and quick taps in a row were taken by the browser as a double tap (zooming the page in).
+    // A click that is not a tap (keyboard, screen reader) still moves its tile.
+    let tapped = 0;
+    swipes(el, go, {min: 30, tap: (x, y, e) => { const b = doc.elementFromPoint?.(e.clientX, e.clientY)?.closest('[data-tile]'); if (b && el.contains(b)) { tapped = Date.now(); push(Number(b.dataset.tile)); } }});
+    el.addEventListener('touchend', e => { if (e.cancelable) e.preventDefault(); }, {passive: false});
+    el.addEventListener('click', e => { const b = e.target.closest('[data-tile]'); if (b && Date.now() - tapped > 500) push(Number(b.dataset.tile)); });
     function restart() { tiles = shuffled(); moves = 0; done = false; api.score(0); draw(); }
     if (saved?.tiles?.length === N * N) { tiles = saved.tiles; moves = Number(saved.moves) || 0; done = false; api.score(moves); draw(); } else restart();
     return {restart, state: () => done ? null : {tiles, moves}, key(e) { const d = ARROWS[e.key]; if (!d) return false; go(d); return true; }, dispose() { el.remove(); }};
