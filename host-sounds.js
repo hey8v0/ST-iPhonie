@@ -310,6 +310,13 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     if (tag.kind === 'ambience' && !tag.stop && ambience.name === tag.name) { wanted = ''; stopAmbience(1); return; }
     return cue(tag);
   }
+  /** 视觉小说: the story reached a sound tag (快进 runs past the one-off sounds; an ambience still changes). Once. */
+  async function stage(id, index, {skipping = false} = {}) {
+    const raw = rawOf(Number(id)), tag = raw === null ? null : parseSounds(raw)[Number(index)];
+    if (!tag || !on() || skipping && tag.kind === 'sfx' || !once(Number(id), raw, tag, VOICE_AGAIN)) return;
+    await unlock();
+    return cue(tag);
+  }
   /** 试听 in the 音效 App: one sound as it is, once (again: stops it). */
   async function listen(soundId) {
     if (preview) { const p = preview; preview = null; try { p.stop(); } catch {} if (p.soundId === soundId) return false; }
@@ -343,5 +350,5 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     const c = ctx; ctx = null;
     setTimer(() => { try { c?.close(); } catch {} }, 200);
   }
-  return {unlock, received, rendered, voice, chatChanged, messageChanged, refresh, tap, listen, state, promptPlan, close, stopAmbience: () => { wanted = ''; stopAmbience(1); }, reload, cue};
+  return {unlock, received, rendered, voice, chatChanged, messageChanged, refresh, tap, stage, listen, state, promptPlan, close, stopAmbience: () => { wanted = ''; stopAmbience(1); }, reload, cue};
 }

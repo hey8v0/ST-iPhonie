@@ -19,7 +19,7 @@ export const APPS = {
   music: {name: '音乐', eyebrow: 'Music', colors: ['#ffb3c7', '#e8507a', '#ffe08a']},
   games: {name: '游戏', eyebrow: 'Arcade', colors: ['#b9f3c9', '#33b36b', '#ffd36a']},
   paint: {name: '画画', eyebrow: 'Paint', colors: ['#ffd1e6', '#e85d9b', '#7fd0ff']},
-  vn: {name: '视觉小说', eyebrow: 'Visual Novel', colors: ['#ffd9ea', '#9a7cf0', '#ffe39a']}
+  vn: {name: '视觉小说', eyebrow: 'Visual Novel', colors: ['#ffd49a', '#f07a45', '#fff2b8']}
 };
 
 export const SLOT = null;

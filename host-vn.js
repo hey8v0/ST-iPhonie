@@ -2,8 +2,10 @@
 // the stage (vn-stage.js) fed with the chat's messages one by one, and the 立绘 kept as files in the tavern's images
 // (settings.vn.cast), so every device sees them.
 import {openVnStage} from './vn-stage.js';
-import {storySteps, userSteps} from './core/vn.js';
+import {storySteps, userSteps, pickLook} from './core/vn.js';
 import {parsePictures} from './core/draw.js';
+import {parseSounds} from './core/sounds.js';
+import {parseBgm} from './core/music.js';
 
 const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? record.versions : record.url ? [{...record}] : [];
 /** The drawn picture of a story picture block, as shown in the chat (the chosen version). */
@@ -17,10 +19,11 @@ const OWN = /^\/?user\/images\//;
 
 /**
  * linesOf(id): the message's voice lines (with places); voiced(line): whether it has a voice; play(id, index) plays one
- * line; stop() stops; voiceOn(): voice is on; avatars(): the tavern's avatars ({me, characters}); closePanel(): puts
- * the phone away.
+ * line; narrate(text) reads story in the 旁白's voice; stop() stops; voiceOn(): voice is on; sound(id, index) /
+ * music(id, index): plays a sound tag / <bgm> of a message (sounds() / musicOn(): whether they are on); avatars(): the
+ * tavern's avatars ({me, characters}); closePanel(): puts the phone away.
  */
-export function createVnHost({context, settings, backend, linesOf, voiced, play, stop, voiceOn, avatars, notice, closePanel = () => {}, doc = document}) {
+export function createVnHost({context, settings, backend, linesOf, voiced, play, narrate = () => {}, stop, voiceOn, sound = () => {}, music = () => {}, sounds = () => false, musicOn = () => false, avatars, notice, closePanel = () => {}, doc = document}) {
   let stage = null, cursor = 0, endTimer = 0;
   const vn = () => settings().vn;
   const chat = () => context()?.chat || [];
@@ -31,7 +34,8 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     if (m.is_user) return userSteps(m.mes, m.name || context()?.name1 || '你').map(s => ({...s, id}));
     const lines = linesOf(id) || [];
     const pics = parsePictures(m.mes || '').map(t => ({start: t.start, url: pictureUrl(m, t.hash)}));
-    return storySteps(m.mes || '', lines, {pics, skip: settings().narration?.skip}).map(s => s.kind === 'say' ? {...s, id, voiced: !!voiced(lines[s.line])} : {...s, id});
+    const tags = sounds() ? parseSounds(m.mes || '') : [], songs = musicOn() ? parseBgm(m.mes || '') : [];
+    return storySteps(m.mes || '', lines, {pics, sounds: tags, bgm: songs, skip: settings().narration?.skip}).map(s => s.kind === 'say' ? {...s, id, voiced: !!voiced(lines[s.line])} : {...s, id});
   }
   /** Where the stage starts: the last story picture before the message (softened), else the chat's own background. */
   function backdrop(start) {
@@ -78,9 +82,11 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       doc, title: title(), subtitle: start > 0 ? `从第 ${start} 楼开始` : '从头开始', backdrop: backdrop(start),
       look: vn,
       source: {next: () => { while (cursor < chat().length) { const id = cursor++, steps = stepsOf(id); if (steps?.length) return {id, steps}; } return null; }},
-      voice: {play: s => play(s.id, s.line), stop, on: voiceOn},
+      voice: {play: s => play(s.id, s.line), narrate: s => narrate(s.text), stop, on: voiceOn},
+      // 快进 runs past the one-off sounds; the ambience and the music still change to where it stops.
+      cue: (s, {skipping}) => { if (s.kind === 'bgm') music(s.id, s.index); else sound(s.id, s.index, {skipping}); },
       face: (name, user) => user ? tavern.me : tavern.characters?.[name] || avatars().characters?.[name] || '',
-      sprite: name => vn().cast?.[name]?.sprite || '',
+      sprite: (name, how) => pickLook(vn().cast?.[name], how),
       send,
       save: patch => { try { backend.saveVn(patch); } catch (error) { notice(error.message); } },
       onClose: id => {
@@ -130,11 +136,15 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     return true;
   }
 
-  /** Keeps a 立绘 (a PNG with its background taken off) as a file in the tavern; null takes it away. */
-  async function setSprite(name, blob) {
+  /**
+   * Keeps a 立绘 (a PNG with its background taken off) as a file in the tavern; null takes it away. look: '' for the
+   * usual one, else a 表情 or 动作 id; seed: what the usual one was drawn with (its 表情 are drawn with it too).
+   */
+  async function setSprite(name, blob, {look = '', seed} = {}) {
     name = String(name || '').trim();
     if (!name) throw Error('没有角色名');
-    const s = settings(), old = s.vn.cast?.[name]?.sprite || '';
+    const s = settings(), entry = s.vn.cast?.[name] || {sprite: '', looks: {}, actions: []};
+    const old = (look ? entry.looks?.[look]?.sprite : entry.sprite) || '';
     let url = '';
     if (blob) {
       const ctx = context();
@@ -142,15 +152,17 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       if (!response.ok) throw Error('立绘没能存进酒馆（' + response.status + '）');
       url = (await response.json()).path;
     }
-    const cast = {...s.vn.cast};
-    if (url) cast[name] = {sprite: url, at: Date.now()}; else delete cast[name];
-    backend.saveVn({cast});
+    const next = {...entry, looks: {...entry.looks}};
+    if (look) { if (url) next.looks[look] = {sprite: url, at: Date.now()}; else delete next.looks[look]; }
+    else { next.sprite = url; next.at = Date.now(); if (url && Number.isInteger(seed) && seed >= 0) next.seed = seed; else if (!url) delete next.seed; }
+    backend.saveVn({cast: {...s.vn.cast, [name]: next}});
     if (old && old !== url && OWN.test(old)) fetch('/api/images/delete', {method: 'POST', headers: context().getRequestHeaders(), body: JSON.stringify({path: old})}).catch(() => {});
     return url;
   }
 
   return {
     open, buttons, click, setSprite,
+    get showing() { return !!stage; },
     status(phase) { stage?.status(phase); },
     refresh() { stage?.refresh(); buttons(); },
     /** A reply was drawn: the stage goes on with it. */

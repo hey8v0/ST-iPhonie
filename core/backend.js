@@ -312,7 +312,8 @@ export class TTSBackend {
         const s = this.settings, names = drawCast(s, this.space, []) || s.routes.map(r => r.name);
         return [...new Set(names)].filter(n => n && !isPlaceholderRole(n) && n !== NARRATOR).map(name => {
             const route = s.routes.find(r => r.name === name);
-            return { name, appearance: route?.appearance || '', sprite: s.vn.cast[name]?.sprite || '' };
+            const entry = s.vn.cast[name];
+            return { name, appearance: route?.appearance || '', sprite: entry?.sprite || '', seed: entry?.seed ?? -1, looks: clone(entry?.looks || {}), actions: clone(entry?.actions || []) };
         });
     }
     updateGeneral(patch) {

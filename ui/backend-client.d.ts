@@ -16,14 +16,21 @@ export interface VnSettings {
     speed: number;
     wait: number;
     voice: boolean;
+    /** 旁白读叙述: the story between the lines in 整篇朗读's voice. */
+    narrate: boolean;
     font: 's' | 'm' | 'l';
-    box: 'night' | 'day' | 'sakura' | 'ink';
+    box: 'night' | 'day' | 'sakura' | 'ink' | 'tavern' | 'phone';
+    /** 跟随小手机: the phone's colours, copied by the 视觉小说 App. */
+    palette: { box: string; box2: string; ink: string; soft: string; plate: string; plateInk: string; line: string } | null;
     opacity: number;
     effects: boolean;
     /** What every 立绘 asks of the picture (after the 画风, before the looks). */
     rule: string;
-    cast: Record<string, { sprite: string; at: number }>;
+    /** Each character's 立绘: the usual one (and its seed), 表情 and 动作 by id in looks, their own 动作. */
+    cast: Record<string, VnCastEntry>;
 }
+export interface VnAction { id: string; label: string; tags: string; words: string[]; }
+export interface VnCastEntry { sprite: string; at: number; seed?: number; looks: Record<string, { sprite: string; at: number }>; actions: VnAction[]; }
 /** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
 export interface NarrationSettings {
     enabled: boolean;
@@ -533,9 +540,9 @@ export interface BackendFacade {
     saveNarration(patch: Partial<NarrationSettings> & {skip?: string[] | string}): NarrationSettings;
     saveVn(patch: Partial<VnSettings>): VnSettings;
     /** The people of the open card (everyone when none is open), with their looks and 立绘. */
-    vnCast(): Array<{ name: string; appearance: string; sprite: string }>;
+    vnCast(): Array<{ name: string; appearance: string; sprite: string; seed: number; looks: Record<string, { sprite: string; at: number }>; actions: VnAction[] }>;
     /** The drawing request for a character's 立绘; appearance / rule: changed for this one picture. */
-    vnSpriteRequest(name: string, options?: { appearance?: string; rule?: string }): { prompt: string; negative: string; characters: Array<{ prompt: string; negative: string; position: number }>; params: Record<string, unknown> };
+    vnSpriteRequest(name: string, options?: { appearance?: string; rule?: string; extra?: string; seed?: number }): { prompt: string; negative: string; characters: Array<{ prompt: string; negative: string; position: number }>; params: Record<string, unknown> };
     saveRoute(route: RouteInput): Route;
     /** 候选音色池: the voices 自动挑音色 picks from first. */
     saveVoicePool(list: VoicePoolEntry[]): VoicePoolEntry[];
@@ -990,7 +997,7 @@ export interface BackendAPI extends BackendFacade {
     /** 视觉小说: opens the stage over the tavern page, from the latest reply, the first message or a message id. */
     vnStart(from: 'latest' | 'first' | number): boolean;
     /** Keeps a 立绘 (PNG) as a tavern image for a character; null takes it away. Resolves to its path. */
-    vnSprite(name: string, blob: Blob | null): Promise<string>;
+    vnSprite(name: string, blob: Blob | null, options?: { look?: string; seed?: number }): Promise<string>;
     /** The tavern's persona name ('' outside the tavern). */
     userName(): string;
     /** Facts for the self-check report (core/diagnostics.js buildReport). Asks whether keys work; never returns them. */

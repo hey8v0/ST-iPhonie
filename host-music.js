@@ -138,6 +138,8 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     if (track?.from === 'bgm' && track.title === want.title && ['playing', 'paused'].includes(phase)) return toggle();
     return playBgm(want);
   }
+  /** 视觉小说: the story reached a <bgm>; the song already playing goes on. */
+  function stage(id, at) { const want = bgmOf(id)[at]; return want ? playBgm(want).catch(e => notice('背景音乐：' + e.message)) : undefined; }
   /** The rule for the story request, and 一起听 when the user plays a song themselves. */
   function promptPlan() {
     const user = context()?.name1 || '我', rule = bgmRule(opts(), {recent, library, user});
@@ -152,7 +154,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
       lyric: at >= 0 ? lyrics[at].text : '', lyricIndex: at, lyrics: lyrics.map(l => ({at: l.at, text: l.text}))};
   }
   return {
-    playList, next: () => next(1), prev: () => next(-1), toggle, stop, status, rendered, tap, promptPlan,
+    playList, next: () => next(1), prev: () => next(-1), toggle, stop, status, rendered, tap, stage, promptPlan,
     play: t => playList([t], 0),
     seek(seconds) { if (audio && Number.isFinite(seconds)) { audio.currentTime = Math.max(0, seconds); emit(); } },
     /** The voice player's phase: music is turned down while a line is voiced. */
