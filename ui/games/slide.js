@@ -30,7 +30,8 @@ export default {
     el.className = 'slide';
     host.append(el);
     let tiles, moves, done;
-    function draw() { el.innerHTML = tiles.map((t, i) => t ? `<button type="button" class="slide-tile${t === i + 1 ? ' home' : ''}" data-tile="${i}">${t}</button>` : '<span class="slide-hole"></span>').join(''); }
+    // A tile in its place is marked slide-placed (it was 'home', which is the phone's own home screen: full size, on top).
+    function draw() { el.innerHTML = tiles.map((t, i) => t ? `<button type="button" class="slide-tile${t === i + 1 ? ' slide-placed' : ''}" data-tile="${i}">${t}</button>` : '<span class="slide-hole"></span>').join(''); }
     function push(i) {
       if (done) return;
       const next = slideTile(tiles, i);
@@ -49,8 +50,8 @@ export default {
     // A click that is not a tap (keyboard, screen reader) still moves its tile.
     let tapped = 0;
     swipes(el, go, {min: 30, tap: (x, y, e) => { const b = doc.elementFromPoint?.(e.clientX, e.clientY)?.closest('[data-tile]'); if (b && el.contains(b)) { tapped = Date.now(); push(Number(b.dataset.tile)); } }});
-    // iPhone: a finger held on a tile must not lift it out as a big preview, select it or zoom (the board then took no
-    // more taps). Pointer events still come; only the browser's own touch handling is stopped.
+    // A finger held or tapping fast must not select, zoom or bring up the browser's menus. Pointer events still come;
+    // only the browser's own touch handling is stopped.
     for (const type of ['touchstart', 'touchend']) el.addEventListener(type, e => { if (e.cancelable) e.preventDefault(); }, {passive: false});
     el.addEventListener('click', e => { const b = e.target.closest('[data-tile]'); if (b && Date.now() - tapped > 500) push(Number(b.dataset.tile)); });
     function restart() { tiles = shuffled(); moves = 0; done = false; api.score(0); draw(); }

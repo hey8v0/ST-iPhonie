@@ -2372,7 +2372,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 /* 数字华容道 */
 .slide{display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(4,1fr);gap:8px;width:min(100%,320px);aspect-ratio:1;padding:8px;border-radius:18px;background:var(--card2);box-shadow:var(--shadow);touch-action:none}
 .slide-tile{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none;display:grid;place-items:center;border-radius:12px;background:var(--card);color:var(--ink);font-size:26px;font-weight:900;box-shadow:0 3px 0 color-mix(in srgb,var(--accent) 30%,transparent)}
-.slide-tile.home{background:var(--accent-soft);color:var(--accent-ink)}
+.slide-tile.slide-placed{background:var(--accent-soft);color:var(--accent-ink)}
 .slide-hole{border-radius:12px}
 @media (prefers-reduced-motion:reduce){.t2048.new,.card-flip{animation:none;transition:none}}
 /* 画画 (ui/paint.js, ui/paint/*) */
