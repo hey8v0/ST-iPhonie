@@ -1,4 +1,5 @@
-import { normalizeNarration } from './narration.js';
+import { normalizeNarration, NARRATOR } from './narration.js';
+import { normalizeVn, spriteRequest } from './vn.js';
 import { MomentStore } from './moments-store.js';
 import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
@@ -298,6 +299,21 @@ export class TTSBackend {
         const next = this.getState();
         next.narration = normalizeNarration({ ...next.narration, ...clone(patch) });
         return clone(this.save(next).narration);
+    }
+    /** 视觉小说: its settings (the 立绘 of each character are in cast). */
+    saveVn(patch) {
+        if (!patch || typeof patch !== 'object') throw Error('设置格式无效');
+        const next = this.getState();
+        next.vn = normalizeVn({ ...next.vn, ...clone(patch) });
+        return clone(this.save(next).vn);
+    }
+    /** 视觉小说: the people of the open card (everyone when no card is open), with their looks and 立绘. */
+    vnCast() {
+        const s = this.settings, names = drawCast(s, this.space, []) || s.routes.map(r => r.name);
+        return [...new Set(names)].filter(n => n && !isPlaceholderRole(n) && n !== NARRATOR).map(name => {
+            const route = s.routes.find(r => r.name === name);
+            return { name, appearance: route?.appearance || '', sprite: s.vn.cast[name]?.sprite || '' };
+        });
     }
     updateGeneral(patch) {
         if (!patch || typeof patch !== 'object') throw Error('设置格式无效');
@@ -2280,7 +2296,7 @@ export class TTSBackend {
     api() {
         const methods = {
             getState: () => this.getState(), getSnapshot: () => this.getSnapshot(), save: (next, revision) => this.save(next, revision),
-            updateGeneral: patch => this.updateGeneral(patch), saveNarration: patch => this.saveNarration(patch), saveRoute: route => this.saveRoute(route), saveVoicePool: list => this.saveVoicePool(clone(list)), deleteRoute: id => this.deleteRoute(id),
+            updateGeneral: patch => this.updateGeneral(patch), saveNarration: patch => this.saveNarration(patch), saveVn: patch => this.saveVn(patch), vnCast: () => this.vnCast(), vnSpriteRequest: (name, options) => clone(spriteRequest(this.settings, String(name || ''), clone(options || {}))), saveRoute: route => this.saveRoute(route), saveVoicePool: list => this.saveVoicePool(clone(list)), deleteRoute: id => this.deleteRoute(id),
             switchRouteEngine, cleanAliases, validRoleName: name => typeof name === 'string' && !!name.trim() && !isPlaceholderRole(name),
             saveConnection: (engine, patch) => this.saveConnection(engine, patch),
             savePreset: preset => this.savePreset(preset), deletePreset: id => this.deletePreset(id), selectPreset: id => this.selectPreset(id),

@@ -10,6 +10,20 @@ export type InjectionPosition = 'in_chat' | 'in_prompt' | 'before_prompt';
 export type MessageRole = 'system' | 'user' | 'assistant';
 
 export interface VoiceBinding { voice: string; model: string; }
+/** 视觉小说 (core/vn.js). speed: index of VN_SPEEDS (4 = at once); wait: index of VN_WAITS; cast: each character's 立绘 (a tavern image path). */
+export interface VnSettings {
+    enabled: boolean;
+    speed: number;
+    wait: number;
+    voice: boolean;
+    font: 's' | 'm' | 'l';
+    box: 'night' | 'day' | 'sakura' | 'ink';
+    opacity: number;
+    effects: boolean;
+    /** What every 立绘 asks of the picture (after the 画风, before the looks). */
+    rule: string;
+    cast: Record<string, { sprite: string; at: number }>;
+}
 /** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
 export interface NarrationSettings {
     enabled: boolean;
@@ -116,6 +130,7 @@ export interface Settings {
     sounds: SoundSettings;
     music: MusicSettings;
     narration: NarrationSettings;
+    vn: VnSettings;
     text: TextSettings;
     /** 向量模型 for 记忆 (key kept as KeyEngine 'embed'). */
     embed: EmbedSettings;
@@ -516,6 +531,11 @@ export interface BackendFacade {
     updateGeneral(patch: Partial<GeneralSettings>): Settings;
     /** 整篇朗读: on/off, the 旁白's voice, the system voice and speed, the tags read past. */
     saveNarration(patch: Partial<NarrationSettings> & {skip?: string[] | string}): NarrationSettings;
+    saveVn(patch: Partial<VnSettings>): VnSettings;
+    /** The people of the open card (everyone when none is open), with their looks and 立绘. */
+    vnCast(): Array<{ name: string; appearance: string; sprite: string }>;
+    /** The drawing request for a character's 立绘; appearance / rule: changed for this one picture. */
+    vnSpriteRequest(name: string, options?: { appearance?: string; rule?: string }): { prompt: string; negative: string; characters: Array<{ prompt: string; negative: string; position: number }>; params: Record<string, unknown> };
     saveRoute(route: RouteInput): Route;
     /** 候选音色池: the voices 自动挑音色 picks from first. */
     saveVoicePool(list: VoicePoolEntry[]): VoicePoolEntry[];
@@ -864,7 +884,7 @@ export interface BackendAPI extends BackendFacade {
     /** Omit lineIndex to play the whole message. Generation requires an explicit user action. */
     play(messageId: number, lineIndex?: number): void;
     /** Latest chat messages, newest first, for choosing where to insert a picture. */
-    recentMessages(): Array<{ id: number; name: string; user: boolean; preview: string }>;
+    recentMessages(limit?: number): Array<{ id: number; name: string; user: boolean; preview: string }>;
     /** Uploads an album photo to the tavern and attaches it to the message. */
     insertImage(messageId: number, photoId: string): Promise<{ id: number; url: string }>;
     /** Asks the chat model for picture tags describing the latest scene. */
@@ -967,6 +987,10 @@ export interface BackendAPI extends BackendFacade {
     panelSizeName(): string;
     /** 画画 全屏: the floating phone fills the whole window (true), or goes back; returns whether it is opened up. */
     panelFull(on: boolean): boolean;
+    /** 视觉小说: opens the stage over the tavern page, from the latest reply, the first message or a message id. */
+    vnStart(from: 'latest' | 'first' | number): boolean;
+    /** Keeps a 立绘 (PNG) as a tavern image for a character; null takes it away. Resolves to its path. */
+    vnSprite(name: string, blob: Blob | null): Promise<string>;
     /** The tavern's persona name ('' outside the tavern). */
     userName(): string;
     /** Facts for the self-check report (core/diagnostics.js buildReport). Asks whether keys work; never returns them. */
