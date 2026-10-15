@@ -36,6 +36,8 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   const canvas = doc.createElement('canvas');
   canvas.className = 'paint-view';
   canvas.style.touchAction = 'none';
+  // iPad / iPhone: holding a finger still (the eyedropper) must not select the picture or lift it out as a preview.
+  for (const type of ['touchstart', 'touchend']) canvas.addEventListener(type, e => { if (e.cancelable) e.preventDefault(); }, {passive: false});
   host.append(canvas);
   const g = canvas.getContext('2d');
   let w = 0, h = 0, ratio = 1, view = null, raf = 0, penSeen = false, spaceDown = false, flipped = false;

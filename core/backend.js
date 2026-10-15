@@ -1580,8 +1580,9 @@ export class TTSBackend {
         if (mine) return mine;
         if (!this.settings.music.sources.some(s => s.enabled)) return null;
         const { songs } = await this.searchMusic([want.title, want.artist].filter(Boolean).join(' ')).catch(() => ({ songs: [] }));
-        const found = bestMatch(songs, want) || songs[0];
-        return found ? { origin: 'source', source: found.source, songId: found.id, title: found.title, artist: found.artist } : null;
+        // Nothing by that name: the search's first song stands in, marked so the player shows what really plays.
+        const match = bestMatch(songs, want), found = match || songs[0];
+        return found ? { origin: 'source', source: found.source, songId: found.id, title: found.title, artist: found.artist, ...(match ? {} : { standIn: true }) } : null;
     }
     saveSounds(patch) {
         const next = this.getState(), allowed = ['enabled', 'ambienceVolume', 'sfxVolume', 'vary', 'tapOnly', 'generate', 'versions', 'pack', 'packHidden'];

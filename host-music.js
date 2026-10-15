@@ -42,7 +42,11 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     if (t.source && t.songId) return {src: await backend.musicLink(t.source, t.songId, {title: t.title, artist: t.artist})};
     const found = await backend.findSong({title: t.title, artist: t.artist});
     if (!found) throw Error(opts().sources?.some(s => s.enabled) ? `没找到「${label(t)}」` : `歌单里没有「${label(t)}」，也还没有添加音源`);
-    Object.assign(t, found, {title: t.title || found.title, artist: t.artist || found.artist});
+    // A stand-in (nothing by that name was found) shows as itself: the same song for every pick means the source's
+    // search does not use the words it is given.
+    const {standIn, ...song} = found;
+    if (standIn && found.title) notice(`没搜到「${label(t)}」，先放搜到的「${label(found)}」`);
+    Object.assign(t, song, standIn && found.title ? {title: found.title, artist: found.artist || ''} : {title: t.title || found.title, artist: t.artist || found.artist});
     return source(t);
   }
   /** The same song on the enabled sources (same title), the ones not tried yet; other sources first. */
