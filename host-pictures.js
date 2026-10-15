@@ -27,7 +27,7 @@ const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? rec
  * voice: 回复后单独配音 ({wanted(), has(text), rules(), format()}): whether it is on, whether a reply already has its
  * lines voiced, the voice preset's prompt for the speakers and its 台词格式. Without it replies are never voiced here.
  */
-export function createPictureHost({context, redrawMessage = (id, message) => context().updateMessageBlock?.(id, message), settings, backend, marker, scheduleRender, openDraw, notice, voice = null, phone = null, speakers = () => []}) {
+export function createPictureHost({context, redrawMessage = (id, message) => context().updateMessageBlock?.(id, message), settings, backend, marker, scheduleRender, openDraw, notice, voice = null, phone = null, speakers = () => [], voiced: lined = () => {}}) {
   const jobs = new Map(); // queue key -> {state: 'generating'|'error', message}
   const folds = new Map(); // `${id}:${hash}` -> true/false, this session's fold choice per picture
   // The latest single tap on a picture: {key, id, message, tag, was, at, rect, timer, done}. It folds or unfolds the
@@ -205,6 +205,8 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       redrawMessage(id, message);
       scheduleRender();
       if (sent) phone.deliver(id).catch(() => {});
+      // The lines are in now: 提前生成 can make them.
+      if (voiced) lined(id);
       if (wantVoice && !voiced) notice('画面挑好了，台词这次没配上，可以在「设置 → 正文」里点「给最新回复配音」');
       if (wantPictures && !pictured) notice('台词配好了，画面这次没挑出来，可以在「设置 → 正文」里点「给最新回复配图」');
       return {voiced, pictured};

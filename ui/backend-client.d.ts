@@ -57,6 +57,8 @@ export interface GeneralSettings {
     voiceEnabled: boolean;
     hideStoryWaves: boolean;
     cacheEnabled: boolean;
+    /** 提前生成: a new reply's lines are made in the background and kept (not played). */
+    pregenerate?: boolean;
     floatingEnabled: boolean;
     waveformEnabled: boolean;
     /** Built-in wallpapers move slowly (clouds, stars, bubbles, leaves, fireflies). */

@@ -141,6 +141,8 @@ export class DialoguePlayer {
   this.controller = null;
   this.valid = () => true;
   this.played = new Set();
+  // Lines being made now, by request key: playing a line that 提前生成 is still making waits for it, not pays twice.
+  this.making = new Map();
   this.volume = volumeValue(sink.getVolume?.() ?? 1);
   this.clearMetadata();
  }
@@ -240,13 +242,44 @@ export class DialoguePlayer {
   const fromCache = !!blob;
   found(fromCache, key);
   if (!blob) {
-   blob = await this.providers.synthesize(request, signal);
+   // Someone else making the same line (提前生成, or the line ahead): its sound, unless that was given up.
+   // A request given up (stopped, the reply changed) is not waited for: it may never answer.
+   const shared = this.making.get(key);
+   if (shared && !shared.signal?.aborted) blob = await Promise.race([shared.job, new Promise(resolve => { shared.signal?.addEventListener('abort', () => resolve(null), { once: true }); signal?.addEventListener('abort', () => resolve(null), { once: true }); })]).catch(() => null);
+   if (!still()) return null;
+   if (!blob) {
+    const job = this.providers.synthesize(request, signal), entry = { job, signal };
+    this.making.set(key, entry);
+    const done = () => { if (this.making.get(key) === entry) this.making.delete(key); };
+    job.catch(() => {}).finally(done);
+    signal?.addEventListener('abort', done, { once: true });
+    blob = await job;
+   }
    if (!still()) return null;
    if (this.settings().general.cacheEnabled) await this.cache.put(key, blob, cacheEpoch, {
     line: copyLine(line), route: { name: effective.name, engine: effective.engine, model: effective.model, voice: effective.voice }, requestKey: key
    });
   }
   return { key, blob, fromCache, effective, request };
+ }
+ /**
+  * 提前生成: makes these lines one after another and keeps them in the cache, plays nothing. Lines nobody has a voice
+  * for are left out. Stops when `signal` is aborted or valid() turns false; a failure ends it (thrown). Returns how
+  * many were made (not counting ones already in the cache).
+  */
+ async prepare(lines, { valid = () => true, signal, each = () => {} } = {}) {
+  let made = 0;
+  for (const line of lines) {
+   const s = this.settings();
+   if (signal?.aborted || !valid() || !s.general.cacheEnabled) break;
+   if (line.narration) continue;
+   const route = findRoute(s.routes, line.role);
+   if (!route?.voice?.trim() && !(route?.engine === 'fish' && s.connections.fish.params.references.length) && !(route?.engine === 'mini' && s.connections.mini.params.timbre_weights.length)) continue;
+   const done = await this.make(line, route, s, signal || new AbortController().signal, () => {}, () => !signal?.aborted && valid());
+   if (!done) break;
+   if (!done.fromCache) { made++; each(line); }
+  }
+  return made;
  }
  /** Starts making the line at `index` now (one ahead of the one about to play); null when there is nothing to make. */
  makeAhead(index, signal) {
