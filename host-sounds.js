@@ -32,6 +32,8 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
   // ---------- Sound out ----------
   function audio() {
     if (!ctx && AudioContextClass && !closed) {
+      // Phones: Web Audio in the same session as the music (an <audio>), so a sound plays over it instead of stopping it.
+      try { const s = globalThis.navigator?.audioSession; if (s && s.type === 'auto') s.type = 'playback'; } catch {}
       ctx = new AudioContextClass();
       sfxOut = ctx.createGain(); ambienceOut = ctx.createGain();
       sfxOut.connect(ctx.destination); ambienceOut.connect(ctx.destination);
@@ -40,6 +42,8 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     return ctx;
   }
   const running = () => ctx?.state === 'running';
+  /** Tells the music a sound is starting: some phones stop the music for it, and the music goes on. */
+  function heard() { try { doc?.dispatchEvent?.(new CustomEvent('sttts-sound')); } catch {} }
   function ramp(param, value, seconds) {
     const t = ctx.currentTime;
     try { param.cancelScheduledValues(t); param.setValueAtTime(param.value, t); param.linearRampToValueAtTime(value, t + Math.max(0.01, seconds)); } catch { param.value = value; }
@@ -68,6 +72,7 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
   /** Plays one sound once (a little different each time); resolves to its source node, or null. */
   async function shot(row, {strength = '', pan = 0, gain = 1, out = sfxOut} = {}) {
     if (!row || !running()) return null;
+    heard();
     let data;
     try { data = await buffer(row); } catch { return null; }
     if (closed || !running()) return null;
@@ -79,7 +84,7 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     if (pan && ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; level.connect(p); tail = p; }
     tail.connect(out);
     src.onended = () => { try { src.disconnect(); level.disconnect(); tail.disconnect(); } catch {} };
-    src.start();
+    src.start(); heard();
     return src;
   }
 

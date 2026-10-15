@@ -10,7 +10,9 @@ const hash = text => { let h = 0; for (const c of String(text)) h = (h * 31 + c.
 export function createMusicHost({context, settings, backend, notice = () => {}, doc = globalThis.document, AudioClass = globalThis.Audio, storage = globalThis.localStorage}) {
   const opts = () => settings()?.music || {};
   let audio = null, queue = [], index = -1, track = null, phase = 'idle', message = '', lyrics = [], ticket = 0, url = '', voiced = false, closed = false, lastEmit = 0;
-  let library = [];
+  let library = [], soundAt = 0;
+  const onSound = () => { soundAt = Date.now(); };
+  doc?.addEventListener?.('sttts-sound', onSound);
   const loadLibrary = () => backend.listSongs?.().then(rows => { library = rows; }).catch(() => {});
   loadLibrary();
   const unsubscribe = backend.subscribe?.(event => { if (event.type === 'music' && event.library) loadLibrary(); if (event.type === 'music' && event.settings) level(); });
@@ -23,7 +25,12 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
       audio = new AudioClass();
       audio.preload = 'auto';
       audio.addEventListener('playing', () => set('playing'));
-      audio.addEventListener('pause', () => { if (phase === 'playing') set('paused'); });
+      // A pause no one asked for just as a sound starts (some phones do that): the music goes on.
+      audio.addEventListener('pause', () => {
+        if (phase !== 'playing') return;
+        if (Date.now() - soundAt < 3000 && !audio.ended) { audio.play().catch(() => set('paused')); return; }
+        set('paused');
+      });
       audio.addEventListener('ended', () => { if (track?.from === 'bgm') { audio.currentTime = 0; audio.play().catch(() => {}); } else next(); });
       audio.addEventListener('timeupdate', () => { const now = Date.now(); if (now - lastEmit > 900) emit(); });
       // While loading, start() hears of it (play() fails) and tries the other sources.
@@ -106,7 +113,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
   function stop() { ticket++; audio?.pause(); if (audio) audio.removeAttribute('src'); if (url.startsWith('blob:')) URL.revokeObjectURL(url); url = ''; track = null; queue = []; index = -1; lyrics = []; set('idle'); }
   function toggle() {
     if (!track || !audio) return Promise.resolve();
-    if (phase === 'playing') { audio.pause(); return Promise.resolve(); }
+    if (phase === 'playing') { audio.pause(); set('paused'); return Promise.resolve(); }
     if (phase === 'error') return start(track).catch(e => notice(e.message));
     // Paused a long time, the link may have run out: it is fetched again.
     return audio.play().catch(e => e?.name === 'NotAllowedError' ? set('paused', '浏览器还不让放声音，再点一下播放') : start(track).catch(err => notice(err.message)));
@@ -159,6 +166,6 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     seek(seconds) { if (audio && Number.isFinite(seconds)) { audio.currentTime = Math.max(0, seconds); emit(); } },
     /** The voice player's phase: music is turned down while a line is voiced. */
     voice(voicePhase) { const on = ['playing', 'generating'].includes(voicePhase); if (on !== voiced) { voiced = on; level(); } },
-    close() { closed = true; unsubscribe?.(); stop(); audio = null; },
+    close() { closed = true; unsubscribe?.(); doc?.removeEventListener?.('sttts-sound', onSound); stop(); audio = null; },
   };
 }
