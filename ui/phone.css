@@ -2553,8 +2553,9 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .vn-box-pick i{width:100%;height:20px;border-radius:7px;background:linear-gradient(90deg,var(--b) 0 28%,var(--a) 28%);box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
 .vn-box-pick[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}
 .vn-keys{margin:0 4px 20px}
-.vn-review-pic{display:grid;place-items:center;min-height:220px;max-height:46vh;margin:0 0 12px;border-radius:16px;overflow:hidden;background:conic-gradient(#e9edf5 25%,#fff 0 50%,#e9edf5 0 75%,#fff 0) 0 0/16px 16px;color:#56637f}
-.vn-review-pic canvas{max-width:100%;max-height:46vh;display:block;cursor:crosshair;touch-action:manipulation}
+.vn-review-pic{display:grid;place-items:center;width:100%;padding:0;border:0;min-height:220px;max-height:46vh;margin:0 0 12px;border-radius:16px;overflow:hidden;background:conic-gradient(#e9edf5 25%,#fff 0 50%,#e9edf5 0 75%,#fff 0) 0 0/16px 16px;color:#56637f;cursor:zoom-in}
+.vn-review-pic canvas{max-width:100%;max-height:46vh;display:block;touch-action:manipulation}
+.vn-redo-icon{display:inline-flex;transform:scaleX(-1)}
 .vn-looks{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 12px}
 .vn-look{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 4px 8px;border-radius:16px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;cursor:pointer}
 .vn-look-pic{display:grid;place-items:center;width:100%;aspect-ratio:3/4;border-radius:12px;overflow:hidden;background:var(--card2);color:var(--ink2)}

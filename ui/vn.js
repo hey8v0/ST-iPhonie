@@ -7,6 +7,8 @@
 // the text box (also in the tavern's or the phone's colours), its size, effects, voice and the 旁白.
 import {createView, esc, heading, help, toggle, avatar, menu} from './common.js';
 import {icon} from './icons.js';
+import {saveFile} from '../download.js';
+import {cutoutHistory, openCutoutEditor} from './cutout-editor.js';
 import {VN_SPEED_NAMES, VN_WAITS, VN_FONTS, VN_BOXES, SPRITE_RULE, EXPRESSIONS, cutBackground, eraseAt, opaqueBounds} from '../core/vn.js';
 
 const SWATCH = {night: ['#1c1d3c', '#ff8fb1'], day: ['#ffffff', '#4f9cf5'], sakura: ['#ffe3ee', '#e85d8f'], ink: ['#161310', '#c9a45c'], tavern: ['#2a2a30', '#e18a24'], phone: ['var(--card)', 'var(--accent)']};
@@ -20,6 +22,9 @@ function phonePalette(win, el) {
 
 export function vnApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'vn');
+  let closeReview = null;
+  const dispose = v.dispose;
+  v.dispose = () => { closeReview?.(); dispose(); };
   const state = () => api.getState().vn;
   const save = patch => { try { api.saveVn(patch); } catch (error) { ctx.notify(error.message, {error: true}); } render(); };
   const inTavern = () => typeof api.vnStart === 'function';
@@ -339,35 +344,60 @@ export function vnApp(ctx) {
     return new Promise((resolve, reject) => out.toBlob(b => b ? resolve(b) : reject(Error('没能存成图片')), 'image/png'));
   }
   /**
-   * Shows the picture with the background taken off. A tap on what is left (a gap in the hair) takes that patch too;
-   * 撤销 puts the last one back. 用这张 keeps it as this look of the character.
+   * Shows the cutout; open the preview to edit at full size. Editing commands share an undo/redo history;
+   * both download and 用这张 export the latest rendered transparent PNG.
    */
   async function review(name, blob, {look, seed, again = null}) {
     let img;
     try { img = await loadImage(blob); } catch (error) { ctx.notify(error.message, {error: true}); return; }
-    const d = ctx.dialog(`立绘 · ${name} · ${look.label}`, `<div class="vn-review"><div class="vn-review-pic"><canvas></canvas></div>
-      <p class="hint">还有没去掉的地方（比如头发缝里），在图上点一下就去掉。</p>
-      <div class="group pad">${toggle('vn-cut', '去掉背景', true, '把纯色背景变成透明。人物边缘被吃掉了就调小强度，背景没去干净就调大，或者在图上点。')}
+    if (v.disposed) return;
+    const d = ctx.dialog(`立绘 · ${name} · ${look.label}`, `<div class="vn-review"><button type="button" class="vn-review-pic" data-action="vn-edit" aria-label="放大编辑"><canvas></canvas></button>
+      <div class="group pad">${toggle('vn-cut', '去掉背景', true)}
       <div class="field"><span>强度</span><input type="range" data-field="vn-strength" min="8" max="120" step="2" value="40" aria-label="去背景强度"></div></div>
-      <div class="actions vn-review-actions"><button type="button" class="secondary" data-action="vn-undo" disabled>${icon('undo')}撤销</button>${again ? `<button type="button" class="secondary" data-action="vn-again">${icon('refresh')}再画一张</button>` : ''}${look.sprite ? `<button type="button" class="secondary" data-action="vn-use" data-replace>${icon('swap')}换掉原来的</button><button type="button" class="primary" data-action="vn-use">${icon('add')}加进这组</button>` : `<button type="button" class="primary" data-action="vn-use">${icon('check')}用这张</button>`}</div></div>`);
-    const canvas = d.body.querySelector('canvas'), opts = {cut: true, strength: 40, taps: []};
-    let busy = Promise.resolve();
-    const paint = () => { busy = busy.then(() => processed(img, opts, canvas)).catch(error => ctx.notify(error.message, {error: true})); d.body.querySelector('[data-action=vn-undo]').disabled = !opts.taps.length; return busy; };
+      <div class="actions vn-review-actions"><button type="button" class="secondary" data-action="vn-undo" disabled>${icon('undo')}撤回</button><button type="button" class="secondary" data-action="vn-redo" disabled><span class="vn-redo-icon">${icon('undo')}</span>重做</button><button type="button" class="secondary" data-action="vn-download">${icon('download')}下载</button>${again ? `<button type="button" class="secondary" data-action="vn-again">${icon('refresh')}再画一张</button>` : ''}${look.sprite ? `<button type="button" class="secondary" data-action="vn-use" data-replace>${icon('swap')}换掉原来的</button><button type="button" class="primary" data-action="vn-use">${icon('add')}加进这组</button>` : `<button type="button" class="primary" data-action="vn-use">${icon('check')}用这张</button>`}</div></div>`);
+    const canvas = d.body.querySelector('canvas'), history = cutoutHistory();
+    let busy = Promise.resolve(), editor = null;
+    closeReview = () => d.close();
+    d.onClose(() => { editor?.close(); closeReview = null; });
+    const paint = () => {
+      const opts = history.value;
+      // Each queued render owns its options; an undo must not mutate an earlier render.
+      busy = busy.catch(() => {}).then(() => processed(img, opts, canvas));
+      busy.catch(error => ctx.notify(error.message, {error: true}));
+      d.body.querySelector('[data-action=vn-undo]').disabled = !history.canUndo;
+      d.body.querySelector('[data-action=vn-redo]').disabled = !history.canRedo;
+      d.body.querySelector('[data-field=vn-cut]').checked = opts.cut;
+      d.body.querySelector('[data-field=vn-strength]').value = opts.strength;
+      editor?.refresh();
+      return busy;
+    };
+    const undo = () => { if (history.undo()) paint(); };
+    const redo = () => { if (history.redo()) paint(); };
+    const edit = value => { if (history.edit(value)) paint(); };
+    const download = async (doc = ctx.doc) => {
+      try { await busy; await saveFile(doc, await trim(canvas), `${name} · ${look.label}.png`); }
+      catch (error) { ctx.notify(error.message, {error: true}); }
+    };
     paint();
-    canvas.addEventListener('click', e => {
-      const r = canvas.getBoundingClientRect();
-      if (!r.width) return;
-      opts.taps.push({x: (e.clientX - r.left) / r.width * canvas.width, y: (e.clientY - r.top) / r.height * canvas.height});
-      paint();
-    });
     d.body.addEventListener('change', e => {
-      if (e.target.dataset.field === 'vn-cut') { opts.cut = e.target.checked; paint(); }
-      if (e.target.dataset.field === 'vn-strength') { opts.strength = Number(e.target.value); paint(); }
+      if (e.target.dataset.field === 'vn-cut') edit({...history.value, cut: e.target.checked});
+      if (e.target.dataset.field === 'vn-strength') edit({...history.value, strength: Number(e.target.value)});
     });
     d.body.addEventListener('click', async e => {
       const b = e.target.closest('[data-action]');
       if (!b) return;
-      if (b.dataset.action === 'vn-undo') { opts.taps.pop(); paint(); return; }
+      if (b.dataset.action === 'vn-undo') { undo(); return; }
+      if (b.dataset.action === 'vn-redo') { redo(); return; }
+      if (b.dataset.action === 'vn-download') { b.disabled = true; await download(); b.disabled = false; return; }
+      if (b.dataset.action === 'vn-edit') {
+        try {
+          await busy;
+          if (!d.live || editor) return;
+          editor = openCutoutEditor({doc: ctx.doc, canvas, history, onUndo: undo, onRedo: redo, onDownload: download,
+            onErase: point => edit({...history.value, taps: [...history.value.taps, point]}), onClose: () => { editor = null; }});
+        } catch (error) { ctx.notify(error.message, {error: true}); }
+        return;
+      }
       if (b.dataset.action === 'vn-again') { d.close(); again(); return; }
       if (b.dataset.action !== 'vn-use') return;
       b.disabled = true;
