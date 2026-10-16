@@ -266,8 +266,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     return here || backend.chatMutate(null, () => backend.chats.create({type: 'dm', members: [name], space: backend.cardKey()}));
   }
   /** Messages that came to the phone: kept unread, said on the island, and photos drawn when that costs nothing. */
-  async function arrive(threadId, items) {
+  async function arrive(threadId, items, from = null) {
     const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
+    if (from) items = items.map(item => ({...item, story: from.story, storyVer: from.ver}));
     const saved = await backend.chatMutate(threadId, () => settle(threadId, items));
     const fresh = (saved?.messages || []).filter(m => !before.has(m.id) && m.from !== 'me');
     for (const m of fresh) if (m.kind === 'photo' && m.imageTags && !m.photoId) drawPhoto(threadId, m.id).catch(() => {});
@@ -298,7 +299,11 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     let sent = 0;
     if (m && !m.is_user && !m.is_system && typeof m.mes === 'string') {
       const parts = phoneParts(m.mes), blocks = parts.filter(p => !p.group).map(p => p.text), grouped = parts.filter(p => p.group);
-      const key = [ctx.getCurrentChatId?.() || ctx.chatId || '', index, hash(parts.map(p => p.group + '|' + p.text).join('\n'))].join('|');
+      const story = [ctx.getCurrentChatId?.() || ctx.chatId || '', index].join('|'), ver = hash(parts.map(p => p.group + '|' + p.text).join('\n'));
+      const key = story + '|' + ver, from = {story, ver};
+      // Rolled again (重 roll, a new swipe): what the earlier version sent goes; this one sends its own.
+      const gone = await withdraw(story, ver).catch(() => 0);
+      if (gone && !parts.length) notice(`重新生成了这条回复，之前发到手机上的 ${gone} 条消息撤回了`);
       if (parts.length && !sentBefore(key)) {
         const contacts = backend.contacts(), people = contacts.map(c => ({name: c.name, voice: false}));
         // A line from someone who is not in the phone (a passer-by, the user) is left out, not given to the one before.
@@ -312,7 +317,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
             if (!thread) continue;
             const members = new Set(thread.members.filter(n => known.has(n)));
             const items = parseChatReply(kept(part.text, members), {members: [...members].map(name => ({name, voice: false})), user: userName(), voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []});
-            try { const n = items.length ? await arrive(thread.id, items) : 0; if (n) { sent += n; notice(`群「${thread.name}」有 ${n} 条新消息`); } } catch { /* not worth interrupting the story */ }
+            try { const n = items.length ? await arrive(thread.id, items, from) : 0; if (n) { sent += n; notice(`群「${thread.name}」有 ${n} 条新消息`); } } catch { /* not worth interrupting the story */ }
           }
         }
         const items = blocks.flatMap(b => parseChatReply(kept(b), {members: people, user: userName(), voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []}));
@@ -329,12 +334,29 @@ export function createChatHost({context, settings, backend, notice, memory = nul
             }
             // They had deleted the user and text again: they added the user back.
             if (thread.friend?.by === 'them') { await backend.chats.update(thread.id, {friend: null}); await backend.chats.append(thread.id, [{from: 'me', kind: 'system', text: `${name}重新添加了你为好友`}]); refreshCuts(); }
-            const n = await arrive(thread.id, list); if (n) { sent += n; notice(`${name} 给你发来 ${n} 条消息`); }
+            const n = await arrive(thread.id, list, from); if (n) { sent += n; notice(`${name} 给你发来 ${n} 条消息`); }
           } catch { /* a failed delivery is not worth interrupting the story */ }
         }
       }
     }
     return sent;
+  }
+  /**
+   * A story reply rolled again: the messages its earlier versions sent to the phone are taken out, unless the user has
+   * answered after them (then the talk stays as it went). Returns how many went.
+   */
+  async function withdraw(story, ver) {
+    let gone = 0;
+    for (const t of await backend.threads()) {
+      const list = (await backend.chats.get(t.id))?.messages || [], old = list.filter(m => m.story === story && m.storyVer !== ver);
+      if (!old.length) continue;
+      const after = list.slice(list.indexOf(old.at(-1)) + 1);
+      if (after.some(m => m.from === 'me' && m.kind !== 'system')) continue;
+      await backend.chatMutate(t.id, () => backend.chats.removeMessages(t.id, old.map(m => m.id)));
+      gone += old.length;
+      backend.emit('chat', {threadId: t.id});
+    }
+    return gone;
   }
   /**
    * Every `every` story replies with nothing sent, someone is asked whether they would text first now (one phone

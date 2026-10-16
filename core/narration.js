@@ -13,8 +13,16 @@ const RATES = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5];
 export const defaultNarration = () => ({enabled: false, voice: 'system', systemVoice: '', rate: 1, skip: [...NARRATION_SKIP]});
 /** A tag name as typed (<小剧场>, 小剧场, </theater>): the name alone. */
 const tagName = value => String(value ?? '').replace(/[<>/\s]/g, '').slice(0, 40);
+/** 「开头…结尾」: a part that opens and closes with words of its own ([HUD_START]…[HUD_END]). */
+const PAIR = /…|\.\.\./;
+function skipEntry(value) {
+  const t = String(value ?? '').trim();
+  if (!PAIR.test(t)) return tagName(t);
+  const [open, close] = t.split(PAIR).map(x => x.trim().slice(0, 40));
+  return open && close ? `${open}…${close}` : '';
+}
 export function cleanSkip(value) {
-  const list = (Array.isArray(value) ? value : String(value ?? '').split(/[,，、;；\n]+/)).map(tagName).filter(Boolean);
+  const list = (Array.isArray(value) ? value : String(value ?? '').split(/[,，、;；\n]+/)).map(skipEntry).filter(Boolean);
   return [...new Set(list)].slice(0, 30);
 }
 export function normalizeNarration(value) {
@@ -40,8 +48,14 @@ export function skippedRanges(raw, skip = NARRATION_SKIP) {
   // The phone's own tags, with what is inside (a picture's prompt, a sound's name, phone messages).
   add(/<img\b[^<>]*>[^<]*<\/img\s*>|<img\b[^<>]*\/?>/gi);
   for (const tag of ['sfx', 'ambience', 'bgm', 'phone']) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, 'gi'));
-  // Thinking and the listed tags: to their end, or to the end of the reply when it was never closed.
-  for (const tag of ['think', 'thinking', ...cleanSkip(skip)]) { const t = escapeRe(tag); add(new RegExp(`<${t}(?=[\\s>/])[^>]*>[\\s\\S]*?(?:<\\/${t}\\s*>|$)`, 'gi')); }
+  // Status panels written as [HUD_START]…[HUD_END] (any NAME_START / NAME_END pair).
+  add(/\[([A-Za-z][\w-]*)_START\][\s\S]*?(?:\[\1_END\]|$)/g);
+  // Thinking and the listed tags: to their end, or to the end of the reply when it was never closed; 「开头…结尾」
+  // from its opening words to its closing ones.
+  for (const tag of ['think', 'thinking', ...cleanSkip(skip)]) {
+    if (tag.includes('…')) { const [open, close] = tag.split('…').map(escapeRe); add(new RegExp(`${open}[\\s\\S]*?(?:${close}|$)`, 'gi')); continue; }
+    const t = escapeRe(tag); add(new RegExp(`<${t}(?=[\\s>/])[^>]*>[\\s\\S]*?(?:<\\/${t}\\s*>|$)`, 'gi'));
+  }
   return out.sort((a, b) => a[0] - b[0]);
 }
 

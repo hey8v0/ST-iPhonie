@@ -2524,8 +2524,16 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .vn-hero .actions{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0}
 .vn-hero .actions .primary{grid-column:1/-1}
 .vn-hero .actions button{margin:0;min-width:0}
-.vn-hero .actions .primary{background:#fff;color:#d2533f}
-.vn-hero .actions .secondary{background:rgba(255,255,255,.22);color:#fff;border-color:rgba(255,255,255,.45)}
+/* The card keeps its own buttons on every skin (a skin's glossy ones would hide the words). */
+.vn-hero .actions .primary,:root[data-skin] .vn-hero .actions .primary{background:#fff;color:#d2533f;border:0;box-shadow:0 6px 14px -8px rgba(120,30,40,.6);text-shadow:none}
+.vn-hero .actions .secondary,:root[data-skin] .vn-hero .actions .secondary{background:rgba(255,255,255,.22);color:#fff;border:1px solid rgba(255,255,255,.5);box-shadow:none;text-shadow:none}
+.vn-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px}
+.vn-chip{display:inline-flex;align-items:center;gap:2px;padding:3px 4px 3px 10px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:13px;color:var(--ink);max-width:100%;overflow-wrap:anywhere}
+.vn-chip button{display:grid;place-items:center;width:22px;height:22px;padding:0;border:0;border-radius:50%;background:none;color:var(--ink2);cursor:pointer}
+.vn-chip button .icon{width:12px;height:12px}
+.vn-skip-add{display:flex;gap:8px}
+.vn-skip-add input{flex:1;min-width:0}
+.vn-skip-add button{margin:0;white-space:nowrap}
 .vn-cast-list{display:flex;flex-direction:column}
 .vn-cast-row{display:flex;align-items:center;gap:10px;width:100%;padding:10px 0;border:0;border-bottom:1px solid var(--line);background:none;color:var(--ink);text-align:left;font:inherit;cursor:pointer}
 .vn-cast-row>.icon{flex:none;width:18px;height:18px;color:var(--ink2)}

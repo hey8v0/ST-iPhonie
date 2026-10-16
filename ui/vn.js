@@ -76,7 +76,10 @@ export function vnApp(ctx) {
         <div class="field"><span>字号</span>${segmented('font', s.font, Object.entries(VN_FONTS))}</div>
         ${toggle('vn-effects', '特效', s.effects, '台词按情绪演：生气时画面震动、头上冒💢，惊讶时跳一下、画面拉近，害羞和心动时飘爱心、画面边缘泛粉，开心时冒星星，难过时低下去、边缘泛蓝……叙述里写到下雨、下雪、樱花、落叶、星空、萤火虫、篝火就有天气，闪电、爆炸、心跳、眼前一黑、回忆也各有效果。还有背景慢慢推近、正文图片展开、角色从旁边走进来、换表情淡入淡出。手机或电脑设置了「减弱动态效果」时自动关掉。')}
         ${toggle('vn-voice', '播放配音', s.voice, '有音色的台词显示时自动读出来。在记录里可以再听一次。语音总开关关着时不播。')}
-        <label class="field"><span>不演的标签${help('正文里这些标签包着的内容不进剧场，比如状态栏、成就美化、生图提示词。写标签名，用逗号隔开，比如：status, 成就, image。设置里「整篇朗读」跳过的标签也不演。')}</span><input type="text" data-field="vn-skip" value="${esc((s.skip || []).join(', '))}" placeholder="比如：成就, image" aria-label="不演的标签"></label>
+        <div class="field vn-skip"><span>不演的标签${help('正文里这些标签包着的内容不进剧场，比如状态栏、成就美化、生图提示词。<status>…</status> 这种写标签名 status 就行；前后不一样的写成「开头…结尾」，比如 [状态]…[/状态]。[HUD_START]…[HUD_END] 这种 XXX_START / XXX_END 不用写，自动不演。设置里「整篇朗读」跳过的标签也不演。')}</span>
+          <div class="vn-chips">${(s.skip || []).map(t => `<span class="vn-chip">${esc(t)}<button type="button" data-skip-del="${esc(t)}" aria-label="不再排除 ${esc(t)}">${icon('close')}</button></span>`).join('') || '<small class="hint">还没有</small>'}</div>
+          <div class="vn-skip-add"><input type="text" data-field="vn-skip-new" placeholder="标签名，或 开头…结尾" aria-label="加一个不演的标签"><button type="button" class="secondary" data-action="vn-skip-add">${icon('add')}添加</button></div>
+          ${narrationSkip().length ? `<small class="hint">整篇朗读里跳过的也不演：${esc(narrationSkip().join('、'))}</small>` : ''}</div>
         ${toggle('vn-narrate', '旁白读叙述', s.narrate, '台词以外的叙述也读出来，用设置里「整篇朗读」选的旁白声音：系统朗读免费；用配音引擎的话要先在角色 App 里给「旁白」选音色，按字数花额度。正文里的音效、氛围音和背景音乐，演到那里就会响（要开着音效和自动放的背景音乐）。')}</div>`
       + `<p class="hint vn-keys">电脑上：Enter / 空格 / 滚轮向下翻页，← 上一页，滚轮向上或 ↑ 看记录，按住 Ctrl 快进，A 自动，H 隐藏，Esc 退出。手机上点屏幕翻页。</p>`);
   }
@@ -384,6 +387,18 @@ export function vnApp(ctx) {
   v.on('click', '[data-action=vn-pick]', () => pick());
   v.on('click', '[data-action=vn-looks]', el => looks(el.dataset.name));
   v.on('click', '[data-action=vn-rule-reset]', () => save({rule: SPRITE_RULE}));
+  /** 不演的标签: added one at a time, each shown with its ×. */
+  const narrationSkip = () => api.getState().narration?.skip || [];
+  function addSkip() {
+    const box = v.root.querySelector('[data-field=vn-skip-new]'), value = box?.value.trim();
+    if (!value) return;
+    const before = state().skip || [];
+    save({skip: [...before, value]});
+    if ((state().skip || []).length === before.length) ctx.notify('这个已经有了，或者格式不对（前后不一样的写成「开头…结尾」）', {error: true});
+  }
+  v.on('click', '[data-action=vn-skip-add]', addSkip);
+  v.on('click', '[data-skip-del]', el => save({skip: (state().skip || []).filter(t => t !== el.dataset.skipDel)}));
+  v.root.addEventListener('keydown', e => { if (e.target.dataset?.field === 'vn-skip-new' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); addSkip(); } });
   v.on('click', '[data-vn-set]', el => {
     const k = el.dataset.vnSet, raw = el.dataset.value;
     save(k === 'box' ? {box: raw, ...(raw === 'phone' ? {palette: phonePalette(ctx.win, v.root)} : {})} : {[k]: k === 'font' ? raw : Number(raw)});
@@ -396,7 +411,6 @@ export function vnApp(ctx) {
     else if (f === 'vn-narrate') save({narrate: e.target.checked});
     else if (f === 'vn-opacity') save({opacity: Number(e.target.value) / 100});
     else if (f === 'vn-rule') save({rule: e.target.value});
-    else if (f === 'vn-skip') save({skip: e.target.value});
   });
   v.refresh = render;
   render();

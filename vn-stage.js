@@ -4,9 +4,10 @@
 // after each line (and its voice), 快进 runs through, 记录 shows what was read (a line's voice plays again from there),
 // 隐藏 leaves only the picture. At the end of the story a box takes what happens next and sends it to the tavern; the
 // reply goes on on the stage when it is written.
-// A picture of the story is a CG: the 立绘 step aside for the rest of its message (whoever speaks shows as a bust in
-// the text box); it fills the screen when its shape is close to the screen's, else it is seen whole. From the next
-// message on the chat's own background comes back (or the CG stays, dimmed) with the 立绘. Characters without a 立绘
+// A picture of the story is a CG: it fills the screen when its shape is close to the screen's, else it is seen whole.
+// The 立绘 step aside while it is new (whoever speaks shows as a bust in the text box); after two pages they come back
+// in front of it, dimmed a little (隐藏 shows it alone again). From the next message on the chat's own background
+// comes back (or the CG stays, dimmed). Characters without a 立绘
 // show their avatar in the text box. Effects: each line is acted from its 情绪 (moves, signs over the head, sparkles,
 // hearts, a glow at the edges), and the story brings weather, lightning, heartbeats, blackouts and memories (vn-fx.js).
 // It brings its own styles, so it works on any theme. Steps come from core/vn.js; vn-host.js feeds them.
@@ -37,7 +38,10 @@ const CSS = `
 @media (orientation:portrait){.vn-fit{background-position:50% 26%}}
 .sttts-vn[data-cg]:is([data-whole],[data-hidden]) .vn-fit{opacity:1}
 .sttts-vn[data-cg]:is([data-whole],[data-hidden]) .vn-bg-layer{filter:blur(18px) brightness(.55)}
-.sttts-vn[data-soft] .vn-bg-layer{filter:brightness(.7) saturate(.92)}
+.sttts-vn[data-soft] .vn-bg-layer,.sttts-vn[data-soft] .vn-fit{filter:brightness(.74) saturate(.92)}
+/* 隐藏 over a CG: the picture alone. */
+.vn-cast{transition:opacity .35s}
+.sttts-vn[data-hidden][data-cg] .vn-cast{opacity:0}
 .sttts-vn[data-fx] .vn-bg-layer[data-on]{animation:vn-drift 28s ease-in-out infinite alternate}
 .sttts-vn[data-fx] .vn-bg-layer[data-on][data-reveal]{animation:vn-reveal 1.1s cubic-bezier(.22,1,.36,1),vn-drift 28s ease-in-out infinite alternate}
 .sttts-vn[data-fx] .vn-fit[data-reveal]{animation:vn-reveal 1.1s cubic-bezier(.22,1,.36,1)}
@@ -49,14 +53,14 @@ const CSS = `
 .sttts-vn[data-memory] .vn-stage::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:3;background:radial-gradient(ellipse at center,transparent 50%,rgba(255,240,214,.6) 100%)}
 .vn-fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
 .vn-tint,.vn-black{position:absolute;inset:0;pointer-events:none;opacity:0;z-index:3}
-.vn-tint[data-tint=red]{background:radial-gradient(ellipse at center,transparent 40%,rgba(230,30,50,.55) 100%)}
-.vn-tint[data-tint=blue]{background:radial-gradient(ellipse at center,transparent 35%,rgba(40,70,160,.55) 100%)}
-.vn-tint[data-tint=pink]{background:radial-gradient(ellipse at center,transparent 40%,rgba(255,120,170,.5) 100%)}
-.vn-tint[data-tint=dark]{background:radial-gradient(ellipse at center,transparent 30%,rgba(0,0,0,.7) 100%)}
+.vn-tint[data-tint=red]{background:radial-gradient(ellipse at center,transparent 58%,rgba(230,30,50,.42) 100%)}
+.vn-tint[data-tint=blue]{background:radial-gradient(ellipse at center,transparent 55%,rgba(40,70,160,.4) 100%)}
+.vn-tint[data-tint=pink]{background:radial-gradient(ellipse at center,transparent 58%,rgba(255,120,170,.38) 100%)}
+.vn-tint[data-tint=dark]{background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,.55) 100%)}
 .vn-tint[data-tint=beat]{background:radial-gradient(ellipse at center,transparent 38%,rgba(200,20,60,.6) 100%)}
 .sttts-vn[data-fx] .vn-tint[data-on]{animation:vn-tint 1.9s ease}
 .sttts-vn[data-fx] .vn-tint[data-on][data-tint=beat]{animation:vn-beat 1.5s ease}
-@keyframes vn-tint{0%{opacity:0}25%{opacity:1}65%{opacity:.85}100%{opacity:0}}
+@keyframes vn-tint{0%{opacity:0}30%{opacity:.85}60%{opacity:.6}100%{opacity:0}}
 @keyframes vn-beat{0%,100%{opacity:0}12%{opacity:1}26%{opacity:.15}40%{opacity:.9}62%{opacity:0}}
 .vn-black{background:#000;z-index:4}
 .sttts-vn[data-fx] .vn-black[data-on]{animation:vn-black 2.3s ease}
@@ -226,7 +230,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   let steps = [], pos = 0, message = null, lastId = null, step = null, typed = true, typing = 0, closed = false;
   let auto = false, skip = false, autoTimer = 0, skipTimer = 0, hidden = false, cg = false, layer = 0, bgUrl = '', ended = false, waiting = false, clock = 0, phase = 'idle', titleTimer = 0;
   const actors = new Map(), log = [], lookOf = new Map();
-  let said = '', weatherAge = 0;
+  let said = '', weatherAge = 0, alone = false, cgPages = 0, lastTint = '';
   const fx = createFx({doc, host: $('.vn-stage'), after: castEl});
   const fxOn = () => root.hasAttribute('data-fx') && !skip;
   // Pages seen (to go back to) and the messages read so far (going on after going back).
@@ -285,7 +289,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   /** After a CG's message: the chat's own background comes back; without one the CG stays, dimmed. */
   function endCg() {
     if (!cg) return;
-    cg = false;
+    cg = false; alone = false;
     root.removeAttribute('data-cg'); root.removeAttribute('data-whole');
     if (scene) setBg(scene); else root.setAttribute('data-soft', '');
   }
@@ -373,16 +377,18 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       move(f.move, actor);
       mark(f.mark, actor);
       if (f.burst) { const [x, y] = headOf(actor); fx.burst(f.burst, x, y); }
-      if (f.tint) { const t = $('.vn-tint'); t.dataset.tint = f.tint; replay(t, 'data-on', '', 2000); }
+      // The same glow line after line would only tire the eyes: once, until the feeling changes.
+      if (f.tint && f.tint !== lastTint) { const t = $('.vn-tint'); t.dataset.tint = f.tint; replay(t, 'data-on', '', 2000); }
+      lastTint = f.tint;
       if (f.punch) replay(root, 'data-punch', '', 520);
       return;
     }
     const f = storyFx(s.text);
+    root.toggleAttribute('data-memory', f.memory);
     if (f.flash === 'lightning') { blink('lightning'); replay(root, 'data-shake', '', 450); }
     if (f.flash === 'boom') { blink('boom'); replay(root, 'data-shake', 'big', 780); }
     if (f.pulse) { const t = $('.vn-tint'); t.dataset.tint = 'beat'; replay(t, 'data-on', '', 1600); }
     if (f.blackout) replay($('.vn-black'), 'data-on', '', 2400);
-    if (f.memory) root.setAttribute('data-memory', '');
   }
   /** The weather the story names stays a while: until it changes or stops, or two messages go by without it. */
   function weatherFrom(s) {
@@ -434,12 +440,16 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       lookOf.set(name, url);
     }
     if (say) said = ''; else said = (said + '\n' + s.text).slice(-400);
+    // A new CG is seen alone for two pages; the next one who speaks with a 立绘 brings them back in front of it.
+    if (!again && cg) cgPages++;
+    if (alone && url && cgPages > 2) { alone = false; root.setAttribute('data-soft', ''); }
+    if (!say && !again) root.removeAttribute('data-memory');
     let actor = null;
-    if (url && !cg) actor = enter(name, url);
+    if (url && !alone) actor = enter(name, url);
     if (actor && !s.part) actor.el.removeAttribute('data-sink');
     // Whoever speaks is lit; the others dim (all of them when the speaker has no 立绘 on the stage).
     spotlight(say ? name : '');
-    const bust = say && !actor && cg ? url : '', pic = say && !actor ? bust || face(name, s.user) : '';
+    const bust = say && !actor && alone ? url : '', pic = say && !actor ? bust || face(name, s.user) : '';
     root.toggleAttribute('data-face', say && !actor);
     faceEl.innerHTML = pic ? `<img src="${esc(pic)}" alt=""${bust ? ' class="vn-bust"' : ''}>` : say && !actor ? `<span>${esc([...name][0] || '?')}</span>` : '';
     weatherFrom(s);
@@ -470,7 +480,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       if (pos >= steps.length && !nextMessage()) { theEnd(); return; }
       const s = steps[pos++];
       if (!s) continue;
-      if (s.kind === 'bg') { cg = true; clearActors(); setBg(s.url, {flash: !skip, cg: true}); continue; }
+      if (s.kind === 'bg') { cg = true; alone = true; cgPages = 0; clearActors(); setBg(s.url, {flash: !skip, cg: true}); continue; }
       if (s.kind === 'sound' || s.kind === 'bgm') { try { cue(s, {skipping: skip}); } catch {} continue; }
       ended = false; root.removeAttribute('data-end');
       seen.push({m: at, pos, s}); if (seen.length > 400) seen.shift();

@@ -74,6 +74,8 @@ function cleanMessage(m, id, at) {
     out.voicemail = spoken(m.voicemail, 4, false);
   }
   if (m.quote?.text && ['text', 'voice'].includes(kind)) out.quote = {from: clip(m.quote.from, 40), text: clip(m.quote.text, 200)};
+  // Sent by a story reply (正文联动手机): which reply (chat|message) and which version of it.
+  if (typeof m.story === 'string' && m.story) { out.story = clip(m.story, 300); out.storyVer = clip(m.storyVer, 40); }
   const textless = ['photo', 'system', 'redpacket', 'transfer', 'pat', 'dice', 'recall', 'call', 'gift'];
   if (!textless.includes(kind) && !out.text.trim()) throw fail('消息内容为空');
   return out;
