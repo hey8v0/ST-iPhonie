@@ -26,6 +26,10 @@ const CSS = `
 .vn-bg{position:absolute;inset:0;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#3a3560,#120f22 70%)}
 .vn-bg-layer{position:absolute;inset:-2%;background:center/cover no-repeat;opacity:0;transition:opacity .9s ease,filter .9s ease}
 .vn-bg-layer[data-on]{opacity:1}
+/* A CG is seen whole: the picture fits the screen, over a blurred copy that fills it. */
+.vn-fit{position:absolute;inset:0;background:center/contain no-repeat;opacity:0;transition:opacity .6s ease}
+.sttts-vn[data-cg] .vn-fit{opacity:1}
+.sttts-vn[data-cg] .vn-bg-layer{filter:blur(18px) brightness(.55)}
 .sttts-vn[data-soft] .vn-bg-layer{filter:blur(3px) brightness(.72) saturate(.9)}
 .sttts-vn[data-fx] .vn-bg-layer[data-on]{animation:vn-drift 28s ease-in-out infinite alternate}
 @keyframes vn-drift{from{transform:scale(1) translate(0,0)}to{transform:scale(1.07) translate(-1.2%,-.8%)}}
@@ -138,8 +142,8 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', '视觉小说');
   root.tabIndex = -1;
-  root.innerHTML = `<div class="vn-stage"><div class="vn-bg"><div class="vn-bg-layer"></div><div class="vn-bg-layer"></div></div><div class="vn-cast"></div><div class="vn-flash"></div></div>
-    <div class="vn-box"><nav class="vn-menu" aria-label="视觉小说菜单"><button data-vn="auto" aria-pressed="false">自动</button><button data-vn="skip" aria-pressed="false">快进</button><button data-vn="log">记录</button><button data-vn="voice" aria-pressed="false">语音</button><button data-vn="hide">隐藏</button><button data-vn="full" aria-pressed="false">全屏</button><button data-vn="close" aria-label="退出视觉小说">退出</button></nav><div class="vn-name" hidden><span></span></div><div class="vn-face"></div><span class="vn-voice" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p class="vn-text" aria-live="polite"></p><span class="vn-next" aria-hidden="true">▼</span>
+  root.innerHTML = `<div class="vn-stage"><div class="vn-bg"><div class="vn-bg-layer"></div><div class="vn-bg-layer"></div><div class="vn-fit"></div></div><div class="vn-cast"></div><div class="vn-flash"></div></div>
+    <div class="vn-box"><nav class="vn-menu" aria-label="视觉小说菜单"><button data-vn="back">上一页</button><button data-vn="auto" aria-pressed="false">自动</button><button data-vn="skip" aria-pressed="false">快进</button><button data-vn="log">记录</button><button data-vn="voice" aria-pressed="false">语音</button><button data-vn="hide">隐藏</button><button data-vn="full" aria-pressed="false">全屏</button><button data-vn="close" aria-label="退出视觉小说">退出</button></nav><div class="vn-name" hidden><span></span></div><div class="vn-face"></div><span class="vn-voice" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p class="vn-text" aria-live="polite"></p><span class="vn-next" aria-hidden="true">▼</span>
       <div class="vn-input"><textarea rows="2" placeholder="接下来你要说什么、做什么？空着发送就让故事接着写" aria-label="接下来的剧情"></textarea><button data-vn="send">发送</button></div></div>
     <div class="vn-log" hidden><header><span>记 录</span><button data-vn="log-close">返回</button></header><ol></ol></div>
     <div class="vn-title"><small>VISUAL NOVEL</small><strong>${esc(title || '视觉小说')}</strong>${subtitle ? `<em>${esc(subtitle)}</em>` : ''}</div>`;
@@ -152,7 +156,10 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   let steps = [], pos = 0, message = null, lastId = null, step = null, typed = true, typing = 0, closed = false;
   let auto = false, skip = false, autoTimer = 0, skipTimer = 0, hidden = false, cg = false, layer = 0, bgUrl = '', ended = false, waiting = false, clock = 0, phase = 'idle', titleTimer = 0;
   const actors = new Map(), log = [], lookOf = new Map();
-  let said = '';
+  let said = '', cgPages = 0;
+  // Pages seen (to go back to) and the messages read so far (going on after going back).
+  const seen = [], loaded = [];
+  let at = -1;
 
   function applyLook() {
     const s = look();
@@ -169,8 +176,10 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   full.hidden = !root.requestFullscreen;
 
   // ---------- background ----------
-  function setBg(url, {soft = false, flash = false} = {}) {
+  function setBg(url, {soft = false, flash = false, cg: whole = false} = {}) {
     root.toggleAttribute('data-soft', soft);
+    root.toggleAttribute('data-cg', whole && !!url);
+    if (whole && url) $('.vn-fit').style.backgroundImage = `url("${String(url).replace(/["\\]/g, '\\$&')}")`;
     if (url === bgUrl) return;
     bgUrl = url;
     const next = layers[layer = 1 - layer], prev = layers[1 - layer];
@@ -259,8 +268,10 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   }
 
   // ---------- steps ----------
-  function show(s) {
+  function show(s, {again = false} = {}) {
     step = s;
+    // A CG is seen alone for one page; then it stays behind, softened, and the 立绘 come back.
+    if (cg && cgPages++ >= 1) { cg = false; root.setAttribute('data-soft', ''); root.removeAttribute('data-cg'); }
     const say = s.kind === 'say', name = say ? s.role : '';
     root.toggleAttribute('data-narrate', !say);
     root.toggleAttribute('data-user', !!s.user);
@@ -281,22 +292,23 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     const pic = say && !actor ? face(name, s.user) : '';
     root.toggleAttribute('data-face', say && !actor);
     faceEl.innerHTML = pic ? `<img src="${esc(pic)}" alt="">` : say && !actor ? `<span>${esc([...name][0] || '?')}</span>` : '';
-    if (say && !s.part) move(look().effects !== false ? stageMove(s.emotion) : '', actor);
+    if (say && !s.part && !again) move(look().effects !== false ? stageMove(s.emotion) : '', actor);
     // Voice: a line plays from its first page on; anything else stops the one before.
-    if (!(say && s.part)) voice.stop();
+    if (!(say && s.part) || again) voice.stop();
+    type(say ? quoted(s.text) : s.text);
+    if (again) return;
     if (say && !s.part && !s.user && !skip && look().voice && voice.on() && s.voiced) voice.play(s);
     // 旁白: the story between the lines in the narrator's voice (整篇朗读's).
     if (!say && !skip && look().narrate && look().voice && voice.on()) voice.narrate?.(s);
-    type(say ? quoted(s.text) : s.text);
     log.push({name, text: say ? quoted(s.text) : s.text, step: say && s.voiced && !s.part ? s : null});
     if (log.length > 600) log.shift();
   }
   function nextMessage() {
-    const m = source.next();
-    if (!m) return false;
+    let m = loaded[at + 1];
+    if (!m) { m = source.next(); if (!m) return false; loaded.push(m); at = loaded.length - 1; } else at++;
     message = m; steps = m.steps; pos = 0; lastId = m.id; said = '';
     // A CG of the message before stays as the backdrop, softened; the 立绘 come back.
-    if (cg) { cg = false; root.setAttribute('data-soft', ''); }
+    if (cg) { cg = false; root.setAttribute('data-soft', ''); root.removeAttribute('data-cg'); }
     return true;
   }
   function next() {
@@ -306,12 +318,24 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       if (pos >= steps.length && !nextMessage()) { theEnd(); return; }
       const s = steps[pos++];
       if (!s) continue;
-      if (s.kind === 'bg') { cg = true; clearActors(); setBg(s.url, {flash: !skip}); continue; }
+      if (s.kind === 'bg') { cg = true; cgPages = 0; clearActors(); setBg(s.url, {flash: !skip, cg: true}); continue; }
       if (s.kind === 'sound' || s.kind === 'bgm') { try { cue(s, {skipping: skip}); } catch {} continue; }
       ended = false; root.removeAttribute('data-end');
+      seen.push({m: at, pos, s}); if (seen.length > 400) seen.shift();
       show(s);
       return;
     }
+  }
+  /** 上一页: the page before again (no voice; going on from there reads on as before). */
+  function back() {
+    if (closed || waiting || seen.length < 2) return;
+    setAuto(false); stopSkip();
+    if (!typed) finishTyping();
+    seen.pop();
+    const h = seen[seen.length - 1];
+    if (h.m !== at && loaded[h.m]) { at = h.m; message = loaded[at]; steps = message.steps; lastId = message.id; }
+    pos = h.pos; ended = false; root.removeAttribute('data-end');
+    show(h.s, {again: true});
   }
   function theEnd() {
     stopSkip();
@@ -404,7 +428,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
 
   // ---------- events ----------
   const actions = {
-    auto: () => setAuto(!auto), skip: () => skip ? stopSkip() : startSkip(), log: openLog, 'log-close': closeLog, hide: () => setHidden(true),
+    back, auto: () => setAuto(!auto), skip: () => skip ? stopSkip() : startSkip(), log: openLog, 'log-close': closeLog, hide: () => setHidden(true),
     voice: () => { const on = !look().voice; save({voice: on}); if (!on) voice.stop(); applyLook(); },
     full: () => { if (doc.fullscreenElement) doc.exitFullscreen?.(); else root.requestFullscreen?.().catch(() => {}); },
     close: () => close(), send: () => sendText(),
@@ -427,7 +451,8 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     if (typing) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendText(); } e.stopPropagation(); return; }
     if (e.key === 'Control' && !e.repeat) { startSkip(); e.preventDefault(); return; }
     const k = e.key.toLowerCase();
-    if (['enter', ' ', 'arrowright', 'arrowdown', 'pagedown'].includes(k)) { e.preventDefault(); if (!logEl.hidden && k !== 'arrowdown') closeLog(); else if (logEl.hidden) advance(); }
+    if (k === 'arrowleft' || k === 'backspace') { e.preventDefault(); if (logEl.hidden) back(); }
+    else if (['enter', ' ', 'arrowright', 'arrowdown', 'pagedown'].includes(k)) { e.preventDefault(); if (!logEl.hidden && k !== 'arrowdown') closeLog(); else if (logEl.hidden) advance(); }
     else if (['arrowup', 'pageup', 'l'].includes(k)) { e.preventDefault(); if (logEl.hidden) openLog(); }
     else if (k === 'a') setAuto(!auto);
     else if (k === 'h') setHidden(!hidden);
@@ -476,6 +501,6 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     refresh() { if (!closed) applyLook(); },
     /** Where the story is, for tests and the host: {id, kind, text, ended}. */
     state() { return {id: lastId, kind: step?.kind || '', text: textEl.dataset.full || '', ended, waiting, auto, skip}; },
-    advance,
+    advance, back,
   };
 }

@@ -66,8 +66,9 @@ export function vnApp(ctx) {
         <div class="field"><span>字号</span>${segmented('font', s.font, Object.entries(VN_FONTS))}</div>
         ${toggle('vn-effects', '特效', s.effects, '背景慢慢推近、换图时闪一下、角色说话时跳一下、生气时画面震动、换表情时淡入淡出。手机或电脑设置了「减弱动态效果」时自动关掉。')}
         ${toggle('vn-voice', '播放配音', s.voice, '有音色的台词显示时自动读出来。在记录里可以再听一次。语音总开关关着时不播。')}
+        <label class="field"><span>不演的标签${help('正文里这些标签包着的内容不进剧场，比如状态栏、成就美化、生图提示词。写标签名，用逗号隔开，比如：status, 成就, image。设置里「整篇朗读」跳过的标签也不演。')}</span><input type="text" data-field="vn-skip" value="${esc((s.skip || []).join(', '))}" placeholder="比如：成就, image" aria-label="不演的标签"></label>
         ${toggle('vn-narrate', '旁白读叙述', s.narrate, '台词以外的叙述也读出来，用设置里「整篇朗读」选的旁白声音：系统朗读免费；用配音引擎的话要先在角色 App 里给「旁白」选音色，按字数花额度。正文里的音效、氛围音和背景音乐，演到那里就会响（要开着音效和自动放的背景音乐）。')}</div>`
-      + `<p class="hint vn-keys">电脑上：Enter / 空格 / 滚轮向下翻页，滚轮向上或 ↑ 看记录，按住 Ctrl 快进，A 自动，H 隐藏，Esc 退出。手机上点屏幕翻页。</p>`);
+      + `<p class="hint vn-keys">电脑上：Enter / 空格 / 滚轮向下翻页，← 上一页，滚轮向上或 ↑ 看记录，按住 Ctrl 快进，A 自动，H 隐藏，Esc 退出。手机上点屏幕翻页。</p>`);
   }
 
   async function start(from) {
@@ -293,6 +294,7 @@ export function vnApp(ctx) {
     else if (f === 'vn-narrate') save({narrate: e.target.checked});
     else if (f === 'vn-opacity') save({opacity: Number(e.target.value) / 100});
     else if (f === 'vn-rule') save({rule: e.target.value});
+    else if (f === 'vn-skip') save({skip: e.target.value});
   });
   v.refresh = render;
   render();

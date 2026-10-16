@@ -27,6 +27,8 @@ export interface VnSettings {
     /** What every 立绘 asks of the picture (after the 画风, before the looks). */
     rule: string;
     /** Each character's 立绘: the usual one (and its seed), 表情 and 动作 by id in looks, their own 动作. */
+    /** 不演的标签: tag names whose content the stage leaves out. */
+    skip: string[];
     cast: Record<string, VnCastEntry>;
 }
 export interface VnAction { id: string; label: string; tags: string; words: string[]; }

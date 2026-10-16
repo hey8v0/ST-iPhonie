@@ -2,7 +2,7 @@
 // the stage (vn-stage.js) fed with the chat's messages one by one, and the 立绘 kept as files in the tavern's images
 // (settings.vn.cast), so every device sees them.
 import {openVnStage} from './vn-stage.js';
-import {storySteps, userSteps, pickLook} from './core/vn.js';
+import {storySteps, userSteps, pickLook, inlinePictures} from './core/vn.js';
 import {parsePictures} from './core/draw.js';
 import {parseSounds} from './core/sounds.js';
 import {parseBgm} from './core/music.js';
@@ -33,9 +33,36 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     if (!m || m.is_system) return null;
     if (m.is_user) return userSteps(m.mes, m.name || context()?.name1 || '你').map(s => ({...s, id}));
     const lines = linesOf(id) || [];
-    const pics = parsePictures(m.mes || '').map(t => ({start: t.start, url: pictureUrl(m, t.hash)}));
+    const own = parsePictures(m.mes || '').map(t => ({start: t.start, url: pictureUrl(m, t.hash)})), inline = inlinePictures(m.mes || '');
+    const pics = [...own, ...inline, ...shownPictures(id, m.mes || '', [...own, ...inline])];
     const tags = sounds() ? parseSounds(m.mes || '') : [], songs = musicOn() ? parseBgm(m.mes || '') : [];
-    return storySteps(m.mes || '', lines, {pics, sounds: tags, bgm: songs, skip: settings().narration?.skip}).map(s => s.kind === 'say' ? {...s, id, voiced: !!voiced(lines[s.line])} : {...s, id});
+    const skip = [...(settings().narration?.skip || []), ...(vn().skip || []), 'style', 'script'];
+    return storySteps(m.mes || '', lines, {pics, sounds: tags, bgm: songs, skip}).map(s => s.kind === 'say' ? {...s, id, voiced: !!voiced(lines[s.line])} : {...s, id});
+  }
+  /**
+   * Pictures another plugin added to the message on the page only (智绘姬 and the like): each one where the text
+   * just before it is in the story (else at the start). Small ones (emoji, icons) and the phone's own are left out.
+   */
+  function shownPictures(id, raw, known) {
+    const box = doc.querySelector(`#chat .mes[mesid="${id}"] .mes_text`);
+    if (!box) return [];
+    const abs = u => { try { return new URL(u, doc.baseURI).href; } catch { return u; } };
+    const seen = new Set(known.map(p => abs(p.url))), out = [];
+    for (const img of box.querySelectorAll('img')) {
+      const url = img.currentSrc || img.src;
+      if (!url || seen.has(abs(url)) || img.closest('[class*="sttts"]')) continue;
+      if (img.naturalWidth && img.naturalWidth < 160 || img.naturalHeight && img.naturalHeight < 160) continue;
+      seen.add(abs(url));
+      let start = 0;
+      try {
+        const range = doc.createRange(); range.setStart(box, 0); range.setEndBefore(img);
+        const before = range.toString().replace(/\s+/g, ''), tail = before.slice(-12);
+        const at = tail ? raw.replace(/\s+/g, ' ').indexOf(tail) : -1;
+        if (tail && at < 0) { const i = raw.lastIndexOf(tail.slice(-6)); if (i >= 0) start = i + 6; } else if (at >= 0) start = at + tail.length;
+      } catch {}
+      out.push({start, url});
+    }
+    return out;
   }
   /** Where the stage starts: the last story picture before the message (softened), else the chat's own background. */
   function backdrop(start) {
@@ -78,6 +105,14 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     closePanel();
     cursor = start;
     const tavern = avatars();
+    // Avatars picked in the phone (an album photo; 只显示文字: none) come before the tavern's.
+    const mine = {}, made = [];
+    try {
+      for (const [key, a] of Object.entries(backend.getState?.().chat?.avatars || {})) {
+        if (a?.kind === 'text') mine[key] = '';
+        else if (a?.kind === 'photo' && a.photoId) backend.library?.getPhoto?.(a.photoId).then(p => { if (p?.blob && !stage?.closed) { const u = URL.createObjectURL(p.blob); made.push(u); mine[key] = u; } }).catch(() => {});
+      }
+    } catch {}
     stage = openVnStage({
       doc, title: title(), subtitle: start > 0 ? `从第 ${start} 楼开始` : '从头开始', backdrop: backdrop(start),
       look: vn,
@@ -85,12 +120,13 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       voice: {play: s => play(s.id, s.line), narrate: s => narrate(s.text), stop, on: voiceOn},
       // 快进 runs past the one-off sounds; the ambience and the music still change to where it stops.
       cue: (s, {skipping}) => { if (s.kind === 'bgm') music(s.id, s.index); else sound(s.id, s.index, {skipping}); },
-      face: (name, user) => user ? tavern.me : tavern.characters?.[name] || avatars().characters?.[name] || '',
+      face: (name, user) => { const key = user ? 'me' : name; if (Object.hasOwn(mine, key)) return mine[key]; return user ? tavern.me : tavern.characters?.[name] || avatars().characters?.[name] || ''; },
       sprite: (name, how) => pickLook(vn().cast?.[name], how),
       send,
       save: patch => { try { backend.saveVn(patch); } catch (error) { notice(error.message); } },
       onClose: id => {
         stage = null;
+        for (const u of made) URL.revokeObjectURL(u);
         // Back in the chat where the story was left.
         if (id != null) doc.querySelector(`#chat .mes[mesid="${id}"]`)?.scrollIntoView?.({block: 'center'});
       },

@@ -1,7 +1,7 @@
 // 视觉小说: the story read as a galgame. Its settings, the story cut into pages (core of the stage in vn-stage.js),
 // the 立绘 (with their 表情 and 动作) and the requests that draw them, and the cut-out that takes the plain background
 // off a drawn 立绘.
-import {skippedRanges, narrationPieces, NARRATION_SKIP} from './narration.js';
+import {skippedRanges, narrationPieces, NARRATION_SKIP, cleanSkip} from './narration.js';
 import {activeStyle, sizeFor} from './draw.js';
 
 /** What a 立绘 asks of the picture, after the 画风 and before the character's own looks. Editable in the app. The
@@ -37,7 +37,7 @@ export function expressionOf(emotion) {
   return best;
 }
 
-export const defaultVn = () => ({enabled: false, speed: 2, wait: 1, voice: true, narrate: false, font: 'm', box: 'night', opacity: 0.86, effects: true, rule: SPRITE_RULE, palette: null, cast: {}});
+export const defaultVn = () => ({enabled: false, speed: 2, wait: 1, voice: true, narrate: false, font: 'm', box: 'night', opacity: 0.86, effects: true, rule: SPRITE_RULE, palette: null, skip: [], cast: {}});
 const pick = (value, list, fallback) => list.includes(value) ? value : fallback;
 const text = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const COLOR = /^(#[0-9a-f]{3,8}|(rgb|hsl)a?\([\d\s.,%/+-]+\))$/i;
@@ -86,6 +86,8 @@ export function normalizeVn(value) {
     effects: v.effects !== false,
     rule: typeof v.rule === 'string' ? (v.rule === OLD_RULE ? SPRITE_RULE : v.rule.slice(0, LIMIT.rule)) : base.rule,
     palette: normalizePalette(v.palette),
+    // 不演的标签: parts of the story the stage leaves out (on top of 整篇朗读's list).
+    skip: cleanSkip(v.skip),
     cast: normalizeCast(v.cast),
   };
 }
@@ -162,6 +164,16 @@ export function storySteps(raw, lines = [], {pics = [], sounds = [], bgm = [], s
     at = e.end;
   }
   prose(at, source.length);
+  return out;
+}
+
+/** Pictures other plugins put in the story (<img src>, ![](url)): [{start, url}], where they are. */
+export function inlinePictures(raw) {
+  const text = String(raw ?? ''), out = [];
+  for (const m of text.matchAll(/<img\b[^<>]*?\bsrc\s*=\s*["']([^"']+)["'][^<>]*>|!\[[^\]]*\]\(([^)\s]+)[^)]*\)/gi)) {
+    const url = (m[1] || m[2] || '').trim();
+    if (/^(https?:|\/|data:image\/|blob:)/i.test(url)) out.push({start: m.index, url});
+  }
   return out;
 }
 
