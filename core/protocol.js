@@ -5,9 +5,7 @@ export const DEFAULT_FORMAT = '“{译文}”<tts>{角色}|{情绪}|{文本}</tt
 // Earlier default; replies written with it keep their waves.
 export const LEGACY_FORMATS = Object.freeze(['“{译文}”<tts role="{角色}" emotion="{情绪}">{文本}</tts>']);
 /** Formats tried when reading a reply: the active preset first, then the other presets, then the built-in ones. */
-/** A slip some models make: the <tts> tags left out, the original in 「」 right after the name and feeling. Read as a line too. */
-export const TAGLESS_FORMAT = '“{译文}”{角色}|{情绪}|「{文本}」';
-export function knownFormats(settings){const p=settings.presets.find(p=>p.id===settings.activePreset);return [...new Set([p?.format,...settings.presets.map(p=>p.format),DEFAULT_FORMAT,...LEGACY_FORMATS,TAGLESS_FORMAT].filter(Boolean))];}
+export function knownFormats(settings){const p=settings.presets.find(p=>p.id===settings.activePreset);return [...new Set([p?.format,...settings.presets.map(p=>p.format),DEFAULT_FORMAT,...LEGACY_FORMATS].filter(Boolean))];}
 const fields=['译文','角色','情绪','文本'];
 export const escapeHTML=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function decodeText(s){return s.replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);/gi,m=>{const names={'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&apos;':"'"};if(names[m.toLowerCase()])return names[m.toLowerCase()];const hex=m[2].toLowerCase()==='x',n=parseInt(m.slice(hex?3:2,-1),hex?16:10);return n>0&&n<=0x10ffff?String.fromCodePoint(n):m;});}
