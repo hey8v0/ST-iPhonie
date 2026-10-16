@@ -64,20 +64,26 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     }
     return out;
   }
-  /** Where the stage starts: the last story picture before the message (softened), else the chat's own background. */
+  /** The chat's own background (the tavern's), '' when it has none. */
+  function chatBackground() {
+    for (const sel of ['#bg_custom', '#bg1']) {
+      const el = doc.querySelector(sel);
+      if (!el) continue;
+      const m = /url\(["']?(.*?)["']?\)/.exec(doc.defaultView.getComputedStyle(el).backgroundImage || '');
+      if (m?.[1]) return m[1];
+    }
+    return '';
+  }
+  /** Where the stage starts: the chat's own background, else the last story picture before the message (dimmed). */
   function backdrop(start) {
+    const own = chatBackground();
+    if (own) return {url: own, soft: false};
     const list = chat();
     for (let id = start - 1; id >= 0 && id >= start - 40; id--) {
       const m = list[id];
       if (!m || m.is_user || m.is_system) continue;
       const tags = parsePictures(m.mes || '');
       for (let i = tags.length - 1; i >= 0; i--) { const url = pictureUrl(m, tags[i].hash); if (url) return {url, soft: true}; }
-    }
-    for (const sel of ['#bg_custom', '#bg1']) {
-      const el = doc.querySelector(sel);
-      if (!el) continue;
-      const m = /url\(["']?(.*?)["']?\)/.exec(doc.defaultView.getComputedStyle(el).backgroundImage || '');
-      if (m?.[1]) return {url: m[1], soft: false};
     }
     return null;
   }
@@ -114,7 +120,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       }
     } catch {}
     stage = openVnStage({
-      doc, title: title(), subtitle: start > 0 ? `从第 ${start} 楼开始` : '从头开始', backdrop: backdrop(start),
+      doc, title: title(), subtitle: start > 0 ? `从第 ${start} 楼开始` : '从头开始', backdrop: backdrop(start), scene: chatBackground(),
       look: vn,
       source: {next: () => { while (cursor < chat().length) { const id = cursor++, steps = stepsOf(id); if (steps?.length) return {id, steps}; } return null; }},
       voice: {play: s => play(s.id, s.line), narrate: s => narrate(s.text), stop, on: voiceOn},

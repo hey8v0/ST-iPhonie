@@ -295,6 +295,66 @@ export function stageMove(emotion) {
   return '';
 }
 
+/**
+ * How a line is acted, from its 情绪 (a word or a director's note; the feeling named first wins): move — the speaker
+ * shakes, hops, bounces, trembles or sinks; mark — a sign over their head (anger, surprise, sweat, heart, blush, note,
+ * drop, dots, sigh); burst — sparkles or hearts around them; tint — the edges of the screen glow red, blue, pink or
+ * dark; punch — the picture jumps closer for a moment.
+ */
+const LINE_FX = [
+  [/angry|furious|rage|annoy|irritat|shout|yell|怒|生气|恼|吼|喊|咆哮|愤|不耐烦|烦躁/i, {move: 'shake', mark: 'anger', tint: 'red'}],
+  [/surpris|shock|startl|astonish|惊|吓了一跳|诧异|震惊|不敢置信/i, {move: 'hop', mark: 'surprise', punch: true}],
+  [/scared|afraid|fear|terrif|panic|怕|恐|颤抖|发抖|慌/i, {move: 'tremble', mark: 'sweat', tint: 'dark'}],
+  [/nervous|awkward|embarrass|sweat|尴尬|紧张|心虚|冒汗|窘/i, {move: 'tremble', mark: 'sweat'}],
+  [/love|affection|adore|flirt|爱|喜欢|心动|宠溺|深情|撒娇/i, {move: 'bounce', mark: 'heart', burst: 'hearts', tint: 'pink'}],
+  [/shy|blush|fluster|害羞|脸红|羞|扭捏/i, {mark: 'blush', burst: 'hearts', tint: 'pink'}],
+  [/excit|cheer|delight|laugh|giggl|playful|happy|joy|sing|兴奋|雀跃|激动|开心|高兴|大笑|欢|俏皮|哼歌|愉快|得意/i, {move: 'bounce', mark: 'note', burst: 'sparkle'}],
+  [/sad|cry|tear|sorrow|grief|hurt|难过|伤心|哭|泪|悲|委屈|失落|哽咽/i, {move: 'sink', mark: 'drop', tint: 'blue'}],
+  [/speechless|silent|deadpan|blank|confus|无语|沉默|愣|呆|困惑|疑惑|不解/i, {mark: 'dots'}],
+  [/sigh|tired|exhaust|weary|叹|疲惫|无奈|累/i, {move: 'sink', mark: 'sigh'}],
+];
+const NO_FX = {move: '', mark: '', burst: '', tint: '', punch: false};
+export function lineFx(emotion) {
+  const e = String(emotion || '');
+  let best = null, at = Infinity;
+  for (const [re, fx] of LINE_FX) { const m = re.exec(e); if (m && m.index < at) { at = m.index; best = fx; } }
+  return {...NO_FX, ...best};
+}
+
+/**
+ * What the story between the lines does to the stage: weather (the kind named last in it: rain, snow, petals, leaves,
+ * stars, fireflies, embers; 'clear' when it stops or they go inside; '' when it says nothing), a flash (lightning,
+ * boom), a heartbeat, a blackout (眼前一黑) and memory (回忆, 梦里: the scene turns old-photo coloured).
+ */
+const WEATHER = [
+  ['rain', /下雨|雨水|雨滴|雨点|雨声|大雨|小雨|暴雨|细雨|雨中|雨夜|雨幕|淋雨|阵雨|\brain/gi],
+  ['snow', /下雪|雪花|雪片|大雪|飘雪|雪夜|雪地|风雪|\bsnow/gi],
+  ['petals', /樱花|花瓣|落英|petal|sakura|cherry blossom/gi],
+  ['leaves', /落叶|枯叶|红叶|秋叶|fallen leaves/gi],
+  ['stars', /星空|繁星|星星|银河|流星|满天星|starry/gi],
+  ['fireflies', /萤火虫|流萤|firefl/gi],
+  ['embers', /篝火|火星|余烬|火堆|烛火|炉火|\bember|bonfire/gi],
+  ['clear', /雨停|雨势渐歇|雨渐渐停|放晴|雪停|天晴了|走进屋|进了屋|回到室内|关上窗|\bindoors/gi],
+];
+export function storyFx(text) {
+  const t = String(text || '');
+  let weather = '', at = -1;
+  for (const [kind, re] of WEATHER) for (const m of t.matchAll(re)) if (m.index > at) { at = m.index; weather = kind; }
+  return {
+    weather,
+    flash: /闪电|雷声|雷鸣|惊雷|电光一闪|lightning|thunder/i.test(t) ? 'lightning' : /爆炸|轰的一声|轰然|巨响|炸开|explo/i.test(t) ? 'boom' : '',
+    pulse: /心跳|怦怦|砰砰|心脏狂跳|heartbeat/i.test(t),
+    blackout: /眼前一黑|昏了过去|晕了过去|昏迷|失去了?意识|失去知觉|black(?:ed)? out/i.test(t),
+    memory: /回忆起|回忆里|回忆中|记忆中|记忆里|那年|多年前|很多年前|梦里|梦中|梦境|flashback/i.test(t),
+  };
+}
+/** Whether a CG fills the screen (cut a little at the edges) or is shown whole (its shape is far from the screen's). */
+export function coverFits(iw, ih, sw, sh) {
+  if (!(iw > 0 && ih > 0 && sw > 0 && sh > 0)) return true;
+  const r = (iw / ih) / (sw / sh);
+  return r >= 0.72 && r <= 1.38;
+}
+
 /** The flat background a 立绘 is drawn on: green, unless the character wears it (then blue, then magenta). */
 export function keyColorFor(looks) {
   const l = String(looks || '').toLowerCase();

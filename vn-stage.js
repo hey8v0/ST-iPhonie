@@ -4,10 +4,14 @@
 // after each line (and its voice), 快进 runs through, 记录 shows what was read (a line's voice plays again from there),
 // 隐藏 leaves only the picture. At the end of the story a box takes what happens next and sends it to the tavern; the
 // reply goes on on the stage when it is written.
-// A picture of the story is a CG: the 立绘 step aside while it is shown; from the next message on it stays as the
-// backdrop, softened, and they come back. Characters without a 立绘 show their avatar in the text box instead.
+// A picture of the story is a CG: the 立绘 step aside for the rest of its message (whoever speaks shows as a bust in
+// the text box); it fills the screen when its shape is close to the screen's, else it is seen whole. From the next
+// message on the chat's own background comes back (or the CG stays, dimmed) with the 立绘. Characters without a 立绘
+// show their avatar in the text box. Effects: each line is acted from its 情绪 (moves, signs over the head, sparkles,
+// hearts, a glow at the edges), and the story brings weather, lightning, heartbeats, blackouts and memories (vn-fx.js).
 // It brings its own styles, so it works on any theme. Steps come from core/vn.js; vn-host.js feeds them.
-import {VN_SPEEDS, VN_WAITS, stageMove} from './core/vn.js';
+import {VN_SPEEDS, VN_WAITS, lineFx, storyFx, coverFits} from './core/vn.js';
+import {createFx} from './vn-fx.js';
 
 const STYLE_ID = 'sttts-vn-style';
 const CSS = `
@@ -26,15 +30,56 @@ const CSS = `
 .vn-bg{position:absolute;inset:0;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#3a3560,#120f22 70%)}
 .vn-bg-layer{position:absolute;inset:-2%;background:center/cover no-repeat;opacity:0;transition:opacity .9s ease,filter .9s ease}
 .vn-bg-layer[data-on]{opacity:1}
-/* A CG is seen whole: the picture fits the screen, over a blurred copy that fills it. */
-.vn-fit{position:absolute;inset:0;background:center/contain no-repeat;opacity:0;transition:opacity .6s ease}
-.sttts-vn[data-cg] .vn-fit{opacity:1}
-.sttts-vn[data-cg] .vn-bg-layer{filter:blur(18px) brightness(.55)}
-.sttts-vn[data-soft] .vn-bg-layer{filter:blur(3px) brightness(.72) saturate(.9)}
+/* A CG fills the screen when its shape is close to the screen's; otherwise (and while the box is hidden) it is seen
+   whole, over a blurred copy that fills the rest. */
+.vn-fit{position:absolute;inset:0;background:50% 40%/contain no-repeat;opacity:0;transition:opacity .6s ease}
+/* On a tall screen a whole CG sits in the room above the text box. */
+@media (orientation:portrait){.vn-fit{background-position:50% 26%}}
+.sttts-vn[data-cg]:is([data-whole],[data-hidden]) .vn-fit{opacity:1}
+.sttts-vn[data-cg]:is([data-whole],[data-hidden]) .vn-bg-layer{filter:blur(18px) brightness(.55)}
+.sttts-vn[data-soft] .vn-bg-layer{filter:brightness(.7) saturate(.92)}
 .sttts-vn[data-fx] .vn-bg-layer[data-on]{animation:vn-drift 28s ease-in-out infinite alternate}
+.sttts-vn[data-fx] .vn-bg-layer[data-on][data-reveal]{animation:vn-reveal 1.1s cubic-bezier(.22,1,.36,1),vn-drift 28s ease-in-out infinite alternate}
+.sttts-vn[data-fx] .vn-fit[data-reveal]{animation:vn-reveal 1.1s cubic-bezier(.22,1,.36,1)}
 @keyframes vn-drift{from{transform:scale(1) translate(0,0)}to{transform:scale(1.07) translate(-1.2%,-.8%)}}
+@keyframes vn-reveal{from{clip-path:circle(0% at 50% 45%)}to{clip-path:circle(80% at 50% 45%)}}
+/* 回忆, 梦里: an old photograph. */
+.vn-stage{transition:filter 1s}
+.sttts-vn[data-memory] .vn-stage{filter:sepia(.55) saturate(.75) contrast(.95)}
+.sttts-vn[data-memory] .vn-stage::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:3;background:radial-gradient(ellipse at center,transparent 50%,rgba(255,240,214,.6) 100%)}
+.vn-fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+.vn-tint,.vn-black{position:absolute;inset:0;pointer-events:none;opacity:0;z-index:3}
+.vn-tint[data-tint=red]{background:radial-gradient(ellipse at center,transparent 40%,rgba(230,30,50,.55) 100%)}
+.vn-tint[data-tint=blue]{background:radial-gradient(ellipse at center,transparent 35%,rgba(40,70,160,.55) 100%)}
+.vn-tint[data-tint=pink]{background:radial-gradient(ellipse at center,transparent 40%,rgba(255,120,170,.5) 100%)}
+.vn-tint[data-tint=dark]{background:radial-gradient(ellipse at center,transparent 30%,rgba(0,0,0,.7) 100%)}
+.vn-tint[data-tint=beat]{background:radial-gradient(ellipse at center,transparent 38%,rgba(200,20,60,.6) 100%)}
+.sttts-vn[data-fx] .vn-tint[data-on]{animation:vn-tint 1.9s ease}
+.sttts-vn[data-fx] .vn-tint[data-on][data-tint=beat]{animation:vn-beat 1.5s ease}
+@keyframes vn-tint{0%{opacity:0}25%{opacity:1}65%{opacity:.85}100%{opacity:0}}
+@keyframes vn-beat{0%,100%{opacity:0}12%{opacity:1}26%{opacity:.15}40%{opacity:.9}62%{opacity:0}}
+.vn-black{background:#000;z-index:4}
+.sttts-vn[data-fx] .vn-black[data-on]{animation:vn-black 2.3s ease}
+@keyframes vn-black{0%{opacity:0}25%,55%{opacity:1}100%{opacity:0}}
+.vn-mark{position:absolute;z-index:6;pointer-events:none;font:900 clamp(28px,4vw,46px)/1 var(--vn-font);color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.35);white-space:nowrap;animation:vn-mark 1.9s ease forwards}
+.vn-actor .vn-mark{top:2%;left:62%}
+.vn-box>.vn-mark{top:-62px;left:clamp(150px,18vw,230px)}
+.vn-mark[data-mark=surprise]{color:var(--vn-plate);-webkit-text-stroke:2px #fff;font-size:clamp(34px,5vw,58px)}
+.vn-mark[data-mark=heart]{color:#ff6b9a}
+.vn-mark[data-mark=blush]{color:#ff7aa8;font-size:clamp(20px,3vw,30px);letter-spacing:-.1em}
+.vn-mark[data-mark=note]{color:#ffd46b;animation-name:vn-note}
+.vn-mark[data-mark=dots]{letter-spacing:.1em}
+.vn-mark:is([data-mark=sweat],[data-mark=drop]){animation-name:vn-drip}
+.vn-mark[data-mark=anger]{animation-name:vn-anger}
+@keyframes vn-mark{0%{opacity:0;transform:scale(.3) translateY(10px)}12%{opacity:1;transform:scale(1.25)}22%{transform:scale(1)}80%{opacity:1;transform:none}100%{opacity:0;transform:translateY(-14px)}}
+@keyframes vn-anger{0%{opacity:0;transform:scale(.3)}10%{opacity:1;transform:scale(1.3)}20%{transform:scale(.95)}30%{transform:scale(1.15)}40%,80%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.1)}}
+@keyframes vn-drip{0%{opacity:0;transform:translateY(-8px)}15%{opacity:1}75%{opacity:1}100%{opacity:0;transform:translateY(26px)}}
+@keyframes vn-note{0%{opacity:0;transform:translate(0,10px) rotate(-10deg)}15%{opacity:1}50%{transform:translate(10px,-14px) rotate(8deg)}85%{opacity:1}100%{opacity:0;transform:translate(-4px,-34px) rotate(-6deg)}}
 .vn-cast{position:absolute;inset:0;pointer-events:none}
 .vn-actor{position:absolute;bottom:0;left:50%;height:min(92%,150vw);transform:translateX(-50%);transition:left .55s cubic-bezier(.22,1,.36,1),opacity .45s,filter .35s;opacity:0;filter:drop-shadow(0 10px 24px rgba(0,0,0,.35))}
+.vn-actor img{transform-origin:50% 100%;transition:transform .45s cubic-bezier(.22,1,.36,1),filter .45s}
+.vn-actor[data-speaking] img{transform:scale(1.015)}
+.vn-actor[data-sink] img{transform:translateY(2.5%);filter:saturate(.8) brightness(.93)}
 .vn-actor[data-in]{opacity:1}
 .vn-actor[data-dim]{filter:brightness(.58) saturate(.85) drop-shadow(0 10px 24px rgba(0,0,0,.35))}
 .vn-actor img{display:block;height:100%;width:auto;max-width:none;-webkit-user-drag:none}
@@ -44,21 +89,35 @@ const CSS = `
 .sttts-vn[data-fx] .vn-actor[data-hop] img{animation:vn-hop .5s cubic-bezier(.3,1.6,.5,1)}
 @keyframes vn-hop{0%,100%{transform:none}35%{transform:translateY(-4.5%)}}
 .sttts-vn[data-fx] .vn-actor[data-enter] img{animation:vn-enter .55s cubic-bezier(.22,1,.36,1)}
-@keyframes vn-enter{from{transform:translateY(5%);opacity:.2}}
+@keyframes vn-enter{from{transform:translate(var(--vn-from,0),4%);opacity:0}}
+.sttts-vn[data-fx] .vn-actor[data-bounce] img{animation:vn-bounce .75s ease}
+@keyframes vn-bounce{0%,100%{transform:none}22%{transform:translateY(-3.5%)}45%{transform:none}65%{transform:translateY(-1.6%)}82%{transform:none}}
+.sttts-vn[data-fx] .vn-actor[data-tremble] img{animation:vn-tremble .7s linear}
+@keyframes vn-tremble{0%,100%{transform:none}10%,50%,90%{transform:translateX(-.7%)}30%,70%{transform:translateX(.7%)}}
+.sttts-vn[data-fx][data-punch] .vn-stage{animation:vn-punch .5s cubic-bezier(.2,1.4,.4,1)}
+@keyframes vn-punch{40%{transform:scale(1.045)}}
+.sttts-vn[data-fx][data-shake=big] .vn-stage{animation:vn-shake-big .75s linear}
+@keyframes vn-shake-big{0%,100%{transform:none}10%{transform:translate(-18px,8px) rotate(-.6deg)}20%{transform:translate(16px,-10px) rotate(.5deg)}30%{transform:translate(-14px,6px)}45%{transform:translate(10px,-5px)}60%{transform:translate(-7px,3px)}80%{transform:translate(3px,-1px)}}
 .sttts-vn[data-fx][data-shake] .vn-stage{animation:vn-shake .42s linear}
 @keyframes vn-shake{0%,100%{transform:none}15%{transform:translate(-9px,3px)}30%{transform:translate(8px,-4px)}45%{transform:translate(-6px,2px)}60%{transform:translate(5px,-2px)}80%{transform:translate(-2px,1px)}}
 .vn-stage{position:absolute;inset:0}
 .vn-flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
 .sttts-vn[data-fx] .vn-flash[data-on]{animation:vn-flash .7s ease-out}
+.sttts-vn[data-fx] .vn-flash[data-on][data-kind=lightning]{animation:vn-lightning 1s linear}
+.vn-flash[data-kind=boom]{background:#ffb35c}
 @keyframes vn-flash{from{opacity:.75}to{opacity:0}}
+@keyframes vn-lightning{0%{opacity:.95}8%{opacity:0}16%{opacity:.75}26%{opacity:0}34%{opacity:.4}100%{opacity:0}}
 .vn-box{position:absolute;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(1120px,calc(100% - 24px));min-height:clamp(132px,24vh,210px);padding:30px clamp(18px,3vw,40px) 22px;border-radius:20px;background:linear-gradient(180deg,var(--vn-box),var(--vn-box2));border:1px solid var(--vn-line);box-shadow:0 18px 50px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.12);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);transition:opacity .3s,transform .3s;z-index:5}
 .sttts-vn[data-face] .vn-box{padding-left:clamp(108px,15vw,150px)}
 .vn-face{position:absolute;left:clamp(14px,2vw,24px);bottom:18px;width:clamp(78px,11vw,112px);aspect-ratio:1;border-radius:18px;overflow:hidden;border:2px solid var(--vn-line);box-shadow:0 6px 18px rgba(0,0,0,.3);display:none;background:var(--vn-box2)}
 .sttts-vn[data-face] .vn-face{display:block}
 .vn-face img{width:100%;height:100%;object-fit:cover;display:block}
+.vn-face img.vn-bust{object-position:50% 0;transform:scale(1.6);transform-origin:50% 0}
 .vn-face span{display:grid;place-items:center;width:100%;height:100%;font-size:38px;font-weight:800;color:var(--vn-plate)}
 .vn-name{position:absolute;top:-19px;left:clamp(16px,2.6vw,34px);min-width:110px;padding:5px 22px;border-radius:12px 12px 12px 4px;background:var(--vn-plate);color:var(--vn-plate-ink);font-weight:800;font-size:17px;letter-spacing:.08em;text-align:center;box-shadow:0 6px 18px var(--vn-glow);transform:skewX(-8deg)}
 .vn-name>span{display:inline-block;transform:skewX(8deg)}
+.sttts-vn[data-fx] .vn-name[data-pop]{animation:vn-plate .4s cubic-bezier(.3,1.5,.5,1)}
+@keyframes vn-plate{from{opacity:0;transform:skewX(-8deg) translateY(8px) scale(.9)}}
 .vn-name[hidden]{display:none}
 .vn-text{margin:0;min-height:3.5em;font-size:var(--vn-size);line-height:1.8;letter-spacing:.02em;white-space:pre-wrap;overflow-wrap:anywhere;text-shadow:0 1px 2px rgba(0,0,0,.18)}
 .sttts-vn:is([data-box=day],[data-box=sakura],[data-box=phone]) .vn-text{text-shadow:none}
@@ -75,11 +134,20 @@ const CSS = `
 .sttts-vn[data-voice=playing] .vn-voice,.sttts-vn[data-voice=generating] .vn-voice{display:flex}
 .sttts-vn[data-voice=generating] .vn-voice i{animation-duration:1.8s;opacity:.6}
 @keyframes vn-bar{50%{height:12px}}
-.vn-menu{position:absolute;right:6px;bottom:calc(100% + 8px);display:flex;gap:4px;z-index:6;flex-wrap:wrap;justify-content:flex-end;max-width:calc(100% - 150px)}
+.vn-menu{position:absolute;right:6px;bottom:calc(100% + 8px);display:flex;gap:4px;z-index:6;justify-content:flex-end}
 .vn-menu button{padding:4px 10px;border-radius:999px;font-size:13px;font-weight:700;color:#fff;background:rgba(10,12,28,.5);border:1px solid rgba(255,255,255,.18);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);letter-spacing:.06em;transition:background .2s}
 .vn-menu button:hover{background:rgba(10,12,28,.72)}
 .vn-menu button[aria-pressed=true]{background:var(--vn-plate);color:var(--vn-plate-ink);border-color:transparent}
 .vn-menu button[hidden]{display:none}
+.vn-menu [data-vn=more]{min-width:34px;text-align:center;letter-spacing:0}
+.vn-more{position:absolute;right:0;bottom:calc(100% + 8px);display:flex;flex-direction:column;min-width:132px;padding:6px;border-radius:16px;background:rgba(10,12,28,.84);border:1px solid rgba(255,255,255,.16);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:0 12px 30px rgba(0,0,0,.35)}
+.vn-more[hidden]{display:none}
+.vn-menu .vn-more button{padding:9px 14px;border-radius:10px;border:0;background:none;font-size:14px;letter-spacing:.04em}
+.vn-menu .vn-more button:hover{background:rgba(255,255,255,.1)}
+.vn-menu .vn-more button[aria-pressed]{background:none;color:#fff}
+.vn-menu .vn-more button[aria-pressed=true]::after{content:' ✓';color:var(--vn-plate)}
+.sttts-vn[data-fx] .vn-more:not([hidden]){animation:vn-pop .2s ease-out}
+@keyframes vn-pop{from{opacity:0;transform:translateY(6px) scale(.97)}}
 .sttts-vn[data-hidden] .vn-box{opacity:0;pointer-events:none;transform:translateX(-50%) translateY(16px)}
 .vn-input{display:none;gap:8px;margin-top:10px}
 .sttts-vn[data-end] .vn-input{display:flex}
@@ -114,8 +182,10 @@ const CSS = `
  .sttts-vn[data-face] .vn-box{padding-left:86px}
  .vn-face{width:64px;left:12px;bottom:14px;border-radius:14px}
  .vn-name{font-size:15px;min-width:86px;padding:4px 16px;top:-16px}
- .vn-menu{right:0;gap:3px;max-width:100%;bottom:calc(100% + 22px)}
- .vn-menu button{padding:3px 8px;font-size:12px}
+ .vn-menu{right:0;gap:4px;bottom:calc(100% + 22px)}
+ .vn-menu button{padding:4px 10px;font-size:12px}
+ .vn-mark{font-size:26px}
+ .vn-box>.vn-mark{top:-52px;left:110px}
  .vn-actor{height:min(80%,200vw)}
  .vn-log li{grid-template-columns:4.5em 1fr auto;gap:8px}
 }
@@ -131,9 +201,9 @@ const quoted = text => /^[「『“"‘（(]/.test(text) ? text : '「' + text +
  * face(name, user): avatar url; sprite(name, {emotion, context}): the 立绘 url for this line (context: the story just
  * before it). cue(step, {skipping}): a sound or <bgm> of the story is reached. send(text): sends to the tavern (false
  * when it could not). save(patch): keeps a setting. title/subtitle: the title card. backdrop: the picture to start on
- * ({url, soft}). onClose(lastId).
+ * ({url, soft}); scene: the chat's own background, which comes back after a CG's message. onClose(lastId).
  */
-export function openVnStage({doc = document, source, look, voice, face, sprite, cue = () => {}, send, save = () => {}, title = '', subtitle = '', backdrop = null, onClose = () => {}}) {
+export function openVnStage({doc = document, source, look, voice, face, sprite, cue = () => {}, send, save = () => {}, title = '', subtitle = '', backdrop = null, scene = '', onClose = () => {}}) {
   const win = doc.defaultView;
   if (!doc.getElementById(STYLE_ID)) { const style = doc.createElement('style'); style.id = STYLE_ID; style.textContent = CSS; doc.head.append(style); }
   const root = doc.createElement('div');
@@ -142,8 +212,8 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', '视觉小说');
   root.tabIndex = -1;
-  root.innerHTML = `<div class="vn-stage"><div class="vn-bg"><div class="vn-bg-layer"></div><div class="vn-bg-layer"></div><div class="vn-fit"></div></div><div class="vn-cast"></div><div class="vn-flash"></div></div>
-    <div class="vn-box"><nav class="vn-menu" aria-label="视觉小说菜单"><button data-vn="back">上一页</button><button data-vn="auto" aria-pressed="false">自动</button><button data-vn="skip" aria-pressed="false">快进</button><button data-vn="log">记录</button><button data-vn="voice" aria-pressed="false">语音</button><button data-vn="hide">隐藏</button><button data-vn="full" aria-pressed="false">全屏</button><button data-vn="close" aria-label="退出视觉小说">退出</button></nav><div class="vn-name" hidden><span></span></div><div class="vn-face"></div><span class="vn-voice" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p class="vn-text" aria-live="polite"></p><span class="vn-next" aria-hidden="true">▼</span>
+  root.innerHTML = `<div class="vn-stage"><div class="vn-bg"><div class="vn-bg-layer"></div><div class="vn-bg-layer"></div><div class="vn-fit"></div></div><div class="vn-cast"></div><div class="vn-tint"></div><div class="vn-flash"></div><div class="vn-black"></div></div>
+    <div class="vn-box"><nav class="vn-menu" aria-label="视觉小说菜单"><button data-vn="auto" aria-pressed="false">自动</button><button data-vn="skip" aria-pressed="false">快进</button><button data-vn="more" aria-expanded="false" aria-label="更多">⋯</button><div class="vn-more" hidden><button data-vn="back">上一页</button><button data-vn="log">记录</button><button data-vn="voice" aria-pressed="false">语音</button><button data-vn="hide">隐藏</button><button data-vn="full" aria-pressed="false">全屏</button><button data-vn="close" aria-label="退出视觉小说">退出</button></div></nav><div class="vn-name" hidden><span></span></div><div class="vn-face"></div><span class="vn-voice" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p class="vn-text" aria-live="polite"></p><span class="vn-next" aria-hidden="true">▼</span>
       <div class="vn-input"><textarea rows="2" placeholder="接下来你要说什么、做什么？空着发送就让故事接着写" aria-label="接下来的剧情"></textarea><button data-vn="send">发送</button></div></div>
     <div class="vn-log" hidden><header><span>记 录</span><button data-vn="log-close">返回</button></header><ol></ol></div>
     <div class="vn-title"><small>VISUAL NOVEL</small><strong>${esc(title || '视觉小说')}</strong>${subtitle ? `<em>${esc(subtitle)}</em>` : ''}</div>`;
@@ -156,7 +226,9 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   let steps = [], pos = 0, message = null, lastId = null, step = null, typed = true, typing = 0, closed = false;
   let auto = false, skip = false, autoTimer = 0, skipTimer = 0, hidden = false, cg = false, layer = 0, bgUrl = '', ended = false, waiting = false, clock = 0, phase = 'idle', titleTimer = 0;
   const actors = new Map(), log = [], lookOf = new Map();
-  let said = '', cgPages = 0;
+  let said = '', weatherAge = 0;
+  const fx = createFx({doc, host: $('.vn-stage'), after: castEl});
+  const fxOn = () => root.hasAttribute('data-fx') && !skip;
   // Pages seen (to go back to) and the messages read so far (going on after going back).
   const seen = [], loaded = [];
   let at = -1;
@@ -168,6 +240,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     root.style.setProperty('--vn-op', String(s.opacity));
     root.style.setProperty('--vn-size', {s: '16px', m: '19px', l: '22px'}[s.font] || '19px');
     root.toggleAttribute('data-fx', s.effects !== false && !win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+    if (!root.hasAttribute('data-fx')) { fx?.clear(); root.removeAttribute('data-memory'); }
     $('[data-vn=voice]').setAttribute('aria-pressed', String(s.voice && voice.on()));
     $('[data-vn=voice]').hidden = !voice.on();
   }
@@ -176,19 +249,46 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   full.hidden = !root.requestFullscreen;
 
   // ---------- background ----------
+  const cssUrl = url => `url("${String(url).replace(/["\\]/g, '\\$&')}")`;
+  /** Whether the CG on the stage is seen whole (its shape far from the screen's), from its size once it has loaded. */
+  let cgSize = null;
+  const fitCg = () => root.toggleAttribute('data-whole', !!cgSize && !coverFits(cgSize[0], cgSize[1], win.innerWidth, win.innerHeight));
   function setBg(url, {soft = false, flash = false, cg: whole = false} = {}) {
     root.toggleAttribute('data-soft', soft);
     root.toggleAttribute('data-cg', whole && !!url);
-    if (whole && url) $('.vn-fit').style.backgroundImage = `url("${String(url).replace(/["\\]/g, '\\$&')}")`;
+    if (whole && url) {
+      const fit = $('.vn-fit');
+      fit.style.backgroundImage = cssUrl(url);
+      cgSize = null; fitCg();
+      const img = new win.Image();
+      img.onload = () => { if (bgUrl === url) { cgSize = [img.naturalWidth, img.naturalHeight]; fitCg(); } };
+      img.src = url;
+      if (!skip) { fit.removeAttribute('data-reveal'); void fit.offsetWidth; fit.setAttribute('data-reveal', ''); }
+    }
     if (url === bgUrl) return;
     bgUrl = url;
     const next = layers[layer = 1 - layer], prev = layers[1 - layer];
-    next.style.backgroundImage = url ? `url("${String(url).replace(/["\\]/g, '\\$&')}")` : '';
+    next.style.backgroundImage = url ? cssUrl(url) : '';
     next.toggleAttribute('data-on', !!url);
     prev.removeAttribute('data-on');
-    if (flash) { const f = $('.vn-flash'); f.removeAttribute('data-on'); void f.offsetWidth; f.setAttribute('data-on', ''); }
+    next.toggleAttribute('data-reveal', whole && !skip);
+    if (whole) win.setTimeout(() => next.removeAttribute('data-reveal'), 1200);
+    if (flash) blink('');
+  }
+  function blink(kind) { const f = $('.vn-flash'); f.dataset.kind = kind; f.removeAttribute('data-on'); void f.offsetWidth; f.setAttribute('data-on', ''); }
+  /** One of the overlays (tint, black) or the stage (shake, punch) plays its animation again. */
+  function replay(el, attr, value = '', ms = 0) {
+    el.removeAttribute(attr); void el.offsetWidth; el.setAttribute(attr, value);
+    if (ms) win.setTimeout(() => { if (el.getAttribute(attr) === value) el.removeAttribute(attr); }, ms);
   }
   if (backdrop?.url) setBg(backdrop.url, {soft: backdrop.soft !== false});
+  /** After a CG's message: the chat's own background comes back; without one the CG stays, dimmed. */
+  function endCg() {
+    if (!cg) return;
+    cg = false;
+    root.removeAttribute('data-cg'); root.removeAttribute('data-whole');
+    if (scene) setBg(scene); else root.setAttribute('data-soft', '');
+  }
 
   // ---------- characters ----------
   function placeActors() {
@@ -216,6 +316,9 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       a = {name, el, last: 0, url};
       actors.set(name, a);
       placeActors();
+      // In from the side it stands on.
+      const left = parseFloat(el.style.left) || 50;
+      el.style.setProperty('--vn-from', left < 45 ? '-9%' : left > 55 ? '9%' : '0%');
       win.requestAnimationFrame(() => el.setAttribute('data-in', ''));
       win.setTimeout(() => el.removeAttribute('data-enter'), 600);
     } else if (a.url !== url) {
@@ -239,8 +342,55 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   }
   function move(kind, actor) {
     if (!kind || skip) return;
-    if (kind === 'shake') { root.removeAttribute('data-shake'); void root.offsetWidth; root.setAttribute('data-shake', ''); win.setTimeout(() => root.removeAttribute('data-shake'), 450); }
-    else if (actor) { actor.el.removeAttribute('data-hop'); void actor.el.offsetWidth; actor.el.setAttribute('data-hop', ''); win.setTimeout(() => actor.el.removeAttribute('data-hop'), 520); }
+    if (kind === 'shake') replay(root, 'data-shake', '', 450);
+    else if (kind === 'sink') actor?.el.setAttribute('data-sink', '');
+    else if (actor) replay(actor.el, 'data-' + kind, '', {hop: 520, bounce: 780, tremble: 720}[kind] || 600);
+  }
+  const MARK = {anger: '💢', surprise: '！', sweat: '💦', heart: '♥', blush: '///', note: '♪', drop: '💧', dots: '…', sigh: '💨'};
+  /** A sign over the speaker's head (or by their name in the box when they are not on the stage). */
+  function mark(kind, actor) {
+    if (!MARK[kind]) return;
+    for (const old of root.querySelectorAll('.vn-mark')) old.remove();
+    const el = doc.createElement('span');
+    el.className = 'vn-mark'; el.dataset.mark = kind; el.textContent = MARK[kind];
+    el.setAttribute('aria-hidden', 'true');
+    (actor ? actor.el : box).append(el);
+    win.setTimeout(() => el.remove(), 2000);
+  }
+  /** Where sparkles or hearts start: by the speaker's head, else above the text box. */
+  function headOf(actor) {
+    const r = root.getBoundingClientRect();
+    if (actor) { const a = actor.el.getBoundingClientRect(); return [a.left - r.left + a.width / 2, a.top - r.top + a.height * 0.2]; }
+    const b = box.getBoundingClientRect();
+    return [b.left - r.left + Math.min(220, b.width / 3), b.top - r.top - 20];
+  }
+  /** A line acted from its 情绪; the story between the lines brings the weather and the rest. */
+  function act(s, actor) {
+    if (!fxOn()) return;
+    if (s.kind === 'say') {
+      if (s.part) return;
+      const f = lineFx(s.emotion);
+      move(f.move, actor);
+      mark(f.mark, actor);
+      if (f.burst) { const [x, y] = headOf(actor); fx.burst(f.burst, x, y); }
+      if (f.tint) { const t = $('.vn-tint'); t.dataset.tint = f.tint; replay(t, 'data-on', '', 2000); }
+      if (f.punch) replay(root, 'data-punch', '', 520);
+      return;
+    }
+    const f = storyFx(s.text);
+    if (f.flash === 'lightning') { blink('lightning'); replay(root, 'data-shake', '', 450); }
+    if (f.flash === 'boom') { blink('boom'); replay(root, 'data-shake', 'big', 780); }
+    if (f.pulse) { const t = $('.vn-tint'); t.dataset.tint = 'beat'; replay(t, 'data-on', '', 1600); }
+    if (f.blackout) replay($('.vn-black'), 'data-on', '', 2400);
+    if (f.memory) root.setAttribute('data-memory', '');
+  }
+  /** The weather the story names stays a while: until it changes or stops, or two messages go by without it. */
+  function weatherFrom(s) {
+    if (s.kind !== 'narrate' || !root.hasAttribute('data-fx')) return;
+    const w = storyFx(s.text).weather;
+    if (!w) return;
+    weatherAge = 0;
+    fx.weather(w === 'clear' ? '' : w);
   }
 
   // ---------- text ----------
@@ -270,29 +420,30 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   // ---------- steps ----------
   function show(s, {again = false} = {}) {
     step = s;
-    // A CG is seen alone for one page; then it stays behind, softened, and the 立绘 come back.
-    if (cg && cgPages++ >= 1) { cg = false; root.setAttribute('data-soft', ''); root.removeAttribute('data-cg'); }
     const say = s.kind === 'say', name = say ? s.role : '';
     root.toggleAttribute('data-narrate', !say);
     root.toggleAttribute('data-user', !!s.user);
+    if (say && nameEl.firstElementChild.textContent !== name && !again) replay(nameEl, 'data-pop', '', 450);
     nameEl.hidden = !say;
     nameEl.firstElementChild.textContent = name;
-    // A 立绘 when there is one (not over a CG, not for the user); else the avatar in the box.
+    // A 立绘 when there is one (not for the user): on the stage, or over a CG as a bust in the box; else the avatar.
     // Its 表情 or 动作 is chosen on its first page (from its 情绪 and the story just before it) and kept for the rest.
     let url = '';
-    if (say && !s.user && !cg) {
+    if (say && !s.user) {
       url = s.part && lookOf.has(name) ? lookOf.get(name) : sprite(name, {emotion: s.emotion, context: said, last: actors.get(name)?.url || ''});
       lookOf.set(name, url);
     }
     if (say) said = ''; else said = (said + '\n' + s.text).slice(-400);
     let actor = null;
-    if (url) actor = enter(name, url);
+    if (url && !cg) actor = enter(name, url);
+    if (actor && !s.part) actor.el.removeAttribute('data-sink');
     // Whoever speaks is lit; the others dim (all of them when the speaker has no 立绘 on the stage).
     spotlight(say ? name : '');
-    const pic = say && !actor ? face(name, s.user) : '';
+    const bust = say && !actor && cg ? url : '', pic = say && !actor ? bust || face(name, s.user) : '';
     root.toggleAttribute('data-face', say && !actor);
-    faceEl.innerHTML = pic ? `<img src="${esc(pic)}" alt="">` : say && !actor ? `<span>${esc([...name][0] || '?')}</span>` : '';
-    if (say && !s.part && !again) move(look().effects !== false ? stageMove(s.emotion) : '', actor);
+    faceEl.innerHTML = pic ? `<img src="${esc(pic)}" alt=""${bust ? ' class="vn-bust"' : ''}>` : say && !actor ? `<span>${esc([...name][0] || '?')}</span>` : '';
+    weatherFrom(s);
+    if (!again) act(s, actor);
     // Voice: a line plays from its first page on; anything else stops the one before.
     if (!(say && s.part) || again) voice.stop();
     type(say ? quoted(s.text) : s.text);
@@ -307,8 +458,9 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     let m = loaded[at + 1];
     if (!m) { m = source.next(); if (!m) return false; loaded.push(m); at = loaded.length - 1; } else at++;
     message = m; steps = m.steps; pos = 0; lastId = m.id; said = '';
-    // A CG of the message before stays as the backdrop, softened; the 立绘 come back.
-    if (cg) { cg = false; root.setAttribute('data-soft', ''); root.removeAttribute('data-cg'); }
+    endCg();
+    root.removeAttribute('data-memory');
+    if (++weatherAge > 2) fx.weather('');
     return true;
   }
   function next() {
@@ -318,7 +470,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       if (pos >= steps.length && !nextMessage()) { theEnd(); return; }
       const s = steps[pos++];
       if (!s) continue;
-      if (s.kind === 'bg') { cg = true; cgPages = 0; clearActors(); setBg(s.url, {flash: !skip, cg: true}); continue; }
+      if (s.kind === 'bg') { cg = true; clearActors(); setBg(s.url, {flash: !skip, cg: true}); continue; }
       if (s.kind === 'sound' || s.kind === 'bgm') { try { cue(s, {skipping: skip}); } catch {} continue; }
       ended = false; root.removeAttribute('data-end');
       seen.push({m: at, pos, s}); if (seen.length > 400) seen.shift();
@@ -427,7 +579,10 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   }
 
   // ---------- events ----------
+  const more = $('.vn-more'), moreButton = $('[data-vn=more]');
+  function setMore(open) { more.hidden = !open; moreButton.setAttribute('aria-expanded', String(open)); }
   const actions = {
+    more: () => setMore(more.hidden),
     back, auto: () => setAuto(!auto), skip: () => skip ? stopSkip() : startSkip(), log: openLog, 'log-close': closeLog, hide: () => setHidden(true),
     voice: () => { const on = !look().voice; save({voice: on}); if (!on) voice.stop(); applyLook(); },
     full: () => { if (doc.fullscreenElement) doc.exitFullscreen?.(); else root.requestFullscreen?.().catch(() => {}); },
@@ -436,7 +591,14 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   };
   root.addEventListener('click', e => {
     const b = e.target.closest('[data-vn]');
-    if (b && root.contains(b)) { e.stopPropagation(); actions[b.dataset.vn]?.(b); return; }
+    if (b && root.contains(b)) {
+      e.stopPropagation();
+      if (b.dataset.vn !== 'more' && !more.hidden) setMore(false);
+      actions[b.dataset.vn]?.(b);
+      return;
+    }
+    // A tap outside the ⋯ menu closes it first.
+    if (!more.hidden) { setMore(false); return; }
     if (e.target.closest('.vn-input, .vn-log')) return;
     advance();
   });
@@ -447,7 +609,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   const onKey = e => {
     if (closed) return;
     const typing = e.target.closest?.('textarea, input');
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (!logEl.hidden) closeLog(); else if (hidden) setHidden(false); else if (typing) input.blur(); else close(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (!more.hidden) setMore(false); else if (!logEl.hidden) closeLog(); else if (hidden) setHidden(false); else if (typing) input.blur(); else close(); return; }
     if (typing) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendText(); } e.stopPropagation(); return; }
     if (e.key === 'Control' && !e.repeat) { startSkip(); e.preventDefault(); return; }
     const k = e.key.toLowerCase();
@@ -462,7 +624,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   };
   const onKeyUp = e => { if (e.key === 'Control') stopSkip(); };
   const onFull = () => full.setAttribute('aria-pressed', String(doc.fullscreenElement === root));
-  const onResize = () => placeActors();
+  const onResize = () => { placeActors(); fitCg(); fx.resize(); };
   doc.addEventListener('keydown', onKey, true);
   doc.addEventListener('keyup', onKeyUp, true);
   doc.addEventListener('fullscreenchange', onFull);
@@ -473,6 +635,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     closed = true;
     win.clearTimeout(autoTimer); win.clearTimeout(skipTimer); win.clearTimeout(titleTimer); win.cancelAnimationFrame(typing);
     voice.stop();
+    fx.dispose();
     doc.removeEventListener('keydown', onKey, true);
     doc.removeEventListener('keyup', onKeyUp, true);
     doc.removeEventListener('fullscreenchange', onFull);
