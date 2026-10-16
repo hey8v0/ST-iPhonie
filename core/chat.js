@@ -1,3 +1,4 @@
+import {promptRule} from './prompt-rules.js';
 // Chat app logic without DOM or network: chat presets, manual contacts, the reply prompt, the reply parser,
 // and the text that carries a phone chat into the next story reply ("带进剧情").
 //
@@ -377,23 +378,23 @@ const fill = (template, values) => Object.entries(values).reduce((s, [k, v]) => 
  * What the people on the phone know of the story: what they were there for, were told, or said on the phone — not
  * the rest the reader saw. names: who speaks (a chat's members, the one on the call). group: a group chat.
  */
-export function knowsRule(names, user, {group = false} = {}) {
+export function knowsRule(names, user, {prompts = {}, group = false} = {}) {
   const who = names.length === 1 ? names[0] : '每个人';
   return [`【${names.length === 1 ? names[0] : '各人'}知道什么】`,
-    `- ${who}只知道自己在场亲眼看到、亲耳听到的事，${user}或别人告诉过${names.length === 1 ? ' TA ' : '自己'}的事，还有在手机上和${user}聊过的事。`,
-    `- 剧情里${names.length === 1 ? names[0] : '一个人'}不在场时发生的事（${user}和别人在一起做了什么、在哪、说了什么），${names.length === 1 ? names[0] : '这个人'}不知道：不能提起这些细节，也不能「碰巧」猜中；想知道可以问${user}。`,
-    `- ${user}心里想的、没说出口的话，旁白交代的秘密和真相，就算在场也不知道。`,
-    `- 自己在场经历的事，自然记得，可以聊起来。剧情里看不出${names.length === 1 ? names[0] : '一个人'}在不在场的，就当不知道。`,
-    group ? `- 群里的消息大家都看得到：各人知道的不一样，私事一般不在群里说。` : ''].filter(Boolean).join('\n');
+    promptRule(prompts, "chat.knowsRule.001", {"对象": (who), "用户": (user), "动态内容3": (names.length === 1 ? ' TA ' : '自己'), "用户_4": (user)}),
+    promptRule(prompts, "chat.knowsRule.002", {"动态内容1": (names.length === 1 ? names[0] : '一个人'), "用户": (user), "动态内容3": (names.length === 1 ? names[0] : '这个人'), "用户_4": (user)}),
+    promptRule(prompts, "chat.knowsRule.003", {"用户": (user)}),
+    promptRule(prompts, "chat.knowsRule.004", {"动态内容1": (names.length === 1 ? names[0] : '一个人')}),
+    group ? promptRule(prompts, "chat.knowsRule.005") : ''].filter(Boolean).join('\n');
 }
-export function buildChatRequest({preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, nudge = false}) {
+export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, nudge = false}) {
   const group = thread.type === 'group';
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
   const values = {
     '用户': user, '对象': partner,
     '语音格式': voiceFormat,
-    '可发语音': speakers.length ? speakers.map(m => `${m.name}（${languageName(m.language || 'zh')}）`).join('、') : '（暂时没有人能发语音，只发文字）'
+    '可发语音': speakers.length ? speakers.map(m => `${m.name}（${languageName(m.language || 'zh')}）`).join('、') : promptRule(prompts, "chat.buildChatRequest.001")
   };
   const used = preset.entries.filter(e => e.enabled && e.text.trim() && e.use.includes(group ? 'group' : 'dm')).filter(e => speakers.length || e.id !== 'voice');
   const rules = used.map(e => fill(e.text, values)), posting = used.some(e => e.id === 'post' || /朋友圈/.test(e.text)), dialing = !group && used.some(e => e.id === 'c-dial');
@@ -402,32 +403,32 @@ export function buildChatRequest({preset, thread, members, story = [], user = '�
   const system = [
     rules.join('\n\n'),
     `【聊天对象】\n${people}`,
-    lore.trim() ? `【世界书】（这些人物和这个世界的设定，写给读者看的：人设、口音、方言、说话方式按这里来；里面的秘密不是每个人都知道）\n${lore.trim()}` : '',
-    userPersona.trim() ? `【${user}】（${user}自己的设定，里面可能有别人不知道的事）\n${userPersona.trim()}` : '',
-    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，旁观的记录：${group ? '群里每个人' : partner}只经历了其中一部分）\n${earlier.trim()}` : '',
-    story.length ? `【最近的剧情】（旁观的记录：读者看得到全部，${group ? '群里每个人' : partner}只经历了其中一部分）\n${story.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
+    lore.trim() ? promptRule(prompts, "chat.buildChatRequest.002", {"动态内容1": (lore.trim())}) : '',
+    userPersona.trim() ? promptRule(prompts, "chat.buildChatRequest.003", {"用户": (user), "用户_2": (user), "动态内容3": (userPersona.trim())}) : '',
+    earlier.trim() ? promptRule(prompts, "chat.buildChatRequest.004", {"动态内容1": (group ? '群里每个人' : partner), "动态内容2": (earlier.trim())}) : '',
+    story.length ? promptRule(prompts, "chat.buildChatRequest.005", {"动态内容1": (group ? '群里每个人' : partner), "动态内容2": (story.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
     memory.trim(),
-    story.length || earlier.trim() ? knowsRule(group ? members.map(m => m.name) : [partner], user, {group}) : '',
+    story.length || earlier.trim() ? knowsRule(group ? members.map(m => m.name) : [partner], user, {group, prompts}) : '',
     ['【输出格式】',
-      `只输出新消息，每条消息单独一行，写成「名字：消息内容」。名字只能是：${names}。`,
-      `不要写${user}的消息，不要写时间、编号、引号或任何解释。`,
-      speakers.length ? `语音消息的整行写成「名字：${voiceFormat}」，标签里的角色填同一个名字；标签里的原文（{文本}）是念出来的话，用这个人的语音语言写（${speakers.map(m => `${m.name}：${languageName(m.language || 'zh')}`).join('，')}），引号里的{译文}写中文。` : '',
-      `需要时也可以像真人一样用手机功能，每种单独一行，偶尔用，别每轮都用：「名字：[图片] 一句话描述拍的照片（拍到别人就写出是谁）${images ? '｜画这张照片用的英文 danbooru tag（只写照片里真有的：拍的是猫就写 cat，画面里没有人就写 no humans、不写 1girl 1boy；只有拍到自己时才写 1girl 或 1boy 和 selfie；再写构图、光线）' : ''}」「名字：[位置] 地点」「名字：[红包 ¥金额] 祝福语」「名字：[转账 ¥金额] 备注」「名字：[拍一拍]」（拍一拍${user}）；很偶尔（节日、纪念日、道歉、想对${user}好的时候）可以送${user}礼物：「名字：[礼物 物品名] 附言」。`,
-      `${user}发来红包或转账时，收下红包单独写一行「名字：[领取红包]」，收下转账写「名字：[收款]」，退还转账写「名字：[退还]」；${user}送来礼物时，收下写「名字：[收下礼物]」，不收写「名字：[退还礼物]」；收不收按人设决定。`,
-      stickers.length ? `可以像真人一样发表情包，单独一行写成「名字：[表情包] 表情包的名字」，合适的时候用，别每条都发；名字只能从这些里选：${stickers.slice(-80).map(s => s.name ?? s).join('、')}。` : '',
-      dialing ? `很偶尔可以直接给${user}打语音电话：这一轮最后单独一行写成「名字：[打电话] 为什么打」，大多数回复都不要打。` : '',
-      posting ? `很偶尔可以顺手发一条朋友圈，单独一行写成「名字：[朋友圈] 动态内容」；这是发给所有朋友看的动态，不是发给${user}的消息，大多数回复都不要发。` : '',
-      music?.share ? `很偶尔想给${user}分享一首歌时，单独一行写「名字：[分享歌曲] 歌名 - 歌手｜想说的一句话」，歌名和歌手写原文（方便搜到），大多数回复都不要分享。` : '',
-      !group && !asking ? `只有和${user}吵架闹翻、真的气到不想再理${user}的时候，可以单独一行写「名字：[删除好友]」把${user}从好友里删掉；之后${user}的消息会被拒收，直到${partner}通过${user}的好友申请。极少用，大多数时候都不要删。` : ''].filter(Boolean).join('\n'),
-    music?.listening ? listeningNote(music.listening, user) : '',
-    asking ? ['【好友申请】', `${partner}之前在手机上把${user}删了好友。现在${user}发来好友申请，验证消息：「${asking}」。`, `按${partner}的性格、你们现在的关系和最近发生的事决定通不通过：通过就第一行单独写「${partner}：[通过好友]」，后面可以接着发几条消息；还不想通过就只写一行「${partner}：[拒绝好友] 想说的一句话（可以空着）」。`].join('\n') : ''
+      promptRule(prompts, "chat.buildChatRequest.006", {"角色名单": (names)}),
+      promptRule(prompts, "chat.buildChatRequest.007", {"用户": (user)}),
+      speakers.length ? promptRule(prompts, "chat.buildChatRequest.008", {"语音格式": (voiceFormat), "动态内容2": (speakers.map(m => `${m.name}：${languageName(m.language || 'zh')}`).join('，'))}) : '',
+      promptRule(prompts, "chat.buildChatRequest.009", {"动态内容1": (images ? promptRule(prompts, "chat.buildChatRequest.010") : ''), "用户": (user), "用户_3": (user), "用户_4": (user)}),
+      promptRule(prompts, "chat.buildChatRequest.011", {"用户": (user), "用户_2": (user)}),
+      stickers.length ? promptRule(prompts, "chat.buildChatRequest.012", {"动态内容1": (stickers.slice(-80).map(s => s.name ?? s).join('、'))}) : '',
+      dialing ? promptRule(prompts, "chat.buildChatRequest.013", {"用户": (user)}) : '',
+      posting ? promptRule(prompts, "chat.buildChatRequest.014", {"用户": (user)}) : '',
+      music?.share ? promptRule(prompts, "chat.buildChatRequest.015", {"用户": (user)}) : '',
+      !group && !asking ? promptRule(prompts, "chat.buildChatRequest.016", {"用户": (user), "用户_2": (user), "用户_3": (user), "用户_4": (user), "聊天对象": (partner), "用户_6": (user)}) : ''].filter(Boolean).join('\n'),
+    music?.listening ? listeningNote(music.listening, user, prompts) : '',
+    asking ? ['【好友申请】', promptRule(prompts, "chat.buildChatRequest.017", {"聊天对象": (partner), "用户": (user), "用户_3": (user), "验证消息": (asking)}), promptRule(prompts, "chat.buildChatRequest.018", {"聊天对象": (partner), "聊天对象_2": (partner), "聊天对象_3": (partner)})].join('\n') : ''
   ].filter(Boolean).join('\n\n');
   const history = thread.messages.filter(m => m.kind !== 'system').slice(-preset.history);
   const last = history.at(-1);
   // 主动找你: whether to text at all is the model's to judge, by the preset's 「正文里主动发消息」 rule; [不发] is no.
   const when = nudge ? preset.entries.find(e => e.id === 's-text' && e.enabled && e.text.trim()) : null;
-  const turn = nudge ? [`（剧情走到这里。${partner}这时会不会主动在手机上给${user}发消息？`, when ? `什么时候会发：${fill(when.text, values)}` : '有合适的理由才发：刚分开、想起对方、有事要说、关系有变化……', `会就照上面的格式写；这时没有合适的理由，就只写一行「[不发]」。不用每次都发。）`].join('\n')
-    : asking ? `（${user}发来了好友申请，现在由${partner}决定。）` : !history.length ? `（聊天刚开始：${group ? '群里有人' : partner}主动给${user}发消息。）`
+  const turn = nudge ? [promptRule(prompts, "chat.buildChatRequest.019", {"聊天对象": (partner), "用户": (user)}), when ? `什么时候会发：${fill(when.text, values)}` : promptRule(prompts, "chat.buildChatRequest.020"), promptRule(prompts, "chat.buildChatRequest.021")].join('\n')
+    : asking ? promptRule(prompts, "chat.buildChatRequest.022", {"用户": (user), "聊天对象": (partner)}) : !history.length ? `（聊天刚开始：${group ? '群里有人' : partner}主动给${user}发消息。）`
     : last.from === 'me' ? `（现在轮到${group ? '群里的成员' : partner}回复${user}。）`
     : `（${group ? '群里' : partner}可以继续说，或者换个话题。）`;
   const transcript = history.length ? `【${group ? thread.name + '（群聊）' : '和' + partner}的聊天记录】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}\n\n` : '';

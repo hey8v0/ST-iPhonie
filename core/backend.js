@@ -1,4 +1,6 @@
 import { normalizeNarration, NARRATOR } from './narration.js';
+import {RequestLog} from './request-log.js';
+import {PROMPT_RULES} from './prompt-rules.js';
 import { normalizeVn, spriteRequest } from './vn.js';
 import { MomentStore } from './moments-store.js';
 import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
@@ -116,6 +118,12 @@ export class TTSBackend {
         this.library = library || new LocalLibrary(this.settings.scope, { indexedDB });
         this.keyStore = keyStore || new KeyStore(this.settings.scope, { indexedDB, onError: message => this.notify(message) });
         this.novelai = novelai || new NovelAIClient();
+        this.requestLog = new RequestLog({change: () => this.emit('logs', {}), secrets: () => [
+            ...this.keyStore.load().values(), ...(this.textKeys?.values() || []), this.gptKey, this.embedKey, this.novelai.key,
+            ...(this.imageKeys?.nai?.values() || []), ...(this.imageKeys?.gpt?.values() || []),
+            ...(this.providers.keys?.values() || [])].flatMap(x => typeof x === 'string' ? x.split('\n').filter(Boolean) : [])});
+        if (typeof this.providers.fetcher === 'function') this.providers.fetcher = this.requestLog.fetch(this.providers.fetcher.bind(this.providers), '语音模型');
+        if (typeof this.novelai.fetch === 'function') this.novelai.fetch = this.requestLog.fetch(this.novelai.fetch.bind(this.novelai), 'NovelAI');
         this.textKeys = new Map();
         this.imageKeys = {nai: new Map(), gpt: new Map()};
         this.imageConnectionRevision = 0;
@@ -140,7 +148,10 @@ export class TTSBackend {
         this.subscription = null;
         // GPT 生图 and ComfyUI: the key of the GPT image engine; requests go out with these (tests pass their own).
         this.gptKey = '';
-        this.imageFetch = imageFetch;
+        this.assetFetch = imageFetch;
+        this.imageFetch = this.requestLog.fetch(imageFetch, '绘图接口');
+        this.textFetch = this.requestLog.fetch((...args) => globalThis.fetch(...args), '文字模型接口');
+        this.embedFetch = this.requestLog.fetch((...args) => globalThis.fetch(...args), '向量模型');
         this.tavernHeaders = tavernHeaders;
         // 保存到酒馆: the tavern's file access (set by the tavern side), what this device last saw there, and the state shown in the phone.
         this.syncFiles = null;
@@ -725,14 +736,17 @@ export class TTSBackend {
      * when the source is the tavern's model. request: {prompt, responseLength?, ...} as for generateRaw.
      */
     async generateText(context, request) {
+        return this.requestLog.run('文字模型', {source: this.settings.text.source, model: activeText(this.settings.text).model, ...request}, () => this.generateTextRaw(context, request));
+    }
+    async generateTextRaw(context, request) {
         const text = activeText(this.settings.text);
-        if (text.source === 'custom') return customRequest({ text, key: this.textKeys.get(text.id) || '', prompt: request.prompt, responseLength: request.responseLength });
+        if (text.source === 'custom') return customRequest({ text, key: this.textKeys.get(text.id) || '', prompt: request.prompt, responseLength: request.responseLength, fetch: this.textFetch });
         if (!context?.generateRaw) throw Error('当前酒馆版本不支持后台生成');
         // The chat-completion request the tavern builds is kept, so an empty answer can be asked again as a stream:
         // "假流式" channels only answer streamed requests, and the tavern's background generation never streams.
         const source = context.eventSource, event = context.eventTypes?.CHAT_COMPLETION_SETTINGS_READY, last = JSON.stringify(asMessages(request.prompt).at(-1)?.content ?? '');
         let payload = null;
-        const keep = data => { if (!payload && data?.type === 'quiet' && JSON.stringify(data.messages?.at?.(-1)?.content ?? '') === last) payload = clone(data); };
+        const keep = data => { if (!payload && data?.type === 'quiet' && JSON.stringify(data.messages?.at?.(-1)?.content ?? '') === last) { payload = clone(data); const id = this.requestLog.add('酒馆最终请求', data); this.requestLog.finish(id, {state: '已交给酒馆发送'}); } };
         if (source?.on && event) source.on(event, keep);
         let empty = false;
         try {
@@ -743,13 +757,13 @@ export class TTSBackend {
             if (!payload || !/no message generated|empty/i.test(String(error?.message || ''))) throw error;
             empty = true;
         } finally { source?.removeListener?.(event, keep); }
-        if (empty) return this.streamTavern(context, payload);
+        if (empty) { const id = this.requestLog.add('文字模型重试', {reason: '普通请求为空，改用流式'}, 'warn'); this.requestLog.finish(id, {retry: true}); return this.streamTavern(context, payload); }
     }
     /** Sends the tavern's chat-completion request again with streaming on, and reads the whole answer. */
     async streamTavern(context, payload) {
         if (typeof context.getRequestHeaders !== 'function') throw Error('模型没有返回内容');
         let response;
-        try { response = await fetch('/api/backends/chat-completions/generate', { method: 'POST', headers: context.getRequestHeaders(), cache: 'no-cache', body: JSON.stringify({ ...payload, stream: true }) }); }
+        try { response = await this.textFetch('/api/backends/chat-completions/generate', { method: 'POST', headers: context.getRequestHeaders(), cache: 'no-cache', body: JSON.stringify({ ...payload, stream: true }) }); }
         catch { throw Error('模型没有返回内容，改用流式请求也没连上'); }
         if (!response.ok) throw Error(`模型没有返回内容，改用流式请求也失败了（HTTP ${response.status}）`);
         const text = await streamText(response);
@@ -1468,12 +1482,12 @@ export class TTSBackend {
         const other = { name: '另一位联系人', persona: '', card: '（酒馆角色卡里的设定）', voice: false };
         const group = { type: 'group', name: '群聊', members: [contact.name, other.name], messages: thread.messages };
         const lore = p.lore !== false ? '（这里是触发的世界书条目：常驻的，以及名字、最近的正文和聊天里命中关键词的）' : '';
-        return ['━━ 私聊 ━━', text(buildChatRequest({ preset: p, thread, members: [member], story, user: '{{user}}', voiceFormat: this.voiceFormat(), lore })),
-            '━━ 群聊 ━━', text(buildChatRequest({ preset: p, thread: group, members: [member, other], story, user: '{{user}}', voiceFormat: this.voiceFormat(), lore })),
-            '━━ 朋友圈（刷新时） ━━', text(buildMomentsRequest({ preset: p, people: [member, other], story, user: '{{user}}', images: this.settings.moments.images, lore })),
-            '━━ 电话（接通后第一句） ━━', text(buildCallRequest({ preset: p, mode: 'incoming', contact: { ...member, voice: true }, history: thread.messages, story, user: '{{user}}', voiceFormat: this.voiceFormat(), voiceRules: '（这里是这个角色的语音引擎朗读规则）', lore })),
-            '━━ 论坛（刷新时） ━━', text(buildForumRequest({ preset: p, people: [member, other], story, user: '{{user}}', lore })),
-            '━━ 查手机 ━━', text(buildPeekRequest({ preset: p, person: member, story, user: '{{user}}', history: thread.messages, lore }))].join('\n\n');
+        return ['━━ 私聊 ━━', text(buildChatRequest({prompts: this.settings.promptRules,  preset: p, thread, members: [member], story, user: '{{user}}', voiceFormat: this.voiceFormat(), lore })),
+            '━━ 群聊 ━━', text(buildChatRequest({prompts: this.settings.promptRules,  preset: p, thread: group, members: [member, other], story, user: '{{user}}', voiceFormat: this.voiceFormat(), lore })),
+            '━━ 朋友圈（刷新时） ━━', text(buildMomentsRequest({prompts: this.settings.promptRules,  preset: p, people: [member, other], story, user: '{{user}}', images: this.settings.moments.images, lore })),
+            '━━ 电话（接通后第一句） ━━', text(buildCallRequest({prompts: this.settings.promptRules,  preset: p, mode: 'incoming', contact: { ...member, voice: true }, history: thread.messages, story, user: '{{user}}', voiceFormat: this.voiceFormat(), voiceRules: '（这里是这个角色的语音引擎朗读规则）', lore })),
+            '━━ 论坛（刷新时） ━━', text(buildForumRequest({prompts: this.settings.promptRules,  preset: p, people: [member, other], story, user: '{{user}}', lore })),
+            '━━ 查手机 ━━', text(buildPeekRequest({prompts: this.settings.promptRules,  preset: p, person: member, story, user: '{{user}}', history: thread.messages, lore }))].join('\n\n');
     }
     /** 来电 options: {auto, every, dailyMax, ring}. */
     saveCalls(patch) {
@@ -1505,14 +1519,14 @@ export class TTSBackend {
         // A server plugin on the tavern itself: with the tavern's login and checks; there is no proxy to try then.
         if (onTavern(url)) {
             let response;
-            try { response = await this.imageFetch(url, { credentials: 'same-origin', headers: this.tavernHeaders() }); } catch { throw Error('连不上酒馆里的这个地址'); }
+            try { response = await this.assetFetch(url, { credentials: 'same-origin', headers: this.tavernHeaders() }); } catch { throw Error('连不上酒馆里的这个地址'); }
             if (response.status === 404) throw Error('酒馆里没有这个地址：服务端插件装好了吗？（config.yaml 里 enableServerPlugins 要是 true，装完要完全重启酒馆）');
             return read(response).catch(error => { throw Error(`酒馆里的音源回答 ${error.message}`); });
         }
-        try { return await read(await this.imageFetch(url, { credentials: 'omit' })); }
+        try { return await read(await this.assetFetch(url, { credentials: 'omit' })); }
         catch (error) {
             if (error?.status) throw Error(`音源回答 ${error.message}`);
-            const proxied = await this.imageFetch('/proxy/' + encodeURIComponent(url), { credentials: 'same-origin' }).catch(() => null);
+            const proxied = await this.assetFetch('/proxy/' + encodeURIComponent(url), { credentials: 'same-origin' }).catch(() => null);
             if (!proxied) throw Error('连不上这个音源：网址不对，或者它不让网页直接读取，酒馆代理也连不上');
             if (!proxied.ok) { const said = await proxied.text().catch(() => ''); throw Error(/CORS proxy is disabled/i.test(said) ? '这个音源不让网页直接读取：可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆' : `音源回答 HTTP ${proxied.status}`); }
             return read(proxied);
@@ -1609,7 +1623,7 @@ export class TTSBackend {
     /** The shipped pack, read once (none when the plugin has no sounds folder or it cannot be read). */
     packAll() {
         if (!this.soundPack) return Promise.resolve([]);
-        this.packLoad ||= this.imageFetch(new URL('pack.json', this.soundPack).href).then(r => r.ok ? r.json() : null).then(pack => packRows(pack, this.soundPack)).catch(() => { this.packLoad = null; return []; });
+        this.packLoad ||= this.assetFetch(new URL('pack.json', this.soundPack).href).then(r => r.ok ? r.json() : null).then(pack => packRows(pack, this.soundPack)).catch(() => { this.packLoad = null; return []; });
         return this.packLoad;
     }
     /** The shipped sounds in use: none while the pack is off, and not the ones taken out. */
@@ -1625,7 +1639,7 @@ export class TTSBackend {
         if (String(id).startsWith('pack:')) {
             const row = (await this.packAll()).find(r => r.id === id);
             if (!row) return null;
-            const r = await this.imageFetch(row.url);
+            const r = await this.assetFetch(row.url);
             if (!r.ok) throw Error('读不到自带的声音（' + r.status + '）');
             return r.blob();
         }
@@ -2102,10 +2116,16 @@ export class TTSBackend {
         if (posts) this.emit('moments', {});
         // Photos in the phone chats: a drawn one can be drawn again; one of the album goes back to its words.
         for (const summary of await this.chats.list()) {
-            const thread = await this.chats.get(summary.id);
-            const hit = (thread?.messages || []).filter(m => m.kind === 'photo' && gone.has(m.photoId));
-            for (const m of hit) await this.chats.updateMessage(thread.id, m.id, m.imageTags ? { photoId: '', imageState: 'failed', imageNote: '图片已清理' } : { photoId: '' });
-            if (hit.length) this.emit('chat', { threadId: thread.id });
+            await this.chatMutate(summary.id, async () => {
+                const thread = await this.chats.get(summary.id);
+                const hit = (thread?.messages || []).filter(m => m.kind === 'photo' && [m.photoId, ...(m.imageVersions || [])].some(id => gone.has(id)));
+                for (const m of hit) {
+                    const imageVersions = [...new Set([...(m.imageVersions || []), m.photoId].filter(id => id && !gone.has(id)))];
+                    const photoId = gone.has(m.photoId) ? imageVersions.at(-1) || '' : m.photoId;
+                    await this.chats.updateMessage(thread.id, m.id, {photoId, imageVersions, imageState: photoId ? 'done' : 'failed', imageNote: photoId ? '' : '图片已清理'});
+                }
+                if (hit.length) this.emit('chat', { threadId: thread.id });
+            });
         }
         const snaps = (await this.apps.list('peek')).filter(doc => [...(doc.photos || []), doc.wallpaper].some(p => p && gone.has(p.photoId)));
         const strip = p => { if (!p || !gone.has(p.photoId)) return p; const { photoId, state, note, ...rest } = p; return rest; };
@@ -2296,6 +2316,14 @@ export class TTSBackend {
     }
     api() {
         const methods = {
+            getRequestLogs: () => this.requestLog.list(), clearRequestLogs: () => this.requestLog.clear(),
+            savePromptRule: (id, rule) => {
+                if (!PROMPT_RULES.some(r => r.id === id)) throw Error('未知提示词规则');
+                const next = this.getState(); next.promptRules = {...next.promptRules};
+                if (rule === null) delete next.promptRules[id];
+                else { if (!rule || typeof rule.text !== 'string') throw Error('提示词规则格式无效'); next.promptRules[id] = {text: rule.text, enabled: rule.enabled !== false}; }
+                this.save(next);
+            },
             getState: () => this.getState(), getSnapshot: () => this.getSnapshot(), save: (next, revision) => this.save(next, revision),
             updateGeneral: patch => this.updateGeneral(patch), saveNarration: patch => this.saveNarration(patch), saveVn: patch => this.saveVn(patch), vnCast: () => this.vnCast(), vnSpriteRequest: (name, options) => clone(spriteRequest(this.settings, String(name || ''), clone(options || {}))), saveRoute: route => this.saveRoute(route), saveVoicePool: list => this.saveVoicePool(clone(list)), deleteRoute: id => this.deleteRoute(id),
             switchRouteEngine, cleanAliases, validRoleName: name => typeof name === 'string' && !!name.trim() && !isPlaceholderRole(name),

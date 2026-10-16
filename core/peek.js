@@ -1,3 +1,4 @@
+import {promptRule} from './prompt-rules.js';
 // 查手机: a look into a character's own phone — their chats with other people, what they searched for, their notes, the
 // photos in their album, their shopping cart and wallpaper — made up by the model from who they are and what they know.
 // No DOM or network here: the prompt, the parser and the checks on what is stored. One snapshot per character; looking
@@ -27,40 +28,40 @@ const unsaid = text => String(text).replace(/（[^（）]*）|\([^()]*\)/g, ' ')
  * story and the settings are written for the reader, who sees everything; the phone may only hold what its owner knows,
  * so the model first lists that and writes the rest from it.
  */
-export function buildPeekRequest({preset, person, story = [], user = '我', userPersona = '', history = [], lore = '', images = false, memory = '', earlier = '', before = null}) {
+export function buildPeekRequest({prompts = {}, preset, person, story = [], user = '我', userPersona = '', history = [], lore = '', images = false, memory = '', earlier = '', before = null}) {
   const name = person.name;
   const rules = preset.entries.filter(e => e.enabled && e.text.trim() && (e.use || []).includes('peek')).map(e => fill(e.text, {'用户': user, '对象': name}));
   const said = story.map(s => ({...s, text: s.name === user ? unsaid(s.text) : s.text})).filter(s => s.text);
-  const drawn = what => images ? `「${what}｜英文 danbooru tag」` : `「${what}」`;
+  const drawn = what => images ? promptRule(prompts, "peek.buildPeekRequest.001", {"动态内容1": (what)}) : `「${what}」`;
   const system = [
     rules.join('\n\n'),
     `【手机的主人】\n- ${name}：${(person.persona || person.card || '').trim() || '（没有资料，按剧情里的表现来）'}`,
-    lore.trim() ? `【世界书】（这个世界和人物的设定，写给读者看的，${name}不一定都知道；人设、口音、方言、说话方式按这里来）\n${lore.trim()}` : '',
-    userPersona.trim() ? `【${user}】（${user}自己的设定，里面可能有${name}不知道的事）\n${userPersona.trim()}` : '',
-    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，也是旁观的记录：${name}只经历了其中一部分）\n${earlier.trim()}` : '',
-    said.length ? `【最近的剧情】（旁观的记录：读者看得到全部，${name}只经历了其中一部分）\n${said.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
-    memory.trim() ? `${memory.trim()}\n（这是${name}和${user}自己聊过的事，${name}都知道）` : '',
-    before ? `【上次看到的手机】（${name}的手机里本来就有这些，现在都还在；这次不用再写）\n${peekSummary(before)}` : '',
-    history.length ? `【${name}和${user}在手机上的聊天】（这是真的，${name}的手机里也有；不用再写这一段）\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}` : '',
+    lore.trim() ? promptRule(prompts, "peek.buildPeekRequest.002", {"角色名": (name), "动态内容2": (lore.trim())}) : '',
+    userPersona.trim() ? promptRule(prompts, "peek.buildPeekRequest.003", {"用户": (user), "用户_2": (user), "角色名": (name), "动态内容4": (userPersona.trim())}) : '',
+    earlier.trim() ? promptRule(prompts, "peek.buildPeekRequest.004", {"角色名": (name), "动态内容2": (earlier.trim())}) : '',
+    said.length ? promptRule(prompts, "peek.buildPeekRequest.005", {"角色名": (name), "动态内容2": (said.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
+    memory.trim() ? promptRule(prompts, "peek.buildPeekRequest.006", {"动态内容1": (memory.trim()), "角色名": (name), "用户": (user), "角色名_4": (name)}) : '',
+    before ? promptRule(prompts, "peek.buildPeekRequest.007", {"角色名": (name), "动态内容2": (peekSummary(before))}) : '',
+    history.length ? promptRule(prompts, "peek.buildPeekRequest.008", {"角色名": (name), "用户": (user), "角色名_3": (name), "动态内容4": (history.map(m => messageLine(m, user)).filter(Boolean).join('\n'))}) : '',
     ['【' + name + '知道什么】',
-      `手机是${name}自己的，里面只能有${name}知道的事：`,
-      `- 能写：${name}在场亲眼看到、亲耳听到的事，${user}或别人告诉${name}的事，手机上真的聊过的内容，还有${name}自己的生活。`,
-      `- 不能写：${name}不在场时发生的剧情，${user}心里想的、没说出口的话，旁白交代的秘密和真相，设定里${name}本来不知道的事。这些不能出现在聊天、搜索、备忘录、相册和购物车里，也不能让${name}碰巧猜中。`,
-      `- 拿不准${name}知不知道的，就当不知道。`].join('\n'),
+      promptRule(prompts, "peek.buildPeekRequest.009", {"角色名": (name), "角色名_2": (name)}),
+      promptRule(prompts, "peek.buildPeekRequest.010", {"角色名": (name), "用户": (user), "角色名_3": (name), "角色名_4": (name)}),
+      promptRule(prompts, "peek.buildPeekRequest.011", {"角色名": (name), "用户": (user), "角色名_3": (name), "角色名_4": (name)}),
+      promptRule(prompts, "peek.buildPeekRequest.012", {"角色名": (name)})].join('\n'),
     ['【输出格式】',
-      '分成下面几块，每一项单独一行，只能用这几种写法，不要写别的文字、编号或解释：',
-      `「【知道】一件事」先写这块：${name}真正知道的、和最近剧情或${user}有关的事，3 到 8 条，只能是上面「能写」的；后面的内容只用这些事和${name}自己的生活来写；`,
-      `「【聊天】对象」开始一段${name}和某人的聊天（2 到 4 段，对象是朋友、家人、同事或别的角色，不要写和${user}的），下面每行写「名字：内容」，名字只用${name}或这个对象；`,
-      '「【搜索】搜索的内容」最近的搜索记录，5 到 10 条；',
-      '「【备忘录】标题｜内容」备忘录，1 到 3 条；',
-      images ? `${drawn('【相册】照片里拍了什么')}相册里最近的照片：先用一句中文描述画面（拍到人就写出是谁：别人写名字，${name}自己写「自拍」或和谁的合照），竖线后面写画这张图用的英文 tag（tag 里不写名字），3 到 6 张；`
-        : `${drawn('【相册】照片里拍了什么')}相册里最近的照片，用一句话描述画面，3 到 6 张；`,
-      `「【购物车】商品｜价格｜备注」购物车里的东西，2 到 6 件，价格只写数字（元），备注是${name}为什么想买或者买给谁，可以空着；`,
-      `${drawn('【壁纸】画面')}${name}的手机壁纸，1 张，竖着的画面。`].join('\n')
+      promptRule(prompts, "peek.buildPeekRequest.013"),
+      promptRule(prompts, "peek.buildPeekRequest.014", {"角色名": (name), "用户": (user), "角色名_3": (name)}),
+      promptRule(prompts, "peek.buildPeekRequest.015", {"角色名": (name), "用户": (user), "角色名_3": (name)}),
+      promptRule(prompts, "peek.buildPeekRequest.016"),
+      promptRule(prompts, "peek.buildPeekRequest.017"),
+      images ? promptRule(prompts, "peek.buildPeekRequest.018", {"动态内容1": (drawn('【相册】照片里拍了什么')), "角色名": (name)})
+        : promptRule(prompts, "peek.buildPeekRequest.019", {"动态内容1": (drawn('【相册】照片里拍了什么'))}),
+      promptRule(prompts, "peek.buildPeekRequest.020", {"角色名": (name)}),
+      promptRule(prompts, "peek.buildPeekRequest.021", {"动态内容1": (drawn('【壁纸】画面')), "角色名": (name)})].join('\n')
   ].filter(Boolean).join('\n\n');
   const ask = before
-    ? `${user}又拿到了${name}的手机。上次看过以后过了一段时间，只写从那以后新多出来的东西：【聊天】1 到 3 段，可以接着上次的对象（用同一个名字，只写新消息），也可以是新的人；【搜索】2 到 6 条新的；【备忘录】新写的或改过的（改过的用原来的标题，写改完的全文），没有就不写；【相册】新拍的 1 到 3 张；【购物车】写现在购物车里的全部东西（已经买了的不写，新想买的写上）；壁纸没换就不写【壁纸】。【知道】照常先写。`
-    : `${user}拿到了${name}的手机。写出${name}手机里现在有的东西。`;
+    ? promptRule(prompts, "peek.buildPeekRequest.022", {"用户": (user), "角色名": (name)})
+    : promptRule(prompts, "peek.buildPeekRequest.023", {"用户": (user), "角色名": (name), "角色名_3": (name)});
   return [{role: 'system', content: system}, {role: 'user', content: ask}];
 }
 /** The phone as last seen, short, for 接着上次看. */

@@ -149,8 +149,8 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
   function stage(id, at) { const want = bgmOf(id)[at]; return want ? playBgm(want).catch(e => notice('背景音乐：' + e.message)) : undefined; }
   /** The rule for the story request, and 一起听 when the user plays a song themselves. */
   function promptPlan() {
-    const user = context()?.name1 || '我', rule = bgmRule(opts(), {recent, library, user});
-    const listening = backend.listening ? listeningNote(backend.listening, user) : '';
+    const user = context()?.name1 || '我', rule = bgmRule(opts(), {prompts: settings()?.promptRules, recent, library, user});
+    const listening = backend.listening ? listeningNote(backend.listening, user, settings()?.promptRules) : '';
     return [...musicPromptPlan(rule), ...(listening ? [{key: 'sttts.entry.listening', text: listening, position: 1, depth: 2, role: 0}] : [])];
   }
 

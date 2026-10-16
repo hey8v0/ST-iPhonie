@@ -52,7 +52,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       const space = backend.cardKey(), hotId = backend.hotId(), {preset, crowd, user} = base(), handles = netNames();
       const recent = (await backend.apps.list('forum')).filter(p => inSpace(p, backend.here())).slice(0, 8), hot = (await backend.apps.get(hotId))?.topics || [];
       const story = storyLines(ctx.chat, preset, user);
-      const prompt = buildForumRequest({preset, handles, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, hot, lore: await lore(preset, crowd, story, [...hot, ...recent.map(p => p.title)])});
+      const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, hot, lore: await lore(preset, crowd, story, [...hot, ...recent.map(p => p.title)])});
       const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'posts', handles});
       await keepNames(found.names, crowd);
       if (!found.posts.length) throw Error('这次没有刷出新帖子，可以再刷新一次');
@@ -67,7 +67,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       const post = await backend.apps.get(postId);
       if (!post) throw Error('这个帖子已经不在了');
       const story = storyLines(ctx.chat, preset, user);
-      const prompt = buildForumRequest({preset, handles, earlier: memory?.storyMemory() || '', mode: 'react', people: crowd, story, user, userPersona: userPersona(), post, lore: await lore(preset, crowd, story, [post.title, post.text])});
+      const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'react', people: crowd, story, user, userPersona: userPersona(), post, lore: await lore(preset, crowd, story, [post.title, post.text])});
       const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'react', handles});
       await keepNames(found.names, crowd);
       if (!found.replies.length) throw Error('这次没有人回复，可以再试一次');
@@ -81,7 +81,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       const post = await backend.apps.get(postId), mine = post?.replies.find(r => r.id === replyId);
       if (!post || !mine) throw Error('这条回复已经不在了');
       const story = storyLines(ctx.chat, preset, user);
-      const prompt = buildForumRequest({preset, handles, earlier: memory?.storyMemory() || '', mode: 'reply', people: crowd, story, user, userPersona: userPersona(), post, reply: mine, lore: await lore(preset, crowd, story, [post.title, mine.text])});
+      const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'reply', people: crowd, story, user, userPersona: userPersona(), post, reply: mine, lore: await lore(preset, crowd, story, [post.title, mine.text])});
       const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'reply', handles});
       await keepNames(found.names, crowd);
       if (!found.replies.length) throw Error('这次没有人接话，可以再试一次');
@@ -101,7 +101,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       const story = storyLines(ctx.chat, preset, user);
       const remembered = memory ? await memory.aboutPeople([name]).catch(() => '') : '';
       const before = keep ? (await backend.apps.get(peekId(name, key))) || (key ? await backend.apps.get(peekId(name)) : null) : null;
-      const prompt = buildPeekRequest({preset, before, earlier: memory?.storyMemory() || '', person, story, user, userPersona: userPersona(), history, memory: remembered, images: !!backend.drawReady(), lore: await lore(preset, [person], story, history.map(m => m.text || ''))});
+      const prompt = buildPeekRequest({prompts: settings().promptRules, preset, before, earlier: memory?.storyMemory() || '', person, story, user, userPersona: userPersona(), history, memory: remembered, images: !!backend.drawReady(), lore: await lore(preset, [person], story, history.map(m => m.text || ''))});
       const found = parsePeek(await ask(ctx, prompt, preset), {name, user});
       return backend.savePeek({name, ...mergePeek(before, found)}, key);
     });

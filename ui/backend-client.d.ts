@@ -124,6 +124,7 @@ export interface Preset {
 }
 export type PresetInput = Omit<Preset, 'id'> & { id?: string };
 export interface Settings {
+    promptRules: Record<string, {text: string; enabled: boolean}>;
     version: 1;
     scope: string;
     enabled: boolean;
@@ -333,6 +334,7 @@ export type ChatKind = 'text' | 'voice' | 'photo' | 'system' | 'redpacket' | 'tr
 export interface CallLine { from: 'me' | string; text: string; translation: string; emotion: string; }
 /** notice: `text` says what `from` did, with {对方} standing for `target`. recall: a withdrawn message (no content). */
 export interface ChatMessage { id: string; from: 'me' | string; kind: ChatKind; text: string; translation?: string; emotion?: string; photoId?: string; amount?: string; /** kind 'gift': what it is (price 0 when a character sends it) */ gift?: { name: string; emoji: string; price: number }; state?: 'sent' | 'opened' | 'accepted' | 'returned' | 'answered' | 'missed' | 'declined' | 'cancelled'; openedBy?: string; detail?: string; target?: string; quote?: { from: string; text: string }; at: number;
+    imageTags?: string; imageVersions?: string[]; imageState?: 'waiting' | 'done' | 'failed'; imageNote?: string;
     /** call: who called (from), how it ended, how long it lasted, what was said and a missed call's voice message. */
     dir?: 'in' | 'out'; duration?: number; lines?: CallLine[]; voicemail?: Omit<CallLine, 'from'>[]; }
 /** pinned: 置顶. muted: 免打扰 (its unread messages do not count toward the badge). */
@@ -525,6 +527,9 @@ export type BackendEvent =
 
 /** Framework-independent facade. Methods may throw validation/lifecycle errors. */
 export interface BackendFacade {
+    getRequestLogs(): Array<{id: string; at: number; source: string; level: 'info' | 'warn' | 'error'; state: string; duration?: number; request: unknown; response?: unknown}>;
+    clearRequestLogs(): void;
+    savePromptRule(id: string, rule: {text: string; enabled: boolean} | null): void;
     readonly apiVersion: string;
     readonly defaultPrompt: string;
     readonly defaultFormat: string;
@@ -857,7 +862,7 @@ export interface BackendFacade {
     refriend(threadId: string): Promise<ChatThread>;
     deleteChatMessages(id: string, ids: string[]): Promise<ChatThread>;
     /** {state, openedBy} for a red packet or transfer, or {recall: true} to withdraw a message. */
-    updateChatMessage(id: string, messageId: string, patch: { state?: string; openedBy?: string; recall?: boolean }): Promise<ChatThread>;
+    updateChatMessage(id: string, messageId: string, patch: { state?: string; openedBy?: string; recall?: boolean; photoId?: string; imageTags?: string; imageVersions?: string[] }): Promise<ChatThread>;
     markThreadRead(id: string): Promise<ChatThread>;
     /** Plays a voice message through the normal player. */
     /** Plays one voice line, or several in a row (a voicemail). */

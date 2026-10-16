@@ -519,7 +519,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const left = Math.max(0, n.left - looks);
     let result = first, used = countField(count, first.prompt), messages = prompt;
     for (let round = 0; prompt && round < 2 && used < left * 0.75; round++) {
-      messages = fillUpRequest(messages, {line: result.prompt, people: result.people, used, left, tags: Math.floor((left - used) / tagCost(count)), sentences: sentenceCount(s)});
+      messages = fillUpRequest(messages, {prompts: s.promptRules, line: result.prompt, people: result.people, used, left, tags: Math.floor((left - used) / tagCost(count)), sentences: sentenceCount(s)});
       let more;
       try { more = readSuggestion(s, await backend.generateText(context(), {prompt: messages, trimNames: false, responseLength: promptLength(s)})); } catch { break; }
       const now = countField(count, more.prompt);

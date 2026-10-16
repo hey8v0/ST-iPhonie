@@ -10,6 +10,7 @@ import {PROFILE_STATUS, BUBBLES, FRAMES, BACKGROUNDS, parseStickers} from '../co
 import {callSummary} from '../core/call.js';
 import {pendant} from './pendants.js';
 import {memorySheet} from './chat-memory.js';
+import {pictureInputs, photoTags, photoCast} from '../core/draw.js';
 import {chatScene, sceneArt, sceneDark, syncMotion} from './chat-scenes.js';
 import {PREMIUM, yuan} from '../core/wallet.js';
 
@@ -522,6 +523,53 @@ export function chatApp(ctx) {
       el.querySelector('.v-ico').innerHTML = state === 'generating' ? icon('spin') : icon(state === 'playing' ? 'pause' : 'play', true);
     }
   }
+  async function photoViewer(message, img) {
+    const id = threadId, mid = message.id;
+    const versions = [];
+    for (const photoId of [...new Set([...(message.imageVersions || []), message.photoId].filter(Boolean))]) {
+      const photo = await api.getPhoto(photoId);
+      if (photo) versions.push({photoId, photo, src: await photoURL(photoId)});
+    }
+    if (v.disposed || threadId !== id || !versions.length) return;
+    const current = async () => (await api.getThread(id))?.messages.find(m => m.id === mid);
+    const request = m => {
+      const names = [...api.getState().routes.map(r => r.name), api.userName?.() || myName()];
+      const tags = photoTags({text: m.text, tags: m.imageTags, owner: m.from, names});
+      return {...pictureInputs(api.getState(), {prompt: tags, characters: photoCast({text: m.text, tags, owner: m.from, names})}), tag: tags};
+    };
+    const draw = async tags => {
+      const m = await current(); if (!m) throw Error('这条消息已不存在');
+      const paid = api.drawQuote?.().free === false, ask = api.paidPrompt?.();
+      if (paid && ask && !await ctx.confirm(ask.title, ask.text)) return false;
+      if (tags !== undefined) await api.updateChatMessage(id, mid, {imageTags: tags});
+      await api.chatDrawPhoto(id, mid, paid);
+    };
+    const rewrite = async () => {
+      const m = await current(); if (!m) throw Error('这条消息已不存在');
+      const d = ctx.dialog('改提示词再画', `<div class="field">${textArea('photo-prompt', m.imageTags || '', 'rows="10"')}</div><div class="actions"><button type="button" class="primary" data-photo-redraw>画</button></div>`);
+      d.body.querySelector('[data-photo-redraw]').addEventListener('click', async e => {
+        const tags = d.body.querySelector('textarea').value.trim(); if (!tags) return;
+        e.target.disabled = true;
+        // The paid confirmation uses the same sheet slot, so take a snapshot before closing.
+        d.close();
+        try { await draw(tags); } catch (error) { ctx.notify(error.message, {error: true}); }
+      });
+    };
+    let viewer;
+    const safe = fn => async i => { viewer?.close(); try { return await fn(i); } catch (error) { ctx.notify(error.message, {error: true}); return false; } };
+    viewer = openImageViewer({doc: ctx.doc, from: img, caption: message.text || '',
+      gallery: {items: versions.map(v => ({src: v.src, alt: message.text || '', info: v.photo.info})), index: Math.max(0, versions.findIndex(v => v.photoId === message.photoId)),
+        onIndex: i => api.updateChatMessage(id, mid, {photoId: versions[i].photoId}).catch(error => ctx.notify(error.message))},
+      actions: [downloadAction(ctx.doc, i => ({source: versions[i].photo.blob, name: versions[i].photo.name}), ctx.notify),
+        ...(message.imageTags && api.chatDrawPhoto ? [
+          {label: '重画', run: safe(() => draw())},
+          {label: '改提示词再画', run: safe(rewrite)},
+          {label: '在绘图中打开', run: safe(async i => { const m = await current(); if (m) ctx.openDraw({...request(m), seed: Number(versions[i].photo.info?.find(row => row[0] === '种子')?.[1])}); })}
+        ] : []),
+        {label: '删除这版', danger: true, run: safe(async i => { if (!await ctx.confirm('删除这版图片？')) return false; await api.deletePhoto(versions[i].photoId); })},
+        {label: '消息选项', run: safe(() => messageMenu(message))}]});
+  }
+
   // Album photos sent in the chat; each picture is read once and kept while the app is open.
   async function photoURL(id) {
     if (!photoURLs.has(id)) {
@@ -1414,8 +1462,7 @@ export function chatApp(ctx) {
       case 'photo': {
         const m = find(), img = el.querySelector('img');
         if (!m || !img?.src) break;
-        // What the photo shows (the words it was drawn from) is told only once it is opened.
-        openImageViewer({doc: ctx.doc, src: img.src, alt: img.alt, from: img, caption: m.text || '', actions: [downloadAction(ctx.doc, () => ({source: img.src, name: `${m.from === 'me' ? '我' : m.from} 的照片`}), ctx.notify), shareAction(ctx.doc, () => ({source: img.src, name: `${m.from === 'me' ? '我' : m.from} 的照片`}), ctx.notify), {label: '消息选项', run: () => messageMenu(m)}]});
+        await photoViewer(m, img);
         break;
       }
       case 'packet': { const m = find(); if (m) openPacket(m); break; }

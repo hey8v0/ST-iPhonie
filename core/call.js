@@ -1,3 +1,4 @@
+import {promptRule} from './prompt-rules.js';
 // 来电 (voice calls) without DOM or network: call options, the request for each turn of a call, and the reply parser.
 //
 // A call is spoken: every line the contact says is written in the voice format of the active voice preset (the same
@@ -40,39 +41,39 @@ export function callClock(seconds) {
  * picked up), 'reply' (the user said something), 'voicemail' (the user did not answer; the contact leaves a message).
  * contact: {name, persona, card, voice, language}; voiceRules: how this contact's lines are read (engine tags).
  */
-export function buildCallRequest({preset, mode, contact, lines = [], history = [], story = [], user = '我', userPersona = '', voiceFormat, voiceRules = '', reason = '', lore = '', memory = '', earlier = ''}) {
+export function buildCallRequest({prompts = {}, preset, mode, contact, lines = [], history = [], story = [], user = '我', userPersona = '', voiceFormat, voiceRules = '', reason = '', lore = '', memory = '', earlier = ''}) {
   const name = contact.name, voiced = !!contact.voice && !!voiceFormat;
   const spoken = languageName(contact.language || 'zh');
   const values = {'用户': user, '对象': name, '语音格式': voiceFormat || '', '可发语音': voiced ? `${name}（${spoken}）` : '（只说中文）'};
   const rules = preset.entries.filter(e => e.enabled && e.text.trim() && e.use.includes('call')).map(e => fill(e.text, values));
   const situation = {
-    incoming: `${name}给${user}打了语音电话，${user}刚刚接通。${reason ? `（打来的原因：${reason}）` : '打电话要有个理由：想${user}了、有事要说、刚发生了什么、想听听声音……按人设和最近的事情来。'}`,
-    outgoing: `${user}给${name}打了语音电话，${name}刚刚接起来。${name}不知道${user}为什么打来。`,
+    incoming: `${name}给${user}打了语音电话，${user}刚刚接通。${reason ? `（打来的原因：${reason}）` : promptRule(prompts, "call.buildCallRequest.001")}`,
+    outgoing: promptRule(prompts, "call.buildCallRequest.002", {"用户": (user), "角色名": (name), "角色名_3": (name), "角色名_4": (name), "用户_5": (user)}),
     reply: `你们正在通话。`,
-    voicemail: `${name}给${user}打了语音电话，${user}没有接。${name}要留一段语音留言。${reason ? `（打来的原因：${reason}）` : ''}`
+    voicemail: promptRule(prompts, "call.buildCallRequest.003", {"角色名": (name), "用户": (user), "用户_3": (user), "角色名_4": (name), "动态内容5": (reason ? `（打来的原因：${reason}）` : '')})
   }[mode];
   const turn = {
-    incoming: `（电话接通了。${name}先开口，说明为什么打来。）`,
-    outgoing: `（电话接通了。${name}先开口，像平时接${user}的电话那样。）`,
-    reply: lines.at(-1)?.from === 'me' ? `（轮到${name}说话，接着${user}刚才的话往下说。）` : `（${user}没有接话，${name}接着往下说。）`,
-    voicemail: `（${name}对着语音信箱留言，长短按人设和打来的原因，一般不超过五六句。）`
+    incoming: promptRule(prompts, "call.buildCallRequest.004", {"角色名": (name)}),
+    outgoing: promptRule(prompts, "call.buildCallRequest.005", {"角色名": (name), "用户": (user)}),
+    reply: lines.at(-1)?.from === 'me' ? promptRule(prompts, "call.buildCallRequest.006", {"角色名": (name), "用户": (user)}) : `（${user}没有接话，${name}接着往下说。）`,
+    voicemail: promptRule(prompts, "call.buildCallRequest.007", {"角色名": (name)})
   }[mode];
   const system = [
     rules.join('\n\n'),
     `【通话对象】\n- ${name}：${(contact.persona || contact.card || '').trim() || '（没有资料，按剧情里的表现来）'}`,
-    lore.trim() ? `【世界书】（这些人物和这个世界的设定，写给读者看的：人设、口音、方言、说话方式按这里来；里面的秘密${name}不一定知道）\n${lore.trim()}` : '',
-    userPersona.trim() ? `【${user}】（${user}自己的设定，里面可能有${name}不知道的事）\n${userPersona.trim()}` : '',
-    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，旁观的记录：${name}只经历了其中一部分）\n${earlier.trim()}` : '',
-    story.length ? `【最近的剧情】（旁观的记录：读者看得到全部，${name}只经历了其中一部分）\n${story.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
+    lore.trim() ? promptRule(prompts, "call.buildCallRequest.008", {"角色名": (name), "动态内容2": (lore.trim())}) : '',
+    userPersona.trim() ? promptRule(prompts, "call.buildCallRequest.009", {"用户": (user), "用户_2": (user), "角色名": (name), "动态内容4": (userPersona.trim())}) : '',
+    earlier.trim() ? promptRule(prompts, "call.buildCallRequest.010", {"角色名": (name), "动态内容2": (earlier.trim())}) : '',
+    story.length ? promptRule(prompts, "call.buildCallRequest.011", {"角色名": (name), "动态内容2": (story.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
     memory.trim(),
-    story.length || earlier.trim() ? knowsRule([name], user) : '',
+    story.length || earlier.trim() ? knowsRule([name], user, {prompts}) : '',
     history.length ? `【${name}和${user}最近的手机聊天】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}` : '',
     `【现在】\n${situation}`,
     ['【输出格式】',
-      `只写${name}接下来说的话，每句单独一行；说多少按人设和情境，最多 ${CALL_LIMITS.perTurn - 1} 句${voiced ? `，整行写成：${voiceFormat}（标签里的角色写「${name}」）` : '，直接写说的话，不加名字和引号'}。`,
-      voiced ? `${name}在电话里说${spoken}：标签里的原文（{文本}）是${name}真正说出口、会被念出来的话，必须用${spoken}写${spoken === '中文' ? '' : '，不要写成中文'}；引号里的{译文}是给${user}看的中文翻译。` : '',
-      `不要写${user}的话，不要写动作、旁白、表情符号、时间或任何解释。`,
-      mode === 'voicemail' ? '' : `${name}想挂电话时（话说完了、被叫走了、生气了），最后单独一行写「[挂断]」。通话不要太短也不要没完没了，自然就好。`,
+      promptRule(prompts, "call.buildCallRequest.012", {"角色名": (name), "动态内容2": (CALL_LIMITS.perTurn - 1), "动态内容3": (voiced ? promptRule(prompts, "call.buildCallRequest.013", {"语音格式": (voiceFormat), "角色名": (name)}) : '，直接写说的话，不加名字和引号')}),
+      voiced ? promptRule(prompts, "call.buildCallRequest.014", {"角色名": (name), "动态内容2": (spoken), "角色名_3": (name), "动态内容4": (spoken), "动态内容5": (spoken === '中文' ? '' : '，不要写成中文'), "用户": (user)}) : '',
+      promptRule(prompts, "call.buildCallRequest.015", {"用户": (user)}),
+      mode === 'voicemail' ? '' : promptRule(prompts, "call.buildCallRequest.016", {"角色名": (name)}),
       voiced && voiceRules ? voiceRules : ''].filter(Boolean).join('\n')
   ].filter(Boolean).join('\n\n');
   const said = lines.length ? `【通话内容】\n${callTranscript(lines, user)}\n\n` : '';

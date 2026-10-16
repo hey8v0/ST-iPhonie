@@ -1,3 +1,4 @@
+import {promptRule} from './prompt-rules.js';
 // 朋友圈 (moments) without DOM or network: the moments preset, the prompts for new posts and for reactions, and the
 // parser for the model's answer.
 //
@@ -39,35 +40,35 @@ export function postLines(post, user) {
  * The request for moments, with the chat preset's rules used in 朋友圈. mode 'posts': new posts from the people; 'react': reactions to one post (the user's new post);
  * 'reply': answers to the user's comment on a post. people: [{name, persona, card}]. recent: latest posts, for variety.
  */
-export function buildMomentsRequest({preset, mode = 'posts', people, story = [], user = '我', userPersona = '', recent = [], post = null, comment = null, images = true, lore = '', memory = '', earlier = ''}) {
+export function buildMomentsRequest({prompts = {}, preset, mode = 'posts', people, story = [], user = '我', userPersona = '', recent = [], post = null, comment = null, images = true, lore = '', memory = '', earlier = ''}) {
   const values = {'用户': user};
   const rules = preset.entries.filter(e => e.enabled && e.text.trim() && (e.use || []).includes('moments')).filter(e => images || e.id !== 'm-picture').map(e => fill(e.text, values));
   const names = people.map(p => p.name);
   const system = [
     rules.join('\n\n'),
     `【朋友圈里的人】\n${people.map(p => `- ${p.name}：${(p.persona || p.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n')}`,
-    lore.trim() ? `【世界书】（这些人物和这个世界的设定，写给读者看的：人设、口音、方言、说话方式按这里来；里面的秘密不是每个人都知道）\n${lore.trim()}` : '',
-    userPersona.trim() ? `【${user}】（${user}自己的设定，里面可能有别人不知道的事）\n${userPersona.trim()}` : '',
-    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，旁观的记录：每个人只经历了其中一部分）\n${earlier.trim()}` : '',
-    story.length ? `【最近的剧情】（旁观的记录：读者看得到全部，朋友圈里的每个人只经历了其中一部分）\n${story.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
+    lore.trim() ? promptRule(prompts, "moments.buildMomentsRequest.001", {"动态内容1": (lore.trim())}) : '',
+    userPersona.trim() ? promptRule(prompts, "moments.buildMomentsRequest.002", {"用户": (user), "用户_2": (user), "动态内容3": (userPersona.trim())}) : '',
+    earlier.trim() ? promptRule(prompts, "moments.buildMomentsRequest.003", {"动态内容1": (earlier.trim())}) : '',
+    story.length ? promptRule(prompts, "moments.buildMomentsRequest.004", {"动态内容1": (story.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
     ['【每个人知道什么】',
-      '- 每个人只知道自己在场经历的、别人告诉过 TA 的事；不在场的剧情，谁都不能写进自己的动态和评论，也不能「碰巧」猜中细节。',
-      `- 朋友圈是给所有朋友看的：就算是自己经历的私事，一般也只含蓄地提，不把和${user}私下在做什么、说了什么的细节写出来，除非人设就是爱晒。`,
-      '- 拿不准一个人知不知道的，就当不知道。'].join('\n'),
-    memory.trim() ? `${memory.trim()}\n（这些是各人和${user}私下聊过的事：只有那个人自己知道，别人的动态和评论里不要提）` : '',
-    recent.length && mode === 'posts' ? `【最近的朋友圈】（不要重复这些内容）\n${recent.map(p => postLines(p, user)).join('\n')}` : '',
+      promptRule(prompts, "moments.buildMomentsRequest.005"),
+      promptRule(prompts, "moments.buildMomentsRequest.006", {"用户": (user)}),
+      promptRule(prompts, "moments.buildMomentsRequest.007")].join('\n'),
+    memory.trim() ? promptRule(prompts, "moments.buildMomentsRequest.008", {"动态内容1": (memory.trim()), "用户": (user)}) : '',
+    recent.length && mode === 'posts' ? promptRule(prompts, "moments.buildMomentsRequest.009", {"动态内容1": (recent.map(p => postLines(p, user)).join('\n'))}) : '',
     ['【输出格式】',
-      '每一项单独一行，只能用下面这几种写法，不要写别的文字、编号或解释：',
-      mode === 'posts' ? '「【动态】名字：动态内容」发一条新动态；' : '',
-      mode === 'posts' && images ? '「【配图】英文 tag」给上一条动态配图，不需要配图就不写；' : '',
+      promptRule(prompts, "moments.buildMomentsRequest.010"),
+      mode === 'posts' ? promptRule(prompts, "moments.buildMomentsRequest.011") : '',
+      mode === 'posts' && images ? promptRule(prompts, "moments.buildMomentsRequest.012") : '',
       '「【赞】名字、名字」点赞；',
-      `「【评论】名字：评论内容」评论，回复某人时写「【评论】名字 回复 某人：内容」。`,
-      `名字只能是：${names.join('、')}。不要替${user}写动态、点赞或评论。`].filter(Boolean).join('\n')
+      promptRule(prompts, "moments.buildMomentsRequest.013"),
+      promptRule(prompts, "moments.buildMomentsRequest.014", {"动态内容1": (names.join('、')), "用户": (user)})].filter(Boolean).join('\n')
   ].filter(Boolean).join('\n\n');
   let ask;
-  if (mode === 'posts') ask = `挑 1 到 ${preset.posts} 个人各发一条新动态（不一定每个人都发）。每条动态下面可以跟着别人的赞和评论。`;
-  else if (mode === 'react') ask = `【${user}刚发的动态】\n${postLines(post, user)}\n\n朋友们看到了这条动态：写出谁点了赞、谁评论了什么。`;
-  else ask = `【这条动态】\n${postLines(post, user)}\n\n${user}刚评论：「${comment.text}」${comment.to ? `（回复 ${who(comment.to, user)}）` : ''}\n被评论的人回复${user}，别的人也可以接话。只写新的评论。`;
+  if (mode === 'posts') ask = promptRule(prompts, "moments.buildMomentsRequest.015", {"动态内容1": (preset.posts)});
+  else if (mode === 'react') ask = promptRule(prompts, "moments.buildMomentsRequest.016", {"用户": (user), "动态内容2": (postLines(post, user))});
+  else ask = promptRule(prompts, "moments.buildMomentsRequest.017", {"动态内容1": (postLines(post, user)), "用户": (user), "动态内容3": (comment.text), "动态内容4": (comment.to ? `（回复 ${who(comment.to, user)}）` : ''), "用户_5": (user)});
   return [{role: 'system', content: system}, {role: 'user', content: ask}];
 }
 

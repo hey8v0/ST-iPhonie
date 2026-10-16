@@ -4,6 +4,7 @@ import {APPS} from './apps.js';
 import {MARK_CHOICES} from '../core/voice-fx.js';
 import {CONTRACT_PROMPT, READING_PROMPT} from '../core/protocol.js';
 import {saveFile} from '../download.js';
+import {promptRulesSheet} from './prompt-rules.js';
 // The voice preset's rule entries that can go back to what ships.
 const RULE_DEFAULTS = {contract: CONTRACT_PROMPT, reading: READING_PROMPT};
 
@@ -38,6 +39,7 @@ export function readPresetFile(text, shownKind) {
 
 export function presetsApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'presets'), drafts = new Map();
+  v.on('click', '[data-action=system-rules]', () => promptRulesSheet(ctx));
   let current = null, currentKind = 'tts', kind = 'tts';
   // Drafts changed since they were opened or saved: their bar says 未保存, also after the page is drawn again.
   const dirty = new Set(), draftKey = () => currentKind + ':' + (current?.id || 'new');
@@ -80,7 +82,7 @@ export function presetsApp(ctx) {
           ? '聊天预设决定手机里的联系人怎么回消息、朋友圈怎么发、能看到多少剧情，以及“带进剧情”时怎么写进下一次正文。每条规则可以选用在私聊、群聊还是朋友圈。手机聊天和朋友圈单独生成，不会写进正文。'
           : '配音预设让模型把台词写成带 TTS 标签的格式。角色配音不在预设里，切换预设不会改动角色。')}</div>`;
     }
-    v.draw(heading('预设', btn('add-menu', icon('add'), 'round-button', `aria-label="新增${label}预设"`), 'Preset · 3 类') + tabs + body);
+    v.draw(heading('预设', btn('add-menu', icon('add'), 'round-button', `aria-label="新增${label}预设"`), 'Preset · 3 类') + tabs + `<button class="list-row" data-action="system-rules">${icon('sliders')}<span><strong>系统提示词</strong><small>输出格式、附加规则与请求模板</small></span>${icon('next')}</button>` + body);
   }
 
   /** The 世界书 line: how much is left out (picked in a sheet), and the tags cleaned away (status bars). */

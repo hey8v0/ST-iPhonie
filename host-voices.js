@@ -29,7 +29,7 @@ export function createVoiceHost({context, settings, backend, saidBy = () => []})
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'fish';
   }
   async function fromLibrary(profile, engine) {
-    const want = parseSearch(await ask(searchRequest(profile, engine)));
+    const want = parseSearch(await ask(searchRequest(profile, engine, settings().promptRules)));
     const connection = settings().connections[engine];
     let found = [];
     if (engine === 'fish') {
@@ -47,7 +47,7 @@ export function createVoiceHost({context, settings, backend, saidBy = () => []})
     }
     if (!found.length) return null;
     const candidates = found.map(v => ({engine, voice: v.id, model: '', name: v.name, label: v.info ? `${v.name} — ${v.info}` : v.name}));
-    const chosen = parsePick(await ask(pickRequest(profile, candidates, {allowNone: false})), candidates.length);
+    const chosen = parsePick(await ask(pickRequest(profile, candidates, {allowNone: false, prompts: settings().promptRules})), candidates.length);
     return chosen ? {...candidates[chosen.index], reason: chosen.reason, from: `${ENGINE_NAMES[engine]} 音色库`} : null;
   }
   async function choose(name, force) {
@@ -57,7 +57,7 @@ export function createVoiceHost({context, settings, backend, saidBy = () => []})
     let chosen = null;
     if (pool.length) {
       const candidates = pool.map(v => ({...v, label: `[${ENGINE_NAMES[v.engine]}] ${poolLine(v)}`}));
-      const picked = parsePick(await ask(pickRequest(profile, candidates)), candidates.length);
+      const picked = parsePick(await ask(pickRequest(profile, candidates, {prompts: settings().promptRules})), candidates.length);
       if (picked) chosen = {...candidates[picked.index], reason: picked.reason, from: '候选池'};
     }
     if (!chosen) chosen = await fromLibrary(profile, libraryEngine());

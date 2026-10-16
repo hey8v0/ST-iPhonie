@@ -1,3 +1,4 @@
+import {promptRule} from './prompt-rules.js';
 // 记忆: a long memory for each phone chat (private or group), in the way of 剧情剪辑台 (BakemonoMemory). The last few
 // dozen messages always go to the model as they are; older ones are written up in layers, each kept in this browser:
 //   level 0  聊天摘要   one batch of older messages (dates, who said what, promises, gifts, feelings)
@@ -133,16 +134,16 @@ const SHARED = ['只根据下面的内容写，不续写、不编造没发生的
  * The request that writes up a batch of messages (level 0) or merges nodes (level 1+).
  * who: the chat's name ('和澄音' or a group's name); user: the user's name.
  */
-export function buildMemoryRequest({level, messages = [], nodes = [], user = '我', who = '', group = false}) {
+export function buildMemoryRequest({prompts = {}, level, messages = [], nodes = [], user = '我', who = '', group = false}) {
   const where = group ? `群聊「${who}」` : `${user}和${who}的手机聊天`;
   if (level === 0) {
-    return [{role: 'system', content: [`你在整理${where}的记录，写成一段以后能直接拿来接着聊的聊天摘要（150 到 400 字）。`,
-      '要留下：聊了什么、发生了什么（时间顺序）；约定、承诺和计划（含日期）；送的礼物、红包、转账；打过的电话说了什么；提到的喜好、习惯、近况；称呼和关系、情绪的变化；还没解决的事。寒暄和重复的话可以省掉。', ...SHARED].join('\n')},
+    return [{role: 'system', content: [promptRule(prompts, "memory.buildMemoryRequest.001", {"动态内容1": (where)}),
+      promptRule(prompts, "memory.buildMemoryRequest.002"), ...SHARED].join('\n')},
       {role: 'user', content: `聊天记录：\n${transcript(messages, user)}`}];
   }
   const name = levelName(level), size = level === 1 ? '300 到 700 字' : '400 到 900 字';
-  return [{role: 'system', content: [`你在整理${where}的长期记忆：把下面几段按时间排好的${levelName(level - 1)}合成一份「${name}」（${size}）。`,
-    '先按时间说清这段时间里的主线和转折，再写：关系和称呼现在是什么样、还有效的约定和承诺、对方的喜好和习惯、没解决的事。前后矛盾时以后面的为准，写出“原来…后来…”。细节宁可多留，不要只写空泛的总结。', ...SHARED].join('\n')},
+  return [{role: 'system', content: [promptRule(prompts, "memory.buildMemoryRequest.003", {"动态内容1": (where), "动态内容2": (levelName(level - 1)), "角色名": (name), "动态内容4": (size)}),
+    promptRule(prompts, "memory.buildMemoryRequest.004"), ...SHARED].join('\n')},
     {role: 'user', content: nodes.map(n => `【${levelName(n.level)} · ${span(n.from, n.to)}】\n${n.text}`).join('\n\n')}];
 }
 /** The written text: think blocks, code fences and a stray heading line dropped. */

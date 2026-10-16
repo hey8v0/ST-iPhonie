@@ -1,3 +1,4 @@
+import {promptRule} from './prompt-rules.js';
 // 论坛: a public board everyone can read, next to 朋友圈 (which only friends see). Characters post and reply there,
 // and so do strangers (路人) with their own screen names. No DOM or network here: the prompts, the parser for the model's
 // answer and the checks on what is stored.
@@ -32,45 +33,45 @@ export const screenName = (handles = {}, user = '我') => name => name === 'me' 
  * 'react': replies to the user's new post; 'reply': answers to the user's reply. people: [{name, persona, card}].
  */
 /** Who knows what on a public forum: strangers only what is public; characters only what they lived, and they keep it to themselves. */
-export function forumKnows(user) {
+export function forumKnows(user, prompts = {}) {
   return ['【论坛上的人知道什么】',
-    '论坛是公开的，帖子和回复只能写论坛上的人真的会知道的事：',
-    '- 路人只知道公开的事：在街上、学校、店里这类公共场所发生、被很多人看到的事，传开了的消息和传闻，有人在论坛上发过的事，这个世界里人人都知道的常识。',
-    '- 角色只知道自己在场经历的、别人告诉过 TA 的事；就算知道，在公开的论坛上一般也不会把私事说出来，要说也只说愿意让大家知道的，而且说得含糊。',
-    `- ${user}和别人在家里、房间里、私下里做的事和说的话（在做什么、穿什么、抱着什么、吃什么、聊了什么），论坛上的人都不知道，也不能「碰巧」猜中或者写出一样的细节。`,
-    '- 最近的剧情只能给论坛提供大方向（季节天气、城里的大事、大家都在关心的东西），不要把剧情里的具体场景、动作、对话搬到论坛上。',
-    `- ${user}自己在论坛上发的帖子和回复是公开的，大家都看得到；回复时只根据帖子里写的内容和公开的事。`,
-    '- 拿不准是不是公开的，就当不知道。'].join('\n');
+    promptRule(prompts, "forum.forumKnows.001"),
+    promptRule(prompts, "forum.forumKnows.002"),
+    promptRule(prompts, "forum.forumKnows.003"),
+    promptRule(prompts, "forum.forumKnows.004", {"用户": (user)}),
+    promptRule(prompts, "forum.forumKnows.005"),
+    promptRule(prompts, "forum.forumKnows.006", {"用户": (user)}),
+    promptRule(prompts, "forum.forumKnows.007")].join('\n');
 }
-export function buildForumRequest({preset, mode = 'posts', people, story = [], user = '我', userPersona = '', recent = [], hot = [], post = null, reply = null, lore = '', earlier = '', handles = {}}) {
+export function buildForumRequest({prompts = {}, preset, mode = 'posts', people, story = [], user = '我', userPersona = '', recent = [], hot = [], post = null, reply = null, lore = '', earlier = '', handles = {}}) {
   const label = screenName(handles, user), missing = people.filter(p => !handles[p.name]).map(p => p.name);
   const rules = preset.entries.filter(e => e.enabled && e.text.trim() && (e.use || []).includes('forum')).map(e => fill(e.text, {'用户': user}));
   const system = [
     rules.join('\n\n'),
-    people.length ? `【论坛里的角色】（在论坛上都用网名）\n${people.map(p => `- ${handles[p.name] ? `网名「${handles[p.name]}」，其实是${p.name}` : p.name}：${(p.persona || p.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n')}` : '',
-    lore.trim() ? `【世界书】（这些人物和这个世界的设定，写给读者看的：人设、口音、方言、说话方式按这里来；里面的秘密和私事，论坛上的人不知道）\n${lore.trim()}` : '',
-    userPersona.trim() ? `【${user}】（${user}自己的设定，论坛上的人不知道）\n${userPersona.trim()}` : '',
-    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，旁观的记录：论坛上的人看不到）\n${earlier.trim()}` : '',
-    story.length ? `【最近的剧情】（旁观的记录：读者看得到全部，论坛上的人看不到。这不是论坛上的人知道的事）\n${story.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
-    mode === 'posts' && hot.length ? `【之前的热搜】（可以延续，也可以换新的）\n${hot.join('\n')}` : '',
-    mode === 'posts' && recent.length ? `【最近的帖子】（不要重复这些内容）\n${recent.map(p => `${label(p.author)}｜${p.title}`).join('\n')}` : '',
-    forumKnows(user),
+    people.length ? promptRule(prompts, "forum.buildForumRequest.001", {"动态内容1": (people.map(p => `- ${handles[p.name] ? `网名「${handles[p.name]}」，其实是${p.name}` : p.name}：${(p.persona || p.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n'))}) : '',
+    lore.trim() ? promptRule(prompts, "forum.buildForumRequest.002", {"动态内容1": (lore.trim())}) : '',
+    userPersona.trim() ? promptRule(prompts, "forum.buildForumRequest.003", {"用户": (user), "用户_2": (user), "动态内容3": (userPersona.trim())}) : '',
+    earlier.trim() ? promptRule(prompts, "forum.buildForumRequest.004", {"动态内容1": (earlier.trim())}) : '',
+    story.length ? promptRule(prompts, "forum.buildForumRequest.005", {"动态内容1": (story.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
+    mode === 'posts' && hot.length ? promptRule(prompts, "forum.buildForumRequest.006", {"动态内容1": (hot.join('\n'))}) : '',
+    mode === 'posts' && recent.length ? promptRule(prompts, "forum.buildForumRequest.007", {"动态内容1": (recent.map(p => `${label(p.author)}｜${p.title}`).join('\n'))}) : '',
+    forumKnows(user, prompts),
     ['【网名】',
-      '论坛上大家都用网名：帖子和回复的作者、回复的对象、正文里提到的人，都只写网名，不写真名。网名背后是谁，路人不知道；角色一般也认不出别人的网名。',
-      `${user}在论坛上的网名是「${label('me')}」：大家只看得到这个网名，不知道这是${user}。`,
-      missing.length ? `${missing.join('、')}还没有网名：先在最前面给每人单独一行写「【网名】真名｜网名」，网名像真的网友起的、符合人设（不要带真名），之后发帖回帖都用这个网名。` : ''].filter(Boolean).join('\n'),
+      promptRule(prompts, "forum.buildForumRequest.008"),
+      promptRule(prompts, "forum.buildForumRequest.009", {"用户": (user), "动态内容2": (label('me')), "用户_3": (user)}),
+      missing.length ? promptRule(prompts, "forum.buildForumRequest.010", {"动态内容1": (missing.join('、'))}) : ''].filter(Boolean).join('\n'),
     ['【输出格式】',
-      '每一项单独一行，只能用下面这几种写法，不要写别的文字、编号或解释：',
-      mode === 'posts' ? `「【公开】一件事」先写这块，0 到 5 条：最近的剧情里，论坛上的人真的能知道的公开的事（在公共场所发生、很多人看见的，传开了的，有人发出来的）；没有就不写。帖子和回复里提到剧情，只能用这几条；` : '',
-      mode === 'posts' ? '「【热搜】话题」现在论坛上的热搜，一个话题一行；' : '',
-      mode === 'posts' ? '「【帖子】作者｜标题｜正文」发一条新帖子，作者写角色或路人的网名；' : '',
-      '「【回复】作者：内容」回复上面的帖子，回复某人时写「【回复】作者 回复 某人：内容」。',
-      `路人的网名要像真的网友（不要叫「路人甲」），同一个路人前后用同一个网名。不要替${user}（网名「${label('me')}」）发帖或回复。`].filter(Boolean).join('\n')
+      promptRule(prompts, "forum.buildForumRequest.011"),
+      mode === 'posts' ? promptRule(prompts, "forum.buildForumRequest.012") : '',
+      mode === 'posts' ? promptRule(prompts, "forum.buildForumRequest.013") : '',
+      mode === 'posts' ? promptRule(prompts, "forum.buildForumRequest.014") : '',
+      promptRule(prompts, "forum.buildForumRequest.015"),
+      promptRule(prompts, "forum.buildForumRequest.016", {"用户": (user), "动态内容2": (label('me'))})].filter(Boolean).join('\n')
   ].filter(Boolean).join('\n\n');
   let ask;
-  if (mode === 'posts') ask = `论坛刷新了：先写 3 到 6 个热搜话题，再发 1 到 ${preset.posts + 1} 条新帖子，有的是角色发的，有的是路人发的。每条帖子下面跟着几条回复，角色和路人都可以回。`;
-  else if (mode === 'react') ask = `【${user}刚发的帖子】\n${postLines(post, user, 30, label)}\n\n大家看到了这个帖子：写出路人和角色的回复（一般三到八条，按话题热不热闹来）。只写回复。`;
-  else ask = `【这个帖子】\n${postLines(post, user, 30, label)}\n\n${user}（${label('me')}）刚回复：「${reply.text}」${reply.to ? `（回复 ${label(reply.to)}）` : ''}\n被回复的人接着回${user}，别的人也可以插话。只写新的回复。`;
+  if (mode === 'posts') ask = promptRule(prompts, "forum.buildForumRequest.017", {"动态内容1": (preset.posts + 1)});
+  else if (mode === 'react') ask = promptRule(prompts, "forum.buildForumRequest.018", {"用户": (user), "动态内容2": (postLines(post, user, 30, label))});
+  else ask = promptRule(prompts, "forum.buildForumRequest.019", {"动态内容1": (postLines(post, user, 30, label)), "用户": (user), "动态内容3": (label('me')), "动态内容4": (reply.text), "动态内容5": (reply.to ? `（回复 ${label(reply.to)}）` : ''), "用户_6": (user)});
   return [{role: 'system', content: system}, {role: 'user', content: ask}];
 }
 

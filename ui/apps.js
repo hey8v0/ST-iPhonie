@@ -2,6 +2,7 @@
 // and place its id on the home screen below (a reserved slot is replaced by the id).
 //   colors: [tile top, tile bottom / glyph shade, glyph accent]
 export const APPS = {
+  logs: {name: '日志', eyebrow: 'Logs', colors: ['#b9d9ed', '#557c9e', '#a7f3cb']},
   roles: {name: '角色', eyebrow: 'Character', colors: ['#9ad8ff', '#4a9af0', '#ff9dbb']},
   engines: {name: '引擎', eyebrow: 'Wallet', colors: ['#cdb6ff', '#8a6cf2', '#fff09a']},
   presets: {name: '预设', eyebrow: 'Preset', colors: ['#ffe39c', '#ffac3f', '#ff7f86']},
@@ -29,7 +30,7 @@ export const SLOT = null;
 export const HOME = {
   pages: [
     ['roles', 'engines', 'presets', 'library', 'gallery', 'notes', 'forum', 'peek'],
-    ['sounds', 'assistant', 'music', 'games', 'paint', 'vn', SLOT, SLOT]
+    ['sounds', 'assistant', 'music', 'games', 'paint', 'vn', 'logs', SLOT]
   ],
   dock: ['chat', 'draw', 'listen', 'settings']
 };

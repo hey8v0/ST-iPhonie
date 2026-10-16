@@ -1,3 +1,4 @@
+import {promptRule} from './prompt-rules.js';
 // 音乐: the phone's music player, background music the story picks (<bgm>), and songs characters share. No DOM here:
 // settings, the user's own music sources (no source ships with the plugin), the tags, the rule for the story model,
 // lyrics and matching a song asked for by name.
@@ -157,17 +158,17 @@ export function renderBgm(text, marker, on = true) {
   return out + withoutBgm(source.slice(at));
 }
 /** The rule for the story request, with the songs played lately (not to repeat) and, when there are any, the user's own. */
-export function bgmRule(music, {recent = [], library = [], user = '我'} = {}) {
+export function bgmRule(music, {prompts = {}, recent = [], library = [], user = '我'} = {}) {
   if (!music || music.bgm === 'off') return '';
   const text = String(music.rule || DEFAULT_BGM_RULE).replaceAll('{{用户}}', user).replaceAll('{{最近}}', recent.length ? recent.slice(0, MUSIC_LIMITS.recent).join('、') : '（还没有）');
   const mine = library.slice(0, 60).map(s => s.artist ? `${s.title} - ${s.artist}` : s.title);
-  return [text, mine.length ? `${user}的歌单里有这些（合适时优先从这里选，写法照抄）：${mine.join('、')}` : ''].filter(Boolean).join('\n');
+  return [text, mine.length ? promptRule(prompts, 'bgmRule.001', {"动态内容1":(user),"动态内容2":(mine.join('、'))}) : ''].filter(Boolean).join('\n');
 }
 export function musicPromptPlan(text) { return text ? [{key: 'sttts.entry.bgm', text, position: 1, depth: 0, role: 0}] : []; }
 /** What the user is listening to, for the story and the phone chat (一起听). */
-export function listeningNote(track, user = '我') {
+export function listeningNote(track, user = '我', prompts = {}) {
   if (!track?.title) return '';
-  return `【${user}正在听】${track.artist ? `${track.title} - ${track.artist}` : track.title}（${user}用手机放着这首歌；合适的时候可以自然地提到，不用每次都提）`;
+  return promptRule(prompts, "music.listeningNote.001", {"用户": (user), "动态内容2": (track.artist ? `${track.title} - ${track.artist}` : track.title), "用户_3": (user)});
 }
 
 // ---------- Matching ----------

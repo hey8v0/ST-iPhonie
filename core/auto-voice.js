@@ -1,3 +1,4 @@
+import {promptRule} from './prompt-rules.js';
 // 自动挑音色: a character met for the first time in the story gets a voice picked for them — from the user's 候选音色池
 // (voices they trust, marked with gender, age and style) first, and only when none of those fits, from the engine's
 // voice library searched by what the character sounds like. The text model picks; the route is marked as picked
@@ -73,16 +74,15 @@ export function voiceProfile({name, card = '', said = [], story = []}) {
   return lines.join('\n\n');
 }
 
-const RULES = '按角色的性别、年龄、身份、性格和说话方式挑。性别和大致年龄必须对得上（小孩不用成年人的声音，男性不用女声）；其次看气质和语气。';
 
 /** Picking one of a list: {index (from 0), reason} by the reply, or null when the model found none fitting. */
-export function pickRequest(profile, candidates, {allowNone = true} = {}) {
+export function pickRequest(profile, candidates, {prompts = {}, allowNone = true} = {}) {
   const list = candidates.map((c, i) => `${i + 1}. ${c.label}`).join('\n');
   return [{role: 'system', content: [
-    '你在给故事里的角色挑配音音色。',
-    RULES,
-    allowNone ? '只能从候选里选；都对不上（尤其是性别或年龄对不上）就回答「无」，不要硬选。' : '只能从候选里选，选最接近的一个。',
-    '只输出一行：编号｜一句话理由（比如「3｜少女音，清亮活泼，和她的性格对得上」）。不要输出别的。'
+    promptRule(prompts,'autoVoice.002'),
+    promptRule(prompts,'autoVoice.001'),
+    allowNone ? promptRule(prompts,'autoVoice.003') : promptRule(prompts,'autoVoice.004'),
+    promptRule(prompts,'autoVoice.005')
   ].join('\n')}, {role: 'user', content: `【角色】\n${profile}\n\n【候选音色】\n${list}\n\n挑一个：`}];
 }
 export function parsePick(reply, count) {
@@ -96,11 +96,11 @@ export function parsePick(reply, count) {
 }
 
 /** What to search a voice library for: {gender, age, words} by the model (words: a few short search terms). */
-export function searchRequest(profile, engine) {
-  const how = engine === 'fish' ? '搜索词用音色网站上标题里常见的说法，中文为主，比如：少女、御姐、正太、大叔、老奶奶、温柔、元气、冷淡、低沉、播音。'
-    : '搜索词用英文，比如 young female、calm、deep、old man。';
-  return [{role: 'system', content: ['你在给故事里的角色找配音音色，先判断要找什么样的声音。', RULES, how,
-    '只输出一行：性别｜年龄段｜两到四个搜索词（用顿号隔开）。性别写 女、男 或 不确定；年龄段写 孩子、少年少女、成年、老年 之一。例如：女｜少年少女｜少女、元气、清亮'].join('\n')},
+export function searchRequest(profile, engine, prompts = {}) {
+  const how = engine === 'fish' ? promptRule(prompts,'autoVoice.006')
+    : promptRule(prompts,'autoVoice.007');
+  return [{role: 'system', content: [promptRule(prompts,'autoVoice.008'), promptRule(prompts,'autoVoice.001'), how,
+    promptRule(prompts,'autoVoice.009')].join('\n')},
     {role: 'user', content: `【角色】\n${profile}\n\n要找什么样的声音？`}];
 }
 export function parseSearch(reply) {

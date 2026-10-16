@@ -38,7 +38,7 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
           const merge = batch.length ? null : nextMerge(book, {stage: o.stage, epic: o.epic});
           if (!batch.length && !merge) break;
           steps++;
-          const prompt = buildMemoryRequest(batch.length ? {level: 0, messages: batch, user, who: name, group} : {level: merge.level, nodes: merge.nodes, user, who: name, group});
+          const prompt = buildMemoryRequest(batch.length ? {prompts: settings().promptRules, level: 0, messages: batch, user, who: name, group} : {prompts: settings().promptRules, level: merge.level, nodes: merge.nodes, user, who: name, group});
           const text = parseMemory(await backend.generateText(context(), {prompt, trimNames: false}));
           await backend.memoryChange(threadId, current => batch.length
             ? addNode(current, {level: 0, text, from: batch[0].at, to: batch.at(-1).at, count: batch.length}, {through: batch.at(-1)})

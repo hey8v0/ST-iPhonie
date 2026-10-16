@@ -20,6 +20,7 @@ import {musicApp} from './music.js';
 import {gamesApp} from './games.js';
 import {paintApp} from './paint.js';
 import {vnApp} from './vn.js';
+import {logsApp} from './logs.js';
 import {momentsNew, momentsSeen} from './moments.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
@@ -27,7 +28,7 @@ import {grow, launch, nudge, within, visible, islandIn, moving} from './carry.js
 import {todayPage} from './today.js';
 
 // App factories, keyed by the ids in apps.js.
-const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp, assistant: assistantApp, music: musicApp, games: gamesApp, paint: paintApp, vn: vnApp};
+const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp, assistant: assistantApp, music: musicApp, games: gamesApp, paint: paintApp, vn: vnApp, logs: logsApp};
 const ACTIVE_PHASES = ['playing', 'paused', 'generating', 'waiting'];
 
 // Network and battery in the status bar come from the user's own device (where the browser tells them).
@@ -204,7 +205,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const routeFor = name => findRoute(api.getState().routes, name);
   const engineOf = name => { const r = routeFor(name); return r?.voice ? r.engine : 'none'; };
   const ctx = {api, doc, win, notify, dialog, confirm, help, lock, open, routeFor, engineOf, openPendingRole: name => openPendingRole(name), visible: name => active === name && !locked,
-    editEngine: id => views.get('engines')?.edit?.(id), showPresetKind: kind => views.get('presets')?.showKind?.(kind), momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
+    editEngine: id => views.get('engines')?.edit?.(id), showPresetKind: kind => views.get('presets')?.showKind?.(kind), openDraw: request => { open('draw'); views.get('draw')?.load?.(request); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
   installMotion(win, mount, signal);
   // On a computer the phone is a floating window: its top bar moves it.
   const stageBar = $('.stage-bar'), sizeButton = $('[data-system=size]');
@@ -860,6 +861,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     }
     if (event.type === 'audio-ready') views.get('listen')?.onPlayback?.(api.status());
     if (event.type === 'draw') views.get('draw')?.onDraw?.(event);
+    if (event.type === 'logs') views.get('logs')?.onLogs?.();
     if (event.type === 'assistant') run(() => views.get('assistant')?.onAssistant?.(event));
     if (event.type === 'music') { run(() => views.get('music')?.onMusic?.(event)); paintMusic(); }
     if (event.type === 'balance') run(() => views.get('engines')?.onBalance?.(event));

@@ -62,7 +62,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       // 记忆: the written-up older chat, and older messages that match the latest ones.
       const query = thread.messages.filter(m => m.kind !== 'system').slice(-6).map(m => messageLine(m, user)).join('\n');
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
-      const prompt = buildChatRequest({preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}});
+      const prompt = buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}});
       const answer = cleanTagged(await backend.generateText(ctx, {prompt, trimNames: false}), preset.cleanTags);
       // 「[不发]」 (also as 「名字：[不发]」) is a no, not a message.
       const text = nudge ? answer.split('\n').filter(line => !/\[不发\]/.test(line)).join('\n') : answer;
@@ -163,7 +163,12 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       const input = pictureInputs(settings(), {prompt: drawn, characters: cast}, '');
       await set({imageState: 'waiting', imageNote: ''});
       const result = await backend.generateImage({...input, allowPaid, name: `聊天-${m.from}`, key: `chat-photo:${messageId}`, label: `聊天 · ${m.from}`});
-      await set({photoId: result.photoId, imageState: 'done', imageNote: ''});
+      await backend.chatMutate(threadId, async () => {
+        const current = (await backend.chats.get(threadId))?.messages.find(x => x.id === messageId);
+        if (!current || current.kind !== 'photo') return;
+        await backend.chats.updateMessage(threadId, messageId, {photoId: result.photoId,
+          imageVersions: [...new Set([...(current.imageVersions || []), current.photoId, result.photoId].filter(Boolean))], imageState: 'done', imageNote: ''});
+      });
       return result.photoId;
     } catch (error) {
       await set({imageState: 'failed', imageNote: error.code === 'PAID' ? backend.paidPrompt().note : error.message}).catch(() => {});
@@ -185,7 +190,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       backend.emit('chat', {threadId, typing: true});
       const recent = story(preset);
       const remembered = memory ? (await memory.contextFor(thread, {query: said}).catch(() => ({text: ''}))).text : '';
-      const prompt = buildChatRequest({preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat: '', memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: s.chat.stickers || [], asking: said});
+      const prompt = buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat: '', memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: s.chat.stickers || [], asking: said});
       const reply = cleanTagged(await backend.generateText(ctx, {prompt, trimNames: false}), preset.cleanTags);
       const items = parseChatReply(reply, {members: people.map(p => ({...p, voice: false})), user, voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []});
       const yes = items.findIndex(i => i.kind === 'befriend'), no = items.find(i => i.kind === 'refuse');
