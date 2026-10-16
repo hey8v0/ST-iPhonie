@@ -19,7 +19,8 @@ export function cutoutHistory(initial = {cut: true, strength: 40, taps: []}) {
 }
 
 const CSS = `
-.sttts-cutout{position:fixed;left:0;top:0;width:100vw;height:100vh;height:100dvh;z-index:40001;background:#111522;color:#fff;touch-action:none;overscroll-behavior:contain;user-select:none;-webkit-user-select:none;font:14px/1.4 system-ui,sans-serif}
+.sttts-cutout{position:fixed;left:0;top:0;box-sizing:border-box;margin:0;padding:0;border:0;max-width:none;max-height:none;width:100vw;height:100vh;height:100dvh;z-index:40001;background:#111522;color:#fff;touch-action:none;overscroll-behavior:contain;user-select:none;-webkit-user-select:none;font:14px/1.4 system-ui,sans-serif}
+.sttts-cutout::backdrop{background:transparent}
 .sttts-cutout-stage{position:absolute;inset:64px 0 88px;overflow:hidden;touch-action:none}
 .sttts-cutout-stage canvas{position:absolute;left:0;top:0;display:block;max-width:none;max-height:none;transform-origin:0 0;cursor:crosshair;touch-action:none;background:conic-gradient(#cbd0da 25%,#fff 0 50%,#cbd0da 0 75%,#fff 0) 0 0/16px 16px}
 .sttts-cutout-top{position:absolute;top:max(12px,env(safe-area-inset-top));right:12px}
@@ -42,12 +43,17 @@ export function openCutoutEditor({doc, canvas, history, onErase, onUndo, onRedo,
   }
   const placeholder = canvas.ownerDocument.createComment('cutout-preview'), oldStyle = canvas.getAttribute('style');
   canvas.before(placeholder);
-  const root = doc.createElement('div');
+  // The phone itself uses showModal() on mobile: a z-index overlay in body is always behind that top layer.
+  const root = doc.createElement(typeof win.HTMLDialogElement?.prototype.showModal === 'function' ? 'dialog' : 'div');
   root.className = 'sttts-cutout'; root.tabIndex = -1;
   root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true'); root.setAttribute('aria-label', '编辑去背景');
   const button = (action, label, art) => `<button type="button" data-cutout="${action}" aria-label="${label}" title="${label}">${art}</button>`;
   root.innerHTML = `<div class="sttts-cutout-stage"></div><div class="sttts-cutout-top">${button('close', '完成', icon('check'))}</div><div class="sttts-cutout-bar">${button('undo', '撤回', icon('undo'))}${button('redo', '重做', icon('undo'))}${button('out', '缩小', '−')}<output></output>${button('in', '放大', '+')}${button('download', '下载', icon('download'))}</div>`;
-  const stage = root.querySelector('.sttts-cutout-stage'); stage.append(canvas); doc.body.append(root);
+  const stage = root.querySelector('.sttts-cutout-stage'); doc.body.append(root);
+  try { root.showModal?.(); }
+  catch (error) { root.remove(); placeholder.remove(); throw error; }
+  // Only take the preview out after the editor has successfully entered the visible layer.
+  stage.append(canvas);
   let scale = 1, fit = 1, x = 0, y = 0, closed = false, downloading = false;
   const pointers = new Map(); let gesture = null;
   const size = () => ({w: stage.clientWidth || win.innerWidth, h: stage.clientHeight || Math.max(1, win.innerHeight - 152)});
@@ -73,6 +79,7 @@ export function openCutoutEditor({doc, canvas, history, onErase, onUndo, onRedo,
   function close() {
     if (closed) return;
     closed = true; controller.abort(); pointers.clear();
+    if (root.open) root.close();
     placeholder.replaceWith(canvas);
     if (oldStyle === null) canvas.removeAttribute('style'); else canvas.setAttribute('style', oldStyle);
     root.remove(); if (focus?.isConnected) focus.focus({preventScroll: true}); onClose();
@@ -147,6 +154,8 @@ export function openCutoutEditor({doc, canvas, history, onErase, onUndo, onRedo,
   listen(win, 'blur', cancelGesture);
   listen(win, 'resize', () => { cancelGesture(); home(); });
   listen(win, 'pagehide', close);
+  listen(root, 'cancel', e => { e.preventDefault(); close(); });
+  listen(root, 'close', close);
   home(); refresh(); root.focus({preventScroll: true});
   return {close, refresh};
 }

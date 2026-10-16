@@ -68,7 +68,11 @@ function askTap(doc, name, download) {
   close.setAttribute('aria-label', '不保存');
   close.style.cssText = 'border:0;border-radius:999px;width:32px;height:32px;background:transparent;color:inherit;font:inherit;cursor:pointer';
   bar.append(go, close);
-  doc.body.append(bar);
+  // A save prompt outside the active native dialog would be hidden and inert behind its top layer.
+  let host = doc.activeElement?.closest('dialog[open]');
+  // Disabling the download button while preparing the file can move focus back to body.
+  if (!host) try { host = [...doc.querySelectorAll('dialog:modal')].at(-1); } catch { /* older browsers */ }
+  (host || doc.body).append(bar);
   return new Promise((resolve, reject) => {
     const done = ok => { win.clearTimeout(timer); bar.remove(); if (ok) resolve(); else reject(Error('已取消保存')); };
     const timer = win.setTimeout(() => done(false), 20000);

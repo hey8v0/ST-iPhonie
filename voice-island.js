@@ -7,6 +7,7 @@
 import {joinStack, stackTop} from './island-stack.js';
 
 const KEY = 'sttts.voiceIsland';
+const HEIGHT_KEY = KEY + '.height';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const WAVE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>';
 const PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>';
@@ -27,10 +28,33 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
   el.setAttribute('role', 'region');
   el.innerHTML = `<div class="vi-pill"><span class="vi-ico">${WAVE}</span><span class="vi-line" data-vi-line></span><span class="vi-bars" aria-hidden="true"><i></i><i></i><i></i></span></div>
     <div class="vi-card"><div class="vi-head"><span class="vi-ico">${WAVE}</span><b data-vi-title></b><button type="button" class="vi-btn vi-all" data-vi="all"></button><button type="button" class="vi-btn vi-close" data-vi="close" aria-label="收起">${CLOSE}</button></div>
-      <div class="vi-list" data-vi-list></div></div>`;
+      <div class="vi-list" data-vi-list></div><div class="vi-resize" data-vi-resize role="separator" tabindex="0" aria-label="调整台词小窗高度" aria-orientation="horizontal"></div></div>`;
   doc.body.append(el);
   let place = null, dismissed = '', reply = null, built = '', expanded = false, width = 0, openedAt = 0, dragged = false;
   try { place = JSON.parse(win.localStorage.getItem(KEY) || 'null'); } catch { /* the top middle */ }
+  const list = el.querySelector('.vi-list'), grip = el.querySelector('[data-vi-resize]');
+  let preferredHeight = null, sizing = null;
+  try { const saved = Number(win.localStorage.getItem(HEIGHT_KEY)); if (Number.isFinite(saved) && saved > 0) preferredHeight = saved; } catch { /* this visit */ }
+  function heightBounds() {
+    // Reserve the grip inside the former maximum card height. Even the smallest list keeps one dialogue row.
+    const max = Math.max(1, Math.min(win.innerHeight * .46, 320) - 24);
+    const min = Math.min(max, list.querySelector('.vi-row')?.offsetHeight || 64);
+    return {min, max};
+  }
+  function sizeList() {
+    if (!expanded) return;
+    const {min, max} = heightBounds(), height = Math.min(max, Math.max(min, preferredHeight ?? max));
+    list.style.maxHeight = height + 'px';
+    grip.setAttribute('aria-valuemin', Math.round(min));
+    grip.setAttribute('aria-valuemax', Math.round(max));
+    grip.setAttribute('aria-valuenow', Math.round(height));
+  }
+  function rememberHeight() {
+    try {
+      if (preferredHeight === null) win.localStorage.removeItem(HEIGHT_KEY);
+      else win.localStorage.setItem(HEIGHT_KEY, String(preferredHeight));
+    } catch { /* this visit */ }
+  }
   const free = () => !place || !Number.isFinite(place.cx) || !Number.isFinite(place.y);
   function where() {
     el.style.transform = 'translateX(-50%)';
@@ -51,6 +75,7 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
       built = key(r);
       text('[data-vi-title]', `${r.name || '台词'} · ${r.lines.length} 句`);
       el.querySelector('[data-vi-list]').innerHTML = r.lines.map((l, i) => `<button type="button" class="vi-row" data-vi-i="${i}"><b>${esc(l.role || '')}</b><span>${esc(l.translation || l.text)}</span>${l.translation && l.translation !== l.text ? `<small>${esc(l.text)}</small>` : ''}</button>`).join('');
+      sizeList();
     }
     for (const row of el.querySelectorAll('.vi-row')) {
       const i = Number(row.dataset.viI), state = i === mine ? 'playing' : i === paused ? 'paused' : '';
@@ -68,6 +93,8 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
     if (expanded === on) return;
     expanded = on; openedAt = on ? Date.now() : 0;
     el.dataset.expanded = on ? '1' : '';
+    if (!on && sizing) { preferredHeight = sizing.before; sizing = null; }
+    if (on) sizeList();
     if (on) el.querySelector('.vi-row[data-state]')?.scrollIntoView?.({block: 'nearest'});
     (win.requestAnimationFrame || (fn => win.setTimeout(fn, 16))).call(win, where);
   }
@@ -85,7 +112,7 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
 
   let drag = null;
   el.addEventListener('pointerdown', e => {
-    if (e.button > 0 || e.target.closest('button')) return;
+    if (e.button > 0 || e.target.closest('button, .vi-list, [data-vi-resize]')) return;
     const r = el.getBoundingClientRect();
     drag = {id: e.pointerId, dx: e.clientX - (r.left + r.width / 2), dy: e.clientY - r.top, x0: e.clientX, y0: e.clientY, live: false};
     try { el.setPointerCapture(e.pointerId); } catch { /* gone */ }
@@ -103,10 +130,41 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
     if (moved) { dragged = true; try { win.localStorage.setItem(KEY, JSON.stringify(place)); } catch { /* this visit */ } }
   });
   el.addEventListener('pointercancel', () => { drag = null; delete el.dataset.dragging; });
+  grip.addEventListener('pointerdown', e => {
+    if (e.button > 0 || !expanded || sizing) return;
+    e.preventDefault(); e.stopPropagation();
+    sizing = {id: e.pointerId, y: e.clientY, height: list.clientHeight || Number(grip.getAttribute('aria-valuenow')), before: preferredHeight};
+    try { grip.setPointerCapture(e.pointerId); } catch { /* gone */ }
+  });
+  grip.addEventListener('pointermove', e => {
+    if (!sizing || e.pointerId !== sizing.id) return;
+    e.preventDefault();
+    const {min, max} = heightBounds();
+    preferredHeight = Math.min(max, Math.max(min, sizing.height + e.clientY - sizing.y));
+    sizeList();
+  });
+  function finishSizing(e, cancel = false) {
+    if (!sizing || e.pointerId !== sizing.id) return;
+    if (cancel) preferredHeight = sizing.before;
+    sizing = null; sizeList();
+    if (!cancel) rememberHeight();
+    try { grip.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+  }
+  grip.addEventListener('pointerup', e => finishSizing(e));
+  grip.addEventListener('pointercancel', e => finishSizing(e, true));
+  grip.addEventListener('lostpointercapture', e => finishSizing(e, true));
+  grip.addEventListener('keydown', e => {
+    if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault(); e.stopPropagation();
+    const {min, max} = heightBounds(), height = list.clientHeight || Number(grip.getAttribute('aria-valuenow'));
+    preferredHeight = e.key === 'Home' ? min : e.key === 'End' ? max : Math.min(max, Math.max(min, height + (e.key === 'ArrowUp' ? -16 : 16)));
+    sizeList(); rememberHeight();
+  });
   // Opening and closing happen on click, not on pointerup: a phone hit-tests the tap's click after the card has opened
   // under the finger, and that click used to land on 整条 or a line and play it. A tap in the first moment after
   // opening is that same tap, so it does nothing.
   el.addEventListener('click', e => {
+    if (e.target.closest('[data-vi-resize]')) return;
     if (dragged) { dragged = false; return; }
     const b = e.target.closest('[data-vi], [data-vi-i]');
     if (!b) { if (!e.target.closest('.vi-list')) setExpanded(!expanded); return; }
@@ -119,7 +177,7 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
   // A tap anywhere else takes the list back in.
   const away = e => { if (expanded && !el.contains(e.target)) setExpanded(false); };
   doc.addEventListener('pointerdown', away, true);
-  const onResize = () => { if (!el.hidden) where(); };
+  const onResize = () => { if (sizing) { preferredHeight = sizing.before; sizing = null; } sizeList(); if (!el.hidden) where(); };
   win.addEventListener('resize', onResize);
   return {refresh, get shown() { return !el.hidden; }, get expanded() { return expanded; },
     dispose() { leave(); doc.removeEventListener('pointerdown', away, true); win.removeEventListener('resize', onResize); el.remove(); }};
