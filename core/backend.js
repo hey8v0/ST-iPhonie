@@ -313,7 +313,7 @@ export class TTSBackend {
         return [...new Set(names)].filter(n => n && !isPlaceholderRole(n) && n !== NARRATOR).map(name => {
             const route = s.routes.find(r => r.name === name);
             const entry = s.vn.cast[name];
-            return { name, appearance: route?.appearance || '', sprite: entry?.sprite || '', seed: entry?.seed ?? -1, looks: clone(entry?.looks || {}), actions: clone(entry?.actions || []) };
+            return { name, appearance: route?.appearance || '', sprite: entry?.sprite || '', seed: entry?.seed ?? -1, alts: clone(entry?.alts || []), mix: !!entry?.mix, looks: clone(entry?.looks || {}), actions: clone(entry?.actions || []), outfits: clone(entry?.outfits || []) };
         });
     }
     updateGeneral(patch) {

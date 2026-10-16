@@ -2,7 +2,7 @@
 // the stage (vn-stage.js) fed with the chat's messages one by one, and the 立绘 kept as files in the tavern's images
 // (settings.vn.cast), so every device sees them.
 import {openVnStage} from './vn-stage.js';
-import {storySteps, userSteps, pickLook, inlinePictures} from './core/vn.js';
+import {storySteps, userSteps, pickLook, inlinePictures, editLook} from './core/vn.js';
 import {parsePictures} from './core/draw.js';
 import {parseSounds} from './core/sounds.js';
 import {parseBgm} from './core/music.js';
@@ -121,7 +121,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       // 快进 runs past the one-off sounds; the ambience and the music still change to where it stops.
       cue: (s, {skipping}) => { if (s.kind === 'bgm') music(s.id, s.index); else sound(s.id, s.index, {skipping}); },
       face: (name, user) => { const key = user ? 'me' : name; if (Object.hasOwn(mine, key)) return mine[key]; return user ? tavern.me : tavern.characters?.[name] || avatars().characters?.[name] || ''; },
-      sprite: (name, how) => pickLook(vn().cast?.[name], how),
+      sprite: (name, how) => pickLook(vn().cast?.[name], {...how, outfit: wear()[name] || ''}),
       send,
       save: patch => { try { backend.saveVn(patch); } catch (error) { notice(error.message); } },
       onClose: id => {
@@ -176,11 +176,25 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
    * Keeps a 立绘 (a PNG with its background taken off) as a file in the tavern; null takes it away. look: '' for the
    * usual one, else a 表情 or 动作 id; seed: what the usual one was drawn with (its 表情 are drawn with it too).
    */
-  async function setSprite(name, blob, {look = '', seed} = {}) {
+  /** The 形象 each character wears in the open chat ({name: outfit id}), kept in the chat itself. */
+  function wear() { const w = context()?.chatMetadata?.sttts_vn_wear; return w && typeof w === 'object' ? {...w} : {}; }
+  function setWear(name, id) {
+    const ctx = context();
+    if (!ctx?.chatMetadata || !ctx.chat?.length) throw Error('先在酒馆里打开一个聊天');
+    const w = wear();
+    if (id) w[String(name)] = String(id); else delete w[String(name)];
+    ctx.chatMetadata.sttts_vn_wear = w;
+    (ctx.saveMetadataDebounced || ctx.saveMetadata)?.call(ctx);
+    return w;
+  }
+  /**
+   * A change to a character's 立绘 (core/vn.js editLook): a new picture (blob) in place of the one in use, or joining
+   * its group (add); use / drop / mix within the group; dropOutfit. Without a blob or another change, the picture in
+   * use is taken out. Files no longer used are deleted from the tavern.
+   */
+  async function setSprite(name, blob, {look = '', outfit = '', seed, add = false, use = '', drop = '', mix, dropOutfit = false} = {}) {
     name = String(name || '').trim();
     if (!name) throw Error('没有角色名');
-    const s = settings(), entry = s.vn.cast?.[name] || {sprite: '', looks: {}, actions: []};
-    const old = (look ? entry.looks?.[look]?.sprite : entry.sprite) || '';
     let url = '';
     if (blob) {
       const ctx = context();
@@ -188,16 +202,17 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       if (!response.ok) throw Error('立绘没能存进酒馆（' + response.status + '）');
       url = (await response.json()).path;
     }
-    const next = {...entry, looks: {...entry.looks}};
-    if (look) { if (url) next.looks[look] = {sprite: url, at: Date.now()}; else delete next.looks[look]; }
-    else { next.sprite = url; next.at = Date.now(); if (url && Number.isInteger(seed) && seed >= 0) next.seed = seed; else if (!url) delete next.seed; }
-    backend.saveVn({cast: {...s.vn.cast, [name]: next}});
-    if (old && old !== url && OWN.test(old)) fetch('/api/images/delete', {method: 'POST', headers: context().getRequestHeaders(), body: JSON.stringify({path: old})}).catch(() => {});
+    const s = settings(), removing = !blob && !use && !drop && typeof mix !== 'boolean' && !dropOutfit;
+    const {entry, gone} = editLook(s.vn.cast?.[name], {look, outfit, url, add, use, drop: removing ? true : drop, mix, seed, dropOutfit});
+    const saved = backend.saveVn({cast: {...s.vn.cast, [name]: entry}});
+    // A file still used somewhere (the same upload in two places) stays.
+    const used = JSON.stringify(saved?.cast ?? settings().vn.cast ?? {});
+    for (const old of gone) if (old && old !== url && OWN.test(old) && !used.includes(JSON.stringify(old))) fetch('/api/images/delete', {method: 'POST', headers: context().getRequestHeaders(), body: JSON.stringify({path: old})}).catch(() => {});
     return url;
   }
 
   return {
-    open, buttons, click, setSprite,
+    open, buttons, click, setSprite, wear, setWear,
     get showing() { return !!stage; },
     status(phase) { stage?.status(phase); },
     refresh() { stage?.refresh(); buttons(); },

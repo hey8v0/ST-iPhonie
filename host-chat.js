@@ -5,7 +5,7 @@
 import {currentDm, currentWindow} from './core/chats.js';
 import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {pictureInputs, photoCast} from './core/draw.js';
+import {pictureInputs, photoCast, photoTags} from './core/draw.js';
 import {storyLines} from './core/moments.js';
 
 const BRING_KEY = 'sttts.bring';
@@ -158,8 +158,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     if (!backend.drawReady()) { await set({imageState: 'failed', imageNote: backend.drawMissing()}); return null; }
     try {
       // The saved looks of who the photo shows: the people its description names, else the sender (a selfie).
-      const cast = photoCast({text: m.text, tags: m.imageTags, owner: m.from, names: [...settings().routes.map(r => r.name), userName()]});
-      const input = pictureInputs(settings(), {prompt: m.imageTags, characters: cast}, '');
+      const names = [...settings().routes.map(r => r.name), userName()], drawn = photoTags({text: m.text, tags: m.imageTags, owner: m.from, names});
+      const cast = photoCast({text: m.text, tags: drawn, owner: m.from, names});
+      const input = pictureInputs(settings(), {prompt: drawn, characters: cast}, '');
       await set({imageState: 'waiting', imageNote: ''});
       const result = await backend.generateImage({...input, allowPaid, name: `聊天-${m.from}`, key: `chat-photo:${messageId}`, label: `聊天 · ${m.from}`});
       await set({photoId: result.photoId, imageState: 'done', imageNote: ''});

@@ -6,7 +6,7 @@ import {buildPeekRequest, parsePeek, peekId, mergePeek} from './core/peek.js';
 import {storyLines} from './core/moments.js';
 import {inSpace, activeChatPreset, cleanTagged} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {pictureInputs, sizeFor, photoCast} from './core/draw.js';
+import {pictureInputs, sizeFor, photoCast, photoTags} from './core/draw.js';
 
 const PEOPLE = 12;
 
@@ -118,10 +118,11 @@ export function createAppsHost({context, settings, backend, memory = null}) {
     if (!backend.drawReady()) throw Error(backend.drawMissing() + '，相册只能看文字');
     const set = patch => backend.appsMutate('peek', () => backend.apps.change(id, doc => { const target = pick(doc); Object.assign(target, patch); for (const k of Object.keys(patch)) if (patch[k] === '') delete target[k]; }));
     // The saved looks of who the photo shows: the people its description names, else the owner (a selfie).
-    const cast = photoCast({text: photo.text, tags: photo.tags, owner: name, names: [...settings().routes.map(r => r.name), userName()]});
+    const names = [...settings().routes.map(r => r.name), userName()], drawn = photoTags({text: photo.text, tags: photo.tags, owner: name, names});
+    const cast = photoCast({text: photo.text, tags: drawn, owner: name, names});
     try {
       await set({state: 'waiting', note: ''});
-      const input = pictureInputs(settings(), {prompt: photo.tags, characters: cast}, '');
+      const input = pictureInputs(settings(), {prompt: drawn, characters: cast}, '');
       // A wallpaper stands upright like the phone (a square size becomes 832×1216 for 1024: about as many pixels, so the
       // free tier still holds).
       if (wall) { const up = sizeFor(input.params, '竖'), side = up.width, snap64 = n => Math.max(64, Math.round(n / 64) * 64); input.params = {...input.params, ...(up.width === up.height ? {width: snap64(side * .8125), height: snap64(side * 1.1875)} : up)}; }

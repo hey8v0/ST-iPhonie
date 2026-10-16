@@ -867,6 +867,23 @@ export function pictureRoles(settings, tag, text = '') {
 }
 
 /**
+ * A phone photo's tags as they are drawn: when its description is of a thing and shows nobody (小猫在窗台上晒太阳) the person tags a
+ * model added anyway (1boy, selfie, solo, portrait…) go, and no humans keeps the picture to what was described.
+ * names: everyone who could be in it.
+ */
+export function photoTags({text = '', tags = '', owner = '', names = []}) {
+  const said = String(text || '').trim(), list = String(tags || '').split(',').map(t => t.trim()).filter(Boolean);
+  if (!said || !list.length) return String(tags || '');
+  const people = /自拍|合照|合影|对镜|镜子|样子|模样|造型|我和|和我|我们|自己|本人|[他她]|人|男|女|孩|宝宝|朋友|同学|闺蜜|兄弟|姐|妹|哥|弟|爸|妈|手|脸|腿|脚|身|穿|selfie|\b(?:me|him|her|us|people|person|man|woman|boy|girl)\b/i;
+  const thing = /猫|狗|宠物|鸟|鱼|兔|仓鼠|花|草|树|叶|风景|景色|天空|云|夕阳|日落|日出|月亮|星|海|山|河|湖|雨|雪|街|路|楼|房间|窗|饭|菜|吃的|甜点|蛋糕|奶茶|咖啡|饮料|早餐|午餐|晚餐|夜宵|零食|水果|面|书|电脑|屏幕|游戏|礼物|桌|床|车|cat|dog|food|view|sky/i;
+  if (!thing.test(said) || people.test(said) || [owner, ...names].some(n => n && n !== '我' && said.includes(n))) return String(tags || '');
+  const person = /^(?:\d+\+?\s*(?:girls?|boys?|others?)|solo|selfie|portrait|upper body|cowboy shot|full body|looking at viewer|smile|smiling|holding phone|v|peace sign)$/i;
+  const kept = list.filter(t => !person.test(t.replace(/[()\[\]{}]/g, '').replace(/:[\d.]+$/, '').trim()));
+  if (!kept.some(t => /^no humans$/i.test(t))) kept.unshift('no humans');
+  return kept.join(', ');
+}
+
+/**
  * Who a phone photo (查手机相册, a chat photo, a 朋友圈 picture) shows, as names for pictureInputs: nobody when its tags
  * show no person (a view, a meal); the people its description names (registered roles, the user); the owner too when
  * it is a selfie or a photo together, or when nobody else is named. names: everyone who could be in it.

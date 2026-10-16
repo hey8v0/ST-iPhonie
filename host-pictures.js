@@ -4,7 +4,7 @@
 //
 // A finished picture shows only the image. One tap folds it to a line of text (and back); a double tap opens the
 // viewer, which holds everything else: the versions
-// (‹ ›), the parameters (参数), redraw, open in the drawing app, fold and delete.
+// (‹ ›), the parameters (参数), redraw (also with the prompt changed first), open in the drawing app, fold and delete.
 //
 // Each tag keeps every version it was drawn in: {versions: [{url, seed, width, height, …}], index}.
 // Redrawing adds a version (the old ones stay for comparison); deleting removes the shown version and its file.
@@ -13,6 +13,7 @@
 import {parsePictures, pictureInputs, planRequest, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
 import {tokenBudget, loadCounter, countField, tagCost, estimateTokens} from './core/tokens.js';
 import {openImageViewer} from './image-viewer.js';
+import {askText} from './host-ask.js';
 import {downloadAction} from './download.js';
 import {plainStory, activeChatPreset} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
@@ -374,6 +375,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
         actions: [
           downloadAction(document, i => ({source: list[i].url, name: [(list[i].characters || []).join('、') || context()?.name2 || 'ST-iPhonie', list[i].seed].filter(v => v !== undefined && v !== '').join('_')}), notice),
           {label: '重画', run: () => act('redo', id, message, tag)},
+          {label: '改提示词再画', run: () => rewrite(id, tag).then(ok => ok ? undefined : false, error => { notice(error.message); return false; })},
           {label: '在绘图中打开', run: () => act('open', id, message, tag)},
           {label: '收起', run: () => act('fold', id, message, tag)},
           {label: '删除这版', danger: true, run: i => { pick(i); return remove(id, tag).then(done => done ? undefined : false); }}
@@ -394,6 +396,39 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     ];
   }
   /** Deletes the version on screen (file and record). Returns false when the user cancels. */
+  /**
+   * 改提示词再画: the tag's prompt (a whole block, or the tags) is changed in the message itself, so it stays changed,
+   * and drawn again. The versions drawn before stay with it, to compare.
+   */
+  async function rewrite(id, tag) {
+    const message = context().chat[id];
+    if (!message || !parsePictures(message.mes).some(t => t.hash === tag.hash)) throw Error('这条消息已经变了，找不到这张图');
+    const before = tag.spec ? tag.body : tag.prompt;
+    const after = await askText({doc: document, title: '改提示词再画', text: before, ok: '画',
+      hint: tag.spec ? '整个出图块都能改：场景、角色、站位。改的会写回正文里，以后重画也用它；之前画的几版还在，可以左右滑着比。' : '画这张图用的英文 tag。改的会写回正文里；之前画的几版还在，可以左右滑着比。'});
+    const value = after?.trim();
+    if (!value) return false;
+    const now = context().chat[id];
+    if (now !== message || !parsePictures(message.mes).some(t => t.hash === tag.hash)) throw Error('这条消息已经变了，找不到这张图');
+    let fresh = tag;
+    if (value !== before.trim()) {
+      const segment = message.mes.slice(tag.start, tag.end), at = segment.indexOf(before);
+      if (!before || at < 0) throw Error('没在正文里找到这张图的提示词');
+      // In prompt="…" a double quote would end it; tags never need angle brackets.
+      const safe = tag.spec ? value.replace(/<\/?img\b/gi, '') : value.replace(/[<>]/g, '').replace(/"/g, /=\s*'/.test(segment.slice(0, at).slice(-12)) ? '"' : "'");
+      message.mes = message.mes.slice(0, tag.start) + segment.slice(0, at) + safe + segment.slice(at + before.length) + message.mes.slice(tag.end);
+      if (Array.isArray(message.swipes) && Number.isInteger(message.swipe_id) && message.swipes[message.swipe_id] != null) message.swipes[message.swipe_id] = message.mes;
+      fresh = parsePictures(message.mes).find(t => t.index === tag.index);
+      if (!fresh) throw Error('改完认不出这张图了，检查一下格式');
+      const record = stored(message, tag.hash);
+      if (record && fresh.hash !== tag.hash) { message.extra.sttts_pics[fresh.hash] = record; delete message.extra.sttts_pics[tag.hash]; }
+      await context().saveChat();
+      redrawMessage(id, message);
+      scheduleRender();
+    }
+    generate(id, fresh, {interactive: true});
+    return true;
+  }
   async function remove(id, tag) {
     const message = context().chat[id], pic = shown(message, tag.hash);
     const others = pic ? pic.count - 1 : 0;

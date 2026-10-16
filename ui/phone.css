@@ -2555,6 +2555,14 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .vn-look-pic .icon{width:26px;height:26px;opacity:.55}
 .vn-look strong{font-size:13px}
 .vn-look small{font-size:11px;color:var(--ink2)}
+.vn-look-pic{position:relative}
+.vn-look-n{position:absolute;right:4px;bottom:4px;padding:1px 6px;border-radius:999px;background:var(--accent);color:var(--on-accent);font-size:10px;font-weight:700;line-height:1.6;font-style:normal;white-space:nowrap}
+.vn-outfits{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.vn-outfit{display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:13px;cursor:pointer}
+.vn-outfit[aria-pressed=true]{background:var(--accent);border-color:transparent;color:var(--on-accent)}
+.vn-outfit i{font-style:normal;font-size:10px;padding:0 5px;border-radius:999px;background:color-mix(in srgb,currentColor 16%,transparent)}
+.vn-outfit.add{border-style:dashed;color:var(--ink2)}
+.vn-outfit .icon{width:14px;height:14px}
 .vn-look.has small{color:var(--accent-ink)}
 .vn-dots::after{content:'';display:inline-block;width:1.4em;text-align:left;animation:vn-dots 1.2s steps(4) infinite}
 @keyframes vn-dots{0%{content:''}25%{content:'·'}50%{content:'··'}75%{content:'···'}}

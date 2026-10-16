@@ -32,7 +32,13 @@ export interface VnSettings {
     cast: Record<string, VnCastEntry>;
 }
 export interface VnAction { id: string; label: string; tags: string; words: string[]; }
-export interface VnCastEntry { sprite: string; at: number; seed?: number; looks: Record<string, { sprite: string; at: number }>; actions: VnAction[]; }
+/** One picture in use and the others of its group (mix: they take turns at random). */
+export interface VnGroup { sprite: string; at: number; alts: Array<{ sprite: string; at: number; seed?: number }>; mix: boolean; }
+/** A set of 立绘: the usual one (with its seed) and the 表情 / 动作 pictures by id. */
+export interface VnSet extends VnGroup { seed?: number; looks: Record<string, VnGroup>; }
+/** 形象: another set of 立绘 (a school uniform, a robe), drawn with its own looks. */
+export interface VnOutfit extends VnSet { id: string; label: string; appearance: string; }
+export interface VnCastEntry extends VnSet { actions: VnAction[]; outfits: VnOutfit[]; }
 /** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
 export interface NarrationSettings {
     enabled: boolean;
@@ -542,7 +548,7 @@ export interface BackendFacade {
     saveNarration(patch: Partial<NarrationSettings> & {skip?: string[] | string}): NarrationSettings;
     saveVn(patch: Partial<VnSettings>): VnSettings;
     /** The people of the open card (everyone when none is open), with their looks and 立绘. */
-    vnCast(): Array<{ name: string; appearance: string; sprite: string; seed: number; looks: Record<string, { sprite: string; at: number }>; actions: VnAction[] }>;
+    vnCast(): Array<{ name: string; appearance: string; sprite: string; seed: number; alts: VnGroup['alts']; mix: boolean; looks: Record<string, VnGroup>; actions: VnAction[]; outfits: VnOutfit[] }>;
     /** The drawing request for a character's 立绘; appearance / rule: changed for this one picture. */
     vnSpriteRequest(name: string, options?: { appearance?: string; rule?: string; extra?: string; seed?: number }): { prompt: string; negative: string; characters: Array<{ prompt: string; negative: string; position: number }>; params: Record<string, unknown> };
     saveRoute(route: RouteInput): Route;
@@ -999,7 +1005,11 @@ export interface BackendAPI extends BackendFacade {
     /** 视觉小说: opens the stage over the tavern page, from the latest reply, the first message or a message id. */
     vnStart(from: 'latest' | 'first' | number): boolean;
     /** Keeps a 立绘 (PNG) as a tavern image for a character; null takes it away. Resolves to its path. */
-    vnSprite(name: string, blob: Blob | null, options?: { look?: string; seed?: number }): Promise<string>;
+    /** A new picture (in place of the one in use, or with add joining its group); use / drop / mix within a group; dropOutfit. */
+    vnSprite(name: string, blob: Blob | null, options?: { look?: string; outfit?: string; seed?: number; add?: boolean; use?: string; drop?: string; mix?: boolean; dropOutfit?: boolean }): Promise<string>;
+    /** The 形象 each character wears in the open chat: {name: outfit id}. */
+    vnWear(): Record<string, string>;
+    vnSetWear(name: string, outfit: string): Record<string, string>;
     /** The tavern's persona name ('' outside the tavern). */
     userName(): string;
     /** Facts for the self-check report (core/diagnostics.js buildReport). Asks whether keys work; never returns them. */

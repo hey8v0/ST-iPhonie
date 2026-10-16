@@ -16,7 +16,7 @@ export const VN_WAITS = Object.freeze([0.6, 1.2, 2, 3]);
 export const VN_FONTS = Object.freeze({s: '小', m: '中', l: '大'});
 /** tavern: the tavern's theme colours; phone: the phone's (a copy kept in palette, taken by the 视觉小说 App). */
 export const VN_BOXES = Object.freeze({night: '夜幕', day: '晴空', sakura: '樱色', ink: '墨染', tavern: '跟随酒馆', phone: '跟随小手机'});
-const LIMIT = {cast: 200, rule: 1000, url: 1000, name: 60, actions: 12, words: 20, label: 12, tags: 300};
+const LIMIT = {cast: 200, rule: 1000, url: 1000, name: 60, actions: 12, words: 20, label: 12, tags: 300, alts: 8, outfits: 6, appearance: 1500};
 
 /**
  * 表情: one 立绘 each, picked by a line's 情绪 (a word or a director's note, English or Chinese). tags: what is added
@@ -50,24 +50,56 @@ function normalizePalette(p) {
 }
 const words = value => [...new Set((Array.isArray(value) ? value : String(value ?? '').split(/[,，、;；\s]+/)).map(w => String(w).trim().slice(0, LIMIT.label)).filter(Boolean))].slice(0, LIMIT.words);
 /**
- * cast: {name: {sprite, at, seed, looks: {id: {sprite, at}}, actions: [{id, label, tags, words}]}} — each character's
- * 立绘 (files in the tavern's images, so every device sees them). sprite is the usual one; looks hold the 表情
- * (EXPRESSIONS ids) and 动作 (the character's own actions: what to draw, and the words that bring them on).
+ * cast: {name: {sprite, at, seed, alts, mix, looks: {id: {sprite, at, alts, mix}}, actions: [{id, label, tags, words}],
+ * outfits: [{id, label, appearance, sprite, at, seed, alts, mix, looks}]}} — each character's 立绘 (files in the
+ * tavern's images, so every device sees them). sprite is the usual one; looks hold the 表情 (EXPRESSIONS ids) and 动作
+ * (the character's own actions: what to draw, and the words that bring them on). Each picture can have others in its
+ * group (alts: [{sprite, at, seed?}]): sprite is the one in use, or with mix they take turns at random. 形象 (outfits:
+ * a school uniform, a monk's robe) each have a whole set of their own; which one a chat uses is kept in that chat.
  */
+const urlOf = value => text(value, LIMIT.url);
+function normalizeAlts(list) {
+  const out = [], seen = new Set();
+  for (const a of Array.isArray(list) ? list : []) {
+    const sprite = urlOf(a?.sprite), seed = Number(a?.seed);
+    if (!sprite || seen.has(sprite)) continue;
+    seen.add(sprite);
+    out.push({sprite, at: Number(a.at) || 0, ...(Number.isInteger(seed) && seed >= 0 ? {seed} : {})});
+  }
+  return out.slice(0, LIMIT.alts);
+}
+/** One picture and its group; null when there is none. */
+function normalizeGroup(g) {
+  const sprite = urlOf(g?.sprite), alts = normalizeAlts(g?.alts).filter(a => a.sprite !== sprite);
+  if (!sprite && !alts.length) return null;
+  // A group without the one in use: the first of the others is used.
+  const [use, ...rest] = sprite ? [{sprite, at: Number(g.at) || 0}, ...alts] : alts;
+  return {sprite: use.sprite, at: use.at, alts: rest, mix: g.mix === true && rest.length > 0};
+}
+/** A set of 立绘: the usual one (with its seed), the 表情 and 动作 pictures. */
+function normalizeSet(c, ids) {
+  const looks = {};
+  for (const [id, look] of Object.entries(c?.looks && typeof c.looks === 'object' ? c.looks : {})) {
+    const g = ids.has(id) && normalizeGroup(look);
+    if (g) looks[id] = g;
+  }
+  const base = normalizeGroup(c), seed = Number(c?.seed);
+  return {sprite: base?.sprite || '', at: base?.at || 0, alts: base?.alts || [], mix: !!base?.mix,
+    ...(base && Number.isInteger(seed) && seed >= 0 ? {seed} : {}), looks};
+}
 function normalizeCast(value) {
   const cast = {};
   for (const [name, c] of Object.entries(value && typeof value === 'object' ? value : {}).slice(0, LIMIT.cast)) {
     const key = String(name).trim().slice(0, LIMIT.name);
     if (!key || !c || typeof c !== 'object') continue;
     const actions = (Array.isArray(c.actions) ? c.actions : []).slice(0, LIMIT.actions).map(a => ({id: text(a?.id, 40), label: text(a?.label, LIMIT.label), tags: text(a?.tags, LIMIT.tags), words: words(a?.words)})).filter(a => /^a-[\w-]+$/.test(a.id) && a.label);
-    const ids = new Set([...EXPRESSIONS.map(e => e.id), ...actions.map(a => a.id)]), looks = {};
-    for (const [id, look] of Object.entries(c.looks && typeof c.looks === 'object' ? c.looks : {})) {
-      const sprite = text(look?.sprite, LIMIT.url);
-      if (ids.has(id) && sprite) looks[id] = {sprite, at: Number(look.at) || 0};
-    }
-    const sprite = text(c.sprite, LIMIT.url), seed = Number(c.seed);
-    if (!sprite && !Object.keys(looks).length && !actions.length) continue;
-    cast[key] = {sprite, at: Number(c.at) || 0, ...(Number.isInteger(seed) && seed >= 0 ? {seed} : {}), looks, actions};
+    const ids = new Set([...EXPRESSIONS.map(e => e.id), ...actions.map(a => a.id)]);
+    const outfits = (Array.isArray(c.outfits) ? c.outfits : []).slice(0, LIMIT.outfits)
+      .map(o => ({id: text(o?.id, 40), label: text(o?.label, LIMIT.label), appearance: text(o?.appearance, LIMIT.appearance), ...normalizeSet(o, ids)}))
+      .filter(o => /^o-[\w-]+$/.test(o.id) && o.label);
+    const set = normalizeSet(c, ids);
+    if (!set.sprite && !Object.keys(set.looks).length && !actions.length && !outfits.length) continue;
+    cast[key] = {...set, actions, outfits};
   }
   return cast;
 }
@@ -92,17 +124,88 @@ export function normalizeVn(value) {
   };
 }
 
+/** The set of 立绘 a character wears: the 形象 (outfit id) when it has pictures, else their own. */
+export function setOf(entry, outfit = '') {
+  const o = outfit && (entry?.outfits || []).find(x => x.id === outfit);
+  return o && (o.sprite || Object.keys(o.looks || {}).length) ? o : entry;
+}
+/** A picture of a group: the one in use; with mix, any of them at random (another than the one shown, when it can). */
+function fromGroup(g, last, random) {
+  if (!g?.sprite) return '';
+  const pool = [g.sprite, ...(g.alts || []).map(a => a.sprite)];
+  if (!g.mix || pool.length < 2) return g.sprite;
+  const others = pool.filter(u => u !== last);
+  return others[Math.floor(random() * others.length) % others.length];
+}
 /**
  * The 立绘 to show for a line: a 动作 whose words are in the story just before it (or in its 情绪) first, then the
  * 表情 of its 情绪, then the usual one. Only pictures that were made count; '' when the character has none.
+ * outfit: the 形象 this chat uses; last: the picture on the stage now (a group taking turns shows another).
  */
-export function pickLook(entry, {emotion = '', context = ''} = {}) {
+export function pickLook(entry, {emotion = '', context = '', outfit = '', last = '', random = Math.random} = {}) {
   if (!entry) return '';
-  const looks = entry.looks || {}, said = String(context || '') + '\n' + String(emotion || '');
-  for (const a of entry.actions || []) if (looks[a.id]?.sprite && a.words.some(w => said.includes(w))) return looks[a.id].sprite;
+  const set = setOf(entry, outfit), looks = set.looks || {}, said = String(context || '') + '\n' + String(emotion || '');
+  for (const a of entry.actions || []) if (looks[a.id]?.sprite && a.words.some(w => said.includes(w))) return fromGroup(looks[a.id], last, random);
   const e = expressionOf(emotion);
-  if (e && looks[e]?.sprite) return looks[e].sprite;
-  return entry.sprite || Object.values(looks)[0]?.sprite || '';
+  if (e && looks[e]?.sprite) return fromGroup(looks[e], last, random);
+  return set.sprite ? fromGroup(set, last, random) : Object.values(looks)[0]?.sprite || '';
+}
+
+/**
+ * A change to one character's pictures, as {entry, gone} (gone: files no longer used). look: '' for the usual one;
+ * outfit: the 形象 ('' for their own). url: a new picture — in place of the one in use, or with add, joining its group
+ * as the one in use. use: an url of the group to use. drop: an url to take out (true: the one in use; the next one
+ * takes its place). mix: whether the group takes turns. dropOutfit: the 形象 goes, with all its pictures.
+ */
+export function editLook(entry, {look = '', outfit = '', url = '', add = false, use = '', drop = '', mix, seed, dropOutfit = false, now = Date.now()} = {}) {
+  const next = structuredClone(entry || {sprite: '', looks: {}, actions: [], outfits: []});
+  next.looks ??= {}; next.actions ??= []; next.outfits ??= [];
+  const gone = [];
+  const filesOf = set => [set.sprite, ...(set.alts || []).map(a => a.sprite), ...Object.values(set.looks || {}).flatMap(g => [g.sprite, ...(g.alts || []).map(a => a.sprite)])].filter(Boolean);
+  let set = next;
+  if (outfit) {
+    const at = next.outfits.findIndex(o => o.id === outfit);
+    if (at < 0) throw Error('这个形象已经不在了');
+    if (dropOutfit) { gone.push(...filesOf(next.outfits[at])); next.outfits.splice(at, 1); return {entry: next, gone}; }
+    set = next.outfits[at];
+    set.looks ??= {};
+  }
+  const g = look ? (set.looks[look] ??= {sprite: '', at: 0, alts: [], mix: false}) : set;
+  g.alts ??= [];
+  const base = !look, oldSeed = set.seed;
+  const putSeed = value => { if (!base) return; if (Number.isInteger(value) && value >= 0) set.seed = value; else delete set.seed; };
+  if (url) {
+    if (add && g.sprite) g.alts.unshift({sprite: g.sprite, at: g.at || 0, ...(base && Number.isInteger(oldSeed) && oldSeed >= 0 ? {seed: oldSeed} : {})});
+    else if (g.sprite && g.sprite !== url) gone.push(g.sprite);
+    g.sprite = url; g.at = now;
+    putSeed(Number(seed));
+    while (g.alts.length > LIMIT.alts) gone.push(g.alts.pop().sprite);
+  }
+  if (use && use !== g.sprite) {
+    const i = g.alts.findIndex(a => a.sprite === use);
+    if (i >= 0) {
+      const [picked] = g.alts.splice(i, 1);
+      if (g.sprite) g.alts.unshift({sprite: g.sprite, at: g.at || 0, ...(base && Number.isInteger(oldSeed) && oldSeed >= 0 ? {seed: oldSeed} : {})});
+      g.sprite = picked.sprite; g.at = picked.at || now;
+      putSeed(picked.seed);
+    }
+  }
+  if (drop) {
+    const target = drop === true ? g.sprite : drop;
+    if (target && target === g.sprite) {
+      gone.push(target);
+      const [after] = g.alts.splice(0, 1);
+      g.sprite = after?.sprite || ''; g.at = after?.at || 0;
+      putSeed(after?.seed);
+    } else if (target) {
+      const i = g.alts.findIndex(a => a.sprite === target);
+      if (i >= 0) { gone.push(target); g.alts.splice(i, 1); }
+    }
+  }
+  if (typeof mix === 'boolean') g.mix = mix;
+  if (g.alts.length === 0) g.mix = false;
+  if (look && !g.sprite) delete set.looks[look];
+  return {entry: next, gone};
 }
 
 /** A text box holds about three lines: longer prose and lines are cut into pages at a sentence end. */

@@ -24,20 +24,30 @@ export function vnApp(ctx) {
   const save = patch => { try { api.saveVn(patch); } catch (error) { ctx.notify(error.message, {error: true}); } render(); };
   const inTavern = () => typeof api.vnStart === 'function';
   const castNow = () => { try { return api.vnCast?.() || []; } catch { return []; } };
-  const castOf = name => castNow().find(c => c.name === name) || {name, appearance: '', sprite: '', seed: -1, looks: {}, actions: []};
-  /** Every look of a character: the usual one, the 表情, their 动作. */
-  const looksOf = c => [{id: '', label: '平常', tags: '', sprite: c.sprite},
-    ...EXPRESSIONS.map(e => ({id: e.id, label: e.label, tags: e.tags, sprite: c.looks[e.id]?.sprite || ''})),
-    ...c.actions.map(a => ({id: a.id, label: a.label, tags: a.tags, sprite: c.looks[a.id]?.sprite || '', action: a}))];
+  const castOf = name => castNow().find(c => c.name === name) || {name, appearance: '', sprite: '', seed: -1, alts: [], mix: false, looks: {}, actions: [], outfits: []};
+  /** The 形象 each character wears in the open chat: {name: outfit id}. */
+  const wearNow = () => { try { return api.vnWear?.() || {}; } catch { return {}; } };
+  /** The pictures of a 形象 ('' for the character's own set). */
+  const setFor = (c, outfit) => outfit ? (c.outfits || []).find(o => o.id === outfit) || null : c;
+  const group = g => g?.sprite ? {sprite: g.sprite, alts: g.alts || [], mix: !!g.mix, count: 1 + (g.alts || []).length} : {sprite: '', alts: [], mix: false, count: 0};
+  /** Every look of a character in a 形象: the usual one, the 表情, their 动作 (each with its group of pictures). */
+  const looksOf = (c, outfit = '') => {
+    const set = setFor(c, outfit) || {looks: {}};
+    return [{id: '', label: '平常', tags: '', outfit, ...group(set)},
+      ...EXPRESSIONS.map(e => ({id: e.id, label: e.label, tags: e.tags, outfit, ...group(set.looks?.[e.id])})),
+      ...c.actions.map(a => ({id: a.id, label: a.label, tags: a.tags, outfit, ...group(set.looks?.[a.id]), action: a}))];
+  };
 
   function castRows() {
     const cast = castNow();
     if (!cast.length) return '<p class="hint">这张卡还没有登记的角色。正文里出现过的角色会自动登记，也可以在角色 App 里添加。</p>';
+    const worn = wearNow();
     return `<div class="vn-cast-list">${cast.map(c => {
-      const made = looksOf(c).filter(l => l.sprite).length, shown = c.sprite || looksOf(c).find(l => l.sprite)?.sprite || '';
+      const w = setFor(c, worn[c.name] || '') ? worn[c.name] || '' : '', all = looksOf(c, w);
+      const made = all.reduce((n, l) => n + l.count, 0), shown = all.find(l => l.sprite)?.sprite || '';
       return `<button type="button" class="vn-cast-row" data-action="vn-looks" data-name="${esc(c.name)}">
       <span class="vn-sprite-thumb${shown ? ' has' : ''}">${shown ? checker(shown) : avatar(c.name, 'none', 44)}</span>
-      <span class="vn-cast-text"><strong>${esc(c.name)}</strong><small>${made ? `${made} 张立绘${c.actions.length ? ` · ${c.actions.length} 个动作` : ''}` : c.appearance ? '还没有立绘' : '还没有立绘 · 没写外貌'}</small></span>
+      <span class="vn-cast-text"><strong>${esc(c.name)}</strong><small>${[made ? `${made} 张立绘` : c.appearance ? '还没有立绘' : '还没有立绘 · 没写外貌', c.actions.length ? `${c.actions.length} 个动作` : '', c.outfits.length ? `${c.outfits.length + 1} 套形象` + (w ? `（穿着${esc(setFor(c, w).label)}）` : '') : ''].filter(Boolean).join(' · ')}</small></span>
       ${icon('next')}</button>`;
     }).join('')}</div>`;
   }
@@ -84,39 +94,129 @@ export function vnApp(ctx) {
 
   // ---------- one character's 立绘 ----------
   let sheet = null;
-  function looks(name) {
+  const sheetOutfit = {};
+  /** A character's page: their 形象 on top (默认 and their own), then every look of the one picked. */
+  function looks(name, outfit = sheetOutfit[name] ?? (wearNow()[name] || '')) {
+    if (outfit && !setFor(castOf(name), outfit)) outfit = '';
+    sheetOutfit[name] = outfit;
     const d = sheet = ctx.dialog('立绘 · ' + name, '');
     const paint = () => {
       if (!d.live) return;
-      const c = castOf(name), all = looksOf(c), missing = all.filter(l => l.id && !l.action && !l.sprite);
-      d.body.innerHTML = `<p class="hint">${c.sprite ? '表情会用平常那张的种子画，脸和衣服尽量一样。' : '先画「平常」这张：表情会用它的种子画，脸和衣服更一致。'}点一张可以画、上传或去掉。</p>
-        <div class="vn-looks">${all.map(l => `<button type="button" class="vn-look${l.sprite ? ' has' : ''}" data-look="${esc(l.id)}"><span class="vn-look-pic">${l.sprite ? checker(l.sprite) : `<i>${icon(l.action ? 'hand' : l.id ? 'smile' : 'person')}</i>`}</span><strong>${esc(l.label)}</strong><small>${l.sprite ? '已画' : l.action ? '动作' : l.id ? '表情' : '平常'}</small></button>`).join('')}</div>
-        <div class="actions"><button type="button" class="secondary" data-action="vn-add-action">${icon('add')}加一个动作</button>${missing.length ? `<button type="button" class="primary" data-action="vn-all" ${c.sprite ? '' : 'disabled'}>${icon('paint')}画没画的 ${missing.length} 种表情</button>` : ''}</div>`;
+      const c = castOf(name), set = setFor(c, outfit) || c, all = looksOf(c, outfit), missing = all.filter(l => l.id && !l.action && !l.sprite);
+      const worn = setFor(c, wearNow()[name] || '') ? wearNow()[name] || '' : '';
+      const chips = [{id: '', label: '默认'}, ...c.outfits.map(o => ({id: o.id, label: o.label}))];
+      d.body.innerHTML = `<div class="vn-outfits" role="group" aria-label="形象">${chips.map(o => `<button type="button" class="vn-outfit" data-outfit="${esc(o.id)}" aria-pressed="${o.id === outfit}">${esc(o.label)}${c.outfits.length && o.id === worn ? '<i>穿着</i>' : ''}</button>`).join('')}<button type="button" class="vn-outfit add" data-action="vn-add-outfit">${icon('add')}形象</button></div>
+        <p class="hint">${set.sprite ? '表情会用平常那张的种子画，脸和衣服尽量一样。' : '先画「平常」这张：表情会用它的种子画，脸和衣服更一致。'}点一张可以画、上传或去掉；一张可以有好几张图，选用哪张或轮换随机出。</p>
+        <div class="vn-looks">${all.map(l => `<button type="button" class="vn-look${l.sprite ? ' has' : ''}" data-look="${esc(l.id)}"><span class="vn-look-pic">${l.sprite ? checker(l.sprite) : `<i>${icon(l.action ? 'hand' : l.id ? 'smile' : 'person')}</i>`}${l.count > 1 ? `<em class="vn-look-n">${l.mix ? '随机 ' : ''}${l.count}</em>` : ''}</span><strong>${esc(l.label)}</strong><small>${l.sprite ? (l.count > 1 ? `${l.count} 张` : '已画') : l.action ? '动作' : l.id ? '表情' : '平常'}</small></button>`).join('')}</div>
+        <div class="actions">${c.outfits.length && outfit !== worn ? `<button type="button" class="primary" data-action="vn-wear">${icon('check')}这个聊天穿这套</button>` : ''}${outfit ? `<button type="button" class="secondary" data-action="vn-edit-outfit">${icon('edit')}改这套形象</button>` : ''}<button type="button" class="secondary" data-action="vn-add-action">${icon('add')}加一个动作</button>${missing.length ? `<button type="button" class="${c.outfits.length && outfit !== worn ? 'secondary' : 'primary'}" data-action="vn-all" ${set.sprite ? '' : 'disabled'}>${icon('paint')}画没画的 ${missing.length} 种表情</button>` : ''}</div>`;
     };
     paint();
     d.onClose(() => { if (sheet === d) sheet = null; render(); });
     d.body.addEventListener('click', async e => {
-      const b = e.target.closest('[data-look], [data-action]');
+      const b = e.target.closest('[data-look], [data-action], [data-outfit]');
       if (!b) return;
       try {
-        if (b.dataset.action === 'vn-add-action') { await editAction(name); looks(name); return; }
-        if (b.dataset.action === 'vn-all') { await drawAll(name); looks(name); return; }
-        const c = castOf(name), l = looksOf(c).find(x => x.id === b.dataset.look);
+        if (b.dataset.outfit != null) { outfit = sheetOutfit[name] = b.dataset.outfit; paint(); return; }
+        if (b.dataset.action === 'vn-add-outfit') { const id = await editOutfit(name); looks(name, id || outfit); return; }
+        if (b.dataset.action === 'vn-edit-outfit') { const gone = await outfitMenu(name, outfit); looks(name, gone ? '' : outfit); return; }
+        if (b.dataset.action === 'vn-wear') { api.vnSetWear(name, outfit); ctx.notify(`这个聊天里${name}穿「${setFor(castOf(name), outfit)?.label || '默认'}」`); paint(); return; }
+        if (b.dataset.action === 'vn-add-action') { await editAction(name); looks(name, outfit); return; }
+        if (b.dataset.action === 'vn-all') { await drawAll(name, outfit); looks(name, outfit); return; }
+        const c = castOf(name), l = looksOf(c, outfit).find(x => x.id === b.dataset.look);
         if (!l) return;
+        const set = setFor(c, outfit) || c;
         const key = await menu(ctx, `${name} · ${l.label}`, [
-          {key: 'draw', icon: 'paint', label: l.sprite ? '重画' : '画这张', note: l.id ? (c.seed >= 0 ? '用平常那张的种子，加上「' + (l.tags || l.label) + '」' : '加上「' + (l.tags || l.label) + '」') : '外貌和立绘要求可以先改'},
-          {key: 'upload', icon: 'import', label: '上传图片', note: '用自己的图，白底、纯色底或透明 PNG 都行'},
+          {key: 'draw', icon: 'paint', label: l.sprite ? '再画一张' : '画这张', note: l.id ? (set.seed >= 0 ? '用平常那张的种子，加上「' + (l.tags || l.label) + '」' : '加上「' + (l.tags || l.label) + '」') : '外貌和立绘要求可以先改'},
+          {key: 'upload', icon: 'import', label: l.sprite ? '再上传一张' : '上传图片', note: '用自己的图，白底、纯色底或透明 PNG 都行'},
+          l.count > 1 && {key: 'group', icon: 'gallery', label: `这组图（${l.count} 张）`, note: l.mix ? '正在轮换随机出' : '选用哪一张，或者轮换随机出'},
           l.action && {key: 'edit', icon: 'edit', label: '改这个动作', note: '名字、怎么画、什么时候用'},
-          l.sprite && {key: 'remove', icon: 'trash', label: '去掉这张', danger: true},
-          l.action && {key: 'delete', icon: 'trash', label: '删掉这个动作', danger: true}]);
+          l.sprite && {key: 'remove', icon: 'trash', label: '去掉这张', note: l.count > 1 ? '换成这组的下一张' : '', danger: true},
+          l.action && {key: 'delete', icon: 'trash', label: '删掉这个动作', note: '每套形象里这个动作的图都会删掉', danger: true}]);
         if (key === 'draw') draw(name, l);
         else if (key === 'upload') upload(name, l);
-        else if (key === 'edit') { await editAction(name, l.action); looks(name); }
-        else if (key === 'remove' && await ctx.confirm(`去掉「${name} · ${l.label}」？`, '酒馆里的图片文件也会删掉。')) { await api.vnSprite(name, null, {look: l.id}); ctx.notify('去掉了'); looks(name); }
-        else if (key === 'delete' && await ctx.confirm(`删掉动作「${l.label}」？`, '画好的这张也会删掉。')) { if (l.sprite) await api.vnSprite(name, null, {look: l.id}); changeActions(name, list => list.filter(a => a.id !== l.id)); looks(name); }
-        else if (key == null) looks(name);
+        else if (key === 'group') groupSheet(name, l);
+        else if (key === 'edit') { await editAction(name, l.action); looks(name, outfit); }
+        else if (key === 'remove' && await ctx.confirm(`去掉「${name} · ${l.label}」这张？`, '酒馆里的图片文件也会删掉。')) { await api.vnSprite(name, null, {look: l.id, outfit}); ctx.notify('去掉了'); looks(name, outfit); }
+        else if (key === 'delete' && await ctx.confirm(`删掉动作「${l.label}」？`, '画好的图也会删掉。')) {
+          for (const o of ['', ...c.outfits.map(x => x.id)]) while (looksOf(castOf(name), o).find(x => x.id === l.id)?.sprite) await api.vnSprite(name, null, {look: l.id, outfit: o});
+          changeActions(name, list => list.filter(a => a.id !== l.id)); looks(name, outfit);
+        }
+        else if (key == null) looks(name, outfit);
       } catch (error) { ctx.notify(error.message, {error: true}); }
     });
+  }
+  /** 这组图: every picture of one look; tap one to use it or take it out; 轮换随机出 lets them take turns. */
+  function groupSheet(name, l) {
+    const d = ctx.dialog(`${name} · ${l.label} · 这组图`, '');
+    const now = () => looksOf(castOf(name), l.outfit).find(x => x.id === l.id);
+    const paint = () => {
+      const g = now();
+      if (!g?.sprite) { d.close(); return; }
+      const all = [g.sprite, ...g.alts.map(a => a.sprite)];
+      d.body.innerHTML = `<p class="hint">点一张可以换成用它，或者去掉。打开「轮换随机出」，演的时候每句从这组里随机挑一张（不会连着两句同一张）。</p>
+        <div class="vn-looks">${all.map((u, i) => `<button type="button" class="vn-look has" data-pic="${esc(u)}"><span class="vn-look-pic">${checker(u)}</span><small>${!i && !g.mix ? '在用' : g.mix ? '轮换' : '备用'}</small></button>`).join('')}</div>
+        <div class="group">${toggle('vn-mix', '轮换随机出', g.mix, '关着时一直用「在用」那张。')}</div>`;
+    };
+    paint();
+    d.onClose(() => looks(name, l.outfit));
+    d.body.addEventListener('change', async e => {
+      if (e.target.dataset.field !== 'vn-mix') return;
+      try { await api.vnSprite(name, null, {look: l.id, outfit: l.outfit, mix: e.target.checked}); } catch (error) { ctx.notify(error.message, {error: true}); }
+      paint();
+    });
+    d.body.addEventListener('click', async e => {
+      const b = e.target.closest('[data-pic]');
+      if (!b) return;
+      const u = b.dataset.pic, g = now(), first = g?.sprite === u;
+      try {
+        const key = await menu(ctx, `${name} · ${l.label}`, [!first && {key: 'use', icon: 'check', label: '用这张', note: g?.mix ? '轮换时也会出现其他几张' : ''}, {key: 'drop', icon: 'trash', label: '去掉这张', danger: true}]);
+        if (key === 'use') await api.vnSprite(name, null, {look: l.id, outfit: l.outfit, use: u});
+        else if (key === 'drop' && await ctx.confirm('去掉这张？', '酒馆里的图片文件也会删掉。')) await api.vnSprite(name, null, {look: l.id, outfit: l.outfit, drop: u});
+      } catch (error) { ctx.notify(error.message, {error: true}); }
+      if (d.live) paint();
+    });
+  }
+  function changeOutfits(name, fn) {
+    const s = state(), entry = s.cast[name] || {sprite: '', looks: {}, actions: [], outfits: []};
+    api.saveVn({cast: {...s.cast, [name]: {...entry, outfits: fn([...(entry.outfits || [])])}}});
+  }
+  /** 形象: its name and the looks to draw it with (clothes, hair); resolves to its id (null when not saved). */
+  function editOutfit(name, outfit = null) {
+    const c = castOf(name);
+    return new Promise(resolve => {
+      let saved = null;
+      const d = ctx.dialog(outfit ? '改形象' : '加一套形象', `<p class="hint">同一个角色在不同的聊天里可以是不同的样子，比如校服和便服。每套形象有自己的一整套立绘；在角色的立绘页点「这个聊天穿这套」，这个聊天就用它。</p>
+        <div class="group pad">
+        <div class="field"><span>名字</span><input data-field="o-label" maxlength="12" value="${esc(outfit?.label || '')}" placeholder="比如 校服"></div>
+        <div class="field"><span>外貌${help('画这套形象的立绘时用的外貌（英文 tag）。先放了角色 App 里登记的外貌，把衣服、发型改成这套的。')}</span><textarea data-field="o-looks" rows="4">${esc(outfit ? outfit.appearance : c.appearance)}</textarea></div></div>
+        <div class="actions"><button type="button" class="primary" data-action="o-save">${icon('check')}保存</button></div>`);
+      d.onClose(() => resolve(saved));
+      d.body.addEventListener('click', e => {
+        if (!e.target.closest('[data-action=o-save]')) return;
+        const label = d.body.querySelector('[data-field=o-label]').value.trim(), appearance = d.body.querySelector('[data-field=o-looks]').value.trim();
+        if (!label) { ctx.notify('写个名字', {error: true}); return; }
+        try {
+          const id = outfit?.id || 'o-' + Date.now().toString(36);
+          changeOutfits(name, list => outfit ? list.map(o => o.id === id ? {...o, label, appearance} : o) : [...list, {id, label, appearance, sprite: '', looks: {}}]);
+          if (!setFor(castOf(name), id)) throw Error('最多 7 套形象');
+          saved = id;
+          d.close();
+        } catch (error) { ctx.notify(error.message, {error: true}); }
+      });
+    });
+  }
+  /** 改这套形象: rename it (and its looks) or delete it with its pictures. Resolves to true when it is gone. */
+  async function outfitMenu(name, id) {
+    const o = setFor(castOf(name), id);
+    if (!o) return true;
+    const key = await menu(ctx, `${name} · ${o.label}`, [{key: 'edit', icon: 'edit', label: '改名字和外貌'}, {key: 'delete', icon: 'trash', label: '删掉这套形象', note: '这套的立绘都会删掉', danger: true}]);
+    if (key === 'edit') { await editOutfit(name, o); return false; }
+    if (key === 'delete' && await ctx.confirm(`删掉「${o.label}」？`, '这套形象的立绘文件也会从酒馆删掉。')) {
+      await api.vnSprite(name, null, {outfit: id, dropOutfit: true});
+      if ((wearNow()[name] || '') === id) try { api.vnSetWear(name, ''); } catch {}
+      return true;
+    }
+    return false;
   }
   function changeActions(name, fn) {
     const s = state(), entry = s.cast[name] || {sprite: '', looks: {}, actions: []};
@@ -148,22 +248,22 @@ export function vnApp(ctx) {
   // ---------- drawing ----------
   const paidLabel = () => api.getState().draw.engine === 'gpt' ? '要花钱' : '会扣 Anlas';
   async function generate(name, l, {appearance, rule, extra} = {}) {
-    const c = castOf(name), seed = l.id && c.seed >= 0 ? c.seed : -1;
-    const request = api.vnSpriteRequest(name, {appearance, rule, extra: extra ?? l.tags, seed});
-    const result = await api.generateImage({...request, allowPaid: true, name: '立绘', key: 'vn:' + name + ':' + (l.id || 'base'), label: `立绘 · ${name}${l.id ? ' · ' + l.label : ''}`});
+    const c = castOf(name), o = l.outfit ? setFor(c, l.outfit) : null, set = o || c, seed = l.id && set.seed >= 0 ? set.seed : -1;
+    const request = api.vnSpriteRequest(name, {appearance: appearance ?? (o?.appearance || undefined), rule, extra: extra ?? l.tags, seed});
+    const result = await api.generateImage({...request, allowPaid: true, name: '立绘', key: 'vn:' + name + ':' + (l.outfit || '') + ':' + (l.id || 'base'), label: `立绘 · ${name}${o ? ' · ' + o.label : ''}${l.id ? ' · ' + l.label : ''}`});
     const photo = await api.getPhoto(result.photoId);
     if (!photo?.blob) throw Error('画好了，但没在相册里找到这张图');
     return {blob: photo.blob, seed: result.seed};
   }
   /** 画这张: their looks, the 立绘 rule and this look's tags can be changed for this one picture before it is drawn. */
   function draw(name, l) {
-    const c = castOf(name);
-    const d = ctx.dialog(`画立绘 · ${name} · ${l.label}`, '');
-    let appearance = c.appearance, rule = state().rule, extra = l.tags;
+    const c = castOf(name), o = l.outfit ? setFor(c, l.outfit) : null;
+    const d = ctx.dialog(`画立绘 · ${name}${o ? ' · ' + o.label : ''} · ${l.label}`, '');
+    let appearance = o?.appearance || c.appearance, rule = state().rule, extra = l.tags;
     const paint = () => {
       const ready = api.drawReady(), request = api.vnSpriteRequest(name, {appearance, rule, extra}), paid = ready && api.drawQuote(request.params)?.free === false;
       d.body.innerHTML = `<div class="group pad">
-        <div class="field"><span>外貌${help('角色 App 里登记的外貌，只在这次生成用；想一直这样画，去角色 App 里改。')}</span><textarea data-field="vn-looks" rows="4" placeholder="比如 1girl, long black hair, red eyes, school uniform">${esc(appearance)}</textarea></div>
+        <div class="field"><span>外貌${help(o ? '这套形象的外貌，改了会记在这套形象里。' : '角色 App 里登记的外貌，只在这次生成用；想一直这样画，去角色 App 里改。')}</span><textarea data-field="vn-looks" rows="4" placeholder="比如 1girl, long black hair, red eyes, school uniform">${esc(appearance)}</textarea></div>
         ${l.id ? `<div class="field"><span>这张的${l.action ? '动作' : '表情'}</span><input data-field="vn-extra" value="${esc(extra)}"></div>` : ''}
         <div class="field"><span>立绘要求</span><textarea data-field="vn-rule-once" rows="3">${esc(rule)}</textarea></div></div>
         ${ready ? '' : `<p class="hint">${esc(api.drawMissing())}，先在引擎 App 里填好。</p>`}
@@ -178,6 +278,7 @@ export function vnApp(ctx) {
       b.disabled = true; b.innerHTML = '<span class="vn-dots">正在画</span>';
       try {
         const made = await generate(name, l, {appearance, rule, extra});
+        if (o && appearance.trim() !== o.appearance) try { changeOutfits(name, list => list.map(x => x.id === o.id ? {...x, appearance: appearance.trim()} : x)); } catch { /* kept for this picture only */ }
         if (d.live) d.close();
         review(name, made.blob, {look: l, seed: made.seed, again: () => draw(name, l)});
       } catch (error) {
@@ -187,17 +288,17 @@ export function vnApp(ctx) {
     });
   }
   /** 画没画的表情: one after another, each with its background taken off as it comes; each can be redone later. */
-  async function drawAll(name) {
-    const c = castOf(name), todo = looksOf(c).filter(l => l.id && !l.action && !l.sprite);
+  async function drawAll(name, outfit = '') {
+    const c = castOf(name), set = setFor(c, outfit) || c, todo = looksOf(c, outfit).filter(l => l.id && !l.action && !l.sprite);
     if (!todo.length) return;
     if (!api.drawReady()) throw Error(api.drawMissing());
-    const request = api.vnSpriteRequest(name, {extra: todo[0].tags, seed: c.seed});
+    const request = api.vnSpriteRequest(name, {appearance: outfit ? set.appearance || undefined : undefined, extra: todo[0].tags, seed: set.seed});
     if (api.drawQuote(request.params)?.free === false && !await ctx.confirm(`画 ${todo.length} 张表情？`, `每张都${paidLabel()}。`)) return;
     let done = 0;
     for (const l of todo) {
       ctx.notify(`正在画${name}的「${l.label}」（${done + 1}/${todo.length}）`);
       const made = await generate(name, l);
-      await api.vnSprite(name, await processed(made.blob, {cut: true, strength: 40, taps: []}).then(trim), {look: l.id});
+      await api.vnSprite(name, await processed(made.blob, {cut: true, strength: 40, taps: []}).then(trim), {look: l.id, outfit});
       done++;
     }
     ctx.notify(`画好了 ${done} 种表情，不满意的点开重画`);
@@ -245,7 +346,7 @@ export function vnApp(ctx) {
       <p class="hint">还有没去掉的地方（比如头发缝里），在图上点一下就去掉。</p>
       <div class="group pad">${toggle('vn-cut', '去掉背景', true, '把纯色背景变成透明。人物边缘被吃掉了就调小强度，背景没去干净就调大，或者在图上点。')}
       <div class="field"><span>强度</span><input type="range" data-field="vn-strength" min="8" max="120" step="2" value="40" aria-label="去背景强度"></div></div>
-      <div class="actions"><button type="button" class="secondary" data-action="vn-undo" disabled>${icon('undo')}撤销</button>${again ? `<button type="button" class="secondary" data-action="vn-again">${icon('refresh')}再画一张</button>` : ''}<button type="button" class="primary" data-action="vn-use">${icon('check')}用这张</button></div></div>`);
+      <div class="actions vn-review-actions"><button type="button" class="secondary" data-action="vn-undo" disabled>${icon('undo')}撤销</button>${again ? `<button type="button" class="secondary" data-action="vn-again">${icon('refresh')}再画一张</button>` : ''}${look.sprite ? `<button type="button" class="secondary" data-action="vn-use" data-replace>${icon('swap')}换掉原来的</button><button type="button" class="primary" data-action="vn-use">${icon('add')}加进这组</button>` : `<button type="button" class="primary" data-action="vn-use">${icon('check')}用这张</button>`}</div></div>`);
     const canvas = d.body.querySelector('canvas'), opts = {cut: true, strength: 40, taps: []};
     let busy = Promise.resolve();
     const paint = () => { busy = busy.then(() => processed(img, opts, canvas)).catch(error => ctx.notify(error.message, {error: true})); d.body.querySelector('[data-action=vn-undo]').disabled = !opts.taps.length; return busy; };
@@ -270,10 +371,11 @@ export function vnApp(ctx) {
       try {
         if (!api.vnSprite) throw Error('要在酒馆里打开小手机才能保存立绘');
         await busy;
-        await api.vnSprite(name, await trim(canvas), {look: look.id, seed});
-        ctx.notify(`「${name} · ${look.label}」换好了`);
+        const add = !!look.sprite && !b.hasAttribute('data-replace');
+        await api.vnSprite(name, await trim(canvas), {look: look.id, outfit: look.outfit || '', seed, add});
+        ctx.notify(add ? `加进了「${name} · ${look.label}」这组` : `「${name} · ${look.label}」换好了`);
         d.close();
-        if (look.id || castOf(name).actions.length) looks(name); else render();
+        looks(name, look.outfit || '');
       } catch (error) { ctx.notify(error.message, {error: true}); b.disabled = false; }
     });
   }

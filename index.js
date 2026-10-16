@@ -389,7 +389,9 @@ function connect(source){
   userName:()=>{check();return context()?.name1||'';},
   exportBackup:async(parts,options)=>{check();const manifest=await fetch(new URL('manifest.json',base)).then(r=>r.ok?r.json():null).catch(()=>null);return api.exportBackup(parts,manifest?.version||'',options);},
   vnStart:from=>{check();return vnHost.open(from);},
-  vnSprite:(name,blob,options)=>{check();return vnHost.setSprite(name,blob,{look:String(options?.look||''),seed:Number(options?.seed)});},
+  vnSprite:(name,blob,options)=>{check();const o=options||{};return vnHost.setSprite(name,blob,{look:String(o.look||''),outfit:String(o.outfit||''),seed:Number(o.seed),add:o.add===true,use:String(o.use||''),drop:typeof o.drop==='string'?o.drop:'',mix:typeof o.mix==='boolean'?o.mix:undefined,dropOutfit:o.dropOutfit===true});},
+  vnWear:()=>{check();return vnHost.wear();},
+  vnSetWear:(name,id)=>{check();return vnHost.setWear(name,id);},
   noteError:text=>{check();remember(text,'error');}
  });
 }

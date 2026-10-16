@@ -281,7 +281,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     // Its 表情 or 动作 is chosen on its first page (from its 情绪 and the story just before it) and kept for the rest.
     let url = '';
     if (say && !s.user && !cg) {
-      url = s.part && lookOf.has(name) ? lookOf.get(name) : sprite(name, {emotion: s.emotion, context: said});
+      url = s.part && lookOf.has(name) ? lookOf.get(name) : sprite(name, {emotion: s.emotion, context: said, last: actors.get(name)?.url || ''});
       lookOf.set(name, url);
     }
     if (say) said = ''; else said = (said + '\n' + s.text).slice(-400);
