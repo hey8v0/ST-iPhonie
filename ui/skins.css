@@ -152,6 +152,23 @@
     linear-gradient(150deg,color-mix(in srgb,var(--e) 30%,#262d29),color-mix(in srgb,var(--e) 16%,#1d2320));
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 18%,transparent),0 -6px 16px -10px rgba(0,0,0,.6),0 12px 22px -14px rgba(0,0,0,.8)}
 :root[data-skin=fresh] .bank-card .spark{display:none}
+/* 开演 on 文艺小清新: paper and ink like the engine cards, not a bright gradient. */
+:root[data-skin=fresh] .vn-hero{--e:#f0a070;--e-ink:#94512f;color:var(--e-ink);border-radius:18px;
+  background:radial-gradient(circle at 86% 22%,transparent 0 27px,color-mix(in srgb,var(--e-ink) 22%,transparent) 27px 28.5px,transparent 29px 33px,color-mix(in srgb,var(--e-ink) 14%,transparent) 33px 34px,transparent 34.5px),
+    repeating-linear-gradient(0deg,transparent 0 23px,color-mix(in srgb,var(--e-ink) 7%,transparent) 23px 24px),
+    linear-gradient(150deg,color-mix(in srgb,var(--e) 30%,#fbf7ee),color-mix(in srgb,var(--e) 52%,#efe7d6));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 16%,transparent),0 -6px 16px -10px rgba(60,60,40,.35),0 12px 22px -14px rgba(60,60,40,.55)}
+:root[data-skin=fresh][data-theme=dark] .vn-hero{--e-ink:#f0b48c;
+  background:radial-gradient(circle at 86% 22%,transparent 0 27px,color-mix(in srgb,var(--e-ink) 20%,transparent) 27px 28.5px,transparent 29px 33px,color-mix(in srgb,var(--e-ink) 12%,transparent) 33px 34px,transparent 34.5px),
+    repeating-linear-gradient(0deg,transparent 0 23px,color-mix(in srgb,var(--e-ink) 6%,transparent) 23px 24px),
+    linear-gradient(150deg,color-mix(in srgb,var(--e) 30%,#262d29),color-mix(in srgb,var(--e) 16%,#1d2320));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 18%,transparent),0 -6px 16px -10px rgba(0,0,0,.6),0 12px 22px -14px rgba(0,0,0,.8)}
+:root[data-skin=fresh] .vn-hero-title{font-family:var(--serif);text-shadow:none}
+:root[data-skin=fresh] .vn-hero p{text-shadow:none;font-weight:500;color:inherit}
+:root[data-skin=fresh] .vn-hero .hint{color:inherit;opacity:.8}
+:root[data-skin=fresh] .vn-hero .actions button.primary{background:var(--e-ink);color:#fbf7ee;border:0;box-shadow:0 8px 16px -10px color-mix(in srgb,var(--e-ink) 90%,#000)}
+:root[data-skin=fresh][data-theme=dark] .vn-hero .actions button.primary{color:#1d2320}
+:root[data-skin=fresh] .vn-hero .actions button.secondary{background:transparent;color:var(--e-ink);border:0;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 45%,transparent)}
 :root[data-skin=fresh] .card-name{font-family:var(--serif);font-weight:700;letter-spacing:.04em}
 :root[data-skin=fresh] .card-chip{filter:saturate(.6)}
 :root[data-skin=fresh] .app-label{font-family:var(--serif);font-weight:700;letter-spacing:.06em}
