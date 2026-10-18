@@ -1,4 +1,5 @@
 import {freshTide,restoreTide,stepTide,nearby,interact,waitFor,turnLens,objective,tideName,tideAt,CLUES} from './model.js';
+import {planRoute} from './navigation.js';
 import {createPainter} from './paint.js';
 import {tideAudio} from './audio.js';
 
@@ -7,11 +8,11 @@ const query=new URLSearchParams(location.search),session=query.get('session')||'
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let saved=null;try{saved=JSON.parse(win.localStorage.getItem(key)||'null');}catch{}
 let fullscreenTarget=null;
-let s=restoreTide(saved),mode='title',disposed=false,raf=0,previous=0,lastDraw=0,lastSave=0,lastHud=0,steps=0,portrait=false,target=null,blocked=0,dialogue=null,dialogueIndex=0,bookReturn='play',lastPage='letter',noticeTimer=0,saveFailed=false;
+let s=restoreTide(saved),mode='title',disposed=false,raf=0,previous=0,lastDraw=0,lastSave=0,lastHud=0,steps=0,portrait=false,target=null,waypoints=[],blocked=0,dialogue=null,dialogueIndex=0,bookReturn='play',lastPage='letter',noticeTimer=0,saveFailed=false;
 const painter=createPainter(canvas),audio=tideAudio(win),keys=new Set(),stick={x:0,y:0,id:null},abort=new AbortController(),timers=new Set();
 const listen=(el,type,fn,options={})=>el.addEventListener(type,fn,{...options,signal:abort.signal});
 const later=(fn,ms)=>{const id=win.setTimeout(()=>{timers.delete(id);if(!disposed)fn();},ms);timers.add(id);return id;};
-function resetInput(){keys.clear();stick.x=stick.y=0;stick.id=null;$('#joystick i').style.transform='';target=null;blocked=0;}
+function resetInput(){keys.clear();stick.x=stick.y=0;stick.id=null;$('#joystick i').style.transform='';target=null;waypoints=[];blocked=0;}
 function notice(text){if(!text)return;$('#notice').textContent=text;$('#notice').classList.add('show');win.clearTimeout(noticeTimer);noticeTimer=win.setTimeout(()=>$('#notice').classList.remove('show'),3800);}
 function save(){if(mode==='title'&&!saved)return;try{win.localStorage.setItem(key,JSON.stringify({...s,savedAt:Date.now()}));saved=true;saveFailed=false;}catch{if(!saveFailed){saveFailed=true;notice('这次的进度暂时无法保存，请检查浏览器存储空间。');}}lastSave=performance.now();}
 function rotation(){const show=mode!=='title'&&mode==='play'&&win.matchMedia('(pointer:coarse)').matches&&win.innerHeight>win.innerWidth&&!portrait;$('#rotate').hidden=!show;if(show)resetInput();return show;}
@@ -52,11 +53,11 @@ listen(doc,'keydown',event=>{if(event.target.closest('input,textarea,select'))re
  if(mode==='title'){if(k==='enter')start();return;}if(event.repeat&&['e','enter','j','m','escape'].includes(k))return;
  if(k==='escape'){if(mode==='play')pause();else if(mode==='pause')resume();else if(mode==='dialogue')nextTalk();else closeOverlay();return;}
  if(mode==='dialogue'&&(k==='enter'||k===' ')){event.preventDefault();nextTalk();return;}
- if(mode!=='play'||rotation())return;if(k==='e'||k==='enter'){event.preventDefault();act();}else if(k==='j')journal();else if(k==='m')map();else{keys.add(k);target=null;}
+ if(mode!=='play'||rotation())return;if(k==='e'||k==='enter'){event.preventDefault();act();}else if(k==='j')journal();else if(k==='m')map();else{keys.add(k);target=null;waypoints=[];}
 });
 listen(doc,'keyup',e=>keys.delete(e.key.toLowerCase()));
-listen(canvas,'pointerup',event=>{if(mode!=='play'||rotation()||event.button>0)return;const r=canvas.getBoundingClientRect(),point=painter.screenToWorld(event.clientX-r.left,event.clientY-r.top),near=nearby(s);if(near&&Math.hypot(point.x-near.x,point.y-near.y)<70)return act();target=point;blocked=0;});
-function joystick(event){if(stick.id!==event.pointerId)return;const r=$('#joystick').getBoundingClientRect(),dx=event.clientX-r.left-r.width/2,dy=event.clientY-r.top-r.height/2,length=Math.hypot(dx,dy),scale=Math.min(1,38/(length||1));stick.x=dx*scale/38;stick.y=dy*scale/38;$('#joystick i').style.transform=`translate(${dx*scale}px,${dy*scale}px)`;target=null;}
+listen(canvas,'pointerup',event=>{if(mode!=='play'||rotation()||event.button>0)return;const r=canvas.getBoundingClientRect(),point=painter.screenToWorld(event.clientX-r.left,event.clientY-r.top),near=nearby(s);if(near&&Math.hypot(point.x-near.x,point.y-near.y)<70)return act();const route=planRoute(s,point);waypoints=route;target=waypoints.shift()||null;blocked=0;if(!target)notice(s.mode==='boat'?'这里暂时无法靠近，试试木码头旁的海面。':'海水挡住了这条路。等退潮后再试试吧。');});
+function joystick(event){if(stick.id!==event.pointerId)return;const r=$('#joystick').getBoundingClientRect(),dx=event.clientX-r.left-r.width/2,dy=event.clientY-r.top-r.height/2,length=Math.hypot(dx,dy),scale=Math.min(1,38/(length||1));stick.x=dx*scale/38;stick.y=dy*scale/38;$('#joystick i').style.transform=`translate(${dx*scale}px,${dy*scale}px)`;target=null;waypoints=[];}
 listen($('#joystick'),'pointerdown',event=>{if(mode!=='play'||rotation())return;event.preventDefault();stick.id=event.pointerId;$('#joystick').setPointerCapture(event.pointerId);joystick(event);});listen($('#joystick'),'pointermove',joystick);
 for(const type of ['pointerup','pointercancel','lostpointercapture'])listen($('#joystick'),type,event=>{if(stick.id!==event.pointerId)return;stick.id=null;stick.x=stick.y=0;$('#joystick i').style.transform='';});
 listen(win,'blur',()=>{if(mode==='play')pause();else resetInput();});
@@ -67,11 +68,11 @@ listen(win,'message',e=>{if(e.source!==win.parent||e.origin!==location.origin||e
 function loop(now){raf=0;if(disposed||doc.hidden)return;raf=requestAnimationFrame(loop);const interval=win.matchMedia('(pointer:coarse)').matches?30:16;if(now-lastDraw<interval)return;const dt=Math.min(.05,(now-(previous||now))/1000);previous=now;lastDraw=now;if(mode==='title')return;
  if(mode==='play'&&!rotation()){
   const input={x:stick.x+(keys.has('d')||keys.has('arrowright')?1:0)-(keys.has('a')||keys.has('arrowleft')?1:0),y:stick.y+(keys.has('s')||keys.has('arrowdown')?1:0)-(keys.has('w')||keys.has('arrowup')?1:0)};
-  if(target&&!input.x&&!input.y){const dx=target.x-s.x,dy=target.y-s.y,len=Math.hypot(dx,dy);if(len<15)target=null;else{input.x=dx/len;input.y=dy/len;}}
+  if(target&&!input.x&&!input.y){const dx=target.x-s.x,dy=target.y-s.y,len=Math.hypot(dx,dy);if(len<12)target=waypoints.shift()||null;else{const speed=Math.min(1,len/(s.mode==='boat'?70:28));input.x=dx/len*speed;input.y=dy/len*speed;}}
   const before={x:s.x,y:s.y},result=stepTide(s,input,dt),moved=Math.hypot(s.x-before.x,s.y-before.y);
   if(result==='shoal'){resetInput();save();notice('浅滩露出了水面。你把小船推回了深水。');}
   if(result==='rising'){resetInput();save();notice('潮水漫上石路。你及时回到了安全的岸边，邮差包没有弄湿。');painter.snap(s);}
-  if(target){blocked=moved<.1?blocked+dt:0;if(blocked>.6){target=null;blocked=0;notice(s.mode==='boat'?'前面是浅滩或海岸。绕开它，木码头可以靠岸。':'前面是海。沿岸找找露出来的路吧。');}}
+  if(target){blocked=moved<.1?blocked+dt:0;if(blocked>.6){target=null;waypoints=[];blocked=0;notice(s.mode==='boat'?'前面是浅滩或海岸。绕开它，木码头可以靠岸。':'前面是海。沿岸找找露出来的路吧。');}}
   if(s.mode==='foot'&&moved>0){steps+=moved;if(steps>37){audio.sound('step');steps=0;}}
   if(now-lastSave>5000)save();
  }
@@ -79,5 +80,5 @@ function loop(now){raf=0;if(disposed||doc.hidden)return;raf=requestAnimationFram
  painter.draw(s,dt,{target,near:nearby(s),menu:mode!=='play'});
 }
 function dispose(){if(disposed)return;save();if(fullscreenTarget?.ownerDocument.fullscreenElement===fullscreenTarget)fullscreenTarget.ownerDocument.exitFullscreen?.().catch(()=>{});fullscreenTarget=null;disposed=true;abort.abort();cancelAnimationFrame(raf);win.clearTimeout(noticeTimer);for(const id of timers)win.clearTimeout(id);timers.clear();resetInput();audio.dispose();}
-win.stTide={pause,dispose,snapshot:()=>structuredClone(s)};
+win.stTide={pause,dispose,assetsReady:painter.ready,snapshot:()=>structuredClone(s)};
 painter.snap(s);showTitle();raf=requestAnimationFrame(loop);
