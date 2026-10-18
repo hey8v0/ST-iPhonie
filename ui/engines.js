@@ -360,6 +360,7 @@ export function enginesApp(ctx) {
     drafts.set(engine, schema.connection);
     const c = draft(), saved = api.keyStatus(engine), fish = engine === 'fish' ? api.getState().connections.fish : null;
     v.root.dataset.engine = engine;
+    const tags = ['doubao', 'custom'].includes(engine) || engine === 'eleven' && !/^eleven_v[34]/.test(c.model) ? [] : engine === 'fish' && !['s1', 'drama-3'].includes(c.model) ? ['happy', 'whispers sweetly', 'slightly sad'] : schema.tags;
     const unsupported = schema.models.filter(m => !m.supported).map(m => m.id + '：' + m.reason).join('\n');
     v.draw(heading(engines[engine], moreButton(), 'Engine Card')
       + card(engine, 'div')
@@ -375,7 +376,7 @@ export function enginesApp(ctx) {
       + balanceGroup()
       + groupTitle(engine === 'custom' ? '接口和音色' : '参数')
       + schema.groups.map((g, i) => `<details data-group="${engine}:${g.id}" ${i === 0 ? 'open' : ''}><summary>${esc(g.title)}</summary><div>${g.fields.map(f => control(f, c)).join('')}</div></details>`).join('')
-      + `<details data-group="tags"><summary>情绪与语气标签</summary><div>${schema.tagNote ? `<p class="hint">${esc(schema.tagNote)}</p>` : ''}<div class="tags">${schema.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>${engine === 'mini' && c.model.startsWith('speech-2.8') ? '<div class="tags">' + ['laughs', 'chuckle', 'coughs', 'clear-throat', 'groans', 'breath', 'pant', 'inhale', 'exhale', 'gasps', 'sniffs', 'sighs', 'snorts', 'burps', 'lip-smacking', 'humming', 'hissing', 'emm', 'sneezes'].map(x => `<span class="tag">(${x})</span>`).join('') + '</div>' : ''}${schema.sounds?.length ? '<div class="tags">' + schema.sounds.map(x => `<span class="tag">(${esc(x)})</span>`).join('') + '</div>' : ''}<a href="${esc(schema.source)}" target="_blank" rel="noopener noreferrer">查看官方文档</a></div></details>`
+      + (tags.length || schema.sounds?.length ? `<details data-group="tags"><summary>情绪与语气标签</summary><div><div class="tags">${tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>${engine === 'mini' && c.model.startsWith('speech-2.8') ? '<div class="tags">' + ['laughs', 'chuckle', 'coughs', 'clear-throat', 'groans', 'breath', 'pant', 'inhale', 'exhale', 'gasps', 'sniffs', 'sighs', 'snorts', 'burps', 'lip-smacking', 'humming', 'hissing', 'emm', 'sneezes'].map(x => `<span class="tag">(${x})</span>`).join('') + '</div>' : ''}${schema.sounds?.length ? '<div class="tags">' + schema.sounds.map(x => `<span class="tag">(${esc(x)})</span>`).join('') + '</div>' : ''}<a href="${esc(schema.source)}" target="_blank" rel="noopener noreferrer">查看官方文档</a></div></details>` : '')
       + (engine === 'custom' ? `<div class="actions">${btn('custom-test', icon('play', true) + '试一试', 'secondary')}</div><p class="hint" data-custom-test style="white-space:pre-line"></p>` : '')
       + `<div class="savebar"><span class="save-state" data-save-state>${dirty ? '未保存' : '已保存'}</span>${btn('save-connection', '保存配置', 'primary')}</div>`);
   }
