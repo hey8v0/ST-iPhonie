@@ -80,5 +80,5 @@ function loop(now){raf=0;if(disposed||doc.hidden)return;raf=requestAnimationFram
  painter.draw(s,dt,{target,near:nearby(s),menu:mode!=='play'});
 }
 function dispose(){if(disposed)return;save();if(fullscreenTarget?.ownerDocument.fullscreenElement===fullscreenTarget)fullscreenTarget.ownerDocument.exitFullscreen?.().catch(()=>{});fullscreenTarget=null;disposed=true;abort.abort();cancelAnimationFrame(raf);win.clearTimeout(noticeTimer);for(const id of timers)win.clearTimeout(id);timers.clear();resetInput();audio.dispose();}
-win.stTide={pause,dispose,assetsReady:painter.ready,snapshot:()=>structuredClone(s)};
+win.stTide={pause,dispose,snapshot:()=>structuredClone(s)};
 painter.snap(s);showTitle();raf=requestAnimationFrame(loop);

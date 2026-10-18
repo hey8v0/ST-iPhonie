@@ -1,7 +1,7 @@
 import {createView,heading,esc} from './common.js';
 
 const GAME = new URL('./indie/tide/index.html', import.meta.url);
-const COVER = new URL('./indie/tide/assets/cover.png', import.meta.url);
+const COVER = new URL('./indie/tide/assets/cover-code.webp', import.meta.url);
 export function indieApp(ctx) {
   const v=createView(ctx,'indie');let session=null;
   function close(){if(!session)return;const {dialog,frame,host,receive}=session;session=null;host.defaultView.removeEventListener('message',receive);try{frame.contentWindow?.stTide?.dispose();}catch{}if(host.fullscreenElement===dialog)host.exitFullscreen?.().catch(()=>{});dialog.close?.();dialog.remove();}
