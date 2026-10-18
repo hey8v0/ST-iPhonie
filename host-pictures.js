@@ -496,7 +496,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     // chain of thought or XML template the model then writes out.
     const ctx = context(), chat = ctx.chat || [];
     const prompt = suggestRequest(settings(), {before: before(chat.length, 6), only: castNow()});
-    const reply = await backend.generateText(ctx, {prompt, trimNames: false, responseLength: promptLength(settings())});
+    const reply = await backend.generateText(ctx, {prompt, plainText: true, trimNames: false, responseLength: promptLength(settings())});
     const result = readSuggestion(settings(), reply);
     if (!result.prompt) throw Error('模型没有写出提示词，再试一次');
     return withCount(result);
@@ -522,7 +522,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     for (let round = 0; prompt && round < 2 && used < left * 0.75; round++) {
       messages = fillUpRequest(messages, {prompts: s.promptRules, line: result.prompt, people: result.people, used, left, tags: Math.floor((left - used) / tagCost(count)), sentences: sentenceCount(s)});
       let more;
-      try { more = readSuggestion(s, await backend.generateText(context(), {prompt: messages, trimNames: false, responseLength: promptLength(s)})); } catch { break; }
+      try { more = readSuggestion(s, await backend.generateText(context(), {prompt: messages, plainText: true, trimNames: false, responseLength: promptLength(s)})); } catch { break; }
       const now = countField(count, more.prompt);
       if (!more.prompt || now <= used || now > left) break;
       result = {prompt: more.prompt, people: [...new Set([...result.people, ...more.people])]};
@@ -534,7 +534,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   async function writePrompt(idea, cast = []) {
     if (!String(idea || '').trim()) throw Error('先说说想画什么');
     const names = (Array.isArray(cast) ? cast : []).map(String).slice(0, 8), prompt = writeRequest(settings(), {idea, cast: names, only: castNow()});
-    const reply = await backend.generateText(context(), {prompt, trimNames: false, responseLength: promptLength(settings())});
+    const reply = await backend.generateText(context(), {prompt, plainText: true, trimNames: false, responseLength: promptLength(settings())});
     const result = readSuggestion(settings(), reply);
     if (!result.prompt) throw Error('模型没有写出提示词，再试一次');
     // Filled up to the limit only when the idea asks for it; otherwise a precise line of whatever length it takes.

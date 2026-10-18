@@ -56,6 +56,21 @@ export function asMessages(prompt) {
   return [{role: 'user', content: String(prompt ?? '')}];
 }
 
+// Manual image-prompt writing only: some tavern wrappers may stringify message
+// arrays. Use generateRaw's string + systemPrompt form at this boundary while
+// leaving the custom API's structured messages and all other features intact.
+export function tavernTextRequest(request){
+  const {plainText,...out}=request;
+  if(!plainText||!Array.isArray(out.prompt))return out;
+  const messages=asMessages(out.prompt).map(m=>{
+    if(Array.isArray(m.content)&&m.content.some(p=>p.type!=='text'))throw Error('绘图提示词请求中包含非文字内容');
+    return {...m,content:typeof m.content==='string'?m.content:m.content.map(p=>p.text).join('\n')};
+  });
+  const system=[out.systemPrompt,...messages.filter(m=>m.role==='system').map(m=>m.content)].filter(Boolean).join('\n\n');
+  const body=messages.filter(m=>m.role!=='system');
+  return {...out,systemPrompt:system,prompt:body.length===1&&body[0].role==='user'?body[0].content:body.map(m=>`[${m.role}]\n${m.content}`).join('\n\n')};
+}
+
 export function chatBody(text, prompt, responseLength) {
   if (!text.model) throw Error('请先在「引擎 → 文字模型」里填写模型名');
   // 关掉思考: the switches the providers that think by default read (硅基流动 and 通义: enable_thinking; 智谱, 火山方舟: thinking).

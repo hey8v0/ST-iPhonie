@@ -695,6 +695,7 @@ export function writeRequest(settings, {idea = '', cast = [], only = null} = {})
  * drawing app can add them with their looks.
  */
 export function readSuggestion(settings, text) {
+  if(typeof text!=='string')throw Error('模型没有返回可用的绘图提示词，请查看日志后重试');
   const people = [];
   const rest = String(text || '').split('\n').filter(line => {
     const m = line.trim().match(/^(?:人物|角色)\s*[:：]\s*(.*)$/);
@@ -705,7 +706,9 @@ export function readSuggestion(settings, text) {
     }
     return false;
   }).join('\n');
-  return {prompt: cleanSuggestion(rest), people};
+  const prompt=cleanSuggestion(rest);
+  if(/\[object\s+Object\]/i.test(prompt)||/JavaScript objects?.{0,160}(?:converted|string|toString)|JSON\.stringify\s*\(\s*yourData|console\.dir\s*\(\s*yourData/i.test(prompt))throw Error('模型返回了程序调试说明，没有生成绘图提示词；原提示词已保留，请重试或查看日志');
+  return {prompt, people};
 }
 /** How long the answer may be: room for the whole budget of tags (a few hundred tokens otherwise). */
 export function promptLength(settings) {
