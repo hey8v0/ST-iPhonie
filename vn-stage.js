@@ -460,8 +460,8 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     if (again) return;
     if (say && !s.part && !s.user && !skip && look().voice && voice.on() && s.voiced) voice.play(s);
     // 旁白: the story between the lines in the narrator's voice (整篇朗读's).
-    if (!say && !skip && look().narrate && look().voice && voice.on()) voice.narrate?.(s);
-    log.push({name, text: say ? quoted(s.text) : s.text, step: say && s.voiced && !s.part ? s : null});
+    if (!say && !s.imageOnly && !skip && look().narrate && look().voice && voice.on()) voice.narrate?.(s);
+    if (!s.imageOnly) log.push({name, text: say ? quoted(s.text) : s.text, step: say && s.voiced && !s.part ? s : null});
     if (log.length > 600) log.shift();
   }
   function nextMessage() {
@@ -483,8 +483,8 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       if (s.kind === 'bg') { cg = true; alone = true; cgPages = 0; clearActors(); setBg(s.url, {flash: !skip, cg: true}); continue; }
       if (s.kind === 'sound' || s.kind === 'bgm') { try { cue(s, {skipping: skip}); } catch {} continue; }
       ended = false; root.removeAttribute('data-end');
-      seen.push({m: at, pos, s}); if (seen.length > 400) seen.shift();
       show(s);
+      seen.push({m: at, pos, s, bg: {url: bgUrl, cg, alone, cgPages, soft: root.hasAttribute('data-soft')}}); if (seen.length > 400) seen.shift();
       return;
     }
   }
@@ -497,6 +497,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     const h = seen[seen.length - 1];
     if (h.m !== at && loaded[h.m]) { at = h.m; message = loaded[at]; steps = message.steps; lastId = message.id; }
     pos = h.pos; ended = false; root.removeAttribute('data-end');
+    if (h.bg) { if (h.bg.url !== bgUrl || h.bg.cg !== cg) clearActors();cg = h.bg.cg;alone = h.bg.alone;cgPages = h.bg.cgPages;setBg(h.bg.url, {cg, soft: h.bg.soft}); }
     show(h.s, {again: true});
   }
   function theEnd() {

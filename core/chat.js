@@ -387,7 +387,7 @@ export function knowsRule(names, user, {prompts = {}, group = false} = {}) {
     promptRule(prompts, "chat.knowsRule.004", {"动态内容1": (names.length === 1 ? names[0] : '一个人')}),
     group ? promptRule(prompts, "chat.knowsRule.005") : ''].filter(Boolean).join('\n');
 }
-export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, nudge = false}) {
+export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', nudge = false}) {
   const group = thread.type === 'group';
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
@@ -407,6 +407,7 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     userPersona.trim() ? promptRule(prompts, "chat.buildChatRequest.003", {"用户": (user), "用户_2": (user), "动态内容3": (userPersona.trim())}) : '',
     earlier.trim() ? promptRule(prompts, "chat.buildChatRequest.004", {"动态内容1": (group ? '群里每个人' : partner), "动态内容2": (earlier.trim())}) : '',
     story.length ? promptRule(prompts, "chat.buildChatRequest.005", {"动态内容1": (group ? '群里每个人' : partner), "动态内容2": (story.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
+    forum.trim() ? promptRule(prompts, 'chat.publicForum', {'论坛内容': forum.trim()}) : '',
     memory.trim(),
     story.length || earlier.trim() ? knowsRule(group ? members.map(m => m.name) : [partner], user, {group, prompts}) : '',
     ['【输出格式】',

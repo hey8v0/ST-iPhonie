@@ -261,8 +261,8 @@ a{color:var(--accent-ink)}
 .list-row>.icon{width:18px;height:18px;color:var(--ink2)}
 .field{display:flex;flex-direction:column;gap:7px;margin:14px 0;min-width:0}
 .field>span:first-child{font-size:13px;font-weight:800;display:flex;align-items:center;gap:6px}
-.field input,.field textarea,.select select,input.search{width:100%;min-width:0;max-width:100%;font-size:16px;min-height:44px;padding:10px 13px;color:var(--ink);background:var(--card2);border:1.5px solid var(--line);border-radius:14px;line-height:1.5}
-.field textarea{resize:vertical;min-height:96px}
+.field input,.field textarea,.select select,input.search,textarea[data-field],input[data-field]:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]):not([type=file]){width:100%;min-width:0;max-width:100%;font-size:16px;min-height:44px;padding:10px 13px;color:var(--ink);background:var(--card2);border:1.5px solid var(--line);border-radius:14px;line-height:1.5}
+.field textarea,textarea[data-field]{display:block;resize:vertical;min-height:96px}
 .field textarea.code,textarea.code{font-family:"JetBrains Mono",ui-monospace,Consolas,monospace;font-size:13px;min-height:120px}
 .field input[type=file]{padding:9px;font-size:13px}
 .select{position:relative;display:block;min-width:0}
@@ -2293,7 +2293,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .field textarea.code.short{min-height:72px}
 /* 引擎：密钥框里带一个小眼睛；离开框就保存 */
 .key-box{position:relative;display:flex}
-.key-box input{flex:1;min-width:0;padding-right:46px}
+.key-box input,.key-box textarea.api-secret{flex:1;min-width:0;padding-right:46px}
 .key-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:12px;display:grid;place-items:center;color:var(--ink2)}
 .key-eye[aria-pressed=true]{color:var(--accent-ink)}
 .key-eye svg{width:18px;height:18px}
@@ -2594,3 +2594,10 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 
 /* Searchable, bounded asset choices. Management stays outside the paginated list. */
 .paged-picker{min-width:0}.picker-search{position:sticky;top:0;z-index:2;background:var(--card);padding:0 0 10px}.picker-search input{width:100%;min-width:0;font:inherit;font-size:13px;color:var(--ink);background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px 13px}.picker-pages{display:flex;align-items:center;justify-content:center;gap:18px;padding:12px 0;color:var(--ink2);font-size:11px}.picker-pages button{width:38px;height:34px;min-height:34px;border:1px solid var(--line);border-radius:10px;background:var(--card2);color:var(--ink);font-size:22px}.picker-pages button:disabled{opacity:.3}.picker-preview{display:-webkit-box!important;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;word-break:break-all}.picker-manage{border-top:1px solid var(--line);margin-top:6px}.picker-manage .list-row{padding-block:11px}.vn-outfit-control{display:flex;gap:8px;align-items:center;margin-bottom:12px}.vn-outfit-control>button:first-child{flex:1;min-width:0;text-align:left}.vn-outfit-control .vn-outfit{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.paged-picker .vn-looks{grid-template-columns:repeat(3,minmax(0,1fr))}.paged-picker .vn-look-pic{height:104px}.paged-picker .vn-look strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* API tokens are not login passwords; retain masking without password-manager replacement. */
+.key-box textarea.api-secret{min-height:46px;height:46px;resize:none;white-space:pre;overflow-x:auto;-webkit-text-security:disc}.key-box textarea.api-secret.secret-visible{-webkit-text-security:none}
+
+@supports not (-webkit-text-security:disc){.key-box textarea.api-secret:not(.secret-visible){color:transparent;text-shadow:0 0 8px var(--ink)}}
+
+.key-box textarea.api-secret::placeholder{-webkit-text-security:none}

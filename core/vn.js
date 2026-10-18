@@ -250,7 +250,7 @@ export function storySteps(raw, lines = [], {pics = [], sounds = [], bgm = [], s
   const events = [
     ...lines.map((l, i) => ({l, i, start: l?.tagOnly&&Number.isFinite(l.displayStart)?l.displayStart:l?.start, end: l?.end})).filter(x => Number.isFinite(x.start) && Number.isFinite(x.end)),
     ...point(pics, 'bg'), ...point(sounds, 'sound'), ...point(bgm, 'bgm'),
-  ].sort((a, b) => a.start - b.start || (a.point ? -1 : 1));
+  ].sort((a, b) => a.start - b.start || Number(!a.point) - Number(!b.point));
   let at = 0;
   for (const e of events) {
     if (e.point) {
@@ -267,6 +267,8 @@ export function storySteps(raw, lines = [], {pics = [], sounds = [], bgm = [], s
     at = e.end;
   }
   prose(at, source.length);
+  // Consecutive images need a page boundary, including galleries with no prose between images.
+  for (let i = out.length - 1; i >= 0; i--) if (out[i].kind === 'bg' && (!out[i + 1] || out[i + 1].kind === 'bg')) out.splice(i + 1, 0, {kind: 'narrate', text: '', imageOnly: true});
   return out;
 }
 

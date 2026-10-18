@@ -47,7 +47,9 @@ export function createVnHost({showEntry = () => true, context, settings, backend
     const box = doc.querySelector(`#chat .mes[mesid="${id}"] .mes_text`);
     if (!box) return [];
     const abs = u => { try { return new URL(u, doc.baseURI).href; } catch { return u; } };
-    const seen = new Set(known.map(p => abs(p.url))), out = [];
+    const seen = new Set(known.map(p => abs(p.url))), out = [], offsets = [];let source = '';
+    for (const m of raw.matchAll(/[\p{L}\p{N}]/gu)) { source += m[0];offsets.push(m.index + m[0].length); }
+    let previous = 0;
     for (const img of box.querySelectorAll('img')) {
       const url = img.currentSrc || img.src;
       if (!url || seen.has(abs(url)) || img.closest('[class*="sttts"]')) continue;
@@ -56,9 +58,14 @@ export function createVnHost({showEntry = () => true, context, settings, backend
       let start = 0;
       try {
         const range = doc.createRange(); range.setStart(box, 0); range.setEndBefore(img);
-        const before = range.toString().replace(/\s+/g, ''), tail = before.slice(-12);
-        const at = tail ? raw.replace(/\s+/g, ' ').indexOf(tail) : -1;
-        if (tail && at < 0) { const i = raw.lastIndexOf(tail.slice(-6)); if (i >= 0) start = i + 6; } else if (at >= 0) start = at + tail.length;
+        const before = (range.toString().match(/[\p{L}\p{N}]/gu) || []).join('');
+        for (const size of [60, 30, 12, 6]) {
+          const tail = before.slice(-size);if (!tail) continue;
+          const at = source.indexOf(tail, previous);
+          if (at >= 0) { previous = at + tail.length;start = offsets[previous - 1] || 0;break; }
+        }
+        if (!start && before) start = offsets[Math.max(0, previous - 1)] || 0;
+
       } catch {}
       out.push({start, url});
     }

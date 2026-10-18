@@ -261,3 +261,6 @@
 .sttts-voice-island .vi-step[aria-pressed=true]{background:rgba(100,210,255,.22)}
 @keyframes sttts-vi-scroll{0%,15%{transform:translateX(0)}85%,100%{transform:translateX(var(--vi-travel,0px))}}
 @media(prefers-reduced-motion:reduce){.sttts-voice-island .vi-scrolling{animation:none}.sttts-voice-island .vi-line{overflow-x:auto;touch-action:pan-x}}
+
+#chat .mes_buttons button.sttts-tools-entry::before,#chat .mes_buttons button.sttts-tools-entry::after{content:none!important;display:none!important}
+#chat .mes_buttons button.sttts-tools-entry>svg{display:block!important;width:20px!important;height:20px!important;min-width:20px;pointer-events:none}

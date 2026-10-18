@@ -113,15 +113,15 @@ export function enginesApp(ctx) {
     catch (error) { if (load !== subscriptionLoad) return; subscription = null; subscriptionError = error.message; subscriptionStatus = error.status || 0; }
     if (!v.disposed && (engine === null || engine === 'nai')) {
       // A balance response may arrive while the user is typing the new connection.
-      const fields = [...v.root.querySelectorAll('[data-field]')].filter(el => el.type !== 'checkbox').map(el => [el.dataset.field, el.value, el.type]);
+      const fields = [...v.root.querySelectorAll('[data-field]')].filter(el => el.type !== 'checkbox').map(el => [el.dataset.field, el.value, el.classList.contains('secret-visible')]);
       render();
-      for (const [name, value, type] of fields) { const el = v.root.querySelector(`[data-field="${name}"]`); if (el) { el.value = value; if (name === 'key') el.type = type; } }
+      for (const [name, value, visible] of fields) { const el = v.root.querySelector(`[data-field="${name}"]`); if (el) { el.value = value; if (name === 'key') el.classList.toggle('secret-visible', visible); } }
     }
   }
 
   // A key box: what is saved shows as a hint inside it (never the key), the eye shows what is typed, and the key is saved
   // once the box is left; clearing it is in the page's 「⋯」.
-  const keyBox = (label, saved, placeholder, info) => field(label, `<div class="key-box">${input('key', '', 'password', `autocomplete="off" spellcheck="false" placeholder="${esc(saved ? '已保存 •••• ' + saved + ' · 填新的会替换' : placeholder)}"`)}${btn('reveal-key', icon('eye'), 'key-eye', 'aria-label="显示密钥"')}</div>`, info);
+  const keyBox = (label, saved, placeholder, info) => field(label, `<div class="key-box">${textArea('key', '', `rows="1" class="api-secret" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="${esc(saved ? '已保存 •••• ' + saved + ' · 填新的会替换' : placeholder)}"`)}${btn('reveal-key', icon('eye'), 'key-eye', 'aria-label="显示密钥"')}</div>`, info);
   /** The 「⋯」 on an engine page. */
   const moreButton = () => btn('engine-more', icon('more'), 'round-button', 'aria-label="更多"');
   /** Which saved connection (name, address, key) the image engine uses: a row, when there is more than one. */
@@ -485,6 +485,7 @@ export function enginesApp(ctx) {
     if (engine !== 'gpt' || !['key', 'gpt-url'].includes(el.dataset.field)) return;
     resetGptModels(); updateGptModels();
   });
+  v.on('pointerdown', '[data-action=reveal-key]', (el, event) => event.preventDefault());
   v.on('change', '[data-field]', el => {
     if (el.dataset.field === 'key') { saveTypedKey(el); return; }
     if (el.dataset.field === 'image-name') return;
@@ -737,9 +738,9 @@ export function enginesApp(ctx) {
         if (await ctx.confirm(['nai', 'gpt'].includes(engine) ? '清除密钥？' : '清除全部密钥？', '之后使用这个引擎需要重新填写。')) { api.clearKey(engine); if (engine === 'nai') subscription = null; balances.delete(engine); render(); } break;
       case 'reveal-key': {
         const field = v.root.querySelector('[data-field=key]');
-        field.type = field.type === 'password' ? 'text' : 'password';
-        el.setAttribute('aria-label', field.type === 'password' ? '显示密钥' : '隐藏密钥');
-        el.setAttribute('aria-pressed', String(field.type !== 'password'));
+        const visible = field.classList.toggle('secret-visible');
+        el.setAttribute('aria-label', visible ? '隐藏密钥' : '显示密钥');
+        el.setAttribute('aria-pressed', String(visible));
         break;
       }
       case 'voice-folder-pick': {

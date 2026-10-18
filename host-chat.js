@@ -7,6 +7,7 @@ import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPrese
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs, photoCast, photoTags} from './core/draw.js';
 import {storyLines} from './core/moments.js';
+import {forumContext} from './core/forum.js';
 
 const BRING_KEY = 'sttts.bring';
 /** The note older versions wrote into the chat for a choice; the chat shows the pending choice by itself now. */
@@ -55,14 +56,19 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       // Voice switched off: nobody sends voice messages.
       if (s.general.voiceEnabled === false) for (const p of people) p.voice = false;
       if (!nudge) backend.emit('chat', {threadId, typing: true});
-      const recent = story(preset);
+      const recent = story(preset), forumSpace = s.chat.partition === 'card' ? {key: thread.space || backend.cardKey()} : null;
+      let forum = '';
+      if (s.promptRules?.['chat.publicForum']?.enabled !== false) {
+        try { forum = forumContext((await backend.apps.list('forum')).filter(p => inSpace(p, forumSpace)), user, s.chat.netNames); }
+        catch (error) { backend.reportDiagnostic?.('聊天 · 论坛读取', error, 'warn'); }
+      }
       // 世界书: scanned over who is in the chat, the recent story and the chat itself, as the story's own request would be.
       const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
-        texts: [people.map(p => p.name).join('、'), ...recent.map(r => `${r.name}: ${r.text}`), ...thread.messages.slice(-preset.history).map(m => messageLine(m, user))]});
+        texts: [forum, people.map(p => p.name).join('、'), ...recent.map(r => `${r.name}: ${r.text}`), ...thread.messages.slice(-preset.history).map(m => messageLine(m, user))]});
       // 记忆: the written-up older chat, and older messages that match the latest ones.
       const query = thread.messages.filter(m => m.kind !== 'system').slice(-6).map(m => messageLine(m, user)).join('\n');
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
-      const prompt = buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}});
+      const prompt = buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}});
       const answer = cleanTagged(await backend.generateText(ctx, {prompt, trimNames: false}), preset.cleanTags);
       // 「[不发]」 (also as 「名字：[不发]」) is a no, not a message.
       const text = nudge ? answer.split('\n').filter(line => !/\[不发\]/.test(line)).join('\n') : answer;

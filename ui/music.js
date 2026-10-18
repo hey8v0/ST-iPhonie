@@ -159,7 +159,7 @@ export function musicApp(ctx) {
   v.on('input', '[data-music-seek]', el => { const p = v.root.querySelector('[data-music-pos]'); if (p) p.textContent = clock(Number(el.value)); });
   v.on('change', '[data-music-volume]', el => { api.saveMusic({volume: Number(el.value) / 100}); renderSettings(); });
   v.on('change', '[data-source-on]', el => { const list = structuredClone(state().sources); list[Number(el.dataset.sourceOn)].enabled = el.checked; try { saveSources(list); } catch (error) { ctx.notify(error.message, {error: true}); renderSettings(); } });
-  v.on('change', '[data-field=rule]', el => { api.saveMusic({rule: el.value || DEFAULT_BGM_RULE}); ctx.notify('点歌规则保存好了'); });
+  v.on('change', '[data-field=rule]', el => { api.saveMusic({rule: el.value || DEFAULT_BGM_RULE}); const note = el.closest('details')?.querySelector('.fold-note'); if (note) note.textContent = state().rule === DEFAULT_BGM_RULE ? '默认' : '改过'; ctx.notify('点歌规则保存好了'); });
   v.on('change', '[data-field=duck],[data-field=share]', el => api.saveMusic({[el.dataset.field]: el.checked}));
   v.on('click', '[data-action]', async el => {
     const i = Number(el.dataset.i);

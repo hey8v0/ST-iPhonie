@@ -17,6 +17,8 @@ const tagName = value => String(value ?? '').replace(/[<>/\s]/g, '').slice(0, 40
 const PAIR = /…|\.\.\./;
 function skipEntry(value) {
   const t = String(value ?? '').trim();
+  const comment = /^<!--\s*([^<>]*?)\s*-->$/.exec(t) || /^!--\s*(.*?)\s*--$/.exec(t);
+  if (comment?.[1]) return `<!--${comment[1].slice(0, 40)}-->`;
   if (!PAIR.test(t)) return tagName(t);
   const [open, close] = t.split(PAIR).map(x => x.trim().slice(0, 40));
   return open && close ? `${open}…${close}` : '';
@@ -39,6 +41,20 @@ export function normalizeNarration(value) {
 export const NARRATION_RATES = RATES;
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Only consume a following, explicitly closed HTML block; never infer that a comment owns the rest of the reply. */
+function followingPanelEnd(text, start) {
+  let at = start;
+  for (;;) {
+    const match = /^\s*<([a-z][\w:-]*)\b[^>]*>/i.exec(text.slice(at));
+    if (!match || !/^(?:div|details|section|article|aside|table|ul|ol|dl|pre|form|fieldset|figure|style|script)$/i.test(match[1]) || /\/\s*>$/.test(match[0])) return at;
+    const tag = escapeRe(match[1]), tokens = new RegExp(`<(\\/?)${tag}\\b[^>]*>`, 'gi');
+    tokens.lastIndex = at + match[0].length;let depth = 1, end = 0;
+    for (let m; (m = tokens.exec(text));) { depth += m[1] ? -1 : /\/\s*>$/.test(m[0]) ? 0 : 1;if (!depth) { end = tokens.lastIndex;break; } }
+    if (!end) return at;
+    at = end;
+    if (!/^(?:style|script)$/i.test(match[1])) return at;
+  }
+}
 /** The parts of a reply not read: [start, end) ranges. */
 export function skippedRanges(raw, skip = NARRATION_SKIP) {
   const text = String(raw ?? ''), out = [];
@@ -52,7 +68,16 @@ export function skippedRanges(raw, skip = NARRATION_SKIP) {
   add(/\[([A-Za-z][\w-]*)_START\][\s\S]*?(?:\[\1_END\]|$)/g);
   // Thinking and the listed tags: to their end, or to the end of the reply when it was never closed; 「开头…结尾」
   // from its opening words to its closing ones.
-  for (const tag of ['think', 'thinking', ...cleanSkip(skip)]) {
+  for (const tag of ['think', 'thinking', 'style', 'script', ...cleanSkip(skip)]) {
+    const marker = /^<!--(.*?)-->$/.exec(tag);
+    if (marker) {
+      const name = escapeRe(marker[1]), open = new RegExp(`<!--\\s*${name}\\s*-->`, 'gi'), close = new RegExp(`<!--\\s*(?:/\\s*${name}|${name}\\s*(?:结束|END)|(?:结束|END)\\s*${name})\\s*-->`, 'gi');
+      for (const m of text.matchAll(open)) {
+        close.lastIndex = m.index + m[0].length;const end = close.exec(text);
+        out.push([m.index, end ? close.lastIndex : followingPanelEnd(text, m.index + m[0].length)]);
+      }
+      continue;
+    }
     if (tag.includes('…')) { const [open, close] = tag.split('…').map(escapeRe); add(new RegExp(`${open}[\\s\\S]*?(?:${close}|$)`, 'gi')); continue; }
     const t = escapeRe(tag); add(new RegExp(`<${t}(?=[\\s>/])[^>]*>[\\s\\S]*?(?:<\\/${t}\\s*>|$)`, 'gi'));
   }

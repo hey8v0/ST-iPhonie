@@ -62,7 +62,7 @@ export function createStoryTools({doc = document, hidden, message, valid, wave, 
    if (hidden() || !message(Number(mes.getAttribute('mesid')))) { old?.remove(); continue; }
    if (old) continue;
    const bar = mes.querySelector('.mes_buttons'); if (!bar) continue;
-   const button = doc.createElement('button'); button.type = 'button'; button.className = 'mes_button sttts-tools-entry fa-solid fa-sliders'; button.dataset.stttsTools = '';
+   const button = doc.createElement('button'); button.type = 'button'; button.className = 'mes_button sttts-tools-entry'; button.dataset.stttsTools = ''; button.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="var(--SmartThemeBlurTintColor,#242424)"/><circle cx="15" cy="12" r="2" fill="var(--SmartThemeBlurTintColor,#242424)"/><circle cx="9" cy="18" r="2" fill="var(--SmartThemeBlurTintColor,#242424)"/></svg>';
    button.title = '小手机工具'; button.setAttribute('aria-label', '小手机工具'); button.setAttribute('aria-haspopup', 'menu'); bar.prepend(button);
   }
  }

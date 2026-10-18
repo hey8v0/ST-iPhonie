@@ -28,6 +28,11 @@ export function postLines(post, user, max = 30, label = name => who(name, user))
 /** How someone shows on the board: the user's 网名 for 'me', a character's 网名, or the name itself. */
 export const screenName = (handles = {}, user = '我') => name => name === 'me' ? handles.me || user : handles[name] || name;
 
+/** Bounded public feed for phone replies; callers apply the chat's card partition before passing posts. */
+export function forumContext(posts, user = '我', handles = {}) {
+  const label = screenName(handles, user);
+  return (Array.isArray(posts) ? posts : []).slice(0, 12).map(p => postLines({...p, title: clip(p.title, 60), text: clip(p.text, 900), replies: (p.replies || []).slice(-6).map(r => ({...r, text: clip(r.text, 300)}))}, user, 6, label)).join('\n\n').slice(0, 6000);
+}
 /**
  * The request for 论坛, with the chat preset's rules used in 论坛. mode 'posts': new posts and the 热搜;
  * 'react': replies to the user's new post; 'reply': answers to the user's reply. people: [{name, persona, card}].
