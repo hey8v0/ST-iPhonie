@@ -52,28 +52,31 @@ export const steady = (last, point, streamline) => !last ? point : {x: last.x + 
 /** A layer's settings, checked (from a saved work or a change). */
 function layerProps(l, i = 0) {
   return {name: String(l.name || `图层 ${i + 1}`).slice(0, 40), opacity: Number.isFinite(l.opacity) ? clamp(l.opacity, 0, 1) : 1, visible: l.visible !== false,
-    blend: BLEND_IDS.includes(l.blend) ? l.blend : 'source-over', clip: l.clip === true, alphaLock: l.alphaLock === true, locked: l.locked === true, reference: l.reference === true};
+    blend: BLEND_IDS.includes(l.blend) ? l.blend : 'source-over', clip: l.clip === true, alphaLock: l.alphaLock === true, locked: l.locked === true, reference: l.reference === true, group: typeof l.group === 'string' ? l.group.slice(0,80) : ''};
 }
 /**
  * A picture: {width, height, background, showBackground, layers: [{id, canvas, g, name, opacity, visible, blend, clip,
  * alphaLock, locked, reference}] (bottom first), active (a layer id)}. From saved layers (with an image) when given.
  */
-export function createPicture(doc, {width, height, background = '#ffffff', showBackground = true, layers = null, active = ''}) {
-  const pic = {doc, width, height, background, showBackground, layers: [], active: '', history: [], future: [], stroke: null, changed: 0, temps: []};
+export function createPicture(doc, {width, height, background = '#ffffff', showBackground = true, layers = null, active = '', groups = []}) {
+  const pic = {doc, width, height, background, showBackground, groups: (Array.isArray(groups)?groups:[]).filter(g=>g&&typeof g.id==='string').map(g=>({id:g.id.slice(0,80),name:String(g.name||'新建组').slice(0,40),collapsed:g.collapsed===true,visible:g.visible!==false})), layers: [], active: '', history: [], future: [], stroke: null, changed: 0, temps: []};
   pic.buffer = canvasOf(doc, width, height);
   for (const [i, l] of (layers || [{name: '图层 1'}]).entries()) {
     const {canvas, g} = canvasOf(doc, width, height);
     if (l.image && g) g.drawImage(l.image, 0, 0);
     pic.layers.push({id: l.id || newId(), canvas, g, ...layerProps(l, i)});
   }
+  for(const l of pic.layers)if(!pic.groups.some(g=>g.id===l.group))l.group='';
   pic.active = pic.layers.some(l => l.id === active) ? active : pic.layers.at(-1).id;
   return pic;
 }
 export const activeLayer = pic => pic.layers.find(l => l.id === pic.active) || pic.layers.at(-1);
 /** The settings of a layer, to keep. */
-export const layerInfo = l => Object.fromEntries(['id', ...PROPS].map(k => [k, l[k]]));
+export const layerInfo = l => ({...Object.fromEntries(['id', ...PROPS].map(k => [k, l[k]])),...(l.group?{group:l.group}:{})});
 const MAX_PIXELS = 30e6;
 function remember(pic, step) {
+  // Keep properties independent of live layers; later grouping/edits must not rewrite an older redo step.
+  if(step.kind==='layer')step.layer={...step.layer};
   pic.history.push(step); pic.future = []; pic.changed++;
   // Not more than so many pixels kept for undo (a few strokes over the whole picture take a lot).
   let total = pic.history.reduce((n, s) => n + (s.pixels || 0), 0);
@@ -179,6 +182,7 @@ export function endStroke(pic, {cancel = false} = {}) {
 
 // ---------- undo ----------
 function restore(pic, step, which) {
+  if (step.kind === 'stack') { const state=step[which];pic.layers=state.layers.map(l=>({...l}));pic.groups=state.groups.map(g=>({...g}));pic.active=state.active;return; }
   if (step.kind === 'group') { for (const s of which === 'before' ? [...step.steps].reverse() : step.steps) restore(pic, s, which); return; }
   if (step.kind === 'pixels') { pic.layers.find(l => l.id === step.layer)?.g?.putImageData(step[which], step.x, step.y); return; }
   if (step.kind === 'props') { const l = pic.layers.find(x => x.id === step.layer); if (l) Object.assign(l, step[which]); return; }
@@ -186,7 +190,7 @@ function restore(pic, step, which) {
     // A layer added (there 'after') or taken away (there 'before').
     const there = which === 'after' ? step.added : !step.added;
     const at = pic.layers.findIndex(l => l.id === step.layer.id);
-    if (there && at < 0) pic.layers.splice(Math.min(step.index, pic.layers.length), 0, step.layer);
+    if (there && at < 0) pic.layers.splice(Math.min(step.index, pic.layers.length), 0, {...step.layer});
     if (!there && at >= 0 && pic.layers.length > 1) pic.layers.splice(at, 1);
     if (!pic.layers.some(l => l.id === pic.active)) pic.active = pic.layers[Math.min(step.index, pic.layers.length - 1)].id;
     else if (there) pic.active = step.layer.id;
@@ -200,13 +204,14 @@ export function redo(pic) { const step = pic.future.pop(); if (!step) return fal
 // ---------- layers ----------
 function insertLayer(pic, at, props = {}) {
   const {canvas, g} = canvasOf(pic.doc, pic.width, pic.height);
-  const layer = {id: newId(), canvas, g, ...layerProps({name: `图层 ${pic.layers.length + 1}`, ...props})};
+  const layer = {id: newId(), canvas, g, ...layerProps({name: `图层 ${pic.layers.length + 1}`, group: activeLayer(pic)?.group || '', ...props})};
   pic.layers.splice(at, 0, layer); pic.active = layer.id;
   return layer;
 }
 /** A new empty layer above the one in use. */
 export function addLayer(pic) {
   const at = pic.layers.findIndex(l => l.id === pic.active) + 1, layer = insertLayer(pic, at);
+  const parent=pic.groups.find(g=>g.id===layer.group);if(parent)parent.collapsed=false;
   remember(pic, {kind: 'layer', layer, index: at, added: true});
   return layer;
 }
@@ -234,9 +239,9 @@ export function moveLayer(pic, id, by) { const at = pic.layers.findIndex(l => l.
 export function moveLayerTo(pic, id, to) {
   const at = pic.layers.findIndex(l => l.id === id);
   if (at < 0 || to < 0 || to >= pic.layers.length || to === at) return false;
-  const before = pic.layers.map(l => l.id), [layer] = pic.layers.splice(at, 1);
-  pic.layers.splice(to, 0, layer);
-  remember(pic, {kind: 'order', before, after: pic.layers.map(l => l.id)});
+  const before=stackState(pic), target=pic.layers[to], [layer]=pic.layers.splice(at,1);
+  layer.group=target.group||'';pic.layers.splice(to,0,layer);
+  pic.groups=pic.groups.filter(g=>pic.layers.some(l=>l.group===g.id));keepStack(pic,before);
   return true;
 }
 /** Changes a layer's settings (name, opacity, blend, clip, alphaLock, locked, reference, visible), undoable. */
@@ -268,18 +273,44 @@ export function fillLayer(pic, id, color) {
   remember(pic, pixelStep(pic, layer, [0, 0, pic.width, pic.height], before));
   return true;
 }
-/** Puts a layer onto the one under it (as it is seen: its blend, opacity and 剪辑蒙版), and takes it away. */
-export function mergeDown(pic, id) {
-  const at = pic.layers.findIndex(l => l.id === id), top = pic.layers[at], below = pic.layers[at - 1];
-  if (!top || !below?.g || below.locked) return false;
-  const before = pixelsOf(pic, below), g = below.g;
-  g.save(); g.globalAlpha = top.opacity; g.globalCompositeOperation = top.blend;
-  g.drawImage(top.clip ? clipped(pic, top.canvas, below.canvas, 1) : top.canvas, 0, 0); g.restore();
-  const paint = pixelStep(pic, below, [0, 0, pic.width, pic.height], before);
-  pic.layers.splice(at, 1); pic.active = below.id;
-  remember(pic, {kind: 'group', steps: [paint, {kind: 'layer', layer: top, index: at, added: false}], pixels: paint.pixels + pic.width * pic.height});
-  return true;
+/** Structural edits keep the original canvases untouched, so one undo restores pixels, settings and selection. */
+const stackState = pic => ({layers:pic.layers.map(l=>({...l})),groups:pic.groups.map(g=>({...g})),active:pic.active});
+function keepStack(pic,before,pixels=0){remember(pic,{kind:'stack',before,after:stackState(pic),pixels});}
+export function groupLayers(pic,ids,name='新建组') {
+  if(pic.stroke||pic.float)return null;
+  const chosen=pic.layers.filter(l=>ids.includes(l.id));if(chosen.length<2)return null;
+  const before=stackState(pic),id='G'+newId(),top=pic.layers.indexOf(chosen.at(-1)),parents=new Set(chosen.map(l=>l.group).filter(Boolean));
+  let at=pic.layers.slice(0,top+1).filter(l=>!ids.includes(l.id)).length;pic.layers=pic.layers.filter(l=>!ids.includes(l.id));
+  for(let i=0;i<pic.layers.length;i++)if(parents.has(pic.layers[i].group))at=Math.max(at,i+1);
+  chosen.forEach(l=>l.group=id);pic.layers.splice(at,0,...chosen);
+  pic.groups=pic.groups.filter(g=>pic.layers.some(l=>l.group===g.id));pic.groups.push({id,name:String(name).slice(0,40),collapsed:false,visible:true});
+  keepStack(pic,before);return id;
 }
+export function setLayerGroup(pic,id,patch) {
+  const group=pic.groups.find(g=>g.id===id);if(!group)return false;const before=stackState(pic);
+  if(typeof patch.name==='string'&&patch.name.trim())group.name=patch.name.trim().slice(0,40);
+  for(const k of ['visible','collapsed'])if(typeof patch[k]==='boolean')group[k]=patch[k];
+  if(Object.keys(patch).every(k=>k==='collapsed'))pic.changed++;else keepStack(pic,before);return true;
+}
+export function ungroupLayers(pic,id) {
+  if(!pic.groups.some(g=>g.id===id))return false;const before=stackState(pic);
+  for(const l of pic.layers)if(l.group===id)l.group='';pic.groups=pic.groups.filter(g=>g.id!==id);keepStack(pic,before);return true;
+}
+/** Merge a contiguous range in one transaction. Opacity and clipping are baked once, into a fresh canvas. */
+export function mergeLayers(pic,ids) {
+  if(pic.stroke||pic.float)return false;
+  const chosen=pic.layers.filter(l=>ids.includes(l.id));if(chosen.length<2||chosen.some(l=>l.locked||!l.g))return false;
+  const at=pic.layers.indexOf(chosen[0]);if(pic.layers.indexOf(chosen.at(-1))-at!==chosen.length-1)return false;
+  const before=stackState(pic),base=chosen[0],out=canvasOf(pic.doc,pic.width,pic.height);if(!out.g)return false;
+  const group=chosen.every(l=>l.group===base.group)?base.group:'';
+  // A retained parent still controls visibility. Across parents, bake their visibility into the result.
+  const groups=group?pic.groups.map(g=>g.id===group?{...g,visible:true}:g):pic.groups;
+  compose({...pic,layers:chosen,groups,showBackground:false,stroke:null},out.g);
+  const merged={id:base.id,...out,...layerProps({...layerInfo(base),opacity:1,blend:'source-over',clip:base.clip,alphaLock:false,visible:chosen.some(l=>l.visible&&!groups.some(g=>g.id===l.group&&!g.visible)),group})};
+  pic.layers.splice(at,chosen.length,merged);pic.active=merged.id;pic.groups=pic.groups.filter(g=>pic.layers.some(l=>l.group===g.id));
+  keepStack(pic,before,pic.width*pic.height*(chosen.length+1));return true;
+}
+export function mergeDown(pic,id) {const at=pic.layers.findIndex(l=>l.id===id);return at>0&&mergeLayers(pic,[pic.layers[at-1].id,id]);}
 
 // ---------- seeing it ----------
 /** What a layer shows now: itself, or itself with the stroke being drawn on it. */
@@ -319,9 +350,9 @@ export function compose(pic, g) {
   for (let i = 0; i < list.length; i++) {
     const base = list[i];
     const group = [];
-    for (let j = i + 1; j < list.length && list[j].clip; j++) group.push(list[j]);
+    for (let j = i + 1; j < list.length && list[j].clip && list[j].group === base.group; j++) group.push(list[j]);
     i += group.length;
-    if (!base.visible) continue;
+    if (!base.visible || pic.groups?.some(g=>g.id===base.group&&!g.visible)) continue;
     const shown = group.filter(l => l.visible);
     let picture = content(pic, base, 0);
     if (shown.length) {

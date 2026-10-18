@@ -79,7 +79,7 @@ export function paintApp(ctx) {
     if (!w) { ctx.notify('这幅作品已经不在了'); return renderGallery(); }
     const layers = await Promise.all((w.layers || []).map(async l => ({...l, image: l.blob ? await ctx.win.createImageBitmap(l.blob).catch(() => null) : null})));
     work = {id: w.id, name: w.name, createdAt: w.createdAt || w.updatedAt};
-    openEditor(createPicture(ctx.doc, {width: w.width, height: w.height, background: w.background, showBackground: w.showBackground !== false, layers: layers.length ? layers : null, active: w.active}));
+    openEditor(createPicture(ctx.doc, {width: w.width, height: w.height, background: w.background, showBackground: w.showBackground !== false, layers: layers.length ? layers : null, active: w.active, groups: w.groups || []}));
     savedAt = pic.changed;
   }
   async function workMenu(id) {
@@ -101,11 +101,12 @@ export function paintApp(ctx) {
     if (!pic || !work || savedAt === pic.changed || pic.float) return saving || Promise.resolve();
     const p = pic, at = p.changed, w = work;
     saving = (saving || Promise.resolve()).then(async () => {
+      const groups = (p.groups || []).map(g=>({...g}));
       const layers = await Promise.all(p.layers.map(async l => ({...layerInfo(l), blob: await blobOf(l.canvas)})));
       const flat = flatten(p), s = Math.min(1, 360 / Math.max(p.width, p.height)), t = ctx.doc.createElement('canvas');
       t.width = Math.round(p.width * s); t.height = Math.round(p.height * s);
       t.getContext('2d')?.drawImage(flat, 0, 0, t.width, t.height);
-      await store.put({id: w.id, name: w.name, width: p.width, height: p.height, background: p.background, showBackground: p.showBackground, active: p.active, createdAt: w.createdAt, updatedAt: Date.now(), thumb: await blobOf(t), layers});
+      await store.put({id: w.id, name: w.name, width: p.width, height: p.height, background: p.background, showBackground: p.showBackground, active: p.active, createdAt: w.createdAt, updatedAt: Date.now(), thumb: await blobOf(t), layers, groups});
       if (pic === p) savedAt = at;
     }).catch(error => ctx.notify('作品没存上：' + error.message, {error: true})).finally(() => { saving = null; });
     return saving;
