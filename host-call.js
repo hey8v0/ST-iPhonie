@@ -148,7 +148,7 @@ export function createCallHost({context, settings, backend, notice, ringing = ()
     const s = settings(), preset = activeChatPreset(s.chat), user = userName(), thread = currentDm(await backend.threads(), c.name);
     const history = thread ? (await backend.chats.get(thread.id)).messages.filter(m => m.kind !== 'system' && m.kind !== 'call').slice(-CALL_LIMITS.history) : [];
     const voiceFormat = backend.voiceFormat(), story = storyLines(ctx.chat || [], preset, user);
-    const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), persona: userPersona(), characters: c.contact.persona || c.contact.card || '',
+    const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: c.contact.persona || c.contact.card || '',
       texts: [c.name, c.reason, ...story.map(r => `${r.name}: ${r.text}`), ...history.map(m => messageLine(m, user)), ...c.lines.map(l => `${l.from === 'me' ? user : c.name}: ${l.translation || l.text}`)]});
     // 记忆: looked up on the call's first turn (with why the call was made and the last chat) and kept for the call.
     if (c.memory === undefined && memory && thread) {

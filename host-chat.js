@@ -57,7 +57,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (!nudge) backend.emit('chat', {threadId, typing: true});
       const recent = story(preset);
       // 世界书: scanned over who is in the chat, the recent story and the chat itself, as the story's own request would be.
-      const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
+      const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
         texts: [people.map(p => p.name).join('、'), ...recent.map(r => `${r.name}: ${r.text}`), ...thread.messages.slice(-preset.history).map(m => messageLine(m, user))]});
       // 记忆: the written-up older chat, and older messages that match the latest ones.
       const query = thread.messages.filter(m => m.kind !== 'system').slice(-6).map(m => messageLine(m, user)).join('\n');

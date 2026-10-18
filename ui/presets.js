@@ -88,7 +88,7 @@ export function presetsApp(ctx) {
   /** The 世界书 line: how much is left out (picked in a sheet), and the tags cleaned away (status bars). */
   function loreFields(p) {
     const books = (p.loreSkipBooks || []).length, entries = (p.loreSkipEntries || []).length;
-    return `<div class="setting-row"><span class="row-text"><strong>手机读哪些世界书</strong><small>${books || entries ? `不读 ${books} 本、${entries} 条` : '现在开着的都读'}</small></span>${btn('lore-pick', '选择', 'chip-button')}</div>
+    return `<div class="setting-row"><span class="row-text"><strong>手机读哪些世界书</strong><small>${books || entries ? `不读 ${books} 本、${entries} 条` : '按触发条件读取'}</small></span>${btn('lore-pick', '选择', 'chip-button')}</div>
       ${field('清洗标签', input('cleanTags', Array.isArray(p.cleanTags) ? p.cleanTags.join(', ') : String(p.cleanTags ?? ''), 'text', 'placeholder="比如 status, 状态栏" autocomplete="off"'), '写标签名，逗号隔开。世界书里用这些标签包住的内容（比如 <status>…</status>）不给手机，手机回复里要是写了也会去掉。')}`;
   }
   /** A sheet listing the books turned on now and their entries: switch one off and the phone leaves it out. */
@@ -115,7 +115,7 @@ export function presetsApp(ctx) {
       d.body.querySelector('[data-lore-list]').scrollTop = keep;
     };
     d.body.innerHTML = `<div class="vibe-search">${icon('search')}<input type="search" data-lore-search placeholder="搜索书名、条目标题、关键词" aria-label="搜索世界书"></div>
-      <p class="hint" style="padding:6px 2px">列出的是现在开着的世界书（全局、角色卡、聊天、人设绑定的）和里面启用的条目。关掉的手机就不读，正文照常用。改完点「保存预设」才生效。</p>
+      <p class="hint" style="padding:6px 2px">列出的是现在开着的世界书（全局、角色卡、聊天、人设绑定的）和里面启用的条目。勾选表示允许读取，仍按常驻、关键词、扫描深度和预算触发；不会强制全文载入。关掉的手机就不读，正文照常用。改完点「保存预设」才生效。</p>
       <div class="lore-list" data-lore-list></div>`;
     paint();
     d.body.addEventListener('input', e => { if (e.target.matches('[data-lore-search]')) { query = e.target.value.trim().toLowerCase(); paint(); } });
@@ -200,8 +200,8 @@ export function presetsApp(ctx) {
           `${field('读取最近的正文', input('context', p.context, 'number', 'min="0" max="100" step="1"'), '回消息时参考最近几条正文，0 表示不看剧情。')}${field('读取聊天记录', input('history', p.history, 'number', 'min="2" max="500" step="1"'), '回消息时带上最近多少条手机聊天。')}
           ${field('每条正文最多（字）', input('storyEach', p.storyEach ?? 4000, 'number', 'min="0" step="500"'), '一条正文太长时只取前面这么多字。0 表示不限制。中文大约一个字一个 token。')}${field('正文一共最多（字）', input('storyTotal', p.storyTotal ?? 20000, 'number', 'min="0" step="1000"'), '最近的正文优先，加起来超过这么多字就不再往前读。0 表示不限制。')}
           ${field('每次刷新朋友圈最多几条', input('posts', p.posts ?? 2, 'number', 'min="1" max="5" step="1"'), '在动态里刷新时，由模型挑 1 到这么多个人发动态。')}`)
-        + fold('preset-lore', '世界书', p.lore === false ? '不带' : books || entries ? `不读 ${books} 本、${entries} 条` : '开着的都读',
-          `${toggle('lore', '带上世界书', p.lore !== false, '聊天、电话和朋友圈也带上酒馆的世界书：和写正文时一样，常驻的条目，以及在名字、最近的正文和聊天里触发关键词的条目（当前角色卡的世界书、全局和聊天绑定的世界书都算）。人设写在世界书里的话要打开。\n\n条目多的话会多占一些上下文。')}${p.lore !== false ? loreFields(p) + field('世界书最多（字）', input('loreMax', p.loreMax ?? 30000, 'number', 'min="0" step="1000"'), '手机读世界书时最多放这么多字，只放整条。0 表示插件不另外限制，只按酒馆「世界书」设置里的预算（占上下文的百分比）来。手机的每次请求（聊天、朋友圈、论坛、查手机、电话）都会带上世界书，放得越多越费 token，也越慢。') : ''}`)
+        + fold('preset-lore', '世界书', p.lore === false ? '不带' : books || entries ? `不读 ${books} 本、${entries} 条` : '按触发条件读取',
+          `${toggle('lore', '带上世界书', p.lore !== false, '聊天、电话、朋友圈、论坛和查手机按触发条件带上酒馆的世界书：和写正文时一样，常驻的条目，以及在名字、最近的正文和聊天里触发关键词的条目（当前角色卡的世界书、全局和聊天绑定的世界书都算）。人设写在世界书里的话要打开。\n\n条目多的话会多占一些上下文。')}${p.lore !== false ? loreFields(p) + field('世界书最多（字）', input('loreMax', p.loreMax ?? 30000, 'number', 'min="0" step="1000"'), '手机读世界书时最多放这么多字，只放整条。0 表示插件不另外限制，只按酒馆「世界书」设置里的预算（占上下文的百分比）来。手机的每次请求（聊天、朋友圈、论坛、查手机、电话）都按这些条件读取世界书，放得越多越费 token，也越慢。') : ''}`)
         + memoryFields(p)
         + fold('preset-bring', '带进剧情', '', `${field('带进剧情的写法', textArea('bring', p.bring, 'class="code" rows="4"'), '选中的聊天消息会按这段文字注入下一次正文，只用一次。需要包含 {{聊天记录}}；也可以用 {{用户}}、{{对象}}。')}${injection(p.injection)}`, '带进剧情的文字插在正文请求的哪里。深度与身份仅在聊天内插入时生效。')
       : (draw ? '' : fold('preset-marks', '心声和电话', marked ? `多认 ${marked} 种写法` : '看情绪字段', marksFields(p)))

@@ -1,7 +1,7 @@
 // 论坛 and 查手机, tavern side. Like 朋友圈, they are generated apart from the story with the tavern's connected model (or
 // the phone's own text model) and nothing is written into the story. One model request per app at a time.
 import {currentDm} from './core/chats.js';
-import {buildForumRequest, parseForum} from './core/forum.js';
+import {buildForumRequest, parseForum, postLines} from './core/forum.js';
 import {buildPeekRequest, parsePeek, peekId, mergePeek} from './core/peek.js';
 import {storyLines} from './core/moments.js';
 import {inSpace, activeChatPreset, cleanTagged} from './core/chat.js';
@@ -21,7 +21,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       .replaceAll('{{char}}', name).replaceAll('{{user}}', userName()).slice(0, 1500);
   }
   const people = () => backend.crowd().slice(0, PEOPLE).map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
-  const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
+  const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
     texts: [crowd.map(p => p.name).join('、'), ...story.map(r => `${r.name}: ${r.text}`), ...texts]});
   async function ask(ctx, prompt, preset) {
     return cleanTagged(String(await backend.generateText(ctx, {prompt, trimNames: false}) || ''), preset.cleanTags);
@@ -67,7 +67,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       const post = await backend.apps.get(postId);
       if (!post) throw Error('这个帖子已经不在了');
       const story = storyLines(ctx.chat, preset, user);
-      const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'react', people: crowd, story, user, userPersona: userPersona(), post, lore: await lore(preset, crowd, story, [post.title, post.text])});
+      const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'react', people: crowd, story, user, userPersona: userPersona(), post, lore: await lore(preset, crowd, story, [postLines(post, user)])});
       const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'react', handles});
       await keepNames(found.names, crowd);
       if (!found.replies.length) throw Error('这次没有人回复，可以再试一次');
@@ -81,7 +81,9 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       const post = await backend.apps.get(postId), mine = post?.replies.find(r => r.id === replyId);
       if (!post || !mine) throw Error('这条回复已经不在了');
       const story = storyLines(ctx.chat, preset, user);
-      const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'reply', people: crowd, story, user, userPersona: userPersona(), post, reply: mine, lore: await lore(preset, crowd, story, [post.title, mine.text])});
+      // Keep the topic in one scan unit: even a shallow scan needs the original question and recent discussion.
+      const discussion = postLines(post, user) + `\n本次回复${mine.to ? '（回复 ' + mine.to + '）' : ''}：${mine.text}`;
+      const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'reply', people: crowd, story, user, userPersona: userPersona(), post, reply: mine, lore: await lore(preset, crowd, story, [discussion])});
       const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'reply', handles});
       await keepNames(found.names, crowd);
       if (!found.replies.length) throw Error('这次没有人接话，可以再试一次');

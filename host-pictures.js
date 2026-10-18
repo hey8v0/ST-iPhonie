@@ -121,7 +121,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   async function storyLore(prior, source) {
     const preset = activeChatPreset(settings().chat);
     if (preset.lore === false) return '';
-    return worldInfoFor(context, {...loreOptions(preset), persona: String(context()?.powerUserSettings?.persona_description || '').slice(0, 1500),
+    return worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: String(context()?.powerUserSettings?.persona_description || '').slice(0, 1500),
       texts: [...prior.map(m => `${m.name}: ${m.text}`), plainStory(withoutPictures(source))]});
   }
   /** The picture planner's request for one reply, with the story's 世界书 and the card's 名单. */

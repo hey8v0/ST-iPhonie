@@ -14,11 +14,12 @@ const LORE_MAX = 30000;
  * cleanTags: tags whose blocks are taken out of the text (a status bar the story asks for, which the phone must not copy).
  * Returns '' when the tavern has no World Info for this (or is older than 1.12.14).
  */
-export async function worldInfoFor(context, {texts = [], persona = '', characters = '', skipBooks = [], skipEntries = [], cleanTags = [], max: most = LORE_MAX, load = () => import('/scripts/world-info.js')} = {}) {
+export async function worldInfoFor(context, {texts = [], persona = '', characters = '', skipBooks = [], skipEntries = [], cleanTags = [], max: most = LORE_MAX, report = () => {}, load = () => import('/scripts/world-info.js')} = {}) {
   const limit = most || Infinity;
-  const ctx = context();
-  if (typeof ctx?.getWorldInfoPrompt !== 'function') return '';
+  const note = (kind, error, level = 'error') => { try { report('世界书读取', {kind, message: error?.message || String(error), stack: error?.stack}, level); } catch {} };
   try {
+    const ctx = context();
+    if (typeof ctx?.getWorldInfoPrompt !== 'function') { note('接口不可用', '当前酒馆没有提供世界书扫描接口，本次未带入世界书', 'warn'); return ''; }
     const scan = texts.map(t => String(t || '').trim()).filter(Boolean).reverse(), max = Number(ctx.maxContext) || 8192;
     const global = {trigger: 'normal', personaDescription: persona, characterDescription: characters, characterPersonality: '', characterDepthPrompt: '', scenario: '', creatorNotes: ''};
     let parts = null;
@@ -30,7 +31,7 @@ export async function worldInfoFor(context, {texts = [], persona = '', character
         const r = await checkWorldInfo(scan, max, true, global);
         parts = [...(r?.allActivatedEntries || [])].filter(e => !skipBooks.includes(e?.world) && !skipEntries.includes(entryId(e?.world, e?.uid)))
           .map(e => typeof ctx.substituteParams === 'function' ? ctx.substituteParams(String(e?.content || '')) : e?.content);
-      } catch { parts = null; }
+      } catch (error) { note('条目筛选不可用，回退到酒馆已触发内容', error, 'warn'); parts = null; }
     }
     if (!parts) {
       const r = await ctx.getWorldInfoPrompt(scan, max, true, global);
@@ -48,7 +49,7 @@ export async function worldInfoFor(context, {texts = [], persona = '', character
       out.push(text); used += text.length + 2;
     }
     return out.join('\n\n');
-  } catch { return ''; }
+  } catch (error) { note('扫描失败，本次未带入世界书', error); return ''; }
 }
 
 /** How an entry is named in a preset's list of entries left out. */

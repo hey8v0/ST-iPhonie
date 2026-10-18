@@ -23,7 +23,7 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   const people = () => backend.crowd().slice(0, MOMENTS_LIMITS.people).map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
   const emit = extra => backend.emit('moments', {busy: !!busy, ...extra});
   /** 世界书 for these people: scanned over their names, the recent story and the posts in question. */
-  const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
+  const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
     texts: [crowd.map(p => p.name).join('、'), ...story.map(r => `${r.name}: ${r.text}`), ...texts]});
 
   /** One model request at a time; the phone shows it as busy. */
