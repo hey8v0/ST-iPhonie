@@ -1,4 +1,5 @@
 import '../core/compat.js';
+import {installHomeSwipe} from './home-swipe.js';
 import {findRoute} from '../core/routes.js';
 import {connectBackend} from './backend-client.js';
 import {glyph, icon, spark, wave} from './icons.js';
@@ -785,31 +786,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       }
     });
   }, {signal});
-  // A mouse drags the home screen sideways to change page (fingers swipe it natively); a drag is not also a tap.
-  {
-    const pagesEl = $('.home-pages');
-    let drag = null, dragged = 0;
-    pagesEl.addEventListener('pointerdown', e => { if (e.target.closest('.today-page[data-editing] .tw, .today-page input')) return; if (e.pointerType === 'mouse' && e.button === 0 && pagesEl.children.length > 1) drag = {id: e.pointerId, x: e.clientX, left: pagesEl.scrollLeft, moved: false}; }, {signal});
-    win.addEventListener('pointermove', e => {
-      if (!drag || e.pointerId !== drag.id) return;
-      const dx = e.clientX - drag.x;
-      if (!drag.moved && Math.abs(dx) < 6) return;
-      if (!drag.moved) { drag.moved = true; pagesEl.style.scrollSnapType = 'none'; pagesEl.style.scrollBehavior = 'auto'; }
-      pagesEl.scrollLeft = drag.left - dx;
-    }, {signal});
-    win.addEventListener('pointerup', e => {
-      const d = drag; drag = null;
-      if (!d?.moved) return;
-      const w = pagesEl.clientWidth || 1, dx = e.clientX - d.x;
-      let page = Math.round(d.left / w);
-      if (Math.abs(dx) > w * 0.15) page += dx < 0 ? 1 : -1;
-      page = Math.max(0, Math.min(pagesEl.children.length - 1, page));
-      pagesEl.style.scrollSnapType = ''; pagesEl.style.scrollBehavior = '';
-      pagesEl.scrollTo({left: page * w, behavior: 'smooth'});
-      dragged = Date.now();
-    }, {signal});
-    pagesEl.addEventListener('click', e => { if (Date.now() - dragged < 350) { e.stopPropagation(); e.preventDefault(); } }, {signal, capture: true});
-  }
+  // A drag pages the desktop without selecting its labels or dragging images.
+  installHomeSwipe($('.home-pages'),{signal});
   // How far 今天 is in (1: all of it): the wallpaper blurs and the dock and dots go, following the finger.
   $('.home-pages').addEventListener('scroll', e => {
     const w = e.target.clientWidth || 1, i = pageNow(), into = today ? Math.min(1, Math.max(0, 1 - e.target.scrollLeft / w)) : 0;

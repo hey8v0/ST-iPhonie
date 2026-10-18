@@ -9,16 +9,26 @@ const query=new URLSearchParams(location.search),session=query.get('session')||'
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let saved=null;try{saved=JSON.parse(win.localStorage.getItem(key)||'null');}catch{}
 let fullscreenTarget=null;
+let inputKind=win.matchMedia('(pointer:coarse)').matches?'touch':'keyboard',lastNonPad=inputKind,lastPadX=0,lastPadY=0,lastMousePoint=null;
 let s=restoreTide(saved),mode='title',disposed=false,raf=0,previous=0,lastDraw=0,lastSave=0,lastHud=0,steps=0,portrait=false,target=null,waypoints=[],targetId=null,blocked=0,dialogue=null,dialogueIndex=0,bookReturn='play',lastPage='letter',noticeTimer=0,saveFailed=false;
 const gamepad=createGamepadInput(win.navigator);
 const painter=createPainter(canvas),audio=tideAudio(win),keys=new Set(),stick={x:0,y:0,id:null},abort=new AbortController(),timers=new Set();
 const listen=(el,type,fn,options={})=>el.addEventListener(type,fn,{...options,signal:abort.signal});
 const later=(fn,ms)=>{const id=win.setTimeout(()=>{timers.delete(id);if(!disposed)fn();},ms);timers.add(id);return id;};
+function useInput(kind){
+ if(inputKind===kind&&doc.body.dataset.input===kind)return;
+ inputKind=kind;if(kind!=='gamepad')lastNonPad=kind;doc.body.dataset.input=kind;
+ const pad=kind==='gamepad',touch=kind==='touch';$('#interact small').textContent=pad?'A':'E';
+ $('.keyboard-hint').textContent=pad?'左摇杆 / 十字键 · 移动':'WASD / 方向键 · 移动　E · 交互';
+ canvas.setAttribute('aria-label',pad?'左摇杆或十字键移动，A 互动，X 海图，Y 手册，菜单键暂停':'用方向键或 WASD 移动，E 交互，J 打开手册，M 查看海图，Escape 暂停');
+ for(const button of doc.querySelectorAll('[data-control-label]')){const key=pad?button.dataset.gamepad:button.dataset.keyboard,label=button.dataset.controlLabel;button.querySelector('.control-key').textContent=key;button.title=touch?label:label+' · '+(key==='≡'?'菜单键':key);button.setAttribute('aria-label',button.title);}
+}
+useInput(inputKind);
 function resetInput(){keys.clear();stick.x=stick.y=0;stick.id=null;$('#joystick i').style.transform='';target=null;waypoints=[];targetId=null;blocked=0;}
 function notice(text){if(!text)return;$('#notice').textContent=text;$('#notice').classList.add('show');win.clearTimeout(noticeTimer);noticeTimer=win.setTimeout(()=>$('#notice').classList.remove('show'),3800);}
 function save(){if(mode==='title'&&!saved)return;try{win.localStorage.setItem(key,JSON.stringify({...s,savedAt:Date.now()}));saved=true;saveFailed=false;}catch{if(!saveFailed){saveFailed=true;notice('这次的进度暂时无法保存，请检查浏览器存储空间。');}}lastSave=performance.now();}
 function rotation(){const show=mode!=='title'&&mode==='play'&&win.matchMedia('(pointer:coarse)').matches&&win.innerHeight>win.innerWidth&&!portrait;$('#rotate').hidden=!show;if(show)resetInput();return show;}
-function updateHud(){const point=nearby(s),button=$('#interact');$('#objective').textContent=objective(s);$('#tide-name').textContent=tideName(s);$('#tide-level').style.width=(tideAt(s.clock)*100)+'%';button.disabled=!point;button.querySelector('span').textContent=point?.verb||'探索';button.setAttribute('aria-label',point?point.verb+' · '+point.label:'附近暂无可交互物件');button.title=point?.label||'';button.querySelector('small').textContent='E';}
+function updateHud(){const point=nearby(s),button=$('#interact');$('#objective').textContent=objective(s);$('#tide-name').textContent=tideName(s);$('#tide-level').style.width=(tideAt(s.clock)*100)+'%';button.disabled=!point;button.querySelector('span').textContent=point?.verb||'探索';button.setAttribute('aria-label',point?point.verb+' · '+point.label:'附近暂无可交互物件');button.title=point?.label||'';button.querySelector('small').textContent=inputKind==='gamepad'?'A':'E';}
 function showHud(on){$('.hud').hidden=$('.tide-dial').hidden=$('.keyboard-hint').hidden=$('#interact').hidden=!on;$('#joystick').style.visibility=on?'':'hidden';}
 function show(html,nextMode){resetInput();mode=nextMode;content.innerHTML=html;overlay.hidden=false;rotation();later(()=>content.querySelector('button')?.focus({preventScroll:true}),30);}
 function resume(){content.innerHTML='';overlay.hidden=true;mode='play';resetInput();rotation();updateHud();audio.start(s.sound);canvas.focus({preventScroll:true});}
@@ -51,7 +61,7 @@ listen(doc,'click',event=>{const b=event.target.closest('button');if(!b)return;
  else if(action==='confirm-new')start(true);else if(action==='exit')exit();else if(action==='fullscreen')fullscreen();else if(action==='pause')pause();else if(action==='resume')resume();else if(action==='map')map();else if(action==='journal')journal();else if(action==='close-overlay')closeOverlay();else if(action==='next')nextTalk();else if(action==='title')showTitle();else if(action==='sound'){s.sound=!s.sound;audio.toggle(s.sound);save();pause();}else if(action==='lens-clue')openPage('office','lens');else if(action==='ending-letter')openPage('delivered','ending');else if(action==='portrait'){portrait=true;rotation();}
 });
 listen($('#interact'),'click',act);
-listen(doc,'keydown',event=>{if(event.target.closest('input,textarea,select'))return;const k=event.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright',' ','escape'].includes(k))event.preventDefault();
+listen(doc,'keydown',event=>{if(event.target.closest('input,textarea,select'))return;useInput('keyboard');const k=event.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright',' ','escape'].includes(k))event.preventDefault();
  if(mode==='title'){if(k==='enter')start();return;}if(event.repeat&&['e','enter','j','m','escape'].includes(k))return;
  if(k==='escape'){if(mode==='play')pause();else if(mode==='pause')resume();else if(mode==='dialogue')nextTalk();else closeOverlay();return;}
  if(mode==='dialogue'&&(k==='enter'||k===' ')){event.preventDefault();nextTalk();return;}
@@ -62,13 +72,15 @@ listen(canvas,'pointerup',event=>{if(mode!=='play'||rotation()||event.button>0)r
 function joystick(event){if(stick.id!==event.pointerId)return;const r=$('#joystick').getBoundingClientRect(),dx=event.clientX-r.left-r.width/2,dy=event.clientY-r.top-r.height/2,length=Math.hypot(dx,dy),scale=Math.min(1,38/(length||1));stick.x=dx*scale/38;stick.y=dy*scale/38;$('#joystick i').style.transform=`translate(${dx*scale}px,${dy*scale}px)`;target=null;waypoints=[];targetId=null;}
 listen($('#joystick'),'pointerdown',event=>{if(mode!=='play'||rotation())return;event.preventDefault();stick.id=event.pointerId;$('#joystick').setPointerCapture(event.pointerId);joystick(event);});listen($('#joystick'),'pointermove',joystick);
 for(const type of ['pointerup','pointercancel','lostpointercapture'])listen($('#joystick'),type,event=>{if(stick.id!==event.pointerId)return;stick.id=null;stick.x=stick.y=0;$('#joystick i').style.transform='';});
+listen(doc,'pointerdown',e=>{if(e.pointerType==='mouse')lastMousePoint={x:e.clientX,y:e.clientY};useInput(e.pointerType==='touch'||e.target.closest('#joystick')?'touch':'mouse');},{capture:true});
+listen(doc,'pointermove',e=>{if(e.pointerType!=='mouse')return;const moved=e.movementX||e.movementY||!lastMousePoint||lastMousePoint.x!==e.clientX||lastMousePoint.y!==e.clientY;lastMousePoint={x:e.clientX,y:e.clientY};if(moved&&!e.target.closest('#joystick'))useInput('mouse');},{capture:true});
 listen(win,'blur',()=>{if(mode==='play')pause();else resetInput();});
 listen(win,'resize',()=>{painter.resize();rotation();});
 listen(doc,'visibilitychange',()=>{if(doc.hidden){if(mode==='play')pause();audio.pause();if(raf)cancelAnimationFrame(raf);raf=0;save();}else if(!raf&&!disposed){previous=lastDraw=performance.now();raf=requestAnimationFrame(loop);}});
 listen(win,'pagehide',()=>{save();audio.pause();});
 listen(win,'message',e=>{if(e.source!==win.parent||e.origin!==location.origin||e.data?.session!==session)return;if(e.data.type==='st-iphonie:tide:pause')pause();});
 function controllerInput(now){
- const pad=gamepad.read(now);if(pad.lost&&mode==='play'){pause();notice('手柄已断开');}if(!pad.connected)return pad;
+ const pad=gamepad.read(now);if(!pad.connected&&inputKind==='gamepad')useInput(lastNonPad);if(pad.connected&&(pad.pressed.size||((pad.x||pad.y)&&Math.hypot(pad.x-lastPadX,pad.y-lastPadY)>.05)))useInput('gamepad');lastPadX=pad.x;lastPadY=pad.y;if(pad.lost&&mode==='play'){pause();notice('手柄已断开');}if(!pad.connected)return pad;
  if(pad.changed)notice('手柄已连接');
  if(!$('#rotate').hidden){if(pad.pressed.has(0)){portrait=true;rotation();}return {...pad,x:0,y:0};}
  if(pad.pressed.has(9)){if(mode==='play')pause();else if(mode==='pause')resume();else if(mode!=='title')pause();return {...pad,x:0,y:0};}
