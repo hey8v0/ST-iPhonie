@@ -1,3 +1,4 @@
+import {installDiagnostics} from '../core/runtime-diagnostics.js';
 import '../core/compat.js';
 import {installHomeSwipe} from './home-swipe.js';
 import {findRoute} from '../core/routes.js';
@@ -55,6 +56,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const doc = win.document;
   const controller = new win.AbortController(), signal = controller.signal;
   const views = new Map(), assets = new Map();
+  const stopDiagnostics = installDiagnostics(win, (...args) => api.reportDiagnostic?.(...args));
+  signal.addEventListener('abort', stopDiagnostics, {once: true});
   let today = null;
   const media = win.matchMedia('(prefers-color-scheme: dark)'), motion = win.matchMedia('(prefers-reduced-motion: reduce)');
   let panelVisible = true, active = null, locked = false, sheet = null, disposed = false;
@@ -121,7 +124,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     win.clearTimeout(toastTimer);
     toastTimer = win.setTimeout(hideToast, error ? 20000 : 4500);
   }
-  const fail = error => notify(error?.message, {error: true});
+  const fail = error => { api.reportDiagnostic?.('小手机界面', error); notify(error?.message, {error: true}); };
   function run(fn) {
     try {
       const result = fn();

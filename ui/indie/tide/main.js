@@ -7,7 +7,7 @@ import {tideAudio} from './audio.js';
 const win=window,doc=document,$=s=>doc.querySelector(s),canvas=$('#sea'),overlay=$('#overlay'),content=$('#overlay-content');
 const query=new URLSearchParams(location.search),session=query.get('session')||'',key='st-iphonie:tide:v1:'+encodeURIComponent((query.get('scope')||'local').slice(0,200));
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let saved=null;try{saved=JSON.parse(win.localStorage.getItem(key)||'null');}catch{}
+let saved=null;try{saved=JSON.parse(win.localStorage.getItem(key)||'null');}catch(error){window.stGameReport?.({kind:'存档读取',message:error.message},'warn');}
 let fullscreenTarget=null;
 let inputKind=win.matchMedia('(pointer:coarse)').matches?'touch':'keyboard',lastNonPad=inputKind,lastPadX=0,lastPadY=0,lastMousePoint=null;
 let s=restoreTide(saved),mode='title',disposed=false,raf=0,previous=0,lastDraw=0,lastSave=0,lastHud=0,steps=0,portrait=false,target=null,waypoints=[],targetId=null,blocked=0,dialogue=null,dialogueIndex=0,bookReturn='play',lastPage='letter',noticeTimer=0,saveFailed=false;
@@ -26,7 +26,7 @@ function useInput(kind){
 useInput(inputKind);
 function resetInput(){keys.clear();stick.x=stick.y=0;stick.id=null;$('#joystick i').style.transform='';target=null;waypoints=[];targetId=null;blocked=0;}
 function notice(text){if(!text)return;$('#notice').textContent=text;$('#notice').classList.add('show');win.clearTimeout(noticeTimer);noticeTimer=win.setTimeout(()=>$('#notice').classList.remove('show'),3800);}
-function save(){if(mode==='title'&&!saved)return;try{win.localStorage.setItem(key,JSON.stringify({...s,savedAt:Date.now()}));saved=true;saveFailed=false;}catch{if(!saveFailed){saveFailed=true;notice('这次的进度暂时无法保存，请检查浏览器存储空间。');}}lastSave=performance.now();}
+function save(){if(mode==='title'&&!saved)return;try{win.localStorage.setItem(key,JSON.stringify({...s,savedAt:Date.now()}));saved=true;saveFailed=false;}catch(error){if(!saveFailed){saveFailed=true;window.stGameReport?.({kind:'存档保存',message:error.message});notice('这次的进度暂时无法保存，请检查浏览器存储空间。');}}lastSave=performance.now();}
 function rotation(){const show=mode!=='title'&&mode==='play'&&win.matchMedia('(pointer:coarse)').matches&&win.innerHeight>win.innerWidth&&!portrait;$('#rotate').hidden=!show;if(show)resetInput();return show;}
 function updateHud(){const point=nearby(s),button=$('#interact');$('#objective').textContent=objective(s);$('#tide-name').textContent=tideName(s);$('#tide-level').style.width=(tideAt(s.clock)*100)+'%';button.disabled=!point;button.querySelector('span').textContent=point?.verb||'探索';button.setAttribute('aria-label',point?point.verb+' · '+point.label:'附近暂无可交互物件');button.title=point?.label||'';button.querySelector('small').textContent=inputKind==='gamepad'?'A':'E';}
 function showHud(on){$('.hud').hidden=$('.tide-dial').hidden=$('.keyboard-hint').hidden=$('#interact').hidden=!on;$('#joystick').style.visibility=on?'':'hidden';}

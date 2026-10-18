@@ -64,6 +64,7 @@ export function createView(ctx, name) {
   root.className = 'view';
   root.dataset.app = name;
   const controller = new ctx.win.AbortController();
+  const failed = error => { try { ctx.api.reportDiagnostic?.('应用 · ' + name, error); } catch {} ctx.notify(error.message, {error: true}); };
   let disposed = false;
   const view = {
     root,
@@ -93,8 +94,8 @@ export function createView(ctx, name) {
         if (type === 'click') event.preventDefault();
         try {
           const result = fn(el, event);
-          if (result?.catch) result.catch(error => ctx.notify(error.message, {error: true}));
-        } catch (error) { ctx.notify(error.message, {error: true}); }
+          if (result?.catch) result.catch(failed);
+        } catch (error) { failed(error); }
       }, {signal: controller.signal});
     },
     async busy(el, task) {

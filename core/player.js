@@ -21,10 +21,12 @@ export class BrowserAudio {
   this.finish = null;
   this.volume = 1;
   this.playEpoch = 0;
+  this.pausedByUser = false;
   this.decoded = new Map();
   this.decodeBytes = 0;
  }
  unlock() {
+  this.pausedByUser=false;
   this.context ??= new AudioContext();
   if (!this.analyser) {
    this.gain = this.context.createGain();
@@ -86,6 +88,7 @@ export class BrowserAudio {
    throw Error('浏览器无法播放此音频格式，请在引擎配置改选 MP3 或 WAV');
   }
   check();
+  if(ctx.state!=='running'&&!this.pausedByUser){let timer;try{await Promise.race([ctx.resume(),new Promise(resolve=>{timer=setTimeout(resolve,2000);})]);}catch{}finally{clearTimeout(timer);}check();if(ctx.state!=='running')throw Error('音频设备已暂停或被系统打断，请回到页面再点一次播放');}
   return new Promise((resolve, reject) => {
    const source = ctx.createBufferSource(), fx = effectChain(ctx, effect, this.gain);
    let settled = false;
@@ -127,8 +130,8 @@ export class BrowserAudio {
    return Math.min(1, Math.pow(sum / (6 * 255), .65));
   });
  }
- pause() { return this.context?.suspend(); }
- resume() { return this.context?.resume(); }
+ pause() { this.pausedByUser=true;return this.context?.suspend(); }
+ resume() { this.pausedByUser=false;return this.context?.resume(); }
  stop() {
   this.playEpoch++;
   if (this.source) {

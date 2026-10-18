@@ -1,3 +1,4 @@
+import {pagedPicker} from './paged-picker.js';
 import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, avatar, empty, pictureCopies} from './common.js';
 import {icon} from './icons.js';
 import {saveFile, shareFile, canShareFiles} from '../download.js';
@@ -218,11 +219,15 @@ export function drawApp(ctx) {
     if (!v.disposed && token === comfyRequest && url === state().comfy.url) { comfyInfo = info; render(); }
   }
 
+  let subscriptionEpoch=0;
   async function refreshSubscription(force = false) {
+    const ticket=++subscriptionEpoch;
     if (eng() !== 'nai' || !api.keyStatus('nai')) { subscription = null; return; }
-    try { subscription = await api.naiSubscription(force); }
-    catch (error) { subscription = null; ctx.notify(error.message); }
-    if (!v.disposed) render();
+    const relay=state().relay.url,connection=state().connections.nai.active;
+    const current=()=>!v.disposed&&ticket===subscriptionEpoch&&eng()==='nai'&&state().relay.url===relay&&state().connections.nai.active===connection;
+    try { const result=await api.naiSubscription(force);if(!current())return;subscription=result; }
+    catch (error) { if(!current())return;subscription=null;if(!relay)ctx.notify(error.message); }
+    if(current())render();
   }
 
   // Loads a picture request sent from the chat ("在绘图中打开").
@@ -424,10 +429,11 @@ export function drawApp(ctx) {
   /** 画风: the ones there are (a tap uses one), and editing, adding or deleting the one in use. */
   function pickStyle() {
     const d0 = state(), using = styleId(), now = style();
-    const d = ctx.dialog('画风', `<div class="pick-list">${d0.styles.map(s => `<button type="button" class="list-row" data-style="${esc(s.id)}">${icon(s.id === using ? 'check' : 'paint')}<span><strong>${esc(s.name)}</strong><small class="mono">${esc(s.artist || '没有画师串')}</small></span></button>`).join('')}
-      <button type="button" class="list-row" data-action="edit-style">${icon('edit')}<span><strong>改「${esc(now.name)}」</strong><small>名字、画师串、固定正面和负面</small></span></button>
+    const d = ctx.dialog('画风', `<div data-style-picker></div><div class="picker-manage pick-list">
+      <button type="button" class="list-row" data-action="edit-style">${icon('edit')}<span><strong>改「${esc(now.name)}」</strong></span></button>
       <button type="button" class="list-row" data-action="new-style">${icon('add')}<span><strong>新建画风</strong></span></button>
       ${d0.styles.length > 1 ? `<button type="button" class="list-row danger-row" data-action="delete-style">${icon('trash')}<span><strong>删除「${esc(now.name)}」</strong></span></button>` : ''}</div>`);
+    pagedPicker(d.body.querySelector('[data-style-picker]'),{items:d0.styles,selected:using,pageSize:8,placeholder:'搜索画风、画师串…',text:s=>s.name+' '+s.artist,render:s=>`<button type="button" class="list-row" data-style="${esc(s.id)}" aria-pressed="${s.id===using}">${icon(s.id===using?'check':'paint')}<span><strong>${esc(s.name)}</strong><small class="mono picker-preview">${esc(s.artist||'没有画师串')}</small></span></button>`});
     d.body.addEventListener('click', async e => {
       const b = e.target.closest('button');
       if (!b) return;

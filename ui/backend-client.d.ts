@@ -529,6 +529,7 @@ export type BackendEvent =
 export interface BackendFacade {
     getRequestLogs(): Array<{id: string; at: number; source: string; level: 'info' | 'warn' | 'error'; state: string; duration?: number; request: unknown; response?: unknown}>;
     clearRequestLogs(): void;
+    reportDiagnostic(source: string, detail: Record<string, unknown>, level?: 'info' | 'warn' | 'error'): void;
     savePromptRule(id: string, rule: {text: string; enabled: boolean} | null): void;
     readonly apiVersion: string;
     readonly defaultPrompt: string;

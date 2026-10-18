@@ -31,7 +31,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
         if (Date.now() - soundAt < 3000 && !audio.ended) { audio.play().catch(() => set('paused')); return; }
         set('paused');
       });
-      audio.addEventListener('ended', () => { if (track?.from === 'bgm') { audio.currentTime = 0; audio.play().catch(() => {}); } else next(); });
+      audio.addEventListener('ended', () => { if (track?.from === 'bgm') { audio.currentTime = 0; audio.play().catch(error => set('error', error.message || '背景音乐续播失败')); } else next(); });
       audio.addEventListener('timeupdate', () => { const now = Date.now(); if (now - lastEmit > 900) emit(); });
       // While loading, start() hears of it (play() fails) and tries the other sources.
       audio.addEventListener('error', () => { if (track && ['playing', 'paused'].includes(phase)) set('error', '这首歌放不出来（链接失效，或者是试听版）'); });
@@ -41,7 +41,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
   }
   function level() { if (audio) audio.volume = Math.min(1, Math.max(0, (opts().volume ?? 0.6) * (voiced && opts().duck !== false ? DUCK : 1))); }
   function emit() { lastEmit = Date.now(); backend.listening = phase === 'playing' && track && track.from !== 'bgm' ? {title: track.title, artist: track.artist} : null; backend.emit('music', {status: true}); }
-  function set(next, words = '') { phase = next; message = words; emit(); }
+  function set(next, words = '') { if (next === 'error') backend.reportDiagnostic?.('音乐播放', {message: words, track: {title: track?.title, artist: track?.artist}, mediaCode: audio?.error?.code}); phase = next; message = words; emit(); }
 
   /** The song's file or link: a 歌单 file, a source song (its link is fetched each time: they expire), or a name to look up. */
   async function source(t) {
@@ -78,11 +78,12 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
         if (url.startsWith('blob:')) URL.revokeObjectURL(url);
         url = got.src; el.src = url; level();
         await el.play();
-        if (!lyrics.length && t.source && t.songId) backend.musicLyric(t.source, t.songId, {title: t.title, artist: t.artist}).then(text => { if (mine === ticket && text) { lyrics = parseLyrics(text); emit(); } });
+        if (!lyrics.length && t.source && t.songId) backend.musicLyric(t.source, t.songId, {title: t.title, artist: t.artist}).then(text => { if (mine === ticket && text) { lyrics = parseLyrics(text); emit(); } }).catch(error => backend.reportDiagnostic?.('音乐歌词', error, 'warn'));
         return;
       } catch (error) {
         if (mine !== ticket) return;
         if (error?.name === 'NotAllowedError') { set('paused', '浏览器要先点一下页面才能放声音，点播放就好'); return; }
+        backend.reportDiagnostic?.('音乐播放尝试', {message: error.message, stack: error.stack, title: t.title, source: t.source}, 'warn');
         failure ||= error;
         if (t.origin === 'file' || !t.source) break;
         if (t.source) tried.add(t.source + '|' + t.songId);

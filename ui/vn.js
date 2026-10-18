@@ -1,3 +1,4 @@
+import {pagedPicker} from './paged-picker.js';
 // 视觉小说: the workbench of the galgame view of the story. 开演 opens the stage over the tavern page (from the latest
 // reply, from the start, or from a message picked here); 视觉小说模式 puts a 📖 button on every message to start from
 // there. 立绘: each character of the open card has a page of standing pictures — the usual one, five 表情 picked by a
@@ -47,14 +48,19 @@ export function vnApp(ctx) {
     const cast = castNow();
     if (!cast.length) return '<p class="hint">这张卡还没有登记的角色。正文里出现过的角色会自动登记，也可以在角色 App 里添加。</p>';
     const worn = wearNow();
-    return `<div class="vn-cast-list">${cast.map(c => {
+    return '<div data-cast-picker></div>';
+  }
+  function mountCastPicker(){
+    const root=v.root.querySelector('[data-cast-picker]');if(!root)return;
+    const worn=wearNow();
+    pagedPicker(root,{items:castNow(),pageSize:8,placeholder:'搜索角色…',text:c=>c.name,listClass:'vn-cast-list',render:c=>{
       const w = setFor(c, worn[c.name] || '') ? worn[c.name] || '' : '', all = looksOf(c, w);
       const made = all.reduce((n, l) => n + l.count, 0), shown = all.find(l => l.sprite)?.sprite || '';
       return `<button type="button" class="vn-cast-row" data-action="vn-looks" data-name="${esc(c.name)}">
       <span class="vn-sprite-thumb${shown ? ' has' : ''}">${shown ? checker(shown) : avatar(c.name, 'none', 44)}</span>
       <span class="vn-cast-text"><strong>${esc(c.name)}</strong><small>${[made ? `${made} 张立绘` : c.appearance ? '还没有立绘' : '还没有立绘 · 没写外貌', c.actions.length ? `${c.actions.length} 个动作` : '', c.outfits.length ? `${c.outfits.length + 1} 套形象` + (w ? `（穿着${esc(setFor(c, w).label)}）` : '') : ''].filter(Boolean).join(' · ')}</small></span>
       ${icon('next')}</button>`;
-    }).join('')}</div>`;
+    }});
   }
 
   function render() {
@@ -87,6 +93,7 @@ export function vnApp(ctx) {
           ${narrationSkip().length ? `<small class="hint">整篇朗读里跳过的也不演：${esc(narrationSkip().join('、'))}</small>` : ''}</div>
         ${toggle('vn-narrate', '旁白读叙述', s.narrate, '台词以外的叙述也读出来，用设置里「整篇朗读」选的旁白声音：系统朗读免费；用配音引擎的话要先在角色 App 里给「旁白」选音色，按字数花额度。正文里的音效、氛围音和背景音乐，演到那里就会响（要开着音效和自动放的背景音乐）。')}</div>`
       + `<p class="hint vn-keys">电脑上：Enter / 空格 / 滚轮向下翻页，← 上一页，滚轮向上或 ↑ 看记录，按住 Ctrl 快进，A 自动，H 隐藏，Esc 退出。手机上点屏幕翻页。</p>`);
+    mountCastPicker();
   }
 
   async function start(from) {
@@ -113,10 +120,10 @@ export function vnApp(ctx) {
       const c = castOf(name), set = setFor(c, outfit) || c, all = looksOf(c, outfit), missing = all.filter(l => l.id && !l.action && !l.sprite);
       const worn = setFor(c, wearNow()[name] || '') ? wearNow()[name] || '' : '';
       const chips = [{id: '', label: '默认'}, ...c.outfits.map(o => ({id: o.id, label: o.label}))];
-      d.body.innerHTML = `<div class="vn-outfits" role="group" aria-label="形象">${chips.map(o => `<button type="button" class="vn-outfit" data-outfit="${esc(o.id)}" aria-pressed="${o.id === outfit}">${esc(o.label)}${c.outfits.length && o.id === worn ? '<i>穿着</i>' : ''}</button>`).join('')}<button type="button" class="vn-outfit add" data-action="vn-add-outfit">${icon('add')}形象</button></div>
-        <p class="hint">${set.sprite ? '表情会用平常那张的种子画，脸和衣服尽量一样。' : '先画「平常」这张：表情会用它的种子画，脸和衣服更一致。'}点一张可以画、上传或去掉；一张可以有好几张图，选用哪张或轮换随机出。</p>
-        <div class="vn-looks">${all.map(l => `<button type="button" class="vn-look${l.sprite ? ' has' : ''}" data-look="${esc(l.id)}"><span class="vn-look-pic">${l.sprite ? checker(l.sprite) : `<i>${icon(l.action ? 'hand' : l.id ? 'smile' : 'person')}</i>`}${l.count > 1 ? `<em class="vn-look-n">${l.mix ? '随机 ' : ''}${l.count}</em>` : ''}</span><strong>${esc(l.label)}</strong><small>${l.sprite ? (l.count > 1 ? `${l.count} 张` : '已画') : l.action ? '动作' : l.id ? '表情' : '平常'}</small></button>`).join('')}</div>
-        <div class="actions">${c.outfits.length && outfit !== worn ? `<button type="button" class="primary" data-action="vn-wear">${icon('check')}这个聊天穿这套</button>` : ''}${outfit ? `<button type="button" class="secondary" data-action="vn-edit-outfit">${icon('edit')}改这套形象</button>` : ''}<button type="button" class="secondary" data-action="vn-add-action">${icon('add')}加一个动作</button>${missing.length ? `<button type="button" class="${c.outfits.length && outfit !== worn ? 'secondary' : 'primary'}" data-action="vn-all" ${set.sprite ? '' : 'disabled'}>${icon('paint')}画没画的 ${missing.length} 种表情</button>` : ''}</div>`;
+      d.body.innerHTML = `<div class="vn-outfit-control"><button type="button" class="vn-outfit" data-action="vn-pick-outfit">${esc(chips.find(o=>o.id===outfit)?.label||'默认')} ▾</button><button type="button" class="vn-outfit add" data-action="vn-add-outfit">${icon('add')}形象</button></div><div data-look-picker></div>
+        <div class="actions">${c.outfits.length && outfit !== worn ? `<button type="button" class="primary" data-action="vn-wear">${icon('check')}穿这套</button>` : ''}${outfit ? `<button type="button" class="secondary" data-action="vn-edit-outfit">${icon('edit')}改形象</button>` : ''}<button type="button" class="secondary" data-action="vn-add-action">${icon('add')}动作</button>${missing.length ? `<button type="button" class="secondary" data-action="vn-all" ${set.sprite ? '' : 'disabled'}>${icon('paint')}补齐 ${missing.length} 种表情</button>` : ''}</div>`;
+      pagedPicker(d.body.querySelector('[data-look-picker]'),{items:all,pageSize:9,placeholder:'搜索表情、动作…',listClass:'vn-looks',text:l=>l.label+' '+l.tags,render:l=>`<button type="button" class="vn-look${l.sprite?' has':''}" data-look="${esc(l.id)}"><span class="vn-look-pic">${l.sprite?checker(l.sprite):`<i>${icon(l.action?'hand':l.id?'smile':'person')}</i>`}${l.count>1?`<em class="vn-look-n">${l.mix?'随机 ':''}${l.count}</em>`:''}</span><strong>${esc(l.label)}</strong><small>${l.sprite?l.count+' 张':l.action?'动作':l.id?'表情':'平常'}</small></button>`});
+
     };
     paint();
     d.onClose(() => { if (sheet === d) sheet = null; render(); });
@@ -125,6 +132,7 @@ export function vnApp(ctx) {
       if (!b) return;
       try {
         if (b.dataset.outfit != null) { outfit = sheetOutfit[name] = b.dataset.outfit; paint(); return; }
+        if (b.dataset.action === 'vn-pick-outfit') { const list=[{id:'',label:'默认'},...castOf(name).outfits];d.close();const picker=ctx.dialog('选择形象','<div data-outfit-picker></div>');pagedPicker(picker.body.querySelector('[data-outfit-picker]'),{items:list,selected:outfit,pageSize:10,placeholder:'搜索形象…',text:o=>o.label,render:o=>`<button type="button" class="list-row" data-outfit="${esc(o.id)}">${icon(o.id===outfit?'check':'person')}<span><strong>${esc(o.label)}</strong></span></button>`});let chosen=outfit;picker.body.addEventListener('click',event=>{const option=event.target.closest('[data-outfit]');if(option){chosen=option.dataset.outfit;picker.close();}});picker.onClose(()=>looks(name,chosen));return; }
         if (b.dataset.action === 'vn-add-outfit') { const id = await editOutfit(name); looks(name, id || outfit); return; }
         if (b.dataset.action === 'vn-edit-outfit') { const gone = await outfitMenu(name, outfit); looks(name, gone ? '' : outfit); return; }
         if (b.dataset.action === 'vn-wear') { api.vnSetWear(name, outfit); ctx.notify(`这个聊天里${name}穿「${setFor(castOf(name), outfit)?.label || '默认'}」`); paint(); return; }
@@ -162,8 +170,9 @@ export function vnApp(ctx) {
       if (!g?.sprite) { d.close(); return; }
       const all = [g.sprite, ...g.alts.map(a => a.sprite)];
       d.body.innerHTML = `<p class="hint">点一张可以换成用它，或者去掉。打开「轮换随机出」，演的时候每句从这组里随机挑一张（不会连着两句同一张）。</p>
-        <div class="vn-looks">${all.map((u, i) => `<button type="button" class="vn-look has" data-pic="${esc(u)}"><span class="vn-look-pic">${checker(u)}</span><small>${!i && !g.mix ? '在用' : g.mix ? '轮换' : '备用'}</small></button>`).join('')}</div>
+        <div data-variant-picker></div>
         <div class="group">${toggle('vn-mix', '轮换随机出', g.mix, '关着时一直用「在用」那张。')}</div>`;
+      pagedPicker(d.body.querySelector('[data-variant-picker]'),{items:all.map((url,i)=>({url,i})),pageSize:9,placeholder:'搜索版本编号…',listClass:'vn-looks',text:x=>'版本 '+(x.i+1),render:x=>`<button type="button" class="vn-look has" data-pic="${esc(x.url)}"><span class="vn-look-pic">${checker(x.url)}</span><strong>第 ${x.i+1} 张</strong><small>${!x.i&&!g.mix?'在用':g.mix?'轮换':'备用'}</small></button>`});
     };
     paint();
     d.onClose(() => looks(name, l.outfit));

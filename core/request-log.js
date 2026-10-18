@@ -23,7 +23,7 @@ export class RequestLog {
       if (typeof v === 'string') return /^data:.*;base64,/i.test(v) || (v.length > 2000 && /^[A-Za-z0-9+/=\r\n]+$/.test(v)) ? `[二进制编码，${v.length} 字符]` : scrub(v);
       if (v === null || typeof v !== 'object') return v;
       if (typeof v.arrayBuffer === 'function') return {type: v.type || 'binary', bytes: v.size ?? v.byteLength};
-      if (v instanceof Error) return {name: v.name, message: scrub(v.message)};
+      if (v instanceof Error) return {name: v.name, message: scrub(v.message), stack: scrub(v.stack || '')};
       if (seen.has(v)) return '[循环引用]'; seen.add(v);
       if (Array.isArray(v)) return v.slice(0, 500).map(x => visit(x, '', depth + 1));
       return Object.fromEntries(Object.entries(v).slice(0, 500).map(([k, x]) => [k, visit(x, k, depth + 1)]));

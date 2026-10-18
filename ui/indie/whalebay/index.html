@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#283f48"><title>鲸湾小镇 · Whale Bay</title><link rel="stylesheet" href="bay.css"></head>
+<body><main id="game">
+ <canvas id="world" tabindex="0" aria-label="鲸湾小镇，WASD 或方向键移动，E 互动，B 背包，Escape 暂停"></canvas>
+ <div class="cinema" aria-hidden="true"></div>
+ <header id="hud" hidden><div class="date"><small>WHALE BAY</small><b id="day"></b><span id="clock"></span></div><div class="purse"><span id="coins"></span><button data-action="bag" aria-label="背包">▤ <kbd data-key="B" data-pad="Y"></kbd></button><button data-action="pause" aria-label="暂停">Ⅱ <kbd data-key="Esc" data-pad="≡"></kbd></button></div></header>
+ <aside id="status" hidden><span id="level"></span><div class="energy"><i id="energy"></i></div><small id="energy-label"></small></aside>
+ <p id="goal" hidden></p><div id="toast" role="status" aria-live="polite"></div>
+ <div id="stick" hidden aria-label="移动摇杆"><i></i></div><button id="interact" data-action="interact" hidden><kbd data-key="E" data-pad="A"></kbd><span>互动</span></button>
+ <div class="control-hint" hidden>WASD · 移动　点击 · 前往</div>
+ <section id="title"><div class="title-copy"><p class="eyebrow">A LITTLE LIFE BY THE SEA</p><h1>鲸湾小镇</h1><p class="en">W H A L E &nbsp; B A Y</p><div class="line"></div><p class="intro">把日子种进海风里。<br>总有一个明天，值得慢慢期待。</p><button class="gold" data-action="start">住进鲸湾 <span>→</span></button><small class="edition">种植 · 垂钓 · 制作 · 四季</small></div><footer><button data-action="exit">← 返回大游戏</button><button data-action="fullscreen">⛶ 全屏</button><span>第一版 · 一段可以继续的生活</span></footer></section>
+ <section id="overlay" hidden role="dialog" aria-modal="true" aria-label="小镇菜单"><article id="paper"></article></section>
+ <section id="rotate" hidden><span>▯ ↻</span><h2>横过来，看看鲸湾。</h2><button data-action="portrait">继续竖屏</button></section>
+ </main><script src="../runtime-capture.js" data-game="鲸湾小镇"></script><script type="module" src="main.js"></script></body></html>

@@ -104,7 +104,7 @@ const REASONS={
  unsupported_model:'这个模型不支持请求里的某个模型或设置，看括号里的说明。',
  quota_exceeded:'额度用完了。',
  insufficient_credits:'额度用完了。',
- voice_not_found:'找不到这个音色 ID，可能已经删除或者填错了。',
+ voice_not_found:'语音服务没有找到当前请求的音色。请核对音色 ID、当前密钥所属账号及所选模型；不要先删除重建音色。',
  invalid_voice_id:'音色 ID 格式不对，请重新选择音色。',
  invalid_voice_settings:'音色设置里有这个模型不接受的数值。eleven_v3 的稳定性只能是 0、0.5 或 1。',
  text_too_long:'这句台词太长了。',
@@ -235,6 +235,7 @@ export class Providers{
  const init={method:'POST',headers:{...this.headers(request.engine),'Content-Type':'application/json',...request.headers},body:JSON.stringify(body)};return request.viaTavern?this.viaTavern(request.url,init,signal):this.fetch(request.url,init,signal);}
  /** Fish's own /v1/tts lets no web page call it: asked through the tavern's proxy, which must be switched on. */
  async viaTavern(url,init,signal){if(!this.proxy)throw Error(FISH_PROXY_NOTE);const r=await this.proxy(url,init,signal).catch(error=>{if(signal?.aborted)throw error;throw Error('连不上酒馆的转发。'+FISH_PROXY_NOTE);});
+  if(r.redirected||r.status===401&&/text\/html/i.test(r.headers?.get('content-type')||''))throw Object.assign(Error('酒馆转发返回了登录页面，可能是云酒馆登录失效或转发接口限制；这不是音色不存在。请先重新登录酒馆，仍失败时查看日志中的酒馆转发请求'),{code:'TAVERN_AUTH',status:r.status});
   if(!r.ok&&/CORS proxy is disabled/i.test(await r.clone().text().catch(()=>'')))throw Error(FISH_PROXY_NOTE);return r;}
  /** The models Fish's compat endpoint serves (no key needed), read once a page and again after half an hour; true when what goes where changed. */
  fishCatalog(){const now=Date.now();if(this.catalogRead&&now-this.catalogAt<30*60*1000)return this.catalogRead;this.catalogAt=now;

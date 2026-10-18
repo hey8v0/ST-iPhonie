@@ -212,7 +212,7 @@ export class NovelAIClient {
     return btoa(text);
   }
   async subscription(signal) {
-    const response = await this.call('/user/subscription', {headers: this.headers(), signal});
+    let response;try{response=await this.call('/user/subscription', {headers:this.headers(),signal});}catch(error){error.operation='subscription';if(error.name!=='AbortError')error.message='订阅查询失败：'+error.message;throw error;}
     return readSubscription(await response.json());
   }
   async generate(body, signal) {

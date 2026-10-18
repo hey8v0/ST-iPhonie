@@ -78,7 +78,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     if (!backend.drawReady()) { if (interactive) notice(backend.drawMissing() + '，请在小手机的引擎卡包里填写'); return false; }
     const engine = settings().draw.engine;
     // Through a relay counted as Opus, a subscription it does not pass on is expected, not worth a notice.
-    if (engine === 'nai') try { await backend.naiSubscription(); } catch (error) { const relay = settings().draw.relay; if (interactive && !(relay.url && relay.assumeOpus)) notice(error.message); }
+    if (engine === 'nai') try { await backend.naiSubscription(); } catch (error) { const relay = settings().draw.relay; if (!relay.url&&interactive)notice(error.message);else backend.reportDiagnostic?.('绘图订阅查询',{message:error.message,drawStillAvailable:true},'warn'); }
     const quote = backend.drawQuote();
     if (quote.free === true) return 'free';
     if (!interactive) return false;
@@ -251,7 +251,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const tags = parsePictures(message.mes).filter(tag => !stored(message, tag.hash));
     if (!tags.length) return;
     const permission = await allowed(false);
-    if (!permission) { scheduleRender(); return; }
+    if (!permission) { backend.reportDiagnostic?.('正文出图', {message:'自动出图未执行，当前设置无法确认免费额度',engine:s.draw.engine,relay:!!s.draw.relay.url}, 'warn');scheduleRender(); return; }
     await Promise.all(tags.map(tag => generate(id, tag, {permission})));
   }
 

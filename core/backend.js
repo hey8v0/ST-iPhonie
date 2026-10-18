@@ -109,7 +109,7 @@ export class TTSBackend {
         this.notify = notify;
         this.providers = providers;
         // 自己的接口 that does not let web pages ask it: asked through the tavern's own proxy, with the tavern's login.
-        if (!this.providers.proxy) this.providers.proxy = (url, init, signal) => this.imageFetch('/proxy/' + encodeURIComponent(url), { ...init, credentials: 'same-origin', headers: { ...init.headers, ...this.tavernHeaders() }, signal });
+        if (!this.providers.proxy) this.providers.proxy = (url, init, signal) => this.proxyFetch('/proxy/' + encodeURIComponent(url), { ...init, credentials: 'same-origin', redirect: 'error', signal });
         // Voice balances (ElevenLabs, Fish) read for the engine cards; a new audio marks them out of date.
         this.balances = new Map();
         // Several Fish keys: when one gives way to the next, the balance shown belongs to the old key.
@@ -150,7 +150,9 @@ export class TTSBackend {
         // GPT 生图 and ComfyUI: the key of the GPT image engine; requests go out with these (tests pass their own).
         this.gptKey = '';
         this.assetFetch = imageFetch;
+        this.musicTransport = this.requestLog.fetch((...args) => this.assetFetch(...args), '音乐音源');
         this.imageFetch = this.requestLog.fetch(withProxyHeaders(imageFetch, tavernHeaders), '绘图接口');
+        this.proxyFetch = this.requestLog.fetch(withProxyHeaders(imageFetch, tavernHeaders), '酒馆转发');
         this.textFetch = this.requestLog.fetch(withProxyHeaders((...args) => globalThis.fetch(...args), tavernHeaders), '文字模型接口');
         this.embedFetch = this.requestLog.fetch(withProxyHeaders((...args) => globalThis.fetch(...args), tavernHeaders), '向量模型');
         this.tavernHeaders = tavernHeaders;
@@ -168,7 +170,7 @@ export class TTSBackend {
         this.prepared = null;
         this.player = new DialoguePlayer({
             settings: () => this.settings, providers, cache: this.cache, ...(sink ? { sink } : {}), unknown, speech,
-            change: state => { change(state); this.emit('playback', state); },
+            change: state => { if (state.phase === 'error') this.reportDiagnostic('语音播放', {message: state.message}); change(state); this.emit('playback', state); },
             prepared: audio => { this.prepared = audio; this.emit('audio-ready', this.audioInfo(audio)); },
         });
     }
@@ -1521,14 +1523,14 @@ export class TTSBackend {
         // A server plugin on the tavern itself: with the tavern's login and checks; there is no proxy to try then.
         if (onTavern(url)) {
             let response;
-            try { response = await this.assetFetch(url, { credentials: 'same-origin', headers: this.tavernHeaders() }); } catch { throw Error('连不上酒馆里的这个地址'); }
+            try { response = await this.musicTransport(url, { credentials: 'same-origin', headers: this.tavernHeaders() }); } catch { throw Error('连不上酒馆里的这个地址'); }
             if (response.status === 404) throw Error('酒馆里没有这个地址：服务端插件装好了吗？（config.yaml 里 enableServerPlugins 要是 true，装完要完全重启酒馆）');
             return read(response).catch(error => { throw Error(`酒馆里的音源回答 ${error.message}`); });
         }
-        try { return await read(await this.assetFetch(url, { credentials: 'omit' })); }
+        try { return await read(await this.musicTransport(url, { credentials: 'omit' })); }
         catch (error) {
             if (error?.status) throw Error(`音源回答 ${error.message}`);
-            const proxied = await this.assetFetch('/proxy/' + encodeURIComponent(url), { credentials: 'same-origin' }).catch(() => null);
+            const proxied = await this.musicTransport('/proxy/' + encodeURIComponent(url), { credentials: 'same-origin' }).catch(() => null);
             if (!proxied) throw Error('连不上这个音源：网址不对，或者它不让网页直接读取，酒馆代理也连不上');
             if (!proxied.ok) { const said = await proxied.text().catch(() => ''); throw Error(/CORS proxy is disabled/i.test(said) ? '这个音源不让网页直接读取：可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆' : `音源回答 HTTP ${proxied.status}`); }
             return read(proxied);
@@ -2316,8 +2318,20 @@ export class TTSBackend {
         if (method === 'deletePhoto') this.emit('phone', { preferences: await this.getPhone() });
         return result;
     }
+    reportDiagnostic(source, detail, level = 'error') {
+        if (this.closed) return;
+        const value = detail && typeof detail.message === 'string' ? {message: detail.message, stack: detail.stack, name: detail.name, ...detail} : detail;
+        const safe = this.requestLog.clean(value), name = String(source || '小手机').slice(0, 80);
+        const signature = JSON.stringify([name, level, safe]);
+        const now = Date.now();
+        if (this.lastDiagnostic?.signature === signature && now - this.lastDiagnostic.at < 1500) return;
+        this.lastDiagnostic = {signature, at: now};
+        const id = this.requestLog.add(name, safe, ['info','warn','error'].includes(level) ? level : 'error');
+        this.requestLog.finish(id, {recorded: true});
+    }
     api() {
         const methods = {
+            reportDiagnostic: (source, detail, level) => this.reportDiagnostic(source, detail, level),
             getRequestLogs: () => this.requestLog.list(), clearRequestLogs: () => this.requestLog.clear(),
             savePromptRule: (id, rule) => {
                 if (!PROMPT_RULES.some(r => r.id === id)) throw Error('未知提示词规则');
@@ -2440,7 +2454,7 @@ export class TTSBackend {
             defaultVoicePreset: Object.freeze((({ id, ...rest }) => rest)(freshState().presets[0])), defaultDrawPreset: Object.freeze((({ id, ...rest }) => rest)(defaultDraw().presets[0])),
             drawCatalog: Object.freeze({ models: NAI_MODELS, modelNames: NAI_MODEL_NAMES, samplers: NAI_SAMPLERS, schedules: NAI_SCHEDULES, engines: DRAW_ENGINES, engineNames: DRAW_ENGINE_NAMES, gptModels: GPT_IMAGE_MODELS, gptQualities: GPT_QUALITIES, comfyWorkflow: DEFAULT_COMFY_WORKFLOW }),
             phoneCatalog: Object.freeze({ apps: PHONE_APPS, wallpapers: PHONE_WALLPAPERS, glyphs: PHONE_GLYPHS, skins: PHONE_SKINS }),
-            ...Object.fromEntries(Object.entries(methods).map(([name, fn]) => [name, (...args) => { this.assertOpen(); return fn(...args); }])),
+            ...Object.fromEntries(Object.entries(methods).map(([name, fn]) => [name, (...args) => { if(name==='reportDiagnostic'&&this.closed)return; this.assertOpen(); const failed = error => { if (!['reportDiagnostic','getRequestLogs','clearRequestLogs'].includes(name)) this.reportDiagnostic('小手机操作', {operation: name, message: error?.message || String(error), stack: error?.stack}, error?.name === 'AbortError'||error?.operation==='subscription' ? 'warn' : 'error'); throw error; }; try { const result = fn(...args); return result?.catch ? result.catch(failed) : result; } catch (error) { return failed(error); } }])),
         });
     }
     async close() {
