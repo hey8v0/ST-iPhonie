@@ -177,7 +177,7 @@ export class DialoguePlayer {
   this.requestKey = null;
  }
  snapshot() {
-  return { phase: this.phase, message: this.message, index: this.index, total: this.queue.length,
+  return { phase: this.phase, message: this.message, stepwise: !!this.stepwise, boundary: !!this.boundary, index: this.index, total: this.queue.length,
    engine: this.engine, speaker: this.speaker, line: copyLine(this.line), source: this.source,
    requestKey: this.requestKey, volume: this.getVolume() };
  }
@@ -219,6 +219,7 @@ export class DialoguePlayer {
   this.pending = null;
   this.settingsOverride = null;
   this.resumePhase = null;
+  this.stepwise = false; this.boundary = false;
   this.skipped = [];
   this.wake?.();
   this.wake = null;
@@ -226,10 +227,11 @@ export class DialoguePlayer {
   this.emit('idle', message);
  }
  /** ahead: while a line plays, the next one is already being made (a call: no pause between its sentences). */
- start(lines, valid = () => true, settingsOverride = null, {ahead = false} = {}) {
+ start(lines, valid = () => true, settingsOverride = null, {ahead = false, stepwise = false} = {}) {
   this.stop();
   this.settingsOverride = settingsOverride;
   this.lookahead = ahead;
+  this.stepwise = stepwise;
   if (!lines.length) return;
   this.valid = valid;
   this.queue = lines.map(copyLine);
@@ -328,6 +330,16 @@ export class DialoguePlayer {
   made.then(value => value && this.sink.warm?.(value.blob)).catch(() => {});
   return { index, made };
  }
+ async finishedLine(epoch) {
+  if (!this.canContinue(epoch)) return false;
+  if (this.stepwise && this.index + 1 < this.queue.length) {
+   this.boundary = true; this.resumePhase = 'generating';
+   this.emit('paused', '等待下一句');
+   if (!await this.waitForResume(epoch)) return false;
+   this.boundary = false;
+  }
+  this.index++; return true;
+ }
  async run(epoch) {
   const signal = this.controller.signal;
   try {
@@ -342,7 +354,7 @@ export class DialoguePlayer {
      this.emit('playing', '正在朗读 · ' + line.role);
      await this.speech.speak(line.text, { voice: s.narration.systemVoice, rate: s.narration.rate, volume: this.volume }, signal);
      if (!this.canContinue(epoch)) return;
-     this.index++;
+     if (!await this.finishedLine(epoch)) return;
      continue;
     }
     const route = findRoute(s.routes, line.role);
@@ -383,7 +395,7 @@ export class DialoguePlayer {
     await this.sink.play(blob, signal, { effect: lineEffect(line) });
     if (!this.canContinue(epoch)) return;
     this.played.add(key);
-    this.index++;
+    if (!await this.finishedLine(epoch)) return;
    }
    this.complete();
   } catch (error) { this.fail(epoch, signal, error); }

@@ -32,7 +32,9 @@ export const tideAt = clock => .5+.5*Math.sin(clock/PERIOD*Math.PI*2);
 export const tideName = s => tideAt(s.clock)<.42?'退潮 · 石路显露':tideAt(s.clock)>.72?'满潮 · 海面开阔':'潮水正在转向';
 const segment = (x,y,p) => {const [ax,ay]=p.a,[bx,by]=p.b,dx=bx-ax,dy=by-ay,t=Math.max(0,Math.min(1,((x-ax)*dx+(y-ay)*dy)/(dx*dx+dy*dy)));return Math.hypot(x-ax-dx*t,y-ay-dy*t);};
 export function landAt(x,y,tide) {return ISLANDS.some(i=>tide>=i.level&&i.level>=0?false:((x-i.x)/i.rx)**2+((y-i.y)/i.ry)**2<1)||PATHS.some(p=>tide<p.level&&segment(x,y,p)<p.width/2);}
-export function passable(s,x,y) {if(x<45||y<45||x>WORLD.w-45||y>WORLD.h-45)return false;const land=landAt(x,y,tideAt(s.clock));return s.mode==='boat'?!land:land;}
+export function buildingAt(x,y){return [[355,1130],[1460,850],[920,935]].some(([cx,cy])=>Math.abs(x-cx)<48&&y>cy-44&&y<cy-8)||((x-1750)/19)**2+((y-451)/18)**2<1;}
+export function questTarget(s){return s.flags.delivered?null:s.flags.office?{id:'lighthouse',x:1750,y:475,label:'灯塔'}:s.flags.metKeeper?{id:'office',x:920,y:935,label:'旧邮局'}:s.mode==='boat'?{id:'dock:egret',x:1810,y:1040,label:'白鹭岛码头'}:{id:'keeper',x:1430,y:885,label:'岑婆婆'};}
+export function passable(s,x,y) {if(x<45||y<45||x>WORLD.w-45||y>WORLD.h-45)return false;const land=landAt(x,y,tideAt(s.clock));return s.mode==='boat'?!land:land&&!buildingAt(x,y);}
 export function freshTide() {return {version:1,x:650,y:1250,heading:-.6,vx:0,vy:0,mode:'boat',dock:'harbor',boat:{x:650,y:1250,heading:-.6},clock:30,elapsed:0,flags:{},pages:['letter'],rings:[1,0,3],sound:true,visited:['harbor']};}
 export function restoreTide(value) {
   if(!value||value.version!==1)return freshTide();

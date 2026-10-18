@@ -214,7 +214,7 @@
 @keyframes sttts-mi-bar{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1.6)}}
 @media (prefers-reduced-motion:reduce){.sttts-music-island,.sttts-music-island .mi-disc,.sttts-music-island .mi-bars i,.sttts-music-island .mi-card{animation:none!important;transition:none}}
 /* 台词小窗: the latest reply's lines, to hear one by one (over a visual-novel sprite too). */
-.sttts-voice-island{position:fixed;z-index:30995;width:max-content;max-width:min(260px,calc(100vw - 16px));padding:5px 12px 5px 5px;border-radius:999px;background:#000;color:#fff;box-shadow:0 8px 24px -8px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.08);font:12px/1.35 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;animation:sttts-mi-in .45s cubic-bezier(.34,1.3,.64,1);transition:max-width .35s cubic-bezier(.34,1.2,.64,1),padding .35s cubic-bezier(.34,1.2,.64,1),border-radius .35s ease}
+.sttts-voice-island{box-sizing:border-box;position:fixed;z-index:30995;width:max-content;max-width:min(260px,calc(100vw - 16px));padding:5px 12px 5px 5px;border-radius:999px;background:#000;color:#fff;box-shadow:0 8px 24px -8px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.08);font:12px/1.35 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;animation:sttts-mi-in .45s cubic-bezier(.34,1.3,.64,1);transition:max-width .35s cubic-bezier(.34,1.2,.64,1),padding .35s cubic-bezier(.34,1.2,.64,1),border-radius .35s ease}
 .sttts-voice-island[hidden]{display:none}
 .sttts-voice-island[data-dragging]{cursor:grabbing}
 .sttts-voice-island .vi-pill{display:flex;align-items:center;gap:8px;height:26px}
@@ -251,3 +251,13 @@
 .sttts-context-menu button{width:auto;min-width:0;max-width:100%;box-sizing:border-box;margin:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;padding:10px 12px;min-height:40px;border-radius:6px;cursor:pointer;white-space:normal;overflow-wrap:anywhere}
 .sttts-context-menu button:hover,.sttts-context-menu button:focus-visible{background:var(--SmartThemeQuoteColor,#555);outline:1px solid var(--SmartThemeBorderColor,#888)}
 .sttts-tools-entry{background:transparent;border:0;color:inherit;font-size:inherit;cursor:pointer}
+
+/* The collapsed line moves only when its measured text exceeds the pill. */
+.sttts-voice-island .vi-line{flex:1;text-overflow:clip}
+.sttts-voice-island .vi-scroll{display:inline-block;white-space:nowrap;vertical-align:top;max-width:none}
+.sttts-voice-island .vi-scrolling{animation:sttts-vi-scroll var(--vi-duration,8s) linear infinite alternate}
+.sttts-voice-island .vi-head{gap:5px}
+.sttts-voice-island .vi-all,.sttts-voice-island .vi-step{padding:0 8px;font-size:12px;white-space:nowrap}
+.sttts-voice-island .vi-step[aria-pressed=true]{background:rgba(100,210,255,.22)}
+@keyframes sttts-vi-scroll{0%,15%{transform:translateX(0)}85%,100%{transform:translateX(var(--vi-travel,0px))}}
+@media(prefers-reduced-motion:reduce){.sttts-voice-island .vi-scrolling{animation:none}.sttts-voice-island .vi-line{overflow-x:auto;touch-action:pan-x}}

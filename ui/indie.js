@@ -11,7 +11,7 @@ export function indieApp(ctx) {
     const dialog=host.createElement('dialog'),frame=host.createElement('iframe'),url=new URL(GAME),token=ctx.win.crypto.randomUUID();
     url.searchParams.set('scope',ctx.api.getState().scope||'local');url.searchParams.set('session',token);
     dialog.setAttribute('aria-label','潮汐来信');dialog.style.cssText='position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;border:0;padding:0;margin:0;background:#133f47;overflow:hidden;';
-    frame.title='潮汐来信';frame.allow='fullscreen; autoplay';frame.allowFullscreen=true;frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#133f47';frame.src=url.href;
+    frame.title='潮汐来信';frame.allow='fullscreen; autoplay; gamepad';frame.allowFullscreen=true;frame.style.cssText='display:block;width:100%;height:100%;border:0;background:#133f47';frame.src=url.href;
     const receive=e=>{if(e.source!==frame.contentWindow||e.origin!==url.origin||e.data?.session!==token)return;if(e.data.type==='st-iphonie:tide:close')close();};
     dialog.addEventListener('cancel',event=>{event.preventDefault();frame.contentWindow?.postMessage({type:'st-iphonie:tide:pause',session:token},url.origin);});
     host.defaultView.addEventListener('message',receive);session={dialog,frame,host,receive};dialog.append(frame);host.body.append(dialog);

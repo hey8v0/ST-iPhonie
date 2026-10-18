@@ -1,4 +1,4 @@
-import {WORLD,passable} from './model.js';
+import {WORLD,passable,PLACES,DOCKS} from './model.js';
 
 // A bounded search on the current tide. All returned segments stay on the same
 // walkable surface; steering with keys or the stick always takes precedence.
@@ -24,4 +24,12 @@ export function planRoute(s,goal){
  const result=[];let from=0;
  while(from<raw.length-1){let to=raw.length-1;while(to>from+1&&!clearSegment(s,raw[from],raw[to]))to--;result.push(raw[to]);from=to;}
  return result;
+}
+
+// Click a visible object to approach its ground contact point and interact.
+export function destinationAt(s,point){
+ const spots=PLACES.filter(p=>!!p.boat===(s.mode==='boat')&&!(['shell','bottle'].includes(p.id)&&s.flags[p.id]));
+ if(s.mode==='boat')spots.push(...DOCKS.map(d=>({id:'dock:'+d.id,x:d.water[0],y:d.water[1],label:d.name})));
+ else{const d=DOCKS.find(d=>d.id===s.dock);spots.push({id:'boat',x:d.land[0],y:d.land[1],label:'邮差的小船'});}
+ return spots.filter(p=>Math.hypot(p.x-point.x,p.y-point.y)<(p.id.startsWith('dock:')?42:30)||(p.id==='lighthouse'&&Math.abs(point.x-p.x)<32&&point.y>p.y-185&&point.y<p.y)||(p.id==='office'&&Math.abs(point.x-p.x)<63&&point.y>p.y-90&&point.y<p.y)).sort((a,b)=>Math.hypot(a.x-point.x,a.y-point.y)-Math.hypot(b.x-point.x,b.y-point.y))[0]||null;
 }
