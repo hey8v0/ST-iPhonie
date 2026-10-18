@@ -179,6 +179,6 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
   doc.addEventListener('pointerdown', away, true);
   const onResize = () => { if (sizing) { preferredHeight = sizing.before; sizing = null; } sizeList(); if (!el.hidden) where(); };
   win.addEventListener('resize', onResize);
-  return {refresh, get shown() { return !el.hidden; }, get expanded() { return expanded; },
+  return {refresh, open() { dismissed = ''; refresh(); if (!el.hidden) setExpanded(true); }, get shown() { return !el.hidden; }, get expanded() { return expanded; },
     dispose() { leave(); doc.removeEventListener('pointerdown', away, true); win.removeEventListener('resize', onResize); el.remove(); }};
 }

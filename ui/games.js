@@ -22,7 +22,7 @@ export function gamesApp(ctx) {
   let game = null, play = null, paused = false;
 
   function renderList() {
-    v.draw(heading('游戏', '', 'Arcade')
+    v.draw(heading('小游戏', '', 'Arcade')
       + `<div class="game-list">${GAMES.map(g => {
         const b = best.best(g.id);
         return `<button type="button" class="game-card" data-game="${g.id}" style="--g1:${g.colors[0]};--g2:${g.colors[1]}"><span class="game-icon" aria-hidden="true">${g.icon}</span><strong>${esc(g.name)}</strong><small>${b ? `${g.lower ? '最好' : '最高'} ${esc(scoreText(g, b))}` : esc(g.note)}</small></button>`;

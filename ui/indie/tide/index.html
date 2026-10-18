@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#153e45"><title>潮汐来信 · 灯塔下的第一封信</title><link rel="stylesheet" href="tide.css"></head>
+<body>
+<main id="game" aria-label="潮汐来信">
+  <canvas id="sea" tabindex="0" aria-label="用方向键或 WASD 移动，E 交互，J 打开手册，M 查看海图，Escape 暂停"></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+  <header class="hud" hidden><div class="chapter"><small>LETTERS ON THE TIDE</small><b>潮汐来信</b><span id="objective"></span></div><div class="tools"><button data-action="map" aria-label="海图" title="海图 M">⌖</button><button data-action="journal" aria-label="航海手册" title="航海手册 J">▤</button><button data-action="pause" aria-label="暂停" title="暂停 Escape">Ⅱ</button></div></header>
+  <aside class="tide-dial" hidden><span class="dial-icon" aria-hidden="true">◒</span><div><b id="tide-name"></b><div class="tide-track"><i id="tide-level"></i></div></div></aside>
+  <div id="notice" role="status" aria-live="polite"></div>
+  <div class="keyboard-hint" hidden>WASD / 方向键 · 移动　E · 交互</div>
+  <div id="joystick" aria-label="移动摇杆"><i></i></div>
+  <button id="interact" hidden><small>E</small><span>探索</span></button>
+  <section id="title-screen" class="title-screen"><div class="title-art"></div><div class="title-grain"></div><div class="title-content"><p class="eyebrow">AN ISLAND. A LETTER. A WAY HOME.</p><h1>潮汐来信</h1><p class="english-title">LETTERS ON THE TIDE</p><div class="title-rule"></div><p class="title-story">有些路，要等海退下去才看得见。<br>有些信，晚一点也一定要送到。</p><div class="title-buttons"><button class="gold" data-action="start">启程 <span>→</span></button><button class="quiet" data-action="new" hidden>重新启程</button></div><p class="edition">序章　灯塔下的第一封信</p></div><div class="title-bottom"><button data-action="exit">← 返回大游戏</button><button data-action="fullscreen">⛶ 全屏</button><span>适合横屏，戴上耳机。</span></div></section>
+  <section id="overlay" class="overlay" hidden aria-modal="true" role="dialog"><div id="overlay-content"></div></section>
+  <div id="rotate" hidden><span class="rotate-icon">▯ ↻</span><h2>把海，横过来看。</h2><p>横屏后，继续你的航程。</p><button data-action="portrait">继续竖屏</button></div>
+  <div id="fade" aria-hidden="true"></div>
+</main><script type="module" src="main.js"></script>
+</body></html>

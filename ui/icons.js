@@ -8,6 +8,7 @@ const gear = (() => {
 })();
 
 const GLYPHS = {
+  indie: '<path d="M12 53h40L34 9h-4z"/><path d="M22 37h20M26 26h12" fill="none" stroke="var(--t2)" stroke-width="3"/><path d="M27 16h10v9H27z" fill="var(--tac)"/><path d="M5 25l17-5-17-5M59 25l-17-5 17-5" fill="none" stroke="var(--tac)" stroke-width="3" stroke-linejoin="round"/><path d="M5 56q7-6 14 0t14 0 14 0 12 0" fill="none" stroke="var(--t2)" stroke-width="3"/>',
   logs: '<rect x="7" y="10" width="50" height="44" rx="7"/><path d="m17 23 8 7-8 7M32 39h14" fill="none" stroke="var(--t2)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="48" cy="19" r="3" fill="var(--tac)"/>',
   assistant: '<path d="M9 12h46v33H32L19 55V45H9z"/><path d="M23 26v5M41 26v5M27 36q5 4 10 0" fill="none" stroke="var(--t2)" stroke-width="3" stroke-linecap="round"/><path d="M48 5l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="var(--tac)"/>',
   roles: '<path d="M14 57c1-10 8-15 18-15s17 5 18 15z"/><circle cx="32" cy="28" r="13"/><path d="M31 15c-1-5 2-9 7-9-3 2-4 5-3 9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M25 29q2.5-3 5 0M34 29q2.5-3 5 0" fill="none" stroke="var(--t2)" stroke-width="2.2" stroke-linecap="round"/><ellipse cx="24" cy="34" rx="3" ry="1.8" fill="var(--tac)"/><ellipse cx="40" cy="34" rx="3" ry="1.8" fill="var(--tac)"/>',
