@@ -119,7 +119,7 @@ function formats(){return knownFormats(settings);}
 const storyFormat=()=>settings.presets.find(p=>p.id===settings.activePreset)?.format||DEFAULT_FORMAT;
 const voicePlan={wanted:()=>voiceOn()&&settings.general.voiceMode==='separate',has:text=>parsed(text).lines.length>0,format:storyFormat,
  rules:()=>{const only=speakers();return promptPlan(settings,modelRules(settings,only),only).map(p=>p.text).join('\n\n');},
- strip:text=>{const {lines}=parsed(text);let out='',at=0;for(const l of lines){out+=text.slice(at,l.start)+'“'+l.translation+'”';at=l.end;}return out+text.slice(at);}};
+ strip:text=>{const {lines}=parsed(text);let out='',at=0;for(const l of lines){out+=text.slice(at,l.start)+(l.tagOnly?'':'“'+l.translation+'”');at=l.end;}return out+text.slice(at);}};
 // What a reply shows: picture tags become placeholders, sound tags small chips (left out while 音效 is off), voice lines
 // become waves (or plain lines when voice is off).
 const soundsOn=()=>settings?.sounds?.enabled===true;
@@ -144,7 +144,7 @@ const KEEP_KEY='sttts.entry.zz-keep';
 function persist(next){return backend.save(next);}
 const voiceOn=()=>settings?.general?.voiceEnabled!==false;
 const storyWavesOn=()=>voiceOn()&&settings?.general?.hideStoryWaves!==true;
-function storeSettings(next){const voiced=voiceOn(),waves=storyWavesOn(),sounded=soundsOn();settings=next;context().extensionSettings[NAMESPACE]=structuredClone(next);context().saveSettingsDebounced();if(active){memoryHost?.refreshStory();inject();syncFloating();vnHost?.refresh();if(voiced!==voiceOn()){player.stop();rerender();}else if(waves!==storyWavesOn()||sounded!==soundsOn())rerender();else scheduleRender();}}
+function storeSettings(next){const voiced=voiceOn(),waves=storyWavesOn(),sounded=soundsOn(),oldFormats=formats().join('\n');settings=next;context().extensionSettings[NAMESPACE]=structuredClone(next);context().saveSettingsDebounced();if(active){memoryHost?.refreshStory();inject();syncFloating();vnHost?.refresh();if(voiced!==voiceOn()){player.stop();rerender();}else if(waves!==storyWavesOn()||sounded!==soundsOn()||oldFormats!==formats().join('\n'))rerender();else scheduleRender();}}
 function currentMessage(id){const ctx=context(),message=ctx.chat[id];if(!message||message.is_user||message.is_system)return null;return {message,chat:ctx.getCurrentChatId?.()??ctx.chatId,id,raw:message.mes,swipe:message.swipe_id};}
 function unchanged(snap){const now=currentMessage(snap.id);return active&&now?.message===snap.message&&now.chat===snap.chat&&now.raw===snap.raw&&now.swipe===snap.swipe;}
 /** 台词小窗: the latest reply (of the last few) that has voiced lines, as {id, name, lines}. */
@@ -218,8 +218,8 @@ function localStorageSize(){try{let bytes=0;for(let i=0;i<localStorage.length;i+
 async function diagnose(){const ctx=context(),s=settings,json=url=>fetch(url,{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
  const [manifest,version,storage]=await Promise.all([json(new URL('manifest.json',base)),json('/version'),navigator.storage?.estimate?.().catch(()=>null)]);
  const preset=s.presets.find(p=>p.id===s.activePreset),voiced=r=>!!(r.voice?.trim()||(r.engine==='fish'&&s.connections.fish?.params?.references?.length)||(r.engine==='mini'&&s.connections.mini?.params?.timbre_weights?.length));
- const keys={};for(const engine of ['fish','mini','eleven','mimo','nai','gpt']){const image=engine==='nai'||engine==='gpt',users=image?[]:s.routes.filter(r=>r.engine===engine).map(r=>r.name),k={set:!!backend.keyStatus(engine),needed:image?(s.draw?.enabled&&s.draw.engine===engine?'正文出图开着，绘图用的是它':''):users.length?'有角色在用：'+users.join('、'):''};
-  if(k.set&&engine!=='mini'&&engine!=='gpt'){try{if(engine==='nai'){const sub=await backend.naiSubscription();k.detail=sub?`${TIER_NAMES[sub.tier]||'订阅'}${sub.active?'':'（未激活）'}${sub.anlas!==undefined?' · Anlas '+sub.anlas:''}`:'';}else{const b=await backend.voiceBalance(engine);k.detail=b?.kind==='characters'?`剩余 ${b.left} / ${b.limit} 字符`:b?.kind==='credit'?`余额 ${b.credit}`:'';}k.check='ok';}catch(e){k.check='error';k.detail=e.message;}}
+ const keys={};for(const engine of ['fish','mini','eleven','mimo','doubao','nai','gpt']){const image=engine==='nai'||engine==='gpt',users=image?[]:s.routes.filter(r=>r.engine===engine).map(r=>r.name),k={set:!!backend.keyStatus(engine),needed:image?(s.draw?.enabled&&s.draw.engine===engine?'正文出图开着，绘图用的是它':''):users.length?'有角色在用：'+users.join('、'):''};
+  if(k.set&&engine!=='mini'&&engine!=='gpt'&&engine!=='doubao'){try{if(engine==='nai'){const sub=await backend.naiSubscription();k.detail=sub?`${TIER_NAMES[sub.tier]||'订阅'}${sub.active?'':'（未激活）'}${sub.anlas!==undefined?' · Anlas '+sub.anlas:''}`:'';}else{const b=await backend.voiceBalance(engine);k.detail=b?.kind==='characters'?`剩余 ${b.left} / ${b.limit} 字符`:b?.kind==='credit'?`余额 ${b.credit}`:'';}k.check='ok';}catch(e){k.check='error';k.detail=e.message;}}
   if(k.set||k.needed)keys[engine]=k;}
  let reply=null;for(let i=ctx.chat.length-1;i>=0&&!reply;i--){const m=ctx.chat[i];if(!m||m.is_user||m.is_system)continue;const raw=m.mes||'',lines=parsed(raw).lines,element=document.querySelector(`#chat .mes[mesid="${i}"]`),ours=element?element.querySelectorAll(`[data-sttts-line][data-sttts-token="${marker}"]`).length:0,all=element?element.querySelectorAll('[data-sttts-line]').length:0;
   reply={id:i,name:m.name||'',lines:lines.length,tags:/<tts\b/i.test(raw),problems:dialogueProblems(raw,lines),inChat:!!element,waves:ours,stale:all-ours,iframes:element?element.querySelectorAll('iframe').length:0,covered:coverSeen?.id===i?coverSeen.what:'',streaming:i===liveId()};}

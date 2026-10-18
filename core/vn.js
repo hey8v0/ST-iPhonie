@@ -248,7 +248,7 @@ export function storySteps(raw, lines = [], {pics = [], sounds = [], bgm = [], s
   const prose = (a, b) => { if (b > a) for (const piece of narrationPieces(masked.slice(a, b))) for (const page of pages(piece, max)) out.push({kind: 'narrate', text: page}); };
   const point = (list, kind) => list.filter(p => Number.isFinite(p?.start) && (kind !== 'bg' || p.url)).map(p => ({point: kind, p, start: p.start, end: p.start}));
   const events = [
-    ...lines.map((l, i) => ({l, i, start: l?.start, end: l?.end})).filter(x => Number.isFinite(x.start) && Number.isFinite(x.end)),
+    ...lines.map((l, i) => ({l, i, start: l?.tagOnly&&Number.isFinite(l.displayStart)?l.displayStart:l?.start, end: l?.end})).filter(x => Number.isFinite(x.start) && Number.isFinite(x.end)),
     ...point(pics, 'bg'), ...point(sounds, 'sound'), ...point(bgm, 'bgm'),
   ].sort((a, b) => a.start - b.start || (a.point ? -1 : 1));
   let at = 0;

@@ -94,7 +94,7 @@ export function readingPlan(raw, lines, skip = NARRATION_SKIP) {
   let at = 0;
   [...lines].map((l, i) => ({l, i})).filter(x => Number.isFinite(x.l?.start)).sort((a, b) => a.l.start - b.l.start).forEach(({l, i}) => {
     if (l.start < at) return;
-    prose(at, l.start);
+    prose(at, l.tagOnly&&Number.isFinite(l.displayStart)?Math.max(at,l.displayStart):l.start);
     if (!hidden(l.start, l.end)) out.push({line: i});
     at = l.end;
   });

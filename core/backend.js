@@ -45,7 +45,7 @@ import { vibeKey, readVibeFile, imageVibe, mergeVibe, encodingFor, withEncoding,
 const AUDIO = Symbol('audio');
 
 export const BACKEND_API_VERSION = '1.0.0';
-const ENGINES = ['fish', 'mini', 'eleven', 'mimo', 'custom'];
+const ENGINES = ['fish', 'mini', 'eleven', 'mimo', 'doubao', 'custom'];
 /** A small JPEG data URI of a base64 picture, for the vibe list; '' where pictures cannot be drawn (no canvas). */
 async function vibeThumbnail(base64) {
     try {
@@ -2206,7 +2206,7 @@ export class TTSBackend {
             ...(field.key === 'references' ? { help: '参考音频保存在当前浏览器，按酒馆账户隔离。' } : {}),
             ...(field.key === 'samples' ? { help: '上传 mp3 或 wav（编码后不超过 10 MB），起个名字，角色的音色填这个名字。保存在当前浏览器，按酒馆账户隔离。' } : {}),
         })) }));
-        return { engine, ...catalog, connection: current, tags: TTSParameters.tags(engine, current.model), tagNote: TTSParameters.tagNote(engine, current.model), sounds: current.model === 's1' && engine === 'fish' ? [...TTSParameters.vocab.FISH_S1_TONES, ...TTSParameters.vocab.FISH_S1_SOUNDS] : [], sourceDate: '2026-09-30' };
+        return { engine, ...catalog, connection: current, tags: TTSParameters.tags(engine, current.model), tagNote: TTSParameters.tagNote(engine, current.model), sounds: current.model === 's1' && engine === 'fish' ? [...TTSParameters.vocab.FISH_S1_TONES, ...TTSParameters.vocab.FISH_S1_SOUNDS] : [], sourceDate: engine==='doubao'?'2026-10-18':'2026-09-30' };
     }
     audioInfo(audio) {
         return { key: audio.key, line: clone(audio.line), route: clone(audio.route), bytes: audio.blob.size, fromCache: audio.fromCache };

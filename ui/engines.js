@@ -539,7 +539,7 @@ export function enginesApp(ctx) {
     const picked = await menu(ctx, nameOf(engine), [
       image && {key: 'image-connections', icon: 'swap', label: '连接', note: '新建、切换、改名、删除保存的几组连接'},
       engine === 'nai' && saved && {key: 'test-relay', icon: 'refresh', label: '测试连接', note: '发一个空请求试探出图接口，不出图、不扣 Anlas'},
-      voice && engine !== 'custom' && {key: 'read-voices', icon: 'refresh', label: '测试连接', note: '读一次音色列表，看密钥能不能用'},
+      voice && !['custom','doubao'].includes(engine) && {key: 'read-voices', icon: 'refresh', label: '测试连接', note: '读一次音色列表，看密钥能不能用'},
       engine === 'fish' && api.getState().connections.fish.relay && saved && {key: 'test-fish-relay', icon: 'refresh', label: '测试中转', note: '看中转转发了哪些接口，格式不对会自动切换'},
       engine === 'fish' && {key: 'references', icon: 'wave', label: '管理参考音频'},
       voice && {key: 'request-preview', icon: 'eye', label: '请求预览', note: '看看发给服务的请求长什么样'},

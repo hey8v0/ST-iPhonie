@@ -1,6 +1,6 @@
 // Voice engines, NovelAI for drawing, and llm: the phone's own text model (an OpenAI-compatible API).
 import {connectionLost} from './idb.js';
-const engines=['fish','mini','eleven','mimo','custom','nai','llm','gpt','embed'];
+const engines=['fish','mini','eleven','mimo','doubao','custom','nai','llm','gpt','embed'];
 // Keys copied from web pages and chat apps often carry invisible characters (zero-width spaces, line breaks), full-width
 // letters typed with a Chinese input method, quotes, or a "Bearer " prefix. No key contains any of these, and a service
 // answers such a key with 401 although the key itself is valid, so they are taken out before the key is kept or sent.
@@ -10,7 +10,7 @@ export function cleanKey(value){
  return key;
 }
 // Engines that take several keys, one per line: when one is refused or used up, the next one is used (core/providers.js).
-export const MULTI_KEY=new Set(['fish','mini','eleven','mimo']);
+export const MULTI_KEY=new Set(['fish','mini','eleven','mimo','doubao']);
 function checkKey(key){if(key.length>4096)throw Error('密钥格式无效');if(/[^\x21-\x7E]/.test(key))throw Error('密钥里有不是英文字母、数字或符号的字，请回到官网重新复制一次');return key;}
 // Text and image models keep one key per connection preset: lines of "<preset id><tab><key>". A key saved before presets
 // (a line without a tab) belongs to the first preset, 'default'.

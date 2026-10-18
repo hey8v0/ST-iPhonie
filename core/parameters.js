@@ -1,3 +1,4 @@
+import {buildDoubaoRequest} from './doubao.js';
 import {proxyAddress} from './proxy-url.js';
 'use strict';
 // Official TTS parameter snapshot: 2026-09-30 (Eleven v4 added 2026-09-28). See research/engine-parameters/README.md.
@@ -49,8 +50,14 @@ const custom={model:'custom',models:['custom'],source:'',groups:[
  group('api','接口',[t('url','接口地址','比如 http://127.0.0.1:9880/tts。台词放在地址里（GET）时在那里写 {{text}}。本机和局域网的 http 地址也能用。'),s('method','请求方式','POST',[['POST','POST · 台词放在请求体里'],['GET','GET · 台词放在地址里']]),t('body','请求体','JSON。可以写 {{text}} 台词、{{lang}} 台词语言、{{emotion}} 情绪、{{voice}} 音色、{{ref_text}} 参考文本、{{ref_lang}} 参考语言。','textarea'),t('headers','额外请求头','每行一个「名字: 值」，可以写 {{key}}（密钥）。填了密钥、又没在这里写 {{key}} 时，自动加 Authorization: Bearer 密钥。','lines'),t('before','换模型','每个角色是单独训练的模型时用（比如 GPT-SoVITS）：每行一个地址，音色的模型和上一句不一样时，先按顺序访问这些地址把模型换过去。可以写 {{model1}} {{model2}}（音色里的模型 1、模型 2）；音色没填模型的，这一行就跳过。','lines'),s('answer','回答是什么','audio',[['audio','音频本身'],['url','JSON 里的音频链接'],['base64','JSON 里的 base64 音频']]),t('path','在 JSON 的哪里','回答是 JSON 时填，用点隔开，比如 data.audio 或 audio_url。'),t('listUrl','音色列表地址','服务能列出自己有哪些音色时填（比如公益站的角色列表）：角色 App 里「从列表选」会把它们一起列出来，不用一个个添加。'),t('listPath','列表在 JSON 的哪里','用点隔开，比如 data 或 voices；空着自动找。列表里可以是名字，也可以是带 id / name 的对象。')]),
  group('voices','音色',[rows('voices','音色',[t('name','名字'),t('voice','音色 / 参考音频'),{...t('ref_text','参考文本'),optional:true},{...t('ref_lang','参考语言'),optional:true},{...t('model1','模型 1（比如 GPT 的 .ckpt）'),optional:true},{...t('model2','模型 2（比如 SoVITS 的 .pth）'),optional:true}],200,'角色的「音色」选这里的名字。「音色 / 参考音频」填进 {{voice}}（音色 ID，或参考音频在后端那台电脑上的路径），参考文本、参考语言填进 {{ref_text}} {{ref_lang}}（参考语言空着就跟台词一样）。')])
 ]};
-const catalogs={fish,mini,eleven,mimo,custom};
-function defaults(key){return Object.fromEntries(catalogs[key].groups.flatMap(g=>g.fields.map(f=>[f.key,structuredClone(f.value)])));}
+const doubao={model:'seed-tts-2.0',models:['seed-tts-2.0','seed-tts-1.0','seed-tts-1.0-concurr','seed-icl-2.0','seed-icl-1.0','seed-icl-1.0-concurr'],source:'https://docs.volcengine.com/docs/DoubaoVoice/HTTPChunkedSSEUnidirectionalStreaming-V3?lang=zh',groups:[
+ group('connection','连接',[t('url','接口地址','默认借酒馆转发，需要服务端开启 enableCorsProxy；也可以填自己的豆包兼容中转完整地址。'),t('appId','旧版 App ID（可不填）','新版控制台只需 API Key。旧版填 App ID，并把 Access Token 存在上面的密钥中。')]),
+ group('audio','声音',[s('format','音频格式','mp3',[['mp3','MP3'],['pcm','PCM（自动封装 WAV）']]),s('sample_rate','采样率',24000,[8000,16000,22050,24000,32000,44100,48000].map(v=>[v,String(v)])),n('speech_rate','语速',0,-50,100,1),n('loudness_rate','音量',0,-50,100,1),n('pitch','音调',0,-12,12,1)]),
+ group('style','语气',[t('context','语音指令','仅合成 2.0 和复刻 2.0 表现力版支持。可写「你可以说得温柔一点吗」。台词情绪会附在指令里，不当作正文朗读。'),s('cloneModel','复刻 2.0 效果','seed-tts-2.0-standard',[['seed-tts-2.0-standard','标准'],['seed-tts-2.0-expressive','表现力增强']])]),
+ group('voices','自己的音色',[rows('voices','音色',[t('name','名字'),t('id','音色 ID')],200,'从火山控制台音色库复制 ID；模型版本需与音色对应。复刻音色也可添加。')])
+]};
+const catalogs={fish,mini,eleven,mimo,doubao,custom};
+function defaults(key){const value = Object.fromEntries(catalogs[key].groups.flatMap(g=>g.fields.map(f=>[f.key,structuredClone(f.value)])));if(key==='doubao')value.url='/proxy/https://openspeech.bytedance.com/api/v3/tts/unidirectional';return value;}
 function allowed(key,field,c){let list=field.options||[];const p=c.params;
  if(key==='fish'&&field.key==='sample_rate'){const rates=p.format==='mp3'?[32000,44100]:p.format==='opus'?[48000]:[8000,16000,24000,32000,44100];list=list.filter(([v])=>rates.includes(v));}
  if(key==='mini'&&field.key==='voice_setting.emotion'&&!c.model.startsWith('speech-2.6'))list=list.filter(([v])=>!['fluent','whisper'].includes(v));
@@ -111,6 +118,7 @@ function setPath(target,key,value){const parts=key.split('.');let node=target;fo
 // (eleven_v4 rejects apply_language_text_normalization:false).
 const ELEVEN_DEFAULTS={apply_text_normalization:'auto',apply_language_text_normalization:false,use_pvc_as_ivc:false,enable_logging:true};
 function requestPreview(key,c,voice='角色音色 ID',text='雨还没停。再坐一会儿吧。',model=c.model){c=structuredClone(c);c.model=model;normalize(key,c);const values=activeParameters(key,c);let body={},query={};for(let [k,v] of Object.entries(values)){if(['dictionary_mode','inline_dictionary'].includes(k))continue;if(key==='eleven'&&Object.hasOwn(ELEVEN_DEFAULTS,k)&&ELEVEN_DEFAULTS[k]===v)continue;if(key==='eleven'&&['output_format','enable_logging','optimize_streaming_latency'].includes(k)){query[k]=v;continue;}const f=catalogs[key].groups.flatMap(g=>g.fields).find(f=>f.key===k);if(f?.type==='lines')v=String(v).split('\n').map(x=>x.trim()).filter(Boolean);setPath(body,k,v);}
+ if(key==='doubao')return buildDoubaoRequest(c,{voice},{text});
  if(key==='fish'){if(c.params.dictionary_mode==='inline'&&c.params.inline_dictionary.length)body.pronunciation_dictionary=[{items:c.params.inline_dictionary}];if(body.references)body.references=body.references.map(r=>({audio:'[本地参考音频：'+r.audio+']',text:r.text}));const format=body.format;delete body.format;const compat={url:fishBase(c)+'/compat/v1/audio/speech',body:{model:'fish-audio/'+model,input:text,voice:body.references?'':voice,response_format:format,provider:{options:{'fish-audio':structuredClone(body)}}}};
  // Fish's own /v1/tts: the model in a header, the same fields at the top (the compat request is kept for the cache).
  if(!fishNative({...c,model}))return compat;return {url:fishBase(c)+'/v1/tts',headers:{model},native:true,compat,body:{text,...(body.references||!voice?{}:{reference_id:voice}),format,...body}};}
@@ -137,11 +145,11 @@ const elevenTagged=model=>/^eleven_v[34]/.test(model);
 // any language, before the words it is for; sounds and pauses in brackets where they happen; paired tags for some words.
 const FISH_DRAMA_PAIRS=['whisper','emphasis','soft','fast','slow','stress','forceful'],FISH_DRAMA_SOUNDS=['sigh','small laugh','shaky breath','pause','gasp','sniff'];
 const fishDrama=model=>model==='drama-3';
-function tags(key,model){if(key==='fish'&&fishDrama(model))return [...FISH_DRAMA_SOUNDS.map(x=>'['+x+']'),...FISH_DRAMA_PAIRS.map(x=>'<'+x+'>…</'+x+'>')];return key==='custom'?[]:key==='mimo'?MIMO_STYLES:key==='mini'?['happy','sad','angry','fearful','disgusted','surprised','calm',...(model.startsWith('speech-2.6')?['fluent','whisper']:[])]:key==='eleven'?(elevenTagged(model)?ELEVEN_TAGS:['通过文字和标点表达情绪']):fishS1(model)?FISH_S1_EMOTIONS:['自然语言描述，如 happy、whispers sweetly、slightly sad'];}
+function tags(key,model){if(key==='fish'&&fishDrama(model))return [...FISH_DRAMA_SOUNDS.map(x=>'['+x+']'),...FISH_DRAMA_PAIRS.map(x=>'<'+x+'>…</'+x+'>')];return key==='doubao'?['自然语气描述，通过语音指令传递']:key==='custom'?[]:key==='mimo'?MIMO_STYLES:key==='mini'?['happy','sad','angry','fearful','disgusted','surprised','calm',...(model.startsWith('speech-2.6')?['fluent','whisper']:[])]:key==='eleven'?(elevenTagged(model)?ELEVEN_TAGS:['通过文字和标点表达情绪']):fishS1(model)?FISH_S1_EMOTIONS:['自然语言描述，如 happy、whispers sweetly、slightly sad'];}
 // What the 情绪 field of a line may say, in Chinese or English, and the MiniMax emotion it means.
 const MINI_EMOTION_WORDS={happy:['happy','joyful','excited','cheerful','delighted','开心','高兴','快乐','喜悦','兴奋','愉快','欣喜','得意','雀跃','幸福','激动'],sad:['sad','upset','depressed','sorrowful','crying','难过','伤心','悲伤','沮丧','失落','委屈','哭泣','哽咽','低落','心疼'],angry:['angry','furious','annoyed','mad','生气','愤怒','恼火','不满','暴怒','气愤','不耐烦','烦躁'],fearful:['fearful','scared','afraid','nervous','anxious','害怕','恐惧','紧张','担心','不安','惊恐','慌张','焦虑'],disgusted:['disgusted','contemptuous','disdainful','厌恶','嫌弃','恶心','鄙视','轻蔑','不屑'],surprised:['surprised','shocked','astonished','惊讶','吃惊','震惊','意外','诧异','惊喜'],calm:['calm','gentle','neutral','soft','relaxed','平静','冷静','温柔','淡然','冷淡','平淡','轻声','温和','沉稳','认真','严肃'],fluent:['fluent','流畅','生动'],whisper:['whisper','whispering','whispers','低语','耳语','悄悄','小声']};
 /** One line for the engine card: how this model reads emotion and tags. */
-function tagNote(key,model){
+function tagNote(key,model){if(key==='doubao')return '豆包 2.0 用自然语言语音指令控制情感，不把 Fish / ElevenLabs 的方括号标签放进朗读文本。1.0 通过措辞、标点和引擎参数表达。';
  if(key==='custom')return '台词的情绪不会写进台词里，要用就在请求体里写 {{emotion}}（比如接口有情绪参数时）。';
  if(key==='mimo')return '台词的情绪会自动写成句首的圆括号标签，如 (开心)，中文最准；原文里还可以在任意位置插方括号的细节标签，如 [轻笑]、[叹气]。'+(mimoMode(model)==='design'?'音色设计模型：角色的「音色」一栏写音色描述。':mimoMode(model)==='clone'?'声音克隆模型：角色的「音色」一栏写克隆样本的名字。':'');
  if(key==='mini')return '台词里的情绪会自动对应到下面这几个（中文也行）；对应不上时由模型自己判断。'+(model.startsWith('speech-2.8')?'原文里还能插下面这些圆括号语气声。':'');
@@ -153,7 +161,7 @@ function tagNote(key,model){
 function miniEmotion(model,emotion){const word=String(emotion||'').trim().toLowerCase();if(!word)return '';const found=Object.entries(MINI_EMOTION_WORDS).find(([,words])=>words.some(w=>word===w||word.includes(w)))?.[0]||'';return tags('mini',model).includes(found)?found:'';}
 /** Puts a line's 情绪 at the start of the text as the model's own tag, when the model reads tags and the text has none there. */
 const ENGLISH={fearful:'scared',whisper:'whispering',fluent:''};
-function emotionTag(key,model,emotion,text){let word=String(emotion||'').trim();if(key==='custom'||!word||/^\s*[[(]/.test(text))return text;
+function emotionTag(key,model,emotion,text){let word=String(emotion||'').trim();if(key==='custom'||key==='doubao'||!word||/^\s*[[(]/.test(text))return text;
  // Drama 3 takes the direction as written, in any language: a whole sentence is fine (one already in brackets keeps them).
  if(key==='fish'&&fishDrama(model)){word=word.replace(/^\[([^\]]*)\]$/,'$1').replace(/[[\]]/g,'').trim();return word&&word.length<=120?`[${word}] ${text}`:text;}
  // MiMo reads Chinese style words best: the 情绪 goes in as written.

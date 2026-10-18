@@ -13,7 +13,7 @@ export function withoutVoice(message, formats) {
     try { lines = parseDialogue(text, format); } catch { continue; }
     if (!lines.length) continue;
     let out = '', at = 0;
-    for (const line of lines) { out += text.slice(at, line.start) + '“' + line.translation + '”'; at = line.end; }
+    for (const line of lines) { out += text.slice(at, line.start) + (line.tagOnly ? '' : '“' + line.translation + '”'); at = line.end; }
     return out + text.slice(at);
   }
   return text;

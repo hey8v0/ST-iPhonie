@@ -103,7 +103,7 @@ export function settingsApp(ctx) {
       + (backup.parts.has('keys') ? keyPasswordFields() : '')
       + `<div class="actions">${btn('make-backup', icon('download') + '生成备份文件', 'primary', canBackup() ? '' : 'disabled')}</div>`);
   }
-  const savedKeys = () => ['fish', 'mini', 'eleven', 'mimo', 'nai', 'llm'].filter(engine => { try { return api.keyStatus(engine); } catch { return false; } }).length;
+  const savedKeys = () => ['fish', 'mini', 'eleven', 'mimo', 'doubao', 'nai', 'llm'].filter(engine => { try { return api.keyStatus(engine); } catch { return false; } }).length;
   const passwordOk = () => !backup.parts.has('keys') || backup.password.length >= 6 && backup.password === backup.again;
   const canBackup = () => backup.parts.size > 0 && passwordOk();
   function keyPasswordFields() {

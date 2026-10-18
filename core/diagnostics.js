@@ -1,7 +1,7 @@
 // The self-check report: facts gathered in the tavern page become sections of findings and a plain-text report that
 // can be copied and sent to whoever is helping. Nothing here reads or prints keys.
 
-const ENGINE_NAMES = {fish: 'Fish Audio', mini: 'MiniMax', eleven: 'ElevenLabs', mimo: '小米 MiMo', custom: '自己的接口', nai: 'NovelAI', gpt: 'GPT 生图'};
+const ENGINE_NAMES = {fish: 'Fish Audio', mini: 'MiniMax', eleven: 'ElevenLabs', mimo: '小米 MiMo', doubao: '豆包语音', custom: '自己的接口', nai: 'NovelAI', gpt: 'GPT 生图'};
 const DRAW_NAMES = {nai: 'NovelAI', gpt: 'GPT 生图', comfy: 'ComfyUI'};
 const MARKS = {ok: '✓', warn: '⚠', error: '✗', info: '·'};
 const item = (level, label, detail = '') => ({level, label, detail: String(detail ?? '')});

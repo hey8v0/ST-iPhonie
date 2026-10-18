@@ -170,7 +170,7 @@ export class LocalLibrary {
  async saveFavorite(input){
   fields(input,['id','requestKey','role','text','translation','engine','model','voice','blob']);
   const id=this.#makeId(input.id),requestKey=string(input.requestKey,'音频编号',512,true),role=string(input.role,'角色名',200,true),text=string(input.text,'原文',1_000_000,true),translation=string(input.translation??'','译文',1_000_000),engine=input.engine,model=string(input.model??'','模型',200),voice=string(input.voice??'','音色',512),blob=blobValue(input.blob,LIBRARY_LIMITS.total,'音频','audio');
-  if(!['fish','mini','eleven','mimo','custom'].includes(engine))throw fail('语音引擎无效');
+  if(!['fish','mini','eleven','mimo','doubao','custom'].includes(engine))throw fail('语音引擎无效');
   return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,requestKey,role,text,translation,engine,model,voice,blob,type:blob.type,size:blob.size,createdAt:rows.favorites.get(id)?.createdAt??now,updatedAt:now};put('favorites',row);return publicRow(row);});
  }
  async getFavorite(id){return publicRow(await this.#read('favorites',identifier(id)));}
@@ -237,7 +237,7 @@ export class LocalLibrary {
   const now=this.#time(),time=v=>Number.isFinite(v)&&v>0?v:now,dates={createdAt:time(row.createdAt),updatedAt:time(row.updatedAt)};
   if(name==='notes')return {id:identifier(row.id),title:string(row.title??'','标题',200),text:string(row.text??'','备忘录',1_000_000),...dates};
   if(name==='photos'||name==='references'){const media=name==='photos',blob=blobValue(row.blob,media?LIBRARY_LIMITS.photo:LIBRARY_LIMITS.reference,media?'图片':'参考音频',media?'image':'audio',row.name);return {id:identifier(row.id),name:string(row.name??(media?'图片':'reference.wav'),media?'图片名称':'音频名称',512,true),blob,type:blob.type,size:blob.size,...dates};}
-  if(name==='favorites'){if(!['fish','mini','eleven','mimo','custom'].includes(row.engine))throw fail('备份里的收藏语音引擎无效');const blob=blobValue(row.blob,LIBRARY_LIMITS.total,'音频','audio');return {id:identifier(row.id),requestKey:string(row.requestKey,'音频编号',512,true),role:string(row.role,'角色名',200,true),text:string(row.text,'原文',1_000_000,true),translation:string(row.translation??'','译文',1_000_000),engine:row.engine,model:string(row.model??'','模型',200),voice:string(row.voice??'','音色',512),blob,type:blob.type,size:blob.size,...dates};}
+  if(name==='favorites'){if(!['fish','mini','eleven','mimo','doubao','custom'].includes(row.engine))throw fail('备份里的收藏语音引擎无效');const blob=blobValue(row.blob,LIBRARY_LIMITS.total,'音频','audio');return {id:identifier(row.id),requestKey:string(row.requestKey,'音频编号',512,true),role:string(row.role,'角色名',200,true),text:string(row.text,'原文',1_000_000,true),translation:string(row.translation??'','译文',1_000_000),engine:row.engine,model:string(row.model??'','模型',200),voice:string(row.voice??'','音色',512),blob,type:blob.type,size:blob.size,...dates};}
   if(name==='vibes'){if(!row.meta||typeof row.meta!=='object'||Array.isArray(row.meta))throw fail('备份里的 Vibe 信息无效');const blob=blobValue(row.blob,LIBRARY_LIMITS.vibe,'Vibe 文件','data');return {id:identifier(row.id),name:string(row.name,'Vibe 名字',80,true),meta:structuredClone(row.meta),blob,size:blob.size,...dates};}
   const {wallpaper,icons,iconStyle,skin,lockOnOpen,volume,widgets}={...defaults(),...row};
   this.#appearance(wallpaper,'wallpaper');fields(icons,PHONE_APPS);for(const icon of Object.values(icons))this.#appearance(icon,'icon');

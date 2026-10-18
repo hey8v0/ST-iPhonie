@@ -1,5 +1,5 @@
 /** Public API returned by the installed ST-iPhonie panel bridge (backend API 1.0.0 plus drawing). */
-export type Engine = 'fish' | 'mini' | 'eleven' | 'mimo';
+export type Engine = 'fish' | 'mini' | 'eleven' | 'mimo' | 'doubao' | 'custom';
 /** Keys cover the voice engines and NovelAI. */
 /** llm: the key of the phone's own text model (an OpenAI-compatible API). */
 export type KeyEngine = Engine | 'nai' | 'llm' | 'embed' | 'gpt';
@@ -509,7 +509,7 @@ export interface AudioMetadata {
 }
 export interface CachedAudio { key: string; at: number; bytes: number; metadata: AudioMetadata; }
 export interface CacheStats { count: number; bytes: number; available: boolean; }
-export interface VoicePoolEntry { engine: 'fish' | 'mini' | 'eleven' | 'mimo'; voice: string; model: string; name: string; gender: 'female' | 'male' | ''; age: 'child' | 'young' | 'adult' | 'old' | ''; style: string; }
+export interface VoicePoolEntry { engine: 'fish' | 'mini' | 'eleven' | 'mimo' | 'doubao' | 'custom'; voice: string; model: string; name: string; gender: 'female' | 'male' | ''; age: 'child' | 'young' | 'adult' | 'old' | ''; style: string; }
 export interface LibraryStats { bytes: number; limit: number; notes: number; photos: number; favorites: number; references: number; vibes: number; /** Bytes by kind: notes, photos, favorites, references, vibes, phone. */ sizes: Record<string, number>; }
 export type LibraryCollection = 'favorites' | 'cache' | 'photos' | 'notes';
 
@@ -1030,7 +1030,7 @@ export interface DiagnosticFacts {
     browser: { secure: boolean; audio: boolean; indexedDB: boolean; storage: { usage: number; quota: number } | null; agent: string };
     extensions: string[];
     voice: { enabled: boolean; preset: string; format: string; injection: string; roles: { name: string; voice: boolean }[] };
-    keys: Partial<Record<'fish' | 'mini' | 'eleven' | 'nai', { set: boolean; needed: string; check?: 'ok' | 'error'; detail?: string }>>;
+    keys: Partial<Record<'fish' | 'mini' | 'eleven' | 'mimo' | 'doubao' | 'custom' | 'nai', { set: boolean; needed: string; check?: 'ok' | 'error'; detail?: string }>>;
     reply: { id: number; name: string; lines: number; tags: boolean; problems: { at: number; role: string; reason: string; snippet: string }[];
         inChat: boolean; waves: number; stale: number; iframes: number; covered: string; streaming: boolean } | null;
     errors: { at: number; kind: 'notice' | 'error'; message: string }[];

@@ -9,7 +9,7 @@ import {promptRule} from './prompt-rules.js';
 export const POOL_LIMIT = 200;
 export const VOICE_GENDERS = Object.freeze({female: '女', male: '男'});
 export const VOICE_AGES = Object.freeze({child: '孩子', young: '少年少女', adult: '成年', old: '老年'});
-const ENGINES = ['fish', 'mini', 'eleven', 'mimo'];
+const ENGINES = ['fish', 'mini', 'eleven', 'mimo', 'doubao'];
 const text = (value, max) => String(value ?? '').trim().slice(0, max);
 
 export function normalizePool(list) {

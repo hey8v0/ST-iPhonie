@@ -2,7 +2,7 @@
 // more, with the voice preset's rules, to voice the lines already in it. The answer is one row per spoken line, the
 // line as the reply has it and the same line in the preset's 台词格式; the plugin puts each in place of its line.
 // With 回复后单独配图 on too, both go in one request (combinedRequest).
-import {parseDialogue, formatExample} from './protocol.js';
+import {parseDialogue, formatExample, FREE_FORMAT} from './protocol.js';
 
 const OPEN = '“"「『‘\'', CLOSE = '”"」』’\'';
 export const VOICE_ARROW = '⇒';
@@ -60,6 +60,7 @@ export function insertVoiced(message, reply, format) {
         let a = at, b = at + text.length;
         if (OPEN.includes(source[a - 1] || '\0') && CLOSE.includes(source[b] || '\0')) { a--; b++; }
         else if (OPEN.includes(source[a - 1] || '\0') && CLOSE.includes(source[b + 1] || '\0') && /[。！？!?…~～，,]/.test(source[b])) { a--; b += 2; }
+        if (format===FREE_FORMAT) { const tail=/^\s*[（(][^()（）\n]{1,2000}[）)]/.exec(source.slice(b)); if(tail)b+=tail[0].length; }
         if (free(a, b)) return [a, b];
       }
     }
@@ -69,7 +70,7 @@ export function insertVoiced(message, reply, format) {
   for (const [said, voiced] of voicedRows(reply, format)) {
     const span = find(said, cursor) || find(said, 0);
     if (!span) continue;
-    taken.push(span); spans.push([...span, voiced]);
+    taken.push(span); spans.push([...span, format===FREE_FORMAT?source.slice(span[0],span[1])+voiced:voiced]);
     if (span[0] >= cursor) cursor = span[1];
   }
   let out = '', at = 0;

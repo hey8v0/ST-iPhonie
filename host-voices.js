@@ -5,7 +5,7 @@ import {normalizePool, poolLine, voiceProfile, pickRequest, parsePick, searchReq
 import {plainStory} from './core/chat.js';
 import {findRoute} from './core/routes.js';
 
-const ENGINE_NAMES = {fish: 'Fish Audio', mini: 'MiniMax', eleven: 'ElevenLabs', mimo: 'MiMo', custom: '自己的接口'};
+const ENGINE_NAMES = {fish: 'Fish Audio', mini: 'MiniMax', eleven: 'ElevenLabs', mimo: 'MiMo', doubao: '豆包语音', custom: '自己的接口'};
 
 /** saidBy(name): what that character said in the story (their lines' translations), newest last. */
 export function createVoiceHost({context, settings, backend, saidBy = () => []}) {

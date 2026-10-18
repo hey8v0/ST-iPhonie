@@ -1,5 +1,6 @@
 // Editable defaults for request assembly; stable IDs preserve saved overrides.
 export const PROMPT_RULES = [
+ {id:'modelRules.doubao',group:'朗读规则',title:'豆包语音的台词与情绪',text:'朗读原文只写角色说出口的话，不添加 Fish 或 ElevenLabs 的声音标签。情绪字段用简短自然语言描述语气，合成 2.0 将它作为语音指令；合成 1.0 不保证支持语气指令。'},
   {
     "id": "chat.knowsRule.001",
     "group": "聊天",
