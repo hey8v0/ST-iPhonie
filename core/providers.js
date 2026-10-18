@@ -1,3 +1,4 @@
+import {proxyAddress} from './proxy-url.js';
 import { validateKey, MULTI_KEY, keyTail } from './keys.js';
 import { languageCode } from './languages.js';
 import { TTSParameters as P, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, setFishCompat } from './parameters.js';
@@ -62,7 +63,7 @@ export function buildRequest(engine,connection,route,line,references=new Map()){
   request.url=P.openaiSpeech(P.fishBase(c));
   request.body={model:c.model,input:request.body.input,voice:request.body.voice,response_format:request.body.response_format,...(Number.isFinite(speed)&&speed!==1?{speed}:{})};
  }
- const url=new URL(request.url);for(const [k,v] of Object.entries(request.query||{}))url.searchParams.set(k,String(v));
+ const url=new URL(request.url,globalThis.location?.href);for(const [k,v] of Object.entries(request.query||{}))url.searchParams.set(k,String(v));
  return {engine,url:url.href,body:request.body,...(official?{official}:{}),...extra,format:engine==='mimo'?'wav':engine==='fish'?c.params.format:engine==='mini'?c.params['audio_setting.format']:c.params.output_format,sampleRate:engine==='mimo'?24000:engine==='fish'?c.params.sample_rate:engine==='mini'?c.params['audio_setting.sample_rate']:Number(c.params.output_format.split('_')[1]),channels:engine==='mini'?c.params['audio_setting.channel']:1};
 }
 export function hexBytes(hex){if(typeof hex!=='string'||!hex.length||hex.length%2||!/^[\da-f]+$/i.test(hex))throw Error('返回的音频数据无效');return Uint8Array.from(hex.match(/../g),x=>parseInt(x,16));}
@@ -208,7 +209,7 @@ export class Providers{
  async customVoiceList(c,search=''){
   const own=customVoices(c),q=search.trim().toLowerCase();let listed=[],note='';
   const url=String(c.params.listUrl||'').trim();
-  if(/^https?:\/\//i.test(url)){const {url:target,init}=customInit({url,method:'GET',headers:String(c.params.headers||'')},this.keys.get('custom')||'');
+  if(proxyAddress(url)||/^https?:\/\//i.test(url)){const {url:target,init}=customInit({url,method:'GET',headers:String(c.params.headers||'')},this.keys.get('custom')||'');
    let r=await fetchWithPolicy(this.fetcher,target,init).catch(()=>null);if(!r&&this.proxy)r=await this.proxy(target,init).catch(()=>null);
    if(!r)note='音色列表地址连不上';else if(!r.ok)note='音色列表地址回答 HTTP '+r.status;else{try{listed=readVoiceList(await r.json(),String(c.params.listPath||'').trim());}catch{note='音色列表回的不是 JSON';}}
    listed=listed.filter(v=>!own.some(o=>o.id===v.id));}

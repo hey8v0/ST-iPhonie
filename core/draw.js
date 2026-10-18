@@ -822,11 +822,17 @@ export function parsePictures(message) {
 }
 
 /** Replaces picture blocks with placeholders that the host fills in after rendering. */
-export function renderPictures(message, marker) {
+export function renderPictures(message, marker, {passive = false, pictures = {}} = {}) {
   const tags = parsePictures(message);
   if (!tags.length) return message;
   let out = '', at = 0;
   for (const tag of tags) {
+    if (passive) {
+      const record = pictures[tag.hash], versions = record?.versions || (record?.url ? [record] : []);
+      const picture = versions[Math.min(versions.length - 1, Math.max(0, record?.index ?? versions.length - 1))];
+      out += message.slice(at, tag.start) + (picture?.url ? `<img src="${escapeHTML(picture.url)}" alt="${escapeHTML(tag.prompt)}" loading="lazy">` : '');
+      at = tag.end; continue;
+    }
     out += message.slice(at, tag.start) + `<span class="sttts-pic" data-sttts-pic="${tag.index}" data-sttts-hash="${escapeHTML(tag.hash)}" data-sttts-token="${escapeHTML(marker)}"></span>`;
     at = tag.end;
   }

@@ -23,7 +23,7 @@ const OWN = /^\/?user\/images\//;
  * music(id, index): plays a sound tag / <bgm> of a message (sounds() / musicOn(): whether they are on); avatars(): the
  * tavern's avatars ({me, characters}); closePanel(): puts the phone away.
  */
-export function createVnHost({context, settings, backend, linesOf, voiced, play, narrate = () => {}, stop, voiceOn, sound = () => {}, music = () => {}, sounds = () => false, musicOn = () => false, avatars, notice, closePanel = () => {}, doc = document}) {
+export function createVnHost({showEntry = () => true, context, settings, backend, linesOf, voiced, play, narrate = () => {}, stop, voiceOn, sound = () => {}, music = () => {}, sounds = () => false, musicOn = () => false, avatars, notice, closePanel = () => {}, doc = document}) {
   let stage = null, cursor = 0, endTimer = 0;
   const vn = () => settings().vn;
   const chat = () => context()?.chat || [];
@@ -152,7 +152,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
 
   /** The 视觉小说 button on each message, while the mode is on. */
   function buttons() {
-    const on = vn()?.enabled === true;
+    const on = showEntry() && vn()?.enabled === true && settings().general?.hideStoryWaves !== true;
     for (const mes of doc.querySelectorAll('#chat .mes[mesid]')) {
       const old = mes.querySelector('[data-sttts-vn]');
       if (!on || mes.getAttribute('is_system') === 'true') { old?.remove(); continue; }

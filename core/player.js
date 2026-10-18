@@ -21,6 +21,8 @@ export class BrowserAudio {
   this.finish = null;
   this.volume = 1;
   this.playEpoch = 0;
+  this.decoded = new Map();
+  this.decodeBytes = 0;
  }
  unlock() {
   this.context ??= new AudioContext();
@@ -34,6 +36,26 @@ export class BrowserAudio {
    this.analyser.connect(this.context.destination);
   }
   return this.context.resume();
+ }
+ /** Decode ahead without resuming the audio device or playing any sound. Bounded PCM cache. */
+ async warm(blob) {
+  this.context ??= new AudioContext();
+  const ctx = this.context;
+  let entry = this.decoded.get(blob);
+  if (entry) return entry.job;
+  entry = {bytes: 0, job: null};
+  entry.job = blob.arrayBuffer().then(bytes => ctx.decodeAudioData(bytes)).then(buffer => {
+   if (ctx !== this.context || this.decoded.get(blob) !== entry) return buffer;
+   entry.bytes = (buffer.length || 0) * (buffer.numberOfChannels || 1) * 4;
+   this.decodeBytes += entry.bytes;
+   while (this.decodeBytes > 32 * 1024 * 1024 || this.decoded.size > 24) {
+    const [old, row] = this.decoded.entries().next().value;
+    this.decoded.delete(old); this.decodeBytes -= row.bytes;
+   }
+   return buffer;
+  }).catch(error => { if (this.decoded.get(blob) === entry) this.decoded.delete(blob); throw error; });
+  this.decoded.set(blob, entry);
+  return entry.job;
  }
  setVolume(value) {
   this.volume = volumeValue(value);
@@ -58,9 +80,7 @@ export class BrowserAudio {
   };
   let buffer;
   try {
-   const bytes = await blob.arrayBuffer();
-   check();
-   buffer = await ctx.decodeAudioData(bytes);
+   buffer = await this.warm(blob);
   } catch (error) {
    check();
    throw Error('浏览器无法播放此音频格式，请在引擎配置改选 MP3 或 WAV');
@@ -123,6 +143,7 @@ export class BrowserAudio {
   this.gain?.disconnect();
   this.analyser?.disconnect();
   this.context = this.analyser = this.gain = null;
+  this.decoded.clear(); this.decodeBytes = 0;
   return context?.close();
  }
 }
@@ -143,6 +164,8 @@ export class DialoguePlayer {
   this.played = new Set();
   // Lines being made now, by request key: playing a line that 提前生成 is still making waits for it, not pays twice.
   this.making = new Map();
+  this.readyAudio = new Map();
+  this.readyBytes = 0;
   this.volume = volumeValue(sink.getVolume?.() ?? 1);
   this.clearMetadata();
  }
@@ -231,13 +254,12 @@ export class DialoguePlayer {
  /** A line's audio: from the cache, or made and kept. found(fromCache, key) is told before any making starts. */
  async make(line, route, s, signal, found = () => {}, still = () => !signal.aborted) {
   const effective = { ...structuredClone(route), language: route.language || s.general.defaultLanguage, model: route.model || s.connections[route.engine].model };
-  // A Fish model web pages may not call yet (drama-3): first ask whether Fish has opened it to them by now.
-  if (route.engine === 'fish' && TTSParameters.fishNative({ ...s.connections.fish, model: effective.model })) await this.providers.fishCatalog?.();
-  const request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
+  let request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
   const key = await requestHash(request);
   if (!still()) return null;
   const cacheEpoch = this.cache.epoch;
-  let blob = s.general.cacheEnabled ? await this.cache.get(key) : null;
+  if (this.readyEpoch !== cacheEpoch || !s.general.cacheEnabled) { this.readyAudio.clear(); this.readyBytes = 0; this.readyEpoch = cacheEpoch; }
+  let blob = s.general.cacheEnabled ? this.readyAudio.get(key) || await this.cache.get(key) : null;
   if (!still()) return null;
   const fromCache = !!blob;
   found(fromCache, key);
@@ -248,7 +270,15 @@ export class DialoguePlayer {
    if (shared && !shared.signal?.aborted) blob = await Promise.race([shared.job, new Promise(resolve => { shared.signal?.addEventListener('abort', () => resolve(null), { once: true }); signal?.addEventListener('abort', () => resolve(null), { once: true }); })]).catch(() => null);
    if (!still()) return null;
    if (!blob) {
-    const job = this.providers.synthesize(request, signal), entry = { job, signal };
+    const job = (async () => {
+     // Cached audio never waits for a network catalog refresh.
+     if (route.engine === 'fish' && TTSParameters.fishNative({ ...s.connections.fish, model: effective.model })) {
+      await this.providers.fishCatalog?.();
+      if (!still()) return null;
+      request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
+     }
+     return this.providers.synthesize(request, signal);
+    })(), entry = { job, signal };
     this.making.set(key, entry);
     const done = () => { if (this.making.get(key) === entry) this.making.delete(key); };
     job.catch(() => {}).finally(done);
@@ -259,6 +289,10 @@ export class DialoguePlayer {
    if (this.settings().general.cacheEnabled) await this.cache.put(key, blob, cacheEpoch, {
     line: copyLine(line), route: { name: effective.name, engine: effective.engine, model: effective.model, voice: effective.voice }, requestKey: key
    });
+  }
+  if (s.general.cacheEnabled && this.cache.epoch === cacheEpoch && !this.readyAudio.has(key) && blob.size <= 16 * 1024 * 1024) {
+   this.readyAudio.set(key, blob); this.readyBytes += blob.size;
+   while (this.readyBytes > 16 * 1024 * 1024 || this.readyAudio.size > 24) { const [old, value] = this.readyAudio.entries().next().value; this.readyAudio.delete(old); this.readyBytes -= value.size; }
   }
   return { key, blob, fromCache, effective, request };
  }
@@ -277,6 +311,8 @@ export class DialoguePlayer {
    if (!route?.voice?.trim() && !(route?.engine === 'fish' && s.connections.fish.params.references.length) && !(route?.engine === 'mini' && s.connections.mini.params.timbre_weights.length)) continue;
    const done = await this.make(line, route, s, signal || new AbortController().signal, () => {}, () => !signal?.aborted && valid());
    if (!done) break;
+   try { await this.sink.warm?.(done.blob); } catch { /* Playback reports unsupported audio when requested. */ }
+   if (signal?.aborted || !valid()) break;
    if (!done.fromCache) { made++; each(line); }
   }
   return made;
@@ -289,6 +325,7 @@ export class DialoguePlayer {
   if (!route?.voice?.trim() && !(route?.engine === 'fish' && s.connections.fish.params.references.length) && !(route?.engine === 'mini' && s.connections.mini.params.timbre_weights.length)) return null;
   const made = this.make(line, route, s, signal, () => {}, () => !signal.aborted && this.valid());
   made.catch(() => {});
+  made.then(value => value && this.sink.warm?.(value.blob)).catch(() => {});
   return { index, made };
  }
  async run(epoch) {
@@ -420,5 +457,5 @@ export class DialoguePlayer {
   this.emit('generating', '准备继续播放');
   return this.unlockAndRun();
  }
- close() { this.stop(); return this.sink.close?.(); }
+ close() { this.stop(); this.readyAudio.clear(); this.readyBytes = 0; return this.sink.close?.(); }
 }

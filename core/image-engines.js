@@ -1,3 +1,4 @@
+import {proxyAddress} from './proxy-url.js';
 // Drawing engines besides NovelAI: GPT image models (the OpenAI images API, or a relay that speaks it) and a ComfyUI
 // the user runs. Everything that calls for a picture (正文出图, 朋友圈, 查手机, the 绘图 App) goes through
 // backend.generateImage, which picks the engine set in 绘图 → 用哪个画; this file turns the same picture (scene tags,
@@ -23,6 +24,8 @@ export const defaultGpt = () => ({url: '', model: 'gpt-image-1', quality: 'auto'
 export function gptBase(value, pageProtocol = globalThis.location?.protocol) {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
+  const proxy = proxyAddress(raw);
+  if (proxy) { let path = proxy.replace(/\/+$/, '').replace(/\/images\/(generations|edits)$/i, ''); if (!/\/v\d+$/i.test(path)) path += '/v1'; return path; }
   let url; try { url = new URL(raw); } catch { throw Error('接口地址格式不对，要以 https:// 开头'); }
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw Error('接口地址格式不对：以 https:// 开头，不带 ? 和 #');
   if (url.protocol === 'http:' && pageProtocol === 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw Error('酒馆是用 HTTPS 打开的，浏览器不允许连 http:// 的接口，请换成 HTTPS 地址');

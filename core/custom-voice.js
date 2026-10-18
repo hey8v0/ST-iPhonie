@@ -1,3 +1,4 @@
+import {proxyAddress} from './proxy-url.js';
 // 自己的接口: a speech service the user runs or has (GPT-SoVITS, CosyVoice, IndexTTS…, or any HTTP text-to-speech),
 // told by templates instead of written into the plugin. The address, the request body (JSON) and the headers say where
 // each thing goes: {{text}} the line, {{lang}} its language (zh, ja, en, ko, yue…), {{emotion}} its 情绪, {{voice}} the
@@ -41,7 +42,7 @@ const fill = (template, values, as) => String(template || '').replace(SLOT, (m, 
 /** The request for a line (the key is put in only when it is sent, so it never reaches the cache key or the preview). */
 export function buildCustomRequest(c, route, line) {
   const p = c.params, url = String(p.url || '').trim();
-  if (!/^https?:\/\/[^\s/]+/i.test(url)) throw Error('自己的接口：先在引擎 App 里填好接口地址（http:// 或 https:// 开头）');
+  if (!proxyAddress(url) && !/^https?:\/\/[^\s/]+/i.test(url)) throw Error('自己的接口：先在引擎 App 里填好接口地址（http:// 或 https:// 开头）');
   const values = customValues(c, route, line), method = p.method === 'GET' ? 'GET' : 'POST', template = url + (method === 'POST' ? p.body : '');
   if (/\{\{\s*voice\s*\}\}/.test(template) && !values.voice) throw Error('请先选择角色音色');
   let body;
@@ -49,7 +50,7 @@ export function buildCustomRequest(c, route, line) {
     try { body = JSON.parse(fill(p.body, values, jsonText)); } catch { throw Error('自己的接口：请求体不是有效的 JSON，检查一下引号和逗号'); }
   }
   // 换模型: the addresses that load this voice's model (a line whose model slot is empty is left out).
-  const before = String(p.before || '').split('\n').map(l => l.trim()).filter(l => /^https?:\/\//i.test(l))
+  const before = String(p.before || '').split('\n').map(l => l.trim()).filter(l => proxyAddress(l) || /^https?:\/\//i.test(l))
     .filter(l => [...l.matchAll(SLOT)].every(([, key]) => !/^model/.test(key) || values[key])).map(l => fill(l, values, encodeURIComponent));
   return {engine: 'custom', url: fill(url, values, encodeURIComponent), method, ...(body !== undefined ? {body} : {}), headers: String(p.headers || ''), before,
     answer: ['url', 'base64'].includes(p.answer) ? p.answer : 'audio', path: String(p.path || '').trim(), format: 'auto'};
@@ -113,7 +114,7 @@ export async function readCustomAnswer(response, request, {read, load}) {
     return new Blob([bytes], {type: audioType(bytes, said)});
   }
   let link;
-  try { link = new URL(value.trim(), request.url).href; } catch { throw Error('回答里的音频链接不是网址'); }
+  try { link = new URL(value.trim(), new URL(request.url, globalThis.location?.href).href).href; } catch { throw Error('回答里的音频链接不是网址'); }
   const audio = await load(link);
   if (!audio.ok) throw Error(`音频链接打不开（HTTP ${audio.status}）`);
   const bytes = await read(audio);

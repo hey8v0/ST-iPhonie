@@ -1,3 +1,4 @@
+import {withProxyHeaders} from './proxy-url.js';
 import { normalizeNarration, NARRATOR } from './narration.js';
 import {RequestLog} from './request-log.js';
 import {PROMPT_RULES} from './prompt-rules.js';
@@ -122,8 +123,8 @@ export class TTSBackend {
             ...this.keyStore.load().values(), ...(this.textKeys?.values() || []), this.gptKey, this.embedKey, this.novelai.key,
             ...(this.imageKeys?.nai?.values() || []), ...(this.imageKeys?.gpt?.values() || []),
             ...(this.providers.keys?.values() || [])].flatMap(x => typeof x === 'string' ? x.split('\n').filter(Boolean) : [])});
-        if (typeof this.providers.fetcher === 'function') this.providers.fetcher = this.requestLog.fetch(this.providers.fetcher.bind(this.providers), '语音模型');
-        if (typeof this.novelai.fetch === 'function') this.novelai.fetch = this.requestLog.fetch(this.novelai.fetch.bind(this.novelai), 'NovelAI');
+        if (typeof this.providers.fetcher === 'function') this.providers.fetcher = this.requestLog.fetch(withProxyHeaders(this.providers.fetcher.bind(this.providers), tavernHeaders), '语音模型');
+        if (typeof this.novelai.fetch === 'function') this.novelai.fetch = this.requestLog.fetch(withProxyHeaders(this.novelai.fetch.bind(this.novelai), tavernHeaders), 'NovelAI');
         this.textKeys = new Map();
         this.imageKeys = {nai: new Map(), gpt: new Map()};
         this.imageConnectionRevision = 0;
@@ -149,9 +150,9 @@ export class TTSBackend {
         // GPT 生图 and ComfyUI: the key of the GPT image engine; requests go out with these (tests pass their own).
         this.gptKey = '';
         this.assetFetch = imageFetch;
-        this.imageFetch = this.requestLog.fetch(imageFetch, '绘图接口');
-        this.textFetch = this.requestLog.fetch((...args) => globalThis.fetch(...args), '文字模型接口');
-        this.embedFetch = this.requestLog.fetch((...args) => globalThis.fetch(...args), '向量模型');
+        this.imageFetch = this.requestLog.fetch(withProxyHeaders(imageFetch, tavernHeaders), '绘图接口');
+        this.textFetch = this.requestLog.fetch(withProxyHeaders((...args) => globalThis.fetch(...args), tavernHeaders), '文字模型接口');
+        this.embedFetch = this.requestLog.fetch(withProxyHeaders((...args) => globalThis.fetch(...args), tavernHeaders), '向量模型');
         this.tavernHeaders = tavernHeaders;
         // 保存到酒馆: the tavern's file access (set by the tavern side), what this device last saw there, and the state shown in the phone.
         this.syncFiles = null;

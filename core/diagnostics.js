@@ -76,7 +76,7 @@ export function buildReport(f) {
     if (!r.tags && !r.lines) items.push(item(v.enabled === false ? 'info' : 'warn', '没有语音标签', '模型没有按格式写台词。可以重新生成，或者检查预设是不是插进去了。'));
     else items.push(item(r.lines ? 'ok' : 'warn', `认出 ${r.lines} 句台词`));
     for (const p of r.problems || []) items.push(item('warn', `${p.role || '未写角色'}：${p.reason}`, p.snippet));
-    if (r.lines && v.wavesHidden) items.push(item('info', '正文声波已隐藏', '可以在「听取」里播放；设置 → 配音 → 隐藏正文声波。'));
+    if (r.lines && v.wavesHidden) items.push(item('info', '正文点击按钮已隐藏', '可以在「听取」里播放；设置 → 配音 → 隐藏正文点击按钮。'));
     if (r.lines && v.enabled !== false && !v.wavesHidden) {
       if (!r.inChat) items.push(item('error', '在聊天区里找不到这条消息', '可能被美化主题或前端卡换了显示方式。'));
       else if (!r.waves) items.push(item('error', '认出了台词，但正文里没有画出声波',

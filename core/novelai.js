@@ -1,3 +1,4 @@
+import {proxyAddress} from './proxy-url.js';
 // NovelAI image client used directly from the browser (image.novelai.net allows cross-origin requests).
 // The key stays in this browser; nothing here goes through the tavern server.
 
@@ -14,6 +15,8 @@ export const FISH_PATHS = /\/(compat\/v1\/audio\/speech|v1\/audio\/speech|audio\
 export function relayUrl(value, pageProtocol = globalThis.location?.protocol, strip = NAI_PATHS) {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
+  const proxy = proxyAddress(raw);
+  if (proxy) return proxy.replace(/\/+$/, '').replace(strip, '');
   let url; try { url = new URL(raw); } catch { throw Error('中转地址格式不对，要以 https:// 开头'); }
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw Error('中转地址格式不对：以 https:// 开头，不带 ? 和 #');
   if (url.protocol === 'http:' && pageProtocol === 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw Error('酒馆是用 HTTPS 打开的，浏览器不允许连 http:// 的中转，请给中转配上 HTTPS');

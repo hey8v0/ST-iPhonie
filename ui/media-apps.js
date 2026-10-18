@@ -238,7 +238,7 @@ export function listenApp(ctx) {
   async function render() {
     const ticket = ++epoch;
     latest = selected();
-    v.draw(heading('听取', help('点台词播放单句，也可以整条播放和导出。默认显示最新一条带语音的回复。点对话框右下角的小三角，可以选择其他有语音台词的楼层；选中后整条播放和导出都使用该楼层。隐藏正文声波不影响这里播放。') + btn('refresh', icon('refresh') + '刷新', 'chip-button'), 'Now Playing')
+    v.draw(heading('听取', help('点台词播放单句，也可以整条播放和导出。默认显示最新一条带语音的回复。点对话框右下角的小三角，可以选择其他有语音台词的楼层；选中后整条播放和导出都使用该楼层。隐藏正文点击按钮不影响这里播放。') + btn('refresh', icon('refresh') + '刷新', 'chip-button'), 'Now Playing')
       + `<div class="listen-stage"><div class="portrait"><span class="ring"></span><span class="ring"></span>${halo()}<span data-portrait></span></div><span class="chip emotion" data-emotion hidden></span><div class="visualizer" aria-hidden="true">${'<i></i>'.repeat(32)}</div></div>
         <div class="dialogue-box"><span class="plate" data-speaker-plate><span></span></span><span class="dialogue-engine" data-engine-label></span><p class="play-caption" data-playback-line aria-live="polite"></p><div class="dialogue-foot"><span data-playback-message></span>${btn('toggle-replies', '<svg viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M1 3h12L7 12z"/></svg>', 'reply-picker-toggle', 'aria-label="选择语音楼层" aria-expanded="false" aria-controls="listen-reply-picker"')}</div><div id="listen-reply-picker" class="reply-picker" role="group" aria-label="有语音台词的楼层" hidden></div></div>
         <div class="actions" data-waiting hidden>${btn('configure', icon('mic') + '去给这个角色选音色', 'primary')}</div>

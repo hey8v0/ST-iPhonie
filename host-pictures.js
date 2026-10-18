@@ -105,10 +105,11 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
         list.push({url, seed: result.seed, width: result.params.width, height: result.params.height, model: result.params.model, steps: result.params.steps, prompt: tag.prompt, characters: inputs.names, at: Date.now()});
         keep(now, tag.hash, list, list.length - 1);
         await context().saveChat();
+        if (settings().general.hideStoryWaves) redrawMessage(id, now);
       }
       jobs.delete(key);
     } catch (error) {
-      if (error.cancelled) jobs.delete(key); else jobs.set(key, {state: 'error', message: error.message});
+      if (error.cancelled) jobs.delete(key); else { jobs.set(key, {state: 'error', message: error.message}); if (settings().general.hideStoryWaves) notice(error.message); }
     }
     scheduleRender();
   }
@@ -568,5 +569,16 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     throw Error('聊天里还没有角色的回复');
   }
 
-  return {decorate, click, autoPictures, planPictures, planLatest, voiceLatest, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
+  async function drawMessage(id) {
+    const message = context().chat[id];
+    if (!message || message.is_user || message.is_system) throw Error('找不到这层楼的回复');
+    if (!backend.drawReady()) throw Error('请先在小手机的绘图 App 配好绘图接口');
+    if (!parsePictures(message.mes).length && !await planPictures(id)) return;
+    if (context().chat[id] !== message) return;
+    const tags = parsePictures(message.mes).filter(tag => !shown(message, tag.hash));
+    if (!tags.length) { notice('这层楼的图片已经生成'); return; }
+    const permission = await allowed(true); if (!permission) return;
+    for (const tag of tags) { if (context().chat[id] !== message) break; await generate(id, tag, {permission}); }
+  }
+  return {drawMessage, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
 }

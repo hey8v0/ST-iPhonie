@@ -1,3 +1,4 @@
+import {proxyAddress} from './proxy-url.js';
 'use strict';
 // Official TTS parameter snapshot: 2026-09-30 (Eleven v4 added 2026-09-28). See research/engine-parameters/README.md.
 
@@ -98,7 +99,7 @@ export const fishNative=c=>!fishOpenAI(c)&&!fishCompat.has(c?.model);
 /** A /v1/tts request without a relay goes through the tavern's proxy: what to do when that is off. */
 export const FISH_PROXY_NOTE='这个模型现在只在 Fish 自己的接口上，网页不能直接调用，要借酒馆转发：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆。用中转的不用改。';
 export const FISH_NATIVE_REFS='这个模型走 Fish 自己的接口，那里不能这样带参考音频：在 Fish 引擎里去掉参考音频，角色的「音色」填 Fish 的音色 ID';
-export const fishBase=c=>typeof c?.relay==='string'&&/^https?:\/\/[^\s]+$/.test(c.relay)?c.relay:FISH_API;
+export const fishBase=c=>typeof c?.relay==='string'&&(proxyAddress(c.relay)||/^https?:\/\/[^\s]+$/.test(c.relay))?c.relay:FISH_API;
 /** A relay speaks Fish's own paths ('fish': /compat/v1/audio/speech, /model, /wallet) or OpenAI's ('openai': /v1/audio/speech only). */
 export const fishOpenAI=c=>!!(c?.relay&&c.relayApi==='openai');
 /** The speech address of an OpenAI-form relay. Its address is often written up to /v1 (as OpenAI services are): not twice. */

@@ -1,3 +1,4 @@
+import {proxyAddress} from './proxy-url.js';
 // 文字模型: which model writes the phone's text (chat replies, 朋友圈, calls, picture plans). 'tavern' uses the model the
 // tavern is connected to (generateRaw), as before; 'custom' calls an OpenAI-compatible Chat Completions API directly
 // from the browser with its own address, key and model. The story itself always stays on the tavern's model.
@@ -45,7 +46,7 @@ export function activeText(value) {
 export function apiBase(url) {
   let base = String(url || '').trim().replace(/\/+$/, '');
   base = base.replace(/\/(chat\/completions|completions|models)$/i, '');
-  if (!/^https?:\/\/[^\s/]+/i.test(base)) throw Error('请填写接口地址，例如 https://api.openai.com/v1');
+  if (!proxyAddress(base) && !/^https?:\/\/[^\s/]+/i.test(base)) throw Error('请填写接口地址，例如 https://api.openai.com/v1');
   return base;
 }
 
@@ -123,6 +124,7 @@ export async function streamText(response, info = {}) {
 
 /** A readable reason for a failed request. The key is never part of it. */
 export function failure(status, body, key = '') {
+  if (status === 403 && /CORS proxy is disabled/i.test(typeof body === 'string' ? body : JSON.stringify(body))) return Error('酒馆的跨域代理未开启：在 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆');
   let detail = '';
   try { const json = typeof body === 'string' ? JSON.parse(body) : body; detail = json?.error?.message || json?.message || json?.detail || ''; } catch { detail = String(body || '').slice(0, 200); }
   detail = String(detail).slice(0, 300);
