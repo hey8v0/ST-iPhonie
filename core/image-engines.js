@@ -272,7 +272,7 @@ function repairWorkflowPlaceholderQuotes(data) {
     if (!node || typeof node !== 'object' || !node.inputs || typeof node.inputs !== 'object' || Array.isArray(node.inputs)) continue;
     for (const [key, value] of Object.entries(node.inputs)) {
       if (typeof value !== 'string') continue;
-      const match = /^(['"])(%[a-z_]+%)\\1$/.exec(value.trim());
+      const match = /^(['"])(%[a-z_]+%)\1$/.exec(value.trim());
       if (!match) continue;
       node.inputs[key] = match[2];
       changed = true;
