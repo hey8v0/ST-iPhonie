@@ -4,6 +4,12 @@ import {proxyAddress} from './proxy-url.js';
 
 export const DOUBAO_VOICES = [{id: 'zh_female_vv_uranus_bigtts', name: 'Vivi · 合成 2.0'}];
 
+/** A line's 情绪 as a 语音指令: written out already (「用……的语气说」), or a word or two made into one. */
+export function instruction(emotion) {
+  const e = String(emotion || '').trim().replace(/[。.]+$/, '');
+  if (!e) return '';
+  return e.length <= 6 && !/[说讲念唱喊]|语气|语调|声音|地$/.test(e) ? `用${e}的语气说` : e;
+}
 /** c: the 豆包 engine's connection; route: the role (its voice is the speaker id); line: {text, emotion}. */
 export function buildDoubaoRequest(c, route, line) {
   const p = c.params, url = String(p.url || '').trim();
@@ -12,7 +18,7 @@ export function buildDoubaoRequest(c, route, line) {
   const additions = {};
   if (p.pitch) additions.post_process = {pitch: p.pitch};
   // 语音指令: the user's own words and the line's 情绪, for the models that take them (2.0, and 复刻 2.0 表现力版).
-  const context = [String(p.context || '').trim(), String(line.emotion || '').trim()].filter(Boolean).join('；');
+  const context = [String(p.context || '').trim(), instruction(line.emotion)].filter(Boolean).join('；');
   const instructed = c.model === 'seed-tts-2.0' || (c.model === 'seed-icl-2.0' && p.cloneModel === 'seed-tts-2.0-expressive');
   if (context && instructed) additions.context_texts = [context];
   const params = {text: line.text, speaker: route.voice.trim(), audio_params: {format: p.format, sample_rate: p.sample_rate, speech_rate: p.speech_rate, loudness_rate: p.loudness_rate}};

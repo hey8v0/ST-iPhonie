@@ -135,6 +135,10 @@ function validate(key,c){for(const f of catalogs[key].groups.flatMap(g=>g.fields
 const FISH_S1_EMOTIONS=['happy','sad','angry','excited','calm','nervous','confident','surprised','satisfied','delighted','scared','worried','upset','frustrated','depressed','empathetic','embarrassed','disgusted','moved','proud','relaxed','grateful','curious','sarcastic','disdainful','unhappy','anxious','hysterical','indifferent','uncertain','doubtful','confused','disappointed','regretful','guilty','ashamed','jealous','envious','hopeful','optimistic','pessimistic','nostalgic','lonely','bored','contemptuous','sympathetic','compassionate','determined','resigned'];
 const FISH_S1_TONES=['in a hurry tone','shouting','screaming','whispering','soft tone'];
 const FISH_S1_SOUNDS=['laughing','chuckling','sobbing','crying loudly','sighing','groaning','panting','gasping','yawning','snoring','break','long-break'];
+// Fish S2 / S2.1 (https://docs.fish.audio/developer-guide/core-features/emotions.md, 2026-10-20): the same emotions in square
+// brackets (free-form also works), these tones and sounds anywhere, [emphasis] right before the word, [break] / [long-break].
+const FISH_S2_TONES=['in a hurry tone','shouting','screaming','whispering','soft tone','emphasis'];
+const FISH_S2_SOUNDS=['laughing','chuckling','sobbing','crying loudly','sighing','groaning','panting','gasping','yawning','clear throat','break','long-break'];
 const MINI_SOUNDS=['laughs','chuckle','coughs','clear-throat','groans','breath','pant','inhale','exhale','gasps','sniffs','sighs','snorts','burps','lip-smacking','humming','hissing','emm','sneezes'];
 const ELEVEN_TAGS=['laughs','laughs harder','starts laughing','whispers','sighs','exhales','sarcastic','curious','excited','crying','mischievously','shouting','nervous','sad','angry'];
 const MIMO_STYLES=['开心','悲伤','愤怒','恐惧','惊讶','兴奋','委屈','平静','冷漠','怅然','欣慰','无奈','愧疚','释然','嫉妒','厌倦','忐忑','动情','温柔','高冷','活泼','严肃','慵懒','俏皮','深沉','干练','凌厉'];
@@ -145,17 +149,17 @@ const elevenTagged=model=>/^eleven_v[34]/.test(model);
 // any language, before the words it is for; sounds and pauses in brackets where they happen; paired tags for some words.
 const FISH_DRAMA_PAIRS=['whisper','emphasis','soft','fast','slow','stress','forceful'],FISH_DRAMA_SOUNDS=['sigh','small laugh','shaky breath','pause','gasp','sniff'];
 const fishDrama=model=>model==='drama-3';
-function tags(key,model){if(key==='fish'&&fishDrama(model))return [...FISH_DRAMA_SOUNDS.map(x=>'['+x+']'),...FISH_DRAMA_PAIRS.map(x=>'<'+x+'>…</'+x+'>')];return key==='doubao'?['自然语气描述，通过语音指令传递']:key==='custom'?[]:key==='mimo'?MIMO_STYLES:key==='mini'?['happy','sad','angry','fearful','disgusted','surprised','calm',...(model.startsWith('speech-2.6')?['fluent','whisper']:[])]:key==='eleven'?(elevenTagged(model)?ELEVEN_TAGS:['通过文字和标点表达情绪']):fishS1(model)?FISH_S1_EMOTIONS:['自然语言描述，如 happy、whispers sweetly、slightly sad'];}
+function tags(key,model){if(key==='fish'&&fishDrama(model))return [...FISH_DRAMA_SOUNDS.map(x=>'['+x+']'),...FISH_DRAMA_PAIRS.map(x=>'<'+x+'>…</'+x+'>')];return key==='doubao'?['一整句语音指令，如「用颤抖沙哑、带着哭腔的语气说」']:key==='custom'?[]:key==='mimo'?MIMO_STYLES:key==='mini'?['happy','sad','angry','fearful','disgusted','surprised','calm',...(model.startsWith('speech-2.6')?['fluent','whisper']:[])]:key==='eleven'?(elevenTagged(model)?ELEVEN_TAGS:['通过文字和标点表达情绪']):fishS1(model)?FISH_S1_EMOTIONS:[...FISH_S1_EMOTIONS,...FISH_S2_TONES,...FISH_S2_SOUNDS].map(x=>'['+x+']');}
 // What the 情绪 field of a line may say, in Chinese or English, and the MiniMax emotion it means.
 const MINI_EMOTION_WORDS={happy:['happy','joyful','excited','cheerful','delighted','开心','高兴','快乐','喜悦','兴奋','愉快','欣喜','得意','雀跃','幸福','激动'],sad:['sad','upset','depressed','sorrowful','crying','难过','伤心','悲伤','沮丧','失落','委屈','哭泣','哽咽','低落','心疼'],angry:['angry','furious','annoyed','mad','生气','愤怒','恼火','不满','暴怒','气愤','不耐烦','烦躁'],fearful:['fearful','scared','afraid','nervous','anxious','害怕','恐惧','紧张','担心','不安','惊恐','慌张','焦虑'],disgusted:['disgusted','contemptuous','disdainful','厌恶','嫌弃','恶心','鄙视','轻蔑','不屑'],surprised:['surprised','shocked','astonished','惊讶','吃惊','震惊','意外','诧异','惊喜'],calm:['calm','gentle','neutral','soft','relaxed','平静','冷静','温柔','淡然','冷淡','平淡','轻声','温和','沉稳','认真','严肃'],fluent:['fluent','流畅','生动'],whisper:['whisper','whispering','whispers','低语','耳语','悄悄','小声']};
 /** One line for the engine card: how this model reads emotion and tags. */
-function tagNote(key,model){if(key==='doubao')return '豆包 2.0 用自然语言语音指令控制情感，不把 Fish / ElevenLabs 的方括号标签放进朗读文本。1.0 通过措辞、标点和引擎参数表达。';
+function tagNote(key,model){if(key==='doubao')return '合成 2.0：台词的情绪会作为语音指令发过去，像给配音演员说戏，如「用颤抖沙哑、带着哭腔，夹杂着质问的语气说」，不会读出来；只写了一个词（如「委屈」）时插件补成「用委屈的语气说」。原文里不放标签，用标点表达停顿和情绪。1.0 不支持语音指令。';
  if(key==='custom')return '台词的情绪不会写进台词里，要用就在请求体里写 {{emotion}}（比如接口有情绪参数时）。';
  if(key==='mimo')return '台词的情绪会自动写成句首的圆括号标签，如 (开心)，中文最准；原文里还可以在任意位置插方括号的细节标签，如 [轻笑]、[叹气]。'+(mimoMode(model)==='design'?'音色设计模型：角色的「音色」一栏写音色描述。':mimoMode(model)==='clone'?'声音克隆模型：角色的「音色」一栏写克隆样本的名字。':'');
  if(key==='mini')return '台词里的情绪会自动对应到下面这几个（中文也行）；对应不上时由模型自己判断。'+(model.startsWith('speech-2.8')?'原文里还能插下面这些圆括号语气声。':'');
  if(key==='eleven')return elevenTagged(model)?'原文里用方括号英文标签控制语气，如 [whispers]、[sarcastic]；台词的情绪会自动放在开头。'+(model==='eleven_v4'?'v4 只用稳定性和音色相似度两项设置。':''):'这个模型不读语气标签，情绪靠措辞和标点表达。';
  if(key==='fish'&&fishDrama(model))return '像给配音演员说戏：台词的情绪会自动放在开头的方括号里，可以写一整句，中文英文都行，如 [强忍着眼泪，却努力笑着]、[defensive, slightly uneasy tone]。原文里在发生的位置插声音和停顿，如 [sigh]、[pause]；只想改几个词就用成对标签包住，如 <whisper>Go on without me.</whisper>。';
- return fishS1(model)?'圆括号固定标签：情绪放句首，如 (sad)；语气和声音可以放在句中，如 (whispering)、(laughing)。台词的情绪会自动写成句首标签。':'方括号里写英文自然语言描述，放在任意位置都行，如 [whispers sweetly]、[slightly sad]，一句最多三个。台词的情绪会自动放在开头。';
+ return fishS1(model)?'圆括号固定标签：情绪放句首，如 (sad)；语气和声音可以放在句中，如 (whispering)、(laughing)。台词的情绪会自动写成句首标签。':'方括号里写英文：句首一个主情绪，如 [sad]、[slightly nervous]、[warm and teasing]；句中可以插语气和声音，如 [whispering]、[emphasis]（紧贴要加重的词）、[laughing]、[break]。一句叠加不超过三个。台词的情绪会自动放在开头。';
 }
 /** The MiniMax emotion for a line's 情绪, or '' to let the model choose (unknown words, or not supported by the model). */
 function miniEmotion(model,emotion){const word=String(emotion||'').trim().toLowerCase();if(!word)return '';const found=Object.entries(MINI_EMOTION_WORDS).find(([,words])=>words.some(w=>word===w||word.includes(w)))?.[0]||'';return tags('mini',model).includes(found)?found:'';}
@@ -171,4 +175,4 @@ function emotionTag(key,model,emotion,text){let word=String(emotion||'').trim();
  if(key==='fish'&&fishS1(model)){const w=word.toLowerCase();return FISH_S1_EMOTIONS.includes(w)||FISH_S1_TONES.includes(w)?`(${w}) ${text}`:text;}
  if(key==='fish'||key==='eleven'&&elevenTagged(model))return /^[a-z][a-z ,'-]{1,40}$/i.test(word)?`[${word.toLowerCase()}] ${text}`:text;
  return text;}
-export const TTSParameters={fishBase,fishOpenAI,fishNative,openaiSpeech,catalogs,defaults,allowed,unavailable,normalize,activeParameters,requestPreview,validate,tags,tagNote,miniEmotion,emotionTag,vocab:{FISH_DRAMA_PAIRS,FISH_DRAMA_SOUNDS,FISH_S1_EMOTIONS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS,MIMO_VOICES},mimoMode};
+export const TTSParameters={fishBase,fishOpenAI,fishNative,openaiSpeech,catalogs,defaults,allowed,unavailable,normalize,activeParameters,requestPreview,validate,tags,tagNote,miniEmotion,emotionTag,vocab:{FISH_DRAMA_PAIRS,FISH_DRAMA_SOUNDS,FISH_S1_EMOTIONS,FISH_S2_TONES,FISH_S2_SOUNDS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS,MIMO_VOICES},mimoMode};

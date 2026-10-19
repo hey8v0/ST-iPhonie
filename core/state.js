@@ -29,7 +29,7 @@ const ENGINE_NAMES={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'�
 // only: the speakers of the current story (null: every role, for previews). Roles not in the story are never named in
 // a story request, or the model takes them as the cast (a new chat of a world card kept bringing back saved roles).
 export function speakingRoutes(s,only=null){const configured=s.routes.filter(r=>!isPlaceholderRole(r.name));if(!Array.isArray(only))return configured;const wanted=new Set(only.map(n=>String(n).trim()));return configured.filter(r=>wanted.has(r.name));}
-export function modelRules(s,only=null){const {FISH_DRAMA_PAIRS,FISH_DRAMA_SOUNDS,FISH_S1_EMOTIONS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS}=TTSParameters.vocab;const output=[];const configured=speakingRoutes(s,only);const registered=s.routes.filter(r=>!isPlaceholderRole(r.name));
+export function modelRules(s,only=null){const {FISH_DRAMA_PAIRS,FISH_DRAMA_SOUNDS,FISH_S1_EMOTIONS,FISH_S2_TONES,FISH_S2_SOUNDS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS}=TTSParameters.vocab;const output=[];const configured=speakingRoutes(s,only);const registered=s.routes.filter(r=>!isPlaceholderRole(r.name));
  // Nobody registered in the story yet: the rules of the engines in use, without names.
  const nameless=!configured.length&&registered.length,routes=configured.length?configured:nameless?[...new Map(registered.map(r=>[r.engine+'|'+(r.model||''),{...r,name:'说话者'}])).values()]:[{name:'未配置角色',engine:'fish',model:s.connections.fish.model}];
  for(const r of routes){const model=r.model||s.connections[r.engine]?.model||TTSParameters.catalogs[r.engine]?.model||'';let rule;
@@ -40,7 +40,7 @@ export function modelRules(s,only=null){const {FISH_DRAMA_PAIRS,FISH_DRAMA_SOUND
   else if(r.engine==='eleven')rule=V('eleven',{'标签':/^eleven_v[34]/.test(model)?ELEVEN_TAGS.map(x=>'['+x+']').join('、'):''});
   else if(model==='drama-3')rule=V('drama',{'声音':FISH_DRAMA_SOUNDS.map(x=>'['+x+']').join('、'),'标签':FISH_DRAMA_PAIRS.map(x=>'<'+x+'>…</'+x+'>').join('、')});
   else if(model==='s1')rule=V('s1',{'情绪':FISH_S1_EMOTIONS.join('、'),'声音':[...FISH_S1_TONES,...FISH_S1_SOUNDS].map(x=>'('+x+')').join('、')});
-  else rule=V('fish');
+  else rule=V('fish',{'情绪':FISH_S1_EMOTIONS.join('、'),'声音':[...FISH_S2_TONES,...FISH_S2_SOUNDS].map(x=>'['+x+']').join('、')});
   // Speakers that share a rule share one entry: the rule is written once, with every name and model in front.
   const same=output.find(o=>o.rule===rule),who=String(r.name),label=(ENGINE_NAMES[r.engine]||r.engine)+' '+model;
   if(same){const group=same.groups.find(g=>g.label===label);if(group){if(!group.names.includes(who))group.names.push(who);}else same.groups.push({label,names:[who]});}
