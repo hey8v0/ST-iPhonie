@@ -39,9 +39,9 @@ const LEAVES = [
 
 // An object: its pixels, an outline in the darker shade of what it edges, normals (from the outline unless drawn),
 // what glows at night, the foot point inside it, and its shapes.
-function object(w, h, draw, {outline = true, fx = w / 2, fy = h - 2, shapes = [], round = 6} = {}) {
+export function object(w, h, draw, {outline = true, fx = w / 2, fy = h - 2, shapes = [], round = 6} = {}) {
   const px = new Uint32Array(w * h), nrm = new Float32Array(w * h * 3), given = new Uint8Array(w * h), emit = new Uint8Array(w * h);
-  const set = (x, y, c, n, glow) => { x = Math.round(x); y = Math.round(y); if (x < 0 || y < 0 || x >= w || y >= h || !c) return; const i = y * w + x; px[i] = c; if (n) { nrm.set(n, i * 3); given[i] = 1; } else given[i] = 0; emit[i] = glow ? 1 : 0; };
+  const set = (x, y, c, n, glow) => { x = Math.round(x); y = Math.round(y); if (x < 0 || y < 0 || x >= w || y >= h || !c) return; const i = y * w + x; px[i] = c; if (n) { nrm.set(n, i * 3); given[i] = 1; } else given[i] = 0; emit[i] = glow ? (glow === true ? 1 : glow) : 0; };
   draw(set);
   let out = px;
   if (outline) {
@@ -56,10 +56,26 @@ function object(w, h, draw, {outline = true, fx = w / 2, fy = h - 2, shapes = []
   for (let i = 0; i < w * h; i++) if (out[i] && !given[i]) nrm.set(auto.subarray(i * 3, i * 3 + 3), i * 3);
   return {w, h, px: out, nrm, emit, fx, fy, shapes};
 }
-const disc = (set, cx, cy, r, c, sy = 1, n) => { for (let y = Math.floor(cy - r * sy); y <= cy + r * sy; y++) for (let x = Math.floor(cx - r); x <= cx + r; x++) if ((x - cx) ** 2 + ((y - cy) / sy) ** 2 <= r * r) set(x, y, c, n); };
+export const disc = (set, cx, cy, r, c, sy = 1, n) => { for (let y = Math.floor(cy - r * sy); y <= cy + r * sy; y++) for (let x = Math.floor(cx - r); x <= cx + r; x++) if ((x - cx) ** 2 + ((y - cy) / sy) ** 2 <= r * r) set(x, y, c, n); };
 const inPoly = (x, y, pts) => { let inside = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside; } return inside; };
-const poly = (set, pts, paint, n) => { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); for (let y = Math.floor(Math.min(...ys)); y <= Math.max(...ys); y++) for (let x = Math.floor(Math.min(...xs)); x <= Math.max(...xs); x++) if (inPoly(x + .5, y + .5, pts)) set(x, y, paint(x, y), n); };
-const norm = (x, y, z) => { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l]; };
+export const poly = (set, pts, paint, n) => { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); for (let y = Math.floor(Math.min(...ys)); y <= Math.max(...ys); y++) for (let x = Math.floor(Math.min(...xs)); x <= Math.max(...xs); x++) if (inPoly(x + .5, y + .5, pts)) set(x, y, paint(x, y), n); };
+export const norm = (x, y, z) => { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l]; };
+/**
+ * A standing round thing (barrel, pot, post, pedestal) seen from above at the game's slant: its top is an ellipse
+ * (rx by ry), so its sides end below in the same curve — the foot, hoops and rims bend round the front, never straight.
+ * paint(u, v, part): u across (-1 left … 1 right), v down the side (0 top rim … 1 foot), part 'side' | 'top'.
+ * width(v) scales rx down the side (a bulge, a taper). top: draw the top face (false for something open or hidden).
+ */
+export function cylinder(set, cx, top, bottom, rx, ry, paint, {width = () => 1, lid = true} = {}) {
+  const H = Math.max(1, bottom - top);
+  for (let y = Math.floor(top - ry); y <= Math.ceil(bottom + ry); y++) for (let x = Math.floor(cx - rx * 1.3); x <= Math.ceil(cx + rx * 1.3); x++) {
+    // which height on the side this pixel is: solve y = top + v·H + ry·√(1−u²) with u from the width there
+    let v = (y - top) / H, u = 0, ok = false;
+    for (let k = 0; k < 3; k++) { const R = rx * width(Math.max(0, Math.min(1, v))); u = (x + .5 - cx) / R; if (Math.abs(u) > 1) break; v = (y + .5 - top - ry * Math.sqrt(1 - u * u)) / H; ok = true; }
+    if (ok && Math.abs(u) <= 1 && v >= 0 && v <= 1) { set(x, y, paint(u, v, 'side'), norm(u, Math.sqrt(Math.max(0, 1 - u * u)) * .9, .1)); continue; }
+    if (lid) { const R0 = rx * width(0), d = ((x + .5 - cx) / R0) ** 2 + ((y + .5 - top) / ry) ** 2; if (d <= 1) set(x, y, paint((x + .5 - cx) / R0, d, 'top'), [0, 0, 1]); }
+  }
+}
 
 // A clump of leaves: painted lighter towards the upper left; the light itself comes from the normals.
 function clump(set, cx, cy, r, t, seed) {
@@ -77,9 +93,9 @@ export function oak(seed, blossom) {
   const leaves = LEAVES[SEASON], bare = SEASON === 3;
   blossom = blossom && SEASON === 0;
   return object(70, 96, set => {
-    for (let y = 54; y < 94; y++) {
-      const flare = y > 86 ? (y - 86) * 1.2 : 0, l = 30 - flare, r = 40 + flare;
-      for (let x = Math.round(l); x < r; x++) { const u = (x - l) / (r - l); let c = u < .2 ? P.tr4 : u < .45 ? P.tr3 : u < .75 ? P.tr2 : P.tr1; if (hash(x, y >> 2, seed) > .82) c = P.tr1; if ((x + (y >> 3)) % 5 === 0 && u > .2) c = shadeC(c, .82); set(x, y, c); }
+    for (let y = 54; y < 96; y++) {
+      const flare = y > 86 ? Math.min(8, y - 86) * 1.2 : 0, l = 30 - flare, r = 40 + flare;
+      for (let x = Math.round(l); x < r; x++) { const u = (x - l) / (r - l); if (y > 92 + 2.6 * Math.sqrt(Math.max(0, 1 - (2 * u - 1) ** 2))) continue; let c = u < .2 ? P.tr4 : u < .45 ? P.tr3 : u < .75 ? P.tr2 : P.tr1; if (hash(x, y >> 2, seed) > .82) c = P.tr1; if ((x + (y >> 3)) % 5 === 0 && u > .2) c = shadeC(c, .82); set(x, y, c); }
     }
     for (const [x0, y0, dx] of [[32, 62, -1], [38, 60, 1]]) for (let k = 0; k < 10; k++) { set(x0 + dx * k, y0 - k * .9, P.tr2); set(x0 + dx * k, y0 - k * .9 + 1, P.tr1); }
     if (bare) { // winter: branches forking up and out, twigs at their ends
@@ -102,7 +118,7 @@ export function oak(seed, blossom) {
 export function pine(seed) {
   const tones = [P.p0, P.p1, P.p2, P.p3, P.p4, P.p5, P.p6];
   return object(48, 100, set => {
-    for (let y = 84; y < 99; y++) for (let x = 21; x < 28; x++) set(x, y, x < 23 ? P.tr3 : x > 25 ? P.tr1 : P.tr2);
+    for (let y = 84; y < 100; y++) for (let x = 20; x < 29; x++) { const flare = y > 94 ? 1 : 0, u = (x + .5 - 24.5) / (3.5 + flare); if (Math.abs(u) > 1 || y > 97 + 1.6 * Math.sqrt(1 - u * u)) continue; set(x, y, u < -.35 ? P.tr3 : u > .45 ? P.tr1 : P.tr2); }
     for (let t = 0; t < 7; t++) {
       const top = 2 + t * 10.5, bottom = top + 22 + t * .8, half = 5 + t * 2.75;
       for (let y = Math.floor(top); y < bottom; y++) {
@@ -145,7 +161,7 @@ export function rock(seed, big) {
 }
 export function stump() {
   return object(24, 18, set => {
-    for (let y = 6; y < 17; y++) { const flare = y > 13 ? (y - 13) : 0; for (let x = 4 - flare; x < 20 + flare; x++) { const u = (x - 4) / 16; set(x, y, u < .25 ? P.tr4 : u < .6 ? P.tr3 : u < .85 ? P.tr2 : P.tr1); } }
+    cylinder(set, 12, 6, 13.5, 8, 4, (u, v) => u < -.5 ? P.tr4 : u < .2 ? P.tr3 : u < .7 ? P.tr2 : P.tr1, {width: v => 1 + Math.max(0, v - .6) * .5, lid: false});
     const up = [0, 0, 1];
     disc(set, 12, 6, 8, P.pl3, .5, up); disc(set, 12, 6, 6, P.pl4, .5, up); disc(set, 12, 6, 4, P.pl3, .5, up); disc(set, 12, 6, 2, P.pl4, .5, up);
   }, {round: 5, shapes: [{t: 'cyl', x: 0, y: -4, r: 8, h: 10}]});
@@ -162,7 +178,7 @@ export function fenceRail(len) {
 export function lamp() {
   return object(14, 50, set => {
     for (let y = 14; y < 47; y++) { set(6, y, C('#5a5468')); set(7, y, C('#3a3546')); }
-    for (let x = 3; x < 11; x++) { set(x, 47, C('#4a4458')); set(x, 48, C('#2e2a3a')); } for (let x = 4; x < 10; x++) set(x, 46, C('#5a5468'));
+    cylinder(set, 7, 45, 47.5, 4.2, 1.6, (u, v, part) => part === 'top' ? C('#5a5468') : u < -.3 ? C('#4a4458') : C('#2e2a3a'));
     for (let y = 3; y < 13; y++) for (let x = 2; x < 12; x++) { const frame = x === 2 || x === 11 || y === 3 || y === 12 || x === 6 || x === 7; set(x, y, frame ? C('#3a3546') : C('#f6e2a4'), frame ? null : [0, 1, 0], !frame); }
     for (let x = 1; x < 13; x++) set(x, 2, C('#2e2a3a')); for (let x = 3; x < 11; x++) set(x, 1, C('#4a4458')); set(6, 0, C('#2e2a3a')); set(7, 0, C('#2e2a3a'));
     for (let x = 4; x < 10; x++) set(x, 13, C('#4a4458'));
@@ -176,11 +192,13 @@ export function mailbox() {
   }, {round: 4, shapes: [{t: 'cyl', x: 0, y: -1, r: 1, h: 14}, {t: 'box', x0: -7, x1: 7, y0: -6, y1: 0, h: 26}]});
 }
 export function barrel() {
-  return object(18, 22, set => {
-    for (let y = 1; y < 21; y++) { const bulge = 1 - Math.abs(y - 10.5) / 11; for (let x = Math.round(4 - bulge * 3); x < 14 + bulge * 3; x++) { const u = (x - 1) / 16; set(x, y, x % 4 === 0 ? P.r2 : u < .3 ? P.r5 : u < .6 ? P.r4 : u < .85 ? P.r3 : P.r2); } }
-    for (const y of [4, 16]) for (let x = 1; x < 17; x++) { set(x, y, C('#6a6a7a')); set(x, y + 1, C('#4a4a58')); }
-    for (let x = 4; x < 14; x++) { set(x, 1, P.pl4, [0, 0, 1]); set(x, 2, P.pl3, [0, 0, 1]); }
-  }, {round: 6, shapes: [{t: 'cyl', x: 0, y: -5, r: 7, h: 20}]});
+  return object(20, 26, set => {
+    cylinder(set, 10, 4, 21, 7, 2.6, (u, v, part) => {
+      if (part === 'top') return v > .72 ? P.r1 : Math.floor((u + 1) * 3.5) % 2 ? P.pl3 : P.pl4;
+      if ((v > .12 && v < .2) || (v > .8 && v < .88)) return v % .5 < .17 ? C('#7a7a8a') : C('#4a4a58');
+      return Math.abs(Math.sin((u + 1) * 7)) < .18 ? P.r2 : u < -.45 ? P.r5 : u < .2 ? P.r4 : u < .65 ? P.r3 : P.r2;
+    }, {width: v => .86 + .14 * Math.sin(Math.PI * v)});
+  }, {round: 3, fy: 24, shapes: [{t: 'cyl', x: 0, y: -5, r: 7, h: 20}]});
 }
 export function crate() {
   return object(20, 24, set => {
@@ -328,19 +346,34 @@ export function house() {
     for (let y = 170; y < 180; y++) for (let x = cx - 16; x <= cx + 16; x++) { const step = y < 174 ? 0 : 1, top = step === 0 ? y < 172 : y < 177; set(x, y, top ? WOOD[4] : (y === 173 || y === 179) ? WOOD[0] : WOOD[2], top ? UP : FRONT); }
     for (const px of [40, w - 42]) for (let y = 120; y < 164; y++) { set(px, y, WOOD[4], FRONT); set(px + 1, y, WOOD[1], FRONT); }
     for (const [px, fc] of [[54, '#ff8fb1'], [w - 58, '#ffd45c']]) {
-      for (let y = 152; y < 160; y++) for (let x = px - 4; x <= px + 4; x++) { const tw = 4 - (y - 152) * .25; if (Math.abs(x - px) > tw) continue; set(x, y, y === 152 ? C('#c9744a') : Math.abs(x - px) > tw - 1 ? C('#7a3f24') : C('#a85a36'), FRONT); }
+      cylinder(set, px, 152, 159, 4.4, 1.6, (u, v, part) => part === 'top' ? (v > .55 ? C('#c9744a') : C('#3a2618')) : v < .12 ? C('#d08050') : u < -.4 ? C('#b8683e') : u < .45 ? C('#a85a36') : C('#7a3f24'), {width: v => 1 - v * .25});
       for (let k = 0; k < 14; k++) { const a = -Math.PI * (k / 13), r = 3 + (k % 3); set(px + Math.cos(a) * r, 151 + Math.sin(a) * r * .8, k % 4 === 0 ? C(fc) : k % 2 ? C('#4f9b45') : C('#3f8a3c')); }
     }
   }, {fy: 179, round: 3, shapes: [{t: 'box', x0: -64, x1: 64, y0: -84, y1: -25, h: 58}, {t: 'roof', x0: -80, x1: 80, y0: -90, y1: -22, h0: 58, h1: 112}, {t: 'box', x0: -54, x1: 54, y0: -25, y1: -10, h: 4}]});
 }
 /** A stack of firewood: round log ends with rings, piled in rows. */
+// Split logs stacked 4-3-2, their cut ends toward us. Each log is a cylinder lying north-south: above its end the bark
+// runs back (up the screen) with curved normals, so the top of the pile catches the sun and holds snow; the ends show
+// pale wood with growth rings, a dark bark ring and the odd crack.
 export function woodpile() {
-  return object(34, 26, set => {
-    for (let row = 0; row < 3; row++) for (let k = 0; k < 4 - (row === 2 ? 1 : 0); k++) {
-      const cx = 5 + k * 8 + (row % 2) * 4, cy = 21 - row * 7;
-      for (let y = -3; y <= 3; y++) for (let x = -4; x <= 4; x++) { const d = Math.hypot(x / 1.1, y); if (d > 3.6) continue; set(cx + x, cy + y, d > 2.9 ? C('#4a2f1e') : d > 2 ? C('#c99a62') : d > 1 ? C('#b0814f') : C('#8a5f38'), [0, 1, 0]); }
+  const D = 9, logs = [];
+  for (const [row, n] of [[0, 4], [1, 3], [2, 2]]) for (let k = 0; k < n; k++) logs.push({cx: 6 + k * 8 + row * 4, cy: 31 - row * 6.5, s: k * 7 + row * 13 + 1});
+  return object(42, 36, set => {
+    // bark tops, lower rows first (the ones above lie over them)
+    for (const L of logs) for (let y = Math.round(L.cy - D); y <= Math.round(L.cy); y++) for (let dx = -4; dx <= 4; dx++) {
+      const t = Math.max(-1, Math.min(1, dx / 4)), a = Math.asin(t), back = y < L.cy - D + 1;
+      const groove = hash(L.cx + dx, L.s, 5) > .62 && (y * 3 + L.s + dx) % 5 !== 0;
+      const c = Math.abs(dx) === 4 ? '#3a2416' : back ? '#4a2f1e' : groove ? '#5e3d24' : dx < -1 ? '#9a6a40' : dx < 2 ? '#86593a' : '#6e4a2e';
+      set(L.cx + dx, y, C(c), norm(Math.sin(a) * .9, .18, Math.cos(a) + .1));
     }
-  }, {round: 3, shapes: [{t: 'box', x0: -16, x1: 16, y0: -6, y1: 0, h: 22}]});
+    // the cut ends, facing us
+    for (const L of logs) for (let y = -4; y <= 4; y++) for (let x = -4; x <= 4; x++) {
+      const d = Math.hypot(x / 1.08, y); if (d > 3.95) continue;
+      const ring = Math.floor(d * 1.25 + hash(L.s, 1) * .9) % 2, crack = x === 0 && y > 0 && hash(L.s, 2) > .5;
+      const c = d > 3.15 ? (y < -1 ? '#6a4428' : '#3e2718') : crack ? '#8a5f38' : d < .8 ? '#a8784a' : ring ? '#d9ae74' : '#c49660';
+      set(L.cx + x, L.cy + y, C(c), norm(x * .05, 1, -y * .05));
+    }
+  }, {round: 2, shapes: [{t: 'box', x0: -20, x1: 20, y0: -D - 2, y1: 0, h: 18}]});
 }
 /** The side of a bridge or dock where its boards end: a beam facing us, plank ends above it. */
 export function beam(len, deep = 6) {
@@ -348,7 +381,7 @@ export function beam(len, deep = 6) {
 }
 /** A pile standing in the water under a dock: a dark wet foot, wood above, a little cap. */
 export function pile(h = 20) {
-  return object(8, h, set => { for (let y = 1; y < h; y++) for (let x = 1; x < 7; x++) set(x, y, y > h - 6 ? (x < 3 ? C('#2e4a4a') : C('#1f3434')) : x === 1 ? P.r5 : x === 6 ? P.r1 : x < 4 ? P.r4 : P.r3); for (let x = 1; x < 7; x++) set(x, 0, P.r5, [0, 0, 1]); }, {round: 3, fy: h - 1, shapes: [{t: 'cyl', x: 0, y: -1, r: 3, h: h - 2}]});
+  return object(10, h + 2, set => cylinder(set, 5, 2, h - 1, 3.4, 1.4, (u, v, part) => part === 'top' ? (v > .6 ? P.r3 : P.r5) : v > 1 - 5 / h ? (u < 0 ? C('#2e4a4a') : C('#1f3434')) : u < -.5 ? P.r5 : u < .1 ? P.r4 : u < .6 ? P.r3 : P.r2), {outline: false, round: 3, fy: h, shapes: [{t: 'cyl', x: 0, y: -1, r: 3, h: h - 2}]});
 }
 
 /** A low rail for a bridge: short posts and one bar, so people on it stay in sight. */

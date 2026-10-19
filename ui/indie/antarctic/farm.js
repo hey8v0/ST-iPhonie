@@ -4,6 +4,7 @@
 import {sprite} from './slim.js';
 import {pillow, insideDistance, sunAt, shadowSteps, shade} from './light.js';
 import {oak, pine, bush, rock, stump, fencePost, fenceRail, lamp, mailbox, barrel, crate, crop, flowerbed, house, beam, pile, lowPost, lowRail, woodpile, shippingBin, setSeason} from './assets.js';
+import {SHORE} from './shore.js';
 
 export const T = 16, TW = 60, TH = 36, W = TW * T, H = TH * T;
 
@@ -52,7 +53,7 @@ const MAP = [
   'gggggggggggpppgggggfffffffffffffffggggggggggggwwwgggggggggg',
   'gggggggggggpppgggggfffffffffffffffgggggggggggwwwggggggggggg',
   'gggggggggggpppggggggggggggggggggggggggggggggwwwgggggggggggg',
-  'gggggggggggpppppppppppppppppppppppppppppppppbbbbbpppppppggg',
+  'gggggggggggpppppppppppppppppppppppppppppppppbbbbbpppppppppppp',
   'gggggggggggggggggggggggpppgggggggggggggggggggwwwggggggggggg',
   'ggggggggggggggggggggggggpppgggggggggggggggggggwwwgggggggggg',
   'gggggggggggggggggggggggggpppgggggggggggggggggggwwwggggggggg',
@@ -92,8 +93,8 @@ const PAL = {
   sh0: '#203f5a', sh1: '#2f5a7c', sh2: '#4378a0', gl0: '#5b8fae', gl1: '#8cc0d8', gl2: '#cfeaf3',
 };
 const P = Object.fromEntries(Object.entries(PAL).map(([k, v]) => [k, C(v)]));
-// grass by season (spring as above); winter grass is under snow
-const GRASS = [null, ['#1f4a1a', '#2c6422', '#3a7c2a', '#4f9632', '#6cb43e', '#93d050', '#bde46a'], ['#3f3a18', '#5a5422', '#76702e', '#928a3c', '#ae9f4a', '#c9b45e', '#e0cc78']];
+// grass by season (spring as above); winter's is a dull, frost-bitten green
+const GRASS = [null, ['#1f4a1a', '#2c6422', '#3a7c2a', '#4f9632', '#6cb43e', '#93d050', '#bde46a'], ['#3f3a18', '#5a5422', '#76702e', '#928a3c', '#ae9f4a', '#c9b45e', '#e0cc78'], ['#2e3e2a', '#3c4e36', '#4c5e44', '#5e6e52', '#728262', '#8a9878', '#a6b294']];
 let SEASON = 0;
 function seasonPalette(season) {
   SEASON = season | 0;
@@ -305,42 +306,42 @@ function lampsOf(objects, sun) {
   return out;
 }
 
-// Winter: snow lies on everything that faces up (the ground, roofs, the tops of branches, posts and stones), thinner on
-// paths where people walk; a few grass tips show through; ice skins the water near the shore.
-function winter(F, N, mat, WD, owner, bare) {
-  const SNOW = ['#aebcd4', '#c9d4e6', '#e2e9f5', '#f4f8ff'].map(C);
+// Winter by the coast is mild (heavy snow belongs to the mountains): a thin frost on what faces the sky — rimed patches
+// in the grass, frost on the top edges of things and on the cliff's ledges, a skin of ice at the very edge of still
+// water. Soil, sand and paths only catch a speck here and there.
+function winter(F, N, mat, WD, owner, bare, W, H) {
+  const FROST = ['#c8d6e0', '#dce6ee', '#eef4f8'].map(C);
+  const mix = (c, d, k) => { const [r, g, b] = unpack(c), [R, G, B] = unpack(d); return pack([r + (R - r) * k, g + (G - g) * k, b + (B - b) * k]); };
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const i = y * W + x, m = mat[i], up = N[i * 3 + 2], ny = N[i * 3 + 1], o = owner[i];
-    if (bare[i]) continue; // people are not snowed on
-    if (m === 4 || m === 6) {
-      const d = WD[i]; if (m === 4 && d <= 4 && o < 0) F[i] = d <= 1 ? C('#f0f6fb') : hash(x, y, 91) > .97 ? C('#9cc4d4') : C('#d7e9f0');
-      continue;
-    }
-    if (o >= 0) { // things: caps where they face the sky, and on every top edge
-      const top = y > 1 && (owner[i - W] !== o || owner[i - 2 * W] !== o);
-      if (!(top || (up > .55 && ny < .35))) continue;
-      if (!top && noise(x, y, 5, 95) > .8) continue;
-      F[i] = SNOW[ny > .2 ? 1 : top && hash(x, y, 96) > .5 ? 3 : 2];
-      continue;
+    if (bare[i]) continue; // people do not frost over
+    if (m === 4 || m === 6) { if (m === 4 && WD[i] <= 1 && o < 0 && hash(x, y, 91) > .3) F[i] = mix(F[i], FROST[2], .55); continue; }
+    if (o >= 0) { // things: rime along their top edges
+      const top = y > 1 && owner[i - W] !== o;
+      if (!top || hash(x, y, 96) < .35) continue;
+      F[i] = mix(F[i], FROST[hash(x, y, 97) > .6 ? 2 : 1], .6); continue;
     }
     if (m === 9 || up < .6) continue;
-    if (m === 7) { if (ny < .5 && noise(x, y, 4, 97) < .75) F[i] = SNOW[hash(x, y, 98) > .7 ? 3 : 2]; continue; } // ledges of the cliff
-    if (m === 2) { // the trodden path: grey packed snow with earth showing in specks
-      const r = hash(x, y, 99); F[i] = r > .93 ? F[i] : r > .55 ? SNOW[0] : SNOW[1]; continue;
-    }
-    if (m === 1 && hash(x, y, 93) > .988) continue; // grass tips
-    const n = noise(x, y, 9, 92);
-    F[i] = SNOW[n < .3 ? 2 : n < .78 ? (hash(x, y, 94) > .85 ? 3 : 2) : 1];
-    if (m === 3 && hash(x, y, 100) > .985) F[i] = SNOW[0];
+    if (m === 7) { if (ny < .5 && hash(x, y, 98) > .82) F[i] = mix(F[i], FROST[1], .5); continue; }
+    const n = noise(x, y, 6, 92), r = hash(x, y, 94);
+    if (m === 1 || m === 16) { if ((n > .64 && r > .5) || r > .965) F[i] = mix(F[i], FROST[r > .985 ? 2 : 1], .32 + (n - .5) * .4); continue; }
+    if (r > .94) F[i] = mix(F[i], FROST[1], .5);
   }
 }
 
 // What does not change with the hour, made once: terrain, things, per-pixel albedo, normals, where each pixel stands
 // and how high, who drew it, reflections, what one can walk on.
-export function prepare({without = [], season = 0} = {}) {
+// The outdoor maps: each paints its terrain and places its things; the rest (normals, light, snow, reflections, what
+// is solid) is the same for all. cliff: the row where the farm's cliff stands (its shadow); fall: the waterfall's box.
+export const MAPS = {
+  farm: {W, H, terrain: () => terrain(), objects: without => placeObjects(without), fall: [44 * T + 2, 4 * T - 4, 47 * T - 2, 7 * T + 6], river: 4 * T},
+  shore: SHORE,
+};
+export function prepare({map = 'farm', without = [], season = 0} = {}) {
   setSeason(season); seasonPalette(season);
-  const {B, mat, CN, cliffFoot, WD} = terrain();
-  const objects = placeObjects(without);
+  const def = MAPS[map], W = def.W, H = def.H;
+  const {B, mat, CN, cliffFoot, WD, tideE = null} = def.terrain(season);
+  const objects = def.objects(without);
   for (const o of objects) o.world = o.shapes.map(s => ({...s, x: (s.x ?? 0) + o.fxw, y: (s.y ?? 0) + o.foot, ...(s.x0 !== undefined ? {x0: s.x0 + o.fxw, x1: s.x1 + o.fxw, y0: s.y0 + o.foot, y1: s.y1 + o.foot} : {})}));
   const bare = new Uint8Array(W * H), F = B.slice(), N = new Float32Array(W * H * 3), Gy = new Float32Array(W * H), Z = new Float32Array(W * H), owner = new Int16Array(W * H).fill(-1), glow = new Uint8Array(W * H);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -358,7 +359,7 @@ export function prepare({without = [], season = 0} = {}) {
     N.set(o.nrm.subarray((j * o.w + k) * 3, (j * o.w + k) * 3 + 3), i * 3);
     Gy[i] = o.foot; Z[i] = Math.max(0, o.foot - Y);
   }
-  if (SEASON === 3) winter(F, N, mat, WD, owner, bare);
+  if (SEASON === 3) winter(F, N, mat, WD, owner, bare, W, H);
   for (const o of objects) {
     if (o.flat) continue;
     for (let j = 0; j < o.h; j++) for (let k = 0; k < o.w; k++) {
@@ -371,12 +372,13 @@ export function prepare({without = [], season = 0} = {}) {
     }
   }
   const solid = new Uint8Array(W * H);
-  for (let i = 0; i < W * H; i++) solid[i] = [4, 6, 7, 8, 9].includes(mat[i]) ? 1 : 0;
+  for (let i = 0; i < W * H; i++) solid[i] = [4, 6, 7, 8, 9, 13].includes(mat[i]) ? 1 : 0;
   for (const o of objects) if (o.block) { const [bw, bh] = o.block; for (let y = o.foot - bh; y < o.foot; y++) for (let x = Math.round(o.fxw - bw / 2); x < o.fxw + bw / 2; x++) if (x >= 0 && y >= 0 && x < W && y < H) solid[y * W + x] = 1; }
   const h = objects.find(o => o.house);
   const at = key => { const o = objects.find(o => o[key]); return o ? [o.fxw, o.foot] : null; };
-  return {F, N, Gy, Z, owner, glow, mat, wd: WD, solid, objects, door: h ? [h.fxw, h.foot + 2] : null, bin: at('bin'), mailbox: at('mailbox'),
-    chimney: h ? [h.x + 132, h.y + 16] : null, fall: [44 * T + 2, 4 * T - 4, 47 * T - 2, 7 * T + 6]};
+  const spots = objects.filter(o => o.spot).map(o => ({x: o.fxw, y: o.foot, ...o.spot}));
+  return {map, W, H, F, N, Gy, Z, owner, glow, mat, wd: WD, solid, objects, cliffFoot, tideE, spots, door: h ? [h.fxw, h.foot + 2] : null, bin: at('bin'), mailbox: at('mailbox'),
+    chimney: h ? [h.x + 132, h.y + 16] : null, fall: def.fall || null, river: def.river || 0};
 }
 
 /**
@@ -384,15 +386,19 @@ export function prepare({without = [], season = 0} = {}) {
  * pass without a stall). When it is done the scene has px (the picture), shadow, light (what light reaches each pixel,
  * for things drawn later), sun and lamps.
  */
-export function* lightSteps(S, hour, {live = false, rows = 20} = {}) {
-  const {F, N, Gy, Z, owner, glow, mat, objects} = S;
+export function* lightSteps(S, hour, {live = false, rows = 20, extra = []} = {}) {
+  const {F, N, Gy, Z, owner, glow, mat, objects, W, H} = S;
+  setFrame(W, H); // the vignette over this map
   const sun = sunAt(hour === 'day' ? 15 : hour === 'night' ? 22 : hour, SEASON);
   const got = {}; yield* shadowSteps(W, H, objects, sun, got); const shadow = got.shadow;
   yield;
-  for (let x = 0; x < W; x++) for (let y = 7 * T - 2; y < 7 * T + 10; y++) shadow[y * W + x] = Math.max(shadow[y * W + x], (1 - (y - 7 * T + 2) / 12) * .55);
+  // at the foot of a cliff, its shade
+  for (let x = 0; x < W; x++) { const f = S.cliffFoot?.[x]; if (!f) continue; for (let y = f - 2; y < Math.min(H, f + 10); y++) shadow[y * W + x] = Math.max(shadow[y * W + x], (1 - (y - f + 2) / 12) * .55); }
   const cloud = new Float32Array(W * H);
   if (!sun.night) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const c = noise(x + y * .5, y, 160, 77); cloud[y * W + x] = Math.max(0, Math.min(.35, (c - .64) * 2.2)); }
-  const lamps = lampsOf(objects, sun);
+  // the scene's own lamps, and what the player has set down (campfires: lit after dusk like the rest)
+  const dusk = sun.night ? 1 : Math.max(0, Math.min(1, (sun.hour - 18.4) / 1.4));
+  const lamps = lampsOf(objects, sun).concat(dusk ? extra.map(l => ({...l, k: l.k * dusk})) : []);
   yield;
   const out = new Float32Array(W * H * 3), light = new Float32Array(W * H * 3), n = [0, 0, 0], emitted = new Float32Array(W * H), ONE = [1, 1, 1];
   for (let y = 0; y < H; y++) {
@@ -446,7 +452,7 @@ export function* lightSteps(S, hour, {live = false, rows = 20} = {}) {
   yield;
   blur3(bright, W2, H2, 4); yield; blur3(bright, W2, H2, 4); yield; blur3(bright, W2, H2, 3); yield;
   for (let i = 0; i < W2 * H2 * 3; i++) bright[i] *= 2.2;
-  for (let y = 6 * T; y < 9 * T; y += 2) for (let x = 43 * T; x < 48 * T; x += 2) { const d = Math.hypot((x - 45.5 * T) / 1.4, y - 7 * T - 6) / 34; if (d < 1) { const k = (1 - d) ** 2 * (sun.night ? 28 : 60), j = ((y >> 1) * W2 + (x >> 1)) * 3; bright[j] += k; bright[j + 1] += k * 1.05; bright[j + 2] += k * 1.05; } }
+  if (S.fall) for (let y = 6 * T; y < 9 * T; y += 2) for (let x = 43 * T; x < 48 * T; x += 2) { const d = Math.hypot((x - 45.5 * T) / 1.4, y - 7 * T - 6) / 34; if (d < 1) { const k = (1 - d) ** 2 * (sun.night ? 28 : 60), j = ((y >> 1) * W2 + (x >> 1)) * 3; bright[j] += k; bright[j + 1] += k * 1.05; bright[j + 2] += k * 1.05; } }
   const px = new Uint32Array(W * H);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) { const i = y * W + x, j = ((y >> 1) * W2 + (x >> 1)) * 3; px[i] = finish(out[i * 3] + bright[j] * .55, out[i * 3 + 1] + bright[j + 1] * .55, out[i * 3 + 2] + bright[j + 2] * .55, x, y, sun); }
@@ -456,14 +462,17 @@ export function* lightSteps(S, hour, {live = false, rows = 20} = {}) {
 }
 /** The last touch every pixel gets, the world's and things drawn over it alike: a little more colour, a soft vignette,
  *  a shoulder for the brightest. */
+// the size the vignette is worked out over: the farm, or the room one is in
+let FW = W, FH = H;
+export function setFrame(w, h) { FW = w; FH = h; }
 export function finish(r, g, b, x, y, sun) {
   const l = (r + g + b) / 3; r = l + (r - l) * 1.12; g = l + (g - l) * 1.1; b = l + (b - l) * 1.05;
-  const vx = x / W - .5, vy = y / H - .5, v = 1 - (vx * vx + vy * vy) * (sun.night ? .7 : .3);
+  const vx = x / FW - .5, vy = y / FH - .5, v = 1 - (vx * vx + vy * vy) * (sun.night ? .7 : .3);
   return pack([tone(r * v), tone(g * v), tone(b * v)]);
 }
 /** All at once (for pictures and tests): the scene lit for an hour. */
-export function render(hour = 15, {without = [], layers = false, live = false, season = 0} = {}) {
-  const S = prepare({without, season});
+export function render(hour = 15, {map = 'farm', without = [], layers = false, live = false, season = 0} = {}) {
+  const S = prepare({map, without, season});
   for (const _ of lightSteps(S, hour, {live})) { /* run to the end */ }
   return layers ? S : S.px;
 }

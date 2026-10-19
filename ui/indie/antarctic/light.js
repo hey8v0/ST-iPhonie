@@ -77,13 +77,16 @@ export function markSprite(mark, o, kx, ky, from = null) {
     const t = from.z / (from.z - z); return [from.x + (x - from.x) * t, from.y + (o.foot - 1 - from.y) * t];
   };
   const line = (a, b) => { const n = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])))); for (let k = 0; k <= n; k++) mark(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n); };
+  // each column joined down its length, and (for a point light, whose rays fan out) to the column before it
+  const side = from ? new Array(o.h).fill(null) : null;
   for (let i = 0; i < o.w; i++) {
     let prev = null;
     for (let j = o.h - 1; j >= 0; j--) {
-      if (!o.px[j * o.w + i]) { prev = null; continue; }
+      if (!o.px[j * o.w + i]) { prev = null; if (side) side[j] = null; continue; }
       const z = Math.max(0, o.foot - (o.y + j) - (o.lift || 0)), p = proj(o.x + i, z);
-      if (!p) { prev = null; continue; }
+      if (!p) { prev = null; if (side) side[j] = null; continue; }
       if (prev) line(prev, p); else mark(p[0], p[1]);
+      if (side) { if (side[j]) line(side[j], p); side[j] = p; }
       prev = p;
     }
   }

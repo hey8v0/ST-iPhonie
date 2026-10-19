@@ -3,7 +3,7 @@
 import {createView, heading, esc} from './common.js';
 
 const GAMES = [
-  {id: 'antarctic', name: '南极结界 · 鲸湾郊外', tag: '测试中', text: '鲸湾郊外的一座小农场：翻土、播种、浇水，四季轮换，出货换代币，在信箱邮购种子。键盘、手柄、触屏都能玩，手机请横屏。'},
+  {id: 'antarctic', name: '南极结界', tag: '测试中', text: '刚到鲸湾的新移民，在城外有一座小农场。捏一个自己、养一只宠物，种田、砍树、采集、制作，去东海岸赶潮、观察生物、记满见闻录。键盘、手柄、触屏都能玩，手机请横屏。'},
 ];
 
 export function indieApp(ctx) {

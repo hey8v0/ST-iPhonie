@@ -64,6 +64,8 @@
   .toast { display: flex; align-items: center; gap: calc(var(--px) * 2); padding: calc(var(--px) * 2.5) calc(var(--px) * 4.5) calc(var(--px) * 2.5) calc(var(--px) * 3); font-size: calc(var(--px) * 4.2); font-weight: 700; line-height: 1.35; animation: slide .25s ease-out; transition: opacity .4s, transform .4s; }
   .toast .icon { width: calc(var(--px) * 12); height: calc(var(--px) * 12); flex: none; }
   .toast.out { opacity: 0; transform: translateX(-20%); }
+  .toast.bump { animation: bump .22s ease-out; }
+  @keyframes bump { 40% { transform: scale(1.08); } }
   @keyframes slide { from { opacity: 0; transform: translateX(-30%); } }
 
   /* touch */
@@ -98,6 +100,68 @@
   .setting { display: flex; justify-content: space-between; align-items: center; padding: calc(var(--px) * 2.5) calc(var(--px) * 3); margin-bottom: calc(var(--px) * 1.5); font-weight: 700; }
   .help { font-size: calc(var(--px) * 3.9); line-height: 1.7; padding: calc(var(--px) * 2) calc(var(--px) * 4); }
   .help b { color: #7a2e1a; }
+  /* the world map */
+  .mapbox { position: relative; height: min(58vh, calc(var(--px) * 118)); overflow: hidden; padding: 0; }
+  #worldmap { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; border-radius: calc(var(--px) * 1.5); }
+  .zoom { position: absolute; right: calc(var(--px) * 2.5); top: calc(var(--px) * 2.5); display: flex; flex-direction: column; gap: calc(var(--px) * 1.5); }
+  .zoom button { width: calc(var(--px) * 10); height: calc(var(--px) * 10); padding: 0; font-size: calc(var(--px) * 5); font-weight: 800; line-height: 1; }
+  #mapinfo { margin-top: calc(var(--px) * 2.5); text-align: center; font-weight: 700; font-size: calc(var(--px) * 4); min-height: 1.4em; }
+  /* where keys and pads are: a ring round the control in focus */
+  .nav-on { outline: calc(var(--px) * .8) solid var(--red); outline-offset: calc(var(--px) * .5); }
+  /* 捏人 */
+  #creator { width: min(calc(var(--px) * 200), 96vw); z-index: 7; }
+  .cgrid { display: grid; grid-template-columns: auto 1fr; gap: calc(var(--px) * 4); align-items: start; }
+  .cpreview { padding: calc(var(--px) * 2); display: grid; gap: calc(var(--px) * 2); justify-items: center; }
+  #cview { width: calc(var(--px) * 64); height: calc(var(--px) * 44); image-rendering: pixelated; border-radius: calc(var(--px) * 1.5); }
+  .cturn { display: flex; gap: calc(var(--px) * 2); } .cturn button { padding: calc(var(--px) * 1) calc(var(--px) * 4); font-size: calc(var(--px) * 4.5); }
+  .copts { display: grid; grid-template-columns: 1fr 1fr; gap: calc(var(--px) * 1.5); max-height: min(62vh, calc(var(--px) * 120)); overflow: auto; padding: calc(var(--px) * 1); }
+  .opt { display: grid; grid-template-columns: calc(var(--px) * 17) auto 1fr auto; align-items: center; gap: calc(var(--px) * 1.5); padding: calc(var(--px) * 1.2) calc(var(--px) * 2); }
+  .opt.pet { background: #e8d4a8; }
+  .opt.off { opacity: .4; }
+  .opt .lab { font-size: calc(var(--px) * 3.6); color: var(--ink2); font-weight: 700; }
+  .opt .val { display: flex; align-items: center; justify-content: center; gap: calc(var(--px) * 1.5); font-weight: 800; font-size: calc(var(--px) * 3.9); white-space: nowrap; overflow: hidden; }
+  .opt button { padding: calc(var(--px) * .6) calc(var(--px) * 2); font-size: calc(var(--px) * 3.2); }
+  .opt input { width: 100%; min-width: 0; font: inherit; font-weight: 800; text-align: center; color: var(--ink); background: #fbf2dc; border: calc(var(--px) * .5) solid #b98d52; border-radius: calc(var(--px)); padding: calc(var(--px) * .5); }
+  .swatch { display: inline-block; width: calc(var(--px) * 4.5); height: calc(var(--px) * 4.5); border-radius: calc(var(--px)); box-shadow: 0 0 0 calc(var(--px) * .5) var(--edge); }
+  @media (max-aspect-ratio: 4/3) { .cgrid { grid-template-columns: 1fr; } .copts { grid-template-columns: 1fr; } }
+  #petline { text-align: center; font-weight: 700; padding: calc(var(--px) * 1) 0 calc(var(--px) * 2); }
+  #petline .hearts { color: #e2404f; margin-left: calc(var(--px) * 2); letter-spacing: calc(var(--px) * .3); }
+  #petline .hearts i { font-style: normal; opacity: .55; } #petline .hearts s { text-decoration: none; color: #b9a585; }
+  /* the bag and chests: ten to a row, the hand row marked */
+  .grid.inv { grid-template-columns: repeat(10, calc(var(--px) * 15)); gap: calc(var(--px) * 1); }
+  .grid.inv .slot { width: calc(var(--px) * 15); height: calc(var(--px) * 15); cursor: pointer; }
+  .grid.inv .slot .icon { width: calc(var(--px) * 12); height: calc(var(--px) * 12); }
+  .grid.inv .slot.hand { background: #f2d89c; }
+  .grid.inv .slot.picked { box-shadow: 0 0 0 calc(var(--px) * .8) #4f9bd6, inset 0 var(--px) 0 #c49a5e; background: #dcecff; }
+  .grid.inv .slot.trash { background: #d8c4a0; }
+  .info { min-height: 1.4em; text-align: center; font-size: calc(var(--px) * 3.7); color: var(--ink2); font-weight: 700; padding: calc(var(--px) * 1) calc(var(--px) * 2); }
+  .slot .pic { display: grid; place-items: center; }
+  #chestui { width: min(calc(var(--px) * 175), 96vw); }
+  #chestui .foot .info { text-align: left; flex: 1; }
+  .recipe { grid-template-columns: auto 1fr auto auto !important; }
+  .need { display: flex; gap: calc(var(--px) * 1.5); flex-wrap: wrap; justify-content: flex-end; }
+  .chip { display: inline-flex; align-items: center; gap: calc(var(--px) * .6); font-weight: 800; font-size: calc(var(--px) * 3.6); }
+  .chip .icon { width: calc(var(--px) * 8); height: calc(var(--px) * 8); }
+  .chip.short { color: #b8343c; }
+  .recipe button.dim { opacity: .55; }
+  @media (max-aspect-ratio: 4/3) { .grid.inv { grid-template-columns: repeat(10, calc(var(--px) * 12)); } .grid.inv .slot { width: calc(var(--px) * 12); height: calc(var(--px) * 12); } .grid.inv .slot .icon { width: calc(var(--px) * 10); height: calc(var(--px) * 10); } }
+  /* the tide, under the clock on the shore */
+  .tide { grid-column: 1 / 3; text-align: center; font-size: calc(var(--px) * 3.8); font-weight: 700; color: #2f6a9a; }
+  /* the 见闻录 */
+  .lorehead { display: flex; justify-content: space-between; align-items: center; gap: calc(var(--px) * 2); margin-bottom: calc(var(--px) * 2); flex-wrap: wrap; }
+  #lorecats { display: flex; gap: calc(var(--px) * 1.5); flex-wrap: wrap; }
+  #lorecats button { padding: calc(var(--px) * 1) calc(var(--px) * 3); font-size: calc(var(--px) * 3.6); }
+  #lorecats button.on { background: linear-gradient(180deg, #ffd27a, #e09a3c); color: var(--ink); text-shadow: none; }
+  #loregrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--px) * 26), 1fr)); gap: calc(var(--px) * 2); max-height: min(46vh, calc(var(--px) * 96)); overflow: auto; padding: calc(var(--px) * 1); }
+  #loregrid .card { display: grid; justify-items: center; gap: calc(var(--px) * 1); padding: calc(var(--px) * 1.5); border: 0; cursor: pointer; font-weight: 800; font-size: calc(var(--px) * 3.4); color: var(--ink); }
+  #loregrid .card canvas { width: calc(var(--px) * 24); height: calc(var(--px) * 18); image-rendering: pixelated; }
+  #loregrid .card.unknown { color: var(--ink2); }
+  #loregrid .card.on { box-shadow: inset 0 0 0 calc(var(--px) * .8) var(--red); }
+  .toast.lore { background: linear-gradient(180deg, #fff6d8, #f2dca0); }
+  /* a question */
+  #ask { width: min(calc(var(--px) * 110), 86vw); text-align: center; z-index: 5; }
+  #ask p { margin: calc(var(--px) * 2) 0 calc(var(--px) * 4); font-weight: 700; font-size: calc(var(--px) * 4.8); }
+  #ask .foot { justify-content: center; gap: calc(var(--px) * 4); }
 
   #fade { position: fixed; inset: 0; background: #06050a; opacity: 0; pointer-events: none; z-index: 5; }
   #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #0c0b12; z-index: 6; }
@@ -110,6 +174,7 @@
   <canvas id="dial" width="40" height="22"></canvas>
   <div class="when"><div id="date"></div><div class="time"><span id="season"></span><b id="clock">06:00</b></div></div>
   <div class="money well"><span id="coin"></span><b id="money"></b></div>
+  <div class="tide" id="tide" hidden>🌊 <b id="tidetext"></b></div>
 </div>
 <button id="menuBtn" class="wood">菜单</button>
 <div id="tool" class="frame"></div>
@@ -124,23 +189,52 @@
   <div class="foot"><span class="purse well"></span><button class="close wood">关上（Esc）</button></div>
 </div>
 <div id="menu" class="frame panel">
-  <div class="tabs"><button class="wood on" data-pane="bag">背包</button><button class="wood" data-pane="settings">设置</button><button class="wood" data-pane="help">玩法</button></div>
-  <div class="pane on" data-pane="bag"><div class="grid"></div></div>
+  <div class="tabs"><button class="wood on" data-pane="bag">背包</button><button class="wood" data-pane="lore">见闻</button><button class="wood" data-pane="craft">制作</button><button class="wood" data-pane="map">地图</button><button class="wood" data-pane="settings">设置</button><button class="wood" data-pane="help">玩法</button></div>
+  <div class="pane on" data-pane="bag"><div id="petline"></div><div class="grid inv" id="invgrid"></div><div id="iteminfo" class="info"></div></div>
+  <div class="pane" data-pane="lore"><div class="lorehead"><b id="lorecount"></b><span id="lorecats"></span></div><div id="loregrid"></div><div id="loreinfo" class="info"></div></div>
+  <div class="pane" data-pane="craft"><p class="sub">用背包里的材料做东西；做好后拿在手上，对着地面按使用就能放下。</p><div id="recipes"></div></div>
+  <div class="pane" data-pane="map">
+    <div class="mapbox well"><canvas id="worldmap"></canvas><div class="zoom"><button class="wood" data-z="1">＋</button><button class="wood" data-z="-1">－</button><button class="wood" data-z="home">◎</button></div></div>
+    <div id="mapinfo"></div>
+  </div>
   <div class="pane" data-pane="settings">
     <div class="setting well" id="leaveRow" hidden><span>保存并回到酒馆</span><button id="leave" class="wood">离开游戏</button></div>
+    <div class="setting well"><span>换个样子（发型、衣服、宠物名字）</span><button id="relook" class="wood">捏人</button></div>
     <div class="setting well"><span>全屏</span><button id="full" class="wood">切换</button></div>
     <div class="setting well"><span>从头开始（清掉现在的进度）</span><button id="reset" class="wood">重新开始</button></div>
   </div>
   <div class="pane help" data-pane="help">
     <div><b>走路</b>：方向键 / WASD · 手柄摇杆 · 手机按住屏幕拖动</div>
     <div><b>使用</b>：空格 / E / 鼠标点 · 手柄 A · 手机右下的「用」</div>
-    <div><b>换工具</b>：1–7 / Q / 滚轮 · 手柄 LB RB · 点下面的格子</div>
-    <div><b>菜单</b>：Esc / I · 手柄 Start</div>
+    <div><b>换手上的东西</b>：1–9、0 / Q / 滚轮 · 手柄 LB RB · 点下面的格子（背包第一排就是这十格）</div>
+    <div><b>菜单里</b>：方向键 / 摇杆移动选择，空格 / A 确定，Esc / B 返回，Q / LB RB 换页</div>
+    <div><b>宠物</b>：面对它按使用摸摸它（每天一次最开心）；用水壶给家门口的水碗倒水。好感会慢慢涨。</div>
+    <div><b>菜单</b>：Esc / I · 手柄 Start；<b>地图</b>：M（拖动、滚轮或 ＋－ 缩放，点地点看名字）</div>
     <div>翻土 → 播种 → 每天浇水；作物只在自己的季节长，换季时不合季的会枯掉。</div>
-    <div>收获后放进<b>出货箱</b>，第二天早上结算；在<b>信箱</b>邮购当季种子；面朝家门按使用睡觉，凌晨两点前要回家。</div>
+    <div>收获后放进<b>出货箱</b>（手里拿着什么就放什么；拿着工具就把收获和采集物全放进去），第二天早上结算；在<b>信箱</b>邮购当季种子。</div>
+    <div><b>清理农场</b>：杂草用什么都能拔（得纤维），树枝和树用斧头（得木头、松果），石头用镐（得石头）。每晚会再长出一些。地上的野菜、浆果、贝壳按使用就能捡。</div>
+    <div><b>探索</b>：农场东边的小路通往东海岸。潮水一天涨落两次，退潮时才走得到潮滩、礁石和小岛。靠近生物或地标按使用来观察，会记进菜单里的「见闻」。</div>
+    <div><b>制作</b>：菜单里的「制作」页，用木头、石头、纤维做木箱、洒水器、石板路、栅栏、篝火；拿在手上对着地面按使用放下，用镐或斧头收回来。</div>
+    <div>走进家门回屋；梯子通到<b>阁楼</b>，在床边按使用睡觉。凌晨两点还没睡会累倒，醒来已经在床上。</div>
   </div>
   <div class="foot"><span class="purse well"></span><button class="close wood">关上（Esc）</button></div>
 </div>
+<div id="creator" class="frame panel">
+  <div class="banner wood">新的居民</div>
+  <div class="cgrid">
+    <div class="cpreview well"><canvas id="cview" width="64" height="44"></canvas><div class="cturn"><button class="wood" data-turn="-1">⟲</button><button class="wood" data-turn="1">⟳</button></div></div>
+    <div class="copts"></div>
+  </div>
+  <div class="foot"><button class="wood" id="crandom">随机（R / X）</button><button class="wood" id="cdone">就这样，出发！</button></div>
+</div>
+<div id="chestui" class="frame panel">
+  <div class="banner wood">木箱</div>
+  <div class="grid inv" id="chestgrid"></div>
+  <p class="sub">点一格，整叠东西放进背包 / 箱子</p>
+  <div class="grid inv" id="chestbag"></div>
+  <div class="foot"><span id="chestinfo" class="info"></span><button class="close wood">关上（Esc）</button></div>
+</div>
+<div id="ask" class="frame panel"><p></p><div class="foot"><button class="wood yes"></button><button class="wood no"></button></div></div>
 <div id="fade"></div>
 <div id="loading"><div class="frame">正在准备鲸湾郊外……</div></div>
 <script type="module" src="./play.js"></script>
