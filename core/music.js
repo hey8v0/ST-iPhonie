@@ -1,4 +1,3 @@
-import {promptRule} from './prompt-rules.js';
 // 音乐: the phone's music player, background music the story picks (<bgm>), and songs characters share. No DOM here:
 // settings, the user's own music sources (no source ships with the plugin), the tags, the rule for the story model,
 // lyrics and matching a song asked for by name.
@@ -6,6 +5,7 @@ import {promptRule} from './prompt-rules.js';
 // A source is two web addresses the user fills in: one that searches ({{query}}) and one that gives a playable link for
 // a song id ({{id}}), plus where in their JSON answers the list, the id, the title, the artist and the link are (dotted
 // paths such as data.list or data.url). A lyrics address is optional.
+import {promptRule} from './prompt-rules.js';
 
 export const BGM_MODES = Object.freeze(['off', 'tap', 'auto']);
 export const BGM_MODE_NAMES = Object.freeze({off: '关', tap: '点一下才放', auto: '自动放'});

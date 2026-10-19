@@ -1,10 +1,10 @@
-import {proxyAddress} from './proxy-url.js';
 // 文字模型: which model writes the phone's text (chat replies, 朋友圈, calls, picture plans). 'tavern' uses the model the
 // tavern is connected to (generateRaw), as before; 'custom' calls an OpenAI-compatible Chat Completions API directly
 // from the browser with its own address, key and model. The story itself always stays on the tavern's model.
 // Several custom connections can be kept as presets (address, model, temperature, length), one of them in use.
 // Each preset's key lives with the other keys (core/keys.js, engine 'llm', one line per preset) and never appears in
 // settings, requests shown to the user, or error messages.
+import {proxyAddress} from './proxy-url.js';
 
 // idle: a streamed answer may go this long without sending anything (thinking counts as sending); whole: the longest
 // any request may take; timeout: an answer that is not streamed (it says nothing until it is done).

@@ -1,6 +1,6 @@
-import {promptRule} from './prompt-rules.js';
 // 助手 settings and local conversations. Story/model context belongs only to the host's current request;
 // none of it is part of these settings or documents.
+import {promptRule} from './prompt-rules.js';
 import {DEFAULT_FORMAT, isPlaceholderRole} from './protocol.js';
 import {languageName} from './languages.js';
 import {normalizeMemory} from './memory.js';

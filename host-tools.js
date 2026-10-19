@@ -37,7 +37,7 @@ export function createStoryTools({doc = document, hidden, message, valid, wave, 
   event.preventDefault(); event.stopImmediatePropagation();
   if (anchor === button) return close();
   const snap = scope(button); if (!snap || hidden()) return;
-  show(button, [['给这层楼生图', checked(snap, () => actions.draw(snap.id))], ['进入视觉小说模式', checked(snap, () => actions.vn(snap.id))], ['台词小窗', checked(snap, () => actions.dialogue(snap.id))], ['整条播放', checked(snap, () => actions.play(snap.id))]]);
+  show(button, [['给这层楼生图', checked(snap, () => actions.draw(snap.id))], ['从这层看视觉小说', checked(snap, () => actions.vn(snap.id))], ['台词小窗', checked(snap, () => actions.dialogue(snap.id))], ['整条播放', checked(snap, () => actions.play(snap.id))]]);
  }
  function down(event) {
   cancel(); suppress = null; if (event.button !== 0 || hidden()) return;
@@ -56,7 +56,6 @@ export function createStoryTools({doc = document, hidden, message, valid, wave, 
  for (const [type, fn] of listeners) doc.addEventListener(type, fn, true);
  function buttons() {
   if (hidden()) close();
-  doc.querySelectorAll('#chat [data-sttts-vn]').forEach(el => el.remove());
   for (const mes of doc.querySelectorAll('#chat .mes[mesid]')) {
    const old = mes.querySelector('[data-sttts-tools]');
    if (hidden() || !message(Number(mes.getAttribute('mesid')))) { old?.remove(); continue; }

@@ -1,10 +1,10 @@
-import {proxyAddress} from './proxy-url.js';
 // 自己的接口: a speech service the user runs or has (GPT-SoVITS, CosyVoice, IndexTTS…, or any HTTP text-to-speech),
 // told by templates instead of written into the plugin. The address, the request body (JSON) and the headers say where
 // each thing goes: {{text}} the line, {{lang}} its language (zh, ja, en, ko, yue…), {{emotion}} its 情绪, {{voice}} the
 // voice (an ID, or a reference audio's path on the machine that runs the service), {{ref_text}} {{ref_lang}} what is
 // said in the reference audio and in which language, {{key}} the key. The answer is the audio itself, or JSON with a
 // link to it or the audio in base64. The voices are the user's own list (parameters.js, 自己的接口 → 音色).
+import {proxyAddress} from './proxy-url.js';
 import {languageCode} from './languages.js';
 import {pick} from './music.js';
 

@@ -1,5 +1,5 @@
-import {promptRule} from './core/prompt-rules.js';
 // Independent conversations with the phone's text model. Nothing here writes to the tavern story or selects its preset.
+import {promptRule} from './core/prompt-rules.js';
 import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, ASSISTANT_WANTS_MUSIC, assistantMusicRule, buildAssistantPrompt, normalizeAssistant, assistantHistory, assistantMeta, assistantReasoningFormat, assistantReasoningTimer, assistantThoughts, assistantWantsImage, assistantConfirmsImage} from './core/assistant.js';
 import {activeText, customRequest, streamText, responseMetadata, failure, replyText} from './core/llm.js';
 import {modelRules} from './core/state.js';

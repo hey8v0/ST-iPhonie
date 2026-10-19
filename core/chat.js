@@ -1,9 +1,9 @@
-import {promptRule} from './prompt-rules.js';
 // Chat app logic without DOM or network: chat presets, manual contacts, the reply prompt, the reply parser,
 // and the text that carries a phone chat into the next story reply ("带进剧情").
 //
 // A chat preset holds the rules the model follows when it answers in the phone, how many recent story messages
 // and chat messages it sees, and the template used when a chat is brought into the story.
+import {promptRule} from './prompt-rules.js';
 import {songOf, listeningNote} from './music.js';
 import {normalizeWallet, defaultWallet, PREMIUM, guessEmoji, yuan} from './wallet.js';
 import {parseDialogue, isPlaceholderRole} from './protocol.js';

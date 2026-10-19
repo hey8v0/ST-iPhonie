@@ -4,9 +4,16 @@
 const KEY = 'st-iphonie-games';
 /** Best scores and saved games, per browser (only a convenience: a private window keeps none). */
 export function store(win, report = () => {}) {
-  let readFailed=false,writeFailed=false;
-  const read = () => { try { const value=JSON.parse(win.localStorage.getItem(KEY) || '{}') || {};readFailed=false;return value; } catch(error) { if(!readFailed){readFailed=true;report({kind:'小游戏存档读取',message:error.message});}return {}; } };
-  const write = all => { try { win.localStorage.setItem(KEY, JSON.stringify(all));writeFailed=false; } catch(error) { if(!writeFailed){writeFailed=true;report({kind:'小游戏存档保存',message:error.message});} } };
+  // A storage that fails is told once (to the 日志), not on every move.
+  let readFailed = false, writeFailed = false;
+  const read = () => {
+    try { const value = JSON.parse(win.localStorage.getItem(KEY) || '{}') || {}; readFailed = false; return value; }
+    catch (error) { if (!readFailed) { readFailed = true; report({kind: '小游戏存档读取', message: error.message}); } return {}; }
+  };
+  const write = all => {
+    try { win.localStorage.setItem(KEY, JSON.stringify(all)); writeFailed = false; }
+    catch (error) { if (!writeFailed) { writeFailed = true; report({kind: '小游戏存档保存', message: error.message}); } }
+  };
   return {
     best: id => Number(read()[id]?.best) || 0,
     /** Keeps the score when it beats the best; true when it did. lower: smaller is better (times, moves). */

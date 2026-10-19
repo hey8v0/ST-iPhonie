@@ -1,4 +1,3 @@
-import {promptRule} from './prompt-rules.js';
 // 记忆: a long memory for each phone chat (private or group), in the way of 剧情剪辑台 (BakemonoMemory). The last few
 // dozen messages always go to the model as they are; older ones are written up in layers, each kept in this browser:
 //   level 0  聊天摘要   one batch of older messages (dates, who said what, promises, gifts, feelings)
@@ -9,6 +8,7 @@ import {promptRule} from './prompt-rules.js';
 // exact words of a long-gone moment can come back. Searching is local (BM25 over Chinese two-character pieces, as in
 // 剧情剪辑台) and, with a 向量模型 set up, mixed with embedding similarity.
 // No DOM, storage or network here: the plans, the prompts, the parsers, the search and the texts sent to the model.
+import {promptRule} from './prompt-rules.js';
 import {messageLine} from './chat.js';
 
 export const MEMORY_LIMITS = Object.freeze({batch: [10, 200], stage: [2, 20], epic: [2, 20], recall: [0, 10], text: 6000, nodes: 600, chunk: 8, cap: 8000});

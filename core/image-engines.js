@@ -1,4 +1,3 @@
-import {proxyAddress} from './proxy-url.js';
 // Drawing engines besides NovelAI: GPT image models (the OpenAI images API, or a relay that speaks it) and a ComfyUI
 // the user runs. Everything that calls for a picture (正文出图, 朋友圈, 查手机, the 绘图 App) goes through
 // backend.generateImage, which picks the engine set in 绘图 → 用哪个画; this file turns the same picture (scene tags,
@@ -7,6 +6,7 @@ import {proxyAddress} from './proxy-url.js';
 //   ComfyUI: through the tavern's own ComfyUI proxy (/api/sd/comfy/…), so neither CORS nor a phone that cannot reach
 //   the computer's 127.0.0.1 gets in the way: the tavern server talks to ComfyUI. Workflows use the tavern's
 //   placeholders ("%prompt%", "%width%" …), so a workflow made for the tavern's image generation works here too.
+import {proxyAddress} from './proxy-url.js';
 
 import {normalizeDisabledLoras} from './comfy-loras.js';
 

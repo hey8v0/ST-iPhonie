@@ -1,28 +1,9 @@
-import {createView,heading,esc} from './common.js';
-const GAMES={tide:{name:'潮汐来信',close:'stTide',color:'#133f47'},enclave:{name:'南极结界',close:'stEnclave',color:'#243c49'}};
-const asset=(id,path)=>new URL(`./indie/${id}/${path}`,import.meta.url).href;
+// 大游戏: the shelf for the bigger games. They are being made again from the start; until then the app shows only that.
+import {createView, heading} from './common.js';
+
 export function indieApp(ctx) {
- const v=createView(ctx,'indie');let session=null;
- const report=(name,detail,level='info')=>ctx.api.reportDiagnostic?.('大游戏 · '+name,detail,level);
- function close(){if(!session)return;const {dialog,frame,host,receive,game}=session;session=null;host.defaultView.removeEventListener('message',receive);try{frame.contentWindow?.[game.close]?.dispose();}catch(error){report(game.name,error,'error');}if(host.fullscreenElement===dialog)host.exitFullscreen?.().catch(()=>{});dialog.close?.();dialog.remove();report(game.name,{event:'关闭游戏'});}
- function launch(el){
-  const id=el?.dataset?.indiePlay||'tide',game=GAMES[id];if(!game||session)return;
-  let host=ctx.doc;try{if(ctx.win.top.document?.body)host=ctx.win.top.document;}catch{}
-  const dialog=host.createElement('dialog'),frame=host.createElement('iframe'),url=new URL(asset(id,'index.html')),token=ctx.win.crypto.randomUUID();
-  url.searchParams.set('scope',ctx.api.getState().scope||'local');url.searchParams.set('session',token);
-  dialog.setAttribute('aria-label',game.name);dialog.style.cssText=`position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;border:0;padding:0;margin:0;background:${game.color};overflow:hidden;`;
-  frame.title=game.name;frame.allow='fullscreen; autoplay; gamepad';frame.allowFullscreen=true;frame.style.cssText=`display:block;width:100%;height:100%;border:0;background:${game.color}`;
-  const receive=e=>{if(e.source!==frame.contentWindow||e.origin!==url.origin||e.data?.session!==token)return;
-   if(e.data.type===`st-iphonie:${id}:close`)close();
-   if(e.data.type==='st-iphonie:game:diagnostic')report(game.name,e.data.detail,['warn','info'].includes(e.data.level)?e.data.level:'error');
-  };
-  dialog.addEventListener('cancel',event=>{event.preventDefault();frame.contentWindow?.postMessage({type:`st-iphonie:${id}:pause`,session:token},url.origin);});
-  frame.addEventListener('error',()=>report(game.name,{event:'游戏页面加载失败'},'error'));
-  host.defaultView.addEventListener('message',receive);session={dialog,frame,host,receive,game};frame.src=url.href;dialog.append(frame);host.body.append(dialog);
-  try{dialog.showModal();}catch{dialog.setAttribute('open','');}frame.focus();report(game.name,{event:'打开游戏'});
- }
- v.draw(heading('大游戏','','Independent worlds')+`<div class="indie-library"><p class="indie-overline">留一段时间，走进另一个世界。</p>
-  <button type="button" class="indie-cover indie-bay" data-indie-play="enclave" aria-label="打开南极结界"><img src="${esc(asset('enclave','cover.webp'))}" alt="南极结界鲸湾街区的石木房屋与居民"><span class="indie-cover-shade"></span><span class="indie-cover-type"><small>ANTARCTIC ENCLAVE</small><strong>南极结界</strong><span>鲸湾篇 · 海风初至</span></span><span class="indie-cover-play">走进结界 ↗</span></button><div class="indie-description"><span>可捏人</span><span>动作探索</span><span>本机存档</span></div><p class="indie-copy">跑过灯街，跃上临海石台。<br>学习能力，寻找回声，也给自己留一处可以回来的家。</p><div class="indie-edition"><span>02</span><div><strong>探索生活 · 原型篇章</strong><p>鲸湾、听潮岸与回声庭院。人物与进度共用存档，更多区域逐步制作。</p></div></div>
-  <button type="button" class="indie-cover" data-indie-play="tide" aria-label="打开潮汐来信"><img src="${esc(asset('tide','assets/cover-code.webp'))}" alt="海上的小船与守望小岛的灯塔" loading="lazy"><span class="indie-cover-shade"></span><span class="indie-cover-type"><small>LETTERS ON THE TIDE</small><strong>潮汐来信</strong><span>序章 · 灯塔下的第一封信</span></span><span class="indie-cover-play">启程 ↗</span></button><div class="indie-description"><span>探索冒险</span><span>单人</span><span>本机存档</span></div><p class="indie-copy">驾一艘小船，循着潮水寻找消失的路。<br>把一封迟到的信，交到仍在等它的人手里。</p><div class="indie-edition"><span>01</span><div><strong>一个可以慢慢停留的世界</strong><p>开船、登岛、等潮。海边的小故事，藏在航海手册里。</p></div></div></div>`);
- v.on('click','[data-indie-play]',launch);v.leave=close;const dispose=v.dispose;v.dispose=()=>{close();dispose();};return v;
+  const v = createView(ctx, 'indie');
+  v.draw(heading('大游戏', '', 'Independent Games')
+    + '<div class="group pad"><p class="hint" style="padding:0">大游戏正在重新制作，做好了会出现在这里。</p></div>');
+  return v;
 }

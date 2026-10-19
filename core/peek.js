@@ -1,4 +1,3 @@
-import {promptRule} from './prompt-rules.js';
 // 查手机: a look into a character's own phone — their chats with other people, what they searched for, their notes, the
 // photos in their album, their shopping cart and wallpaper — made up by the model from who they are and what they know.
 // No DOM or network here: the prompt, the parser and the checks on what is stored. One snapshot per character; looking
@@ -12,6 +11,7 @@ import {promptRule} from './prompt-rules.js';
 //   【相册】照片里拍了什么｜english tags   one photo, described (the tags only when pictures can be drawn)
 //   【购物车】商品｜价格｜备注        one thing in the cart
 //   【壁纸】画面｜english tags        the wallpaper, like a photo
+import {promptRule} from './prompt-rules.js';
 import {messageLine} from './chat.js';
 
 export const PEEK_LIMITS = Object.freeze({chats: 5, lines: 24, searches: 12, notes: 5, photos: 9, cart: 8, knows: 10, text: 600});

@@ -18,7 +18,7 @@ export const GAMES = [g2048, snake, tetris, gomoku, mines, memory, slide, breako
 const scoreText = (game, n) => game.unit === '秒' ? `${n} 秒` : game.unit === '步' ? `${n} 步` : String(n);
 
 export function gamesApp(ctx) {
-  const v = createView(ctx, 'games'), best = store(ctx.win, detail=>ctx.api.reportDiagnostic?.('小游戏',detail,'warn')), keys = new ctx.win.AbortController(), sounds = gameSounds(ctx.win);
+  const v = createView(ctx, 'games'), best = store(ctx.win, detail => ctx.api.reportDiagnostic?.('小游戏', detail, 'warn')), keys = new ctx.win.AbortController(), sounds = gameSounds(ctx.win);
   let game = null, play = null, paused = false;
 
   function renderList() {
@@ -38,7 +38,6 @@ export function gamesApp(ctx) {
   function open(id) {
     close();
     game = GAMES.find(g => g.id === id);
-    if(game)ctx.api.reportDiagnostic?.('小游戏 · '+game.name,{event:'开始游戏'},'info');
     if (!game) return renderList();
     const saved = best.saved(game.id);
     v.draw(`<div class="game-page" data-playing="${game.id}"><h2 class="game-title">${esc(game.name)}</h2>${bar()}<div class="game-host" data-game-host></div><p class="hint game-how">${esc(game.how)}</p><div class="game-over" data-game-over hidden></div></div>`);
@@ -51,7 +50,6 @@ export function gamesApp(ctx) {
       score: n => { const el = v.root.querySelector('[data-game-score]'); if (el) el.textContent = scoreText(game, n); },
       /** The game ended: the score is offered as a best; the card says so. win: it was won (not lost). */
       over: ({score = 0, win = false, text = '', goOn = false} = {}) => {
-        ctx.api.reportDiagnostic?.('小游戏 · '+game.name,{event:'本局结束',score,win},'info');
         const record = best.offer(game.id, score, {lower: !!game.lower});
         sounds.play(record || win ? 'win' : 'lose');
         const el = v.root.querySelector('[data-game-over]');

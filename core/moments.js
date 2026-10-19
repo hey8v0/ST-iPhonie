@@ -1,4 +1,3 @@
-import {promptRule} from './prompt-rules.js';
 // 朋友圈 (moments) without DOM or network: the moments preset, the prompts for new posts and for reactions, and the
 // parser for the model's answer.
 //
@@ -8,6 +7,7 @@ import {promptRule} from './prompt-rules.js';
 //   【赞】名字、名字            likes on the post above (or on the post being reacted to)
 //   【评论】名字：内容          a comment; 「名字 回复 名字：内容」 answers someone
 // The rules come from the chat preset: its rules marked for 朋友圈, plus its story length and posts per refresh.
+import {promptRule} from './prompt-rules.js';
 import {plainStory} from './chat.js';
 import {isPlaceholderRole} from './protocol.js';
 

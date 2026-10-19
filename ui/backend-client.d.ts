@@ -12,7 +12,6 @@ export type MessageRole = 'system' | 'user' | 'assistant';
 export interface VoiceBinding { voice: string; model: string; }
 /** 视觉小说 (core/vn.js). speed: index of VN_SPEEDS (4 = at once); wait: index of VN_WAITS; cast: each character's 立绘 (a tavern image path). */
 export interface VnSettings {
-    enabled: boolean;
     speed: number;
     wait: number;
     voice: boolean;

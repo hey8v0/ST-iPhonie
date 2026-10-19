@@ -2,7 +2,7 @@
 const SECRET = /authorization|cookie|password|secret|api[-_]?key|access[-_]?token|csrf|^key$|^token$/i;
 const MAX_TEXT = 100000, MAX_TOTAL = 4000000;
 export class RequestLog {
-  constructor({change = () => {}, secrets = () => []} = {}) { this.rows = []; this.change = change; this.secrets = secrets; }
+  constructor({change = () => {}, secrets = () => []} = {}) { this.rows = []; this.total = 0; this.change = change; this.secrets = secrets; }
   clean(value) {
     let secrets = []; try { secrets = this.secrets() || []; } catch { /* key storage may be unavailable */ }
     const keys = [...new Set(secrets.filter(x => typeof x === 'string' && x.length >= 4))];
@@ -32,17 +32,19 @@ export class RequestLog {
   }
   add(source, request, level = 'info') {
     const row = {id: crypto.randomUUID(), at: Date.now(), source, level, state: 'pending', request: this.clean(request)};
-    this.rows.push(row); this.trim(); this.change(); return row.id;
+    this.rows.push(row); this.measure(row); this.trim(); this.change(); return row.id;
   }
   finish(id, response, error = false) {
     const row = this.rows.find(r => r.id === id); if (!row) return;
     Object.assign(row, {state: error ? 'failed' : 'done', duration: Date.now() - row.at, response: this.clean(response)});
     if (error) row.level = response?.name === 'AbortError' ? 'warn' : 'error';
-    this.trim(); this.change();
+    this.measure(row); this.trim(); this.change();
   }
-  trim() { while (this.rows.length > 200 || this.rows.length > 1 && JSON.stringify(this.rows).length > MAX_TOTAL) this.rows.shift(); }
+  /** How big a row is, worked out when it changes (not the whole log on every change). */
+  measure(row) { const size = JSON.stringify(row).length; this.total += size - (this.sizes?.get(row) || 0); (this.sizes ??= new WeakMap()).set(row, size); }
+  trim() { while (this.rows.length > 200 || this.rows.length > 1 && this.total > MAX_TOTAL) { const old = this.rows.shift(); this.total -= this.sizes?.get(old) || 0; } }
   list() { return structuredClone(this.rows); }
-  clear() { this.rows = []; this.change(); }
+  clear() { this.rows = []; this.total = 0; this.sizes = new WeakMap(); this.change(); }
   async run(source, request, fn) {
     const id = this.add(source, request);
     try { const result = await fn(); this.finish(id, result); return result; }

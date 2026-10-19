@@ -102,7 +102,7 @@ export function enginesApp(ctx) {
       : d.status === 404 ? `✗ 出图接口 404：插件请求的是「${esc(api.getState().draw.relay.url || 'https://image.novelai.net')}/ai/generate-image」，${where}不认这个路径。中转地址只填到这个路径前面为止。`
       : `? 出图接口返回 ${d.status}，说不准能不能出图，可以直接试着画一张`;
     const sub = s.ok ? `✓ 读到订阅：${TIERS[s.tier] || '未知档位'}`
-      : r.relay && s.status === 404 ? `— 这个中转不转发查订阅，不影响出图。${api.getState().draw.relay.assumeOpus ? '已经按 Opus 算。' : '订阅信息不可用；出图仍可按现有设置使用。'}`
+      : r.relay && s.status === 404 ? `— 这个中转不转发查订阅，不影响出图。${api.getState().draw.relay.assumeOpus ? '已经按 Opus 算。' : '想自动出图，打开「读不到订阅时按 Opus 算」。'}`
       : `✗ 查订阅失败：${esc(s.message)}`;
     return `<div class="group pad"><p class="probe-line">${draw}</p><p class="probe-line">${sub}</p></div>`;
   }
@@ -180,7 +180,7 @@ export function enginesApp(ctx) {
           <div class="setting-row"><span>Anlas 余额</span><strong>${subscription ? subscription.anlas : '—'}</strong></div>
           <div class="setting-row"><span>免费小图</span><small>${subscription ? (subscription.unlimited ? 'V4.5 及更早：无限（28 步、1024×1024 以内）' : subscription.active ? '仅 Opus 可用：每张图都会扣 Anlas' : '订阅未生效：每张图都会扣 Anlas') : '—'}</small></div>
           ${subscription?.unlimited ? `<div class="setting-row"><span>V5 免费额度</span><small>${subscription.usage ? (subscription.usage.negative || subscription.usage.percent < 2 ? `${subscription.usage.percent}% · 已用完，会扣 Anlas` : `还剩 ${subscription.usage.percent}%，会慢慢恢复`) : '未读到'}</small></div>` : ''}
-        </div>${relayNoSubscription() ? `<p class="hint">这个中转不转发查订阅（插件请求的是「中转地址/user/subscription」），出图不受影响。${d.relay.assumeOpus ? '已经按 Opus 算，小图会自动出。' : '订阅信息不可用；出图仍可按现有设置使用。'}右上角「⋯」里的「测试连接」可以单独检查出图接口。</p>` : subscriptionError ? `<p class="error-copy hint">${esc(subscriptionError)}</p>` : ''}`
+        </div>${relayNoSubscription() ? `<p class="hint">这个中转不转发查订阅（插件请求的是「中转地址/user/subscription」），出图不受影响。${d.relay.assumeOpus ? '已经按 Opus 算，小图会自动出。' : '想让新回复自动出图，打开上面的「读不到订阅时按 Opus 算」。'}右上角「⋯」里的「测试连接」可以单独检查出图接口。</p>` : subscriptionError ? `<p class="error-copy hint">${esc(subscriptionError)}</p>` : ''}`
       + `<div class="actions">${btn('open-draw', icon('paint') + '打开绘图', 'secondary')}</div>`);
   }
 

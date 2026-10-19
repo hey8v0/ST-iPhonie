@@ -1,5 +1,4 @@
-import {promptRule} from './prompt-rules.js';
-import {normalizePromptRules} from './prompt-rules.js';
+import {promptRule, normalizePromptRules} from './prompt-rules.js';
 import { normalizeRoute } from './routes.js';
 import { TTSParameters } from './parameters.js';
 import { DEFAULT_FORMAT,DEFAULT_PROMPT,LEGACY_FORMATS,validatePreset,isPlaceholderRole,CONTRACT_PROMPT,READING_PROMPT,CONTRACT_OLD_END,CONTRACT_NEW_END } from './protocol.js';

@@ -1,5 +1,5 @@
-// 视觉小说 on the tavern page: the 「视觉小说」 button on each message (while the mode is on in the phone's 视觉小说 app),
-// the stage (vn-stage.js) fed with the chat's messages one by one, and the 立绘 kept as files in the tavern's images
+// 视觉小说 on the tavern page: the stage (vn-stage.js), opened from a message's 小手机工具 menu or the phone's 视觉小说
+// app, fed with the chat's messages one by one, and the 立绘 kept as files in the tavern's images
 // (settings.vn.cast), so every device sees them.
 import {openVnStage} from './vn-stage.js';
 import {storySteps, userSteps, pickLook, inlinePictures, editLook} from './core/vn.js';
@@ -23,7 +23,7 @@ const OWN = /^\/?user\/images\//;
  * music(id, index): plays a sound tag / <bgm> of a message (sounds() / musicOn(): whether they are on); avatars(): the
  * tavern's avatars ({me, characters}); closePanel(): puts the phone away.
  */
-export function createVnHost({showEntry = () => true, context, settings, backend, linesOf, voiced, play, narrate = () => {}, stop, voiceOn, sound = () => {}, music = () => {}, sounds = () => false, musicOn = () => false, avatars, notice, closePanel = () => {}, doc = document}) {
+export function createVnHost({context, settings, backend, linesOf, voiced, play, narrate = () => {}, stop, voiceOn, sound = () => {}, music = () => {}, sounds = () => false, musicOn = () => false, avatars, notice, closePanel = () => {}, doc = document}) {
   let stage = null, cursor = 0, endTimer = 0;
   const vn = () => settings().vn;
   const chat = () => context()?.chat || [];
@@ -171,38 +171,6 @@ export function createVnHost({showEntry = () => true, context, settings, backend
     return true;
   }
 
-  /** The 视觉小说 button on each message, while the mode is on. */
-  function buttons() {
-    const on = showEntry() && vn()?.enabled === true && settings().general?.hideStoryWaves !== true;
-    for (const mes of doc.querySelectorAll('#chat .mes[mesid]')) {
-      const old = mes.querySelector('[data-sttts-vn]');
-      if (!on || mes.getAttribute('is_system') === 'true') { old?.remove(); continue; }
-      if (old) continue;
-      const bar = mes.querySelector('.mes_buttons');
-      if (!bar) continue;
-      const b = doc.createElement('div');
-      b.className = 'mes_button sttts-vn-entry fa-solid fa-book-open';
-      b.dataset.stttsVn = '';
-      b.title = '从这里开始视觉小说';
-      b.setAttribute('role', 'button');
-      b.setAttribute('aria-label', '从这里开始视觉小说');
-      b.tabIndex = 0;
-      bar.prepend(b);
-    }
-  }
-  function click(event) {
-    const b = event.target.closest?.('[data-sttts-vn]');
-    if (!b || !b.closest('#chat')) return false;
-    event.preventDefault();
-    event.stopPropagation();
-    try { open(Number(b.closest('.mes[mesid]')?.getAttribute('mesid'))); } catch (error) { notice(error.message); }
-    return true;
-  }
-
-  /**
-   * Keeps a 立绘 (a PNG with its background taken off) as a file in the tavern; null takes it away. look: '' for the
-   * usual one, else a 表情 or 动作 id; seed: what the usual one was drawn with (its 表情 are drawn with it too).
-   */
   /** The 形象 each character wears in the open chat ({name: outfit id}), kept in the chat itself. */
   function wear() { const w = context()?.chatMetadata?.sttts_vn_wear; return w && typeof w === 'object' ? {...w} : {}; }
   function setWear(name, id) {
@@ -239,16 +207,16 @@ export function createVnHost({showEntry = () => true, context, settings, backend
   }
 
   return {
-    open, buttons, click, setSprite, wear, setWear,
+    open, setSprite, wear, setWear,
     get showing() { return !!stage; },
     status(phase) { stage?.status(phase); },
-    refresh() { stage?.refresh(); buttons(); },
+    refresh() { stage?.refresh(); },
     /** A reply was drawn: the stage goes on with it. */
     rendered() { clearTimeout(endTimer); stage?.more(); },
     /** The tavern stopped writing: if nothing new came, the box comes back. */
     ended() { clearTimeout(endTimer); endTimer = setTimeout(() => stage?.failed(), 800); },
     close() { clearTimeout(endTimer); stage?.close(); stage = null; },
-    dispose() { this.close(); for (const b of doc.querySelectorAll('#chat [data-sttts-vn]')) b.remove(); },
+    dispose() { this.close(); },
     state: () => stage?.state() || null,
   };
 }

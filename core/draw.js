@@ -1,4 +1,3 @@
-import {promptRule} from './prompt-rules.js';
 // Drawing settings, the LLM-facing drawing preset, and <img>…</img> picture blocks in chat text.
 //
 // Two kinds of preset live here:
@@ -13,6 +12,7 @@ import {promptRule} from './prompt-rules.js';
 //   位置 Pn (only when pictures are planned after the reply: which paragraph the picture follows)
 // Two ways to get blocks (draw.mode): 'separate' asks the model in its own request after the reply is written and
 // inserts the blocks; 'inline' injects the rules into the story request so the reply carries the blocks itself.
+import {promptRule} from './prompt-rules.js';
 import {defaultDrawParams, normalizeDrawParams, guardParams, relayUrl, NAI_MODEL_NAMES} from './novelai.js';
 import {tokenBudget, counterNow, estimateTokens, countField, tagCost} from './tokens.js';
 import {strength as vibeStrength} from './vibes.js';
@@ -695,7 +695,7 @@ export function writeRequest(settings, {idea = '', cast = [], only = null} = {})
  * drawing app can add them with their looks.
  */
 export function readSuggestion(settings, text) {
-  if(typeof text!=='string')throw Error('模型没有返回可用的绘图提示词，请查看日志后重试');
+  if (typeof text !== 'string') throw Error('模型没有返回可用的绘图提示词，请查看日志后重试');
   const people = [];
   const rest = String(text || '').split('\n').filter(line => {
     const m = line.trim().match(/^(?:人物|角色)\s*[:：]\s*(.*)$/);
@@ -706,8 +706,10 @@ export function readSuggestion(settings, text) {
     }
     return false;
   }).join('\n');
-  const prompt=cleanSuggestion(rest);
-  if(/\[object\s+Object\]/i.test(prompt)||/JavaScript objects?.{0,160}(?:converted|string|toString)|JSON\.stringify\s*\(\s*yourData|console\.dir\s*\(\s*yourData/i.test(prompt))throw Error('模型返回了程序调试说明，没有生成绘图提示词；原提示词已保留，请重试或查看日志');
+  const prompt = cleanSuggestion(rest);
+  // A request that reached the model as "[object Object]" comes back as that, or as a lecture about it, not as tags.
+  const debugging = /JavaScript objects?.{0,160}(?:converted|string|toString)|JSON\.stringify\s*\(\s*yourData|console\.dir\s*\(\s*yourData/i;
+  if (/\[object\s+Object\]/i.test(prompt) || debugging.test(prompt)) throw Error('模型返回了程序调试说明，没有生成绘图提示词；原提示词已保留，请重试或查看日志');
   return {prompt, people};
 }
 /** How long the answer may be: room for the whole budget of tags (a few hundred tokens otherwise). */

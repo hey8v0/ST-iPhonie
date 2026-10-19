@@ -33,7 +33,7 @@ export const EXPRESSIONS = Object.freeze([
 /** The 表情 a 情绪 names; in a longer note (「强忍着眼泪，却努力笑着」) the one named first. */
 export const expressionOf = visualEmotion;
 
-export const defaultVn = () => ({enabled: false, speed: 2, wait: 1, voice: true, narrate: false, font: 'm', box: 'night', opacity: 0.86, effects: true, rule: SPRITE_RULE, palette: null, skip: [], cast: {}});
+export const defaultVn = () => ({speed: 2, wait: 1, voice: true, narrate: false, font: 'm', box: 'night', opacity: 0.86, effects: true, rule: SPRITE_RULE, palette: null, skip: [], cast: {}});
 const pick = (value, list, fallback) => list.includes(value) ? value : fallback;
 const text = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const COLOR = /^(#[0-9a-f]{3,8}|(rgb|hsl)a?\([\d\s.,%/+-]+\))$/i;
@@ -103,7 +103,6 @@ export function normalizeVn(value) {
   const base = defaultVn(), v = value && typeof value === 'object' ? value : {};
   const opacity = Number(v.opacity);
   return {
-    enabled: v.enabled === true,
     speed: pick(Number(v.speed), [0, 1, 2, 3, 4], base.speed),
     wait: pick(Number(v.wait), [0, 1, 2, 3], base.wait),
     voice: v.voice !== false,

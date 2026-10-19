@@ -1,10 +1,10 @@
-import {promptRule} from './prompt-rules.js';
 // 自动挑音色: a character met for the first time in the story gets a voice picked for them — from the user's 候选音色池
 // (voices they trust, marked with gender, age and style) first, and only when none of those fits, from the engine's
 // voice library searched by what the character sounds like. The text model picks; the route is marked as picked
 // automatically so it can be changed in the 角色 App.
 //
 // 候选音色池 entry: {engine, voice, model, name, gender: 'female'|'male'|'', age: 'child'|'young'|'adult'|'old'|'', style}.
+import {promptRule} from './prompt-rules.js';
 
 export const POOL_LIMIT = 200;
 export const VOICE_GENDERS = Object.freeze({female: '女', male: '男'});

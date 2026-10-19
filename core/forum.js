@@ -1,4 +1,3 @@
-import {promptRule} from './prompt-rules.js';
 // 论坛: a public board everyone can read, next to 朋友圈 (which only friends see). Characters post and reply there,
 // and so do strangers (路人) with their own screen names. No DOM or network here: the prompts, the parser for the model's
 // answer and the checks on what is stored.
@@ -10,6 +9,7 @@ import {promptRule} from './prompt-rules.js';
 //   【网名】真名｜网名                 a screen name made up for a character who had none (kept from then on)
 // Everyone is on the board by a screen name (网名): the user's and the characters' are given (or made up once) and the
 // model writes only those; the answer is read back to the real names, which is how posts are stored.
+import {promptRule} from './prompt-rules.js';
 import {isPlaceholderRole} from './protocol.js';
 
 export const FORUM_LIMITS = Object.freeze({posts: 200, replies: 80, perRefresh: 5, hot: 8, title: 60, text: 2000, reply: 500});

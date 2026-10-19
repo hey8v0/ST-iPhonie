@@ -1,6 +1,6 @@
-import {proxyAddress} from './proxy-url.js';
 // NovelAI image client used directly from the browser (image.novelai.net allows cross-origin requests).
 // The key stays in this browser; nothing here goes through the tavern server.
+import {proxyAddress} from './proxy-url.js';
 
 import {vibeKey, vibeParameters} from './vibes.js';
 

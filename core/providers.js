@@ -104,7 +104,7 @@ const REASONS={
  unsupported_model:'这个模型不支持请求里的某个模型或设置，看括号里的说明。',
  quota_exceeded:'额度用完了。',
  insufficient_credits:'额度用完了。',
- voice_not_found:'语音服务没有找到当前请求的音色。请核对音色 ID、当前密钥所属账号及所选模型；不要先删除重建音色。',
+ voice_not_found:'找不到这个音色：音色 ID 填错了、已经删除，或者不属于这个密钥的账号。',
  invalid_voice_id:'音色 ID 格式不对，请重新选择音色。',
  invalid_voice_settings:'音色设置里有这个模型不接受的数值。eleven_v3 的稳定性只能是 0、0.5 或 1。',
  text_too_long:'这句台词太长了。',

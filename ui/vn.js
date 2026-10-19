@@ -1,11 +1,11 @@
-import {pagedPicker} from './paged-picker.js';
 // 视觉小说: the workbench of the galgame view of the story. 开演 opens the stage over the tavern page (from the latest
-// reply, from the start, or from a message picked here); 视觉小说模式 puts a 📖 button on every message to start from
-// there. 立绘: each character of the open card has a page of standing pictures — the usual one, five 表情 picked by a
+// reply, from the start, or from a message picked here); a message's 小手机工具 menu in the tavern starts from that
+// message. 立绘: each character of the open card has a page of standing pictures — the usual one, five 表情 picked by a
 // line's 情绪, and 动作 of their own picked by words in the story — drawn with the drawing engine (the 画风 in use, the
 // 立绘 rule, their looks from the 角色 App, on a flat key colour that is taken off) or uploaded. A 表情 is drawn with
 // the usual one's seed, so the face and clothes stay as close as the engine allows. 观感: text speed, the pause of 自动,
 // the text box (also in the tavern's or the phone's colours), its size, effects, voice and the 旁白.
+import {pagedPicker} from './paged-picker.js';
 import {createView, esc, heading, help, toggle, avatar, menu} from './common.js';
 import {icon} from './icons.js';
 import {saveFile} from '../download.js';
@@ -72,7 +72,6 @@ export function vnApp(ctx) {
         <p>把酒馆里的剧情放成 galgame：背景、立绘、对话框，配音一句一句来。看到最后还能直接写下一段。</p>
         <div class="actions"><button type="button" class="primary" data-action="vn-start" data-from="latest">${icon('play', true)}从最新一条开始</button><button type="button" class="secondary" data-action="vn-pick">选一条开始</button><button type="button" class="secondary" data-action="vn-start" data-from="first">从头开始</button></div>
         ${inTavern() ? '' : '<p class="hint">要在酒馆里打开小手机才能开演。</p>'}</div>`
-      + `<div class="group">${toggle('vn-enabled', '视觉小说模式', s.enabled, '打开后，酒馆里每条消息的按钮栏多一个📖，点它就从那条开始看。关着也能在这里开演。')}</div>`
       + `<div class="group-title"><span>立绘</span>${help('点一个角色，给 TA 画立绘：平常的一张，开心、生气、难过、惊讶、害羞五种表情，还能加自己的动作（比如抱臂、托腮）。台词的情绪对上哪种表情就换哪张，正文里出现动作的词就换成那个动作。\n\n用绘图 App 现在的引擎和画风画，外貌用角色 App 里登记的，背景画成纯绿色（角色穿绿色就换蓝色）再去掉，浅色衣服和头发缝都好处理。表情用平常那张的种子画，脸和衣服会尽量一样。也可以上传自己的图。\n\n立绘存在酒馆的图片文件夹里，换设备也能看到。没有立绘的角色，说话时在对话框左边显示头像。')}</div>
         <div class="group">${castRows()}
         <details class="vn-rule" data-group="vn-rule"><summary>立绘要求</summary>
@@ -446,8 +445,7 @@ export function vnApp(ctx) {
   });
   v.root.addEventListener('change', e => {
     const f = e.target.dataset.field;
-    if (f === 'vn-enabled') { save({enabled: e.target.checked}); ctx.notify(e.target.checked ? '酒馆的每条消息上多了📖，点它从那条开始看' : '消息上的📖收起来了'); }
-    else if (f === 'vn-effects') save({effects: e.target.checked});
+    if (f === 'vn-effects') save({effects: e.target.checked});
     else if (f === 'vn-voice') save({voice: e.target.checked});
     else if (f === 'vn-narrate') save({narrate: e.target.checked});
     else if (f === 'vn-opacity') save({opacity: Number(e.target.value) / 100});

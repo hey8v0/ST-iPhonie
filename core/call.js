@@ -1,9 +1,9 @@
-import {promptRule} from './prompt-rules.js';
 // 来电 (voice calls) without DOM or network: call options, the request for each turn of a call, and the reply parser.
 //
 // A call is spoken: every line the contact says is written in the voice format of the active voice preset (the same
 // tags as story dialogue), so it can be read aloud with the contact's own voice. Rules come from the chat preset, the
 // ones used in 电话. The finished call is kept in the private chat as one message of kind 'call'.
+import {promptRule} from './prompt-rules.js';
 import {parseDialogue} from './protocol.js';
 import {messageLine, knowsRule} from './chat.js';
 import {languageName} from './languages.js';
