@@ -71,10 +71,13 @@ export function skippedRanges(raw, skip = NARRATION_SKIP) {
   for (const tag of ['think', 'thinking', 'style', 'script', ...cleanSkip(skip)]) {
     const marker = /^<!--(.*?)-->$/.exec(tag);
     if (marker) {
-      const name = escapeRe(marker[1]), open = new RegExp(`<!--\\s*${name}\\s*-->`, 'gi'), close = new RegExp(`<!--\\s*(?:/\\s*${name}|${name}\\s*(?:结束|END)|(?:结束|END)\\s*${name})\\s*-->`, 'gi');
+      const name = escapeRe(marker[1]), open = new RegExp(`<!--\\s*${name}\\s*-->`, 'gi'), close = new RegExp(`<!--\\s*(?:/\\s*${name}|${name}\\s*(?:结束|END)|(?:结束|END)\\s*${name})\\s*-->`, 'gi'), nextOpen=new RegExp(open.source,'gi');
       for (const m of text.matchAll(open)) {
         close.lastIndex = m.index + m[0].length;const end = close.exec(text);
-        out.push([m.index, end ? close.lastIndex : followingPanelEnd(text, m.index + m[0].length)]);
+        nextOpen.lastIndex=m.index+m[0].length;const next=nextOpen.exec(text);
+        const panelEnd=followingPanelEnd(text,m.index+m[0].length);
+        // Do not borrow a later panel's closing marker across another opening marker.
+        out.push([m.index, end&&(!next||end.index<next.index) ? close.lastIndex : panelEnd]);
       }
       continue;
     }

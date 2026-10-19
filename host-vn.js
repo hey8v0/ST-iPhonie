@@ -41,7 +41,8 @@ export function createVnHost({showEntry = () => true, context, settings, backend
   }
   /**
    * Pictures another plugin added to the message on the page only (智绘姬 and the like): each one where the text
-   * just before it is in the story (else at the start). Small ones (emoji, icons) and the phone's own are left out.
+   * just before it is in the story. Unrendered picture tags supply positions when a plugin replaces the prose.
+   * Small ones (emoji, icons) and the phone's own are left out.
    */
   function shownPictures(id, raw, known) {
     const box = doc.querySelector(`#chat .mes[mesid="${id}"] .mes_text`);
@@ -49,24 +50,37 @@ export function createVnHost({showEntry = () => true, context, settings, backend
     const abs = u => { try { return new URL(u, doc.baseURI).href; } catch { return u; } };
     const seen = new Set(known.map(p => abs(p.url))), out = [], offsets = [];let source = '';
     for (const m of raw.matchAll(/[\p{L}\p{N}]/gu)) { source += m[0];offsets.push(m.index + m[0].length); }
+    const slots = known.filter(p => !p.url && Number.isFinite(p.start)).sort((a,b)=>a.start-b.start);
+    // Range.toString() includes style code and controls that image plugins add. Those labels are not story anchors.
+    const beforeImage = new Map(), walker = doc.createTreeWalker(box, 5);let before = '';
+    for(let node; (node=walker.nextNode());) {
+      if(node.nodeType===1&&node.tagName==='IMG')beforeImage.set(node,before);
+      if(node.nodeType!==3||node.parentElement?.closest('style,script,button,select,textarea,[hidden],[aria-hidden="true"],.sttts-pic,.sttts-phone-note'))continue;
+      before=(before+(node.textContent.match(/[\p{L}\p{N}]/gu)||[]).join('')).slice(-300);
+    }
     let previous = 0;
     for (const img of box.querySelectorAll('img')) {
       const url = img.currentSrc || img.src;
       if (!url || seen.has(abs(url)) || img.closest('[class*="sttts"]')) continue;
       if (img.naturalWidth && img.naturalWidth < 160 || img.naturalHeight && img.naturalHeight < 160) continue;
       seen.add(abs(url));
-      let start = 0;
+      const slot=slots.shift();let start = null;
       try {
-        const range = doc.createRange(); range.setStart(box, 0); range.setEndBefore(img);
-        const before = (range.toString().match(/[\p{L}\p{N}]/gu) || []).join('');
+        const before = beforeImage.get(img)||'';
         for (const size of [60, 30, 12, 6]) {
           const tail = before.slice(-size);if (!tail) continue;
-          const at = source.indexOf(tail, previous);
-          if (at >= 0) { previous = at + tail.length;start = offsets[previous - 1] || 0;break; }
+          const from=offsets.findIndex(at=>at>=previous), at = source.indexOf(tail,Math.max(0,from-tail.length+1));
+          if (at >= 0 && offsets[at+tail.length-1]>=previous) {
+            start = offsets[at+tail.length-1];
+            while(start<raw.length&&/[\s。，、！？!?…；;,.：:”’」』）)】\]]/.test(raw[start]))start++;
+            break;
+          }
         }
-        if (!start && before) start = offsets[Math.max(0, previous - 1)] || 0;
-
       } catch {}
+      // A failed match is not evidence that an image belongs before all prose. Original tags are authoritative
+      // fallbacks, including when the image plugin puts its whole gallery ahead of a rendered/iframe story.
+      if(start===null)start=slot?.start??((beforeImage.get(img)||'')?raw.length:previous);
+      start=Math.max(previous,start);previous=start;
       out.push({start, url});
     }
     return out;
