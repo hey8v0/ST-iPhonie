@@ -1,5 +1,6 @@
 // Compact menus on the tavern page; colors inherit the active tavern theme.
-export function createStoryTools({doc = document, hidden, message, valid, wave, actions, notice}) {
+// entry: whether the 楼层工具 button is shown on each reply (hidden() takes it away too, with the voice menu).
+export function createStoryTools({doc = document, hidden, entry = () => true, message, valid, wave, actions, notice}) {
  let menu = null, anchor = null, hold = null, suppress = null;
  const win = doc.defaultView;
  function close() { menu?.remove(); menu = null; anchor = null; }
@@ -55,10 +56,10 @@ export function createStoryTools({doc = document, hidden, message, valid, wave, 
  const listeners = [['click', click], ['pointerdown', down], ['pointermove', move], ['pointerup', cancel], ['pointercancel', cancel], ['contextmenu', context], ['keydown', key]];
  for (const [type, fn] of listeners) doc.addEventListener(type, fn, true);
  function buttons() {
-  if (hidden()) close();
+  if (hidden() || !entry()) close();
   for (const mes of doc.querySelectorAll('#chat .mes[mesid]')) {
    const old = mes.querySelector('[data-sttts-tools]');
-   if (hidden() || !message(Number(mes.getAttribute('mesid')))) { old?.remove(); continue; }
+   if (hidden() || !entry() || !message(Number(mes.getAttribute('mesid')))) { old?.remove(); continue; }
    if (old) continue;
    const bar = mes.querySelector('.mes_buttons'); if (!bar) continue;
    const button = doc.createElement('button'); button.type = 'button'; button.className = 'mes_button sttts-tools-entry'; button.dataset.stttsTools = ''; button.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="var(--SmartThemeBlurTintColor,#242424)"/><circle cx="15" cy="12" r="2" fill="var(--SmartThemeBlurTintColor,#242424)"/><circle cx="9" cy="18" r="2" fill="var(--SmartThemeBlurTintColor,#242424)"/></svg>';

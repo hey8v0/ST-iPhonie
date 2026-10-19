@@ -19,24 +19,27 @@ function codeSpans(message){return [...message.matchAll(/```[\s\S]*?(?:```|$)|~~
 /** The “{译文}”<tts>{角色}|{情绪}|{文本}</tts> shape, whose common slips can still be read. */
 const tagFamily=format=>format.replace(/\s+/g,'')==='“{译文}”<tts>{角色}|{情绪}|{文本}</tts>';
 // Repairs that keep every character in place, so positions found in the repaired text hold in the original:
-// <TTS> in capitals, a full-width ｜ inside a tag, and "…" 「…」 『…』 ＂…＂ around the translation instead of “…”.
-function repaired(message){return message.replace(/<\/?tts\b/gi,m=>m.toLowerCase()).replace(/<tts>[^<]{0,6000}<\/tts>/g,m=>m.replace(/｜/g,'|')).replace(/(["「『＂])([^"「」『』＂“”\n]{1,1000})(["」』＂])(?=<tts>)/g,(m,a,t)=>'“'+t+'”');}
+// <TTS> in capitals, a full-width ｜ inside a tag, *“…”* in italics (the marks go inside the quotes and are dropped
+// from the translation), and "…" 「…」 『…』 ＂…＂ around the translation instead of “…”.
+function repaired(message){return message.replace(/<\/?tts\b/gi,m=>m.toLowerCase()).replace(/(\*{1,3}|_{1,2})(["「『＂“])([^"「」『』＂“”\n]{1,1000})(["」』＂”])\1(?=<tts>)/gi,'$2$1$3$1$4').replace(/<tts>[^<]{0,6000}<\/tts>/g,m=>m.replace(/｜/g,'|')).replace(/(["「『＂])([^"「」『』＂“”\n]{1,1000})(["」』＂])(?=<tts>)/g,(m,a,t)=>'“'+t+'”');}
 function exactLines(message,literals,names,excluded){const result=[];let cursor=0,tries=0;while(cursor<message.length&&result.length<500&&tries++<2000){const start=message.indexOf(literals[0],cursor);if(start<0)break;const hidden=excluded.find(([a,b])=>a<=start&&start<b);if(hidden){cursor=hidden[1];continue;}let at=start+literals[0].length,valid=true,values={};for(let i=0;i<4;i++){const end=message.indexOf(literals[i+1],at);if(end<0){valid=false;break;}values[names[i]]=decodeText(message.slice(at,end));at=end+literals[i+1].length;}if(valid&&message.slice(start+literals[0].length,at).includes(literals[0]))valid=false;cursor=valid?at:start+literals[0].length;if(!valid||excluded.some(([a,b])=>start<b&&at>a)||fields.some(f=>!values[f]?.trim())||values.角色.length>100||values.情绪.length>100||isPlaceholderRole(values.角色))continue;
 // A line quoted twice (““你好””<tts>…) matches from the inner quote: the outer opening quote is left in front and the
 // outer closing one ends the translation. Both belong to the line; quotes around the whole translation are dropped.
 let from=start,said=values.译文;const lead=literals[0],close=literals[1]?.[0];if(lead&&close&&start>=lead.length&&message.slice(start-lead.length,start)===lead&&said.endsWith(close)&&(result.at(-1)?.end??0)<=start-lead.length){from=start-lead.length;said=said.slice(0,-close.length);}
 const bare=said.replace(/^\s*[“"]\s*([\s\S]*?)\s*[”"]\s*$/,'$1');if(bare.trim())said=bare;
+const plain=said.replace(/^(\*{1,3}|_{1,2})(?=\S)([\s\S]*?\S)\1$/,'$2');if(plain.trim())said=plain;
 result.push({start:from,end:at,translation:said,role:values.角色.trim(),emotion:values.情绪.trim(),text:values.文本});}return result;}
+/** What is read out without the engine's voice tags ([sigh], <break>, (laughs)), for showing. */
+const voiceOnly=t=>String(t).replace(/\[[^\]]*\]|<[^>]*>|\((?:[a-z][a-z\s'-]*)\)/gi,'');
 // Voice tags the exact reading skipped but that are still clear: two fields (角色|原文, the emotion is left to the
 // engine), and tags with no quoted translation in front (the original text is shown instead). Others stay problems.
 function looseLines(message,found,excluded){const out=[];for(const m of message.matchAll(/<tts>([^<]{1,6000}?)<\/tts>/g)){const at=m.index,end=at+m[0].length;if(found.some(l=>at<l.end&&end>l.start)||excluded.some(([a,b])=>at<b&&end>a))continue;const parts=m[1].split('|');if(parts.length<2||parts.length>3)continue;const role=decodeText(parts[0]).trim(),emotion=parts.length===3?decodeText(parts[1]).trim():'',text=decodeText(parts.at(-1)).trim();if(!role||role.length>100||emotion.length>100||isPlaceholderRole(role)||!text.trim())continue;
 const before=Math.max(0,...found.map(l=>l.end).filter(e=>e<=at),...out.map(l=>l.end)),quoted=/“([^“”]{1,2000})”\s*$/.exec(message.slice(before,at));
-out.push({start:quoted?at-quoted[0].length:at,end,translation:(quoted?decodeText(quoted[1]):text).trim(),role,emotion,text});}return out;}
+out.push({start:quoted?at-quoted[0].length:at,end,translation:(quoted?decodeText(quoted[1]):voiceOnly(text)).trim()||text,role,emotion,text});}return out;}
 // A Chinese line the model split in two — the beginning quoted, the rest only in the tag (“今天天气真不错”<tts>澄音|开心|
 // 我们出去约会吧！</tts>) — or quoted only partly (the tag holds the whole line): the whole line is shown and spoken.
 // Only for a Chinese tag (Han characters, no kana, hangul or Latin words): a translation of another language is left
 // alone, and so is a Chinese pair that says the same thing in other words (they share most characters, Cantonese too).
-const voiceOnly=t=>String(t).replace(/\[[^\]]*\]|<[^>]*>|\((?:[a-z][a-z\s'-]*)\)/gi,'');
 const coreText=t=>voiceOnly(t).replace(/[\s\p{P}\p{S}]/gu,'');
 const chineseText=t=>{const c=coreText(t);return /\p{Script=Han}/u.test(c)&&!/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(c)&&!/[a-z]{3,}/i.test(c);};
 export function mendLine(line){const t=coreText(line.translation),x=coreText(line.text);
@@ -57,8 +60,8 @@ function freeLines(message) {
   const role=decodeText(parts[0]).trim(),emotion=parts.length===3?decodeText(parts[1]).trim():'',text=decodeText(parts.at(-1)).trim();
   if(!role||role.length>100||emotion.length>100||!text||isPlaceholderRole(role))continue;
   const before=message.slice(out.at(-1)?.end||0,start);
-  const visible=/(?:“[^“”\n]+”|"[^"\n]+"|「[^「」\n]+」|『[^『』\n]+』)(?:\s*[（(][^()（）\n]*[）)])?\s*$/.exec(before);
-  out.push({start,end,translation:visible?decodeText(visible[0].trim()):text,role,emotion,text,tagOnly:true,...(visible?{displayStart:start-visible[0].length}:{})});
+  const visible=/(\*{0,3}|_{0,2})(?:“[^“”\n]+”|"[^"\n]+"|「[^「」\n]+」|『[^『』\n]+』)(?:\s*[（(][^()（）\n]*[）)])?\1\s*$/.exec(before);
+  out.push({start,end,translation:visible?decodeText(visible[0].trim().replace(/^[*_]+|[*_]+$/g,'')):voiceOnly(text).trim()||text,role,emotion,text,tagOnly:true,...(visible?{displayStart:start-visible[0].length}:{})});
  }
  return out;
 }

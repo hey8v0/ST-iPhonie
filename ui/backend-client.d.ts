@@ -84,6 +84,8 @@ export interface GeneralSettings {
     /** Voice lines in the story and voice messages in the phone chat. Off: no voice rules are sent, tagged lines show only their translation. */
     voiceEnabled: boolean;
     hideStoryWaves: boolean;
+    /** 楼层工具按钮 on each reply (default on). */
+    storyTools?: boolean;
     cacheEnabled: boolean;
     /** 提前生成: a new reply's lines are made in the background and kept (not played). */
     pregenerate?: boolean;
