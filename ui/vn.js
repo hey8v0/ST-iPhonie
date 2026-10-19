@@ -58,7 +58,7 @@ export function vnApp(ctx) {
       const made = all.reduce((n, l) => n + l.count, 0), shown = all.find(l => l.sprite)?.sprite || '';
       return `<button type="button" class="vn-cast-row" data-action="vn-looks" data-name="${esc(c.name)}">
       <span class="vn-sprite-thumb${shown ? ' has' : ''}">${shown ? checker(shown) : avatar(c.name, 'none', 44)}</span>
-      <span class="vn-cast-text"><strong>${esc(c.name)}</strong><small>${[made ? `${made} 张立绘` : c.appearance ? '还没有立绘' : '还没有立绘 · 没写外貌', c.actions.length ? `${c.actions.length} 个动作` : '', c.outfits.length ? `${c.outfits.length + 1} 套形象` + (w ? `（穿着${esc(setFor(c, w).label)}）` : '') : ''].filter(Boolean).join(' · ')}</small></span>
+      <span class="vn-cast-text"><strong>${esc(c.name)}</strong><small>${[made ? `${made} 张立绘` : c.appearance ? '还没有立绘' : '还没有立绘 · 没写外貌', c.actions.length ? `${c.actions.length} 个自定义表情／动作` : '', c.outfits.length ? `${c.outfits.length + 1} 套形象` + (w ? `（穿着${esc(setFor(c, w).label)}）` : '') : ''].filter(Boolean).join(' · ')}</small></span>
       ${icon('next')}</button>`;
     }});
   }
@@ -121,8 +121,8 @@ export function vnApp(ctx) {
       const worn = setFor(c, wearNow()[name] || '') ? wearNow()[name] || '' : '';
       const chips = [{id: '', label: '默认'}, ...c.outfits.map(o => ({id: o.id, label: o.label}))];
       d.body.innerHTML = `<div class="vn-outfit-control"><button type="button" class="vn-outfit" data-action="vn-pick-outfit">${esc(chips.find(o=>o.id===outfit)?.label||'默认')} ▾</button><button type="button" class="vn-outfit add" data-action="vn-add-outfit">${icon('add')}形象</button></div><div data-look-picker></div>
-        <div class="actions">${c.outfits.length && outfit !== worn ? `<button type="button" class="primary" data-action="vn-wear">${icon('check')}穿这套</button>` : ''}${outfit ? `<button type="button" class="secondary" data-action="vn-edit-outfit">${icon('edit')}改形象</button>` : ''}<button type="button" class="secondary" data-action="vn-add-action">${icon('add')}动作</button>${missing.length ? `<button type="button" class="secondary" data-action="vn-all" ${set.sprite ? '' : 'disabled'}>${icon('paint')}补齐 ${missing.length} 种表情</button>` : ''}</div>`;
-      pagedPicker(d.body.querySelector('[data-look-picker]'),{items:all,pageSize:9,placeholder:'搜索表情、动作…',listClass:'vn-looks',text:l=>l.label+' '+l.tags,render:l=>`<button type="button" class="vn-look${l.sprite?' has':''}" data-look="${esc(l.id)}"><span class="vn-look-pic">${l.sprite?checker(l.sprite):`<i>${icon(l.action?'hand':l.id?'smile':'person')}</i>`}${l.count>1?`<em class="vn-look-n">${l.mix?'随机 ':''}${l.count}</em>`:''}</span><strong>${esc(l.label)}</strong><small>${l.sprite?l.count+' 张':l.action?'动作':l.id?'表情':'平常'}</small></button>`});
+        <div class="actions">${c.outfits.length && outfit !== worn ? `<button type="button" class="primary" data-action="vn-wear">${icon('check')}穿这套</button>` : ''}${outfit ? `<button type="button" class="secondary" data-action="vn-edit-outfit">${icon('edit')}改形象</button>` : ''}<button type="button" class="secondary" data-action="vn-add-expression" ${c.actions.length>=24?'disabled':''}>${icon('add')}表情</button><button type="button" class="secondary" data-action="vn-add-action" ${c.actions.length>=24?'disabled':''}>${icon('add')}动作</button>${missing.length ? `<button type="button" class="secondary" data-action="vn-all" ${set.sprite ? '' : 'disabled'}>${icon('paint')}补齐 ${missing.length} 种表情</button>` : ''}</div>`;
+      pagedPicker(d.body.querySelector('[data-look-picker]'),{items:all,pageSize:9,placeholder:'搜索表情、动作…',listClass:'vn-looks',text:l=>l.label+' '+l.tags,render:l=>`<button type="button" class="vn-look${l.sprite?' has':''}" data-look="${esc(l.id)}"><span class="vn-look-pic">${l.sprite?checker(l.sprite):`<i>${icon(l.action?'hand':l.id?'smile':'person')}</i>`}${l.count>1?`<em class="vn-look-n">${l.mix?'随机 ':''}${l.count}</em>`:''}</span><strong>${esc(l.label)}</strong><small>${l.sprite?l.count+' 张':l.action?(l.action.kind==='expression'?'表情':'动作'):l.id?'表情':'平常'}</small></button>`});
 
     };
     paint();
@@ -136,6 +136,7 @@ export function vnApp(ctx) {
         if (b.dataset.action === 'vn-add-outfit') { const id = await editOutfit(name); looks(name, id || outfit); return; }
         if (b.dataset.action === 'vn-edit-outfit') { const gone = await outfitMenu(name, outfit); looks(name, gone ? '' : outfit); return; }
         if (b.dataset.action === 'vn-wear') { api.vnSetWear(name, outfit); ctx.notify(`这个聊天里${name}穿「${setFor(castOf(name), outfit)?.label || '默认'}」`); paint(); return; }
+        if (b.dataset.action === 'vn-add-expression') { await editAction(name,null,'expression'); looks(name,outfit); return; }
         if (b.dataset.action === 'vn-add-action') { await editAction(name); looks(name, outfit); return; }
         if (b.dataset.action === 'vn-all') { await drawAll(name, outfit); looks(name, outfit); return; }
         const c = castOf(name), l = looksOf(c, outfit).find(x => x.id === b.dataset.look);
@@ -145,15 +146,15 @@ export function vnApp(ctx) {
           {key: 'draw', icon: 'paint', label: l.sprite ? '再画一张' : '画这张', note: l.id ? (set.seed >= 0 ? '用平常那张的种子，加上「' + (l.tags || l.label) + '」' : '加上「' + (l.tags || l.label) + '」') : '外貌和立绘要求可以先改'},
           {key: 'upload', icon: 'import', label: l.sprite ? '再上传一张' : '上传图片', note: '用自己的图，白底、纯色底或透明 PNG 都行'},
           l.count > 1 && {key: 'group', icon: 'gallery', label: `这组图（${l.count} 张）`, note: l.mix ? '正在轮换随机出' : '选用哪一张，或者轮换随机出'},
-          l.action && {key: 'edit', icon: 'edit', label: '改这个动作', note: '名字、怎么画、什么时候用'},
+          l.action && {key: 'edit', icon: 'edit', label: l.action?.kind==='expression'?'改这个表情':'改这个动作', note: '名字、怎么画、什么时候用'},
           l.sprite && {key: 'remove', icon: 'trash', label: '去掉这张', note: l.count > 1 ? '换成这组的下一张' : '', danger: true},
-          l.action && {key: 'delete', icon: 'trash', label: '删掉这个动作', note: '每套形象里这个动作的图都会删掉', danger: true}]);
+          l.action && {key: 'delete', icon: 'trash', label: l.action?.kind==='expression'?'删掉这个表情':'删掉这个动作', note: '每套形象里的对应图片都会删掉', danger: true}]);
         if (key === 'draw') draw(name, l);
         else if (key === 'upload') upload(name, l);
         else if (key === 'group') groupSheet(name, l);
         else if (key === 'edit') { await editAction(name, l.action); looks(name, outfit); }
         else if (key === 'remove' && await ctx.confirm(`去掉「${name} · ${l.label}」这张？`, '酒馆里的图片文件也会删掉。')) { await api.vnSprite(name, null, {look: l.id, outfit}); ctx.notify('去掉了'); looks(name, outfit); }
-        else if (key === 'delete' && await ctx.confirm(`删掉动作「${l.label}」？`, '画好的图也会删掉。')) {
+        else if (key === 'delete' && await ctx.confirm(`删掉${l.action?.kind==='expression'?'表情':'动作'}「${l.label}」？`, '画好的图也会删掉。')) {
           for (const o of ['', ...c.outfits.map(x => x.id)]) while (looksOf(castOf(name), o).find(x => x.id === l.id)?.sprite) await api.vnSprite(name, null, {look: l.id, outfit: o});
           changeActions(name, list => list.filter(a => a.id !== l.id)); looks(name, outfit);
         }
@@ -240,22 +241,23 @@ export function vnApp(ctx) {
     api.saveVn({cast: {...s.cast, [name]: {...entry, actions: fn([...(entry.actions || [])])}}});
   }
   /** 动作: its name, what to draw (English tags) and the words in the story that bring it on. */
-  function editAction(name, action = null) {
+  function editAction(name, action = null, kind = action?.kind || 'action') {
+    const expression=kind==='expression', noun=expression?'表情':'动作';
     return new Promise(resolve => {
-      const d = ctx.dialog(action ? '改动作' : '加一个动作', `<div class="group pad">
-        <div class="field"><span>名字</span><input data-field="a-label" maxlength="12" value="${esc(action?.label || '')}" placeholder="比如 抱臂"></div>
-        <div class="field"><span>怎么画${help('写给绘图模型的英文 tag，比如 crossed arms、hand on own chin、waving、pointing at viewer。')}</span><input data-field="a-tags" value="${esc(action?.tags || '')}" placeholder="crossed arms"></div>
-        <div class="field"><span>什么时候用${help('台词前面的叙述（或台词的情绪）里出现这些词，就换成这张。用逗号或空格隔开，比如：抱臂、抱着手臂、双臂交叉。')}</span><input data-field="a-words" value="${esc((action?.words || []).join('、'))}" placeholder="抱臂、双臂交叉"></div></div>
+      const d = ctx.dialog((action?'改':'加一个')+noun, `<div class="group pad">
+        <div class="field"><span>名字</span><input data-field="a-label" maxlength="12" value="${esc(action?.label || '')}" placeholder="${expression?'比如 紧张':'比如 抱臂'}"></div>
+        <div class="field"><span>怎么画${help('写给绘图模型的英文 tag，比如 crossed arms、hand on own chin、waving、pointing at viewer。')}</span><input data-field="a-tags" value="${esc(action?.tags || '')}" placeholder="${expression?'nervous expression':'crossed arms'}"></div>
+        <div class="field"><span>什么时候用${help(expression?'只匹配台词的情绪；中英文同义词自动对应。多个词用逗号隔开，英文短语可以保留空格。':'台词前面的叙述（或台词的情绪）里出现这些词，就换成这张。用逗号或空格隔开，比如：抱臂、抱着手臂、双臂交叉。')}</span><input data-field="a-words" value="${esc((action?.words || []).join('、'))}" placeholder="${expression?'紧张、nervous、uneasy':'抱臂、双臂交叉'}"></div></div>
         <div class="actions"><button type="button" class="primary" data-action="a-save">${icon('check')}保存</button></div>`);
       d.onClose(() => resolve());
       d.body.addEventListener('click', e => {
         if (!e.target.closest('[data-action=a-save]')) return;
         const val = k => d.body.querySelector(`[data-field=${k}]`).value.trim();
-        const label = val('a-label'), tags = val('a-tags'), words = val('a-words').split(/[,，、;；\s]+/).filter(Boolean);
+        const label = val('a-label'), tags = val('a-tags'), words = val('a-words').split(expression?/[,，、;；\n]+/:/[,，、;；\s]+/).map(w=>w.trim()).filter(Boolean);
         if (!label) { ctx.notify('写个名字', {error: true}); return; }
         if (!words.length) words.push(label);
         try {
-          changeActions(name, list => action ? list.map(a => a.id === action.id ? {...a, label, tags, words} : a) : [...list, {id: 'a-' + Date.now().toString(36), label, tags, words}]);
+          changeActions(name, list => action ? list.map(a => a.id === action.id ? {...a, label, tags, words} : a) : [...list, {id: 'a-' + Date.now().toString(36), label, tags, words,...(expression?{kind:'expression'}:{})}]);
           d.close();
         } catch (error) { ctx.notify(error.message, {error: true}); }
       });

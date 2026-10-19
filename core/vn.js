@@ -2,6 +2,7 @@
 // the 立绘 (with their 表情 and 动作) and the requests that draw them, and the cut-out that takes the plain background
 // off a drawn 立绘.
 import {skippedRanges, narrationPieces, NARRATION_SKIP, cleanSkip} from './narration.js';
+import {visualEmotion, visualEffects, matchesVisualWord, visualWordEmotion} from './visual-emotion.js';
 import {activeStyle, sizeFor} from './draw.js';
 
 /** What a 立绘 asks of the picture, after the 画风 and before the character's own looks. Editable in the app. The
@@ -16,26 +17,21 @@ export const VN_WAITS = Object.freeze([0.6, 1.2, 2, 3]);
 export const VN_FONTS = Object.freeze({s: '小', m: '中', l: '大'});
 /** tavern: the tavern's theme colours; phone: the phone's (a copy kept in palette, taken by the 视觉小说 App). */
 export const VN_BOXES = Object.freeze({night: '夜幕', day: '晴空', sakura: '樱色', ink: '墨染', tavern: '跟随酒馆', phone: '跟随小手机'});
-const LIMIT = {cast: 200, rule: 1000, url: 1000, name: 60, actions: 12, words: 20, label: 12, tags: 300, alts: 8, outfits: 6, appearance: 1500};
+const LIMIT = {cast: 200, rule: 1000, url: 1000, name: 60, actions: 24, words: 20, label: 12, tags: 300, alts: 8, outfits: 6, appearance: 1500};
 
 /**
  * 表情: one 立绘 each, picked by a line's 情绪 (a word or a director's note, English or Chinese). tags: what is added
  * to the 立绘's prompt to draw it.
  */
 export const EXPRESSIONS = Object.freeze([
-  {id: 'happy', label: '开心', tags: 'smile, happy, open mouth', words: /happy|joy|cheer|laugh|smil|giggl|delight|playful|teas|开心|高兴|笑|喜|愉快|雀跃|得意|欢|俏皮|调侃/},
-  {id: 'angry', label: '生气', tags: 'angry, frown, v-shaped eyebrows, clenched teeth', words: /angry|annoy|furious|rage|irritat|mad\b|shout|yell|生气|愤|恼|不满|烦|怒|吼|凶/},
-  {id: 'sad', label: '难过', tags: 'sad, tears, teary eyes, frown', words: /sad|cry|tear|sob|sorrow|grief|hurt|lonely|melanchol|难过|伤心|哭|泪|悲|委屈|失落|沮丧|心酸|哽咽/},
-  {id: 'surprised', label: '惊讶', tags: 'surprised, wide-eyed, open mouth', words: /surpris|shock|startl|amaz|astonish|gasp|scared|panic|惊|吓|震惊|愣|慌/},
-  {id: 'shy', label: '害羞', tags: 'blush, embarrassed, looking away, shy', words: /shy|blush|embarrass|fluster|bashful|timid|害羞|脸红|羞|不好意思|扭捏|局促/},
+  {id: 'happy', label: '开心', tags: 'smile, happy, open mouth'},
+  {id: 'angry', label: '生气', tags: 'angry, frown, v-shaped eyebrows, clenched teeth'},
+  {id: 'sad', label: '难过', tags: 'sad, tears, teary eyes, frown'},
+  {id: 'surprised', label: '惊讶', tags: 'surprised, wide-eyed, open mouth'},
+  {id: 'shy', label: '害羞', tags: 'blush, embarrassed, looking away, shy'},
 ]);
 /** The 表情 a 情绪 names; in a longer note (「强忍着眼泪，却努力笑着」) the one named first. */
-export function expressionOf(emotion) {
-  const e = String(emotion || '').toLowerCase();
-  let best = '', at = Infinity;
-  for (const x of EXPRESSIONS) { const m = x.words.exec(e); if (m && m.index < at) { at = m.index; best = x.id; } }
-  return best;
-}
+export const expressionOf = visualEmotion;
 
 export const defaultVn = () => ({enabled: false, speed: 2, wait: 1, voice: true, narrate: false, font: 'm', box: 'night', opacity: 0.86, effects: true, rule: SPRITE_RULE, palette: null, skip: [], cast: {}});
 const pick = (value, list, fallback) => list.includes(value) ? value : fallback;
@@ -48,7 +44,7 @@ function normalizePalette(p) {
   for (const k of PALETTE) { const c = String(p[k] ?? '').trim(); if (!COLOR.test(c)) return null; out[k] = c; }
   return out;
 }
-const words = value => [...new Set((Array.isArray(value) ? value : String(value ?? '').split(/[,，、;；\s]+/)).map(w => String(w).trim().slice(0, LIMIT.label)).filter(Boolean))].slice(0, LIMIT.words);
+const words = (value,max=LIMIT.label) => [...new Set((Array.isArray(value) ? value : String(value ?? '').split(/[,，、;；\s]+/)).map(w => String(w).trim().slice(0, max)).filter(Boolean))].slice(0, LIMIT.words);
 /**
  * cast: {name: {sprite, at, seed, alts, mix, looks: {id: {sprite, at, alts, mix}}, actions: [{id, label, tags, words}],
  * outfits: [{id, label, appearance, sprite, at, seed, alts, mix, looks}]}} — each character's 立绘 (files in the
@@ -92,7 +88,7 @@ function normalizeCast(value) {
   for (const [name, c] of Object.entries(value && typeof value === 'object' ? value : {}).slice(0, LIMIT.cast)) {
     const key = String(name).trim().slice(0, LIMIT.name);
     if (!key || !c || typeof c !== 'object') continue;
-    const actions = (Array.isArray(c.actions) ? c.actions : []).slice(0, LIMIT.actions).map(a => ({id: text(a?.id, 40), label: text(a?.label, LIMIT.label), tags: text(a?.tags, LIMIT.tags), words: words(a?.words)})).filter(a => /^a-[\w-]+$/.test(a.id) && a.label);
+    const actions = (Array.isArray(c.actions) ? c.actions : []).slice(0, LIMIT.actions).map(a => ({id: text(a?.id, 40), label: text(a?.label, LIMIT.label), tags: text(a?.tags, LIMIT.tags), words: words(a?.words,a?.kind==='expression'?80:LIMIT.label), ...(a?.kind==='expression'?{kind:'expression'}:{})})).filter(a => /^a-[\w-]+$/.test(a.id) && a.label);
     const ids = new Set([...EXPRESSIONS.map(e => e.id), ...actions.map(a => a.id)]);
     const outfits = (Array.isArray(c.outfits) ? c.outfits : []).slice(0, LIMIT.outfits)
       .map(o => ({id: text(o?.id, 40), label: text(o?.label, LIMIT.label), appearance: text(o?.appearance, LIMIT.appearance), ...normalizeSet(o, ids)}))
@@ -145,10 +141,12 @@ function fromGroup(g, last, random) {
 export function pickLook(entry, {emotion = '', context = '', outfit = '', last = '', random = Math.random} = {}) {
   if (!entry) return '';
   const set = setOf(entry, outfit), looks = set.looks || {}, said = String(context || '') + '\n' + String(emotion || '');
-  for (const a of entry.actions || []) if (looks[a.id]?.sprite && a.words.some(w => said.includes(w))) return fromGroup(looks[a.id], last, random);
+  for (const a of entry.actions || []) if(a.kind!=='expression'&&looks[a.id]?.sprite&&a.words.some(w=>matchesVisualWord(said,w)))return fromGroup(looks[a.id],last,random);
+  const feeling=expressionOf(emotion);
+  for(const a of entry.actions||[])if(a.kind==='expression'&&a.words.some(w=>matchesVisualWord(emotion,w)||(feeling&&visualWordEmotion(w)===feeling)))return looks[a.id]?.sprite?fromGroup(looks[a.id],last,random):(set.sprite?fromGroup(set,last,random):'');
   const e = expressionOf(emotion);
   if (e && looks[e]?.sprite) return fromGroup(looks[e], last, random);
-  return set.sprite ? fromGroup(set, last, random) : Object.values(looks)[0]?.sprite || '';
+  return set.sprite ? fromGroup(set, last, random) : '';
 }
 
 /**
@@ -290,12 +288,7 @@ export function userSteps(raw, name, max = PAGE) {
 }
 
 /** How a line is acted on the stage, from its 情绪 (a word or a director's note): 'shake', 'hop' or ''. */
-export function stageMove(emotion) {
-  const e = String(emotion || '').toLowerCase();
-  if (/angry|furious|rage|shout|yell|怒|生气|吼|喊|咆哮|愤/.test(e)) return 'shake';
-  if (/surpris|shock|startl|scared|panic|excit|惊|吓|慌|兴奋|激动|雀跃/.test(e)) return 'hop';
-  return '';
-}
+export const stageMove = emotion => visualEffects(emotion).move;
 
 /**
  * How a line is acted, from its 情绪 (a word or a director's note; the feeling named first wins): move — the speaker
@@ -303,25 +296,7 @@ export function stageMove(emotion) {
  * drop, dots, sigh); burst — sparkles or hearts around them; tint — the edges of the screen glow red, blue, pink or
  * dark; punch — the picture jumps closer for a moment.
  */
-const LINE_FX = [
-  [/angry|furious|rage|annoy|irritat|shout|yell|怒|生气|恼|吼|喊|咆哮|愤|不耐烦|烦躁/i, {move: 'shake', mark: 'anger', tint: 'red'}],
-  [/surpris|shock|startl|astonish|惊|吓了一跳|诧异|震惊|不敢置信/i, {move: 'hop', mark: 'surprise', punch: true}],
-  [/scared|afraid|fear|terrif|panic|怕|恐|颤抖|发抖|慌/i, {move: 'tremble', mark: 'sweat', tint: 'dark'}],
-  [/nervous|awkward|embarrass|sweat|尴尬|紧张|心虚|冒汗|窘/i, {move: 'tremble', mark: 'sweat'}],
-  [/love|affection|adore|flirt|爱|喜欢|心动|宠溺|深情|撒娇/i, {move: 'bounce', mark: 'heart', burst: 'hearts', tint: 'pink'}],
-  [/shy|blush|fluster|害羞|脸红|羞|扭捏/i, {mark: 'blush', burst: 'hearts', tint: 'pink'}],
-  [/excit|cheer|delight|laugh|giggl|playful|happy|joy|sing|兴奋|雀跃|激动|开心|高兴|大笑|欢|俏皮|哼歌|愉快|得意/i, {move: 'bounce', mark: 'note', burst: 'sparkle'}],
-  [/sad|cry|tear|sorrow|grief|hurt|难过|伤心|哭|泪|悲|委屈|失落|哽咽/i, {move: 'sink', mark: 'drop', tint: 'blue'}],
-  [/speechless|silent|deadpan|blank|confus|无语|沉默|愣|呆|困惑|疑惑|不解/i, {mark: 'dots'}],
-  [/sigh|tired|exhaust|weary|叹|疲惫|无奈|累/i, {move: 'sink', mark: 'sigh'}],
-];
-const NO_FX = {move: '', mark: '', burst: '', tint: '', punch: false};
-export function lineFx(emotion) {
-  const e = String(emotion || '');
-  let best = null, at = Infinity;
-  for (const [re, fx] of LINE_FX) { const m = re.exec(e); if (m && m.index < at) { at = m.index; best = fx; } }
-  return {...NO_FX, ...best};
-}
+export const lineFx = visualEffects;
 
 /**
  * What the story between the lines does to the stage: weather (the kind named last in it: rain, snow, petals, leaves,

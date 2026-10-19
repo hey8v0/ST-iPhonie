@@ -445,6 +445,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     if (alone && url && cgPages > 2) { alone = false; root.setAttribute('data-soft', ''); }
     if (!say && !again) root.removeAttribute('data-memory');
     let actor = null;
+    if(say&&!url)leave(name);
     if (url && !alone) actor = enter(name, url);
     if (actor && !s.part) actor.el.removeAttribute('data-sink');
     // Whoever speaks is lit; the others dim (all of them when the speaker has no 立绘 on the stage).
