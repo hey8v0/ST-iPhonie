@@ -12,7 +12,7 @@
 //   位置 Pn (only when pictures are planned after the reply: which paragraph the picture follows)
 // Two ways to get blocks (draw.mode): 'separate' asks the model in its own request after the reply is written and
 // inserts the blocks; 'inline' injects the rules into the story request so the reply carries the blocks itself.
-import {promptRule} from './prompt-rules.js';
+import {promptText, promptTemplate} from './prompt-rules.js';
 import {defaultDrawParams, normalizeDrawParams, guardParams, relayUrl, NAI_MODEL_NAMES} from './novelai.js';
 import {tokenBudget, counterNow, estimateTokens, countField, tagCost} from './tokens.js';
 import {strength as vibeStrength} from './vibes.js';
@@ -269,21 +269,9 @@ export const V05_DRAW_ENTRIES = [
 export const DEFAULT_DRAW_RULE = DEFAULT_DRAW_ENTRIES.map(e => e.text).join('\n\n');
 
 /** Appended to the rules in 'inline' mode: the reply itself carries exactly `count` blocks. */
-export const drawContract = (count, prompts = {}) => [
-  '【出图硬性规则】',
-  promptRule(prompts, "draw.drawContract.001", {"出图数量": (count), "动态内容2": (count > 1 ? '，几个出图块分散在正文不同位置' : '')}),
-  '出图块严格照这个格式写并闭合：',
-  '{{出图格式}}',
-  promptRule(prompts, "draw.drawContract.002")
-].join('\n');
+export const drawContract = (count, prompts = {}) => promptText(prompts, 'draw-story', 'contract', {'出图数量': count, '几张': count > 1});
 /** Appended to the rules in 'separate' mode: the reply is already written; answer with blocks only. */
-export const planContract = (count, prompts = {}) => [
-  '【出图硬性规则】',
-  promptRule(prompts, "draw.planContract.001", {"出图数量": (count), "出图数量_2": (count)}),
-  '出图块严格照这个格式写并闭合：',
-  '{{出图格式}}',
-  promptRule(prompts, "draw.planContract.002")
-].join('\n');
+export const planContract = (count, prompts = {}) => promptText(prompts, 'draw-story', 'plan', {'出图数量': count});
 
 // Rule texts shipped earlier. A preset that still holds one of them word for word gets the current default rules.
 const OLD_DEFAULT_RULES = [
@@ -483,15 +471,10 @@ function ruleText(settings, p, format, contract, only = null) {
 export function assistantDrawGuide(settings) {
   const draw = settings.draw, p = activePreset(draw);
   if (!draw || !p) return '';
-  const engine = draw.engine || 'nai', style = activeStyle(draw) || {};
-  const {entries, fill} = ruleText(settings, {...p, count: 1}, promptRule(settings.promptRules, 'draw.format.picture'), () => '');
-  const budget = budgetText(settings);
-  return ['【绘图】',
-    promptRule(settings.promptRules, "draw.assistantDrawGuide.001", {"动态内容1": (DRAW_ENGINE_NAMES[engine] || engine), "动态内容2": (style.name || '默认画风')}),
-    promptRule(settings.promptRules, "draw.assistantDrawGuide.002"),
-    ...entries.filter(e => e.id !== 'pick').map(e => fill(e.text)),
-    ['【出图块格式】', '严格照这个格式写并闭合：', promptRule(settings.promptRules, 'draw.format.picture'), promptRule(settings.promptRules, "draw.assistantDrawGuide.003", {"动态内容1": (castList(settings))})].join('\n'),
-    budget].filter(Boolean).join('\n\n');
+  const engine = draw.engine || 'nai', style = activeStyle(draw) || {}, format = promptTemplate(settings.promptRules, 'draw-story', 'format');
+  const {entries, fill} = ruleText(settings, {...p, count: 1}, format, () => '');
+  return promptText(settings.promptRules, 'assistant', 'drawGuide', {'引擎': DRAW_ENGINE_NAMES[engine] || engine, '画风': style.name || '默认画风',
+    '绘图规则': entries.filter(e => e.id !== 'pick').map(e => fill(e.text)).join('\n\n'), '出图格式': format, '名单': castList(settings), 'tag长度': budgetText(settings)});
 }
 
 /**
@@ -512,11 +495,7 @@ export function budgetNumbers(settings, only = null) {
 export function budgetText(settings, only = null) {
   const n = budgetNumbers(settings, only);
   if (!n) return '';
-  const {head, looks, left, tags} = n, b = n;
-  return ['【tag 长度】',
-    promptRule(settings.promptRules, "draw.budgetText.001", {"动态内容1": (n.name), "动态内容2": (b.limit)}),
-    `画风已经占了约 ${head}${looks.length ? promptRule(settings.promptRules, "draw.budgetText.002", {"动态内容1": (looks.join('、'))}) : ''}。`,
-    promptRule(settings.promptRules, "draw.budgetText.003", {"长度上限": (left), "标签数量": (tags)})].join('\n');
+  return promptText(settings.promptRules, 'draw-story', 'budget', {'模型': n.name, '上限': n.limit, '画风占用': n.head, '外貌占用': n.looks.join('、'), '剩余': n.left, '标签数': n.tags});
 }
 
 /** Prompt entries injected with the story request ('inline' mode only). Keys share the sttts.entry. prefix. */
@@ -525,7 +504,7 @@ export function drawPromptPlan(settings, preset, only = null) {
   if (!preset && (!draw?.enabled || draw.mode !== 'inline')) return [];
   const p = activePreset(draw, preset);
   if (!p) return [];
-  const {entries, fill, tail} = ruleText(settings, p, promptRule(settings.promptRules, 'draw.format.picture'), drawContract, only);
+  const {entries, fill, tail} = ruleText(settings, p, promptTemplate(settings.promptRules, 'draw-story', 'format'), drawContract, only);
   return entries.map((e, index) => {
     const i = e.injection || p.injection;
     return {
@@ -614,28 +593,24 @@ export function paragraphs(message) {
 /** Chat-style request asking for the picture blocks of one reply. before: [{name, text}] earlier messages. */
 export function planRequest(settings, {message, before = [], preset, only = null, lore = ''} = {}) {
   const p = activePreset(settings.draw, preset);
-  const {entries, fill, tail} = ruleText(settings, p, promptRule(settings.promptRules, 'draw.format.plan'), planContract, only);
+  const {entries, fill, tail} = ruleText(settings, p, promptTemplate(settings.promptRules, 'draw-story', 'planFormat'), planContract, only);
   const system = entries.map(e => fill(e.text)).join('\n\n') + '\n\n' + tail;
   // 世界书: the entries the tavern would turn on for this story (the phone's choice of books), for era, places and looks.
-  const context = (lore.trim() ? promptRule(settings.promptRules, "draw.planRequest.001", {"动态内容1": (lore.trim())}) : '')
-    + (before.length ? `【前情】\n${before.map(m => `${m.name}：${m.text}`).join('\n')}\n\n` : '');
-  const body = paragraphs(message).map((x, i) => `[P${i + 1}] ${x.text}`).join('\n');
-  return [{role: 'system', content: system}, {role: 'user', content: promptRule(settings.promptRules, "draw.planRequest.002", {"上下文": (context), "正文": (body), "动态内容3": (countOf(p))})}];
+  const ask = promptText(settings.promptRules, 'draw-story', 'planAsk', {'世界书': lore.trim(), '前情': before.map(m => `${m.name}：${m.text}`).join('\n'),
+    '正文': paragraphs(message).map((x, i) => `[P${i + 1}] ${x.text}`).join('\n'), '出图数量': countOf(p)});
+  return [{role: 'system', content: system}, {role: 'user', content: ask}];
 }
 /** 「从剧情生成」 in the drawing app: a request of its own (no story preset, no chain of thought), worded for the engine. */
 export function suggestRequest(settings, {before = [], only = null} = {}) {
   const gpt = settings.draw?.engine === 'gpt';
-  const system = [
-    promptRule(settings.promptRules, "draw.suggestRequest.001"),
-    gpt ? promptRule(settings.promptRules, "draw.suggestRequest.002")
-      : promptRule(settings.promptRules, "draw.suggestRequest.003"),
-    ...peopleRules(settings, [], only),
-    ...sentenceRule(settings),
-    promptRule(settings.promptRules, "draw.suggestRequest.004"),
-    ...(n => n ? [promptRule(settings.promptRules, "draw.suggestRequest.005", {"动态内容1": (n.name), "动态内容2": (n.limit), "动态内容3": (n.head), "动态内容4": (n.left), "动态内容5": (n.tags)})] : [])(gpt ? null : budgetNumbers(settings))
-  ].join('\n');
+  const system = promptText(settings.promptRules, 'draw-prompt', 'suggest', {'GPT': gpt, '人物规则': peopleRules(settings, [], only), '描述句规则': sentenceRule(settings), '长度': gpt ? '' : lengthLine(settings)});
   const story = before.length ? before.map(m => `${m.name}：${m.text}`).join('\n') : '（还没有剧情）';
-  return [{role: 'system', content: system}, {role: 'user', content: promptRule(settings.promptRules, "draw.suggestRequest.006", {"动态内容1": (story)})}];
+  return [{role: 'system', content: system}, {role: 'user', content: promptText(settings.promptRules, 'draw-prompt', 'suggestAsk', {'剧情': story})}];
+}
+/** How long the line may be, for NovelAI ('' for the other engines). */
+function lengthLine(settings) {
+  const n = budgetNumbers(settings);
+  return n ? promptText(settings.promptRules, 'draw-prompt', 'length', {'模型': n.name, '上限': n.limit, '画风占用': n.head, '剩余': n.left, '标签数': n.tags}) : '';
 }
 /**
  * Who may be in a prompt line: works' characters by the tag the model knows; registered people by name only (their
@@ -653,23 +628,14 @@ export function sentenceCount(settings) {
   return /diffusion-5/.test(model) ? 3 : /diffusion-4/.test(model) ? 1 : 0;
 }
 function sentenceRule(settings) {
+  // Whatever the model: the point of the picture has to be in the shot. V4 / V4.5 read sentences poorly: where things
+  // are has to be said with things it knows.
   const n = sentenceCount(settings);
-  // Whatever the model: the point of the picture has to be in the shot.
-  const seen = promptRule(settings.promptRules, "draw.sentenceRule.001");
-  // V4 / V4.5 read sentences poorly: where things are has to be said with things it knows.
-  const concrete = promptRule(settings.promptRules, "draw.sentenceRule.002");
-  if (!n) return [seen];
-  return [promptRule(settings.promptRules, "draw.sentenceRule.003", {"动态内容1": (n > 1 ? '两三句' : '一句'), "动态内容2": (n > 1 ? '' : promptRule(settings.promptRules, "draw.sentenceRule.004"))}),
-    promptRule(settings.promptRules, "draw.sentenceRule.005"),
-    seen, ...(n === 1 ? [concrete] : [])];
+  return promptText(settings.promptRules, 'draw-prompt', 'sentences', {'句数': n, '多句': n > 1, '只一句': n === 1});
 }
 function peopleRules(settings, cast = [], only = null) {
   const known = drawable(settings).map(r => r.name).filter(n => (!only || only.includes(n)) && !cast.some(c => sameName(c, n)));
-  return [
-    cast.length ? promptRule(settings.promptRules, "draw.peopleRules.001", {"动态内容1": (cast.join('、'))}) : '',
-    known.length ? promptRule(settings.promptRules, "draw.peopleRules.002", {"动态内容1": (known.join('、'))}) : '',
-    promptRule(settings.promptRules, "draw.peopleRules.003")
-  ].filter(Boolean);
+  return promptText(settings.promptRules, 'draw-prompt', 'people', {'画面里的人': cast.join('、'), '登记的人': known.join('、')});
 }
 /**
  * 帮我写: the user says in a few words (Chinese is fine) what they want drawn, the model writes the prompt line —
@@ -677,18 +643,9 @@ function peopleRules(settings, cast = [], only = null) {
  * (their looks are added by the plugin; the model only writes what they do).
  */
 export function writeRequest(settings, {idea = '', cast = [], only = null} = {}) {
-  const gpt = settings.draw?.engine === 'gpt', n = gpt ? null : budgetNumbers(settings);
-  const system = [
-    promptRule(settings.promptRules, "draw.writeRequest.001"),
-    gpt ? promptRule(settings.promptRules, "draw.writeRequest.002")
-      : promptRule(settings.promptRules, "draw.writeRequest.003"),
-    promptRule(settings.promptRules, "draw.writeRequest.004"),
-    ...peopleRules(settings, cast, only),
-    ...sentenceRule(settings),
-    promptRule(settings.promptRules, "draw.writeRequest.005"),
-    n ? promptRule(settings.promptRules, "draw.writeRequest.006", {"动态内容1": (n.name), "动态内容2": (n.limit), "动态内容3": (n.head), "动态内容4": (n.left), "动态内容5": (n.tags)}) : ''
-  ].filter(Boolean).join('\n');
-  return [{role: 'system', content: system}, {role: 'user', content: `想画的：${String(idea).trim()}\n\n只输出提示词：`}];
+  const gpt = settings.draw?.engine === 'gpt';
+  const system = promptText(settings.promptRules, 'draw-prompt', 'write', {'GPT': gpt, '人物规则': peopleRules(settings, cast, only), '描述句规则': sentenceRule(settings), '长度': gpt ? '' : lengthLine(settings)});
+  return [{role: 'system', content: system}, {role: 'user', content: promptText(settings.promptRules, 'draw-prompt', 'writeAsk', {'想画的': String(idea).trim()})}];
 }
 /**
  * A 帮我写 / 从剧情生成 reply: the prompt line and the registered people its 人物 line names (as registered), so the
@@ -721,7 +678,7 @@ export function promptLength(settings) {
 /** The follow-up asking for a fuller line: what it holds now and how much room is left. */
 export function fillUpRequest(prompt, {prompts = {}, line, people = [], used, left, tags, sentences = 0}) {
   return [...prompt, {role: 'assistant', content: line + (people.length ? `\n人物：${people.join('、')}` : '')},
-    {role: 'user', content: promptRule(prompts, "draw.fillUpRequest.001", {"已用长度": (used), "动态内容2": (left - used), "标签数量": (tags), "动态内容4": (sentences ? promptRule(prompts, "draw.fillUpRequest.002", {"句数": (sentences)}) : ''), "动态内容5": (people.length ? '，最后一行照旧写「人物：…」' : '')})}];
+    {role: 'user', content: promptText(prompts, 'draw-prompt', 'fillUp', {'已用': used, '还差': left - used, '标签数': tags, '句数': sentences, '人物': people.length > 0})}];
 }
 /** The prompt line out of a reply: thinking blocks, tags, code fences and labels taken out. */
 export function cleanSuggestion(text) {

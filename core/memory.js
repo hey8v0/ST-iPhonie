@@ -8,7 +8,7 @@
 // exact words of a long-gone moment can come back. Searching is local (BM25 over Chinese two-character pieces, as in
 // 剧情剪辑台) and, with a 向量模型 set up, mixed with embedding similarity.
 // No DOM, storage or network here: the plans, the prompts, the parsers, the search and the texts sent to the model.
-import {promptRule} from './prompt-rules.js';
+import {promptText} from './prompt-rules.js';
 import {messageLine} from './chat.js';
 
 export const MEMORY_LIMITS = Object.freeze({batch: [10, 200], stage: [2, 20], epic: [2, 20], recall: [0, 10], text: 6000, nodes: 600, chunk: 8, cap: 8000});
@@ -127,9 +127,7 @@ export function transcript(messages, user) {
   }
   return out.join('\n');
 }
-const SHARED = ['只根据下面的内容写，不续写、不编造没发生的事，不替任何人做新决定。',
-  '写清是谁说的、谁做的；用名字，不用“我”“你”。日期照原文写。',
-  '直接写正文，不要标题、不要前言后语，不要用代码块。'];
+
 /**
  * The request that writes up a batch of messages (level 0) or merges nodes (level 1+).
  * who: the chat's name ('和澄音' or a group's name); user: the user's name.
@@ -137,13 +135,11 @@ const SHARED = ['只根据下面的内容写，不续写、不编造没发生的
 export function buildMemoryRequest({prompts = {}, level, messages = [], nodes = [], user = '我', who = '', group = false}) {
   const where = group ? `群聊「${who}」` : `${user}和${who}的手机聊天`;
   if (level === 0) {
-    return [{role: 'system', content: [promptRule(prompts, "memory.buildMemoryRequest.001", {"动态内容1": (where)}),
-      promptRule(prompts, "memory.buildMemoryRequest.002"), ...SHARED].join('\n')},
+    return [{role: 'system', content: promptText(prompts, 'memory', 'system', {'摘要': true, '哪里': where})},
       {role: 'user', content: `聊天记录：\n${transcript(messages, user)}`}];
   }
-  const name = levelName(level), size = level === 1 ? '300 到 700 字' : '400 到 900 字';
-  return [{role: 'system', content: [promptRule(prompts, "memory.buildMemoryRequest.003", {"动态内容1": (where), "动态内容2": (levelName(level - 1)), "角色名": (name), "动态内容4": (size)}),
-    promptRule(prompts, "memory.buildMemoryRequest.004"), ...SHARED].join('\n')},
+  const system = promptText(prompts, 'memory', 'system', {'哪里': where, '下一层': levelName(level - 1), '这一层': levelName(level), '字数': level === 1 ? '300 到 700 字' : '400 到 900 字'});
+  return [{role: 'system', content: system},
     {role: 'user', content: nodes.map(n => `【${levelName(n.level)} · ${span(n.from, n.to)}】\n${n.text}`).join('\n\n')}];
 }
 /** The written text: think blocks, code fences and a stray heading line dropped. */

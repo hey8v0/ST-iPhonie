@@ -3,7 +3,7 @@
 // A call is spoken: every line the contact says is written in the voice format of the active voice preset (the same
 // tags as story dialogue), so it can be read aloud with the contact's own voice. Rules come from the chat preset, the
 // ones used in 电话. The finished call is kept in the private chat as one message of kind 'call'.
-import {promptRule} from './prompt-rules.js';
+import {promptText} from './prompt-rules.js';
 import {parseDialogue} from './protocol.js';
 import {messageLine, knowsRule} from './chat.js';
 import {languageName} from './languages.js';
@@ -46,36 +46,15 @@ export function buildCallRequest({prompts = {}, preset, mode, contact, lines = [
   const spoken = languageName(contact.language || 'zh');
   const values = {'用户': user, '对象': name, '语音格式': voiceFormat || '', '可发语音': voiced ? `${name}（${spoken}）` : '（只说中文）'};
   const rules = preset.entries.filter(e => e.enabled && e.text.trim() && e.use.includes('call')).map(e => fill(e.text, values));
-  const situation = {
-    incoming: `${name}给${user}打了语音电话，${user}刚刚接通。${reason ? `（打来的原因：${reason}）` : promptRule(prompts, "call.buildCallRequest.001")}`,
-    outgoing: promptRule(prompts, "call.buildCallRequest.002", {"用户": (user), "角色名": (name), "角色名_3": (name), "角色名_4": (name), "用户_5": (user)}),
-    reply: `你们正在通话。`,
-    voicemail: promptRule(prompts, "call.buildCallRequest.003", {"角色名": (name), "用户": (user), "用户_3": (user), "角色名_4": (name), "动态内容5": (reason ? `（打来的原因：${reason}）` : '')})
-  }[mode];
-  const turn = {
-    incoming: promptRule(prompts, "call.buildCallRequest.004", {"角色名": (name)}),
-    outgoing: promptRule(prompts, "call.buildCallRequest.005", {"角色名": (name), "用户": (user)}),
-    reply: lines.at(-1)?.from === 'me' ? promptRule(prompts, "call.buildCallRequest.006", {"角色名": (name), "用户": (user)}) : `（${user}没有接话，${name}接着往下说。）`,
-    voicemail: promptRule(prompts, "call.buildCallRequest.007", {"角色名": (name)})
-  }[mode];
-  const system = [
-    rules.join('\n\n'),
-    `【通话对象】\n- ${name}：${(contact.persona || contact.card || '').trim() || '（没有资料，按剧情里的表现来）'}`,
-    lore.trim() ? promptRule(prompts, "call.buildCallRequest.008", {"角色名": (name), "动态内容2": (lore.trim())}) : '',
-    userPersona.trim() ? promptRule(prompts, "call.buildCallRequest.009", {"用户": (user), "用户_2": (user), "角色名": (name), "动态内容4": (userPersona.trim())}) : '',
-    earlier.trim() ? promptRule(prompts, "call.buildCallRequest.010", {"角色名": (name), "动态内容2": (earlier.trim())}) : '',
-    story.length ? promptRule(prompts, "call.buildCallRequest.011", {"角色名": (name), "动态内容2": (story.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
-    memory.trim(),
-    story.length || earlier.trim() ? knowsRule([name], user, {prompts}) : '',
-    history.length ? `【${name}和${user}最近的手机聊天】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}` : '',
-    `【现在】\n${situation}`,
-    ['【输出格式】',
-      promptRule(prompts, "call.buildCallRequest.012", {"角色名": (name), "动态内容2": (CALL_LIMITS.perTurn - 1), "动态内容3": (voiced ? promptRule(prompts, "call.buildCallRequest.013", {"语音格式": (voiceFormat), "角色名": (name)}) : '，直接写说的话，不加名字和引号')}),
-      voiced ? promptRule(prompts, "call.buildCallRequest.014", {"角色名": (name), "动态内容2": (spoken), "角色名_3": (name), "动态内容4": (spoken), "动态内容5": (spoken === '中文' ? '' : '，不要写成中文'), "用户": (user)}) : '',
-      promptRule(prompts, "call.buildCallRequest.015", {"用户": (user)}),
-      mode === 'voicemail' ? '' : promptRule(prompts, "call.buildCallRequest.016", {"角色名": (name)}),
-      voiced && voiceRules ? voiceRules : ''].filter(Boolean).join('\n')
-  ].filter(Boolean).join('\n\n');
+  const now = {'来电': mode === 'incoming', '去电': mode === 'outgoing', '通话中': mode === 'reply', '留言': mode === 'voicemail'};
+  const system = promptText(prompts, 'call', 'system', {...now, '预设规则': rules.join('\n\n'), '用户': user, '角色': name,
+    '角色资料': (contact.persona || contact.card || '').trim() || '（没有资料，按剧情里的表现来）',
+    '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': story.map(s => `${s.name}：${s.text}`).join('\n'),
+    '记忆': memory.trim(), '知情范围': story.length || earlier.trim() ? knowsRule([name], user, {prompts}) : '',
+    '聊天记录': history.map(m => messageLine(m, user)).filter(Boolean).join('\n'), '原因': reason,
+    '最多': CALL_LIMITS.perTurn - 1, '语音': voiced, '语音格式': voiceFormat, '语言': spoken, '不是中文': spoken !== '中文',
+    '朗读规则': voiced && voiceRules ? voiceRules : ''});
+  const turn = promptText(prompts, 'call', 'turn', {...now, '用户': user, '角色': name, '用户刚说': lines.at(-1)?.from === 'me'});
   const said = lines.length ? `【通话内容】\n${callTranscript(lines, user)}\n\n` : '';
   return [{role: 'system', content: system}, {role: 'user', content: said + turn}];
 }

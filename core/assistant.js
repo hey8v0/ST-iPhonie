@@ -1,6 +1,6 @@
 // 助手 settings and local conversations. Story/model context belongs only to the host's current request;
 // none of it is part of these settings or documents.
-import {promptRule} from './prompt-rules.js';
+import {promptText} from './prompt-rules.js';
 import {DEFAULT_FORMAT, isPlaceholderRole} from './protocol.js';
 import {languageName} from './languages.js';
 import {normalizeMemory} from './memory.js';
@@ -101,7 +101,7 @@ export function buildAssistantPrompt(settings, {voiceRules = ''} = {}) {
   const values = {'语音格式': format, '角色列表': routes.map(route => `- ${route.name}（${languageName(route.language || settings?.general?.defaultLanguage)}）`).join('\n') || '（尚未配置可试听的角色）', '语言': language};
   const prompt = preset.entries.filter(item => item.enabled && item.text.trim()).map(item => item.text.replace(/\{\{(语音格式|角色列表|语言)\}\}/g, (_, key) => values[key])).join('\n\n');
   const voice = preset.entries.some(item => item.id === 'format' && item.enabled && item.text.trim()) && typeof voiceRules === 'string' && voiceRules.trim();
-  return [prompt, voice ? promptRule(settings.promptRules, "assistant.buildAssistantPrompt.001", {"动态内容1": (voice)}) : ''].filter(Boolean).join('\n\n');
+  return [prompt, voice ? promptText(settings.promptRules, 'assistant', 'voice', {'引擎规则': voice}) : ''].filter(Boolean).join('\n\n');
 }
 
 export function assistantId(id) {
@@ -238,10 +238,7 @@ export function assistantWantsImage(messages) {
 export const ASSISTANT_WANTS_MUSIC = /播放|放(?:一?首|一下|点|些|个)?(?:歌|音乐|曲子)|(?:来|放)一?首|来点(?:歌|音乐)|想听|听听|点(?:一?首)?歌|换一?首|放.{0,20}的歌|放[「『《“"]/;
 /** Songs the reply may put on: 「[放歌] 歌名 - 歌手」 lines become cards the user taps (the first one plays at once when asked). */
 export function assistantMusicRule({prompts = {}, ready = false, library = [], listening = null, asked = false} = {}) {
-  const lines = [promptRule(prompts, "assistant.assistantMusicRule.001"),
-    promptRule(prompts, "assistant.assistantMusicRule.002")];
-  if (!ready) lines.push(promptRule(prompts, "assistant.assistantMusicRule.003"));
-  if (listening?.title) lines.push(`用户正在听：${listening.title}${listening.artist ? ' - ' + listening.artist : ''}`);
-  if (asked && library.length) lines.push('用户歌单里有：' + library.slice(0, 40).map(x => x.artist ? `${x.title} - ${x.artist}` : x.title).join('、'));
-  return lines.join('\n');
+  return promptText(prompts, 'assistant', 'music', {'有音源': ready,
+    '正在听': listening?.title ? `${listening.title}${listening.artist ? ' - ' + listening.artist : ''}` : '',
+    '歌单': asked ? library.slice(0, 40).map(x => x.artist ? `${x.title} - ${x.artist}` : x.title).join('、') : ''});
 }

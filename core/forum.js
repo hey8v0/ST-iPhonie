@@ -9,7 +9,7 @@
 //   【网名】真名｜网名                 a screen name made up for a character who had none (kept from then on)
 // Everyone is on the board by a screen name (网名): the user's and the characters' are given (or made up once) and the
 // model writes only those; the answer is read back to the real names, which is how posts are stored.
-import {promptRule} from './prompt-rules.js';
+import {promptText} from './prompt-rules.js';
 import {isPlaceholderRole} from './protocol.js';
 
 export const FORUM_LIMITS = Object.freeze({posts: 200, replies: 80, perRefresh: 5, hot: 8, title: 60, text: 2000, reply: 500});
@@ -37,46 +37,18 @@ export function forumContext(posts, user = '我', handles = {}) {
  * The request for 论坛, with the chat preset's rules used in 论坛. mode 'posts': new posts and the 热搜;
  * 'react': replies to the user's new post; 'reply': answers to the user's reply. people: [{name, persona, card}].
  */
-/** Who knows what on a public forum: strangers only what is public; characters only what they lived, and they keep it to themselves. */
-export function forumKnows(user, prompts = {}) {
-  return ['【论坛上的人知道什么】',
-    promptRule(prompts, "forum.forumKnows.001"),
-    promptRule(prompts, "forum.forumKnows.002"),
-    promptRule(prompts, "forum.forumKnows.003"),
-    promptRule(prompts, "forum.forumKnows.004", {"用户": (user)}),
-    promptRule(prompts, "forum.forumKnows.005"),
-    promptRule(prompts, "forum.forumKnows.006", {"用户": (user)}),
-    promptRule(prompts, "forum.forumKnows.007")].join('\n');
-}
+
 export function buildForumRequest({prompts = {}, preset, mode = 'posts', people, story = [], user = '我', userPersona = '', recent = [], hot = [], post = null, reply = null, lore = '', earlier = '', handles = {}}) {
   const label = screenName(handles, user), missing = people.filter(p => !handles[p.name]).map(p => p.name);
   const rules = preset.entries.filter(e => e.enabled && e.text.trim() && (e.use || []).includes('forum')).map(e => fill(e.text, {'用户': user}));
-  const system = [
-    rules.join('\n\n'),
-    people.length ? promptRule(prompts, "forum.buildForumRequest.001", {"动态内容1": (people.map(p => `- ${handles[p.name] ? `网名「${handles[p.name]}」，其实是${p.name}` : p.name}：${(p.persona || p.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n'))}) : '',
-    lore.trim() ? promptRule(prompts, "forum.buildForumRequest.002", {"动态内容1": (lore.trim())}) : '',
-    userPersona.trim() ? promptRule(prompts, "forum.buildForumRequest.003", {"用户": (user), "用户_2": (user), "动态内容3": (userPersona.trim())}) : '',
-    earlier.trim() ? promptRule(prompts, "forum.buildForumRequest.004", {"动态内容1": (earlier.trim())}) : '',
-    story.length ? promptRule(prompts, "forum.buildForumRequest.005", {"动态内容1": (story.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
-    mode === 'posts' && hot.length ? promptRule(prompts, "forum.buildForumRequest.006", {"动态内容1": (hot.join('\n'))}) : '',
-    mode === 'posts' && recent.length ? promptRule(prompts, "forum.buildForumRequest.007", {"动态内容1": (recent.map(p => `${label(p.author)}｜${p.title}`).join('\n'))}) : '',
-    forumKnows(user, prompts),
-    ['【网名】',
-      promptRule(prompts, "forum.buildForumRequest.008"),
-      promptRule(prompts, "forum.buildForumRequest.009", {"用户": (user), "动态内容2": (label('me')), "用户_3": (user)}),
-      missing.length ? promptRule(prompts, "forum.buildForumRequest.010", {"动态内容1": (missing.join('、'))}) : ''].filter(Boolean).join('\n'),
-    ['【输出格式】',
-      promptRule(prompts, "forum.buildForumRequest.011"),
-      mode === 'posts' ? promptRule(prompts, "forum.buildForumRequest.012") : '',
-      mode === 'posts' ? promptRule(prompts, "forum.buildForumRequest.013") : '',
-      mode === 'posts' ? promptRule(prompts, "forum.buildForumRequest.014") : '',
-      promptRule(prompts, "forum.buildForumRequest.015"),
-      promptRule(prompts, "forum.buildForumRequest.016", {"用户": (user), "动态内容2": (label('me'))})].filter(Boolean).join('\n')
-  ].filter(Boolean).join('\n\n');
-  let ask;
-  if (mode === 'posts') ask = promptRule(prompts, "forum.buildForumRequest.017", {"动态内容1": (preset.posts + 1)});
-  else if (mode === 'react') ask = promptRule(prompts, "forum.buildForumRequest.018", {"用户": (user), "动态内容2": (postLines(post, user, 30, label))});
-  else ask = promptRule(prompts, "forum.buildForumRequest.019", {"动态内容1": (postLines(post, user, 30, label)), "用户": (user), "动态内容3": (label('me')), "动态内容4": (reply.text), "动态内容5": (reply.to ? `（回复 ${label(reply.to)}）` : ''), "用户_6": (user)});
+  const now = {'刷新': mode === 'posts', '回应': mode === 'react'};
+  const system = promptText(prompts, 'forum', 'system', {...now, '预设规则': rules.join('\n\n'), '用户': user,
+    '论坛里的角色': people.map(p => `- ${handles[p.name] ? `网名「${handles[p.name]}」，其实是${p.name}` : p.name}：${(p.persona || p.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n'),
+    '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': story.map(s => `${s.name}：${s.text}`).join('\n'),
+    '热搜': mode === 'posts' ? hot.join('\n') : '', '最近的帖子': mode === 'posts' ? recent.map(p => `${label(p.author)}｜${p.title}`).join('\n') : '',
+    '我的网名': label('me'), '没网名的人': missing.join('、')});
+  const ask = promptText(prompts, 'forum', 'ask', {...now, '用户': user, '帖子数': preset.posts + 1, '我的网名': label('me'),
+    '帖子': mode === 'posts' ? '' : postLines(post, user, 30, label), '回复': mode === 'reply' ? reply.text : '', '回复谁': mode === 'reply' && reply.to ? label(reply.to) : ''});
   return [{role: 'system', content: system}, {role: 'user', content: ask}];
 }
 

@@ -1,4 +1,4 @@
-import {promptRule, normalizePromptRules} from './prompt-rules.js';
+import {promptText, normalizePromptRules} from './prompt-rules.js';
 import { normalizeRoute } from './routes.js';
 import { TTSParameters } from './parameters.js';
 import { DEFAULT_FORMAT,DEFAULT_PROMPT,LEGACY_FORMATS,validatePreset,isPlaceholderRole,CONTRACT_PROMPT,READING_PROMPT,CONTRACT_OLD_END,CONTRACT_NEW_END } from './protocol.js';
@@ -33,26 +33,16 @@ export function modelRules(s,only=null){const {FISH_DRAMA_PAIRS,FISH_DRAMA_SOUND
  // Nobody registered in the story yet: the rules of the engines in use, without names.
  const nameless=!configured.length&&registered.length,routes=configured.length?configured:nameless?[...new Map(registered.map(r=>[r.engine+'|'+(r.model||''),{...r,name:'说话者'}])).values()]:[{name:'未配置角色',engine:'fish',model:s.connections.fish.model}];
  for(const r of routes){const model=r.model||s.connections[r.engine]?.model||TTSParameters.catalogs[r.engine]?.model||'';let rule;
-  if(r.engine==='doubao'){rule=promptRule(s.promptRules,'modelRules.doubao');
-  }else if(r.engine==='mimo'){
-   rule=promptRule(s.promptRules, 'modelRules.011', {"动态内容1":(MIMO_STYLES.join('、')),"动态内容2":(MIMO_SOUNDS.map(x=>'['+x+']').join('、'))});
-  }else if(r.engine==='mini'){
-   rule=promptRule(s.promptRules, 'modelRules.010', {"动态内容1":(TTSParameters.tags('mini',model).join('、'))});
-   rule+=model.startsWith('speech-2.8')?promptRule(s.promptRules, 'modelRules.009', {"动态内容1":(MINI_SOUNDS.map(x=>'('+x+')').join('、'))}):promptRule(s.promptRules, 'modelRules.008');
-   rule+=promptRule(s.promptRules, 'modelRules.007');
-  }else if(r.engine==='eleven'){
-   rule=/^eleven_v[34]/.test(model)
-    ?promptRule(s.promptRules, 'modelRules.006', {"动态内容1":(ELEVEN_TAGS.map(x=>'['+x+']').join('、'))})
-    :promptRule(s.promptRules, 'modelRules.005');
-  }else if(model==='drama-3'){
-   rule=promptRule(s.promptRules, 'modelRules.004', {"动态内容1":(FISH_DRAMA_SOUNDS.map(x=>'['+x+']').join('、')),"动态内容2":(FISH_DRAMA_PAIRS.map(x=>'<'+x+'>…</'+x+'>').join('、'))});
-  }else if(model==='s1'){
-   rule=promptRule(s.promptRules, 'modelRules.003', {"动态内容1":(FISH_S1_EMOTIONS.join('、')),"动态内容2":([...FISH_S1_TONES,...FISH_S1_SOUNDS].map(x=>'('+x+')').join('、'))});
-  }else{
-   rule=promptRule(s.promptRules, 'modelRules.002');
-  }
+  const V=(part,values)=>promptText(s.promptRules,'voice-rules',part,values);
+  if(r.engine==='doubao')rule=V('doubao');
+  else if(r.engine==='mimo')rule=V('mimo',{'情绪':MIMO_STYLES.join('、'),'声音':MIMO_SOUNDS.map(x=>'['+x+']').join('、')});
+  else if(r.engine==='mini')rule=V('mini',{'情绪':TTSParameters.tags('mini',model).join('、'),'语气声':model.startsWith('speech-2.8')?MINI_SOUNDS.map(x=>'('+x+')').join('、'):''});
+  else if(r.engine==='eleven')rule=V('eleven',{'标签':/^eleven_v[34]/.test(model)?ELEVEN_TAGS.map(x=>'['+x+']').join('、'):''});
+  else if(model==='drama-3')rule=V('drama',{'声音':FISH_DRAMA_SOUNDS.map(x=>'['+x+']').join('、'),'标签':FISH_DRAMA_PAIRS.map(x=>'<'+x+'>…</'+x+'>').join('、')});
+  else if(model==='s1')rule=V('s1',{'情绪':FISH_S1_EMOTIONS.join('、'),'声音':[...FISH_S1_TONES,...FISH_S1_SOUNDS].map(x=>'('+x+')').join('、')});
+  else rule=V('fish');
   // Speakers that share a rule share one entry: the rule is written once, with every name and model in front.
   const same=output.find(o=>o.rule===rule),who=String(r.name),label=(ENGINE_NAMES[r.engine]||r.engine)+' '+model;
   if(same){const group=same.groups.find(g=>g.label===label);if(group){if(!group.names.includes(who))group.names.push(who);}else same.groups.push({label,names:[who]});}
   else output.push({rule,groups:[{label,names:[who]}]});}
- return promptRule(s.promptRules, 'modelRules.001', {"动态内容1":(output.map(o=>'· '+o.groups.map(g=>g.names.join('、')+'（'+g.label+'）').join('、')+'：\n  '+o.rule).join('\n'))});}
+ return promptText(s.promptRules,'voice-rules','wrapper',{'规则':output.map(o=>'· '+o.groups.map(g=>g.names.join('、')+'（'+g.label+'）').join('、')+'：\n  '+o.rule).join('\n')});}

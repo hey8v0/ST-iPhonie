@@ -4,7 +4,7 @@
 // automatically so it can be changed in the 角色 App.
 //
 // 候选音色池 entry: {engine, voice, model, name, gender: 'female'|'male'|'', age: 'child'|'young'|'adult'|'old'|'', style}.
-import {promptRule} from './prompt-rules.js';
+import {promptText} from './prompt-rules.js';
 
 export const POOL_LIMIT = 200;
 export const VOICE_GENDERS = Object.freeze({female: '女', male: '男'});
@@ -74,16 +74,10 @@ export function voiceProfile({name, card = '', said = [], story = []}) {
   return lines.join('\n\n');
 }
 
-
 /** Picking one of a list: {index (from 0), reason} by the reply, or null when the model found none fitting. */
 export function pickRequest(profile, candidates, {prompts = {}, allowNone = true} = {}) {
   const list = candidates.map((c, i) => `${i + 1}. ${c.label}`).join('\n');
-  return [{role: 'system', content: [
-    promptRule(prompts,'autoVoice.002'),
-    promptRule(prompts,'autoVoice.001'),
-    allowNone ? promptRule(prompts,'autoVoice.003') : promptRule(prompts,'autoVoice.004'),
-    promptRule(prompts,'autoVoice.005')
-  ].join('\n')}, {role: 'user', content: `【角色】\n${profile}\n\n【候选音色】\n${list}\n\n挑一个：`}];
+  return [{role: 'system', content: promptText(prompts, 'auto-voice', 'pick', {'可以不选': allowNone})}, {role: 'user', content: `【角色】\n${profile}\n\n【候选音色】\n${list}\n\n挑一个：`}];
 }
 export function parsePick(reply, count) {
   const body = String(reply || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
@@ -97,10 +91,7 @@ export function parsePick(reply, count) {
 
 /** What to search a voice library for: {gender, age, words} by the model (words: a few short search terms). */
 export function searchRequest(profile, engine, prompts = {}) {
-  const how = engine === 'fish' ? promptRule(prompts,'autoVoice.006')
-    : promptRule(prompts,'autoVoice.007');
-  return [{role: 'system', content: [promptRule(prompts,'autoVoice.008'), promptRule(prompts,'autoVoice.001'), how,
-    promptRule(prompts,'autoVoice.009')].join('\n')},
+  return [{role: 'system', content: promptText(prompts, 'auto-voice', 'search', {'Fish': engine === 'fish'})},
     {role: 'user', content: `【角色】\n${profile}\n\n要找什么样的声音？`}];
 }
 export function parseSearch(reply) {

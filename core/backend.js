@@ -1,7 +1,7 @@
 import {withProxyHeaders} from './proxy-url.js';
 import { normalizeNarration, NARRATOR } from './narration.js';
 import {RequestLog} from './request-log.js';
-import {PROMPT_RULES} from './prompt-rules.js';
+import {PROMPT_BLOCKS, normalizePromptRules} from './prompt-rules.js';
 import { normalizeVn, spriteRequest } from './vn.js';
 import { MomentStore } from './moments-store.js';
 import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
@@ -2333,11 +2333,15 @@ export class TTSBackend {
         const methods = {
             reportDiagnostic: (source, detail, level) => this.reportDiagnostic(source, detail, level),
             getRequestLogs: () => this.requestLog.list(), clearRequestLogs: () => this.requestLog.clear(),
+            /** 系统提示词: one block as the user changed it ({enabled?, parts: {key: text}}), or null for the shipped one. */
             savePromptRule: (id, rule) => {
-                if (!PROMPT_RULES.some(r => r.id === id)) throw Error('未知提示词规则');
+                const block = PROMPT_BLOCKS.find(b => b.id === id);
+                if (!block && id !== 'legacy') throw Error('未知提示词');
                 const next = this.getState(); next.promptRules = {...next.promptRules};
                 if (rule === null) delete next.promptRules[id];
-                else { if (!rule || typeof rule.text !== 'string') throw Error('提示词规则格式无效'); next.promptRules[id] = {text: rule.text, enabled: rule.enabled !== false}; }
+                else if (!rule || typeof rule !== 'object') throw Error('提示词格式无效');
+                else next.promptRules[id] = clone(rule);
+                next.promptRules = normalizePromptRules(next.promptRules);
                 this.save(next);
             },
             getState: () => this.getState(), getSnapshot: () => this.getSnapshot(), save: (next, revision) => this.save(next, revision),

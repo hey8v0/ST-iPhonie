@@ -7,7 +7,7 @@
 //   【赞】名字、名字            likes on the post above (or on the post being reacted to)
 //   【评论】名字：内容          a comment; 「名字 回复 名字：内容」 answers someone
 // The rules come from the chat preset: its rules marked for 朋友圈, plus its story length and posts per refresh.
-import {promptRule} from './prompt-rules.js';
+import {promptText} from './prompt-rules.js';
 import {plainStory} from './chat.js';
 import {isPlaceholderRole} from './protocol.js';
 
@@ -43,32 +43,14 @@ export function postLines(post, user) {
 export function buildMomentsRequest({prompts = {}, preset, mode = 'posts', people, story = [], user = '我', userPersona = '', recent = [], post = null, comment = null, images = true, lore = '', memory = '', earlier = ''}) {
   const values = {'用户': user};
   const rules = preset.entries.filter(e => e.enabled && e.text.trim() && (e.use || []).includes('moments')).filter(e => images || e.id !== 'm-picture').map(e => fill(e.text, values));
-  const names = people.map(p => p.name);
-  const system = [
-    rules.join('\n\n'),
-    `【朋友圈里的人】\n${people.map(p => `- ${p.name}：${(p.persona || p.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n')}`,
-    lore.trim() ? promptRule(prompts, "moments.buildMomentsRequest.001", {"动态内容1": (lore.trim())}) : '',
-    userPersona.trim() ? promptRule(prompts, "moments.buildMomentsRequest.002", {"用户": (user), "用户_2": (user), "动态内容3": (userPersona.trim())}) : '',
-    earlier.trim() ? promptRule(prompts, "moments.buildMomentsRequest.003", {"动态内容1": (earlier.trim())}) : '',
-    story.length ? promptRule(prompts, "moments.buildMomentsRequest.004", {"动态内容1": (story.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
-    ['【每个人知道什么】',
-      promptRule(prompts, "moments.buildMomentsRequest.005"),
-      promptRule(prompts, "moments.buildMomentsRequest.006", {"用户": (user)}),
-      promptRule(prompts, "moments.buildMomentsRequest.007")].join('\n'),
-    memory.trim() ? promptRule(prompts, "moments.buildMomentsRequest.008", {"动态内容1": (memory.trim()), "用户": (user)}) : '',
-    recent.length && mode === 'posts' ? promptRule(prompts, "moments.buildMomentsRequest.009", {"动态内容1": (recent.map(p => postLines(p, user)).join('\n'))}) : '',
-    ['【输出格式】',
-      promptRule(prompts, "moments.buildMomentsRequest.010"),
-      mode === 'posts' ? promptRule(prompts, "moments.buildMomentsRequest.011") : '',
-      mode === 'posts' && images ? promptRule(prompts, "moments.buildMomentsRequest.012") : '',
-      '「【赞】名字、名字」点赞；',
-      promptRule(prompts, "moments.buildMomentsRequest.013"),
-      promptRule(prompts, "moments.buildMomentsRequest.014", {"动态内容1": (names.join('、')), "用户": (user)})].filter(Boolean).join('\n')
-  ].filter(Boolean).join('\n\n');
-  let ask;
-  if (mode === 'posts') ask = promptRule(prompts, "moments.buildMomentsRequest.015", {"动态内容1": (preset.posts)});
-  else if (mode === 'react') ask = promptRule(prompts, "moments.buildMomentsRequest.016", {"用户": (user), "动态内容2": (postLines(post, user))});
-  else ask = promptRule(prompts, "moments.buildMomentsRequest.017", {"动态内容1": (postLines(post, user)), "用户": (user), "动态内容3": (comment.text), "动态内容4": (comment.to ? `（回复 ${who(comment.to, user)}）` : ''), "用户_5": (user)});
+  const now = {'刷新': mode === 'posts', '回应': mode === 'react', '回复': mode === 'reply'};
+  const system = promptText(prompts, 'moments', 'system', {...now, '预设规则': rules.join('\n\n'), '用户': user,
+    '朋友圈里的人': people.map(p => `- ${p.name}：${(p.persona || p.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n'),
+    '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': story.map(s => `${s.name}：${s.text}`).join('\n'),
+    '记忆': memory.trim(), '最近的朋友圈': mode === 'posts' ? recent.map(p => postLines(p, user)).join('\n') : '',
+    '出图': images, '名单': people.map(p => p.name).join('、')});
+  const ask = promptText(prompts, 'moments', 'ask', {...now, '用户': user, '人数': preset.posts,
+    '动态': mode === 'posts' ? '' : postLines(post, user), '评论': mode === 'reply' ? comment.text : '', '回复谁': mode === 'reply' && comment.to ? who(comment.to, user) : ''});
   return [{role: 'system', content: system}, {role: 'user', content: ask}];
 }
 

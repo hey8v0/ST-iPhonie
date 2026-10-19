@@ -123,7 +123,8 @@ export interface Preset {
 }
 export type PresetInput = Omit<Preset, 'id'> & { id?: string };
 export interface Settings {
-    promptRules: Record<string, {text: string; enabled: boolean}>;
+    /** 系统提示词 the user changed: per block, parts by key; legacy = sentence-level changes from before 0.8.23 (not used). */
+    promptRules: Record<string, {enabled?: boolean; parts?: Record<string, string>}> & {legacy?: {id: string; text: string; enabled: boolean}[]};
     version: 1;
     scope: string;
     enabled: boolean;
@@ -529,7 +530,8 @@ export interface BackendFacade {
     getRequestLogs(): Array<{id: string; at: number; source: string; level: 'info' | 'warn' | 'error'; state: string; duration?: number; request: unknown; response?: unknown}>;
     clearRequestLogs(): void;
     reportDiagnostic(source: string, detail: Record<string, unknown>, level?: 'info' | 'warn' | 'error'): void;
-    savePromptRule(id: string, rule: {text: string; enabled: boolean} | null): void;
+    /** One block of 系统提示词 ({enabled?, parts}), or null for the shipped one; id 'legacy' with null drops the old changes. */
+    savePromptRule(id: string, rule: {enabled?: boolean; parts?: Record<string, string>} | null): void;
     readonly apiVersion: string;
     readonly defaultPrompt: string;
     readonly defaultFormat: string;

@@ -5,7 +5,7 @@
 // A source is two web addresses the user fills in: one that searches ({{query}}) and one that gives a playable link for
 // a song id ({{id}}), plus where in their JSON answers the list, the id, the title, the artist and the link are (dotted
 // paths such as data.list or data.url). A lyrics address is optional.
-import {promptRule} from './prompt-rules.js';
+import {promptText} from './prompt-rules.js';
 
 export const BGM_MODES = Object.freeze(['off', 'tap', 'auto']);
 export const BGM_MODE_NAMES = Object.freeze({off: '关', tap: '点一下才放', auto: '自动放'});
@@ -162,13 +162,13 @@ export function bgmRule(music, {prompts = {}, recent = [], library = [], user = 
   if (!music || music.bgm === 'off') return '';
   const text = String(music.rule || DEFAULT_BGM_RULE).replaceAll('{{用户}}', user).replaceAll('{{最近}}', recent.length ? recent.slice(0, MUSIC_LIMITS.recent).join('、') : '（还没有）');
   const mine = library.slice(0, 60).map(s => s.artist ? `${s.title} - ${s.artist}` : s.title);
-  return [text, mine.length ? promptRule(prompts, 'bgmRule.001', {"动态内容1":(user),"动态内容2":(mine.join('、'))}) : ''].filter(Boolean).join('\n');
+  return [text, mine.length ? promptText(prompts, 'music', 'library', {'用户': user, '歌单': mine.join('、')}) : ''].filter(Boolean).join('\n');
 }
 export function musicPromptPlan(text) { return text ? [{key: 'sttts.entry.bgm', text, position: 1, depth: 0, role: 0}] : []; }
 /** What the user is listening to, for the story and the phone chat (一起听). */
 export function listeningNote(track, user = '我', prompts = {}) {
   if (!track?.title) return '';
-  return promptRule(prompts, "music.listeningNote.001", {"用户": (user), "动态内容2": (track.artist ? `${track.title} - ${track.artist}` : track.title), "用户_3": (user)});
+  return promptText(prompts, 'music', 'listening', {'用户': user, '歌': track.artist ? `${track.title} - ${track.artist}` : track.title});
 }
 
 // ---------- Matching ----------

@@ -8,6 +8,7 @@ import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs, photoCast, photoTags} from './core/draw.js';
 import {storyLines} from './core/moments.js';
 import {forumContext} from './core/forum.js';
+import {promptOn} from './core/prompt-rules.js';
 
 const BRING_KEY = 'sttts.bring';
 /** The note older versions wrote into the chat for a choice; the chat shows the pending choice by itself now. */
@@ -58,7 +59,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (!nudge) backend.emit('chat', {threadId, typing: true});
       const recent = story(preset), forumSpace = s.chat.partition === 'card' ? {key: thread.space || backend.cardKey()} : null;
       let forum = '';
-      if (s.promptRules?.['chat.publicForum']?.enabled !== false) {
+      if (promptOn(s.promptRules, 'chat-forum')) {
         try { forum = forumContext((await backend.apps.list('forum')).filter(p => inSpace(p, forumSpace)), user, s.chat.netNames); }
         catch (error) { backend.reportDiagnostic?.('聊天 · 论坛读取', error, 'warn'); }
       }

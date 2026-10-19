@@ -1,5 +1,5 @@
 // Independent conversations with the phone's text model. Nothing here writes to the tavern story or selects its preset.
-import {promptRule} from './core/prompt-rules.js';
+import {promptText} from './core/prompt-rules.js';
 import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, ASSISTANT_WANTS_MUSIC, assistantMusicRule, buildAssistantPrompt, normalizeAssistant, assistantHistory, assistantMeta, assistantReasoningFormat, assistantReasoningTimer, assistantThoughts, assistantWantsImage, assistantConfirmsImage} from './core/assistant.js';
 import {activeText, customRequest, streamText, responseMetadata, failure, replyText} from './core/llm.js';
 import {modelRules} from './core/state.js';
@@ -10,7 +10,7 @@ import {createAssistantMemoryHost, assistantMemoryThread} from './host-assistant
 
 // 智能界面: small native pieces of UI the model may put in a reply (like ChatGPT's visual answers), drawn by the phone
 // with its own theme. Only when they make the answer clearer; the reply text stays the main thing.
-export const ASSISTANT_VISUALS = promptRule({}, 'assistant.host.ASSISTANT_VISUALS');
+export const ASSISTANT_VISUALS = promptText({}, 'assistant', 'visuals');
 const cancelled = () => Object.assign(new Error('已取消助手回复'), {name: 'AbortError'});
 const checkSignal = signal => { if (signal?.aborted) throw cancelled(); };
 const loadCompletionModule = () => import('/scripts/openai.js');
@@ -216,7 +216,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
       checkSignal(controller.signal);
       // The drawing guide (the user's own 绘图预设 and 画风) when pictures are being drawn or talked about.
       const guide = !oldImage && !cardText && backend.drawReady?.() && (drawing || wants || assistantTalksPictures(historyMessages)) ? assistantDrawGuide(s) : '';
-      const rules = [...chosen.rules.filter(r => r.content.trim()), {role: 'system', content: promptRule(s.promptRules, 'assistant.host.IMAGE_COLLABORATION')}, ...(guide ? [{role: 'system', content: guide}] : []), ...(s.assistant.visuals !== false && !oldImage && !cardText ? [{role: 'system', content: promptRule(s.promptRules, 'assistant.host.ASSISTANT_VISUALS')}] : [])];
+      const rules = [...chosen.rules.filter(r => r.content.trim()), {role: 'system', content: promptText(s.promptRules, 'assistant', 'images')}, ...(guide ? [{role: 'system', content: guide}] : []), ...(s.assistant.visuals !== false && !oldImage && !cardText ? [{role: 'system', content: promptText(s.promptRules, 'assistant', 'visuals')}] : [])];
       // 放歌: the phone's 音乐 plays what the reply names; the 歌单 is told only when the user talks about music.
       if (!oldImage && !cardText) {
         const said = String(historyMessages.findLast(m => m.role === 'user')?.text || ''), asked = ASSISTANT_WANTS_MUSIC.test(said) || /歌|音乐|曲/.test(said);
@@ -227,9 +227,9 @@ export function createAssistantHost({context, settings, backend, presets = taver
       if (s.assistant.memory.enabled && !oldImage && !cardText) {
         const query = assistantMemoryThread({...thread, messages: historyMessages.slice(-6)}).messages.map(message => message.text).join('\n');
         const recalled = await memory.contextFor({...thread, messages: historyMessages}, {query, history: s.assistant.history, reroll: !!rerollId, signal: controller.signal, config: s.assistant.memory});
-        if (recalled.text) rules.push({role: 'system', content: promptRule(s.promptRules, 'assistant.host.extra1') + recalled.text});
+        if (recalled.text) rules.push({role: 'system', content: promptText(s.promptRules, 'assistant', 'memory', {'记忆': recalled.text})});
       }
-      const prefix = [{role: 'system', content: promptRule(s.promptRules, 'assistant.host.IDENTITY')}, ...rules.map(({role, content}) => ({role, content}))];
+      const prefix = [{role: 'system', content: promptText(s.promptRules, 'assistant', 'identity')}, ...rules.map(({role, content}) => ({role, content}))];
       // With memory off, retain the previous full-history behavior. With it on, only this recent window is verbatim.
       const recent = s.assistant.memory.enabled ? historyMessages.slice(-s.assistant.history) : historyMessages;
       const history = assistantHistory(recent.map(m => m.role === 'assistant' && !m.meta?.reasoningFormat ? {...m, meta: {...m.meta, reasoningFormat}} : m), {textOnly: activeText(s.text).source === 'tavern' && !hasCompletionService(ctx)});
@@ -245,9 +245,9 @@ export function createAssistantHost({context, settings, backend, presets = taver
         reference = result.messages;
         lastContext = {chat, chatId: key, info: result.info};
       }
-      if (proposing) rules.push({role: 'system', content: promptRule(s.promptRules, 'assistant.host.extra2')});
+      if (proposing) rules.push({role: 'system', content: promptText(s.promptRules, 'assistant', 'propose')});
       const normal = rules.filter(r => r.position !== 1).map(({role, content}) => ({role, content}));
-      const messages = [{role: 'system', content: promptRule(s.promptRules, 'assistant.host.IDENTITY')}, ...normal, ...reference, ...(reference.length ? [{role: 'system', content: promptRule(s.promptRules, 'assistant.referenceBoundary')}] : []), ...history];
+      const messages = [{role: 'system', content: promptText(s.promptRules, 'assistant', 'identity')}, ...normal, ...reference, ...(reference.length ? [{role: 'system', content: promptText(s.promptRules, 'assistant', 'reference')}] : []), ...history];
       for (const rule of rules.filter(r => r.position === 1).sort((a, b) => b.depth - a.depth || b.order - a.order)) {
         messages.splice(Math.max(1 + normal.length + reference.length + (reference.length ? 1 : 0), messages.length - rule.depth), 0, {role: rule.role, content: rule.content});
       }
@@ -272,7 +272,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
         job.progress.phase = 'prompting'; backend.emit('assistant', {threadId: id, progress: true});
         let prompt = oldImage?.prompt || cardText, imageReply = oldImage ? thread.messages[targetIndex].text : cardText ? ['按这个方案画好了：', ASSISTANT_IMAGE_SLOT].join('\n\n') : '';
         if (!prompt) {
-          messages.push({role: 'system', content: promptRule(s.promptRules, 'assistant.host.extra3')});
+          messages.push({role: 'system', content: promptText(s.promptRules, 'assistant', 'draw')});
           const prepared = await request(ctx, backend, s, messages, {presetName: chosen.name, signal: controller.signal, completion, loadCompletion, details: true, reasoningFormat});
           checkSignal(controller.signal);
           ({prompt, imageReply} = assistantPicture(assistantThoughts(typeof prepared === 'string' ? prepared : prepared?.text, reasoningFormat).text, style));

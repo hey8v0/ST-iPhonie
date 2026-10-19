@@ -11,7 +11,7 @@
 //   【相册】照片里拍了什么｜english tags   one photo, described (the tags only when pictures can be drawn)
 //   【购物车】商品｜价格｜备注        one thing in the cart
 //   【壁纸】画面｜english tags        the wallpaper, like a photo
-import {promptRule} from './prompt-rules.js';
+import {promptText} from './prompt-rules.js';
 import {messageLine} from './chat.js';
 
 export const PEEK_LIMITS = Object.freeze({chats: 5, lines: 24, searches: 12, notes: 5, photos: 9, cart: 8, knows: 10, text: 600});
@@ -32,36 +32,11 @@ export function buildPeekRequest({prompts = {}, preset, person, story = [], user
   const name = person.name;
   const rules = preset.entries.filter(e => e.enabled && e.text.trim() && (e.use || []).includes('peek')).map(e => fill(e.text, {'用户': user, '对象': name}));
   const said = story.map(s => ({...s, text: s.name === user ? unsaid(s.text) : s.text})).filter(s => s.text);
-  const drawn = what => images ? promptRule(prompts, "peek.buildPeekRequest.001", {"动态内容1": (what)}) : `「${what}」`;
-  const system = [
-    rules.join('\n\n'),
-    `【手机的主人】\n- ${name}：${(person.persona || person.card || '').trim() || '（没有资料，按剧情里的表现来）'}`,
-    lore.trim() ? promptRule(prompts, "peek.buildPeekRequest.002", {"角色名": (name), "动态内容2": (lore.trim())}) : '',
-    userPersona.trim() ? promptRule(prompts, "peek.buildPeekRequest.003", {"用户": (user), "用户_2": (user), "角色名": (name), "动态内容4": (userPersona.trim())}) : '',
-    earlier.trim() ? promptRule(prompts, "peek.buildPeekRequest.004", {"角色名": (name), "动态内容2": (earlier.trim())}) : '',
-    said.length ? promptRule(prompts, "peek.buildPeekRequest.005", {"角色名": (name), "动态内容2": (said.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
-    memory.trim() ? promptRule(prompts, "peek.buildPeekRequest.006", {"动态内容1": (memory.trim()), "角色名": (name), "用户": (user), "角色名_4": (name)}) : '',
-    before ? promptRule(prompts, "peek.buildPeekRequest.007", {"角色名": (name), "动态内容2": (peekSummary(before))}) : '',
-    history.length ? promptRule(prompts, "peek.buildPeekRequest.008", {"角色名": (name), "用户": (user), "角色名_3": (name), "动态内容4": (history.map(m => messageLine(m, user)).filter(Boolean).join('\n'))}) : '',
-    ['【' + name + '知道什么】',
-      promptRule(prompts, "peek.buildPeekRequest.009", {"角色名": (name), "角色名_2": (name)}),
-      promptRule(prompts, "peek.buildPeekRequest.010", {"角色名": (name), "用户": (user), "角色名_3": (name), "角色名_4": (name)}),
-      promptRule(prompts, "peek.buildPeekRequest.011", {"角色名": (name), "用户": (user), "角色名_3": (name), "角色名_4": (name)}),
-      promptRule(prompts, "peek.buildPeekRequest.012", {"角色名": (name)})].join('\n'),
-    ['【输出格式】',
-      promptRule(prompts, "peek.buildPeekRequest.013"),
-      promptRule(prompts, "peek.buildPeekRequest.014", {"角色名": (name), "用户": (user), "角色名_3": (name)}),
-      promptRule(prompts, "peek.buildPeekRequest.015", {"角色名": (name), "用户": (user), "角色名_3": (name)}),
-      promptRule(prompts, "peek.buildPeekRequest.016"),
-      promptRule(prompts, "peek.buildPeekRequest.017"),
-      images ? promptRule(prompts, "peek.buildPeekRequest.018", {"动态内容1": (drawn('【相册】照片里拍了什么')), "角色名": (name)})
-        : promptRule(prompts, "peek.buildPeekRequest.019", {"动态内容1": (drawn('【相册】照片里拍了什么'))}),
-      promptRule(prompts, "peek.buildPeekRequest.020", {"角色名": (name)}),
-      promptRule(prompts, "peek.buildPeekRequest.021", {"动态内容1": (drawn('【壁纸】画面')), "角色名": (name)})].join('\n')
-  ].filter(Boolean).join('\n\n');
-  const ask = before
-    ? promptRule(prompts, "peek.buildPeekRequest.022", {"用户": (user), "角色名": (name)})
-    : promptRule(prompts, "peek.buildPeekRequest.023", {"用户": (user), "角色名": (name), "角色名_3": (name)});
+  const system = promptText(prompts, 'peek', 'system', {'预设规则': rules.join('\n\n'), '用户': user, '主人': name,
+    '主人资料': (person.persona || person.card || '').trim() || '（没有资料，按剧情里的表现来）',
+    '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': said.map(s => `${s.name}：${s.text}`).join('\n'),
+    '记忆': memory.trim(), '上次': before ? peekSummary(before) : '', '聊天记录': history.map(m => messageLine(m, user)).filter(Boolean).join('\n'), '出图': images});
+  const ask = promptText(prompts, 'peek', 'ask', {'用户': user, '主人': name, '上次': !!before});
   return [{role: 'system', content: system}, {role: 'user', content: ask}];
 }
 /** The phone as last seen, short, for 接着上次看. */

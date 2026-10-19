@@ -3,7 +3,7 @@
 //
 // A chat preset holds the rules the model follows when it answers in the phone, how many recent story messages
 // and chat messages it sees, and the template used when a chat is brought into the story.
-import {promptRule} from './prompt-rules.js';
+import {promptText, promptOn} from './prompt-rules.js';
 import {songOf, listeningNote} from './music.js';
 import {normalizeWallet, defaultWallet, PREMIUM, guessEmoji, yuan} from './wallet.js';
 import {parseDialogue, isPlaceholderRole} from './protocol.js';
@@ -379,13 +379,8 @@ const fill = (template, values) => Object.entries(values).reduce((s, [k, v]) => 
  * the rest the reader saw. names: who speaks (a chat's members, the one on the call). group: a group chat.
  */
 export function knowsRule(names, user, {prompts = {}, group = false} = {}) {
-  const who = names.length === 1 ? names[0] : '每个人';
-  return [`【${names.length === 1 ? names[0] : '各人'}知道什么】`,
-    promptRule(prompts, "chat.knowsRule.001", {"对象": (who), "用户": (user), "动态内容3": (names.length === 1 ? ' TA ' : '自己'), "用户_4": (user)}),
-    promptRule(prompts, "chat.knowsRule.002", {"动态内容1": (names.length === 1 ? names[0] : '一个人'), "用户": (user), "动态内容3": (names.length === 1 ? names[0] : '这个人'), "用户_4": (user)}),
-    promptRule(prompts, "chat.knowsRule.003", {"用户": (user)}),
-    promptRule(prompts, "chat.knowsRule.004", {"动态内容1": (names.length === 1 ? names[0] : '一个人')}),
-    group ? promptRule(prompts, "chat.knowsRule.005") : ''].filter(Boolean).join('\n');
+  const one = names.length === 1 ? names[0] : '';
+  return promptText(prompts, 'knows', 'text', {'谁': one || '各人', '每个人': one || '每个人', '用户': user, '告诉': one ? ' TA ' : '自己', '某人': one || '一个人', '那人': one || '这个人', '群聊': group});
 }
 export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', nudge = false}) {
   const group = thread.type === 'group';
@@ -394,44 +389,30 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
   const values = {
     '用户': user, '对象': partner,
     '语音格式': voiceFormat,
-    '可发语音': speakers.length ? speakers.map(m => `${m.name}（${languageName(m.language || 'zh')}）`).join('、') : promptRule(prompts, "chat.buildChatRequest.001")
+    '可发语音': speakers.length ? speakers.map(m => `${m.name}（${languageName(m.language || 'zh')}）`).join('、') : promptText(prompts, 'chat', 'noVoice')
   };
   const used = preset.entries.filter(e => e.enabled && e.text.trim() && e.use.includes(group ? 'group' : 'dm')).filter(e => speakers.length || e.id !== 'voice');
   const rules = used.map(e => fill(e.text, values)), posting = used.some(e => e.id === 'post' || /朋友圈/.test(e.text)), dialing = !group && used.some(e => e.id === 'c-dial');
-  const people = members.map(m => `- ${m.name}：${(m.persona || m.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n');
-  const names = members.map(m => m.name).join('、');
-  const system = [
-    rules.join('\n\n'),
-    `【聊天对象】\n${people}`,
-    lore.trim() ? promptRule(prompts, "chat.buildChatRequest.002", {"动态内容1": (lore.trim())}) : '',
-    userPersona.trim() ? promptRule(prompts, "chat.buildChatRequest.003", {"用户": (user), "用户_2": (user), "动态内容3": (userPersona.trim())}) : '',
-    earlier.trim() ? promptRule(prompts, "chat.buildChatRequest.004", {"动态内容1": (group ? '群里每个人' : partner), "动态内容2": (earlier.trim())}) : '',
-    story.length ? promptRule(prompts, "chat.buildChatRequest.005", {"动态内容1": (group ? '群里每个人' : partner), "动态内容2": (story.map(s => `${s.name}：${s.text}`).join('\n'))}) : '',
-    forum.trim() ? promptRule(prompts, 'chat.publicForum', {'论坛内容': forum.trim()}) : '',
-    memory.trim(),
-    story.length || earlier.trim() ? knowsRule(group ? members.map(m => m.name) : [partner], user, {group, prompts}) : '',
-    ['【输出格式】',
-      promptRule(prompts, "chat.buildChatRequest.006", {"角色名单": (names)}),
-      promptRule(prompts, "chat.buildChatRequest.007", {"用户": (user)}),
-      speakers.length ? promptRule(prompts, "chat.buildChatRequest.008", {"语音格式": (voiceFormat), "动态内容2": (speakers.map(m => `${m.name}：${languageName(m.language || 'zh')}`).join('，'))}) : '',
-      promptRule(prompts, "chat.buildChatRequest.009", {"动态内容1": (images ? promptRule(prompts, "chat.buildChatRequest.010") : ''), "用户": (user), "用户_3": (user), "用户_4": (user)}),
-      promptRule(prompts, "chat.buildChatRequest.011", {"用户": (user), "用户_2": (user)}),
-      stickers.length ? promptRule(prompts, "chat.buildChatRequest.012", {"动态内容1": (stickers.slice(-80).map(s => s.name ?? s).join('、'))}) : '',
-      dialing ? promptRule(prompts, "chat.buildChatRequest.013", {"用户": (user)}) : '',
-      posting ? promptRule(prompts, "chat.buildChatRequest.014", {"用户": (user)}) : '',
-      music?.share ? promptRule(prompts, "chat.buildChatRequest.015", {"用户": (user)}) : '',
-      !group && !asking ? promptRule(prompts, "chat.buildChatRequest.016", {"用户": (user), "用户_2": (user), "用户_3": (user), "用户_4": (user), "聊天对象": (partner), "用户_6": (user)}) : ''].filter(Boolean).join('\n'),
-    music?.listening ? listeningNote(music.listening, user, prompts) : '',
-    asking ? ['【好友申请】', promptRule(prompts, "chat.buildChatRequest.017", {"聊天对象": (partner), "用户": (user), "用户_3": (user), "验证消息": (asking)}), promptRule(prompts, "chat.buildChatRequest.018", {"聊天对象": (partner), "聊天对象_2": (partner), "聊天对象_3": (partner)})].join('\n') : ''
-  ].filter(Boolean).join('\n\n');
+  const system = promptText(prompts, 'chat', 'system', {
+    '预设规则': rules.join('\n\n'), '用户': user, '聊天对象': partner, '谁': group ? '群里每个人' : partner,
+    '聊天对象资料': members.map(m => `- ${m.name}：${(m.persona || m.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n'),
+    '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': story.map(s => `${s.name}：${s.text}`).join('\n'),
+    '论坛': forum.trim() ? promptText(prompts, 'chat-forum', 'text', {'论坛内容': forum.trim()}) : '',
+    '记忆': memory.trim(),
+    '知情范围': story.length || earlier.trim() ? knowsRule(group ? members.map(m => m.name) : [partner], user, {group, prompts}) : '',
+    '名单': members.map(m => m.name).join('、'),
+    '语音': speakers.length > 0, '语音格式': voiceFormat, '语音语言': speakers.map(m => `${m.name}：${languageName(m.language || 'zh')}`).join('，'),
+    '出图': images, '表情包': stickers.slice(-80).map(s => s.name ?? s).join('、'), '打电话': dialing, '朋友圈': posting, '分享歌曲': !!music?.share, '删好友': !group && !asking,
+    '正在听': music?.listening ? listeningNote(music.listening, user, prompts) : '', '好友申请': asking});
   const history = thread.messages.filter(m => m.kind !== 'system').slice(-preset.history);
-  const last = history.at(-1);
+  const last = history.at(-1), now = !nudge && !asking;
   // 主动找你: whether to text at all is the model's to judge, by the preset's 「正文里主动发消息」 rule; [不发] is no.
   const when = nudge ? preset.entries.find(e => e.id === 's-text' && e.enabled && e.text.trim()) : null;
-  const turn = nudge ? [promptRule(prompts, "chat.buildChatRequest.019", {"聊天对象": (partner), "用户": (user)}), when ? `什么时候会发：${fill(when.text, values)}` : promptRule(prompts, "chat.buildChatRequest.020"), promptRule(prompts, "chat.buildChatRequest.021")].join('\n')
-    : asking ? promptRule(prompts, "chat.buildChatRequest.022", {"用户": (user), "聊天对象": (partner)}) : !history.length ? `（聊天刚开始：${group ? '群里有人' : partner}主动给${user}发消息。）`
-    : last.from === 'me' ? `（现在轮到${group ? '群里的成员' : partner}回复${user}。）`
-    : `（${group ? '群里' : partner}可以继续说，或者换个话题。）`;
+  const turn = promptText(prompts, 'chat', 'turn', {'用户': user, '聊天对象': partner,
+    '主动': nudge, '什么时候发': when ? fill(when.text, values) : '', '好友申请': !nudge && asking,
+    '刚开始': now && !history.length ? (group ? '群里有人' : partner) : '',
+    '轮到回复': now && last?.from === 'me' ? (group ? '群里的成员' : partner) : '',
+    '接着说': now && last && last.from !== 'me' ? (group ? '群里' : partner) : ''});
   const transcript = history.length ? `【${group ? thread.name + '（群聊）' : '和' + partner}的聊天记录】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}\n\n` : '';
   return [{role: 'system', content: system}, {role: 'user', content: transcript + turn}];
 }
