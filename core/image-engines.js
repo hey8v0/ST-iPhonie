@@ -262,7 +262,25 @@ export function comfyUrl(value) {
 }
 /** The placeholders a workflow uses ("%prompt%" → prompt). */
 export const workflowPlaceholders = text => [...new Set([...String(text).matchAll(/"%([a-z_]+)%"/g)].map(m => m[1]))];
-/** Checks an imported workflow: API format (File → Export (API)), with "%prompt%" somewhere. */
+/** Repair a placeholder typed with literal quotes in a ComfyUI text field.
+ * JSON strings already have their own quotes, so an input of "\"%prompt%\"" exports as "\\\"%prompt%\\\"".
+ * Only touch complete quoted placeholders in node inputs; never rewrite ordinary prompt text or metadata.
+ */
+function repairWorkflowPlaceholderQuotes(data) {
+  let changed = false;
+  for (const node of Object.values(data)) {
+    if (!node || typeof node !== 'object' || !node.inputs || typeof node.inputs !== 'object' || Array.isArray(node.inputs)) continue;
+    for (const [key, value] of Object.entries(node.inputs)) {
+      if (typeof value !== 'string') continue;
+      const match = /^(['"])(%[a-z_]+%)\\1$/.exec(value.trim());
+      if (!match) continue;
+      node.inputs[key] = match[2];
+      changed = true;
+    }
+  }
+  return changed;
+}
+/** Checks and normalizes an imported API workflow, with %prompt% somewhere. */
 export function checkWorkflow(text) {
   const raw = String(text ?? '').trim();
   if (!raw) return '';
@@ -271,8 +289,9 @@ export function checkWorkflow(text) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw Error('工作流格式不对');
   if (Array.isArray(data.nodes) && data.links) throw Error('这是界面格式的工作流：请在 ComfyUI 里用「导出 (API)」（Export (API)）重新导出');
   if (!Object.values(data).some(n => n && typeof n === 'object' && typeof n.class_type === 'string')) throw Error('工作流里没有节点（需要 API 格式）');
-  if (!workflowPlaceholders(raw).includes('prompt')) throw Error('工作流里没有 "%prompt%"：把正面提示词那一栏的文字换成 "%prompt%"（带引号），插件才知道往哪里填');
-  return raw;
+  const normalized = repairWorkflowPlaceholderQuotes(data) ? JSON.stringify(data) : raw;
+  if (!workflowPlaceholders(normalized).includes('prompt')) throw Error('工作流里没有 %prompt%：请在 ComfyUI 正向提示词输入框填写 %prompt%（不要手动加引号），再导出 API 格式 JSON');
+  return normalized;
 }
 export function comfyParams(c) {
   const base = COMFY_DEFAULT_PARAMS;
