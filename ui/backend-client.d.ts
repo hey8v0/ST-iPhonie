@@ -1013,6 +1013,8 @@ export interface BackendAPI extends BackendFacade {
     panelFull(on: boolean): boolean;
     /** 视觉小说: opens the stage over the tavern page, from the latest reply, the first message or a message id. */
     vnStart(from: 'latest' | 'first' | number): boolean;
+    /** 大游戏: opens a game over the whole tavern page (the phone closes); only in the tavern. */
+    gameStart?(name: 'antarctic'): boolean;
     /** Keeps a 立绘 (PNG) as a tavern image for a character; null takes it away. Resolves to its path. */
     /** A new picture (in place of the one in use, or with add joining its group); use / drop / mix within a group; dropOutfit. */
     vnSprite(name: string, blob: Blob | null, options?: { look?: string; outfit?: string; seed?: number; add?: boolean; use?: string; drop?: string; mix?: boolean; dropOutfit?: boolean }): Promise<string>;

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>南极结界 · 鲸湾郊外</title>
+<style>
+  /* One "pixel" of the interface, so frames and text grow with the screen like the picture does. */
+  :root {
+    color-scheme: dark; --px: clamp(2px, min(.3vw, .52vh), 4px);
+    --paper: #f7e4b5; --paper2: #ecd093; --ink: #4a2a17; --ink2: #8a5a34; --wood: #b0642b; --wood-hi: #e7a85a; --wood-lo: #6e3a19; --edge: #3d2213;
+    --gold: #ffd45c; --red: #d8343f;
+  }
+  html, body { margin: 0; height: 100%; background: #0c0b12; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif; color: var(--ink); font-size: calc(var(--px) * 5); }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+  #view { image-rendering: pixelated; display: block; }
+  canvas.icon { image-rendering: pixelated; display: block; }
+  [hidden] { display: none !important; }
+
+  /* the wooden frame round parchment: a dark edge, a lit rim, the wood, its shadow, and a drop under it all */
+  .frame {
+    background: linear-gradient(180deg, var(--paper), var(--paper2)); color: var(--ink);
+    border: calc(var(--px) * 1.5) solid var(--edge); border-radius: calc(var(--px) * 3);
+    box-shadow: inset 0 0 0 var(--px) var(--wood-hi), inset 0 0 0 calc(var(--px) * 2.5) var(--wood), inset 0 0 0 calc(var(--px) * 3.5) var(--wood-lo),
+      inset 0 calc(var(--px) * 4.5) 0 calc(var(--px) * -.5) rgba(110, 58, 25, .18), 0 calc(var(--px) * 1.5) 0 rgba(0, 0, 0, .4);
+    padding: calc(var(--px) * 5);
+  }
+  .wood { background: linear-gradient(180deg, #c97a3a, #9c5424); border: calc(var(--px)) solid var(--edge); border-radius: calc(var(--px) * 2);
+    box-shadow: inset 0 var(--px) 0 var(--wood-hi), inset 0 calc(var(--px) * -1) 0 var(--wood-lo), 0 var(--px) 0 rgba(0, 0, 0, .4); color: #fff3d6; text-shadow: 0 var(--px) 0 var(--wood-lo); }
+  .wood:active { transform: translateY(var(--px)); box-shadow: inset 0 var(--px) 0 var(--wood-lo); }
+  .well { background: #e3c387; border-radius: calc(var(--px) * 1.5); box-shadow: inset 0 var(--px) 0 #b98d52, inset 0 calc(var(--px) * -1) 0 #fbefcf; }
+
+  /* the clock: a dial with the sun or moon on its arc, the date, the time, and the purse */
+  #clockbox { position: fixed; top: calc(var(--px) * 3); right: calc(var(--px) * 3); display: grid; grid-template-columns: auto auto; gap: calc(var(--px) * 1.5) calc(var(--px) * 3); align-items: center; z-index: 2; pointer-events: none; padding: calc(var(--px) * 4.5) calc(var(--px) * 5.5); }
+  #dial { width: calc(var(--px) * 40); height: calc(var(--px) * 22); image-rendering: pixelated; border-radius: calc(var(--px) * 20) calc(var(--px) * 20) calc(var(--px) * 2) calc(var(--px) * 2); box-shadow: 0 0 0 var(--px) var(--edge); }
+  .when { display: grid; gap: calc(var(--px) * .5); justify-items: center; min-width: calc(var(--px) * 30); }
+  #date { font-size: calc(var(--px) * 4.2); font-weight: 700; white-space: nowrap; }
+  .time { display: flex; align-items: center; gap: calc(var(--px) * 1.5); }
+  .time .icon { width: calc(var(--px) * 9); height: calc(var(--px) * 9); }
+  #clock { font-size: calc(var(--px) * 7); letter-spacing: calc(var(--px) * .4); font-variant-numeric: tabular-nums; }
+  .money { grid-column: 1 / 3; display: flex; align-items: center; justify-content: space-between; padding: calc(var(--px) * 1) calc(var(--px) * 3); }
+  .money .icon { width: calc(var(--px) * 9); height: calc(var(--px) * 9); }
+  #money { font-size: calc(var(--px) * 5.5); font-variant-numeric: tabular-nums; color: #7a2e1a; }
+  #menuBtn { position: fixed; top: calc(var(--px) * 3); left: calc(var(--px) * 3); z-index: 2; padding: calc(var(--px) * 1.5) calc(var(--px) * 4); font-size: calc(var(--px) * 4.5); font-weight: 700; }
+
+  /* the hotbar */
+  #bar { position: fixed; left: 50%; bottom: calc(var(--px) * 3); transform: translateX(-50%); display: flex; gap: calc(var(--px) * 1); padding: calc(var(--px) * 4); z-index: 2; }
+  .slot { position: relative; width: calc(var(--px) * 20); height: calc(var(--px) * 20); padding: 0; border: 0; display: grid; place-items: center; background: #e9c98d;
+    border-radius: calc(var(--px) * 1.5); box-shadow: inset 0 var(--px) 0 #c49a5e, inset var(--px) 0 0 #c49a5e, inset 0 calc(var(--px) * -1) 0 #fbefcf; }
+  .slot .icon { width: calc(var(--px) * 16); height: calc(var(--px) * 16); }
+  .slot.on { box-shadow: 0 0 0 calc(var(--px) * 1) var(--red), 0 0 0 calc(var(--px) * 2) #ffd2a0, inset 0 var(--px) 0 #c49a5e; background: #f6dda6; z-index: 1; }
+  .slot .key { position: absolute; left: calc(var(--px) * 1); top: 0; font-size: calc(var(--px) * 3.2); color: var(--ink2); font-weight: 700; }
+  .slot .count { position: absolute; right: calc(var(--px) * 1); bottom: 0; font-size: calc(var(--px) * 4); font-weight: 800; color: #fff; text-shadow: calc(var(--px) * .5) calc(var(--px) * .5) 0 var(--edge), calc(var(--px) * -.5) calc(var(--px) * .5) 0 var(--edge), 0 calc(var(--px) * -.5) 0 var(--edge); }
+  .slot .meter { position: absolute; left: calc(var(--px) * 2); right: calc(var(--px) * 2); bottom: calc(var(--px) * 1.5); height: calc(var(--px) * 2); background: #3d2213; border-radius: var(--px); overflow: hidden; }
+  .slot .meter i { display: block; height: 100%; background: linear-gradient(180deg, #a9dcff, #4f9bd6); }
+  .slot.off .icon { opacity: .35; filter: grayscale(.8); }
+  #tool { position: fixed; left: 50%; bottom: calc(var(--px) * 34); transform: translateX(-50%); padding: calc(var(--px) * 1.5) calc(var(--px) * 5); font-size: calc(var(--px) * 4.2); font-weight: 700; z-index: 2; pointer-events: none; opacity: 0; transition: opacity .3s; white-space: nowrap; }
+  #tool.on { opacity: 1; }
+
+  /* messages pile up at the lower left and leave on their own */
+  #toasts { position: fixed; left: calc(var(--px) * 3); bottom: calc(var(--px) * 3); display: flex; flex-direction: column; align-items: flex-start; gap: calc(var(--px) * 2); z-index: 3; pointer-events: none; max-width: 34vw; }
+  .toast { display: flex; align-items: center; gap: calc(var(--px) * 2); padding: calc(var(--px) * 2.5) calc(var(--px) * 4.5) calc(var(--px) * 2.5) calc(var(--px) * 3); font-size: calc(var(--px) * 4.2); font-weight: 700; line-height: 1.35; animation: slide .25s ease-out; transition: opacity .4s, transform .4s; }
+  .toast .icon { width: calc(var(--px) * 12); height: calc(var(--px) * 12); flex: none; }
+  .toast.out { opacity: 0; transform: translateX(-20%); }
+  @keyframes slide { from { opacity: 0; transform: translateX(-30%); } }
+
+  /* touch */
+  #use { position: fixed; right: calc(var(--px) * 8); bottom: calc(var(--px) * 30); width: calc(var(--px) * 26); height: calc(var(--px) * 26); border-radius: 50%; font-size: calc(var(--px) * 6); font-weight: 800; display: none; z-index: 2; }
+  body.touch #use { display: block; }
+  #stick { position: fixed; display: none; width: 96px; height: 96px; margin: -48px 0 0 -48px; border-radius: 50%; background: rgba(255, 244, 222, .14); border: 2px solid rgba(255, 244, 222, .35); pointer-events: none; z-index: 3; }
+  #stick div { position: absolute; left: 30px; top: 30px; width: 36px; height: 36px; border-radius: 50%; background: rgba(255, 244, 222, .55); }
+
+  /* panels: the mail-order shop and the menu */
+  .panel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(calc(var(--px) * 170), 94vw); max-height: 88vh; overflow: auto; z-index: 4; display: none; }
+  .panel.on { display: block; animation: pop .18s ease-out; }
+  @keyframes pop { from { transform: translate(-50%, -46%); opacity: 0; } }
+  .banner { margin: calc(var(--px) * -2) auto calc(var(--px) * 3); width: fit-content; padding: calc(var(--px) * 1.5) calc(var(--px) * 9); font-size: calc(var(--px) * 5.5); font-weight: 800; letter-spacing: calc(var(--px) * .6); }
+  .sub { margin: 0 0 calc(var(--px) * 3); text-align: center; font-size: calc(var(--px) * 3.8); color: var(--ink2); }
+  .item { display: grid; grid-template-columns: auto 1fr auto auto auto; column-gap: calc(var(--px) * 3); align-items: center; padding: calc(var(--px) * 2) calc(var(--px) * 3); margin-bottom: calc(var(--px) * 1.5); }
+  .item .icon { width: calc(var(--px) * 16); height: calc(var(--px) * 16); }
+  .item.on { box-shadow: inset 0 0 0 calc(var(--px) * .8) var(--red), inset 0 var(--px) 0 #b98d52; background: #f2d89c; }
+  .item b { display: block; font-size: calc(var(--px) * 4.6); }
+  .item small { display: block; font-size: calc(var(--px) * 3.5); color: var(--ink2); }
+  .price { display: flex; align-items: center; gap: var(--px); font-weight: 800; color: #7a2e1a; font-size: calc(var(--px) * 4.6); }
+  .price .icon { width: calc(var(--px) * 8); height: calc(var(--px) * 8); }
+  .item button, .panel .foot button, .tabs button, .setting button { padding: calc(var(--px) * 1.5) calc(var(--px) * 3.5); font-size: calc(var(--px) * 4); font-weight: 700; }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: calc(var(--px) * 3); font-weight: 800; }
+  .foot .purse { display: flex; align-items: center; gap: calc(var(--px) * 1.5); padding: calc(var(--px) * 1) calc(var(--px) * 3); color: #7a2e1a; }
+  .foot .purse .icon { width: calc(var(--px) * 8); height: calc(var(--px) * 8); }
+  .tabs { display: flex; gap: calc(var(--px) * 2); justify-content: center; margin-bottom: calc(var(--px) * 3); }
+  .tabs button.on { background: linear-gradient(180deg, #ffd27a, #e09a3c); color: var(--ink); text-shadow: none; }
+  .pane { display: none; } .pane.on { display: block; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, calc(var(--px) * 20)); gap: calc(var(--px) * 1.5); justify-content: center; padding: calc(var(--px) * 3); }
+  .grid .slot { cursor: default; }
+  .empty { text-align: center; color: var(--ink2); padding: calc(var(--px) * 4); }
+  .setting { display: flex; justify-content: space-between; align-items: center; padding: calc(var(--px) * 2.5) calc(var(--px) * 3); margin-bottom: calc(var(--px) * 1.5); font-weight: 700; }
+  .help { font-size: calc(var(--px) * 3.9); line-height: 1.7; padding: calc(var(--px) * 2) calc(var(--px) * 4); }
+  .help b { color: #7a2e1a; }
+
+  #fade { position: fixed; inset: 0; background: #06050a; opacity: 0; pointer-events: none; z-index: 5; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #0c0b12; z-index: 6; }
+  #loading .frame { font-weight: 800; letter-spacing: calc(var(--px) * .6); padding: calc(var(--px) * 5) calc(var(--px) * 10); }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="view"></canvas></div>
+<div id="clockbox" class="frame">
+  <canvas id="dial" width="40" height="22"></canvas>
+  <div class="when"><div id="date"></div><div class="time"><span id="season"></span><b id="clock">06:00</b></div></div>
+  <div class="money well"><span id="coin"></span><b id="money"></b></div>
+</div>
+<button id="menuBtn" class="wood">菜单</button>
+<div id="tool" class="frame"></div>
+<div id="bar" class="frame"></div>
+<div id="toasts"></div>
+<button id="use" class="wood">用</button>
+<div id="stick"><div></div></div>
+<div id="shop" class="frame panel">
+  <div class="banner wood">中央市集 · 邮购</div>
+  <p class="sub"></p>
+  <div class="items"></div>
+  <div class="foot"><span class="purse well"></span><button class="close wood">关上（Esc）</button></div>
+</div>
+<div id="menu" class="frame panel">
+  <div class="tabs"><button class="wood on" data-pane="bag">背包</button><button class="wood" data-pane="settings">设置</button><button class="wood" data-pane="help">玩法</button></div>
+  <div class="pane on" data-pane="bag"><div class="grid"></div></div>
+  <div class="pane" data-pane="settings">
+    <div class="setting well" id="leaveRow" hidden><span>保存并回到酒馆</span><button id="leave" class="wood">离开游戏</button></div>
+    <div class="setting well"><span>全屏</span><button id="full" class="wood">切换</button></div>
+    <div class="setting well"><span>从头开始（清掉现在的进度）</span><button id="reset" class="wood">重新开始</button></div>
+  </div>
+  <div class="pane help" data-pane="help">
+    <div><b>走路</b>：方向键 / WASD · 手柄摇杆 · 手机按住屏幕拖动</div>
+    <div><b>使用</b>：空格 / E / 鼠标点 · 手柄 A · 手机右下的「用」</div>
+    <div><b>换工具</b>：1–7 / Q / 滚轮 · 手柄 LB RB · 点下面的格子</div>
+    <div><b>菜单</b>：Esc / I · 手柄 Start</div>
+    <div>翻土 → 播种 → 每天浇水；作物只在自己的季节长，换季时不合季的会枯掉。</div>
+    <div>收获后放进<b>出货箱</b>，第二天早上结算；在<b>信箱</b>邮购当季种子；面朝家门按使用睡觉，凌晨两点前要回家。</div>
+  </div>
+  <div class="foot"><span class="purse well"></span><button class="close wood">关上（Esc）</button></div>
+</div>
+<div id="fade"></div>
+<div id="loading"><div class="frame">正在准备鲸湾郊外……</div></div>
+<script type="module" src="./play.js"></script>
+</body>
+</html>
