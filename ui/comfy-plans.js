@@ -34,7 +34,7 @@ export function comfyPlans(ctx, render) {
       <div class="group pad">${builtIn ? '<p class="hint" style="padding:0">正在用默认工作流（酒馆自带的那一个）。它不能改名、不能删除。</p>' : field('名字', input('comfy-name', row.name, 'text', 'maxlength="60"'))}
         <div class="actions">${builtIn ? '' : btn('plan-rename', '保存名字', 'primary')}${btn('plan-copy', icon('add') + '另存为新方案', builtIn ? 'primary' : 'secondary')}</div>
       </div>
-      ${groupTitle('导入工作流', help('在 ComfyUI 里用「导出 (API)」（Export (API)）存成 JSON 文件。把正面提示词那一栏的文字换成 "%prompt%"（带引号），插件才知道往哪里填；负面、尺寸、步数这些也可以换成 "%negative_prompt%"、"%width%"、"%steps%" 等，换了的会出现在「参数」里。每导入一次多一套方案，已有的保留。'))}
+      ${groupTitle('导入工作流', help('在 ComfyUI 里用「导出 (API)」（Export (API)）存成 JSON 文件。在 ComfyUI 的正面提示词输入框填 %prompt%（不要手动加引号，导出 JSON 会自动加）；负面、尺寸、步数也能填 %negative_prompt%、%width%、%steps% 等，换了的会出现在「参数」里。误填成带引号的占位符，导入时会自动修正。每导入一次多一套方案，已有的保留。'))}
       <div class="group pad"><div class="key-actions"><label class="file-pick"><input type="file" accept=".json,application/json" data-comfy-file aria-label="导入工作流 JSON 文件"><span>${icon('add')}导入 JSON 文件</span></label>${btn('plan-tavern', '从酒馆读取', 'secondary')}</div><div data-tavern-list></div></div>
       ${builtIn ? '' : `<div class="actions">${btn('plan-delete', icon('trash') + '删除这套方案', 'danger')}</div>`}`);
     const done = text => { d.close(); render(); if (text) ctx.notify(text); };
