@@ -1090,12 +1090,12 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .view.qq-mode{display:flex;flex-direction:column;padding-bottom:0}
 .qq-page{flex:1 0 auto;padding-bottom:14px}
 .qq-tabs{position:sticky;bottom:0;z-index:5;display:flex;margin:0 -16px;padding:6px 8px calc(env(safe-area-inset-bottom,0px) + 22px);background:color-mix(in srgb,var(--card) 90%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--line)}
-.qq-tabs button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:50px;font-size:11px;font-weight:800;color:var(--ink2)}
+.qq-tabs button{overflow:visible;flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:50px;font-size:11px;font-weight:800;color:var(--ink2)}
 .qq-tabs button[aria-pressed=true]{color:var(--accent-ink)}
 .qq-tab-ico{position:relative;display:grid;place-items:center;width:34px;height:30px;border-radius:12px;transition:transform .2s,background .2s}
 .qq-tabs button[aria-pressed=true] .qq-tab-ico{background:var(--accent-soft);transform:translateY(-1px) scale(1.06)}
 .qq-tab-ico .icon{width:22px;height:22px}
-.qq-tab-ico .badge{position:absolute;top:-6px;left:22px;min-width:18px;height:18px;padding:0 5px;font-size:10px}
+.qq-tab-ico .badge{position:absolute;z-index:1;top:-6px;left:22px;min-width:18px;height:18px;padding:0 5px;font-size:10px}
 .qq-dot-new{position:absolute;top:0;right:2px;width:9px;height:9px;border-radius:50%;background:var(--danger);box-shadow:0 0 0 2px var(--card)}
 .app-badge.dot{min-width:12px;width:12px;height:12px;padding:0}
 .qq-top{display:flex;align-items:center;gap:10px;padding:14px 0 10px}
