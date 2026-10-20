@@ -10,10 +10,11 @@
 // Redrawing adds a version (the old ones stay for comparison); deleting removes the shown version and its file.
 // When the last version is deleted the record becomes {removed: true, versions: []}, so it is not drawn again
 // automatically. Older records ({url, seed, …}) read as a single version.
+import {storyReply} from './core/outgoing.js';
 import {parsePictures, pictureInputs, planRequest, planLength, tagTextRequest, tagTextAnswer, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
 import {tokenBudget, loadCounter, countField, tagCost, estimateTokens} from './core/tokens.js';
 import {openImageViewer} from './image-viewer.js';
-import {askText} from './host-ask.js';
+import {editTags} from './host-ask.js';
 import {downloadAction} from './download.js';
 import {plainStory, activeChatPreset} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
@@ -412,6 +413,13 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     ];
   }
   /** Deletes the version on screen (file and record). Returns false when the user cancels. */
+  /** Reads a picture's English tags in Chinese ('translate'), or changes them the way the user says ('revise'), with the phone's text model. */
+  async function tagText(text, mode, wish = '') {
+    if (!String(text).trim()) throw Error('框里是空的');
+    const answer = tagTextAnswer(await backend.generateText(context(), {prompt: tagTextRequest(settings(), text, mode, wish), plainText: true, trimNames: false, responseLength: Math.min(6000, 1500 + String(text).length * 3)}));
+    if (!answer) throw Error('模型没有回内容，再试一次');
+    return answer;
+  }
   /**
    * 改提示词再画: the tag's prompt (a whole block, or the tags) is changed in the message itself, so it stays changed,
    * and drawn again. The versions drawn before stay with it, to compare.
@@ -420,22 +428,8 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const message = context().chat[id];
     if (!message || !parsePictures(message.mes).some(t => t.hash === tag.hash)) throw Error('这条消息已经变了，找不到这张图');
     const before = tag.spec ? tag.body : tag.prompt;
-    // Reading the English tags in Chinese, and changing them the way the user says, with the phone's text model.
-    const ask = async (text, mode, wish = '') => {
-      if (!String(text).trim()) throw Error('框里是空的');
-      const answer = tagTextAnswer(await backend.generateText(context(), {prompt: tagTextRequest(settings(), text, mode, wish), plainText: true, trimNames: false, responseLength: Math.min(6000, 1500 + String(text).length * 3)}));
-      if (!answer) throw Error('模型没有回内容，再试一次');
-      return answer;
-    };
-    const chinese = text => /[\u4e00-\u9fff]/.test(text.replace(/^\s*(?:画幅|尺寸|场景|基础|描述|角色|人物|新外貌|登记|位置)\s*[:：][^｜|,，\n]*/gm, '').replace(/^\s*角色\s*[:：]\s*[^｜|]*/gm, ''));
-    const after = await askText({doc: document, title: '改提示词再画', text: before, ok: '画',
-      hint: (tag.spec ? '整个出图块都能改：场景、角色、站位。改的会写回正文里，以后重画也用它；之前画的几版还在，可以左右滑着比。' : '画这张图用的英文 tag。改的会写回正文里；之前画的几版还在，可以左右滑着比。')
-        + '\n\n看不懂英文，点「看中文」。想改又不知道怎么写 tag，就在「想怎么改」里直接说，比如「他笑得太得意了」「背景换成晚上」「两个人离远一点」，点「改」让模型来改。',
-      tools: [{label: '看中文', run: async text => ({note: await ask(text, 'translate')})}],
-      wish: {label: '改', placeholder: '想怎么改？比如：他笑得太得意了', run: async (text, wish) => {
-        if (!wish.trim() && !chinese(text)) return {note: '先在左边说说想怎么改，比如「表情温柔一点」「换成侧脸」。'};
-        return {text: await ask(text, 'revise', wish), note: '改好了，看一眼没问题就点「画」；不满意可以接着说，或者点「还原」。'};
-      }}});
+    const after = await editTags({doc: document, text: before, ask: tagText,
+      about: tag.spec ? '整个出图块都能改：场景、角色、站位。改的会写回正文里，以后重画也用它；之前画的几版还在，可以左右滑着比。' : '画这张图用的英文 tag。改的会写回正文里；之前画的几版还在，可以左右滑着比。'});
     const value = after?.trim();
     if (!value) return false;
     const now = context().chat[id];
@@ -600,7 +594,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
 
   async function drawMessage(id) {
     const message = context().chat[id];
-    if (!message || message.is_user || message.is_system) throw Error('找不到这层楼的回复');
+    if (!storyReply(message)) throw Error('找不到这层楼的回复');
     if (!backend.drawReady()) throw Error('请先在小手机的绘图 App 配好绘图接口');
     if (!parsePictures(message.mes).length && !await planPictures(id)) return;
     if (context().chat[id] !== message) return;
@@ -609,5 +603,5 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const permission = await allowed(true); if (!permission) return;
     for (const tag of tags) { if (context().chat[id] !== message) break; await generate(id, tag, {permission}); }
   }
-  return {drawMessage, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
+  return {tagText, drawMessage, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
 }

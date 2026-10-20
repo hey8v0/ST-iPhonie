@@ -1,12 +1,14 @@
 // 朋友圈 posts, kept in this browser (IndexedDB) and scoped to the tavern account like the other local data.
 // Post: {id, author:'me'|name, text, at, source:'manual'|'auto'|'me'|'chat', photoId?, imageTags?, imageState?:'waiting'|'done'|'failed',
-//        imageNote?, likes:[name|'me'], comments:[{id, from:'me'|name, to?:'me'|name, text, at}]}
+//        imageNote?, imageVersions?:[photoId] (every picture drawn for it, to swipe through), likes:[name|'me'],
+//        comments:[{id, from:'me'|name, to?:'me'|name, text, at}]}
 import {MOMENTS_LIMITS} from './moments.js';
 import {connectionLost, lostError} from './idb.js';
 
 const fail = (message, code = 'INVALID') => Object.assign(new Error(message), {code});
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const person = value => clip(value, 40).trim();
+const versionList = list => [...new Set((Array.isArray(list) ? list : []).filter(x => typeof x === 'string' && x).map(x => clip(x, 512)))].slice(-30);
 
 function cleanComment(c, id, at) {
   const from = person(c?.from), said = clip(c?.text, 500).trim();
@@ -20,6 +22,7 @@ function cleanPost(p, id, at) {
   const out = {id, author, text: said, at, source: ['manual', 'auto', 'me', 'chat'].includes(p.source) ? p.source : 'manual', likes: [], comments: []};
   if (p.photoId) out.photoId = clip(p.photoId, 512);
   if (p.imageTags) out.imageTags = clip(p.imageTags, 600);
+  if (versionList(p.imageVersions).length) out.imageVersions = versionList(p.imageVersions);
   if (['waiting', 'done', 'failed'].includes(p.imageState)) out.imageState = p.imageState;
   if (p.imageNote) out.imageNote = clip(p.imageNote, 200);
   if (p.space) out.space = clip(p.space, 300);
@@ -129,10 +132,12 @@ export class MomentStore {
     return {post, comment: added};
   }
   async removeComment(id, commentId) { return this.#change(id, row => { row.comments = row.comments.filter(c => c.id !== commentId); }); }
-  /** The picture of a post: {photoId, imageState, imageNote}. */
-  async setImage(id, {photoId, imageState, imageNote} = {}) {
+  /** The picture of a post: {photoId, imageState, imageNote, imageTags, imageVersions}. */
+  async setImage(id, {photoId, imageState, imageNote, imageTags, imageVersions} = {}) {
     return this.#change(id, row => {
       if (photoId !== undefined) { if (photoId) row.photoId = clip(photoId, 512); else delete row.photoId; }
+      if (imageTags !== undefined && String(imageTags).trim()) row.imageTags = clip(String(imageTags).trim(), 600);
+      if (imageVersions !== undefined) { const list = versionList(imageVersions); if (list.length) row.imageVersions = list; else delete row.imageVersions; }
       if (imageState !== undefined) row.imageState = imageState;
       if (imageNote !== undefined) { if (imageNote) row.imageNote = clip(imageNote, 200); else delete row.imageNote; }
     });

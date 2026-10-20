@@ -8,7 +8,7 @@ export const languages = LANGUAGES;
 /** Languages typed in by the user anywhere in the settings (default language and every role), for the chip list. */
 export const typedLanguages = state => customLanguages([state.general?.defaultLanguage, ...(state.routes || []).map(r => r.language)]);
 export const languageName = code => languages.find(([value]) => value === code)?.[1] || code;
-export const size = bytes => bytes < 1024 * 1024 ? Math.round(bytes / 1024) + ' KB' : (bytes / 1024 / 1024).toFixed(1) + ' MB';
+export const size = bytes => bytes < 1024 * 1024 ? Math.round(bytes / 1024) + ' KB' : bytes < 1024 ** 3 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : (bytes / 1024 ** 3).toFixed(1) + ' GB';
 
 // style: primary | secondary | danger | text-button | chip-button
 export const btn = (action, text, style = 'secondary', attrs = '') => `<button type="button" class="${style}" data-action="${action}" ${attrs}>${text}</button>`;

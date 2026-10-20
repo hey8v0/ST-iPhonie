@@ -152,16 +152,18 @@ export function settingsApp(ctx) {
    * 本地资料: one row with what this device holds in all (voice cache included); opened, each kind with its count
    * and size, and the in-text pictures of this chat, which are kept in the tavern.
    */
-  function storageFold(cache, library, drawn, chatPictures) {
+  function storageFold(cache, library, drawn, chatPictures, budget) {
     const row = (label, note, amount, extra = '') => `<div class="setting-row"><span class="row-text"><strong>${label}</strong>${note ? `<small>${note}</small>` : ''}</span><small class="part-size">${amount}</small>${extra}</div>`;
     const parts = [
       cache.available && cache.count ? row('语音缓存', `${cache.count} 段`, size(cache.bytes)) : '',
       ...(library ? [['photos', '相册', '张'], ['favorites', '语音收藏', '段'], ['references', '参考音频', '段'], ['vibes', 'Vibe 参考图', '张'], ['notes', '备忘录', '条']].filter(([k]) => library[k])
         .map(([k, label, unit]) => row(label, `${library[k]} ${unit}${k === 'photos' && drawn?.count ? `，画出来的 ${drawn.count} 张` : ''}`, size(library.sizes?.[k] || 0),
           k === 'vibes' && (library.sizes?.vibes || 0) > 300 * 1024 * library.vibes ? btn('vibes-compact', '压缩原图', 'chip-button') : '')) : []),
-      chatPictures?.count ? row('当前聊天的正文图片', `${chatPictures.count} 张`, '存在酒馆') : ''
+      chatPictures?.count ? row('当前聊天的正文图片', `${chatPictures.count} 张`, '存在酒馆') : '',
+      // How much there is: a share of what this browser gives the site, so a computer keeps more than a phone.
+      library ? row('能存多少', `相册和收藏这些最多 ${size(library.limit)}，语音缓存最多 ${size(cache.limit || 0)}（满了先清最早的）${budget?.quota ? `；浏览器给小手机所在网站 ${size(budget.quota)}` : ''}${budget?.persisted ? '，已设为长期保存' : ''}`, '') : ''
     ].filter(Boolean);
-    const total = library ? `${size(library.bytes + (cache.available ? cache.bytes : 0))} / ${size(library.limit)}` : '无法读取';
+    const total = library ? `${size(library.bytes + (cache.available ? cache.bytes : 0))} / ${size(library.limit + (cache.available ? cache.limit || 0 : 0))}` : '无法读取';
     return `<details class="storage-fold" data-group="storage-parts"><summary><span>本地资料</span><small>${total}</small></summary>${parts.join('') || '<div class="setting-row"><span>什么都没有存</span></div>'}</details>`;
   }
   /** 清除相册里的绘图: pick which of the drawn photos go (all ticked), with how many and how big each is. */
@@ -207,13 +209,13 @@ export function settingsApp(ctx) {
 
   /** 存储空间: the voice cache switch, what this device holds, the clearing, and the copy in the tavern. */
   async function renderStorage(ticket) {
-    const [cache, library, drawn] = await Promise.all([api.cacheStats(), api.libraryStats().catch(() => null), api.generatedPhotos().catch(() => null)]);
+    const [cache, library, drawn, budget] = await Promise.all([api.cacheStats(), api.libraryStats().catch(() => null), api.generatedPhotos().catch(() => null), api.storageBudget().catch(() => null)]);
     const chatPictures = api.chatPictureStats?.() || null, st = api.syncStatus?.();
     if (v.disposed || ticket !== epoch) return;
     const s = api.getState();
     v.draw(heading('存储空间', '', 'Storage')
       + `<div class="group">${toggle('cacheEnabled', '保存语音缓存', s.general.cacheEnabled, '已生成的音频用于重播。清缓存不会删除收藏、相册、备忘录或参考音频。')}
-          ${storageFold(cache, library, drawn, chatPictures)}</div>`
+          ${storageFold(cache, library, drawn, chatPictures, budget)}</div>`
       + groupTitle('清理')
       + `<div class="group">
           <div class="setting-row"><span class="row-text"><strong>语音缓存</strong><small>收藏和其他资料会保留</small></span>${btn('clear-cache', icon('trash') + '清理', 'chip-button')}</div>

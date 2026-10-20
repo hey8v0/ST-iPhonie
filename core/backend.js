@@ -32,6 +32,7 @@ import { TTSParameters, FISH_API } from './parameters.js';
 import { KeyStore, keyTail, validateKey, parseTextKeys, joinTextKeys } from './keys.js';
 import { Providers, buildRequest } from './providers.js';
 import { AudioCache } from './cache.js';
+import { createStorageBudget } from './storage-budget.js';
 import { DialoguePlayer } from './player.js';
 import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS } from './library.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, guardParams, isFree, isV5, normalizeDrawParams } from './novelai.js';
@@ -115,8 +116,10 @@ export class TTSBackend {
         // Several Fish keys: when one gives way to the next, the balance shown belongs to the old key.
         providers.onKeySwitch = engine => { this.balances.delete(engine); this.emit('balance', { engine, stale: true, switched: true }); };
         providers.onSpend = engine => { const b = this.balances.get(engine); if (b) b.checkedAt = 0; this.emit('balance', { engine, stale: true }); };
-        this.cache = cache || new AudioCache(this.settings.scope, notify, indexedDB);
-        this.library = library || new LocalLibrary(this.settings.scope, { indexedDB });
+        // How much this browser lets the phone keep (a share of what it gives the site, core/storage-budget.js).
+        this.budget = createStorageBudget();
+        this.cache = cache || new AudioCache(this.settings.scope, notify, indexedDB, { limit: this.budget.voice, keep: this.budget.keep });
+        this.library = library || new LocalLibrary(this.settings.scope, { indexedDB, limit: this.budget.library, keep: this.budget.keep });
         this.keyStore = keyStore || new KeyStore(this.settings.scope, { indexedDB, onError: message => this.notify(message) });
         this.novelai = novelai || new NovelAIClient();
         this.requestLog = new RequestLog({change: () => this.emit('logs', {}), secrets: () => [
@@ -2121,8 +2124,10 @@ export class TTSBackend {
     async #forgetPhotos(gone) {
         let posts = 0;
         for (const post of await this.moments.list()) {
-            if (!gone.has(post.photoId)) continue;
-            await this.moments.setImage(post.id, post.imageTags ? { photoId: '', imageState: 'failed', imageNote: '配图已清理' } : { photoId: '' });
+            if (![post.photoId, ...(post.imageVersions || [])].some(id => gone.has(id))) continue;
+            const imageVersions = [...new Set([...(post.imageVersions || []), post.photoId].filter(id => id && !gone.has(id)))];
+            const photoId = gone.has(post.photoId) ? imageVersions.at(-1) || '' : post.photoId;
+            await this.moments.setImage(post.id, photoId ? { photoId, imageVersions } : post.imageTags ? { photoId: '', imageVersions, imageState: 'failed', imageNote: '配图已清理' } : { photoId: '', imageVersions });
             posts++;
         }
         if (posts) this.emit('moments', {});
@@ -2391,7 +2396,7 @@ export class TTSBackend {
             listPhotos: () => this.library.listPhotos(), addPhoto: value => this.mutateLibrary('photos', 'addPhoto', value),
             getPhoto: id => this.library.getPhoto(id), deletePhoto: id => this.deletePhotos([id]).then(n => n > 0), deletePhotos: ids => this.deletePhotos(ids),
             listNotes: () => this.library.listNotes(), saveNote: value => this.mutateLibrary('notes', 'saveNote', value), deleteNote: id => this.mutateLibrary('notes', 'deleteNote', id),
-            getPhone: () => this.getPhone(), savePhone: patch => this.savePhone(patch), libraryStats: () => this.library.stats(),
+            getPhone: () => this.getPhone(), savePhone: patch => this.savePhone(patch), libraryStats: () => this.library.stats(), storageBudget: () => this.budget.read(),
             generatedPhotos: () => this.generatedPhotos().then(({ count, bytes, sources }) => ({ count, bytes, sources: Object.fromEntries(Object.entries(sources).map(([k, { ids, ...rest }]) => [k, rest])) })), deleteGeneratedPhotos: sources => this.deleteGeneratedPhotos(sources),
             saveMoments: patch => this.saveMoments(clone(patch)), saveCalls: patch => this.saveCalls(clone(patch)),
             saveAssistant: patch => this.saveAssistant(patch), assistantThreads: () => this.assistantThreads(), assistantThread: id => this.assistantThread(id),
@@ -2418,6 +2423,8 @@ export class TTSBackend {
             listMoments: async () => { const here = this.here(); return (await this.moments.list()).filter(p => inSpace(p, here)); }, getMoment: id => this.moments.get(id),
             postMoment: ({ text, photoId } = {}) => this.momentsMutate(async () => (await this.moments.add([{ author: 'me', source: 'me', text, photoId, space: this.cardKey() }]))[0]),
             likeMoment: (id, on = true) => this.momentsMutate(() => this.moments.like(id, 'me', on)),
+            // One of the pictures drawn for a post becomes the one shown.
+            momentsPickImage: (id, photoId) => this.momentsMutate(async () => { const post = await this.moments.get(id); if (!post || ![post.photoId, ...(post.imageVersions || [])].includes(photoId)) throw Error('这张配图已经不在了'); return this.moments.setImage(id, { photoId }); }),
             commentMoment: (id, { text, to } = {}) => this.momentsMutate(() => this.moments.comment(id, { from: 'me', text, to })),
             deleteMoment: id => this.momentsMutate(async () => { const done = await this.moments.remove(id); this.noteGone('moments', [id]); return done; }), deleteMomentComment: (id, commentId) => this.momentsMutate(async () => { const post = await this.moments.removeComment(id, commentId); this.noteGone('moments', [`${id}/${commentId}`]); return post; }),
             clearMoments: () => this.momentsMutate(() => this.dropping('moments', () => this.moments.list(), () => this.clearHere(() => this.moments.list(), id => this.moments.remove(id), () => this.moments.clear()))),

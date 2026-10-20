@@ -85,11 +85,15 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
     });
   }
 
-  /** Draws a post's picture. Without allowPaid, only when NovelAI's free tier covers it. */
-  async function drawImage(postId, {allowPaid = false} = {}) {
+  /**
+   * Draws a post's picture. Without allowPaid, only when NovelAI's free tier covers it. tags: changed tags (改提示词再画),
+   * kept for the next time. The pictures drawn before stay as its versions.
+   */
+  async function drawImage(postId, {allowPaid = false, tags = ''} = {}) {
+    const set = patch => backend.momentsMutate(() => backend.moments.setImage(postId, patch));
+    if (String(tags).trim()) await set({imageTags: String(tags).trim()});
     const post = await backend.moments.get(postId);
     if (!post?.imageTags) throw Error('这条动态没有配图描述');
-    const set = patch => backend.momentsMutate(() => backend.moments.setImage(postId, patch));
     if (!backend.drawReady()) { await set({imageState: 'failed', imageNote: backend.drawMissing()}); return null; }
     try {
       // The saved looks of who the picture shows: the people the post names, else the poster (a selfie).
@@ -98,7 +102,8 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
       const input = pictureInputs(settings(), {prompt: drawn, characters: cast}, '');
       await set({imageState: 'waiting', imageNote: ''});
       const result = await backend.generateImage({...input, allowPaid, name: `朋友圈-${post.author}`, key: `moments:${postId}`, label: `朋友圈 · ${post.author}`});
-      await set({photoId: result.photoId, imageState: 'done', imageNote: ''});
+      const now = await backend.moments.get(postId);
+      await set({photoId: result.photoId, imageVersions: [...(now?.imageVersions || []), now?.photoId, result.photoId].filter(Boolean), imageState: 'done', imageNote: ''});
       return result.photoId;
     } catch (error) {
       await set({imageState: 'failed', imageNote: error.code === 'PAID' ? backend.paidPrompt().note : error.message});

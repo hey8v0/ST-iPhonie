@@ -319,7 +319,7 @@ export interface PeekSnapshot { id: string; kind: 'peek'; name: string; at: numb
 export interface PeekPicture { text: string; tags: string; photoId?: string; state?: 'waiting' | 'done' | 'failed'; note?: string; }
 export interface MomentComment { id: string; from: string; to?: string; text: string; at: number; }
 /** author and comment names are 'me' for the user. */
-export interface MomentPost { id: string; author: string; text: string; at: number; source: 'manual' | 'auto' | 'me'; photoId?: string; imageTags?: string; imageState?: 'waiting' | 'done' | 'failed'; imageNote?: string; likes: string[]; comments: MomentComment[]; }
+export interface MomentPost { id: string; author: string; text: string; at: number; source: 'manual' | 'auto' | 'me'; photoId?: string; imageTags?: string; imageVersions?: string[]; imageState?: 'waiting' | 'done' | 'failed'; imageNote?: string; likes: string[]; comments: MomentComment[]; }
 /** 表情包: a picture on the web by name (the name is what the model writes). */
 export interface Sticker { name: string; url: string; }
 export interface ChatSettings { /** 表情包 */ stickers?: Sticker[]; presets: ChatPreset[]; activePreset: string; contacts: Contact[]; voiceText: VoiceTextOptions; profile: ChatProfile; /** 特别关心 */ starred: string[];
@@ -512,7 +512,7 @@ export interface AudioMetadata {
     requestKey?: string;
 }
 export interface CachedAudio { key: string; at: number; bytes: number; metadata: AudioMetadata; }
-export interface CacheStats { count: number; bytes: number; available: boolean; }
+export interface CacheStats { count: number; bytes: number; /** The most it keeps before the oldest go. */ limit: number; available: boolean; }
 export interface VoicePoolEntry { engine: 'fish' | 'mini' | 'eleven' | 'mimo' | 'doubao' | 'custom'; voice: string; model: string; name: string; gender: 'female' | 'male' | ''; age: 'child' | 'young' | 'adult' | 'old' | ''; style: string; }
 export interface LibraryStats { bytes: number; limit: number; notes: number; photos: number; favorites: number; references: number; vibes: number; /** Bytes by kind: notes, photos, favorites, references, vibes, phone. */ sizes: Record<string, number>; }
 export type LibraryCollection = 'favorites' | 'cache' | 'photos' | 'notes';
@@ -716,6 +716,8 @@ export interface BackendFacade {
     getPhone(): Promise<PhonePreferences>;
     savePhone(patch: PhonePatch): Promise<PhonePreferences>;
     libraryStats(): Promise<LibraryStats>;
+    /** What this browser gives the site (quota, 0 when it does not say), the share for 本地资料 and for the voice cache, and whether it keeps them when space runs short. */
+    storageBudget(): Promise<{ quota: number; library: number; voice: number; persisted: boolean }>;
     /** Album photos made by drawing (the workbench and in-text pictures). */
     /** The photos the phone drew, by where: 绘图 App (draw), 正文图片 (chat), 查手机 (peek), 朋友圈 (moments). */
     generatedPhotos(): Promise<{ count: number; bytes: number; sources: Record<'draw' | 'chat' | 'peek' | 'moments' | 'chatapp' | 'assistant', { label: string; count: number; bytes: number }> }>;
@@ -797,6 +799,8 @@ export interface BackendFacade {
     /** A post by the user. */
     postMoment(post: { text: string; photoId?: string }): Promise<MomentPost>;
     likeMoment(id: string, on?: boolean): Promise<MomentPost>;
+    /** One of the pictures drawn for a post (its photoId or imageVersions) becomes the one shown. */
+    momentsPickImage(id: string, photoId: string): Promise<unknown>;
     commentMoment(id: string, comment: { text: string; to?: string }): Promise<{ post: MomentPost; comment: MomentComment }>;
     deleteMoment(id: string): Promise<boolean>;
     deleteMomentComment(id: string, commentId: string): Promise<MomentPost>;
@@ -957,7 +961,8 @@ export interface BackendAPI extends BackendFacade {
     /** Answers to the user's comment. */
     momentsReply(id: string, commentId: string): Promise<MomentPost>;
     /** Draws a post's picture; allowPaid lets it spend Anlas. */
-    momentsDrawImage(id: string, allowPaid?: boolean): Promise<string | null>;
+    /** Draws a post's picture (again); tags: changed tags, kept for next time. The pictures before stay as versions. */
+    momentsDrawImage(id: string, allowPaid?: boolean, tags?: string): Promise<string | null>;
     /** True while a 朋友圈 request is running. */
     momentsBusy(): boolean;
     /** The call going on (or just ended), null when there is none. */
@@ -1025,6 +1030,8 @@ export interface BackendAPI extends BackendFacade {
     vnSetWear(name: string, outfit: string): Record<string, string>;
     /** What the 视觉小说 last showed for a character and why: a 动作 (and the words that brought it, before or after the line, or in its 情绪), a 表情, or the usual one. */
     vnLastPick?(name: string): { kind: 'action' | 'expression' | 'usual'; label: string; word: string; where?: 'emotion' | 'before' | 'after'; line: string } | null;
+    /** 改提示词再画: a picture's English tags read in Chinese ('translate'), or changed the way the user says ('revise'), by the text model. Only in the tavern. */
+    tagText?(text: string, mode: 'translate' | 'revise', wish?: string): Promise<string>;
     /** The tavern's persona name ('' outside the tavern). */
     userName(): string;
     /** Facts for the self-check report (core/diagnostics.js buildReport). Asks whether keys work; never returns them. */

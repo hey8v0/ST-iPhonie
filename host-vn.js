@@ -4,6 +4,7 @@
 import {openVnStage} from './vn-stage.js';
 import {storySteps, userSteps, pickLook, inlinePictures, editLook} from './core/vn.js';
 import {parsePictures} from './core/draw.js';
+import {storyMessage, storyReply} from './core/outgoing.js';
 import {parseSounds} from './core/sounds.js';
 import {parseBgm} from './core/music.js';
 
@@ -30,7 +31,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
 
   function stepsOf(id) {
     const m = chat()[id];
-    if (!m || m.is_system) return null;
+    if (!storyMessage(m)) return null;
     if (m.is_user) return userSteps(m.mes, m.name || context()?.name1 || '你').map(s => ({...s, id}));
     const lines = linesOf(id) || [];
     const own = parsePictures(m.mes || '').map(t => ({start: t.start, url: pictureUrl(m, t.hash)})), inline = inlinePictures(m.mes || '');
@@ -102,7 +103,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     const list = chat();
     for (let id = start - 1; id >= 0 && id >= start - 40; id--) {
       const m = list[id];
-      if (!m || m.is_user || m.is_system) continue;
+      if (!storyReply(m)) continue;
       const tags = parsePictures(m.mes || '');
       for (let i = tags.length - 1; i >= 0; i--) { const url = pictureUrl(m, tags[i].hash); if (url) return {url, soft: true}; }
     }

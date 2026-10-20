@@ -4,6 +4,14 @@ import {parseDialogue} from './protocol.js';
 import {withoutPictures} from './draw.js';
 import {withoutSounds} from './sounds.js';
 
+/**
+ * A message of the story: also one hidden from the model (/hide, or a summary plugin hiding old floors marks it
+ * is_system), which can still be listened to and watched again; not the tavern's own notes (they carry extra.type).
+ */
+export const storyMessage = m => !!m && (!m.is_system || !m.extra?.type);
+/** A character's reply of the story (hidden ones too). */
+export const storyReply = m => storyMessage(m) && !m.is_user;
+
 /** A reply with each voiced line turned back into its translation: “你好”<tts>A|calm|Hello</tts> → “你好”. */
 export function withoutVoice(message, formats) {
   const text = String(message);

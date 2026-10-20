@@ -45,7 +45,8 @@ export function libraryApp(ctx) {
           [{key: 'download', label: '下载', icon: 'download'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}], {label: r.translation || r.text})).join('') + '</div>'
         : empty('把喜欢的对白留在这里', '在听取里点爱心，就能把生成过的台词收藏起来。', 'heart');
     } else {
-      const used = library?.limit ? Math.min(100, cache.bytes / library.limit * 100) : 0, fav = library?.limit ? Math.min(100, library.bytes / library.limit * 100) : 0;
+      // One bar for the whole room (本地资料's and the cache's together): 收藏与资料 then the cache.
+      const room = (library?.limit || 0) + (cache.limit || 0), fav = room && library ? Math.min(100, library.bytes / room * 100) : 0, used = room ? Math.min(100 - fav, cache.bytes / room * 100) : 0;
       body = `<div class="group pad"><strong>本机音频</strong><div class="storage-meter"><i style="width:${fav}%;background:var(--pink)"></i><i style="width:${used}%;background:var(--accent)"></i></div>
           <div class="legend"><span style="--c:var(--pink)">收藏与资料 ${library ? size(library.bytes) : '无法读取'}</span><span style="--c:var(--accent)">缓存 ${cache.available ? cache.count + ' 段 · ' + size(cache.bytes) : '不可用'}</span></div></div>`
         + (shown.length

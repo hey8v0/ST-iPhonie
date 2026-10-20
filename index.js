@@ -10,7 +10,7 @@ import { normalizeSettings,validateSettings,modelRules,NAMESPACE } from './core/
 import { DEFAULT_FORMAT,parseDialogue,renderDialogue,plainDialogue,promptPlan,validatePreset,isPlaceholderRole,DEFAULT_PROMPT,knownFormats,dialogueProblems,escapeHTML,unwaveFramed,markDialogue,waveMarks,unmark,KEEP_REPLY } from './core/protocol.js';
 import { FloatingPlayer } from './core/floating.js';
 import { renderPictures, drawPromptPlan } from './core/draw.js';
-import { outgoingChat } from './core/outgoing.js';
+import { outgoingChat, storyReply } from './core/outgoing.js';
 import { createPictureHost } from './host-pictures.js';
 import { createChatHost } from './host-chat.js';
 import { createMomentsHost } from './host-moments.js';
@@ -148,7 +148,8 @@ function persist(next){return backend.save(next);}
 const voiceOn=()=>settings?.general?.voiceEnabled!==false;
 const storyWavesOn=()=>voiceOn()&&settings?.general?.hideStoryWaves!==true;
 function storeSettings(next){const voiced=voiceOn(),waves=storyWavesOn(),sounded=soundsOn(),oldFormats=formats().join('\n');settings=next;context().extensionSettings[NAMESPACE]=structuredClone(next);context().saveSettingsDebounced();if(active){memoryHost?.refreshStory();inject();syncFloating();vnHost?.refresh();if(voiced!==voiceOn()){player.stop();rerender();}else if(waves!==storyWavesOn()||sounded!==soundsOn()||oldFormats!==formats().join('\n'))rerender();else scheduleRender();}}
-function currentMessage(id){const ctx=context(),message=ctx.chat[id];if(!message||message.is_user||message.is_system)return null;return {message,chat:ctx.getCurrentChatId?.()??ctx.chatId,id,raw:message.mes,swipe:message.swipe_id};}
+// Hidden floors (/hide) are still the story: their waves play, and they can be voiced again.
+function currentMessage(id){const ctx=context(),message=ctx.chat[id];if(!storyReply(message))return null;return {message,chat:ctx.getCurrentChatId?.()??ctx.chatId,id,raw:message.mes,swipe:message.swipe_id};}
 function unchanged(snap){const now=currentMessage(snap.id);return active&&now?.message===snap.message&&now.chat===snap.chat&&now.raw===snap.raw&&now.swipe===snap.swipe;}
 /** 台词小窗: the latest reply (of the last few) that has voiced lines, as {id, name, lines}. */
 function latestLines(){const chat=context()?.chat||[];for(let i=chat.length-1,seen=0;i>=0&&seen<6;i--){const snap=currentMessage(i);if(!snap)continue;seen++;const lines=messageLines(snap);if(lines.length)return {id:i,name:snap.message.name||'',lines:lines.map(l=>({role:l.role||'',text:l.text||'',translation:l.translation||''}))};}return null;}
@@ -378,7 +379,7 @@ function connect(source){
   momentsRefresh:()=>{check();return momentsHost.refresh();},
   momentsReact:id=>{check();return momentsHost.react(id);},
   momentsReply:(id,commentId)=>{check();return momentsHost.reply(id,commentId);},
-  momentsDrawImage:(id,allowPaid)=>{check();return momentsHost.drawImage(id,{allowPaid});},
+  momentsDrawImage:(id,allowPaid,tags)=>{check();return momentsHost.drawImage(id,{allowPaid,tags:typeof tags==='string'?tags:''});},
   momentsBusy:()=>{check();return momentsHost.busy();},
   forumRefresh:()=>{check();return appsHost.forumRefresh();},
   forumReact:id=>{check();return appsHost.forumReact(id);},
@@ -420,6 +421,7 @@ function connect(source){
   vnWear:()=>{check();return vnHost.wear();},
   vnSetWear:(name,id)=>{check();return vnHost.setWear(name,id);},
   vnLastPick:name=>{check();return vnHost.lastPick(String(name||''));},
+  tagText:(text,mode,wish)=>{check();if(!['translate','revise'].includes(mode))throw Error('不认识的改法');return pictures.tagText(String(text||''),mode,String(wish||''));},
   noteError:text=>{check();remember(text,'error');}
  });
 }

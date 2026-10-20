@@ -5,6 +5,7 @@ import {songOf} from '../core/music.js';
 import {icon} from './icons.js';
 import {fly} from './carry.js';
 import {openImageViewer} from '../image-viewer.js';
+import {editTags} from '../host-ask.js';
 import {saveFile, downloadAction, shareAction, shareFile, canShareFiles} from '../download.js';
 import {momentsPanel, momentsNew, momentsSeen} from './moments.js';
 import {PROFILE_STATUS, BUBBLES, FRAMES, BACKGROUNDS, parseStickers} from '../core/chat.js';
@@ -545,16 +546,13 @@ export function chatApp(ctx) {
       if (tags !== undefined) await api.updateChatMessage(id, mid, {imageTags: tags});
       await api.chatDrawPhoto(id, mid, paid);
     };
+    // 改提示词再画 the way the story's pictures are: 看中文, and saying in words how to change it.
     const rewrite = async () => {
       const m = await current(); if (!m) throw Error('这条消息已不存在');
-      const d = ctx.dialog('改提示词再画', `<div class="field">${textArea('photo-prompt', m.imageTags || '', 'rows="10"')}</div><div class="actions"><button type="button" class="primary" data-photo-redraw>画</button></div>`);
-      d.body.querySelector('[data-photo-redraw]').addEventListener('click', async e => {
-        const tags = d.body.querySelector('textarea').value.trim(); if (!tags) return;
-        e.target.disabled = true;
-        // The paid confirmation uses the same sheet slot, so take a snapshot before closing.
-        d.close();
-        try { await draw(tags); } catch (error) { ctx.notify(error.message, {error: true}); }
-      });
+      const tags = await editTags({doc: ctx.doc, text: m.imageTags || '', ask: (text, mode, wish) => api.tagText ? api.tagText(text, mode, wish) : Promise.reject(Error('看中文和改要在酒馆里用')),
+        about: '这张照片用的英文 tag。改了以后重画也用它；之前画的几版还在，可以左右滑着比。'});
+      if (!tags?.trim()) return false;
+      await draw(tags.trim());
     };
     let viewer;
     const safe = fn => async i => { viewer?.close(); try { return await fn(i); } catch (error) { ctx.notify(error.message, {error: true}); return false; } };

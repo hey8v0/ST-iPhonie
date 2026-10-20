@@ -5,6 +5,8 @@ import {esc, btn, empty, avatar, field, textArea, input, toggle, help} from './c
 import {icon} from './icons.js';
 import {openImageViewer} from '../image-viewer.js';
 import {downloadAction, shareAction} from '../download.js';
+import {editTags} from '../host-ask.js';
+import {pictureInputs, photoTags, photoCast} from '../core/draw.js';
 
 const SEEN_KEY = 'st-iphonie-moments-seen';
 /** When the user last looked at 动态 (per browser; only for the dots). */
@@ -167,7 +169,7 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
       case 'm-post-menu': if (await ctx.confirm('删除这条动态？', '点赞和评论会一起删除，配图还留在相册里。')) { await api.deleteMoment(id); await render(); } return true;
       case 'view-photo': {
         const img = el.querySelector('img');
-        if (img?.src && target) openImageViewer({doc: ctx.doc, src: img.src, alt: img.alt, from: img, actions: [downloadAction(ctx.doc, async () => ({source: (await api.getPhoto(target.photoId)).blob, name: `动态 · ${nameOf(target.author)}`}), ctx.notify), shareAction(ctx.doc, async () => ({source: (await api.getPhoto(target.photoId)).blob, name: `动态 · ${nameOf(target.author)}`}), ctx.notify)]});
+        if (img?.src && target) await viewPhoto(target, img);
         return true;
       }
       case 'draw-image': {
@@ -177,6 +179,49 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
       }
     }
     return false;
+  }
+  /**
+   * A post's picture, full size: the pictures drawn for it are swiped through (the one left on shows in 朋友圈), and a
+   * drawn one can be drawn again, with its tags changed the way the story's pictures are (看中文, 想怎么改).
+   */
+  async function viewPhoto(post, img) {
+    const versions = [];
+    for (const photoId of [...new Set([...(post.imageVersions || []), post.photoId].filter(Boolean))]) {
+      const photo = await api.getPhoto(photoId);
+      if (photo) versions.push({photoId, photo, src: await urlFor(photoId)});
+    }
+    if (v.disposed || !versions.length) return;
+    const name = `动态 · ${nameOf(post.author)}`, drawn = !!post.imageTags && post.author !== 'me';
+    const current = async () => { const now = await api.getMoment(post.id); if (!now) throw Error('这条动态已经不在了'); return now; };
+    const redraw = async tags => {
+      const paid = api.drawQuote?.().free === false, ask = api.paidPrompt?.();
+      if (paid && ask && !await ctx.confirm(ask.title, ask.text)) return false;
+      background(api.momentsDrawImage(post.id, paid, tags));
+    };
+    const rewrite = async () => {
+      const now = await current();
+      const tags = await editTags({doc: ctx.doc, text: now.imageTags || '', ask: (text, mode, wish) => api.tagText ? api.tagText(text, mode, wish) : Promise.reject(Error('看中文和改要在酒馆里用')),
+        about: '这张配图用的英文 tag。改了以后重画也用它；之前画的几版还在，可以左右滑着比。'});
+      if (!tags?.trim()) return false;
+      return redraw(tags.trim());
+    };
+    const inDraw = async i => {
+      const now = await current(), names = [...api.getState().routes.map(r => r.name), api.userName?.() || me().name];
+      const tags = photoTags({text: now.text, tags: now.imageTags, owner: now.author, names});
+      ctx.openDraw({...pictureInputs(api.getState(), {prompt: tags, characters: photoCast({text: now.text, tags, owner: now.author, names})}), tag: tags, seed: Number(versions[i].photo.info?.find(row => row[0] === '种子')?.[1])});
+    };
+    let viewer;
+    const safe = fn => async i => { viewer?.close(); try { return await fn(i); } catch (error) { ctx.notify(error.message, {error: true}); return false; } };
+    viewer = openImageViewer({doc: ctx.doc, from: img, caption: post.text || '',
+      gallery: {items: versions.map(x => ({src: x.src, alt: post.text || '', info: x.photo.info})), index: Math.max(0, versions.findIndex(x => x.photoId === post.photoId)),
+        onIndex: i => api.momentsPickImage(post.id, versions[i].photoId).then(() => render(), error => ctx.notify(error.message))},
+      actions: [downloadAction(ctx.doc, i => ({source: versions[i].photo.blob, name}), ctx.notify), shareAction(ctx.doc, i => ({source: versions[i].photo.blob, name}), ctx.notify),
+        ...(drawn ? [
+          {label: '重画', run: safe(() => redraw())},
+          {label: '改提示词再画', run: safe(rewrite)},
+          ...(ctx.openDraw ? [{label: '在绘图中打开', run: safe(inDraw)}] : []),
+          {label: '删除这版', danger: true, run: safe(async i => { if (!await ctx.confirm('删除这版配图？', versions.length > 1 ? '这条动态换成别的一版。' : '这条动态就没有配图了，之后可以再画。')) return false; await api.deletePhoto(versions[i].photoId); await render(); })}
+        ] : [])].filter(Boolean)});
   }
   return {
     render, click,

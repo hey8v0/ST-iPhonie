@@ -26,6 +26,24 @@ const CSS = `
 `;
 
 /**
+ * 改提示词再画, the same wherever a picture's tags are changed (the story, the phone's chats, 朋友圈): the tags in a box,
+ * 「看中文」, and a line to say in plain words how to change them. ask(text, mode, wish) → the text model's answer
+ * ('translate' or 'revise'). about: what these tags are and where a change goes (the start of the 「i」).
+ * Resolves to the new tags, or null when cancelled.
+ */
+export function editTags({doc = document, text = '', about = '', ask, title = '改提示词再画', ok = '画'} = {}) {
+  // Words that are not tags: 画幅 / 角色 lines of a block, and the names in them.
+  const chinese = value => /[一-鿿]/.test(String(value).replace(/^\s*(?:画幅|尺寸|场景|基础|描述|角色|人物|新外貌|登记|位置)\s*[:：][^｜|,，\n]*/gm, '').replace(/^\s*角色\s*[:：]\s*[^｜|]*/gm, ''));
+  return askText({doc, title, text, ok,
+    hint: (about ? about + '\n\n' : '') + '看不懂英文，点「看中文」。想改又不知道怎么写 tag，就在「想怎么改」里直接说，比如「他笑得太得意了」「背景换成晚上」「两个人离远一点」，点「改」让模型来改。',
+    tools: [{label: '看中文', run: async value => ({note: await ask(value, 'translate')})}],
+    wish: {label: '改', placeholder: '想怎么改？比如：他笑得太得意了', run: async (value, wish) => {
+      if (!wish.trim() && !chinese(value)) return {note: '先在左边说说想怎么改，比如「表情温柔一点」「换成侧脸」。'};
+      return {text: await ask(value, 'revise', wish), note: `改好了，看一眼没问题就点「${ok}」；不满意可以接着说，或者点「还原」。`};
+    }}});
+}
+
+/**
  * Asks for text: resolves to what was written, or null when it was cancelled. Ctrl+Enter is ok, Esc cancels.
  * hint: folded under the title's 「i」. tools: [{label, run(text)}] buttons at the bottom left. wish: {label, placeholder,
  * run(text, wish)} a line to say how to change it. A run resolves to {text} (put in the box, with 还原 to go back) and/or

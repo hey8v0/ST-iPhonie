@@ -23,6 +23,7 @@ export const PHONE_WALLPAPERS = Object.freeze(['sky','silver','midnight','rose',
 export const PHONE_SKINS = Object.freeze(['sky','aero','fresh']);
 export const PHONE_GLYPHS = Object.freeze([...new Set(['default',...PHONE_APPS,'wave','book','music','camera','sliders','note','person','microphone','star','headphones'])]);
 const STORES = ['notes','photos','favorites','phone','references','vibes'];
+const sizeText=n=>n>=1024**3?`${(n/1024**3).toFixed(1).replace(/\.0$/,'')} GB`:`${Math.round(n/1024**2)} MB`;
 const IMAGE_TYPES = new Set(['image/jpeg','image/png','image/webp','image/avif','image/gif']);
 const encoder = new TextEncoder();
 const defaults = () => ({wallpaper:{kind:'builtin',key:'sky'},icons:{},iconStyle:'color',skin:'sky',lockOnOpen:false,volume:1});
@@ -65,9 +66,10 @@ function friendly(error){
  return fail('无法读写本地资料，请检查浏览器的存储权限后重试','STORAGE_UNAVAILABLE');
 }
 export class LocalLibrary {
- #scope; #factory; #now; #id; #db=null; #opening=null; #closed=false;
- constructor(scope,{indexedDB=globalThis.indexedDB,now=Date.now,id=()=>globalThis.crypto.randomUUID()}={}){
-  this.#scope=string(scope,'账户编号',512,true);this.#factory=indexedDB;this.#now=now;this.#id=id;
+ #scope; #factory; #now; #id; #limit; #keep; #db=null; #opening=null; #closed=false;
+ // limit(): the bytes it may hold (core/storage-budget.js; LIBRARY_LIMITS.total when not told); keep(): asks the browser to keep it.
+ constructor(scope,{indexedDB=globalThis.indexedDB,now=Date.now,id=()=>globalThis.crypto.randomUUID(),limit=async()=>LIBRARY_LIMITS.total,keep=()=>{}}={}){
+  this.#scope=string(scope,'账户编号',512,true);this.#factory=indexedDB;this.#now=now;this.#id=id;this.#limit=limit;this.#keep=keep;
   if(typeof now!=='function'||typeof id!=='function')throw fail('本地资料配置无效');
  }
  #time(){const n=this.#now();if(!Number.isFinite(n)||n<0)throw fail('设备时间无效');return n;}
@@ -113,6 +115,7 @@ export class LocalLibrary {
   }));
  }
  async #mutate(change){
+  const limit=await this.#room();this.#keep();
   return this.#run(db=>new Promise((resolve,reject)=>{
    let tx,result,ownError,remaining=STORES.length;const rows={},puts=[],deletes=[];
    try{tx=db.transaction(STORES,'readwrite');}catch(e){reject(friendly(e));return;}
@@ -124,7 +127,7 @@ export class LocalLibrary {
      const remove=(name,id)=>{const existed=rows[name].delete(id);if(existed)deletes.push([name,id]);return existed;};
      result=change({rows,put,remove});
      const total=STORES.reduce((sum,name)=>sum+[...rows[name].values()].reduce((n,row)=>n+bytes(row),0),0);
-     if(total>LIBRARY_LIMITS.total)throw fail('本地资料已达到 256 MB 上限，请删除不需要的内容后再保存','LIBRARY_FULL');
+     if(total>limit)throw fail(`本地资料已达到 ${sizeText(limit)} 上限（这个浏览器给小手机的空间），请删除不需要的内容后再保存`,'LIBRARY_FULL');
      for(const [name,id] of deletes)tx.objectStore(name).delete([this.#scope,id]);
      for(const [name,row] of puts)tx.objectStore(name).put(row);
     }catch(e){ownError=friendly(e);tx.abort();}
@@ -243,9 +246,11 @@ export class LocalLibrary {
   this.#appearance(wallpaper,'wallpaper');fields(icons,PHONE_APPS);for(const icon of Object.values(icons))this.#appearance(icon,'icon');
   return {wallpaper,icons,iconStyle:['color','glass','mono'].includes(iconStyle)?iconStyle:'color',skin:PHONE_SKINS.includes(skin)?skin:'sky',lockOnOpen:lockOnOpen===true,volume:Number.isFinite(volume)?Math.min(1,Math.max(0,volume)):1,...(Array.isArray(widgets)?{widgets:normalizeWidgets(widgets)}:{}),...dates};
  }
+ async #room(){try{const n=await this.#limit();return Number.isFinite(n)&&n>0?n:LIBRARY_LIMITS.total;}catch{return LIBRARY_LIMITS.total;}}
  async stats(){
+  const limit=await this.#room();
   return this.#run(db=>new Promise((resolve,reject)=>{
-   let tx;const result={bytes:0,limit:LIBRARY_LIMITS.total,notes:0,photos:0,favorites:0,references:0,vibes:0,sizes:{}};
+   let tx;const result={bytes:0,limit,notes:0,photos:0,favorites:0,references:0,vibes:0,sizes:{}};
    try{tx=db.transaction(STORES,'readonly');for(const name of STORES){const req=tx.objectStore(name).index('scope').getAll(this.#scope);req.onsuccess=()=>{if(name!=='phone')result[name]=req.result.length;const size=req.result.reduce((n,row)=>n+bytes(row),0);result.sizes[name]=size;result.bytes+=size;};}}
    catch(e){reject(friendly(e));return;}
    tx.oncomplete=()=>resolve(structuredClone(result));tx.onabort=()=>reject(friendly(tx.error));tx.onerror=()=>{};

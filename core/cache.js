@@ -1,6 +1,7 @@
 import {sha256Hex} from './hash.js';
 import {connectionLost} from './idb.js';
 
+// The most it keeps (the oldest go first) when not told: core/storage-budget.js gives the share of this browser.
 const MAX_BYTES = 200 * 1024 * 1024;
 export async function requestHash(request) {
  // A Fish line is the same audio straight or through a relay: the address is left out, so switching keeps the cache.
@@ -8,7 +9,8 @@ export async function requestHash(request) {
  return sha256Hex(JSON.stringify(request));
 }
 export class AudioCache {
- constructor(scope, notify = () => {}, factory = globalThis.indexedDB) { Object.assign(this, { scope, notify, factory, epoch: 0, db: null, failed: false, closed: false }); }
+ constructor(scope, notify = () => {}, factory = globalThis.indexedDB, {limit = async () => MAX_BYTES, keep = () => {}} = {}) { Object.assign(this, { scope, notify, factory, limit, keep, epoch: 0, db: null, failed: false, closed: false }); }
+ async room() { try { const n = await this.limit(); return Number.isFinite(n) && n > 0 ? n : MAX_BYTES; } catch { return MAX_BYTES; } }
  async open() {
   if (this.failed || this.closed) return null;
   if (!this.db) this.db = new Promise((resolve, reject) => {
@@ -46,14 +48,16 @@ export class AudioCache {
  async get(key) { const row = await this.getRecord(key); return row?.blob instanceof Blob && row.blob.size ? row.blob : null; }
  async has(key) { return Boolean(await this.get(key)); }
  async put(key, blob, epoch = this.epoch, metadata = {}) {
-  if (epoch !== this.epoch || !(blob instanceof Blob) || !blob.size || blob.size > MAX_BYTES) return;
+  if (epoch !== this.epoch || !(blob instanceof Blob) || !blob.size) return;
+  const max = await this.room(); this.keep();
+  if (blob.size > max) return;
   try { await this.transaction('readwrite', store => {
    if (epoch !== this.epoch) return;
    const request = store.getAll(); request.onsuccess = () => {
     if (epoch !== this.epoch) return;
     const own = request.result.filter(row => row.scope === this.scope && row.id !== this.id(key)).sort((a,b) => a.at-b.at);
     let total = own.reduce((sum,row) => sum + row.size,0) + blob.size;
-    for (const row of own) { if (total <= MAX_BYTES) break; total -= row.size; store.delete(row.id); }
+    for (const row of own) { if (total <= max) break; total -= row.size; store.delete(row.id); }
     store.put({ id: this.id(key), key, scope:this.scope, at:Date.now(), size:blob.size, blob, metadata:structuredClone(metadata) });
    };
   }); } catch { this.notify('语音已生成，但本机缓存未能保存'); }
@@ -62,7 +66,7 @@ export class AudioCache {
   const rows = await this.transaction('readonly',store => store.getAll()).catch(() => null);
   return (rows || []).filter(row => row.scope===this.scope).sort((a,b) => b.at-a.at).map(row => ({key:row.key || row.id.slice(this.scope.length+1),at:row.at,bytes:row.size,metadata:structuredClone(row.metadata || {})}));
  }
- async stats() { const rows=await this.list(); return {count:rows.length,bytes:rows.reduce((sum,row)=>sum+row.bytes,0),available:!this.failed&&!this.closed}; }
+ async stats() { const rows=await this.list(); return {count:rows.length,bytes:rows.reduce((sum,row)=>sum+row.bytes,0),limit:await this.room(),available:!this.failed&&!this.closed}; }
  async remove(key) { this.epoch++; if(!await this.open()) throw Error('无法访问本机语音缓存'); await this.transaction('readwrite',store=>store.delete(this.id(key))); }
  async clear() {
   this.epoch++; if(!await this.open()) throw Error('无法访问本机语音缓存');
