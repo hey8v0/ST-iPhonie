@@ -122,6 +122,25 @@ function smudgeStamp(pic, x, y, size, strength) {
   held.drawImage(s.layer.canvas, x - C / 2, y - C / 2, C, C, 0, 0, C, C);
   held.globalAlpha = 1;
 }
+/**
+ * 对称 (pic.symmetry: {kind, cx, cy, n}): where else a stamp at (x, y) goes — mirrored left–right ('v'), top–bottom
+ * ('h'), both ('quad'), or turned n times about the middle ('radial').
+ */
+export function mirrored(pic, x, y) {
+  const s = pic.symmetry;
+  if (!s?.kind) return [];
+  const cx = s.cx ?? pic.width / 2, cy = s.cy ?? pic.height / 2, mx = 2 * cx - x, my = 2 * cy - y;
+  if (s.kind === 'v') return [[mx, y]];
+  if (s.kind === 'h') return [[x, my]];
+  if (s.kind === 'quad') return [[mx, y], [x, my], [mx, my]];
+  if (s.kind === 'radial') {
+    const n = s.n || 6, dx = x - cx, dy = y - cy, out = [];
+    for (let i = 1; i < n; i++) { const a = i * 2 * Math.PI / n, c = Math.cos(a), si = Math.sin(a); out.push([cx + dx * c - dy * si, cy + dx * si + dy * c]); }
+    return out;
+  }
+  return [];
+}
+const grow = (s, cx, cy, size) => { const r = size / 2 + 2, box = [Math.floor(cx - r), Math.floor(cy - r), Math.ceil(cx + r), Math.ceil(cy + r)]; s.box = s.box ? [Math.min(s.box[0], box[0]), Math.min(s.box[1], box[1]), Math.max(s.box[2], box[2]), Math.max(s.box[3], box[3])] : box; };
 function stamp(pic, {x, y, p}) {
   const s = pic.stroke, {size: full, alpha} = stampOf(s.brush, s.size, p), g = pic.buffer.g;
   const size = s.stamps ? full * taperAt(s.brush, s.size, s.dist) : full;
@@ -133,10 +152,12 @@ function stamp(pic, {x, y, p}) {
   }
   const jitter = s.brush.jitter * size;
   const cx = x + (jitter ? (Math.random() - .5) * 2 * jitter : 0), cy = y + (jitter ? (Math.random() - .5) * 2 * jitter : 0);
-  if (g) { g.globalAlpha = clamp(alpha, 0, 1); g.drawImage(s.tip, cx - size / 2, cy - size / 2, size, size); }
-  s.stamps?.push({cx, cy, full, alpha, d: s.dist});
-  const r = size / 2 + 2, box = [Math.floor(cx - r), Math.floor(cy - r), Math.ceil(cx + r), Math.ceil(cy + r)];
-  s.box = s.box ? [Math.min(s.box[0], box[0]), Math.min(s.box[1], box[1]), Math.max(s.box[2], box[2]), Math.max(s.box[3], box[3])] : box;
+  // The stamp, and its copies where 对称 puts them.
+  for (const [px, py] of [[cx, cy], ...mirrored(pic, cx, cy)]) {
+    if (g) { g.globalAlpha = clamp(alpha, 0, 1); g.drawImage(s.tip, px - size / 2, py - size / 2, size, size); }
+    s.stamps?.push({cx: px, cy: py, full, alpha, d: s.dist});
+    grow(s, px, py, size);
+  }
 }
 /** The stroke goes on to `point`: stamps along the way. */
 export function extendStroke(pic, point) {
@@ -580,3 +601,25 @@ export function commitTransform(pic) {
 }
 /** Puts the piece back where it was, unchanged. */
 export function cancelTransform(pic) { const f = pic.float; if (!f) return false; pic.float = null; f.layer.g.putImageData(f.before, 0, 0); return true; }
+
+// ---------- 调整 ----------
+/** Starts adjusting the layer in use: its pixels as they are, to show changes over and to go back to. null: locked. */
+export function beginAdjust(pic) {
+  const layer = activeLayer(pic);
+  if (!layer?.g || layer.locked || pic.float) return null;
+  const copy = canvasOf(pic.doc, pic.width, pic.height);
+  copy.g?.drawImage(layer.canvas, 0, 0);
+  return {layer, copy: copy.canvas, before: pixelsOf(pic, layer)};
+}
+/** Shows the layer as `picture` (the adjusted copy), inside the selection when there is one. */
+export function showAdjust(pic, a, picture) {
+  const g = a.layer.g;
+  g.save(); g.globalCompositeOperation = 'copy'; g.globalAlpha = 1; g.drawImage(a.copy, 0, 0); g.restore();
+  g.save(); clipSelection(g, pic); g.clearRect(0, 0, pic.width, pic.height); g.drawImage(picture, 0, 0); g.restore();
+}
+/** Keeps the adjustment (undoable), or puts the layer back as it was. */
+export function endAdjust(pic, a, keep) {
+  if (keep) { remember(pic, pixelStep(pic, a.layer, [0, 0, pic.width, pic.height], a.before)); return true; }
+  a.layer.g.putImageData(a.before, 0, 0);
+  return false;
+}

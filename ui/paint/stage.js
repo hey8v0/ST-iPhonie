@@ -3,14 +3,17 @@
 // - a pen, a finger or the mouse draws (画笔, 橡皮, 涂抹); once a pen has been seen, fingers no longer draw;
 // - two fingers pinch, turn and move the picture; a quick pinch in puts the whole picture back on screen; a quick
 //   two-finger tap undoes, three fingers redo;
-// - holding still for a moment picks the colour under the point;
+// - holding still for a moment picks the colour under the point (a ring shows the colour picked over the one before);
+// - 速创形状: a stroke held still at its end becomes a line, an ellipse, a rectangle…, which follows the pen until it lifts;
+// - 对称 (pic.symmetry): its axes show over the picture; the engine stamps the copies;
 // - 柳叶笔 (a brush with lasso): draw round a shape and it is filled, or with 橡皮 emptied, when the pen lifts;
 // - 选区: drag a box, or draw round what to select; 变形: drag to move, the corners to scale, the dot above to turn,
 //   two fingers to scale and turn;
 // - on a computer: the wheel zooms where the pointer is, space or the middle button drags the picture.
 import {beginStroke, extendStroke, endStroke, compose, layerPicture, colorAt, steady, tracePath, floatCorners} from './engine.js';
+import {fitShape, shapePoints, reshape, shapeName} from './shapes.js';
 
-const HOLD = 480, TAP = 280, HANDLE = 24, SNAP = 320;
+const HOLD = 480, TAP = 280, HANDLE = 24, SNAP = 320, SHAPE_HOLD = 520;
 /** The view's turn, place and zoom: picture point → screen point, and back. */
 export function viewMath(t) {
   const cos = Math.cos(t.angle), sin = Math.sin(t.angle);
@@ -90,7 +93,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     for (const l of list.slice(i + 1)) if (l.visible && l.blend !== 'source-over') return -1;
     return i;
   }
-  const viewKey = () => `${view.x},${view.y},${view.scale},${view.angle},${flipped},${canvas.width},${canvas.height}`;
+  const viewKey = () => `${view.x},${view.y},${view.scale},${view.angle},${flipped},${canvas.width},${canvas.height},${pic.changed},${pic.active}`;
   const pictureKey = () => `${pic.changed},${pic.layers.length},${pic.showBackground},${pic.background},${pic.active}`;
   function render() {
     win.cancelAnimationFrame(raf); raf = 0;
@@ -125,14 +128,14 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   /** A frame while a stroke goes on: under, the layer with the stroke, over. */
   function strokeFrame(at) {
     const key = viewKey();
-    if (split?.stroke !== pic.stroke || split.key !== key) {
+    if (split?.layer !== pic.layers[at] || split.key !== key) {
       const under = screenCanvas(), over = screenCanvas(), ug = under.getContext('2d'), og = over.getContext('2d');
       if (!ug || !og) { split = null; return; }
       for (const c of [ug, og]) { c.setTransform(ratio, 0, 0, ratio, 0, 0); inView(c); c.imageSmoothingEnabled = view.scale < 2; }
       paper(ug);
       compose(pic, ug, {to: at});
       compose(pic, og, {from: at + 1, background: false});
-      split = {stroke: pic.stroke, key, under, over};
+      split = {layer: pic.layers[at], key, under, over};
     }
     const layer = pic.layers[at];
     g.drawImage(split.under, 0, 0);
@@ -152,8 +155,58 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     for (const [color, offset] of [['#fff', 0], ['#222', 5]]) { g.strokeStyle = color; g.setLineDash([5, 5]); g.lineDashOffset = offset; tracePath(g, s.map(p => [p.x, p.y])); g.stroke(); }
     g.restore();
   }
+  // ---------- over the picture: 对称's axes, the shape's name, the eyedropper's ring, the brush's size ----------
+  let banner = null, loupe = null, preview = null, fade = 0;
+  function guides() {
+    const s = pic.symmetry;
+    if (!s?.kind) return;
+    const cx = s.cx ?? pic.width / 2, cy = s.cy ?? pic.height / 2, far = Math.hypot(pic.width, pic.height);
+    const lines = s.kind === 'radial' ? Array.from({length: s.n || 6}, (_, i) => i * Math.PI / (s.n || 6)) : [...(s.kind !== 'h' ? [Math.PI / 2] : []), ...(s.kind !== 'v' ? [0] : [])];
+    g.save();
+    // Only over the picture.
+    const edge = [[0, 0], [pic.width, 0], [pic.width, pic.height], [0, pic.height]].map(([x, y]) => toScreen(x, y));
+    g.beginPath(); edge.forEach((p, i) => i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)); g.closePath(); g.clip();
+    g.lineWidth = 1.2; g.setLineDash([6, 6]);
+    for (const [color, offset] of [['rgba(255,255,255,.9)', 0], ['rgba(58,156,240,.9)', 6]]) {
+      g.strokeStyle = color; g.lineDashOffset = offset;
+      for (const a of lines) { const p = toScreen(cx - Math.cos(a) * far, cy - Math.sin(a) * far), q = toScreen(cx + Math.cos(a) * far, cy + Math.sin(a) * far); g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(q.x, q.y); g.stroke(); }
+    }
+    g.restore();
+  }
+  function pill(text, x, y) {
+    g.save(); g.font = '700 13px system-ui,"PingFang SC","Microsoft YaHei",sans-serif';
+    const pw = g.measureText(text).width + 26;
+    g.fillStyle = 'rgba(20,24,40,.82)'; g.beginPath(); if (g.roundRect) g.roundRect(x - pw / 2, y - 15, pw, 30, 15); else g.rect(x - pw / 2, y - 15, pw, 30); g.fill();
+    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, x, y + 1);
+    g.restore();
+  }
+  function marks() {
+    guides();
+    // 速创形状's name, a moment at the top.
+    if (banner && Date.now() - banner.at < 1200) pill(`${banner.text} · 拖动调整，抬笔完成`, w / 2, 26);
+    // The eyedropper: a ring round the point, the colour picked above and the one before below.
+    if (loupe) {
+      const r = 42;
+      g.save(); g.lineWidth = 16;
+      g.strokeStyle = loupe.now; g.beginPath(); g.arc(loupe.sx, loupe.sy - 70, r, Math.PI, 0); g.stroke();
+      g.strokeStyle = loupe.was; g.beginPath(); g.arc(loupe.sx, loupe.sy - 70, r, 0, Math.PI); g.stroke();
+      g.lineWidth = 1.5; g.strokeStyle = 'rgba(255,255,255,.95)';
+      for (const rr of [r - 8, r + 8]) { g.beginPath(); g.arc(loupe.sx, loupe.sy - 70, rr, 0, Math.PI * 2); g.stroke(); }
+      g.restore();
+    }
+    // The brush's real size on the picture, while its size or opacity is being changed.
+    if (preview && Date.now() - preview.at < 900) {
+      const r = Math.max(1.5, preview.size * view.scale / 2);
+      g.save(); g.globalAlpha = Math.max(.08, Math.min(1, preview.opacity)); g.fillStyle = preview.color;
+      g.beginPath(); g.arc(w / 2, h / 2, r, 0, Math.PI * 2); g.fill();
+      g.globalAlpha = 1; g.lineWidth = 1.5; g.strokeStyle = 'rgba(255,255,255,.95)'; g.stroke();
+      g.lineWidth = 1; g.strokeStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.arc(w / 2, h / 2, r + 1.5, 0, Math.PI * 2); g.stroke();
+      g.restore();
+    }
+  }
   function overlays() {
     ahead();
+    marks();
     if (pic.selection && !pic.float) ants(pic.selection.points);
     if (outline?.fill && outline.points.length > 1) {
       // 柳叶笔: the shape shows filled as it is drawn (emptying shows light), with its edge.
@@ -211,15 +264,17 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
       drawing = {id: e.pointerId, outline: true, at: Date.now(), start: at, moved: 0}; return;
     }
     if (t.kind === 'transform') { startMoving(e, at); return; }
-    const brush = {...t.brush, opacity: t.brush.opacity * t.opacity};
-    drawing = {id: e.pointerId, start: at, smooth: at, raw: at, moved: 0, at: Date.now(), streamline: brush.streamline};
-    if (!beginStroke(pic, {brush, size: t.size, color: t.color, erase: t.kind === 'eraser', smudge: t.kind === 'smudge'}, at)) { drawing = null; locked(); return; }
+    const brush = {...t.brush, opacity: t.brush.opacity * t.opacity}, params = {brush, size: t.size, color: t.color, erase: t.kind === 'eraser', smudge: t.kind === 'smudge'};
+    drawing = {id: e.pointerId, start: at, smooth: at, raw: at, moved: 0, at: Date.now(), streamline: brush.streamline, params, pts: [at], was: t.color};
+    if (!beginStroke(pic, params, at)) { drawing = null; locked(); return; }
     // Held still: the eyedropper instead.
     drawing.hold = win.setTimeout(() => { if (drawing && !drawing.pick && drawing.moved < 6) { endStroke(pic, {cancel: true}); drawing.pick = true; pick(drawing.raw); later(); } }, HOLD);
     later();
   }
   function moveDrawing(e) {
     if (drawing.pick) { pick(point(e)); return; }
+    // A shape follows the pen until it lifts.
+    if (drawing.shape) { const pen = point(e); drawing.shape = reshape(drawing.shape, drawing.anchor, pen); drawing.anchor = pen; drawShape(drawing); later(); return; }
     if (drawing.done) return;
     if (drawing.outline) {
       const at = point(e), s = outline.start;
@@ -235,24 +290,49 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
       drawing.raw = raw;
       drawing.smooth = steady(drawing.smooth, raw, drawing.streamline);
       extendStroke(pic, drawing.smooth);
+      if (drawing.pts.length < 4000) drawing.pts.push(raw);
+    }
+    // Held still after drawing a while: 速创形状 in a moment (not while 涂抹).
+    const d = drawing;
+    if (!d.params.smudge && d.moved > 14 && (!d.stillAt || Math.hypot(d.raw.sx - d.stillAt.sx, d.raw.sy - d.stillAt.sy) > 3)) {
+      d.stillAt = d.raw; win.clearTimeout(d.shapeTimer); d.shapeTimer = win.setTimeout(() => snapShape(d), SHAPE_HOLD);
     }
     drawing.predicted = (e.getPredictedEvents?.() || []).slice(0, 3).map(point);
+    later();
+  }
+  /** The stroke drawn again as its shape (the brush stamps along it). */
+  function drawShape(d) {
+    endStroke(pic, {cancel: true});
+    const pts = shapePoints(d.shape);
+    if (!beginStroke(pic, d.params, pts[0])) return;
+    for (const p of pts.slice(1)) extendStroke(pic, p);
+  }
+  function snapShape(d) {
+    if (drawing !== d || d.shape || d.pick) return;
+    const shape = fitShape(d.pts, 1 / view.scale);
+    if (!shape) return;
+    d.shape = shape; d.anchor = d.raw;
+    drawShape(d);
+    banner = {text: shapeName(shape), at: Date.now()};
+    try { win.navigator?.vibrate?.(10); } catch { /* none */ }
+    win.setTimeout(later, 1300);
     later();
   }
   function endDrawing(cancel = false) {
     const d = drawing;
     drawing = null;
+    loupe = null;
     if (!d) return;
-    win.clearTimeout(d.hold);
+    win.clearTimeout(d.hold); win.clearTimeout(d.shapeTimer);
     if (d.pick || d.done) return;
     if (d.outline) { const o = outline; outline = null; if (!cancel) { if (o.fill) lassoed(o.points, {erase: o.erase}); else selected(o.points); } later(); return; }
     split = null;
     // The steadied line catches up with where the pen lifted.
-    if (!cancel && d.raw && d.raw !== d.smooth) extendStroke(pic, d.raw);
+    if (!cancel && !d.shape && d.raw && d.raw !== d.smooth) extendStroke(pic, d.raw);
     if (endStroke(pic, {cancel})) stroked();
     later();
   }
-  function pick(at) { const c = colorAt(pic, at.x, at.y); if (c) picked(c); }
+  function pick(at) { const c = colorAt(pic, at.x, at.y); if (c) { loupe = {sx: at.sx, sy: at.sy, now: c, was: loupe?.was || drawing?.was || tool().color}; picked(c); later(); } }
 
   // ---------- 变形 ----------
   function startMoving(e, at) {
@@ -387,6 +467,8 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   size();
 
   return {
+    /** The brush's size shown on the picture for a moment (its size or opacity being changed). */
+    preview(brush) { preview = {...brush, at: Date.now()}; later(); win.clearTimeout(fade); fade = win.setTimeout(later, 950); },
     /** Something changed the picture (a layer, a fill, undo…): drawn anew. */
     render() { whole = null; split = null; later(); },
     fit() { view = fitView(pic, w, h); later(); },

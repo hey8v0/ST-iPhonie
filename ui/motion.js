@@ -22,8 +22,59 @@ function slidePill(win, bar, to, from) {
     {duration: 440, easing: 'cubic-bezier(.3,1.3,.4,1)'}).finished.then(done, done);
 }
 
+/** Long notes (how a thing works) fold into a small 「ⓘ 说明」: shown when asked for, not as walls of text. */
+const NOTE = 'p.hint, p.help-copy';
+const NOTE_LONG = 44;
+function foldNotes(doc, root) {
+  for (const p of root.querySelectorAll?.(NOTE) || []) {
+    if (p.dataset.folded || p.hidden || p.closest('[data-keep-notes],.sheet-help,.toast,[role=status],[role=alert]') || p.matches('.sw-hint,.moments-busy,.error-copy,[data-keep-hint]')) continue;
+    if (p.textContent.replace(/\s+/g, '').length < NOTE_LONG) continue;
+    p.dataset.folded = '';
+    p.hidden = true;
+    const chip = doc.createElement('button');
+    chip.type = 'button'; chip.className = 'note-chip'; chip.setAttribute('aria-expanded', 'false');
+    chip.innerHTML = '<i aria-hidden="true">i</i><span>说明</span>';
+    p.before(chip);
+  }
+}
+
 export function installMotion(win, mount, signal) {
   const reduced = win.matchMedia('(prefers-reduced-motion: reduce)'), hover = win.matchMedia('(hover: hover) and (pointer: fine)');
+  // ---------- notes: folded, and opened in place ----------
+  foldNotes(win.document, mount);
+  const watch = new win.MutationObserver(list => { for (const m of list) for (const n of m.addedNodes) if (n.nodeType === 1) { if (n.matches?.(NOTE)) foldNotes(win.document, n.parentElement || n); else foldNotes(win.document, n); } });
+  watch.observe(mount, {childList: true, subtree: true});
+  signal?.addEventListener?.('abort', () => watch.disconnect());
+  mount.addEventListener('click', e => {
+    const chip = e.target.closest?.('.note-chip');
+    if (!chip) return;
+    const note = chip.nextElementSibling, open = chip.getAttribute('aria-expanded') !== 'true';
+    if (!note) return;
+    chip.setAttribute('aria-expanded', String(open));
+    note.hidden = !open;
+    if (open && !reduced.matches && typeof note.animate === 'function') note.animate([{opacity: 0, transform: 'translateY(-6px)'}, {opacity: 1, transform: 'none'}], {duration: 260, easing: 'cubic-bezier(.2,.9,.25,1)'});
+  }, {signal});
+  // ---------- 展开 / 收起: a fold grows open and shrinks shut instead of jumping ----------
+  mount.addEventListener('click', e => {
+    const summary = e.target.closest?.('summary');
+    if (!summary || reduced.matches || e.defaultPrevented || e.target.closest('input,button,select,textarea,a,label') && e.target.closest('input,button,select,textarea,a,label') !== summary) return;
+    const fold = summary.parentElement;
+    if (fold?.tagName !== 'DETAILS' || typeof fold.animate !== 'function' || fold.matches('[data-instant]')) return;
+    // A menu that floats over the page (its content is placed absolutely) opens at once.
+    const inside = [...fold.children].find(c => c !== summary);
+    if (inside && /absolute|fixed/.test(win.getComputedStyle(inside).position)) return;
+    e.preventDefault();
+    fold._grow?.cancel();
+    const from = fold.offsetHeight, edge = fold.offsetHeight - fold.clientHeight;
+    const opening = !fold.open;
+    if (opening) fold.open = true;
+    const to = opening ? fold.offsetHeight : summary.offsetHeight + edge;
+    fold.style.overflow = 'hidden';
+    const grow = fold._grow = fold.animate({height: [`${from}px`, `${to}px`]}, {duration: opening ? 340 : 260, easing: opening ? 'cubic-bezier(.2,1.05,.3,1)' : 'cubic-bezier(.4,0,.2,1)'});
+    if (opening) for (const c of fold.children) if (c !== summary) c.animate([{opacity: 0, transform: 'translateY(-6px)'}, {opacity: 1, transform: 'none'}], {duration: 300, delay: 40, easing: 'ease-out', fill: 'backwards'});
+    const end = () => { if (fold._grow !== grow) return; fold._grow = null; fold.style.overflow = ''; if (!opening) fold.open = false; };
+    grow.finished.then(end, () => { if (fold._grow === grow) fold.style.overflow = ''; });
+  }, {signal});
   mount.addEventListener('pointerdown', e => {
     if (reduced.matches || e.button > 0) return;
     const target = e.target.closest(RIPPLE);

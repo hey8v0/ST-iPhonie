@@ -144,11 +144,12 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
 
   // ---------- Sheets ----------
-  function dialog(title, html, {top = false} = {}) {
+  /** add: a 「＋」 in the title bar (its label), for a list that grows there; listened for as a click on [data-sheet-add]. */
+  function dialog(title, html, {top = false, add = ''} = {}) {
     sheet?.close(null);
     const focus = doc.activeElement, overlay = doc.createElement('div');
     overlay.className = 'overlay' + (top ? ' top' : '');
-    overlay.innerHTML = `<section class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><header class="sheet-header"><h2>${esc(title)}</h2><button class="nav-button" data-sheet-close aria-label="关闭">${icon('close')}</button></header><div class="sheet-body">${html}</div></section>`;
+    overlay.innerHTML = `<section class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><header class="sheet-header"><h2>${esc(title)}</h2>${add ? `<button type="button" class="sheet-add" data-sheet-add aria-label="${esc(add)}">${icon('add')}</button>` : ''}<button class="nav-button" data-sheet-close aria-label="关闭">${icon('close')}</button></header><div class="sheet-body">${html}</div></section>`;
     screen.append(overlay);
     let live = true;
     const callbacks = [];
@@ -192,7 +193,9 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (!top) dragToClose(overlay, result);
     sheet = result;
     syncInert();
-    overlay.querySelector('button').focus({preventScroll: true});
+    // A bottom sheet takes the focus itself (its × is hidden; focusing it would bring it back into view).
+    const sheetEl = overlay.querySelector('.sheet');
+    if (top) overlay.querySelector('button').focus({preventScroll: true}); else { sheetEl.tabIndex = -1; sheetEl.focus({preventScroll: true}); }
     return result;
   }
   /**
@@ -254,7 +257,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
   function confirm(title, text = '') {
     return new Promise(resolve => {
-      const d = dialog(title, `<p class="help-copy">${esc(text)}</p><div class="actions"><button type="button" class="secondary" data-action="cancel">取消</button><button type="button" class="primary" data-action="confirm">确认</button></div>`);
+      const d = dialog(title, `<p class="help-copy" data-keep-hint>${esc(text)}</p><div class="actions"><button type="button" class="secondary" data-action="cancel">取消</button><button type="button" class="primary" data-action="confirm">确认</button></div>`);
       d.onClose(value => resolve(value === true));
       d.body.addEventListener('click', e => {
         const action = e.target.closest('button')?.dataset.action;
@@ -263,7 +266,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       });
     });
   }
-  const help = text => dialog('说明', `<p class="help-copy">${esc(text)}</p>`);
+  const help = text => dialog('说明', `<p class="help-copy" data-keep-hint>${esc(text)}</p>`);
 
   const routeFor = name => findRoute(api.getState().routes, name);
   const engineOf = name => { const r = routeFor(name); return r?.voice ? r.engine : 'none'; };

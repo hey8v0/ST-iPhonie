@@ -2,7 +2,8 @@
 // library has none of (缺的声音: upload one, or have ElevenLabs make it), and the library by name: each name can have
 // several versions (played in turn), an ambience a 底子 that loops and 点缀 now and then. Playing happens in the tavern
 // page (host-sounds.js); this app only keeps the library.
-import {createView, esc, btn, field, input, select, toggle, heading, groupTitle, plate, empty, size} from './common.js';
+import {createView, esc, btn, field, input, select, toggle, heading, groupTitle, plate, empty, size, help} from './common.js';
+import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {icon} from './icons.js';
 import {saveFile} from '../download.js';
 import {KIND_NAMES, LAYER_NAMES, SOUND_SOURCES, soundName} from '../core/sounds.js';
@@ -66,14 +67,29 @@ export function soundsApp(ctx) {
     const list = rows.filter(r => r.type === type && r.name === name);
     if (!list.length) return render();
     const own = list.filter(r => r.source !== 'pack');
+    const about = '这是自带的声音：剧情里写这个名字就会放。不喜欢哪个版本可以拿掉，也可以自己再加一个版本。\n\n'
+      + '氛围音的底子一直循环（雨声、海浪），点缀偶尔在左边或右边响一下（雷声、鸟叫）。轻重：剧情写了「名字|轻」或「名字|重」时，先挑对应的版本，没有就挑不分轻重的。\n\n'
+      + '点一个版本试听；左滑拿掉或删除；右滑多选。';
     const d = ctx.dialog(name, `${own.length ? `${field('名字', input('name', name, 'text', 'maxlength="20"'), '剧情里写的就是这个名字。改了以后，你自己的和 ElevenLabs 做的版本一起改名（自带的不变）。')}
-      <div class="actions">${btn('rename', '改名', 'secondary')}</div>` : '<p class="help-copy">这是自带的声音：剧情里写这个名字就会放。不喜欢哪个版本可以拿掉，也可以自己再加一个版本。</p>'}
-      ${groupTitle('版本', `<small>${list.length}</small>`)}
-      <div class="group">${list.map(r => `<div class="sound-version" data-id="${esc(r.id)}">
-        <div class="sound-version-head">${btn('listen', icon('play'), 'icon-button', `data-id="${esc(r.id)}" aria-label="试听"`)}<span><strong>${esc(SOUND_SOURCES[r.source])}${r.layer === 'dot' ? ' · 点缀' : ''}</strong><small>${r.seconds ? r.seconds + ' 秒 · ' : ''}${size(r.size)}${r.describe ? ' · ' + esc(r.describe) : ''}${r.credit ? ' · ' + esc(r.credit) : ''}</small></span>${btn('delete-version', icon('trash'), 'icon-button', `data-id="${esc(r.id)}" aria-label="${r.source === 'pack' ? '不用这个版本' : '删除这个版本'}"`)}</div>
-        ${r.source === 'pack' ? '' : `<div class="sound-version-fields">${select('kind', kindValue(r), KINDS, `data-id="${esc(r.id)}" aria-label="种类"`)}${select('strength', r.strength, STRENGTH_CHOICES, `data-id="${esc(r.id)}" aria-label="轻重"`)}</div>`}</div>`).join('')}</div>
-      <p class="hint">氛围音的底子一直循环（雨声、海浪），点缀偶尔在左边或右边响一下（雷声、鸟叫）。轻重：剧情写了 <code>名字|轻</code> 或 <code>名字|重</code> 时，先挑对应的版本，没有就挑不分轻重的。</p>
+      <div class="actions">${btn('rename', '改名', 'secondary')}</div>` : ''}
+      ${groupTitle('版本', `${help(about)}<small>${list.length}</small>`)}
+      <div class="group" data-version-list>${list.map(r => swipeRow(r.id, `<div class="sound-version" data-id="${esc(r.id)}">
+        <div class="sound-version-head"><span class="disc play" aria-hidden="true">${icon('play')}</span><span><strong>${esc(SOUND_SOURCES[r.source])}${r.layer === 'dot' ? ' · 点缀' : ''}</strong><small>${r.seconds ? r.seconds + ' 秒 · ' : ''}${size(r.size)}${r.describe ? ' · ' + esc(r.describe) : ''}${r.credit ? ' · ' + esc(r.credit) : ''}</small></span></div>
+        ${r.source === 'pack' ? '' : `<div class="sound-version-fields">${select('kind', kindValue(r), KINDS, `data-id="${esc(r.id)}" aria-label="种类"`)}${select('strength', r.strength, STRENGTH_CHOICES, `data-id="${esc(r.id)}" aria-label="轻重"`)}</div>`}</div>`,
+        [{key: 'delete', label: r.source === 'pack' ? '拿掉' : '删除', icon: 'trash', danger: true}], {label: SOUND_SOURCES[r.source]})).join('')}</div>
       <div class="actions"><label class="secondary file-button">${icon('add')}再加一个版本<input type="file" data-version-file multiple accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac,.opus,.webm" aria-label="选择声音文件"></label>${own.length ? btn('export-name', icon('download') + '导出', 'secondary') : ''}</div>`);
+    /** Versions taken out (自带 ones can come back from 自带音效包). */
+    const drop = async ids => {
+      const packOnly = ids.every(id => id.startsWith('pack:'));
+      if (!await ctx.confirm(ids.length > 1 ? `去掉这 ${ids.length} 个版本？` : packOnly ? '不用这个自带的版本？' : '删除这个版本？', packOnly ? '以后可以在「自带音效包」里找回。' : '')) return;
+      await api.deleteSounds(ids);
+      if (list.length <= ids.length) close(); else { d.close(); await render(); openName(type, name); }
+    };
+    const swipe = mountSwipeList(d.body.querySelector('[data-version-list]'), {ctx,
+      onTap: async id => { const on = await api.soundListen?.(id); if (on === undefined) ctx.notify('在酒馆里打开小手机才能试听'); },
+      onAction: (key, id) => { if (key === 'delete') drop([id]).catch(error => ctx.notify(error.message, {error: true})); },
+      bulk: [{key: 'delete', label: '去掉', icon: 'trash', danger: true}], onBulk: (key, ids) => drop(ids)});
+    d.onClose(() => swipe.dispose());
     const close = () => { d.close(); render(); };
     d.body.addEventListener('click', e => {
       const b = e.target.closest('[data-action]');
@@ -87,12 +103,6 @@ export function soundsApp(ctx) {
             for (const r of own) await api.updateSound(r.id, {name: next});
             ctx.notify(`改成了「${next}」`); close(); break;
           }
-          case 'listen': { const on = await api.soundListen?.(b.dataset.id); if (on === undefined) ctx.notify('在酒馆里打开小手机才能试听'); break; }
-          case 'delete-version':
-            if (!await ctx.confirm(b.dataset.id.startsWith('pack:') ? '不用这个自带的版本？' : '删除这个版本？', b.dataset.id.startsWith('pack:') ? '以后可以在「自带音效包」里找回。' : '')) return;
-            await api.deleteSounds([b.dataset.id]);
-            if (list.length <= 1) close(); else { d.close(); await render(); openName(type, name); }
-            break;
           case 'export-name': await download(own.map(r => r.id), name); break;
         }
       })().catch(error => ctx.notify(error.message, {error: true}));

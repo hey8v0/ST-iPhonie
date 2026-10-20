@@ -432,15 +432,14 @@ export function drawApp(ctx) {
    */
   function pickStyle() {
     const using = styleId(), all = () => state().styles;
-    const d = ctx.dialog('画风', `<div data-style-picker></div><div class="picker-manage pick-list">
-      <button type="button" class="list-row" data-action="new-style">${icon('add')}<span><strong>新建画风</strong></span></button></div>`);
+    const d = ctx.dialog('画风', '<div data-style-picker></div>', {add: '新建画风'});
     const actions = () => [{key: 'edit', label: '改', icon: 'edit'}, {key: 'copy', label: '复制', icon: 'copy'}, ...(all().length > 1 ? [{key: 'delete', label: '删除', icon: 'trash', danger: true}] : [])];
     const picker = d.body.querySelector('[data-style-picker]');
     pagedPicker(picker, {items: all(), selected: using, pageSize: 8, placeholder: '搜索画风、画师串…', text: x => x.name + ' ' + x.artist,
       render: x => swipeRow(x.id, `<div class="list-row style-row" aria-current="${x.id === using}">${icon(x.id === using ? 'check' : 'paint')}<span><strong>${esc(x.name)}</strong><small class="mono picker-preview">${esc(x.artist || '没有画师串')}</small></span></div>`, actions(), {label: x.name})});
     const list = picker.querySelector('[data-picker-items]');
     const again = () => { swipe.dispose(); d.close(); pickStyle(); };
-    const swipe = mountSwipeList(list, {ctx, hint: '左滑：改、复制、删除；右滑：多选', mouseHint: '右键或 ⋯：改、复制、删除；按住 Ctrl 点：多选',
+    const swipe = mountSwipeList(list, {ctx,
       onTap: id => { api.saveDraw({activeStyle: id}); d.close(); render(); },
       onAction: async (key, id) => {
         const target = all().find(x => x.id === id);
@@ -460,8 +459,8 @@ export function drawApp(ctx) {
         render(); again();
       }});
     d.onClose?.(() => swipe.dispose());
-    d.body.addEventListener('click', e => {
-      if (!e.target.closest('[data-action=new-style]')) return;
+    d.overlay.addEventListener('click', e => {
+      if (!e.target.closest('[data-sheet-add]')) return;
       try {
         const now = style(), created = api.saveStyle({name: '新画风 ' + (all().length + 1), artist: '', positive: now.positive, negative: now.negative});
         api.saveDraw({activeStyle: created.id});

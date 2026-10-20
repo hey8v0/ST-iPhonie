@@ -6,7 +6,8 @@ import {createView, esc, btn, help, menu, empty} from './common.js';
 import {saveFile} from '../download.js';
 import {allBrushes, userBrushes, saveUserBrushes, cleanBrush, BRUSHES, FIELDS, tipMask, coloredTip} from './paint/brushes.js';
 import {importBrushFile} from './paint/brush-import.js';
-import {createPicture, undo, redo, flatten, stampOf, taperAt, layerInfo, floodFill, lassoFill, setSelection, invertSelection, clearSelected, copySelected, startTransform, commitTransform, cancelTransform} from './paint/engine.js';
+import {createPicture, undo, redo, flatten, stampOf, taperAt, layerInfo, floodFill, lassoFill, setSelection, invertSelection, clearSelected, copySelected, startTransform, commitTransform, cancelTransform, beginAdjust, showAdjust, endAdjust} from './paint/engine.js';
+import {adjusted} from './paint/adjust.js';
 import {layersPanel} from './paint/layers-panel.js';
 import {createStage} from './paint/stage.js';
 import {paintStore} from './paint/store.js';
@@ -33,6 +34,9 @@ const toSlider = px => Math.round(Math.sqrt((px - 1) / 399) * 1000);
 const fromSlider = v => Math.max(1, Math.round(1 + 399 * (v / 1000) ** 2));
 // A phone in the tavern is the whole screen already; 全屏 is for the floating phone on a computer or a tablet.
 const PHONE_SCREEN = '(pointer: coarse) and (max-width: 540px), (max-width: 360px)';
+
+/** 对称辅助's choices: [kind, name, note]. */
+const SYMMETRY = [['', '关闭', '只画一处'], ['v', '左右对称', '沿竖直的中线对称'], ['h', '上下对称', '沿水平的中线对称'], ['quad', '四向对称', '左右和上下一起'], ['radial', '径向对称', '绕中心转六份，像万花筒']];
 
 export function paintApp(ctx) {
   const v = createView(ctx, 'paint'), store = paintStore(ctx.win), keys = new ctx.win.AbortController();
@@ -391,11 +395,53 @@ export function paintApp(ctx) {
     popover(v.root.querySelector('[data-action=paint-layers]'));
   }
 
+  // ---------- 调整 ----------
+  /** The layer in use, its colours and blur changed with sliders and seen on the picture as they move; 应用 keeps it (undoable). */
+  function adjustSheet() {
+    const a = beginAdjust(pic);
+    if (!a) { ctx.notify(pic.float ? '先放下正在变形的东西' : '这个图层锁定了'); return; }
+    const values = {hue: 0, saturation: 100, brightness: 100, blur: 0};
+    const rows = [['hue', '色相', -180, 180, '°'], ['saturation', '饱和度', 0, 200, '%'], ['brightness', '亮度', 0, 200, '%'], ['blur', '模糊', 0, 40, 'px']];
+    // Small, so the picture above it shows what the sliders do.
+    const d = ctx.dialog('调整 · 当前图层', `<div class="adjust-panel">${rows.map(([k, label, min, max, unit]) => `<label class="adjust-row"><span>${label}</span><input class="slider" type="range" min="${min}" max="${max}" step="1" value="${values[k]}" data-adjust="${k}" aria-label="${label}"><output data-adjust-out="${k}">${values[k]}${unit}</output></label>`).join('')}</div>
+      <div class="actions adjust-actions">${btn('adjust-reset', '复原', 'secondary')}${btn('adjust-apply', '应用', 'primary')}</div>`);
+    let kept = false, frame = 0;
+    const show = () => { frame = 0; showAdjust(pic, a, adjusted(ctx.doc, a.copy, {hue: values.hue, saturation: values.saturation / 100, brightness: values.brightness / 100, blur: values.blur})); stage.render(); };
+    d.body.addEventListener('input', e => {
+      const k = e.target.dataset.adjust;
+      if (!k) return;
+      values[k] = Number(e.target.value);
+      d.body.querySelector(`[data-adjust-out="${k}"]`).textContent = values[k] + rows.find(r => r[0] === k)[4];
+      if (!frame) frame = ctx.win.requestAnimationFrame(show);
+    });
+    d.body.addEventListener('click', e => {
+      if (e.target.closest('[data-action=adjust-reset]')) {
+        Object.assign(values, {hue: 0, saturation: 100, brightness: 100, blur: 0});
+        for (const el of d.body.querySelectorAll('[data-adjust]')) { el.value = values[el.dataset.adjust]; d.body.querySelector(`[data-adjust-out="${el.dataset.adjust}"]`).textContent = values[el.dataset.adjust] + rows.find(r => r[0] === el.dataset.adjust)[4]; }
+        show();
+      }
+      if (e.target.closest('[data-action=adjust-apply]')) { if (frame) { ctx.win.cancelAnimationFrame(frame); show(); } kept = endAdjust(pic, a, true); d.close(); stage.render(); syncSide(); saveSoon(); ctx.notify('调整好了，可以撤销'); }
+    });
+    d.onClose(() => { if (frame) ctx.win.cancelAnimationFrame(frame); if (!kept) { endAdjust(pic, a, false); stage.render(); } });
+  }
+  // ---------- 对称辅助 ----------
+  async function symmetryMenu() {
+    const now = pic.symmetry?.kind || '';
+    const picked = await menu(ctx, '对称辅助', SYMMETRY.map(([k, label, note]) => ({key: k || 'off', icon: k === now ? 'check' : 'swap', label, note})));
+    if (picked == null) return;
+    const kind = picked === 'off' ? '' : picked;
+    pic.symmetry = kind ? {kind, n: 6} : null;
+    stage.render();
+    if (kind) ctx.notify(`${SYMMETRY.find(([k]) => k === kind)[1]}：虚线是对称轴`);
+  }
+
   async function actions() {
     const asked = menu(ctx, work?.name || '作品', [
       {key: 'select', icon: 'eye', label: tools.kind === 'select' ? '退出选区' : '选区', note: '框选或手绘一块，之后只在里面画'},
       {key: 'transform', icon: 'swap', label: tools.kind === 'transform' ? '放下（完成变形）' : '变形', note: '移动、缩放、旋转、翻转选区里的东西或整个图层'},
       canFull() && {key: 'full', icon: 'float', label: full ? '退出全屏' : '全屏', note: full ? '回到小手机里' : '画布铺满整个窗口'},
+      {key: 'adjust', icon: 'sliders', label: '调整', note: '当前图层的色相、饱和度、亮度和模糊'},
+      {key: 'symmetry', icon: 'swap', label: '对称辅助', note: SYMMETRY.find(([k]) => k === (pic.symmetry?.kind || ''))[1] + '：画一笔，对称的地方也画上'},
       {key: 'album', icon: 'image', label: '存到相册', note: '把所有图层合成一张放进相册'},
       {key: 'download', icon: 'download', label: '下载 PNG'},
       {key: 'fit', icon: 'next', label: '适应屏幕', note: '回到整张画都看得见的样子'},
@@ -409,6 +455,8 @@ export function paintApp(ctx) {
       if (a === 'full') setFull(!full);
       if (a === 'album') await toAlbum(pic, work.name);
       if (a === 'download') { const blob = await blobOf(flatten(pic)); if (blob) ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, work.name)); }
+      if (a === 'adjust') adjustSheet();
+      if (a === 'symmetry') await symmetryMenu();
       if (a === 'fit') stage.fit();
       if (a === 'flip') { stage.flip(); ctx.notify(stage.flipped ? '画面左右翻转了（画本身没变）' : '翻转回来了'); }
       if (a === 'rename') {
@@ -482,6 +530,8 @@ export function paintApp(ctx) {
     const t = current(), x = Math.min(1, Math.max(0, f));
     if (kind === 'size') t.size = fromSlider(Math.round(x * 1000)); else t.opacity = Math.max(.01, Math.round(x * 100) / 100);
     syncSide();
+    // The brush's real size and strength, shown on the picture while it changes.
+    stage?.preview({size: t.size, opacity: t.opacity * (brushOf(t.id)?.opacity ?? 1), color: tools.kind === 'eraser' ? '#ffffff' : tools.color});
   };
   const sliderAt = kind => kind === 'size' ? toSlider(current().size) / 1000 : current().opacity;
   let sliding = null;

@@ -1,4 +1,5 @@
 import {createView, esc, engines, btn, field, input, select, textArea, heading, help, groupTitle, plate, avatar, languageField, languageName, typedLanguages, toggle} from './common.js';
+import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {VOICE_GENDERS, VOICE_AGES, poolLine, readPoolFile, poolFile, guessVoice} from '../core/auto-voice.js';
 import {saveFile} from '../download.js';
 import {icon, halo} from './icons.js';
@@ -130,13 +131,43 @@ export function rolesApp(ctx) {
     });
   }
   function poolSheet() {
+    // Each voice: a tap edits it; swiped left 改 / 删除; swiped right picked, to export or delete several.
     const draw = () => { const pool = favorites(); return pool.length
-      ? `<div class="group">${pool.map((v, i) => `<button class="list-row" data-engine="${v.engine}" data-action="pool-edit" data-index="${i}"><span style="flex:none">${plate(engines[v.engine])}</span><span style="flex:1;min-width:0"><strong>${esc(v.name)}</strong><small>${esc(poolLine({...v, name: ''}) || '没有备注')}</small><small class="mono">${esc(v.voice)}</small></span>${icon('next')}</button>`).join('')}</div>`
-      : '<p class="hint">还没有音色。在角色页「从列表选」里点 ♡ 收藏，或点上面的「添加音色」填音色 ID。</p>'; };
-    const d = ctx.dialog('音色收藏夹', `<div class="actions">${btn('pool-manual', icon('add') + '添加音色', 'secondary')}<label class="secondary file-button">${icon('import')}导入<input type="file" data-pool-file accept=".json,application/json" aria-label="选择音色收藏文件"></label>${btn('pool-export', icon('download') + '导出', 'secondary')}</div>
-      <div class="row-heading fav-heading"><span>收藏的音色 ${help('收藏用得上的音色，名字和备注随便写。角色页填音色时点「从收藏夹选」；自动挑音色也先从这里挑（标了性别和年龄的更容易挑中）。\n\n可以导入别人分享的音色文件（ST-iPhonie 导出的，或 FishDialogue 的音色库 JSON）。文件里没写男女和年龄的，按名字和描述猜（少女、大叔、妈妈……），猜不出就留空。')}</span></div>
-      <div data-pool>${draw()}</div>`);
-    const redraw = () => { if (!d.live) return; d.body.querySelector('[data-pool]').innerHTML = draw(); if (!current) render(); };
+      ? `<div class="group" data-pool-list>${pool.map((v, i) => swipeRow(String(i), `<div class="list-row" data-engine="${v.engine}"><span style="flex:none">${plate(engines[v.engine])}</span><span style="flex:1;min-width:0"><strong>${esc(v.name)}</strong><small>${esc(poolLine({...v, name: ''}) || '没有备注')}</small><small class="mono">${esc(v.voice)}</small></span>${icon('next')}</div>`,
+        [{key: 'edit', label: '改', icon: 'edit'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}], {label: v.name})).join('')}</div>`
+      : '<p class="hint">还没有音色。在角色页「从列表选」里点 ♡ 收藏，或点右上角的「＋」填音色 ID。</p>'; };
+    const d = ctx.dialog('音色收藏夹', `<div class="row-heading fav-heading"><span>收藏的音色 ${help('收藏用得上的音色，名字和备注随便写。角色页填音色时点「从收藏夹选」；自动挑音色也先从这里挑（标了性别和年龄的更容易挑中）。\n\n可以导入别人分享的音色文件（ST-iPhonie 导出的，或 FishDialogue 的音色库 JSON）。文件里没写男女和年龄的，按名字和描述猜（少女、大叔、妈妈……），猜不出就留空。')}</span><span class="fav-tools"><label class="chip-button file-button">${icon('import')}导入<input type="file" data-pool-file accept=".json,application/json" aria-label="选择音色收藏文件"></label>${btn('pool-export', icon('download') + '导出', 'chip-button')}</span></div>
+      <div data-pool>${draw()}</div>`, {add: '添加音色'});
+    let swipe = null;
+    const exportVoices = pool => {
+      if (!pool.length) { ctx.notify('收藏夹还是空的'); return Promise.resolve(); }
+      return saveFile(ctx.doc, new Blob([poolFile(pool)], {type: 'application/json'}), '音色收藏夹.json').then(name => ctx.notify('已下载 ' + name));
+    };
+    const dropVoices = async indexes => {
+      if (!await ctx.confirm(indexes.length > 1 ? `删除这 ${indexes.length} 个音色？` : '删除这个音色？', '只是从收藏夹拿掉，用着它的角色不受影响。')) return;
+      const gone = new Set(indexes);
+      api.saveVoicePool((api.getState().voicePool || []).filter((_, i) => !gone.has(i)));
+      if (!current) render();
+      poolSheet();
+    };
+    const mount = () => {
+      swipe?.dispose(); swipe = null;
+      const list = d.body.querySelector('[data-pool-list]');
+      if (!list) return;
+      swipe = mountSwipeList(list, {ctx,
+        onTap: id => { const index = Number(id); favoriteForm(favorites()[index], {index, done: () => { if (!current) render(); poolSheet(); }}); },
+        onAction: (key, id) => {
+          const index = Number(id);
+          if (key === 'edit') favoriteForm(favorites()[index], {index, done: () => { if (!current) render(); poolSheet(); }});
+          else if (key === 'delete') dropVoices([index]).catch(error => ctx.notify(error.message, {error: true}));
+        },
+        bulk: [{key: 'export', label: '导出', icon: 'download'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}],
+        onBulk: (key, ids) => { const indexes = ids.map(Number); return key === 'export' ? exportVoices(indexes.map(i => (api.getState().voicePool || [])[i]).filter(Boolean)) : dropVoices(indexes); }});
+    };
+    mount();
+    d.onClose(() => swipe?.dispose());
+    d.overlay.addEventListener('click', e => { if (e.target.closest('[data-sheet-add]')) favoriteForm({engine: current?.engine || 'fish', voice: ''}, {done: () => { if (!current) render(); poolSheet(); }}); });
+    const redraw = () => { if (!d.live) return; d.body.querySelector('[data-pool]').innerHTML = draw(); mount(); if (!current) render(); };
     // A pool file adds its voices (those already in the pool stay as they are).
     d.body.addEventListener('change', e => {
       if (!e.target.matches('[data-pool-file]')) return;
@@ -154,18 +185,8 @@ export function rolesApp(ctx) {
     d.body.addEventListener('click', e => {
       if (e.target.closest('[data-action=pool-export]')) {
         e.preventDefault();
-        const pool = api.getState().voicePool || [];
-        if (!pool.length) { ctx.notify('收藏夹还是空的'); return; }
-        saveFile(ctx.doc, new Blob([poolFile(pool)], {type: 'application/json'}), '音色收藏夹.json').then(name => ctx.notify('已下载 ' + name)).catch(error => ctx.notify(error.message, {error: true}));
-        return;
+        exportVoices(api.getState().voicePool || []).catch(error => ctx.notify(error.message, {error: true}));
       }
-      // The form replaces this sheet (one sheet at a time); the 收藏夹 comes back after it.
-      const back = () => { if (!current) render(); poolSheet(); };
-      if (e.target.closest('[data-action=pool-manual]')) { favoriteForm({engine: current?.engine || 'fish', voice: ''}, {done: back}); return; }
-      const b = e.target.closest('[data-action=pool-edit]');
-      if (!b) return;
-      const index = Number(b.dataset.index);
-      favoriteForm(favorites()[index], {index, done: back});
     });
   }
 

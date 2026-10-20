@@ -20,6 +20,9 @@ export function pagedPicker(root, {items, render, text = x => x.name || '', id =
     page = Math.max(0, Math.min(total - 1, page));
     list.innerHTML = rows.slice(page * pageSize, (page + 1) * pageSize).map(render).join('') || '<p class="hint">没有匹配项</p>';
     count.textContent = `${page + 1} / ${total} · ${rows.length}`;
+    // One page needs no turning; a short list needs no search.
+    root.querySelector('.picker-pages').hidden = total <= 1;
+    root.querySelector('.picker-search').hidden = items.length <= 6;
     root.querySelector('[data-picker-step="-1"]').disabled = page === 0;
     root.querySelector('[data-picker-step="1"]').disabled = page === total - 1;
   }

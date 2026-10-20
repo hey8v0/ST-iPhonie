@@ -2,6 +2,7 @@ import {createView, esc, engines, btn, field, input, select, textArea, toggle, h
 
 const TIERS = {0: '未订阅', 1: 'Tablet', 2: 'Scroll', 3: 'Opus'};
 import {icon, spark} from './icons.js';
+import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {fly} from './carry.js';
 import {CUSTOM_TEMPLATES, voicesFromFolder, shortLanguage, customHint} from '../core/custom-voice.js';
 
@@ -144,23 +145,26 @@ export function enginesApp(ctx) {
     ctx.notify(note); later(imageSaved);
   }
   const later = fn => ctx.win.setTimeout(() => { if (!v.disposed) fn(); }, 0);
-  /** 新建 / 切换 / 改名 / 删除 the image engine's saved connections. */
-  async function imageConnectionMenu() {
-    const list = api.imageConnectionList(engine), current = list.find(p => p.current);
-    const picked = await menu(ctx, '连接', [
-      ...list.map(p => ({key: 'use:' + p.id, icon: p.current ? 'check' : 'next', label: p.name, note: (p.url || (engine === 'nai' ? '直连 NovelAI' : '直连 OpenAI')) + ' · ' + (p.configured ? '•••• ' + (p.tail || '已存') : '未填密钥')})),
-      {key: 'new', icon: 'add', label: '新建一组连接', note: '换一个中转或账号时用；新的一组密钥是空的'},
-      {key: 'rename', icon: 'edit', label: `给「${current.name}」改名`},
-      list.length > 1 && {key: 'delete', icon: 'trash', label: `删除「${current.name}」`, danger: true}]);
-    if (!picked) return;
-    if (picked.startsWith('use:')) { if (picked.slice(4) !== current.id) { api.selectImageConnection(engine, picked.slice(4)); imageSaved(); ctx.notify('已切换生图连接'); } return; }
-    if (picked === 'new') { api.saveImageConnection(engine); imageSaved(); ctx.notify('已新建连接，请填写地址和密钥'); return; }
-    if (picked === 'rename') {
-      const d = ctx.dialog('改名', `${field('连接名称', input('image-name', current.name, 'text', 'maxlength="60"'))}<div class="actions">${btn('image-rename', '保存', 'primary')}</div>`);
-      d.body.addEventListener('click', e => { if (!e.target.closest('[data-action=image-rename]')) return; const name = d.body.querySelector('[data-field=image-name]').value; try { api.saveImageConnection(engine, {id: current.id, name}); d.close(); imageSaved(); } catch (error) { ctx.notify(error.message, {error: true}); } });
-      return;
-    }
-    if (picked === 'delete' && await ctx.confirm('删除这组连接？', `「${current.name}」的地址和密钥会一起删掉，其他组保留。`)) { api.deleteImageConnection(engine, current.id); imageSaved(); ctx.notify('已删除这组连接'); }
+  /** The image engine's saved connections: a tap uses one; swiped left 改名 / 删除; 「＋」 makes a new one. */
+  function imageConnectionMenu() {
+    const list = api.imageConnectionList(engine);
+    const d = ctx.dialog('连接', `<div class="pick-list" data-conn-list>${list.map(p => swipeRow(p.id, `<div class="list-row">${icon(p.current ? 'check' : 'next')}<span><strong>${esc(p.name)}</strong><small>${esc((p.url || (engine === 'nai' ? '直连 NovelAI' : '直连 OpenAI')) + ' · ' + (p.configured ? '•••• ' + (p.tail || '已存') : '未填密钥'))}</small></span></div>`,
+      [{key: 'rename', label: '改名', icon: 'edit'}, ...(list.length > 1 ? [{key: 'delete', label: '删除', icon: 'trash', danger: true}] : [])], {label: p.name})).join('')}</div>`, {add: '新建一组连接'});
+    const swipe = mountSwipeList(d.body.querySelector('[data-conn-list]'), {ctx,
+      onTap: id => { d.close(); if (id !== list.find(p => p.current)?.id) { api.selectImageConnection(engine, id); imageSaved(); ctx.notify('已切换生图连接'); } },
+      onAction: async (key, id) => {
+        const p = list.find(x => x.id === id);
+        if (!p) return;
+        if (key === 'rename') {
+          d.close();
+          const r = ctx.dialog('改名', `${field('连接名称', input('image-name', p.name, 'text', 'maxlength="60"'))}<div class="actions">${btn('image-rename', '保存', 'primary')}</div>`);
+          r.body.addEventListener('click', e => { if (!e.target.closest('[data-action=image-rename]')) return; const name = r.body.querySelector('[data-field=image-name]').value; try { api.saveImageConnection(engine, {id: p.id, name}); r.close(); imageSaved(); } catch (error) { ctx.notify(error.message, {error: true}); } });
+          return;
+        }
+        if (key === 'delete') { d.close(); if (await ctx.confirm('删除这组连接？', `「${p.name}」的地址和密钥会一起删掉，其他组保留。`)) { api.deleteImageConnection(engine, p.id); imageSaved(); ctx.notify('已删除这组连接'); } }
+      }});
+    d.onClose(() => swipe.dispose());
+    d.overlay.addEventListener('click', e => { if (!e.target.closest('[data-sheet-add]')) return; d.close(); api.saveImageConnection(engine); imageSaved(); ctx.notify('已新建连接，请填写地址和密钥'); });
   }
 
   function renderNovelAI() {

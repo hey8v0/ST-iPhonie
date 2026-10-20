@@ -1,4 +1,5 @@
 import {createView, esc, btn, heading, field, select, toggle, copyText, menu} from './common.js';
+import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {openImageViewer} from '../image-viewer.js';
 import {downloadAction, shareAction} from '../download.js';
 import {ASSISTANT_FILE_ACCEPT} from '../assistant-files.js';
@@ -512,6 +513,16 @@ export function assistantApp(ctx) {
     const next = v.root.querySelector('.assistant-messages'); if (bottom) next.scrollTop = next.scrollHeight;
     if (focused) { const box = v.root.querySelector('[data-assistant-draft]'); box.focus({preventScroll: true}); box.setSelectionRange(...selection); }
   }
+  /** Conversations deleted (one, or several picked in 会话记录), with their messages. */
+  async function dropThreads(ids) {
+    if (!await ctx.confirm(ids.length > 1 ? `删除这 ${ids.length} 个助手会话？` : '删除这个助手会话？', '会话里的消息会一并删除。')) return;
+    for (const id of ids) {
+      api.assistantCancel?.(id); await api.deleteAssistantThread(id); saveDraft('', id); fileDrafts.delete(id); errors.delete(id);
+      if (id === threadId) { threadId = null; thread = null; }
+    }
+    return render();
+  }
+  let threadSwipe = null;
   async function render() {
     if (v.disposed) return;
     const ticket = ++epoch, id = threadId, currentMode = mode;
@@ -520,7 +531,16 @@ export function assistantApp(ctx) {
       const rows = await api.assistantThreads();
       if (v.disposed || ticket !== epoch || currentMode !== mode) return;
       v.root.classList.remove('assistant-chat-mode');
-      v.draw(heading('会话记录', btn('new', icon('add'), 'round-button', 'aria-label="新建会话"'), 'Assistant') + `<div class="group">${rows.length ? rows.map(r => `<div class="assistant-thread-row">${renameId === r.id ? `<div class="assistant-rename"><input data-thread-title value="${esc(r.title)}" maxlength="80" aria-label="会话名字">${btn('save-title', '保存', 'text-button', `data-id="${esc(r.id)}"`)}${btn('cancel-title', '取消', 'text-button')}</div>` : `<button data-action="thread" data-id="${esc(r.id)}"><strong>${esc(r.title || '新会话')}</strong><small>${esc(r.preview || `${r.messageCount || 0} 条消息`)}</small></button>${btn('rename-thread', icon('edit'), 'icon-button', `data-id="${esc(r.id)}" aria-label="修改会话名字"`)}`}${btn('delete-thread', icon('trash'), 'icon-button', `data-id="${esc(r.id)}" aria-label="删除会话 ${esc(r.title || '新会话')}"`)}</div>`).join('') : '<p class="hint">还没有会话。和助手说第一句话吧。</p>'}</div>`);
+      const titled = r => r.title || '新会话';
+      v.draw(heading('会话记录', btn('new', icon('add'), 'round-button', 'aria-label="新建会话"'), 'Assistant') + `<div class="group" data-thread-list>${rows.length ? rows.map(r => renameId === r.id
+        ? `<div class="assistant-thread-row"><div class="assistant-rename"><input data-thread-title value="${esc(r.title)}" maxlength="80" aria-label="会话名字">${btn('save-title', '保存', 'text-button', `data-id="${esc(r.id)}"`)}${btn('cancel-title', '取消', 'text-button')}</div></div>`
+        : swipeRow(r.id, `<div class="assistant-thread-row"><button data-action="thread" data-id="${esc(r.id)}"><strong>${esc(titled(r))}</strong><small>${esc(r.preview || `${r.messageCount || 0} 条消息`)}</small></button></div>`,
+          [{key: 'rename', label: '改名', icon: 'edit'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}], {label: titled(r)})).join('') : '<p class="hint">还没有会话。和助手说第一句话吧。</p>'}</div>`);
+      threadSwipe?.dispose();
+      const list = v.root.querySelector('[data-thread-list]');
+      threadSwipe = rows.length ? mountSwipeList(list, {ctx,
+        onAction: (key, id) => { if (key === 'rename') { renameId = id; render(); } else if (key === 'delete') dropThreads([id]).catch(error => ctx.notify(error.message, {error: true})); },
+        bulk: [{key: 'delete', label: '删除', icon: 'trash', danger: true}], onBulk: (key, ids) => dropThreads(ids)}) : null;
       return;
     }
     const row = id ? await api.assistantThread(id) : null;
@@ -735,12 +755,7 @@ export function assistantApp(ctx) {
       case 'threads': closePreviews(); mode = 'threads'; return render();
       case 'thread': closePreviews(); selectionEpoch++; threadId = el.dataset.id; thread = null; mode = 'chat'; return render();
       case 'new': closePreviews(); selectionEpoch++; threadId = null; thread = null; mode = 'chat'; return render();
-      case 'delete-thread': {
-        const id = el.dataset.id;
-        if (!await ctx.confirm('删除这个助手会话？', '会话里的消息会一并删除。')) return;
-        api.assistantCancel?.(id); await api.deleteAssistantThread(id); saveDraft('', id); fileDrafts.delete(id); errors.delete(id);
-        if (id === threadId) { threadId = null; thread = null; } return render();
-      }
+      case 'delete-thread': return dropThreads([el.dataset.id]);
       case 'new-preset':
       case 'copy-preset': {
         if (!settings || settings.source !== 'builtin') return;
