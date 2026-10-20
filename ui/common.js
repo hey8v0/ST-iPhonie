@@ -59,13 +59,49 @@ export const avatar = (name, engine = 'none', size = 48, key = name) => {
   return `<span class="avatar${engine === 'none' ? ' none' : ''}${picture ? ' pic' : ''}" data-engine="${engine}" style="--s:${size}px">${picture ? `<img src="${esc(picture)}" alt="" loading="lazy" decoding="async" draggable="false">` : letter}</span>`;
 };
 
+/** Rows that keep who they are when a page is drawn again: they glide to their new places (FLIP), new ones fade in. */
+const KEYED = '.sw-row[data-swipe],.conv[data-thread],.list-row[data-id],.list-row[data-name],.moment[data-id],.forum-card[data-id],[data-flip]';
+const keyOf = el => el.dataset.swipe || el.dataset.thread || el.dataset.flip || (el.dataset.id ? el.className.split(' ')[0] + ':' + el.dataset.id : 'name:' + el.dataset.name);
+const titleOf = root => root.querySelector('.page-heading h1')?.textContent || '';
+/** A tap on something that goes back (the phone's back, a 返回 of the app's own) makes the next page come from the left. */
+const BACKWARD = '[data-action$=back],[data-action^=back],[aria-label^="返回"],.nav-back';
+
 export function createView(ctx, name) {
   const root = ctx.doc.createElement('section');
   root.className = 'view';
   root.dataset.app = name;
   const controller = new ctx.win.AbortController();
   const failed = error => { try { ctx.api.reportDiagnostic?.('应用 · ' + name, error); } catch {} ctx.notify(error.message, {error: true}); };
-  let disposed = false;
+  let disposed = false, backAt = 0;
+  // ---------- motion between drawings of the page ----------
+  const motionOn = () => typeof root.animate === 'function' && !ctx.win.matchMedia?.('(prefers-reduced-motion: reduce)').matches && root.isConnected;
+  root.addEventListener('click', e => { if (e.target.closest?.(BACKWARD)) backAt = Date.now(); }, {capture: true, signal: controller.signal});
+  function measure() {
+    const rows = new Map();
+    for (const el of root.querySelectorAll(KEYED)) { const k = keyOf(el); if (!rows.has(k)) rows.set(k, el.getBoundingClientRect()); if (rows.size > 80) break; }
+    return rows;
+  }
+  /** Another page (its title changed): it slides in, from the left when going back. The same page: rows glide. */
+  function settleMotion(before, title) {
+    const now = titleOf(root), screen = root.closest('.screen'), phoneBack = Number(screen?.dataset.navBack || 0);
+    if (title && now && title !== now) {
+      const dir = Date.now() - Math.max(backAt, phoneBack) < 600 ? -1 : 1;
+      root.animate([{transform: `translateX(${dir * 34}px)`, opacity: .35}, {transform: 'none', opacity: 1}], {duration: 340, easing: 'cubic-bezier(.2,.9,.25,1)'});
+      return;
+    }
+    // The first drawing of an app comes in with its own entrance.
+    if (!title) return;
+    let moved = 0;
+    const fresh = [];
+    for (const el of root.querySelectorAll(KEYED)) {
+      const was = before.get(keyOf(el));
+      if (!was) { fresh.push(el); continue; }
+      const box = el.getBoundingClientRect(), dy = was.top - box.top;
+      if (Math.abs(dy) > 1 && moved++ < 60) el.animate([{transform: `translateY(${dy}px)`}, {transform: 'none'}], {duration: 420, easing: 'cubic-bezier(.2,1.15,.3,1)'});
+    }
+    // Rows that came (a new message, a song added): only a few, not a whole new list.
+    if (fresh.length && fresh.length <= 6) fresh.forEach((el, i) => el.animate([{opacity: 0, transform: 'translateY(10px) scale(.98)'}, {opacity: 1, transform: 'none'}], {duration: 320, delay: i * 40, easing: 'cubic-bezier(.2,.9,.25,1)', fill: 'backwards'}));
+  }
   const view = {
     root,
     back: null,
@@ -80,7 +116,9 @@ export function createView(ctx, name) {
       const focus = active?.dataset.field ? `[data-field="${active.dataset.field}"]` : active?.dataset.param ? `[data-param="${active.dataset.param}"]` : '';
       const opened = [...root.querySelectorAll('details[open]')].map(el => el.dataset.group);
       const inner = new Map([...root.querySelectorAll('[data-keep-scroll]')].map(el => [el.dataset.keepScroll, el.scrollTop]));
+      const before = motionOn() ? measure() : null, title = before ? titleOf(root) : '';
       root.innerHTML = html;
+      if (before) settleMotion(before, title);
       for (const el of root.querySelectorAll('details')) if (opened.includes(el.dataset.group)) el.open = true;
       for (const el of root.querySelectorAll('[data-keep-scroll]')) if (inner.has(el.dataset.keepScroll)) el.scrollTop = inner.get(el.dataset.keepScroll);
       root.scrollTop = y;

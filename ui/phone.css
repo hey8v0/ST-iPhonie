@@ -343,12 +343,17 @@ details>div{padding-bottom:10px}
 .file-button input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
 
 /* ---------- Sheets, toast, lock ---------- */
-.overlay{position:absolute;inset:0;z-index:60;display:flex;align-items:flex-end;padding:10px 10px 22px;background:rgba(10,20,40,.36);animation:fade .2s}
+.overlay,.overlay-out{position:absolute;inset:0;z-index:60;display:flex;align-items:flex-end;padding:10px 10px 22px;background:rgba(10,20,40,.36);animation:fade .2s}
+.overlay-out,.overlay-out .sheet{animation:none;pointer-events:none}
 .overlay.top{align-items:flex-start;padding-top:52px;background:rgba(20,40,80,.3);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
 @keyframes fade{from{opacity:0}}
 .sheet{width:100%;max-height:84%;display:flex;flex-direction:column;background:var(--bg);border-radius:28px;box-shadow:0 10px 40px rgba(0,0,0,.25);animation:sheet-in .32s var(--spring-soft)}
 .overlay.top .sheet{animation-name:sheet-drop;background:transparent;box-shadow:none}
 @keyframes sheet-in{from{opacity:.3;transform:translateY(30px)}}
+/* The grabber: a bottom sheet is pulled down by its top to close (phone.js dragToClose). */
+.overlay:not(.top):not(.pop) .sheet::before,.overlay-out .sheet::before{content:"";flex:none;align-self:center;width:38px;height:5px;margin:8px 0 -8px;border-radius:3px;background:var(--line)}
+.overlay:not(.top):not(.pop) .sheet-header{touch-action:none;cursor:grab}
+.overlay:not(.top):not(.pop) .sheet-header:active{cursor:grabbing}
 @keyframes sheet-drop{from{opacity:.3;transform:translateY(-30px)}}
 .sheet-header{padding:14px 12px 6px 20px;display:flex;align-items:center;justify-content:space-between}
 .sheet-header h2{font-size:19px;font-weight:900}
@@ -944,7 +949,7 @@ details>div{padding-bottom:10px}
 .screen[data-home-in] .home-page .app-icon:nth-child(n+7){animation-delay:.18s}
 .screen[data-home-in] .widget{animation:rise-in .34s var(--spring-soft) both}
 .screen[data-home-in] .widget+.widget{animation-delay:.06s}
-.view[data-switching] .qq-page{animation:blur-in .34s cubic-bezier(.2,.8,.2,1)}
+.view[data-switching] .qq-page{animation:rise-in .34s cubic-bezier(.2,.8,.2,1)}
 /* Presses: sink a little, spring back past rest */
 .list-row,.conv,.widget,.control-tile,.deco,.qq-card,.role-card,.chat-bubble,.voice-msg,.call-msg,.moment-actions button{transition:transform .38s cubic-bezier(.3,1.7,.45,1)}
 .list-row:active,.conv:active,.deco:active,.control-tile:active,.voice-msg:active,.call-msg:active{transform:scale(.97);transition-duration:.08s}
@@ -1058,6 +1063,13 @@ html{color-scheme:light dark!important;background:transparent}
 
 /* 朋友圈 */
 .moments-busy{margin:4px 0 10px;padding:10px 14px;border-radius:14px;background:var(--accent-soft);color:var(--accent-ink);font-size:13px;font-weight:700}
+/* While the model writes: a card's outline with light passing over it, where the new posts will come. */
+.moments-busy{position:relative;margin-bottom:142px}
+.moments-busy::after{content:"";position:absolute;left:0;right:0;top:calc(100% + 10px);height:124px;border-radius:20px;box-shadow:var(--shadow);
+  background:radial-gradient(circle 19px at 35px 35px,var(--line) 96%,transparent),linear-gradient(var(--line),var(--line)) 66px 22px/38% 11px no-repeat,linear-gradient(var(--line),var(--line)) 66px 42px/22% 9px no-repeat,linear-gradient(var(--line),var(--line)) 16px 74px/calc(100% - 32px) 10px no-repeat,linear-gradient(var(--line),var(--line)) 16px 96px/58% 10px no-repeat,var(--card)}
+.moments-busy::before{content:"";position:absolute;z-index:1;left:0;right:0;top:calc(100% + 10px);height:124px;border-radius:20px;pointer-events:none;background:linear-gradient(105deg,transparent 30%,var(--shimmer,rgba(255,255,255,.6)) 50%,transparent 70%) 0 0/250% 100% no-repeat;animation:skeleton 1.4s ease-in-out infinite}
+:root[data-theme=dark] .moments-busy::before{--shimmer:rgba(255,255,255,.09)}
+@keyframes skeleton{from{background-position:130% 0}to{background-position:-30% 0}}
 .moments-feed{display:flex;flex-direction:column;gap:2px;margin:4px 0 16px;padding:4px 14px;border-radius:20px;background:var(--card);box-shadow:var(--shadow)}
 .moment{display:flex;gap:10px;padding:14px 0}
 .moment+.moment{border-top:1px solid var(--line)}
@@ -1192,7 +1204,7 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .call-screen{position:absolute;inset:0;z-index:70;display:flex;flex-direction:column;align-items:center;padding:74px 18px calc(env(safe-area-inset-bottom,0px) + 34px);color:var(--ink);overflow:hidden;animation:call-in .38s cubic-bezier(.2,.9,.3,1.05)}
 .call-screen[hidden]{display:none}
 .call-screen[data-carried]{animation:none}
-@keyframes call-in{from{opacity:0;transform:scale(1.04);filter:blur(6px)}}
+@keyframes call-in{from{opacity:0;transform:scale(1.04)}}
 .call-bg{position:absolute;inset:0;z-index:-1;overflow:hidden;background:radial-gradient(90% 55% at 50% 18%,color-mix(in srgb,var(--accent) 42%,transparent),transparent 70%),radial-gradient(70% 45% at 88% 92%,color-mix(in srgb,var(--pink) 34%,transparent),transparent 72%),linear-gradient(180deg,var(--bg),var(--page))}
 .call-bg:before,.call-bg:after{content:"";position:absolute;inset:-20% -10%;pointer-events:none}
 /* The moving layer: the skin's wallpaper scene at random places (ui/call.js), drawn with the wallpaper's own styles. */
@@ -1215,9 +1227,10 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .call-ball[data-dragging]{transition:none;cursor:grabbing;transform:scale(1.06)}
 .call-ball .cb-icon svg{width:22px;height:22px}
 .call-ball .cb-time{font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
-.call-ball.speaking{animation:cb-breathe 1.4s ease-in-out infinite}
+/* Speaking: a green ring spreads from the ball (a ring that grows and fades costs a phone far less than a moving shadow). */
+.call-ball.speaking::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;box-shadow:0 0 0 3px rgba(58,212,111,.6);animation:cb-ring 1.4s ease-out infinite}
+@keyframes cb-ring{from{transform:scale(1);opacity:1}to{transform:scale(1.45);opacity:0}}
 .call-ball.thinking .cb-icon{animation:cb-think 1s ease-in-out infinite}
-@keyframes cb-breathe{0%,100%{box-shadow:0 10px 24px -8px rgba(0,0,0,.45),0 0 0 0 rgba(58,212,111,.55),inset 0 0 0 1.5px rgba(255,255,255,.35)}50%{box-shadow:0 10px 24px -8px rgba(0,0,0,.45),0 0 0 10px rgba(58,212,111,0),inset 0 0 0 1.5px rgba(255,255,255,.35)}}
 @keyframes cb-think{50%{opacity:.4}}
 @media (prefers-reduced-motion:reduce){.call-ball,.call-ball .cb-icon{animation:none!important;transition:none}}
 .call-top h2{margin:10px 0 0;font-size:26px;font-weight:900;color:var(--ink)}
@@ -2596,3 +2609,67 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 /* Compact, anchored single-choice lists. */
 .popup-select{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:42px;min-width:130px;max-width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card2);color:var(--ink);font:inherit;text-align:left}.popup-select>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.popup-select>.icon{width:16px;height:16px;color:var(--ink2)}.popup-select[aria-expanded=true]{border-color:var(--accent)}.popup-select-menu{position:fixed;z-index:1000000;overflow:auto;overscroll-behavior:contain;padding:5px;border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);box-shadow:var(--shadow);touch-action:pan-y}.popup-select-menu button{display:flex;align-items:center;width:100%;min-height:42px;padding:10px 12px;border-radius:9px;text-align:left;font:inherit;font-size:14px}.popup-select-menu [aria-selected=true]{background:var(--accent-soft);color:var(--accent-ink);font-weight:800}.popup-select-menu [aria-selected=true]::after{content:'✓';margin-left:auto;padding-left:12px}.popup-select-menu button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}.prompt-rule-filter{display:flex;justify-content:flex-start;margin:12px 0}.pl-panel>.popup-select{width:100%}.pl-history{display:grid;place-items:center;width:34px;height:36px;color:var(--accent-ink)}.pl-history .icon{width:20px;height:20px}.pl-redo svg{transform:scaleX(-1)}.pl-head>.pl-history:nth-child(2){margin-right:auto}.pl-head .pl-selection-count{font-size:12px;color:var(--ink2)}.pl-head .chip-button{font-size:13px}.pl-head [data-pl=add]{font-size:20px}.pl-row.selected:not(.on) .pl-main,.pl-row.selecting .pl-main{background:var(--accent-soft);box-shadow:inset 3px 0 var(--accent)}.pl-row.in-group{margin-left:18px}.pl-group-head{display:flex;align-items:center;gap:7px;min-height:44px;padding:4px 10px;border-radius:12px;background:var(--card2)}.pl-group-head strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.pl-group-head button{display:grid;place-items:center;min-width:30px;min-height:32px}.pl-group-head .icon{width:18px;height:18px}.pl-group-head input{width:22px;height:22px;accent-color:var(--accent)}
 .pl-group-head .pl-group-rename{flex:1;min-width:0;width:0;padding:6px 8px;font-size:13px}
+
+/* ---------- 滑动列表 (ui/swipe-list.js): rows that swipe like Procreate's layers ---------- */
+.sw-row{position:relative;overflow:hidden;--sw-p:0;--sw-r:0;isolation:isolate}
+.sw-row+.sw-row{border-top:1px solid var(--line)}
+.sw-actions{position:absolute;top:0;bottom:0;right:0;width:var(--sw-w);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:0 4px 0 8px;box-sizing:border-box;z-index:0}
+.sw-act{all:unset;box-sizing:border-box;flex:none;width:64px;height:min(58px,calc(100% - 12px));min-height:44px;border-radius:16px;display:grid;place-items:center;align-content:center;gap:3px;cursor:pointer;color:var(--accent-ink);background:var(--accent-soft);font-size:11px;font-weight:800;letter-spacing:.02em;
+  opacity:clamp(0,calc(var(--sw-p) * 2.4 - var(--i) * .5),1);
+  transform:translateX(calc((1 - min(var(--sw-p),1)) * (16px + var(--i) * 16px))) scale(calc(.55 + .45 * min(var(--sw-p),1)));
+  transition:transform .46s cubic-bezier(.2,1.35,.3,1) calc(var(--i) * 35ms),opacity .24s,background .15s,filter .15s}
+.sw-act svg{width:20px;height:20px}
+.sw-act.danger{color:#fff;background:var(--danger)}
+.sw-act:hover{filter:brightness(1.05)}
+.sw-act:active{filter:brightness(.92)}
+.sw-act:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sw-drag .sw-act{transition:opacity .1s}
+.sw-main{position:relative;z-index:1;display:flex;align-items:center;background:var(--card);touch-action:pan-y;transition:transform .52s cubic-bezier(.2,1.22,.32,1),background .2s;user-select:none;-webkit-user-select:none}
+.sw-open .sw-main{border-radius:0 16px 16px 0;box-shadow:8px 0 20px -14px rgba(20,40,90,.5)}
+.sw-body{flex:1;min-width:0}
+.sw-body>.list-row,.sw-body>.audio-row{border:0}
+/* The circle that shows a row is picked: it grows in as the row is pulled right, and stays while choosing. */
+.sw-check{flex:none;display:grid;place-items:center;box-sizing:border-box;width:0;height:24px;margin-right:0;border-radius:50%;border:2px solid var(--line);color:var(--on-accent);overflow:hidden;opacity:0;transition:width .38s cubic-bezier(.2,1.3,.3,1),margin .38s cubic-bezier(.2,1.3,.3,1),opacity .2s,background .2s,border-color .2s}
+.sw-drag .sw-check{width:calc(var(--sw-r) * 24px);margin-right:calc(var(--sw-r) * 12px);opacity:var(--sw-r);border-color:var(--accent);transition:none}
+.sw-choosing .sw-check{width:24px;margin-right:12px;opacity:1}
+.sw-chosen .sw-check{background:var(--accent);border-color:var(--accent);animation:sw-pop .4s cubic-bezier(.2,1.6,.4,1)}
+.sw-check svg{width:14px;height:14px;opacity:0;transform:scale(.3);transition:transform .3s cubic-bezier(.2,1.6,.4,1),opacity .2s}
+.sw-chosen .sw-check svg{opacity:1;transform:none}
+.sw-chosen .sw-main{background:color-mix(in srgb,var(--accent) 13%,var(--card))}
+@keyframes sw-pop{0%{transform:scale(.55)}55%{transform:scale(1.18)}100%{transform:none}}
+/* The bar for what to do with the rows picked: it floats up over the bottom of the list. */
+.sw-bar{position:sticky;bottom:12px;z-index:6;display:flex;align-items:center;gap:6px;margin:10px 0 16px;padding:7px;border-radius:22px;background:color-mix(in srgb,var(--card) 86%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.4);backdrop-filter:blur(14px) saturate(1.4);box-shadow:0 16px 36px -14px rgba(20,40,90,.5),inset 0 0 0 1px var(--line);animation:sw-bar-in .44s cubic-bezier(.2,1.3,.3,1)}
+.sw-bar[hidden]{display:none}
+.sw-bar.sw-leaving{animation:sw-bar-out .22s ease-in forwards}
+@keyframes sw-bar-in{from{opacity:0;transform:translateY(26px) scale(.94)}}
+@keyframes sw-bar-out{to{opacity:0;transform:translateY(20px) scale(.96)}}
+.sw-bar button{all:unset;box-sizing:border-box;flex:none;min-height:40px;padding:0 12px;border-radius:15px;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:800;cursor:pointer;color:var(--ink);transition:transform .15s,filter .15s}
+.sw-bar button:active{transform:scale(.95)}
+.sw-bar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sw-bar .sw-bar-act{background:var(--accent-soft);color:var(--accent-ink)}
+.sw-bar .sw-bar-act.danger{background:var(--danger);color:#fff}
+.sw-bar .sw-bar-done{background:var(--accent-btn);color:var(--on-accent)}
+.sw-bar button:disabled{opacity:.4;cursor:default}
+.sw-bar svg{width:17px;height:17px}
+.sw-count{font-size:12.5px;font-weight:700;color:var(--ink2);white-space:nowrap;padding-left:2px}
+.sw-bar-gap{flex:1}
+.sw-bar.many .sw-bar-act span{display:none}
+.sw-bar.many .sw-bar-act{padding:0 11px}
+.sw-hint{margin:-6px 4px 14px}
+/* With a mouse: a ⋯ on the row under the pointer opens its actions (a touch screen swipes instead). */
+.sw-more{all:unset;display:none;flex:none;box-sizing:border-box;width:34px;height:34px;margin-left:6px;border-radius:12px;place-items:center;font-size:18px;font-weight:900;line-height:1;color:var(--ink2);cursor:pointer;opacity:0;transform:scale(.8);transition:opacity .18s,transform .25s cubic-bezier(.2,1.4,.4,1),background .15s}
+@media (hover:hover) and (pointer:fine){
+  .sw-more{display:grid}
+  .sw-row:is(:hover,:focus-within) .sw-more,.sw-open .sw-more{opacity:1;transform:none}
+  .sw-more:hover,.sw-open .sw-more{background:var(--accent-soft);color:var(--accent-ink)}
+  .sw-choosing .sw-more{display:none}
+}
+.sw-more:focus-visible{opacity:1;transform:none;outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.sw-main,.sw-act,.sw-check,.sw-check svg{transition:none}.sw-bar,.sw-chosen .sw-check{animation:none}}
+/* 分段: the fill carried from the old button to the new one (ui/motion.js); the buttons stay over it. */
+.segmented{position:relative}
+.segmented button{position:relative;z-index:1}
+.seg-pill{position:absolute;z-index:0;pointer-events:none;transform-origin:left center}
+.segmented button.seg-arriving{background:transparent!important;box-shadow:none!important;transition:color .2s,transform .35s cubic-bezier(.3,1.7,.45,1)}
+/* Decorated bubbles move only on the last few messages: dozens of moving bubbles would cost a phone every frame. */
+.chat-thread .msg:not(:nth-last-child(-n+6)) .chat-bubble,.chat-thread .msg:not(:nth-last-child(-n+6)) .chat-bubble::before,.chat-thread .msg:not(:nth-last-child(-n+6)) .chat-bubble::after{animation-play-state:paused}

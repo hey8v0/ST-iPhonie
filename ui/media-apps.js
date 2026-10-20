@@ -1,6 +1,7 @@
 import {createView, esc, engines, btn, heading, empty, size, field, input, textArea, groupTitle, avatar, help, pictureCopies} from './common.js';
 import {icon, wave, halo} from './icons.js';
 import {openAlbum} from './album-viewer.js';
+import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {saveFile, shareFile, canShareFiles, zipFiles} from '../download.js';
 import {decodeMono, joinClips, encodeWav, JOIN_RATE} from '../core/audio-join.js';
 
@@ -12,7 +13,22 @@ const dateLabel = time => new Date(time).toLocaleDateString('zh-CN', {month: 'nu
 
 export function libraryApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'library');
-  let tab = 'favorites', role = '', epoch = 0;
+  let tab = 'favorites', role = '', epoch = 0, swipe = null, preview = null, playing = '';
+  const stopPreview = () => { if (preview) { preview.pause(); ctx.win.URL.revokeObjectURL(preview.src); } preview = null; playing = ''; v.root.querySelectorAll('.audio-row.playing').forEach(r => r.classList.remove('playing')); };
+  const dispose = v.dispose;
+  v.dispose = () => { stopPreview(); swipe?.dispose(); dispose(); };
+  /** A cached line heard here (tap again to stop). */
+  async function listen(key) {
+    const was = playing;
+    stopPreview();
+    if (was === key) return;
+    const {blob} = await api.audioFile({key});
+    preview = new ctx.win.Audio(ctx.win.URL.createObjectURL(blob));
+    playing = key;
+    v.root.querySelector(`.sw-row[data-swipe="${CSS.escape(key)}"] .audio-row`)?.classList.add('playing');
+    preview.addEventListener('ended', stopPreview);
+    await preview.play();
+  }
   async function render() {
     const ticket = ++epoch;
     const [rows, cache, library] = await Promise.all([tab === 'favorites' ? api.listFavorites() : api.listAudio(), api.cacheStats(), api.libraryStats().catch(() => null)]);
@@ -25,33 +41,56 @@ export function libraryApp(ctx) {
     let body;
     if (tab === 'favorites') {
       body = shown.length
-        ? '<div class="group">' + shown.map(r => `<div class="audio-row" data-engine="${esc(r.engine)}">${btn('play-favorite', icon('play', true), 'play-round', `data-id="${esc(r.id)}" aria-label="播放收藏"`)}<div><p>“${esc(r.translation || r.text)}”</p><small>${esc(r.role)} · ${engines[r.engine] || r.engine} · ${size(r.size)} · ${dateLabel(r.createdAt)}</small></div><span class="row-tools">${btn('download-favorite', icon('download'), 'text-button', `data-id="${esc(r.id)}" aria-label="下载到本地"`)}${btn('delete-favorite', icon('trash'), 'text-button', `data-id="${esc(r.id)}" aria-label="删除收藏"`)}</span></div>`).join('') + '</div>'
+        ? '<div class="group" data-audio-list>' + shown.map(r => swipeRow(r.id, `<div class="audio-row" data-engine="${esc(r.engine)}"><span class="disc play">${icon('play', true)}</span><div><p>“${esc(r.translation || r.text)}”</p><small>${esc(r.role)} · ${engines[r.engine] || r.engine} · ${size(r.size)} · ${dateLabel(r.createdAt)}</small></div></div>`,
+          [{key: 'download', label: '下载', icon: 'download'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}], {label: r.translation || r.text})).join('') + '</div>'
         : empty('把喜欢的对白留在这里', '在听取里点爱心，就能把生成过的台词收藏起来。', 'heart');
     } else {
       const used = library?.limit ? Math.min(100, cache.bytes / library.limit * 100) : 0, fav = library?.limit ? Math.min(100, library.bytes / library.limit * 100) : 0;
       body = `<div class="group pad"><strong>本机音频</strong><div class="storage-meter"><i style="width:${fav}%;background:var(--pink)"></i><i style="width:${used}%;background:var(--accent)"></i></div>
           <div class="legend"><span style="--c:var(--pink)">收藏与资料 ${library ? size(library.bytes) : '无法读取'}</span><span style="--c:var(--accent)">缓存 ${cache.available ? cache.count + ' 段 · ' + size(cache.bytes) : '不可用'}</span></div></div>`
         + (shown.length
-          ? '<div class="group">' + shown.map(r => { const line = r.metadata?.line || {}; return `<div class="audio-row" data-engine="${esc(r.metadata?.route?.engine || 'none')}"><span class="disc">${icon('wave')}</span><div><p>${esc(line.translation ? '“' + line.translation + '”' : '早期缓存的音频')}</p><small>${esc(line.role || '未知角色')} · ${size(r.bytes)}</small></div><span class="row-tools">${btn('download-cache', icon('download'), 'text-button', `data-id="${esc(r.key)}" aria-label="下载到本地"`)}${btn('favorite-cache', icon('heart'), 'text-button', `data-id="${esc(r.key)}" aria-label="收藏"`)}${btn('delete-cache', icon('trash'), 'text-button', `data-id="${esc(r.key)}" aria-label="清理"`)}</span></div>`; }).join('') + '</div>'
+          ? '<div class="group" data-audio-list>' + shown.map(r => { const line = r.metadata?.line || {}; return swipeRow(r.key, `<div class="audio-row${playing === r.key ? ' playing' : ''}" data-engine="${esc(r.metadata?.route?.engine || 'none')}"><span class="disc">${icon('wave')}</span><div><p>${esc(line.translation ? '“' + line.translation + '”' : '早期缓存的音频')}</p><small>${esc(line.role || '未知角色')} · ${size(r.bytes)}</small></div></div>`,
+            [{key: 'download', label: '下载', icon: 'download'}, {key: 'favorite', label: '收藏', icon: 'heart'}, {key: 'delete', label: '清理', icon: 'trash', danger: true}], {label: line.translation || ''}); }).join('') + '</div>'
           : empty('还没有音频缓存', '点聊天里的声波生成过的台词会暂存在这里。'))
         + `<div class="actions">${btn('clear-cache', icon('trash') + '清理全部缓存', 'danger')}</div><p class="hint">收藏和缓存分开保存，清理缓存不会删掉收藏。</p>`;
     }
+    swipe?.dispose(); swipe = null;
     v.draw(heading('音频收藏', '', 'Voice Library') + tabs + filters + body);
+    const list = v.root.querySelector('[data-audio-list]');
+    const acts = tab === 'favorites' ? '下载、删除' : '下载、收藏、清理';
+    if (list) swipe = mountSwipeList(list, {ctx, hint: `点一下播放；左滑：${acts}；右滑：多选`, mouseHint: `点一下播放；右键或 ⋯：${acts}；按住 Ctrl 点：多选`,
+      onTap: id => (tab === 'favorites' ? api.playFavorite(id) : listen(id)).catch(error => ctx.notify(error.message, {error: true})),
+      onAction: (key, id) => act(key, [id]).catch(error => ctx.notify(error.message, {error: true})),
+      bulk: tab === 'favorites' ? [{key: 'download', label: '下载', icon: 'download'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}]
+        : [{key: 'favorite', label: '收藏', icon: 'heart'}, {key: 'download', label: '下载', icon: 'download'}, {key: 'delete', label: '清理', icon: 'trash', danger: true}],
+      onBulk: (key, ids) => act(key, ids)});
+  }
+  /** One line or several: downloaded (several in one zip), kept in 收藏, or deleted. */
+  async function act(key, ids) {
+    const ref = id => tab === 'favorites' ? {favorite: id} : {key: id};
+    if (key === 'download') {
+      if (ids.length === 1) return saveAs(ctx, api.audioFile(ref(ids[0])));
+      const files = [];
+      for (const id of ids) { const {blob, name} = await api.audioFile(ref(id)); files.push({name, blob}); }
+      ctx.notify('已下载 ' + await saveFile(ctx.doc, await zipFiles(files), `音频收藏-${ids.length}段.zip`));
+      return;
+    }
+    if (key === 'favorite') { for (const id of ids) await api.favoriteAudio(id); ctx.notify(ids.length > 1 ? `收藏了 ${ids.length} 段` : '已加入收藏'); return; }
+    if (key === 'delete') {
+      const what = tab === 'favorites' ? '收藏' : '缓存';
+      if (!await ctx.confirm(ids.length > 1 ? `删除这 ${ids.length} 段${what}？` : `删除这段${what}？`)) return;
+      if (ids.includes(playing)) stopPreview();
+      for (const id of ids) await (tab === 'favorites' ? api.deleteFavorite(id) : api.deleteAudio(id));
+      await render();
+    }
   }
   v.refresh = render;
   v.on('click', '[data-action]', async el => {
-    const id = el.dataset.id;
     switch (el.dataset.action) {
-      case 'tab': tab = el.dataset.tab; role = ''; await render(); break;
+      case 'tab': stopPreview(); tab = el.dataset.tab; role = ''; await render(); break;
       case 'role': role = el.dataset.role; await render(); break;
-      case 'play-favorite': await api.playFavorite(id); break;
-      case 'download-favorite': await v.busy(el, () => saveAs(ctx, api.audioFile({favorite: id}))); break;
-      case 'download-cache': await v.busy(el, () => saveAs(ctx, api.audioFile({key: id}))); break;
-      case 'favorite-cache': await v.busy(el, () => api.favoriteAudio(id)); ctx.notify('已加入收藏'); break;
-      case 'delete-cache': if (await ctx.confirm('清理这段缓存？')) { await api.deleteAudio(id); await render(); } break;
-      case 'delete-favorite': if (await ctx.confirm('删除这段收藏？')) { await api.deleteFavorite(id); await render(); } break;
       case 'clear-cache':
-        if (await ctx.confirm('清理语音缓存？', '正在播放的音频会停止，收藏和其他资料会保留。')) { await v.busy(el, () => api.clearCache()); await render(); ctx.notify('语音缓存已清理'); }
+        if (await ctx.confirm('清理语音缓存？', '正在播放的音频会停止，收藏和其他资料会保留。')) { stopPreview(); await v.busy(el, () => api.clearCache()); await render(); ctx.notify('语音缓存已清理'); }
         break;
     }
   });

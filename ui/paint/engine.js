@@ -314,6 +314,8 @@ export function mergeDown(pic,id) {const at=pic.layers.findIndex(l=>l.id===id);r
 
 // ---------- seeing it ----------
 /** What a layer shows now: itself, or itself with the stroke being drawn on it. */
+/** A layer as it shows now: with the stroke being drawn on it, or the piece being moved. */
+export const layerPicture = (pic, l) => content(pic, l, 0);
 function content(pic, l, n) {
   const s = pic.stroke, f = pic.float;
   if (f && f.layer === l) {
@@ -343,15 +345,18 @@ function clipped(pic, source, base, n) {
 /**
  * Draws the picture into g (already set to picture space): the background, then each layer with its blend mode and
  * opacity; a 剪辑蒙版 layer shows only over the paint of the layer it sits on (they make one group).
+ * from / to: only the layers (groups) whose bottom layer is in [from, to); background: with the background colour.
  */
-export function compose(pic, g) {
-  if (pic.showBackground) { g.fillStyle = pic.background; g.fillRect(0, 0, pic.width, pic.height); }
+export function compose(pic, g, {from = 0, to = Infinity, background = true} = {}) {
+  if (background && pic.showBackground) { g.fillStyle = pic.background; g.fillRect(0, 0, pic.width, pic.height); }
   const list = pic.layers;
   for (let i = 0; i < list.length; i++) {
     const base = list[i];
     const group = [];
     for (let j = i + 1; j < list.length && list[j].clip && list[j].group === base.group; j++) group.push(list[j]);
+    const at = i;
     i += group.length;
+    if (at < from || at >= to) continue;
     if (!base.visible || pic.groups?.some(g=>g.id===base.group&&!g.visible)) continue;
     const shown = group.filter(l => l.visible);
     let picture = content(pic, base, 0);

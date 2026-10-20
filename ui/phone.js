@@ -157,10 +157,10 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       body: overlay.querySelector('.sheet-body'),
       get live() { return live; },
       onClose(fn) { callbacks.push(fn); },
-      close(value = null) {
+      close(value = null, {from = 0} = {}) {
         if (!live) return;
         live = false;
-        overlay.remove();
+        leave(overlay, from);
         if (sheet === result) sheet = null;
         syncInert();
         for (const callback of callbacks) callback(value);
@@ -189,10 +189,68 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       if (e.shiftKey && doc.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && doc.activeElement === last) { e.preventDefault(); first.focus(); }
     });
+    if (!top) dragToClose(overlay, result);
     sheet = result;
     syncInert();
     overlay.querySelector('button').focus({preventScroll: true});
     return result;
+  }
+  /**
+   * A sheet that closes slides down as its shade fades. It is out of the way at once: no clicks, and it is no longer
+   * an .overlay (a new sheet, or a look for an open one, does not find it). from: where a drag let go of it.
+   */
+  function leave(overlay, from = 0) {
+    const panel = overlay.querySelector('.sheet');
+    // Only a plain bottom sheet: the control center has its own way out, a pop-over in 画画 sits where it was put.
+    if (motion.matches || overlay.className !== 'overlay' || typeof panel?.animate !== 'function') { overlay.remove(); return; }
+    overlay.inert = true;
+    overlay.classList.replace('overlay', 'overlay-out');
+    const gone = () => overlay.remove(), h = panel.offsetHeight || 400;
+    overlay.animate([{opacity: 1}, {opacity: 0}], {duration: 240, easing: 'ease-in', fill: 'forwards'});
+    panel.animate([{transform: `translateY(${from}px)`}, {transform: `translateY(${Math.max(140, h * .55)}px)`}], {duration: 240, easing: 'cubic-bezier(.45,0,.8,.55)', fill: 'forwards'}).finished.then(gone, gone);
+    win.setTimeout(gone, 500);
+  }
+  /**
+   * A sheet pulled down by its top (the grabber and the title) follows the finger, its shade lightening; let go far or
+   * fast enough it closes, otherwise it springs back. Pushed up it hardly moves.
+   */
+  function dragToClose(overlay, d) {
+    const panel = overlay.querySelector('.sheet'), head = overlay.querySelector('.sheet-header');
+    let g = null;
+    head.addEventListener('pointerdown', e => {
+      if (e.button > 0 || overlay.className !== 'overlay' || e.target.closest('button,input,select,textarea,a')) return;
+      g = {id: e.pointerId, y: e.clientY, dy: 0, v: 0, last: {y: e.clientY, t: e.timeStamp}, on: false};
+    });
+    head.addEventListener('pointermove', e => {
+      if (!g || e.pointerId !== g.id) return;
+      const dy = e.clientY - g.y;
+      if (!g.on) {
+        if (Math.abs(dy) < 6) return;
+        if (dy < 0) { g = null; return; }
+        g.on = true;
+        try { head.setPointerCapture(e.pointerId); } catch { /* fine */ }
+        panel.style.animation = 'none'; panel.style.transition = 'none';
+      }
+      g.dy = dy < 0 ? -Math.sqrt(-dy) * 2 : dy;
+      const h = panel.offsetHeight || 400;
+      panel.style.transform = `translateY(${g.dy}px)`;
+      overlay.style.backgroundColor = `rgba(10,20,40,${(.36 * (1 - Math.min(1, Math.max(0, g.dy) / h))).toFixed(3)})`;
+      if (e.timeStamp > g.last.t) { g.v = (e.clientY - g.last.y) / (e.timeStamp - g.last.t); g.last = {y: e.clientY, t: e.timeStamp}; }
+    });
+    const end = e => {
+      if (!g || e.pointerId !== g.id) return;
+      const was = g;
+      g = null;
+      if (!was.on) return;
+      const h = panel.offsetHeight || 400, fresh = e.timeStamp - was.last.t < 90;
+      if (e.type !== 'pointercancel' && (was.dy > h * .28 || (fresh && was.v > .55 && was.dy > 20))) { d.close(null, {from: was.dy}); return; }
+      panel.style.transition = 'transform .5s cubic-bezier(.2,1.25,.3,1)';
+      panel.style.transform = '';
+      overlay.style.backgroundColor = '';
+      win.setTimeout(() => { panel.style.transition = ''; }, 520);
+    };
+    head.addEventListener('pointerup', end);
+    head.addEventListener('pointercancel', end);
   }
   function confirm(title, text = '') {
     return new Promise(resolve => {
@@ -327,6 +385,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     homeTimer = win.setTimeout(() => delete screen.dataset.homeIn, 800);
   }
   function back() {
+    // The page an app draws next comes in from the left (ui/common.js).
+    screen.dataset.navBack = String(Date.now());
     if (sheet) { sheet.close(null); return; }
     if (locked) { unlock(); return; }
     if (active && views.get(active)?.back?.()) return;

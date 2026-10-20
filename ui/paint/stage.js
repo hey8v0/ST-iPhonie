@@ -8,7 +8,7 @@
 // - 选区: drag a box, or draw round what to select; 变形: drag to move, the corners to scale, the dot above to turn,
 //   two fingers to scale and turn;
 // - on a computer: the wheel zooms where the pointer is, space or the middle button drags the picture.
-import {beginStroke, extendStroke, endStroke, compose, colorAt, steady, tracePath, floatCorners} from './engine.js';
+import {beginStroke, extendStroke, endStroke, compose, layerPicture, colorAt, steady, tracePath, floatCorners} from './engine.js';
 
 const HOLD = 480, TAP = 280, HANDLE = 24, SNAP = 320;
 /** The view's turn, place and zoom: picture point → screen point, and back. */
@@ -39,7 +39,8 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   // iPad / iPhone: holding a finger still (the eyedropper) must not select the picture or lift it out as a preview.
   for (const type of ['touchstart', 'touchend']) canvas.addEventListener(type, e => { if (e.cancelable) e.preventDefault(); }, {passive: false});
   host.append(canvas);
-  const g = canvas.getContext('2d');
+  // desynchronized: the canvas reaches the screen without waiting for the page (a pen's line keeps up with the pen).
+  const g = canvas.getContext('2d', {desynchronized: true}) || canvas.getContext('2d');
   let w = 0, h = 0, ratio = 1, view = null, raf = 0, penSeen = false, spaceDown = false, flipped = false;
   const pointers = new Map();
   let drawing = null, gesture = null, panning = null, taps = null, outline = null, moving = null, refit = false, glide = 0;
@@ -56,29 +57,93 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   // Picture px ⇄ screen px, with 左右翻转画面.
   const toScreen = (x, y) => viewMath(view).toScreen(flipped ? pic.width - x : x, y);
   const toPicture = (x, y) => { const p = viewMath(view).toPicture(x, y); return {x: flipped ? pic.width - p.x : p.x, y: p.y}; };
+  // ---------- drawing the view ----------
+  // A frame costs what is drawn in it. While a stroke goes on, what lies under and over its layer does not change: they
+  // are kept as two pictures the size of the screen, and a frame is those two with the layer between. While the view
+  // moves (fingers, wheel, gliding), the picture does not change: it is kept whole. Anything else draws it all.
+  let split = null, whole = null;
+  const inView = c => { c.translate(view.x, view.y); c.rotate(view.angle); c.scale(view.scale, view.scale); if (flipped) { c.translate(pic.width, 0); c.scale(-1, 1); } };
+  const screenCanvas = () => { const c = doc.createElement('canvas'); c.width = canvas.width; c.height = canvas.height; return c; };
+  /** The sheet: a soft shadow of a few widening rims (a blur each frame costs a phone too much), white, and the chequer. */
+  function paper(c) {
+    const k = 1 / view.scale;
+    c.fillStyle = 'rgba(0,0,0,.035)';
+    for (let i = 5; i >= 1; i--) { const d = i * 3.2 * k; c.fillRect(-d, -d + 4 * k, pic.width + 2 * d, pic.height + 2 * d); }
+    c.fillStyle = '#fff'; c.fillRect(0, 0, pic.width, pic.height);
+    if (!pic.showBackground) checker(c);
+  }
+  // Behind a picture without its background: a light chequer, so what is see-through shows (one pattern, not a square at a time).
+  let tile = null;
+  function checker(c) {
+    if (!tile) { const t = doc.createElement('canvas'); t.width = t.height = 32; const tg = t.getContext('2d'); if (!tg) return; tg.fillStyle = '#e6e6ea'; tg.fillRect(0, 0, 16, 16); tg.fillRect(16, 16, 16, 16); tile = t; }
+    const pattern = c.createPattern?.(tile, 'repeat');
+    if (!pattern) return;
+    pattern.setTransform?.(new win.DOMMatrix().scale(1 / view.scale));
+    c.fillStyle = pattern; c.fillRect(0, 0, pic.width, pic.height);
+  }
+  /** The index of the layer being stroked when the picture can be drawn as under + it + over; -1 when it cannot. */
+  function splitAt() {
+    const s = pic.stroke, list = pic.layers, i = s ? list.indexOf(s.layer) : -1;
+    if (i < 0 || pic.float || s.layer.clip || (list[i + 1]?.clip && list[i + 1].group === s.layer.group)) return -1;
+    if (!s.layer.visible || pic.groups?.some(x => x.id === s.layer.group && !x.visible)) return -1;
+    // Over it, a layer blending other than normally mixes with what is under: then the whole picture is drawn.
+    for (const l of list.slice(i + 1)) if (l.visible && l.blend !== 'source-over') return -1;
+    return i;
+  }
+  const viewKey = () => `${view.x},${view.y},${view.scale},${view.angle},${flipped},${canvas.width},${canvas.height}`;
+  const pictureKey = () => `${pic.changed},${pic.layers.length},${pic.showBackground},${pic.background},${pic.active}`;
   function render() {
     win.cancelAnimationFrame(raf); raf = 0;
     if (!g) return;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, canvas.width, canvas.height);
+    const at = splitAt();
+    if (at >= 0) strokeFrame(at);
+    else {
+      split = null;
+      g.setTransform(ratio, 0, 0, ratio, 0, 0);
+      g.save(); inView(g);
+      paper(g);
+      g.imageSmoothingEnabled = view.scale < 2;
+      if (pic.float || pic.stroke) { whole = null; compose(pic, g); }
+      else {
+        if (whole?.key !== pictureKey()) whole = keepWhole();
+        if (whole) g.drawImage(whole.canvas, 0, 0); else compose(pic, g);
+      }
+      g.restore();
+    }
     g.setTransform(ratio, 0, 0, ratio, 0, 0);
-    g.save();
-    g.translate(view.x, view.y); g.rotate(view.angle); g.scale(view.scale, view.scale);
-    if (flipped) { g.translate(pic.width, 0); g.scale(-1, 1); }
-    g.shadowColor = 'rgba(0,0,0,.25)'; g.shadowBlur = 18 / view.scale;
-    g.fillStyle = '#fff'; g.fillRect(0, 0, pic.width, pic.height);
-    g.shadowBlur = 0; g.shadowColor = 'transparent';
-    if (!pic.showBackground) checker();
-    g.imageSmoothingEnabled = view.scale < 2;
-    compose(pic, g);
-    g.restore();
     overlays();
   }
-  // Behind a picture without its background: a light chequer, so what is see-through shows.
-  function checker() {
-    const cell = 16 / view.scale;
-    g.fillStyle = '#e6e6ea';
-    for (let y = 0; y < pic.height; y += cell) for (let x = (Math.floor(y / cell) % 2) * cell; x < pic.width; x += cell * 2) g.fillRect(x, y, Math.min(cell, pic.width - x), Math.min(cell, pic.height - y));
+  function keepWhole() {
+    const c = doc.createElement('canvas'); c.width = pic.width; c.height = pic.height;
+    const cg = c.getContext('2d');
+    if (!cg) return null;
+    compose(pic, cg, {background: true});
+    return {canvas: c, key: pictureKey()};
+  }
+  /** A frame while a stroke goes on: under, the layer with the stroke, over. */
+  function strokeFrame(at) {
+    const key = viewKey();
+    if (split?.stroke !== pic.stroke || split.key !== key) {
+      const under = screenCanvas(), over = screenCanvas(), ug = under.getContext('2d'), og = over.getContext('2d');
+      if (!ug || !og) { split = null; return; }
+      for (const c of [ug, og]) { c.setTransform(ratio, 0, 0, ratio, 0, 0); inView(c); c.imageSmoothingEnabled = view.scale < 2; }
+      paper(ug);
+      compose(pic, ug, {to: at});
+      compose(pic, og, {from: at + 1, background: false});
+      split = {stroke: pic.stroke, key, under, over};
+    }
+    const layer = pic.layers[at];
+    g.drawImage(split.under, 0, 0);
+    g.setTransform(ratio, 0, 0, ratio, 0, 0);
+    g.save(); inView(g);
+    g.imageSmoothingEnabled = view.scale < 2;
+    g.globalAlpha = layer.opacity; g.globalCompositeOperation = layer.blend;
+    g.drawImage(layerPicture(pic, layer), 0, 0);
+    g.restore();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(split.over, 0, 0);
   }
   // On top, in screen px: the selection's dashed outline, the one being drawn, and the 变形 box with its handles.
   function ants(points) {
@@ -88,6 +153,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     g.restore();
   }
   function overlays() {
+    ahead();
     if (pic.selection && !pic.float) ants(pic.selection.points);
     if (outline?.fill && outline.points.length > 1) {
       // 柳叶笔: the shape shows filled as it is drawn (emptying shows light), with its edge.
@@ -103,6 +169,23 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     const mid = {x: (c[0].x + c[1].x) / 2, y: (c[0].y + c[1].y) / 2};
     g.beginPath(); g.moveTo(mid.x, mid.y); g.lineTo(top.x, top.y); g.stroke();
     for (const p of [...c, top]) { g.beginPath(); g.arc(p.x, p.y, p === top ? 7 : 6, 0, Math.PI * 2); g.fillStyle = p === top ? '#3a9cf0' : '#fff'; g.fill(); g.stroke(); }
+    g.restore();
+  }
+  /**
+   * Where the pen is about to be (the browser's predicted points): the brush's tip stamped there for this frame only,
+   * so the line keeps up with a fast pen. The real stroke reaches there in the next frames.
+   */
+  function ahead() {
+    const s = pic.stroke, next = drawing?.predicted;
+    if (!s || s.smudge || s.erase || !next?.length || !s.tip || !drawing.smooth) return;
+    g.save(); inView(g);
+    g.globalAlpha = Math.min(1, s.brush.opacity ?? 1) * .9;
+    let from = drawing.smooth, n = 0;
+    for (const to of next) {
+      const len = Math.hypot(to.x - from.x, to.y - from.y), size = Math.max(1, s.size * (to.p ?? 1)), step = Math.max(1, size * .25);
+      for (let d = step; d <= len && n < 24; d += step, n++) { const x = from.x + (to.x - from.x) * d / len, y = from.y + (to.y - from.y) * d / len; g.drawImage(s.tip, x - size / 2, y - size / 2, size, size); }
+      from = to;
+    }
     g.restore();
   }
   // The dot that turns a lifted piece: a little above the middle of its top edge.
@@ -153,6 +236,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
       drawing.smooth = steady(drawing.smooth, raw, drawing.streamline);
       extendStroke(pic, drawing.smooth);
     }
+    drawing.predicted = (e.getPredictedEvents?.() || []).slice(0, 3).map(point);
     later();
   }
   function endDrawing(cancel = false) {
@@ -162,6 +246,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     win.clearTimeout(d.hold);
     if (d.pick || d.done) return;
     if (d.outline) { const o = outline; outline = null; if (!cancel) { if (o.fill) lassoed(o.points, {erase: o.erase}); else selected(o.points); } later(); return; }
+    split = null;
     // The steadied line catches up with where the pen lifted.
     if (!cancel && d.raw && d.raw !== d.smooth) extendStroke(pic, d.raw);
     if (endStroke(pic, {cancel})) stroked();
@@ -302,7 +387,8 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   size();
 
   return {
-    render: later,
+    /** Something changed the picture (a layer, a fill, undo…): drawn anew. */
+    render() { whole = null; split = null; later(); },
     fit() { view = fitView(pic, w, h); later(); },
     /** The next change of size (全屏 on or off) shows the whole picture again. */
     fitOnResize() { refit = true; win.setTimeout(() => { refit = false; }, 600); },

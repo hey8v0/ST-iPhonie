@@ -1,4 +1,5 @@
 import {pagedPicker} from './paged-picker.js';
+import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, avatar, empty, pictureCopies} from './common.js';
 import {icon} from './icons.js';
 import {saveFile, shareFile, canShareFiles} from '../download.js';
@@ -426,35 +427,51 @@ export function drawApp(ctx) {
     });
   }
 
-  /** 画风: the ones there are (a tap uses one), and editing, adding or deleting the one in use. */
+  /**
+   * 画风: a tap uses one. Swiped left a style shows 改 / 复制 / 删除; swiped right it is picked, to delete several at once.
+   */
   function pickStyle() {
-    const d0 = state(), using = styleId(), now = style();
+    const using = styleId(), all = () => state().styles;
     const d = ctx.dialog('画风', `<div data-style-picker></div><div class="picker-manage pick-list">
-      <button type="button" class="list-row" data-action="edit-style">${icon('edit')}<span><strong>改「${esc(now.name)}」</strong></span></button>
-      <button type="button" class="list-row" data-action="new-style">${icon('add')}<span><strong>新建画风</strong></span></button>
-      ${d0.styles.length > 1 ? `<button type="button" class="list-row danger-row" data-action="delete-style">${icon('trash')}<span><strong>删除「${esc(now.name)}」</strong></span></button>` : ''}</div>`);
-    pagedPicker(d.body.querySelector('[data-style-picker]'),{items:d0.styles,selected:using,pageSize:8,placeholder:'搜索画风、画师串…',text:s=>s.name+' '+s.artist,render:s=>`<button type="button" class="list-row" data-style="${esc(s.id)}" aria-pressed="${s.id===using}">${icon(s.id===using?'check':'paint')}<span><strong>${esc(s.name)}</strong><small class="mono picker-preview">${esc(s.artist||'没有画师串')}</small></span></button>`});
-    d.body.addEventListener('click', async e => {
-      const b = e.target.closest('button');
-      if (!b) return;
+      <button type="button" class="list-row" data-action="new-style">${icon('add')}<span><strong>新建画风</strong></span></button></div>`);
+    const actions = () => [{key: 'edit', label: '改', icon: 'edit'}, {key: 'copy', label: '复制', icon: 'copy'}, ...(all().length > 1 ? [{key: 'delete', label: '删除', icon: 'trash', danger: true}] : [])];
+    const picker = d.body.querySelector('[data-style-picker]');
+    pagedPicker(picker, {items: all(), selected: using, pageSize: 8, placeholder: '搜索画风、画师串…', text: x => x.name + ' ' + x.artist,
+      render: x => swipeRow(x.id, `<div class="list-row style-row" aria-current="${x.id === using}">${icon(x.id === using ? 'check' : 'paint')}<span><strong>${esc(x.name)}</strong><small class="mono picker-preview">${esc(x.artist || '没有画师串')}</small></span></div>`, actions(), {label: x.name})});
+    const list = picker.querySelector('[data-picker-items]');
+    const again = () => { swipe.dispose(); d.close(); pickStyle(); };
+    const swipe = mountSwipeList(list, {ctx, hint: '左滑：改、复制、删除；右滑：多选', mouseHint: '右键或 ⋯：改、复制、删除；按住 Ctrl 点：多选',
+      onTap: id => { api.saveDraw({activeStyle: id}); d.close(); render(); },
+      onAction: async (key, id) => {
+        const target = all().find(x => x.id === id);
+        if (!target) return;
+        try {
+          if (key === 'edit') { swipe.dispose(); d.close(); editStyle(target); }
+          else if (key === 'copy') { api.saveStyle({name: (target.name + ' 副本').slice(0, 40), artist: target.artist, positive: target.positive, negative: target.negative}); ctx.notify('复制好了'); again(); }
+          else if (key === 'delete' && await ctx.confirm(`删除画风「${target.name}」？`, '其他画风保留。')) { api.deleteStyle(id); render(); again(); }
+        } catch (error) { ctx.notify(error.message, {error: true}); }
+      },
+      bulk: [{key: 'delete', label: '删除', icon: 'trash', danger: true}],
+      onBulk: async (key, ids) => {
+        if (key !== 'delete') return;
+        if (ids.length >= all().length) throw Error('至少要留一个画风');
+        if (!await ctx.confirm(`删除这 ${ids.length} 个画风？`, '其他画风保留。')) return;
+        for (const id of ids) api.deleteStyle(id);
+        render(); again();
+      }});
+    d.onClose?.(() => swipe.dispose());
+    d.body.addEventListener('click', e => {
+      if (!e.target.closest('[data-action=new-style]')) return;
       try {
-        if (b.dataset.style) { api.saveDraw({activeStyle: b.dataset.style}); d.close(); render(); }
-        if (b.dataset.action === 'edit-style') { d.close(); editStyle(); }
-        if (b.dataset.action === 'new-style') {
-          const created = api.saveStyle({name: '新画风 ' + (d0.styles.length + 1), artist: '', positive: now.positive, negative: now.negative});
-          api.saveDraw({activeStyle: created.id});
-          d.close(); render(); editStyle();
-        }
-        if (b.dataset.action === 'delete-style') {
-          d.close();
-          if (await ctx.confirm('删除当前画风？', `「${now.name}」会被删除，其他画风保留。`)) { api.deleteStyle(now.id); render(); }
-        }
-      } catch (error) { ctx.notify(error.message); }
+        const now = style(), created = api.saveStyle({name: '新画风 ' + (all().length + 1), artist: '', positive: now.positive, negative: now.negative});
+        api.saveDraw({activeStyle: created.id});
+        swipe.dispose(); d.close(); render(); editStyle(created);
+      } catch (error) { ctx.notify(error.message, {error: true}); }
     });
   }
-  /** The style in use, in a sheet: saved with its button, left as it was when the sheet is closed. */
-  function editStyle() {
-    const s = {...style()};
+  /** A style (the one in use unless another is given), in a sheet: saved with its button, left as it was when the sheet is closed. */
+  function editStyle(which = style()) {
+    const s = {...which};
     const d = ctx.dialog('画风', `${field('名字', input('name', s.name, 'text', 'maxlength="40"'))}
       ${field('画师串', textArea('artist', s.artist, 'class="code" rows="3" placeholder="例如 artist:wlop, artist:ciloranko"'), '正文出图和这里单独生图都会带上画风。每个引擎记住自己用的画风；GPT 不读画师串和固定负面。')}
       ${field('固定正面', textArea('positive', s.positive, 'class="code" rows="3"'))}
