@@ -253,7 +253,11 @@ export function phoneFormat({user = '我', names = [], groups = [], images = fal
     '- 分享歌曲：「名字：[分享歌曲] 歌名 - 歌手｜想说的话」',
     `- 打电话：「名字：[打电话] 为什么打」（${user}的手机会响，每次最多一个）`,
     `- 发朋友圈：「名字：[朋友圈] 动态内容」（发给所有朋友看的，不是发给${user}的）`,
-    groups.length ? (after ? `群里的消息另起一段，第一行写「群：群名」，下面一样一行一件事；群名只能是：${groups.join('、')}。` : `群里的消息另写一段 <phone group="群名"></phone>；群名只能是：${groups.join('、')}。`) : '',
+    `私聊是一对一的：${after ? '' : '<phone></phone> 里'}每个人的每一条都是他单独发给${user}的，只有他和${user}看得到，发到他和${user}的私聊窗口里。所以：`,
+    `- 每条都是对${user}说的（「你」就是${user}），不对别人说话、不喊别人的名字让对方接话；想说别人的事，就当着${user}的面说起他。`,
+    `- 几个人都发消息时，各发各的：彼此看不到对方发了什么，不回应、不引用、不接着别人私聊里的话，也不知道别人给${user}发过消息（正文里当面说过、${user}告诉过他的除外）。`,
+    `- 消息内容只能是他这时会知道的事：没在场的人不知道刚才当面发生了什么。`,
+    groups.length ? (after ? `几个人在一起聊、互相能看到的，只能发在群里：另起一段，第一行写「群：群名」，下面一样一行一件事；群名只能是：${groups.join('、')}。` : `几个人在一起聊、互相能看到的，只能发在群里：另写一段 <phone group="群名"></phone>；群名只能是：${groups.join('、')}。`) : '',
     `名字只能是：${list}。不要替${user}发，不写语音标签。这些只出现在${user}的手机上，不写进正文的叙述里。${after ? '正文里没有这样的事、也没人要发消息，就只写「无」。' : '没有这样的事就不写。'}`].filter(Boolean).join('\n');
 }
 const storyRules = (preset, user, list) => (preset?.entries || []).filter(e => e.enabled && e.text?.trim() && (e.use || []).includes('story')).map(e => fill(e.text, {'用户': user, '联系人': list, '对象': list}));

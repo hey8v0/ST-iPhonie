@@ -648,6 +648,19 @@ export function writeRequest(settings, {idea = '', cast = [], only = null} = {})
   return [{role: 'system', content: system}, {role: 'user', content: promptText(settings.promptRules, 'draw-prompt', 'writeAsk', {'想画的': String(idea).trim()})}];
 }
 /**
+ * 改提示词再画: the prompt in Chinese to read ('translate'), or rewritten the way the user asked in their own words
+ * ('revise', wish: what they said; with no wish, the Chinese they wrote in it is made tags).
+ */
+export function tagTextRequest(settings, text, mode = 'translate', wish = '') {
+  const gpt = settings.draw?.engine === 'gpt', prompt = String(text ?? '').trim();
+  if (mode !== 'revise') return [{role: 'system', content: promptText(settings.promptRules, 'draw-prompt', 'translate', {'GPT': gpt})}, {role: 'user', content: prompt}];
+  return [{role: 'system', content: promptText(settings.promptRules, 'draw-prompt', 'revise', {'GPT': gpt})},
+    {role: 'user', content: promptText(settings.promptRules, 'draw-prompt', 'reviseAsk', {'提示词': prompt, '想怎么改': String(wish ?? '').trim() || '把里面写的中文换成英文 tag，别的不动'})}];
+}
+/** The answer of tagTextRequest: without thinking, a code fence around it or 「翻译：」 in front. */
+export const tagTextAnswer = reply => String(reply ?? '').replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '').trim()
+  .replace(/^```[\w-]*\n([\s\S]*?)\n```$/, '$1').replace(/^(?:翻译|中文|改好的(?:内容)?)\s*[:：]\s*\n?/, '').trim();
+/**
  * A 帮我写 / 从剧情生成 reply: the prompt line and the registered people its 人物 line names (as registered), so the
  * drawing app can add them with their looks.
  */
@@ -675,6 +688,14 @@ export function promptLength(settings) {
   const n = settings.draw?.engine === 'gpt' ? null : budgetNumbers(settings);
   return n ? Math.min(6000, Math.round(n.left * 1.5) + 1500) : 1500;
 }
+/**
+ * Room for the picture blocks of one reply (回复后单独配图): each block's tags up to the budget, and room for a model
+ * that thinks first (its thinking counts toward the limit; too little room cut the blocks off before </img>).
+ */
+export function planLength(settings, count = 1) {
+  const n = settings.draw?.engine === 'gpt' ? null : budgetNumbers(settings);
+  return Math.min(8000, 1500 + Math.max(1, count) * (n ? Math.round(n.left * 1.5) + 300 : 600));
+}
 /** The follow-up asking for a fuller line: what it holds now and how much room is left. */
 export function fillUpRequest(prompt, {prompts = {}, line, people = [], used, left, tags, sentences = 0}) {
   return [...prompt, {role: 'assistant', content: line + (people.length ? `\n人物：${people.join('、')}` : '')},
@@ -694,10 +715,17 @@ export function cleanSuggestion(text) {
 /** Puts planned blocks into the reply after their paragraphs. Blocks without a usable 位置 go after the last one. */
 export function insertPlanned(message, reply) {
   const source = String(message), paras = paragraphs(source), blocks = [];
-  for (const m of String(reply).matchAll(/<img\b[^<>]*>([^<]*)<\/img\s*>/gi)) {
-    const at = m[1].match(/(?:^|\n)\s*位置\s*[:：]\s*P?\s*(\d+)/i);
-    const body = m[1].replace(/(?:^|\n)\s*位置\s*[:：][^\n]*/i, '').trim();
-    if (!parseBlock(body)) continue;
+  // A model that thinks out loud may write sample blocks in its thinking: only the answer counts.
+  const answer = String(reply ?? '').replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  const bodies = [...answer.matchAll(/<img\b[^<>]*>([^<]*)<\/img\s*>/gi)].map(m => m[1]);
+  // Cut off at the length limit: the last block, without its unfinished line, when it is the only one.
+  const open = !bodies.length && answer.match(/<img\b[^<>]*>([^<]*)$/i);
+  if (open) bodies.push(/\n\s*$/.test(open[1]) ? open[1] : open[1].replace(/\n[^\n]*$/, ''));
+  for (const raw of bodies) {
+    const at = raw.match(/(?:^|\n)\s*位置\s*[:：]\s*P?\s*(\d+)/i);
+    const body = raw.replace(/(?:^|\n)\s*位置\s*[:：][^\n]*/i, '').trim();
+    const spec = parseBlock(body);
+    if (!spec || !spec.tags && !spec.cast.length && !spec.nl) continue;
     const index = Math.min(paras.length, Math.max(1, Number(at?.[1]) || paras.length)) - 1;
     blocks.push({end: paras[index]?.end ?? source.length, text: `<img>\n${body}\n</img>`});
   }

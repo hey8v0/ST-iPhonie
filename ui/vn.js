@@ -9,8 +9,9 @@ import {pagedPicker} from './paged-picker.js';
 import {createView, esc, heading, help, toggle, avatar, menu} from './common.js';
 import {icon} from './icons.js';
 import {saveFile} from '../download.js';
+import {openAlbum} from './album-viewer.js';
 import {cutoutHistory, openCutoutEditor} from './cutout-editor.js';
-import {VN_SPEED_NAMES, VN_WAITS, VN_FONTS, VN_BOXES, SPRITE_RULE, EXPRESSIONS, cutBackground, eraseAt, opaqueBounds} from '../core/vn.js';
+import {VN_SPEED_NAMES, VN_WAITS, VN_FONTS, VN_BOXES, SPRITE_RULE, EXPRESSIONS, cutBackground, clearEdges, eraseAt, opaqueBounds} from '../core/vn.js';
 
 const SWATCH = {night: ['#1c1d3c', '#ff8fb1'], day: ['#ffffff', '#4f9cf5'], sakura: ['#ffe3ee', '#e85d8f'], ink: ['#161310', '#c9a45c'], tavern: ['#2a2a30', '#e18a24'], phone: ['var(--card)', 'var(--accent)']};
 const segmented = (key, value, list) => `<div class="segmented" style="margin:0">${list.map(([k, l]) => `<button type="button" data-vn-set="${key}" data-value="${esc(k)}" aria-pressed="${String(value) === String(k)}">${l}</button>`).join('')}</div>`;
@@ -75,7 +76,7 @@ export function vnApp(ctx) {
       + `<div class="group-title"><span>立绘</span>${help('点一个角色，给 TA 画立绘：平常的一张，开心、生气、难过、惊讶、害羞五种表情，还能加自己的动作（比如抱臂、托腮）。台词的情绪对上哪种表情就换哪张，正文里出现动作的词就换成那个动作。\n\n用绘图 App 现在的引擎和画风画，外貌用角色 App 里登记的，背景画成纯绿色（角色穿绿色就换蓝色）再去掉，浅色衣服和头发缝都好处理。表情用平常那张的种子画，脸和衣服会尽量一样。也可以上传自己的图。\n\n立绘存在酒馆的图片文件夹里，换设备也能看到。没有立绘的角色，说话时在对话框左边显示头像。')}</div>
         <div class="group">${castRows()}
         <details class="vn-rule" data-group="vn-rule"><summary>立绘要求</summary>
-          <p class="hint">每张立绘都会带上这些。画风、外貌、表情动作和纯色背景插件会自己加；这里写了 background 就不另加背景。</p>
+          <p class="hint">每张立绘都会带上这些。画风、外貌、表情动作和背景插件会自己加（NovelAI V5 直接画透明背景，别的用纯色背景再去掉）；这里写了 background 就不另加背景。</p>
           <textarea data-field="vn-rule" rows="3" aria-label="立绘要求">${esc(s.rule)}</textarea>
           <div class="actions"><button type="button" class="text-button" data-action="vn-rule-reset">恢复默认</button></div></details></div>`
       + `<div class="group-title"><span>观感</span></div><div class="group pad">
@@ -84,8 +85,9 @@ export function vnApp(ctx) {
         <div class="field"><span>对话框${help('跟随酒馆：用酒馆主题（用户设置里的主题颜色）的颜色。跟随小手机：用小手机现在的皮肤和日间 / 夜间的颜色，换了皮肤再打开一次这个 App 就会跟上。')}</span><div class="vn-boxes">${Object.entries(VN_BOXES).map(([k, l]) => `<button type="button" class="vn-box-pick" data-vn-set="box" data-value="${k}" aria-pressed="${s.box === k}" style="--a:${SWATCH[k][0]};--b:${SWATCH[k][1]}"><i></i>${l}</button>`).join('')}</div></div>
         <div class="field"><span>对话框透明度</span><input type="range" data-field="vn-opacity" min="30" max="100" step="2" value="${Math.round(s.opacity * 100)}" aria-label="对话框透明度"></div>
         <div class="field"><span>字号</span>${segmented('font', s.font, Object.entries(VN_FONTS))}</div>
-        ${toggle('vn-effects', '特效', s.effects, '台词按情绪演：生气时画面震动、头上冒💢，惊讶时跳一下、画面拉近，害羞和心动时飘爱心、画面边缘泛粉，开心时冒星星，难过时低下去、边缘泛蓝……叙述里写到下雨、下雪、樱花、落叶、星空、萤火虫、篝火就有天气，闪电、爆炸、心跳、眼前一黑、回忆也各有效果。还有背景慢慢推近、正文图片展开、角色从旁边走进来、换表情淡入淡出。手机或电脑设置了「减弱动态效果」时自动关掉。')}
+        ${toggle('vn-effects', '特效', s.effects, '台词按情绪演，像电影的镜头：惊讶时镜头急推、集中线一闪，生气时画面震动、边缘泛红，难过时镜头慢慢推近、边缘泛蓝，害羞和心动时飘起粉色的柔光，开心时暖光和闪光围着说话的人，紧张害怕时镜头微微晃动……叙述里写到下雨、下雪、樱花、落叶、星空、萤火虫、篝火就有天气，闪电、爆炸、心跳、眼前一黑、回忆也各有效果。还有背景慢慢推近、正文图片展开、角色从旁边走进来、换表情淡入淡出。手机或电脑设置了「减弱动态效果」时自动关掉。')}
         ${toggle('vn-voice', '播放配音', s.voice, '有音色的台词显示时自动读出来。在记录里可以再听一次。语音总开关关着时不播。')}
+        <div class="field"><span>正文标签${help('回复用这些标签包着正文时（比如 <content>…</content>），只演标签里面的，前后的状态栏、摘要、小剧场都不演。写标签名，用顿号或逗号隔开；回复里没有这些标签时照常演整条，清空就总是演整条。和设置里的「整篇朗读」共用。')}</span><input type="text" data-field="vn-body" value="${esc((api.getState().narration?.body || []).join('、'))}" placeholder="content、正文" aria-label="正文标签"></div>
         <div class="field vn-skip"><span>不演的标签${help('正文里这些标签包着的内容不进剧场，比如状态栏、成就美化、生图提示词。<status>…</status> 这种写标签名 status 就行；前后不一样的写成「开头…结尾」，比如 [状态]…[/状态]。[HUD_START]…[HUD_END] 这种 XXX_START / XXX_END 不用写，自动不演。设置里「整篇朗读」跳过的标签也不演。')}</span>
           <div class="vn-chips">${(s.skip || []).map(t => `<span class="vn-chip">${esc(t)}<button type="button" data-skip-del="${esc(t)}" aria-label="不再排除 ${esc(t)}">${icon('close')}</button></span>`).join('') || '<small class="hint">还没有</small>'}</div>
           <div class="vn-skip-add"><input type="text" data-field="vn-skip-new" placeholder="标签名，或 开头…结尾" aria-label="加一个不演的标签"><button type="button" class="secondary" data-action="vn-skip-add">${icon('add')}添加</button></div>
@@ -142,13 +144,15 @@ export function vnApp(ctx) {
         if (!l) return;
         const set = setFor(c, outfit) || c;
         const key = await menu(ctx, `${name} · ${l.label}`, [
+          l.sprite && {key: 'view', icon: 'image', label: '看大图', note: l.count > 1 ? `这组 ${l.count} 张，左右滑着看，可以下载` : '可以下载'},
           {key: 'draw', icon: 'paint', label: l.sprite ? '再画一张' : '画这张', note: l.id ? (set.seed >= 0 ? '用平常那张的种子，加上「' + (l.tags || l.label) + '」' : '加上「' + (l.tags || l.label) + '」') : '外貌和立绘要求可以先改'},
           {key: 'upload', icon: 'import', label: l.sprite ? '再上传一张' : '上传图片', note: '用自己的图，白底、纯色底或透明 PNG 都行'},
           l.count > 1 && {key: 'group', icon: 'gallery', label: `这组图（${l.count} 张）`, note: l.mix ? '正在轮换随机出' : '选用哪一张，或者轮换随机出'},
           l.action && {key: 'edit', icon: 'edit', label: l.action?.kind==='expression'?'改这个表情':'改这个动作', note: '名字、怎么画、什么时候用'},
           l.sprite && {key: 'remove', icon: 'trash', label: '去掉这张', note: l.count > 1 ? '换成这组的下一张' : '', danger: true},
           l.action && {key: 'delete', icon: 'trash', label: l.action?.kind==='expression'?'删掉这个表情':'删掉这个动作', note: '每套形象里的对应图片都会删掉', danger: true}]);
-        if (key === 'draw') draw(name, l);
+        if (key === 'view') viewSprites(name, l);
+        else if (key === 'draw') draw(name, l);
         else if (key === 'upload') upload(name, l);
         else if (key === 'group') groupSheet(name, l);
         else if (key === 'edit') { await editAction(name, l.action); looks(name, outfit); }
@@ -160,6 +164,18 @@ export function vnApp(ctx) {
         else if (key == null) looks(name, outfit);
       } catch (error) { ctx.notify(error.message, {error: true}); }
     });
+  }
+  /** 看大图: the pictures of one look full size, swiped through like the album, each one can be downloaded. */
+  function viewSprites(name, l, first = '', back = () => looks(name, l.outfit)) {
+    const g = looksOf(castOf(name), l.outfit).find(x => x.id === l.id);
+    const all = g?.sprite ? [g.sprite, ...g.alts.map(a => a.sprite)] : [];
+    if (!all.length) return;
+    const fileName = url => `${name}_${l.label}${all.length > 1 ? '_' + (all.indexOf(url) + 1) : ''}.png`;
+    const fetchPicture = async url => { const response = await ctx.win.fetch(url); if (!response.ok) throw Error('读不到这张立绘'); return response.blob(); };
+    openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: all, index: Math.max(0, all.indexOf(first)),
+      load: async url => ({blob: await fetchPicture(url), name: fileName(url)}),
+      actions: [{key: 'download', icon: 'download', label: '下载', run: async url => { ctx.notify('已下载 ' + await saveFile(ctx.doc, await fetchPicture(url), fileName(url))); }}],
+      onClose: back});
   }
   /** 这组图: every picture of one look; tap one to use it or take it out; 轮换随机出 lets them take turns. */
   function groupSheet(name, l) {
@@ -186,8 +202,9 @@ export function vnApp(ctx) {
       if (!b) return;
       const u = b.dataset.pic, g = now(), first = g?.sprite === u;
       try {
-        const key = await menu(ctx, `${name} · ${l.label}`, [!first && {key: 'use', icon: 'check', label: '用这张', note: g?.mix ? '轮换时也会出现其他几张' : ''}, {key: 'drop', icon: 'trash', label: '去掉这张', danger: true}]);
-        if (key === 'use') await api.vnSprite(name, null, {look: l.id, outfit: l.outfit, use: u});
+        const key = await menu(ctx, `${name} · ${l.label}`, [{key: 'view', icon: 'image', label: '看大图', note: '可以下载'}, !first && {key: 'use', icon: 'check', label: '用这张', note: g?.mix ? '轮换时也会出现其他几张' : ''}, {key: 'drop', icon: 'trash', label: '去掉这张', danger: true}]);
+        if (key === 'view') { viewSprites(name, l, u, () => groupSheet(name, l)); return; }
+        else if (key === 'use') await api.vnSprite(name, null, {look: l.id, outfit: l.outfit, use: u});
         else if (key === 'drop' && await ctx.confirm('去掉这张？', '酒馆里的图片文件也会删掉。')) await api.vnSprite(name, null, {look: l.id, outfit: l.outfit, drop: u});
       } catch (error) { ctx.notify(error.message, {error: true}); }
       if (d.live) paint();
@@ -338,7 +355,8 @@ export function vnApp(ctx) {
     if (!g) throw Error('这个浏览器不能处理图片');
     g.drawImage(img, 0, 0);
     const data = g.getImageData(0, 0, canvas.width, canvas.height);
-    if (cut) cutBackground(data.data, canvas.width, canvas.height, strength);
+    // Drawn with a transparent background (NovelAI V5): already cut out.
+    if (cut && !clearEdges(data.data, canvas.width, canvas.height)) cutBackground(data.data, canvas.width, canvas.height, strength);
     for (const t of taps) eraseAt(data.data, canvas.width, canvas.height, t.x, t.y, strength);
     g.putImageData(data, 0, 0);
     return canvas;
@@ -450,6 +468,7 @@ export function vnApp(ctx) {
     else if (f === 'vn-narrate') save({narrate: e.target.checked});
     else if (f === 'vn-opacity') save({opacity: Number(e.target.value) / 100});
     else if (f === 'vn-rule') save({rule: e.target.value});
+    else if (f === 'vn-body') { try { api.saveNarration({body: e.target.value}); } catch (error) { ctx.notify(error.message, {error: true}); } render(); }
   });
   v.refresh = render;
   render();

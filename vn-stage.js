@@ -65,20 +65,6 @@ const CSS = `
 .vn-black{background:#000;z-index:4}
 .sttts-vn[data-fx] .vn-black[data-on]{animation:vn-black 2.3s ease}
 @keyframes vn-black{0%{opacity:0}25%,55%{opacity:1}100%{opacity:0}}
-.vn-mark{position:absolute;z-index:6;pointer-events:none;font:900 clamp(28px,4vw,46px)/1 var(--vn-font);color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.35);white-space:nowrap;animation:vn-mark 1.9s ease forwards}
-.vn-actor .vn-mark{top:2%;left:62%}
-.vn-box>.vn-mark{top:-62px;left:clamp(150px,18vw,230px)}
-.vn-mark[data-mark=surprise]{color:var(--vn-plate);-webkit-text-stroke:2px #fff;font-size:clamp(34px,5vw,58px)}
-.vn-mark[data-mark=heart]{color:#ff6b9a}
-.vn-mark[data-mark=blush]{color:#ff7aa8;font-size:clamp(20px,3vw,30px);letter-spacing:-.1em}
-.vn-mark[data-mark=note]{color:#ffd46b;animation-name:vn-note}
-.vn-mark[data-mark=dots]{letter-spacing:.1em}
-.vn-mark:is([data-mark=sweat],[data-mark=drop]){animation-name:vn-drip}
-.vn-mark[data-mark=anger]{animation-name:vn-anger}
-@keyframes vn-mark{0%{opacity:0;transform:scale(.3) translateY(10px)}12%{opacity:1;transform:scale(1.25)}22%{transform:scale(1)}80%{opacity:1;transform:none}100%{opacity:0;transform:translateY(-14px)}}
-@keyframes vn-anger{0%{opacity:0;transform:scale(.3)}10%{opacity:1;transform:scale(1.3)}20%{transform:scale(.95)}30%{transform:scale(1.15)}40%,80%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.1)}}
-@keyframes vn-drip{0%{opacity:0;transform:translateY(-8px)}15%{opacity:1}75%{opacity:1}100%{opacity:0;transform:translateY(26px)}}
-@keyframes vn-note{0%{opacity:0;transform:translate(0,10px) rotate(-10deg)}15%{opacity:1}50%{transform:translate(10px,-14px) rotate(8deg)}85%{opacity:1}100%{opacity:0;transform:translate(-4px,-34px) rotate(-6deg)}}
 .vn-cast{position:absolute;inset:0;pointer-events:none}
 .vn-actor{position:absolute;bottom:0;left:50%;height:min(92%,150vw);transform:translateX(-50%);transition:left .55s cubic-bezier(.22,1,.36,1),opacity .45s,filter .35s;opacity:0;filter:drop-shadow(0 10px 24px rgba(0,0,0,.35))}
 .vn-actor img{transform-origin:50% 100%;transition:transform .45s cubic-bezier(.22,1,.36,1),filter .45s}
@@ -98,8 +84,6 @@ const CSS = `
 @keyframes vn-bounce{0%,100%{transform:none}22%{transform:translateY(-3.5%)}45%{transform:none}65%{transform:translateY(-1.6%)}82%{transform:none}}
 .sttts-vn[data-fx] .vn-actor[data-tremble] img{animation:vn-tremble .7s linear}
 @keyframes vn-tremble{0%,100%{transform:none}10%,50%,90%{transform:translateX(-.7%)}30%,70%{transform:translateX(.7%)}}
-.sttts-vn[data-fx][data-punch] .vn-stage{animation:vn-punch .5s cubic-bezier(.2,1.4,.4,1)}
-@keyframes vn-punch{40%{transform:scale(1.045)}}
 .sttts-vn[data-fx][data-shake=big] .vn-stage{animation:vn-shake-big .75s linear}
 @keyframes vn-shake-big{0%,100%{transform:none}10%{transform:translate(-18px,8px) rotate(-.6deg)}20%{transform:translate(16px,-10px) rotate(.5deg)}30%{transform:translate(-14px,6px)}45%{transform:translate(10px,-5px)}60%{transform:translate(-7px,3px)}80%{transform:translate(3px,-1px)}}
 .sttts-vn[data-fx][data-shake] .vn-stage{animation:vn-shake .42s linear}
@@ -180,6 +164,31 @@ const CSS = `
 .vn-title[data-out]{opacity:0;pointer-events:none}
 .sttts-vn[data-fx] .vn-title strong{animation:vn-rise 1.1s cubic-bezier(.22,1,.36,1)}
 @keyframes vn-rise{from{opacity:0;transform:translateY(14px);letter-spacing:.5em}}
+/* 镜头: the scene (background and people, not the text box) pushes in, snaps, sways or tilts toward whoever speaks. */
+.vn-bg,.vn-cast{transform-origin:var(--vn-focus,50%) 38%}
+.sttts-vn[data-fx][data-cam=push] :is(.vn-bg,.vn-cast){animation:vn-cam-push 2.8s cubic-bezier(.33,0,.2,1)}
+.sttts-vn[data-fx][data-cam=snap] :is(.vn-bg,.vn-cast){animation:vn-cam-snap 1.2s cubic-bezier(.2,.9,.25,1)}
+.sttts-vn[data-fx][data-cam=sway] :is(.vn-bg,.vn-cast){animation:vn-cam-sway 2.2s ease-in-out}
+.sttts-vn[data-fx][data-cam=tilt] :is(.vn-bg,.vn-cast){animation:vn-cam-tilt 2.2s cubic-bezier(.33,0,.2,1)}
+@keyframes vn-cam-push{0%{transform:none}40%,72%{transform:scale(1.055)}100%{transform:none}}
+@keyframes vn-cam-snap{0%{transform:none}14%{transform:scale(1.1)}38%{transform:scale(1.075)}100%{transform:none}}
+@keyframes vn-cam-sway{0%,100%{transform:none}22%{transform:scale(1.03) translate(.5%,-.3%) rotate(.3deg)}48%{transform:scale(1.03) translate(-.45%,.25%) rotate(-.25deg)}74%{transform:scale(1.03) translate(.3%,.2%) rotate(.18deg)}}
+@keyframes vn-cam-tilt{0%{transform:none}30%,74%{transform:scale(1.05) rotate(-1.1deg)}100%{transform:none}}
+/* 集中线: lines rushing in toward whoever speaks (surprise, anger). */
+.vn-lines{position:absolute;inset:-12%;pointer-events:none;opacity:0;z-index:3;--vn-line-ink:rgba(255,255,255,.55);background:repeating-conic-gradient(from 0deg at var(--vn-focus,50%) 40%,transparent 0deg 2.1deg,var(--vn-line-ink) 2.3deg 2.6deg,transparent 2.8deg 4.9deg,var(--vn-line-ink) 5deg 5.15deg,transparent 5.3deg 7.4deg);-webkit-mask:radial-gradient(ellipse at var(--vn-focus,50%) 40%,transparent 30%,#000 72%);mask:radial-gradient(ellipse at var(--vn-focus,50%) 40%,transparent 30%,#000 72%)}
+.vn-lines[data-kind=dark]{--vn-line-ink:rgba(30,0,8,.6)}
+.sttts-vn[data-fx] .vn-lines[data-on]{animation:vn-lines .8s ease-out}
+@keyframes vn-lines{0%{opacity:0;transform:scale(1.22)}16%{opacity:1}100%{opacity:0;transform:scale(1)}}
+.vn-tint[data-tint=warm]{background:radial-gradient(ellipse at 12% 0%,rgba(255,206,140,.42),transparent 58%),radial-gradient(ellipse at center,transparent 62%,rgba(255,190,120,.22) 100%)}
+/* A CG behind a blur does not drift (a moving blur is the heaviest thing on the stage). */
+.sttts-vn[data-cg]:is([data-whole],[data-hidden]) .vn-bg-layer[data-on]{animation:none}
+.sttts-vn[data-fx]:not([data-lite]) .vn-bg-layer[data-on]{will-change:transform}
+/* 手机: no drifting background, no blur behind the text box and the menus, no shadow redrawn under moving people. */
+.sttts-vn[data-lite][data-fx] .vn-bg-layer[data-on]:not([data-reveal]){animation:none}
+.sttts-vn[data-lite][data-fx] .vn-bg-layer[data-on][data-reveal]{animation:vn-reveal 1.1s cubic-bezier(.22,1,.36,1)}
+.sttts-vn[data-lite] :is(.vn-box,.vn-menu button,.vn-more,.vn-log){-webkit-backdrop-filter:none;backdrop-filter:none}
+.sttts-vn[data-lite] .vn-actor{filter:none}
+.sttts-vn[data-lite] .vn-actor[data-dim]{filter:brightness(.58) saturate(.85)}
 @media (max-width:600px){
  .sttts-vn{font-size:15px}
  .vn-box{min-height:clamp(120px,27vh,190px);padding:26px 16px 18px;border-radius:16px;width:calc(100% - 16px);bottom:max(8px,env(safe-area-inset-bottom))}
@@ -188,8 +197,6 @@ const CSS = `
  .vn-name{font-size:15px;min-width:86px;padding:4px 16px;top:-16px}
  .vn-menu{right:0;gap:4px;bottom:calc(100% + 22px)}
  .vn-menu button{padding:4px 10px;font-size:12px}
- .vn-mark{font-size:26px}
- .vn-box>.vn-mark{top:-52px;left:110px}
  .vn-actor{height:min(80%,200vw)}
  .vn-log li{grid-template-columns:4.5em 1fr auto;gap:8px}
 }
@@ -216,7 +223,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', '视觉小说');
   root.tabIndex = -1;
-  root.innerHTML = `<div class="vn-stage"><div class="vn-bg"><div class="vn-bg-layer"></div><div class="vn-bg-layer"></div><div class="vn-fit"></div></div><div class="vn-cast"></div><div class="vn-tint"></div><div class="vn-flash"></div><div class="vn-black"></div></div>
+  root.innerHTML = `<div class="vn-stage"><div class="vn-bg"><div class="vn-bg-layer"></div><div class="vn-bg-layer"></div><div class="vn-fit"></div></div><div class="vn-cast"></div><div class="vn-lines"></div><div class="vn-tint"></div><div class="vn-flash"></div><div class="vn-black"></div></div>
     <div class="vn-box"><nav class="vn-menu" aria-label="视觉小说菜单"><button data-vn="auto" aria-pressed="false">自动</button><button data-vn="skip" aria-pressed="false">快进</button><button data-vn="more" aria-expanded="false" aria-label="更多">⋯</button><div class="vn-more" hidden><button data-vn="back">上一页</button><button data-vn="log">记录</button><button data-vn="voice" aria-pressed="false">语音</button><button data-vn="hide">隐藏</button><button data-vn="full" aria-pressed="false">全屏</button><button data-vn="close" aria-label="退出视觉小说">退出</button></div></nav><div class="vn-name" hidden><span></span></div><div class="vn-face"></div><span class="vn-voice" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p class="vn-text" aria-live="polite"></p><span class="vn-next" aria-hidden="true">▼</span>
       <div class="vn-input"><textarea rows="2" placeholder="接下来你要说什么、做什么？空着发送就让故事接着写" aria-label="接下来的剧情"></textarea><button data-vn="send">发送</button></div></div>
     <div class="vn-log" hidden><header><span>记 录</span><button data-vn="log-close">返回</button></header><ol></ol></div>
@@ -231,7 +238,10 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   let auto = false, skip = false, autoTimer = 0, skipTimer = 0, hidden = false, cg = false, layer = 0, bgUrl = '', ended = false, waiting = false, clock = 0, phase = 'idle', titleTimer = 0;
   const actors = new Map(), log = [], lookOf = new Map();
   let said = '', weatherAge = 0, alone = false, cgPages = 0, lastTint = '';
-  const fx = createFx({doc, host: $('.vn-stage'), after: castEl});
+  // A phone (or a small computer): the stage leaves out what costs the most to draw (see data-lite in the styles).
+  const lite = !!win.matchMedia?.('(pointer: coarse)').matches || (win.navigator?.hardwareConcurrency || 8) <= 4;
+  root.toggleAttribute('data-lite', lite);
+  const fx = createFx({doc, host: $('.vn-stage'), after: castEl, lite});
   const fxOn = () => root.hasAttribute('data-fx') && !skip;
   // Pages seen (to go back to) and the messages read so far (going on after going back).
   const seen = [], loaded = [];
@@ -280,7 +290,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     if (flash) blink('');
   }
   function blink(kind) { const f = $('.vn-flash'); f.dataset.kind = kind; f.removeAttribute('data-on'); void f.offsetWidth; f.setAttribute('data-on', ''); }
-  /** One of the overlays (tint, black) or the stage (shake, punch) plays its animation again. */
+  /** One of the overlays (tint, black) or the stage (shake, a camera move) plays its animation again. */
   function replay(el, attr, value = '', ms = 0) {
     el.removeAttribute(attr); void el.offsetWidth; el.setAttribute(attr, value);
     if (ms) win.setTimeout(() => { if (el.getAttribute(attr) === value) el.removeAttribute(attr); }, ms);
@@ -350,18 +360,26 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     else if (kind === 'sink') actor?.el.setAttribute('data-sink', '');
     else if (actor) replay(actor.el, 'data-' + kind, '', {hop: 520, bounce: 780, tremble: 720}[kind] || 600);
   }
-  const MARK = {anger: '💢', surprise: '！', sweat: '💦', heart: '♥', blush: '///', note: '♪', drop: '💧', dots: '…', sigh: '💨'};
-  /** A sign over the speaker's head (or by their name in the box when they are not on the stage). */
-  function mark(kind, actor) {
-    if (!MARK[kind]) return;
-    for (const old of root.querySelectorAll('.vn-mark')) old.remove();
-    const el = doc.createElement('span');
-    el.className = 'vn-mark'; el.dataset.mark = kind; el.textContent = MARK[kind];
-    el.setAttribute('aria-hidden', 'true');
-    (actor ? actor.el : box).append(el);
-    win.setTimeout(() => el.remove(), 2000);
+  /** 镜头 and 集中线 aim at whoever speaks (the middle of the stage when no one stands there). */
+  function focusOn(actor) {
+    const r = root.getBoundingClientRect();
+    let x = 50;
+    if (actor && r.width) { const a = actor.el.getBoundingClientRect(); x = (a.left + a.width / 2 - r.left) / r.width * 100; }
+    root.style.setProperty('--vn-focus', Math.max(12, Math.min(88, x)).toFixed(1) + '%');
   }
-  /** Where sparkles or hearts start: by the speaker's head, else above the text box. */
+  function camera(kind, actor) {
+    if (!kind) return;
+    focusOn(actor);
+    replay(root, 'data-cam', kind, {push: 2900, snap: 1250, sway: 2300, tilt: 2300}[kind] || 2000);
+  }
+  function rush(kind, actor) {
+    if (!kind) return;
+    focusOn(actor);
+    const lines = $('.vn-lines');
+    lines.dataset.kind = kind;
+    replay(lines, 'data-on', '', 850);
+  }
+  /** Where light gathers: by the speaker's head, else above the text box. */
   function headOf(actor) {
     const r = root.getBoundingClientRect();
     if (actor) { const a = actor.el.getBoundingClientRect(); return [a.left - r.left + a.width / 2, a.top - r.top + a.height * 0.2]; }
@@ -375,12 +393,12 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       if (s.part) return;
       const f = lineFx(s.emotion);
       move(f.move, actor);
-      mark(f.mark, actor);
+      camera(f.camera, actor);
+      rush(f.lines, actor);
       if (f.burst) { const [x, y] = headOf(actor); fx.burst(f.burst, x, y); }
       // The same glow line after line would only tire the eyes: once, until the feeling changes.
       if (f.tint && f.tint !== lastTint) { const t = $('.vn-tint'); t.dataset.tint = f.tint; replay(t, 'data-on', '', 2000); }
       lastTint = f.tint;
-      if (f.punch) replay(root, 'data-punch', '', 520);
       return;
     }
     const f = storyFx(s.text);

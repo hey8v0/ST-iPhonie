@@ -4,7 +4,7 @@ import {RequestLog} from './request-log.js';
 import {PROMPT_BLOCKS, normalizePromptRules} from './prompt-rules.js';
 import { normalizeVn, spriteRequest } from './vn.js';
 import { MomentStore } from './moments-store.js';
-import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
+import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, missingLink, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
@@ -1392,7 +1392,15 @@ export class TTSBackend {
             this.emit('draw', { phase: 'generating' });
             if (quote.vibes.used.length) Object.assign(request.body.parameters, vibeParameters(await this.vibeEncodings(quote.vibes.used, request.params.model, signal)));
             this.novelai.relay = this.settings.draw.relay.url;
-            const blob = await this.novelai.generate(request.body, signal);
+            let blob;
+            try { blob = await this.novelai.generate(request.body, signal); }
+            catch (error) {
+                // 透明背景's flags are not in NovelAI's public documents: refused, the picture is asked for once more without them.
+                const p = request.body.parameters;
+                if (!p.straight_alpha || ![400, 422, 500].includes(error?.status)) throw error;
+                delete p.straight_alpha; delete p.tag_hint_transparent_background;
+                blob = await this.novelai.generate(request.body, signal);
+            }
             this.assertOpen();
             const info = this.pictureInfo('nai', { params: request.params, seed: request.seed, prompt: request.body.input }, { negative, characters });
             const photo = await this.library.addPhoto({ name: (name || 'NovelAI') + '-' + request.seed + '.png', blob, info });
@@ -1567,7 +1575,7 @@ export class TTSBackend {
         const answer = await this.musicFetch(address, 'link');
         if (answer === AUDIO) return own();
         const link = readLink(s, answer);
-        if (!link) throw Error(`「${s.name}」没有给出这首歌的播放链接（可能要会员，或者「链接在哪」填得不对）`);
+        if (!link) throw Error(`「${s.name}」没有给出播放链接：${missingLink(s, answer)}`);
         return playable(link, globalThis.location?.protocol);
     }
     async musicLyric(sourceId, songId, hint = {}) {

@@ -91,7 +91,26 @@ export const fill = (template, values) => String(template).replace(/\{\{(query|i
 export function readLink(source, json) {
   const value = typeof json === 'string' ? json : pick(json, source.urlPath);
   const link = typeof value === 'string' ? value.trim() : '';
-  return /^https?:\/\//i.test(link) ? link : '';
+  if (/^https?:\/\//i.test(link)) return link;
+  // 「链接在哪」 not matching this backend's answer (or pointing at the list around the link): the link is looked for.
+  return value === null ? '' : findLink(value !== undefined && typeof value === 'object' ? value : json);
+}
+const LINK_KEYS = /^(?:url|src|link|play_?url|audio_?url|music_?url|mp3|file)$/i, AUDIO_FILE = /\.(?:mp3|m4a|flac|aac|ogg|opus|wav)(?:[?#]|$)/i;
+/** The first web address in an answer that looks like the song: under a key such as url / src, or ending like an audio file. */
+function findLink(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 5) return '';
+  const entries = Array.isArray(value) ? value.map((v, i) => [String(i), v]) : Object.entries(value);
+  for (const [key, v] of entries) if (typeof v === 'string' && /^https?:\/\/\S+$/i.test(v.trim()) && (LINK_KEYS.test(key) || AUDIO_FILE.test(v))) return v.trim();
+  for (const [, v] of entries) { const found = findLink(v, depth + 1); if (found) return found; }
+  return '';
+}
+/** Why a 取歌 answer gave no link, in words: an empty value where the link goes, or no such place in the answer. */
+export function missingLink(source, json) {
+  const value = typeof json === 'string' ? json : pick(json, source.urlPath), path = source.urlPath || '整个回答';
+  if (value === null || value === '') return `音源说这首歌没有播放链接（「${path}」是空的）：常见的原因是要会员、没有版权，或者音源服务器不在国内（网易云 API 搭在海外时很多歌拿不到链接）`;
+  let shown = '';
+  try { shown = typeof json === 'string' ? json : JSON.stringify(json); } catch { /* not shown */ }
+  return `在音源的回答里没找到「${path}」，也没认出别的播放链接；回答的开头是：${String(shown).replace(/\s+/g, ' ').slice(0, 160)}`;
 }
 /** An answer that is the song itself (a stream, or a redirect that ended at the file) rather than JSON about it. */
 export const isAudio = type => /^(?:audio|video)\/|octet-stream|mpegurl/i.test(String(type || ''));

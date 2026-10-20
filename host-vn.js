@@ -37,7 +37,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     const pics = [...own, ...inline, ...shownPictures(id, m.mes || '', [...own, ...inline])];
     const tags = sounds() ? parseSounds(m.mes || '') : [], songs = musicOn() ? parseBgm(m.mes || '') : [];
     const skip = [...(settings().narration?.skip || []), ...(vn().skip || []), 'style', 'script'];
-    return storySteps(m.mes || '', lines, {pics, sounds: tags, bgm: songs, skip}).map(s => s.kind === 'say' ? {...s, id, voiced: !!voiced(lines[s.line])} : {...s, id});
+    return storySteps(m.mes || '', lines, {pics, sounds: tags, bgm: songs, skip, body: settings().narration?.body}).map(s => s.kind === 'say' ? {...s, id, voiced: !!voiced(lines[s.line])} : {...s, id});
   }
   /**
    * Pictures another plugin added to the message on the page only (智绘姬 and the like): each one where the text

@@ -1,6 +1,7 @@
 // 视觉小说 effects drawn on a canvas over the stage: weather that stays (rain, snow, petals, leaves, stars, fireflies,
-// embers) and bursts that come and go (sparkles, hearts) around whoever speaks. Nothing runs while nothing shows: the
-// frame loop stops when the sky is clear and the last particle is gone.
+// embers) and light that comes and goes around whoever speaks (glints of warm light, soft bokeh). Nothing runs while
+// nothing shows: the frame loop stops when the sky is clear and the last particle is gone. On a phone (lite) the canvas
+// is drawn at its CSS size and with fewer particles.
 
 const TAU = Math.PI * 2;
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -12,13 +13,14 @@ const KINDS = {
     make: (w, h, fill) => ({x: rand(-0.1 * w, 1.15 * w), y: fill ? rand(-h, h) : rand(-h * 0.3, -10), len: rand(14, 28), v: rand(950, 1350), a: rand(0.25, 0.55)}),
     move: (p, dt) => { p.y += p.v * dt; p.x -= p.v * 0.16 * dt; },
     out: (p, w, h) => p.y - p.len > h,
-    draw(g, p) { g.strokeStyle = `rgba(200,218,255,${p.a})`; g.lineWidth = 1.2; g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x + p.len * 0.16, p.y - p.len); g.stroke(); },
+    // All the drops in one path: one stroke a frame instead of one a drop.
+    drawAll(g, list) { g.strokeStyle = 'rgba(200,218,255,.42)'; g.lineWidth = 1.2; g.beginPath(); for (const p of list) { g.moveTo(p.x, p.y); g.lineTo(p.x + p.len * 0.16, p.y - p.len); } g.stroke(); },
   },
   snow: {
     make: (w, h, fill) => ({x: rand(0, w), y: fill ? rand(-h, h) : rand(-60, -6), r: rand(1.4, 4.2), v: rand(28, 80), t: rand(0, TAU), sway: rand(14, 40)}),
     move: (p, dt) => { p.t += dt * 1.3; p.y += p.v * dt; p.x += Math.sin(p.t) * p.sway * dt; },
     out: (p, w, h) => p.y - p.r > h,
-    draw(g, p) { g.fillStyle = `rgba(255,255,255,${0.45 + p.r / 9})`; g.beginPath(); g.arc(p.x, p.y, p.r, 0, TAU); g.fill(); },
+    drawAll(g, list) { g.fillStyle = 'rgba(255,255,255,.78)'; g.beginPath(); for (const p of list) { g.moveTo(p.x + p.r, p.y); g.arc(p.x, p.y, p.r, 0, TAU); } g.fill(); },
   },
   petals: {
     make: (w, h, fill) => ({x: rand(-0.2 * w, w), y: fill ? rand(-h, h) : rand(-60, -10), s: rand(5, 10), vx: rand(25, 70), vy: rand(40, 90), r: rand(0, TAU), vr: rand(-2, 2), t: rand(0, TAU), hue: rand(330, 350), light: rand(82, 92)}),
@@ -53,11 +55,36 @@ const KINDS = {
   },
 };
 
-function star(g, r) { g.beginPath(); for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4, d = i % 2 ? r * 0.32 : r; g.lineTo(Math.cos(a) * d, Math.sin(a) * d); } g.closePath(); g.fill(); }
-function heart(g, s) { g.beginPath(); g.moveTo(0, s * 0.35); g.bezierCurveTo(-s, -s * 0.3, -s * 0.45, -s, 0, -s * 0.45); g.bezierCurveTo(s * 0.45, -s, s, -s * 0.3, 0, s * 0.35); g.fill(); }
+/** Light, as small pictures drawn once and stamped (a gradient per particle per frame costs too much on a phone). */
+const LIGHT = {warm: [255, 222, 168], white: [255, 250, 240], pink: [255, 176, 206], gold: [255, 206, 120]};
+function lightSprite(doc, color, kind) {
+  const c = doc.createElement('canvas'), n = 64;
+  c.width = c.height = n;
+  let g = null;
+  try { g = c.getContext('2d'); } catch { /* none */ }
+  if (!g) return null;
+  const [r, gr, b] = LIGHT[color] || LIGHT.white, rgba = a => `rgba(${r},${gr},${b},${a})`;
+  if (kind === 'bokeh') {
+    // A soft disc, a little brighter at the rim, as an out-of-focus light.
+    const d = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+    d.addColorStop(0, rgba(.55)); d.addColorStop(.72, rgba(.62)); d.addColorStop(.86, rgba(.4)); d.addColorStop(1, rgba(0));
+    g.fillStyle = d; g.fillRect(0, 0, n, n);
+  } else if (kind === 'flare') {
+    // A four-pointed glint: two thin streaks crossed over a small glow.
+    const d = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+    d.addColorStop(0, rgba(1)); d.addColorStop(.18, rgba(.5)); d.addColorStop(.45, rgba(0));
+    g.fillStyle = d; g.fillRect(0, 0, n, n);
+    for (const [w, h] of [[n, 2.2], [2.2, n]]) { const l = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2); l.addColorStop(0, rgba(.95)); l.addColorStop(1, rgba(0)); g.fillStyle = l; g.fillRect((n - w) / 2, (n - h) / 2, w, h); }
+  } else {
+    const d = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+    d.addColorStop(0, rgba(1)); d.addColorStop(.25, rgba(.55)); d.addColorStop(.6, rgba(.12)); d.addColorStop(1, rgba(0));
+    g.fillStyle = d; g.fillRect(0, 0, n, n);
+  }
+  return c;
+}
 
-/** host: the element the canvas covers (its first child after `after`, so the text box stays on top). */
-export function createFx({doc, host, after = null}) {
+/** host: the element the canvas covers (its first child after `after`, so the text box stays on top). lite: a phone. */
+export function createFx({doc, host, after = null, lite = false}) {
   const win = doc.defaultView;
   const canvas = doc.createElement('canvas');
   canvas.className = 'vn-fx';
@@ -66,9 +93,10 @@ export function createFx({doc, host, after = null}) {
   let g = null, tried = false, raf = 0, w = 0, h = 0, dpr = 1, last = 0, weather = '';
   let sky = [], bits = [];
   const ctx = () => { if (!tried) { tried = true; try { g = canvas.getContext('2d'); } catch { g = null; } } return g; };
-  const scale = () => Math.min(1.4, Math.max(0.45, (w * h) / (1920 * 1080)));
+  const scale = () => Math.min(1.4, Math.max(0.45, (w * h) / (1920 * 1080))) * (lite ? 0.55 : 1);
+  const sprites = new Map(), spriteOf = (color, kind) => { const key = color + kind; if (!sprites.has(key)) sprites.set(key, lightSprite(doc, color, kind)); return sprites.get(key); };
   function size() {
-    dpr = Math.min(2, win.devicePixelRatio || 1);
+    dpr = lite ? 1 : Math.min(2, win.devicePixelRatio || 1);
     w = host.clientWidth || win.innerWidth; h = host.clientHeight || win.innerHeight;
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
   }
@@ -96,16 +124,25 @@ export function createFx({doc, host, after = null}) {
     }
     sky = sky.filter(p => !p.gone);
     g.globalCompositeOperation = 'source-over';
-    for (const p of sky) { if (p.kind === 'fireflies') g.globalCompositeOperation = 'lighter'; KINDS[p.kind].draw(g, p); g.globalCompositeOperation = 'source-over'; }
-    // The bursts.
+    for (const kind of new Set(sky.map(p => p.kind))) {
+      const k = KINDS[kind], list = sky.filter(p => p.kind === kind);
+      if (kind === 'fireflies') g.globalCompositeOperation = 'lighter';
+      if (k.drawAll) k.drawAll(g, list); else for (const p of list) k.draw(g, p);
+      g.globalCompositeOperation = 'source-over';
+    }
+    // The light around the speaker: it grows in and fades out, added to what is under it.
+    g.globalCompositeOperation = 'lighter';
     for (const b of bits) {
       b.life -= dt / b.span;
-      b.vy += b.fall * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.r += b.vr * dt;
-      const a = Math.max(0, Math.min(1, b.life * 1.6));
-      g.save(); g.translate(b.x, b.y); g.rotate(b.r); g.globalAlpha = a; g.fillStyle = b.color;
-      if (b.shape === 'heart') heart(g, b.s); else star(g, b.s * (0.6 + 0.4 * Math.sin(b.life * 9)));
-      g.restore();
+      b.x += b.vx * dt; b.y += b.vy * dt; b.t += dt;
+      const sprite = spriteOf(b.color, b.kind);
+      if (!sprite || b.life <= 0) continue;
+      const a = Math.sin(Math.PI * Math.min(1, 1 - b.life)) * b.peak * (b.kind === 'flare' ? 0.75 + 0.25 * Math.sin(b.t * 7) : 1);
+      g.globalAlpha = Math.max(0, a);
+      const s = b.s * (b.kind === 'bokeh' ? 1 : 0.8 + 0.2 * Math.sin(b.t * 3));
+      g.drawImage(sprite, b.x - s, b.y - s, s * 2, s * 2);
     }
+    g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
     bits = bits.filter(b => b.life > 0);
     if (weather || sky.length || bits.length) raf = win.requestAnimationFrame(frame);
     else { raf = 0; g.clearRect(0, 0, w, h); }
@@ -126,12 +163,20 @@ export function createFx({doc, host, after = null}) {
       run();
     },
     get current() { return weather; },
-    /** Sparkles or hearts around a point (x, y in the stage's pixels). */
+    /**
+     * Light around a point (x, y in the stage's pixels): 'glints' (warm motes rising, a few glints among them) or
+     * 'bokeh' (soft out-of-focus lights drifting over the upper stage).
+     */
     burst(kind, x, y) {
       if (!ctx()) return;
       if (!raf) size();
-      if (kind === 'hearts') for (let i = 0; i < 9; i++) bits.push({shape: 'heart', x: x + rand(-50, 50), y: y + rand(-10, 30), vx: rand(-30, 30), vy: rand(-140, -70), fall: 30, r: rand(-0.4, 0.4), vr: rand(-0.6, 0.6), s: rand(9, 17), color: `hsl(${rand(335, 355)},90%,${rand(68, 80)}%)`, life: 1, span: rand(1.3, 1.9)});
-      else for (let i = 0; i < 16; i++) { const a = rand(0, TAU), v = rand(90, 240); bits.push({shape: 'star', x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 40, fall: 160, r: rand(0, TAU), vr: rand(-3, 3), s: rand(5, 10), color: i % 3 ? '#fff6c8' : '#ffd46b', life: 1, span: rand(0.7, 1.1)}); }
+      const few = lite ? 0.6 : 1, mote = (o) => bits.push({t: rand(0, TAU), ...o});
+      if (kind === 'glints') {
+        for (let i = 0; i < Math.round(16 * few); i++) mote({kind: 'glow', color: i % 4 ? 'warm' : 'gold', x: x + rand(-170, 170), y: y + rand(-60, 110), vx: rand(-12, 12), vy: rand(-70, -26), s: rand(5, 15), peak: rand(.45, .9), life: 1, span: rand(1.6, 2.6)});
+        for (let i = 0; i < Math.round(4 * few); i++) mote({kind: 'flare', color: 'white', x: x + rand(-140, 140), y: y + rand(-50, 70), vx: 0, vy: rand(-18, -6), s: rand(16, 30), peak: rand(.6, .95), life: 1, span: rand(1.1, 1.7)});
+      } else if (kind === 'bokeh') {
+        for (let i = 0; i < Math.round(12 * few); i++) mote({kind: 'bokeh', color: i % 3 ? 'pink' : 'white', x: x + rand(-0.4, 0.4) * w, y: rand(0.08, 0.62) * h, vx: rand(-14, 14), vy: rand(-22, -6), s: rand(16, 46), peak: rand(.22, .48), life: 1, span: rand(2.4, 3.6)});
+      }
       run();
     },
     resize() { if (raf) size(); },

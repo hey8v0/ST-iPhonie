@@ -10,7 +10,7 @@
 // Redrawing adds a version (the old ones stay for comparison); deleting removes the shown version and its file.
 // When the last version is deleted the record becomes {removed: true, versions: []}, so it is not drawn again
 // automatically. Older records ({url, seed, …}) read as a single version.
-import {parsePictures, pictureInputs, planRequest, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
+import {parsePictures, pictureInputs, planRequest, planLength, tagTextRequest, tagTextAnswer, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
 import {tokenBudget, loadCounter, countField, tagCost, estimateTokens} from './core/tokens.js';
 import {openImageViewer} from './image-viewer.js';
 import {askText} from './host-ask.js';
@@ -140,23 +140,32 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     }
     return out;
   }
+  /** The pictures of a reply asked for on their own: put in, asked once more when none came out. {text, count} */
+  async function planOnce(id, source) {
+    let last = {text: source, count: 0};
+    for (let round = 0; round < 2 && !last.count; round++) {
+      const reply = await backend.generateText(context(), {prompt: await pictureRequest(id, source), trimNames: false, responseLength: planLength(settings(), activeDrawPreset().count)});
+      last = insertPlanned(source, reply);
+      if (!last.count) backend.reportDiagnostic?.('正文出图', {message: round ? '又试了一次，还是没有挑出画面' : '没有挑出画面，再试一次', reply: String(reply ?? '').slice(0, 2000)}, 'warn');
+    }
+    return last;
+  }
+  const activeDrawPreset = () => { const s = settings(); return s.draw.presets.find(p => p.id === s.draw.activePreset) || s.draw.presets[0]; };
   /**
    * 'separate' mode: after a reply is written, ask the model (its own request) for the picture blocks and put them
    * into the reply after the paragraphs it chose. force: plan again, replacing the blocks already there.
    */
   async function planPictures(id, {force = false} = {}) {
-    const ctx = context(), s = settings(), message = ctx.chat[id];
+    const ctx = context(), message = ctx.chat[id];
     if (!message || message.is_user || message.is_system || planning.has(id)) return false;
     if (!force && parsePictures(message.mes).length) return false;
     planning.add(id);
     notice('正在给这条回复挑画面……');
     try {
       const source = force ? withoutPictures(message.mes) : message.mes;
-      const preset = s.draw.presets.find(p => p.id === s.draw.activePreset) || s.draw.presets[0];
-      const reply = await backend.generateText(ctx, {prompt: await pictureRequest(id, source), trimNames: false, responseLength: Math.min(4000, 500 + preset.count * 400)});
+      const {text, count} = await planOnce(id, source);
       if (context().chat[id] !== message) return false;
-      const {text, count} = insertPlanned(source, reply);
-      if (!count) throw Error('这次没有挑出画面，可以在小手机的「设置 → 正文」里点「给最新回复配图」再试一次');
+      if (!count) throw Error('这次没有挑出画面（试了两次），可以点这层楼右边的小手机工具按钮「给这层楼生图」再试；模型具体回了什么可以在小手机的「日志」App 里看');
       message.mes = text;
       if (Array.isArray(message.swipes)) message.swipes[message.swipe_id ?? 0] = text;
       await ctx.saveChat();
@@ -183,13 +192,19 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       // 正文联动手机: what happens on the phone is asked for at the end of the same request (【手机】).
       const phoneRule = phoned && phone?.wanted() ? await phone.rule() : '';
       const prompt = withPhone(asked, phoneRule);
-      const length = (wantVoice ? Math.min(3000, 400 + source.length * 2) : 0) + (wantPictures ? 500 + preset.count * 400 : 0) + (phoneRule ? 500 : 0);
-      const answer = await backend.generateText(ctx, {prompt, trimNames: false, responseLength: Math.min(6000, length)});
+      const length = (wantVoice ? Math.min(3000, 400 + source.length * 2) : 0) + (wantPictures ? planLength(s, preset.count) : 0) + (phoneRule ? 500 : 0);
+      const answer = await backend.generateText(ctx, {prompt, trimNames: false, responseLength: Math.min(10000, length)});
       if (context().chat[id] !== message) return {voiced: 0, pictured: 0};
       const {rest: reply, phone: sent} = phoneRule ? phoneSection(answer) : {rest: answer, phone: ''};
       let text = source, pictured = 0, voiced = 0;
       if (wantPictures) ({text, count: pictured} = insertPlanned(text, reply));
       if (wantVoice) ({text, count: voiced} = insertVoiced(text, reply, format));
+      // No pictures came out with the rest: they are asked for on their own (once more at most).
+      if (wantPictures && !pictured) {
+        backend.reportDiagnostic?.('正文出图', {message: '和配音一起请求时没有挑出画面，单独再请求一次', reply: String(reply ?? '').slice(0, 2000)}, 'warn');
+        ({text, count: pictured} = await planOnce(id, text));
+        if (context().chat[id] !== message) return {voiced: 0, pictured: 0};
+      }
       // The phone part is kept at the end of the reply like the story's own <phone> (shown as a note), then delivered.
       if (sent) {
         text = `${text}\n${sent}`;
@@ -200,7 +215,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
           phone.deliver(id).catch(() => {});
         }
       }
-      if (!voiced && !pictured) throw Error(wantVoice ? '这次没有配上音，可以在小手机的「设置 → 正文」里点「给最新回复配音」再试一次' : '这次没有挑出画面，可以在小手机的「设置 → 正文」里点「给最新回复配图」再试一次');
+      if (!voiced && !pictured) throw Error(wantVoice ? '这次没有配上音，可以在小手机的「设置 → 正文」里点「给最新回复配音」再试一次' : '这次没有挑出画面（试了两次），可以点这层楼右边的小手机工具按钮「给这层楼生图」再试；模型具体回了什么可以在小手机的「日志」App 里看');
       message.mes = text;
       if (Array.isArray(message.swipes)) message.swipes[message.swipe_id ?? 0] = text;
       await ctx.saveChat();
@@ -405,8 +420,22 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const message = context().chat[id];
     if (!message || !parsePictures(message.mes).some(t => t.hash === tag.hash)) throw Error('这条消息已经变了，找不到这张图');
     const before = tag.spec ? tag.body : tag.prompt;
+    // Reading the English tags in Chinese, and changing them the way the user says, with the phone's text model.
+    const ask = async (text, mode, wish = '') => {
+      if (!String(text).trim()) throw Error('框里是空的');
+      const answer = tagTextAnswer(await backend.generateText(context(), {prompt: tagTextRequest(settings(), text, mode, wish), plainText: true, trimNames: false, responseLength: Math.min(6000, 1500 + String(text).length * 3)}));
+      if (!answer) throw Error('模型没有回内容，再试一次');
+      return answer;
+    };
+    const chinese = text => /[\u4e00-\u9fff]/.test(text.replace(/^\s*(?:画幅|尺寸|场景|基础|描述|角色|人物|新外貌|登记|位置)\s*[:：][^｜|,，\n]*/gm, '').replace(/^\s*角色\s*[:：]\s*[^｜|]*/gm, ''));
     const after = await askText({doc: document, title: '改提示词再画', text: before, ok: '画',
-      hint: tag.spec ? '整个出图块都能改：场景、角色、站位。改的会写回正文里，以后重画也用它；之前画的几版还在，可以左右滑着比。' : '画这张图用的英文 tag。改的会写回正文里；之前画的几版还在，可以左右滑着比。'});
+      hint: (tag.spec ? '整个出图块都能改：场景、角色、站位。改的会写回正文里，以后重画也用它；之前画的几版还在，可以左右滑着比。' : '画这张图用的英文 tag。改的会写回正文里；之前画的几版还在，可以左右滑着比。')
+        + '\n\n看不懂英文，点「看中文」。想改又不知道怎么写 tag，就在「想怎么改」里直接说，比如「他笑得太得意了」「背景换成晚上」「两个人离远一点」，点「改」让模型来改。',
+      tools: [{label: '看中文', run: async text => ({note: await ask(text, 'translate')})}],
+      wish: {label: '改', placeholder: '想怎么改？比如：他笑得太得意了', run: async (text, wish) => {
+        if (!wish.trim() && !chinese(text)) return {note: '先在左边说说想怎么改，比如「表情温柔一点」「换成侧脸」。'};
+        return {text: await ask(text, 'revise', wish), note: '改好了，看一眼没问题就点「画」；不满意可以接着说，或者点「还原」。'};
+      }}});
     const value = after?.trim();
     if (!value) return false;
     const now = context().chat[id];

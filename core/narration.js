@@ -8,9 +8,11 @@
 export const NARRATOR = '旁白';
 /** Tags read past by default: the usual places for 小剧场, status bars and folded extras. */
 export const NARRATION_SKIP = Object.freeze(['小剧场', '状态栏', 'theater', 'status', 'statusbar', 'details']);
+/** Tags a preset wraps the story in: when a reply has one, only what is inside it is read. */
+export const NARRATION_BODY = Object.freeze(['content', '正文']);
 const RATES = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5];
 
-export const defaultNarration = () => ({enabled: false, voice: 'system', systemVoice: '', rate: 1, skip: [...NARRATION_SKIP]});
+export const defaultNarration = () => ({enabled: false, voice: 'system', systemVoice: '', rate: 1, skip: [...NARRATION_SKIP], body: [...NARRATION_BODY]});
 /** A tag name as typed (<小剧场>, 小剧场, </theater>): the name alone. */
 const tagName = value => String(value ?? '').replace(/[<>/\s]/g, '').slice(0, 40);
 /** 「开头…结尾」: a part that opens and closes with words of its own ([HUD_START]…[HUD_END]). */
@@ -27,6 +29,11 @@ export function cleanSkip(value) {
   const list = (Array.isArray(value) ? value : String(value ?? '').split(/[,，、;；\n]+/)).map(skipEntry).filter(Boolean);
   return [...new Set(list)].slice(0, 30);
 }
+/** 正文标签 as typed (content、<正文>): tag names only, no 「开头…结尾」 or comments. */
+export function cleanBody(value) {
+  const list = (Array.isArray(value) ? value : String(value ?? '').split(/[,，、;；\n]+/)).map(tagName).filter(t => t && !PAIR.test(t) && !t.startsWith('!--'));
+  return [...new Set(list)].slice(0, 10);
+}
 export function normalizeNarration(value) {
   const base = defaultNarration(), v = value && typeof value === 'object' ? value : {};
   const rate = Number(v.rate);
@@ -36,6 +43,7 @@ export function normalizeNarration(value) {
     systemVoice: String(v.systemVoice ?? '').slice(0, 300),
     rate: RATES.includes(rate) ? rate : base.rate,
     skip: v.skip === undefined ? base.skip : cleanSkip(v.skip),
+    body: v.body === undefined ? base.body : cleanBody(v.body),
   };
 }
 export const NARRATION_RATES = RATES;
@@ -55,10 +63,15 @@ function followingPanelEnd(text, start) {
     if (!/^(?:style|script)$/i.test(match[1])) return at;
   }
 }
-/** The parts of a reply not read: [start, end) ranges. */
-export function skippedRanges(raw, skip = NARRATION_SKIP) {
-  const text = String(raw ?? ''), out = [];
-  const add = re => { for (const m of text.matchAll(re)) if (m[0]) out.push([m.index, m.index + m[0].length]); };
+/**
+ * The parts of a reply not read: [start, end) ranges, in order. The reply is read from the start, so a tag named inside a
+ * part already skipped (a thinking block that lists 「`<details>` -> `<!-- SDC-end -->`」) opens nothing.
+ * body: the 正文标签; when the reply wraps its story in one, what is outside it is not read either.
+ */
+export function skippedRanges(raw, skip = NARRATION_SKIP, body = NARRATION_BODY) {
+  const text = String(raw ?? ''), finds = [];
+  // A finder gives the first part starting at or after `from`: [start, end], or null.
+  const add = re => finds.push(from => { re.lastIndex = from;const m = re.exec(text);return m ? [m.index, m.index + Math.max(1, m[0].length)] : null; });
   add(/<!--[\s\S]*?(?:-->|$)/g);
   add(/```[\s\S]*?(?:```|$)/g);
   // The phone's own tags, with what is inside (a picture's prompt, a sound's name, phone messages).
@@ -72,18 +85,45 @@ export function skippedRanges(raw, skip = NARRATION_SKIP) {
     const marker = /^<!--(.*?)-->$/.exec(tag);
     if (marker) {
       const name = escapeRe(marker[1]), open = new RegExp(`<!--\\s*${name}\\s*-->`, 'gi'), close = new RegExp(`<!--\\s*(?:/\\s*${name}|${name}\\s*(?:结束|END)|(?:结束|END)\\s*${name})\\s*-->`, 'gi'), nextOpen=new RegExp(open.source,'gi');
-      for (const m of text.matchAll(open)) {
+      finds.push(from => {
+        open.lastIndex = from;const m = open.exec(text);
+        if (!m) return null;
         close.lastIndex = m.index + m[0].length;const end = close.exec(text);
         nextOpen.lastIndex=m.index+m[0].length;const next=nextOpen.exec(text);
         const panelEnd=followingPanelEnd(text,m.index+m[0].length);
         // Do not borrow a later panel's closing marker across another opening marker.
-        out.push([m.index, end&&(!next||end.index<next.index) ? close.lastIndex : panelEnd]);
-      }
+        return [m.index, end&&(!next||end.index<next.index) ? close.lastIndex : panelEnd];
+      });
       continue;
     }
     if (tag.includes('…')) { const [open, close] = tag.split('…').map(escapeRe); add(new RegExp(`${open}[\\s\\S]*?(?:${close}|$)`, 'gi')); continue; }
     const t = escapeRe(tag); add(new RegExp(`<${t}(?=[\\s>/])[^>]*>[\\s\\S]*?(?:<\\/${t}\\s*>|$)`, 'gi'));
   }
+  // From the start: the part that opens first (the longer one when two open together), then on from its end.
+  const out = [], ahead = finds.map(() => undefined);
+  for (let at = 0; ;) {
+    let best = null;
+    finds.forEach((find, i) => {
+      if (ahead[i] === undefined || (ahead[i] && ahead[i][0] < at)) ahead[i] = find(at);
+      const r = ahead[i];
+      if (r && (!best || r[0] < best[0] || (r[0] === best[0] && r[1] > best[1]))) best = r;
+    });
+    if (!best) break;
+    out.push(best);at = Math.max(best[1], best[0] + 1);
+  }
+  // A preset that wraps the story in <content> (or another 正文标签): what is outside it (status bars, summaries, extras) is not read.
+  const story = [], names = cleanBody(body);
+  if (!names.length) return out;
+  for (const m of text.matchAll(new RegExp(`<(${names.map(escapeRe).join('|')})(?:\\s[^<>]*)?>`, 'gi'))) {
+    if (out.some(([a, b]) => m.index >= a && m.index < b) || (story.length && m.index < story.at(-1)[1])) continue;
+    const close = new RegExp(`<\\/${m[1]}\\s*>`, 'gi');close.lastIndex = m.index + m[0].length;
+    const end = close.exec(text);
+    story.push([m.index, end ? end.index + end[0].length : text.length]);
+  }
+  if (!story.length) return out;
+  let from = 0;
+  for (const [a, b] of story) { if (a > from) out.push([from, a]);from = b; }
+  if (from < text.length) out.push([from, text.length]);
   return out.sort((a, b) => a[0] - b[0]);
 }
 
@@ -91,7 +131,7 @@ const MAX = 220;
 /** Prose as it is heard: no markup, Markdown marks or entities; one piece per paragraph, long ones cut at a sentence end. */
 export function narrationPieces(text) {
   const plain = String(text ?? '')
-    .replace(/<[^<>\n]{1,300}>/g, ' ')
+    .replace(/<\/?[a-z][\w:-]*(?:\s[^<>]*)?\/?>/gi, ' ').replace(/<[^<>\n]{1,300}>/g, ' ')
     .replace(/&nbsp;/g, ' ').replace(/&[a-z]+;|&#\d+;/gi, '')
     .replace(/^\s{0,3}(?:#{1,6}|>+|[-*+]\s)\s*/gm, '').replace(/^\s*(?:[-*_]\s*){3,}$/gm, '')
     .replace(/\*+|_{2,}|~~|`+/g, '');
@@ -112,8 +152,8 @@ export function narrationPieces(text) {
  * The order a reply is read in: [{line: index}] for its voice lines and [{narration: text}] for the story between them.
  * lines: the reply's voice lines with their places (start, end). Lines inside a skipped part are not read either.
  */
-export function readingPlan(raw, lines, skip = NARRATION_SKIP) {
-  const text = String(raw ?? ''), cut = skippedRanges(text, skip);
+export function readingPlan(raw, lines, skip = NARRATION_SKIP, body = NARRATION_BODY) {
+  const text = String(raw ?? ''), cut = skippedRanges(text, skip, body);
   // Skipped text becomes blank (new lines kept, so paragraphs stay apart); places do not move.
   let masked = text;
   for (const [a, b] of cut) masked = masked.slice(0, a) + masked.slice(a, b).replace(/[^\n]/g, ' ') + masked.slice(b);

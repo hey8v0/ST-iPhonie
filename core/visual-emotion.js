@@ -51,12 +51,18 @@ export function visualWordEmotion(value) {
   return '';
 }
 
+// How each feeling is staged, like a film rather than a comic: the person moves (move), the camera pushes in, snaps,
+// sways or tilts toward them (camera), light gathers around them (burst: warm glints or soft bokeh), the edge of the
+// picture takes a colour (tint), lines rush in (lines: 'light' or 'dark').
+// How each feeling is staged, like a film rather than a comic: the person moves (move), the camera pushes in, snaps,
+// sways or tilts toward them (camera), light gathers around them (burst: warm glints or soft bokeh), the edge of the
+// picture takes a colour (tint), lines rush in (lines: 'light' or 'dark').
 const EFFECTS = {
-  happy:{move:'bounce',mark:'note',burst:'sparkle'}, angry:{move:'shake',mark:'anger',tint:'red'},
-  sad:{move:'sink',mark:'drop',tint:'blue'}, surprised:{move:'hop',mark:'surprise',punch:true},
-  shy:{mark:'blush',burst:'hearts',tint:'pink'}, nervous:{move:'tremble',mark:'sweat'},
-  fearful:{move:'tremble',mark:'sweat',tint:'dark'}, tired:{move:'sink',mark:'sigh'},
-  confused:{mark:'dots'}, tender:{move:'bounce',mark:'heart',burst:'hearts',tint:'pink'},
-  sulky:{mark:'dots'},worried:{mark:'sweat'},curious:{mark:'dots'},moved:{mark:'heart',burst:'hearts'},
+  happy:{move:'bounce',burst:'glints',tint:'warm'}, angry:{move:'shake',camera:'snap',tint:'red',lines:'dark'},
+  sad:{move:'sink',camera:'push',tint:'blue'}, surprised:{move:'hop',camera:'snap',lines:'light'},
+  shy:{burst:'bokeh',tint:'pink'}, nervous:{move:'tremble',camera:'sway'},
+  fearful:{move:'tremble',camera:'sway',tint:'dark'}, tired:{move:'sink',tint:'dark'},
+  confused:{camera:'tilt'}, tender:{camera:'push',burst:'bokeh',tint:'pink'},
+  sulky:{camera:'tilt'},worried:{camera:'sway'},curious:{camera:'tilt'},moved:{camera:'push',burst:'glints',tint:'warm'},
 };
-export function visualEffects(value) {return {move:'',mark:'',burst:'',tint:'',punch:false,...EFFECTS[visualEmotion(value)]};}
+export function visualEffects(value) {return {move:'',camera:'',burst:'',tint:'',lines:'',...EFFECTS[visualEmotion(value)]};}

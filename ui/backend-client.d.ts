@@ -47,6 +47,8 @@ export interface NarrationSettings {
     rate: number;
     /** Tag names whose contents are not read. */
     skip: string[];
+    /** 正文标签: when a reply wraps its story in one of these tags, only what is inside is read. */
+    body: string[];
 }
 export interface Route {
     id?: string;

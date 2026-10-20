@@ -58,6 +58,8 @@ export function normalizeDrawParams(value = {}) {
   p.cfgRescale = num(p.cfgRescale, 0, 1, 0, .02);
   p.seed = num(p.seed, -1, 4294967295, -1);
   p.variety = !!p.variety && !isV5(p.model);
+  // 透明背景: V5 draws with an alpha channel (立绘 without cutting the background out).
+  p.transparent = !!p.transparent && isV5(p.model);
   return p;
 }
 
@@ -119,6 +121,8 @@ export function buildImageRequest({prompt, negative = '', characters = [], param
     Object.assign(parameters, {sm: false, sm_dyn: false});
   }
   if (vibes.length && vibeKey(p.model)) Object.assign(parameters, vibeParameters(vibes));
+  // What the official app sends with 透明背景 on (V5): the picture comes back with straight alpha.
+  if (p.transparent) Object.assign(parameters, {straight_alpha: true, tag_hint_transparent_background: true});
   return {body: {input: prompt, model: p.model, action: 'generate', parameters}, seed, params: p};
 }
 

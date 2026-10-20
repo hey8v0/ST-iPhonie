@@ -1,9 +1,10 @@
 // 视觉小说: the story read as a galgame. Its settings, the story cut into pages (core of the stage in vn-stage.js),
 // the 立绘 (with their 表情 and 动作) and the requests that draw them, and the cut-out that takes the plain background
 // off a drawn 立绘.
-import {skippedRanges, narrationPieces, NARRATION_SKIP, cleanSkip} from './narration.js';
+import {skippedRanges, narrationPieces, NARRATION_SKIP, NARRATION_BODY, cleanSkip} from './narration.js';
 import {visualEmotion, visualEffects, matchesVisualWord, visualWordEmotion} from './visual-emotion.js';
 import {activeStyle, sizeFor} from './draw.js';
+import {isV5} from './novelai.js';
 
 /** What a 立绘 asks of the picture, after the 画风 and before the character's own looks. Editable in the app. The
  *  background is added by the plugin (a flat key colour that is easy to take off), unless the rule names one. */
@@ -236,8 +237,8 @@ export function pages(value, max = PAGE) {
  * sounds / bgm: [{start, index}].
  * The parts not read aloud by 整篇朗读 (thinking, status bars, code, the phone's tags) are not shown either.
  */
-export function storySteps(raw, lines = [], {pics = [], sounds = [], bgm = [], skip = NARRATION_SKIP, max = PAGE} = {}) {
-  const source = String(raw ?? ''), cut = skippedRanges(source, skip);
+export function storySteps(raw, lines = [], {pics = [], sounds = [], bgm = [], skip = NARRATION_SKIP, body = NARRATION_BODY, max = PAGE} = {}) {
+  const source = String(raw ?? ''), cut = skippedRanges(source, skip, body);
   let masked = source;
   for (const [a, b] of cut) masked = masked.slice(0, a) + masked.slice(a, b).replace(/[^\n]/g, ' ') + masked.slice(b);
   const hidden = (a, b) => cut.some(([s, e]) => a < e && b > s);
@@ -349,15 +350,25 @@ export function spriteRequest(settings, name, {appearance, rule, extra = '', see
   const looks = String(appearance ?? route?.appearance ?? '').trim();
   const head = [style.artist, style.positive].map(x => String(x || '').trim()).filter(Boolean);
   const want = String(rule ?? vn.rule).trim(), more = String(extra || '').trim();
-  const backdrop = /background/i.test(want + ',' + more) ? '' : `simple background, ${keyColorFor(looks)} background`;
+  // NovelAI V5 draws a transparent background itself; other engines get a flat key colour to cut out afterwards.
+  const clear = (draw.engine === 'nai' || !draw.engine) && isV5(draw.params?.model);
+  const backdrop = /background/i.test(want + ',' + more) ? '' : clear ? '2::transparent background::' : `simple background, ${keyColorFor(looks)} background`;
   return {
     prompt: [...head, want, more, backdrop, looks ? '' : name].filter(Boolean).join(', '),
     negative: [String(style.negative || '').trim(), SPRITE_NEGATIVE].filter(Boolean).join(', '),
     characters: looks ? [{prompt: looks, negative: '', position: -1}] : [],
-    params: {...draw.params, ...sizeFor(draw.params, '竖'), seed: Number.isInteger(seed) && seed >= 0 ? seed : -1},
+    params: {...draw.params, ...sizeFor(draw.params, '竖'), seed: Number.isInteger(seed) && seed >= 0 ? seed : -1, transparent: clear && !!backdrop},
   };
 }
 
+/** A picture that is clear around the edge already (drawn with a transparent background): nothing to cut out. */
+export function clearEdges(data, width, height) {
+  let clear = 0, all = 0;
+  const at = i => { all++; if (data[i * 4 + 3] < 16) clear++; };
+  for (let x = 0; x < width; x++) { at(x); at((height - 1) * width + x); }
+  for (let y = 1; y < height - 1; y++) { at(y * width); at(y * width + width - 1); }
+  return all > 0 && clear / all > .6;
+}
 /** The colour most of the border has (in 32-step buckets), averaged: [r, g, b]. */
 function borderColor(data, width, height) {
   const border = [];
