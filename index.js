@@ -419,6 +419,7 @@ function connect(source){
   vnSprite:(name,blob,options)=>{check();const o=options||{};return vnHost.setSprite(name,blob,{look:String(o.look||''),outfit:String(o.outfit||''),seed:Number(o.seed),add:o.add===true,use:String(o.use||''),drop:typeof o.drop==='string'?o.drop:'',mix:typeof o.mix==='boolean'?o.mix:undefined,dropOutfit:o.dropOutfit===true});},
   vnWear:()=>{check();return vnHost.wear();},
   vnSetWear:(name,id)=>{check();return vnHost.setWear(name,id);},
+  vnLastPick:name=>{check();return vnHost.lastPick(String(name||''));},
   noteError:text=>{check();remember(text,'error');}
  });
 }

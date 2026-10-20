@@ -2,7 +2,7 @@
 // the 立绘 (with their 表情 and 动作) and the requests that draw them, and the cut-out that takes the plain background
 // off a drawn 立绘.
 import {skippedRanges, narrationPieces, NARRATION_SKIP, NARRATION_BODY, cleanSkip} from './narration.js';
-import {visualEmotion, visualEffects, matchesVisualWord, visualWordEmotion} from './visual-emotion.js';
+import {visualEmotion, visualEffects, matchesVisualWord, visualWordEmotion, visualWordHits, doneBy} from './visual-emotion.js';
 import {activeStyle, sizeFor} from './draw.js';
 import {isV5} from './novelai.js';
 
@@ -134,18 +134,45 @@ function fromGroup(g, last, random) {
   return others[Math.floor(random() * others.length) % others.length];
 }
 /**
- * The 立绘 to show for a line: a 动作 whose words are in the story just before it (or in its 情绪) first, then the
- * 表情 of its 情绪, then the usual one. Only pictures that were made count; '' when the character has none.
- * outfit: the 形象 this chat uses; last: the picture on the stage now (a group taking turns shows another).
+ * The 动作 a line is acted with: the one whose words are found nearest to it, in its 情绪, the story just before it
+ * (context) or right after it (after), and done by them (name; names: the others who may be named there).
+ * {action, word, where: 'emotion' | 'before' | 'after'} or null.
  */
-export function pickLook(entry, {emotion = '', context = '', outfit = '', last = '', random = Math.random} = {}) {
+export function actionFor(actions, {emotion = '', context = '', after = '', name = '', names = []} = {}) {
+  const before = String(context || ''), next = String(after || '');
+  let best = null;
+  for (const a of actions || []) {
+    if (a.kind === 'expression') continue;
+    for (const w of a.words || []) {
+      const found = [
+        ...visualWordHits(emotion, w).map(h => ({...h, where: 'emotion', far: 0})),
+        ...visualWordHits(before, w).filter(h => !name || doneBy(before, h.at, name, names)).map(h => ({...h, where: 'before', far: before.length - h.end})),
+        ...visualWordHits(next, w).filter(h => !name || doneBy(next, h.at, name, names)).map(h => ({...h, where: 'after', far: h.at})),
+      ];
+      for (const h of found) if (!best || h.far < best.far) best = {action: a, word: h.text, where: h.where, far: h.far};
+    }
+  }
+  return best && {action: best.action, word: best.word, where: best.where};
+}
+
+/**
+ * The 立绘 to show for a line: its 动作 (actionFor) first, then the 表情 of its 情绪, then the usual one. Only pictures
+ * that were made count; '' when the character has none. outfit: the 形象 this chat uses (a 动作 it has no picture of
+ * is shown in their own clothes); last: the picture on the stage now (a group taking turns shows another).
+ * why: an object told what was chosen and why ({kind: 'action' | 'expression' | 'usual', label, word, where}).
+ */
+export function pickLook(entry, {emotion = '', context = '', after = '', name = '', names = [], outfit = '', last = '', random = Math.random, why = null} = {}) {
   if (!entry) return '';
-  const set = setOf(entry, outfit), looks = set.looks || {}, said = String(context || '') + '\n' + String(emotion || '');
-  for (const a of entry.actions || []) if(a.kind!=='expression'&&looks[a.id]?.sprite&&a.words.some(w=>matchesVisualWord(said,w)))return fromGroup(looks[a.id],last,random);
+  const tell = info => { if (why) Object.assign(why, info); };
+  const set = setOf(entry, outfit), looks = set.looks || {};
+  const drawn = (entry.actions || []).filter(a => a.kind !== 'expression' && (looks[a.id]?.sprite || entry.looks?.[a.id]?.sprite));
+  const act = actionFor(drawn, {emotion, context, after, name, names});
+  if (act) { tell({kind: 'action', label: act.action.label, word: act.word, where: act.where}); return fromGroup(looks[act.action.id]?.sprite ? looks[act.action.id] : entry.looks[act.action.id], last, random); }
   const feeling=expressionOf(emotion);
-  for(const a of entry.actions||[])if(a.kind==='expression'&&a.words.some(w=>matchesVisualWord(emotion,w)||(feeling&&visualWordEmotion(w)===feeling)))return looks[a.id]?.sprite?fromGroup(looks[a.id],last,random):(set.sprite?fromGroup(set,last,random):'');
+  for(const a of entry.actions||[])if(a.kind==='expression'&&a.words.some(w=>matchesVisualWord(emotion,w)||(feeling&&visualWordEmotion(w)===feeling))){tell({kind:'expression',label:a.label,word:emotion});return looks[a.id]?.sprite?fromGroup(looks[a.id],last,random):(set.sprite?fromGroup(set,last,random):'');}
   const e = expressionOf(emotion);
-  if (e && looks[e]?.sprite) return fromGroup(looks[e], last, random);
+  if (e && looks[e]?.sprite) { tell({kind: 'expression', label: EXPRESSIONS.find(x => x.id === e)?.label || e, word: emotion}); return fromGroup(looks[e], last, random); }
+  tell({kind: 'usual', label: '', word: emotion});
   return set.sprite ? fromGroup(set, last, random) : '';
 }
 

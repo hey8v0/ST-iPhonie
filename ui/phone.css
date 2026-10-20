@@ -2726,3 +2726,4 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .adjust-actions{margin-top:6px}
 .sw-chosen.sw-drag .sw-check{background:color-mix(in srgb,var(--accent) calc((1 - var(--sw-r)) * 100%),transparent)}
 .sw-chosen.sw-drag .sw-check svg{opacity:calc(1 - var(--sw-r))}
+.vn-last-pick{margin:0 0 12px;padding:9px 12px;border-radius:12px;background:var(--card2);font-size:12px;line-height:1.55}

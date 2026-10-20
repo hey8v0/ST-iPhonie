@@ -209,8 +209,8 @@ const quoted = text => /^[「『“"‘（(]/.test(text) ? text : '「' + text +
 /**
  * Opens the stage. source: {next() → {id, steps} | null (the next message, read when it is reached), more() → whether
  * more messages are on their way}. look(): the 视觉小说 settings now. voice: {play(step), narrate(step), stop(), on()}.
- * face(name, user): avatar url; sprite(name, {emotion, context}): the 立绘 url for this line (context: the story just
- * before it). cue(step, {skipping}): a sound or <bgm> of the story is reached. send(text): sends to the tavern (false
+ * face(name, user): avatar url; sprite(name, {emotion, context, after, names}): the 立绘 url for this line (context:
+ * the story just before it; after: right after it; names: who else is in the story). cue(step, {skipping}): a sound or <bgm> of the story is reached. send(text): sends to the tavern (false
  * when it could not). save(patch): keeps a setting. title/subtitle: the title card. backdrop: the picture to start on
  * ({url, soft}); scene: the chat's own background, which comes back after a CG's message. onClose(lastId).
  */
@@ -442,6 +442,16 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   }
 
   // ---------- steps ----------
+  /** The story right after a line (up to the next one said): 「……」她抱起手臂。 acts the line before it. */
+  function storyAfter(s) {
+    let i = steps.indexOf(s), text = '';
+    if (i < 0) return '';
+    while (steps[i + 1]?.kind === 'say' && steps[i + 1].line === s.line && steps[i + 1].role === s.role) i++;
+    for (let k = i + 1; k < steps.length && steps[k].kind !== 'say' && text.length < 200; k++) if (steps[k].kind === 'narrate') text += steps[k].text + '\n';
+    return text.slice(0, 200);
+  }
+  /** Everyone who speaks in this message or has been seen: a 动作 near another one's name is theirs. */
+  const people = () => [...new Set([...steps.filter(x => x.kind === 'say').map(x => x.role), ...actors.keys()].filter(Boolean))];
   function show(s, {again = false} = {}) {
     step = s;
     const say = s.kind === 'say', name = say ? s.role : '';
@@ -454,7 +464,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     // Its 表情 or 动作 is chosen on its first page (from its 情绪 and the story just before it) and kept for the rest.
     let url = '';
     if (say && !s.user) {
-      url = s.part && lookOf.has(name) ? lookOf.get(name) : sprite(name, {emotion: s.emotion, context: said, last: actors.get(name)?.url || ''});
+      url = s.part && lookOf.has(name) ? lookOf.get(name) : sprite(name, {emotion: s.emotion, context: said, after: storyAfter(s), names: people(), line: s.text, last: actors.get(name)?.url || ''});
       lookOf.set(name, url);
     }
     if (say) said = ''; else said = (said + '\n' + s.text).slice(-400);

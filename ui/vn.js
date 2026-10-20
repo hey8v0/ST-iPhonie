@@ -109,6 +109,19 @@ export function vnApp(ctx) {
   }
 
   // ---------- one character's 立绘 ----------
+  /** What the stage last showed for them and why, so a 动作 that never comes on can be told why. */
+  function lastPickNote(name, c) {
+    let p = null;
+    try { p = api.vnLastPick?.(name); } catch {}
+    if (!p) return '';
+    const said = p.line ? `「${esc(p.line)}${p.line.length >= 40 ? '…' : ''}」` : '这一句';
+    const where = {before: '台词前面写着', after: '台词后面写着', emotion: '情绪里有'}[p.where] || '';
+    const acts = c.actions.some(a => a.kind !== 'expression');
+    const why = p.kind === 'action' ? `用了动作「${esc(p.label)}」：${where}「${esc(p.word)}」。`
+      : p.kind === 'expression' ? `用了表情「${esc(p.label)}」（情绪：${esc(p.word)}）。${acts ? '前后的叙述里没找到动作的触发词。' : ''}`
+      : `用了平常那张：${p.word ? `情绪「${esc(p.word)}」没对上画好的表情` : '这句没写情绪'}${acts ? '，前后的叙述里也没找到动作的触发词' : ''}。`;
+    return `<p class="hint vn-last-pick" data-keep-hint>上一次演到${said}，${why}</p>`;
+  }
   let sheet = null;
   const sheetOutfit = {};
   /** A character's page: their 形象 on top (默认 and their own), then every look of the one picked. */
@@ -121,7 +134,7 @@ export function vnApp(ctx) {
       const c = castOf(name), set = setFor(c, outfit) || c, all = looksOf(c, outfit), missing = all.filter(l => l.id && !l.action && !l.sprite);
       const worn = setFor(c, wearNow()[name] || '') ? wearNow()[name] || '' : '';
       const chips = [{id: '', label: '默认'}, ...c.outfits.map(o => ({id: o.id, label: o.label}))];
-      d.body.innerHTML = `<div class="vn-outfit-control"><button type="button" class="vn-outfit" data-action="vn-pick-outfit">${esc(chips.find(o=>o.id===outfit)?.label||'默认')} ▾</button><button type="button" class="vn-outfit add" data-action="vn-add-outfit">${icon('add')}形象</button></div><div data-look-picker></div>
+      d.body.innerHTML = `${lastPickNote(name, c)}<div class="vn-outfit-control"><button type="button" class="vn-outfit" data-action="vn-pick-outfit">${esc(chips.find(o=>o.id===outfit)?.label||'默认')} ▾</button><button type="button" class="vn-outfit add" data-action="vn-add-outfit">${icon('add')}形象</button></div><div data-look-picker></div>
         <div class="actions">${c.outfits.length && outfit !== worn ? `<button type="button" class="primary" data-action="vn-wear">${icon('check')}穿这套</button>` : ''}${outfit ? `<button type="button" class="secondary" data-action="vn-edit-outfit">${icon('edit')}改形象</button>` : ''}<button type="button" class="secondary" data-action="vn-add-expression" ${c.actions.length>=24?'disabled':''}>${icon('add')}表情</button><button type="button" class="secondary" data-action="vn-add-action" ${c.actions.length>=24?'disabled':''}>${icon('add')}动作</button>${missing.length ? `<button type="button" class="secondary" data-action="vn-all" ${set.sprite ? '' : 'disabled'}>${icon('paint')}补齐 ${missing.length} 种表情</button>` : ''}</div>`;
       pagedPicker(d.body.querySelector('[data-look-picker]'),{items:all,pageSize:9,placeholder:'搜索表情、动作…',listClass:'vn-looks',text:l=>l.label+' '+l.tags,render:l=>`<button type="button" class="vn-look${l.sprite?' has':''}" data-look="${esc(l.id)}"><span class="vn-look-pic">${l.sprite?checker(l.sprite):`<i>${icon(l.action?'hand':l.id?'smile':'person')}</i>`}${l.count>1?`<em class="vn-look-n">${l.mix?'随机 ':''}${l.count}</em>`:''}</span><strong>${esc(l.label)}</strong><small>${l.sprite?l.count+' 张':l.action?(l.action.kind==='expression'?'表情':'动作'):l.id?'表情':'平常'}</small></button>`});
 
@@ -263,7 +276,7 @@ export function vnApp(ctx) {
       const d = ctx.dialog((action?'改':'加一个')+noun, `<div class="group pad">
         <div class="field"><span>名字</span><input data-field="a-label" maxlength="12" value="${esc(action?.label || '')}" placeholder="${expression?'比如 紧张':'比如 抱臂'}"></div>
         <div class="field"><span>怎么画${help('写给绘图模型的英文 tag，比如 crossed arms、hand on own chin、waving、pointing at viewer。')}</span><input data-field="a-tags" value="${esc(action?.tags || '')}" placeholder="${expression?'nervous expression':'crossed arms'}"></div>
-        <div class="field"><span>什么时候用${help(expression?'只匹配台词的情绪；中英文同义词自动对应。多个词用逗号隔开，英文短语可以保留空格。':'台词前面的叙述（或台词的情绪）里出现这些词，就换成这张。用逗号或空格隔开，比如：抱臂、抱着手臂、双臂交叉。')}</span><input data-field="a-words" value="${esc((action?.words || []).join('、'))}" placeholder="${expression?'紧张、nervous、uneasy':'抱臂、双臂交叉'}"></div></div>
+        <div class="field"><span>什么时候用${help(expression?'只匹配台词的情绪；中英文同义词自动对应。多个词用顿号、逗号或分号隔开（全角半角都行），英文短语里的空格会保留。':'台词前后紧挨着的叙述（或台词的情绪）里出现这些词，就换成这张。中文词中间隔一两个字也算：写「抱臂」，「抱着手臂」「抱起双臂」都能对上。叙述里离这个词最近的名字是别人时不算。多个词用顿号、逗号、分号或空格隔开（全角半角都行）。')}</span><input data-field="a-words" value="${esc((action?.words || []).join('、'))}" placeholder="${expression?'紧张、nervous、uneasy':'抱臂、双臂交叉'}"></div></div>
         <div class="actions"><button type="button" class="primary" data-action="a-save">${icon('check')}保存</button></div>`);
       d.onClose(() => resolve());
       d.body.addEventListener('click', e => {

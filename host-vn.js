@@ -25,7 +25,7 @@ const OWN = /^\/?user\/images\//;
  */
 export function createVnHost({context, settings, backend, linesOf, voiced, play, narrate = () => {}, stop, voiceOn, sound = () => {}, music = () => {}, sounds = () => false, musicOn = () => false, avatars, notice, closePanel = () => {}, doc = document}) {
   let stage = null, cursor = 0, endTimer = 0;
-  const vn = () => settings().vn;
+  const vn = () => settings().vn, picks = new Map();
   const chat = () => context()?.chat || [];
 
   function stepsOf(id) {
@@ -148,7 +148,11 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       // 快进 runs past the one-off sounds; the ambience and the music still change to where it stops.
       cue: (s, {skipping}) => { if (s.kind === 'bgm') music(s.id, s.index); else sound(s.id, s.index, {skipping}); },
       face: (name, user) => { const key = user ? 'me' : name; if (Object.hasOwn(mine, key)) return mine[key]; return user ? tavern.me : tavern.characters?.[name] || avatars().characters?.[name] || ''; },
-      sprite: (name, how) => pickLook(vn().cast?.[name], {...how, outfit: wear()[name] || ''}),
+      sprite: (name, how) => {
+        const why = {}, cast = vn().cast || {}, url = pickLook(cast[name], {...how, name, names: [...new Set([...(how.names || []), ...Object.keys(cast)])], outfit: wear()[name] || '', why});
+        if (cast[name]) picks.set(name, {...why, line: String(how.line || '').slice(0, 40)});
+        return url;
+      },
       send,
       save: patch => { try { backend.saveVn(patch); } catch (error) { notice(error.message); } },
       onClose: id => {
@@ -206,8 +210,10 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     return url;
   }
 
+  /** What the stage last chose for a character and why (shown on their 立绘 page): {kind, label, word, where, line}. */
+  const lastPick = name => picks.has(name) ? {...picks.get(name)} : null;
   return {
-    open, setSprite, wear, setWear,
+    open, setSprite, wear, setWear, lastPick,
     get showing() { return !!stage; },
     status(phase) { stage?.status(phase); },
     refresh() { stage?.refresh(); },

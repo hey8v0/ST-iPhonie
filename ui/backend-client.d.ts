@@ -1023,6 +1023,8 @@ export interface BackendAPI extends BackendFacade {
     /** The 形象 each character wears in the open chat: {name: outfit id}. */
     vnWear(): Record<string, string>;
     vnSetWear(name: string, outfit: string): Record<string, string>;
+    /** What the 视觉小说 last showed for a character and why: a 动作 (and the words that brought it, before or after the line, or in its 情绪), a 表情, or the usual one. */
+    vnLastPick?(name: string): { kind: 'action' | 'expression' | 'usual'; label: string; word: string; where?: 'emotion' | 'before' | 'after'; line: string } | null;
     /** The tavern's persona name ('' outside the tavern). */
     userName(): string;
     /** Facts for the self-check report (core/diagnostics.js buildReport). Asks whether keys work; never returns them. */
