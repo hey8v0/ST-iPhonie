@@ -1,4 +1,5 @@
 import {currentDm, chatWindows, currentWindow, groupKey} from '../core/chats.js';
+import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, avatar, avatarPicture, empty, help, copyText} from './common.js';
 import {songOf} from '../core/music.js';
 import {icon} from './icons.js';
@@ -1019,45 +1020,48 @@ export function chatApp(ctx) {
    */
   async function windowsSheet(base) {
     const group = base.type === 'group', name = base.members[0];
-    const d = ctx.dialog(group ? `「${base.name}」的聊天窗口` : `和${shown(name)}的聊天窗口`, '<p class="hint">正在读取……</p>');
+    const d = ctx.dialog(group ? `「${base.name}」的聊天窗口` : `和${shown(name)}的聊天窗口`, '<p class="hint">正在读取……</p>', {add: '新开一个窗口'});
+    let swipe = null;
     const paint = async () => {
       const list = chatWindows(await api.listThreads(), base);
       if (!d.live) return;
       const when = at => at ? new Date(at).toLocaleString('zh-CN', {hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'}) : '';
-      d.body.innerHTML = `<div class="pick-list">${list.map((t, i) => `<div class="list-row window-row"><button type="button" class="window-open" data-window="${esc(t.id)}">${icon(i === 0 ? 'check' : 'chat')}<span><strong>${esc(t.label || (t.last ? preview(t.last) : '空的窗口'))}</strong><small>${i === 0 ? '正在用 · ' : ''}${t.count} 条${t.last ? ' · ' + when(t.last.at) : ''}</small></span></button>${btn('window-rename', icon('edit'), 'icon-button', `data-id="${esc(t.id)}" aria-label="改名"`)}${btn('window-delete', icon('trash'), 'icon-button', `data-id="${esc(t.id)}" aria-label="删除这个窗口"`)}</div>`).join('')}
-        <button type="button" class="list-row" data-window-new>${icon('add')}<span><strong>新开一个窗口</strong><small>从头聊，之前的窗口都留着</small></span></button></div>`;
+      // A tap opens one; swiped left 改名 / 删除.
+      d.body.innerHTML = `<div class="pick-list" data-window-list>${list.map((t, i) => swipeRow(t.id, `<div class="list-row">${icon(i === 0 ? 'check' : 'chat')}<span><strong>${esc(t.label || (t.last ? preview(t.last) : '空的窗口'))}</strong><small>${i === 0 ? '正在用 · ' : ''}${t.count} 条${t.last ? ' · ' + when(t.last.at) : ''}</small></span></div>`,
+        [{key: 'rename', label: '改名', icon: 'edit'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}], {label: t.label || ''})).join('')}</div>`;
+      swipe?.dispose();
+      swipe = mountSwipeList(d.body.querySelector('[data-window-list]'), {ctx,
+        onTap: id => run(async () => { d.close(); await api.updateThread(id, {open: true}); open(id); }),
+        onAction: (key, id) => run(() => key === 'rename' ? rename(id) : drop(id))});
+    };
+    const run = task => ctx.win.Promise.resolve().then(task).catch(error => ctx.notify(error.message, {error: true}));
+    const rename = async id => {
+      const t = (await api.listThreads()).find(x => x.id === id);
+      const r = ctx.dialog('窗口的名字', `${field('名字', input('window-label', t?.label || '', 'text', 'maxlength="40" placeholder="比如：第二周目、平行世界"'))}<div class="actions">${btn('window-label-save', '保存', 'primary')}</div>`);
+      r.body.addEventListener('click', async ev => { if (!ev.target.closest('[data-action=window-label-save]')) return; await api.updateThread(id, {label: r.body.querySelector('[data-field=window-label]').value}); r.close(); render(); windowsSheet(base); });
+    };
+    const drop = async id => {
+      const last = chatWindows(await api.listThreads(), base).length <= 1;
+      if (!await ctx.confirm(last && group ? '删除这个群聊？' : '删除这个聊天窗口？', last && group ? '这是群里最后一个窗口，删掉后这个群就没有了。' : '这个窗口里的聊天记录和记忆会删掉，别的窗口不受影响。')) return windowsSheet(base);
+      // Whether it was open is read first: a redraw after the delete leaves a missing chat for the list.
+      const wasOpen = id === threadId;
+      await api.deleteThread(id);
+      const next = currentWindow(await api.listThreads(), base);
+      if (!next && group) forgetGroupAvatar(base);
+      if (wasOpen) { if (next) open(next.id); else { mode = 'list'; threadId = null; render(); } }
+      else render();
+      if (next) windowsSheet(base);
     };
     await paint();
-    d.body.addEventListener('click', e => {
-      const b = e.target.closest('button');
-      if (!b) return;
-      ctx.win.Promise.resolve().then(async () => {
-        if (b.dataset.window) { d.close(); await api.updateThread(b.dataset.window, {open: true}); open(b.dataset.window); }
-        if (b.hasAttribute('data-window-new')) {
-          d.close();
-          const now = chatWindows(await api.listThreads(), base)[0] || base;
-          const t = await api.createThread(group ? {type: 'group', members: now.members, name: now.name, windowOf: groupKey(base)} : {type: 'dm', members: [name]});
-          open(t.id); ctx.notify('新开了一个聊天窗口');
-        }
-        if (b.dataset.action === 'window-rename') {
-          const t = (await api.listThreads()).find(x => x.id === b.dataset.id);
-          const r = ctx.dialog('窗口的名字', `${field('名字', input('window-label', t?.label || '', 'text', 'maxlength="40" placeholder="比如：第二周目、平行世界"'))}<div class="actions">${btn('window-label-save', '保存', 'primary')}</div>`);
-          r.body.addEventListener('click', async ev => { if (!ev.target.closest('[data-action=window-label-save]')) return; await api.updateThread(b.dataset.id, {label: r.body.querySelector('[data-field=window-label]').value}); r.close(); render(); windowsSheet(base); });
-        }
-        if (b.dataset.action === 'window-delete') {
-          const id = b.dataset.id;
-          const last = chatWindows(await api.listThreads(), base).length <= 1;
-          if (!await ctx.confirm(last && group ? '删除这个群聊？' : '删除这个聊天窗口？', last && group ? '这是群里最后一个窗口，删掉后这个群就没有了。' : '这个窗口里的聊天记录和记忆会删掉，别的窗口不受影响。')) return windowsSheet(base);
-          // Whether it was open is read first: a redraw after the delete leaves a missing chat for the list.
-          const wasOpen = id === threadId;
-          await api.deleteThread(id);
-          const next = currentWindow(await api.listThreads(), base);
-          if (!next && group) forgetGroupAvatar(base);
-          if (wasOpen) { if (next) open(next.id); else { mode = 'list'; threadId = null; render(); } }
-          else render();
-          if (next) windowsSheet(base);
-        }
-      }).catch(error => ctx.notify(error.message, {error: true}));
+    d.onClose(() => swipe?.dispose());
+    d.overlay.addEventListener('click', e => {
+      if (!e.target.closest('[data-sheet-add]')) return;
+      run(async () => {
+        d.close();
+        const now = chatWindows(await api.listThreads(), base)[0] || base;
+        const t = await api.createThread(group ? {type: 'group', members: now.members, name: now.name, windowOf: groupKey(base)} : {type: 'dm', members: [name]});
+        open(t.id); ctx.notify('新开了一个聊天窗口');
+      });
     });
   }
   /** Options for voice messages in every chat: what 转文字 shows, and whether it happens by itself. */

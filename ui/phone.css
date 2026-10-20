@@ -2681,9 +2681,10 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .note-chip[aria-expanded=true]{color:var(--accent-ink);background:var(--accent-soft)}
 .note-chip[aria-expanded=true] i{background:var(--accent-btn);transform:rotate(360deg)}
 .note-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.note-chip+p[data-folded]{margin-top:2px}
+.note-fold>p{margin-top:2px}
+.note-fold[hidden]{display:none}
 /* A bottom sheet closes by pulling it down, tapping outside or Esc: its × is kept for keyboards and screen readers only. */
-.overlay:not(.top):not(.pop) .sheet-header [data-sheet-close]:not(:focus-visible){position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);border:0}
+.overlay:not(.top):not(.pop) .sheet-header [data-sheet-close]:not(:focus-visible),.overlay-out .sheet-header [data-sheet-close]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);border:0}
 .overlay:not(.top):not(.pop) .sheet-header{min-height:44px}
 .sound-version .disc{width:38px;height:38px;background:var(--accent-soft);color:var(--accent-ink)}
 /* 「＋」 in a sheet's title bar: the list below grows there. */
@@ -2723,3 +2724,5 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .adjust-row output{font-size:12px;font-weight:700;color:var(--ink2);text-align:right;font-variant-numeric:tabular-nums}
 .adjust-row .slider{min-height:28px;margin:0}
 .adjust-actions{margin-top:6px}
+.sw-chosen.sw-drag .sw-check{background:color-mix(in srgb,var(--accent) calc((1 - var(--sw-r)) * 100%),transparent)}
+.sw-chosen.sw-drag .sw-check svg{opacity:calc(1 - var(--sw-r))}

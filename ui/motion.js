@@ -25,16 +25,20 @@ function slidePill(win, bar, to, from) {
 /** Long notes (how a thing works) fold into a small 「ⓘ 说明」: shown when asked for, not as walls of text. */
 const NOTE = 'p.hint, p.help-copy';
 const NOTE_LONG = 44;
+const kept = p => p.closest('[data-keep-notes],.sheet-help,.toast,[role=status],[role=alert],.note-fold') || p.matches('.sw-hint,.moments-busy,.error-copy,[data-keep-hint]');
+/** A long note goes into a fold behind 「ⓘ 说明」, with the notes right after it (short ones too: they belong to it). */
 function foldNotes(doc, root) {
   for (const p of root.querySelectorAll?.(NOTE) || []) {
-    if (p.dataset.folded || p.hidden || p.closest('[data-keep-notes],.sheet-help,.toast,[role=status],[role=alert]') || p.matches('.sw-hint,.moments-busy,.error-copy,[data-keep-hint]')) continue;
+    if (p.dataset.folded || p.hidden || !p.isConnected || kept(p)) continue;
     if (p.textContent.replace(/\s+/g, '').length < NOTE_LONG) continue;
-    p.dataset.folded = '';
-    p.hidden = true;
+    const fold = doc.createElement('div');
+    fold.className = 'note-fold'; fold.hidden = true;
     const chip = doc.createElement('button');
     chip.type = 'button'; chip.className = 'note-chip'; chip.setAttribute('aria-expanded', 'false');
     chip.innerHTML = '<i aria-hidden="true">i</i><span>说明</span>';
-    p.before(chip);
+    p.before(chip); chip.after(fold);
+    let next = p;
+    while (next && next.matches?.(NOTE) && !kept(next)) { const after = next.nextElementSibling; next.dataset.folded = ''; fold.append(next); next = after; }
   }
 }
 

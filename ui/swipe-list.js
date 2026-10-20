@@ -1,6 +1,6 @@
 // Rows that swipe the way Procreate's layers do. Swiped left, a row slides aside and its actions pop out one after
-// another (a quick flick is enough); swiped right, it is picked and the list turns to choosing several, with a bar
-// for what to do with them all. A tap does what a tap did before. One row is open at a time; touching anything else
+// another (a quick flick is enough); swiped right, it is picked (swiped right again, let go), and with rows picked a
+// bar comes for what to do with them all. A tap does what a tap did before. One row is open at a time; touching anything else
 // closes it. The list scrolls as usual: only a sideways move takes the row.
 // With a mouse the same is at hand without swiping: a ⋯ on the row under the pointer (or the right button) opens its
 // actions, and Ctrl / ⌘ / Shift with a click picks rows, as when choosing files.
@@ -70,7 +70,8 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
     if (chosen) { bar.hidden = false; bar.querySelector('.sw-count').textContent = `已选 ${chosen.size} 项`; for (const b of bar.querySelectorAll('.sw-bar-act')) b.disabled = !chosen.size; }
     else if (!bar.hidden) { bar.classList.add('sw-leaving'); win.setTimeout(() => { if (!chosen) { bar.hidden = true; bar.classList.remove('sw-leaving'); } }, reduced() ? 0 : 220); }
   }
-  function pick(id) { close(); chosen ??= new Set(); if (chosen.has(id)) chosen.delete(id); else chosen.add(id); buzz(); paintChoice(); }
+  /** A row picked, or let go when it was picked; the last one let go ends choosing. */
+  function pick(id) { close(); chosen ??= new Set(); if (chosen.has(id)) chosen.delete(id); else chosen.add(id); buzz(); if (!chosen.size) chosen = null; paintChoice(); }
   function done() { chosen = null; paintChoice(); }
   bar.addEventListener('click', async e => {
     const b = e.target.closest('[data-sw-bulk]');
@@ -108,7 +109,7 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
       else return;
     }
     const w = room(p.row), raw = p.start + dx;
-    const canPick = bulk.length > 0 && p.start === 0 && !chosen;
+    const canPick = bulk.length > 0 && p.start === 0;
     let x = raw;
     if (raw < -w) x = -w - rubber(-w - raw, 40);
     else if (raw > 0) x = canPick ? rubber(raw, 110) : rubber(raw, 24);
@@ -133,7 +134,7 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
     suppress = Date.now();
     const w = room(p.row), x = p.x2 ?? 0, fresh = (e.timeStamp || Date.now()) - p.last.t < 90, v = fresh ? p.vx : 0;
     if (e.type === 'pointercancel') return settle(p.row, open === p.row ? -w : 0);
-    if (bulk.length && p.start === 0 && !chosen && (x > PICK || (v > .5 && x > 16))) { settle(p.row, 0); return pick(p.row.dataset.swipe); }
+    if (bulk.length && p.start === 0 && (x > PICK || (v > .5 && x > 16))) { settle(p.row, 0); return pick(p.row.dataset.swipe); }
     if (w && (v < -.35 || (v <= .35 && x < -w / 2))) return openRow(p.row);
     settle(p.row, 0);
     if (open === p.row) open = null;
