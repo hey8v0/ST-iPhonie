@@ -298,21 +298,43 @@ function watchPanelLayout(on){const w=globalThis.window,method=on?'addEventListe
  if(!on){cancelAnimationFrame(panelLayoutRaf);panelLayoutRaf=0;for(const id of panelLayoutTimers)clearTimeout(id);panelLayoutTimers=[];panelViewport=null;}}
 // Older ST-TTS copies publish __stTtsPanelBridge (this one no longer does): both running doubles the waves and prompts.
 let oldCopyNoted=false;
-function openPanel(roleId,preserveView=false){setTimeout(()=>{callIsland?.refresh();msgIsland?.refresh();noteIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();},0);floating?.setMode('docked');if(globalThis.__stTtsPanelBridge&&!oldCopyNoted){oldCopyNoted=true;notice('这个酒馆里还装着旧版「ST-TTS · 角色对白」，会和 ST-iPhonie 互相干扰：请在扩展管理里删除它，然后刷新页面');}if(settings?.sync?.enabled&&!panel?.open)backend?.syncNow().catch(()=>{});if(!panel){panel=document.createElement('dialog');panel.id='sttts-panel';panel.setAttribute('aria-label','ST-iPhonie');frame=document.createElement('iframe');frame.title='ST-iPhonie';frame.src=new URL('ui/index.html',base).href;panel.append(frame);panel.addEventListener('close',()=>{unarmBack();frame?.contentWindow?.stTtsPanelVisibility?.(false);if(panelExpanded){panelExpanded=false;placePanel();}callIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();});panel.addEventListener('cancel',()=>{if(['playing','generating'].includes(player.phase))player.toggle();});document.body.append(panel);}if(!panel.open){placePanel();if(panel.classList.contains('floating'))panel.show();else panel.showModal();frame.contentWindow?.stTtsPanelVisibility?.(true,{preserveView});restorePanelLayout();}armBack();if(roleId)frame.contentWindow?.stTtsOpenRole?.(roleId);}
-// 手机上从屏幕边缘滑（浏览器的返回）: while the phone is open there is one history entry of ours on top, so the
-// browser's back (the edge swipe, Android's back) goes back inside the phone — closing what is on top, leaving an app —
-// and closes the phone only from its home screen, instead of leaving the tavern. Touch screens only.
-let backArmed=false,unwinding=false;
+function openPanel(roleId,preserveView=false){setTimeout(()=>{callIsland?.refresh();msgIsland?.refresh();noteIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();},0);floating?.setMode('docked');if(globalThis.__stTtsPanelBridge&&!oldCopyNoted){oldCopyNoted=true;notice('这个酒馆里还装着旧版「ST-TTS · 角色对白」，会和 ST-iPhonie 互相干扰：请在扩展管理里删除它，然后刷新页面');}if(settings?.sync?.enabled&&!panel?.open)backend?.syncNow().catch(()=>{});if(!panel){panel=document.createElement('dialog');panel.id='sttts-panel';panel.setAttribute('aria-label','ST-iPhonie');frame=document.createElement('iframe');frame.title='ST-iPhonie';frame.src=new URL('ui/index.html',base).href;frame.addEventListener('load',()=>{try{frame.contentWindow.addEventListener('pointerdown',()=>{if(guards<BACK_SPARE)setTimeout(armBack,0);},true);}catch{}});panel.append(frame);panel.addEventListener('close',()=>{setTimeout(syncBack,0);frame?.contentWindow?.stTtsPanelVisibility?.(false);if(panelExpanded){panelExpanded=false;placePanel();}callIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();});panel.addEventListener('cancel',()=>{if(['playing','generating'].includes(player.phase))player.toggle();});document.body.append(panel);}if(!panel.open){placePanel();if(panel.classList.contains('floating'))panel.show();else panel.showModal();frame.contentWindow?.stTtsPanelVisibility?.(true,{preserveView});restorePanelLayout();}armBack();if(roleId)frame.contentWindow?.stTtsOpenRole?.(roleId);}
+// 手机上从屏幕边缘滑（浏览器的返回）: while something of ours is open over the tavern (the phone, the 视觉小说 stage,
+// a 大游戏, a picture or the 改提示词 box on the tavern page) a few history entries of ours lie on top, so the browser's
+// back (the edge swipe, Android's back) steps back inside it — the way Esc does, one layer at a time — and the tavern
+// is left only once all of ours is closed. Touch screens only.
+// They are laid only while the user touches the page: Chrome skips, on back, an entry a page added without the user's
+// touch. Each back uses one; every touch (and going one level deeper always takes one) lays them full again; when all
+// of ours is closed the rest are taken away. Entries left from before a reload are skipped on their own.
+const BACK_SPARE=6,OVER='.sttts-vn,.sttts-viewer,.sttts-ask,[data-sttts-owned=game]';
+let guards=0,unwinding=false;
 const touchBack=()=>!!globalThis.matchMedia?.('(pointer: coarse)').matches;
-function armBack(){if(backArmed||unwinding||!panel?.open||!touchBack())return;try{history.pushState({...(history.state&&typeof history.state==='object'?history.state:{}),stttsPhone:true},'');backArmed=true;}catch{}}
-function unarmBack(){if(!backArmed)return;backArmed=false;if(history.state?.stttsPhone){unwinding=true;try{history.back();}catch{unwinding=false;}}}
-globalThis.addEventListener?.('popstate',()=>{
- if(unwinding){unwinding=false;armBack();return;}
- if(!backArmed)return;backArmed=false;
+const oursOpen=()=>!!panel?.open||!!document.querySelector(OVER);
+function armBack(){if(unwinding||!oursOpen()||!touchBack())return;try{while(guards<BACK_SPARE){history.pushState({...(history.state&&typeof history.state==='object'?history.state:{}),stttsPhone:marker},'');guards++;}}catch{}}
+function unarmBack(){const n=guards;guards=0;if(n&&history.state?.stttsPhone===marker){unwinding=true;try{history.go(-n);}catch{unwinding=false;}}}
+// Something of ours opened or closed: lay the entries (an opening comes from a touch), or take them away when all is closed.
+function syncBack(){if(oursOpen())armBack();else unarmBack();}
+/** One step back in what is on top: the stage, a picture or the box on the tavern page, a game, else the phone. */
+function stepBack(){
+ const over=[...document.querySelectorAll(OVER)].at(-1);
+ if(over?.matches('[data-sttts-owned=game]')){try{const d=over.querySelector('iframe')?.contentDocument;d?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));}catch{}return;}
+ if(over){document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));return;}
  if(!panel?.open)return;
  let inside=false;try{inside=!!frame?.contentWindow?.stTtsBack?.();}catch{}
- if(inside)armBack();else panel.close();
+ if(!inside)panel.close();
+}
+globalThis.addEventListener?.('popstate',()=>{
+ if(unwinding){unwinding=false;syncBack();return;}
+ // An entry of ours from before a reload: nothing to step back in, go on back.
+ if(!guards){if(history.state?.stttsPhone&&history.state.stttsPhone!==marker)history.back();return;}
+ guards--;
+ stepBack();
+ setTimeout(()=>{if(!oursOpen())unarmBack();},0);
 });
+// A touch anywhere (the tavern page, or inside the phone's frame: see openPanel) lays the used entries again.
+globalThis.addEventListener?.('pointerdown',()=>{if(guards<BACK_SPARE)setTimeout(armBack,0);},true);
+// The stage, the pictures, the box and the game come and go as children of the page.
+if(globalThis.MutationObserver&&document.body)new MutationObserver(list=>{if(list.some(m=>[...m.addedNodes,...m.removedNodes].some(n=>n.nodeType===1&&n.matches(OVER))))syncBack();}).observe(document.body,{childList:true});
 // 大游戏 over the whole tavern page: the game in a frame of its own (ui/indie/<name>/play.html), the phone closed meanwhile.
 // The game asks to leave with a message {type:'st-iphonie-game:close'}; its saves stay in this browser.
 let gameOverlay=null;
