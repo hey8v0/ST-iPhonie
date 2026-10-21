@@ -77,7 +77,8 @@ export function chatApp(ctx) {
   const shown = name => name === 'me' ? name : remarks()[name] || name;
   const you = who => who === 'me' ? '你' : shown(who);
   // mode: list (the tabs) · thread · profile (a contact's card) · me (the user's card and 个性装扮) · contact-edit
-  let mode = 'list', tab = 'msgs', search = '', searching = false, profileOf = '', threadId = null, thread = null, selecting = null, contactDraft = null, epoch = 0, stick = false;
+  // selecting: the messages picked (null when not picking); pickFor: what for, 'bring' (带进剧情) or 'delete' (多选删除).
+  let mode = 'list', tab = 'msgs', search = '', searching = false, profileOf = '', threadId = null, thread = null, selecting = null, pickFor = 'bring', contactDraft = null, epoch = 0, stick = false;
   let unreadTotal = 0, freshMoments = 0;
   let panel = null, quote = null;
   const drafts = new Map(), live = typeof api.chatReply === 'function';
@@ -172,7 +173,7 @@ export function chatApp(ctx) {
         ${toggle('story-keep', '一直带着', thread.story === true, `每次写正文都带上你和${who}的聊天（整理好的记忆，加上还没整理的消息），正文一直记得你们在手机上聊过什么。会多占一些正文的字数，只给重要的聊天打开就好。`)}
       </div>
       ${waiting ? `<p class="hint">${waiting.threadId === threadId ? '这段聊天' : `和${esc(waiting.name)}的聊天`}有 ${waiting.count} 条等着带进下一次正文 ${btn('bring-cancel', '取消', 'text-button')}</p>` : ''}`, {
-      'bring-pick': () => { d.close(); selecting = new Set(); panel = null; render(); },
+      'bring-pick': () => { d.close(); selecting = new Set(); pickFor = 'bring'; panel = null; render(); },
       'bring-cancel': async () => { d.close(); await api.chatCancelBring?.(); ctx.notify('已取消，这次不带聊天进正文'); render(); }
     });
     d.body.querySelector('[data-field="story-keep"]')?.addEventListener('change', async e => {
@@ -182,7 +183,7 @@ export function chatApp(ctx) {
     });
   }
   /** The 带进剧情 count; a choice already waiting is replaced by the new one (only one goes into the story). */
-  const pickedLabel = n => { const before = pendingBring(); return `已选 ${n} 条${before ? `（会替换之前选的 ${before.count} 条）` : ''}`; };
+  const pickedLabel = n => { const before = pickFor === 'bring' && pendingBring(); return `已选 ${n} 条${before ? `（会替换之前选的 ${before.count} 条）` : ''}`; };
 
   // ---------- 消息 ----------
   function convRow(t, me) {
@@ -454,7 +455,9 @@ export function chatApp(ctx) {
         ${typer !== null ? `<div class="msg typing-row" data-engine="${typer ? engine(typer) : 'none'}">${avatar(typer || '…', typer ? engine(typer) : 'none', 34)}<div class="m-body"><div class="chat-bubble typing" aria-label="对方正在输入"><i></i><i></i><i></i></div></div></div>` : ''}</div></div>
       ${!group && thread.friend ? `<div class="friend-cut" role="status">${icon('alert')}<span>${thread.friend.by === 'me' ? `你已删除了${esc(thread.members[0])}` : `${esc(thread.members[0])}已把你从好友里删除了`}</span>${thread.friend.by === 'me' ? btn('refriend', '加回好友', 'chip-button', `data-id="${esc(thread.id)}"`) : btn('ask-friend', '发送好友申请', 'chip-button')}</div>` : ''}
       ${selecting
-        ? `<div class="bring-bar"><span>${selecting.size ? pickedLabel(selecting.size) : '点一条消息开始，再拖上下的条条多选'}</span>${btn('bring-go', '带进下一次正文', 'primary', selecting.size ? '' : 'disabled')}</div>`
+        ? (pickFor === 'delete'
+          ? `<div class="bring-bar pick-delete"><span>${selecting.size ? pickedLabel(selecting.size) : '点一条消息开始，再拖上下的条条多选'}</span>${btn('pick-up', '到最早', 'text-button', selecting.size ? '' : 'disabled')}${btn('pick-down', '到最新', 'text-button', selecting.size ? '' : 'disabled')}${btn('delete-go', icon('trash') + '删除', 'danger', selecting.size ? '' : 'disabled')}</div>`
+          : `<div class="bring-bar"><span>${selecting.size ? pickedLabel(selecting.size) : '点一条消息开始，再拖上下的条条多选'}</span>${btn('bring-go', '带进下一次正文', 'primary', selecting.size ? '' : 'disabled')}</div>`)
         : composerHTML()}
     </div>`);
     const msgs = v.root.querySelector('.msgs');
@@ -956,7 +959,7 @@ export function chatApp(ctx) {
     const d = sheet('消息', `${voice ? '' : `<p class="help-copy">${esc(shown)}</p>`}
       ${voice ? `<div class="actions">${btn('transcribe', icon('book') + (open ? '收起文字' : '转文字'), 'primary')}${btn('download', icon('download') + '下载语音', 'secondary')}${canShareFiles(ctx.win) ? btn('share', icon('share') + '分享', 'secondary') : ''}</div>` : ''}
       <div class="actions">${quotable(m) ? btn('quote', icon('reply') + '引用', 'secondary') : ''}${copyable ? btn('copy', icon('copy') + '复制', 'secondary') : ''}</div>
-      <div class="actions">${canRecall ? btn('recall', icon('undo') + '撤回', 'secondary') : ''}${btn('delete', icon('trash') + '删除', 'danger')}</div>
+      <div class="actions">${canRecall ? btn('recall', icon('undo') + '撤回', 'secondary') : ''}${btn('pick-delete', icon('check') + '多选删除', 'secondary')}${btn('delete', icon('trash') + '删除', 'danger')}</div>
       ${last && live ? `<div class="actions">${btn('reroll', icon('refresh') + '重新回复这一轮', 'secondary')}</div>` : ''}`, {
       transcribe: () => {
         d.close();
@@ -974,6 +977,8 @@ export function chatApp(ctx) {
         await api.updateChatMessage(threadId, m.id, {recall: true});
       },
       delete: async () => { d.close(); await api.deleteChatMessages(threadId, [m.id]); },
+      // Picking like 带进剧情: this one first, then tap others or drag the bars (到最早 / 到最新 take in all on that side).
+      'pick-delete': () => { d.close(); selecting = new Set(LINE_KINDS.includes(m.kind) ? [] : [m.id]); pickFor = 'delete'; panel = null; quote = null; render(); },
       reroll: async () => { d.close(); await reroll(); }
     });
   }
@@ -1497,6 +1502,27 @@ export function chatApp(ctx) {
         break;
       }
       case 'cancel-bring': await api.chatCancelBring?.(); ctx.notify('已取消，这次不带聊天进正文'); render(); break;
+      case 'pick-up': case 'pick-down': {
+        // Everything from the picked ones to the first (or the latest) message.
+        const ids = thread.messages.filter(m => !LINE_KINDS.includes(m.kind)).map(m => m.id), at = ids.map((id, i) => selecting.has(id) ? i : -1).filter(i => i >= 0);
+        if (!at.length) break;
+        const [from, to] = action === 'pick-up' ? [0, at.at(-1)] : [at[0], ids.length - 1];
+        selecting = new Set(ids.slice(from, to + 1));
+        render();
+        break;
+      }
+      case 'delete-go': {
+        const picked = thread.messages.map((m, i) => selecting.has(m.id) ? i : -1).filter(i => i >= 0);
+        if (!picked.length) break;
+        // The notes between them (拍一拍, 撤回, system lines) go with them.
+        const ids = thread.messages.filter((m, i) => selecting.has(m.id) || (LINE_KINDS.includes(m.kind) && i > picked[0] && i < picked.at(-1))).map(m => m.id);
+        if (!await ctx.confirm(`删除这 ${selecting.size} 条消息？`, '删掉后聊天记录里就没有了，TA 之后也不会再看到这些。')) break;
+        await api.deleteChatMessages(threadId, ids);
+        selecting = null;
+        ctx.notify(`删除了 ${ids.length} 条消息`);
+        render();
+        break;
+      }
       case 'contact-add': addContact(); break;
       case 'contact-edit': contactDraft = structuredClone(api.getState().chat.contacts.find(c => c.id === el.dataset.id)); mode = 'contact-edit'; render(); break;
       case 'contact-cancel': contactDraft = null; mode = 'list'; render(); break;

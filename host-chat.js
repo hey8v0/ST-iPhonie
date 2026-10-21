@@ -249,8 +249,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     const s = settings();
     return s.chat.proactive?.on === true && ((s.general.voiceEnabled !== false && s.general.voiceMode === 'separate') || (s.draw.enabled && s.draw.mode === 'separate'));
   }
-  /** The phone part's rule for that request; '' when there is no one to send anything. */
+  /** The phone part's rule for that request; '' when there is no one to send anything, or it is not the phone's turn. */
   async function phoneAfterPlan() {
+    if (!phoneTurn()) return '';
     const list = await backend.chats.list().catch(() => null);
     if (list) groups = list.filter(t => t.type === 'group').map(t => ({name: t.name, space: t.space || ''}));
     return phoneAfterRule(activeChatPreset(settings().chat), {user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.()});
@@ -258,7 +259,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   /** The 正文 rule for the story request while 正文联动手机 is on: who can send what, and how (<phone>). */
   function storyPlan() {
     const s = settings(), friends = friendsPlan();
-    if (!s.chat.proactive?.on || phoneAfter()) return friends;
+    if (!s.chat.proactive?.on || phoneAfter() || !phoneTurn()) return friends;
     refreshCuts();
     const text = storyTextRule(activeChatPreset(s.chat), {user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.()});
     return [...(text ? [{key: 'sttts.entry.phone', text, position: 1, depth: 0, role: 0}] : []), ...friends];
@@ -288,17 +289,35 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     if (last) backend.emit('chat', {threadId, incoming: {from: last.from, text: last.text || '', kind: last.kind, count: fresh.length}});
     return fresh.length;
   }
-  let since = 0;
-  /**
-   * A story reply finished: what it sent to the phone (<phone>) arrives, once per version of the reply; and, when
-   * `every` is set, every that many replies someone may text first (one phone request, at most dailyMax a day).
-   */
+  // How often the phone reaches out, whoever does it (the story writing <phone>, or someone asked by nudge): with
+  // `every` set, the phone has one turn in that many story replies — the story may send then, else someone is asked;
+  // at most dailyMax times a day (0: no limit). Out of turn the story is not told it can use the phone at all.
+  let quiet = 0;
+  function today() {
+    let day = {day: new Date().toDateString(), n: 0};
+    try { const saved = JSON.parse(localStorage.getItem(DAY_KEY) || 'null'); if (saved?.day === day.day) day = saved; } catch { /* this session only */ }
+    return day;
+  }
+  function counted() {
+    const day = today(); day.n++;
+    try { localStorage.setItem(DAY_KEY, JSON.stringify(day)); } catch { /* counted for this session */ }
+  }
+  /** Whether the next story reply may reach out on the phone. */
+  function phoneTurn() {
+    const o = settings().chat.proactive || {};
+    if (!o.on || (o.dailyMax > 0 && today().n >= o.dailyMax)) return false;
+    return !(o.every > 0) || quiet >= o.every - 1;
+  }
+  /** A story reply finished: what it sent to the phone (<phone>) arrives, once per version of the reply; when it is
+   * the phone's turn and nothing came, someone is asked whether they would text first (one phone request). */
   async function storyReplied(id) {
-    const ctx = context(), s = settings(), o = s.chat.proactive || {};
-    if (!o.on) { since = 0; return; }
+    const o = settings().chat.proactive || {};
+    if (!o.on) { quiet = 0; return; }
     const sent = await deliver(id);
-    if (sent || !(o.every > 0)) { since = 0; return; }
-    await nudge();
+    if (sent) { quiet = 0; counted(); return; }
+    if (!(o.every > 0) || ++quiet < o.every) return;
+    quiet = 0;
+    if (!(o.dailyMax > 0 && today().n >= o.dailyMax)) await nudge();
   }
   /**
    * What a story reply sent to the phone (<phone>) arrives, once per version of the reply: private messages (and
@@ -370,17 +389,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     }
     return gone;
   }
-  /**
-   * Every `every` story replies with nothing sent, someone is asked whether they would text first now (one phone
-   * request; they may say no). At most dailyMax messages a day (0: no limit).
-   */
+  /** On the phone's turn with nothing sent: someone is asked whether they would text first now (they may say no). */
   async function nudge() {
-    const ctx = context(), o = settings().chat.proactive || {};
-    if (++since < o.every) return;
-    since = 0;
-    let day = {day: new Date().toDateString(), n: 0};
-    try { const saved = JSON.parse(localStorage.getItem(DAY_KEY) || 'null'); if (saved?.day === day.day) day = saved; } catch { /* this session only */ }
-    if (o.dailyMax > 0 && day.n >= o.dailyMax) return;
+    const ctx = context();
     // The card's own character first, else someone from the 角色 App.
     // Not someone who is not friends with the user right now (either way).
     const apart = new Set((await backend.threads()).filter(t => t.type === 'dm' && t.friend).map(t => t.members[0]));
@@ -394,8 +405,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       // Only messages sent count toward the day; 「[不发]」 does not.
       if (!fresh.length) return;
       notice(`${name} 给你发来 ${fresh.length} 条消息`); backend.emit('chat', {threadId: thread.id, incoming: {from: name, text: fresh.at(-1).text || '', kind: fresh.at(-1).kind, count: fresh.length}});
-      day.n++;
-      try { localStorage.setItem(DAY_KEY, JSON.stringify(day)); } catch { /* counted for this session */ }
+      counted();
     } catch { /* not worth interrupting the story */ }
   }
 

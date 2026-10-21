@@ -7,13 +7,17 @@ const CSS = `
 .sttts-ask-head{display:flex;align-items:center;gap:8px}
 .sttts-ask-card h2{margin:0;font-size:16px;font-weight:700;color:#fff}
 .sttts-ask-card p{margin:0;font-size:12.5px;opacity:.72}
-.sttts-ask-card textarea{box-sizing:border-box;width:100%;min-height:150px;flex:1;resize:vertical;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:#141622;color:#eef0f8;font:13px/1.55 ui-monospace,Consolas,monospace}
-.sttts-ask-card textarea:focus,.sttts-ask-wish input:focus{outline:2px solid #7cc4ff;outline-offset:1px}
+.sttts-ask .sttts-ask-card textarea{all:unset;display:block;box-sizing:border-box;width:100%;min-height:150px;flex:1;resize:vertical;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:#141622;color:#eef0f8;caret-color:#7cc4ff;font:13px/1.55 ui-monospace,Consolas,monospace;-webkit-text-fill-color:#eef0f8}
+.sttts-ask .sttts-ask-card textarea:focus,.sttts-ask .sttts-ask-wish input:focus{outline:2px solid #7cc4ff;outline-offset:1px;border-color:transparent}
 .sttts-ask-note{margin:0;max-height:32vh;overflow:auto;padding:10px 12px;border-radius:12px;background:rgba(124,196,255,.08);border:1px solid rgba(124,196,255,.22);white-space:pre-wrap;font:13px/1.6 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#dfe9f5}
 .sttts-ask-note[data-error]{background:rgba(255,120,120,.1);border-color:rgba(255,120,120,.3)}
 .sttts-ask-note button{margin-left:8px;min-height:28px;padding:0 12px;font-size:12.5px}
 .sttts-ask-wish{display:flex;gap:8px}
-.sttts-ask-wish input{flex:1;min-width:0;box-sizing:border-box;height:40px;padding:0 12px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:#141622;color:#eef0f8;font:13.5px "PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+.sttts-ask .sttts-ask-wish input{all:unset;flex:1;min-width:0;box-sizing:border-box;height:40px;padding:0 12px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:#141622;color:#eef0f8;caret-color:#7cc4ff;font:13.5px "PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-text-fill-color:#eef0f8}
+.sttts-ask .sttts-ask-card textarea,.sttts-ask .sttts-ask-wish input{background:#141622!important;color:#eef0f8!important;-webkit-text-fill-color:#eef0f8!important;border:1px solid rgba(255,255,255,.16)!important;border-radius:12px!important;box-shadow:none!important;backdrop-filter:none!important;text-shadow:none!important;opacity:1!important}
+.sttts-ask .sttts-ask-card textarea{font-family:ui-monospace,Consolas,monospace!important;font-size:13px!important}
+.sttts-ask .sttts-ask-wish input{font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif!important;font-size:13.5px!important}
+.sttts-ask .sttts-ask-wish input::placeholder{color:rgba(238,240,248,.42);-webkit-text-fill-color:rgba(238,240,248,.42)}
 .sttts-ask-actions{display:flex;align-items:center;gap:8px}
 .sttts-ask-actions .sttts-ask-gap{flex:1}
 .sttts-ask button{all:unset;box-sizing:border-box;min-height:40px;padding:0 16px;border-radius:999px;display:inline-grid;place-items:center;cursor:pointer;font-weight:700;background:rgba(255,255,255,.1);color:#fff;white-space:nowrap}

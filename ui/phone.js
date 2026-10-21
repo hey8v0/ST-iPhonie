@@ -979,6 +979,17 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     return true;
   }
   win.stTtsOpenThread = () => run(takeThread);
+  // The browser's back while the phone is open (the edge swipe on a phone, see index.js): whatever is on top closes
+  // the way Esc closes it (a picture, the 改提示词 box, a sheet), else the app goes back a step. false at home: the
+  // phone itself closes.
+  win.stTtsBack = () => {
+    if (!sheet && !locked && !active && !doc.querySelector('.sttts-ask, .sttts-viewer, .album-viewer')) return false;
+    const keyboard = doc.documentElement.dataset.keyboard;
+    doc.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+    // It was not a key: the phone keeps its animations (they are off while a keyboard is used).
+    if (keyboard === undefined) delete doc.documentElement.dataset.keyboard;
+    return true;
+  };
   win.stTtsPanelVisibility = (visible, {preserveView = false} = {}) => {
     const reopening = visible && !panelVisible;
     panelVisible = visible;
@@ -1016,6 +1027,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     win.stTtsPanelVisibility = previousVisibility;
     win.stTtsOpenDraw = previousOpenDraw;
     win.stTtsOpenThread = previousOpenThread;
+    if (win.stTtsBack) delete win.stTtsBack;
   }
   win.addEventListener('pagehide', dispose, {signal});
   today = todayPage({doc, win, api, open, confirm, dialog, notify, signal, engineOf, appIcon, playback: () => playback, battery: () => batteryState(battery),

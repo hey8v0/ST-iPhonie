@@ -28,8 +28,8 @@ export function settingsApp(ctx) {
       const s = api.getState(), o = s.chat.proactive, after = (s.general.voiceEnabled !== false && s.general.voiceMode === 'separate') || (s.draw.enabled && s.draw.mode === 'separate');
       d.body.innerHTML = `<div class="group pad">${toggle('p-on', '正文里的事发到手机', o.on, '打开后，正文里有人用手机联系你——发消息、发照片、转账、发红包、送礼物、分享歌曲、打电话，或者发了朋友圈、在群里说话——这些事会真的出现在小手机上：消息进聊天，电话会响，动态进朋友圈。正文里只留一行「📱 谁给你发了消息」。\n\n照片：能出图时会画出来；没开出图就是一张文字照片，写着拍到了什么，以后也能点「画出来」。\n\n只有角色 App 里的角色和手机里的联系人能发；群消息只发到已经有的群。什么时候发、怎么发，在预设 App 的聊天预设里改「正文里主动发消息」这条规则（用在「正文」）。')}
         ${o.on ? `<p class="hint">${after ? '现在开着「回复后单独配音 / 配图」：手机上的事在那次请求里一起写，正文请求不变，也不多花一次请求。' : '正文模型写回复时顺手写在最后，不多花一次请求。开了「回复后单独配音 / 配图」的话，会改成在那次请求里一起写。'}</p>` : ''}
-        <div class="field"><span>正文里没发的话，每几条正文问一次要不要主动找你${help('0 表示只在正文里发。设成几，就每隔这么多条正文回复，问一个角色（优先是当前卡的角色）这时会不会主动给你发消息，每问一次用文字模型请求一次。TA 觉得没理由就不发，什么时候会发由聊天预设里「正文里主动发消息」这条规则决定。')}</span><input data-field="p-every" type="number" min="0" max="100" value="${o.every}" ${o.on ? '' : 'disabled'}></div>
-        <div class="field"><span>这样主动找你，每天最多${help('填 0 是不限。只算真的发来的，TA 决定不发的那次不算。')}</span><input data-field="p-dailyMax" type="number" min="0" max="99" value="${o.dailyMax}" ${o.on && o.every ? '' : 'disabled'}></div></div>`;
+        <div class="field"><span>每几条正文，手机这边来找你一次${help('0：每条正文都可以顺手用手机联系你，发不发由正文自己决定。设成几：每隔这么多条正文才有一次机会——这一条正文可以顺手发；没发的话，再单独问一个角色（优先是当前卡的角色）这时会不会主动找你，问一次用文字模型请求一次，TA 觉得没理由就不发。其余几条正文不会被告知可以用手机，所以不会每轮都来消息（手动加的联系人也一样）。什么时候会发由聊天预设里「正文里主动发消息」这条规则决定。')}</span><input data-field="p-every" type="number" min="0" max="100" value="${o.every}" ${o.on ? '' : 'disabled'}></div>
+        <div class="field"><span>手机这边来找你，每天最多${help('填 0 是不限。正文里发来的和单独问出来的都算，只算真的发来的，TA 决定不发的那次不算。到了上限，今天的正文就不再被告知可以用手机。')}</span><input data-field="p-dailyMax" type="number" min="0" max="99" value="${o.dailyMax}" ${o.on ? '' : 'disabled'}></div></div>`;
     };
     paint();
     d.onClose(() => render());
@@ -161,9 +161,9 @@ export function settingsApp(ctx) {
           k === 'vibes' && (library.sizes?.vibes || 0) > 300 * 1024 * library.vibes ? btn('vibes-compact', '压缩原图', 'chip-button') : '')) : []),
       chatPictures?.count ? row('当前聊天的正文图片', `${chatPictures.count} 张`, '存在酒馆') : '',
       // How much there is: a share of what this browser gives the site, so a computer keeps more than a phone.
-      library ? row('能存多少', `相册和收藏这些最多 ${size(library.limit)}，语音缓存最多 ${size(cache.limit || 0)}（满了先清最早的）${budget?.quota ? `；浏览器给小手机所在网站 ${size(budget.quota)}` : ''}${budget?.persisted ? '，已设为长期保存' : ''}`, '') : ''
+      library ? row('最多能存', `只是上限，不会先占着：手机里实际只用上面这些。相册和收藏这些最多 ${size(library.limit)}，语音缓存最多 ${size(cache.limit || 0)}（满了先清最早的）${budget?.quota ? `；按浏览器给小手机所在网站的 ${size(budget.quota)} 算的` : ''}${budget?.persisted ? '，已设为长期保存' : ''}。`, '') : ''
     ].filter(Boolean);
-    const total = library ? `${size(library.bytes + (cache.available ? cache.bytes : 0))} / ${size(library.limit + (cache.available ? cache.limit || 0 : 0))}` : '无法读取';
+    const total = library ? `已用 ${size(library.bytes + (cache.available ? cache.bytes : 0))} · 最多 ${size(library.limit + (cache.available ? cache.limit || 0 : 0))}` : '无法读取';
     return `<details class="storage-fold" data-group="storage-parts"><summary><span>本地资料</span><small>${total}</small></summary>${parts.join('') || '<div class="setting-row"><span>什么都没有存</span></div>'}</details>`;
   }
   /** 清除相册里的绘图: pick which of the drawn photos go (all ticked), with how many and how big each is. */
