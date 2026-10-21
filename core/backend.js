@@ -28,7 +28,7 @@ import { normalizeSettings, validateSettings, modelRules, freshState } from './s
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases } from './routes.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
 import { normalizeMarks, withMarks } from './voice-fx.js';
-import { TTSParameters, FISH_API } from './parameters.js';
+import { TTSParameters, FISH_API, tauriTavern } from './parameters.js';
 import { KeyStore, keyTail, validateKey, parseTextKeys, joinTextKeys } from './keys.js';
 import { Providers, buildRequest } from './providers.js';
 import { AudioCache } from './cache.js';
@@ -2007,7 +2007,7 @@ export class TTSBackend {
         catalog.models = catalog.models.map(id => ({ id, supported: true, reason: '' }));
         // Models only on Fish's own /v1/tts: without a relay they go through the tavern's proxy, which must be on.
         const native = engine === 'fish' && TTSParameters.fishBase(current) === FISH_API ? catalog.models.filter(m => TTSParameters.fishNative({ ...current, model: m.id })).map(m => m.id) : [];
-        catalog.modelNote = native.length ? `${native.join('、')} 现在只在 Fish 自己的接口上，网页不能直接调用，要借酒馆转发：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆（用中转的不用改）。Fish 把它放进网页能用的接口以后会自动直连。` : '';
+        catalog.modelNote = native.length && tauriTavern() ? `${native.join('、')} 现在只在 Fish 自己的接口上，网页不能直接调用。TauriTavern 现在还没有酒馆的转发功能，要在下面的「中转」里填一个 Fish 格式的中转才能用这个模型；TauriTavern 以后加上转发，或者 Fish 把它放进网页能用的接口，就不用中转了。` : native.length ? `${native.join('、')} 现在只在 Fish 自己的接口上，网页不能直接调用，要借酒馆转发：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆（用中转的不用改）。Fish 把它放进网页能用的接口以后会自动直连。` : '';
         catalog.groups = catalog.groups.map(group => ({ ...group, fields: group.fields.map(field => ({
             ...field, ...(field.type === 'select' ? { options: TTSParameters.allowed(engine, field, current) } : {}),
             unavailable: TTSParameters.unavailable(engine, field, current),

@@ -105,6 +105,12 @@ export function setFishCompat(ids){const next=new Set((ids||[]).map(id=>String(i
 export const fishNative=c=>!fishOpenAI(c)&&!fishCompat.has(c?.model);
 /** A /v1/tts request without a relay goes through the tavern's proxy: what to do when that is off. */
 export const FISH_PROXY_NOTE='这个模型现在只在 Fish 自己的接口上，网页不能直接调用，要借酒馆转发：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆。用中转的不用改。';
+/** TauriTavern (the tavern as a phone and desktop app, Rust instead of Node) has no /proxy/ yet, and gives extensions
+// no other way to reach a page without CORS: a model only on Fish's /v1/tts needs a relay there for now. */
+export const tauriTavern=(host=globalThis)=>!!host?.__TAURITAVERN__;
+export const FISH_TAURI_NOTE='TauriTavern 现在还没有酒馆的转发功能，扩展也没有别的办法调用不让网页访问的接口；drama-3 现在只在 Fish 自己的接口上，所以要在 Fish 引擎的「中转」里填一个 Fish 格式的中转才能用。TauriTavern 以后加上转发，或者 Fish 把 drama-3 放进网页能用的接口，就不用中转了，插件会自动用上。其他 Fish 模型（s2.1-pro 这些）是直连的，不受影响。';
+/** What the tavern's proxy answered when it is not there (an app tavern's own page, a script, plain text). */
+export const FISH_PROXY_PAGE='酒馆的转发返回的不是声音，而是酒馆自己的网页或代码：这个酒馆没有能用的转发（TauriTavern 这类手机酒馆 App 没有这个功能）。在 Fish 引擎的「中转」里填一个 Fish 格式的中转，drama-3 就能用；其他 Fish 模型不受影响。';
 export const FISH_NATIVE_REFS='这个模型走 Fish 自己的接口，那里不能这样带参考音频：在 Fish 引擎里去掉参考音频，角色的「音色」填 Fish 的音色 ID';
 export const fishBase=c=>typeof c?.relay==='string'&&(proxyAddress(c.relay)||/^https?:\/\/[^\s]+$/.test(c.relay))?c.relay:FISH_API;
 /** A relay speaks Fish's own paths ('fish': /compat/v1/audio/speech, /model, /wallet) or OpenAI's ('openai': /v1/audio/speech only). */
