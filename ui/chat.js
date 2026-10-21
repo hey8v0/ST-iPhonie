@@ -1055,8 +1055,8 @@ export function chatApp(ctx) {
       else render();
       if (next) windowsSheet(base);
     };
-    await paint();
     d.onClose(() => swipe?.dispose());
+    // 「＋」 works at once, also before the list is read.
     d.overlay.addEventListener('click', e => {
       if (!e.target.closest('[data-sheet-add]')) return;
       run(async () => {
@@ -1066,6 +1066,7 @@ export function chatApp(ctx) {
         open(t.id); ctx.notify('新开了一个聊天窗口');
       });
     });
+    await paint();
   }
   /** Options for voice messages in every chat: what 转文字 shows, and whether it happens by itself. */
   function voiceTextSheet() {

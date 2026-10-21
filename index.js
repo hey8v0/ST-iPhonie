@@ -301,7 +301,7 @@ function watchPanelLayout(on){const w=globalThis.window,method=on?'addEventListe
  if(!on){cancelAnimationFrame(panelLayoutRaf);panelLayoutRaf=0;for(const id of panelLayoutTimers)clearTimeout(id);panelLayoutTimers=[];panelViewport=null;}}
 // Older ST-TTS copies publish __stTtsPanelBridge (this one no longer does): both running doubles the waves and prompts.
 let oldCopyNoted=false;
-function openPanel(roleId,preserveView=false){setTimeout(()=>{callIsland?.refresh();msgIsland?.refresh();noteIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();},0);floating?.setMode('docked');if(globalThis.__stTtsPanelBridge&&!oldCopyNoted){oldCopyNoted=true;notice('这个酒馆里还装着旧版「ST-TTS · 角色对白」，会和 ST-iPhonie 互相干扰：请在扩展管理里删除它，然后刷新页面');}if(settings?.sync?.enabled&&!panel?.open)backend?.syncNow().catch(()=>{});if(!panel){panel=document.createElement('dialog');panel.id='sttts-panel';panel.setAttribute('aria-label','ST-iPhonie');frame=document.createElement('iframe');frame.title='ST-iPhonie';frame.src=new URL('ui/index.html',base).href;frame.addEventListener('load',()=>{try{frame.contentWindow.addEventListener('pointerdown',()=>{if(guards<BACK_SPARE)setTimeout(armBack,0);},true);}catch{}});panel.append(frame);panel.addEventListener('close',()=>{setTimeout(syncBack,0);frame?.contentWindow?.stTtsPanelVisibility?.(false);if(panelExpanded){panelExpanded=false;placePanel();}callIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();});panel.addEventListener('cancel',()=>{if(['playing','generating'].includes(player.phase))player.toggle();});document.body.append(panel);}if(!panel.open){placePanel();if(panel.classList.contains('floating'))panel.show();else panel.showModal();frame.contentWindow?.stTtsPanelVisibility?.(true,{preserveView});restorePanelLayout();}armBack();if(roleId)frame.contentWindow?.stTtsOpenRole?.(roleId);}
+function openPanel(roleId,preserveView=false){setTimeout(()=>{callIsland?.refresh();msgIsland?.refresh();noteIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();},0);floating?.setMode('docked');if(globalThis.__stTtsPanelBridge&&!oldCopyNoted){oldCopyNoted=true;notice('这个酒馆里还装着旧版「ST-TTS · 角色对白」，会和 ST-iPhonie 互相干扰：请在扩展管理里删除它，然后刷新页面');}if(settings?.sync?.enabled&&!panel?.open)backend?.syncNow().catch(()=>{});if(!panel){panel=document.createElement('dialog');panel.id='sttts-panel';panel.setAttribute('aria-label','ST-iPhonie');frame=document.createElement('iframe');frame.title='ST-iPhonie';frame.src=new URL('ui/index.html',base).href;frame.addEventListener('load',()=>{try{listenTouches(frame.contentWindow);}catch{}});panel.append(frame);panel.addEventListener('close',()=>{setTimeout(syncBack,0);frame?.contentWindow?.stTtsPanelVisibility?.(false);if(panelExpanded){panelExpanded=false;placePanel();}callIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();});panel.addEventListener('cancel',()=>{if(['playing','generating'].includes(player.phase))player.toggle();});document.body.append(panel);}if(!panel.open){placePanel();if(panel.classList.contains('floating'))panel.show();else panel.showModal();frame.contentWindow?.stTtsPanelVisibility?.(true,{preserveView});restorePanelLayout();}armBack();if(roleId)frame.contentWindow?.stTtsOpenRole?.(roleId);}
 // 手机上从屏幕边缘滑（浏览器的返回）: while something of ours is open over the tavern (the phone, the 视觉小说 stage,
 // a 大游戏, a picture or the 改提示词 box on the tavern page) a few history entries of ours lie on top, so the browser's
 // back (the edge swipe, Android's back) steps back inside it — the way Esc does, one layer at a time — and the tavern
@@ -313,7 +313,7 @@ const BACK_SPARE=6,OVER='.sttts-vn,.sttts-viewer,.sttts-ask,[data-sttts-owned=ga
 let guards=0,unwinding=false;
 const touchBack=()=>!!globalThis.matchMedia?.('(pointer: coarse)').matches;
 const oursOpen=()=>!!panel?.open||!!document.querySelector(OVER);
-function armBack(){if(unwinding||!oursOpen()||!touchBack())return;try{while(guards<BACK_SPARE){history.pushState({...(history.state&&typeof history.state==='object'?history.state:{}),stttsPhone:marker},'');guards++;}}catch{}}
+function armBack(force=false){if(unwinding||!(force||oursOpen())||!touchBack())return;try{while(guards<BACK_SPARE){history.pushState({...(history.state&&typeof history.state==='object'?history.state:{}),stttsPhone:marker},'');guards++;}}catch{}}
 function unarmBack(){const n=guards;guards=0;if(n&&history.state?.stttsPhone===marker){unwinding=true;try{history.go(-n);}catch{unwinding=false;}}}
 // Something of ours opened or closed: lay the entries (an opening comes from a touch), or take them away when all is closed.
 function syncBack(){if(oursOpen())armBack();else unarmBack();}
@@ -335,7 +335,19 @@ globalThis.addEventListener?.('popstate',()=>{
  setTimeout(()=>{if(!oursOpen())unarmBack();},0);
 });
 // A touch anywhere (the tavern page, or inside the phone's frame: see openPanel) lays the used entries again.
-globalThis.addEventListener?.('pointerdown',()=>{if(guards<BACK_SPARE)setTimeout(armBack,0);},true);
+// Laid while the touch is still being handled: Safari only keeps an entry added during the user's own touch, not one a
+// moment later. A touch opening something (a double tap opening a picture, a tap on 改提示词再画) has opened it by the
+// time the event reaches the window, so the window hears it last (and once more right after, for what opens late).
+// What opens something of ours on the tavern page (a picture, the tools of a reply, a wave, the phone): touched, the
+// entries are laid before it opens (a handler may keep the event from the window); nothing opened, they go again.
+const OPENERS='.sttts-pic,.sttts-pic-zoom,[data-sttts-pic-action],[data-sttts-action],[data-sttts-tools],.sttts-context-menu,#sttts-open,#sttts-wand-entry,#sttts-floating,[data-sttts-owned]';
+let preArmed=0;
+const touched=e=>{
+ if(e?.type==='pointerdown'&&!oursOpen()&&e.target?.closest?.(OPENERS)&&!guards){armBack(true);clearTimeout(preArmed);preArmed=setTimeout(()=>{if(!oursOpen())unarmBack();},1500);return;}
+ if(guards<BACK_SPARE){armBack();setTimeout(armBack,0);}
+};
+function listenTouches(win){for(const type of ['pointerdown','pointerup','click','dblclick','keydown'])win.addEventListener?.(type,touched,false);}
+listenTouches(globalThis);
 // The stage, the pictures, the box and the game come and go as children of the page.
 if(globalThis.MutationObserver&&document.body)new MutationObserver(list=>{if(list.some(m=>[...m.addedNodes,...m.removedNodes].some(n=>n.nodeType===1&&n.matches(OVER))))syncBack();}).observe(document.body,{childList:true});
 // 大游戏 over the whole tavern page: the game in a frame of its own (ui/indie/<name>/play.html), the phone closed meanwhile.

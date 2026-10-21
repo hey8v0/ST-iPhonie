@@ -132,14 +132,17 @@ function ruleUse(e) {
 
 // The user in the chat app (QQ style): shown name (empty: the tavern's persona name), status, signature, and looks.
 export const PROFILE_STATUS = Object.freeze({online: '在线', qme: 'Q我吧', busy: '忙碌', away: '离开', hidden: '隐身'});
-export const BUBBLES = Object.freeze({default: '默认', candy: '糖果', mint: '薄荷', night: '星空', ink: '描边'});
+// 质感 bubbles and 氛围 backgrounds (ui/aura.css, ui/chat-scenes.js): material and soft colour, each with a day and a night
+// look. The ones from before (drawn pictures) become the nearest new one (OLD_LOOKS).
+export const BUBBLES = Object.freeze({default: '默认', paper: '纸张', jelly: '果冻', frost: '磨砂', glow: '夜光'});
 export const FRAMES = Object.freeze({none: '无', star: '星星', cat: '猫耳', flower: '花环', halo: '光环'});
-export const BACKGROUNDS = Object.freeze({none: '无', clouds: '云朵', stars: '星空', grid: '格子', sakura: '樱花'});
+export const BACKGROUNDS = Object.freeze({none: '无', sky: '晴空', dusk: '黄昏', blush: '樱粉', mint: '薄荷', lavender: '薰衣草', deep: '深海', paper: '纸张'});
+const OLD_LOOKS = {bubble: {candy: 'jelly', mint: 'jelly', night: 'glow', ink: 'paper'}, background: {clouds: 'sky', stars: 'lavender', grid: 'paper', sakura: 'blush', 'aura-sky': 'sky', 'aura-dusk': 'dusk', 'aura-blush': 'blush', 'aura-deep': 'deep', 'aura-night': 'lavender'}};
 export function normalizeProfile(p = {}) {
   const pick = (value, list, fallback) => Object.hasOwn(list, value) ? value : fallback;
   return {name: text(p.name, 40).trim(), status: pick(p.status, PROFILE_STATUS, 'online'), statusText: text(p.statusText, 20).trim(), signature: text(p.signature, 80).trim(),
     // Bought looks (PREMIUM) are kept like the free ones; the backend checks they were bought before they are put on.
-    bubble: pick(p.bubble, {...BUBBLES, ...PREMIUM.bubble}, 'default'), frame: pick(p.frame, {...FRAMES, ...PREMIUM.frame}, 'none'), background: pick(p.background, {...BACKGROUNDS, ...PREMIUM.background}, 'none'), backgroundPhoto: text(p.backgroundPhoto, 512)};
+    bubble: pick(OLD_LOOKS.bubble[p.bubble] || p.bubble, {...BUBBLES, ...PREMIUM.bubble}, 'default'), frame: pick(p.frame, {...FRAMES, ...PREMIUM.frame}, 'none'), background: pick(OLD_LOOKS.background[p.background] || p.background, {...BACKGROUNDS, ...PREMIUM.background}, 'none'), backgroundPhoto: text(p.backgroundPhoto, 512)};
 }
 
 /**

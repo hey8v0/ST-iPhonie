@@ -5,6 +5,7 @@ import {esc, btn, empty, avatar, field, textArea, input, toggle, help} from './c
 import {icon} from './icons.js';
 import {openImageViewer} from '../image-viewer.js';
 import {downloadAction, shareAction} from '../download.js';
+import {aura} from './aura.js';
 import {editTags} from '../host-ask.js';
 import {pictureInputs, photoTags, photoCast} from '../core/draw.js';
 
@@ -70,7 +71,7 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
     const busy = api.momentsBusy?.(), who = me();
     const tools = btn('m-refresh', icon('refresh'), 'round-button', `aria-label="刷新：让角色发新动态" ${busy ? 'disabled' : ''}`) + btn('m-new', icon('add'), 'round-button', 'aria-label="发动态"') + btn('m-options', icon('sliders'), 'round-button', 'aria-label="动态设置"');
     const scroll = v.root.scrollTop;
-    v.draw(frame(`<div class="qzone-cover"><span class="qzone-title">好友动态</span><span class="qzone-tools">${tools}</span><span class="qzone-me">${who.avatar(58)}<strong>${esc(who.name)}</strong></span></div>`
+    v.draw(frame(`<div class="qzone-cover">${aura('theme')}<span class="qzone-title">好友动态</span><span class="qzone-tools">${tools}</span><span class="qzone-me">${who.avatar(58)}<strong>${esc(who.name)}</strong></span></div>`
       + (author ? `<div class="banner">${icon('person')}<span>只看 ${esc(nameOf(author))} 的动态</span>${btn('m-all', '看全部', 'chip-button')}</div>` : '')
       + (busy ? '<p class="moments-busy" role="status">朋友们正在刷动态……</p>' : '')
       + (posts.length ? `<div class="moments-feed">${posts.map(post).join('')}</div>`

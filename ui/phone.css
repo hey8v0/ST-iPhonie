@@ -1142,10 +1142,6 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .me-av .pendant{position:absolute;inset:-17.6%;width:135.2%;height:135.2%;overflow:visible;pointer-events:none;z-index:1;filter:drop-shadow(0 1px 1.5px #0003)}
 .msg.me .me-side{flex:none}
 /* 聊天气泡 */
-.chat-thread[data-bubble=candy] .msg.me .chat-bubble{background:linear-gradient(135deg,#ff9ec4,#ffc6a3);color:#4a1630;box-shadow:0 3px 0 #e2779f}
-.chat-thread[data-bubble=mint] .msg.me .chat-bubble{background:linear-gradient(135deg,#7fe0c3,#c1f2a6);color:#0d3b2e;box-shadow:0 3px 0 #4fb996}
-.chat-thread[data-bubble=night] .msg.me .chat-bubble{background:radial-gradient(circle at 80% 30%,#fff9 0 1px,transparent 1.5px) 0 0/14px 14px,linear-gradient(135deg,#2b2f6b,#5a3d8a);color:#fff;box-shadow:0 3px 0 #1a1c44}
-.chat-thread[data-bubble=ink] .msg.me .chat-bubble{background:var(--card);color:var(--ink);border:2px solid var(--ink);box-shadow:3px 3px 0 var(--ink)}
 /* 聊天背景 */
 .chat-thread[data-bg=photo] .msgs{background-size:cover;background-position:center}
 /* 个性装扮 choices */
@@ -1153,10 +1149,6 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .deco{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:60px;padding:6px 4px;border-radius:14px;font-size:12px;font-weight:700;color:var(--ink2)}
 .deco[aria-pressed=true]{outline:2px solid var(--accent-btn);color:var(--accent-ink)}
 .deco-sample{width:52px;height:30px;border-radius:14px 14px 5px 14px;background:var(--accent-btn)}
-.deco[data-bubble=candy] .deco-sample{background:linear-gradient(135deg,#ff9ec4,#ffc6a3)}
-.deco[data-bubble=mint] .deco-sample{background:linear-gradient(135deg,#7fe0c3,#c1f2a6)}
-.deco[data-bubble=night] .deco-sample{background:linear-gradient(135deg,#2b2f6b,#5a3d8a)}
-.deco[data-bubble=ink] .deco-sample{background:var(--card);border:2px solid var(--ink);box-shadow:2px 2px 0 var(--ink)}
 .deco[data-frame] .deco-sample{display:grid;place-items:center;width:52px;height:52px;border-radius:50%;background:none}
 .deco[data-frame] .deco-sample .avatar{background:color-mix(in srgb,var(--accent) 35%,var(--card2))}
 .deco[data-background] .deco-sample{width:44px;height:44px;border-radius:12px;background:var(--card2);box-shadow:inset 0 0 0 1px var(--line)}
@@ -1591,13 +1583,6 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 @keyframes ear-sway{0%,100%{transform:rotate(0)}50%{transform:rotate(-5deg)}}
 
 /* Bubbles */
-.chat-thread[data-bubble=aurora] .msg.me .chat-bubble,.deco[data-bubble=aurora] .deco-sample{background:linear-gradient(115deg,#7afcff,#a98bff,#ff8bd8,#ffd68b,#7afcff);background-size:300% 100%;animation:aurora-flow 9s linear infinite;color:#1d1240;box-shadow:0 4px 14px -5px #a98bffcc,inset 0 1px 0 #ffffffaa}
-.chat-thread[data-bubble=sakura] .msg.me .chat-bubble,.deco[data-bubble=sakura] .deco-sample{background:radial-gradient(ellipse 5px 3px at 88% 22%,#ff9ec4 95%,transparent),radial-gradient(ellipse 4px 2.5px at 10% 82%,#ffb8d2 95%,transparent),radial-gradient(ellipse 3px 2px at 70% 85%,#ffd0e0 95%,transparent),linear-gradient(160deg,#fff7fa,#ffe0ec);color:#7a2c4d;border:1.5px dashed #ffa8c8;box-shadow:inset 0 0 0 2px #fff,0 3px 10px -4px #ff8fb5aa}
-.chat-thread[data-bubble=gold] .msg.me .chat-bubble,.deco[data-bubble=gold] .deco-sample{position:relative;overflow:hidden;background:linear-gradient(140deg,#2c2010,#4d3714 55%,#2c2010);color:#ffe7a8;border:1.5px solid #e9c46a;box-shadow:0 0 0 2px #2c2010,0 5px 14px -5px #e9c46acc;text-shadow:0 0 8px #ffd76a55}
-.chat-thread[data-bubble=gold] .msg.me .chat-bubble:after,.deco[data-bubble=gold] .deco-sample:after{content:"";position:absolute;inset:0;width:40%;background:linear-gradient(90deg,transparent,#fff3c455,transparent);animation:shine-sweep 5.5s ease-in-out infinite;pointer-events:none}
-.chat-thread[data-bubble=glass] .msg.me .chat-bubble,.deco[data-bubble=glass] .deco-sample{background:linear-gradient(135deg,#ffffffb8,#dff1ff80);-webkit-backdrop-filter:blur(10px) saturate(1.4);backdrop-filter:blur(10px) saturate(1.4);color:#1b3554;border:1px solid #ffffffd9;box-shadow:inset 0 1px 0 #fff,inset 0 -8px 16px -10px #8cc8ff,0 6px 16px -8px #4a7ab5aa}
-:root[data-theme=dark] .chat-thread[data-bubble=glass] .msg.me .chat-bubble,:root[data-theme=dark] .deco[data-bubble=glass] .deco-sample{background:linear-gradient(135deg,#123456d9,#1d4a7acc);color:#eef6ff;border-color:#9fd4ff66;box-shadow:inset 0 1px 0 #ffffff40,0 6px 16px -8px #000a}
-.chat-thread[data-bubble=galaxy] .msg.me .chat-bubble,.deco[data-bubble=galaxy] .deco-sample{background:radial-gradient(circle at 18% 30%,#fff 0 .9px,transparent 1.4px),radial-gradient(circle at 72% 64%,#fff 0 .8px,transparent 1.3px),radial-gradient(circle at 46% 82%,#ffe9a8 0 1px,transparent 1.5px),radial-gradient(circle at 86% 22%,#c9b8ff 0 1px,transparent 1.6px),radial-gradient(120% 90% at 80% 10%,#7a4bd8aa,transparent 60%),linear-gradient(135deg,#0f0c29,#302b63 55%,#24243e);color:#f2ecff;box-shadow:0 5px 16px -6px #6a4bd8cc,inset 0 0 0 1px #ffffff22}
 
 /* Backgrounds */
 
@@ -1740,11 +1725,7 @@ button.gift-item[data-short]{opacity:.55}
 .chat-thread[data-tone=dark] .note-line{color:#eef0ff;text-shadow:0 1px 6px #0009}
 .chat-thread[data-tone=dark] .chat-empty{color:#eef0ff}
 .chat-thread[data-tone=dark] .day{background:#ffffff26;color:#fff;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
-:root[data-theme=dark] .chat-scene[data-scene-bg=grid] .cs-art,:root[data-theme=dark] .deco[data-background=grid] .cs-art{filter:invert(.9) hue-rotate(180deg) brightness(.9)}
 /* Meteors of 流星雨: three, falling one after another across the sky. */
-.cs-meteor{top:6%;left:70%;width:120px;height:2px;border-radius:2px;background:linear-gradient(90deg,#fff,#fff0);opacity:0;transform:rotate(-32deg);animation:cs-fall 7s ease-in infinite}
-.cs-meteor:nth-child(2){top:18%;left:40%;width:90px;animation-duration:9s;animation-delay:calc(var(--delay,0s) - 3s)}
-.cs-meteor:nth-child(3){top:2%;left:20%;width:140px;animation-duration:11s;animation-delay:calc(var(--delay,0s) - 6s)}
 @keyframes cs-fall{0%,70%{opacity:0;transform:rotate(-32deg) translateX(0)}74%{opacity:1}86%,100%{opacity:0;transform:rotate(-32deg) translateX(-260px)}}
 /* The same picture as the swatch in 个性装扮 and the shop. */
 .deco[data-background] .deco-sample{position:relative;overflow:hidden}
@@ -1752,15 +1733,6 @@ button.gift-item[data-short]{opacity:.55}
 /* A small ornament on the corner of your own bubbles (and on the swatch): one per look. */
 .chat-thread[data-bubble] .msg.me .chat-bubble:not(.typing){position:relative}
 .deco[data-bubble] .deco-sample{position:relative}
-.chat-thread[data-bubble=candy] .msg.me .chat-bubble:not(.typing)::before,.deco[data-bubble=candy] .deco-sample::before{content:"";position:absolute;top:-9px;right:-6px;width:19px;height:19px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 21s-8-5.2-8-11a4.6 4.6 0 0 1 8-3 4.6 4.6 0 0 1 8 3c0 5.8-8 11-8 11z' fill='%23ff5f95' stroke='%23fff' stroke-width='1.6'/%3E%3Ccircle cx='8.5' cy='9' r='1.6' fill='%23fff' opacity='.85'/%3E%3C/svg%3E") center/contain no-repeat;pointer-events:none;filter:drop-shadow(0 1px 1.5px #0004)}
-.chat-thread[data-bubble=mint] .msg.me .chat-bubble:not(.typing)::before,.deco[data-bubble=mint] .deco-sample::before{content:"";position:absolute;top:-9px;right:-6px;width:19px;height:19px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 20C4 9 11 4 21 3c-1 10-6 17-17 17z' fill='%233fbf8f' stroke='%23fff' stroke-width='1.4'/%3E%3Cpath d='M5 19 15 9' stroke='%23e9fff4' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;pointer-events:none;filter:drop-shadow(0 1px 1.5px #0004)}
-.chat-thread[data-bubble=night] .msg.me .chat-bubble:not(.typing)::before,.deco[data-bubble=night] .deco-sample::before{content:"";position:absolute;top:-9px;right:-6px;width:19px;height:19px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M15 3a9 9 0 1 0 6 15A7.5 7.5 0 0 1 15 3z' fill='%23ffe7a0' stroke='%232b2f6b' stroke-width='1.2'/%3E%3Ccircle cx='19' cy='5' r='1.2' fill='%23fff'/%3E%3C/svg%3E") center/contain no-repeat;pointer-events:none;filter:drop-shadow(0 1px 1.5px #0004)}
-.chat-thread[data-bubble=ink] .msg.me .chat-bubble:not(.typing)::before,.deco[data-bubble=ink] .deco-sample::before{content:"";position:absolute;top:-9px;right:-6px;width:19px;height:19px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m12 2.5 2.8 6 6.5.6-4.9 4.4 1.5 6.4L12 16.6l-5.9 3.3 1.5-6.4L2.7 9.1l6.5-.6z' fill='%23ffd24d' stroke='%232b2b2b' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat;pointer-events:none;filter:drop-shadow(0 1px 1.5px #0004)}
-.chat-thread[data-bubble=gold] .msg.me .chat-bubble:not(.typing)::before,.deco[data-bubble=gold] .deco-sample::before{content:"";position:absolute;top:3px;right:5px;width:14px;height:14px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 18 4.5 8l4.3 4L12 5l3.2 7 4.3-4L21 18z' fill='%23f4c95d' stroke='%237a5a14' stroke-width='1.2' stroke-linejoin='round'/%3E%3Ccircle cx='12' cy='5' r='1.4' fill='%23fff3c4'/%3E%3C/svg%3E") center/contain no-repeat;pointer-events:none;filter:drop-shadow(0 1px 1.5px #0004)}
-.chat-thread[data-bubble=sakura] .msg.me .chat-bubble:not(.typing)::before,.deco[data-bubble=sakura] .deco-sample::before{content:"";position:absolute;top:-9px;right:-6px;width:19px;height:19px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg transform='translate%2812 12%29'%3E%3Cellipse cx='0' cy='-5.5' rx='3.6' ry='5.6' fill='%23ffb3cc' stroke='%23fff' stroke-width='.8' transform='rotate%280%29'/%3E%3Cellipse cx='0' cy='-5.5' rx='3.6' ry='5.6' fill='%23ffb3cc' stroke='%23fff' stroke-width='.8' transform='rotate%2872%29'/%3E%3Cellipse cx='0' cy='-5.5' rx='3.6' ry='5.6' fill='%23ffb3cc' stroke='%23fff' stroke-width='.8' transform='rotate%28144%29'/%3E%3Cellipse cx='0' cy='-5.5' rx='3.6' ry='5.6' fill='%23ffb3cc' stroke='%23fff' stroke-width='.8' transform='rotate%28216%29'/%3E%3Cellipse cx='0' cy='-5.5' rx='3.6' ry='5.6' fill='%23ffb3cc' stroke='%23fff' stroke-width='.8' transform='rotate%28288%29'/%3E%3Ccircle r='2.2' fill='%23ff7aa5'/%3E%3C/g%3E%3C/svg%3E") center/contain no-repeat;pointer-events:none;filter:drop-shadow(0 1px 1.5px #0004)}
-.chat-thread[data-bubble=galaxy] .msg.me .chat-bubble:not(.typing)::before,.deco[data-bubble=galaxy] .deco-sample::before{content:"";position:absolute;top:-9px;right:-6px;width:19px;height:19px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 1.5c.8 5 2.6 7.6 9.5 10.5-6.9 2.9-8.7 5.5-9.5 10.5-.8-5-2.6-7.6-9.5-10.5C9.4 9.1 11.2 6.5 12 1.5z' fill='%23fff' stroke='%238f7cff' stroke-width='1'/%3E%3C/svg%3E") center/contain no-repeat;pointer-events:none;filter:drop-shadow(0 1px 1.5px #0004);animation:star-twinkle 2.8s ease-in-out infinite}
-.chat-thread[data-bubble=glass] .msg.me .chat-bubble:not(.typing)::before,.deco[data-bubble=glass] .deco-sample::before{content:"";position:absolute;top:-9px;right:-6px;width:19px;height:19px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg stroke='%237cc8ff' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 2v20M3.3 7l17.4 10M3.3 17 20.7 7'/%3E%3Cpath d='m9 4 3 2.5L15 4M9 20l3-2.5 3 2.5' fill='none'/%3E%3C/g%3E%3Ccircle cx='12' cy='12' r='2.2' fill='%23fff'/%3E%3C/svg%3E") center/contain no-repeat;pointer-events:none;filter:drop-shadow(0 1px 1.5px #0004)}
-.chat-thread[data-bubble=aurora] .msg.me .chat-bubble:not(.typing)::before,.deco[data-bubble=aurora] .deco-sample::before{content:"";position:absolute;top:-9px;right:-6px;width:19px;height:19px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 1.5c.8 5 2.6 7.6 9.5 10.5-6.9 2.9-8.7 5.5-9.5 10.5-.8-5-2.6-7.6-9.5-10.5C9.4 9.1 11.2 6.5 12 1.5z' fill='%23c6f8ff' stroke='%23a98bff' stroke-width='1.2'/%3E%3C/svg%3E") center/contain no-repeat;pointer-events:none;filter:drop-shadow(0 1px 1.5px #0004);animation:star-twinkle 2.8s ease-in-out infinite}
 /* 想画什么 (ui/draw.js): grows with long requests instead of hiding them */
 .idea-box{width:100%;box-sizing:border-box;min-height:64px;max-height:260px;resize:vertical;line-height:1.55;field-sizing:content}
 /* 剧情记忆来源 in the chat preset (ui/presets.js) */
