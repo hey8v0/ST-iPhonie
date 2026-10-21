@@ -427,6 +427,7 @@ function connect(source){
   chatCancelBring:()=>{check();return chats.cancelBring();},
   chatTyping:threadId=>{check();return chats.typing(threadId);},
   chatAskFriend:(threadId,text)=>{check();return chats.askFriend(threadId,text);},
+  chatSeesPictures:()=>{check();return chats.seesPictures();},
   momentsRefresh:()=>{check();return momentsHost.refresh();},
   momentsReact:id=>{check();return momentsHost.react(id);},
   momentsReply:(id,commentId)=>{check();return momentsHost.reply(id,commentId);},

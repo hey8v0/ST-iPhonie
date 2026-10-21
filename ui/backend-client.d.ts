@@ -944,6 +944,8 @@ export interface BackendAPI extends BackendFacade {
     chatTyping(threadId: string): boolean;
     /** 发送好友申请 to a contact who deleted the user: the contact decides (one model request). */
     chatAskFriend(threadId: string, text: string): Promise<{ accepted: boolean; thread: ChatThread }>;
+    /** Whether photos the user sends reach the chat's model as pictures (else only their words). */
+    chatSeesPictures?(): Promise<boolean>;
     musicStatus(): MusicStatus;
     /** Plays a list (the 歌单, search results) from one of its songs. */
     musicPlayList(list: MusicTrack[], at?: number): Promise<void>;

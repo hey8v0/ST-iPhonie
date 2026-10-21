@@ -15,6 +15,7 @@ import {memorySheet} from './chat-memory.js';
 import {pictureInputs, photoTags, photoCast} from '../core/draw.js';
 import {chatScene, sceneArt, sceneDark, syncMotion} from './chat-scenes.js';
 import {PREMIUM, yuan} from '../core/wallet.js';
+import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
 
 // Chat app, QQ style: 消息 (conversations, with search, 置顶 and 免打扰), 联系人 (特别关心, friends, groups, profile cards)
 // and 动态 (朋友圈, ui/moments.js). Tapping your own avatar opens 我: name, status, signature and 个性装扮 (chat bubble,
@@ -52,6 +53,7 @@ export function preview(m) {
     case 'gift': return '[礼物] ' + (m.gift?.name || '');
     case 'location': return '[位置] ' + m.text;
     case 'song': return '[音乐] ' + (m.song?.title || '');
+    case 'file': return '[文件] ' + m.name;
     case 'dice': return '[骰子]';
     case 'call': return `[${callSummary(m)}]`;
     case 'pat': return patText(m);
@@ -342,6 +344,7 @@ export function chatApp(ctx) {
       case 'photo': return m.photoId
         ? `<button class="chat-photo" data-action="photo" ${mid} aria-label="查看照片"><img data-chat-photo="${esc(m.photoId)}" alt="${esc(m.text || '照片')}"></button>`
         : `<button class="chat-photo described" data-action="message" ${mid}><span class="ph-art">${icon('image')}</span><span class="ph-cap">${esc(m.text)}</span></button>${photoNote(m)}`;
+      case 'file': return fileBody(m, mid);
       // A sticker: the picture without a bubble; its name when the picture cannot be loaded.
       case 'sticker': return `<button class="chat-sticker" data-action="sticker" ${mid} aria-label="表情包：${esc(m.text)}" data-name="[${esc(m.text)}]">${m.url ? `<img src="${esc(m.url)}" alt="${esc(m.text)}" loading="lazy" referrerpolicy="no-referrer" draggable="false">` : ''}</button>`;
       case 'redpacket': {
@@ -401,7 +404,7 @@ export function chatApp(ctx) {
   function toolsHTML() {
     const group = thread.type === 'group';
     const tools = [['photo', 'image', '照片'], ['emoji', 'smile', '表情'], ['redpacket', 'packet', '红包'], ...(group ? [] : [['transfer', 'swap', '转账'], ['gift', 'gift', '礼物']]),
-      ['location', 'pin', '位置'], ['song', 'music', '分享歌'], ['pat', 'hand', '拍一拍'], ['dice', 'dice', '骰子']];
+      ['file', 'file', '文件'], ['location', 'pin', '位置'], ['song', 'music', '分享歌'], ['pat', 'hand', '拍一拍'], ['dice', 'dice', '骰子']];
     const tabs = `<div class="emoji-tabs" role="tablist">${[['emoji', '表情'], ['stickers', '表情包']].map(([k, t]) => `<button type="button" role="tab" data-action="panel-${k}" aria-selected="${panel === k}">${t}</button>`).join('')}</div>`;
     if (panel === 'stickers') {
       const list = api.getState().chat.stickers || [];
@@ -417,7 +420,7 @@ export function chatApp(ctx) {
     // Pages of 8 (two rows), swiped sideways like WeChat's; the dots show the page and switch it on a tap.
     const pages = [];
     for (let i = 0; i < tools.length; i += 8) pages.push(tools.slice(i, i + 8));
-    const page = list => `<div class="tool-grid">${list.map(([action, glyph, label]) =>
+    const page = list => `<div class="tool-grid">${list.map(([action, glyph, label]) => action === 'file' ? fileTool() :
       `<button class="tool" data-action="tool-${action}"><span class="tool-ico" data-tool="${action}">${icon(glyph)}</span><span>${label}</span></button>`).join('')}</div>`;
     return `<div class="chat-panel" role="group" aria-label="更多功能"><div class="tool-pages">${pages.map(page).join('')}</div>${pages.length > 1
       ? `<div class="tool-dots">${pages.map((_, i) => `<button type="button" data-action="tool-page" data-page="${i}" aria-label="第 ${i + 1} 页" aria-current="${i === 0}"></button>`).join('')}</div>` : ''}</div>`;
@@ -672,7 +675,7 @@ export function chatApp(ctx) {
     const d = sheet('发送照片', `<div class="photo-grid pick-photos">${rows.map(r => `<button data-action="pick-photo" data-id="${esc(r.id)}" aria-pressed="false" aria-label="选择 ${esc(r.name)}"><img data-photo="${esc(r.id)}" alt="${esc(r.name)}"></button>`).join('')}</div>
       ${rows.length ? '' : '<p class="help-copy">相册里还没有照片，可以直接从本地选一张。</p>'}
       <div class="actions"><label class="secondary file-button">${icon('import')}从本地选<input type="file" data-chat-file accept="image/png,image/jpeg,image/webp,image/avif,image/gif" aria-label="从本地选照片"></label></div>
-      ${field('照片说明', input('caption', '', 'text', 'maxlength="200" placeholder="比如：下班路上的晚霞"'), '对方看不到图片本身，只看得到这句说明。写清楚照片里有什么，对方才好接话。')}
+      ${field('照片说明', input('caption', '', 'text', 'maxlength="200" placeholder="比如：下班路上的晚霞"'), '现在的模型看不到图片本身，只看得到这句说明，写清楚照片里有什么，对方才好接话。\n\n想让对方直接看图：用能识图的模型（比如 Gemini、Claude、GPT-4o 这类），并在酒馆的「AI 回复配置」里打开「发送内联媒体」；用小手机自己的文字连接时，只要模型能识图就行。')}
       <div class="actions">${btn('photo-send', icon('send') + '发送', 'primary', 'disabled')}</div>`, {
       'pick-photo': b => {
         chosen = b.dataset.id;
@@ -687,6 +690,7 @@ export function chatApp(ctx) {
       }
     });
     d.onClose(() => { for (const url of local) ctx.win.URL.revokeObjectURL(url); });
+    api.chatSeesPictures?.().then(yes => { const box = d.body.querySelector('[data-field=caption]'), info = box?.closest('.field')?.querySelector('.info'); if (!yes || !box) return; box.placeholder = '可以不写，对方看得到照片'; info?.setAttribute('data-help', '现在的模型能看图，对方会直接看到这张照片；说明可以不写，写了就当作你配的话。'); }).catch(() => {});
     d.body.addEventListener('change', e => {
       const file = e.target.closest('[data-chat-file]')?.files?.[0];
       if (!file) return;
@@ -1238,6 +1242,18 @@ export function chatApp(ctx) {
   v.on('input', '[data-field=chat-search]', (el, e) => { search = el.value; searching = true; if (!e.isComposing) render(); });
   v.on('compositionend', '[data-field=chat-search]', el => { search = el.value; searching = true; render(); });
   v.on('focusout', '[data-field=chat-search]', () => { searching = false; });
+  // 文件: pictures are sent as photos, documents by their words (ui/chat-files.js).
+  v.on('change', '[data-chat-files]', async el => {
+    const files = [...(el.files || [])];
+    el.value = '';
+    if (!files.length) return;
+    panel = null; syncPanel();
+    try {
+      const {messages, cut} = await filesToMessages(api, files);
+      if (messages.length) await post(messages);
+      if (cut.length) ctx.notify(`${cut.join('、')} 太长，只发了前面一部分`);
+    } catch (error) { ctx.notify(error.message); }
+  });
   v.on('change', '[data-field^=me-]', el => {
     const key = el.dataset.field.slice(3);
     try { api.saveChatOptions({profile: {[key]: el.value}}); render(); } catch (error) { ctx.notify(error.message, {error: true}); }
@@ -1473,6 +1489,7 @@ export function chatApp(ctx) {
         await photoViewer(m, img);
         break;
       }
+      case 'file': { const m = find(); if (m) showFile(ctx, m); break; }
       case 'packet': { const m = find(); if (m) openPacket(m); break; }
       case 'transfer': { const m = find(); if (m) openTransfer(m); break; }
       case 'gift': { const m = find(); if (m) openGift(m); break; }

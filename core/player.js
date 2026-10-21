@@ -3,8 +3,11 @@ import { TTSParameters } from './parameters.js';
 import { findRoute } from './routes.js';
 import { requestHash } from './cache.js';
 import { effectChain, lineEffect } from './voice-fx.js';
+import { audioKind, unpacked, mp3FromFrame, undecodable } from './audio-bytes.js';
+export { audioKind, mp3FromFrame } from './audio-bytes.js';
 
 const stopped = () => new DOMException('已停止', 'AbortError');
+
 const copyLine = line => line ? { role: '', text: '', translation: '', emotion: '', ...structuredClone(line) } : null;
 function volumeValue(value) {
  const volume = Number(value);
@@ -46,7 +49,17 @@ export class BrowserAudio {
   let entry = this.decoded.get(blob);
   if (entry) return entry.job;
   entry = {bytes: 0, job: null};
-  entry.job = blob.arrayBuffer().then(bytes => ctx.decodeAudioData(bytes)).then(buffer => {
+  // decodeAudioData takes the bytes away, so each try gets its own copy; a refused MP3 is tried again from its first whole frame.
+  entry.job = blob.arrayBuffer().then(async raw => {
+   let bytes = new Uint8Array(raw);
+   bytes = await unpacked(bytes) || bytes;
+   try { return await ctx.decodeAudioData(bytes.slice().buffer); }
+   catch (error) {
+    const cut = audioKind(bytes) === 'mp3' ? mp3FromFrame(bytes) : null;
+    if (cut) try { return await ctx.decodeAudioData(cut.slice().buffer); } catch { /* said below */ }
+    throw Object.assign(Error(undecodable(bytes)), {code: 'UNDECODABLE', cause: error});
+   }
+  }).then(buffer => {
    if (ctx !== this.context || this.decoded.get(blob) !== entry) return buffer;
    entry.bytes = (buffer.length || 0) * (buffer.numberOfChannels || 1) * 4;
    this.decodeBytes += entry.bytes;
@@ -85,7 +98,7 @@ export class BrowserAudio {
    buffer = await this.warm(blob);
   } catch (error) {
    check();
-   throw Error('浏览器无法播放此音频格式，请在引擎配置改选 MP3 或 WAV');
+   throw error?.code === 'UNDECODABLE' ? error : Error('浏览器无法播放此音频格式，请在引擎配置改选 MP3 或 WAV');
   }
   check();
   if(ctx.state!=='running'&&!this.pausedByUser){let timer;try{await Promise.race([ctx.resume(),new Promise(resolve=>{timer=setTimeout(resolve,2000);})]);}catch{}finally{clearTimeout(timer);}check();if(ctx.state!=='running')throw Error('音频设备已暂停或被系统打断，请回到页面再点一次播放');}

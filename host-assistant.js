@@ -13,8 +13,8 @@ import {createAssistantMemoryHost, assistantMemoryThread} from './host-assistant
 export const ASSISTANT_VISUALS = promptText({}, 'assistant', 'visuals');
 const cancelled = () => Object.assign(new Error('已取消助手回复'), {name: 'AbortError'});
 const checkSignal = signal => { if (signal?.aborted) throw cancelled(); };
-const loadCompletionModule = () => import('/scripts/openai.js');
-const hasCompletionService = ctx => ctx.mainApi === 'openai' && ctx.ChatCompletionService?.presetToGeneratePayload && ctx.ChatCompletionService?.sendRequest;
+export const loadCompletionModule = () => import('/scripts/openai.js');
+export const hasCompletionService = ctx => ctx.mainApi === 'openai' && ctx.ChatCompletionService?.presetToGeneratePayload && ctx.ChatCompletionService?.sendRequest;
 
 /** Capture before awaiting: the saved preset and live connection can change while reference material is prepared. */
 async function completionSnapshot(ctx, presetName, load = loadCompletionModule) {
@@ -44,7 +44,7 @@ async function completionSnapshot(ctx, presetName, load = loadCompletionModule) 
 export async function requestAssistantText(ctx, backend, settings, messages, options = {}) {
   const prompt = messages.filter(m => typeof m.content !== 'string' || m.content.trim());
   const run = () => requestAssistantTextRaw(ctx, backend, settings, prompt, options);
-  return backend.requestLog ? backend.requestLog.run('助手', {connection: activeText(settings.text).source, messages: prompt}, run) : run();
+  return backend.requestLog ? backend.requestLog.run(options.label || '助手', {connection: activeText(settings.text).source, messages: prompt}, run) : run();
 }
 async function requestAssistantTextRaw(ctx, backend, settings, messages, {presetName = '', signal, completion, loadCompletion = loadCompletionModule, details = false, reasoningFormat = assistantReasoningFormat(ctx.powerUserSettings?.reasoning), now, onProgress} = {}) {
   const text = activeText(settings.text), timer = assistantReasoningTimer(reasoningFormat, now);

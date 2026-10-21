@@ -9,13 +9,58 @@ import {pictureInputs, photoCast, photoTags} from './core/draw.js';
 import {storyLines} from './core/moments.js';
 import {forumContext} from './core/forum.js';
 import {promptOn} from './core/prompt-rules.js';
+import {activeText} from './core/llm.js';
+import {requestAssistantText, hasCompletionService, loadCompletionModule} from './host-assistant.js';
+
+/** 看图: the user's latest photos (at most this many, in the chat window) go along to a model that sees. */
+export const CHAT_PICTURES = 3;
+/** A photo as the model gets it: at most 1024 px on the long side, JPEG (on white, for see-through pictures). */
+async function pictureUrl(blob, doc = globalThis.document, side = 1024) {
+  const bitmap = await createImageBitmap(blob), scale = Math.min(1, side / Math.max(bitmap.width, bitmap.height));
+  const canvas = doc.createElement('canvas'); canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const g = canvas.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, canvas.width, canvas.height); g.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close?.();
+  return canvas.toDataURL('image/jpeg', .85);
+}
 
 const BRING_KEY = 'sttts.bring';
 /** The note older versions wrote into the chat for a choice; the chat shows the pending choice by itself now. */
 export const BRING_NOTE = /^\d+ 条消息会带进下一次正文$/;
 
-export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}, storage = globalThis.localStorage}) {
+export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}, storage = globalThis.localStorage, loadCompletion = loadCompletionModule, picture = pictureUrl, ask = requestAssistantText}) {
   const busy = new Map();
+  // 看图. A tavern connection sees when the tavern says so (its 发送内联图片, and a model it knows takes pictures); a
+  // custom connection is tried. A model that failed with pictures and answered without them is not sent any again
+  // until the page is reloaded.
+  const blind = new Set();
+  const seeKey = ctx => { const t = activeText(settings().text); if (t.source === 'custom') return `custom:${t.id}:${t.model}`; let model = ''; try { model = ctx?.getChatCompletionModel?.() || ''; } catch { /* older tavern */ } return `tavern:${ctx?.chatCompletionSettings?.chat_completion_source || ''}:${model}`; };
+  async function sees(ctx = context()) {
+    if (blind.has(seeKey(ctx))) return false;
+    if (activeText(settings().text).source === 'custom') return true;
+    if (!hasCompletionService(ctx)) return false;
+    try { return !!(await loadCompletion()).isImageInliningSupported?.(); } catch { return false; }
+  }
+  /** The user's latest photos in the chat window, ready to send, when the model sees ([] otherwise). */
+  async function pictures(ctx, thread, preset) {
+    const photos = thread.messages.filter(m => m.kind !== 'system').slice(-preset.history).filter(m => m.kind === 'photo' && m.from === 'me' && m.photoId).slice(-CHAT_PICTURES);
+    if (!photos.length || !await sees(ctx)) return [];
+    const out = [];
+    for (const m of photos) {
+      try { const row = await backend.library.getPhoto(m.photoId); if (row?.blob) out.push({id: m.id, url: await picture(row.blob)}); }
+      catch (error) { backend.reportDiagnostic?.('聊天 · 看图', error, 'warn'); }
+    }
+    return out;
+  }
+  /** The contact's answer; with pictures, through the request that carries them, and in words only if that fails. */
+  async function answerFor(ctx, request, pics) {
+    if (!pics.length) return backend.generateText(ctx, {prompt: request([]), trimNames: false});
+    try { return await ask(ctx, backend, settings(), request(pics), {label: '聊天 · 看图'}); }
+    catch (error) {
+      backend.reportDiagnostic?.('聊天 · 看图', error, 'warn');
+      const answer = await backend.generateText(ctx, {prompt: request([]), trimNames: false});
+      blind.add(seeKey(ctx));
+      return answer;
+    }
+  }
   // What the next story reply brings along; kept over a page reload (it used to be lost without a word).
   let pending = (() => { try { const p = JSON.parse(storage?.getItem(BRING_KEY) || 'null'); return p?.threadId && p.text ? p : null; } catch { return null; } })();
   const keepBring = () => { try { if (pending) storage?.setItem(BRING_KEY, JSON.stringify(pending)); else storage?.removeItem(BRING_KEY); } catch { /* this visit only */ } };
@@ -69,8 +114,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       // 记忆: the written-up older chat, and older messages that match the latest ones.
       const query = thread.messages.filter(m => m.kind !== 'system').slice(-6).map(m => messageLine(m, user)).join('\n');
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
-      const prompt = buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}});
-      const answer = cleanTagged(await backend.generateText(ctx, {prompt, trimNames: false}), preset.cleanTags);
+      const request = pics => buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
+      const answer = cleanTagged(await answerFor(ctx, request, await pictures(ctx, thread, preset)), preset.cleanTags);
       // 「[不发]」 (also as 「名字：[不发]」) is a no, not a message.
       const text = nudge ? answer.split('\n').filter(line => !/\[不发\]/.test(line)).join('\n') : answer;
       const items = parseChatReply(text, {members: people, user, voiceFormat, voiceNames: people.filter(p => p.voice).map(p => p.name), stickers: settings().chat.stickers || []});
@@ -422,6 +467,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
 
   return {
     reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, phoneAfter, phoneAfterPlan, askFriend,
+    seesPictures: () => sees(),
     typing: threadId => busy.has(threadId),
     pendingBring: () => pending && {threadId: pending.threadId, name: pending.name, count: pending.count},
     cancelBring: () => { const p = pending; pending = null; keepBring(); return dropNote(p).finally(() => { if (p) backend.emit('chat', {threadId: p.threadId, bring: false}); }); }

@@ -358,7 +358,8 @@ export function messageLine(m, user) {
   switch (m.kind) {
     case 'system': return '';
     case 'voice': return `${who}：${quote}[语音] ${m.translation || m.text}`;
-    case 'photo': return `${who}：[图片]${m.text ? ' ' + m.text : ''}`;
+    case 'photo': return `${who}：[图片${m.seen ? m.seen : ''}]${m.text ? ' ' + m.text : ''}`;
+    case 'file': return `${who}：[文件 ${m.name}]${m.text ? ' ' + m.text : ''}`;
     case 'sticker': return `${who}：[表情包] ${m.text}`;
     case 'redpacket': return `${who}：[红包 ¥${m.amount}] ${m.text || DEFAULT_BLESSING}（${m.state === 'opened' ? nameOf(m.openedBy, user) + '已领取' : '还没领取'}）`;
     case 'transfer': return `${who}：[转账 ¥${m.amount}]${m.text ? ' ' + m.text : ''}（${TRANSFER_STATE[m.state] || '待收款'}）`;
@@ -376,6 +377,17 @@ export function messageLine(m, user) {
 
 const fill = (template, values) => Object.entries(values).reduce((s, [k, v]) => s.replaceAll(`{{${k}}}`, v), template);
 
+/** The words of the files still in the chat window: the latest three, at most 30000 characters together. */
+export const CHAT_FILES = Object.freeze({count: 3, chars: 30000});
+function filesText(history, user) {
+  let room = CHAT_FILES.chars;
+  const files = history.filter(m => m.kind === 'file' && m.fileText).slice(-CHAT_FILES.count).reverse().map(m => {
+    const words = m.fileText.slice(0, Math.max(0, room)); room -= words.length;
+    return words ? `【${nameOf(m.from, user)}发来的文件：${m.name}】\n${words}${words.length < m.fileText.length ? '\n（后面太长，没有发出来）' : ''}\n【文件结束】` : '';
+  }).filter(Boolean).reverse();
+  return files.length ? files.join('\n\n') + '\n\n' : '';
+}
+
 /**
  * Chat-style request for one reply turn.
  * members: [{name, persona, card, voice, language}] (card: the tavern character card text, when there is one)
@@ -389,7 +401,7 @@ export function knowsRule(names, user, {prompts = {}, group = false} = {}) {
   const one = names.length === 1 ? names[0] : '';
   return promptText(prompts, 'knows', 'text', {'谁': one || '各人', '每个人': one || '每个人', '用户': user, '告诉': one ? ' TA ' : '自己', '某人': one || '一个人', '那人': one || '这个人', '群聊': group});
 }
-export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', nudge = false}) {
+export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', nudge = false, pictures = []}) {
   const group = thread.type === 'group';
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
@@ -410,8 +422,10 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     '名单': members.map(m => m.name).join('、'),
     '语音': speakers.length > 0, '语音格式': voiceFormat, '语音语言': speakers.map(m => `${m.name}：${languageName(m.language || 'zh')}`).join('，'),
     '出图': images, '表情包': stickers.slice(-80).map(s => s.name ?? s).join('、'), '打电话': dialing, '朋友圈': posting, '分享歌曲': !!music?.share, '删好友': !group && !asking,
-    '正在听': music?.listening ? listeningNote(music.listening, user, prompts) : '', '好友申请': asking});
-  const history = thread.messages.filter(m => m.kind !== 'system').slice(-preset.history);
+    '正在听': music?.listening ? listeningNote(music.listening, user, prompts) : '', '好友申请': asking, '看图': pictures.length > 0});
+  // pictures: [{id, url}] — photos sent along for a model that sees; the record numbers them [图片1], [图片2]… in order.
+  const seen = new Map(pictures.map((p, i) => [p.id, i + 1]));
+  const history = thread.messages.filter(m => m.kind !== 'system').slice(-preset.history).map(m => seen.has(m.id) ? {...m, seen: seen.get(m.id)} : m);
   const last = history.at(-1), now = !nudge && !asking;
   // 主动找你: whether to text at all is the model's to judge, by the preset's 「正文里主动发消息」 rule; [不发] is no.
   const when = nudge ? preset.entries.find(e => e.id === 's-text' && e.enabled && e.text.trim()) : null;
@@ -421,7 +435,8 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     '轮到回复': now && last?.from === 'me' ? (group ? '群里的成员' : partner) : '',
     '接着说': now && last && last.from !== 'me' ? (group ? '群里' : partner) : ''});
   const transcript = history.length ? `【${group ? thread.name + '（群聊）' : '和' + partner}的聊天记录】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}\n\n` : '';
-  return [{role: 'system', content: system}, {role: 'user', content: transcript + turn}];
+  const text = transcript + filesText(history, user) + turn;
+  return [{role: 'system', content: system}, {role: 'user', content: pictures.length ? [{type: 'text', text}, ...pictures.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : text}];
 }
 
 const NAME_LINE = /^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]\s*(.*)$/;

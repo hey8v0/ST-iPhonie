@@ -27,6 +27,7 @@ import {logsApp} from './logs.js';
 import {momentsNew, momentsSeen} from './moments.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
+import {bindNativeSelects} from './popup-select.js';
 import {grow, launch, nudge, within, visible, islandIn, moving} from './carry.js';
 import {todayPage} from './today.js';
 
@@ -132,6 +133,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       return result;
     } catch (error) { fail(error); }
   }
+  bindNativeSelects(win.document);
   mount.addEventListener('click', e => {
     if (!e.target.closest('[data-toast-close]')) return;
     hideToast();

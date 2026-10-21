@@ -5,6 +5,7 @@ import { languageCode } from './languages.js';
 import { TTSParameters as P, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, setFishCompat } from './parameters.js';
 import { speakable } from './voice-fx.js';
 import { buildCustomRequest, customInit, readCustomAnswer, customVoices, readVoiceList } from './custom-voice.js';
+import { unpacked } from './audio-bytes.js';
 const names={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'小米 MiMo',doubao:'豆包语音',custom:'自己的接口'};
 export const miniBase=c=>'https://'+(c.region==='cn'?'api.minimaxi.com':c.region==='uw'?'api-uw.minimax.io':'api.minimax.io');
 const object=value=>Object.prototype.toString.call(value)==='[object Object]';
@@ -187,7 +188,7 @@ export class Providers{
   try{this.onSpend?.(request.engine);}catch{}
   if(request.engine==='doubao'){try{return audioBlob(doubaoAudio(await limitedBytes(response)),request);}catch(error){for(const key of (this.keys.get('doubao')||'').split('\n').filter(Boolean))error.message=error.message.split(key).join('***');throw error;}}
   if(request.engine==='mimo')return decodeMimo(response,request);
-  if(request.engine==='mini')return decodeMini(response,request,this.fetcher,signal);if(response.headers.get('Content-Type')?.includes('json'))throw Error(names[request.engine]+' 未返回音频');return audioBlob(await limitedBytes(response),request);}
+  if(request.engine==='mini')return decodeMini(response,request,this.fetcher,signal);if(response.headers.get('Content-Type')?.includes('json'))throw Error(names[request.engine]+' 未返回音频');const bytes=await limitedBytes(response);return audioBlob(await unpacked(bytes)||bytes,request);}
  /**
   * 自己的接口: the request as the templates say, the key (optional) put in now. A service that does not let web pages
   * ask it (no CORS) is asked again through the tavern's own proxy (this.proxy, set by the backend).
@@ -236,7 +237,10 @@ export class Providers{
  /** Fish's own /v1/tts lets no web page call it: asked through the tavern's proxy, which must be switched on. */
  async viaTavern(url,init,signal){if(!this.proxy)throw Error(FISH_PROXY_NOTE);const r=await this.proxy(url,init,signal).catch(error=>{if(signal?.aborted)throw error;throw Error('连不上酒馆的转发。'+FISH_PROXY_NOTE);});
   if(r.redirected||r.status===401&&/text\/html/i.test(r.headers?.get('content-type')||''))throw Object.assign(Error('酒馆转发返回了登录页面，可能是云酒馆登录失效或转发接口限制；这不是音色不存在。请先重新登录酒馆，仍失败时查看日志中的酒馆转发请求'),{code:'TAVERN_AUTH',status:r.status});
-  if(!r.ok&&/CORS proxy is disabled/i.test(await r.clone().text().catch(()=>'')))throw Error(FISH_PROXY_NOTE);return r;}
+  if(!r.ok&&/CORS proxy is disabled/i.test(await r.clone().text().catch(()=>'')))throw Error(FISH_PROXY_NOTE);
+  // A tavern without the proxy (some phone apps' taverns) answers its own page instead: that is not a sound.
+  if(r.ok&&/text\/html/i.test(r.headers?.get('content-type')||''))throw Object.assign(Error('酒馆的转发返回了一个网页，不是声音：这个酒馆没有能用的转发（有的手机酒馆 App 不带这个功能，或者 config.yaml 里没打开 enableCorsProxy）。在 Fish 引擎里填一个中转，drama-3 就能用；其他模型不受影响'),{code:'TAVERN_PROXY'});
+  return r;}
  /** The models Fish's compat endpoint serves (no key needed), read once a page and again after half an hour; true when what goes where changed. */
  fishCatalog(){const now=Date.now();if(this.catalogRead&&now-this.catalogAt<30*60*1000)return this.catalogRead;this.catalogAt=now;
   return this.catalogRead=fetchWithPolicy(this.fetcher,FISH_API+'/compat/v1/models',{}).then(async r=>{if(!r.ok)throw Error('HTTP '+r.status);const json=await r.json();return setFishCompat((json?.data||[]).map(m=>m?.id).filter(id=>typeof id==='string'));}).catch(()=>{this.catalogRead=null;return false;});}

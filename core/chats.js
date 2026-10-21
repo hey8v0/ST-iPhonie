@@ -17,8 +17,8 @@
 // streak (聊天火花): days in a row, up to today or yesterday, on which both the user and the other side wrote.
 import {connectionLost, lostError} from './idb.js';
 
-export const CHAT_STORE_LIMITS = Object.freeze({messages: 1000, text: 4000, members: 20});
-const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song'];
+export const CHAT_STORE_LIMITS = Object.freeze({messages: 1000, text: 4000, members: 20, fileText: 30000});
+const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song', 'file'];
 const CALL_STATES = ['answered', 'missed', 'declined', 'cancelled'];
 const spoken = (list, max, withFrom) => (Array.isArray(list) ? list : []).slice(-max).filter(l => l && String(l.text || l.translation || '').trim()).map(l => ({...(withFrom ? {from: clip(l.from, 40).trim() || 'me'} : {}), text: clip(l.text || l.translation, 1000), translation: clip(l.translation || l.text, 1000), emotion: clip(l.emotion || 'calm', 100)}));
 const STATES = {redpacket: ['sent', 'opened'], transfer: ['sent', 'accepted', 'returned'], gift: ['sent', 'accepted', 'returned']};
@@ -60,6 +60,12 @@ function cleanMessage(m, id, at) {
     if (m.openedBy) out.openedBy = clip(m.openedBy, 40);
   }
   if (kind === 'location') out.detail = clip(m.detail, 200);
+  // A document the user sent: its name and the words in it (what the contact reads); the file itself is not kept.
+  if (kind === 'file') {
+    out.name = clip(m.name, 120).trim(); out.size = Math.max(0, Math.round(Number(m.size) || 0)); out.fileText = clip(m.fileText, CHAT_STORE_LIMITS.fileText);
+    if (!out.name) throw fail('文件缺少名字');
+    if (!out.fileText.trim()) throw fail('文件里没有能读的文字');
+  }
   // A song shared: what it is (played from the 歌单 or the user's music sources when tapped).
   if (kind === 'song') { const s = m.song && typeof m.song === 'object' ? m.song : {}; out.song = {title: clip(s.title, 120).trim(), artist: clip(s.artist, 120).trim()}; if (!out.song.title) throw fail('歌曲缺少名字'); }
   // A sticker keeps its address, so it still shows after it leaves the collection.
@@ -77,7 +83,7 @@ function cleanMessage(m, id, at) {
   if (m.quote?.text && ['text', 'voice'].includes(kind)) out.quote = {from: clip(m.quote.from, 40), text: clip(m.quote.text, 200)};
   // Sent by a story reply (正文联动手机): which reply (chat|message) and which version of it.
   if (typeof m.story === 'string' && m.story) { out.story = clip(m.story, 300); out.storyVer = clip(m.storyVer, 40); }
-  const textless = ['photo', 'system', 'redpacket', 'transfer', 'pat', 'dice', 'recall', 'call', 'gift'];
+  const textless = ['photo', 'system', 'redpacket', 'transfer', 'pat', 'dice', 'recall', 'call', 'gift', 'file'];
   if (!textless.includes(kind) && !out.text.trim()) throw fail('消息内容为空');
   return out;
 }
