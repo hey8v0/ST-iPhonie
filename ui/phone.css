@@ -2730,3 +2730,5 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .pick-delete span{min-width:0;font-size:12px}
 .pick-delete .text-button{flex:none;min-height:34px;padding:0 6px;font-size:12.5px;white-space:nowrap}
 .pick-delete .danger{flex:none;min-height:36px;padding:0 14px;white-space:nowrap}
+.style-row small.style-params{display:block;margin-top:2px;font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.style-param-line{margin:0;padding:10px 12px;border-radius:12px;background:var(--card2);font-size:12.5px;line-height:1.5}

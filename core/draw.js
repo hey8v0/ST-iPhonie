@@ -283,6 +283,11 @@ const OLD_DEFAULT_RULES = [
     '竖线后写画面里出现的角色名，用逗号分隔，只写这些名字：{{角色列表}}。画面里没有这些角色时，连同竖线一起省略。', '不要解释这些标签，也不要放进代码块。']
 ].map(lines => lines.join('\n'));
 
+// The NovelAI parameters a 画风 keeps: an artist string often wants its own model, sampler, steps and CFG. Picking the
+// 画风 puts them back; changing them while it is in use changes its own. The size and the seed belong to each picture.
+export const STYLE_PARAM_KEYS = Object.freeze(['model', 'steps', 'scale', 'sampler', 'schedule', 'cfgRescale', 'variety']);
+/** The part of the drawing parameters a 画风 keeps. */
+export const styleParams = params => { const p = normalizeDrawParams(params); return Object.fromEntries(STYLE_PARAM_KEYS.map(k => [k, p[k]])); };
 const DEFAULT_STYLE = {id: 'default', name: '默认画风', artist: '', positive: 'masterpiece, best quality, very aesthetic, absurdres', negative: 'lowres, bad anatomy, bad hands, text, error, missing fingers, extra digits, cropped, worst quality, jpeg artifacts, signature, watermark, blurry'};
 // rev 2 (0.6.1): presets made earlier get the 张力 entry once, after 角色; deleting it afterwards sticks.
 // rev 3 (0.6.49): the engine entries (用 tag 写, GPT, NovelAI / ComfyUI / GPT 的角色写法) are added once.
@@ -370,8 +375,12 @@ export function normalizeDraw(value) {
   }
   d.vibe = normalizeVibeSettings(d.vibe);
   d.params = normalizeDrawParams(d.params);
-  d.styles = (Array.isArray(d.styles) && d.styles.length ? d.styles : base.styles).map(s => ({id: String(s.id || crypto.randomUUID()), name: text(s.name, 60) || '画风', artist: text(s.artist, 4000), positive: text(s.positive, 4000), negative: text(s.negative, 4000)}));
+  d.styles = (Array.isArray(d.styles) && d.styles.length ? d.styles : base.styles).map(s => ({id: String(s.id || crypto.randomUUID()), name: text(s.name, 60) || '画风', artist: text(s.artist, 4000), positive: text(s.positive, 4000), negative: text(s.negative, 4000),
+    ...(s.params && typeof s.params === 'object' ? {params: styleParams({...d.params, ...s.params})} : {})}));
   d.activeStyle = d.styles.some(s => s.id === d.activeStyle) ? d.activeStyle : d.styles[0].id;
+  // From before 画风 kept parameters: the one in use keeps the parameters in use now.
+  const using = d.styles.find(s => s.id === d.activeStyle);
+  if (!using.params) using.params = styleParams(d.params);
   for (const key of ['gpt', 'comfy']) if (!d.styles.some(s => s.id === d[key].style)) d[key].style = '';
   d.presets = (Array.isArray(d.presets) && d.presets.length ? d.presets : base.presets).map(p => {
     let entries = Array.isArray(p.entries) ? p.entries : [];
