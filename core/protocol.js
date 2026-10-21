@@ -21,7 +21,11 @@ const tagFamily=format=>format.replace(/\s+/g,'')==='“{译文}”<tts>{角色}
 // Repairs that keep every character in place, so positions found in the repaired text hold in the original:
 // <TTS> in capitals, a full-width ｜ inside a tag, *“…”* in italics (the marks go inside the quotes and are dropped
 // from the translation), and "…" 「…」 『…』 ＂…＂ around the translation instead of “…”.
-function repaired(message){return message.replace(/<\/?tts\b/gi,m=>m.toLowerCase()).replace(/(\*{1,3}|_{1,2})(["「『＂“])([^"「」『』＂“”\n]{1,1000})(["」』＂”])\1(?=<tts>)/gi,'$2$1$3$1$4').replace(/<tts>[^<]{0,6000}<\/tts>/g,m=>m.replace(/｜/g,'|')).replace(/(["「『＂])([^"「」『』＂“”\n]{1,1000})(["」』＂])(?=<tts>)/g,(m,a,t)=>'“'+t+'”');}
+// A 心声 written in marks instead of quotes (*想的话*<tts>A|心声·…|…</tts>, also （…）) is the translation of that tag:
+// its first and last mark become the quotes. Only before a tag whose 情绪 says 心声 (many presets write actions in *…*).
+const INNER_BEFORE=/(\*{1,3}|_{1,2})([^*_\n“”"「」]{1,1000}?)\1(?=<tts>[^<|]{1,100}\|\s*心声)|（([^（）\n“”"]{1,1000})）(?=<tts>[^<|]{1,100}\|\s*心声)/gi;
+const innerQuoted=message=>message.replace(INNER_BEFORE,(m,mark,said,paren)=>paren!==undefined?'“'+paren+'”':'“'+mark.slice(1)+said+mark.slice(1)+'”');
+function repaired(message){return innerQuoted(message.replace(/<\/?tts\b/gi,m=>m.toLowerCase())).replace(/(\*{1,3}|_{1,2})(["「『＂“])([^"「」『』＂“”\n]{1,1000})(["」』＂”])\1(?=<tts>)/gi,'$2$1$3$1$4').replace(/<tts>[^<]{0,6000}<\/tts>/g,m=>m.replace(/｜/g,'|')).replace(/(["「『＂])([^"「」『』＂“”\n]{1,1000})(["」』＂])(?=<tts>)/g,(m,a,t)=>'“'+t+'”');}
 function exactLines(message,literals,names,excluded){const result=[];let cursor=0,tries=0;while(cursor<message.length&&result.length<500&&tries++<2000){const start=message.indexOf(literals[0],cursor);if(start<0)break;const hidden=excluded.find(([a,b])=>a<=start&&start<b);if(hidden){cursor=hidden[1];continue;}let at=start+literals[0].length,valid=true,values={};for(let i=0;i<4;i++){const end=message.indexOf(literals[i+1],at);if(end<0){valid=false;break;}values[names[i]]=decodeText(message.slice(at,end));at=end+literals[i+1].length;}if(valid&&message.slice(start+literals[0].length,at).includes(literals[0]))valid=false;cursor=valid?at:start+literals[0].length;if(!valid||excluded.some(([a,b])=>start<b&&at>a)||fields.some(f=>!values[f]?.trim())||values.角色.length>100||values.情绪.length>100||isPlaceholderRole(values.角色))continue;
 // A line quoted twice (““你好””<tts>…) matches from the inner quote: the outer opening quote is left in front and the
 // outer closing one ends the translation. Both belong to the line; quotes around the whole translation are dropped.
@@ -60,8 +64,9 @@ function freeLines(message) {
   const role=decodeText(parts[0]).trim(),emotion=parts.length===3?decodeText(parts[1]).trim():'',text=decodeText(parts.at(-1)).trim();
   if(!role||role.length>100||emotion.length>100||!text||isPlaceholderRole(role))continue;
   const before=message.slice(out.at(-1)?.end||0,start);
-  const visible=/(\*{0,3}|_{0,2})(?:“[^“”\n]+”|"[^"\n]+"|「[^「」\n]+」|『[^『』\n]+』)(?:\s*[（(][^()（）\n]*[）)])?\1\s*$/.exec(before);
-  out.push({start,end,translation:visible?decodeText(visible[0].trim().replace(/^[*_]+|[*_]+$/g,'')):voiceOnly(text).trim()||text,role,emotion,text,tagOnly:true,...(visible?{displayStart:start-visible[0].length}:{})});
+  const inner=/^\s*心声/.test(parts.length===3?parts[1]:'')&&/(\*{1,3}|_{1,2})([^*_\n“”"「」]{1,1000}?)\1\s*$|（([^（）\n“”"]{1,1000})）\s*$/.exec(before);
+  const visible=inner||/(\*{0,3}|_{0,2})(?:“[^“”\n]+”|"[^"\n]+"|「[^「」\n]+」|『[^『』\n]+』)(?:\s*[（(][^()（）\n]*[）)])?\1\s*$/.exec(before);
+  out.push({start,end,translation:visible?decodeText(inner?(inner[2]??inner[3]).trim():visible[0].trim().replace(/^[*_]+|[*_]+$/g,'')):voiceOnly(text).trim()||text,role,emotion,text,tagOnly:true,...(visible?{displayStart:start-visible[0].length}:{})});
  }
  return out;
 }
@@ -79,7 +84,7 @@ const close=fixed.indexOf('</tts>',at),next=fixed.indexOf('<tts',at+4),open=clos
 const inner=open?'':fixed.slice(at+m[0].length,close),parts=inner.split('|'),role=decodeText(open?fixed.slice(at+m[0].length).split(/[|<\n]/)[0]:parts[0]).trim();
 let reason;if(open)reason='标签没有闭合，少了 </tts>';else if(m[0]!=='<tts>')reason='标签写法不对，应该是 <tts>角色|情绪|原文</tts>';else if(parts.length<2)reason='缺少分隔符 |，应该写成 角色|情绪|原文';else if(parts.length>3)reason=`分成了 ${parts.length} 段，应该是 角色|情绪|原文 三段`;else if(!role)reason='没有写角色名';else if(isPlaceholderRole(role))reason=`角色名还是占位符 ${role}`;else if(!parts.at(-1).trim())reason='没有写原文';else reason='格式没认出来';
 problems.push({at,role:role.slice(0,40),reason,snippet:text.slice(at,Math.min(open?at+80:close+6,at+120))});}return problems;}
-export function renderDialogue(message,format,marker){const lines=parseDialogue(message,format);let out='',at=0;lines.forEach((line,index)=>{out+=message.slice(at,line.start);out+=`<span class="sttts-utterance" data-sttts-line="${index}" data-sttts-token="${marker}"><span class="sttts-translation" data-sttts-translation>${line.tagOnly?'':'“'+escapeHTML(line.translation)+'”'}</span> <button type="button" class="sttts-play" data-sttts-action="line" data-sttts-state="ungenerated" aria-label="生成并朗读 ${escapeHTML(line.role)} 的台词"><span data-sttts-wave aria-hidden="true"><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i></span></button></span>`;at=line.end;});return out+message.slice(at);}
+export function renderDialogue(message,format,marker,inner=[]){const lines=parseDialogue(message,format);let out='',at=0;lines.forEach((line,index)=>{out+=message.slice(at,line.start);out+=`<span class="sttts-utterance" data-sttts-line="${index}" data-sttts-token="${marker}"${inner[index]?' data-sttts-inner':''}><span class="sttts-translation" data-sttts-translation>${line.tagOnly?'':inner[index]?escapeHTML(line.translation):'“'+escapeHTML(line.translation)+'”'}</span> <button type="button" class="sttts-play" data-sttts-action="line" data-sttts-state="ungenerated" aria-label="生成并朗读 ${escapeHTML(line.role)} 的台词"><span data-sttts-wave aria-hidden="true"><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i></span></button></span>`;at=line.end;});return out+message.slice(at);}
 /** Voice switched off: each tagged line shows only its Chinese translation, without the tag or the wave button. */
 export function plainDialogue(message,format){const lines=parseDialogue(message,format);let out='',at=0;for(const line of lines){out+=message.slice(at,line.start)+(line.tagOnly?'':'“'+escapeHTML(line.translation)+'”');at=line.end;}return out+message.slice(at);}
 export function validatePreset(p){compileFormat(p.format);if(!p.entries?.some(e=>e.enabled&&e.text?.trim()))throw Error('请启用至少一条提示词');const text=p.entries.filter(e=>e.enabled).map(e=>e.text).join('\n');if(!text.includes('{{格式}}')||!text.includes('{{语言}}'))throw Error('提示词需要 {{格式}} 与 {{语言}}');for(const i of [p.injection,...p.entries.filter(e=>e.injection).map(e=>e.injection)]){if(!i||!['in_chat','in_prompt','before_prompt'].includes(i.position)||!['system','user','assistant'].includes(i.role)||!Number.isInteger(i.depth)||i.depth<0||i.depth>10000)throw Error('提示词插入设置无效');}}
@@ -126,10 +131,11 @@ export function unwaveFramed(text){return String(text).replace(FRAMED,block=>unm
 const ch = n => String.fromCharCode(n), MARK_OPEN = ch(0xE000), MARK_MID = ch(0xE001), MARK_CLOSE = ch(0xE002), MARK_BASE = 0xE100;
 const MARKED = new RegExp(`${MARK_OPEN}([${ch(0xE100)}-${ch(0xE8FF)}])${MARK_MID}([^]*?)${MARK_CLOSE}`, 'g'), MARK_LEFT = new RegExp(`${MARK_OPEN}[${ch(0xE100)}-${ch(0xE8FF)}]?${MARK_MID}?|${MARK_CLOSE}`, 'g');
 const waveButton = role => `<button type="button" class="sttts-play" data-sttts-action="line" data-sttts-state="ungenerated" aria-label="生成并朗读 ${escapeHTML(role)} 的台词"><span data-sttts-wave aria-hidden="true"><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i></span></button>`;
-/** Each tagged line as its “translation” between marks, for the stage before a card's regex. */
-export function markDialogue(message, format) {
+/** Each tagged line as its “translation” between marks, for the stage before a card's regex. inner: per line, whether it
+ *  is a 心声 (shown without quotes, in the italics of the story's thoughts: see waveMarks). */
+export function markDialogue(message, format, inner = []) {
   const lines = parseDialogue(message, format); let out = '', at = 0;
-  lines.forEach((line, index) => { out += message.slice(at, line.start) + MARK_OPEN + String.fromCharCode(MARK_BASE + index) + MARK_MID + (line.tagOnly?'':`“${escapeHTML(line.translation)}”`) + MARK_CLOSE; at = line.end; });
+  lines.forEach((line, index) => { out += message.slice(at, line.start) + MARK_OPEN + String.fromCharCode(MARK_BASE + index) + MARK_MID + (line.tagOnly?'':inner[index]?escapeHTML(line.translation):`“${escapeHTML(line.translation)}”`) + MARK_CLOSE; at = line.end; });
   return out + message.slice(at);
 }
 /** Whether html has a tag without its pair (line breaks aside): pairs are taken out from the inside until none are left. */
@@ -140,12 +146,12 @@ function cutInto(html) {
 }
 /** After the regex and Markdown: the marks become the waves (roles: the lines' speakers, for the button's label). Marks a
  *  card's regex pulled apart are only taken away. */
-export function waveMarks(html, marker, roles = []) {
+export function waveMarks(html, marker, roles = [], inner = []) {
   return String(html).replace(MARKED, (m, n, text) => { const index = n.charCodeAt(0) - MARK_BASE;
     // A line the regex cut into (a tag left open or closed inside it) keeps its text and gets no wave. Whole pairs are
     // fine: the tavern puts every “quote” in <q>, Markdown adds <em> and <strong>.
     if (cutInto(text)) return text;
-    return `<span class="sttts-utterance" data-sttts-line="${index}" data-sttts-token="${marker}"><span class="sttts-translation" data-sttts-translation>${text}</span> ${waveButton(roles[index] || '')}</span>`; }).replace(MARK_LEFT, '');
+    return `<span class="sttts-utterance" data-sttts-line="${index}" data-sttts-token="${marker}"${inner[index] ? ' data-sttts-inner' : ''}><span class="sttts-translation" data-sttts-translation>${text}</span> ${waveButton(roles[index] || '')}</span>`; }).replace(MARK_LEFT, '');
 }
 /** Marks without their waves (inside a framed block, or when nothing turns them into waves). */
 export const unmark = text => String(text).replace(MARKED, '$2').replace(MARK_LEFT, '');

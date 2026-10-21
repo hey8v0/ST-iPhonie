@@ -24,6 +24,8 @@
 #sttts-extension-entry .sttts-entry-controls button{flex:1;white-space:nowrap}
 #sttts-extension-entry .sttts-status{display:block;min-height:1.4em;margin-top:4px;font-size:.8em;opacity:.8}
 [data-sttts-line]{display:inline}
+/* 心声: in the story's italics (the color of its *thoughts*), without quotes, so it is not taken for a line said aloud. */
+#chat [data-sttts-line][data-sttts-inner] [data-sttts-translation]{font-style:italic;color:var(--SmartThemeEmColor,inherit)}
 
 /* ---------- Chat waves ----------
    Every colour comes from the tavern theme:
