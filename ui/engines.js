@@ -443,7 +443,7 @@ export function enginesApp(ctx) {
           ${field('温度', input('text-temperature', t.temperature, 'number', 'min="0" max="2" step="0.05"'), '越高越随性，越低越稳定。0.7–1 比较常用。')}
           ${field('流式', select('text-stream', t.stream === false ? 'off' : 'on', [['on', '流式（默认）'], ['off', '不用流式']]), '流式：回复一边写一边传回来，模型想得久、写得长也不会等到超时。\n\n不用流式：等整条写完一次给回来。有的模型或中转（比如一些 Gemini 的接口）流式传回来的回复会被截断、只剩一半，改成「不用流式」就好；一次最多等 5 分钟。')}
           ${field('思考', select('text-thinking', t.thinking || 'auto', [['auto', '按模型默认'], ['off', '关掉思考']]), '会先思考的模型（GLM、Qwen3、豆包、DeepSeek 思考版……）写手机里的字时可以关掉思考：快很多，也省钱，长度不会被思考用光。插件会发 enable_thinking: false 和 thinking: disabled，大多数接口认其中一个；接口报错不认识这些参数时改回「按模型默认」。')}
-          ${field('最长回复（tokens）', input('text-maxTokens', t.maxTokens, 'number', 'min="64" max="32000" step="1"'), '一次回复最多写多少，聊天、电话、朋友圈用这个。帮我写、从剧情生成和配图规划按各自需要的长度来（够写到 NovelAI 的上限，也给会先思考的模型留出余量）。')}
+          ${field('最长回复（tokens）', input('text-maxTokens', t.maxTokens, 'number', 'min="64" max="128000" step="1"'), '一次回复最多写多少（最多 128000），所有用到文字模型的地方都至少给这么多。配音、配图规划这些要重写整段正文的，正文很长时会自动给到更多，不会比这里少。会先思考的模型，思考也算在里面。')}
         </div>` : '')
       + `<div class="savebar"><span class="save-state" data-save-state>${dirty ? '未保存' : '已保存'}</span>${btn('save-text', '保存', 'primary')}</div>`);
   }

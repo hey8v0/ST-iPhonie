@@ -8,7 +8,7 @@ import {proxyAddress} from './proxy-url.js';
 
 // idle: a streamed answer may go this long without sending anything (thinking counts as sending); whole: the longest
 // any request may take; timeout: an answer that is not streamed (it says nothing until it is done).
-export const TEXT_LIMITS = Object.freeze({maxTokens: [64, 32000], temperature: [0, 2], idle: 90000, whole: 600000, timeout: 300000});
+export const TEXT_LIMITS = Object.freeze({maxTokens: [64, 128000], temperature: [0, 2], idle: 90000, whole: 600000, timeout: 300000});
 
 export function defaultTextPreset(id = 'default', name = '自定义接口') {
   return {id, name, url: '', model: '', temperature: 0.9, maxTokens: 1200, thinking: 'auto', stream: true};
@@ -71,11 +71,17 @@ export function tavernTextRequest(request){
   return {...out,systemPrompt:system,prompt:body.length===1&&body[0].role==='user'?body[0].content:body.map(m=>`[${m.role}]\n${m.content}`).join('\n\n')};
 }
 
+/**
+ * How long an answer may be: what the task needs at least (responseLength, worked out from its size), or the user's own
+ * 最长回复 when that is more. The user's number is a ceiling they chose, so a task never cuts below it.
+ */
+export const answerRoom = (asked, own) => Math.max(Number(asked) || 0, Number(own) || 0) || undefined;
+
 export function chatBody(text, prompt, responseLength) {
   if (!text.model) throw Error('请先在「引擎 → 文字模型」里填写模型名');
   // 关掉思考: the switches the providers that think by default read (硅基流动 and 通义: enable_thinking; 智谱, 火山方舟: thinking).
   const quiet = text.thinking === 'off' ? {enable_thinking: false, thinking: {type: 'disabled'}} : {};
-  return {model: text.model, messages: asMessages(prompt), temperature: text.temperature, max_tokens: responseLength || text.maxTokens, ...quiet, stream: false};
+  return {model: text.model, messages: asMessages(prompt), temperature: text.temperature, max_tokens: answerRoom(responseLength, text.maxTokens), ...quiet, stream: false};
 }
 
 /** The reply text of a Chat Completions answer (reasoning kept apart by the provider is left out). */

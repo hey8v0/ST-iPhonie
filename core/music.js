@@ -107,10 +107,21 @@ function findLink(value, depth = 0) {
 /** Why a 取歌 answer gave no link, in words: an empty value where the link goes, or no such place in the answer. */
 export function missingLink(source, json) {
   const value = typeof json === 'string' ? json : pick(json, source.urlPath), path = source.urlPath || '整个回答';
-  if (value === null || value === '') return `音源说这首歌没有播放链接（「${path}」是空的）：常见的原因是要会员、没有版权，或者音源服务器不在国内（网易云 API 搭在海外时很多歌拿不到链接）`;
+  if (value === null || value === '') return `音源说这首歌没有播放链接（「${path}」是空的）。常见原因：这首要会员或没有版权（换一首试试；会员歌要让音源登录，比如网易云 API 在取歌地址后面加 &cookie=你的登录 cookie）；或者音源按请求的 IP 判断地区（网页、手机开了代理、云酒馆的转发，都可能不被当成国内），网易云 API 的取歌地址加上 &randomCNIP=true 就会用国内 IP 去问，插件遇到网易云这种地址已经自动加上再试过了`;
   let shown = '';
   try { shown = typeof json === 'string' ? json : JSON.stringify(json); } catch { /* not shown */ }
   return `在音源的回答里没找到「${path}」，也没认出别的播放链接；回答的开头是：${String(shown).replace(/\s+/g, ' ').slice(0, 160)}`;
+}
+/**
+ * The 取歌 address once more as a Chinese IP, for a NeteaseCloudMusicApi-style backend that gave no link: it tells
+ * Netease the IP the request came from (the phone, a VPN, the cloud tavern's proxy), and Netease gives nothing to an IP
+ * it does not place in China — while the same backend asked on its own server does give the link. null when the
+ * address is not that kind, or already says which IP to use.
+ */
+export function asChina(address) {
+  const a = String(address || '');
+  if (!/\/song\/url(?:\/v1)?\?/i.test(a) || /[?&](?:randomCNIP|realIP)=/i.test(a)) return null;
+  return a + '&randomCNIP=true';
 }
 /** An answer that is the song itself (a stream, or a redirect that ended at the file) rather than JSON about it. */
 export const isAudio = type => /^(?:audio|video)\/|octet-stream|mpegurl/i.test(String(type || ''));
@@ -125,7 +136,7 @@ export const playable = (link, pageProtocol = 'http:') => pageProtocol === 'http
  */
 export const SELF_HOSTED = Object.freeze([
   {id: 'netease-api', name: '网易云音乐 API（NeteaseCloudMusicApi 这类，自己搭的）', example: 'http://localhost:3000',
-    fill: base => ({name: '网易云（我的后端）', search: base + '/cloudsearch?keywords={{query}}&limit=20', url: base + '/song/url/v1?id={{id}}&level=standard', lyric: base + '/lyric?id={{id}}',
+    fill: base => ({name: '网易云（我的后端）', search: base + '/cloudsearch?keywords={{query}}&limit=20', url: base + '/song/url/v1?id={{id}}&level=standard&randomCNIP=true', lyric: base + '/lyric?id={{id}}',
       listPath: 'result.songs', idPath: 'id', titlePath: 'name', artistPath: 'ar', urlPath: 'data[0].url', lyricPath: 'lrc.lyric'})}
 ]);
 

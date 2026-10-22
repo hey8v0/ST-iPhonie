@@ -4,7 +4,7 @@ import {RequestLog} from './request-log.js';
 import {PROMPT_BLOCKS, normalizePromptRules} from './prompt-rules.js';
 import { normalizeVn, spriteRequest } from './vn.js';
 import { MomentStore } from './moments-store.js';
-import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, missingLink, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
+import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, missingLink, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
@@ -12,7 +12,7 @@ import { buildPeekRequest, cleanPeek, peekId } from './peek.js';
 import { languageCode } from './languages.js';
 import { normalizeMoments, buildMomentsRequest } from './moments.js';
 import { normalizeCalls, buildCallRequest } from './call.js';
-import { normalizeText, activeText, customRequest, listModels, streamText, asMessages, tavernTextRequest, TEXT_PRESET_ID } from './llm.js';
+import { normalizeText, activeText, customRequest, listModels, streamText, asMessages, tavernTextRequest, answerRoom, TEXT_PRESET_ID } from './llm.js';
 import { normalizeEmbed, embedReady, embedTexts } from './embed.js';
 import { bookId, emptyBook, cleanBook, removeNode } from './memory.js';
 import { normalizeMemoryBooks, normalizeAssistantThreads } from './data-transfer.js';
@@ -751,7 +751,9 @@ export class TTSBackend {
         if (!context?.generateRaw) throw Error('当前酒馆版本不支持后台生成');
         // The chat-completion request the tavern builds is kept, so an empty answer can be asked again as a stream:
         // "假流式" channels only answer streamed requests, and the tavern's background generation never streams.
-        const outgoing=tavernTextRequest(request);
+        // A length the task asks for replaces the tavern's own for that request: the tavern's, when longer, is kept.
+        const own = context?.mainApi === 'openai' ? context.chatCompletionSettings?.openai_max_tokens : 0;
+        const outgoing=tavernTextRequest(request.responseLength ? {...request, responseLength: answerRoom(request.responseLength, own)} : request);
         const source = context.eventSource, event = context.eventTypes?.CHAT_COMPLETION_SETTINGS_READY, last = JSON.stringify(asMessages(outgoing.prompt).at(-1)?.content ?? '');
         let payload = null;
         const keep = data => { if (!payload && data?.type === 'quiet' && JSON.stringify(data.messages?.at?.(-1)?.content ?? '') === last) { payload = clone(data); const id = this.requestLog.add('酒馆最终请求', data); this.requestLog.finish(id, {state: '已交给酒馆发送'}); } };
@@ -1367,9 +1369,12 @@ export class TTSBackend {
         // The address itself is the song: played as it is (the tavern's own address stays as it is, the page's origin).
         const own = () => onTavern(address) ? address : playable(address, globalThis.location?.protocol);
         if (s.direct) return own();
-        const answer = await this.musicFetch(address, 'link');
+        let answer = await this.musicFetch(address, 'link');
         if (answer === AUDIO) return own();
-        const link = readLink(s, answer);
+        let link = readLink(s, answer);
+        // No link from a NeteaseCloudMusicApi-style backend: asked once more as a Chinese IP (core/music.js asChina).
+        const again = !link && asChina(address);
+        if (again) { const second = await this.musicFetch(again, 'link').catch(() => null); if (second === AUDIO) return playable(again, globalThis.location?.protocol); if (second) { const found = readLink(s, second); if (found) { link = found; answer = second; } } }
         if (!link) throw Error(`「${s.name}」没有给出播放链接：${missingLink(s, answer)}`);
         return playable(link, globalThis.location?.protocol);
     }
