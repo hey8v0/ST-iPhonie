@@ -104,14 +104,35 @@ function findLink(value, depth = 0) {
   for (const [, v] of entries) { const found = findLink(v, depth + 1); if (found) return found; }
   return '';
 }
-/** Why a 取歌 answer gave no link, in words: an empty value where the link goes, or no such place in the answer. */
+/** A place for the link that is there but empty (QQ 音乐 API: data.<songmid>.url is ""). */
+function emptyLink(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 5) return false;
+  const entries = Array.isArray(value) ? value.map((v, i) => [String(i), v]) : Object.entries(value);
+  return entries.some(([key, v]) => (LINK_KEYS.test(key) && (v === '' || v === null)) || emptyLink(v, depth + 1));
+}
+const SAID_KEYS = /^(?:error|err|errmsg|err_?msg|msg|message|reason|tips?)$/i, FINE = /^(?:ok|success|succeed|成功|null|undefined)$/i;
+/** What the source itself says in its answer (「无可用直链」), when it says more than ok. */
+export function sourceSays(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 5) return '';
+  const entries = Array.isArray(value) ? value.map((v, i) => [String(i), v]) : Object.entries(value);
+  for (const [key, v] of entries) if (SAID_KEYS.test(key) && typeof v === 'string' && v.trim() && !FINE.test(v.trim())) return v.trim().slice(0, 120);
+  for (const [, v] of entries) { const said = sourceSays(v, depth + 1); if (said) return said; }
+  return '';
+}
+const LOGIN = '多半是音源后端没登录（或这首要会员）：网易云 API 可以在取歌地址后面加 &cookie=你的登录 cookie；QQ 音乐这类 API 要在它那边登录或填 QQ 的 cookie，具体看那个 API 的说明。没登录时很多歌拿不到链接，会员歌最多只给 30 秒试听';
+/** Why a 取歌 answer gave no link, in words: what the source said, an empty value where the link goes, or no such place. */
 export function missingLink(source, json) {
   const value = typeof json === 'string' ? json : pick(json, source.urlPath), path = source.urlPath || '整个回答';
-  if (value === null || value === '') return `音源说这首歌没有播放链接（「${path}」是空的）。常见原因：这首要会员或没有版权（换一首试试；会员歌要让音源登录，比如网易云 API 在取歌地址后面加 &cookie=你的登录 cookie）；或者音源按请求的 IP 判断地区（网页、手机开了代理、云酒馆的转发，都可能不被当成国内），网易云 API 的取歌地址加上 &randomCNIP=true 就会用国内 IP 去问，插件遇到网易云这种地址已经自动加上再试过了`;
+  const said = typeof json === 'object' ? sourceSays(json) : '';
+  if (value === null || value === '' || (typeof json === 'object' && emptyLink(json))) {
+    return `音源回答了，但播放链接是空的${said ? `，音源自己说：「${said}」` : ''}。${LOGIN}。也可能是这首没有版权（换一首试试），或者音源按请求的 IP 判断地区（网页、手机开了代理、云酒馆的转发，都可能不被当成国内）：网易云 API 的取歌地址加上 &randomCNIP=true 就会用国内 IP 去问，插件遇到网易云这种地址已经自动加上再试过了；这个参数要较新的网易云 API 才认，旧版本要更新`;
+  }
   let shown = '';
   try { shown = typeof json === 'string' ? json : JSON.stringify(json); } catch { /* not shown */ }
-  return `在音源的回答里没找到「${path}」，也没认出别的播放链接；回答的开头是：${String(shown).replace(/\s+/g, ' ').slice(0, 160)}`;
+  return `在音源的回答里没找到「${path}」，也没认出别的播放链接${said ? `；音源自己说：「${said}」` : ''}；回答的开头是：${String(shown).replace(/\s+/g, ' ').slice(0, 160)}`;
 }
+/** A NetEase answer that gives only the 30-second preview of a 会员 song (freeTrialInfo is set). */
+export const trialOnly = json => !!(json && typeof json === 'object' && [].concat(json.data ?? []).some(d => d && typeof d === 'object' && d.freeTrialInfo && typeof d.freeTrialInfo === 'object'));
 /**
  * The 取歌 address once more as a Chinese IP, for a NeteaseCloudMusicApi-style backend that gave no link: it tells
  * Netease the IP the request came from (the phone, a VPN, the cloud tavern's proxy), and Netease gives nothing to an IP

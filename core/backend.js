@@ -4,7 +4,7 @@ import {RequestLog} from './request-log.js';
 import {PROMPT_BLOCKS, normalizePromptRules} from './prompt-rules.js';
 import { normalizeVn, spriteRequest } from './vn.js';
 import { MomentStore } from './moments-store.js';
-import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, missingLink, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
+import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, missingLink, trialOnly, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
@@ -1376,8 +1376,13 @@ export class TTSBackend {
         const again = !link && asChina(address);
         if (again) { const second = await this.musicFetch(again, 'link').catch(() => null); if (second === AUDIO) return playable(again, globalThis.location?.protocol); if (second) { const found = readLink(s, second); if (found) { link = found; answer = second; } } }
         if (!link) throw Error(`「${s.name}」没有给出播放链接：${missingLink(s, answer)}`);
-        return playable(link, globalThis.location?.protocol);
+        const out = playable(link, globalThis.location?.protocol);
+        // Only the 30-second preview: kept, so the player can say why the song stops (core/music.js trialOnly).
+        if (trialOnly(answer)) { this.trialLinks ??= new Set(); this.trialLinks.add(out); if (this.trialLinks.size > 50) this.trialLinks.delete(this.trialLinks.values().next().value); }
+        return out;
     }
+    /** Whether a link from musicLink is only a 30-second preview (a 会员 song, the source not logged in). */
+    musicTrial(link) { return !!this.trialLinks?.has(link); }
     async musicLyric(sourceId, songId, hint = {}) {
         const s = this.musicSource(sourceId);
         if (!s.lyric) return '';

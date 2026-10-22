@@ -46,7 +46,11 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
   /** The song's file or link: a 歌单 file, a source song (its link is fetched each time: they expire), or a name to look up. */
   async function source(t) {
     if (t.id && t.origin === 'file') { const blob = await backend.songBlob(t.id); if (!blob) throw Error('这首歌已经不在歌单里了'); return {src: URL.createObjectURL(blob), own: true}; }
-    if (t.source && t.songId) return {src: await backend.musicLink(t.source, t.songId, {title: t.title, artist: t.artist})};
+    if (t.source && t.songId) {
+      const src = await backend.musicLink(t.source, t.songId, {title: t.title, artist: t.artist});
+      if (backend.musicTrial?.(src)) notice(`「${label(t)}」只拿到 30 秒试听：这首是会员歌，音源后端没登录会员账号`);
+      return {src};
+    }
     const found = await backend.findSong({title: t.title, artist: t.artist});
     if (!found) throw Error(opts().sources?.some(s => s.enabled) ? `没找到「${label(t)}」` : `歌单里没有「${label(t)}」，也还没有添加音源`);
     // A stand-in (nothing by that name was found) shows as itself: the same song for every pick means the source's
