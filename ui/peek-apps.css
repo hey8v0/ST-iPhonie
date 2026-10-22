@@ -1,0 +1,127 @@
+/* 查手机: 电话, 日历, 音乐, 天气, 时钟, 设置, 相机 (ui/peek-apps.js). The owner's phone has its own light look, as the
+   rest of .peek-phone in phone.css. */
+.pp-empty small{display:block;margin-top:6px;font-size:12px}
+.pp-foot{margin:12px 4px 0;text-align:center;color:var(--pp-sub);font-size:12px}
+.pp-head{margin:18px 4px 8px;font-size:13px;font-weight:600;color:var(--pp-sub)}
+.pp-switch{position:relative;flex-shrink:0;width:46px;height:28px;border-radius:14px;background:#e3e3e8;transition:background .2s}
+.pp-switch i{position:absolute;top:2px;left:2px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.18)}
+.pp-switch.on{background:#34c759}.pp-switch.on i{left:20px}
+/* 电话 */
+.pp-calls{--pp-bg:#fff}
+.pp-seg{display:grid;grid-template-columns:1fr 1fr;padding:2px;margin:2px 30px 12px;border-radius:9px;background:rgba(118,118,128,.12);font-size:13px;font-weight:600;text-align:center}
+.pp-seg span{padding:5px 0;border-radius:7px;color:#333}
+.pp-seg .on{background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.08)}
+.pp-call-row{display:flex;align-items:center;gap:11px;padding:9px 12px}
+.pp-call-row+.pp-call-row{border-top:.5px solid var(--pp-line)}
+.pp-call-row b{font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-call-row small{display:flex;align-items:center;gap:3px;font-size:12.5px;color:var(--pp-sub)}
+.pp-call-row small svg{width:13px;height:13px}
+.pp-call-row.missed b{color:#ff3b30}
+.pp-call-when{flex-shrink:0;font-size:13px;color:var(--pp-sub)}
+/* 日历 */
+.pp-calendar{--pp-bg:#fff}
+.pp-red{color:#ff3b30}
+.pp-month{display:grid;gap:4px}
+.pp-week,.pp-days{display:grid;grid-template-columns:repeat(7,1fr);text-align:center}
+.pp-week span{font-size:11px;color:var(--pp-sub)}
+.pp-days span{position:relative;display:grid;place-items:center;height:36px;font-size:16px}
+.pp-days .today{color:#fff}
+.pp-days .today:before{content:"";position:absolute;width:32px;height:32px;border-radius:50%;background:#ff3b30;z-index:-1}
+.pp-days span{z-index:0}
+.pp-days .dot:after{content:"";position:absolute;bottom:1px;width:5px;height:5px;border-radius:50%;background:#bbb}
+.pp-calendar .pp-group{background:#f2f2f7}
+.pp-event{display:flex;gap:10px;padding:11px 12px}
+.pp-event+.pp-event{border-top:.5px solid var(--pp-line)}
+.pp-event i{flex-shrink:0;width:4px;border-radius:2px}
+.pp-event>span{display:grid;gap:2px;min-width:0}
+.pp-event b{font-size:15px;font-weight:600}
+.pp-event small{font-size:12.5px;color:var(--pp-sub)}
+/* 音乐 */
+.pp-music{--pp-bg:#fff}
+.pp-now{display:flex!important;align-items:center;gap:14px;width:100%;padding:14px;margin-bottom:14px;border-radius:18px;background:linear-gradient(135deg,#ff6b8a,#fa2d48);color:#fff;box-shadow:0 10px 24px -14px rgba(250,45,72,.8)}
+.pp-now>span:nth-child(2){display:grid;gap:2px;min-width:0;flex:1}
+.pp-now small{font-size:11px;font-weight:700;color:#fff;opacity:.85;letter-spacing:.5px}
+.pp-now b{font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-now em{font-style:normal;font-size:13px;opacity:.9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-now i{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.25);display:grid;place-items:center}
+.pp-now i svg{width:20px;height:20px}
+.pp-disc{flex-shrink:0;width:58px;height:58px;border-radius:50%;background:radial-gradient(circle,#222 0 16%,hsl(var(--h) 70% 60%) 17% 22%,#111 23% 60%,#333 61% 63%,#111 64%);animation:pp-spin 6s linear infinite;box-shadow:0 4px 12px rgba(0,0,0,.3)}
+@keyframes pp-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.pp-disc{animation:none}}
+.pp-music .pp-group{background:#f7f7f9}
+.pp-song{display:flex!important;align-items:center;gap:12px;width:100%;padding:8px 12px;color:var(--pp-ink)}
+.pp-song+.pp-song{border-top:.5px solid var(--pp-line)}
+.pp-song b{font-size:15px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-song small{font-size:12.5px;color:var(--pp-sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-song>svg{width:18px;height:18px;color:#fa2d48;flex-shrink:0}
+.pp-cover{flex-shrink:0;width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,hsl(var(--h) 70% 72%),hsl(calc(var(--h) + 50) 65% 52%))}
+/* 天气 */
+.pp-weather{--pp-bg:linear-gradient(#3d8be8,#7ab8f5 60%,#a9d3fa);color:#fff;background:var(--pp-bg)}
+.pp-weather[data-sky=cloud]{--pp-bg:linear-gradient(#6b84a3,#9db2c9 60%,#c3d1e0)}
+.pp-weather[data-sky=rain]{--pp-bg:linear-gradient(#40526b,#6b7f99 60%,#91a3b8)}
+.pp-weather small{color:#fff}
+.pp-weather .pp-bar{background:transparent;border:0;-webkit-backdrop-filter:none;backdrop-filter:none}
+.pp-weather .pp-back{color:#fff}
+.pp-sky-now{display:grid;justify-items:center;gap:0;margin:0 0 18px;text-shadow:0 1px 6px rgba(0,0,0,.15)}
+.pp-sky-now p{margin:0;font-size:16px;font-weight:600}
+.pp-sky-now b{font-size:84px;font-weight:200;line-height:1;margin-left:18px}
+.pp-sky-now span{font-size:18px;font-weight:500}
+.pp-sky-now small{font-size:14px;opacity:.9}
+.pp-sky-card{margin-bottom:10px;padding:10px 12px;border-radius:16px;background:rgba(255,255,255,.18);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.pp-hours{display:grid;grid-template-columns:repeat(6,1fr);text-align:center}
+.pp-hours span{display:grid;justify-items:center;gap:5px;font-size:15px}
+.pp-hours small{font-size:12px;opacity:.9}
+.pp-sky-head{margin:0 0 6px;font-size:12px;font-weight:600;opacity:.8}
+.pp-sky-day{display:grid;grid-template-columns:44px 28px 30px 1fr 30px;align-items:center;gap:8px;padding:6px 0;font-size:15px}
+.pp-sky-day+.pp-sky-day{border-top:.5px solid rgba(255,255,255,.22)}
+.pp-sky-day small{font-size:14px;text-align:center;opacity:.95}
+.pp-sky-day i{position:relative;height:5px;border-radius:3px;background:rgba(255,255,255,.25)}
+.pp-sky-day i:after{content:"";position:absolute;top:0;bottom:0;left:calc(max(0, var(--a)) * 100%);right:calc((1 - min(1, var(--b))) * 100%);border-radius:3px;background:linear-gradient(90deg,#8fd3ff,#ffd60a,#ff9500)}
+/* 时钟 */
+.pp-clockapp{--pp-bg:#000;color:#fff}
+.pp-clockapp .pp-bar{background:rgba(20,20,20,.9);border-color:rgba(255,255,255,.08)}
+.pp-clockapp .pp-bar>b{color:#fff}
+.pp-clockapp .pp-link{color:#ff9f0a}
+.pp-plus{font-size:24px;line-height:1}
+.pp-clock-now{display:grid;justify-items:center;margin:8px 0 18px}
+.pp-clock-now b{font-size:64px;font-weight:200;font-variant-numeric:tabular-nums}
+.pp-clock-now small{font-size:13px;color:#8e8e93}
+.pp-clockapp .pp-group{background:#1c1c1e}
+.pp-alarm{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px}
+.pp-alarm+.pp-alarm{border-top:.5px solid rgba(255,255,255,.12)}
+.pp-alarm>span:not(.pp-switch){display:grid;min-width:0}
+.pp-alarm b{font-size:44px;font-weight:200;line-height:1.1;font-variant-numeric:tabular-nums}
+.pp-alarm small{font-size:13px;color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-alarm.off b,.pp-alarm.off small{color:#8e8e93}
+.pp-clockapp .pp-switch{background:#39393d}.pp-clockapp .pp-switch.on{background:#34c759}
+/* 设置 */
+.pp-settings .pp-group{margin-bottom:18px}
+.pp-me{display:flex;align-items:center;gap:12px;padding:12px}
+.pp-me .pp-avatar{border-radius:50%}
+.pp-me>span:not(.pp-avatar){display:grid;gap:2px;flex:1;min-width:0}
+.pp-me b{font-size:19px;font-weight:600}
+.pp-me small{font-size:12.5px;color:var(--pp-sub)}
+.pp-me em,.pp-set-row em{font-style:normal;color:#c4c4c7;font-size:20px;line-height:1}
+.pp-set-row{display:flex;align-items:center;gap:12px;padding:8px 12px;min-height:30px}
+.pp-set-row+.pp-set-row{border-top:.5px solid var(--pp-line)}
+.pp-set-row i{flex-shrink:0;width:29px;height:29px;border-radius:7px}
+.pp-set-row>span:not(.pp-switch){flex:1;font-size:16px}
+.pp-set-row small{font-size:15px;color:var(--pp-sub);max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 相机 */
+.pp-camera{flex:1;display:flex;flex-direction:column;background:#000;color:#fff;padding-top:var(--pp-top)}
+.pp-finder{position:relative;flex:1;margin:34px 0 0;overflow:hidden;background:radial-gradient(120% 80% at 30% 20%,#5b6b7d,#2a313a 55%,#14171b);transition:transform .35s}
+.pp-finder.pp-selfie{transform:scaleX(-1);background:radial-gradient(120% 80% at 60% 30%,#8a7466,#3b302b 55%,#171311)}
+.pp-grid-lines{position:absolute;inset:0;background:linear-gradient(90deg,transparent calc(33.3% - .5px),rgba(255,255,255,.25) calc(33.3% - .5px) calc(33.3% + .5px),transparent 0,transparent calc(66.6% - .5px),rgba(255,255,255,.25) calc(66.6% - .5px) calc(66.6% + .5px),transparent 0),linear-gradient(transparent calc(33.3% - .5px),rgba(255,255,255,.25) calc(33.3% - .5px) calc(33.3% + .5px),transparent 0,transparent calc(66.6% - .5px),rgba(255,255,255,.25) calc(66.6% - .5px) calc(66.6% + .5px),transparent 0)}
+.pp-focus{position:absolute;left:50%;top:45%;width:70px;height:70px;margin:-35px 0 0 -35px;border:1.5px solid #ffd60a;opacity:.85}
+.pp-finder.pp-flash:after{content:"";position:absolute;inset:0;background:#fff;animation:pp-flash .35s ease-out forwards}
+@keyframes pp-flash{from{opacity:1}to{opacity:0}}
+.pp-modes{display:flex;justify-content:center;gap:14px;padding:12px 0 6px;font-size:12.5px;font-weight:600;color:#ddd;white-space:nowrap;overflow:hidden}
+.pp-modes .on{color:#ffd60a}
+.pp-shutter-row{display:flex;align-items:center;justify-content:space-between;padding:10px 30px 46px}
+.pp-last{position:relative;width:46px;height:46px;border-radius:8px;overflow:hidden;background:#333}
+.pp-last img,.pp-last .pp-blank{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.pp-last .pp-blank em,.pp-last .pp-blank svg{display:none}
+.pp-shutter{width:68px;height:68px;border-radius:50%;background:#fff;box-shadow:0 0 0 4px #000,0 0 0 7px #fff}
+.pp-shutter:active{transform:scale(.92)}
+.pp-flip{width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.14);display:grid!important;place-items:center}
+.pp-flip svg{width:24px;height:24px}

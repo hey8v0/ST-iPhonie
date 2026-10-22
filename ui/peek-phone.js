@@ -1,8 +1,10 @@
 // 查手机: the character's own phone, held in the user's hands. A layer over the whole screen (like a call) with its own
 // status bar, lock screen, home screen and apps: 消息 (their chats with other people), 相册, 备忘录, 浏览器 (what they
-// searched for) and 购物 (their cart). The rest of the home screen is there to make it look like a phone; those apps only
-// shake. Everything shown comes from one snapshot (core/peek.js); nothing here talks to the model.
+// searched for), 购物 (their cart), and 电话, 日历, 音乐, 天气, 时钟, 设置, 相机 (ui/peek-apps.js). Every app opens.
+// Everything shown comes from one snapshot (core/peek.js) or from the owner's name and the day; nothing here talks to
+// the model.
 import {esc, avatarPicture} from './common.js';
+import {peekApps} from './peek-apps.js';
 
 const WEEK = '日一二三四五六';
 const pad = n => String(n).padStart(2, '0');
@@ -34,10 +36,12 @@ const GLYPH = {
   camera: '<rect x="11" y="20" width="38" height="26" rx="5.5" fill="#fff"/><path d="M22.5 20.5l3-5.5h9l3 5.5" fill="#fff"/><circle cx="30" cy="33" r="7.6" fill="#4a4a4a"/><circle cx="30" cy="33" r="4.6" fill="#8d8d8d"/>'
 };
 const APPS = {
-  calendar: {label: '日历'}, photos: {label: '相册', open: true}, notes: {label: '备忘录', open: true}, weather: {label: '天气'},
-  clock: {label: '时钟'}, browser: {label: '浏览器', open: true}, cart: {label: '购物', open: true}, settings: {label: '设置'},
-  music: {label: '音乐'}, phone: {label: '电话'}, messages: {label: '消息', open: true}, camera: {label: '相机'}
+  calendar: {label: '日历'}, photos: {label: '相册'}, notes: {label: '备忘录'}, weather: {label: '天气'},
+  clock: {label: '时钟'}, browser: {label: '浏览器'}, cart: {label: '购物'}, settings: {label: '设置'},
+  music: {label: '音乐'}, phone: {label: '电话'}, messages: {label: '消息'}, camera: {label: '相机'}
 };
+// Pages whose top is dark (the status bar and the home bar go white there).
+const DARK = new Set(['lock', 'home', 'photo', 'camera', 'weather', 'clock']);
 const GRID = ['calendar', 'photos', 'notes', 'weather', 'clock', 'cart', 'settings', 'music'], DOCK = ['phone', 'messages', 'browser', 'camera'];
 
 // Small line icons of the phone's own chrome.
@@ -62,15 +66,17 @@ const tile = (index, text) => { const h = (hash(text) + index * 47) % 360; retur
 
 /**
  * Opens the phone of snap.name over `host` (the phone's .screen). draw(index) draws a photo (index 'wallpaper': the
- * wallpaper) and resolves when done; photo(id) gives a drawn picture's URL; view(img) shows a picture large; close() is
- * called when the user puts the phone down. Returns {update(snap), back(), close()}.
+ * wallpaper) and resolves when done; photo(id) gives a drawn picture's URL; view(img) shows a picture large; play(song)
+ * plays a song of theirs on the user's phone; close() is called when the user puts the phone down. Returns
+ * {update(snap), back(), close()}.
  */
-export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, close}) {
+export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, play = () => {}, close}) {
   const doc = ctx.doc, layer = doc.createElement('div');
   layer.className = 'peek-phone';
   layer.setAttribute('role', 'dialog');
   layer.setAttribute('aria-label', `${snap.name} 的手机`);
-  // page: lock | home | messages | thread | photos | photo | notes | note | browser | cart
+  // page: lock | home | messages | thread | photos | photo | notes | note | browser | cart | phone | calendar | music |
+  // weather | clock | settings | camera
   let page = 'lock', item = -1, closed = false, enter = 'pp-anim-in';
   const battery = 18 + hash(snap.name + snap.at) % 80;
   const own = l => l.from === snap.name;
@@ -93,7 +99,7 @@ export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, close}) 
   function icon(id, badge = 0) {
     const app = APPS[id], now = new Date();
     const art = id === 'calendar' ? `<span class="pp-cal"><small>星期${WEEK[now.getDay()]}</small><b>${now.getDate()}</b></span>` : `<svg viewBox="0 0 60 60" aria-hidden="true">${GLYPH[id]}</svg>`;
-    return `<button type="button" class="pp-app-icon" data-pp="${app.open ? 'open' : 'shake'}" data-id="${id}" aria-label="${app.label}${badge ? `，${badge} 条未读` : ''}"><span class="pp-tile pp-t-${id}">${art}${badge ? `<em>${badge > 99 ? '99+' : badge}</em>` : ''}</span><span class="pp-label">${app.label}</span></button>`;
+    return `<button type="button" class="pp-app-icon" data-pp="open" data-id="${id}" aria-label="${app.label}${badge ? `，${badge} 条未读` : ''}"><span class="pp-tile pp-t-${id}">${art}${badge ? `<em>${badge > 99 ? '99+' : badge}</em>` : ''}</span><span class="pp-label">${app.label}</span></button>`;
   }
   const bar = (title, back = '', right = '') => `<header class="pp-bar"><button type="button" class="pp-back" data-pp="back">${UI.back}<span>${esc(back)}</span></button><b>${title}</b><span class="pp-right">${right}</span></header>`;
 
@@ -102,7 +108,7 @@ export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, close}) 
     return `<div class="pp-lock" data-pp="unlock">
       <div class="pp-lock-head">${UI.lock}<p class="pp-date">${now.getMonth() + 1}月${now.getDate()}日 星期${WEEK[now.getDay()]}</p><p class="pp-clock">${hhmm(now)}</p></div>
       <div class="pp-notices">${notes.map(c => `<button type="button" class="pp-notice" data-pp="notice" data-index="${c.index}"><span class="pp-notice-head"><span class="pp-tile pp-t-messages mini"><svg viewBox="0 0 60 60" aria-hidden="true">${GLYPH.messages}</svg></span>消息<small>${esc(c.when)}</small></span><b>${esc(c.with)}${c.unread > 1 ? ` <small>(${c.unread} 条)</small>` : ''}</b><span class="pp-notice-text">${esc(clipText(c.lines.at(-1).text, 60))}</span></button>`).join('')}</div>
-      <div class="pp-lock-foot"><button type="button" class="pp-round" data-pp="put" aria-label="放下手机">${UI.down}</button><span>点一下解锁</span><button type="button" class="pp-round" data-pp="shake" aria-label="相机">${UI.camera}</button></div>
+      <div class="pp-lock-foot"><button type="button" class="pp-round" data-pp="put" aria-label="放下手机">${UI.down}</button><span>点一下解锁</span><button type="button" class="pp-round" data-pp="open" data-id="camera" aria-label="相机">${UI.camera}</button></div>
     </div>`;
   }
   function homePage() {
@@ -170,13 +176,15 @@ export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, close}) 
       <div class="pp-body">${snap.cart.length ? snap.cart.map((x, i) => `<div class="pp-item"><span class="pp-radio on">${UI.check}</span><span class="pp-thumb" style="background:${tile(i, x.name)}">${esc([...x.name][0] || '?')}</span><span class="pp-item-main"><b>${esc(x.name)}</b>${x.note ? `<small>${esc(x.note)}</small>` : ''}<span class="pp-price">${money(x.price)}</span></span></div>`).join('') : '<p class="pp-empty">购物车是空的</p>'}</div>
       ${snap.cart.length ? `<footer class="pp-checkout"><span class="pp-radio on">${UI.check}</span>全选<span class="pp-sum">合计：<b>${money(total)}</b></span><button type="button" data-pp="shake">结算(${snap.cart.length})</button></footer>` : ''}</div>`;
   }
-  const PAGES = {lock: lockPage, home: homePage, messages: messagesPage, thread: threadPage, photos: photosPage, photo: photoPage, notes: notesPage, note: notePage, browser: browserPage, cart: cartPage};
+  const more = () => peekApps({snap, hash, stamp, bar, face, battery, album, picture});
+  const PAGES = {lock: lockPage, home: homePage, messages: messagesPage, thread: threadPage, photos: photosPage, photo: photoPage, notes: notesPage, note: notePage, browser: browserPage, cart: cartPage,
+    ...Object.fromEntries(['phone', 'calendar', 'music', 'weather', 'clock', 'settings', 'camera'].map(id => [id, () => more()[id]()]))};
 
   async function paint() {
     if (closed) return;
-    const inner = PAGES[page](), onWall = page === 'lock' || page === 'home';
+    const inner = PAGES[page](), dark = DARK.has(page);
     layer.dataset.page = page;
-    layer.innerHTML = `<div class="pp-wall" aria-hidden="true"></div>${status(onWall)}<div class="pp-page ${enter}">${inner}</div>${page === 'lock' ? '' : `<button type="button" class="pp-homebar${onWall || page === 'photo' ? ' light' : ''}" data-pp="home" aria-label="${page === 'home' ? '锁屏' : '回到主屏幕'}"></button>`}`;
+    layer.innerHTML = `<div class="pp-wall" aria-hidden="true"></div>${status(dark && page !== 'photo')}<div class="pp-page ${enter}">${inner}</div>${page === 'lock' ? '' : `<button type="button" class="pp-homebar${dark ? ' light' : ''}" data-pp="home" aria-label="${page === 'home' ? '锁屏' : '回到主屏幕'}"></button>`}`;
     enter = '';
     const wall = layer.querySelector('.pp-wall'), drawn = snap.wallpaper?.photoId;
     wall.style.background = painted(snap.name);
@@ -192,7 +200,7 @@ export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, close}) 
   function shake(el) { el.classList.remove('pp-shake'); void el.offsetWidth; el.classList.add('pp-shake'); }
   function back() {
     if (closed) return false;
-    const up = {thread: 'messages', photo: 'photos', note: 'notes', messages: 'home', photos: 'home', notes: 'home', browser: 'home', cart: 'home', home: 'lock'}[page];
+    const up = page === 'home' ? 'lock' : {thread: 'messages', photo: 'photos', note: 'notes'}[page] || (page === 'lock' ? '' : 'home');
     if (up) go(up, -1, up === 'lock' ? 'pp-anim-down' : 'pp-anim-back');
     else done();
     return true;
@@ -218,6 +226,10 @@ export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, close}) 
       case 'zoom': { const img = el.querySelector('img'); if (img?.src) view(img); break; }
       case 'draw': await draw([el.dataset.key === 'wallpaper' ? 'wallpaper' : Number(el.dataset.key)]); break;
       case 'draw-all': await draw(album().filter(p => p.tags && !p.photoId && p.state !== 'waiting').map(p => p.key)); break;
+      case 'song': { const song = snap.songs?.[index]; if (song) play(song); break; }
+      // The camera: a flash for the shutter, the view turned round for the other lens. Nothing is taken.
+      case 'snap': { const finder = layer.querySelector('.pp-finder'); finder?.classList.remove('pp-flash'); void finder?.offsetWidth; finder?.classList.add('pp-flash'); break; }
+      case 'flip': layer.querySelector('.pp-finder')?.classList.toggle('pp-selfie'); break;
     }
   });
   // The clock in the status bar keeps time while the phone is held.

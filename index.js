@@ -311,7 +311,8 @@ function openPanel(roleId,preserveView=false){setTimeout(()=>{callIsland?.refres
 // of ours is closed the rest are taken away. Entries left from before a reload are skipped on their own.
 const BACK_SPARE=6,OVER='.sttts-vn,.sttts-viewer,.sttts-ask,[data-sttts-owned=game]';
 let guards=0,unwinding=false;
-const touchBack=()=>!!globalThis.matchMedia?.('(pointer: coarse)').matches;
+// A touch screen. Some Android browsers and app web views do not say (pointer: coarse): any touch point counts too.
+const touchBack=()=>!!(globalThis.matchMedia?.('(pointer: coarse)').matches||globalThis.matchMedia?.('(any-pointer: coarse)').matches||globalThis.navigator?.maxTouchPoints>0||'ontouchstart' in globalThis);
 const oursOpen=()=>!!panel?.open||!!document.querySelector(OVER);
 function armBack(force=false){if(unwinding||!(force||oursOpen())||!touchBack())return;try{while(guards<BACK_SPARE){history.pushState({...(history.state&&typeof history.state==='object'?history.state:{}),stttsPhone:marker},'');guards++;}}catch{}}
 function unarmBack(){const n=guards;guards=0;if(n&&history.state?.stttsPhone===marker){unwinding=true;try{history.go(-n);}catch{unwinding=false;}}}
@@ -346,7 +347,8 @@ const touched=e=>{
  if(e?.type==='pointerdown'&&!oursOpen()&&e.target?.closest?.(OPENERS)&&!guards){armBack(true);clearTimeout(preArmed);preArmed=setTimeout(()=>{if(!oursOpen())unarmBack();},1500);return;}
  if(guards<BACK_SPARE){armBack();setTimeout(armBack,0);}
 };
-function listenTouches(win){for(const type of ['pointerdown','pointerup','click','dblclick','keydown'])win.addEventListener?.(type,touched,false);}
+// touchend too: on a touch screen it is the lifting of the finger that counts as the user's own touch for the browser.
+function listenTouches(win){for(const type of ['pointerdown','pointerup','touchend','click','dblclick','keydown'])win.addEventListener?.(type,touched,false);}
 listenTouches(globalThis);
 // The stage, the pictures, the box and the game come and go as children of the page.
 if(globalThis.MutationObserver&&document.body)new MutationObserver(list=>{if(list.some(m=>[...m.addedNodes,...m.removedNodes].some(n=>n.nodeType===1&&n.matches(OVER))))syncBack();}).observe(document.body,{childList:true});

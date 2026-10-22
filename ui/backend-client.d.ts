@@ -315,7 +315,7 @@ export interface ChatProfile { name: string; status: 'online' | 'qme' | 'busy' |
 export interface ForumReply { id: string; from: string; to?: string; text: string; at: number; }
 export interface ForumPost { id: string; kind: 'forum'; author: string; title: string; text: string; at: number; source: 'auto' | 'me'; likes: number; liked: boolean; heat: number; replies: ForumReply[]; }
 /** 查手机: a character's phone as the model made it up. */
-export interface PeekSnapshot { id: string; kind: 'peek'; name: string; at: number; chats: Array<{ with: string; lines: Array<{ from: string; text: string }> }>; searches: string[]; notes: Array<{ title: string; text: string }>; photos: PeekPicture[]; cart: Array<{ name: string; price: number; note: string }>; wallpaper?: PeekPicture; }
+export interface PeekSnapshot { id: string; kind: 'peek'; name: string; at: number; chats: Array<{ with: string; lines: Array<{ from: string; text: string }> }>; searches: string[]; notes: Array<{ title: string; text: string }>; photos: PeekPicture[]; cart: Array<{ name: string; price: number; note: string }>; calls?: Array<{ with: string; dir: 'in' | 'out' | 'missed'; long: string }>; events?: Array<{ when: string; what: string }>; songs?: Array<{ title: string; artist: string }>; wallpaper?: PeekPicture; }
 export interface PeekPicture { text: string; tags: string; photoId?: string; state?: 'waiting' | 'done' | 'failed'; note?: string; }
 export interface MomentComment { id: string; from: string; to?: string; text: string; at: number; }
 /** author and comment names are 'me' for the user. */

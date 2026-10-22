@@ -74,6 +74,7 @@ export function peekApp(ctx) {
     const host = ctx.doc.querySelector('.screen') || v.root;
     device = peekPhone(ctx, {host, snap: s, canDraw: () => api.drawReady(), draw, photo: urlFor,
       view: img => openImageViewer({doc: ctx.doc, src: img.src, alt: img.alt, from: img}),
+      play: song => { ctx.notify(`正在找「${song.title}」……`); api.musicPlay?.({...song, from: 'share'}).catch(error => ctx.notify(error.message, {error: true})); },
       close: () => { device = null; if (!v.disposed) render().catch(() => {}); }});
   }
   function look(keep = false) {
