@@ -5,7 +5,7 @@
 import {currentDm, currentWindow} from './core/chats.js';
 import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {pictureInputs, photoCast, photoTags} from './core/draw.js';
+import {pictureInputs, photoCast, photoTags, tagTextRequest, tagTextAnswer} from './core/draw.js';
 import {storyLines} from './core/moments.js';
 import {forumContext} from './core/forum.js';
 import {promptOn} from './core/prompt-rules.js';
@@ -125,7 +125,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       const saved = await backend.chatMutate(threadId, () => settle(threadId, items));
       memory?.after(threadId);
       // The new photos with tags are drawn when the free tier covers them; the others wait for 画出来.
-      for (const m of saved?.messages || []) if (!before.has(m.id) && m.kind === 'photo' && m.imageTags && !m.photoId) drawPhoto(threadId, m.id).catch(() => {});
+      for (const m of saved?.messages || []) if (!before.has(m.id) && m.kind === 'photo' && !m.photoId && (m.imageTags || backend.drawReady?.())) drawPhoto(threadId, m.id).catch(() => {});
       return saved;
     })().finally(() => { busy.delete(threadId); backend.emit('chat', {threadId, typing: false}); });
     busy.set(threadId, job);
@@ -205,10 +205,21 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   /** Draws a contact's photo (its tags). Without allowPaid, only when the free tier covers it. */
   async function drawPhoto(threadId, messageId, {allowPaid = false} = {}) {
     const m = (await backend.chats.get(threadId))?.messages.find(x => x.id === messageId);
-    if (!m?.imageTags) throw Error('这张照片没有画图用的描述');
+    if (!m || m.kind !== 'photo' || !(m.imageTags || m.text?.trim())) throw Error('这张照片没有画图用的描述');
     const set = patch => backend.chatMutate(threadId, () => backend.chats.updateMessage(threadId, messageId, patch));
     if (!backend.drawReady()) { await set({imageState: 'failed', imageNote: backend.drawMissing()}); return null; }
     try {
+      // The model wrote only the description (no 「｜英文 tag」, common with a long one): its words become the tags
+      // once, kept with the photo.
+      if (!m.imageTags) {
+        // Drawn on its own (not asked for) only when it costs nothing: no words spent turning it into tags otherwise.
+        if (!allowPaid && backend.drawQuote?.()?.free === false) throw Object.assign(Error('要花钱'), {code: 'PAID'});
+        await set({imageState: 'waiting', imageNote: ''});
+        const tags = tagTextAnswer(await backend.generateText(context(), {prompt: tagTextRequest(settings(), m.text, 'translate'), plainText: true, trimNames: false, responseLength: Math.min(6000, 1500 + m.text.length * 3)})).replace(/\s+/g, ' ').trim().slice(0, 6000);
+        if (!tags) throw Error('没把照片的描述写成画图用的 tag，再点一次试试');
+        m.imageTags = tags;
+        await set({imageTags: tags});
+      }
       // The saved looks of who the photo shows: the people its description names, else the sender (a selfie).
       const names = [...settings().routes.map(r => r.name), userName()], drawn = photoTags({text: m.text, tags: m.imageTags, owner: m.from, names});
       const cast = photoCast({text: m.text, tags: drawn, owner: m.from, names});
@@ -329,7 +340,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     if (from) items = items.map(item => ({...item, story: from.story, storyVer: from.ver}));
     const saved = await backend.chatMutate(threadId, () => settle(threadId, items));
     const fresh = (saved?.messages || []).filter(m => !before.has(m.id) && m.from !== 'me');
-    for (const m of fresh) if (m.kind === 'photo' && m.imageTags && !m.photoId) drawPhoto(threadId, m.id).catch(() => {});
+    for (const m of fresh) if (m.kind === 'photo' && !m.photoId && (m.imageTags || backend.drawReady?.())) drawPhoto(threadId, m.id).catch(() => {});
     const last = fresh.at(-1);
     if (last) backend.emit('chat', {threadId, incoming: {from: last.from, text: last.text || '', kind: last.kind, count: fresh.length}});
     return fresh.length;

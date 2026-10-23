@@ -389,7 +389,8 @@ export function chatApp(ctx) {
   }
   /** Under a contact's described photo: drawing it now, or 画出来 (it was not free, or it failed). */
   function photoNote(m) {
-    if (!m.imageTags || !api.chatDrawPhoto) return '';
+    // A photo described without tags can be drawn too: its words are turned into tags first (host-chat.js drawPhoto).
+    if (!api.chatDrawPhoto || !(m.imageTags || m.text?.trim())) return '';
     if (m.imageState === 'waiting') return '<span class="ph-note">正在画……</span>';
     if (!api.drawReady?.()) return '';
     return `<button type="button" class="ph-note ph-draw" data-action="photo-draw" data-mid="${esc(m.id)}">${esc(m.imageState === 'failed' && m.imageNote ? m.imageNote + ' · ' : '')}画出来</button>`;

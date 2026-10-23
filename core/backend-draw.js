@@ -3,7 +3,7 @@
 // picture costs. Methods of TTSBackend, kept in a file of their own (installDrawSettings puts them on its prototype).
 import { DRAW_ENGINES, normalizeGpt, gptBase, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, defaultWorkflow, COMFY_PARAM_KEYS, applyComfyWorkflow } from './image-engines.js';
 import { activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource } from './comfy-loras.js';
-import { relayUrl, guardParams, isFree, isV5, normalizeDrawParams } from './novelai.js';
+import { relayUrl, guardParams, isFree, isV5, normalizeDrawParams, takesReference, REFERENCE_ANLAS } from './novelai.js';
 import { PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, normalizeVibeSettings, styleParams } from './draw.js';
 import { activeChatPreset } from './chat.js';
 import { VIBE_ANLAS } from './vibes.js';
@@ -222,8 +222,11 @@ class DrawSettings {
         catch (error) { subscription = { ok: false, status: error.status || 0, message: error.message }; }
         return { relay: !!this.settings.draw.relay.url, draw, subscription };
     }
-    /** Whether params cost Anlas. free: true (covered), false (costs Anlas), null (subscription unknown). */
-    drawQuote(params) {
+    /**
+     * Whether params cost Anlas. free: true (covered), false (costs Anlas), null (subscription unknown). extra: {base,
+     * refs} — a base picture (图生图 / 局部重绘) is never in the Opus free tier, and each 角色参考 adds REFERENCE_ANLAS.
+     */
+    drawQuote(params, extra = {}) {
         const engine = this.settings.draw.engine;
         if (engine !== 'nai') return this.engineQuote(engine, params);
         const requested = normalizeDrawParams(params || this.settings.draw.params);
@@ -232,8 +235,11 @@ class DrawSettings {
         const relay = this.settings.draw.relay, subscription = this.subscription || (relay.url && relay.assumeOpus ? { unlimited: true, active: true, usage: null, assumed: true } : null);
         // Vibes: encoding one (first use) and every vibe past four cost Anlas, so such a picture is not free.
         const vibes = this.vibePlan(effective.model), vibeAnlas = (vibes.encode + vibes.extra) * VIBE_ANLAS, free = isFree(effective, subscription);
-        return { params: effective, clamped: JSON.stringify(effective) !== JSON.stringify(requested), free: vibeAnlas && free !== false ? false : free, guard: this.settings.draw.guard,
-            v5: isV5(effective.model), usage: this.subscription?.usage ? clone(this.subscription.usage) : null, vibes, vibeAnlas };
+        const refs = takesReference(effective.model) ? Math.max(0, Number(extra?.refs) || 0) : 0, referenceAnlas = refs * REFERENCE_ANLAS, base = !!extra?.base;
+        // With references no vibe is sent, so the vibes cost nothing then.
+        const vibeCost = refs ? 0 : vibeAnlas, paid = !!(vibeCost || referenceAnlas || base);
+        return { params: effective, clamped: JSON.stringify(effective) !== JSON.stringify(requested), free: paid && free !== false ? false : free, guard: this.settings.draw.guard,
+            v5: isV5(effective.model), usage: this.subscription?.usage ? clone(this.subscription.usage) : null, vibes, vibeAnlas: vibeCost, referenceAnlas, base };
     }
 }
 

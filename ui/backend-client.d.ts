@@ -250,11 +250,15 @@ export interface DrawJob { key: string; label: string; state: 'waiting' | 'spaci
 export interface NovelAISubscription { tier: number; active: boolean; unlimited: boolean; usage: { percent: number; negative: boolean } | null; anlas: number; checkedAt: number; }
 export interface DrawQuote { params: DrawParams; clamped: boolean; /** null when the subscription is unknown. */ free: boolean | null; guard: boolean; v5: boolean; usage: NovelAISubscription['usage'];
     /** The vibes this picture would use; vibeAnlas: what encoding them and vibes past four add (2 each). */
-    vibes: VibePlan; vibeAnlas: number;
+    vibes: VibePlan; vibeAnlas: number; /** 角色参考: Anlas they add; base: a base picture is used. */ referenceAnlas?: number; base?: boolean;
     /** GPT / ComfyUI only: which engine; paid: GPT (every picture costs money). */
     engine?: DrawEngine; paid?: boolean; }
 export interface DrawCharacter { prompt: string; negative?: string; /** 0-24 on a 5x5 grid, -1 lets the model decide. */ position: number; }
-export interface DrawInput { prompt: string; negative?: string; characters?: DrawCharacter[]; params?: Partial<DrawParams>; allowPaid?: boolean; name?: string; /** Queue key; the same key joins the waiting job. */ key?: string; label?: string; }
+export interface DrawInput { prompt: string; negative?: string; characters?: DrawCharacter[]; params?: Partial<DrawParams>; allowPaid?: boolean; name?: string; /** Queue key; the same key joins the waiting job. */ key?: string; label?: string;
+    /** NovelAI: 图生图 (no mask) or 局部重绘 (mask: white where it is drawn again); the picture is drawn at the base's size. */
+    base?: { image: string; width: number; height: number; strength: number; noise?: number; mask?: string } | null;
+    /** NovelAI V4.5: 角色参考 (fitted pictures). */
+    refs?: Array<{ image: string; kind: 'character' | 'style' | 'both'; strength: number; fidelity: number }>; }
 /** seed is -1 for GPT (it takes none); params are what the engine used (GPT has no steps). */
 export interface DrawResult { photoId: string; seed: number; params: DrawParams; prompt: string; engine: DrawEngine; }
 export interface SettingsSnapshot { state: Settings; revision: number; }
@@ -642,7 +646,10 @@ export interface BackendFacade {
     cloudQueueError(): string;
     testCloudQueue(value?: Partial<CloudQueueSettings>): Promise<{ ok: true; length: number; holder: string; cooldown: number } | { ok: false; message: string }>;
     newRoomCode(): string;
-    drawQuote(params?: Partial<DrawParams>): DrawQuote;
+    /** extra: a base picture (图生图 / 局部重绘) and how many 角色参考 — both cost Anlas. */
+    drawQuote(params?: Partial<DrawParams>, extra?: { base?: boolean; refs?: number }): DrawQuote;
+    /** NovelAI's 导演工具 (tool: bg-removal | lineart | sketch | colorize | emotion | declutter) or 放大 (tool: upscale) on a picture; the result goes into the album. */
+    naiTool(input: { tool: string; image: string; width: number; height: number; prompt?: string; mood?: string; defry?: number; name?: string }): Promise<DrawResult & { tool: string }>;
     /** Saved vibes (summaries, newest first). */
     listVibes(): VibeSummary[];
     /** Makes the pictures of saved vibes small (encodings stay): how many changed, and the bytes before and after. */

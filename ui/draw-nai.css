@@ -1,0 +1,56 @@
+/* The drawing app's NovelAI tools: the 参考图 tab (ui/draw-refs.js), the tools under the picture and 导演工具 (ui/draw.js),
+   and the brush for 局部重绘 (ui/draw-images.js). */
+.canvas-tools{display:flex;flex-wrap:wrap;gap:6px;margin:-2px 0 12px}
+.canvas-tools .chip-button{gap:4px}
+.canvas-tools .icon{width:15px;height:15px}
+.read-png{margin:6px 0 0;justify-content:flex-start;align-items:center;gap:4px}
+.read-png .file-button{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--accent-ink);cursor:pointer}
+.read-png .icon{width:16px;height:16px}
+/* 参考图 */
+.ref-section{display:grid;gap:10px}
+.ref-head{display:flex;align-items:center;gap:6px;margin:0;font-size:14px}
+.ref-head .icon{width:18px;height:18px;color:var(--accent-ink)}
+.ref-empty{display:grid;justify-items:center;gap:6px;padding:14px 10px;border:1.5px dashed var(--line);border-radius:16px;text-align:center;color:var(--ink2)}
+.ref-empty>.icon{width:28px;height:28px;opacity:.7}
+.ref-empty p{margin:0;font-size:13px;line-height:1.55}
+.ref-empty .actions{margin:4px 0 0}
+.ref-card{display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px;align-items:start;padding:10px;border-radius:16px;background:var(--card2)}
+.ref-card+.ref-card{margin-top:2px}
+.ref-thumb{position:relative;width:96px;max-height:150px;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background:#111;box-shadow:0 2px 8px -4px rgba(0,0,0,.4)}
+.ref-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.ref-thumb .ref-mask{position:absolute;inset:0;background:#ff2e6a;opacity:.55;-webkit-mask-size:100% 100%;mask-size:100% 100%}
+.ref-main{display:grid;gap:4px;min-width:0}
+.ref-main .field{margin:0}
+.ref-title{display:flex;align-items:baseline;gap:8px;margin:0 0 2px}
+.ref-title small{color:var(--ink2);font-size:12px}
+.ref-kinds{margin:0 0 4px}
+.ref-kinds button{font-size:11.5px;padding:6px 2px;white-space:nowrap}
+.ref-actions{margin:2px 0 0;justify-content:flex-start;flex-wrap:wrap;gap:6px}
+.ref-actions .secondary{flex:1 1 100%;justify-content:center}
+.ref-actions .text-button{white-space:nowrap}
+.ref-note,.ref-cost{display:flex;gap:6px;align-items:flex-start;margin:0;padding:0 4px;line-height:1.55}
+.ref-note .icon,.ref-cost .icon{flex-shrink:0;width:16px;height:16px;margin-top:2px;color:var(--warn,#e8890c)}
+/* 导演工具 */
+.director-tools,.emotion-chips{display:flex;flex-wrap:wrap;gap:6px}
+.director-tools button,.emotion-chips button{padding:8px 13px;border-radius:999px;background:var(--card2);border:1.5px solid var(--line);font-size:14px;font-weight:600;color:var(--ink)}
+.emotion-chips button{padding:6px 11px;font-size:13px}
+.director-tools button[aria-pressed=true],.emotion-chips button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink)}
+/* 局部重绘的笔刷 */
+.mask-editor{position:absolute;inset:0;z-index:60;display:flex;flex-direction:column;background:#0d0f14;color:#fff;animation:sheet-in .2s ease-out}
+.mask-editor header,.mask-editor footer{display:flex;align-items:center;gap:10px;padding:12px 14px}
+.mask-editor header{padding-top:calc(env(safe-area-inset-top,0px) + 14px)}
+.mask-editor header b{flex:1;text-align:center;font-size:15px}
+.mask-editor header .text-button{color:#ddd}
+.mask-editor footer{flex-wrap:wrap;justify-content:center;padding-bottom:calc(env(safe-area-inset-bottom,0px) + 18px)}
+.mask-editor .segmented{margin:0}
+.mask-editor .segmented button{display:inline-flex;align-items:center;gap:4px}
+.mask-editor .segmented .icon{width:16px;height:16px}
+.mask-editor footer .text-button{color:#ff8fa8}
+.mask-stage{flex:1;min-height:0;display:grid;place-items:center;padding:6px 12px}
+.mask-frame{position:relative;border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+.mask-frame img,.mask-frame canvas{position:absolute;inset:0;width:100%;height:100%}
+.mask-frame img{object-fit:fill}
+.mask-frame canvas{opacity:.55;touch-action:none;cursor:crosshair}
+.mask-size{display:flex;align-items:center;gap:8px;font-size:13px;color:#ccc}
+.mask-size input{width:110px;accent-color:#ff2e6a}
+@media (prefers-reduced-motion:reduce){.mask-editor{animation:none}}

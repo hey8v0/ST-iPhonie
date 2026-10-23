@@ -5,11 +5,13 @@ import {proxyAddress} from './proxy-url.js';
 import {vibeKey, vibeParameters} from './vibes.js';
 
 export const NAI_HOST = 'https://image.novelai.net';
+/** NovelAI's other host: 放大 (upscale) is asked there. */
+export const NAI_API = 'https://api.novelai.net';
 /**
  * A relay the user runs in front of NovelAI: the same paths (/ai/generate-image, /user/subscription) and whatever key it
  * asks for. '' means NovelAI itself. A page opened over HTTPS cannot reach an http:// relay (except on this computer).
  */
-const NAI_PATHS = /\/(ai\/generate-image(-stream)?|user\/subscription)$/i;
+const NAI_PATHS = /\/(ai\/generate-image(-stream)?|ai\/augment-image|ai\/upscale|user\/subscription)$/i;
 /** Fish Audio paths the plugin adds; a pasted full address keeps only what comes before them. */
 export const FISH_PATHS = /\/(compat\/v1\/audio\/speech|v1\/audio\/speech|audio\/speech|v1\/tts|v1\/models|model|wallet\/self\/api-credit)$/i;
 export function relayUrl(value, pageProtocol = globalThis.location?.protocol, strip = NAI_PATHS) {
@@ -93,12 +95,49 @@ export const gridCenter = index => ({x: +(.1 + (index % 5) * .2).toFixed(1), y: 
  * Builds the generate-image request body.
  * prompt/negative are final strings; characters: [{prompt, negative, position}] where position is a grid index or -1 (let the model place it).
  */
-/** vibes: [{encoding, strength}] already encoded for this model; ignored by models without vibes (V5, V3). */
-export function buildImageRequest({prompt, negative = '', characters = [], params, vibes = []}) {
+/** 角色参考 (NovelAI's Precise Reference, Director reference): V4.5 only — V5 and the older models take none. */
+export const takesReference = model => /^nai-diffusion-4-5/.test(model);
+/** Anlas a character reference adds to each picture (never in the Opus free tier). */
+export const REFERENCE_ANLAS = 5;
+/** What a reference passes on: the character, the style, or both (NovelAI's own words go in the request). */
+export const REFERENCE_KINDS = Object.freeze({character: 'character', style: 'style', both: 'character&style'});
+/** The sizes a reference picture is fitted into (padded with black), by its shape. */
+export const REFERENCE_SIZES = Object.freeze([[1024, 1536], [1536, 1024], [1472, 1472]]);
+/** The model that repaints part of a picture (局部重绘). V5 Curated has none of its own: V4.5 Curated's, asked as V4.5. */
+export const inpaintModel = model => model === 'nai-diffusion-5-curated' ? 'nai-diffusion-4-5-curated-inpainting' : model === 'nai-diffusion-4-curated-preview' ? 'nai-diffusion-4-curated-inpainting' : model + '-inpainting';
+/** 导演工具 (Director tools): what each does to a picture. 上色 and 换表情 take words and a 去瑕疵 level. */
+export const DIRECTOR_TOOLS = Object.freeze({'bg-removal': '去背景', lineart: '线稿', sketch: '素描', colorize: '上色', emotion: '换表情', declutter: '去杂物'});
+export const DIRECTOR_WORDS = Object.freeze(['colorize', 'emotion']);
+/** 换表情: the moods NovelAI knows (its words) with their names here. */
+export const EMOTIONS = Object.freeze([['neutral', '平静'], ['happy', '开心'], ['sad', '难过'], ['angry', '生气'], ['scared', '害怕'], ['surprised', '惊讶'], ['tired', '疲惫'], ['excited', '兴奋'], ['nervous', '紧张'], ['thinking', '思考'], ['confused', '困惑'], ['shy', '害羞'], ['disgusted', '嫌弃'], ['smug', '得意'], ['bored', '无聊'], ['laughing', '大笑'], ['irritated', '烦躁'], ['aroused', '动情'], ['embarrassed', '尴尬'], ['worried', '担心'], ['love', '爱慕'], ['determined', '坚定'], ['hurt', '受伤'], ['playful', '调皮']]);
+/** 放大: the biggest side NovelAI makes. */
+export const UPSCALE_MAX = 4096;
+/** The body of a Director tool request: the picture, its size and the tool; mood and words for 换表情 / 上色. */
+export function augmentBody({tool, image, width, height, prompt = '', mood = 'neutral', defry = 0}) {
+  if (!Object.hasOwn(DIRECTOR_TOOLS, tool)) throw Error('没有这个导演工具');
+  const words = String(prompt || '').trim(), level = Math.max(0, Math.min(5, Math.round(Number(defry) || 0)));
+  return {image, width, height, req_type: tool, ...(tool === 'emotion' ? {prompt: `${mood};;${words}`, defry: level} : tool === 'colorize' ? {prompt: words, defry: level} : {})};
+}
+/** 放大 by 4 when the result stays within UPSCALE_MAX, else by 2; 0 when even that is too big. */
+export const upscaleBy = (width, height) => [4, 2].find(k => width * k <= UPSCALE_MAX && height * k <= UPSCALE_MAX) || 0;
+const clampTo = (value, min, max, fallback) => { const n = Number(value); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback; };
+
+/**
+ * vibes: [{encoding, strength}] already encoded for this model; ignored by models without vibes (V5, V3).
+ * base: {image (base64 PNG at width×height), width, height, strength, noise, mask?} — 图生图, or 局部重绘 with a mask
+ * (white where it is drawn again); the picture is then drawn at the base's size. refs: [{image (fitted, base64), kind,
+ * strength, fidelity}] — 角色参考, V4.5 only; with them no vibe is sent (NovelAI's own app does the same: both at once
+ * come back broken). The result says whether references went (refs) so the vibes are left out.
+ */
+export function buildImageRequest({prompt, negative = '', characters = [], params, vibes = [], base = null, refs = []}) {
   const p = normalizeDrawParams(params);
+  if (base?.image) { p.width = base.width; p.height = base.height; }
+  const action = base?.image ? (base.mask ? 'infill' : 'img2img') : 'generate';
+  // V5 Curated repaints with V4.5 Curated's model, so the request is V4.5-shaped then.
+  const shape = action === 'infill' && p.model === 'nai-diffusion-5-curated' ? 'nai-diffusion-4-5-curated' : p.model;
   const seed = p.seed >= 0 ? p.seed : Math.floor(Math.random() * 4294967295);
   const parameters = {
-    params_version: isV5(p.model) ? 4 : 3, width: p.width, height: p.height, scale: p.scale, sampler: p.sampler, steps: p.steps, n_samples: 1, seed,
+    params_version: isV5(shape) ? 4 : 3, width: p.width, height: p.height, scale: p.scale, sampler: p.sampler, steps: p.steps, n_samples: 1, seed,
     ucPreset: 0, qualityToggle: false, dynamic_thresholding: false, controlnet_strength: 1, legacy: false, add_original_image: false,
     cfg_rescale: p.cfgRescale, noise_schedule: p.schedule, legacy_v3_extend: false, deliberate_euler_ancestral_bug: false, prefer_brownian: true,
     skip_cfg_above_sigma: p.variety && !isV5(p.model) ? Math.pow(p.width * p.height / REFERENCE_PIXELS, .5) * (p.model.includes('4-5') ? 58 : 19) : null,
@@ -120,10 +159,21 @@ export function buildImageRequest({prompt, negative = '', characters = [], param
     prompt = [prompt, extra].filter(Boolean).join(', ');
     Object.assign(parameters, {sm: false, sm_dyn: false});
   }
-  if (vibes.length && vibeKey(p.model)) Object.assign(parameters, vibeParameters(vibes));
+  const director = takesReference(p.model) ? (refs || []).filter(r => r?.image) : [];
+  if (director.length) Object.assign(parameters, {
+    director_reference_images: director.map(r => r.image),
+    director_reference_descriptions: director.map(r => ({caption: {base_caption: REFERENCE_KINDS[r.kind] || REFERENCE_KINDS.character, char_captions: []}, legacy_uc: false})),
+    director_reference_strength_values: director.map(r => clampTo(r.strength, 0, 1, .6)),
+    // 保真度 as NovelAI's app shows it is the other way round from what it is sent as.
+    director_reference_secondary_strength_values: director.map(r => +(1 - clampTo(r.fidelity, 0, 1, .5)).toFixed(3)),
+    director_reference_information_extracted: director.map(() => 1)
+  });
+  else if (vibes.length && vibeKey(p.model)) Object.assign(parameters, vibeParameters(vibes));
+  if (base?.image) Object.assign(parameters, {image: base.image, strength: clampTo(base.strength, .01, .99, .7), add_original_image: true,
+    ...(action === 'infill' ? {mask: base.mask} : {noise: clampTo(base.noise, 0, .99, 0), extra_noise_seed: seed})});
   // What the official app sends with 透明背景 on (V5): the picture comes back with straight alpha.
   if (p.transparent) Object.assign(parameters, {straight_alpha: true, tag_hint_transparent_background: true});
-  return {body: {input: prompt, model: p.model, action: 'generate', parameters}, seed, params: p};
+  return {body: {input: prompt, model: action === 'infill' ? inpaintModel(p.model) : p.model, action, parameters}, seed, params: p, refs: director.length};
 }
 
 // Reads the first PNG from a ZIP archive (stored or deflated) using the central directory.
@@ -187,10 +237,10 @@ export class NovelAIClient {
     if (!this.key) throw Error('还没有填写 NovelAI 密钥');
     return {Authorization: 'Bearer ' + this.key, 'Content-Type': 'application/json'};
   }
-  async call(path, init) {
+  async call(path, init, host = NAI_HOST) {
     const relay = this.relay;
     let response;
-    try { response = await this.fetch((relay || NAI_HOST) + path, init); }
+    try { response = await this.fetch((relay || host) + path, init); }
     catch (error) { if (error?.name === 'AbortError') throw error; throw Error(relay ? '连不上中转：请确认地址正确、中转允许跨域（CORS）；酒馆用 HTTPS 打开时，中转也要用 HTTPS' : '连不上 NovelAI，请检查网络'); }
     if (!response.ok) throw failure(response.status, await response.text().catch(() => ''), !!relay);
     return response;
@@ -221,6 +271,16 @@ export class NovelAIClient {
   }
   async generate(body, signal) {
     const response = await this.call('/ai/generate-image', {method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal});
+    return unzipFirstImage(await response.arrayBuffer());
+  }
+  /** 导演工具: body from augmentBody. The picture back (from a ZIP, as a drawing is). */
+  async augment(body, signal) {
+    const response = await this.call('/ai/augment-image', {method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal});
+    return unzipFirstImage(await response.arrayBuffer());
+  }
+  /** 放大: {image, width, height, scale}, asked on NovelAI's api host (or the relay). */
+  async upscale(body, signal) {
+    const response = await this.call('/ai/upscale', {method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal}, NAI_API);
     return unzipFirstImage(await response.arrayBuffer());
   }
 }
