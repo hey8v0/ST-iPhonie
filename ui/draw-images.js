@@ -43,6 +43,17 @@ export async function fitReference(win, blob) {
   return {image: base64Of(canvas), preview: thumb.toDataURL('image/jpeg', .8)};
 }
 
+/** A picture redrawn at width×height (增强 sends it larger): {image (base64 PNG), width, height, preview}. */
+export async function scaledPicture(win, blob, width, height) {
+  const img = await loadImage(win, blob), canvas = canvasOf(win.document, width, height), g = canvas.getContext('2d');
+  g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, width, height);
+  return {image: base64Of(canvas), width, height, preview: canvas.toDataURL('image/jpeg', .8)};
+}
+/** NovelAI's biggest picture for 增强 (pixels). */
+export const ENHANCE_MAX = 3145728;
+/** The 增强 sizes a picture can go to: ×2, ×1.5, ×1 (sides in multiples of 64), the ones within ENHANCE_MAX. */
+export const enhanceSizes = (width, height) => [2, 1.5, 1].map(k => [k, Math.round(width * k / 64) * 64, Math.round(height * k / 64) * 64]).filter(([, w, h]) => w * h <= ENHANCE_MAX);
+
 /** A picture as it is, for 放大 and 导演工具: {image (base64 PNG), width, height}. */
 export async function pictureData(win, blob) {
   const img = await loadImage(win, blob), canvas = canvasOf(win.document, img.naturalWidth, img.naturalHeight);

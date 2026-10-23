@@ -8,7 +8,7 @@ import {comfyLoraPanel} from './comfy-lora-panel.js';
 import {styleSheets} from './draw-styles.js';
 import {tokenBudget, loadCounter, countPicture, countField, tagCost} from '../core/tokens.js';
 import {refPanel} from './draw-refs.js';
-import {pictureData, readNovelAI} from './draw-images.js';
+import {pictureData, readNovelAI, fitBase, scaledPicture, enhanceSizes} from './draw-images.js';
 import {DIRECTOR_TOOLS, DIRECTOR_WORDS, EMOTIONS, upscaleBy, UPSCALE_MAX} from '../core/novelai.js';
 
 const SIZES = [['portrait', '竖图', 832, 1216], ['landscape', '横图', 1216, 832], ['square', '方图', 1024, 1024], ['tall', '大竖图', 1024, 1536]];
@@ -20,6 +20,8 @@ const POSITION = i => i < 0 ? '自动' : 'ABCDE'[i % 5] + (Math.floor(i / 5) + 1
 export function drawApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'draw'), urls = new Map();
   let tab = 'prompt', idea = '', prompt = '', negative = '', characters = [], seed = -1, results = [], current = -1, newest = false, busy = false, subscription = null, epoch = 0;
+  /** How many pictures one 生成 makes (one request each, one after another). */
+  let count = 1;
   // ComfyUI: models, samplers and schedulers read from it (null until 读取 is pressed).
   let comfyInfo = null, comfyRequest = 0, comfyAddress = '';
   const plans = comfyPlans(ctx, () => render());
@@ -140,10 +142,10 @@ export function drawApp(ctx) {
         <div class="canvas-card"><div class="canvas-main${main ? '' : ' empty'}" style="aspect-ratio:${p.width}/${p.height}">${main ? `<button type="button" class="canvas-zoom" data-action="zoom" aria-label="放大查看"><img src="${esc(main)}" alt="生成的图片"></button>` : `<span>${comfy && !(comfy.controls.includes('width') && comfy.controls.includes('height')) ? '尺寸由工作流决定' : `${p.width} × ${p.height}`}<br>还没有图</span>`}${busy ? `<span class="canvas-busy">${esc(engineName(e))} 正在画……</span>` : ''}</div>
           ${results.length ? `<div class="canvas-side" data-keep-scroll="results">${thumbs.map((url, i) => `<button class="thumb" data-action="thumb" data-index="${i}" aria-pressed="${i === current}" aria-label="第 ${i + 1} 张">${url ? `<img src="${esc(url)}" alt="">` : ''}</button>`).join('')}</div>` : ''}</div>
         ${shown ? `<p class="hint canvas-meta">${[shown.tool ? (shown.prompt || '') : shown.params.model, `${shown.params.width}×${shown.params.height}`, shown.params.steps ? shown.params.steps + ' 步' : '', shown.seed >= 0 ? '种子 ' + shown.seed : ''].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
-        ${shown && e === 'nai' && keyed ? `<div class="canvas-tools" role="group" aria-label="这张图">${btn('tool-base', icon('image') + '当底图', 'chip-button')}${btn('tool-ref', icon('person') + '当参考', 'chip-button')}${btn('tool-upscale', icon('expand') + '放大', 'chip-button', busy ? 'disabled' : '')}${btn('tool-director', icon('wand') + '导演工具', 'chip-button', busy ? 'disabled' : '')}</div>` : ''}
+        ${shown && e === 'nai' && keyed ? `<div class="canvas-tools" role="group" aria-label="这张图">${btn('tool-base', icon('image') + '当底图', 'chip-button')}${btn('tool-ref', icon('person') + '当参考', 'chip-button')}${btn('tool-variation', icon('layers') + '变体', 'chip-button', busy ? 'disabled' : '')}${btn('tool-enhance', icon('star') + '增强', 'chip-button', busy ? 'disabled' : '')}${btn('tool-upscale', icon('expand') + '放大', 'chip-button', busy ? 'disabled' : '')}${btn('tool-director', icon('wand') + '导演工具', 'chip-button', busy ? 'disabled' : '')}</div>` : ''}
         <div class="segmented draw-tabs">${tabs.map(([k, l]) => `<button data-action="tab" data-tab="${k}" aria-pressed="${k === tab}">${l}</button>`).join('')}</div>
         ${body}
-        <div class="savebar">${btn('generate', busy ? '正在画……' : q.free === false ? icon('alert') + (e === 'gpt' ? '生成（要花钱）' : '生成（会扣 Anlas）') : icon('paint') + '生成', 'primary', busy || !keyed || comfy?.missing ? 'disabled' : '')}</div>`);
+        <div class="savebar"><div class="draw-count" role="group" aria-label="一次画几张">${[1, 2, 3, 4].map(k => `<button type="button" data-action="count" data-count="${k}" aria-pressed="${k === count}" aria-label="一次画 ${k} 张">${k}</button>`).join('')}<small>张</small></div>${btn('generate', busy ? '正在画……' : (q.free === false ? icon('alert') : icon('paint')) + (count > 1 ? `画 ${count} 张` : '生成') + (q.free === false ? (e === 'gpt' ? '（要花钱）' : '（会扣 Anlas）') : ''), 'primary', busy || !keyed || comfy?.missing ? 'disabled' : '')}</div>`);
     // A new picture goes on top of the column: show it.
     if (newest) { newest = false; const side = v.root.querySelector('.canvas-side'); if (side) side.scrollTop = 0; }
     meters();
@@ -378,42 +380,117 @@ export function drawApp(ctx) {
         });
         break;
       case 'pick-style': pickStyle(); break;
+      case 'count': count = Number(el.dataset.count) || 1; render(); break;
       case 'generate': await generate(); break;
     }
   });
 
-  async function generate() {
-    const s = style(), q = quote(), extra = eng() === 'nai' ? refs.payload() : {base: null, refs: []};
-    let allowPaid = false;
-    if (q.free === false && eng() === 'gpt') {
-      const ask = api.paidPrompt();
-      if (!await ctx.confirm(ask.title, ask.text)) return;
-      allowPaid = true;
-    } else if (q.free === false) {
-      const vibeNote = (q.vibeAnlas ? `其中 Vibe 约 ${q.vibeAnlas} Anlas（${[q.vibes.encode && `${q.vibes.encode} 个第一次用要编码`, q.vibes.extra && `超过 4 个多了 ${q.vibes.extra} 个`].filter(Boolean).join('，')}）。` : '')
-        + (q.referenceAnlas ? `角色参考多扣 ${q.referenceAnlas} Anlas。` : '') + (q.base ? '用了底图，不在 Opus 免费档里。' : '');
-      if (!await ctx.confirm('这张图会扣 Anlas', `按当前参数和订阅，这次生成要消耗 Anlas${subscription ? `（现有 ${subscription.anlas}）` : ''}。${vibeNote}实际扣多少以 NovelAI 结算为准。`)) return;
-      allowPaid = true;
-    }
+  /** The question before pictures that cost: true to go on (paid), false when declined; null when they cost nothing. */
+  async function askPaid(q, n = 1) {
+    if (q.free !== false) return null;
+    if (eng() === 'gpt') { const ask = api.paidPrompt(); return await ctx.confirm(ask.title + (n > 1 ? `（${n} 张）` : ''), ask.text); }
+    const notes = (q.vibeAnlas ? `其中 Vibe 约 ${q.vibeAnlas} Anlas（${[q.vibes.encode && `${q.vibes.encode} 个第一次用要编码`, q.vibes.extra && `超过 4 个多了 ${q.vibes.extra} 个`].filter(Boolean).join('，')}）。` : '')
+      + (q.referenceAnlas ? `角色参考每张多扣 ${q.referenceAnlas} Anlas。` : '') + (q.base ? '用了底图，不在 Opus 免费档里。' : '');
+    return await ctx.confirm(n > 1 ? `这 ${n} 张图会扣 Anlas` : '这张图会扣 Anlas', `按当前参数和订阅，${n > 1 ? `每张都` : '这次生成'}要消耗 Anlas${subscription ? `（现有 ${subscription.anlas}）` : ''}。${notes}实际扣多少以 NovelAI 结算为准。`);
+  }
+  /**
+   * n pictures of one request, each its own request waiting in the queue (so each stays in Opus's free tier, unlike
+   * NovelAI's own batch). A fixed seed goes seed, seed+1…; each picture joins the column as it is done. The request is
+   * kept with the picture, for 变体 and 增强.
+   */
+  async function drawMany(request, n = 1, allowPaid = false) {
     busy = true;
     render();
-    try {
-      const result = await api.generateImage({
-        prompt: [s.artist, s.positive, prompt].map(x => (x || '').trim()).filter(Boolean).join(', '),
-        negative: [s.negative, negative].map(x => (x || '').trim()).filter(Boolean).join(', '),
-        characters: characters.filter(c => c.prompt.trim()).map(c => ({prompt: c.prompt, position: c.position})),
-        params: eng() === 'nai' ? {...state().params, seed} : {seed}, allowPaid, name: engineName().replace(/\s+/g, ''), label: '绘图 App · ' + (prompt.trim().slice(0, 24) || s.name),
-        ...(extra.base ? {base: extra.base} : {}), ...(extra.refs.length ? {refs: extra.refs} : {})
-      });
+    const fixed = Number.isInteger(request.params?.seed) && request.params.seed >= 0;
+    const jobs = Array.from({length: n}, (_, i) => api.generateImage({...request, params: {...request.params, seed: fixed ? (request.params.seed + i) % 4294967295 : -1}, allowPaid,
+      label: request.label + (n > 1 ? ` · ${i + 1}/${n}` : '')}).then(result => {
+      result.request = {prompt: request.prompt, negative: request.negative, characters: request.characters};
       results.unshift(result);
       results = results.slice(0, MAX_RESULTS);
       current = 0;
       newest = true;
-      if (allowPaid && eng() === 'nai') refreshSubscription(true);
-    } catch (error) { if (!error.cancelled) ctx.notify(error.message); }
+      if (n > 1 && i < n - 1) render();
+    }));
+    const failed = (await Promise.allSettled(jobs)).find(s => s.status === 'rejected' && !s.reason?.cancelled);
+    if (failed) ctx.notify(failed.reason.message);
+    if (allowPaid && eng() === 'nai') refreshSubscription(true);
     busy = false;
     render();
   }
+  async function generate() {
+    const s = style(), q = quote(), extra = eng() === 'nai' ? refs.payload() : {base: null, refs: []};
+    const paid = await askPaid(q, count);
+    if (paid === false) return;
+    await drawMany({
+      prompt: [s.artist, s.positive, prompt].map(x => (x || '').trim()).filter(Boolean).join(', '),
+      negative: [s.negative, negative].map(x => (x || '').trim()).filter(Boolean).join(', '),
+      characters: characters.filter(c => c.prompt.trim()).map(c => ({prompt: c.prompt, position: c.position})),
+      params: eng() === 'nai' ? {...state().params, seed} : {seed}, name: engineName().replace(/\s+/g, ''), label: '绘图 App · ' + (prompt.trim().slice(0, 24) || s.name),
+      ...(extra.base ? {base: extra.base} : {}), ...(extra.refs.length ? {refs: extra.refs} : {})
+    }, count, paid === true);
+  }
+  /** What a picture was drawn with, for 变体 and 增强: its own request, else what the app holds now (for a tool's picture). */
+  function requestOf(result) {
+    if (result?.request) return result.request;
+    const s = style();
+    return {prompt: [s.artist, s.positive, prompt].map(x => (x || '').trim()).filter(Boolean).join(', '), negative: [s.negative, negative].map(x => (x || '').trim()).filter(Boolean).join(', '),
+      characters: characters.filter(c => c.prompt.trim()).map(c => ({prompt: c.prompt, position: c.position}))};
+  }
+  /** 变体: the shown picture drawn again from itself, as much changed as picked, n times. */
+  function variationSheet() {
+    const shown = results[current], levels = [['small', '小', .5], ['medium', '中', .7], ['large', '大', .8]];
+    let level = 'large', n = Math.max(1, count);
+    const d = ctx.dialog('变体', '');
+    const draw = () => {
+      d.body.innerHTML = `<p class="hint" data-keep-hint>用这张图原来的提示词，以它为底图再画${n > 1 ? ` ${n} 张` : '一张'}：构图和人物大致不变，细节、表情、姿势有变化。</p>
+        <div class="field"><span>变化多大</span><div class="segmented" role="group" aria-label="变化多大">${levels.map(([k, l, v]) => `<button type="button" data-level="${k}" aria-pressed="${k === level}">${l}<small>强度 ${v}</small></button>`).join('')}</div></div>
+        <div class="field"><span>画几张</span><div class="segmented" role="group" aria-label="画几张">${[1, 2, 3, 4].map(k => `<button type="button" data-n="${k}" aria-pressed="${k === n}">${k} 张</button>`).join('')}</div></div>
+        <p class="hint" data-keep-hint>${icon('alert')}以图画图不在 Opus 免费档里，每张都扣 Anlas，实际扣多少以 NovelAI 结算为准。</p>
+        <div class="actions">${btn('variation-run', icon('layers') + `画 ${n} 张变体`, 'primary')}</div>`;
+    };
+    draw();
+    d.body.addEventListener('click', async e => {
+      const pickLevel = e.target.closest('[data-level]')?.dataset.level, pickN = e.target.closest('[data-n]')?.dataset.n;
+      if (pickLevel) { level = pickLevel; draw(); return; }
+      if (pickN) { n = Number(pickN); draw(); return; }
+      if (!e.target.closest('[data-action=variation-run]')) return;
+      try {
+        const blob = await shownBlob(), strength = levels.find(x => x[0] === level)[2];
+        const fitted = await fitBase(ctx.win, blob, (shown?.params?.width || 832) * (shown?.params?.height || 1216));
+        d.close();
+        await drawMany({...requestOf(shown), params: {...state().params, ...pick(shown?.params), seed: -1}, base: {image: fitted.image, width: fitted.width, height: fitted.height, strength, noise: .1},
+          name: 'NovelAI', label: '变体'}, n, true);
+      } catch (error) { ctx.notify(error.message, {error: true}); }
+    });
+  }
+  /** 增强: the shown picture made larger, then drawn over lightly with its own prompt (NovelAI's Enhance). */
+  async function enhanceSheet() {
+    const shown = results[current], blob = await shownBlob(), picture = await pictureData(ctx.win, blob), sizes = enhanceSizes(picture.width, picture.height);
+    let size = sizes[0], strength = .5;
+    const d = ctx.dialog('增强', '');
+    const draw = () => {
+      d.body.innerHTML = `<p class="hint" data-keep-hint>先把图放大，再用它原来的提示词轻轻重画一遍，补上细节、修掉糊的地方。原图 ${picture.width}×${picture.height}。</p>
+        <div class="field"><span>放大到</span><div class="segmented" role="group" aria-label="放大到">${sizes.map(([k, w, h]) => `<button type="button" data-size="${k}" aria-pressed="${k === size[0]}">×${k}<small>${w}×${h}</small></button>`).join('')}</div></div>
+        <div class="field"><div class="meter-label"><span>变化幅度${help('越高改得越多：0.2 左右只补细节，0.5 是官网的默认，0.7 以上可能连脸都变了。')}</span><output>${strength.toFixed(2)}</output></div><input class="slider" type="range" data-enhance="strength" min="0.1" max="0.8" step="0.05" value="${strength}" aria-label="变化幅度"></div>
+        <p class="hint" data-keep-hint>${icon('alert')}增强按放大后的尺寸收费，不在 Opus 免费档里，实际扣多少以 NovelAI 结算为准。结果另存一张，原图还在。</p>
+        <div class="actions">${btn('enhance-run', icon('wand') + '增强', 'primary')}</div>`;
+    };
+    draw();
+    d.body.addEventListener('input', e => { if (e.target.dataset.enhance) { strength = Number(e.target.value); e.target.previousElementSibling.querySelector('output').textContent = strength.toFixed(2); } });
+    d.body.addEventListener('click', async e => {
+      const k = e.target.closest('[data-size]')?.dataset.size;
+      if (k) { size = sizes.find(s => String(s[0]) === k); draw(); return; }
+      if (!e.target.closest('[data-action=enhance-run]')) return;
+      try {
+        const [, width, height] = size, base = await scaledPicture(ctx.win, blob, width, height);
+        d.close();
+        await drawMany({...requestOf(shown), params: {...state().params, ...pick(shown?.params), steps: 28, seed: -1}, base: {image: base.image, width, height, strength, noise: 0},
+          name: 'NovelAI', label: `增强 ×${size[0]}`}, 1, true);
+      } catch (error) { ctx.notify(error.message, {error: true}); }
+    });
+  }
+  /** The parameters of a picture worth carrying to 变体 / 增强 (its model and how it was sampled; not its size or seed). */
+  const pick = (p = {}) => Object.fromEntries(['model', 'steps', 'scale', 'sampler', 'schedule', 'cfgRescale', 'variety'].filter(k => p[k] !== undefined).map(k => [k, p[k]]));
 
   // ---------- NovelAI's tools on the shown picture ----------
   const shownBlob = async () => { const r = results[current]; const photo = r && await api.getPhoto(r.photoId); if (!photo?.blob) throw Error('这张图已经不在相册里了'); return photo.blob; };
@@ -440,6 +517,8 @@ export function drawApp(ctx) {
           return true;
         }
         case 'tool-director': directorSheet(); return true;
+        case 'tool-variation': variationSheet(); return true;
+        case 'tool-enhance': await enhanceSheet(); return true;
       }
     } catch (error) { ctx.notify(error.message, {error: true}); return true; }
     return false;
