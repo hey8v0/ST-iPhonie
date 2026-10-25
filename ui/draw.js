@@ -22,6 +22,8 @@ export function drawApp(ctx) {
   let tab = 'prompt', idea = '', prompt = '', negative = '', characters = [], seed = -1, results = [], current = -1, newest = false, busy = false, subscription = null, epoch = 0;
   /** How many pictures one 生成 makes (one request each, one after another). */
   let count = 1;
+  /** The tools for the shown picture: folded until asked for. */
+  let toolsOpen = false;
   // ComfyUI: models, samplers and schedulers read from it (null until 读取 is pressed).
   let comfyInfo = null, comfyRequest = 0, comfyAddress = '';
   const plans = comfyPlans(ctx, () => render());
@@ -87,7 +89,7 @@ export function drawApp(ctx) {
       <div class="group pad">${field('这张图的提示词', textArea('prompt', prompt, 'rows="4" placeholder="英文 tag，逗号分隔，例如 2girls, rainy day, cafe window, sharing an umbrella"'), e === 'gpt' ? '会和画风的固定正面、每个角色的外貌一起整理成一段英文描述发给 GPT。画师串、权重括号和负面不会发给 GPT。' : e === 'comfy' ? '实际发送：画师串 + 固定正面 + 这里的提示词，后面接上每个角色的外貌；NovelAI 的权重写法会自动换成 ComfyUI 的。' : '实际发送：画师串 + 固定正面 + 这里的提示词。')}
         <div class="token-meter" data-token-meter="positive" hidden></div>
         <div class="field idea-field"><span>想画什么${help('用中文说一句就行，比如「下雨天两个人在便利店门口共撑一把伞」，也可以写很多要求（框会跟着变高），点「帮我写」，模型会补成完整的英文提示词填到上面（会换掉上面原来的）。可以直接写人名：作品里的角色模型会写成它认得的 tag；角色 App 里登记了外貌的人，模型只写名字，插件会把他们加进「角色」并带上外貌。用 NovelAI 时会按 token 上限尽量写满。')}</span>${textArea('idea', idea, 'class="idea-box" rows="2" maxlength="1000" placeholder="例如：下雨天两个人共撑一把伞。可以写很多要求：动作、表情、衣服、天气、镜头……"')}<div class="actions" style="margin:6px 0 0">${btn('write-prompt', icon('wand') + '帮我写', 'secondary')}${btn('suggest', icon('book') + '从剧情生成', 'secondary')}</div></div>
-        ${e === 'nai' ? `<div class="actions read-png"><label class="text-button file-button">${icon('import')}从 NovelAI 的图读参数<input type="file" data-read-png accept="image/png" hidden></label>${help('选一张 NovelAI 画的 PNG（官网下载的原图），把它的提示词、负面、角色和参数（模型、尺寸、步数、CFG、采样器、种子）填回来。图片被压缩或转存过就读不到了。')}</div>` : ''}</div>
+</div>
         ${e === 'gpt' ? '' : `<details data-group="draw-negative" ${negative.trim() ? 'open' : ''}><summary>这张图额外的负面<small class="fold-note">${negative.trim() ? '' : '没有'}</small></summary><div class="fold-body">${textArea('negative', negative, 'rows="2" aria-label="这张图额外的负面" placeholder="可以留空，会和固定负面合在一起"')}<div class="token-meter" data-token-meter="negative" hidden></div></div></details>`}`;
     if (tab === 'chars') body = (characters.length ? characters.map((c, i) => `
       <div class="group pad draw-char" data-engine="${ctx.engineOf(c.name)}"><div class="row-heading">${avatar(c.name, ctx.engineOf(c.name), 30)}<strong style="flex:1">${esc(c.name)}</strong><span class="chip">位置 ${POSITION(c.position)}</span>${btn('remove-char', icon('trash'), 'text-button', `data-index="${i}" aria-label="移除 ${esc(c.name)}"`)}</div>
@@ -138,11 +140,11 @@ export function drawApp(ctx) {
       + `<div class="segmented draw-engines" role="group" aria-label="用哪个画">${api.drawCatalog.engines.map(k => `<button data-action="draw-engine" data-pick="${k}" aria-pressed="${k === e}">${esc(engineName(k))}</button>`).join('')}</div>`
       + (keyed ? '' : `<div class="banner">${icon('key')}<span>${esc(api.drawMissing())}。</span>${btn('go-key', '去填写', 'chip-button')}</div>`)
       + queueCard()
-      + `<div class="draw-meta">${btn('pick-style', icon('layers') + esc(style().name) + icon('down'), 'chip-button')}${costChip(q)}</div>
+      + `<div class="draw-meta">${btn('pick-style', icon('layers') + esc(style().name) + icon('down'), 'chip-button')}${costChip(q)}${e === 'nai' ? `<label class="chip-button file-button read-png" title="从 NovelAI 画的 PNG 读回提示词、角色和参数">${icon('import')}读图<input type="file" data-read-png accept="image/png" aria-label="从 NovelAI 的图读参数" hidden></label>` : ''}</div>
         <div class="canvas-card"><div class="canvas-main${main ? '' : ' empty'}" style="aspect-ratio:${p.width}/${p.height}">${main ? `<button type="button" class="canvas-zoom" data-action="zoom" aria-label="放大查看"><img src="${esc(main)}" alt="生成的图片"></button>` : `<span>${comfy && !(comfy.controls.includes('width') && comfy.controls.includes('height')) ? '尺寸由工作流决定' : `${p.width} × ${p.height}`}<br>还没有图</span>`}${busy ? `<span class="canvas-busy">${esc(engineName(e))} 正在画……</span>` : ''}</div>
           ${results.length ? `<div class="canvas-side" data-keep-scroll="results">${thumbs.map((url, i) => `<button class="thumb" data-action="thumb" data-index="${i}" aria-pressed="${i === current}" aria-label="第 ${i + 1} 张">${url ? `<img src="${esc(url)}" alt="">` : ''}</button>`).join('')}</div>` : ''}</div>
         ${shown ? `<p class="hint canvas-meta">${[shown.tool ? (shown.prompt || '') : shown.params.model, `${shown.params.width}×${shown.params.height}`, shown.params.steps ? shown.params.steps + ' 步' : '', shown.seed >= 0 ? '种子 ' + shown.seed : ''].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
-        ${shown && e === 'nai' && keyed ? `<div class="canvas-tools" role="group" aria-label="这张图">${btn('tool-base', icon('image') + '当底图', 'chip-button')}${btn('tool-ref', icon('person') + '当参考', 'chip-button')}${btn('tool-variation', icon('layers') + '变体', 'chip-button', busy ? 'disabled' : '')}${btn('tool-enhance', icon('star') + '增强', 'chip-button', busy ? 'disabled' : '')}${btn('tool-upscale', icon('expand') + '放大', 'chip-button', busy ? 'disabled' : '')}${btn('tool-director', icon('wand') + '导演工具', 'chip-button', busy ? 'disabled' : '')}</div>` : ''}
+        ${shown && e === 'nai' && keyed ? toolsHTML() : ''}
         <div class="segmented draw-tabs">${tabs.map(([k, l]) => `<button data-action="tab" data-tab="${k}" aria-pressed="${k === tab}">${l}</button>`).join('')}</div>
         ${body}
         <div class="savebar"><div class="draw-count" role="group" aria-label="一次画几张">${[1, 2, 3, 4].map(k => `<button type="button" data-action="count" data-count="${k}" aria-pressed="${k === count}" aria-label="一次画 ${k} 张">${k}</button>`).join('')}<small>张</small></div>${btn('generate', busy ? '正在画……' : (q.free === false ? icon('alert') : icon('paint')) + (count > 1 ? `画 ${count} 张` : '生成') + (q.free === false ? (e === 'gpt' ? '（要花钱）' : '（会扣 Anlas）') : ''), 'primary', busy || !keyed || comfy?.missing ? 'disabled' : '')}</div>`);
@@ -381,6 +383,7 @@ export function drawApp(ctx) {
         break;
       case 'pick-style': pickStyle(); break;
       case 'count': count = Number(el.dataset.count) || 1; render(); break;
+      case 'tools-toggle': toolsOpen = !toolsOpen; render(); break;
       case 'generate': await generate(); break;
     }
   });
@@ -493,6 +496,12 @@ export function drawApp(ctx) {
   const pick = (p = {}) => Object.fromEntries(['model', 'steps', 'scale', 'sampler', 'schedule', 'cfgRescale', 'variety'].filter(k => p[k] !== undefined).map(k => [k, p[k]]));
 
   // ---------- NovelAI's tools on the shown picture ----------
+  /** [action, icon, name, what it does, costs Anlas] */
+  const PICTURE_TOOLS = [['tool-base', 'image', '当底图', '图生图 · 局部重绘', false], ['tool-ref', 'person', '当参考', '角色参考 · V4.5', false], ['tool-variation', 'layers', '变体', '照着再画几张', true],
+    ['tool-enhance', 'star', '增强', '放大后补细节', true], ['tool-upscale', 'expand', '放大', '2 或 4 倍', true], ['tool-director', 'wand', '导演工具', '去背景 · 线稿 · 换表情…', true]];
+  /** One line under the picture; opened, a grid of what can be done with it. */
+  const toolsHTML = () => `<div class="pic-tools${toolsOpen ? ' open' : ''}"><button type="button" class="pic-tools-toggle" data-action="tools-toggle" aria-expanded="${toolsOpen}">${icon('wand')}<span><b>用这张图继续</b><small>${toolsOpen ? '收起' : '底图 · 参考 · 变体 · 增强 · 放大 · 导演工具'}</small></span>${icon('down')}</button>`
+    + (toolsOpen ? `<div class="pic-tools-grid" role="group" aria-label="用这张图">${PICTURE_TOOLS.map(([action, glyph, name, what, paid]) => `<button type="button" class="pic-tool" data-action="${action}"${paid && busy ? ' disabled' : ''}><span class="pic-tool-ico">${icon(glyph)}</span><b>${name}</b><small>${what}</small>${paid ? '<em>扣 Anlas</em>' : ''}</button>`).join('')}</div>` : '') + '</div>';
   const shownBlob = async () => { const r = results[current]; const photo = r && await api.getPhoto(r.photoId); if (!photo?.blob) throw Error('这张图已经不在相册里了'); return photo.blob; };
   /** A tool's picture joins the column like a drawing. */
   async function runTool(input) {
@@ -561,6 +570,16 @@ export function drawApp(ctx) {
     const {seed: read, ...params} = found.params;
     if (Number.isInteger(read)) seed = read;
     if (Object.keys(params).length) { try { api.saveDraw({params}); } catch (error) { ctx.notify(error.message, {error: true}); } }
+    // The picture itself joins the column (and the album) with what it was drawn with: swipe up on it to read it, and
+    // its tools (变体, 增强…) draw from its own prompt.
+    const chars = found.characters.map(c => ({prompt: c.prompt, position: c.position}));
+    const info = [['来源', '读入的 NovelAI 图'], ['模型', params.model], ['步数', params.steps], ['CFG', params.scale], ['采样器', params.sampler],
+      ['种子', Number.isInteger(read) ? read : ''], ['提示词', found.prompt], ['负面', found.negative], ['角色', chars.map(c => c.prompt).join(' | ')]].filter(([, v]) => v !== undefined && v !== null && String(v).trim());
+    try {
+      const photo = await api.addPhoto({name: file.name || 'NovelAI.png', blob: file, info});
+      results.unshift({photoId: photo.id, seed: Number.isInteger(read) ? read : -1, params: {...state().params, ...params}, prompt: found.prompt, engine: 'nai', request: {prompt: found.prompt, negative: found.negative, characters: chars}});
+      results = results.slice(0, MAX_RESULTS); current = 0; newest = true;
+    } catch (error) { ctx.notify(error.message, {error: true}); }
     tab = 'prompt';
     render();
     ctx.notify(`读到了：提示词${found.characters.length ? `、${found.characters.length} 个角色` : ''}${Object.keys(params).length ? '、参数' : ''}${Number.isInteger(read) ? '、种子' : ''}。画风的画师串和固定串还会接在前面，不想要可以先换个空画风`);

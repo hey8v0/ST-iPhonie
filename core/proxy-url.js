@@ -17,6 +17,13 @@ export function withProxyHeaders(send, tavernHeaders) {
   if (!sameProxy) return send(input, init, ...rest);
   const headers = new Headers(init.headers);
   for (const [key, value] of new Headers(tavernHeaders?.()).entries()) if (!headers.has(key)) headers.set(key, value);
+  // A tavern behind Basic login (common on cloud taverns) needs the browser's own Authorization on every request: a
+  // Fish key sent there as Bearer took its place, so the tavern asked to log in again and again. Fish also reads its
+  // key from api-key, so through the tavern it goes there and Authorization is left to the tavern.
+  if (/^https?(:|%3A)(\/|%2F){2}api\.fish\.audio(\/|%2F|$)/i.test(raw.slice(raw.indexOf('/proxy/') + 7))) {
+   const bearer = headers.get('Authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+   if (bearer) { headers.delete('Authorization'); headers.set('api-key', bearer); }
+  }
   return send(input, {...init, credentials: 'same-origin', headers}, ...rest);
  };
 }
