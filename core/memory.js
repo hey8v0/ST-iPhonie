@@ -109,6 +109,30 @@ export function removeNode(book, id) {
   return out;
 }
 
+/**
+ * The book after messages were deleted (gone: the times they were sent; left: the chat as it is now). A 摘要 made from
+ * any of them goes, and so does every 摘要 after it (they would be written again anyway: what is written up goes back
+ * to before the first one gone), with the summaries merged from them; the summaries before stand as they were. The
+ * messages left there are written up again later, so nothing deleted stays in the memory. Unchanged when no summary
+ * held a deleted message.
+ */
+export function pruneBook(book, gone, left) {
+  const times = (gone || []).filter(Number.isFinite);
+  const hit = (book?.nodes || []).filter(n => n.level === 0 && times.some(t => t >= n.from && t <= n.to));
+  if (!hit.length) return book;
+  const earliest = Math.min(...hit.map(n => n.from));
+  const drop = new Set(book.nodes.filter(n => n.level === 0 && n.from >= earliest).map(n => n.id));
+  // A summary merged from any dropped one goes too (and one merged from that).
+  for (let grew = true; grew;) { grew = false; for (const n of book.nodes) if (!drop.has(n.id) && (n.covers || []).some(c => drop.has(c))) { drop.add(n.id); grew = true; } }
+  const out = structuredClone(book);
+  out.nodes = out.nodes.filter(n => !drop.has(n.id)).map(n => drop.has(n.coveredBy) ? {...n, coveredBy: ''} : n);
+  const before = said({messages: left}).filter(m => m.at < earliest).at(-1);
+  out.through = before?.id || '';
+  out.throughAt = before ? before.at : earliest - 1;
+  out.at = Date.now();
+  return out;
+}
+
 // ---------- Prompts ----------
 const pad = n => String(n).padStart(2, '0');
 export function day(at) { const d = new Date(at); return `${d.getMonth() + 1}月${d.getDate()}日`; }

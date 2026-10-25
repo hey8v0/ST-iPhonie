@@ -169,6 +169,18 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     return saved;
   }
 
+  // What waits to be carried into the story goes when its chat, or any of its messages, is deleted before then (it
+  // used to go in once all the same). A choice from before 0.8.47 has no ids: only its chat is checked.
+  async function checkPending() {
+    const p = pending;
+    if (!p) return;
+    const thread = await backend.chats.get(p.threadId).catch(() => null), have = new Set((thread?.messages || []).map(m => m.id));
+    if (pending !== p || (thread && (p.ids || []).every(id => have.has(id)))) return;
+    pending = null; keepBring();
+    backend.emit('chat', {threadId: p.threadId, bring: false});
+  }
+  backend.subscribe?.(event => { if (event?.type === 'chat' && !event.typing && event.bring === undefined && pending && event.threadId === pending.threadId) checkPending().catch(() => {}); });
+
   /** Prepares chat messages to be carried into the next story reply. */
   async function bring(threadId, ids) {
     const thread = await backend.chats.get(threadId);
@@ -179,7 +191,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     // A new choice takes the place of the one before (only one goes into the story), and so does its note.
     pending = null; keepBring();
     await dropNote(before);
-    pending = {threadId, name: thread.name, count: chosen.length, text: bringText(preset, {thread, messages: chosen, user: userName()})};
+    pending = {threadId, name: thread.name, count: chosen.length, ids: chosen.map(m => m.id), text: bringText(preset, {thread, messages: chosen, user: userName()})};
     keepBring();
     return {...pending, replaced: before ? before.count : 0};
   }
@@ -470,6 +482,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    * notes that promised forever what would never happen. They are taken out of this card's chats.
    */
   async function tidyNotes() {
+    await checkPending().catch(() => {});
     for (const t of await backend.chats.list()) {
       const thread = await backend.chats.get(t.id), stale = (thread?.messages || []).filter(m => m.kind === 'system' && BRING_NOTE.test(m.text || '')).map(m => m.id);
       if (stale.length) await backend.chatMutate(t.id, () => backend.chats.removeMessages(t.id, stale)).catch(() => {});

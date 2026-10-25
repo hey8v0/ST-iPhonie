@@ -14,7 +14,7 @@ import { normalizeMoments, buildMomentsRequest } from './moments.js';
 import { normalizeCalls, buildCallRequest } from './call.js';
 import { normalizeText, activeText, customRequest, listModels, streamText, asMessages, tavernTextRequest, answerRoom, TEXT_PRESET_ID } from './llm.js';
 import { normalizeEmbed, embedReady, embedTexts } from './embed.js';
-import { bookId, emptyBook, cleanBook, removeNode } from './memory.js';
+import { bookId, emptyBook, cleanBook, removeNode, pruneBook } from './memory.js';
 import { normalizeMemoryBooks, normalizeAssistantThreads } from './data-transfer.js';
 import { normalizeSync, runSync, removeSync, joinGone, SYNC_PARTS } from './sync.js';
 import { normalizePool } from './auto-voice.js';
@@ -859,6 +859,18 @@ export class TTSBackend {
         });
         this.emit('memory', { threadId, persisted: true });
         return saved;
+    }
+    /**
+     * Deleted messages leave the chat's memory too: with nothing said left in the chat, the memory goes as when the chat
+     * is deleted; otherwise the summaries that held them are written again (core/memory.js pruneBook). Before this, a
+     * chat emptied message by message kept its summaries, and with 一直带着 on the story still knew it all.
+     */
+    async memoryAfterDelete(threadId, before, after) {
+        const kept = new Set((after?.messages || []).map(m => m.id)), gone = (before?.messages || []).filter(m => !kept.has(m.id) && m.kind !== 'system');
+        if (!gone.length) return;
+        if (!(after?.messages || []).some(m => m.kind !== 'system')) return this.memoryForget(threadId);
+        const book = await this.memoryBook(threadId), next = pruneBook(book, gone.map(m => m.at), after.messages);
+        if (next !== book) await this.memoryChange(threadId, () => next);
     }
     memoryVectors(threadId) { return this.memoryStore.get('vec:' + threadId); }
     memorySaveVectors(threadId, doc) { return this.memoryStore.put([{ ...doc, id: 'vec:' + threadId, kind: 'vectors', threadId, at: Date.now() }]); }
@@ -2297,7 +2309,7 @@ export class TTSBackend {
             embedTest: async draft => { const [v] = await this.embed(['测试一下向量模型'], clone(draft || {})); return v.length; },
             appendChat: (id, messages, options) => { this.assertOpen(); return this.appendChat(id, clone(messages), clone(options || {})); },
             unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId),
-            deleteChatMessages: (id, ids) => this.chatMutate(id, async () => { const thread = await this.chats.removeMessages(id, clone(ids)); this.noteGone('chats', (ids || []).map(m => `${id}/${m}`)); return thread; }),
+            deleteChatMessages: (id, ids) => this.chatMutate(id, async () => { const before = await this.chats.get(id); const thread = await this.chats.removeMessages(id, clone(ids)); this.noteGone('chats', (ids || []).map(m => `${id}/${m}`)); await this.memoryAfterDelete(id, before, thread).catch(() => {}); return thread; }),
             updateChatMessage: (id, messageId, patch) => this.chatMutate(id, () => this.chats.updateMessage(id, messageId, clone(patch || {}))),
             markThreadRead: id => this.chatMutate(id, () => this.chats.markRead(id)),
             speak: line => this.speak(clone(line)), voiceFormat: () => this.voiceFormat(),
