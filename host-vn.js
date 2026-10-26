@@ -226,6 +226,18 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
   }
 
   /**
+   * A file picked in the phone, as this page's own: the phone is a frame of its own, and its files are another
+   * window's (instanceof Blob says no to them). Copied by the browser where it can, else read through.
+   */
+  async function ownFile(file) {
+    const name = String(file?.name || ''), type = String(file?.type || '');
+    let local = null;
+    try { local = Blob.prototype.slice.call(file, 0, undefined, type); } catch {}
+    if (!local && typeof file?.arrayBuffer === 'function') local = new Blob([await file.arrayBuffer()], {type});
+    if (!local?.size) throw Error('模型文件无效（读不出内容）');
+    return new File([local], name, {type});
+  }
+  /**
    * A character's 模型: a new file (a .vrm, or a Live2D model as a .zip) in place of the one before, kept in the tavern's
    * user/files; or, without one, a change to how it stands (frame, zoom, lift, map); remove takes it away. The file
    * no longer used is deleted from the tavern. Resolves to the model kept (null when taken away).
@@ -233,6 +245,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
   async function setModel(name, blob, {remove = false, ...change} = {}) {
     name = String(name || '').trim();
     if (!name) throw Error('没有角色名');
+    if (blob) blob = await ownFile(blob);
     const s = settings(), entry = s.vn.cast?.[name] || {sprite: '', looks: {}, actions: [], outfits: []}, old = entry.model || null;
     let model = remove ? null : old;
     if (blob) {
