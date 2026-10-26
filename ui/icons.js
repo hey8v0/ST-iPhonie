@@ -26,6 +26,8 @@ const GLYPHS = {
   paint: '<path d="M32 7C17 7 6 17 6 30c0 12 10 21 22 21 4 0 6-2 6-5 0-2-1-3-1-5 0-3 2-5 5-5h6c8 0 14-5 14-13C58 13 46 7 32 7z"/><circle cx="19" cy="27" r="4" fill="var(--tac)"/><circle cx="27" cy="17" r="4" fill="var(--t2)"/><circle cx="40" cy="17" r="4" fill="var(--tac)"/>',
   // A game pad: the cross on the left, two buttons on the right.
   games: '<rect x="6" y="18" width="52" height="30" rx="15"/><path d="M19 26v14M12 33h14" stroke="var(--t2)" stroke-width="4.5" stroke-linecap="round"/><circle cx="42" cy="29" r="3.6" fill="var(--tac)"/><circle cx="49" cy="36" r="3.6" fill="var(--tac)"/>',
+  // An open picture book: two pages, a picture on the left, a ribbon.
+  picbook: '<path d="M32 16C24 11 15 10 6 12v38c9-2 18-1 26 4 8-5 17-6 26-4V12c-9-2-18-1-26 4z"/><path d="M32 16v38" stroke="var(--t2)" stroke-width="3"/><path d="M11 38l6-8 5 5 4-4 3 7z" fill="var(--t2)"/><circle cx="20" cy="22" r="3" fill="var(--tac)"/><path d="M38 22h14M38 29h14M38 36h10" stroke="var(--t2)" stroke-width="2.6" stroke-linecap="round"/><path d="M45 8v14l3-3 3 3V8z" fill="var(--tac)"/>',
   // A scene with someone in it and a text box over it.
   vn: '<rect x="7" y="8" width="50" height="46" rx="7"/><circle cx="32" cy="23" r="8" fill="var(--t2)"/><path d="M19 41c2-7 7-10 13-10s11 3 13 10z" fill="var(--t2)"/><rect x="11" y="37" width="42" height="13" rx="4" fill="var(--tac)"/><path d="M16 43.5h20" stroke="var(--t2)" stroke-width="2.5" stroke-linecap="round"/><path d="M47 41l2 3 2-3z" fill="var(--t2)"/>',
   music: '<path d="M24 46V14l26-6v32" fill="none" stroke="currentColor" stroke-width="5" stroke-linejoin="round"/><circle cx="18" cy="46" r="8"/><circle cx="44" cy="40" r="8"/><path d="M24 20l26-6" stroke="var(--tac)" stroke-width="4"/>',

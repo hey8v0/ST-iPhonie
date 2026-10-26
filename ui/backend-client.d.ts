@@ -41,6 +41,10 @@ export interface VnOutfit extends VnSet { id: string; label: string; appearance:
 /** 模型 (core/model-files.js normalizeModel): a VRM or Live2D model the stage shows in place of the 立绘. frame: 取景; map: a Live2D model's 表情 / 动作 ('group:index') for each of the five 情绪. */
 /** A motion file (.vrma) the user added, for every VRM character, brought on by its words. */
 export interface VnMoveFile { id: string; label: string; words: string[]; path: string; file: string; size: number; seconds: number; at: number; }
+/** 绘本 (core/book.js normalizeBook / normalizePage). */
+export interface BookLine { role: string; text: string; emotion: string; from?: { id: number; line: number } }
+export interface BookPage { kind: 'cover' | 'chapter' | 'page' | 'end'; text: string; picture: { url: string } | { id: string } | null; prompt: string; layout: '' | 'top' | 'full' | 'frame'; lines: BookLine[] }
+export interface Book { id: string; title: string; subtitle: string; author: string; theme: string; mode: 'story' | 'retell'; source: { chat: string; name: string; from: number; to: number }; pages: BookPage[]; at: number; made: number }
 export interface VnModel { /** Live2D: the model's own motions ('group:index') and their words. */ acts?: Record<string, string[]>; id: string; kind: 'vrm' | 'live2d'; version: string; path: string; file: string; size: number; title: string; frame: 'half' | 'full' | 'face'; zoom: number; lift: number; map: Record<string, { expression: string; motion: string }>; /** Live2D 表情 kept on (its look); absent: guessed. */ keep?: string[]; at: number; }
 export interface VnCastEntry extends VnSet { actions: VnAction[]; outfits: VnOutfit[]; /** Up to 8, to switch between. */ models?: VnModel[]; /** The one in use ('' = the 立绘). */ useModel?: string; }
 /** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
@@ -725,6 +729,11 @@ export interface BackendFacade {
     listNotes(): Promise<Note[]>;
     saveNote(value: NoteInput): Promise<Note>;
     deleteNote(id: string): Promise<boolean>;
+    /** 绘本 (core/book.js): the shelf, newest first; one book; keep one (made or changed); throw one away (its drawn pictures stay in 相册). */
+    listBooks(): Promise<Book[]>;
+    getBook(id: string): Promise<Book | null>;
+    saveBook(book: Book): Promise<Book>;
+    deleteBook(id: string): Promise<boolean>;
     getPhone(): Promise<PhonePreferences>;
     savePhone(patch: PhonePatch): Promise<PhonePreferences>;
     libraryStats(): Promise<LibraryStats>;
@@ -1034,6 +1043,13 @@ export interface BackendAPI extends BackendFacade {
     panelFull(on: boolean): boolean;
     /** 视觉小说: opens the stage over the tavern page, from the latest reply, the first message or a message id. */
     vnStart(from: 'latest' | 'first' | number): boolean;
+    /** 绘本 (host-book.js): the open chat; its story from `from` to `to` as steps (core/vn.js storySteps, whole lines); the text model's answer; a page read aloud (resolves when read; false: nothing on it can be read); a page's sound by line for an export (null: not keepable); whether the 旁白 can be read / kept. */
+    bookInfo?(): { chat: string; title: string; length: number; user: string };
+    bookSource?(from?: number, to?: number): { chat: string; title: string; length: number; user: string; from: number; to: number; messages: Array<{ id: number; user: boolean; name: string; steps: Array<{ kind: 'say' | 'narrate' | 'bg'; text?: string; role?: string; emotion?: string; line?: number; part?: number; url?: string; user?: boolean }> }> };
+    bookWrite?(system: string, user: string, options?: { length?: number }): Promise<string>;
+    bookRead?(lines: BookLine[]): Promise<boolean>;
+    bookAudio?(lines: BookLine[]): Promise<Array<Blob | null>>;
+    bookNarration?(): { kept: boolean; readable: boolean };
     /** 大游戏: opens a game over the whole tavern page (the phone closes); only in the tavern. */
     gameStart?(name: 'antarctic'): boolean;
     /** Keeps a 立绘 (PNG) as a tavern image for a character; null takes it away. Resolves to its path. */

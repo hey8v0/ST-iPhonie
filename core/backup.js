@@ -17,10 +17,11 @@ export const BACKUP_PARTS = Object.freeze({
   photos: '相册',
   favorites: '收藏的语音',
   vibes: 'Vibe 和 Vibe 组',
+  books: '绘本',
   keys: '密钥（用密码加密）'
 });
 /** Which library stores each part covers. */
-export const PART_STORES = Object.freeze({settings: ['references', 'phone'], vnFiles: [], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], chats: [], memories: [], assistant: [], moments: [], keys: []});
+export const PART_STORES = Object.freeze({settings: ['references', 'phone'], vnFiles: [], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], books: ['books'], chats: [], memories: [], assistant: [], moments: [], keys: []});
 /** Parts chosen by default: keys only when the user turns them on. */
 export const DEFAULT_BACKUP_PARTS = Object.freeze(Object.keys(BACKUP_PARTS).filter(part => part !== 'keys'));
 export const KEY_PASSWORD_MIN = 6;
@@ -116,7 +117,7 @@ export async function readBackup(file) {
   const memories = parsed.data.memories === undefined ? null : normalizeMemoryBooks(parsed.data.memories);
   const assistant = parsed.data.assistant === undefined ? null : normalizeAssistantThreads(parsed.data.assistant);
   const library = {};
-  for (const store of ['notes', 'photos', 'favorites', 'vibes', 'references', 'phone']) {
+  for (const store of ['notes', 'photos', 'favorites', 'vibes', 'references', 'phone', 'books']) {
     const rows = parsed.data[store];
     if (rows === undefined) continue;
     if (!Array.isArray(rows)) throw fail('备份内容损坏：' + store);
@@ -137,6 +138,7 @@ export async function readBackup(file) {
     favorites: library.favorites ? library.favorites.length : null,
     vibes: library.vibes ? {vibes: library.vibes.length, groups: vibeGroups?.length || 0} : null,
     vnFiles: vnFiles ? vnFiles.length : null,
+    books: library.books ? library.books.length : null,
     keys: parsed.data.keys?.data ? (Array.isArray(parsed.data.keys.engines) ? parsed.data.keys.engines.length : 0) : null
   };
   return {version: String(parsed.version || ''), createdAt: Number(parsed.createdAt) || 0, settings, chats, memories, assistant, moments, library, vibeGroups, vnFiles, keys: parsed.data.keys?.data ? parsed.data.keys : null, summary};

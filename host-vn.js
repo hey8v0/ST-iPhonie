@@ -34,16 +34,17 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
   const vn = () => settings().vn, picks = new Map();
   const chat = () => context()?.chat || [];
 
-  function stepsOf(id) {
+  /** A message as the stage's steps; max: how long a page of text may be (绘本 takes whole lines). */
+  function stepsOf(id, max) {
     const m = chat()[id];
     if (!storyMessage(m)) return null;
-    if (m.is_user) return userSteps(m.mes, m.name || context()?.name1 || '你').map(s => ({...s, id}));
+    if (m.is_user) return userSteps(m.mes, m.name || context()?.name1 || '你', max).map(s => ({...s, id}));
     const lines = linesOf(id) || [];
     const own = parsePictures(m.mes || '').map(t => ({start: t.start, url: pictureUrl(m, t.hash)})), inline = inlinePictures(m.mes || '');
     const pics = [...own, ...inline, ...shownPictures(id, m.mes || '', [...own, ...inline])];
     const tags = sounds() ? parseSounds(m.mes || '') : [], songs = musicOn() ? parseBgm(m.mes || '') : [];
     const skip = [...(settings().narration?.skip || []), ...(vn().skip || []), 'style', 'script'];
-    return storySteps(m.mes || '', lines, {pics, sounds: tags, bgm: songs, skip, body: settings().narration?.body}).map(s => s.kind === 'say' ? {...s, id, voiced: !!voiced(lines[s.line])} : {...s, id});
+    return storySteps(m.mes || '', lines, {pics, sounds: tags, bgm: songs, skip, body: settings().narration?.body, ...(max ? {max} : {})}).map(s => s.kind === 'say' ? {...s, id, voiced: !!voiced(lines[s.line])} : {...s, id});
   }
   /**
    * Pictures another plugin added to the message on the page only (智绘姬 and the like): each one where the text
@@ -340,6 +341,8 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
   const lastPick = name => picks.has(name) ? {...picks.get(name)} : null;
   return {
     open, setSprite, setModel, setMoveFile, moveSpec, wear, setWear, lastPick,
+    /** 绘本: a message's steps with whole lines (null when it is not part of the story). */
+    bookSteps: id => stepsOf(id, 4000),
     get showing() { return !!stage; },
     status(phase) { stage?.status(phase); },
     refresh() { stage?.refresh(); },

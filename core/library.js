@@ -17,12 +17,13 @@
  */
 import {connectionLost, lostError} from './idb.js';
 import {normalizeWidgets} from './widgets.js';
+import {normalizeBook} from './book.js';
 export const LIBRARY_LIMITS = Object.freeze({total:256*1024*1024,photo:12*1024*1024,reference:20*1024*1024,vibe:40*1024*1024});
-export const PHONE_APPS = Object.freeze(['roles','engines','presets','library','gallery','notes','listen','settings','draw','chat','forum','peek','sounds','assistant','music']);
+export const PHONE_APPS = Object.freeze(['roles','engines','presets','library','gallery','notes','listen','settings','draw','chat','forum','peek','sounds','assistant','music','picbook']);
 export const PHONE_WALLPAPERS = Object.freeze(['sky','silver','midnight','rose','sand','aero','fresh']);
 export const PHONE_SKINS = Object.freeze(['sky','aero','fresh']);
 export const PHONE_GLYPHS = Object.freeze([...new Set(['default',...PHONE_APPS,'wave','book','music','camera','sliders','note','person','microphone','star','headphones'])]);
-const STORES = ['notes','photos','favorites','phone','references','vibes'];
+const STORES = ['notes','photos','favorites','phone','references','vibes','books'];
 const sizeText=n=>n>=1024**3?`${(n/1024**3).toFixed(1).replace(/\.0$/,'')} GB`:`${Math.round(n/1024**2)} MB`;
 const IMAGE_TYPES = new Set(['image/jpeg','image/png','image/webp','image/avif','image/gif']);
 const encoder = new TextEncoder();
@@ -82,8 +83,8 @@ export class LocalLibrary {
   if(!this.#opening)this.#opening=new Promise((resolve,reject)=>{
    let req,settled=false;
    const rejectOnce=e=>{if(!settled){settled=true;reject(friendly(e));}};
-   // Version 2 added the vibes store: an upgrade only creates the stores that are missing, the others keep their rows.
-   try{req=this.#factory.open('st-tts-library-v1',2);}catch(e){rejectOnce(e);return;}
+   // Version 2 added the vibes store, 3 the books (绘本): an upgrade only creates the stores that are missing, the others keep their rows.
+   try{req=this.#factory.open('st-tts-library-v1',3);}catch(e){rejectOnce(e);return;}
    req.onupgradeneeded=()=>{
     const db=req.result;
     for(const name of STORES){if(db.objectStoreNames.contains(name))continue;const store=db.createObjectStore(name,{keyPath:['scope','id']});store.createIndex('scope','scope');}
@@ -146,6 +147,14 @@ export class LocalLibrary {
   return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,title,text,createdAt:rows.notes.get(id)?.createdAt??now,updatedAt:now};put('notes',row);return row;});
  }
  async deleteNote(id){return this.#remove('notes',id);}
+ /** 绘本 (core/book.js): the books on the shelf, newest first; one; kept (made or changed); thrown away (its drawn pictures stay in 相册). */
+ async listBooks(){return (await this.#list('books')).map(row=>row.book);}
+ async getBook(id){return (await this.#read('books',identifier(id)))?.book||null;}
+ async saveBook(input){
+  if(!input||typeof input!=='object')throw fail('绘本格式无效');const book=normalizeBook(input);identifier(book.id);
+  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id:book.id,book:{...book,at:now},createdAt:rows.books.get(book.id)?.createdAt??now,updatedAt:now};put('books',row);return structuredClone(row.book);});
+ }
+ async deleteBook(id){return this.#remove('books',id);}
  async listPhotos(){return this.#list('photos',true);}
  /** info: how a drawn picture was made, [[label, value]] (shown under 参数 when it is opened). */
  async addPhoto(input){
@@ -239,6 +248,7 @@ export class LocalLibrary {
   if(!row||typeof row!=='object')throw fail('备份内容无效：'+name);
   const now=this.#time(),time=v=>Number.isFinite(v)&&v>0?v:now,dates={createdAt:time(row.createdAt),updatedAt:time(row.updatedAt)};
   if(name==='notes')return {id:identifier(row.id),title:string(row.title??'','标题',200),text:string(row.text??'','备忘录',1_000_000),...dates};
+  if(name==='books'){const book=normalizeBook(row.book);return {id:identifier(book.id),book,...dates};}
   if(name==='photos'||name==='references'){const media=name==='photos',blob=blobValue(row.blob,media?LIBRARY_LIMITS.photo:LIBRARY_LIMITS.reference,media?'图片':'参考音频',media?'image':'audio',row.name);return {id:identifier(row.id),name:string(row.name??(media?'图片':'reference.wav'),media?'图片名称':'音频名称',512,true),blob,type:blob.type,size:blob.size,...dates};}
   if(name==='favorites'){if(!['fish','mini','eleven','mimo','doubao','custom'].includes(row.engine))throw fail('备份里的收藏语音引擎无效');const blob=blobValue(row.blob,LIBRARY_LIMITS.total,'音频','audio');return {id:identifier(row.id),requestKey:string(row.requestKey,'音频编号',512,true),role:string(row.role,'角色名',200,true),text:string(row.text,'原文',1_000_000,true),translation:string(row.translation??'','译文',1_000_000),engine:row.engine,model:string(row.model??'','模型',200),voice:string(row.voice??'','音色',512),blob,type:blob.type,size:blob.size,...dates};}
   if(name==='vibes'){if(!row.meta||typeof row.meta!=='object'||Array.isArray(row.meta))throw fail('备份里的 Vibe 信息无效');const blob=blobValue(row.blob,LIBRARY_LIMITS.vibe,'Vibe 文件','data');return {id:identifier(row.id),name:string(row.name,'Vibe 名字',80,true),meta:structuredClone(row.meta),blob,size:blob.size,...dates};}
@@ -250,7 +260,7 @@ export class LocalLibrary {
  async stats(){
   const limit=await this.#room();
   return this.#run(db=>new Promise((resolve,reject)=>{
-   let tx;const result={bytes:0,limit,notes:0,photos:0,favorites:0,references:0,vibes:0,sizes:{}};
+   let tx;const result={bytes:0,limit,notes:0,photos:0,favorites:0,references:0,vibes:0,books:0,sizes:{}};
    try{tx=db.transaction(STORES,'readonly');for(const name of STORES){const req=tx.objectStore(name).index('scope').getAll(this.#scope);req.onsuccess=()=>{if(name!=='phone')result[name]=req.result.length;const size=req.result.reduce((n,row)=>n+bytes(row),0);result.sizes[name]=size;result.bytes+=size;};}}
    catch(e){reject(friendly(e));return;}
    tx.oncomplete=()=>resolve(structuredClone(result));tx.onabort=()=>reject(friendly(tx.error));tx.onerror=()=>{};
