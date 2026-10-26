@@ -148,8 +148,8 @@ export class LocalLibrary {
  }
  async deleteNote(id){return this.#remove('notes',id);}
  /** 绘本 (core/book.js): the books on the shelf, newest first; one; kept (made or changed); thrown away (its drawn pictures stay in 相册). */
- async listBooks(){return (await this.#list('books')).map(row=>row.book);}
- async getBook(id){return (await this.#read('books',identifier(id)))?.book||null;}
+ async listBooks(){return (await this.#list('books')).map(row=>normalizeBook(row.book));}
+ async getBook(id){const row=await this.#read('books',identifier(id));return row?.book?normalizeBook(row.book):null;}
  async saveBook(input){
   if(!input||typeof input!=='object')throw fail('绘本格式无效');const book=normalizeBook(input);identifier(book.id);
   return this.#mutate(({rows,put})=>{const now=this.#time(),row={id:book.id,book:{...book,at:now},createdAt:rows.books.get(book.id)?.createdAt??now,updatedAt:now};put('books',row);return structuredClone(row.book);});

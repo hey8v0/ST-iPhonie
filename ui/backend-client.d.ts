@@ -43,8 +43,10 @@ export interface VnOutfit extends VnSet { id: string; label: string; appearance:
 export interface VnMoveFile { id: string; label: string; words: string[]; path: string; file: string; size: number; seconds: number; at: number; }
 /** 绘本 (core/book.js normalizeBook / normalizePage). */
 export interface BookLine { role: string; text: string; emotion: string; from?: { id: number; line: number } }
-export interface BookPage { kind: 'cover' | 'chapter' | 'page' | 'end'; text: string; picture: { url: string } | { id: string } | null; prompt: string; layout: '' | 'top' | 'full' | 'frame'; lines: BookLine[] }
-export interface Book { id: string; title: string; subtitle: string; author: string; theme: string; mode: 'story' | 'retell'; source: { chat: string; name: string; from: number; to: number }; pages: BookPage[]; at: number; made: number }
+export type BookPicture = { url: string } | { id: string } | null;
+/** A page: pictures (shots), who stands on it as their 立绘 (cast, stage pages), the few words shown (texts), emoji stickers, drawn things cut out (props), what is read aloud (lines). */
+export interface BookPage { kind: 'cover' | 'scene' | 'end'; layout: 'cover' | 'end' | 'bleed' | 'stage' | 'panels' | 'polaroid' | 'vignette' | 'shout' | 'letter' | 'spread' | 'title' | 'classic'; shots: Array<{ prompt: string; picture: BookPicture; people: boolean }>; cast: Array<{ name: string; emotion: string; at: 'left' | 'right' | 'center' }>; texts: Array<{ kind: 'caption' | 'bubble' | 'think' | 'shout' | 'whisper' | 'title'; text: string; who: string }>; stickers: string[]; props: Array<{ prompt: string; picture: BookPicture }>; lines: BookLine[] }
+export interface Book { id: string; version: 2; title: string; subtitle: string; author: string; theme: string; art: 'book' | 'app'; mode: 'story' | 'retell'; source: { chat: string; name: string; from: number; to: number }; pages: BookPage[]; at: number; made: number }
 export interface VnModel { /** Live2D: the model's own motions ('group:index') and their words. */ acts?: Record<string, string[]>; id: string; kind: 'vrm' | 'live2d'; version: string; path: string; file: string; size: number; title: string; frame: 'half' | 'full' | 'face'; zoom: number; lift: number; map: Record<string, { expression: string; motion: string }>; /** Live2D 表情 kept on (its look); absent: guessed. */ keep?: string[]; at: number; }
 export interface VnCastEntry extends VnSet { actions: VnAction[]; outfits: VnOutfit[]; /** Up to 8, to switch between. */ models?: VnModel[]; /** The one in use ('' = the 立绘). */ useModel?: string; }
 /** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
@@ -1050,6 +1052,8 @@ export interface BackendAPI extends BackendFacade {
     bookRead?(lines: BookLine[]): Promise<boolean>;
     bookAudio?(lines: BookLine[]): Promise<Array<Blob | null>>;
     bookNarration?(): { kept: boolean; readable: boolean };
+    /** 绘本 opened over the whole tavern page at page `at` (book-stage.js; the phone is put away). */
+    bookStage?(id: string, at?: number): Promise<boolean>;
     /** 大游戏: opens a game over the whole tavern page (the phone closes); only in the tavern. */
     gameStart?(name: 'antarctic'): boolean;
     /** Keeps a 立绘 (PNG) as a tavern image for a character; null takes it away. Resolves to its path. */

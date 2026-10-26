@@ -343,6 +343,11 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     open, setSprite, setModel, setMoveFile, moveSpec, wear, setWear, lastPick,
     /** 绘本: a message's steps with whole lines (null when it is not part of the story). */
     bookSteps: id => stepsOf(id, 4000),
+    /** 绘本: a character's 立绘 for a feeling, in the 形象 this chat uses ('' when they have none). */
+    bookSprite(name, emotion = '') {
+      const cast = vn().cast || {};
+      return cast[name] ? pickLook(cast[name], {emotion, name, names: Object.keys(cast), outfit: wear()[name] || '', random: () => 0}) : '';
+    },
     get showing() { return !!stage; },
     status(phase) { stage?.status(phase); },
     refresh() { stage?.refresh(); },

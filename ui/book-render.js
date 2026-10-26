@@ -1,7 +1,9 @@
-// 绘本的一页, drawn on a canvas: for the PDF, the pictures export and the shelf's covers. The same look as the reader
-// (ui/book.css): the theme's paper and ornament, the picture placed by the page's layout, the words wrapped (Chinese
-// breaks anywhere; a closing mark never starts a line), the cover's title, a chapter's heading, 「完」 at the end.
+// 绘本的一页 as a picture: for the PDF, the EPUB and the pictures export. The page is the reader's own (core/book-pages.js):
+// laid out in the document at the picture's size, its pictures put inside it, then drawn through an SVG onto a canvas,
+// so the picture is the page as it is read. A browser that will not draw it that way gets a plainer page drawn on the
+// canvas by hand (drawSimple): the picture over the page, the words in a box, the title on the cover.
 import {themeOf} from '../core/book-themes.js';
+import {BOOK_CSS, fitProse} from '../core/book-pages.js';
 
 export const PAGE_W = 1200, PAGE_H = 1600;
 const NO_START = /[，。！？、；：」』”’）》〉…—,.!?;:)\]]/;
@@ -23,90 +25,75 @@ function cover(g, img, x, y, w, h) {
   g.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, x, y, w, h);
 }
 function rounded(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
-/** The theme's ornament around the page. */
-function ornament(g, t, W, H) {
-  g.save();
-  g.strokeStyle = t.accent; g.fillStyle = t.accent;
-  const k = W / 1200;
-  if (t.deco === 'ornate' || t.deco === 'seal' || t.deco === 'map') { g.globalAlpha = .55; g.lineWidth = 6 * k; g.strokeRect(36 * k, 36 * k, W - 72 * k, H - 72 * k); g.lineWidth = 2 * k; g.strokeRect(52 * k, 52 * k, W - 104 * k, H - 104 * k); }
-  if (t.deco === 'stars' || t.deco === 'pop') { g.globalAlpha = .35; for (let i = 0; i < 18; i++) { const x = (i * 197 % 1100 + 50) * k, y = (i % 2 ? 40 + i * 7 : H / k - 60 - i * 5) * k; g.beginPath(); g.arc(x, y, (6 + i % 4 * 3) * k, 0, Math.PI * 2); g.fill(); } }
-  if (t.deco === 'petals') { g.globalAlpha = .3; for (let i = 0; i < 14; i++) { g.save(); g.translate((i * 233 % 1150 + 25) * k, (i % 2 ? 30 + i * 9 : H / k - 40 - i * 6) * k); g.rotate(i); g.beginPath(); g.ellipse(0, 0, 18 * k, 9 * k, 0, 0, Math.PI * 2); g.fill(); g.restore(); } }
-  if (t.deco === 'lines') { g.globalAlpha = .18; g.lineWidth = 2 * k; for (let y = 120 * k; y < H; y += 64 * k) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); } }
-  if (t.deco === 'grid') { g.globalAlpha = .12; g.lineWidth = 1.5 * k; for (let x = 0; x < W; x += 80 * k) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); } for (let y = 0; y < H; y += 80 * k) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); } }
-  if (t.deco === 'noir' || t.deco === 'scratch') { const v = g.createRadialGradient(W / 2, H / 2, H * .3, W / 2, H / 2, H * .75); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.55)'); g.globalAlpha = 1; g.fillStyle = v; g.fillRect(0, 0, W, H); }
-  g.restore();
-}
-/** The seal of 古风 (a red square with the book's first character) and other small marks. */
-function seal(g, t, text, x, y, s) {
-  g.save(); g.fillStyle = t.accent; rounded(g, x, y, s, s, s * .12); g.fill();
-  g.fillStyle = t.paper; g.font = `700 ${s * .62}px ${t.font}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText([...text][0] || '书', x + s / 2, y + s / 2 + s * .04); g.restore();
-}
 
 /**
- * Draws page p of book onto g (W×H). image: the page's picture (an HTMLImageElement or ImageBitmap) or null.
- * number: the page number printed at the foot (0: none).
+ * A page drawn by hand (when the page cannot be drawn as it is read): images — the page's pictures (bitmaps or
+ * images; null where there is none). number: the page number at the foot (0: none).
  */
-export function drawPage(g, book, p, image, {W = PAGE_W, H = PAGE_H, number = 0} = {}) {
-  const t = themeOf(book.theme), k = W / 1200, pad = 90 * k;
+export function drawSimple(g, book, p, images = [], {W = PAGE_W, H = PAGE_H, number = 0} = {}) {
+  const t = themeOf(book.theme), k = Math.min(W, H) / 1200, pad = 80 * k;
   g.save();
   g.fillStyle = t.paper; g.fillRect(0, 0, W, H);
-  g.textBaseline = 'alphabetic';
+  const pics = images.filter(Boolean);
+  if (pics.length === 1) cover(g, pics[0], 0, 0, W, H);
+  else if (pics.length > 1) { const h = (H - pad) / pics.length; pics.forEach((im, i) => cover(g, im, pad / 2, pad / 2 + i * h, W - pad, h - 20 * k)); }
+  g.textAlign = 'center'; g.textBaseline = 'alphabetic';
   if (p.kind === 'cover') {
-    if (image) { cover(g, image, 0, 0, W, H); const fade = g.createLinearGradient(0, H * .45, 0, H); fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,.7)'); g.fillStyle = fade; g.fillRect(0, 0, W, H); }
-    else ornament(g, t, W, H);
-    g.fillStyle = image ? '#fff' : t.accent; g.textAlign = 'center';
-    g.font = `800 ${110 * k}px ${t.font}`;
-    const lines = wrap(g, book.title || '绘本', W - pad * 2);
-    lines.forEach((line, i) => g.fillText(line, W / 2, (image ? H - 330 * k : H * .38) + i * 130 * k));
-    if (book.subtitle) { g.font = `500 ${46 * k}px ${t.font}`; g.globalAlpha = .85; g.fillText(book.subtitle, W / 2, (image ? H - 330 * k : H * .38) + lines.length * 130 * k + 10 * k); g.globalAlpha = 1; }
-    g.font = `600 ${36 * k}px ${t.font}`; g.fillStyle = image ? 'rgba(255,255,255,.85)' : t.ink; g.fillText(`${t.label}绘本${book.author ? ' · ' + book.author : ''}`, W / 2, H - 90 * k);
-    if (t.deco === 'seal') seal(g, t, book.title, W - 200 * k, 120 * k, 110 * k);
-    g.restore(); return;
+    g.font = `800 ${120 * k}px ${t.title}`;
+    g.lineWidth = 16 * k; g.strokeStyle = t.accent; g.fillStyle = '#fff'; g.lineJoin = 'round';
+    wrap(g, book.title, W - pad * 2).forEach((line, i) => { const y = 260 * k + i * 140 * k; g.strokeText(line, W / 2, y); g.fillText(line, W / 2, y); });
+  } else if (p.kind === 'end') {
+    g.fillStyle = t.accent; g.font = `800 ${220 * k}px ${t.title}`; g.fillText('完', W / 2, H / 2);
   }
-  ornament(g, t, W, H);
-  if (p.kind === 'chapter') {
-    if (image) { g.save(); rounded(g, pad, pad * 1.6, W - pad * 2, H * .5, 28 * k); g.clip(); cover(g, image, pad, pad * 1.6, W - pad * 2, H * .5); g.restore(); }
-    g.fillStyle = t.accent; g.textAlign = 'center'; g.font = `800 ${84 * k}px ${t.font}`;
-    wrap(g, p.text || '', W - pad * 2).forEach((line, i) => g.fillText(line, W / 2, (image ? H * .72 : H * .45) + i * 100 * k));
-    g.restore(); return;
+  const words = p.kind === 'cover' ? [] : p.texts.map(w => (w.who && w.kind !== 'caption' ? w.who + '：' : '') + w.text);
+  if (words.length) {
+    g.font = `500 ${44 * k}px ${t.font}`;
+    const lines = words.flatMap(w => wrap(g, w, W - pad * 3)), lh = 66 * k, boxH = lines.length * lh + pad;
+    const y0 = p.layout === 'title' ? (H - boxH) / 2 : H - boxH - pad / 2;
+    g.fillStyle = 'rgba(255,255,255,.86)'; rounded(g, pad, y0, W - pad * 2, boxH, 28 * k); g.fill();
+    g.fillStyle = '#2b2b2b';
+    lines.forEach((line, i) => g.fillText(line, W / 2, y0 + pad / 2 + (i + .8) * lh));
   }
-  if (p.kind === 'end') {
-    if (image) { g.save(); rounded(g, pad, pad * 1.6, W - pad * 2, H * .55, 28 * k); g.clip(); cover(g, image, pad, pad * 1.6, W - pad * 2, H * .55); g.restore(); }
-    g.fillStyle = t.accent; g.textAlign = 'center'; g.font = `800 ${120 * k}px ${t.font}`; g.fillText(p.text || '完', W / 2, image ? H * .82 : H * .5);
-    g.restore(); return;
-  }
-  const layout = p.layout || t.layout, size = 52 * k, lh = size * 1.75;
-  g.font = `500 ${size}px ${t.font}`;
-  const textW = W - pad * 2, lines = wrap(g, p.text || '', textW);
-  if (image && layout === 'full') {
-    cover(g, image, 0, 0, W, H);
-    const boxH = Math.min(H * .5, lines.length * lh + pad), y = H - boxH - pad * .6;
-    g.fillStyle = t.paper; g.globalAlpha = .9; rounded(g, pad * .6, y, W - pad * 1.2, boxH, 30 * k); g.fill(); g.globalAlpha = 1;
-    g.fillStyle = t.ink; g.textAlign = 'left';
-    lines.forEach((line, i) => g.fillText(line, pad, y + pad * .55 + size + i * lh));
-  } else {
-    let top = pad * 1.3;
-    if (image) {
-      const ph = Math.min(H * (layout === 'frame' ? .52 : .58), H - pad * 2.6 - lines.length * lh);
-      if (layout === 'frame') { g.save(); g.shadowColor = 'rgba(0,0,0,.25)'; g.shadowBlur = 24 * k; g.fillStyle = '#fff'; g.fillRect(pad * .9, top - 18 * k, W - pad * 1.8, ph + 36 * k); g.restore(); cover(g, image, pad, top, W - pad * 2, ph); }
-      else { g.save(); rounded(g, pad, top, W - pad * 2, ph, 30 * k); g.clip(); cover(g, image, pad, top, W - pad * 2, ph); g.restore(); }
-      top += ph + 80 * k;
-    } else top = Math.max(pad * 2, (H - lines.length * lh) / 2 - lh);
-    g.fillStyle = t.ink; g.textAlign = 'left';
-    lines.forEach((line, i) => g.fillText(line, pad, top + size + i * lh));
-  }
-  if (number) { g.fillStyle = t.ink; g.globalAlpha = .5; g.textAlign = 'center'; g.font = `500 ${30 * k}px ${t.font}`; g.fillText(String(number), W / 2, H - 46 * k); g.globalAlpha = 1; }
+  if (number) { g.font = `600 ${30 * k}px ${t.font}`; g.fillStyle = t.ink; g.globalAlpha = .6; g.fillText(String(number), W - pad, H - 40 * k); }
   g.restore();
 }
 
-/** A page drawn into a JPEG (bytes), for the PDF and the pictures export. */
-export async function pageJpeg(doc, book, p, image, {W = PAGE_W, H = PAGE_H, number = 0, quality = .88} = {}) {
-  const c = doc.createElement('canvas');
-  c.width = W; c.height = H;
-  const g = c.getContext('2d');
+const loadImage = (win, src) => new Promise((resolve, reject) => { const im = new win.Image(); im.onload = () => resolve(im); im.onerror = () => reject(Error('没能画出这一页')); im.src = src; });
+const toJpeg = (canvas, quality = .9) => new Promise((resolve, reject) => { try { canvas.toBlob(b => b ? resolve(b) : reject(Error('没能存成图片')), 'image/jpeg', quality); } catch (error) { reject(error); } });
+
+/**
+ * A page's markup as a JPEG of width × height (bytes). inline(src, img): a picture's address as a data: URL (a picture
+ * drawn through an SVG cannot fetch anything). fallback(g): draws the page by hand when this browser will not.
+ */
+export async function pageJpeg(doc, markup, {width = PAGE_W, height = PAGE_H, inline = async s => s, fallback = null} = {}) {
+  const win = doc.defaultView, canvas = doc.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const g = canvas.getContext('2d');
   if (!g) throw Error('这个浏览器不能画图');
-  drawPage(g, book, p, image, {W, H, number});
-  const blob = await new Promise(resolve => c.toBlob(resolve, 'image/jpeg', quality));
-  if (!blob) throw Error('这一页没能存成图片');
-  return new Uint8Array(await blob.arrayBuffer());
+  try {
+    const holder = doc.createElement('div');
+    holder.style.cssText = `position:fixed;left:-${width + 4000}px;top:0;width:${width}px;height:${height}px;overflow:hidden;pointer-events:none;contain:strict`;
+    holder.innerHTML = markup;
+    (doc.body || doc.documentElement).append(holder);
+    const page = holder.firstElementChild;
+    try {
+      // A picture that cannot be had (a file gone) is left out.
+      for (const img of page.querySelectorAll('img')) { const src = img.getAttribute('src'), data = src ? await inline(src, img) : ''; if (data) img.setAttribute('src', data); else img.remove(); }
+      await Promise.all([...page.querySelectorAll('img')].map(im => im.decode?.().catch(() => {})));
+      fitProse(page);
+      const xhtml = new win.XMLSerializer().serializeToString(page);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject x="0" y="0" width="${width}" height="${height}"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${width}px;height:${height}px;overflow:hidden"><style><![CDATA[${BOOK_CSS}]]></style>${xhtml}</div></foreignObject></svg>`;
+      const image = await loadImage(win, 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+      g.drawImage(image, 0, 0, width, height);
+      // Some browsers show the pictures inside only from the second drawing on.
+      g.drawImage(image, 0, 0, width, height);
+    } finally { holder.remove(); }
+    return new Uint8Array(await (await toJpeg(canvas)).arrayBuffer());
+  } catch (error) {
+    if (!fallback) throw error;
+    const plain = doc.createElement('canvas');
+    plain.width = width; plain.height = height;
+    await fallback(plain.getContext('2d'), width, height);
+    return new Uint8Array(await (await toJpeg(plain)).arrayBuffer());
+  }
 }

@@ -1,17 +1,19 @@
 // 绘本 on the tavern page: what the phone's 绘本 app needs from the tavern — the story (its messages as steps with
 // their pictures, whole lines), the text model (to retell it as a picture book), and the voices: a page read aloud (a
 // voice line of the story in the voice already made for it, the 旁白 for the rest and for anyone without a voice), or
-// made into sound for an export.
+// made into sound for an export; and the book opened over the whole page to read (book-stage.js).
 import {NARRATOR} from './core/narration.js';
+import {openBookStage} from './book-stage.js';
 import {findRoute} from './core/routes.js';
 import {storyMessage} from './core/outgoing.js';
 
 /**
  * steps(id): a message as the stage's steps (host-vn.js bookSteps); lines(id): the voice lines of a story reply as the
  * player takes them; voiced(line): whether a line has a voice; speech: the browser's speech (整篇朗读's system voice);
- * active(): the plugin is on.
+ * active(): the plugin is on. sprite(name, emotion): a character's 立绘 for a feeling (the 视觉小说's); closePanel():
+ * puts the phone away.
  */
-export function createBookHost({context, settings, backend, steps, lines, voiced, speech, active = () => true}) {
+export function createBookHost({context, settings, backend, steps, lines, voiced, speech, active = () => true, sprite = () => '', closePanel = () => {}, doc = globalThis.document}) {
   const chat = () => context()?.chat || [];
   /** The open chat: {chat, title, length, user}. */
   function info() {
@@ -82,5 +84,26 @@ export function createBookHost({context, settings, backend, steps, lines, voiced
   }
   /** Whether the 旁白 has a voice that can be kept in a file (a 旁白 role), and whether it can be read at all. */
   const narration = () => { const s = settings(), role = s.narration?.voice === 'role'; return {kept: role && voiced({role: NARRATOR}), readable: role ? voiced({role: NARRATOR}) : !!speech}; };
-  return {info, source, write, read, audio, narration, stop: () => backend.player.stop()};
+  /** Opens a book over the whole tavern page at page `at`. */
+  let stage = null;
+  async function open(id, at = 0) {
+    const book = await backend.library.getBook(String(id || ''));
+    if (!book) throw Error('这本绘本找不到了');
+    stage?.close();
+    closePanel();
+    const made = [];
+    const absolute = url => /^(https?:|data:|blob:|\/)/.test(url) ? url : '/' + String(url).replace(/^\.?\//, '');
+    const picture = async p => {
+      if (p?.url) return absolute(p.url);
+      const photo = p?.id ? await backend.library.getPhoto(p.id).catch(() => null) : null;
+      if (!photo?.blob) return '';
+      const u = URL.createObjectURL(photo.blob);
+      made.push(u);
+      return u;
+    };
+    stage = openBookStage({doc, book, at: Math.max(0, Number(at) || 0), picture, sprite, read, stop: () => backend.player.stop(),
+      onClose: () => { stage = null; backend.player.stop(); setTimeout(() => made.forEach(u => URL.revokeObjectURL(u)), 600); }});
+    return true;
+  }
+  return {info, source, write, read, audio, narration, open, stop: () => backend.player.stop(), close: () => stage?.close(), get showing() { return !!stage; }};
 }

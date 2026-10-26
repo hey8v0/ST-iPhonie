@@ -1,5 +1,7 @@
-// 绘本导出: a book as a PDF (each page drawn as a picture, so the Chinese type and the look come out the same anywhere)
-// and as an EPUB 3 (words as words, pictures with them, for e-readers). Built here, byte by byte; no libraries.
+// 绘本导出: a book as a PDF and as an EPUB 3 — both of whole pages drawn as pictures (ui/book-render.js), so the type,
+// the collage and the look come out the same anywhere; the EPUB is fixed-layout, a page a screen (two side by side
+// where the reader can), each page's words kept with its picture for reading aloud and search. Built here, byte by
+// byte; no libraries.
 import {writeZip} from './model-files.js';
 
 const enc = new TextEncoder();
@@ -20,8 +22,8 @@ export function jpegSize(b) {
 }
 
 /**
- * A PDF of whole-page pictures: pages [{jpeg: Uint8Array}] (each its own size), width: the page width in points (the
- * height follows each picture's shape). title / author go in the document's information.
+ * A PDF of whole-page pictures: pages [{jpeg: Uint8Array, width?}] — width: the page's width in points (a spread is
+ * wider), else `width`; the height follows each picture's shape. title / author go in the document's information.
  */
 export function pdfFromJpegs(pages, {title = '', author = '', width = 420} = {}) {
   const chunks = [], offsets = [];
@@ -35,7 +37,7 @@ export function pdfFromJpegs(pages, {title = '', author = '', width = 420} = {})
   pages.forEach((p, i) => {
     const size = jpegSize(p.jpeg);
     if (!size) throw Error(`第 ${i + 1} 页的图不是 JPEG`);
-    const w = width, h = Math.round(width * size.h / size.w * 100) / 100, n = 3 + i * 3, draw = `q ${w} 0 0 ${h} 0 0 cm /Im0 Do Q`;
+    const w = p.width || width, h = Math.round(w * size.h / size.w * 100) / 100, n = 3 + i * 3, draw = `q ${w} 0 0 ${h} 0 0 cm /Im0 Do Q`;
     obj(n, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im0 ${n + 2} 0 R >> >> /Contents ${n + 1} 0 R >>`);
     obj(n + 1, [`<< /Length ${draw.length} >>\nstream\n`, draw, '\nendstream']);
     obj(n + 2, [`<< /Type /XObject /Subtype /Image /Width ${size.w} /Height ${size.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.jpeg.length} >>\nstream\n`, p.jpeg, '\nendstream']);
@@ -49,37 +51,29 @@ export function pdfFromJpegs(pages, {title = '', author = '', width = 420} = {})
 }
 
 /**
- * An EPUB 3 of the book: book {title, author, theme: {paper, ink, accent, font}, pages: [{kind, text, chapter}]},
- * images: Map(page index → {bytes, type}) for the pages that have a picture (the cover too). One XHTML file a page.
+ * A fixed-layout EPUB 3 of the book: book {title, author}; pages [{jpeg: Uint8Array, width, height, text, label}] —
+ * each page's picture (the cover first), its words (kept as the picture's text) and, for the contents, its label
+ * (the cover's and each chapter's).
  */
-export function epubOf(book, images = new Map(), {id = 'urn:uuid:' + (globalThis.crypto?.randomUUID?.() || Date.now()), now = new Date()} = {}) {
-  const t = book.theme || {}, files = [], items = [], spine = [], toc = [];
+export function epubOf(book, pages, {id = 'urn:uuid:' + (globalThis.crypto?.randomUUID?.() || Date.now()), now = new Date()} = {}) {
+  const files = [], items = [], spine = [], toc = [];
   const add = (path, text) => files.push({path, bytes: typeof text === 'string' ? enc.encode(text) : text});
   add('mimetype', 'application/epub+zip');
   add('META-INF/container.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');
-  add('OEBPS/style.css', `body{margin:0;padding:1em;background:${t.paper || '#fff'};color:${t.ink || '#222'};font-family:${t.font || 'serif'};line-height:1.8}
-img{display:block;max-width:100%;margin:0 auto 1em;border-radius:6px}h1,h2{color:${t.accent || '#c55'};text-align:center}
-.cover{text-align:center}.cover h1{font-size:2em;margin-top:1em}.end{text-align:center;margin-top:30%;font-size:1.6em;color:${t.accent || '#c55'}}p{text-indent:2em;margin:.4em 0}`);
-  items.push('<item id="css" href="style.css" media-type="text/css"/>');
-  const page = (name, title, body) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh-CN" lang="zh-CN"><head><meta charset="UTF-8"/><title>${xml(title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body>${body}</body></html>`;
-  let coverImage = '';
-  book.pages.forEach((p, i) => {
-    const img = images.get(i), ext = img ? (/png/.test(img.type) ? 'png' : 'jpg') : '', imgName = img ? `images/p${i}.${ext}` : '';
-    if (img) { add('OEBPS/' + imgName, img.bytes); items.push(`<item id="img${i}" href="${imgName}" media-type="${ext === 'png' ? 'image/png' : 'image/jpeg'}"${p.kind === 'cover' ? ' properties="cover-image"' : ''}/>`); if (p.kind === 'cover') coverImage = imgName; }
-    const name = `p${i}.xhtml`, picture = img ? `<img src="${imgName}" alt=""/>` : '';
-    const words = String(p.text || '').split(/\n+/).filter(Boolean).map(line => `<p>${xml(line)}</p>`).join('');
-    const body = p.kind === 'cover' ? `<div class="cover">${picture}<h1>${xml(book.title)}</h1>${book.author ? `<p>${xml(book.author)}</p>` : ''}</div>`
-      : p.kind === 'chapter' ? `<h2>${xml(p.text || p.chapter)}</h2>${picture}`
-      : p.kind === 'end' ? `${picture}<div class="end">${xml(p.text || '完')}</div>` : `${picture}${words}`;
-    add('OEBPS/' + name, page(name, p.kind === 'chapter' ? p.text : book.title, body));
+  const head = (title, w, h) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh-CN" lang="zh-CN"><head><meta charset="UTF-8"/>${w ? `<meta name="viewport" content="width=${w}, height=${h}"/>` : ''}<title>${xml(title)}</title>${w ? `<style>html,body{margin:0;padding:0;width:${w}px;height:${h}px;overflow:hidden}img{display:block;width:${w}px;height:${h}px}</style>` : ''}</head>`;
+  pages.forEach((p, i) => {
+    const img = `images/p${i}.jpg`, name = `p${i}.xhtml`, w = p.width || 1200, h = p.height || 1600;
+    add('OEBPS/' + img, p.jpeg);
+    items.push(`<item id="img${i}" href="${img}" media-type="image/jpeg"${i === 0 ? ' properties="cover-image"' : ''}/>`);
+    add('OEBPS/' + name, `${head(p.label || book.title, w, h)}<body><img src="${img}" alt="${xml(p.text || p.label || '')}"/></body></html>`);
     items.push(`<item id="p${i}" href="${name}" media-type="application/xhtml+xml"/>`);
-    spine.push(`<itemref idref="p${i}"/>`);
-    if (p.kind === 'cover' || p.kind === 'chapter') toc.push(`<li><a href="${name}">${xml(p.kind === 'cover' ? book.title : p.text || p.chapter)}</a></li>`);
+    spine.push(`<itemref idref="p${i}"${i === 0 ? ' properties="rendition:page-spread-center"' : ''}/>`);
+    if (p.label) toc.push(`<li><a href="${name}">${xml(p.label)}</a></li>`);
   });
   if (!toc.length) toc.push(`<li><a href="p0.xhtml">${xml(book.title)}</a></li>`);
-  add('OEBPS/nav.xhtml', page('nav', '目录', `<nav epub:type="toc" id="toc"><h1>目录</h1><ol>${toc.join('')}</ol></nav>`));
+  add('OEBPS/nav.xhtml', `${head('目录')}<body><nav epub:type="toc" id="toc"><h1>目录</h1><ol>${toc.join('')}</ol></nav></body></html>`);
   items.push('<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>');
   const modified = now.toISOString().replace(/\.\d+Z$/, 'Z');
-  add('OEBPS/content.opf', `<?xml version="1.0" encoding="UTF-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="zh-CN"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">${xml(id)}</dc:identifier><dc:title>${xml(book.title)}</dc:title><dc:language>zh-CN</dc:language>${book.author ? `<dc:creator>${xml(book.author)}</dc:creator>` : ''}<meta property="dcterms:modified">${modified}</meta>${coverImage ? `<meta name="cover" content="img0"/>` : ''}</metadata><manifest>${items.join('')}</manifest><spine>${spine.join('')}</spine></package>`);
+  add('OEBPS/content.opf', `<?xml version="1.0" encoding="UTF-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="zh-CN" prefix="rendition: http://www.idpf.org/vocab/rendition/#"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">${xml(id)}</dc:identifier><dc:title>${xml(book.title)}</dc:title><dc:language>zh-CN</dc:language>${book.author ? `<dc:creator>${xml(book.author)}</dc:creator>` : ''}<meta property="dcterms:modified">${modified}</meta><meta property="rendition:layout">pre-paginated</meta><meta property="rendition:spread">landscape</meta><meta name="cover" content="img0"/></metadata><manifest>${items.join('')}</manifest><spine>${spine.join('')}</spine></package>`);
   return new Blob([writeZip(files)], {type: 'application/epub+zip'});
 }
