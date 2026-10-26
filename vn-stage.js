@@ -8,10 +8,17 @@
 // The 立绘 step aside while it is new (whoever speaks shows as a bust in the text box); after two pages they come back
 // in front of it, dimmed a little (隐藏 shows it alone again). From the next message on the chat's own background
 // comes back (or the CG stays, dimmed). Characters without a 立绘
-// show their avatar in the text box. Effects: each line is acted from its 情绪 (moves, signs over the head, sparkles,
-// hearts, a glow at the edges), and the story brings weather, lightning, heartbeats, blackouts and memories (vn-fx.js).
+// show their avatar in the text box. Effects (one switch in 观感): the 立绘 breathe and bob while they talk; each line
+// is acted from its 情绪 — one of several moves and camera shots for that feeling, a pose held while it is said, light
+// around the speaker, the edges glowing, a cut-in for a shout, letterbox bars for a quiet moment — and from what the
+// story says around it (点头, 摇头, 鞠躬, 别过脸 …); the words come in with the line's tone (a shout slams in and shakes
+// the box, a whisper fades in small, fear trembles, sorrow is slow) and pause at commas and full stops. The story
+// brings weather (several kinds at once: rain, storms, snow, fog, petals, stars, fireworks … vn-fx.js), the light of
+// the time of day, light rays, lightning, blows that land, glitches, heartbeats, blackouts, memories, and a card when
+// time has passed (第二天清晨). A new CG comes in one of several ways.
 // It brings its own styles, so it works on any theme. Steps come from core/vn.js; vn-host.js feeds them.
-import {VN_SPEEDS, VN_WAITS, lineFx, storyFx, coverFits} from './core/vn.js';
+import {VN_SPEEDS, VN_WAITS, lineStage, toneOf, storyFx, coverFits, hashOf} from './core/vn.js';
+import {moveFor} from './core/model-moves.js';
 import {createFx} from './vn-fx.js';
 import {typedMouth} from './core/model-files.js';
 
@@ -67,7 +74,7 @@ const CSS = `
 .sttts-vn[data-fx] .vn-black[data-on]{animation:vn-black 2.3s ease}
 @keyframes vn-black{0%{opacity:0}25%,55%{opacity:1}100%{opacity:0}}
 .vn-cast{position:absolute;inset:0;pointer-events:none}
-.vn-actor{position:absolute;bottom:0;left:50%;height:min(92%,150vw);transform:translateX(-50%);transition:left .55s cubic-bezier(.22,1,.36,1),opacity .45s,filter .35s;opacity:0;filter:drop-shadow(0 10px 24px rgba(0,0,0,.35))}
+.vn-actor{position:absolute;bottom:0;left:50%;height:min(92%,150vw);transform:translateX(-50%);transform-origin:50% 100%;transition:left .55s cubic-bezier(.22,1,.36,1),opacity .45s,filter .35s;opacity:0;filter:drop-shadow(0 10px 24px rgba(0,0,0,.35))}
 .vn-actor :is(img,canvas){transform-origin:50% 100%;transition:transform .45s cubic-bezier(.22,1,.36,1),filter .45s}
 .vn-actor[data-speaking] :is(img,canvas){transform:scale(1.015)}
 .vn-actor[data-sink] :is(img,canvas){transform:translateY(2.5%);filter:saturate(.8) brightness(.93)}
@@ -167,7 +174,7 @@ const CSS = `
 .sttts-vn[data-fx] .vn-title strong{animation:vn-rise 1.1s cubic-bezier(.22,1,.36,1)}
 @keyframes vn-rise{from{opacity:0;transform:translateY(14px);letter-spacing:.5em}}
 /* 镜头: the scene (background and people, not the text box) pushes in, snaps, sways or tilts toward whoever speaks. */
-.vn-bg,.vn-cast{transform-origin:var(--vn-focus,50%) 38%}
+.vn-bg,.vn-cast{transform-origin:var(--vn-focus,50%) var(--vn-focus-y,38%)}
 .sttts-vn[data-fx][data-cam=push] :is(.vn-bg,.vn-cast){animation:vn-cam-push 2.8s cubic-bezier(.33,0,.2,1)}
 .sttts-vn[data-fx][data-cam=snap] :is(.vn-bg,.vn-cast){animation:vn-cam-snap 1.2s cubic-bezier(.2,.9,.25,1)}
 .sttts-vn[data-fx][data-cam=sway] :is(.vn-bg,.vn-cast){animation:vn-cam-sway 2.2s ease-in-out}
@@ -191,6 +198,136 @@ const CSS = `
 .sttts-vn[data-lite] :is(.vn-box,.vn-menu button,.vn-more,.vn-log){-webkit-backdrop-filter:none;backdrop-filter:none}
 .sttts-vn[data-lite] .vn-actor{filter:none}
 .sttts-vn[data-lite] .vn-actor[data-dim]{filter:brightness(.58) saturate(.85)}
+/* 立绘 alive: breathing a little all the time, bobbing while they talk (other properties than the moves use). */
+.sttts-vn[data-fx] .vn-actor{animation:vn-breathe var(--vn-breath,5.4s) ease-in-out var(--vn-phase,0s) infinite}
+.sttts-vn[data-fx] .vn-actor[data-talking]{animation:vn-breathe var(--vn-breath,5.4s) ease-in-out var(--vn-phase,0s) infinite,vn-talk .32s ease-in-out infinite alternate}
+@keyframes vn-breathe{0%,100%{scale:1 1}50%{scale:1.005 1.012}}
+@keyframes vn-talk{from{translate:0 0}to{translate:0 -.5%}}
+/* Poses held while a line is said. */
+.vn-actor[data-pose] :is(img,canvas){transition:transform .55s cubic-bezier(.22,1,.36,1),filter .45s}
+.vn-actor[data-pose=approach] :is(img,canvas){transform:scale(1.07) translateY(1.8%)}
+.vn-actor[data-pose=turn] img:not(.vn-was){transform:scaleX(-1)}
+.vn-actor[data-pose=tilt] :is(img,canvas){transform:rotate(var(--vn-tilt,-2.2deg))}
+.vn-actor[data-pose=shrink] :is(img,canvas){transform:scale(.96) translateY(1.4%)}
+.vn-actor[data-pose=lean] :is(img,canvas){transform:translateX(var(--vn-lean,2.4%)) rotate(var(--vn-tilt,.8deg))}
+.vn-actor[data-pose=sink] :is(img,canvas){transform:translateY(2.5%);filter:saturate(.8) brightness(.93)}
+.vn-actor[data-pose=droop] :is(img,canvas){transform:translateY(3.2%) rotate(-1.4deg);filter:saturate(.75) brightness(.9)}
+/* One-shot moves (the story's 点头, 摇头, 鞠躬 … and the feelings'). */
+.sttts-vn[data-fx] .vn-actor[data-sway] :is(img,canvas){animation:vn-sway .9s ease-in-out}
+.sttts-vn[data-fx] .vn-actor[data-stomp] :is(img,canvas){animation:vn-stomp .5s cubic-bezier(.3,1.4,.5,1)}
+.sttts-vn[data-fx] .vn-actor[data-lunge] :is(img,canvas){animation:vn-lunge .55s cubic-bezier(.2,.9,.3,1)}
+.sttts-vn[data-fx] .vn-actor[data-recoil] :is(img,canvas){animation:vn-recoil .6s cubic-bezier(.2,.9,.3,1)}
+.sttts-vn[data-fx] .vn-actor[data-nod] :is(img,canvas){animation:vn-nod .8s ease-in-out}
+.sttts-vn[data-fx] .vn-actor[data-headshake] :is(img,canvas){animation:vn-headshake .8s ease-in-out}
+.sttts-vn[data-fx] .vn-actor[data-wiggle] :is(img,canvas){animation:vn-wiggle .9s ease-in-out}
+.sttts-vn[data-fx] .vn-actor[data-bow] :is(img,canvas){animation:vn-bow 1.3s ease-in-out}
+.sttts-vn[data-fx] .vn-actor[data-giggle] :is(img,canvas){animation:vn-giggle .7s ease-in-out}
+.sttts-vn[data-fx] .vn-actor[data-shrug] :is(img,canvas){animation:vn-shrug .8s ease-in-out}
+.sttts-vn[data-fx] .vn-actor[data-jump] :is(img,canvas){animation:vn-jump .7s cubic-bezier(.3,1.5,.5,1)}
+.sttts-vn[data-fx] .vn-actor[data-puff] :is(img,canvas){animation:vn-puff .6s ease-in-out}
+.sttts-vn[data-fx] .vn-actor[data-settle] :is(img,canvas){animation:vn-settle .6s ease-out}
+@keyframes vn-sway{0%,100%{transform:none}30%{transform:rotate(1.6deg)}70%{transform:rotate(-1.2deg)}}
+@keyframes vn-stomp{0%,100%{transform:none}25%{transform:translateY(-2.5%)}50%{transform:translateY(1%) scale(1.02,.98)}}
+@keyframes vn-lunge{0%,100%{transform:none}35%{transform:scale(1.08) translateY(1.5%)}}
+@keyframes vn-recoil{0%,100%{transform:none}30%{transform:scale(.94) translateY(1%)}}
+@keyframes vn-nod{0%,100%{transform:none}20%,60%{transform:translateY(1.4%) rotate(.3deg)}40%,80%{transform:none}}
+@keyframes vn-headshake{0%,100%{transform:none}20%{transform:translateX(-.8%) rotate(-.8deg)}45%{transform:translateX(.8%) rotate(.8deg)}70%{transform:translateX(-.5%) rotate(-.5deg)}}
+@keyframes vn-wiggle{0%,100%{transform:none}25%,75%{transform:rotate(1.4deg)}50%{transform:rotate(-1.4deg)}}
+@keyframes vn-bow{0%,100%{transform:none}35%,65%{transform:translateY(4%) scale(1,.97)}}
+@keyframes vn-giggle{0%,100%{transform:none}20%,60%{transform:translateY(-1%)}40%,80%{transform:translateY(.3%)}}
+@keyframes vn-shrug{0%,100%{transform:none}30%,60%{transform:translateY(-1.5%) scale(1.01,.99)}}
+@keyframes vn-jump{0%,100%{transform:none}30%{transform:translateY(-7%)}55%{transform:translateY(0) scale(1.03,.97)}}
+@keyframes vn-puff{0%,100%{transform:none}40%{transform:scale(1.04)}}
+@keyframes vn-settle{0%{transform:translateY(-1%)}100%{transform:none}}
+/* More shots: a close-up on the speaker, a sudden zoom, a pull back, a slow drift. A close-up blurs what is behind. */
+.sttts-vn[data-fx][data-cam=close] :is(.vn-bg,.vn-cast){animation:vn-cam-close 4.2s cubic-bezier(.3,0,.2,1)}
+.sttts-vn[data-fx][data-cam=zoom] :is(.vn-bg,.vn-cast){animation:vn-cam-zoom 1.6s cubic-bezier(.15,.9,.2,1)}
+.sttts-vn[data-fx][data-cam=pull] :is(.vn-bg,.vn-cast){animation:vn-cam-pull 2.8s cubic-bezier(.3,0,.2,1)}
+.sttts-vn[data-fx][data-cam=drift] :is(.vn-bg,.vn-cast){animation:vn-cam-drift 4s ease-in-out}
+@keyframes vn-cam-close{0%{transform:none}30%,80%{transform:scale(1.16)}100%{transform:none}}
+@keyframes vn-cam-zoom{0%{transform:none}10%{transform:scale(1.13)}70%{transform:scale(1.1)}100%{transform:none}}
+@keyframes vn-cam-pull{0%{transform:scale(1.12)}100%{transform:none}}
+@keyframes vn-cam-drift{0%,100%{transform:none}50%{transform:scale(1.04) translateX(-1.2%)}}
+.sttts-vn[data-fx]:not([data-lite])[data-cam=close] .vn-bg{filter:blur(2.5px) brightness(.9);transition:filter .6s}
+/* The light of the scene (time of day, lamplight), over everything on the stage. */
+.vn-grade{position:absolute;inset:0;pointer-events:none;z-index:2;opacity:0;transition:opacity 1.6s ease}
+.sttts-vn[data-fx][data-grade] .vn-grade{opacity:1}
+.sttts-vn[data-grade=night] .vn-grade{background:linear-gradient(180deg,rgba(26,38,104,.5),rgba(10,12,48,.55));mix-blend-mode:multiply}
+.sttts-vn[data-grade=dusk] .vn-grade{background:linear-gradient(180deg,rgba(140,80,190,.5),rgba(255,140,60,.6));mix-blend-mode:soft-light}
+.sttts-vn[data-grade=dawn] .vn-grade{background:linear-gradient(180deg,rgba(255,196,170,.6),rgba(255,236,200,.35));mix-blend-mode:soft-light}
+.sttts-vn[data-grade=day] .vn-grade{background:radial-gradient(ellipse at 20% 0%,rgba(255,250,220,.4),transparent 62%);mix-blend-mode:screen}
+.sttts-vn[data-grade=warm] .vn-grade{background:radial-gradient(ellipse at 50% 40%,rgba(255,190,110,.55),rgba(120,50,10,.6) 100%);mix-blend-mode:soft-light}
+.sttts-vn[data-grade=cold] .vn-grade{background:linear-gradient(180deg,rgba(150,166,196,.4),rgba(80,92,116,.4));mix-blend-mode:multiply}
+/* Light pouring in. */
+.vn-rays{position:absolute;inset:-20%;z-index:2;pointer-events:none;opacity:0;transform-origin:18% 0;background:repeating-conic-gradient(from 200deg at 18% -10%,rgba(255,244,214,0) 0deg 6deg,rgba(255,244,214,.24) 8deg 11deg,rgba(255,244,214,0) 13deg 20deg);-webkit-mask:linear-gradient(170deg,#000 10%,transparent 75%);mask:linear-gradient(170deg,#000 10%,transparent 75%);mix-blend-mode:screen;transition:opacity 1.4s}
+.sttts-vn[data-fx][data-rays] .vn-rays{opacity:1;animation:vn-rays 9s ease-in-out infinite alternate}
+@keyframes vn-rays{from{transform:rotate(-2deg)}to{transform:rotate(2deg)}}
+/* A blow lands: the picture flashes to its negative and shakes. Something goes wrong: it glitches. */
+.sttts-vn[data-fx][data-impact] .vn-stage{animation:vn-impact .5s linear both}
+@keyframes vn-impact{0%{filter:invert(1) contrast(1.6) grayscale(1);transform:translate(-16px,8px)}14%{filter:none;transform:translate(14px,-9px)}28%{filter:invert(1) contrast(1.4) grayscale(1);transform:translate(-10px,5px)}44%{filter:none;transform:translate(7px,-3px)}70%{transform:translate(-3px,1px)}100%{filter:none;transform:none}}
+.sttts-vn[data-fx][data-glitch] .vn-stage{animation:vn-glitch .8s steps(8) both}
+@keyframes vn-glitch{0%{transform:none;filter:none}12%{transform:translate(-8px,2px);filter:hue-rotate(80deg) saturate(1.6);clip-path:inset(12% 0 58% 0)}24%{transform:translate(6px,-3px);clip-path:inset(46% 0 20% 0)}36%{transform:translate(-4px,0);filter:hue-rotate(-60deg);clip-path:none}50%{transform:translate(3px,1px);filter:drop-shadow(5px 0 rgba(255,0,60,.6)) drop-shadow(-5px 0 rgba(0,220,255,.6))}64%{transform:none;filter:none;clip-path:inset(70% 0 6% 0)}76%{clip-path:none;filter:drop-shadow(4px 0 rgba(255,0,60,.5)) drop-shadow(-4px 0 rgba(0,220,255,.5))}100%{transform:none;filter:none;clip-path:none}}
+/* Letterbox bars for a quiet, heavy moment. */
+.vn-bars::before,.vn-bars::after{content:'';position:absolute;left:0;right:0;height:9vh;background:#000;z-index:4;transition:transform .8s cubic-bezier(.22,1,.36,1);pointer-events:none}
+.vn-bars::before{top:0;transform:translateY(-100%)}
+.vn-bars::after{bottom:0;transform:translateY(100%)}
+.sttts-vn[data-fx][data-bars] .vn-bars::before,.sttts-vn[data-fx][data-bars] .vn-bars::after{transform:none}
+/* Cut-in: a band sweeps across with the speaker's face and the shout. */
+.vn-cutin{position:absolute;inset:0;z-index:4;pointer-events:none;opacity:0;overflow:hidden}
+.vn-cutin i{position:absolute;left:-15%;right:-15%;top:24%;height:34%;transform:skewY(-7deg) translateX(110%);background:linear-gradient(100deg,var(--vn-plate),color-mix(in srgb,var(--vn-plate) 55%,#000));box-shadow:0 0 0 4px rgba(255,255,255,.9),0 18px 40px rgba(0,0,0,.45);overflow:hidden}
+.vn-cutin i::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(100deg,transparent 0 22px,rgba(255,255,255,.22) 22px 24px);animation:vn-speed .35s linear infinite}
+.vn-cutin b{position:absolute;right:14%;top:-60%;width:46%;height:220%;background:var(--vn-face) 50% 7%/auto 240% no-repeat;transform:skewY(7deg)}
+.vn-cutin span{position:absolute;left:12%;right:50%;top:50%;transform:translateY(-50%) skewY(7deg);color:#fff;font-weight:900;font-size:clamp(22px,4.8vw,60px);line-height:1.2;letter-spacing:.06em;text-shadow:0 3px 0 rgba(0,0,0,.35),0 0 18px rgba(0,0,0,.35);overflow-wrap:anywhere}
+.sttts-vn[data-fx] .vn-cutin[data-on]{animation:vn-cutin-fade 1.4s ease forwards}
+.sttts-vn[data-fx] .vn-cutin[data-on] i{animation:vn-cutin 1.4s cubic-bezier(.2,.9,.25,1) forwards}
+.sttts-vn[data-hidden] .vn-cutin{display:none}
+@keyframes vn-cutin-fade{0%{opacity:0}8%,82%{opacity:1}100%{opacity:0}}
+@keyframes vn-cutin{0%{transform:skewY(-7deg) translateX(110%)}18%{transform:skewY(-7deg) translateX(0)}78%{transform:skewY(-7deg) translateX(-3%)}100%{transform:skewY(-7deg) translateX(-115%)}}
+@keyframes vn-speed{to{background-position:-120px 0}}
+/* Time gone by: a card between scenes. */
+.vn-card{position:absolute;inset:0;z-index:6;display:grid;place-content:center;justify-items:center;gap:14px;background:#07070d;color:#f4f2ff;opacity:0;pointer-events:none}
+.vn-card strong{font:800 clamp(24px,4.4vw,44px)/1.3 "Songti SC","STSong","Noto Serif SC",serif;letter-spacing:.3em;padding-left:.3em}
+.vn-card::before,.vn-card::after{content:'';width:min(280px,50vw);height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);justify-self:center}
+.sttts-vn[data-fx] .vn-card[data-on]{animation:vn-card 2.6s ease forwards}
+.sttts-vn[data-fx] .vn-card[data-on] strong{animation:vn-rise 1.2s cubic-bezier(.22,1,.36,1) .25s both}
+@keyframes vn-card{0%{opacity:0}18%,70%{opacity:1}100%{opacity:0}}
+/* A new CG comes in one of several ways. */
+.sttts-vn[data-fx] .vn-bg-layer[data-on][data-reveal=wipe],.sttts-vn[data-fx] .vn-fit[data-reveal=wipe]{animation:vn-wipe 1s cubic-bezier(.65,0,.35,1),vn-drift 28s ease-in-out infinite alternate}
+.sttts-vn[data-fx] .vn-bg-layer[data-on][data-reveal=diag],.sttts-vn[data-fx] .vn-fit[data-reveal=diag]{animation:vn-diag 1.1s cubic-bezier(.65,0,.35,1),vn-drift 28s ease-in-out infinite alternate}
+.sttts-vn[data-fx] .vn-bg-layer[data-on][data-reveal=zoom],.sttts-vn[data-fx] .vn-fit[data-reveal=zoom]{animation:vn-zoomin 1.2s cubic-bezier(.22,1,.36,1),vn-drift 28s ease-in-out infinite alternate}
+.sttts-vn[data-fx] .vn-bg-layer[data-on][data-reveal=white],.sttts-vn[data-fx] .vn-fit[data-reveal=white]{animation:vn-whitein 1.3s ease,vn-drift 28s ease-in-out infinite alternate}
+.sttts-vn[data-lite][data-fx] .vn-bg-layer[data-on][data-reveal],.sttts-vn[data-lite][data-fx] .vn-fit[data-reveal]{animation:vn-reveal 1.1s cubic-bezier(.22,1,.36,1)}
+@keyframes vn-wipe{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0)}}
+@keyframes vn-diag{from{clip-path:polygon(0 0,0 0,-40% 100%,-40% 100%)}to{clip-path:polygon(0 0,140% 0,100% 100%,-40% 100%)}}
+@keyframes vn-zoomin{from{transform:scale(1.3);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes vn-whitein{from{filter:brightness(3) saturate(0);opacity:.3}to{filter:none;opacity:1}}
+/* The words: each comes in as it is typed, in the line's tone. */
+.vn-ch{display:inline-block;opacity:0;white-space:pre-wrap}
+.vn-ch.on{opacity:1}
+.sttts-vn[data-fx] .vn-ch.on{animation:vn-ch .24s ease-out both}
+@keyframes vn-ch{from{opacity:0;transform:translateY(.22em)}to{opacity:1;transform:none}}
+.sttts-vn[data-fx][data-tone=shout] .vn-ch.on{animation:vn-ch-slam .26s cubic-bezier(.2,1.5,.4,1) both}
+@keyframes vn-ch-slam{from{opacity:0;transform:scale(1.9)}to{opacity:1;transform:none}}
+.sttts-vn[data-fx][data-tone=bounce] .vn-ch.on{animation:vn-ch-hop .34s cubic-bezier(.3,1.7,.5,1) both}
+@keyframes vn-ch-hop{from{opacity:0;transform:translateY(.5em) scale(.8)}to{opacity:1;transform:none}}
+.sttts-vn[data-fx]:is([data-tone=slow],[data-tone=whisper]) .vn-ch.on{animation:vn-ch-soft .8s ease both}
+@keyframes vn-ch-soft{from{opacity:0;transform:translateY(-.15em)}to{opacity:1;transform:none}}
+.sttts-vn[data-fx][data-tone=tremble] .vn-ch.on{animation:vn-ch .2s ease-out both,vn-ch-jit .16s steps(2) .2s infinite}
+.sttts-vn[data-fx][data-tone=tremble] .vn-ch.on:nth-child(odd){animation:vn-ch .2s ease-out both,vn-ch-jit2 .16s steps(2) .2s infinite}
+.sttts-vn[data-lite][data-fx][data-tone=tremble] .vn-ch.on{animation:vn-ch .2s ease-out both}
+@keyframes vn-ch-jit{50%{transform:translate(.04em,-.03em)}}
+@keyframes vn-ch-jit2{50%{transform:translate(-.04em,.03em)}}
+.sttts-vn[data-tone=shout] .vn-text{font-size:calc(var(--vn-size) * 1.16);font-weight:800;letter-spacing:.04em}
+.sttts-vn[data-tone=whisper] .vn-text{font-size:calc(var(--vn-size) * .92);letter-spacing:.1em;opacity:.86}
+.sttts-vn[data-fx] .vn-box[data-jolt]{animation:vn-jolt .38s linear}
+/* The box glows with the line's feeling. */
+.vn-box{transition:opacity .3s,transform .3s,box-shadow .6s}
+.sttts-vn[data-fx][data-feel=angry] .vn-box{box-shadow:0 0 0 1px rgba(255,90,90,.55),0 0 28px rgba(230,40,60,.35),0 18px 50px rgba(0,0,0,.4)}
+.sttts-vn[data-fx][data-feel=sad] .vn-box,.sttts-vn[data-fx][data-feel=tired] .vn-box{box-shadow:0 0 0 1px rgba(120,160,255,.5),0 0 28px rgba(70,110,220,.3),0 18px 50px rgba(0,0,0,.4)}
+.sttts-vn[data-fx]:is([data-feel=shy],[data-feel=tender]) .vn-box{box-shadow:0 0 0 1px rgba(255,150,190,.6),0 0 30px rgba(255,120,170,.35),0 18px 50px rgba(0,0,0,.4)}
+.sttts-vn[data-fx]:is([data-feel=happy],[data-feel=moved]) .vn-box{box-shadow:0 0 0 1px rgba(255,214,140,.6),0 0 30px rgba(255,190,90,.3),0 18px 50px rgba(0,0,0,.4)}
+.sttts-vn[data-fx]:is([data-feel=fearful],[data-feel=nervous]) .vn-box{box-shadow:0 0 0 1px rgba(170,140,230,.5),0 0 26px rgba(90,40,160,.35),0 18px 50px rgba(0,0,0,.45)}
+@keyframes vn-jolt{0%,100%{transform:translateX(-50%)}20%{transform:translateX(calc(-50% - 7px))}40%{transform:translateX(calc(-50% + 6px))}60%{transform:translateX(calc(-50% - 4px))}80%{transform:translateX(calc(-50% + 2px))}}
 @media (max-width:600px){
  .sttts-vn{font-size:15px}
  .vn-box{min-height:clamp(120px,27vh,190px);padding:26px 16px 18px;border-radius:16px;width:calc(100% - 16px);bottom:max(8px,env(safe-area-inset-bottom))}
@@ -228,10 +365,11 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', '视觉小说');
   root.tabIndex = -1;
-  root.innerHTML = `<div class="vn-stage"><div class="vn-bg"><div class="vn-bg-layer"></div><div class="vn-bg-layer"></div><div class="vn-fit"></div></div><div class="vn-cast"></div><div class="vn-lines"></div><div class="vn-tint"></div><div class="vn-flash"></div><div class="vn-black"></div></div>
+  root.innerHTML = `<div class="vn-stage"><div class="vn-bg"><div class="vn-bg-layer"></div><div class="vn-bg-layer"></div><div class="vn-fit"></div></div><div class="vn-cast"></div><div class="vn-grade"></div><div class="vn-rays"></div><div class="vn-lines"></div><div class="vn-tint"></div><div class="vn-bars"></div><div class="vn-cutin"><i><b></b><span></span></i></div><div class="vn-flash"></div><div class="vn-black"></div></div>
     <div class="vn-box"><nav class="vn-menu" aria-label="视觉小说菜单"><button data-vn="auto" aria-pressed="false">自动</button><button data-vn="skip" aria-pressed="false">快进</button><button data-vn="more" aria-expanded="false" aria-label="更多">⋯</button><div class="vn-more" hidden><button data-vn="back">上一页</button><button data-vn="log">记录</button><button data-vn="voice" aria-pressed="false">语音</button><button data-vn="hide">隐藏</button><button data-vn="full" aria-pressed="false">全屏</button><button data-vn="close" aria-label="退出视觉小说">退出</button></div></nav><div class="vn-name" hidden><span></span></div><div class="vn-face"></div><span class="vn-voice" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p class="vn-text" aria-live="polite"></p><span class="vn-next" aria-hidden="true">▼</span>
       <div class="vn-input"><textarea rows="2" placeholder="接下来你要说什么、做什么？空着发送就让故事接着写" aria-label="接下来的剧情"></textarea><button data-vn="send">发送</button></div></div>
     <div class="vn-log" hidden><header><span>记 录</span><button data-vn="log-close">返回</button></header><ol></ol></div>
+    <div class="vn-card"><strong></strong></div>
     <div class="vn-title"><small>VISUAL NOVEL</small><strong>${esc(title || '视觉小说')}</strong>${subtitle ? `<em>${esc(subtitle)}</em>` : ''}</div>`;
   const $ = s => root.querySelector(s);
   const box = $('.vn-box'), nameEl = $('.vn-name'), textEl = $('.vn-text'), faceEl = $('.vn-face'), castEl = $('.vn-cast'), logEl = $('.vn-log'), titleEl = $('.vn-title');
@@ -243,11 +381,12 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   let auto = false, skip = false, autoTimer = 0, skipTimer = 0, hidden = false, cg = false, layer = 0, bgUrl = '', ended = false, waiting = false, clock = 0, phase = 'idle', titleTimer = 0;
   const actors = new Map(), log = [], lookOf = new Map(), modelOf = new Map(), lost = new Set();
   let typedChar = '', typedFrom = 0, loop = 0, lastFrame = 0;
-  let said = '', weatherAge = 0, alone = false, cgPages = 0, lastTint = '';
+  let said = '', weatherAge = 0, alone = false, cgPages = 0, lastTint = '', lineNo = 0, lastCut = -9, barsLeft = 0, spans = [], built = '';
   // A phone (or a small computer): the stage leaves out what costs the most to draw (see data-lite in the styles).
   const lite = !!win.matchMedia?.('(pointer: coarse)').matches || (win.navigator?.hardwareConcurrency || 8) <= 4;
   root.toggleAttribute('data-lite', lite);
-  const fx = createFx({doc, host: $('.vn-stage'), after: castEl, lite});
+  // Over the people and the light of the time of day (fireworks and fireflies are lights themselves), under the edges.
+  const fx = createFx({doc, host: $('.vn-stage'), after: $('.vn-rays'), lite});
   const fxOn = () => root.hasAttribute('data-fx') && !skip;
   // Pages seen (to go back to) and the messages read so far (going on after going back).
   const seen = [], loaded = [];
@@ -283,7 +422,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       const img = new win.Image();
       img.onload = () => { if (bgUrl === url) { cgSize = [img.naturalWidth, img.naturalHeight]; fitCg(); } };
       img.src = url;
-      if (!skip) { fit.removeAttribute('data-reveal'); void fit.offsetWidth; fit.setAttribute('data-reveal', ''); }
+      if (!skip) { fit.removeAttribute('data-reveal'); void fit.offsetWidth; fit.setAttribute('data-reveal', revealOf(url)); }
     }
     if (url === bgUrl) return;
     bgUrl = url;
@@ -291,10 +430,12 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     next.style.backgroundImage = url ? cssUrl(url) : '';
     next.toggleAttribute('data-on', !!url);
     prev.removeAttribute('data-on');
-    next.toggleAttribute('data-reveal', whole && !skip);
+    if (whole && !skip) next.setAttribute('data-reveal', revealOf(url)); else next.removeAttribute('data-reveal');
     if (whole) win.setTimeout(() => next.removeAttribute('data-reveal'), 1200);
     if (flash) blink('');
   }
+  /** How a CG comes in: the same picture always the same way, pictures by turns in several ways. */
+  const REVEALS = ['circle', 'wipe', 'diag', 'zoom', 'white'], revealOf = url => REVEALS[hashOf(url) % REVEALS.length];
   function blink(kind) { const f = $('.vn-flash'); f.dataset.kind = kind; f.removeAttribute('data-on'); void f.offsetWidth; f.setAttribute('data-on', ''); }
   /** One of the overlays (tint, black) or the stage (shake, a camera move) plays its animation again. */
   function replay(el, attr, value = '', ms = 0) {
@@ -332,6 +473,9 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       if (model) el.append(model.canvas);
       else { el.innerHTML = `<img alt="${esc(name)}" draggable="false">`; watch(el.querySelector('img'), name, url); el.querySelector('img').src = url; }
       el.setAttribute('data-enter', '');
+      // Each breathes at a pace of their own.
+      el.style.setProperty('--vn-breath', (4.6 + Math.random() * 1.6).toFixed(2) + 's');
+      el.style.setProperty('--vn-phase', (-Math.random() * 5).toFixed(2) + 's');
       castEl.append(el);
       a = {name, el, last: 0, url, model};
       actors.set(name, a);
@@ -428,23 +572,58 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       a.el.toggleAttribute('data-dim', !!name && a.name !== name);
     }
   }
+  const MOVE_MS = {hop: 520, bounce: 780, tremble: 720, sway: 950, stomp: 520, lunge: 600, recoil: 650, nod: 850, headshake: 850, wiggle: 950, bow: 1350, giggle: 750, shrug: 850, jump: 750, puff: 650, settle: 650};
+  const POSES = new Set(['approach', 'turn', 'tilt', 'shrink', 'lean', 'sink', 'droop']);
   function move(kind, actor) {
     if (!kind || skip) return;
+    if (POSES.has(kind)) { pose(actor, kind); return; }
     if (kind === 'shake') replay(root, 'data-shake', '', 450);
-    else if (kind === 'sink') actor?.el.setAttribute('data-sink', '');
-    else if (actor) replay(actor.el, 'data-' + kind, '', {hop: 520, bounce: 780, tremble: 720}[kind] || 600);
+    else if (kind === 'stomp') { replay(root, 'data-shake', '', 450); if (actor) replay(actor.el, 'data-stomp', '', MOVE_MS.stomp); }
+    else if (actor) replay(actor.el, 'data-' + kind, '', MOVE_MS[kind] || 600);
+  }
+  /** A pose held while the line is said (leaning and tilting toward the middle of the stage). */
+  function pose(actor, kind) {
+    if (!actor) return;
+    if (!kind) { delete actor.el.dataset.pose; return; }
+    actor.el.dataset.pose = kind;
+    const left = (parseFloat(actor.el.style.left) || 50) < 50;
+    actor.el.style.setProperty('--vn-lean', (left ? 2.4 : -2.4) + '%');
+    actor.el.style.setProperty('--vn-tilt', (left ? 1 : -1) * (kind === 'tilt' ? 2.2 : .8) + 'deg');
+  }
+  /** Whoever speaks bobs while their words come in and while their voice plays. */
+  function talk() {
+    const speaker = step?.kind === 'say' && !step.user ? actors.get(step.role) : null;
+    const on = !!speaker && !speaker.model && (!typed || phase === 'playing');
+    for (const a of actors.values()) a.el.toggleAttribute('data-talking', on && a === speaker);
+  }
+  /** The 2D move for a 动作 the story names around a line (the models' 点头, 摇头 … as a 立绘 can do them). */
+  const MOVE_2D = {wave: 'wiggle', nod: 'nod', shake: 'headshake', bow: 'bow', hop: 'hop', crossArms: 'settle', handsHips: 'puff', coverMouth: 'giggle', point: 'lean', shrug: 'shrug', cheer: 'jump', think: 'tilt', handChest: 'settle', coverFace: 'shrink', lookAway: 'turn', tilt: 'tilt'};
+  /** A cut-in: a band sweeps across with the speaker's face and what they shout. */
+  function cutIn(actor, text) {
+    if (!actor?.url) return;
+    const el = $('.vn-cutin');
+    el.style.setProperty('--vn-face', cssUrl(actor.url));
+    el.querySelector('span').textContent = String(text).replace(/^[「『]|[」』]$/g, '');
+    replay(el, 'data-on', '', 1450);
+  }
+  /** Time gone by: a card between scenes. */
+  function card(label) {
+    const el = $('.vn-card');
+    el.querySelector('strong').textContent = label;
+    replay(el, 'data-on', '', 2700);
   }
   /** 镜头 and 集中线 aim at whoever speaks (the middle of the stage when no one stands there). */
   function focusOn(actor) {
     const r = root.getBoundingClientRect();
-    let x = 50;
-    if (actor && r.width) { const a = actor.el.getBoundingClientRect(); x = (a.left + a.width / 2 - r.left) / r.width * 100; }
+    let x = 50, y = 38;
+    if (actor && r.width) { const a = actor.el.getBoundingClientRect(); x = (a.left + a.width / 2 - r.left) / r.width * 100; y = (a.top + a.height * 0.2 - r.top) / r.height * 100; }
     root.style.setProperty('--vn-focus', Math.max(12, Math.min(88, x)).toFixed(1) + '%');
+    root.style.setProperty('--vn-focus-y', Math.max(12, Math.min(60, y || 38)).toFixed(1) + '%');
   }
   function camera(kind, actor) {
     if (!kind) return;
     focusOn(actor);
-    replay(root, 'data-cam', kind, {push: 2900, snap: 1250, sway: 2300, tilt: 2300}[kind] || 2000);
+    replay(root, 'data-cam', kind, {push: 2900, snap: 1250, sway: 2300, tilt: 2300, close: 4300, zoom: 1650, pull: 2850, drift: 4100}[kind] || 2000);
   }
   function rush(kind, actor) {
     if (!kind) return;
@@ -460,32 +639,48 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     const b = box.getBoundingClientRect();
     return [b.left - r.left + Math.min(220, b.width / 3), b.top - r.top - 20];
   }
-  /** A line acted from its 情绪; the story between the lines brings the weather and the rest. */
-  function act(s, actor) {
-    if (!fxOn()) return;
+  /**
+   * A line acted from its 情绪 (one of several ways for that feeling, the same line always the same way) and from the
+   * 动作 the story names around it (motion); the story between the lines brings the weather and the rest.
+   */
+  function act(s, actor, motion = '') {
+    if (!fxOn()) { root.removeAttribute('data-bars'); return; }
     if (s.kind === 'say') {
       if (s.part) return;
-      const f = lineFx(s.emotion);
-      move(f.move, actor);
+      lineNo++;
+      const f = lineStage(s.emotion, s.text, `${lastId}:${s.line ?? lineNo}`);
+      if (motion && actor && !actor.model) { move(motion, actor); if (!POSES.has(motion)) pose(actor, f.pose); }
+      else { move(f.move, actor); if (!POSES.has(f.move)) pose(actor, f.pose); }
       camera(f.camera, actor);
       rush(f.lines, actor);
       if (f.burst) { const [x, y] = headOf(actor); fx.burst(f.burst, x, y); }
       // The same glow line after line would only tire the eyes: once, until the feeling changes.
       if (f.tint && f.tint !== lastTint) { const t = $('.vn-tint'); t.dataset.tint = f.tint; replay(t, 'data-on', '', 2000); }
       lastTint = f.tint;
+      if (f.tone === 'shout') replay(box, 'data-jolt', '', 420);
+      root.dataset.feel = f.feel || '';
+      // A cut-in now and then for a shout (not two in a row), short enough to read across the band.
+      if (f.cut && actor && !actor.model && lineNo - lastCut >= 3 && [...String(s.text)].length <= 18) { cutIn(actor, s.text); lastCut = lineNo; }
+      if (f.bars) { barsLeft = 2; root.setAttribute('data-bars', ''); } else if (barsLeft > 0 && --barsLeft === 0) root.removeAttribute('data-bars');
       return;
     }
     const f = storyFx(s.text);
     root.toggleAttribute('data-memory', f.memory);
-    if (f.flash === 'lightning') { blink('lightning'); replay(root, 'data-shake', '', 450); }
+    if (f.flash === 'lightning') { blink('lightning'); replay(root, 'data-shake', '', 450); fx.lightning?.(); }
     if (f.flash === 'boom') { blink('boom'); replay(root, 'data-shake', 'big', 780); }
+    if (f.impact && !f.flash) { replay(root, 'data-impact', '', 560); rush('dark', null); }
+    if (f.glitch) replay(root, 'data-glitch', '', 850);
     if (f.pulse) { const t = $('.vn-tint'); t.dataset.tint = 'beat'; replay(t, 'data-on', '', 1600); }
     if (f.blackout) replay($('.vn-black'), 'data-on', '', 2400);
+    if (f.rays) root.setAttribute('data-rays', '');
+    if (barsLeft > 0 && --barsLeft === 0) root.removeAttribute('data-bars');
   }
   /** The weather the story names stays a while: until it changes or stops, or two messages go by without it. */
   function weatherFrom(s) {
     if (s.kind !== 'narrate' || !root.hasAttribute('data-fx')) return;
-    const w = storyFx(s.text).weather;
+    const {weather: w, grade} = storyFx(s.text);
+    // The light of the time of day stays until another is named.
+    if (grade) root.dataset.grade = grade;
     if (!w) return;
     weatherAge = 0;
     fx.weather(w === 'clear' ? '' : w);
@@ -495,10 +690,31 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   function finishTyping() {
     win.cancelAnimationFrame(typing); typing = 0;
     typed = true; typedChar = '';
-    textEl.textContent = textEl.dataset.full || '';
+    const full = textEl.dataset.full || '';
+    // The words typed so far stay as they are (a trembling line keeps trembling); the rest come in at once.
+    if (built === full && spans.length) for (const el of spans) el.classList.add('on');
+    else { textEl.textContent = full; spans = []; built = ''; }
     root.setAttribute('data-done', '');
     planAuto();
+    talk();
   }
+  /**
+   * The words in pieces that come in one by one: a character each, a closing mark kept with the one before it and an
+   * opening one with the one after (a line never starts with ，), a word of letters or digits whole.
+   */
+  function pieces(text) {
+    const out = [];
+    for (const ch of text) {
+      const prev = out[out.length - 1];
+      if (ch === '\n' || ch === ' ' || ch === '\u3000') { out.push(ch); continue; }
+      const glue = prev && !/^[\n \u3000]$/.test(prev) && (/[，。！？、；：」』）)”’》〉】\]…—,.!?;:~～]/.test(ch) || /[「『（(“‘《〈【\[]$/.test(prev) || /[A-Za-z0-9'’]/.test(ch) && /[A-Za-z0-9'’]$/.test(prev));
+      if (glue) out[out.length - 1] = prev + ch; else out.push(ch);
+    }
+    return out;
+  }
+  // A pause after a mark (in characters' time), and the pace of each tone.
+  const PAUSE = {'，': 3.5, ',': 3.5, '、': 2.5, '；': 4, ';': 4, '：': 3, ':': 3, '。': 6, '.': 5, '！': 6, '!': 5, '？': 6, '?': 5, '…': 4, '—': 2.5, '～': 2, '~': 2};
+  const PACE = {shout: .6, whisper: 1.35, tremble: 1.1, slow: 1.45, bounce: .9};
   function type(text) {
     win.cancelAnimationFrame(typing);
     typed = false;
@@ -506,14 +722,26 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     textEl.dataset.full = text;
     const per = VN_SPEEDS[look().speed] ?? VN_SPEEDS[2];
     if (!per || skip) { finishTyping(); return; }
-    const start = typedFrom = win.performance.now(), chars = [...text];
+    const parts = pieces(text), pace = per * (PACE[root.dataset.tone] || 1), when = [];
+    let t = 0;
+    for (const part of parts) {
+      if (/^[\n \u3000]$/.test(part)) continue;
+      when.push(t);
+      const n = [...part].length, end = [...part].pop();
+      t += pace * n + (PAUSE[end] ? pace * (PAUSE[end] - 1) : 0);
+    }
+    textEl.innerHTML = parts.map(part => /^[\n \u3000]$/.test(part) ? esc(part) : `<span class="vn-ch">${esc(part)}</span>`).join('');
+    spans = [...textEl.querySelectorAll('.vn-ch')]; built = text;
+    const start = typedFrom = win.performance.now();
+    let shown = 0;
     const tick = now => {
-      const n = Math.min(chars.length, Math.floor((now - start) / 1000 / per) + 1);
-      textEl.innerHTML = esc(chars.slice(0, n).join('')) + `<span class="vn-rest">${esc(chars.slice(n).join(''))}</span>`;
-      typedChar = chars[n - 1] || '';
-      if (n < chars.length) typing = win.requestAnimationFrame(tick); else finishTyping();
+      const gone = (now - start) / 1000;
+      while (shown < spans.length && when[shown] <= gone) spans[shown++].classList.add('on');
+      typedChar = spans[shown - 1]?.textContent.slice(-1) || '';
+      if (shown < spans.length) typing = win.requestAnimationFrame(tick); else finishTyping();
     };
     typing = win.requestAnimationFrame(tick);
+    talk();
   }
 
   // ---------- steps ----------
@@ -546,6 +774,8 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     const model = say && !s.user ? modelFor(name) : null;
     // A 动作 the story right around the line names (挥手, 鞠躬 …), for a character standing as a model.
     const gesture = model && !s.part && !again ? models.move?.(name, {context: said, after: storyAfter(s), names: people()}) : null;
+    // The same for a 立绘: the move it can do for a 动作 named around the line.
+    const motion = say && !s.user && !model && !s.part && !again ? MOVE_2D[moveFor({context: said, after: storyAfter(s), name, names: people()})?.id] || '' : '';
     if (say) said = ''; else said = (said + '\n' + s.text).slice(-400);
     // A new CG is seen alone for two pages; the next one who speaks with a 立绘 brings them back in front of it.
     if (!again && cg) cgPages++;
@@ -556,14 +786,18 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     if ((url || model) && !alone) actor = enter(name, url, model);
     if (actor?.model && !s.part) actor.model.feel(s.emotion);
     if (actor?.model && gesture && !skip) actor.model.act(gesture)?.catch?.(() => {});
-    if (actor && !s.part) actor.el.removeAttribute('data-sink');
+    if (actor && !s.part) { actor.el.removeAttribute('data-sink'); delete actor.el.dataset.pose; }
     // Whoever speaks is lit; the others dim (all of them when the speaker has no 立绘 on the stage).
     spotlight(say ? name : '');
     const bust = say && !actor && alone ? url : '', pic = say && !actor ? bust || face(name, s.user) : '';
     root.toggleAttribute('data-face', say && !actor);
     faceEl.innerHTML = pic ? `<img src="${esc(pic)}" alt=""${bust ? ' class="vn-bust"' : ''}>` : say && !actor ? `<span>${esc([...name][0] || '?')}</span>` : '';
     weatherFrom(s);
-    if (!again) act(s, actor);
+    root.dataset.tone = say ? toneOf(s.text, s.emotion) : '';
+    if (!say) root.dataset.feel = '';
+    // Time gone by, at the start of a message: a card first.
+    if (!say && !again && fxOn() && !steps.slice(0, steps.indexOf(s)).some(x => x.kind === 'say' || x.kind === 'narrate')) { const gone = storyFx(s.text).skip; if (gone) card(gone); }
+    if (!again) act(s, actor, motion);
     // Voice: a line plays from its first page on; anything else stops the one before.
     if (!(say && s.part) || again) voice.stop();
     type(say ? quoted(s.text) : s.text);
@@ -580,7 +814,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     message = m; steps = m.steps; pos = 0; lastId = m.id; said = '';
     for (const x of steps) if (x.kind === 'say' && !x.user) modelFor(x.role);
     endCg();
-    root.removeAttribute('data-memory');
+    root.removeAttribute('data-memory'); root.removeAttribute('data-rays'); root.removeAttribute('data-bars'); barsLeft = 0;
     if (++weatherAge > 2) fx.weather('');
     return true;
   }
@@ -618,7 +852,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       voice.stop();
       step = null;
       root.setAttribute('data-end', '');
-      root.removeAttribute('data-face'); root.setAttribute('data-narrate', ''); nameEl.hidden = true;
+      root.removeAttribute('data-face'); root.setAttribute('data-narrate', ''); root.dataset.tone = ''; nameEl.hidden = true;
       spotlight('');
       textEl.dataset.full = '— 故事写到这里了 —';
       finishTyping();
@@ -669,7 +903,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   // ---------- 记录 ----------
   function openLog() {
     const list = logEl.querySelector('ol');
-    list.innerHTML = log.map((e, i) => `<li${e.name ? '' : ' data-narrate'}><b>${esc(e.name)}</b><span>${esc(e.text)}</span>${e.step && voice.on() ? `<button data-vn="replay" data-i="${i}" aria-label="再听一次">▶</button>` : '<i></i>'}</li>`).join('');
+    list.innerHTML = log.map((e, i) => `<li${e.name ? '' : ' data-narrate'}><b>${esc(e.name)}</b><span>${esc(e.text)}</span>${e.step && voice.on() ? `<button data-vn="replay" data-i="${i}" aria-label="再听一次"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></button>` : '<i></i>'}</li>`).join('');
     logEl.hidden = false;
     list.scrollTop = list.scrollHeight;
     setAuto(false); stopSkip();
@@ -695,6 +929,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       waiting = true;
       root.removeAttribute('data-end');
       textEl.dataset.full = '';
+      root.dataset.tone = '';
       textEl.innerHTML = '<span class="vn-dots">故事正在写</span>';
       root.removeAttribute('data-done');
     } finally { button.disabled = false; }
@@ -779,7 +1014,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     get closed() { return closed; },
     close,
     /** The player's phase: the small wave on the box, and 自动 waits for a line's voice to end. */
-    status(value) { phase = value || 'idle'; root.dataset.voice = phase; if (auto && typed && !busyVoice()) planAuto(); },
+    status(value) { phase = value || 'idle'; root.dataset.voice = phase; talk(); if (auto && typed && !busyVoice()) planAuto(); },
     /** New messages arrived (a reply was written): the story goes on from where it ended. */
     more() { if (closed) return; const was = waiting; waiting = false; if (ended || was) { ended = false; root.removeAttribute('data-end'); next(); } },
     /** The reply could not be written (stopped or failed): back to the box. */

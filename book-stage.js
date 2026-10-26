@@ -8,10 +8,11 @@ const CSS = `.sttts-book{position:fixed;inset:0;width:100vw;height:100vh;height:
 .sttts-book[data-in]{opacity:1}`;
 
 /**
- * Opens the book: picture(p) → its address; sprite(name, emotion) → a 立绘's; read(lines) → resolves when read (false:
- * nothing could be); stop(); onClose(at): it was closed at page `at`. Returns {close, refresh, closed}.
+ * Opens the book: picture(p) → its address; sprite(name, emotion) → a 立绘's; read(lines, onLine) → resolves when read
+ * (false: nothing could be); stop(); sound(kind, name): a page's ambience or sound; onClose(at): it was closed at page
+ * `at`. Returns {close, refresh, closed}.
  */
-export function openBookStage({doc, book, at = 0, picture, sprite, read, stop, onClose = () => {}}) {
+export function openBookStage({doc, book, at = 0, picture, sprite, read, stop, sound = null, onClose = () => {}}) {
   bookStyles(doc);
   if (!doc.getElementById(STYLE_ID)) { const s = doc.createElement('style'); s.id = STYLE_ID; s.textContent = CSS; doc.head.append(s); }
   const shell = doc.createElement('div');
@@ -24,7 +25,7 @@ export function openBookStage({doc, book, at = 0, picture, sprite, read, stop, o
     if (doc.fullscreenElement) doc.exitFullscreen?.().catch(() => {});
     else shell.requestFullscreen?.().catch(() => {});
   };
-  const reader = mountBookReader({doc, root: shell, book, picture, sprite, read, stop, at, two: true, onClose: () => close(), onFull: shell.requestFullscreen ? full : null});
+  const reader = mountBookReader({doc, root: shell, book, picture, sprite, read, stop, sound, at, two: true, onClose: () => close(), onFull: shell.requestFullscreen ? full : null});
   doc.defaultView.requestAnimationFrame(() => shell.setAttribute('data-in', ''));
   shell.querySelector('.bkr')?.focus?.({preventScroll: true});
   function close() {

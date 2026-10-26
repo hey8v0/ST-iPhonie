@@ -3,9 +3,10 @@
 // the kind of book; whether pictures are drawn, and in the book's own way or the 绘图 App's); making it (written, then
 // every picture planned drawn — scenes, backgrounds the characters' 立绘 stand on, small things cut out as stickers —
 // each kept as it comes, so leaving does not lose it); the reader (book-reader.js: the page filling the phone, 全屏 on
-// the tavern page, 朗读 turning the pages); changes to a page (its words, what is read, its stickers, its layout, its
-// pictures) and the book (its kind, how it is drawn, its title); and exports: a web page that reads itself (.html),
-// PDF, EPUB, the reading as one sound file, and the pages as pictures.
+// the tavern page, 朗读 turning the pages, the words coming in as they are read); changes to a page (its words, what is
+// read, its little drawings, its layout, its pictures, how it is performed: mood, camera, effects, the turn, its
+// sound) and the book (its kind, how it is drawn, its title); and exports: a web page that reads and performs itself
+// (.html), PDF, EPUB, the reading as one sound file, and the pages as pictures.
 import {createView, esc, heading, menu, help} from './common.js';
 import {icon} from './icons.js';
 import {saveFile, zipFiles} from '../download.js';
@@ -13,8 +14,9 @@ import {pictureInputs, sizeFor, activeStyle, withoutPeopleTags} from '../core/dr
 import {isV5} from '../core/novelai.js';
 import {pickLook, cutBackground, clearEdges, opaqueBounds} from '../core/vn.js';
 import {BOOK_THEMES, THEME_IDS, themeOf, guessTheme} from '../core/book-themes.js';
-import {storyPages, storyScript, retellPrompt, retoldPages, bookOf, pagesFor, scriptParts, normalizePage, linesFromText, linesText, readOf, castOf, shotShape, missingPictures, wordsOf, textsOfLines, LAYOUTS, TEXT_KINDS, TEXT_LABELS} from '../core/book.js';
-import {pageMarkup, pageNumbers, themeStyle} from '../core/book-pages.js';
+import {storyPages, storyScript, retellPrompt, retoldPages, bookOf, pagesFor, scriptParts, normalizePage, linesFromText, linesText, readOf, castOf, shotShape, missingPictures, wordsOf, textsOfLines, LAYOUTS, TEXT_KINDS, TEXT_LABELS, MOODS, CAMERAS, FX, TURNS} from '../core/book.js';
+import {pageMarkup, pageNumbers, themeStyle, directionOf} from '../core/book-pages.js';
+import {ORNAMENTS, ORNAMENT_IDS, ornamentSvg} from '../core/book-ornaments.js';
 import {mountBookReader, bookStyles} from '../book-reader.js';
 import {pageJpeg, drawSimple} from './book-render.js';
 import {pdfFromJpegs, epubOf} from '../core/book-export.js';
@@ -74,13 +76,13 @@ export function bookApp(ctx) {
     books.sort((a, b) => (b.at || 0) - (a.at || 0));
     const covers = await Promise.all(books.map(b => picUrl(firstPicture(b))));
     const card = (b, i) => {
-      const front = {...b, pages: [{...b.pages[0], kind: 'cover', shots: covers[i] ? [{picture: {url: 'cover'}, prompt: '', people: true}] : [], props: [], texts: [], stickers: [], cast: []}]};
+      const front = {...b, pages: [{...b.pages[0], kind: 'cover', shots: covers[i] ? [{picture: {url: 'cover'}, prompt: '', people: true}] : [], props: [], texts: [], doodles: [], cast: []}]};
       const lack = missingPictures(b).length, n = b.pages.filter(p => p.kind === 'scene' && p.layout !== 'title').length;
       return `<button type="button" class="bk-card" data-book="${esc(b.id)}" aria-label="${esc(b.title)}"><span class="bk-mini">${pageMarkup(front, 0, {url: () => covers[i]})}</span><span class="bk-badge">${esc(themeOf(b.theme).label)} · ${n} 页${lack ? ` · 差 ${lack} 张图` : ''}</span></button>`;
     };
     v.draw(heading('绘本', `<button type="button" class="chip-button" data-action="bk-new">${icon('add')}做一本</button>`, 'Picture Book')
       + `<div class="bk-shelf">${books.map(card).join('')}<button type="button" class="bk-new" data-action="bk-new">${icon('add')}<span>做一本绘本</span></button></div>`
-      + `<p class="hint">把酒馆里的故事做成以画面为主的绘本：大图、分镜、相片拼贴、人物立绘站在场景里，字只有几句，用旁白和角色的声音读出来。${help('「绘本（改编）」让文字模型把故事编成一页页的画面：每页选一种版式（满版大图、人物登场、分镜、相片拼贴、小画留白、大字、信纸、跨页大图），只放几句字或者一个字都不放，另写好朗读的话。「原文配图」不改一个字，按段落分页配上图。\n插图用绘图 App 现在的引擎：「绘本画风」按这本书的风格画（水彩、蜡笔、水墨……），「绘图 App 的画风」用你在绘图 App 里选的画风。人物登场页用视觉小说里的立绘，小物件画好后自动抠出来当贴纸。\n看书：手机上铺满屏幕，点右上角 ⛶ 在酒馆页面全屏看，电脑和平板横着放是左右两页的书。')}</p>`);
+      + `<p class="hint">把酒馆里的故事做成以画面为主的绘本：大图、分镜、相片拼贴、人物立绘站在场景里，字只有几句，用旁白和角色的声音读出来。${help('「绘本（改编）」让文字模型把故事编成一页页的画面：每页选一种版式（满版大图、人物登场、分镜、相片拼贴、小画留白、大字、信纸、跨页大图），只放几句字或者一个字都不放，另写好朗读的话。「原文配图」不改一个字，按段落分页配上图。\n插图用绘图 App 现在的引擎：「绘本画风」按这本书的风格画（水彩、蜡笔、水墨……），「绘图 App 的画风」用你在绘图 App 里选的画风。人物登场页用视觉小说里的立绘，小物件画好后自动抠出来当贴纸。\n看书：手机上铺满屏幕，点右上角的全屏按钮在酒馆页面全屏看，电脑和平板横着放是左右两页的书。每一页有自己的演出：光线和颜色、镜头、下雨下雪烟花这些效果、翻页的方式、环境声和音效；字跟着朗读一句句出来。')}</p>`);
   }
 
   // ---------- 做一本 ----------
@@ -140,12 +142,14 @@ export function bookApp(ctx) {
       let pages, title = form.title.trim(), subtitle = '', genre = '', cover = '', ending = '';
       if (form.mode === 'retell') {
         const {script, pictures} = storyScript(source.messages), parts = scriptParts(script), want = form.length === 'auto' ? pagesFor(script.length) : Number(form.length);
+        // The sounds the 音效 library has (while 音效 is on): the model picks each scene's ambience and sounds from them.
+        const sounds = await api.bookSounds?.().catch(() => null) || null;
         pages = [];
         for (let i = 0; i < parts.length; i++) {
           if (me.stop) throw Error('停下了');
           progress('文字模型在编绘本', i, parts.length, parts.length > 1 ? `故事比较长，分成 ${parts.length} 段来编：第 ${i + 1} 段` : '分页、想每一页的画面和版式、写几句字和朗读的话');
           const last = pages.filter(p => p.layout !== 'title').at(-1);
-          const prompt = retellPrompt(parts[i], {pages: Math.max(4, Math.round(want * parts[i].length / script.length)), cast: speakers, staged: standing, part: parts.length > 1 ? {index: i, of: parts.length} : null, before: last ? readOf({title: ''}, last).map(l => l.text).join('').slice(0, 160) : ''});
+          const prompt = retellPrompt(parts[i], {pages: Math.max(4, Math.round(want * parts[i].length / script.length)), cast: speakers, staged: standing, part: parts.length > 1 ? {index: i, of: parts.length} : null, before: last ? readOf({title: ''}, last).map(l => l.text).join('').slice(0, 160) : '', sounds});
           const got = retoldPages(await api.bookWrite(prompt.system, prompt.user), {pictures, cast: speakers, staged: standing});
           if (!i) { title ||= got.title; subtitle = got.subtitle; genre = got.genre; cover = got.cover; ending = got.ending; }
           pages.push(...got.pages);
@@ -266,8 +270,8 @@ export function bookApp(ctx) {
     loadCast();
     v.draw('<div class="bk-reading" data-bk-host></div>');
     v.root.classList.add('book-mode');
-    reader = mountBookReader({doc: ctx.doc, root: v.root.querySelector('[data-bk-host]'), book, picture: picUrl, sprite, read: lines => api.bookRead(lines), stop: () => api.stop?.(), at, two: true, draft: true,
-      onClose: () => shelf(), onFull: api.bookStage ? i => full(i) : null, onMenu: i => pageMenu(i), onPage: i => { at = i; }, notify: (text, error) => ctx.notify(text, {error}), visible: () => ctx.visible?.('picbook') !== false});
+    reader = mountBookReader({doc: ctx.doc, root: v.root.querySelector('[data-bk-host]'), book, picture: picUrl, sprite, read: (lines, onLine) => api.bookRead(lines, onLine), sound: api.bookSound ? (kind, name) => api.bookSound(kind, name) : null, stop: () => api.stop?.(), at, two: true, draft: true,
+      onClose: () => shelf(), onFull: api.bookStage ? i => full(i) : null, onMenu: i => pageMenu(i), onPage: i => { at = i; }, notify: (text, error) => ctx.notify(text, {error}), visible: () => ctx.visible?.('picbook') !== false && !ctx.doc.querySelector('.overlay .sheet'), escape: false});
   }
   async function full(i) {
     try { if (reader?.reading) reader.setReading(false); await api.bookStage(book.id, i); }
@@ -282,7 +286,8 @@ export function bookApp(ctx) {
     const key = await menu(ctx, p.kind === 'cover' ? '封面' : p.kind === 'end' ? '最后一页' : `第 ${i + 1} 页`, [
       p.kind === 'cover' && {key: 'title', icon: 'edit', label: '改书名'},
       p.layout === 'title' && {key: 'chapter', icon: 'edit', label: '改章节名'},
-      (scene || p.kind === 'end') && {key: 'words', icon: 'edit', label: '改字和朗读', note: '页面上的几句字、读出来的话、贴纸'},
+      (scene || p.kind === 'end') && {key: 'words', icon: 'edit', label: '改字和朗读', note: '页面上的几句字、读出来的话、小装饰'},
+      {key: 'show', icon: 'star', label: '演出', note: showNote(i)},
       scene && {key: 'layout', icon: 'sliders', label: '版式', note: LAYOUTS[p.layout].label},
       p.kind !== 'end' && {key: 'draw', icon: 'paint', label: has ? '重画这一页的图' : '给这一页画图', note: '可以先改要画什么'},
       p.kind !== 'end' && {key: 'pick', icon: 'image', label: '从相册换图'},
@@ -298,6 +303,7 @@ export function bookApp(ctx) {
       if (key === 'title') await editTitle();
       else if (key === 'chapter') await editChapter(i);
       else if (key === 'words') await editWords(i);
+      else if (key === 'show') await editShow(i);
       else if (key === 'layout') await changeLayout(i);
       else if (key === 'draw') { const k = await whichShot(i, '画哪一张？'); if (k != null) await redraw(i, k); }
       else if (key === 'pick') { const k = await whichShot(i, '换哪一张？'); if (k != null) { const blob = await pickBlob(); if (blob) { const ph = await api.addPhoto({name: `绘本-${safeTitle()}-${Date.now()}.${/png/.test(blob.type) ? 'png' : 'jpg'}`, blob}); p.shots[k] = {prompt: '', people: true, ...p.shots[k], picture: {id: ph.id}}; book.pages[i] = normalizePage(p); await keep(i); } } }
@@ -342,24 +348,70 @@ export function bookApp(ctx) {
     const p = book.pages[i], d = ctx.dialog('改章节名', `<div class="field"><span>章节名</span><input data-bk-edit="chapter" value="${esc(p.texts[0]?.text || '')}" maxlength="30"></div><div class="actions"><button type="button" class="primary" data-bk-save>存好</button></div>`);
     return dialogDone(d, async () => { const t = d.body.querySelector('[data-bk-edit=chapter]').value.trim(); if (!t) return; book.pages[i] = normalizePage({...p, texts: [{kind: 'title', text: t}], lines: [{role: '', text: t}]}); await keep(i); });
   }
-  /** The words on a page (each its kind and who says it), what is read aloud, the stickers. */
+  /** How a page is performed now, in words (the menu's note). */
+  function showNote(i) {
+    const d = directionOf(book, i);
+    return [MOODS[d.mood], CAMERAS[d.camera], ...d.fx.map(k => FX[k]), TURNS[d.turn]].filter(Boolean).join(' · ');
+  }
+  /**
+   * How a page is performed: its mood (the colour of its light), the camera over its picture, effects, the way it is
+   * turned to, and its sound; 自动 leaves each to its words.
+   */
+  async function editShow(i) {
+    const p = book.pages[i], d0 = directionOf(book, i), names = await api.bookSounds?.().catch(() => null) || null;
+    const chips = (key, table, multi = false) => `<div class="bk-chips" data-bk-chips="${key}"${multi ? ' data-multi' : ''}>${multi ? '' : `<button type="button" data-bk-chip="" aria-pressed="${!p[key]}">自动</button>`}${Object.entries(table).map(([id, label]) => `<button type="button" data-bk-chip="${id}" aria-pressed="${multi ? p.fx.includes(id) : p[key] === id}">${esc(label)}</button>`).join('')}</div>`;
+    const list = (id, items) => items?.length ? `<datalist id="${id}">${items.map(n => `<option value="${esc(n)}">`).join('')}</datalist>` : '';
+    const d = ctx.dialog('演出', `<p class="hint">「自动」按这一页的字和故事的类型来选。现在是：${esc(showNote(i))}。</p>
+      <div class="field"><span>情绪基调（画面的光和颜色）</span>${chips('mood', MOODS)}</div>
+      <div class="field"><span>镜头</span>${chips('camera', CAMERAS)}</div>
+      <div class="field"><span>效果（最多三个，不选就按字来）</span>${chips('fx', FX, true)}</div>
+      <div class="field"><span>翻到这一页的方式</span>${chips('turn', TURNS)}</div>
+      ${api.bookSound ? `<div class="field"><span>环境声${help('音效库里的名字（音效 App 打开时才会响）。一直响到下一个环境声；写「停」就停下。')}</span><input data-bk-amb value="${esc(p.sound.ambience)}" maxlength="40" list="bk-amb-list" placeholder="比如 雨声">${list('bk-amb-list', names?.ambience)}</div>
+      <div class="field"><span>翻到这一页时的音效</span><input data-bk-sfx value="${esc(p.sound.sfx)}" maxlength="40" list="bk-sfx-list" placeholder="比如 开门">${list('bk-sfx-list', names?.sfx)}</div>` : ''}
+      <div class="actions"><button type="button" class="primary" data-bk-save>存好</button></div>`);
+    void d0;
+    d.body.addEventListener('click', e => {
+      const b = e.target.closest('[data-bk-chip]');
+      if (!b) return;
+      const group = b.closest('[data-bk-chips]');
+      if (group.hasAttribute('data-multi')) {
+        const on = b.getAttribute('aria-pressed') !== 'true';
+        if (on && group.querySelectorAll('[aria-pressed=true]').length >= 3) { ctx.notify('效果最多三个'); return; }
+        b.setAttribute('aria-pressed', String(on));
+      } else group.querySelectorAll('[data-bk-chip]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    });
+    return dialogDone(d, async () => {
+      const chosen = key => d.body.querySelector(`[data-bk-chips="${key}"] [aria-pressed=true]`)?.dataset.bkChip || '';
+      const fx = [...d.body.querySelectorAll('[data-bk-chips=fx] [aria-pressed=true]')].map(b => b.dataset.bkChip);
+      const sound = {ambience: d.body.querySelector('[data-bk-amb]')?.value.trim() ?? p.sound.ambience, sfx: d.body.querySelector('[data-bk-sfx]')?.value.trim() ?? p.sound.sfx};
+      book.pages[i] = normalizePage({...p, mood: chosen('mood'), camera: chosen('camera'), turn: chosen('turn'), fx, sound});
+      await keep(i);
+    });
+  }
+  /** The words on a page (each its kind and who says it), what is read aloud, its little drawings. */
   function editWords(i) {
-    const p = book.pages[i], names = castOf(book), kinds = TEXT_KINDS.filter(k => k !== 'title');
+    const p = book.pages[i], names = castOf(book), kinds = TEXT_KINDS.filter(k => k !== 'title'), t = themeOf(book.theme);
     const row = (w = {kind: 'caption', text: '', who: ''}) => `<div class="bk-row" data-bk-row><select data-k="kind" aria-label="哪种字">${kinds.map(k => `<option value="${k}"${k === w.kind ? ' selected' : ''}>${TEXT_LABELS[k]}</option>`).join('')}</select><select data-k="who" aria-label="谁说的"><option value="">（旁白）</option>${names.map(n => `<option${n === w.who ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select><input data-k="text" value="${esc(w.text)}" maxlength="160" placeholder="页面上的字" aria-label="字"><button type="button" class="icon-button" data-bk-del aria-label="删掉这句">${icon('close')}</button></div>`;
     const d = ctx.dialog('改字和朗读', `<div class="field"><span>页面上的字${help('少一点更像绘本，可以一句都没有，只靠画面。旁白是一句话的说明；说话和心里话会放进气泡；大字是拟声词或大喊；小声是悄悄话。')}</span><div class="bk-rows" data-bk-rows>${p.texts.map(row).join('')}</div><button type="button" class="secondary" data-bk-add>${icon('add')}加一句</button></div>
       <div class="field"><span>读出来的话${help('一行一段。人物说的写成 名字：「……」，用他们的声音读；其他的是旁白。空着就读页面上的字。')}</span><textarea data-bk-read rows="5">${esc(linesText(p.lines))}</textarea></div>
-      <div class="field"><span>贴纸（emoji，用空格隔开）</span><input data-bk-stickers value="${esc(p.stickers.join(' '))}" placeholder="🌙 ☕"></div>
+      <div class="field"><span>小装饰（最多三个，可以不选）</span><div class="bk-orns">${ORNAMENT_IDS.map(id => `<button type="button" class="bk-orn" data-bk-orn="${id}" aria-pressed="${p.doodles.includes(id)}" aria-label="${esc(ORNAMENTS[id].label)}" title="${esc(ORNAMENTS[id].label)}" style="--o1:${t.accent};--o2:${t.tape[1]}">${ornamentSvg(id)}</button>`).join('')}</div></div>
       <div class="actions"><button type="button" class="primary" data-bk-save>存好</button></div>`);
     d.body.addEventListener('click', e => {
       if (e.target.closest('[data-bk-add]')) { d.body.querySelector('[data-bk-rows]').insertAdjacentHTML('beforeend', row()); d.body.querySelector('[data-bk-row]:last-child [data-k=text]')?.focus(); }
       const del = e.target.closest('[data-bk-del]');
       if (del) del.closest('[data-bk-row]').remove();
+      const orn = e.target.closest('[data-bk-orn]');
+      if (orn) {
+        const on = orn.getAttribute('aria-pressed') !== 'true';
+        if (on && d.body.querySelectorAll('[data-bk-orn][aria-pressed=true]').length >= 3) { ctx.notify('小装饰最多三个'); return; }
+        orn.setAttribute('aria-pressed', String(on));
+      }
     });
     return dialogDone(d, async () => {
       const texts = [...d.body.querySelectorAll('[data-bk-row]')].map(r => ({kind: r.querySelector('[data-k=kind]').value, who: r.querySelector('[data-k=who]').value, text: r.querySelector('[data-k=text]').value.trim()})).filter(w => w.text);
       const lines = linesFromText(d.body.querySelector('[data-bk-read]').value, names, p.lines);
-      const stickers = d.body.querySelector('[data-bk-stickers]').value.split(/\s+/).filter(Boolean);
-      book.pages[i] = normalizePage({...p, texts, lines, stickers});
+      const doodles = [...d.body.querySelectorAll('[data-bk-orn][aria-pressed=true]')].map(b => b.dataset.bkOrn);
+      book.pages[i] = normalizePage({...p, texts, lines, doodles});
       await keep(i);
     });
   }
@@ -485,7 +537,10 @@ export function bookApp(ctx) {
         pages.push(pageMarkup(book, i, {url: x => tokens.get(keyOf(x)) || '', sprite: (who, how) => people.get(who + '|' + how) || '', number: numbers[i].number, chapter: numbers[i].chapter, coverUrl}));
         if (kind === 'html-voice') { const b = await pageSound(p); sounds.push(b ? await dataUrl(b) : ''); }
       }
-      blob = new Blob([bookHtml(book, {pages, images, sounds})], {type: 'text/html'}); file = name + '.html';
+      // The weather drawn over the pages comes with the file (vn-fx.js inside it).
+      let fx = '';
+      try { const r = await ctx.win.fetch(new URL('../vn-fx.js', import.meta.url)); if (r.ok) fx = await r.text(); } catch {}
+      blob = new Blob([bookHtml(book, {pages, images, sounds, fx})], {type: 'text/html'}); file = name + '.html';
     }
     ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, file));
   }

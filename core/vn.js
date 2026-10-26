@@ -344,30 +344,123 @@ export const stageMove = emotion => visualEffects(emotion).move;
 export const lineFx = visualEffects;
 
 /**
- * What the story between the lines does to the stage: weather (the kind named last in it: rain, snow, petals, leaves,
- * stars, fireflies, embers; 'clear' when it stops or they go inside; '' when it says nothing), a flash (lightning,
- * boom), a heartbeat, a blackout (眼前一黑) and memory (回忆, 梦里: the scene turns old-photo coloured).
+ * How a line is staged beyond lineFx, so that lines alike are not all acted alike: the move (one of several for its
+ * feeling, picked by `seed`), a pose held while it is said (approach, turn, tilt, sink, droop, shrink, lean), the
+ * camera (push, snap, close, zoom, pull, drift, sway, tilt), light around the speaker (glints, bokeh, hearts), the
+ * edges (tint), lines rushing in, whether it is strong enough for a cut-in, letterbox bars for a quiet moment, and the
+ * tone its words are typed in (toneOf).
+ */
+const STAGE = {
+  happy: {move: ['bounce', 'hop', 'sway', 'bounce'], camera: ['', 'drift', 'push', ''], burst: ['glints', 'glints', 'hearts']},
+  angry: {move: ['shake', 'stomp', 'lunge'], camera: ['snap', 'close', 'zoom'], cut: true},
+  sad: {move: ['', ''], pose: ['sink', 'droop'], camera: ['push', 'close', 'pull'], bars: true},
+  surprised: {move: ['hop', 'recoil', 'hop'], camera: ['snap', 'zoom', 'snap'], cut: true},
+  shy: {move: ['', 'sway', ''], pose: ['shrink', 'turn', 'tilt'], camera: ['', 'push', 'drift'], burst: ['bokeh', 'hearts', 'bokeh']},
+  nervous: {move: ['tremble', 'tremble'], pose: ['', 'shrink'], camera: ['sway', 'tilt']},
+  fearful: {move: ['tremble', 'recoil'], pose: ['shrink', ''], camera: ['sway', 'zoom', 'tilt'], cut: true},
+  tired: {move: ['', ''], pose: ['droop', 'sink'], camera: ['', 'pull']},
+  confused: {move: ['', ''], pose: ['tilt', 'tilt', ''], camera: ['tilt', '']},
+  tender: {move: ['sway', ''], pose: ['approach', 'approach', 'tilt'], camera: ['push', 'close', 'drift'], burst: ['bokeh', 'hearts', 'bokeh'], bars: true},
+  sulky: {move: ['puff', ''], pose: ['turn', 'turn', ''], camera: ['tilt', '']},
+  worried: {move: ['', 'tremble'], pose: ['shrink', ''], camera: ['sway', 'push']},
+  curious: {move: ['', 'hop'], pose: ['lean', 'tilt'], camera: ['tilt', 'push']},
+  moved: {move: ['', ''], pose: ['approach', 'sink'], camera: ['push', 'close'], burst: ['glints', 'bokeh'], bars: true},
+};
+/** A steady number for a value (the same line is always acted the same way). */
+export function hashOf(value) {
+  let h = 2166136261;
+  for (const c of String(value)) h = Math.imul(h ^ c.codePointAt(0), 16777619);
+  return h >>> 0;
+}
+const pickOf = (list, n) => list?.length ? list[n % list.length] : '';
+/**
+ * The tone a line's words are typed in: 'shout' (！！, ！？, or a sharp feeling with ！), 'whisper' (in （）, or said
+ * softly), 'tremble' (afraid, nervous), 'slow' (sad, tired), 'bounce' (happy) or ''.
+ */
+export function toneOf(text, emotion = '') {
+  const t = String(text || '').trim(), e = String(emotion || ''), feel = visualEmotion(e);
+  if (/^[（(][\s\S]*[）)]$/.test(t) || /小声|低声|轻声|悄悄|耳语|呢喃|嘀咕|喃喃|whisper|murmur|mutter/i.test(e)) return 'whisper';
+  if (/[！!]{2,}|[！!][？?]|[？?][！!]/.test(t) || /[！!]/.test(t) && ['angry', 'surprised', 'fearful'].includes(feel) || /大喊|大叫|怒吼|吼道|尖叫|喊道|\bshout|\byell|scream/i.test(e)) return 'shout';
+  if (feel === 'fearful' || feel === 'nervous') return 'tremble';
+  if (feel === 'sad' || feel === 'tired') return 'slow';
+  if (feel === 'happy') return 'bounce';
+  return '';
+}
+/** lineFx and more for one line: {move, pose, camera, burst, tint, lines, cut, bars, tone, feel}; seed: the line itself. */
+export function lineStage(emotion, text = '', seed = '') {
+  const base = visualEffects(emotion), feel = visualEmotion(emotion), s = STAGE[feel] || {}, tone = toneOf(text, emotion), k = hashOf(`${seed}|${text}`);
+  const strong = tone === 'shout';
+  return {
+    move: s.move ? pickOf(s.move, k) : base.move,
+    pose: pickOf(s.pose, k >>> 3),
+    camera: s.camera ? pickOf(s.camera, k >>> 6) || (strong ? 'snap' : '') : strong ? 'snap' : base.camera,
+    burst: s.burst ? pickOf(s.burst, k >>> 9) : base.burst,
+    tint: base.tint,
+    lines: base.lines || (strong ? 'light' : ''),
+    cut: strong && (!!s.cut || /[！!]{2,}/.test(String(text))),
+    bars: !!s.bars && (k >>> 12) % 3 !== 0,
+    tone, feel,
+  };
+}
+
+/**
+ * What the story between the lines does to the stage: weather — every kind it names, in order, at most two, joined
+ * with '+' ('rain', 'storm' (rain and lightning), 'snow', 'petals', 'leaves', 'stars', 'shooting' (falling stars),
+ * 'fireflies', 'embers', 'fog', 'dust', 'sparkles', 'bubbles', 'wind', 'fireworks'); 'clear' when it stops or they go
+ * inside (which ends what was named before it); '' when it says nothing. Then a flash (lightning, boom), a heartbeat,
+ * a blackout (眼前一黑), memory (回忆, 梦里: old-photo colours), impact (a blow lands), glitch (what is seen or heard
+ * goes wrong), rays (light pouring in), grade — the light of the scene named last (night, dusk, dawn, day, warm
+ * lamplight, cold) — and skip: the time gone by when the text opens with it (第二天清晨, 三天后), for a card.
  */
 const WEATHER = [
-  ['rain', /下雨|雨水|雨滴|雨点|雨声|大雨|小雨|暴雨|细雨|雨中|雨夜|雨幕|淋雨|阵雨|\brain/gi],
-  ['snow', /下雪|雪花|雪片|大雪|飘雪|雪夜|雪地|风雪|\bsnow/gi],
+  ['storm', /暴风雨|雷雨|狂风暴雨|暴雨如注|电闪雷鸣|thunderstorm|\bstorm/gi],
+  ['rain', /下雨|下起了?(?:大|小|细|暴)?雨|雨下得|雨越下越|雨水|雨滴|雨点|雨声|大雨|小雨|暴雨|细雨|雨中|雨夜|雨幕|淋雨|阵雨|淅淅沥沥|\brain/gi],
+  ['snow', /下雪|下起了?(?:大|小)?雪|雪下得|飘起了?雪|雪花|雪片|大雪|飘雪|雪夜|雪地|风雪|落雪|\bsnow/gi],
   ['petals', /樱花|花瓣|落英|petal|sakura|cherry blossom/gi],
   ['leaves', /落叶|枯叶|红叶|秋叶|fallen leaves/gi],
-  ['stars', /星空|繁星|星星|银河|流星|满天星|starry/gi],
+  ['shooting', /流星|shooting stars?|meteor/gi],
+  ['stars', /星空|繁星|星星|银河|满天星|starry/gi],
   ['fireflies', /萤火虫|流萤|firefl/gi],
   ['embers', /篝火|火星|余烬|火堆|烛火|炉火|\bember|bonfire/gi],
-  ['clear', /雨停|雨势渐歇|雨渐渐停|放晴|雪停|天晴了|走进屋|进了屋|回到室内|关上窗|\bindoors/gi],
+  ['fog', /雾气|薄雾|浓雾|大雾|雾霭|晨雾|雾中|白雾|\bfog|\bmist/gi],
+  ['dust', /尘埃|灰尘|浮尘|微尘|尘土|\bdust/gi],
+  ['sparkles', /闪闪发光|亮晶晶|星光点点|光点|光粒|金光闪闪|波光粼粼|sparkl|glitter/gi],
+  ['bubbles', /气泡|泡泡|水下|海底|潜入水|\bbubbles?|underwater/gi],
+  ['wind', /狂风|大风|寒风|风呼啸|呼啸的风|一阵风|风很大|狂风大作|\bgust|\bwindy/gi],
+  ['fireworks', /烟花|烟火|焰火|礼花|firework/gi],
+  ['clear', /雨停|雨势渐歇|雨渐渐停|放晴|雪停|天晴了|雾散|雾气散去|风停了|走进屋|进了屋|回到室内|关上窗|\bindoors/gi],
 ];
+const GRADES = [
+  ['night', /深夜|夜晚|夜色|月光|月色|夜空|入夜|午夜|凌晨|路灯|黑夜|夜里|\bnight|moonlight/gi],
+  ['dusk', /黄昏|夕阳|落日|傍晚|晚霞|余晖|日落|\bdusk|sunset/gi],
+  ['dawn', /清晨|黎明|破晓|晨光|朝阳|日出|天亮|一大早|\bdawn|sunrise/gi],
+  ['day', /正午|中午|阳光明媚|烈日|大白天|晴空|\bnoon|midday/gi],
+  ['warm', /烛光|灯火|炉火|壁炉|暖黄的灯|昏黄的灯|台灯|candlelight|fireplace/gi],
+  ['cold', /阴天|乌云|阴沉沉|灰蒙蒙|阴冷|冷风|overcast/gi],
+];
+const SKIP = /^[\s「『"“（(…—\-*#]*(?:而|直到|等到|到了)?((?:第二天|翌日|次日|隔天|第二日)(?:早上|清晨|一早|中午|下午|傍晚|晚上|夜里)?|(?:几|数|[一二三四五六七八九十两半]+)(?:天|日|周|个星期|星期|个月|年)(?:之)?后|那天(?:晚上|夜里)|当晚|当天晚上|深夜|半夜|清晨|黎明时分|黄昏时分|傍晚时分|午后|入夜(?:后)?)/;
 export function storyFx(text) {
-  const t = String(text || '');
-  let weather = '', at = -1;
-  for (const [kind, re] of WEATHER) for (const m of t.matchAll(re)) if (m.index > at) { at = m.index; weather = kind; }
+  const t = String(text || ''), found = [];
+  for (const [kind, re] of WEATHER) for (const m of t.matchAll(re)) found.push({kind, at: m.index});
+  found.sort((a, b) => a.at - b.at);
+  let kinds = [], cleared = false;
+  for (const f of found) { if (f.kind === 'clear') { kinds = []; cleared = true; } else kinds = [...kinds.filter(k => k !== f.kind), f.kind]; }
+  // A storm is rain already.
+  if (kinds.includes('storm')) kinds = kinds.filter(k => k !== 'rain');
+  kinds = kinds.slice(-2);
+  let grade = '', at = -1;
+  for (const [kind, re] of GRADES) for (const m of t.matchAll(re)) if (m.index > at) { at = m.index; grade = kind; }
   return {
-    weather,
+    weather: kinds.length ? kinds.join('+') : cleared ? 'clear' : '',
     flash: /闪电|雷声|雷鸣|惊雷|电光一闪|lightning|thunder/i.test(t) ? 'lightning' : /爆炸|轰的一声|轰然|巨响|炸开|explo/i.test(t) ? 'boom' : '',
     pulse: /心跳|怦怦|砰砰|心脏狂跳|heartbeat/i.test(t),
     blackout: /眼前一黑|昏了过去|晕了过去|昏迷|失去了?意识|失去知觉|black(?:ed)? out/i.test(t),
     memory: /回忆起|回忆里|回忆中|记忆中|记忆里|那年|多年前|很多年前|梦里|梦中|梦境|flashback/i.test(t),
+    impact: /一拳|重重地(?:打|撞|砸|摔)|击中(?![^，。！？]{0,4}心)|撞上|撞向|撞击|砸在|砸向|劈下|斩下|一刀|刺穿|捅进|中枪|开枪|枪声|一脚踢|踹|一巴掌|耳光|\bpunch|\bsmash/i.test(t),
+    glitch: /扭曲|故障|乱码|信号(?:中断|失真|不稳)|杂音|电流声|屏幕闪烁|画面闪烁|glitch|静电/i.test(t),
+    rays: /阳光(?:洒|透过|穿过|照进|倾泻|铺满)|光柱|一束光|一道光(?!芒)|圣光|光芒(?:四射|万丈|洒)|曙光|晨光(?:洒|照)|sunbeam|god ?rays?/i.test(t),
+    grade,
+    skip: (SKIP.exec(t)?.[1] || '').replace(/[了，,。]$/, ''),
   };
 }
 /** Whether a CG fills the screen (cut a little at the edges) or is shown whole (its shape is far from the screen's). */

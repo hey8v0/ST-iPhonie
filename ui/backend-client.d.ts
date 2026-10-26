@@ -44,8 +44,10 @@ export interface VnMoveFile { id: string; label: string; words: string[]; path: 
 /** 绘本 (core/book.js normalizeBook / normalizePage). */
 export interface BookLine { role: string; text: string; emotion: string; from?: { id: number; line: number } }
 export type BookPicture = { url: string } | { id: string } | null;
-/** A page: pictures (shots), who stands on it as their 立绘 (cast, stage pages), the few words shown (texts), emoji stickers, drawn things cut out (props), what is read aloud (lines). */
-export interface BookPage { kind: 'cover' | 'scene' | 'end'; layout: 'cover' | 'end' | 'bleed' | 'stage' | 'panels' | 'polaroid' | 'vignette' | 'shout' | 'letter' | 'spread' | 'title' | 'classic'; shots: Array<{ prompt: string; picture: BookPicture; people: boolean }>; cast: Array<{ name: string; emotion: string; at: 'left' | 'right' | 'center' }>; texts: Array<{ kind: 'caption' | 'bubble' | 'think' | 'shout' | 'whisper' | 'title'; text: string; who: string }>; stickers: string[]; props: Array<{ prompt: string; picture: BookPicture }>; lines: BookLine[] }
+/** A page: pictures (shots), who stands on it as their 立绘 (cast, stage pages), the few words shown (texts), little drawings (doodles: book-ornaments.js ids), drawn things cut out (props), what is read aloud (lines). */
+export interface BookPage { kind: 'cover' | 'scene' | 'end'; layout: 'cover' | 'end' | 'bleed' | 'stage' | 'panels' | 'polaroid' | 'vignette' | 'shout' | 'letter' | 'spread' | 'title' | 'classic'; shots: Array<{ prompt: string; picture: BookPicture; people: boolean }>; cast: Array<{ name: string; emotion: string; at: 'left' | 'right' | 'center' }>; texts: Array<{ kind: 'caption' | 'bubble' | 'think' | 'shout' | 'whisper' | 'title'; text: string; who: string }>; doodles: string[]; props: Array<{ prompt: string; picture: BookPicture }>; lines: BookLine[];
+  /** How the page is performed ('' / []: chosen from its words): the light of its mood, the camera over its picture, effects, how it is turned to; its ambience and sound (音效 library names). */
+  mood: string; camera: string; fx: string[]; turn: string; sound: { ambience: string; sfx: string } }
 export interface Book { id: string; version: 2; title: string; subtitle: string; author: string; theme: string; art: 'book' | 'app'; mode: 'story' | 'retell'; source: { chat: string; name: string; from: number; to: number }; pages: BookPage[]; at: number; made: number }
 export interface VnModel { /** Live2D: the model's own motions ('group:index') and their words. */ acts?: Record<string, string[]>; id: string; kind: 'vrm' | 'live2d'; version: string; path: string; file: string; size: number; title: string; frame: 'half' | 'full' | 'face'; zoom: number; lift: number; map: Record<string, { expression: string; motion: string }>; /** Live2D 表情 kept on (its look); absent: guessed. */ keep?: string[]; at: number; }
 export interface VnCastEntry extends VnSet { actions: VnAction[]; outfits: VnOutfit[]; /** Up to 8, to switch between. */ models?: VnModel[]; /** The one in use ('' = the 立绘). */ useModel?: string; }
@@ -1049,7 +1051,11 @@ export interface BackendAPI extends BackendFacade {
     bookInfo?(): { chat: string; title: string; length: number; user: string };
     bookSource?(from?: number, to?: number): { chat: string; title: string; length: number; user: string; from: number; to: number; messages: Array<{ id: number; user: boolean; name: string; steps: Array<{ kind: 'say' | 'narrate' | 'bg'; text?: string; role?: string; emotion?: string; line?: number; part?: number; url?: string; user?: boolean }> }> };
     bookWrite?(system: string, user: string, options?: { length?: number }): Promise<string>;
-    bookRead?(lines: BookLine[]): Promise<boolean>;
+    bookRead?(lines: BookLine[], onLine?: (index: number) => void): Promise<boolean>;
+    /** 绘本: a page's ambience ('ambience', looping until another or 停), a sound ('sfx'), or 'stop' — from the 音效 library while 音效 is on (false: off). */
+    bookSound?(kind: 'ambience' | 'sfx' | 'stop', name?: string): Promise<boolean>;
+    /** 绘本: the names in the 音效 library, for the text model to choose a page's sound from (empty while 音效 is off). */
+    bookSounds?(): Promise<{ ambience: string[]; sfx: string[] }>;
     bookAudio?(lines: BookLine[]): Promise<Array<Blob | null>>;
     bookNarration?(): { kept: boolean; readable: boolean };
     /** 绘本 opened over the whole tavern page at page `at` (book-stage.js; the phone is put away). */

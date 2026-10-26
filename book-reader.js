@@ -2,10 +2,15 @@
 // wide screen the book lies open, two pages at a time, the leaf turning over the spine; on a tall one a page fills the
 // screen and turns away to the left. A tap on the left or right goes back or on, a swipe too, the arrow keys and the
 // wheel; a tap in the middle shows the bar (the title, 朗读, the page slider, 全屏, ⋯) or hides it. 朗读 reads the
-// pages aloud and turns them as it goes (by the time a page takes to look at when nothing on it can be read).
+// pages aloud and turns them as it goes (by the time a page takes to look at when nothing on it can be read); the words
+// on a page come in as their lines are read, and whoever is speaking moves.
+// Each page is performed as directed (core/book-pages.js directionOf): the page before turns into it its own way (the
+// leaf turning, a fade, through black or white, sliding, pushing in, opening like an eye, wiped across), the weather
+// and light it names are drawn over it (vn-fx.js), and its ambience and sound play (when 音效 is on).
 // The pages come from core/book-pages.js; pictures are found by `picture` (a picture's address, made once each).
-import {BOOK_CSS, pageMarkup, openings, pageNumbers, fitProse, themeStyle} from './core/book-pages.js';
+import {BOOK_CSS, pageMarkup, openings, pageNumbers, fitProse, themeStyle, directionOf} from './core/book-pages.js';
 import {readOf} from './core/book.js';
+import {createFx, FX_KINDS} from './vn-fx.js';
 
 const STYLE_ID = 'sttts-book-style';
 const READER_CSS = `
@@ -52,6 +57,9 @@ const READER_CSS = `
 .bkr-slider{flex:1;min-width:60px;accent-color:#fff;height:28px;cursor:pointer}
 .bkr-hint{position:absolute;left:50%;bottom:72px;z-index:41;transform:translateX(-50%);padding:8px 14px;border-radius:16px;background:rgba(0,0,0,.66);color:#fff;font-size:13px;pointer-events:none;opacity:0;transition:opacity .3s;max-width:86%;text-align:center}
 .bkr-hint[data-on]{opacity:1}
+.bkr-fx{position:absolute;z-index:30;pointer-events:none;overflow:hidden}
+.bkr-fx .vn-fx{position:absolute;inset:0;width:100%;height:100%}
+.bkr-cover-fx{position:absolute;inset:0;z-index:25;pointer-events:none;opacity:0}
 @media (prefers-reduced-motion:reduce){.bkr-leaf,.bkr-one-leaf{transition:none}}
 `;
 
@@ -77,10 +85,12 @@ const ICON = {
  * Puts a reader in `root` (filled). picture(p): a picture's address (a promise; '' when it is gone); sprite(name,
  * emotion): a 立绘's address; read(lines): reads lines aloud, resolving when done (false: nothing could be read);
  * stop(): stops reading. onClose / onFull / onMenu: buttons shown when given. two: whether a wide screen shows two
- * pages. onPage(i): the page now in front. visible(): whether keys are for it now. Returns {go, refresh, changed, at,
- * reading, setReading, destroy}.
+ * pages. onPage(i): the page now in front. visible(): whether keys are for it now. read(lines, onLine): onLine(k) when
+ * line k starts. sound(kind, name): an ambience ('ambience'), a sound ('sfx') or 'stop'. escape: whether Esc closes it
+ * (not in the phone, where Esc is its back). Returns {go, refresh, changed,
+ * at, reading, setReading, destroy}.
  */
-export function mountBookReader({doc, root, book, picture, sprite = () => '', read = null, stop = () => {}, at = 0, two = true, onClose = null, onFull = null, onMenu = null, onPage = () => {}, notify = () => {}, draft = false, visible = () => true}) {
+export function mountBookReader({doc, root, book, picture, sprite = () => '', read = null, stop = () => {}, at = 0, two = true, onClose = null, onFull = null, onMenu = null, onPage = () => {}, notify = () => {}, draft = false, visible = () => true, sound = null, escape = true}) {
   bookStyles(doc);
   const win = doc.defaultView, keys = new win.AbortController(), urls = new Map(), waiting = new Map();
   const frame = f => win.requestAnimationFrame ? win.requestAnimationFrame(f) : win.setTimeout(f, 16);
@@ -88,14 +98,17 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
   el.className = 'bkr';
   el.tabIndex = -1;
   el.setAttribute('style', themeStyle(book.theme));
-  el.innerHTML = `<div class="bkr-desk"></div><div class="bkr-book"></div>
+  el.innerHTML = `<div class="bkr-desk"></div><div class="bkr-book"></div><div class="bkr-fx"></div>
     <div class="bkr-bar">${onClose ? `<button type="button" class="bkr-btn" data-r="close" aria-label="关上">${ICON.close}</button>` : ''}<span class="bkr-title"></span>
       ${onFull ? `<button type="button" class="bkr-btn" data-r="full" aria-label="全屏">${ICON.full}</button>` : ''}${onMenu ? `<button type="button" class="bkr-btn" data-r="menu" aria-label="更多">${ICON.more}</button>` : ''}</div>
     <div class="bkr-foot"><button type="button" class="bkr-btn" data-r="prev" aria-label="上一页">${ICON.prev}</button><input class="bkr-slider" type="range" min="0" value="0" aria-label="翻到"><span class="bkr-where"></span><button type="button" class="bkr-btn" data-r="next" aria-label="下一页">${ICON.next}</button>
       ${read ? `<button type="button" class="bkr-btn" data-r="read" aria-pressed="false">${ICON.play}朗读</button>` : ''}</div>
     <div class="bkr-hint"></div>`;
   root.append(el);
-  const $ = s => el.querySelector(s), bookEl = $('.bkr-book');
+  const $ = s => el.querySelector(s), bookEl = $('.bkr-book'), fxEl = $('.bkr-fx');
+  // The weather over the pages: fewer particles where drawing costs more.
+  const fx = createFx({doc, host: fxEl, lite: !!win.matchMedia?.('(pointer: coarse)').matches || (win.navigator?.hardwareConcurrency || 8) <= 4});
+  let ambience = '';
   // A picture that will not load (a file gone) is left out, not shown broken.
   el.addEventListener('error', e => { if (e.target?.tagName === 'IMG') e.target.classList.add('bkp-broken'); }, true);
   let wide = false, list = [], shown = -1, heading = -1, showTurn = 0, size = {w: 0, h: 0}, busy = null, reading = false, readTurn = 0, quietTimer = 0, gone = false;
@@ -130,6 +143,8 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
     else if (W / H > .86) { framed = true; const m = 16; h = Math.min(H - m * 2, (W - m * 2) / .75); w = h * .75; }
     else { w = W; h = H; }
     Object.assign(bookEl.style, {width: w + 'px', height: h + 'px', left: (W - w) / 2 + 'px', top: (H - h) / 2 + 'px'});
+    Object.assign(fxEl.style, {width: w + 'px', height: h + 'px', left: (W - w) / 2 + 'px', top: (H - h) / 2 + 'px'});
+    fx.resize();
     bookEl.toggleAttribute('data-framed', framed);
     const changed = nowWide !== wide || !list.length;
     wide = nowWide;
@@ -150,7 +165,7 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
   const turnOn = nodes => frame(() => nodes.forEach(n => n.querySelector('.bkp')?.classList.add('on')));
 
   // ---------- showing an opening ----------
-  async function show(o, dir = 0) {
+  async function show(o, dir = 0, {sounds = true} = {}) {
     o = Math.max(0, Math.min(list.length - 1, o));
     heading = o;
     const turn = ++showTurn, target = list[o];
@@ -162,19 +177,84 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
     const fresh = target.map((i, k) => slot(i, sideOf(target, k)));
     const was = shown;
     shown = o;
-    const motion = dir && old.length && !win.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (!motion) { bookEl.replaceChildren(...fresh); fit(fresh); turnOn(fresh); }
-    else if (!wide) turnOne(old, fresh, dir);
-    else if (list[was]?.length === 2 && target.length === 2) turnLeaf(old, fresh, target, dir);
-    else { bookEl.replaceChildren(...fresh); fresh.forEach(f => f.classList.add('bkr-fade')); fit(fresh); turnOn(fresh); }
     paintBar();
     onPage(target[0]);
     ahead(o);
+    weather(target);
+    if (sounds) soundFor(target);
+    const motion = dir && old.length && !win.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    // Going on, the page turned to says how it comes; going back, the leaf turns back.
+    const kind = dir > 0 ? directionOf(book, target[0]).turn : 'curl';
+    let over;
+    if (!motion) { bookEl.replaceChildren(...fresh); fit(fresh); turnOn(fresh); over = Promise.resolve(); }
+    else if (kind !== 'curl') over = turnFx(old, fresh, kind);
+    else if (!wide) over = turnOne(old, fresh, dir);
+    else if (list[was]?.length === 2 && target.length === 2) over = turnLeaf(old, fresh, target, dir);
+    else over = turnFx(old, fresh, 'fade');
+    await over;
+  }
+  /** The weather and light the pages in front name, drawn over them. */
+  function weather(target) {
+    const kinds = [...new Set(target.flatMap(i => directionOf(book, i).fx.filter(k => FX_KINDS.includes(k))))].slice(0, 2);
+    if (kinds.length || fx.current) fx.weather(kinds);
+  }
+  /** Their ambience (a new one, or 停) and their sound, as they come in front. */
+  function soundFor(target) {
+    if (!sound) return;
+    for (const i of target) {
+      const s = book.pages[i]?.sound || {};
+      if (s.ambience && s.ambience !== ambience) { ambience = s.ambience; try { sound(/^(停|stop)$/i.test(s.ambience) ? 'stop' : 'ambience', s.ambience); } catch {} }
+      if (s.sfx) win.setTimeout(() => { if (!gone) try { sound('sfx', s.sfx); } catch {} }, 450);
+    }
+  }
+  /**
+   * The new pages come in over the old ones in their own way: a fade, through black, through white, sliding in,
+   * pushing in, opening like an eye, wiped across. Resolves when it is over.
+   */
+  function turnFx(old, fresh, kind) {
+    return new Promise(resolve => {
+      const timers = [], anims = [];
+      let done = false, cover = null;
+      const later = (fn, ms) => timers.push(win.setTimeout(fn, ms));
+      const anim = (node, frames, o = {}) => { const a = node.animate?.(frames, {duration: 650, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'both', ...o}); if (a) anims.push(a); return a; };
+      const end = () => { if (done) return; done = true; timers.forEach(t => win.clearTimeout(t)); anims.forEach(a => { try { a.cancel(); } catch {} }); cover?.remove(); bookEl.replaceChildren(...fresh); fit(fresh); turnOn(fresh); resolve(); };
+      busy = end;
+      if (kind === 'black' || kind === 'white') {
+        cover = doc.createElement('div');
+        cover.className = 'bkr-cover-fx';
+        cover.style.background = kind === 'black' ? '#000' : '#fff';
+        bookEl.append(cover);
+        const into = kind === 'black' ? 450 : 130, hold = kind === 'black' ? 260 : 70, out = kind === 'black' ? 650 : 700;
+        if (!anim(cover, [{opacity: 0}, {opacity: 1}], {duration: into})) cover.style.opacity = '1';
+        later(() => {
+          bookEl.replaceChildren(...fresh, cover); fit(fresh); turnOn(fresh);
+          if (!anim(cover, [{opacity: 1}, {opacity: 0}], {duration: out, easing: 'ease-out'})) cover.style.opacity = '0';
+        }, into + hold);
+        later(end, into + hold + out);
+        return;
+      }
+      bookEl.replaceChildren(...old, ...fresh);
+      fit(fresh);
+      const ms = {fade: 750, slide: 620, zoom: 680, iris: 800, wipe: 700}[kind] || 650;
+      for (const f of fresh) {
+        if (kind === 'slide') anim(f, [{transform: 'translateX(100%)'}, {transform: 'none'}], {duration: ms, easing: 'cubic-bezier(.2,.8,.2,1)'});
+        else if (kind === 'zoom') anim(f, [{transform: 'scale(1.14)', opacity: 0}, {transform: 'none', opacity: 1}], {duration: ms, easing: 'cubic-bezier(.2,.8,.2,1)'});
+        else if (kind === 'iris') anim(f, [{clipPath: 'circle(0% at 50% 50%)'}, {clipPath: 'circle(150% at 50% 50%)'}], {duration: ms, easing: 'cubic-bezier(.5,0,.3,1)'});
+        else if (kind === 'wipe') anim(f, [{clipPath: 'inset(0 0 0 100%)'}, {clipPath: 'inset(0 0 0 0)'}], {duration: ms, easing: 'cubic-bezier(.6,0,.3,1)'});
+        else anim(f, [{opacity: 0}, {opacity: 1}], {duration: ms});
+      }
+      for (const o of old) {
+        if (kind === 'slide') anim(o, [{transform: 'none', opacity: 1}, {transform: 'translateX(-30%)', opacity: .2}], {duration: ms, easing: 'cubic-bezier(.2,.8,.2,1)'});
+        else if (kind === 'zoom') anim(o, [{transform: 'none', opacity: 1}, {transform: 'scale(.92)', opacity: 0}], {duration: ms});
+      }
+      later(end, ms + 30);
+    });
   }
   /** One page: the old one turns away over the new (on), or the new one comes back over the old (back). */
   function turnOne(old, fresh, dir) {
-    let done = false;
-    const end = () => { if (done) return; done = true; bookEl.replaceChildren(...fresh); fit(fresh); turnOn(fresh); };
+    let done = false, resolve;
+    const over = new Promise(r => { resolve = r; });
+    const end = () => { if (done) return; done = true; bookEl.replaceChildren(...fresh); fit(fresh); turnOn(fresh); resolve(); };
     if (dir > 0) {
       bookEl.replaceChildren(...fresh, ...old);
       fit(fresh);
@@ -191,6 +271,7 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
     }
     const t = win.setTimeout(() => { fresh[0].classList.remove('bkr-one-leaf'); end(); }, 650);
     busy = () => { win.clearTimeout(t); fresh[0].classList.remove('bkr-one-leaf'); fresh[0].removeAttribute('data-away'); end(); };
+    return over;
   }
   /**
    * Two pages: the leaf turns over the spine. On: it holds the old right page in front and the new left page behind,
@@ -212,11 +293,13 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
     leaf.append(face(front, 'front'), face(behind, 'back'));
     bookEl.replaceChildren(...fresh, stay, leaf);
     fit([...fresh, behind]);
-    let done = false;
-    const end = () => { if (done) return; done = true; bookEl.replaceChildren(...fresh); turnOn(fresh); };
+    let done = false, resolve;
+    const over = new Promise(r => { resolve = r; });
+    const end = () => { if (done) return; done = true; bookEl.replaceChildren(...fresh); turnOn(fresh); resolve(); };
     frame(() => frame(() => { leaf.setAttribute('data-turning', ''); leaf.style.transform = `rotateY(${back ? 180 : -180}deg)`; }));
     const t = win.setTimeout(end, 760);
     busy = () => { win.clearTimeout(t); end(); };
+    return over;
   }
   function paintBar() {
     const o = list[shown] || [0], last = book.pages.length;
@@ -244,22 +327,48 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
     const b = $('[data-r=read]');
     if (b) { b.setAttribute('aria-pressed', String(on)); b.innerHTML = on ? `${ICON.pause}停` : `${ICON.play}朗读`; }
     readTurn++;
-    if (on) { quiet(true); readHere(); } else stop();
+    if (on) { quiet(true); readHere(); } else { stop(); release(); }
+  }
+  /** The page's words all there again, nobody speaking. */
+  function release(page = null) {
+    for (const p of page ? [page] : bookEl.querySelectorAll('.bkp[data-wait]')) {
+      p.querySelectorAll('.bkp-t').forEach(t => t.setAttribute('data-go', ''));
+      p.removeAttribute('data-wait');
+      p.querySelectorAll('.bkp-actor[data-talk]').forEach(a => a.removeAttribute('data-talk'));
+    }
   }
   async function readHere() {
     const turn = ++readTurn, o = now();
     for (const i of list[o] || []) {
       const lines = readOf(book, book.pages[i]);
+      const page = bookEl.querySelector(`:scope > .bkr-slot[data-page="${i}"] .bkp`), texts = page ? [...page.querySelectorAll('.bkp-t')] : [];
+      // Each line of words waits for the line read with it: the one that has its words, else the one at its place in
+      // the page's words; whoever says it moves.
+      const data = book.pages[i].texts, L = lines.length, clean = x => String(x || '').replace(/[\s「」『』“”"'‘’（）()…—，。！？、；：,.!?;:~～]/g, '');
+      const lineOf = k => {
+        const t = clean(data[k]?.text);
+        const hit = t ? lines.findIndex(l => { const c = clean(l.text); return c && (c.includes(t) || t.includes(c)); }) : -1;
+        return hit >= 0 ? hit : Math.min(L - 1, Math.floor(k * L / Math.max(1, data.length)));
+      };
+      const reveal = k => {
+        if (turn !== readTurn) return;
+        texts.forEach(t => { if (lineOf(Number(t.dataset.k)) <= k) t.setAttribute('data-go', ''); });
+        const role = lines[k]?.role || '';
+        page?.querySelectorAll('.bkp-actor').forEach(a => a.toggleAttribute('data-talk', !!role && a.getAttribute('aria-label') === role));
+      };
+      if (page && texts.length && lines.length) page.setAttribute('data-wait', '');
       let done = false;
-      try { done = lines.length ? await read(lines) : false; } catch (error) { notify(error.message, true); setReading(false); return; }
+      try { done = lines.length ? await read(lines, reveal) : false; } catch (error) { notify(error.message, true); setReading(false); return; }
       if (turn !== readTurn || !reading) return;
       if (!done) {
         if (lines.length && !warned) { warned = true; hint('没有能朗读的声音，按时间自动翻页（在设置 → 整篇朗读选旁白声音）'); }
-        // Nothing read: as long as it takes to look at it.
-        const chars = lines.reduce((n, l) => n + l.text.length, 0);
-        await new Promise(r => win.setTimeout(r, Math.min(9000, 2600 + chars * 120)));
+        // Nothing read: as long as it takes to look at it, the words coming in one line after another.
+        const chars = lines.reduce((n, l) => n + l.text.length, 0), wait = Math.min(9000, 2600 + chars * 120);
+        lines.forEach((_, k) => win.setTimeout(() => reveal(k), wait * k / (lines.length + 1)));
+        await new Promise(r => win.setTimeout(r, wait));
         if (turn !== readTurn || !reading) return;
       }
+      if (page) release(page);
     }
     if (now() >= list.length - 1) { setReading(false); return; }
     win.setTimeout(async () => { if (turn === readTurn && reading) { await go(now() + 1, {keepReading: true}); if (turn === readTurn && reading) readHere(); } }, 700);
@@ -296,15 +405,15 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
   });
   $('.bkr-slider').addEventListener('input', e => { later(); go(Number(e.target.value)); });
   doc.addEventListener('keydown', e => {
-    if (gone || !el.isConnected || el.closest('[hidden]') || e.target.closest?.('input:not(.bkr-slider), textarea, select, button, [contenteditable=true]')) return;
+    if (gone || !el.isConnected || el.closest('[hidden], [inert]') || e.target.closest?.('input:not(.bkr-slider), textarea, select, button, [contenteditable=true]')) return;
     if (!visible()) return;
     const k = e.key;
     if (k === 'ArrowRight' || k === 'PageDown' || k === ' ' || k === 'Enter') { e.preventDefault(); step(1); }
     else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); step(-1); }
     else if (k === 'Home') go(0); else if (k === 'End') go(list.length - 1);
-    else if (k === 'Escape' && onClose) onClose();
+    else if (k === 'Escape' && onClose && escape) onClose();
   }, {signal: keys.signal});
-  const resized = win.ResizeObserver ? new win.ResizeObserver(() => { const keep = list[now()]?.[0] ?? at; if (layout()) { shown = -1; show(openingOf(keep)); } }) : null;
+  const resized = win.ResizeObserver ? new win.ResizeObserver(() => { const keep = list[now()]?.[0] ?? at; if (layout()) { shown = -1; show(openingOf(keep), 0, {sounds: false}); } }) : null;
   resized?.observe(el);
 
   // ---------- start ----------
@@ -327,7 +436,7 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
       const keep = i ?? list[now()]?.[0] ?? 0;
       list = openings(book, wide);
       shown = -1;
-      return show(openingOf(Math.min(keep, book.pages.length - 1)));
+      return show(openingOf(Math.min(keep, book.pages.length - 1)), 0, {sounds: false});
     },
     /** A page changed (a picture drawn for it): drawn again when it is in front, else kept for when it comes. */
     changed(next, page) {
@@ -336,6 +445,6 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
       book = next; numbers = pageNumbers(book);
       return null;
     },
-    destroy() { gone = true; readTurn++; if (reading) stop(); keys.abort(); resized?.disconnect(); busy?.(); el.remove(); },
+    destroy() { gone = true; readTurn++; if (reading) stop(); if (ambience && sound) try { sound('stop'); } catch {} keys.abort(); resized?.disconnect(); busy?.(); fx.dispose(); el.remove(); },
   };
 }
