@@ -8,7 +8,7 @@ import {parsePictures} from './core/draw.js';
 import {storyMessage, storyReply} from './core/outgoing.js';
 import {parseSounds} from './core/sounds.js';
 import {parseBgm} from './core/music.js';
-import {modelInfo, normalizeModel} from './core/model-files.js';
+import {modelInfo, normalizeModel, currentModel, MODEL_LIMIT} from './core/model-files.js';
 
 const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? record.versions : record.url ? [{...record}] : [];
 /** The drawn picture of a story picture block, as shown in the chat (the chosen version). */
@@ -152,9 +152,9 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       source: {next: () => { while (cursor < chat().length) { const id = cursor++, steps = stepsOf(id); if (steps?.length) return {id, steps}; } return null; }},
       voice: {play: s => play(s.id, s.line), narrate: s => narrate(s.text), stop, on: voiceOn, mouth},
       models: {
-        has: name => !!vn().cast?.[name]?.model,
+        has: name => !!currentModel(vn().cast?.[name]),
         load: async name => {
-          const entry = vn().cast?.[name]?.model, {createModelActor, modelBytes} = await import('./vn-model.js');
+          const entry = currentModel(vn().cast?.[name]), {createModelActor, modelBytes} = await import('./vn-model.js');
           try { return await createModelActor({...entry}, await modelBytes(entry.path)); }
           // Once a stage: the 立绘 (or the avatar) stays in its place.
           catch (error) { if (!failed.has(name)) { failed.add(name); notice(`${name}的模型没能演出来：${error.message}`); } throw error; }
@@ -238,33 +238,51 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     return new File([local], name, {type});
   }
   /**
-   * A character's 模型: a new file (a .vrm, or a Live2D model as a .zip) in place of the one before, kept in the tavern's
-   * user/files; or, without one, a change to how it stands (frame, zoom, lift, map); remove takes it away. The file
-   * no longer used is deleted from the tavern. Resolves to the model kept (null when taken away).
+   * A character's 模型 (several, to switch between): a new file (a .vrm, or a Live2D model as a .zip) joins them, kept in
+   * the tavern's user/files, and is put on; use: which one they stand as ('' = the 立绘); remove: that one goes (its file
+   * deleted from the tavern); else a change to how one stands (frame, zoom, lift, map, keep). id: which one (the one in
+   * use when not said). Resolves to that model (or the one in use after use / remove; null for the 立绘).
    */
-  async function setModel(name, blob, {remove = false, ...change} = {}) {
+  async function setModel(name, blob, {id = '', use, remove = false, ...change} = {}) {
     name = String(name || '').trim();
     if (!name) throw Error('没有角色名');
     if (blob) blob = await ownFile(blob);
-    const s = settings(), entry = s.vn.cast?.[name] || {sprite: '', looks: {}, actions: [], outfits: []}, old = entry.model || null;
-    let model = remove ? null : old;
+    const s = settings(), entry = s.vn.cast?.[name] || {sprite: '', looks: {}, actions: [], outfits: []};
+    let models = [...(entry.models || [])], useModel = entry.useModel || '', target = id || useModel, gone = null;
     if (blob) {
+      if (models.length >= MODEL_LIMIT) throw Error(`一个角色最多存 ${MODEL_LIMIT} 个模型，先删掉一个不用的`);
       const info = await modelInfo(new Uint8Array(await blob.arrayBuffer()));
-      const file = `sttts-model-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.${info.kind === 'vrm' ? 'vrm' : 'zip'}`;
+      const key = Date.now().toString(36) + Math.random().toString(36).slice(2, 6), file = `sttts-model-${key}.${info.kind === 'vrm' ? 'vrm' : 'zip'}`;
       const ctx = context();
       const response = await fetch('/api/files/upload', {method: 'POST', headers: ctx.getRequestHeaders(), body: JSON.stringify({name: file, data: await backend.base64(blob)})});
       if (!response.ok) throw Error(response.status === 413 ? '模型文件太大，酒馆（或它前面的服务器）不让上传这么大的文件' : '模型没能存进酒馆（' + response.status + '）');
-      model = {kind: info.kind, version: info.version, path: 'user/files/' + file, file: String(blob.name || (info.kind === 'vrm' ? 'model.vrm' : 'model.zip')), size: blob.size, title: info.title,
-        frame: old?.frame || 'half', zoom: 1, lift: 0, map: {}, at: Date.now()};
+      const made = {id: 'm-' + key, kind: info.kind, version: info.version, path: 'user/files/' + file, file: String(blob.name || (info.kind === 'vrm' ? 'model.vrm' : 'model.zip')), size: blob.size, title: info.title, frame: 'half', zoom: 1, lift: 0, map: {}, at: Date.now()};
+      if (!normalizeModel(made)) throw Error('模型设置无效');
+      models.push(made); useModel = target = made.id;
+    } else if (remove) {
+      gone = models.find(m => m.id === target) || null;
+      if (!gone) throw Error('没有这个模型');
+      models = models.filter(m => m !== gone);
+      if (useModel === gone.id) useModel = models[0]?.id || '';
+      target = useModel;
+    } else if (use !== undefined) {
+      if (use && !models.some(m => m.id === use)) throw Error('没有这个模型');
+      useModel = target = String(use || '');
+    } else {
+      const at = models.findIndex(m => m.id === target);
+      if (at < 0) throw Error('没有这个模型');
+      const next = {...models[at], ...change, id: models[at].id, kind: models[at].kind, path: models[at].path};
+      if (!normalizeModel(next)) throw Error('模型设置无效');
+      models[at] = next;
     }
-    if (model && !blob) model = {...model, ...change, kind: model.kind, path: model.path};
-    if (model && !normalizeModel(model)) throw Error('模型设置无效');
-    const saved = backend.saveVn({cast: {...s.vn.cast, [name]: {...entry, model}}});
-    if (old && old.path !== model?.path) {
-      fetch('/api/files/delete', {method: 'POST', headers: context().getRequestHeaders(), body: JSON.stringify({path: old.path.replace(/^\//, '')})}).catch(() => {});
-      import('./vn-model.js').then(m => m.forgetModelBytes(old.path)).catch(() => {});
+    const {model: _old, ...rest} = entry;
+    const saved = backend.saveVn({cast: {...s.vn.cast, [name]: {...rest, models, useModel}}});
+    if (gone) {
+      fetch('/api/files/delete', {method: 'POST', headers: context().getRequestHeaders(), body: JSON.stringify({path: gone.path.replace(/^\//, '')})}).catch(() => {});
+      import('./vn-model.js').then(m => m.forgetModelBytes(gone.path)).catch(() => {});
     }
-    return saved?.cast?.[name]?.model || null;
+    const kept = (saved?.cast ?? settings().vn.cast)?.[name];
+    return (kept?.models || []).find(m => m.id === target) || null;
   }
 
   /** What the stage last chose for a character and why (shown on their 立绘 page): {kind, label, word, where, line}. */

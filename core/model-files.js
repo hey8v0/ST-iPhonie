@@ -303,9 +303,12 @@ export function typedMouth(char, t) {
 
 // ---------- the entry kept in settings ----------
 export const MODEL_FRAMES = Object.freeze({half: '半身', full: '全身', face: '特写'});
+/** How many models a character keeps to switch between. */
+export const MODEL_LIMIT = 8;
 /**
- * cast[name].model: {kind, version, path (in the tavern), file, size, title, frame, zoom, lift, map (Live2D 情绪 → 表情 /
- * 动作), keep (Live2D 表情 always on, its look; absent: guessed), at}.
+ * One model of a character (cast[name].models): {id, kind, version, path (in the tavern), file, size, title, frame,
+ * zoom, lift, map (Live2D 情绪 → 表情 / 动作), keep (Live2D 表情 always on, its look; absent: guessed), at}. A model kept
+ * before there were several has no id: it takes one from its file.
  */
 export function normalizeModel(m) {
   if (!m || typeof m !== 'object' || !['vrm', 'live2d'].includes(m.kind)) return null;
@@ -319,9 +322,27 @@ export function normalizeModel(m) {
   }
   const zoom = Number(m.zoom), lift = Number(m.lift);
   const keep = Array.isArray(m.keep) ? [...new Set(m.keep.map(x => text(x, 80)).filter(Boolean))].slice(0, 12) : null;
-  return {kind: m.kind, version: text(m.version, 4), path, file: text(m.file, 120), size: Math.max(0, Number(m.size) || 0), title: text(m.title, 80),
+  const id = typeof m.id === 'string' && /^m-[\w-]{1,60}$/.test(m.id) ? m.id : 'm-' + path.split('/').pop().replace(/[^\w-]/g, '_').slice(0, 58);
+  return {id, kind: m.kind, version: text(m.version, 4), path, file: text(m.file, 120), size: Math.max(0, Number(m.size) || 0), title: text(m.title, 80),
     frame: Object.hasOwn(MODEL_FRAMES, m.frame) ? m.frame : 'half', zoom: Number.isFinite(zoom) ? Math.min(2, Math.max(.6, Math.round(zoom * 100) / 100)) : 1,
     lift: Number.isFinite(lift) ? Math.min(.4, Math.max(-.4, Math.round(lift * 100) / 100)) : 0, map, ...(keep ? {keep} : {}), at: Number(m.at) || 0};
 }
+/**
+ * A character's models and the one in use, from what is kept: {models, useModel} ('' = the 立绘). A single model kept by
+ * 0.8.49 and before (entry.model) becomes the first of the list, in use.
+ */
+export function normalizeModels(entry) {
+  const legacy = normalizeModel(entry?.model), seen = new Set(), models = [];
+  for (const raw of [...(Array.isArray(entry?.models) ? entry.models : []), ...(legacy ? [legacy] : [])]) {
+    const m = normalizeModel(raw);
+    if (!m || seen.has(m.id) || seen.has(m.path)) continue;
+    seen.add(m.id); seen.add(m.path); models.push(m);
+  }
+  models.splice(MODEL_LIMIT);
+  const asked = typeof entry?.useModel === 'string' ? entry.useModel : legacy ? legacy.id : '';
+  return {models, useModel: models.some(m => m.id === asked) ? asked : ''};
+}
+/** The model a character stands as now (null: their 立绘). */
+export const currentModel = entry => (entry?.models || []).find(m => m.id === entry?.useModel) || null;
 /** What the page says a model is: 「VRM 0.x」「Live2D Cubism 4」. */
 export const modelLabel = m => !m ? '' : m.kind === 'vrm' ? `VRM ${m.version === '1' ? '1.0' : '0.x'}` : `Live2D Cubism ${m.version === '2' ? '2' : '3 / 4'}`;

@@ -2,19 +2,21 @@
 // (where the browser can) a whole Live2D folder, packed into one zip here; and the preview, where it moves as on the
 // stage: try each 情绪 and the mouth, choose the 取景 and nudge its size and height, and for Live2D which 表情 / 动作
 // each 情绪 brings (guessed from their names until changed). The model file is kept in the tavern (host-vn.js).
-import {esc, menu, size, select} from './common.js';
+import {esc, menu, size, select, help} from './common.js';
 import {icon} from './icons.js';
-import {modelLabel, MODEL_FRAMES, writeZip, live2dMap} from '../core/model-files.js';
+import {modelLabel, MODEL_FRAMES, MODEL_LIMIT, writeZip, live2dMap} from '../core/model-files.js';
 
 const FEELS = [['', '平常'], ['开心', '开心'], ['生气', '生气'], ['难过', '难过'], ['惊讶', '惊讶'], ['害羞', '害羞']];
 const MAPPED = [['happy', '开心'], ['angry', '生气'], ['sad', '难过'], ['surprised', '惊讶'], ['shy', '害羞']];
 const SAMPLE = '你好呀，今天也要一起加油哦！嗯……真的吗？太好了！';
 const LIMIT = 300 * 1024 * 1024;
 
-/** The model's card on a character's 立绘 page. */
-export function modelCard(model) {
-  if (!model) return `<button type="button" class="vn-model-card empty" data-action="vn-model">${icon('person')}<span><strong>用 VRM / Live2D 模型</strong><small>视觉小说里会动、会眨眼，跟着配音对口型</small></span>${icon('add')}</button>`;
-  return `<button type="button" class="vn-model-card" data-action="vn-model">${icon('person')}<span><strong>${esc(model.title || model.file)}</strong><small>${esc(modelLabel(model))} · ${esc(MODEL_FRAMES[model.frame] || '半身')}${model.size ? ' · ' + size(model.size) : ''} · 视觉小说里代替立绘</small></span>${icon('next')}</button>`;
+/** The models' card on a character's 立绘 page: the one in use (or the 立绘), and how many are kept. c: from vnCast. */
+export function modelCard(c) {
+  const models = c?.models || [], m = c?.model || null, more = models.length > 1 ? ` · 存了 ${models.length} 个` : '';
+  if (!models.length) return `<button type="button" class="vn-model-card empty" data-action="vn-model">${icon('person')}<span><strong>用 VRM / Live2D 模型</strong><small>视觉小说里会动、会眨眼，跟着配音对口型</small></span>${icon('add')}</button>`;
+  if (!m) return `<button type="button" class="vn-model-card empty" data-action="vn-model">${icon('person')}<span><strong>现在用立绘</strong><small>存了 ${models.length} 个模型，点开换上</small></span>${icon('next')}</button>`;
+  return `<button type="button" class="vn-model-card" data-action="vn-model">${icon('person')}<span><strong>${esc(m.title || m.file)}</strong><small>${esc(modelLabel(m))} · ${esc(MODEL_FRAMES[m.frame] || '半身')}${m.size ? ' · ' + size(m.size) : ''}${more}</small></span>${icon('next')}</button>`;
 }
 
 /** A .vrm / .zip, or a folder packed into a zip; null when nothing was picked. */
@@ -39,7 +41,17 @@ function pick(ctx, folder) {
     input.click();
   });
 }
-async function upload(ctx, api, name, folder) {
+const folderPick = ctx => 'webkitdirectory' in ctx.doc.createElement('input') && !ctx.win.matchMedia?.('(pointer: coarse)').matches;
+/** A new model joins the character's and is put on: a file, or (on a computer) a Live2D folder. null: nothing picked. */
+async function addModel(ctx, api, name) {
+  let folder = false;
+  if (folderPick(ctx)) {
+    const key = await menu(ctx, '添加模型 · ' + name, [
+      {key: 'file', icon: 'import', label: '选 .vrm 或 .zip 文件', note: 'VRM 0.x / 1.0 直接选 .vrm；Live2D（Cubism 2、3、4 都行）把整个模型文件夹压成 .zip'},
+      {key: 'folder', icon: 'import', label: '选 Live2D 模型文件夹', note: '不用压缩，直接选有 .model3.json 或 .model.json 的那个文件夹'}]);
+    if (!key) return null;
+    folder = key === 'folder';
+  }
   const file = await pick(ctx, folder);
   if (!file) return null;
   if (file.size > LIMIT) throw Error('模型文件太大了（超过 300 MB）');
@@ -49,18 +61,29 @@ async function upload(ctx, api, name, folder) {
   return model;
 }
 
-/** The card was tapped: pick a model (none yet), or preview / change / take away the one there. */
-export async function modelMenu(ctx, api, name, model) {
+/**
+ * The card was tapped: with no model yet, add one; else every model kept (the one in use ticked), the 立绘, and 添加模型.
+ * A model: put it on, preview and adjust it, or delete it. c: the character, from vnCast.
+ */
+export async function modelMenu(ctx, api, name, c) {
   if (!api.vnModel) throw Error('要在酒馆里打开小手机才能设置模型');
-  const folders = 'webkitdirectory' in ctx.doc.createElement('input') && !ctx.win.matchMedia?.('(pointer: coarse)').matches;
-  const picks = [
-    {key: 'file', icon: 'import', label: model ? '换一个模型' : '选 .vrm 或 .zip 文件', note: 'VRM 0.x / 1.0 直接选 .vrm；Live2D（Cubism 2、3、4 都行）把整个模型文件夹压成 .zip'},
-    folders && {key: 'folder', icon: 'import', label: '选 Live2D 模型文件夹', note: '不用压缩，直接选有 .model3.json 或 .model.json 的那个文件夹'},
-  ];
-  const key = await menu(ctx, '模型 · ' + name, model ? [{key: 'preview', icon: 'play', label: '预览和调整', note: '试表情和口型，选取景、大小、高低' + (model.kind === 'live2d' ? '，每种情绪用哪个表情 / 动作' : '')}, ...picks, {key: 'remove', icon: 'trash', label: '去掉模型', note: '视觉小说里换回立绘；酒馆里的模型文件也会删掉', danger: true}] : picks);
-  if (key === 'preview') return modelPreview(ctx, api, name, model);
-  if (key === 'file' || key === 'folder') { const made = await upload(ctx, api, name, key === 'folder'); if (made) return modelPreview(ctx, api, name, made); return; }
-  if (key === 'remove' && await ctx.confirm(`去掉${name}的模型？`, '酒馆里的模型文件也会删掉，立绘还在。')) { await api.vnModel(name, null, {remove: true}); ctx.notify('去掉了'); }
+  const models = c?.models || [], use = c?.useModel || '';
+  if (!models.length) { const made = await addModel(ctx, api, name); if (made) return modelPreview(ctx, api, name, made); return; }
+  const key = await menu(ctx, '模型 · ' + name, [
+    ...models.map(m => ({key: 'm:' + m.id, icon: m.id === use ? 'check' : 'person', label: m.title || m.file, note: `${modelLabel(m)} · ${MODEL_FRAMES[m.frame] || '半身'}${m.size ? ' · ' + size(m.size) : ''}${m.id === use ? ' · 正在用' : ''}`})),
+    {key: 'sprite', icon: use ? 'image' : 'check', label: '不用模型，用立绘', note: use ? '模型都留着，随时换回来' : '正在用'},
+    models.length < MODEL_LIMIT && {key: 'add', icon: 'add', label: '添加模型', note: `还能存 ${MODEL_LIMIT - models.length} 个，VRM 和 Live2D 都行`}]);
+  if (key === 'sprite') { if (use) { await api.vnModel(name, null, {use: ''}); ctx.notify(`${name}换回立绘了`); } return; }
+  if (key === 'add') { const made = await addModel(ctx, api, name); if (made) return modelPreview(ctx, api, name, made); return; }
+  const m = key && models.find(x => 'm:' + x.id === key);
+  if (!m) return;
+  const act = await menu(ctx, m.title || m.file, [
+    m.id !== use && {key: 'use', icon: 'check', label: '用这个', note: '视觉小说里用它演'},
+    {key: 'preview', icon: 'play', label: '预览和调整', note: '试表情和口型，选取景、大小、高低' + (m.kind === 'live2d' ? '，每种情绪用哪个表情 / 动作' : '')},
+    {key: 'remove', icon: 'trash', label: '删掉这个模型', note: '酒馆里的这个模型文件也会删掉', danger: true}]);
+  if (act === 'use') { await api.vnModel(name, null, {use: m.id}); ctx.notify(`${name}换上了「${m.title || m.file}」`); }
+  else if (act === 'preview') return modelPreview(ctx, api, name, m);
+  else if (act === 'remove' && await ctx.confirm(`删掉「${m.title || m.file}」？`, '酒馆里的这个模型文件也会删掉；' + (m.id === use ? (models.length > 1 ? '换成存着的下一个模型。' : '换回立绘。') : '正在用的不受影响。'))) { await api.vnModel(name, null, {id: m.id, remove: true}); ctx.notify('删掉了'); }
 }
 
 /** The model moving as on the stage, with its settings under it. Resolves when the sheet is closed. */
@@ -72,7 +95,7 @@ export async function modelPreview(ctx, api, name, model) {
     <label class="vn-model-slider"><span>大小</span><input class="slider" type="range" min="60" max="200" step="5" value="${Math.round((m.zoom || 1) * 100)}" data-model-set="zoom" aria-label="大小"></label>
     <label class="vn-model-slider"><span>高低</span><input class="slider" type="range" min="-40" max="40" step="2" value="${Math.round((m.lift || 0) * 100)}" data-model-set="lift" aria-label="高低"></label>
     <div data-model-map></div>
-    <p class="hint" data-keep-hint>${esc(modelLabel(m))} · ${esc(m.file)}${m.size ? ' · ' + size(m.size) : ''}。有模型时视觉小说用它演，立绘留着备用（模型读出来之前、读不出来时用）。配音播放时嘴跟着声音动，没有配音就跟着打字动。${m.kind === 'live2d' ? 'Live2D 的运行核心第一次用时从 Live2D 官网读（Cubism 2 的从 jsDelivr），要能连上。' : ''}</p>`);
+    <p class="hint">${esc(modelLabel(m))} · ${esc(m.file)}${m.size ? ' · ' + size(m.size) : ''}。有模型时视觉小说用它演，立绘留着备用（模型读出来之前、读不出来时用）。配音播放时嘴跟着声音动，没有配音就跟着打字动。${m.kind === 'live2d' ? 'Live2D 的运行核心第一次用时从 Live2D 官网读（Cubism 2 的从 jsDelivr），要能连上。' : ''}</p>`);
   const stage = d.body.querySelector('[data-model-stage]');
   let actor = null, raf = 0, last = 0, talk = 0, closed = false;
   const done = new Promise(resolve => d.onClose(() => { closed = true; ctx.win.cancelAnimationFrame(raf); actor?.dispose(); resolve(); }));
@@ -108,14 +131,14 @@ export async function modelPreview(ctx, api, name, model) {
     const info = actor.info, box = d.body.querySelector('[data-model-map]');
     if (!box || !info) return;
     const on = kept(), map = live2dMap(info, m.map, on), motions = Object.entries(info.motions || {}).flatMap(([g, n]) => Array.from({length: n}, (_, i) => [`${g}:${i}`, n > 1 ? `${g} ${i + 1}` : g]));
-    box.innerHTML = `${info.expressions.length ? `<div class="group-title"><span>一直开着的表情（外观）</span></div><div class="vn-model-feel">${info.expressions.map(e => `<button type="button" class="chip-button" data-look="${esc(e)}" aria-pressed="${on.includes(e)}">${esc(e)}</button>`).join('')}</div><p class="hint">捏人模型的样子（比如「我的」）存在表情里，选上它才是你捏的样子。</p>` : ''}
-      ${!info.expressions.some(e => !on.includes(e)) && !motions.length ? '<p class="hint" data-keep-hint>这个模型没有自带的情绪表情和动作：开心、生气这些用眉毛、眼睛、嘴角、脸红、歪头这些通用参数做出来。</p>' : `<div class="group-title"><span>每种情绪用哪个表情 / 动作</span></div><div class="vn-model-map">${MAPPED.map(([id, label]) => `<div class="vn-model-map-row"><b>${label}</b>${select('map-e-' + id, map[id]?.expression || '', [['', '通用表情'], ...info.expressions.filter(e => !on.includes(e)).map(e => [e, e])], `data-map="${id}" data-part="expression"`)}${select('map-m-' + id, map[id]?.motion || '', [['', '不做动作'], ...motions], `data-map="${id}" data-part="motion"`)}</div>`).join('')}</div>
+    box.innerHTML = `${info.expressions.length ? `<div class="group-title"><span>一直开着的表情（外观）${help('捏人模型的样子（比如 VTube Studio 的「我的」）存在表情里，选上它才是你捏的样子。插件会先猜一个，不对就在这里改。')}</span></div><div class="vn-model-feel">${info.expressions.map(e => `<button type="button" class="chip-button" data-look="${esc(e)}" aria-pressed="${on.includes(e)}">${esc(e)}</button>`).join('')}</div>` : ''}
+      ${!info.expressions.some(e => !on.includes(e)) && !motions.length ? '<p class="hint">这个模型没有自带的情绪表情和动作：开心、生气这些用眉毛、眼睛、嘴角、脸红、歪头这些通用参数做出来。</p>' : `<div class="group-title"><span>每种情绪用哪个表情 / 动作</span></div><div class="vn-model-map">${MAPPED.map(([id, label]) => `<div class="vn-model-map-row"><b>${label}</b>${select('map-e-' + id, map[id]?.expression || '', [['', '通用表情'], ...info.expressions.filter(e => !on.includes(e)).map(e => [e, e])], `data-map="${id}" data-part="expression"`)}${select('map-m-' + id, map[id]?.motion || '', [['', '不做动作'], ...motions], `data-map="${id}" data-part="motion"`)}</div>`).join('')}</div>
       <p class="hint">按名字猜的，可以改；试表情时就用这里选的。选「通用表情」的情绪，用眉毛、眼睛、嘴角、脸红、歪头这些每个模型都有的参数做出来。</p>`}`;
   }
   async function save(change) {
     m = {...m, ...change};
     actor?.frame(change);
-    try { m = await api.vnModel(name, null, change) || m; } catch (error) { ctx.notify(error.message, {error: true}); }
+    try { m = await api.vnModel(name, null, {id: m.id, ...change}) || m; } catch (error) { ctx.notify(error.message, {error: true}); }
   }
   d.body.addEventListener('click', e => {
     const look = e.target.closest('[data-look]');

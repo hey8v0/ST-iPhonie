@@ -2,7 +2,7 @@
 // the 立绘 (with their 表情 and 动作) and the requests that draw them, and the cut-out that takes the plain background
 // off a drawn 立绘.
 import {skippedRanges, narrationPieces, NARRATION_SKIP, NARRATION_BODY, cleanSkip} from './narration.js';
-import {normalizeModel} from './model-files.js';
+import {normalizeModels} from './model-files.js';
 import {visualEmotion, visualEffects, matchesVisualWord, visualWordEmotion, visualWordHits, doneBy} from './visual-emotion.js';
 import {activeStyle, sizeFor} from './draw.js';
 import {isV5} from './novelai.js';
@@ -54,7 +54,8 @@ const words = (value,max=LIMIT.label) => [...new Set((Array.isArray(value) ? val
  * (the character's own actions: what to draw, and the words that bring them on). Each picture can have others in its
  * group (alts: [{sprite, at, seed?}]): sprite is the one in use, or with mix they take turns at random. 形象 (outfits:
  * a school uniform, a monk's robe) each have a whole set of their own; which one a chat uses is kept in that chat.
- * model: a VRM or Live2D model (core/model-files.js normalizeModel) the stage shows in place of the 立绘.
+ * models: VRM / Live2D models (core/model-files.js normalizeModels); useModel: the one the stage shows in place of the
+ * 立绘 ('' = the 立绘).
  */
 const urlOf = value => text(value, LIMIT.url);
 function normalizeAlts(list) {
@@ -96,9 +97,9 @@ function normalizeCast(value) {
     const outfits = (Array.isArray(c.outfits) ? c.outfits : []).slice(0, LIMIT.outfits)
       .map(o => ({id: text(o?.id, 40), label: text(o?.label, LIMIT.label), appearance: text(o?.appearance, LIMIT.appearance), ...normalizeSet(o, ids)}))
       .filter(o => /^o-[\w-]+$/.test(o.id) && o.label);
-    const set = normalizeSet(c, ids), model = normalizeModel(c.model);
-    if (!set.sprite && !Object.keys(set.looks).length && !actions.length && !outfits.length && !model) continue;
-    cast[key] = {...set, actions, outfits, ...(model ? {model} : {})};
+    const set = normalizeSet(c, ids), {models, useModel} = normalizeModels(c);
+    if (!set.sprite && !Object.keys(set.looks).length && !actions.length && !outfits.length && !models.length) continue;
+    cast[key] = {...set, actions, outfits, ...(models.length ? {models, useModel} : {})};
   }
   return cast;
 }
