@@ -8,7 +8,8 @@ import {parsePictures} from './core/draw.js';
 import {storyMessage, storyReply} from './core/outgoing.js';
 import {parseSounds} from './core/sounds.js';
 import {parseBgm} from './core/music.js';
-import {modelInfo, normalizeModel, currentModel, MODEL_LIMIT} from './core/model-files.js';
+import {modelInfo, normalizeModel, currentModel, MODEL_LIMIT, vrmaInfo, wordList, MOVE_FILE_LIMIT} from './core/model-files.js';
+import {MOVES, moveFor} from './core/model-moves.js';
 
 const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? record.versions : record.url ? [{...record}] : [];
 /** The drawn picture of a story picture block, as shown in the chat (the chosen version). */
@@ -159,6 +160,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
           // Once a stage: the 立绘 (or the avatar) stays in its place.
           catch (error) { if (!failed.has(name)) { failed.add(name); notice(`${name}的模型没能演出来：${error.message}`); } throw error; }
         },
+        move: (name, how) => moveSpec(name, how),
       },
       // 快进 runs past the one-off sounds; the ambience and the music still change to where it stops.
       cue: (s, {skipping}) => { if (s.kind === 'bgm') music(s.id, s.index); else sound(s.id, s.index, {skipping}); },
@@ -285,10 +287,59 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     return (kept?.models || []).find(m => m.id === target) || null;
   }
 
+  /**
+   * The 动作 a line brings for a character's model (core/model-moves.js), from the story around it: the built-in ones;
+   * their own 立绘 动作 named like one of those (their words bring it on too); for VRM the user's motion files, for
+   * Live2D the model's own motions given words. A spec for the model's act(), or null.
+   */
+  function moveSpec(name, how = {}) {
+    const entry = vn().cast?.[name], model = currentModel(entry);
+    if (!model) return null;
+    const extra = [];
+    if (model.kind === 'vrm') for (const m of vn().moves || []) extra.push({id: m.id, label: m.label, words: m.words});
+    else for (const [motion, words] of Object.entries(model.acts || {})) extra.push({id: 'motion:' + motion, label: motion, words});
+    for (const a of entry.actions || []) {
+      if (a.kind === 'expression') continue;
+      const same = MOVES.find(m => m.label === a.label || (a.words || []).some(w => m.words.includes(w)));
+      if (same) extra.push({id: same.id, label: same.label, words: a.words});
+    }
+    const hit = moveFor({...how, name}, extra);
+    if (!hit) return null;
+    if (hit.id.startsWith('motion:')) return {id: hit.id, motion: hit.id.slice(7)};
+    const file = (vn().moves || []).find(m => m.id === hit.id);
+    return file ? {id: file.id, path: file.path} : {id: hit.id};
+  }
+  /**
+   * The user's motion files (.vrma, for every VRM character): a new one joins them (kept in the tavern's user/files);
+   * else the one with this id is renamed / given words, or removed (its file deleted). Resolves to the list.
+   */
+  async function setMoveFile(blob, {id = '', label, words, remove = false} = {}) {
+    const s = settings(), list = [...(s.vn.moves || [])];
+    let gone = null;
+    if (blob) {
+      blob = await ownFile(blob);
+      if (list.length >= MOVE_FILE_LIMIT) throw Error(`动作文件最多存 ${MOVE_FILE_LIMIT} 个，先删掉不用的`);
+      const info = vrmaInfo(new Uint8Array(await blob.arrayBuffer()));
+      const key = Date.now().toString(36) + Math.random().toString(36).slice(2, 6), file = `sttts-move-${key}.vrma`;
+      const response = await fetch('/api/files/upload', {method: 'POST', headers: context().getRequestHeaders(), body: JSON.stringify({name: file, data: await backend.base64(blob)})});
+      if (!response.ok) throw Error('动作文件没能存进酒馆（' + response.status + '）');
+      const base = String(blob.name || '').replace(/\.vrma$/i, '').trim();
+      list.push({id: 'v-' + key, label: String(label || base || '动作').slice(0, 20), words: wordList(words ?? base), path: 'user/files/' + file, file: String(blob.name || file), size: blob.size, seconds: info.seconds, at: Date.now()});
+    } else {
+      const at = list.findIndex(m => m.id === id);
+      if (at < 0) throw Error('没有这个动作文件');
+      if (remove) gone = list.splice(at, 1)[0];
+      else list[at] = {...list[at], ...(label != null ? {label: String(label)} : {}), ...(words != null ? {words: wordList(words)} : {})};
+    }
+    const saved = backend.saveVn({moves: list});
+    if (gone) fetch('/api/files/delete', {method: 'POST', headers: context().getRequestHeaders(), body: JSON.stringify({path: gone.path.replace(/^\//, '')})}).catch(() => {});
+    return (saved?.moves ?? settings().vn.moves) || [];
+  }
+
   /** What the stage last chose for a character and why (shown on their 立绘 page): {kind, label, word, where, line}. */
   const lastPick = name => picks.has(name) ? {...picks.get(name)} : null;
   return {
-    open, setSprite, setModel, wear, setWear, lastPick,
+    open, setSprite, setModel, setMoveFile, moveSpec, wear, setWear, lastPick,
     get showing() { return !!stage; },
     status(phase) { stage?.status(phase); },
     refresh() { stage?.refresh(); },

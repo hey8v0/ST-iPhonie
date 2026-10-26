@@ -2729,3 +2729,10 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 /* 视觉小说 › 立绘 whose file is gone from the tavern. */
 :is(.vn-look-pic,.vn-sprite-thumb).lost img{display:none}
 :is(.vn-look-pic,.vn-sprite-thumb).lost::after{content:'图丢了';display:grid;place-items:center;width:100%;height:100%;font-size:11px;font-weight:700;color:var(--danger);background:var(--card2)}
+
+/* 视觉小说 › 模型 › 动作: the user's motion files and a Live2D model's own motions, each with its words. */
+.vn-move-files{display:grid;gap:8px;margin:0 0 10px}
+.vn-move-row{display:grid;grid-template-columns:minmax(0,5.5em) minmax(0,1fr) auto;align-items:center;gap:6px}
+.vn-move-row[data-motion]{grid-template-columns:auto minmax(0,1fr)}
+.vn-move-row input{min-width:0;font:inherit;font-size:13px;color:var(--ink);background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.vn-move-row .chip-button{min-height:32px;border:0;cursor:pointer}

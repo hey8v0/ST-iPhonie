@@ -215,7 +215,8 @@ const quoted = text => /^[「『“"‘（(]/.test(text) ? text : '「' + text +
  * the story just before it; after: right after it; names: who else is in the story). cue(step, {skipping}): a sound or <bgm> of the story is reached. send(text): sends to the tavern (false
  * when it could not). save(patch): keeps a setting. title/subtitle: the title card. backdrop: the picture to start on
  * ({url, soft}); scene: the chat's own background, which comes back after a CG's message. onClose(lastId).
- * models: {has(name), load(name) → Promise<actor>} — characters with a VRM / Live2D model (vn-model.js) stand as it,
+ * models: {has(name), load(name) → Promise<actor>, move?(name, {context, after, names}) → a 动作 for act() or null} —
+ * characters with a VRM / Live2D model (vn-model.js) stand as it,
  * their 立绘 only until it is ready; voice.mouth() is the mouth of the voice playing now.
  */
 export function openVnStage({doc = document, source, look, voice, face, sprite, cue = () => {}, send, save = () => {}, title = '', subtitle = '', backdrop = null, scene = '', models = null, onClose = () => {}}) {
@@ -543,6 +544,8 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       lookOf.set(name, url);
     }
     const model = say && !s.user ? modelFor(name) : null;
+    // A 动作 the story right around the line names (挥手, 鞠躬 …), for a character standing as a model.
+    const gesture = model && !s.part && !again ? models.move?.(name, {context: said, after: storyAfter(s), names: people()}) : null;
     if (say) said = ''; else said = (said + '\n' + s.text).slice(-400);
     // A new CG is seen alone for two pages; the next one who speaks with a 立绘 brings them back in front of it.
     if (!again && cg) cgPages++;
@@ -552,6 +555,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     if (say && !url && !model) leave(name);
     if ((url || model) && !alone) actor = enter(name, url, model);
     if (actor?.model && !s.part) actor.model.feel(s.emotion);
+    if (actor?.model && gesture && !skip) actor.model.act(gesture)?.catch?.(() => {});
     if (actor && !s.part) actor.el.removeAttribute('data-sink');
     // Whoever speaks is lit; the others dim (all of them when the speaker has no 立绘 on the stage).
     spotlight(say ? name : '');

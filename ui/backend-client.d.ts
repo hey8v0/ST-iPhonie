@@ -29,6 +29,7 @@ export interface VnSettings {
     /** 不演的标签: tag names whose content the stage leaves out. */
     skip: string[];
     cast: Record<string, VnCastEntry>;
+    moves: VnMoveFile[];
 }
 export interface VnAction { id: string; label: string; tags: string; words: string[]; }
 /** One picture in use and the others of its group (mix: they take turns at random). */
@@ -38,7 +39,9 @@ export interface VnSet extends VnGroup { seed?: number; looks: Record<string, Vn
 /** 形象: another set of 立绘 (a school uniform, a robe), drawn with its own looks. */
 export interface VnOutfit extends VnSet { id: string; label: string; appearance: string; }
 /** 模型 (core/model-files.js normalizeModel): a VRM or Live2D model the stage shows in place of the 立绘. frame: 取景; map: a Live2D model's 表情 / 动作 ('group:index') for each of the five 情绪. */
-export interface VnModel { id: string; kind: 'vrm' | 'live2d'; version: string; path: string; file: string; size: number; title: string; frame: 'half' | 'full' | 'face'; zoom: number; lift: number; map: Record<string, { expression: string; motion: string }>; /** Live2D 表情 kept on (its look); absent: guessed. */ keep?: string[]; at: number; }
+/** A motion file (.vrma) the user added, for every VRM character, brought on by its words. */
+export interface VnMoveFile { id: string; label: string; words: string[]; path: string; file: string; size: number; seconds: number; at: number; }
+export interface VnModel { /** Live2D: the model's own motions ('group:index') and their words. */ acts?: Record<string, string[]>; id: string; kind: 'vrm' | 'live2d'; version: string; path: string; file: string; size: number; title: string; frame: 'half' | 'full' | 'face'; zoom: number; lift: number; map: Record<string, { expression: string; motion: string }>; /** Live2D 表情 kept on (its look); absent: guessed. */ keep?: string[]; at: number; }
 export interface VnCastEntry extends VnSet { actions: VnAction[]; outfits: VnOutfit[]; /** Up to 8, to switch between. */ models?: VnModel[]; /** The one in use ('' = the 立绘). */ useModel?: string; }
 /** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
 export interface NarrationSettings {
@@ -1040,7 +1043,9 @@ export interface BackendAPI extends BackendFacade {
     vnWear(): Record<string, string>;
     vnSetWear(name: string, outfit: string): Record<string, string>;
     /** A character's 模型: a .vrm or a Live2D .zip (kept in the tavern) joins their models and is put on; use: which one they stand as ('' = 立绘); remove: that one goes; else how it stands. id: which one (default: in use). */
-    vnModel?(name: string, blob: Blob | null, options?: { id?: string; use?: string; remove?: boolean; frame?: 'half' | 'full' | 'face'; zoom?: number; lift?: number; map?: Record<string, { expression: string; motion: string }>; keep?: string[] }): Promise<VnModel | null>;
+    /** 模型的动作文件 (.vrma, for every VRM character): a new one joins them; else rename / give words to / remove the one with id. */
+    vnMoveFile?(blob: Blob | null, options?: { id?: string; label?: string; words?: string | string[]; remove?: boolean }): Promise<VnMoveFile[]>;
+    vnModel?(name: string, blob: Blob | null, options?: { id?: string; use?: string; remove?: boolean; acts?: Record<string, string[]>; frame?: 'half' | 'full' | 'face'; zoom?: number; lift?: number; map?: Record<string, { expression: string; motion: string }>; keep?: string[] }): Promise<VnModel | null>;
     /** What the 视觉小说 last showed for a character and why: a 动作 (and the words that brought it, before or after the line, or in its 情绪), a 表情, or the usual one. */
     vnLastPick?(name: string): { kind: 'action' | 'expression' | 'usual'; label: string; word: string; where?: 'emotion' | 'before' | 'after'; line: string } | null;
     /** 改提示词再画: a picture's English tags read in Chinese ('translate'), or changed the way the user says ('revise'), by the text model. Only in the tavern. */

@@ -218,7 +218,7 @@ export class TTSBackend {
         // The 视觉小说's 立绘 and 模型 are files in the tavern; the settings only name them. A backup carries the files.
         let vnFiles = null;
         if (want.includes('vnFiles')) {
-            const paths = castFiles(this.settings.vn.cast);
+            const paths = castFiles([this.settings.vn.cast, this.settings.vn.moves]);
             if (paths.length && !this.syncFiles?.readPath) throw Error('要在酒馆里打开小手机，才能把视觉小说的立绘和模型放进备份（不要的话把这一项关掉）');
             vnFiles = [];
             for (const path of paths) { const blob = await this.syncFiles.readPath(path).catch(() => null); if (blob) vnFiles.push({ path, blob }); }
@@ -261,7 +261,7 @@ export class TTSBackend {
                 moved[f.path] = await this.syncFiles.writePath(f.path, f.blob);
                 done.vnFiles++;
             }
-            if (settings) settings.vn.cast = moveCastFiles(settings.vn.cast, moved);
+            if (settings) { settings.vn.cast = moveCastFiles(settings.vn.cast, moved); settings.vn.moves = moveCastFiles(settings.vn.moves, moved); }
         }
         const rows = {};
         for (const part of want) for (const store of PART_STORES[part]) if (backup.library[store]) rows[store] = backup.library[store];
@@ -269,7 +269,7 @@ export class TTSBackend {
         // settings that point at them.
         if (Object.keys(rows).length) Object.assign(done, await this.library.importRows(rows, { replace }));
         if (settings) { this.save(settings); done.settings = true; await this.loadReferences(); }
-        else if (moved && Object.entries(moved).some(([a, b]) => a !== b)) this.saveVn({ cast: moveCastFiles(this.settings.vn.cast, moved) });
+        else if (moved && Object.entries(moved).some(([a, b]) => a !== b)) this.saveVn({ cast: moveCastFiles(this.settings.vn.cast, moved), moves: moveCastFiles(this.settings.vn.moves, moved) });
         if (want.has('vibes') && backup.library.vibes) {
             // The groups: replace takes the backup's; merge keeps the current ones and adds or overwrites by id.
             const now = this.settings.draw.vibe, incoming = backup.vibeGroups || [];

@@ -2,7 +2,7 @@
 // the 立绘 (with their 表情 and 动作) and the requests that draw them, and the cut-out that takes the plain background
 // off a drawn 立绘.
 import {skippedRanges, narrationPieces, NARRATION_SKIP, NARRATION_BODY, cleanSkip} from './narration.js';
-import {normalizeModels} from './model-files.js';
+import {normalizeModels, normalizeMoveFiles} from './model-files.js';
 import {visualEmotion, visualEffects, matchesVisualWord, visualWordEmotion, visualWordHits, doneBy} from './visual-emotion.js';
 import {activeStyle, sizeFor} from './draw.js';
 import {isV5} from './novelai.js';
@@ -35,7 +35,7 @@ export const EXPRESSIONS = Object.freeze([
 /** The 表情 a 情绪 names; in a longer note (「强忍着眼泪，却努力笑着」) the one named first. */
 export const expressionOf = visualEmotion;
 
-export const defaultVn = () => ({speed: 2, wait: 1, voice: true, narrate: false, font: 'm', box: 'night', opacity: 0.86, effects: true, rule: SPRITE_RULE, palette: null, skip: [], cast: {}});
+export const defaultVn = () => ({speed: 2, wait: 1, voice: true, narrate: false, font: 'm', box: 'night', opacity: 0.86, effects: true, rule: SPRITE_RULE, palette: null, skip: [], cast: {}, moves: []});
 const pick = (value, list, fallback) => list.includes(value) ? value : fallback;
 const text = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const COLOR = /^(#[0-9a-f]{3,8}|(rgb|hsl)a?\([\d\s.,%/+-]+\))$/i;
@@ -119,6 +119,8 @@ export function normalizeVn(value) {
     palette: normalizePalette(v.palette),
     // 不演的标签: parts of the story the stage leaves out (on top of 整篇朗读's list).
     skip: cleanSkip(v.skip),
+    // 模型的动作文件 (.vrma) the user added, for every VRM character.
+    moves: normalizeMoveFiles(v.moves),
     cast: normalizeCast(v.cast),
   };
 }
@@ -131,7 +133,7 @@ export function castFiles(cast) {
 }
 /** The cast with files moved ({old path: new path}) pointing at where they are now. */
 export function moveCastFiles(cast, moved) {
-  let text = JSON.stringify(cast || {});
+  let text = JSON.stringify(cast ?? {});
   for (const [from, to] of Object.entries(moved || {})) if (from !== to) text = text.split(JSON.stringify(from)).join(JSON.stringify(to));
   return JSON.parse(text);
 }

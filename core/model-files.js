@@ -303,6 +303,36 @@ export function typedMouth(char, t) {
 
 // ---------- the entry kept in settings ----------
 export const MODEL_FRAMES = Object.freeze({half: '半身', full: '全身', face: '特写'});
+/** Trigger words as a list: split on commas, 、, ；, spaces (English phrases keep theirs when split by commas). */
+export function wordList(value) {
+  const parts = Array.isArray(value) ? value : /[,，、;；]/.test(String(value ?? '')) ? String(value).split(/[,，、;；]/) : String(value ?? '').split(/\s+/);
+  return [...new Set(parts.map(w => String(w).trim().slice(0, 40)).filter(Boolean))].slice(0, 20);
+}
+/** A VRM motion file (.vrma): what it is, or an error saying it is not one. */
+export function vrmaInfo(input) {
+  let j;
+  try { j = glbJson(input); } catch { throw Error('这不是 VRM 动作文件（.vrma）'); }
+  const used = j.extensionsUsed || [], ext = j.extensions || {};
+  if (!used.includes('VRMC_vrm_animation') && !ext.VRMC_vrm_animation) throw Error('这个文件不是 VRM 动作（.vrma），是普通的 glTF');
+  const seconds = Math.max(0, ...(j.accessors || []).filter((a, i) => (j.animations || []).some(an => (an.samplers || []).some(s => s.input === i))).map(a => Number(a.max?.[0]) || 0));
+  return {seconds: Math.round(seconds * 10) / 10};
+}
+/**
+ * The user's motion files for VRM characters (vn.moves): [{id, label, words, path (user/files), file, size, seconds, at}],
+ * up to 40; any VRM can play them, brought on by their words like the built-in 动作.
+ */
+export const MOVE_FILE_LIMIT = 40;
+export function normalizeMoveFiles(list) {
+  const out = [], seen = new Set();
+  for (const m of Array.isArray(list) ? list : []) {
+    const path = typeof m?.path === 'string' ? m.path.trim() : '', id = typeof m?.id === 'string' ? m.id : '';
+    if (!/^\/?user\/files\/[\w.-]+$/.test(path) || !/^v-[\w-]{1,60}$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({id, label: String(m.label || '动作').trim().slice(0, 20) || '动作', words: wordList(m.words), path, file: String(m.file || '').slice(0, 120), size: Math.max(0, Number(m.size) || 0), seconds: Math.max(0, Number(m.seconds) || 0), at: Number(m.at) || 0});
+  }
+  return out.slice(0, MOVE_FILE_LIMIT);
+}
+
 /** How many models a character keeps to switch between. */
 export const MODEL_LIMIT = 8;
 /**
@@ -315,7 +345,9 @@ export function normalizeModel(m) {
   const path = typeof m.path === 'string' ? m.path.trim().slice(0, 300) : '';
   if (!/^\/?user\/files\/[\w.-]+$/.test(path)) return null;
   const text = (v, n) => typeof v === 'string' ? v.trim().slice(0, n) : '';
-  const map = {};
+  const map = {}, acts = {};
+  // A Live2D model's own motions ('group:index') and the words that bring them on.
+  for (const [k, w] of Object.entries(m.acts && typeof m.acts === 'object' ? m.acts : {}).slice(0, 60)) { const words = wordList(w); if (/^.{1,80}:\d{1,3}$/.test(k) && words.length) acts[k] = words; }
   for (const id of ['happy', 'angry', 'sad', 'surprised', 'shy']) {
     const e = m.map?.[id];
     if (e && typeof e === 'object') map[id] = {expression: text(e.expression, 80), motion: text(e.motion, 90)};
@@ -325,7 +357,7 @@ export function normalizeModel(m) {
   const id = typeof m.id === 'string' && /^m-[\w-]{1,60}$/.test(m.id) ? m.id : 'm-' + path.split('/').pop().replace(/[^\w-]/g, '_').slice(0, 58);
   return {id, kind: m.kind, version: text(m.version, 4), path, file: text(m.file, 120), size: Math.max(0, Number(m.size) || 0), title: text(m.title, 80),
     frame: Object.hasOwn(MODEL_FRAMES, m.frame) ? m.frame : 'half', zoom: Number.isFinite(zoom) ? Math.min(2, Math.max(.6, Math.round(zoom * 100) / 100)) : 1,
-    lift: Number.isFinite(lift) ? Math.min(.4, Math.max(-.4, Math.round(lift * 100) / 100)) : 0, map, ...(keep ? {keep} : {}), at: Number(m.at) || 0};
+    lift: Number.isFinite(lift) ? Math.min(.4, Math.max(-.4, Math.round(lift * 100) / 100)) : 0, map, ...(keep ? {keep} : {}), ...(Object.keys(acts).length ? {acts} : {}), at: Number(m.at) || 0};
 }
 /**
  * A character's models and the one in use, from what is kept: {models, useModel} ('' = the 立绘). A single model kept by

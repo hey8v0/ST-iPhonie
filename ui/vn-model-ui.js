@@ -5,6 +5,7 @@
 import {esc, menu, size, select, help} from './common.js';
 import {icon} from './icons.js';
 import {modelLabel, MODEL_FRAMES, MODEL_LIMIT, writeZip, live2dMap} from '../core/model-files.js';
+import {MOVES} from '../core/model-moves.js';
 
 const FEELS = [['', '平常'], ['开心', '开心'], ['生气', '生气'], ['难过', '难过'], ['惊讶', '惊讶'], ['害羞', '害羞']];
 const MAPPED = [['happy', '开心'], ['angry', '生气'], ['sad', '难过'], ['surprised', '惊讶'], ['shy', '害羞']];
@@ -94,6 +95,7 @@ export async function modelPreview(ctx, api, name, model) {
     <div class="segmented" role="group" aria-label="取景">${Object.entries(MODEL_FRAMES).map(([k, l]) => `<button type="button" data-model-frame="${k}" aria-pressed="${m.frame === k}">${l}</button>`).join('')}</div>
     <label class="vn-model-slider"><span>大小</span><input class="slider" type="range" min="60" max="200" step="5" value="${Math.round((m.zoom || 1) * 100)}" data-model-set="zoom" aria-label="大小"></label>
     <label class="vn-model-slider"><span>高低</span><input class="slider" type="range" min="-40" max="40" step="2" value="${Math.round((m.lift || 0) * 100)}" data-model-set="lift" aria-label="高低"></label>
+    <div data-model-moves></div>
     <div data-model-map></div>
     <p class="hint">${esc(modelLabel(m))} · ${esc(m.file)}${m.size ? ' · ' + size(m.size) : ''}。有模型时视觉小说用它演，立绘留着备用（模型读出来之前、读不出来时用）。配音播放时嘴跟着声音动，没有配音就跟着打字动。${m.kind === 'live2d' ? 'Live2D 的运行核心第一次用时从 Live2D 官网读（Cubism 2 的从 jsDelivr），要能连上。' : ''}</p>`);
   const stage = d.body.querySelector('[data-model-stage]');
@@ -111,6 +113,30 @@ export async function modelPreview(ctx, api, name, model) {
     actor.tick(dt, true);
     raf = ctx.win.requestAnimationFrame(frame);
   };
+  /**
+   * 动作: try each built-in one; for VRM the user's motion files (shared by every VRM character: add, name, words,
+   * delete); for Live2D the model's own motions, each with the words that bring it on in the story.
+   */
+  const BUILT_IN = MOVES.map(x => `${x.label}（${x.words.filter(w => /[\u4e00-\u9fff]/.test(w)).slice(0, 4).join('、')}）`).join('；');
+  function paintMoves() {
+    const box = d.body.querySelector('[data-model-moves]');
+    if (!box || !actor) return;
+    const files = m.kind === 'vrm' ? api.getState().vn.moves || [] : [], acts = m.acts || {};
+    const motions = m.kind === 'live2d' ? Object.entries(actor.info.motions || {}).flatMap(([g, n]) => Array.from({length: n}, (_, i) => [`${g}:${i}`, n > 1 ? `${g} ${i + 1}` : g])) : [];
+    box.innerHTML = `<div class="group-title"><span>动作${help('正文里台词前后写到这些词，模型就做这个动作（离台词最近的那个）：' + BUILT_IN + '。立绘里加过的同名动作（比如「抱臂」），它的触发词也算。' + (m.kind === 'vrm' ? '\n还能加自己的动作文件（.vrma，VRoid Hub 等处下载，或用动作捕捉录），所有 VRM 角色都能用。' : '\nLive2D 的手臂动作看模型本身：有手臂参数的会摆手臂，模型自带的动作可以在下面写上触发词。'))}</span></div>
+      <div class="vn-model-feel" role="group" aria-label="试动作">${MOVES.map(x => `<button type="button" class="chip-button" data-move="${x.id}">${esc(x.label)}</button>`).join('')}${files.map(f => `<button type="button" class="chip-button" data-move="${esc(f.id)}" data-path="${esc(f.path)}">${icon('play')}${esc(f.label)}</button>`).join('')}</div>
+      ${m.kind === 'vrm' ? `${files.length ? `<div class="vn-move-files">${files.map(f => `<div class="vn-move-row" data-file="${esc(f.id)}"><input data-move-label value="${esc(f.label)}" aria-label="名字" maxlength="20"><input data-move-words value="${esc(f.words.join('、'))}" placeholder="触发词，用顿号隔开" aria-label="触发词"><button type="button" class="icon-button" data-move-drop aria-label="删掉这个动作文件">${icon('trash')}</button></div>`).join('')}</div>` : ''}
+        <div class="actions"><button type="button" class="secondary" data-move-add>${icon('import')}添加动作文件（.vrma）</button></div>` : ''}
+      ${motions.length ? `<div class="vn-move-files">${motions.map(([k, label]) => `<div class="vn-move-row" data-motion="${esc(k)}"><button type="button" class="chip-button" data-move-motion="${esc(k)}">${icon('play')}${esc(label)}</button><input data-act-words value="${esc((acts[k] || []).join('、'))}" placeholder="触发词，用顿号隔开" aria-label="${esc(label)} 的触发词"></div>`).join('')}</div>` : ''}`;
+  }
+  async function addMoveFile() {
+    const input = ctx.doc.createElement('input');
+    input.type = 'file'; input.accept = '.vrma';
+    const file = await new Promise(resolve => { input.addEventListener('change', () => resolve(input.files?.[0] || null)); input.addEventListener('cancel', () => resolve(null)); input.click(); });
+    if (!file) return;
+    try { await api.vnMoveFile(file); ctx.notify('加好了：在下面写上触发词，正文写到它就做'); } catch (error) { ctx.notify(error.message, {error: true}); }
+    paintMoves();
+  }
   /** The Live2D 表情 kept on the whole time (its look): set, else guessed. */
   const kept = () => Array.isArray(m.keep) ? m.keep : actor?.info?.keep || [];
   let mouthOf = () => null;
@@ -122,6 +148,7 @@ export async function modelPreview(ctx, api, name, model) {
     actor = made;
     stage.replaceChildren(actor.canvas);
     raf = ctx.win.requestAnimationFrame(frame);
+    paintMoves();
     if (m.kind === 'live2d') paintMap();
   } catch (error) {
     stage.innerHTML = `<p class="hint" data-keep-hint>${esc(error.message)}</p>`;
@@ -141,6 +168,14 @@ export async function modelPreview(ctx, api, name, model) {
     try { m = await api.vnModel(name, null, {id: m.id, ...change}) || m; } catch (error) { ctx.notify(error.message, {error: true}); }
   }
   d.body.addEventListener('click', e => {
+    const mv = e.target.closest('[data-move], [data-move-motion], [data-move-add], [data-move-drop]');
+    if (mv && actor) {
+      if (mv.dataset.moveMotion) actor.act({id: 'motion', motion: mv.dataset.moveMotion});
+      else if (mv.hasAttribute('data-move-add')) addMoveFile();
+      else if (mv.hasAttribute('data-move-drop')) { const id = mv.closest('[data-file]').dataset.file; ctx.confirm('删掉这个动作文件？', '酒馆里的文件也会删掉，所有 VRM 角色都不再用它。').then(ok => ok && api.vnMoveFile(null, {id, remove: true}).then(paintMoves)).catch(error => ctx.notify(error.message, {error: true})); }
+      else actor.act(mv.dataset.path ? {id: mv.dataset.move, path: mv.dataset.path} : {id: mv.dataset.move})?.catch?.(error => ctx.notify(error.message, {error: true}));
+      return;
+    }
     const look = e.target.closest('[data-look]');
     if (look && actor) { const n = look.dataset.look, list = kept().includes(n) ? kept().filter(x => x !== n) : [...kept(), n]; save({keep: list}); paintMap(); return; }
     const b = e.target.closest('[data-feel], [data-model-talk], [data-model-frame]');
@@ -154,6 +189,9 @@ export async function modelPreview(ctx, api, name, model) {
     if (k) actor?.frame(k === 'zoom' ? {zoom: e.target.value / 100} : {lift: e.target.value / 100});
   });
   d.body.addEventListener('change', e => {
+    const line = e.target.closest('[data-file], [data-motion]');
+    if (line && (e.target.matches('[data-move-label], [data-move-words]'))) { api.vnMoveFile(null, {id: line.dataset.file, ...(e.target.matches('[data-move-label]') ? {label: e.target.value} : {words: e.target.value})}).catch(error => ctx.notify(error.message, {error: true})); return; }
+    if (line && e.target.matches('[data-act-words]')) { const acts = {...(m.acts || {})}; acts[line.dataset.motion] = e.target.value.split(/[,，、;；]/).map(w => w.trim()).filter(Boolean); if (!acts[line.dataset.motion].length) delete acts[line.dataset.motion]; save({acts}); return; }
     const k = e.target.dataset.modelSet;
     if (k) { save(k === 'zoom' ? {zoom: e.target.value / 100} : {lift: e.target.value / 100}); return; }
     const id = e.target.dataset.map;

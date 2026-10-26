@@ -5,6 +5,7 @@
 // with the text as it is typed. The same actor is used by the stage (vn-stage.js) and the preview in the phone.
 import {readZip, cleanPath, live2dInfo, live2dSettings, expressionParams, VRM_FACES, VRM_POSES, LIVE2D_FACES, live2dMap, feelingFor, VOWELS} from './core/model-files.js';
 import {visualEmotion} from './core/visual-emotion.js';
+import {moveById, samplePose, VRM_REST} from './core/model-moves.js';
 
 const VENDOR = new URL('./vendor/', import.meta.url);
 const C4_CORE = 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js';
@@ -85,6 +86,16 @@ export async function createModelActor(entry, bytes, {light = lite()} = {}) {
     canvas, kind: entry.kind,
     /** The 情绪 of a line as written (「强忍着眼泪」, '' = none): the face it has, eased in. */
     feel(value) { const v = visualEmotion(value || ''); if (v !== emotion) { emotion = v; body.feel(v); } },
+    /**
+     * A 动作 (core/model-moves.js): {id} a built-in one; {id, vrma: bytes} a VRM motion file; {id, motion: 'group:index'}
+     * a Live2D model's own. Plays once, then back to standing; a new one takes over. at: held still at that second.
+     */
+    async act(spec) {
+      if (!spec) return;
+      // A motion file in the tavern: read once, then kept like the models.
+      if (spec.path && !spec.vrma) spec = {...spec, vrma: await modelBytes(spec.path)};
+      return body.act(spec);
+    },
     /** The mouth now (core/model-files.js mouthShape / typedMouth), or null: shut. */
     mouth(shape) { for (const k of ['open', ...VOWELS]) target[k] = shape?.[k] || 0; },
     /** One frame: dt seconds since the last. Not speaking, it draws less often (30 or 15 a second). */
@@ -132,9 +143,8 @@ async function vrmBody(canvas, entry, bytes, light) {
   const has = n => names.has(String(n).toLowerCase());
   const set = (n, v) => { const real = names.get(String(n).toLowerCase()); if (real) vrm.expressionManager.setValue(real, v); };
   // Arms down from the T pose; a VRM 0.x model's normalized bones turn the other way.
-  const side = entry.version === '0' ? -1 : 1;
-  const rest = {leftUpperArm: [0, 0, -1.2 * side], rightUpperArm: [0, 0, 1.2 * side], leftLowerArm: [0, -.25 * side, -.12 * side], rightLowerArm: [0, .25 * side, .12 * side], leftHand: [0, 0, -.1 * side], rightHand: [0, 0, .1 * side]};
-  for (const [n, r] of Object.entries(rest)) bone(n)?.rotation.set(...r);
+  const side = entry.version === '0' ? -1 : 1, turn = r => [r[0] * side, r[1], r[2] * side];
+  for (const [n, r] of Object.entries(VRM_REST)) bone(n)?.rotation.set(...turn(r));
   vrm.update(0);
   scene.updateMatrixWorld(true);
   const at = name => { const b = bone(name); return b ? b.getWorldPosition(new T.Vector3()).y : null; };
@@ -158,10 +168,58 @@ async function vrmBody(canvas, entry, bytes, light) {
   frame(entry);
   const face = {}, pose = {head: [0, 0, 0], lean: 0, eyes: ''}, held = {head: [0, 0, 0], lean: 0};
   let faceTarget = {}, t = 0, blinkAt = 2 + Math.random() * 3, blink = 0;
+  // 动作: a built-in one (bone poses over time) or a motion file (.vrma, played by three's mixer); one at a time.
+  let acting = null, mixer = null;
+  const clips = new Map();
+  async function clipOf(id, bytes) {
+    if (!clips.has(id)) clips.set(id, (async () => {
+      const loader = new T.GLTFLoader();
+      loader.register(parser => new T.VRMAnimationLoaderPlugin(parser));
+      const gltf = await loader.parseAsync(bytes.slice(0), '');
+      const anim = gltf.userData.vrmAnimations?.[0];
+      if (!anim) throw Error('这个文件里没有 VRM 动作');
+      return T.createVRMAnimationClip(anim, vrm);
+    })());
+    return clips.get(id);
+  }
+  const fade = (t, end) => Math.min(1, t / .25, Math.max(0, end - t) / .3);
+  function poseNow(dt) {
+    if (!acting?.move) return;
+    if (!acting.still) acting.t += dt;
+    const {pose, done} = samplePose(acting.move, acting.t, 'vrm');
+    if (done) { acting = null; vrm.scene.position.y = 0; return; }
+    const w = fade(acting.t, acting.move.vrm.keys.at(-1)[0]);
+    for (const [name, value] of Object.entries(pose)) {
+      if (name === 'lift') { vrm.scene.position.y = value * w; continue; }
+      const b = bone(name);
+      if (!b) continue;
+      const to = turn(value), r = b.rotation;
+      r.set(r.x + (to[0] - r.x) * w, r.y + (to[1] - r.y) * w, r.z + (to[2] - r.z) * w);
+    }
+  }
   return {
     info: {expressions: [...names.values()]},
     size(w, h, ratio) { renderer.setPixelRatio(ratio); renderer.setSize(w, h, false); aspect = w / h; frame(entry); },
     frame,
+    async act(spec) {
+      if (spec.vrma) {
+        const clip = await clipOf(spec.id, spec.vrma);
+        mixer ??= new T.AnimationMixer(vrm.scene);
+        mixer.stopAllAction();
+        acting = null; vrm.scene.position.y = 0;
+        const action = mixer.clipAction(clip);
+        action.setLoop(T.LoopOnce, 1);
+        action.clampWhenFinished = false;
+        action.reset().fadeIn(.3).play();
+        const out = Math.max(0, clip.duration - .35) * 1000;
+        setTimeout(() => { if (action.isRunning()) action.fadeOut(.35); }, out);
+        return;
+      }
+      const move = moveById(spec.id);
+      if (!move?.vrm) return;
+      mixer?.stopAllAction();
+      acting = {move, t: spec.at ?? 0, still: spec.at != null};
+    },
     feel(emotion) {
       const id = feelingFor(emotion, k => !!VRM_FACES[k] && Object.keys(VRM_FACES[k]).some(has)) || (VRM_FACES[emotion] ? emotion : '');
       faceTarget = {...(VRM_FACES[id] || {})};
@@ -188,8 +246,12 @@ async function vrmBody(canvas, entry, bytes, light) {
       if (chest) chest.rotation.x = breath * .012;
       if (spine) spine.rotation.set(held.lean + breath * .006, Math.sin(t * .37) * .015, 0);
       const ua = .02 * breath;
+      for (const [n, r] of Object.entries(VRM_REST)) bone(n)?.rotation.set(...turn(r));
       bone('leftUpperArm')?.rotation.set(0, 0, (-1.2 + ua) * side);
       bone('rightUpperArm')?.rotation.set(0, 0, (1.2 - ua) * side);
+      for (const n of ['leftShoulder', 'rightShoulder']) bone(n)?.rotation.set(0, 0, 0);
+      poseNow(dt);
+      mixer?.update(dt);
       const eyes = pose.eyes;
       gaze.position.set(camera.position.x + (eyes === 'away' ? -.6 : 0), camera.position.y + (eyes === 'down' ? -.5 : 0) + Math.sin(t * .5) * .02, camera.position.z);
       vrm.update(dt);
@@ -207,6 +269,7 @@ async function vrmBody(canvas, entry, bytes, light) {
 /** The standard parameters, by Cubism 3/4 and Cubism 2 name. */
 const PARAMS = {
   angleX: ['ParamAngleX', 'PARAM_ANGLE_X'], angleY: ['ParamAngleY', 'PARAM_ANGLE_Y'], angleZ: ['ParamAngleZ', 'PARAM_ANGLE_Z'], body: ['ParamBodyAngleX', 'PARAM_BODY_ANGLE_X'],
+  bodyY: ['ParamBodyAngleY', 'PARAM_BODY_ANGLE_Y'], bodyZ: ['ParamBodyAngleZ', 'PARAM_BODY_ANGLE_Z'],
   eyeL: ['ParamEyeLOpen', 'PARAM_EYE_L_OPEN'], eyeR: ['ParamEyeROpen', 'PARAM_EYE_R_OPEN'], smileL: ['ParamEyeLSmile', 'PARAM_EYE_L_SMILE'], smileR: ['ParamEyeRSmile', 'PARAM_EYE_R_SMILE'],
   ballX: ['ParamEyeBallX', 'PARAM_EYE_BALL_X'], ballY: ['ParamEyeBallY', 'PARAM_EYE_BALL_Y'],
   browLY: ['ParamBrowLY', 'PARAM_BROW_L_Y'], browRY: ['ParamBrowRY', 'PARAM_BROW_R_Y'], browLA: ['ParamBrowLAngle', 'PARAM_BROW_L_ANGLE'], browRA: ['ParamBrowRAngle', 'PARAM_BROW_R_ANGLE'],
@@ -334,10 +397,32 @@ async function live2dBody(canvas, entry, bytes, light) {
   const put = (p, v) => { try { if (four) core.setParameterValueById(p, v); else core.setParamFloat(p, v); } catch {} };
   // What is drawn each frame on top of the model's own movement: its look, the 情绪's face, a blink, the mouth.
   const face = {}, now = {};
-  let mouth = null, talking = 0, t = 0, blinkAt = 2 + Math.random() * 3, blink = 0;
+  let mouth = null, talking = 0, t = 0, blinkAt = 2 + Math.random() * 3, blink = 0, acting = null, moving = {};
+  // Its arms, where it has parameters for them (official samples: ParamArmRA …; 捏人 models: 右手 / Rhand …).
+  const arms = {};
+  try {
+    const ids = core._parameterIds || [], names = {};
+    const cdi = four && info.json.FileReferences.DisplayInfo && zip.get(cleanPath(dir + info.json.FileReferences.DisplayInfo));
+    if (cdi) for (const x of JSON.parse(new TextDecoder().decode(await cdi.bytes()).replace(/^﻿/, '')).Parameters || []) names[x.Id] = String(x.Name || '');
+    const find = (byId, byName) => ids.find(i => byId.test(i)) || ids.find(i => byName.test(names[i] || ''));
+    for (const [k, byId, byName] of [['armR', /^(ParamArmR[A]?|PARAM_ARM_R[_A]*|Rhand|RightArm|ParamHandR)$/i, /^(右手|右臂|右腕|右胳膊)/], ['armL', /^(ParamArmL[A]?|PARAM_ARM_L[_A]*|Lhand|LeftArm|ParamHandL)$/i, /^(左手|左臂|左腕|左胳膊)/]]) {
+      const pid = find(byId, byName);
+      if (!pid) continue;
+      const i = ids.indexOf(pid), span = four ? (core.getParameterMaximumValue(i) - core.getParameterMinimumValue(i)) / 2 : 1;
+      if (span > 0) arms[k] = {id: pid, span};
+    }
+  } catch {}
   const wear = () => { for (const x of base) (x.blend === 'multiply' ? mul : x.blend === 'set' ? put : add)(x.id, x.value); };
   model.internalModel.on('beforeModelUpdate', () => {
     wear();
+    // A 动作 of the head and body, on top of the rest.
+    // (armR / armL: its arm parameters if it has any, -1 … 1 of their range; a name that is not a standard one is the
+    // model's own parameter: a 动作 made for that model.)
+    for (const [k, v] of Object.entries(moving)) {
+      if (k === 'lift' || !v) continue;
+      if (k === 'armR' || k === 'armL') { const a = arms[k]; if (a) add(a.id, v * a.span); continue; }
+      add(PARAMS[k] ? id(k) : k, v);
+    }
     const f = now;
     if (f.angleX) add(id('angleX'), f.angleX);
     if (f.angleY || talking) add(id('angleY'), (f.angleY || 0) + talking * 4);
@@ -364,7 +449,7 @@ async function live2dBody(canvas, entry, bytes, light) {
   // Where the model is really drawn (its canvas often has room all round), and where its head is (what moves when
   // it turns its head): the 取景 is cut from these, so a big-headed chibi and a tall one both fit.
   const frames = measure(model.internalModel, core, four, id, natural, wear);
-  let W = 10, H = 10, R = 1, map = {};
+  let W = 10, H = 10, R = 1, map = {}, baseY = 0;
   const paint = canvas.getContext('2d');
   function frame(e) {
     const r = frames[e.frame] || frames.half, zoom = e.zoom || 1, lift = e.lift || 0, span = (r.y1 - r.y0) * 1.06;
@@ -372,7 +457,7 @@ async function live2dBody(canvas, entry, bytes, light) {
     model.scale.set(scale);
     model.anchor?.set(.5, 0);
     model.x = W / 2 - ((r.x0 + r.x1) / 2 - natural.w / 2) * scale;
-    model.y = -r.y0 * scale + H * .03 - lift * H;
+    model.y = baseY = -r.y0 * scale + H * .03 - lift * H;
     map = live2dMap(info, e.map, keep);
     if (Array.isArray(e.keep) && JSON.stringify(e.keep) !== JSON.stringify(keep)) { keep = e.keep; looks(keep).then(list => { base = list; }); }
   }
@@ -383,6 +468,12 @@ async function live2dBody(canvas, entry, bytes, light) {
     shape: f => { const r = frames[f] || frames.half; return Math.min(1, Math.max(.4, (r.x1 - r.x0) / ((r.y1 - r.y0) * 1.06))); },
     size(w, h, ratio) { W = w; H = h; R = ratio; canvas.width = Math.round(w * ratio); canvas.height = Math.round(h * ratio); frame(entry); },
     frame,
+    act(spec) {
+      // The model's own motion (made for it: arms and all), else the head and body from the standard parameters.
+      if (spec.motion) { const at = spec.motion.lastIndexOf(':'); model.motion(spec.motion.slice(0, at), Number(spec.motion.slice(at + 1)) || 0, L.MotionPriority?.FORCE ?? 3); return; }
+      const move = moveById(spec.id);
+      if (move?.live2d) acting = {move, t: spec.at ?? 0, still: spec.at != null};
+    },
     feel(emotion) {
       const id = feelingFor(emotion, k => !!map[k]), m = map[id];
       const expressions = model.internalModel.motionManager.expressionManager;
@@ -395,6 +486,13 @@ async function live2dBody(canvas, entry, bytes, light) {
       t += dt;
       mouth = shape; talking = open;
       for (const k of Object.keys(face)) now[k] = smooth(now[k] || 0, face[k], 5, dt);
+      moving = {};
+      if (acting) {
+        if (!acting.still) acting.t += dt;
+        const {pose, done} = samplePose(acting.move, acting.t, 'live2d');
+        if (done) acting = null; else moving = pose;
+      }
+      model.y = baseY - (moving.lift || 0) * H;
       // Models made for face tracking do not blink by themselves.
       if (!info.blinks) { blinkAt -= dt; if (blinkAt <= 0) { blink += dt; if (blink > .16) { blink = 0; blinkAt = 2.2 + Math.random() * 3.8; } } }
       model.update(dt * 1000);
