@@ -2,7 +2,7 @@ import {withProxyHeaders} from './proxy-url.js';
 import { normalizeNarration, NARRATOR } from './narration.js';
 import {RequestLog} from './request-log.js';
 import {PROMPT_BLOCKS, normalizePromptRules} from './prompt-rules.js';
-import { normalizeVn, spriteRequest } from './vn.js';
+import { normalizeVn, spriteRequest, castFiles, moveCastFiles } from './vn.js';
 import { MomentStore } from './moments-store.js';
 import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, missingLink, trialOnly, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
@@ -214,7 +214,15 @@ export class TTSBackend {
         const vibeGroups = want.includes('vibes') ? clone(this.settings.draw.vibe.groups) : null;
         const memories = want.includes('memories') ? await this.exportChatMemories() : null;
         const assistant = want.includes('assistant') ? await this.exportAssistantThreads() : null;
-        const blob = await writeBackup({ version, settings, library, chats, moments, keys, vibeGroups, memories, assistant });
+        // The 视觉小说's 立绘 and 模型 are files in the tavern; the settings only name them. A backup carries the files.
+        let vnFiles = null;
+        if (want.includes('vnFiles')) {
+            const paths = castFiles(this.settings.vn.cast);
+            if (paths.length && !this.syncFiles?.readPath) throw Error('要在酒馆里打开小手机，才能把视觉小说的立绘和模型放进备份（不要的话把这一项关掉）');
+            vnFiles = [];
+            for (const path of paths) { const blob = await this.syncFiles.readPath(path).catch(() => null); if (blob) vnFiles.push({ path, blob }); }
+        }
+        const blob = await writeBackup({ version, settings, library, chats, moments, keys, vibeGroups, memories, assistant, vnFiles });
         const day = new Date(), pad = n => String(n).padStart(2, '0');
         return { blob, name: `ST-iPhonie 备份 ${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}` };
     }
@@ -241,12 +249,26 @@ export class TTSBackend {
             settings = normalizeSettings({ ...backup.settings, scope: this.settings.scope, floating: this.settings.floating });
             validateSettings(settings);
         }
+        // The 视觉小说's files the tavern lacks (another tavern, or deleted since the backup) go back in first; where
+        // one lands elsewhere, the settings are pointed there.
+        let moved = null;
+        if (want.has('vnFiles') && backup.vnFiles?.length) {
+            if (!this.syncFiles?.writePath) throw Error('要在酒馆里打开小手机，才能恢复视觉小说的立绘和模型');
+            moved = {}; done.vnFiles = 0;
+            for (const f of backup.vnFiles) {
+                if (await this.syncFiles.hasPath(f.path).catch(() => false)) continue;
+                moved[f.path] = await this.syncFiles.writePath(f.path, f.blob);
+                done.vnFiles++;
+            }
+            if (settings) settings.vn.cast = moveCastFiles(settings.vn.cast, moved);
+        }
         const rows = {};
         for (const part of want) for (const store of PART_STORES[part]) if (backup.library[store]) rows[store] = backup.library[store];
         // One transaction for the library: photos land before the phone's look that uses them, references before the
         // settings that point at them.
         if (Object.keys(rows).length) Object.assign(done, await this.library.importRows(rows, { replace }));
         if (settings) { this.save(settings); done.settings = true; await this.loadReferences(); }
+        else if (moved && Object.entries(moved).some(([a, b]) => a !== b)) this.saveVn({ cast: moveCastFiles(this.settings.vn.cast, moved) });
         if (want.has('vibes') && backup.library.vibes) {
             // The groups: replace takes the backup's; merge keeps the current ones and adds or overwrites by id.
             const now = this.settings.draw.vibe, incoming = backup.vibeGroups || [];
@@ -331,7 +353,7 @@ export class TTSBackend {
         return [...new Set(names)].filter(n => n && !isPlaceholderRole(n) && n !== NARRATOR).map(name => {
             const route = s.routes.find(r => r.name === name);
             const entry = s.vn.cast[name];
-            return { name, appearance: route?.appearance || '', sprite: entry?.sprite || '', seed: entry?.seed ?? -1, alts: clone(entry?.alts || []), mix: !!entry?.mix, looks: clone(entry?.looks || {}), actions: clone(entry?.actions || []), outfits: clone(entry?.outfits || []) };
+            return { name, appearance: route?.appearance || '', sprite: entry?.sprite || '', seed: entry?.seed ?? -1, alts: clone(entry?.alts || []), mix: !!entry?.mix, looks: clone(entry?.looks || {}), actions: clone(entry?.actions || []), outfits: clone(entry?.outfits || []), model: entry?.model ? clone(entry.model) : null };
         });
     }
     updateGeneral(patch) {

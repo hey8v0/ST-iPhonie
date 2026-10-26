@@ -6,6 +6,8 @@
 // the usual one's seed, so the face and clothes stay as close as the engine allows. 观感: text speed, the pause of 自动,
 // the text box (also in the tavern's or the phone's colours), its size, effects, voice and the 旁白.
 import {pagedPicker} from './paged-picker.js';
+import {modelCard, modelMenu} from './vn-model-ui.js';
+import {modelLabel} from '../core/model-files.js';
 import {createView, esc, heading, help, toggle, avatar, menu} from './common.js';
 import {icon} from './icons.js';
 import {saveFile} from '../download.js';
@@ -26,7 +28,10 @@ export function vnApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'vn');
   let closeReview = null;
   const dispose = v.dispose;
-  v.dispose = () => { closeReview?.(); dispose(); };
+  // A 立绘 whose file is gone from the tavern shows as 「图丢了」 (redraw, upload or take it away), not a broken picture.
+  const lostPicture = e => { const img = e.target; if (img?.tagName === 'IMG') img.closest('.vn-look-pic, .vn-sprite-thumb')?.classList.add('lost'); };
+  ctx.doc.addEventListener('error', lostPicture, true);
+  v.dispose = () => { closeReview?.(); ctx.doc.removeEventListener('error', lostPicture, true); dispose(); };
   const state = () => api.getState().vn;
   const save = patch => { try { api.saveVn(patch); } catch (error) { ctx.notify(error.message, {error: true}); } render(); };
   const inTavern = () => typeof api.vnStart === 'function';
@@ -59,7 +64,7 @@ export function vnApp(ctx) {
       const made = all.reduce((n, l) => n + l.count, 0), shown = all.find(l => l.sprite)?.sprite || '';
       return `<button type="button" class="vn-cast-row" data-action="vn-looks" data-name="${esc(c.name)}">
       <span class="vn-sprite-thumb${shown ? ' has' : ''}">${shown ? checker(shown) : avatar(c.name, 'none', 44)}</span>
-      <span class="vn-cast-text"><strong>${esc(c.name)}</strong><small>${[made ? `${made} 张立绘` : c.appearance ? '还没有立绘' : '还没有立绘 · 没写外貌', c.actions.length ? `${c.actions.length} 个自定义表情／动作` : '', c.outfits.length ? `${c.outfits.length + 1} 套形象` + (w ? `（穿着${esc(setFor(c, w).label)}）` : '') : ''].filter(Boolean).join(' · ')}</small></span>
+      <span class="vn-cast-text"><strong>${esc(c.name)}</strong><small>${[c.model ? esc(modelLabel(c.model)) + ' 模型' : '', made ? `${made} 张立绘` : c.model ? '' : c.appearance ? '还没有立绘' : '还没有立绘 · 没写外貌', c.actions.length ? `${c.actions.length} 个自定义表情／动作` : '', c.outfits.length ? `${c.outfits.length + 1} 套形象` + (w ? `（穿着${esc(setFor(c, w).label)}）` : '') : ''].filter(Boolean).join(' · ')}</small></span>
       ${icon('next')}</button>`;
     }});
   }
@@ -134,7 +139,7 @@ export function vnApp(ctx) {
       const c = castOf(name), set = setFor(c, outfit) || c, all = looksOf(c, outfit), missing = all.filter(l => l.id && !l.action && !l.sprite);
       const worn = setFor(c, wearNow()[name] || '') ? wearNow()[name] || '' : '';
       const chips = [{id: '', label: '默认'}, ...c.outfits.map(o => ({id: o.id, label: o.label}))];
-      d.body.innerHTML = `${lastPickNote(name, c)}<div class="vn-outfit-control"><button type="button" class="vn-outfit" data-action="vn-pick-outfit">${esc(chips.find(o=>o.id===outfit)?.label||'默认')} ▾</button><button type="button" class="vn-outfit add" data-action="vn-add-outfit">${icon('add')}形象</button></div><div data-look-picker></div>
+      d.body.innerHTML = `${lastPickNote(name, c)}${api.vnModel ? modelCard(c.model) : ''}<div class="vn-outfit-control"><button type="button" class="vn-outfit" data-action="vn-pick-outfit">${esc(chips.find(o=>o.id===outfit)?.label||'默认')} ▾</button><button type="button" class="vn-outfit add" data-action="vn-add-outfit">${icon('add')}形象</button></div><div data-look-picker></div>
         <div class="actions">${c.outfits.length && outfit !== worn ? `<button type="button" class="primary" data-action="vn-wear">${icon('check')}穿这套</button>` : ''}${outfit ? `<button type="button" class="secondary" data-action="vn-edit-outfit">${icon('edit')}改形象</button>` : ''}<button type="button" class="secondary" data-action="vn-add-expression" ${c.actions.length>=24?'disabled':''}>${icon('add')}表情</button><button type="button" class="secondary" data-action="vn-add-action" ${c.actions.length>=24?'disabled':''}>${icon('add')}动作</button>${missing.length ? `<button type="button" class="secondary" data-action="vn-all" ${set.sprite ? '' : 'disabled'}>${icon('paint')}补齐 ${missing.length} 种表情</button>` : ''}</div>`;
       pagedPicker(d.body.querySelector('[data-look-picker]'),{items:all,pageSize:9,placeholder:'搜索表情、动作…',listClass:'vn-looks',text:l=>l.label+' '+l.tags,render:l=>`<button type="button" class="vn-look${l.sprite?' has':''}" data-look="${esc(l.id)}"><span class="vn-look-pic">${l.sprite?checker(l.sprite):`<i>${icon(l.action?'hand':l.id?'smile':'person')}</i>`}${l.count>1?`<em class="vn-look-n">${l.mix?'随机 ':''}${l.count}</em>`:''}</span><strong>${esc(l.label)}</strong><small>${l.sprite?l.count+' 张':l.action?(l.action.kind==='expression'?'表情':'动作'):l.id?'表情':'平常'}</small></button>`});
 
@@ -147,6 +152,7 @@ export function vnApp(ctx) {
       try {
         if (b.dataset.outfit != null) { outfit = sheetOutfit[name] = b.dataset.outfit; paint(); return; }
         if (b.dataset.action === 'vn-pick-outfit') { const list=[{id:'',label:'默认'},...castOf(name).outfits];d.close();const picker=ctx.dialog('选择形象','<div data-outfit-picker></div>');pagedPicker(picker.body.querySelector('[data-outfit-picker]'),{items:list,selected:outfit,pageSize:10,placeholder:'搜索形象…',text:o=>o.label,render:o=>`<button type="button" class="list-row" data-outfit="${esc(o.id)}">${icon(o.id===outfit?'check':'person')}<span><strong>${esc(o.label)}</strong></span></button>`});let chosen=outfit;picker.body.addEventListener('click',event=>{const option=event.target.closest('[data-outfit]');if(option){chosen=option.dataset.outfit;picker.close();}});picker.onClose(()=>looks(name,chosen));return; }
+        if (b.dataset.action === 'vn-model') { d.close(); try { await modelMenu(ctx, api, name, castOf(name).model); } finally { looks(name, outfit); } return; }
         if (b.dataset.action === 'vn-add-outfit') { const id = await editOutfit(name); looks(name, id || outfit); return; }
         if (b.dataset.action === 'vn-edit-outfit') { const gone = await outfitMenu(name, outfit); looks(name, gone ? '' : outfit); return; }
         if (b.dataset.action === 'vn-wear') { api.vnSetWear(name, outfit); ctx.notify(`这个聊天里${name}穿「${setFor(castOf(name), outfit)?.label || '默认'}」`); paint(); return; }

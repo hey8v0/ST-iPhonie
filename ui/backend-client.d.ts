@@ -37,7 +37,9 @@ export interface VnGroup { sprite: string; at: number; alts: Array<{ sprite: str
 export interface VnSet extends VnGroup { seed?: number; looks: Record<string, VnGroup>; }
 /** 形象: another set of 立绘 (a school uniform, a robe), drawn with its own looks. */
 export interface VnOutfit extends VnSet { id: string; label: string; appearance: string; }
-export interface VnCastEntry extends VnSet { actions: VnAction[]; outfits: VnOutfit[]; }
+/** 模型 (core/model-files.js normalizeModel): a VRM or Live2D model the stage shows in place of the 立绘. frame: 取景; map: a Live2D model's 表情 / 动作 ('group:index') for each of the five 情绪. */
+export interface VnModel { kind: 'vrm' | 'live2d'; version: string; path: string; file: string; size: number; title: string; frame: 'half' | 'full' | 'face'; zoom: number; lift: number; map: Record<string, { expression: string; motion: string }>; /** Live2D 表情 kept on (its look); absent: guessed. */ keep?: string[]; at: number; }
+export interface VnCastEntry extends VnSet { actions: VnAction[]; outfits: VnOutfit[]; model?: VnModel; }
 /** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
 export interface NarrationSettings {
     enabled: boolean;
@@ -563,7 +565,7 @@ export interface BackendFacade {
     saveNarration(patch: Partial<NarrationSettings> & {skip?: string[] | string}): NarrationSettings;
     saveVn(patch: Partial<VnSettings>): VnSettings;
     /** The people of the open card (everyone when none is open), with their looks and 立绘. */
-    vnCast(): Array<{ name: string; appearance: string; sprite: string; seed: number; alts: VnGroup['alts']; mix: boolean; looks: Record<string, VnGroup>; actions: VnAction[]; outfits: VnOutfit[] }>;
+    vnCast(): Array<{ name: string; appearance: string; sprite: string; seed: number; alts: VnGroup['alts']; mix: boolean; looks: Record<string, VnGroup>; actions: VnAction[]; outfits: VnOutfit[]; model: VnModel | null }>;
     /** The drawing request for a character's 立绘; appearance / rule: changed for this one picture. */
     vnSpriteRequest(name: string, options?: { appearance?: string; rule?: string; extra?: string; seed?: number }): { prompt: string; negative: string; characters: Array<{ prompt: string; negative: string; position: number }>; params: Record<string, unknown> };
     saveRoute(route: RouteInput): Route;
@@ -1037,6 +1039,8 @@ export interface BackendAPI extends BackendFacade {
     /** The 形象 each character wears in the open chat: {name: outfit id}. */
     vnWear(): Record<string, string>;
     vnSetWear(name: string, outfit: string): Record<string, string>;
+    /** A character's 模型: a .vrm or a Live2D .zip (kept in the tavern) in place of the one before; without a file, how it stands; remove takes it away. */
+    vnModel?(name: string, blob: Blob | null, options?: { remove?: boolean; frame?: 'half' | 'full' | 'face'; zoom?: number; lift?: number; map?: Record<string, { expression: string; motion: string }>; keep?: string[] }): Promise<VnModel | null>;
     /** What the 视觉小说 last showed for a character and why: a 动作 (and the words that brought it, before or after the line, or in its 情绪), a 表情, or the usual one. */
     vnLastPick?(name: string): { kind: 'action' | 'expression' | 'usual'; label: string; word: string; where?: 'emotion' | 'before' | 'after'; line: string } | null;
     /** 改提示词再画: a picture's English tags read in Chinese ('translate'), or changed the way the user says ('revise'), by the text model. Only in the tavern. */

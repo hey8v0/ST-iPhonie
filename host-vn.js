@@ -1,12 +1,14 @@
 // 视觉小说 on the tavern page: the stage (vn-stage.js), opened from a message's 小手机工具 menu or the phone's 视觉小说
 // app, fed with the chat's messages one by one, and the 立绘 kept as files in the tavern's images
-// (settings.vn.cast), so every device sees them.
+// (settings.vn.cast), so every device sees them. A character can have a VRM or Live2D model instead (vn-model.js), kept
+// as a file in the tavern's user/files the same way.
 import {openVnStage} from './vn-stage.js';
 import {storySteps, userSteps, pickLook, inlinePictures, editLook} from './core/vn.js';
 import {parsePictures} from './core/draw.js';
 import {storyMessage, storyReply} from './core/outgoing.js';
 import {parseSounds} from './core/sounds.js';
 import {parseBgm} from './core/music.js';
+import {modelInfo, normalizeModel} from './core/model-files.js';
 
 const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? record.versions : record.url ? [{...record}] : [];
 /** The drawn picture of a story picture block, as shown in the chat (the chosen version). */
@@ -22,10 +24,12 @@ const OWN = /^\/?user\/images\//;
  * linesOf(id): the message's voice lines (with places); voiced(line): whether it has a voice; play(id, index) plays one
  * line; narrate(text) reads story in the 旁白's voice; stop() stops; voiceOn(): voice is on; sound(id, index) /
  * music(id, index): plays a sound tag / <bgm> of a message (sounds() / musicOn(): whether they are on); avatars(): the
- * tavern's avatars ({me, characters}); closePanel(): puts the phone away.
+ * tavern's avatars ({me, characters}); closePanel(): puts the phone away. mouth(): the mouth of the voice playing now
+ * (core/model-files.js mouthShape), for the models' lips.
  */
-export function createVnHost({context, settings, backend, linesOf, voiced, play, narrate = () => {}, stop, voiceOn, sound = () => {}, music = () => {}, sounds = () => false, musicOn = () => false, avatars, notice, closePanel = () => {}, doc = document}) {
+export function createVnHost({context, settings, backend, linesOf, voiced, play, narrate = () => {}, stop, voiceOn, sound = () => {}, music = () => {}, sounds = () => false, musicOn = () => false, avatars, notice, closePanel = () => {}, mouth = () => null, doc = document}) {
   let stage = null, cursor = 0, endTimer = 0;
+  const failed = new Set();
   const vn = () => settings().vn, picks = new Map();
   const chat = () => context()?.chat || [];
 
@@ -132,6 +136,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     stage?.close();
     closePanel();
     cursor = start;
+    failed.clear();
     const tavern = avatars();
     // Avatars picked in the phone (an album photo; 只显示文字: none) come before the tavern's.
     const mine = {}, made = [];
@@ -145,7 +150,16 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       doc, title: title(), subtitle: start > 0 ? `从第 ${start} 楼开始` : '从头开始', backdrop: backdrop(start), scene: chatBackground(),
       look: vn,
       source: {next: () => { while (cursor < chat().length) { const id = cursor++, steps = stepsOf(id); if (steps?.length) return {id, steps}; } return null; }},
-      voice: {play: s => play(s.id, s.line), narrate: s => narrate(s.text), stop, on: voiceOn},
+      voice: {play: s => play(s.id, s.line), narrate: s => narrate(s.text), stop, on: voiceOn, mouth},
+      models: {
+        has: name => !!vn().cast?.[name]?.model,
+        load: async name => {
+          const entry = vn().cast?.[name]?.model, {createModelActor, modelBytes} = await import('./vn-model.js');
+          try { return await createModelActor({...entry}, await modelBytes(entry.path)); }
+          // Once a stage: the 立绘 (or the avatar) stays in its place.
+          catch (error) { if (!failed.has(name)) { failed.add(name); notice(`${name}的模型没能演出来：${error.message}`); } throw error; }
+        },
+      },
       // 快进 runs past the one-off sounds; the ambience and the music still change to where it stops.
       cue: (s, {skipping}) => { if (s.kind === 'bgm') music(s.id, s.index); else sound(s.id, s.index, {skipping}); },
       face: (name, user) => { const key = user ? 'me' : name; if (Object.hasOwn(mine, key)) return mine[key]; return user ? tavern.me : tavern.characters?.[name] || avatars().characters?.[name] || ''; },
@@ -211,10 +225,39 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     return url;
   }
 
+  /**
+   * A character's 模型: a new file (a .vrm, or a Live2D model as a .zip) in place of the one before, kept in the tavern's
+   * user/files; or, without one, a change to how it stands (frame, zoom, lift, map); remove takes it away. The file
+   * no longer used is deleted from the tavern. Resolves to the model kept (null when taken away).
+   */
+  async function setModel(name, blob, {remove = false, ...change} = {}) {
+    name = String(name || '').trim();
+    if (!name) throw Error('没有角色名');
+    const s = settings(), entry = s.vn.cast?.[name] || {sprite: '', looks: {}, actions: [], outfits: []}, old = entry.model || null;
+    let model = remove ? null : old;
+    if (blob) {
+      const info = await modelInfo(new Uint8Array(await blob.arrayBuffer()));
+      const file = `sttts-model-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.${info.kind === 'vrm' ? 'vrm' : 'zip'}`;
+      const ctx = context();
+      const response = await fetch('/api/files/upload', {method: 'POST', headers: ctx.getRequestHeaders(), body: JSON.stringify({name: file, data: await backend.base64(blob)})});
+      if (!response.ok) throw Error(response.status === 413 ? '模型文件太大，酒馆（或它前面的服务器）不让上传这么大的文件' : '模型没能存进酒馆（' + response.status + '）');
+      model = {kind: info.kind, version: info.version, path: 'user/files/' + file, file: String(blob.name || (info.kind === 'vrm' ? 'model.vrm' : 'model.zip')), size: blob.size, title: info.title,
+        frame: old?.frame || 'half', zoom: 1, lift: 0, map: {}, at: Date.now()};
+    }
+    if (model && !blob) model = {...model, ...change, kind: model.kind, path: model.path};
+    if (model && !normalizeModel(model)) throw Error('模型设置无效');
+    const saved = backend.saveVn({cast: {...s.vn.cast, [name]: {...entry, model}}});
+    if (old && old.path !== model?.path) {
+      fetch('/api/files/delete', {method: 'POST', headers: context().getRequestHeaders(), body: JSON.stringify({path: old.path.replace(/^\//, '')})}).catch(() => {});
+      import('./vn-model.js').then(m => m.forgetModelBytes(old.path)).catch(() => {});
+    }
+    return saved?.cast?.[name]?.model || null;
+  }
+
   /** What the stage last chose for a character and why (shown on their 立绘 page): {kind, label, word, where, line}. */
   const lastPick = name => picks.has(name) ? {...picks.get(name)} : null;
   return {
-    open, setSprite, wear, setWear, lastPick,
+    open, setSprite, setModel, wear, setWear, lastPick,
     get showing() { return !!stage; },
     status(phase) { stage?.status(phase); },
     refresh() { stage?.refresh(); },

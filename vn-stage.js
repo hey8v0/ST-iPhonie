@@ -13,6 +13,7 @@
 // It brings its own styles, so it works on any theme. Steps come from core/vn.js; vn-host.js feeds them.
 import {VN_SPEEDS, VN_WAITS, lineFx, storyFx, coverFits} from './core/vn.js';
 import {createFx} from './vn-fx.js';
+import {typedMouth} from './core/model-files.js';
 
 const STYLE_ID = 'sttts-vn-style';
 const CSS = `
@@ -67,22 +68,23 @@ const CSS = `
 @keyframes vn-black{0%{opacity:0}25%,55%{opacity:1}100%{opacity:0}}
 .vn-cast{position:absolute;inset:0;pointer-events:none}
 .vn-actor{position:absolute;bottom:0;left:50%;height:min(92%,150vw);transform:translateX(-50%);transition:left .55s cubic-bezier(.22,1,.36,1),opacity .45s,filter .35s;opacity:0;filter:drop-shadow(0 10px 24px rgba(0,0,0,.35))}
-.vn-actor img{transform-origin:50% 100%;transition:transform .45s cubic-bezier(.22,1,.36,1),filter .45s}
-.vn-actor[data-speaking] img{transform:scale(1.015)}
-.vn-actor[data-sink] img{transform:translateY(2.5%);filter:saturate(.8) brightness(.93)}
+.vn-actor :is(img,canvas){transform-origin:50% 100%;transition:transform .45s cubic-bezier(.22,1,.36,1),filter .45s}
+.vn-actor[data-speaking] :is(img,canvas){transform:scale(1.015)}
+.vn-actor[data-sink] :is(img,canvas){transform:translateY(2.5%);filter:saturate(.8) brightness(.93)}
 .vn-actor[data-in]{opacity:1}
 .vn-actor[data-dim]{filter:brightness(.58) saturate(.85) drop-shadow(0 10px 24px rgba(0,0,0,.35))}
 .vn-actor img{display:block;height:100%;width:auto;max-width:none;-webkit-user-drag:none}
+.vn-actor canvas.vn-model{display:block;height:100%;width:auto;max-width:none}
 .vn-actor img.vn-was{position:absolute;left:50%;bottom:0;transform:translateX(-50%);opacity:1;transition:opacity .35s}
 .vn-actor img.vn-was[data-gone]{opacity:0}
 .vn-actor[data-speaking]{z-index:2}
-.sttts-vn[data-fx] .vn-actor[data-hop] img{animation:vn-hop .5s cubic-bezier(.3,1.6,.5,1)}
+.sttts-vn[data-fx] .vn-actor[data-hop] :is(img,canvas){animation:vn-hop .5s cubic-bezier(.3,1.6,.5,1)}
 @keyframes vn-hop{0%,100%{transform:none}35%{transform:translateY(-4.5%)}}
-.sttts-vn[data-fx] .vn-actor[data-enter] img{animation:vn-enter .55s cubic-bezier(.22,1,.36,1)}
+.sttts-vn[data-fx] .vn-actor[data-enter] :is(img,canvas){animation:vn-enter .55s cubic-bezier(.22,1,.36,1)}
 @keyframes vn-enter{from{transform:translate(var(--vn-from,0),4%);opacity:0}}
-.sttts-vn[data-fx] .vn-actor[data-bounce] img{animation:vn-bounce .75s ease}
+.sttts-vn[data-fx] .vn-actor[data-bounce] :is(img,canvas){animation:vn-bounce .75s ease}
 @keyframes vn-bounce{0%,100%{transform:none}22%{transform:translateY(-3.5%)}45%{transform:none}65%{transform:translateY(-1.6%)}82%{transform:none}}
-.sttts-vn[data-fx] .vn-actor[data-tremble] img{animation:vn-tremble .7s linear}
+.sttts-vn[data-fx] .vn-actor[data-tremble] :is(img,canvas){animation:vn-tremble .7s linear}
 @keyframes vn-tremble{0%,100%{transform:none}10%,50%,90%{transform:translateX(-.7%)}30%,70%{transform:translateX(.7%)}}
 .sttts-vn[data-fx][data-shake=big] .vn-stage{animation:vn-shake-big .75s linear}
 @keyframes vn-shake-big{0%,100%{transform:none}10%{transform:translate(-18px,8px) rotate(-.6deg)}20%{transform:translate(16px,-10px) rotate(.5deg)}30%{transform:translate(-14px,6px)}45%{transform:translate(10px,-5px)}60%{transform:translate(-7px,3px)}80%{transform:translate(3px,-1px)}}
@@ -213,8 +215,10 @@ const quoted = text => /^[「『“"‘（(]/.test(text) ? text : '「' + text +
  * the story just before it; after: right after it; names: who else is in the story). cue(step, {skipping}): a sound or <bgm> of the story is reached. send(text): sends to the tavern (false
  * when it could not). save(patch): keeps a setting. title/subtitle: the title card. backdrop: the picture to start on
  * ({url, soft}); scene: the chat's own background, which comes back after a CG's message. onClose(lastId).
+ * models: {has(name), load(name) → Promise<actor>} — characters with a VRM / Live2D model (vn-model.js) stand as it,
+ * their 立绘 only until it is ready; voice.mouth() is the mouth of the voice playing now.
  */
-export function openVnStage({doc = document, source, look, voice, face, sprite, cue = () => {}, send, save = () => {}, title = '', subtitle = '', backdrop = null, scene = '', onClose = () => {}}) {
+export function openVnStage({doc = document, source, look, voice, face, sprite, cue = () => {}, send, save = () => {}, title = '', subtitle = '', backdrop = null, scene = '', models = null, onClose = () => {}}) {
   const win = doc.defaultView;
   if (!doc.getElementById(STYLE_ID)) { const style = doc.createElement('style'); style.id = STYLE_ID; style.textContent = CSS; doc.head.append(style); }
   const root = doc.createElement('div');
@@ -236,7 +240,8 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
 
   let steps = [], pos = 0, message = null, lastId = null, step = null, typed = true, typing = 0, closed = false;
   let auto = false, skip = false, autoTimer = 0, skipTimer = 0, hidden = false, cg = false, layer = 0, bgUrl = '', ended = false, waiting = false, clock = 0, phase = 'idle', titleTimer = 0;
-  const actors = new Map(), log = [], lookOf = new Map();
+  const actors = new Map(), log = [], lookOf = new Map(), modelOf = new Map(), lost = new Set();
+  let typedChar = '', typedFrom = 0, loop = 0, lastFrame = 0;
   let said = '', weatherAge = 0, alone = false, cgPages = 0, lastTint = '';
   // A phone (or a small computer): the stage leaves out what costs the most to draw (see data-lite in the styles).
   const lite = !!win.matchMedia?.('(pointer: coarse)').matches || (win.navigator?.hardwareConcurrency || 8) <= 4;
@@ -317,17 +322,17 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     win.setTimeout(() => a.el.remove(), 500);
   }
   function clearActors() { for (const name of [...actors.keys()]) leave(name); }
-  function enter(name, url) {
+  function enter(name, url, model = null) {
     let a = actors.get(name);
     if (!a) {
       if (actors.size >= 3) leave([...actors.values()].sort((x, y) => x.last - y.last)[0].name);
       const el = doc.createElement('div');
       el.className = 'vn-actor';
-      el.innerHTML = `<img alt="${esc(name)}" draggable="false">`;
-      el.querySelector('img').src = url;
+      if (model) el.append(model.canvas);
+      else { el.innerHTML = `<img alt="${esc(name)}" draggable="false">`; watch(el.querySelector('img'), name, url); el.querySelector('img').src = url; }
       el.setAttribute('data-enter', '');
       castEl.append(el);
-      a = {name, el, last: 0, url};
+      a = {name, el, last: 0, url, model};
       actors.set(name, a);
       placeActors();
       // In from the side it stands on.
@@ -335,12 +340,15 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       el.style.setProperty('--vn-from', left < 45 ? '-9%' : left > 55 ? '9%' : '0%');
       win.requestAnimationFrame(() => el.setAttribute('data-in', ''));
       win.setTimeout(() => el.removeAttribute('data-enter'), 600);
-    } else if (a.url !== url) {
+      if (model) play();
+    } else if (model && a.model !== model) putModel(a, model);
+    else if (!a.model && a.url !== url) {
       // Another 表情 or 动作: the new picture under the old one, which fades away.
       a.url = url;
       const img = a.el.querySelector('img:not(.vn-was)'), was = img.cloneNode();
       was.classList.add('vn-was');
       a.el.append(was);
+      watch(img, name, url);
       img.src = url;
       win.requestAnimationFrame(() => win.requestAnimationFrame(() => was.setAttribute('data-gone', '')));
       win.setTimeout(() => was.remove(), 450);
@@ -348,6 +356,71 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     a.last = ++clock;
     return a;
   }
+  /**
+   * A 立绘 whose file is gone (a backup from another tavern, a picture deleted since): no broken picture on the stage,
+   * the speaker shows as their avatar in the box instead, and that file is not tried again.
+   */
+  function watch(img, name, url) {
+    img.onerror = () => {
+      lost.add(url);
+      const a = actors.get(name);
+      if (!a || a.model || a.url !== url) return;
+      leave(name);
+      if (step?.kind === 'say' && step.role === name && !step.user) {
+        const pic = face(name, false);
+        root.setAttribute('data-face', '');
+        faceEl.innerHTML = pic ? `<img src="${esc(pic)}" alt="">` : `<span>${esc([...name][0] || '?')}</span>`;
+      }
+    };
+  }
+
+  // ---------- models ----------
+  /** A character's model once it is ready (loading starts the first time it is asked for); null without one. */
+  function modelFor(name) {
+    if (!name || !models?.has(name)) return null;
+    let m = modelOf.get(name);
+    if (!m) {
+      modelOf.set(name, m = {actor: null});
+      Promise.resolve().then(() => models.load(name)).then(actor => {
+        if (closed) { actor.dispose(); return; }
+        m.actor = actor;
+        const on = actors.get(name);
+        // Ready while they stand there (as their 立绘) or speak: the model takes their place.
+        if (on) putModel(on, actor);
+        else if (step?.kind === 'say' && step.role === name && !alone) { enter(name, '', actor); spotlight(name); root.removeAttribute('data-face'); faceEl.innerHTML = ''; }
+        if (step?.kind === 'say' && step.role === name) actor.feel(step.emotion);
+      }).catch(() => { m.failed = true; });
+    }
+    return m.actor;
+  }
+  function putModel(a, model) {
+    a.model = model; a.url = '';
+    a.el.replaceChildren(model.canvas);
+    play();
+  }
+  /** What the speaker's mouth does now: the voice's, the text's while it is typed (no voice coming), else shut. */
+  function mouthNow(now) {
+    if (step?.kind !== 'say' || step.user) return null;
+    if (phase === 'playing') return voice.mouth?.() || null;
+    if (!typed && typedChar && !(step.voiced && look().voice && voice.on())) return typedMouth(typedChar, (now - typedFrom) / 1000);
+    return null;
+  }
+  /** The models on the stage move while it is open (and the page is seen). */
+  function play() { if (!loop && !closed) { lastFrame = 0; loop = win.requestAnimationFrame(frame); } }
+  function frame(now) {
+    loop = 0;
+    const on = [...actors.values()].filter(a => a.model);
+    if (closed || !on.length) return;
+    const dt = lastFrame ? Math.min(.1, (now - lastFrame) / 1000) : 0;
+    lastFrame = now;
+    if (!doc.hidden) for (const a of on) {
+      const speaking = a.el.hasAttribute('data-speaking');
+      a.model.mouth(speaking ? mouthNow(now) : null);
+      a.model.tick(dt, speaking);
+    }
+    loop = win.requestAnimationFrame(frame);
+  }
+
   function spotlight(name) {
     for (const a of actors.values()) {
       a.el.toggleAttribute('data-speaking', a.name === name);
@@ -420,7 +493,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   // ---------- text ----------
   function finishTyping() {
     win.cancelAnimationFrame(typing); typing = 0;
-    typed = true;
+    typed = true; typedChar = '';
     textEl.textContent = textEl.dataset.full || '';
     root.setAttribute('data-done', '');
     planAuto();
@@ -432,10 +505,11 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     textEl.dataset.full = text;
     const per = VN_SPEEDS[look().speed] ?? VN_SPEEDS[2];
     if (!per || skip) { finishTyping(); return; }
-    const start = win.performance.now(), chars = [...text];
+    const start = typedFrom = win.performance.now(), chars = [...text];
     const tick = now => {
       const n = Math.min(chars.length, Math.floor((now - start) / 1000 / per) + 1);
       textEl.innerHTML = esc(chars.slice(0, n).join('')) + `<span class="vn-rest">${esc(chars.slice(n).join(''))}</span>`;
+      typedChar = chars[n - 1] || '';
       if (n < chars.length) typing = win.requestAnimationFrame(tick); else finishTyping();
     };
     typing = win.requestAnimationFrame(tick);
@@ -465,16 +539,19 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     let url = '';
     if (say && !s.user) {
       url = s.part && lookOf.has(name) ? lookOf.get(name) : sprite(name, {emotion: s.emotion, context: said, after: storyAfter(s), names: people(), line: s.text, last: actors.get(name)?.url || ''});
+      if (lost.has(url)) url = '';
       lookOf.set(name, url);
     }
+    const model = say && !s.user ? modelFor(name) : null;
     if (say) said = ''; else said = (said + '\n' + s.text).slice(-400);
     // A new CG is seen alone for two pages; the next one who speaks with a 立绘 brings them back in front of it.
     if (!again && cg) cgPages++;
-    if (alone && url && cgPages > 2) { alone = false; root.setAttribute('data-soft', ''); }
+    if (alone && (url || model) && cgPages > 2) { alone = false; root.setAttribute('data-soft', ''); }
     if (!say && !again) root.removeAttribute('data-memory');
     let actor = null;
-    if(say&&!url)leave(name);
-    if (url && !alone) actor = enter(name, url);
+    if (say && !url && !model) leave(name);
+    if ((url || model) && !alone) actor = enter(name, url, model);
+    if (actor?.model && !s.part) actor.model.feel(s.emotion);
     if (actor && !s.part) actor.el.removeAttribute('data-sink');
     // Whoever speaks is lit; the others dim (all of them when the speaker has no 立绘 on the stage).
     spotlight(say ? name : '');
@@ -497,6 +574,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     let m = loaded[at + 1];
     if (!m) { m = source.next(); if (!m) return false; loaded.push(m); at = loaded.length - 1; } else at++;
     message = m; steps = m.steps; pos = 0; lastId = m.id; said = '';
+    for (const x of steps) if (x.kind === 'say' && !x.user) modelFor(x.role);
     endCg();
     root.removeAttribute('data-memory');
     if (++weatherAge > 2) fx.weather('');
@@ -676,6 +754,8 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     win.clearTimeout(autoTimer); win.clearTimeout(skipTimer); win.clearTimeout(titleTimer); win.cancelAnimationFrame(typing);
     voice.stop();
     fx.dispose();
+    win.cancelAnimationFrame(loop);
+    for (const m of modelOf.values()) m.actor?.dispose();
     doc.removeEventListener('keydown', onKey, true);
     doc.removeEventListener('keyup', onKeyUp, true);
     doc.removeEventListener('fullscreenchange', onFull);

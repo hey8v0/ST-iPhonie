@@ -4,6 +4,7 @@ import { findRoute } from './routes.js';
 import { requestHash } from './cache.js';
 import { effectChain, lineEffect } from './voice-fx.js';
 import { audioKind, unpacked, mp3FromFrame, undecodable } from './audio-bytes.js';
+import { mouthShape } from './model-files.js';
 export { audioKind, mp3FromFrame } from './audio-bytes.js';
 
 const stopped = () => new DOMException('已停止', 'AbortError');
@@ -37,7 +38,12 @@ export class BrowserAudio {
    this.analyser = this.context.createAnalyser();
    this.analyser.fftSize = 128;
    this.analyser.smoothingTimeConstant = .72;
-   this.gain.connect(this.analyser);
+   // A finer one for the 视觉小说 models' lips (the vowels need more than the wave's five bars).
+   this.lips = this.context.createAnalyser();
+   this.lips.fftSize = 1024;
+   this.lips.smoothingTimeConstant = .45;
+   this.gain.connect(this.lips);
+   this.lips.connect(this.analyser);
    this.analyser.connect(this.context.destination);
   }
   return this.context.resume();
@@ -142,6 +148,16 @@ export class BrowserAudio {
    for (let j = 0; j < 6; j++) sum += data[i * 6 + j];
    return Math.min(1, Math.pow(sum / (6 * 255), .65));
   });
+ }
+ /** The mouth for the sound playing now (core/model-files.js mouthShape), null before anything played. */
+ mouth() {
+  if (!this.lips) return null;
+  const data = new Uint8Array(this.lips.frequencyBinCount);
+  this.lips.getByteFrequencyData(data);
+  const shape = mouthShape(data, this.context.sampleRate / this.lips.fftSize, this.lipPeak ?? .6);
+  // The loudest of late, falling back slowly: the next lines open as wide whether the voice is quiet or loud.
+  this.lipPeak = Math.max(.3, shape.loud, (this.lipPeak ?? .6) * .997);
+  return shape;
  }
  pause() { this.pausedByUser=true;return this.context?.suspend(); }
  resume() { this.pausedByUser=false;return this.context?.resume(); }

@@ -8,6 +8,7 @@ export const BACKUP_FORMAT = 2;
 /** The parts a backup can hold, in the order they are shown. settings brings the reference audio and the phone's look. */
 export const BACKUP_PARTS = Object.freeze({
   settings: '设置、预设和角色音色',
+  vnFiles: '视觉小说的立绘和模型',
   chats: '聊天记录',
   memories: '聊天记忆',
   assistant: '助手会话与记忆',
@@ -19,7 +20,7 @@ export const BACKUP_PARTS = Object.freeze({
   keys: '密钥（用密码加密）'
 });
 /** Which library stores each part covers. */
-export const PART_STORES = Object.freeze({settings: ['references', 'phone'], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], chats: [], memories: [], assistant: [], moments: [], keys: []});
+export const PART_STORES = Object.freeze({settings: ['references', 'phone'], vnFiles: [], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], chats: [], memories: [], assistant: [], moments: [], keys: []});
 /** Parts chosen by default: keys only when the user turns them on. */
 export const DEFAULT_BACKUP_PARTS = Object.freeze(Object.keys(BACKUP_PARTS).filter(part => part !== 'keys'));
 export const KEY_PASSWORD_MIN = 6;
@@ -78,9 +79,10 @@ async function rowJSON(row) {
 /**
  * Builds the backup file.
  * data: {version, settings?: object, library?: {store: rows[]}, chats?: threads[], memories?: books[],
- *   assistant?: threads with memory (book or null)[], moments?: posts[], vibeGroups?: groups[]}
+ *   assistant?: threads with memory (book or null)[], moments?: posts[], vibeGroups?: groups[], vnFiles?: [{path, blob}]}
+ *   (vnFiles: the 视觉小说's 立绘 and 模型 files, which live in the tavern, not in the settings).
  */
-export async function writeBackup({version = '', settings = null, library = {}, chats = null, memories = null, assistant = null, moments = null, keys = null, vibeGroups = null}) {
+export async function writeBackup({version = '', settings = null, library = {}, chats = null, memories = null, assistant = null, moments = null, keys = null, vibeGroups = null, vnFiles = null}) {
   const pieces = [JSON.stringify({app: 'ST-iPhonie', kind: 'backup', format: BACKUP_FORMAT, version, createdAt: Date.now()}).slice(0, -1), ',"data":{'];
   const fields = [];
   if (settings) fields.push(['settings', JSON.stringify(settings)]);
@@ -90,7 +92,7 @@ export async function writeBackup({version = '', settings = null, library = {}, 
   if (moments) fields.push(['moments', JSON.stringify(moments)]);
   if (keys) fields.push(['keys', JSON.stringify(keys)]);
   if (vibeGroups) fields.push(['vibeGroups', JSON.stringify(vibeGroups)]);
-  for (const [store, rows] of Object.entries(library)) {
+  for (const [store, rows] of [...Object.entries(library), ...(vnFiles ? [['vnFiles', vnFiles]] : [])]) {
     const parts = ['['];
     for (let i = 0; i < rows.length; i++) parts.push(i ? ',' : '', await rowJSON(rows[i]));
     parts.push(']');
@@ -123,6 +125,7 @@ export async function readBackup(file) {
   const settings = parsed.data.settings && typeof parsed.data.settings === 'object' ? parsed.data.settings : null;
   const chats = Array.isArray(parsed.data.chats) ? parsed.data.chats : null, moments = Array.isArray(parsed.data.moments) ? parsed.data.moments : null;
   const vibeGroups = library.vibes && Array.isArray(parsed.data.vibeGroups) ? parsed.data.vibeGroups : null;
+  const vnFiles = Array.isArray(parsed.data.vnFiles) ? parsed.data.vnFiles.filter(f => typeof f?.path === 'string' && f.blob?.$blob).map(f => ({path: f.path, blob: fromBase64(f.blob.$blob.data, f.blob.$blob.type)})) : null;
   const summary = {
     settings: settings ? {roles: settings.routes?.length || 0, presets: settings.presets?.length || 0} : null,
     chats: chats ? chats.length : null,
@@ -133,7 +136,8 @@ export async function readBackup(file) {
     photos: library.photos ? library.photos.length : null,
     favorites: library.favorites ? library.favorites.length : null,
     vibes: library.vibes ? {vibes: library.vibes.length, groups: vibeGroups?.length || 0} : null,
+    vnFiles: vnFiles ? vnFiles.length : null,
     keys: parsed.data.keys?.data ? (Array.isArray(parsed.data.keys.engines) ? parsed.data.keys.engines.length : 0) : null
   };
-  return {version: String(parsed.version || ''), createdAt: Number(parsed.createdAt) || 0, settings, chats, memories, assistant, moments, library, vibeGroups, keys: parsed.data.keys?.data ? parsed.data.keys : null, summary};
+  return {version: String(parsed.version || ''), createdAt: Number(parsed.createdAt) || 0, settings, chats, memories, assistant, moments, library, vibeGroups, vnFiles, keys: parsed.data.keys?.data ? parsed.data.keys : null, summary};
 }

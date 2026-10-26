@@ -2706,3 +2706,26 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .pick-delete .danger{flex:none;min-height:36px;padding:0 14px;white-space:nowrap}
 .style-row small.style-params{display:block;margin-top:2px;font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .style-param-line{margin:0;padding:10px 12px;border-radius:12px;background:var(--card2);font-size:12.5px;line-height:1.5}
+
+/* 视觉小说 › 模型: the card on a character's 立绘 page and the preview where the model moves. */
+.vn-model-card{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 12px;padding:12px 14px;border-radius:18px;border:1px solid var(--line);background:linear-gradient(135deg,var(--accent-soft),var(--card));color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.vn-model-card.empty{background:var(--card);border-style:dashed}
+.vn-model-card>.icon{flex:none;width:22px;height:22px;color:var(--accent)}
+.vn-model-card>.icon:last-child{width:16px;height:16px;color:var(--ink2)}
+.vn-model-card>span{flex:1;min-width:0;display:grid;gap:2px}
+.vn-model-card strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vn-model-card small{font-size:11.5px;color:var(--ink2);line-height:1.45}
+.vn-model-stage{display:grid;place-items:center;height:min(46vh,360px);margin:0 0 12px;border-radius:18px;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#3a3560,#120f22 72%)}
+.vn-model-stage canvas{display:block;height:100%;width:auto;max-width:100%}
+.vn-model-stage .hint{color:#d8d4ee;padding:0 18px;text-align:center}
+.vn-model-feel{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.vn-model-feel .chip-button{min-height:32px;padding:0 12px;border:0;cursor:pointer}
+.vn-model-feel .chip-button[aria-pressed=true]{background:var(--accent);color:var(--on-accent)}
+.vn-model-slider{display:grid;grid-template-columns:3em 1fr;align-items:center;gap:10px;margin:0 0 8px;font-size:13px;color:var(--ink2)}
+.vn-model-map{display:grid;gap:8px;margin:0 0 6px}
+.vn-model-map-row{display:grid;grid-template-columns:2.6em minmax(0,1fr) minmax(0,1fr);align-items:center;gap:6px;font-size:13px}
+.vn-model-map-row .select select{font-size:12.5px}
+
+/* 视觉小说 › 立绘 whose file is gone from the tavern. */
+:is(.vn-look-pic,.vn-sprite-thumb).lost img{display:none}
+:is(.vn-look-pic,.vn-sprite-thumb).lost::after{content:'图丢了';display:grid;place-items:center;width:100%;height:100%;font-size:11px;font-weight:700;color:var(--danger);background:var(--card2)}
