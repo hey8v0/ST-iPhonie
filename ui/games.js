@@ -1,4 +1,4 @@
-// 游戏: classic little games, offline, all our own (ui/games/*). The list shows each with its best score; a game fills
+// 游戏: little games, offline, all our own (ui/games/*): the kind the ads show and the classics. The list shows each with its best score; a game fills
 // the page under a bar with the score, the best and 重新开始. Arrow keys (and WASD) play on a computer, swipes and the
 // on-screen pad on a phone. Leaving the app pauses a game that runs by itself; coming back, a tap goes on.
 // Best scores are kept in this browser (ui/games/kit.js store).
@@ -13,8 +13,15 @@ import mines from './games/mines.js';
 import memory from './games/memory.js';
 import slide from './games/slide.js';
 import breakout from './games/breakout.js';
+import stack3 from './games/stack3.js';
+import parking from './games/parking.js';
+import water from './games/water.js';
+import suika from './games/suika.js';
+import tower from './games/tower.js';
+import hop from './games/hop.js';
 
-export const GAMES = [g2048, snake, tetris, gomoku, mines, memory, slide, breakout];
+// The ones the ads made famous first (三消叠叠乐, 挪车, 倒水 …), then the classics.
+export const GAMES = [stack3, parking, water, suika, tower, hop, g2048, snake, tetris, gomoku, mines, memory, slide, breakout];
 const scoreText = (game, n) => game.unit === '秒' ? `${n} 秒` : game.unit === '步' ? `${n} 步` : String(n);
 
 export function gamesApp(ctx) {

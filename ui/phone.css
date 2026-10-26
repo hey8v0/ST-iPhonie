@@ -2736,3 +2736,42 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .vn-move-row[data-motion]{grid-template-columns:auto minmax(0,1fr)}
 .vn-move-row input{min-width:0;font:inherit;font-size:13px;color:var(--ink);background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
 .vn-move-row .chip-button{min-height:32px;border:0;cursor:pointer}
+
+/* 三消叠叠乐 */
+.stack3{display:flex;flex-direction:column;align-items:center;gap:10px;width:100%}
+.stack3-level,.parking-level,.water-level{font-size:12.5px;font-weight:800;color:var(--ink2)}
+.stack3-board{position:relative;margin:4px auto}
+.stack3-tile{position:absolute;width:var(--tile);height:var(--tile);display:grid;place-items:center;font-size:calc(var(--tile) * .58);border-radius:10px;background:#fffdf5;border:1.5px solid #c9b78f;box-shadow:0 3px 0 #b39a68;padding:0;cursor:pointer;transition:filter .15s}
+.stack3-tile.under{filter:brightness(.55) saturate(.6);cursor:default}
+.stack3-aside{display:flex;gap:4px;min-height:0}
+.stack3-aside .stack3-tile{position:static}
+.stack3-bar{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;width:min(100%,330px);padding:6px;border-radius:14px;background:#8a6a3f;box-shadow:inset 0 2px 6px rgba(0,0,0,.35)}
+.stack3-slot{aspect-ratio:1;display:grid;place-items:center;font-size:22px;border-radius:8px;background:rgba(255,255,255,.15)}
+.stack3-tools,.water-tools{display:flex;gap:8px}
+.stack3-tools .chip-button,.water-tools .chip-button{border:0;cursor:pointer}
+.stack3-tools .chip-button:disabled,.water-tools .chip-button:disabled{opacity:.4}
+/* 挪车 */
+.parking{display:flex;flex-direction:column;align-items:center;gap:10px}
+.parking-lot{position:relative;border-radius:14px;background:#5f6672;background-image:linear-gradient(rgba(255,255,255,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.08) 1px,transparent 1px);background-size:var(--cell) var(--cell);overflow:hidden;box-shadow:inset 0 0 0 3px #f8f9fa}
+.parking-car{position:absolute;padding:3px;border:0;background:none;cursor:pointer;transition:transform .32s cubic-bezier(.5,0,.75,0),opacity .32s}
+.parking-car i{display:block;width:100%;height:100%;border-radius:10px;background:var(--car);box-shadow:inset 0 -4px 0 rgba(0,0,0,.18),0 2px 4px rgba(0,0,0,.3);position:relative}
+.parking-car[data-dir=right] i{background:linear-gradient(90deg,var(--car) 58%,rgba(255,255,255,.6) 58% 74%,var(--car) 74%)}
+.parking-car[data-dir=left] i{background:linear-gradient(270deg,var(--car) 58%,rgba(255,255,255,.6) 58% 74%,var(--car) 74%)}
+.parking-car[data-dir=down] i{background:linear-gradient(180deg,var(--car) 58%,rgba(255,255,255,.6) 58% 74%,var(--car) 74%)}
+.parking-car[data-dir=up] i{background:linear-gradient(0deg,var(--car) 58%,rgba(255,255,255,.6) 58% 74%,var(--car) 74%)}
+.parking-car i::after{content:'';position:absolute;inset:0;margin:auto;width:0;height:0;border:8px solid transparent}
+.parking-car[data-dir=right] i::after{border-left:11px solid rgba(255,255,255,.9);transform:translateX(5px)}
+.parking-car[data-dir=left] i::after{border-right:11px solid rgba(255,255,255,.9);transform:translateX(-5px)}
+.parking-car[data-dir=down] i::after{border-top:11px solid rgba(255,255,255,.9);transform:translateY(5px)}
+.parking-car[data-dir=up] i::after{border-bottom:11px solid rgba(255,255,255,.9);transform:translateY(-5px)}
+.parking-car.bump{animation:parking-bump .3s}
+@keyframes parking-bump{25%{translate:-3px 0}50%{translate:3px 0}75%{translate:-2px 0}}
+/* 倒水排序 */
+.water{display:flex;flex-direction:column;align-items:center;gap:12px}
+.water-tubes{display:flex;flex-wrap:wrap;justify-content:center;gap:10px 8px;max-width:330px}
+.water-tube{width:34px;height:118px;display:flex;flex-direction:column-reverse;padding:3px 3px 4px;border-radius:6px 6px 17px 17px;border:2px solid rgba(120,140,170,.55);background:rgba(255,255,255,.35);cursor:pointer;transition:transform .18s;overflow:hidden}
+.water-tube i{display:block;height:25%;flex:none;background:var(--water)}
+.water-tube i:first-child{border-radius:0 0 13px 13px}
+.water-tube.picked{transform:translateY(-12px)}
+.water-tube.full{border-color:#51cf66}
+@media (prefers-reduced-motion:reduce){.parking-car,.water-tube{transition:none}.parking-car.bump{animation:none}}
