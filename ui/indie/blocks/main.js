@@ -11,6 +11,7 @@ import {listWorlds, saveWorld, deleteWorld} from './db.js';
 import {Mirror} from './mirror.js';
 import {Body, raycast} from './player.js';
 import {Inventory, furnaceTick, stackMax, ARMOR_AT, takeSmeltXp} from './inventory.js';
+import {enchOf, shelvesAround, fishLoot, protectionFactor, wears, seeded} from './enchant.js';
 import {InventoryUI, stackHtml} from './invui.js';
 import {Entities, itemLook, setPacked} from './entities.js';
 import {Input} from './input.js';
@@ -168,14 +169,16 @@ function startWorld(meta) {
   G.xp = {level: start.xpLevel || 0, prog: start.xpProg || 0, total: start.xpTotal || 0};
   G.weather = {raining: false, thundering: false, rainT: 12000 + Math.floor(Math.random() * 168000), thunderT: 12000 + Math.floor(Math.random() * 168000), rain: 0, thunder: 0, ...meta.weather};
   G.view = 0; G.bodyYaw = body.yaw; G.flash = 0; G.bolts = []; G.tops = new Map();
+  // the enchanting table's offers stay the same till something is enchanted (the game's enchanting seed)
+  G.enchSeed = start.enchSeed ?? Math.floor(Math.random() * 2 ** 31); G.bobber = null;
   ents.loadOrbs(meta.orbs);
   G.mobs = new Mobs({
     world: mirror, player: body, mode: () => G.mode, daylight: () => environment(G.time).daylight, held: () => held(),
     dark: (x, y, z, spawn) => isDark(x, y, z, spawn), loaded: (x, z) => mirror.has(Math.floor(x), Math.floor(z)),
-    hurtPlayer: (n, why, from) => hurt(n, why, from), explode: (x, y, z, power, src) => explode(x, y, z, power, src),
+    hurtPlayer: (n, why, from, kind) => hurt(n, why, from, kind), explode: (x, y, z, power, src) => explode(x, y, z, power, src),
     sound: (name, x, y, z) => soundAt(name, x, y, z), drop: (s, x, y, z) => G.ents.drop(s, x, y, z), give: s => !G.inv.add(s),
     burst: (x, y, z, kind) => G.ents.puff(x, y, z, kind), setBlock: (x, y, z, v) => setBlock(x, y, z, v),
-    xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain',
+    xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain', looting: () => enchOf(held(), 'looting'),
   });
   G.mobs.load(meta.mobs);
   worker.onmessage = e => onWorker(e.data);
@@ -222,7 +225,7 @@ function explode(x, y, z, power, src) {
   if (d < r) {
     const k = 1 - d / r;
     b.vx += dx / (d || 1) * k * 1.2; b.vy += k * 0.6 + 0.1; b.vz += dz / (d || 1) * k * 1.2;
-    hurt(Math.floor((k * k + k) / 2 * 7 * r + 1), src ? `被${src.def.zh}炸死了` : '被炸死了');
+    hurt(Math.floor((k * k + k) / 2 * 7 * r + 1), src ? `被${src.def.zh}炸死了` : '被炸死了', null, 'explosion');
   }
   G.ents.puff(x, y, z, 'explosion');
   soundAt('explode', x, y, z);
@@ -265,7 +268,7 @@ async function saveGame() {
   if (!G || !G.ready) return;
   const b = G.body, m = G.meta;
   Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], bed: G.bedPos, weather: G.weather,
-    player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total}});
+    player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total, enchSeed: G.enchSeed}});
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   G.worker.postMessage({type: 'flush', id: Date.now()});
 }
@@ -363,7 +366,7 @@ function strike(x, y, z) {
   G.flash = 3;
   const b = G.body, d = Math.hypot(b.x - x, b.z - z);
   play('thunder', 0, Math.max(0.35, 1 - d / 96));
-  if (d < 3 && Math.abs(b.y - y) < 4) hurt(5, '被闪电击中了');
+  if (d < 3 && Math.abs(b.y - y) < 4) hurt(5, '被闪电击中了', null, 'lightning');
   for (const m of G.mobs.list) if (!m.dead && Math.hypot(m.x - x, m.z - z) < 3 && Math.abs(m.y - y) < 4) { G.mobs.hurt(m, 5, null, 'lightning'); m.fire = 160; }
 }
 
@@ -375,6 +378,9 @@ function wearTool(n = 1) {
   if (G.mode === 'creative') return;
   const s = held(), t = s && itemInfo(s.id)?.tool;
   if (!t) return;
+  // 耐久: each point of wear may be saved
+  for (let k = n; k > 0; k--) if (!wears(s)) n--;
+  if (!n) return;
   s.dmg = (s.dmg || 0) + n;
   if (s.dmg >= t.uses) { G.inv.slots[G.hot] = null; play('break', ID.glass); toast(`${zhOf(s.id)}坏了`); }
   drawHud(true);
@@ -390,8 +396,12 @@ function breakBlock(t) {
   // shears take leaves whole
   if (survival && heldTool()?.kind === 'shears' && b.name.endsWith('_leaves')) G.ents.drop({id: b.name, n: 1}, x + 0.5, y + 0.4, z + 0.5);
   else if (survival && harvests(b, heldTool())) {
-    for (const [id, n] of dropsOf(b, v >>> 12)) G.ents.drop({id, n}, x + 0.5, y + 0.4, z + 0.5);  // a door or a bed goes whole
-    if (b.xp) G.ents.xp(b.xp[0] + Math.floor(Math.random() * (b.xp[1] - b.xp[0] + 1)), x + 0.5, y + 0.5, z + 0.5);
+    // 精准采集 takes the block itself (and no experience); 时运 gives ores more (the game's: ×1 up to ×level+1, redstone +0–level)
+    const tool = held(), silk = enchOf(tool, 'silk_touch') && b.item, fortune = enchOf(tool, 'fortune');
+    const drops = silk ? [[b.name, 1]] : dropsOf(b, v >>> 12).map(([id, n]) => !fortune || !b.name.endsWith('_ore') || id === b.name ? [id, n]
+      : [id, /redstone/.test(b.name) ? n + Math.floor(Math.random() * (fortune + 1)) : n * (Math.max(0, Math.floor(Math.random() * (fortune + 2)) - 1) + 1)]);
+    for (const [id, n] of drops) G.ents.drop({id, n}, x + 0.5, y + 0.4, z + 0.5);  // a door or a bed goes whole
+    if (b.xp && !silk) G.ents.xp(b.xp[0] + Math.floor(Math.random() * (b.xp[1] - b.xp[0] + 1)), x + 0.5, y + 0.5, z + 0.5);
   }
   if (b.shape === 'door' || b.shape === 'bed') { const [ox, oy, oz] = partnerOf(x, y, z, v); if ((G.mirror.get(ox, oy, oz) & 0xFFF) === b.id) setBlock(ox, oy, oz, 0); }
   // what was inside goes out
@@ -455,6 +465,7 @@ function placeFrom(t, stack) {
   setBlock(x, y, z, v);
   if (b?.use === 'furnace') G.tiles[`${x},${y},${z}`] = {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0};
   if (b?.use === 'chest') G.tiles[`${x},${y},${z}`] = {kind: 'chest', slots: new Array(27).fill(null)};
+  if (b?.use === 'enchant') G.tiles[`${x},${y},${z}`] = {kind: 'enchant'};
   play('place', v);
   return true;
 }
@@ -478,6 +489,8 @@ function use(t, mob = null) {
   if (t && b.use && !G.body.sneaking) { openBlock(b.use, t); return; }
   // armour in the hand is put on
   if (info?.armor) { wearHeld(); return; }
+  // a fishing rod casts, or reels in what is on the line
+  if (info?.tool?.kind === 'rod') { if (G.bobber) reel(); else cast(); return; }
   // seeds, carrots, potatoes on farmland are planted (before being eaten)
   if (t && info?.plant && (t.v & 0xFFF) === ID.farmland && t.face === 2) { if (placeFrom(t, s)) useUp(); return; }
   // bone meal, a lighter on TNT
@@ -510,6 +523,62 @@ function use(t, mob = null) {
   if (info?.tool?.kind === 'hoe' && t.face === 2 && ['grass_block', 'dirt'].includes(b.name) && !G.mirror.get(t.x, t.y + 1, t.z)) { setBlock(t.x, t.y, t.z, ID.farmland); wearTool(); play('place', ID.dirt); return; }
   if (s && (info.block?.item || info.plant)) { if (placeFrom(t, s)) useUp(); }
 }
+// ---------- fishing ----------
+/** Throws the bobber the way the player looks. */
+function cast() {
+  const d = G.body.look(), eye = eyePos();
+  G.bobber = {x: eye[0] + d[0] * 0.3, y: eye[1] - 0.1, z: eye[2] + d[2] * 0.3, vx: d[0] * 0.9 + (Math.random() - 0.5) * 0.04, vy: d[1] * 0.9 + 0.12, vz: d[2] * 0.9 + (Math.random() - 0.5) * 0.04, state: 'fly', wait: 0, near: 0, bite: 0, age: 0};
+  G.swing = 6; play('cast');
+}
+/** How long till a fish comes (the game's 5–30 seconds, 5 less for each level of 饵钓). */
+const fishWait = () => Math.max(20, 100 + Math.floor(Math.random() * 500) - enchOf(held(), 'lure') * 100);
+/** Reels in: on a bite, the catch flies to the player (and experience); stuck in the ground it costs two uses. */
+function reel() {
+  const f = G.bobber, b = G.body;
+  G.bobber = null; G.swing = 6; play('reel');
+  if (f?.state === 'water' && f.bite > 0) {
+    const {stack, xp} = fishLoot(enchOf(held(), 'luck_of_the_sea'), seeded(Math.floor(Math.random() * 2 ** 31)));
+    G.ents.drop(stack, f.x, f.y + 0.3, f.z, {delay: 0});
+    const it = G.ents.items.at(-1), dx = b.x - f.x, dy = b.y + 1 - f.y, dz = b.z - f.z;
+    Object.assign(it, {vx: dx * 0.1, vy: dy * 0.1 + Math.sqrt(Math.hypot(dx, dy, dz)) * 0.08, vz: dz * 0.1});
+    G.ents.xp(xp, b.x, b.y + 0.5, b.z);
+    wearTool(1);
+  } else if (f?.state === 'ground') wearTool(2);
+}
+/** The bobber flies, floats, waits; a fish comes (bubbles), bites (it dips, a splash) and gets away if not reeled in. */
+function bobberTick() {
+  const f = G.bobber, b = G.body;
+  if (!f) return;
+  if (itemInfo(held()?.id)?.tool?.kind !== 'rod' || G.dead || Math.hypot(f.x - b.x, f.y - b.y, f.z - b.z) > 32) { G.bobber = null; return; }
+  f.age++;
+  const water = (x, y, z) => (G.mirror.get(Math.floor(x), Math.floor(y), Math.floor(z)) & 0xFFF) === ID.water;
+  if (f.state === 'fly' || f.state === 'ground') {
+    if (f.state === 'ground') { if (collisionBoxes(G.mirror.get(Math.floor(f.x), Math.floor(f.y - 0.05), Math.floor(f.z)))) return; f.state = 'fly'; }
+    f.vy -= 0.03;
+    const nx = f.x + f.vx, ny = f.y + f.vy, nz = f.z + f.vz;
+    if (water(nx, ny, nz)) { Object.assign(f, {x: nx, y: ny, z: nz, state: 'water', wait: fishWait()}); G.ents.puff(nx, ny + 0.3, nz, 'splash'); play('bite', 0, 0.4); return; }
+    if (collisionBoxes(G.mirror.get(Math.floor(nx), Math.floor(ny), Math.floor(nz)))) { Object.assign(f, {state: 'ground', vx: 0, vy: 0, vz: 0}); return; }
+    Object.assign(f, {x: nx, y: ny, z: nz, vx: f.vx * 0.92, vy: f.vy * 0.92, vz: f.vz * 0.92});
+    return;
+  }
+  // floating: on the surface, a little lower while a fish pulls
+  let top = Math.floor(f.y);
+  while (water(f.x, top + 1, f.z)) top++;
+  if (!water(f.x, top, f.z)) { f.state = 'fly'; return; }
+  const want = top + 0.85 - (f.bite > 0 ? 0.25 : 0) + Math.sin(f.age * 0.15) * 0.02;
+  f.y += (want - f.y) * 0.3; f.x += f.vx; f.z += f.vz; f.vx *= 0.8; f.vz *= 0.8;
+  if (f.bite > 0) { if (--f.bite === 0) f.wait = fishWait(); return; }
+  if (f.near > 0) {
+    // a fish swimming up: a trail of bubbles coming closer
+    const a = f.age * 0.3, r = f.near / 15;
+    if (f.age % 2 === 0) G.ents.puff(f.x + Math.cos(a) * r, top + 0.9, f.z + Math.sin(a) * r, 'bubble');
+    if (--f.near === 0) { f.bite = 20 + Math.floor(Math.random() * 20); play('bite'); G.ents.puff(f.x, top + 1, f.z, 'splash'); }
+    return;
+  }
+  // rain brings them sooner
+  if (fallsAt(Math.floor(f.x), Math.floor(f.z)) === 'rain' && Math.random() < 0.25) f.wait--;
+  if (--f.wait <= 0) f.near = 20 + Math.floor(Math.random() * 60);
+}
 /** Opens or shuts a door (both halves), a gate or a trapdoor. */
 function toggle(t) {
   const b = BLOCKS[t.v & 0xFFF], m = t.v >>> 12;
@@ -541,6 +610,18 @@ function openBlock(kind, t) {
   if (kind === 'crafting') invUI.show('crafting');
   if (kind === 'furnace') invUI.show('furnace', G.tiles[k] ||= {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0});
   if (kind === 'chest') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: new Array(27).fill(null)});
+  if (kind === 'enchant') { G.tiles[k] ||= {kind: 'enchant'}; invUI.show('enchant', {pos: {x: t.x, y: t.y, z: t.z}, shelves: shelvesAround((x, y, z) => G.mirror.get(x, y, z), t.x, t.y, t.z, ID.bookshelf)}); }
+  if (kind === 'anvil') invUI.show('anvil', {pos: {x: t.x, y: t.y, z: t.z}});
+}
+/** An anvil used: one time in eight-ish (12%) it wears a step (new → chipped → damaged → gone). */
+function anvilUsed() {
+  play('anvil');
+  const p = invUI.data?.pos;
+  if (!p || G.mode === 'creative' || Math.random() >= 0.12) return;
+  const v = G.mirror.get(p.x, p.y, p.z), next = {[ID.anvil]: ID.chipped_anvil, [ID.chipped_anvil]: ID.damaged_anvil, [ID.damaged_anvil]: 0}[v & 0xFFF];
+  if (next === undefined) return;
+  setBlock(p.x, p.y, p.z, next ? withMeta(next, v >>> 12) : 0);
+  if (!next) { play('anvil_break'); invUI.hide(); toast('铁砧碎了'); }
 }
 function openInventory() {
   if (!G || G.dead) return;
@@ -552,27 +633,28 @@ function closedInventory() { drawHud(true); if (G && !paused) { input.enabled = 
 // ---------- aiming ----------
 const reach = () => G.mode === 'creative' ? 5 : 4.5;
 function eyePos() { const b = G.body; return [b.x, b.y + b.eye, b.z]; }
-/** The direction aimed: through the touch point when there is one, else straight ahead. */
-function aimDir(point = null) {
-  if (!point || !renderer.vp) return G.body.look();
-  const [w, h] = rotated ? [innerHeight, innerWidth] : [innerWidth, innerHeight];
-  const inv = mat.invert(renderer.vp), nx = point[0] / w * 2 - 1, ny = 1 - point[1] / h * 2;
-  const p = [0, 1, 2, 3].map(r => inv[r] * nx + inv[4 + r] * ny + inv[8 + r] * 1 + inv[12 + r]);
-  const d = [p[0] / p[3], p[1] / p[3], p[2] / p[3]], l = Math.hypot(...d);
-  return d.map(v => v / l);
-}
+/** The direction aimed: the crosshair, straight ahead from the eye (also on phones and in third person). */
+const aimDir = () => G.body.look();
 
 // ---------- survival ----------
-/** pierce: what armour does not stop (falling, drowning, hunger, the void). */
-function hurt(n, why, from = null, pierce = false) {
+/**
+ * kind: what hurt ('hit', 'arrow', 'explosion', 'fall', 'lava', 'fire', 'cactus', 'lightning', 'drown', 'starve',
+ * 'void'). Armour does not stop falling, drowning, hunger or the void; the protection enchantments then take their
+ * share (the special ones only of their kind). A monster's hit may meet thorns.
+ */
+const PIERCE = new Set(['fall', 'drown', 'starve', 'void']);
+function hurt(n, why, from = null, kind = 'hit') {
   if (G.mode === 'creative' || G.dead || n <= 0) return;
   // a moment after a hit nothing hurts again (a stronger hit only adds what it has more)
   if (G.invuln > 0) { if (n <= G.lastDmg) return; const extra = n - G.lastDmg; G.lastDmg = n; n = extra; }
   else { G.invuln = 10; G.lastDmg = n; }
-  if (!pierce) {
+  const worn = [0, 1, 2, 3].map(i => G.inv.worn(i));
+  if (!PIERCE.has(kind)) {
     const {points, tough} = G.inv.armor();
     if (points) { wearArmor(n); n = throughArmor(n, points, tough); }
   }
+  n *= protectionFactor(worn, kind);
+  if (kind === 'hit' && from?.def) for (const s of worn) { const l = enchOf(s, 'thorns'); if (l && Math.random() < 0.15 * l) G.mobs.hurt(from, 1 + Math.floor(Math.random() * 4), {x: G.body.x, z: G.body.z, player: true}); }
   G.health = Math.max(0, G.health - n); G.hurtT = 10; G.exh += 0.1;
   if (from) { const b = G.body, a = Math.atan2(b.x - from.x, b.z - from.z); b.vx += Math.sin(a) * 0.4; b.vz += Math.cos(a) * 0.4; if (b.onGround) b.vy = 0.36; }
   play('hurt'); drawHud(true);
@@ -582,7 +664,7 @@ function hurt(n, why, from = null, pierce = false) {
 function wearArmor(dmg) {
   for (let i = 0; i < 4; i++) {
     const s = G.inv.worn(i), a = s && itemInfo(s.id)?.armor;
-    if (!a) continue;
+    if (!a || !wears(s, Math.random, true)) continue;
     s.dmg = (s.dmg || 0) + Math.max(1, Math.floor(dmg / 4));
     if (s.dmg >= a.uses) { G.inv.slots[ARMOR_AT + i] = null; play('break', ID.glass); toast(`${zhOf(s.id)}坏了`); }
   }
@@ -595,6 +677,15 @@ function wearHeld() {
 }
 /** Experience gained: the bar fills, levels go up (the game's amounts per level), a chime every five levels. */
 function gainXp(n) {
+  // 经验修补: a worn or held piece with it takes the orb first, two uses mended a point
+  const menders = [held(), ...[0, 1, 2, 3].map(i => G.inv.worn(i))].filter(s => s?.dmg > 0 && enchOf(s, 'mending'));
+  if (menders.length) {
+    const s = menders[Math.floor(Math.random() * menders.length)], fix = Math.min(s.dmg, n * 2);
+    s.dmg -= fix; if (!s.dmg) delete s.dmg;
+    n -= Math.ceil(fix / 2);
+    drawHud(true);
+    if (n <= 0) { play('orb'); return; }
+  }
   const was = G.xp.level;
   G.xp = addXp(G.xp, n);
   play('orb');
@@ -607,11 +698,17 @@ function attackMob(m) {
   const b = G.body, s = held(), crit = !b.onGround && b.vy < 0 && !b.inWater && !b.climbing;
   let dmg = damageOf(s?.id) * (crit ? 1.5 : 1);
   if (G.mode === 'creative' && !s) dmg = Math.max(dmg, 1);
-  const hit = G.mobs.hurt(m, dmg, {x: b.x, z: b.z, player: true, knock: b.sprinting ? 0.9 : 0.4});
+  // 锋利 half a point a level and a half more; 亡灵杀手 and 节肢杀手 2.5 a level on their own kind
+  const sharp = enchOf(s, 'sharpness'), smite = m.def.undead ? enchOf(s, 'smite') : 0, bane = m.kind === 'spider' ? enchOf(s, 'bane_of_arthropods') : 0;
+  dmg += (sharp ? sharp * 0.5 + 0.5 : 0) + smite * 2.5 + bane * 2.5;
+  const hit = G.mobs.hurt(m, dmg, {x: b.x, z: b.z, player: true, knock: (b.sprinting ? 0.9 : 0.4) + enchOf(s, 'knockback') * 0.5});
   G.attackWait = 8; G.swing = 6; G.exh += 0.1;
   if (hit) {
     play('attack', 0, 1);
     if (crit) G.ents.puff(m.x, m.y + m.body.height * 0.7, m.z, 'crit');
+    if (sharp || smite || bane) G.ents.puff(m.x, m.y + m.body.height * 0.7, m.z, 'magic');
+    const fire = enchOf(s, 'fire_aspect');
+    if (fire) m.fire = Math.max(m.fire, 80 * fire);
     const kind = itemInfo(s?.id)?.tool?.kind;
     if (kind) wearTool(kind === 'sword' ? 1 : 2);
   }
@@ -630,19 +727,19 @@ function die(why) {
 function survivalTick(r) {
   const b = G.body;
   if (G.mode === 'creative') { G.health = 20; G.food = 20; G.air = 300; return; }
-  if (r.landed > 3 && !b.inWater) hurt(Math.ceil(r.landed - 3), '摔得太重了', null, true);
+  if (r.landed > 3 && !b.inWater) hurt(Math.ceil(r.landed - 3), '摔得太重了', null, 'fall');
   if (r.landed > 2) play('fall', 0, Math.min(1, r.landed / 8));
   // air
-  if (b.headInWater) { G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了', null, true); } } else G.air = Math.min(300, G.air + 4);
-  if ((b.inLava) && G.time % 10 === 0) hurt(4, '掉进了岩浆');
-  if (b.touchCactus && G.time % 10 === 0) hurt(1, '被仙人掌扎死了');
-  if (b.y < MINY - 64 && G.time % 10 === 0) hurt(4, '掉出了世界', null, true);
+  if (b.headInWater) { if (Math.random() < 1 / (enchOf(G.inv.worn(0), 'respiration') + 1)) G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了', null, 'drown'); } } else G.air = Math.min(300, G.air + 4);
+  if ((b.inLava) && G.time % 10 === 0) hurt(4, '掉进了岩浆', null, 'lava');
+  if (b.touchCactus && G.time % 10 === 0) hurt(1, '被仙人掌扎死了', null, 'cactus');
+  if (b.y < MINY - 64 && G.time % 10 === 0) hurt(4, '掉出了世界', null, 'void');
   // hunger
   if (b.sprinting) G.exh += 0.1 * Math.hypot(b.x - b.prev.x, b.z - b.prev.z);
   if (r.jumped) G.exh += b.sprinting ? 0.2 : 0.05;
   if (G.exh >= 4) { G.exh -= 4; if (G.sat > 0) G.sat = Math.max(0, G.sat - 1); else { G.food = Math.max(0, G.food - 1); drawHud(true); } }
   if (G.food >= 18 && G.health < 20) { if (++G.regen >= (G.food >= 20 && G.sat > 0 ? 10 : 80)) { G.regen = 0; G.health = Math.min(20, G.health + 1); G.exh += 6; drawHud(true); } } else G.regen = 0;
-  if (G.food <= 0) { if (++G.starve >= 80) { G.starve = 0; if (G.health > 1) hurt(1, '饿死了', null, true); } } else G.starve = 0;
+  if (G.food <= 0) { if (++G.starve >= 80) { G.starve = 0; if (G.health > 1) hurt(1, '饿死了', null, 'starve'); } } else G.starve = 0;
   if (G.food <= 6) b.sprinting = false;
 }
 function eatTick() {
@@ -686,8 +783,10 @@ function tick() {
   else if (G.draw > 0) {
     const f = Math.min(1, G.draw / 20), power = Math.min(1, (f * f + f * 2) / 3);
     if (power >= 0.1) {
-      G.mobs.shootFromPlayer(b, b.look(), power, G.mode !== 'creative');
-      if (G.mode !== 'creative') { const i = G.inv.slots.findIndex(s => s?.id === 'arrow'); if (i >= 0) G.inv.take(i, 1); }
+      // 无限: the arrow is not used up (and cannot be picked up)
+      const bowItem = held(), infinite = G.mode === 'creative' || enchOf(bowItem, 'infinity') > 0;
+      G.mobs.shootFromPlayer(b, b.look(), power, !infinite, {strength: enchOf(bowItem, 'power'), punch: enchOf(bowItem, 'punch'), flame: enchOf(bowItem, 'flame')});
+      if (!infinite) { const i = G.inv.slots.findIndex(s => s?.id === 'arrow'); if (i >= 0) G.inv.take(i, 1); }
       wearTool(); play('bow');
     }
     G.draw = 0;
@@ -697,12 +796,15 @@ function tick() {
   if (G.breakWait > 0) G.breakWait--;
   if (ctl.attack && G.targetMob && !G.dead && !bow) { attackMob(G.targetMob); G.breaking = null; }
   else if (ctl.attack && t && !G.dead && !bow) {
-    G.swing = Math.max(G.swing, 4);
+    // digging swings the arm over and over: a new swing once the last is half way (as the game does)
+    if (G.swing <= 3) G.swing = 7;
     if (G.mode === 'creative') { if (!G.breakWait) { breakBlock(t); G.breakWait = 6; } G.breaking = null; }
     else {
       const bk = G.breaking, same = bk && bk.x === t.x && bk.y === t.y && bk.z === t.z && bk.v === t.v;
       if (!same) G.breaking = {x: t.x, y: t.y, z: t.z, v: t.v, p: 0};
-      const secs = breakTime(BLOCKS[t.v & 0xFFF], heldTool());
+      // under water (without 水下速掘) and off the ground the game digs five times slower each
+      const mult = (b.headInWater && !enchOf(G.inv.worn(0), 'aqua_affinity') ? 0.2 : 1) * (!b.onGround && !b.flying ? 0.2 : 1);
+      const secs = breakTime(BLOCKS[t.v & 0xFFF], heldTool(), {efficiency: enchOf(held(), 'efficiency'), mult});
       if (secs === 0) { if (!G.breakWait) { breakBlock(t); G.breaking = null; G.breakWait = 5; } }
       else if (secs < Infinity && !G.breakWait) {
         G.breaking.p += 1 / (secs * 20);
@@ -721,6 +823,7 @@ function tick() {
   G.ents.tick(b, stack => { if (G.dead) return stack; const left = G.inv.add(stack); drawHud(true); return left; });
   G.ents.orbTick(b, v => gainXp(v));
   weatherTick();
+  bobberTick();
   // the body turns after the head when it has turned far, or when walking
   const turnBy = ((b.yaw - G.bodyYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
   if (moved > 0.01) G.bodyYaw += turnBy * 0.5; else if (Math.abs(turnBy) > 0.85) G.bodyYaw += turnBy - Math.sign(turnBy) * 0.85;
@@ -738,7 +841,7 @@ function tick() {
 }
 
 // ---------- events from the controls ----------
-function handleEvents(events, c = ctl) {
+function handleEvents(events) {
   for (const e of events) {
     if (screens.open && !G?.ready) { if (e === 'pause') screens.nav('back'); continue; }
     if (invUI.open) { if (e === 'inventory' || e === 'pause') { invUI.hide(); } continue; }
@@ -755,7 +858,7 @@ function handleEvents(events, c = ctl) {
     else if (e === 'debug') { debugOn = !debugOn; $('.debug').hidden = !debugOn; }
     else if (e === 'hud') { hudHidden = !hudHidden; hud.style.opacity = hudHidden ? 0 : 1; }
     else if (e === 'view') { G.view = (G.view + 1) % 3; toast(['第一人称', '第三人称（背后）', '第三人称（正面）'][G.view]); }
-    else if (e === 'use') { const t = targetAt(c.aim), m = mobAt(c.aim); if (m && (!t || m.t < t.t)) use(null, m.mob); else use(t); G.useWait = 5; }
+    else if (e === 'use') { const t = targetAt(), m = mobAt(); if (m && (!t || m.t < t.t)) use(null, m.mob); else use(t); G.useWait = 5; }
     else if (e === 'pick' && G.target) {
       const id = BLOCKS[G.target.v & 0xFFF].name, name = BLOCKS[G.target.v & 0xFFF].item ? id : null;
       if (!name) continue;
@@ -767,16 +870,14 @@ function handleEvents(events, c = ctl) {
     }
   }
 }
-/** Where aiming starts: the eye; in third person a finger on the screen aims from the camera (as far again as it is away). */
-const aimFrom = point => point && G.view && G.cam ? [G.cam, G.camDist] : [eyePos(), 0];
-function targetAt(point) {
-  const [o, extra] = aimFrom(point), d = aimDir(point);
-  return raycast(G.mirror, o[0], o[1], o[2], d[0], d[1], d[2], reach() + extra);
+function targetAt() {
+  const o = eyePos(), d = aimDir();
+  return raycast(G.mirror, o[0], o[1], o[2], d[0], d[1], d[2], reach());
 }
 /** The mob aimed at (within 3 blocks, the game's reach for hitting; 5 in creative): {mob, t} or null. */
-function mobAt(point) {
-  const [o, extra] = aimFrom(point), d = aimDir(point);
-  return G.mobs.raycast(o[0], o[1], o[2], d[0], d[1], d[2], (G.mode === 'creative' ? 5 : 3) + extra);
+function mobAt() {
+  const o = eyePos(), d = aimDir();
+  return G.mobs.raycast(o[0], o[1], o[2], d[0], d[1], d[2], G.mode === 'creative' ? 5 : 3);
 }
 
 // ---------- the HUD ----------
@@ -818,7 +919,8 @@ function showError(text) {
 // ---------- the hand ----------
 function handModel(view) {
   const b = G.body, s = held(), v = G.hand.reset(), [sky, blk] = G.mirror.light(Math.floor(b.x), Math.floor(b.y + b.eye), Math.floor(b.z));
-  const sw = G.swing > 0 ? Math.sin((1 - G.swing / 6) * Math.PI) : 0, eat = G.eating ? Math.sin(G.eating * 0.9) * 0.03 : 0;
+  // how far the swing is, between ticks too; it strikes fast and comes back slower (the game's √ curve)
+  const p = G.swing > 0 ? Math.min(1, (6 - G.swing + (view.alpha || 0)) / 6) : 0, sw = Math.sin(Math.sqrt(p) * Math.PI), eat = G.eating ? Math.sin(G.eating * 0.9) * 0.03 : 0;
   const bobT = G.walked * 2.2, bob = settings.bob && b.onGround ? Math.abs(Math.sin(bobT)) * 0.035 : 0, sideBob = settings.bob && b.onGround ? Math.sin(bobT) * 0.02 : 0;
   if (!s) {
     v.cube(0.5, Array(6).fill(LAYER.player_arm), sky * 17, blk * 17, 256, 32, null, [4, 0, 8, 16]);
@@ -826,7 +928,8 @@ function handModel(view) {
     const m = mat.mul(mat.model(1, 0.2, -1.1 + sw * 0.8, 0.15, 0.62 + sideBob - sw * 0.15, -0.62 + bob + sw * 0.12, -0.75 - sw * 0.25), new Float32Array([0.22, 0, 0, 0, 0, 0.7, 0, 0, 0, 0, 0.22, 0, 0, 0, 0, 1]));
     return {verts: v, model: m};
   }
-  const look = itemLook(s.id);
+  // a rod whose line is out shows without its line
+  const look = G.bobber && s.id === 'fishing_rod' ? {flat: LAYER.fishing_rod_cast, tint: 0xFFFFFF} : itemLook(s.id);
   if (look.cube) {
     v.cube(0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints);
     return {verts: v, model: mat.model(0.38, Math.PI / 4 + sw * 0.6, -0.05 - sw * 0.5, 0, 0.58 + sideBob - sw * 0.2, -0.5 + bob + eat + sw * 0.1, -0.78 - sw * 0.2)};
@@ -867,6 +970,46 @@ function playerModel(view, a, light) {
     if (!am) continue;
     const [model, parts] = ARMOR_PARTS[i], skin = `armor_${am.mat}${model === 'armor_inner' ? '_legs' : ''}`;
     out.push({skin, verts: new Float32Array(buildModel(model, rot, pose, [], skinSizes[skin], parts)), light: [sky, blk], tint: greyArmor[skin] ? [0.63, 0.4, 0.25] : [1, 1, 1], hurt: hurtFlash, white: 0});
+  }
+  return out;
+}
+/** The bobber (a little picture turned to the camera) and the line to the rod's tip, sagging; the tip is at the right
+ *  hand: on the screen's right in first person, at the model's hand in third. */
+let bobberV = null;
+function fishingDraw(view, light) {
+  const f = G.bobber, b = G.body;
+  if (!f) return null;
+  const v = (bobberV ||= new Verts(16)).reset(), [sky, blk] = light(Math.floor(f.x), Math.floor(f.y), Math.floor(f.z)), s = 0.13;
+  const yaw = view.yaw, pitch = view.pitch, rx = [Math.cos(yaw), 0, -Math.sin(yaw)], up = [Math.sin(yaw) * Math.sin(pitch), Math.cos(pitch), Math.cos(yaw) * Math.sin(pitch)];
+  const ox = f.x - view.x, oy = f.y + 0.1 - view.y, oz = f.z - view.z;
+  for (const [a, c, u, w] of [[-1, -1, 0, 16], [1, -1, 16, 16], [1, 1, 16, 0], [-1, 1, 0, 0]]) v.v(ox + (rx[0] * a + up[0] * c) * s, oy + (rx[1] * a + up[1] * c) * s, oz + (rx[2] * a + up[2] * c) * s, 256, 128, LAYER.fishing_hook, u, w, sky * 17, blk * 17, 2 << 2);
+  let tip;
+  if (!G.view) { const d = b.look(); tip = [d[0] * 0.9 + rx[0] * 0.36 + up[0] * 0.1, d[1] * 0.9 + up[1] * 0.1, d[2] * 0.9 + rx[2] * 0.36 + up[2] * 0.1]; }
+  else { const by = G.bodyYaw, r = [Math.cos(by), 0, -Math.sin(by)], fw = [-Math.sin(by), 0, -Math.cos(by)]; tip = [b.x + r[0] * 0.35 + fw[0] * 0.9 - view.x, b.y + 1.9 - view.y, b.z + r[2] * 0.35 + fw[2] * 0.9 - view.z]; }
+  const end = [ox, oy + 0.08, oz], dist = Math.hypot(end[0] - tip[0], end[1] - tip[1], end[2] - tip[2]), sag = f.bite > 0 ? 0 : Math.min(0.6, dist * 0.04), pts = [];
+  let prev = tip;
+  for (let i = 1; i <= 16; i++) {
+    const t = i / 16, p = [tip[0] + (end[0] - tip[0]) * t, tip[1] + (end[1] - tip[1]) * t - sag * 4 * t * (1 - t), tip[2] + (end[2] - tip[2]) * t];
+    pts.push(...prev, ...p); prev = p;
+  }
+  return {thing: {verts: v, x: view.x, y: view.y, z: view.z, model: mat.identity(), center: 128}, lines: {pts, color: [0.08, 0.08, 0.08, 0.85]}};
+}
+/** Over each enchanting table near: an open book, bobbing, turning to the player. */
+function tableBooks(view, light) {
+  const out = [], open = 0.8 + Math.sin(G.time * 0.05) * 0.12, w = 0.2, h = 0.26;
+  for (const [k, tile] of Object.entries(G.tiles)) {
+    if (tile.kind !== 'enchant') continue;
+    const [x, y, z] = k.split(',').map(Number);
+    if (Math.abs(x + 0.5 - view.x) > 24 || Math.abs(z + 0.5 - view.z) > 24) continue;
+    if ((G.mirror.get(x, y, z) & 0xFFF) !== ID.enchanting_table) { if (G.mirror.has(x, z)) delete G.tiles[k]; continue; }
+    const [sky, blk] = light(x, y + 1, z), v = new Verts(32), L = LAYER.enchanting_book_pages;
+    const spine = [[0, -h / 2, 0], [0, h / 2, 0]], page = sgn => [Math.sin(open) * w * sgn, 0, Math.cos(open) * w];
+    for (const [sgn, u0, u1] of [[-1, 0, 8], [1, 8, 16]]) {
+      const p = page(sgn), q = [[...spine[0]], [...spine[1]], [p[0], h / 2, p[2]], [p[0], -h / 2, p[2]]], uv = [[u1, 16], [u1, 0], [u0, 0], [u0, 16]];
+      for (const order of [[0, 1, 2, 3], [3, 2, 1, 0]]) for (const i of order) v.v(q[i][0], q[i][1], q[i][2], 256, 32, L, uv[i][0], uv[i][1], sky * 17, Math.max(blk, 7) * 17, 2 << 2);
+    }
+    const cx = x + 0.5, cz = z + 0.5;
+    out.push({verts: v, x: cx, y: y + 1.05 + Math.sin(G.time * 0.08 + x) * 0.05, z: cz, model: mat.model(1, Math.atan2(view.x - cx, view.z - cz))});
   }
   return out;
 }
@@ -926,7 +1069,7 @@ function frame(now) {
   const dt = Math.min(0.25, (now - lastFrame) / 1000 || 0);
   lastFrame = now;
   const c = input.read(dt);
-  handleEvents(c.events, c);
+  handleEvents(c.events);
   if (invUI.open && input.mode === 'pad') padInventory();
   if (screens.open && input.mode === 'pad' && (!G || paused || G.dead)) padMenu();
   if (!G) return;
@@ -962,9 +1105,9 @@ function frame(now) {
     if (G.view === 2) { view.yaw += Math.PI; view.pitch = -view.pitch; }
   }
   G.cam = [view.x, view.y, view.z];
-  // aimed block (at the finger on touch screens), or a mob in front of it
-  G.target = paused || G.dead ? null : targetAt(c.aim);
-  const mt = paused || G.dead ? null : mobAt(c.aim);
+  // the block at the crosshair, or a mob in front of it
+  G.target = paused || G.dead ? null : targetAt();
+  const mt = paused || G.dead ? null : mobAt();
   G.targetMob = mt && (!G.target || mt.t < G.target.t) ? mt.mob : null;
   if (G.targetMob) G.target = null;
   const env = environment(G.time + a);
@@ -984,6 +1127,9 @@ function frame(now) {
   extras.weather = weatherVerts(view);
   const bolt = boltVerts(view);
   if (bolt?.n) extras.things.push({verts: bolt, x: view.x, y: view.y, z: view.z, model: mat.identity(), center: 128, bright: 1});
+  const fishing = fishingDraw(view, lightAt);
+  if (fishing) { extras.things.push(fishing.thing); extras.lines = fishing.lines; }
+  extras.things.push(...tableBooks(view, lightAt));
   if (G.target && !hudHidden) extras.outline = {boxes: G.target.boxes};
   if (G.breaking && G.breaking.p > 0) extras.crack = {x: G.breaking.x, y: G.breaking.y, z: G.breaking.z, layer: LAYER[`destroy_stage_${Math.min(9, Math.floor(G.breaking.p * 10))}`]};
   if (!hudHidden && !G.dead && !G.view) extras.hand = handModel(view);
@@ -1023,7 +1169,10 @@ async function boot() {
   screens = new Screens($('#screens'), api());
   invUI = new InventoryUI(invRoot, {get inv() { return G.inv; }, get icons() { return icons; }, drop: s => { const b = G.body; G.ents.drop(s, b.x, b.y + 1.2, b.z, {dir: b.look(), delay: 40}); }, sound: n => play(n), closed: () => closedInventory(), toApp: (x, y) => input.toApp(x, y), rotated: () => rotated, crafted: () => play('place', ID.crafting_table),
     // what was smelted gives its experience when taken out
-    took: f => { const n = takeSmeltXp(f); if (n) { const b = G.body; G.ents.xp(n, b.x, b.y + 1, b.z); } }, worn: () => play('equip')});
+    took: f => { const n = takeSmeltXp(f); if (n) { const b = G.body; G.ents.xp(n, b.x, b.y + 1, b.z); } }, worn: () => play('equip'),
+    // the enchanting table and the anvil: the player's levels, creative, paying, the enchanting seed
+    xp: () => G.xp, creative: () => G.mode === 'creative', spend: n => { G.xp.level = Math.max(0, G.xp.level - n); drawHud(true); },
+    seed: () => G.enchSeed, reseed: () => { G.enchSeed = Math.floor(Math.random() * 2 ** 31); }, anvilUsed: () => anvilUsed()});
   // tapping the hotbar picks a slot; ⋯ opens the inventory
   $('.hotbar').addEventListener('pointerdown', e => { if (!G || paused) return; const s = e.target.closest('[data-i]'); if (s) { G.hot = Number(s.dataset.i); drawHud(true); } if (e.target.closest('[data-inv]')) openInventory(); e.stopPropagation(); });
   $('.pausebtn').addEventListener('click', () => pause());

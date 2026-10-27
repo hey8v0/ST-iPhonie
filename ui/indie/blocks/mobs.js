@@ -269,10 +269,10 @@ export class Mobs {
     this.arrows.push({x: ax, y: ay, z: az, vx: dir[0] * v, vy: dir[1] * v, vz: dir[2] * v, from: m, life: 0, stuck: false, dmg: 2});
     this.ctx.sound('bow', ax, ay, az);
   }
-  /** The player's arrow: power 0–1. */
-  shootFromPlayer(p, look, power, pickup) {
+  /** The player's arrow: power 0–1; the bow's 力量 (more damage: half a point a level and a half more), 冲击 (knocks further), 火矢 (sets alight). */
+  shootFromPlayer(p, look, power, pickup, {strength = 0, punch = 0, flame = 0} = {}) {
     const v = power * 3, eye = p.y + p.eye;
-    this.arrows.push({x: p.x + look[0] * 0.3, y: eye - 0.1, z: p.z + look[2] * 0.3, vx: look[0] * v, vy: look[1] * v, vz: look[2] * v, from: 'player', life: 0, stuck: false, dmg: 2, crit: power >= 1, pickup});
+    this.arrows.push({x: p.x + look[0] * 0.3, y: eye - 0.1, z: p.z + look[2] * 0.3, vx: look[0] * v, vy: look[1] * v, vz: look[2] * v, from: 'player', life: 0, stuck: false, dmg: 2 + (strength ? strength * 0.5 + 0.5 : 0), crit: power >= 1, pickup, punch, flame});
   }
   arrowTick() {
     const {player} = this.ctx;
@@ -294,12 +294,12 @@ export class Mobs {
         const speed = Math.hypot(a.vx, a.vy, a.vz), dmg = Math.ceil(speed * a.dmg + (a.crit ? Math.random() * speed * a.dmg / 2 : 0));
         if (a.from !== 'player' && a.life > 1) {
           const [x0, y0, z0, x1, y1, z1] = player.aabb();
-          if (nx > x0 - 0.1 && nx < x1 + 0.1 && ny > y0 && ny < y1 && nz > z0 - 0.1 && nz < z1 + 0.1) { this.ctx.hurtPlayer(dmg, `被${a.from?.def?.zh || ''}射杀了`, {x: a.x, z: a.z}); this.arrows.splice(i, 1); hit = true; break; }
+          if (nx > x0 - 0.1 && nx < x1 + 0.1 && ny > y0 && ny < y1 && nz > z0 - 0.1 && nz < z1 + 0.1) { this.ctx.hurtPlayer(dmg, `被${a.from?.def?.zh || ''}射杀了`, {x: a.x, z: a.z}, 'arrow'); this.arrows.splice(i, 1); hit = true; break; }
         }
         for (const m of this.list) {
           if (m === a.from || m.dead || (a.life < 2 && a.from !== 'player')) continue;
           const [x0, y0, z0, x1, y1, z1] = m.body.aabb();
-          if (nx > x0 && nx < x1 && ny > y0 && ny < y1 && nz > z0 && nz < z1) { this.hurt(m, dmg, {x: a.x, z: a.z, player: a.from === 'player', knock: 0.3}, 'arrow'); this.arrows.splice(i, 1); hit = true; this.ctx.sound('arrow_hit', a.x, a.y, a.z); break; }
+          if (nx > x0 && nx < x1 && ny > y0 && ny < y1 && nz > z0 && nz < z1) { this.hurt(m, dmg, {x: a.x, z: a.z, player: a.from === 'player', knock: 0.3 + (a.punch || 0) * 0.6}, 'arrow'); if (a.flame) m.fire = Math.max(m.fire, 100); this.arrows.splice(i, 1); hit = true; this.ctx.sound('arrow_hit', a.x, a.y, a.z); break; }
         }
         if (hit) break;
         const bs = collisionBoxes(this.world.get(Math.floor(nx), Math.floor(ny), Math.floor(nz)));

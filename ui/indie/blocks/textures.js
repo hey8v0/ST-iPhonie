@@ -683,6 +683,47 @@ const ARMOR_SHAPES = {
 };
 for (const [mat, [color, light, dark, outline]] of Object.entries(ARMOR_COLORS)) for (const [piece, shape] of Object.entries(ARMOR_SHAPES))
   ITEM_ART[`${mat}_${piece}`] = () => icon([{mask: shape(), color, light, dark, outline, grain: mat === 'leather'}], {sparkle: mat === 'diamond' || mat === 'golden' ? [[5, 5]] : null});
+// the enchanting table: obsidian, a red cloth over its top edge with a gold border, a gold diamond on the cloth on top
+const obsidianPic = seed => specks(mottled(seed, ['#0f0b19', '#150f22', '#1b142b', '#22193a'], {cells: 4, grain: 0.4}), seed + 1, 7, ['#3b2b5c', '#2a1f44'], {size: 2});
+const CLOTH = ['#8e1f24', '#a2272c', '#b52f34'];
+BLOCK_ART.enchanting_table_side = () => {
+  const p = obsidianPic(121), r = rng(122);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < S; x++) p.set(x, y, [0, 0, 0], 0);
+  for (let y = 4; y < 8; y++) for (let x = 0; x < S; x++) p.set(x, y, hex(CLOTH[Math.floor(r() * 3)]));
+  for (let x = 0; x < S; x++) p.set(x, 8, hex(x % 3 ? '#d8a830' : '#f6d860'));
+  for (const x of [3, 8, 12]) { p.set(x, 9, hex('#b52f34')); p.set(x, 10, hex('#8e1f24')); }
+  return p;
+};
+BLOCK_ART.enchanting_table_top = () => {
+  const p = obsidianPic(123), r = rng(124);
+  for (let y = 2; y < 14; y++) for (let x = 2; x < 14; x++) p.set(x, y, hex(CLOTH[Math.floor(r() * 3)]));
+  for (let i = 2; i < 14; i++) { p.set(i, 2, hex('#d8a830')); p.set(i, 13, hex('#d8a830')); p.set(2, i, hex('#d8a830')); p.set(13, i, hex('#d8a830')); }
+  for (let y = 4; y < 12; y++) for (let x = 4; x < 12; x++) if (Math.abs(x - 7.5) + Math.abs(y - 7.5) < 3.6) p.set(x, y, hex(Math.abs(x - 7.5) + Math.abs(y - 7.5) < 2 ? '#fff0a0' : '#e8c048'));
+  return p;
+};
+BLOCK_ART.enchanting_table_bottom = () => obsidianPic(125);
+// the anvil: dark iron, worn smooth on top; chipped and damaged ones cracked
+BLOCK_ART.anvil = () => { const p = mottled(131, ['#3c3c3c', '#444444', '#4c4c4c', '#363636'], {cells: 4, grain: 0.3}); for (let i = 0; i < S; i++) { p.set(i, 0, hex('#5a5a5a')); p.set(i, 15, hex('#2a2a2a')); } return p; };
+const anvilTop = cracks => () => {
+  const p = mottled(132, ['#5c5c5c', '#646464', '#6c6c6c', '#565656'], {cells: 4, grain: 0.25});
+  for (let i = 0; i < S; i++) { p.set(i, 0, hex('#7a7a7a')); p.set(0, i, hex('#7a7a7a')); p.set(i, 15, hex('#3a3a3a')); p.set(15, i, hex('#3a3a3a')); }
+  const r = rng(133);
+  for (let k = 0; k < cracks; k++) { let x = 2 + Math.floor(r() * 12), y = 2 + Math.floor(r() * 12); for (let s = 0; s < 5; s++) { p.set(x, y, hex('#2a2a2a')); x += Math.floor(r() * 3) - 1; y += 1; } }
+  return p;
+};
+BLOCK_ART.anvil_top = anvilTop(0); BLOCK_ART.chipped_anvil_top = anvilTop(2); BLOCK_ART.damaged_anvil_top = anvilTop(5);
+// the open book floating over the table: cream pages with lines of writing
+BLOCK_ART.enchanting_book_pages = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, hex(x === 0 || x === 15 || y === 0 || y === 15 ? '#6e3a1e' : '#efe4c4')); for (let y = 3; y < 13; y += 2) for (let x = 3; x < 13; x++) if (hash(201, x, y) > 0.35) p.set(x, y, hex('#7a6a8a')); return p; };
+// the bobber: red over white
+BLOCK_ART.fishing_hook = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 7.5, y - 8.5); if (d < 4.6) p.set(x, y, hex(y < 8 ? '#d42a2a' : '#f2f2f2')); } p.set(7, 2, hex('#2a2a2a')); p.set(7, 3, hex('#2a2a2a')); return p; };
+ITEM_ART.enchanted_book = () => icon([{mask: mask().poly([[3, 4], [11, 2], [13, 11], [5, 13.5]]), color: '#7a2a8a', light: '#a85ab8', dark: '#4e165a', outline: '#200628'}, {mask: mask().line(5.5, 13, 13, 11, 1.2), color: '#f0ead8', light: '#ffffff', dark: '#c8bfa4'}, {mask: mask().poly([[7, 6], [9, 5.5], [10, 8], [8, 8.5]]), color: '#f6d860', dark: '#c8a030'}]);
+const rodIcon = cast => icon([{mask: mask().line(2.5, 13.5, 12, 3, 1.5), ...HANDLE}, ...(cast ? [] : [{mask: mask().line(12.5, 3, 13, 11, 0.8).disc(13, 11.5, 0.9), color: '#e6e6e6', dark: '#9a9a9a'}])]);
+ITEM_ART.fishing_rod = () => rodIcon(false); ITEM_ART.fishing_rod_cast = () => rodIcon(true);
+const fish = (body, belly, fin, eye = '#141414') => { const p = icon([{mask: mask().disc(7, 8.5, 5, 3).poly([[11, 8.5], [14.5, 5.5], [14.5, 11.5]]), color: body, dark: fin, outline: '#1e1e1e'}, {mask: mask().disc(7, 10, 4, 1.4), color: belly, dark: body}]); p.set(4, 7, hex(eye)); return p; };
+ITEM_ART.cod = () => fish('#b9a27c', '#e2d6bc', '#7c6a4c'); ITEM_ART.cooked_cod = () => fish('#c98a4a', '#e8b878', '#7a4a1e', '#5a3010');
+ITEM_ART.salmon = () => fish('#b64a3a', '#e8a088', '#6e2a20'); ITEM_ART.cooked_salmon = () => fish('#b8683a', '#e6a070', '#6e3a18', '#5a3010');
+ITEM_ART.tropical_fish = () => { const p = fish('#f08a2a', '#ffffff', '#b85a10'); for (const x of [6, 9]) for (let y = 6; y < 12; y++) if (p.alpha(x, y)) p.set(x, y, hex('#ffffff')); return p; };
+ITEM_ART.pufferfish = () => { const p = icon([{mask: mask().disc(8, 8.5, 5, 4.6), color: '#e8c838', light: '#fff07a', dark: '#a88a18', outline: '#3a2e08'}]); for (const [x, y] of [[3, 5], [12, 5], [3, 12], [12, 12], [8, 3], [8, 14]]) p.set(x, y, hex('#f0f0e0')); p.set(5, 7, hex('#141414')); return p; };
 // an experience orb: a round glow, yellow-green, brighter inside
 BLOCK_ART.xp_orb = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (d < 6.5) p.set(x, y, d < 2.5 ? [250, 255, 190] : d < 4.5 ? [190, 240, 60] : [110, 170, 20]); } return p; };
 // rain: a few thin streaks, see-through; snow: flakes here and there

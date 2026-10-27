@@ -133,6 +133,11 @@ for (const [w, zh] of [['oak', '橡木'], ['spruce', '云杉木'], ['birch', '�
 block('glass_pane', '玻璃板', {tex: {all: 'glass', edge: 'glass_pane_top'}, shape: 'pane', pass: 'cutout', hard: 0.3, drop: null, ...shaped});
 block('iron_bars', '铁栏杆', {tex: all('iron_bars'), shape: 'pane', pass: 'cutout', hard: 5, tool: T.PICK, tier: 0, ...shaped});
 for (const [c, zh, h] of COLORS) block(`${c}_bed`, `${zh}床`, {tex: all('white_wool'), shape: 'bed', hard: 0.2, color: h, use: 'bed', ...shaped});
+// enchanting and repairing: the table (three quarters high, a little light) and the anvil (facing; it wears from new to
+// chipped to damaged, and falls like sand)
+block('enchanting_table', '附魔台', {tex: tbs('enchanting_table_top', 'enchanting_table_bottom', 'enchanting_table_side'), shape: 'enchanting', hard: 5, tool: T.PICK, tier: 0, light: 7, use: 'enchant', blast: 1200, ...shaped});
+for (const [n, zh] of [['anvil', '铁砧'], ['chipped_anvil', '开裂的铁砧'], ['damaged_anvil', '损坏的铁砧']])
+  block(n, zh, {tex: {top: `${n}_top`, bottom: 'anvil', side: 'anvil'}, shape: 'anvil', hard: 5, tool: T.PICK, tier: 0, facing: true, gravity: true, use: 'anvil', blast: 1200, ...shaped});
 
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
@@ -149,7 +154,7 @@ item('coal', '煤炭', {fuel: 80});
 item('charcoal', '木炭', {fuel: 80});
 for (const [m, zh] of [['iron', '铁'], ['copper', '铜'], ['gold', '金']]) { item(`raw_${m}`, `粗${zh}`); item(`${m}_ingot`, `${zh}锭`); }
 item('diamond', '钻石'); item('emerald', '绿宝石'); item('lapis_lazuli', '青金石'); item('redstone', '红石粉'); item('flint', '燧石');
-item('glowstone_dust', '荧石粉'); item('book', '书'); item('snowball', '雪球', {stack: 16}); item('clay_ball', '黏土球'); item('brick', '红砖');
+item('glowstone_dust', '荧石粉'); item('book', '书', {enchantability: 1}); item('snowball', '雪球', {stack: 16}); item('clay_ball', '黏土球'); item('brick', '红砖');
 item('apple', '苹果', {food: 4, sat: 2.4}); item('wheat_seeds', '小麦种子', {plant: 'wheat'}); item('wheat', '小麦'); item('bread', '面包', {food: 5, sat: 6});
 item('melon_slice', '西瓜片', {food: 2, sat: 1.2}); item('bucket', '桶', {stack: 16}); item('water_bucket', '水桶', {stack: 1, pour: 'water'}); item('lava_bucket', '岩浆桶', {stack: 1, pour: 'lava', fuel: 1000});
 item('bowl', '碗', {fuel: 5});
@@ -160,23 +165,27 @@ for (const [raw, cooked, zh, f, s, cf, cs] of [['porkchop', 'cooked_porkchop', '
 item('carrot', '胡萝卜', {food: 3, sat: 3.6, plant: 'carrots'}); item('potato', '马铃薯', {food: 1, sat: 0.6, plant: 'potatoes'}); item('baked_potato', '烤马铃薯', {food: 5, sat: 6});
 item('rotten_flesh', '腐肉', {food: 4, sat: 0.8}); item('spider_eye', '蜘蛛眼', {food: 2, sat: 3.2});
 item('leather', '皮革'); item('feather', '羽毛'); item('bone', '骨头'); item('bone_meal', '骨粉', {meal: true}); item('string', '线'); item('gunpowder', '火药'); item('paper', '纸');
-item('arrow', '箭'); item('bow', '弓', {stack: 1, tool: {kind: 'bow', tier: -1, speed: 1, uses: 384}, fuel: 15});
+item('arrow', '箭'); item('bow', '弓', {stack: 1, tool: {kind: 'bow', tier: -1, speed: 1, uses: 384}, fuel: 15, enchantability: 1});
+item('fishing_rod', '钓鱼竿', {stack: 1, tool: {kind: 'rod', tier: -1, speed: 1, uses: 64}, fuel: 15, enchantability: 1});
+item('enchanted_book', '附魔书', {stack: 1});
+for (const [raw, cooked, zh, f, s, cf, cs] of [['cod', 'cooked_cod', '鳕鱼', 2, 0.4, 5, 6], ['salmon', 'cooked_salmon', '鲑鱼', 2, 0.4, 6, 9.6]]) { item(raw, `生${zh}`, {food: f, sat: s}); item(cooked, `熟${zh}`, {food: cf, sat: cs}); }
+item('tropical_fish', '热带鱼', {food: 1, sat: 0.2}); item('pufferfish', '河豚', {food: 1, sat: 0.2});
 item('shears', '剪刀', {stack: 1, tool: {kind: 'shears', tier: -1, speed: 1, uses: 238}});
 item('flint_and_steel', '打火石', {stack: 1, tool: {kind: 'fire', tier: -1, speed: 1, uses: 64}});
-export const TIERS = {wooden: {zh: '木', tier: 0, speed: 2, uses: 59}, stone: {zh: '石', tier: 1, speed: 4, uses: 131}, iron: {zh: '铁', tier: 2, speed: 6, uses: 250},
-  golden: {zh: '金', tier: 0, speed: 12, uses: 32}, diamond: {zh: '钻石', tier: 3, speed: 8, uses: 1561}};
+export const TIERS = {wooden: {zh: '木', tier: 0, speed: 2, uses: 59, enchantability: 15}, stone: {zh: '石', tier: 1, speed: 4, uses: 131, enchantability: 5}, iron: {zh: '铁', tier: 2, speed: 6, uses: 250, enchantability: 14},
+  golden: {zh: '金', tier: 0, speed: 12, uses: 32, enchantability: 22}, diamond: {zh: '钻石', tier: 3, speed: 8, uses: 1561, enchantability: 10}};
 const KINDS = {pickaxe: '镐', axe: '斧', shovel: '锹', sword: '剑', hoe: '锄'};
 // the game's attack damage of each tool (hearts × 2)
 const DAMAGE = {sword: [4, 5, 6, 4, 7], axe: [7, 9, 9, 7, 9], pickaxe: [2, 3, 4, 2, 5], shovel: [2.5, 3.5, 4.5, 2.5, 5.5], hoe: [1, 1, 1, 1, 1]};
 Object.keys(TIERS).forEach((t, ti) => { for (const [k, zh] of Object.entries(KINDS))
-  item(`${t}_${k}`, `${TIERS[t].zh}${zh}`, {stack: 1, tool: {kind: k, tier: TIERS[t].tier, speed: TIERS[t].speed, uses: TIERS[t].uses}, damage: DAMAGE[k][ti], fuel: t === 'wooden' ? 10 : 0}); });
+  item(`${t}_${k}`, `${TIERS[t].zh}${zh}`, {stack: 1, tool: {kind: k, tier: TIERS[t].tier, speed: TIERS[t].speed, uses: TIERS[t].uses}, damage: DAMAGE[k][ti], fuel: t === 'wooden' ? 10 : 0, enchantability: TIERS[t].enchantability, repair: {wooden: '#planks', stone: '#stone_tool', iron: 'iron_ingot', golden: 'gold_ingot', diamond: 'diamond'}[t]}); });
 // armour: worn in a slot (0 head, 1 chest, 2 legs, 3 feet); its points, toughness and uses are the game's (uses: the
 // material's base × 11, 16, 15, 13). Leather from a pack is grey and dyed, its default colour is the tint.
-export const ARMOR = {leather: {zh: '皮革', base: 5, points: [1, 3, 2, 1], tough: 0}, iron: {zh: '铁', base: 15, points: [2, 6, 5, 2], tough: 0},
-  golden: {zh: '金', base: 7, points: [2, 5, 3, 1], tough: 0}, diamond: {zh: '钻石', base: 33, points: [3, 8, 6, 3], tough: 2}};
+export const ARMOR = {leather: {zh: '皮革', base: 5, points: [1, 3, 2, 1], tough: 0, enchantability: 15, repair: 'leather'}, iron: {zh: '铁', base: 15, points: [2, 6, 5, 2], tough: 0, enchantability: 9, repair: 'iron_ingot'},
+  golden: {zh: '金', base: 7, points: [2, 5, 3, 1], tough: 0, enchantability: 25, repair: 'gold_ingot'}, diamond: {zh: '钻石', base: 33, points: [3, 8, 6, 3], tough: 2, enchantability: 10, repair: 'diamond'}};
 export const ARMOR_PIECES = [['helmet', '头盔', 11, '帽子'], ['chestplate', '胸甲', 16, '外套'], ['leggings', '护腿', 15, '裤子'], ['boots', '靴子', 13, '靴子']];
 for (const [mat, a] of Object.entries(ARMOR)) ARMOR_PIECES.forEach(([piece, zh, k, leather], slot) =>
-  item(`${mat}_${piece}`, `${a.zh}${mat === 'leather' ? leather : zh}`, {stack: 1, armor: {slot, mat, points: a.points[slot], tough: a.tough, uses: a.base * k}, ...(mat === 'leather' ? {tint: '#a06540'} : {})}));
+  item(`${mat}_${piece}`, `${a.zh}${mat === 'leather' ? leather : zh}`, {stack: 1, armor: {slot, mat, points: a.points[slot], tough: a.tough, uses: a.base * k}, enchantability: a.enchantability, repair: a.repair, ...(mat === 'leather' ? {tint: '#a06540'} : {})}));
 /** What a hit of `dmg` does through armour of `points` and `tough` (the game's formula). */
 export function throughArmor(dmg, points, tough = 0) {
   if (!points) return dmg;
@@ -208,13 +217,19 @@ export function itemInfo(name) {
 export const ALL_ITEMS = [...B.filter(b => b.item).map(b => b.name), ...Object.keys(I)];
 export const zhOf = name => itemInfo(name)?.zh || name;
 
-/** Seconds of block breaking from MC's rules: hardness × 1.5 (or × 5 without the right tool) ÷ the tool's speed. */
-export function breakTime(block, tool) {
+/**
+ * Seconds of block breaking from MC's rules: hardness × 1.5 (or × 5 without the right tool) ÷ the tool's speed.
+ * efficiency: the enchantment's level (adds level² + 1 to a tool that is right for the block); mult: under water or
+ * not standing on anything the game digs five times slower (0.2).
+ */
+export function breakTime(block, tool, {efficiency = 0, mult = 1} = {}) {
   if (block.hard < 0) return Infinity;
   if (block.hard === 0) return 0;
   let speed = tool && block.tool === tool.kind ? tool.speed : 1;
   if (tool?.kind === 'sword' && block.name.endsWith('_leaves')) speed = 1.5;
   if (tool?.kind === 'shears') speed = block.name.endsWith('_leaves') ? 15 : block.name.endsWith('_wool') ? 5 : 1;
+  if (efficiency && speed > 1) speed += efficiency * efficiency + 1;
+  speed *= mult;
   // Per tick: speed / hardness / (30 if it drops else 100); 20 ticks a second.
   const perTick = speed / block.hard / (harvests(block, tool) ? 30 : 100);
   return perTick > 1 ? 0 : Math.ceil(1 / perTick) / 20;

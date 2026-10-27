@@ -13,7 +13,7 @@ export function itemLook(id) {
   const b = info?.block;
   // doors have a flat picture of their own; other shaped blocks show as a small block of what they are made of
   if (b && LAYER[b.name] !== undefined && !b.tex?.all) return {flat: LAYER[b.name], tint: 0xFFFFFF};
-  if (b && ['cube', 'slab', 'farmland', 'cactus', 'layer', 'stairs', 'fence', 'gate', 'pane', 'trapdoor', 'bed', 'chest'].includes(b.shape) && b.tex) {
+  if (b && ['cube', 'slab', 'farmland', 'cactus', 'layer', 'stairs', 'fence', 'gate', 'pane', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil'].includes(b.shape) && b.tex) {
     const t = b.tex, L = n => LAYER[n] ?? 0, tint = b.color ? parseInt(b.color.slice(1), 16) : tintNum(b.tint);
     if (t.all) return {cube: Array(6).fill(L(t.all)), tints: Array(6).fill(tint), half: b.shape === 'slab' || b.shape === 'layer'};
     const side = L(t.side), front = t.front ? L(t.front) : side;
@@ -114,7 +114,8 @@ export class Entities {
   /** Puffs that are not bits of a block: smoke, poof (a mob gone), heart, crit, explosion, meal (bone meal sparkles). */
   puff(x, y, z, kind) {
     const S = {smoke: [4, 0x4a4a4a, 0.02, 0.1, 30, -0.005], poof: [14, 0xdddddd, 0.08, 0.12, 20, -0.01], heart: [6, 0xff3a5a, 0.02, 0.12, 30, -0.004], crit: [10, 0xfff2b0, 0.15, 0.08, 14, 0.02],
-      explosion: [40, 0x8a8a8a, 0.35, 0.35, 30, -0.01], meal: [12, 0x7ce05a, 0.06, 0.07, 20, -0.005]}[kind];
+      explosion: [40, 0x8a8a8a, 0.35, 0.35, 30, -0.01], meal: [12, 0x7ce05a, 0.06, 0.07, 20, -0.005], magic: [10, 0x9a6aff, 0.12, 0.07, 16, 0.01],
+      bubble: [3, 0xd8ecff, 0.02, 0.05, 12, -0.01], splash: [8, 0x9ac8ff, 0.08, 0.05, 14, 0.03]}[kind];
     if (!S) return;
     const [n, tint, spread, size, life, g] = S, layer = LAYER.white_wool ?? 0;
     for (let i = 0; i < n; i++) this.particles.push({x: x + (Math.random() - 0.5) * spread * 4, y: y + (Math.random() - 0.5) * spread * 4, z: z + (Math.random() - 0.5) * spread * 4,

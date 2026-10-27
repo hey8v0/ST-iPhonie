@@ -2,7 +2,6 @@
 // app, fed with the chat's messages one by one, and the 立绘 kept as files in the tavern's images
 // (settings.vn.cast), so every device sees them. A character can have a VRM or Live2D model instead (vn-model.js), kept
 // as a file in the tavern's user/files the same way.
-import {openVnStage} from './vn-stage.js';
 import {storySteps, userSteps, pickLook, inlinePictures, editLook} from './core/vn.js';
 import {parsePictures} from './core/draw.js';
 import {storyMessage, storyReply} from './core/outgoing.js';
@@ -131,7 +130,11 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     return Math.max(0, list.length - 1);
   }
 
-  function open(from = 'latest') {
+  // The stage (vn-stage.js and its effects, about 100 KB) is loaded the first time it opens, not with the tavern.
+  let stageCode = null;
+  async function open(from = 'latest') {
+    if (!chat().length) throw Error('这个聊天还没有内容');
+    const {openVnStage} = await (stageCode ||= import('./vn-stage.js').catch(error => { stageCode = null; throw error; }));
     const list = chat();
     if (!list.length) throw Error('这个聊天还没有内容');
     const start = from === 'first' ? 0 : from === 'latest' ? latestStart() : Math.min(list.length - 1, Math.max(0, Number(from) || 0));

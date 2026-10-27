@@ -255,7 +255,7 @@ export function phoneFormat({user = '我', names = [], groups = [], images = fal
     '- 礼物：「名字：[礼物 物品名] 附言」',
     '- 分享歌曲：「名字：[分享歌曲] 歌名 - 歌手｜想说的话」',
     `- 打电话：「名字：[打电话] 为什么打」（${user}的手机会响，每次最多一个）`,
-    `- 发朋友圈：「名字：[朋友圈] 动态内容」（发给所有朋友看的，不是发给${user}的）`,
+    `- 发朋友圈：「名字：[朋友圈] 动态内容${images ? '｜配图用的英文 danbooru tag（有画面感才配，不配图就不写｜和后面的 tag）' : ''}」（发给所有朋友看的，不是发给${user}的）`,
     `私聊是一对一的：${after ? '' : '<phone></phone> 里'}每个人的每一条都是他单独发给${user}的，只有他和${user}看得到，发到他和${user}的私聊窗口里。所以：`,
     `- 每条都是对${user}说的（「你」就是${user}），不对别人说话、不喊别人的名字让对方接话；想说别人的事，就当着${user}的面说起他。`,
     `- 几个人都发消息时，各发各的：彼此看不到对方发了什么，不回应、不引用、不接着别人私聊里的话，也不知道别人给${user}发过消息（正文里当面说过、${user}告诉过他的除外）。`,
@@ -441,8 +441,18 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
 
 const NAME_LINE = /^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]\s*(.*)$/;
 const unquote = s => s.trim().replace(/^[「“"『](.*)[」”"』]$/s, '$1').trim();
-const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
+const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|配图|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
 const LUCKY = ['6.66', '8.88', '5.20', '13.14', '16.80', '1.88'];
+// Drawing tags from what the model wrote: the English words (Chinese in them is left out), comma separated.
+const tagsOf = s => String(s).replace(/[一-鿿]+/g, ' ').split(/[,，]/).map(t => t.replace(/\s+/g, ' ').trim()).filter(Boolean).join(', ').slice(0, 600);
+// A post's picture: 「（配图：描述｜english tags）」 or 「[配图] tags」 after the text, or 「动态｜english tags」.
+const PICTURE = /\s*[（(【[]\s*配图\s*[:：\]】]\s*([\s\S]*?)\s*[）)\]】]?\s*$/;
+function postPicture(text) {
+  const m = text.match(PICTURE);
+  if (m) { const [said, ...tags] = m[1].split(/[|｜]/); return {text: text.slice(0, m.index).trim(), imageTags: tagsOf(tags.length ? tags.join(',') : said)}; }
+  const bar = text.match(/^([\s\S]+?)\s*[|｜]\s*([\x20-\x7e]{3,})$/);
+  return bar && /[a-z]/i.test(bar[2]) ? {text: bar[1].trim(), imageTags: tagsOf(bar[2])} : {text, imageTags: ''};
+}
 /**
  * A phone-feature line (「[红包 ¥8.88] 祝福」 and the like) as a message; {kind:'claim', action} for taking or returning
  * the user's red packet or transfer. null when the line is ordinary text.
@@ -453,7 +463,12 @@ function special(from, content, {names, user, stickers = []}) {
   const [, what, arg, rest] = m, text = unquote(rest || '').replace(/<[^>]+>/g, '');
   switch (what) {
     // A 朋友圈 post made while chatting: it goes to 朋友圈, not into the chat.
-    case '朋友圈': case '发朋友圈': case '动态': { const said = (text || arg.trim()).slice(0, 2000); return said ? {from, kind: 'moment', text: said} : null; }
+    case '朋友圈': case '发朋友圈': case '动态': {
+      const {text: said, imageTags} = postPicture(text || arg.trim());
+      return said ? {from, kind: 'moment', text: said.slice(0, 2000), ...(imageTags ? {imageTags} : {})} : null;
+    }
+    // The picture of the post just above, on a line of its own.
+    case '配图': { const imageTags = tagsOf((text || arg.trim().replace(/^[:：]\s*/, '')).split(/[|｜]/).at(-1));return imageTags ? {from, kind: 'moment-picture', imageTags} : null; }
     // A voice call placed from the chat: the phone rings after this reply.
     case '打电话': case '语音通话': case '来电': return {from, kind: 'call', reason: (text || arg.trim()).slice(0, 200)};
     // A song shared (「[分享歌曲] 歌名 - 歌手｜想说的话」): a card the user can play.
@@ -465,7 +480,7 @@ function special(from, content, {names, user, stickers = []}) {
     case '图片': case '照片': {
       // 「描述｜英文 tag」: the tags draw it when a drawing engine is set up (Chinese words in them are left out).
       const [said, ...tags] = (text || arg.trim()).split(/[|｜]/);
-      const imageTags = tags.join(',').replace(/[一-鿿]+/g, ' ').split(/[,，]/).map(t => t.replace(/\s+/g, ' ').trim()).filter(Boolean).join(', ').slice(0, 600);
+      const imageTags = tagsOf(tags.join(','));
       return said.trim() ? {from, kind: 'photo', text: said.trim().slice(0, 500), ...(imageTags ? {imageTags} : {})} : null;
     }
     // A sticker of the user's collection; a name it does not have stays words.
@@ -499,7 +514,11 @@ export function parseChatReply(reply, {members, user = '我', voiceFormat, voice
     else if (names.length === 1) from = names[0];
     else if (out.length) from = out.at(-1).from;
     if (!from || !content.trim()) continue;
+    // 「（配图：…）」 on the line after a post is that post's picture, not a message.
+    const post = out.at(-1)?.kind === 'moment' && !out.at(-1).imageTags ? out.at(-1) : null;
+    if (post && /^\s*[（(]\s*配图\s*[:：]/.test(content)) { const imageTags = postPicture('x' + content.trim()).imageTags; if (imageTags) post.imageTags = imageTags; continue; }
     const feature = special(from, content, {names, user, stickers});
+    if (feature?.kind === 'moment-picture') { if (post) post.imageTags = feature.imageTags; continue; }
     if (feature) { out.push(feature); if (out.length >= 12) break; continue; }
     const voice = voiceFormat ? parseDialogue(content, voiceFormat)[0] : null;
     if (voice) {

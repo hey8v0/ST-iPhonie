@@ -56,9 +56,13 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
       const found = parseMoments(await ask(ctx, request), {names, user, mode: 'posts'});
       if (!found.posts.length) throw Error('这次没有收到新动态，可以再刷新一次');
       const posts = await backend.momentsMutate(() => backend.moments.add(found.posts.map(p => ({...p, space, source: auto ? 'auto' : 'manual', imageState: p.imageTags && s.moments.images ? 'waiting' : undefined}))));
-      for (const post of posts) if (post.imageTags && s.moments.images) drawImage(post.id).catch(() => {});
+      drawNew(posts);
       return posts;
     });
+  }
+  /** The pictures of new posts (from a refresh, or posted while chatting), when 动态配图 is on. */
+  function drawNew(posts) {
+    if (settings().moments.images) for (const post of posts || []) if (post.imageTags && !post.photoId) drawImage(post.id).catch(() => {});
   }
   /** Friends react to the user's new post. */
   function react(postId) {
@@ -124,5 +128,5 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
     } catch { /* A failed automatic post is not worth interrupting the story. */ }
   }
 
-  return {refresh, react, reply, drawImage, storyReplied, busy: () => !!busy};
+  return {refresh, react, reply, drawImage, drawNew, storyReplied, busy: () => !!busy};
 }

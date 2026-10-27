@@ -385,6 +385,7 @@ export class Renderer {
     // clouds
     if (env.clouds && this.images.clouds) this.drawClouds(vp, view, env, fogNear, fogFar);
     if (extras.outline) this.drawOutline(extras.outline, view, vp);
+    if (extras.lines) this.drawLines(extras.lines, vp);
     if (extras.hand) this.drawHand(extras.hand, view, env);
     gl.disable(gl.BLEND);
     gl.bindVertexArray(null);
@@ -445,6 +446,14 @@ export class Renderer {
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.lineBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pts), gl.DYNAMIC_DRAW);
     gl.bindVertexArray(this.lineVao); gl.drawArrays(gl.LINES, 0, pts.length / 3);
+  }
+  /** Lines (a fishing line): {pts: [x, y, z, …] in pairs, relative to the camera, color: [r, g, b, a]}. */
+  drawLines(lines, vp) {
+    const gl = this.gl, L = this.line;
+    gl.useProgram(L.p); gl.uniformMatrix4fv(L.u.u_viewProj, false, vp); gl.uniform4fv(L.u.u_color, lines.color);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.lineBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lines.pts), gl.DYNAMIC_DRAW);
+    gl.bindVertexArray(this.lineVao); gl.drawArrays(gl.LINES, 0, lines.pts.length / 3);
   }
   /** Draws vertices built on the page (a Verts) with a model matrix at a place (relative to the camera). */
   drawVerts(verts, {origin, model = mat.identity(), unit = 256, center = 32, cut = 0.5, overlay = false, alpha = 1}) {

@@ -102,7 +102,7 @@ export function makeIcons(built) {
 }
 
 // how a shaped block shows in the inventory: its state, and what joins it (a fence and a pane joined left and right)
-const ICON_STATE = {stairs: 2, fence: 0, gate: 0, pane: 0, trapdoor: 0, bed: 2 | 4, chest: 0};
+const ICON_STATE = {stairs: 2, fence: 0, gate: 0, pane: 0, trapdoor: 0, bed: 2 | 4, chest: 0, enchanting: 0, anvil: 1};
 // blocks with their own flat item picture (doors)
 const LAYER_ITEM = new Set(['oak_door', 'spruce_door', 'birch_door']);
 /**

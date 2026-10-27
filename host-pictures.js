@@ -13,7 +13,6 @@
 import {storyReply} from './core/outgoing.js';
 import {parsePictures, pictureInputs, planRequest, planLength, tagTextRequest, tagTextAnswer, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
 import {tokenBudget, loadCounter, countField, tagCost, estimateTokens} from './core/tokens.js';
-import {openImageViewer} from './image-viewer.js';
 import {editTags} from './host-ask.js';
 import {downloadAction} from './download.js';
 import {plainStory, activeChatPreset} from './core/chat.js';
@@ -29,6 +28,9 @@ const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? rec
  * voice: 回复后单独配音 ({wanted(), has(text), rules(), format()}): whether it is on, whether a reply already has its
  * lines voiced, the voice preset's prompt for the speakers and its 台词格式. Without it replies are never voiced here.
  */
+// the viewer (image-viewer.js) is loaded the first time a picture is opened, not with the tavern
+let viewerLoad = null;
+const viewerCode = () => viewerLoad ||= import('./image-viewer.js').catch(error => { viewerLoad = null; throw error; });
 export function createPictureHost({context, redrawMessage = (id, message) => context().updateMessageBlock?.(id, message), settings, backend, marker, scheduleRender, openDraw, notice, voice = null, phone = null, speakers = () => [], voiced: lined = () => {}}) {
   const jobs = new Map(); // queue key -> {state: 'generating'|'error', message}
   const folds = new Map(); // `${id}:${hash}` -> true/false, this session's fold choice per picture
@@ -387,7 +389,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const list = versionsOf(stored(message, tag.hash));
       // Paging in the viewer also changes which version the chat shows.
       const pick = i => { if (i !== shown(message, tag.hash)?.index) { keep(message, tag.hash, list, i); saveSoon(); scheduleRender(); } };
-      openImageViewer({doc: document, from: source?.querySelector?.('img') || source,
+      viewerCode().then(({openImageViewer}) => openImageViewer({doc: document, from: source?.querySelector?.('img') || source,
         gallery: {items: list.map(v => ({src: v.url, alt: tag.prompt, info: pictureInfo(v, tag)})), index: pic.index, onIndex: pick},
         actions: [
           downloadAction(document, i => ({source: list[i].url, name: [(list[i].characters || []).join('、') || context()?.name2 || 'ST-iPhonie', list[i].seed].filter(v => v !== undefined && v !== '').join('_')}), notice),
@@ -396,7 +398,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
           {label: '在绘图中打开', run: () => act('open', id, message, tag)},
           {label: '收起', run: () => act('fold', id, message, tag)},
           {label: '删除这版', danger: true, run: i => { pick(i); return remove(id, tag).then(done => done ? undefined : false); }}
-        ]});
+        ]})).catch(error => notice(error.message));
     }
     if (action === 'delete') remove(id, tag).catch(error => notice(error.message));
   }

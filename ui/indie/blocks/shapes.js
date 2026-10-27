@@ -81,6 +81,12 @@ export function pieces(v, near = () => 0) {
       const latch = [[7, 7, 15, 9, 11, 16], [0, 7, 7, 1, 11, 9], [7, 7, 0, 9, 11, 1], [15, 7, 7, 16, 11, 9]][f];
       return [{box: [1, 0, 1, 15, 14, 15], role: 'main'}, {box: latch, role: 'latch'}];
     }
+    case 'enchanting': return [{box: [0, 0, 0, 16, 12, 16], role: 'main'}];
+    case 'anvil': {
+      // the game's: a wide foot, a narrow waist, the long top lying along the way it faces
+      const parts = [[2, 0, 2, 14, 4, 14], [4, 4, 3, 12, 5, 13], [6, 5, 4, 10, 10, 12], [3, 10, 0, 13, 16, 16]];
+      return parts.map(([x0, y0, z0, x1, y1, z1]) => ({box: f % 2 === 0 ? [x0, y0, z0, x1, y1, z1] : [z0, y0, x0, z1, y1, x1], role: 'main'}));
+    }
   }
   return null;
 }
@@ -93,8 +99,9 @@ export function collisionBoxes(v, near = () => 0) {
   switch (b.shape) {
     case 'fence': return toBlock(pieces(v, near).filter((p, i) => i === 0 || p.box[1] === 12)).map(q => [q[0], 0, q[2], q[3], 1.5, q[5]]);
     case 'gate': return meta & 4 ? null : (meta & 3) % 2 === 0 ? [[0, 0, px(6), 1, 1.5, px(10)]] : [[px(6), 0, 0, px(10), 1.5, 1]];
-    case 'pane': case 'stairs': case 'door': case 'trapdoor': case 'chest': return toBlock(pieces(v, near));
+    case 'pane': case 'stairs': case 'door': case 'trapdoor': case 'chest': case 'anvil': return toBlock(pieces(v, near));
     case 'bed': return [[0, 0, 0, 1, px(9), 1]];
+    case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
   }
   if (!b.solid) {
     if (b.shape === 'layer' && meta > 0) return [[0, 0, 0, 1, px(meta * 2), 1]];
@@ -129,7 +136,8 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'farmland': return [[0, 0, 0, 1, px(15), 1]];
     case 'wall': return [[[0, 0, 0, 1, 1, px(3)], [px(13), 0, 0, 1, 1, 1], [0, 0, px(13), 1, 1, 1], [0, 0, 0, px(3), 1, 1]][meta & 3]];
     case 'bed': return [[0, 0, 0, 1, px(9), 1]];
-    case 'stairs': case 'fence': case 'gate': case 'pane': case 'door': case 'trapdoor': case 'chest': return toBlock(pieces(v, near));
+    case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
+    case 'stairs': case 'fence': case 'gate': case 'pane': case 'door': case 'trapdoor': case 'chest': case 'anvil': return toBlock(pieces(v, near));
     default: return FULL;
   }
 }

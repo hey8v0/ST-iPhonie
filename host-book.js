@@ -3,7 +3,6 @@
 // voice line of the story in the voice already made for it, the 旁白 for the rest and for anyone without a voice), or
 // made into sound for an export; and the book opened over the whole page to read (book-stage.js).
 import {NARRATOR} from './core/narration.js';
-import {openBookStage} from './book-stage.js';
 import {parseSounds, soundNames} from './core/sounds.js';
 import {findRoute} from './core/routes.js';
 import {storyMessage} from './core/outgoing.js';
@@ -118,10 +117,12 @@ export function createBookHost({context, settings, backend, steps, lines, voiced
   /** Whether the 旁白 has a voice that can be kept in a file (a 旁白 role), and whether it can be read at all. */
   const narration = () => { const s = settings(), role = s.narration?.voice === 'role'; return {kept: role && voiced({role: NARRATOR}), readable: role ? voiced({role: NARRATOR}) : !!speech}; };
   /** Opens a book over the whole tavern page at page `at`. */
-  let stage = null;
+  let stage = null, stageCode = null;
   async function open(id, at = 0) {
     const book = await backend.library.getBook(String(id || ''));
     if (!book) throw Error('这本绘本找不到了');
+    // the reader (book-stage.js, its pages and effects, about 140 KB) is loaded the first time a book is opened
+    const {openBookStage} = await (stageCode ||= import('./book-stage.js').catch(error => { stageCode = null; throw error; }));
     stage?.close();
     closePanel();
     const made = [];

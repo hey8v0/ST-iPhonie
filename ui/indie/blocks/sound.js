@@ -89,6 +89,12 @@ export function play(name, v = 0, k = 1) {
     case 'attack': burst(1200, 1.5, 0.25 * k, 0.08, {pitch: r}); break;
     case 'meal': for (let i = 0; i < 4; i++) tone(900 + Math.random() * 900, 0.05, 0.08, {at: i * 0.05}); break;
     case 'orb': tone(1400 + Math.random() * 900, 0.07, 0.12, {type: 'triangle', slide: 1.2}); break;
+    case 'enchant': [784, 988, 1175, 1568].forEach((fr, i) => tone(fr, 0.07, 0.5, {type: 'sine', at: i * 0.07})); burst(6000, 2, 0.06, 0.6); break;
+    case 'anvil': tone(880, 0.18, 0.4, {type: 'triangle', slide: 0.98}); tone(1320, 0.1, 0.3, {type: 'sine'}); burst(3000, 4, 0.2, 0.08); break;
+    case 'anvil_break': burst(500, 1, 0.5, 0.5); tone(220, 0.2, 0.4, {type: 'square', slide: 0.5}); break;
+    case 'cast': burst(1800, 1.2, 0.18, 0.25, {pitch: 0.8}); break;
+    case 'reel': for (let i = 0; i < 4; i++) burst(2400, 4, 0.08, 0.04, {at: i * 0.05}); break;
+    case 'bite': burst(1000, 0.8, 0.35 * k, 0.35, {pitch: 1.2}); break;
     case 'equip': burst(2200, 3, 0.18, 0.12); burst(1400, 2, 0.12, 0.15, {at: 0.05}); break;
     case 'thunder': burst(90, 0.5, 0.9 * k, 2.6, {pitch: 0.7}); burst(400, 0.7, 0.45 * k, 1.4, {at: 0.05}); burst(1800, 0.6, 0.25 * k, 0.4); tone(42, 0.4 * k, 2.2, {type: 'sawtooth', slide: 0.6, at: 0.1}); break;
   }

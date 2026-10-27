@@ -4,18 +4,27 @@
 // d-pad / stick moves between slots, A left, X right, Y shift, B closes.
 import {itemInfo, zhOf, ALL_ITEMS, BLOCKS} from './blocks.js';
 import {craft, useGrid, stackMax, same, smeltOf, fuelOf, ARMOR_AT} from './inventory.js';
+import {ENCHANTS, enchName, tableOffers, enchanted, anvilResult} from './enchant.js';
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 const usesOf = info => info?.tool?.uses || info?.armor?.uses;
 // an empty worn slot shows the outline of what goes there
 const GHOST = ['iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots'];
-/** The picture and numbers of a stack (HTML). */
+/** The picture and numbers of a stack (HTML); an enchanted one shimmers. */
 export function stackHtml(s, icons) {
   if (!s) return '';
-  const info = itemInfo(s.id), uses = usesOf(info);
+  const info = itemInfo(s.id), uses = usesOf(info), src = icons[s.id] || '';
   const dur = uses && s.dmg ? `<span class="dur"><i style="width:${Math.max(0, (1 - s.dmg / uses) * 100)}%;background:hsl(${Math.max(0, (1 - s.dmg / uses) * 120)},90%,45%)"></i></span>` : '';
-  return `<img class="icon" src="${icons[s.id] || ''}" alt="">${s.n > 1 ? `<span class="n">${s.n}</span>` : ''}${dur}`;
+  const glint = s.ench || s.id === 'enchanted_book' ? `<i class="glint" style="-webkit-mask-image:url(${src});mask-image:url(${src})"></i>` : '';
+  return `<img class="icon" src="${src}" alt="">${glint}${s.n > 1 ? `<span class="n">${s.n}</span>` : ''}${dur}`;
 }
+/** What a stack is, for its tip: the name, its enchantments, armour, uses. */
+export function stackTip(s) {
+  const info = itemInfo(s.id), uses = usesOf(info);
+  return [zhOf(s.id), ...Object.entries(s.ench || {}).map(([n, l]) => enchName(n, l)), ...(info?.armor ? [`护甲 +${info.armor.points}`] : []), ...(uses ? [`耐久度 ${uses - (s.dmg || 0)}/${uses}`] : [])].join('\n');
+}
+// creative: every enchanted book at its highest level
+const BOOKS = Object.entries(ENCHANTS).map(([n, e]) => ({id: 'enchanted_book', n: 1, ench: {[n]: e.max}}));
 
 const KINDS = [
   ['all', '全部', () => true],
@@ -41,7 +50,8 @@ export class InventoryUI {
   /** Opens a window: 'player' | 'crafting' | 'furnace' (data: its state) | 'chest' (data: {slots}) | 'creative'. */
   show(kind, data = null) {
     this.kind = kind; this.data = data; this.open = true; this.root.hidden = false;
-    this.grid = new Array(kind === 'crafting' ? 9 : kind === 'player' ? 4 : 0).fill(null);
+    // what is put in while the window is open (crafting grid; the enchanting table's item and lapis; the anvil's two) goes back when it closes
+    this.grid = new Array(kind === 'crafting' ? 9 : kind === 'player' ? 4 : kind === 'enchant' || kind === 'anvil' ? 2 : 0).fill(null);
     this.focus = 0;
     this.draw();
   }
@@ -58,9 +68,18 @@ export class InventoryUI {
   slots() {
     const inv = this.game.inv, list = [], add = (section, i, arr, extra = {}) => list.push({key: `${section}:${i}`, section, get: () => arr[i], set: s => { arr[i] = s; }, ...extra});
     if (this.kind === 'creative' && this.tab !== 'bag') {
-      this.items().forEach((id, i) => list.push({key: `c:${i}`, section: 'c', get: () => ({id, n: 1}), set: () => {}, source: id}));
+      this.items().forEach((st, i) => list.push({key: `c:${i}`, section: 'c', get: () => ({...st, n: 1}), set: () => {}, source: st}));
       list.push({key: 'trash', section: 'trash', get: () => null, set: () => {}, trash: true});
     } else {
+      if (this.kind === 'enchant') {
+        add('e', 0, this.grid, {max: 1});
+        add('e', 1, this.grid, {accept: s => s.id === 'lapis_lazuli'});
+        this.offers().forEach((o, i) => list.push({key: `opt:${i}`, section: 'opt', get: () => null, set: () => {}, opt: i}));
+      }
+      if (this.kind === 'anvil') {
+        add('v', 0, this.grid); add('v', 1, this.grid);
+        list.push({key: 'v:out', section: 'vo', get: () => anvilResult(this.grid[0], this.grid[1])?.out || null, set: () => {}, out: 'anvil'});
+      }
       if (this.kind === 'player' || this.kind === 'crafting') {
         this.grid.forEach((_, i) => add('g', i, this.grid));
         list.push({key: 'out', section: 'out', get: () => craft(this.grid, this.kind === 'crafting' ? 3 : 2)?.out || null, set: () => {}, out: 'craft'});
@@ -81,7 +100,25 @@ export class InventoryUI {
   }
   items() {
     const k = KINDS.find(x => x[0] === this.tab) || KINDS[0], q = this.query.trim().toLowerCase();
-    return ALL_ITEMS.filter(id => k[2](id) && (!q || zhOf(id).includes(q) || id.includes(q)));
+    const plain = ALL_ITEMS.filter(id => id !== 'enchanted_book' && k[2](id) && (!q || zhOf(id).includes(q) || id.includes(q))).map(id => ({id, n: 1}));
+    const books = k[0] === 'all' || k[0] === 'items' ? BOOKS.filter(b => !q || '附魔书'.includes(q) || enchName(...Object.entries(b.ench)[0]).includes(q)) : [];
+    return [...plain, ...books];
+  }
+  /** The enchanting table's three offers for what is on it (none for an enchanted one). */
+  offers() {
+    const item = this.grid[0];
+    return item && !item.ench ? tableOffers(item.id, this.data?.shelves || 0, this.game.seed?.() || 0) : [0, 1, 2].map(() => ({level: 0, list: []}));
+  }
+  /** Takes offer i: the levels and lapis it costs (none in creative), a new seed for the next. */
+  enchantWith(i) {
+    const o = this.offers()[i], item = this.grid[0], lapis = this.grid[1], creative = this.game.creative?.();
+    if (!o?.level || !o.list.length || !item) return;
+    if (!creative && ((this.game.xp?.().level || 0) < o.level || (lapis?.n || 0) < i + 1)) return;
+    this.grid[0] = enchanted(item, o.list);
+    if (item.n > 1) { const left = this.game.inv.add({...item, n: item.n - 1}); if (left) this.game.drop(left); }
+    if (!creative) { lapis.n -= i + 1; if (!lapis.n) this.grid[1] = null; this.game.spend?.(i + 1); }
+    this.game.reseed?.(); this.game.sound?.('enchant');
+    this.draw();
   }
   // ---------- drawing ----------
   draw() {
@@ -102,6 +139,17 @@ export class InventoryUI {
       body = `<h3>熔炉</h3><div class="furnace">${slot(fin)}<div></div><div></div><div class="fire"><i style="height:${Math.round(burn * 100)}%"></i></div><div class="arrow"><i style="width:${Math.round(cook * 65)}%"></i></div>${slot(fout, ' big')}${slot(fuel)}<div></div><div></div></div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'chest') {
       body = `<h3>箱子</h3><div class="slots">${sec('chest').map(s => slot(s)).join('')}</div><h3>物品栏</h3>${bag}`;
+    } else if (this.kind === 'enchant') {
+      // each offer: the level it needs (green when it can be had), a hint of what it gives, what it costs
+      const offers = this.offers(), level = this.game.xp?.().level || 0, lapis = this.grid[1]?.n || 0, creative = this.game.creative?.();
+      const opt = (s, i) => { const o = offers[i], ok = o.level && o.list.length && (creative || (level >= o.level && lapis >= i + 1));
+        return `<div class="slot opt${ok ? '' : ' off'}${list.indexOf(s) === this.focus ? ' focus' : ''}" data-k="${s.key}">${o.level && o.list.length ? `<b>${o.level}</b><span>${esc(enchName(...o.list[0]))}……？</span><small>${i + 1} 青金石 · ${i + 1} 级</small>` : ''}</div>`; };
+      body = `<h3>附魔</h3><div class="enchant"><div class="ench-in">${sec('e').map((s, i) => slot(s, i === 1 && !s.get() ? ' lapis' : '')).join('')}</div><div class="ench-opts">${sec('opt').map(opt).join('')}</div></div>
+        <div class="note">书架 ${this.data?.shelves || 0} 个（附魔台周围隔一格，最多 15 个）· 你的等级 ${level}</div><h3>物品栏</h3>${bag}`;
+    } else if (this.kind === 'anvil') {
+      const r = anvilResult(this.grid[0], this.grid[1]), level = this.game.xp?.().level || 0, creative = this.game.creative?.();
+      const cost = !r ? '' : r.tooMuch && !creative ? '<p class="cost bad">过于昂贵！</p>' : `<p class="cost${!creative && level < r.cost ? ' bad' : ''}">花费等级：${r.cost}</p>`;
+      body = `<h3>铁砧</h3><div class="anvil">${slot(sec('v')[0])}<span class="plus">+</span>${slot(sec('v')[1])}<div class="arrow"></div>${slot(sec('vo')[0], ' big')}</div>${cost}<h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'creative') {
       const tabs = `<div class="tabs">${KINDS.map(([k, label]) => `<button data-tab="${k}" class="${k === this.tab ? 'on' : ''}">${label}</button>`).join('')}</div>`;
       if (this.tab === 'bag') body = `${tabs}<h3>背包</h3><div class="craft">${worn}</div>${bag}`;
@@ -145,8 +193,7 @@ export class InventoryUI {
     const tip = this.root.querySelector('.tip'), el = e.target.closest?.('.slot');
     if (!tip) return;
     const s = el && this.list?.find(k => k.key === el.dataset.k)?.get();
-    const info = s && itemInfo(s.id), uses = usesOf(info);
-    if (s && !this.cursor && e.pointerType === 'mouse') { tip.hidden = false; tip.textContent = zhOf(s.id) + (info?.armor ? `（护甲 +${info.armor.points}）` : '') + (uses ? `（耐久 ${uses - (s.dmg || 0)}/${uses}）` : ''); tip.style.left = `${x + 14}px`; tip.style.top = `${y - 10}px`; }
+    if (s && !this.cursor && e.pointerType === 'mouse') { tip.hidden = false; tip.textContent = stackTip(s); tip.style.left = `${x + 14}px`; tip.style.top = `${y - 10}px`; }
     else tip.hidden = true;
   }
   /** A click on a slot: left, right or shift. */
@@ -154,15 +201,29 @@ export class InventoryUI {
     if (!s) return;
     const c = this.cursor, here = s.get();
     this.game.sound?.('click');
+    if (s.opt != null) { this.enchantWith(s.opt); return; }
     if (s.trash) { this.cursor = null; this.draw(); return; }
     if (s.source) {
       // creative: the item comes from nowhere
-      const full = {id: s.source, n: how === 'right' ? 1 : stackMax(s.source)};
+      const full = {...s.source, n: how === 'right' ? 1 : stackMax(s.source.id)};
       if (how === 'shift') { this.game.inv.add(full); }
-      else if (c && c.id === s.source && how === 'left') { c.n = stackMax(c.id); }
+      else if (c && same(c, s.source) && how === 'left') { c.n = stackMax(c.id); }
       else if (c) this.cursor = null;
       else this.cursor = full;
       this.draw(); return;
+    }
+    if (s.out === 'anvil') {
+      // the result is taken whole into an empty hand (or straight into the inventory with shift); it costs its levels
+      const r = anvilResult(this.grid[0], this.grid[1]), creative = this.game.creative?.();
+      if (!r || (c && how !== 'shift') || (!creative && (r.tooMuch || (this.game.xp?.().level || 0) < r.cost))) { this.draw(); return; }
+      this.grid[0] = this.grid[0].n > 1 ? {...this.grid[0], n: this.grid[0].n - 1} : null;
+      const right = this.grid[1]; right.n -= r.use; if (right.n <= 0) this.grid[1] = null;
+      if (this.grid[0]) { const left = this.game.inv.add(this.grid[0]); if (left) this.game.drop(left); this.grid[0] = null; }
+      if (!creative) this.game.spend?.(r.cost);
+      if (how === 'shift') { const left = this.game.inv.add(r.out); if (left) this.game.drop(left); } else this.cursor = r.out;
+      this.game.anvilUsed?.();
+      if (this.open) this.draw();
+      return;
     }
     if (s.out === 'craft') {
       const w = this.kind === 'crafting' ? 3 : 2;
@@ -178,14 +239,15 @@ export class InventoryUI {
     }
     const before = s.get();
     if (how === 'left') {
+      // a slot that holds one (the enchanting table's) takes one of a stack
       if (!c) { if (here) { this.cursor = here; s.set(null); } }
-      else if (!here) { if (!s.accept || s.accept(c)) { s.set(c); this.cursor = null; } }
-      else if (same(c, here)) { const k = Math.min(stackMax(c.id) - here.n, c.n); here.n += k; c.n -= k; if (!c.n) this.cursor = null; }
-      else if (!s.accept || s.accept(c)) { s.set(c); this.cursor = here; }
+      else if (!here) { if (!s.accept || s.accept(c)) { if (s.max && c.n > s.max) { s.set({...c, n: s.max}); c.n -= s.max; } else { s.set(c); this.cursor = null; } } }
+      else if (same(c, here)) { const k = Math.min((s.max || stackMax(c.id)) - here.n, c.n); if (k > 0) { here.n += k; c.n -= k; if (!c.n) this.cursor = null; } }
+      else if ((!s.accept || s.accept(c)) && !(s.max && c.n > s.max)) { s.set(c); this.cursor = here; }
     } else if (how === 'right') {
       if (!c) { if (here) { const k = Math.ceil(here.n / 2); this.cursor = {...here, n: k}; here.n -= k; if (!here.n) s.set(null); } }
       else if (!here) { if (!s.accept || s.accept(c)) { s.set({...c, n: 1}); c.n--; if (!c.n) this.cursor = null; } }
-      else if (same(c, here) && here.n < stackMax(here.id)) { here.n++; c.n--; if (!c.n) this.cursor = null; }
+      else if (same(c, here) && here.n < (s.max || stackMax(here.id))) { here.n++; c.n--; if (!c.n) this.cursor = null; }
     }
     if (s.worn != null && s.get() && s.get() !== before) this.game.worn?.();
     this.draw();
@@ -197,6 +259,14 @@ export class InventoryUI {
     // armour goes on, when its slot is free
     const piece = itemInfo(st.id)?.armor, slotFor = piece && (s.section === 'hot' || s.section === 'main') && this.list.find(x => x.worn === piece.slot);
     if (slotFor && !slotFor.get()) { slotFor.set(st); s.set(null); this.game.worn?.(); return; }
+    // to the enchanting table (lapis to its place, one item on it) or the anvil's free side
+    if ((this.kind === 'enchant' || this.kind === 'anvil') && (s.section === 'hot' || s.section === 'main')) {
+      if (this.kind === 'enchant') {
+        if (st.id === 'lapis_lazuli') { const l = this.grid[1]; const k = l ? Math.min(stackMax(st.id) - l.n, st.n) : st.n; if (l) l.n += k; else this.grid[1] = {...st, n: k}; st.n -= k; if (!st.n) s.set(null); }
+        else if (!this.grid[0]) { this.grid[0] = {...st, n: 1}; st.n--; if (!st.n) s.set(null); }
+      } else { const at = this.grid[0] ? this.grid[1] ? -1 : 1 : 0; if (at >= 0) { this.grid[at] = st; s.set(null); } }
+      return;
+    }
     let targets;
     if (s.section === 'hot') targets = this.list.filter(x => x.section === (this.kind === 'chest' ? 'chest' : this.kind === 'furnace' ? 'f' : 'main'));
     else if (s.section === 'main') targets = this.list.filter(x => x.section === (this.kind === 'chest' ? 'chest' : this.kind === 'furnace' ? 'f' : 'hot'));

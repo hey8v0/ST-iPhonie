@@ -58,6 +58,25 @@ export class Body {
   }
   /** Is there ground under the box if it were here? (sneaking stops at edges) */
   groundUnder(x, z) { const h = this.w / 2; return this.boxesIn(x - h, this.y - 0.6, z - h, x + h, this.y - 0.01, z + h).some(b => b[4] > this.y - 0.6 && b[3] > x - h && b[0] < x + h && b[5] > z - h && b[2] < z + h); }
+  /**
+   * Is there a step to jump onto in the way (auto-jump)? Walking roughly forwards (not backwards), the box is slid
+   * ahead up to 0.7 blocks (0.9 sprinting); the first thing it meets must rise more than 0.6 (a slab is stepped up) and
+   * at most 1.2 above the feet, with room for the body on top.
+   */
+  stepAhead(fwd, side, sinY, cosY) {
+    const mx = -sinY * fwd + cosY * side, mz = -cosY * fwd - sinY * side, len = Math.hypot(mx, mz);
+    if (len < 0.1 || fwd < -0.15 * len) return false;
+    const ux = mx / len, uz = mz / len, h = this.w / 2 - 0.01, y = this.y, far = this.sprinting ? 0.9 : 0.7;
+    const meets = (x, z, y0, y1) => this.boxesIn(x - h, y0, z - h, x + h, y1, z + h).filter(b => b[0] < x + h && b[3] > x - h && b[2] < z + h && b[5] > z - h && b[1] < y1 && b[4] > y0);
+    for (let s = 0.1; s <= far + 1e-6; s += 0.1) {
+      const x = this.x + ux * s, z = this.z + uz * s, hit = meets(x, z, y + 0.01, y + this.height);
+      if (!hit.length) continue;
+      const top = Math.max(...hit.map(b => b[4]));
+      if (top <= y + 0.6 || top > y + 1.2 || hit.some(b => b[1] >= y + 1.2)) return false;
+      return !meets(x, z, top + 0.01, top + this.height).length;
+    }
+    return false;
+  }
   /** What the body is in now (water, lava, a ladder). */
   feel() {
     const [x0, y0, z0, x1, y1, z1] = this.aabb();
@@ -131,7 +150,9 @@ export class Body {
       this.vy = Math.max(this.vy, this.sneaking ? 0 : -0.15);
       this.fall = 0;
     }
-    if (input.jump && this.onGround && !this.jumpWait) {
+    // auto-jump (touch), as the game does it: a step ahead taller than a slab and up to 1.2 high, jumped before reaching it
+    const hop = !input.jump && input.autoJump && this.onGround && !this.jumpWait && !this.sneaking && !this.climbing && this.stepAhead(fwd, side, sinY, cosY);
+    if ((input.jump || hop) && this.onGround && !this.jumpWait) {
       this.vy = 0.42; this.jumpWait = 10;
       if (this.sprinting) { this.vx += -sinY * 0.2; this.vz += -cosY * 0.2; }
       result.jumped = true;
@@ -153,13 +174,6 @@ export class Body {
       const up = this.move(0, 0.6, 0), across = this.move(dx, 0, dz), down = this.move(0, -up.dy - 0.01, 0);
       if (Math.hypot(across.dx, across.dz) > Math.hypot(r.dx, r.dz) + 1e-4 && down.down) { r = {...across, hitY: true, down: true, dy: 0}; result.stepped = this.y - sy; }
       else { this.x = save.x; this.y = save.y; this.z = save.z; }
-    }
-    // auto-jump (touch): a one-block step in the way
-    if (input.autoJump && (r.hitX || r.hitZ) && this.onGround && !this.jumpWait && Math.hypot(fwd, side) > 0.1 && !this.climbing) {
-      const h = this.w / 2, ax = this.x + Math.sign(dx) * 0.4, az = this.z + Math.sign(dz) * 0.4;
-      const wall = this.boxesIn(ax - h, this.y + 0.01, az - h, ax + h, this.y + 1, az + h).length;
-      const room = !this.boxesIn(ax - h, this.y + 1.01, az - h, ax + h, this.y + 1 + this.height, az + h).some(b => b[4] > this.y + 1.01);
-      if (wall && room) { this.vy = 0.42; this.jumpWait = 10; result.jumped = true; }
     }
     if (this.climbing && (r.hitX || r.hitZ) && !this.sneaking) this.vy = 0.2;
     this.collidedX = r.hitX || r.hitZ;

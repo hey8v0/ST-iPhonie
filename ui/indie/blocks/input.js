@@ -1,6 +1,7 @@
 // Controls, all at once and switching by themselves: keyboard and mouse (the mouse is locked to the game while
-// playing), touch like the game on phones (a stick on the left, drag on the right to look, hold to break and tap to
-// place at the finger, buttons to jump and sneak, double-tap jump to fly in creative) and game pads.
+// playing), touch like the game's crosshair controls on phones (a stick on the left, drag on the right to look, the
+// crosshair in the middle aims: tap to place or use, hold still to break and keep turning while breaking; buttons to
+// jump and sneak, double-tap jump to fly in creative) and game pads.
 // On a phone held upright the game is turned on its side (forced landscape): touches are turned back here.
 
 export const KEYS = {fwd: ['KeyW', 'ArrowUp'], back: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], jump: ['Space'], sneak: ['ShiftLeft', 'ShiftRight'], sprint: ['ControlLeft', 'ControlRight']};
@@ -11,7 +12,7 @@ export class Input {
     this.app = app; this.canvas = canvas; this.rotated = rotated; this.onMode = onMode; this.sens = sensitivity;
     this.keys = new Set(); this.mode = 'keyboard'; this.events = []; this.look = [0, 0];
     this.mouse = {attack: false, use: false};
-    this.touch = {stick: null, look: null, jump: false, sneak: false, down: false, up: false, aim: null, attack: false};
+    this.touch = {stick: null, look: null, jump: false, sneak: false, down: false, up: false, attack: false};
     this.pad = {attack: false, use: false, prev: [], sneak: false};
     this.lastJump = 0; this.lastW = 0; this.sprintKey = false; this.enabled = false; this.blocked = false;
     addEventListener('keydown', e => this.key(e, true));
@@ -92,7 +93,7 @@ export class Input {
           touches.set(tc.identifier, {kind: 'look', x, y, sx: x, sy: y, t: performance.now(), moved: false, breaking: false});
           clearTimeout(this.holdTimer);
           const id = tc.identifier;
-          this.holdTimer = setTimeout(() => { const s = touches.get(id); if (s && !s.moved) { s.breaking = true; t.attack = true; t.aim = [s.x, s.y]; } }, 280);
+          this.holdTimer = setTimeout(() => { const s = touches.get(id); if (s && !s.moved) { s.breaking = true; t.attack = true; } }, 280);
         }
       }
       if (ours) e.preventDefault();
@@ -111,9 +112,9 @@ export class Input {
           t.stick.dx = dx / r; t.stick.dy = dy / r;
           knob.style.transform = `translate(${dx}px, ${dy}px)`;
         } else if (s.kind === 'look') {
-          if (!s.moved && Math.hypot(x - s.sx, y - s.sy) > 10 && !s.breaking) s.moved = true;
-          if (s.breaking) t.aim = [x, y];
-          else if (s.moved) { this.look[0] -= (x - s.x) * 0.0065 * this.sens(); this.look[1] -= (y - s.y) * 0.0065 * this.sens(); }
+          // a finger that has moved (or is breaking) turns the view; a still one may still become a tap
+          if (!s.moved && Math.hypot(x - s.sx, y - s.sy) > 10) s.moved = true;
+          if (s.moved || s.breaking) { this.look[0] -= (x - s.x) * 0.0065 * this.sens(); this.look[1] -= (y - s.y) * 0.0065 * this.sens(); }
           s.x = x; s.y = y;
         }
       }
@@ -129,8 +130,8 @@ export class Input {
         if (s.kind === 'btn') { this.press(s.name, false); s.el.classList.remove('on'); }
         else if (s.kind === 'stick') { t.stick = null; stick.hidden = true; }
         else if (s.kind === 'look') {
-          if (s.breaking) { t.attack = false; t.aim = null; }
-          else if (!s.moved && performance.now() - s.t < 280) { t.aim = [s.x, s.y]; this.events.push('use'); this.tapAim = [s.x, s.y]; }
+          if (s.breaking) t.attack = false;
+          else if (!s.moved && performance.now() - s.t < 280) this.events.push('use');
         }
       }
       if (ours) e.preventDefault();
@@ -191,7 +192,7 @@ export class Input {
     if (!this.enabled) return out;
     if (this.mode === 'touch') {
       if (t.stick) { out.fwd = -t.stick.dy; out.side = t.stick.dx; out.sprint = Math.hypot(t.stick.dx, t.stick.dy) > 0.97 && -t.stick.dy > 0.8; }
-      out.jump = t.jump || t.up; out.sneak = t.sneak || t.down; out.attack = t.attack; out.aim = t.attack ? t.aim : this.tapAim; this.tapAim = null;
+      out.jump = t.jump || t.up; out.sneak = t.sneak || t.down; out.attack = t.attack;
       out.flyDown = t.down;
     } else if (this.mode === 'pad' && pad) Object.assign(out, pad);
     else {

@@ -26,7 +26,7 @@ const BRING_KEY = 'sttts.bring';
 /** The note older versions wrote into the chat for a choice; the chat shows the pending choice by itself now. */
 export const BRING_NOTE = /^\d+ 条消息会带进下一次正文$/;
 
-export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}, storage = globalThis.localStorage, loadCompletion = loadCompletionModule, picture = pictureUrl, ask = requestAssistantText}) {
+export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}, onPosts = () => {},storage = globalThis.localStorage, loadCompletion = loadCompletionModule, picture = pictureUrl, ask = requestAssistantText}) {
   const busy = new Map();
   // 看图. A tavern connection sees when the tavern says so (its 发送内联图片, and a model it knows takes pictures); a
   // custom connection is tried. A model that failed with pictures and answered without them is not sent any again
@@ -145,7 +145,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (item.kind === 'unfriend') { if (thread.type === 'dm') cutting = true; continue; }
       if (item.kind === 'befriend' || item.kind === 'refuse') continue;
       // 「[朋友圈] …」: posted to 朋友圈 while chatting, not a chat message.
-      if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, source: 'chat', space: thread?.space || backend.cardKey()}); continue; }
+      if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, ...(item.imageTags ? {imageTags: item.imageTags} : {}), source: 'chat', space: thread?.space || backend.cardKey()}); continue; }
       // 「[打电话] …」: the contact calls right after this reply (private chats only; one call).
       if (item.kind === 'call') { if (thread.type === 'dm' && !calling) calling = item; continue; }
       if (item.kind !== 'claim') { out.push(item); continue; }
@@ -162,7 +162,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       const gift = target.kind === 'gift';
       out.push({from: item.from, kind: 'notice', target: 'me', text: {opened: '领取了{对方}的红包', accepted: gift ? '收下了{对方}的礼物' : '收下了{对方}的转账', returned: gift ? '退还了{对方}的礼物' : '退还了{对方}的转账'}[state]});
     }
-    if (posts.length) await backend.momentsMutate(() => backend.moments.add(posts)).catch(() => {});
+    // Their pictures are drawn the way 朋友圈's own are (onPosts).
+    if (posts.length) await backend.momentsMutate(() => backend.moments.add(posts)).then(onPosts).catch(() => {});
     let saved = out.length ? await backend.chats.append(threadId, out) : latest;
     if (cutting) { saved = await backend.chats.update(threadId, {friend: {by: 'them', at: Date.now(), requests: []}}); calling = null; refreshCuts(); }
     if (calling) setTimeout(() => onCall(calling.from, calling.reason), 1200);

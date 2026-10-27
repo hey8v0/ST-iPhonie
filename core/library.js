@@ -62,6 +62,19 @@ function bytes(row){const metadata={...row};delete metadata.blob;delete metadata
 // The size worked out when the row was saved: adding up the whole library on every save no longer turns every note
 // and 绘本 into text again.
 const sizeOf=row=>Number.isFinite(row._bytes)?row._bytes:bytes(row);
+/** The rows of one store as a change sees them: every id (has, keys), and the rows it asked for (get, values). */
+class RowView {
+ #ids=new Set();#rows=new Map();
+ know(id){this.#ids.add(id);}
+ load(row){this.#ids.add(row.id);this.#rows.set(row.id,row);}
+ has(id){return this.#ids.has(id);}
+ get(id){return this.#rows.get(id);}
+ set(id,row){this.#ids.add(id);this.#rows.set(id,row);return this;}
+ delete(id){this.#rows.delete(id);return this.#ids.delete(id);}
+ keys(){return this.#ids.values();}
+ values(){return this.#rows.values();}
+ get size(){return this.#ids.size;}
+}
 function friendly(error){
  if(error?.code&&typeof error.code==='string'&&!(error instanceof DOMException))return error;
  if(connectionLost(error))return lostError(error);
@@ -87,10 +100,16 @@ export class LocalLibrary {
    let req,settled=false;
    const rejectOnce=e=>{if(!settled){settled=true;reject(friendly(e));}};
    // Version 2 added the vibes store, 3 the books (绘本): an upgrade only creates the stores that are missing, the others keep their rows.
-   try{req=this.#factory.open('st-tts-library-v1',3);}catch(e){rejectOnce(e);return;}
-   req.onupgradeneeded=()=>{
-    const db=req.result;
+   // 4 added 'sizes', each row's size on its own ({scope, store, id, bytes}), so a save no longer reads every picture and recording.
+   try{req=this.#factory.open('st-tts-library-v1',4);}catch(e){rejectOnce(e);return;}
+   req.onupgradeneeded=event=>{
+    const db=req.result,tx=req.transaction;
     for(const name of STORES){if(db.objectStoreNames.contains(name))continue;const store=db.createObjectStore(name,{keyPath:['scope','id']});store.createIndex('scope','scope');}
+    if(db.objectStoreNames.contains('sizes'))return;
+    const sizes=db.createObjectStore('sizes',{keyPath:['scope','store','id']});sizes.createIndex('scope','scope');
+    if(!event.oldVersion)return;
+    // the rows there were: each one's size, once
+    for(const name of STORES){const cursor=tx.objectStore(name).openCursor();cursor.onsuccess=()=>{const c=cursor.result;if(!c)return;const row=c.value;if(typeof row?.scope==='string'&&typeof row.id==='string')sizes.put({scope:row.scope,store:name,id:row.id,bytes:sizeOf(row)});c.continue();};}
    };
    req.onerror=()=>rejectOnce(req.error);
    req.onblocked=()=>rejectOnce(fail('另一个页面占用了本地资料，请关闭旧页面后重试','STORAGE_BLOCKED'));
@@ -118,36 +137,56 @@ export class LocalLibrary {
    tx.onabort=()=>reject(friendly(tx.error));tx.onerror=()=>{};
   }));
  }
- async #mutate(change){
+ /**
+  * One change, all or nothing. change({rows, put, remove}) sees rows[store]: has(id) for every row, get(id) for the rows
+  * named in `need` ({store: [id, …]}; 'all' reads every row, for imports). The total size comes from 'sizes', so a
+  * save reads only the rows it changes, not every picture and recording.
+  */
+ async #mutate(change,need='all'){
   const limit=await this.#room();this.#keep();
   return this.#run(db=>new Promise((resolve,reject)=>{
-   let tx,result,ownError,remaining=STORES.length;const rows={},puts=[],deletes=[];
-   try{tx=db.transaction(STORES,'readwrite');}catch(e){reject(friendly(e));return;}
+   let tx,result,ownError,pending=1;const rows={},ops=[],ledger=new Map(),key=(name,id)=>name+'\n'+id;
+   try{tx=db.transaction([...STORES,'sizes'],'readwrite');}catch(e){reject(friendly(e));return;}
    tx.oncomplete=()=>resolve(structuredClone(result));
    tx.onabort=()=>reject(ownError||friendly(tx.error));tx.onerror=()=>{};
+   for(const name of STORES)rows[name]=new RowView();
+   const sizes=tx.objectStore('sizes');
    const apply=()=>{
     try{
-     const put=(name,row)=>{const stored={...row,scope:this.#scope};stored._bytes=bytes(stored);rows[name].set(stored.id,stored);puts.push([name,stored]);};
-     const remove=(name,id)=>{const existed=rows[name].delete(id);if(existed)deletes.push([name,id]);return existed;};
+     const put=(name,row)=>{const stored={...row,scope:this.#scope};stored._bytes=bytes(stored);rows[name].set(stored.id,stored);ops.push(['put',name,stored]);};
+     const remove=(name,id)=>{const existed=rows[name].delete(id);if(existed)ops.push(['delete',name,id]);return existed;};
      result=change({rows,put,remove});
-     const total=STORES.reduce((sum,name)=>sum+[...rows[name].values()].reduce((n,row)=>n+sizeOf(row),0),0);
+     const after=new Map(ledger);
+     for(const [op,name,x] of ops){if(op==='put')after.set(key(name,x.id),x._bytes);else after.delete(key(name,x));}
+     let total=0;for(const n of after.values())total+=n;
      if(total>limit)throw fail(`本地资料已达到 ${sizeText(limit)} 上限（这个浏览器给小手机的空间），请删除不需要的内容后再保存`,'LIBRARY_FULL');
-     for(const [name,id] of deletes)tx.objectStore(name).delete([this.#scope,id]);
-     for(const [name,row] of puts)tx.objectStore(name).put(row);
+     for(const [op,name,x] of ops){
+      if(op==='put'){tx.objectStore(name).put(x);sizes.put({scope:this.#scope,store:name,id:x.id,bytes:x._bytes});}
+      else{tx.objectStore(name).delete([this.#scope,x]);sizes.delete([this.#scope,name,x]);}
+     }
     }catch(e){ownError=friendly(e);tx.abort();}
    };
+   const done=()=>{if(--pending===0)apply();};
+   // a row found that the sizes did not know (written before them): counted now
+   const found=(name,row)=>{rows[name].load(row);const k=key(name,row.id);if(!ledger.has(k)){ledger.set(k,sizeOf(row));sizes.put({scope:this.#scope,store:name,id:row.id,bytes:sizeOf(row)});}};
+   pending++;
+   const all=sizes.index('scope').getAll(this.#scope);
+   all.onsuccess=()=>{for(const r of all.result)if(rows[r.store]){ledger.set(key(r.store,r.id),r.bytes);rows[r.store].know(r.id);}done();};
    for(const name of STORES){
-    const req=tx.objectStore(name).index('scope').getAll(this.#scope);
-    req.onsuccess=()=>{rows[name]=new Map(req.result.map(row=>[row.id,row]));if(--remaining===0)apply();};
+    const ids=need==='all'?null:need[name];
+    if(need!=='all'&&!ids?.length)continue;
+    if(!ids){pending++;const req=tx.objectStore(name).index('scope').getAll(this.#scope);req.onsuccess=()=>{for(const row of req.result)found(name,row);done();};continue;}
+    for(const id of ids){pending++;const req=tx.objectStore(name).get(this.#key(id));req.onsuccess=()=>{if(req.result)found(name,req.result);done();};}
    }
+   done();
   }));
  }
  async #list(name,metadata=false){const rows=await this.#read(name);return rows.sort((a,b)=>b.updatedAt-a.updatedAt||a.id.localeCompare(b.id)).map(row=>publicRow(row,metadata));}
- async #remove(name,id){identifier(id);return this.#mutate(({remove})=>remove(name,id));}
+ async #remove(name,id){identifier(id);return this.#mutate(({remove})=>remove(name,id),{});}
  async listNotes(){return this.#list('notes');}
  async saveNote(input){
   fields(input,['id','title','text']);const id=this.#makeId(input.id),title=string(input.title??'','标题',200),text=string(input.text??'','备忘录',1_000_000);
-  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,title,text,createdAt:rows.notes.get(id)?.createdAt??now,updatedAt:now};put('notes',row);return row;});
+  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,title,text,createdAt:rows.notes.get(id)?.createdAt??now,updatedAt:now};put('notes',row);return row;},{notes:[id]});
  }
  async deleteNote(id){return this.#remove('notes',id);}
  /** 绘本 (core/book.js): the books on the shelf, newest first; one; kept (made or changed); thrown away (its drawn pictures stay in 相册). */
@@ -155,7 +194,7 @@ export class LocalLibrary {
  async getBook(id){const row=await this.#read('books',identifier(id));return row?.book?normalizeBook(row.book):null;}
  async saveBook(input){
   if(!input||typeof input!=='object')throw fail('绘本格式无效');const book=normalizeBook(input);identifier(book.id);
-  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id:book.id,book:{...book,at:now},createdAt:rows.books.get(book.id)?.createdAt??now,updatedAt:now};put('books',row);return structuredClone(row.book);});
+  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id:book.id,book:{...book,at:now},createdAt:rows.books.get(book.id)?.createdAt??now,updatedAt:now};put('books',row);return structuredClone(row.book);},{books:[book.id]});
  }
  async deleteBook(id){return this.#remove('books',id);}
  async listPhotos(){return this.#list('photos',true);}
@@ -166,7 +205,7 @@ export class LocalLibrary {
   return this.#saveMedia('photos',{id:this.#makeId(),name,blob,info});
  }
  async #saveMedia(store,{id,name,blob,info}){
-  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,name,blob,type:blob.type,size:blob.size,...(info?.length?{info}:{}),createdAt:rows[store].get(id)?.createdAt??now,updatedAt:now};put(store,row);return publicRow(row);});
+  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,name,blob,type:blob.type,size:blob.size,...(info?.length?{info}:{}),createdAt:rows[store].get(id)?.createdAt??now,updatedAt:now};put(store,row);return publicRow(row);},{[store]:[id]});
  }
  async getPhoto(id){return publicRow(await this.#read('photos',identifier(id)));}
  async deletePhoto(id){
@@ -179,14 +218,14 @@ export class LocalLibrary {
     if(changed){next.updatedAt=this.#time();put('phone',next);}
    }
    return removed;
-  });
+  },{phone:['preferences']});
  }
  async listFavorites({role}={}){if(role!==undefined)string(role,'角色名',200,true);const rows=await this.#list('favorites',true);return role===undefined?rows:rows.filter(row=>row.role===role);}
  async saveFavorite(input){
   fields(input,['id','requestKey','role','text','translation','engine','model','voice','blob']);
   const id=this.#makeId(input.id),requestKey=string(input.requestKey,'音频编号',512,true),role=string(input.role,'角色名',200,true),text=string(input.text,'原文',1_000_000,true),translation=string(input.translation??'','译文',1_000_000),engine=input.engine,model=string(input.model??'','模型',200),voice=string(input.voice??'','音色',512),blob=blobValue(input.blob,LIBRARY_LIMITS.total,'音频','audio');
   if(!['fish','mini','eleven','mimo','doubao','custom'].includes(engine))throw fail('语音引擎无效');
-  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,requestKey,role,text,translation,engine,model,voice,blob,type:blob.type,size:blob.size,createdAt:rows.favorites.get(id)?.createdAt??now,updatedAt:now};put('favorites',row);return publicRow(row);});
+  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,requestKey,role,text,translation,engine,model,voice,blob,type:blob.type,size:blob.size,createdAt:rows.favorites.get(id)?.createdAt??now,updatedAt:now};put('favorites',row);return publicRow(row);},{favorites:[id]});
  }
  async getFavorite(id){return publicRow(await this.#read('favorites',identifier(id)));}
  async deleteFavorite(id){return this.#remove('favorites',id);}
@@ -207,7 +246,7 @@ export class LocalLibrary {
    for(const item of [next.wallpaper,...Object.values(next.icons)])if(item.kind==='photo'&&!rows.photos.has(item.photoId))throw fail('找不到这张图片，请重新选择','PHOTO_MISSING');
    const row={...next,id:'preferences',createdAt:existing?.createdAt??now,updatedAt:now};put('phone',row);
    const result={...next};delete result.id;delete result.createdAt;delete result.updatedAt;return result;
-  });
+  },{phone:['preferences']});
  }
  #appearance(value,target){
   if(value?.kind==='photo'){fields(value,['kind','photoId']);identifier(value.photoId);}
@@ -229,7 +268,7 @@ export class LocalLibrary {
   const v=fields(input,['id','name','meta','blob']),id=identifier(v.id),name=string(v.name,'Vibe 名字',80,true);
   if(!v.meta||typeof v.meta!=='object')throw fail('Vibe 信息无效');
   const blob=blobValue(v.blob,LIBRARY_LIMITS.vibe,'Vibe 文件','data'),time=this.#time();
-  return publicRow(await this.#mutate(({rows,put})=>{const old=rows.vibes.get(id);const row={id,name,meta:structuredClone(v.meta),size:blob.size,createdAt:old?.createdAt??time,updatedAt:time,blob};put('vibes',row);return row;}),true);
+  return publicRow(await this.#mutate(({rows,put})=>{const old=rows.vibes.get(id);const row={id,name,meta:structuredClone(v.meta),size:blob.size,createdAt:old?.createdAt??time,updatedAt:time,blob};put('vibes',row);return row;},{vibes:[id]}),true);
  }
  async deleteVibe(id){return this.#remove('vibes',id);}
  /** Every row of the given stores with its blob, for a backup. */
@@ -263,8 +302,9 @@ export class LocalLibrary {
  async stats(){
   const limit=await this.#room();
   return this.#run(db=>new Promise((resolve,reject)=>{
-   let tx;const result={bytes:0,limit,notes:0,photos:0,favorites:0,references:0,vibes:0,books:0,sizes:{}};
-   try{tx=db.transaction(STORES,'readonly');for(const name of STORES){const req=tx.objectStore(name).index('scope').getAll(this.#scope);req.onsuccess=()=>{if(name!=='phone')result[name]=req.result.length;const size=req.result.reduce((n,row)=>n+sizeOf(row),0);result.sizes[name]=size;result.bytes+=size;};}}
+   let tx;const result={bytes:0,limit,notes:0,photos:0,favorites:0,references:0,vibes:0,books:0,sizes:Object.fromEntries(STORES.map(name=>[name,0]))};
+   // from the sizes alone: the pictures and recordings are not read
+   try{tx=db.transaction('sizes','readonly');const req=tx.objectStore('sizes').index('scope').getAll(this.#scope);req.onsuccess=()=>{for(const r of req.result){if(!STORES.includes(r.store))continue;if(r.store!=='phone')result[r.store]++;result.sizes[r.store]+=r.bytes;result.bytes+=r.bytes;}};}
    catch(e){reject(friendly(e));return;}
    tx.oncomplete=()=>resolve(structuredClone(result));tx.onabort=()=>reject(friendly(tx.error));tx.onerror=()=>{};
   }));
