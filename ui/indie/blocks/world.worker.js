@@ -17,6 +17,7 @@ onmessage = async e => {
       world = new World({seed: m.seed, tex: name => m.layers[name] ?? 0, post, store, radius: m.radius, worldId: m.worldId, dim});
       world.center = m.center;
       world.wave = m.wave !== false;
+      world.lodRadius = m.lod || 0;
       setInterval(() => world.step(), 50);
       setInterval(() => world.flush().catch(err => post({type: 'error', message: String(err?.message || err)})), 15000);
       loop();
@@ -28,6 +29,10 @@ onmessage = async e => {
     else if (m.type === 'meal') post({type: 'meal', x: m.x, y: m.y, z: m.z, took: world.meal(m.x, m.y, m.z)});
     else if (m.type === 'flush') { await world.flush(); post({type: 'flushed', id: m.id}); }
     else if (m.type === 'portal') post({type: 'portal', id: m.id, ...await world.makePortal(m)});
+    // the distant view's reach; making land ahead of time
+    else if (m.type === 'lod') world.lodRadius = m.radius;
+    else if (m.type === 'pregen') world.startPregen(m.radius);
+    else if (m.type === 'pregenStop') world.stopPregen();
     else if (m.type === 'remesh') { world.wave = m.wave !== false; for (const c of world.cols.values()) for (let si = 0; si < c.sections.length; si++) if (c.sections[si]) world.dirty.add(c.k * 32 + si); }
   } catch (err) { post({type: 'error', message: String(err?.message || err)}); }
 };

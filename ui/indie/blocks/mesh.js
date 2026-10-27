@@ -187,7 +187,8 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
     } else if (shape === 'cross') {
       const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.tex.all);
       const h = hash2(ox + x, oz + z), jx = (id === ID.sugar_cane ? 0 : (h & 15) / 15 - 0.5) * 0.4, jz = (id === ID.sugar_cane ? 0 : (h >> 4 & 15) / 15 - 0.5) * 0.4;
-      const cx = x + 0.5 + jx, cz = z + 0.5 + jz, r = 0.45, flags = wave && id !== ID.sugar_cane ? 2 : 0;
+      // 2: a plant that waves, 3: one that stands still (the shaded look finds plants by these)
+      const cx = x + 0.5 + jx, cz = z + 0.5 + jz, r = 0.45, flags = wave && id !== ID.sugar_cane ? 2 : 3;
       quad(out, [[cx - r, y, cz - r], [cx + r, y, cz + r], [cx + r, y + 1, cz + r], [cx - r, y + 1, cz - r]], layer, UVQ, lt, lb, tintC, flags);
       quad(out, [[cx - r, y, cz + r], [cx + r, y, cz - r], [cx + r, y + 1, cz - r], [cx - r, y + 1, cz + r]], layer, UVQ, lt, lb, tintC, flags);
     } else if (shape === 'crop') {

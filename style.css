@@ -210,6 +210,8 @@
 .sttts-music-island .mi-lyrics{margin-top:8px;text-align:center;overflow:hidden}
 .sttts-music-island .mi-lyrics p{margin:0;font-size:11px;line-height:1.5;color:rgba(255,255,255,.4);min-height:1.5em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sttts-music-island .mi-lyrics p.now{font-size:14px;font-weight:700;color:#fff}
+.sttts-music-island[data-plain="1"] .mi-line,.sttts-music-island[data-plain="1"] .mi-lyrics{display:none}
+.sttts-music-island[data-plain="1"][data-expanded="1"]{width:min(260px,calc(100vw - 16px));max-width:min(260px,calc(100vw - 16px));padding:10px 12px}
 @keyframes sttts-mi-in{from{opacity:0;transform:var(--mi-from,translateX(-50%)) scale(.6)}}
 @keyframes sttts-mi-open{from{opacity:0}}
 @keyframes sttts-mi-spin{to{transform:rotate(360deg)}}

@@ -41,27 +41,40 @@ export async function deleteWorld(id) {
 }
 
 // ---------- columns ----------
-/** A column as kept: the names of the blocks in it and each section as indexes into them (meta kept). */
+/**
+ * A column as kept: the names of the blocks in it and each section as indexes into them (meta kept), in runs —
+ * [index, how many, …] — so mostly-stone sections take a few hundred numbers instead of 4096 (v 2; v 1 kept them
+ * whole). A pre-generated column (made ahead, unchanged) says so: its animals come when it is first loaded.
+ */
 export function packColumn(c) {
   const names = [], index = new Map(), secs = [];
   for (let si = 0; si < SECTIONS; si++) {
     const s = c.sections[si];
     if (!s || !s.some(v => v)) continue;
-    const out = new Uint16Array(4096);
+    const runs = [];
+    let last = -1, n = 0;
     for (let i = 0; i < 4096; i++) {
       const v = s[i], id = v & 0xFFF;
       let k = index.get(id);
       if (k === undefined) { k = names.length; names.push(BLOCKS[id].name); index.set(id, k); }
-      out[i] = k | (v & 0xF000);
+      const p = k | (v & 0xF000);
+      if (p === last && n < 65535) n++;
+      else { if (n) runs.push(last, n); last = p; n = 1; }
     }
-    secs.push([si, out]);
+    runs.push(last, n);
+    secs.push([si, Uint16Array.from(runs)]);
   }
-  return {v: 1, names, secs, biome: c.biome, height: c.height};
+  return {v: 2, names, secs, biome: c.biome, height: c.height, ...(c.pregen ? {pregen: 1} : {})};
 }
 export function unpackColumn(cx, cz, data, byName) {
   const sections = new Array(SECTIONS).fill(null), ids = data.names.map(n => byName[n]?.id ?? 0);
-  for (const [si, packed] of data.secs) { const s = new Uint16Array(4096); for (let i = 0; i < 4096; i++) { const v = packed[i]; s[i] = ids[v & 0xFFF] | (v & 0xF000); } sections[si] = s; }
-  return {cx, cz, sections, biome: new Uint8Array(data.biome), height: new Int16Array(data.height), changed: false};
+  for (const [si, packed] of data.secs) {
+    const s = new Uint16Array(4096);
+    if (data.v === 2) { let i = 0; for (let r = 0; r < packed.length; r += 2) { const v = packed[r], b = ids[v & 0xFFF] | (v & 0xF000); s.fill(b, i, i + packed[r + 1]); i += packed[r + 1]; } }
+    else for (let i = 0; i < 4096; i++) { const v = packed[i]; s[i] = ids[v & 0xFFF] | (v & 0xF000); }
+    sections[si] = s;
+  }
+  return {cx, cz, sections, biome: new Uint8Array(data.biome), height: new Int16Array(data.height), changed: false, pregen: !!data.pregen};
 }
 /** The worker's view of one world's saved columns. */
 export async function openStore(worldId, byName) {
@@ -71,6 +84,7 @@ export async function openStore(worldId, byName) {
     has: (cx, cz) => saved.has(`${cx},${cz}`),
     async load(cx, cz) { const d = await getOne('chunks', `${worldId}:${cx},${cz}`); return d ? unpackColumn(cx, cz, d, byName) : null; },
     async save(c) { await putOne('chunks', packColumn(c), `${worldId}:${c.cx},${c.cz}`); saved.add(`${c.cx},${c.cz}`); c.changed = false; },
+    count: () => saved.size,
   };
 }
 export {MINY};

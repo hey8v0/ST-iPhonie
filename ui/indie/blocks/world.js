@@ -6,6 +6,7 @@ import {generateColumn, newColumn, BIOMES, growTree, worldOf} from './gen.js';
 import {generateNether} from './nether.js';
 import {portalHolds, portalSpot, buildPortal} from './portal.js';
 import {villagersIn} from './village.js';
+import {lodTile, lodPlan} from './lod.js';
 import {BLOCKS, ID, MINY, HEIGHT, SECTIONS, SEA, withMeta, dropsOf, itemInfo} from './blocks.js';
 import {meshSection} from './mesh.js';
 import {rng} from './noise.js';
@@ -42,6 +43,8 @@ export class World {
     this.tick = 0; this.due = new Map(); this.ack = 0; this.wave = true;
     this.r = rng(seed ^ 0x5bd1e995);
     this.decay = new Map();
+    // the distant view: its reach (columns; 0 none) and the tiles sent (key → cell size); a pre-generation under way
+    this.lodRadius = 0; this.lodSent = new Map(); this.pregen = null;
   }
   col(cx, cz) { return this.cols.get(key(cx, cz)); }
   // ---------- blocks and light ----------
@@ -642,7 +645,9 @@ export class World {
       this.loading.add(k);
       let c = null;
       if (this.store && this.store.has(cx, cz)) c = await this.store.load(cx, cz).catch(() => null);
-      let fresh = false;
+      // a column made ahead of time is new to the world: its animals come now
+      let fresh = !!c?.pregen;
+      if (c) c.pregen = false;
       if (!c) { c = (this.nether ? generateNether : generateColumn)(this.seed, cx, cz); fresh = true; }
       this.loading.delete(k);
       if (this.cols.has(k)) continue;
@@ -680,7 +685,56 @@ export class World {
         this.post({type: 'drop', cx: c.cx, cz: c.cz});
       }
     }
+    // 5. with the near work done: the distant view, then land made ahead
+    if (!did && performance.now() - t0 < budget) {
+      if (this.lodWork(t0, budget)) did++;
+      else if (await this.pregenWork(t0, budget)) did++;
+    }
     return did > 0;
+  }
+  // ---------- the distant view ----------
+  /** Makes the distant view's tiles nearest first (a finer one where the player came nearer) and lets go of far ones. */
+  lodWork(t0, budget) {
+    if (!this.lodRadius || this.nether) { if (this.lodSent.size) { for (const k of this.lodSent.keys()) { const [tx, tz] = k.split(',').map(Number); this.post({type: 'lodDrop', tx, tz}); } this.lodSent.clear(); } return false; }
+    const [cx, cz] = this.center, plan = lodPlan(cx, cz, this.lodRadius, this.radius), want = new Set();
+    let made = 0;
+    for (const t of plan) {
+      const k = `${t.tx},${t.tz}`;
+      want.add(k);
+      if (this.lodSent.get(k) === t.step || performance.now() - t0 > budget) continue;
+      const {data, quads} = lodTile(this.seed, t.tx, t.tz, t.step);
+      this.lodSent.set(k, t.step);
+      this.post({type: 'lod', tx: t.tx, tz: t.tz, step: t.step, data, quads}, [data]);
+      made++;
+    }
+    for (const k of this.lodSent.keys()) if (!want.has(k)) { const [tx, tz] = k.split(',').map(Number); this.lodSent.delete(k); this.post({type: 'lodDrop', tx, tz}); }
+    return made > 0;
+  }
+  // ---------- making land ahead of time (like Chunky) ----------
+  /** Starts making every column within `radius` of the player that is not saved yet, nearest first. */
+  startPregen(radius) {
+    if (!this.store) return;
+    const [cx, cz] = this.center, list = [];
+    for (let dz = -radius; dz <= radius; dz++) for (let dx = -radius; dx <= radius; dx++) if (dx * dx + dz * dz <= radius * radius && !this.store.has(cx + dx, cz + dz)) list.push([dx * dx + dz * dz, cx + dx, cz + dz]);
+    list.sort((a, b) => a[0] - b[0]);
+    this.pregen = {list, i: 0, total: list.length, radius};
+    this.post({type: 'pregen', done: 0, total: list.length});
+  }
+  stopPregen() { if (this.pregen) { this.post({type: 'pregen', done: this.pregen.i, total: this.pregen.total, stopped: true}); this.pregen = null; } }
+  /** A few more columns made and kept (packed small), as time allows. */
+  async pregenWork(t0, budget) {
+    const g = this.pregen;
+    if (!g) return false;
+    while (g.i < g.list.length && performance.now() - t0 < budget) {
+      const [, cx, cz] = g.list[g.i++];
+      if (this.store.has(cx, cz) || this.cols.has(key(cx, cz))) continue;
+      const c = (this.nether ? generateNether : generateColumn)(this.seed, cx, cz);
+      c.pregen = !this.nether;
+      await this.store.save(c);
+    }
+    if (g.i % 8 === 0 || g.i >= g.list.length) this.post({type: 'pregen', done: g.i, total: g.total, saved: this.store.count()});
+    if (g.i >= g.list.length) { this.pregen = null; this.post({type: 'pregen', done: g.total, total: g.total, finished: true}); }
+    return true;
   }
   /** Saves every changed column. */
   async flush() {

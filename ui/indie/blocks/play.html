@@ -85,6 +85,7 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
 .btn:hover,.btn:focus-visible,.btn.focus{background:#7a8cc8 linear-gradient(#8fa0dc,#6f80bc);color:#ffffa0;outline:none}
 .btn:disabled{opacity:.5;cursor:default}
 .btn.half{min-width:calc(73*var(--u))}
+.btn.third{min-width:calc(48*var(--u))}
 .btns{display:flex;gap:calc(4*var(--u));flex-wrap:wrap;justify-content:center}
 .list{width:min(92%,calc(260*var(--u)));max-height:55%;overflow:auto;background:rgba(0,0,0,.5);border:var(--u) solid #000;display:flex;flex-direction:column}
 .list .it{display:flex;gap:calc(6*var(--u));align-items:center;padding:calc(4*var(--u)) calc(6*var(--u));cursor:pointer;border:var(--u) solid transparent}
@@ -101,6 +102,7 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
 .slider span{font-size:calc(7.5*var(--u));text-shadow:var(--u) var(--u) 0 #3f3f3f}
 .slider input{width:100%;accent-color:#8fa0dc;height:calc(10*var(--u))}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:calc(4*var(--u)) calc(8*var(--u));width:min(94%,calc(320*var(--u)))}
+.grid2>*{min-width:0}.grid2 .btn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .note{font-size:calc(6.5*var(--u));color:#bbb;max-width:min(94%,calc(300*var(--u)));line-height:1.5;text-align:center}
 .bar{width:min(80%,calc(200*var(--u)));height:calc(3*var(--u));background:#333;border:var(--u) solid #000}
 .bar i{display:block;height:100%;background:#80ff20;width:0}

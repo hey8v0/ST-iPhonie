@@ -175,6 +175,9 @@ export function parseLyrics(text) {
 }
 /** The lyric line playing at `seconds` (index, or -1 before the first). */
 export const lyricAt = (lines, seconds) => { let i = -1; for (let k = 0; k < lines.length && lines[k].at <= seconds + 0.2; k++) i = k; return i; };
+/** Whether any line is sung: 纯音乐 has none, or only 「纯音乐，请欣赏」 and credits such as 「作曲 : …」. */
+const NOT_SUNG = /^(?:此歌曲为没有填词的)?纯音乐[，,、\s]*请(?:您)?欣赏|^[^\s:：]{1,12}\s*[:：]/;
+export const hasWords = lines => (lines || []).some(l => l.text && !NOT_SUNG.test(l.text.trim()));
 
 // ---------- <bgm> ----------
 const TAG = /<bgm\b[^>]*>([^<>]{1,200}?)<\/bgm\s*>/gi;

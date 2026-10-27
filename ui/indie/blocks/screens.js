@@ -77,13 +77,19 @@ export class Screens {
     const s = this.api.settings();
     const slider = (key, label, min, max, step, fmt) => `<label class="slider"><span>${label}：<b data-v="${key}">${fmt(s[key])}</b></span><input type="range" data-k="${key}" min="${min}" max="${max}" step="${step}" value="${s[key]}"></label>`;
     const toggle = (key, label) => `<button class="btn" data-a="toggle" data-k="${key}">${label}：${s[key] ? '开' : '关'}</button>`;
+    // choices that go round when pressed: 光影 and how far the distant view reaches
+    const CHOICES = {shaders: [['off', '关'], ['low', '低'], ['mid', '中'], ['high', '高']], lod: [[0, '关'], [24, '24 区块'], [48, '48 区块'], [96, '96 区块']]};
+    const named = (k, v) => (CHOICES[k].find(o => o[0] === v) || CHOICES[k][0])[1];
+    const cycle = (key, label) => `<button class="btn" data-a="cycle" data-k="${key}">${label}：${named(key, s[key])}</button>`;
     const fmts = {dist: v => `${v} 区块`, fov: v => `${v}°`, sens: v => `${Math.round(v * 100)}%`, gamma: v => v <= 0 ? '昏暗' : v >= 1 ? '明亮' : `${Math.round(v * 100)}%`, volume: v => `${Math.round(v * 100)}%`, scale: v => `${Math.round(v * 100)}%`};
     this.show(`<h2>设置</h2><div class="grid2">
       ${slider('dist', '视野距离', 2, 16, 1, fmts.dist)}${slider('fov', '视角', 50, 110, 1, fmts.fov)}
       ${slider('sens', '灵敏度', 0.2, 3, 0.05, fmts.sens)}${slider('gamma', '亮度', 0, 1, 0.05, fmts.gamma)}
       ${slider('volume', '音量', 0, 1, 0.05, fmts.volume)}${slider('scale', '画面清晰度', 0.4, 1, 0.05, fmts.scale)}
+      ${cycle('shaders', '光影')}${cycle('lod', '远景')}
       ${toggle('wave', '草木摇动')}${toggle('clouds', '云')}${toggle('bob', '走路晃动')}${toggle('autoJump', '触屏自动跳')}
-      </div><p class="note">手机上视野距离和画面清晰度调低会更流畅。</p><button class="btn" data-a="back">完成</button>`, inGame ? 'dim' : 'dirt', {
+      </div><p class="note">光影：低是光照、水面和天空；中再加阳光的影子和立体的云；高的影子更柔和，还有穿过缝隙的光束。远景：视野外的地形用大一点的方块画出来，能看到很远的山。光影开着时卡了会自动降一点清晰度。手机上视野距离和画面清晰度调低会更流畅。</p><button class="btn" data-a="back">完成</button>`, inGame ? 'dim' : 'dirt', {
+      cycle: b => { const k = b.dataset.k, opts = CHOICES[k], i = opts.findIndex(o => o[0] === this.api.settings()[k]), next = opts[(i + 1) % opts.length]; this.api.setSetting(k, next[0]); b.textContent = b.textContent.replace(/：.*/, `：${next[1]}`); },
       toggle: b => { const k = b.dataset.k; this.api.setSetting(k, !this.api.settings()[k]); b.textContent = b.textContent.replace(/：.*/, `：${this.api.settings()[k] ? '开' : '关'}`); },
       input: el => { if (!el.dataset.k) return; const k = el.dataset.k, v = Number(el.value); this.api.setSetting(k, v); this.current.querySelector(`[data-v="${k}"]`).textContent = fmts[k](v); },
       back: () => back(),
@@ -120,12 +126,32 @@ export class Screens {
     this.show(`<h2>游戏菜单</h2>
       <button class="btn" data-a="resume">回到游戏</button>
       <div class="btns"><button class="btn half" data-a="settings">设置</button><button class="btn half" data-a="pack">材质</button></div>
+      <button class="btn" data-a="pregen">预生成地形</button>
       <div class="btns">${this.api.canFull() ? `<button class="btn half" data-a="full">${this.api.isFull() ? '退出全屏' : '全屏'}</button>` : ''}<button class="btn half" data-a="mode">${this.api.mode() === 'creative' ? '换成生存模式' : '换成创造模式'}</button></div>
       <button class="btn" data-a="quit">保存并回到标题</button>
       ${this.api.inTavern() ? '<button class="btn" data-a="leave">保存并离开游戏</button>' : ''}`, 'dim', {
-      resume: () => this.api.resume(), settings: () => this.settings(() => this.pause(), true), pack: () => this.pack(() => this.pause(), true),
+      resume: () => this.api.resume(), settings: () => this.settings(() => this.pause(), true), pregen: () => this.pregen(() => this.pause()), pack: () => this.pack(() => this.pause(), true),
       mode: () => { this.api.toggleMode(); this.pause(); }, quit: () => this.api.quit(), leave: () => this.api.leave(), back: () => this.api.resume(),
       full: async () => { await this.api.fullscreen(); this.pause(); },
+    });
+  }
+  /** Making the land ahead of time (like Chunky): a radius, how far it has got, stopping. */
+  pregen(back) {
+    const sizes = [8, 16, 32];
+    this.show(`<h2>预生成地形</h2>
+      <p class="note">先把你周围的地形生成好、压缩存起来（只存在这台设备的浏览器里），之后走过去直接读取，不用现场生成，手机上走得更顺。半径越大越久、越占地方：每个区块大约 16 KB，32 区块的半径要五十多 MB。可以一边玩一边生成，离开游戏就停。</p>
+      <div class="btns">${sizes.map(r => `<button class="btn third" data-a="go" data-r="${r}">${r} 区块</button>`).join('')}</div>
+      <div class="bar" hidden><i></i></div><p class="note msg"></p>
+      <div class="btns"><button class="btn half" data-a="stop">停止</button><button class="btn half" data-a="back">返回</button></div>`, 'dim', {
+      go: b => { this.api.pregen(Number(b.dataset.r)); this.current.querySelector('.bar').hidden = false; this.current.querySelector('.msg').textContent = '开始生成…'; },
+      stop: () => this.api.pregenStop(),
+      back: () => { this.api.onPregen(null); back(); },
+    });
+    this.api.onPregen(m => {
+      const bar = this.current?.querySelector('.bar'), msg = this.current?.querySelector('.msg');
+      if (!bar || !msg) return;
+      bar.hidden = false; bar.firstElementChild.style.width = `${m.total ? Math.round(m.done / m.total * 100) : 100}%`;
+      msg.textContent = m.finished ? `好了：周围 ${m.total} 个区块都生成好了` : m.stopped ? `停下了：${m.done} / ${m.total}` : !m.total ? '周围都已经生成过了' : `生成中：${m.done} / ${m.total}`;
     });
   }
   dead(reason) {

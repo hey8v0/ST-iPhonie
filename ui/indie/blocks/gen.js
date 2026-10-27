@@ -91,7 +91,17 @@ export function landAt(w, x, z) {
   const mixed = k => lerp(lerp(a[k], b2[k], fx), lerp(c2[k], d[k], fx), fz);
   const mountain = mixed('mountain'), c = mixed('c'), e = mixed('e'), t = mixed('t'), hu = mixed('hu'), river = mixed('river');
   const h = Math.round(clamp(mixed('h') + w.detail.n2(x, z) * 1.5, MINY + 8, MINY + HEIGHT - 20));
-  // biome
+  return {h, mountain, c, e, t, hu, river, biome: biomeOf(h, mountain, c, t, hu, river)};
+}
+/**
+ * The land seen from far off (the distant view): the large-scale grid point nearest (x, z) only — no blending, no
+ * small bumps — so a sample costs one grid point instead of four and the fine noise. {h, mountain, biome}.
+ */
+export function coarseLand(w, x, z) {
+  const l = gridLand(w, Math.round(x / 4), Math.round(z / 4)), h = Math.round(clamp(l.h, MINY + 8, MINY + HEIGHT - 20));
+  return {h, mountain: l.mountain, biome: biomeOf(h, l.mountain, l.c, l.t, l.hu, l.river)};
+}
+function biomeOf(h, mountain, c, t, hu, river) {
   let b;
   const coast = c > -0.24 && c < 0.06;
   if (h < SEA - 4 && !river) b = t < -0.5 ? 'frozen_ocean' : t < -0.15 ? 'cold_ocean' : t > 0.5 ? 'warm_ocean' : 'ocean';
@@ -103,7 +113,7 @@ export function landAt(w, x, z) {
   else if (t < -0.15) b = hu < -0.3 ? 'plains' : 'taiga';
   else if (t < 0.4) b = hu < -0.35 ? 'plains' : hu < 0.05 ? 'forest' : hu < 0.3 ? 'birch_forest' : hu > 0.55 && h < SEA + 5 ? 'swamp' : 'dark_forest';
   else b = hu < -0.2 ? 'desert' : hu < 0.15 ? 'savanna' : 'jungle';
-  return {h, mountain, c, e, t, hu, river, biome: BIOME[b]};
+  return BIOME[b];
 }
 
 /** A column's own random numbers. */
@@ -299,7 +309,7 @@ function treesNear(w, cx, cz) {
   }
   return out;
 }
-const TREE_DENSITY = {plains: 0.03, forest: 0.75, birch_forest: 0.7, dark_forest: 0.9, swamp: 0.25, taiga: 0.6, snowy_taiga: 0.45, snowy_plains: 0.02, savanna: 0.08, jungle: 0.95, meadow: 0.02, beach: 0};
+export const TREE_DENSITY = {plains: 0.03, forest: 0.75, birch_forest: 0.7, dark_forest: 0.9, swamp: 0.25, taiga: 0.6, snowy_taiga: 0.45, snowy_plains: 0.02, savanna: 0.08, jungle: 0.95, meadow: 0.02, beach: 0};
 function treeKind(b, p) {
   switch (b) {
     case 'forest': return p < 0.8 ? 'oak' : 'birch';

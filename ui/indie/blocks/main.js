@@ -28,20 +28,24 @@ const app = $('#app'), canvas = $('#view'), hud = $('#hud'), invRoot = $('#inv')
 const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 const inTavern = parent !== window;
 const SET_KEY = 'st-iphonie-blocks-settings';
-const DEFAULTS = {dist: isTouch ? 5 : 8, fov: 70, sens: 1, gamma: 0.5, volume: 0.7, scale: isTouch ? 0.7 : 1, wave: true, clouds: true, bob: true, autoJump: true};
+const DEFAULTS = {dist: isTouch ? 5 : 8, fov: 70, sens: 1, gamma: 0.5, volume: 0.7, scale: isTouch ? 0.7 : 1, wave: true, clouds: true, bob: true, autoJump: true,
+  // 光影 and the distant view: phones start with the light ones, computers in the middle (high is for a real graphics card)
+  shaders: isTouch ? 'low' : 'mid', lod: isTouch ? 24 : 48};
 let settings = {...DEFAULTS};
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SET_KEY) || '{}')); } catch {}
 const saveSettings = () => { try { localStorage.setItem(SET_KEY, JSON.stringify(settings)); } catch {} };
 
 // ---------- layout: the whole window, turned on its side on an upright phone ----------
 let rotated = false, renderer = null;
+// with 光影 on, how much of 画面清晰度 is used (lowered while frames are slow, raised again when there is room)
+let dynScale = 1, perf = {t: 0, n: 0};
 function layout() {
   rotated = isTouch && innerHeight > innerWidth;
   document.documentElement.classList.toggle('rot', rotated);
   const w = rotated ? innerHeight : innerWidth, h = rotated ? innerWidth : innerHeight;
   // the window's own size (100vh / dvh do not always match it, and the turned box needs it exactly)
   app.style.width = `${w}px`; app.style.height = `${h}px`;
-  const dpr = Math.min(devicePixelRatio || 1, 2) * settings.scale;
+  const dpr = Math.min(devicePixelRatio || 1, 2) * settings.scale * dynScale;
   renderer?.resize(Math.max(1, Math.round(w * dpr)), Math.max(1, Math.round(h * dpr)));
   app.style.setProperty('--u', `${Math.max(1.4, Math.min(4, Math.min(w / 330, h / 225))).toFixed(2)}px`);
 }
@@ -127,6 +131,7 @@ const picUrl = c => c.toDataURL();
 const HUD_URL = Object.fromEntries(Object.entries(HUD_PICS).map(([k, c]) => [k, picUrl(c)]));
 
 // ---------- the game ----------
+let pregenListener = null;
 let G = null, paused = true, screens = null, input = null, invUI = null, lastFrame = 0, acc = 0, debugOn = false, hudHidden = false;
 const TICK = 50;
 
@@ -139,6 +144,9 @@ function api() {
     removePack: async () => { await removePack(); await reloadTextures(); },
     leave: () => leaveGame(), resume: () => resume(), quit: () => quitToTitle(), respawn: () => respawn(),
     fullscreen: () => toggleFullscreen(), isFull: () => !!document.fullscreenElement, canFull: () => !!document.documentElement.requestFullscreen,
+    // making the land ahead of time (like Chunky): within a radius of columns round the player
+    pregen: radius => { if (G) G.worker.postMessage({type: 'pregen', radius}); }, pregenStop: () => { if (G) G.worker.postMessage({type: 'pregenStop'}); },
+    onPregen: fn => { pregenListener = fn; }, savedColumns: () => G?.savedColumns || 0,
     mode: () => G?.mode, toggleMode: () => { if (!G) return; G.mode = G.mode === 'creative' ? 'survival' : 'creative'; if (G.mode === 'survival') G.body.flying = false; drawHud(true); toast(G.mode === 'creative' ? '换成了创造模式' : '换成了生存模式'); },
   };
 }
@@ -147,6 +155,8 @@ function applySetting(k) {
   if (k === 'scale') layout();
   if (k === 'dist' && G) G.worker.postMessage({type: 'center', cx: G.cx, cz: G.cz, radius: settings.dist});
   if (k === 'wave' && G) G.worker.postMessage({type: 'remesh', wave: settings.wave});
+  if (k === 'shaders') { renderer?.setQuality(settings.shaders); dynScale = 1; layout(); }
+  if (k === 'lod') { if (!settings.lod) renderer?.clearLod(); if (G) G.worker.postMessage({type: 'lod', radius: settings.lod}); }
 }
 async function reloadTextures() {
   await loadTextures();
@@ -201,7 +211,7 @@ function startWorld(meta) {
   G.mobs.load(meta.mobs);
   worker.onmessage = e => onWorker(e.data);
   worker.onerror = e => showError(`世界线程出错：${e.message || e}`);
-  worker.postMessage({type: 'init', seed: meta.seed, layers: LAYER, radius: settings.dist, worldId: meta.id, center: [G.cx, G.cz], wave: settings.wave, dim: G.dim});
+  worker.postMessage({type: 'init', seed: meta.seed, layers: LAYER, radius: settings.dist, worldId: meta.id, center: [G.cx, G.cz], wave: settings.wave, dim: G.dim, lod: settings.lod});
   drawHud(true);
 }
 function onWorker(m) {
@@ -221,6 +231,10 @@ function onWorker(m) {
     for (const [id, n, x, y, z] of m.drops) G.ents.drop({id, n}, x, y, z);
     for (const [x, y, z] of m.tnt) G.mobs.light(x, y, z, 10 + Math.floor(Math.random() * 20));
   } else if (m.type === 'portal') arrived(m);
+  // the distant view's tiles; how far making the land ahead has got
+  else if (m.type === 'lod') renderer.setLod(m.tx, m.tz, m.data, m.quads);
+  else if (m.type === 'lodDrop') renderer.dropLod(m.tx, m.tz);
+  else if (m.type === 'pregen') { if (m.saved != null) G.savedColumns = m.saved; pregenListener?.(m); }
   else if (m.type === 'flushed') { G.waits?.get(m.id)?.(); G.waits?.delete(m.id); }
   else if (m.type === 'error') console.warn('world:', m.message);
 }
@@ -296,7 +310,7 @@ async function saveGame() {
   await new Promise(done => { const id = Date.now() + Math.random(); (g.waits ||= new Map()).set(id, done); g.worker.postMessage({type: 'flush', id}); setTimeout(done, 3000); });
 }
 async function quitToTitle() {
-  if (G) { await saveGame(); await new Promise(r => setTimeout(r, 300)); G.worker.terminate(); renderer.clearAll(); }
+  if (G) { await saveGame(); await new Promise(r => setTimeout(r, 300)); G.worker.terminate(); renderer.clearAll(); renderer.clearLod(); }
   G = null; paused = true; input.enabled = false; input.unlock(); hud.hidden = true; invUI.hide();
   screens.title();
 }
@@ -355,7 +369,7 @@ async function switchWorld(to, pos) {
   Object.assign(m, {away: here, dim: to, tiles: there.tiles || {}, items: there.items || [], orbs: there.orbs || [], mobs: there.mobs || [], herds: there.herds || []});
   m.player = {...m.player, x: pos.x, y: pos.y, z: pos.z, flying: false, health: G.health, food: G.food, sat: G.sat, effects: G.effects};
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
-  G.worker.terminate(); renderer.clearAll();
+  G.worker.terminate(); renderer.clearAll(); renderer.clearLod();
   play('travel');
   startWorld(m);
 }
@@ -1306,6 +1320,15 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.25, (now - lastFrame) / 1000 || 0);
   lastFrame = now;
+  // 光影 on: the picture's resolution follows the frame time (down to half while it runs under ~38 a second)
+  if (renderer.level !== 'off' && G?.ready && !paused && dt > 0) {
+    perf.t += dt; perf.n++;
+    if (perf.t > 2) {
+      const avg = perf.t / perf.n; perf.t = perf.n = 0;
+      const next = avg > 1 / 38 ? Math.max(0.5, dynScale - 0.1) : avg < 1 / 56 ? Math.min(1, dynScale + 0.05) : dynScale;
+      if (next !== dynScale) { dynScale = next; layout(); }
+    }
+  }
   const c = input.read(dt);
   handleEvents(c.events);
   if (invUI.open && input.mode === 'pad') padInventory();
@@ -1329,7 +1352,9 @@ function frame(now) {
   // shaking after an explosion; a drawn bow zooms in
   const shake = G.shake > 0 ? (G.shake -= dt * 20, G.shake * 0.004) : 0, zoom = 1 - Math.min(1, G.draw / 20) * 0.15;
   const view = {x, y: y + b.eye + Math.abs(Math.sin(bobT)) * 0.04 * bobbing, z, yaw: b.yaw + (Math.random() - 0.5) * shake, pitch: b.pitch + Math.abs(Math.cos(bobT)) * 0.006 * bobbing + (Math.random() - 0.5) * shake,
-    fov: (settings.fov + (b.sprinting ? 8 : 0) + (b.flying && b.sprinting ? 4 : 0)) * zoom * Math.PI / 180, far: settings.dist * 16, alpha: a};
+    fov: (settings.fov + (b.sprinting ? 8 : 0) + (b.flying && b.sprinting ? 4 : 0)) * zoom * Math.PI / 180, far: settings.dist * 16, alpha: a,
+    // the distant view: out to its reach, drawn only past the columns the worker keeps
+    lodFar: settings.lod && G.dim !== 'nether' ? Math.max(settings.lod, settings.dist + 2) * 16 : 0, lodInner: Math.max(0, settings.dist - 1) * 16};
   // third person: the camera four blocks behind (or in front, looking back), nearer where a wall is in the way
   G.camDist = 0;
   if (G.view && !G.dead) {
@@ -1406,6 +1431,7 @@ function padMenu() { const e = padEdges(); for (const k of ['up', 'down', 'left'
 // ---------- start ----------
 async function boot() {
   try { renderer = new Renderer(canvas); } catch (e) { showError(e.message); return; }
+  renderer.setQuality(settings.shaders);
   layout();
   input = new Input(app, canvas, {rotated: () => rotated, sensitivity: () => settings.sens, onMode: m => { document.body.classList.toggle('touchmode', m === 'touch'); drawHud(true); screens?.markFocus(); }});
   if (isTouch) document.body.classList.add('touchmode'), input.mode = 'touch';

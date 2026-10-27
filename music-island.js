@@ -1,11 +1,12 @@
 // 音乐小窗 on the tavern page, like a dynamic island: while a song plays and the phone is put away, a small black pill
-// floats over the story — a turning disc, the lyric line being sung (or the song) and a little wave. A tap opens it into
-// a card (the song, the lines around, play/pause, next, ✕); a tap elsewhere takes it back in. A double tap opens the
+// floats over the story — a turning disc, the lyric line being sung (or the song; nothing for 纯音乐) and a little wave.
+// A tap opens it into a card (the song, the lines around, play/pause, next, ✕); a tap elsewhere takes it back in. A double tap opens the
 // phone's 音乐. Drag it anywhere (the place is remembered, by its middle: a longer or shorter line grows or shrinks it
 // evenly on both sides, so it stays where it was put); ✕ puts it away until the next song. It steps aside while the
 // call island is up.
 
 import {joinStack, stackTop} from './island-stack.js';
+import {hasWords} from './core/music.js';
 
 const KEY = 'sttts.musicIsland';
 const PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>';
@@ -47,10 +48,13 @@ export function createMusicIsland({doc = document, status, phoneOpen, callShown 
     el.dataset.playing = playing ? '1' : '';
     const b = el.querySelector('[data-mi=toggle]');
     if (b.dataset.on !== String(playing)) { b.dataset.on = String(playing); b.innerHTML = playing ? PAUSE : PLAY; b.setAttribute('aria-label', playing ? '暂停' : '播放'); }
+    // 纯音乐 (no sung line): just the disc and the wave in the pill, and no lyrics in the card.
+    const words = hasWords(lines), plain = !words && (s.phase === 'playing' || s.phase === 'paused');
+    if ((el.dataset.plain === '1') !== plain) el.dataset.plain = plain ? '1' : '';
     const sung = lines.length && i >= 0 ? lines[i].text : '';
-    text('[data-mi-line]', s.phase === 'loading' ? '正在找这首歌……' : s.phase === 'error' ? s.message : sung || (t.artist ? `${t.title} - ${t.artist}` : t.title));
-    if (lines.length) { text('[data-mi-prev]', lines[i - 1]?.text || ''); text('[data-mi-now]', i >= 0 ? lines[i].text || '♪' : '♪'); text('[data-mi-next]', lines[i + 1]?.text || ''); }
-    else { text('[data-mi-prev]', ''); text('[data-mi-now]', s.phase === 'error' ? s.message : '♪ 这首歌没有歌词'); text('[data-mi-next]', ''); }
+    text('[data-mi-line]', s.phase === 'loading' ? '正在找这首歌……' : s.phase === 'error' ? s.message : plain ? '' : sung || (t.artist ? `${t.title} - ${t.artist}` : t.title));
+    if (words) { text('[data-mi-prev]', lines[i - 1]?.text || ''); text('[data-mi-now]', i >= 0 ? lines[i].text || '♪' : '♪'); text('[data-mi-next]', lines[i + 1]?.text || ''); }
+    else { text('[data-mi-prev]', ''); text('[data-mi-now]', s.phase === 'error' ? s.message : s.phase === 'loading' ? '正在找这首歌……' : ''); text('[data-mi-next]', ''); }
     el.setAttribute('aria-label', `正在放 ${t.title}${t.artist ? ' - ' + t.artist : ''}。点一下展开，双击打开音乐`);
   }
   function setExpanded(on) {
