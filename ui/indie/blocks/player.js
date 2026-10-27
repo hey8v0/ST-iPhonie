@@ -133,10 +133,12 @@ export class Body {
       if (input.jump) this.vy += 0.04;
       const r = this.move(this.vx, this.vy, this.vz);
       const k = this.inWater ? 0.8 : 0.5;
+      // the bump first, then the slowing and the sinking (the game's order): standing on the bottom, each tick sinks
+      // into it and stands again — the other way round every other tick floated free and the view shook
+      if (r.hitX) this.vx = 0; if (r.hitZ) this.vz = 0; if (r.hitY) this.vy = 0;
       this.vx *= k; this.vz *= k; this.vy = this.vy * k - 0.02;
       // climbing out at the edge
       if ((r.hitX || r.hitZ) && input.jump) this.vy = 0.3;
-      if (r.hitX) this.vx = 0; if (r.hitZ) this.vz = 0; if (r.hitY) this.vy = 0;
       this.onGround = r.down; this.fall = 0; this.collidedX = r.hitX || r.hitZ;
       return result;
     }

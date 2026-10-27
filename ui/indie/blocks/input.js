@@ -25,6 +25,9 @@ export class Input {
     canvas.addEventListener('contextmenu', e => e.preventDefault());
     this.buildTouch();
   }
+  // off while a menu or window is over the game: fingers down then are let go of (they would dig on afterwards)
+  get enabled() { return this.on; }
+  set enabled(v) { this.on = v; if (!v) this.release?.(); }
   locked() { return document.pointerLockElement === this.canvas; }
   lock() { if (this.mode !== 'touch' && !this.locked()) { try { const p = this.canvas.requestPointerLock?.(); p?.catch?.(() => {}); } catch {} } }
   unlock() { if (this.locked()) document.exitPointerLock?.(); }
@@ -73,11 +76,29 @@ export class Input {
     const stick = el.querySelector('.stick'), knob = stick.firstElementChild;
     const touches = new Map();
     const area = (x, y) => { const [w, h] = this.appSize(); return x < w * 0.38 && y > h * 0.3 ? 'stick' : 'look'; };
+    // breaking lasts while some still-held finger is breaking (never a flag left on by a finger that is gone)
+    const breaking = () => { t.attack = [...touches.values()].some(s => s.breaking); };
+    const endTouch = (id, tapped) => {
+      const s = touches.get(id);
+      if (!s) return;
+      touches.delete(id);
+      if (s.kind === 'btn') { this.press(s.name, false); s.el.classList.remove('on'); }
+      else if (s.kind === 'stick') { t.stick = null; stick.hidden = true; }
+      else if (s.kind === 'look' && tapped && !s.breaking && !s.moved && performance.now() - s.t < 280) this.events.push('use');
+      breaking();
+    };
+    // every finger let go of: when a window opens over the game, the page loses focus, or an end never came (a phone
+    // may drop it, and gives the next finger the same number)
+    this.release = () => { clearTimeout(this.holdTimer); for (const id of [...touches.keys()]) endTouch(id, false); t.attack = false; };
+    const forget = e => { if (!e.touches) return; const now = new Set([...e.touches].map(tc => tc.identifier)); for (const id of [...touches.keys()]) if (!now.has(id)) endTouch(id, false); };
+    addEventListener('blur', () => this.release());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.release(); });
     // Only the game's own touches (stick, looking, the round buttons) have their browser actions stopped: a phone
     // makes its taps (the click on a menu button) out of touchend, so stopping every touch made all buttons dead.
     const onStart = e => {
       if (!this.enabled) return;
       this.setMode('touch');
+      forget(e);
       let ours = false;
       for (const tc of e.changedTouches) {
         ours = true;
@@ -90,10 +111,11 @@ export class Input {
           touches.set(tc.identifier, {kind: 'stick'});
           stick.hidden = false; stick.style.left = `${x}px`; stick.style.top = `${y}px`; knob.style.transform = '';
         } else {
-          touches.set(tc.identifier, {kind: 'look', x, y, sx: x, sy: y, t: performance.now(), moved: false, breaking: false});
+          const s = {kind: 'look', x, y, sx: x, sy: y, t: performance.now(), moved: false, breaking: false};
+          touches.set(tc.identifier, s);
           clearTimeout(this.holdTimer);
-          const id = tc.identifier;
-          this.holdTimer = setTimeout(() => { const s = touches.get(id); if (s && !s.moved) { s.breaking = true; t.attack = true; } }, 280);
+          // this finger itself, still down and still: a later finger given the same number is not it
+          this.holdTimer = setTimeout(() => { if (touches.get(tc.identifier) === s && !s.moved) { s.breaking = true; breaking(); } }, 280);
         }
       }
       if (ours) e.preventDefault();
@@ -123,17 +145,11 @@ export class Input {
     const onEnd = e => {
       let ours = false;
       for (const tc of e.changedTouches) {
-        const s = touches.get(tc.identifier);
-        if (!s) continue;
+        if (!touches.has(tc.identifier)) continue;
         ours = true;
-        touches.delete(tc.identifier);
-        if (s.kind === 'btn') { this.press(s.name, false); s.el.classList.remove('on'); }
-        else if (s.kind === 'stick') { t.stick = null; stick.hidden = true; }
-        else if (s.kind === 'look') {
-          if (s.breaking) t.attack = false;
-          else if (!s.moved && performance.now() - s.t < 280) this.events.push('use');
-        }
+        endTouch(tc.identifier, e.type === 'touchend');
       }
+      forget(e);
       if (ours) e.preventDefault();
     };
     this.canvas.addEventListener('touchstart', onStart, {passive: false});

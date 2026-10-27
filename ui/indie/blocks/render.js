@@ -186,20 +186,25 @@ export function lighting(env, view) {
   const a = env.sunAngle || 0, el = Math.sin(a), sun = [Math.cos(a), el * Math.cos(SUN_TILT), el * Math.sin(SUN_TILT)];
   const rain = 1 - (env.sunMoon ?? 1), fogFar = env.underwater ? 18 : env.nether ? Math.min(view.far, Math.max(56, Math.min(view.far, 192) * 0.5)) : (view.lodFar || view.far);
   // the eye's reach to the sky (dark air and a brighter exposure in caves), the light held in the hand, the clouds' cover
+  // (more or fewer over the hours of play, a storm's towers)
   const eyeSky = env.eyeSky ?? 1, cave = 1 + (1 - eyeSky) * 0.5;
   // a thunderstorm: darker, the air thicker; a lightning flash lights everything outside for a moment; the aurora on
   // snowy nights
   const thunder = env.thunder || 0;
-  const base = {sunTrue: sun, block: [1.0, 0.6, 0.3], fogLin: lin(env.fog), fogFar, fogDensity: 1.75 / fogFar * (1 + rain * 1.4 + thunder * 0.8), underwater: env.underwater ? 1 : 0, flicker: env.flicker ?? 1, bright: env.bright || 0, rain,
-    eyeSky, held: env.held || 0, camY: view.y, time: env.time || 0, cover: 0.5 - rain * 0.25 - thunder * 0.1, sunDisc: [0, 0, 0], aurora: env.aurora || 0, flash: env.flash ? 1 : 0};
+  const base = {sunTrue: sun, block: [1.0, 0.6, 0.3], fogLin: lin(env.fog), fogFar, fogDensity: 1.3 / fogFar * (1 + rain * 1.8 + thunder * 0.8), underwater: env.underwater ? 1 : 0, flicker: env.flicker ?? 1, bright: env.bright || 0, rain,
+    eyeSky, held: env.held || 0, camY: view.y, time: env.time || 0, cover: 0.47 - 0.06 * Math.sin((env.time || 0) * 0.0011) - 0.03 * Math.sin((env.time || 0) * 0.0041 + 1) - rain * 0.25 - thunder * 0.1, storm: thunder, sunDisc: [0, 0, 0], aurora: env.aurora || 0, flash: env.flash ? 1 : 0};
   if (env.nether) return {...base, lightDir: [0, 1, 0], lightCol: [0, 0, 0], amb: [0.17, 0.07, 0.05], zenith: lin(env.fog), horizon: lin(env.fog), glow: [0, 0, 0], exposure: 1.4, fogDensity: 2.4 / fogFar, eyeSky: 1};
   const day = smooth(-0.04, 0.14, el), night = 1 - smooth(-0.14, 0.02, el), set = Math.max(0, 1 - Math.abs(el) * 3.2);
-  const sunCol = scale(mixv([1.0, 0.91, 0.8], [1.0, 0.5, 0.22], set * set), 2.9 * day * (1 - rain * 0.85));
+  // the sun about three times the sky's light on the ground (a sunny beach stays sand-coloured, the shade readable)
+  const sunHue = mixv([1.0, 0.92, 0.82], [1.0, 0.5, 0.22], set * set), sunCol = scale(sunHue, 0.95 * day * (1 - rain * 0.85));
   const moonCol = scale([0.3, 0.38, 0.62], 0.34 * night * (1 - rain * 0.7)), up = el > -0.02;
-  let amb = scale(mixv([0.018, 0.024, 0.05], [0.21, 0.28, 0.46], day), (1 - rain * 0.45) * (1 - thunder * 0.35));
-  amb = mixv(amb, [0.42, 0.33, 0.32], set * 0.3 * day);
-  const glow = mixv(scale(sunCol, 0.22), [1.1, 0.5, 0.2], set * 0.7 * day);
-  return {...base, lightDir: up ? sun : scale(sun, -1), lightCol: up ? sunCol : moonCol, amb, zenith: lin(env.skyTop), horizon: lin(env.horizon), glow, exposure: (0.86 + night * 1.0) * cave, day, sunDisc: sunCol};
+  let amb = scale(mixv([0.018, 0.024, 0.05], [0.26, 0.3, 0.4], day), (1 - rain * 0.45) * (1 - thunder * 0.35));
+  amb = mixv(amb, [0.32, 0.25, 0.24], set * 0.3 * day);
+  const glow = mixv(scale(sunHue, 0.5 * day * (1 - rain * 0.85)), [1.1, 0.5, 0.2], set * 0.7 * day);
+  // a clear day's sky deep blue overhead (less in rain); the horizon a little bluer than the plain look's
+  const clear = 1 - rain * 0.8, zenith = lin(env.skyTop).map((v, i) => v * (1 + ([0.32, 0.6, 1.2][i] - 1) * clear));
+  const horizon = lin(env.horizon).map((v, i) => v * (1 + ([0.88, 0.94, 1.0][i] - 1) * clear));
+  return {...base, lightDir: up ? sun : scale(sun, -1), lightCol: up ? sunCol : moonCol, amb, zenith, horizon, glow, exposure: (0.86 + night * 0.7) * cave, day, sunDisc: sunCol};
 }
 export const mat = {
   perspective(fovy, aspect, near, far) { const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far); return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]); },
@@ -393,14 +398,14 @@ export class Renderer {
   resize(w, h) { this.canvas.width = w; this.canvas.height = h; }
   // ---------- 光影 ----------
   /**
-   * 'off' | 'low' (shaded light, water, sky) | 'mid' (+ shadows, clouds, HDR: bloom, the water's mirror and depth,
-   * bumps from the pictures, smoothed edges) | 'high' (+ softer shadows, thicker clouds, a longer mirror, edge shade,
-   * light shafts).
+   * 'off' | 'low' (shaded light, water, sky, one soft cloud layer) | 'mid' (+ shadows, clouds with depth, HDR: bloom,
+   * the water's mirror and depth, bumps from the pictures, smoothed edges) | 'high' (+ softer shadows, thicker clouds, a
+   * longer mirror, edge shade, light shafts).
    */
   setQuality(level) {
     const L = this.level = ['low', 'mid', 'high'].includes(level) ? level : 'off';
     this.shadowQ = {mid: 1, high: 2}[L] || 0;
-    this.cloudQ = {mid: 1, high: 2}[L] || 0;
+    this.cloudQ = {low: 1, mid: 2, high: 3}[L] || 0;
     this.hdr = this.hdrOk && (L === 'mid' || L === 'high');
     this.postOn = L === 'high';
     // edge shade samples (fewer on mid), light shafts from mid up
@@ -415,7 +420,7 @@ export class Renderer {
     gl.uniform1f(u.u_exposure, lit.exposure); gl.uniform1f(u.u_fogDensity, lit.fogDensity); gl.uniform1f(u.u_fogFar, lit.fogFar); gl.uniform1f(u.u_underwater, lit.underwater);
     gl.uniform1f(u.u_flicker, lit.flicker); gl.uniform1f(u.u_bright, lit.bright);
     gl.uniform1f(u.u_rain, lit.rain); gl.uniform1f(u.u_eyeSky, lit.eyeSky); gl.uniform1f(u.u_camY, lit.camY); gl.uniform1f(u.u_held, lit.held); gl.uniform1f(u.u_time, lit.time); gl.uniform1f(u.u_cover, lit.cover);
-    gl.uniform1f(u.u_aurora, lit.aurora); gl.uniform1f(u.u_flash, lit.flash);
+    gl.uniform1f(u.u_aurora, lit.aurora); gl.uniform1f(u.u_flash, lit.flash); gl.uniform1f(u.u_storm, lit.storm || 0);
     if (u.u_noise) { gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, this.noise); gl.uniform1i(u.u_noise, 7); gl.activeTexture(gl.TEXTURE0); }
     if (u.u_shadow) {
       gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.shadowMap?.tex || null); gl.uniform1i(u.u_shadow, 2); gl.activeTexture(gl.TEXTURE0);
@@ -557,10 +562,10 @@ export class Renderer {
     const t = Math.tan(view.fov / 2), sun = this.sunShafts(vp, lit), shafts = fx.rays ? sun : {uv: sun.uv, rays: 0};
     gl.uniform2f(C.u.u_px, 1 / W, 1 / H); gl.uniform2f(C.u.u_tanHalf, t * W / H, t);
     gl.uniform1f(C.u.u_near, this.near); gl.uniform1f(C.u.u_far, this.far); gl.uniform1f(C.u.u_exposure, lit.exposure);
-    gl.uniform1f(C.u.u_bloomAmt, levels.length ? 0.45 / levels.length : 0); gl.uniform1f(C.u.u_underwater, lit.underwater); gl.uniform1f(C.u.u_time, lit.time);
-    gl.uniform2fv(C.u.u_sunUV, shafts.uv); gl.uniform1f(C.u.u_rays, shafts.rays * 0.5); gl.uniform3fv(C.u.u_rayCol, scale(lit.lightCol, 0.35));
-    // the lens flare when the sun is in the picture (by day, not in rain; weaker toward the edge, as the shafts)
-    gl.uniform1f(C.u.u_flare, fx.flare ? sun.rays : 0);
+    gl.uniform1f(C.u.u_bloomAmt, levels.length ? 0.3 / levels.length : 0); gl.uniform1f(C.u.u_underwater, lit.underwater); gl.uniform1f(C.u.u_time, lit.time);
+    gl.uniform2fv(C.u.u_sunUV, shafts.uv); gl.uniform1f(C.u.u_rays, shafts.rays * 0.5); gl.uniform3fv(C.u.u_rayCol, scale(lit.lightCol, 0.45));
+    // the lens flare: ghosts of whatever is brightest (none under water)
+    gl.uniform1f(C.u.u_flare, fx.flare && !lit.underwater ? 1 : 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     if (ldr) {
       const E = this.prog('edge', edgeShaders);
@@ -620,7 +625,7 @@ export class Renderer {
     if (shaded && this.hdr && !target) { this.hdrOk = false; this.setQuality(this.level); }
     const hdr = this.frameHdr = !!target, fx = this.fx;
     // with 光影 the shaded programs stand in for the plain ones (the helpers below use whichever is set)
-    const opts = {shadows: this.shadowQ, hdr: hdr ? 1 : 0, gen: fx.gen || 0, ssr: hdr ? fx.ssr : 0, clouds: this.cloudQ}, key = Object.values(opts).join(':');
+    const opts = {shadows: this.shadowQ, hdr: hdr ? 1 : 0, gen: fx.gen || 0, ssr: hdr ? fx.ssr : 0, clouds: env.clouds === false ? 0 : this.cloudQ}, key = Object.values(opts).join(':');
     this.chunk = shaded ? this.prog(`chunk:${key}`, () => chunkShaders(opts)) : this.chunk0;
     this.ent = shaded ? this.prog(`ent:${opts.shadows}:${opts.hdr}`, () => entityShaders(opts)) : this.ent0;
     this.sky = shaded ? this.prog(`sky:${opts.clouds}:${opts.hdr}`, () => skyShaders(opts)) : this.sky0;
