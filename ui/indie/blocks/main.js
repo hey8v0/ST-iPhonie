@@ -15,7 +15,7 @@ import {InventoryUI, stackHtml} from './invui.js';
 import {Entities, itemLook} from './entities.js';
 import {Input} from './input.js';
 import {Screens} from './screens.js';
-import {collisionBoxes} from './shapes.js';
+import {collisionBoxes, DIR} from './shapes.js';
 import {unlockSound, play, setVolume} from './sound.js';
 import {seedOf} from './noise.js';
 import {spawnPoint, BIOMES} from './gen.js';
@@ -155,6 +155,7 @@ function startWorld(meta) {
   ents.load(meta.items);
   ents.onPickup = () => play('pop');
   G.herds = new Set(meta.herds || []);
+  G.bedPos = meta.bed || null; G.sleeping = 0;
   G.draw = 0; G.attackWait = 0; G.targetMob = null;
   G.mobs = new Mobs({
     world: mirror, player: body, mode: () => G.mode, daylight: () => environment(G.time).daylight, held: () => held(),
@@ -248,7 +249,7 @@ function pause() {
 async function saveGame() {
   if (!G || !G.ready) return;
   const b = G.body, m = G.meta;
-  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds],
+  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], bed: G.bedPos,
     player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot}});
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   G.worker.postMessage({type: 'flush', id: Date.now()});
@@ -264,7 +265,14 @@ async function leaveGame() {
 }
 function respawn() {
   const b = G.body;
-  Object.assign(b, {x: G.spawn.x, y: G.spawn.y, z: G.spawn.z, vx: 0, vy: 0, vz: 0, fall: 0});
+  // at the bed slept in last, while it is there (far away it is not known yet: trust it)
+  let p = G.spawn;
+  if (G.bedPos) {
+    const {x, y, z} = G.bedPos;
+    if (!G.mirror.has(x, z) || BLOCKS[G.mirror.get(x, y, z) & 0xFFF]?.shape === 'bed') p = {x: x + 0.5, y: y + 0.6, z: z + 0.5};
+    else { G.bedPos = null; toast('你的床不见了，回到了世界出生点'); }
+  }
+  Object.assign(b, {x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0, fall: 0});
   b.prev = {x: b.x, y: b.y, z: b.z};
   Object.assign(G, {health: 20, food: 20, sat: 5, exh: 0, air: 300, dead: false});
   b.dead = false;
@@ -313,7 +321,9 @@ function breakBlock(t) {
   setBlock(x, y, z, survival && b.name === 'ice' && below && collisionBoxes(below) ? ID.water : 0);
   // shears take leaves whole
   if (survival && heldTool()?.kind === 'shears' && b.name.endsWith('_leaves')) G.ents.drop({id: b.name, n: 1}, x + 0.5, y + 0.4, z + 0.5);
-  else if (survival && harvests(b, heldTool())) for (const [id, n] of dropsOf(b, v >>> 12)) G.ents.drop({id, n}, x + 0.5, y + 0.4, z + 0.5);  // what was inside goes out
+  else if (survival && harvests(b, heldTool())) for (const [id, n] of dropsOf(b, v >>> 12)) G.ents.drop({id, n}, x + 0.5, y + 0.4, z + 0.5);  // a door or a bed goes whole
+  if (b.shape === 'door' || b.shape === 'bed') { const [ox, oy, oz] = partnerOf(x, y, z, v); if ((G.mirror.get(ox, oy, oz) & 0xFFF) === b.id) setBlock(ox, oy, oz, 0); }
+  // what was inside goes out
   const k = `${x},${y},${z}`, tile = G.tiles[k];
   if (tile) { for (const s of tile.slots || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; }
   G.ents.burst(x, y, z, v, 28);
@@ -335,12 +345,28 @@ function placeFrom(t, stack) {
   const here = G.mirror.get(x, y, z);
   if (here && !BLOCKS[here & 0xFFF].replace) return false;
   let v;
+  const pf = (facingBack() + 2) % 4; // the way the player looks
+  // two blocks: a door (and its upper half), a bed (and its head the way the player looks)
+  if (b?.shape === 'door' || b?.shape === 'bed') {
+    const [dx, dz] = b.shape === 'bed' ? DIR[pf] : [0, 0], ox = x + dx, oy = b.shape === 'door' ? y + 1 : y, oz = z + dz, other = G.mirror.get(ox, oy, oz);
+    if (other && !BLOCKS[other & 0xFFF].replace) return false;
+    if (!collisionBoxes(G.mirror.get(x, y - 1, z)) || (b.shape === 'bed' && !collisionBoxes(G.mirror.get(ox, y - 1, oz)))) return false;
+    const m = b.shape === 'door' ? facingBack() : pf;
+    setBlock(x, y, z, withMeta(b.id, m)); setBlock(ox, oy, oz, withMeta(b.id, m | (b.shape === 'door' ? 8 : 4)));
+    play('place', ID.oak_planks);
+    return true;
+  }
   if (info.plant) { if ((G.mirror.get(x, y - 1, z) & 0xFFF) !== ID.farmland) return false; v = ID[info.plant]; }
   else if (!b) return false;
   else {
     let meta = 0;
     if (b.axis) meta = t.face <= 1 ? 1 : t.face >= 4 ? 2 : 0;
     if (b.facing && b.shape !== 'wall') meta = facingBack();
+    const upper = t.face === 3 || (t.face !== 2 && t.hit[1] - Math.floor(t.hit[1]) > 0.5);
+    if (b.shape === 'stairs') meta = pf | (upper ? 4 : 0);
+    if (b.shape === 'gate') meta = pf;
+    // a trapdoor hangs on the side it was put against (on a floor or ceiling: the side towards the player)
+    if (b.shape === 'trapdoor') meta = (t.face === 2 || t.face === 3 ? facingBack() : {0: 1, 1: 3, 4: 2, 5: 0}[t.face]) | (upper ? 8 : 0);
     if (b.shape === 'torch') { if (t.face === 3) return false; meta = t.face === 2 ? 0 : [2, 1, 0, 0, 4, 3][t.face]; }
     if (b.shape === 'wall') { if (t.face >= 2 && t.face <= 3) return false; meta = [3, 1, 0, 0, 0, 2][t.face]; }
     if (b.shape === 'slab') meta = t.face === 3 || (t.face !== 2 && t.hit[1] - Math.floor(t.hit[1]) > 0.5) ? 1 : 0;
@@ -376,6 +402,8 @@ function use(t, mob = null) {
     if (input.mode === 'touch') attackMob(mob);
     return;
   }
+  if (t && b.use === 'toggle' && !G.body.sneaking) { toggle(t); return; }
+  if (t && b.use === 'bed' && !G.body.sneaking) { sleepIn(t); return; }
   if (t && b.use && !G.body.sneaking) { openBlock(b.use, t); return; }
   // seeds, carrots, potatoes on farmland are planted (before being eaten)
   if (t && info?.plant && (t.v & 0xFFF) === ID.farmland && t.face === 2) { if (placeFrom(t, s)) useUp(); return; }
@@ -408,6 +436,31 @@ function use(t, mob = null) {
   // a hoe makes farmland
   if (info?.tool?.kind === 'hoe' && t.face === 2 && ['grass_block', 'dirt'].includes(b.name) && !G.mirror.get(t.x, t.y + 1, t.z)) { setBlock(t.x, t.y, t.z, ID.farmland); wearTool(); play('place', ID.dirt); return; }
   if (s && (info.block?.item || info.plant)) { if (placeFrom(t, s)) useUp(); }
+}
+/** Opens or shuts a door (both halves), a gate or a trapdoor. */
+function toggle(t) {
+  const b = BLOCKS[t.v & 0xFFF], m = t.v >>> 12;
+  setBlock(t.x, t.y, t.z, withMeta(b.id, m ^ 4));
+  if (b.shape === 'door') { const oy = m & 8 ? t.y - 1 : t.y + 1, o = G.mirror.get(t.x, oy, t.z); if ((o & 0xFFF) === b.id) setBlock(t.x, oy, t.z, withMeta(b.id, (o >>> 12) ^ 4)); }
+  play('place', ID.oak_planks);
+}
+/** The other half of a door (above / below) or a bed (head / foot). */
+function partnerOf(x, y, z, v) {
+  const m = v >>> 12;
+  if (BLOCKS[v & 0xFFF].shape === 'door') return [x, m & 8 ? y - 1 : y + 1, z];
+  const [dx, dz] = DIR[m & 3], s = m & 4 ? -1 : 1;
+  return [x + dx * s, y, z + dz * s];
+}
+/** A bed: the place to wake up from now on; at night (and no monster near) sleep till morning. */
+function sleepIn(t) {
+  const day = ((G.time % 24000) + 24000) % 24000, night = day >= 12542 && day <= 23459;
+  if (!G.bedPos || G.bedPos.x !== t.x || G.bedPos.y !== t.y || G.bedPos.z !== t.z) { G.bedPos = {x: t.x, y: t.y, z: t.z}; toast('已设置重生点'); }
+  if (!night) { toast('你只能在夜里睡觉'); return; }
+  if (G.mobs.list.some(m => m.def.hostile && !m.dead && Math.hypot(m.x - t.x - 0.5, m.y - t.y, m.z - t.z - 0.5) < 8)) { toast('现在不能休息，周围有怪物在游荡'); return; }
+  const b = G.body;
+  Object.assign(b, {x: t.x + 0.5, y: t.y + 0.5625, z: t.z + 0.5, vx: 0, vy: 0, vz: 0});
+  b.prev = {x: b.x, y: b.y, z: b.z};
+  G.sleeping = 1;
 }
 function openBlock(kind, t) {
   const k = `${t.x},${t.y},${t.z}`;
@@ -505,7 +558,9 @@ let ctl = {fwd: 0, side: 0, jump: false, sneak: false, sprint: false, attack: fa
 function tick() {
   const b = G.body;
   G.time++;
-  const r = b.tick({...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false});
+  // asleep: the screen goes dark; after five seconds it is morning
+  if (G.sleeping && ++G.sleeping >= 100) { G.time = Math.ceil(G.time / 24000) * 24000; G.sleeping = 0; toast('天亮了'); }
+  const r = b.tick(G.sleeping ? {} : {...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false});
   if (G.mode !== 'creative' && b.flying) b.flying = false;
   input.setFlying(b.flying);
   // steps
@@ -715,6 +770,7 @@ function frame(now) {
   if ((eyeV & 0xFFF) === ID.lava) { env.underwater = true; env.fog = [0.6, 0.15, 0.02]; }
   $('.water').style.display = env.underwater ? 'block' : 'none';
   $('.hurt').style.opacity = G.hurtT ? 0.9 : 0;
+  $('.sleep').style.opacity = G.sleeping ? Math.min(1, G.sleeping / 60) : 0;
   // animated textures
   const tick20 = Math.floor(G.time);
   for (const an of animFrames) { const f = Math.floor(tick20 / an.time) % an.frames.length; if (f !== an.at) { an.at = f; renderer.updateLayer(an.layer, an.frames[f]); } }

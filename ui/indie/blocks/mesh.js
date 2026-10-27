@@ -6,6 +6,10 @@
 // A vertex is 16 bytes: x, y, z (uint16, 1/16 block, from one block before the section's corner), texture layer (uint16), u, v (uint8, 0–16),
 // sky light, block light (uint8, level × 17), shade (uint8: bits 0–1 corner shade, 2–4 face, 5–7 wave kind), tint r, g, b.
 import {BLOCKS, ID, idOf, metaOf} from './blocks.js';
+import {pieces} from './shapes.js';
+
+// shapes drawn from their pieces (shapes.js)
+const PIECED = new Set(['stairs', 'fence', 'gate', 'pane', 'door', 'trapdoor', 'bed', 'chest']);
 
 export const STRIDE = 16;
 const P = 18, P2 = P * P;
@@ -168,6 +172,14 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
         if (b.axis && (meta & 3) === 2 && (f === 0 || f === 1)) rot = 1;
         cubeFace(out, x, y, z, f, layer, t, rot, leaf && wave ? 1 : 0);
         if (id === ID.grass_block && meta !== 1 && f !== 2 && f !== 3) cubeFace(out, x, y, z, f, tex('grass_block_side_overlay'), tintC);
+      }
+    } else if (PIECED.has(shape)) {
+      const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)];
+      for (const {box: [x0, y0, z0, x1, y1, z1], role} of pieces(v, near)) {
+        const texFor = f => role === 'main' ? (shape === 'pane' && (f === 2 || f === 3) ? tex(b.tex.edge || b.tex.all) : faceTex(b, f, meta))
+          : role === 'door_top' ? tex(b.tex.top) : role === 'door_bottom' ? tex(b.tex.bottom) : role === 'wood' ? tex('oak_planks') : role === 'latch' ? tex('iron_block') : tex('white_wool');
+        const t = role === 'wool' ? parseInt(b.color.slice(1), 16) : role === 'main' ? tintC : WHITE;
+        box(out, x, y, z, x0, y0, z0, x1, y1, z1, texFor, t, {cull: [x1 === 16, x0 === 0, y1 === 16, y0 === 0, z1 === 16, z0 === 0]});
       }
     } else if (shape === 'cross') {
       const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.tex.all);

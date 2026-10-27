@@ -11,8 +11,10 @@ const tintNum = t => t == null ? 0xFFFFFF : t.startsWith('#') ? parseInt(t.slice
 export function itemLook(id) {
   const info = itemInfo(id);
   const b = info?.block;
-  if (b && ['cube', 'slab', 'farmland', 'cactus', 'layer'].includes(b.shape) && b.tex) {
-    const t = b.tex, L = n => LAYER[n] ?? 0, tint = tintNum(b.tint);
+  // doors have a flat picture of their own; other shaped blocks show as a small block of what they are made of
+  if (b && LAYER[b.name] !== undefined && !b.tex?.all) return {flat: LAYER[b.name], tint: 0xFFFFFF};
+  if (b && ['cube', 'slab', 'farmland', 'cactus', 'layer', 'stairs', 'fence', 'gate', 'pane', 'trapdoor', 'bed', 'chest'].includes(b.shape) && b.tex) {
+    const t = b.tex, L = n => LAYER[n] ?? 0, tint = b.color ? parseInt(b.color.slice(1), 16) : tintNum(b.tint);
     if (t.all) return {cube: Array(6).fill(L(t.all)), tints: Array(6).fill(tint), half: b.shape === 'slab' || b.shape === 'layer'};
     const side = L(t.side), front = t.front ? L(t.front) : side;
     const grass = b.name === 'grass_block';

@@ -84,7 +84,7 @@ plant('brown_mushroom', '棕色蘑菇', {light: 1});
 for (const [w, zh] of WOODS) plant(`${w}_sapling`, `${zh.replace(/木$/, '')}树苗`);
 block('crafting_table', '工作台', {tex: {top: 'crafting_table_top', bottom: 'oak_planks', side: 'crafting_table_side', front: 'crafting_table_front'}, hard: 2.5, tool: T.AXE, facing: true, use: 'crafting'});
 block('furnace', '熔炉', {tex: {top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front'}, hard: 3.5, tool: T.PICK, tier: 0, facing: true, use: 'furnace'});
-block('chest', '箱子', {tex: {top: 'chest_top', bottom: 'chest_top', side: 'chest_side', front: 'chest_front'}, hard: 2.5, tool: T.AXE, facing: true, use: 'chest'});
+block('chest', '箱子', {tex: {top: 'chest_top', bottom: 'chest_top', side: 'chest_side', front: 'chest_front'}, shape: 'chest', hard: 2.5, tool: T.AXE, facing: true, use: 'chest', opaque: false, filter: 0});
 block('torch', '火把', {tex: all('torch'), shape: 'torch', pass: 'cutout', hard: 0, solid: false, light: 14});
 block('glass', '玻璃', {tex: all('glass'), pass: 'cutout', hard: 0.3, drop: null, filter: 0});
 block('bricks', '砖块', {tex: all('bricks'), hard: 2, tool: T.PICK, tier: 0});
@@ -118,6 +118,21 @@ block('carrots', '胡萝卜', {tex: all('carrots_stage0'), stages: stagesOf('car
   drop: (r, meta) => ['carrot', meta >= 7 ? 2 + Math.floor(r() * 4) : 1]});
 block('potatoes', '土豆', {tex: all('potatoes_stage0'), stages: stagesOf('potatoes'), shape: 'crop', pass: 'cutout', hard: 0, solid: false, item: false,
   drop: (r, meta) => ['potato', meta >= 7 ? 2 + Math.floor(r() * 4) : 1]});
+// building: stairs (state: facing 0–3, upside down 4), fences and gates (gate: facing, open 4), panes, doors (facing,
+// open 4, upper half 8), trapdoors (facing, open 4, at the top 8), beds (facing from foot to head, head 4)
+const shaped = {opaque: false, filter: 0};
+for (const [n, zh, tex, hard, tool, tier] of [['oak', '橡木', all('oak_planks'), 2, T.AXE, -1], ['spruce', '云杉木', all('spruce_planks'), 2, T.AXE, -1], ['birch', '白桦木', all('birch_planks'), 2, T.AXE, -1],
+  ['cobblestone', '圆石', all('cobblestone'), 2, T.PICK, 0], ['stone_brick', '石砖', all('stone_bricks'), 1.5, T.PICK, 0], ['brick', '砖', all('bricks'), 2, T.PICK, 0],
+  ['sandstone', '砂岩', tbs('sandstone_top', 'sandstone_bottom', 'sandstone'), 0.8, T.PICK, 0]]) block(`${n}_stairs`, `${zh}楼梯`, {tex, shape: 'stairs', hard, tool, tier, ...shaped});
+for (const [w, zh] of [['oak', '橡木'], ['spruce', '云杉木'], ['birch', '白桦木']]) {
+  block(`${w}_fence`, `${zh}栅栏`, {tex: all(`${w}_planks`), shape: 'fence', hard: 2, tool: T.AXE, ...shaped});
+  block(`${w}_fence_gate`, `${zh}栅栏门`, {tex: all(`${w}_planks`), shape: 'gate', hard: 2, tool: T.AXE, use: 'toggle', ...shaped});
+  block(`${w}_door`, `${zh}门`, {tex: {top: `${w}_door_top`, bottom: `${w}_door_bottom`}, shape: 'door', pass: 'cutout', hard: 3, tool: T.AXE, use: 'toggle', ...shaped});
+  block(`${w}_trapdoor`, `${zh}活板门`, {tex: all(`${w}_trapdoor`), shape: 'trapdoor', pass: 'cutout', hard: 3, tool: T.AXE, use: 'toggle', ...shaped});
+}
+block('glass_pane', '玻璃板', {tex: {all: 'glass', edge: 'glass_pane_top'}, shape: 'pane', pass: 'cutout', hard: 0.3, drop: null, ...shaped});
+block('iron_bars', '铁栏杆', {tex: all('iron_bars'), shape: 'pane', pass: 'cutout', hard: 5, tool: T.PICK, tier: 0, ...shaped});
+for (const [c, zh, h] of COLORS) block(`${c}_bed`, `${zh}床`, {tex: all('white_wool'), shape: 'bed', hard: 0.2, color: h, use: 'bed', ...shaped});
 
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
@@ -160,7 +175,11 @@ export const ITEMS = I;
 /** Anything that can be held: a block (that can be an item) or an item. */
 export function itemInfo(name) {
   const b = BY_NAME[name];
-  if (b && b.item) return {name, zh: b.zh, block: b, icon: null, stack: 64, fuel: /_(planks|log)$/.test(name) ? 15 : /_slab$/.test(name) && name.startsWith('oak') ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'bookshelf' || name === 'ladder' ? 15 : /_sapling$/.test(name) ? 5 : name === 'coal_block' ? 800 : 0};
+  if (b && b.item) {
+    const wood = /^(oak|spruce|birch)_(fence|fence_gate|trapdoor|stairs)$/.test(name), door = /^(oak|spruce|birch)_door$/.test(name);
+    return {name, zh: b.zh, block: b, icon: null, stack: door || b.shape === 'bed' ? (b.shape === 'bed' ? 1 : 64) : 64,
+      fuel: /_(planks|log)$/.test(name) || wood ? 15 : door ? 10 : /_slab$/.test(name) && name.startsWith('oak') ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'bookshelf' || name === 'ladder' ? 15 : /_sapling$/.test(name) ? 5 : name === 'coal_block' ? 800 : 0};
+  }
   return I[name] || null;
 }
 export const ALL_ITEMS = [...B.filter(b => b.item).map(b => b.name), ...Object.keys(I)];

@@ -19,6 +19,8 @@ const NEIGHBOURS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], 
 const LIQUID = new Set([ID.water, ID.lava]);
 const GRAVITY = new Set(BLOCKS.filter(b => b.gravity).map(b => b.id));
 const CROP = new Set([ID.wheat, ID.carrots, ID.potatoes]);
+const PAIRED = new Set(BLOCKS.filter(b => b.shape === 'door' || b.shape === 'bed').map(b => b.id));
+const FACE_DIR = [[0, 1], [-1, 0], [0, -1], [1, 0]];
 const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern'].includes(b.shape)).map(b => b.id));
 const hexRGB = h => parseInt(h.slice(1), 16);
 const TINTS = BIOMES.map(b => ({grass: hexRGB(b.grass), foliage: hexRGB(b.foliage), water: hexRGB(b.water)}));
@@ -226,6 +228,7 @@ export class World {
       if (LIQUID.has(id)) this.schedule(nx, ny, nz, id === ID.water ? 5 : 30);
       else if (GRAVITY.has(id)) this.schedule(nx, ny, nz, 2);
       else if (PLANT.has(id) && dy !== -1) this.schedule(nx, ny, nz, 1);
+      else if (PAIRED.has(id)) this.schedule(nx, ny, nz, 1);
     }
   }
   schedule(x, y, z, delay) { const k = `${x},${y},${z}`; const t = this.tick + delay; if (!this.due.has(k) || this.due.get(k) > t) this.due.set(k, t); }
@@ -347,7 +350,16 @@ export class World {
       return;
     }
     if (PLANT.has(id)) { if (!this.supported(x, y, z, v)) this.breakBlock(x, y, z); return; }
+    // a door or a bed whose other half is gone goes too (its item came from the half that went)
+    if (PAIRED.has(id)) { const [ox, oy, oz] = this.partner(x, y, z, v); if ((this.get(ox, oy, oz) & 0xFFF) !== id) this.set(x, y, z, 0); return; }
     if (LIQUID.has(id)) this.flow(x, y, z, v);
+  }
+  /** Where the other half of a door (above or below) or a bed (head or foot) is. */
+  partner(x, y, z, v) {
+    const m = v >>> 12;
+    if (BLOCKS[v & 0xFFF].shape === 'door') return [x, m & 8 ? y - 1 : y + 1, z];
+    const [dx, dz] = FACE_DIR[m & 3], s = m & 4 ? -1 : 1;
+    return [x + dx * s, y, z + dz * s];
   }
   supported(x, y, z, v) {
     const id = v & 0xFFF, below = this.get(x, y - 1, z), bid = below & 0xFFF, b = BLOCKS[id];

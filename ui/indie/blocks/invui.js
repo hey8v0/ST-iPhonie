@@ -16,9 +16,9 @@ export function stackHtml(s, icons) {
 
 const KINDS = [
   ['all', '全部', () => true],
-  ['build', '建筑方块', n => /planks|cobble|bricks|smooth_stone|slab|wool|glass|sandstone|terracotta|_block$|obsidian|bookshelf|stone$|granite|diorite|andesite|tuff|calcite|deepslate$|mossy/.test(n) && !/ore$/.test(n) && n !== 'grass_block'],
+  ['build', '建筑方块', n => /planks|cobble|bricks|smooth_stone|slab|stairs|fence|pane|bars|door|wool|glass|sandstone|terracotta|_block$|obsidian|bookshelf|stone$|granite|diorite|andesite|tuff|calcite|deepslate$|mossy/.test(n) && !/ore$/.test(n) && n !== 'grass_block'],
   ['nature', '自然方块', n => { const b = BLOCKS.find(x => x.name === n); return !!b && /grass|dirt|podzol|sand|gravel|clay|ore$|_log$|leaves|sapling|fern|dandelion|poppy|orchid|allium|bluet|daisy|cornflower|lily|dead_bush|sugar_cane|cactus|mushroom|snow|ice|pumpkin|melon|moss|mud|bedrock|stone$|deepslate$/.test(n); }],
-  ['use', '功能方块', n => /crafting|furnace|chest|torch|ladder|lantern|glowstone|tnt|bookshelf/.test(n)],
+  ['use', '功能方块', n => /crafting|furnace|chest|torch|ladder|lantern|glowstone|tnt|bookshelf|_bed$|door|gate/.test(n)],
   ['tools', '工具', n => /_pickaxe|_axe|_shovel|_hoe|_sword|bucket/.test(n)],
   ['items', '材料与食物', n => !BLOCKS.find(x => x.name === n) && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket/.test(n)],
   ['bag', '背包', null],

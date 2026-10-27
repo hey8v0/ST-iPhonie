@@ -1,7 +1,7 @@
 // The player's body: moving like the game does it, 20 ticks a second (walking, sprinting, sneaking without falling off
 // edges, jumping, stepping up slabs, swimming, climbing ladders, flying in creative), bumping into blocks, falling and
 // its damage, and the ray that finds the block aimed at.
-import {collisionBoxes, selectionBoxes, isClimbable, slipperiness} from './shapes.js';
+import {collisionBoxes, selectionBoxes, isClimbable, slipperiness, nearIn} from './shapes.js';
 import {ID, BLOCKS} from './blocks.js';
 
 export const W = 0.6, H = 1.8, SNEAK_H = 1.5, EYE = 1.62, SNEAK_EYE = 1.27;
@@ -27,7 +27,7 @@ export class Body {
     for (let y = Math.floor(y0) - 1; y <= Math.floor(y1); y++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) for (let x = Math.floor(x0); x <= Math.floor(x1); x++) {
       const v = this.world.get(x, y, z);
       // where the world is not here yet, walls stop you
-      const bs = this.world.has(x, z) ? collisionBoxes(v) : [[0, 0, 0, 1, 1, 1]];
+      const bs = this.world.has(x, z) ? collisionBoxes(v, nearIn(this.world, x, y, z)) : [[0, 0, 0, 1, 1, 1]];
       if (!bs) continue;
       for (const b of bs) out.push([x + b[0], y + b[1], z + b[2], x + b[3], y + b[4], z + b[5]]);
     }
@@ -188,7 +188,7 @@ export function raycast(world, ox, oy, oz, dx, dy, dz, reach, liquids = false) {
   const tdx = dx ? Math.abs(1 / dx) : Infinity, tdy = dy ? Math.abs(1 / dy) : Infinity, tdz = dz ? Math.abs(1 / dz) : Infinity;
   let tx = dx ? (sx > 0 ? x + 1 - ox : ox - x) * tdx : Infinity, ty = dy ? (sy > 0 ? y + 1 - oy : oy - y) * tdy : Infinity, tz = dz ? (sz > 0 ? z + 1 - oz : oz - z) * tdz : Infinity;
   for (let i = 0; i < 64; i++) {
-    const v = world.get(x, y, z), boxes = selectionBoxes(v, liquids);
+    const v = world.get(x, y, z), boxes = selectionBoxes(v, liquids, nearIn(world, x, y, z));
     if (boxes) {
       let best = null;
       for (const b of boxes) {

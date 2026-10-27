@@ -41,6 +41,7 @@ button{font:inherit;color:inherit}
 .debug{position:absolute;left:calc(2*var(--u));top:calc(2*var(--u));font:calc(6.5*var(--u))/1.35 ui-monospace,Menlo,Consolas,monospace;white-space:pre;text-shadow:1px 1px 0 #000;background:rgba(0,0,0,.25);padding:calc(2*var(--u))}
 .hurt{position:absolute;inset:0;background:radial-gradient(transparent 55%,rgba(200,0,0,.45));opacity:0;transition:opacity .4s}
 .water{position:absolute;inset:0;background:rgba(20,60,160,.25);display:none}
+.sleep{position:absolute;inset:0;background:#05050a;opacity:0;transition:opacity .25s}
 .pausebtn{position:absolute;right:calc(4*var(--u) + env(safe-area-inset-right,0px));top:calc(4*var(--u));width:calc(16*var(--u));height:calc(16*var(--u));pointer-events:auto;background:rgba(0,0,0,.4);border:var(--u) solid rgba(255,255,255,.35);display:none}
 .pausebtn::before,.pausebtn::after{content:"";position:absolute;top:25%;bottom:25%;width:18%;background:#fff}
 .pausebtn::before{left:27%}.pausebtn::after{right:27%}
@@ -130,6 +131,7 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
   <div id="hud" hidden>
     <div class="water"></div>
     <div class="hurt"></div>
+    <div class="sleep"></div>
     <div class="cross"></div>
     <div class="debug" hidden></div>
     <div class="toast"></div>

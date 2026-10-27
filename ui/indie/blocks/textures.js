@@ -526,6 +526,33 @@ function rootCrop(stage, leaf, crop, seed) {
   }
   return p;
 }
+/** A door half: a frame of boards; the top half has a window (clear) with a cross, or small holes (birch). */
+function door(base, top, windows) {
+  const c = hex(base), p = pic();
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const frame = x < 2 || x > 13 || (top ? y < 2 : y > 13) || y === 7 || y === 8;
+    let k = (x % 4 === 3 ? 0.8 : 1) * (0.94 + hash(nameSeed(base), x, y) * 0.1);
+    if (frame) k *= 0.82;
+    p.set(x, y, mul(c, k));
+  }
+  if (top && windows === 'glass') for (let y = 3; y < 7; y++) for (const x0 of [3, 9]) for (let x = x0; x < x0 + 4; x++) p.set(x, y, [0, 0, 0], 0);
+  if (top && windows === 'holes') for (const [x, y] of [[4, 4], [5, 4], [10, 4], [11, 4], [4, 10], [5, 10], [10, 10], [11, 10]]) p.set(x, y, [0, 0, 0], 0);
+  if (!top) { p.set(12, 2, hex('#3a3a3a')); p.set(12, 3, hex('#5a5a5a')); }
+  return p;
+}
+function trapdoor(base, holes) {
+  const c = hex(base), p = pic();
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, mul(c, (x < 1 || x > 14 || y < 1 || y > 14 ? 0.75 : x % 5 === 0 ? 0.85 : 1) * (0.94 + hash(nameSeed(base) + 1, x, y) * 0.1)));
+  if (holes) for (const [x0, y0] of [[3, 3], [9, 3], [3, 9], [9, 9]]) for (let y = y0; y < y0 + 4; y++) for (let x = x0; x < x0 + 4; x++) p.set(x, y, [0, 0, 0], 0);
+  return p;
+}
+const WOOD_DOORS = {oak: ['#b8945f', 'glass'], spruce: ['#6e5130', 'none'], birch: ['#d4c78e', 'holes']};
+for (const [w, [c, win]] of Object.entries(WOOD_DOORS)) {
+  BLOCK_ART[`${w}_door_top`] = () => door(c, true, win); BLOCK_ART[`${w}_door_bottom`] = () => door(c, false, win);
+  BLOCK_ART[`${w}_trapdoor`] = () => trapdoor(c, w !== 'spruce');
+}
+BLOCK_ART.iron_bars = () => { const p = pic(); for (let y = 0; y < S; y++) for (const x of [1, 5, 9, 13]) { p.set(x, y, hex('#6e6e6e')); p.set(x + 1, y, hex('#4a4a4a')); } for (let x = 0; x < S; x++) for (const y of [0, 15]) p.set(x, y, hex('#5c5c5c')); return p; };
+BLOCK_ART.glass_pane_top = () => { const p = pic(); for (let y = 0; y < S; y++) { p.set(7, y, hex('#dbeef3')); p.set(8, y, hex('#a9c6cf')); } return p; };
 for (let i = 0; i < 4; i++) { BLOCK_ART[`carrots_stage${i}`] = () => rootCrop(i, '#4f9a2a', '#f08a1c', 51); BLOCK_ART[`potatoes_stage${i}`] = () => rootCrop(i, '#3f8a2c', '#c9a55a', 61); }
 for (let i = 0; i < 10; i++) BLOCK_ART[`destroy_stage_${i}`] = () => crack(i);
 
@@ -592,6 +619,7 @@ const meat = (color, fat, dark, bone) => {
   return icon(layers);
 };
 const drumstick = (color, dark) => icon([{mask: mask().line(10, 6, 13.5, 2.5, 1.4).disc(13.5, 2.5, 1.2), color: '#efe9dc', light: '#ffffff', dark: '#b8b0a0', outline: '#4a4438'}, {mask: mask().disc(7, 9.5, 4.6, 4).disc(9.5, 7, 2.5), color, dark, outline: '#3a200c', grain: true}]);
+const doorIcon = (c, window) => { const layers = [{mask: mask().poly([[4, 1], [12, 1], [12, 15], [4, 15]]), color: c, outline: '#2e2010', grain: true}]; if (window) layers.push({mask: mask().poly([[5.5, 2.5], [10.5, 2.5], [10.5, 6.5], [5.5, 6.5]]), color: '#bfe3ee', dark: '#8ab4c4'}); return icon(layers); };
 const ingot = c => icon([{mask: mask().poly([[2, 10], [9, 5.5], [14, 7.5], [7, 12.5]]), color: c[0], light: c[1], dark: c[2], outline: c[3]}]);
 const raw = (c, seed) => { const p = icon([{mask: blob(8, 8.5, 4.6, seed), color: c[0], light: c[1], dark: c[2], outline: c[3], grain: true}]); const r = rng(seed + 1); for (let k = 0; k < 5; k++) { const x = 5 + Math.floor(r() * 6), y = 5 + Math.floor(r() * 6); if (p.alpha(x, y)) p.set(x, y, hex(c[1])); } return p; };
 const ITEM_ART = {
@@ -640,6 +668,7 @@ const ITEM_ART = {
   bow: () => icon([{mask: mask().curve([[3, 13], [3, 3], [13, 3]], 2), ...HANDLE}, {mask: mask().line(4, 12, 12, 4, 0.9), color: '#e6e6e6', dark: '#9a9a9a'}]),
   shears: () => icon([{mask: mask().line(4, 12, 12, 4, 2).line(4, 4, 8, 8, 2), color: '#c8c8c8', light: '#f0f0f0', dark: '#7a7a7a', outline: '#2a2a2a'}, {mask: mask().disc(4.5, 4.5, 1.6).disc(3.5, 12, 1.6), color: '#6b4a2a', dark: '#3e2814', outline: '#1e1206'}]),
   flint_and_steel: () => icon([{mask: mask().curve([[4, 12], [3, 4], [10, 4]], 2).cut(mask().disc(6, 8, 1.5)), color: '#a8a8a8', light: '#dcdcdc', dark: '#6a6a6a', outline: '#262626'}, {mask: mask().poly([[9, 8], [13, 9], [12, 13], [8, 12]]), color: '#3a3a3a', light: '#6a6a6a', dark: '#1e1e1e', outline: '#080808'}]),
+  oak_door: () => doorIcon('#b8945f', true), spruce_door: () => doorIcon('#6e5130', false), birch_door: () => doorIcon('#d4c78e', true),
   // the arm shown when the hand is empty: a sleeve over skin (our own colours)
   player_arm: () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const sleeve = y < 6, c = sleeve ? hex(y === 5 ? '#9e3646' : '#c84a5a') : hex('#f2c9a9'); p.set(x, y, mul(c, 0.92 + hash(9, x, y) * 0.1 - (x % 4 === 3 ? 0.06 : 0))); } return p; },
 };

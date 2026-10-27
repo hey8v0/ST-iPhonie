@@ -2,8 +2,9 @@
 // layer of one texture array, from the player's imported pack when it has that name, else our own drawing. Also the
 // little pictures for the inventory: blocks as small 3D cubes, items flat. And the sky things (sun, moon, clouds).
 import {ownTexture, OWN_BLOCK_TEXTURES, OWN_ITEM_TEXTURES, ANIMATED} from './textures.js';
-import {BLOCKS, BY_NAME, itemInfo, ALL_ITEMS} from './blocks.js';
+import {BLOCKS, BY_NAME, itemInfo, ALL_ITEMS, withMeta} from './blocks.js';
 import {rng} from './noise.js';
+import {pieces} from './shapes.js';
 
 export const TEXTURE_NAMES = [...OWN_BLOCK_TEXTURES, ...OWN_ITEM_TEXTURES];
 export const LAYER = Object.fromEntries(TEXTURE_NAMES.map((n, i) => [n, i]));
@@ -54,13 +55,22 @@ const tintColor = t => t == null ? null : t.startsWith('#') ? parseInt(t.slice(1
 export function makeIcons(built) {
   const {size, layers} = built, out = {}, N = 32;
   const face = (name, tint) => rgba(tinted(layers[LAYER[name]] || layers[0], tint), size);
+  // tinted and darkened faces, kept (the iso painter asks for the same ones often)
+  const cache = new Map();
+  const face2 = (name, tint, shade) => {
+    const k = `${name}|${tint}|${shade}`;
+    if (!cache.has(k)) { const d = tinted(layers[LAYER[name]] || layers[0], tint), o = new Uint8Array(d); if (shade) for (let i = 0; i < o.length; i += 4) { o[i] *= 1 - shade; o[i + 1] *= 1 - shade; o[i + 2] *= 1 - shade; } cache.set(k, rgba(o, size)); }
+    return cache.get(k);
+  };
   for (const name of ALL_ITEMS) {
     const info = itemInfo(name), c = document.createElement('canvas');
     c.width = c.height = N;
     const g = c.getContext('2d');
     g.imageSmoothingEnabled = false;
     const b = info.block;
-    if (b && ['cube', 'slab', 'cactus', 'farmland', 'layer'].includes(b.shape) && b.tex) {
+    if (b && ICON_STATE[b.shape] && !LAYER_ITEM.has(b.name)) {
+      isoPieces(g, b, (name, tint, shade) => face2(name, tint, shade), size);
+    } else if (b && ['cube', 'slab', 'cactus', 'farmland', 'layer'].includes(b.shape) && b.tex) {
       const t = b.tex, tint = tintColor(b.tint);
       const top = face(t.all || t.top, tint), side = face(t.all || (b.facing && t.front) || t.side, b.name === 'grass_block' ? null : tint);
       const side2 = face(t.all || t.side, b.name === 'grass_block' ? null : tint);
@@ -81,13 +91,50 @@ export function makeIcons(built) {
       const ov = b.name === 'grass_block' ? face('grass_block_side_overlay', DEFAULT_TINT.grass) : null;
       drawSide(side, true, 0.2, ov); drawSide(side2, false, 0.4, ov);
     } else {
-      const tex = b ? (b.name === 'wheat' ? 'wheat_stage7' : b.tex?.all || b.tex?.side) : info.icon;
+      const tex = b ? (LAYER_ITEM.has(b.name) ? b.name : b.name === 'wheat' ? 'wheat_stage7' : b.tex?.all || b.tex?.side) : info.icon;
       const img = face(tex, b ? tintColor(b.tint) : null);
       g.drawImage(img, 0, 0, N, N);
     }
     out[name] = c.toDataURL();
   }
   return out;
+}
+
+// how a shaped block shows in the inventory: its state, and what joins it (a fence and a pane joined left and right)
+const ICON_STATE = {stairs: 2, fence: 0, gate: 0, pane: 0, trapdoor: 0, bed: 2 | 4, chest: 0};
+// blocks with their own flat item picture (doors)
+const LAYER_ITEM = new Set(['oak_door', 'spruce_door', 'birch_door']);
+/**
+ * A shaped block drawn as its pieces in the same isometric view as the cubes: for each piece the top, the front (south)
+ * and the right (east) face, back pieces first. face(name, tint, shade) gives a texture picture.
+ */
+function isoPieces(g, b, face, size) {
+  const v = withMeta(b.id, ICON_STATE[b.shape]), near = (dx, dy, dz) => (b.shape === 'fence' || b.shape === 'pane') && dx ? v : 0;
+  const P = (x, y, z) => [16 + (x - z) * 16, 16 + (x + z) * 8 - y * 16];
+  const color = b.color ? parseInt(b.color.slice(1), 16) : null;
+  const texOf = (role, f) => {
+    if (role === 'wool') return ['white_wool', color];
+    if (role === 'pillow') return ['white_wool', null];
+    if (role === 'wood') return ['oak_planks', null];
+    if (role === 'latch') return ['iron_block', null];
+    const t = b.tex;
+    if (b.shape === 'pane' && f === 2) return [t.edge || t.all, null];
+    if (t.all) return [t.all, null];
+    if (b.shape === 'chest' && f === 4) return [t.front, null];
+    return [f === 2 ? t.top : t.side, null];
+  };
+  const quad = (img, p0, pu, pv, sx, sy, sw, sh) => {
+    if (sw <= 0 || sh <= 0) return;
+    g.save(); g.setTransform(pu[0] - p0[0], pu[1] - p0[1], pv[0] - p0[0], pv[1] - p0[1], p0[0], p0[1]);
+    g.drawImage(img, sx, sy, sw, sh, 0, 0, 1, 1); g.restore();
+  };
+  const list = pieces(v, near).map(p => ({...p, b: p.box.map(q => q / 16)})).sort((a, c) => (a.b[0] + a.b[2]) * 2 + a.b[1] - ((c.b[0] + c.b[2]) * 2 + c.b[1]));
+  for (const {b: [x0, y0, z0, x1, y1, z1], role} of list) {
+    const S = size;
+    let [n, t] = texOf(role, 2); quad(face(n, t, 0), P(x0, y1, z0), P(x1, y1, z0), P(x0, y1, z1), x0 * S, z0 * S, (x1 - x0) * S, (z1 - z0) * S);
+    [n, t] = texOf(role, 4); quad(face(n, t, 0.2), P(x0, y1, z1), P(x1, y1, z1), P(x0, y0, z1), x0 * S, (1 - y1) * S, (x1 - x0) * S, (y1 - y0) * S);
+    [n, t] = texOf(role, 0); quad(face(n, t, 0.4), P(x1, y1, z1), P(x1, y1, z0), P(x1, y0, z1), (1 - z1) * S, (1 - y1) * S, (z1 - z0) * S, (y1 - y0) * S);
+  }
 }
 
 // ---------- sky pictures (ours; the pack's when imported) ----------

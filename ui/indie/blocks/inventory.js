@@ -1,7 +1,7 @@
 // What the player carries and makes: stacks, the inventory (36 slots, the first 9 the hotbar), crafting (2×2 in the
 // inventory, 3×3 at a crafting table; shaped recipes may be mirrored), the furnace (smelting and fuel) and chests.
 // Recipes are the game's.
-import {itemInfo, BLOCKS, ITEMS} from './blocks.js';
+import {itemInfo, BLOCKS, ITEMS, COLORS} from './blocks.js';
 
 export const stackMax = id => itemInfo(id)?.stack || 64;
 export const same = (a, b) => a && b && a.id === b.id && !a.dmg && !b.dmg;
@@ -83,6 +83,18 @@ shaped(['G#G', '#G#', 'G#G'], {G: 'gunpowder', '#': 'sand'}, 'tnt');
 shaped(['##', '##'], {'#': 'string'}, 'white_wool');
 shaped(['###'], {'#': 'sugar_cane'}, 'paper', 3);
 shapeless(['paper', 'paper', 'paper', 'leather'], 'book');
+for (const [n, mat] of [['oak', 'oak_planks'], ['spruce', 'spruce_planks'], ['birch', 'birch_planks'], ['cobblestone', 'cobblestone'], ['stone_brick', 'stone_bricks'], ['brick', 'bricks'], ['sandstone', 'sandstone']])
+  shaped(['#  ', '## ', '###'], {'#': mat}, `${n}_stairs`, 4);
+for (const w of ['oak', 'spruce', 'birch']) {
+  const p = `${w}_planks`;
+  shaped(['#S#', '#S#'], {'#': p, S: 'stick'}, `${w}_fence`, 3);
+  shaped(['S#S', 'S#S'], {'#': p, S: 'stick'}, `${w}_fence_gate`);
+  shaped(['##', '##', '##'], {'#': p}, `${w}_door`, 3);
+  shaped(['###', '###'], {'#': p}, `${w}_trapdoor`, 2);
+}
+shaped(['###', '###'], {'#': 'glass'}, 'glass_pane', 16);
+shaped(['###', '###'], {'#': 'iron_ingot'}, 'iron_bars', 16);
+for (const [c] of COLORS) shaped(['WWW', '###'], {W: `${c}_wool`, '#': '#planks'}, `${c}_bed`);
 export const RECIPES = R;
 
 /** What a crafting grid (w × h stacks, row by row) makes: {out, recipe} or null. */
