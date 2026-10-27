@@ -30,7 +30,8 @@ export class Input {
   setMode(m) { if (this.mode !== m) { this.mode = m; this.onMode(m); } }
   key(e, down) {
     if (e.target?.closest?.('input, textarea')) return;
-    const k = e.code;
+    // the tavern's back gesture sends an Escape with only its key name
+    const k = e.code || (e.key === 'Escape' ? 'Escape' : '');
     if (down) this.setMode('keyboard');
     if (down && !e.repeat) {
       const map = {KeyE: 'inventory', KeyQ: 'drop', Escape: 'pause', F3: 'debug', F1: 'hud', KeyF: 'swap', F5: 'view', KeyT: 'chat'};
@@ -70,13 +71,17 @@ export class Input {
     const stick = el.querySelector('.stick'), knob = stick.firstElementChild;
     const touches = new Map();
     const area = (x, y) => { const [w, h] = this.appSize(); return x < w * 0.38 && y > h * 0.3 ? 'stick' : 'look'; };
+    // Only the game's own touches (stick, looking, the round buttons) have their browser actions stopped: a phone
+    // makes its taps (the click on a menu button) out of touchend, so stopping every touch made all buttons dead.
     const onStart = e => {
       if (!this.enabled) return;
       this.setMode('touch');
+      let ours = false;
       for (const tc of e.changedTouches) {
+        ours = true;
         const [x, y] = this.toApp(tc.clientX, tc.clientY), btn = document.elementFromPoint(tc.clientX, tc.clientY)?.closest?.('[data-t]');
         if (btn && el.contains(btn)) { touches.set(tc.identifier, {kind: 'btn', name: btn.dataset.t, el: btn}); this.press(btn.dataset.t, true); btn.classList.add('on'); continue; }
-        if (e.target !== this.canvas && !el.contains(e.target)) continue;
+        if (e.target !== this.canvas && !el.contains(e.target)) { ours = false; continue; }
         const kind = area(x, y);
         if (kind === 'stick' && !t.stick) {
           t.stick = {id: tc.identifier, x, y, dx: 0, dy: 0};
@@ -89,12 +94,14 @@ export class Input {
           this.holdTimer = setTimeout(() => { const s = touches.get(id); if (s && !s.moved) { s.breaking = true; t.attack = true; t.aim = [s.x, s.y]; } }, 280);
         }
       }
-      e.preventDefault();
+      if (ours) e.preventDefault();
     };
     const onMove = e => {
+      let ours = false;
       for (const tc of e.changedTouches) {
         const s = touches.get(tc.identifier);
         if (!s) continue;
+        ours = true;
         const [x, y] = this.toApp(tc.clientX, tc.clientY);
         if (s.kind === 'stick') {
           let dx = x - t.stick.x, dy = y - t.stick.y;
@@ -109,12 +116,14 @@ export class Input {
           s.x = x; s.y = y;
         }
       }
-      e.preventDefault();
+      if (ours) e.preventDefault();
     };
     const onEnd = e => {
+      let ours = false;
       for (const tc of e.changedTouches) {
         const s = touches.get(tc.identifier);
         if (!s) continue;
+        ours = true;
         touches.delete(tc.identifier);
         if (s.kind === 'btn') { this.press(s.name, false); s.el.classList.remove('on'); }
         else if (s.kind === 'stick') { t.stick = null; stick.hidden = true; }
@@ -123,7 +132,7 @@ export class Input {
           else if (!s.moved && performance.now() - s.t < 280) { t.aim = [s.x, s.y]; this.events.push('use'); this.tapAim = [s.x, s.y]; }
         }
       }
-      e.preventDefault();
+      if (ours) e.preventDefault();
     };
     this.canvas.addEventListener('touchstart', onStart, {passive: false});
     el.addEventListener('touchstart', onStart, {passive: false});

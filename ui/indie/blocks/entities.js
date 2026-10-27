@@ -67,7 +67,7 @@ export class Entities {
       const p = this.particles[i];
       p.life--; if (p.life <= 0) { this.particles.splice(i, 1); continue; }
       p.vy -= p.g; const nx = p.x + p.vx, ny = p.y + p.vy, nz = p.z + p.vz;
-      if (this.solidAt(nx, ny, nz)) { p.vx *= 0.3; p.vz *= 0.3; p.vy = 0; } else { p.x = nx; p.y = ny; p.z = nz; }
+      if (!p.air && this.solidAt(nx, ny, nz)) { p.vx *= 0.3; p.vz *= 0.3; p.vy = 0; } else { p.x = nx; p.y = ny; p.z = nz; }
       p.vx *= 0.96; p.vz *= 0.96; p.vy *= 0.98;
     }
   }
@@ -80,6 +80,15 @@ export class Entities {
       const u = Math.floor(Math.random() * 12), w = Math.floor(Math.random() * 12);
       this.particles.push({x: x + 0.1 + Math.random() * 0.8, y: y + 0.1 + Math.random() * 0.8, z: z + 0.1 + Math.random() * 0.8, vx: (Math.random() - 0.5) * 0.15, vy: Math.random() * 0.15 + 0.05, vz: (Math.random() - 0.5) * 0.15, g: 0.04, life: 15 + Math.floor(Math.random() * 20), layer, uv: [u, w, u + 4, w + 4], size: 0.07 + Math.random() * 0.05, tint});
     }
+  }
+  /** Puffs that are not bits of a block: smoke, poof (a mob gone), heart, crit, explosion, meal (bone meal sparkles). */
+  puff(x, y, z, kind) {
+    const S = {smoke: [4, 0x4a4a4a, 0.02, 0.1, 30, -0.005], poof: [14, 0xdddddd, 0.08, 0.12, 20, -0.01], heart: [6, 0xff3a5a, 0.02, 0.12, 30, -0.004], crit: [10, 0xfff2b0, 0.15, 0.08, 14, 0.02],
+      explosion: [40, 0x8a8a8a, 0.35, 0.35, 30, -0.01], meal: [12, 0x7ce05a, 0.06, 0.07, 20, -0.005]}[kind];
+    if (!S) return;
+    const [n, tint, spread, size, life, g] = S, layer = LAYER.white_wool ?? 0;
+    for (let i = 0; i < n; i++) this.particles.push({x: x + (Math.random() - 0.5) * spread * 4, y: y + (Math.random() - 0.5) * spread * 4, z: z + (Math.random() - 0.5) * spread * 4,
+      vx: (Math.random() - 0.5) * spread, vy: Math.random() * spread + 0.02, vz: (Math.random() - 0.5) * spread, g, life: life + Math.floor(Math.random() * 10), layer, uv: [4, 4, 8, 8], size: size * (0.6 + Math.random() * 0.8), tint, air: true});
   }
   splash(x, y, z) {
     for (let i = 0; i < 20; i++) this.particles.push({x: x + (Math.random() - 0.5), y, z: z + (Math.random() - 0.5), vx: (Math.random() - 0.5) * 0.1, vy: Math.random() * 0.2, vz: (Math.random() - 0.5) * 0.1, g: 0.04, life: 20, layer: LAYER.water_still, uv: [0, 0, 4, 4], size: 0.06, tint: 0x6a9cff});

@@ -26,6 +26,8 @@ function block(name, zh, o = {}) {
     gravity: false, replace: false, solid: true, opaque: true, filter: 15, item: true, axis: false, facing: false, ...o};
   if (b.shape !== 'cube' || b.pass !== 'solid') b.opaque = o.opaque ?? false;
   if (!b.opaque) b.filter = o.filter ?? (b.pass === 'translucent' && b.shape === 'liquid' ? 2 : b.name.endsWith('_leaves') ? 1 : 0);
+  // how much an explosion it takes (the game's blast resistance, roughly: stone 6, ores 3, wood 3, dirt 0.5)
+  b.blast = o.blast ?? (b.hard < 0 ? 3600000 : b.shape === 'liquid' ? 100 : b.tool === T.PICK && b.hard >= 1.5 ? (name.endsWith('_ore') ? 3 : 6) : b.hard * 1.5);
   B.push(b);
   return b;
 }
@@ -65,7 +67,7 @@ block('clay', '黏土块', {tex: all('clay'), hard: 0.6, tool: T.SHOVEL, drop: (
 block('coarse_dirt', '砂土', {tex: all('coarse_dirt'), hard: 0.5, tool: T.SHOVEL});
 block('podzol', '灰化土', {tex: tbs('podzol_top', 'dirt', 'podzol_side'), hard: 0.5, tool: T.SHOVEL, drop: 'dirt'});
 block('mossy_cobblestone', '苔石', {tex: all('mossy_cobblestone'), hard: 2, tool: T.PICK, tier: 0});
-block('obsidian', '黑曜石', {tex: all('obsidian'), hard: 50, tool: T.PICK, tier: 3});
+block('obsidian', '黑曜石', {tex: all('obsidian'), hard: 50, tool: T.PICK, tier: 3, blast: 1200});
 block('snow_block', '雪块', {tex: all('snow'), hard: 0.2, tool: T.SHOVEL, tier: 0, drop: () => ['snowball', 4]});
 block('snow', '雪', {tex: all('snow'), shape: 'layer', hard: 0.1, tool: T.SHOVEL, tier: 0, drop: 'snowball', replace: true, solid: false, opaque: false, filter: 0});
 block('ice', '冰', {tex: all('ice'), pass: 'translucent', hard: 0.5, tool: T.PICK, drop: null, filter: 2, slip: 0.98});
@@ -110,6 +112,12 @@ block('moss_block', '苔藓块', {tex: all('moss_block'), hard: 0.1, tool: T.HOE
 block('mud', '泥巴', {tex: all('mud'), hard: 0.5, tool: T.SHOVEL});
 block('lantern', '灯笼', {tex: all('lantern'), shape: 'lantern', pass: 'cutout', hard: 3.5, tool: T.PICK, tier: 0, solid: false, light: 15});
 block('blue_ice', '蓝冰', {tex: all('blue_ice'), hard: 2.8, tool: T.PICK, drop: null, slip: 0.989});
+// more crops: eight ages, four pictures (ages 0–1, 2–3, 4–6, 7)
+const stagesOf = n => [0, 0, 1, 1, 2, 2, 2, 3].map(s => `${n}_stage${s}`);
+block('carrots', '胡萝卜', {tex: all('carrots_stage0'), stages: stagesOf('carrots'), shape: 'crop', pass: 'cutout', hard: 0, solid: false, item: false,
+  drop: (r, meta) => ['carrot', meta >= 7 ? 2 + Math.floor(r() * 4) : 1]});
+block('potatoes', '土豆', {tex: all('potatoes_stage0'), stages: stagesOf('potatoes'), shape: 'crop', pass: 'cutout', hard: 0, solid: false, item: false,
+  drop: (r, meta) => ['potato', meta >= 7 ? 2 + Math.floor(r() * 4) : 1]});
 
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
@@ -128,11 +136,25 @@ item('glowstone_dust', '荧石粉'); item('book', '书'); item('snowball', '雪�
 item('apple', '苹果', {food: 4, sat: 2.4}); item('wheat_seeds', '小麦种子', {plant: 'wheat'}); item('wheat', '小麦'); item('bread', '面包', {food: 5, sat: 6});
 item('melon_slice', '西瓜片', {food: 2, sat: 1.2}); item('bucket', '桶', {stack: 16}); item('water_bucket', '水桶', {stack: 1, pour: 'water'}); item('lava_bucket', '岩浆桶', {stack: 1, pour: 'lava', fuel: 1000});
 item('bowl', '碗', {fuel: 5});
+// from animals and monsters
+for (const [raw, cooked, zh, f, s, cf, cs] of [['porkchop', 'cooked_porkchop', '猪排', 3, 1.8, 8, 12.8], ['beef', 'cooked_beef', '牛肉', 3, 1.8, 8, 12.8], ['mutton', 'cooked_mutton', '羊肉', 2, 1.2, 6, 9.6], ['chicken', 'cooked_chicken', '鸡肉', 2, 1.2, 6, 7.2]]) {
+  item(raw, `生${zh}`, {food: f, sat: s}); item(cooked, `熟${zh}`, {food: cf, sat: cs});
+}
+item('carrot', '胡萝卜', {food: 3, sat: 3.6, plant: 'carrots'}); item('potato', '马铃薯', {food: 1, sat: 0.6, plant: 'potatoes'}); item('baked_potato', '烤马铃薯', {food: 5, sat: 6});
+item('rotten_flesh', '腐肉', {food: 4, sat: 0.8}); item('spider_eye', '蜘蛛眼', {food: 2, sat: 3.2});
+item('leather', '皮革'); item('feather', '羽毛'); item('bone', '骨头'); item('bone_meal', '骨粉', {meal: true}); item('string', '线'); item('gunpowder', '火药'); item('paper', '纸');
+item('arrow', '箭'); item('bow', '弓', {stack: 1, tool: {kind: 'bow', tier: -1, speed: 1, uses: 384}, fuel: 15});
+item('shears', '剪刀', {stack: 1, tool: {kind: 'shears', tier: -1, speed: 1, uses: 238}});
+item('flint_and_steel', '打火石', {stack: 1, tool: {kind: 'fire', tier: -1, speed: 1, uses: 64}});
 export const TIERS = {wooden: {zh: '木', tier: 0, speed: 2, uses: 59}, stone: {zh: '石', tier: 1, speed: 4, uses: 131}, iron: {zh: '铁', tier: 2, speed: 6, uses: 250},
   golden: {zh: '金', tier: 0, speed: 12, uses: 32}, diamond: {zh: '钻石', tier: 3, speed: 8, uses: 1561}};
 const KINDS = {pickaxe: '镐', axe: '斧', shovel: '锹', sword: '剑', hoe: '锄'};
-for (const [t, info] of Object.entries(TIERS)) for (const [k, zh] of Object.entries(KINDS))
-  item(`${t}_${k}`, `${info.zh}${zh}`, {stack: 1, tool: {kind: k, tier: info.tier, speed: info.speed, uses: info.uses}, fuel: t === 'wooden' ? 10 : 0});
+// the game's attack damage of each tool (hearts × 2)
+const DAMAGE = {sword: [4, 5, 6, 4, 7], axe: [7, 9, 9, 7, 9], pickaxe: [2, 3, 4, 2, 5], shovel: [2.5, 3.5, 4.5, 2.5, 5.5], hoe: [1, 1, 1, 1, 1]};
+Object.keys(TIERS).forEach((t, ti) => { for (const [k, zh] of Object.entries(KINDS))
+  item(`${t}_${k}`, `${TIERS[t].zh}${zh}`, {stack: 1, tool: {kind: k, tier: TIERS[t].tier, speed: TIERS[t].speed, uses: TIERS[t].uses}, damage: DAMAGE[k][ti], fuel: t === 'wooden' ? 10 : 0}); });
+/** How hard a hit with this (an item name, or nothing) is. */
+export const damageOf = name => (name && I[name]?.damage) || 1;
 export const ITEMS = I;
 
 /** Anything that can be held: a block (that can be an item) or an item. */
@@ -150,6 +172,7 @@ export function breakTime(block, tool) {
   if (block.hard === 0) return 0;
   let speed = tool && block.tool === tool.kind ? tool.speed : 1;
   if (tool?.kind === 'sword' && block.name.endsWith('_leaves')) speed = 1.5;
+  if (tool?.kind === 'shears') speed = block.name.endsWith('_leaves') ? 15 : block.name.endsWith('_wool') ? 5 : 1;
   // Per tick: speed / hardness / (30 if it drops else 100); 20 ticks a second.
   const perTick = speed / block.hard / (harvests(block, tool) ? 30 : 100);
   return perTick > 1 ? 0 : Math.ceil(1 / perTick) / 20;

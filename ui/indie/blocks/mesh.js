@@ -176,7 +176,7 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
       quad(out, [[cx - r, y, cz - r], [cx + r, y, cz + r], [cx + r, y + 1, cz + r], [cx - r, y + 1, cz - r]], layer, UVQ, lt, lb, tintC, flags);
       quad(out, [[cx - r, y, cz + r], [cx + r, y, cz - r], [cx + r, y + 1, cz - r], [cx - r, y + 1, cz + r]], layer, UVQ, lt, lb, tintC, flags);
     } else if (shape === 'crop') {
-      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(`wheat_stage${Math.min(7, meta)}`), top = y + 1 - 1 / 16;
+      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.stages ? b.stages[Math.min(7, meta)] : `wheat_stage${Math.min(7, meta)}`), top = y + 1 - 1 / 16;
       for (const k of [4 / 16, 12 / 16]) {
         quad(out, [[x, y - 1 / 16, z + k], [x + 1, y - 1 / 16, z + k], [x + 1, top, z + k], [x, top, z + k]], layer, UVQ, lt, lb, WHITE, 2);
         quad(out, [[x + k, y - 1 / 16, z + 1], [x + k, y - 1 / 16, z], [x + k, top, z], [x + k, top, z + 1]], layer, UVQ, lt, lb, WHITE, 2);

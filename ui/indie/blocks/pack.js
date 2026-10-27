@@ -38,6 +38,12 @@ async function zipRead(file, e) {
 
 // the sky: older versions keep the moon's eight phases in one 4 × 2 picture, newer ones (26.x) one picture each
 const SKY = {sun: ['environment/celestial/sun.png', 'environment/sun.png'], moon: ['environment/moon_phases.png'], clouds: ['environment/clouds.png']};
+// mob skins (the game's layouts; newer versions have several looks per animal — the temperate one is the usual)
+const SKINS = {
+  pig: ['entity/pig/pig_temperate.png', 'entity/pig/pig.png', 'entity/pig.png'], cow: ['entity/cow/cow_temperate.png', 'entity/cow/cow.png', 'entity/cow.png'],
+  sheep: ['entity/sheep/sheep.png'], sheep_wool: ['entity/sheep/sheep_wool.png', 'entity/sheep/sheep_fur.png'], chicken: ['entity/chicken/chicken_temperate.png', 'entity/chicken.png'],
+  zombie: ['entity/zombie/zombie.png'], skeleton: ['entity/skeleton/skeleton.png'], creeper: ['entity/creeper/creeper.png'], spider: ['entity/spider/spider.png'],
+};
 const MOON_PHASES = ['full_moon', 'waning_gibbous', 'third_quarter', 'waning_crescent', 'new_moon', 'waxing_crescent', 'first_quarter', 'waxing_gibbous'];
 /**
  * Reads the pictures we use from a jar or resource pack: {label, files: {name: {png: Blob, meta}}, sky: {sun, moon,
@@ -76,10 +82,12 @@ export async function readPack(file, onProgress = () => {}) {
     const phases = MOON_PHASES.map(n => index.get(`${base}environment/celestial/moon/${n}.png`));
     if (phases.every(Boolean)) sky.moonPhases = await Promise.all(phases.map(async e => new Blob([await zipRead(file, e)], {type: 'image/png'})));
   }
+  const skins = {};
+  for (const [k, paths] of Object.entries(SKINS)) { const e = paths.map(p => index.get(base + p)).find(Boolean); if (e) skins[k] = new Blob([await zipRead(file, e)], {type: 'image/png'}); }
   let label = file.name.replace(/\.(jar|zip)$/i, '');
   const ver = index.get(root + 'version.json');
   if (ver) { try { label = `Minecraft ${JSON.parse(new TextDecoder().decode(await zipRead(file, ver))).name}`; } catch {} }
-  return {label, files, sky, count: wanted.length, at: Date.now()};
+  return {label, files, sky, skins, count: wanted.length, at: Date.now()};
 }
 /** Kept in this browser. */
 export const savePack = p => putOne('pack', p, 'current');
@@ -88,8 +96,9 @@ export const loadPackRecord = () => getOne('pack', 'current').catch(() => null);
 
 /** The pictures decoded: Map(name → {w, h, frames: [Uint8Array], time}) and sky images (ImageBitmaps). */
 export async function decodePack(rec) {
-  const out = new Map(), sky = {};
-  if (!rec) return {textures: null, sky};
+  const out = new Map(), sky = {}, skins = {};
+  if (!rec) return {textures: null, sky, skins};
+  for (const [k, blob] of Object.entries(rec.skins || {})) { try { skins[k] = await createImageBitmap(blob); } catch {} }
   const canvas = document.createElement('canvas'), g = canvas.getContext('2d', {willReadFrequently: true});
   for (const [name, {png, meta}] of Object.entries(rec.files)) {
     try {
@@ -125,5 +134,5 @@ export async function decodePack(rec) {
       sky.moon = c;
     } catch {}
   }
-  return {textures: out, sky};
+  return {textures: out, sky, skins};
 }

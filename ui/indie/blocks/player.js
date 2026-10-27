@@ -7,8 +7,10 @@ import {ID, BLOCKS} from './blocks.js';
 export const W = 0.6, H = 1.8, SNEAK_H = 1.5, EYE = 1.62, SNEAK_EYE = 1.27;
 
 export class Body {
-  constructor(world) {
+  /** world: get(x, y, z) and has(x, z); size: the box [width, height] (mobs; the player by default). */
+  constructor(world, size = null) {
     this.world = world;
+    this.w = size ? size[0] : W; this.hgt = size ? size[1] : H; this.mob = !!size;
     this.x = 0; this.y = 100; this.z = 0; this.vx = 0; this.vy = 0; this.vz = 0;
     this.yaw = 0; this.pitch = 0;
     this.onGround = false; this.flying = false; this.sneaking = false; this.sprinting = false;
@@ -17,8 +19,8 @@ export class Body {
     this.prev = {x: 0, y: 100, z: 0};
     this.landed = 0; this.stepped = 0;
   }
-  get height() { return this.sneaking && !this.flying ? SNEAK_H : H; }
-  get eye() { return this.sneaking && !this.flying ? SNEAK_EYE : EYE; }
+  get height() { return this.mob ? this.hgt : this.sneaking && !this.flying ? SNEAK_H : H; }
+  get eye() { return this.mob ? this.hgt * 0.85 : this.sneaking && !this.flying ? SNEAK_EYE : EYE; }
   /** The boxes of solid blocks touching a box. */
   boxesIn(x0, y0, z0, x1, y1, z1) {
     const out = [];
@@ -31,7 +33,7 @@ export class Body {
     }
     return out;
   }
-  aabb(x = this.x, y = this.y, z = this.z) { const h = W / 2; return [x - h, y, z - h, x + h, y + this.height, z + h]; }
+  aabb(x = this.x, y = this.y, z = this.z) { const h = this.w / 2; return [x - h, y, z - h, x + h, y + this.height, z + h]; }
   /** Moves by dx, dy, dz, stopped by blocks (up and down first, then across). */
   move(dx, dy, dz) {
     const box = this.aabb(), e = 1e-7;
@@ -55,7 +57,7 @@ export class Body {
     return {dx, dy, dz, hitX: dx !== odx, hitY: dy !== ody, hitZ: dz !== odz, down: ody < 0 && dy !== ody};
   }
   /** Is there ground under the box if it were here? (sneaking stops at edges) */
-  groundUnder(x, z) { const h = W / 2; return this.boxesIn(x - h, this.y - 0.6, z - h, x + h, this.y - 0.01, z + h).some(b => b[4] > this.y - 0.6 && b[3] > x - h && b[0] < x + h && b[5] > z - h && b[2] < z + h); }
+  groundUnder(x, z) { const h = this.w / 2; return this.boxesIn(x - h, this.y - 0.6, z - h, x + h, this.y - 0.01, z + h).some(b => b[4] > this.y - 0.6 && b[3] > x - h && b[0] < x + h && b[5] > z - h && b[2] < z + h); }
   /** What the body is in now (water, lava, a ladder). */
   feel() {
     const [x0, y0, z0, x1, y1, z1] = this.aabb();
@@ -83,7 +85,7 @@ export class Body {
     const wantSneak = !!input.sneak && !this.flying;
     if (this.sneaking && !wantSneak) {
       // standing up needs room
-      const h = W / 2;
+      const h = this.w / 2;
       if (!this.boxesIn(this.x - h, this.y, this.z - h, this.x + h, this.y + H, this.z + h).some(b => b[1] < this.y + H && b[4] > this.y + 0.01)) this.sneaking = false;
     } else this.sneaking = wantSneak;
     let fwd = (input.fwd || 0) * 0.98, side = (input.side || 0) * 0.98;
@@ -122,7 +124,7 @@ export class Body {
     const below = this.world.get(Math.floor(this.x), Math.floor(this.y - 0.5), Math.floor(this.z));
     // the game's rule: the push on the ground is speed × 0.216 / friction³, the slowing friction × 0.91
     const friction = slipperiness(below), slip = this.onGround ? friction * 0.91 : 0.91;
-    const speed = 0.1 * (this.sprinting ? 1.3 : 1);
+    const speed = (input.speed ?? 0.1) * (this.sprinting ? 1.3 : 1);
     accel(this.onGround ? speed * 0.21600002 / (friction * friction * friction) : this.sprinting ? 0.026 : 0.02);
     if (this.climbing) {
       this.vx = Math.max(-0.15, Math.min(0.15, this.vx)); this.vz = Math.max(-0.15, Math.min(0.15, this.vz));
@@ -154,7 +156,7 @@ export class Body {
     }
     // auto-jump (touch): a one-block step in the way
     if (input.autoJump && (r.hitX || r.hitZ) && this.onGround && !this.jumpWait && Math.hypot(fwd, side) > 0.1 && !this.climbing) {
-      const h = W / 2, ax = this.x + Math.sign(dx) * 0.4, az = this.z + Math.sign(dz) * 0.4;
+      const h = this.w / 2, ax = this.x + Math.sign(dx) * 0.4, az = this.z + Math.sign(dz) * 0.4;
       const wall = this.boxesIn(ax - h, this.y + 0.01, az - h, ax + h, this.y + 1, az + h).length;
       const room = !this.boxesIn(ax - h, this.y + 1.01, az - h, ax + h, this.y + 1 + this.height, az + h).some(b => b[4] > this.y + 1.01);
       if (wall && room) { this.vy = 0.42; this.jumpWait = 10; result.jumped = true; }

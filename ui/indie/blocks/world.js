@@ -18,6 +18,7 @@ const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1
 const NEIGHBOURS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 const LIQUID = new Set([ID.water, ID.lava]);
 const GRAVITY = new Set(BLOCKS.filter(b => b.gravity).map(b => b.id));
+const CROP = new Set([ID.wheat, ID.carrots, ID.potatoes]);
 const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern'].includes(b.shape)).map(b => b.id));
 const hexRGB = h => parseInt(h.slice(1), 16);
 const TINTS = BIOMES.map(b => ({grass: hexRGB(b.grass), foliage: hexRGB(b.foliage), water: hexRGB(b.water)}));
@@ -290,9 +291,9 @@ export class World {
       }
     } else if (b.name.endsWith('_sapling')) {
       if (lit() >= 9 && r() < 1 / 7) this.growSapling(x, y, z, b.name.replace('_sapling', ''));
-    } else if (id === ID.wheat) {
+    } else if (CROP.has(id)) {
       const meta = v >>> 12;
-      if (meta < 7 && lit() >= 9 && r() < (this.get(x, y - 1, z) >>> 12 ? 0.33 : 0.16)) this.set(x, y, z, withMeta(ID.wheat, meta + 1));
+      if (meta < 7 && lit() >= 9 && r() < (this.get(x, y - 1, z) >>> 12 ? 0.33 : 0.16)) this.set(x, y, z, withMeta(id, meta + 1));
     } else if (id === ID.sugar_cane || id === ID.cactus) {
       if (this.get(x, y + 1, z)) return;
       let h = 1; while (h < 3 && (this.get(x, y - h, z) & 0xFFF) === id) h++;
@@ -358,7 +359,7 @@ export class World {
     }
     if (b.shape === 'wall') { const [dx, dz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][v >>> 12 & 3]; return OPAQUE[this.get(x + dx, y, z + dz) & 0xFFF] === 1; }
     if (b.shape === 'lantern') return !!below && BLOCKS[bid].solid;
-    if (id === ID.wheat) return bid === ID.farmland;
+    if (CROP.has(id)) return bid === ID.farmland;
     if (id === ID.sugar_cane) return bid === ID.sugar_cane || ((bid === ID.sand || bid === ID.grass_block || bid === ID.dirt || bid === ID.red_sand) && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => (this.get(x + dx, y - 1, z + dz) & 0xFFF) === ID.water));
     if (id === ID.cactus) return bid === ID.cactus || bid === ID.sand || bid === ID.red_sand;
     if (id === ID.dead_bush) return bid === ID.sand || bid === ID.red_sand || bid === ID.dirt || bid === ID.coarse_dirt || bid === ID.terracotta;
@@ -419,6 +420,71 @@ export class World {
     if (old && PLANT.has(oid)) this.breakBlock(x, y, z);
     this.set(x, y, z, withMeta(id, meta));
     this.schedule(x, y, z, id === ID.water ? 5 : 30);
+  }
+
+  // ---------- explosions, bone meal, animals ----------
+  /**
+   * An explosion the game's way: rays from the centre in all directions, each weakened by what it passes through
+   * (blast resistance); blocks it gets through break. Drops: each block one time in `power`. TNT in it is lit.
+   * Returns {drops: [[name, n, x, y, z]], tnt: [[x, y, z]]}.
+   */
+  explode(cx, cy, cz, power) {
+    const hit = new Set(), r = this.r;
+    for (let i = 0; i < 16; i++) for (let j = 0; j < 16; j++) for (let k = 0; k < 16; k++) {
+      if (i && i !== 15 && j && j !== 15 && k && k !== 15) continue;
+      let dx = i / 15 * 2 - 1, dy = j / 15 * 2 - 1, dz = k / 15 * 2 - 1;
+      const l = Math.hypot(dx, dy, dz); dx /= l; dy /= l; dz /= l;
+      let x = cx, y = cy, z = cz, f = power * (0.7 + r() * 0.6);
+      while (f > 0) {
+        const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z), v = this.get(bx, by, bz);
+        if (v) { f -= (BLOCKS[v & 0xFFF].blast + 0.3) * 0.3; if (f > 0) hit.add(`${bx},${by},${bz}`); }
+        x += dx * 0.3; y += dy * 0.3; z += dz * 0.3; f -= 0.22500001;
+      }
+    }
+    const drops = [], tnt = [];
+    for (const k of hit) {
+      const [x, y, z] = k.split(',').map(Number), v = this.get(x, y, z), b = BLOCKS[v & 0xFFF];
+      if (!v || b.shape === 'liquid') continue;
+      if (v === ID.tnt) { tnt.push([x, y, z]); this.set(x, y, z, 0); continue; }
+      if (r() < 1 / power) for (const [name, n] of dropsOf(b, v >>> 12, r)) drops.push([name, n, x + 0.5, y + 0.5, z + 0.5]);
+      this.set(x, y, z, 0);
+    }
+    return {drops, tnt};
+  }
+  /** Bone meal on a block: crops grow, saplings may become trees, grass sprouts flowers. Returns whether it took. */
+  meal(x, y, z) {
+    const v = this.get(x, y, z), id = v & 0xFFF, b = BLOCKS[id], r = this.r;
+    if (CROP.has(id)) { if ((v >>> 12) >= 7) return false; this.set(x, y, z, withMeta(id, Math.min(7, (v >>> 12) + 2 + Math.floor(r() * 4)))); return true; }
+    if (b.name.endsWith('_sapling')) { if (r() < 0.45) this.growSapling(x, y, z, b.name.replace('_sapling', '')); return true; }
+    if (id === ID.grass_block && !this.get(x, y + 1, z)) {
+      for (let k = 0; k < 48; k++) {
+        const gx = x + Math.floor(r() * 7) - 3, gz = z + Math.floor(r() * 7) - 3;
+        for (let gy = y + 1; gy >= y - 1; gy--) {
+          if (this.get(gx, gy, gz) === ID.grass_block && !this.get(gx, gy + 1, gz)) { this.set(gx, gy + 1, gz, r() < 0.88 ? ID.short_grass : r() < 0.5 ? ID.dandelion : ID.poppy); break; }
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+  /** Animals living on a column made for the first time: [[kind, x, y, z, extra]] (the page keeps each place once). */
+  herdFor(c) {
+    const seed = this.seed, x0 = c.cx * 16, z0 = c.cz * 16;
+    const h = (salt) => { let n = Math.imul(seed ^ (c.cx * 73856093) ^ (c.cz * 19349663) ^ salt, 2654435761); n ^= n >>> 15; return (n >>> 0) / 4294967296; };
+    if (h(1) > 0.12) return [];
+    const biome = BIOMES[c.biome[8 * 16 + 8]].name;
+    const kinds = {plains: ['pig', 'cow', 'sheep', 'chicken'], meadow: ['sheep', 'cow', 'chicken'], forest: ['pig', 'cow', 'chicken', 'sheep'], birch_forest: ['pig', 'chicken', 'sheep'], dark_forest: ['pig', 'chicken'],
+      taiga: ['sheep', 'pig'], snowy_taiga: ['sheep'], snowy_plains: ['sheep'], savanna: ['cow', 'sheep', 'chicken'], jungle: ['chicken', 'pig'], swamp: ['chicken'], beach: []}[biome];
+    if (!kinds || !kinds.length) return [];
+    const kind = kinds[Math.floor(h(2) * kinds.length)], n = 2 + Math.floor(h(3) * 3), out = [];
+    for (let k = 0; k < n * 4 && out.length < n; k++) {
+      const lx = Math.floor(h(10 + k) * 16), lz = Math.floor(h(40 + k) * 16), top = c.height[lz * 16 + lx];
+      const g = this.get(x0 + lx, top, z0 + lz) & 0xFFF;
+      if (g !== ID.grass_block && g !== ID.podzol) continue;
+      if (this.get(x0 + lx, top + 1, z0 + lz) && !BLOCKS[this.get(x0 + lx, top + 1, z0 + lz) & 0xFFF].replace) continue;
+      out.push([kind, x0 + lx + 0.5, top + 1, z0 + lz + 0.5]);
+    }
+    return out;
   }
 
   // ---------- meshing ----------
@@ -509,10 +575,12 @@ export class World {
       this.loading.add(k);
       let c = null;
       if (this.store && this.store.has(cx, cz)) c = await this.store.load(cx, cz).catch(() => null);
-      if (!c) c = generateColumn(this.seed, cx, cz);
+      let fresh = false;
+      if (!c) { c = generateColumn(this.seed, cx, cz); fresh = true; }
       this.loading.delete(k);
       if (this.cols.has(k)) continue;
       this.addColumn(c);
+      if (fresh) { const herd = this.herdFor(c); if (herd.length) this.post({type: 'herd', cx, cz, list: herd}); }
     }
     // 2. meshes: changed sections of columns whose neighbours are all here, nearest first
     if (this.dirty.size) {

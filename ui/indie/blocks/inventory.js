@@ -74,6 +74,15 @@ shaped(['###', '###', '###'], {'#': 'ice'}, 'packed_ice');
 shaped(['###', '###', '###'], {'#': 'packed_ice'}, 'blue_ice');
 shaped(['#D', 'D#'], {'#': 'dirt', D: 'gravel'}, 'coarse_dirt', 4);
 shapeless(['cobblestone', 'moss_block'], 'mossy_cobblestone');
+shapeless(['bone'], 'bone_meal', 3);
+shaped([' #X', '# X', ' #X'], {'#': 'stick', X: 'string'}, 'bow');
+shaped(['F', 'S', 'E'], {F: 'flint', S: 'stick', E: 'feather'}, 'arrow', 4);
+shapeless(['iron_ingot', 'flint'], 'flint_and_steel');
+shaped([' #', '# '], {'#': 'iron_ingot'}, 'shears');
+shaped(['G#G', '#G#', 'G#G'], {G: 'gunpowder', '#': 'sand'}, 'tnt');
+shaped(['##', '##'], {'#': 'string'}, 'white_wool');
+shaped(['###'], {'#': 'sugar_cane'}, 'paper', 3);
+shapeless(['paper', 'paper', 'paper', 'leather'], 'book');
 export const RECIPES = R;
 
 /** What a crafting grid (w × h stacks, row by row) makes: {out, recipe} or null. */
@@ -116,6 +125,7 @@ const SMELT = {
   deepslate_iron_ore: 'iron_ingot', deepslate_gold_ore: 'gold_ingot', deepslate_copper_ore: 'copper_ingot', coal_ore: 'coal', deepslate_coal_ore: 'coal',
   diamond_ore: 'diamond', deepslate_diamond_ore: 'diamond', emerald_ore: 'emerald', deepslate_emerald_ore: 'emerald', lapis_ore: 'lapis_lazuli', deepslate_lapis_ore: 'lapis_lazuli',
   redstone_ore: 'redstone', deepslate_redstone_ore: 'redstone', wet_sponge: 'sponge',
+  porkchop: 'cooked_porkchop', beef: 'cooked_beef', mutton: 'cooked_mutton', chicken: 'cooked_chicken', potato: 'baked_potato',
 };
 for (const l of TAGS.logs) SMELT[l] = 'charcoal';
 export const smeltOf = id => SMELT[id] || null;

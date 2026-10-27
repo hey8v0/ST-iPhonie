@@ -96,6 +96,33 @@ void main() {
   float fog = smoothstep(u_fogNear, u_fogFar, v_dist);
   o = vec4(mix(u_color.rgb, u_fog, fog), u_color.a * (1.0 - fog * fog));
 }`;
+// mobs: boxes built on the page, already placed relative to the camera, textured from their skin
+const ENT_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 a_pos;
+layout(location=1) in vec2 a_uv;
+layout(location=2) in float a_shade;
+uniform mat4 u_viewProj;
+out vec2 v_uv; out float v_shade; out float v_dist;
+void main() { gl_Position = u_viewProj * vec4(a_pos, 1.0); v_uv = a_uv; v_shade = a_shade; v_dist = length(a_pos); }`;
+const ENT_FS = `#version 300 es
+precision highp float;
+uniform sampler2D u_img;
+uniform vec2 u_light;
+uniform float u_daylight, u_gamma, u_flicker, u_fogNear, u_fogFar, u_hurt, u_white;
+uniform vec3 u_skyLight, u_fog, u_tint;
+in vec2 v_uv; in float v_shade; in float v_dist; out vec4 o;
+float curve(float l) { float x = clamp(l / 15.0, 0.0, 1.0); float b = x / (4.0 - 3.0 * x); return mix(b, 1.0 - pow(1.0 - b, 4.0), u_gamma); }
+void main() {
+  vec4 c = texture(u_img, v_uv);
+  if (c.a < 0.1) discard;
+  float sky = max(u_light.x - (1.0 - u_daylight) * 11.0, 0.0);
+  vec3 light = clamp(curve(sky) * u_skyLight + curve(u_light.y) * vec3(1.0, 0.86, 0.68) * u_flicker + 0.05, 0.0, 1.0);
+  vec3 col = c.rgb * u_tint * light * v_shade;
+  col = mix(col, vec3(1.0, 0.12, 0.08) * max(light, vec3(0.3)), u_hurt * 0.45);
+  col = mix(col, vec3(1.0), u_white);
+  o = vec4(mix(col, u_fog, smoothstep(u_fogNear, u_fogFar, v_dist)), 1.0);
+}`;
 const LINE_VS = `#version 300 es
 precision highp float;
 layout(location=0) in vec3 a_pos;
@@ -173,6 +200,15 @@ export class Verts {
     const [u0, v0, u1, v1] = uv, UV = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
     for (let f = 0; f < 6; f++) { if (layers[f] < 0) continue; for (let c = 0; c < 4; c++) this.v(F[f][c][0], F[f][c][1], F[f][c][2], unit, center, layers[f], UV[c][0], UV[c][1], sky, blk, f << 2, tints ? tints[f] : 0xFFFFFF); }
   }
+  /** An arrow (or any item picture drawn corner to corner) along +y: two crossed squares turned 45°, both sides. */
+  arrow(h, layer, sky, blk, unit, center) {
+    const k = h * Math.SQRT2, UV = [[0, 16], [16, 16], [16, 0], [0, 0]];
+    for (const plane of [p => [p[0], p[1], 0], p => [0, p[1], p[0]]]) {
+      const P = [[0, -k], [k, 0], [0, k], [-k, 0]].map(plane);
+      for (let c = 0; c < 4; c++) this.v(P[c][0], P[c][1], P[c][2], unit, center, layer, UV[c][0], UV[c][1], sky, blk, 4 << 2);
+      for (let c = 3; c >= 0; c--) this.v(P[c][0], P[c][1], P[c][2], unit, center, layer, UV[c][0], UV[c][1], sky, blk, 5 << 2);
+    }
+  }
   /** A flat square in the x–y plane, both sides. */
   flat(h, layer, sky, blk, unit, center, tint = 0xFFFFFF) {
     const P = [[-h, -h, 0], [h, -h, 0], [h, h, 0], [-h, h, 0]], UV = [[0, 16], [16, 16], [16, 0], [0, 0]];
@@ -186,7 +222,13 @@ export class Renderer {
     const gl = canvas.getContext('webgl2', {antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: false});
     if (!gl) throw Error('这个浏览器不支持 WebGL2，玩不了方块世界');
     this.gl = gl; this.canvas = canvas;
-    this.chunk = compile(gl, VS, FS); this.sky = compile(gl, SKY_VS, SKY_FS); this.quad = compile(gl, QUAD_VS, QUAD_FS); this.line = compile(gl, LINE_VS, LINE_FS);
+    this.chunk = compile(gl, VS, FS); this.sky = compile(gl, SKY_VS, SKY_FS); this.quad = compile(gl, QUAD_VS, QUAD_FS); this.line = compile(gl, LINE_VS, LINE_FS); this.ent = compile(gl, ENT_VS, ENT_FS);
+    this.entBuf = gl.createBuffer(); this.entVao = gl.createVertexArray();
+    gl.bindVertexArray(this.entVao); gl.bindBuffer(gl.ARRAY_BUFFER, this.entBuf);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 24, 12);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 24, 20);
+    gl.bindVertexArray(null);
     this.sections = new Map(); this.indexCount = 0; this.index = gl.createBuffer();
     this.ensureIndex(1 << 16);
     this.dyn = this.makeVao(gl.createBuffer());
@@ -208,6 +250,7 @@ export class Renderer {
     // every VAO keeps its element buffer binding: rebind
     for (const s of this.sections.values()) for (const part of [s.solid, s.trans]) if (part) { gl.bindVertexArray(part.vao); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.index); }
     if (this.dyn) { gl.bindVertexArray(this.dyn.vao); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.index); }
+    if (this.entVao) { gl.bindVertexArray(this.entVao); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.index); }
     gl.bindVertexArray(null);
   }
   makeVao(buf) {
@@ -330,6 +373,7 @@ export class Renderer {
     // things in the world (dropped items, the cracks, particles)
     if (extras.crack) this.drawCrack(extras.crack, view);
     if (extras.things) this.drawThings(extras.things, view);
+    if (extras.mobs?.length) this.drawMobs(extras.mobs, vp, env, fogNear, fogFar);
     // water and ice, far to near
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
     gl.useProgram(P.p); gl.uniform1f(P.u.u_cut, 0.01); gl.uniformMatrix4fv(P.u.u_model, false, mat.identity()); gl.uniform1f(P.u.u_unit, 16); gl.uniform1f(P.u.u_center, 1);
@@ -419,10 +463,38 @@ export class Renderer {
     gl.disable(gl.POLYGON_OFFSET_FILL); gl.depthMask(true); gl.disable(gl.BLEND);
     gl.uniform1f(this.chunk.u.u_overlay, 0);
   }
-  /** things: [{verts, x, y, z, model}] in world coordinates. */
+  /** things: [{verts, x, y, z, model, bright}] in world coordinates. */
   drawThings(things, view) {
-    for (const t of things) this.drawVerts(t.verts, {origin: [t.x - view.x, t.y - view.y, t.z - view.z], model: t.model, cut: 0.5});
-    this.gl.uniformMatrix4fv(this.chunk.u.u_model, false, mat.identity());
+    const gl = this.gl;
+    for (const t of things) {
+      if (t.bright) { gl.useProgram(this.chunk.p); gl.uniform1f(this.chunk.u.u_bright, t.bright); }
+      this.drawVerts(t.verts, {origin: [t.x - view.x, t.y - view.y, t.z - view.z], model: t.model, cut: 0.5});
+      if (t.bright) gl.uniform1f(this.chunk.u.u_bright, 0);
+    }
+    gl.uniformMatrix4fv(this.chunk.u.u_model, false, mat.identity());
+  }
+  /** Mobs: [{skin, verts (x, y, z, u, v, shade; relative to the camera), light: [sky, block], tint, hurt, white}]. */
+  drawMobs(list, vp, env, fogNear, fogFar) {
+    const gl = this.gl, E = this.ent;
+    gl.useProgram(E.p); gl.disable(gl.CULL_FACE);
+    gl.uniformMatrix4fv(E.u.u_viewProj, false, vp);
+    gl.uniform1f(E.u.u_daylight, env.daylight); gl.uniform1f(E.u.u_gamma, env.gamma); gl.uniform1f(E.u.u_flicker, env.flicker);
+    gl.uniform3fv(E.u.u_skyLight, env.skyLight); gl.uniform3fv(E.u.u_fog, env.fog); gl.uniform1f(E.u.u_fogNear, fogNear); gl.uniform1f(E.u.u_fogFar, fogFar);
+    gl.activeTexture(gl.TEXTURE1); gl.uniform1i(E.u.u_img, 1);
+    gl.bindVertexArray(this.entVao); gl.bindBuffer(gl.ARRAY_BUFFER, this.entBuf);
+    for (const m of list) {
+      const img = this.images[`mob:${m.skin}`];
+      if (!img || !m.verts.length) continue;
+      gl.bindTexture(gl.TEXTURE_2D, img);
+      gl.uniform2f(E.u.u_light, m.light[0], m.light[1]); gl.uniform3fv(E.u.u_tint, m.tint); gl.uniform1f(E.u.u_hurt, m.hurt); gl.uniform1f(E.u.u_white, m.white);
+      gl.bufferData(gl.ARRAY_BUFFER, m.verts, gl.STREAM_DRAW);
+      const quads = m.verts.length / 24;
+      this.ensureIndex(quads);
+      gl.bindVertexArray(this.entVao);
+      gl.drawElements(gl.TRIANGLES, quads * 6, gl.UNSIGNED_INT, 0);
+    }
+    gl.enable(gl.CULL_FACE);
+    gl.useProgram(this.chunk.p);
   }
   /** What is in the hand, drawn over the world with its own view. */
   drawHand(h, view, env) {

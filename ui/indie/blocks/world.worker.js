@@ -23,6 +23,8 @@ onmessage = async e => {
     else if (m.type === 'center') { world.center = [m.cx, m.cz]; if (m.radius) world.radius = m.radius; }
     else if (m.type === 'set') { world.set(m.x, m.y, m.z, m.v); world.ack = m.seq; }
     else if (m.type === 'day') world.dayDark = m.dark;
+    else if (m.type === 'explode') { const r = world.explode(m.x, m.y, m.z, m.power); post({type: 'exploded', id: m.id, ...r}); }
+    else if (m.type === 'meal') post({type: 'meal', x: m.x, y: m.y, z: m.z, took: world.meal(m.x, m.y, m.z)});
     else if (m.type === 'flush') { await world.flush(); post({type: 'flushed', id: m.id}); }
     else if (m.type === 'remesh') { world.wave = m.wave !== false; for (const c of world.cols.values()) for (let si = 0; si < c.sections.length; si++) if (c.sections[si]) world.dirty.add(c.k * 32 + si); }
   } catch (err) { post({type: 'error', message: String(err?.message || err)}); }

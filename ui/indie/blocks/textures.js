@@ -512,6 +512,21 @@ for (const [o, cols] of Object.entries(ORE_COLORS)) {
   BLOCK_ART[`deepslate_${o}_ore`] = () => ore(nameSeed(o) + 1, deepslate(71), cols, o === 'coal' ? 6 : 4);
 }
 for (let i = 0; i < 8; i++) BLOCK_ART[`wheat_stage${i}`] = () => wheat(i);
+/** Carrots and potatoes in the ground: leafy tops growing, the crop showing when ripe. */
+function rootCrop(stage, leaf, crop, seed) {
+  const p = pic(), r = rng(seed + stage), h = 3 + stage * 2;
+  for (const x0 of [2, 6, 10, 13]) {
+    const hh = h - Math.floor(r() * 2);
+    for (let i = 0; i < hh; i++) {
+      const y = 15 - i, c = mul(hex(leaf), 0.8 + (i / hh) * 0.35);
+      p.set(x0, y, c);
+      if (i > 1 && i % 2 === 0) { p.set(x0 - 1, y - 1, mul(c, 0.9)); p.set(x0 + 1, y - 1, mul(c, 1.05)); }
+    }
+    if (stage === 3) { p.set(x0, 15, hex(crop)); p.set(x0 + 1, 15, mul(hex(crop), 0.8)); p.set(x0, 14, mul(hex(crop), 1.1)); }
+  }
+  return p;
+}
+for (let i = 0; i < 4; i++) { BLOCK_ART[`carrots_stage${i}`] = () => rootCrop(i, '#4f9a2a', '#f08a1c', 51); BLOCK_ART[`potatoes_stage${i}`] = () => rootCrop(i, '#3f8a2c', '#c9a55a', 61); }
 for (let i = 0; i < 10; i++) BLOCK_ART[`destroy_stage_${i}`] = () => crack(i);
 
 // ---------- items: shapes rasterised, then outlined and shaded ----------
@@ -570,6 +585,13 @@ function tool(kind, mat) {
   return icon([{mask: handle, ...HANDLE}, {mask: h, ...head}]);
 }
 const blob = (cx, cy, r, seed) => { const m = mask(), rr = rng(seed); m.disc(cx, cy, r, r * 0.9); for (let k = 0; k < 4; k++) m.disc(cx + (rr() - 0.5) * r * 1.2, cy + (rr() - 0.5) * r * 1.2, r * (0.45 + rr() * 0.3)); return m; };
+/** A piece of meat: the meat, its fat rim, a darker side; a bone sticking out when bone. */
+const meat = (color, fat, dark, bone) => {
+  const layers = [{mask: mask().disc(8, 8.5, 5.4, 4.4), color: fat, light: '#ffffff', dark, outline: '#3a1a10'}, {mask: mask().disc(7.5, 8, 4.2, 3.4), color, dark, light: fat, grain: true}];
+  if (bone) layers.unshift({mask: mask().line(11, 6, 14, 3, 1.6), color: '#efe9dc', light: '#ffffff', dark: '#b8b0a0', outline: '#4a4438'});
+  return icon(layers);
+};
+const drumstick = (color, dark) => icon([{mask: mask().line(10, 6, 13.5, 2.5, 1.4).disc(13.5, 2.5, 1.2), color: '#efe9dc', light: '#ffffff', dark: '#b8b0a0', outline: '#4a4438'}, {mask: mask().disc(7, 9.5, 4.6, 4).disc(9.5, 7, 2.5), color, dark, outline: '#3a200c', grain: true}]);
 const ingot = c => icon([{mask: mask().poly([[2, 10], [9, 5.5], [14, 7.5], [7, 12.5]]), color: c[0], light: c[1], dark: c[2], outline: c[3]}]);
 const raw = (c, seed) => { const p = icon([{mask: blob(8, 8.5, 4.6, seed), color: c[0], light: c[1], dark: c[2], outline: c[3], grain: true}]); const r = rng(seed + 1); for (let k = 0; k < 5; k++) { const x = 5 + Math.floor(r() * 6), y = 5 + Math.floor(r() * 6); if (p.alpha(x, y)) p.set(x, y, hex(c[1])); } return p; };
 const ITEM_ART = {
@@ -597,6 +619,27 @@ const ITEM_ART = {
   water_bucket: () => icon([{mask: mask().poly([[3, 5], [13, 5], [11.5, 14], [4.5, 14]]), color: '#bdbdbd', light: '#e8e8e8', dark: '#7a7a7a', outline: '#2a2a2a'}, {mask: mask().poly([[4.5, 5], [11.5, 5], [11, 7], [5, 7]]), color: '#3f76e4', light: '#7aa6ff', dark: '#2a4fa8'}, {mask: mask().curve([[3, 5], [8, -2], [13, 5]], 1), color: '#8a8a8a', dark: '#4a4a4a'}]),
   lava_bucket: () => icon([{mask: mask().poly([[3, 5], [13, 5], [11.5, 14], [4.5, 14]]), color: '#bdbdbd', light: '#e8e8e8', dark: '#7a7a7a', outline: '#2a2a2a'}, {mask: mask().poly([[4.5, 5], [11.5, 5], [11, 7], [5, 7]]), color: '#f2791a', light: '#ffc951', dark: '#c6400b'}, {mask: mask().curve([[3, 5], [8, -2], [13, 5]], 1), color: '#8a8a8a', dark: '#4a4a4a'}]),
   bowl: () => icon([{mask: mask().disc(8, 8, 6, 5).cut(mask().disc(8, 5.5, 6.5, 3.5)), ...HANDLE}]),
+  // meat, raw and cooked
+  porkchop: () => meat('#e98f8f', '#f7d8cf', '#b8605f', true), cooked_porkchop: () => meat('#b4683c', '#e9b37c', '#7c3f1e', true),
+  beef: () => meat('#c7362f', '#e7837a', '#8a1d18', false), cooked_beef: () => meat('#7c4426', '#a8653a', '#4e2614', false),
+  mutton: () => meat('#d9604f', '#f0b0a0', '#963b2e', true), cooked_mutton: () => meat('#9c5832', '#c98a52', '#5e3018', true),
+  chicken: () => drumstick('#f2cdb4', '#d9a78c'), cooked_chicken: () => drumstick('#cc8c40', '#9a5e22'),
+  carrot: () => icon([{mask: mask().line(4, 12, 11, 5, 3).line(3.5, 12.5, 6, 10, 2), color: '#f08a1c', light: '#ffb45a', dark: '#b05a0c', outline: '#4a2204'}, {mask: mask().line(11, 5, 13.5, 2, 1.4).line(11, 5, 14, 5, 1.2), color: '#4f9a2a', light: '#7cc44a', dark: '#2e6216', outline: '#103008'}]),
+  potato: () => icon([{mask: mask().disc(8, 8.5, 5, 4), color: '#c9a55a', light: '#e6c47c', dark: '#8a6a30', outline: '#3a2a0e', grain: true}], {sparkle: [[6, 7]]}),
+  baked_potato: () => icon([{mask: mask().disc(8, 8.5, 5, 4), color: '#c98a3a', light: '#f0c070', dark: '#7a4a18', outline: '#2e1a06', grain: true}, {mask: mask().line(6, 8, 10, 8, 1.2), color: '#f6e6a0', dark: '#e0c060'}]),
+  rotten_flesh: () => { const p = icon([{mask: blob(8, 8.5, 5, 41), color: '#7a6b3a', light: '#9a8a52', dark: '#4e4220', outline: '#2a220e', grain: true}]); for (const [x, y] of [[6, 7], [9, 10], [10, 6], [5, 10]]) if (p.alpha(x, y)) p.set(x, y, hex('#3c4a1c')); return p; },
+  spider_eye: () => icon([{mask: mask().disc(8, 8, 4.6), color: '#a3201c', light: '#d84a3c', dark: '#5e0e0c', outline: '#2a0606'}], {sparkle: [[6, 6]]}),
+  leather: () => icon([{mask: mask().poly([[3, 4], [7, 3], [9, 4], [13, 3], [12, 8], [13, 13], [8, 12], [3, 13], [4, 8]]), color: '#9a5a2e', light: '#bd7a46', dark: '#64361a', outline: '#2e1808', grain: true}]),
+  feather: () => icon([{mask: mask().curve([[4, 13], [7, 6], [13, 2]], 3), color: '#f2f2ee', light: '#ffffff', dark: '#bdbdb6', outline: '#5a5a54'}, {mask: mask().line(3, 14, 9, 7, 1), color: '#cfcfc8', dark: '#8a8a84'}]),
+  bone: () => icon([{mask: mask().line(4.5, 11.5, 11.5, 4.5, 2).disc(4, 12, 1.7).disc(5, 13, 1.5).disc(12, 4, 1.7).disc(11, 3, 1.5), color: '#ece8dc', light: '#ffffff', dark: '#b8b2a2', outline: '#5c584c'}]),
+  bone_meal: () => { const m = mask(), r = rng(43); for (let k = 0; k < 9; k++) m.disc(4 + r() * 8, 6 + r() * 7, 1.2 + r() * 1.3); return icon([{mask: m, color: '#f0eee6', light: '#ffffff', dark: '#c4c0b2', outline: '#6a665a'}]); },
+  string: () => icon([{mask: mask().curve([[3, 12], [6, 2], [8, 8]], 1.2).curve([[8, 8], [10, 14], [13, 4]], 1.2), color: '#f4f4f4', light: '#ffffff', dark: '#c8c8c8', outline: '#4a4a4a'}]),
+  gunpowder: () => { const m = mask(), r = rng(44); for (let k = 0; k < 10; k++) m.disc(4 + r() * 8, 6 + r() * 7, 1.2 + r() * 1.3); return icon([{mask: m, color: '#5a5a5a', light: '#7c7c7c', dark: '#383838', outline: '#141414'}]); },
+  paper: () => icon([{mask: mask().poly([[3, 3], [12, 2], [13, 13], [4, 14]]), color: '#f2f0e6', light: '#ffffff', dark: '#cfcbbb', outline: '#6a665a'}]),
+  arrow: () => icon([{mask: mask().line(3.5, 12.5, 11.5, 4.5, 1.3), ...HANDLE}, {mask: mask().poly([[10, 3], [13.5, 2.5], [13, 6]]), color: '#9a9a9a', light: '#cfcfcf', dark: '#5a5a5a', outline: '#202020'}, {mask: mask().poly([[2, 11], [5, 11], [5, 14], [2, 14]]), color: '#eeeeea', dark: '#b4b4ae', outline: '#4a4a44'}]),
+  bow: () => icon([{mask: mask().curve([[3, 13], [3, 3], [13, 3]], 2), ...HANDLE}, {mask: mask().line(4, 12, 12, 4, 0.9), color: '#e6e6e6', dark: '#9a9a9a'}]),
+  shears: () => icon([{mask: mask().line(4, 12, 12, 4, 2).line(4, 4, 8, 8, 2), color: '#c8c8c8', light: '#f0f0f0', dark: '#7a7a7a', outline: '#2a2a2a'}, {mask: mask().disc(4.5, 4.5, 1.6).disc(3.5, 12, 1.6), color: '#6b4a2a', dark: '#3e2814', outline: '#1e1206'}]),
+  flint_and_steel: () => icon([{mask: mask().curve([[4, 12], [3, 4], [10, 4]], 2).cut(mask().disc(6, 8, 1.5)), color: '#a8a8a8', light: '#dcdcdc', dark: '#6a6a6a', outline: '#262626'}, {mask: mask().poly([[9, 8], [13, 9], [12, 13], [8, 12]]), color: '#3a3a3a', light: '#6a6a6a', dark: '#1e1e1e', outline: '#080808'}]),
   // the arm shown when the hand is empty: a sleeve over skin (our own colours)
   player_arm: () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const sleeve = y < 6, c = sleeve ? hex(y === 5 ? '#9e3646' : '#c84a5a') : hex('#f2c9a9'); p.set(x, y, mul(c, 0.92 + hash(9, x, y) * 0.1 - (x % 4 === 3 ? 0.06 : 0))); } return p; },
 };

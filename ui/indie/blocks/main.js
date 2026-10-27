@@ -1,7 +1,9 @@
 // 方块世界: a block world in the spirit of the game, made from scratch. This page runs the game: the menus, the player,
 // breaking and placing, survival (health, hunger, air), the day, what is held, the HUD; the world itself is made and
 // kept by the worker (world.worker.js) and drawn by render.js.
-import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta} from './blocks.js';
+import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf} from './blocks.js';
+import {Mobs, MOBS} from './mobs.js';
+import {MODELS, OWN_SKINS} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
 import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds} from './atlas.js';
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
@@ -56,13 +58,16 @@ async function toggleFullscreen() {
 let built = null, icons = {}, packLabel = '', dirtUrl = '';
 async function loadTextures() {
   const rec = await loadPackRecord();
-  const {textures, sky} = await decodePack(rec);
+  const {textures, sky, skins} = await decodePack(rec);
   built = buildLayers(textures);
   renderer.setTextures(built.size, built.layers);
   icons = makeIcons(built);
   renderer.setImage('sun', sky.sun || ownSun(), {linear: false});
   renderer.setImage('moon', sky.moon || ownMoon());
   renderer.setImage('clouds', sky.clouds || ownClouds(), {repeat: true});
+  // mob skins: the pack's (in the same layout) or ours; their sizes, since a pack's may be bigger
+  skinSizes = {};
+  for (const k of Object.keys(MODELS)) { const img = skins?.[k] || OWN_SKINS[k](); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; }
   packLabel = rec?.label || '';
   // the menus' background: the dirt, darkened
   const c = document.createElement('canvas'), d = built.layers[LAYER.dirt], s = built.size;
@@ -76,7 +81,7 @@ async function loadTextures() {
   style.textContent = `.screen.dirt{background-image:url(${dirtUrl})}`;
   animFrames = built.animated.map(a => ({...a, at: -1}));
 }
-let animFrames = [];
+let animFrames = [], skinSizes = {};
 
 // ---------- HUD pictures (our own) ----------
 function sprite9(rows, pal) {
@@ -149,6 +154,16 @@ function startWorld(meta) {
   };
   ents.load(meta.items);
   ents.onPickup = () => play('pop');
+  G.herds = new Set(meta.herds || []);
+  G.draw = 0; G.attackWait = 0; G.targetMob = null;
+  G.mobs = new Mobs({
+    world: mirror, player: body, mode: () => G.mode, daylight: () => environment(G.time).daylight, held: () => held(),
+    dark: (x, y, z, spawn) => isDark(x, y, z, spawn), loaded: (x, z) => mirror.has(Math.floor(x), Math.floor(z)),
+    hurtPlayer: (n, why, from) => hurt(n, why, from), explode: (x, y, z, power, src) => explode(x, y, z, power, src),
+    sound: (name, x, y, z) => soundAt(name, x, y, z), drop: (s, x, y, z) => G.ents.drop(s, x, y, z), give: s => !G.inv.add(s),
+    burst: (x, y, z, kind) => G.ents.puff(x, y, z, kind), setBlock: (x, y, z, v) => setBlock(x, y, z, v),
+  });
+  G.mobs.load(meta.mobs);
   worker.onmessage = e => onWorker(e.data);
   worker.onerror = e => showError(`世界线程出错：${e.message || e}`);
   worker.postMessage({type: 'init', seed: meta.seed, layers: LAYER, radius: settings.dist, worldId: meta.id, center: [G.cx, G.cz], wave: settings.wave});
@@ -160,8 +175,42 @@ function onWorker(m) {
   else if (m.type === 'mesh') { renderer.setSection(m.cx, m.sy, m.cz, m.solid, m.trans); G.meshes++; }
   else if (m.type === 'drop') { G.mirror.drop(m.cx, m.cz); renderer.dropColumn(m.cx, m.cz); }
   else if (m.type === 'drops') for (const [id, n] of m.items) G.ents.drop({id, n}, m.x, m.y, m.z);
-  else if (m.type === 'sound') play(m.name);
-  else if (m.type === 'error') console.warn('world:', m.message);
+  else if (m.type === 'sound') soundAt(m.name, m.x, m.y, m.z);
+  else if (m.type === 'herd') {
+    // each place has its animals once (a column made again after it went out of range keeps none)
+    const k = `${m.cx},${m.cz}`;
+    if (G.herds.has(k)) return;
+    G.herds.add(k);
+    if (G.mobs.count(x => x.def.passive) < 160) for (const [kind, x, y, z] of m.list) G.mobs.add(kind, x, y, z);
+  } else if (m.type === 'exploded') {
+    for (const [id, n, x, y, z] of m.drops) G.ents.drop({id, n}, x, y, z);
+    for (const [x, y, z] of m.tnt) G.mobs.light(x, y, z, 10 + Math.floor(Math.random() * 20));
+  } else if (m.type === 'error') console.warn('world:', m.message);
+}
+/** A sound from somewhere in the world: quieter with distance (gone at 16 blocks). */
+function soundAt(name, x, y, z) {
+  if (x == null || !G) { play(name); return; }
+  const d = Math.hypot(x - G.body.x, y - G.body.y, z - G.body.z);
+  if (d < 16) play(name, 0, 1 - d / 16);
+}
+/** Dark enough for monsters: no block light, and the sky's light (after nightfall) low — for spawning, at most a random 0–7. */
+function isDark(x, y, z, spawn = false) {
+  const [sky, blk] = G.mirror.light(Math.floor(x), Math.floor(y), Math.floor(z)), lit = Math.max(blk, sky - Math.round((1 - environment(G.time).daylight) * 11));
+  return spawn ? blk === 0 && lit <= Math.floor(Math.random() * 8) : lit <= 7;
+}
+/** An explosion: the worker breaks the blocks; here what is near is hurt and pushed. */
+function explode(x, y, z, power, src) {
+  G.worker.postMessage({type: 'explode', x, y, z, power});
+  G.mobs.blast(x, y, z, power);
+  const b = G.body, dx = b.x - x, dy = b.y + 0.9 - y, dz = b.z - z, d = Math.hypot(dx, dy, dz), r = power * 2;
+  if (d < r) {
+    const k = 1 - d / r;
+    b.vx += dx / (d || 1) * k * 1.2; b.vy += k * 0.6 + 0.1; b.vz += dz / (d || 1) * k * 1.2;
+    hurt(Math.floor((k * k + k) / 2 * 7 * r + 1), src ? `被${src.def.zh}炸死了` : '被炸死了');
+  }
+  G.ents.puff(x, y, z, 'explosion');
+  soundAt('explode', x, y, z);
+  if (d < 16) G.shake = 12 * (1 - d / 16);
 }
 /** Waits for the ground under the player, then lets them play. */
 function checkReady() {
@@ -199,7 +248,7 @@ function pause() {
 async function saveGame() {
   if (!G || !G.ready) return;
   const b = G.body, m = G.meta;
-  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), spawn: G.spawn,
+  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds],
     player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot}});
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   G.worker.postMessage({type: 'flush', id: Date.now()});
@@ -218,6 +267,7 @@ function respawn() {
   Object.assign(b, {x: G.spawn.x, y: G.spawn.y, z: G.spawn.z, vx: 0, vy: 0, vz: 0, fall: 0});
   b.prev = {x: b.x, y: b.y, z: b.z};
   Object.assign(G, {health: 20, food: 20, sat: 5, exh: 0, air: 300, dead: false});
+  b.dead = false;
   drawHud(true); resume();
 }
 
@@ -245,11 +295,11 @@ function environment(time) {
 const held = () => G.inv.slots[G.hot];
 const heldTool = () => { const s = held(); return s ? itemInfo(s.id)?.tool || null : null; };
 function useUp(n = 1) { if (G.mode === 'creative') return; const s = held(); if (!s) return; s.n -= n; if (s.n <= 0) G.inv.slots[G.hot] = null; drawHud(true); }
-function wearTool() {
+function wearTool(n = 1) {
   if (G.mode === 'creative') return;
   const s = held(), t = s && itemInfo(s.id)?.tool;
   if (!t) return;
-  s.dmg = (s.dmg || 0) + 1;
+  s.dmg = (s.dmg || 0) + n;
   if (s.dmg >= t.uses) { G.inv.slots[G.hot] = null; play('break', ID.glass); toast(`${zhOf(s.id)}坏了`); }
   drawHud(true);
 }
@@ -261,8 +311,9 @@ function breakBlock(t) {
   // ice over something becomes water when broken (unless creative)
   const below = G.mirror.get(x, y - 1, z);
   setBlock(x, y, z, survival && b.name === 'ice' && below && collisionBoxes(below) ? ID.water : 0);
-  if (survival && harvests(b, heldTool())) for (const [id, n] of dropsOf(b, v >>> 12)) G.ents.drop({id, n}, x + 0.5, y + 0.4, z + 0.5);
-  // what was inside goes out
+  // shears take leaves whole
+  if (survival && heldTool()?.kind === 'shears' && b.name.endsWith('_leaves')) G.ents.drop({id: b.name, n: 1}, x + 0.5, y + 0.4, z + 0.5);
+  else if (survival && harvests(b, heldTool())) for (const [id, n] of dropsOf(b, v >>> 12)) G.ents.drop({id, n}, x + 0.5, y + 0.4, z + 0.5);  // what was inside goes out
   const k = `${x},${y},${z}`, tile = G.tiles[k];
   if (tile) { for (const s of tile.slots || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; }
   G.ents.burst(x, y, z, v, 28);
@@ -310,11 +361,31 @@ function placeFrom(t, stack) {
   play('place', v);
   return true;
 }
-/** The use action (right click / tap / LT) on what is aimed at. */
-function use(t) {
+/** The use action (right click / tap / LT) on what is aimed at: a mob (feed, shear; a tap on a phone hits), or a block. */
+function use(t, mob = null) {
   const s = held(), info = s ? itemInfo(s.id) : null, b = t ? BLOCKS[t.v & 0xFFF] : null;
+  if (info?.tool?.kind === 'bow') return;
   G.swing = 6;
+  if (mob) {
+    if (s && mob.def.breed?.includes(s.id) && !mob.baby && !mob.love && !mob.loveWait) { mob.love = 600; useUp(); G.ents.puff(mob.x, mob.y + 1, mob.z, 'heart'); return; }
+    if (s && mob.def.breed?.includes(s.id) && mob.baby) { mob.grow += 2400; useUp(); G.ents.puff(mob.x, mob.y + 0.6, mob.z, 'meal'); return; }
+    if (info?.tool?.kind === 'shears' && mob.kind === 'sheep' && !mob.sheared && !mob.baby) {
+      mob.sheared = true; const n = 1 + Math.floor(Math.random() * 3);
+      G.ents.drop({id: `${mob.color || 'white'}_wool`, n}, mob.x, mob.y + 1, mob.z); wearTool(); play('shear'); return;
+    }
+    if (input.mode === 'touch') attackMob(mob);
+    return;
+  }
   if (t && b.use && !G.body.sneaking) { openBlock(b.use, t); return; }
+  // seeds, carrots, potatoes on farmland are planted (before being eaten)
+  if (t && info?.plant && (t.v & 0xFFF) === ID.farmland && t.face === 2) { if (placeFrom(t, s)) useUp(); return; }
+  // bone meal, a lighter on TNT
+  if (t && info?.meal) {
+    const id = t.v & 0xFFF, grows = (['wheat', 'carrots', 'potatoes'].includes(b.name) && (t.v >>> 12) < 7) || b.name.endsWith('_sapling') || (id === ID.grass_block && !G.mirror.get(t.x, t.y + 1, t.z));
+    if (grows) { G.worker.postMessage({type: 'meal', x: t.x, y: t.y, z: t.z}); useUp(); G.ents.puff(t.x + 0.5, t.y + 1, t.z + 0.5, 'meal'); play('meal'); }
+    return;
+  }
+  if (t && info?.tool?.kind === 'fire') { if (b.name === 'tnt') { setBlock(t.x, t.y, t.z, 0); G.mobs.light(t.x, t.y, t.z); } play('ignite'); wearTool(); return; }
   if (info?.food && G.mode !== 'creative' && G.food < 20) { G.eating = 32; return; }
   if (s && (s.id === 'bucket' || info?.pour)) {
     const eye = eyePos(), dir = aimDir(), lt = raycast(G.mirror, eye[0], eye[1], eye[2], dir[0], dir[1], dir[2], reach(), true);
@@ -366,14 +437,34 @@ function aimDir(point = null) {
 }
 
 // ---------- survival ----------
-function hurt(n, why) {
+function hurt(n, why, from = null) {
   if (G.mode === 'creative' || G.dead || n <= 0) return;
+  // a moment after a hit nothing hurts again (a stronger hit only adds what it has more)
+  if (G.invuln > 0) { if (n <= G.lastDmg) return; const extra = n - G.lastDmg; G.lastDmg = n; n = extra; }
+  else { G.invuln = 10; G.lastDmg = n; }
   G.health = Math.max(0, G.health - n); G.hurtT = 10; G.exh += 0.1;
+  if (from) { const b = G.body, a = Math.atan2(b.x - from.x, b.z - from.z); b.vx += Math.sin(a) * 0.4; b.vz += Math.cos(a) * 0.4; if (b.onGround) b.vy = 0.36; }
   play('hurt'); drawHud(true);
   if (G.health <= 0) die(why);
 }
+/** The player hits a mob: the held thing's damage, more when falling (a critical hit), the knock away. */
+function attackMob(m) {
+  if (G.attackWait > 0 || m.dead) return;
+  const b = G.body, s = held(), crit = !b.onGround && b.vy < 0 && !b.inWater && !b.climbing;
+  let dmg = damageOf(s?.id) * (crit ? 1.5 : 1);
+  if (G.mode === 'creative' && !s) dmg = Math.max(dmg, 1);
+  const hit = G.mobs.hurt(m, dmg, {x: b.x, z: b.z, player: true, knock: b.sprinting ? 0.9 : 0.4});
+  G.attackWait = 8; G.swing = 6; G.exh += 0.1;
+  if (hit) {
+    play('attack', 0, 1);
+    if (crit) G.ents.puff(m.x, m.y + m.body.height * 0.7, m.z, 'crit');
+    const kind = itemInfo(s?.id)?.tool?.kind;
+    if (kind) wearTool(kind === 'sword' ? 1 : 2);
+  }
+  if (b.sprinting) b.sprinting = false;
+}
 function die(why) {
-  G.dead = true; paused = true; input.enabled = false; input.unlock(); invUI.hide();
+  G.dead = true; G.body.dead = true; paused = true; input.enabled = false; input.unlock(); invUI.hide();
   const b = G.body;
   for (let i = 0; i < G.inv.slots.length; i++) if (G.inv.slots[i]) { G.ents.drop(G.inv.slots[i], b.x, b.y + 1, b.z); G.inv.slots[i] = null; }
   drawHud(true);
@@ -423,10 +514,25 @@ function tick() {
   if (b.inWater && moved > 0.05 && G.time % 12 === 0) play('swim');
   survivalTick(r);
   eatTick();
-  // breaking
+  if (G.attackWait > 0) G.attackWait--;
+  if (G.invuln > 0) G.invuln--;
+  // a bow: held use draws it (on a phone: holding the screen), letting go shoots
+  const bow = itemInfo(held()?.id)?.tool?.kind === 'bow';
+  if (bow && !G.dead && (ctl.use || (input.mode === 'touch' && ctl.attack))) { if (G.mode === 'creative' || G.inv.count('arrow') > 0) G.draw++; }
+  else if (G.draw > 0) {
+    const f = Math.min(1, G.draw / 20), power = Math.min(1, (f * f + f * 2) / 3);
+    if (power >= 0.1) {
+      G.mobs.shootFromPlayer(b, b.look(), power, G.mode !== 'creative');
+      if (G.mode !== 'creative') { const i = G.inv.slots.findIndex(s => s?.id === 'arrow'); if (i >= 0) G.inv.take(i, 1); }
+      wearTool(); play('bow');
+    }
+    G.draw = 0;
+  }
+  // hitting a mob, else breaking
   const t = G.target;
   if (G.breakWait > 0) G.breakWait--;
-  if (ctl.attack && t && !G.dead) {
+  if (ctl.attack && G.targetMob && !G.dead && !bow) { attackMob(G.targetMob); G.breaking = null; }
+  else if (ctl.attack && t && !G.dead && !bow) {
     G.swing = Math.max(G.swing, 4);
     if (G.mode === 'creative') { if (!G.breakWait) { breakBlock(t); G.breakWait = 6; } G.breaking = null; }
     else {
@@ -446,7 +552,8 @@ function tick() {
   if (ctl.use && !G.useWait && input.mode !== 'touch') { const s = held(); if (s && itemInfo(s.id)?.block?.item && G.target) { use(G.target); G.useWait = 4; } }
   if (G.swing > 0) G.swing--;
   if (G.hurtT > 0) G.hurtT--;
-  // items, furnaces
+  // mobs, items, furnaces
+  G.mobs.tick();
   G.ents.tick(b, stack => { if (G.dead) return stack; const left = G.inv.add(stack); drawHud(true); return left; });
   for (const [k, tile] of Object.entries(G.tiles)) if (tile.kind === 'furnace') {
     const was = tile.burn > 0, lit = furnaceTick(tile);
@@ -477,7 +584,7 @@ function handleEvents(events, c = ctl) {
     else if (e === 'fly') { if (G.mode === 'creative') { G.body.flying = !G.body.flying; G.body.vy = 0; } }
     else if (e === 'debug') { debugOn = !debugOn; $('.debug').hidden = !debugOn; }
     else if (e === 'hud') { hudHidden = !hudHidden; hud.style.opacity = hudHidden ? 0 : 1; }
-    else if (e === 'use') { const t = targetAt(c.aim); use(t); G.useWait = 5; }
+    else if (e === 'use') { const t = targetAt(c.aim), m = mobAt(c.aim); if (m && (!t || m.t < t.t)) use(null, m.mob); else use(t); G.useWait = 5; }
     else if (e === 'pick' && G.target) {
       const id = BLOCKS[G.target.v & 0xFFF].name, name = BLOCKS[G.target.v & 0xFFF].item ? id : null;
       if (!name) continue;
@@ -492,6 +599,11 @@ function handleEvents(events, c = ctl) {
 function targetAt(point) {
   const eye = eyePos(), d = aimDir(point);
   return raycast(G.mirror, eye[0], eye[1], eye[2], d[0], d[1], d[2], reach());
+}
+/** The mob aimed at (within 3 blocks, the game's reach for hitting; 5 in creative): {mob, t} or null. */
+function mobAt(point) {
+  const eye = eyePos(), d = aimDir(point);
+  return G.mobs.raycast(eye[0], eye[1], eye[2], d[0], d[1], d[2], G.mode === 'creative' ? 5 : 3);
 }
 
 // ---------- the HUD ----------
@@ -545,6 +657,25 @@ function handModel(view) {
   return {verts: v, model: mat.model(0.62, -Math.PI / 2 + 0.25, tool ? 0.1 - sw * 1.2 : -sw * 0.6, tool ? 0.55 : 0.2, 0.62 + sideBob - sw * 0.15, -0.45 + bob + eat + sw * 0.08, -0.8 - sw * 0.15)};
 }
 
+/** Arrows in flight or stuck, and lit TNT (flashing white), as things to draw. */
+let arrowVerts = null, tntVerts = null;
+function shotThings(light) {
+  const out = [];
+  for (const ar of G.mobs.arrows) {
+    const [sky, blk] = light(Math.floor(ar.x), Math.floor(ar.y), Math.floor(ar.z));
+    const v = (arrowVerts ||= {}), key = sky * 16 + blk;
+    const verts = v[key] ||= (() => { const q = new Verts(16); q.arrow(0.5, LAYER.arrow, sky * 17, blk * 17, 256, 32); return q; })();
+    if (!ar.stuck) { ar.dir = [ar.vx, ar.vy, ar.vz]; }
+    const [dx, dy, dz] = ar.dir || [0, -1, 0], l = Math.hypot(dx, dy, dz) || 1;
+    out.push({verts, x: ar.x, y: ar.y, z: ar.z, model: mat.model(0.5, Math.atan2(dx, dz), Math.acos(Math.max(-1, Math.min(1, dy / l))), 0)});
+  }
+  for (const t of G.mobs.tnt) {
+    if (!tntVerts) { tntVerts = new Verts(32); tntVerts.cube(0.5, [LAYER.tnt_side, LAYER.tnt_side, LAYER.tnt_top, LAYER.tnt_bottom, LAYER.tnt_side, LAYER.tnt_side], 255, 255, 256, 32); }
+    const grow = t.fuse < 10 ? 1 + (10 - t.fuse) * 0.02 : 1;
+    out.push({verts: tntVerts, x: t.x, y: t.y + 0.5, z: t.z, model: mat.model(grow), bright: Math.floor(t.fuse / 5) % 2 ? 0.5 : 0});
+  }
+  return out;
+}
 // ---------- the frame ----------
 function frame(now) {
   requestAnimationFrame(frame);
@@ -568,9 +699,15 @@ function frame(now) {
   // the camera between the last two ticks
   const a = paused ? 1 : acc / TICK, x = b.prev.x + (b.x - b.prev.x) * a, y = b.prev.y + (b.y - b.prev.y) * a, z = b.prev.z + (b.z - b.prev.z) * a;
   const bobT = G.walked * 2.2, bobbing = settings.bob && b.onGround && !b.flying ? 1 : 0;
-  const view = {x, y: y + b.eye + Math.abs(Math.sin(bobT)) * 0.04 * bobbing, z, yaw: b.yaw, pitch: b.pitch + Math.abs(Math.cos(bobT)) * 0.006 * bobbing, fov: (settings.fov + (b.sprinting ? 8 : 0) + (b.flying && b.sprinting ? 4 : 0)) * Math.PI / 180, far: settings.dist * 16};
-  // aimed block (at the finger on touch screens)
+  // shaking after an explosion; a drawn bow zooms in
+  const shake = G.shake > 0 ? (G.shake -= dt * 20, G.shake * 0.004) : 0, zoom = 1 - Math.min(1, G.draw / 20) * 0.15;
+  const view = {x, y: y + b.eye + Math.abs(Math.sin(bobT)) * 0.04 * bobbing, z, yaw: b.yaw + (Math.random() - 0.5) * shake, pitch: b.pitch + Math.abs(Math.cos(bobT)) * 0.006 * bobbing + (Math.random() - 0.5) * shake,
+    fov: (settings.fov + (b.sprinting ? 8 : 0) + (b.flying && b.sprinting ? 4 : 0)) * zoom * Math.PI / 180, far: settings.dist * 16, alpha: a};
+  // aimed block (at the finger on touch screens), or a mob in front of it
   G.target = paused || G.dead ? null : targetAt(c.aim);
+  const mt = paused || G.dead ? null : mobAt(c.aim);
+  G.targetMob = mt && (!G.target || mt.t < G.target.t) ? mt.mob : null;
+  if (G.targetMob) G.target = null;
   const env = environment(G.time + a);
   const eyeV = G.mirror.get(Math.floor(view.x), Math.floor(view.y), Math.floor(view.z));
   env.underwater = (eyeV & 0xFFF) === ID.water;
@@ -581,7 +718,8 @@ function frame(now) {
   // animated textures
   const tick20 = Math.floor(G.time);
   for (const an of animFrames) { const f = Math.floor(tick20 / an.time) % an.frames.length; if (f !== an.at) { an.at = f; renderer.updateLayer(an.layer, an.frames[f]); } }
-  const extras = {things: G.ents.drawList(view, env.time, (bx, by, bz) => G.mirror.light(bx, by, bz))};
+  const lightAt = (bx, by, bz) => G.mirror.light(bx, by, bz);
+  const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
   if (G.target && !hudHidden) extras.outline = {boxes: G.target.boxes};
   if (G.breaking && G.breaking.p > 0) extras.crack = {x: G.breaking.x, y: G.breaking.y, z: G.breaking.z, layer: LAYER[`destroy_stage_${Math.min(9, Math.floor(G.breaking.p * 10))}`]};
   if (!hudHidden && !G.dead) extras.hand = handModel(view);
@@ -592,7 +730,7 @@ function frame(now) {
     // facingBack() is where a placed block's front looks: the player looks the other way
     const bx = Math.floor(b.x), by = Math.floor(b.y), bz = Math.floor(b.z), [sk, bl] = G.mirror.light(bx, by, bz), dir = ['北', '东', '南', '西'][facingBack()];
     const day = Math.floor(G.time / 24000) + 1, hour = Math.floor(((G.time % 24000) / 1000 + 6) % 24);
-    $('.debug').textContent = `方块世界  ${Math.round(1 / Math.max(dt, 0.001))} fps\nXYZ: ${b.x.toFixed(2)} / ${b.y.toFixed(2)} / ${b.z.toFixed(2)}\n方块: ${bx} ${by} ${bz}  区块: ${G.cx} ${G.cz}\n朝向: ${dir}  (${(b.yaw * 180 / Math.PI % 360).toFixed(1)} / ${(b.pitch * 180 / Math.PI).toFixed(1)})\n生物群系: ${BIOMES[G.mirror.biome(bx, bz)]?.zh}\n光照: 天空 ${sk}  方块 ${bl}\n第 ${day} 天 ${hour}:00\n区段: ${renderer.stats.drawn}/${renderer.stats.sections}  三角形: ${renderer.stats.tris}\n种子: ${G.meta.seedText || G.meta.seed}${G.target ? `\n看着: ${BLOCKS[G.target.v & 0xFFF].zh} (${G.target.x}, ${G.target.y}, ${G.target.z})` : ''}`;
+    $('.debug').textContent = `方块世界  ${Math.round(1 / Math.max(dt, 0.001))} fps\nXYZ: ${b.x.toFixed(2)} / ${b.y.toFixed(2)} / ${b.z.toFixed(2)}\n方块: ${bx} ${by} ${bz}  区块: ${G.cx} ${G.cz}\n朝向: ${dir}  (${(b.yaw * 180 / Math.PI % 360).toFixed(1)} / ${(b.pitch * 180 / Math.PI).toFixed(1)})\n生物群系: ${BIOMES[G.mirror.biome(bx, bz)]?.zh}\n光照: 天空 ${sk}  方块 ${bl}\n第 ${day} 天 ${hour}:00\n区段: ${renderer.stats.drawn}/${renderer.stats.sections}  三角形: ${renderer.stats.tris}\n生物: ${G.mobs.count(m => m.def.passive)} 动物 / ${G.mobs.count(m => m.def.hostile)} 怪物\n种子: ${G.meta.seedText || G.meta.seed}${G.targetMob ? `\n看着: ${G.targetMob.def.zh}（${Math.ceil(G.targetMob.health)}/${G.targetMob.def.health}）` : ''}${G.target ? `\n看着: ${BLOCKS[G.target.v & 0xFFF].zh} (${G.target.x}, ${G.target.y}, ${G.target.z})` : ''}`;
   }
 }
 // pads in menus and inventories
