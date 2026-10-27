@@ -1,9 +1,10 @@
 // 大游戏: the shelf for the bigger games. Each opens over the whole tavern page (the phone closes meanwhile) and keeps its
-// own save in this browser. For now one: 南极结界 · 鲸湾郊外, a farm in progress.
+// own save in this browser: 方块世界 (a block world made from scratch) and 南极结界 · 鲸湾郊外 (a farm, on hold).
 import {createView, heading, esc} from './common.js';
 
 const GAMES = [
-  {id: 'antarctic', name: '南极结界', tag: '测试中', text: '刚到鲸湾的新移民，在城外有一座小农场。捏一个自己、养一只宠物，种田、砍树、采集、制作，去东海岸赶潮、观察生物、记满见闻录。键盘、手柄、触屏都能玩，手机请横屏。'},
+  {id: 'blocks', name: '方块世界', tag: '新 · 测试中', text: '从零做起的方块世界：无限的地形、山脉河流、十几种生物群系、洞穴和矿石，昼夜交替，挖方块、放方块、合成、熔炉、种小麦，生存模式会饿会受伤，创造模式随便拿还能飞。有正版《我的世界》Java 版的话，可以在游戏里导入它自己的材质（只存在这台设备上）。键盘鼠标、手柄、触屏都能玩，手机竖着拿也会自动横过来。'},
+  {id: 'antarctic', name: '南极结界', tag: '测试中 · 暂缓更新', text: '刚到鲸湾的新移民，在城外有一座小农场。捏一个自己、养一只宠物，种田、砍树、采集、制作，去东海岸赶潮、观察生物、记满见闻录。键盘、手柄、触屏都能玩，手机请横屏。'},
 ];
 
 export function indieApp(ctx) {

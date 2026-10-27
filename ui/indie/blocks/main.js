@@ -1,0 +1,639 @@
+// 方块世界: a block world in the spirit of the game, made from scratch. This page runs the game: the menus, the player,
+// breaking and placing, survival (health, hunger, air), the day, what is held, the HUD; the world itself is made and
+// kept by the worker (world.worker.js) and drawn by render.js.
+import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta} from './blocks.js';
+import {Renderer, Verts, mat} from './render.js';
+import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds} from './atlas.js';
+import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
+import {listWorlds, saveWorld, deleteWorld} from './db.js';
+import {Mirror} from './mirror.js';
+import {Body, raycast} from './player.js';
+import {Inventory, furnaceTick, stackMax} from './inventory.js';
+import {InventoryUI, stackHtml} from './invui.js';
+import {Entities, itemLook} from './entities.js';
+import {Input} from './input.js';
+import {Screens} from './screens.js';
+import {collisionBoxes} from './shapes.js';
+import {unlockSound, play, setVolume} from './sound.js';
+import {seedOf} from './noise.js';
+import {spawnPoint, BIOMES} from './gen.js';
+
+const $ = s => document.querySelector(s);
+const app = $('#app'), canvas = $('#view'), hud = $('#hud'), invRoot = $('#inv');
+const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+const inTavern = parent !== window;
+const SET_KEY = 'st-iphonie-blocks-settings';
+const DEFAULTS = {dist: isTouch ? 5 : 8, fov: 70, sens: 1, gamma: 0.5, volume: 0.7, scale: isTouch ? 0.7 : 1, wave: true, clouds: true, bob: true, autoJump: true};
+let settings = {...DEFAULTS};
+try { Object.assign(settings, JSON.parse(localStorage.getItem(SET_KEY) || '{}')); } catch {}
+const saveSettings = () => { try { localStorage.setItem(SET_KEY, JSON.stringify(settings)); } catch {} };
+
+// ---------- layout: the whole window, turned on its side on an upright phone ----------
+let rotated = false, renderer = null;
+function layout() {
+  rotated = isTouch && innerHeight > innerWidth;
+  document.documentElement.classList.toggle('rot', rotated);
+  const w = rotated ? innerHeight : innerWidth, h = rotated ? innerWidth : innerHeight;
+  // the window's own size (100vh / dvh do not always match it, and the turned box needs it exactly)
+  app.style.width = `${w}px`; app.style.height = `${h}px`;
+  const dpr = Math.min(devicePixelRatio || 1, 2) * settings.scale;
+  renderer?.resize(Math.max(1, Math.round(w * dpr)), Math.max(1, Math.round(h * dpr)));
+  app.style.setProperty('--u', `${Math.max(1.4, Math.min(4, Math.min(w / 330, h / 225))).toFixed(2)}px`);
+}
+addEventListener('resize', layout);
+addEventListener('orientationchange', () => setTimeout(layout, 120));
+const tryLandscape = () => { if (!isTouch) return; try { screen.orientation?.lock?.('landscape')?.catch?.(() => {}); } catch {} };
+/** Full screen (on Android phones the screen can then really be locked sideways; iPhones can't go full screen). */
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else { await document.documentElement.requestFullscreen({navigationUI: 'hide'}); tryLandscape(); }
+  } catch { toast('这个浏览器不能全屏'); }
+  setTimeout(layout, 200);
+}
+
+// ---------- textures ----------
+let built = null, icons = {}, packLabel = '', dirtUrl = '';
+async function loadTextures() {
+  const rec = await loadPackRecord();
+  const {textures, sky} = await decodePack(rec);
+  built = buildLayers(textures);
+  renderer.setTextures(built.size, built.layers);
+  icons = makeIcons(built);
+  renderer.setImage('sun', sky.sun || ownSun(), {linear: false});
+  renderer.setImage('moon', sky.moon || ownMoon());
+  renderer.setImage('clouds', sky.clouds || ownClouds(), {repeat: true});
+  packLabel = rec?.label || '';
+  // the menus' background: the dirt, darkened
+  const c = document.createElement('canvas'), d = built.layers[LAYER.dirt], s = built.size;
+  c.width = c.height = s;
+  const img = c.getContext('2d').createImageData(s, s);
+  for (let i = 0; i < d.length; i += 4) { img.data[i] = d[i] * 0.25; img.data[i + 1] = d[i + 1] * 0.25; img.data[i + 2] = d[i + 2] * 0.25; img.data[i + 3] = 255; }
+  c.getContext('2d').putImageData(img, 0, 0);
+  dirtUrl = c.toDataURL();
+  let style = document.getElementById('dirt-style');
+  if (!style) { style = document.createElement('style'); style.id = 'dirt-style'; document.head.append(style); }
+  style.textContent = `.screen.dirt{background-image:url(${dirtUrl})}`;
+  animFrames = built.animated.map(a => ({...a, at: -1}));
+}
+let animFrames = [];
+
+// ---------- HUD pictures (our own) ----------
+function sprite9(rows, pal) {
+  const c = document.createElement('canvas'); c.width = c.height = 9;
+  const g = c.getContext('2d');
+  rows.forEach((r, y) => [...r].forEach((ch, x) => { if (pal[ch]) { g.fillStyle = pal[ch]; g.fillRect(x, y, 1, 1); } }));
+  return c;
+}
+const HEART = ['.oo...oo.', 'oRRo.oRRo', 'oRWRoRRRo', 'oRRRRRRRo', 'oRRRRRRRo', '.oRRRRRo.', '..oRRRo..', '...oRo...', '....o....'];
+const FOOD = ['....ooo..', '...oMMMo.', '..oMMWMMo', '..oMMMMMo', '..oMMMMo.', '.oBoMMo..', 'oBBo.oo..', 'oBo......', '.o.......'];
+const AIR = ['..ooooo..', '.oBBBBBo.', 'oBWWBBBBo', 'oBWBBBBBo', 'oBBBBBBBo', 'oBBBBBBBo', 'oBBBBBBBo', '.oBBBBBo.', '..ooooo..'];
+const half = (rows, keepLeft) => rows.map(r => [...r].map((ch, x) => (keepLeft ? x > 4 : x < 4) && ch !== 'o' && ch !== '.' ? 'E' : ch).join(''));
+const HUD_PICS = {
+  heartFull: sprite9(HEART, {o: '#1b0b0b', R: '#d42a2a', W: '#ff9a9a'}), heartHalf: sprite9(half(HEART, true), {o: '#1b0b0b', R: '#d42a2a', W: '#ff9a9a', E: '#3a1212'}),
+  heartEmpty: sprite9(HEART, {o: '#1b0b0b', R: '#3a1212', W: '#3a1212'}),
+  foodFull: sprite9(FOOD, {o: '#2a1406', M: '#b5652a', W: '#e8a060', B: '#efe6d2'}), foodHalf: sprite9(half(FOOD, false), {o: '#2a1406', M: '#b5652a', W: '#e8a060', B: '#efe6d2', E: '#3a2410'}),
+  foodEmpty: sprite9(FOOD, {o: '#2a1406', M: '#3a2410', W: '#3a2410', B: '#3a2410'}),
+  air: sprite9(AIR, {o: '#0a2a5a', B: '#3a8ee8', W: '#cfe8ff'}),
+};
+const picUrl = c => c.toDataURL();
+const HUD_URL = Object.fromEntries(Object.entries(HUD_PICS).map(([k, c]) => [k, picUrl(c)]));
+
+// ---------- the game ----------
+let G = null, paused = true, screens = null, input = null, invUI = null, lastFrame = 0, acc = 0, debugOn = false, hudHidden = false;
+const TICK = 50;
+
+function api() {
+  return {
+    sound: n => play(n), inTavern: () => inTavern, packLabel: () => packLabel, padMode: () => input?.mode === 'pad',
+    listWorlds, deleteWorld: id => deleteWorld(id), play: w => startWorld(w), createWorld,
+    settings: () => settings, setSetting: (k, v) => { settings[k] = v; saveSettings(); applySetting(k); },
+    importPack: async (file, onProgress) => { const p = await readPack(file, onProgress); await savePack(p); await reloadTextures(); return `${p.label}（${p.count} 张贴图）`; },
+    removePack: async () => { await removePack(); await reloadTextures(); },
+    leave: () => leaveGame(), resume: () => resume(), quit: () => quitToTitle(), respawn: () => respawn(),
+    fullscreen: () => toggleFullscreen(), isFull: () => !!document.fullscreenElement, canFull: () => !!document.documentElement.requestFullscreen,
+    mode: () => G?.mode, toggleMode: () => { if (!G) return; G.mode = G.mode === 'creative' ? 'survival' : 'creative'; if (G.mode === 'survival') G.body.flying = false; drawHud(true); toast(G.mode === 'creative' ? '换成了创造模式' : '换成了生存模式'); },
+  };
+}
+function applySetting(k) {
+  if (k === 'volume') setVolume(settings.volume);
+  if (k === 'scale') layout();
+  if (k === 'dist' && G) G.worker.postMessage({type: 'center', cx: G.cx, cz: G.cz, radius: settings.dist});
+  if (k === 'wave' && G) G.worker.postMessage({type: 'remesh', wave: settings.wave});
+}
+async function reloadTextures() {
+  await loadTextures();
+  if (G) { G.worker.postMessage({type: 'remesh', wave: settings.wave}); drawHud(true); }
+}
+
+async function createWorld({name, seed, mode}) {
+  const s = seed ? seedOf(seed) : Math.floor(Math.random() * 2 ** 31) - 2 ** 30;
+  const w = {id: `w${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`, name, seed: s, seedText: seed || String(s), mode, created: Date.now(), played: Date.now(), time: 0, version: 1};
+  await saveWorld(w);
+  startWorld(w);
+}
+
+function startWorld(meta) {
+  screens.loading('正在生成世界…', 0);
+  const worker = new Worker(new URL('./world.worker.js', import.meta.url), {type: 'module'});
+  const sp = meta.player ? null : spawnPoint(meta.seed);
+  const start = meta.player || {x: sp.x, y: sp.y, z: sp.z, yaw: 0, pitch: 0};
+  const mirror = new Mirror(), body = new Body(mirror), ents = new Entities(mirror);
+  Object.assign(body, {x: start.x, y: start.y, z: start.z, yaw: start.yaw || 0, pitch: start.pitch || 0, flying: !!start.flying});
+  body.prev = {x: body.x, y: body.y, z: body.z};
+  G = {
+    meta, worker, mirror, body, ents, mode: meta.mode || 'survival', inv: Inventory.from(meta.inv), hot: start.hot || 0, time: meta.time || 0,
+    health: start.health ?? 20, food: start.food ?? 20, sat: start.sat ?? 5, exh: 0, air: 300, tiles: meta.tiles || {}, spawn: meta.spawn || (sp ? {x: sp.x, y: sp.y, z: sp.z} : {x: start.x, y: start.y, z: start.z}),
+    needGround: !meta.player, ready: false, meshes: 0, cx: Math.floor(start.x / 16), cz: Math.floor(start.z / 16),
+    breaking: null, breakWait: 0, useWait: 0, swing: 0, eating: 0, hurtT: 0, regen: 0, starve: 0, lastHit: 0, walked: 0, stepAt: 0, dead: false, saveAt: performance.now(), hand: new Verts(64), outline: null, target: null,
+  };
+  ents.load(meta.items);
+  ents.onPickup = () => play('pop');
+  worker.onmessage = e => onWorker(e.data);
+  worker.onerror = e => showError(`世界线程出错：${e.message || e}`);
+  worker.postMessage({type: 'init', seed: meta.seed, layers: LAYER, radius: settings.dist, worldId: meta.id, center: [G.cx, G.cz], wave: settings.wave});
+  drawHud(true);
+}
+function onWorker(m) {
+  if (!G) return;
+  if (m.type === 'column') G.mirror.column(m);
+  else if (m.type === 'mesh') { renderer.setSection(m.cx, m.sy, m.cz, m.solid, m.trans); G.meshes++; }
+  else if (m.type === 'drop') { G.mirror.drop(m.cx, m.cz); renderer.dropColumn(m.cx, m.cz); }
+  else if (m.type === 'drops') for (const [id, n] of m.items) G.ents.drop({id, n}, m.x, m.y, m.z);
+  else if (m.type === 'sound') play(m.name);
+  else if (m.type === 'error') console.warn('world:', m.message);
+}
+/** Waits for the ground under the player, then lets them play. */
+function checkReady() {
+  const b = G.body;
+  if (!G.mirror.has(Math.floor(b.x), Math.floor(b.z))) { screens.loading('正在生成世界…', Math.min(0.95, G.meshes / ((settings.dist * 2 + 1) ** 2 * 6))); return false; }
+  if (G.needGround) {
+    let y = MINY + HEIGHT - 2;
+    while (y > MINY && !collisionBoxes(G.mirror.get(Math.floor(b.x), y, Math.floor(b.z)))) y--;
+    b.y = y + 1; b.prev.y = b.y; G.spawn.y = b.y; G.needGround = false;
+  }
+  // the ground around the player is drawn: play (the rest comes in while playing)
+  const near = [...renderer.sections.values()].filter(s => Math.abs(s.cx - G.cx) <= 1 && Math.abs(s.cz - G.cz) <= 1).length;
+  if (near < 9) { screens.loading('正在生成世界…', Math.min(0.95, 0.3 + near / 12)); return false; }
+  G.ready = true;
+  screens.hide(); hud.hidden = false; drawHud(true);
+  if (!G.meta.player) toast(G.mode === 'creative' ? '创造模式：按 E（或物品栏右边的 ⋯）拿方块，双击跳跃飞起来' : '生存模式：先撸一棵树（按住挖），做工作台吧');
+  resume();
+  return true;
+}
+
+// ---------- play / pause ----------
+function resume() {
+  if (!G) return;
+  paused = false; screens.hide(); input.enabled = true;
+  if (input.mode !== 'touch') input.lock();
+  tryLandscape();
+}
+function pause() {
+  if (!G || paused) return;
+  paused = true; input.enabled = false; input.unlock();
+  invUI.hide();
+  saveGame();
+  screens.pause();
+}
+async function saveGame() {
+  if (!G || !G.ready) return;
+  const b = G.body, m = G.meta;
+  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), spawn: G.spawn,
+    player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot}});
+  try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
+  G.worker.postMessage({type: 'flush', id: Date.now()});
+}
+async function quitToTitle() {
+  if (G) { await saveGame(); await new Promise(r => setTimeout(r, 300)); G.worker.terminate(); renderer.clearAll(); }
+  G = null; paused = true; input.enabled = false; input.unlock(); hud.hidden = true; invUI.hide();
+  screens.title();
+}
+async function leaveGame() {
+  if (G) await quitToTitle();
+  parent.postMessage({type: 'st-iphonie-game:close'}, location.origin);
+}
+function respawn() {
+  const b = G.body;
+  Object.assign(b, {x: G.spawn.x, y: G.spawn.y, z: G.spawn.z, vx: 0, vy: 0, vz: 0, fall: 0});
+  b.prev = {x: b.x, y: b.y, z: b.z};
+  Object.assign(G, {health: 20, food: 20, sat: 5, exh: 0, air: 300, dead: false});
+  drawHud(true); resume();
+}
+
+// ---------- the day ----------
+/** Light and colours at a time (ticks, 24000 a day; 0 is sunrise). */
+function environment(time) {
+  const f = (time % 24000) / 24000, a = f * Math.PI * 2, el = Math.sin(a);
+  const day = Math.max(0, Math.min(1, el * 2.2 + 0.45));
+  const lerp = (x, y, t) => x.map((v, i) => v + (y[i] - v) * t);
+  const glowAmt = Math.max(0, 1 - Math.abs(el) * 3.2) * (Math.cos(a) > 0 ? 0.9 : 1);
+  let top = lerp([0.01, 0.015, 0.05], [0.47, 0.65, 1.0], day), horizon = lerp([0.03, 0.04, 0.09], [0.73, 0.83, 1.0], day);
+  horizon = lerp(horizon, [0.95, 0.55, 0.3], glowAmt * 0.55);
+  const b = G ? BIOMES[G.mirror.biome(Math.floor(G.body.x), Math.floor(G.body.z))] : null;
+  if (b?.dry) { top = lerp(top, [0.5, 0.68, 0.95], 0.3 * day); }
+  if (b?.cold) { top = lerp(top, [0.55, 0.68, 0.92], 0.25 * day); }
+  return {
+    daylight: day, skyTop: top, horizon, fog: horizon, glow: [1, 0.48, 0.18], glowAmt, sunAngle: a, sunDir: [Math.cos(a), el, 0], stars: Math.max(0, 1 - day * 1.6),
+    skyLight: lerp([0.62, 0.68, 0.95], [1, 1, 1], day).map((v, i) => v * (1 - glowAmt * 0.15 * (i === 2 ? 1 : 0))),
+    cloudColor: lerp([0.08, 0.09, 0.13], [1, 1, 1], day), moonPhase: Math.floor(time / 24000) % 8, cloudShift: time * 0.03,
+    gamma: settings.gamma, wave: settings.wave, clouds: settings.clouds, time: performance.now() / 1000, flicker: 0.92 + Math.sin(performance.now() / 90) * 0.03 + Math.sin(performance.now() / 37) * 0.02,
+  };
+}
+
+// ---------- held item, hotbar ----------
+const held = () => G.inv.slots[G.hot];
+const heldTool = () => { const s = held(); return s ? itemInfo(s.id)?.tool || null : null; };
+function useUp(n = 1) { if (G.mode === 'creative') return; const s = held(); if (!s) return; s.n -= n; if (s.n <= 0) G.inv.slots[G.hot] = null; drawHud(true); }
+function wearTool() {
+  if (G.mode === 'creative') return;
+  const s = held(), t = s && itemInfo(s.id)?.tool;
+  if (!t) return;
+  s.dmg = (s.dmg || 0) + 1;
+  if (s.dmg >= t.uses) { G.inv.slots[G.hot] = null; play('break', ID.glass); toast(`${zhOf(s.id)}坏了`); }
+  drawHud(true);
+}
+
+// ---------- breaking and placing ----------
+function setBlock(x, y, z, v) { G.worker.postMessage(G.mirror.set(x, y, z, v)); }
+function breakBlock(t) {
+  const {x, y, z, v} = t, b = BLOCKS[v & 0xFFF], survival = G.mode !== 'creative';
+  // ice over something becomes water when broken (unless creative)
+  const below = G.mirror.get(x, y - 1, z);
+  setBlock(x, y, z, survival && b.name === 'ice' && below && collisionBoxes(below) ? ID.water : 0);
+  if (survival && harvests(b, heldTool())) for (const [id, n] of dropsOf(b, v >>> 12)) G.ents.drop({id, n}, x + 0.5, y + 0.4, z + 0.5);
+  // what was inside goes out
+  const k = `${x},${y},${z}`, tile = G.tiles[k];
+  if (tile) { for (const s of tile.slots || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; }
+  G.ents.burst(x, y, z, v, 28);
+  play('break', v);
+  if (survival) { if (b.hard > 0) wearTool(); G.exh += 0.005; }
+}
+/** Which way the player faces (0 south, 1 west, 2 north, 3 east) — a block placed faces back at them. */
+function facingBack() { const y = ((G.body.yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2); const q = Math.round(y / (Math.PI / 2)) % 4; return [0, 3, 2, 1][q]; }
+function placeFrom(t, stack) {
+  const info = itemInfo(stack.id), b = info?.block;
+  const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face];
+  const tb = BLOCKS[t.v & 0xFFF];
+  // slabs join into a double one, snow layers stack up
+  if (b?.shape === 'slab' && (t.v & 0xFFF) === b.id && t.v >>> 12 !== 2 && ((t.face === 2 && t.v >>> 12 === 0) || (t.face === 3 && t.v >>> 12 === 1))) { setBlock(t.x, t.y, t.z, withMeta(b.id, 2)); return true; }
+  if (b?.name === 'snow' && (t.v & 0xFFF) === b.id && (t.v >>> 12) < 7) { setBlock(t.x, t.y, t.z, withMeta(b.id, (t.v >>> 12) + 1)); return true; }
+  let x = t.x, y = t.y, z = t.z;
+  if (!tb.replace || (tb.id === (b?.id ?? -1))) { x += nx; y += ny; z += nz; }
+  if (y < MINY || y >= MINY + HEIGHT) return false;
+  const here = G.mirror.get(x, y, z);
+  if (here && !BLOCKS[here & 0xFFF].replace) return false;
+  let v;
+  if (info.plant) { if ((G.mirror.get(x, y - 1, z) & 0xFFF) !== ID.farmland) return false; v = ID[info.plant]; }
+  else if (!b) return false;
+  else {
+    let meta = 0;
+    if (b.axis) meta = t.face <= 1 ? 1 : t.face >= 4 ? 2 : 0;
+    if (b.facing && b.shape !== 'wall') meta = facingBack();
+    if (b.shape === 'torch') { if (t.face === 3) return false; meta = t.face === 2 ? 0 : [2, 1, 0, 0, 4, 3][t.face]; }
+    if (b.shape === 'wall') { if (t.face >= 2 && t.face <= 3) return false; meta = [3, 1, 0, 0, 0, 2][t.face]; }
+    if (b.shape === 'slab') meta = t.face === 3 || (t.face !== 2 && t.hit[1] - Math.floor(t.hit[1]) > 0.5) ? 1 : 0;
+    if (b.name.endsWith('_leaves')) meta = 1;
+    // plants need their ground
+    const under = G.mirror.get(x, y - 1, z) & 0xFFF, ub = BLOCKS[under];
+    if (b.shape === 'cross' && !['grass_block', 'dirt', 'podzol', 'coarse_dirt', 'farmland', 'moss_block', 'mud', 'sand', 'red_sand'].includes(ub.name) && !(b.name === 'sugar_cane' && under === ID.sugar_cane) && !(b.name.endsWith('mushroom') && ub.opaque)) return false;
+    if (b.name === 'cactus' && !['sand', 'red_sand', 'cactus'].includes(ub.name)) return false;
+    if ((b.shape === 'torch' && meta === 0) && !ub.opaque && ub.shape !== 'slab') return false;
+    v = withMeta(b.id, meta);
+    // not inside the player
+    const boxes = collisionBoxes(v), [x0, y0, z0, x1, y1, z1] = G.body.aabb();
+    if (boxes && boxes.some(q => x + q[0] < x1 && x + q[3] > x0 && y + q[1] < y1 && y + q[4] > y0 && z + q[2] < z1 && z + q[5] > z0)) return false;
+  }
+  setBlock(x, y, z, v);
+  if (b?.use === 'furnace') G.tiles[`${x},${y},${z}`] = {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0};
+  if (b?.use === 'chest') G.tiles[`${x},${y},${z}`] = {kind: 'chest', slots: new Array(27).fill(null)};
+  play('place', v);
+  return true;
+}
+/** The use action (right click / tap / LT) on what is aimed at. */
+function use(t) {
+  const s = held(), info = s ? itemInfo(s.id) : null, b = t ? BLOCKS[t.v & 0xFFF] : null;
+  G.swing = 6;
+  if (t && b.use && !G.body.sneaking) { openBlock(b.use, t); return; }
+  if (info?.food && G.mode !== 'creative' && G.food < 20) { G.eating = 32; return; }
+  if (s && (s.id === 'bucket' || info?.pour)) {
+    const eye = eyePos(), dir = aimDir(), lt = raycast(G.mirror, eye[0], eye[1], eye[2], dir[0], dir[1], dir[2], reach(), true);
+    if (s.id === 'bucket' && lt && [ID.water, ID.lava].includes(lt.v & 0xFFF) && !(lt.v >>> 12)) {
+      setBlock(lt.x, lt.y, lt.z, 0);
+      const full = {id: (lt.v & 0xFFF) === ID.water ? 'water_bucket' : 'lava_bucket', n: 1};
+      if (G.mode !== 'creative') { useUp(); const left = G.inv.add(full); if (left) G.ents.drop(left, G.body.x, G.body.y + 1, G.body.z); }
+      play('splash'); drawHud(true); return;
+    }
+    if (info?.pour && t) {
+      const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face];
+      const x = b.replace ? t.x : t.x + nx, y = b.replace ? t.y : t.y + ny, z = b.replace ? t.z : t.z + nz, here = G.mirror.get(x, y, z);
+      if (here && !BLOCKS[here & 0xFFF].replace) return;
+      setBlock(x, y, z, ID[info.pour]);
+      if (G.mode !== 'creative') { G.inv.slots[G.hot] = {id: 'bucket', n: 1}; drawHud(true); }
+      play('splash'); return;
+    }
+  }
+  if (!t) return;
+  // a hoe makes farmland
+  if (info?.tool?.kind === 'hoe' && t.face === 2 && ['grass_block', 'dirt'].includes(b.name) && !G.mirror.get(t.x, t.y + 1, t.z)) { setBlock(t.x, t.y, t.z, ID.farmland); wearTool(); play('place', ID.dirt); return; }
+  if (s && (info.block?.item || info.plant)) { if (placeFrom(t, s)) useUp(); }
+}
+function openBlock(kind, t) {
+  const k = `${t.x},${t.y},${t.z}`;
+  input.enabled = false; input.unlock();
+  if (kind === 'crafting') invUI.show('crafting');
+  if (kind === 'furnace') invUI.show('furnace', G.tiles[k] ||= {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0});
+  if (kind === 'chest') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: new Array(27).fill(null)});
+}
+function openInventory() {
+  if (!G || G.dead) return;
+  input.enabled = false; input.unlock();
+  invUI.show(G.mode === 'creative' ? 'creative' : 'player');
+}
+function closedInventory() { drawHud(true); if (G && !paused) { input.enabled = true; if (input.mode !== 'touch') input.lock(); } }
+
+// ---------- aiming ----------
+const reach = () => G.mode === 'creative' ? 5 : 4.5;
+function eyePos() { const b = G.body; return [b.x, b.y + b.eye, b.z]; }
+/** The direction aimed: through the touch point when there is one, else straight ahead. */
+function aimDir(point = null) {
+  if (!point || !renderer.vp) return G.body.look();
+  const [w, h] = rotated ? [innerHeight, innerWidth] : [innerWidth, innerHeight];
+  const inv = mat.invert(renderer.vp), nx = point[0] / w * 2 - 1, ny = 1 - point[1] / h * 2;
+  const p = [0, 1, 2, 3].map(r => inv[r] * nx + inv[4 + r] * ny + inv[8 + r] * 1 + inv[12 + r]);
+  const d = [p[0] / p[3], p[1] / p[3], p[2] / p[3]], l = Math.hypot(...d);
+  return d.map(v => v / l);
+}
+
+// ---------- survival ----------
+function hurt(n, why) {
+  if (G.mode === 'creative' || G.dead || n <= 0) return;
+  G.health = Math.max(0, G.health - n); G.hurtT = 10; G.exh += 0.1;
+  play('hurt'); drawHud(true);
+  if (G.health <= 0) die(why);
+}
+function die(why) {
+  G.dead = true; paused = true; input.enabled = false; input.unlock(); invUI.hide();
+  const b = G.body;
+  for (let i = 0; i < G.inv.slots.length; i++) if (G.inv.slots[i]) { G.ents.drop(G.inv.slots[i], b.x, b.y + 1, b.z); G.inv.slots[i] = null; }
+  drawHud(true);
+  screens.dead(why);
+}
+function survivalTick(r) {
+  const b = G.body;
+  if (G.mode === 'creative') { G.health = 20; G.food = 20; G.air = 300; return; }
+  if (r.landed > 3 && !b.inWater) hurt(Math.ceil(r.landed - 3), '摔得太重了');
+  if (r.landed > 2) play('fall', 0, Math.min(1, r.landed / 8));
+  // air
+  if (b.headInWater) { G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了'); } } else G.air = Math.min(300, G.air + 4);
+  if ((b.inLava) && G.time % 10 === 0) hurt(4, '掉进了岩浆');
+  if (b.touchCactus && G.time % 10 === 0) hurt(1, '被仙人掌扎死了');
+  if (b.y < MINY - 64 && G.time % 10 === 0) hurt(4, '掉出了世界');
+  // hunger
+  if (b.sprinting) G.exh += 0.1 * Math.hypot(b.x - b.prev.x, b.z - b.prev.z);
+  if (r.jumped) G.exh += b.sprinting ? 0.2 : 0.05;
+  if (G.exh >= 4) { G.exh -= 4; if (G.sat > 0) G.sat = Math.max(0, G.sat - 1); else { G.food = Math.max(0, G.food - 1); drawHud(true); } }
+  if (G.food >= 18 && G.health < 20) { if (++G.regen >= (G.food >= 20 && G.sat > 0 ? 10 : 80)) { G.regen = 0; G.health = Math.min(20, G.health + 1); G.exh += 6; drawHud(true); } } else G.regen = 0;
+  if (G.food <= 0) { if (++G.starve >= 80) { G.starve = 0; if (G.health > 1) hurt(1, '饿死了'); } } else G.starve = 0;
+  if (G.food <= 6) b.sprinting = false;
+}
+function eatTick() {
+  if (!G.eating) return;
+  const s = held(), info = s && itemInfo(s.id);
+  if (!info?.food) { G.eating = 0; return; }
+  if (G.eating % 4 === 0) play('eat');
+  if (--G.eating === 0) {
+    G.food = Math.min(20, G.food + info.food); G.sat = Math.min(G.food, G.sat + (info.sat || info.food * 0.6));
+    useUp(); if (s.id === 'mushroom_stew') G.inv.add({id: 'bowl', n: 1});
+    play('burp'); drawHud(true);
+  }
+}
+
+// ---------- one tick (20 a second) ----------
+let ctl = {fwd: 0, side: 0, jump: false, sneak: false, sprint: false, attack: false, use: false, aim: null};
+function tick() {
+  const b = G.body;
+  G.time++;
+  const r = b.tick({...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false});
+  if (G.mode !== 'creative' && b.flying) b.flying = false;
+  input.setFlying(b.flying);
+  // steps
+  const moved = Math.hypot(b.x - b.prev.x, b.z - b.prev.z);
+  if (b.onGround && !b.sneaking) { G.walked += moved; if (G.walked - G.stepAt > 1.6) { G.stepAt = G.walked; play('step', G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z))); } }
+  if (b.inWater && moved > 0.05 && G.time % 12 === 0) play('swim');
+  survivalTick(r);
+  eatTick();
+  // breaking
+  const t = G.target;
+  if (G.breakWait > 0) G.breakWait--;
+  if (ctl.attack && t && !G.dead) {
+    G.swing = Math.max(G.swing, 4);
+    if (G.mode === 'creative') { if (!G.breakWait) { breakBlock(t); G.breakWait = 6; } G.breaking = null; }
+    else {
+      const bk = G.breaking, same = bk && bk.x === t.x && bk.y === t.y && bk.z === t.z && bk.v === t.v;
+      if (!same) G.breaking = {x: t.x, y: t.y, z: t.z, v: t.v, p: 0};
+      const secs = breakTime(BLOCKS[t.v & 0xFFF], heldTool());
+      if (secs === 0) { if (!G.breakWait) { breakBlock(t); G.breaking = null; G.breakWait = 5; } }
+      else if (secs < Infinity && !G.breakWait) {
+        G.breaking.p += 1 / (secs * 20);
+        if (G.time % 4 === 0) { play('hit', t.v); G.ents.burst(t.x, t.y, t.z, t.v, 2); }
+        if (G.breaking.p >= 1) { breakBlock(t); G.breaking = null; G.breakWait = 5; }
+      }
+    }
+  } else G.breaking = null;
+  // holding use places again every 4 ticks
+  if (G.useWait > 0) G.useWait--;
+  if (ctl.use && !G.useWait && input.mode !== 'touch') { const s = held(); if (s && itemInfo(s.id)?.block?.item && G.target) { use(G.target); G.useWait = 4; } }
+  if (G.swing > 0) G.swing--;
+  if (G.hurtT > 0) G.hurtT--;
+  // items, furnaces
+  G.ents.tick(b, stack => { if (G.dead) return stack; const left = G.inv.add(stack); drawHud(true); return left; });
+  for (const [k, tile] of Object.entries(G.tiles)) if (tile.kind === 'furnace') {
+    const was = tile.burn > 0, lit = furnaceTick(tile);
+    if (was !== lit) { const [x, y, z] = k.split(',').map(Number), v = G.mirror.get(x, y, z); if ((v & 0xFFF) === ID.furnace) setBlock(x, y, z, withMeta(ID.furnace, (v >>> 12 & 3) | (lit ? 4 : 0))); }
+  }
+  if (invUI.open && invUI.kind === 'furnace' && G.time % 4 === 0) invUI.refresh();
+  // the worker: where we are, how dark the sky is
+  const cx = Math.floor(b.x / 16), cz = Math.floor(b.z / 16);
+  if (cx !== G.cx || cz !== G.cz) { G.cx = cx; G.cz = cz; G.worker.postMessage({type: 'center', cx, cz}); }
+  if (G.time % 100 === 0) G.worker.postMessage({type: 'day', dark: Math.round((1 - environment(G.time).daylight) * 11)});
+  if (performance.now() - G.saveAt > 30000) { G.saveAt = performance.now(); saveGame(); }
+}
+
+// ---------- events from the controls ----------
+function handleEvents(events, c = ctl) {
+  for (const e of events) {
+    if (screens.open && !G?.ready) { if (e === 'pause') screens.nav('back'); continue; }
+    if (invUI.open) { if (e === 'inventory' || e === 'pause') { invUI.hide(); } continue; }
+    if (screens.open) { if (e === 'pause') screens.nav('back'); continue; }
+    if (!G || G.dead) continue;
+    if (e === 'pause') { pause(); continue; }
+    if (paused) continue;
+    if (e === 'inventory') openInventory();
+    else if (e.startsWith('slot')) { G.hot = Number(e.slice(4)); drawHud(true); }
+    else if (e === 'next') { G.hot = (G.hot + 1) % 9; drawHud(true); }
+    else if (e === 'prev') { G.hot = (G.hot + 8) % 9; drawHud(true); }
+    else if (e === 'drop') { const s = held(); if (s) { const one = G.inv.take(G.hot, 1); const eye = eyePos(); G.ents.drop(one, eye[0], eye[1] - 0.3, eye[2], {dir: G.body.look(), delay: 40}); drawHud(true); } }
+    else if (e === 'fly') { if (G.mode === 'creative') { G.body.flying = !G.body.flying; G.body.vy = 0; } }
+    else if (e === 'debug') { debugOn = !debugOn; $('.debug').hidden = !debugOn; }
+    else if (e === 'hud') { hudHidden = !hudHidden; hud.style.opacity = hudHidden ? 0 : 1; }
+    else if (e === 'use') { const t = targetAt(c.aim); use(t); G.useWait = 5; }
+    else if (e === 'pick' && G.target) {
+      const id = BLOCKS[G.target.v & 0xFFF].name, name = BLOCKS[G.target.v & 0xFFF].item ? id : null;
+      if (!name) continue;
+      const at = G.inv.slots.findIndex(s => s?.id === name);
+      if (at >= 0 && at < 9) G.hot = at;
+      else if (at >= 9) { const tmp = G.inv.slots[G.hot]; G.inv.slots[G.hot] = G.inv.slots[at]; G.inv.slots[at] = tmp; }
+      else if (G.mode === 'creative') G.inv.slots[G.hot] = {id: name, n: stackMax(name)};
+      drawHud(true);
+    }
+  }
+}
+function targetAt(point) {
+  const eye = eyePos(), d = aimDir(point);
+  return raycast(G.mirror, eye[0], eye[1], eye[2], d[0], d[1], d[2], reach());
+}
+
+// ---------- the HUD ----------
+let hudKey = '';
+function drawHud(force = false) {
+  if (!G) return;
+  const key = JSON.stringify([G.inv.slots.slice(0, 9), G.hot, G.health, G.food, Math.ceil(G.air / 30), G.mode, input?.mode]);
+  if (!force && key === hudKey) return;
+  hudKey = key;
+  const hb = $('.hotbar');
+  hb.innerHTML = G.inv.slots.slice(0, 9).map((s, i) => `<div class="s${i === G.hot ? ' on' : ''}" data-i="${i}">${stackHtml(s, icons)}</div>`).join('') + (input?.mode === 'touch' ? '<div class="more" data-inv>⋯</div>' : '');
+  const survival = G.mode !== 'creative';
+  const row = (n, full, halfK, empty, count = 10) => Array.from({length: count}, (_, i) => `<img class="px" style="width:calc(9*var(--u));height:calc(9*var(--u))" src="${HUD_URL[n >= (i + 1) * 2 ? full : n >= i * 2 + 1 ? halfK : empty]}">`).join('');
+  $('.hearts').innerHTML = survival ? row(G.health, 'heartFull', 'heartHalf', 'heartEmpty') : '';
+  $('.food').innerHTML = survival ? row(G.food, 'foodFull', 'foodHalf', 'foodEmpty') : '';
+  const bubbles = Math.ceil(Math.max(0, G.air) / 30);
+  $('.bars .air').innerHTML = survival && G.air < 300 ? Array.from({length: bubbles}, () => `<img class="px" style="width:calc(9*var(--u));height:calc(9*var(--u))" src="${HUD_URL.air}">`).join('') : '';
+  const s = held(), name = $('.name');
+  if (s && name.dataset.id !== s.id + G.hot) { name.textContent = zhOf(s.id); name.style.opacity = 1; name.dataset.id = s.id + G.hot; clearTimeout(name._t); name._t = setTimeout(() => { name.style.opacity = 0; }, 1800); }
+  if (!s) { name.style.opacity = 0; name.dataset.id = ''; }
+}
+function toast(text) {
+  const box = $('.toast'), d = document.createElement('div');
+  d.textContent = text; box.append(d);
+  setTimeout(() => { d.style.opacity = 0; setTimeout(() => d.remove(), 700); }, 4200);
+  while (box.children.length > 4) box.firstElementChild.remove();
+}
+function showError(text) {
+  const e = document.createElement('div'); e.className = 'err'; e.textContent = text; app.append(e);
+  setTimeout(() => e.remove(), 12000);
+}
+
+// ---------- the hand ----------
+function handModel(view) {
+  const b = G.body, s = held(), v = G.hand.reset(), [sky, blk] = G.mirror.light(Math.floor(b.x), Math.floor(b.y + b.eye), Math.floor(b.z));
+  const sw = G.swing > 0 ? Math.sin((1 - G.swing / 6) * Math.PI) : 0, eat = G.eating ? Math.sin(G.eating * 0.9) * 0.03 : 0;
+  const bobT = G.walked * 2.2, bob = settings.bob && b.onGround ? Math.abs(Math.sin(bobT)) * 0.035 : 0, sideBob = settings.bob && b.onGround ? Math.sin(bobT) * 0.02 : 0;
+  if (!s) {
+    v.cube(0.5, Array(6).fill(LAYER.player_arm), sky * 17, blk * 17, 256, 32, null, [4, 0, 8, 16]);
+    // a long box: the arm reaching in from the lower right
+    const m = mat.mul(mat.model(1, 0.2, -1.1 + sw * 0.8, 0.15, 0.62 + sideBob - sw * 0.15, -0.62 + bob + sw * 0.12, -0.75 - sw * 0.25), new Float32Array([0.22, 0, 0, 0, 0, 0.7, 0, 0, 0, 0, 0.22, 0, 0, 0, 0, 1]));
+    return {verts: v, model: m};
+  }
+  const look = itemLook(s.id);
+  if (look.cube) {
+    v.cube(0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints);
+    return {verts: v, model: mat.model(0.38, Math.PI / 4 + sw * 0.6, -0.05 - sw * 0.5, 0, 0.58 + sideBob - sw * 0.2, -0.5 + bob + eat + sw * 0.1, -0.78 - sw * 0.2)};
+  }
+  v.flat(0.5, look.flat, sky * 17, blk * 17, 256, 32, look.tint);
+  const tool = !!itemInfo(s.id)?.tool;
+  return {verts: v, model: mat.model(0.62, -Math.PI / 2 + 0.25, tool ? 0.1 - sw * 1.2 : -sw * 0.6, tool ? 0.55 : 0.2, 0.62 + sideBob - sw * 0.15, -0.45 + bob + eat + sw * 0.08, -0.8 - sw * 0.15)};
+}
+
+// ---------- the frame ----------
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.25, (now - lastFrame) / 1000 || 0);
+  lastFrame = now;
+  const c = input.read(dt);
+  handleEvents(c.events, c);
+  if (invUI.open && input.mode === 'pad') padInventory();
+  if (screens.open && input.mode === 'pad' && (!G || paused || G.dead)) padMenu();
+  if (!G) return;
+  if (!G.ready) { checkReady(); return; }
+  const b = G.body;
+  if (!paused && !invUI.open) {
+    b.yaw += c.look[0]; b.pitch = Math.max(-1.5705, Math.min(1.5705, b.pitch + c.look[1]));
+    ctl = c;
+    acc += dt * 1000;
+    let n = 0;
+    while (acc >= TICK && n++ < 5) { tick(); acc -= TICK; }
+    if (acc > TICK * 5) acc = 0;
+  } else ctl = {...ctl, attack: false, use: false, fwd: 0, side: 0, jump: false};
+  // the camera between the last two ticks
+  const a = paused ? 1 : acc / TICK, x = b.prev.x + (b.x - b.prev.x) * a, y = b.prev.y + (b.y - b.prev.y) * a, z = b.prev.z + (b.z - b.prev.z) * a;
+  const bobT = G.walked * 2.2, bobbing = settings.bob && b.onGround && !b.flying ? 1 : 0;
+  const view = {x, y: y + b.eye + Math.abs(Math.sin(bobT)) * 0.04 * bobbing, z, yaw: b.yaw, pitch: b.pitch + Math.abs(Math.cos(bobT)) * 0.006 * bobbing, fov: (settings.fov + (b.sprinting ? 8 : 0) + (b.flying && b.sprinting ? 4 : 0)) * Math.PI / 180, far: settings.dist * 16};
+  // aimed block (at the finger on touch screens)
+  G.target = paused || G.dead ? null : targetAt(c.aim);
+  const env = environment(G.time + a);
+  const eyeV = G.mirror.get(Math.floor(view.x), Math.floor(view.y), Math.floor(view.z));
+  env.underwater = (eyeV & 0xFFF) === ID.water;
+  if (env.underwater) { env.fog = [0.05, 0.12, 0.35].map(q => q * (0.3 + env.daylight * 0.7)); }
+  if ((eyeV & 0xFFF) === ID.lava) { env.underwater = true; env.fog = [0.6, 0.15, 0.02]; }
+  $('.water').style.display = env.underwater ? 'block' : 'none';
+  $('.hurt').style.opacity = G.hurtT ? 0.9 : 0;
+  // animated textures
+  const tick20 = Math.floor(G.time);
+  for (const an of animFrames) { const f = Math.floor(tick20 / an.time) % an.frames.length; if (f !== an.at) { an.at = f; renderer.updateLayer(an.layer, an.frames[f]); } }
+  const extras = {things: G.ents.drawList(view, env.time, (bx, by, bz) => G.mirror.light(bx, by, bz))};
+  if (G.target && !hudHidden) extras.outline = {boxes: G.target.boxes};
+  if (G.breaking && G.breaking.p > 0) extras.crack = {x: G.breaking.x, y: G.breaking.y, z: G.breaking.z, layer: LAYER[`destroy_stage_${Math.min(9, Math.floor(G.breaking.p * 10))}`]};
+  if (!hudHidden && !G.dead) extras.hand = handModel(view);
+  renderer.draw(view, env, extras);
+  drawHud();
+  if (debugOn && now - (G.debugAt || 0) > 250) {
+    G.debugAt = now;
+    // facingBack() is where a placed block's front looks: the player looks the other way
+    const bx = Math.floor(b.x), by = Math.floor(b.y), bz = Math.floor(b.z), [sk, bl] = G.mirror.light(bx, by, bz), dir = ['北', '东', '南', '西'][facingBack()];
+    const day = Math.floor(G.time / 24000) + 1, hour = Math.floor(((G.time % 24000) / 1000 + 6) % 24);
+    $('.debug').textContent = `方块世界  ${Math.round(1 / Math.max(dt, 0.001))} fps\nXYZ: ${b.x.toFixed(2)} / ${b.y.toFixed(2)} / ${b.z.toFixed(2)}\n方块: ${bx} ${by} ${bz}  区块: ${G.cx} ${G.cz}\n朝向: ${dir}  (${(b.yaw * 180 / Math.PI % 360).toFixed(1)} / ${(b.pitch * 180 / Math.PI).toFixed(1)})\n生物群系: ${BIOMES[G.mirror.biome(bx, bz)]?.zh}\n光照: 天空 ${sk}  方块 ${bl}\n第 ${day} 天 ${hour}:00\n区段: ${renderer.stats.drawn}/${renderer.stats.sections}  三角形: ${renderer.stats.tris}\n种子: ${G.meta.seedText || G.meta.seed}${G.target ? `\n看着: ${BLOCKS[G.target.v & 0xFFF].zh} (${G.target.x}, ${G.target.y}, ${G.target.z})` : ''}`;
+  }
+}
+// pads in menus and inventories
+let padPrev = {};
+function padEdges() {
+  const p = [...(navigator.getGamepads?.() || [])].find(g => g && g.connected);
+  if (!p) return {};
+  const now = {up: p.buttons[12]?.pressed || p.axes[1] < -0.6, down: p.buttons[13]?.pressed || p.axes[1] > 0.6, left: p.buttons[14]?.pressed || p.axes[0] < -0.6, right: p.buttons[15]?.pressed || p.axes[0] > 0.6,
+    a: p.buttons[0]?.pressed, b: p.buttons[1]?.pressed, x: p.buttons[2]?.pressed, y: p.buttons[3]?.pressed};
+  const out = {};
+  for (const k in now) { if (now[k] && !padPrev[k]) out[k] = true; }
+  // held directions repeat
+  for (const k of ['up', 'down', 'left', 'right']) { if (now[k]) { padPrev[`${k}T`] = (padPrev[`${k}T`] || 0) + 1; if (padPrev[`${k}T`] > 18 && padPrev[`${k}T`] % 5 === 0) out[k] = true; } else padPrev[`${k}T`] = 0; }
+  Object.assign(padPrev, now);
+  return out;
+}
+function padInventory() { const e = padEdges(); for (const k of ['up', 'down', 'left', 'right', 'a', 'x', 'y']) if (e[k]) invUI.pad(k); if (e.b) invUI.hide(); }
+function padMenu() { const e = padEdges(); for (const k of ['up', 'down', 'left', 'right']) if (e[k]) screens.nav(k); if (e.a) screens.nav('ok'); if (e.b) screens.nav('back'); }
+
+// ---------- start ----------
+async function boot() {
+  try { renderer = new Renderer(canvas); } catch (e) { showError(e.message); return; }
+  layout();
+  input = new Input(app, canvas, {rotated: () => rotated, sensitivity: () => settings.sens, onMode: m => { document.body.classList.toggle('touchmode', m === 'touch'); drawHud(true); screens?.markFocus(); }});
+  if (isTouch) document.body.classList.add('touchmode'), input.mode = 'touch';
+  screens = new Screens($('#screens'), api());
+  invUI = new InventoryUI(invRoot, {get inv() { return G.inv; }, get icons() { return icons; }, drop: s => { const b = G.body; G.ents.drop(s, b.x, b.y + 1.2, b.z, {dir: b.look(), delay: 40}); }, sound: n => play(n), closed: () => closedInventory(), toApp: (x, y) => input.toApp(x, y), rotated: () => rotated, crafted: () => play('place', ID.crafting_table)});
+  // tapping the hotbar picks a slot; ⋯ opens the inventory
+  $('.hotbar').addEventListener('pointerdown', e => { if (!G || paused) return; const s = e.target.closest('[data-i]'); if (s) { G.hot = Number(s.dataset.i); drawHud(true); } if (e.target.closest('[data-inv]')) openInventory(); e.stopPropagation(); });
+  $('.pausebtn').addEventListener('click', () => pause());
+  document.addEventListener('pointerlockchange', () => { if (G && G.ready && !paused && !invUI.open && !input.locked() && input.mode === 'keyboard') pause(); });
+  addEventListener('pointerdown', () => unlockSound(), {capture: true});
+  addEventListener('keydown', e => { unlockSound(); if (screens.open && (!G || paused || G.dead)) { const map = {ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'ok'}; if (map[e.code] && !e.target.closest?.('input[type=text]')) { screens.nav(map[e.code]); e.preventDefault(); } } }, {capture: true});
+  addEventListener('visibilitychange', () => { if (document.hidden) { if (G && G.ready && !paused) pause(); else saveGame(); } });
+  addEventListener('pagehide', () => saveGame());
+  setVolume(settings.volume);
+  screens.loading('正在准备材质…', 0.3);
+  try { await loadTextures(); } catch (e) { showError(`材质没读成：${e.message || e}`); built = buildLayers(null); renderer.setTextures(built.size, built.layers); icons = makeIcons(built); }
+  screens.title();
+  requestAnimationFrame(frame);
+}
+boot();
+// for looking into a running game from the console
+globalThis.__blocks = {get game() { return G; }, get renderer() { return renderer; }, get input() { return input; }, settings, toast, importPack: (f, p) => api().importPack(f, p), removePack: () => api().removePack()};

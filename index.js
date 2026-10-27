@@ -368,7 +368,7 @@ if(globalThis.MutationObserver&&document.body)new MutationObserver(list=>{if(lis
 // 大游戏 over the whole tavern page: the game in a frame of its own (ui/indie/<name>/play.html), the phone closed meanwhile.
 // The game asks to leave with a message {type:'st-iphonie-game:close'}; its saves stay in this browser.
 let gameOverlay=null;
-const GAMES=new Set(['antarctic']);
+const GAMES=new Set(['antarctic','blocks']);
 function closeGame(){if(!gameOverlay)return;gameOverlay.stop();gameOverlay.el.remove();gameOverlay=null;}
 function openGame(name){
  if(!GAMES.has(name))throw Error('没有这个游戏');
