@@ -24,6 +24,9 @@ for (const b of BLOCKS) {
 }
 const WATER = ID.water, LAVA = ID.lava, LEAVES = new Uint8Array(N);
 for (const b of BLOCKS) if (b.name.endsWith('_leaves')) LEAVES[b.id] = 1;
+// ores: flag 5, for the shaded look to let their coloured bits glow
+const ORE = new Uint8Array(N);
+for (const b of BLOCKS) if (b.name.endsWith('_ore')) ORE[b.id] = 1;
 const isOpaque = v => OPAQUE[v & 0xFFF] === 1 || (SHAPE[v & 0xFFF] === 'slab' && (v >>> 12) === 2);
 
 // faces: normal, u, v, base corner (p0); p1 = p0 + u, p2 = p0 + u + v, p3 = p0 + v
@@ -170,7 +173,7 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
         let rot = 0;
         if (b.axis && (meta & 3) === 1 && f !== 0 && f !== 1) rot = 1;
         if (b.axis && (meta & 3) === 2 && (f === 0 || f === 1)) rot = 1;
-        cubeFace(out, x, y, z, f, layer, t, rot, leaf && wave ? 1 : 0);
+        cubeFace(out, x, y, z, f, layer, t, rot, ORE[id] ? 5 : leaf && wave ? 1 : 0);
         if (id === ID.grass_block && meta !== 1 && f !== 2 && f !== 3) cubeFace(out, x, y, z, f, tex('grass_block_side_overlay'), tintC);
       }
     } else if (PIECED.has(shape)) {

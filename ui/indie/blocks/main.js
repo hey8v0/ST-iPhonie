@@ -491,6 +491,8 @@ function environment(time) {
     skyLight: lerp([0.62, 0.68, 0.95], [1, 1, 1], dayLit).map((v, i) => v * (1 - glowAmt * 0.15 * (i === 2 ? 1 : 0))),
     cloudColor: lerp([0.08, 0.09, 0.13], [1, 1, 1], day).map(v => v * (1 - rain * 0.45)), moonPhase: Math.floor(time / 24000) % 8, cloudShift: time * 0.03, sunMoon: 1 - rain,
     gamma: settings.gamma, wave: settings.wave, clouds: settings.clouds, time: performance.now() / 1000, flicker: 0.92 + Math.sin(performance.now() / 90) * 0.03 + Math.sin(performance.now() / 37) * 0.02,
+    // for 光影: the storm, a lightning flash, and a snowy place (the aurora at night)
+    thunder, flash: !!flash, cold: !!b?.cold,
   };
 }
 
@@ -1415,6 +1417,9 @@ function frame(now) {
   G.eyeSky = (G.eyeSky ?? eyeSky) + (eyeSky - (G.eyeSky ?? eyeSky)) * Math.min(1, dt * 1.5);
   env.eyeSky = G.eyeSky;
   env.held = (itemInfo(G.inv.slots[G.hot]?.id)?.block?.light || 0) / 15;
+  // the aurora: snowy places by night, coming and going over a few seconds; where the player stands (grass leans away)
+  G.aurora = (G.aurora || 0) + ((env.cold ? env.stars : 0) - (G.aurora || 0)) * Math.min(1, dt * 0.4);
+  env.aurora = G.aurora; env.player = [G.body.x, G.body.y, G.body.z];
   $('.water').style.display = env.underwater ? 'block' : 'none';
   $('.hurt').style.opacity = G.hurtT ? 0.9 : 0;
   $('.sleep').style.opacity = G.sleeping ? Math.min(1, G.sleeping / 60) : 0;

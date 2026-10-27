@@ -187,13 +187,16 @@ export function lighting(env, view) {
   const rain = 1 - (env.sunMoon ?? 1), fogFar = env.underwater ? 18 : env.nether ? Math.min(view.far, Math.max(56, Math.min(view.far, 192) * 0.5)) : (view.lodFar || view.far);
   // the eye's reach to the sky (dark air and a brighter exposure in caves), the light held in the hand, the clouds' cover
   const eyeSky = env.eyeSky ?? 1, cave = 1 + (1 - eyeSky) * 0.5;
-  const base = {sunTrue: sun, block: [1.0, 0.6, 0.3], fogLin: lin(env.fog), fogFar, fogDensity: 1.75 / fogFar * (1 + rain * 1.4), underwater: env.underwater ? 1 : 0, flicker: env.flicker ?? 1, bright: env.bright || 0, rain,
-    eyeSky, held: env.held || 0, camY: view.y, time: env.time || 0, cover: 0.5 - rain * 0.25, sunDisc: [0, 0, 0]};
+  // a thunderstorm: darker, the air thicker; a lightning flash lights everything outside for a moment; the aurora on
+  // snowy nights
+  const thunder = env.thunder || 0;
+  const base = {sunTrue: sun, block: [1.0, 0.6, 0.3], fogLin: lin(env.fog), fogFar, fogDensity: 1.75 / fogFar * (1 + rain * 1.4 + thunder * 0.8), underwater: env.underwater ? 1 : 0, flicker: env.flicker ?? 1, bright: env.bright || 0, rain,
+    eyeSky, held: env.held || 0, camY: view.y, time: env.time || 0, cover: 0.5 - rain * 0.25 - thunder * 0.1, sunDisc: [0, 0, 0], aurora: env.aurora || 0, flash: env.flash ? 1 : 0};
   if (env.nether) return {...base, lightDir: [0, 1, 0], lightCol: [0, 0, 0], amb: [0.17, 0.07, 0.05], zenith: lin(env.fog), horizon: lin(env.fog), glow: [0, 0, 0], exposure: 1.4, fogDensity: 2.4 / fogFar, eyeSky: 1};
   const day = smooth(-0.04, 0.14, el), night = 1 - smooth(-0.14, 0.02, el), set = Math.max(0, 1 - Math.abs(el) * 3.2);
-  const sunCol = scale(mixv([1.0, 0.94, 0.86], [1.0, 0.5, 0.22], set * set), 2.9 * day * (1 - rain * 0.85));
+  const sunCol = scale(mixv([1.0, 0.91, 0.8], [1.0, 0.5, 0.22], set * set), 2.9 * day * (1 - rain * 0.85));
   const moonCol = scale([0.3, 0.38, 0.62], 0.34 * night * (1 - rain * 0.7)), up = el > -0.02;
-  let amb = scale(mixv([0.018, 0.024, 0.05], [0.24, 0.32, 0.5], day), 1 - rain * 0.45);
+  let amb = scale(mixv([0.018, 0.024, 0.05], [0.21, 0.28, 0.46], day), (1 - rain * 0.45) * (1 - thunder * 0.35));
   amb = mixv(amb, [0.42, 0.33, 0.32], set * 0.3 * day);
   const glow = mixv(scale(sunCol, 0.22), [1.1, 0.5, 0.2], set * 0.7 * day);
   return {...base, lightDir: up ? sun : scale(sun, -1), lightCol: up ? sunCol : moonCol, amb, zenith: lin(env.skyTop), horizon: lin(env.horizon), glow, exposure: (0.86 + night * 1.0) * cave, day, sunDisc: sunCol};
@@ -400,7 +403,8 @@ export class Renderer {
     this.cloudQ = {mid: 1, high: 2}[L] || 0;
     this.hdr = this.hdrOk && (L === 'mid' || L === 'high');
     this.postOn = L === 'high';
-    this.fx = {gen: L === 'mid' || L === 'high' ? 1 : 0, ssr: L === 'high' ? 24 : 0, ao: L === 'high', rays: L === 'high', bloom: {mid: 4, high: 5}[L] || 0};
+    // edge shade samples (fewer on mid), light shafts from mid up
+    this.fx = {gen: L === 'mid' || L === 'high' ? 1 : 0, ssr: L === 'high' ? 24 : 0, ao: {mid: 4, high: 8}[L] || 0, rays: {mid: 18, high: 28}[L] || 0, flare: L === 'mid' || L === 'high', bloom: {mid: 4, high: 5}[L] || 0};
   }
   prog(name, make) { return this.progs[name] ||= compile(this.gl, ...make()); }
   /** The lighting uniforms of a shaded program for this frame. */
@@ -411,6 +415,7 @@ export class Renderer {
     gl.uniform1f(u.u_exposure, lit.exposure); gl.uniform1f(u.u_fogDensity, lit.fogDensity); gl.uniform1f(u.u_fogFar, lit.fogFar); gl.uniform1f(u.u_underwater, lit.underwater);
     gl.uniform1f(u.u_flicker, lit.flicker); gl.uniform1f(u.u_bright, lit.bright);
     gl.uniform1f(u.u_rain, lit.rain); gl.uniform1f(u.u_eyeSky, lit.eyeSky); gl.uniform1f(u.u_camY, lit.camY); gl.uniform1f(u.u_held, lit.held); gl.uniform1f(u.u_time, lit.time); gl.uniform1f(u.u_cover, lit.cover);
+    gl.uniform1f(u.u_aurora, lit.aurora); gl.uniform1f(u.u_flash, lit.flash);
     if (u.u_noise) { gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, this.noise); gl.uniform1i(u.u_noise, 7); gl.activeTexture(gl.TEXTURE0); }
     if (u.u_shadow) {
       gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.shadowMap?.tex || null); gl.uniform1i(u.u_shadow, 2); gl.activeTexture(gl.TEXTURE0);
@@ -545,15 +550,17 @@ export class Renderer {
       }
       gl.disable(gl.BLEND);
     }
-    const C = this.prog(`composite${fx.ao ? 1 : 0}`, () => compositeShaders({ao: fx.ao})), ldr = this.target('ldr', W, H);
+    const C = this.prog(`composite${fx.ao}:${fx.rays}`, () => compositeShaders({ao: fx.ao, rays: fx.rays})), ldr = this.target('ldr', W, H);
     gl.bindFramebuffer(gl.FRAMEBUFFER, ldr ? ldr.fbo : null); gl.viewport(0, 0, W, H);
     gl.useProgram(C.p);
     bind(3, src.color, C.u.u_color); bind(4, src.depth, C.u.u_depth); bind(5, levels[0]?.color || src.color, C.u.u_bloom);
-    const t = Math.tan(view.fov / 2), shafts = fx.rays ? this.sunShafts(vp, lit) : {uv: [0.5, 0.5], rays: 0};
+    const t = Math.tan(view.fov / 2), sun = this.sunShafts(vp, lit), shafts = fx.rays ? sun : {uv: sun.uv, rays: 0};
     gl.uniform2f(C.u.u_px, 1 / W, 1 / H); gl.uniform2f(C.u.u_tanHalf, t * W / H, t);
     gl.uniform1f(C.u.u_near, this.near); gl.uniform1f(C.u.u_far, this.far); gl.uniform1f(C.u.u_exposure, lit.exposure);
-    gl.uniform1f(C.u.u_bloomAmt, levels.length ? 0.32 / levels.length : 0);
+    gl.uniform1f(C.u.u_bloomAmt, levels.length ? 0.45 / levels.length : 0); gl.uniform1f(C.u.u_underwater, lit.underwater); gl.uniform1f(C.u.u_time, lit.time);
     gl.uniform2fv(C.u.u_sunUV, shafts.uv); gl.uniform1f(C.u.u_rays, shafts.rays * 0.5); gl.uniform3fv(C.u.u_rayCol, scale(lit.lightCol, 0.35));
+    // the lens flare when the sun is in the picture (by day, not in rain; weaker toward the edge, as the shafts)
+    gl.uniform1f(C.u.u_flare, fx.flare ? sun.rays : 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     if (ldr) {
       const E = this.prog('edge', edgeShaders);
@@ -660,6 +667,9 @@ export class Renderer {
     const fogFar = env.underwater ? 18 : env.nether ? Math.min(view.far, Math.max(56, Math.min(view.far, 192) * 0.5)) : view.far, fogNear = env.underwater ? 1 : env.nether ? view.far * 0.05 : view.far * 0.72;
     gl.uniform1f(P.u.u_fogNear, fogNear); gl.uniform1f(P.u.u_fogFar, fogFar);
     gl.uniform1f(P.u.u_overlay, 0); gl.uniform1f(P.u.u_alpha, 1); gl.uniform1f(P.u.u_cut, 0.5); gl.uniform1f(P.u.u_texSize, this.texSize || 16); gl.uniform1f(P.u.u_behind, 0);
+    // where the player stands (relative to the camera): grass and flowers lean away
+    const pl = env.player || [view.x, view.y - 1.62, view.z];
+    gl.uniform3f(P.u.u_player, pl[0] - view.x, pl[1] - view.y, pl[2] - view.z);
     // the plain look with the distant view: the near land fades over the whole way out
     if (!shaded && view.lodFar && !env.underwater && !env.nether) { gl.uniform1f(P.u.u_fogNear, view.lodFar * 0.3); gl.uniform1f(P.u.u_fogFar, view.lodFar); }
     if (shaded) this.setLit(P, lit, view);

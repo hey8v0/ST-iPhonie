@@ -15,14 +15,14 @@ const SKY = `
 #define HDR 0
 #endif
 uniform vec3 u_lightDir, u_lightCol, u_ambCol, u_blockCol, u_sunTrue, u_zenith, u_horizon, u_glowCol, u_fogLin;
-uniform float u_exposure, u_fogDensity, u_fogFar, u_underwater, u_flicker, u_bright, u_rain, u_eyeSky, u_camY, u_held, u_time, u_cover;
+uniform float u_exposure, u_fogDensity, u_fogFar, u_underwater, u_flicker, u_bright, u_rain, u_eyeSky, u_camY, u_held, u_time, u_cover, u_aurora, u_flash;
 uniform sampler2D u_noise;
 // the sky's colour along a direction: horizon to zenith, the sun's glow (wide, a halo, a bright core), dark below
 vec3 skyCol(vec3 d) {
   float y = d.y;
   vec3 c = mix(u_horizon, u_zenith, pow(clamp(y, 0.0, 1.0), 0.45));
   float s = max(dot(d, u_sunTrue), 0.0);
-  c += u_glowCol * (pow(s, 4.0) * 0.5 + pow(s, 32.0) * 1.3 + pow(s, 500.0) * 3.0) * (1.0 - 0.45 * clamp(y, 0.0, 1.0));
+  c += u_glowCol * (pow(s, 4.0) * 0.22 + pow(s, 32.0) * 1.1 + pow(s, 500.0) * 3.0) * (1.0 - 0.45 * clamp(y, 0.0, 1.0));
   return mix(c, u_horizon * 0.4, smoothstep(0.0, -0.3, y));
 }
 // how much cloud there is over a place (0 clear … 1 thick): octaves of the noise picture drifting with the wind
@@ -103,7 +103,7 @@ layout(location=3) in uvec2 a_light;
 layout(location=4) in uint a_shade;
 layout(location=5) in vec3 a_tint;
 uniform mat4 u_viewProj, u_model, u_shadowMat;
-uniform vec3 u_origin, u_camera, u_lightDir;
+uniform vec3 u_origin, u_camera, u_lightDir, u_player;
 uniform float u_unit, u_center, u_time, u_wave;
 out vec3 v_uvl; out vec2 v_light; out float v_ao; out vec3 v_tint; out float v_dist; out vec3 v_wp; out vec3 v_n; out vec3 v_tu; out vec3 v_tv; out vec4 v_sh;
 flat out uint v_flags;
@@ -120,6 +120,8 @@ void main() {
   if (u_wave > 0.0 && flags == 1u) wp.xz += 0.035 * vec2(sin(u_time * 1.7 + world.x * 0.9 + world.y), cos(u_time * 1.3 + world.z * 0.8 + world.y));
   if (u_wave > 0.0 && flags == 2u) wp.xz += (1.0 - float(a_uv.y) / 16.0) * 0.07 * vec2(sin(u_time * 2.1 + world.x * 0.7 + world.z * 0.3), cos(u_time * 1.7 + world.z * 0.6));
   if (flags == 4u) wp.y += sin(u_time * 1.2 + world.x * 0.6 + world.z * 0.8) * 0.012;
+  // grass and flowers lean away from the player walking through them, more toward their tops
+  if (flags == 2u) { vec3 d = wp - u_player; float r = length(d.xz); if (r < 1.3 && d.y > -0.3 && d.y < 2.4) wp.xz += d.xz / max(r, 0.05) * (1.0 - r / 1.3) * clamp(d.y, 0.0, 1.0) * 0.45; }
   gl_Position = u_viewProj * vec4(wp, 1.0);
   v_uvl = vec3(vec2(a_uv) / 16.0, float(a_layer));
   v_light = vec2(a_light) / 17.0;
@@ -220,14 +222,17 @@ void main() {
   float open = smoothstep(0.55, 0.95, sky), sunVis = sh * open * (open > 0.0 ? cloudShade(W) : 1.0);
   vec3 light = u_lightCol * direct * sunVis;
   // leaves and grass let light through: they glow looking toward the sun behind them
-  if (leaf || plant) light += u_lightCol * pow(max(dot(-V, L), 0.0), 5.0) * (leaf ? 0.9 : 0.6) * sunVis;
+  if (leaf || plant) light += u_lightCol * pow(max(dot(-V, L), 0.0), 5.0) * (leaf ? 0.45 : 0.35) * sunVis;
   float ao = mix(1.0, v_ao, 0.8);
-  vec3 amb = u_ambCol * sky * sky * (0.62 + 0.38 * (N.y * 0.5 + 0.5)) * ao;
+  vec3 amb = (u_ambCol + vec3(0.01, 0.05, 0.03) * u_aurora) * sky * sky * (0.62 + 0.38 * (N.y * 0.5 + 0.5)) * ao;
+  light += vec3(0.55, 0.58, 0.7) * u_flash * open;
   vec3 bl = u_blockCol * (pow(blk, 2.2) * 1.9 + pow(blk, 9.0) * 1.6) * u_flicker * ao;
   // rain: the open ground darker and shiny, puddles in its hollows
   float wet = liquid ? 0.0 : u_rain * open * smoothstep(0.2, 0.9, N.y);
   albedo *= 1.0 - 0.35 * wet;
   vec3 col = albedo * (light + amb + bl + vec3(0.012 + u_bright));
+  // an ore's coloured specks shine a little in the dark (the stone round them, grey, does not)
+  if (v_flags == 5u) { float hi = max(c.r, max(c.g, c.b)); col += albedo * smoothstep(0.3, 0.6, hi > 0.0 ? (hi - min(c.r, min(c.g, c.b))) / hi : 0.0) * 1.2; }
   if (wet > 0.01) {
     float puddle = smoothstep(0.5, 0.68, vnoise(W.xz * 0.35)) * step(0.9, N.y);
     vec3 n = normalize(mix(N, vec3(0.0, 1.0, 0.0), puddle)), R = reflect(-V, n);
@@ -320,11 +325,42 @@ float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.
 void main() {
   vec3 d = normalize(v_dir);
   vec3 c = skyCol(d);
-  if (u_stars > 0.0 && d.y > 0.0) { vec3 q = floor(d * 260.0); float s = hash3(q); if (s > 0.9968) c += vec3(u_stars * (s - 0.9968) / 0.0032) * (0.6 + 0.4 * sin(u_time * 3.0 + s * 90.0)) * smoothstep(0.0, 0.2, d.y); }
+  if (u_stars > 0.0 && d.y > 0.0) {
+    // nebulae: slow clouds of blue and violet across the sky (the noise picture seen on a plane far up)
+    vec2 q2 = d.xz / (d.y + 0.25) * 0.35;
+    float n1 = texture(u_noise, q2 * 0.6 + 0.13).r, n2 = texture(u_noise, q2 * 1.7 + 0.71).r, n3 = texture(u_noise, q2 * 4.1).r;
+    float neb = smoothstep(0.45, 0.85, n1 * 0.6 + n2 * 0.3 + n3 * 0.1);
+    c += mix(vec3(0.03, 0.08, 0.25), vec3(0.16, 0.05, 0.2), smoothstep(0.3, 0.7, n2)) * neb * u_stars * smoothstep(0.0, 0.3, d.y) * 0.5;
+    // stars: thicker in the nebulae, twinkling, a little warm or blue
+    vec3 q = floor(d * 300.0); float s = hash3(q), edge = 0.9955 - neb * 0.004;
+    if (s > edge) { float k = (s - edge) / (1.0 - edge); c += mix(vec3(1.0, 0.85, 0.7), vec3(0.75, 0.85, 1.0), hash3(q + 7.0)) * u_stars * k * k * 1.6 * (0.55 + 0.45 * sin(u_time * 3.0 + s * 90.0)) * smoothstep(0.0, 0.2, d.y); }
+    // the aurora (snowy places at night): sheets one above another, each lit along a wavy line, green low and violet high
+    if (u_aurora > 0.0) {
+      // many thin sheets, each pixel's set shifted a little at random, so they blur into hanging curtains
+      vec3 au = vec3(0.0);
+      float jit = ign(gl_FragCoord.xy);
+      for (int i = 0; i < 16; i++) {
+        float f = (float(i) + jit) / 16.0;
+        vec2 p = d.xz / max(d.y, 0.05) * (0.5 + f * 0.6) + vec2(u_time * 0.004, u_time * 0.002);
+        float band = 1.0 - smoothstep(0.0, 0.035, abs(texture(u_noise, p * 0.22).r - 0.5));
+        au += mix(vec3(0.1, 1.0, 0.45), vec3(0.6, 0.2, 0.9), f) * band * pow(1.0 - f, 1.5) * 0.045;
+      }
+      c += au * u_aurora * u_stars * smoothstep(0.05, 0.35, d.y);
+    }
+  }
+  c = mix(c, vec3(0.6, 0.62, 0.72), u_flash * 0.6);
 #if HDR
   c += u_sunDisc * smoothstep(0.99972, 0.99988, dot(d, u_sunTrue)) * 24.0;
 #endif
 #if CLOUDS > 0
+  // a high thin layer at 300, streaked with the wind, behind the main one
+  float ph0 = 0.55 + 1.6 * pow(max(dot(d, u_lightDir), 0.0), 8.0);
+  if (d.y > 0.02 && u_camPos.y < 300.0) {
+    float t2 = (300.0 - u_camPos.y) / d.y;
+    vec2 p2 = u_camPos.xz + d.xz * t2 + vec2(u_time * 3.0, 0.0);
+    float n = texture(u_noise, vec2(p2.x * 0.00035, p2.y * 0.0011)).r * 0.65 + texture(u_noise, p2 * 0.0021).r * 0.35;
+    c = mix(c, u_lightCol * 0.35 * ph0 + u_ambCol * 1.3, smoothstep(u_cover + 0.05, u_cover + 0.35, n) * 0.5 * exp(-t2 * 0.0003));
+  }
   const float CB = 192.0, CT = 236.0;
   float cy = u_camPos.y;
   if (abs(d.y) > 0.01) {
@@ -483,11 +519,12 @@ ${up ? `  vec3 c = at(vec2(0.0)) * 4.0 + (at(vec2(1.0, 0.0)) + at(vec2(-1.0, 0.0
  */
 export function compositeShaders(o = {}) {
   const fs = `#version 300 es
-#define AO ${o.ao ? 1 : 0}
+#define AO ${o.ao || 0}
+#define RAYS ${o.rays || 28}
 precision highp float;
 uniform sampler2D u_color, u_depth, u_bloom;
 uniform vec2 u_px, u_tanHalf, u_sunUV;
-uniform float u_bloomAmt, u_near, u_far, u_rays, u_exposure;
+uniform float u_bloomAmt, u_near, u_far, u_rays, u_exposure, u_underwater, u_time, u_flare;
 uniform vec3 u_rayCol;
 in vec2 v_uv; out vec4 o;
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
@@ -501,29 +538,53 @@ vec3 film(vec3 c) {
   return clamp(mix(vec3(l), c, mix(0.45, 1.08, smoothstep(0.01, 0.25, l))), 0.0, 1.0);
 }
 void main() {
-  vec3 c = texture(u_color, v_uv).rgb;
-  float d = texture(u_depth, v_uv).r;
+  // under water the picture wavers
+  vec2 uv = v_uv + (u_underwater > 0.5 ? vec2(sin(v_uv.y * 30.0 + u_time * 2.0), cos(v_uv.x * 26.0 + u_time * 1.7)) * 0.003 : vec2(0.0));
+  vec3 c = texture(u_color, uv).rgb;
+  float d = texture(u_depth, uv).r;
 #if AO
   // edge shade: how much of the half-space in front of this point the nearby land fills (a few samples round it)
   if (d < 0.99999) {
-    vec3 P = viewPos(v_uv), N = normalize(cross(dFdx(P), dFdy(P)));
+    vec3 P = viewPos(uv), N = normalize(cross(dFdx(P), dFdy(P)));
     float r = 0.55 / (-P.z * u_tanHalf.y), a = ign(gl_FragCoord.xy) * 6.2832, occ = 0.0;
-    for (int i = 0; i < 8; i++) {
-      float t = (float(i) + 0.5) / 8.0, b = float(i) * 2.39996 + a;
-      vec3 v = viewPos(v_uv + vec2(cos(b), sin(b)) * sqrt(t) * r) - P;
+    for (int i = 0; i < AO; i++) {
+      float t = (float(i) + 0.5) / float(AO), b = float(i) * 2.39996 + a;
+      vec3 v = viewPos(uv + vec2(cos(b), sin(b)) * sqrt(t) * r) - P;
       float l = length(v);
       occ += max(dot(N, v / max(l, 1e-4)) - 0.15, 0.0) * smoothstep(1.6, 0.3, l);
     }
-    c *= 1.0 - clamp(occ / 8.0 * 0.9, 0.0, 0.45);
+    c *= 1.0 - clamp(occ / float(AO) * 0.9, 0.0, 0.45);
   }
 #endif
   if (u_rays > 0.0) {
-    vec2 dir = (u_sunUV - v_uv) / 28.0, p = v_uv + dir * ign(gl_FragCoord.xy);
-    float acc = 0.0, w = 1.0;
-    for (int i = 0; i < 28; i++) { p += dir; if (p.x < 0.0 || p.y < 0.0 || p.x > 1.0 || p.y > 1.0) break; acc += (texture(u_depth, p).r >= 0.99999 ? 1.0 : 0.0) * w; w *= 0.955; }
-    c += u_rayCol * (acc / 28.0) * u_rays * smoothstep(1.4, 0.0, length((v_uv - u_sunUV) * vec2(1.6, 1.0)));
+    vec2 dir = (u_sunUV - v_uv) / float(RAYS), p = v_uv + dir * ign(gl_FragCoord.xy);
+    float acc = 0.0, w = 1.0, fall = pow(0.955, 28.0 / float(RAYS));
+    for (int i = 0; i < RAYS; i++) { p += dir; if (p.x < 0.0 || p.y < 0.0 || p.x > 1.0 || p.y > 1.0) break; acc += (texture(u_depth, p).r >= 0.99999 ? 1.0 : 0.0) * w; w *= fall; }
+    c += u_rayCol * (acc / float(RAYS)) * u_rays * smoothstep(1.4, 0.0, length((v_uv - u_sunUV) * vec2(1.6, 1.0)));
   }
-  c += texture(u_bloom, v_uv).rgb * u_bloomAmt;
+  c += texture(u_bloom, uv).rgb * u_bloomAmt;
+  // the lens's flare: when the sun shows, coloured ghosts and rings along the line from it through the middle
+  if (u_flare > 0.0) {
+    float seen = 0.0;
+    for (int i = 0; i < 5; i++) seen += texture(u_depth, u_sunUV + vec2(float(i % 3) - 1.0, float(i / 3) * 2.0 - 1.0) * 0.012).r >= 0.99999 ? 0.2 : 0.0;
+    if (seen > 0.0) {
+      vec2 toward = vec2(0.5) - u_sunUV;
+      float aspect = u_px.y / u_px.x;
+      vec3 fl = vec3(0.0);
+      // (how far along, size, colour, ring)
+      const vec4 G[6] = vec4[6](vec4(0.35, 0.035, 0.0, 0.0), vec4(0.6, 0.022, 1.0, 0.0), vec4(0.85, 0.055, 2.0, 1.0), vec4(1.15, 0.03, 3.0, 0.0), vec4(1.45, 0.085, 0.0, 1.0), vec4(1.75, 0.045, 2.0, 0.0));
+      const vec3 TINT[4] = vec3[4](vec3(1.0, 0.6, 0.25), vec3(0.35, 1.0, 0.6), vec3(0.6, 0.35, 1.0), vec3(0.3, 0.6, 1.0));
+      for (int i = 0; i < 6; i++) {
+        vec4 g = G[i];
+        float dd = length((v_uv - (u_sunUV + toward * g.x * 2.0 * 0.5)) * vec2(aspect, 1.0)), r = g.y;
+        float shape = g.w > 0.5 ? smoothstep(r * 0.78, r * 0.92, dd) * smoothstep(r * 1.08, r * 0.95, dd) : smoothstep(r, r * 0.55, dd);
+        fl += TINT[int(g.z)] * shape;
+      }
+      // a soft glow round the sun itself
+      fl += vec3(1.0, 0.85, 0.65) * exp(-length((v_uv - u_sunUV) * vec2(aspect, 1.0)) * 9.0) * 0.6;
+      c += fl * u_flare * seen * 0.25;
+    }
+  }
   c = sqrt(film(c));
   o = vec4(c, luma(c));
 }`;
@@ -546,12 +607,15 @@ void main() {
   float e = texture(u_img, v_uv + vec2(u_px.x, 0.0)).a, w = texture(u_img, v_uv - vec2(u_px.x, 0.0)).a;
   float lo = min(m.a, min(min(n, s), min(e, w))), hi = max(m.a, max(max(n, s), max(e, w)));
   vec3 c = m.rgb;
+  float k = 0.0;
   if (hi - lo > max(0.05, hi * 0.15)) {
     vec2 g = vec2(e - w, n - s), t = normalize(vec2(-g.y, g.x) + 1e-5) * u_px;
-    float k = clamp((hi - lo) * 2.0, 0.0, 1.0);
+    k = clamp((hi - lo) * 2.0, 0.0, 1.0);
     vec3 along = (texture(u_img, v_uv + t).rgb + texture(u_img, v_uv - t).rgb + texture(u_img, v_uv + t * 2.0).rgb * 0.5 + texture(u_img, v_uv - t * 2.0).rgb * 0.5) / 3.0;
     c = mix(c, along, k * 0.75);
   }
+  vec3 around = (texture(u_img, v_uv + vec2(0.0, u_px.y)).rgb + texture(u_img, v_uv - vec2(0.0, u_px.y)).rgb + texture(u_img, v_uv + vec2(u_px.x, 0.0)).rgb + texture(u_img, v_uv - vec2(u_px.x, 0.0)).rgb) * 0.25;
+  c = clamp(c + (m.rgb - around) * 0.35 * (1.0 - k), 0.0, 1.0);
   c *= mix(0.85, 1.0, smoothstep(1.15, 0.4, length(v_uv - 0.5) * 1.35));
   o = vec4(c, 1.0);
 }`;
