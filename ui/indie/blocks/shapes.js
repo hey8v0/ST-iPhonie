@@ -1,5 +1,5 @@
 // The boxes of blocks: what you bump into (collision), what the aiming outline goes round (selection), and the pieces
-// a shaped block is drawn from (stairs, fences and gates, panes and bars, doors, trapdoors, beds, chests) — one place
+// a shaped block is drawn from (stairs, fences and gates, panes and bars, doors, trapdoors, beds, chests, cocoa) — one place
 // for all three, so what you see is what you hit. Units: block 0–1 for collision and selection, 1/16 for pieces.
 // Some shapes join their neighbours (fences, panes): near(dx, dy, dz) gives the block next to it.
 import {BLOCKS, ID} from './blocks.js';
@@ -98,6 +98,11 @@ export function pieces(v, near = () => 0) {
       {box: [5, 6, 5, 11, 12, 11], role: 'main'}, {box: [4, 4, 4, 12, 6, 12], role: 'main'}, {box: [7, 12, 7, 9, 13, 9], role: 'main'}];
     // a portal: a thin sheet across the middle of the block, standing along x (0) or z (1)
     case 'portal': return [{box: meta & 1 ? [6, 0, 0, 10, 16, 16] : [0, 0, 6, 16, 16, 10], role: 'main'}];
+    // a cocoa pod hanging on the side of the log it faces (0 south …), bigger as it ripens (age: meta >> 2)
+    case 'cocoa': {
+      const age = Math.min(2, meta >> 2), hw = [2, 3, 4][age], h = [5, 7, 9][age], y0 = 12 - h;
+      return [{box: [[8 - hw, y0, 15 - 2 * hw, 8 + hw, 12, 15], [1, y0, 8 - hw, 1 + 2 * hw, 12, 8 + hw], [8 - hw, y0, 1, 8 + hw, 12, 1 + 2 * hw], [15 - 2 * hw, y0, 8 - hw, 15, 12, 8 + hw]][f], role: 'main'}];
+    }
     case 'anvil': {
       // the game's: a wide foot, a narrow waist, the long top lying along the way it faces
       const parts = [[2, 0, 2, 14, 4, 14], [4, 4, 3, 12, 5, 13], [6, 5, 4, 10, 10, 12], [3, 10, 0, 13, 16, 16]];
@@ -119,7 +124,7 @@ export function collisionBoxes(v, near = () => 0) {
     case 'bed': return [[0, 0, 0, 1, px(9), 1]];
     case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
     case 'brewing': return [[px(7), 0, px(7), px(9), px(14), px(9)], [px(2), 0, px(1), px(15), px(2), px(15)]];
-    case 'lectern': case 'bell': return toBlock(pieces(v, near));
+    case 'lectern': case 'bell': case 'cocoa': return toBlock(pieces(v, near));
   }
   if (!b.solid) {
     if (b.shape === 'layer' && meta > 0) return [[0, 0, 0, 1, px(meta * 2), 1]];
@@ -132,6 +137,7 @@ export function collisionBoxes(v, near = () => 0) {
     default: return FULL;
   }
 }
+const VINE = [[0, 0, px(15), 1, 1, 1], [0, 0, 0, px(1), 1, 1], [0, 0, 0, 1, 1, px(1)], [px(15), 0, 0, 1, 1, 1]];
 const TORCH = [null, [px(11), px(3), px(5.5), 1, px(13), px(10.5)], [0, px(3), px(5.5), px(5), px(13), px(10.5)], [px(5.5), px(3), px(11), px(10.5), px(13), 1], [px(5.5), px(3), 0, px(10.5), px(13), px(5)]];
 /** Boxes of the outline when aimed at (null: can't be aimed at). Liquids only when asked for. */
 export function selectionBoxes(v, liquids = false, near = () => 0) {
@@ -157,7 +163,10 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
     case 'brewing': return [[px(2), 0, px(1), px(15), px(14), px(15)]];
     case 'portal': return null;
-    case 'lectern': case 'bell': return toBlock(pieces(v, near));
+    // a vine: a thin sheet on each side it clings to
+    case 'vine': { const out = VINE.filter((q, d) => meta & 1 << d); return out.length ? out : [VINE[0]]; }
+    case 'tall': return [[px(2), 0, px(2), px(14), 1, px(14)]];
+    case 'lectern': case 'bell': case 'cocoa': return toBlock(pieces(v, near));
     case 'stairs': case 'fence': case 'gate': case 'pane': case 'door': case 'trapdoor': case 'chest': case 'anvil': return toBlock(pieces(v, near));
     default: return FULL;
   }

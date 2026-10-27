@@ -170,6 +170,17 @@ block('fletching_table', '制箭台', {tex: {top: 'fletching_table_top', bottom:
 block('smithing_table', '锻造台', {tex: {top: 'smithing_table_top', bottom: 'smithing_table_bottom', side: 'smithing_table_side', front: 'smithing_table_front'}, hard: 2.5, tool: T.AXE, facing: true});
 block('smoker', '烟熏炉', {tex: {top: 'smoker_top', bottom: 'smoker_bottom', side: 'smoker_side', front: 'smoker_front', frontOn: 'smoker_front_on'}, hard: 3.5, tool: T.PICK, tier: 0, facing: true, use: 'furnace', cook: 'food'});
 block('blast_furnace', '高炉', {tex: {top: 'blast_furnace_top', bottom: 'blast_furnace_top', side: 'blast_furnace_side', front: 'blast_furnace_front', frontOn: 'blast_furnace_front_on'}, hard: 3.5, tool: T.PICK, tier: 0, facing: true, use: 'furnace', cook: 'ore'});
+// forests: vines (state: a bit for each side it clings to, 1 << the direction in shapes.js DIR — 1 south, 2 west,
+// 4 north, 8 east; you climb them, they grow down; only shears take them), cocoa on jungle logs (facing the log 0–3,
+// age · 4: 0–2), and the plants two blocks tall (the upper half 8; the item is the whole plant)
+block('vine', '藤蔓', {tex: all('vine'), shape: 'vine', pass: 'cutout', hard: 0.2, tool: T.AXE, solid: false, replace: true, climb: true, tint: 'foliage', drop: null});
+block('cocoa', '可可果', {tex: all('cocoa_stage2'), stages: ['cocoa_stage0', 'cocoa_stage1', 'cocoa_stage2'], shape: 'cocoa', pass: 'cutout', hard: 0.2, tool: T.AXE, solid: false, item: false,
+  drop: (r, meta) => ['cocoa_beans', meta >> 2 >= 2 ? 3 : 1]});
+const tall = (name, zh, o = {}) => block(name, zh, {tex: {all: `${name}_top`, top: `${name}_top`, bottom: `${name}_bottom`}, shape: 'tall', pass: 'cutout', hard: 0, solid: false, ...o});
+tall('tall_grass', '高草丛', {tint: 'grass', replace: true, drop: (r, meta) => !(meta & 8) && r() < 0.125 ? 'wheat_seeds' : null});
+tall('large_fern', '大型蕨', {tint: 'grass', replace: true, drop: (r, meta) => !(meta & 8) && r() < 0.125 ? 'wheat_seeds' : null});
+tall('sunflower', '向日葵', {tex: {all: 'sunflower_front', top: 'sunflower_top', bottom: 'sunflower_bottom', front: 'sunflower_front', back: 'sunflower_back'}});
+for (const [n, zh] of [['lilac', '丁香'], ['rose_bush', '玫瑰丛'], ['peony', '牡丹']]) tall(n, zh);
 
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
@@ -210,6 +221,8 @@ item('blaze_rod', '烈焰棒', {fuel: 120}); item('blaze_powder', '烈焰粉'); 
 item('glass_bottle', '玻璃瓶'); item('potion', '药水', {stack: 1, drink: true}); item('splash_potion', '喷溅药水', {stack: 1, thrown: true});
 item('fermented_spider_eye', '发酵蛛眼'); item('sugar', '糖'); item('golden_carrot', '金胡萝卜', {food: 6, sat: 14.4}); item('glistering_melon_slice', '闪烁的西瓜片');
 item('fire_charge', '火焰弹');
+// from the jungle: cocoa beans (put on the side of a jungle log they grow there), and cookies made with them
+item('cocoa_beans', '可可豆'); item('cookie', '曲奇', {food: 2, sat: 0.4});
 export const TIERS = {wooden: {zh: '木', tier: 0, speed: 2, uses: 59, enchantability: 15}, stone: {zh: '石', tier: 1, speed: 4, uses: 131, enchantability: 5}, iron: {zh: '铁', tier: 2, speed: 6, uses: 250, enchantability: 14},
   golden: {zh: '金', tier: 0, speed: 12, uses: 32, enchantability: 22}, diamond: {zh: '钻石', tier: 3, speed: 8, uses: 1561, enchantability: 10}};
 const KINDS = {pickaxe: '镐', axe: '斧', shovel: '锹', sword: '剑', hoe: '锄'};

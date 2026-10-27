@@ -25,9 +25,11 @@ const NEIGHBOURS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], 
 const LIQUID = new Set([ID.water, ID.lava]);
 const GRAVITY = new Set(BLOCKS.filter(b => b.gravity).map(b => b.id));
 const CROP = new Set([ID.wheat, ID.carrots, ID.potatoes]);
-const PAIRED = new Set(BLOCKS.filter(b => b.shape === 'door' || b.shape === 'bed').map(b => b.id));
+const PAIRED = new Set(BLOCKS.filter(b => b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall').map(b => b.id));
 const FACE_DIR = [[0, 1], [-1, 0], [0, -1], [1, 0]];
-const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern'].includes(b.shape)).map(b => b.id));
+const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa'].includes(b.shape)).map(b => b.id));
+// the tall flowers: bone meal gives another one
+const TALL_FLOWERS = new Set([ID.sunflower, ID.lilac, ID.rose_bush, ID.peony]);
 const hexRGB = h => parseInt(h.slice(1), 16);
 const TINTS = BIOMES.map(b => ({grass: hexRGB(b.grass), foliage: hexRGB(b.foliage), water: hexRGB(b.water)}));
 
@@ -241,7 +243,7 @@ export class World {
       else if (id === ID.nether_portal) this.schedule(nx, ny, nz, 1);
       else if (GRAVITY.has(id)) this.schedule(nx, ny, nz, 2);
       else if (PLANT.has(id) && dy !== -1) this.schedule(nx, ny, nz, 1);
-      else if (PAIRED.has(id)) this.schedule(nx, ny, nz, 1);
+      else if (PAIRED.has(id) || id === ID.vine) this.schedule(nx, ny, nz, 1);
     }
   }
   schedule(x, y, z, delay) { const k = `${x},${y},${z}`; const t = this.tick + delay; if (!this.due.has(k) || this.due.get(k) > t) this.due.set(k, t); }
@@ -324,6 +326,26 @@ export class World {
     } else if (CROP.has(id)) {
       const meta = v >>> 12;
       if (meta < 7 && lit() >= 9 && r() < (this.get(x, y - 1, z) >>> 12 ? 0.33 : 0.16)) this.set(x, y, z, withMeta(id, meta + 1));
+    } else if (id === ID.cocoa) {
+      // one chance in five a random tick (the game's), up to age 2
+      const meta = v >>> 12;
+      if (meta >> 2 < 2 && r() < 0.2) this.set(x, y, z, withMeta(id, meta + 4));
+    } else if (id === ID.vine) {
+      // the game's: a chance in four; a random way — down (or a side it already has): a vine below with some of its sides;
+      // a side it has not: onto the block there if it is a wall (when there are not many vines about)
+      if (r() >= 0.25) return;
+      const d = Math.floor(r() * 6), faces = v >>> 12;
+      if (d < 4 && !(faces & 1 << d)) {
+        const n = this.get(x + FACE_DIR[d][0], y, z + FACE_DIR[d][1]) & 0xFFF;
+        if (OPAQUE[n] === 1 && this.vinesNear(x, y, z) < 5) this.set(x, y, z, withMeta(ID.vine, faces | 1 << d));
+      } else if (d !== 4 && y > MINY) {
+        const below = this.get(x, y - 1, z);
+        if (below && (below & 0xFFF) !== ID.vine) return;
+        let keep = 0;
+        for (let k = 0; k < 4; k++) if (faces & 1 << k && r() < 0.5) keep |= 1 << k;
+        const now = below ? below >>> 12 : 0;
+        if (keep & ~now) this.set(x, y - 1, z, withMeta(ID.vine, now | keep));
+      }
     } else if (id === ID.nether_wart) {
       // nether wart grows in the dark too: one chance in ten a random tick
       const meta = v >>> 12;
@@ -339,27 +361,36 @@ export class World {
       else if (!wet && !this.get(x, y + 1, z) && r() < 0.2) this.set(x, y, z, ID.dirt);
     }
   }
+  /** Vines within four blocks across and one up or down (the game's limit on spreading). */
+  vinesNear(x, y, z) {
+    let n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) if ((this.get(x + dx, y + dy, z + dz) & 0xFFF) === ID.vine) n++;
+    return n;
+  }
   get darkness() { return this.dayDark || 0; }
   waterNear(x, y, z) {
     for (let dy = 0; dy <= 1; dy++) for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) if ((this.get(x + dx, y + dy, z + dz) & 0xFFF) === ID.water) return true;
     return false;
   }
   growSapling(x, y, z, kind) {
-    const tree = {oak: 'oak', birch: 'birch', spruce: 'spruce', jungle: 'jungle', acacia: 'acacia', dark_oak: 'dark_oak'}[kind];
-    if (kind === 'dark_oak') {
-      // needs four in a square
-      const sap = this.get(x, y, z);
-      let base = null;
+    const sap = this.get(x, y, z), put = (wx, wy, wz, v, force) => this.treePut(wx, wy, wz, v, force), get = (a, b, c) => this.get(a, b, c);
+    // four in a square: a giant spruce (or pine) or jungle tree; dark oak only grows from four
+    let base = null;
+    if (kind === 'spruce' || kind === 'jungle' || kind === 'dark_oak')
       for (const [ox, oz] of [[0, 0], [-1, 0], [0, -1], [-1, -1]]) if ([[0, 0], [1, 0], [0, 1], [1, 1]].every(([a, b]) => this.get(x + ox + a, y, z + oz + b) === sap)) { base = [x + ox, z + oz]; break; }
-      if (!base) return;
+    if (kind === 'dark_oak' && !base) return;
+    if (base) {
       for (const [a, b] of [[0, 0], [1, 0], [0, 1], [1, 1]]) this.set(base[0] + a, y, base[1] + b, 0);
-      growTree({x: base[0], y: y - 1, z: base[1], kind: tree, r: this.r}, (wx, wy, wz, v, force) => this.treePut(wx, wy, wz, v, force));
+      const tree = kind === 'spruce' ? (this.r() < 0.5 ? 'mega_spruce' : 'mega_pine') : kind === 'jungle' ? 'mega_jungle' : 'dark_oak';
+      growTree({x: base[0], y: y - 1, z: base[1], kind: tree, r: this.r}, put, get);
       return;
     }
     // room to grow
     for (let k = 1; k < 6; k++) { const a = this.get(x, y + k, z); if (a && !BLOCKS[a & 0xFFF].replace && !BLOCKS[a & 0xFFF].name.endsWith('_leaves')) return; }
     this.set(x, y, z, 0);
-    growTree({x, y: y - 1, z, kind: tree, r: this.r}, (wx, wy, wz, v, force) => this.treePut(wx, wy, wz, v, force));
+    // from a sapling: one oak in ten a fancy oak, a jungle tree without its vines (the game's)
+    const tree = kind === 'oak' ? (this.r() < 0.1 ? 'fancy_oak' : 'oak') : kind === 'jungle' ? 'jungle_plain' : kind;
+    growTree({x, y: y - 1, z, kind: tree, r: this.r}, put, get);
   }
   treePut(x, y, z, v, force) {
     const old = this.get(x, y, z), ob = BLOCKS[old & 0xFFF];
@@ -381,6 +412,8 @@ export class World {
       return;
     }
     if (PLANT.has(id)) { if (!this.supported(x, y, z, v)) this.breakBlock(x, y, z); return; }
+    if (id === ID.vine) { const keep = this.vineHolds(x, y, z, v >>> 12); if (keep !== v >>> 12) this.set(x, y, z, keep ? withMeta(ID.vine, keep) : 0); return; }
+    if (BLOCKS[id].shape === 'tall' && !(v >>> 12 & 8) && !this.supported(x, y, z, withMeta(ID.short_grass, 0))) { this.breakBlock(x, y, z); return; }
     // a door or a bed whose other half is gone goes too (its item came from the half that went)
     if (PAIRED.has(id)) { const [ox, oy, oz] = this.partner(x, y, z, v); if ((this.get(ox, oy, oz) & 0xFFF) !== id) this.set(x, y, z, 0); return; }
     if (LIQUID.has(id)) this.flow(x, y, z, v);
@@ -390,7 +423,7 @@ export class World {
   /** Where the other half of a door (above or below) or a bed (head or foot) is. */
   partner(x, y, z, v) {
     const m = v >>> 12;
-    if (BLOCKS[v & 0xFFF].shape === 'door') return [x, m & 8 ? y - 1 : y + 1, z];
+    if (BLOCKS[v & 0xFFF].shape === 'door' || BLOCKS[v & 0xFFF].shape === 'tall') return [x, m & 8 ? y - 1 : y + 1, z];
     const [dx, dz] = FACE_DIR[m & 3], s = m & 4 ? -1 : 1;
     return [x + dx * s, y, z + dz * s];
   }
@@ -404,6 +437,7 @@ export class World {
     }
     if (b.shape === 'wall') { const [dx, dz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][v >>> 12 & 3]; return OPAQUE[this.get(x + dx, y, z + dz) & 0xFFF] === 1; }
     if (b.shape === 'lantern') return !!below && BLOCKS[bid].solid;
+    if (id === ID.cocoa) { const [dx, dz] = FACE_DIR[v >>> 12 & 3]; return (this.get(x + dx, y, z + dz) & 0xFFF) === ID.jungle_log; }
     if (CROP.has(id)) return bid === ID.farmland;
     if (id === ID.nether_wart) return bid === ID.soul_sand;
     if (id === ID.sugar_cane) return bid === ID.sugar_cane || ((bid === ID.sand || bid === ID.grass_block || bid === ID.dirt || bid === ID.red_sand) && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => (this.get(x + dx, y - 1, z + dz) & 0xFFF) === ID.water));
@@ -412,6 +446,17 @@ export class World {
     if (b.shape === 'layer') return OPAQUE[bid] === 1 || BLOCKS[bid].name.endsWith('_leaves');
     if (b.shape === 'cross') return bid === ID.grass_block || bid === ID.dirt || bid === ID.podzol || bid === ID.coarse_dirt || bid === ID.farmland || bid === ID.moss_block || bid === ID.mud || (b.name.endsWith('mushroom') && OPAQUE[bid] === 1);
     return true;
+  }
+  /** The sides a vine still clings to: a full block there (or leaves), or the vine above hanging on that side. */
+  vineHolds(x, y, z, faces) {
+    let keep = 0;
+    const up = this.get(x, y + 1, z), upFaces = (up & 0xFFF) === ID.vine ? up >>> 12 : 0;
+    for (let d = 0; d < 4; d++) {
+      if (!(faces & 1 << d)) continue;
+      const n = this.get(x + FACE_DIR[d][0], y, z + FACE_DIR[d][1]) & 0xFFF;
+      if (OPAQUE[n] === 1 || BLOCKS[n].name.endsWith('_leaves') || upFaces & 1 << d) keep |= 1 << d;
+    }
+    return keep;
   }
   /** Liquid levels in the meta: 0 a source, 1–7 flowing (higher is thinner), 8 falling. */
   flow(x, y, z, v) {
@@ -502,6 +547,13 @@ export class World {
     const v = this.get(x, y, z), id = v & 0xFFF, b = BLOCKS[id], r = this.r;
     if (CROP.has(id)) { if ((v >>> 12) >= 7) return false; this.set(x, y, z, withMeta(id, Math.min(7, (v >>> 12) + 2 + Math.floor(r() * 4)))); return true; }
     if (b.name.endsWith('_sapling')) { if (r() < 0.45) this.growSapling(x, y, z, b.name.replace('_sapling', '')); return true; }
+    if (id === ID.cocoa) { if ((v >>> 12) >> 2 >= 2) return false; this.set(x, y, z, withMeta(id, (v >>> 12) + 4)); return true; }
+    if ((id === ID.short_grass || id === ID.fern) && !this.get(x, y + 1, z)) {
+      const t = id === ID.fern ? ID.large_fern : ID.tall_grass;
+      this.set(x, y, z, t); this.set(x, y + 1, z, withMeta(t, 8));
+      return true;
+    }
+    if (TALL_FLOWERS.has(id)) { this.post({type: 'drops', x: x + 0.5, y: y + 0.5, z: z + 0.5, items: [[b.name, 1]]}); return true; }
     if (id === ID.grass_block && !this.get(x, y + 1, z)) {
       for (let k = 0; k < 48; k++) {
         const gx = x + Math.floor(r() * 7) - 3, gz = z + Math.floor(r() * 7) - 3;

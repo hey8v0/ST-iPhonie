@@ -175,12 +175,13 @@ export class Body {
       if (Math.hypot(across.dx, across.dz) > Math.hypot(r.dx, r.dz) + 1e-4 && down.down) { r = {...across, hitY: true, down: true, dy: 0}; result.stepped = this.y - sy; }
       else { this.x = save.x; this.y = save.y; this.z = save.z; }
     }
-    if (this.climbing && (r.hitX || r.hitZ) && !this.sneaking) this.vy = 0.2;
     this.collidedX = r.hitX || r.hitZ;
     if (r.hitX) this.vx = 0; if (r.hitZ) this.vz = 0;
     const wasGround = this.onGround;
     this.onGround = r.down;
     if (r.hitY) { if (this.vy < 0 && this.fall > 0) { result.landed = this.fall; } this.vy = 0; }
+    // against a wall on a ladder or vine: up (after the landing above, or standing on the ground it never starts — the game's order)
+    if (this.climbing && (r.hitX || r.hitZ) && !this.sneaking) this.vy = 0.2;
     if (this.onGround) this.fall = 0; else if (this.y < sy) this.fall += sy - this.y;
     if (this.onGround && !wasGround && !result.landed) result.landed = 0.001;
     this.vy = (this.vy - 0.08) * 0.98;

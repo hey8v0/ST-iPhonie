@@ -93,7 +93,7 @@ export function drawVillages(col, seed) {
           const y = top(x, z, landAt(w, x, z).h), g = get(x, y, z) & 0xFFF;
           // over water a plank bridge; on land a path, with what grew on it cleared
           put(x, y, z, g === ID.water ? B(st.flat) : B('dirt_path'));
-          for (let k = 1; k <= 3; k++) { const a = get(x, y + k, z); if (a && (BLOCKS[a & 0xFFF].replace || BLOCKS[a & 0xFFF].shape === 'cross' || (a & 0xFFF) === ID.snow)) put(x, y + k, z, 0); }
+          for (let k = 1; k <= 3; k++) { const a = get(x, y + k, z); if (a && (BLOCKS[a & 0xFFF].replace || BLOCKS[a & 0xFFF].shape === 'cross' || BLOCKS[a & 0xFFF].shape === 'tall' || (a & 0xFFF) === ID.snow)) put(x, y + k, z, 0); }
         }
         continue;
       }

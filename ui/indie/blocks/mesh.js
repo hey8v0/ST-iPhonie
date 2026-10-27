@@ -234,6 +234,35 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
         [[x + k, y, z], [x + k, y, z + 1], [x + k, y + 1, z + 1], [x + k, y + 1, z]],             // faces east: on the west wall
       ][meta & 3];
       quad(out, pts, layer, UVQ, lt, lb, WHITE, 0, 4);
+    } else if (shape === 'vine') {
+      // a sheet just off each side it clings to (bit d: the side towards DIR d), facing away from it
+      const layer = tex(b.tex.all), L0 = L(i), lt = L0 >> 4, lb = L0 & 15, k = 1 / 16;
+      const sheets = [
+        [[x, y, z + 1 - k], [x + 1, y, z + 1 - k], [x + 1, y + 1, z + 1 - k], [x, y + 1, z + 1 - k]],
+        [[x + k, y, z], [x + k, y, z + 1], [x + k, y + 1, z + 1], [x + k, y + 1, z]],
+        [[x + 1, y, z + k], [x, y, z + k], [x, y + 1, z + k], [x + 1, y + 1, z + k]],
+        [[x + 1 - k, y, z + 1], [x + 1 - k, y, z], [x + 1 - k, y + 1, z], [x + 1 - k, y + 1, z + 1]],
+      ];
+      for (let d = 0; d < 4; d++) if (meta & 1 << d) quad(out, sheets[d], layer, UVQ, lt, lb, tintC, 0, [5, 0, 4, 1][d]);
+    } else if (shape === 'tall') {
+      // a plant two blocks tall: crossed like the others, each half its own picture, both halves at the same spot
+      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, top = meta & 8, layer = tex(top ? b.tex.top : b.tex.bottom);
+      const h = hash2(ox + x, oz + z), jx = ((h & 15) / 15 - 0.5) * 0.3, jz = ((h >> 4 & 15) / 15 - 0.5) * 0.3;
+      const cx = x + 0.5 + jx, cz = z + 0.5 + jz, r = 0.45, flags = wave ? 2 : 3;
+      quad(out, [[cx - r, y, cz - r], [cx + r, y, cz + r], [cx + r, y + 1, cz + r], [cx - r, y + 1, cz - r]], layer, UVQ, lt, lb, tintC, flags);
+      quad(out, [[cx - r, y, cz + r], [cx + r, y, cz - r], [cx + r, y + 1, cz - r], [cx - r, y + 1, cz + r]], layer, UVQ, lt, lb, tintC, flags);
+      if (top && b.tex.front) {
+        // the sunflower's head, turned to the east and tipped up a little: its face that way, its back the other
+        const xb = cx + 0.17, xt = cx - 0.08, y0 = y - 1 / 16, y1 = y + 15 / 16, z0 = cz - 0.44, z1 = cz + 0.44;
+        quad(out, [[xb, y0, z1], [xb, y0, z0], [xt, y1, z0], [xt, y1, z1]], tex(b.tex.front), UVQ, lt, lb, WHITE, 3, 0, false);
+        quad(out, [[xb - 0.01, y0, z0], [xb - 0.01, y0, z1], [xt - 0.01, y1, z1], [xt - 0.01, y1, z0]], tex(b.tex.back), UVQ, lt, lb, WHITE, 3, 1, false);
+      }
+    } else if (shape === 'cocoa') {
+      // the pod (its picture laid out as the game's: sides from (15 − w, 4), top and bottom from the corner)
+      const age = Math.min(2, meta >> 2), layer = tex(b.stages[age]), w = [4, 6, 8][age], hh = [5, 7, 9][age], t = [4, 6, 7][age];
+      const side = [15 - w, 4, 15, 4 + hh], cap = [0, 0, t, t];
+      const [{box: [x0, y0, z0, x1, y1, z1]}] = pieces(v);
+      box(out, x, y, z, x0, y0, z0, x1, y1, z1, () => layer, WHITE, {uvs: [side, side, cap, cap, side, side]});
     }
   }
 

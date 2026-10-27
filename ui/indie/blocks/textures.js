@@ -825,6 +825,90 @@ const blast = (face, on) => { const p = furnace(face, on); for (let i = 0; i < S
 BLOCK_ART.smoker_top = () => smoker('top'); BLOCK_ART.smoker_bottom = () => smoker('top'); BLOCK_ART.smoker_side = () => smoker('side'); BLOCK_ART.smoker_front = () => smoker('front', false); BLOCK_ART.smoker_front_on = () => smoker('front', true);
 BLOCK_ART.blast_furnace_top = () => blast('top'); BLOCK_ART.blast_furnace_side = () => blast('side'); BLOCK_ART.blast_furnace_front = () => blast('front', false); BLOCK_ART.blast_furnace_front_on = () => blast('front', true);
 
+// ---------- forests: vines, cocoa, the plants two blocks tall ----------
+/** Vines: stems wandering down with leaves along them (grey: the foliage colour is put on). */
+function vine() {
+  const p = pic(), r = rng(nameSeed('vine'));
+  for (const x0 of [2, 6, 10, 13]) {
+    let x = x0;
+    for (let y = 0; y < S; y++) {
+      if (r() < 0.25) x = clamp(x + (r() < 0.5 ? -1 : 1), 0, 15);
+      const g = 95 + r() * 30; p.set(x, y, [g, g, g]);
+      if (r() < 0.45) { const lx = x + (r() < 0.5 ? -1 : 1), g2 = 130 + r() * 60; p.set(lx, y, [g2, g2, g2]); if (r() < 0.5) p.set(lx, y + 1, [g2 - 20, g2 - 20, g2 - 20]); }
+    }
+  }
+  return p;
+}
+/**
+ * A cocoa pod at its age (0 green and small, 1 yellow, 2 ripe brown), laid out as the game's pictures are: the top
+ * in the corner (0, 0)–(t, t), the sides (15 − w, 4)–(15, 4 + h) with ridges down them, the stem at (12, 0)–(16, 4).
+ */
+function cocoaPod(age) {
+  const p = pic(), w = [4, 6, 8][age], h = [5, 7, 9][age], t = [4, 6, 7][age];
+  const base = hex(['#7f9c3c', '#c49a3c', '#a65a2a'][age]), dark = mul(base, 0.72), light = mix(base, [255, 255, 255], 0.25);
+  for (let y = 0; y < t; y++) for (let x = 0; x < t; x++) p.set(x, y, (x + y) % 3 ? base : light);
+  for (let y = 4; y < 4 + h; y++) for (let x = 15 - w; x < 15; x++) {
+    const k = x - (15 - w);
+    p.set(x, y, y === 4 ? light : y === 3 + h ? dark : k % 3 === 0 ? dark : k % 3 === 1 ? base : mix(base, light, 0.5));
+  }
+  for (let x = 12; x < 16; x++) { p.set(x, 1, hex('#6a4a22')); if (x > 13) p.set(x, 2, hex('#5a7a2a')); }
+  return p;
+}
+/** Tall grass and the large fern, half by half: the blades go on from the bottom picture into the top one. */
+function tallGrass(seed, top, fern) {
+  const p = pic(), r = rng(seed), shade = rng(seed + (top ? 7 : 3));
+  for (let b = 0; b < (fern ? 6 : 11); b++) {
+    const x0 = 1 + Math.floor(r() * 14), lean = (r() - 0.5) * (fern ? 1.2 : 0.6), end = 5 + Math.floor(r() * 10);
+    const n = top ? end : S;
+    for (let i = 0; i < n; i++) {
+      const k = top ? i + 16 : i, y = 15 - i, x = Math.round(x0 + lean * k * 0.25), g = 100 + Math.min(k, 26) * 4 + shade() * 18;
+      if (x >= 0 && x < S) p.set(x, y, [g, g, g]);
+      if (fern && i % 2 === 0 && i > 0) for (const s of [-1, 1]) { const xx = x + s; if (xx >= 0 && xx < S) p.set(xx, y + 1, [g - 20, g - 20, g - 20]); }
+    }
+  }
+  return p;
+}
+/** The tall flowers: stems and leaves, with clusters of flowers (more on the top half); a stem only for the sunflower. */
+function tallFlower(seed, top, flower, {leaf = '#3f7f2a', stem = false} = {}) {
+  const p = pic(), r = rng(seed + (top ? 1 : 0)), L = hex(leaf);
+  for (const x0 of stem ? [7] : [5, 8, 11]) for (let y = top ? 6 : 0; y < S; y++) p.set(x0 + (y % 5 === 0 ? 1 : 0), y, mul(L, 0.75));
+  const leaves = !stem ? (top ? 14 : 30) : top ? 0 : 8;
+  for (let k = 0; k < leaves; k++) {
+    const x = !stem ? 2 + Math.floor(r() * 12) : 5 + Math.floor(r() * 6), y = (top ? 6 : 0) + Math.floor(r() * (top ? 10 : 16));
+    p.set(x, y, mul(L, 0.85 + r() * 0.35));
+  }
+  if (flower) {
+    const F = hex(flower);
+    for (let k = 0; k < (top ? 9 : 3); k++) {
+      const cx = 3 + Math.floor(r() * 10), cy = (top ? 1 : 2) + Math.floor(r() * (top ? 9 : 10));
+      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1], [-1, 0], [0, -1]]) if (r() < 0.85) p.set(cx + dx, cy + dy, mul(F, 0.8 + r() * 0.35));
+    }
+  }
+  return p;
+}
+/** The sunflower's head: petals round a brown middle (front), or its green back with the petals' tips. */
+function sunflowerHead(front) {
+  const p = pic();
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const dx = x - 7.5, dy = y - 7.5, d = Math.hypot(dx, dy), petal = 6 + Math.cos(Math.atan2(dy, dx) * 10) * 1.3;
+    if (d > petal + 0.5) continue;
+    if (front) p.set(x, y, d < 3.6 ? mul(hex('#5a3a1a'), 0.8 + hash(41, x, y) * 0.4) : mul(hex('#f2c21a'), 0.85 + d / 40));
+    else p.set(x, y, d < 4.5 ? mul(hex('#5e8a2a'), 0.85 + hash(42, x, y) * 0.3) : hex('#e0b21a'));
+  }
+  return p;
+}
+BLOCK_ART.vine = () => vine();
+for (let a = 0; a < 3; a++) BLOCK_ART[`cocoa_stage${a}`] = () => cocoaPod(a);
+BLOCK_ART.tall_grass_bottom = () => tallGrass(151, false, false); BLOCK_ART.tall_grass_top = () => tallGrass(151, true, false);
+BLOCK_ART.large_fern_bottom = () => tallGrass(153, false, true); BLOCK_ART.large_fern_top = () => tallGrass(153, true, true);
+BLOCK_ART.sunflower_bottom = () => tallFlower(155, false, null, {leaf: '#4f8a2a', stem: true}); BLOCK_ART.sunflower_top = () => tallFlower(155, true, null, {leaf: '#4f8a2a', stem: true});
+BLOCK_ART.sunflower_front = () => sunflowerHead(true); BLOCK_ART.sunflower_back = () => sunflowerHead(false);
+BLOCK_ART.lilac_bottom = () => tallFlower(157, false, null); BLOCK_ART.lilac_top = () => tallFlower(157, true, '#b98bd0');
+BLOCK_ART.rose_bush_bottom = () => tallFlower(159, false, '#c8202a'); BLOCK_ART.rose_bush_top = () => tallFlower(159, true, '#c8202a');
+BLOCK_ART.peony_bottom = () => tallFlower(161, false, null); BLOCK_ART.peony_top = () => tallFlower(161, true, '#e8a6d8');
+ITEM_ART.cocoa_beans = () => icon([{mask: mask().disc(6, 8, 3, 2.2).disc(10, 10.5, 3, 2.2), color: '#7a4a24', light: '#a86a3a', dark: '#4a2a12', outline: '#1e1006'}]);
+ITEM_ART.cookie = () => { const p = icon([{mask: mask().disc(8, 8.5, 5.5, 5), color: '#d18a3a', light: '#f0b060', dark: '#94581e', outline: '#3a1e06', grain: true}]); for (const [x, y] of [[6, 6], [10, 7], [7, 10], [10, 11], [5, 9]]) p.set(x, y, hex('#4a2a12')); return p; };
+
 /** Frames per animated texture and ticks per frame. */
 export const ANIMATED = {water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};
 /** Our drawing of a texture by name: {w, h, frames: [Uint8ClampedArray], time} or null when we have none. */

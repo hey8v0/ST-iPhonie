@@ -89,6 +89,7 @@ shaped(['###'], {'#': 'oak_planks'}, 'oak_slab', 6);
 shaped(['###'], {'#': 'cobblestone'}, 'cobblestone_slab', 6);
 shaped(['###'], {'#': 'smooth_stone'}, 'stone_slab', 6);
 shaped(['###'], {'#': 'wheat'}, 'bread');
+shaped(['#c#'], {'#': 'wheat', c: 'cocoa_beans'}, 'cookie', 8);
 shaped(['# #', ' # '], {'#': '#planks'}, 'bowl', 4);
 shaped(['###', '###', '###'], {'#': 'melon_slice'}, 'melon');
 shaped(['###', '###', '###'], {'#': 'ice'}, 'packed_ice');

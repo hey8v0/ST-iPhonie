@@ -6,6 +6,8 @@
 import {fractal, simplex, hash, rng} from './noise.js';
 import {ID, MINY, HEIGHT, SECTIONS, SEA, withMeta} from './blocks.js';
 import {drawVillages} from './village.js';
+import {growTree} from './trees.js';
+export {growTree};
 
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -36,6 +38,12 @@ export const BIOMES = [
   {name: 'stony_peaks', zh: '裸岩山峰', grass: '#9abe4b', foliage: '#82ac1e', water: '#3f76e4'},
   {name: 'snowy_slopes', zh: '积雪山坡', grass: '#80b497', foliage: '#60a17b', water: '#3d57d6', cold: true},
   {name: 'nether_wastes', zh: '下界荒地', grass: '#bfb755', foliage: '#aea42a', water: '#3f76e4', dry: true, nether: true},
+  // variants where the weirdness noise is far from the middle: the old growth forests, flower forest, sunflower plains
+  {name: 'old_growth_pine_taiga', zh: '原始松木针叶林', grass: '#86b87f', foliage: '#68a55f', water: '#3f76e4'},
+  {name: 'old_growth_spruce_taiga', zh: '原始云杉针叶林', grass: '#86b87f', foliage: '#68a55f', water: '#3f76e4'},
+  {name: 'old_growth_birch_forest', zh: '原始桦木森林', grass: '#88bb67', foliage: '#6ba941', water: '#3f76e4'},
+  {name: 'flower_forest', zh: '繁花森林', grass: '#79c05a', foliage: '#59ae30', water: '#3f76e4'},
+  {name: 'sunflower_plains', zh: '向日葵平原', grass: '#91bd59', foliage: '#77ab2f', water: '#3f76e4'},
 ];
 export const BIOME = Object.fromEntries(BIOMES.map((b, i) => [b.name, i]));
 
@@ -49,7 +57,7 @@ export function worldOf(seed) {
     temp: fractal(seed + 4, {scale: 1300, octaves: 3}), hum: fractal(seed + 5, {scale: 1000, octaves: 3}), river: fractal(seed + 6, {scale: 850, octaves: 4}),
     hills: fractal(seed + 7, {scale: 140, octaves: 4}), detail: fractal(seed + 8, {scale: 32, octaves: 2}), warp: fractal(seed + 9, {scale: 90, octaves: 2}),
     over: simplex(seed + 10), cheese: fractal(seed + 11, {scale: 70, octaves: 2}), spagA: simplex(seed + 12), spagB: simplex(seed + 13), noodle: simplex(seed + 14),
-    open: fractal(seed + 15, {scale: 60, octaves: 2}), land: new Map(),
+    open: fractal(seed + 15, {scale: 60, octaves: 2}), weird: fractal(seed + 16, {scale: 480, octaves: 2}), land: new Map(),
   };
   worlds.set(seed, w);
   return w;
@@ -59,7 +67,7 @@ const PTS = [[-1, 28], [-0.55, 34], [-0.35, 46], [-0.18, 56], [-0.06, 62], [0.02
 /** The large-scale land at a grid point (every 4 blocks): height before detail, mountain share, climate, river. */
 function rawLand(w, x, z) {
   const wx = x + w.warp.n2(x, z) * 18, wz = z + w.warp.n2(z + 500, x - 500) * 18;
-  const c = clamp(w.cont.n2(wx, wz) * 1.9 + 0.12, -1, 1), e = w.ero.n2(wx, wz) * 1.6, t = w.temp.n2(x, z) * 1.7, hu = w.hum.n2(x, z) * 1.7;
+  const c = clamp(w.cont.n2(wx, wz) * 1.9 + 0.12, -1, 1), e = w.ero.n2(wx, wz) * 1.6, t = w.temp.n2(x, z) * 1.7, hu = w.hum.n2(x, z) * 1.7, wd = w.weird.n2(x, z) * 1.6;
   // land height over continentalness
   let base = PTS[0][1];
   for (let i = 1; i < PTS.length; i++) if (c <= PTS[i][0]) { const [c0, h0] = PTS[i - 1], [c1, h1] = PTS[i]; base = lerp(h0, h1, (c - c0) / (c1 - c0)); break; } else base = PTS[i][1];
@@ -75,7 +83,7 @@ function rawLand(w, x, z) {
     const bed = SEA - 3 - (1 - k) * 2;
     if (h > bed) { h = lerp(bed, h, k * k * (1 - mountain * 0.5) + mountain * 0.5 * k); river = rv < width ? 1 - rv / width : 0; }
   }
-  return {h, mountain, c, e, t, hu, river};
+  return {h, mountain, c, e, t, hu, river, wd};
 }
 function gridLand(w, gx, gz) {
   const key = gx * 131072 + gz;
@@ -89,9 +97,9 @@ export function landAt(w, x, z) {
   const gx = Math.floor(x / 4), gz = Math.floor(z / 4), fx = (x - gx * 4) / 4, fz = (z - gz * 4) / 4;
   const a = gridLand(w, gx, gz), b2 = gridLand(w, gx + 1, gz), c2 = gridLand(w, gx, gz + 1), d = gridLand(w, gx + 1, gz + 1);
   const mixed = k => lerp(lerp(a[k], b2[k], fx), lerp(c2[k], d[k], fx), fz);
-  const mountain = mixed('mountain'), c = mixed('c'), e = mixed('e'), t = mixed('t'), hu = mixed('hu'), river = mixed('river');
+  const mountain = mixed('mountain'), c = mixed('c'), e = mixed('e'), t = mixed('t'), hu = mixed('hu'), river = mixed('river'), wd = mixed('wd');
   const h = Math.round(clamp(mixed('h') + w.detail.n2(x, z) * 1.5, MINY + 8, MINY + HEIGHT - 20));
-  return {h, mountain, c, e, t, hu, river, biome: biomeOf(h, mountain, c, t, hu, river)};
+  return {h, mountain, c, e, t, hu, river, biome: biomeOf(h, mountain, c, t, hu, river, wd)};
 }
 /**
  * The land seen from far off (the distant view): the large-scale grid point nearest (x, z) only — no blending, no
@@ -99,9 +107,9 @@ export function landAt(w, x, z) {
  */
 export function coarseLand(w, x, z) {
   const l = gridLand(w, Math.round(x / 4), Math.round(z / 4)), h = Math.round(clamp(l.h, MINY + 8, MINY + HEIGHT - 20));
-  return {h, mountain: l.mountain, biome: biomeOf(h, l.mountain, l.c, l.t, l.hu, l.river)};
+  return {h, mountain: l.mountain, biome: biomeOf(h, l.mountain, l.c, l.t, l.hu, l.river, l.wd)};
 }
-function biomeOf(h, mountain, c, t, hu, river) {
+function biomeOf(h, mountain, c, t, hu, river, wd = 0) {
   let b;
   const coast = c > -0.24 && c < 0.06;
   if (h < SEA - 4 && !river) b = t < -0.5 ? 'frozen_ocean' : t < -0.15 ? 'cold_ocean' : t > 0.5 ? 'warm_ocean' : 'ocean';
@@ -113,6 +121,11 @@ function biomeOf(h, mountain, c, t, hu, river) {
   else if (t < -0.15) b = hu < -0.3 ? 'plains' : 'taiga';
   else if (t < 0.4) b = hu < -0.35 ? 'plains' : hu < 0.05 ? 'forest' : hu < 0.3 ? 'birch_forest' : hu > 0.55 && h < SEA + 5 ? 'swamp' : 'dark_forest';
   else b = hu < -0.2 ? 'desert' : hu < 0.15 ? 'savanna' : 'jungle';
+  // the variants, where the weirdness is high or low
+  if (b === 'taiga' && wd > 0.4) b = hu > 0.35 ? 'old_growth_spruce_taiga' : 'old_growth_pine_taiga';
+  else if (b === 'birch_forest' && wd > 0.4) b = 'old_growth_birch_forest';
+  else if (b === 'forest' && wd < -0.45) b = 'flower_forest';
+  else if (b === 'plains' && wd > 0.5) b = 'sunflower_plains';
   return BIOME[b];
 }
 
@@ -212,7 +225,7 @@ export function generateColumn(seed, cx, cz) {
       const v = getBlock(col, x, yy, z);
       if (!isSolidGround(v)) { depth = 0; continue; }
       if (v !== stone && v !== deepslate) break;
-      setBlock(col, x, yy, z, surfaceBlock(b, depth, yy, slope, l, hash(seed + 5, wx, yy, wz)));
+      setBlock(col, x, yy, z, surfaceBlock(b, depth, yy, slope, l, hash(seed + 5, wx, yy, wz), w.open.n2(wx * 2.3 + 900, wz * 2.3)));
       depth++;
     }
     // water over low ground; ice on cold water
@@ -230,7 +243,7 @@ export function generateColumn(seed, cx, cz) {
   return col;
 }
 const isSolidGround = v => v && v !== ID.water && v !== ID.lava;
-function surfaceBlock(b, depth, y, slope, l, rnd) {
+function surfaceBlock(b, depth, y, slope, l, rnd, patch) {
   const name = BIOMES[b].name, under = y < SEA - 1;
   if (name.endsWith('ocean')) return depth < 3 ? (l.h < SEA - 18 ? ID.gravel : rnd < 0.15 && name !== 'frozen_ocean' ? ID.clay : ID.sand) : ID.stone;
   if (name.endsWith('river')) return depth < 2 ? (rnd < 0.2 ? ID.clay : rnd < 0.45 ? ID.gravel : ID.sand) : ID.stone;
@@ -239,6 +252,8 @@ function surfaceBlock(b, depth, y, slope, l, rnd) {
   if (name === 'snowy_slopes') return slope > 4 ? ID.stone : depth === 0 ? ID.snow_block : depth < 2 ? ID.dirt : ID.stone;
   if (slope > 5 && l.mountain > 0.2) return ID.stone;
   if (under) return depth < 3 ? (rnd < 0.3 ? ID.gravel : ID.dirt) : ID.stone;
+  // the old growth taigas: patches of coarse dirt and podzol among the grass
+  if (depth === 0 && name.startsWith('old_growth') && name.endsWith('taiga')) return patch > 0.22 ? ID.coarse_dirt : patch < -0.08 || rnd < 0.25 ? ID.podzol : ID.grass_block;
   if (depth === 0) return name === 'taiga' && rnd < 0.3 || name === 'snowy_taiga' && rnd < 0.15 ? ID.podzol : name === 'savanna' && rnd < 0.08 ? ID.coarse_dirt : ID.grass_block;
   return depth < 4 ? ID.dirt : ID.stone;
 }
@@ -288,62 +303,106 @@ function carve(w, col, x0, z0, L, top) {
 
 // ---------- trees and plants ----------
 const TREE_GRID = 5;
-/** The trees whose cells are near a column: [{x, z, y (ground), kind, r}], the same whichever column asks. */
+/** The trees whose cells are near a column: [{x, z, y (ground), kind, r}], the same whichever column asks (a big one
+ * reaches up to 10 blocks from its trunk). */
 function treesNear(w, cx, cz) {
   const out = [], seed = w.seed;
-  const gx0 = Math.floor((cx * 16 - 5) / TREE_GRID), gx1 = Math.floor((cx * 16 + 20) / TREE_GRID);
-  const gz0 = Math.floor((cz * 16 - 5) / TREE_GRID), gz1 = Math.floor((cz * 16 + 20) / TREE_GRID);
+  const gx0 = Math.floor((cx * 16 - 10) / TREE_GRID), gx1 = Math.floor((cx * 16 + 25) / TREE_GRID);
+  const gz0 = Math.floor((cz * 16 - 10) / TREE_GRID), gz1 = Math.floor((cz * 16 + 25) / TREE_GRID);
   for (let gz = gz0; gz <= gz1; gz++) for (let gx = gx0; gx <= gx1; gx++) {
     const x = gx * TREE_GRID + Math.floor(hash(seed + 21, gx, gz) * TREE_GRID), z = gz * TREE_GRID + Math.floor(hash(seed + 22, gx, gz) * TREE_GRID);
     const l = landAt(w, x, z), b = BIOMES[l.biome].name;
     const density = TREE_DENSITY[b] || 0;
     if (!density || hash(seed + 23, gx, gz) > density) continue;
     if (l.h <= SEA || l.mountain > 0.15 || l.river > 0) continue;
+    // only the trees that reach into this column
+    const kind = treeKind(b, hash(seed + 24, gx, gz));
+    const reach = REACH[kind] ?? 10, dx = Math.max(cx * 16 - x, 0, x - (cx * 16 + 15)), dz = Math.max(cz * 16 - z, 0, z - (cz * 16 + 15));
+    if (dx > reach || dz > reach) continue;
     if (w.open.n2(x, z) > 0.35) continue;
     // not on slopes
     const slope = Math.max(Math.abs(landAt(w, x + 1, z).h - landAt(w, x - 1, z).h), Math.abs(landAt(w, x, z + 1).h - landAt(w, x, z - 1).h));
     if (slope > 2) continue;
-    const pick = hash(seed + 24, gx, gz);
-    const kind = treeKind(b, pick);
     if (kind) out.push({x, z, y: l.h, kind, r: rng(Math.floor(hash(seed + 25, x, z) * 2147483647))});
   }
   return out;
 }
-export const TREE_DENSITY = {plains: 0.03, forest: 0.75, birch_forest: 0.7, dark_forest: 0.9, swamp: 0.25, taiga: 0.6, snowy_taiga: 0.45, snowy_plains: 0.02, savanna: 0.08, jungle: 0.95, meadow: 0.02, beach: 0};
+export const TREE_DENSITY = {plains: 0.03, sunflower_plains: 0.02, forest: 0.75, flower_forest: 0.35, birch_forest: 0.7, old_growth_birch_forest: 0.7, dark_forest: 0.9, swamp: 0.25, taiga: 0.6, snowy_taiga: 0.45,
+  old_growth_pine_taiga: 0.7, old_growth_spruce_taiga: 0.7, snowy_plains: 0.02, savanna: 0.08, jungle: 0.95, meadow: 0.02, beach: 0};
+// how far a tree reaches out from its trunk (leaves, vines, the podzol round a giant spruce), on the + side of a 2×2 one
+const REACH = {oak: 3, birch: 3, tall_birch: 3, jungle: 4, jungle_bush: 3, spruce: 4, pine: 4, swamp_oak: 5, acacia: 7, dark_oak: 7, fancy_oak: 9, mega_spruce: 7, mega_pine: 7, mega_jungle: 10};
+/** Which tree, by the game's shares in each biome (its list is tried in turn, each with its own chance). */
 function treeKind(b, p) {
   switch (b) {
-    case 'forest': return p < 0.8 ? 'oak' : 'birch';
+    case 'plains': case 'sunflower_plains': return p < 1 / 3 ? 'fancy_oak' : 'oak';
+    case 'forest': case 'flower_forest': return p < 0.2 ? 'birch' : p < 0.28 ? 'fancy_oak' : 'oak';
     case 'birch_forest': return 'birch';
-    case 'dark_forest': return p < 0.75 ? 'dark_oak' : p < 0.9 ? 'oak' : 'birch';
-    case 'taiga': case 'snowy_taiga': case 'snowy_plains': return 'spruce';
-    case 'savanna': return p < 0.85 ? 'acacia' : 'oak';
-    case 'jungle': return p < 0.7 ? 'jungle' : p < 0.85 ? 'jungle_bush' : 'oak';
+    case 'old_growth_birch_forest': return p < 0.5 ? 'tall_birch' : 'birch';
+    case 'dark_forest': return p < 2 / 3 ? 'dark_oak' : p < 0.733 ? 'birch' : p < 0.76 ? 'fancy_oak' : 'oak';
+    case 'taiga': case 'snowy_taiga': return p < 1 / 3 ? 'pine' : 'spruce';
+    case 'old_growth_pine_taiga': return p < 0.0256 ? 'mega_spruce' : p < 0.3254 ? 'mega_pine' : p < 0.5503 ? 'pine' : 'spruce';
+    case 'old_growth_spruce_taiga': return p < 1 / 3 ? 'mega_spruce' : p < 0.5556 ? 'pine' : 'spruce';
+    case 'snowy_plains': return 'spruce';
+    case 'savanna': return p < 0.8 ? 'acacia' : 'oak';
+    case 'jungle': return p < 0.1 ? 'fancy_oak' : p < 0.55 ? 'jungle_bush' : p < 0.7 ? 'mega_jungle' : 'jungle';
     case 'swamp': return 'swamp_oak';
-    case 'meadow': return p < 0.5 ? 'birch' : 'oak';
+    case 'meadow': return p < 0.5 ? 'tall_birch' : 'fancy_oak';
     default: return 'oak';
   }
 }
+/** Mossy boulders of the old growth taigas: [{x, y (the first block over the ground), z, r}] near a column. */
+const ROCK_GRID = 8;
+function rocksNear(w, cx, cz) {
+  const out = [], seed = w.seed;
+  for (let gz = Math.floor((cz * 16 - 4) / ROCK_GRID); gz <= Math.floor((cz * 16 + 19) / ROCK_GRID); gz++) for (let gx = Math.floor((cx * 16 - 4) / ROCK_GRID); gx <= Math.floor((cx * 16 + 19) / ROCK_GRID); gx++) {
+    if (hash(seed + 41, gx, gz) > 0.5) continue;
+    const x = gx * ROCK_GRID + Math.floor(hash(seed + 42, gx, gz) * ROCK_GRID), z = gz * ROCK_GRID + Math.floor(hash(seed + 43, gx, gz) * ROCK_GRID);
+    const l = landAt(w, x, z), b = BIOMES[l.biome].name;
+    if (!(b.startsWith('old_growth') && b.endsWith('taiga')) || l.h <= SEA || l.river > 0) continue;
+    out.push({x, y: l.h + 1, z, r: rng(Math.floor(hash(seed + 44, x, z) * 2147483647))});
+  }
+  return out;
+}
+/** The game's forest rock: three small balls of mossy cobblestone, each a step down and aside from the last. */
+function growRock({x, y, z, r}, put) {
+  for (let i = 0; i < 3; i++) {
+    const j = Math.floor(r() * 2), k = Math.floor(r() * 2), l = Math.floor(r() * 2), f = (j + k + l) * 0.333 + 0.5;
+    for (let dx = -j; dx <= j; dx++) for (let dy = -k; dy <= k; dy++) for (let dz = -l; dz <= l; dz++) if (dx * dx + dy * dy + dz * dz <= f * f) put(x + dx, y + dy, z + dz, ID.mossy_cobblestone, true);
+    x += Math.floor(r() * 2) - 1; y -= Math.floor(r() * 2); z += Math.floor(r() * 2) - 1;
+  }
+}
 function decorate(w, col, x0, z0, L, top) {
+  const inside = (wx, wz) => wx >= x0 && wx < x0 + 16 && wz >= z0 && wz < z0 + 16;
+  // force (a trunk, the dirt under it, a boulder) goes over plants, leaves, logs, grass and dirt — not stone
   const put = (wx, y, wz, v, force = false) => {
-    const x = wx - x0, z = wz - z0;
-    if (x < 0 || x > 15 || z < 0 || z > 15) return;
-    const old = getBlock(col, x, y, z);
-    if (!force && old && !REPLACEABLE.has(old & 0xFFF)) return;
+    if (!inside(wx, wz)) return;
+    const x = wx - x0, z = wz - z0, old = getBlock(col, x, y, z);
+    if (old && !(force ? TRUNK_OVER : REPLACEABLE).has(old & 0xFFF)) return;
+    // half of a tall plant grown over: the other half goes too
+    if (old && TALL_PLANTS.has(old & 0xFFF)) { const oy = old >>> 12 & 8 ? y - 1 : y + 1; if ((getBlock(col, x, oy, z) & 0xFFF) === (old & 0xFFF)) setBlock(col, x, oy, z, 0); }
     setBlock(col, x, y, z, v);
   };
-  // plants on top of the ground first (trees then grow over them), snow last
+  const get = (wx, y, wz) => inside(wx, wz) ? getBlock(col, wx - x0, y, wz - z0) : -1;
   const seed = w.seed;
+  // the old growth taigas' mossy boulders, then plants on the ground (trees grow over them), snow last
+  for (const rock of rocksNear(w, col.cx, col.cz)) growRock(rock, put);
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
     const wx = x0 + x, wz = z0 + z, b = BIOMES[col.biome[z * 16 + x]].name;
     let y = top + 1;
     while (y > MINY && !getBlock(col, x, y, z)) y--;
-    const g = getBlock(col, x, y, z), above = y + 1, rnd = hash(seed + 31, wx, wz), rnd2 = hash(seed + 32, wx, wz);
+    const g = getBlock(col, x, y, z), above = y + 1, rnd = hash(seed + 31, wx, wz), rnd2 = hash(seed + 32, wx, wz), rnd3 = hash(seed + 33, wx, wz);
     if (getBlock(col, x, above, z)) continue;
+    // a plant two blocks tall: both halves (where there is room)
+    const tall = id => { if (getBlock(col, x, above + 1, z)) return false; put(wx, above, wz, id); put(wx, above + 1, wz, withMeta(id, 8)); return true; };
     if (g === ID.grass_block || g === ID.podzol) {
-      const f = FLOWERS[b] || FLOWERS.plains;
-      if (rnd < (GRASS[b] ?? 0.2)) put(wx, above, wz, b.includes('taiga') && rnd2 < 0.45 || b === 'jungle' && rnd2 < 0.3 ? ID.fern : ID.short_grass);
-      else if (rnd < (GRASS[b] ?? 0.2) + f.rate) put(wx, above, wz, ID[f.kinds[Math.floor(rnd2 * f.kinds.length)]]);
-      else if ((b === 'dark_forest' || b === 'swamp') && rnd > 0.985) put(wx, above, wz, rnd2 < 0.5 ? ID.red_mushroom : ID.brown_mushroom);
+      const f = FLOWERS[b] || FLOWERS.plains, grass = GRASS[b] ?? 0.2, big = BIG_FLOWERS[b];
+      if (rnd < grass) {
+        const fern = b.includes('taiga') && rnd2 < (b.startsWith('old_growth') ? 0.6 : 0.45) || b === 'jungle' && rnd2 < 0.3;
+        if (!(rnd3 < (TALL[b] || 0) && tall(fern ? ID.large_fern : ID.tall_grass))) put(wx, above, wz, fern ? ID.fern : ID.short_grass);
+      }
+      else if (rnd < grass + f.rate) put(wx, above, wz, ID[f.kinds[Math.floor(rnd2 * f.kinds.length)]]);
+      else if (big && rnd < grass + f.rate + big.rate) tall(ID[big.kinds[Math.floor(rnd2 * big.kinds.length)]]);
+      else if ((b === 'dark_forest' || b === 'swamp' || b.startsWith('old_growth') && b.endsWith('taiga')) && rnd > 0.985) put(wx, above, wz, rnd2 < 0.5 ? ID.red_mushroom : ID.brown_mushroom);
       else if ((b === 'plains' || b === 'taiga') && rnd > 0.9994) put(wx, above, wz, ID.pumpkin);
       else if (b === 'jungle' && rnd > 0.997) put(wx, above, wz, ID.melon);
     }
@@ -356,7 +415,7 @@ function decorate(w, col, x0, z0, L, top) {
       else if (rnd > 0.985) put(wx, above, wz, ID.dead_bush);
     }
   }
-  for (const t of treesNear(w, col.cx, col.cz)) growTree(t, put);
+  for (const t of treesNear(w, col.cx, col.cz)) growTree(t, put, get);
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
     const b = BIOMES[col.biome[z * 16 + x]].name;
     if (BIOMES[col.biome[z * 16 + x]].cold && b !== 'frozen_ocean' && b !== 'frozen_river') {
@@ -368,13 +427,27 @@ function decorate(w, col, x0, z0, L, top) {
     }
   }
 }
-const REPLACEABLE = new Set([0, ID.short_grass, ID.fern, ID.snow, ID.dandelion, ID.poppy, ID.dead_bush]);
-for (const n of ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak']) REPLACEABLE.add(ID[`${n}_leaves`]);
-const CROSS = new Set(['short_grass', 'fern', 'dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'dead_bush', 'sugar_cane', 'red_mushroom', 'brown_mushroom'].map(n => ID[n]));
-const GRASS = {plains: 0.35, meadow: 0.6, forest: 0.18, birch_forest: 0.2, dark_forest: 0.12, swamp: 0.25, taiga: 0.22, snowy_taiga: 0.1, snowy_plains: 0.04, savanna: 0.5, jungle: 0.35, stony_peaks: 0.05, desert: 0};
+// what a tree's leaves may grow into (the game's: air, small plants, leaves), and what its trunk may also go over
+const WOOD_KINDS = ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak'];
+const TALL_PLANTS = new Set([ID.tall_grass, ID.large_fern, ID.sunflower, ID.lilac, ID.rose_bush, ID.peony]);
+const REPLACEABLE = new Set([0, ID.short_grass, ID.fern, ID.snow, ID.dead_bush, ID.vine, ID.tall_grass, ID.large_fern, ID.sunflower, ID.lilac, ID.rose_bush, ID.peony,
+  ...['dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'red_mushroom', 'brown_mushroom'].map(n => ID[n]), ...WOOD_KINDS.map(n => ID[`${n}_leaves`])]);
+const TRUNK_OVER = new Set([...REPLACEABLE, ID.grass_block, ID.dirt, ID.podzol, ID.coarse_dirt, ID.cocoa, ...WOOD_KINDS.map(n => ID[`${n}_log`])]);
+const CROSS = new Set(['short_grass', 'fern', 'dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'dead_bush', 'sugar_cane', 'red_mushroom', 'brown_mushroom', 'tall_grass', 'large_fern', 'sunflower', 'lilac', 'rose_bush', 'peony', 'vine', 'cocoa'].map(n => ID[n]));
+const GRASS = {plains: 0.35, sunflower_plains: 0.35, meadow: 0.6, forest: 0.18, flower_forest: 0.15, birch_forest: 0.2, old_growth_birch_forest: 0.2, dark_forest: 0.12, swamp: 0.25, taiga: 0.22, snowy_taiga: 0.1,
+  old_growth_pine_taiga: 0.3, old_growth_spruce_taiga: 0.3, snowy_plains: 0.04, savanna: 0.5, jungle: 0.35, stony_peaks: 0.05, desert: 0};
+// how much of the grass grows two blocks tall (tall grass, or the large fern where ferns grow)
+const TALL = {plains: 0.08, sunflower_plains: 0.08, savanna: 0.15, meadow: 0.06, jungle: 0.12, forest: 0.03, flower_forest: 0.03, birch_forest: 0.03, old_growth_birch_forest: 0.03, dark_forest: 0.04,
+  taiga: 0.15, snowy_taiga: 0.08, old_growth_pine_taiga: 0.3, old_growth_spruce_taiga: 0.3};
+// the tall flowers: lilac, rose bush and peony in forests (many in the flower forest), sunflowers on their plains
+const FOREST_FLOWERS = ['lilac', 'rose_bush', 'peony'];
+const BIG_FLOWERS = {forest: {rate: 0.004, kinds: FOREST_FLOWERS}, flower_forest: {rate: 0.05, kinds: FOREST_FLOWERS}, birch_forest: {rate: 0.002, kinds: FOREST_FLOWERS},
+  old_growth_birch_forest: {rate: 0.003, kinds: FOREST_FLOWERS}, sunflower_plains: {rate: 0.06, kinds: ['sunflower']}};
 const FLOWERS = {
   plains: {rate: 0.025, kinds: ['dandelion', 'poppy', 'azure_bluet', 'oxeye_daisy', 'cornflower']}, meadow: {rate: 0.08, kinds: ['dandelion', 'poppy', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower']},
   forest: {rate: 0.02, kinds: ['dandelion', 'poppy', 'lily_of_the_valley']}, birch_forest: {rate: 0.02, kinds: ['dandelion', 'poppy', 'lily_of_the_valley']},
+  flower_forest: {rate: 0.12, kinds: ['dandelion', 'poppy', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley']}, old_growth_birch_forest: {rate: 0.02, kinds: ['dandelion', 'poppy', 'lily_of_the_valley']},
+  old_growth_pine_taiga: {rate: 0.004, kinds: ['dandelion', 'poppy']}, old_growth_spruce_taiga: {rate: 0.004, kinds: ['dandelion', 'poppy']}, sunflower_plains: {rate: 0.025, kinds: ['dandelion', 'poppy', 'azure_bluet', 'oxeye_daisy', 'cornflower']},
   dark_forest: {rate: 0.006, kinds: ['poppy', 'dandelion']}, swamp: {rate: 0.02, kinds: ['blue_orchid']}, taiga: {rate: 0.004, kinds: ['dandelion', 'poppy']},
   snowy_taiga: {rate: 0, kinds: ['poppy']}, snowy_plains: {rate: 0, kinds: ['poppy']}, savanna: {rate: 0.006, kinds: ['dandelion', 'poppy']}, jungle: {rate: 0.006, kinds: ['dandelion', 'poppy']},
 };
@@ -382,61 +455,6 @@ function nearWater(col, x, y, z) {
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const xx = x + dx, zz = z + dz; if (xx < 0 || zz < 0 || xx > 15 || zz > 15) continue; if (getBlock(col, xx, y, zz) === ID.water) return true; }
   return false;
 }
-/** Grows a tree through put(x, y, z, block) (put keeps what is not replaceable; force overwrites). */
-export function growTree({x, y, z, kind, r}, put) {
-  const leaf = (n, lx, ly, lz) => put(lx, ly, lz, ID[`${n}_leaves`]);
-  const logAt = (n, lx, ly, lz, axis = 0) => put(lx, ly, lz, withMeta(ID[`${n}_log`], axis), true);
-  const ground = (lx, lz) => put(lx, y, lz, ID.dirt, true);
-  const blob = (n, cx, cy, cz, layers) => {
-    for (const [dy, rad, cut] of layers) for (let dx = -rad; dx <= rad; dx++) for (let dz = -rad; dz <= rad; dz++) {
-      if (Math.abs(dx) === rad && Math.abs(dz) === rad && (cut === 'all' || (cut === 'some' && r() < 0.5))) continue;
-      leaf(n, cx + dx, cy + dy, cz + dz);
-    }
-  };
-  if (kind === 'oak' || kind === 'birch' || kind === 'swamp_oak') {
-    const n = kind === 'birch' ? 'birch' : 'oak', h = (kind === 'birch' ? 5 : 4) + Math.floor(r() * 3);
-    ground(x, z);
-    const t = y + h;
-    blob(n, x, t, z, [[-3, 2, 'some'], [-2, 2, 'some'], [-1, 1, 'some'], [0, 1, 'all']]);
-    if (kind === 'swamp_oak') blob(n, x, t, z, [[-3, 3, 'all'], [-2, 3, 'all']]);
-    for (let i = 1; i <= h; i++) logAt(n, x, y + i, z);
-  } else if (kind === 'spruce') {
-    const h = 6 + Math.floor(r() * 5), t = y + h, bare = 1 + Math.floor(r() * 2);
-    ground(x, z);
-    let rad = 0;
-    for (let yy = t + 1; yy > y + bare; yy--) {
-      blob('spruce', x, yy, z, [[0, rad, rad > 1 ? 'all' : 'none']]);
-      rad = rad >= (yy < y + h / 2 ? 3 : 2) ? 1 : rad + 1;
-      if (yy === t + 1) rad = 0;
-    }
-    for (let i = 1; i <= h; i++) logAt('spruce', x, y + i, z);
-  } else if (kind === 'jungle' || kind === 'jungle_bush') {
-    if (kind === 'jungle_bush') { ground(x, z); logAt('jungle', x, y + 1, z); blob('oak', x, y + 1, z, [[0, 2, 'some'], [1, 1, 'some']]); return; }
-    const h = 7 + Math.floor(r() * 7), t = y + h;
-    ground(x, z);
-    blob('jungle', x, t, z, [[-2, 2, 'some'], [-1, 2, 'some'], [0, 1, 'none'], [1, 1, 'all']]);
-    for (let i = 1; i <= h; i++) logAt('jungle', x, y + i, z);
-  } else if (kind === 'acacia') {
-    const h = 4 + Math.floor(r() * 2), dir = Math.floor(r() * 4), [ddx, ddz] = [[1, 0], [-1, 0], [0, 1], [0, -1]][dir];
-    ground(x, z);
-    let cx = x, cz = z, cy = y;
-    for (let i = 1; i <= h; i++) { cy++; if (i > h - 3) { cx += ddx; cz += ddz; } logAt('acacia', cx, cy, cz); }
-    blob('acacia', cx, cy + 1, cz, [[0, 2, 'all'], [1, 1, 'none']]);
-    blob('acacia', cx, cy, cz, [[0, 3, 'all']]);
-    if (r() < 0.6) { const ox = x - ddx * 2, oz = z - ddz * 2, oy = y + h - 2; logAt('acacia', x - ddx, y + h - 3, z - ddz); logAt('acacia', ox, oy, oz); blob('acacia', ox, oy + 1, oz, [[0, 2, 'all'], [1, 1, 'some']]); }
-  } else if (kind === 'dark_oak') {
-    const h = 6 + Math.floor(r() * 3), t = y + h;
-    for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { ground(x + dx, z + dz); }
-    for (let dx = -3; dx <= 4; dx++) for (let dz = -3; dz <= 4; dz++) {
-      const d = Math.max(Math.abs(dx - 0.5), Math.abs(dz - 0.5));
-      if (d < 3.6) leaf('dark_oak', x + dx, t - 1, z + dz);
-      if (d < 3.1 && !(Math.abs(dx - 0.5) > 2.6 && Math.abs(dz - 0.5) > 2.6)) leaf('dark_oak', x + dx, t, z + dz);
-      if (d < 2.1) leaf('dark_oak', x + dx, t + 1, z + dz);
-    }
-    for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) for (let i = 1; i <= h; i++) logAt('dark_oak', x + dx, y + i, z + dz);
-  }
-}
-
 /** A place to start: dry land near the middle of the world. */
 export function spawnPoint(seed) {
   const w = worldOf(seed);

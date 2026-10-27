@@ -564,8 +564,8 @@ function breakBlock(t) {
   // ice over something becomes water when broken (unless creative)
   const below = G.mirror.get(x, y - 1, z);
   setBlock(x, y, z, survival && b.name === 'ice' && below && collisionBoxes(below) ? ID.water : 0);
-  // shears take leaves whole
-  if (survival && heldTool()?.kind === 'shears' && b.name.endsWith('_leaves')) G.ents.drop({id: b.name, n: 1}, x + 0.5, y + 0.4, z + 0.5);
+  // shears take leaves, grass, ferns, dead bushes and vines whole
+  if (survival && heldTool()?.kind === 'shears' && (b.name.endsWith('_leaves') || SHEARED.has(b.name))) G.ents.drop({id: b.name, n: 1}, x + 0.5, y + 0.4, z + 0.5);
   else if (survival && harvests(b, heldTool())) {
     // 精准采集 takes the block itself (and no experience); 时运 gives ores more (the game's: ×1 up to ×level+1, redstone +0–level)
     const tool = held(), silk = enchOf(tool, 'silk_touch') && b.item, fortune = enchOf(tool, 'fortune');
@@ -574,7 +574,7 @@ function breakBlock(t) {
     for (const [id, n] of drops) G.ents.drop({id, n}, x + 0.5, y + 0.4, z + 0.5);  // a door or a bed goes whole
     if (b.xp && !silk) G.ents.xp(b.xp[0] + Math.floor(Math.random() * (b.xp[1] - b.xp[0] + 1)), x + 0.5, y + 0.5, z + 0.5);
   }
-  if (b.shape === 'door' || b.shape === 'bed') { const [ox, oy, oz] = partnerOf(x, y, z, v); if ((G.mirror.get(ox, oy, oz) & 0xFFF) === b.id) setBlock(ox, oy, oz, 0); }
+  if (b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall') { const [ox, oy, oz] = partnerOf(x, y, z, v); if ((G.mirror.get(ox, oy, oz) & 0xFFF) === b.id) setBlock(ox, oy, oz, 0); }
   // what was inside goes out
   const k = `${x},${y},${z}`, tile = G.tiles[k];
   if (tile) { for (const s of tile.slots || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; }
@@ -582,6 +582,7 @@ function breakBlock(t) {
   play('break', v);
   if (survival) { if (b.hard > 0) wearTool(); G.exh += 0.005; }
 }
+const SHEARED = new Set(['short_grass', 'fern', 'dead_bush', 'vine', 'tall_grass', 'large_fern']);
 /** Which way the player faces (0 south, 1 west, 2 north, 3 east) — a block placed faces back at them. */
 function facingBack() { const y = ((G.body.yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2); const q = Math.round(y / (Math.PI / 2)) % 4; return [0, 3, 2, 1][q]; }
 function placeFrom(t, stack) {
@@ -591,6 +592,17 @@ function placeFrom(t, stack) {
   // slabs join into a double one, snow layers stack up
   if (b?.shape === 'slab' && (t.v & 0xFFF) === b.id && t.v >>> 12 !== 2 && ((t.face === 2 && t.v >>> 12 === 0) || (t.face === 3 && t.v >>> 12 === 1))) { setBlock(t.x, t.y, t.z, withMeta(b.id, 2)); return true; }
   if (b?.name === 'snow' && (t.v & 0xFFF) === b.id && (t.v >>> 12) < 7) { setBlock(t.x, t.y, t.z, withMeta(b.id, (t.v >>> 12) + 1)); return true; }
+  // a vine goes on the side of a block that was aimed at (a full one or leaves), clinging to it; on a vine already
+  // there it gets that side too
+  if (b?.shape === 'vine') {
+    if (t.face === 2 || t.face === 3 || !(tb.opaque || tb.name.endsWith('_leaves'))) return false;
+    const vx = t.x + nx, vz = t.z + nz, here = G.mirror.get(vx, t.y, vz), bit = 1 << {0: 1, 1: 3, 4: 2, 5: 0}[t.face];
+    if (here && (here & 0xFFF) !== ID.vine && !BLOCKS[here & 0xFFF].replace) return false;
+    const faces = (here & 0xFFF) === ID.vine ? here >>> 12 : 0;
+    if (faces & bit) return false;
+    setBlock(vx, t.y, vz, withMeta(ID.vine, faces | bit)); play('place', ID.vine);
+    return true;
+  }
   let x = t.x, y = t.y, z = t.z;
   if (!tb.replace || (tb.id === (b?.id ?? -1))) { x += nx; y += ny; z += nz; }
   if (y < MINY || y >= MINY + HEIGHT) return false;
@@ -598,6 +610,14 @@ function placeFrom(t, stack) {
   if (here && !BLOCKS[here & 0xFFF].replace) return false;
   let v;
   const pf = (facingBack() + 2) % 4; // the way the player looks
+  // a plant two blocks tall: on its ground, with room above
+  if (b?.shape === 'tall') {
+    const above = G.mirror.get(x, y + 1, z), ub = BLOCKS[G.mirror.get(x, y - 1, z) & 0xFFF];
+    if (above && !BLOCKS[above & 0xFFF].replace) return false;
+    if (!['grass_block', 'dirt', 'podzol', 'coarse_dirt', 'farmland', 'moss_block', 'mud'].includes(ub.name)) return false;
+    setBlock(x, y, z, b.id); setBlock(x, y + 1, z, withMeta(b.id, 8)); play('place', ID.short_grass);
+    return true;
+  }
   // two blocks: a door (and its upper half), a bed (and its head the way the player looks)
   if (b?.shape === 'door' || b?.shape === 'bed') {
     const [dx, dz] = b.shape === 'bed' ? DIR[pf] : [0, 0], ox = x + dx, oy = b.shape === 'door' ? y + 1 : y, oz = z + dz, other = G.mirror.get(ox, oy, oz);
@@ -671,9 +691,17 @@ function use(t, mob = null) {
   if (info?.tool?.kind === 'rod') { if (G.bobber) reel(); else cast(); return; }
   // seeds, carrots, potatoes on farmland are planted (before being eaten)
   if (t && info?.plant && (t.v & 0xFFF) === ID.farmland && t.face === 2) { if (placeFrom(t, s)) useUp(); return; }
+  // cocoa beans on the side of a jungle log: a pod there, facing the log
+  if (t && s?.id === 'cocoa_beans') {
+    const n = [[1, 0, 0], [-1, 0, 0], null, null, [0, 0, 1], [0, 0, -1]][t.face];
+    if (!n || (t.v & 0xFFF) !== ID.jungle_log || G.mirror.get(t.x + n[0], t.y, t.z + n[2])) return;
+    setBlock(t.x + n[0], t.y, t.z + n[2], withMeta(ID.cocoa, {0: 1, 1: 3, 4: 2, 5: 0}[t.face])); useUp(); play('place', ID.cocoa);
+    return;
+  }
   // bone meal, a lighter on TNT
   if (t && info?.meal) {
-    const id = t.v & 0xFFF, grows = (['wheat', 'carrots', 'potatoes'].includes(b.name) && (t.v >>> 12) < 7) || b.name.endsWith('_sapling') || (id === ID.grass_block && !G.mirror.get(t.x, t.y + 1, t.z));
+    const id = t.v & 0xFFF, grows = (['wheat', 'carrots', 'potatoes'].includes(b.name) && (t.v >>> 12) < 7) || b.name.endsWith('_sapling') || (id === ID.grass_block && !G.mirror.get(t.x, t.y + 1, t.z))
+      || (id === ID.cocoa && (t.v >>> 12) >> 2 < 2) || ((id === ID.short_grass || id === ID.fern) && !G.mirror.get(t.x, t.y + 1, t.z)) || ['sunflower', 'lilac', 'rose_bush', 'peony'].includes(b.name);
     if (grows) { G.worker.postMessage({type: 'meal', x: t.x, y: t.y, z: t.z}); useUp(); G.ents.puff(t.x + 0.5, t.y + 1, t.z + 0.5, 'meal'); play('meal'); }
     return;
   }
@@ -777,10 +805,10 @@ function toggle(t) {
   if (b.shape === 'door') { const oy = m & 8 ? t.y - 1 : t.y + 1, o = G.mirror.get(t.x, oy, t.z); if ((o & 0xFFF) === b.id) setBlock(t.x, oy, t.z, withMeta(b.id, (o >>> 12) ^ 4)); }
   play('place', ID.oak_planks);
 }
-/** The other half of a door (above / below) or a bed (head / foot). */
+/** The other half of a door or a tall plant (above / below) or a bed (head / foot). */
 function partnerOf(x, y, z, v) {
   const m = v >>> 12;
-  if (BLOCKS[v & 0xFFF].shape === 'door') return [x, m & 8 ? y - 1 : y + 1, z];
+  if (BLOCKS[v & 0xFFF].shape === 'door' || BLOCKS[v & 0xFFF].shape === 'tall') return [x, m & 8 ? y - 1 : y + 1, z];
   const [dx, dz] = DIR[m & 3], s = m & 4 ? -1 : 1;
   return [x + dx * s, y, z + dz * s];
 }
@@ -799,7 +827,8 @@ function sleepIn(t) {
 }
 // what the composter takes and how likely each one fills it a level (the game's chances)
 const COMPOST = {wheat_seeds: 0.3, short_grass: 0.3, sugar_cane: 0.5, cactus: 0.5, melon_slice: 0.5, wheat: 0.65, carrot: 0.65, potato: 0.65, apple: 0.65, pumpkin: 0.65, melon: 0.65, fern: 0.65,
-  nether_wart: 0.65, red_mushroom: 0.65, brown_mushroom: 0.65, bread: 0.85, baked_potato: 0.85, hay_block: 0.85};
+  nether_wart: 0.65, red_mushroom: 0.65, brown_mushroom: 0.65, bread: 0.85, baked_potato: 0.85, hay_block: 0.85,
+  vine: 0.5, tall_grass: 0.5, large_fern: 0.65, cocoa_beans: 0.65, sunflower: 0.65, lilac: 0.65, rose_bush: 0.65, peony: 0.65, cookie: 0.85};
 const compostable = id => COMPOST[id] ?? (/_leaves$|_sapling$/.test(id) ? 0.3 : /^(dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley)$/.test(id) ? 0.65 : 0);
 /** The composter: what is held goes in (a chance of a level); full, it gives bone meal. */
 function compost(t) {
