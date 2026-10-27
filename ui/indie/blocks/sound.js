@@ -62,6 +62,9 @@ function voice(kind, mood, k) {
     case 'ghast': if (mood === 'warn') { tone(900, 0.2 * g, 0.7, {type: 'sawtooth', slide: 1.4}); burst(2400, 1, 0.15 * g, 0.6); } else if (mood === 'shoot') burst(600, 0.6, 0.35 * g, 0.5, {pitch: 0.7}); else { tone(420 * p, 0.12 * g, 1.4 * long, {type: 'triangle', slide: 0.6}); tone(640 * p, 0.06 * g, 1.2 * long, {type: 'sine', slide: 0.5, at: 0.1}); } break;
     case 'blaze': if (mood === 'shoot') { burst(1200, 0.7, 0.3 * g, 0.4); tone(160, 0.12 * g, 0.4, {type: 'sawtooth', slide: 0.5}); } else burst(800 * p, 0.5, 0.18 * g, 0.9 * long, {pitch: 0.6}); break;
     case 'magma': burst(400 * p, 1.2, 0.2 * g, 0.18); tone(90 * p, 0.12 * g, 0.15, {type: 'sine', slide: 0.6}); break;
+    // a villager's 「hmm」 (rising for yes, falling for no), the golem's clank
+    case 'villager': { const up = mood === 'yes' ? 1.4 : mood === 'no' ? 0.6 : 0.9 + Math.random() * 0.3; tone(190 * p, 0.14 * g, 0.18 * long, {type: 'sawtooth', slide: up}); tone(240 * p, 0.08 * g, 0.16 * long, {type: 'square', slide: up, at: 0.14}); break; }
+    case 'iron': burst(300 * p, 2, 0.35 * g, 0.25); tone(110 * p, 0.2 * g, 0.3, {type: 'triangle', slide: 0.7}); break;
   }
 }
 /** Plays a sound: break, place, step, hit (digging), pop, splash, fizz, hurt, eat, burp, click, levelup, and the mobs'. */
@@ -69,7 +72,7 @@ export function play(name, v = 0, k = 1) {
   if (!ctx || !sound.volume || k <= 0) return;
   // a mob's sound: its kind first, what happened last (zombified_piglin_hurt, ghast_warn)
   const parts = name.split('_'), kind = parts[0], mood = parts.length > 1 ? parts.at(-1) : undefined;
-  if (['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'spider', 'creeper', 'zombified', 'ghast', 'blaze', 'magma'].includes(kind)) { voice(kind, mood, k); return; }
+  if (['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'spider', 'creeper', 'zombified', 'ghast', 'blaze', 'magma', 'villager', 'iron'].includes(kind)) { voice(kind, mood, k); return; }
   const [f, q, g] = MAT[materialOf(v)] || MAT.stone, r = 0.85 + Math.random() * 0.3;
   switch (name) {
     case 'break': burst(f, q, g * 0.9, 0.22, {pitch: r}); burst(f * 0.6, q, g * 0.5, 0.18, {pitch: r, at: 0.03}); break;
@@ -109,6 +112,7 @@ export function play(name, v = 0, k = 1) {
     case 'drink': for (let i = 0; i < 2; i++) tone(260 + Math.random() * 60, 0.14, 0.09, {type: 'sine', slide: 1.5, at: i * 0.12}); break;
     case 'throw': burst(900, 1, 0.2, 0.25, {pitch: 0.7}); break;
     case 'glass': for (let i = 0; i < 4; i++) burst(4200 + Math.random() * 2000, 5, 0.25 * k, 0.12, {at: i * 0.03}); break;
+    case 'bell': [880, 1320, 1760].forEach((fr, i) => tone(fr, 0.16 / (i + 1), 2.4, {type: 'sine', at: 0.002 * i})); tone(440, 0.08, 2.8, {type: 'triangle'}); break;
     case 'brew': for (let i = 0; i < 5; i++) tone(400 + Math.random() * 500, 0.06 * k, 0.07, {slide: 1.8, at: i * 0.09}); break;
   }
 }

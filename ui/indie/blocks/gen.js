@@ -5,6 +5,7 @@
 // column's edge are grown from every column they touch, so the halves meet.
 import {fractal, simplex, hash, rng} from './noise.js';
 import {ID, MINY, HEIGHT, SECTIONS, SEA, withMeta} from './blocks.js';
+import {drawVillages} from './village.js';
 
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -214,6 +215,8 @@ export function generateColumn(seed, cx, cz) {
   // heightmap: the top block
   const high = Math.min(MINY + HEIGHT - 1, Math.max(top, SEA) + 40);
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) { let y = high; while (y > MINY && !getBlock(col, x, y, z)) y--; col.height[z * 16 + x] = y; }
+  // 6. villages
+  drawVillages(col, seed);
   return col;
 }
 const isSolidGround = v => v && v !== ID.water && v !== ID.lava;

@@ -9,7 +9,7 @@ import {BLOCKS, ID, idOf, metaOf} from './blocks.js';
 import {pieces} from './shapes.js';
 
 // shapes drawn from their pieces (shapes.js)
-const PIECED = new Set(['stairs', 'fence', 'gate', 'pane', 'door', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'brewing', 'portal']);
+const PIECED = new Set(['stairs', 'fence', 'gate', 'pane', 'door', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'brewing', 'portal', 'composter', 'lectern', 'bell']);
 
 export const STRIDE = 16;
 const P = 18, P2 = P * P;
@@ -147,7 +147,7 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
     }
     if (f === 2) return tex(t.top);
     if (f === 3) return tex(t.bottom);
-    if (b.facing && t.front && f === FRONT[meta & 3]) return tex(b.id === ID.furnace && meta & 4 ? 'furnace_front_on' : t.front);
+    if (b.facing && t.front && f === FRONT[meta & 3]) return tex(t.frontOn && meta & 4 ? t.frontOn : t.front);
     return tex(t.side);
   };
 
@@ -177,7 +177,8 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
       const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)];
       for (const {box: [x0, y0, z0, x1, y1, z1], role} of pieces(v, near)) {
         const texFor = f => role === 'main' ? (shape === 'pane' && (f === 2 || f === 3) ? tex(b.tex.edge || b.tex.all) : faceTex(b, f, meta))
-          : role === 'door_top' ? tex(b.tex.top) : role === 'door_bottom' ? tex(b.tex.bottom) : role === 'wood' ? tex('oak_planks') : role === 'latch' ? tex('iron_block') : role === 'base' ? tex(b.tex.base) : tex('white_wool');
+          : role === 'door_top' ? tex(b.tex.top) : role === 'door_bottom' ? tex(b.tex.bottom) : role === 'wood' ? tex('oak_planks') : role === 'latch' ? tex('iron_block') : role === 'base' ? tex(b.tex.base) : role === 'post' ? tex(b.tex.post)
+          : role === 'compost' ? tex('composter_compost') : role === 'ready' ? tex('composter_ready') : tex('white_wool');
         const t = role === 'wool' ? parseInt(b.color.slice(1), 16) : role === 'main' ? tintC : WHITE;
         // a portal's sheet shows no edge where it meets more of itself
         const faces = shape === 'portal' ? FACE.reduce((m, F, f) => (pad[at(x + F.n[0], y + F.n[1], z + F.n[2])] & 0xFFF) === id ? m & ~(1 << f) : m, 63) : 63;

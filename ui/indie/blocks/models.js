@@ -81,6 +81,20 @@ export const MODELS = {
     ...Array.from({length: 8}, (_, i) => part(`slice${i}`, i === 2 ? [24, 10] : i === 3 ? [24, 19] : [0, i], [[-4, 16 + i, -4, 8, 1, 8]])),
     part('core', [0, 16], [[-2, 18, -2, 4, 4, 4]]),
   ]},
+  // villagers (64×64: a long head with a big nose, a robe over the body, the arms folded in front) and the iron golem
+  // (128×128: a heavy body, long arms swinging, a small head with a long nose)
+  villager: {skin: [64, 64], size: [0.6, 1.95], parts: [
+    part('head', [0, 0], [[-4, -10, -4, 8, 10, 8]], [0, 0, 0], [0, 0, 0], [part('nose', [24, 0], [[-1, -1, -6, 2, 4, 2]], [0, -2, 0])]),
+    part('body', [16, 20], [[-4, 0, -3, 8, 12, 6]], [0, 0, 0], [0, 0, 0], [part('robe', [0, 38], [[-4, 0, -3, 8, 20, 6, 0.5]])]),
+    part('arms', [44, 22], [[-8, -2, -2, 4, 8, 4], [4, -2, -2, 4, 8, 4, 0, true]], [0, 3, -1], [-0.75, 0, 0], [part('hands', [40, 38], [[-4, 2, -2, 8, 4, 4]])]),
+    part('leg0', [0, 22], [[-2, 0, -2, 4, 12, 4]], [-2, 12, 0]), part('leg1', [0, 22], [[-2, 0, -2, 4, 12, 4, 0, true]], [2, 12, 0]),
+  ]},
+  iron_golem: {skin: [128, 128], size: [1.4, 2.7], parts: [
+    part('head', [0, 0], [[-4, -12, -5.5, 8, 10, 8]], [0, -7, -2], [0, 0, 0], [part('nose', [24, 0], [[-1, -5, -7.5, 2, 4, 2]])]),
+    part('body', [0, 40], [[-9, -2, -6, 18, 12, 11]], [0, -7, 0], [0, 0, 0], [part('waist', [0, 70], [[-4.5, 10, -3, 9, 5, 6, 0.5]])]),
+    part('arm0', [60, 21], [[-13, -2.5, -3, 4, 30, 6]], [0, -7, 0]), part('arm1', [60, 58], [[9, -2.5, -3, 4, 30, 6]], [0, -7, 0]),
+    part('leg0', [37, 0], [[-3.5, -3, -3, 6, 16, 5]], [-4, 11, 0]), part('leg1', [60, 0], [[-3.5, -3, -3, 6, 16, 5, 0, true]], [5, 11, 0]),
+  ]},
   // the player (seen from behind or the front): the 64×64 layout, each part with its outer layer a little bigger
   player: {skin: [64, 64], size: [0.6, 1.8], parts: [
     part('head', [0, 0], [[-4, -8, -4, 8, 8, 8]], [0, 0, 0], [0, 0, 0], [part('hat', [32, 0], [[-4, -8, -4, 8, 8, 8, 0.5]])]),
@@ -134,6 +148,16 @@ export function animate(kind, rot, pose) {
     set('arm0', walk(PI) - hit * 1.3, hit * 0.4, 0.05 + Math.cos(pose.age * 0.09) * 0.03);
     set('arm1', walk(0), 0, -0.05 - Math.cos(pose.age * 0.09) * 0.03);
     set('leg0', walk(0) * 1.4); set('leg1', walk(PI) * 1.4);
+  } else if (kind === 'villager') {
+    set('leg0', swing() * 0.5); set('leg1', swing(PI) * 0.5);
+    // shaking its head (no trade for you), or nodding as it trades
+    if (pose.shake) head[2] = Math.sin(pose.age * 1.4) * 0.3;
+  } else if (kind === 'iron_golem') {
+    // the game's: arms and legs on a triangle wave as it walks; both arms thrown up when it hits
+    const tri = (x, p) => (Math.abs(((x % p) + p) % p - p / 2) - p / 4) / (p / 4), w = tri(pose.limb, 13);
+    if (pose.attack) { const up = -2 + 1.5 * tri(pose.attack * 10, 10); set('arm0', up); set('arm1', up); }
+    else { set('arm0', (-0.2 + 1.5 * w) * pose.amount); set('arm1', (-0.2 - 1.5 * w) * pose.amount); }
+    set('leg0', -1.5 * w * pose.amount); set('leg1', 1.5 * w * pose.amount);
   } else if (kind === 'zombified_piglin') {
     // arms held out when it is angry, swinging when it walks; the ears flap
     const up = -PI / 2 + Math.sin(pose.age * 0.067) * 0.05 - (pose.attack || 0) * 0.6;
@@ -305,6 +329,18 @@ export const OWN_SKINS = {
     const [fx, fy] = front(32, 4, 8, 8);
     for (const [ex, ey] of [[1, 3], [6, 3], [2, 4], [5, 4], [3, 2], [4, 2], [0, 4], [7, 4]]) px(fx + ex, fy + ey, hex('#d0201c'));
   }),
+  villager: () => ownVillager('none'),
+  iron_golem: () => skin(128, 128, 31, ({px, area, box, front, hex, r}) => {
+    const iron = ['#d8d2c8', '#cfc8bd', '#e2ddd4', '#c4bdb2'];
+    box(0, 0, 8, 10, 8, iron, 0.12); box(24, 0, 2, 4, 2, ['#c4bdb2']); box(0, 40, 18, 12, 11, iron, 0.12); box(0, 70, 9, 5, 6, iron, 0.12);
+    box(60, 21, 4, 30, 6, iron, 0.12); box(60, 58, 4, 30, 6, iron, 0.12); box(37, 0, 6, 16, 5, iron, 0.12); box(60, 0, 6, 16, 5, iron, 0.12);
+    // vines growing over it, rivets and cracks, the red eyes
+    for (let k = 0; k < 260; k++) { const x = Math.floor(r() * 90), y = 40 + Math.floor(r() * 50); if (r() < 0.5 && x < 60) px(x, y, hex(r() < 0.5 ? '#4a7a2a' : '#5e9036')); }
+    for (let k = 0; k < 60; k++) px(Math.floor(r() * 100), Math.floor(r() * 100), hex('#9a948a'));
+    const [fx, fy] = front(0, 0, 8, 8);
+    area(fx + 1, fy + 4, 2, 1, ['#2a1414']); area(fx + 5, fy + 4, 2, 1, ['#2a1414']); px(fx + 2, fy + 4, hex('#c81e1e')); px(fx + 5, fy + 4, hex('#c81e1e'));
+    area(fx + 1, fy + 2, 6, 1, ['#a8a298']);
+  }),
   // the Nether's, ours: a rotting pink piglin with bare ribs and a gold-trimmed belt
   zombified_piglin: () => skin(64, 64, 21, ({px, area, box, front, hex, r}) => {
     const pink = ['#e8a4a0', '#dc9894', '#f0b0aa'], rot = ['#7aa860', '#6a9852', '#88b46c'], loin = ['#5a3a22', '#4e321c', '#66442a'];
@@ -359,7 +395,28 @@ export const OWN_SKINS = {
     for (const [u, v] of [[0, 16], [16, 48]]) { box(u, v, 4, 12, 4, jeans); area(u, v + 13, 16, 3, shoe); area(u + 8, v, 4, 4, shoe); }
   }),
 };
-export const MOB_KINDS = Object.keys(MODELS).filter(k => k !== 'sheep_wool' && k !== 'player');
+// a villager's clothes by trade: the robe, its trim, and something of the trade (ours)
+const VILLAGER_CLOTHES = {none: ['#6e4b30', '#5a3c26'], nitwit: ['#3a8a3a', '#2a6a2a'], farmer: ['#8a6a2a', '#d8c060', 'hat'], fisherman: ['#3a6a8a', '#d8c060', 'hat'],
+  shepherd: ['#8a5a3a', '#f0f0f0'], fletcher: ['#6a7a3a', '#e8e8e8', 'feather'], librarian: ['#e8e4d8', '#a82a2a'], cleric: ['#7a2a8a', '#e8c040'],
+  armorer: ['#3a3a3a', '#8a8a8a', 'apron'], toolsmith: ['#4a4a5a', '#8a6a3a', 'apron'], butcher: ['#e8e8e8', '#b83a3a', 'apron']};
+/** Our villager skin for a trade ('none': no work yet), in the game's 64×64 villager layout. */
+export function ownVillager(prof) {
+  const [robe, trim, mark] = VILLAGER_CLOTHES[prof] || VILLAGER_CLOTHES.none;
+  return skin(64, 64, 41 + prof.length, ({px, area, box, front, hex}) => {
+    const face = ['#b98c6a', '#ad8060', '#c49674'], cloth = [robe, robe, robe], dark = [trim];
+    box(0, 0, 8, 10, 8, face); box(24, 0, 2, 4, 2, ['#a0785a', '#9a7254']);
+    box(16, 20, 8, 12, 6, cloth); box(0, 38, 8, 20, 6, cloth, 0.12); box(44, 22, 4, 8, 4, cloth); box(40, 38, 8, 4, 4, face); box(0, 22, 4, 12, 4, ['#4a3a2a', '#3e3022']);
+    // the robe's hem and collar in the trim colour; eyes and a brow
+    area(6, 56, 28, 2, dark); area(22, 20, 8, 1, dark); area(6, 44, 8, 1, dark);
+    const [fx, fy] = front(0, 0, 8, 8);
+    area(fx + 1, fy + 4, 6, 1, ['#4a3020']); px(fx + 1, fy + 5, hex('#ffffff')); px(fx + 2, fy + 5, hex('#2a6a3a')); px(fx + 5, fy + 5, hex('#2a6a3a')); px(fx + 6, fy + 5, hex('#ffffff'));
+    if (mark === 'hat') area(0, 0, 32, 8, [trim, trim, '#c0a848']);
+    if (mark === 'apron') { const [bx, by] = front(0, 38, 8, 6); area(bx + 1, by + 2, 6, 16, [trim]); }
+    if (mark === 'feather') { area(8, 0, 2, 8, [trim]); px(9, 0, hex('#ffffff')); }
+  });
+}
+export const VILLAGER_SKINS = Object.keys(VILLAGER_CLOTHES);
+export const MOB_KINDS =Object.keys(MODELS).filter(k => k !== 'sheep_wool' && k !== 'player');
 // our armour pictures, one per material and layer (1: helmet, chestplate, boots; 2: leggings), only where it is worn
 const ARMOR_PAL = {leather: ['#8f5530', '#9c5e36', '#a8683c', '#7e4a29'], iron: ['#c6c6c6', '#d4d4d4', '#b8b8b8', '#e2e2e2'],
   golden: ['#e9c33a', '#f2d24e', '#d9ae2a', '#fae27a'], diamond: ['#4fd1cb', '#62e0d9', '#3fbcb6', '#8ff0ea']};

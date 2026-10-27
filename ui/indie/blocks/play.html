@@ -153,6 +153,19 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
 .cost{margin:0;text-align:center;font-size:calc(7*var(--u));color:#3c8a12;font-weight:700}
 .win .note{color:#555;margin:0 auto}
 .cost.bad{color:#c0292b}
+/* trading: the villager's offers down the left (sold out ones crossed through), the payment and what it gives on the right */
+.vxp{height:calc(3*var(--u));background:#3a3a3a;margin:0 calc(30*var(--u)) calc(3*var(--u))}
+.vxp i{display:block;height:100%;background:#7ec82a}
+.trade{display:flex;gap:calc(8*var(--u));align-items:flex-start}
+.offers{display:flex;flex-direction:column;gap:var(--u);max-height:calc(19*5*var(--u));overflow-y:auto;overflow-x:hidden}
+.slot.offer{width:calc(70*var(--u));height:calc(18*var(--u));display:flex;align-items:center;gap:var(--u);padding:0 calc(2*var(--u));background:#a8a8a8}
+.slot.offer.on{background:#d8d8d8;outline:var(--u) solid #fff}
+.slot.offer.off{opacity:.55;background-image:linear-gradient(160deg,transparent 46%,#c0292b 47% 53%,transparent 54%)}
+.slot.offer b{color:#555;font-size:calc(8*var(--u));margin:0 var(--u)}
+.mini{position:relative;width:calc(16*var(--u));height:calc(16*var(--u));display:inline-block}
+.mini .icon{width:100%;height:100%}
+.mini .n{font-size:calc(6*var(--u))}
+.tpay{display:flex;align-items:center;gap:calc(3*var(--u));margin-top:calc(14*var(--u))}
 /* the brewing stand: fuel at the left, the ingredient over the bottles, bubbles rising while it brews */
 .brew{display:grid;grid-template-columns:auto auto;gap:calc(2*var(--u)) calc(16*var(--u));justify-content:center;align-items:start;padding:calc(2*var(--u)) 0}
 .bfuel{display:flex;flex-direction:column;align-items:center;gap:calc(2*var(--u));grid-row:1/3}

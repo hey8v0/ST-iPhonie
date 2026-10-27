@@ -5,6 +5,7 @@
 import {generateColumn, newColumn, BIOMES, growTree, worldOf} from './gen.js';
 import {generateNether} from './nether.js';
 import {portalHolds, portalSpot, buildPortal} from './portal.js';
+import {villagersIn} from './village.js';
 import {BLOCKS, ID, MINY, HEIGHT, SECTIONS, SEA, withMeta, dropsOf, itemInfo} from './blocks.js';
 import {meshSection} from './mesh.js';
 import {rng} from './noise.js';
@@ -14,7 +15,9 @@ const FILTER = new Uint8Array(N), EMIT = new Uint8Array(N), OPAQUE = new Uint8Ar
 for (const b of BLOCKS) { FILTER[b.id] = b.opaque ? 15 : b.filter; EMIT[b.id] = b.light; OPAQUE[b.id] = b.opaque ? 1 : 0; }
 // a slab made double hides light like a full block; a burning furnace glows
 const filterOf = v => { const id = v & 0xFFF; return (BLOCKS[id].shape === 'slab' && v >>> 12 === 2) ? 15 : FILTER[id]; };
-const emitOf = v => (v & 0xFFF) === ID.furnace ? (v >>> 12 & 4 ? 13 : 0) : EMIT[v & 0xFFF];
+// furnaces (and smokers, blast furnaces) glow while lit (state bit 4)
+const FURNACES = new Set(BLOCKS.filter(b => b.use === 'furnace').map(b => b.id));
+const emitOf = v => FURNACES.has(v & 0xFFF) ? (v >>> 12 & 4 ? 13 : 0) : EMIT[v & 0xFFF];
 const key = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
 const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 const NEIGHBOURS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -510,6 +513,9 @@ export class World {
   /** Animals living on a column made for the first time: [[kind, x, y, z, extra]] (the page keeps each place once). */
   herdFor(c) {
     const seed = this.seed, x0 = c.cx * 16, z0 = c.cz * 16;
+    // the villagers (and the golem) of a village part here
+    const people = villagersIn(seed, c.cx, c.cz);
+    if (people.length) return people;
     const h = (salt) => { let n = Math.imul(seed ^ (c.cx * 73856093) ^ (c.cz * 19349663) ^ salt, 2654435761); n ^= n >>> 15; return (n >>> 0) / 4294967296; };
     if (h(1) > 0.12) return [];
     const biome = BIOMES[c.biome[8 * 16 + 8]].name;

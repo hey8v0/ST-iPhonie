@@ -788,6 +788,43 @@ ITEM_ART.golden_carrot = () => icon([{mask: mask().line(4, 12, 11, 5, 3).line(3.
 ITEM_ART.glistering_melon_slice = () => icon([{mask: mask().poly([[2, 4], [14, 4], [8, 14]]), color: '#e23b3b', light: '#ff7a6a', dark: '#a41f1f', outline: '#4a0a0a'}, {mask: mask().line(2.5, 4, 13.5, 4, 1.4), color: '#f2d23a', light: '#fff7a8', dark: '#c99a1a'}], {sparkle: [[6, 7], [9, 9], [8, 6]]});
 ITEM_ART.fire_charge = () => { const p = icon([{mask: mask().disc(8, 8.5, 5), color: '#3a2a20', light: '#5a4030', dark: '#1a1008', outline: '#0a0604', grain: true}]); for (const [x, y] of [[6, 6], [9, 7], [7, 10], [10, 10], [5, 9]]) p.set(x, y, hex(hash(404, x, y) > 0.5 ? '#f0a020' : '#ff5a10')); return p; };
 
+// ---------- villages ----------
+const OAK = '#b8945f', SPRUCE = '#6e5130', BIRCH = '#d4c78e', DARKW = '#5e3f22';
+const framed = (p, c) => { for (let i = 0; i < S; i++) { p.set(i, 0, hex(c)); p.set(i, 15, hex(c)); p.set(0, i, hex(c)); p.set(15, i, hex(c)); } return p; };
+BLOCK_ART.dirt_path_top = () => specks(mottled(411, ['#8c6a3c', '#94723f', '#9c7a46', '#856438'], {cells: 8, grain: 0.5, smooth: 0.4}), 412, 8, ['#6f5230', '#a6844f'], {size: 1});
+BLOCK_ART.dirt_path_side = () => { const p = dirt(nameSeed('dirt')); const t = BLOCK_ART.dirt_path_top(); for (let y = 1; y < 4; y++) for (let x = 0; x < S; x++) p.set(x, y, t.get(x, y)); for (let x = 0; x < S; x++) p.set(x, 0, [0, 0, 0], 0); return p; };
+BLOCK_ART.hay_block_side = () => { const p = mottled(421, ['#b8962a', '#c4a232', '#d0ae3a', '#a8861e'], {cells: 4, grain: 0.5, smooth: 0.3}); for (let x = 0; x < S; x++) for (let y = 0; y < S; y++) if ((x + Math.floor(hash(422, x, 0) * 3)) % 3 === 0) p.set(x, y, mul(p.get(x, y), 0.85)); for (const y of [3, 12]) for (let x = 0; x < S; x++) { p.set(x, y, hex('#7a5a1a')); p.set(x, y + 1, hex('#9a1e1e')); } return p; };
+BLOCK_ART.hay_block_top = () => { const p = mottled(423, ['#b8962a', '#c4a232', '#d0ae3a', '#a8861e'], {cells: 8, grain: 0.7, smooth: 0.2}); for (const c of [3, 12]) for (let i = 0; i < S; i++) { p.set(c, i, hex('#9a1e1e')); p.set(i, c, hex('#9a1e1e')); } return p; };
+BLOCK_ART.bell_body = () => { const p = mottled(431, ['#d8a828', '#e8b830', '#f0c840', '#c89820'], {cells: 4, grain: 0.25, smooth: 0.7}); for (let x = 0; x < S; x++) { p.set(x, 0, hex('#fff0a0')); p.set(x, 15, hex('#a07010')); } return p; };
+BLOCK_ART.composter_side = () => { const p = planks(441, OAK); for (const x of [0, 15]) for (let y = 0; y < S; y++) p.set(x, y, hex(DARKW)); for (let x = 0; x < S; x++) p.set(x, 15, hex(DARKW)); return p; };
+BLOCK_ART.composter_top = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (x < 2 || x > 13 || y < 2 || y > 13) p.set(x, y, mul(hex(OAK), 0.9 + hash(442, x, y) * 0.2)); return p; };
+BLOCK_ART.composter_bottom = () => planks(443, OAK);
+BLOCK_ART.composter_compost = () => specks(mottled(444, ['#3a2a16', '#4a3620', '#5a4228', '#2e2010'], {cells: 8, grain: 0.7, smooth: 0.3}), 445, 10, ['#5a7a2a', '#7a9a3a'], {size: 1});
+BLOCK_ART.composter_ready = () => specks(BLOCK_ART.composter_compost(), 446, 18, ['#f0eee6', '#ffffff'], {size: 1});
+BLOCK_ART.lectern_base = () => framed(planks(451, OAK), DARKW);
+BLOCK_ART.lectern_top = () => { const p = planks(452, OAK); framed(p, DARKW); for (let y = 3; y < 13; y++) for (let x = 3; x < 13; x++) if (x !== 8) p.set(x, y, hex(x % 2 ? '#efe4c4' : '#e4d8b4')); return p; };
+BLOCK_ART.lectern_sides = () => { const p = planks(453, OAK); for (let x = 0; x < S; x++) { p.set(x, 0, hex(DARKW)); p.set(x, 15, hex(DARKW)); } return p; };
+BLOCK_ART.lectern_front = () => { const p = BLOCK_ART.lectern_sides(); for (let y = 2; y < 14; y++) { p.set(7, y, hex(DARKW)); p.set(8, y, hex(DARKW)); } return p; };
+BLOCK_ART.barrel_side = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, mul(hex(SPRUCE), (x % 4 === 3 ? 0.75 : 1) * (0.92 + hash(461, x, y >> 2) * 0.12))); for (const y of [2, 13]) for (let x = 0; x < S; x++) p.set(x, y, hex('#5a5a5a')); return p; };
+BLOCK_ART.barrel_top = () => { const p = framed(planks(462, SPRUCE), '#4a3620'); for (let y = 5; y < 11; y++) for (let x = 5; x < 11; x++) p.set(x, y, hex(Math.abs(x - 7.5) + Math.abs(y - 7.5) < 2 ? '#3a2a18' : '#5a4228')); return p; };
+BLOCK_ART.barrel_bottom = () => framed(planks(463, SPRUCE), '#4a3620');
+BLOCK_ART.loom_top = () => { const p = framed(planks(471, BIRCH), '#8a7a50'); for (let x = 2; x < 14; x++) for (const y of [5, 6, 9, 10]) p.set(x, y, hex(['#c84a3a', '#3a6ac8', '#e8c84a', '#4ab85a'][(x + y) % 4])); return p; };
+BLOCK_ART.loom_side = () => { const p = framed(planks(472, OAK), DARKW); for (let y = 3; y < 13; y++) for (const x of [4, 8, 12]) p.set(x, y, hex('#f0f0f0')); return p; };
+BLOCK_ART.loom_front = () => { const p = framed(planks(473, OAK), DARKW); for (let y = 2; y < 14; y++) for (let x = 2; x < 14; x++) p.set(x, y, hex((x + y) % 2 ? '#e8e8e8' : '#d0d0d0')); p.rect(6, 6, 9, 9, hex('#c84a3a')); return p; };
+BLOCK_ART.loom_bottom = () => planks(474, OAK);
+BLOCK_ART.fletching_table_top = () => { const p = framed(planks(481, BIRCH), '#8a7a50'); for (let i = 3; i < 13; i++) p.set(i, i, hex('#6a4a2a')); p.set(12, 12, hex('#9a9a9a')); p.set(3, 3, hex('#f0f0f0')); p.set(4, 3, hex('#f0f0f0')); return p; };
+BLOCK_ART.fletching_table_side = () => { const p = planks(482, BIRCH); for (let x = 0; x < S; x++) { p.set(x, 0, hex('#8a7a50')); p.set(x, 1, hex('#6a5a3a')); } return p; };
+BLOCK_ART.fletching_table_front = () => { const p = BLOCK_ART.fletching_table_side(); for (let y = 4; y < 13; y++) { p.set(5, y, hex('#f4f4f4')); p.set(10, y, hex('#6a4a2a')); } p.set(10, 3, hex('#9a9a9a')); return p; };
+BLOCK_ART.smithing_table_top = () => { const p = framed(mottled(491, ['#3a3a42', '#42424a', '#4a4a52'], {cells: 4, grain: 0.3}), '#26262c'); for (let x = 3; x < 13; x++) { p.set(x, 7, hex('#6a6a72')); p.set(x, 8, hex('#2a2a30')); } return p; };
+BLOCK_ART.smithing_table_bottom = () => planks(492, SPRUCE);
+BLOCK_ART.smithing_table_side = () => { const p = planks(493, SPRUCE); for (let y = 0; y < 3; y++) for (let x = 0; x < S; x++) p.set(x, y, hex(y === 1 ? '#42424a' : '#26262c')); return p; };
+BLOCK_ART.smithing_table_front = () => { const p = BLOCK_ART.smithing_table_side(); p.rect(4, 6, 11, 7, hex('#8a8a92')); p.rect(7, 8, 8, 13, hex('#6a4a2a')); return p; };
+// the smoker (dark wood bands round a stone body) and the blast furnace (iron over smooth stone)
+const smoker = (face, on) => { const p = furnace(face, on); if (face === 'top') return framed(planks(501, '#4a3a2a'), '#2a1e14'); for (const y of [0, 1, 14, 15]) for (let x = 0; x < S; x++) p.set(x, y, hex(y % 2 ? '#3a2a1a' : '#5a4430')); return p; };
+const blast = (face, on) => { const p = furnace(face, on); for (let i = 0; i < S; i++) for (const j of [0, 15]) { p.set(i, j, hex('#9a9aa2')); p.set(j, i, hex('#9a9aa2')); } if (face !== 'top') for (let x = 1; x < 15; x++) p.set(x, 7, hex('#5a5a62')); return p; };
+BLOCK_ART.smoker_top = () => smoker('top'); BLOCK_ART.smoker_bottom = () => smoker('top'); BLOCK_ART.smoker_side = () => smoker('side'); BLOCK_ART.smoker_front = () => smoker('front', false); BLOCK_ART.smoker_front_on = () => smoker('front', true);
+BLOCK_ART.blast_furnace_top = () => blast('top'); BLOCK_ART.blast_furnace_side = () => blast('side'); BLOCK_ART.blast_furnace_front = () => blast('front', false); BLOCK_ART.blast_furnace_front_on = () => blast('front', true);
+
 /** Frames per animated texture and ticks per frame. */
 export const ANIMATED = {water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};
 /** Our drawing of a texture by name: {w, h, frames: [Uint8ClampedArray], time} or null when we have none. */

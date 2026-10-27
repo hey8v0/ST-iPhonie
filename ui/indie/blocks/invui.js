@@ -7,6 +7,7 @@ import {craft, useGrid, stackMax, same, smeltOf, fuelOf, ARMOR_AT} from './inven
 import {ENCHANTS, enchName, tableOffers, enchanted, anvilResult} from './enchant.js';
 import {iconKey} from './atlas.js';
 import {POTIONS, potionName, potionLines, INGREDIENTS, BREW_TICKS} from './brew.js';
+import {PROFESSIONS, LEVELS, LEVEL_XP, levelOf, pays, trade} from './trades.js';
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 const usesOf = info => info?.tool?.uses || info?.armor?.uses;
@@ -57,7 +58,8 @@ export class InventoryUI {
   show(kind, data = null) {
     this.kind = kind; this.data = data; this.open = true; this.root.hidden = false;
     // what is put in while the window is open (crafting grid; the enchanting table's item and lapis; the anvil's two) goes back when it closes
-    this.grid = new Array(kind === 'crafting' ? 9 : kind === 'player' ? 4 : kind === 'enchant' || kind === 'anvil' ? 2 : 0).fill(null);
+    this.grid = new Array(kind === 'crafting' ? 9 : kind === 'player' ? 4 : kind === 'enchant' || kind === 'anvil' || kind === 'trade' ? 2 : 0).fill(null);
+    this.sel = -1;
     this.focus = 0;
     this.draw();
   }
@@ -97,6 +99,12 @@ export class InventoryUI {
         list.push({key: 'f:out', section: 'f', get: () => f.output, set: s => { f.output = s; }, out: 'take'});
       }
       if (this.kind === 'chest') this.data.slots.forEach((_, i) => add('chest', i, this.data.slots));
+      // a villager's trades: its offers down the side (each shows what it gives), two places to pay, what you get
+      if (this.kind === 'trade') {
+        this.data.v.offers.forEach((o, i) => list.push({key: `of:${i}`, section: 'of', get: () => o.sell, set: () => {}, offer: i}));
+        add('t', 0, this.grid); add('t', 1, this.grid);
+        list.push({key: 't:out', section: 'to', get: () => this.tradeOut()?.sell || null, set: () => {}, out: 'trade'});
+      }
       // the brewing stand: three bottles (one each), the ingredient on top, blaze powder for fuel
       if (this.kind === 'brew') {
         const t = this.data.slots;
@@ -135,6 +143,47 @@ export class InventoryUI {
     this.game.reseed?.(); this.game.sound?.('enchant');
     this.draw();
   }
+  /** The offer the payment pays for now (the one picked, else the first it pays for): {i, sell} or null. */
+  tradeOut() {
+    const v = this.data?.v, ok = i => { const o = v.offers[i]; return o && o.uses < o.max && pays(o, this.grid[0], this.grid[1]); };
+    if (!v) return null;
+    const i = ok(this.sel) ? this.sel : v.offers.findIndex((_, k) => ok(k));
+    return i >= 0 ? {i, sell: v.offers[i].sell} : null;
+  }
+  /** An offer picked: what was being paid goes back, and what it costs comes out of the inventory into the payment places. */
+  pickOffer(i) {
+    const inv = this.game.inv, o = this.data.v.offers[i];
+    this.sel = i;
+    for (let k = 0; k < 2; k++) if (this.grid[k]) { const left = inv.add(this.grid[k]); if (left) this.game.drop(left); this.grid[k] = null; }
+    [o.buy[0], o.buy2].forEach((need, k) => {
+      if (!need) return;
+      for (let j = 0; j < 36 && (this.grid[k]?.n || 0) < stackMax(need.id); j++) {
+        const st = inv.slots[j];
+        if (!st || st.id !== need.id || st.ench || st.pot !== need.pot || st.dmg) continue;
+        const take = Math.min(st.n, stackMax(need.id) - (this.grid[k]?.n || 0));
+        this.grid[k] = {...st, n: (this.grid[k]?.n || 0) + take}; st.n -= take; if (!st.n) inv.slots[j] = null;
+      }
+    });
+    this.draw();
+  }
+  /** The trade made once (what it gives into the hand, or into the inventory with shift, as long as it pays). */
+  tradeTake(how) {
+    const v = this.data.v, first = this.tradeOut();
+    // shift repeats this one trade while it pays (not another one the rest would pay for)
+    for (let n = 0; first && n < (how === 'shift' ? 64 : 1); n++) {
+      const t = this.tradeOut();
+      if (!t || t.i !== first.i) break;
+      const c = this.cursor, sell = v.offers[t.i].sell;
+      if (how !== 'shift' && c && !(same(c, sell) && c.n + sell.n <= stackMax(c.id))) break;
+      const got = trade(v, t.i, this.grid);
+      if (!got) break;
+      this.sel = t.i;
+      if (how === 'shift') { const left = this.game.inv.add(got); if (left) this.game.drop(left); }
+      else if (c) c.n += got.n; else this.cursor = got;
+      this.game.traded?.(v, v.offers[t.i]);
+    }
+    this.draw();
+  }
   // ---------- drawing ----------
   draw() {
     if (!this.open) return;
@@ -150,16 +199,23 @@ export class InventoryUI {
       body = `<h3>合成</h3><div class="craft" style="justify-content:${this.kind === 'crafting' ? 'center' : 'space-between'}">${this.kind === 'player' ? worn : ''}<div class="craft"><div class="g${w}">${sec('g').map(s => slot(s)).join('')}</div><div class="arrow"></div>${slot(out, ' big')}</div></div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'furnace') {
       const f = this.data, [fin, fuel, fout] = sec('f');
-      const burn = f.burnMax ? f.burn / f.burnMax : 0, cook = (f.cook || 0) / 200;
-      body = `<h3>熔炉</h3><div class="furnace">${slot(fin)}<div></div><div></div><div class="fire"><i style="height:${Math.round(burn * 100)}%"></i></div><div class="arrow"><i style="width:${Math.round(cook * 65)}%"></i></div>${slot(fout, ' big')}${slot(fuel)}<div></div><div></div></div><h3>物品栏</h3>${bag}`;
+      const burn = f.burnMax ? f.burn / f.burnMax : 0, cook = (f.cook || 0) / (f.type ? 100 : 200);
+      body = `<h3>${f.type === 'food' ? '烟熏炉' : f.type === 'ore' ? '高炉' : '熔炉'}</h3><div class="furnace">${slot(fin)}<div></div><div></div><div class="fire"><i style="height:${Math.round(burn * 100)}%"></i></div><div class="arrow"><i style="width:${Math.round(cook * 65)}%"></i></div>${slot(fout, ' big')}${slot(fuel)}<div></div><div></div></div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'brew') {
       // fuel on the left (its bar: brews left of twenty), the ingredient at the top with the progress arrow, the three bottles under it
       const t = this.data, prog = t.time ? 1 - t.time / BREW_TICKS : 0;
       body = `<h3>酿造台</h3><div class="brew"><div class="bfuel">${slot(sec('bf')[0], t.slots[4] ? '' : ' powder')}<div class="fuelbar"><i style="width:${Math.round((t.fuel || 0) / 20 * 100)}%"></i></div></div>`
         + `<div class="bmid"><div class="bubbles${t.time ? ' on' : ''}"></div>${slot(sec('bi')[0])}<div class="barrow"><i style="height:${Math.round(prog * 100)}%"></i></div></div>`
         + `<div class="bottles">${sec('b').map(st => slot(st, st.get() ? '' : ' bottle')).join('')}</div></div><h3>物品栏</h3>${bag}`;
+    } else if (this.kind === 'trade') {
+      // the villager's trade and level, the bar to its next level; each offer: what it costs → what it gives (crossed out when sold out)
+      const v = this.data.v, lv = levelOf(v.xp), next = LEVEL_XP[lv + 1], bar = next ? (v.xp - LEVEL_XP[lv]) / (next - LEVEL_XP[lv]) : 1, cur = this.tradeOut()?.i ?? this.sel;
+      const mini = st => st ? `<span class="mini">${stackHtml(st, icons)}</span>` : '<span class="mini"></span>';
+      const offer = (st, i) => { const o = v.offers[i]; return `<div class="slot offer${i === cur ? ' on' : ''}${o.uses >= o.max ? ' off' : ''}${list.indexOf(st) === this.focus ? ' focus' : ''}" data-k="${st.key}">${mini(o.buy[0])}${mini(o.buy2)}<b>→</b>${mini(o.sell)}</div>`; };
+      body = `<h3>${esc(PROFESSIONS[v.prof]?.zh || '村民')} · ${LEVELS[lv]}</h3><div class="vxp"><i style="width:${Math.round(bar * 100)}%"></i></div>`
+        + `<div class="trade"><div class="offers">${sec('of').map(offer).join('')}</div><div class="tpay">${sec('t').map(st => slot(st)).join('')}<div class="arrow"></div>${slot(sec('to')[0], ' big')}</div></div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'chest') {
-      body = `<h3>箱子</h3><div class="slots">${sec('chest').map(s => slot(s)).join('')}</div><h3>物品栏</h3>${bag}`;
+      body = `<h3>${esc(this.data.title || '箱子')}</h3><div class="slots">${sec('chest').map(s => slot(s)).join('')}</div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'enchant') {
       // each offer: the level it needs (green when it can be had), a hint of what it gives, what it costs
       const offers = this.offers(), level = this.game.xp?.().level || 0, lapis = this.grid[1]?.n || 0, creative = this.game.creative?.();
@@ -223,6 +279,8 @@ export class InventoryUI {
     const c = this.cursor, here = s.get();
     this.game.sound?.('click');
     if (s.opt != null) { this.enchantWith(s.opt); return; }
+    if (s.offer != null) { this.pickOffer(s.offer); return; }
+    if (s.out === 'trade') { this.tradeTake(how); return; }
     if (s.trash) { this.cursor = null; this.draw(); return; }
     if (s.source) {
       // creative: the item comes from nowhere

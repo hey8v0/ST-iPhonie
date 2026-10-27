@@ -112,7 +112,7 @@ export function makeIcons(built) {
 export const iconKey = s => s.pot ? `${s.id}:${s.pot}` : s.id;
 
 // how a shaped block shows in the inventory: its state, and what joins it (a fence and a pane joined left and right)
-const ICON_STATE = {stairs: 2, fence: 0, gate: 0, pane: 0, trapdoor: 0, bed: 2 | 4, chest: 0, enchanting: 0, anvil: 1, brewing: 0};
+const ICON_STATE = {stairs: 2, fence: 0, gate: 0, pane: 0, trapdoor: 0, bed: 2 | 4, chest: 0, enchanting: 0, anvil: 1, brewing: 0, composter: 0, lectern: 0, bell: 0};
 // blocks with their own flat item picture (doors)
 const LAYER_ITEM = new Set(['oak_door', 'spruce_door', 'birch_door']);
 /**
@@ -130,6 +130,8 @@ function isoPieces(g, b, face, size) {
     if (role === 'latch') return ['iron_block', null];
     const t = b.tex;
     if (role === 'base') return [t.base, null];
+    if (role === 'post') return [t.post, null];
+    if (role === 'compost' || role === 'ready') return [`composter_${role === 'ready' ? 'ready' : 'compost'}`, null];
     if (b.shape === 'pane' && f === 2) return [t.edge || t.all, null];
     if (t.all) return [t.all, null];
     if (b.shape === 'chest' && f === 4) return [t.front, null];

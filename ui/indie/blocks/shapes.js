@@ -85,6 +85,17 @@ export function pieces(v, near = () => 0) {
     // the brewing stand: the rod, three arms holding the bottles' places, and the three-footed stone base
     case 'brewing': return [{box: [7, 0, 7, 9, 14, 9], role: 'main'}, {box: [9, 11, 7.5, 14, 12, 8.5], role: 'main'}, {box: [3, 11, 3, 7, 12, 4], role: 'main'}, {box: [3, 11, 12, 7, 12, 13], role: 'main'},
       {box: [9, 0, 5, 15, 2, 11], role: 'base'}, {box: [2, 0, 1, 8, 2, 7], role: 'base'}, {box: [2, 0, 9, 8, 2, 15], role: 'base'}];
+    // the composter: a box of planks open at the top, filled to its level (8: ready, bone meal on top)
+    case 'composter': {
+      const out = [[0, 0, 0, 16, 2, 16], [0, 2, 0, 2, 16, 16], [14, 2, 0, 16, 16, 16], [2, 2, 0, 14, 16, 2], [2, 2, 14, 14, 16, 16]].map(box => ({box, role: 'main'}));
+      if (meta) out.push({box: [2, 2, 2, 14, Math.min(15, 1 + Math.min(meta, 7) * 2), 14], role: meta >= 8 ? 'ready' : 'compost'});
+      return out;
+    }
+    // the lectern: a base, a post, and the sloping top (drawn flat)
+    case 'lectern': return [{box: [0, 0, 0, 16, 2, 16], role: 'base'}, {box: [4, 2, 4, 12, 13, 12], role: 'main'}, {box: [0, 13, 0, 16, 15, 16], role: 'main'}];
+    // the bell hanging between two stone posts
+    case 'bell': return [{box: [0, 0, 6, 2, 16, 10], role: 'post'}, {box: [14, 0, 6, 16, 16, 10], role: 'post'}, {box: [2, 13, 7, 14, 15, 9], role: 'post'},
+      {box: [5, 6, 5, 11, 12, 11], role: 'main'}, {box: [4, 4, 4, 12, 6, 12], role: 'main'}, {box: [7, 12, 7, 9, 13, 9], role: 'main'}];
     // a portal: a thin sheet across the middle of the block, standing along x (0) or z (1)
     case 'portal': return [{box: meta & 1 ? [6, 0, 0, 10, 16, 16] : [0, 0, 6, 16, 16, 10], role: 'main'}];
     case 'anvil': {
@@ -108,6 +119,7 @@ export function collisionBoxes(v, near = () => 0) {
     case 'bed': return [[0, 0, 0, 1, px(9), 1]];
     case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
     case 'brewing': return [[px(7), 0, px(7), px(9), px(14), px(9)], [px(2), 0, px(1), px(15), px(2), px(15)]];
+    case 'lectern': case 'bell': return toBlock(pieces(v, near));
   }
   if (!b.solid) {
     if (b.shape === 'layer' && meta > 0) return [[0, 0, 0, 1, px(meta * 2), 1]];
@@ -145,6 +157,7 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
     case 'brewing': return [[px(2), 0, px(1), px(15), px(14), px(15)]];
     case 'portal': return null;
+    case 'lectern': case 'bell': return toBlock(pieces(v, near));
     case 'stairs': case 'fence': case 'gate': case 'pane': case 'door': case 'trapdoor': case 'chest': case 'anvil': return toBlock(pieces(v, near));
     default: return FULL;
   }

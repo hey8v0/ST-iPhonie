@@ -8,6 +8,7 @@ import {buildModel, animate, MODELS} from './models.js';
 import {BLOCKS, ID, MINY, COLORS} from './blocks.js';
 import {collisionBoxes} from './shapes.js';
 import {fortressAt, spawnersNear} from './nether.js';
+import {newWork, PROFESSIONS, restock} from './trades.js';
 
 export const MOBS = {
   pig: {zh: '猪', health: 10, speed: 0.25, passive: true, breed: ['carrot', 'potato'], drops: [['porkchop', 1, 3, 'cooked_porkchop']]},
@@ -22,6 +23,9 @@ export const MOBS = {
   zombified_piglin: {zh: '僵尸猪灵', health: 20, speed: 0.23, hostile: true, neutral: true, undead: true, fireproof: true, damage: 8, range: 35, xp: 5, drops: [['rotten_flesh', 0, 1], ['gold_nugget', 0, 1]], rare: ['gold_ingot']},
   ghast: {zh: '恶魂', health: 10, speed: 0.1, hostile: true, fireproof: true, flies: 'ghast', range: 64, xp: 5, drops: [['ghast_tear', 0, 1], ['gunpowder', 0, 2]]},
   blaze: {zh: '烈焰人', health: 20, speed: 0.23, hostile: true, fireproof: true, flies: 'blaze', glow: true, range: 48, xp: 10, drops: [['blaze_rod', 0, 1]]},
+  // villages (kept in the save like animals): villagers trade and run from zombies; the iron golem guards them
+  villager: {zh: '村民', health: 20, speed: 0.25, passive: true, keep: true, breed: [], drops: []},
+  iron_golem: {zh: '铁傀儡', health: 100, speed: 0.25, keep: true, golem: true, range: 16, xp: 0, drops: [['iron_ingot', 3, 5], ['poppy', 0, 2]]},
   magma_cube: {zh: '岩浆怪', health: 16, speed: 0.2, hostile: true, fireproof: true, range: 16, drops: [['magma_cream', 0, 1]]},
 };
 for (const [k, m] of Object.entries(MOBS)) { m.kind = k; m.size = MODELS[k].size; }
@@ -43,13 +47,24 @@ export class Mob {
     this.color = extra.color || (kind === 'sheep' ? sheepColor(Math.random()) : null); this.sheared = !!extra.sheared;
     this.headYaw = 0; this.headPitch = 0; this.limb = 0; this.amount = 0; this.age = 0;
     this.hurtT = 0; this.inv = 0; this.dead = 0; this.fire = 0; this.goal = null; this.wait = 20 + Math.floor(Math.random() * 100);
-    this.panic = 0; this.love = 0; this.loveWait = 0; this.cool = 0; this.fuse = 0; this.aim = 0; this.graze = 0; this.attackT = 0; this.angry = 0;
+    this.panic = 0; this.love = 0; this.loveWait = 0; this.cool = 0; this.fuse = 0; this.aim = 0; this.graze = 0; this.attackT = 0; this.angry = 0; this.burnT = 0;
     if (this.baby) { this.body.w *= 0.5; this.body.hgt *= 0.5; }
     // a magma cube is big (4), middling (2) or small (1): its size × the box, size² health
+    this.home = extra.home || null;
+    // a villager's trade: its work (offers, experience) and the work block it has taken
+    if (kind === 'villager') {
+      const prof = extra.prof || 'none', seed = extra.seed ?? Math.floor(Math.random() * 2 ** 30);
+      Object.assign(this, extra.offers ? {prof, xp: extra.xp || 0, seed, offers: extra.offers} : PROFESSIONS[prof] ? newWork(prof, seed) : {prof, xp: 0, seed, offers: []});
+      this.job = extra.job || null; this.shake = 0; this.trading = false;
+    }
     if (kind === 'magma_cube') { this.mag = extra.mag || [1, 2, 4][Math.floor(Math.random() * 3)]; this.body.w *= this.mag; this.body.hgt *= this.mag; if (extra.health == null) this.health = this.mag * this.mag; this.hop = 10; this.squish = 0; }
   }
   get x() { return this.body.x; } get y() { return this.body.y; } get z() { return this.body.z; }
-  toJSON() { const b = this.body; return {kind: this.kind, x: +b.x.toFixed(2), y: +b.y.toFixed(2), z: +b.z.toFixed(2), yaw: +this.yaw.toFixed(2), health: this.health, baby: this.baby || undefined, grow: this.grow || undefined, color: this.color || undefined, sheared: this.sheared || undefined}; }
+  toJSON() {
+    const b = this.body;
+    return {kind: this.kind, x: +b.x.toFixed(2), y: +b.y.toFixed(2), z: +b.z.toFixed(2), yaw: +this.yaw.toFixed(2), health: this.health, baby: this.baby || undefined, grow: this.grow || undefined, color: this.color || undefined, sheared: this.sheared || undefined,
+      home: this.home || undefined, ...(this.kind === 'villager' ? {prof: this.prof, xp: this.xp, seed: this.seed, offers: this.offers, job: this.job || undefined} : {})};
+  }
 }
 
 const angleTo = (fx, fz, tx, tz) => Math.atan2(-(tx - fx), -(tz - fz));
@@ -99,13 +114,17 @@ export class Mobs {
     if (b.inLava && !d.fireproof) m.fire = 300;
     if (d.fireproof) m.fire = 0;
     if (wet && !b.inLava) m.fire = 0;
-    if (m.fire > 0) { m.fire--; if (m.fire % 20 === 0) this.hurt(m, b.inLava ? 4 : 1, null, 'fire'); if (m.age % 4 === 0) this.ctx.burst(m.x, m.y + b.height * 0.6, m.z, 'smoke'); }
+    // burning hurts once a second (counted on its own: the sun keeps setting the fire's time back, so its time never
+    // reached a whole second and the undead never burned)
+    if (m.fire > 0) { m.fire--; if (++m.burnT % 20 === 0) this.hurt(m, b.inLava ? 4 : 1, null, 'fire'); if (m.age % 4 === 0) this.ctx.burst(m.x, m.y + b.height * 0.6, m.z, 'smoke'); }
     if (b.inLava && !d.fireproof && m.age % 10 === 0) this.hurt(m, 4, null, 'lava');
     const pd = Math.hypot(player.x - m.x, player.z - m.z), py = player.y - m.y, alive = !player.dead && this.ctx.mode() !== 'creative';
     m.input = {fwd: 0, jump: false, mod: 1};
     m.lookAt = null;
     // an invisible player is noticed only from close by
     const range = d.range * (this.ctx.invisible?.() ? 0.1 : 1);
+    if (m.kind === 'villager') { if (this.villager(m, pd)) return; }
+    if (m.kind === 'iron_golem' && this.golem(m, pd)) return;
     if (m.kind === 'ghast') { this.ghast(m, pd, alive && pd < range); return; }
     if (m.kind === 'blaze') { this.blaze(m, pd, py, alive && pd < range); return; }
     if (m.kind === 'magma_cube') { this.cube(m, pd, py, alive && pd < range && Math.abs(py) < 16); return; }
@@ -138,6 +157,16 @@ export class Mobs {
         return;
       }
       m.fuse = Math.max(0, m.fuse - 1); m.aim = 0;
+      // a zombie with no player to chase goes for a villager
+      if (m.kind === 'zombie') {
+        if (m.age % 10 === 0) m.prey = this.nearest(m, o => o.kind === 'villager', 24);
+        const v = m.prey;
+        if (v && !v.dead) {
+          m.goal = [v.x, v.z]; m.input.fwd = 1; m.lookAt = [v.x, v.y + 1.5, v.z];
+          if (Math.hypot(v.x - m.x, v.z - m.z) < 1.5 && Math.abs(v.y - m.y) < 2 && m.attackT === 0) { m.attackT = 20; this.hurt(v, 3, {x: m.x, z: m.z}); }
+          return;
+        }
+      }
     }
     // animals: run when hurt, come to their food, find a mate
     if (d.passive) {
@@ -175,6 +204,69 @@ export class Mobs {
     if (!m.lookAt && pd < 8 && Math.random() < 0.02) m.lookUntil = m.age + 40;
     if (m.lookUntil > m.age) m.lookAt = [player.x, player.y + player.eye, player.z];
   }
+  /** The nearest other mob within reach that fn accepts, or null. */
+  nearest(m, fn, reach) {
+    let best = null, bd = reach;
+    for (const o of this.list) { if (o === m || o.dead || !fn(o)) continue; const d = Math.hypot(o.x - m.x, o.y - m.y, o.z - m.z); if (d < bd) { bd = d; best = o; } }
+    return best;
+  }
+  /**
+   * A villager: still while it trades (or shakes its head); runs from zombies; one without work takes a free work block
+   * near it (and loses it again if the block goes before it has traded); back in stock twice a day; it keeps near its
+   * village. Returns true when it has done its thinking.
+   */
+  villager(m, pd) {
+    const {player} = this.ctx;
+    if (m.shake > 0) m.shake--;
+    if (m.trading || m.shake > 0) { m.lookAt = [player.x, player.y + player.eye, player.z]; m.goal = null; return true; }
+    if (m.age % 10 === 0) { const z = this.nearest(m, o => o.kind === 'zombie', 8); if (z) { m.panic = 60; const a = Math.atan2(m.x - z.x, m.z - z.z); m.goal = [m.x + Math.sin(a) * 10, m.z + Math.cos(a) * 10]; m.wait = 30; } }
+    if (m.age % 100 === m.id % 100 && !m.baby) this.findWork(m);
+    if (m.offers.length && m.age % 12000 === 6000) restock(m);
+    if (m.age % 160 === m.id % 160 && Math.random() < 0.4) this.ctx.sound('villager', m.x, m.y, m.z);
+    // too far from its village: back toward it
+    if (m.home && !m.panic && Math.hypot(m.home[0] - m.x, m.home[2] - m.z) > 28 && (!m.goal || m.wait < 0)) { m.goal = [m.home[0] + (Math.random() - 0.5) * 10, m.home[2] + (Math.random() - 0.5) * 10]; m.wait = 200; }
+    return false;
+  }
+  /** Taking a work block (one no other villager has, within eight blocks), or losing it. */
+  findWork(m) {
+    const w = this.world;
+    if (m.job) {
+      const [x, y, z] = m.job;
+      if (!this.ctx.loaded(x, z) || BLOCKS[w.get(x, y, z) & 0xFFF]?.name === PROFESSIONS[m.prof]?.block) return;
+      m.job = null;
+      if (m.xp === 0) { m.prof = 'none'; m.offers = []; this.ctx.burst(m.x, m.y + 2, m.z, 'smoke'); }
+      return;
+    }
+    if (m.prof === 'nitwit' || (m.prof !== 'none' && m.xp > 0)) return;
+    const taken = new Set(this.list.filter(o => o.kind === 'villager' && o.job).map(o => o.job.join()));
+    const fx = Math.floor(m.x), fy = Math.floor(m.y), fz = Math.floor(m.z);
+    for (let dy = -2; dy <= 2; dy++) for (let dz = -8; dz <= 8; dz++) for (let dx = -8; dx <= 8; dx++) {
+      const name = BLOCKS[w.get(fx + dx, fy + dy, fz + dz) & 0xFFF]?.name, prof = Object.keys(PROFESSIONS).find(k => PROFESSIONS[k].block === name);
+      if (!prof || taken.has([fx + dx, fy + dy, fz + dz].join()) || (m.prof !== 'none' && prof !== m.prof)) continue;
+      m.job = [fx + dx, fy + dy, fz + dz];
+      if (m.prof !== prof) { Object.assign(m, newWork(prof, m.seed)); this.ctx.burst(m.x, m.y + 2, m.z, 'meal'); }
+      return;
+    }
+  }
+  /** The iron golem: walks its village slowly, goes for monsters near it (and a player who hurt a villager), throws them up. True while it fights. */
+  golem(m, pd) {
+    const {player} = this.ctx;
+    if (m.age % 10 === 0) m.prey = m.angry > 0 && !player.dead && pd < 24 ? 'player' : this.nearest(m, o => o.def.hostile && o.kind !== 'creeper', 16);
+    const t = m.prey === 'player' ? player : m.prey;
+    if (t && !t.dead) {
+      m.goal = [t.x, t.z]; m.input.fwd = 1; m.lookAt = [t.x, t.y + 1.5, t.z];
+      if (Math.hypot(t.x - m.x, t.z - m.z) < 2.4 && Math.abs(t.y - m.y) < 2.5 && m.attackT === 0) {
+        m.attackT = 10; const dmg = 7 + Math.floor(Math.random() * 15);
+        if (t === player) { this.ctx.hurtPlayer(dmg, `被${m.def.zh}杀死了`, m); player.vy = 0.4; }
+        else { this.hurt(t, dmg, {x: m.x, z: m.z, knock: 0.2}); t.body.vy += 0.4; }
+        this.ctx.sound('iron_golem_attack', m.x, m.y, m.z);
+      }
+      return true;
+    }
+    m.input.mod = 0.6;
+    if (m.home && Math.hypot(m.home[0] - m.x, m.home[2] - m.z) > 20 && (!m.goal || m.wait < 0)) { m.goal = [m.home[0], m.home[2]]; m.wait = 200; }
+    return false;
+  }
   /** Walks toward the goal: turning, jumping over steps, not off cliffs or into lava. */
   move(m) {
     const b = m.body, d = m.def, inp = m.input || {fwd: 0, mod: 1};
@@ -200,7 +292,7 @@ export class Mobs {
     // a blaze rises to the player's height and sinks slowly; a magma cube's slices squash when it lands
     if (d.flies === 'blaze') { if (m.rise) b.vy += (0.3 - b.vy) * 0.3; else if (!b.onGround && b.vy < 0) b.vy *= 0.6; }
     if (m.kind === 'magma_cube') { if (r.landed) m.squish = -0.5; m.squish *= 0.6; }
-    if (r.landed > 3 && !d.flies && m.kind !== 'magma_cube') this.hurt(m, Math.ceil(r.landed - 3), null, 'fall');
+    if (r.landed > 3 && !d.flies && m.kind !== 'magma_cube' && !d.golem) this.hurt(m, Math.ceil(r.landed - 3), null, 'fall');
     // the head follows what it looks at
     if (m.lookAt) {
       const dx = m.lookAt[0] - m.x, dy = m.lookAt[1] - (m.y + b.eye), dz = m.lookAt[2] - m.z, h = Math.hypot(dx, dz);
@@ -226,12 +318,14 @@ export class Mobs {
     if (m.dead || (m.inv > 0 && why === 'hit')) return false;
     if (m.def.fireproof && (why === 'fire' || why === 'lava')) return false;
     m.health -= n; m.hurtT = 10; if (why === 'hit' || why === 'arrow') m.inv = 10;
-    if (from) {
+    if (from && !m.def.golem) {
       const a = Math.atan2(m.x - from.x, m.z - from.z), k = from.knock ?? 0.4;
       m.body.vx += Math.sin(a) * k; m.body.vz += Math.cos(a) * k; if (m.body.onGround) m.body.vy = 0.36;
     }
     if (m.def.passive) m.panic = 100;
     if (m.kind === 'spider' || (m.def.hostile && from?.player)) m.angry = 600;
+    if (m.kind === 'villager' && from?.player) for (const o of this.list) if (o.kind === 'iron_golem' && Math.hypot(o.x - m.x, o.z - m.z) < 24) o.angry = 1200;
+    if (m.def.golem && from?.player) m.angry = 1200;
     // hit one zombified piglin and those around it come for you too
     if (m.def.neutral && from?.player) for (const o of this.list) if (o.kind === m.kind && Math.hypot(o.x - m.x, o.z - m.z) < 20) o.angry = 600 + Math.floor(Math.random() * 400);
     this.ctx.sound(m.health <= 0 ? `${m.kind}_death` : `${m.kind}_hurt`, m.x, m.y, m.z);
@@ -518,17 +612,18 @@ export class Mobs {
       const dx = m.x - view.x, dz = m.z - view.z;
       if (dx * dx + dz * dz > view.far * view.far) continue;
       const b = m.body, a = view.alpha ?? 1, x = b.prev.x + (b.x - b.prev.x) * a - view.x, y = b.prev.y + (b.y - b.prev.y) * a - view.y, z = b.prev.z + (b.z - b.prev.z) * a - view.z;
-      const rot = animate(m.kind, {}, {limb: m.limb, amount: m.amount, headYaw: -m.headYaw, headPitch: m.headPitch, age: m.age, attack: m.attackT > 10 ? 1 : 0, aim: m.aim > 0 || (m.def.neutral && m.angry > 0), fall: !b.onGround, graze: m.graze > 0, squish: m.squish || 0});
+      const rot = animate(m.kind, {}, {limb: m.limb, amount: m.amount, headYaw: -m.headYaw, headPitch: m.headPitch, age: m.age, attack: m.def.golem ? m.attackT / 10 : m.attackT > 10 ? 1 : 0, shake: m.shake > 0, aim: m.aim > 0 || (m.def.neutral && m.angry > 0), fall: !b.onGround, graze: m.graze > 0, squish: m.squish || 0});
       const s = (m.baby ? 0.5 : 1) * (MODELS[m.kind].scale || 1) * (m.mag || 1), roll = m.dead ? Math.min(1, m.dead / 10) * Math.PI / 2 : 0, swell = m.fuse ? Math.min(1, m.fuse / 30) * 0.3 * (1 + Math.sin(m.fuse * 0.9) * 0.15) : 0;
       const [sky, blk] = light(Math.floor(m.x), Math.floor(m.y + b.height / 2), Math.floor(m.z));
       const pose = {x, y, z, yaw: m.yaw, s, roll, swell}, hurt = m.hurtT > 0 || m.dead ? 1 : 0, white = m.fuse && Math.floor(m.fuse / 5) % 2 ? 0.6 : 0;
       const fire = m.fire > 0 || m.def.glow ? 1 : 0;
-      out.push({skin: m.kind, verts: new Float32Array(buildModel(m.kind, rot, pose, [], sizes[m.kind])), light: [sky, Math.max(blk, fire ? 14 : 0)], tint: [1, 1, 1], hurt, white});
+      const skin = m.kind === 'villager' ? `villager_${m.prof || 'none'}` : m.kind;
+      out.push({skin, verts: new Float32Array(buildModel(m.kind, rot, pose, [], sizes[skin])), light: [sky, Math.max(blk, fire ? 14 : 0)], tint: [1, 1, 1], hurt, white});
       if (m.kind === 'sheep' && !m.sheared) out.push({skin: 'sheep_wool', verts: new Float32Array(buildModel('sheep_wool', rot, pose, [], sizes.sheep_wool)), light: [sky, blk], tint: WOOL_TINT[m.color] || [1, 1, 1], hurt, white: 0});
     }
     return out;
   }
-  toJSON() { return this.list.filter(m => m.def.passive && !m.dead).map(m => m.toJSON()); }
-  load(list) { for (const s of list || []) if (MOBS[s.kind]?.passive) this.add(s.kind, s.x, s.y, s.z, s); }
+  toJSON() { return this.list.filter(m => (m.def.passive || m.def.keep) && !m.dead).map(m => m.toJSON()); }
+  load(list) { for (const s of list || []) if (MOBS[s.kind]?.passive || MOBS[s.kind]?.keep) this.add(s.kind, s.x, s.y, s.z, s); }
 }
 export {WOOL};

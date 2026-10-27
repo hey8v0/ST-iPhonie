@@ -44,6 +44,8 @@ const SKINS = {
   sheep: ['entity/sheep/sheep.png'], sheep_wool: ['entity/sheep/sheep_wool.png', 'entity/sheep/sheep_fur.png'], chicken: ['entity/chicken/chicken_temperate.png', 'entity/chicken.png'],
   zombie: ['entity/zombie/zombie.png'], skeleton: ['entity/skeleton/skeleton.png'], creeper: ['entity/creeper/creeper.png'], spider: ['entity/spider/spider.png'],
   player: ['entity/player/wide/steve.png', 'entity/steve.png'],
+  villager: ['entity/villager/villager.png'], villager_type: ['entity/villager/type/plains.png'], iron_golem: ['entity/iron_golem/iron_golem.png'],
+  ...Object.fromEntries(['farmer', 'fisherman', 'shepherd', 'fletcher', 'librarian', 'cleric', 'armorer', 'toolsmith', 'butcher', 'nitwit'].map(p => [`villager_prof_${p}`, [`entity/villager/profession/${p}.png`]])),
   zombified_piglin: ['entity/piglin/zombified_piglin.png'], ghast: ['entity/ghast/ghast.png'], blaze: ['entity/blaze.png'], magma_cube: ['entity/slime/magmacube.png'],
 };
 // worn armour: newer versions keep it under equipment/, older ones as <material>_layer_1 / _2 (gold is "gold" there)

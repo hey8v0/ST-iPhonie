@@ -3,7 +3,7 @@
 // kept by the worker (world.worker.js) and drawn by render.js.
 import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp} from './blocks.js';
 import {Mobs, MOBS} from './mobs.js';
-import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate} from './models.js';
+import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
 import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds} from './atlas.js';
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
@@ -71,6 +71,17 @@ async function loadTextures() {
   // mob skins: the pack's (in the same layout) or ours; their sizes, since a pack's may be bigger
   skinSizes = {};
   for (const k of Object.keys(MODELS)) { const img = skins?.[k] || OWN_SKINS[k](); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; }
+  // villagers by trade: the pack's villager with its plains clothes and the trade's over them, or ours
+  for (const prof of VILLAGER_SKINS) {
+    let img = ownVillager(prof);
+    if (skins?.villager) {
+      const c = document.createElement('canvas'), g = c.getContext('2d');
+      c.width = skins.villager.width; c.height = skins.villager.height;
+      for (const layer of [skins.villager, skins.villager_type, skins[`villager_prof_${prof}`]]) if (layer) g.drawImage(layer, 0, 0, c.width, c.height);
+      img = c;
+    }
+    renderer.setImage(`mob:villager_${prof}`, img); skinSizes[`villager_${prof}`] = [img.width, img.height];
+  }
   // worn armour: the pack's pictures (leather there is grey, dyed its usual brown) or ours
   for (const m of Object.keys(ARMOR)) for (const [key, layer] of [[`armor_${m}`, 1], [`armor_${m}_legs`, 2]]) {
     const img = skins?.[key] || ownArmor(m, layer); renderer.setImage(`mob:${key}`, img); skinSizes[key] = [img.width, img.height]; greyArmor[key] = !!skins?.[key] && m === 'leather';
@@ -205,7 +216,7 @@ function onWorker(m) {
     const k = `${m.cx},${m.cz}`;
     if (G.herds.has(k)) return;
     G.herds.add(k);
-    if (G.mobs.count(x => x.def.passive) < 160) for (const [kind, x, y, z] of m.list) G.mobs.add(kind, x, y, z);
+    if (G.mobs.count(x => x.def.passive) < 160) for (const [kind, x, y, z, extra] of m.list) G.mobs.add(kind, x, y, z, extra);
   } else if (m.type === 'exploded') {
     for (const [id, n, x, y, z] of m.drops) G.ents.drop({id, n}, x, y, z);
     for (const [x, y, z] of m.tnt) G.mobs.light(x, y, z, 10 + Math.floor(Math.random() * 20));
@@ -627,8 +638,15 @@ function use(t, mob = null) {
       mob.sheared = true; const n = 1 + Math.floor(Math.random() * 3);
       G.ents.drop({id: `${mob.color || 'white'}_wool`, n}, mob.x, mob.y + 1, mob.z); wearTool(); play('shear'); return;
     }
+    // a villager with work trades (one without, or a child, shakes its head)
+    if (mob.kind === 'villager' && !info?.drink && !info?.thrown) {
+      if (mob.baby || !mob.offers.length) { mob.shake = 40; play('villager_no'); return; }
+      mob.trading = true; input.enabled = false; input.unlock(); play('villager');
+      invUI.show('trade', {v: mob});
+      return;
+    }
     // a potion is drunk or thrown whatever is in front; otherwise a tap on a phone hits
-    if (!info?.drink && !info?.thrown) { if (input.mode === 'touch') attackMob(mob); return; }
+    if (!info?.drink && !info?.thrown) { if (input.mode === 'touch' && mob.kind !== 'villager' && mob.kind !== 'iron_golem') attackMob(mob); return; }
   }
   if (t && b.use === 'toggle' && !G.body.sneaking) { toggle(t); return; }
   if (t && b.use === 'bed' && !G.body.sneaking) { sleepIn(t); return; }
@@ -678,6 +696,8 @@ function use(t, mob = null) {
   if (!t) return;
   // a hoe makes farmland
   if (info?.tool?.kind === 'hoe' && t.face === 2 && ['grass_block', 'dirt'].includes(b.name) && !G.mirror.get(t.x, t.y + 1, t.z)) { setBlock(t.x, t.y, t.z, ID.farmland); wearTool(); play('place', ID.dirt); return; }
+  // a shovel makes a path
+  if (info?.tool?.kind === 'shovel' && t.face !== 3 && ['grass_block', 'dirt', 'podzol', 'coarse_dirt'].includes(b.name) && !G.mirror.get(t.x, t.y + 1, t.z)) { setBlock(t.x, t.y, t.z, ID.dirt_path); wearTool(); play('place', ID.grass_block); return; }
   if (s && (info.block?.item || info.plant)) { if (placeFrom(t, s)) useUp(); }
 }
 // ---------- fishing ----------
@@ -763,12 +783,31 @@ function sleepIn(t) {
   b.prev = {x: b.x, y: b.y, z: b.z};
   G.sleeping = 1;
 }
+// what the composter takes and how likely each one fills it a level (the game's chances)
+const COMPOST = {wheat_seeds: 0.3, short_grass: 0.3, sugar_cane: 0.5, cactus: 0.5, melon_slice: 0.5, wheat: 0.65, carrot: 0.65, potato: 0.65, apple: 0.65, pumpkin: 0.65, melon: 0.65, fern: 0.65,
+  nether_wart: 0.65, red_mushroom: 0.65, brown_mushroom: 0.65, bread: 0.85, baked_potato: 0.85, hay_block: 0.85};
+const compostable = id => COMPOST[id] ?? (/_leaves$|_sapling$/.test(id) ? 0.3 : /^(dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley)$/.test(id) ? 0.65 : 0);
+/** The composter: what is held goes in (a chance of a level); full, it gives bone meal. */
+function compost(t) {
+  const level = t.v >>> 12, s = held();
+  if (level >= 8) { setBlock(t.x, t.y, t.z, ID.composter); G.ents.drop({id: 'bone_meal', n: 1}, t.x + 0.5, t.y + 1.1, t.z + 0.5); play('pop'); return; }
+  const chance = s ? compostable(s.id) : 0;
+  if (!chance) return;
+  useUp();
+  if (Math.random() < chance) { setBlock(t.x, t.y, t.z, withMeta(ID.composter, level + 1 >= 7 ? 8 : level + 1)); G.ents.puff(t.x + 0.5, t.y + 1, t.z + 0.5, 'meal'); }
+  play('place', ID.dirt); drawHud(true);
+}
 function openBlock(kind, t) {
   const k = `${t.x},${t.y},${t.z}`;
+  if (kind === 'compost') { compost(t); return; }
+  if (kind === 'bell') { play('bell'); G.swing = 6; return; }
   input.enabled = false; input.unlock();
   if (kind === 'crafting') invUI.show('crafting');
-  if (kind === 'furnace') invUI.show('furnace', G.tiles[k] ||= {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0});
+  // a smoker or a blast furnace is a furnace of its own kind
+  const type = BLOCKS[t.v & 0xFFF].cook;
+  if (kind === 'furnace') invUI.show('furnace', G.tiles[k] ||= {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0, ...(type ? {type} : {})});
   if (kind === 'chest') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: new Array(27).fill(null)});
+  if (kind === 'barrel') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: new Array(27).fill(null), title: '木桶'});
   if (kind === 'enchant') { G.tiles[k] ||= {kind: 'enchant'}; invUI.show('enchant', {pos: {x: t.x, y: t.y, z: t.z}, shelves: shelvesAround((x, y, z) => G.mirror.get(x, y, z), t.x, t.y, t.z, ID.bookshelf)}); }
   if (kind === 'anvil') invUI.show('anvil', {pos: {x: t.x, y: t.y, z: t.z}});
   if (kind === 'brew') invUI.show('brew', G.tiles[k] ||= {kind: 'brew', slots: [null, null, null, null, null], fuel: 0, time: 0});
@@ -889,7 +928,9 @@ function die(why) {
 function survivalTick(r) {
   const b = G.body;
   if (G.mode === 'creative') { G.health = 20; G.food = 20; G.air = 300; return; }
-  if (r.landed > 3 && !b.inWater) hurt(Math.ceil(r.landed - 3), '摔得太重了', null, 'fall');
+  // a hay bale takes four fifths of a fall
+  const onHay = (G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z)) & 0xFFF) === ID.hay_block;
+  if (r.landed > 3 && !b.inWater) hurt(Math.ceil((r.landed - 3) * (onHay ? 0.2 : 1)), '摔得太重了', null, 'fall');
   if (r.landed > 2) play('fall', 0, Math.min(1, r.landed / 8));
   // air
   if (b.headInWater && !G.effects.water_breathing) { if (Math.random() < 1 / (enchOf(G.inv.worn(0), 'respiration') + 1)) G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了', null, 'drown'); } } else G.air = Math.min(300, G.air + 4);
@@ -1012,7 +1053,7 @@ function tick() {
     if (tile.done) { tile.done = false; const [x, y, z] = k.split(',').map(Number); soundAt('brew', x + 0.5, y + 0.5, z + 0.5); }
   } else if (tile.kind === 'furnace') {
     const was = tile.burn > 0, lit = furnaceTick(tile);
-    if (was !== lit) { const [x, y, z] = k.split(',').map(Number), v = G.mirror.get(x, y, z); if ((v & 0xFFF) === ID.furnace) setBlock(x, y, z, withMeta(ID.furnace, (v >>> 12 & 3) | (lit ? 4 : 0))); }
+    if (was !== lit) { const [x, y, z] = k.split(',').map(Number), v = G.mirror.get(x, y, z); if (BLOCKS[v & 0xFFF]?.use === 'furnace') setBlock(x, y, z, withMeta(v & 0xFFF, (v >>> 12 & 3) | (lit ? 4 : 0))); }
   }
   if (invUI.open && (invUI.kind === 'furnace' || invUI.kind === 'brew') && G.time % 4 === 0) invUI.refresh();
   // the worker: where we are, how dark the sky is
@@ -1369,12 +1410,14 @@ async function boot() {
   input = new Input(app, canvas, {rotated: () => rotated, sensitivity: () => settings.sens, onMode: m => { document.body.classList.toggle('touchmode', m === 'touch'); drawHud(true); screens?.markFocus(); }});
   if (isTouch) document.body.classList.add('touchmode'), input.mode = 'touch';
   screens = new Screens($('#screens'), api());
-  invUI = new InventoryUI(invRoot, {get inv() { return G.inv; }, get icons() { return icons; }, drop: s => { const b = G.body; G.ents.drop(s, b.x, b.y + 1.2, b.z, {dir: b.look(), delay: 40}); }, sound: n => play(n), closed: () => closedInventory(), toApp: (x, y) => input.toApp(x, y), rotated: () => rotated, crafted: () => play('place', ID.crafting_table),
+  invUI = new InventoryUI(invRoot, {get inv() { return G.inv; }, get icons() { return icons; }, drop: s => { const b = G.body; G.ents.drop(s, b.x, b.y + 1.2, b.z, {dir: b.look(), delay: 40}); }, sound: n => play(n), closed: (kind, data) => { if (kind === 'trade') data.v.trading = false; closedInventory(); }, toApp: (x, y) => input.toApp(x, y), rotated: () => rotated, crafted: () => play('place', ID.crafting_table),
     // what was smelted gives its experience when taken out
     took: f => { const n = takeSmeltXp(f); if (n) { const b = G.body; G.ents.xp(n, b.x, b.y + 1, b.z); } }, worn: () => play('equip'),
     // the enchanting table and the anvil: the player's levels, creative, paying, the enchanting seed
     xp: () => G.xp, creative: () => G.mode === 'creative', spend: n => { G.xp.level = Math.max(0, G.xp.level - n); drawHud(true); },
-    seed: () => G.enchSeed, reseed: () => { G.enchSeed = Math.floor(Math.random() * 2 ** 31); }, anvilUsed: () => anvilUsed()});
+    seed: () => G.enchSeed, reseed: () => { G.enchSeed = Math.floor(Math.random() * 2 ** 31); }, anvilUsed: () => anvilUsed(),
+    // a trade with a villager: its 「嗯」, a few points of experience for the player (the game's 3–6)
+    traded: v => { play('villager_yes'); const b = G.body; G.ents.xp(3 + Math.floor(Math.random() * 4), v.x, v.y + 1, v.z); }});
   // tapping the hotbar picks a slot; ⋯ opens the inventory
   $('.hotbar').addEventListener('pointerdown', e => { if (!G || paused) return; const s = e.target.closest('[data-i]'); if (s) { G.hot = Number(s.dataset.i); drawHud(true); } if (e.target.closest('[data-inv]')) openInventory(); e.stopPropagation(); });
   $('.pausebtn').addEventListener('click', () => pause());

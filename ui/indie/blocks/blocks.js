@@ -83,7 +83,7 @@ plant('red_mushroom', '红色蘑菇', {light: 0});
 plant('brown_mushroom', '棕色蘑菇', {light: 1});
 for (const [w, zh] of WOODS) plant(`${w}_sapling`, `${zh.replace(/木$/, '')}树苗`);
 block('crafting_table', '工作台', {tex: {top: 'crafting_table_top', bottom: 'oak_planks', side: 'crafting_table_side', front: 'crafting_table_front'}, hard: 2.5, tool: T.AXE, facing: true, use: 'crafting'});
-block('furnace', '熔炉', {tex: {top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front'}, hard: 3.5, tool: T.PICK, tier: 0, facing: true, use: 'furnace'});
+block('furnace', '熔炉', {tex: {top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front', frontOn: 'furnace_front_on'}, hard: 3.5, tool: T.PICK, tier: 0, facing: true, use: 'furnace'});
 block('chest', '箱子', {tex: {top: 'chest_top', bottom: 'chest_top', side: 'chest_side', front: 'chest_front'}, shape: 'chest', hard: 2.5, tool: T.AXE, facing: true, use: 'chest', opaque: false, filter: 0});
 block('torch', '火把', {tex: all('torch'), shape: 'torch', pass: 'cutout', hard: 0, solid: false, light: 14});
 block('glass', '玻璃', {tex: all('glass'), pass: 'cutout', hard: 0.3, drop: null, filter: 0});
@@ -156,6 +156,20 @@ block('nether_portal', '下界传送门', {tex: all('nether_portal'), shape: 'po
 block('quartz_block', '石英块', {tex: tbs('quartz_block_top', 'quartz_block_bottom', 'quartz_block_side'), hard: 0.8, tool: T.PICK, tier: 0});
 // brewing: the stand (a rod with three bottle holders on a stone foot)
 block('brewing_stand', '酿造台', {tex: {top: 'brewing_stand', side: 'brewing_stand', base: 'brewing_stand_base'}, shape: 'brewing', pass: 'cutout', hard: 0.5, tool: T.PICK, tier: 0, light: 1, use: 'brew', ...shaped});
+// villages: the dirt path (a little lower than a block, like farmland), hay, the bell on its stand, and the trades' work
+// blocks — the composter (state: how full, 8 ready), the lectern, the barrel (a chest), and the smoker and blast
+// furnace (furnaces twice as fast, for food / for ore and metal)
+block('dirt_path', '土径', {tex: tbs('dirt_path_top', 'dirt', 'dirt_path_side'), shape: 'farmland', hard: 0.65, tool: T.SHOVEL, drop: 'dirt', opaque: false, filter: 15});
+block('hay_block', '干草块', {tex: tbs('hay_block_top', 'hay_block_top', 'hay_block_side'), hard: 0.5, tool: T.HOE, axis: true});
+block('bell', '钟', {tex: {all: 'bell_body', post: 'smooth_stone'}, shape: 'bell', hard: 5, tool: T.PICK, tier: 0, use: 'bell', ...shaped});
+block('composter', '堆肥桶', {tex: tbs('composter_top', 'composter_bottom', 'composter_side'), shape: 'composter', hard: 0.6, tool: T.AXE, use: 'compost', ...shaped});
+block('lectern', '讲台', {tex: {top: 'lectern_top', bottom: 'oak_planks', side: 'lectern_sides', front: 'lectern_front', base: 'lectern_base'}, shape: 'lectern', hard: 2.5, tool: T.AXE, facing: true, ...shaped});
+block('barrel', '木桶', {tex: tbs('barrel_top', 'barrel_bottom', 'barrel_side'), hard: 2.5, tool: T.AXE, use: 'barrel'});
+block('loom', '织布机', {tex: {top: 'loom_top', bottom: 'loom_bottom', side: 'loom_side', front: 'loom_front'}, hard: 2.5, tool: T.AXE, facing: true});
+block('fletching_table', '制箭台', {tex: {top: 'fletching_table_top', bottom: 'birch_planks', side: 'fletching_table_side', front: 'fletching_table_front'}, hard: 2.5, tool: T.AXE, facing: true});
+block('smithing_table', '锻造台', {tex: {top: 'smithing_table_top', bottom: 'smithing_table_bottom', side: 'smithing_table_side', front: 'smithing_table_front'}, hard: 2.5, tool: T.AXE, facing: true});
+block('smoker', '烟熏炉', {tex: {top: 'smoker_top', bottom: 'smoker_bottom', side: 'smoker_side', front: 'smoker_front', frontOn: 'smoker_front_on'}, hard: 3.5, tool: T.PICK, tier: 0, facing: true, use: 'furnace', cook: 'food'});
+block('blast_furnace', '高炉', {tex: {top: 'blast_furnace_top', bottom: 'blast_furnace_top', side: 'blast_furnace_side', front: 'blast_furnace_front', frontOn: 'blast_furnace_front_on'}, hard: 3.5, tool: T.PICK, tier: 0, facing: true, use: 'furnace', cook: 'ore'});
 
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));

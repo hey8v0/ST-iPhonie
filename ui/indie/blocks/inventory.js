@@ -125,6 +125,17 @@ for (const [mat, x] of [['leather', 'leather'], ['iron', 'iron_ingot'], ['golden
   shaped(['XXX', 'X X', 'X X'], {X: x}, `${mat}_leggings`);
   shaped(['X X', 'X X'], {X: x}, `${mat}_boots`);
 }
+// villages: hay, the work blocks
+shaped(['###', '###', '###'], {'#': 'wheat'}, 'hay_block');
+shapeless(['hay_block'], 'wheat', 9);
+shaped(['# #', '# #', '###'], {'#': 'oak_slab'}, 'composter');
+shaped(['PSP', 'P P', 'PSP'], {P: '#planks', S: 'oak_slab'}, 'barrel');
+shaped(['SS', 'PP'], {S: 'string', P: '#planks'}, 'loom');
+shaped(['FF', 'PP', 'PP'], {F: 'flint', P: '#planks'}, 'fletching_table');
+shaped(['II', 'PP', 'PP'], {I: 'iron_ingot', P: '#planks'}, 'smithing_table');
+shaped([' L ', 'LFL', ' L '], {L: '#logs', F: 'furnace'}, 'smoker');
+shaped(['III', 'IFI', 'SSS'], {I: 'iron_ingot', F: 'furnace', S: 'smooth_stone'}, 'blast_furnace');
+shaped(['SSS', ' B ', ' S '], {S: 'oak_slab', B: 'bookshelf'}, 'lectern');
 // the Nether and brewing
 shaped(['# #', ' # '], {'#': 'glass'}, 'glass_bottle', 3);
 shaped([' B ', '###'], {B: 'blaze_rod', '#': '#stone_tool'}, 'brewing_stand');
@@ -196,19 +207,25 @@ const SMELT_XP = {iron_ingot: 0.7, copper_ingot: 0.7, gold_ingot: 1, diamond: 1,
 export function takeSmeltXp(f, r = Math.random) { const x = f.xp || 0; f.xp = 0; return Math.floor(x) + (r() < x - Math.floor(x) ? 1 : 0); }
 /** Seconds of burning a fuel gives. */
 export const fuelOf = id => { const i = itemInfo(id); return i?.fuel || 0; };
-/** A furnace's state: {input, fuel, output, burn (ticks left), burnMax, cook (ticks done)}. One tick; returns lit. */
+// the smoker cooks only food and the blast furnace only ore and raw metal, each twice as fast (burning fuel twice as fast)
+const FOODS = new Set(['porkchop', 'beef', 'mutton', 'chicken', 'potato', 'cod', 'salmon']);
+export const smeltsIn = (type, id) => !!smeltOf(id) && (!type || (type === 'food' ? FOODS.has(id) : /_ore$|^raw_/.test(id)));
+/**
+ * A furnace's state: {input, fuel, output, burn (ticks left), burnMax, cook (ticks done), type ('food' | 'ore' for the
+ * smoker and blast furnace)}. One tick; returns lit.
+ */
 export function furnaceTick(f) {
-  const result = f.input ? smeltOf(f.input.id) : null;
+  const result = f.input && smeltsIn(f.type, f.input.id) ? smeltOf(f.input.id) : null, fast = f.type ? 2 : 1;
   const canOut = result && (!f.output || (f.output.id === result && f.output.n < stackMax(result)));
   if (f.burn > 0) f.burn--;
   if (!f.burn && canOut && f.fuel && fuelOf(f.fuel.id)) {
-    f.burnMax = f.burn = Math.round(fuelOf(f.fuel.id) * 20);
+    f.burnMax = f.burn = Math.round(fuelOf(f.fuel.id) * 20 / fast);
     const wasBucket = f.fuel.id === 'lava_bucket';
     f.fuel.n--; if (!f.fuel.n) f.fuel = wasBucket ? {id: 'bucket', n: 1} : null;
   }
   if (f.burn > 0 && canOut) {
     f.cook = (f.cook || 0) + 1;
-    if (f.cook >= 200) {
+    if (f.cook >= 200 / fast) {
       f.cook = 0;
       f.input.n--; if (!f.input.n) f.input = null;
       if (f.output) f.output.n++; else f.output = {id: result, n: 1};
