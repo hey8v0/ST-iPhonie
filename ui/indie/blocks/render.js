@@ -5,8 +5,11 @@
 // divides by u_unit and moves by u_center, so chunks (1/16 block) and small things (1/256) use the same program.
 // With 光影 on (setQuality) the same meshes go through shaders.js: lit in colour, with shadows from a shadow map,
 // fog into the sky, water that mirrors, clouds, light shafts; and the distant view's tiles (lod.js) past the columns.
+// On mid and high (where the browser can draw into float pictures) the frame goes into an HDR picture first: the land,
+// then the sky where nothing is, a copy of that for the water to look into, the water; then the end of the frame
+// (bloom, edge shade, shafts, the film, smoothing) onto the screen, and the hand over it.
 import {STRIDE} from './mesh.js';
-import {chunkShaders, shadowShaders, skyShaders, entityShaders, lodShaders, postShaders} from './shaders.js';
+import {chunkShaders, shadowShaders, skyShaders, entityShaders, lodShaders, postShaders, bloomShaders, compositeShaders, edgeShaders} from './shaders.js';
 import {LOD_STRIDE, LOD_TILE} from './lod.js';
 
 const VS = `#version 300 es
@@ -85,15 +88,16 @@ precision highp float;
 layout(location=0) in vec3 a_pos;
 layout(location=1) in vec2 a_uv;
 uniform mat4 u_viewProj;
+uniform float u_back;
 out vec2 v_uv; out float v_dist;
-void main() { gl_Position = u_viewProj * vec4(a_pos, 1.0); v_uv = a_uv; v_dist = length(a_pos); }`;
+void main() { gl_Position = u_viewProj * vec4(a_pos, 1.0); if (u_back > 0.5) gl_Position.z = gl_Position.w * 0.99995; v_uv = a_uv; v_dist = length(a_pos); }`;
 const QUAD_FS = `#version 300 es
 precision highp float;
 uniform sampler2D u_img;
-uniform vec4 u_color; uniform float u_mode, u_fogNear, u_fogFar; uniform vec3 u_fog; uniform vec2 u_shift;
+uniform vec4 u_color; uniform float u_mode, u_fogNear, u_fogFar, u_gain; uniform vec3 u_fog; uniform vec2 u_shift;
 in vec2 v_uv; in float v_dist; out vec4 o;
 void main() {
-  if (u_mode < 0.5) { vec4 t = texture(u_img, v_uv); o = vec4(t.rgb * u_color.rgb, t.a * u_color.a); if (o.a < 0.01) discard; return; }
+  if (u_mode < 0.5) { vec4 t = texture(u_img, v_uv); o = vec4((u_gain > 0.0 ? t.rgb * t.rgb * u_gain : t.rgb) * u_color.rgb, t.a * u_color.a); if (o.a < 0.01) discard; return; }
   // clouds: the map, one texel per 12 blocks
   vec4 t = texture(u_img, v_uv + u_shift);
   if (t.a < 0.5) discard;
@@ -152,6 +156,26 @@ function compile(gl, vs, fs) {
   return {p, u};
 }
 
+/**
+ * A tiling value noise picture (n × n, grey): random values on a cells × cells grid that wraps round, blended smoothly
+ * between. The shaded look reads it for the clouds (an octave a lookup) and for puddles and foam.
+ */
+export function noisePicture(n = 256, cells = 8, seed = 7) {
+  const at = (i, j) => {
+    let h = Math.imul(((i % cells) + cells) % cells, 374761393) ^ Math.imul(((j % cells) + cells) % cells, 668265263) ^ Math.imul(seed, 1442695041);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  const d = new Uint8Array(n * n * 4), size = n / cells, ease = t => t * t * (3 - 2 * t);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const fx = x / size, fy = y / size, i = Math.floor(fx), j = Math.floor(fy), u = ease(fx - i), v = ease(fy - j);
+    const top = at(i, j) + (at(i + 1, j) - at(i, j)) * u, bottom = at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * u;
+    const o = (y * n + x) * 4;
+    d[o] = d[o + 1] = d[o + 2] = Math.round((top + (bottom - top) * v) * 255); d[o + 3] = 255;
+  }
+  return d;
+}
+
 // ---------- small matrix helpers (column-major, like WebGL) ----------
 const lin = c => c.map(v => v * v), mixv = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t), scale = (a, k) => a.map(v => v * k);
 const smooth = (a, b, v) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -161,15 +185,18 @@ export const SUN_TILT = 0.42;
 export function lighting(env, view) {
   const a = env.sunAngle || 0, el = Math.sin(a), sun = [Math.cos(a), el * Math.cos(SUN_TILT), el * Math.sin(SUN_TILT)];
   const rain = 1 - (env.sunMoon ?? 1), fogFar = env.underwater ? 18 : env.nether ? Math.min(view.far, Math.max(56, Math.min(view.far, 192) * 0.5)) : (view.lodFar || view.far);
-  const base = {sunTrue: sun, block: [1.0, 0.6, 0.3], fogLin: lin(env.fog), fogFar, fogDensity: 1.75 / fogFar * (1 + rain * 1.4), underwater: env.underwater ? 1 : 0, flicker: env.flicker ?? 1, bright: env.bright || 0, rain};
-  if (env.nether) return {...base, lightDir: [0, 1, 0], lightCol: [0, 0, 0], amb: [0.17, 0.07, 0.05], zenith: lin(env.fog), horizon: lin(env.fog), glow: [0, 0, 0], exposure: 1.4, fogDensity: 2.4 / fogFar};
+  // the eye's reach to the sky (dark air and a brighter exposure in caves), the light held in the hand, the clouds' cover
+  const eyeSky = env.eyeSky ?? 1, cave = 1 + (1 - eyeSky) * 0.5;
+  const base = {sunTrue: sun, block: [1.0, 0.6, 0.3], fogLin: lin(env.fog), fogFar, fogDensity: 1.75 / fogFar * (1 + rain * 1.4), underwater: env.underwater ? 1 : 0, flicker: env.flicker ?? 1, bright: env.bright || 0, rain,
+    eyeSky, held: env.held || 0, camY: view.y, time: env.time || 0, cover: 0.5 - rain * 0.25, sunDisc: [0, 0, 0]};
+  if (env.nether) return {...base, lightDir: [0, 1, 0], lightCol: [0, 0, 0], amb: [0.17, 0.07, 0.05], zenith: lin(env.fog), horizon: lin(env.fog), glow: [0, 0, 0], exposure: 1.4, fogDensity: 2.4 / fogFar, eyeSky: 1};
   const day = smooth(-0.04, 0.14, el), night = 1 - smooth(-0.14, 0.02, el), set = Math.max(0, 1 - Math.abs(el) * 3.2);
   const sunCol = scale(mixv([1.0, 0.94, 0.86], [1.0, 0.5, 0.22], set * set), 2.9 * day * (1 - rain * 0.85));
   const moonCol = scale([0.3, 0.38, 0.62], 0.34 * night * (1 - rain * 0.7)), up = el > -0.02;
-  let amb = scale(mixv([0.018, 0.024, 0.05], [0.36, 0.46, 0.66], day), 1 - rain * 0.45);
+  let amb = scale(mixv([0.018, 0.024, 0.05], [0.24, 0.32, 0.5], day), 1 - rain * 0.45);
   amb = mixv(amb, [0.42, 0.33, 0.32], set * 0.3 * day);
   const glow = mixv(scale(sunCol, 0.22), [1.1, 0.5, 0.2], set * 0.7 * day);
-  return {...base, lightDir: up ? sun : scale(sun, -1), lightCol: up ? sunCol : moonCol, amb, zenith: lin(env.skyTop), horizon: lin(env.horizon), glow, exposure: 1 + night * 0.9, day};
+  return {...base, lightDir: up ? sun : scale(sun, -1), lightCol: up ? sunCol : moonCol, amb, zenith: lin(env.skyTop), horizon: lin(env.horizon), glow, exposure: (0.86 + night * 1.0) * cave, day, sunDisc: sunCol};
 }
 export const mat = {
   perspective(fovy, aspect, near, far) { const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far); return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]); },
@@ -269,7 +296,17 @@ export class Renderer {
     this.stats = {sections: 0, drawn: 0, tris: 0};
     // the plain programs; with 光影 the shaded ones take their place for the frame
     this.chunk0 = this.chunk; this.ent0 = this.ent; this.sky0 = this.sky; this.progs = {}; this.level = 'off'; this.lods = new Map(); this.frame = 0;
-    this.lodBuf = null;
+    this.lodBuf = null; this.targets = {}; this.fx = {};
+    // float pictures to draw into (HDR); without them mid and high draw as before
+    this.hdrOk = !!gl.getExtension('EXT_color_buffer_float');
+    // the noise picture, kept on unit 7 for the shaded programs
+    this.noise = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, this.noise);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, noisePicture());
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.activeTexture(gl.TEXTURE0);
   }
   ensureIndex(quads) {
     if (quads <= this.indexCount) return;
@@ -352,12 +389,18 @@ export class Renderer {
 
   resize(w, h) { this.canvas.width = w; this.canvas.height = h; }
   // ---------- 光影 ----------
-  /** 'off' | 'low' (shaded light, water, sky) | 'mid' (+ shadows, clouds) | 'high' (+ soft shadows, light shafts). */
+  /**
+   * 'off' | 'low' (shaded light, water, sky) | 'mid' (+ shadows, clouds, HDR: bloom, the water's mirror and depth,
+   * bumps from the pictures, smoothed edges) | 'high' (+ softer shadows, thicker clouds, a longer mirror, edge shade,
+   * light shafts).
+   */
   setQuality(level) {
-    this.level = ['low', 'mid', 'high'].includes(level) ? level : 'off';
-    this.shadowQ = {mid: 1, high: 2}[this.level] || 0;
-    this.cloudQ = this.level === 'mid' || this.level === 'high' ? 1 : 0;
-    this.postOn = this.level === 'high';
+    const L = this.level = ['low', 'mid', 'high'].includes(level) ? level : 'off';
+    this.shadowQ = {mid: 1, high: 2}[L] || 0;
+    this.cloudQ = {mid: 1, high: 2}[L] || 0;
+    this.hdr = this.hdrOk && (L === 'mid' || L === 'high');
+    this.postOn = L === 'high';
+    this.fx = {gen: L === 'mid' || L === 'high' ? 1 : 0, ssr: L === 'high' ? 24 : 0, ao: L === 'high', rays: L === 'high', bloom: {mid: 4, high: 5}[L] || 0};
   }
   prog(name, make) { return this.progs[name] ||= compile(this.gl, ...make()); }
   /** The lighting uniforms of a shaded program for this frame. */
@@ -367,6 +410,8 @@ export class Renderer {
     gl.uniform3fv(u.u_sunTrue, lit.sunTrue); gl.uniform3fv(u.u_zenith, lit.zenith); gl.uniform3fv(u.u_horizon, lit.horizon); gl.uniform3fv(u.u_glowCol, lit.glow); gl.uniform3fv(u.u_fogLin, lit.fogLin);
     gl.uniform1f(u.u_exposure, lit.exposure); gl.uniform1f(u.u_fogDensity, lit.fogDensity); gl.uniform1f(u.u_fogFar, lit.fogFar); gl.uniform1f(u.u_underwater, lit.underwater);
     gl.uniform1f(u.u_flicker, lit.flicker); gl.uniform1f(u.u_bright, lit.bright);
+    gl.uniform1f(u.u_rain, lit.rain); gl.uniform1f(u.u_eyeSky, lit.eyeSky); gl.uniform1f(u.u_camY, lit.camY); gl.uniform1f(u.u_held, lit.held); gl.uniform1f(u.u_time, lit.time); gl.uniform1f(u.u_cover, lit.cover);
+    if (u.u_noise) { gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, this.noise); gl.uniform1i(u.u_noise, 7); gl.activeTexture(gl.TEXTURE0); }
     if (u.u_shadow) {
       gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.shadowMap?.tex || null); gl.uniform1i(u.u_shadow, 2); gl.activeTexture(gl.TEXTURE0);
       gl.uniform1f(u.u_shadowOn, shadow && this.shadowLive ? 1 : 0); gl.uniform1f(u.u_texel, this.shadowMap ? 1 / this.shadowMap.size : 0);
@@ -427,40 +472,98 @@ export class Renderer {
     gl.disable(gl.POLYGON_OFFSET_FILL);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
-  /** The frame drawn into a picture first (for the light shafts after): its colour and depth, the canvas's size. */
-  postTarget(W, H) {
-    const gl = this.gl;
-    if (this.postFb && this.postFb.w === W && this.postFb.h === H) return this.postFb;
-    if (this.postFb) { gl.deleteTexture(this.postFb.color); gl.deleteTexture(this.postFb.depth); gl.deleteFramebuffer(this.postFb.fbo); }
-    const color = gl.createTexture(), depth = gl.createTexture(), fbo = gl.createFramebuffer();
-    gl.bindTexture(gl.TEXTURE_2D, color); gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, W, H);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindTexture(gl.TEXTURE_2D, depth); gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, W, H);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  /** A picture to draw into (made again when the size changes): colour of a format, a depth texture if asked. */
+  target(name, W, H, {fmt = 'RGBA8', depth = false} = {}) {
+    const gl = this.gl, old = this.targets[name];
+    if (old && old.w === W && old.h === H) return old;
+    if (old) { gl.deleteTexture(old.color); if (old.depth) gl.deleteTexture(old.depth); gl.deleteFramebuffer(old.fbo); }
+    const tex = (format, filter) => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t); gl.texStorage2D(gl.TEXTURE_2D, 1, format, W, H);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return t;
+    };
+    const color = tex(gl[fmt], gl.LINEAR), dt = depth ? tex(gl.DEPTH_COMPONENT24, gl.NEAREST) : null, fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depth, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0);
+    if (dt) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, dt, 0);
     const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    this.postFb = ok ? {fbo, color, depth, w: W, h: H} : null;
-    if (!ok) this.postOn = false;
-    return this.postFb;
+    if (!ok) { gl.deleteTexture(color); if (dt) gl.deleteTexture(dt); gl.deleteFramebuffer(fbo); delete this.targets[name]; return null; }
+    return (this.targets[name] = {fbo, color, depth: dt, w: W, h: H});
+  }
+  /** Where the sun is on the screen, and how strong its shafts are (none when it is behind, set or hidden by rain). */
+  sunShafts(vp, lit) {
+    const d = lit.sunTrue, c = [0, 1, 2, 3].map(i => vp[i] * d[0] * 1000 + vp[4 + i] * d[1] * 1000 + vp[8 + i] * d[2] * 1000 + vp[12 + i]);
+    if (!(c[3] > 0) || lit.underwater) return {uv: [0.5, 0.5], rays: 0};
+    const uv = [c[0] / c[3] * 0.5 + 0.5, c[1] / c[3] * 0.5 + 0.5];
+    return {uv, rays: (lit.day || 0) * (1 - lit.rain) * smooth(1.6, 0.6, Math.max(Math.abs(uv[0] - 0.5), Math.abs(uv[1] - 0.5)) * 2)};
   }
   /** Light shafts toward the sun where the sky shows through, and the soft dark edge; onto the canvas. */
   drawPost(vp, lit, W, H) {
-    const gl = this.gl, P = this.prog('post', postShaders), fb = this.postFb;
+    const gl = this.gl, P = this.prog('post', postShaders), fb = this.targets.post;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, W, H);
     gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND); gl.disable(gl.CULL_FACE);
     gl.useProgram(P.p);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, fb.color); gl.uniform1i(P.u.u_color, 3);
     gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, fb.depth); gl.uniform1i(P.u.u_depth, 4);
-    // where the sun is on the screen; no shafts when it is behind, set or hidden by rain
-    const d = lit.sunTrue, c = [0, 1, 2, 3].map(i => vp[i] * d[0] * 1000 + vp[4 + i] * d[1] * 1000 + vp[8 + i] * d[2] * 1000 + vp[12 + i]);
-    let rays = 0, uv = [0.5, 0.5];
-    if (c[3] > 0 && !lit.underwater) { uv = [c[0] / c[3] * 0.5 + 0.5, c[1] / c[3] * 0.5 + 0.5]; rays = 0.42 * (lit.day || 0) * (1 - lit.rain) * smooth(1.6, 0.6, Math.max(Math.abs(uv[0] - 0.5), Math.abs(uv[1] - 0.5)) * 2); }
-    gl.uniform2fv(P.u.u_sunUV, uv); gl.uniform1f(P.u.u_rays, rays); gl.uniform3fv(P.u.u_rayCol, [1.0, 0.86, 0.62]);
+    const {uv, rays} = this.sunShafts(vp, lit);
+    gl.uniform2fv(P.u.u_sunUV, uv); gl.uniform1f(P.u.u_rays, rays * 0.42); gl.uniform3fv(P.u.u_rayCol, [1.0, 0.86, 0.62]);
     gl.bindVertexArray(this.skyVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+  /**
+   * The end of an HDR frame, onto the screen: bloom (down a chain of half-size pictures and back up), then the
+   * composite (edge shade, shafts, bloom, the film) into a display picture, then the edge smoothing onto the canvas.
+   */
+  finish(vp, lit, view, W, H) {
+    const gl = this.gl, fx = this.fx, src = this.targets.hdr;
+    gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.disable(gl.BLEND);
+    gl.bindVertexArray(this.skyVao);
+    const bind = (unit, tex, loc) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(loc, unit); };
+    const levels = [];
+    if (fx.bloom) {
+      const D = this.prog('bloomDown', () => bloomShaders(false)), U = this.prog('bloomUp', () => bloomShaders(true));
+      gl.useProgram(D.p);
+      let w = W, h = H, from = src.color;
+      for (let i = 0; i < fx.bloom && w > 8 && h > 8; i++) {
+        const pw = w, ph = h; w >>= 1; h >>= 1;
+        const t = this.target(`bloom${i}`, w, h, {fmt: 'RGBA16F'});
+        if (!t) break;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo); gl.viewport(0, 0, w, h);
+        bind(3, from, D.u.u_src); gl.uniform2f(D.u.u_px, 1 / pw, 1 / ph); gl.uniform1f(D.u.u_first, i === 0 ? 1 : 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        levels.push(t); from = t.color;
+      }
+      gl.useProgram(U.p); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+      for (let i = levels.length - 1; i > 0; i--) {
+        const a = levels[i], b = levels[i - 1];
+        gl.bindFramebuffer(gl.FRAMEBUFFER, b.fbo); gl.viewport(0, 0, b.w, b.h);
+        bind(3, a.color, U.u.u_src); gl.uniform2f(U.u.u_px, 1 / a.w, 1 / a.h); gl.uniform1f(U.u.u_weight, 1);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      gl.disable(gl.BLEND);
+    }
+    const C = this.prog(`composite${fx.ao ? 1 : 0}`, () => compositeShaders({ao: fx.ao})), ldr = this.target('ldr', W, H);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, ldr ? ldr.fbo : null); gl.viewport(0, 0, W, H);
+    gl.useProgram(C.p);
+    bind(3, src.color, C.u.u_color); bind(4, src.depth, C.u.u_depth); bind(5, levels[0]?.color || src.color, C.u.u_bloom);
+    const t = Math.tan(view.fov / 2), shafts = fx.rays ? this.sunShafts(vp, lit) : {uv: [0.5, 0.5], rays: 0};
+    gl.uniform2f(C.u.u_px, 1 / W, 1 / H); gl.uniform2f(C.u.u_tanHalf, t * W / H, t);
+    gl.uniform1f(C.u.u_near, this.near); gl.uniform1f(C.u.u_far, this.far); gl.uniform1f(C.u.u_exposure, lit.exposure);
+    gl.uniform1f(C.u.u_bloomAmt, levels.length ? 0.32 / levels.length : 0);
+    gl.uniform2fv(C.u.u_sunUV, shafts.uv); gl.uniform1f(C.u.u_rays, shafts.rays * 0.5); gl.uniform3fv(C.u.u_rayCol, scale(lit.lightCol, 0.35));
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (ldr) {
+      const E = this.prog('edge', edgeShaders);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, W, H);
+      gl.useProgram(E.p); bind(3, ldr.color, E.u.u_img); gl.uniform2f(E.u.u_px, 1 / W, 1 / H);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    // nothing of this frame's pictures left on a unit: the next frame draws into them (a unit holding one that a
+    // program reads would make the draw fail)
+    for (const unit of [3, 4, 5]) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, null); }
     gl.activeTexture(gl.TEXTURE0);
   }
   // ---------- the distant view ----------
@@ -484,7 +587,7 @@ export class Renderer {
   clearLod() { for (const t of [...this.lods.values()]) this.dropLod(t.tx, t.tz); }
   drawLod(view, vp, planes, lit) {
     if (!this.lods.size) return 0;
-    const gl = this.gl, P = this.prog('lod', lodShaders);
+    const gl = this.gl, hdr = this.frameHdr ? 1 : 0, P = this.prog(`lod${hdr}`, () => lodShaders({hdr}));
     gl.useProgram(P.p); gl.uniformMatrix4fv(P.u.u_viewProj, false, vp); this.setLit(P, lit, view);
     gl.uniform1f(P.u.u_inner, view.lodInner || 0); gl.uniform1f(P.u.u_plain, 0);
     gl.enable(gl.CULL_FACE);
@@ -505,30 +608,38 @@ export class Renderer {
     const gl = this.gl, W = this.canvas.width, H = this.canvas.height, shaded = this.level !== 'off';
     this.frame++;
     const lit = this.lit = shaded || this.lods.size ? lighting(env, view) : null;
+    // HDR (mid, high): into a float picture, finished at the end; it falls back to the plain way if the picture can't be made
+    const target = shaded && this.hdr ? this.target('hdr', W, H, {fmt: 'RGBA16F', depth: true}) : null;
+    if (shaded && this.hdr && !target) { this.hdrOk = false; this.setQuality(this.level); }
+    const hdr = this.frameHdr = !!target, fx = this.fx;
     // with 光影 the shaded programs stand in for the plain ones (the helpers below use whichever is set)
-    this.chunk = shaded ? this.prog(`chunk${this.shadowQ}`, () => chunkShaders(this.shadowQ)) : this.chunk0;
-    this.ent = shaded ? this.prog(`ent${this.shadowQ}`, () => entityShaders(this.shadowQ)) : this.ent0;
-    this.sky = shaded ? this.prog(`sky${this.cloudQ}`, () => skyShaders(this.cloudQ)) : this.sky0;
+    const opts = {shadows: this.shadowQ, hdr: hdr ? 1 : 0, gen: fx.gen || 0, ssr: hdr ? fx.ssr : 0, clouds: this.cloudQ}, key = Object.values(opts).join(':');
+    this.chunk = shaded ? this.prog(`chunk:${key}`, () => chunkShaders(opts)) : this.chunk0;
+    this.ent = shaded ? this.prog(`ent:${opts.shadows}:${opts.hdr}`, () => entityShaders(opts)) : this.ent0;
+    this.sky = shaded ? this.prog(`sky:${opts.clouds}:${opts.hdr}`, () => skyShaders(opts)) : this.sky0;
     this.shadowLive = false;
     if (shaded && this.shadowQ && !env.nether) this.drawShadow({...view, time: env.time, wave: env.wave}, lit);
-    const post = shaded && this.postOn && this.postTarget(W, H);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, post ? post.fbo : null);
+    const post = !hdr && shaded && this.postOn && this.target('post', W, H, {depth: true});
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target ? target.fbo : post ? post.fbo : null);
     gl.viewport(0, 0, W, H);
-    const proj = mat.perspective(view.fov, W / H, 0.05, Math.max(view.far * 1.2 + 64, (view.lodFar || 0) + 64)), rot = mat.view(view.yaw, view.pitch), vp = mat.mul(proj, rot);
+    this.near = 0.05; this.far = Math.max(view.far * 1.2 + 64, (view.lodFar || 0) + 64);
+    const proj = mat.perspective(view.fov, W / H, this.near, this.far), rot = mat.view(view.yaw, view.pitch), vp = mat.mul(proj, rot);
     this.vp = vp; this.view = view;
     gl.disable(gl.BLEND); gl.depthMask(true);
-    gl.clearColor(env.fog[0], env.fog[1], env.fog[2], 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    // sky
-    gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
-    if (!env.underwater) {
+    const clear = hdr ? lit.fogLin : env.fog;
+    gl.clearColor(clear[0], clear[1], clear[2], 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    // the sky: first in the plain way; with HDR after the land, only where nothing was drawn
+    const sky = () => {
+      if (env.underwater) return;
       gl.useProgram(this.sky.p);
       gl.uniformMatrix4fv(this.sky.u.u_invViewProj, false, mat.invert(vp));
       gl.uniform3fv(this.sky.u.u_top, env.skyTop); gl.uniform3fv(this.sky.u.u_horizon, env.horizon); gl.uniform3fv(this.sky.u.u_glow, env.glow);
       gl.uniform3fv(this.sky.u.u_sunDir, env.sunDir); gl.uniform1f(this.sky.u.u_stars, env.stars); gl.uniform1f(this.sky.u.u_glowAmt, env.glowAmt);
-      if (shaded) { this.setLit(this.sky, lit, view); gl.uniform1f(this.sky.u.u_time, env.time); gl.uniform3f(this.sky.u.u_camPos, view.x, view.y, view.z); gl.uniform1f(this.sky.u.u_cover, 0.5 - (1 - (env.sunMoon ?? 1)) * 0.25); }
+      if (shaded) { this.setLit(this.sky, lit, view); gl.uniform3f(this.sky.u.u_camPos, view.x, view.y, view.z); gl.uniform3fv(this.sky.u.u_sunDisc, lit.sunDisc); }
       gl.bindVertexArray(this.skyVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
-      this.drawSunMoon(vp, env);
-    }
+      this.drawSunMoon(vp, env, hdr);
+    };
+    if (!hdr) { gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); sky(); }
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
     gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
     // world
@@ -537,6 +648,8 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
     if (this.mipDirty) { gl.generateMipmap(gl.TEXTURE_2D_ARRAY); this.mipDirty = false; }
     gl.uniform1i(P.u.u_tex, 0);
+    // the water's look behind (HDR) on units of their own: left at 0 they would clash with the block pictures there
+    if (P.u.u_scene) { gl.uniform1i(P.u.u_scene, 5); gl.uniform1i(P.u.u_sceneDepth, 6); }
     gl.uniformMatrix4fv(P.u.u_viewProj, false, vp); gl.uniformMatrix4fv(P.u.u_model, false, mat.identity());
     gl.uniform3f(P.u.u_camera, view.x, view.y, view.z);
     gl.uniform1f(P.u.u_unit, 16); gl.uniform1f(P.u.u_center, 1); gl.uniform1f(P.u.u_time, env.time); gl.uniform1f(P.u.u_wave, env.wave ? 1 : 0);
@@ -546,7 +659,7 @@ export class Renderer {
     // than 56 blocks (the game's view is longer than a phone's, and half of a short one is a wall)
     const fogFar = env.underwater ? 18 : env.nether ? Math.min(view.far, Math.max(56, Math.min(view.far, 192) * 0.5)) : view.far, fogNear = env.underwater ? 1 : env.nether ? view.far * 0.05 : view.far * 0.72;
     gl.uniform1f(P.u.u_fogNear, fogNear); gl.uniform1f(P.u.u_fogFar, fogFar);
-    gl.uniform1f(P.u.u_overlay, 0); gl.uniform1f(P.u.u_alpha, 1); gl.uniform1f(P.u.u_cut, 0.5);
+    gl.uniform1f(P.u.u_overlay, 0); gl.uniform1f(P.u.u_alpha, 1); gl.uniform1f(P.u.u_cut, 0.5); gl.uniform1f(P.u.u_texSize, this.texSize || 16); gl.uniform1f(P.u.u_behind, 0);
     // the plain look with the distant view: the near land fades over the whole way out
     if (!shaded && view.lodFar && !env.underwater && !env.nether) { gl.uniform1f(P.u.u_fogNear, view.lodFar * 0.3); gl.uniform1f(P.u.u_fogFar, view.lodFar); }
     if (shaded) this.setLit(P, lit, view);
@@ -569,27 +682,50 @@ export class Renderer {
     if (extras.crack) this.drawCrack(extras.crack, view);
     if (extras.things) this.drawThings(extras.things, view);
     if (extras.mobs?.length) this.drawMobs(extras.mobs, vp, env, fogNear, fogFar);
-    // water and ice, far to near
+    if (hdr) { gl.depthMask(false); gl.disable(gl.CULL_FACE); sky(); gl.depthMask(true); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); }
+    // water and ice, far to near; with HDR the land as it is now is copied first, for the water to look into
+    gl.useProgram(P.p);
+    if (hdr && list.some(e => e[1].trans)) {
+      const b = this.target('behind', W, H, {fmt: 'RGBA16F', depth: true});
+      if (b) {
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.fbo); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, b.fbo);
+        gl.blitFramebuffer(0, 0, W, H, 0, 0, W, H, gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+        gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, b.color); gl.uniform1i(P.u.u_scene, 5);
+        gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, b.depth); gl.uniform1i(P.u.u_sceneDepth, 6);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform2f(P.u.u_screen, W, H); gl.uniform1f(P.u.u_near, this.near); gl.uniform1f(P.u.u_far, this.far); gl.uniform1f(P.u.u_behind, 1);
+      }
+    }
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
-    gl.useProgram(P.p); gl.uniform1f(P.u.u_cut, 0.01); gl.uniformMatrix4fv(P.u.u_model, false, mat.identity()); gl.uniform1f(P.u.u_unit, 16); gl.uniform1f(P.u.u_center, 1);
+    gl.uniform1f(P.u.u_cut, 0.01); gl.uniformMatrix4fv(P.u.u_model, false, mat.identity()); gl.uniform1f(P.u.u_unit, 16); gl.uniform1f(P.u.u_center, 1);
     gl.disable(gl.CULL_FACE);
     for (let i = list.length - 1; i >= 0; i--) { const [, s, ox, oy, oz] = list[i]; if (s.trans) { gl.uniform3f(P.u.u_origin, ox, oy, oz); gl.bindVertexArray(s.trans.vao); gl.drawElements(gl.TRIANGLES, s.trans.count, gl.UNSIGNED_INT, 0); tris += s.trans.count / 3; } }
     // rain or snow: see-through streaks round the camera
-    if (extras.weather?.n) this.drawVerts(extras.weather, {origin: [0, 0, 0], unit: 256, center: 128, cut: 0.01});
+    // with 光影 the streaks are lit like everything else: fainter, or they hang in the air like a curtain
+    if (extras.weather?.n) this.drawVerts(extras.weather, {origin: [0, 0, 0], unit: 256, center: 128, cut: 0.01, alpha: shaded ? 0.4 : 1});
     gl.depthMask(true);
     // clouds
     if (env.clouds && this.images.clouds && !(shaded && this.cloudQ)) this.drawClouds(vp, view, env, fogNear, fogFar);
     if (extras.outline) this.drawOutline(extras.outline, view, vp);
     if (extras.lines) this.drawLines(extras.lines, vp);
-    if (extras.hand) this.drawHand(extras.hand, view, env);
+    if (hdr) {
+      gl.disable(gl.BLEND);
+      this.finish(vp, lit, view, W, H);
+      if (extras.hand) { gl.enable(gl.DEPTH_TEST); this.drawHand(extras.hand, view, env); }
+    } else {
+      if (extras.hand) this.drawHand(extras.hand, view, env);
+      gl.disable(gl.BLEND);
+      if (post) this.drawPost(vp, lit, W, H);
+    }
     gl.disable(gl.BLEND);
-    if (post) this.drawPost(vp, lit, W, H);
     gl.bindVertexArray(null);
     this.stats = {sections: this.sections.size, drawn: list.length, tris: Math.round(tris)};
   }
-  drawSunMoon(vp, env) {
+  drawSunMoon(vp, env, hdr = false) {
     const gl = this.gl, Q = this.quad;
     gl.useProgram(Q.p); gl.uniformMatrix4fv(Q.u.u_viewProj, false, vp); gl.uniform1f(Q.u.u_mode, 0);
+    gl.uniform1f(Q.u.u_back, hdr ? 1 : 0); gl.uniform1f(Q.u.u_gain, hdr ? 2.5 : 0);
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     const a = env.sunAngle, put = (dir, size, img, uv, color) => {
       if (!this.images[img]) return;
@@ -610,14 +746,14 @@ export class Renderer {
     const seen = env.sunMoon ?? 1;
     if (seen <= 0.02) { gl.disable(gl.BLEND); return; }
     // with 光影 the sky already glows round the sun: its picture smaller and softer, or it is a white wall
-    put(sun, lean ? 9 : 18, 'sun', [0, 0, 1, 1], lean ? [1, 0.92, 0.8, seen * 0.6] : [1, 1, 1, seen]);
+    if (!hdr) put(sun, lean ? 9 : 18, 'sun', [0, 0, 1, 1], lean ? [1, 0.92, 0.8, seen * 0.6] : [1, 1, 1, seen]);
     const ph = env.moonPhase || 0, mu = (ph % 4) / 4, mv = Math.floor(ph / 4) / 2;
     put(moon, 12, 'moon', [mu, mv, mu + 0.25, mv + 0.5], [1, 1, 1, seen]);
-    gl.disable(gl.BLEND);
+    gl.disable(gl.BLEND); gl.uniform1f(Q.u.u_back, 0); gl.uniform1f(Q.u.u_gain, 0);
   }
   drawClouds(vp, view, env, fogNear, fogFar) {
     const gl = this.gl, Q = this.quad, y = 192.5 - view.y, R = Math.max(view.far * 2, 256);
-    gl.useProgram(Q.p); gl.uniformMatrix4fv(Q.u.u_viewProj, false, vp); gl.uniform1f(Q.u.u_mode, 1);
+    gl.useProgram(Q.p); gl.uniformMatrix4fv(Q.u.u_viewProj, false, vp); gl.uniform1f(Q.u.u_mode, 1); gl.uniform1f(Q.u.u_back, 0); gl.uniform1f(Q.u.u_gain, 0);
     gl.uniform1f(Q.u.u_fogNear, fogNear * 1.4); gl.uniform1f(Q.u.u_fogFar, R); gl.uniform3fv(Q.u.u_fog, env.fog);
     const scale = 1 / (12 * 256), sx = (view.x + env.cloudShift) * scale, sz = view.z * scale;
     gl.uniform2f(Q.u.u_shift, sx, sz);
@@ -710,12 +846,21 @@ export class Renderer {
   }
   /** What is in the hand, drawn over the world with its own view. */
   drawHand(h, view, env) {
-    const gl = this.gl, P = this.chunk, W = this.canvas.width, H = this.canvas.height;
+    const gl = this.gl, W = this.canvas.width, H = this.canvas.height, shaded = this.level !== 'off' && this.lit;
+    const P = shaded ? this.prog('chunk:hand', () => chunkShaders({})) : this.chunk;
     gl.clear(gl.DEPTH_BUFFER_BIT); gl.disable(gl.BLEND); gl.enable(gl.CULL_FACE);
     const proj = mat.perspective(70 * Math.PI / 180, W / H, 0.05, 10);
     gl.useProgram(P.p); gl.uniformMatrix4fv(P.u.u_viewProj, false, proj); gl.uniform1f(P.u.u_fogNear, 1000); gl.uniform1f(P.u.u_fogFar, 2000);
-    if (this.level !== 'off') { gl.uniform1f(P.u.u_fogDensity, 0); gl.uniform1f(P.u.u_fogFar, 1e5); gl.uniform1f(P.u.u_underwater, 0); gl.uniform1f(P.u.u_shadowOn, 0); }
+    if (shaded) {
+      this.setLit(P, this.lit, view);
+      gl.uniform1f(P.u.u_fogDensity, 0); gl.uniform1f(P.u.u_fogFar, 1e5); gl.uniform1f(P.u.u_underwater, 0); gl.uniform1f(P.u.u_rain, 0);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex); gl.uniform1i(P.u.u_tex, 0);
+      gl.uniform3f(P.u.u_camera, view.x, view.y, view.z); gl.uniform1f(P.u.u_texSize, this.texSize || 16);
+    }
+    const was = this.chunk;
+    this.chunk = P;
     this.drawVerts(h.verts, {origin: [0, 0, 0], model: h.model, cut: 0.5});
+    this.chunk = was;
   }
 }
 

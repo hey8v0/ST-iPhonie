@@ -1409,6 +1409,12 @@ function frame(now) {
   env.underwater = (eyeV & 0xFFF) === ID.water;
   if (env.underwater) { env.fog = [0.05, 0.12, 0.35].map(q => q * (0.3 + env.daylight * 0.7)); }
   if ((eyeV & 0xFFF) === ID.lava) { env.underwater = true; env.fog = [0.6, 0.15, 0.02]; }
+  // for 光影: how far the sky reaches the eye (eased: walking into a cave the air darkens over a second or two), and
+  // the light of what is in the hand (a torch lights round the player)
+  const eyeSky = G.mirror.light(Math.floor(view.x), Math.floor(view.y), Math.floor(view.z))[0] / 15;
+  G.eyeSky = (G.eyeSky ?? eyeSky) + (eyeSky - (G.eyeSky ?? eyeSky)) * Math.min(1, dt * 1.5);
+  env.eyeSky = G.eyeSky;
+  env.held = (itemInfo(G.inv.slots[G.hot]?.id)?.block?.light || 0) / 15;
   $('.water').style.display = env.underwater ? 'block' : 'none';
   $('.hurt').style.opacity = G.hurtT ? 0.9 : 0;
   $('.sleep').style.opacity = G.sleeping ? Math.min(1, G.sleeping / 60) : 0;

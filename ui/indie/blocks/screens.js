@@ -88,7 +88,7 @@ export class Screens {
       ${slider('volume', '音量', 0, 1, 0.05, fmts.volume)}${slider('scale', '画面清晰度', 0.4, 1, 0.05, fmts.scale)}
       ${cycle('shaders', '光影')}${cycle('lod', '远景')}
       ${toggle('wave', '草木摇动')}${toggle('clouds', '云')}${toggle('bob', '走路晃动')}${toggle('autoJump', '触屏自动跳')}
-      </div><p class="note">光影：低是光照、水面和天空；中再加阳光的影子和立体的云；高的影子更柔和，还有穿过缝隙的光束。远景：视野外的地形用大一点的方块画出来，能看到很远的山。光影开着时卡了会自动降一点清晰度。手机上视野距离和画面清晰度调低会更流畅。</p><button class="btn" data-a="back">完成</button>`, inGame ? 'dim' : 'dirt', {
+      </div><p class="note">光影：低是光照、水面和天空；中再加阳光的影子、有厚度的云和云影、泛光、方块的凹凸，水能看到底下、越深越蓝；高的影子更柔和，水面倒映岸上的东西，还有角落的阴影和穿过缝隙的光束。远景：视野外的地形用大一点的方块画出来，能看到很远的山。光影开着时卡了会自动降一点清晰度。手机上视野距离和画面清晰度调低会更流畅。</p><button class="btn" data-a="back">完成</button>`, inGame ? 'dim' : 'dirt', {
       cycle: b => { const k = b.dataset.k, opts = CHOICES[k], i = opts.findIndex(o => o[0] === this.api.settings()[k]), next = opts[(i + 1) % opts.length]; this.api.setSetting(k, next[0]); b.textContent = b.textContent.replace(/：.*/, `：${next[1]}`); },
       toggle: b => { const k = b.dataset.k; this.api.setSetting(k, !this.api.settings()[k]); b.textContent = b.textContent.replace(/：.*/, `：${this.api.settings()[k] ? '开' : '关'}`); },
       input: el => { if (!el.dataset.k) return; const k = el.dataset.k, v = Number(el.value); this.api.setSetting(k, v); this.current.querySelector(`[data-v="${k}"]`).textContent = fmts[k](v); },

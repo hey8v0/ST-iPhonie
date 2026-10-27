@@ -28,7 +28,8 @@ export class Mirror {
     const c = this.cols.get(key(x >> 4, z >> 4));
     if (!c || y < MINY) return [15, 0];
     const si = (y - MINY) >> 4, s = c.light[si];
-    const l = s ? s[((y - MINY) & 15) << 8 | (z & 15) << 4 | (x & 15)] : si > c.topSec ? 0xF0 : 0;
+    // a section of nothing but air has no light kept: the open sky above the column's top block, dark below it
+    const l = s ? s[((y - MINY) & 15) << 8 | (z & 15) << 4 | (x & 15)] : si > c.topSec || y > (c.height?.[(z & 15) * 16 + (x & 15)] ?? Infinity) ? 0xF0 : 0;
     return [l >> 4, l & 15];
   }
   biome(x, z) { const c = this.cols.get(key(x >> 4, z >> 4)); return c ? c.biome[(z & 15) * 16 + (x & 15)] : 0; }

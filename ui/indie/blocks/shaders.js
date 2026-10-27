@@ -1,59 +1,101 @@
-// The shaded look (光影), in the spirit of the game's shader packs: sunlight with real shadows (a shadow map from the sun,
-// or the moon at night, softened), sky light and block light in colour, a filmic tone curve, air that fades the land
-// into the sky's own colour, water that ripples and mirrors the sky and the sun, a sky with a glow round the sun,
-// soft clouds, light shafts. Each piece comes in by quality: low (the lighting, the water, the sky), mid (+ shadows,
-// clouds), high (+ softer shadows, light shafts). render.js builds the programs from these.
+// The shaded look (光影): our own take on what the game's shader packs do. Light is worked out in linear colour — the
+// sun's (or the moon's) through a shadow map and through leaves and grass, the sky's from above, block light warm and
+// flickering (and from a torch held in the hand), shade under the clouds — and the land fades into air that is thick
+// low down, thin up a mountain and dark in a cave. Water bends what is under it, colours by its depth, foams at the
+// shore and mirrors the land (marched through the picture) and the sky; rain wets the ground into puddles. The clouds
+// are a layer with depth, lit through. With HDR (mid, high) everything goes into a float picture and the end does the
+// film: bloom, edge shade (high), light shafts (high), the tone curve and colour, smoothed edges. Low (phones) draws
+// straight to the screen with the same light, tone-mapped per pixel. render.js builds the programs from these.
 
-// lighting shared by everything shaded: colours are linear (sRGB squared), lit, then tone-mapped back
-const LIGHT = `
+// what the land and the sky share: the light's uniforms, the sky's colour along a direction, the clouds' cover (an
+// octave a lookup into a tiling noise picture), and the air between the eye and a point. Per pixel for the land (the
+// land has far more vertices than the screen has pixels); mobs, with few vertices, work out their air per vertex.
+const SKY = `
+#ifndef HDR
+#define HDR 0
+#endif
 uniform vec3 u_lightDir, u_lightCol, u_ambCol, u_blockCol, u_sunTrue, u_zenith, u_horizon, u_glowCol, u_fogLin;
-uniform float u_exposure, u_fogDensity, u_fogFar, u_underwater, u_flicker, u_bright;
-vec3 lin(vec3 c) { return c * c; }
-vec3 aces(vec3 x) { x *= u_exposure; return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
-vec3 display(vec3 c) { return sqrt(aces(c)); }
-// the sky's colour along a direction: horizon to zenith, a glow round the sun, darker under the horizon
+uniform float u_exposure, u_fogDensity, u_fogFar, u_underwater, u_flicker, u_bright, u_rain, u_eyeSky, u_camY, u_held, u_time, u_cover;
+uniform sampler2D u_noise;
+// the sky's colour along a direction: horizon to zenith, the sun's glow (wide, a halo, a bright core), dark below
 vec3 skyCol(vec3 d) {
   float y = d.y;
-  vec3 c = mix(u_horizon, u_zenith, pow(clamp(y, 0.0, 1.0), 0.5));
+  vec3 c = mix(u_horizon, u_zenith, pow(clamp(y, 0.0, 1.0), 0.45));
   float s = max(dot(d, u_sunTrue), 0.0);
-  c += u_glowCol * (pow(s, 5.0) * 0.45 + pow(s, 40.0) * 1.6) * (1.0 - 0.5 * clamp(y, 0.0, 1.0));
-  return mix(c, u_horizon * 0.45, smoothstep(0.0, -0.35, y));
+  c += u_glowCol * (pow(s, 4.0) * 0.5 + pow(s, 32.0) * 1.3 + pow(s, 500.0) * 3.0) * (1.0 - 0.45 * clamp(y, 0.0, 1.0));
+  return mix(c, u_horizon * 0.4, smoothstep(0.0, -0.3, y));
 }
-// the air: thin near, thick far (squared), the sky's colour behind; under water a short blue murk
-vec3 airFog(vec3 col, vec3 wp, float dist) {
-  if (u_underwater > 0.5) return mix(col, u_fogLin, smoothstep(1.0, u_fogFar, dist));
-  float k = dist * u_fogDensity, f = 1.0 - exp(-k * k);
-  f = max(f, smoothstep(u_fogFar * 0.9, u_fogFar, dist));
-  return mix(col, skyCol(normalize(wp)), f);
+// how much cloud there is over a place (0 clear … 1 thick): octaves of the noise picture drifting with the wind
+float cloudCover(vec2 xz, int oct) {
+  vec2 p = (xz + vec2(u_time * 2.0, u_time * 0.6)) * 0.0021 / 8.0;
+  float s = 0.0, a = 0.5, n = 0.0;
+  for (int i = 0; i < 5; i++) { if (i >= oct) break; s += a * textureLod(u_noise, p, 0.0).r; n += a; p = p * 2.03 + 0.37; a *= 0.5; }
+  return smoothstep(u_cover, u_cover + 0.3, s / n);
+}
+// the air between the eye and a point (camera-relative): its colour, and how much of it there is (alpha). Thicker low
+// down (from a mountain the view is clear, the valley hazy), the sky's colour behind — or a cave's darkness when the
+// eye is out of the sky's reach; under water a short blue murk.
+vec4 airAt(vec3 wp, float dist) {
+  if (u_underwater > 0.5) return vec4(u_fogLin, smoothstep(1.0, u_fogFar, dist));
+  float k = 0.016, dy = wp.y, h = exp(-clamp(u_camY - 64.0, -24.0, 200.0) * k) * (abs(dy) > 0.05 ? (1.0 - exp(-k * dy)) / (k * dy) : 1.0);
+  float t = dist * u_fogDensity * clamp(h, 0.2, 2.5), f = max(1.0 - exp(-t * t), smoothstep(u_fogFar * 0.88, u_fogFar, dist));
+  return vec4(mix(u_ambCol * 0.02 + vec3(0.002), skyCol(wp / max(dist, 0.001)), u_eyeSky), f);
 }
 `;
-// the shadow map, looked up with the hardware's 2×2 filter and a few taps round (more on high)
+// the light of a pixel, after SKY: colours are linear (sRGB squared), lit, then through the film
+const LIGHT = SKY + `
+vec3 lin(vec3 c) { return c * c; }
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// the film: a filmic curve (ACES, fitted), then a little more colour in the light and less in the dark (the curve's
+// toe would make dark blues glow)
+vec3 film(vec3 c) {
+  c *= u_exposure;
+  c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+  float l = luma(c);
+  return clamp(mix(vec3(l), c, mix(0.45, 1.08, smoothstep(0.01, 0.25, l))), 0.0, 1.0);
+}
+#if HDR
+vec3 display(vec3 c) { return c; }
+#else
+vec3 display(vec3 c) { return sqrt(film(c)); }
+#endif
+// noise from the pixel's place, spread evenly (for jittering samples)
+float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+// smooth noise of about one unit across (one cell of the noise picture is an eighth of it)
+float vnoise(vec2 p) { return texture(u_noise, p / 8.0).r; }
+`;
+// the shadow map: the hardware's 2×2 compare, and taps on a turned spiral round (more and wider on high)
 const SHADOW = `
 uniform highp sampler2DShadow u_shadow;
 uniform float u_shadowOn, u_texel;
-const vec2 POISSON[8] = vec2[8](vec2(-0.613, 0.617), vec2(0.17, -0.04), vec2(-0.299, -0.789), vec2(0.645, 0.493), vec2(-0.651, -0.162), vec2(0.421, -0.704), vec2(-0.135, 0.255), vec2(0.86, -0.155));
+// points on a spiral (each at the golden angle from the last, spreading out evenly), turned per pixel by one rotation
+#if SHADOWS >= 2
+const int N_SH = 12; const float R_SH = 2.4;
+const vec2 SPIRAL[12] = vec2[12](vec2(0.204, 0.000), vec2(-0.261, 0.239), vec2(0.040, -0.455), vec2(0.329, 0.429), vec2(-0.603, -0.107), vec2(0.571, -0.363), vec2(-0.191, 0.711), vec2(-0.364, -0.702), vec2(0.791, 0.289), vec2(-0.822, 0.340), vec2(0.396, -0.847), vec2(0.293, 0.934));
+#else
+const int N_SH = 4; const float R_SH = 1.3;
+const vec2 SPIRAL[4] = vec2[4](vec2(0.354, 0.000), vec2(-0.452, 0.414), vec2(0.069, -0.788), vec2(0.569, 0.742));
+#endif
 float shadowAt(vec4 sp) {
   vec3 p = sp.xyz * 0.5 + 0.5;
   float edge = max(abs(p.x - 0.5), abs(p.y - 0.5)) * 2.0;
   if (edge >= 1.0 || p.z >= 1.0) return 1.0;
-  float s = 0.0;
-#if SHADOWS >= 2
-  float a = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 6.2832;
-  mat2 r = mat2(cos(a), sin(a), -sin(a), cos(a));
-  for (int i = 0; i < 8; i++) s += texture(u_shadow, vec3(p.xy + r * POISSON[i] * u_texel * 1.8, p.z));
-  s /= 8.0;
-#else
-  for (int i = 0; i < 4; i++) s += texture(u_shadow, vec3(p.xy + POISSON[i * 2] * u_texel, p.z));
-  s /= 4.0;
-#endif
-  return mix(s, 1.0, smoothstep(0.85, 1.0, edge));
+  float a = ign(gl_FragCoord.xy) * 6.2832, c = cos(a), sn = sin(a), s = 0.0;
+  mat2 rot = mat2(c, sn, -sn, c) * (R_SH * u_texel);
+  for (int i = 0; i < N_SH; i++) s += texture(u_shadow, vec3(p.xy + rot * SPIRAL[i], p.z));
+  return mix(s / float(N_SH), 1.0, smoothstep(0.85, 1.0, edge));
 }
 `;
 const head = (defs, prec = '') => `#version 300 es\n${Object.entries(defs).map(([k, v]) => `#define ${k} ${v}`).join('\n')}\nprecision highp float;\n${prec}`;
+const defsOf = o => ({SHADOWS: o.shadows || 0, HDR: o.hdr ? 1 : 0, GEN: o.gen ? 1 : 0, SSR: o.ssr || 0, CLOUDS: o.clouds || 0});
 
-/** The world's blocks (and things drawn like them). shadows: 0 none, 1 a few taps, 2 soft. */
-export function chunkShaders(shadows) {
-  const vs = head({SHADOWS: shadows}) + `
+/**
+ * The world's blocks (and things drawn like them). o: {shadows: 0 none | 1 a few taps | 2 soft, hdr (into the float
+ * picture; water then reads the land behind it), gen (bumps from the picture), ssr (steps of the water's mirror), clouds}.
+ */
+export function chunkShaders(o = {}) {
+  const defs = defsOf(o);
+  const vs = head(defs) + `
 layout(location=0) in uvec3 a_pos;
 layout(location=1) in uint a_layer;
 layout(location=2) in uvec2 a_uv;
@@ -63,9 +105,13 @@ layout(location=5) in vec3 a_tint;
 uniform mat4 u_viewProj, u_model, u_shadowMat;
 uniform vec3 u_origin, u_camera, u_lightDir;
 uniform float u_unit, u_center, u_time, u_wave;
-out vec3 v_uvl; out vec2 v_light; out float v_ao; out vec3 v_tint; out float v_dist; out float v_liquid; out vec3 v_wp; out vec3 v_n; out vec4 v_sh;
+out vec3 v_uvl; out vec2 v_light; out float v_ao; out vec3 v_tint; out float v_dist; out vec3 v_wp; out vec3 v_n; out vec3 v_tu; out vec3 v_tv; out vec4 v_sh;
+flat out uint v_flags;
 const float AO[4] = float[4](1.0, 0.8, 0.65, 0.5);
 const vec3 N6[6] = vec3[6](vec3(1.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, -1.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, -1.0));
+// which way the picture's u and v run on each face (the game's texture coordinates, as mesh.js lays them)
+const vec3 TU[6] = vec3[6](vec3(0.0, 0.0, -1.0), vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0));
+const vec3 TV[6] = vec3[6](vec3(0.0, -1.0, 0.0), vec3(0.0, -1.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, -1.0), vec3(0.0, -1.0, 0.0), vec3(0.0, -1.0, 0.0));
 void main() {
   vec3 p = vec3(a_pos) / u_unit - u_center;
   vec3 wp = (u_model * vec4(p, 1.0)).xyz + u_origin;
@@ -78,8 +124,10 @@ void main() {
   v_uvl = vec3(vec2(a_uv) / 16.0, float(a_layer));
   v_light = vec2(a_light) / 17.0;
   v_ao = AO[a_shade & 3u];
-  v_n = mat3(u_model) * N6[min((a_shade >> 2u) & 7u, 5u)];
-  v_tint = a_tint; v_wp = wp; v_dist = length(wp); v_liquid = flags == 4u ? 1.0 : 0.0;
+  uint f = min((a_shade >> 2u) & 7u, 5u);
+  mat3 m = mat3(u_model);
+  v_n = m * N6[f]; v_tu = m * TU[f]; v_tv = m * TV[f];
+  v_tint = a_tint; v_wp = wp; v_dist = length(wp); v_flags = flags;
 #if SHADOWS > 0
   // pushed off the surface a little (more far away) so it does not shadow itself; plants (crossed sheets with no real
   // facing) are looked up half a block toward the light instead, or each would sit in its own shadow
@@ -89,40 +137,136 @@ void main() {
   v_sh = vec4(0.0);
 #endif
 }`;
-  const fs = head({SHADOWS: shadows}, 'precision highp sampler2DArray;\n') + LIGHT + (shadows ? SHADOW : '') + `
+  const fs = head(defs, 'precision highp sampler2DArray;\n') + LIGHT + (defs.SHADOWS ? SHADOW : '') + `
 uniform sampler2DArray u_tex;
-uniform float u_cut, u_alpha, u_overlay, u_time;
+uniform float u_cut, u_alpha, u_overlay, u_texSize;
 uniform vec3 u_camera;
-in vec3 v_uvl; in vec2 v_light; in float v_ao; in vec3 v_tint; in float v_dist; in float v_liquid; in vec3 v_wp; in vec3 v_n; in vec4 v_sh;
+uniform mat4 u_viewProj;
+#if HDR
+uniform sampler2D u_scene, u_sceneDepth;
+uniform vec2 u_screen;
+uniform float u_near, u_far, u_behind;
+#endif
+in vec3 v_uvl; in vec2 v_light; in float v_ao; in vec3 v_tint; in float v_dist; in vec3 v_wp; in vec3 v_n; in vec3 v_tu; in vec3 v_tv; in vec4 v_sh;
+flat in uint v_flags;
 out vec4 o;
+#if CLOUDS > 0
+// the clouds' shade on the land: the cover where the light's line from here meets the layer's middle
+float cloudShade(vec3 W) { return u_lightDir.y < 0.05 ? 1.0 : 1.0 - 0.6 * cloudCover(W.xz + u_lightDir.xz * (214.0 - W.y) / u_lightDir.y, 3); }
+#else
+float cloudShade(vec3 W) { return 1.0; }
+#endif
+// small waves in three sizes: the water's surface slope
+vec3 waterNormal(vec3 W) {
+  vec2 g = vec2(cos(W.x * 0.9 + u_time * 1.6), cos(W.z * 0.8 + u_time * 1.3)) * 0.05
+         + vec2(cos(W.x * 2.3 - W.z * 1.7 + u_time * 2.4), cos(W.z * 2.1 + W.x * 1.3 + u_time * 2.0)) * 0.025
+         + vec2(cos(W.x * 5.1 + W.z * 3.3 + u_time * 3.7), cos(W.z * 4.7 - W.x * 2.9 + u_time * 3.1)) * 0.012;
+  return normalize(vec3(-g.x, 1.0, -g.y));
+}
+#if HDR
+float linearDepth(float d) { float z = d * 2.0 - 1.0; return 2.0 * u_near * u_far / (u_far + u_near - z * (u_far - u_near)); }
+#if SSR > 0
+// the mirror: steps along the reflected ray through the picture of the land; where it goes behind something, that
+// is what is seen (rgb, how sure). The sky where it leaves without meeting anything.
+vec4 mirror(vec3 p, vec3 r) {
+  float stride = (0.5 + v_dist * 0.02) * (SSR > 16 ? 1.0 : 1.6);
+  vec2 uv = vec2(-1.0);
+  for (int i = 0; i < SSR; i++) {
+    stride *= 1.22; p += r * stride;
+    vec4 c = u_viewProj * vec4(p, 1.0);
+    if (c.w <= 0.05) break;
+    vec2 q = c.xy / c.w * 0.5 + 0.5;
+    if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0) break;
+    uv = q;
+    float d = texture(u_sceneDepth, q).r, behind = c.w - linearDepth(d);
+    if (d < 0.99999 && behind > 0.0 && behind < stride * 2.0 + 0.6) {
+      vec3 a = p - r * stride, b = p;
+      for (int k = 0; k < 4; k++) { vec3 m = (a + b) * 0.5; vec4 cm = u_viewProj * vec4(m, 1.0); vec2 qm = cm.xy / cm.w * 0.5 + 0.5; if (cm.w - linearDepth(texture(u_sceneDepth, qm).r) > 0.0) b = m; else a = m; uv = qm; }
+      vec2 e = smoothstep(0.0, 0.07, uv) * smoothstep(1.0, 0.93, uv);
+      return vec4(texture(u_scene, uv).rgb, e.x * e.y);
+    }
+  }
+  // left the land behind: the picture's sky there (with its clouds), if it is sky
+  if (uv.x >= 0.0 && texture(u_sceneDepth, uv).r >= 0.99999) { vec2 e = smoothstep(0.0, 0.07, uv) * smoothstep(1.0, 0.93, uv); return vec4(texture(u_scene, uv).rgb, e.x * e.y * 0.85); }
+  return vec4(0.0);
+}
+#endif
+#endif
 void main() {
   vec4 c = texture(u_tex, v_uvl);
   if (c.a < u_cut) discard;
   if (u_overlay > 0.5) { o = vec4(c.rgb, c.a); return; }
-  vec3 albedo = lin(c.rgb * v_tint), N = normalize(v_n);
+  bool leaf = v_flags == 1u, plant = v_flags == 2u || v_flags == 3u, liquid = v_flags == 4u;
+  vec3 albedo = lin(c.rgb * v_tint), N = normalize(v_n), V = normalize(-v_wp), W = v_wp + u_camera, L = u_lightDir;
   float sky = clamp(v_light.x / 15.0, 0.0, 1.0), blk = clamp(v_light.y / 15.0, 0.0, 1.0);
-  float ndl = max(dot(N, u_lightDir), 0.0), sh = 1.0;
-#if SHADOWS > 0
-  if (u_shadowOn > 0.5 && ndl > 0.0) sh = shadowAt(v_sh);
+  // a torch (or anything that shines) in the hand lights round the player, a level less each block away
+  blk = max(blk, clamp(u_held - v_dist / 15.0, 0.0, 1.0));
+#if GEN
+  // bumps from the picture itself: its darker parts lower (only near, where a texel is more than a pixel)
+  if (!leaf && !plant && !liquid && v_dist < 26.0) {
+    float e = 1.0 / u_texSize, h0 = luma(textureLod(u_tex, v_uvl, 0.0).rgb);
+    vec2 g = vec2(luma(textureLod(u_tex, v_uvl + vec3(e, 0.0, 0.0), 0.0).rgb) - h0, luma(textureLod(u_tex, v_uvl + vec3(0.0, e, 0.0), 0.0).rgb) - h0);
+    g *= 2.0 * (1.0 - smoothstep(12.0, 26.0, v_dist));
+    N = normalize(N - g.x * normalize(v_tu) - g.y * normalize(v_tv));
+  }
 #endif
-  // sunlight only where the sky reaches (in caves the map may not know)
-  float sun = ndl * sh * smoothstep(0.55, 0.95, sky);
-  vec3 L = u_lightCol * sun + u_ambCol * sky * sky * (0.72 + 0.28 * N.y) * v_ao + u_blockCol * pow(blk, 2.4) * 2.2 * u_flicker * v_ao + vec3(0.01 + u_bright);
-  vec3 col = albedo * L;
-  float alpha = (v_liquid > 0.5 ? max(c.a, 0.72) : c.a) * u_alpha;
-  // water's top: two sets of small waves; the sky and the sun mirrored more at a glance
-  if (v_liquid > 0.5 && N.y > 0.5) {
-    vec3 W = v_wp + u_camera;
-    vec2 g = vec2(cos(W.x * 0.9 + u_time * 1.6), cos(W.z * 0.8 + u_time * 1.3)) * 0.06
-           + vec2(cos(W.x * 2.3 - W.z * 1.7 + u_time * 2.4), cos(W.z * 2.1 + W.x * 1.3 + u_time * 2.0)) * 0.03;
-    vec3 n = normalize(vec3(-g.x, 1.0, -g.y)), V = normalize(-v_wp), R = reflect(-V, n);
+  float ndl = dot(N, L);
+  // leaves take light from either side; grass and flowers have no real facing
+  float direct = leaf ? clamp(ndl * 0.55 + 0.45, 0.0, 1.0) : plant ? 0.8 : max(ndl, 0.0), sh = 1.0;
+#if SHADOWS > 0
+  if (u_shadowOn > 0.5 && direct > 0.0) sh = shadowAt(v_sh);
+#endif
+  // sunlight only where the sky reaches (in caves the map may not know), less under clouds
+  float open = smoothstep(0.55, 0.95, sky), sunVis = sh * open * (open > 0.0 ? cloudShade(W) : 1.0);
+  vec3 light = u_lightCol * direct * sunVis;
+  // leaves and grass let light through: they glow looking toward the sun behind them
+  if (leaf || plant) light += u_lightCol * pow(max(dot(-V, L), 0.0), 5.0) * (leaf ? 0.9 : 0.6) * sunVis;
+  float ao = mix(1.0, v_ao, 0.8);
+  vec3 amb = u_ambCol * sky * sky * (0.62 + 0.38 * (N.y * 0.5 + 0.5)) * ao;
+  vec3 bl = u_blockCol * (pow(blk, 2.2) * 1.9 + pow(blk, 9.0) * 1.6) * u_flicker * ao;
+  // rain: the open ground darker and shiny, puddles in its hollows
+  float wet = liquid ? 0.0 : u_rain * open * smoothstep(0.2, 0.9, N.y);
+  albedo *= 1.0 - 0.35 * wet;
+  vec3 col = albedo * (light + amb + bl + vec3(0.012 + u_bright));
+  if (wet > 0.01) {
+    float puddle = smoothstep(0.5, 0.68, vnoise(W.xz * 0.35)) * step(0.9, N.y);
+    vec3 n = normalize(mix(N, vec3(0.0, 1.0, 0.0), puddle)), R = reflect(-V, n);
+    float fr = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
+    col = mix(col, skyCol(normalize(vec3(R.x, max(R.y, 0.02), R.z))) * open, fr * wet * (0.3 + 0.7 * puddle));
+  }
+  float alpha = c.a * u_alpha;
+  if (liquid) {
+    vec3 n = N.y > 0.5 ? waterNormal(W) : N, R = reflect(-V, n);
     float fr = 0.02 + 0.98 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
-    vec3 refl = skyCol(normalize(vec3(R.x, max(R.y, 0.03), R.z))) * mix(0.12, 1.0, sky * sky);
-    refl += u_lightCol * pow(max(dot(R, u_lightDir), 0.0), 140.0) * 5.0 * sh * smoothstep(0.55, 0.95, sky);
-    col = mix(col * 0.6, refl, fr);
+    vec3 refl = skyCol(normalize(vec3(R.x, max(R.y, 0.02), R.z))) * mix(0.1, 1.0, sky * sky);
+    vec3 glint = u_lightCol * pow(max(dot(R, L), 0.0), 220.0) * 8.0 * sunVis;
+#if HDR
+    if (u_behind > 0.5 && u_underwater < 0.5) {
+      // what is under the surface, bent by the waves (not where something stands in front of the water)
+      vec2 suv = gl_FragCoord.xy / u_screen, ruv = suv + n.xz * 0.05 / max(v_dist * 0.1, 1.0);
+      float here = 1.0 / gl_FragCoord.w, bd = linearDepth(texture(u_sceneDepth, ruv).r);
+      if (bd < here) { ruv = suv; bd = linearDepth(texture(u_sceneDepth, suv).r); }
+      float deep = clamp(bd - here, 0.0, 64.0);
+      // the light that gets through: the colours the water lacks go first; what is lost turns to the water's own colour
+      vec3 wc = lin(v_tint), absorb = exp(-deep * ((vec3(1.0) - wc) * 0.85 + 0.04));
+      vec3 body = texture(u_scene, ruv).rgb * absorb + wc * (u_ambCol * 0.5 + u_lightCol * max(L.y, 0.0) * 0.12 * open) * 0.6 * (1.0 - absorb);
+#if SSR > 0
+      if (fr > 0.06 && R.y > 0.0) { vec4 m = mirror(v_wp, R); refl = mix(refl, m.rgb, m.a); }
+#endif
+      col = mix(body, refl, fr) + glint;
+      // foam where it is shallow, a little patchy and moving
+      float foam = (1.0 - smoothstep(0.0, 0.55, deep)) * smoothstep(0.35, 0.8, vnoise(W.xz * 1.8 + u_time * 0.4));
+      col = mix(col, (u_lightCol * max(L.y, 0.0) * sunVis + u_ambCol * sky * sky + bl) * 0.85, foam * 0.55 * step(0.5, N.y));
+      vec4 air = airAt(v_wp, v_dist);
+      o = vec4(display(mix(col, air.rgb, air.a)), 1.0);
+      return;
+    }
+#endif
+    col = mix(col * 0.6, refl, fr) + glint;
     alpha = mix(0.62, 0.97, fr) * u_alpha;
   }
-  o = vec4(display(airFog(col, v_wp, v_dist)), alpha);
+  vec4 air = airAt(v_wp, v_dist);
+  o = vec4(display(mix(col, air.rgb, air.a)), alpha);
 }`;
   return [vs, fs];
 }
@@ -156,38 +300,53 @@ void main() { if (textureLod(u_tex, v_uvl, 0.0).a < 0.5) discard; o = vec4(1.0);
   return [vs, fs];
 }
 
-/** The sky: its colour, the stars by night, and (clouds 1) soft clouds lit by the sun or the moon. */
-export function skyShaders(clouds) {
+/**
+ * The sky: its colour, the stars by night, the sun's disc (HDR: bright enough to bloom), and (clouds 1, 2: more steps)
+ * the cloud layer from 192 to 236 — marched through, each step lit by how much cloud lies toward the light.
+ */
+export function skyShaders(o = {}) {
+  const defs = defsOf(o);
   const vs = `#version 300 es
 precision highp float;
 const vec2 P[3] = vec2[3](vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0));
 uniform mat4 u_invViewProj;
 out vec3 v_dir;
 void main() { vec2 p = P[gl_VertexID]; gl_Position = vec4(p, 0.9999, 1.0); vec4 w = u_invViewProj * vec4(p, 1.0, 1.0); v_dir = w.xyz / w.w; }`;
-  const fs = head({CLOUDS: clouds}) + LIGHT + `
-uniform float u_stars, u_time, u_cover;
-uniform vec3 u_camPos;
+  const fs = head(defs) + LIGHT + `
+uniform float u_stars;
+uniform vec3 u_camPos, u_sunDisc;
 in vec3 v_dir; out vec4 o;
 float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-float h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h2(i), h2(i + vec2(1.0, 0.0)), f.x), mix(h2(i + vec2(0.0, 1.0)), h2(i + 1.0), f.x), f.y); }
-float fbm(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * noise(p); p = p * 2.03 + 17.1; a *= 0.5; } return s; }
 void main() {
   vec3 d = normalize(v_dir);
   vec3 c = skyCol(d);
   if (u_stars > 0.0 && d.y > 0.0) { vec3 q = floor(d * 260.0); float s = hash3(q); if (s > 0.9968) c += vec3(u_stars * (s - 0.9968) / 0.0032) * (0.6 + 0.4 * sin(u_time * 3.0 + s * 90.0)) * smoothstep(0.0, 0.2, d.y); }
+#if HDR
+  c += u_sunDisc * smoothstep(0.99972, 0.99988, dot(d, u_sunTrue)) * 24.0;
+#endif
 #if CLOUDS > 0
-  // a layer of clouds at 220: where the view ray meets it, a noise for how thick; thinner toward the sun is brighter
-  float H = 220.0 - u_camPos.y;
-  if (d.y > 0.015 && H > 2.0) {
-    float t = H / d.y;
-    vec2 p = (u_camPos.xz + d.xz * t + vec2(u_time * 2.0, u_time * 0.6)) * 0.0021;
-    float n = fbm(p), dens = smoothstep(u_cover, u_cover + 0.28, n);
-    if (dens > 0.0) {
-      float lit = fbm(p + u_lightDir.xz * 0.06);
-      float shade = clamp(1.15 - (lit - n) * 3.0 - dens * 0.25, 0.35, 1.25);
-      vec3 cc = u_lightCol * 0.42 * shade + u_ambCol * 1.15 + u_glowCol * pow(max(dot(d, u_sunTrue), 0.0), 6.0) * 0.6;
-      c = mix(c, cc, dens * exp(-t * 0.00045) * 0.95);
+  const float CB = 192.0, CT = 236.0;
+  float cy = u_camPos.y;
+  if (abs(d.y) > 0.01) {
+    float ta = (CB - cy) / d.y, tb = (CT - cy) / d.y, t0 = max(min(ta, tb), 0.0), t1 = max(ta, tb);
+    if (t1 > 0.0 && t0 < 6000.0) {
+      t1 = min(t1, t0 + 420.0);
+      const int N = CLOUDS > 1 ? 16 : 9;
+      float dt = (t1 - t0) / float(N), T = 1.0, j = ign(gl_FragCoord.xy), ph = 0.55 + 1.6 * pow(max(dot(d, u_lightDir), 0.0), 8.0);
+      vec3 S = vec3(0.0);
+      for (int i = 0; i < N; i++) {
+        vec3 p = u_camPos + d * (t0 + (float(i) + j) * dt);
+        float h = clamp((p.y - CB) / (CT - CB), 0.0, 1.0);
+        // flat underneath, rounded on top; thin cover makes thin clouds
+        float dens = clamp(cloudCover(p.xz, CLOUDS > 1 ? 5 : 4) * 1.4 - (1.0 - smoothstep(0.0, 0.15, h) * smoothstep(1.0, 0.45, h)), 0.0, 1.0);
+        if (dens < 0.01) continue;
+        float lt = exp(-cloudCover(p.xz + u_lightDir.xz * 18.0, 2) * 2.2) * (0.5 + 0.5 * h);
+        vec3 lum = u_lightCol * lt * ph * 1.1 + u_ambCol * (0.55 + 0.6 * h) * 1.4;
+        float a = 1.0 - exp(-dens * dt * 0.06);
+        S += T * a * lum; T *= 1.0 - a;
+        if (T < 0.03) break;
+      }
+      c = mix(c, c * T + S, exp(-t0 * 0.00035));
     }
   }
 #endif
@@ -197,47 +356,49 @@ void main() {
 }
 
 /** Mobs and the player in third person: lit like the blocks (their own face shading stands in for the sun's angle). */
-export function entityShaders(shadows) {
-  const vs = head({SHADOWS: shadows}) + `
+export function entityShaders(o = {}) {
+  const defs = defsOf(o);
+  const vs = head(defs) + SKY + `
 layout(location=0) in vec3 a_pos;
 layout(location=1) in vec2 a_uv;
 layout(location=2) in float a_shade;
 uniform mat4 u_viewProj, u_shadowMat;
-out vec2 v_uv; out float v_shade; out float v_dist; out vec3 v_wp; out vec4 v_sh;
+out vec2 v_uv; out float v_shade; out float v_dist; out vec3 v_wp; out vec4 v_sh; out vec4 v_air;
 void main() {
-  gl_Position = u_viewProj * vec4(a_pos, 1.0); v_uv = a_uv; v_shade = a_shade; v_dist = length(a_pos); v_wp = a_pos;
+  gl_Position = u_viewProj * vec4(a_pos, 1.0); v_uv = a_uv; v_shade = a_shade; v_dist = length(a_pos); v_wp = a_pos; v_air = airAt(a_pos, v_dist);
 #if SHADOWS > 0
   v_sh = u_shadowMat * vec4(a_pos + vec3(0.0, 0.08, 0.0), 1.0);
 #else
   v_sh = vec4(0.0);
 #endif
 }`;
-  const fs = head({SHADOWS: shadows}) + LIGHT + (shadows ? SHADOW : '') + `
+  const fs = head(defs) + LIGHT + (defs.SHADOWS ? SHADOW : '') + `
 uniform sampler2D u_img;
 uniform vec2 u_light;
 uniform float u_hurt, u_white;
 uniform vec3 u_tint;
-in vec2 v_uv; in float v_shade; in float v_dist; in vec3 v_wp; in vec4 v_sh; out vec4 o;
+in vec2 v_uv; in float v_shade; in float v_dist; in vec3 v_wp; in vec4 v_sh; in vec4 v_air; out vec4 o;
 void main() {
   vec4 c = texture(u_img, v_uv);
   if (c.a < 0.1) discard;
-  float sky = clamp(u_light.x / 15.0, 0.0, 1.0), blk = clamp(u_light.y / 15.0, 0.0, 1.0), sh = 1.0;
+  float sky = clamp(u_light.x / 15.0, 0.0, 1.0), blk = max(clamp(u_light.y / 15.0, 0.0, 1.0), clamp(u_held - v_dist / 15.0, 0.0, 1.0)), sh = 1.0;
 #if SHADOWS > 0
   if (u_shadowOn > 0.5) sh = shadowAt(v_sh);
 #endif
   vec3 L = u_lightCol * clamp((v_shade - 0.45) * 1.7, 0.0, 1.0) * max(u_lightDir.y, 0.25) * sh * smoothstep(0.55, 0.95, sky)
-    + u_ambCol * sky * sky + u_blockCol * pow(blk, 2.4) * 2.2 * u_flicker + vec3(0.012 + u_bright);
+    + u_ambCol * sky * sky + u_blockCol * (pow(blk, 2.2) * 1.9 + pow(blk, 9.0) * 1.6) * u_flicker + vec3(0.012 + u_bright);
   vec3 col = lin(c.rgb * u_tint) * L;
   col = mix(col, vec3(1.0, 0.1, 0.06) * max(L, vec3(0.25)), u_hurt * 0.45);
   col = mix(col, vec3(2.0), u_white);
-  o = vec4(display(airFog(col, v_wp, v_dist)), 1.0);
+  o = vec4(display(mix(col, v_air.rgb, v_air.a)), 1.0);
 }`;
   return [vs, fs];
 }
 
 /** The distant view's coarse land: coloured voxels, lit and fogged like the near land; nothing where real columns are. */
-export function lodShaders() {
-  const vs = head({}) + `
+export function lodShaders(o = {}) {
+  const defs = defsOf(o);
+  const vs = head(defs) + `
 layout(location=0) in vec3 a_pos;
 layout(location=1) in uvec4 a_col;
 uniform mat4 u_viewProj;
@@ -249,27 +410,29 @@ void main() {
   gl_Position = u_viewProj * vec4(wp, 1.0);
   v_wp = wp; v_col = vec3(a_col.rgb) / 255.0; v_n = N6[min(a_col.a & 7u, 5u)]; v_water = (a_col.a & 8u) > 0u ? 1.0 : 0.0;
 }`;
-  const fs = head({}) + LIGHT + `
+  const fs = head(defs) + LIGHT + `
 uniform float u_inner, u_plain;
 in vec3 v_wp; in vec3 v_col; in vec3 v_n; in float v_water; out vec4 o;
 void main() {
   if (length(v_wp.xz) < u_inner) discard;
   vec3 N = v_n, albedo = lin(v_col);
-  vec3 col = albedo * (u_lightCol * max(dot(N, u_lightDir), 0.0) + u_ambCol * (0.72 + 0.28 * N.y) + vec3(0.01 + u_bright));
+  vec3 col = albedo * (u_lightCol * max(dot(N, u_lightDir), 0.0) + u_ambCol * (0.62 + 0.38 * (N.y * 0.5 + 0.5)) + vec3(0.012 + u_bright));
   if (v_water > 0.5) { vec3 V = normalize(-v_wp), R = reflect(-V, N); float fr = 0.02 + 0.98 * pow(1.0 - max(V.y, 0.0), 5.0); col = mix(col, skyCol(normalize(vec3(R.x, max(R.y, 0.03), R.z))), fr); }
   if (u_plain > 0.5) { o = vec4(sqrt(clamp(col, 0.0, 1.0)), 1.0); return; }
-  o = vec4(display(airFog(col, v_wp, length(v_wp))), 1.0);
+  vec4 air = airAt(v_wp, length(v_wp));
+  o = vec4(display(mix(col, air.rgb, air.a)), 1.0);
 }`;
   return [vs, fs];
 }
 
-/** After everything (high): light shafts from the sun through gaps (where the sky shows), and a soft dark edge. */
-export function postShaders() {
-  const vs = `#version 300 es
+const FULL_VS = `#version 300 es
 precision highp float;
 const vec2 P[3] = vec2[3](vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0));
 out vec2 v_uv;
 void main() { vec2 p = P[gl_VertexID]; gl_Position = vec4(p, 0.0, 1.0); v_uv = p * 0.5 + 0.5; }`;
+
+/** Without float pictures (high): light shafts from the sun through gaps (where the sky shows), and a soft dark edge. */
+export function postShaders() {
   const fs = `#version 300 es
 precision highp float;
 uniform sampler2D u_color, u_depth;
@@ -289,5 +452,108 @@ void main() {
   c *= mix(0.8, 1.0, smoothstep(1.15, 0.4, length(v_uv - 0.5) * 1.35));
   o = vec4(c, 1.0);
 }`;
-  return [vs, fs];
+  return [FULL_VS, fs];
+}
+
+/**
+ * Bloom, one step down a chain of half-size pictures (down) or back up (up, added onto the bigger one): a soft blur
+ * of five (down) or nine (up) samples. The first step down keeps mostly what is bright.
+ */
+export function bloomShaders(up) {
+  const fs = `#version 300 es
+precision highp float;
+uniform sampler2D u_src;
+uniform vec2 u_px;
+uniform float u_first, u_weight;
+in vec2 v_uv; out vec4 o;
+vec3 at(vec2 d) { return texture(u_src, v_uv + d * u_px).rgb; }
+void main() {
+${up ? `  vec3 c = at(vec2(0.0)) * 4.0 + (at(vec2(1.0, 0.0)) + at(vec2(-1.0, 0.0)) + at(vec2(0.0, 1.0)) + at(vec2(0.0, -1.0))) * 2.0
+    + at(vec2(1.0, 1.0)) + at(vec2(-1.0, 1.0)) + at(vec2(1.0, -1.0)) + at(vec2(-1.0, -1.0));
+  o = vec4(c / 16.0 * u_weight, 1.0);` : `  vec3 c = (at(vec2(0.0)) * 4.0 + at(vec2(-1.0, -1.0)) + at(vec2(1.0, -1.0)) + at(vec2(-1.0, 1.0)) + at(vec2(1.0, 1.0))) / 8.0;
+  if (u_first > 0.5) { float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); c *= 0.08 + 0.92 * smoothstep(0.5, 2.2, l); }
+  o = vec4(min(c, vec3(64.0)), 1.0);`}
+}`;
+  return [FULL_VS, fs];
+}
+
+/**
+ * The end of a shaded frame (HDR): edge shade (ao 1: high), light shafts toward the sun through the gaps, the bloom,
+ * the film (exposure, the curve, colour); out as display colour with its brightness in alpha for the smoothing after.
+ */
+export function compositeShaders(o = {}) {
+  const fs = `#version 300 es
+#define AO ${o.ao ? 1 : 0}
+precision highp float;
+uniform sampler2D u_color, u_depth, u_bloom;
+uniform vec2 u_px, u_tanHalf, u_sunUV;
+uniform float u_bloomAmt, u_near, u_far, u_rays, u_exposure;
+uniform vec3 u_rayCol;
+in vec2 v_uv; out vec4 o;
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+float linearDepth(float d) { float z = d * 2.0 - 1.0; return 2.0 * u_near * u_far / (u_far + u_near - z * (u_far - u_near)); }
+vec3 viewPos(vec2 uv) { float z = linearDepth(texture(u_depth, uv).r); return vec3((uv * 2.0 - 1.0) * u_tanHalf * z, -z); }
+vec3 film(vec3 c) {
+  c *= u_exposure;
+  c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+  float l = luma(c);
+  return clamp(mix(vec3(l), c, mix(0.45, 1.08, smoothstep(0.01, 0.25, l))), 0.0, 1.0);
+}
+void main() {
+  vec3 c = texture(u_color, v_uv).rgb;
+  float d = texture(u_depth, v_uv).r;
+#if AO
+  // edge shade: how much of the half-space in front of this point the nearby land fills (a few samples round it)
+  if (d < 0.99999) {
+    vec3 P = viewPos(v_uv), N = normalize(cross(dFdx(P), dFdy(P)));
+    float r = 0.55 / (-P.z * u_tanHalf.y), a = ign(gl_FragCoord.xy) * 6.2832, occ = 0.0;
+    for (int i = 0; i < 8; i++) {
+      float t = (float(i) + 0.5) / 8.0, b = float(i) * 2.39996 + a;
+      vec3 v = viewPos(v_uv + vec2(cos(b), sin(b)) * sqrt(t) * r) - P;
+      float l = length(v);
+      occ += max(dot(N, v / max(l, 1e-4)) - 0.15, 0.0) * smoothstep(1.6, 0.3, l);
+    }
+    c *= 1.0 - clamp(occ / 8.0 * 0.9, 0.0, 0.45);
+  }
+#endif
+  if (u_rays > 0.0) {
+    vec2 dir = (u_sunUV - v_uv) / 28.0, p = v_uv + dir * ign(gl_FragCoord.xy);
+    float acc = 0.0, w = 1.0;
+    for (int i = 0; i < 28; i++) { p += dir; if (p.x < 0.0 || p.y < 0.0 || p.x > 1.0 || p.y > 1.0) break; acc += (texture(u_depth, p).r >= 0.99999 ? 1.0 : 0.0) * w; w *= 0.955; }
+    c += u_rayCol * (acc / 28.0) * u_rays * smoothstep(1.4, 0.0, length((v_uv - u_sunUV) * vec2(1.6, 1.0)));
+  }
+  c += texture(u_bloom, v_uv).rgb * u_bloomAmt;
+  c = sqrt(film(c));
+  o = vec4(c, luma(c));
+}`;
+  return [FULL_VS, fs];
+}
+
+/**
+ * Smoothing the stair-stepped edges (our own small edge blend: where brightness jumps across a pixel, blend along the
+ * edge), and the soft dark rim of the picture.
+ */
+export function edgeShaders() {
+  const fs = `#version 300 es
+precision highp float;
+uniform sampler2D u_img;
+uniform vec2 u_px;
+in vec2 v_uv; out vec4 o;
+void main() {
+  vec4 m = texture(u_img, v_uv);
+  float n = texture(u_img, v_uv + vec2(0.0, u_px.y)).a, s = texture(u_img, v_uv - vec2(0.0, u_px.y)).a;
+  float e = texture(u_img, v_uv + vec2(u_px.x, 0.0)).a, w = texture(u_img, v_uv - vec2(u_px.x, 0.0)).a;
+  float lo = min(m.a, min(min(n, s), min(e, w))), hi = max(m.a, max(max(n, s), max(e, w)));
+  vec3 c = m.rgb;
+  if (hi - lo > max(0.05, hi * 0.15)) {
+    vec2 g = vec2(e - w, n - s), t = normalize(vec2(-g.y, g.x) + 1e-5) * u_px;
+    float k = clamp((hi - lo) * 2.0, 0.0, 1.0);
+    vec3 along = (texture(u_img, v_uv + t).rgb + texture(u_img, v_uv - t).rgb + texture(u_img, v_uv + t * 2.0).rgb * 0.5 + texture(u_img, v_uv - t * 2.0).rgb * 0.5) / 3.0;
+    c = mix(c, along, k * 0.75);
+  }
+  c *= mix(0.85, 1.0, smoothstep(1.15, 0.4, length(v_uv - 0.5) * 1.35));
+  o = vec4(c, 1.0);
+}`;
+  return [FULL_VS, fs];
 }
