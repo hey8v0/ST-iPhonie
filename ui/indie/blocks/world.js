@@ -262,6 +262,20 @@ export class World {
         }
       }
     }
+    // cold places: still water on top freezes, and while it snows a layer of snow settles (the game's 1 in 16 a column)
+    if (this.snowing || this.tick % 4 === 0) for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+      if (this.r() >= 1 / 16) continue;
+      const c = this.col(px + dx, pz + dz);
+      if (!c) continue;
+      const i = Math.floor(this.r() * 256), x = c.cx * 16 + (i & 15), z = c.cz * 16 + (i >> 4);
+      if (!BIOMES[c.biome[i]]?.cold) continue;
+      let y = MINY + (c.topSec + 1) * 16 - 1;
+      while (y > MINY && !this.get(x, y, z)) y--;
+      const top = this.get(x, y, z), id = top & 0xFFF;
+      if ((this.light(x, y + 1, z) & 15) >= 10) continue;
+      if (id === ID.water && !(top >>> 12)) this.set(x, y, z, ID.ice);
+      else if (this.snowing && (OPAQUE[id] || BLOCKS[id].name.endsWith('_leaves')) && id !== ID.ice && id !== ID.packed_ice && id !== ID.blue_ice && y + 1 < MINY + HEIGHT) this.set(x, y + 1, z, ID.snow);
+    }
     // leaves whose tree is gone
     if (this.decay.size && this.tick % 4 === 0) {
       let n = 0;

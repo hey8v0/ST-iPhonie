@@ -1,22 +1,22 @@
 // 方块世界: a block world in the spirit of the game, made from scratch. This page runs the game: the menus, the player,
 // breaking and placing, survival (health, hunger, air), the day, what is held, the HUD; the world itself is made and
 // kept by the worker (world.worker.js) and drawn by render.js.
-import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf} from './blocks.js';
+import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp} from './blocks.js';
 import {Mobs, MOBS} from './mobs.js';
-import {MODELS, OWN_SKINS} from './models.js';
+import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
 import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds} from './atlas.js';
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
 import {listWorlds, saveWorld, deleteWorld} from './db.js';
 import {Mirror} from './mirror.js';
 import {Body, raycast} from './player.js';
-import {Inventory, furnaceTick, stackMax} from './inventory.js';
+import {Inventory, furnaceTick, stackMax, ARMOR_AT, takeSmeltXp} from './inventory.js';
 import {InventoryUI, stackHtml} from './invui.js';
-import {Entities, itemLook} from './entities.js';
+import {Entities, itemLook, setPacked} from './entities.js';
 import {Input} from './input.js';
 import {Screens} from './screens.js';
 import {collisionBoxes, DIR} from './shapes.js';
-import {unlockSound, play, setVolume} from './sound.js';
+import {unlockSound, play, setVolume, setRain} from './sound.js';
 import {seedOf} from './noise.js';
 import {spawnPoint, BIOMES} from './gen.js';
 
@@ -68,6 +68,11 @@ async function loadTextures() {
   // mob skins: the pack's (in the same layout) or ours; their sizes, since a pack's may be bigger
   skinSizes = {};
   for (const k of Object.keys(MODELS)) { const img = skins?.[k] || OWN_SKINS[k](); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; }
+  // worn armour: the pack's pictures (leather there is grey, dyed its usual brown) or ours
+  for (const m of Object.keys(ARMOR)) for (const [key, layer] of [[`armor_${m}`, 1], [`armor_${m}_legs`, 2]]) {
+    const img = skins?.[key] || ownArmor(m, layer); renderer.setImage(`mob:${key}`, img); skinSizes[key] = [img.width, img.height]; greyArmor[key] = !!skins?.[key] && m === 'leather';
+  }
+  setPacked(built.from);
   packLabel = rec?.label || '';
   // the menus' background: the dirt, darkened
   const c = document.createElement('canvas'), d = built.layers[LAYER.dirt], s = built.size;
@@ -81,7 +86,7 @@ async function loadTextures() {
   style.textContent = `.screen.dirt{background-image:url(${dirtUrl})}`;
   animFrames = built.animated.map(a => ({...a, at: -1}));
 }
-let animFrames = [], skinSizes = {};
+let animFrames = [], skinSizes = {}, greyArmor = {};
 
 // ---------- HUD pictures (our own) ----------
 function sprite9(rows, pal) {
@@ -93,6 +98,7 @@ function sprite9(rows, pal) {
 const HEART = ['.oo...oo.', 'oRRo.oRRo', 'oRWRoRRRo', 'oRRRRRRRo', 'oRRRRRRRo', '.oRRRRRo.', '..oRRRo..', '...oRo...', '....o....'];
 const FOOD = ['....ooo..', '...oMMMo.', '..oMMWMMo', '..oMMMMMo', '..oMMMMo.', '.oBoMMo..', 'oBBo.oo..', 'oBo......', '.o.......'];
 const AIR = ['..ooooo..', '.oBBBBBo.', 'oBWWBBBBo', 'oBWBBBBBo', 'oBBBBBBBo', 'oBBBBBBBo', 'oBBBBBBBo', '.oBBBBBo.', '..ooooo..'];
+const VEST = ['.oo...oo.', 'oWSo.oSSo', 'oWSSoSSSo', 'oSSSSSSSo', '.oSSSSSo.', '.oSSSSSo.', '.oSSSSSo.', '.oSSSSSo.', '..ooooo..'];
 const half = (rows, keepLeft) => rows.map(r => [...r].map((ch, x) => (keepLeft ? x > 4 : x < 4) && ch !== 'o' && ch !== '.' ? 'E' : ch).join(''));
 const HUD_PICS = {
   heartFull: sprite9(HEART, {o: '#1b0b0b', R: '#d42a2a', W: '#ff9a9a'}), heartHalf: sprite9(half(HEART, true), {o: '#1b0b0b', R: '#d42a2a', W: '#ff9a9a', E: '#3a1212'}),
@@ -100,6 +106,8 @@ const HUD_PICS = {
   foodFull: sprite9(FOOD, {o: '#2a1406', M: '#b5652a', W: '#e8a060', B: '#efe6d2'}), foodHalf: sprite9(half(FOOD, false), {o: '#2a1406', M: '#b5652a', W: '#e8a060', B: '#efe6d2', E: '#3a2410'}),
   foodEmpty: sprite9(FOOD, {o: '#2a1406', M: '#3a2410', W: '#3a2410', B: '#3a2410'}),
   air: sprite9(AIR, {o: '#0a2a5a', B: '#3a8ee8', W: '#cfe8ff'}),
+  armorFull: sprite9(VEST, {o: '#141414', S: '#d6d6d6', W: '#ffffff'}), armorHalf: sprite9(half(VEST, true), {o: '#141414', S: '#d6d6d6', W: '#ffffff', E: '#3c3c3c'}),
+  armorEmpty: sprite9(VEST, {o: '#141414', S: '#3c3c3c', W: '#3c3c3c'}),
 };
 const picUrl = c => c.toDataURL();
 const HUD_URL = Object.fromEntries(Object.entries(HUD_PICS).map(([k, c]) => [k, picUrl(c)]));
@@ -157,12 +165,17 @@ function startWorld(meta) {
   G.herds = new Set(meta.herds || []);
   G.bedPos = meta.bed || null; G.sleeping = 0;
   G.draw = 0; G.attackWait = 0; G.targetMob = null;
+  G.xp = {level: start.xpLevel || 0, prog: start.xpProg || 0, total: start.xpTotal || 0};
+  G.weather = {raining: false, thundering: false, rainT: 12000 + Math.floor(Math.random() * 168000), thunderT: 12000 + Math.floor(Math.random() * 168000), rain: 0, thunder: 0, ...meta.weather};
+  G.view = 0; G.bodyYaw = body.yaw; G.flash = 0; G.bolts = []; G.tops = new Map();
+  ents.loadOrbs(meta.orbs);
   G.mobs = new Mobs({
     world: mirror, player: body, mode: () => G.mode, daylight: () => environment(G.time).daylight, held: () => held(),
     dark: (x, y, z, spawn) => isDark(x, y, z, spawn), loaded: (x, z) => mirror.has(Math.floor(x), Math.floor(z)),
     hurtPlayer: (n, why, from) => hurt(n, why, from), explode: (x, y, z, power, src) => explode(x, y, z, power, src),
     sound: (name, x, y, z) => soundAt(name, x, y, z), drop: (s, x, y, z) => G.ents.drop(s, x, y, z), give: s => !G.inv.add(s),
     burst: (x, y, z, kind) => G.ents.puff(x, y, z, kind), setBlock: (x, y, z, v) => setBlock(x, y, z, v),
+    xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain',
   });
   G.mobs.load(meta.mobs);
   worker.onmessage = e => onWorker(e.data);
@@ -196,7 +209,9 @@ function soundAt(name, x, y, z) {
 }
 /** Dark enough for monsters: no block light, and the sky's light (after nightfall) low — for spawning, at most a random 0–7. */
 function isDark(x, y, z, spawn = false) {
-  const [sky, blk] = G.mirror.light(Math.floor(x), Math.floor(y), Math.floor(z)), lit = Math.max(blk, sky - Math.round((1 - environment(G.time).daylight) * 11));
+  // in a thunderstorm the game counts the sky ten levels darker: monsters come out by day
+  const [sky, blk] = G.mirror.light(Math.floor(x), Math.floor(y), Math.floor(z)), dim = G.weather.thunder > 0.9 ? 10 : Math.round((1 - environment(G.time).daylight) * 11);
+  const lit = Math.max(blk, sky - dim);
   return spawn ? blk === 0 && lit <= Math.floor(Math.random() * 8) : lit <= 7;
 }
 /** An explosion: the worker breaks the blocks; here what is near is hurt and pushed. */
@@ -249,8 +264,8 @@ function pause() {
 async function saveGame() {
   if (!G || !G.ready) return;
   const b = G.body, m = G.meta;
-  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], bed: G.bedPos,
-    player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot}});
+  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], bed: G.bedPos, weather: G.weather,
+    player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total}});
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   G.worker.postMessage({type: 'flush', id: Date.now()});
 }
@@ -280,23 +295,76 @@ function respawn() {
 }
 
 // ---------- the day ----------
-/** Light and colours at a time (ticks, 24000 a day; 0 is sunrise). */
+/** Light and colours at a time (ticks, 24000 a day; 0 is sunrise). Rain and thunder darken the sky and the light. */
 function environment(time) {
   const f = (time % 24000) / 24000, a = f * Math.PI * 2, el = Math.sin(a);
-  const day = Math.max(0, Math.min(1, el * 2.2 + 0.45));
+  const w = G?.weather, rain = w?.rain || 0, thunder = w?.thunder || 0, flash = G?.flash > 0 ? 1 : 0;
+  // the game's: the light from the sky goes down to 11/16 in rain and again in a thunderstorm
+  const day = Math.max(0, Math.min(1, el * 2.2 + 0.45)) * (1 - rain * 5 / 16) * (1 - thunder * 5 / 16);
   const lerp = (x, y, t) => x.map((v, i) => v + (y[i] - v) * t);
-  const glowAmt = Math.max(0, 1 - Math.abs(el) * 3.2) * (Math.cos(a) > 0 ? 0.9 : 1);
+  const grey = (c, k) => { const l = (c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11) * 0.6; return c.map(v => v * (1 - k) + l * k); };
+  const glowAmt = Math.max(0, 1 - Math.abs(el) * 3.2) * (Math.cos(a) > 0 ? 0.9 : 1) * (1 - rain);
   let top = lerp([0.01, 0.015, 0.05], [0.47, 0.65, 1.0], day), horizon = lerp([0.03, 0.04, 0.09], [0.73, 0.83, 1.0], day);
   horizon = lerp(horizon, [0.95, 0.55, 0.3], glowAmt * 0.55);
   const b = G ? BIOMES[G.mirror.biome(Math.floor(G.body.x), Math.floor(G.body.z))] : null;
   if (b?.dry) { top = lerp(top, [0.5, 0.68, 0.95], 0.3 * day); }
   if (b?.cold) { top = lerp(top, [0.55, 0.68, 0.92], 0.25 * day); }
+  if (rain) { top = grey(top, rain * 0.75); horizon = grey(horizon, rain * 0.75); }
+  if (thunder) { top = grey(top, thunder * 0.5).map(v => v * (1 - thunder * 0.3)); horizon = grey(horizon, thunder * 0.5).map(v => v * (1 - thunder * 0.3)); }
+  // a lightning flash lights everything for a moment
+  if (flash) { top = lerp(top, [0.85, 0.87, 0.95], 0.75); horizon = lerp(horizon, [0.85, 0.87, 0.95], 0.75); }
+  const dayLit = flash ? 1 : day;
   return {
-    daylight: day, skyTop: top, horizon, fog: horizon, glow: [1, 0.48, 0.18], glowAmt, sunAngle: a, sunDir: [Math.cos(a), el, 0], stars: Math.max(0, 1 - day * 1.6),
-    skyLight: lerp([0.62, 0.68, 0.95], [1, 1, 1], day).map((v, i) => v * (1 - glowAmt * 0.15 * (i === 2 ? 1 : 0))),
-    cloudColor: lerp([0.08, 0.09, 0.13], [1, 1, 1], day), moonPhase: Math.floor(time / 24000) % 8, cloudShift: time * 0.03,
+    daylight: dayLit, skyTop: top, horizon, fog: horizon, glow: [1, 0.48, 0.18], glowAmt, sunAngle: a, sunDir: [Math.cos(a), el, 0], stars: Math.max(0, 1 - day * 1.6) * (1 - rain),
+    skyLight: lerp([0.62, 0.68, 0.95], [1, 1, 1], dayLit).map((v, i) => v * (1 - glowAmt * 0.15 * (i === 2 ? 1 : 0))),
+    cloudColor: lerp([0.08, 0.09, 0.13], [1, 1, 1], day).map(v => v * (1 - rain * 0.45)), moonPhase: Math.floor(time / 24000) % 8, cloudShift: time * 0.03, sunMoon: 1 - rain,
     gamma: settings.gamma, wave: settings.wave, clouds: settings.clouds, time: performance.now() / 1000, flicker: 0.92 + Math.sin(performance.now() / 90) * 0.03 + Math.sin(performance.now() / 37) * 0.02,
   };
+}
+
+// ---------- weather ----------
+/** What falls on a column now: 'rain', 'snow' (cold places) or null (dry places, or no rain). */
+function fallsAt(x, z) {
+  if (!G || G.weather.rain < 0.2) return null;
+  const b = BIOMES[G.mirror.biome(x, z)];
+  return b?.dry ? null : b?.cold ? 'snow' : 'rain';
+}
+/** The highest block that stops rain on a column (cached for a second), +1. */
+function topAt(x, z) {
+  const k = `${x},${z}`, c = G.tops.get(k);
+  if (c && G.time - c[1] < 20) return c[0];
+  let y = Math.min(MINY + HEIGHT - 1, Math.floor(G.body.y) + 40);
+  while (y > MINY && !G.mirror.get(x, y, z)) y--;
+  G.tops.set(k, [y + 1, G.time]);
+  return y + 1;
+}
+/** The game's cycle: clear for half a day to a week, rain for half a day to a day; thunder on its own clock, only while it rains. */
+function weatherTick() {
+  const w = G.weather, rnd = n => Math.floor(Math.random() * n);
+  if (--w.thunderT <= 0) { w.thundering = !w.thundering; w.thunderT = w.thundering ? 3600 + rnd(12000) : 12000 + rnd(168000); }
+  if (--w.rainT <= 0) { w.raining = !w.raining; w.rainT = w.raining ? 12000 + rnd(12000) : 12000 + rnd(168000); }
+  const toward = (v, t) => v < t ? Math.min(t, v + 0.01) : Math.max(t, v - 0.01);
+  w.rain = toward(w.rain, w.raining ? 1 : 0); w.thunder = toward(w.thunder, w.raining && w.thundering ? 1 : 0);
+  if (G.tops.size > 4000) G.tops.clear();
+  if (G.flash > 0) G.flash--;
+  for (let i = G.bolts.length - 1; i >= 0; i--) if (--G.bolts[i].life <= 0) G.bolts.splice(i, 1);
+  // lightning now and then in a thunderstorm, somewhere it rains within 48 blocks
+  if (w.thunder > 0.9 && Math.random() < 1 / 300) {
+    const x = Math.floor(G.body.x + (Math.random() - 0.5) * 96), z = Math.floor(G.body.z + (Math.random() - 0.5) * 96);
+    if (G.mirror.has(x, z) && fallsAt(x, z) === 'rain') strike(x + 0.5, topAt(x, z), z + 0.5);
+  }
+  // the hiss of rain, quieter under a roof
+  const b = G.body, open = G.mirror.light(Math.floor(b.x), Math.floor(b.y + b.eye), Math.floor(b.z))[0] >= 14;
+  setRain(fallsAt(Math.floor(b.x), Math.floor(b.z)) === 'rain' ? w.rain * (open ? 1 : 0.3) : 0);
+}
+/** A lightning strike: a bolt, a flash, thunder; what is within three blocks is hit. */
+function strike(x, y, z) {
+  G.bolts.push({x, y, z, life: 8, seed: 1 + Math.floor(Math.random() * 1e6)});
+  G.flash = 3;
+  const b = G.body, d = Math.hypot(b.x - x, b.z - z);
+  play('thunder', 0, Math.max(0.35, 1 - d / 96));
+  if (d < 3 && Math.abs(b.y - y) < 4) hurt(5, '被闪电击中了');
+  for (const m of G.mobs.list) if (!m.dead && Math.hypot(m.x - x, m.z - z) < 3 && Math.abs(m.y - y) < 4) { G.mobs.hurt(m, 5, null, 'lightning'); m.fire = 160; }
 }
 
 // ---------- held item, hotbar ----------
@@ -321,7 +389,10 @@ function breakBlock(t) {
   setBlock(x, y, z, survival && b.name === 'ice' && below && collisionBoxes(below) ? ID.water : 0);
   // shears take leaves whole
   if (survival && heldTool()?.kind === 'shears' && b.name.endsWith('_leaves')) G.ents.drop({id: b.name, n: 1}, x + 0.5, y + 0.4, z + 0.5);
-  else if (survival && harvests(b, heldTool())) for (const [id, n] of dropsOf(b, v >>> 12)) G.ents.drop({id, n}, x + 0.5, y + 0.4, z + 0.5);  // a door or a bed goes whole
+  else if (survival && harvests(b, heldTool())) {
+    for (const [id, n] of dropsOf(b, v >>> 12)) G.ents.drop({id, n}, x + 0.5, y + 0.4, z + 0.5);  // a door or a bed goes whole
+    if (b.xp) G.ents.xp(b.xp[0] + Math.floor(Math.random() * (b.xp[1] - b.xp[0] + 1)), x + 0.5, y + 0.5, z + 0.5);
+  }
   if (b.shape === 'door' || b.shape === 'bed') { const [ox, oy, oz] = partnerOf(x, y, z, v); if ((G.mirror.get(ox, oy, oz) & 0xFFF) === b.id) setBlock(ox, oy, oz, 0); }
   // what was inside goes out
   const k = `${x},${y},${z}`, tile = G.tiles[k];
@@ -405,6 +476,8 @@ function use(t, mob = null) {
   if (t && b.use === 'toggle' && !G.body.sneaking) { toggle(t); return; }
   if (t && b.use === 'bed' && !G.body.sneaking) { sleepIn(t); return; }
   if (t && b.use && !G.body.sneaking) { openBlock(b.use, t); return; }
+  // armour in the hand is put on
+  if (info?.armor) { wearHeld(); return; }
   // seeds, carrots, potatoes on farmland are planted (before being eaten)
   if (t && info?.plant && (t.v & 0xFFF) === ID.farmland && t.face === 2) { if (placeFrom(t, s)) useUp(); return; }
   // bone meal, a lighter on TNT
@@ -453,9 +526,9 @@ function partnerOf(x, y, z, v) {
 }
 /** A bed: the place to wake up from now on; at night (and no monster near) sleep till morning. */
 function sleepIn(t) {
-  const day = ((G.time % 24000) + 24000) % 24000, night = day >= 12542 && day <= 23459;
+  const day = ((G.time % 24000) + 24000) % 24000, night = (day >= 12542 && day <= 23459) || G.weather.thunder > 0.9;
   if (!G.bedPos || G.bedPos.x !== t.x || G.bedPos.y !== t.y || G.bedPos.z !== t.z) { G.bedPos = {x: t.x, y: t.y, z: t.z}; toast('已设置重生点'); }
-  if (!night) { toast('你只能在夜里睡觉'); return; }
+  if (!night) { toast('你只能在夜里或雷雨天睡觉'); return; }
   if (G.mobs.list.some(m => m.def.hostile && !m.dead && Math.hypot(m.x - t.x - 0.5, m.y - t.y, m.z - t.z - 0.5) < 8)) { toast('现在不能休息，周围有怪物在游荡'); return; }
   const b = G.body;
   Object.assign(b, {x: t.x + 0.5, y: t.y + 0.5625, z: t.z + 0.5, vx: 0, vy: 0, vz: 0});
@@ -490,15 +563,43 @@ function aimDir(point = null) {
 }
 
 // ---------- survival ----------
-function hurt(n, why, from = null) {
+/** pierce: what armour does not stop (falling, drowning, hunger, the void). */
+function hurt(n, why, from = null, pierce = false) {
   if (G.mode === 'creative' || G.dead || n <= 0) return;
   // a moment after a hit nothing hurts again (a stronger hit only adds what it has more)
   if (G.invuln > 0) { if (n <= G.lastDmg) return; const extra = n - G.lastDmg; G.lastDmg = n; n = extra; }
   else { G.invuln = 10; G.lastDmg = n; }
+  if (!pierce) {
+    const {points, tough} = G.inv.armor();
+    if (points) { wearArmor(n); n = throughArmor(n, points, tough); }
+  }
   G.health = Math.max(0, G.health - n); G.hurtT = 10; G.exh += 0.1;
   if (from) { const b = G.body, a = Math.atan2(b.x - from.x, b.z - from.z); b.vx += Math.sin(a) * 0.4; b.vz += Math.cos(a) * 0.4; if (b.onGround) b.vy = 0.36; }
   play('hurt'); drawHud(true);
   if (G.health <= 0) die(why);
+}
+/** Each worn piece takes a quarter of the hit (at least 1) off its uses, and breaks when they run out. */
+function wearArmor(dmg) {
+  for (let i = 0; i < 4; i++) {
+    const s = G.inv.worn(i), a = s && itemInfo(s.id)?.armor;
+    if (!a) continue;
+    s.dmg = (s.dmg || 0) + Math.max(1, Math.floor(dmg / 4));
+    if (s.dmg >= a.uses) { G.inv.slots[ARMOR_AT + i] = null; play('break', ID.glass); toast(`${zhOf(s.id)}坏了`); }
+  }
+}
+/** Puts on what is held (in its slot; what was worn there comes into the hand). */
+function wearHeld() {
+  if (!G.inv.wear(G.hot)) return false;
+  play('equip'); drawHud(true);
+  return true;
+}
+/** Experience gained: the bar fills, levels go up (the game's amounts per level), a chime every five levels. */
+function gainXp(n) {
+  const was = G.xp.level;
+  G.xp = addXp(G.xp, n);
+  play('orb');
+  if (G.xp.level > was && G.xp.level % 5 === 0) play('levelup');
+  drawHud(true);
 }
 /** The player hits a mob: the held thing's damage, more when falling (a critical hit), the knock away. */
 function attackMob(m) {
@@ -520,25 +621,28 @@ function die(why) {
   G.dead = true; G.body.dead = true; paused = true; input.enabled = false; input.unlock(); invUI.hide();
   const b = G.body;
   for (let i = 0; i < G.inv.slots.length; i++) if (G.inv.slots[i]) { G.ents.drop(G.inv.slots[i], b.x, b.y + 1, b.z); G.inv.slots[i] = null; }
+  // experience: seven points a level fall out (at most a hundred), the rest is lost
+  G.ents.xp(Math.min(100, G.xp.level * 7), b.x, b.y + 1, b.z);
+  G.xp = {level: 0, prog: 0, total: 0};
   drawHud(true);
   screens.dead(why);
 }
 function survivalTick(r) {
   const b = G.body;
   if (G.mode === 'creative') { G.health = 20; G.food = 20; G.air = 300; return; }
-  if (r.landed > 3 && !b.inWater) hurt(Math.ceil(r.landed - 3), '摔得太重了');
+  if (r.landed > 3 && !b.inWater) hurt(Math.ceil(r.landed - 3), '摔得太重了', null, true);
   if (r.landed > 2) play('fall', 0, Math.min(1, r.landed / 8));
   // air
-  if (b.headInWater) { G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了'); } } else G.air = Math.min(300, G.air + 4);
+  if (b.headInWater) { G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了', null, true); } } else G.air = Math.min(300, G.air + 4);
   if ((b.inLava) && G.time % 10 === 0) hurt(4, '掉进了岩浆');
   if (b.touchCactus && G.time % 10 === 0) hurt(1, '被仙人掌扎死了');
-  if (b.y < MINY - 64 && G.time % 10 === 0) hurt(4, '掉出了世界');
+  if (b.y < MINY - 64 && G.time % 10 === 0) hurt(4, '掉出了世界', null, true);
   // hunger
   if (b.sprinting) G.exh += 0.1 * Math.hypot(b.x - b.prev.x, b.z - b.prev.z);
   if (r.jumped) G.exh += b.sprinting ? 0.2 : 0.05;
   if (G.exh >= 4) { G.exh -= 4; if (G.sat > 0) G.sat = Math.max(0, G.sat - 1); else { G.food = Math.max(0, G.food - 1); drawHud(true); } }
   if (G.food >= 18 && G.health < 20) { if (++G.regen >= (G.food >= 20 && G.sat > 0 ? 10 : 80)) { G.regen = 0; G.health = Math.min(20, G.health + 1); G.exh += 6; drawHud(true); } } else G.regen = 0;
-  if (G.food <= 0) { if (++G.starve >= 80) { G.starve = 0; if (G.health > 1) hurt(1, '饿死了'); } } else G.starve = 0;
+  if (G.food <= 0) { if (++G.starve >= 80) { G.starve = 0; if (G.health > 1) hurt(1, '饿死了', null, true); } } else G.starve = 0;
   if (G.food <= 6) b.sprinting = false;
 }
 function eatTick() {
@@ -559,7 +663,12 @@ function tick() {
   const b = G.body;
   G.time++;
   // asleep: the screen goes dark; after five seconds it is morning
-  if (G.sleeping && ++G.sleeping >= 100) { G.time = Math.ceil(G.time / 24000) * 24000; G.sleeping = 0; toast('天亮了'); }
+  if (G.sleeping && ++G.sleeping >= 100) {
+    G.time = Math.ceil(G.time / 24000) * 24000; G.sleeping = 0; toast('天亮了');
+    // waking up, the rain has stopped
+    const w = G.weather;
+    if (w.raining || w.thundering) Object.assign(w, {raining: false, thundering: false, rain: 0, thunder: 0, rainT: 12000 + Math.floor(Math.random() * 168000), thunderT: 12000 + Math.floor(Math.random() * 168000)});
+  }
   const r = b.tick(G.sleeping ? {} : {...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false});
   if (G.mode !== 'creative' && b.flying) b.flying = false;
   input.setFlying(b.flying);
@@ -607,9 +716,15 @@ function tick() {
   if (ctl.use && !G.useWait && input.mode !== 'touch') { const s = held(); if (s && itemInfo(s.id)?.block?.item && G.target) { use(G.target); G.useWait = 4; } }
   if (G.swing > 0) G.swing--;
   if (G.hurtT > 0) G.hurtT--;
-  // mobs, items, furnaces
+  // mobs, items, experience, furnaces, the weather
   G.mobs.tick();
   G.ents.tick(b, stack => { if (G.dead) return stack; const left = G.inv.add(stack); drawHud(true); return left; });
+  G.ents.orbTick(b, v => gainXp(v));
+  weatherTick();
+  // the body turns after the head when it has turned far, or when walking
+  const turnBy = ((b.yaw - G.bodyYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  if (moved > 0.01) G.bodyYaw += turnBy * 0.5; else if (Math.abs(turnBy) > 0.85) G.bodyYaw += turnBy - Math.sign(turnBy) * 0.85;
+  G.limbAmt = (G.limbAmt || 0) + (Math.min(1, moved * 4) - (G.limbAmt || 0)) * 0.4;
   for (const [k, tile] of Object.entries(G.tiles)) if (tile.kind === 'furnace') {
     const was = tile.burn > 0, lit = furnaceTick(tile);
     if (was !== lit) { const [x, y, z] = k.split(',').map(Number), v = G.mirror.get(x, y, z); if ((v & 0xFFF) === ID.furnace) setBlock(x, y, z, withMeta(ID.furnace, (v >>> 12 & 3) | (lit ? 4 : 0))); }
@@ -618,7 +733,7 @@ function tick() {
   // the worker: where we are, how dark the sky is
   const cx = Math.floor(b.x / 16), cz = Math.floor(b.z / 16);
   if (cx !== G.cx || cz !== G.cz) { G.cx = cx; G.cz = cz; G.worker.postMessage({type: 'center', cx, cz}); }
-  if (G.time % 100 === 0) G.worker.postMessage({type: 'day', dark: Math.round((1 - environment(G.time).daylight) * 11)});
+  if (G.time % 100 === 0) G.worker.postMessage({type: 'day', dark: Math.round((1 - environment(G.time).daylight) * 11), snow: G.weather.rain > 0.5});
   if (performance.now() - G.saveAt > 30000) { G.saveAt = performance.now(); saveGame(); }
 }
 
@@ -639,6 +754,7 @@ function handleEvents(events, c = ctl) {
     else if (e === 'fly') { if (G.mode === 'creative') { G.body.flying = !G.body.flying; G.body.vy = 0; } }
     else if (e === 'debug') { debugOn = !debugOn; $('.debug').hidden = !debugOn; }
     else if (e === 'hud') { hudHidden = !hudHidden; hud.style.opacity = hudHidden ? 0 : 1; }
+    else if (e === 'view') { G.view = (G.view + 1) % 3; toast(['第一人称', '第三人称（背后）', '第三人称（正面）'][G.view]); }
     else if (e === 'use') { const t = targetAt(c.aim), m = mobAt(c.aim); if (m && (!t || m.t < t.t)) use(null, m.mob); else use(t); G.useWait = 5; }
     else if (e === 'pick' && G.target) {
       const id = BLOCKS[G.target.v & 0xFFF].name, name = BLOCKS[G.target.v & 0xFFF].item ? id : null;
@@ -651,29 +767,37 @@ function handleEvents(events, c = ctl) {
     }
   }
 }
+/** Where aiming starts: the eye; in third person a finger on the screen aims from the camera (as far again as it is away). */
+const aimFrom = point => point && G.view && G.cam ? [G.cam, G.camDist] : [eyePos(), 0];
 function targetAt(point) {
-  const eye = eyePos(), d = aimDir(point);
-  return raycast(G.mirror, eye[0], eye[1], eye[2], d[0], d[1], d[2], reach());
+  const [o, extra] = aimFrom(point), d = aimDir(point);
+  return raycast(G.mirror, o[0], o[1], o[2], d[0], d[1], d[2], reach() + extra);
 }
 /** The mob aimed at (within 3 blocks, the game's reach for hitting; 5 in creative): {mob, t} or null. */
 function mobAt(point) {
-  const eye = eyePos(), d = aimDir(point);
-  return G.mobs.raycast(eye[0], eye[1], eye[2], d[0], d[1], d[2], G.mode === 'creative' ? 5 : 3);
+  const [o, extra] = aimFrom(point), d = aimDir(point);
+  return G.mobs.raycast(o[0], o[1], o[2], d[0], d[1], d[2], (G.mode === 'creative' ? 5 : 3) + extra);
 }
 
 // ---------- the HUD ----------
 let hudKey = '';
 function drawHud(force = false) {
   if (!G) return;
-  const key = JSON.stringify([G.inv.slots.slice(0, 9), G.hot, G.health, G.food, Math.ceil(G.air / 30), G.mode, input?.mode]);
+  const armor = G.inv.armor().points;
+  const key = JSON.stringify([G.inv.slots.slice(0, 9), G.hot, Math.ceil(G.health), G.food, Math.ceil(G.air / 30), G.mode, input?.mode, armor, G.xp.level, Math.round(G.xp.prog * 182)]);
   if (!force && key === hudKey) return;
   hudKey = key;
   const hb = $('.hotbar');
   hb.innerHTML = G.inv.slots.slice(0, 9).map((s, i) => `<div class="s${i === G.hot ? ' on' : ''}" data-i="${i}">${stackHtml(s, icons)}</div>`).join('') + (input?.mode === 'touch' ? '<div class="more" data-inv>⋯</div>' : '');
   const survival = G.mode !== 'creative';
   const row = (n, full, halfK, empty, count = 10) => Array.from({length: count}, (_, i) => `<img class="px" style="width:calc(9*var(--u));height:calc(9*var(--u))" src="${HUD_URL[n >= (i + 1) * 2 ? full : n >= i * 2 + 1 ? halfK : empty]}">`).join('');
-  $('.hearts').innerHTML = survival ? row(G.health, 'heartFull', 'heartHalf', 'heartEmpty') : '';
+  $('.hearts').innerHTML = survival ? row(Math.ceil(G.health), 'heartFull', 'heartHalf', 'heartEmpty') : '';
   $('.food').innerHTML = survival ? row(G.food, 'foodFull', 'foodHalf', 'foodEmpty') : '';
+  // armour over the hearts (only when some is worn), the experience bar and level over the hotbar
+  $('.bars .armor').innerHTML = survival && armor ? row(armor, 'armorFull', 'armorHalf', 'armorEmpty') : '';
+  $('.xp').hidden = !survival;
+  $('.xp i').style.width = `${(G.xp.prog * 100).toFixed(1)}%`;
+  $('.xp b').textContent = G.xp.level > 0 ? G.xp.level : '';
   const bubbles = Math.ceil(Math.max(0, G.air) / 30);
   $('.bars .air').innerHTML = survival && G.air < 300 ? Array.from({length: bubbles}, () => `<img class="px" style="width:calc(9*var(--u));height:calc(9*var(--u))" src="${HUD_URL.air}">`).join('') : '';
   const s = held(), name = $('.name');
@@ -731,6 +855,71 @@ function shotThings(light) {
   }
   return out;
 }
+/** The player as others would see them (third person): the body, and what armour is worn over it. */
+function playerModel(view, a, light) {
+  const b = G.body, x = b.prev.x + (b.x - b.prev.x) * a - view.x, y = b.prev.y + (b.y - b.prev.y) * a - view.y, z = b.prev.z + (b.z - b.prev.z) * a - view.z;
+  const turn = ((b.yaw - G.bodyYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  const rot = animate('player', {}, {limb: G.walked * 4, amount: G.limbAmt || 0, headYaw: -turn, headPitch: -b.pitch, age: G.time, attack: G.swing > 0 ? 1 - G.swing / 6 : 0});
+  const pose = {x, y, z, yaw: G.bodyYaw, s: 0.9375}, [sky, blk] = light(Math.floor(b.x), Math.floor(b.y + 1), Math.floor(b.z)), hurtFlash = G.hurtT > 0 ? 1 : 0;
+  const out = [{skin: 'player', verts: new Float32Array(buildModel('player', rot, pose, [], skinSizes.player)), light: [sky, blk], tint: [1, 1, 1], hurt: hurtFlash, white: 0}];
+  for (let i = 0; i < 4; i++) {
+    const am = itemInfo(G.inv.worn(i)?.id)?.armor;
+    if (!am) continue;
+    const [model, parts] = ARMOR_PARTS[i], skin = `armor_${am.mat}${model === 'armor_inner' ? '_legs' : ''}`;
+    out.push({skin, verts: new Float32Array(buildModel(model, rot, pose, [], skinSizes[skin], parts)), light: [sky, blk], tint: greyArmor[skin] ? [0.63, 0.4, 0.25] : [1, 1, 1], hurt: hurtFlash, white: 0});
+  }
+  return out;
+}
+const colHash = (x, z) => (((x * 73856093) ^ (z * 19349663)) >>> 0) % 1000 / 1000;
+/** Rain or snow round the camera: a strip on each column where it falls, from the rain-stopping block (or ten below)
+ *  to twelve above, turned to the camera, its picture running down (snow slowly, drifting). */
+let weatherV = null;
+function weatherVerts(view) {
+  const w = G.weather;
+  if (w.rain < 0.05) return null;
+  const v = (weatherV ||= new Verts(4096)).reset(), R = 9, cx = Math.floor(view.x), cy = Math.floor(view.y), cz = Math.floor(view.z), t = performance.now() / 1000;
+  for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+    if (dx * dx + dz * dz > R * R || (!dx && !dz)) continue;
+    const x = cx + dx, z = cz + dz, kind = fallsAt(x, z);
+    if (!kind || colHash(x, z) > w.rain * (kind === 'snow' ? 0.6 : 1)) continue;
+    const y0 = Math.max(topAt(x, z), cy - 10), y1 = cy + 12;
+    if (y1 <= y0) continue;
+    const snow = kind === 'snow', ox = x + 0.5 - view.x, oz = z + 0.5 - view.z, d = Math.hypot(ox, oz) || 1, sx = -oz / d * 0.5, sz = ox / d * 0.5;
+    const [sky, blk] = G.mirror.light(x, Math.min(MINY + HEIGHT - 1, Math.max(y0, cy)), z);
+    // one picture per two blocks; it moves down as time goes (the texture coordinate at the top falls)
+    const fall = (t * (snow ? 0.6 : 7) + colHash(z, x)) % 1, top = Math.round((1 - fall) * 16), bottom = top + (y1 - y0) * 8;
+    const drift = snow ? Math.sin(t * 0.7 + x * 0.9 + z * 0.6) * 0.3 : 0, layer = snow ? LAYER.weather_snow : LAYER.weather_rain, oy0 = y0 - view.y, oy1 = y1 - view.y;
+    v.v(ox - sx, oy0, oz - sz, 256, 128, layer, 0, bottom, sky * 17, blk * 17, 2 << 2);
+    v.v(ox + sx, oy0, oz + sz, 256, 128, layer, 16, bottom, sky * 17, blk * 17, 2 << 2);
+    v.v(ox + sx + drift, oy1, oz + sz, 256, 128, layer, 16, top, sky * 17, blk * 17, 2 << 2);
+    v.v(ox - sx + drift, oy1, oz - sz, 256, 128, layer, 0, top, sky * 17, blk * 17, 2 << 2);
+  }
+  return v;
+}
+/** Lightning: a crooked white line from high up to where it struck, flickering. */
+let boltV = null;
+function boltVerts(view) {
+  if (!G.bolts.length) return null;
+  const v = (boltV ||= new Verts(512)).reset();
+  for (const bolt of G.bolts) {
+    if (bolt.life % 3 === 1) continue;
+    let s = bolt.seed;
+    const r = () => (s = (s * 16807) % 2147483647) / 2147483647;
+    let px = bolt.x, py = Math.min(bolt.y + 80, view.y + 110), pz = bolt.z;
+    while (py > bolt.y) {
+      // crooked, but pulled back over where it strikes
+      const ny = Math.max(bolt.y, py - 3 - r() * 5), last = ny <= bolt.y, nx = last ? bolt.x : px + (r() - 0.5) * 2.4 + (bolt.x - px) * 0.35, nz = last ? bolt.z : pz + (r() - 0.5) * 2.4 + (bolt.z - pz) * 0.35;
+      // a band along the segment, its width across the view
+      const a = [px - view.x, py - view.y, pz - view.z], c = [nx - view.x, ny - view.y, nz - view.z], seg = [c[0] - a[0], c[1] - a[1], c[2] - a[2]], mid = [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2, (a[2] + c[2]) / 2];
+      let side = [seg[1] * mid[2] - seg[2] * mid[1], seg[2] * mid[0] - seg[0] * mid[2], seg[0] * mid[1] - seg[1] * mid[0]];
+      const l = Math.hypot(...side) || 1; side = side.map(q => q / l * 0.22);
+      // both ways round (faces turned away are not drawn)
+      for (const [p, k] of [[a, -1], [a, 1], [c, 1], [c, -1], [c, -1], [c, 1], [a, 1], [a, -1]]) v.v(p[0] + side[0] * k, p[1] + side[1] * k, p[2] + side[2] * k, 256, 128, LAYER.lightning_bolt, 8, 8, 255, 255, 2 << 2);
+      px = nx; py = ny; pz = nz;
+    }
+  }
+  return v;
+}
 // ---------- the frame ----------
 function frame(now) {
   requestAnimationFrame(frame);
@@ -753,11 +942,26 @@ function frame(now) {
   } else ctl = {...ctl, attack: false, use: false, fwd: 0, side: 0, jump: false};
   // the camera between the last two ticks
   const a = paused ? 1 : acc / TICK, x = b.prev.x + (b.x - b.prev.x) * a, y = b.prev.y + (b.y - b.prev.y) * a, z = b.prev.z + (b.z - b.prev.z) * a;
-  const bobT = G.walked * 2.2, bobbing = settings.bob && b.onGround && !b.flying ? 1 : 0;
+  const bobT = G.walked * 2.2, bobbing = settings.bob && b.onGround && !b.flying && !G.view ? 1 : 0;
   // shaking after an explosion; a drawn bow zooms in
   const shake = G.shake > 0 ? (G.shake -= dt * 20, G.shake * 0.004) : 0, zoom = 1 - Math.min(1, G.draw / 20) * 0.15;
   const view = {x, y: y + b.eye + Math.abs(Math.sin(bobT)) * 0.04 * bobbing, z, yaw: b.yaw + (Math.random() - 0.5) * shake, pitch: b.pitch + Math.abs(Math.cos(bobT)) * 0.006 * bobbing + (Math.random() - 0.5) * shake,
     fov: (settings.fov + (b.sprinting ? 8 : 0) + (b.flying && b.sprinting ? 4 : 0)) * zoom * Math.PI / 180, far: settings.dist * 16, alpha: a};
+  // third person: the camera four blocks behind (or in front, looking back), nearer where a wall is in the way
+  G.camDist = 0;
+  if (G.view && !G.dead) {
+    // eight rays from round the eye (as the game does), so the camera does not slip into a block past a corner
+    const d = b.look().map(q => G.view === 1 ? -q : q);
+    let dist = 4;
+    for (let k = 0; k < 8; k++) {
+      const ox = (k & 1 ? 0.1 : -0.1), oy = (k & 2 ? 0.1 : -0.1), oz = (k & 4 ? 0.1 : -0.1), hit = raycast(G.mirror, view.x + ox, view.y + oy, view.z + oz, d[0], d[1], d[2], 4.3, false, true);
+      if (hit) dist = Math.min(dist, hit.t - 0.35);
+    }
+    G.camDist = Math.max(0.2, dist);
+    view.x += d[0] * G.camDist; view.y += d[1] * G.camDist; view.z += d[2] * G.camDist;
+    if (G.view === 2) { view.yaw += Math.PI; view.pitch = -view.pitch; }
+  }
+  G.cam = [view.x, view.y, view.z];
   // aimed block (at the finger on touch screens), or a mob in front of it
   G.target = paused || G.dead ? null : targetAt(c.aim);
   const mt = paused || G.dead ? null : mobAt(c.aim);
@@ -776,9 +980,13 @@ function frame(now) {
   for (const an of animFrames) { const f = Math.floor(tick20 / an.time) % an.frames.length; if (f !== an.at) { an.at = f; renderer.updateLayer(an.layer, an.frames[f]); } }
   const lightAt = (bx, by, bz) => G.mirror.light(bx, by, bz);
   const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
+  if (G.view && !G.dead) extras.mobs.push(...playerModel(view, a, lightAt));
+  extras.weather = weatherVerts(view);
+  const bolt = boltVerts(view);
+  if (bolt?.n) extras.things.push({verts: bolt, x: view.x, y: view.y, z: view.z, model: mat.identity(), center: 128, bright: 1});
   if (G.target && !hudHidden) extras.outline = {boxes: G.target.boxes};
   if (G.breaking && G.breaking.p > 0) extras.crack = {x: G.breaking.x, y: G.breaking.y, z: G.breaking.z, layer: LAYER[`destroy_stage_${Math.min(9, Math.floor(G.breaking.p * 10))}`]};
-  if (!hudHidden && !G.dead) extras.hand = handModel(view);
+  if (!hudHidden && !G.dead && !G.view) extras.hand = handModel(view);
   renderer.draw(view, env, extras);
   drawHud();
   if (debugOn && now - (G.debugAt || 0) > 250) {
@@ -786,7 +994,7 @@ function frame(now) {
     // facingBack() is where a placed block's front looks: the player looks the other way
     const bx = Math.floor(b.x), by = Math.floor(b.y), bz = Math.floor(b.z), [sk, bl] = G.mirror.light(bx, by, bz), dir = ['北', '东', '南', '西'][facingBack()];
     const day = Math.floor(G.time / 24000) + 1, hour = Math.floor(((G.time % 24000) / 1000 + 6) % 24);
-    $('.debug').textContent = `方块世界  ${Math.round(1 / Math.max(dt, 0.001))} fps\nXYZ: ${b.x.toFixed(2)} / ${b.y.toFixed(2)} / ${b.z.toFixed(2)}\n方块: ${bx} ${by} ${bz}  区块: ${G.cx} ${G.cz}\n朝向: ${dir}  (${(b.yaw * 180 / Math.PI % 360).toFixed(1)} / ${(b.pitch * 180 / Math.PI).toFixed(1)})\n生物群系: ${BIOMES[G.mirror.biome(bx, bz)]?.zh}\n光照: 天空 ${sk}  方块 ${bl}\n第 ${day} 天 ${hour}:00\n区段: ${renderer.stats.drawn}/${renderer.stats.sections}  三角形: ${renderer.stats.tris}\n生物: ${G.mobs.count(m => m.def.passive)} 动物 / ${G.mobs.count(m => m.def.hostile)} 怪物\n种子: ${G.meta.seedText || G.meta.seed}${G.targetMob ? `\n看着: ${G.targetMob.def.zh}（${Math.ceil(G.targetMob.health)}/${G.targetMob.def.health}）` : ''}${G.target ? `\n看着: ${BLOCKS[G.target.v & 0xFFF].zh} (${G.target.x}, ${G.target.y}, ${G.target.z})` : ''}`;
+    $('.debug').textContent = `方块世界  ${Math.round(1 / Math.max(dt, 0.001))} fps\nXYZ: ${b.x.toFixed(2)} / ${b.y.toFixed(2)} / ${b.z.toFixed(2)}\n方块: ${bx} ${by} ${bz}  区块: ${G.cx} ${G.cz}\n朝向: ${dir}  (${(b.yaw * 180 / Math.PI % 360).toFixed(1)} / ${(b.pitch * 180 / Math.PI).toFixed(1)})\n生物群系: ${BIOMES[G.mirror.biome(bx, bz)]?.zh}\n光照: 天空 ${sk}  方块 ${bl}\n第 ${day} 天 ${hour}:00\n区段: ${renderer.stats.drawn}/${renderer.stats.sections}  三角形: ${renderer.stats.tris}\n生物: ${G.mobs.count(m => m.def.passive)} 动物 / ${G.mobs.count(m => m.def.hostile)} 怪物\n天气: ${G.weather.thunder > 0.5 ? '雷雨' : G.weather.rain > 0.5 ? (fallsAt(bx, bz) === 'snow' ? '下雪' : '下雨') : '晴'}（${Math.round(G.weather.rain * 100)}%，${Math.round(G.weather.rainT / 20)} 秒后${G.weather.raining ? '停' : '下'}）  护甲: ${G.inv.armor().points}  等级: ${G.xp.level}\n种子: ${G.meta.seedText || G.meta.seed}${G.targetMob ? `\n看着: ${G.targetMob.def.zh}（${Math.ceil(G.targetMob.health)}/${G.targetMob.def.health}）` : ''}${G.target ? `\n看着: ${BLOCKS[G.target.v & 0xFFF].zh} (${G.target.x}, ${G.target.y}, ${G.target.z})` : ''}`;
   }
 }
 // pads in menus and inventories
@@ -813,7 +1021,9 @@ async function boot() {
   input = new Input(app, canvas, {rotated: () => rotated, sensitivity: () => settings.sens, onMode: m => { document.body.classList.toggle('touchmode', m === 'touch'); drawHud(true); screens?.markFocus(); }});
   if (isTouch) document.body.classList.add('touchmode'), input.mode = 'touch';
   screens = new Screens($('#screens'), api());
-  invUI = new InventoryUI(invRoot, {get inv() { return G.inv; }, get icons() { return icons; }, drop: s => { const b = G.body; G.ents.drop(s, b.x, b.y + 1.2, b.z, {dir: b.look(), delay: 40}); }, sound: n => play(n), closed: () => closedInventory(), toApp: (x, y) => input.toApp(x, y), rotated: () => rotated, crafted: () => play('place', ID.crafting_table)});
+  invUI = new InventoryUI(invRoot, {get inv() { return G.inv; }, get icons() { return icons; }, drop: s => { const b = G.body; G.ents.drop(s, b.x, b.y + 1.2, b.z, {dir: b.look(), delay: 40}); }, sound: n => play(n), closed: () => closedInventory(), toApp: (x, y) => input.toApp(x, y), rotated: () => rotated, crafted: () => play('place', ID.crafting_table),
+    // what was smelted gives its experience when taken out
+    took: f => { const n = takeSmeltXp(f); if (n) { const b = G.body; G.ents.xp(n, b.x, b.y + 1, b.z); } }, worn: () => play('equip')});
   // tapping the hotbar picks a slot; ⋯ opens the inventory
   $('.hotbar').addEventListener('pointerdown', e => { if (!G || paused) return; const s = e.target.closest('[data-i]'); if (s) { G.hot = Number(s.dataset.i); drawHud(true); } if (e.target.closest('[data-inv]')) openInventory(); e.stopPropagation(); });
   $('.pausebtn').addEventListener('click', () => pause());

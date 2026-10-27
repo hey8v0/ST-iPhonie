@@ -673,6 +673,22 @@ const ITEM_ART = {
   player_arm: () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const sleeve = y < 6, c = sleeve ? hex(y === 5 ? '#9e3646' : '#c84a5a') : hex('#f2c9a9'); p.set(x, y, mul(c, 0.92 + hash(9, x, y) * 0.1 - (x % 4 === 3 ? 0.06 : 0))); } return p; },
 };
 for (const mat of Object.keys(MAT)) for (const kind of ['pickaxe', 'axe', 'shovel', 'hoe', 'sword']) ITEM_ART[`${mat}_${kind}`] = () => tool(kind, mat);
+// armour: a cap, a vest, trousers, a pair of boots, in the material's colours
+const ARMOR_COLORS = {leather: ['#a0623a', '#c28452', '#6e3f1f', '#2e1808'], iron: MAT.iron, golden: MAT.golden, diamond: MAT.diamond};
+const ARMOR_SHAPES = {
+  helmet: () => mask().poly([[2.5, 11], [2.5, 6.5], [4.5, 3], [11.5, 3], [13.5, 6.5], [13.5, 11], [11, 11], [11, 8], [5, 8], [5, 11]]),
+  chestplate: () => mask().poly([[1.5, 3], [6, 3], [8, 5], [10, 3], [14.5, 3], [13.5, 8.5], [12, 8.5], [12, 14], [4, 14], [4, 8.5], [2.5, 8.5]]),
+  leggings: () => mask().poly([[3, 2], [13, 2], [13, 14], [9.5, 14], [8.5, 6.5], [7.5, 6.5], [6.5, 14], [3, 14]]),
+  boots: () => mask().poly([[1.5, 6], [6, 6], [6, 10], [7, 11], [7, 13.5], [1.5, 13.5]]).poly([[10, 6], [14.5, 6], [14.5, 13.5], [9, 13.5], [9, 11], [10, 10]]),
+};
+for (const [mat, [color, light, dark, outline]] of Object.entries(ARMOR_COLORS)) for (const [piece, shape] of Object.entries(ARMOR_SHAPES))
+  ITEM_ART[`${mat}_${piece}`] = () => icon([{mask: shape(), color, light, dark, outline, grain: mat === 'leather'}], {sparkle: mat === 'diamond' || mat === 'golden' ? [[5, 5]] : null});
+// an experience orb: a round glow, yellow-green, brighter inside
+BLOCK_ART.xp_orb = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (d < 6.5) p.set(x, y, d < 2.5 ? [250, 255, 190] : d < 4.5 ? [190, 240, 60] : [110, 170, 20]); } return p; };
+// rain: a few thin streaks, see-through; snow: flakes here and there
+BLOCK_ART.weather_rain = () => { const p = pic(), r = rng(71); for (let k = 0; k < 3; k++) { const x = 2 + k * 5 + Math.floor(r() * 3), y0 = Math.floor(r() * 16), len = 3 + Math.floor(r() * 4); for (let i = 0; i < len; i++) p.set(x, (y0 + i) % S, [175, 195, 220], 105 + i * 8); } return p; };
+BLOCK_ART.weather_snow = () => { const p = pic(), r = rng(72); for (let k = 0; k < 7; k++) { const x = Math.floor(r() * 15), y = Math.floor(r() * 15); p.set(x, y, [255, 255, 255], 230); if (r() < 0.5) p.set(x + 1, y, [235, 240, 250], 200); } return p; };
+BLOCK_ART.lightning_bolt = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, [235, 240, 255]); return p; };
 
 /** Frames per animated texture and ticks per frame. */
 export const ANIMATED = {water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}};

@@ -92,7 +92,8 @@ export function makeIcons(built) {
       drawSide(side, true, 0.2, ov); drawSide(side2, false, 0.4, ov);
     } else {
       const tex = b ? (LAYER_ITEM.has(b.name) ? b.name : b.name === 'wheat' ? 'wheat_stage7' : b.tex?.all || b.tex?.side) : info.icon;
-      const img = face(tex, b ? tintColor(b.tint) : null);
+      // a pack's leather is grey (it is dyed in the game): its usual colour
+      const img = face(tex, b ? tintColor(b.tint) : built.from?.[tex] === 'pack' ? tintColor(info.tint) : null);
       g.drawImage(img, 0, 0, N, N);
     }
     out[name] = c.toDataURL();

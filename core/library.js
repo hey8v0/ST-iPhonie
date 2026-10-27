@@ -59,6 +59,9 @@ function publicRow(row,metadata=false){
  return result;
 }
 function bytes(row){const metadata={...row};delete metadata.blob;delete metadata._bytes;return encoder.encode(JSON.stringify(metadata)).byteLength+(row.blob?.size||0);}
+// The size worked out when the row was saved: adding up the whole library on every save no longer turns every note
+// and 绘本 into text again.
+const sizeOf=row=>Number.isFinite(row._bytes)?row._bytes:bytes(row);
 function friendly(error){
  if(error?.code&&typeof error.code==='string'&&!(error instanceof DOMException))return error;
  if(connectionLost(error))return lostError(error);
@@ -127,7 +130,7 @@ export class LocalLibrary {
      const put=(name,row)=>{const stored={...row,scope:this.#scope};stored._bytes=bytes(stored);rows[name].set(stored.id,stored);puts.push([name,stored]);};
      const remove=(name,id)=>{const existed=rows[name].delete(id);if(existed)deletes.push([name,id]);return existed;};
      result=change({rows,put,remove});
-     const total=STORES.reduce((sum,name)=>sum+[...rows[name].values()].reduce((n,row)=>n+bytes(row),0),0);
+     const total=STORES.reduce((sum,name)=>sum+[...rows[name].values()].reduce((n,row)=>n+sizeOf(row),0),0);
      if(total>limit)throw fail(`本地资料已达到 ${sizeText(limit)} 上限（这个浏览器给小手机的空间），请删除不需要的内容后再保存`,'LIBRARY_FULL');
      for(const [name,id] of deletes)tx.objectStore(name).delete([this.#scope,id]);
      for(const [name,row] of puts)tx.objectStore(name).put(row);
@@ -261,7 +264,7 @@ export class LocalLibrary {
   const limit=await this.#room();
   return this.#run(db=>new Promise((resolve,reject)=>{
    let tx;const result={bytes:0,limit,notes:0,photos:0,favorites:0,references:0,vibes:0,books:0,sizes:{}};
-   try{tx=db.transaction(STORES,'readonly');for(const name of STORES){const req=tx.objectStore(name).index('scope').getAll(this.#scope);req.onsuccess=()=>{if(name!=='phone')result[name]=req.result.length;const size=req.result.reduce((n,row)=>n+bytes(row),0);result.sizes[name]=size;result.bytes+=size;};}}
+   try{tx=db.transaction(STORES,'readonly');for(const name of STORES){const req=tx.objectStore(name).index('scope').getAll(this.#scope);req.onsuccess=()=>{if(name!=='phone')result[name]=req.result.length;const size=req.result.reduce((n,row)=>n+sizeOf(row),0);result.sizes[name]=size;result.bytes+=size;};}}
    catch(e){reject(friendly(e));return;}
    tx.oncomplete=()=>resolve(structuredClone(result));tx.onabort=()=>reject(friendly(tx.error));tx.onerror=()=>{};
   }));

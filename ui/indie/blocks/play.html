@@ -30,8 +30,14 @@ button{font:inherit;color:inherit}
 .n{position:absolute;right:0;bottom:calc(-1*var(--u));font-weight:800;font-size:calc(8*var(--u));line-height:1;color:#fff;text-shadow:var(--u) var(--u) 0 #3f3f3f;pointer-events:none;font-family:ui-monospace,Menlo,Consolas,monospace}
 .dur{position:absolute;left:calc(2*var(--u));right:calc(2*var(--u));bottom:calc(1*var(--u));height:calc(2*var(--u));background:#000;pointer-events:none}
 .dur i{display:block;height:50%}
-.bars{position:absolute;left:50%;bottom:calc(25*var(--u) + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:calc(182*var(--u));display:flex;justify-content:space-between;align-items:flex-end}
+.bars{position:absolute;left:50%;bottom:calc(31*var(--u) + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:calc(182*var(--u));display:flex;justify-content:space-between;align-items:flex-end}
+.armor{position:absolute;left:0;bottom:calc(10*var(--u))}
+.xp{position:absolute;left:50%;bottom:calc(25*var(--u) + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:calc(182*var(--u));height:calc(5*var(--u));background:#1a1a1a;border:calc(.5*var(--u)) solid #000;box-sizing:border-box}
+.xp[hidden]{display:none}
+.xp i{display:block;height:100%;background:linear-gradient(#b9f55a,#6fd024 60%,#4ea312);width:0}
+.xp b{position:absolute;left:50%;bottom:calc(2.5*var(--u));transform:translateX(-50%);font:900 calc(8*var(--u))/1 ui-monospace,Menlo,Consolas,monospace;color:#80ff20;text-shadow:calc(.6*var(--u)) 0 #000,calc(-.6*var(--u)) 0 #000,0 calc(.6*var(--u)) #000,0 calc(-.6*var(--u)) #000}
 .row{display:flex;gap:0}
+.row img{margin-right:calc(-1*var(--u))}
 .row.r{flex-direction:row-reverse}
 .row canvas{width:calc(9*var(--u));height:calc(9*var(--u));image-rendering:pixelated}
 .air{position:absolute;right:0;bottom:calc(10*var(--u))}
@@ -58,6 +64,7 @@ button{font:inherit;color:inherit}
 .touch .sneak{right:calc(44*var(--u) + env(safe-area-inset-right,0px));bottom:calc(18*var(--u))}
 .touch .up{right:calc(14*var(--u) + env(safe-area-inset-right,0px));bottom:calc(64*var(--u))}
 .touch .down{right:calc(14*var(--u) + env(safe-area-inset-right,0px));bottom:calc(4*var(--u))}
+.touch .view{right:calc(24*var(--u) + env(safe-area-inset-right,0px));top:calc(4*var(--u));width:calc(16*var(--u));height:calc(16*var(--u))}
 .touch .stick{position:absolute;width:calc(48*var(--u));height:calc(48*var(--u));margin:calc(-24*var(--u)) 0 0 calc(-24*var(--u));border-radius:50%;border:var(--u) solid rgba(255,255,255,.4);background:rgba(0,0,0,.18)}
 .touch .stick i{position:absolute;left:50%;top:50%;width:calc(20*var(--u));height:calc(20*var(--u));margin:calc(-10*var(--u)) 0 0 calc(-10*var(--u));border-radius:50%;background:rgba(255,255,255,.55)}
 /* ---------- screens ---------- */
@@ -106,6 +113,8 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
 .craft{display:flex;align-items:center;gap:calc(8*var(--u))}
 .craft .g2{display:grid;grid-template-columns:repeat(2,calc(18*var(--u)))}
 .craft .g3{display:grid;grid-template-columns:repeat(3,calc(18*var(--u)))}
+.worn{display:grid;grid-template-columns:calc(18*var(--u))}
+.icon.ghost{opacity:.25;filter:grayscale(1) brightness(.35)}
 .arrow{width:calc(22*var(--u));height:calc(15*var(--u));position:relative}
 .arrow::before{content:"";position:absolute;left:0;top:35%;width:65%;height:30%;background:#8b8b8b}
 .arrow::after{content:"";position:absolute;right:0;top:0;border-left:calc(9*var(--u)) solid #8b8b8b;border-top:calc(7.5*var(--u)) solid transparent;border-bottom:calc(7.5*var(--u)) solid transparent}
@@ -136,7 +145,8 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
     <div class="debug" hidden></div>
     <div class="toast"></div>
     <div class="name"></div>
-    <div class="bars"><div class="row hearts"></div><div class="row r food"></div><div class="row r air"></div></div>
+    <div class="bars"><div class="row hearts"></div><div class="row r food"></div><div class="row r air"></div><div class="row armor"></div></div>
+    <div class="xp"><i></i><b></b></div>
     <div class="hotbar"></div>
     <button class="pausebtn" aria-label="暂停"></button>
   </div>

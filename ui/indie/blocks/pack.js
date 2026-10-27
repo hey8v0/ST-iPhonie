@@ -43,7 +43,13 @@ const SKINS = {
   pig: ['entity/pig/pig_temperate.png', 'entity/pig/pig.png', 'entity/pig.png'], cow: ['entity/cow/cow_temperate.png', 'entity/cow/cow.png', 'entity/cow.png'],
   sheep: ['entity/sheep/sheep.png'], sheep_wool: ['entity/sheep/sheep_wool.png', 'entity/sheep/sheep_fur.png'], chicken: ['entity/chicken/chicken_temperate.png', 'entity/chicken.png'],
   zombie: ['entity/zombie/zombie.png'], skeleton: ['entity/skeleton/skeleton.png'], creeper: ['entity/creeper/creeper.png'], spider: ['entity/spider/spider.png'],
+  player: ['entity/player/wide/steve.png', 'entity/steve.png'],
 };
+// worn armour: newer versions keep it under equipment/, older ones as <material>_layer_1 / _2 (gold is "gold" there)
+for (const [mat, tex] of [['leather', 'leather'], ['iron', 'iron'], ['golden', 'gold'], ['diamond', 'diamond']]) {
+  SKINS[`armor_${mat}`] = [`entity/equipment/humanoid/${tex}.png`, `models/armor/${tex}_layer_1.png`];
+  SKINS[`armor_${mat}_legs`] = [`entity/equipment/humanoid_leggings/${tex}.png`, `models/armor/${tex}_layer_2.png`];
+}
 const MOON_PHASES = ['full_moon', 'waning_gibbous', 'third_quarter', 'waning_crescent', 'new_moon', 'waxing_crescent', 'first_quarter', 'waxing_gibbous'];
 /**
  * Reads the pictures we use from a jar or resource pack: {label, files: {name: {png: Blob, meta}}, sky: {sun, moon,

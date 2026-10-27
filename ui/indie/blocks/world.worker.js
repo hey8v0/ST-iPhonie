@@ -22,7 +22,7 @@ onmessage = async e => {
     } else if (!world) return;
     else if (m.type === 'center') { world.center = [m.cx, m.cz]; if (m.radius) world.radius = m.radius; }
     else if (m.type === 'set') { world.set(m.x, m.y, m.z, m.v); world.ack = m.seq; }
-    else if (m.type === 'day') world.dayDark = m.dark;
+    else if (m.type === 'day') { world.dayDark = m.dark; world.snowing = !!m.snow; }
     else if (m.type === 'explode') { const r = world.explode(m.x, m.y, m.z, m.power); post({type: 'exploded', id: m.id, ...r}); }
     else if (m.type === 'meal') post({type: 'meal', x: m.x, y: m.y, z: m.z, took: world.meal(m.x, m.y, m.z)});
     else if (m.type === 'flush') { await world.flush(); post({type: 'flushed', id: m.id}); }

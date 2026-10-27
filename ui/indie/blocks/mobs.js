@@ -83,9 +83,10 @@ export class Mobs {
     if (m.baby && ++m.grow >= 24000) { m.baby = false; m.body.w = d.size[0]; m.body.hgt = d.size[1]; }
     // fire: the sun on the undead, lava
     const sky = this.ctx.world.light(Math.floor(m.x), Math.floor(m.y + b.height * 0.8), Math.floor(m.z))[0];
-    if (d.undead && this.ctx.daylight() > 0.6 && sky >= 15 && !b.inWater) m.fire = Math.max(m.fire, 160);
+    const wet = b.inWater || (sky >= 15 && !!this.ctx.raining?.(m.x, m.z));
+    if (d.undead && this.ctx.daylight() > 0.6 && sky >= 15 && !wet) m.fire = Math.max(m.fire, 160);
     if (b.inLava) m.fire = 300;
-    if (b.inWater) m.fire = 0;
+    if (wet && !b.inLava) m.fire = 0;
     if (m.fire > 0) { m.fire--; if (m.fire % 20 === 0) this.hurt(m, b.inLava ? 4 : 1, null, 'fire'); if (m.age % 4 === 0) this.ctx.burst(m.x, m.y + b.height * 0.6, m.z, 'smoke'); }
     if (b.inLava && m.age % 10 === 0) this.hurt(m, 4, null, 'lava');
     const pd = Math.hypot(player.x - m.x, player.z - m.z), py = player.y - m.y, alive = !player.dead && this.ctx.mode() !== 'creative';
@@ -132,7 +133,7 @@ export class Mobs {
           if (Math.hypot(mate.x - m.x, mate.z - m.z) < 2 && m.id < mate.id) {
             m.love = mate.love = 0; m.loveWait = mate.loveWait = 6000;
             this.add(m.kind, (m.x + mate.x) / 2, m.y, (m.z + mate.z) / 2, {baby: true, color: m.kind === 'sheep' ? (Math.random() < 0.5 ? m.color : mate.color) : null});
-            this.ctx.burst(m.x, m.y + 1, m.z, 'heart'); this.ctx.xp?.(1 + Math.floor(Math.random() * 7));
+            this.ctx.burst(m.x, m.y + 1, m.z, 'heart'); this.ctx.xp?.(1 + Math.floor(Math.random() * 7), m.x, m.y + 0.5, m.z);
           }
           return;
         }
@@ -222,7 +223,7 @@ export class Mobs {
     }
     if (m.kind === 'sheep' && !m.sheared) this.ctx.drop({id: `${m.color || 'white'}_wool`, n: 1}, m.x, m.y + 0.5, m.z);
     if (m.def.rare && m.killedByPlayer && Math.random() < 0.025) this.ctx.drop({id: m.def.rare[Math.floor(Math.random() * m.def.rare.length)], n: 1}, m.x, m.y + 0.5, m.z);
-    if (m.killedByPlayer) this.ctx.xp?.(m.def.hostile ? 5 : 1 + Math.floor(Math.random() * 3));
+    if (m.killedByPlayer) this.ctx.xp?.(m.def.hostile ? 5 : 1 + Math.floor(Math.random() * 3), m.x, m.y + 0.5, m.z);
   }
   /** The mob a ray from the eye hits first within reach: {mob, t} or null. */
   raycast(ox, oy, oz, dx, dy, dz, reach) {

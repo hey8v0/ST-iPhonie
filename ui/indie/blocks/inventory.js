@@ -7,21 +7,38 @@ export const stackMax = id => itemInfo(id)?.stack || 64;
 export const same = (a, b) => a && b && a.id === b.id && !a.dmg && !b.dmg;
 export const copy = s => s ? {...s} : null;
 
+/** The carried slots (the first 9 the hotbar); after them the four worn ones, head to feet. */
+export const MAIN = 36, ARMOR_AT = 36;
 export class Inventory {
-  constructor(size = 36) { this.slots = new Array(size).fill(null); }
-  /** Puts a stack in (hotbar first, joining stacks of the same); returns what did not fit (or null). */
+  constructor(size = MAIN + 4) { this.slots = new Array(size).fill(null); }
+  /** Puts a stack in (hotbar first, joining stacks of the same; never into the worn slots); returns what did not fit. */
   add(stack) {
     if (!stack) return null;
     let left = stack.n;
-    const max = stackMax(stack.id);
-    for (let i = 0; i < this.slots.length && left; i++) { const s = this.slots[i]; if (same(s, stack) && s.n < max) { const k = Math.min(max - s.n, left); s.n += k; left -= k; } }
-    for (let i = 0; i < this.slots.length && left; i++) if (!this.slots[i]) { const k = Math.min(max, left); this.slots[i] = {...stack, n: k}; left -= k; }
+    const max = stackMax(stack.id), n = Math.min(MAIN, this.slots.length);
+    for (let i = 0; i < n && left; i++) { const s = this.slots[i]; if (same(s, stack) && s.n < max) { const k = Math.min(max - s.n, left); s.n += k; left -= k; } }
+    for (let i = 0; i < n && left; i++) if (!this.slots[i]) { const k = Math.min(max, left); this.slots[i] = {...stack, n: k}; left -= k; }
     return left ? {...stack, n: left} : null;
   }
-  count(id) { return this.slots.reduce((n, s) => n + (s && s.id === id ? s.n : 0), 0); }
+  count(id) { return this.slots.slice(0, MAIN).reduce((n, s) => n + (s && s.id === id ? s.n : 0), 0); }
   take(i, n = 1) { const s = this.slots[i]; if (!s) return null; const k = Math.min(n, s.n); s.n -= k; if (!s.n) this.slots[i] = null; return {...s, n: k}; }
+  /** The worn piece in a slot (0 head … 3 feet). */
+  worn(slot) { return this.slots[ARMOR_AT + slot] || null; }
+  /** Armour points and toughness of what is worn. */
+  armor() {
+    let points = 0, tough = 0;
+    for (let i = 0; i < 4; i++) { const a = itemInfo(this.worn(i)?.id)?.armor; if (a) { points += a.points; tough += a.tough; } }
+    return {points, tough};
+  }
+  /** Puts on a piece from slot i (taking the place of what was worn there, which goes back to slot i). */
+  wear(i) {
+    const s = this.slots[i], a = s && itemInfo(s.id)?.armor;
+    if (!a) return false;
+    this.slots[i] = this.slots[ARMOR_AT + a.slot]; this.slots[ARMOR_AT + a.slot] = s;
+    return true;
+  }
   toJSON() { return this.slots; }
-  static from(list, size = 36) { const inv = new Inventory(size); (list || []).slice(0, size).forEach((s, i) => { if (s && itemInfo(s.id)) inv.slots[i] = {id: s.id, n: Math.max(1, s.n | 0), ...(s.dmg ? {dmg: s.dmg} : {})}; }); return inv; }
+  static from(list, size = MAIN + 4) { const inv = new Inventory(size); (list || []).slice(0, size).forEach((s, i) => { if (s && itemInfo(s.id)) inv.slots[i] = {id: s.id, n: Math.max(1, s.n | 0), ...(s.dmg ? {dmg: s.dmg} : {})}; }); return inv; }
 }
 
 // ---------- crafting ----------
@@ -95,6 +112,12 @@ for (const w of ['oak', 'spruce', 'birch']) {
 shaped(['###', '###'], {'#': 'glass'}, 'glass_pane', 16);
 shaped(['###', '###'], {'#': 'iron_ingot'}, 'iron_bars', 16);
 for (const [c] of COLORS) shaped(['WWW', '###'], {W: `${c}_wool`, '#': '#planks'}, `${c}_bed`);
+for (const [mat, x] of [['leather', 'leather'], ['iron', 'iron_ingot'], ['golden', 'gold_ingot'], ['diamond', 'diamond']]) {
+  shaped(['XXX', 'X X'], {X: x}, `${mat}_helmet`);
+  shaped(['X X', 'XXX', 'XXX'], {X: x}, `${mat}_chestplate`);
+  shaped(['XXX', 'X X', 'X X'], {X: x}, `${mat}_leggings`);
+  shaped(['X X', 'X X'], {X: x}, `${mat}_boots`);
+}
 export const RECIPES = R;
 
 /** What a crafting grid (w × h stacks, row by row) makes: {out, recipe} or null. */
@@ -141,6 +164,12 @@ const SMELT = {
 };
 for (const l of TAGS.logs) SMELT[l] = 'charcoal';
 export const smeltOf = id => SMELT[id] || null;
+// experience for each thing smelted, given when the result is taken out (the game's numbers)
+const SMELT_XP = {iron_ingot: 0.7, copper_ingot: 0.7, gold_ingot: 1, diamond: 1, emerald: 1, lapis_lazuli: 0.2, redstone: 0.3, coal: 0.1, charcoal: 0.15,
+  glass: 0.1, stone: 0.1, smooth_stone: 0.1, deepslate: 0.1, brick: 0.3, terracotta: 0.35, sponge: 0.15,
+  cooked_porkchop: 0.35, cooked_beef: 0.35, cooked_mutton: 0.35, cooked_chicken: 0.35, baked_potato: 0.35};
+/** Whole experience points for what was smelted (the fraction left is a chance of one more). */
+export function takeSmeltXp(f, r = Math.random) { const x = f.xp || 0; f.xp = 0; return Math.floor(x) + (r() < x - Math.floor(x) ? 1 : 0); }
 /** Seconds of burning a fuel gives. */
 export const fuelOf = id => { const i = itemInfo(id); return i?.fuel || 0; };
 /** A furnace's state: {input, fuel, output, burn (ticks left), burnMax, cook (ticks done)}. One tick; returns lit. */
@@ -159,6 +188,7 @@ export function furnaceTick(f) {
       f.cook = 0;
       f.input.n--; if (!f.input.n) f.input = null;
       if (f.output) f.output.n++; else f.output = {id: result, n: 1};
+      f.xp = (f.xp || 0) + (SMELT_XP[result] || 0);
     }
   } else if (f.cook) f.cook = Math.max(0, f.cook - 2);
   return f.burn > 0;

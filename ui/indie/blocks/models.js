@@ -59,7 +59,31 @@ export const MODELS = {
     part('body', [0, 12], [[-5, -4, -6, 10, 8, 12]], [0, 15, 9]),
     ...[2, 1, 0, -1].flatMap((z, i) => [part(`leg${i * 2}`, [18, 0], [[-15, -1, -1, 16, 2, 2]], [-4, 15, z]), part(`leg${i * 2 + 1}`, [18, 0], [[-1, -1, -1, 16, 2, 2]], [4, 15, z])]),
   ]},
+  // the player (seen from behind or the front): the 64×64 layout, each part with its outer layer a little bigger
+  player: {skin: [64, 64], size: [0.6, 1.8], parts: [
+    part('head', [0, 0], [[-4, -8, -4, 8, 8, 8]], [0, 0, 0], [0, 0, 0], [part('hat', [32, 0], [[-4, -8, -4, 8, 8, 8, 0.5]])]),
+    part('body', [16, 16], [[-4, 0, -2, 8, 12, 4]], [0, 0, 0], [0, 0, 0], [part('jacket', [16, 32], [[-4, 0, -2, 8, 12, 4, 0.25]])]),
+    part('arm0', [40, 16], [[-3, -2, -2, 4, 12, 4]], [-5, 2, 0], [0, 0, 0], [part('sleeve0', [40, 32], [[-3, -2, -2, 4, 12, 4, 0.25]])]),
+    part('arm1', [32, 48], [[-1, -2, -2, 4, 12, 4]], [5, 2, 0], [0, 0, 0], [part('sleeve1', [48, 48], [[-1, -2, -2, 4, 12, 4, 0.25]])]),
+    part('leg0', [0, 16], [[-2, 0, -2, 4, 12, 4]], [-1.9, 12, 0], [0, 0, 0], [part('pants0', [0, 32], [[-2, 0, -2, 4, 12, 4, 0.25]])]),
+    part('leg1', [16, 48], [[-2, 0, -2, 4, 12, 4]], [1.9, 12, 0], [0, 0, 0], [part('pants1', [0, 48], [[-2, 0, -2, 4, 12, 4, 0.25]])]),
+  ]},
 };
+// worn armour over the player, in the game's 64×32 layouts: the outer one (helmet, chestplate, boots) and the inner one
+// (leggings); each piece draws only its parts
+export const ARMOR_MODELS = {
+  armor_outer: {skin: [64, 32], parts: [
+    part('head', [0, 0], [[-4, -8, -4, 8, 8, 8, 1]]), part('body', [16, 16], [[-4, 0, -2, 8, 12, 4, 1]]),
+    part('arm0', [40, 16], [[-3, -2, -2, 4, 12, 4, 1]], [-5, 2, 0]), part('arm1', [40, 16], [[-1, -2, -2, 4, 12, 4, 1, true]], [5, 2, 0]),
+    part('leg0', [0, 16], [[-2, 0, -2, 4, 12, 4, 1]], [-1.9, 12, 0]), part('leg1', [0, 16], [[-2, 0, -2, 4, 12, 4, 1, true]], [1.9, 12, 0]),
+  ]},
+  armor_inner: {skin: [64, 32], parts: [
+    part('body', [16, 16], [[-4, 0, -2, 8, 12, 4, 0.5]]),
+    part('leg0', [0, 16], [[-2, 0, -2, 4, 12, 4, 0.5]], [-1.9, 12, 0]), part('leg1', [0, 16], [[-2, 0, -2, 4, 12, 4, 0.5, true]], [1.9, 12, 0]),
+  ]},
+};
+/** Which model and parts each worn piece draws (0 helmet … 3 boots). */
+export const ARMOR_PARTS = [['armor_outer', ['head']], ['armor_outer', ['body', 'arm0', 'arm1']], ['armor_inner', ['body', 'leg0', 'leg1']], ['armor_outer', ['leg0', 'leg1']]];
 
 // ---------- moving ----------
 /** Sets the parts' turning for a pose: {limb, amount, headYaw, headPitch, age, attack, aim, flap, fall}. */
@@ -82,6 +106,12 @@ export function animate(kind, rot, pose) {
     set('arm0', aim ? -PI / 2 + head[0] : arms, aim ? -0.1 + head[1] : 0, Math.cos(pose.age * 0.09) * 0.05 + 0.05);
     set('arm1', kind === 'zombie' ? arms : aim ? -PI / 2 + head[0] : swing() * 0.5, aim ? 0.5 + head[1] : 0, -Math.cos(pose.age * 0.09) * 0.05 - 0.05);
     set('leg0', swing() * 0.8); set('leg1', swing(PI) * 0.8);
+  } else if (kind === 'player') {
+    // arms swing against the legs; a hit swings the right arm down and across
+    const walk = k => Math.cos(pose.limb * 0.6662 + k) * pose.amount, hit = Math.sin((pose.attack || 0) * PI);
+    set('arm0', walk(PI) - hit * 1.3, hit * 0.4, 0.05 + Math.cos(pose.age * 0.09) * 0.03);
+    set('arm1', walk(0), 0, -0.05 - Math.cos(pose.age * 0.09) * 0.03);
+    set('leg0', walk(0) * 1.4); set('leg1', walk(PI) * 1.4);
   } else if (kind === 'spider') {
     const z = [PI / 4, PI / 4 * 0.74, PI / 4 * 0.74, PI / 4], y = [PI / 4, PI / 8, -PI / 8, -PI / 4];
     for (let i = 0; i < 4; i++) {
@@ -107,8 +137,8 @@ const ID3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
  * Writes a mob's triangles (as quads) into out (a Float32 list: x, y, z, u, v, shade per vertex), already turned,
  * scaled and placed: at (x, y, z) relative to the camera, facing yaw (0 looks along −z), size s.
  */
-export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}, out, skinSize = null) {
-  const m = MODELS[kind], [tw, th] = skinSize || m.skin;
+export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}, out, skinSize = null, only = null) {
+  const m = MODELS[kind] || ARMOR_MODELS[kind], [tw, th] = skinSize || m.skin;
   const cy = Math.cos(yaw), sy = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll), k = (1 + swell) * s / 16;
   // the game's model space → world: x and y turned over, the feet at 24, then the body's turn (and a fall-over roll)
   const place = p => {
@@ -134,7 +164,7 @@ export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}
     }
     for (const c of p.children) walk({...c, name: c.name}, R, here(c.pivot));
   };
-  for (const p of m.parts) walk(p, ID3, p.pivot);
+  for (const p of m.parts) if (!only || only.includes(p.name)) walk(p, ID3, p.pivot);
   return out;
 }
 
@@ -232,6 +262,42 @@ export const OWN_SKINS = {
     const [fx, fy] = front(32, 4, 8, 8);
     for (const [ex, ey] of [[1, 3], [6, 3], [2, 4], [5, 4], [3, 2], [4, 2], [0, 4], [7, 4]]) px(fx + ex, fy + ey, hex('#d0201c'));
   }),
+  // ours, not the game's: dark hair, a red hoodie (the sleeve of the hand seen in first person), jeans, white shoes
+  player: () => skin(64, 64, 10, ({px, area, box, front, hex}) => {
+    const skinC = ['#f2c9a9', '#ecc2a0', '#f5cfb0'], hair = ['#2b2230', '#342a3a', '#241c29'], hoodie = ['#c84a5a', '#bf4454', '#d05262'], jeans = ['#3b4a6b', '#364463', '#41517a'], shoe = ['#ecece8', '#dededa'];
+    box(0, 0, 8, 8, 8, skinC);
+    area(8, 0, 8, 8, hair); area(24, 8, 8, 8, hair); area(0, 8, 8, 3, hair); area(16, 8, 8, 3, hair); area(0, 11, 3, 3, hair); area(21, 11, 3, 3, hair);
+    const [fx, fy] = front(0, 0, 8, 8);
+    area(fx, fy, 8, 2, hair); px(fx, fy + 2, hex('#2b2230')); px(fx + 7, fy + 2, hex('#2b2230'));
+    for (const [ex, c] of [[1, '#ffffff'], [2, '#3a2a4a'], [5, '#3a2a4a'], [6, '#ffffff']]) px(fx + ex, fy + 4, hex(c));
+    px(fx + 3, fy + 6, hex('#c98a7a')); px(fx + 4, fy + 6, hex('#c98a7a'));
+    box(16, 16, 8, 12, 4, hoodie);
+    const [bx, by] = front(16, 16, 8, 4);
+    px(bx + 3, by + 1, hex('#f0e6e6')); px(bx + 4, by + 1, hex('#f0e6e6')); px(bx + 3, by + 2, hex('#f0e6e6')); px(bx + 4, by + 3, hex('#f0e6e6'));
+    area(bx + 1, by + 7, 6, 3, ['#b23f4f', '#ac3a4a']); area(16, 28, 24, 4, ['#9e3646', '#a33a4a']);
+    for (const [u, v] of [[40, 16], [32, 48]]) { box(u, v, 4, 12, 4, hoodie); area(u, v + 13, 16, 3, skinC); area(u + 8, v, 4, 4, skinC); area(u, v + 12, 16, 1, ['#9e3646']); }
+    for (const [u, v] of [[0, 16], [16, 48]]) { box(u, v, 4, 12, 4, jeans); area(u, v + 13, 16, 3, shoe); area(u + 8, v, 4, 4, shoe); }
+  }),
 };
-export const MOB_KINDS = Object.keys(MODELS).filter(k => k !== 'sheep_wool');
+export const MOB_KINDS = Object.keys(MODELS).filter(k => k !== 'sheep_wool' && k !== 'player');
+// our armour pictures, one per material and layer (1: helmet, chestplate, boots; 2: leggings), only where it is worn
+const ARMOR_PAL = {leather: ['#8f5530', '#9c5e36', '#a8683c', '#7e4a29'], iron: ['#c6c6c6', '#d4d4d4', '#b8b8b8', '#e2e2e2'],
+  golden: ['#e9c33a', '#f2d24e', '#d9ae2a', '#fae27a'], diamond: ['#4fd1cb', '#62e0d9', '#3fbcb6', '#8ff0ea']};
+export function ownArmor(mat, layer) {
+  return skin(64, 32, layer === 1 ? 31 : 32, ({px, area, box, front}) => {
+    const pal = ARMOR_PAL[mat] || ARMOR_PAL.iron, edge = pal.map(c => shadeHex(c, 0.72));
+    const clear = (x, y, w, h) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) px(x + i, y + j, [0, 0, 0], 0); };
+    if (layer === 1) {
+      box(0, 0, 8, 8, 8, pal, 0.12);
+      const [fx, fy] = front(0, 0, 8, 8);
+      clear(fx + 1, fy + 3, 6, 5); clear(16, 0, 8, 8); area(0, 15, 32, 1, edge);
+      box(16, 16, 8, 12, 4, pal, 0.12); area(16, 31, 24, 1, edge);
+      box(40, 16, 4, 12, 4, pal, 0.12); clear(40, 26, 16, 6); clear(48, 16, 4, 4); area(40, 25, 16, 1, edge);
+      box(0, 16, 4, 12, 4, pal, 0.12); clear(0, 20, 16, 8); clear(4, 16, 4, 4); area(0, 28, 16, 1, edge);
+    } else {
+      box(16, 16, 8, 12, 4, pal, 0.12); clear(16, 20, 24, 7); clear(20, 16, 8, 4); area(16, 27, 24, 1, edge);
+      box(0, 16, 4, 12, 4, pal, 0.12); clear(0, 30, 16, 2); clear(8, 16, 4, 4);
+    }
+  });
+}
 export {shadeHex};

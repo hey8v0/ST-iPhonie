@@ -88,5 +88,22 @@ export function play(name, v = 0, k = 1) {
     case 'ignite': burst(2500, 1, 0.3, 0.25); tone(1600, 0.08, 0.05, {type: 'square'}); break;
     case 'attack': burst(1200, 1.5, 0.25 * k, 0.08, {pitch: r}); break;
     case 'meal': for (let i = 0; i < 4; i++) tone(900 + Math.random() * 900, 0.05, 0.08, {at: i * 0.05}); break;
+    case 'orb': tone(1400 + Math.random() * 900, 0.07, 0.12, {type: 'triangle', slide: 1.2}); break;
+    case 'equip': burst(2200, 3, 0.18, 0.12); burst(1400, 2, 0.12, 0.15, {at: 0.05}); break;
+    case 'thunder': burst(90, 0.5, 0.9 * k, 2.6, {pitch: 0.7}); burst(400, 0.7, 0.45 * k, 1.4, {at: 0.05}); burst(1800, 0.6, 0.25 * k, 0.4); tone(42, 0.4 * k, 2.2, {type: 'sawtooth', slide: 0.6, at: 0.1}); break;
   }
+}
+// rain: a soft hiss that keeps going, as loud as it rains where the player is (quieter under a roof)
+let rainSrc = null, rainGain = null;
+export function setRain(level) {
+  if (!ctx) return;
+  if (!rainSrc && level > 0) {
+    rainSrc = ctx.createBufferSource(); rainSrc.buffer = noiseBuf; rainSrc.loop = true;
+    const lo = ctx.createBiquadFilter(), hi = ctx.createBiquadFilter();
+    lo.type = 'lowpass'; lo.frequency.value = 5200; hi.type = 'highpass'; hi.frequency.value = 500;
+    rainGain = ctx.createGain(); rainGain.gain.value = 0;
+    rainSrc.connect(lo); lo.connect(hi); hi.connect(rainGain); rainGain.connect(master); rainSrc.start();
+  }
+  if (rainGain) rainGain.gain.setTargetAtTime(Math.max(0, Math.min(1, level)) * 0.16, ctx.currentTime, 0.4);
+  if (rainSrc && level <= 0 && rainGain.gain.value < 0.002) { rainSrc.stop(); rainSrc.disconnect(); rainSrc = null; rainGain = null; }
 }

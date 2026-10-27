@@ -66,7 +66,8 @@ export class Input {
       <button class="tb jump" data-t="jump" aria-label="跳"><svg viewBox="0 0 24 24"><path d="M12 5l7 8h-4v6h-6v-6H5z"/></svg></button>
       <button class="tb sneak" data-t="sneak" aria-label="潜行"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/></svg></button>
       <button class="tb up" data-t="up" aria-label="上升" hidden><svg viewBox="0 0 24 24"><path d="M12 5l7 8H5z"/></svg></button>
-      <button class="tb down" data-t="down" aria-label="下降" hidden><svg viewBox="0 0 24 24"><path d="M12 19l7-8H5z"/></svg></button>`;
+      <button class="tb down" data-t="down" aria-label="下降" hidden><svg viewBox="0 0 24 24"><path d="M12 19l7-8H5z"/></svg></button>
+      <button class="tb view" data-t="view" aria-label="切换视角"><svg viewBox="0 0 24 24"><path d="M12 6C7 6 3.5 9.5 2 12c1.5 2.5 5 6 10 6s8.5-3.5 10-6c-1.5-2.5-5-6-10-6zm0 9.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg></button>`;
     this.app.append(el);
     const stick = el.querySelector('.stick'), knob = stick.firstElementChild;
     const touches = new Map();
@@ -146,6 +147,7 @@ export class Input {
     if (name === 'sneak' && down) { t.sneak = !t.sneak; this.touchLayer.querySelector('.sneak').classList.toggle('lit', t.sneak); }
     if (name === 'up') t.up = down;
     if (name === 'down') t.down = down;
+    if (name === 'view' && down) this.events.push('view');
   }
   /** Shows the fly buttons instead of jump and sneak. */
   setFlying(on) {
@@ -170,7 +172,9 @@ export class Input {
     if (edge(5) || edge(15)) this.events.push('next');
     if (edge(6)) this.events.push('use');
     if (edge(8)) this.events.push('debug');
-    if (edge(12)) this.events.push('pick');
+    // d-pad up turns the camera round (as on consoles), down picks the block aimed at
+    if (edge(12)) this.events.push('view');
+    if (edge(13)) this.events.push('pick');
     if (edge(0)) { const now = performance.now(); if (now - this.lastJump < 320) this.events.push('fly'); this.lastJump = now; }
     if (edge(11)) this.pad.sneak = !this.pad.sneak;
     this.pad.prev = p.buttons.map(x => x.pressed || x.value > 0.5);

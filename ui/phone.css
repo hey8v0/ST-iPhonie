@@ -784,6 +784,8 @@ details>div{padding-bottom:10px}
 .msgs::-webkit-scrollbar{display:none}
 .chat-empty{margin:auto;text-align:center;font-size:13px;color:var(--ink2);padding:24px;max-width:260px;line-height:1.7}
 .day{align-self:center;font-size:11px;font-weight:800;color:var(--ink2);background:var(--card);padding:3px 12px;border-radius:999px;letter-spacing:.05em}
+.chat-older{align-self:center;display:flex;align-items:center;gap:4px;margin:2px 0 6px;padding:5px 14px;border:0;border-radius:999px;font:inherit;font-size:12px;font-weight:800;color:var(--ink2);background:var(--card);cursor:pointer}
+.chat-older .icon{width:14px;height:14px;transform:rotate(90deg)}
 .msg{display:flex;gap:8px;align-items:flex-end;max-width:86%}
 .msg .avatar{--s:34px}
 .msg.me{align-self:flex-end;flex-direction:row-reverse}
@@ -1016,6 +1018,8 @@ html[data-keyboard=true] *{animation:none!important;transition:none!important}
 .wall-motion{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .wall-motion i,.wall-motion b,.call-motion i,.call-motion b{position:absolute;display:block;will-change:transform,opacity;animation-delay:var(--delay,0s)}
 .screen[data-wall-motion=off] .wall-motion,.screen[data-view=app] .wall-motion{display:none}
+/* Under a sheet nothing behind moves: the sheet's frosted glass would blur the whole screen again on every frame. */
+.screen:has(>.overlay) .wall-motion *,.screen:has(>.overlay) .wall-motion *::before,.screen:has(>.overlay) .aura i,.screen:has(>.overlay) .aura::before,.screen:has(.home[data-today-in]) .wall-motion *,.screen:has(.home[data-today-in]) .wall-motion *::before{animation-play-state:paused}
 @media (prefers-reduced-motion:reduce){.wall-motion,.call-motion{display:none}}
 /* 晴空 · 月白: clouds drifting across */
 /* Keep every gradient's transparent edge inside its box, so drifting clouds have no clipped vertical seam. */

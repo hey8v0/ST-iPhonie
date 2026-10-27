@@ -379,6 +379,8 @@ export class Renderer {
     gl.useProgram(P.p); gl.uniform1f(P.u.u_cut, 0.01); gl.uniformMatrix4fv(P.u.u_model, false, mat.identity()); gl.uniform1f(P.u.u_unit, 16); gl.uniform1f(P.u.u_center, 1);
     gl.disable(gl.CULL_FACE);
     for (let i = list.length - 1; i >= 0; i--) { const [, s, ox, oy, oz] = list[i]; if (s.trans) { gl.uniform3f(P.u.u_origin, ox, oy, oz); gl.bindVertexArray(s.trans.vao); gl.drawElements(gl.TRIANGLES, s.trans.count, gl.UNSIGNED_INT, 0); tris += s.trans.count / 3; } }
+    // rain or snow: see-through streaks round the camera
+    if (extras.weather?.n) this.drawVerts(extras.weather, {origin: [0, 0, 0], unit: 256, center: 128, cut: 0.01});
     gl.depthMask(true);
     // clouds
     if (env.clouds && this.images.clouds) this.drawClouds(vp, view, env, fogNear, fogFar);
@@ -407,9 +409,12 @@ export class Renderer {
       gl.bindVertexArray(this.quadVao); gl.drawArrays(gl.TRIANGLES, 0, 6);
     };
     const sun = [Math.cos(a), Math.sin(a), 0], moon = [-sun[0], -sun[1], 0];
-    put(sun, 18, 'sun', [0, 0, 1, 1], [1, 1, 1, 1]);
+    // hidden behind the rain clouds as it rains
+    const seen = env.sunMoon ?? 1;
+    if (seen <= 0.02) { gl.disable(gl.BLEND); return; }
+    put(sun, 18, 'sun', [0, 0, 1, 1], [1, 1, 1, seen]);
     const ph = env.moonPhase || 0, mu = (ph % 4) / 4, mv = Math.floor(ph / 4) / 2;
-    put(moon, 12, 'moon', [mu, mv, mu + 0.25, mv + 0.5], [1, 1, 1, 1]);
+    put(moon, 12, 'moon', [mu, mv, mu + 0.25, mv + 0.5], [1, 1, 1, seen]);
     gl.disable(gl.BLEND);
   }
   drawClouds(vp, view, env, fogNear, fogFar) {
@@ -463,12 +468,12 @@ export class Renderer {
     gl.disable(gl.POLYGON_OFFSET_FILL); gl.depthMask(true); gl.disable(gl.BLEND);
     gl.uniform1f(this.chunk.u.u_overlay, 0);
   }
-  /** things: [{verts, x, y, z, model, bright}] in world coordinates. */
+  /** things: [{verts, x, y, z, model, bright, center}] in world coordinates (center: what the verts were built with). */
   drawThings(things, view) {
     const gl = this.gl;
     for (const t of things) {
       if (t.bright) { gl.useProgram(this.chunk.p); gl.uniform1f(this.chunk.u.u_bright, t.bright); }
-      this.drawVerts(t.verts, {origin: [t.x - view.x, t.y - view.y, t.z - view.z], model: t.model, cut: 0.5});
+      this.drawVerts(t.verts, {origin: [t.x - view.x, t.y - view.y, t.z - view.z], model: t.model, cut: 0.5, center: t.center || 32});
       if (t.bright) gl.uniform1f(this.chunk.u.u_bright, 0);
     }
     gl.uniformMatrix4fv(this.chunk.u.u_model, false, mat.identity());

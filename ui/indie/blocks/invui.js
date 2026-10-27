@@ -3,13 +3,16 @@
 // whole stack, right takes half or puts one, shift moves it across. Touch: a long press is the right click. Pads: the
 // d-pad / stick moves between slots, A left, X right, Y shift, B closes.
 import {itemInfo, zhOf, ALL_ITEMS, BLOCKS} from './blocks.js';
-import {craft, useGrid, stackMax, same, smeltOf, fuelOf} from './inventory.js';
+import {craft, useGrid, stackMax, same, smeltOf, fuelOf, ARMOR_AT} from './inventory.js';
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
+const usesOf = info => info?.tool?.uses || info?.armor?.uses;
+// an empty worn slot shows the outline of what goes there
+const GHOST = ['iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots'];
 /** The picture and numbers of a stack (HTML). */
 export function stackHtml(s, icons) {
   if (!s) return '';
-  const info = itemInfo(s.id), uses = info?.tool?.uses;
+  const info = itemInfo(s.id), uses = usesOf(info);
   const dur = uses && s.dmg ? `<span class="dur"><i style="width:${Math.max(0, (1 - s.dmg / uses) * 100)}%;background:hsl(${Math.max(0, (1 - s.dmg / uses) * 120)},90%,45%)"></i></span>` : '';
   return `<img class="icon" src="${icons[s.id] || ''}" alt="">${s.n > 1 ? `<span class="n">${s.n}</span>` : ''}${dur}`;
 }
@@ -19,8 +22,9 @@ const KINDS = [
   ['build', '建筑方块', n => /planks|cobble|bricks|smooth_stone|slab|stairs|fence|pane|bars|door|wool|glass|sandstone|terracotta|_block$|obsidian|bookshelf|stone$|granite|diorite|andesite|tuff|calcite|deepslate$|mossy/.test(n) && !/ore$/.test(n) && n !== 'grass_block'],
   ['nature', '自然方块', n => { const b = BLOCKS.find(x => x.name === n); return !!b && /grass|dirt|podzol|sand|gravel|clay|ore$|_log$|leaves|sapling|fern|dandelion|poppy|orchid|allium|bluet|daisy|cornflower|lily|dead_bush|sugar_cane|cactus|mushroom|snow|ice|pumpkin|melon|moss|mud|bedrock|stone$|deepslate$/.test(n); }],
   ['use', '功能方块', n => /crafting|furnace|chest|torch|ladder|lantern|glowstone|tnt|bookshelf|_bed$|door|gate/.test(n)],
-  ['tools', '工具', n => /_pickaxe|_axe|_shovel|_hoe|_sword|bucket/.test(n)],
-  ['items', '材料与食物', n => !BLOCKS.find(x => x.name === n) && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket/.test(n)],
+  ['tools', '工具', n => /_pickaxe|_axe|_shovel|_hoe|bucket|shears|flint_and_steel/.test(n)],
+  ['combat', '战斗', n => /_sword|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
+  ['items', '材料与食物', n => !BLOCKS.find(x => x.name === n) && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket|shears|flint_and_steel|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
   ['bag', '背包', null],
 ];
 
@@ -68,6 +72,8 @@ export class InventoryUI {
         list.push({key: 'f:out', section: 'f', get: () => f.output, set: s => { f.output = s; }, out: 'take'});
       }
       if (this.kind === 'chest') this.data.slots.forEach((_, i) => add('chest', i, this.data.slots));
+      // worn: head to feet, each taking only its own kind of armour
+      if (this.kind === 'player' || this.kind === 'creative') for (let i = 0; i < 4; i++) add('a', ARMOR_AT + i, inv.slots, {worn: i, accept: s => itemInfo(s.id)?.armor?.slot === i});
       for (let i = 9; i < 36; i++) add('main', i, inv.slots);
     }
     for (let i = 0; i < 9; i++) add('hot', i, inv.slots);
@@ -82,13 +88,14 @@ export class InventoryUI {
     if (!this.open) return;
     const icons = this.game.icons, list = this.slots();
     this.list = list;
-    const slot = (s, cls = '') => `<div class="slot${cls}${list.indexOf(s) === this.focus ? ' focus' : ''}" data-k="${s.key}">${stackHtml(s.get(), icons)}</div>`;
+    const slot = (s, cls = '') => `<div class="slot${cls}${list.indexOf(s) === this.focus ? ' focus' : ''}" data-k="${s.key}">${s.worn != null && !s.get() ? `<img class="icon ghost" src="${icons[GHOST[s.worn]] || ''}" alt="">` : stackHtml(s.get(), icons)}</div>`;
     const sec = name => list.filter(s => s.section === name);
     const bag = `<div class="slots">${sec('main').map(s => slot(s)).join('')}</div><div class="slots" style="margin-top:calc(4*var(--u))">${sec('hot').map(s => slot(s)).join('')}</div>`;
+    const worn = `<div class="worn">${sec('a').map(s => slot(s)).join('')}</div>`;
     let body = '';
     if (this.kind === 'player' || this.kind === 'crafting') {
       const w = this.kind === 'crafting' ? 3 : 2, out = sec('out')[0];
-      body = `<h3>${this.kind === 'crafting' ? '合成' : '合成'}</h3><div class="craft" style="justify-content:${this.kind === 'crafting' ? 'center' : 'flex-end'}"><div class="g${w}">${sec('g').map(s => slot(s)).join('')}</div><div class="arrow"></div>${slot(out, ' big')}</div><h3>物品栏</h3>${bag}`;
+      body = `<h3>合成</h3><div class="craft" style="justify-content:${this.kind === 'crafting' ? 'center' : 'space-between'}">${this.kind === 'player' ? worn : ''}<div class="craft"><div class="g${w}">${sec('g').map(s => slot(s)).join('')}</div><div class="arrow"></div>${slot(out, ' big')}</div></div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'furnace') {
       const f = this.data, [fin, fuel, fout] = sec('f');
       const burn = f.burnMax ? f.burn / f.burnMax : 0, cook = (f.cook || 0) / 200;
@@ -97,7 +104,7 @@ export class InventoryUI {
       body = `<h3>箱子</h3><div class="slots">${sec('chest').map(s => slot(s)).join('')}</div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'creative') {
       const tabs = `<div class="tabs">${KINDS.map(([k, label]) => `<button data-tab="${k}" class="${k === this.tab ? 'on' : ''}">${label}</button>`).join('')}</div>`;
-      if (this.tab === 'bag') body = `${tabs}<h3>背包</h3>${bag}`;
+      if (this.tab === 'bag') body = `${tabs}<h3>背包</h3><div class="craft">${worn}</div>${bag}`;
       else body = `${tabs}<div style="display:flex;justify-content:space-between;align-items:center"><h3>${esc((KINDS.find(k => k[0] === this.tab) || KINDS[0])[1])}</h3><input class="search" placeholder="搜索" value="${esc(this.query)}"></div><div class="cgrid">${sec('c').map(s => slot(s)).join('')}</div><div style="display:flex;gap:calc(4*var(--u));margin-top:calc(4*var(--u));align-items:center"><div class="slots">${sec('hot').map(s => slot(s)).join('')}</div>${slot(sec('trash')[0], ' trash')}</div><div class="note" style="color:#555;text-align:left">点一下拿一组，放到下面的物品栏；拿着东西点红色格子扔掉。</div>`;
     }
     const scroll = this.root.querySelector('.cgrid')?.scrollTop || 0;
@@ -138,7 +145,8 @@ export class InventoryUI {
     const tip = this.root.querySelector('.tip'), el = e.target.closest?.('.slot');
     if (!tip) return;
     const s = el && this.list?.find(k => k.key === el.dataset.k)?.get();
-    if (s && !this.cursor && e.pointerType === 'mouse') { tip.hidden = false; tip.textContent = zhOf(s.id) + (itemInfo(s.id)?.tool ? `（耐久 ${itemInfo(s.id).tool.uses - (s.dmg || 0)}/${itemInfo(s.id).tool.uses}）` : ''); tip.style.left = `${x + 14}px`; tip.style.top = `${y - 10}px`; }
+    const info = s && itemInfo(s.id), uses = usesOf(info);
+    if (s && !this.cursor && e.pointerType === 'mouse') { tip.hidden = false; tip.textContent = zhOf(s.id) + (info?.armor ? `（护甲 +${info.armor.points}）` : '') + (uses ? `（耐久 ${uses - (s.dmg || 0)}/${uses}）` : ''); tip.style.left = `${x + 14}px`; tip.style.top = `${y - 10}px`; }
     else tip.hidden = true;
   }
   /** A click on a slot: left, right or shift. */
@@ -163,11 +171,12 @@ export class InventoryUI {
       else if (here && (!c || (same(c, here) && c.n + here.n <= stackMax(c.id)))) { const got = once(); if (got) { if (c) c.n += got.n; else this.cursor = got; this.game.crafted?.(); } }
       this.draw(); return;
     }
-    if (how === 'shift' && here) { this.quickMove(s); this.draw(); return; }
+    if (how === 'shift' && here) { this.quickMove(s); if (s.key === 'f:out' && !s.get()) this.game.took?.(this.data); this.draw(); return; }
     if (s.out === 'take') {
-      if (here && (!c || (same(c, here) && c.n + here.n <= stackMax(c.id)))) { if (c) c.n += here.n; else this.cursor = {...here}; s.set(null); }
+      if (here && (!c || (same(c, here) && c.n + here.n <= stackMax(c.id)))) { if (c) c.n += here.n; else this.cursor = {...here}; s.set(null); if (this.kind === 'furnace') this.game.took?.(this.data); }
       this.draw(); return;
     }
+    const before = s.get();
     if (how === 'left') {
       if (!c) { if (here) { this.cursor = here; s.set(null); } }
       else if (!here) { if (!s.accept || s.accept(c)) { s.set(c); this.cursor = null; } }
@@ -178,12 +187,16 @@ export class InventoryUI {
       else if (!here) { if (!s.accept || s.accept(c)) { s.set({...c, n: 1}); c.n--; if (!c.n) this.cursor = null; } }
       else if (same(c, here) && here.n < stackMax(here.id)) { here.n++; c.n--; if (!c.n) this.cursor = null; }
     }
+    if (s.worn != null && s.get() && s.get() !== before) this.game.worn?.();
     this.draw();
   }
   /** Shift-click: to the other part of the window. */
   quickMove(s) {
     const st = s.get(), inv = this.game.inv;
     if (!st) return;
+    // armour goes on, when its slot is free
+    const piece = itemInfo(st.id)?.armor, slotFor = piece && (s.section === 'hot' || s.section === 'main') && this.list.find(x => x.worn === piece.slot);
+    if (slotFor && !slotFor.get()) { slotFor.set(st); s.set(null); this.game.worn?.(); return; }
     let targets;
     if (s.section === 'hot') targets = this.list.filter(x => x.section === (this.kind === 'chest' ? 'chest' : this.kind === 'furnace' ? 'f' : 'main'));
     else if (s.section === 'main') targets = this.list.filter(x => x.section === (this.kind === 'chest' ? 'chest' : this.kind === 'furnace' ? 'f' : 'hot'));

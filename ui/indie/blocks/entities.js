@@ -21,11 +21,39 @@ export function itemLook(id) {
     return {cube: [side, side, L(t.top), L(t.bottom), front, side], tints: [grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint, tint, 0xFFFFFF, grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint], half: b.shape === 'slab'};
   }
   const name = b ? (b.name === 'wheat' ? 'wheat_stage7' : b.tex?.all || b.tex?.side) : info?.icon || id;
-  return {flat: LAYER[name] ?? 0, tint: b ? tintNum(b.tint) : 0xFFFFFF};
+  return {flat: LAYER[name] ?? 0, tint: b ? tintNum(b.tint) : packed.has(name) && info?.tint ? tintNum(info.tint) : 0xFFFFFF};
 }
+/** The names whose picture came from the player's pack (leather from a pack is grey and gets its colour). */
+const packed = new Set();
+export function setPacked(from) { packed.clear(); for (const [n, f] of Object.entries(from || {})) if (f === 'pack') packed.add(n); }
+
+// the game's orb sizes: an amount of experience is split into orbs of these values
+const ORB_VALUES = [2477, 1237, 617, 307, 149, 73, 37, 17, 7, 3, 1];
+export const splitXp = n => { const out = []; while (n > 0) { const v = ORB_VALUES.find(k => k <= n); out.push(v); n -= v; } return out; };
 
 export class Entities {
-  constructor(world) { this.world = world; this.items = []; this.particles = []; this.verts = new Verts(256); this.pv = new Verts(2048); }
+  constructor(world) { this.world = world; this.items = []; this.particles = []; this.orbs = []; this.orbWait = 0; this.verts = new Verts(256); this.pv = new Verts(2048); }
+  /** Experience: the amount split into orbs at a place, flying out a little. */
+  xp(n, x, y, z) {
+    for (const v of splitXp(Math.max(0, Math.round(n)))) { const a = Math.random() * Math.PI * 2; this.orbs.push({v, x, y, z, vx: Math.cos(a) * 0.1, vy: 0.15 + Math.random() * 0.1, vz: Math.sin(a) * 0.1, age: Math.floor(Math.random() * 40)}); }
+  }
+  /** Orbs drift to a living player within 8 blocks (faster the nearer) and are taken one every two ticks: gain(value). */
+  orbTick(player, gain) {
+    if (this.orbWait > 0) this.orbWait--;
+    for (let i = this.orbs.length - 1; i >= 0; i--) {
+      const o = this.orbs[i];
+      if (++o.age > 6000) { this.orbs.splice(i, 1); continue; }
+      const dx = player.x - o.x, dy = player.y + player.eye / 2 - o.y, dz = player.z - o.z, d = Math.hypot(dx, dy, dz) || 1;
+      if (!player.dead && d < 8) { const k = (1 - d / 8) ** 2 * 0.1; o.vx += dx / d * k; o.vy += dy / d * k; o.vz += dz / d * k; }
+      if (!player.dead && d < 1.3 && !this.orbWait) { gain(o.v); this.orbWait = 2; this.orbs.splice(i, 1); continue; }
+      o.vy -= 0.03;
+      for (const [k, dk] of [['x', 'vx'], ['y', 'vy'], ['z', 'vz']]) {
+        const n = o[k] + o[dk], at = {x: o.x, y: o.y, z: o.z, [k]: n};
+        if (this.solidAt(at.x, at.y, at.z)) { o[dk] *= k === 'y' ? -0.2 : -0.3; if (k === 'y') { o.vx *= 0.6; o.vz *= 0.6; } } else o[k] = n;
+      }
+      o.vx *= 0.98; o.vy *= 0.98; o.vz *= 0.98;
+    }
+  }
   solidAt(x, y, z) {
     const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z), bs = collisionBoxes(this.world.get(bx, by, bz));
     return bs && bs.some(b => x >= bx + b[0] && x <= bx + b[3] && y >= by + b[1] && y <= by + b[4] && z >= bz + b[2] && z <= bz + b[5]);
@@ -107,21 +135,29 @@ export class Entities {
       const s = look.cube ? 0.25 : 0.4, copies = it.stack.n > 16 ? 3 : it.stack.n > 1 ? 2 : 1;
       for (let c = 0; c < copies; c++) out.push({verts: v, x: it.x + c * 0.06, y: it.y + bob + s / 2 + c * 0.05, z: it.z + c * 0.04, model: mat.model(s, (it.age / 20 + it.spin) % (Math.PI * 2))});
     }
-    if (this.particles.length) {
+    if (this.particles.length || this.orbs.length) {
       const v = this.pv.reset(), cx = view.x, cy = view.y, cz = view.z;
       // squares turned to face the camera
       const yaw = view.yaw, pitch = view.pitch, rx = [Math.cos(yaw), 0, -Math.sin(yaw)], up = [Math.sin(yaw) * Math.sin(pitch), Math.cos(pitch), Math.cos(yaw) * Math.sin(pitch)];
-      for (const p of this.particles) {
-        const [sky, blk] = light(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)), s = p.size;
-        const ox = p.x - cx, oy = p.y - cy, oz = p.z - cz;
-        if (Math.abs(ox) > 100 || Math.abs(oy) > 100 || Math.abs(oz) > 100) continue;
-        const [u0, v0, u1, v1] = p.uv, corners = [[-1, -1, u0, v1], [1, -1, u1, v1], [1, 1, u1, v0], [-1, 1, u0, v0]];
-        for (const [a, b, u, w] of corners) v.v(ox + (rx[0] * a + up[0] * b) * s, oy + (rx[1] * a + up[1] * b) * s, oz + (rx[2] * a + up[2] * b) * s, 256, 128, p.layer, u, w, sky * 17, blk * 17, 2 << 2, p.tint);
+      const square = (x, y, z, s, layer, uv, sky, blk, tint) => {
+        const ox = x - cx, oy = y - cy, oz = z - cz;
+        if (Math.abs(ox) > 100 || Math.abs(oy) > 100 || Math.abs(oz) > 100) return;
+        const [u0, v0, u1, v1] = uv, corners = [[-1, -1, u0, v1], [1, -1, u1, v1], [1, 1, u1, v0], [-1, 1, u0, v0]];
+        for (const [a, b, u, w] of corners) v.v(ox + (rx[0] * a + up[0] * b) * s, oy + (rx[1] * a + up[1] * b) * s, oz + (rx[2] * a + up[2] * b) * s, 256, 128, layer, u, w, sky * 17, blk * 17, 2 << 2, tint);
+      };
+      for (const p of this.particles) { const [sky, blk] = light(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)); square(p.x, p.y, p.z, p.size, p.layer, p.uv, sky, blk, p.tint); }
+      // orbs glow (full light), bigger for more, their colour going between yellow and green
+      for (const o of this.orbs) {
+        const t = o.age + time * 20, r = Math.round((Math.sin(t * 0.25) + 1) * 0.5 * 255), b = Math.round((Math.sin(t * 0.25 + 4.19) + 1) * 0.1 * 255);
+        square(o.x, o.y + 0.1, o.z, 0.06 + Math.min(0.1, Math.log2(o.v + 1) * 0.012), LAYER.xp_orb, [0, 0, 16, 16], 15, 15, (Math.max(120, r) << 16) | (255 << 8) | b);
       }
-      out.push({verts: v, x: cx, y: cy, z: cz, model: mat.model(1)});
+      // built round the camera (±128 blocks), so read back with the same centre
+      out.push({verts: v, x: cx, y: cy, z: cz, model: mat.model(1), center: 128});
     }
     return out;
   }
+  orbsJSON() { return this.orbs.map(o => ({v: o.v, x: o.x, y: o.y, z: o.z, age: o.age})); }
+  loadOrbs(list) { this.orbs = (list || []).filter(o => o?.v > 0).map(o => ({...o, vx: 0, vy: 0, vz: 0})); }
   toJSON() { return this.items.map(it => ({stack: it.stack, x: it.x, y: it.y, z: it.z, age: it.age})); }
   load(list) { this.items = (list || []).filter(i => i?.stack && itemInfo(i.stack.id)).map(i => ({...i, vx: 0, vy: 0, vz: 0, delay: 0, spin: Math.random() * 6})); }
 }

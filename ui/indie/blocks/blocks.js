@@ -136,6 +136,8 @@ for (const [c, zh, h] of COLORS) block(`${c}_bed`, `${zh}床`, {tex: all('white_
 
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
+// experience from ores mined with the right tool (the game's ranges)
+for (const [o, xp] of [['coal', [0, 2]], ['diamond', [3, 7]], ['emerald', [3, 7]], ['lapis', [2, 5]], ['redstone', [1, 5]]]) for (const n of [`${o}_ore`, `deepslate_${o}_ore`]) BY_NAME[n].xp = xp;
 export const AIR = 0, ID = Object.fromEntries(B.map(b => [b.name, b.id]));
 
 // ---------- items ----------
@@ -168,6 +170,27 @@ const KINDS = {pickaxe: '镐', axe: '斧', shovel: '锹', sword: '剑', hoe: '�
 const DAMAGE = {sword: [4, 5, 6, 4, 7], axe: [7, 9, 9, 7, 9], pickaxe: [2, 3, 4, 2, 5], shovel: [2.5, 3.5, 4.5, 2.5, 5.5], hoe: [1, 1, 1, 1, 1]};
 Object.keys(TIERS).forEach((t, ti) => { for (const [k, zh] of Object.entries(KINDS))
   item(`${t}_${k}`, `${TIERS[t].zh}${zh}`, {stack: 1, tool: {kind: k, tier: TIERS[t].tier, speed: TIERS[t].speed, uses: TIERS[t].uses}, damage: DAMAGE[k][ti], fuel: t === 'wooden' ? 10 : 0}); });
+// armour: worn in a slot (0 head, 1 chest, 2 legs, 3 feet); its points, toughness and uses are the game's (uses: the
+// material's base × 11, 16, 15, 13). Leather from a pack is grey and dyed, its default colour is the tint.
+export const ARMOR = {leather: {zh: '皮革', base: 5, points: [1, 3, 2, 1], tough: 0}, iron: {zh: '铁', base: 15, points: [2, 6, 5, 2], tough: 0},
+  golden: {zh: '金', base: 7, points: [2, 5, 3, 1], tough: 0}, diamond: {zh: '钻石', base: 33, points: [3, 8, 6, 3], tough: 2}};
+export const ARMOR_PIECES = [['helmet', '头盔', 11, '帽子'], ['chestplate', '胸甲', 16, '外套'], ['leggings', '护腿', 15, '裤子'], ['boots', '靴子', 13, '靴子']];
+for (const [mat, a] of Object.entries(ARMOR)) ARMOR_PIECES.forEach(([piece, zh, k, leather], slot) =>
+  item(`${mat}_${piece}`, `${a.zh}${mat === 'leather' ? leather : zh}`, {stack: 1, armor: {slot, mat, points: a.points[slot], tough: a.tough, uses: a.base * k}, ...(mat === 'leather' ? {tint: '#a06540'} : {})}));
+/** What a hit of `dmg` does through armour of `points` and `tough` (the game's formula). */
+export function throughArmor(dmg, points, tough = 0) {
+  if (!points) return dmg;
+  const kept = Math.min(20, Math.max(points * 0.2, points - dmg / (2 + tough / 4)));
+  return dmg * (1 - kept / 25);
+}
+/** Experience to go from `level` to the next (the game's numbers). */
+export const xpToNext = level => level >= 30 ? 112 + (level - 30) * 9 : level >= 15 ? 37 + (level - 15) * 5 : 7 + level * 2;
+/** {level, prog (0–1 of the bar), total} after gaining n points, the way the game fills the bar. */
+export function addXp(x, n) {
+  const o = {...x, total: x.total + n, prog: x.prog + n / xpToNext(x.level)};
+  while (o.prog >= 1) { o.prog = (o.prog - 1) * xpToNext(o.level); o.level++; o.prog /= xpToNext(o.level); }
+  return o;
+}
 /** How hard a hit with this (an item name, or nothing) is. */
 export const damageOf = name => (name && I[name]?.damage) || 1;
 export const ITEMS = I;

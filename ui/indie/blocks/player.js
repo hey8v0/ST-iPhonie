@@ -182,13 +182,14 @@ export class Body {
  * The first block along a ray within reach: {x, y, z, face (0 east … 5 north), v, hit: [x, y, z], box} or null.
  * liquids: also stop at liquid sources (for a bucket).
  */
-export function raycast(world, ox, oy, oz, dx, dy, dz, reach, liquids = false) {
+export function raycast(world, ox, oy, oz, dx, dy, dz, reach, liquids = false, solidOnly = false) {
   let x = Math.floor(ox), y = Math.floor(oy), z = Math.floor(oz);
   const sx = Math.sign(dx), sy = Math.sign(dy), sz = Math.sign(dz);
   const tdx = dx ? Math.abs(1 / dx) : Infinity, tdy = dy ? Math.abs(1 / dy) : Infinity, tdz = dz ? Math.abs(1 / dz) : Infinity;
   let tx = dx ? (sx > 0 ? x + 1 - ox : ox - x) * tdx : Infinity, ty = dy ? (sy > 0 ? y + 1 - oy : oy - y) * tdy : Infinity, tz = dz ? (sz > 0 ? z + 1 - oz : oz - z) * tdz : Infinity;
   for (let i = 0; i < 64; i++) {
-    const v = world.get(x, y, z), boxes = selectionBoxes(v, liquids, nearIn(world, x, y, z));
+    // solidOnly (the third-person camera): what one bumps into, not grass or flowers
+    const v = world.get(x, y, z), boxes = solidOnly ? collisionBoxes(v, nearIn(world, x, y, z)) : selectionBoxes(v, liquids, nearIn(world, x, y, z));
     if (boxes) {
       let best = null;
       for (const b of boxes) {
