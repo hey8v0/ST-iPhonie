@@ -3,6 +3,8 @@
 // spreading, leaves dropping when their tree is gone. The page keeps a copy of the blocks and light (for walking and
 // aiming) that this sends along whenever something changes.
 import {generateColumn, newColumn, BIOMES, growTree, worldOf} from './gen.js';
+import {generateNether} from './nether.js';
+import {portalHolds, portalSpot, buildPortal} from './portal.js';
 import {BLOCKS, ID, MINY, HEIGHT, SECTIONS, SEA, withMeta, dropsOf, itemInfo} from './blocks.js';
 import {meshSection} from './mesh.js';
 import {rng} from './noise.js';
@@ -26,9 +28,13 @@ const hexRGB = h => parseInt(h.slice(1), 16);
 const TINTS = BIOMES.map(b => ({grass: hexRGB(b.grass), foliage: hexRGB(b.foliage), water: hexRGB(b.water)}));
 
 export class World {
-  /** seed, tex (texture name → layer), post(message, transfer), store (save helper or null), radius (columns). */
-  constructor({seed, tex, post, store = null, radius = 6, worldId = ''}) {
+  /**
+   * seed, tex (texture name → layer), post(message, transfer), store (save helper or null), radius (columns), dim
+   * ('overworld' | 'nether': the Nether has no sky, so no sky light, and its lava runs fast and far).
+   */
+  constructor({seed, tex, post, store = null, radius = 6, worldId = '', dim = 'overworld'}) {
     this.seed = seed; this.tex = tex; this.post = post; this.store = store; this.radius = radius; this.worldId = worldId;
+    this.dim = dim; this.nether = dim === 'nether'; this.sky = this.nether ? 0 : 0xF0;
     this.cols = new Map(); this.center = [0, 0]; this.dirty = new Set(); this.saved = new Set(); this.loading = new Set();
     this.tick = 0; this.due = new Map(); this.ack = 0; this.wave = true;
     this.r = rng(seed ^ 0x5bd1e995);
@@ -44,18 +50,18 @@ export class World {
     return s ? s[((y - MINY) & 15) << 8 | (z & 15) << 4 | (x & 15)] : 0;
   }
   light(x, y, z) {
-    if (y >= MINY + HEIGHT) return 0xF0;
+    if (y >= MINY + HEIGHT) return this.sky;
     if (y < MINY) return 0;
     const c = this.cols.get(key(x >> 4, z >> 4));
     if (!c) return 0;
     const si = (y - MINY) >> 4, s = c.light[si];
-    if (!s) return si > c.topSec ? 0xF0 : 0;
+    if (!s) return si > c.topSec ? this.sky : 0;
     return s[((y - MINY) & 15) << 8 | (z & 15) << 4 | (x & 15)];
   }
   /** The light section a write goes to (made when missing: above the column's top it starts as open sky). */
   lightSec(c, si) {
     let s = c.light[si];
-    if (!s) { s = c.light[si] = new Uint8Array(4096); if (si > c.topSec) s.fill(0xF0); }
+    if (!s) { s = c.light[si] = new Uint8Array(4096); if (si > c.topSec) s.fill(this.sky); }
     return s;
   }
   setLight(x, y, z, sky, blk) {
@@ -98,7 +104,7 @@ export class World {
     const sky = [], blk = [];
     // straight down from the sky: full light until something takes some of it
     const sunBottom = new Int16Array(256);
-    for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    if (this.sky) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
       let y = MINY + (c.topSec + 1) * 16 - 1;
       for (; y >= MINY; y--) {
         const si = (y - MINY) >> 4, s = c.sections[si], v = s ? s[((y - MINY) & 15) << 8 | z << 4 | x] : 0;
@@ -108,7 +114,7 @@ export class World {
       }
       sunBottom[z * 16 + x] = y + 1;
     }
-    for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    if (this.sky) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
       const own = sunBottom[z * 16 + x];
       // the sky light at the edge of the sunlit part spreads sideways into the shade and down under leaves
       let reach = own;
@@ -198,7 +204,7 @@ export class World {
     if (!s) s = c.sections[si] = new Uint16Array(4096);
     s[li] = v;
     c.changed = true; this.saved.add(c.k);
-    if (si > c.topSec) { for (let k = c.topSec + 1; k <= si; k++) if (!c.light[k]) { c.light[k] = new Uint8Array(4096); c.light[k].fill(0xF0); } c.topSec = si; }
+    if (si > c.topSec) { for (let k = c.topSec + 1; k <= si; k++) if (!c.light[k]) { c.light[k] = new Uint8Array(4096); c.light[k].fill(this.sky); } c.topSec = si; }
     this.touch(c, si, x & 15, (y - MINY) & 15, z & 15);
     // light: take away what the cell gave, then let it all run in again (with what the new block gives off)
     const oldF = old ? filterOf(old) : 0, newF = v ? filterOf(v) : 0, oldE = emitOf(old), newE = emitOf(v);
@@ -225,7 +231,8 @@ export class World {
   react(x, y, z) {
     for (const [dx, dy, dz] of [[0, 0, 0], ...DIRS]) {
       const nx = x + dx, ny = y + dy, nz = z + dz, v = this.get(nx, ny, nz), id = v & 0xFFF;
-      if (LIQUID.has(id)) this.schedule(nx, ny, nz, id === ID.water ? 5 : 30);
+      if (LIQUID.has(id)) this.schedule(nx, ny, nz, id === ID.water ? 5 : this.nether ? 10 : 30);
+      else if (id === ID.nether_portal) this.schedule(nx, ny, nz, 1);
       else if (GRAVITY.has(id)) this.schedule(nx, ny, nz, 2);
       else if (PLANT.has(id) && dy !== -1) this.schedule(nx, ny, nz, 1);
       else if (PAIRED.has(id)) this.schedule(nx, ny, nz, 1);
@@ -311,6 +318,10 @@ export class World {
     } else if (CROP.has(id)) {
       const meta = v >>> 12;
       if (meta < 7 && lit() >= 9 && r() < (this.get(x, y - 1, z) >>> 12 ? 0.33 : 0.16)) this.set(x, y, z, withMeta(id, meta + 1));
+    } else if (id === ID.nether_wart) {
+      // nether wart grows in the dark too: one chance in ten a random tick
+      const meta = v >>> 12;
+      if (meta < 3 && r() < 0.1) this.set(x, y, z, withMeta(id, meta + 1));
     } else if (id === ID.sugar_cane || id === ID.cactus) {
       if (this.get(x, y + 1, z)) return;
       let h = 1; while (h < 3 && (this.get(x, y - h, z) & 0xFFF) === id) h++;
@@ -367,6 +378,8 @@ export class World {
     // a door or a bed whose other half is gone goes too (its item came from the half that went)
     if (PAIRED.has(id)) { const [ox, oy, oz] = this.partner(x, y, z, v); if ((this.get(ox, oy, oz) & 0xFFF) !== id) this.set(x, y, z, 0); return; }
     if (LIQUID.has(id)) this.flow(x, y, z, v);
+    // a portal whose frame is broken goes out (and the rest of it after it)
+    if (id === ID.nether_portal && !portalHolds((a, b, c) => this.get(a, b, c), x, y, z, v)) this.set(x, y, z, 0);
   }
   /** Where the other half of a door (above or below) or a bed (head or foot) is. */
   partner(x, y, z, v) {
@@ -386,6 +399,7 @@ export class World {
     if (b.shape === 'wall') { const [dx, dz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][v >>> 12 & 3]; return OPAQUE[this.get(x + dx, y, z + dz) & 0xFFF] === 1; }
     if (b.shape === 'lantern') return !!below && BLOCKS[bid].solid;
     if (CROP.has(id)) return bid === ID.farmland;
+    if (id === ID.nether_wart) return bid === ID.soul_sand;
     if (id === ID.sugar_cane) return bid === ID.sugar_cane || ((bid === ID.sand || bid === ID.grass_block || bid === ID.dirt || bid === ID.red_sand) && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => (this.get(x + dx, y - 1, z + dz) & 0xFFF) === ID.water));
     if (id === ID.cactus) return bid === ID.cactus || bid === ID.sand || bid === ID.red_sand;
     if (id === ID.dead_bush) return bid === ID.sand || bid === ID.red_sand || bid === ID.dirt || bid === ID.coarse_dirt || bid === ID.terracotta;
@@ -395,7 +409,7 @@ export class World {
   }
   /** Liquid levels in the meta: 0 a source, 1–7 flowing (higher is thinner), 8 falling. */
   flow(x, y, z, v) {
-    const id = v & 0xFFF, meta = v >>> 12, water = id === ID.water, step = water ? 1 : 2, delay = water ? 5 : 30;
+    const id = v & 0xFFF, meta = v >>> 12, water = id === ID.water, step = water || this.nether ? 1 : 2, delay = water ? 5 : this.nether ? 10 : 30;
     const same = n => (n & 0xFFF) === id, lvl = n => (n >>> 12) >= 8 ? 0 : (n >>> 12);
     let level = meta >= 8 ? 0 : meta;
     if (meta !== 0) {
@@ -561,11 +575,11 @@ export class World {
         for (let py = 0; py < 18; py++) {
           const wy = MINY + si * 16 + py - 1;
           if (wy < MINY) { pad[py * 324 + pz * 18 + px] = ID.bedrock; continue; }
-          if (wy >= MINY + HEIGHT) { lit[py * 324 + pz * 18 + px] = 0xF0; continue; }
+          if (wy >= MINY + HEIGHT) { lit[py * 324 + pz * 18 + px] = this.sky; continue; }
           const s2 = (wy - MINY) >> 4, sec = n.sections[s2], li = ((wy - MINY) & 15) << 8 | z << 4 | x;
           pad[py * 324 + pz * 18 + px] = sec ? sec[li] : 0;
           const ls = n.light[s2];
-          lit[py * 324 + pz * 18 + px] = ls ? ls[li] : s2 > n.topSec ? 0xF0 : 0;
+          lit[py * 324 + pz * 18 + px] = ls ? ls[li] : s2 > n.topSec ? this.sky : 0;
         }
       }
     }
@@ -578,6 +592,27 @@ export class World {
     const transfer = [...sections, ...light].filter(Boolean).map(s => s.buffer);
     this.post({type: 'column', cx: c.cx, cz: c.cz, sections, light, topSec: c.topSec, biome: c.biome.slice(), height: c.height.slice(), ack: this.ack}, transfer);
     c.sent = true;
+  }
+
+  // ---------- portals ----------
+  /** A column made or read back now (not waiting for its turn). */
+  async ensure(cx, cz) {
+    const k = key(cx, cz);
+    if (this.cols.has(k)) return;
+    const c = this.store?.has(cx, cz) ? await this.store.load(cx, cz).catch(() => null) : null;
+    if (!this.cols.has(k)) this.addColumn(c || (this.nether ? generateNether : generateColumn)(this.seed, cx, cz));
+  }
+  /**
+   * A new portal for someone coming out near (x, y, z): on the ground nearby with room round it (the overworld's
+   * surface; in the Nether the cavern floor nearest their height), built of obsidian and lit. Returns {x, y, z, axis}.
+   */
+  async makePortal({x, y, z}) {
+    const cx = Math.floor(x) >> 4, cz = Math.floor(z) >> 4;
+    for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) await this.ensure(cx + dx, cz + dz);
+    const get = (a, b, c) => this.get(a, b, c);
+    const at = this.nether ? portalSpot(get, x, z, 32, 118, Math.max(32, Math.min(118, Math.round(y))), false) : portalSpot(get, x, z, SEA - 2, 200, Math.max(SEA + 1, Math.round(y)), true);
+    buildPortal((a, b, c, v) => this.set(a, b, c, v), at.x, at.y, at.z, at.axis);
+    return at;
   }
 
   // ---------- around the player ----------
@@ -602,11 +637,11 @@ export class World {
       let c = null;
       if (this.store && this.store.has(cx, cz)) c = await this.store.load(cx, cz).catch(() => null);
       let fresh = false;
-      if (!c) { c = generateColumn(this.seed, cx, cz); fresh = true; }
+      if (!c) { c = (this.nether ? generateNether : generateColumn)(this.seed, cx, cz); fresh = true; }
       this.loading.delete(k);
       if (this.cols.has(k)) continue;
       this.addColumn(c);
-      if (fresh) { const herd = this.herdFor(c); if (herd.length) this.post({type: 'herd', cx, cz, list: herd}); }
+      if (fresh && !this.nether) { const herd = this.herdFor(c); if (herd.length) this.post({type: 'herd', cx, cz, list: herd}); }
     }
     // 2. meshes: changed sections of columns whose neighbours are all here, nearest first
     if (this.dirty.size) {

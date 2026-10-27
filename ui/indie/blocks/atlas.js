@@ -5,6 +5,7 @@ import {ownTexture, OWN_BLOCK_TEXTURES, OWN_ITEM_TEXTURES, ANIMATED} from './tex
 import {BLOCKS, BY_NAME, itemInfo, ALL_ITEMS, withMeta} from './blocks.js';
 import {rng} from './noise.js';
 import {pieces} from './shapes.js';
+import {POTIONS, potionColor} from './brew.js';
 
 export const TEXTURE_NAMES = [...OWN_BLOCK_TEXTURES, ...OWN_ITEM_TEXTURES];
 export const LAYER = Object.fromEntries(TEXTURE_NAMES.map((n, i) => [n, i]));
@@ -98,11 +99,20 @@ export function makeIcons(built) {
     }
     out[name] = c.toDataURL();
   }
+  // potions: the bottle over its liquid in the potion's colour, a picture for each kind ('potion:swiftness' …)
+  for (const id of ['potion', 'splash_potion']) for (const pot of Object.keys(POTIONS)) {
+    const c = document.createElement('canvas'), g = c.getContext('2d');
+    c.width = c.height = N; g.imageSmoothingEnabled = false;
+    g.drawImage(face('potion_overlay', potionColor(pot)), 0, 0, N, N); g.drawImage(face(id, null), 0, 0, N, N);
+    out[`${id}:${pot}`] = c.toDataURL();
+  }
   return out;
 }
+/** The picture of a stack: a potion's by its kind. */
+export const iconKey = s => s.pot ? `${s.id}:${s.pot}` : s.id;
 
 // how a shaped block shows in the inventory: its state, and what joins it (a fence and a pane joined left and right)
-const ICON_STATE = {stairs: 2, fence: 0, gate: 0, pane: 0, trapdoor: 0, bed: 2 | 4, chest: 0, enchanting: 0, anvil: 1};
+const ICON_STATE = {stairs: 2, fence: 0, gate: 0, pane: 0, trapdoor: 0, bed: 2 | 4, chest: 0, enchanting: 0, anvil: 1, brewing: 0};
 // blocks with their own flat item picture (doors)
 const LAYER_ITEM = new Set(['oak_door', 'spruce_door', 'birch_door']);
 /**
@@ -119,6 +129,7 @@ function isoPieces(g, b, face, size) {
     if (role === 'wood') return ['oak_planks', null];
     if (role === 'latch') return ['iron_block', null];
     const t = b.tex;
+    if (role === 'base') return [t.base, null];
     if (b.shape === 'pane' && f === 2) return [t.edge || t.all, null];
     if (t.all) return [t.all, null];
     if (b.shape === 'chest' && f === 4) return [t.front, null];

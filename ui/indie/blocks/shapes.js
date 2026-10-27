@@ -82,6 +82,11 @@ export function pieces(v, near = () => 0) {
       return [{box: [1, 0, 1, 15, 14, 15], role: 'main'}, {box: latch, role: 'latch'}];
     }
     case 'enchanting': return [{box: [0, 0, 0, 16, 12, 16], role: 'main'}];
+    // the brewing stand: the rod, three arms holding the bottles' places, and the three-footed stone base
+    case 'brewing': return [{box: [7, 0, 7, 9, 14, 9], role: 'main'}, {box: [9, 11, 7.5, 14, 12, 8.5], role: 'main'}, {box: [3, 11, 3, 7, 12, 4], role: 'main'}, {box: [3, 11, 12, 7, 12, 13], role: 'main'},
+      {box: [9, 0, 5, 15, 2, 11], role: 'base'}, {box: [2, 0, 1, 8, 2, 7], role: 'base'}, {box: [2, 0, 9, 8, 2, 15], role: 'base'}];
+    // a portal: a thin sheet across the middle of the block, standing along x (0) or z (1)
+    case 'portal': return [{box: meta & 1 ? [6, 0, 0, 10, 16, 16] : [0, 0, 6, 16, 16, 10], role: 'main'}];
     case 'anvil': {
       // the game's: a wide foot, a narrow waist, the long top lying along the way it faces
       const parts = [[2, 0, 2, 14, 4, 14], [4, 4, 3, 12, 5, 13], [6, 5, 4, 10, 10, 12], [3, 10, 0, 13, 16, 16]];
@@ -102,6 +107,7 @@ export function collisionBoxes(v, near = () => 0) {
     case 'pane': case 'stairs': case 'door': case 'trapdoor': case 'chest': case 'anvil': return toBlock(pieces(v, near));
     case 'bed': return [[0, 0, 0, 1, px(9), 1]];
     case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
+    case 'brewing': return [[px(7), 0, px(7), px(9), px(14), px(9)], [px(2), 0, px(1), px(15), px(2), px(15)]];
   }
   if (!b.solid) {
     if (b.shape === 'layer' && meta > 0) return [[0, 0, 0, 1, px(meta * 2), 1]];
@@ -137,6 +143,8 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'wall': return [[[0, 0, 0, 1, 1, px(3)], [px(13), 0, 0, 1, 1, 1], [0, 0, px(13), 1, 1, 1], [0, 0, 0, px(3), 1, 1]][meta & 3]];
     case 'bed': return [[0, 0, 0, 1, px(9), 1]];
     case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
+    case 'brewing': return [[px(2), 0, px(1), px(15), px(14), px(15)]];
+    case 'portal': return null;
     case 'stairs': case 'fence': case 'gate': case 'pane': case 'door': case 'trapdoor': case 'chest': case 'anvil': return toBlock(pieces(v, near));
     default: return FULL;
   }

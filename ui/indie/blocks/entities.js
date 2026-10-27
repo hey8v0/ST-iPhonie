@@ -4,11 +4,16 @@ import {collisionBoxes} from './shapes.js';
 import {itemInfo, BLOCKS} from './blocks.js';
 import {Verts, mat} from './render.js';
 import {LAYER} from './atlas.js';
+import {potionColor} from './brew.js';
 
 const DEFAULT_TINT = {grass: 0x91bd59, foliage: 0x77ab2f, water: 0x3f76e4};
 const tintNum = t => t == null ? 0xFFFFFF : t.startsWith('#') ? parseInt(t.slice(1), 16) : DEFAULT_TINT[t];
-/** The faces' texture layers of an item as a little cube (or one flat picture): {cube: [6 layers], tints} | {flat}. */
-export function itemLook(id) {
+/**
+ * The faces' texture layers of an item as a little cube (or one flat picture): {cube: [6 layers], tints} | {flat, tint,
+ * over}. A potion (stack s) is its liquid in its colour with the bottle over it.
+ */
+export function itemLook(id, s = null) {
+  if (s?.pot) return {flat: LAYER.potion_overlay, tint: potionColor(s.pot), over: LAYER[id]};
   const info = itemInfo(id);
   const b = info?.block;
   // doors have a flat picture of their own; other shaped blocks show as a small block of what they are made of
@@ -111,13 +116,17 @@ export class Entities {
       this.particles.push({x: x + 0.1 + Math.random() * 0.8, y: y + 0.1 + Math.random() * 0.8, z: z + 0.1 + Math.random() * 0.8, vx: (Math.random() - 0.5) * 0.15, vy: Math.random() * 0.15 + 0.05, vz: (Math.random() - 0.5) * 0.15, g: 0.04, life: 15 + Math.floor(Math.random() * 20), layer, uv: [u, w, u + 4, w + 4], size: 0.07 + Math.random() * 0.05, tint});
     }
   }
-  /** Puffs that are not bits of a block: smoke, poof (a mob gone), heart, crit, explosion, meal (bone meal sparkles). */
-  puff(x, y, z, kind) {
+  /**
+   * Puffs that are not bits of a block: smoke, poof (a mob gone), heart, crit, explosion, meal (bone meal sparkles),
+   * potion swirls and a splash potion breaking (in the potion's colour), the portal's sparks, a blaze's flames.
+   */
+  puff(x, y, z, kind, color = null) {
     const S = {smoke: [4, 0x4a4a4a, 0.02, 0.1, 30, -0.005], poof: [14, 0xdddddd, 0.08, 0.12, 20, -0.01], heart: [6, 0xff3a5a, 0.02, 0.12, 30, -0.004], crit: [10, 0xfff2b0, 0.15, 0.08, 14, 0.02],
       explosion: [40, 0x8a8a8a, 0.35, 0.35, 30, -0.01], meal: [12, 0x7ce05a, 0.06, 0.07, 20, -0.005], magic: [10, 0x9a6aff, 0.12, 0.07, 16, 0.01],
-      bubble: [3, 0xd8ecff, 0.02, 0.05, 12, -0.01], splash: [8, 0x9ac8ff, 0.08, 0.05, 14, 0.03]}[kind];
+      bubble: [3, 0xd8ecff, 0.02, 0.05, 12, -0.01], splash: [8, 0x9ac8ff, 0.08, 0.05, 14, 0.03], swirl: [1, 0xffffff, 0.03, 0.07, 18, -0.006], shatter: [40, 0xffffff, 0.18, 0.08, 22, 0.01],
+      portal: [2, 0xa04cff, 0.08, 0.06, 26, -0.004], flame: [2, 0xffa020, 0.03, 0.07, 12, -0.008]}[kind];
     if (!S) return;
-    const [n, tint, spread, size, life, g] = S, layer = LAYER.white_wool ?? 0;
+    const [n, base, spread, size, life, g] = S, tint = color ?? base, layer = LAYER.white_wool ?? 0;
     for (let i = 0; i < n; i++) this.particles.push({x: x + (Math.random() - 0.5) * spread * 4, y: y + (Math.random() - 0.5) * spread * 4, z: z + (Math.random() - 0.5) * spread * 4,
       vx: (Math.random() - 0.5) * spread, vy: Math.random() * spread + 0.02, vz: (Math.random() - 0.5) * spread, g, life: life + Math.floor(Math.random() * 10), layer, uv: [4, 4, 8, 8], size: size * (0.6 + Math.random() * 0.8), tint, air: true});
   }
@@ -128,11 +137,11 @@ export class Entities {
   drawList(view, time, light) {
     const out = [];
     for (const it of this.items) {
-      const look = itemLook(it.stack.id), [sky, blk] = light(Math.floor(it.x), Math.floor(it.y + 0.2), Math.floor(it.z));
+      const look = itemLook(it.stack.id, it.stack), [sky, blk] = light(Math.floor(it.x), Math.floor(it.y + 0.2), Math.floor(it.z));
       const v = new Verts(48);
       const bob = Math.sin((it.age + time * 20) * 0.1 + it.spin) * 0.06 + 0.1;
       if (look.cube) v.cube(look.half ? 0.5 : 0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints);
-      else v.flat(0.5, look.flat, sky * 17, blk * 17, 256, 32, look.tint);
+      else v.flatLook(0.5, look, sky * 17, blk * 17, 256, 32);
       const s = look.cube ? 0.25 : 0.4, copies = it.stack.n > 16 ? 3 : it.stack.n > 1 ? 2 : 1;
       for (let c = 0; c < copies; c++) out.push({verts: v, x: it.x + c * 0.06, y: it.y + bob + s / 2 + c * 0.05, z: it.z + c * 0.04, model: mat.model(s, (it.age / 20 + it.spin) % (Math.PI * 2))});
     }

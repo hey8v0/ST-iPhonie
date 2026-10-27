@@ -34,6 +34,7 @@ export const BIOMES = [
   {name: 'meadow', zh: '草甸', grass: '#83bb6d', foliage: '#63a948', water: '#0e4ecf'},
   {name: 'stony_peaks', zh: '裸岩山峰', grass: '#9abe4b', foliage: '#82ac1e', water: '#3f76e4'},
   {name: 'snowy_slopes', zh: '积雪山坡', grass: '#80b497', foliage: '#60a17b', water: '#3d57d6', cold: true},
+  {name: 'nether_wastes', zh: '下界荒地', grass: '#bfb755', foliage: '#aea42a', water: '#3f76e4', dry: true, nether: true},
 ];
 export const BIOME = Object.fromEntries(BIOMES.map((b, i) => [b.name, i]));
 

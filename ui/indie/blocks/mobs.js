@@ -1,11 +1,13 @@
 // Mobs and other moving things: animals (pigs, cows, sheep, chickens) that wander, flee when hit, follow the food they
 // like and have young; monsters (zombies, skeletons, creepers, spiders) that come out in the dark, hunt the player and
-// burn in the sun; arrows; lit TNT. Their bodies move with the player's physics (player.js); what they look like is in
+// burn in the sun; the Nether's (zombified piglins that only fight back, ghasts and blazes shooting fireballs, magma
+// cubes that split); arrows, fireballs; lit TNT. Their bodies move with the player's physics (player.js); what they look like is in
 // models.js. Numbers (health, speed, damage, drops) are the game's.
 import {Body} from './player.js';
 import {buildModel, animate, MODELS} from './models.js';
 import {BLOCKS, ID, MINY, COLORS} from './blocks.js';
 import {collisionBoxes} from './shapes.js';
+import {fortressAt, spawnersNear} from './nether.js';
 
 export const MOBS = {
   pig: {zh: '猪', health: 10, speed: 0.25, passive: true, breed: ['carrot', 'potato'], drops: [['porkchop', 1, 3, 'cooked_porkchop']]},
@@ -16,6 +18,11 @@ export const MOBS = {
   skeleton: {zh: '骷髅', health: 20, speed: 0.25, hostile: true, undead: true, range: 16, drops: [['bone', 0, 2], ['arrow', 0, 2]]},
   creeper: {zh: '苦力怕', health: 20, speed: 0.25, hostile: true, range: 16, drops: [['gunpowder', 0, 2]]},
   spider: {zh: '蜘蛛', health: 16, speed: 0.3, hostile: true, damage: 2, range: 16, drops: [['string', 0, 2], ['spider_eye', 0, 1]]},
+  // the Nether (neutral: only angry when one of them is hit; fireproof: fire and lava do nothing)
+  zombified_piglin: {zh: '僵尸猪灵', health: 20, speed: 0.23, hostile: true, neutral: true, undead: true, fireproof: true, damage: 8, range: 35, xp: 5, drops: [['rotten_flesh', 0, 1], ['gold_nugget', 0, 1]], rare: ['gold_ingot']},
+  ghast: {zh: '恶魂', health: 10, speed: 0.1, hostile: true, fireproof: true, flies: 'ghast', range: 64, xp: 5, drops: [['ghast_tear', 0, 1], ['gunpowder', 0, 2]]},
+  blaze: {zh: '烈焰人', health: 20, speed: 0.23, hostile: true, fireproof: true, flies: 'blaze', glow: true, range: 48, xp: 10, drops: [['blaze_rod', 0, 1]]},
+  magma_cube: {zh: '岩浆怪', health: 16, speed: 0.2, hostile: true, fireproof: true, range: 16, drops: [['magma_cream', 0, 1]]},
 };
 for (const [k, m] of Object.entries(MOBS)) { m.kind = k; m.size = MODELS[k].size; }
 const WOOL = COLORS.map(c => c[0]);
@@ -38,6 +45,8 @@ export class Mob {
     this.hurtT = 0; this.inv = 0; this.dead = 0; this.fire = 0; this.goal = null; this.wait = 20 + Math.floor(Math.random() * 100);
     this.panic = 0; this.love = 0; this.loveWait = 0; this.cool = 0; this.fuse = 0; this.aim = 0; this.graze = 0; this.attackT = 0; this.angry = 0;
     if (this.baby) { this.body.w *= 0.5; this.body.hgt *= 0.5; }
+    // a magma cube is big (4), middling (2) or small (1): its size × the box, size² health
+    if (kind === 'magma_cube') { this.mag = extra.mag || [1, 2, 4][Math.floor(Math.random() * 3)]; this.body.w *= this.mag; this.body.hgt *= this.mag; if (extra.health == null) this.health = this.mag * this.mag; this.hop = 10; this.squish = 0; }
   }
   get x() { return this.body.x; } get y() { return this.body.y; } get z() { return this.body.z; }
   toJSON() { const b = this.body; return {kind: this.kind, x: +b.x.toFixed(2), y: +b.y.toFixed(2), z: +b.z.toFixed(2), yaw: +this.yaw.toFixed(2), health: this.health, baby: this.baby || undefined, grow: this.grow || undefined, color: this.color || undefined, sheared: this.sheared || undefined}; }
@@ -52,7 +61,7 @@ const turn = (a, b, max) => { let d = ((b - a + Math.PI * 3) % (Math.PI * 2)) - 
  * held(), loaded(x, z)}.
  */
 export class Mobs {
-  constructor(ctx) { this.ctx = ctx; this.list = []; this.arrows = []; this.tnt = []; this.r = Math.random; }
+  constructor(ctx) { this.ctx = ctx; this.list = []; this.arrows = []; this.balls = []; this.tnt = []; this.r = Math.random; this.spawnerT = new Map(); }
   get world() { return this.ctx.world; }
   add(kind, x, y, z, extra) { const m = new Mob(kind, x, y, z, this.world, extra); this.list.push(m); return m; }
   count(fn) { let n = 0; for (const m of this.list) if (fn(m)) n++; return n; }
@@ -72,7 +81,9 @@ export class Mobs {
       this.move(m);
     }
     this.spawnTick();
+    this.spawnerTick();
     this.arrowTick();
+    this.ballTick();
     this.tntTick();
   }
   /** Where a mob wants to go and what it does. */
@@ -85,20 +96,26 @@ export class Mobs {
     const sky = this.ctx.world.light(Math.floor(m.x), Math.floor(m.y + b.height * 0.8), Math.floor(m.z))[0];
     const wet = b.inWater || (sky >= 15 && !!this.ctx.raining?.(m.x, m.z));
     if (d.undead && this.ctx.daylight() > 0.6 && sky >= 15 && !wet) m.fire = Math.max(m.fire, 160);
-    if (b.inLava) m.fire = 300;
+    if (b.inLava && !d.fireproof) m.fire = 300;
+    if (d.fireproof) m.fire = 0;
     if (wet && !b.inLava) m.fire = 0;
     if (m.fire > 0) { m.fire--; if (m.fire % 20 === 0) this.hurt(m, b.inLava ? 4 : 1, null, 'fire'); if (m.age % 4 === 0) this.ctx.burst(m.x, m.y + b.height * 0.6, m.z, 'smoke'); }
-    if (b.inLava && m.age % 10 === 0) this.hurt(m, 4, null, 'lava');
+    if (b.inLava && !d.fireproof && m.age % 10 === 0) this.hurt(m, 4, null, 'lava');
     const pd = Math.hypot(player.x - m.x, player.z - m.z), py = player.y - m.y, alive = !player.dead && this.ctx.mode() !== 'creative';
     m.input = {fwd: 0, jump: false, mod: 1};
     m.lookAt = null;
+    // an invisible player is noticed only from close by
+    const range = d.range * (this.ctx.invisible?.() ? 0.1 : 1);
+    if (m.kind === 'ghast') { this.ghast(m, pd, alive && pd < range); return; }
+    if (m.kind === 'blaze') { this.blaze(m, pd, py, alive && pd < range); return; }
+    if (m.kind === 'magma_cube') { this.cube(m, pd, py, alive && pd < range && Math.abs(py) < 16); return; }
     // monsters
     if (d.hostile) {
       const dark = this.ctx.dark(m.x, m.y + 1, m.z);
-      const hunts = alive && pd < d.range && Math.abs(py) < 24 && (m.kind !== 'spider' || dark || m.angry);
+      const hunts = alive && pd < range && Math.abs(py) < 24 && (m.kind !== 'spider' || dark || m.angry) && (!d.neutral || m.angry > 0);
       if (hunts) {
         m.lookAt = [player.x, player.y + player.eye, player.z];
-        if (m.kind === 'zombie' || m.kind === 'spider') {
+        if (m.kind === 'zombie' || m.kind === 'spider' || m.kind === 'zombified_piglin') {
           m.goal = [player.x, player.z]; m.input.fwd = 1;
           if (m.kind === 'spider' && b.onGround && pd < 5 && pd > 2 && m.cool === 0 && Math.random() < 0.15) { const a = angleTo(m.x, m.z, player.x, player.z); b.vx += -Math.sin(a) * 0.5; b.vz += -Math.cos(a) * 0.5; b.vy = 0.4; m.cool = 20; }
           if (pd < (m.kind === 'spider' ? 1.6 : 1.4) + d.size[0] / 2 && py > -1.5 && py < 2 && m.attackT === 0) {
@@ -161,6 +178,7 @@ export class Mobs {
   /** Walks toward the goal: turning, jumping over steps, not off cliffs or into lava. */
   move(m) {
     const b = m.body, d = m.def, inp = m.input || {fwd: 0, mod: 1};
+    if (d.flies === 'ghast') { this.fly(m); return; }
     let fwd = inp.fwd;
     if (m.goal) {
       const want = angleTo(m.x, m.z, m.goal[0], m.goal[1]);
@@ -179,7 +197,10 @@ export class Mobs {
     const r = b.tick({fwd: fwd * speed / 0.98, side: (m.strafe || 0) * speed / 0.98, speed, jump, autoJump: false});
     // spiders climb walls
     if (m.kind === 'spider' && b.collidedX && fwd) b.vy = 0.2;
-    if (r.landed > 3) this.hurt(m, Math.ceil(r.landed - 3), null, 'fall');
+    // a blaze rises to the player's height and sinks slowly; a magma cube's slices squash when it lands
+    if (d.flies === 'blaze') { if (m.rise) b.vy += (0.3 - b.vy) * 0.3; else if (!b.onGround && b.vy < 0) b.vy *= 0.6; }
+    if (m.kind === 'magma_cube') { if (r.landed) m.squish = -0.5; m.squish *= 0.6; }
+    if (r.landed > 3 && !d.flies && m.kind !== 'magma_cube') this.hurt(m, Math.ceil(r.landed - 3), null, 'fall');
     // the head follows what it looks at
     if (m.lookAt) {
       const dx = m.lookAt[0] - m.x, dy = m.lookAt[1] - (m.y + b.eye), dz = m.lookAt[2] - m.z, h = Math.hypot(dx, dz);
@@ -203,6 +224,7 @@ export class Mobs {
   /** A hit: damage, a knock away from the source, the red flash; dead at no health. */
   hurt(m, n, from = null, why = 'hit') {
     if (m.dead || (m.inv > 0 && why === 'hit')) return false;
+    if (m.def.fireproof && (why === 'fire' || why === 'lava')) return false;
     m.health -= n; m.hurtT = 10; if (why === 'hit' || why === 'arrow') m.inv = 10;
     if (from) {
       const a = Math.atan2(m.x - from.x, m.z - from.z), k = from.knock ?? 0.4;
@@ -210,6 +232,8 @@ export class Mobs {
     }
     if (m.def.passive) m.panic = 100;
     if (m.kind === 'spider' || (m.def.hostile && from?.player)) m.angry = 600;
+    // hit one zombified piglin and those around it come for you too
+    if (m.def.neutral && from?.player) for (const o of this.list) if (o.kind === m.kind && Math.hypot(o.x - m.x, o.z - m.z) < 20) o.angry = 600 + Math.floor(Math.random() * 400);
     this.ctx.sound(m.health <= 0 ? `${m.kind}_death` : `${m.kind}_hurt`, m.x, m.y, m.z);
     if (m.health <= 0) { m.dead = 1; m.killedByPlayer = !!from?.player; }
     return true;
@@ -217,13 +241,16 @@ export class Mobs {
   die(m) {
     this.ctx.burst(m.x, m.y + m.body.height / 2, m.z, 'poof');
     if (m.baby) return;
-    for (const [id, lo, hi, cooked] of m.def.drops) {
+    // a magma cube breaks into two to four of half its size; only the bigger ones drop magma cream
+    if (m.kind === 'magma_cube' && m.mag > 1) for (let k = 2 + Math.floor(Math.random() * 3); k > 0; k--) this.add('magma_cube', m.x + (Math.random() - 0.5) * m.mag * 0.5, m.y + 0.5, m.z + (Math.random() - 0.5) * m.mag * 0.5, {mag: m.mag / 2});
+    const drops = m.kind === 'magma_cube' && m.mag === 1 ? [] : m.kind === 'blaze' && !m.killedByPlayer ? [] : m.def.drops;
+    for (const [id, lo, hi, cooked] of drops) {
       const n = lo + Math.floor(Math.random() * (hi - lo + 1 + (m.killedByPlayer ? this.ctx.looting?.() || 0 : 0)));
       if (n > 0) this.ctx.drop({id: m.fire > 0 && cooked ? cooked : id, n}, m.x, m.y + 0.5, m.z);
     }
     if (m.kind === 'sheep' && !m.sheared) this.ctx.drop({id: `${m.color || 'white'}_wool`, n: 1}, m.x, m.y + 0.5, m.z);
     if (m.def.rare && m.killedByPlayer && Math.random() < 0.025) this.ctx.drop({id: m.def.rare[Math.floor(Math.random() * m.def.rare.length)], n: 1}, m.x, m.y + 0.5, m.z);
-    if (m.killedByPlayer) this.ctx.xp?.(m.def.hostile ? 5 : 1 + Math.floor(Math.random() * 3), m.x, m.y + 0.5, m.z);
+    if (m.killedByPlayer) this.ctx.xp?.(m.kind === 'magma_cube' ? m.mag : m.def.xp || (m.def.hostile ? 5 : 1 + Math.floor(Math.random() * 3)), m.x, m.y + 0.5, m.z);
   }
   /** The mob a ray from the eye hits first within reach: {mob, t} or null. */
   raycast(ox, oy, oz, dx, dy, dz, reach) {
@@ -246,6 +273,7 @@ export class Mobs {
   spawnTick() {
     const {player} = this.ctx;
     if (this.ctx.mode() === 'creative' && this.ctx.peaceful?.()) return;
+    if (this.ctx.nether?.()) { this.netherSpawn(); return; }
     if (this.count(m => m.def.hostile) >= 18 || Math.random() > 0.25) return;
     const a = Math.random() * Math.PI * 2, r = 24 + Math.random() * 40, x = Math.floor(player.x + Math.cos(a) * r), z = Math.floor(player.z + Math.sin(a) * r);
     if (!this.ctx.loaded(x, z)) return;
@@ -260,6 +288,150 @@ export class Mobs {
     const kinds = ['zombie', 'zombie', 'skeleton', 'skeleton', 'creeper', 'spider'], kind = kinds[Math.floor(Math.random() * kinds.length)];
     if (kind === 'spider' && (collisionBoxes(this.world.get(x + 1, y, z)) || collisionBoxes(this.world.get(x - 1, y, z)))) return;
     this.add(kind, x + 0.5, y, z + 0.5);
+  }
+  /**
+   * The Nether's: on a floor somewhere around (16–56 blocks off): in a fortress mostly blazes, else zombified piglins
+   * in groups, ghasts where there is room to float, now and then a magma cube.
+   */
+  netherSpawn() {
+    const {player} = this.ctx, get = (x, y, z) => this.world.get(x, y, z);
+    if (this.count(m => m.def.hostile) >= 14 || Math.random() > 0.2) return;
+    const a = Math.random() * Math.PI * 2, r = 16 + Math.random() * 40, x = Math.floor(player.x + Math.cos(a) * r), z = Math.floor(player.z + Math.sin(a) * r);
+    if (!this.ctx.loaded(x, z)) return;
+    let y = 33 + Math.floor(Math.random() * 88);
+    while (y > 32 && !(collisionBoxes(get(x, y - 1, z)) && !get(x, y, z) && !get(x, y + 1, z))) y--;
+    const below = get(x, y - 1, z) & 0xFFF;
+    if (y <= 32 || below === ID.bedrock || below === ID.lava || BLOCKS[below].shape === 'slab') return;
+    const fort = fortressAt(this.ctx.seed, x + 0.5, y, z + 0.5), q = Math.random();
+    const kind = fort ? (q < 0.6 ? 'blaze' : q < 0.8 ? 'zombified_piglin' : 'magma_cube') : q < 0.62 ? 'zombified_piglin' : q < 0.95 ? 'ghast' : 'magma_cube';
+    if (kind === 'ghast') {
+      if (this.count(m => m.kind === 'ghast') >= 3) return;
+      for (let dy = 0; dy < 5; dy++) for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) if (get(x + dx, y + dy, z + dz)) return;
+    }
+    const n = kind === 'zombified_piglin' ? 1 + Math.floor(Math.random() * 3) : 1;
+    for (let k = 0; k < n; k++) this.add(kind, x + 0.5 + (k ? (Math.random() - 0.5) * 0.6 : 0), y, z + 0.5 + (k ? (Math.random() - 0.5) * 0.6 : 0));
+  }
+  /** A fortress's blaze spawner near the player (16 blocks): every 10–40 seconds up to four blazes round it, while fewer than six are near. */
+  spawnerTick() {
+    if (!this.ctx.nether?.() || this.ctx.mode() === 'creative' || Math.random() > 0.05) return;
+    const {player} = this.ctx;
+    for (const [x, y, z] of spawnersNear(this.ctx.seed, player.x, player.z)) {
+      if (Math.hypot(x + 0.5 - player.x, y - player.y, z + 0.5 - player.z) > 16 || (this.world.get(x, y, z) & 0xFFF) !== ID.spawner) continue;
+      const k = `${x},${y},${z}`, t = this.spawnerT.get(k) ?? 20;
+      if (t > 0) { this.spawnerT.set(k, t - 20); continue; }
+      this.spawnerT.set(k, 200 + Math.floor(Math.random() * 600));
+      if (this.count(m => m.kind === 'blaze' && Math.hypot(m.x - x, m.y - y, m.z - z) < 9) >= 6) continue;
+      for (let n = 0; n < 4; n++) {
+        const bx = x + Math.floor((Math.random() - 0.5) * 8), by = y + Math.floor(Math.random() * 3) - 1, bz = z + Math.floor((Math.random() - 0.5) * 8);
+        if (!this.world.get(bx, by, bz) && !this.world.get(bx, by + 1, bz)) { this.add('blaze', bx + 0.5, by, bz + 0.5); this.ctx.burst(bx + 0.5, by + 1, bz + 0.5, 'flame'); }
+      }
+    }
+  }
+  // ---------- the Nether's monsters ----------
+  /** A ghast drifts about; seeing the player, it cries out, then spits a fireball (one every three seconds). */
+  ghast(m, pd, hunting) {
+    const p = this.ctx.player;
+    if (!m.fly || m.wait-- <= 0 || Math.hypot(m.fly[0] - m.x, m.fly[1] - m.y, m.fly[2] - m.z) < 1) { m.fly = [m.x + (Math.random() * 2 - 1) * 16, m.y + (Math.random() * 2 - 1) * 16, m.z + (Math.random() * 2 - 1) * 16]; m.wait = 40 + Math.floor(Math.random() * 80); }
+    if (hunting && this.sees(m, p)) {
+      m.lookAt = [p.x, p.y + p.eye, p.z];
+      if (++m.aim === 10) this.ctx.sound('ghast_warn', m.x, m.y, m.z);
+      if (m.aim >= 20) { m.aim = -40; this.fireball(m, p, 'large'); }
+    } else m.aim = m.aim > 0 ? m.aim - 1 : Math.min(0, m.aim + 1);
+    if (m.age % 200 === m.id % 200 && Math.random() < 0.4) this.ctx.sound('ghast', m.x, m.y, m.z);
+  }
+  /** Flying (a ghast): drawn toward where it wants to be, slowed by the air; something in the way, it picks a new place. */
+  fly(m) {
+    const b = m.body, [tx, ty, tz] = m.fly || [m.x, m.y, m.z], dx = tx - m.x, dy = ty - m.y, dz = tz - m.z, l = Math.hypot(dx, dy, dz) || 1;
+    b.prev = {x: b.x, y: b.y, z: b.z};
+    if (l > 1) { b.vx += dx / l * 0.1 * 0.1; b.vy += dy / l * 0.1 * 0.1; b.vz += dz / l * 0.1 * 0.1; }
+    const r = b.move(b.vx, b.vy, b.vz);
+    if (r.hitX || r.hitY || r.hitZ) { m.fly = null; if (r.hitX) b.vx = 0; if (r.hitY) b.vy = 0; if (r.hitZ) b.vz = 0; }
+    b.vx *= 0.91; b.vy *= 0.91; b.vz *= 0.91;
+    m.yaw = m.lookAt ? angleTo(m.x, m.z, m.lookAt[0], m.lookAt[2]) : Math.hypot(b.vx, b.vz) > 0.002 ? Math.atan2(-b.vx, -b.vz) : m.yaw;
+    b.yaw = m.yaw; m.headYaw = 0; m.headPitch = 0;
+    if (b.y < 0) { m.health = 0; m.dead = 20; }
+  }
+  /** A blaze hovers to the player's height; it burns for three seconds, then throws three small fireballs; close by it hits. */
+  blaze(m, pd, py, hunting) {
+    const p = this.ctx.player, d = m.def, b = m.body;
+    if (m.age % 5 === 0) this.ctx.burst(m.x, m.y + 0.4 + Math.random() * 1.2, m.z, m.aim > 0 && m.aim < 80 ? 'flame' : 'smoke');
+    m.rise = false;
+    if (!hunting || !this.sees(m, p)) { m.aim = Math.min(0, m.aim + 1); if (--m.wait <= 0) { m.wait = 60 + Math.floor(Math.random() * 120); const a = Math.random() * Math.PI * 2; m.goal = [m.x + Math.cos(a) * 5, m.z + Math.sin(a) * 5]; } m.input.fwd = m.goal ? 1 : 0; return; }
+    m.lookAt = [p.x, p.y + p.eye, p.z]; m.goal = [p.x, p.z]; m.input.fwd = pd > 6 ? 1 : 0;
+    m.rise = p.y + p.eye > m.y + b.eye + 0.8;
+    if (pd < 2 && Math.abs(py) < 2 && m.attackT === 0) { m.attackT = 20; this.ctx.hurtPlayer(6, `被${d.zh}杀死了`, m); }
+    if (++m.aim === 60) this.ctx.sound('blaze_shoot', m.x, m.y, m.z);
+    if (m.aim > 60 && (m.aim - 60) % 6 === 0) this.fireball(m, p, 'small');
+    if (m.aim >= 78) m.aim = -100;
+    if (m.age % 160 === m.id % 160 && Math.random() < 0.5) this.ctx.sound('blaze', m.x, m.y, m.z);
+  }
+  /** A magma cube hops (only moving in the air), more often when after the player; touching the player hurts them. */
+  cube(m, pd, py, hunting) {
+    const p = this.ctx.player, b = m.body;
+    if (hunting) { m.yaw = turn(m.yaw, angleTo(m.x, m.z, p.x, p.z), 0.6); m.lookAt = [p.x, p.y + p.eye, p.z]; }
+    else if (m.age % 60 === 0) m.yaw += (Math.random() - 0.5) * 2;
+    m.goal = null; m.input.fwd = b.onGround ? 0 : 1; m.input.mod = 1 + m.mag * 0.4;
+    if (b.onGround && --m.hop <= 0) {
+      b.vy = 0.42 + m.mag * 0.1; m.squish = 1;
+      m.hop = Math.floor((10 + Math.random() * 20) / (hunting ? 3 : 1));
+      this.ctx.sound('magma_cube', m.x, m.y, m.z);
+    }
+    if (hunting && pd < b.w / 2 + 0.6 && py > -b.hgt && py < 1.5 && m.attackT === 0) { m.attackT = 20; this.ctx.hurtPlayer({1: 3, 2: 4, 4: 6}[m.mag] || 3, `被${m.def.zh}杀死了`, m); }
+  }
+  // ---------- fireballs ----------
+  /** A ghast's big fireball (it explodes) or a blaze's small one (it burns), flying at the player. */
+  fireball(m, p, kind) {
+    const big = kind === 'large', ax = m.x, ay = m.y + m.body.height * (big ? 0.5 : 0.75), az = m.z;
+    let dx = p.x - ax, dy = p.y + p.height / 2 - ay, dz = p.z - az;
+    if (!big) { const spread = Math.sqrt(Math.hypot(dx, dz)) * 0.5; dx += (Math.random() - 0.5) * spread; dz += (Math.random() - 0.5) * spread; }
+    const l = Math.hypot(dx, dy, dz) || 1, ux = dx / l, uy = dy / l, uz = dz / l, start = big ? 2.5 : 0.6;
+    this.balls.push({x: ax + ux * start, y: ay + uy * start, z: az + uz * start, vx: 0, vy: 0, vz: 0, ax: ux * 0.05, ay: uy * 0.05, az: uz * 0.05, big, from: m, life: 0});
+    this.ctx.sound(big ? 'ghast_shoot' : 'blaze_shoot', ax, ay, az);
+  }
+  /** The player hits a fireball in front of them: it flies off the way they look (back at the ghast, with luck). */
+  deflect(eye, dir) {
+    for (const f of this.balls) {
+      const dx = f.x - eye[0], dy = f.y - eye[1], dz = f.z - eye[2], t = dx * dir[0] + dy * dir[1] + dz * dir[2];
+      if (t < 0 || t > 4 || Math.hypot(dx - dir[0] * t, dy - dir[1] * t, dz - dir[2] * t) > (f.big ? 1 : 0.5)) continue;
+      Object.assign(f, {vx: dir[0] * 0.8, vy: dir[1] * 0.8, vz: dir[2] * 0.8, ax: dir[0] * 0.05, ay: dir[1] * 0.05, az: dir[2] * 0.05, from: 'player'});
+      this.ctx.sound('attack', f.x, f.y, f.z);
+      return true;
+    }
+    return false;
+  }
+  ballTick() {
+    const {player} = this.ctx;
+    for (let i = this.balls.length - 1; i >= 0; i--) {
+      const f = this.balls[i];
+      // they speed up as they go (and the air slows them): the game's fireballs
+      f.vx = (f.vx + f.ax) * 0.95; f.vy = (f.vy + f.ay) * 0.95; f.vz = (f.vz + f.az) * 0.95;
+      if (++f.life > 200) { this.balls.splice(i, 1); continue; }
+      if (f.life % 2 === 0) this.ctx.burst(f.x, f.y, f.z, f.big ? 'smoke' : 'flame');
+      const steps = Math.max(1, Math.ceil(Math.hypot(f.vx, f.vy, f.vz) / 0.25)), r = f.big ? 0.5 : 0.16;
+      let hit = null;
+      for (let k = 0; k < steps && !hit; k++) {
+        const nx = f.x + f.vx / steps, ny = f.y + f.vy / steps, nz = f.z + f.vz / steps;
+        if (f.from !== 'player' || f.life > 5) {
+          const [x0, y0, z0, x1, y1, z1] = player.aabb();
+          if (!player.dead && nx > x0 - r && nx < x1 + r && ny > y0 - r && ny < y1 + r && nz > z0 - r && nz < z1 + r) hit = {player: true};
+        }
+        for (const m of this.list) {
+          if (hit || m === f.from || m.dead) continue;
+          const [x0, y0, z0, x1, y1, z1] = m.body.aabb();
+          if (nx > x0 - r && nx < x1 + r && ny > y0 - r && ny < y1 + r && nz > z0 - r && nz < z1 + r) hit = {mob: m};
+        }
+        if (!hit && collisionBoxes(this.world.get(Math.floor(nx), Math.floor(ny), Math.floor(nz)))) hit = {block: true};
+        f.x = nx; f.y = ny; f.z = nz;
+      }
+      if (!hit) continue;
+      this.balls.splice(i, 1);
+      const by = f.from === 'player' ? {player: true, x: f.x, z: f.z} : null;
+      if (f.big) {
+        if (hit.mob) this.hurt(hit.mob, 6, by || {x: f.x, z: f.z}, 'hit');
+        this.ctx.explode(f.x, f.y, f.z, 1, f.from === 'player' ? null : f.from);
+      } else if (hit.player) this.ctx.hurtPlayer(5, `被${f.from?.def?.zh || ''}的火球烧死了`, {x: f.x, z: f.z}, 'fire');
+      else if (hit.mob) { this.hurt(hit.mob, 5, by, 'fire'); if (!hit.mob.def.fireproof) hit.mob.fire = Math.max(hit.mob.fire, 100); }
+    }
   }
   // ---------- arrows ----------
   shoot(m, p) {
@@ -346,11 +518,11 @@ export class Mobs {
       const dx = m.x - view.x, dz = m.z - view.z;
       if (dx * dx + dz * dz > view.far * view.far) continue;
       const b = m.body, a = view.alpha ?? 1, x = b.prev.x + (b.x - b.prev.x) * a - view.x, y = b.prev.y + (b.y - b.prev.y) * a - view.y, z = b.prev.z + (b.z - b.prev.z) * a - view.z;
-      const rot = animate(m.kind, {}, {limb: m.limb, amount: m.amount, headYaw: -m.headYaw, headPitch: m.headPitch, age: m.age, attack: m.attackT > 10 ? 1 : 0, aim: m.aim > 0, fall: !b.onGround, graze: m.graze > 0});
-      const s = m.baby ? 0.5 : 1, roll = m.dead ? Math.min(1, m.dead / 10) * Math.PI / 2 : 0, swell = m.fuse ? Math.min(1, m.fuse / 30) * 0.3 * (1 + Math.sin(m.fuse * 0.9) * 0.15) : 0;
+      const rot = animate(m.kind, {}, {limb: m.limb, amount: m.amount, headYaw: -m.headYaw, headPitch: m.headPitch, age: m.age, attack: m.attackT > 10 ? 1 : 0, aim: m.aim > 0 || (m.def.neutral && m.angry > 0), fall: !b.onGround, graze: m.graze > 0, squish: m.squish || 0});
+      const s = (m.baby ? 0.5 : 1) * (MODELS[m.kind].scale || 1) * (m.mag || 1), roll = m.dead ? Math.min(1, m.dead / 10) * Math.PI / 2 : 0, swell = m.fuse ? Math.min(1, m.fuse / 30) * 0.3 * (1 + Math.sin(m.fuse * 0.9) * 0.15) : 0;
       const [sky, blk] = light(Math.floor(m.x), Math.floor(m.y + b.height / 2), Math.floor(m.z));
       const pose = {x, y, z, yaw: m.yaw, s, roll, swell}, hurt = m.hurtT > 0 || m.dead ? 1 : 0, white = m.fuse && Math.floor(m.fuse / 5) % 2 ? 0.6 : 0;
-      const fire = m.fire > 0 ? 1 : 0;
+      const fire = m.fire > 0 || m.def.glow ? 1 : 0;
       out.push({skin: m.kind, verts: new Float32Array(buildModel(m.kind, rot, pose, [], sizes[m.kind])), light: [sky, Math.max(blk, fire ? 14 : 0)], tint: [1, 1, 1], hurt, white});
       if (m.kind === 'sheep' && !m.sheared) out.push({skin: 'sheep_wool', verts: new Float32Array(buildModel('sheep_wool', rot, pose, [], sizes.sheep_wool)), light: [sky, blk], tint: WOOL_TINT[m.color] || [1, 1, 1], hurt, white: 0});
     }

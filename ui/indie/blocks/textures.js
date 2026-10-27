@@ -731,8 +731,65 @@ BLOCK_ART.weather_rain = () => { const p = pic(), r = rng(71); for (let k = 0; k
 BLOCK_ART.weather_snow = () => { const p = pic(), r = rng(72); for (let k = 0; k < 7; k++) { const x = Math.floor(r() * 15), y = Math.floor(r() * 15); p.set(x, y, [255, 255, 255], 230); if (r() < 0.5) p.set(x + 1, y, [235, 240, 250], 200); } return p; };
 BLOCK_ART.lightning_bolt = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, [235, 240, 255]); return p; };
 
+// ---------- the Nether ----------
+const NETHERRACK = ['#4f1d1d', '#5e2222', '#6b2828', '#782d2d', '#843333', '#6f1f1f'];
+BLOCK_ART.netherrack = () => { const p = mottled(301, NETHERRACK, {cells: 8, grain: 0.7, smooth: 0.3}); const r = rng(302); for (let k = 0; k < 10; k++) { const x = Math.floor(r() * S), y = Math.floor(r() * S); p.set(x, y, hex('#3b1212')); p.set(x + 1, y, hex('#9a4a4a')); } return p; };
+BLOCK_ART.soul_sand = () => {
+  const p = mottled(311, ['#3e2d22', '#4a372a', '#554032', '#5f493a'], {cells: 8, grain: 0.5, smooth: 0.4});
+  // faces of the souls pressed into it
+  for (const [fx, fy] of [[2, 3], [9, 2], [4, 10], [11, 9]]) { for (const [dx, dy] of [[0, 0], [2, 0], [0, 2], [1, 2], [2, 2]]) p.set(fx + dx, fy + dy, hex('#2a1d15')); p.set(fx + 1, fy + 3, hex('#2a1d15')); }
+  return p;
+};
+BLOCK_ART.nether_quartz_ore = () => specks(BLOCK_ART.netherrack(), 321, 7, ['#f0ebe2', '#d6cfc0', '#ffffff'], {size: 2});
+BLOCK_ART.nether_gold_ore = () => specks(BLOCK_ART.netherrack(), 322, 8, ['#f6d050', '#c8961c', '#fff08a'], {size: 1});
+// magma: dark crust with glowing cracks that throb (three frames)
+const magma = f => { const p = mottled(331, ['#5a2410', '#6a2c12', '#4a1c0c'], {cells: 4, grain: 0.4}), n = tileNoise(332, 4), glow = [0.12, 0.17, 0.14][f]; for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const v = Math.abs(n(x, y) - 0.5); if (v < glow) p.set(x, y, v < glow * 0.45 ? hex('#ffd24a') : hex('#e8701a')); } return p; };
+BLOCK_ART.magma = magma;
+BLOCK_ART.nether_bricks = () => {
+  const p = pic().fill(hex('#2c1418')), r = rng(341);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const row = y >> 2, off = row % 2 ? 4 : 0, inBrick = (y & 3) !== 3 && ((x + off) & 7) !== 7;
+    if (inBrick) p.set(x, y, mul(hex(['#46222a', '#4e262e', '#552a33'][Math.floor(r() * 3)]), (y & 3) === 0 ? 1.15 : 1));
+  }
+  return p;
+};
+// nether wart: little red knobs on stalks, bigger as it grows
+const wart = stage => { const p = pic(), r = rng(351 + stage); const n = [4, 6, 9][stage]; for (let k = 0; k < n; k++) { const x = 2 + Math.floor(r() * 12), top = 15 - (stage + 1) * 3 - Math.floor(r() * 3); for (let y = top + 1; y < 16; y++) p.set(x, y, hex('#6a1a1a')); p.set(x, top, hex('#c0302a')); if (stage) { p.set(x - 1, top, hex('#a02420')); p.set(x + 1, top + 1, hex('#8a1e1a')); } if (stage === 2) p.set(x, top - 1, hex('#e04a3a')); } return p; };
+for (let i = 0; i < 3; i++) BLOCK_ART[`nether_wart_stage${i}`] = () => wart(i);
+BLOCK_ART.spawner = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const bar = x % 5 === 0 || y % 5 === 0 || x === 15 || y === 15; if (bar) p.set(x, y, mul(hex('#2c3a46'), 0.8 + hash(361, x, y) * 0.4)); } return p; };
+// the portal: purple swirls that turn (sixteen frames)
+const portal = f => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const a = Math.atan2(y - 7.5, x - 7.5), d = Math.hypot(x - 7.5, y - 7.5), v = Math.sin(a * 2 + d * 0.9 - f * Math.PI / 8) * 0.5 + 0.5 + (hash(371, x, y) - 0.5) * 0.3; p.set(x, y, mix(hex('#3a0a7a'), hex('#b45cff'), clamp(v, 0, 1)), 190); } return p; };
+BLOCK_ART.nether_portal = portal;
+BLOCK_ART.quartz_block_side = () => mottled(381, ['#e8e2d6', '#ece6db', '#f0ebe1', '#e4ddd0'], {cells: 4, grain: 0.15, smooth: 0.8});
+BLOCK_ART.quartz_block_top = BLOCK_ART.quartz_block_bottom = () => { const p = BLOCK_ART.quartz_block_side(); for (let i = 0; i < S; i++) { p.set(i, 0, hex('#d4ccbd')); p.set(0, i, hex('#d4ccbd')); } return p; };
+// the brewing stand: a dark rod and arms; the base grey stone
+BLOCK_ART.brewing_stand = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, mul(hex('#5a4a3a'), 0.85 + hash(391, x, y) * 0.3)); for (let y = 0; y < 3; y++) for (let x = 6; x < 10; x++) p.set(x, y, hex('#d8c050')); return p; };
+BLOCK_ART.brewing_stand_base = () => mottled(392, ['#6a6a6a', '#7a7a7a', '#5e5e5e'], {cells: 4, grain: 0.3});
+// items
+const bottle = () => mask().disc(8, 10.5, 4.6, 4.2).poly([[6.5, 2.5], [9.5, 2.5], [9.5, 7], [6.5, 7]]);
+const splashBottle = () => mask().disc(8, 10, 5, 4.6).poly([[6.5, 2], [9.5, 2], [9.5, 6], [6.5, 6]]);
+const liquid = shape => mask().disc(8, 10.8, 3.4, 3).cut(mask().poly([[0, 0], [16, 0], [16, shape === 'splash' ? 8.5 : 9], [0, shape === 'splash' ? 8.5 : 9]]));
+const glassOf = (m, cutLiquid, cork) => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { if (!m.m[y * S + x] || cutLiquid?.m[y * S + x]) continue; const edge = !m.m[y * S + x - 1] || !m.m[y * S + x + 1] || !m.m[(y - 1) * S + x] || !m.m[(y + 1) * S + x]; if (edge) p.set(x, y, hex('#5a6a7a')); else if (cutLiquid) p.set(x, y, hex('#dfeef8'), 110); else p.set(x, y, hex('#c8dcea'), 150); } for (let x = 7; x < 9; x++) { p.set(x, 1, hex(cork)); p.set(x, 2, hex(cork)); } return p; };
+ITEM_ART.glass_bottle = () => glassOf(bottle(), null, '#a87850');
+ITEM_ART.potion = () => glassOf(bottle(), liquid('drink'), '#a87850');
+ITEM_ART.splash_potion = () => glassOf(splashBottle(), liquid('splash'), '#8a8a8a');
+ITEM_ART.potion_overlay = () => { const p = pic(), m = liquid('drink'); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (m.m[y * S + x]) p.set(x, y, mul([255, 255, 255], 0.75 + (x < 7 && y < 11 ? 0.25 : 0) - (y > 12 ? 0.15 : 0))); return p; };
+ITEM_ART.quartz = () => icon([{mask: mask().poly([[3, 9], [7, 3], [10, 5], [13, 4], [12, 11], [7, 13]]), color: '#e8e2d6', light: '#ffffff', dark: '#b8ae9c', outline: '#4a443a'}]);
+ITEM_ART.gold_nugget = () => icon([{mask: mask().disc(7, 9, 3.2, 2.6).disc(10, 7.5, 2.4), color: '#f2d23a', light: '#fff7a8', dark: '#c99a1a', outline: '#5a3f08'}], {sparkle: [[6, 8]]});
+ITEM_ART.nether_brick = () => icon([{mask: mask().poly([[2, 10], [9, 5.5], [14, 7.5], [7, 12.5]]), color: '#4e262e', light: '#6e3a44', dark: '#2c1418', outline: '#140808'}]);
+ITEM_ART.nether_wart = () => icon([{mask: blob(8, 8.5, 4.4, 401), color: '#a02420', light: '#d84a3a', dark: '#5e1010', outline: '#2a0606', grain: true}]);
+ITEM_ART.blaze_rod = () => icon([{mask: mask().line(3.5, 12.5, 12.5, 3.5, 2.2), color: '#f0b020', light: '#fff07a', dark: '#b06a08', outline: '#4a2a04'}]);
+ITEM_ART.blaze_powder = () => { const m = mask(), r = rng(402); for (let k = 0; k < 9; k++) m.disc(4 + r() * 8, 6 + r() * 7, 1.2 + r() * 1.2); return icon([{mask: m, color: '#f09a1a', light: '#ffe060', dark: '#b05a08', outline: '#4a2204'}]); };
+ITEM_ART.ghast_tear = () => icon([{mask: mask().disc(8, 10, 3.6).poly([[8, 2.5], [11, 8.5], [5, 8.5]]), color: '#e6f4f4', light: '#ffffff', dark: '#a8c4c8', outline: '#4a5a5e'}], {sparkle: [[7, 9]]});
+ITEM_ART.magma_cream = () => icon([{mask: mask().disc(8, 8.5, 4.8, 4.2), color: '#6a2c12', light: '#9a4a1e', dark: '#3a1608', outline: '#1a0804', grain: true}, {mask: mask().disc(8, 8.5, 2.2, 1.8), color: '#f0a020', light: '#ffe060', dark: '#c06a10'}]);
+ITEM_ART.fermented_spider_eye = () => icon([{mask: mask().disc(8, 9, 4.6), color: '#a3201c', light: '#d84a3c', dark: '#5e0e0c', outline: '#2a0606'}, {mask: mask().disc(9, 7, 2.2).disc(6, 11, 1.6), color: '#c8b8a8', light: '#f0e6da', dark: '#8a7a6a'}]);
+ITEM_ART.sugar = () => { const m = mask(), r = rng(403); for (let k = 0; k < 10; k++) m.disc(4 + r() * 8, 6 + r() * 7, 1 + r() * 1.3); return icon([{mask: m, color: '#f4f4f4', light: '#ffffff', dark: '#c8c8d0', outline: '#6a6a72'}]); };
+ITEM_ART.golden_carrot = () => icon([{mask: mask().line(4, 12, 11, 5, 3).line(3.5, 12.5, 6, 10, 2), color: '#f2d23a', light: '#fff7a8', dark: '#c99a1a', outline: '#5a3f08'}, {mask: mask().line(11, 5, 13.5, 2, 1.4).line(11, 5, 14, 5, 1.2), color: '#e8c838', light: '#fff07a', dark: '#a88a18', outline: '#3a2e08'}], {sparkle: [[7, 8]]});
+ITEM_ART.glistering_melon_slice = () => icon([{mask: mask().poly([[2, 4], [14, 4], [8, 14]]), color: '#e23b3b', light: '#ff7a6a', dark: '#a41f1f', outline: '#4a0a0a'}, {mask: mask().line(2.5, 4, 13.5, 4, 1.4), color: '#f2d23a', light: '#fff7a8', dark: '#c99a1a'}], {sparkle: [[6, 7], [9, 9], [8, 6]]});
+ITEM_ART.fire_charge = () => { const p = icon([{mask: mask().disc(8, 8.5, 5), color: '#3a2a20', light: '#5a4030', dark: '#1a1008', outline: '#0a0604', grain: true}]); for (const [x, y] of [[6, 6], [9, 7], [7, 10], [10, 10], [5, 9]]) p.set(x, y, hex(hash(404, x, y) > 0.5 ? '#f0a020' : '#ff5a10')); return p; };
+
 /** Frames per animated texture and ticks per frame. */
-export const ANIMATED = {water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}};
+export const ANIMATED = {water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};
 /** Our drawing of a texture by name: {w, h, frames: [Uint8ClampedArray], time} or null when we have none. */
 export function ownTexture(name) {
   const art = BLOCK_ART[name] || ITEM_ART[name];

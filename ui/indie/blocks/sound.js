@@ -21,7 +21,7 @@ export function materialOf(v) {
   if (!b) return 'stone';
   const n = b.name;
   if (/_log|_planks|crafting|chest|bookshelf|ladder|oak_slab|pumpkin|melon/.test(n)) return 'wood';
-  if (/grass_block|dirt|podzol|farmland|clay|moss|mud|leaves|sapling|short_grass|fern|cactus|sugar_cane|wheat|mushroom|dandelion|poppy|orchid|allium|bluet|daisy|cornflower|lily|dead_bush/.test(n)) return 'grass';
+  if (/grass_block|dirt|podzol|farmland|clay|moss|mud|leaves|sapling|short_grass|fern|cactus|sugar_cane|wheat|mushroom|dandelion|poppy|orchid|allium|bluet|daisy|cornflower|lily|dead_bush|nether_wart/.test(n)) return 'grass';
   if (/sand|gravel/.test(n)) return 'sand';
   if (/glass|ice|glowstone/.test(n)) return 'glass';
   if (/wool/.test(n)) return 'cloth';
@@ -57,13 +57,19 @@ function voice(kind, mood, k) {
     case 'skeleton': for (let i = 0; i < 5; i++) burst(2600 * p, 6, 0.12 * g, 0.04, {at: i * 0.05 + Math.random() * 0.02}); break;
     case 'spider': burst(3800 * p, 1.5, 0.12 * g, 0.4 * long); break;
     case 'creeper': burst(2000, 1, 0.08 * g, 0.2); break;
+    // the Nether's: a piglin's grunt, a ghast's wail (a shriek before it shoots), a blaze's breathing, a cube's squelch
+    case 'zombified': tone(120 * p, 0.16 * g, 0.25 * long, {type: 'sawtooth', slide: 0.8}); tone(180 * p, 0.1 * g, 0.15 * long, {type: 'square', slide: 0.7, at: 0.12}); break;
+    case 'ghast': if (mood === 'warn') { tone(900, 0.2 * g, 0.7, {type: 'sawtooth', slide: 1.4}); burst(2400, 1, 0.15 * g, 0.6); } else if (mood === 'shoot') burst(600, 0.6, 0.35 * g, 0.5, {pitch: 0.7}); else { tone(420 * p, 0.12 * g, 1.4 * long, {type: 'triangle', slide: 0.6}); tone(640 * p, 0.06 * g, 1.2 * long, {type: 'sine', slide: 0.5, at: 0.1}); } break;
+    case 'blaze': if (mood === 'shoot') { burst(1200, 0.7, 0.3 * g, 0.4); tone(160, 0.12 * g, 0.4, {type: 'sawtooth', slide: 0.5}); } else burst(800 * p, 0.5, 0.18 * g, 0.9 * long, {pitch: 0.6}); break;
+    case 'magma': burst(400 * p, 1.2, 0.2 * g, 0.18); tone(90 * p, 0.12 * g, 0.15, {type: 'sine', slide: 0.6}); break;
   }
 }
 /** Plays a sound: break, place, step, hit (digging), pop, splash, fizz, hurt, eat, burp, click, levelup, and the mobs'. */
 export function play(name, v = 0, k = 1) {
   if (!ctx || !sound.volume || k <= 0) return;
-  const [kind, mood] = name.split('_');
-  if (['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'spider', 'creeper'].includes(kind)) { voice(kind, mood, k); return; }
+  // a mob's sound: its kind first, what happened last (zombified_piglin_hurt, ghast_warn)
+  const parts = name.split('_'), kind = parts[0], mood = parts.length > 1 ? parts.at(-1) : undefined;
+  if (['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'spider', 'creeper', 'zombified', 'ghast', 'blaze', 'magma'].includes(kind)) { voice(kind, mood, k); return; }
   const [f, q, g] = MAT[materialOf(v)] || MAT.stone, r = 0.85 + Math.random() * 0.3;
   switch (name) {
     case 'break': burst(f, q, g * 0.9, 0.22, {pitch: r}); burst(f * 0.6, q, g * 0.5, 0.18, {pitch: r, at: 0.03}); break;
@@ -97,6 +103,13 @@ export function play(name, v = 0, k = 1) {
     case 'bite': burst(1000, 0.8, 0.35 * k, 0.35, {pitch: 1.2}); break;
     case 'equip': burst(2200, 3, 0.18, 0.12); burst(1400, 2, 0.12, 0.15, {at: 0.05}); break;
     case 'thunder': burst(90, 0.5, 0.9 * k, 2.6, {pitch: 0.7}); burst(400, 0.7, 0.45 * k, 1.4, {at: 0.05}); burst(1800, 0.6, 0.25 * k, 0.4); tone(42, 0.4 * k, 2.2, {type: 'sawtooth', slide: 0.6, at: 0.1}); break;
+    // the portal's hum rising as you stand in it, the rush of going through
+    case 'portal': tone(70, 0.22, 3.6, {type: 'sawtooth', slide: 3.2}); burst(700, 0.6, 0.18, 3.4, {pitch: 0.6}); tone(140, 0.08, 3.2, {type: 'sine', slide: 2.6, at: 0.3}); break;
+    case 'travel': burst(400, 0.5, 0.5, 1.2, {pitch: 0.5}); tone(300, 0.2, 1, {type: 'sawtooth', slide: 0.25}); break;
+    case 'drink': for (let i = 0; i < 2; i++) tone(260 + Math.random() * 60, 0.14, 0.09, {type: 'sine', slide: 1.5, at: i * 0.12}); break;
+    case 'throw': burst(900, 1, 0.2, 0.25, {pitch: 0.7}); break;
+    case 'glass': for (let i = 0; i < 4; i++) burst(4200 + Math.random() * 2000, 5, 0.25 * k, 0.12, {at: i * 0.03}); break;
+    case 'brew': for (let i = 0; i < 5; i++) tone(400 + Math.random() * 500, 0.06 * k, 0.07, {slide: 1.8, at: i * 0.09}); break;
   }
 }
 // rain: a soft hiss that keeps going, as loud as it rains where the player is (quieter under a roof)

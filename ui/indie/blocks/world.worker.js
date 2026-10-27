@@ -12,8 +12,9 @@ onmessage = async e => {
   const m = e.data;
   try {
     if (m.type === 'init') {
-      const store = m.worldId ? await openStore(m.worldId, BY_NAME) : null;
-      world = new World({seed: m.seed, tex: name => m.layers[name] ?? 0, post, store, radius: m.radius, worldId: m.worldId});
+      // the Nether's columns are kept under their own names beside the overworld's
+      const dim = m.dim === 'nether' ? 'nether' : 'overworld', store = m.worldId ? await openStore(m.worldId + (dim === 'nether' ? ':nether' : ''), BY_NAME) : null;
+      world = new World({seed: m.seed, tex: name => m.layers[name] ?? 0, post, store, radius: m.radius, worldId: m.worldId, dim});
       world.center = m.center;
       world.wave = m.wave !== false;
       setInterval(() => world.step(), 50);
@@ -26,6 +27,7 @@ onmessage = async e => {
     else if (m.type === 'explode') { const r = world.explode(m.x, m.y, m.z, m.power); post({type: 'exploded', id: m.id, ...r}); }
     else if (m.type === 'meal') post({type: 'meal', x: m.x, y: m.y, z: m.z, took: world.meal(m.x, m.y, m.z)});
     else if (m.type === 'flush') { await world.flush(); post({type: 'flushed', id: m.id}); }
+    else if (m.type === 'portal') post({type: 'portal', id: m.id, ...await world.makePortal(m)});
     else if (m.type === 'remesh') { world.wave = m.wave !== false; for (const c of world.cols.values()) for (let si = 0; si < c.sections.length; si++) if (c.sections[si]) world.dirty.add(c.k * 32 + si); }
   } catch (err) { post({type: 'error', message: String(err?.message || err)}); }
 };

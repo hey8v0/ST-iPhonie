@@ -5,6 +5,8 @@
 import {itemInfo, zhOf, ALL_ITEMS, BLOCKS} from './blocks.js';
 import {craft, useGrid, stackMax, same, smeltOf, fuelOf, ARMOR_AT} from './inventory.js';
 import {ENCHANTS, enchName, tableOffers, enchanted, anvilResult} from './enchant.js';
+import {iconKey} from './atlas.js';
+import {POTIONS, potionName, potionLines, INGREDIENTS, BREW_TICKS} from './brew.js';
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 const usesOf = info => info?.tool?.uses || info?.armor?.uses;
@@ -13,7 +15,7 @@ const GHOST = ['iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots'];
 /** The picture and numbers of a stack (HTML); an enchanted one shimmers. */
 export function stackHtml(s, icons) {
   if (!s) return '';
-  const info = itemInfo(s.id), uses = usesOf(info), src = icons[s.id] || '';
+  const info = itemInfo(s.id), uses = usesOf(info), src = icons[iconKey(s)] || icons[s.id] || '';
   const dur = uses && s.dmg ? `<span class="dur"><i style="width:${Math.max(0, (1 - s.dmg / uses) * 100)}%;background:hsl(${Math.max(0, (1 - s.dmg / uses) * 120)},90%,45%)"></i></span>` : '';
   const glint = s.ench || s.id === 'enchanted_book' ? `<i class="glint" style="-webkit-mask-image:url(${src});mask-image:url(${src})"></i>` : '';
   return `<img class="icon" src="${src}" alt="">${glint}${s.n > 1 ? `<span class="n">${s.n}</span>` : ''}${dur}`;
@@ -21,16 +23,20 @@ export function stackHtml(s, icons) {
 /** What a stack is, for its tip: the name, its enchantments, armour, uses. */
 export function stackTip(s) {
   const info = itemInfo(s.id), uses = usesOf(info);
+  if (s.pot) return [potionName(s), ...potionLines(s)].join('\n');
   return [zhOf(s.id), ...Object.entries(s.ench || {}).map(([n, l]) => enchName(n, l)), ...(info?.armor ? [`护甲 +${info.armor.points}`] : []), ...(uses ? [`耐久度 ${uses - (s.dmg || 0)}/${uses}`] : [])].join('\n');
 }
 // creative: every enchanted book at its highest level
 const BOOKS = Object.entries(ENCHANTS).map(([n, e]) => ({id: 'enchanted_book', n: 1, ench: {[n]: e.max}}));
+// creative: every potion, to drink and to throw
+const POTION_STACKS = ['potion', 'splash_potion'].flatMap(id => Object.keys(POTIONS).map(pot => ({id, n: 1, pot})));
+const BOTTLES = ['potion', 'splash_potion', 'glass_bottle'];
 
 const KINDS = [
   ['all', '全部', () => true],
   ['build', '建筑方块', n => /planks|cobble|bricks|smooth_stone|slab|stairs|fence|pane|bars|door|wool|glass|sandstone|terracotta|_block$|obsidian|bookshelf|stone$|granite|diorite|andesite|tuff|calcite|deepslate$|mossy/.test(n) && !/ore$/.test(n) && n !== 'grass_block'],
   ['nature', '自然方块', n => { const b = BLOCKS.find(x => x.name === n); return !!b && /grass|dirt|podzol|sand|gravel|clay|ore$|_log$|leaves|sapling|fern|dandelion|poppy|orchid|allium|bluet|daisy|cornflower|lily|dead_bush|sugar_cane|cactus|mushroom|snow|ice|pumpkin|melon|moss|mud|bedrock|stone$|deepslate$/.test(n); }],
-  ['use', '功能方块', n => /crafting|furnace|chest|torch|ladder|lantern|glowstone|tnt|bookshelf|_bed$|door|gate/.test(n)],
+  ['use', '功能方块', n => /crafting|furnace|chest|torch|ladder|lantern|glowstone|tnt|bookshelf|_bed$|door|gate|enchanting|anvil|brewing/.test(n)],
   ['tools', '工具', n => /_pickaxe|_axe|_shovel|_hoe|bucket|shears|flint_and_steel/.test(n)],
   ['combat', '战斗', n => /_sword|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
   ['items', '材料与食物', n => !BLOCKS.find(x => x.name === n) && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket|shears|flint_and_steel|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
@@ -91,6 +97,13 @@ export class InventoryUI {
         list.push({key: 'f:out', section: 'f', get: () => f.output, set: s => { f.output = s; }, out: 'take'});
       }
       if (this.kind === 'chest') this.data.slots.forEach((_, i) => add('chest', i, this.data.slots));
+      // the brewing stand: three bottles (one each), the ingredient on top, blaze powder for fuel
+      if (this.kind === 'brew') {
+        const t = this.data.slots;
+        for (let i = 0; i < 3; i++) add('b', i, t, {max: 1, accept: st => BOTTLES.includes(st.id)});
+        add('bi', 3, t, {accept: st => INGREDIENTS.has(st.id)});
+        add('bf', 4, t, {accept: st => st.id === 'blaze_powder'});
+      }
       // worn: head to feet, each taking only its own kind of armour
       if (this.kind === 'player' || this.kind === 'creative') for (let i = 0; i < 4; i++) add('a', ARMOR_AT + i, inv.slots, {worn: i, accept: s => itemInfo(s.id)?.armor?.slot === i});
       for (let i = 9; i < 36; i++) add('main', i, inv.slots);
@@ -100,9 +113,11 @@ export class InventoryUI {
   }
   items() {
     const k = KINDS.find(x => x[0] === this.tab) || KINDS[0], q = this.query.trim().toLowerCase();
-    const plain = ALL_ITEMS.filter(id => id !== 'enchanted_book' && k[2](id) && (!q || zhOf(id).includes(q) || id.includes(q))).map(id => ({id, n: 1}));
-    const books = k[0] === 'all' || k[0] === 'items' ? BOOKS.filter(b => !q || '附魔书'.includes(q) || enchName(...Object.entries(b.ench)[0]).includes(q)) : [];
-    return [...plain, ...books];
+    const plain = ALL_ITEMS.filter(id => id !== 'enchanted_book' && id !== 'potion' && id !== 'splash_potion' && k[2](id) && (!q || zhOf(id).includes(q) || id.includes(q))).map(id => ({id, n: 1}));
+    const more = k[0] === 'all' || k[0] === 'items';
+    const books = more ? BOOKS.filter(b => !q || '附魔书'.includes(q) || enchName(...Object.entries(b.ench)[0]).includes(q)) : [];
+    const potions = more ? POTION_STACKS.filter(p => !q || potionName(p).includes(q) || p.pot.includes(q)) : [];
+    return [...plain, ...books, ...potions];
   }
   /** The enchanting table's three offers for what is on it (none for an enchanted one). */
   offers() {
@@ -137,6 +152,12 @@ export class InventoryUI {
       const f = this.data, [fin, fuel, fout] = sec('f');
       const burn = f.burnMax ? f.burn / f.burnMax : 0, cook = (f.cook || 0) / 200;
       body = `<h3>熔炉</h3><div class="furnace">${slot(fin)}<div></div><div></div><div class="fire"><i style="height:${Math.round(burn * 100)}%"></i></div><div class="arrow"><i style="width:${Math.round(cook * 65)}%"></i></div>${slot(fout, ' big')}${slot(fuel)}<div></div><div></div></div><h3>物品栏</h3>${bag}`;
+    } else if (this.kind === 'brew') {
+      // fuel on the left (its bar: brews left of twenty), the ingredient at the top with the progress arrow, the three bottles under it
+      const t = this.data, prog = t.time ? 1 - t.time / BREW_TICKS : 0;
+      body = `<h3>酿造台</h3><div class="brew"><div class="bfuel">${slot(sec('bf')[0], t.slots[4] ? '' : ' powder')}<div class="fuelbar"><i style="width:${Math.round((t.fuel || 0) / 20 * 100)}%"></i></div></div>`
+        + `<div class="bmid"><div class="bubbles${t.time ? ' on' : ''}"></div>${slot(sec('bi')[0])}<div class="barrow"><i style="height:${Math.round(prog * 100)}%"></i></div></div>`
+        + `<div class="bottles">${sec('b').map(st => slot(st, st.get() ? '' : ' bottle')).join('')}</div></div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'chest') {
       body = `<h3>箱子</h3><div class="slots">${sec('chest').map(s => slot(s)).join('')}</div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'enchant') {
@@ -162,7 +183,7 @@ export class InventoryUI {
     if (search) { search.oninput = () => { this.query = search.value; this.focus = 0; const pos = search.selectionStart; this.draw(); const s2 = this.root.querySelector('.search'); s2.focus(); s2.setSelectionRange(pos, pos); }; search.onkeydown = e => e.stopPropagation(); }
     this.placeCursor();
   }
-  refresh() { if (this.open && this.kind === 'furnace') this.draw(); }
+  refresh() { if (this.open && (this.kind === 'furnace' || this.kind === 'brew')) this.draw(); }
   placeCursor(x = this.cx, y = this.cy) {
     const c = this.root.querySelector('.cursor');
     if (!c) return;
@@ -265,6 +286,17 @@ export class InventoryUI {
         if (st.id === 'lapis_lazuli') { const l = this.grid[1]; const k = l ? Math.min(stackMax(st.id) - l.n, st.n) : st.n; if (l) l.n += k; else this.grid[1] = {...st, n: k}; st.n -= k; if (!st.n) s.set(null); }
         else if (!this.grid[0]) { this.grid[0] = {...st, n: 1}; st.n--; if (!st.n) s.set(null); }
       } else { const at = this.grid[0] ? this.grid[1] ? -1 : 1 : 0; if (at >= 0) { this.grid[at] = st; s.set(null); } }
+      return;
+    }
+    // to the brewing stand: bottles to the bottle places, blaze powder to the fuel (else as an ingredient), the rest on top
+    if (this.kind === 'brew' && (s.section === 'hot' || s.section === 'main')) {
+      const to = BOTTLES.includes(st.id) ? this.list.filter(x => x.section === 'b') : this.list.filter(x => (st.id === 'blaze_powder' && x.section === 'bf') || (INGREDIENTS.has(st.id) && x.section === 'bi'));
+      for (const t of to) {
+        const h = t.get(), room = t.max || stackMax(st.id);
+        if (!h && (!t.accept || t.accept(st))) { const k = Math.min(room, st.n); t.set({...st, n: k}); st.n -= k; }
+        else if (same(h, st) && h.n < room) { const k = Math.min(room - h.n, st.n); h.n += k; st.n -= k; }
+        if (!st.n) { s.set(null); return; }
+      }
       return;
     }
     let targets;

@@ -20,6 +20,8 @@ import {collisionBoxes, DIR} from './shapes.js';
 import {unlockSound, play, setVolume, setRain} from './sound.js';
 import {seedOf} from './noise.js';
 import {spawnPoint, BIOMES} from './gen.js';
+import {findFrame, portalFill, across, nearestPortal, SEARCH} from './portal.js';
+import {applyPotion, effectsTick, speedFactor, hitBonus, EFFECTS, levelName, brewTick, swirlColor, potionColor} from './brew.js';
 
 const $ = s => document.querySelector(s);
 const app = $('#app'), canvas = $('#view'), hud = $('#hud'), invRoot = $('#inv');
@@ -171,6 +173,10 @@ function startWorld(meta) {
   G.view = 0; G.bodyYaw = body.yaw; G.flash = 0; G.bolts = []; G.tops = new Map();
   // the enchanting table's offers stay the same till something is enchanted (the game's enchanting seed)
   G.enchSeed = start.enchSeed ?? Math.floor(Math.random() * 2 ** 31); G.bobber = null;
+  // which world this is (the overworld or the Nether), the potion effects on the player, potions in flight, and the
+  // portal: how long they have stood in one (not again till they step out after coming through)
+  G.dim = meta.dim === 'nether' ? 'nether' : 'overworld'; G.effects = start.effects || {}; G.thrown = [];
+  G.inPortal = 0; G.portalBlocked = meta.arrive ? 'wait' : false; G.portalWaitT = 0; G.arriving = false; G.leaving = false;
   ents.loadOrbs(meta.orbs);
   G.mobs = new Mobs({
     world: mirror, player: body, mode: () => G.mode, daylight: () => environment(G.time).daylight, held: () => held(),
@@ -179,11 +185,12 @@ function startWorld(meta) {
     sound: (name, x, y, z) => soundAt(name, x, y, z), drop: (s, x, y, z) => G.ents.drop(s, x, y, z), give: s => !G.inv.add(s),
     burst: (x, y, z, kind) => G.ents.puff(x, y, z, kind), setBlock: (x, y, z, v) => setBlock(x, y, z, v),
     xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain', looting: () => enchOf(held(), 'looting'),
+    nether: () => G.dim === 'nether', seed: meta.seed, invisible: () => !!G.effects.invisibility,
   });
   G.mobs.load(meta.mobs);
   worker.onmessage = e => onWorker(e.data);
   worker.onerror = e => showError(`世界线程出错：${e.message || e}`);
-  worker.postMessage({type: 'init', seed: meta.seed, layers: LAYER, radius: settings.dist, worldId: meta.id, center: [G.cx, G.cz], wave: settings.wave});
+  worker.postMessage({type: 'init', seed: meta.seed, layers: LAYER, radius: settings.dist, worldId: meta.id, center: [G.cx, G.cz], wave: settings.wave, dim: G.dim});
   drawHud(true);
 }
 function onWorker(m) {
@@ -202,7 +209,9 @@ function onWorker(m) {
   } else if (m.type === 'exploded') {
     for (const [id, n, x, y, z] of m.drops) G.ents.drop({id, n}, x, y, z);
     for (const [x, y, z] of m.tnt) G.mobs.light(x, y, z, 10 + Math.floor(Math.random() * 20));
-  } else if (m.type === 'error') console.warn('world:', m.message);
+  } else if (m.type === 'portal') arrived(m);
+  else if (m.type === 'flushed') { G.waits?.get(m.id)?.(); G.waits?.delete(m.id); }
+  else if (m.type === 'error') console.warn('world:', m.message);
 }
 /** A sound from somewhere in the world: quieter with distance (gone at 16 blocks). */
 function soundAt(name, x, y, z) {
@@ -218,14 +227,14 @@ function isDark(x, y, z, spawn = false) {
   return spawn ? blk === 0 && lit <= Math.floor(Math.random() * 8) : lit <= 7;
 }
 /** An explosion: the worker breaks the blocks; here what is near is hurt and pushed. */
-function explode(x, y, z, power, src) {
+function explode(x, y, z, power, src, why = null) {
   G.worker.postMessage({type: 'explode', x, y, z, power});
   G.mobs.blast(x, y, z, power);
   const b = G.body, dx = b.x - x, dy = b.y + 0.9 - y, dz = b.z - z, d = Math.hypot(dx, dy, dz), r = power * 2;
   if (d < r) {
     const k = 1 - d / r;
     b.vx += dx / (d || 1) * k * 1.2; b.vy += k * 0.6 + 0.1; b.vz += dz / (d || 1) * k * 1.2;
-    hurt(Math.floor((k * k + k) / 2 * 7 * r + 1), src ? `被${src.def.zh}炸死了` : '被炸死了', null, 'explosion');
+    hurt(Math.floor((k * k + k) / 2 * 7 * r + 1), why || (src ? `被${src.def.zh}炸死了` : '被炸死了'), null, 'explosion');
   }
   G.ents.puff(x, y, z, 'explosion');
   soundAt('explode', x, y, z);
@@ -245,6 +254,7 @@ function checkReady() {
   if (near < 9) { screens.loading('正在生成世界…', Math.min(0.95, 0.3 + near / 12)); return false; }
   G.ready = true;
   screens.hide(); hud.hidden = false; drawHud(true);
+  if (G.meta.arrive) arrive();
   if (!G.meta.player) toast(G.mode === 'creative' ? '创造模式：按 E（或物品栏右边的 ⋯）拿方块，双击跳跃飞起来' : '生存模式：先撸一棵树（按住挖），做工作台吧');
   resume();
   return true;
@@ -267,10 +277,12 @@ function pause() {
 async function saveGame() {
   if (!G || !G.ready) return;
   const b = G.body, m = G.meta;
-  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], bed: G.bedPos, weather: G.weather,
-    player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total, enchSeed: G.enchSeed}});
+  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, dim: G.dim, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], bed: G.bedPos, weather: G.weather,
+    player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total, enchSeed: G.enchSeed, effects: G.effects}});
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
-  G.worker.postMessage({type: 'flush', id: Date.now()});
+  // the worker writes the changed columns; this waits till it has (or three seconds)
+  const g = G;
+  await new Promise(done => { const id = Date.now() + Math.random(); (g.waits ||= new Map()).set(id, done); g.worker.postMessage({type: 'flush', id}); setTimeout(done, 3000); });
 }
 async function quitToTitle() {
   if (G) { await saveGame(); await new Promise(r => setTimeout(r, 300)); G.worker.terminate(); renderer.clearAll(); }
@@ -283,23 +295,155 @@ async function leaveGame() {
 }
 function respawn() {
   const b = G.body;
-  // at the bed slept in last, while it is there (far away it is not known yet: trust it)
+  // at the bed slept in last, while it is there (far away, or from the Nether, it is not known yet: trust it)
   let p = G.spawn;
   if (G.bedPos) {
     const {x, y, z} = G.bedPos;
-    if (!G.mirror.has(x, z) || BLOCKS[G.mirror.get(x, y, z) & 0xFFF]?.shape === 'bed') p = {x: x + 0.5, y: y + 0.6, z: z + 0.5};
+    if (!G.mirror.has(x, z) || G.dim === 'nether' || BLOCKS[G.mirror.get(x, y, z) & 0xFFF]?.shape === 'bed') p = {x: x + 0.5, y: y + 0.6, z: z + 0.5};
     else { G.bedPos = null; toast('你的床不见了，回到了世界出生点'); }
   }
+  Object.assign(G, {health: 20, food: 20, sat: 5, exh: 0, air: 300, dead: false, effects: {}});
+  b.dead = false;
+  if (G.dim === 'nether') { G.meta.arrive = null; switchWorld('overworld', p); return; }
   Object.assign(b, {x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0, fall: 0});
   b.prev = {x: b.x, y: b.y, z: b.z};
-  Object.assign(G, {health: 20, food: 20, sat: 5, exh: 0, air: 300, dead: false});
-  b.dead = false;
   drawHud(true); resume();
 }
+
+// ---------- the Nether ----------
+const samePortal = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+function addPortal(dim, p) { const list = (G.meta.portals ||= {})[dim] ||= []; if (!list.some(q => samePortal(q, p))) list.push(p); }
+function forgetPortal(dim, p) { if (G.meta.portals?.[dim]) G.meta.portals[dim] = G.meta.portals[dim].filter(q => !samePortal(q, p)); }
+/** Flint and steel on the inside of an obsidian frame lights it. */
+function lightPortal(t) {
+  const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face];
+  const f = findFrame((x, y, z) => G.mirror.get(x, y, z), t.x + nx, t.y + ny, t.z + nz);
+  if (!f) return false;
+  for (const [x, y, z, v] of portalFill(f)) setBlock(x, y, z, v);
+  addPortal(G.dim, [f.x, f.y, f.z, f.axis]);
+  play('portal');
+  return true;
+}
+/**
+ * Through a portal: to the other world at the matching place (an eighth of the way in the Nether, eight times back), by
+ * an old portal there when one is near enough (the game's 128 blocks in the overworld, 16 in the Nether).
+ */
+async function travel() {
+  const to = G.dim === 'nether' ? 'overworld' : 'nether', b = G.body, m = G.meta, [x, z] = across(b.x, b.z, to === 'nether');
+  const old = nearestPortal(m.portals?.[to], x, z, SEARCH[to]);
+  m.arrive = old ? {known: true, at: old, x: old[0] + (old[3] ? 0.5 : 1), y: old[1], z: old[2] + (old[3] ? 1 : 0.5)} : {known: false, x, y: to === 'nether' ? Math.max(32, Math.min(118, b.y)) : b.y, z};
+  await switchWorld(to, m.arrive);
+}
+/** Leaves this world for the other (what lies about here is kept for coming back), standing at pos. */
+async function switchWorld(to, pos) {
+  if (!G || G.leaving) return;
+  G.leaving = true; invUI.hide();
+  const m = G.meta;
+  await saveGame();
+  const here = {tiles: m.tiles, items: m.items, orbs: m.orbs, mobs: m.mobs, herds: m.herds}, there = m.away || {};
+  Object.assign(m, {away: here, dim: to, tiles: there.tiles || {}, items: there.items || [], orbs: there.orbs || [], mobs: there.mobs || [], herds: there.herds || []});
+  m.player = {...m.player, x: pos.x, y: pos.y, z: pos.z, flying: false, health: G.health, food: G.food, sat: G.sat, effects: G.effects};
+  try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
+  G.worker.terminate(); renderer.clearAll();
+  play('travel');
+  startWorld(m);
+}
+/** Just through: an old portal where they stand, else the worker finds a place and builds one (they wait for it). */
+function arrive() {
+  const a = G.meta.arrive, v = a.known ? G.mirror.get(Math.floor(a.x), Math.floor(a.y), Math.floor(a.z)) : 0;
+  if ((v & 0xFFF) === ID.nether_portal) { G.meta.arrive = null; return; }
+  if (a.known) forgetPortal(G.dim, a.at);
+  G.arriving = true;
+  G.worker.postMessage({type: 'portal', x: a.x, y: a.y, z: a.z, id: 1});
+}
+function arrived(m) {
+  const b = G.body;
+  Object.assign(b, {x: m.x + (m.axis ? 0.5 : 1), y: m.y, z: m.z + (m.axis ? 1 : 0.5), vx: 0, vy: 0, vz: 0, fall: 0});
+  b.prev = {x: b.x, y: b.y, z: b.z};
+  addPortal(G.dim, [m.x, m.y, m.z, m.axis]);
+  G.meta.arrive = null; G.arriving = false; G.portalBlocked = 'wait'; G.portalWaitT = 0;
+}
+/** Standing in a portal: four seconds (at once in creative), the screen swirling purple, and through. */
+function portalTick() {
+  const b = G.body, at = y => (G.mirror.get(Math.floor(b.x), Math.floor(y), Math.floor(b.z)) & 0xFFF) === ID.nether_portal;
+  // just come through: the portal's blocks may reach this copy of the world a moment after the player does, so it
+  // counts as stepping out only once they have been seen standing in it (or after five seconds)
+  if (!at(b.y + 0.2) && !at(b.y + 1.2)) {
+    if (G.portalBlocked === 'wait' && ++G.portalWaitT < 100) return false;
+    G.portalBlocked = false; G.inPortal = Math.max(0, G.inPortal - 4); return false;
+  }
+  if (G.portalBlocked === 'wait') G.portalBlocked = true;
+  if (G.portalBlocked) return false;
+  if (G.inPortal === 0) play('portal');
+  if (G.time % 4 === 0) G.ents.puff(b.x, b.y + 1, b.z, 'portal');
+  if (++G.inPortal < (G.mode === 'creative' ? 1 : 80)) return false;
+  G.inPortal = 0; G.portalBlocked = true;
+  travel();
+  return true;
+}
+
+// ---------- potions ----------
+/** A potion drunk: what it does, the bottle left. Water does nothing. */
+function drink(s) {
+  applyPotion(G.effects, s.pot, {heal: n => { G.health = Math.min(20, G.health + n); }, harm: n => hurt(n, '被魔法杀死了', null, 'magic')});
+  // the empty bottle stays in the hand
+  if (G.mode !== 'creative') { useUp(); const empty = {id: 'glass_bottle', n: 1}, left = G.inv.slots[G.hot] ? G.inv.add(empty) : (G.inv.slots[G.hot] = empty, null); if (left) G.ents.drop(left, G.body.x, G.body.y + 1, G.body.z); }
+  play('burp'); drawHud(true); drawEffects();
+}
+/** A splash potion thrown the way the player looks. */
+function throwPotion(s) {
+  const d = G.body.look(), eye = eyePos();
+  G.thrown.push({x: eye[0] + d[0] * 0.3, y: eye[1] - 0.1, z: eye[2] + d[2] * 0.3, vx: d[0] * 0.5, vy: d[1] * 0.5 + 0.1, vz: d[2] * 0.5, s: {...s, n: 1}, age: 0});
+  G.swing = 6; play('throw');
+}
+/** Thrown potions fly (falling a little), and break on a block or a mob: everyone within four blocks gets their share. */
+function thrownTick() {
+  for (let i = G.thrown.length - 1; i >= 0; i--) {
+    const p = G.thrown[i];
+    p.vy -= 0.05; p.vx *= 0.99; p.vy *= 0.99; p.vz *= 0.99;
+    const len = Math.hypot(p.vx, p.vy, p.vz) || 1, hit = raycast(G.mirror, p.x, p.y, p.z, p.vx / len, p.vy / len, p.vz / len, len, false, true);
+    const mob = G.mobs.raycast(p.x, p.y, p.z, p.vx / len, p.vy / len, p.vz / len, len);
+    if (hit || mob || ++p.age > 200) {
+      const t = mob && (!hit || mob.t < hit.t) ? mob.t : hit ? hit.t : len;
+      splash(p.x + p.vx / len * t, p.y + p.vy / len * t, p.z + p.vz / len * t, p.s.pot);
+      G.thrown.splice(i, 1); continue;
+    }
+    p.x += p.vx; p.y += p.vy; p.z += p.vz;
+  }
+}
+function splash(x, y, z, pot) {
+  G.ents.puff(x, y, z, 'shatter', potionColor(pot)); soundAt('glass', x, y, z);
+  const b = G.body, d = Math.hypot(b.x - x, b.y + 0.9 - y, b.z - z);
+  if (d < 4) applyPotion(G.effects, pot, {share: 1 - d / 4, heal: n => { G.health = Math.min(20, G.health + n); drawHud(true); }, harm: n => hurt(n, '被魔法杀死了', null, 'magic')});
+  // mobs: the instant ones (undead the other way round)
+  for (const m of G.mobs.list) {
+    const dm = Math.hypot(m.x - x, m.y + m.body.height / 2 - y, m.z - z);
+    if (m.dead || dm >= 4) continue;
+    applyPotion({}, pot, {share: 1 - dm / 4, heal: n => { if (m.def.undead) G.mobs.hurt(m, n, null, 'magic'); else m.health = Math.min(m.def.health, m.health + n); },
+      harm: n => { if (m.def.undead) m.health = Math.min(m.def.health, m.health + n); else G.mobs.hurt(m, n, null, 'magic'); }});
+  }
+  drawEffects();
+}
+let fxKey = '';
+/** The effects on the player, top right: a dot of its colour, its name and level, the time left. */
+function drawEffects() {
+  if (!G) return;
+  const list = Object.entries(G.effects), key = list.map(([id, e]) => `${id}${e.amp}${Math.ceil(e.t / 20)}`).join();
+  if (key === fxKey) return;
+  fxKey = key;
+  $('.effects').innerHTML = list.map(([id, e]) => { const c = EFFECTS[id], secs = Math.ceil(e.t / 20); return `<div class="fx${c.good ? '' : ' bad'}"><i style="background:#${c.color.toString(16).padStart(6, '0')}"></i>${c.zh}${levelName(e.amp)}<b>${c.instant ? '' : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`}</b></div>`; }).join('');
+}
+
 
 // ---------- the day ----------
 /** Light and colours at a time (ticks, 24000 a day; 0 is sunrise). Rain and thunder darken the sky and the light. */
 function environment(time) {
+  // the Nether: no sky, no sun; dark red fog, and a little light everywhere (the game's ambient tenth)
+  if (G?.dim === 'nether') {
+    const fog = [0.2, 0.03, 0.03];
+    return {daylight: 0, skyTop: fog, horizon: fog, fog, glow: [1, 0.48, 0.18], glowAmt: 0, sunAngle: 0, sunDir: [0, -1, 0], stars: 0, skyLight: [1, 1, 1], cloudColor: fog, moonPhase: 0, cloudShift: 0, sunMoon: 0,
+      gamma: settings.gamma, wave: settings.wave, clouds: false, time: performance.now() / 1000, flicker: 0.92 + Math.sin(performance.now() / 90) * 0.03 + Math.sin(performance.now() / 37) * 0.02, nether: true, bright: 0.14};
+  }
   const f = (time % 24000) / 24000, a = f * Math.PI * 2, el = Math.sin(a);
   const w = G?.weather, rain = w?.rain || 0, thunder = w?.thunder || 0, flash = G?.flash > 0 ? 1 : 0;
   // the game's: the light from the sky goes down to 11/16 in rain and again in a thunderstorm
@@ -328,7 +472,7 @@ function environment(time) {
 // ---------- weather ----------
 /** What falls on a column now: 'rain', 'snow' (cold places) or null (dry places, or no rain). */
 function fallsAt(x, z) {
-  if (!G || G.weather.rain < 0.2) return null;
+  if (!G || G.dim === 'nether' || G.weather.rain < 0.2) return null;
   const b = BIOMES[G.mirror.biome(x, z)];
   return b?.dry ? null : b?.cold ? 'snow' : 'rain';
 }
@@ -343,6 +487,8 @@ function topAt(x, z) {
 }
 /** The game's cycle: clear for half a day to a week, rain for half a day to a day; thunder on its own clock, only while it rains. */
 function weatherTick() {
+  // no weather in the Nether
+  if (G.dim === 'nether') { setRain(0); if (G.flash > 0) G.flash--; return; }
   const w = G.weather, rnd = n => Math.floor(Math.random() * n);
   if (--w.thunderT <= 0) { w.thundering = !w.thundering; w.thunderT = w.thundering ? 3600 + rnd(12000) : 12000 + rnd(168000); }
   if (--w.rainT <= 0) { w.raining = !w.raining; w.rainT = w.raining ? 12000 + rnd(12000) : 12000 + rnd(168000); }
@@ -481,8 +627,8 @@ function use(t, mob = null) {
       mob.sheared = true; const n = 1 + Math.floor(Math.random() * 3);
       G.ents.drop({id: `${mob.color || 'white'}_wool`, n}, mob.x, mob.y + 1, mob.z); wearTool(); play('shear'); return;
     }
-    if (input.mode === 'touch') attackMob(mob);
-    return;
+    // a potion is drunk or thrown whatever is in front; otherwise a tap on a phone hits
+    if (!info?.drink && !info?.thrown) { if (input.mode === 'touch') attackMob(mob); return; }
   }
   if (t && b.use === 'toggle' && !G.body.sneaking) { toggle(t); return; }
   if (t && b.use === 'bed' && !G.body.sneaking) { sleepIn(t); return; }
@@ -499,8 +645,17 @@ function use(t, mob = null) {
     if (grows) { G.worker.postMessage({type: 'meal', x: t.x, y: t.y, z: t.z}); useUp(); G.ents.puff(t.x + 0.5, t.y + 1, t.z + 0.5, 'meal'); play('meal'); }
     return;
   }
-  if (t && info?.tool?.kind === 'fire') { if (b.name === 'tnt') { setBlock(t.x, t.y, t.z, 0); G.mobs.light(t.x, t.y, t.z); } play('ignite'); wearTool(); return; }
+  if (t && info?.tool?.kind === 'fire') { if (b.name === 'tnt') { setBlock(t.x, t.y, t.z, 0); G.mobs.light(t.x, t.y, t.z); } else lightPortal(t); play('ignite'); wearTool(); return; }
   if (info?.food && G.mode !== 'creative' && G.food < 20) { G.eating = 32; return; }
+  // a potion is drunk (as long as eating takes), a splash potion thrown
+  if (info?.drink) { G.eating = 32; return; }
+  if (info?.thrown) { throwPotion(s); useUp(); return; }
+  // a glass bottle fills at water
+  if (s?.id === 'glass_bottle') {
+    const eye = eyePos(), dir = aimDir(), lt = raycast(G.mirror, eye[0], eye[1], eye[2], dir[0], dir[1], dir[2], reach(), true);
+    if (lt && (lt.v & 0xFFF) === ID.water) { useUp(); const left = G.inv.add({id: 'potion', n: 1, pot: 'water'}); if (left) G.ents.drop(left, G.body.x, G.body.y + 1, G.body.z); play('splash'); drawHud(true); }
+    return;
+  }
   if (s && (s.id === 'bucket' || info?.pour)) {
     const eye = eyePos(), dir = aimDir(), lt = raycast(G.mirror, eye[0], eye[1], eye[2], dir[0], dir[1], dir[2], reach(), true);
     if (s.id === 'bucket' && lt && [ID.water, ID.lava].includes(lt.v & 0xFFF) && !(lt.v >>> 12)) {
@@ -513,7 +668,9 @@ function use(t, mob = null) {
       const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face];
       const x = b.replace ? t.x : t.x + nx, y = b.replace ? t.y : t.y + ny, z = b.replace ? t.z : t.z + nz, here = G.mirror.get(x, y, z);
       if (here && !BLOCKS[here & 0xFFF].replace) return;
-      setBlock(x, y, z, ID[info.pour]);
+      // water poured in the Nether boils away
+      if (info.pour === 'water' && G.dim === 'nether') { G.ents.puff(x + 0.5, y + 0.5, z + 0.5, 'smoke'); play('fizz'); }
+      else setBlock(x, y, z, ID[info.pour]);
       if (G.mode !== 'creative') { G.inv.slots[G.hot] = {id: 'bucket', n: 1}; drawHud(true); }
       play('splash'); return;
     }
@@ -595,6 +752,8 @@ function partnerOf(x, y, z, v) {
 }
 /** A bed: the place to wake up from now on; at night (and no monster near) sleep till morning. */
 function sleepIn(t) {
+  // a bed in the Nether blows up (the game's 「刻意的游戏设计」)
+  if (G.dim === 'nether') { const [ox, oy, oz] = partnerOf(t.x, t.y, t.z, t.v); setBlock(t.x, t.y, t.z, 0); setBlock(ox, oy, oz, 0); explode(t.x + 0.5, t.y + 0.5, t.z + 0.5, 5, null, '被[刻意的游戏设计]杀死了'); return; }
   const day = ((G.time % 24000) + 24000) % 24000, night = (day >= 12542 && day <= 23459) || G.weather.thunder > 0.9;
   if (!G.bedPos || G.bedPos.x !== t.x || G.bedPos.y !== t.y || G.bedPos.z !== t.z) { G.bedPos = {x: t.x, y: t.y, z: t.z}; toast('已设置重生点'); }
   if (!night) { toast('你只能在夜里或雷雨天睡觉'); return; }
@@ -612,6 +771,7 @@ function openBlock(kind, t) {
   if (kind === 'chest') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: new Array(27).fill(null)});
   if (kind === 'enchant') { G.tiles[k] ||= {kind: 'enchant'}; invUI.show('enchant', {pos: {x: t.x, y: t.y, z: t.z}, shelves: shelvesAround((x, y, z) => G.mirror.get(x, y, z), t.x, t.y, t.z, ID.bookshelf)}); }
   if (kind === 'anvil') invUI.show('anvil', {pos: {x: t.x, y: t.y, z: t.z}});
+  if (kind === 'brew') invUI.show('brew', G.tiles[k] ||= {kind: 'brew', slots: [null, null, null, null, null], fuel: 0, time: 0});
 }
 /** An anvil used: one time in eight-ish (12%) it wears a step (new → chipped → damaged → gone). */
 function anvilUsed() {
@@ -642,9 +802,11 @@ const aimDir = () => G.body.look();
  * 'void'). Armour does not stop falling, drowning, hunger or the void; the protection enchantments then take their
  * share (the special ones only of their kind). A monster's hit may meet thorns.
  */
-const PIERCE = new Set(['fall', 'drown', 'starve', 'void']);
+const PIERCE = new Set(['fall', 'drown', 'starve', 'void', 'magic']);
 function hurt(n, why, from = null, kind = 'hit') {
   if (G.mode === 'creative' || G.dead || n <= 0) return;
+  // 抗火: no harm from fire, lava or magma
+  if (G.effects.fire_resistance && (kind === 'lava' || kind === 'fire')) return;
   // a moment after a hit nothing hurts again (a stronger hit only adds what it has more)
   if (G.invuln > 0) { if (n <= G.lastDmg) return; const extra = n - G.lastDmg; G.lastDmg = n; n = extra; }
   else { G.invuln = 10; G.lastDmg = n; }
@@ -700,7 +862,7 @@ function attackMob(m) {
   if (G.mode === 'creative' && !s) dmg = Math.max(dmg, 1);
   // 锋利 half a point a level and a half more; 亡灵杀手 and 节肢杀手 2.5 a level on their own kind
   const sharp = enchOf(s, 'sharpness'), smite = m.def.undead ? enchOf(s, 'smite') : 0, bane = m.kind === 'spider' ? enchOf(s, 'bane_of_arthropods') : 0;
-  dmg += (sharp ? sharp * 0.5 + 0.5 : 0) + smite * 2.5 + bane * 2.5;
+  dmg = Math.max(0, dmg + (sharp ? sharp * 0.5 + 0.5 : 0) + smite * 2.5 + bane * 2.5 + hitBonus(G.effects));
   const hit = G.mobs.hurt(m, dmg, {x: b.x, z: b.z, player: true, knock: (b.sprinting ? 0.9 : 0.4) + enchOf(s, 'knockback') * 0.5});
   G.attackWait = 8; G.swing = 6; G.exh += 0.1;
   if (hit) {
@@ -730,9 +892,11 @@ function survivalTick(r) {
   if (r.landed > 3 && !b.inWater) hurt(Math.ceil(r.landed - 3), '摔得太重了', null, 'fall');
   if (r.landed > 2) play('fall', 0, Math.min(1, r.landed / 8));
   // air
-  if (b.headInWater) { if (Math.random() < 1 / (enchOf(G.inv.worn(0), 'respiration') + 1)) G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了', null, 'drown'); } } else G.air = Math.min(300, G.air + 4);
+  if (b.headInWater && !G.effects.water_breathing) { if (Math.random() < 1 / (enchOf(G.inv.worn(0), 'respiration') + 1)) G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了', null, 'drown'); } } else G.air = Math.min(300, G.air + 4);
   if ((b.inLava) && G.time % 10 === 0) hurt(4, '掉进了岩浆', null, 'lava');
   if (b.touchCactus && G.time % 10 === 0) hurt(1, '被仙人掌扎死了', null, 'cactus');
+  // magma burns feet, unless sneaking
+  if (b.onGround && !b.sneaking && G.time % 10 === 0 && (G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z)) & 0xFFF) === ID.magma_block) hurt(1, '发现了地板是熔岩做的', null, 'fire');
   if (b.y < MINY - 64 && G.time % 10 === 0) hurt(4, '掉出了世界', null, 'void');
   // hunger
   if (b.sprinting) G.exh += 0.1 * Math.hypot(b.x - b.prev.x, b.z - b.prev.z);
@@ -745,9 +909,10 @@ function survivalTick(r) {
 function eatTick() {
   if (!G.eating) return;
   const s = held(), info = s && itemInfo(s.id);
-  if (!info?.food) { G.eating = 0; return; }
-  if (G.eating % 4 === 0) play('eat');
-  if (--G.eating === 0) {
+  if (!info?.food && !info?.drink) { G.eating = 0; return; }
+  if (G.eating % 4 === 0) play(info.drink ? 'drink' : 'eat');
+  if (--G.eating === 0 && info.drink) { drink(s); return; }
+  if (G.eating === 0) {
     G.food = Math.min(20, G.food + info.food); G.sat = Math.min(G.food, G.sat + (info.sat || info.food * 0.6));
     useUp(); if (s.id === 'mushroom_stew') G.inv.add({id: 'bowl', n: 1});
     play('burp'); drawHud(true);
@@ -758,6 +923,8 @@ function eatTick() {
 let ctl = {fwd: 0, side: 0, jump: false, sneak: false, sprint: false, attack: false, use: false, aim: null};
 function tick() {
   const b = G.body;
+  // nothing moves while going through a portal, or while the one on the other side is made
+  if (G.arriving || G.leaving) return;
   G.time++;
   // asleep: the screen goes dark; after five seconds it is morning
   if (G.sleeping && ++G.sleeping >= 100) {
@@ -766,7 +933,8 @@ function tick() {
     const w = G.weather;
     if (w.raining || w.thundering) Object.assign(w, {raining: false, thundering: false, rain: 0, thunder: 0, rainT: 12000 + Math.floor(Math.random() * 168000), thunderT: 12000 + Math.floor(Math.random() * 168000)});
   }
-  const r = b.tick(G.sleeping ? {} : {...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false});
+  const r = b.tick(G.sleeping ? {} : {...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false, speed: 0.1 * speedFactor(G.effects)});
+  if (portalTick()) return;
   if (G.mode !== 'creative' && b.flying) b.flying = false;
   input.setFlying(b.flying);
   // steps
@@ -775,6 +943,14 @@ function tick() {
   if (b.inWater && moved > 0.05 && G.time % 12 === 0) play('swim');
   survivalTick(r);
   eatTick();
+  // potion effects wear off; regeneration heals, poison hurts (never to death); swirls round the player
+  if (Object.keys(G.effects).length) {
+    effectsTick(G.effects, {heal: n => { if (G.health < 20 && !G.dead) { G.health = Math.min(20, G.health + n); drawHud(true); } }, harm: n => hurt(n, '中毒了', null, 'magic'), health: () => G.health});
+    const c = swirlColor(G.effects);
+    if (c != null && G.view && G.time % 3 === 0 && !G.effects.invisibility) G.ents.puff(b.x + (Math.random() - 0.5) * 0.6, b.y + Math.random() * 1.8, b.z + (Math.random() - 0.5) * 0.6, 'swirl', c);
+    if (G.time % 10 === 0) drawEffects();
+  } else if (fxKey) drawEffects();
+  thrownTick();
   if (G.attackWait > 0) G.attackWait--;
   if (G.invuln > 0) G.invuln--;
   // a bow: held use draws it (on a phone: holding the screen), letting go shoots
@@ -791,6 +967,8 @@ function tick() {
     }
     G.draw = 0;
   }
+  // a fireball in front is hit back
+  if (ctl.attack && !G.attackWait && !G.dead && G.mobs.deflect(eyePos(), aimDir())) { G.attackWait = 8; G.swing = 6; }
   // hitting a mob, else breaking
   const t = G.target;
   if (G.breakWait > 0) G.breakWait--;
@@ -828,11 +1006,15 @@ function tick() {
   const turnBy = ((b.yaw - G.bodyYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
   if (moved > 0.01) G.bodyYaw += turnBy * 0.5; else if (Math.abs(turnBy) > 0.85) G.bodyYaw += turnBy - Math.sign(turnBy) * 0.85;
   G.limbAmt = (G.limbAmt || 0) + (Math.min(1, moved * 4) - (G.limbAmt || 0)) * 0.4;
-  for (const [k, tile] of Object.entries(G.tiles)) if (tile.kind === 'furnace') {
+  for (const [k, tile] of Object.entries(G.tiles)) if (tile.kind === 'brew') {
+    // brewing stands brew whether their window is open or not
+    brewTick(tile);
+    if (tile.done) { tile.done = false; const [x, y, z] = k.split(',').map(Number); soundAt('brew', x + 0.5, y + 0.5, z + 0.5); }
+  } else if (tile.kind === 'furnace') {
     const was = tile.burn > 0, lit = furnaceTick(tile);
     if (was !== lit) { const [x, y, z] = k.split(',').map(Number), v = G.mirror.get(x, y, z); if ((v & 0xFFF) === ID.furnace) setBlock(x, y, z, withMeta(ID.furnace, (v >>> 12 & 3) | (lit ? 4 : 0))); }
   }
-  if (invUI.open && invUI.kind === 'furnace' && G.time % 4 === 0) invUI.refresh();
+  if (invUI.open && (invUI.kind === 'furnace' || invUI.kind === 'brew') && G.time % 4 === 0) invUI.refresh();
   // the worker: where we are, how dark the sky is
   const cx = Math.floor(b.x / 16), cz = Math.floor(b.z / 16);
   if (cx !== G.cx || cz !== G.cz) { G.cx = cx; G.cz = cz; G.worker.postMessage({type: 'center', cx, cz}); }
@@ -929,12 +1111,12 @@ function handModel(view) {
     return {verts: v, model: m};
   }
   // a rod whose line is out shows without its line
-  const look = G.bobber && s.id === 'fishing_rod' ? {flat: LAYER.fishing_rod_cast, tint: 0xFFFFFF} : itemLook(s.id);
+  const look = G.bobber && s.id === 'fishing_rod' ? {flat: LAYER.fishing_rod_cast, tint: 0xFFFFFF} : itemLook(s.id, s);
   if (look.cube) {
     v.cube(0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints);
     return {verts: v, model: mat.model(0.38, Math.PI / 4 + sw * 0.6, -0.05 - sw * 0.5, 0, 0.58 + sideBob - sw * 0.2, -0.5 + bob + eat + sw * 0.1, -0.78 - sw * 0.2)};
   }
-  v.flat(0.5, look.flat, sky * 17, blk * 17, 256, 32, look.tint);
+  v.flatLook(0.5, look, sky * 17, blk * 17, 256, 32);
   const tool = !!itemInfo(s.id)?.tool;
   return {verts: v, model: mat.model(0.62, -Math.PI / 2 + 0.25, tool ? 0.1 - sw * 1.2 : -sw * 0.6, tool ? 0.55 : 0.2, 0.62 + sideBob - sw * 0.15, -0.45 + bob + eat + sw * 0.08, -0.8 - sw * 0.15)};
 }
@@ -957,6 +1139,21 @@ function shotThings(light) {
     out.push({verts: tntVerts, x: t.x, y: t.y + 0.5, z: t.z, model: mat.model(grow), bright: Math.floor(t.fuse / 5) % 2 ? 0.5 : 0});
   }
   return out;
+}
+/** Fireballs in flight: a burning ball turned to the camera, lit by itself. */
+let fireVerts = null;
+function fireThings(view) {
+  if (!G.mobs.balls.length) return [];
+  if (!fireVerts) { fireVerts = new Verts(16); fireVerts.flat(0.5, LAYER.fire_charge, 255, 255, 256, 32); }
+  return G.mobs.balls.map(f => ({verts: fireVerts, x: f.x, y: f.y, z: f.z, model: mat.model(f.big ? 1 : 0.32, view.yaw), bright: 1}));
+}
+/** Splash potions in flight: the bottle turning over as it goes. */
+function potionThings(light) {
+  return G.thrown.map(p => {
+    const [sky, blk] = light(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)), v = new Verts(32);
+    v.flatLook(0.5, itemLook(p.s.id, p.s), sky * 17, blk * 17, 256, 32);
+    return {verts: v, x: p.x, y: p.y, z: p.z, model: mat.model(0.35, p.age * 0.4)};
+  });
 }
 /** The player as others would see them (third person): the body, and what armour is worn over it. */
 function playerModel(view, a, light) {
@@ -1075,9 +1272,11 @@ function frame(now) {
   if (!G) return;
   if (!G.ready) { checkReady(); return; }
   const b = G.body;
-  if (!paused && !invUI.open) {
-    b.yaw += c.look[0]; b.pitch = Math.max(-1.5705, Math.min(1.5705, b.pitch + c.look[1]));
-    ctl = c;
+  // the world goes on while a window (the inventory, a furnace, a brewing stand) is open, as in the game; only the
+  // player stands still
+  if (!paused) {
+    if (!invUI.open) { b.yaw += c.look[0]; b.pitch = Math.max(-1.5705, Math.min(1.5705, b.pitch + c.look[1])); ctl = c; }
+    else ctl = {...ctl, attack: false, use: false, fwd: 0, side: 0, jump: false, sprint: false};
     acc += dt * 1000;
     let n = 0;
     while (acc >= TICK && n++ < 5) { tick(); acc -= TICK; }
@@ -1118,11 +1317,14 @@ function frame(now) {
   $('.water').style.display = env.underwater ? 'block' : 'none';
   $('.hurt').style.opacity = G.hurtT ? 0.9 : 0;
   $('.sleep').style.opacity = G.sleeping ? Math.min(1, G.sleeping / 60) : 0;
+  $('.portalfx').style.opacity = G.inPortal ? Math.min(0.8, G.inPortal / 80) : 0;
+  // 夜视: everything seen as if lit
+  if (G.effects.night_vision) env.bright = Math.max(env.bright || 0, 0.7);
   // animated textures
   const tick20 = Math.floor(G.time);
   for (const an of animFrames) { const f = Math.floor(tick20 / an.time) % an.frames.length; if (f !== an.at) { an.at = f; renderer.updateLayer(an.layer, an.frames[f]); } }
   const lightAt = (bx, by, bz) => G.mirror.light(bx, by, bz);
-  const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
+  const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
   if (G.view && !G.dead) extras.mobs.push(...playerModel(view, a, lightAt));
   extras.weather = weatherVerts(view);
   const bolt = boltVerts(view);

@@ -4,7 +4,7 @@
 import {itemInfo, BLOCKS, ITEMS, COLORS} from './blocks.js';
 
 export const stackMax = id => itemInfo(id)?.stack || 64;
-export const same = (a, b) => a && b && a.id === b.id && !a.dmg && !b.dmg && !a.ench && !b.ench;
+export const same = (a, b) => a && b && a.id === b.id && !a.dmg && !b.dmg && !a.ench && !b.ench && a.pot === b.pot;
 export const copy = s => s ? {...s} : null;
 
 /** The carried slots (the first 9 the hotbar); after them the four worn ones, head to feet. */
@@ -40,9 +40,9 @@ export class Inventory {
   toJSON() { return this.slots; }
   static from(list, size = MAIN + 4) { const inv = new Inventory(size); (list || []).slice(0, size).forEach((s, i) => { if (s && itemInfo(s.id)) inv.slots[i] = clean(s); }); return inv; }
 }
-/** A saved stack, kept to what a stack has: id, count, wear, enchantments, the anvil's prior work. */
+/** A saved stack, kept to what a stack has: id, count, wear, enchantments, the anvil's prior work, a potion's kind. */
 export function clean(s) {
-  return {id: s.id, n: Math.max(1, s.n | 0), ...(s.dmg ? {dmg: s.dmg} : {}), ...(s.ench && typeof s.ench === 'object' && Object.keys(s.ench).length ? {ench: {...s.ench}} : {}), ...(s.rep ? {rep: s.rep} : {})};
+  return {id: s.id, n: Math.max(1, s.n | 0), ...(s.dmg ? {dmg: s.dmg} : {}), ...(s.ench && typeof s.ench === 'object' && Object.keys(s.ench).length ? {ench: {...s.ench}} : {}), ...(s.rep ? {rep: s.rep} : {}), ...(typeof s.pot === 'string' ? {pot: s.pot} : {})};
 }
 
 // ---------- crafting ----------
@@ -125,6 +125,22 @@ for (const [mat, x] of [['leather', 'leather'], ['iron', 'iron_ingot'], ['golden
   shaped(['XXX', 'X X', 'X X'], {X: x}, `${mat}_leggings`);
   shaped(['X X', 'X X'], {X: x}, `${mat}_boots`);
 }
+// the Nether and brewing
+shaped(['# #', ' # '], {'#': 'glass'}, 'glass_bottle', 3);
+shaped([' B ', '###'], {B: 'blaze_rod', '#': '#stone_tool'}, 'brewing_stand');
+shapeless(['blaze_rod'], 'blaze_powder', 2);
+shapeless(['spider_eye', 'brown_mushroom', 'sugar'], 'fermented_spider_eye');
+shapeless(['sugar_cane'], 'sugar');
+shaped(['###', '#C#', '###'], {'#': 'gold_nugget', C: 'carrot'}, 'golden_carrot');
+shaped(['###', '#M#', '###'], {'#': 'gold_nugget', M: 'melon_slice'}, 'glistering_melon_slice');
+shaped(['###', '###', '###'], {'#': 'gold_nugget'}, 'gold_ingot');
+shapeless(['gold_ingot'], 'gold_nugget', 9);
+shaped(['##', '##'], {'#': 'quartz'}, 'quartz_block');
+shaped(['##', '##'], {'#': 'magma_cream'}, 'magma_block');
+shaped(['##', '##'], {'#': 'nether_brick'}, 'nether_bricks');
+shaped(['#B#', '#B#'], {'#': 'nether_bricks', B: 'nether_brick'}, 'nether_brick_fence', 6);
+shaped(['#  ', '## ', '###'], {'#': 'nether_bricks'}, 'nether_brick_stairs', 4);
+shapeless(['blaze_powder', '#coals', 'gunpowder'], 'fire_charge', 3);
 export const RECIPES = R;
 
 /** What a crafting grid (w × h stacks, row by row) makes: {out, recipe} or null. */
@@ -168,12 +184,13 @@ const SMELT = {
   diamond_ore: 'diamond', deepslate_diamond_ore: 'diamond', emerald_ore: 'emerald', deepslate_emerald_ore: 'emerald', lapis_ore: 'lapis_lazuli', deepslate_lapis_ore: 'lapis_lazuli',
   redstone_ore: 'redstone', deepslate_redstone_ore: 'redstone', wet_sponge: 'sponge',
   porkchop: 'cooked_porkchop', beef: 'cooked_beef', mutton: 'cooked_mutton', chicken: 'cooked_chicken', potato: 'baked_potato', cod: 'cooked_cod', salmon: 'cooked_salmon',
+  netherrack: 'nether_brick', nether_quartz_ore: 'quartz', nether_gold_ore: 'gold_ingot',
 };
 for (const l of TAGS.logs) SMELT[l] = 'charcoal';
 export const smeltOf = id => SMELT[id] || null;
 // experience for each thing smelted, given when the result is taken out (the game's numbers)
 const SMELT_XP = {iron_ingot: 0.7, copper_ingot: 0.7, gold_ingot: 1, diamond: 1, emerald: 1, lapis_lazuli: 0.2, redstone: 0.3, coal: 0.1, charcoal: 0.15,
-  glass: 0.1, stone: 0.1, smooth_stone: 0.1, deepslate: 0.1, brick: 0.3, terracotta: 0.35, sponge: 0.15,
+  glass: 0.1, stone: 0.1, smooth_stone: 0.1, deepslate: 0.1, brick: 0.3, terracotta: 0.35, sponge: 0.15, nether_brick: 0.1, quartz: 0.2,
   cooked_porkchop: 0.35, cooked_beef: 0.35, cooked_mutton: 0.35, cooked_chicken: 0.35, baked_potato: 0.35, cooked_cod: 0.35, cooked_salmon: 0.35};
 /** Whole experience points for what was smelted (the fraction left is a chance of one more). */
 export function takeSmeltXp(f, r = Math.random) { const x = f.xp || 0; f.xp = 0; return Math.floor(x) + (r() < x - Math.floor(x) ? 1 : 0); }

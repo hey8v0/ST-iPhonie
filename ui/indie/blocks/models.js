@@ -59,6 +59,28 @@ export const MODELS = {
     part('body', [0, 12], [[-5, -4, -6, 10, 8, 12]], [0, 15, 9]),
     ...[2, 1, 0, -1].flatMap((z, i) => [part(`leg${i * 2}`, [18, 0], [[-15, -1, -1, 16, 2, 2]], [-4, 15, z]), part(`leg${i * 2 + 1}`, [18, 0], [[-1, -1, -1, 16, 2, 2]], [4, 15, z])]),
   ]},
+  // the Nether's: the zombified piglin (the piglin's 64×64 layout: a wide head with a snout, tusks and floppy ears),
+  // the ghast (a cube drawn 4.5 times over, nine tentacles hanging under it), the blaze (a head in three rings of
+  // turning rods) and the magma cube (eight slices and a core, pulled apart as it jumps)
+  zombified_piglin: {skin: [64, 64], size: [0.6, 1.95], parts: [
+    part('head', [0, 0], [[-5, -8, -4, 10, 8, 8]], [0, 0, 0], [0, 0, 0], [part('snout', [31, 1], [[-2, -4, -5, 4, 4, 1]]), part('tusk0', [2, 4], [[-3, -2, -5, 1, 2, 1]]), part('tusk1', [2, 0], [[2, -2, -5, 1, 2, 1]]),
+      part('ear0', [39, 6], [[-1, 0, -2, 1, 5, 4]], [-4.5, -6, 0], [0, 0, Math.PI / 6]), part('ear1', [51, 6], [[0, 0, -2, 1, 5, 4]], [4.5, -6, 0], [0, 0, -Math.PI / 6])]),
+    part('body', [16, 16], [[-4, 0, -2, 8, 12, 4]]),
+    part('arm0', [40, 16], [[-3, -2, -2, 4, 12, 4]], [-5, 2, 0]), part('arm1', [32, 48], [[-1, -2, -2, 4, 12, 4]], [5, 2, 0]),
+    part('leg0', [0, 16], [[-2, 0, -2, 4, 12, 4]], [-1.9, 12, 0]), part('leg1', [16, 48], [[-2, 0, -2, 4, 12, 4]], [1.9, 12, 0]),
+  ]},
+  ghast: {skin: [64, 32], size: [4, 4], scale: 4.5, parts: [
+    part('body', [0, 0], [[-8, -8, -8, 16, 16, 16]], [0, 17.6, 0]),
+    ...Array.from({length: 9}, (_, i) => part(`tentacle${i}`, [0, 0], [[-1, 0, -1, 2, [9, 12, 8, 13, 10, 11, 8, 12, 9][i], 2]], [((i % 3) - (Math.floor(i / 3) % 2) * 0.5 + 0.25 - 1) * 5, 24.6, (Math.floor(i / 3) - 1) * 5])),
+  ]},
+  blaze: {skin: [64, 32], size: [0.6, 1.8], parts: [
+    part('head', [0, 0], [[-4, -4, -4, 8, 8, 8]]),
+    ...Array.from({length: 12}, (_, i) => part(`rod${i}`, [0, 16], [[0, 0, 0, 2, 8, 2]])),
+  ]},
+  magma_cube: {skin: [64, 32], size: [0.52, 0.52], parts: [
+    ...Array.from({length: 8}, (_, i) => part(`slice${i}`, i === 2 ? [24, 10] : i === 3 ? [24, 19] : [0, i], [[-4, 16 + i, -4, 8, 1, 8]])),
+    part('core', [0, 16], [[-2, 18, -2, 4, 4, 4]]),
+  ]},
   // the player (seen from behind or the front): the 64×64 layout, each part with its outer layer a little bigger
   player: {skin: [64, 64], size: [0.6, 1.8], parts: [
     part('head', [0, 0], [[-4, -8, -4, 8, 8, 8]], [0, 0, 0], [0, 0, 0], [part('hat', [32, 0], [[-4, -8, -4, 8, 8, 8, 0.5]])]),
@@ -112,6 +134,27 @@ export function animate(kind, rot, pose) {
     set('arm0', walk(PI) - hit * 1.3, hit * 0.4, 0.05 + Math.cos(pose.age * 0.09) * 0.03);
     set('arm1', walk(0), 0, -0.05 - Math.cos(pose.age * 0.09) * 0.03);
     set('leg0', walk(0) * 1.4); set('leg1', walk(PI) * 1.4);
+  } else if (kind === 'zombified_piglin') {
+    // arms held out when it is angry, swinging when it walks; the ears flap
+    const up = -PI / 2 + Math.sin(pose.age * 0.067) * 0.05 - (pose.attack || 0) * 0.6;
+    set('arm0', pose.aim ? up : swing(PI) * 0.5, 0, 0.05); set('arm1', pose.aim ? up : swing() * 0.5, 0, -0.05);
+    set('leg0', swing() * 0.8); set('leg1', swing(PI) * 0.8);
+    const flap = Math.sin(pose.limb * 0.6662) * pose.amount * 0.3 + Math.sin(pose.age * 0.1) * 0.05;
+    set('ear0', 0, 0, PI / 6 + flap); set('ear1', 0, 0, -PI / 6 - flap);
+  } else if (kind === 'ghast') {
+    for (let i = 0; i < 9; i++) set(`tentacle${i}`, 0.2 * Math.sin(pose.age * 0.3 + i) + 0.4);
+  } else if (kind === 'blaze') {
+    // three rings of four rods going round (the top ring one way, the middle the other), bobbing (the game's numbers);
+    // '@name' moves a part's pivot
+    let f = pose.age * PI * -0.1;
+    for (let i = 0; i < 4; i++, f++) rot[`@rod${i}`] = [Math.cos(f) * 9, -2 + Math.cos((i * 2 + pose.age) * 0.25), Math.sin(f) * 9];
+    f = PI / 4 + pose.age * PI * 0.03;
+    for (let i = 4; i < 8; i++, f++) rot[`@rod${i}`] = [Math.cos(f) * 7, 2 + Math.cos((i * 2 + pose.age) * 0.25), Math.sin(f) * 7];
+    f = 0.47123894 + pose.age * PI * -0.05;
+    for (let i = 8; i < 12; i++, f++) rot[`@rod${i}`] = [Math.cos(f) * 5, 11 + Math.cos((i * 1.5 + pose.age) * 0.5), Math.sin(f) * 5];
+  } else if (kind === 'magma_cube') {
+    // squish: the slices spread apart (in the air) or press together (landing)
+    for (let i = 0; i < 8; i++) rot[`@slice${i}`] = [0, -(4 - i) * (pose.squish || 0) * 1.7, 0];
   } else if (kind === 'spider') {
     const z = [PI / 4, PI / 4 * 0.74, PI / 4 * 0.74, PI / 4], y = [PI / 4, PI / 8, -PI / 8, -PI / 4];
     for (let i = 0; i < 4; i++) {
@@ -164,7 +207,7 @@ export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}
     }
     for (const c of p.children) walk({...c, name: c.name}, R, here(c.pivot));
   };
-  for (const p of m.parts) if (!only || only.includes(p.name)) walk(p, ID3, p.pivot);
+  for (const p of m.parts) if (!only || only.includes(p.name)) walk(p, ID3, rot[`@${p.name}`] || p.pivot);
   return out;
 }
 
@@ -261,6 +304,43 @@ export const OWN_SKINS = {
     for (let k = 0; k < 40; k++) px(Math.floor(r() * 44), 12 + Math.floor(r() * 20), hex('#4e4038'));
     const [fx, fy] = front(32, 4, 8, 8);
     for (const [ex, ey] of [[1, 3], [6, 3], [2, 4], [5, 4], [3, 2], [4, 2], [0, 4], [7, 4]]) px(fx + ex, fy + ey, hex('#d0201c'));
+  }),
+  // the Nether's, ours: a rotting pink piglin with bare ribs and a gold-trimmed belt
+  zombified_piglin: () => skin(64, 64, 21, ({px, area, box, front, hex, r}) => {
+    const pink = ['#e8a4a0', '#dc9894', '#f0b0aa'], rot = ['#7aa860', '#6a9852', '#88b46c'], loin = ['#5a3a22', '#4e321c', '#66442a'];
+    box(0, 0, 10, 8, 8, pink); box(31, 1, 4, 4, 1, ['#f2b8b2', '#e8aaa4']); box(16, 16, 8, 12, 4, pink); box(40, 16, 4, 12, 4, pink); box(32, 48, 4, 12, 4, rot);
+    box(0, 16, 4, 12, 4, loin); box(16, 48, 4, 12, 4, pink); box(39, 6, 1, 5, 4, pink); box(51, 6, 1, 5, 4, pink); box(2, 0, 1, 2, 1, ['#f0ecd8']); box(2, 4, 1, 2, 1, ['#f0ecd8']);
+    // rotten patches, the bones of the ribs and an arm, the belt
+    for (let k = 0; k < 40; k++) { const x = Math.floor(r() * 56), y = Math.floor(r() * 32); if (r() < 0.5) px(x, y, hex(rot[k % 3])); }
+    for (const y of [21, 23, 25]) area(21, y, 4, 1, ['#f0ecd8']);
+    area(16, 26, 24, 2, ['#d8a838', '#c09028']);
+    const [fx, fy] = front(0, 0, 10, 8);
+    area(fx + 1, fy + 3, 2, 1, ['#1a1010']); area(fx + 7, fy + 3, 2, 1, ['#f0f0e8']); px(fx + 7, fy + 3, hex('#1a1010'));
+    const [sx, sy] = front(31, 1, 4, 1); px(sx + 1, sy + 1, hex('#8a4a48')); px(sx + 2, sy + 1, hex('#8a4a48'));
+  }),
+  ghast: () => skin(64, 32, 22, ({area, box, front, px, hex, r}) => {
+    const white = ['#f2f2f2', '#e8e8e8', '#fafafa', '#dcdcdc'];
+    box(0, 0, 16, 16, 16, white, 0.08);
+    for (let k = 0; k < 30; k++) px(Math.floor(r() * 64), Math.floor(r() * 32), hex('#c8c8c8'));
+    // the face: closed eyes with tears, a small mouth
+    const [fx, fy] = front(0, 0, 16, 16), dark = ['#3a3a3a'];
+    area(fx + 3, fy + 5, 3, 1, dark); area(fx + 10, fy + 5, 3, 1, dark); area(fx + 4, fy + 6, 1, 3, ['#9ab4c8']); area(fx + 11, fy + 6, 1, 3, ['#9ab4c8']);
+    area(fx + 6, fy + 10, 4, 2, dark);
+  }),
+  blaze: () => skin(64, 32, 23, ({area, box, front, px, hex, r}) => {
+    const gold = ['#f0b020', '#e8a018', '#f8c840', '#d89010'], rod = ['#f8d050', '#e8a020', '#c87810'];
+    box(0, 0, 8, 8, 8, gold, 0.25); box(0, 16, 2, 8, 2, rod, 0.3);
+    for (let k = 0; k < 20; k++) px(Math.floor(r() * 32), Math.floor(r() * 16), hex('#a85a08'));
+    const [fx, fy] = front(0, 0, 8, 8);
+    area(fx + 1, fy + 3, 2, 1, ['#2a1404']); area(fx + 5, fy + 3, 2, 1, ['#2a1404']); area(fx + 2, fy + 6, 4, 1, ['#6a3008']);
+  }),
+  magma_cube: () => skin(64, 32, 24, ({area, box, front, px, hex, r}) => {
+    const crust = ['#3a1a10', '#4a2214', '#2e140c'];
+    for (let i = 0; i < 8; i++) { const [u, v] = i === 2 ? [24, 10] : i === 3 ? [24, 19] : [0, i]; box(u, v, 8, 1, 8, crust); }
+    // glowing seams on the slices' sides, the eyes on the front, an orange core
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 32; x++) if (r() < 0.25) px(x, y + 8, hex(r() < 0.5 ? '#f08a1a' : '#ffd040'));
+    box(0, 16, 4, 4, 4, ['#ffb020', '#ff8a10', '#ffd050']);
+    const [fx, fy] = front(0, 4, 8, 8); area(fx + 1, 12, 2, 1, ['#ffd040']); area(fx + 5, 12, 2, 1, ['#ffd040']);
   }),
   // ours, not the game's: dark hair, a red hoodie (the sleeve of the hand seen in first person), jeans, white shoes
   player: () => skin(64, 64, 10, ({px, area, box, front, hex}) => {

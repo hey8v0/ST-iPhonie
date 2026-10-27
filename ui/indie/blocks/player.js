@@ -184,7 +184,9 @@ export class Body {
     if (this.onGround) this.fall = 0; else if (this.y < sy) this.fall += sy - this.y;
     if (this.onGround && !wasGround && !result.landed) result.landed = 0.001;
     this.vy = (this.vy - 0.08) * 0.98;
-    this.vx *= slip; this.vz *= slip;
+    // soul sand holds the feet: walking on it is slower (the game's 0.4)
+    const hold = this.onGround ? BLOCKS[below & 0xFFF]?.slow || 1 : 1;
+    this.vx *= slip * hold; this.vz *= slip * hold;
     if (Math.abs(this.vx) < 0.003) this.vx = 0; if (Math.abs(this.vz) < 0.003) this.vz = 0;
     return result;
   }

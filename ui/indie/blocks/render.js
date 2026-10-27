@@ -109,7 +109,7 @@ const ENT_FS = `#version 300 es
 precision highp float;
 uniform sampler2D u_img;
 uniform vec2 u_light;
-uniform float u_daylight, u_gamma, u_flicker, u_fogNear, u_fogFar, u_hurt, u_white;
+uniform float u_daylight, u_gamma, u_flicker, u_fogNear, u_fogFar, u_hurt, u_white, u_bright;
 uniform vec3 u_skyLight, u_fog, u_tint;
 in vec2 v_uv; in float v_shade; in float v_dist; out vec4 o;
 float curve(float l) { float x = clamp(l / 15.0, 0.0, 1.0); float b = x / (4.0 - 3.0 * x); return mix(b, 1.0 - pow(1.0 - b, 4.0), u_gamma); }
@@ -117,7 +117,7 @@ void main() {
   vec4 c = texture(u_img, v_uv);
   if (c.a < 0.1) discard;
   float sky = max(u_light.x - (1.0 - u_daylight) * 11.0, 0.0);
-  vec3 light = clamp(curve(sky) * u_skyLight + curve(u_light.y) * vec3(1.0, 0.86, 0.68) * u_flicker + 0.05, 0.0, 1.0);
+  vec3 light = clamp(curve(sky) * u_skyLight + curve(u_light.y) * vec3(1.0, 0.86, 0.68) * u_flicker + 0.05 + u_bright, 0.0, 1.0);
   vec3 col = c.rgb * u_tint * light * v_shade;
   col = mix(col, vec3(1.0, 0.12, 0.08) * max(light, vec3(0.3)), u_hurt * 0.45);
   col = mix(col, vec3(1.0), u_white);
@@ -209,9 +209,14 @@ export class Verts {
       for (let c = 3; c >= 0; c--) this.v(P[c][0], P[c][1], P[c][2], unit, center, layer, UV[c][0], UV[c][1], sky, blk, 5 << 2);
     }
   }
-  /** A flat square in the x–y plane, both sides. */
-  flat(h, layer, sky, blk, unit, center, tint = 0xFFFFFF) {
-    const P = [[-h, -h, 0], [h, -h, 0], [h, h, 0], [-h, h, 0]], UV = [[0, 16], [16, 16], [16, 0], [0, 0]];
+  /** An item's flat picture (itemLook); a potion's bottle a little in front of and behind its liquid. */
+  flatLook(h, look, sky, blk, unit, center) {
+    this.flat(h, look.flat, sky, blk, unit, center, look.tint);
+    if (look.over != null) for (const z of [0.012, -0.012]) this.flat(h, look.over, sky, blk, unit, center, 0xFFFFFF, z);
+  }
+  /** A flat square in the x–y plane (at z), both sides. */
+  flat(h, layer, sky, blk, unit, center, tint = 0xFFFFFF, z = 0) {
+    const P = [[-h, -h, z], [h, -h, z], [h, h, z], [-h, h, z]], UV = [[0, 16], [16, 16], [16, 0], [0, 0]];
     for (let c = 0; c < 4; c++) this.v(P[c][0], P[c][1], P[c][2], unit, center, layer, UV[c][0], UV[c][1], sky, blk, 4 << 2, tint);
     for (let c = 3; c >= 0; c--) this.v(P[c][0], P[c][1], P[c][2], unit, center, layer, UV[c][0], UV[c][1], sky, blk, 5 << 2, tint);
   }
@@ -354,7 +359,9 @@ export class Renderer {
     gl.uniform1f(P.u.u_unit, 16); gl.uniform1f(P.u.u_center, 1); gl.uniform1f(P.u.u_time, env.time); gl.uniform1f(P.u.u_wave, env.wave ? 1 : 0);
     gl.uniform1f(P.u.u_daylight, env.daylight); gl.uniform1f(P.u.u_gamma, env.gamma); gl.uniform1f(P.u.u_flicker, env.flicker); gl.uniform1f(P.u.u_bright, env.bright || 0);
     gl.uniform3fv(P.u.u_skyLight, env.skyLight); gl.uniform3fv(P.u.u_fog, env.fog);
-    const fogFar = env.underwater ? 18 : view.far, fogNear = env.underwater ? 1 : view.far * 0.72;
+    // the Nether's thick fog: from a twentieth of the view out to half of it, as the game draws it — but never thicker
+    // than 56 blocks (the game's view is longer than a phone's, and half of a short one is a wall)
+    const fogFar = env.underwater ? 18 : env.nether ? Math.min(view.far, Math.max(56, Math.min(view.far, 192) * 0.5)) : view.far, fogNear = env.underwater ? 1 : env.nether ? view.far * 0.05 : view.far * 0.72;
     gl.uniform1f(P.u.u_fogNear, fogNear); gl.uniform1f(P.u.u_fogFar, fogFar);
     gl.uniform1f(P.u.u_overlay, 0); gl.uniform1f(P.u.u_alpha, 1); gl.uniform1f(P.u.u_cut, 0.5);
     // visible sections, near to far
@@ -492,7 +499,7 @@ export class Renderer {
     const gl = this.gl, E = this.ent;
     gl.useProgram(E.p); gl.disable(gl.CULL_FACE);
     gl.uniformMatrix4fv(E.u.u_viewProj, false, vp);
-    gl.uniform1f(E.u.u_daylight, env.daylight); gl.uniform1f(E.u.u_gamma, env.gamma); gl.uniform1f(E.u.u_flicker, env.flicker);
+    gl.uniform1f(E.u.u_daylight, env.daylight); gl.uniform1f(E.u.u_gamma, env.gamma); gl.uniform1f(E.u.u_flicker, env.flicker); gl.uniform1f(E.u.u_bright, env.bright || 0);
     gl.uniform3fv(E.u.u_skyLight, env.skyLight); gl.uniform3fv(E.u.u_fog, env.fog); gl.uniform1f(E.u.u_fogNear, fogNear); gl.uniform1f(E.u.u_fogFar, fogFar);
     gl.activeTexture(gl.TEXTURE1); gl.uniform1i(E.u.u_img, 1);
     gl.bindVertexArray(this.entVao); gl.bindBuffer(gl.ARRAY_BUFFER, this.entBuf);

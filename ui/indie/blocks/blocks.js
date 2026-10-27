@@ -138,6 +138,24 @@ for (const [c, zh, h] of COLORS) block(`${c}_bed`, `${zh}床`, {tex: all('white_
 block('enchanting_table', '附魔台', {tex: tbs('enchanting_table_top', 'enchanting_table_bottom', 'enchanting_table_side'), shape: 'enchanting', hard: 5, tool: T.PICK, tier: 0, light: 7, use: 'enchant', blast: 1200, ...shaped});
 for (const [n, zh] of [['anvil', '铁砧'], ['chipped_anvil', '开裂的铁砧'], ['damaged_anvil', '损坏的铁砧']])
   block(n, zh, {tex: {top: `${n}_top`, bottom: 'anvil', side: 'anvil'}, shape: 'anvil', hard: 5, tool: T.PICK, tier: 0, facing: true, gravity: true, use: 'anvil', blast: 1200, ...shaped});
+// the Nether: netherrack, soul sand (you sink in a little and walk slowly), its ores (quartz; gold that drops nuggets),
+// magma (burns what stands on it unless it sneaks), the fortresses' nether bricks, nether wart (grows on soul sand,
+// four ages), the blaze spawner, and the portal (state 0 standing along x, 1 along z; it cannot be picked up)
+block('netherrack', '下界岩', {tex: all('netherrack'), hard: 0.4, tool: T.PICK, tier: 0});
+block('soul_sand', '灵魂沙', {tex: all('soul_sand'), hard: 0.5, tool: T.SHOVEL, slow: 0.4});
+block('nether_quartz_ore', '下界石英矿石', {tex: all('nether_quartz_ore'), hard: 3, tool: T.PICK, tier: 0, drop: 'quartz', xp: [2, 5]});
+block('nether_gold_ore', '下界金矿石', {tex: all('nether_gold_ore'), hard: 3, tool: T.PICK, tier: 0, drop: r => ['gold_nugget', 2 + Math.floor(r() * 5)], xp: [0, 1]});
+block('magma_block', '岩浆块', {tex: all('magma'), hard: 0.5, tool: T.PICK, tier: 0, light: 3, hot: true});
+block('nether_bricks', '下界砖块', {tex: all('nether_bricks'), hard: 2, tool: T.PICK, tier: 0, blast: 6});
+block('nether_brick_fence', '下界砖栅栏', {tex: all('nether_bricks'), shape: 'fence', hard: 2, tool: T.PICK, tier: 0, blast: 6, ...shaped});
+block('nether_brick_stairs', '下界砖楼梯', {tex: all('nether_bricks'), shape: 'stairs', hard: 2, tool: T.PICK, tier: 0, blast: 6, ...shaped});
+block('nether_wart', '下界疣', {tex: all('nether_wart_stage0'), stages: ['nether_wart_stage0', 'nether_wart_stage1', 'nether_wart_stage1', 'nether_wart_stage2'], shape: 'crop', pass: 'cutout', hard: 0, solid: false, item: false,
+  drop: (r, meta) => ['nether_wart', meta >= 3 ? 2 + Math.floor(r() * 3) : 1]});
+block('spawner', '刷怪笼', {tex: all('spawner'), pass: 'cutout', hard: 5, tool: T.PICK, tier: 0, drop: null, xp: [15, 43], opaque: false, filter: 0});
+block('nether_portal', '下界传送门', {tex: all('nether_portal'), shape: 'portal', pass: 'translucent', hard: -1, blast: 0, solid: false, light: 11, drop: null, item: false, filter: 0});
+block('quartz_block', '石英块', {tex: tbs('quartz_block_top', 'quartz_block_bottom', 'quartz_block_side'), hard: 0.8, tool: T.PICK, tier: 0});
+// brewing: the stand (a rod with three bottle holders on a stone foot)
+block('brewing_stand', '酿造台', {tex: {top: 'brewing_stand', side: 'brewing_stand', base: 'brewing_stand_base'}, shape: 'brewing', pass: 'cutout', hard: 0.5, tool: T.PICK, tier: 0, light: 1, use: 'brew', ...shaped});
 
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
@@ -172,6 +190,12 @@ for (const [raw, cooked, zh, f, s, cf, cs] of [['cod', 'cooked_cod', '鳕鱼', 2
 item('tropical_fish', '热带鱼', {food: 1, sat: 0.2}); item('pufferfish', '河豚', {food: 1, sat: 0.2});
 item('shears', '剪刀', {stack: 1, tool: {kind: 'shears', tier: -1, speed: 1, uses: 238}});
 item('flint_and_steel', '打火石', {stack: 1, tool: {kind: 'fire', tier: -1, speed: 1, uses: 64}});
+// from the Nether, and for brewing (a potion is {id: 'potion' | 'splash_potion', pot: …}: brew.js)
+item('quartz', '下界石英'); item('gold_nugget', '金粒'); item('nether_brick', '下界砖'); item('nether_wart', '下界疣', {plant: 'nether_wart'});
+item('blaze_rod', '烈焰棒', {fuel: 120}); item('blaze_powder', '烈焰粉'); item('ghast_tear', '恶魂之泪'); item('magma_cream', '岩浆膏');
+item('glass_bottle', '玻璃瓶'); item('potion', '药水', {stack: 1, drink: true}); item('splash_potion', '喷溅药水', {stack: 1, thrown: true});
+item('fermented_spider_eye', '发酵蛛眼'); item('sugar', '糖'); item('golden_carrot', '金胡萝卜', {food: 6, sat: 14.4}); item('glistering_melon_slice', '闪烁的西瓜片');
+item('fire_charge', '火焰弹');
 export const TIERS = {wooden: {zh: '木', tier: 0, speed: 2, uses: 59, enchantability: 15}, stone: {zh: '石', tier: 1, speed: 4, uses: 131, enchantability: 5}, iron: {zh: '铁', tier: 2, speed: 6, uses: 250, enchantability: 14},
   golden: {zh: '金', tier: 0, speed: 12, uses: 32, enchantability: 22}, diamond: {zh: '钻石', tier: 3, speed: 8, uses: 1561, enchantability: 10}};
 const KINDS = {pickaxe: '镐', axe: '斧', shovel: '锹', sword: '剑', hoe: '锄'};
