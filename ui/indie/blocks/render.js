@@ -184,27 +184,33 @@ export const SUN_TILT = 0.42;
 /** The light of a frame from the environment: where the sun (or moon) is, its colour, the sky's, the air's. */
 export function lighting(env, view) {
   const a = env.sunAngle || 0, el = Math.sin(a), sun = [Math.cos(a), el * Math.cos(SUN_TILT), el * Math.sin(SUN_TILT)];
-  const rain = 1 - (env.sunMoon ?? 1), fogFar = env.underwater ? 18 : env.nether ? Math.min(view.far, Math.max(56, Math.min(view.far, 192) * 0.5)) : (view.lodFar || view.far);
+  // under water: a blue-green murk that goes darker the deeper the eye is under the surface, seen some 40 blocks
+  const water = env.underwater && !env.lava, deep = water ? Math.max(0, (env.waterY ?? view.y) - view.y) : 0;
+  const rain = 1 - (env.sunMoon ?? 1), fogFar = water ? 40 : env.underwater ? 6 : env.nether ? Math.min(view.far, Math.max(56, Math.min(view.far, 192) * 0.5)) : (view.lodFar || view.far);
   // the eye's reach to the sky (dark air and a brighter exposure in caves), the light held in the hand, the clouds' cover
   // (more or fewer over the hours of play, a storm's towers)
   const eyeSky = env.eyeSky ?? 1, cave = 1 + (1 - eyeSky) * 0.5;
   // a thunderstorm: darker, the air thicker; a lightning flash lights everything outside for a moment; the aurora on
-  // snowy nights
-  const thunder = env.thunder || 0;
-  const base = {sunTrue: sun, block: [1.0, 0.6, 0.3], fogLin: lin(env.fog), fogFar, fogDensity: 1.3 / fogFar * (1 + rain * 1.8 + thunder * 0.8), underwater: env.underwater ? 1 : 0, flicker: env.flicker ?? 1, bright: env.bright || 0, rain,
-    eyeSky, held: env.held || 0, camY: view.y, time: env.time || 0, cover: 0.47 - 0.06 * Math.sin((env.time || 0) * 0.0011) - 0.03 * Math.sin((env.time || 0) * 0.0041 + 1) - rain * 0.25 - thunder * 0.1, storm: thunder, sunDisc: [0, 0, 0], aurora: env.aurora || 0, flash: env.flash ? 1 : 0};
-  if (env.nether) return {...base, lightDir: [0, 1, 0], lightCol: [0, 0, 0], amb: [0.17, 0.07, 0.05], zenith: lin(env.fog), horizon: lin(env.fog), glow: [0, 0, 0], exposure: 1.4, fogDensity: 2.4 / fogFar, eyeSky: 1};
+  // snowy nights; some mornings a mist lying low (main.js), and always a little haze that catches the light
+  const thunder = env.thunder || 0, mist = env.mist || 0;
+  const fogLin = water ? scale([0.02, 0.085, 0.11], (0.2 + 0.8 * (env.daylight ?? 1)) * Math.exp(-deep * 0.035)) : lin(env.fog);
+  const base = {sunTrue: sun, block: [1.0, 0.6, 0.3], fogLin, fogFar, fogDensity: 1.3 / fogFar * (1 + rain * 1.8 + thunder * 0.8), underwater: env.underwater ? 1 : 0, flicker: env.flicker ?? 1, bright: env.bright || 0, rain,
+    eyeSky, held: env.held || 0, camY: view.y, time: env.time || 0, cover: 0.47 - 0.06 * Math.sin((env.time || 0) * 0.0011) - 0.03 * Math.sin((env.time || 0) * 0.0041 + 1) - rain * 0.25 - thunder * 0.1, storm: thunder, sunDisc: [0, 0, 0], aurora: env.aurora || 0, flash: env.flash ? 1 : 0,
+    mist, haze: 0.0012 * (1 + rain * 2 + thunder), waterY: water ? env.waterY ?? view.y + 1 : -1e4};
+  if (env.nether) return {...base, lightDir: [0, 1, 0], lightCol: [0, 0, 0], amb: [0.17, 0.07, 0.05], zenith: lin(env.fog), horizon: lin(env.fog), glow: [0, 0, 0], exposure: 1.4, fogDensity: 2.4 / fogFar, eyeSky: 1, mist: 0, haze: 0};
   const day = smooth(-0.04, 0.14, el), night = 1 - smooth(-0.14, 0.02, el), set = Math.max(0, 1 - Math.abs(el) * 3.2);
-  // the sun about three times the sky's light on the ground (a sunny beach stays sand-coloured, the shade readable)
-  const sunHue = mixv([1.0, 0.92, 0.82], [1.0, 0.5, 0.22], set * set), sunCol = scale(sunHue, 0.95 * day * (1 - rain * 0.85));
+  // the sun some seven times the sky's light on the ground: strong light and blue shade, as the shader packs have it
+  // (0.8.66 had nine with a harsher curve — a sunny beach went white; 0.8.67 three — it no longer looked shaded); the
+  // film's soft shoulder keeps bright sand from burning out
+  const sunHue = mixv([1.0, 0.92, 0.82], [1.0, 0.5, 0.22], set * set), sunCol = scale(sunHue, 2.0 * day * (1 - rain * 0.85));
   const moonCol = scale([0.3, 0.38, 0.62], 0.34 * night * (1 - rain * 0.7)), up = el > -0.02;
-  let amb = scale(mixv([0.018, 0.024, 0.05], [0.26, 0.3, 0.4], day), (1 - rain * 0.45) * (1 - thunder * 0.35));
+  let amb = scale(mixv([0.018, 0.024, 0.05], [0.205, 0.27, 0.42], day), (1 - rain * 0.45) * (1 - thunder * 0.35));
   amb = mixv(amb, [0.32, 0.25, 0.24], set * 0.3 * day);
   const glow = mixv(scale(sunHue, 0.5 * day * (1 - rain * 0.85)), [1.1, 0.5, 0.2], set * 0.7 * day);
   // a clear day's sky deep blue overhead (less in rain); the horizon a little bluer than the plain look's
   const clear = 1 - rain * 0.8, zenith = lin(env.skyTop).map((v, i) => v * (1 + ([0.32, 0.6, 1.2][i] - 1) * clear));
   const horizon = lin(env.horizon).map((v, i) => v * (1 + ([0.88, 0.94, 1.0][i] - 1) * clear));
-  return {...base, lightDir: up ? sun : scale(sun, -1), lightCol: up ? sunCol : moonCol, amb, zenith, horizon, glow, exposure: (0.86 + night * 0.7) * cave, day, sunDisc: sunCol};
+  return {...base, lightDir: up ? sun : scale(sun, -1), lightCol: up ? sunCol : moonCol, amb, zenith, horizon, glow, exposure: (0.8 + night * 0.7) * cave, day, sunDisc: sunCol};
 }
 export const mat = {
   perspective(fovy, aspect, near, far) { const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far); return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]); },
@@ -408,8 +414,8 @@ export class Renderer {
     this.cloudQ = {low: 1, mid: 2, high: 3}[L] || 0;
     this.hdr = this.hdrOk && (L === 'mid' || L === 'high');
     this.postOn = L === 'high';
-    // edge shade samples (fewer on mid), light shafts from mid up
-    this.fx = {gen: L === 'mid' || L === 'high' ? 1 : 0, ssr: L === 'high' ? 24 : 0, ao: {mid: 4, high: 8}[L] || 0, rays: {mid: 18, high: 28}[L] || 0, flare: L === 'mid' || L === 'high', bloom: {mid: 4, high: 5}[L] || 0};
+    // edge shade samples (fewer on mid), steps of the light in the air (shafts, mist) from mid up
+    this.fx = {gen: L === 'mid' || L === 'high' ? 1 : 0, ssr: L === 'high' ? 24 : 0, ao: {mid: 4, high: 8}[L] || 0, vol: {mid: 10, high: 16}[L] || 0, flare: L === 'mid' || L === 'high', bloom: {mid: 4, high: 5}[L] || 0};
   }
   prog(name, make) { return this.progs[name] ||= compile(this.gl, ...make()); }
   /** The lighting uniforms of a shaded program for this frame. */
@@ -555,15 +561,28 @@ export class Renderer {
       }
       gl.disable(gl.BLEND);
     }
-    const C = this.prog(`composite${fx.ao}:${fx.rays}`, () => compositeShaders({ao: fx.ao, rays: fx.rays})), ldr = this.target('ldr', W, H);
+    const C = this.prog(`composite${fx.ao}:${fx.vol}`, () => compositeShaders({ao: fx.ao, vol: fx.vol})), ldr = this.target('ldr', W, H);
     gl.bindFramebuffer(gl.FRAMEBUFFER, ldr ? ldr.fbo : null); gl.viewport(0, 0, W, H);
     gl.useProgram(C.p);
     bind(3, src.color, C.u.u_color); bind(4, src.depth, C.u.u_depth); bind(5, levels[0]?.color || src.color, C.u.u_bloom);
-    const t = Math.tan(view.fov / 2), sun = this.sunShafts(vp, lit), shafts = fx.rays ? sun : {uv: sun.uv, rays: 0};
+    const t = Math.tan(view.fov / 2);
     gl.uniform2f(C.u.u_px, 1 / W, 1 / H); gl.uniform2f(C.u.u_tanHalf, t * W / H, t);
     gl.uniform1f(C.u.u_near, this.near); gl.uniform1f(C.u.u_far, this.far); gl.uniform1f(C.u.u_exposure, lit.exposure);
     gl.uniform1f(C.u.u_bloomAmt, levels.length ? 0.3 / levels.length : 0); gl.uniform1f(C.u.u_underwater, lit.underwater); gl.uniform1f(C.u.u_time, lit.time);
-    gl.uniform2fv(C.u.u_sunUV, shafts.uv); gl.uniform1f(C.u.u_rays, shafts.rays * 0.5); gl.uniform3fv(C.u.u_rayCol, scale(lit.lightCol, 0.45));
+    // the light in the air: the shadow map (on its own unit, 2) says where the sun reaches; the view turned back to the
+    // world's axes for the steps; under water the shafts from the waves (the noise picture)
+    if (fx.vol) {
+      const r = this.rot, wet = lit.underwater && lit.waterY > -1e3;
+      gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.shadowMap?.tex || null); gl.uniform1i(C.u.u_shadow, 2);
+      gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, this.noise); gl.uniform1i(C.u.u_noise, 7);
+      gl.uniform1f(C.u.u_shadowOn, this.shadowLive && this.shadowMat ? 1 : 0);
+      if (this.shadowMat) gl.uniformMatrix4fv(C.u.u_shadowMat, false, this.shadowMat);
+      gl.uniformMatrix3fv(C.u.u_toWorld, false, new Float32Array([r[0], r[4], r[8], r[1], r[5], r[9], r[2], r[6], r[10]]));
+      gl.uniform3fv(C.u.u_lightDir, lit.lightDir); gl.uniform3fv(C.u.u_lightCol, lit.lightCol); gl.uniform3f(C.u.u_camPos, view.x, view.y, view.z);
+      gl.uniform3fv(C.u.u_waterCol, lit.lightCol.map((v, i) => v * [0.5, 0.9, 1.0][i]));
+      gl.uniform1f(C.u.u_camY, view.y); gl.uniform1f(C.u.u_mist, lit.mist || 0); gl.uniform1f(C.u.u_haze, lit.haze || 0); gl.uniform1f(C.u.u_waterY, lit.waterY);
+      gl.uniform1f(C.u.u_volFar, wet ? 24 : lit.underwater || !lit.haze ? 0 : this.shadowQ >= 2 ? 80 : 48);
+    }
     // the lens flare: ghosts of whatever is brightest (none under water)
     gl.uniform1f(C.u.u_flare, fx.flare && !lit.underwater ? 1 : 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -636,7 +655,7 @@ export class Renderer {
     gl.viewport(0, 0, W, H);
     this.near = 0.05; this.far = Math.max(view.far * 1.2 + 64, (view.lodFar || 0) + 64);
     const proj = mat.perspective(view.fov, W / H, this.near, this.far), rot = mat.view(view.yaw, view.pitch), vp = mat.mul(proj, rot);
-    this.vp = vp; this.view = view;
+    this.vp = vp; this.rot = rot; this.view = view;
     gl.disable(gl.BLEND); gl.depthMask(true);
     const clear = hdr ? lit.fogLin : env.fog;
     gl.clearColor(clear[0], clear[1], clear[2], 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);

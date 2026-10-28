@@ -486,13 +486,19 @@ function environment(time) {
   // a lightning flash lights everything for a moment
   if (flash) { top = lerp(top, [0.85, 0.87, 0.95], 0.75); horizon = lerp(horizon, [0.85, 0.87, 0.95], 0.75); }
   const dayLit = flash ? 1 : day;
+  // 光影: some mornings (about half, each world its own) a mist lies in the low places, from before sunrise until the
+  // sun is well up, thinner or thicker
+  const tod = ((time % 24000) + 24000) % 24000, morning = Math.floor((time + 1500) / 24000);
+  let roll = Math.imul(morning ^ (G?.meta?.seed || 0), 0x2c1b3c6d) ^ 0x297a2d39; roll = (Math.imul(roll ^ (roll >>> 15), 0x85ebca6b) >>> 0) / 4294967296;
+  const lies = tod >= 22500 ? Math.min(1, (tod - 22500) / 1000) : tod < 3500 ? Math.min(1, (3500 - tod) / 2500) : 0;
+  const mist = roll < 0.5 ? (0.45 + roll * 1.1) * lies * (1 - rain) : 0;
   return {
     daylight: dayLit, skyTop: top, horizon, fog: horizon, glow: [1, 0.48, 0.18], glowAmt, sunAngle: a, sunDir: [Math.cos(a), el, 0], stars: Math.max(0, 1 - day * 1.6) * (1 - rain),
     skyLight: lerp([0.62, 0.68, 0.95], [1, 1, 1], dayLit).map((v, i) => v * (1 - glowAmt * 0.15 * (i === 2 ? 1 : 0))),
     cloudColor: lerp([0.08, 0.09, 0.13], [1, 1, 1], day).map(v => v * (1 - rain * 0.45)), moonPhase: Math.floor(time / 24000) % 8, cloudShift: time * 0.03, sunMoon: 1 - rain,
     gamma: settings.gamma, wave: settings.wave, clouds: settings.clouds, time: performance.now() / 1000, flicker: 0.92 + Math.sin(performance.now() / 90) * 0.03 + Math.sin(performance.now() / 37) * 0.02,
     // for 光影: the storm, a lightning flash, and a snowy place (the aurora at night)
-    thunder, flash: !!flash, cold: !!b?.cold,
+    thunder, flash: !!flash, cold: !!b?.cold, mist,
   };
 }
 
@@ -1409,8 +1415,15 @@ function frame(now) {
   const env = environment(G.time + a);
   const eyeV = G.mirror.get(Math.floor(view.x), Math.floor(view.y), Math.floor(view.z));
   env.underwater = (eyeV & 0xFFF) === ID.water;
-  if (env.underwater) { env.fog = [0.05, 0.12, 0.35].map(q => q * (0.3 + env.daylight * 0.7)); }
-  if ((eyeV & 0xFFF) === ID.lava) { env.underwater = true; env.fog = [0.6, 0.15, 0.02]; }
+  if (env.underwater) {
+    env.fog = [0.05, 0.12, 0.35].map(q => q * (0.3 + env.daylight * 0.7));
+    // 光影: where the surface is above the eye (the shafts and the light on the bottom come down from it)
+    const ex = Math.floor(view.x), ez = Math.floor(view.z);
+    let y = Math.floor(view.y);
+    while (y < view.y + 48 && (G.mirror.get(ex, y + 1, ez) & 0xFFF) === ID.water) y++;
+    env.waterY = y + 0.9;
+  }
+  if ((eyeV & 0xFFF) === ID.lava) { env.underwater = true; env.lava = true; env.fog = [0.6, 0.15, 0.02]; }
   // for 光影: how far the sky reaches the eye (eased: walking into a cave the air darkens over a second or two), and
   // the light of what is in the hand (a torch lights round the player)
   const eyeSky = G.mirror.light(Math.floor(view.x), Math.floor(view.y), Math.floor(view.z))[0] / 15;
@@ -1420,7 +1433,8 @@ function frame(now) {
   // the aurora: snowy places by night, coming and going over a few seconds; where the player stands (grass leans away)
   G.aurora = (G.aurora || 0) + ((env.cold ? env.stars : 0) - (G.aurora || 0)) * Math.min(1, dt * 0.4);
   env.aurora = G.aurora; env.player = [G.body.x, G.body.y, G.body.z];
-  $('.water').style.display = env.underwater ? 'block' : 'none';
+  // (with 光影 the water's own murk stands in for the blue sheet over the picture)
+  $('.water').style.display = env.underwater && (renderer.level === 'off' || env.lava) ? 'block' : 'none';
   $('.hurt').style.opacity = G.hurtT ? 0.9 : 0;
   $('.sleep').style.opacity = G.sleeping ? Math.min(1, G.sleeping / 60) : 0;
   $('.portalfx').style.opacity = G.inPortal ? Math.min(0.8, G.inPortal / 80) : 0;

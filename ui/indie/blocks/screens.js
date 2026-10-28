@@ -88,7 +88,7 @@ export class Screens {
       ${slider('volume', '音量', 0, 1, 0.05, fmts.volume)}${slider('scale', '画面清晰度', 0.4, 1, 0.05, fmts.scale)}
       ${cycle('shaders', '光影')}${cycle('lod', '远景')}
       ${toggle('wave', '草木摇动')}${toggle('clouds', '云')}${toggle('bob', '走路晃动')}${toggle('autoJump', '触屏自动跳')}
-      </div><p class="note">光影：低是光照、水面、天空和一层柔和的云（夜里有星云，雪地的夜里有极光），矿石在暗处发光，草会给人让开；中再加阳光的影子、有厚度的云（积云、成片的层积云，雷雨天长成高高的积雨云，高处还有卷云、卷积云和带日晕的卷层云）和云影、泛光、方块的凹凸、角落的阴影、穿过缝隙的光束和对着太阳时柔和的镜头眩光，水能看到底下、越深越蓝；高的影子更柔和、云更细，水面倒映岸上的东西。远景：视野外的地形用大一点的方块画出来，能看到很远的山。光影开着时卡了会自动降一点清晰度。手机上视野距离和画面清晰度调低会更流畅。</p><button class="btn" data-a="back">完成</button>`, inGame ? 'dim' : 'dirt', {
+      </div><p class="note">光影：低是光照、水面、天空和一层柔和的云（夜里有星云，雪地的夜里有极光），矿石在暗处发光，草会给人让开；中再加阳光的影子、有厚度的云（积云、成片的层积云，雷雨天长成高高的积雨云，高处还有卷云、卷积云和带日晕的卷层云）和云影、泛光、方块的凹凸、角落的阴影、空气里看得见的光柱（有些早晨起雾时最明显）和柔和的镜头眩光，水能看到底下、越深越蓝、水底有晃动的光纹，在水下抬头能看到水面外的天和太阳、有从水面照下来的光；高的影子更柔和、云更细，水面倒映岸上的东西。远景：视野外的地形用大一点的方块画出来，能看到很远的山。光影开着时卡了会自动降一点清晰度。手机上视野距离和画面清晰度调低会更流畅。</p><button class="btn" data-a="back">完成</button>`, inGame ? 'dim' : 'dirt', {
       cycle: b => { const k = b.dataset.k, opts = CHOICES[k], i = opts.findIndex(o => o[0] === this.api.settings()[k]), next = opts[(i + 1) % opts.length]; this.api.setSetting(k, next[0]); b.textContent = b.textContent.replace(/：.*/, `：${next[1]}`); },
       toggle: b => { const k = b.dataset.k; this.api.setSetting(k, !this.api.settings()[k]); b.textContent = b.textContent.replace(/：.*/, `：${this.api.settings()[k] ? '开' : '关'}`); },
       input: el => { if (!el.dataset.k) return; const k = el.dataset.k, v = Number(el.value); this.api.setSetting(k, v); this.current.querySelector(`[data-v="${k}"]`).textContent = fmts[k](v); },

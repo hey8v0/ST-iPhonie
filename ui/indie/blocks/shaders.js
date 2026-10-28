@@ -15,7 +15,7 @@ const SKY = `
 #define HDR 0
 #endif
 uniform vec3 u_lightDir, u_lightCol, u_ambCol, u_blockCol, u_sunTrue, u_zenith, u_horizon, u_glowCol, u_fogLin;
-uniform float u_exposure, u_fogDensity, u_fogFar, u_underwater, u_flicker, u_bright, u_rain, u_eyeSky, u_camY, u_held, u_time, u_cover, u_aurora, u_flash, u_storm;
+uniform float u_exposure, u_fogDensity, u_fogFar, u_underwater, u_flicker, u_bright, u_rain, u_eyeSky, u_camY, u_held, u_time, u_cover, u_aurora, u_flash, u_storm, u_mist, u_waterY;
 uniform sampler2D u_noise;
 // the sky's colour along a direction: a thin pale band at the horizon under a deep blue (as the air thins upward),
 // the sun's glow (wide, a halo, a bright core), dark below
@@ -34,20 +34,34 @@ float cloudCover(vec2 xz, int oct) {
   for (int i = 0; i < 5; i++) { if (i >= oct) break; s += a * textureLod(u_noise, p + float(i) * u_time * vec2(0.00009, -0.00006), 0.0).r; n += a; p = p * 2.03 + 0.37; a *= 0.5; }
   return smoothstep(u_cover, u_cover + 0.25, s / n);
 }
-// what kind of low cloud is over a place, from a slow wide noise: 0 flat sheets (stratocumulus; in rain the grey
-// overcast) … 1 heaps (cumulus); a thunderstorm makes towers of all of them
+// what kind of low cloud is over a place, from a slow wide noise (a kind over some thousand blocks, so a sky shows a
+// few): 0 flat sheets (stratocumulus; in rain the grey overcast) … 1 heaps (cumulus); a thunderstorm makes towers
 float cloudKind(vec2 xz) {
-  float k = smoothstep(0.28, 0.56, textureLod(u_noise, (xz + vec2(u_time * 2.0, u_time * 0.6)) * 0.000045 + 0.31, 0.0).r);
+  float k = smoothstep(0.28, 0.56, textureLod(u_noise, (xz + vec2(u_time * 2.0, u_time * 0.6)) * 0.00011 + 0.31, 0.0).r);
   return max(k * (1.0 - u_rain * 0.7), u_storm);
 }
+// a morning's mist, seen along a direction: pale, lit by the low sun on its side
+vec3 mistCol(vec3 d) { return u_ambCol * 1.4 + u_lightCol * (0.15 + 0.5 * pow(max(dot(d, u_lightDir), 0.0), 4.0)); }
 // the air between the eye and a point (camera-relative): its colour, and how much of it there is (alpha). Thicker low
-// down (from a mountain the view is clear, the valley hazy), the sky's colour behind — or a cave's darkness when the
-// eye is out of the sky's reach; under water a short blue murk.
+// down (from a mountain the view is clear, the valley hazy), the sky's colour behind (brighter toward the sun, where
+// the haze sends its light on) — or a cave's darkness when the eye is out of the sky's reach; some mornings a mist
+// lying in the low places, a few blocks deep; under water a blue-green murk.
 vec4 airAt(vec3 wp, float dist) {
-  if (u_underwater > 0.5) return vec4(u_fogLin, smoothstep(1.0, u_fogFar, dist));
+  if (u_underwater > 0.5) return vec4(u_fogLin, 1.0 - exp(-dist * 2.2 / u_fogFar));
+  vec3 d = wp / max(dist, 0.001);
   float k = 0.016, dy = wp.y, h = exp(-clamp(u_camY - 64.0, -24.0, 200.0) * k) * (abs(dy) > 0.05 ? (1.0 - exp(-k * dy)) / (k * dy) : 1.0);
   float t = dist * u_fogDensity * clamp(h, 0.2, 2.5), f = max(1.0 - exp(-t * t), smoothstep(u_fogFar * 0.88, u_fogFar, dist));
-  return vec4(mix(u_ambCol * 0.02 + vec3(0.002), skyCol(wp / max(dist, 0.001)), u_eyeSky), f);
+  vec3 col = skyCol(d) + u_lightCol * 0.06 * pow(max(dot(d, u_lightDir), 0.0), 6.0);
+  if (u_mist > 0.0) {
+    // the mist thins upward four times faster than the haze (a valley full, a hilltop over it; never thicker than at sea
+    // level): near things clear, the far ones fading
+    float km = 0.06, hm = exp(-max(u_camY - 62.0, 0.0) * km) * (abs(dy) > 0.05 ? (1.0 - exp(-km * dy)) / (km * dy) : 1.0);
+    float tm = dist * u_mist * 0.012 * min(hm, 1.0), fm = 1.0 - exp(-tm), F = 1.0 - (1.0 - f) * (1.0 - fm);
+    // the colour by each one's share
+    col = mix(col, mistCol(d), fm / max(F, 1e-4));
+    f = F;
+  }
+  return vec4(mix(u_ambCol * 0.02 + vec3(0.002), col, u_eyeSky), f);
 }
 `;
 // the light of a pixel, after SKY: colours are linear (sRGB squared), lit, then through the film
@@ -58,9 +72,12 @@ float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 // keeps the shade readable (the usual fitted curve takes the dark down to a fifth), a little less colour in the dark
 vec3 film(vec3 c) {
   c *= u_exposure;
-  c = clamp((c * (2.51 * c + 0.12)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+  // half each channel through the curve (bright colours go toward white, as film does), half the brightness through it
+  // with the colour kept (bright sand stays sand-coloured)
+  float l0 = luma(c), lc = clamp((l0 * (2.51 * l0 + 0.08)) / (l0 * (2.43 * l0 + 0.59) + 0.14), 0.0, 1.0);
+  c = mix(clamp((c * (2.51 * c + 0.08)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0), c * (lc / max(l0, 1e-5)), 0.5);
   float l = luma(c);
-  return clamp(mix(vec3(l), c, mix(0.75, 1.0, smoothstep(0.0, 0.2, l))), 0.0, 1.0);
+  return clamp(mix(vec3(l), c, mix(0.8, 1.05, smoothstep(0.0, 0.25, l))), 0.0, 1.0);
 }
 #if HDR
 vec3 display(vec3 c) { return c; }
@@ -71,6 +88,12 @@ vec3 display(vec3 c) { return sqrt(film(c)); }
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 // smooth noise of about one unit across (one cell of the noise picture is an eighth of it)
 float vnoise(vec2 p) { return texture(u_noise, p / 8.0).r; }
+// the light the waves gather onto what is under them (caustics): where two drifting noises are nearly equal, a net of
+// bright lines a block or two across
+float caustic(vec2 p) {
+  float a = texture(u_noise, p * 0.085 + u_time * vec2(0.011, 0.006)).r, b = texture(u_noise, p * 0.1 - u_time * vec2(0.007, 0.01) + 0.5).r;
+  return pow(1.0 - min(abs(a - b) * 3.0, 1.0), 5.0);
+}
 `;
 // the shadow map: the hardware's 2×2 compare, and taps on a turned spiral round (more and wider on high)
 const SHADOW = `
@@ -166,11 +189,14 @@ float cloudShade(vec3 W) { return u_lightDir.y < 0.05 ? 1.0 : 1.0 - (0.6 + 0.3 *
 #else
 float cloudShade(vec3 W) { return 1.0; }
 #endif
-// small waves in three sizes: the water's surface slope
+// the water's surface slope: two long swells, and ripples with no pattern to them (the slope of the noise picture in
+// two sizes, drifting different ways) — the sums of waves alone looked like a woven sheet
 vec3 waterNormal(vec3 W) {
-  vec2 g = vec2(cos(W.x * 0.9 + u_time * 1.6), cos(W.z * 0.8 + u_time * 1.3)) * 0.05
-         + vec2(cos(W.x * 2.3 - W.z * 1.7 + u_time * 2.4), cos(W.z * 2.1 + W.x * 1.3 + u_time * 2.0)) * 0.025
-         + vec2(cos(W.x * 5.1 + W.z * 3.3 + u_time * 3.7), cos(W.z * 4.7 - W.x * 2.9 + u_time * 3.1)) * 0.012;
+  vec2 g = vec2(cos(W.x * 0.9 + u_time * 1.6), cos(W.z * 0.8 + u_time * 1.3)) * 0.03
+         + vec2(cos(W.x * 2.3 - W.z * 1.7 + u_time * 2.4), cos(W.z * 2.1 + W.x * 1.3 + u_time * 2.0)) * 0.012;
+  vec2 p = W.xz * 0.35 + u_time * vec2(0.06, 0.04), q = W.xz * 0.95 - u_time * vec2(0.05, 0.09);
+  float a = vnoise(p), b = vnoise(q);
+  g += vec2(vnoise(p + vec2(0.15, 0.0)) - a, vnoise(p + vec2(0.0, 0.15)) - a) * 0.55 + vec2(vnoise(q + vec2(0.15, 0.0)) - b, vnoise(q + vec2(0.0, 0.15)) - b) * 0.3;
   return normalize(vec3(-g.x, 1.0, -g.y));
 }
 #if HDR
@@ -230,6 +256,8 @@ void main() {
 #endif
   // sunlight only where the sky reaches (in caves the map may not know), less under clouds
   float open = smoothstep(0.55, 0.95, sky), sunVis = sh * open * (open > 0.0 ? cloudShade(W) : 1.0);
+  // under the water (with the eye in it): the sunlight comes down in the net the waves make, less the deeper it is
+  if (u_underwater > 0.5 && W.y < u_waterY && !liquid) { float below = u_waterY - W.y; sunVis *= (0.3 + 1.7 * caustic(W.xz + L.xz / max(L.y, 0.2) * below)) * exp(-below * 0.07); }
   vec3 light = u_lightCol * direct * sunVis;
   // leaves and grass let light through: they glow looking toward the sun behind them
   if (leaf || plant) light += u_lightCol * pow(max(dot(-V, L), 0.0), 5.0) * (leaf ? 0.35 : 0.28) * sunVis;
@@ -254,7 +282,19 @@ void main() {
     vec3 n = N.y > 0.5 ? waterNormal(W) : N, R = reflect(-V, n);
     float fr = 0.02 + 0.98 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
     vec3 refl = skyCol(normalize(vec3(R.x, max(R.y, 0.02), R.z))) * mix(0.1, 1.0, sky * sky);
-    vec3 glint = u_lightCol * pow(max(dot(R, L), 0.0), 220.0) * 16.0 * sunVis;
+    vec3 glint = u_lightCol * pow(max(dot(R, L), 0.0), 220.0) * 12.0 * sunVis;
+    if (u_underwater > 0.5 && N.y > 0.5 && V.y < 0.0) {
+      // seen from under it: straight up, through a round window (some 48° round, its rim moving with the waves), the
+      // sky bent in and the sun; round the window the surface mirrors the dark water below; the murk over all with
+      // the distance
+      vec3 D = -V, T = refract(D, -n, 1.33);
+      bool out_ = dot(T, T) > 0.5;
+      float r = out_ ? 0.02 + 0.98 * pow(1.0 - max(dot(T, n), 0.0), 5.0) : 1.0;
+      vec3 up = out_ ? (skyCol(normalize(T)) + u_lightCol * pow(max(dot(normalize(T), L), 0.0), 300.0) * 30.0) * mix(0.15, 1.0, sky * sky) : vec3(0.0);
+      vec4 air = airAt(v_wp, v_dist);
+      o = vec4(display(mix(mix(up, u_fogLin, r), air.rgb, air.a)), 1.0);
+      return;
+    }
 #if HDR
     if (u_behind > 0.5 && u_underwater < 0.5) {
       // what is under the surface, bent by the waves (not where something stands in front of the water)
@@ -264,7 +304,10 @@ void main() {
       float deep = clamp(bd - here, 0.0, 64.0);
       // the light that gets through: the colours the water lacks go first; what is lost turns to the water's own colour
       vec3 wc = lin(v_tint), absorb = exp(-deep * ((vec3(1.0) - wc) * 0.85 + 0.04));
-      vec3 body = texture(u_scene, ruv).rgb * absorb + wc * (u_ambCol * 0.5 + u_lightCol * max(L.y, 0.0) * 0.12 * open) * 0.6 * (1.0 - absorb);
+      // the bed below lit through the waves (caustics), where the sun reaches it
+      vec3 bed = v_wp * (bd / here) + u_camera;
+      float cst = caustic(bed.xz + L.xz / max(L.y, 0.2) * (W.y - bed.y)) * sunVis * smoothstep(0.1, 0.4, L.y) * exp(-deep * 0.15);
+      vec3 body = texture(u_scene, ruv).rgb * absorb * (1.0 + cst * 1.4) + wc * (u_ambCol * 0.5 + u_lightCol * max(L.y, 0.0) * 0.12 * open) * 0.6 * (1.0 - absorb);
 #if SSR > 0
       if (fr > 0.06 && R.y > 0.0) { vec4 m = mirror(v_wp, R); refl = mix(refl, m.rgb, m.a); }
 #endif
@@ -362,7 +405,7 @@ void main() {
   }
   c = mix(c, vec3(0.6, 0.62, 0.72), u_flash * 0.6);
 #if HDR
-  c += u_sunDisc * smoothstep(0.99972, 0.99988, dot(d, u_sunTrue)) * 80.0;
+  c += u_sunDisc * smoothstep(0.99972, 0.99988, dot(d, u_sunTrue)) * 45.0;
 #endif
 #if CLOUDS > 0
   // high clouds at 300, of three kinds from place to place (a slow wide noise, drifting): wisps drawn out by the wind
@@ -372,14 +415,14 @@ void main() {
   if (d.y > 0.02 && u_camPos.y < 300.0) {
     float t2 = (300.0 - u_camPos.y) / d.y;
     vec2 p2 = u_camPos.xz + d.xz * t2 + vec2(u_time * 3.0, u_time * 0.7);
-    float hk = textureLod(u_noise, p2 * 0.00004 + 0.57, 0.0).r, far = exp(-t2 * 0.00025) * (1.0 - u_rain * 0.8);
+    float hk = textureLod(u_noise, p2 * 0.0001 + 0.57, 0.0).r, far = exp(-t2 * 0.00025) * (1.0 - u_rain * 0.8);
     vec2 q = vec2(p2.x * 0.00025, p2.y * 0.0012 + textureLod(u_noise, p2 * 0.0005, 0.0).r * 0.4);
     float wisp = smoothstep(u_cover + 0.05, u_cover + 0.45, textureLod(u_noise, q, 0.0).r * 0.65 + textureLod(u_noise, q * 3.3 + 0.2, 0.0).r * 0.35) * smoothstep(0.33, 0.45, hk) * (1.0 - smoothstep(0.62, 0.74, hk));
     // the flecks in patches, soft, of two sizes so they do not sit in a grid
     float fn = textureLod(u_noise, p2 * vec2(0.011, 0.016), 0.0).r * 0.7 + textureLod(u_noise, p2 * 0.037 + 0.4, 0.0).r * 0.3;
     float fleck = smoothstep(0.5, 0.9, fn) * smoothstep(0.5, 0.68, textureLod(u_noise, p2 * 0.0011 + 0.3, 0.0).r) * (1.0 - smoothstep(0.36, 0.44, hk));
     float veil = smoothstep(0.66, 0.8, hk);
-    c = mix(c, (u_lightCol * 0.5 * ph0 + vec3(luma(u_ambCol)) * 1.6) * (1.0 - 0.6 * u_stars), clamp(wisp * 0.5 + fleck * 0.16 + veil * 0.3, 0.0, 1.0) * far);
+    c = mix(c, (u_lightCol * 0.3 * ph0 + vec3(luma(u_ambCol)) * 1.6) * (1.0 - 0.6 * u_stars), clamp(wisp * 0.5 + fleck * 0.16 + veil * 0.3, 0.0, 1.0) * far);
     vec3 ring = exp(-pow((acos(clamp(dot(d, u_lightDir), -1.0, 1.0)) - vec3(0.375, 0.383, 0.392)) / 0.011, vec3(2.0)));
     c += u_lightCol * ring * veil * far * 0.12;
   }
@@ -399,7 +442,7 @@ void main() {
     float cv = cloudCover(xz, 4);
     if (cv > 0.0) {
       float lt = exp(-cloudCover(xz + u_lightDir.xz * 24.0, 2) * 1.6), ph = 0.55 + 1.6 * pow(max(dot(d, u_lightDir), 0.0), 8.0);
-      vec3 lum = (u_lightCol * (0.2 + 0.8 * lt) * ph * 1.3 + dimAmb * mix(1.5, 0.9, cv)) * (1.0 - 0.45 * u_storm) * (1.0 - 0.6 * u_stars);
+      vec3 lum = (u_lightCol * (0.2 + 0.8 * lt) * ph * 0.75 + dimAmb * mix(1.5, 0.9, cv)) * (1.0 - 0.45 * u_storm) * (1.0 - 0.6 * u_stars);
       c = mix(c, lum, smoothstep(0.0, 0.45, cv) * exp(-tl * 0.00035));
     }
   }
@@ -430,7 +473,7 @@ void main() {
         // the light's way out goes through what is above (a thin sheet lets it through, a heap's middle not)
         float lt = exp(-cloudCover(p.xz + u_lightDir.xz * 16.0, 2) * 3.2 * max(top - h, 0.0) - 0.15);
         // (by night the moon lights them dimly: dark grey, not bright against the stars)
-        vec3 lum = (u_lightCol * lt * ph * 1.5 + dimAmb * (0.35 + 0.85 * h) * 1.7) * (1.0 - 0.45 * u_storm) * (1.0 - 0.6 * u_stars);
+        vec3 lum = (u_lightCol * lt * ph * 0.85 + dimAmb * (0.35 + 0.85 * h) * 1.7) * (1.0 - 0.45 * u_storm) * (1.0 - 0.6 * u_stars);
         float a = 1.0 - exp(-dens * dt * 0.06);
         S += T * a * lum; T *= 1.0 - a;
         if (T < 0.03) break;
@@ -440,6 +483,8 @@ void main() {
   }
 #endif
 #endif
+  // a morning's mist hides the horizon
+  if (u_mist > 0.0) c = mix(c, mistCol(d), u_mist * exp(-max(d.y, 0.0) * 9.0) * 0.85);
   o = vec4(display(c), 1.0);
 }`;
   return [vs, fs];
@@ -562,25 +607,30 @@ void main() {
 ${up ? `  vec3 c = at(vec2(0.0)) * 4.0 + (at(vec2(1.0, 0.0)) + at(vec2(-1.0, 0.0)) + at(vec2(0.0, 1.0)) + at(vec2(0.0, -1.0))) * 2.0
     + at(vec2(1.0, 1.0)) + at(vec2(-1.0, 1.0)) + at(vec2(1.0, -1.0)) + at(vec2(-1.0, -1.0));
   o = vec4(c / 16.0 * u_weight, 1.0);` : `  vec3 c = (at(vec2(0.0)) * 4.0 + at(vec2(-1.0, -1.0)) + at(vec2(1.0, -1.0)) + at(vec2(-1.0, 1.0)) + at(vec2(1.0, 1.0))) / 8.0;
-  if (u_first > 0.5) { float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); c *= 0.02 + 0.98 * smoothstep(1.2, 3.5, l); }
+  if (u_first > 0.5) { float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); c *= 0.02 + 0.98 * smoothstep(1.6, 4.5, l); }
   o = vec4(min(c, vec3(64.0)), 1.0);`}
 }`;
   return [FULL_VS, fs];
 }
 
 /**
- * The end of a shaded frame (HDR): edge shade (ao 1: high), light shafts toward the sun through the gaps, the bloom,
- * the film (exposure, the curve, colour); out as display colour with its brightness in alpha for the smoothing after.
+ * The end of a shaded frame (HDR): edge shade (ao: samples), the light the air catches (vol: steps — shafts through
+ * the gaps from the shadow map, a morning's mist lit up, under water the shafts from the waves), the bloom, the lens
+ * flare, the film (exposure, the curve, colour); out as display colour with its brightness in alpha for the smoothing
+ * after.
  */
 export function compositeShaders(o = {}) {
   const fs = `#version 300 es
 #define AO ${o.ao || 0}
-#define RAYS ${o.rays || 28}
+#define VOL ${o.vol || 0}
 precision highp float;
-uniform sampler2D u_color, u_depth, u_bloom;
-uniform vec2 u_px, u_tanHalf, u_sunUV;
-uniform float u_bloomAmt, u_near, u_far, u_rays, u_exposure, u_underwater, u_time, u_flare;
-uniform vec3 u_rayCol;
+uniform sampler2D u_color, u_depth, u_bloom, u_noise;
+uniform highp sampler2DShadow u_shadow;
+uniform vec2 u_px, u_tanHalf;
+uniform float u_bloomAmt, u_near, u_far, u_exposure, u_underwater, u_time, u_flare, u_shadowOn, u_camY, u_mist, u_haze, u_waterY, u_volFar;
+uniform vec3 u_lightDir, u_lightCol, u_camPos, u_waterCol;
+uniform mat4 u_shadowMat;
+uniform mat3 u_toWorld;
 in vec2 v_uv; out vec4 o;
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
@@ -588,10 +638,49 @@ float linearDepth(float d) { float z = d * 2.0 - 1.0; return 2.0 * u_near * u_fa
 vec3 viewPos(vec2 uv) { float z = linearDepth(texture(u_depth, uv).r); return vec3((uv * 2.0 - 1.0) * u_tanHalf * z, -z); }
 vec3 film(vec3 c) {
   c *= u_exposure;
-  c = clamp((c * (2.51 * c + 0.12)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+  // half each channel through the curve (bright colours go toward white, as film does), half the brightness through it
+  // with the colour kept (bright sand stays sand-coloured)
+  float l0 = luma(c), lc = clamp((l0 * (2.51 * l0 + 0.08)) / (l0 * (2.43 * l0 + 0.59) + 0.14), 0.0, 1.0);
+  c = mix(clamp((c * (2.51 * c + 0.08)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0), c * (lc / max(l0, 1e-5)), 0.5);
   float l = luma(c);
-  return clamp(mix(vec3(l), c, mix(0.75, 1.0, smoothstep(0.0, 0.2, l))), 0.0, 1.0);
+  return clamp(mix(vec3(l), c, mix(0.8, 1.05, smoothstep(0.0, 0.25, l))), 0.0, 1.0);
 }
+#if VOL
+// under water, the shafts: broad soft beams from where the waves gather the light, drifting
+float beams(vec2 p) {
+  float a = textureLod(u_noise, p * 0.03 + u_time * vec2(0.004, 0.0025), 0.0).r, b = textureLod(u_noise, p * 0.045 - u_time * vec2(0.003, 0.004) + 0.5, 0.0).r;
+  return smoothstep(0.45, 0.8, a * 0.6 + b * 0.4);
+}
+// the light the air on the way to this pixel catches (the shafts through a forest, a lit morning mist): steps along
+// the view (closer together near the eye), each lit where the shadow map says the sun or moon reaches it, by how much
+// air is there — a little haze, thinning upward, and the mist low down — and much more looking toward the light (the
+// haze sends it on forward). Under water: the light comes down in moving shafts from the waves.
+vec3 airLight(vec2 uv, float d) {
+  vec3 dv = normalize(vec3((uv * 2.0 - 1.0) * u_tanHalf, -1.0)), dir = u_toWorld * dv;
+  float far = d >= 0.99999 ? u_volFar : min(linearDepth(d) / -dv.z, u_volFar);
+  float j = ign(gl_FragCoord.xy), prev = 0.0, s = 0.0, cosT = dot(dir, u_lightDir);
+  bool wet = u_underwater > 0.5;
+  for (int i = 0; i < VOL; i++) {
+    float f = (float(i) + j) / float(VOL), t = far * f * f, dt = t - prev;
+    prev = t;
+    vec3 p = dir * t;
+    float y = u_camY + p.y, lit, dens;
+    if (wet) {
+      float below = u_waterY - y;
+      if (below < 0.0) continue;
+      lit = beams(u_camPos.xz + p.xz + u_lightDir.xz / max(u_lightDir.y, 0.2) * below) * exp(-below * 0.05);
+      dens = 0.012;
+    } else {
+      vec3 q = (u_shadowMat * vec4(p, 1.0)).xyz * 0.5 + 0.5;
+      lit = u_shadowOn > 0.5 && q.x > 0.0 && q.y > 0.0 && q.x < 1.0 && q.y < 1.0 && q.z < 1.0 ? textureLod(u_shadow, vec3(q.xy, q.z - 0.0015), 0.0) : 1.0;
+      dens = u_haze * exp(-max(y - 63.0, 0.0) * 0.02) + u_mist * 0.012 * exp(-max(y - 62.0, 0.0) * 0.06);
+    }
+    s += lit * dens * dt;
+  }
+  float ph = wet ? 0.6 + 2.0 * pow(max(cosT, 0.0), 3.0) : 0.35 + 2.0 * pow(max(cosT, 0.0), 12.0);
+  return (wet ? u_waterCol : u_lightCol) * ph * s;
+}
+#endif
 void main() {
   // under water the picture sways a little, slowly
   vec2 uv = v_uv + (u_underwater > 0.5 ? vec2(sin(v_uv.y * 9.0 + u_time * 0.9), cos(v_uv.x * 8.0 + u_time * 0.7)) * 0.0015 : vec2(0.0));
@@ -611,12 +700,9 @@ void main() {
     c *= 1.0 - clamp(occ / float(AO) * 0.9, 0.0, 0.45);
   }
 #endif
-  if (u_rays > 0.0) {
-    vec2 dir = (u_sunUV - v_uv) / float(RAYS), p = v_uv + dir * ign(gl_FragCoord.xy);
-    float acc = 0.0, w = 1.0, fall = pow(0.955, 28.0 / float(RAYS));
-    for (int i = 0; i < RAYS; i++) { p += dir; if (p.x < 0.0 || p.y < 0.0 || p.x > 1.0 || p.y > 1.0) break; acc += (texture(u_depth, p).r >= 0.99999 ? 1.0 : 0.0) * w; w *= fall; }
-    c += u_rayCol * (acc / float(RAYS)) * u_rays * smoothstep(1.4, 0.0, length((v_uv - u_sunUV) * vec2(1.6, 1.0)));
-  }
+#if VOL
+  if (u_volFar > 0.0) c += airLight(uv, d);
+#endif
   c += texture(u_bloom, uv).rgb * u_bloomAmt;
   // the lens's flare: soft ghosts of whatever is brightest (the bloom picture, blurred already, so they are round and
   // soft and shaped like their light) mirrored through the middle of the picture at a few sizes, their rims split
