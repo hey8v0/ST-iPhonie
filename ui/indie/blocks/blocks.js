@@ -371,6 +371,39 @@ block('pink_petals', '粉红色花簇', {tex: all('pink_petals'), shape: 'petals
 // what grows into a tree, and which (the bamboo shoot is no tree's)
 for (const b of B) if (b.name.endsWith('_sapling') && b.name !== 'bamboo_sapling') b.sapling = b.name.replace('_sapling', '');
 
+// ---------- the sea (0.8.74) ----------
+// Plants that live under water (water: they stand in water — their cell is water as well, drawn and swum in as water,
+// and what is left when they go): kelp (state: its age, 0–25; the top grows on up through the water while it is younger
+// than 25) and the kelp's stem under its top; seagrass and tall seagrass; sea pickles (state & 3: one to four; they give
+// light 6, 9, 12, 15); the five corals, their fans, and their blocks (a coral block with no water by it dies: grey) —
+// dead corals and fans out of the water. Prismarine (the shards come from the deep sea), its bricks and the dark kind,
+// their stairs and slabs, the wall; the sea lantern; the block of dried kelp (it burns long).
+const WET = {water: true, filter: 2};
+block('kelp', '海带', {tex: all('kelp'), shape: 'cross', pass: 'cutout', hard: 0, solid: false, ...WET, drop: 'kelp', itemIcon: 'kelp_item'});
+block('kelp_plant', '海带植株', {tex: all('kelp_plant'), shape: 'cross', pass: 'cutout', hard: 0, solid: false, ...WET, drop: 'kelp', item: false});
+block('seagrass', '海草', {tex: all('seagrass'), shape: 'cross', pass: 'cutout', hard: 0, solid: false, ...WET, drop: null, itemIcon: 'seagrass_item', shears: 'seagrass'});
+block('tall_seagrass', '高海草', {tex: {all: 'tall_seagrass_top', top: 'tall_seagrass_top', bottom: 'tall_seagrass_bottom'}, shape: 'tall', pass: 'cutout', hard: 0, solid: false, ...WET, drop: null, item: false, shears: 'seagrass'});
+block('sea_pickle', '海泡菜', {tex: all('sea_pickle'), shape: 'pickle', pass: 'cutout', hard: 0, solid: false, ...WET, drop: (r, meta) => ['sea_pickle', (meta & 3) + 1], itemIcon: 'sea_pickle_item'});
+export const CORALS = [['tube', '管珊瑚'], ['brain', '脑纹珊瑚'], ['bubble', '气泡珊瑚'], ['fire', '火珊瑚'], ['horn', '鹿角珊瑚']];
+for (const [c, zh] of CORALS) {
+  block(`${c}_coral_block`, `${zh}块`, {tex: all(`${c}_coral_block`), hard: 1.5, tool: T.PICK, tier: 0, drop: `dead_${c}_coral_block`, coral: `dead_${c}_coral_block`, cat: 'build'});
+  block(`dead_${c}_coral_block`, `失活的${zh}块`, {tex: all(`dead_${c}_coral_block`), hard: 1.5, tool: T.PICK, tier: 0, cat: 'build'});
+  block(`${c}_coral`, zh, {tex: all(`${c}_coral`), shape: 'cross', pass: 'cutout', hard: 0, solid: false, ...WET, drop: null});
+  block(`dead_${c}_coral`, `失活的${zh}`, {tex: all(`dead_${c}_coral`), shape: 'cross', pass: 'cutout', hard: 0, solid: false, tool: T.PICK, drop: null});
+  block(`${c}_coral_fan`, `${zh}扇`, {tex: all(`${c}_coral_fan`), shape: 'fan', pass: 'cutout', hard: 0, solid: false, ...WET, drop: null});
+  block(`dead_${c}_coral_fan`, `失活的${zh}扇`, {tex: all(`dead_${c}_coral_fan`), shape: 'fan', pass: 'cutout', hard: 0, solid: false, tool: T.PICK, drop: null});
+}
+stoneBlock('prismarine', '海晶石', 'prismarine');
+stoneBlock('prismarine_bricks', '海晶石砖', 'prismarine_bricks');
+stoneBlock('dark_prismarine', '暗海晶石', 'dark_prismarine');
+family('prismarine', '海晶石', 'prismarine', {wall: true});
+family('prismarine_brick', '海晶石砖', 'prismarine_bricks');
+family('dark_prismarine', '暗海晶石', 'dark_prismarine');
+block('sea_lantern', '海晶灯', {tex: all('sea_lantern'), hard: 0.3, light: 15, drop: r => ['prismarine_crystals', 2 + Math.floor(r() * 2)], cat: 'build'});
+block('dried_kelp_block', '干海带块', {tex: tbs('dried_kelp_top', 'dried_kelp_bottom', 'dried_kelp_side'), hard: 0.5, tool: T.HOE, cat: 'build'});
+// the turtle's eggs (state & 3: one to four less one; state >> 2: how near hatching, 0–2)
+block('turtle_egg', '海龟蛋', {tex: all('turtle_egg'), stages: ['turtle_egg', 'turtle_egg_slightly_cracked', 'turtle_egg_very_cracked'], shape: 'eggs', pass: 'cutout', hard: 0.5, solid: false, drop: null, itemIcon: 'turtle_egg_item'});
+
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
 // experience from ores mined with the right tool (the game's ranges)
@@ -472,6 +505,16 @@ export const boatItem = (wood, chest) => wood === 'bamboo' ? (chest ? 'bamboo_ch
 for (const w of BOAT_WOODS) for (const chest of [false, true])
   item(boatItem(w, chest), w === 'bamboo' ? (chest ? '运输竹筏' : '竹筏') : `${WOOD_ZH[w]}${chest ? '运输船' : '船'}`, {stack: 1, boat: w, chest, fuel: 60});
 
+// from the sea: prismarine's shards and crystals, kelp (it is put down as kelp) dried (food, fast to eat), the squids'
+// ink, buckets with a fish in them (poured out: the water and the fish), the turtle's scute and its shell to wear
+item('prismarine_shard', '海晶碎片'); item('prismarine_crystals', '海晶砂粒');
+item('dried_kelp', '干海带', {food: 1, sat: 0.6, fast: true});
+item('glow_ink_sac', '荧光墨囊');
+for (const [f, zh] of [['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚']]) item(`${f}_bucket`, `${zh}桶`, {stack: 1, pour: 'water', fish: f});
+item('turtle_scute', '海龟鳞甲'); item('nautilus_shell', '鹦鹉螺壳');
+item('turtle_helmet', '海龟壳', {stack: 1, armor: {slot: 0, mat: 'turtle', points: 2, tough: 0, uses: 275}, enchantability: 9, repair: 'turtle_scute'});
+for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
+
 export const ITEMS = I;
 
 // what of wood burns (seconds): shaped wood and the wood blocks 15, doors 10, slabs 7.5
@@ -485,7 +528,7 @@ export function itemInfo(name) {
     const wood = WOOD_FUEL.test(name), door = WOOD_DOOR.test(name);
     return {name, zh: b.zh, block: b, icon: null, cat: b.cat, stack: door || b.shape === 'bed' ? (b.shape === 'bed' ? 1 : 64) : 64,
       fuel: /_(planks|log)$/.test(name) || wood ? 15 : door ? 10 : WOOD_SLAB.test(name) ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'bookshelf' || name === 'ladder' ? 15
-        : /_sapling$|_propagule$/.test(name) ? 5 : name === 'bamboo' ? 2.5 : name === 'coal_block' ? 800 : 0};
+        : /_sapling$|_propagule$/.test(name) ? 5 : name === 'bamboo' ? 2.5 : name === 'coal_block' ? 800 : name === 'dried_kelp_block' ? 200 : 0};
   }
   return I[name] || null;
 }

@@ -98,6 +98,38 @@ export const MODELS = {
     part('arm0', [60, 21], [[-13, -2.5, -3, 4, 30, 6]], [0, -7, 0]), part('arm1', [60, 58], [[9, -2.5, -3, 4, 30, 6]], [0, -7, 0]),
     part('leg0', [37, 0], [[-3.5, -3, -3, 6, 16, 5]], [-4, 11, 0]), part('leg1', [60, 0], [[-3.5, -3, -3, 6, 16, 5, 0, true]], [5, 11, 0]),
   ]},
+  // the sea: the squid (its body up, eight tentacles hanging round), the glowing one, cod, salmon (in two halves), the small
+  // tropical fish (white: tinted with its colour), the pufferfish (the small one; it swells by its size), the turtle
+  squid: {skin: [64, 32], size: [0.8, 0.8], parts: [
+    part('body', [0, 0], [[-6, -8, -6, 12, 16, 12, 0.02]], [0, 8, 0]),
+    ...Array.from({length: 8}, (_, k) => part(`tentacle${k}`, [48, 0], [[-1, 0, -1, 2, 18, 2]], [Math.cos(k * PI * 2 / 8) * 5, 15, Math.sin(k * PI * 2 / 8) * 5], [0, k * PI * -2 / 8 + PI / 2, 0])),
+  ]},
+  cod: {skin: [32, 32], size: [0.5, 0.3], parts: [
+    part('body', [0, 0], [[-1, -2, 0, 2, 4, 7]], [0, 22, 0]), part('head', [11, 0], [[-1, -2, -3, 2, 4, 3]], [0, 22, 0]), part('nose', [0, 0], [[-1, -2, -1, 2, 3, 1]], [0, 22, -3]),
+    part('right_fin', [22, 1], [[-2, 0, -1, 2, 0, 2]], [-1, 23, 0], [0, 0, -PI / 4]), part('left_fin', [22, 4], [[0, 0, -1, 2, 0, 2]], [1, 23, 0], [0, 0, PI / 4]),
+    part('tail_fin', [22, 3], [[0, -2, 0, 0, 4, 4]], [0, 22, 7]), part('top_fin', [20, -6], [[0, -1, -1, 0, 1, 6]], [0, 20, 0]),
+  ]},
+  salmon: {skin: [32, 32], size: [0.7, 0.4], parts: [
+    part('body_front', [0, 0], [[-1.5, -2.5, 0, 3, 5, 8]], [0, 20, 0], [0, 0, 0], [part('top_front_fin', [2, 1], [[0, 0, 0, 0, 2, 3]], [0, -4.5, 5])]),
+    part('body_back', [0, 13], [[-1.5, -2.5, 0, 3, 5, 8]], [0, 20, 8], [0, 0, 0], [part('back_fin', [20, 10], [[0, -2.5, 0, 0, 5, 6]], [0, 0, 8]), part('top_back_fin', [0, 2], [[0, 0, 0, 0, 2, 4]], [0, -4.5, -1])]),
+    part('head', [22, 0], [[-1, -2, -3, 2, 4, 3]], [0, 20, 0]),
+    part('right_fin', [-4, 0], [[-2, 0, 0, 2, 0, 2]], [-1.5, 21.5, 0], [0, 0, -PI / 4]), part('left_fin', [0, 0], [[0, 0, 0, 2, 0, 2]], [1.5, 21.5, 0], [0, 0, PI / 4]),
+  ]},
+  tropical_fish: {skin: [32, 32], size: [0.5, 0.4], parts: [
+    part('body', [0, 0], [[-1, -1.5, -3, 2, 3, 6]], [0, 22, 0]), part('tail', [22, -6], [[0, -1.5, 0, 0, 3, 6]], [0, 22, 3]),
+    part('right_fin', [2, 16], [[-2, -1, 0, 2, 2, 0]], [-1, 22.5, 0], [0, PI / 4, 0]), part('left_fin', [2, 12], [[0, -1, 0, 2, 2, 0]], [1, 22.5, 0], [0, -PI / 4, 0]),
+    part('top_fin', [10, -5], [[0, -3, 0, 0, 3, 6]], [0, 20.5, -3]),
+  ]},
+  pufferfish: {skin: [32, 32], size: [0.35, 0.35], parts: [
+    part('body', [0, 27], [[-1.5, -2, -1.5, 3, 2, 3]], [0, 23, 0]), part('right_eye', [24, 6], [[-1.5, 0, -1.5, 1, 1, 1]], [0, 20, 0]), part('left_eye', [28, 6], [[0.5, 0, -1.5, 1, 1, 1]], [0, 20, 0]),
+    part('back_fin', [-3, 0], [[-1.5, 0, 0, 3, 0, 3]], [0, 22, 1.5]), part('right_fin', [25, 0], [[-1, 0, 0, 1, 0, 2]], [-1.5, 22, -1.5]), part('left_fin', [25, 0], [[0, 0, 0, 1, 0, 2]], [1.5, 22, -1.5]),
+  ]},
+  turtle: {skin: [128, 64], size: [1.2, 0.4], parts: [
+    part('head', [3, 0], [[-3, -1, -3, 6, 5, 6]], [0, 19, -10]),
+    part('body', [7, 37], [[-9.5, 3, -10, 19, 20, 6]], [0, 11, -10], [PI / 2, 0, 0], [part('belly', [31, 1], [[-5.5, 3, -13, 11, 18, 3]])]),
+    part('leg0', [1, 23], [[-2, 0, 0, 4, 1, 10]], [-3.5, 22, 11]), part('leg1', [1, 12], [[-2, 0, 0, 4, 1, 10]], [3.5, 22, 11]),
+    part('leg2', [27, 30], [[-13, 0, -2, 13, 1, 5]], [-5, 21, -4]), part('leg3', [27, 24], [[0, 0, -2, 13, 1, 5]], [5, 21, -4]),
+  ]},
   // the player (seen from behind or the front): the 64×64 layout, each part with its outer layer a little bigger
   player: {skin: [64, 64], size: [0.6, 1.8], parts: [
     part('head', [0, 0], [[-4, -8, -4, 8, 8, 8]], [0, 0, 0], [0, 0, 0], [part('hat', [32, 0], [[-4, -8, -4, 8, 8, 8, 0.5]])]),
@@ -108,6 +140,7 @@ export const MODELS = {
     part('leg1', [16, 48], [[-2, 0, -2, 4, 12, 4]], [1.9, 12, 0], [0, 0, 0], [part('pants1', [0, 48], [[-2, 0, -2, 4, 12, 4, 0.25]])]),
   ]},
 };
+MODELS.glow_squid = {...MODELS.squid};
 // worn armour over the player, in the game's 64×32 layouts: the outer one (helmet, chestplate, boots) and the inner one
 // (leggings); each piece draws only its parts
 export const ARMOR_MODELS = {
@@ -206,6 +239,21 @@ export function animate(kind, rot, pose) {
     set('leg0', swing() * 0.8); set('leg1', swing(PI) * 0.8);
     const flap = Math.sin(pose.limb * 0.6662) * pose.amount * 0.3 + Math.sin(pose.age * 0.1) * 0.05;
     set('ear0', 0, 0, PI / 6 + flap); set('ear1', 0, 0, -PI / 6 - flap);
+  } else if (kind === 'squid') {
+    // the tentacles open and close as it swims (the game's tentacle angle)
+    for (let k = 0; k < 8; k++) set(`tentacle${k}`, pose.tentacles || 0, k * PI * -2 / 8 + PI / 2, 0);
+  } else if (kind === 'cod' || kind === 'salmon' || kind === 'tropical_fish') {
+    // the tail beats (faster out of the water)
+    const beat = -(pose.flop ? 1.5 : 1) * 0.45 * Math.sin(0.6 * pose.age);
+    if (kind === 'cod') set('tail_fin', 0, beat, 0);
+    if (kind === 'tropical_fish') set('tail', 0, beat, 0);
+    if (kind === 'salmon') { set('body_back', 0, beat * 0.6, 0); }
+  } else if (kind === 'pufferfish') {
+    set('right_fin', 0, 0, -0.2 + 0.4 * Math.sin(pose.age * 0.2)); set('left_fin', 0, 0, 0.2 - 0.4 * Math.sin(pose.age * 0.2));
+  } else if (kind === 'turtle') {
+    // flippers: rowing in the water, paddling slowly on land
+    const sw = Math.cos(pose.limb * (pose.swim ? 0.6662 * 0.6 : 0.6662 * 5)) * (pose.swim ? 0.5 : 0.25) * Math.max(pose.amount, pose.swim ? 0.6 : 0);
+    set('leg0', sw, 0, 0); set('leg1', -sw, 0, 0); set('leg2', 0, 0, sw); set('leg3', 0, 0, -sw);
   } else if (kind === 'ghast') {
     for (let i = 0; i < 9; i++) set(`tentacle${i}`, 0.2 * Math.sin(pose.age * 0.3 + i) + 0.4);
   } else if (kind === 'blaze') {
@@ -270,7 +318,8 @@ export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}
         // each face wound the same way round seen from outside (a mirrored box's corners swapped turn it the other
         // way: walked backwards), so the backs of the faces can be left out — the game's mobs show through the gaps
         // of a cut-out picture (a skeleton's ribs) what is behind, not the inside of their own box
-        for (let k = 0; k < 4; k++) { const i = mirror ? 3 - k : k, P = V[vs[i]]; out.push(P[0], P[1], P[2], uv[i][0] / tw, uv[i][1] / th, shade); }
+        // (the game's fish have flat fins whose pictures start a little off the skin's edge: kept on it)
+        for (let k = 0; k < 4; k++) { const i = mirror ? 3 - k : k, P = V[vs[i]]; out.push(P[0], P[1], P[2], Math.min(1, Math.max(0, uv[i][0] / tw)), Math.min(1, Math.max(0, uv[i][1] / th)), shade); }
       }
     }
     for (const c of p.children) walk({...c, name: c.name}, R, here(c.pivot));
@@ -447,6 +496,53 @@ export const OWN_SKINS = {
     for (const [u, v] of [[0, 16], [16, 48]]) { box(u, v, 4, 12, 4, jeans); area(u, v + 13, 16, 3, shoe); area(u + 8, v, 4, 4, shoe); }
   }),
 };
+// the sea's creatures (ours): painted into the game's layouts
+Object.assign(OWN_SKINS, {
+  squid: () => skin(64, 32, 71, ({px, area, box, front, hex}) => {
+    const body = ['#2d4a6a', '#34547a', '#3a5c84', '#26405c'];
+    box(0, 0, 12, 16, 12, body, 0.15); box(48, 0, 2, 18, 2, ['#2d4a6a', '#3a5c84', '#4a6c94'], 0.2);
+    const [fx, fy] = front(0, 0, 12, 12);
+    for (const ex of [2, 8]) { area(fx + ex, fy + 9, 2, 2, ['#e8e8e8']); px(fx + ex + 1, fy + 10, hex('#101010')); }
+  }),
+  glow_squid: () => skin(64, 32, 72, ({px, area, box, front, hex}) => {
+    const body = ['#0d5a5a', '#127070', '#1a8080', '#0a4a4a'];
+    box(0, 0, 12, 16, 12, body, 0.15); box(48, 0, 2, 18, 2, ['#1a8080', '#3ac8b0', '#5af0d0'], 0.2);
+    for (let k = 0; k < 24; k++) px(1 + Math.floor((k * 37) % 46), 13 + Math.floor((k * 11) % 14), hex('#7af0d8'));
+    const [fx, fy] = front(0, 0, 12, 12);
+    for (const ex of [2, 8]) { area(fx + ex, fy + 9, 2, 2, ['#c8fff0']); px(fx + ex + 1, fy + 10, hex('#0a2a2a')); }
+  }),
+  cod: () => skin(32, 32, 73, ({px, area, box, hex}) => {
+    const body = ['#b9a27c', '#c4ad86', '#a8916c'], belly = ['#e2d6bc'];
+    box(0, 0, 2, 4, 7, body); box(11, 0, 2, 4, 3, body); box(0, 0, 2, 3, 1, body);
+    area(0, 7 + 3, 18, 1, belly); area(22, 1, 4, 3, ['#8c7a58']); area(22, 4, 4, 3, ['#8c7a58']); area(22, 3, 8, 4, ['#9c8a62']); area(20, 0, 12, 1, ['#9c8a62']);
+    px(14, 4, hex('#101010')); px(11, 4, hex('#101010'));
+  }),
+  salmon: () => skin(32, 32, 74, ({px, area, box, hex}) => {
+    const body = ['#a8463a', '#b64a3a', '#c45a48'], belly = ['#e8a088'];
+    box(0, 0, 3, 5, 8, body); box(0, 13, 3, 5, 8, body); box(22, 0, 2, 4, 3, ['#8a3a30', '#9a4236']);
+    area(0, 12, 22, 1, belly); area(0, 25, 22, 1, belly); area(20, 10, 12, 11, ['#6e2a20', '#7a3226']); area(0, 0, 8, 6, ['#7a3226']);
+    px(25, 4, hex('#101010')); px(22, 4, hex('#101010'));
+  }),
+  tropical_fish: () => skin(32, 32, 75, ({px, area, box, hex}) => {
+    // white, so its colour comes from the tint; a darker band and the eye
+    box(0, 0, 2, 3, 6, ['#f4f4f4', '#ececec', '#ffffff']); area(22, 0, 12, 9, ['#e0e0e0']); area(2, 12, 4, 6, ['#e4e4e4']); area(10, 0, 12, 9, ['#e4e4e4']);
+    area(6, 6, 6, 3, ['#bcbcbc']); px(6, 7, hex('#101010')); px(14, 7, hex('#101010'));
+  }),
+  pufferfish: () => skin(32, 32, 76, ({px, area, box, hex}) => {
+    box(0, 27, 3, 2, 3, ['#e8c838', '#f0d24a', '#dcb82c']); box(24, 6, 1, 1, 1, ['#141414']); box(28, 6, 1, 1, 1, ['#141414']);
+    area(0, 0, 9, 3, ['#d8b028']); area(25, 0, 6, 2, ['#d8b028']);
+    for (const [x, y] of [[4, 29], [7, 30], [10, 29]]) px(x, y, hex('#6a8ab0'));
+  }),
+  turtle: () => skin(128, 64, 77, ({px, area, box, front, hex}) => {
+    const skinC = ['#5a9a4a', '#4e8c40', '#66a656'], shell = ['#3a6a2a', '#447a32', '#4e8638', '#2e5a22'], belly = ['#c8c08a', '#bcb47e'];
+    box(3, 0, 6, 5, 6, skinC); box(7, 37, 19, 20, 6, shell, 0.2); box(31, 1, 11, 18, 3, belly);
+    box(1, 23, 4, 1, 10, skinC); box(1, 12, 4, 1, 10, skinC); box(27, 30, 13, 1, 5, skinC); box(27, 24, 13, 1, 5, skinC);
+    // the shell's plates
+    for (let k = 0; k < 6; k++) area(13 + (k % 3) * 6, 43 + Math.floor(k / 3) * 8, 1, 7, ['#24461a']);
+    const [fx, fy] = front(3, 0, 6, 6);
+    px(fx, fy + 1, hex('#141414')); px(fx + 5, fy + 1, hex('#141414'));
+  }),
+});
 // a villager's clothes by trade: the robe, its trim, and something of the trade (ours)
 const VILLAGER_CLOTHES = {none: ['#6e4b30', '#5a3c26'], nitwit: ['#3a8a3a', '#2a6a2a'], farmer: ['#8a6a2a', '#d8c060', 'hat'], fisherman: ['#3a6a8a', '#d8c060', 'hat'],
   shepherd: ['#8a5a3a', '#f0f0f0'], fletcher: ['#6a7a3a', '#e8e8e8', 'feather'], librarian: ['#e8e4d8', '#a82a2a'], cleric: ['#7a2a8a', '#e8c040'],
@@ -494,7 +590,7 @@ export function ownBoat(wood, withChest) {
 }
 export const MOB_KINDS =Object.keys(MODELS).filter(k => k !== 'sheep_wool' && k !== 'player');
 // our armour pictures, one per material and layer (1: helmet, chestplate, boots; 2: leggings), only where it is worn
-const ARMOR_PAL = {leather: ['#8f5530', '#9c5e36', '#a8683c', '#7e4a29'], chainmail: ['#8a8a8a', '#a2a2a2', '#6e6e6e', '#b8b8b8'], iron: ['#c6c6c6', '#d4d4d4', '#b8b8b8', '#e2e2e2'],
+const ARMOR_PAL = {turtle: ['#4a9a3a', '#56a644', '#3e8a30', '#62b250'], leather: ['#8f5530', '#9c5e36', '#a8683c', '#7e4a29'], chainmail: ['#8a8a8a', '#a2a2a2', '#6e6e6e', '#b8b8b8'], iron: ['#c6c6c6', '#d4d4d4', '#b8b8b8', '#e2e2e2'],
   golden: ['#e9c33a', '#f2d24e', '#d9ae2a', '#fae27a'], diamond: ['#4fd1cb', '#62e0d9', '#3fbcb6', '#8ff0ea']};
 export function ownArmor(mat, layer) {
   return skin(64, 32, layer === 1 ? 31 : 32, ({px, area, box, front}) => {

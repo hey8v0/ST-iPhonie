@@ -6,7 +6,7 @@
 // A vertex is 16 bytes: x, y, z (uint16, 1/16 block, from one block before the section's corner), texture layer (uint16), u, v (uint8, 0–16),
 // sky light, block light (uint8, level × 17), shade (uint8: bits 0–1 corner shade, 2–4 face, 5–7 wave kind), tint r, g, b.
 import {BLOCKS, ID, idOf, metaOf} from './blocks.js';
-import {pieces, wireLinks, WIRE_SIDES, LEVER_BASE, railSlope, plantOffset} from './shapes.js';
+import {pieces, wireLinks, WIRE_SIDES, LEVER_BASE, railSlope, plantOffset, PICKLES, EGGS} from './shapes.js';
 
 // shapes drawn from their pieces (shapes.js)
 const PIECED = new Set(['stairs', 'fence', 'gate', 'pane', 'door', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'brewing', 'portal', 'composter', 'lectern', 'bell', 'stonewall', 'carpet', 'button', 'plate', 'detector', 'hopper']);
@@ -26,6 +26,9 @@ for (const b of BLOCKS) {
   if (b.tint?.startsWith('#')) TINT_FIXED[b.id] = parseInt(b.tint.slice(1), 16); else TINT[b.id] = b.tint;
 }
 const WATER = ID.water, LAVA = ID.lava, LEAVES = new Uint8Array(N);
+// the sea's plants stand in water: their cell is drawn with water in it, and water beside them is water to them
+const WET = new Uint8Array(N);
+for (const b of BLOCKS) if (b.water) WET[b.id] = 1;
 for (const b of BLOCKS) if (b.name.endsWith('_leaves')) LEAVES[b.id] = 1;
 // ores: flag 5, for the shaded look to let their coloured bits glow
 const ORE = new Uint8Array(N);
@@ -263,6 +266,8 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
     if (!b) continue;
     const out = PASS[id] === 'translucent' ? trans : solid;
     const tintC = tintOf(id, x, z);
+    // a sea plant: the water it stands in, then the plant
+    if (WET[id]) liquid(trans, x, y, z, WATER, 0, tintOf(WATER, x, z));
     if (shape === 'cube' || (shape === 'slab' && meta === 2)) {
       const leaf = LEAVES[id];
       for (let f = 0; f < 6; f++) {
@@ -365,6 +370,20 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
       // were put down
       const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.tex.all), n = (meta & 3) + 1, turn = meta >> 2 & 3;
       for (let q = 0; q < n; q++) { const [qx, qz] = [[0, 0], [0, 0.5], [0.5, 0.5], [0.5, 0]][(q + turn) & 3]; flatRect(out, x, y + 3 / 16, z, qx, qz, qx + 0.5, qz + 0.5, layer, lt, lb, WHITE); }
+    } else if (shape === 'pickle' || shape === 'eggs') {
+      // sea pickles and turtle eggs: one to four small boxes (an egg's picture cracks as it nears hatching)
+      const layer = tex(b.stages ? b.stages[Math.min(2, meta >> 2 & 3)] : b.tex.all), pickle = shape === 'pickle';
+      for (const [x0, z0, w, h] of (pickle ? PICKLES : EGGS)[meta & 3]) {
+        const side = pickle ? [0, 4, 4, 4 + h] : [1, 3, 1 + w, 3 + h], end = pickle ? [4, 0, 8, 4] : [6, 6, 6 + w, 6 + w];
+        box(out, x, y, z, x0, 0, z0, x0 + w, h, z0 + w, () => layer, WHITE, {uvs: [side, side, end, end, side, side]});
+      }
+    } else if (shape === 'fan') {
+      // a coral fan: two sheets crossed, low, leaning out from the middle
+      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.tex.all), cx = x + 0.5, cz = z + 0.5, h = y + 0.25;
+      quad(out, [[cx - 0.5, y, cz - 0.1], [cx + 0.5, y, cz - 0.1], [cx + 0.5, h + 0.25, cz + 0.4], [cx - 0.5, h + 0.25, cz + 0.4]], layer, UVQ, lt, lb, WHITE, 3);
+      quad(out, [[cx - 0.5, y, cz + 0.1], [cx + 0.5, y, cz + 0.1], [cx + 0.5, h + 0.25, cz - 0.4], [cx - 0.5, h + 0.25, cz - 0.4]], layer, UVQ, lt, lb, WHITE, 3);
+      quad(out, [[cx - 0.1, y, cz - 0.5], [cx - 0.1, y, cz + 0.5], [cx + 0.4, h + 0.25, cz + 0.5], [cx + 0.4, h + 0.25, cz - 0.5]], layer, UVQ, lt, lb, WHITE, 3);
+      quad(out, [[cx + 0.1, y, cz - 0.5], [cx + 0.1, y, cz + 0.5], [cx - 0.4, h + 0.25, cz + 0.5], [cx - 0.4, h + 0.25, cz - 0.5]], layer, UVQ, lt, lb, WHITE, 3);
     } else if (shape === 'crop') {
       const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.stages ? b.stages[Math.min(7, meta)] : `wheat_stage${Math.min(7, meta)}`), top = y + 1 - 1 / 16;
       for (const k of [4 / 16, 12 / 16]) {
@@ -441,13 +460,13 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
   }
 
   function liquid(out, x, y, z, id, meta, tintC) {
-    const above = pad[at(x, y + 1, z)] & 0xFFF, same = n => (n & 0xFFF) === id;
+    const above = pad[at(x, y + 1, z)], same = n => (n & 0xFFF) === id || (id === WATER && WET[n & 0xFFF] === 1);
     const level = meta & 7, falling = meta >= 8;
     const height = (xx, zz) => {
       const n = pad[at(xx, y, zz)];
       if (!same(n)) return -1;
       if (same(pad[at(xx, y + 1, zz)])) return 16;
-      const lv = (n >>> 12) >= 8 ? 0 : (n >>> 12) & 7;
+      const lv = WET[n & 0xFFF] || (n >>> 12) >= 8 ? 0 : (n >>> 12) & 7;
       return 14.2 - lv * 1.75;
     };
     // corner heights: average of the liquid blocks around each corner (sloping water)
@@ -460,7 +479,7 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
       }
       return cnt ? sum / cnt : 0;
     };
-    const top = same(above) ? null : [corner(0, 1), corner(1, 1), corner(1, 0), corner(0, 0)];
+    const top = same(above) ? null : [corner(0, 1), corner(1, 1), corner(1, 0), corner(0, 0)];  // (above: a plant in the water too)
     const still = tex(id === WATER ? 'water_still' : 'lava_still'), flow = tex(id === WATER ? 'water_flow' : 'lava_flow');
     const own = L(at(x, y, z)), flags = 4;
     if (top) {

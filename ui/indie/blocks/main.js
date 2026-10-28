@@ -9,7 +9,7 @@ import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds} from './atlas
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
 import {listWorlds, saveWorld, deleteWorld} from './db.js';
 import {Mirror} from './mirror.js';
-import {Body, raycast, W as PLAYER_W} from './player.js';
+import {Body, raycast, W as PLAYER_W, isWater} from './player.js';
 import {Inventory, furnaceTick, stackMax, ARMOR_AT, takeSmeltXp} from './inventory.js';
 import {enchOf, shelvesAround, fishLoot, protectionFactor, wears, seeded} from './enchant.js';
 import {InventoryUI, stackHtml} from './invui.js';
@@ -95,6 +95,8 @@ async function loadTextures() {
   for (const m of Object.keys(ARMOR)) for (const [key, layer] of [[`armor_${m}`, 1], [`armor_${m}_legs`, 2]]) {
     const img = skins?.[key] || ownArmor(m, layer); renderer.setImage(`mob:${key}`, img); skinSizes[key] = [img.width, img.height]; greyArmor[key] = !!skins?.[key] && m === 'leather';
   }
+  // the turtle shell worn
+  { const img = skins?.armor_turtle || ownArmor('turtle', 1); renderer.setImage('mob:armor_turtle', img); skinSizes.armor_turtle = [img.width, img.height]; }
   // boats: each wood's, with a chest and without (the pack's or ours)
   for (const w of BOAT_WOODS) for (const chest of [false, true]) {
     const key = `${chest ? 'chest_boat' : 'boat'}_${w}`, img = skins?.[key] || ownBoat(w, chest);
@@ -218,7 +220,7 @@ function startWorld(meta) {
     dark: (x, y, z, spawn) => isDark(x, y, z, spawn), loaded: (x, z) => mirror.has(Math.floor(x), Math.floor(z)),
     hurtPlayer: (n, why, from, kind) => hurt(n, why, from, kind), explode: (x, y, z, power, src) => explode(x, y, z, power, src),
     sound: (name, x, y, z) => soundAt(name, x, y, z), drop: (s, x, y, z) => G.ents.drop(s, x, y, z), give: s => !G.inv.add(s),
-    burst: (x, y, z, kind) => G.ents.puff(x, y, z, kind), setBlock: (x, y, z, v) => setBlock(x, y, z, v),
+    burst: (x, y, z, kind) => G.ents.puff(x, y, z, kind), setBlock: (x, y, z, v) => setBlock(x, y, z, v), effect: (id, amp, ticks) => giveEffect(id, amp, ticks),
     xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain', looting: () => enchOf(held(), 'looting'),
     nether: () => G.dim === 'nether', seed: meta.seed, invisible: () => !!G.effects.invisibility,
     difficulty: () => meta.difficulty || 'normal', spawning: () => (meta.rules || defaultRules()).doMobSpawning,
@@ -248,6 +250,7 @@ function onWorker(m) {
   else if (m.type === 'note') noteAt(m.x, m.y, m.z);
   else if (m.type === 'dispense') dispense(m);
   else if (m.type === 'pushed') pushed(m.cells, m.dir);
+  else if (m.type === 'hatch') { for (let k = 0; k < m.n; k++) G.mobs.add('turtle', m.x + (Math.random() - 0.5) * 0.4, m.y, m.z + (Math.random() - 0.5) * 0.4, {baby: true, beach: [Math.floor(m.x), m.y, Math.floor(m.z)]}); soundAt('pop', m.x, m.y, m.z); }
   else if (m.type === 'herd') {
     // each place has its animals once (a column made again after it went out of range keeps none)
     const k = `${m.cx},${m.cz}`;
@@ -760,9 +763,9 @@ function breakBlock(t) {
   const {x, y, z, v} = t, b = BLOCKS[v & 0xFFF], survival = G.mode !== 'creative';
   // ice over something becomes water when broken (unless creative)
   const below = G.mirror.get(x, y - 1, z);
-  setBlock(x, y, z, survival && b.name === 'ice' && below && collisionBoxes(below) ? ID.water : 0);
+  setBlock(x, y, z, b.water || (survival && b.name === 'ice' && below && collisionBoxes(below)) ? ID.water : 0);
   // shears take leaves, grass, ferns, dead bushes and vines whole
-  if (survival && heldTool()?.kind === 'shears' && (b.name.endsWith('_leaves') || SHEARED.has(b.name))) G.ents.drop({id: b.name, n: 1}, x + 0.5, y + 0.4, z + 0.5);
+  if (survival && heldTool()?.kind === 'shears' && (b.name.endsWith('_leaves') || SHEARED.has(b.name) || b.shears)) G.ents.drop({id: b.shears || b.name, n: 1}, x + 0.5, y + 0.4, z + 0.5);
   else if (survival && harvests(b, heldTool())) {
     // 精准采集 takes the block itself (and no experience); 时运 gives ores more (the game's: ×1 up to ×level+1, redstone +0–level)
     const tool = held(), silk = enchOf(tool, 'silk_touch') && b.item, fortune = enchOf(tool, 'fortune');
@@ -790,6 +793,7 @@ function placeFrom(t, stack) {
   if (b?.shape === 'slab' && (t.v & 0xFFF) === b.id && t.v >>> 12 !== 2 && ((t.face === 2 && t.v >>> 12 === 0) || (t.face === 3 && t.v >>> 12 === 1))) { setBlock(t.x, t.y, t.z, withMeta(b.id, 2)); return true; }
   if (b?.name === 'snow' && (t.v & 0xFFF) === b.id && (t.v >>> 12) < 7) { setBlock(t.x, t.y, t.z, withMeta(b.id, (t.v >>> 12) + 1)); return true; }
   if (b?.name === 'pink_petals' && (t.v & 0xFFF) === b.id && (t.v >>> 12 & 3) < 3) { setBlock(t.x, t.y, t.z, t.v + (1 << 12)); play('place', ID.short_grass); return true; }
+  if ((b?.name === 'sea_pickle' || b?.name === 'turtle_egg') && (t.v & 0xFFF) === b.id && (t.v >>> 12 & 3) < 3) { setBlock(t.x, t.y, t.z, t.v + (1 << 12)); play('place', b.id); return true; }
   // a vine goes on the side of a block that was aimed at (a full one or leaves), clinging to it; on a vine already
   // there it gets that side too
   if (b?.shape === 'vine') {
@@ -850,8 +854,14 @@ function placeFrom(t, stack) {
     if (b.shape === 'hopper') meta = t.face === 2 || t.face === 3 ? 3 : OPPOSITE[t.face];
     // plants need their ground
     const under = G.mirror.get(x, y - 1, z) & 0xFFF, ub = BLOCKS[under];
-    if (b.shape === 'cross' && !['grass_block', 'dirt', 'podzol', 'coarse_dirt', 'farmland', 'moss_block', 'mud', 'muddy_mangrove_roots', 'sand', 'red_sand', ...(b.name === 'mangrove_propagule' ? ['clay'] : [])].includes(ub.name) && !(b.name === 'sugar_cane' && under === ID.sugar_cane) && !(b.name.endsWith('mushroom') && ub.opaque)) return false;
+    if (b.shape === 'cross' && !b.water && !/coral$/.test(b.name) && !['grass_block', 'dirt', 'podzol', 'coarse_dirt', 'farmland', 'moss_block', 'mud', 'muddy_mangrove_roots', 'sand', 'red_sand', ...(b.name === 'mangrove_propagule' ? ['clay'] : [])].includes(ub.name) && !(b.name === 'sugar_cane' && under === ID.sugar_cane) && !(b.name.endsWith('mushroom') && ub.opaque)) return false;
     if (b.shape === 'petals') { if (!['grass_block', 'dirt', 'podzol', 'coarse_dirt', 'moss_block', 'mud', 'muddy_mangrove_roots'].includes(ub.name)) return false; meta = facingBack() << 2; }
+    // a plant of the sea only into still water (on the ground, or kelp on kelp — the old top a stem then)
+    if (b.water) {
+      if ((here & 0xFFF) !== ID.water || here >>> 12) return false;
+      if (b.name === 'kelp' && (under === ID.kelp || under === ID.kelp_plant)) { if (under === ID.kelp) setBlock(x, y - 1, z, ID.kelp_plant); }
+      else if (!ub.opaque) return false;
+    }
     // bamboo: on bamboo it goes on up (as thick as the one under it), on its ground it is a shoot
     if (b.name === 'bamboo') {
       if (under === ID.bamboo || under === ID.bamboo_sapling) meta = under === ID.bamboo ? G.mirror.get(x, y - 1, z) >>> 12 & 4 : 0;
@@ -1064,6 +1074,12 @@ function use(t, mob = null) {
     }
     // a spawn egg on a mob of its kind: a young one
     if (info?.spawn) { if (info.spawn === mob.kind && MOBS[mob.kind].passive) { G.mobs.add(mob.kind, mob.x, mob.y, mob.z, {baby: true}); useUp(); } return; }
+    // a water bucket on a fish: the fish in the bucket
+    if (s?.id === 'water_bucket' && mob.def.bucket && !mob.dead) {
+      G.mobs.list.splice(G.mobs.list.indexOf(mob), 1);
+      if (G.mode !== 'creative') useUp();
+      handBack({id: mob.def.bucket, n: 1}); play('splash'); drawHud(true); return;
+    }
     // a bucket on a cow: milk (in creative the empty bucket stays, and the milk comes as well)
     if (s?.id === 'bucket' && mob.kind === 'cow' && !mob.baby) {
       if (G.mode !== 'creative') { useUp(); handBack({id: 'milk_bucket', n: 1}); } else if (!G.inv.slots.some(x => x?.id === 'milk_bucket')) G.inv.add({id: 'milk_bucket', n: 1});
@@ -1098,14 +1114,14 @@ function use(t, mob = null) {
   // bone meal, a lighter on TNT
   if (t && info?.meal) {
     const id = t.v & 0xFFF, grows = (['wheat', 'carrots', 'potatoes', 'beetroots'].includes(b.name) && (t.v >>> 12) < 7) || (b.sapling && !(t.v >>> 12 & 8)) || (id === ID.grass_block && !G.mirror.get(t.x, t.y + 1, t.z))
-      || ['bamboo', 'bamboo_sapling', 'pink_petals'].includes(b.name)
+      || ['bamboo', 'bamboo_sapling', 'pink_petals', 'seagrass', 'sea_pickle'].includes(b.name) || (['sand', 'gravel', 'dirt', 'clay'].includes(b.name) && isWater(G.mirror.get(t.x, t.y + 1, t.z)))
       || (id === ID.cocoa && (t.v >>> 12) >> 2 < 2) || ((id === ID.short_grass || id === ID.fern) && !G.mirror.get(t.x, t.y + 1, t.z)) || ['sunflower', 'lilac', 'rose_bush', 'peony'].includes(b.name);
     if (grows) { G.worker.postMessage({type: 'meal', x: t.x, y: t.y, z: t.z}); useUp(); G.ents.puff(t.x + 0.5, t.y + 1, t.z + 0.5, 'meal'); play('meal'); }
     return;
   }
   if (t && info?.tool?.kind === 'fire') { if (b.name === 'tnt') { setBlock(t.x, t.y, t.z, 0); G.mobs.light(t.x, t.y, t.z); } else lightPortal(t); play('ignite'); wearTool(); return; }
   // food when hungry (a golden apple any time, in creative too)
-  if (info?.food && ((G.mode !== 'creative' && G.food < 20) || info.always)) { G.eating = 32; return; }
+  if (info?.food && ((G.mode !== 'creative' && G.food < 20) || info.always)) { G.eating = info.fast ? 16 : 32; return; }
   // a potion is drunk (as long as eating takes), a splash potion thrown
   if (info?.drink) { G.eating = 32; return; }
   if (info?.thrown) { throwItem(s); useUp(); return; }
@@ -1123,6 +1139,12 @@ function use(t, mob = null) {
       if (G.mode !== 'creative') { useUp(); const left = G.inv.add(full); if (left) G.ents.drop(left, G.body.x, G.body.y + 1, G.body.z); }
       play('splash'); drawHud(true); return;
     }
+    // a fish bucket emptied into the water aimed at (no block in reach): the fish goes into it
+    if (info?.fish && lt && isWater(lt.v) && (!t || lt.t < t.t)) {
+      G.mobs.add(info.fish, lt.x + 0.5, lt.y + 0.3, lt.z + 0.5, {persist: true});
+      if (G.mode !== 'creative') { G.inv.slots[G.hot] = {id: 'bucket', n: 1}; drawHud(true); }
+      play('splash'); return;
+    }
     if (info?.pour && t) {
       const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face];
       const x = b.replace ? t.x : t.x + nx, y = b.replace ? t.y : t.y + ny, z = b.replace ? t.z : t.z + nz, here = G.mirror.get(x, y, z);
@@ -1130,6 +1152,7 @@ function use(t, mob = null) {
       // water poured in the Nether boils away
       if (info.pour === 'water' && G.dim === 'nether') { G.ents.puff(x + 0.5, y + 0.5, z + 0.5, 'smoke'); play('fizz'); }
       else setBlock(x, y, z, ID[info.pour]);
+      if (info.fish && G.dim !== 'nether') G.mobs.add(info.fish, x + 0.5, y + 0.2, z + 0.5, {persist: true});
       if (G.mode !== 'creative') { G.inv.slots[G.hot] = {id: 'bucket', n: 1}; drawHud(true); }
       play('splash'); return;
     }
@@ -1152,7 +1175,7 @@ function use(t, mob = null) {
   if (info?.spawn) {
     if (MOBS[info.spawn].hostile && difficulty() === 'peaceful') return;
     const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face], on = b.replace;
-    G.mobs.add(info.spawn, (on ? t.x : t.x + nx) + 0.5, on ? t.y : t.y + ny, (on ? t.z : t.z + nz) + 0.5); useUp();
+    G.mobs.add(info.spawn, (on ? t.x : t.x + nx) + 0.5, on ? t.y : t.y + ny, (on ? t.z : t.z + nz) + 0.5, MOBS[info.spawn].water ? {persist: true} : undefined); useUp();
     return;
   }
   // an axe takes the bark off a log or wood (it keeps lying the same way)
@@ -1253,7 +1276,7 @@ const COMPOST = {wheat_seeds: 0.3, short_grass: 0.3, sugar_cane: 0.5, cactus: 0.
   nether_wart: 0.65, red_mushroom: 0.65, brown_mushroom: 0.65, bread: 0.85, baked_potato: 0.85, hay_block: 0.85,
   vine: 0.5, tall_grass: 0.5, large_fern: 0.65, cocoa_beans: 0.65, sunflower: 0.65, lilac: 0.65, rose_bush: 0.65, peony: 0.65, cookie: 0.85,
   beetroot_seeds: 0.3, beetroot: 0.65, pumpkin_pie: 1};
-const compostable = id => COMPOST[id] ?? (/_leaves$|_sapling$|_propagule$|^pink_petals$|^mangrove_roots$/.test(id) ? 0.3 : /^(dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|(red|orange|white|pink)_tulip)$/.test(id) ? 0.65 : 0);
+const compostable = id => COMPOST[id] ?? (/_leaves$|_sapling$|_propagule$|^pink_petals$|^mangrove_roots$|^kelp$|^seagrass$|^dried_kelp$/.test(id) ? 0.3 : id === 'sea_pickle' ? 0.65 : id === 'dried_kelp_block' ? 0.5 : /^(dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|(red|orange|white|pink)_tulip)$/.test(id) ? 0.65 : 0);
 /** The composter: what is held goes in (a chance of a level); full, it gives bone meal. */
 function compost(t) {
   const level = t.v >>> 12, s = held();
@@ -1418,6 +1441,8 @@ function survivalTick(r) {
   if (G.mode === 'creative') { G.health = 20; G.food = 20; G.air = 300; return; }
   // peaceful: never hungry, the hearts come back by themselves (one each second)
   if (difficulty() === 'peaceful') { if (G.food < 20 || G.sat < 5) { G.food = 20; G.sat = Math.max(G.sat, 5); drawHud(true); } if (G.health < 20 && G.time % 20 === 0) { G.health = Math.min(20, G.health + 1); drawHud(true); } }
+  // a turtle shell worn: water breathing kept at ten seconds while the head is out of the water
+  if (G.inv.worn(0)?.id === 'turtle_helmet' && !b.headInWater && G.time % 20 === 0) giveEffect('water_breathing', 0, 200);
   // a hay bale takes four fifths of a fall
   const onHay = (G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z)) & 0xFFF) === ID.hay_block;
   if (r.landed > 3 && !b.inWater) hurt(Math.ceil((r.landed - 3) * (onHay ? 0.2 : 1)), '摔得太重了', null, 'fall');
@@ -1981,13 +2006,13 @@ function frame(now) {
   if (G.targetMob) G.target = null;
   const env = environment(G.time + a);
   const eyeV = G.mirror.get(Math.floor(view.x), Math.floor(view.y), Math.floor(view.z));
-  env.underwater = (eyeV & 0xFFF) === ID.water;
+  env.underwater = isWater(eyeV);
   if (env.underwater) {
     env.fog = [0.05, 0.12, 0.35].map(q => q * (0.3 + env.daylight * 0.7));
     // 光影: where the surface is above the eye (the shafts and the light on the bottom come down from it)
     const ex = Math.floor(view.x), ez = Math.floor(view.z);
     let y = Math.floor(view.y);
-    while (y < view.y + 48 && (G.mirror.get(ex, y + 1, ez) & 0xFFF) === ID.water) y++;
+    while (y < view.y + 48 && isWater(G.mirror.get(ex, y + 1, ez))) y++;
     env.waterY = y + 0.9;
   }
   if ((eyeV & 0xFFF) === ID.lava) { env.underwater = true; env.lava = true; env.fog = [0.6, 0.15, 0.02]; }

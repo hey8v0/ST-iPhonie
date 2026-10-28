@@ -20,7 +20,7 @@ for (const b of BLOCKS) { FILTER[b.id] = b.opaque ? 15 : b.filter; EMIT[b.id] = 
 const filterOf = v => { const id = v & 0xFFF; return (BLOCKS[id].shape === 'slab' && v >>> 12 === 2) ? 15 : FILTER[id]; };
 // furnaces (and smokers, blast furnaces) glow while lit (state bit 4)
 const FURNACES = new Set(BLOCKS.filter(b => b.use === 'furnace').map(b => b.id));
-const emitOf = v => FURNACES.has(v & 0xFFF) ? (v >>> 12 & 4 ? 13 : 0) : EMIT[v & 0xFFF];
+const emitOf = v => FURNACES.has(v & 0xFFF) ? (v >>> 12 & 4 ? 13 : 0) : (v & 0xFFF) === ID.sea_pickle ? 6 + 3 * (v >>> 12 & 3) : EMIT[v & 0xFFF];
 const key = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
 const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 const NEIGHBOURS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -29,11 +29,17 @@ const GRAVITY = new Set(BLOCKS.filter(b => b.gravity).map(b => b.id));
 const CROP = new Set([ID.wheat, ID.carrots, ID.potatoes, ID.beetroots]);
 const PAIRED = new Set(BLOCKS.filter(b => b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall').map(b => b.id));
 const FACE_DIR = [[0, 1], [-1, 0], [0, -1], [1, 0]];
-const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'plate', 'rail', 'lever', 'button', 'piston_head', 'bamboo', 'petals'].includes(b.shape)).map(b => b.id));
+const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'plate', 'rail', 'lever', 'button', 'piston_head', 'bamboo', 'petals', 'pickle', 'eggs', 'fan'].includes(b.shape)).map(b => b.id));
 // the ground plants take root in (the game's dirt), what bamboo also stands in, and what mangrove roots grow into
 const DIRT = new Set([ID.grass_block, ID.dirt, ID.podzol, ID.coarse_dirt, ID.moss_block, ID.mud, ID.muddy_mangrove_roots]);
 const BAMBOO_GROUND = new Set([...DIRT, ID.sand, ID.red_sand, ID.gravel]);
 const MUDDY = new Set([ID.mud, ID.muddy_mangrove_roots, ID.mangrove_roots]);
+// the sea's plants stand in water (blocks.js water): water is beside them, they leave it when they go; what sea plants
+// grow on (and the sand, gravel and the rest of the sea floor)
+const WET = new Set(BLOCKS.filter(b => b.water).map(b => b.id));
+const isWater = v => (v & 0xFFF) === ID.water || WET.has(v & 0xFFF);
+const SEA_FLOOR = new Set([...DIRT, ID.sand, ID.red_sand, ID.gravel, ID.clay, ID.stone, ...BLOCKS.filter(b => b.coral || /coral_block$/.test(b.name)).map(b => b.id)]);
+const CORAL_BLOCKS = new Set(BLOCKS.filter(b => b.coral).map(b => b.id));
 // redstone that lies on the ground: on a full block, the top half of a slab or a hopper
 const ON_GROUND = new Set(['wire', 'repeater', 'comparator', 'plate', 'rail']);
 // the tall flowers: bone meal gives another one
@@ -254,6 +260,8 @@ export class World {
       else if (id === ID.nether_portal) this.schedule(nx, ny, nz, 1);
       else if (GRAVITY.has(id)) this.schedule(nx, ny, nz, 2);
       else if (PLANT.has(id)) this.schedule(nx, ny, nz, 1);
+      // a coral block looks for water a few seconds after something by it changed (the game's; a reef as it was made stays)
+      else if (CORAL_BLOCKS.has(id)) this.schedule(nx, ny, nz, 60 + Math.floor(this.r() * 40));
       else if (PAIRED.has(id) || id === ID.vine) this.schedule(nx, ny, nz, 1);
     }
   }
@@ -262,7 +270,7 @@ export class World {
   breakBlock(x, y, z, drop = true) {
     const v = this.get(x, y, z);
     if (!v) return;
-    this.set(x, y, z, 0);
+    this.set(x, y, z, WET.has(v & 0xFFF) ? ID.water : 0);
     if (drop) { const items = dropsOf(BLOCKS[v & 0xFFF], v >>> 12, this.r); if (items.length) this.post({type: 'drops', x: x + 0.5, y: y + 0.25, z: z + 0.5, items}); }
   }
   // ---------- the world's ticks (20 a second) ----------
@@ -341,6 +349,17 @@ export class World {
       if (!(v >>> 12 & 8) && r() < 1 / 3 && !this.get(x, y + 1, z) && lit() >= 9) { const h = this.bambooBelow(x, y, z) + 1; if (h < 16) this.growBamboo(x, y, z, h); }
     } else if (id === ID.bamboo_sapling) {
       if (r() < 1 / 3 && !this.get(x, y + 1, z) && lit() >= 9) this.shootUp(x, y, z);
+    } else if (id === ID.kelp) {
+      // the top of a kelp grows on up into the water over it (a chance in seven, till it is 25 old): the old top a stem
+      const age = v >>> 12, up = this.get(x, y + 1, z);
+      if (age < 25 && r() < 0.14 && (up & 0xFFF) === ID.water && !(up >>> 12)) { this.set(x, y + 1, z, withMeta(ID.kelp, age + 1)); this.set(x, y, z, ID.kelp_plant); }
+    } else if (id === ID.turtle_egg) {
+      // eggs crack (sooner at night, the game's), and at the third crack hatch: a young turtle each
+      const m = v >>> 12, night = this.darkness > 6;
+      if ((this.get(x, y - 1, z) & 0xFFF) === ID.sand && (night || r() < 1 / 500)) {
+        if ((m >> 2) < 2) this.set(x, y, z, withMeta(id, m + 4));
+        else { this.set(x, y, z, 0); this.post({type: 'hatch', x: x + 0.5, y, z: z + 0.5, n: (m & 3) + 1}); }
+      }
     } else if (CROP.has(id)) {
       const meta = v >>> 12;
       if (meta < 7 && lit() >= 9 && r() < (this.get(x, y - 1, z) >>> 12 ? 0.33 : 0.16)) this.set(x, y, z, withMeta(id, meta + 1));
@@ -459,11 +478,13 @@ export class World {
       }
       return;
     }
+    // a coral block with no water by it dies
+    if (CORAL_BLOCKS.has(id)) { if (!DIRS.some(([dx, dy, dz]) => isWater(this.get(x + dx, y + dy, z + dz)))) this.set(x, y, z, ID[BLOCKS[id].coral]); return; }
     // a bamboo shoot with bamboo put on it is a stalk now
     if (id === ID.bamboo_sapling && (this.get(x, y + 1, z) & 0xFFF) === ID.bamboo) { this.set(x, y, z, ID.bamboo); return; }
     if (PLANT.has(id)) { if (!this.supported(x, y, z, v)) this.breakBlock(x, y, z); return; }
     if (id === ID.vine) { const keep = this.vineHolds(x, y, z, v >>> 12); if (keep !== v >>> 12) this.set(x, y, z, keep ? withMeta(ID.vine, keep) : 0); return; }
-    if (BLOCKS[id].shape === 'tall' && !(v >>> 12 & 8) && !this.supported(x, y, z, withMeta(ID.short_grass, 0))) { this.breakBlock(x, y, z); return; }
+    if (BLOCKS[id].shape === 'tall' && !(v >>> 12 & 8) && !this.supported(x, y, z, id === ID.tall_seagrass ? v : withMeta(ID.short_grass, 0))) { this.breakBlock(x, y, z); return; }
     // a door or a bed whose other half is gone goes too (its item came from the half that went)
     if (PAIRED.has(id)) { const [ox, oy, oz] = this.partner(x, y, z, v); if ((this.get(ox, oy, oz) & 0xFFF) !== id) this.set(x, y, z, 0); return; }
     if (LIQUID.has(id)) this.flow(x, y, z, v);
@@ -504,6 +525,9 @@ export class World {
     if (id === ID.bamboo_sapling) return BAMBOO_GROUND.has(bid);
     if (id === ID.mangrove_propagule) return v >>> 12 & 8 ? (this.get(x, y + 1, z) & 0xFFF) === ID.mangrove_leaves : DIRT.has(bid) || bid === ID.farmland || bid === ID.clay;
     if (b.shape === 'petals') return DIRT.has(bid);
+    if (id === ID.kelp || id === ID.kelp_plant) return bid === ID.kelp_plant || bid === ID.kelp || (SEA_FLOOR.has(bid) && OPAQUE[bid] === 1);
+    if (WET.has(id) || b.shape === 'fan' || /coral$/.test(b.name)) return OPAQUE[bid] === 1 || (id === ID.tall_seagrass && v >>> 12 & 8 && bid === ID.tall_seagrass);
+    if (id === ID.turtle_egg) return OPAQUE[bid] === 1;
     if (b.shape === 'cross') return DIRT.has(bid) || bid === ID.farmland || (b.name.endsWith('mushroom') && OPAQUE[bid] === 1);
     return true;
   }
@@ -521,7 +545,7 @@ export class World {
   /** Liquid levels in the meta: 0 a source, 1–7 flowing (higher is thinner), 8 falling. */
   flow(x, y, z, v) {
     const id = v & 0xFFF, meta = v >>> 12, water = id === ID.water, step = water || this.nether ? 1 : 2, delay = water ? 5 : this.nether ? 10 : 30;
-    const same = n => (n & 0xFFF) === id, lvl = n => (n >>> 12) >= 8 ? 0 : (n >>> 12);
+    const same = n => (n & 0xFFF) === id || (water && WET.has(n & 0xFFF)), lvl = n => WET.has(n & 0xFFF) || (n >>> 12) >= 8 ? 0 : (n >>> 12);
     let level = meta >= 8 ? 0 : meta;
     if (meta !== 0) {
       // a flowing block is fed from above or from a side that is less spread out
@@ -530,7 +554,7 @@ export class World {
       let sources = 0;
       for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const n = this.get(x + dx, y, z + dz);
-        if (same(n)) { feed = Math.min(feed, lvl(n)); if (!(n >>> 12)) sources++; }
+        if (same(n)) { feed = Math.min(feed, lvl(n)); if (!lvl(n)) sources++; }
       }
       let next;
       if (water && sources >= 2) { const b = this.get(x, y - 1, z); if (OPAQUE[b & 0xFFF] || (same(b) && !(b >>> 12))) next = 0; }
@@ -555,7 +579,7 @@ export class World {
   canFlow(n, id) {
     if (!n) return true;
     const nid = n & 0xFFF, b = BLOCKS[nid];
-    if (nid === id) return false;
+    if (nid === id || WET.has(nid)) return false;
     if (LIQUID.has(nid)) return true;
     return !b.solid && !OPAQUE[nid] && b.shape !== 'liquid' && (b.replace || PLANT.has(nid));
   }
@@ -622,6 +646,24 @@ export class World {
       return true;
     }
     if (id === ID.bamboo_sapling) { if (this.get(x, y + 1, z)) return false; this.shootUp(x, y, z); return true; }
+    if (id === ID.seagrass) { const up = this.get(x, y + 1, z); if ((up & 0xFFF) !== ID.water || up >>> 12) return false; this.set(x, y, z, ID.tall_seagrass); this.set(x, y + 1, z, withMeta(ID.tall_seagrass, 8)); return true; }
+    if (id === ID.sea_pickle) {
+      // a sea pickle on coral: more pickles round it (the game's)
+      if (!CORAL_BLOCKS.has(this.get(x, y - 1, z) & 0xFFF)) return false;
+      this.set(x, y, z, withMeta(id, 3));
+      for (let k = 0; k < 8; k++) { const px = x + Math.floor(r() * 5) - 2, pz = z + Math.floor(r() * 5) - 2, n = this.get(px, y, pz); if ((n & 0xFFF) === ID.water && !(n >>> 12) && CORAL_BLOCKS.has(this.get(px, y - 1, pz) & 0xFFF)) this.set(px, y, pz, withMeta(id, Math.floor(r() * 4))); }
+      return true;
+    }
+    if ((id === ID.sand || id === ID.gravel || id === ID.dirt || id === ID.clay) && (this.get(x, y + 1, z) & 0xFFF) === ID.water) {
+      for (let k = 0; k < 24; k++) {
+        const gx = x + Math.floor(r() * 7) - 3, gz = z + Math.floor(r() * 7) - 3;
+        for (let gy = y + 1; gy >= y - 1; gy--) {
+          const g = this.get(gx, gy, gz) & 0xFFF, up = this.get(gx, gy + 1, gz);
+          if (SEA_FLOOR.has(g) && OPAQUE[g] === 1 && (up & 0xFFF) === ID.water && !(up >>> 12)) { this.set(gx, gy + 1, gz, ID.seagrass); break; }
+        }
+      }
+      return true;
+    }
     if (id === ID.pink_petals) { if ((v >>> 12 & 3) < 3) this.set(x, y, z, v + (1 << 12)); else this.post({type: 'drops', x: x + 0.5, y: y + 0.5, z: z + 0.5, items: [['pink_petals', 1]]}); return true; }
     if (id === ID.cocoa) { if ((v >>> 12) >> 2 >= 2) return false; this.set(x, y, z, withMeta(id, (v >>> 12) + 4)); return true; }
     if ((id === ID.short_grass || id === ID.fern) && !this.get(x, y + 1, z)) {
@@ -651,14 +693,14 @@ export class World {
     if (h(1) > 0.12) return [];
     const biome = BIOMES[c.biome[8 * 16 + 8]].name;
     const kinds = {plains: ['pig', 'cow', 'sheep', 'chicken'], meadow: ['sheep', 'cow', 'chicken'], forest: ['pig', 'cow', 'chicken', 'sheep'], birch_forest: ['pig', 'chicken', 'sheep'], dark_forest: ['pig', 'chicken'],
-      taiga: ['sheep', 'pig'], snowy_taiga: ['sheep'], snowy_plains: ['sheep'], savanna: ['cow', 'sheep', 'chicken'], jungle: ['chicken', 'pig'], swamp: ['chicken'], beach: [],
+      taiga: ['sheep', 'pig'], snowy_taiga: ['sheep'], snowy_plains: ['sheep'], savanna: ['cow', 'sheep', 'chicken'], jungle: ['chicken', 'pig'], swamp: ['chicken'], beach: ['turtle'],
       cherry_grove: ['pig', 'sheep'], bamboo_jungle: ['chicken', 'pig']}[biome];
     if (!kinds || !kinds.length) return [];
     const kind = kinds[Math.floor(h(2) * kinds.length)], n = 2 + Math.floor(h(3) * 3), out = [];
     for (let k = 0; k < n * 4 && out.length < n; k++) {
       const lx = Math.floor(h(10 + k) * 16), lz = Math.floor(h(40 + k) * 16), top = c.height[lz * 16 + lx];
       const g = this.get(x0 + lx, top, z0 + lz) & 0xFFF;
-      if (g !== ID.grass_block && g !== ID.podzol) continue;
+      if (g !== ID.grass_block && g !== ID.podzol && !(kind === 'turtle' && g === ID.sand)) continue;
       if (this.get(x0 + lx, top + 1, z0 + lz) && !BLOCKS[this.get(x0 + lx, top + 1, z0 + lz) & 0xFFF].replace) continue;
       out.push([kind, x0 + lx + 0.5, top + 1, z0 + lz + 0.5]);
     }

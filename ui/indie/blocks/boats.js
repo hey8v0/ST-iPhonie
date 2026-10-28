@@ -6,7 +6,7 @@
 // its chest held); falling more than three blocks onto land breaks it into planks and sticks. Others bump into a boat
 // and push it, and can stand on it.
 import {BLOCKS, ID, ITEMS, zhOf} from './blocks.js';
-import {Body} from './player.js';
+import {Body, isWater} from './player.js';
 import {collisionBoxes, nearIn} from './shapes.js';
 
 export const BOAT_W = 1.375, BOAT_H = 0.5625;
@@ -19,9 +19,9 @@ const slotsOf = (list, n) => Array.from({length: n}, (_, i) => list?.[i] || null
 /** The top of the water in a block, as it is drawn (1 under more water; a source 14/16, flowing lower), or null. */
 export function waterTop(world, x, y, z) {
   const v = world.get(x, y, z);
-  if ((v & 0xFFF) !== ID.water) return null;
-  if ((world.get(x, y + 1, z) & 0xFFF) === ID.water) return y + 1;
-  const m = v >>> 12;
+  if (!isWater(v)) return null;
+  if (isWater(world.get(x, y + 1, z))) return y + 1;
+  const m = (v & 0xFFF) === ID.water ? v >>> 12 : 0;
   return y + Math.round(m >= 8 ? 14.2 : 14.2 - (m & 7) * 1.75) / 16;
 }
 

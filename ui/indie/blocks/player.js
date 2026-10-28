@@ -3,6 +3,10 @@
 // its damage, and the ray that finds the block aimed at.
 import {collisionBoxes, selectionBoxes, isClimbable, slipperiness, nearIn} from './shapes.js';
 import {ID, BLOCKS} from './blocks.js';
+// water, and the sea's plants that stand in it
+const WATERY = new Uint8Array(BLOCKS.length);
+WATERY[ID.water] = 1; for (const b of BLOCKS) if (b.water) WATERY[b.id] = 1;
+export const isWater = v => WATERY[v & 0xFFF] === 1;
 
 export const W = 0.6, H = 1.8, SNEAK_H = 1.5, EYE = 1.62, SNEAK_EYE = 1.27;
 
@@ -85,14 +89,14 @@ export class Body {
     let water = false, lava = false, climb = false, cactus = false;
     for (let y = Math.floor(y0 + 0.01); y <= Math.floor(y1 - 0.01); y++) for (let z = Math.floor(z0); z <= Math.floor(z1 - 1e-6); z++) for (let x = Math.floor(x0); x <= Math.floor(x1 - 1e-6); x++) {
       const v = this.world.get(x, y, z), id = v & 0xFFF;
-      if (id === ID.water && y + 0.9 > y0 + 0.1) water = true;
+      if (WATERY[id] && y + 0.9 > y0 + 0.1) water = true;
       if (id === ID.lava) lava = true;
     }
     const fx = Math.floor(this.x), fz = Math.floor(this.z), fy = Math.floor(this.y + 0.01);
     climb = isClimbable(this.world.get(fx, fy, fz)) || isClimbable(this.world.get(fx, fy + 1, fz));
     for (let y = Math.floor(y0 - 0.01); y <= Math.floor(y1); y++) for (let z = Math.floor(z0 - 0.02); z <= Math.floor(z1 + 0.02); z++) for (let x = Math.floor(x0 - 0.02); x <= Math.floor(x1 + 0.02); x++) if ((this.world.get(x, y, z) & 0xFFF) === ID.cactus) cactus = true;
     const ey = this.y + this.eye, ev = this.world.get(Math.floor(this.x), Math.floor(ey), Math.floor(this.z));
-    this.headInWater = (ev & 0xFFF) === ID.water && ey < Math.floor(ey) + 0.89;
+    this.headInWater = WATERY[ev & 0xFFF] === 1 && ey < Math.floor(ey) + 0.89;
     this.headInLava = (ev & 0xFFF) === ID.lava;
     this.inWater = water; this.inLava = lava; this.climbing = climb && !this.flying; this.touchCactus = cactus;
   }

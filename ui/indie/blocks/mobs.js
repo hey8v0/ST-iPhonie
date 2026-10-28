@@ -3,9 +3,9 @@
 // burn in the sun; the Nether's (zombified piglins that only fight back, ghasts and blazes shooting fireballs, magma
 // cubes that split); arrows, fireballs; lit TNT. Their bodies move with the player's physics (player.js); what they look like is in
 // models.js. Numbers (health, speed, damage, drops) are the game's.
-import {Body} from './player.js';
+import {Body, isWater} from './player.js';
 import {buildModel, animate, MODELS} from './models.js';
-import {BLOCKS, ID, MINY, COLORS} from './blocks.js';
+import {BLOCKS, ID, MINY, COLORS, SEA, withMeta} from './blocks.js';
 import {collisionBoxes} from './shapes.js';
 import {fortressAt, spawnersNear} from './nether.js';
 import {newWork, PROFESSIONS, restock} from './trades.js';
@@ -33,7 +33,20 @@ export const MOBS = {
   magma_cube: {zh: '岩浆怪', health: 16, speed: 0.2, hostile: true, fireproof: true, range: 16, cube: true, drops: [['magma_cream', 0, 1]]},
   // slimes: hopping cubes like the magma cube, in swamps at night and deep under ground in one place in ten; the small ones drop slime balls
   slime: {zh: '史莱姆', health: 16, speed: 0.2, hostile: true, range: 16, cube: true, drops: [['slime_ball', 0, 2]]},
+  // the sea (water: they live in it — out of it a fish flops and runs out of air; they come and go round the player, and
+  // stay only out of a bucket): squids (ink when hit) and the glowing ones deep down; cod, salmon, tropical fish (each
+  // its colour), the pufferfish (swelling when someone is near, stinging with poison); turtles on the beaches and in the
+  // sea — bred with seagrass, a mother lays her eggs on the sand; a young one grown up leaves a scute
+  squid: {zh: '鱿鱼', health: 10, speed: 0.12, passive: true, water: 'squid', breed: [], drops: [['ink_sac', 1, 3]]},
+  glow_squid: {zh: '发光鱿鱼', health: 10, speed: 0.12, passive: true, water: 'squid', glow: true, breed: [], drops: [['glow_ink_sac', 1, 3]]},
+  cod: {zh: '鳕鱼', health: 3, speed: 0.1, passive: true, water: 'fish', breed: [], drops: [['cod', 1, 1, 'cooked_cod']], rare: ['bone_meal'], bucket: 'cod_bucket'},
+  salmon: {zh: '鲑鱼', health: 3, speed: 0.1, passive: true, water: 'fish', breed: [], drops: [['salmon', 1, 1, 'cooked_salmon']], rare: ['bone_meal'], bucket: 'salmon_bucket'},
+  tropical_fish: {zh: '热带鱼', health: 3, speed: 0.1, passive: true, water: 'fish', breed: [], drops: [['tropical_fish', 1, 1]], rare: ['bone_meal'], bucket: 'tropical_fish_bucket'},
+  pufferfish: {zh: '河豚', health: 3, speed: 0.08, passive: true, water: 'fish', breed: [], drops: [['pufferfish', 1, 1]], rare: ['bone_meal'], bucket: 'pufferfish_bucket'},
+  turtle: {zh: '海龟', health: 30, speed: 0.12, passive: true, amphibious: true, breed: ['seagrass'], drops: [['seagrass', 0, 2]]},
 };
+// a tropical fish's colours (tinting its white picture): the game's sixteen dye colours
+const FISH_COLORS = COLORS.map(([, , h]) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255]);
 for (const [k, m] of Object.entries(MOBS)) { m.kind = k; m.size = MODELS[k].size; }
 const WOOL = COLORS.map(c => c[0]);
 // a sheep's natural colour: mostly white, a few greys and blacks, now and then brown or pink
@@ -66,12 +79,18 @@ export class Mob {
       this.job = extra.job || null; this.shake = 0; this.trading = false;
     }
     if (d.cube) { this.mag = extra.mag || [1, 2, 4][Math.floor(Math.random() * 3)]; this.body.w *= this.mag; this.body.hgt *= this.mag; if (extra.health == null) this.health = this.mag * this.mag; this.hop = 10; this.squish = 0; }
+    // the sea's: air to hold out of the water, kept when let out of a bucket; a tropical fish's colour; a pufferfish's
+    // swelling; a turtle's beach
+    if (d.water) { this.air = 300; this.persist = !!extra.persist; this.tm = 0; this.tSpeed = 0.15; this.tentacles = 0; this.puff = 0; }
+    if (kind === 'tropical_fish') this.color = extra.color ?? Math.floor(Math.random() * 16);
+    if (kind === 'turtle') { this.beach = extra.beach || [Math.floor(x), Math.floor(y), Math.floor(z)]; this.egg = !!extra.egg; }
   }
   get x() { return this.body.x; } get y() { return this.body.y; } get z() { return this.body.z; }
   toJSON() {
     const b = this.body;
     return {kind: this.kind, x: +b.x.toFixed(2), y: +b.y.toFixed(2), z: +b.z.toFixed(2), yaw: +this.yaw.toFixed(2), health: this.health, baby: this.baby || undefined, grow: this.grow || undefined, color: this.color || undefined, sheared: this.sheared || undefined,
-      home: this.home || undefined, ...(this.kind === 'villager' ? {prof: this.prof, xp: this.xp, seed: this.seed, offers: this.offers, job: this.job || undefined} : {})};
+      home: this.home || undefined, ...(this.kind === 'villager' ? {prof: this.prof, xp: this.xp, seed: this.seed, offers: this.offers, job: this.job || undefined} : {}),
+      ...(this.persist ? {persist: true} : {}), ...(this.kind === 'turtle' ? {beach: this.beach, egg: this.egg || undefined} : {})};
   }
 }
 
@@ -99,12 +118,17 @@ export class Mobs {
         const d = Math.hypot(m.x - player.x, m.z - player.z);
         if (d > 128 || (d > 40 && Math.random() < 1 / 800) || (this.ctx.daylight() > 0.8 && !m.def.undead && m.kind !== 'spider' && d > 24 && Math.random() < 1 / 400)) { this.list.splice(i, 1); continue; }
       }
+      if (m.def.water && !m.persist && !m.dead) {
+        const d = Math.hypot(m.x - player.x, m.z - player.z);
+        if (d > 128 || (d > 40 && Math.random() < 1 / 600)) { this.list.splice(i, 1); continue; }
+      }
       if (m.dead) { if (++m.dead > 20) { this.die(m); this.list.splice(i, 1); } continue; }
       this.think(m);
       this.move(m);
       if (m.kind === 'chicken' && !m.baby && --m.egg <= 0) { m.egg = 6000 + Math.floor(this.r() * 6000); this.ctx.drop({id: 'egg', n: 1}, m.x, m.y + 0.3, m.z); this.ctx.sound('pop', m.x, m.y, m.z); }
     }
     this.spawnTick();
+    this.seaSpawnTick();
     this.spawnerTick();
     this.arrowTick();
     this.ballTick();
@@ -115,7 +139,9 @@ export class Mobs {
     const {player} = this.ctx, d = m.def, b = m.body;
     m.age++; if (m.hurtT > 0) m.hurtT--; if (m.inv > 0) m.inv--; if (m.cool > 0) m.cool--; if (m.panic > 0) m.panic--; if (m.attackT > 0) m.attackT--;
     if (m.loveWait > 0) m.loveWait--; if (m.love > 0) m.love--; if (m.angry > 0) m.angry--;
-    if (m.baby && ++m.grow >= 24000) { m.baby = false; m.body.w = d.size[0]; m.body.hgt = d.size[1]; }
+    if (m.baby && ++m.grow >= 24000) { m.baby = false; m.body.w = d.size[0]; m.body.hgt = d.size[1]; if (m.kind === 'turtle') this.ctx.drop({id: 'turtle_scute', n: 1}, m.x, m.y + 0.3, m.z); }
+    if (d.water) { this.swim(m); return; }
+    if (m.kind === 'turtle' && this.turtle(m)) return;
     // fire: the sun on the undead, lava
     const sky = this.ctx.world.light(Math.floor(m.x), Math.floor(m.y + b.height * 0.8), Math.floor(m.z))[0];
     const wet = b.inWater || (sky >= 15 && !!this.ctx.raining?.(m.x, m.z));
@@ -187,7 +213,9 @@ export class Mobs {
           m.goal = [mate.x, mate.z]; m.input.fwd = Math.hypot(mate.x - m.x, mate.z - m.z) > 1.5 ? 1 : 0; m.lookAt = [mate.x, mate.y + 0.5, mate.z];
           if (Math.hypot(mate.x - m.x, mate.z - m.z) < 2 && m.id < mate.id) {
             m.love = mate.love = 0; m.loveWait = mate.loveWait = 6000;
-            this.add(m.kind, (m.x + mate.x) / 2, m.y, (m.z + mate.z) / 2, {baby: true, color: m.kind === 'sheep' ? (Math.random() < 0.5 ? m.color : mate.color) : null});
+            // turtles: no young here — the mother carries eggs to lay on her beach
+            if (m.kind === 'turtle') m.egg = true;
+            else this.add(m.kind, (m.x + mate.x) / 2, m.y, (m.z + mate.z) / 2, {baby: true, color: m.kind === 'sheep' ? (Math.random() < 0.5 ? m.color : mate.color) : null});
             this.ctx.burst(m.x, m.y + 1, m.z, 'heart'); this.ctx.xp?.(1 + Math.floor(Math.random() * 7), m.x, m.y + 0.5, m.z);
           }
           return;
@@ -280,6 +308,7 @@ export class Mobs {
   move(m) {
     const b = m.body, d = m.def, inp = m.input || {fwd: 0, mod: 1};
     if (d.flies === 'ghast') { this.fly(m); return; }
+    if (d.water || (m.kind === 'turtle' && m.swimming)) { this.swimMove(m); return; }
     let fwd = inp.fwd;
     if (m.goal) {
       const want = angleTo(m.x, m.z, m.goal[0], m.goal[1]);
@@ -315,6 +344,125 @@ export class Mobs {
     if (m.age % 160 === m.id % 160 && Math.random() < 0.5) this.ctx.sound(m.kind, m.x, m.y, m.z);
     if (b.y < MINY - 64) { m.health = 0; m.dead = 20; }
   }
+  // ---------- the sea ----------
+  /**
+   * A squid or a fish: in the water it goes for a place in the water near it (a new one now and then; from a hurt, away
+   * and quick); a squid in strokes, its tentacles opening and closing. Out of the water it flops about and runs out of
+   * air (fifteen seconds, then it drowns). A pufferfish swells when someone is near and stings who touches it.
+   */
+  swim(m) {
+    const b = m.body, d = m.def, {player} = this.ctx;
+    b.feel();
+    if (!b.inWater) { m.goal3 = null; if (--m.air <= -20) { m.air = 0; this.hurt(m, 2, null, 'drown'); } return; }
+    m.air = 300;
+    const far = !m.goal3 || Math.hypot(m.goal3[0] - m.x, m.goal3[1] - m.y, m.goal3[2] - m.z) < 1;
+    if (far || m.wait-- <= 0 || (m.panic > 0 && m.age % 20 === 0)) {
+      m.wait = 60 + Math.floor(Math.random() * 100);
+      for (let k = 0; k < 8; k++) {
+        const r = m.panic > 0 ? 10 : 6, gx = m.x + (Math.random() - 0.5) * r * 2, gy = m.y + (Math.random() - 0.5) * 6, gz = m.z + (Math.random() - 0.5) * r * 2;
+        if (this.ctx.loaded(gx, gz) && isWater(this.world.get(Math.floor(gx), Math.floor(gy), Math.floor(gz))) && isWater(this.world.get(Math.floor(gx), Math.floor(gy + 0.5), Math.floor(gz)))) { m.goal3 = [gx, gy, gz]; break; }
+      }
+    }
+    if (m.kind === 'pufferfish') {
+      const near = !player.dead && this.ctx.mode() !== 'creative' && Math.hypot(player.x - m.x, player.y + 0.9 - m.y, player.z - m.z) < 2.5;
+      if (near && m.puff < 2 && m.age % 10 === 0) { m.puff++; this.ctx.sound('pop', m.x, m.y, m.z); }
+      else if (!near && m.puff > 0 && m.age % 60 === 0) m.puff--;
+      if (m.puff > 0 && near && Math.hypot(player.x - m.x, player.y + 0.5 - m.y, player.z - m.z) < 1 + m.puff * 0.25 && m.attackT === 0) {
+        m.attackT = 20; this.ctx.hurtPlayer(1 + m.puff, '被河豚扎死了', m); this.ctx.effect?.('poison', 0, 60 * m.puff);
+      }
+    }
+  }
+  swimMove(m) {
+    const b = m.body, d = m.def;
+    b.prev = {x: b.x, y: b.y, z: b.z};
+    if (m.kind === 'turtle') b.feel();
+    if (b.inWater) {
+      // a squid's stroke (the game's tentacle movement); a fish swims on
+      let push = d.speed * 0.1 * (m.panic > 0 ? 2.5 : 1);
+      if (d.water === 'squid') {
+        m.tm += m.tSpeed;
+        if (m.tm > Math.PI * 2) { m.tm -= Math.PI * 2; m.tSpeed = 1 / (Math.random() + 1) * 0.2; }
+        const f = m.tm / Math.PI;
+        m.tentacles = f < 1 ? Math.sin(f * f * Math.PI) * Math.PI * 0.25 : 0;
+        push = f < 1 ? d.speed * 0.45 * (1 - f * f) * (m.panic > 0 ? 2 : 1) : 0;
+      }
+      if (m.kind === 'turtle') push = d.speed * 0.3;
+      // a pufferfish swollen up hardly moves
+      if (m.puff) push *= 0.15;
+      if (m.goal3) {
+        const dx = m.goal3[0] - m.x, dy = m.goal3[1] - m.y, dz = m.goal3[2] - m.z, len = Math.hypot(dx, dy, dz) || 1;
+        b.vx += dx / len * push; b.vy += dy / len * push; b.vz += dz / len * push;
+        m.yaw = turn(m.yaw, angleTo(m.x, m.z, m.goal3[0], m.goal3[2]), 0.25);
+      }
+      b.vx *= 0.9; b.vy *= 0.9; b.vz *= 0.9;
+    } else {
+      // out of the water: down it comes; on the ground a fish flops
+      b.vy -= 0.08; b.vx *= 0.9; b.vz *= 0.9;
+      if (b.onGround && d.water && Math.random() < 0.1) { b.vy = 0.36; b.vx += (Math.random() - 0.5) * 0.2; b.vz += (Math.random() - 0.5) * 0.2; m.yaw += (Math.random() - 0.5) * 2; this.ctx.sound('splash', m.x, m.y, m.z); }
+      m.tentacles = 0;
+    }
+    const r = b.move(b.vx, b.vy, b.vz);
+    if (r.hitX) b.vx = 0;
+    if (r.hitZ) b.vz = 0;
+    if (r.hitY) b.vy = 0;
+    b.onGround = r.down;
+    b.feel();
+    const moved = Math.hypot(b.x - b.prev.x, b.z - b.prev.z);
+    m.limb += moved * 4; m.amount += (Math.min(1, moved * 4) - m.amount) * 0.4;
+    if (b.y < MINY - 64) { m.health = 0; m.dead = 20; }
+  }
+  /**
+   * A turtle: in the water it swims (it can hold its breath), on land it walks like any animal; one with eggs goes to
+   * sand near its beach and lays one to four there. True when it has done its thinking.
+   */
+  turtle(m) {
+    const b = m.body;
+    m.input = {fwd: 0, jump: false, mod: 1};
+    m.swimming = b.inWater && !b.onGround;
+    if (m.egg) {
+      const [hx, hy, hz] = m.beach;
+      if (Math.hypot(hx - m.x, hz - m.z) > 4) { m.goal = [hx + 0.5, hz + 0.5]; m.goal3 = [hx + 0.5, hy, hz + 0.5]; m.input.fwd = 1; return true; }
+      // on the sand by its beach: the eggs
+      const x = Math.floor(m.x), z = Math.floor(m.z);
+      for (let y = Math.floor(m.y) + 1; y >= Math.floor(m.y) - 2; y--) {
+        if ((this.world.get(x, y - 1, z) & 0xFFF) === ID.sand && !this.world.get(x, y, z)) { this.ctx.setBlock(x, y, z, withMeta(ID.turtle_egg, Math.floor(Math.random() * 4))); m.egg = false; this.ctx.sound('place', m.x, m.y, m.z); break; }
+      }
+      if (m.egg && m.age % 200 === 0) m.beach = [x + Math.floor((Math.random() - 0.5) * 6), Math.floor(m.y), z + Math.floor((Math.random() - 0.5) * 6)];
+      return true;
+    }
+    if (m.swimming) {
+      if (!m.goal3 || m.wait-- <= 0) {
+        m.wait = 80 + Math.floor(Math.random() * 120);
+        const [hx, hy, hz] = m.beach, home = Math.hypot(hx - m.x, hz - m.z) > 24;
+        m.goal3 = home ? [hx + 0.5, hy, hz + 0.5] : [m.x + (Math.random() - 0.5) * 16, m.y + (Math.random() - 0.5) * 4, m.z + (Math.random() - 0.5) * 16];
+      }
+      return true;
+    }
+    return false;
+  }
+  /** Squids and fish come into the water round the player (a few at a time, some kinds by the sea's warmth). */
+  seaSpawnTick() {
+    if (this.ctx.nether?.() || Math.random() > 0.05) return;
+    const {player} = this.ctx, squids = this.count(m => m.def.water === 'squid'), fish = this.count(m => m.def.water === 'fish' && !m.persist);
+    if (squids >= 5 && fish >= 14) return;
+    const a = Math.random() * Math.PI * 2, r = 16 + Math.random() * 36, x = Math.floor(player.x + Math.cos(a) * r), z = Math.floor(player.z + Math.sin(a) * r);
+    if (!this.ctx.loaded(x, z)) return;
+    let depth = 0;
+    while (depth < 40 && isWater(this.world.get(x, SEA - depth, z))) depth++;
+    if (depth < 3) return;
+    const biome = BIOMES[this.world.biome?.(x, z)]?.name || '', y = SEA - 1 - Math.floor(Math.random() * (depth - 2));
+    if (!biome.endsWith('ocean') && !biome.endsWith('river')) return;
+    let kind, n = 1;
+    if (squids < 5 && Math.random() < 0.25) kind = 'squid';
+    else if (fish < 14) {
+      const q = Math.random();
+      kind = biome === 'warm_ocean' ? (q < 0.1 ? 'pufferfish' : 'tropical_fish') : biome.endsWith('river') || biome.includes('cold') || biome.includes('frozen') ? 'salmon' : q < 0.15 ? 'pufferfish' : 'cod';
+      n = kind === 'pufferfish' ? 1 : 2 + Math.floor(Math.random() * 3);
+    }
+    if (!kind) return;
+    const color = Math.floor(Math.random() * 16);
+    for (let k = 0; k < n; k++) this.add(kind, x + 0.5 + (Math.random() - 0.5), y + 0.2, z + 0.5 + (Math.random() - 0.5), {color});
+  }
   /** Can a mob see the player (nothing solid between their eyes)? */
   sees(m, p) {
     const ax = m.x, ay = m.y + m.body.eye, az = m.z, bx = p.x, by = p.y + p.eye, bz = p.z, n = Math.ceil(Math.hypot(bx - ax, by - ay, bz - az) * 2);
@@ -332,6 +480,7 @@ export class Mobs {
       m.body.vx += Math.sin(a) * k; m.body.vz += Math.cos(a) * k; if (m.body.onGround) m.body.vy = 0.36;
     }
     if (m.def.passive) m.panic = 100;
+    if (m.def.water === 'squid') this.ctx.burst(m.x, m.y + 0.4, m.z, m.def.glow ? 'glow_ink' : 'ink');
     if (m.kind === 'spider' || (m.def.hostile && from?.player)) m.angry = 600;
     if (m.kind === 'villager' && from?.player) for (const o of this.list) if (o.kind === 'iron_golem' && Math.hypot(o.x - m.x, o.z - m.z) < 24) o.angry = 1200;
     if (m.def.golem && from?.player) m.angry = 1200;
@@ -626,18 +775,20 @@ export class Mobs {
       const dx = m.x - view.x, dz = m.z - view.z;
       if (dx * dx + dz * dz > view.far * view.far) continue;
       const b = m.body, a = view.alpha ?? 1, x = b.prev.x + (b.x - b.prev.x) * a - view.x, y = b.prev.y + (b.y - b.prev.y) * a - view.y, z = b.prev.z + (b.z - b.prev.z) * a - view.z;
-      const rot = animate(m.kind, {}, {limb: m.limb, amount: m.amount, headYaw: -m.headYaw, headPitch: m.headPitch, age: m.age, attack: m.def.golem ? m.attackT / 10 : m.attackT > 10 ? 1 : 0, shake: m.shake > 0, aim: m.aim > 0 || (m.def.neutral && m.angry > 0), fall: !b.onGround, graze: m.graze > 0, squish: m.squish || 0});
-      const s = (m.baby ? 0.5 : 1) * (MODELS[m.kind].scale || 1) * (m.mag || 1), roll = m.dead ? Math.min(1, m.dead / 10) * Math.PI / 2 : 0, swell = m.fuse ? Math.min(1, m.fuse / 30) * 0.3 * (1 + Math.sin(m.fuse * 0.9) * 0.15) : 0;
+      const rot = animate(m.kind, {}, {limb: m.limb, amount: m.amount, headYaw: -m.headYaw, headPitch: m.headPitch, age: m.age, attack: m.def.golem ? m.attackT / 10 : m.attackT > 10 ? 1 : 0, shake: m.shake > 0, aim: m.aim > 0 || (m.def.neutral && m.angry > 0), fall: !b.onGround, graze: m.graze > 0, squish: m.squish || 0,
+        tentacles: m.tentacles || 0, flop: m.def.water && !b.inWater, swim: m.swimming});
+      const s = (m.baby ? (m.kind === 'turtle' ? 0.3 : 0.5) : 1) * (MODELS[m.kind].scale || 1) * (m.mag || 1) * (m.kind === 'pufferfish' ? [1, 1.6, 2.2][m.puff || 0] : 1), roll = m.dead ? Math.min(1, m.dead / 10) * Math.PI / 2 : 0, swell = m.fuse ? Math.min(1, m.fuse / 30) * 0.3 * (1 + Math.sin(m.fuse * 0.9) * 0.15) : 0;
       const [sky, blk] = light(Math.floor(m.x), Math.floor(m.y + b.height / 2), Math.floor(m.z));
-      const pose = {x, y, z, yaw: m.yaw, s, roll, swell}, hurt = m.hurtT > 0 || m.dead ? 1 : 0, white = m.fuse && Math.floor(m.fuse / 5) % 2 ? 0.6 : 0;
+      // (the game draws a squid lower: its tentacles hang under its box)
+      const pose = {x, y: y - (m.def.water === 'squid' ? 0.7 : 0), z, yaw: m.yaw, s, roll, swell}, hurt = m.hurtT > 0 || m.dead ? 1 : 0, white = m.fuse && Math.floor(m.fuse / 5) % 2 ? 0.6 : 0;
       const fire = m.fire > 0 || m.def.glow ? 1 : 0;
       const skin = m.kind === 'villager' ? `villager_${m.prof || 'none'}` : m.kind;
-      out.push({skin, verts: new Float32Array(buildModel(m.kind, rot, pose, [], sizes[skin])), light: [sky, Math.max(blk, fire ? 14 : 0)], tint: [1, 1, 1], hurt, white});
+      out.push({skin, verts: new Float32Array(buildModel(m.kind, rot, pose, [], sizes[skin])), light: [sky, Math.max(blk, fire ? 14 : 0)], tint: m.kind === 'tropical_fish' ? FISH_COLORS[m.color] || [1, 1, 1] : [1, 1, 1], hurt, white});
       if (m.kind === 'sheep' && !m.sheared) out.push({skin: 'sheep_wool', verts: new Float32Array(buildModel('sheep_wool', rot, pose, [], sizes.sheep_wool)), light: [sky, blk], tint: WOOL_TINT[m.color] || [1, 1, 1], hurt, white: 0});
     }
     return out;
   }
-  toJSON() { return this.list.filter(m => (m.def.passive || m.def.keep) && !m.dead).map(m => m.toJSON()); }
+  toJSON() { return this.list.filter(m => (m.def.passive || m.def.keep) && !m.dead && (!m.def.water || m.persist)).map(m => m.toJSON()); }
   load(list) { for (const s of list || []) if (MOBS[s.kind]?.passive || MOBS[s.kind]?.keep) this.add(s.kind, s.x, s.y, s.z, s); }
 }
 export {WOOL};

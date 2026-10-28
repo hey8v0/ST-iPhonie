@@ -276,6 +276,15 @@ for (const [w, p] of [['cherry', 'cherry_planks'], ['mangrove', 'mangrove_planks
 shapeless(['mud', 'mangrove_roots'], 'muddy_mangrove_roots');
 shapeless(['pink_petals'], 'pink_dye');
 for (const w of BOAT_WOODS) { shaped(['# #', '###'], {'#': `${w}_planks`}, boatItem(w, false)); shapeless([boatItem(w, false), 'chest'], boatItem(w, true)); }
+// ---------- the sea ----------
+shaped(['##', '##'], {'#': 'prismarine_shard'}, 'prismarine');
+shaped(['###', '###', '###'], {'#': 'prismarine_shard'}, 'prismarine_bricks');
+shaped(['###', '#D#', '###'], {'#': 'prismarine_shard', D: 'black_dye'}, 'dark_prismarine');
+shaped(['SCS', 'CCC', 'SCS'], {S: 'prismarine_shard', C: 'prismarine_crystals'}, 'sea_lantern');
+for (const [mat, base] of [['prismarine', 'prismarine'], ['prismarine_bricks', 'prismarine_brick'], ['dark_prismarine', 'dark_prismarine']]) { shaped(['#  ', '## ', '###'], {'#': mat}, `${base}_stairs`, 4); shaped(['###'], {'#': mat}, `${base}_slab`, 6); }
+shaped(['###', '###'], {'#': 'prismarine'}, 'prismarine_wall', 6);
+shaped(['###', '###', '###'], {'#': 'dried_kelp'}, 'dried_kelp_block'); shapeless(['dried_kelp_block'], 'dried_kelp', 9);
+shaped(['###', '# #'], {'#': 'turtle_scute'}, 'turtle_helmet');
 export const RECIPES = R;
 
 /** What a crafting grid (w × h stacks, row by row) makes: {out, recipe} or null. */
@@ -319,7 +328,7 @@ const SMELT = {
   diamond_ore: 'diamond', deepslate_diamond_ore: 'diamond', emerald_ore: 'emerald', deepslate_emerald_ore: 'emerald', lapis_ore: 'lapis_lazuli', deepslate_lapis_ore: 'lapis_lazuli',
   redstone_ore: 'redstone', deepslate_redstone_ore: 'redstone', wet_sponge: 'sponge',
   porkchop: 'cooked_porkchop', beef: 'cooked_beef', mutton: 'cooked_mutton', chicken: 'cooked_chicken', potato: 'baked_potato', cod: 'cooked_cod', salmon: 'cooked_salmon',
-  netherrack: 'nether_brick', nether_quartz_ore: 'quartz', nether_gold_ore: 'gold_ingot',
+  netherrack: 'nether_brick', nether_quartz_ore: 'quartz', nether_gold_ore: 'gold_ingot', kelp: 'dried_kelp',
   stone_bricks: 'cracked_stone_bricks', deepslate_bricks: 'cracked_deepslate_bricks', deepslate_tiles: 'cracked_deepslate_tiles', nether_bricks: 'cracked_nether_bricks',
   sandstone: 'smooth_sandstone', red_sandstone: 'smooth_red_sandstone', quartz_block: 'smooth_quartz', cactus: 'green_dye',
   ...Object.fromEntries(COLORS.map(([c]) => [`${c}_terracotta`, `${c}_glazed_terracotta`])),
@@ -331,13 +340,13 @@ const SMELT_XP = {iron_ingot: 0.7, copper_ingot: 0.7, gold_ingot: 1, diamond: 1,
   glass: 0.1, stone: 0.1, smooth_stone: 0.1, deepslate: 0.1, brick: 0.3, terracotta: 0.35, sponge: 0.15, nether_brick: 0.1, quartz: 0.2, green_dye: 1,
   cracked_stone_bricks: 0.1, cracked_deepslate_bricks: 0.1, cracked_deepslate_tiles: 0.1, cracked_nether_bricks: 0.1, smooth_sandstone: 0.1, smooth_red_sandstone: 0.1, smooth_quartz: 0.1,
   ...Object.fromEntries(COLORS.map(([c]) => [`${c}_glazed_terracotta`, 0.1])),
-  cooked_porkchop: 0.35, cooked_beef: 0.35, cooked_mutton: 0.35, cooked_chicken: 0.35, baked_potato: 0.35, cooked_cod: 0.35, cooked_salmon: 0.35};
+  cooked_porkchop: 0.35, cooked_beef: 0.35, cooked_mutton: 0.35, cooked_chicken: 0.35, baked_potato: 0.35, cooked_cod: 0.35, cooked_salmon: 0.35, dried_kelp: 0.1};
 /** Whole experience points for what was smelted (the fraction left is a chance of one more). */
 export function takeSmeltXp(f, r = Math.random) { const x = f.xp || 0; f.xp = 0; return Math.floor(x) + (r() < x - Math.floor(x) ? 1 : 0); }
 /** Seconds of burning a fuel gives. */
 export const fuelOf = id => { const i = itemInfo(id); return i?.fuel || 0; };
 // the smoker cooks only food and the blast furnace only ore and raw metal, each twice as fast (burning fuel twice as fast)
-const FOODS = new Set(['porkchop', 'beef', 'mutton', 'chicken', 'potato', 'cod', 'salmon']);
+const FOODS = new Set(['porkchop', 'beef', 'mutton', 'chicken', 'potato', 'cod', 'salmon', 'kelp']);
 export const smeltsIn = (type, id) => !!smeltOf(id) && (!type || (type === 'food' ? FOODS.has(id) : /_ore$|^raw_/.test(id)));
 /**
  * A furnace's state: {input, fuel, output, burn (ticks left), burnMax, cook (ticks done), type ('food' | 'ore' for the

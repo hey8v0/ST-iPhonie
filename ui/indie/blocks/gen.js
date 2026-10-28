@@ -474,6 +474,7 @@ function decorate(w, col, x0, z0, L, top) {
     }
   }
   for (const t of trees) growTree(t, put, get);
+  seaLife(w, col, x0, z0, top);
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
     const b = BIOMES[col.biome[z * 16 + x]].name;
     if (BIOMES[col.biome[z * 16 + x]].cold && b !== 'frozen_ocean' && b !== 'frozen_river') {
@@ -511,6 +512,52 @@ const FLOWERS = {
   snowy_taiga: {rate: 0, kinds: ['poppy']}, snowy_plains: {rate: 0, kinds: ['poppy']}, savanna: {rate: 0.006, kinds: ['dandelion', 'poppy']}, jungle: {rate: 0.006, kinds: ['dandelion', 'poppy']},
   cherry_grove: {rate: 0, kinds: ['poppy']}, mangrove_swamp: {rate: 0, kinds: ['poppy']}, bamboo_jungle: {rate: 0.006, kinds: ['dandelion', 'poppy']},
 };
+/**
+ * What grows on the floor of the sea and the rivers (the game's, roughly): seagrass (taller where the water is deep
+ * enough), kelp in tall stems in the cold and temperate seas (in patches, up to near the top), and in the warm sea coral
+ * reefs — mounds of coral blocks with corals, fans and sea pickles on them; sea pickles here and there.
+ */
+const CORAL_KINDS = ['tube', 'brain', 'bubble', 'fire', 'horn'];
+function seaLife(w, col, x0, z0, top) {
+  const seed = w.seed, {water} = ID;
+  const still = (x, y, z) => getBlock(col, x, y, z) === water;
+  for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    const name = BIOMES[col.biome[z * 16 + x]].name, sea = name.endsWith('ocean'), river = name.endsWith('river');
+    if ((!sea && !river) || name.startsWith('frozen')) continue;
+    let y = Math.min(top, SEA);
+    while (y > MINY && getBlock(col, x, y, z) === water) y--;
+    const g = getBlock(col, x, y, z) & 0xFFF, depth = SEA - y;
+    if (depth < 2 || !still(x, y + 1, z) || ![ID.sand, ID.gravel, ID.dirt, ID.clay, ID.stone].includes(g)) continue;
+    const wx = x0 + x, wz = z0 + z, rnd = hash(seed + 51, wx, wz), rnd2 = hash(seed + 52, wx, wz), patch = w.open.n2(wx * 1.3 + 2000, wz * 1.3);
+    // the warm sea's reefs: in patches, a pillar of one coral's blocks one to four high, a coral or a fan on top
+    if (name === 'warm_ocean' && patch > -0.05 && depth > 3) {
+      const c = CORAL_KINDS[Math.floor(hash(seed + 53, wx >> 2, wz >> 2) * 5)], hgt = 1 + Math.floor(((patch + 0.05) * 3.2 + rnd2) * 1.5);
+      let k = 0;
+      for (; k < Math.min(hgt, depth - 2); k++) setBlock(col, x, y + 1 + k, z, ID[`${c}_coral_block`]);
+      const on = y + 1 + k;
+      if (still(x, on, z) && still(x, on + 1, z)) {
+        if (rnd < 0.3) setBlock(col, x, on, z, ID[`${CORAL_KINDS[Math.floor(rnd2 * 5)]}_coral`]);
+        else if (rnd < 0.55) setBlock(col, x, on, z, ID[`${CORAL_KINDS[Math.floor(rnd2 * 5)]}_coral_fan`]);
+        else if (rnd < 0.6) setBlock(col, x, on, z, withMeta(ID.sea_pickle, Math.floor(rnd2 * 4)));
+      }
+      continue;
+    }
+    // kelp: stems one to ten high (the game's) in patches in the temperate and cold seas (not the warm one), never
+    // reaching the top
+    if (sea && name !== 'warm_ocean' && patch > 0.1 && rnd < 0.32 && depth > 3) {
+      const hgt = Math.min(depth - 1, 1 + Math.floor(rnd2 * 10));
+      for (let k = 1; k < hgt; k++) setBlock(col, x, y + k, z, ID.kelp_plant);
+      setBlock(col, x, y + hgt, z, withMeta(ID.kelp, Math.floor(rnd2 * 16) + 8));
+      continue;
+    }
+    // sea pickles now and then in the warm sea; seagrass everywhere else, tall where it is deep enough
+    if (name === 'warm_ocean' && rnd > 0.985) { setBlock(col, x, y + 1, z, withMeta(ID.sea_pickle, Math.floor(rnd2 * 4))); continue; }
+    if (rnd < (river ? 0.25 : name === 'warm_ocean' ? 0.35 : 0.3)) {
+      if (hash(seed ^ 0x5f3759df, wz, wx) < 0.3 && depth > 2 && still(x, y + 2, z)) { setBlock(col, x, y + 1, z, ID.tall_seagrass); setBlock(col, x, y + 2, z, withMeta(ID.tall_seagrass, 8)); }
+      else setBlock(col, x, y + 1, z, ID.seagrass);
+    }
+  }
+}
 function nearWater(col, x, y, z) {
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const xx = x + dx, zz = z + dz; if (xx < 0 || zz < 0 || xx > 15 || zz > 15) continue; if (getBlock(col, xx, y, zz) === ID.water) return true; }
   return false;

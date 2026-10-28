@@ -187,6 +187,9 @@ const toBlock = list => list.map(({box}) => box.map(px));
 /** The same, kept inside the block (a piston head's arm reaches into the base). */
 const inBlock = list => list.map(({box}) => box.map(v => px(Math.max(0, Math.min(16, v)))));
 
+// sea pickles (one to four) and turtle eggs (one to four), where each stands in its block (1/16): [x0, z0, size, height]
+export const PICKLES = [[[6, 6, 4, 6]], [[3, 3, 4, 6], [9, 9, 4, 4]], [[2, 7, 4, 6], [8, 3, 4, 4], [9, 9, 4, 6]], [[2, 2, 4, 4], [9, 2, 4, 6], [2, 9, 4, 6], [9, 9, 4, 7]]];
+export const EGGS = [[[5, 5, 4, 7]], [[2, 3, 4, 7], [9, 8, 3, 5]], [[2, 3, 4, 7], [9, 8, 3, 5], [8, 2, 3, 4]], [[2, 3, 4, 7], [9, 8, 3, 5], [8, 2, 3, 4], [3, 10, 4, 5]]];
 /**
  * How far a plant that stands off the middle of its block (bamboo) is moved, in 1/16: [x, z], the same all the way up
  * a column (the game's: up to a quarter of a block each way, from the place).
@@ -203,7 +206,8 @@ export function collisionBoxes(v, near = () => 0) {
   const id = v & 0xFFF, meta = v >>> 12, b = BLOCKS[id];
   switch (b.shape) {
     case 'bamboo': { const [ox, oz] = plantOffset(near.x, near.z); return [[px(6.5 + ox), 0, px(6.5 + oz), px(9.5 + ox), 1, px(9.5 + oz)]]; }
-    case 'petals': return null;
+    case 'petals': case 'pickle': case 'fan': return null;
+    case 'eggs': return [[px(1), 0, px(1), px(15), px(7), px(15)]];
     case 'fence': return toBlock(pieces(v, near).filter((p, i) => i === 0 || p.box[1] === 12)).map(q => [q[0], 0, q[2], q[3], 1.5, q[5]]);
     case 'stonewall': return toBlock(pieces(v, near)).map(q => [q[0], 0, q[2], q[3], 1.5, q[5]]);
     case 'carpet': return [[0, 0, 0, 1, px(1), 1]];
@@ -259,6 +263,9 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'wire': return [[0, 0, 0, 1, px(1), 1]];
     case 'bamboo': { const [ox, oz] = plantOffset(near.x, near.z), r = (meta & 3) === 2 ? 5 : 3; return [[px(8 - r + ox), 0, px(8 - r + oz), px(8 + r + ox), 1, px(8 + r + oz)]]; }
     case 'petals': return [[0, 0, 0, 1, px(3), 1]];
+    case 'pickle': { const list = PICKLES[meta & 3]; return [[px(Math.min(...list.map(q => q[0]))), 0, px(Math.min(...list.map(q => q[1]))), px(Math.max(...list.map(q => q[0] + q[2]))), px(Math.max(...list.map(q => q[3]))), px(Math.max(...list.map(q => q[1] + q[2])))]]; }
+    case 'eggs': return [[px(1), 0, px(1), px(15), px(7), px(15)]];
+    case 'fan': return [[px(2), 0, px(2), px(14), px(4), px(14)]];
     case 'rail': return [[0, 0, 0, 1, px(railSlope(BLOCKS[id].rail === 'rail' ? meta : meta & 7) ? 8 : 2), 1]];
     case 'lever': { const [x0, y0, z0, x1, y1, z1] = LEVER_BASE[meta & 7], a = meta & 7; return [(a < 2 ? [4, 0, 4, 12, 7, 12] : a < 4 ? [4, 9, 4, 12, 16, 12] : [Math.min(x0, 16 - x1 === 0 ? 10 : x0), 3, Math.min(z0, 16 - z1 === 0 ? 10 : z0), Math.max(x1, x0 === 0 ? 6 : x1), 13, Math.max(z1, z0 === 0 ? 6 : z1)]).map(px)]; }
     case 'button': case 'plate': case 'repeater': case 'comparator': case 'piston': case 'piston_head': case 'hopper': case 'detector': return inBlock(pieces(v, near));

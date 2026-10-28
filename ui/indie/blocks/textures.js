@@ -1440,6 +1440,100 @@ const boatIcon = (w, chest) => {
 };
 for (const w of Object.keys(BOAT_PLANK)) for (const chest of [false, true]) ITEM_ART[w === 'bamboo' ? (chest ? 'bamboo_chest_raft' : 'bamboo_raft') : `${w}_${chest ? 'chest_boat' : 'boat'}`] = () => boatIcon(w, chest);
 
+// ---------- the sea ----------
+// kelp: the top a crown of leaves, the stem a green-brown stalk with a leaf to each side; seagrass thin blades
+const KELP = ['#5a8a24', '#6a9a2c', '#7aaa36', '#4a7420'];
+const strands = (list, cols, seed) => {
+  const m = mask(); for (const [pts, w] of list) m.curve(pts, w);
+  const p = pic(), n = tileNoise(seed, 4);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (m.m[y * S + x]) p.set(x, y, hex(cols[clamp(Math.floor(n(x, y) * cols.length + (hash(seed, x, y) - 0.5)), 0, cols.length - 1)]));
+  return p;
+};
+BLOCK_ART.kelp = () => strands([[[[8, 16], [7, 9], [9, 2]], 2.2], [[[8, 12], [4, 9], [2, 4]], 1.6], [[[8, 11], [12, 8], [13, 3]], 1.6], [[[8, 7], [6, 4], [6, 0]], 1.3]], KELP, 1001);
+BLOCK_ART.kelp_plant = () => strands([[[[8, 16], [6, 8], [8, 0]], 2.4], [[[7, 12], [3, 10], [1, 6]], 1.5], [[[7, 5], [12, 3], [14, 0]], 1.5]], KELP, 1002);
+ITEM_ART.kelp_item = () => icon([{mask: mask().curve([[4, 14], [5, 7], [10, 2]], 2).curve([[5, 9], [9, 9], [12, 6]], 1.4), color: '#5d8a26', light: '#86b444', dark: '#3f6418', outline: '#1a2a08'}]);
+ITEM_ART.dried_kelp = () => icon([{mask: mask().curve([[3, 13], [6, 6], [12, 3]], 2.4).curve([[6, 10], [10, 10], [13, 7]], 1.6), color: '#3a4a26', light: '#56683a', dark: '#222c16', outline: '#0e1408'}]);
+BLOCK_ART.dried_kelp_side = () => { const p = mottled(1003, ['#2c3a1c', '#334322', '#3a4a26'], {cells: 4, grain: 0.3}); for (const y of [3, 12]) for (let x = 0; x < S; x++) p.set(x, y, hex('#5a5a3a')); return p; };
+BLOCK_ART.dried_kelp_top = () => { const p = mottled(1004, ['#2c3a1c', '#334322', '#3a4a26'], {cells: 4, grain: 0.3}); for (let i = 0; i < S; i++) for (const k of [3, 12]) { p.set(k, i, hex('#5a5a3a')); p.set(i, k, hex('#5a5a3a')); } return p; };
+BLOCK_ART.dried_kelp_bottom = () => mottled(1005, ['#2c3a1c', '#334322', '#3a4a26'], {cells: 4, grain: 0.3});
+const SEAGRASS = ['#3f8a2a', '#4c9a32', '#5aa83a', '#2f6a1e'];
+BLOCK_ART.seagrass = () => strands([[[[3, 16], [2, 10], [4, 3]], 1.3], [[[7, 16], [8, 8], [6, 0]], 1.4], [[[11, 16], [10, 9], [13, 4]], 1.3], [[[14, 16], [15, 12], [13, 8]], 1.1]], SEAGRASS, 1011);
+BLOCK_ART.tall_seagrass_bottom = () => strands([[[[3, 16], [3, 8], [2, 0]], 1.3], [[[8, 16], [7, 8], [8, 0]], 1.5], [[[12, 16], [12, 8], [13, 0]], 1.3]], SEAGRASS, 1012);
+BLOCK_ART.tall_seagrass_top = () => strands([[[[2, 16], [3, 8], [5, 2]], 1.3], [[[8, 16], [9, 7], [7, 0]], 1.4], [[[13, 16], [12, 9], [10, 4]], 1.2]], SEAGRASS, 1013);
+ITEM_ART.seagrass_item = () => icon([{mask: mask().curve([[5, 15], [4, 8], [6, 2]], 1.3).curve([[8, 15], [9, 7], [8, 1]], 1.4).curve([[11, 15], [11, 9], [13, 4]], 1.3), color: '#4c9a32', light: '#7cc44a', dark: '#2f6a1e', outline: '#103008'}]);
+// a sea pickle: its side (a green pickle, darker spots) at the left, its top and its tuft at the right (the boxes take
+// their faces from here)
+BLOCK_ART.sea_pickle = () => {
+  const p = pic();
+  for (let y = 0; y < 6; y++) for (let x = 0; x < 4; x++) p.set(x, y + 4, hex(x === 0 ? '#86a83a' : x === 3 ? '#4a6a1e' : '#6a8a2c'));
+  for (const [x, y] of [[1, 5], [2, 8], [1, 9]]) p.set(x, y, hex('#3e5a18'));
+  for (let y = 0; y < 4; y++) for (let x = 4; x < 8; x++) p.set(x, y, hex(x === 4 || y === 0 ? '#9ab84a' : '#7a9a32'));
+  for (const [x, y] of [[9, 0], [10, 1], [11, 0], [10, 2]]) p.set(x, y, hex('#b4e05a'));
+  return p;
+};
+ITEM_ART.sea_pickle_item = () => icon([{mask: mask().disc(6, 10, 2.4, 3.6).disc(10.5, 9, 2.2, 3.2), color: '#6a8a2c', light: '#9ab84a', dark: '#3e5a18', outline: '#18240a'}], {sparkle: [[6, 6], [10, 5]]});
+// corals: the living colours, the dead grey; the block porous, the coral branching up, the fan spread out flat
+const CORAL = {tube: ['#2f4dbd', '#3e62d8', '#5a7ef0'], brain: ['#c44f8a', '#d8649e', '#ec84b8'], bubble: ['#8f1a99', '#a92bb0', '#c44ac8'], fire: ['#a81f2c', '#c42a35', '#dc4a4f'], horn: ['#c4a92e', '#d8c03c', '#ead45a']};
+const DEAD = ['#7a7570', '#8a8580', '#9a958e'];
+const coralBlock = (cols, seed) => { const p = mottled(seed, cols, {cells: 8, grain: 0.5, smooth: 0.4}), r = rng(seed + 1); for (let k = 0; k < 22; k++) { const x = Math.floor(r() * S), y = Math.floor(r() * S); p.set(x, y, mul(hex(cols[0]), 0.62)); } return p; };
+const coralPlant = (cols, seed) => {
+  const m = mask(), r = rng(seed);
+  m.line(8, 16, 8, 9, 2);
+  for (const [x0, y0, x1, y1] of [[8, 11, 4, 5], [8, 10, 12, 4], [8, 9, 8, 2], [5, 7, 2, 3], [11, 7, 14, 2]]) m.line(x0, y0, x1 + (r() - 0.5) * 2, y1, 1.6);
+  for (const [x, y] of [[4, 4], [12, 3], [8, 1], [2, 2], [14, 1]]) m.disc(x, y, 1.4);
+  const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (m.m[y * S + x]) p.set(x, y, hex(cols[clamp(Math.floor((1 - y / S) * 2.2 + hash(seed, x, y) * 0.9), 0, 2)]));
+  return p;
+};
+const coralFan = (cols, seed) => {
+  const p = pic(), r = rng(seed);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const dx = x + 0.5 - 8, dy = 16 - (y + 0.5), a = Math.atan2(dx, dy), d = Math.hypot(dx, dy);
+    if (d > 7.5 + Math.sin(a * 6) * 0.8 || Math.abs(a) > 1.25) continue;
+    const rib = Math.abs(((a + 1.25) / 2.5 * 7) % 1 - 0.5) < 0.16;
+    if (!rib && hash(seed, x, y) < 0.22) continue;
+    p.set(x, y, hex(cols[rib ? 0 : d > 5 ? 2 : 1]));
+  }
+  return p;
+};
+for (const [c, cols] of Object.entries(CORAL)) {
+  const s0 = nameSeed(c + '_coral');
+  BLOCK_ART[`${c}_coral_block`] = () => coralBlock(cols, s0); BLOCK_ART[`dead_${c}_coral_block`] = () => coralBlock(DEAD, s0);
+  BLOCK_ART[`${c}_coral`] = () => coralPlant(cols, s0 + 1); BLOCK_ART[`dead_${c}_coral`] = () => coralPlant(DEAD, s0 + 1);
+  BLOCK_ART[`${c}_coral_fan`] = () => coralFan(cols, s0 + 2); BLOCK_ART[`dead_${c}_coral_fan`] = () => coralFan(DEAD, s0 + 2);
+}
+// prismarine: blue-green stone, mottled; its bricks; the dark one with dark seams; the sea lantern's glowing panes
+BLOCK_ART.prismarine = () => mottled(1021, ['#5a9c8c', '#63a596', '#6eb0a0', '#7fbfae', '#548f86'], {cells: 4, grain: 0.35, smooth: 0.55});
+BLOCK_ART.prismarine_bricks = () => { const p = mottled(1022, ['#63a99a', '#6cb2a2', '#76baaa'], {cells: 8, grain: 0.3}); for (let x = 0; x < S; x++) for (const y of [0, 7, 8, 15]) p.set(x, y, hex(y % 8 === 0 ? '#9ad4c4' : '#3e7a6c')); for (let y = 0; y < S; y++) for (const x of y < 8 ? [0, 8] : [4, 12]) p.set(x, y, hex('#3e7a6c')); return p; };
+BLOCK_ART.dark_prismarine = () => { const p = mottled(1023, ['#2e4a3e', '#345446', '#3a5c4e'], {cells: 4, grain: 0.3}); for (let i = 0; i < S; i++) for (const k of [0, 15]) { p.set(i, k, hex('#1c3028')); p.set(k, i, hex('#1c3028')); } for (let i = 4; i < 12; i++) { p.set(i, 4, hex('#22382e')); p.set(i, 11, hex('#22382e')); p.set(4, i, hex('#22382e')); p.set(11, i, hex('#22382e')); } return p; };
+BLOCK_ART.sea_lantern = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const edge = x === 0 || y === 0 || x === 15 || y === 15, cross = x === 7 || x === 8 || y === 7 || y === 8; p.set(x, y, hex(edge ? '#8ab4a8' : cross ? '#c8e8e0' : (x + y) % 5 === 0 ? '#f4fffc' : '#dff4ee')); } return p; };
+ITEM_ART.prismarine_shard = () => icon([{mask: mask().poly([[4, 13], [6, 3], [12, 6], [10, 13]]), color: '#63a596', light: '#a6dccd', dark: '#3e7a6c', outline: '#14302a'}]);
+ITEM_ART.prismarine_crystals = () => { const p = icon([{mask: mask().disc(6, 10, 2.6).disc(10.5, 7, 2.4).disc(9, 12, 1.8), color: '#c8ecdf', light: '#ffffff', dark: '#86b4a6', outline: '#2c4a42'}]); for (const [x, y] of [[6, 9], [10, 6]]) p.set(x, y, hex('#ffffff')); return p; };
+ITEM_ART.nautilus_shell = () => icon([{mask: mask().disc(8, 9, 5.4, 5).cut(mask().disc(6.5, 8, 1.6)), color: '#e8d8c4', light: '#fff4e8', dark: '#b89a7a', outline: '#4a3a2a', grain: true}, {mask: mask().curve([[9, 4.5], [12.5, 8], [9, 13]], 1.2), color: '#c8784a', dark: '#8a4a2a'}]);
+ITEM_ART.glow_ink_sac = () => icon([{mask: blob(8, 9, 4.6, 3302), color: '#2f8a8a', light: '#7af0d8', dark: '#1a4a4a', outline: '#062020', grain: true}], {sparkle: [[6, 7], [9, 10]]});
+// buckets with a fish in them: the water bucket, the fish over its water
+const fishBucket = (body, fin) => icon([{mask: mask().poly([[3, 5], [13, 5], [11.5, 14], [4.5, 14]]), color: '#bdbdbd', light: '#e8e8e8', dark: '#7a7a7a', outline: '#2a2a2a'}, {mask: mask().poly([[4.5, 5], [11.5, 5], [11, 7], [5, 7]]), color: '#3f76e4', light: '#7aa6ff', dark: '#2a4fa8'},
+  {mask: mask().disc(8, 9.5, 2.6, 1.6).poly([[10, 9.5], [12, 8], [12, 11]]), color: body, dark: fin, outline: '#1e1e1e'}, {mask: mask().curve([[3, 5], [8, -2], [13, 5]], 1), color: '#8a8a8a', dark: '#4a4a4a'}]);
+ITEM_ART.cod_bucket = () => fishBucket('#b9a27c', '#7c6a4c'); ITEM_ART.salmon_bucket = () => fishBucket('#b64a3a', '#6e2a20');
+ITEM_ART.tropical_fish_bucket = () => fishBucket('#f08a2a', '#b85a10'); ITEM_ART.pufferfish_bucket = () => fishBucket('#e8c838', '#a88a18');
+// the turtle's: a scute (a green shell plate), its shell to wear, its eggs (pale, speckled; cracking as they near hatching)
+ITEM_ART.turtle_scute = () => icon([{mask: mask().poly([[4, 4], [12, 4], [14, 9], [8, 14], [2, 9]]), color: '#4a9a3a', light: '#7cc45a', dark: '#2e6a22', outline: '#102a0c'}]);
+ITEM_ART.turtle_helmet = () => icon([{mask: mask().poly([[2, 10], [3, 5], [8, 2.5], [13, 5], [14, 10], [12, 11], [12, 8], [4, 8], [4, 11]]), color: '#4a9a3a', light: '#7cc45a', dark: '#2e6a22', outline: '#102a0c'}], {sparkle: [[6, 4]]});
+const eggs = (crack, seed) => {
+  const p = pic(), r = rng(seed);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, hex(hash(seed, x, y) < 0.18 ? '#c8c08a' : '#eee8cc'));
+  for (let k = 0; k < 10; k++) p.set(Math.floor(r() * S), Math.floor(r() * S), hex('#7a9a6a'));
+  for (let k = 0; k < crack * 6; k++) { const x = 2 + Math.floor(r() * 12), y = 2 + Math.floor(r() * 12); p.set(x, y, hex('#6a6450')); p.set(x + 1, y + 1, hex('#6a6450')); }
+  return p;
+};
+BLOCK_ART.turtle_egg = () => eggs(0, 1031); BLOCK_ART.turtle_egg_slightly_cracked = () => eggs(1, 1031); BLOCK_ART.turtle_egg_very_cracked = () => eggs(2, 1031);
+ITEM_ART.turtle_egg_item = () => icon([{mask: mask().disc(8, 9, 4, 5), color: '#eee8cc', light: '#ffffff', dark: '#b8b08a', outline: '#4a4630'}], {sparkle: [[6, 7]]});
+for (const [k, [a, b]] of Object.entries({squid: ['#223b4d', '#708899'], glow_squid: ['#095656', '#85f1bc'], cod: ['#c1a76a', '#e5c48b'], salmon: ['#a00f10', '#0e8474'], tropical_fish: ['#ef6915', '#fff9ef'],
+  pufferfish: ['#f6b201', '#37c3f2'], turtle: ['#e7e7e7', '#00afaf']})) ITEM_ART[`${k}_spawn_egg`] = () => {
+  const p = icon([{mask: mask().disc(8, 9, 4.6, 5.8), color: a, light: toHex(mix(hex(a), [255, 255, 255], 0.35)), dark: toHex(mul(hex(a), 0.62)), outline: '#1a1a1a'}]), r = rng(nameSeed(k));
+  for (let n = 0; n < 9; n++) { const x = 5 + Math.floor(r() * 7), y = 5 + Math.floor(r() * 8); if (p.alpha(x, y) && p.alpha(x + 1, y)) { p.set(x, y, hex(b)); if (r() < 0.6) p.set(x + 1, y, mul(hex(b), 0.85)); } }
+  return p;
+};
+
 /** Frames per animated texture and ticks per frame. */
 export const ANIMATED = {water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};
 /** Our drawing of a texture by name: {w, h, frames: [Uint8ClampedArray], time} or null when we have none. */
