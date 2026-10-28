@@ -30,8 +30,8 @@ const bookSale = r => {
 /** The professions: zh, the work block, and per level the trades it may offer. */
 export const PROFESSIONS = {
   farmer: {zh: '农民', block: 'composter', levels: [
-    [T([S('wheat', 20)], E(1)), T([S('potato', 26)], E(1)), T([S('carrot', 22)], E(1)), T([E(1)], S('bread', 6))],
-    [T([S('pumpkin', 6)], E(1), 12), T([E(1)], S('apple', 4))],
+    [T([S('wheat', 20)], E(1)), T([S('potato', 26)], E(1)), T([S('carrot', 22)], E(1)), T([S('beetroot', 15)], E(1)), T([E(1)], S('bread', 6))],
+    [T([S('pumpkin', 6)], E(1), 12), T([E(1)], S('pumpkin_pie', 4)), T([E(1)], S('apple', 4))],
     [T([S('melon', 4)], E(1), 12), T([E(1)], S('baked_potato', 6))],
     [T([E(1)], S('golden_carrot', 1), 12), T([S('melon_slice', 18)], E(1))],
     [T([E(3)], S('golden_carrot', 3), 12), T([E(4)], S('glistering_melon_slice', 3), 12)],
@@ -69,12 +69,12 @@ export const PROFESSIONS = {
     [T([S('gold_ingot', 3)], E(1), 12), T([E(1)], S('lapis_lazuli', 1), 12)],
     [T([E(4)], S('glowstone', 1), 12), T([S('spider_eye', 12)], E(1))],
     [T([S('glass_bottle', 9)], E(1), 12), T([S('blaze_powder', 4)], E(1), 12)],
-    [T([S('nether_wart', 22)], E(1), 12), T([E(5)], {id: 'potion', n: 1, pot: 'healing'}, 12)],
+    [T([S('nether_wart', 22)], E(1), 12), T([E(5)], {id: 'potion', n: 1, pot: 'healing'}, 12), T([E(3)], S('experience_bottle', 1), 12)],
   ]},
   armorer: {zh: '盔甲匠', block: 'blast_furnace', levels: [
     [T([S('coal', 15)], E(1)), T([E(5)], S('iron_leggings'), 12), T([E(4)], S('iron_boots'), 12), T([E(5)], S('iron_helmet'), 12), T([E(9)], S('iron_chestplate'), 12)],
-    [T([S('iron_ingot', 4)], E(1), 12), T([E(36)], S('bell'), 12)],
-    [T([S('lava_bucket', 1)], E(1), 12), T([S('diamond', 1)], E(1), 12)],
+    [T([S('iron_ingot', 4)], E(1), 12), T([E(36)], S('bell'), 12), T([E(1)], S('chainmail_boots'), 12), T([E(3)], S('chainmail_leggings'), 12)],
+    [T([S('lava_bucket', 1)], E(1), 12), T([S('diamond', 1)], E(1), 12), T([E(1)], S('chainmail_helmet'), 12), T([E(4)], S('chainmail_chestplate'), 12)],
     [enchantedSale('diamond_leggings', 14), enchantedSale('diamond_boots', 8)],
     [enchantedSale('diamond_helmet', 8), enchantedSale('diamond_chestplate', 16)],
   ]},

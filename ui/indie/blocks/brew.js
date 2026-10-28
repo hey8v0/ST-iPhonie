@@ -15,6 +15,8 @@ export const EFFECTS = {
   water_breathing: {zh: '水下呼吸', color: 0x98DAC0, good: true},
   night_vision: {zh: '夜视', color: 0xC2FF66, good: true},
   invisibility: {zh: '隐身', color: 0xF6F6F6, good: true},
+  absorption: {zh: '伤害吸收', color: 0x2552A5, good: true},
+  resistance: {zh: '抗性提升', color: 0x99453A, good: true},
   instant_health: {zh: '瞬间治疗', color: 0xF82423, good: true, instant: true},
   instant_damage: {zh: '瞬间伤害', color: 0xA9656A, good: false, instant: true},
 };

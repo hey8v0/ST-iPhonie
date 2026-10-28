@@ -426,7 +426,7 @@ export function ownVillager(prof) {
 export const VILLAGER_SKINS = Object.keys(VILLAGER_CLOTHES);
 export const MOB_KINDS =Object.keys(MODELS).filter(k => k !== 'sheep_wool' && k !== 'player');
 // our armour pictures, one per material and layer (1: helmet, chestplate, boots; 2: leggings), only where it is worn
-const ARMOR_PAL = {leather: ['#8f5530', '#9c5e36', '#a8683c', '#7e4a29'], iron: ['#c6c6c6', '#d4d4d4', '#b8b8b8', '#e2e2e2'],
+const ARMOR_PAL = {leather: ['#8f5530', '#9c5e36', '#a8683c', '#7e4a29'], chainmail: ['#8a8a8a', '#a2a2a2', '#6e6e6e', '#b8b8b8'], iron: ['#c6c6c6', '#d4d4d4', '#b8b8b8', '#e2e2e2'],
   golden: ['#e9c33a', '#f2d24e', '#d9ae2a', '#fae27a'], diamond: ['#4fd1cb', '#62e0d9', '#3fbcb6', '#8ff0ea']};
 export function ownArmor(mat, layer) {
   return skin(64, 32, layer === 1 ? 31 : 32, ({px, area, box, front}) => {

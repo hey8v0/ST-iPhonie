@@ -22,7 +22,7 @@ import {seedOf} from './noise.js';
 import {runCommand, DIFFICULTIES, defaultRules} from './commands.js';
 import {spawnPoint, BIOMES} from './gen.js';
 import {findFrame, portalFill, across, nearestPortal, SEARCH} from './portal.js';
-import {applyPotion, effectsTick, speedFactor, hitBonus, EFFECTS, levelName, brewTick, swirlColor, potionColor} from './brew.js';
+import {applyPotion, addEffect, effectsTick, speedFactor, hitBonus, EFFECTS, levelName, brewTick, swirlColor, potionColor} from './brew.js';
 
 const $ = s => document.querySelector(s);
 const app = $('#app'), canvas = $('#view'), hud = $('#hud'), invRoot = $('#inv');
@@ -127,6 +127,7 @@ const HUD_PICS = {
   air: sprite9(AIR, {o: '#0a2a5a', B: '#3a8ee8', W: '#cfe8ff'}),
   armorFull: sprite9(VEST, {o: '#141414', S: '#d6d6d6', W: '#ffffff'}), armorHalf: sprite9(half(VEST, true), {o: '#141414', S: '#d6d6d6', W: '#ffffff', E: '#3c3c3c'}),
   armorEmpty: sprite9(VEST, {o: '#141414', S: '#3c3c3c', W: '#3c3c3c'}),
+  absorbFull: sprite9(HEART, {o: '#1f1503', R: '#e6b422', W: '#fff3a0'}), absorbHalf: sprite9(half(HEART, true), {o: '#1f1503', R: '#e6b422', W: '#fff3a0', E: '#3a2a08'}),
 };
 const picUrl = c => c.toDataURL();
 const HUD_URL = Object.fromEntries(Object.entries(HUD_PICS).map(([k, c]) => [k, picUrl(c)]));
@@ -198,7 +199,7 @@ function startWorld(meta) {
   G.enchSeed = start.enchSeed ?? Math.floor(Math.random() * 2 ** 31); G.bobber = null;
   // which world this is (the overworld or the Nether), the potion effects on the player, potions in flight, and the
   // portal: how long they have stood in one (not again till they step out after coming through)
-  G.dim = meta.dim === 'nether' ? 'nether' : 'overworld'; G.effects = start.effects || {}; G.thrown = [];
+  G.dim = meta.dim === 'nether' ? 'nether' : 'overworld'; G.effects = start.effects || {}; G.absorb = start.absorb || 0; G.thrown = [];
   G.inPortal = 0; G.portalBlocked = meta.arrive ? 'wait' : false; G.portalWaitT = 0; G.arriving = false; G.leaving = false;
   ents.loadOrbs(meta.orbs);
   G.mobs = new Mobs({
@@ -306,7 +307,7 @@ async function saveGame() {
   if (!G || !G.ready) return;
   const b = G.body, m = G.meta;
   Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, dim: G.dim, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], bed: G.bedPos, weather: G.weather,
-    player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total, enchSeed: G.enchSeed, effects: G.effects}});
+    player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total, enchSeed: G.enchSeed, effects: G.effects, absorb: G.absorb || 0}});
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   // the worker writes the changed columns; this waits till it has (or three seconds)
   const g = G;
@@ -330,7 +331,7 @@ function respawn() {
     if (!G.mirror.has(x, z) || G.dim === 'nether' || BLOCKS[G.mirror.get(x, y, z) & 0xFFF]?.shape === 'bed') p = {x: x + 0.5, y: y + 0.6, z: z + 0.5};
     else { G.bedPos = null; toast('你的床不见了，回到了世界出生点'); }
   }
-  Object.assign(G, {health: 20, food: 20, sat: 5, exh: 0, air: 300, dead: false, effects: {}});
+  Object.assign(G, {health: 20, food: 20, sat: 5, exh: 0, air: 300, dead: false, effects: {}, absorb: 0});
   b.dead = false;
   if (G.dim === 'nether') { G.meta.arrive = null; switchWorld('overworld', p); return; }
   Object.assign(b, {x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0, fall: 0});
@@ -370,7 +371,7 @@ async function switchWorld(to, pos) {
   await saveGame();
   const here = {tiles: m.tiles, items: m.items, orbs: m.orbs, mobs: m.mobs, herds: m.herds}, there = m.away || {};
   Object.assign(m, {away: here, dim: to, tiles: there.tiles || {}, items: there.items || [], orbs: there.orbs || [], mobs: there.mobs || [], herds: there.herds || []});
-  m.player = {...m.player, x: pos.x, y: pos.y, z: pos.z, flying: false, health: G.health, food: G.food, sat: G.sat, effects: G.effects};
+  m.player = {...m.player, x: pos.x, y: pos.y, z: pos.z, flying: false, health: G.health, food: G.food, sat: G.sat, effects: G.effects, absorb: G.absorb || 0};
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   G.worker.terminate(); renderer.clearAll(); renderer.clearLod();
   play('travel');
@@ -415,29 +416,62 @@ function portalTick() {
 function drink(s) {
   applyPotion(G.effects, s.pot, {heal: n => { G.health = Math.min(20, G.health + n); }, harm: n => hurt(n, '被魔法杀死了', null, 'magic')});
   // the empty bottle stays in the hand
-  if (G.mode !== 'creative') { useUp(); const empty = {id: 'glass_bottle', n: 1}, left = G.inv.slots[G.hot] ? G.inv.add(empty) : (G.inv.slots[G.hot] = empty, null); if (left) G.ents.drop(left, G.body.x, G.body.y + 1, G.body.z); }
+  if (G.mode !== 'creative') { useUp(); handBack({id: 'glass_bottle', n: 1}); }
   play('burp'); drawHud(true); drawEffects();
 }
-/** A splash potion thrown the way the player looks. */
-function throwPotion(s) {
-  const d = G.body.look(), eye = eyePos();
-  G.thrown.push({x: eye[0] + d[0] * 0.3, y: eye[1] - 0.1, z: eye[2] + d[2] * 0.3, vx: d[0] * 0.5, vy: d[1] * 0.5 + 0.1, vz: d[2] * 0.5, s: {...s, n: 1}, age: 0});
+/** What is left of a thing used up (a bottle, a bowl, a bucket): in the hand if that is empty now, else in the bag (or it falls). */
+function handBack(stack) {
+  const left = G.inv.slots[G.hot] ? G.inv.add(stack) : (G.inv.slots[G.hot] = stack, null);
+  if (left) G.ents.drop(left, G.body.x, G.body.y + 1, G.body.z);
+}
+/** Milk: every effect gone (the golden hearts too); the empty bucket stays in the hand. */
+function drinkMilk() {
+  for (const k of Object.keys(G.effects)) delete G.effects[k];
+  G.absorb = 0;
+  if (G.mode !== 'creative') { useUp(); handBack({id: 'bucket', n: 1}); }
+  play('burp'); drawHud(true); drawEffects();
+}
+/** An effect from food (a golden apple's); 伤害吸收 gives its golden hearts at once (two a level). */
+function giveEffect(id, amp, ticks) {
+  addEffect(G.effects, id, amp, ticks);
+  if (id === 'absorption') G.absorb = Math.max(G.absorb || 0, 4 * (amp + 1));
+  drawEffects();
+}
+// how fast each thrown thing leaves the hand, how much it rises over the aim, and how fast it falls (the game's, a tick)
+const THROWN = {splash_potion: [0.5, 0.1, 0.05], experience_bottle: [0.7, 0.2, 0.07], snowball: [1.5, 0, 0.03], egg: [1.5, 0, 0.03]};
+/** Something thrown the way the player looks: a splash potion, a bottle o' enchanting, a snowball, an egg. */
+function throwItem(s) {
+  const d = G.body.look(), eye = eyePos(), [speed, up, g] = THROWN[s.id] || THROWN.snowball;
+  G.thrown.push({x: eye[0] + d[0] * 0.3, y: eye[1] - 0.1, z: eye[2] + d[2] * 0.3, vx: d[0] * speed, vy: d[1] * speed + up, vz: d[2] * speed, g, s: {...s, n: 1}, age: 0});
   G.swing = 6; play('throw');
 }
-/** Thrown potions fly (falling a little), and break on a block or a mob: everyone within four blocks gets their share. */
+/** Thrown things fly (falling a little), and land on a block or a mob. */
 function thrownTick() {
   for (let i = G.thrown.length - 1; i >= 0; i--) {
     const p = G.thrown[i];
-    p.vy -= 0.05; p.vx *= 0.99; p.vy *= 0.99; p.vz *= 0.99;
+    p.vy -= p.g ?? 0.05; p.vx *= 0.99; p.vy *= 0.99; p.vz *= 0.99;
     const len = Math.hypot(p.vx, p.vy, p.vz) || 1, hit = raycast(G.mirror, p.x, p.y, p.z, p.vx / len, p.vy / len, p.vz / len, len, false, true);
     const mob = G.mobs.raycast(p.x, p.y, p.z, p.vx / len, p.vy / len, p.vz / len, len);
     if (hit || mob || ++p.age > 200) {
-      const t = mob && (!hit || mob.t < hit.t) ? mob.t : hit ? hit.t : len;
-      splash(p.x + p.vx / len * t, p.y + p.vy / len * t, p.z + p.vz / len * t, p.s.pot);
+      const onMob = mob && (!hit || mob.t < hit.t), t = onMob ? mob.t : hit ? hit.t : len;
+      landed(p, p.x + p.vx / len * t, p.y + p.vy / len * t, p.z + p.vz / len * t, onMob ? mob.mob : null);
       G.thrown.splice(i, 1); continue;
     }
     p.x += p.vx; p.y += p.vy; p.z += p.vz;
   }
+}
+/**
+ * Where a thrown thing comes down: a splash potion breaks over everyone within four blocks; a bottle o' enchanting
+ * leaves 3–11 experience; a snowball or an egg breaks into bits, knocking a mob it hit back unhurt (a snowball hurts a
+ * blaze); an egg hatches a chick one time in eight (four chicks one time in 32 of those).
+ */
+function landed(p, x, y, z, mob) {
+  const id = p.s.id;
+  if (id === 'splash_potion') { splash(x, y, z, p.s.pot); return; }
+  if (id === 'experience_bottle') { G.ents.puff(x, y, z, 'shatter', 0x5a8cff); soundAt('glass', x, y, z); G.ents.xp(3 + Math.floor(Math.random() * 5) + Math.floor(Math.random() * 5), x, y + 0.2, z); return; }
+  G.ents.crumbs(x, y, z, id);
+  if (mob) G.mobs.hurt(mob, id === 'snowball' && mob.kind === 'blaze' ? 3 : 0, {x: x - p.vx, z: z - p.vz, player: true});
+  if (id === 'egg' && Math.random() < 1 / 8) for (let k = Math.random() < 1 / 32 ? 4 : 1; k > 0; k--) G.mobs.add('chicken', x, y, z, {baby: true});
 }
 function splash(x, y, z, pot) {
   G.ents.puff(x, y, z, 'shatter', potionColor(pot)); soundAt('glass', x, y, z);
@@ -484,13 +518,28 @@ const commandCtx = () => ({
   teleport: (x, y, z) => { const b = G.body; Object.assign(b, {x, y, z, vx: 0, vy: 0, vz: 0, fall: 0}); b.prev = {x, y, z}; },
   kill: () => { const m = G.mode; G.mode = 'survival'; G.invuln = 0; hurt(1000, '自杀了', null, 'void'); if (!G.dead) G.mode = m; },
   summon: (kind, x, y, z) => { G.mobs.add(kind, x, y, z); },
-  effect: (id, secs, amp) => { G.effects[id] = {amp, t: Math.round(secs * 20)}; drawEffects(); },
-  clearEffects: () => { G.effects = {}; drawEffects(); },
+  effect: (id, secs, amp) => { G.effects[id] = {amp, t: Math.round(secs * 20)}; if (id === 'absorption') G.absorb = Math.max(G.absorb || 0, 4 * (amp + 1)); drawEffects(); drawHud(true); },
+  clearEffects: () => { G.effects = {}; G.absorb = 0; drawEffects(); drawHud(true); },
   clear: () => { let n = 0; for (let i = 0; i < G.inv.slots.length; i++) if (G.inv.slots[i]) { n += G.inv.slots[i].n; G.inv.slots[i] = null; } drawHud(true); return n; },
   addXp: (n, levels) => { if (levels) G.xp.level = Math.max(0, G.xp.level + n); else gainXp(n); drawHud(true); },
   setSpawn: () => { const b = G.body; G.spawn = {x: b.x, y: b.y, z: b.z}; },
   get seed() { return G.meta.seedText ?? G.meta.seed; },
   get rules() { return rules(); }, setRule: (k, on) => { rules()[k] = on; },
+  // /setblock and /fill: only in land that is loaded, inside the world's height; what a block kept goes with it
+  setBlocks: (list, keep) => {
+    if (list.some(([x, y, z]) => y < MINY || y >= MINY + HEIGHT)) return '那里出了世界的高度';
+    if (list.some(([x, y, z]) => !G.mirror.has(x, z))) return '那里还没加载';
+    let n = 0;
+    for (const [x, y, z, name] of list) {
+      const was = G.mirror.get(x, y, z), v = ID[name] || 0;
+      if ((keep && was) || was === v) continue;
+      delete G.tiles[`${x},${y},${z}`];
+      setBlock(x, y, z, v); makeTile(x, y, z, BLOCKS[v]); n++;
+      // a door comes with its upper half (where there is room)
+      if (BLOCKS[v].shape === 'door' && y + 1 < MINY + HEIGHT && !G.mirror.get(x, y + 1, z)) setBlock(x, y + 1, z, withMeta(v, 8));
+    }
+    return n;
+  },
 });
 /** The chat bar (T, or / to start a command): what is typed is run as a command; the answers show over the game. */
 let chatEl = null;
@@ -566,13 +615,17 @@ function environment(time) {
   let roll = Math.imul(morning ^ (G?.meta?.seed || 0), 0x2c1b3c6d) ^ 0x297a2d39; roll = (Math.imul(roll ^ (roll >>> 15), 0x85ebca6b) >>> 0) / 4294967296;
   const lies = tod >= 22500 ? Math.min(1, (tod - 22500) / 1000) : tod < 3500 ? Math.min(1, (3500 - tod) / 2500) : 0;
   const mist = roll < 0.5 ? (0.45 + roll * 1.1) * lies * (1 - rain) : 0;
+  // a rainbow for two minutes after a real rain has stopped (coming in over ten seconds, going over the last forty),
+  // while the sun is up; where it shows is the sky's affair (round the point opposite the sun, so not at noon)
+  const bowAge = G?.bowAt != null ? time - G.bowAt : 1e9, ease = (x, a, b) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const rainbow = bowAge >= 0 && bowAge < 2400 ? ease(bowAge, 0, 200) * (1 - ease(bowAge, 1600, 2400)) * Math.max(0, Math.min(1, el * 5)) * (1 - rain) : 0;
   return {
     daylight: dayLit, skyTop: top, horizon, fog: horizon, glow: [1, 0.48, 0.18], glowAmt, sunAngle: a, sunDir: [Math.cos(a), el, 0], stars: Math.max(0, 1 - day * 1.6) * (1 - rain),
     skyLight: lerp([0.62, 0.68, 0.95], [1, 1, 1], dayLit).map((v, i) => v * (1 - glowAmt * 0.15 * (i === 2 ? 1 : 0))),
     cloudColor: lerp([0.08, 0.09, 0.13], [1, 1, 1], day).map(v => v * (1 - rain * 0.45)), moonPhase: Math.floor(time / 24000) % 8, cloudShift: time * 0.03, sunMoon: 1 - rain,
     gamma: settings.gamma, wave: settings.wave, clouds: settings.clouds, time: performance.now() / 1000, flicker: 0.92 + Math.sin(performance.now() / 90) * 0.03 + Math.sin(performance.now() / 37) * 0.02,
     // for 光影: the storm, a lightning flash, and a snowy place (the aurora at night)
-    thunder, flash: !!flash, cold: !!b?.cold, mist,
+    thunder, flash: !!flash, cold: !!b?.cold, mist, wet: G?.wet || 0, rainbow,
   };
 }
 
@@ -614,6 +667,38 @@ function weatherTick() {
   // the hiss of rain, quieter under a roof
   const b = G.body, open = G.mirror.light(Math.floor(b.x), Math.floor(b.y + b.eye), Math.floor(b.z))[0] >= 14;
   setRain(fallsAt(Math.floor(b.x), Math.floor(b.z)) === 'rain' ? w.rain * (open ? 1 : 0.3) : 0);
+  // how wet the ground is (光影: the puddles): wetting over half a minute of rain, drying over two minutes after it;
+  // not where it snows or never rains
+  const here = BIOMES[G.mirror.biome(Math.floor(b.x), Math.floor(b.z))], wetTo = here?.dry || here?.cold ? 0 : w.rain, wet = G.wet || 0;
+  G.wet = wetTo > wet ? Math.min(wetTo, wet + 1 / 600) : Math.max(wetTo, wet - 1 / 2400);
+  // a rainbow when a real rain has stopped
+  if (w.rain >= 0.5 && fallsAt(Math.floor(b.x), Math.floor(b.z)) === 'rain') G.rained = true;
+  if (G.rained && w.rain < 0.15) { G.rained = false; G.bowAt = G.time; }
+  if (w.rain > 0.2) raindrops(Math.round(w.rain * (6 + w.thunder * 3)));
+}
+/**
+ * Raindrops landing round the player (the game's rain splashes): n places within ten blocks where rain reaches the
+ * ground, a few drops jumping off the top of what is there (off water a lighter splash; plants let it through).
+ */
+function raindrops(n) {
+  const bx = Math.floor(G.body.x), bz = Math.floor(G.body.z);
+  for (let tries = n * 3; n > 0 && tries > 0; tries--) {
+    const x = bx + Math.floor((Math.random() * 2 - 1) * 10), z = bz + Math.floor((Math.random() * 2 - 1) * 10);
+    if (!G.mirror.has(x, z) || fallsAt(x, z) !== 'rain') continue;
+    let y = topAt(x, z) - 1;
+    if (Math.abs(y - G.body.y) > 20) continue;
+    for (let k = 0; k < 4 && y > MINY; k++, y--) {
+      const v = G.mirror.get(x, y, z), id = v & 0xFFF;
+      if (!v) continue;
+      if (id === ID.water) { G.ents.drip(x + Math.random(), y + 0.88, z + Math.random(), true); break; }
+      const boxes = collisionBoxes(v);
+      if (!boxes?.length) continue;
+      const fx = Math.random(), fz = Math.random(), top = Math.max(...boxes.map(q => q[4]));
+      G.ents.drip(x + fx, y + Math.min(1, top), z + fz, false);
+      break;
+    }
+    n--;
+  }
 }
 /** A lightning strike: a bolt, a flash, thunder; what is within three blocks is hit. */
 function strike(x, y, z) {
@@ -738,11 +823,15 @@ function placeFrom(t, stack) {
     if (boxes && boxes.some(q => x + q[0] < x1 && x + q[3] > x0 && y + q[1] < y1 && y + q[4] > y0 && z + q[2] < z1 && z + q[5] > z0)) return false;
   }
   setBlock(x, y, z, v);
+  makeTile(x, y, z, b);
+  play('place', v);
+  return true;
+}
+/** What a block keeps of its own (a furnace's fire, a chest's things), made when it is put down. */
+function makeTile(x, y, z, b) {
   if (b?.use === 'furnace') G.tiles[`${x},${y},${z}`] = {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0};
   if (b?.use === 'chest') G.tiles[`${x},${y},${z}`] = {kind: 'chest', slots: new Array(27).fill(null)};
   if (b?.use === 'enchant') G.tiles[`${x},${y},${z}`] = {kind: 'enchant'};
-  play('place', v);
-  return true;
 }
 /** The use action (right click / tap / LT) on what is aimed at: a mob (feed, shear; a tap on a phone hits), or a block. */
 function use(t, mob = null) {
@@ -755,6 +844,13 @@ function use(t, mob = null) {
     if (info?.tool?.kind === 'shears' && mob.kind === 'sheep' && !mob.sheared && !mob.baby) {
       mob.sheared = true; const n = 1 + Math.floor(Math.random() * 3);
       G.ents.drop({id: `${mob.color || 'white'}_wool`, n}, mob.x, mob.y + 1, mob.z); wearTool(); play('shear'); return;
+    }
+    // a spawn egg on a mob of its kind: a young one
+    if (info?.spawn) { if (info.spawn === mob.kind && MOBS[mob.kind].passive) { G.mobs.add(mob.kind, mob.x, mob.y, mob.z, {baby: true}); useUp(); } return; }
+    // a bucket on a cow: milk (in creative the empty bucket stays, and the milk comes as well)
+    if (s?.id === 'bucket' && mob.kind === 'cow' && !mob.baby) {
+      if (G.mode !== 'creative') { useUp(); handBack({id: 'milk_bucket', n: 1}); } else if (!G.inv.slots.some(x => x?.id === 'milk_bucket')) G.inv.add({id: 'milk_bucket', n: 1});
+      play('splash'); drawHud(true); return;
     }
     // a villager with work trades (one without, or a child, shakes its head)
     if (mob.kind === 'villager' && !info?.drink && !info?.thrown) {
@@ -784,16 +880,17 @@ function use(t, mob = null) {
   }
   // bone meal, a lighter on TNT
   if (t && info?.meal) {
-    const id = t.v & 0xFFF, grows = (['wheat', 'carrots', 'potatoes'].includes(b.name) && (t.v >>> 12) < 7) || b.name.endsWith('_sapling') || (id === ID.grass_block && !G.mirror.get(t.x, t.y + 1, t.z))
+    const id = t.v & 0xFFF, grows = (['wheat', 'carrots', 'potatoes', 'beetroots'].includes(b.name) && (t.v >>> 12) < 7) || b.name.endsWith('_sapling') || (id === ID.grass_block && !G.mirror.get(t.x, t.y + 1, t.z))
       || (id === ID.cocoa && (t.v >>> 12) >> 2 < 2) || ((id === ID.short_grass || id === ID.fern) && !G.mirror.get(t.x, t.y + 1, t.z)) || ['sunflower', 'lilac', 'rose_bush', 'peony'].includes(b.name);
     if (grows) { G.worker.postMessage({type: 'meal', x: t.x, y: t.y, z: t.z}); useUp(); G.ents.puff(t.x + 0.5, t.y + 1, t.z + 0.5, 'meal'); play('meal'); }
     return;
   }
   if (t && info?.tool?.kind === 'fire') { if (b.name === 'tnt') { setBlock(t.x, t.y, t.z, 0); G.mobs.light(t.x, t.y, t.z); } else lightPortal(t); play('ignite'); wearTool(); return; }
-  if (info?.food && G.mode !== 'creative' && G.food < 20) { G.eating = 32; return; }
+  // food when hungry (a golden apple any time, in creative too)
+  if (info?.food && ((G.mode !== 'creative' && G.food < 20) || info.always)) { G.eating = 32; return; }
   // a potion is drunk (as long as eating takes), a splash potion thrown
   if (info?.drink) { G.eating = 32; return; }
-  if (info?.thrown) { throwPotion(s); useUp(); return; }
+  if (info?.thrown) { throwItem(s); useUp(); return; }
   // a glass bottle fills at water
   if (s?.id === 'glass_bottle') {
     const eye = eyePos(), dir = aimDir(), lt = raycast(G.mirror, eye[0], eye[1], eye[2], dir[0], dir[1], dir[2], reach(), true);
@@ -820,6 +917,17 @@ function use(t, mob = null) {
     }
   }
   if (!t) return;
+  // a spawn egg: its mob on the block aimed at (no monsters on peaceful)
+  if (info?.spawn) {
+    if (MOBS[info.spawn].hostile && difficulty() === 'peaceful') return;
+    const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face], on = b.replace;
+    G.mobs.add(info.spawn, (on ? t.x : t.x + nx) + 0.5, on ? t.y : t.y + ny, (on ? t.z : t.z + nz) + 0.5); useUp();
+    return;
+  }
+  // an axe takes the bark off a log or wood (it keeps lying the same way)
+  if (info?.tool?.kind === 'axe' && /_(log|wood)$/.test(b.name) && !b.name.startsWith('stripped_') && ID[`stripped_${b.name}`] !== undefined) {
+    setBlock(t.x, t.y, t.z, withMeta(ID[`stripped_${b.name}`], t.v >>> 12)); wearTool(); play('place', t.v); return;
+  }
   // a hoe makes farmland
   if (info?.tool?.kind === 'hoe' && t.face === 2 && ['grass_block', 'dirt'].includes(b.name) && !G.mirror.get(t.x, t.y + 1, t.z)) { setBlock(t.x, t.y, t.z, ID.farmland); wearTool(); play('place', ID.dirt); return; }
   // a shovel makes a path
@@ -912,8 +1020,9 @@ function sleepIn(t) {
 // what the composter takes and how likely each one fills it a level (the game's chances)
 const COMPOST = {wheat_seeds: 0.3, short_grass: 0.3, sugar_cane: 0.5, cactus: 0.5, melon_slice: 0.5, wheat: 0.65, carrot: 0.65, potato: 0.65, apple: 0.65, pumpkin: 0.65, melon: 0.65, fern: 0.65,
   nether_wart: 0.65, red_mushroom: 0.65, brown_mushroom: 0.65, bread: 0.85, baked_potato: 0.85, hay_block: 0.85,
-  vine: 0.5, tall_grass: 0.5, large_fern: 0.65, cocoa_beans: 0.65, sunflower: 0.65, lilac: 0.65, rose_bush: 0.65, peony: 0.65, cookie: 0.85};
-const compostable = id => COMPOST[id] ?? (/_leaves$|_sapling$/.test(id) ? 0.3 : /^(dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley)$/.test(id) ? 0.65 : 0);
+  vine: 0.5, tall_grass: 0.5, large_fern: 0.65, cocoa_beans: 0.65, sunflower: 0.65, lilac: 0.65, rose_bush: 0.65, peony: 0.65, cookie: 0.85,
+  beetroot_seeds: 0.3, beetroot: 0.65, pumpkin_pie: 1};
+const compostable = id => COMPOST[id] ?? (/_leaves$|_sapling$/.test(id) ? 0.3 : /^(dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|(red|orange|white|pink)_tulip)$/.test(id) ? 0.65 : 0);
 /** The composter: what is held goes in (a chance of a level); full, it gives bone meal. */
 function compost(t) {
   const level = t.v >>> 12, s = held();
@@ -983,7 +1092,11 @@ function hurt(n, why, from = null, kind = 'hit') {
     const {points, tough} = G.inv.armor();
     if (points) { wearArmor(n); n = throughArmor(n, points, tough); }
   }
+  // 抗性提升: a fifth less a level (not falling out of the world, nor hunger)
+  if (G.effects.resistance && kind !== 'void' && kind !== 'starve') n *= Math.max(0, 1 - 0.2 * (G.effects.resistance.amp + 1));
   n *= protectionFactor(worn, kind);
+  // 伤害吸收: the golden hearts go first
+  if (G.absorb > 0) { const soak = Math.min(G.absorb, n); G.absorb -= soak; n -= soak; }
   if (kind === 'hit' && from?.def) for (const s of worn) { const l = enchOf(s, 'thorns'); if (l && Math.random() < 0.15 * l) G.mobs.hurt(from, 1 + Math.floor(Math.random() * 4), {x: G.body.x, z: G.body.z, player: true}); }
   G.health = Math.max(0, G.health - n); G.hurtT = 10; G.exh += 0.1;
   if (from) { const b = G.body, a = Math.atan2(b.x - from.x, b.z - from.z); b.vx += Math.sin(a) * 0.4; b.vz += Math.cos(a) * 0.4; if (b.onGround) b.vy = 0.36; }
@@ -1087,12 +1200,15 @@ function eatTick() {
   const s = held(), info = s && itemInfo(s.id);
   if (!info?.food && !info?.drink) { G.eating = 0; return; }
   if (G.eating % 4 === 0) play(info.drink ? 'drink' : 'eat');
-  if (--G.eating === 0 && info.drink) { drink(s); return; }
-  if (G.eating === 0) {
-    G.food = Math.min(20, G.food + info.food); G.sat = Math.min(G.food, G.sat + (info.sat || info.food * 0.6));
-    useUp(); if (s.id === 'mushroom_stew') G.inv.add({id: 'bowl', n: 1});
-    play('burp'); drawHud(true);
-  }
+  if (--G.eating > 0) return;
+  if (s.id === 'milk_bucket') { drinkMilk(); return; }
+  if (info.drink) { drink(s); return; }
+  G.food = Math.min(20, G.food + info.food); G.sat = Math.min(G.food, G.sat + (info.sat || info.food * 0.6));
+  for (const [id, amp, secs] of info.effects || []) giveEffect(id, amp, secs * 20);
+  useUp();
+  // a stew or a soup leaves its bowl
+  if (info.bowl && G.mode !== 'creative') handBack({id: 'bowl', n: 1});
+  play('burp'); drawHud(true);
 }
 
 // ---------- one tick (20 a second) ----------
@@ -1121,7 +1237,8 @@ function tick() {
   eatTick();
   // potion effects wear off; regeneration heals, poison hurts (never to death); swirls round the player
   if (Object.keys(G.effects).length) {
-    effectsTick(G.effects, {heal: n => { if (G.health < 20 && !G.dead) { G.health = Math.min(20, G.health + n); drawHud(true); } }, harm: n => hurt(n, '中毒了', null, 'magic'), health: () => G.health});
+    const gone = effectsTick(G.effects, {heal: n => { if (G.health < 20 && !G.dead) { G.health = Math.min(20, G.health + n); drawHud(true); } }, harm: n => hurt(n, '中毒了', null, 'magic'), health: () => G.health});
+    if (gone.includes('absorption') && G.absorb) { G.absorb = 0; drawHud(true); }
     const c = swirlColor(G.effects);
     if (c != null && G.view && G.time % 3 === 0 && !G.effects.invisibility) G.ents.puff(b.x + (Math.random() - 0.5) * 0.6, b.y + Math.random() * 1.8, b.z + (Math.random() - 0.5) * 0.6, 'swirl', c);
     if (G.time % 10 === 0) drawEffects();
@@ -1244,7 +1361,7 @@ let hudKey = '';
 function drawHud(force = false) {
   if (!G) return;
   const armor = G.inv.armor().points;
-  const key = JSON.stringify([G.inv.slots.slice(0, 9), G.hot, Math.ceil(G.health), G.food, Math.ceil(G.air / 30), G.mode, input?.mode, armor, G.xp.level, Math.round(G.xp.prog * 182)]);
+  const key = JSON.stringify([G.inv.slots.slice(0, 9), G.hot, Math.ceil(G.health), Math.ceil(G.absorb || 0), G.food, Math.ceil(G.air / 30), G.mode, input?.mode, armor, G.xp.level, Math.round(G.xp.prog * 182)]);
   if (!force && key === hudKey) return;
   hudKey = key;
   const hb = $('.hotbar');
@@ -1254,7 +1371,11 @@ function drawHud(force = false) {
   $('.hearts').innerHTML = survival ? row(Math.ceil(G.health), 'heartFull', 'heartHalf', 'heartEmpty') : '';
   $('.food').innerHTML = survival ? row(G.food, 'foodFull', 'foodHalf', 'foodEmpty') : '';
   // armour over the hearts (only when some is worn), the experience bar and level over the hotbar
+  // golden hearts (伤害吸收) in a row over the red ones, the armour then over those
+  const gold = survival ? Math.ceil(G.absorb || 0) : 0;
+  $('.bars .absorb').innerHTML = gold ? row(gold, 'absorbFull', 'absorbHalf', 'absorbHalf', Math.min(10, Math.ceil(gold / 2))) : '';
   $('.bars .armor').innerHTML = survival && armor ? row(armor, 'armorFull', 'armorHalf', 'armorEmpty') : '';
+  $('.bars .armor').style.bottom = gold ? 'calc(20*var(--u))' : '';
   $('.xp').hidden = !survival;
   $('.xp i').style.width = `${(G.xp.prog * 100).toFixed(1)}%`;
   $('.xp b').textContent = G.xp.level > 0 ? G.xp.level : '';
@@ -1324,7 +1445,7 @@ function fireThings(view) {
   if (!fireVerts) { fireVerts = new Verts(16); fireVerts.flat(0.5, LAYER.fire_charge, 255, 255, 256, 32); }
   return G.mobs.balls.map(f => ({verts: fireVerts, x: f.x, y: f.y, z: f.z, model: mat.model(f.big ? 1 : 0.32, view.yaw), bright: 1}));
 }
-/** Splash potions in flight: the bottle turning over as it goes. */
+/** Things thrown, in flight (potions, bottles, snowballs, eggs): turning over as they go. */
 function potionThings(light) {
   return G.thrown.map(p => {
     const [sky, blk] = light(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)), v = new Verts(32);
@@ -1412,6 +1533,59 @@ function weatherVerts(view) {
     v.v(ox - sx + drift, oy1, oz - sz, 256, 128, layer, 0, top, sky * 17, blk * 17, 2 << 2);
   }
   return v;
+}
+/**
+ * The round shadows under things (the game's 实体阴影): under each mob, dropped item, experience orb and the player
+ * seen from outside, a soft dark disc laid on the tops of the blocks below (two blocks down at most) — fainter the
+ * higher it is over them and the farther from the camera. With 光影 mid / high in the sun the mobs cast their own
+ * shadows (render.js), so theirs is only a light touch under the feet then.
+ */
+let blobV = null;
+function blobVerts(view, a) {
+  const L = LAYER.entity_shadow;
+  if (L === undefined) return null;
+  const v = (blobV ||= new Verts(1024)).reset(), sun = renderer.entLive ? 0.35 : 1, casters = [];
+  for (const m of G.mobs.list) {
+    if (m.dead > 6) continue;
+    const b = m.body, x = b.prev.x + (b.x - b.prev.x) * a, y = b.prev.y + (b.y - b.prev.y) * a, z = b.prev.z + (b.z - b.prev.z) * a;
+    casters.push([x, y, z, Math.max(0.25, Math.min(1.3, b.w * 0.75 + 0.05)), sun]);
+  }
+  for (const it of G.ents.items) casters.push([it.x, it.y, it.z, 0.15, 0.75]);
+  for (const o of G.ents.orbs) casters.push([o.x, o.y, o.z, 0.12, 0.6]);
+  if (G.view && !G.dead) { const b = G.body; casters.push([b.prev.x + (b.x - b.prev.x) * a, b.prev.y + (b.y - b.prev.y) * a, b.prev.z + (b.z - b.prev.z) * a, 0.5, sun]); }
+  const quad = (x0, z0, x1, z1, y, u0, w0, u1, w1, alpha) => {
+    const k = Math.round(Math.max(0, Math.min(1, alpha)) * 255), tint = k << 16 | k << 8 | k, ox = -view.x, oy = y - view.y, oz = -view.z;
+    v.v(x0 + ox, oy, z1 + oz, 256, 128, L, u0, w1, 0, 0, 2 << 2, tint); v.v(x1 + ox, oy, z1 + oz, 256, 128, L, u1, w1, 0, 0, 2 << 2, tint);
+    v.v(x1 + ox, oy, z0 + oz, 256, 128, L, u1, w0, 0, 0, 2 << 2, tint); v.v(x0 + ox, oy, z0 + oz, 256, 128, L, u0, w0, 0, 0, 2 << 2, tint);
+  };
+  for (const [x, y, z, r, strength] of casters) {
+    const d2 = (x - view.x) ** 2 + (y - view.y) ** 2 + (z - view.z) ** 2;
+    if (d2 > 24 * 24) continue;
+    const fade = strength * (1 - d2 / 576), feet = Math.floor(y + 0.001), tops = [];
+    // the ground under each column the disc covers: the first top at or below the feet
+    for (let bx = Math.floor(x - r); bx <= Math.floor(x + r); bx++) for (let bz = Math.floor(z - r); bz <= Math.floor(z + r); bz++) {
+      for (let by = feet; by >= feet - 2; by--) {
+        const bv = G.mirror.get(bx, by, bz);
+        if (!bv) continue;
+        const boxes = collisionBoxes(bv);
+        if (!boxes?.length) continue;
+        const ty = by + Math.min(1, Math.max(...boxes.map(q => q[4])));
+        if (ty <= y + 0.01) tops.push([bx, bz, ty]);
+        break;
+      }
+    }
+    if (!tops.length) continue;
+    // on even ground one disc; on a step or an edge a piece on each block (its picture cut to fit)
+    const even = tops.length === (Math.floor(x + r) - Math.floor(x - r) + 1) * (Math.floor(z + r) - Math.floor(z - r) + 1) && tops.every(t => Math.abs(t[2] - tops[0][2]) < 0.01);
+    if (even) { const ty = tops[0][2], al = (1 - (y - ty) / 2) * 0.6 * fade; if (al > 0.01) quad(x - r, z - r, x + r, z + r, ty + 0.002, 0, 0, 16, 16, al); continue; }
+    for (const [bx, bz, ty] of tops) {
+      const al = (1 - (y - ty) / 2) * 0.6 * fade;
+      if (al <= 0.01) continue;
+      const x0 = Math.max(bx, x - r), x1 = Math.min(bx + 1, x + r), z0 = Math.max(bz, z - r), z1 = Math.min(bz + 1, z + r), uv = q => Math.round(q * 16);
+      quad(x0, z0, x1, z1, ty + 0.002, uv((x0 - x + r) / (2 * r)), uv((z0 - z + r) / (2 * r)), uv((x1 - x + r) / (2 * r)), uv((z1 - z + r) / (2 * r)), al);
+    }
+  }
+  return v.n ? v : null;
 }
 /** Lightning: a crooked white line from high up to where it struck, flickering. */
 let boltV = null;
@@ -1532,6 +1706,7 @@ function frame(now) {
   const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
   if (G.view && !G.dead) extras.mobs.push(...playerModel(view, a, lightAt));
   extras.weather = weatherVerts(view);
+  extras.blobs = blobVerts(view, a);
   const bolt = boltVerts(view);
   if (bolt?.n) extras.things.push({verts: bolt, x: view.x, y: view.y, z: view.z, model: mat.identity(), center: 128, bright: 1});
   const fishing = fishingDraw(view, lightAt);

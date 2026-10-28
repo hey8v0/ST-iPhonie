@@ -1,7 +1,7 @@
 // What the player carries and makes: stacks, the inventory (36 slots, the first 9 the hotbar), crafting (2×2 in the
 // inventory, 3×3 at a crafting table; shaped recipes may be mirrored), the furnace (smelting and fuel) and chests.
 // Recipes are the game's.
-import {itemInfo, BLOCKS, ITEMS, COLORS} from './blocks.js';
+import {itemInfo, BLOCKS, ITEMS, COLORS, ID} from './blocks.js';
 
 export const stackMax = id => itemInfo(id)?.stack || 64;
 export const same = (a, b) => a && b && a.id === b.id && !a.dmg && !b.dmg && !a.ench && !b.ench && a.pot === b.pot;
@@ -48,9 +48,11 @@ export function clean(s) {
 // ---------- crafting ----------
 const TAGS = {
   planks: BLOCKS.filter(b => b.name.endsWith('_planks')).map(b => b.name),
-  logs: BLOCKS.filter(b => b.name.endsWith('_log')).map(b => b.name),
+  logs: BLOCKS.filter(b => /_(log|wood)$/.test(b.name)).map(b => b.name),
+  wooden_slabs: ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak'].map(w => `${w}_slab`),
   stone_tool: ['cobblestone', 'cobbled_deepslate'],
   coals: ['coal', 'charcoal'],
+  wool: COLORS.map(c => `${c[0]}_wool`),
 };
 const matches = (key, id) => key.startsWith('#') ? TAGS[key.slice(1)]?.includes(id) : key === id;
 const R = [];
@@ -87,7 +89,8 @@ shaped(['###', 'BBB', '###'], {'#': '#planks', B: 'book'}, 'bookshelf');
 shaped(['S S', 'SSS', 'S S'], {S: 'stick'}, 'ladder', 3);
 shaped(['###'], {'#': 'oak_planks'}, 'oak_slab', 6);
 shaped(['###'], {'#': 'cobblestone'}, 'cobblestone_slab', 6);
-shaped(['###'], {'#': 'smooth_stone'}, 'stone_slab', 6);
+shaped(['###'], {'#': 'stone'}, 'stone_slab', 6);
+shaped(['###'], {'#': 'smooth_stone'}, 'smooth_stone_slab', 6);
 shaped(['###'], {'#': 'wheat'}, 'bread');
 shaped(['#c#'], {'#': 'wheat', c: 'cocoa_beans'}, 'cookie', 8);
 shaped(['# #', ' # '], {'#': '#planks'}, 'bowl', 4);
@@ -130,7 +133,7 @@ for (const [mat, x] of [['leather', 'leather'], ['iron', 'iron_ingot'], ['golden
 shaped(['###', '###', '###'], {'#': 'wheat'}, 'hay_block');
 shapeless(['hay_block'], 'wheat', 9);
 shaped(['# #', '# #', '###'], {'#': 'oak_slab'}, 'composter');
-shaped(['PSP', 'P P', 'PSP'], {P: '#planks', S: 'oak_slab'}, 'barrel');
+shaped(['PSP', 'P P', 'PSP'], {P: '#planks', S: '#wooden_slabs'}, 'barrel');
 shaped(['SS', 'PP'], {S: 'string', P: '#planks'}, 'loom');
 shaped(['FF', 'PP', 'PP'], {F: 'flint', P: '#planks'}, 'fletching_table');
 shaped(['II', 'PP', 'PP'], {I: 'iron_ingot', P: '#planks'}, 'smithing_table');
@@ -153,6 +156,72 @@ shaped(['##', '##'], {'#': 'nether_brick'}, 'nether_bricks');
 shaped(['#B#', '#B#'], {'#': 'nether_bricks', B: 'nether_brick'}, 'nether_brick_fence', 6);
 shaped(['#  ', '## ', '###'], {'#': 'nether_bricks'}, 'nether_brick_stairs', 4);
 shapeless(['blaze_powder', '#coals', 'gunpowder'], 'fire_charge', 3);
+// ---------- dyes and colours ----------
+// dyes from flowers (two from a tall one), bone meal, cocoa, lapis, beetroot, ink; and mixed
+const DYE_FROM = {white: ['bone_meal', 'lily_of_the_valley'], orange: ['orange_tulip'], magenta: ['allium', ['lilac', 2]], light_blue: ['blue_orchid'], yellow: ['dandelion', ['sunflower', 2]],
+  pink: ['pink_tulip', ['peony', 2]], light_gray: ['azure_bluet', 'oxeye_daisy', 'white_tulip'], blue: ['lapis_lazuli', 'cornflower'], brown: ['cocoa_beans'],
+  red: ['poppy', 'red_tulip', 'beetroot', ['rose_bush', 2]], black: ['ink_sac']};
+for (const [c, list] of Object.entries(DYE_FROM)) for (const x of list) { const [id, n] = Array.isArray(x) ? x : [x, 1]; shapeless([id], `${c}_dye`, n); }
+for (const [a, b, out, n] of [['red', 'yellow', 'orange', 2], ['purple', 'pink', 'magenta', 2], ['blue', 'white', 'light_blue', 2], ['green', 'white', 'lime', 2], ['red', 'white', 'pink', 2],
+  ['black', 'white', 'gray', 2], ['gray', 'white', 'light_gray', 2], ['blue', 'green', 'cyan', 2], ['red', 'blue', 'purple', 2]]) shapeless([`${a}_dye`, `${b}_dye`], `${out}_dye`, n);
+shapeless(['black_dye', 'white_dye', 'white_dye'], 'light_gray_dye', 3);
+shapeless(['blue_dye', 'red_dye', 'pink_dye'], 'magenta_dye', 3);
+// any wool and a dye; eight of terracotta, glass or panes round a dye; concrete powder; carpets; panes of stained glass
+for (const [c] of COLORS) {
+  const dye = `${c}_dye`;
+  shapeless([dye, '#wool'], `${c}_wool`);
+  shaped(['###', '#D#', '###'], {'#': 'terracotta', D: dye}, `${c}_terracotta`, 8);
+  shaped(['###', '#D#', '###'], {'#': 'glass', D: dye}, `${c}_stained_glass`, 8);
+  shaped(['###', '###'], {'#': `${c}_stained_glass`}, `${c}_stained_glass_pane`, 16);
+  shaped(['###', '#D#', '###'], {'#': 'glass_pane', D: dye}, `${c}_stained_glass_pane`, 8);
+  shapeless([dye, 'sand', 'sand', 'sand', 'sand', 'gravel', 'gravel', 'gravel', 'gravel'], `${c}_concrete_powder`, 8);
+  shaped(['##'], {'#': `${c}_wool`}, `${c}_carpet`, 3);
+}
+// ---------- wood ----------
+for (const w of ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak']) {
+  shaped(['##', '##'], {'#': `${w}_log`}, `${w}_wood`, 3);
+  shaped(['##', '##'], {'#': `stripped_${w}_log`}, `stripped_${w}_wood`, 3);
+  for (const from of [`${w}_wood`, `stripped_${w}_log`, `stripped_${w}_wood`]) shapeless([from], `${w}_planks`, 4);
+  if (w !== 'oak') shaped(['###'], {'#': `${w}_planks`}, `${w}_slab`, 6);
+}
+for (const w of ['jungle', 'acacia', 'dark_oak']) {
+  const p = `${w}_planks`;
+  shaped(['#  ', '## ', '###'], {'#': p}, `${w}_stairs`, 4);
+  shaped(['#S#', '#S#'], {'#': p, S: 'stick'}, `${w}_fence`, 3);
+  shaped(['S#S', 'S#S'], {'#': p, S: 'stick'}, `${w}_fence_gate`);
+  shaped(['##', '##', '##'], {'#': p}, `${w}_door`, 3);
+  shaped(['###', '###'], {'#': p}, `${w}_trapdoor`, 2);
+}
+// ---------- stone: stairs, slabs and walls of each family; polished, bricks, tiles, chiseled kinds ----------
+for (const [mat, base] of [['stone', 'stone'], ['cobblestone', 'cobblestone'], ['mossy_cobblestone', 'mossy_cobblestone'], ['stone_bricks', 'stone_brick'], ['mossy_stone_bricks', 'mossy_stone_brick'],
+  ['granite', 'granite'], ['diorite', 'diorite'], ['andesite', 'andesite'], ['polished_granite', 'polished_granite'], ['polished_diorite', 'polished_diorite'], ['polished_andesite', 'polished_andesite'],
+  ['cobbled_deepslate', 'cobbled_deepslate'], ['polished_deepslate', 'polished_deepslate'], ['deepslate_bricks', 'deepslate_brick'], ['deepslate_tiles', 'deepslate_tile'],
+  ['tuff', 'tuff'], ['polished_tuff', 'polished_tuff'], ['tuff_bricks', 'tuff_brick'], ['sandstone', 'sandstone'], ['red_sandstone', 'red_sandstone'], ['cut_sandstone', 'cut_sandstone'],
+  ['cut_red_sandstone', 'cut_red_sandstone'], ['smooth_sandstone', 'smooth_sandstone'], ['smooth_red_sandstone', 'smooth_red_sandstone'], ['bricks', 'brick'], ['quartz_block', 'quartz'],
+  ['smooth_quartz', 'smooth_quartz'], ['mud_bricks', 'mud_brick'], ['nether_bricks', 'nether_brick'], ['red_nether_bricks', 'red_nether_brick']]) {
+  const made = id => ID[id] !== undefined && !R.some(r => r.out.id === id);
+  if (made(`${base}_stairs`)) shaped(['#  ', '## ', '###'], {'#': mat}, `${base}_stairs`, 4);
+  if (made(`${base}_slab`)) shaped(['###'], {'#': mat}, `${base}_slab`, 6);
+  if (made(`${base}_wall`)) shaped(['###', '###'], {'#': mat}, `${base}_wall`, 6);
+}
+const square = (from, out, n = 4) => shaped(['##', '##'], {'#': from}, out, n);
+const pillar = (from, out, n = 1) => shaped(['#', '#'], {'#': from}, out, n);
+shapeless(['stone_bricks', 'moss_block'], 'mossy_stone_bricks'); shapeless(['stone_bricks', 'vine'], 'mossy_stone_bricks'); shapeless(['cobblestone', 'vine'], 'mossy_cobblestone');
+pillar('stone_brick_slab', 'chiseled_stone_bricks');
+for (const n of ['granite', 'diorite', 'andesite']) square(n, `polished_${n}`);
+shapeless(['diorite', 'quartz'], 'granite'); shaped(['CQ', 'QC'], {C: 'cobblestone', Q: 'quartz'}, 'diorite', 2); shapeless(['diorite', 'cobblestone'], 'andesite', 2);
+square('cobbled_deepslate', 'polished_deepslate'); square('polished_deepslate', 'deepslate_bricks'); square('deepslate_bricks', 'deepslate_tiles'); pillar('cobbled_deepslate_slab', 'chiseled_deepslate');
+square('tuff', 'polished_tuff'); square('polished_tuff', 'tuff_bricks'); pillar('tuff_slab', 'chiseled_tuff'); pillar('tuff_brick_slab', 'chiseled_tuff_bricks');
+for (const n of ['sandstone', 'red_sandstone']) { square(n, `cut_${n}`); pillar(`${n}_slab`, `chiseled_${n}`); }
+pillar('quartz_slab', 'chiseled_quartz_block'); pillar('quartz_block', 'quartz_pillar', 2); square('quartz_block', 'quartz_bricks');
+shapeless(['mud', 'wheat'], 'packed_mud'); square('packed_mud', 'mud_bricks');
+shaped(['WB', 'BW'], {W: 'nether_wart', B: 'nether_brick'}, 'red_nether_bricks'); pillar('nether_brick_slab', 'chiseled_nether_bricks');
+for (const m of ['iron', 'copper', 'gold']) { shaped(['###', '###', '###'], {'#': `raw_${m}`}, `raw_${m}_block`); shapeless([`raw_${m}_block`], `raw_${m}`, 9); }
+// ---------- food ----------
+shaped(['###', '#A#', '###'], {'#': 'gold_ingot', A: 'apple'}, 'golden_apple');
+shapeless(['pumpkin', 'sugar', 'egg'], 'pumpkin_pie');
+shapeless(['red_mushroom', 'brown_mushroom', 'bowl'], 'mushroom_stew');
+shapeless(['beetroot', 'beetroot', 'beetroot', 'beetroot', 'beetroot', 'beetroot', 'bowl'], 'beetroot_soup');
 export const RECIPES = R;
 
 /** What a crafting grid (w × h stacks, row by row) makes: {out, recipe} or null. */
@@ -197,12 +266,17 @@ const SMELT = {
   redstone_ore: 'redstone', deepslate_redstone_ore: 'redstone', wet_sponge: 'sponge',
   porkchop: 'cooked_porkchop', beef: 'cooked_beef', mutton: 'cooked_mutton', chicken: 'cooked_chicken', potato: 'baked_potato', cod: 'cooked_cod', salmon: 'cooked_salmon',
   netherrack: 'nether_brick', nether_quartz_ore: 'quartz', nether_gold_ore: 'gold_ingot',
+  stone_bricks: 'cracked_stone_bricks', deepslate_bricks: 'cracked_deepslate_bricks', deepslate_tiles: 'cracked_deepslate_tiles', nether_bricks: 'cracked_nether_bricks',
+  sandstone: 'smooth_sandstone', red_sandstone: 'smooth_red_sandstone', quartz_block: 'smooth_quartz', cactus: 'green_dye',
+  ...Object.fromEntries(COLORS.map(([c]) => [`${c}_terracotta`, `${c}_glazed_terracotta`])),
 };
 for (const l of TAGS.logs) SMELT[l] = 'charcoal';
 export const smeltOf = id => SMELT[id] || null;
 // experience for each thing smelted, given when the result is taken out (the game's numbers)
 const SMELT_XP = {iron_ingot: 0.7, copper_ingot: 0.7, gold_ingot: 1, diamond: 1, emerald: 1, lapis_lazuli: 0.2, redstone: 0.3, coal: 0.1, charcoal: 0.15,
-  glass: 0.1, stone: 0.1, smooth_stone: 0.1, deepslate: 0.1, brick: 0.3, terracotta: 0.35, sponge: 0.15, nether_brick: 0.1, quartz: 0.2,
+  glass: 0.1, stone: 0.1, smooth_stone: 0.1, deepslate: 0.1, brick: 0.3, terracotta: 0.35, sponge: 0.15, nether_brick: 0.1, quartz: 0.2, green_dye: 1,
+  cracked_stone_bricks: 0.1, cracked_deepslate_bricks: 0.1, cracked_deepslate_tiles: 0.1, cracked_nether_bricks: 0.1, smooth_sandstone: 0.1, smooth_red_sandstone: 0.1, smooth_quartz: 0.1,
+  ...Object.fromEntries(COLORS.map(([c]) => [`${c}_glazed_terracotta`, 0.1])),
   cooked_porkchop: 0.35, cooked_beef: 0.35, cooked_mutton: 0.35, cooked_chicken: 0.35, baked_potato: 0.35, cooked_cod: 0.35, cooked_salmon: 0.35};
 /** Whole experience points for what was smelted (the fraction left is a chance of one more). */
 export function takeSmeltXp(f, r = Math.random) { const x = f.xp || 0; f.xp = 0; return Math.floor(x) + (r() < x - Math.floor(x) ? 1 : 0); }

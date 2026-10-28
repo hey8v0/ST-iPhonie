@@ -11,10 +11,10 @@ import {fortressAt, spawnersNear} from './nether.js';
 import {newWork, PROFESSIONS, restock} from './trades.js';
 
 export const MOBS = {
-  pig: {zh: '猪', health: 10, speed: 0.25, passive: true, breed: ['carrot', 'potato'], drops: [['porkchop', 1, 3, 'cooked_porkchop']]},
+  pig: {zh: '猪', health: 10, speed: 0.25, passive: true, breed: ['carrot', 'potato', 'beetroot'], drops: [['porkchop', 1, 3, 'cooked_porkchop']]},
   cow: {zh: '牛', health: 10, speed: 0.2, passive: true, breed: ['wheat'], drops: [['beef', 1, 3, 'cooked_beef'], ['leather', 0, 2]]},
   sheep: {zh: '羊', health: 8, speed: 0.23, passive: true, breed: ['wheat'], drops: [['mutton', 1, 2, 'cooked_mutton']]},
-  chicken: {zh: '鸡', health: 4, speed: 0.25, passive: true, breed: ['wheat_seeds'], drops: [['chicken', 1, 1, 'cooked_chicken'], ['feather', 0, 2]]},
+  chicken: {zh: '鸡', health: 4, speed: 0.25, passive: true, breed: ['wheat_seeds', 'beetroot_seeds'], drops: [['chicken', 1, 1, 'cooked_chicken'], ['feather', 0, 2]]},
   zombie: {zh: '僵尸', health: 20, speed: 0.23, hostile: true, undead: true, damage: 3, range: 35, drops: [['rotten_flesh', 0, 2]], rare: ['carrot', 'potato', 'iron_ingot']},
   skeleton: {zh: '骷髅', health: 20, speed: 0.25, hostile: true, undead: true, range: 16, drops: [['bone', 0, 2], ['arrow', 0, 2]]},
   creeper: {zh: '苦力怕', health: 20, speed: 0.25, hostile: true, range: 16, drops: [['gunpowder', 0, 2]]},
@@ -47,6 +47,8 @@ export class Mob {
     this.color = extra.color || (kind === 'sheep' ? sheepColor(Math.random()) : null); this.sheared = !!extra.sheared;
     this.headYaw = 0; this.headPitch = 0; this.limb = 0; this.amount = 0; this.age = 0;
     this.hurtT = 0; this.inv = 0; this.dead = 0; this.fire = 0; this.goal = null; this.wait = 20 + Math.floor(Math.random() * 100);
+    // a hen lays an egg every five to ten minutes (the game's 6000–12000 ticks)
+    if (kind === 'chicken') this.egg = extra.egg || 6000 + Math.floor(Math.random() * 6000);
     this.panic = 0; this.love = 0; this.loveWait = 0; this.cool = 0; this.fuse = 0; this.aim = 0; this.graze = 0; this.attackT = 0; this.angry = 0; this.burnT = 0;
     if (this.baby) { this.body.w *= 0.5; this.body.hgt *= 0.5; }
     // a magma cube is big (4), middling (2) or small (1): its size × the box, size² health
@@ -94,6 +96,7 @@ export class Mobs {
       if (m.dead) { if (++m.dead > 20) { this.die(m); this.list.splice(i, 1); } continue; }
       this.think(m);
       this.move(m);
+      if (m.kind === 'chicken' && !m.baby && --m.egg <= 0) { m.egg = 6000 + Math.floor(this.r() * 6000); this.ctx.drop({id: 'egg', n: 1}, m.x, m.y + 0.3, m.z); this.ctx.sound('pop', m.x, m.y, m.z); }
     }
     this.spawnTick();
     this.spawnerTick();

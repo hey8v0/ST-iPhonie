@@ -15,7 +15,7 @@ const SKY = `
 #define HDR 0
 #endif
 uniform vec3 u_lightDir, u_lightCol, u_ambCol, u_blockCol, u_sunTrue, u_zenith, u_horizon, u_glowCol, u_fogLin;
-uniform float u_exposure, u_fogDensity, u_fogFar, u_underwater, u_flicker, u_bright, u_rain, u_eyeSky, u_camY, u_held, u_time, u_cover, u_aurora, u_flash, u_storm, u_mist, u_waterY;
+uniform float u_exposure, u_fogDensity, u_fogFar, u_underwater, u_flicker, u_bright, u_rain, u_eyeSky, u_camY, u_held, u_time, u_cover, u_aurora, u_flash, u_storm, u_mist, u_waterY, u_wet, u_rainbow;
 uniform sampler2D u_noise;
 // the sky's colour along a direction: a thin pale band at the horizon under a deep blue (as the air thins upward),
 // the sun's glow (wide, a halo, a bright core), dark below
@@ -117,6 +117,22 @@ float shadowAt(vec4 sp) {
   return mix(s / float(N_SH), 1.0, smoothstep(0.85, 1.0, edge));
 }
 `;
+// the mobs' shadows: a second map with only them in it, drawn every frame (they move; the land's map is kept a few
+// frames), looked up the same way with fewer points
+const ENT_SHADOW = `
+uniform highp sampler2DShadow u_entShadow;
+uniform float u_entOn;
+float entShadowAt(vec4 sp) {
+  vec3 p = sp.xyz * 0.5 + 0.5;
+  float edge = max(abs(p.x - 0.5), abs(p.y - 0.5)) * 2.0;
+  if (edge >= 1.0 || p.z >= 1.0) return 1.0;
+  float a = ign(gl_FragCoord.xy) * 6.2832, c = cos(a), sn = sin(a), s = 0.0;
+  mat2 rot = mat2(c, sn, -sn, c) * (1.4 * u_texel);
+  const vec2 Q[4] = vec2[4](vec2(0.354, 0.0), vec2(-0.452, 0.414), vec2(0.069, -0.788), vec2(0.569, 0.742));
+  for (int i = 0; i < 4; i++) s += texture(u_entShadow, vec3(p.xy + rot * Q[i], p.z - 0.0006));
+  return mix(s * 0.25, 1.0, smoothstep(0.85, 1.0, edge));
+}
+`;
 const head = (defs, prec = '') => `#version 300 es\n${Object.entries(defs).map(([k, v]) => `#define ${k} ${v}`).join('\n')}\nprecision highp float;\n${prec}`;
 const defsOf = o => ({SHADOWS: o.shadows || 0, HDR: o.hdr ? 1 : 0, GEN: o.gen ? 1 : 0, SSR: o.ssr || 0, CLOUDS: o.clouds || 0});
 
@@ -158,7 +174,7 @@ void main() {
   v_face = min((a_shade >> 2u) & 7u, 5u);
   v_tint = a_tint; v_wp = wp; v_flags = flags;
 }`;
-  const fs = head(defs, 'precision highp sampler2DArray;\n') + LIGHT + (defs.SHADOWS ? SHADOW : '') + `
+  const fs = head(defs, 'precision highp sampler2DArray;\n') + LIGHT + (defs.SHADOWS ? SHADOW + ENT_SHADOW : '') + `
 uniform sampler2DArray u_tex;
 uniform float u_cut, u_alpha, u_overlay, u_texSize;
 uniform vec3 u_camera;
@@ -195,6 +211,21 @@ vec3 waterNormal(vec3 W) {
   g += vec2(vnoise(p + vec2(0.15, 0.0)) - a, vnoise(p + vec2(0.0, 0.15)) - a) * 0.55 + vec2(vnoise(q + vec2(0.15, 0.0)) - b, vnoise(q + vec2(0.0, 0.15)) - b) * 0.3;
   return normalize(vec3(-g.x, 1.0, -g.y));
 }
+// raindrops landing on standing water (puddles, ponds): a ring spreading from each, now and then in each cell of a
+// fine grid at its own place and time — the slope it gives, to bend the surface by (the nearest four cells: a ring
+// never grows past one)
+vec2 hash22(vec2 p) { p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3))); return fract(sin(p) * 43758.5453); }
+vec2 ripples(vec2 w) {
+  vec2 q = w * 1.7, base = floor(q - 0.5), g = vec2(0.0);
+  for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++) {
+    vec2 c = base + vec2(float(i), float(j)), h = hash22(c);
+    float t = fract(u_time * 0.9 + h.x * 7.0);
+    vec2 d = q - (c + 0.5 + (h - 0.5) * 0.5);
+    float r = length(d), k = r - t * 0.55;
+    g += d / max(r, 1e-3) * sin(k * 38.0) * exp(-k * k * 260.0) * (1.0 - t) * (1.0 - t);
+  }
+  return g * 0.35;
+}
 #if HDR
 float linearDepth(float d) { float z = d * 2.0 - 1.0; return 2.0 * u_near * u_far / (u_far + u_near - z * (u_far - u_near)); }
 #if SSR > 0
@@ -227,7 +258,7 @@ vec4 mirror(vec3 p, vec3 r) {
 void main() {
   vec4 c = texture(u_tex, v_uvl);
   if (c.a < u_cut) discard;
-  if (u_overlay > 0.5) { o = vec4(c.rgb, c.a); return; }
+  if (u_overlay > 0.5) { o = vec4(c.rgb, c.a * v_tint.r); return; }
   bool leaf = v_flags == 1u, plant = v_flags == 2u || v_flags == 3u, liquid = v_flags == 4u;
   mat3 m = mat3(u_model);
   v_dist = length(v_wp);
@@ -255,6 +286,7 @@ void main() {
   // (crossed sheets with no real facing) are looked up half a block toward the light instead, or each would sit in
   // its own shadow
   if (u_shadowOn > 0.5 && direct > 0.0) sh = shadowAt(u_shadowMat * vec4(v_wp + (plant ? u_lightDir * 0.5 : N0 * (0.05 + v_dist * 0.002)), 1.0));
+  if (u_entOn > 0.5 && direct > 0.0 && v_dist < 48.0) sh = min(sh, entShadowAt(u_shadowMat * vec4(v_wp + N0 * 0.03, 1.0)));
 #endif
   // sunlight only where the sky reaches (in caves the map may not know), less under clouds
   float open = smoothstep(0.55, 0.95, sky), sunVis = sh * open * (open > 0.0 ? cloudShade(W) : 1.0);
@@ -267,9 +299,14 @@ void main() {
   vec3 amb = (u_ambCol + vec3(0.01, 0.05, 0.03) * u_aurora) * sky * sky * (0.62 + 0.38 * (N.y * 0.5 + 0.5)) * ao;
   light += vec3(0.55, 0.58, 0.7) * u_flash * open;
   vec3 bl = u_blockCol * (pow(blk, 2.2) * 1.2 + pow(blk, 9.0) * 1.0) * u_flicker * ao;
-  // rain: the open ground darker and shiny, puddles in its hollows
-  float wet = liquid ? 0.0 : u_rain * open * smoothstep(0.2, 0.9, N.y);
-  albedo *= 1.0 - 0.35 * wet;
+  // rain: the open ground darker and shiny, and water standing in its flat places — more the longer it rains, drying
+  // slowly after it stops (u_wet: main.js); under a puddle the ground is darker and its grain shows less
+  float wet = liquid ? 0.0 : u_wet * open * smoothstep(0.2, 0.9, N.y), puddle = 0.0;
+  if (wet > 0.01) {
+    float pn = vnoise(W.xz * 0.31) * 0.75 + vnoise(W.xz * 1.3) * 0.25;
+    puddle = smoothstep(0.66 - 0.2 * u_wet, 0.71 - 0.2 * u_wet, pn) * step(0.9, N.y) * smoothstep(0.3, 0.8, u_wet) * open;
+    albedo = mix(albedo * (1.0 - 0.35 * wet), lin(textureLod(u_tex, v_uvl, 3.0).rgb * v_tint) * 0.4, puddle * 0.8);
+  }
   vec3 col = albedo * (light + amb + bl + vec3(0.012 + u_bright));
   // pale ground in full sun (sand, snow, light stone) glares a little whiter, as it does to the eye: only in the direct
   // light — where a cloud's shadow or the land's lies over it, it keeps its colour
@@ -277,14 +314,20 @@ void main() {
   // an ore's coloured specks shine a little in the dark (the stone round them, grey, does not)
   if (v_flags == 5u) { float hi = max(c.r, max(c.g, c.b)); col += albedo * smoothstep(0.3, 0.6, hi > 0.0 ? (hi - min(c.r, min(c.g, c.b))) / hi : 0.0) * 1.2; }
   if (wet > 0.01) {
-    float puddle = smoothstep(0.5, 0.68, vnoise(W.xz * 0.35)) * step(0.9, N.y);
-    vec3 n = normalize(mix(N, vec3(0.0, 1.0, 0.0), puddle)), R = reflect(-V, n);
-    float fr = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
-    col = mix(col, skyCol(normalize(vec3(R.x, max(R.y, 0.02), R.z))) * open, fr * wet * (0.3 + 0.7 * puddle));
+    // wet stone or grass shines a little at a slant; a puddle is a mirror of the sky and the sun, rippled by raindrops
+    vec2 rip = u_rain > 0.01 ? ripples(W.xz) * u_rain : vec2(0.0);
+    vec3 n = normalize(mix(N, vec3(0.0, 1.0, 0.0), puddle) + vec3(rip.x, 0.0, rip.y) * puddle), R = reflect(-V, n);
+    float cv = max(dot(n, V), 0.0), fr = mix(0.04 + 0.96 * pow(1.0 - cv, 5.0), 0.22 + 0.78 * pow(1.0 - cv, 3.0), puddle);
+    vec3 refl = skyCol(normalize(vec3(R.x, max(R.y, 0.02), R.z))) * open + u_lightCol * pow(max(dot(R, L), 0.0), 400.0) * 8.0 * sunVis * puddle;
+    col = mix(col, refl, fr * wet * (0.25 + 0.75 * puddle));
+    // the rings catch the light
+    col += refl * min(length(rip) * 1.6, 0.35) * puddle;
   }
   float alpha = c.a * u_alpha;
   if (liquid) {
-    vec3 n = N.y > 0.5 ? waterNormal(W) : N, R = reflect(-V, n);
+    vec3 n = N.y > 0.5 ? waterNormal(W) : N;
+    if (N.y > 0.5 && u_rain > 0.01) { vec2 rp = ripples(W.xz) * u_rain * 1.4; n = normalize(n + vec3(rp.x, 0.0, rp.y)); }
+    vec3 R = reflect(-V, n);
     float fr = 0.02 + 0.98 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
     vec3 refl = skyCol(normalize(vec3(R.x, max(R.y, 0.02), R.z))) * mix(0.1, 1.0, sky * sky);
     vec3 glint = u_lightCol * pow(max(dot(R, L), 0.0), 220.0) * 12.0 * sunVis;
@@ -397,9 +440,22 @@ uniform float u_stars, u_moonPhase, u_seen;
 uniform vec3 u_camPos, u_sunDisc;
 in vec3 v_dir; out vec4 o;
 float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+// a rainbow's colours across its band (0 violet … 1 red), soft at both edges, nothing outside it
+vec3 spectrum(float x) {
+  if (x <= 0.0 || x >= 1.0) return vec3(0.0);
+  vec3 c = clamp(abs(mod((1.0 - x) * 0.78 * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  return c * smoothstep(0.0, 0.25, x) * smoothstep(1.0, 0.75, x);
+}
 void main() {
   vec3 d = normalize(v_dir);
   vec3 c = skyCol(d);
+  // after rain (main.js: u_rainbow), round the point opposite the sun: the bow 42° out (red outside, violet inside),
+  // the sky inside it a little brighter, a fainter second bow at 51° the other way round; only above the horizon
+  if (u_rainbow > 0.0 && d.y > -0.02) {
+    float ang = degrees(acos(clamp(dot(d, -u_sunTrue), -1.0, 1.0))), sun = luma(u_lightCol);
+    vec3 bow = spectrum((ang - 40.6) / 1.9) + spectrum((53.4 - ang) / 3.1) * 0.35;
+    c += (bow * 0.42 * sun + c * (1.0 - smoothstep(37.0, 41.0, ang)) * 0.1) * u_rainbow * smoothstep(-0.02, 0.06, d.y);
+  }
   if (u_stars > 0.0 && d.y > 0.0) {
     // nebulae: slow clouds of blue and violet across the sky (the noise picture seen on a plane far up)
     vec2 q2 = d.xz / (d.y + 0.25) * 0.35;
@@ -527,6 +583,20 @@ void main() {
   return [vs, fs];
 }
 
+/** The mobs seen from the light, for their own shadow map (their pictures' see-through parts cut). */
+export function entShadowShaders() {
+  const vs = head({}) + `
+layout(location=0) in vec3 a_pos;
+layout(location=1) in vec2 a_uv;
+uniform mat4 u_lightMat;
+out vec2 v_uv;
+void main() { gl_Position = u_lightMat * vec4(a_pos, 1.0); v_uv = a_uv; }`;
+  const fs = head({}) + `
+uniform sampler2D u_img;
+in vec2 v_uv; out vec4 o;
+void main() { if (texture(u_img, v_uv).a < 0.1) discard; o = vec4(1.0); }`;
+  return [vs, fs];
+}
 /** Mobs and the player in third person: lit like the blocks (their own face shading stands in for the sun's angle). */
 export function entityShaders(o = {}) {
   const defs = defsOf(o);

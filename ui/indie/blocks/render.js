@@ -13,7 +13,7 @@ import {STRIDE, ALL_OPEN} from './mesh.js';
 // sections in a column (−64 to 320), a number for a section's place, and the six sides (−x, +x, −y, +y, −z, +z)
 const SECTIONS = 24, secKey = (cx, sy, cz) => ((cx + 1048576) * 2097152 + (cz + 1048576)) * 32 + sy;
 const DX = [-1, 1, 0, 0, 0, 0], DY = [0, 0, -1, 1, 0, 0], DZ = [0, 0, 0, 0, -1, 1], OPP = [1, 0, 3, 2, 5, 4];
-import {chunkShaders, shadowShaders, skyShaders, entityShaders, lodShaders, postShaders, bloomShaders, compositeShaders, edgeShaders} from './shaders.js';
+import {chunkShaders, shadowShaders, entShadowShaders, skyShaders, entityShaders, lodShaders, postShaders, bloomShaders, compositeShaders, edgeShaders} from './shaders.js';
 import {LOD_STRIDE, LOD_TILE} from './lod.js';
 
 const VS = `#version 300 es
@@ -56,7 +56,7 @@ float curve(float l) { float x = clamp(l / 15.0, 0.0, 1.0); float b = x / (4.0 -
 void main() {
   vec4 c = texture(u_tex, v_uvl);
   if (c.a < u_cut) discard;
-  if (u_overlay > 0.5) { o = vec4(c.rgb, c.a); return; }
+  if (u_overlay > 0.5) { o = vec4(c.rgb, c.a * v_tint.r); return; }
   float sky = max(v_light.x - (1.0 - u_daylight) * 11.0, 0.0);
   vec3 light = curve(sky) * u_skyLight + curve(v_light.y) * vec3(1.0, 0.86, 0.68) * u_flicker;
   light = clamp(light + 0.035 + u_bright, 0.0, 1.0);
@@ -73,9 +73,15 @@ void main() { vec2 p = P[gl_VertexID]; gl_Position = vec4(p, 0.9999, 1.0); vec4 
 const SKY_FS = `#version 300 es
 precision highp float;
 uniform vec3 u_top, u_horizon, u_sunDir, u_glow;
-uniform float u_stars, u_glowAmt;
+uniform float u_stars, u_glowAmt, u_rainbow;
 in vec3 v_dir; out vec4 o;
 float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+// a rainbow's colours across its band (0 violet … 1 red), soft at both edges
+vec3 spectrum(float x) {
+  if (x <= 0.0 || x >= 1.0) return vec3(0.0);
+  vec3 c = clamp(abs(mod((1.0 - x) * 0.78 * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  return c * smoothstep(0.0, 0.25, x) * smoothstep(1.0, 0.75, x);
+}
 void main() {
   vec3 d = normalize(v_dir);
   float h = clamp(d.y, -0.2, 1.0);
@@ -85,6 +91,11 @@ void main() {
   float g = max(dot(normalize(vec3(d.x, d.y * 2.5, d.z)), normalize(vec3(u_sunDir.x, 0.0, u_sunDir.z))), 0.0);
   c = mix(c, u_glow, pow(g, 6.0) * u_glowAmt * (1.0 - smoothstep(0.0, 0.5, d.y)));
   if (u_stars > 0.0 && d.y > 0.0) { vec3 q = floor(d * 220.0); float s = hash(q); if (s > 0.9965) c += vec3(u_stars * (s - 0.9965) / 0.0035) * smoothstep(0.0, 0.2, d.y); }
+  // after rain: the bow round the point opposite the sun (42°, red outside), a fainter second one at 51°
+  if (u_rainbow > 0.0 && d.y > -0.02) {
+    float ang = degrees(acos(clamp(dot(d, -normalize(u_sunDir)), -1.0, 1.0)));
+    c += (spectrum((ang - 40.6) / 1.9) + spectrum((53.4 - ang) / 3.1) * 0.35) * 0.3 * u_rainbow * smoothstep(-0.02, 0.06, d.y);
+  }
   o = vec4(c, 1.0);
 }`;
 const QUAD_VS = `#version 300 es
@@ -200,7 +211,7 @@ export function lighting(env, view) {
   const fogLin = water ? scale([0.02, 0.085, 0.11], (0.2 + 0.8 * (env.daylight ?? 1)) * Math.exp(-deep * 0.035)) : lin(env.fog);
   const base = {sunTrue: sun, block: [1.0, 0.6, 0.3], fogLin, fogFar, fogDensity: 1.3 / fogFar * (1 + rain * 1.8 + thunder * 0.8), underwater: env.underwater ? 1 : 0, flicker: env.flicker ?? 1, bright: env.bright || 0, rain,
     eyeSky, held: env.held || 0, camY: view.y, time: env.time || 0, cover: 0.47 - 0.06 * Math.sin((env.time || 0) * 0.0011) - 0.03 * Math.sin((env.time || 0) * 0.0041 + 1) - rain * 0.25 - thunder * 0.1, storm: thunder, sunDisc: [0, 0, 0], aurora: env.aurora || 0, flash: env.flash ? 1 : 0,
-    mist, haze: 0.0012 * (1 + rain * 2 + thunder), waterY: water ? env.waterY ?? view.y + 1 : -1e4};
+    mist, wet: env.wet || 0, rainbow: env.rainbow || 0, haze: 0.0012 * (1 + rain * 2 + thunder), waterY: water ? env.waterY ?? view.y + 1 : -1e4};
   if (env.nether) return {...base, lightDir: [0, 1, 0], lightCol: [0, 0, 0], amb: [0.17, 0.07, 0.05], zenith: lin(env.fog), horizon: lin(env.fog), glow: [0, 0, 0], exposure: 1.4, fogDensity: 2.4 / fogFar, eyeSky: 1, mist: 0, haze: 0};
   const day = smooth(-0.04, 0.14, el), night = 1 - smooth(-0.14, 0.02, el), set = Math.max(0, 1 - Math.abs(el) * 3.2);
   // the sun some seven times the sky's light on the ground: strong light and blue shade, as the shader packs have it
@@ -480,12 +491,17 @@ export class Renderer {
     gl.uniform1f(u.u_exposure, lit.exposure); gl.uniform1f(u.u_fogDensity, lit.fogDensity); gl.uniform1f(u.u_fogFar, lit.fogFar); gl.uniform1f(u.u_underwater, lit.underwater);
     gl.uniform1f(u.u_flicker, lit.flicker); gl.uniform1f(u.u_bright, lit.bright);
     gl.uniform1f(u.u_rain, lit.rain); gl.uniform1f(u.u_eyeSky, lit.eyeSky); gl.uniform1f(u.u_camY, lit.camY); gl.uniform1f(u.u_held, lit.held); gl.uniform1f(u.u_time, lit.time); gl.uniform1f(u.u_cover, lit.cover);
-    gl.uniform1f(u.u_aurora, lit.aurora); gl.uniform1f(u.u_flash, lit.flash); gl.uniform1f(u.u_storm, lit.storm || 0);
+    gl.uniform1f(u.u_aurora, lit.aurora); gl.uniform1f(u.u_flash, lit.flash); gl.uniform1f(u.u_storm, lit.storm || 0); gl.uniform1f(u.u_wet, lit.wet || 0); gl.uniform1f(u.u_rainbow, lit.rainbow || 0);
     if (u.u_noise) { gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, this.noise); gl.uniform1i(u.u_noise, 7); gl.activeTexture(gl.TEXTURE0); }
     if (u.u_shadow) {
       gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.shadowMap?.tex || null); gl.uniform1i(u.u_shadow, 2); gl.activeTexture(gl.TEXTURE0);
       gl.uniform1f(u.u_shadowOn, shadow && this.shadowLive ? 1 : 0); gl.uniform1f(u.u_texel, this.shadowMap ? 1 / this.shadowMap.size : 0);
       if (this.shadowMat) gl.uniformMatrix4fv(u.u_shadowMat, false, this.shadowMat);
+    }
+    // the mobs' own shadow map (on a unit nothing else uses: a shadow sampler must never share one with a picture)
+    if (u.u_entShadow) {
+      gl.activeTexture(gl.TEXTURE8); gl.bindTexture(gl.TEXTURE_2D, this.entShadow?.tex || null); gl.uniform1i(u.u_entShadow, 8); gl.activeTexture(gl.TEXTURE0);
+      gl.uniform1f(u.u_entOn, shadow && this.shadowLive && this.entLive ? 1 : 0);
     }
   }
   /**
@@ -542,6 +558,59 @@ export class Renderer {
     }
     gl.disable(gl.POLYGON_OFFSET_FILL);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  /**
+   * The mobs' own shadow map: each frame (they move; the land's map is kept a few frames), the mobs alone seen from
+   * the light through the land's matrix, so the land looks both up at the same place.
+   */
+  drawEntShadow(mobs) {
+    const gl = this.gl, size = this.shadowMap.size;
+    if (!this.entShadow || this.entShadow.size !== size) {
+      if (this.entShadow) { gl.deleteTexture(this.entShadow.tex); gl.deleteFramebuffer(this.entShadow.fbo); }
+      const tex = gl.createTexture(), fbo = gl.createFramebuffer();
+      gl.activeTexture(gl.TEXTURE8); gl.bindTexture(gl.TEXTURE_2D, tex); gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, size, size);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, tex, 0);
+      gl.drawBuffers([gl.NONE]); gl.readBuffer(gl.NONE);
+      this.entShadow = {tex, fbo, size};
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.entShadow.fbo); gl.viewport(0, 0, size, size);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE); gl.disable(gl.BLEND); gl.depthMask(true);
+    const S = this.prog('entShadow', entShadowShaders);
+    gl.useProgram(S.p); gl.uniformMatrix4fv(S.u.u_lightMat, false, this.shadowMat);
+    gl.activeTexture(gl.TEXTURE1); gl.uniform1i(S.u.u_img, 1);
+    gl.bindVertexArray(this.entVao); gl.bindBuffer(gl.ARRAY_BUFFER, this.entBuf);
+    let any = false;
+    for (const m of mobs) {
+      const img = this.images[`mob:${m.skin}`];
+      if (!img || !m.verts.length || m.noShadow) continue;
+      gl.bindTexture(gl.TEXTURE_2D, img);
+      gl.bufferData(gl.ARRAY_BUFFER, m.verts, gl.STREAM_DRAW);
+      const quads = m.verts.length / 24;
+      this.ensureIndex(quads);
+      gl.bindVertexArray(this.entVao);
+      gl.drawElements(gl.TRIANGLES, quads * 6, gl.UNSIGNED_INT, 0);
+      any = true;
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.entLive = any;
+  }
+  /**
+   * The round shadows under mobs, dropped things and the player (the game's 实体阴影; every look, the phones' too):
+   * soft dark patches laid on the ground under them (verts built by main.js), darkening what is there.
+   */
+  drawBlobs(v) {
+    const gl = this.gl;
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+    gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(-1, -2);
+    this.drawVerts(v, {origin: [0, 0, 0], overlay: true, cut: 0.004, unit: 256, center: 128});
+    gl.disable(gl.POLYGON_OFFSET_FILL); gl.depthMask(true); gl.disable(gl.BLEND);
+    gl.uniform1f(this.chunk.u.u_overlay, 0);
   }
   /** A picture to draw into (made again when the size changes): colour of a format, a depth texture if asked. */
   target(name, W, H, {fmt = 'RGBA8', depth = false} = {}) {
@@ -703,9 +772,10 @@ export class Renderer {
     this.chunk = shaded ? this.prog(`chunk:${key}`, () => chunkShaders(opts)) : this.chunk0;
     this.ent = shaded ? this.prog(`ent:${opts.shadows}:${opts.hdr}`, () => entityShaders(opts)) : this.ent0;
     this.sky = shaded ? this.prog(`sky:${opts.clouds}:${opts.hdr}`, () => skyShaders(opts)) : this.sky0;
-    this.shadowLive = false;
+    this.shadowLive = false; this.entLive = false;
     this.mark('shadow');
     if (shaded && this.shadowQ && !env.nether) this.drawShadow({...view, time: env.time, wave: env.wave}, lit);
+    if (this.shadowLive && extras.mobs?.length) this.drawEntShadow(extras.mobs);
     this.mark('land');
     const post = !hdr && shaded && this.postOn && this.target('post', W, H, {depth: true});
     gl.bindFramebuffer(gl.FRAMEBUFFER, target ? target.fbo : post ? post.fbo : null);
@@ -723,7 +793,7 @@ export class Renderer {
       gl.useProgram(this.sky.p);
       gl.uniformMatrix4fv(this.sky.u.u_invViewProj, false, mat.invert(vp));
       gl.uniform3fv(this.sky.u.u_top, env.skyTop); gl.uniform3fv(this.sky.u.u_horizon, env.horizon); gl.uniform3fv(this.sky.u.u_glow, env.glow);
-      gl.uniform3fv(this.sky.u.u_sunDir, env.sunDir); gl.uniform1f(this.sky.u.u_stars, env.stars); gl.uniform1f(this.sky.u.u_glowAmt, env.glowAmt);
+      gl.uniform3fv(this.sky.u.u_sunDir, env.sunDir); gl.uniform1f(this.sky.u.u_stars, env.stars); gl.uniform1f(this.sky.u.u_glowAmt, env.glowAmt); gl.uniform1f(this.sky.u.u_rainbow, env.rainbow || 0);
       if (shaded) { this.setLit(this.sky, lit, view); gl.uniform3f(this.sky.u.u_camPos, view.x, view.y, view.z); gl.uniform3fv(this.sky.u.u_sunDisc, lit.sunDisc); gl.uniform1f(this.sky.u.u_moonPhase, env.moonPhase || 0); gl.uniform1f(this.sky.u.u_seen, env.sunMoon ?? 1); }
       gl.bindVertexArray(this.skyVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.drawSunMoon(vp, env, hdr);
@@ -763,7 +833,8 @@ export class Renderer {
     this.mark('far');
     if (lit && this.lods.size && !env.nether) { tris += this.drawLod(view, vp, planes, lit); gl.useProgram(P.p); }
     this.mark('mobs');
-    // things in the world (dropped items, the cracks, particles)
+    // things in the world (their shadows on the ground, dropped items, the cracks, particles)
+    if (extras.blobs?.n) this.drawBlobs(extras.blobs);
     if (extras.crack) this.drawCrack(extras.crack, view);
     if (extras.things) this.drawThings(extras.things, view);
     if (extras.mobs?.length) this.drawMobs(extras.mobs, vp, env, fogNear, fogFar);

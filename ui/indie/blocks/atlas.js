@@ -69,7 +69,7 @@ export function makeIcons(built) {
     const g = c.getContext('2d');
     g.imageSmoothingEnabled = false;
     const b = info.block;
-    if (b && ICON_STATE[b.shape] && !LAYER_ITEM.has(b.name)) {
+    if (b && ICON_STATE[b.shape] !== undefined && !LAYER_ITEM.has(b.name)) {
       isoPieces(g, b, (name, tint, shade) => face2(name, tint, shade), size);
     } else if (b && ['cube', 'slab', 'cactus', 'farmland', 'layer'].includes(b.shape) && b.tex) {
       const t = b.tex, tint = tintColor(b.tint);
@@ -111,16 +111,17 @@ export function makeIcons(built) {
 /** The picture of a stack: a potion's by its kind. */
 export const iconKey = s => s.pot ? `${s.id}:${s.pot}` : s.id;
 
-// how a shaped block shows in the inventory: its state, and what joins it (a fence and a pane joined left and right)
-const ICON_STATE = {stairs: 2, fence: 0, gate: 0, pane: 0, trapdoor: 0, bed: 2 | 4, chest: 0, enchanting: 0, anvil: 1, brewing: 0, composter: 0, lectern: 0, bell: 0};
+// how a shaped block shows in the inventory: its state, and what joins it (a fence or a wall joined left and right);
+// panes, bars, the brewing stand and the bell are flat pictures, as in the game
+const ICON_STATE = {stairs: 2, fence: 0, gate: 0, trapdoor: 0, bed: 2 | 4, chest: 0, enchanting: 0, anvil: 1, composter: 0, lectern: 0, stonewall: 0, carpet: 0};
 // blocks with their own flat item picture (doors)
-const LAYER_ITEM = new Set(['oak_door', 'spruce_door', 'birch_door']);
+const LAYER_ITEM = new Set(['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak'].map(w => `${w}_door`));
 /**
  * A shaped block drawn as its pieces in the same isometric view as the cubes: for each piece the top, the front (south)
  * and the right (east) face, back pieces first. face(name, tint, shade) gives a texture picture.
  */
 function isoPieces(g, b, face, size) {
-  const v = withMeta(b.id, ICON_STATE[b.shape]), near = (dx, dy, dz) => (b.shape === 'fence' || b.shape === 'pane') && dx ? v : 0;
+  const v = withMeta(b.id, ICON_STATE[b.shape]), near = (dx, dy, dz) => (b.shape === 'fence' || b.shape === 'stonewall') && dx ? v : 0;
   const P = (x, y, z) => [16 + (x - z) * 16, 16 + (x + z) * 8 - y * 16];
   const color = b.color ? parseInt(b.color.slice(1), 16) : null;
   const texOf = (role, f) => {
@@ -130,9 +131,7 @@ function isoPieces(g, b, face, size) {
     if (role === 'latch') return ['iron_block', null];
     const t = b.tex;
     if (role === 'base') return [t.base, null];
-    if (role === 'post') return [t.post, null];
     if (role === 'compost' || role === 'ready') return [`composter_${role === 'ready' ? 'ready' : 'compost'}`, null];
-    if (b.shape === 'pane' && f === 2) return [t.edge || t.all, null];
     if (t.all) return [t.all, null];
     if (b.shape === 'chest' && f === 4) return [t.front, null];
     return [f === 2 ? t.top : t.side, null];

@@ -18,9 +18,9 @@ export function itemLook(id, s = null) {
   const b = info?.block;
   // doors have a flat picture of their own; other shaped blocks show as a small block of what they are made of
   if (b && LAYER[b.name] !== undefined && !b.tex?.all) return {flat: LAYER[b.name], tint: 0xFFFFFF};
-  if (b && ['cube', 'slab', 'farmland', 'cactus', 'layer', 'stairs', 'fence', 'gate', 'pane', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil'].includes(b.shape) && b.tex) {
+  if (b && ['cube', 'slab', 'farmland', 'cactus', 'layer', 'stairs', 'fence', 'gate', 'pane', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'stonewall', 'carpet'].includes(b.shape) && b.tex) {
     const t = b.tex, L = n => LAYER[n] ?? 0, tint = b.color ? parseInt(b.color.slice(1), 16) : tintNum(b.tint);
-    if (t.all) return {cube: Array(6).fill(L(t.all)), tints: Array(6).fill(tint), half: b.shape === 'slab' || b.shape === 'layer'};
+    if (t.all) return {cube: Array(6).fill(L(t.all)), tints: Array(6).fill(tint), half: b.shape === 'slab' || b.shape === 'layer' || b.shape === 'carpet'};
     const side = L(t.side), front = t.front ? L(t.front) : side;
     const grass = b.name === 'grass_block';
     return {cube: [side, side, L(t.top), L(t.bottom), front, side], tints: [grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint, tint, 0xFFFFFF, grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint], half: b.shape === 'slab'};
@@ -129,6 +129,20 @@ export class Entities {
     const [n, base, spread, size, life, g] = S, tint = color ?? base, layer = LAYER.white_wool ?? 0;
     for (let i = 0; i < n; i++) this.particles.push({x: x + (Math.random() - 0.5) * spread * 4, y: y + (Math.random() - 0.5) * spread * 4, z: z + (Math.random() - 0.5) * spread * 4,
       vx: (Math.random() - 0.5) * spread, vy: Math.random() * spread + 0.02, vz: (Math.random() - 0.5) * spread, g, life: life + Math.floor(Math.random() * 10), layer, uv: [4, 4, 8, 8], size: size * (0.6 + Math.random() * 0.8), tint, air: true});
+  }
+  /** A raindrop landing: two or three little drops jumping off where it fell (off water, paler and one more). */
+  drip(x, y, z, water) {
+    for (let i = 0, n = water ? 3 : 2; i < n; i++) this.particles.push({x: x + (Math.random() - 0.5) * 0.12, y: y + 0.03, z: z + (Math.random() - 0.5) * 0.12,
+      vx: (Math.random() - 0.5) * 0.05, vy: 0.05 + Math.random() * 0.07, vz: (Math.random() - 0.5) * 0.05, g: 0.03, life: 4 + Math.floor(Math.random() * 4),
+      layer: LAYER.white_wool ?? 0, uv: [4, 4, 8, 8], size: 0.032 + Math.random() * 0.024, tint: water ? 0xf0f6ff : 0xe0e8f0, air: true});
+  }
+  /** Bits of a thing's picture flying off (a snowball or an egg breaking where it hit). */
+  crumbs(x, y, z, id, n = 8) {
+    const look = itemLook(id), layer = look.flat ?? LAYER.white_wool ?? 0;
+    for (let i = 0; i < n; i++) {
+      const u = 2 + Math.floor(Math.random() * 10), w = 2 + Math.floor(Math.random() * 10);
+      this.particles.push({x, y, z, vx: (Math.random() - 0.5) * 0.15, vy: Math.random() * 0.12 + 0.04, vz: (Math.random() - 0.5) * 0.15, g: 0.04, life: 8 + Math.floor(Math.random() * 10), layer, uv: [u, w, u + 3, w + 3], size: 0.05 + Math.random() * 0.03, tint: look.tint ?? 0xFFFFFF});
+    }
   }
   splash(x, y, z) {
     for (let i = 0; i < 20; i++) this.particles.push({x: x + (Math.random() - 0.5), y, z: z + (Math.random() - 0.5), vx: (Math.random() - 0.5) * 0.1, vy: Math.random() * 0.2, vz: (Math.random() - 0.5) * 0.1, g: 0.04, life: 20, layer: LAYER.water_still, uv: [0, 0, 4, 4], size: 0.06, tint: 0x6a9cff});

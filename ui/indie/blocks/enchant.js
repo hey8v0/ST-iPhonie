@@ -186,7 +186,7 @@ export function anvilResult(left, right) {
 
 // ---------- fishing ----------
 const FISH = [['cod', 60], ['salmon', 25], ['tropical_fish', 2], ['pufferfish', 13]];
-const JUNK = [['leather_boots', 10], ['leather', 10], ['bone', 10], ['string', 5], ['fishing_rod', 2], ['bowl', 10], ['stick', 5], ['rotten_flesh', 10]];
+const JUNK = [['leather_boots', 10], ['leather', 10], ['bone', 10], ['string', 5], ['fishing_rod', 2], ['bowl', 10], ['stick', 5], ['rotten_flesh', 10], ['ink_sac', 1]];
 const TREASURE = [['bow', 1], ['fishing_rod', 1], ['enchanted_book', 1]];
 const weighted = (list, r) => { const total = list.reduce((s, x) => s + x[1], 0); let k = r.float() * total; for (const x of list) { k -= x[1]; if (k < 0) return x[0]; } return list.at(-1)[0]; };
 /** One catch: {stack, xp}. luck: 海之眷顾's level (fish 85 − luck, junk 10 − 2·luck, treasure 5 + 2·luck). */
@@ -195,7 +195,7 @@ export function fishLoot(luck = 0, r = seeded(Math.floor(Math.random() * 2 ** 31
   if (what === 'fish') return {stack: {id: weighted(FISH, r), n: 1}, xp};
   if (what === 'junk') {
     const id = weighted(JUNK, r), info = itemInfo(id), uses = usesOf(info);
-    return {stack: {id, n: 1, ...(uses ? {dmg: Math.floor(uses * r.float() * 0.9)} : {})}, xp};
+    return {stack: {id, n: id === 'ink_sac' ? 10 : 1, ...(uses ? {dmg: Math.floor(uses * r.float() * 0.9)} : {})}, xp};
   }
   // treasure: enchanted as at a table of level 30 (a book may get the treasure ones, like 经验修补)
   const id = weighted(TREASURE, r), base = id === 'enchanted_book' ? 'book' : id, uses = usesOf(itemInfo(id));

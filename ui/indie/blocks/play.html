@@ -31,7 +31,7 @@ button{font:inherit;color:inherit}
 .dur{position:absolute;left:calc(2*var(--u));right:calc(2*var(--u));bottom:calc(1*var(--u));height:calc(2*var(--u));background:#000;pointer-events:none}
 .dur i{display:block;height:50%}
 .bars{position:absolute;left:50%;bottom:calc(31*var(--u) + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:calc(182*var(--u));display:flex;justify-content:space-between;align-items:flex-end}
-.armor{position:absolute;left:0;bottom:calc(10*var(--u))}
+.armor,.absorb{position:absolute;left:0;bottom:calc(10*var(--u))}
 .xp{position:absolute;left:50%;bottom:calc(25*var(--u) + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:calc(182*var(--u));height:calc(5*var(--u));background:#1a1a1a;border:calc(.5*var(--u)) solid #000;box-sizing:border-box}
 .xp[hidden]{display:none}
 .xp i{display:block;height:100%;background:linear-gradient(#b9f55a,#6fd024 60%,#4ea312);width:0}
@@ -211,7 +211,7 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
     <div class="toast"></div>
     <div class="chatlog"></div>
     <div class="name"></div>
-    <div class="bars"><div class="row hearts"></div><div class="row r food"></div><div class="row r air"></div><div class="row armor"></div></div>
+    <div class="bars"><div class="row hearts"></div><div class="row r food"></div><div class="row r air"></div><div class="row armor"></div><div class="row absorb"></div></div>
     <div class="xp"><i></i><b></b></div>
     <div class="hotbar"></div>
     <button class="pausebtn" aria-label="暂停"></button>

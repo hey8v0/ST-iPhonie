@@ -24,10 +24,10 @@ const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1
 const NEIGHBOURS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 const LIQUID = new Set([ID.water, ID.lava]);
 const GRAVITY = new Set(BLOCKS.filter(b => b.gravity).map(b => b.id));
-const CROP = new Set([ID.wheat, ID.carrots, ID.potatoes]);
+const CROP = new Set([ID.wheat, ID.carrots, ID.potatoes, ID.beetroots]);
 const PAIRED = new Set(BLOCKS.filter(b => b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall').map(b => b.id));
 const FACE_DIR = [[0, 1], [-1, 0], [0, -1], [1, 0]];
-const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa'].includes(b.shape)).map(b => b.id));
+const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet'].includes(b.shape)).map(b => b.id));
 // the tall flowers: bone meal gives another one
 const TALL_FLOWERS = new Set([ID.sunflower, ID.lilac, ID.rose_bush, ID.peony]);
 const hexRGB = h => parseInt(h.slice(1), 16);
@@ -401,12 +401,15 @@ export class World {
   update(x, y, z) {
     const v = this.get(x, y, z), id = v & 0xFFF;
     if (!v) return;
+    // concrete powder touching water at a side or above sets into concrete (with water under it, it falls in and sets there)
+    const sets = BLOCKS[id].sets;
+    if (sets && DIRS.some(([dx, dy, dz]) => dy !== -1 && (this.get(x + dx, y + dy, z + dz) & 0xFFF) === ID.water)) { this.set(x, y, z, ID[sets]); return; }
     if (GRAVITY.has(id)) {
       const below = this.get(x, y - 1, z), bb = BLOCKS[below & 0xFFF];
       if (y > MINY && (!below || LIQUID.has(below & 0xFFF) || bb.replace && !bb.solid)) {
         this.set(x, y, z, 0);
         if (below && !LIQUID.has(below & 0xFFF)) this.breakBlock(x, y - 1, z);
-        this.set(x, y - 1, z, v);
+        this.set(x, y - 1, z, sets && (below & 0xFFF) === ID.water ? ID[sets] : v);
         this.schedule(x, y - 1, z, 2);
       }
       return;
@@ -437,6 +440,7 @@ export class World {
     }
     if (b.shape === 'wall') { const [dx, dz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][v >>> 12 & 3]; return OPAQUE[this.get(x + dx, y, z + dz) & 0xFFF] === 1; }
     if (b.shape === 'lantern') return !!below && BLOCKS[bid].solid;
+    if (b.shape === 'carpet') return !!below && !LIQUID.has(bid);
     if (id === ID.cocoa) { const [dx, dz] = FACE_DIR[v >>> 12 & 3]; return (this.get(x + dx, y, z + dz) & 0xFFF) === ID.jungle_log; }
     if (CROP.has(id)) return bid === ID.farmland;
     if (id === ID.nether_wart) return bid === ID.soul_sand;
@@ -545,7 +549,12 @@ export class World {
   /** Bone meal on a block: crops grow, saplings may become trees, grass sprouts flowers. Returns whether it took. */
   meal(x, y, z) {
     const v = this.get(x, y, z), id = v & 0xFFF, b = BLOCKS[id], r = this.r;
-    if (CROP.has(id)) { if ((v >>> 12) >= 7) return false; this.set(x, y, z, withMeta(id, Math.min(7, (v >>> 12) + 2 + Math.floor(r() * 4)))); return true; }
+    if (CROP.has(id)) {
+      if ((v >>> 12) >= 7) return false;
+      // beetroots to their next look (three times in four), the others two to five steps
+      const m = v >>> 12, to = id === ID.beetroots ? (r() < 0.75 ? [2, 2, 4, 4, 7, 7, 7][m] : m) : Math.min(7, m + 2 + Math.floor(r() * 4));
+      this.set(x, y, z, withMeta(id, to)); return true;
+    }
     if (b.name.endsWith('_sapling')) { if (r() < 0.45) this.growSapling(x, y, z, b.name.replace('_sapling', '')); return true; }
     if (id === ID.cocoa) { if ((v >>> 12) >> 2 >= 2) return false; this.set(x, y, z, withMeta(id, (v >>> 12) + 4)); return true; }
     if ((id === ID.short_grass || id === ID.fern) && !this.get(x, y + 1, z)) {

@@ -128,7 +128,7 @@ export function drawVillages(col, seed) {
           if (byRoad) put(x, y, z, B('composter'));
           else if (edge) put(x, y, z, B(st.post));
           else if (across === mid) put(x, y, z, B('water'));
-          else { put(x, y, z, withMeta(ID.farmland, 1)); const crop = ['wheat', 'carrots', 'potatoes'][Math.floor(hash(seed + 17, p.x0, 0, p.z0) * 3)]; put(x, y + 1, z, withMeta(ID[crop], 2 + Math.floor(hash(seed, x, y, z) * 6))); }
+          else { put(x, y, z, withMeta(ID.farmland, 1)); const crop = ['wheat', 'carrots', 'potatoes', 'beetroots'][Math.floor(hash(seed + 17, p.x0, 0, p.z0) * 4)]; put(x, y + 1, z, withMeta(ID[crop], 2 + Math.floor(hash(seed, x, y, z) * 6))); }
           continue;
         }
         // a house or a work place: a floor, walls with log corners, windows, the door, a roof

@@ -9,7 +9,7 @@ import {BLOCKS, ID, idOf, metaOf} from './blocks.js';
 import {pieces} from './shapes.js';
 
 // shapes drawn from their pieces (shapes.js)
-const PIECED = new Set(['stairs', 'fence', 'gate', 'pane', 'door', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'brewing', 'portal', 'composter', 'lectern', 'bell']);
+const PIECED = new Set(['stairs', 'fence', 'gate', 'pane', 'door', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'brewing', 'portal', 'composter', 'lectern', 'bell', 'stonewall', 'carpet']);
 
 export const STRIDE = 16;
 const P = 18, P2 = P * P;

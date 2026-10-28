@@ -674,7 +674,7 @@ const ITEM_ART = {
 };
 for (const mat of Object.keys(MAT)) for (const kind of ['pickaxe', 'axe', 'shovel', 'hoe', 'sword']) ITEM_ART[`${mat}_${kind}`] = () => tool(kind, mat);
 // armour: a cap, a vest, trousers, a pair of boots, in the material's colours
-const ARMOR_COLORS = {leather: ['#a0623a', '#c28452', '#6e3f1f', '#2e1808'], iron: MAT.iron, golden: MAT.golden, diamond: MAT.diamond};
+const ARMOR_COLORS = {leather: ['#a0623a', '#c28452', '#6e3f1f', '#2e1808'], chainmail: ['#8c8c8c', '#c4c4c4', '#5c5c5c', '#262626'], iron: MAT.iron, golden: MAT.golden, diamond: MAT.diamond};
 const ARMOR_SHAPES = {
   helmet: () => mask().poly([[2.5, 11], [2.5, 6.5], [4.5, 3], [11.5, 3], [13.5, 6.5], [13.5, 11], [11, 11], [11, 8], [5, 8], [5, 11]]),
   chestplate: () => mask().poly([[1.5, 3], [6, 3], [8, 5], [10, 3], [14.5, 3], [13.5, 8.5], [12, 8.5], [12, 14], [4, 14], [4, 8.5], [2.5, 8.5]]),
@@ -682,7 +682,12 @@ const ARMOR_SHAPES = {
   boots: () => mask().poly([[1.5, 6], [6, 6], [6, 10], [7, 11], [7, 13.5], [1.5, 13.5]]).poly([[10, 6], [14.5, 6], [14.5, 13.5], [9, 13.5], [9, 11], [10, 10]]),
 };
 for (const [mat, [color, light, dark, outline]] of Object.entries(ARMOR_COLORS)) for (const [piece, shape] of Object.entries(ARMOR_SHAPES))
-  ITEM_ART[`${mat}_${piece}`] = () => icon([{mask: shape(), color, light, dark, outline, grain: mat === 'leather'}], {sparkle: mat === 'diamond' || mat === 'golden' ? [[5, 5]] : null});
+  ITEM_ART[`${mat}_${piece}`] = () => {
+    const p = icon([{mask: shape(), color, light, dark, outline, grain: mat === 'leather'}], {sparkle: mat === 'diamond' || mat === 'golden' ? [[5, 5]] : null});
+    // chainmail: little rings, a dark dot in each
+    if (mat === 'chainmail') for (let y = 4; y < 14; y += 2) for (let x = 3 + (y >> 1) % 2; x < 14; x += 2) if (p.alpha(x, y) && p.alpha(x + 1, y) && p.alpha(x, y + 1)) p.set(x, y, hex('#3c3c3c'));
+    return p;
+  };
 // the enchanting table: obsidian, a red cloth over its top edge with a gold border, a gold diamond on the cloth on top
 const obsidianPic = seed => specks(mottled(seed, ['#0f0b19', '#150f22', '#1b142b', '#22193a'], {cells: 4, grain: 0.4}), seed + 1, 7, ['#3b2b5c', '#2a1f44'], {size: 2});
 const CLOTH = ['#8e1f24', '#a2272c', '#b52f34'];
@@ -908,6 +913,179 @@ BLOCK_ART.rose_bush_bottom = () => tallFlower(159, false, '#c8202a'); BLOCK_ART.
 BLOCK_ART.peony_bottom = () => tallFlower(161, false, null); BLOCK_ART.peony_top = () => tallFlower(161, true, '#e8a6d8');
 ITEM_ART.cocoa_beans = () => icon([{mask: mask().disc(6, 8, 3, 2.2).disc(10, 10.5, 3, 2.2), color: '#7a4a24', light: '#a86a3a', dark: '#4a2a12', outline: '#1e1006'}]);
 ITEM_ART.cookie = () => { const p = icon([{mask: mask().disc(8, 8.5, 5.5, 5), color: '#d18a3a', light: '#f0b060', dark: '#94581e', outline: '#3a1e06', grain: true}]); for (const [x, y] of [[6, 6], [10, 7], [7, 10], [10, 11], [5, 9]]) p.set(x, y, hex('#4a2a12')); return p; };
+
+// ---------- 0.8.71: the colours, the stone and wood families, more food and things ----------
+const CONCRETE = {white: '#cfd5d6', orange: '#e06101', magenta: '#a9309f', light_blue: '#2489c7', yellow: '#f1af15', lime: '#5ea918', pink: '#d5658f', gray: '#36393d',
+  light_gray: '#7d7d73', cyan: '#157788', purple: '#64209c', blue: '#2d2f8f', brown: '#603c20', green: '#495b24', red: '#8e2121', black: '#080a0f'};
+const POWDER = {white: '#e2e4e4', orange: '#e3843a', magenta: '#c053b9', light_blue: '#4ab4d6', yellow: '#e9c637', lime: '#7dbd2a', pink: '#e59ab6', gray: '#4d5155',
+  light_gray: '#9b9b94', cyan: '#25949d', purple: '#8438b2', blue: '#4649a6', brown: '#7e5536', green: '#61773c', red: '#a83633', black: '#191a1f'};
+const TERRACOTTA = {white: '#d1b2a1', orange: '#a15325', magenta: '#95576c', light_blue: '#706c8a', yellow: '#ba8523', lime: '#677535', pink: '#a14e4e', gray: '#392a23',
+  light_gray: '#876b62', cyan: '#575b5b', purple: '#764656', blue: '#4a3b5b', brown: '#4d3323', green: '#4c532a', red: '#8f3d2e', black: '#251610'};
+const toHex = c => '#' + c.map(v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('');
+const shadesOf = (h, n = 4, spread = 0.18) => Array.from({length: n}, (_, i) => { const c = mul(hex(h), 1 - spread + (2 * spread) * i / (n - 1)); return '#' + c.map(v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join(''); });
+/** A smooth face with a frame: lit on the top and left edges, shaded on the bottom and right (polished stone). */
+function bordered(p, k = 0.18) {
+  for (let i = 0; i < S; i++) { p.set(i, 0, mul(p.get(i, 0), 1 + k)); p.set(0, i, mul(p.get(0, i), 1 + k)); p.set(i, 15, mul(p.get(i, 15), 1 - k * 1.4)); p.set(15, i, mul(p.get(15, i), 1 - k * 1.4)); }
+  return p;
+}
+/** Thin dark cracks running across a face. */
+function cracked(p, seed, n = 3) {
+  const r = rng(seed);
+  for (let k = 0; k < n; k++) {
+    let x = Math.floor(r() * S), y = Math.floor(r() * S);
+    for (let i = 0; i < 6 + Math.floor(r() * 6); i++) { p.set(x, y, mul(p.get(x, y), 0.45)); x += r() < 0.5 ? 1 : 0; y += r() < 0.6 ? 1 : -1; }
+  }
+  return p;
+}
+/** Bricks of a palette: rows of h, bricks of w (every other row shifted half a brick), mortar between. */
+function brickWall(seed, pal, mortar, {w = 8, h = 4} = {}) {
+  const p = mottled(seed, pal, {cells: 4, grain: 0.4}), m = hex(mortar);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const row = Math.floor(y / h), off = row % 2 ? w / 2 : 0;
+    if (y % h === h - 1 || (x + off) % w === w - 1) p.set(x, y, m);
+    else if (y % h === 0) p.set(x, y, mul(p.get(x, y), 1.1));
+  }
+  return p;
+}
+/** Square tiles of n pixels, each its own shade, with dark seams. */
+function tiles(seed, pal, seam, n = 4) {
+  const p = pic(), r = rng(seed), shade = {};
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const k = `${Math.floor(x / n)},${Math.floor(y / n)}`;
+    shade[k] ??= hex(pal[Math.floor(r() * pal.length)]);
+    p.set(x, y, x % n === n - 1 || y % n === n - 1 ? hex(seam) : mul(shade[k], (x % n === 0 || y % n === 0 ? 1.08 : 1) * (0.95 + hash(seed, x, y) * 0.08)));
+  }
+  return p;
+}
+/** Carved: a smooth face, a raised border and an inner ring (the chiseled kinds). */
+function chiseled(seed, pal, {ring = true, cross = false} = {}) {
+  const p = bordered(mottled(seed, pal, {cells: 4, grain: 0.25, smooth: 0.7}), 0.2), dark = mul(hex(pal[0]), 0.7), light = mul(hex(pal[pal.length - 1]), 1.12);
+  for (let i = 2; i < 14; i++) { p.set(i, 2, dark); p.set(2, i, dark); p.set(i, 13, light); p.set(13, i, light); }
+  if (ring) for (let i = 5; i < 11; i++) { p.set(i, 5, light); p.set(5, i, light); p.set(i, 10, dark); p.set(10, i, dark); }
+  if (cross) for (let i = 3; i < 13; i++) { p.set(i, i, dark); p.set(15 - i, i, dark); }
+  return p;
+}
+for (const [c] of COLORS) {
+  const seed = nameSeed(c);
+  BLOCK_ART[`${c}_concrete`] = () => mottled(seed + 1, shadesOf(CONCRETE[c], 4, 0.035), {cells: 4, grain: 0.15, smooth: 0.7});
+  BLOCK_ART[`${c}_concrete_powder`] = () => specks(mottled(seed + 2, shadesOf(POWDER[c], 5, 0.09), {cells: 8, grain: 0.75, smooth: 0.3}), seed + 3, 10, shadesOf(POWDER[c], 2, 0.2), {size: 1});
+  BLOCK_ART[`${c}_terracotta`] = () => mottled(seed + 4, shadesOf(TERRACOTTA[c], 4, 0.07), {cells: 4, grain: 0.3});
+  // glazed: a pattern of its own, a quarter turned four times round the middle
+  BLOCK_ART[`${c}_glazed_terracotta`] = () => {
+    const r = rng(seed + 5), base = hex(CONCRETE[c]), pal = [base, mul(base, 0.7), mix(base, [255, 255, 255], 0.55), mix(hex(TERRACOTTA[c]), [255, 255, 255], 0.15)];
+    const a = 1 + r() * 2, b = 1 + r() * 2, ph = r() * 6, kind = Math.floor(r() * 3), q = [];
+    for (let v = 0; v < 8; v++) for (let u = 0; u < 8; u++) {
+      const d = Math.max(u, v), w = kind === 0 ? Math.sin(u * a + ph) + Math.cos(v * b) : kind === 1 ? Math.sin((u + v) * a * 0.6 + ph) * Math.cos((u - v) * b * 0.5) * 2 : Math.sin(Math.hypot(u - 7.5, v - 7.5) * a + ph) + (u === v ? 1 : 0);
+      q[v * 8 + u] = d === 7 ? 1 : w > 1 ? 2 : w > 0.1 ? 0 : w > -0.8 ? 3 : 1;
+    }
+    const p = pic();
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      // which quarter, and its own corner turned to the middle
+      let u = x, v = y;
+      if (x >= 8 && y < 8) [u, v] = [y, 15 - x]; else if (x >= 8 && y >= 8) [u, v] = [15 - x, 15 - y]; else if (x < 8 && y >= 8) [u, v] = [15 - y, x];
+      p.set(x, y, mul(pal[q[v * 8 + u]], 0.95 + hash(seed, x, y) * 0.08));
+    }
+    return p;
+  };
+  // stained glass: the frame and a few glints almost solid, the pane between see-through, all in the colour
+  const g = COLORS.find(x => x[0] === c)[2];
+  BLOCK_ART[`${c}_stained_glass`] = () => {
+    const p = pic(), col = hex(g), edge = mix(col, [255, 255, 255], 0.25), dim = mul(col, 0.75);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, mul(col, 0.95 + hash(seed + 6, x, y) * 0.08), 110);
+    for (let i = 0; i < S; i++) { p.set(i, 0, edge, 230); p.set(0, i, edge, 230); p.set(i, 15, dim, 230); p.set(15, i, dim, 230); }
+    for (const [x, y] of [[3, 4], [4, 3], [5, 2], [10, 11], [11, 10], [12, 9]]) p.set(x, y, mix(col, [255, 255, 255], 0.6), 200);
+    return p;
+  };
+  BLOCK_ART[`${c}_stained_glass_pane_top`] = () => { const p = pic(), col = hex(g); for (let y = 0; y < S; y++) { p.set(7, y, mix(col, [255, 255, 255], 0.25), 230); p.set(8, y, mul(col, 0.75), 230); } return p; };
+  // dyes: a little heap of the colour
+  ITEM_ART[`${c}_dye`] = () => { const col = hex(g), h = x => '#' + x.map(v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join(''); return icon([{mask: blob(8, 9, 4.4, seed + 7), color: g, light: h(mix(col, [255, 255, 255], 0.35)), dark: h(mul(col, 0.65)), outline: h(mul(col, 0.3)), grain: true}]); };
+}
+ITEM_ART.ink_sac = () => icon([{mask: blob(8, 9, 4.6, 3301), color: '#24222e', light: '#4a4658', dark: '#121118', outline: '#050508', grain: true}], {sparkle: [[6, 7]]});
+// stripped wood: the planks' colour with the grain running along, the end with its rings to the edge
+for (const [w, [, , plank, rings]] of Object.entries(WOOD_ART)) {
+  const seed = nameSeed('stripped_' + w);
+  BLOCK_ART[`stripped_${w}_log`] = () => { const p = pic(), n = tileNoise(seed, 4); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, mul(hex(plank), (x % 3 === 0 ? 0.88 : 1) * (0.9 + n(x, y) * 0.14) * (0.96 + hash(seed, x, y >> 2) * 0.06))); return p; };
+  BLOCK_ART[`stripped_${w}_log_top`] = () => logTop(seed + 1, rings[0], rings);
+}
+// the doors and trapdoors of jungle, acacia and dark oak
+for (const [w, [c, win]] of Object.entries({jungle: ['#a07351', 'holes'], acacia: ['#b2643a', 'glass'], dark_oak: ['#4c3220', 'glass']})) {
+  BLOCK_ART[`${w}_door_top`] = () => door(c, true, win); BLOCK_ART[`${w}_door_bottom`] = () => door(c, false, win);
+  BLOCK_ART[`${w}_trapdoor`] = () => trapdoor(c, w !== 'dark_oak');
+  ITEM_ART[`${w}_door`] = () => doorIcon(c, win === 'glass');
+}
+// stone
+const SB = ['#6d6d6d', '#767676', '#7e7e7e', '#868686', '#8e8e8e'];
+BLOCK_ART.mossy_stone_bricks = () => { const p = stoneBricks(153), n = tileNoise(154, 4), r = rng(155); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (n(x, y) > 0.58 || (n(x, y) > 0.45 && r() < 0.3)) p.set(x, y, mix(hex('#4f7a2e'), hex('#6a943a'), r())); return p; };
+BLOCK_ART.cracked_stone_bricks = () => cracked(stoneBricks(153), 156, 4);
+BLOCK_ART.chiseled_stone_bricks = () => chiseled(157, SB);
+const polished = (seed, pal) => bordered(mottled(seed, pal, {cells: 4, grain: 0.18, smooth: 0.8}));
+BLOCK_ART.polished_granite = () => polished(3101, ['#9a6552', '#a26b58', '#a8715e', '#ae7764']);
+BLOCK_ART.polished_diorite = () => polished(3102, ['#c0c0c2', '#c8c8ca', '#d0d0d2', '#d8d8da']);
+BLOCK_ART.polished_andesite = () => polished(3103, ['#7f8382', '#878b8a', '#8f9392', '#979b9a']);
+const DS = ['#36363e', '#3e3e46', '#46464e', '#4e4e56'];
+BLOCK_ART.polished_deepslate = () => polished(3111, DS);
+BLOCK_ART.deepslate_bricks = () => brickWall(3112, DS, '#1e1e24');
+BLOCK_ART.cracked_deepslate_bricks = () => cracked(brickWall(3112, DS, '#1e1e24'), 3113, 4);
+BLOCK_ART.deepslate_tiles = () => tiles(3114, DS, '#1c1c22');
+BLOCK_ART.cracked_deepslate_tiles = () => cracked(tiles(3114, DS, '#1c1c22'), 3115, 4);
+BLOCK_ART.chiseled_deepslate = () => chiseled(3116, DS, {cross: true});
+const TF = ['#5f6158', '#686a61', '#71736a', '#7a7c73'];
+BLOCK_ART.polished_tuff = () => polished(3121, TF);
+BLOCK_ART.tuff_bricks = () => brickWall(3122, TF, '#45473f', {w: 8, h: 8});
+BLOCK_ART.chiseled_tuff = () => chiseled(3123, TF, {ring: false, cross: true});
+BLOCK_ART.chiseled_tuff_top = () => polished(3124, TF);
+BLOCK_ART.chiseled_tuff_bricks = () => { const p = brickWall(3125, TF, '#45473f', {w: 8, h: 8}); for (let i = 4; i < 12; i++) { p.set(i, 4, hex('#8a8c82')); p.set(i, 11, hex('#4a4c44')); } return p; };
+BLOCK_ART.chiseled_tuff_bricks_top = () => chiseled(3126, TF);
+const SAND = {sandstone: ['#cfbd84', '#d6c58c', '#dccd95', '#e3d6a1'], red_sandstone: ['#a8541c', '#b25b20', '#bc6427', '#c56d2e']};
+for (const [n, pal] of Object.entries(SAND)) {
+  BLOCK_ART[`cut_${n}`] = () => { const p = mottled(nameSeed('cut_' + n), pal, {cells: 4, grain: 0.25}); for (let x = 0; x < S; x++) { for (const y of [0, 8]) p.set(x, y, mul(hex(pal[3]), 1.05)); for (const y of [7, 15]) p.set(x, y, mul(hex(pal[0]), 0.85)); } return p; };
+  BLOCK_ART[`chiseled_${n}`] = () => { const p = chiseled(nameSeed('chiseled_' + n), pal, {ring: true}); for (const [x, y] of [[7, 7], [8, 7], [7, 8], [8, 8]]) p.set(x, y, mul(hex(pal[0]), 0.7)); return p; };
+}
+const QZ = ['#e4ded2', '#e8e2d6', '#ece6db', '#f0ebe1'];
+BLOCK_ART.chiseled_quartz_block = () => { const p = bordered(mottled(3131, QZ, {cells: 4, grain: 0.1, smooth: 0.85}), 0.08); for (let y = 0; y < S; y++) for (const x of [3, 4, 11, 12]) p.set(x, y, mul(p.get(x, y), x === 3 || x === 11 ? 0.88 : 1.04)); return p; };
+BLOCK_ART.chiseled_quartz_block_top = () => chiseled(3132, QZ);
+BLOCK_ART.quartz_pillar = () => { const p = mottled(3133, QZ, {cells: 4, grain: 0.1, smooth: 0.85}); for (let y = 0; y < S; y++) for (const x of [0, 5, 10, 15]) p.set(x, y, mul(p.get(x, y), 0.9)); return p; };
+BLOCK_ART.quartz_pillar_top = () => { const p = bordered(mottled(3134, QZ, {cells: 4, grain: 0.1}), 0.08); for (let i = 3; i < 13; i++) { p.set(i, 3, hex('#d4ccbd')); p.set(3, i, hex('#d4ccbd')); p.set(i, 12, hex('#d4ccbd')); p.set(12, i, hex('#d4ccbd')); } return p; };
+BLOCK_ART.quartz_bricks = () => brickWall(3135, QZ, '#cfc6b6', {w: 8, h: 8});
+const MUD = ['#8a6a4e', '#937255', '#9b7a5c', '#a38263'];
+BLOCK_ART.packed_mud = () => specks(mottled(3141, MUD, {cells: 4, grain: 0.45}), 3142, 8, ['#7a5c42', '#b08e6c'], {size: 1});
+BLOCK_ART.mud_bricks = () => brickWall(3143, ['#8d6d50', '#967557', '#9e7d5e'], '#6e5440', {w: 8, h: 4});
+const NB = ['#3a1c22', '#421f26', '#4a232b', '#522730'], RNB = ['#4a0a0d', '#560c10', '#620e13', '#6e1016'];
+BLOCK_ART.red_nether_bricks = () => brickWall(3151, RNB, '#2a0406', {w: 8, h: 4});
+BLOCK_ART.cracked_nether_bricks = () => cracked(BLOCK_ART.nether_bricks(), 3152, 5);
+BLOCK_ART.chiseled_nether_bricks = () => chiseled(3153, NB);
+// the raw metals' blocks: heaped lumps of the raw metal
+for (const [m, pal] of Object.entries({iron: ['#8e6f57', '#a6866b', '#bd9a7e', '#d8af93'], copper: ['#8a4f33', '#9a5a3b', '#b06a47', '#c27a54'], gold: ['#b88220', '#d19a26', '#dda62d', '#f0c140']}))
+  BLOCK_ART[`raw_${m}_block`] = () => stones(nameSeed('raw_' + m), pal, {count: 11, seam: toHex(mul(hex(pal[0]), 0.7)), edge: 0.22});
+// the tulips: a cup of petals on a stem
+for (const [t, head] of Object.entries({red: '#d8301e', orange: '#ec7a1a', white: '#eeeee6', pink: '#eea6c6'})) BLOCK_ART[`${t}_tulip`] = () => {
+  const p = flower(head, '#4c8a2a', '#5fa437', {tall: 7}), col = hex(head);
+  for (const [x, y] of [[6, 4], [8, 4], [6, 5], [7, 5], [8, 5], [7, 6]]) p.set(x, y, y === 4 ? mix(col, [255, 255, 255], 0.3) : mul(col, y === 6 ? 0.8 : 1));
+  return p;
+};
+for (let i = 0; i < 4; i++) BLOCK_ART[`beetroots_stage${i}`] = () => rootCrop(i, '#5a8a2a', '#a8262c', 71);
+// food and the rest
+const bowlOf = soup => icon([{mask: mask().disc(8, 8.5, 6, 5).cut(mask().disc(8, 6, 6.5, 3.6)), ...HANDLE}, {mask: mask().disc(8, 7.2, 5.2, 1.7), color: soup, light: '#ffffff', dark: '#3a2010'}]);
+ITEM_ART.mushroom_stew = () => bowlOf('#b5734a');
+ITEM_ART.beetroot_soup = () => bowlOf('#a3222e');
+ITEM_ART.golden_apple = () => icon([{mask: mask().disc(7, 9.5, 4.6, 4.3).disc(10, 9.5, 4, 4), color: '#f2c53a', light: '#fff2a0', dark: '#b5850f', outline: '#4a3404'}, {mask: mask().line(8.5, 5.5, 9.5, 2.5, 1.2), ...HANDLE}, {mask: mask().disc(11.5, 3.5, 1.8, 1.1), color: '#4c9a2a', light: '#7cc44a', dark: '#2e6a16'}], {sparkle: [[6, 7]]});
+ITEM_ART.enchanted_golden_apple = ITEM_ART.golden_apple;
+ITEM_ART.pumpkin_pie = () => icon([{mask: mask().disc(8, 9, 6.2, 4.2), color: '#c97f2a', light: '#e8a952', dark: '#8a5214', outline: '#3a2006'}, {mask: mask().disc(8, 8.4, 4.4, 2.6), color: '#e48a2a', light: '#f6b45a', dark: '#b05f12'}]);
+ITEM_ART.beetroot = () => icon([{mask: mask().disc(8, 10, 4.2, 4.4).poly([[6, 12], [10, 12], [8, 15.5]]), color: '#a8262c', light: '#d84a52', dark: '#6a1218', outline: '#2e0608'}, {mask: mask().line(8, 6, 6, 1.5, 1.4).line(8, 6, 10.5, 2, 1.4), color: '#5a8a2a', light: '#86b84a', dark: '#355a16'}]);
+ITEM_ART.beetroot_seeds = () => { const p = pic(); for (const [x, y] of [[4, 9], [7, 6], [10, 10], [6, 12], [11, 6], [8, 9]]) { p.set(x, y, hex('#8a5a3a')); p.set(x + 1, y, hex('#6a4026')); p.set(x, y + 1, hex('#5a3420')); } return p; };
+ITEM_ART.egg = () => icon([{mask: mask().disc(8, 9, 4.2, 5.4), color: '#e8d6b4', light: '#fff6e2', dark: '#b8a07a', outline: '#4a3a20'}], {sparkle: [[6, 6]]});
+ITEM_ART.milk_bucket = () => icon([{mask: mask().poly([[3, 5], [13, 5], [11.5, 14], [4.5, 14]]), color: '#bdbdbd', light: '#e8e8e8', dark: '#7a7a7a', outline: '#2a2a2a'}, {mask: mask().poly([[4.5, 5], [11.5, 5], [11, 7], [5, 7]]), color: '#f6f6f2', light: '#ffffff', dark: '#d6d6d0'}, {mask: mask().curve([[3, 5], [8, -2], [13, 5]], 1), color: '#8a8a8a', dark: '#4a4a4a'}]);
+ITEM_ART.experience_bottle = () => icon([{mask: mask().disc(8, 10.5, 4.2, 3.8).poly([[6.5, 3], [9.5, 3], [9.5, 7], [6.5, 7]]), color: '#9be35a', light: '#d8ff9e', dark: '#4f9a24', outline: '#1e3a0a'}, {mask: mask().poly([[6.5, 1.5], [9.5, 1.5], [9.5, 3], [6.5, 3]]), color: '#8a6438', dark: '#5c4021'}], {sparkle: [[6, 9], [9, 11]]});
+// spawn eggs: the egg in a colour of the creature, speckled with its second colour
+for (const [k, [a, b]] of Object.entries({pig: ['#f0a5a2', '#db635f'], cow: ['#443626', '#a1a1a1'], sheep: ['#e7e7e7', '#ffb5b5'], chicken: ['#a1a1a1', '#ff0000'], zombie: ['#00afaf', '#799c65'],
+  skeleton: ['#c1c1c1', '#494949'], creeper: ['#0da70b', '#000000'], spider: ['#342d27', '#a80e0e'], zombified_piglin: ['#ea9393', '#4c7129'], ghast: ['#f9f9f9', '#bcbcbc'], blaze: ['#f6b201', '#fff87e'],
+  villager: ['#563c33', '#bd8b72'], iron_golem: ['#dbcdc1', '#74a332'], magma_cube: ['#340000', '#fcfc00']})) ITEM_ART[`${k}_spawn_egg`] = () => {
+  const p = icon([{mask: mask().disc(8, 9, 4.6, 5.8), color: a, light: '#' + mix(hex(a), [255, 255, 255], 0.35).map(v => Math.round(v).toString(16).padStart(2, '0')).join(''), dark: '#' + mul(hex(a), 0.62).map(v => Math.round(v).toString(16).padStart(2, '0')).join(''), outline: '#1a1a1a'}]), r = rng(nameSeed(k));
+  for (let n = 0; n < 9; n++) { const x = 5 + Math.floor(r() * 7), y = 5 + Math.floor(r() * 8); if (p.alpha(x, y) && p.alpha(x + 1, y)) { p.set(x, y, hex(b)); if (r() < 0.6) p.set(x + 1, y, mul(hex(b), 0.85)); } }
+  return p;
+};
+// the round shadow laid under mobs and things (render.js drawBlobs): black, thinning out to the edge
+BLOCK_ART.entity_shadow = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x + 0.5 - 8, y + 0.5 - 8) / 8; if (d < 1) p.set(x, y, [0, 0, 0], Math.round(255 * (1 - d * d) ** 1.4)); } return p; };
 
 /** Frames per animated texture and ticks per frame. */
 export const ANIMATED = {water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};

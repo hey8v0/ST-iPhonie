@@ -431,9 +431,9 @@ function decorate(w, col, x0, z0, L, top) {
 const WOOD_KINDS = ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak'];
 const TALL_PLANTS = new Set([ID.tall_grass, ID.large_fern, ID.sunflower, ID.lilac, ID.rose_bush, ID.peony]);
 const REPLACEABLE = new Set([0, ID.short_grass, ID.fern, ID.snow, ID.dead_bush, ID.vine, ID.tall_grass, ID.large_fern, ID.sunflower, ID.lilac, ID.rose_bush, ID.peony,
-  ...['dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'red_mushroom', 'brown_mushroom'].map(n => ID[n]), ...WOOD_KINDS.map(n => ID[`${n}_leaves`])]);
+  ...['dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'red_tulip', 'orange_tulip', 'white_tulip', 'pink_tulip', 'red_mushroom', 'brown_mushroom'].map(n => ID[n]), ...WOOD_KINDS.map(n => ID[`${n}_leaves`])]);
 const TRUNK_OVER = new Set([...REPLACEABLE, ID.grass_block, ID.dirt, ID.podzol, ID.coarse_dirt, ID.cocoa, ...WOOD_KINDS.map(n => ID[`${n}_log`])]);
-const CROSS = new Set(['short_grass', 'fern', 'dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'dead_bush', 'sugar_cane', 'red_mushroom', 'brown_mushroom', 'tall_grass', 'large_fern', 'sunflower', 'lilac', 'rose_bush', 'peony', 'vine', 'cocoa'].map(n => ID[n]));
+const CROSS = new Set(['short_grass', 'fern', 'dandelion', 'poppy', 'red_tulip', 'orange_tulip', 'white_tulip', 'pink_tulip', 'blue_orchid', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'dead_bush', 'sugar_cane', 'red_mushroom', 'brown_mushroom', 'tall_grass', 'large_fern', 'sunflower', 'lilac', 'rose_bush', 'peony', 'vine', 'cocoa'].map(n => ID[n]));
 const GRASS = {plains: 0.35, sunflower_plains: 0.35, meadow: 0.6, forest: 0.18, flower_forest: 0.15, birch_forest: 0.2, old_growth_birch_forest: 0.2, dark_forest: 0.12, swamp: 0.25, taiga: 0.22, snowy_taiga: 0.1,
   old_growth_pine_taiga: 0.3, old_growth_spruce_taiga: 0.3, snowy_plains: 0.04, savanna: 0.5, jungle: 0.35, stony_peaks: 0.05, desert: 0};
 // how much of the grass grows two blocks tall (tall grass, or the large fern where ferns grow)
@@ -442,11 +442,11 @@ const TALL = {plains: 0.08, sunflower_plains: 0.08, savanna: 0.15, meadow: 0.06,
 // the tall flowers: lilac, rose bush and peony in forests (many in the flower forest), sunflowers on their plains
 const FOREST_FLOWERS = ['lilac', 'rose_bush', 'peony'];
 const BIG_FLOWERS = {forest: {rate: 0.004, kinds: FOREST_FLOWERS}, flower_forest: {rate: 0.05, kinds: FOREST_FLOWERS}, birch_forest: {rate: 0.002, kinds: FOREST_FLOWERS},
-  old_growth_birch_forest: {rate: 0.003, kinds: FOREST_FLOWERS}, sunflower_plains: {rate: 0.06, kinds: ['sunflower']}};
+  old_growth_birch_forest: {rate: 0.003, kinds: FOREST_FLOWERS}, sunflower_plains: {rate: 0.06, kinds: ['sunflower', 'red_tulip', 'orange_tulip', 'red_tulip', 'orange_tulip']}};
 const FLOWERS = {
-  plains: {rate: 0.025, kinds: ['dandelion', 'poppy', 'azure_bluet', 'oxeye_daisy', 'cornflower']}, meadow: {rate: 0.08, kinds: ['dandelion', 'poppy', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower']},
+  plains: {rate: 0.025, kinds: ['dandelion', 'poppy', 'azure_bluet', 'oxeye_daisy', 'cornflower']}, meadow: {rate: 0.08, kinds: ['dandelion', 'poppy', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'red_tulip', 'orange_tulip', 'white_tulip', 'pink_tulip']},
   forest: {rate: 0.02, kinds: ['dandelion', 'poppy', 'lily_of_the_valley']}, birch_forest: {rate: 0.02, kinds: ['dandelion', 'poppy', 'lily_of_the_valley']},
-  flower_forest: {rate: 0.12, kinds: ['dandelion', 'poppy', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley']}, old_growth_birch_forest: {rate: 0.02, kinds: ['dandelion', 'poppy', 'lily_of_the_valley']},
+  flower_forest: {rate: 0.12, kinds: ['dandelion', 'poppy', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'red_tulip', 'orange_tulip', 'white_tulip', 'pink_tulip']}, old_growth_birch_forest: {rate: 0.02, kinds: ['dandelion', 'poppy', 'lily_of_the_valley']},
   old_growth_pine_taiga: {rate: 0.004, kinds: ['dandelion', 'poppy']}, old_growth_spruce_taiga: {rate: 0.004, kinds: ['dandelion', 'poppy']}, sunflower_plains: {rate: 0.025, kinds: ['dandelion', 'poppy', 'azure_bluet', 'oxeye_daisy', 'cornflower']},
   dark_forest: {rate: 0.006, kinds: ['poppy', 'dandelion']}, swamp: {rate: 0.02, kinds: ['blue_orchid']}, taiga: {rate: 0.004, kinds: ['dandelion', 'poppy']},
   snowy_taiga: {rate: 0, kinds: ['poppy']}, snowy_plains: {rate: 0, kinds: ['poppy']}, savanna: {rate: 0.006, kinds: ['dandelion', 'poppy']}, jungle: {rate: 0.006, kinds: ['dandelion', 'poppy']},

@@ -104,7 +104,7 @@ block('wheat', '小麦', {tex: all('wheat_stage0'), shape: 'crop', pass: 'cutout
   drop: (r, meta) => meta >= 7 ? [['wheat', 1], ['wheat_seeds', 1 + Math.floor(r() * 3)]] : ['wheat_seeds', 1]});
 block('ladder', '梯子', {tex: all('ladder'), shape: 'wall', pass: 'cutout', hard: 0.4, tool: T.AXE, solid: false, facing: true, climb: true});
 block('oak_slab', '橡木台阶', {tex: all('oak_planks'), shape: 'slab', hard: 2, tool: T.AXE, opaque: false, filter: 0});
-block('stone_slab', '石台阶', {tex: tbs('smooth_stone', 'smooth_stone', 'smooth_stone_slab_side'), shape: 'slab', hard: 2, tool: T.PICK, tier: 0, opaque: false, filter: 0});
+block('stone_slab', '石台阶', {tex: all('stone'), shape: 'slab', hard: 2, tool: T.PICK, tier: 0, opaque: false, filter: 0});
 block('cobblestone_slab', '圆石台阶', {tex: all('cobblestone'), shape: 'slab', hard: 2, tool: T.PICK, tier: 0, opaque: false, filter: 0});
 block('pumpkin', '南瓜', {tex: tbs('pumpkin_top', 'pumpkin_top', 'pumpkin_side'), hard: 1, tool: T.AXE});
 block('melon', '西瓜', {tex: tbs('melon_top', 'melon_top', 'melon_side'), hard: 1, tool: T.AXE, drop: r => ['melon_slice', 3 + Math.floor(r() * 5)]});
@@ -182,6 +182,104 @@ tall('large_fern', '大型蕨', {tint: 'grass', replace: true, drop: (r, meta) =
 tall('sunflower', '向日葵', {tex: {all: 'sunflower_front', top: 'sunflower_top', bottom: 'sunflower_bottom', front: 'sunflower_front', back: 'sunflower_back'}});
 for (const [n, zh] of [['lilac', '丁香'], ['rose_bush', '玫瑰丛'], ['peony', '牡丹']]) tall(n, zh);
 
+// ---------- more of the game's blocks (0.8.71; only ever added at the end) ----------
+// cat: the creative inventory's tab (invui.js) for those its names do not place
+// colours: carpets (a sixteenth thick, on anything), concrete and its powder (falls like sand; touching water it sets:
+// world.js), terracotta in the sixteen colours and glazed (a pattern of its own each), stained glass and its panes
+for (const [c, zh] of COLORS) block(`${c}_carpet`, `${zh}地毯`, {tex: all(`${c}_wool`), shape: 'carpet', hard: 0.1, opaque: false, filter: 0, cat: 'color'});
+for (const [c, zh] of COLORS) block(`${c}_concrete`, `${zh}混凝土`, {tex: all(`${c}_concrete`), hard: 1.8, tool: T.PICK, tier: 0, cat: 'color'});
+for (const [c, zh] of COLORS) block(`${c}_concrete_powder`, `${zh}混凝土粉末`, {tex: all(`${c}_concrete_powder`), hard: 0.5, tool: T.SHOVEL, gravity: true, sets: `${c}_concrete`, cat: 'color'});
+for (const [c, zh] of COLORS) block(`${c}_terracotta`, `${zh}陶瓦`, {tex: all(`${c}_terracotta`), hard: 1.25, tool: T.PICK, tier: 0, cat: 'color'});
+for (const [c, zh] of COLORS) block(`${c}_glazed_terracotta`, `${zh}带釉陶瓦`, {tex: all(`${c}_glazed_terracotta`), hard: 1.4, tool: T.PICK, tier: 0, cat: 'color'});
+for (const [c, zh] of COLORS) block(`${c}_stained_glass`, `${zh}染色玻璃`, {tex: all(`${c}_stained_glass`), pass: 'translucent', hard: 0.3, drop: null, filter: 0, cat: 'color'});
+for (const [c, zh] of COLORS) block(`${c}_stained_glass_pane`, `${zh}染色玻璃板`, {tex: {all: `${c}_stained_glass`, edge: `${c}_stained_glass_pane_top`}, shape: 'pane', pass: 'translucent', hard: 0.3, drop: null, ...shaped, cat: 'color'});
+// wood: the bark block, logs and wood with the bark taken off (an axe's use), and every kind's slab; the shaped wood of
+// the kinds that had none
+for (const [w, zh] of WOODS) {
+  block(`${w}_wood`, zh, {tex: all(`${w}_log`), hard: 2, tool: T.AXE, axis: true, cat: 'build'});
+  block(`stripped_${w}_log`, `去皮${zh}原木`, {tex: tbs(`stripped_${w}_log_top`, `stripped_${w}_log_top`, `stripped_${w}_log`), hard: 2, tool: T.AXE, axis: true, cat: 'build'});
+  block(`stripped_${w}_wood`, `去皮${zh}`, {tex: all(`stripped_${w}_log`), hard: 2, tool: T.AXE, axis: true, cat: 'build'});
+  if (w !== 'oak') block(`${w}_slab`, `${zh}台阶`, {tex: all(`${w}_planks`), shape: 'slab', hard: 2, tool: T.AXE, opaque: false, filter: 0});
+}
+for (const [w, zh] of WOODS.filter(([w]) => !['oak', 'spruce', 'birch'].includes(w))) {
+  block(`${w}_stairs`, `${zh}楼梯`, {tex: all(`${w}_planks`), shape: 'stairs', hard: 2, tool: T.AXE, ...shaped});
+  block(`${w}_fence`, `${zh}栅栏`, {tex: all(`${w}_planks`), shape: 'fence', hard: 2, tool: T.AXE, ...shaped});
+  block(`${w}_fence_gate`, `${zh}栅栏门`, {tex: all(`${w}_planks`), shape: 'gate', hard: 2, tool: T.AXE, use: 'toggle', ...shaped});
+  block(`${w}_door`, `${zh}门`, {tex: {top: `${w}_door_top`, bottom: `${w}_door_bottom`}, shape: 'door', pass: 'cutout', hard: 3, tool: T.AXE, use: 'toggle', ...shaped});
+  block(`${w}_trapdoor`, `${zh}活板门`, {tex: all(`${w}_trapdoor`), shape: 'trapdoor', pass: 'cutout', hard: 3, tool: T.AXE, use: 'toggle', ...shaped});
+}
+// stone: polished, mossy, cracked and chiseled kinds, and the stairs, slabs and walls of each family (a wall: a post
+// and arms to what it meets, 1.5 high to walk into)
+const stoneBlock = (name, zh, tex, hard = 1.5, o = {}) => block(name, zh, {tex: typeof tex === 'string' ? all(tex) : tex, hard, tool: T.PICK, tier: 0, cat: 'build', ...o});
+const family = (base, zh, tex, {hard = 1.5, stairs = true, slab = true, wall = false} = {}) => {
+  const t = typeof tex === 'string' ? all(tex) : tex, o = {tex: t, hard, tool: T.PICK, tier: 0, cat: 'build'};
+  if (stairs) block(`${base}_stairs`, `${zh}楼梯`, {...o, shape: 'stairs', ...shaped});
+  if (slab) block(`${base}_slab`, `${zh}台阶`, {...o, shape: 'slab', opaque: false, filter: 0});
+  if (wall) block(`${base}_wall`, `${zh}墙`, {...o, shape: 'stonewall', ...shaped});
+};
+family('stone', '石', 'stone', {slab: false});
+block('smooth_stone_slab', '平滑石台阶', {tex: tbs('smooth_stone', 'smooth_stone', 'smooth_stone_slab_side'), shape: 'slab', hard: 2, tool: T.PICK, tier: 0, opaque: false, filter: 0, cat: 'build'});
+family('cobblestone', '圆石', 'cobblestone', {hard: 2, stairs: false, slab: false, wall: true});
+family('mossy_cobblestone', '苔石', 'mossy_cobblestone', {hard: 2, wall: true});
+family('stone_brick', '石砖', 'stone_bricks', {stairs: false, wall: true});
+stoneBlock('mossy_stone_bricks', '苔石砖', 'mossy_stone_bricks');
+stoneBlock('cracked_stone_bricks', '裂纹石砖', 'cracked_stone_bricks');
+stoneBlock('chiseled_stone_bricks', '錾制石砖', 'chiseled_stone_bricks');
+family('mossy_stone_brick', '苔石砖', 'mossy_stone_bricks', {wall: true});
+for (const [n, zh] of [['granite', '花岗岩'], ['diorite', '闪长岩'], ['andesite', '安山岩']]) {
+  stoneBlock(`polished_${n}`, `磨制${zh}`, `polished_${n}`);
+  family(n, zh, n, {wall: true});
+  family(`polished_${n}`, `磨制${zh}`, `polished_${n}`);
+}
+family('cobbled_deepslate', '深板岩圆石', 'cobbled_deepslate', {hard: 3.5, wall: true});
+stoneBlock('polished_deepslate', '磨制深板岩', 'polished_deepslate', 3.5);
+family('polished_deepslate', '磨制深板岩', 'polished_deepslate', {hard: 3.5, wall: true});
+stoneBlock('deepslate_bricks', '深板岩砖', 'deepslate_bricks', 3.5);
+family('deepslate_brick', '深板岩砖', 'deepslate_bricks', {hard: 3.5, wall: true});
+stoneBlock('cracked_deepslate_bricks', '裂纹深板岩砖', 'cracked_deepslate_bricks', 3.5);
+stoneBlock('deepslate_tiles', '深板岩瓦', 'deepslate_tiles', 3.5);
+family('deepslate_tile', '深板岩瓦', 'deepslate_tiles', {hard: 3.5, wall: true});
+stoneBlock('cracked_deepslate_tiles', '裂纹深板岩瓦', 'cracked_deepslate_tiles', 3.5);
+stoneBlock('chiseled_deepslate', '錾制深板岩', 'chiseled_deepslate', 3.5);
+family('tuff', '凝灰岩', 'tuff', {wall: true});
+stoneBlock('polished_tuff', '磨制凝灰岩', 'polished_tuff');
+family('polished_tuff', '磨制凝灰岩', 'polished_tuff', {wall: true});
+stoneBlock('tuff_bricks', '凝灰岩砖', 'tuff_bricks');
+family('tuff_brick', '凝灰岩砖', 'tuff_bricks', {wall: true});
+stoneBlock('chiseled_tuff', '錾制凝灰岩', tbs('chiseled_tuff_top', 'chiseled_tuff_top', 'chiseled_tuff'));
+stoneBlock('chiseled_tuff_bricks', '錾制凝灰岩砖', tbs('chiseled_tuff_bricks_top', 'chiseled_tuff_bricks_top', 'chiseled_tuff_bricks'));
+for (const [n, zh] of [['sandstone', '砂岩'], ['red_sandstone', '红砂岩']]) {
+  const t = tbs(`${n}_top`, `${n}_bottom`, n);
+  family(n, zh, t, {hard: 0.8, stairs: n !== 'sandstone', wall: true});
+  stoneBlock(`cut_${n}`, `切制${zh}`, tbs(`${n}_top`, `${n}_top`, `cut_${n}`), 0.8);
+  family(`cut_${n}`, `切制${zh}`, tbs(`${n}_top`, `${n}_top`, `cut_${n}`), {hard: 0.8, stairs: false});
+  stoneBlock(`chiseled_${n}`, `錾制${zh}`, tbs(`${n}_top`, `${n}_top`, `chiseled_${n}`), 0.8);
+  stoneBlock(`smooth_${n}`, `平滑${zh}`, `${n}_top`, 2);
+  family(`smooth_${n}`, `平滑${zh}`, `${n}_top`, {hard: 2});
+}
+family('brick', '红砖', 'bricks', {hard: 2, stairs: false, wall: true});
+family('quartz', '石英', tbs('quartz_block_top', 'quartz_block_bottom', 'quartz_block_side'), {hard: 0.8});
+stoneBlock('chiseled_quartz_block', '錾制石英块', tbs('chiseled_quartz_block_top', 'chiseled_quartz_block_top', 'chiseled_quartz_block'), 0.8);
+stoneBlock('quartz_pillar', '石英柱', tbs('quartz_pillar_top', 'quartz_pillar_top', 'quartz_pillar'), 0.8, {axis: true});
+stoneBlock('quartz_bricks', '石英砖', 'quartz_bricks', 0.8);
+stoneBlock('smooth_quartz', '平滑石英块', 'quartz_block_bottom', 2);
+family('smooth_quartz', '平滑石英', 'quartz_block_bottom', {hard: 2});
+block('packed_mud', '泥坯', {tex: all('packed_mud'), hard: 1, tool: T.PICK, cat: 'build'});
+stoneBlock('mud_bricks', '泥砖', 'mud_bricks');
+family('mud_brick', '泥砖', 'mud_bricks', {wall: true});
+family('nether_brick', '下界砖', 'nether_bricks', {hard: 2, stairs: false, wall: true});
+stoneBlock('red_nether_bricks', '红色下界砖块', 'red_nether_bricks', 2);
+family('red_nether_brick', '红色下界砖', 'red_nether_bricks', {hard: 2, wall: true});
+stoneBlock('cracked_nether_bricks', '裂纹下界砖块', 'cracked_nether_bricks', 2);
+stoneBlock('chiseled_nether_bricks', '錾制下界砖块', 'chiseled_nether_bricks', 2);
+// the raw metals' blocks (nine raw pieces each)
+for (const [m, zh, tier] of [['iron', '粗铁块', 1], ['copper', '粗铜块', 1], ['gold', '粗金块', 2]]) block(`raw_${m}_block`, zh, {tex: all(`raw_${m}_block`), hard: 5, tool: T.PICK, tier, cat: 'build'});
+// flowers: the four tulips (plains and flower forests)
+for (const [t, zh] of [['red', '红色'], ['orange', '橙色'], ['white', '白色'], ['pink', '粉红色']]) plant(`${t}_tulip`, `${zh}郁金香`);
+// beetroots: a crop of four looks (seeds from village farms, and from grass now and then)
+block('beetroots', '甜菜根', {tex: all('beetroots_stage0'), stages: [0, 0, 1, 1, 2, 2, 2, 3].map(s => `beetroots_stage${s}`), shape: 'crop', pass: 'cutout', hard: 0, solid: false, item: false,
+  drop: (r, meta) => meta >= 7 ? [['beetroot', 1], ['beetroot_seeds', 1 + Math.floor(r() * 3)]] : ['beetroot_seeds', 1]});
+
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
 // experience from ores mined with the right tool (the game's ranges)
@@ -197,7 +295,7 @@ item('coal', '煤炭', {fuel: 80});
 item('charcoal', '木炭', {fuel: 80});
 for (const [m, zh] of [['iron', '铁'], ['copper', '铜'], ['gold', '金']]) { item(`raw_${m}`, `粗${zh}`); item(`${m}_ingot`, `${zh}锭`); }
 item('diamond', '钻石'); item('emerald', '绿宝石'); item('lapis_lazuli', '青金石'); item('redstone', '红石粉'); item('flint', '燧石');
-item('glowstone_dust', '荧石粉'); item('book', '书', {enchantability: 1}); item('snowball', '雪球', {stack: 16}); item('clay_ball', '黏土球'); item('brick', '红砖');
+item('glowstone_dust', '荧石粉'); item('book', '书', {enchantability: 1}); item('snowball', '雪球', {stack: 16, thrown: true}); item('clay_ball', '黏土球'); item('brick', '红砖');
 item('apple', '苹果', {food: 4, sat: 2.4}); item('wheat_seeds', '小麦种子', {plant: 'wheat'}); item('wheat', '小麦'); item('bread', '面包', {food: 5, sat: 6});
 item('melon_slice', '西瓜片', {food: 2, sat: 1.2}); item('bucket', '桶', {stack: 16}); item('water_bucket', '水桶', {stack: 1, pour: 'water'}); item('lava_bucket', '岩浆桶', {stack: 1, pour: 'lava', fuel: 1000});
 item('bowl', '碗', {fuel: 5});
@@ -223,6 +321,23 @@ item('fermented_spider_eye', '发酵蛛眼'); item('sugar', '糖'); item('golden
 item('fire_charge', '火焰弹');
 // from the jungle: cocoa beans (put on the side of a jungle log they grow there), and cookies made with them
 item('cocoa_beans', '可可豆'); item('cookie', '曲奇', {food: 2, sat: 0.4});
+// dyes: from flowers and the rest (inventory.js), they colour wool, terracotta, glass, concrete
+for (const [c, zh] of COLORS) item(`${c}_dye`, `${zh}染料`, {dye: c});
+item('ink_sac', '墨囊');
+// more food: golden apples (and their effects: main.js), pumpkin pie, stews and soups (the bowl comes back),
+// beetroots, eggs (thrown: now and then a chick), milk (it takes every effect away)
+item('golden_apple', '金苹果', {food: 4, sat: 9.6, always: true, effects: [['regeneration', 1, 5], ['absorption', 0, 120]]});
+item('enchanted_golden_apple', '附魔金苹果', {food: 4, sat: 9.6, always: true, glint: true, effects: [['regeneration', 1, 20], ['absorption', 3, 120], ['resistance', 0, 300], ['fire_resistance', 0, 300]]});
+item('pumpkin_pie', '南瓜派', {food: 8, sat: 4.8});
+item('mushroom_stew', '蘑菇煲', {food: 6, sat: 7.2, stack: 1, bowl: true});
+item('beetroot', '甜菜根', {food: 1, sat: 1.2}); item('beetroot_seeds', '甜菜种子', {plant: 'beetroots'}); item('beetroot_soup', '甜菜汤', {food: 6, sat: 7.2, stack: 1, bowl: true});
+item('egg', '鸡蛋', {stack: 16, thrown: true});
+item('milk_bucket', '奶桶', {stack: 1, drink: true});
+item('experience_bottle', '附魔之瓶', {thrown: true, glint: true});
+// spawn eggs: each of the world's creatures, let out where it is used
+for (const [k, zh] of [['pig', '猪'], ['cow', '牛'], ['sheep', '羊'], ['chicken', '鸡'], ['zombie', '僵尸'], ['skeleton', '骷髅'], ['creeper', '苦力怕'], ['spider', '蜘蛛'],
+  ['zombified_piglin', '僵尸猪灵'], ['ghast', '恶魂'], ['blaze', '烈焰人'], ['villager', '村民'], ['iron_golem', '铁傀儡'], ['magma_cube', '岩浆怪']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
+
 export const TIERS = {wooden: {zh: '木', tier: 0, speed: 2, uses: 59, enchantability: 15}, stone: {zh: '石', tier: 1, speed: 4, uses: 131, enchantability: 5}, iron: {zh: '铁', tier: 2, speed: 6, uses: 250, enchantability: 14},
   golden: {zh: '金', tier: 0, speed: 12, uses: 32, enchantability: 22}, diamond: {zh: '钻石', tier: 3, speed: 8, uses: 1561, enchantability: 10}};
 const KINDS = {pickaxe: '镐', axe: '斧', shovel: '锹', sword: '剑', hoe: '锄'};
@@ -232,7 +347,8 @@ Object.keys(TIERS).forEach((t, ti) => { for (const [k, zh] of Object.entries(KIN
   item(`${t}_${k}`, `${TIERS[t].zh}${zh}`, {stack: 1, tool: {kind: k, tier: TIERS[t].tier, speed: TIERS[t].speed, uses: TIERS[t].uses}, damage: DAMAGE[k][ti], fuel: t === 'wooden' ? 10 : 0, enchantability: TIERS[t].enchantability, repair: {wooden: '#planks', stone: '#stone_tool', iron: 'iron_ingot', golden: 'gold_ingot', diamond: 'diamond'}[t]}); });
 // armour: worn in a slot (0 head, 1 chest, 2 legs, 3 feet); its points, toughness and uses are the game's (uses: the
 // material's base × 11, 16, 15, 13). Leather from a pack is grey and dyed, its default colour is the tint.
-export const ARMOR = {leather: {zh: '皮革', base: 5, points: [1, 3, 2, 1], tough: 0, enchantability: 15, repair: 'leather'}, iron: {zh: '铁', base: 15, points: [2, 6, 5, 2], tough: 0, enchantability: 9, repair: 'iron_ingot'},
+export const ARMOR = {leather: {zh: '皮革', base: 5, points: [1, 3, 2, 1], tough: 0, enchantability: 15, repair: 'leather'}, chainmail: {zh: '锁链', base: 15, points: [2, 5, 4, 1], tough: 0, enchantability: 12, repair: 'iron_ingot'},
+  iron: {zh: '铁', base: 15, points: [2, 6, 5, 2], tough: 0, enchantability: 9, repair: 'iron_ingot'},
   golden: {zh: '金', base: 7, points: [2, 5, 3, 1], tough: 0, enchantability: 25, repair: 'gold_ingot'}, diamond: {zh: '钻石', base: 33, points: [3, 8, 6, 3], tough: 2, enchantability: 10, repair: 'diamond'}};
 export const ARMOR_PIECES = [['helmet', '头盔', 11, '帽子'], ['chestplate', '胸甲', 16, '外套'], ['leggings', '护腿', 15, '裤子'], ['boots', '靴子', 13, '靴子']];
 for (const [mat, a] of Object.entries(ARMOR)) ARMOR_PIECES.forEach(([piece, zh, k, leather], slot) =>
@@ -259,9 +375,9 @@ export const ITEMS = I;
 export function itemInfo(name) {
   const b = BY_NAME[name];
   if (b && b.item) {
-    const wood = /^(oak|spruce|birch)_(fence|fence_gate|trapdoor|stairs)$/.test(name), door = /^(oak|spruce|birch)_door$/.test(name);
-    return {name, zh: b.zh, block: b, icon: null, stack: door || b.shape === 'bed' ? (b.shape === 'bed' ? 1 : 64) : 64,
-      fuel: /_(planks|log)$/.test(name) || wood ? 15 : door ? 10 : /_slab$/.test(name) && name.startsWith('oak') ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'bookshelf' || name === 'ladder' ? 15 : /_sapling$/.test(name) ? 5 : name === 'coal_block' ? 800 : 0};
+    const wood = /^(oak|spruce|birch|jungle|acacia|dark_oak)_(fence|fence_gate|trapdoor|stairs)$|^(stripped_)?(oak|spruce|birch|jungle|acacia|dark_oak)_wood$|^stripped_.*_log$/.test(name), door = /^(oak|spruce|birch|jungle|acacia|dark_oak)_door$/.test(name);
+    return {name, zh: b.zh, block: b, icon: null, cat: b.cat, stack: door || b.shape === 'bed' ? (b.shape === 'bed' ? 1 : 64) : 64,
+      fuel: /_(planks|log)$/.test(name) || wood ? 15 : door ? 10 : /^(oak|spruce|birch|jungle|acacia|dark_oak)_slab$/.test(name) ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'bookshelf' || name === 'ladder' ? 15 : /_sapling$/.test(name) ? 5 : name === 'coal_block' ? 800 : 0};
   }
   return I[name] || null;
 }

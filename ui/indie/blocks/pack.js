@@ -49,7 +49,7 @@ const SKINS = {
   zombified_piglin: ['entity/piglin/zombified_piglin.png'], ghast: ['entity/ghast/ghast.png'], blaze: ['entity/blaze.png'], magma_cube: ['entity/slime/magmacube.png'],
 };
 // worn armour: newer versions keep it under equipment/, older ones as <material>_layer_1 / _2 (gold is "gold" there)
-for (const [mat, tex] of [['leather', 'leather'], ['iron', 'iron'], ['golden', 'gold'], ['diamond', 'diamond']]) {
+for (const [mat, tex] of [['leather', 'leather'], ['chainmail', 'chainmail'], ['iron', 'iron'], ['golden', 'gold'], ['diamond', 'diamond']]) {
   SKINS[`armor_${mat}`] = [`entity/equipment/humanoid/${tex}.png`, `models/armor/${tex}_layer_1.png`];
   SKINS[`armor_${mat}_legs`] = [`entity/equipment/humanoid_leggings/${tex}.png`, `models/armor/${tex}_layer_2.png`];
 }

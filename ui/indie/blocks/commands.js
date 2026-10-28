@@ -1,8 +1,9 @@
 // Commands typed in the chat bar (T, or / to start with one), as the game has them: /time, /weather, /gamemode,
-// /difficulty, /give, /tp, /kill, /summon, /effect, /clear, /xp, /spawnpoint, /seed, /gamerule, /help. Names may be
+// /difficulty, /give, /tp, /kill, /summon, /effect, /clear, /xp, /spawnpoint, /seed, /gamerule, /setblock, /fill,
+// /help. Names may be
 // the game's English ones or the Chinese ones shown in the game; ~ means "where I am" (~5 five blocks on). The game
 // itself is reached through ctx (main.js), so this file only reads and checks what was typed.
-import {ALL_ITEMS, itemInfo} from './blocks.js';
+import {ALL_ITEMS, itemInfo, BLOCKS, BY_NAME} from './blocks.js';
 import {MOBS} from './mobs.js';
 import {EFFECTS} from './brew.js';
 
@@ -16,13 +17,15 @@ const HELP = [
   '/weather clear|rain|thunder', '/gamemode survival|creative', '/difficulty peaceful|easy|normal|hard',
   '/give 物品 [数量]', '/tp x y z（~ 是现在的位置）', '/kill', '/summon 生物 [x y z]', '/effect give 效果 [秒] [等级]，/effect clear',
   '/clear', '/xp add 数量 [levels]', '/spawnpoint', '/seed', '/gamerule 规则 true|false',
+  '/setblock x y z 方块', '/fill x1 y1 z1 x2 y2 z2 方块 [replace|keep|hollow|outline]',
 ];
 
 // a name typed: the game's id (minecraft: may be in front) or the Chinese one
 const byZh = (list, zhOf) => { const m = new Map(); for (const k of list) m.set(zhOf(k), k); return m; };
-let ITEM_ZH = null, MOB_ZH = null, EFFECT_ZH = null;
+let ITEM_ZH = null, MOB_ZH = null, EFFECT_ZH = null, BLOCK_ZH = null;
 const itemId = s => { s = s.replace(/^minecraft:/, ''); if (itemInfo(s)) return s; ITEM_ZH ||= byZh(ALL_ITEMS, k => itemInfo(k)?.zh || k); return ITEM_ZH.get(s) || null; };
 const mobId = s => { s = s.replace(/^minecraft:/, ''); if (MOBS[s]) return s; MOB_ZH ||= byZh(Object.keys(MOBS), k => MOBS[k].zh); return MOB_ZH.get(s) || null; };
+const blockId = s => { s = s.replace(/^minecraft:/, ''); if (BY_NAME[s]) return s; BLOCK_ZH ||= byZh(BLOCKS.map(b => b.name), k => BY_NAME[k].zh); return BLOCK_ZH.get(s) || null; };
 const effectId = s => { s = s.replace(/^minecraft:/, ''); if (EFFECTS[s]) return s; EFFECT_ZH ||= byZh(Object.keys(EFFECTS), k => EFFECTS[k].zh); return EFFECT_ZH.get(s) || null; };
 const pick = (s, table) => { s = (s || '').toLowerCase(); if (table[s] != null) return s; return Object.keys(table).find(k => table[k] === s || (typeof table[k] === 'string' && table[k].startsWith(s) && s.length >= 2)) || null; };
 const num = s => /^-?\d+(\.\d+)?$/.test(s || '') ? Number(s) : null;
@@ -32,7 +35,8 @@ const coord = (s, here) => { if (s === '~') return here; if (/^~-?\d+(\.\d+)?$/.
 /**
  * Runs one line. ctx: {time, setTime(t), weather(kind), mode, setMode(m), difficulty, setDifficulty(d), give(id, n),
  * pos() → [x, y, z], teleport(x, y, z), kill(), summon(kind, x, y, z), effect(id, secs, amp), clearEffects(),
- * clear() → count, addXp(n, levels), setSpawn(), seed, rules, setRule(name, on)}. Returns {ok, text} (in Chinese).
+ * clear() → count, addXp(n, levels), setSpawn(), seed, rules, setRule(name, on), setBlocks([[x, y, z, name]], keep) →
+ * how many changed or why not}. Returns {ok, text} (in Chinese).
  */
 export function runCommand(line, ctx) {
   const parts = line.trim().replace(/^\//, '').split(/\s+/).filter(Boolean), [cmd, ...a] = parts;
@@ -128,6 +132,29 @@ export function runCommand(line, ctx) {
       if (on == null) return no(`用法：/gamerule ${name} true|false`);
       ctx.setRule(name, on);
       return ok(`${RULES[name]}：${on ? '开' : '关'}`);
+    }
+    // a block put somewhere, or a box of them (the game's at most 32768 at a time): replace (all of it), keep (only
+    // where there is air), hollow (the shell, air inside), outline (the shell, the inside left as it is)
+    case 'setblock': case 'fill': {
+      const one = cmd.toLowerCase() === 'setblock', n = one ? 3 : 6, [px, py, pz] = ctx.pos(), here = [px, py, pz].map(Math.floor);
+      const at = a.slice(0, n).map((s, i) => coord(s, here[i % 3])), id = blockId(a[n] || ''), mode = (a[n + 1] || 'replace').toLowerCase();
+      if (at.length < n || at.some(v => v == null) || !a[n]) return no(one ? '用法：/setblock x y z 方块' : '用法：/fill x1 y1 z1 x2 y2 z2 方块 [replace|keep|hollow|outline]');
+      if (!id) return no(`没有叫「${a[n]}」的方块`);
+      if (!['replace', 'keep', 'hollow', 'outline'].includes(mode)) return no('最后可以是 replace、keep、hollow 或 outline');
+      const [x0, y0, z0] = at.slice(0, 3).map(Math.floor), [x1, y1, z1] = (one ? at.slice(0, 3) : at.slice(3)).map(Math.floor);
+      const lo = [Math.min(x0, x1), Math.min(y0, y1), Math.min(z0, z1)], hi = [Math.max(x0, x1), Math.max(y0, y1), Math.max(z0, z1)];
+      const size = (hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1);
+      if (size > 32768) return no(`一次最多 32768 格（这次 ${size} 格）`);
+      const list = [];
+      for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) {
+        const edge = x === lo[0] || x === hi[0] || y === lo[1] || y === hi[1] || z === lo[2] || z === hi[2];
+        if (mode === 'outline' && !edge) continue;
+        list.push([x, y, z, mode === 'hollow' && !edge ? 'air' : id]);
+      }
+      const r = ctx.setBlocks(list, mode === 'keep');
+      if (typeof r === 'string') return no(r);
+      if (!r) return no(one ? '那里已经是这个方块了' : '一格也没变');
+      return ok(one ? `放了${BY_NAME[id].zh}` : `填了 ${r} 格${BY_NAME[id].zh}`);
     }
     default: return no(`不认识的指令「${cmd}」；/help 看全部`);
   }

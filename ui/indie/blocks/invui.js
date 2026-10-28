@@ -19,7 +19,7 @@ export function stackHtml(s, icons) {
   if (!s) return '';
   const info = itemInfo(s.id), uses = usesOf(info), src = icons[iconKey(s)] || icons[s.id] || '';
   const dur = uses && s.dmg ? `<span class="dur"><i style="width:${Math.max(0, (1 - s.dmg / uses) * 100)}%;background:hsl(${Math.max(0, (1 - s.dmg / uses) * 120)},90%,45%)"></i></span>` : '';
-  const glint = s.ench || s.id === 'enchanted_book' ? `<i class="glint" style="-webkit-mask-image:url(${src});mask-image:url(${src})"></i>` : '';
+  const glint = s.ench || s.id === 'enchanted_book' || info?.glint ? `<i class="glint" style="-webkit-mask-image:url(${src});mask-image:url(${src})"></i>` : '';
   return `<img class="icon" src="${src}" alt="">${glint}${s.n > 1 ? `<span class="n">${s.n}</span>` : ''}${dur}`;
 }
 /** What a stack is, for its tip: the name, its enchantments, armour, uses. */
@@ -34,14 +34,19 @@ const BOOKS = Object.entries(ENCHANTS).map(([n, e]) => ({id: 'enchanted_book', n
 const POTION_STACKS = ['potion', 'splash_potion'].flatMap(id => Object.keys(POTIONS).map(pot => ({id, n: 1, pot})));
 const BOTTLES = ['potion', 'splash_potion', 'glass_bottle'];
 
+const catOf = n => itemInfo(n)?.cat;
+const FOODY = n => { const i = itemInfo(n); return !!(i?.food || i?.drink) && !i.block; };
 const KINDS = [
   ['all', '全部', () => true],
-  ['build', '建筑方块', n => /planks|cobble|bricks|smooth_stone|slab|stairs|fence|pane|bars|door|wool|glass|sandstone|terracotta|_block$|obsidian|bookshelf|stone$|granite|diorite|andesite|tuff|calcite|deepslate$|mossy/.test(n) && !/ore$/.test(n) && n !== 'grass_block'],
+  ['build', '建筑方块', n => catOf(n) === 'build' || (!catOf(n) && !!BLOCKS.find(x => x.name === n) && /planks|cobble|bricks|smooth_stone|slab|stairs|fence|pane|bars|door|glass|sandstone|terracotta|_block$|obsidian|bookshelf|stone$|granite|diorite|andesite|tuff|calcite|deepslate$|mossy|_wall$/.test(n) && !/ore$/.test(n) && n !== 'grass_block')],
+  ['color', '染色方块', n => catOf(n) === 'color' || /_wool$|_bed$/.test(n)],
   ['nature', '自然方块', n => { const b = BLOCKS.find(x => x.name === n); return !!b && /grass|dirt|podzol|sand|gravel|clay|ore$|_log$|leaves|sapling|fern|dandelion|poppy|orchid|allium|bluet|daisy|cornflower|lily|dead_bush|sugar_cane|cactus|mushroom|snow|ice|pumpkin|melon|moss|mud|bedrock|stone$|deepslate$/.test(n); }],
-  ['use', '功能方块', n => /crafting|furnace|chest|torch|ladder|lantern|glowstone|tnt|bookshelf|_bed$|door|gate|enchanting|anvil|brewing/.test(n)],
+  ['use', '功能方块', n => /crafting|furnace|(^|_)chest$|torch|ladder|lantern|glowstone|tnt|bookshelf|_bed$|door|gate|enchanting|anvil|brewing/.test(n)],
   ['tools', '工具', n => /_pickaxe|_axe|_shovel|_hoe|bucket|shears|flint_and_steel/.test(n)],
   ['combat', '战斗', n => /_sword|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
-  ['items', '材料与食物', n => !BLOCKS.find(x => x.name === n) && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket|shears|flint_and_steel|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
+  ['food', '食物与饮品', n => FOODY(n) || BOTTLES.includes(n)],
+  ['items', '原材料', n => !BLOCKS.find(x => x.name === n) && !FOODY(n) && !BOTTLES.includes(n) && !itemInfo(n)?.spawn && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket|shears|flint_and_steel|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
+  ['spawn', '刷怪蛋', n => !!itemInfo(n)?.spawn],
   ['bag', '背包', null],
 ];
 
@@ -124,9 +129,9 @@ export class InventoryUI {
   items() {
     const k = KINDS.find(x => x[0] === this.tab) || KINDS[0], q = this.query.trim().toLowerCase();
     const plain = ALL_ITEMS.filter(id => id !== 'enchanted_book' && id !== 'potion' && id !== 'splash_potion' && k[2](id) && (!q || zhOf(id).includes(q) || id.includes(q))).map(id => ({id, n: 1}));
-    const more = k[0] === 'all' || k[0] === 'items';
-    const books = more ? BOOKS.filter(b => !q || '附魔书'.includes(q) || enchName(...Object.entries(b.ench)[0]).includes(q)) : [];
-    const potions = more ? POTION_STACKS.filter(p => !q || potionName(p).includes(q) || p.pot.includes(q)) : [];
+    // enchanted books with the ingredients, potions with food and drink (the game's tabs)
+    const books = k[0] === 'all' || k[0] === 'items' ? BOOKS.filter(b => !q || '附魔书'.includes(q) || enchName(...Object.entries(b.ench)[0]).includes(q)) : [];
+    const potions = k[0] === 'all' || k[0] === 'food' ? POTION_STACKS.filter(p => !q || potionName(p).includes(q) || p.pot.includes(q)) : [];
     return [...plain, ...books, ...potions];
   }
   /** The enchanting table's three offers for what is on it (none for an enchanted one). */

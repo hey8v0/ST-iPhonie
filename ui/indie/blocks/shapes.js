@@ -19,7 +19,9 @@ function fenceJoins(n, d) {
   if (s === 'gate') { const f = n >>> 12 & 3; return (f % 2) !== (d % 2); }
   return opaque(n);
 }
-const paneJoins = n => { const s = shapeOf(n); return s === 'pane' || opaque(n) || (BLOCKS[n & 0xFFF]?.name === 'glass'); };
+const paneJoins = n => { const s = shapeOf(n); return s === 'pane' || s === 'stonewall' || opaque(n) || /glass$/.test(BLOCKS[n & 0xFFF]?.name || ''); };
+/** Does a wall join what is beside it (a wall, a pane or bars, a fence gate, a full block)? */
+const wallJoins = n => { const s = shapeOf(n); return s === 'stonewall' || s === 'pane' || s === 'gate' || opaque(n); };
 
 /**
  * The pieces a shaped block is drawn from: [{box: [x0, y0, z0, x1, y1, z1] (1/16), role}] — role picks the picture:
@@ -65,6 +67,16 @@ export function pieces(v, near = () => 0) {
       for (let d = 0; d < 4; d++) if (paneJoins(near(DIR[d][0], 0, DIR[d][1]))) out.push({box: arms[d], role: 'main'});
       return out;
     }
+    // a wall: a post (none in the middle of a straight run), and an arm 14 high to each side it joins
+    case 'stonewall': {
+      const j = [0, 1, 2, 3].map(d => wallJoins(near(DIR[d][0], 0, DIR[d][1]))), straight = (j[0] && j[2] && !j[1] && !j[3]) || (j[1] && j[3] && !j[0] && !j[2]);
+      const arms = [[5, 0, 8, 11, 14, 16], [0, 0, 5, 8, 14, 11], [5, 0, 0, 11, 14, 8], [8, 0, 5, 16, 14, 11]];
+      const out = j.flatMap((on, d) => on ? [{box: arms[d], role: 'main'}] : []);
+      // the post: not in the middle of a straight run, unless a torch stands on it
+      if (!straight || shapeOf(near(0, 1, 0)) === 'torch') out.unshift({box: [4, 0, 4, 12, 16, 12], role: 'main'});
+      return out;
+    }
+    case 'carpet': return [{box: [0, 0, 0, 16, 1, 16], role: 'main'}];
     case 'door': return [{box: panel(meta & 4 ? (f + 1) % 4 : f), role: meta & 8 ? 'door_top' : 'door_bottom'}];
     case 'trapdoor': return [{box: meta & 4 ? panel(f) : meta & 8 ? [0, 13, 0, 16, 16, 16] : [0, 0, 0, 16, 3, 16], role: 'main'}];
     case 'bed': {
@@ -119,6 +131,8 @@ export function collisionBoxes(v, near = () => 0) {
   const id = v & 0xFFF, meta = v >>> 12, b = BLOCKS[id];
   switch (b.shape) {
     case 'fence': return toBlock(pieces(v, near).filter((p, i) => i === 0 || p.box[1] === 12)).map(q => [q[0], 0, q[2], q[3], 1.5, q[5]]);
+    case 'stonewall': return toBlock(pieces(v, near)).map(q => [q[0], 0, q[2], q[3], 1.5, q[5]]);
+    case 'carpet': return [[0, 0, 0, 1, px(1), 1]];
     case 'gate': return meta & 4 ? null : (meta & 3) % 2 === 0 ? [[0, 0, px(6), 1, 1.5, px(10)]] : [[px(6), 0, 0, px(10), 1.5, 1]];
     case 'pane': case 'stairs': case 'door': case 'trapdoor': case 'chest': case 'anvil': return toBlock(pieces(v, near));
     case 'bed': return [[0, 0, 0, 1, px(9), 1]];
@@ -167,7 +181,7 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'vine': { const out = VINE.filter((q, d) => meta & 1 << d); return out.length ? out : [VINE[0]]; }
     case 'tall': return [[px(2), 0, px(2), px(14), 1, px(14)]];
     case 'lectern': case 'bell': case 'cocoa': return toBlock(pieces(v, near));
-    case 'stairs': case 'fence': case 'gate': case 'pane': case 'door': case 'trapdoor': case 'chest': case 'anvil': return toBlock(pieces(v, near));
+    case 'stairs': case 'fence': case 'gate': case 'pane': case 'door': case 'trapdoor': case 'chest': case 'anvil': case 'stonewall': case 'carpet': return toBlock(pieces(v, near));
     default: return FULL;
   }
 }
