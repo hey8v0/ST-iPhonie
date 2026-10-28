@@ -1,4 +1,4 @@
-/* 绘本 in the phone: the shelf (each cover is the book's own first page, core/book-pages.js), the making sheet, and the
+/* 绘本 in the phone: the shelf (each cover is the book's own cover, core/book-pages.js), the making sheet, and the
    reader filling the screen (book-reader.js brings the pages' and the reader's own styles). */
 
 .bk-shelf{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 14px;padding:6px 2px 14px}
@@ -16,7 +16,7 @@
 .bk-theme b{font-family:var(--bk-title);font-size:16px;font-weight:800;color:var(--bk-accent);letter-spacing:.04em}
 .bk-theme[data-theme=ancient] b,.bk-theme[data-theme=romance] b{font-weight:400;font-size:17px}
 .bk-theme[data-theme=scifi] b{text-shadow:0 0 6px var(--bk-accent)}
-.bk-theme i{width:30px;height:5px;border-radius:3px;background:linear-gradient(90deg,var(--bk-tape1,var(--bk-accent)),var(--bk-tape2,var(--bk-accent)),var(--bk-tape3,var(--bk-accent)))}
+.bk-theme i{width:30px;height:5px;border-radius:3px;background:linear-gradient(90deg,var(--bk-accent),var(--bk-soft))}
 .bk-theme[aria-pressed=true]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .bk-range{display:flex;gap:10px;flex-wrap:wrap;margin:-4px 0 12px}
 .bk-range input{width:76px}
@@ -32,16 +32,13 @@
 .view.book-mode:before{display:none}
 .bk-reading{position:absolute;inset:0}
 
-/* changing a page */
+/* changing a spread */
 .bk-rows{display:grid;gap:8px;margin-bottom:8px}
-.bk-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:6px;align-items:center}
-.bk-row select{max-width:96px}
-.bk-row input{min-width:0}
+.bk-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px 8px;align-items:center;padding:8px;border-radius:14px;background:var(--card2)}
+.bk-row select{max-width:150px;min-height:38px;padding:6px 10px;border-radius:12px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);font-size:15px}
+.bk-row textarea{grid-column:1/-1;min-width:0;resize:vertical}
+.bk-bub{display:flex;align-items:center;gap:5px;font-size:13px;white-space:nowrap}
 .bk-check{display:flex;align-items:center;gap:8px;margin:4px 0 10px;font-size:13.5px}
 .bk-chips{display:flex;flex-wrap:wrap;gap:6px}
 .bk-chips button{padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:13px;cursor:pointer}
 .bk-chips button[aria-pressed=true]{background:var(--accent);color:var(--on-accent);border-color:transparent}
-.bk-orns{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
-.bk-orn{aspect-ratio:1;padding:7px;border-radius:12px;border:2px solid transparent;background:var(--card2);cursor:pointer}
-.bk-orn[aria-pressed=true]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-.bk-orn svg{display:block;width:100%;height:100%;overflow:visible}

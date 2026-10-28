@@ -41,14 +41,14 @@ export interface VnOutfit extends VnSet { id: string; label: string; appearance:
 /** 模型 (core/model-files.js normalizeModel): a VRM or Live2D model the stage shows in place of the 立绘. frame: 取景; map: a Live2D model's 表情 / 动作 ('group:index') for each of the five 情绪. */
 /** A motion file (.vrma) the user added, for every VRM character, brought on by its words. */
 export interface VnMoveFile { id: string; label: string; words: string[]; path: string; file: string; size: number; seconds: number; at: number; }
-/** 绘本 (core/book.js normalizeBook / normalizePage). */
+/** 绘本 (core/book.js normalizeBook / normalizeSpread). */
 export interface BookLine { role: string; text: string; emotion: string; from?: { id: number; line: number } }
 export type BookPicture = { url: string } | { id: string } | null;
-/** A page: pictures (shots), who stands on it as their 立绘 (cast, stage pages), the few words shown (texts), little drawings (doodles: book-ornaments.js ids), drawn things cut out (props), what is read aloud (lines). */
-export interface BookPage { kind: 'cover' | 'scene' | 'end'; layout: 'cover' | 'end' | 'bleed' | 'stage' | 'panels' | 'polaroid' | 'vignette' | 'shout' | 'letter' | 'spread' | 'title' | 'classic'; shots: Array<{ prompt: string; picture: BookPicture; people: boolean }>; cast: Array<{ name: string; emotion: string; at: 'left' | 'right' | 'center' }>; texts: Array<{ kind: 'caption' | 'bubble' | 'think' | 'shout' | 'whisper' | 'title'; text: string; who: string }>; doodles: string[]; props: Array<{ prompt: string; picture: BookPicture }>; lines: BookLine[];
-  /** How the page is performed ('' / []: chosen from its words): the light of its mood, the camera over its picture, effects, how it is turned to; its ambience and sound (音效 library names). */
-  mood: string; camera: string; fx: string[]; turn: string; sound: { ambience: string; sfx: string } }
-export interface Book { id: string; version: 2; title: string; subtitle: string; author: string; theme: string; art: 'book' | 'app'; mode: 'story' | 'retell'; source: { chat: string; name: string; from: number; to: number }; pages: BookPage[]; at: number; made: number }
+/** A piece of a spread's words (what is printed is what is read); bubble: shown in a speech bubble, at: the side its speaker is on. */
+export interface BookWord extends BookLine { bubble: boolean; at: 'left' | 'right' }
+/** A spread (two pages seen together): its layout; side: the page its picture (or 立绘) is on, or for one across both pages the page its words are on; space / tone: where a picture across both pages leaves room for the words and whether that room is light or dark; heading; pictures; words; cast: who stands on it as their 立绘 (人物出场); fx: the weather drawn over it; sound: its ambience and sound (音效 library names). */
+export interface BookSpread { layout: 'quiet' | 'page' | 'window' | 'spread' | 'fade' | 'ground' | 'pair' | 'stage' | 'text'; side: 'left' | 'right'; space: 'top' | 'bottom'; tone: 'light' | 'dark'; heading: string; pictures: Array<{ prompt: string; picture: BookPicture; people: boolean }>; words: BookWord[]; cast: Array<{ name: string; emotion: string }>; fx: string[]; sound: { ambience: string; sfx: string } }
+export interface Book { id: string; version: 3; title: string; subtitle: string; author: string; theme: string; art: 'book' | 'app'; mode: 'story' | 'retell'; source: { chat: string; name: string; from: number; to: number }; cover: { prompt: string; picture: BookPicture }; spreads: BookSpread[]; ending: string; at: number; made: number }
 export interface VnModel { /** Live2D: the model's own motions ('group:index') and their words. */ acts?: Record<string, string[]>; id: string; kind: 'vrm' | 'live2d'; version: string; path: string; file: string; size: number; title: string; frame: 'half' | 'full' | 'face'; zoom: number; lift: number; map: Record<string, { expression: string; motion: string }>; /** Live2D 表情 kept on (its look); absent: guessed. */ keep?: string[]; at: number; }
 export interface VnCastEntry extends VnSet { actions: VnAction[]; outfits: VnOutfit[]; /** Up to 8, to switch between. */ models?: VnModel[]; /** The one in use ('' = the 立绘). */ useModel?: string; }
 /** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
@@ -1058,7 +1058,7 @@ export interface BackendAPI extends BackendFacade {
     bookSounds?(): Promise<{ ambience: string[]; sfx: string[] }>;
     bookAudio?(lines: BookLine[]): Promise<Array<Blob | null>>;
     bookNarration?(): { kept: boolean; readable: boolean };
-    /** 绘本 opened over the whole tavern page at page `at` (book-stage.js; the phone is put away). */
+    /** 绘本 opened over the whole tavern page at sheet `at` (0 the cover, then the spreads; book-stage.js; the phone is put away). */
     bookStage?(id: string, at?: number): Promise<boolean>;
     /** 大游戏: opens a game over the whole tavern page (the phone closes); only in the tavern. */
     gameStart?(name: 'antarctic'): boolean;
