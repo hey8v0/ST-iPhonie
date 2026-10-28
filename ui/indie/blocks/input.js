@@ -40,6 +40,7 @@ export class Input {
     if (down && !e.repeat) {
       const map = {KeyE: 'inventory', KeyQ: 'drop', Escape: 'pause', F3: 'debug', F1: 'hud', KeyF: 'swap', F5: 'view', KeyT: 'chat'};
       if (/^Digit[1-9]$/.test(k)) this.events.push('slot' + (Number(k.slice(5)) - 1));
+      else if (k === 'Slash' && this.enabled) { this.events.push('command'); e.preventDefault(); }
       else if (map[k]) this.events.push(map[k]);
       if (k === 'Space' && this.enabled) { const t = performance.now(); if (t - this.lastJump < 300) this.events.push('fly'); this.lastJump = t; }
       if (k === 'KeyW' && this.enabled) { const t = performance.now(); if (t - this.lastW < 300) this.sprintKey = true; this.lastW = t; }
@@ -71,6 +72,7 @@ export class Input {
       <button class="tb sneak" data-t="sneak" aria-label="潜行"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/></svg></button>
       <button class="tb up" data-t="up" aria-label="上升" hidden><svg viewBox="0 0 24 24"><path d="M12 5l7 8H5z"/></svg></button>
       <button class="tb down" data-t="down" aria-label="下降" hidden><svg viewBox="0 0 24 24"><path d="M12 19l7-8H5z"/></svg></button>
+      <button class="tb chat" data-t="chat" aria-label="聊天和指令"><svg viewBox="0 0 24 24"><path d="M4 4h16v11H9l-5 4z"/></svg></button>
       <button class="tb view" data-t="view" aria-label="切换视角"><svg viewBox="0 0 24 24"><path d="M12 6C7 6 3.5 9.5 2 12c1.5 2.5 5 6 10 6s8.5-3.5 10-6c-1.5-2.5-5-6-10-6zm0 9.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg></button>`;
     this.app.append(el);
     const stick = el.querySelector('.stick'), knob = stick.firstElementChild;
@@ -165,6 +167,7 @@ export class Input {
     if (name === 'up') t.up = down;
     if (name === 'down') t.down = down;
     if (name === 'view' && down) this.events.push('view');
+    if (name === 'chat' && down) this.events.push('chat');
   }
   /** Shows the fly buttons instead of jump and sneak. */
   setFlying(on) {

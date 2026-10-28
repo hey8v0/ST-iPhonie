@@ -133,16 +133,14 @@ layout(location=2) in uvec2 a_uv;
 layout(location=3) in uvec2 a_light;
 layout(location=4) in uint a_shade;
 layout(location=5) in vec3 a_tint;
-uniform mat4 u_viewProj, u_model, u_shadowMat;
+uniform mat4 u_viewProj, u_model;
 uniform vec3 u_origin, u_camera, u_lightDir, u_player;
 uniform float u_unit, u_center, u_time, u_wave;
-out vec3 v_uvl; out vec2 v_light; out float v_ao; out vec3 v_tint; out float v_dist; out vec3 v_wp; out vec3 v_n; out vec3 v_tu; out vec3 v_tv; out vec4 v_sh;
-flat out uint v_flags;
+// (few outputs: a vertex's results are what this small GPU spends its time on — the land costs about the same at any
+// size of picture — so the facing, the distance and the shadow's place are worked out per pixel instead)
+out vec3 v_uvl; out vec2 v_light; out float v_ao; out vec3 v_tint; out vec3 v_wp;
+flat out uint v_flags; flat out uint v_face;
 const float AO[4] = float[4](1.0, 0.8, 0.65, 0.5);
-const vec3 N6[6] = vec3[6](vec3(1.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, -1.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, -1.0));
-// which way the picture's u and v run on each face (the game's texture coordinates, as mesh.js lays them)
-const vec3 TU[6] = vec3[6](vec3(0.0, 0.0, -1.0), vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0));
-const vec3 TV[6] = vec3[6](vec3(0.0, -1.0, 0.0), vec3(0.0, -1.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, -1.0), vec3(0.0, -1.0, 0.0), vec3(0.0, -1.0, 0.0));
 void main() {
   vec3 p = vec3(a_pos) / u_unit - u_center;
   vec3 wp = (u_model * vec4(p, 1.0)).xyz + u_origin;
@@ -157,32 +155,30 @@ void main() {
   v_uvl = vec3(vec2(a_uv) / 16.0, float(a_layer));
   v_light = vec2(a_light) / 17.0;
   v_ao = AO[a_shade & 3u];
-  uint f = min((a_shade >> 2u) & 7u, 5u);
-  mat3 m = mat3(u_model);
-  v_n = m * N6[f]; v_tu = m * TU[f]; v_tv = m * TV[f];
-  v_tint = a_tint; v_wp = wp; v_dist = length(wp); v_flags = flags;
-#if SHADOWS > 0
-  // pushed off the surface a little (more far away) so it does not shadow itself; plants (crossed sheets with no real
-  // facing) are looked up half a block toward the light instead, or each would sit in its own shadow
-  bool plant = flags == 2u || flags == 3u;
-  v_sh = u_shadowMat * vec4(wp + (plant ? u_lightDir * 0.5 : normalize(v_n) * (0.05 + v_dist * 0.002)), 1.0);
-#else
-  v_sh = vec4(0.0);
-#endif
+  v_face = min((a_shade >> 2u) & 7u, 5u);
+  v_tint = a_tint; v_wp = wp; v_flags = flags;
 }`;
   const fs = head(defs, 'precision highp sampler2DArray;\n') + LIGHT + (defs.SHADOWS ? SHADOW : '') + `
 uniform sampler2DArray u_tex;
 uniform float u_cut, u_alpha, u_overlay, u_texSize;
 uniform vec3 u_camera;
-uniform mat4 u_viewProj;
+uniform mat4 u_viewProj, u_model;
+#if SHADOWS > 0
+uniform mat4 u_shadowMat;
+#endif
+const vec3 N6[6] = vec3[6](vec3(1.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, -1.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, -1.0));
+// which way the picture's u and v run on each face (the game's texture coordinates, as mesh.js lays them)
+const vec3 TU[6] = vec3[6](vec3(0.0, 0.0, -1.0), vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0));
+const vec3 TV[6] = vec3[6](vec3(0.0, -1.0, 0.0), vec3(0.0, -1.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, -1.0), vec3(0.0, -1.0, 0.0), vec3(0.0, -1.0, 0.0));
 #if HDR
 uniform sampler2D u_scene, u_sceneDepth;
 uniform vec2 u_screen;
 uniform float u_near, u_far, u_behind;
 #endif
-in vec3 v_uvl; in vec2 v_light; in float v_ao; in vec3 v_tint; in float v_dist; in vec3 v_wp; in vec3 v_n; in vec3 v_tu; in vec3 v_tv; in vec4 v_sh;
-flat in uint v_flags;
+in vec3 v_uvl; in vec2 v_light; in float v_ao; in vec3 v_tint; in vec3 v_wp;
+flat in uint v_flags; flat in uint v_face;
 out vec4 o;
+float v_dist;
 #if CLOUDS > 0
 // the clouds' shade on the land: the cover where the light's line from here meets the layer's middle
 float cloudShade(vec3 W) { return u_lightDir.y < 0.05 ? 1.0 : 1.0 - (0.6 + 0.3 * u_storm) * cloudCover(W.xz + u_lightDir.xz * (214.0 - W.y) / u_lightDir.y, 3); }
@@ -233,7 +229,10 @@ void main() {
   if (c.a < u_cut) discard;
   if (u_overlay > 0.5) { o = vec4(c.rgb, c.a); return; }
   bool leaf = v_flags == 1u, plant = v_flags == 2u || v_flags == 3u, liquid = v_flags == 4u;
-  vec3 albedo = lin(c.rgb * v_tint), N = normalize(v_n), V = normalize(-v_wp), W = v_wp + u_camera, L = u_lightDir;
+  mat3 m = mat3(u_model);
+  v_dist = length(v_wp);
+  vec3 N0 = normalize(m * N6[v_face]);
+  vec3 albedo = lin(c.rgb * v_tint), N = N0, V = v_wp / -max(v_dist, 1e-4), W = v_wp + u_camera, L = u_lightDir;
   // leaves and grass a touch less vivid (their tints squared into linear light glow too green)
   if (leaf || plant) albedo = mix(vec3(luma(albedo)), albedo, 0.82);
   float sky = clamp(v_light.x / 15.0, 0.0, 1.0), blk = clamp(v_light.y / 15.0, 0.0, 1.0);
@@ -245,14 +244,17 @@ void main() {
     float e = 1.0 / u_texSize, h0 = luma(textureLod(u_tex, v_uvl, 0.0).rgb);
     vec2 g = vec2(luma(textureLod(u_tex, v_uvl + vec3(e, 0.0, 0.0), 0.0).rgb) - h0, luma(textureLod(u_tex, v_uvl + vec3(0.0, e, 0.0), 0.0).rgb) - h0);
     g *= 2.0 * (1.0 - smoothstep(12.0, 26.0, v_dist));
-    N = normalize(N - g.x * normalize(v_tu) - g.y * normalize(v_tv));
+    N = normalize(N - g.x * (m * TU[v_face]) - g.y * (m * TV[v_face]));
   }
 #endif
   float ndl = dot(N, L);
   // leaves take light from either side; grass and flowers have no real facing
   float direct = leaf ? clamp(ndl * 0.55 + 0.45, 0.0, 1.0) : plant ? 0.8 : max(ndl, 0.0), sh = 1.0;
 #if SHADOWS > 0
-  if (u_shadowOn > 0.5 && direct > 0.0) sh = shadowAt(v_sh);
+  // the shadow map's place: pushed off the surface a little (more far away) so it does not shadow itself; plants
+  // (crossed sheets with no real facing) are looked up half a block toward the light instead, or each would sit in
+  // its own shadow
+  if (u_shadowOn > 0.5 && direct > 0.0) sh = shadowAt(u_shadowMat * vec4(v_wp + (plant ? u_lightDir * 0.5 : N0 * (0.05 + v_dist * 0.002)), 1.0));
 #endif
   // sunlight only where the sky reaches (in caves the map may not know), less under clouds
   float open = smoothstep(0.55, 0.95, sky), sunVis = sh * open * (open > 0.0 ? cloudShade(W) : 1.0);
@@ -269,6 +271,9 @@ void main() {
   float wet = liquid ? 0.0 : u_rain * open * smoothstep(0.2, 0.9, N.y);
   albedo *= 1.0 - 0.35 * wet;
   vec3 col = albedo * (light + amb + bl + vec3(0.012 + u_bright));
+  // pale ground in full sun (sand, snow, light stone) glares a little whiter, as it does to the eye: only in the direct
+  // light — where a cloud's shadow or the land's lies over it, it keeps its colour
+  if (!leaf && !plant && !liquid) col += u_lightCol * direct * sunVis * smoothstep(0.35, 0.65, luma(albedo)) * 0.35;
   // an ore's coloured specks shine a little in the dark (the stone round them, grey, does not)
   if (v_flags == 5u) { float hi = max(c.r, max(c.g, c.b)); col += albedo * smoothstep(0.3, 0.6, hi > 0.0 ? (hi - min(c.r, min(c.g, c.b))) / hi : 0.0) * 1.2; }
   if (wet > 0.01) {
@@ -284,13 +289,28 @@ void main() {
     vec3 refl = skyCol(normalize(vec3(R.x, max(R.y, 0.02), R.z))) * mix(0.1, 1.0, sky * sky);
     vec3 glint = u_lightCol * pow(max(dot(R, L), 0.0), 220.0) * 12.0 * sunVis;
     if (u_underwater > 0.5 && N.y > 0.5 && V.y < 0.0) {
-      // seen from under it: straight up, through a round window (some 48° round, its rim moving with the waves), the
-      // sky bent in and the sun; round the window the surface mirrors the dark water below; the murk over all with
-      // the distance
-      vec3 D = -V, T = refract(D, -n, 1.33);
-      bool out_ = dot(T, T) > 0.5;
-      float r = out_ ? 0.02 + 0.98 * pow(1.0 - max(dot(T, n), 0.0), 5.0) : 1.0;
-      vec3 up = out_ ? (skyCol(normalize(T)) + u_lightCol * pow(max(dot(normalize(T), L), 0.0), 300.0) * 30.0) * mix(0.15, 1.0, sky * sky) : vec3(0.0);
+      // seen from under it: like water, not a clean round window — the waves (full strength, a finer ripple on top)
+      // bend the sky and the sun into a moving bright ceiling, brightest straight up, the sun broken into glints; where
+      // the light can no longer get out the edge is broken up by the waves, and past it, the game's way, the world
+      // above shows through dimmer (in shallow water, looking across, the bank is seen); the murk over all with the
+      // distance
+      vec2 fine = vec2(vnoise(W.xz * 2.1 + u_time * vec2(0.3, -0.2)), vnoise(W.xz * 2.1 + vec2(0.5) - u_time * vec2(0.2, 0.25))) - 0.5;
+      vec3 nb = normalize(n + vec3(fine.x, 0.0, fine.y) * 0.14), D = -V;
+      float ci = max(dot(D, nb), 0.0), s2 = 1.7689 * (1.0 - ci * ci), win = smoothstep(1.0, 0.35, s2);
+      vec3 Tn = s2 < 1.0 ? normalize(refract(D, -nb, 1.33)) : normalize(vec3(D.x, max(D.y, 0.05), D.z));
+      float r = mix(0.35, 0.02 + 0.98 * pow(1.0 - max(dot(Tn, nb), 0.0), 5.0), win);
+      float sd = max(dot(Tn, u_sunTrue), 0.0);
+      vec3 up = (skyCol(Tn) + u_lightCol * (pow(sd, 900.0) * (HDR > 0 ? 14.0 : 2.0) + pow(sd, 40.0) * 0.35)) * mix(0.15, 1.0, sky * sky);
+      // the crests catch more light, the troughs less: the waves show on it
+      up *= 0.7 + 3.5 * length(nb.xz);
+#if HDR
+      // what stands above the water (the shore, trees) is in the picture already, bent by the waves (the sky is not
+      // drawn under water: there it stays the sky worked out here)
+      if (u_behind > 0.5) {
+        vec2 suv = gl_FragCoord.xy / u_screen + nb.xz * 0.03;
+        if (texture(u_sceneDepth, suv).r < 0.99999) up = texture(u_scene, suv).rgb;
+      }
+#endif
       vec4 air = airAt(v_wp, v_dist);
       o = vec4(display(mix(mix(up, u_fogLin, r), air.rgb, air.a)), 1.0);
       return;
@@ -373,7 +393,7 @@ uniform mat4 u_invViewProj;
 out vec3 v_dir;
 void main() { vec2 p = P[gl_VertexID]; gl_Position = vec4(p, 0.9999, 1.0); vec4 w = u_invViewProj * vec4(p, 1.0, 1.0); v_dir = w.xyz / w.w; }`;
   const fs = head(defs) + LIGHT + `
-uniform float u_stars;
+uniform float u_stars, u_moonPhase, u_seen;
 uniform vec3 u_camPos, u_sunDisc;
 in vec3 v_dir; out vec4 o;
 float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
@@ -404,9 +424,26 @@ void main() {
     }
   }
   c = mix(c, vec3(0.6, 0.62, 0.72), u_flash * 0.6);
-#if HDR
-  c += u_sunDisc * smoothstep(0.99972, 0.99988, dot(d, u_sunTrue)) * 45.0;
-#endif
+  // the sun: a round disc (HDR: bright enough to bloom; the plain picture of the game's is square)
+  c += u_sunDisc * smoothstep(0.99972, 0.99988, dot(d, u_sunTrue)) * (HDR > 0 ? 45.0 : 6.0) * u_seen;
+  // the moon, opposite the sun: a round disc lit by its phase (the game's eight, 0 full … 4 new), greyer seas on it, a
+  // soft glow round it (the game's moon picture is a square)
+  vec3 md = -u_sunTrue;
+  float mc = dot(d, md), th = u_moonPhase / 8.0 * 6.2832;
+  c += vec3(0.5, 0.55, 0.7) * exp(-sqrt(max(1.0 - mc, 0.0)) * 26.0) * 0.12 * (0.5 + 0.5 * cos(th)) * u_stars * u_seen;
+  if (mc > 0.99 && u_stars > 0.0) {
+    vec3 mr = normalize(cross(md, vec3(0.0, 1.0, 0.0) + vec3(0.0, 0.0, 0.001))), mu = cross(mr, md);
+    vec2 q = vec2(dot(d, mr), dot(d, mu)) / 0.032;
+    float r2 = dot(q, q);
+    if (r2 < 1.0) {
+      vec3 sp = vec3(q, sqrt(1.0 - r2));
+      float lit = smoothstep(-0.06, 0.06, dot(sp, vec3(sin(th), 0.0, cos(th))));
+      float sea = smoothstep(0.45, 0.7, textureLod(u_noise, q * 0.18 + 0.33, 0.0).r) * 0.35 + (1.0 - textureLod(u_noise, q * 0.5 + 0.7, 0.0).r) * 0.15;
+      vec3 face = vec3(0.92, 0.94, 1.0) * (1.0 - sea) * (HDR > 0 ? 2.6 : 1.4);
+      // the dark part shows faintly (earthshine) and hides the stars behind
+      c = mix(c * smoothstep(1.0, 0.9, r2), face * (0.008 + 0.992 * lit), smoothstep(1.0, 0.93, r2) * u_seen);
+    }
+  }
 #if CLOUDS > 0
   // high clouds at 300, of three kinds from place to place (a slow wide noise, drifting): wisps drawn out by the wind
   // and bent (cirrus), small flecks (cirrocumulus), a thin even veil (cirrostratus) — with the faint ring that such a
@@ -552,7 +589,8 @@ void main() {
   if (length(v_wp.xz) < u_inner) discard;
   vec3 N = v_n, albedo = lin(v_col);
   vec3 col = albedo * (u_lightCol * max(dot(N, u_lightDir), 0.0) + u_ambCol * (0.62 + 0.38 * (N.y * 0.5 + 0.5)) + vec3(0.012 + u_bright));
-  if (v_water > 0.5) { vec3 V = normalize(-v_wp), R = reflect(-V, N); float fr = 0.02 + 0.98 * pow(1.0 - max(V.y, 0.0), 5.0); col = mix(col, skyCol(normalize(vec3(R.x, max(R.y, 0.03), R.z))), fr); }
+  // water: deep and dark under its mirror of the sky, as the near water is (lit like land it was a pale cyan)
+  if (v_water > 0.5) { vec3 V = normalize(-v_wp), R = reflect(-V, N); float fr = 0.02 + 0.98 * pow(1.0 - max(V.y, 0.0), 5.0); col = mix(albedo * (u_ambCol * 0.45 + u_lightCol * max(u_lightDir.y, 0.0) * 0.12), skyCol(normalize(vec3(R.x, max(R.y, 0.03), R.z))), fr); }
   if (u_plain > 0.5) { o = vec4(sqrt(clamp(col, 0.0, 1.0)), 1.0); return; }
   vec4 air = airAt(v_wp, length(v_wp));
   o = vec4(display(mix(col, air.rgb, air.a)), 1.0);

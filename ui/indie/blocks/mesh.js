@@ -29,6 +29,32 @@ const ORE = new Uint8Array(N);
 for (const b of BLOCKS) if (b.name.endsWith('_ore')) ORE[b.id] = 1;
 const isOpaque = v => OPAQUE[v & 0xFFF] === 1 || (SHAPE[v & 0xFFF] === 'slab' && (v >>> 12) === 2);
 
+/**
+ * Which sides of a section see each other through it (for the renderer's cave culling, as the game does it): the
+ * open cells (not opaque) are filled outward from each, and every side one such space touches is joined to the
+ * others it touches. sec: its 16³ blocks (y << 8 | z << 4 | x), or null (all air). Six rows, one per side (−x, +x,
+ * −y, +y, −z, +z), each a mask of the sides it reaches.
+ */
+export const ALL_OPEN = [63, 63, 63, 63, 63, 63];
+export function sectionVis(sec) {
+  if (!sec) return ALL_OPEN;
+  const rows = [0, 0, 0, 0, 0, 0], seen = new Uint8Array(4096), stack = new Int32Array(4096);
+  for (let start = 0; start < 4096; start++) {
+    if (seen[start] || isOpaque(sec[start])) continue;
+    let top = 0, sides = 0;
+    stack[top++] = start; seen[start] = 1;
+    while (top) {
+      const i = stack[--top], x = i & 15, z = (i >> 4) & 15, y = i >> 8;
+      if (x === 0) sides |= 1; if (x === 15) sides |= 2; if (y === 0) sides |= 4; if (y === 15) sides |= 8; if (z === 0) sides |= 16; if (z === 15) sides |= 32;
+      const go = j => { if (!seen[j] && !isOpaque(sec[j])) { seen[j] = 1; stack[top++] = j; } };
+      if (x > 0) go(i - 1); if (x < 15) go(i + 1); if (y > 0) go(i - 256); if (y < 15) go(i + 256); if (z > 0) go(i - 16); if (z < 15) go(i + 16);
+    }
+    for (let a = 0; a < 6; a++) if (sides & 1 << a) rows[a] |= sides;
+    if (rows.every(r => r === 63)) break;
+  }
+  return rows;
+}
+
 // faces: normal, u, v, base corner (p0); p1 = p0 + u, p2 = p0 + u + v, p3 = p0 + v
 const FACE = [
   {n: [1, 0, 0], u: [0, 0, -1], v: [0, 1, 0], o: [1, 0, 1]},
@@ -323,7 +349,8 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
       u16[h] = Math.round((px + x + 1.5) * 16); u16[h + 1] = Math.round((py + y + 1) * 16); u16[h + 2] = Math.round((pz + z + 1.5) * 16);
     }
   }
-  return {solid: finish(solid), trans: finish(trans)};
+  const sorted = byFacing(finish(solid));
+  return {solid: sorted.data, faces: sorted.faces, trans: finish(trans)};
 }
 // facing: 0 south, 1 west, 2 north, 3 east → the face it shows its front on
 export const FRONT = [4, 1, 5, 0];
@@ -334,5 +361,26 @@ function finish(out) {
     out.u8.set(a.subarray(STRIDE), base * STRIDE); out.u8.set(a.subarray(0, STRIDE), (base + 3) * STRIDE);
   }
   return out.take();
+}
+/**
+ * The quads put in seven groups by which way they face (+x, −x, +y, −y, +z, −z, then any other way: plants, slopes),
+ * from each quad's own corners (a two-sided one is two quads, one each way). The renderer leaves out a group that
+ * faces away from the camera without the GPU working through its corners. faces: where each group starts (in quads),
+ * and the end.
+ */
+export function byFacing(data) {
+  const quads = data.length / STRIDE / 4, u16 = new Uint16Array(data.buffer, data.byteOffset, data.length >> 1), group = new Uint8Array(quads), n = new Int32Array(7);
+  for (let q = 0; q < quads; q++) {
+    const h = q * 2 * STRIDE, a = h, b = h + STRIDE / 2, d = h + 3 * STRIDE / 2;
+    const ux = u16[b] - u16[a], uy = u16[b + 1] - u16[a + 1], uz = u16[b + 2] - u16[a + 2], vx = u16[d] - u16[a], vy = u16[d + 1] - u16[a + 1], vz = u16[d + 2] - u16[a + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const g = !ny && !nz && nx ? (nx > 0 ? 0 : 1) : !nx && !nz && ny ? (ny > 0 ? 2 : 3) : !nx && !ny && nz ? (nz > 0 ? 4 : 5) : 6;
+    group[q] = g; n[g]++;
+  }
+  const faces = new Int32Array(8);
+  for (let g = 0; g < 7; g++) faces[g + 1] = faces[g] + n[g];
+  const out = new Uint8Array(data.length), at = faces.slice(0, 7), size = 4 * STRIDE;
+  for (let q = 0; q < quads; q++) out.set(data.subarray(q * size, q * size + size), at[group[q]]++ * size);
+  return {data: out, faces};
 }
 function hash2(x, z) { let h = Math.imul(x, 374761393) ^ Math.imul(z, 668265263); h = Math.imul(h ^ h >>> 13, 1274126177); return (h ^ h >>> 16) >>> 0; }

@@ -56,15 +56,19 @@ export class Screens {
     draw();
   }
   create() {
-    let mode = 'survival';
+    let mode = 'survival', difficulty = 'normal';
+    const DIFF = [['peaceful', '和平'], ['easy', '简单'], ['normal', '普通'], ['hard', '困难']];
     const draw = () => this.show(`<h2>新建世界</h2><div class="form">
       <label>世界名字<input type="text" class="wname" maxlength="32" value="新的世界"></label>
       <label>种子（不填就随机）<input type="text" class="wseed" maxlength="40" placeholder=""></label>
       <div class="seg"><button class="btn${mode === 'survival' ? ' sel' : ''}" data-a="mode" data-m="survival">生存</button><button class="btn${mode === 'creative' ? ' sel' : ''}" data-a="mode" data-m="creative">创造</button></div>
       <p class="note">${mode === 'survival' ? '收集材料、合成工具，会饿也会受伤。' : '所有方块随便拿，可以飞，不会受伤。'}</p>
+      <div class="seg">${DIFF.map(([k, zh]) => `<button class="btn${difficulty === k ? ' sel' : ''}" data-a="diff" data-d="${k}">${zh}</button>`).join('')}</div>
+      <p class="note">${{peaceful: '没有怪物，不会饿，血会自己回来。', easy: '怪物伤害小一些，饿也只会饿到剩半血。', normal: '和原版的普通一样。', hard: '怪物伤害更高，会被饿死。'}[difficulty]}</p>
       </div><div class="btns"><button class="btn half" data-a="go">创建</button><button class="btn half" data-a="back">取消</button></div>`, 'dirt', {
       mode: b => { const name = this.current.querySelector('.wname').value, seed = this.current.querySelector('.wseed').value; mode = b.dataset.m; draw(); this.current.querySelector('.wname').value = name; this.current.querySelector('.wseed').value = seed; },
-      go: () => this.api.createWorld({name: this.current.querySelector('.wname').value.trim() || '新的世界', seed: this.current.querySelector('.wseed').value.trim(), mode}),
+      diff: b => { const name = this.current.querySelector('.wname').value, seed = this.current.querySelector('.wseed').value; difficulty = b.dataset.d; draw(); this.current.querySelector('.wname').value = name; this.current.querySelector('.wseed').value = seed; },
+      go: () => this.api.createWorld({name: this.current.querySelector('.wname').value.trim() || '新的世界', seed: this.current.querySelector('.wseed').value.trim(), mode, difficulty}),
       back: () => this.worlds(),
     });
     draw();
@@ -78,7 +82,7 @@ export class Screens {
     const slider = (key, label, min, max, step, fmt) => `<label class="slider"><span>${label}：<b data-v="${key}">${fmt(s[key])}</b></span><input type="range" data-k="${key}" min="${min}" max="${max}" step="${step}" value="${s[key]}"></label>`;
     const toggle = (key, label) => `<button class="btn" data-a="toggle" data-k="${key}">${label}：${s[key] ? '开' : '关'}</button>`;
     // choices that go round when pressed: 光影 and how far the distant view reaches
-    const CHOICES = {shaders: [['off', '关'], ['low', '低'], ['mid', '中'], ['high', '高']], lod: [[0, '关'], [24, '24 区块'], [48, '48 区块'], [96, '96 区块']]};
+    const CHOICES = {shaders: [['off', '关'], ['low', '低'], ['mid', '中'], ['high', '高']], lod: [[0, '关'], [24, '24 区块'], [48, '48 区块'], [96, '96 区块'], [160, '160 区块']]};
     const named = (k, v) => (CHOICES[k].find(o => o[0] === v) || CHOICES[k][0])[1];
     const cycle = (key, label) => `<button class="btn" data-a="cycle" data-k="${key}">${label}：${named(key, s[key])}</button>`;
     const fmts = {dist: v => `${v} 区块`, fov: v => `${v}°`, sens: v => `${Math.round(v * 100)}%`, gamma: v => v <= 0 ? '昏暗' : v >= 1 ? '明亮' : `${Math.round(v * 100)}%`, volume: v => `${Math.round(v * 100)}%`, scale: v => `${Math.round(v * 100)}%`};
@@ -126,12 +130,12 @@ export class Screens {
     this.show(`<h2>游戏菜单</h2>
       <button class="btn" data-a="resume">回到游戏</button>
       <div class="btns"><button class="btn half" data-a="settings">设置</button><button class="btn half" data-a="pack">材质</button></div>
-      <button class="btn" data-a="pregen">预生成地形</button>
+      <div class="btns"><button class="btn half" data-a="pregen">预生成地形</button><button class="btn half" data-a="diff">难度：${{peaceful: '和平', easy: '简单', normal: '普通', hard: '困难'}[this.api.difficulty()] || '普通'}</button></div>
       <div class="btns">${this.api.canFull() ? `<button class="btn half" data-a="full">${this.api.isFull() ? '退出全屏' : '全屏'}</button>` : ''}<button class="btn half" data-a="mode">${this.api.mode() === 'creative' ? '换成生存模式' : '换成创造模式'}</button></div>
       <button class="btn" data-a="quit">保存并回到标题</button>
       ${this.api.inTavern() ? '<button class="btn" data-a="leave">保存并离开游戏</button>' : ''}`, 'dim', {
       resume: () => this.api.resume(), settings: () => this.settings(() => this.pause(), true), pregen: () => this.pregen(() => this.pause()), pack: () => this.pack(() => this.pause(), true),
-      mode: () => { this.api.toggleMode(); this.pause(); }, quit: () => this.api.quit(), leave: () => this.api.leave(), back: () => this.api.resume(),
+      mode: () => { this.api.toggleMode(); this.pause(); }, diff: () => { this.api.cycleDifficulty(); this.pause(); }, quit: () => this.api.quit(), leave: () => this.api.leave(), back: () => this.api.resume(),
       full: async () => { await this.api.fullscreen(); this.pause(); },
     });
   }

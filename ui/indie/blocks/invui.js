@@ -1,6 +1,7 @@
 // The inventory windows: the player's own (with 2×2 crafting), the crafting table (3×3), the furnace, a chest, and the
 // creative inventory (every block and item, by kind, with search). Clicks work like the game: left takes or puts the
-// whole stack, right takes half or puts one, shift moves it across. Touch: a long press is the right click. Pads: the
+// whole stack, right takes half or puts one, shift moves it across. Touch: a long press is the right click, a slide
+// carries a stack to where the finger is let go (on the creative list it scrolls). Pads: the
 // d-pad / stick moves between slots, A left, X right, Y shift, B closes.
 import {itemInfo, zhOf, ALL_ITEMS, BLOCKS} from './blocks.js';
 import {craft, useGrid, stackMax, same, smeltOf, fuelOf, ARMOR_AT} from './inventory.js';
@@ -51,6 +52,7 @@ export class InventoryUI {
     this.grid = []; this.out = null;
     root.addEventListener('pointerdown', e => this.pointer(e));
     root.addEventListener('pointerup', e => this.pointerUp(e));
+    root.addEventListener('pointercancel', () => { this.pressAt = null; clearTimeout(this.longTimer); });
     root.addEventListener('pointermove', e => this.move(e));
     root.addEventListener('contextmenu', e => e.preventDefault());
   }
@@ -256,16 +258,47 @@ export class InventoryUI {
     if (!el) { if (!t.closest('.win') && this.cursor) { this.game.drop(this.cursor); this.cursor = null; this.draw(); } return; }
     const s = this.list.find(x => x.key === el.dataset.k);
     this.focus = this.list.indexOf(s);
-    if (e.pointerType === 'touch') { this.pressAt = {s, t: performance.now(), id: e.pointerId}; clearTimeout(this.longTimer); this.longTimer = setTimeout(() => { if (this.pressAt?.s === s) { this.click(s, 'right'); this.pressAt = null; } }, 420); return; }
+    // a finger: a tap is a click, holding still a right click; sliding up and down the creative list scrolls it,
+    // sliding from a slot elsewhere carries its stack to the slot where the finger is let go (the page itself does not
+    // scroll: the game may be turned on its side, so the list is moved here in the game's own pixels)
+    if (e.pointerType === 'touch') {
+      const [x, y] = this.appPoint(e);
+      this.pressAt = {s, el, id: e.pointerId, x, y, y0: y, list: el.closest('.cgrid'), moved: false};
+      clearTimeout(this.longTimer);
+      this.longTimer = setTimeout(() => { if (this.pressAt?.s === s && !this.pressAt.moved) { this.click(s, 'right'); this.pressAt = null; } }, 420);
+      try { this.root.setPointerCapture(e.pointerId); } catch {}
+      return;
+    }
     this.click(s, e.button === 2 ? 'right' : e.shiftKey ? 'shift' : 'left');
   }
+  /** The slot under a point of the screen (the finger, wherever it is now). */
+  slotAt(e) { const el = this.root.ownerDocument.elementFromPoint(e.clientX, e.clientY)?.closest?.('.slot'); return el && this.root.contains(el) ? this.list.find(x => x.key === el.dataset.k) : null; }
+  appPoint(e) { const a = this.root.getBoundingClientRect(); return this.game.toApp ? this.game.toApp(e.clientX, e.clientY) : [e.clientX - a.left, e.clientY - a.top]; }
   pointerUp(e) {
-    if (e.pointerType === 'touch' && this.pressAt) { const {s} = this.pressAt; this.pressAt = null; clearTimeout(this.longTimer); this.click(s, 'left'); }
+    const p = this.pressAt;
+    if (e.pointerType !== 'touch' || !p || p.id !== e.pointerId) return;
+    this.pressAt = null; clearTimeout(this.longTimer);
+    if (!p.moved) { this.click(p.s, 'left'); return; }
+    // carried: put down where the finger is (a click there); let go off the slots, it goes back where it came from
+    if (p.carry) {
+      const to = this.slotAt(e);
+      if (to && to !== p.s) this.click(to, 'left');
+      if (this.cursor) this.click(p.s, 'left');
+      this.draw();
+    }
   }
   move(e) {
-    const a = this.root.getBoundingClientRect();
     // the root may be turned (forced landscape): use the game's own pixels
-    const [x, y] = this.game.toApp ? this.game.toApp(e.clientX, e.clientY) : [e.clientX - a.left, e.clientY - a.top];
+    const [x, y] = this.appPoint(e);
+    const p = this.pressAt;
+    if (p && e.pointerType === 'touch' && p.id === e.pointerId) {
+      if (!p.moved && Math.hypot(x - p.x, y - p.y) > 8) {
+        p.moved = true; clearTimeout(this.longTimer);
+        // on the creative list a slide scrolls it; elsewhere it picks the stack up to carry (if the hand is empty)
+        if (!p.list && !this.cursor && p.s.get() && !p.s.out && !p.s.trash && p.s.opt == null && p.s.offer == null) { this.click(p.s, 'left'); p.carry = !!this.cursor; }
+      }
+      if (p.moved && p.list) { const g = this.root.querySelector('.cgrid'); if (g) g.scrollTop -= y - p.y0; p.y0 = y; return; }
+    }
     this.cx = x; this.cy = y; this.placeCursor(x, y);
     const tip = this.root.querySelector('.tip'), el = e.target.closest?.('.slot');
     if (!tip) return;

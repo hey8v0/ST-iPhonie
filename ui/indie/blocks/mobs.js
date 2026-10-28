@@ -366,7 +366,8 @@ export class Mobs {
   /** Monsters in the dark around the player (one try a tick), up to a limit. */
   spawnTick() {
     const {player} = this.ctx;
-    if (this.ctx.mode() === 'creative' && this.ctx.peaceful?.()) return;
+    // none on peaceful, nor with the game rule 生成怪物 off
+    if (this.ctx.difficulty?.() === 'peaceful' || this.ctx.spawning?.() === false) return;
     if (this.ctx.nether?.()) { this.netherSpawn(); return; }
     if (this.count(m => m.def.hostile) >= 18 || Math.random() > 0.25) return;
     const a = Math.random() * Math.PI * 2, r = 24 + Math.random() * 40, x = Math.floor(player.x + Math.cos(a) * r), z = Math.floor(player.z + Math.sin(a) * r);

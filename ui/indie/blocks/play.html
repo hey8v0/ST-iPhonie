@@ -44,6 +44,12 @@ button{font:inherit;color:inherit}
 .name{position:absolute;left:50%;bottom:calc(46*var(--u) + env(safe-area-inset-bottom,0px));transform:translateX(-50%);font-size:calc(8*var(--u));text-shadow:var(--u) var(--u) 0 #3f3f3f;transition:opacity .5s;white-space:nowrap}
 .toast{position:absolute;left:calc(4*var(--u));bottom:calc(60*var(--u));font-size:calc(7*var(--u));display:flex;flex-direction:column;gap:calc(2*var(--u));max-width:60%}
 .toast div{background:rgba(0,0,0,.45);padding:calc(1*var(--u)) calc(3*var(--u));transition:opacity .6s}
+/* the chat: answers to commands over the game (they fade after a while, all show while typing), the bar to type in */
+.chatlog{position:absolute;left:calc(2*var(--u));bottom:calc(76*var(--u));max-width:min(70%,calc(320*var(--u)));display:flex;flex-direction:column;font-size:calc(7*var(--u));pointer-events:none;white-space:pre-wrap}
+.chatlog div{background:rgba(0,0,0,.45);padding:calc(.6*var(--u)) calc(2.5*var(--u));transition:opacity 1s}
+.chatlog div.bad{color:#ff6b6b}.chatlog div.old{opacity:0}.chatlog.open div.old{opacity:1}
+.chatbar{position:absolute;left:calc(2*var(--u));right:calc(2*var(--u));bottom:calc(64*var(--u) + env(safe-area-inset-bottom,0px));z-index:5}
+.chatbar input{width:100%;box-sizing:border-box;background:rgba(0,0,0,.6);color:#fff;border:none;outline:none;font:inherit;font-size:calc(8*var(--u));padding:calc(2.5*var(--u)) calc(3*var(--u));user-select:text;-webkit-user-select:text;touch-action:auto}
 .debug{position:absolute;left:calc(2*var(--u));top:calc(2*var(--u));font:calc(6.5*var(--u))/1.35 ui-monospace,Menlo,Consolas,monospace;white-space:pre;text-shadow:1px 1px 0 #000;background:rgba(0,0,0,.25);padding:calc(2*var(--u))}
 .hurt{position:absolute;inset:0;background:radial-gradient(transparent 55%,rgba(200,0,0,.45));opacity:0;transition:opacity .4s}
 .water{position:absolute;inset:0;background:rgba(20,60,160,.25);display:none}
@@ -71,6 +77,7 @@ button{font:inherit;color:inherit}
 .touch .up{right:calc(14*var(--u) + env(safe-area-inset-right,0px));bottom:calc(64*var(--u))}
 .touch .down{right:calc(14*var(--u) + env(safe-area-inset-right,0px));bottom:calc(4*var(--u))}
 .touch .view{right:calc(24*var(--u) + env(safe-area-inset-right,0px));top:calc(4*var(--u));width:calc(16*var(--u));height:calc(16*var(--u))}
+.touch .chat{right:calc(44*var(--u) + env(safe-area-inset-right,0px));top:calc(4*var(--u));width:calc(16*var(--u));height:calc(16*var(--u))}
 .touch .stick{position:absolute;width:calc(48*var(--u));height:calc(48*var(--u));margin:calc(-24*var(--u)) 0 0 calc(-24*var(--u));border-radius:50%;border:var(--u) solid rgba(255,255,255,.4);background:rgba(0,0,0,.18)}
 .touch .stick i{position:absolute;left:50%;top:50%;width:calc(20*var(--u));height:calc(20*var(--u));margin:calc(-10*var(--u)) 0 0 calc(-10*var(--u));border-radius:50%;background:rgba(255,255,255,.55)}
 /* ---------- screens ---------- */
@@ -110,6 +117,8 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
 .dead .title{color:#fff;font-size:calc(20*var(--u))}
 /* ---------- inventories ---------- */
 .inv{position:absolute;inset:0;background:rgba(16,16,16,.55);display:flex;align-items:center;justify-content:center}
+/* fingers in the windows are the game's (its own scrolling of the lists, carrying stacks): the page must not pan */
+.inv,.inv *{touch-action:none}
 .inv[hidden]{display:none}
 .win{background:var(--panel);border:var(--u) solid #000;box-shadow:inset calc(2*var(--u)) calc(2*var(--u)) 0 var(--light),inset calc(-2*var(--u)) calc(-2*var(--u)) 0 #555;padding:calc(7*var(--u));color:var(--text);position:relative;max-height:96%;display:flex;flex-direction:column;gap:calc(3*var(--u))}
 .win h3{margin:0;font-size:calc(7.5*var(--u));font-weight:600;color:var(--text)}
@@ -200,6 +209,7 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
     <div class="effects"></div>
     <div class="debug" hidden></div>
     <div class="toast"></div>
+    <div class="chatlog"></div>
     <div class="name"></div>
     <div class="bars"><div class="row hearts"></div><div class="row r food"></div><div class="row r air"></div><div class="row armor"></div></div>
     <div class="xp"><i></i><b></b></div>

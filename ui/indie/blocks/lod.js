@@ -1,6 +1,6 @@
 // The distant view (in the spirit of voxy): past the columns the worker keeps, the land is drawn in coarse voxels made
-// straight from the generator's large shapes — tiles of 64 × 64 blocks, in cells of 4 blocks near, 8 and then 16
-// farther out; each cell a column of its surface colour up to the land's height, forests a dark green canopy a few
+// straight from the generator's large shapes — tiles of 64 × 64 blocks near (256 × 256 past 384 blocks, so seeing a
+// few thousand blocks away is a few hundred tiles to draw), in cells of 2 blocks near, then 4, 8, 16, 32 farther out; each cell a column of its surface colour up to the land's height, forests a dark green canopy a few
 // blocks over the ground, water flat at sea level. Caves, buildings and what the player changed are not in it: from
 // that far they would not show. A vertex is 16 bytes: x, y, z (float, from the tile's corner), r, g, b, face (+8 water).
 import {coarseLand, worldOf, BIOMES, TREE_DENSITY} from './gen.js';
@@ -28,15 +28,19 @@ function surface(name, b, h, mountain, x, z, seed) {
   return [h, dim(rgb(b.grass), 0.92), false];
 }
 /** The cell size for a tile at a distance (blocks) from the player. */
-export const lodStep = d => d < 384 ? 4 : d < 768 ? 8 : 16;
+export const lodStep = d => d < 192 ? 2 : d < 384 ? 4 : d < 768 ? 8 : d < 1536 ? 16 : 32;
+// the big tiles' size, and from how far they are used
+export const LOD_BIG = 256, BIG_FROM = 384;
 /** A tile's mesh: {data: ArrayBuffer (LOD_STRIDE a vertex, four a quad), quads}. */
-export function lodTile(seed, tx, tz, step) {
-  const w = worldOf(seed), n = LOD_TILE / step, x0 = tx * LOD_TILE, z0 = tz * LOD_TILE, N = n + 2;
+export function lodTile(seed, tx, tz, step, size = LOD_TILE) {
+  const w = worldOf(seed), n = size / step, x0 = tx * LOD_TILE, z0 = tz * LOD_TILE, N = n + 2;
   const top = new Int16Array(N * N), col = new Uint8Array(N * N * 3), wet = new Uint8Array(N * N);
   for (let j = -1; j <= n; j++) for (let i = -1; i <= n; i++) {
     const x = x0 + i * step + step / 2, z = z0 + j * step + step / 2, l = coarseLand(w, x, z), b = BIOMES[l.biome];
     const [h, c, water] = surface(b.name, b, l.h, l.mountain, x, z, seed), k = (j + 1) * N + i + 1;
-    top[k] = h; col.set(c, k * 3); wet[k] = water ? 1 : 0;
+    // each cell a little lighter or darker (the blocks' own pictures vary so, seen from afar), water less
+    const shade = 1 + (hash(seed + 9, Math.floor(x / step), 0, Math.floor(z / step)) - 0.5) * (water ? 0.04 : 0.12);
+    top[k] = h; col.set(dim(c, shade).map(v => Math.min(255, v)), k * 3); wet[k] = water ? 1 : 0;
   }
   // a top for every cell; a side wherever the neighbour is lower
   const quads = [];
@@ -68,13 +72,19 @@ export function lodTile(seed, tx, tz, step) {
  */
 export function lodPlan(cx, cz, radius, near) {
   const px = cx * 16 + 8, pz = cz * 16 + 8, R = radius * 16, inner = Math.max(0, near - 1) * 16, out = [];
-  const t0x = Math.floor((px - R) / LOD_TILE), t1x = Math.floor((px + R) / LOD_TILE), t0z = Math.floor((pz - R) / LOD_TILE), t1z = Math.floor((pz + R) / LOD_TILE);
-  for (let tz = t0z; tz <= t1z; tz++) for (let tx = t0x; tx <= t1x; tx++) {
-    // the tile's nearest and farthest points from the player
-    const nx = Math.max(tx * LOD_TILE, Math.min(px, (tx + 1) * LOD_TILE)), nz = Math.max(tz * LOD_TILE, Math.min(pz, (tz + 1) * LOD_TILE));
-    const near0 = Math.hypot(nx - px, nz - pz), far0 = Math.hypot(Math.max(Math.abs(tx * LOD_TILE - px), Math.abs((tx + 1) * LOD_TILE - px)), Math.max(Math.abs(tz * LOD_TILE - pz), Math.abs((tz + 1) * LOD_TILE - pz)));
-    if (near0 > R || far0 < inner) continue;
-    out.push({tx, tz, step: lodStep(near0), d: near0});
+  // the nearest and farthest points of a square (x0, z0, size) from the player
+  const span = (x0, z0, s) => [Math.hypot(Math.max(x0, Math.min(px, x0 + s)) - px, Math.max(z0, Math.min(pz, z0 + s)) - pz), Math.hypot(Math.max(Math.abs(x0 - px), Math.abs(x0 + s - px)), Math.max(Math.abs(z0 - pz), Math.abs(z0 + s - pz)))];
+  const K = LOD_BIG / LOD_TILE, b0x = Math.floor((px - R) / LOD_BIG), b1x = Math.floor((px + R) / LOD_BIG), b0z = Math.floor((pz - R) / LOD_BIG), b1z = Math.floor((pz + R) / LOD_BIG);
+  for (let bz = b0z; bz <= b1z; bz++) for (let bx = b0x; bx <= b1x; bx++) {
+    const [n0, f0] = span(bx * LOD_BIG, bz * LOD_BIG, LOD_BIG);
+    if (n0 > R || f0 < inner) continue;
+    // far off: the whole big square as one tile; near: its sixteen small ones (tx, tz in small tiles either way)
+    if (n0 >= BIG_FROM && n0 - inner > LOD_BIG) { out.push({tx: bx * K, tz: bz * K, size: LOD_BIG, step: lodStep(n0), d: n0}); continue; }
+    for (let j = 0; j < K; j++) for (let i = 0; i < K; i++) {
+      const tx = bx * K + i, tz = bz * K + j, [near0, far0] = span(tx * LOD_TILE, tz * LOD_TILE, LOD_TILE);
+      if (near0 > R || far0 < inner) continue;
+      out.push({tx, tz, size: LOD_TILE, step: lodStep(near0), d: near0});
+    }
   }
   return out.sort((a, b) => a.d - b.d);
 }

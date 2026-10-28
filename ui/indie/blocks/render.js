@@ -8,7 +8,11 @@
 // On mid and high (where the browser can draw into float pictures) the frame goes into an HDR picture first: the land,
 // then the sky where nothing is, a copy of that for the water to look into, the water; then the end of the frame
 // (bloom, edge shade, shafts, the film, smoothing) onto the screen, and the hand over it.
-import {STRIDE} from './mesh.js';
+import {STRIDE, ALL_OPEN} from './mesh.js';
+
+// sections in a column (−64 to 320), a number for a section's place, and the six sides (−x, +x, −y, +y, −z, +z)
+const SECTIONS = 24, secKey = (cx, sy, cz) => ((cx + 1048576) * 2097152 + (cz + 1048576)) * 32 + sy;
+const DX = [-1, 1, 0, 0, 0, 0], DY = [0, 0, -1, 1, 0, 0], DZ = [0, 0, 0, 0, -1, 1], OPP = [1, 0, 3, 2, 5, 4];
 import {chunkShaders, shadowShaders, skyShaders, entityShaders, lodShaders, postShaders, bloomShaders, compositeShaders, edgeShaders} from './shaders.js';
 import {LOD_STRIDE, LOD_TILE} from './lod.js';
 
@@ -297,7 +301,7 @@ export class Renderer {
     gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 24, 12);
     gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 24, 20);
     gl.bindVertexArray(null);
-    this.sections = new Map(); this.indexCount = 0; this.index = gl.createBuffer();
+    this.sections = new Map(); this.vis = new Map(); this.byNum = new Map(); this.indexCount = 0; this.index = gl.createBuffer();
     this.ensureIndex(1 << 16);
     this.dyn = this.makeVao(gl.createBuffer());
     this.lineBuf = gl.createBuffer(); this.lineVao = gl.createVertexArray();
@@ -364,12 +368,25 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
     this.texSize = size;
   }
-  /** Changes one layer (an animation frame). */
+  /**
+   * Changes one layer (an animation frame), with its smaller copies made here for this layer alone: the GPU's own
+   * makes them for every layer at once, and with the water, lava and fire changing every frame or two that was most
+   * of a frame's time on a small GPU (18 of 22 ms of the land's on this laptop).
+   */
   updateLayer(i, data) {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
-    gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, i, this.texSize, this.texSize, 1, gl.RGBA, gl.UNSIGNED_BYTE, data);
-    this.mipDirty = true;
+    let size = this.texSize, d = data;
+    gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, i, size, size, 1, gl.RGBA, gl.UNSIGNED_BYTE, d);
+    for (let lv = 1, top = Math.min(Math.floor(Math.log2(size)), 4); lv <= top; lv++) {
+      const half = size >> 1, out = new Uint8Array(half * half * 4), row = size * 4;
+      for (let y = 0; y < half; y++) for (let x = 0; x < half; x++) for (let c = 0; c < 4; c++) {
+        const a = y * 2 * row + x * 8 + c;
+        out[(y * half + x) * 4 + c] = (d[a] + d[a + 4] + d[a + row] + d[a + row + 4] + 2) >> 2;
+      }
+      gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, lv, 0, 0, i, half, half, 1, gl.RGBA, gl.UNSIGNED_BYTE, out);
+      d = out; size = half;
+    }
   }
   /** A 2D picture for the sky things (sun, moon, clouds). */
   setImage(name, source, {repeat = false, linear = false} = {}) {
@@ -383,8 +400,10 @@ export class Renderer {
     this.images[name] = t;
   }
   /** A section's meshes from the worker (null to clear). */
-  setSection(cx, sy, cz, solid, trans) {
+  setSection(cx, sy, cz, solid, trans, vis = null, sun = true, faces = null) {
     const gl = this.gl, k = `${cx},${sy},${cz}`;
+    // which of its sides see each other (every section, drawn or not: the cave culling walks through them)
+    if (vis) this.vis.set(secKey(cx, sy, cz), vis); else if (!solid && !trans) this.vis.delete(secKey(cx, sy, cz));
     let s = this.sections.get(k);
     const put = (part, data) => {
       if (!data || !data.length) { if (part) { gl.deleteBuffer(part.buf); gl.deleteVertexArray(part.vao); } return null; }
@@ -394,12 +413,47 @@ export class Renderer {
       this.ensureIndex(data.length / STRIDE / 4);
       return part;
     };
-    if (!s) { if (!solid && !trans) return; s = {cx, sy, cz, solid: null, trans: null}; this.sections.set(k, s); }
-    s.solid = put(s.solid, solid); s.trans = put(s.trans, trans);
-    if (!s.solid && !s.trans) this.sections.delete(k);
+    if (!s) { if (!solid && !trans) return; s = {cx, sy, cz, solid: null, trans: null}; this.sections.set(k, s); this.byNum.set(secKey(cx, sy, cz), s); }
+    s.solid = put(s.solid, solid); s.trans = put(s.trans, trans); s.sun = sun; s.faces = faces;
+    if (!s.solid && !s.trans) { this.sections.delete(k); this.byNum.delete(secKey(cx, sy, cz)); }
   }
-  dropColumn(cx, cz) { for (const [k, s] of this.sections) if (s.cx === cx && s.cz === cz) { this.setSection(s.cx, s.sy, s.cz, null, null); this.sections.delete(k); } }
-  clearAll() { for (const s of [...this.sections.values()]) this.setSection(s.cx, s.sy, s.cz, null, null); this.sections.clear(); }
+  /**
+   * The sections to draw: as the game culls caves, a walk out from the camera's section through the sides each section
+   * lets one see through (never turning back toward the camera), inside the frustum and the view's reach — what is
+   * behind solid rock (the caves under one's feet) is never reached. A section not heard of yet counts as open.
+   * [distance², section, its offset from the camera]
+   */
+  reach(view, planes) {
+    const out = [], far2 = (view.far + 24) ** 2, sec = this.byNum, vis = this.vis;
+    const cx0 = Math.floor(view.x / 16), cz0 = Math.floor(view.z / 16), sy0 = Math.max(0, Math.min(SECTIONS - 1, Math.floor((view.y + 64) / 16)));
+    // the queue in flat arrays (cx, sy, cz, side come in by, directions taken), kept between frames
+    const Q = this.reachQ ||= new Int32Array(5 * 16384), seen = this.reachSeen ||= new Set();
+    seen.clear(); seen.add(secKey(cx0, sy0, cz0));
+    Q.set([cx0, sy0, cz0, -1, 0], 0);
+    let tail = 1;
+    for (let h = 0; h < tail; h++) {
+      const cx = Q[h * 5], sy = Q[h * 5 + 1], cz = Q[h * 5 + 2], from = Q[h * 5 + 3], dirs = Q[h * 5 + 4], here = secKey(cx, sy, cz);
+      const ox = cx * 16 - view.x, oy = -64 + sy * 16 - view.y, oz = cz * 16 - view.z;
+      const s = sec.get(here);
+      if (s) out.push([(ox + 8) ** 2 + (oy + 8) ** 2 + (oz + 8) ** 2, s, ox, oy, oz]);
+      const rows = vis.get(here) || ALL_OPEN;
+      for (let d = 0; d < 6; d++) {
+        if (dirs & 1 << OPP[d] || (from >= 0 && !(rows[from] & 1 << d))) continue;
+        const nx = cx + DX[d], ny = sy + DY[d], nz = cz + DZ[d];
+        if (ny < 0 || ny >= SECTIONS) continue;
+        const k = secKey(nx, ny, nz);
+        if (seen.has(k)) continue;
+        const bx = nx * 16 - view.x, by = -64 + ny * 16 - view.y, bz = nz * 16 - view.z;
+        if ((bx + 8) ** 2 + (bz + 8) ** 2 > far2 || !boxVisible(planes, bx, by, bz, bx + 16, by + 16, bz + 16)) continue;
+        seen.add(k);
+        if (tail >= 16384) continue;
+        Q[tail * 5] = nx; Q[tail * 5 + 1] = ny; Q[tail * 5 + 2] = nz; Q[tail * 5 + 3] = OPP[d]; Q[tail * 5 + 4] = dirs | 1 << d; tail++;
+      }
+    }
+    return out;
+  }
+  dropColumn(cx, cz) { for (let sy = 0; sy < SECTIONS; sy++) { const s = this.byNum.get(secKey(cx, sy, cz)); if (s) this.setSection(cx, sy, cz, null, null); this.vis.delete(secKey(cx, sy, cz)); } }
+  clearAll() { for (const s of [...this.sections.values()]) this.setSection(s.cx, s.sy, s.cz, null, null); this.sections.clear(); this.byNum.clear(); this.vis.clear(); }
 
   resize(w, h) { this.canvas.width = w; this.canvas.height = h; }
   // ---------- 光影 ----------
@@ -480,7 +534,8 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex); gl.uniform1i(S.u.u_tex, 0);
     gl.uniformMatrix4fv(S.u.u_lightMat, false, M); gl.uniform3f(S.u.u_camera, view.x, view.y, view.z); gl.uniform1f(S.u.u_time, view.time); gl.uniform1f(S.u.u_wave, view.wave ? 1 : 0);
     for (const s of this.sections.values()) {
-      if (!s.solid) continue;
+      // (a section the sky's light never reaches casts no shadow anything in the sun could show: the land above does)
+      if (!s.solid || s.sun === false) continue;
       const ox = s.cx * 16 - view.x, oy = -64 + s.sy * 16 - view.y, oz = s.cz * 16 - view.z;
       if (Math.abs(ox + 8) > R + 24 || Math.abs(oz + 8) > R + 24 || oy > D || oy + 16 < -D) continue;
       gl.uniform3f(S.u.u_origin, ox, oy, oz); gl.bindVertexArray(s.solid.vao); gl.drawElements(gl.TRIANGLES, s.solid.count, gl.UNSIGNED_INT, 0);
@@ -599,8 +654,8 @@ export class Renderer {
   }
   // ---------- the distant view ----------
   /** A tile of the distant view from the worker (lod.js). */
-  setLod(tx, tz, data, quads) {
-    const gl = this.gl, k = `${tx},${tz}`;
+  setLod(tx, tz, data, quads, size = LOD_TILE) {
+    const gl = this.gl, k = `${tx},${tz},${size}`;
     let t = this.lods.get(k);
     if (!t) {
       const buf = gl.createBuffer(), vao = gl.createVertexArray();
@@ -609,13 +664,13 @@ export class Renderer {
       gl.enableVertexAttribArray(1); gl.vertexAttribIPointer(1, 4, gl.UNSIGNED_BYTE, LOD_STRIDE, 12);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.index);
       gl.bindVertexArray(null);
-      t = {tx, tz, buf, vao}; this.lods.set(k, t);
+      t = {tx, tz, size, buf, vao}; this.lods.set(k, t);
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, t.buf); gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(data), gl.STATIC_DRAW);
     t.count = quads * 6; this.ensureIndex(quads);
   }
-  dropLod(tx, tz) { const t = this.lods.get(`${tx},${tz}`); if (t) { this.gl.deleteBuffer(t.buf); this.gl.deleteVertexArray(t.vao); this.lods.delete(`${tx},${tz}`); } }
-  clearLod() { for (const t of [...this.lods.values()]) this.dropLod(t.tx, t.tz); }
+  dropLod(tx, tz, size = LOD_TILE) { const k = `${tx},${tz},${size}`, t = this.lods.get(k); if (t) { this.gl.deleteBuffer(t.buf); this.gl.deleteVertexArray(t.vao); this.lods.delete(k); } }
+  clearLod() { for (const t of [...this.lods.values()]) this.dropLod(t.tx, t.tz, t.size); }
   drawLod(view, vp, planes, lit) {
     if (!this.lods.size) return 0;
     const gl = this.gl, hdr = this.frameHdr ? 1 : 0, P = this.prog(`lod${hdr}`, () => lodShaders({hdr}));
@@ -625,7 +680,7 @@ export class Renderer {
     let n = 0;
     for (const t of this.lods.values()) {
       const ox = t.tx * LOD_TILE - view.x, oz = t.tz * LOD_TILE - view.z;
-      if (!t.count || !boxVisible(planes, ox, -64 - view.y, oz, ox + LOD_TILE, 320 - view.y, oz + LOD_TILE)) continue;
+      if (!t.count || !boxVisible(planes, ox, -64 - view.y, oz, ox + t.size, 320 - view.y, oz + t.size)) continue;
       gl.uniform3f(P.u.u_origin, ox, -view.y, oz); gl.bindVertexArray(t.vao); gl.drawElements(gl.TRIANGLES, t.count, gl.UNSIGNED_INT, 0);
       n += t.count / 3;
     }
@@ -649,11 +704,14 @@ export class Renderer {
     this.ent = shaded ? this.prog(`ent:${opts.shadows}:${opts.hdr}`, () => entityShaders(opts)) : this.ent0;
     this.sky = shaded ? this.prog(`sky:${opts.clouds}:${opts.hdr}`, () => skyShaders(opts)) : this.sky0;
     this.shadowLive = false;
+    this.mark('shadow');
     if (shaded && this.shadowQ && !env.nether) this.drawShadow({...view, time: env.time, wave: env.wave}, lit);
+    this.mark('land');
     const post = !hdr && shaded && this.postOn && this.target('post', W, H, {depth: true});
     gl.bindFramebuffer(gl.FRAMEBUFFER, target ? target.fbo : post ? post.fbo : null);
     gl.viewport(0, 0, W, H);
-    this.near = 0.05; this.far = Math.max(view.far * 1.2 + 64, (view.lodFar || 0) + 64);
+    // (a farther near plane when the distant view reaches thousands of blocks: the depth's steps there stay small)
+    this.near = (view.lodFar || 0) > 1100 ? 0.1 : 0.05; this.far = Math.max(view.far * 1.2 + 64, (view.lodFar || 0) + 64);
     const proj = mat.perspective(view.fov, W / H, this.near, this.far), rot = mat.view(view.yaw, view.pitch), vp = mat.mul(proj, rot);
     this.vp = vp; this.rot = rot; this.view = view;
     gl.disable(gl.BLEND); gl.depthMask(true);
@@ -666,7 +724,7 @@ export class Renderer {
       gl.uniformMatrix4fv(this.sky.u.u_invViewProj, false, mat.invert(vp));
       gl.uniform3fv(this.sky.u.u_top, env.skyTop); gl.uniform3fv(this.sky.u.u_horizon, env.horizon); gl.uniform3fv(this.sky.u.u_glow, env.glow);
       gl.uniform3fv(this.sky.u.u_sunDir, env.sunDir); gl.uniform1f(this.sky.u.u_stars, env.stars); gl.uniform1f(this.sky.u.u_glowAmt, env.glowAmt);
-      if (shaded) { this.setLit(this.sky, lit, view); gl.uniform3f(this.sky.u.u_camPos, view.x, view.y, view.z); gl.uniform3fv(this.sky.u.u_sunDisc, lit.sunDisc); }
+      if (shaded) { this.setLit(this.sky, lit, view); gl.uniform3f(this.sky.u.u_camPos, view.x, view.y, view.z); gl.uniform3fv(this.sky.u.u_sunDisc, lit.sunDisc); gl.uniform1f(this.sky.u.u_moonPhase, env.moonPhase || 0); gl.uniform1f(this.sky.u.u_seen, env.sunMoon ?? 1); }
       gl.bindVertexArray(this.skyVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.drawSunMoon(vp, env, hdr);
     };
@@ -677,7 +735,6 @@ export class Renderer {
     const P = this.chunk;
     gl.useProgram(P.p);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
-    if (this.mipDirty) { gl.generateMipmap(gl.TEXTURE_2D_ARRAY); this.mipDirty = false; }
     gl.uniform1i(P.u.u_tex, 0);
     // the water's look behind (HDR) on units of their own: left at 0 they would clash with the block pictures there
     if (P.u.u_scene) { gl.uniform1i(P.u.u_scene, 5); gl.uniform1i(P.u.u_sceneDepth, 6); }
@@ -698,25 +755,21 @@ export class Renderer {
     if (!shaded && view.lodFar && !env.underwater && !env.nether) { gl.uniform1f(P.u.u_fogNear, view.lodFar * 0.3); gl.uniform1f(P.u.u_fogFar, view.lodFar); }
     if (shaded) this.setLit(P, lit, view);
     // visible sections, near to far
-    const planes = frustum(vp), list = [];
-    for (const s of this.sections.values()) {
-      const ox = s.cx * 16 - view.x, oy = -64 + s.sy * 16 - view.y, oz = s.cz * 16 - view.z;
-      const dx = ox + 8, dz = oz + 8;
-      const d2 = dx * dx + dz * dz;
-      if (d2 > (view.far + 24) ** 2) continue;
-      if (!boxVisible(planes, ox, oy, oz, ox + 16, oy + 16, oz + 16)) continue;
-      list.push([d2 + (oy + 8) ** 2, s, ox, oy, oz]);
-    }
+    const planes = frustum(vp), list = this.reach(view, planes);
     list.sort((a, b) => a[0] - b[0]);
     let tris = 0;
-    for (const [, s, ox, oy, oz] of list) if (s.solid) { gl.uniform3f(P.u.u_origin, ox, oy, oz); gl.bindVertexArray(s.solid.vao); gl.drawElements(gl.TRIANGLES, s.solid.count, gl.UNSIGNED_INT, 0); tris += s.solid.count / 3; }
+    for (const [, s, ox, oy, oz] of list) if (s.solid) { gl.uniform3f(P.u.u_origin, ox, oy, oz); gl.bindVertexArray(s.solid.vao); tris += this.drawFacing(s, ox, oy, oz); }
     // the distant view past the columns
+    this.mark('far');
     if (lit && this.lods.size && !env.nether) { tris += this.drawLod(view, vp, planes, lit); gl.useProgram(P.p); }
+    this.mark('mobs');
     // things in the world (dropped items, the cracks, particles)
     if (extras.crack) this.drawCrack(extras.crack, view);
     if (extras.things) this.drawThings(extras.things, view);
     if (extras.mobs?.length) this.drawMobs(extras.mobs, vp, env, fogNear, fogFar);
+    this.mark('sky');
     if (hdr) { gl.depthMask(false); gl.disable(gl.CULL_FACE); sky(); gl.depthMask(true); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); }
+    this.mark('water');
     // water and ice, far to near; with HDR the land as it is now is copied first, for the water to look into
     gl.useProgram(P.p);
     if (hdr && list.some(e => e[1].trans)) {
@@ -743,6 +796,7 @@ export class Renderer {
     if (env.clouds && this.images.clouds && !(shaded && this.cloudQ)) this.drawClouds(vp, view, env, fogNear, fogFar);
     if (extras.outline) this.drawOutline(extras.outline, view, vp);
     if (extras.lines) this.drawLines(extras.lines, vp);
+    this.mark('post');
     if (hdr) {
       gl.disable(gl.BLEND);
       this.finish(vp, lit, view, W, H);
@@ -754,7 +808,52 @@ export class Renderer {
     }
     gl.disable(gl.BLEND);
     gl.bindVertexArray(null);
-    this.stats = {sections: this.sections.size, drawn: list.length, tris: Math.round(tris)};
+    this.mark(null);
+    this.stats = {sections: this.sections.size, drawn: list.length, tris: Math.round(tris), gpu: this.gpu};
+  }
+  /**
+   * A section's land, without the groups of faces turned away from the camera (mesh.js byFacing): a section wholly to
+   * one side of it shows none of its faces that look the other way (a block's width of margin for what sways). One
+   * call for the rest (several ranges at once where the browser can). Returns the triangles drawn.
+   */
+  drawFacing(s, ox, oy, oz) {
+    const gl = this.gl, f = s.faces;
+    if (!f) { gl.drawElements(gl.TRIANGLES, s.solid.count, gl.UNSIGNED_INT, 0); return s.solid.count / 3; }
+    // which groups are seen: +x faces only from the +x side of their planes, and so on
+    const on = [!(ox > 1), !(ox + 16 < -1), !(oy > 1), !(oy + 16 < -1), !(oz > 1), !(oz + 16 < -1), true];
+    const counts = this.mdCounts ||= new Int32Array(7), offs = this.mdOffs ||= new Int32Array(7);
+    let n = 0, tris = 0;
+    for (let g = 0; g < 7; g++) {
+      if (!on[g] || f[g + 1] === f[g]) continue;
+      // joined to the range before when they meet
+      if (n && offs[n - 1] + counts[n - 1] * 4 === f[g] * 24) counts[n - 1] += (f[g + 1] - f[g]) * 6;
+      else { offs[n] = f[g] * 24; counts[n] = (f[g + 1] - f[g]) * 6; n++; }
+      tris += (f[g + 1] - f[g]) * 2;
+    }
+    if (!n) return 0;
+    const md = this.multiDraw ??= gl.getExtension('WEBGL_multi_draw');
+    if (md && n > 1) md.multiDrawElementsWEBGL(gl.TRIANGLES, counts, 0, gl.UNSIGNED_INT, offs, 0, n);
+    else for (let i = 0; i < n; i++) gl.drawElements(gl.TRIANGLES, counts[i], gl.UNSIGNED_INT, offs[i]);
+    return tris;
+  }
+  /**
+   * Timing a frame's parts on the GPU (the debug screen shows them): mark(name) ends the part before and starts the
+   * next, mark(null) ends the frame. Off unless profile is set; the results (milliseconds, averaged over about a
+   * second) arrive a few frames late, in gpu.
+   */
+  mark(name) {
+    if (!this.profile) return;
+    const gl = this.gl, P = this.prof ||= {ext: gl.getExtension('EXT_disjoint_timer_query_webgl2'), open: null, wait: [], sum: {}, n: {}, t: performance.now()};
+    if (!P.ext) return;
+    if (P.open) { gl.endQuery(P.ext.TIME_ELAPSED_EXT); P.wait.push(P.open); P.open = null; }
+    if (name) { const q = gl.createQuery(); gl.beginQuery(P.ext.TIME_ELAPSED_EXT, q); P.open = [name, q]; return; }
+    const lost = gl.getParameter(P.ext.GPU_DISJOINT_EXT);
+    P.wait = P.wait.filter(([k, q]) => {
+      if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) return true;
+      if (!lost) { P.sum[k] = (P.sum[k] || 0) + gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; P.n[k] = (P.n[k] || 0) + 1; }
+      gl.deleteQuery(q); return false;
+    });
+    if (performance.now() - P.t > 1000) { this.gpu = Object.fromEntries(Object.keys(P.sum).map(k => [k, +(P.sum[k] / P.n[k]).toFixed(1)])); P.sum = {}; P.n = {}; P.t = performance.now(); }
   }
   drawSunMoon(vp, env, hdr = false) {
     const gl = this.gl, Q = this.quad;
@@ -779,8 +878,9 @@ export class Renderer {
     // hidden behind the rain clouds as it rains
     const seen = env.sunMoon ?? 1;
     if (seen <= 0.02) { gl.disable(gl.BLEND); return; }
-    // with 光影 the sky already glows round the sun: its picture smaller and softer, or it is a white wall
-    if (!hdr) put(sun, lean ? 9 : 18, 'sun', [0, 0, 1, 1], lean ? [1, 0.92, 0.8, seen * 0.6] : [1, 1, 1, seen]);
+    // with 光影 the sky's shader draws them round (the pictures are square)
+    if (lean) { gl.disable(gl.BLEND); gl.uniform1f(Q.u.u_back, 0); gl.uniform1f(Q.u.u_gain, 0); return; }
+    put(sun, 18, 'sun', [0, 0, 1, 1], [1, 1, 1, seen]);
     const ph = env.moonPhase || 0, mu = (ph % 4) / 4, mv = Math.floor(ph / 4) / 2;
     put(moon, 12, 'moon', [mu, mv, mu + 0.25, mv + 0.5], [1, 1, 1, seen]);
     gl.disable(gl.BLEND); gl.uniform1f(Q.u.u_back, 0); gl.uniform1f(Q.u.u_gain, 0);
@@ -857,7 +957,8 @@ export class Renderer {
   /** Mobs: [{skin, verts (x, y, z, u, v, shade; relative to the camera), light: [sky, block], tint, hurt, white}]. */
   drawMobs(list, vp, env, fogNear, fogFar) {
     const gl = this.gl, E = this.ent;
-    gl.useProgram(E.p); gl.disable(gl.CULL_FACE);
+    // the backs of their faces left out, as the game draws mobs (see buildModel)
+    gl.useProgram(E.p); gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
     gl.uniformMatrix4fv(E.u.u_viewProj, false, vp);
     gl.uniform1f(E.u.u_daylight, env.daylight); gl.uniform1f(E.u.u_gamma, env.gamma); gl.uniform1f(E.u.u_flicker, env.flicker); gl.uniform1f(E.u.u_bright, env.bright || 0);
     gl.uniform3fv(E.u.u_skyLight, env.skyLight); gl.uniform3fv(E.u.u_fog, env.fog); gl.uniform1f(E.u.u_fogNear, fogNear); gl.uniform1f(E.u.u_fogFar, fogFar);

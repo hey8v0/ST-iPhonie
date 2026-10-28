@@ -19,6 +19,7 @@ import {Screens} from './screens.js';
 import {collisionBoxes, DIR} from './shapes.js';
 import {unlockSound, play, setVolume, setRain} from './sound.js';
 import {seedOf} from './noise.js';
+import {runCommand, DIFFICULTIES, defaultRules} from './commands.js';
 import {spawnPoint, BIOMES} from './gen.js';
 import {findFrame, portalFill, across, nearestPortal, SEARCH} from './portal.js';
 import {applyPotion, effectsTick, speedFactor, hitBonus, EFFECTS, levelName, brewTick, swirlColor, potionColor} from './brew.js';
@@ -30,7 +31,7 @@ const inTavern = parent !== window;
 const SET_KEY = 'st-iphonie-blocks-settings';
 const DEFAULTS = {dist: isTouch ? 5 : 8, fov: 70, sens: 1, gamma: 0.5, volume: 0.7, scale: isTouch ? 0.7 : 1, wave: true, clouds: true, bob: true, autoJump: true,
   // 光影 and the distant view: phones start with the light ones, computers in the middle (high is for a real graphics card)
-  shaders: isTouch ? 'low' : 'mid', lod: isTouch ? 24 : 48};
+  shaders: isTouch ? 'low' : 'mid', lod: isTouch ? 48 : 96};
 let settings = {...DEFAULTS};
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SET_KEY) || '{}')); } catch {}
 const saveSettings = () => { try { localStorage.setItem(SET_KEY, JSON.stringify(settings)); } catch {} };
@@ -147,6 +148,7 @@ function api() {
     // making the land ahead of time (like Chunky): within a radius of columns round the player
     pregen: radius => { if (G) G.worker.postMessage({type: 'pregen', radius}); }, pregenStop: () => { if (G) G.worker.postMessage({type: 'pregenStop'}); },
     onPregen: fn => { pregenListener = fn; }, savedColumns: () => G?.savedColumns || 0,
+    difficulty: () => difficulty(), cycleDifficulty: () => { if (!G) return; const k = Object.keys(DIFFICULTIES); setDifficulty(k[(k.indexOf(difficulty()) + 1) % k.length]); toast(`难度：${DIFFICULTIES[difficulty()]}`); },
     mode: () => G?.mode, toggleMode: () => { if (!G) return; G.mode = G.mode === 'creative' ? 'survival' : 'creative'; if (G.mode === 'survival') G.body.flying = false; drawHud(true); toast(G.mode === 'creative' ? '换成了创造模式' : '换成了生存模式'); },
   };
 }
@@ -163,9 +165,9 @@ async function reloadTextures() {
   if (G) { G.worker.postMessage({type: 'remesh', wave: settings.wave}); drawHud(true); }
 }
 
-async function createWorld({name, seed, mode}) {
+async function createWorld({name, seed, mode, difficulty = 'normal'}) {
   const s = seed ? seedOf(seed) : Math.floor(Math.random() * 2 ** 31) - 2 ** 30;
-  const w = {id: `w${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`, name, seed: s, seedText: seed || String(s), mode, created: Date.now(), played: Date.now(), time: 0, version: 1};
+  const w = {id: `w${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`, name, seed: s, seedText: seed || String(s), mode, difficulty, created: Date.now(), played: Date.now(), time: 0, version: 1};
   await saveWorld(w);
   startWorld(w);
 }
@@ -207,6 +209,7 @@ function startWorld(meta) {
     burst: (x, y, z, kind) => G.ents.puff(x, y, z, kind), setBlock: (x, y, z, v) => setBlock(x, y, z, v),
     xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain', looting: () => enchOf(held(), 'looting'),
     nether: () => G.dim === 'nether', seed: meta.seed, invisible: () => !!G.effects.invisibility,
+    difficulty: () => meta.difficulty || 'normal', spawning: () => (meta.rules || defaultRules()).doMobSpawning,
   });
   G.mobs.load(meta.mobs);
   worker.onmessage = e => onWorker(e.data);
@@ -217,7 +220,7 @@ function startWorld(meta) {
 function onWorker(m) {
   if (!G) return;
   if (m.type === 'column') G.mirror.column(m);
-  else if (m.type === 'mesh') { renderer.setSection(m.cx, m.sy, m.cz, m.solid, m.trans); G.meshes++; }
+  else if (m.type === 'mesh') { renderer.setSection(m.cx, m.sy, m.cz, m.solid, m.trans, m.vis, m.sun, m.faces); G.meshes++; }
   else if (m.type === 'drop') { G.mirror.drop(m.cx, m.cz); renderer.dropColumn(m.cx, m.cz); }
   else if (m.type === 'drops') for (const [id, n] of m.items) G.ents.drop({id, n}, m.x, m.y, m.z);
   else if (m.type === 'sound') soundAt(m.name, m.x, m.y, m.z);
@@ -232,8 +235,8 @@ function onWorker(m) {
     for (const [x, y, z] of m.tnt) G.mobs.light(x, y, z, 10 + Math.floor(Math.random() * 20));
   } else if (m.type === 'portal') arrived(m);
   // the distant view's tiles; how far making the land ahead has got
-  else if (m.type === 'lod') renderer.setLod(m.tx, m.tz, m.data, m.quads);
-  else if (m.type === 'lodDrop') renderer.dropLod(m.tx, m.tz);
+  else if (m.type === 'lod') renderer.setLod(m.tx, m.tz, m.data, m.quads, m.size);
+  else if (m.type === 'lodDrop') renderer.dropLod(m.tx, m.tz, m.size);
   else if (m.type === 'pregen') { if (m.saved != null) G.savedColumns = m.saved; pregenListener?.(m); }
   else if (m.type === 'flushed') { G.waits?.get(m.id)?.(); G.waits?.delete(m.id); }
   else if (m.type === 'error') console.warn('world:', m.message);
@@ -460,6 +463,77 @@ function drawEffects() {
 }
 
 
+// ---------- difficulty, game rules, commands ----------
+const difficulty = () => G?.meta.difficulty || 'normal';
+const rules = () => (G.meta.rules ||= defaultRules());
+function setDifficulty(d) {
+  G.meta.difficulty = d;
+  // peaceful: the monsters there are gone
+  if (d === 'peaceful') G.mobs.list = G.mobs.list.filter(m => !m.def.hostile);
+  drawHud(true);
+}
+function setMode(m) { G.mode = m; if (m === 'survival') G.body.flying = false; drawHud(true); }
+/** What a command (commands.js) can do to the game. */
+const commandCtx = () => ({
+  get time() { return G.time; }, setTime: t => { G.time = t; },
+  weather: k => { const w = G.weather; Object.assign(w, {raining: k !== 'clear', thundering: k === 'thunder', rain: k === 'clear' ? 0 : 1, thunder: k === 'thunder' ? 1 : 0, rainT: 6000 + Math.floor(Math.random() * 12000), thunderT: 6000 + Math.floor(Math.random() * 12000)}); },
+  get mode() { return G.mode; }, setMode,
+  get difficulty() { return difficulty(); }, setDifficulty,
+  give: (id, n) => { while (n > 0) { const k = Math.min(n, stackMax(id)); n -= k; const left = G.inv.add({id, n: k}); if (left) { const b = G.body; G.ents.drop(left, b.x, b.y + 1, b.z); } } drawHud(true); },
+  pos: () => [G.body.x, G.body.y, G.body.z],
+  teleport: (x, y, z) => { const b = G.body; Object.assign(b, {x, y, z, vx: 0, vy: 0, vz: 0, fall: 0}); b.prev = {x, y, z}; },
+  kill: () => { const m = G.mode; G.mode = 'survival'; G.invuln = 0; hurt(1000, '自杀了', null, 'void'); if (!G.dead) G.mode = m; },
+  summon: (kind, x, y, z) => { G.mobs.add(kind, x, y, z); },
+  effect: (id, secs, amp) => { G.effects[id] = {amp, t: Math.round(secs * 20)}; drawEffects(); },
+  clearEffects: () => { G.effects = {}; drawEffects(); },
+  clear: () => { let n = 0; for (let i = 0; i < G.inv.slots.length; i++) if (G.inv.slots[i]) { n += G.inv.slots[i].n; G.inv.slots[i] = null; } drawHud(true); return n; },
+  addXp: (n, levels) => { if (levels) G.xp.level = Math.max(0, G.xp.level + n); else gainXp(n); drawHud(true); },
+  setSpawn: () => { const b = G.body; G.spawn = {x: b.x, y: b.y, z: b.z}; },
+  get seed() { return G.meta.seedText ?? G.meta.seed; },
+  get rules() { return rules(); }, setRule: (k, on) => { rules()[k] = on; },
+});
+/** The chat bar (T, or / to start a command): what is typed is run as a command; the answers show over the game. */
+let chatEl = null;
+function chatLog(text, ok = true) {
+  const log = $('.chatlog');
+  for (const line of String(text).split('\n')) {
+    if (!line) continue;
+    const d = document.createElement('div');
+    d.className = ok ? '' : 'bad'; d.textContent = line;
+    log.append(d);
+    setTimeout(() => d.classList.add('old'), 8000);
+  }
+  while (log.children.length > 12) log.firstElementChild.remove();
+}
+function openChat(start = '') {
+  if (!G || G.dead || paused || invUI.open || chatEl) return;
+  input.enabled = false; input.unlock();
+  const bar = chatEl = document.createElement('div');
+  bar.className = 'chatbar';
+  bar.innerHTML = '<input type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="输入指令，比如 /time set day（/help 看全部）">';
+  $('.chatlog').after(bar);
+  const box = bar.firstElementChild;
+  box.value = start;
+  $('.chatlog').classList.add('open');
+  setTimeout(() => { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }, 0);
+  const close = () => { if (chatEl !== bar) return; bar.remove(); chatEl = null; $('.chatlog').classList.remove('open'); if (G && !paused && !G.dead) { input.enabled = true; if (input.mode !== 'touch') input.lock(); } };
+  box.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const line = box.value.trim();
+      if (line) {
+        chatLog(line, true);
+        // (what does not start with / is said, as in the game; only commands do anything here)
+        if (line.startsWith('/')) { const r = runCommand(line, commandCtx()); if (r.text) chatLog(r.text, r.ok); }
+      }
+      close();
+    }
+  });
+  box.addEventListener('blur', () => setTimeout(close, 200));
+}
+
 // ---------- the day ----------
 /** Light and colours at a time (ticks, 24000 a day; 0 is sunrise). Rain and thunder darken the sky and the light. */
 function environment(time) {
@@ -523,8 +597,10 @@ function weatherTick() {
   // no weather in the Nether
   if (G.dim === 'nether') { setRain(0); if (G.flash > 0) G.flash--; return; }
   const w = G.weather, rnd = n => Math.floor(Math.random() * n);
-  if (--w.thunderT <= 0) { w.thundering = !w.thundering; w.thunderT = w.thundering ? 3600 + rnd(12000) : 12000 + rnd(168000); }
-  if (--w.rainT <= 0) { w.raining = !w.raining; w.rainT = w.raining ? 12000 + rnd(12000) : 12000 + rnd(168000); }
+  if (rules().doWeatherCycle) {
+    if (--w.thunderT <= 0) { w.thundering = !w.thundering; w.thunderT = w.thundering ? 3600 + rnd(12000) : 12000 + rnd(168000); }
+    if (--w.rainT <= 0) { w.raining = !w.raining; w.rainT = w.raining ? 12000 + rnd(12000) : 12000 + rnd(168000); }
+  }
   const toward = (v, t) => v < t ? Math.min(t, v + 0.01) : Math.max(t, v - 0.01);
   w.rain = toward(w.rain, w.raining ? 1 : 0); w.thunder = toward(w.thunder, w.raining && w.thundering ? 1 : 0);
   if (G.tops.size > 4000) G.tops.clear();
@@ -895,6 +971,8 @@ const aimDir = () => G.body.look();
 const PIERCE = new Set(['fall', 'drown', 'starve', 'void', 'magic']);
 function hurt(n, why, from = null, kind = 'hit') {
   if (G.mode === 'creative' || G.dead || n <= 0) return;
+  // the difficulty scales what mobs do (the game's: easy half and one more, at most the same; hard half again)
+  if (from) { const d = difficulty(); if (d === 'peaceful') return; if (d === 'easy') n = Math.min(n, n / 2 + 1); if (d === 'hard') n *= 1.5; }
   // 抗火: no harm from fire, lava or magma
   if (G.effects.fire_resistance && (kind === 'lava' || kind === 'fire')) return;
   // a moment after a hit nothing hurts again (a stronger hit only adds what it has more)
@@ -969,16 +1047,21 @@ function attackMob(m) {
 function die(why) {
   G.dead = true; G.body.dead = true; paused = true; input.enabled = false; input.unlock(); invUI.hide();
   const b = G.body;
-  for (let i = 0; i < G.inv.slots.length; i++) if (G.inv.slots[i]) { G.ents.drop(G.inv.slots[i], b.x, b.y + 1, b.z); G.inv.slots[i] = null; }
-  // experience: seven points a level fall out (at most a hundred), the rest is lost
-  G.ents.xp(Math.min(100, G.xp.level * 7), b.x, b.y + 1, b.z);
-  G.xp = {level: 0, prog: 0, total: 0};
+  // (the game rule 死亡不掉落 keeps everything, experience too)
+  if (!rules().keepInventory) {
+    for (let i = 0; i < G.inv.slots.length; i++) if (G.inv.slots[i]) { G.ents.drop(G.inv.slots[i], b.x, b.y + 1, b.z); G.inv.slots[i] = null; }
+    // experience: seven points a level fall out (at most a hundred), the rest is lost
+    G.ents.xp(Math.min(100, G.xp.level * 7), b.x, b.y + 1, b.z);
+    G.xp = {level: 0, prog: 0, total: 0};
+  }
   drawHud(true);
   screens.dead(why);
 }
 function survivalTick(r) {
   const b = G.body;
   if (G.mode === 'creative') { G.health = 20; G.food = 20; G.air = 300; return; }
+  // peaceful: never hungry, the hearts come back by themselves (one each second)
+  if (difficulty() === 'peaceful') { if (G.food < 20 || G.sat < 5) { G.food = 20; G.sat = Math.max(G.sat, 5); drawHud(true); } if (G.health < 20 && G.time % 20 === 0) { G.health = Math.min(20, G.health + 1); drawHud(true); } }
   // a hay bale takes four fifths of a fall
   const onHay = (G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z)) & 0xFFF) === ID.hay_block;
   if (r.landed > 3 && !b.inWater) hurt(Math.ceil((r.landed - 3) * (onHay ? 0.2 : 1)), '摔得太重了', null, 'fall');
@@ -995,7 +1078,8 @@ function survivalTick(r) {
   if (r.jumped) G.exh += b.sprinting ? 0.2 : 0.05;
   if (G.exh >= 4) { G.exh -= 4; if (G.sat > 0) G.sat = Math.max(0, G.sat - 1); else { G.food = Math.max(0, G.food - 1); drawHud(true); } }
   if (G.food >= 18 && G.health < 20) { if (++G.regen >= (G.food >= 20 && G.sat > 0 ? 10 : 80)) { G.regen = 0; G.health = Math.min(20, G.health + 1); G.exh += 6; drawHud(true); } } else G.regen = 0;
-  if (G.food <= 0) { if (++G.starve >= 80) { G.starve = 0; if (G.health > 1) hurt(1, '饿死了', null, 'starve'); } } else G.starve = 0;
+  // starving: down to half the hearts on easy, to half a heart on normal, to death on hard
+  if (G.food <= 0) { if (++G.starve >= 80) { G.starve = 0; if (G.health > {peaceful: 20, easy: 10, normal: 1, hard: 0}[difficulty()]) hurt(1, '饿死了', null, 'starve'); } } else G.starve = 0;
   if (G.food <= 6) b.sprinting = false;
 }
 function eatTick() {
@@ -1017,7 +1101,7 @@ function tick() {
   const b = G.body;
   // nothing moves while going through a portal, or while the one on the other side is made
   if (G.arriving || G.leaving) return;
-  G.time++;
+  if (rules().doDaylightCycle) G.time++;
   // asleep: the screen goes dark; after five seconds it is morning
   if (G.sleeping && ++G.sleeping >= 100) {
     G.time = Math.ceil(G.time / 24000) * 24000; G.sleeping = 0; toast('天亮了');
@@ -1129,7 +1213,8 @@ function handleEvents(events) {
     else if (e === 'prev') { G.hot = (G.hot + 8) % 9; drawHud(true); }
     else if (e === 'drop') { const s = held(); if (s) { const one = G.inv.take(G.hot, 1); const eye = eyePos(); G.ents.drop(one, eye[0], eye[1] - 0.3, eye[2], {dir: G.body.look(), delay: 40}); drawHud(true); } }
     else if (e === 'fly') { if (G.mode === 'creative') { G.body.flying = !G.body.flying; G.body.vy = 0; } }
-    else if (e === 'debug') { debugOn = !debugOn; $('.debug').hidden = !debugOn; }
+    else if (e === 'debug') { debugOn = !debugOn; $('.debug').hidden = !debugOn; renderer.profile = debugOn; }
+    else if (e === 'chat' || e === 'command') openChat(e === 'command' ? '/' : '');
     else if (e === 'hud') { hudHidden = !hudHidden; hud.style.opacity = hudHidden ? 0 : 1; }
     else if (e === 'view') { G.view = (G.view + 1) % 3; toast(['第一人称', '第三人称（背后）', '第三人称（正面）'][G.view]); }
     else if (e === 'use') { const t = targetAt(), m = mobAt(); if (m && (!t || m.t < t.t)) use(null, m.mob); else use(t); G.useWait = 5; }
@@ -1462,7 +1547,7 @@ function frame(now) {
     // facingBack() is where a placed block's front looks: the player looks the other way
     const bx = Math.floor(b.x), by = Math.floor(b.y), bz = Math.floor(b.z), [sk, bl] = G.mirror.light(bx, by, bz), dir = ['北', '东', '南', '西'][facingBack()];
     const day = Math.floor(G.time / 24000) + 1, hour = Math.floor(((G.time % 24000) / 1000 + 6) % 24);
-    $('.debug').textContent = `方块世界  ${Math.round(1 / Math.max(dt, 0.001))} fps\nXYZ: ${b.x.toFixed(2)} / ${b.y.toFixed(2)} / ${b.z.toFixed(2)}\n方块: ${bx} ${by} ${bz}  区块: ${G.cx} ${G.cz}\n朝向: ${dir}  (${(b.yaw * 180 / Math.PI % 360).toFixed(1)} / ${(b.pitch * 180 / Math.PI).toFixed(1)})\n生物群系: ${BIOMES[G.mirror.biome(bx, bz)]?.zh}\n光照: 天空 ${sk}  方块 ${bl}\n第 ${day} 天 ${hour}:00\n区段: ${renderer.stats.drawn}/${renderer.stats.sections}  三角形: ${renderer.stats.tris}\n生物: ${G.mobs.count(m => m.def.passive)} 动物 / ${G.mobs.count(m => m.def.hostile)} 怪物\n天气: ${G.weather.thunder > 0.5 ? '雷雨' : G.weather.rain > 0.5 ? (fallsAt(bx, bz) === 'snow' ? '下雪' : '下雨') : '晴'}（${Math.round(G.weather.rain * 100)}%，${Math.round(G.weather.rainT / 20)} 秒后${G.weather.raining ? '停' : '下'}）  护甲: ${G.inv.armor().points}  等级: ${G.xp.level}\n种子: ${G.meta.seedText || G.meta.seed}${G.targetMob ? `\n看着: ${G.targetMob.def.zh}（${Math.ceil(G.targetMob.health)}/${G.targetMob.def.health}）` : ''}${G.target ? `\n看着: ${BLOCKS[G.target.v & 0xFFF].zh} (${G.target.x}, ${G.target.y}, ${G.target.z})` : ''}`;
+    $('.debug').textContent = `方块世界  ${Math.round(1 / Math.max(dt, 0.001))} fps\nXYZ: ${b.x.toFixed(2)} / ${b.y.toFixed(2)} / ${b.z.toFixed(2)}\n方块: ${bx} ${by} ${bz}  区块: ${G.cx} ${G.cz}\n朝向: ${dir}  (${(b.yaw * 180 / Math.PI % 360).toFixed(1)} / ${(b.pitch * 180 / Math.PI).toFixed(1)})\n生物群系: ${BIOMES[G.mirror.biome(bx, bz)]?.zh}\n光照: 天空 ${sk}  方块 ${bl}\n第 ${day} 天 ${hour}:00\n区段: ${renderer.stats.drawn}/${renderer.stats.sections}  三角形: ${renderer.stats.tris}  难度: ${DIFFICULTIES[difficulty()]}\n${renderer.stats.gpu ? `显卡（毫秒）: ${Object.entries(renderer.stats.gpu).map(([k, v]) => `${{shadow: '影子', land: '地形', far: '远景', mobs: '生物', sky: '天空', water: '水', post: '后期'}[k] || k} ${v}`).join('  ')}\n` : ''}生物: ${G.mobs.count(m => m.def.passive)} 动物 / ${G.mobs.count(m => m.def.hostile)} 怪物\n天气: ${G.weather.thunder > 0.5 ? '雷雨' : G.weather.rain > 0.5 ? (fallsAt(bx, bz) === 'snow' ? '下雪' : '下雨') : '晴'}（${Math.round(G.weather.rain * 100)}%，${Math.round(G.weather.rainT / 20)} 秒后${G.weather.raining ? '停' : '下'}）  护甲: ${G.inv.armor().points}  等级: ${G.xp.level}\n种子: ${G.meta.seedText || G.meta.seed}${G.targetMob ? `\n看着: ${G.targetMob.def.zh}（${Math.ceil(G.targetMob.health)}/${G.targetMob.def.health}）` : ''}${G.target ? `\n看着: ${BLOCKS[G.target.v & 0xFFF].zh} (${G.target.x}, ${G.target.y}, ${G.target.z})` : ''}`;
   }
 }
 // pads in menus and inventories

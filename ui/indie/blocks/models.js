@@ -36,11 +36,13 @@ export const MODELS = {
     part('leg0', [26, 0], [[-1, 0, -3, 3, 5, 3]], [-2, 19, 1]), part('leg1', [26, 0], [[-1, 0, -3, 3, 5, 3]], [1, 19, 1]),
     part('wing0', [24, 13], [[0, 0, -3, 1, 4, 6]], [-4, 13, 0]), part('wing1', [24, 13], [[-1, 0, -3, 1, 4, 6]], [4, 13, 0]),
   ]},
+  // the left arm and leg are the right ones mirrored, as the game's own humanoid model has them (its zombie picture is
+  // 64×64 but leaves the player's left-limb places empty: taken from there, a zombie had one arm and one leg)
   zombie: {skin: [64, 64], size: [0.6, 1.95], parts: [
     part('head', [0, 0], [[-4, -8, -4, 8, 8, 8]]),
     part('body', [16, 16], [[-4, 0, -2, 8, 12, 4]]),
-    part('arm0', [40, 16], [[-3, -2, -2, 4, 12, 4]], [-5, 2, 0]), part('arm1', [32, 48], [[-1, -2, -2, 4, 12, 4]], [5, 2, 0]),
-    part('leg0', [0, 16], [[-2, 0, -2, 4, 12, 4]], [-1.9, 12, 0]), part('leg1', [16, 48], [[-2, 0, -2, 4, 12, 4]], [1.9, 12, 0]),
+    part('arm0', [40, 16], [[-3, -2, -2, 4, 12, 4]], [-5, 2, 0]), part('arm1', [40, 16], [[-1, -2, -2, 4, 12, 4, 0, true]], [5, 2, 0]),
+    part('leg0', [0, 16], [[-2, 0, -2, 4, 12, 4]], [-1.9, 12, 0]), part('leg1', [0, 16], [[-2, 0, -2, 4, 12, 4, 0, true]], [1.9, 12, 0]),
   ]},
   skeleton: {skin: [64, 32], size: [0.6, 1.99], parts: [
     part('head', [0, 0], [[-4, -8, -4, 8, 8, 8]]),
@@ -226,7 +228,10 @@ export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}
         const nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]), ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]), nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
         const len = Math.hypot(nx, ny, nz) || 1, shade = 0.7 + Math.abs(ny / len) * (ny > 0 ? 0.3 : -0.2) + Math.abs(nz / len) * 0.1;
         const uv = [[u2, v1], [u1, v1], [u1, v2], [u2, v2]];
-        for (let i = 0; i < 4; i++) { const P = V[vs[i]]; out.push(P[0], P[1], P[2], uv[i][0] / tw, uv[i][1] / th, shade); }
+        // each face wound the same way round seen from outside (a mirrored box's corners swapped turn it the other
+        // way: walked backwards), so the backs of the faces can be left out — the game's mobs show through the gaps
+        // of a cut-out picture (a skeleton's ribs) what is behind, not the inside of their own box
+        for (let k = 0; k < 4; k++) { const i = mirror ? 3 - k : k, P = V[vs[i]]; out.push(P[0], P[1], P[2], uv[i][0] / tw, uv[i][1] / th, shade); }
       }
     }
     for (const c of p.children) walk({...c, name: c.name}, R, here(c.pivot));
@@ -289,7 +294,8 @@ export const OWN_SKINS = {
     const white = ['#f4f4f2', '#ececea', '#fafaf8'];
     box(0, 0, 4, 6, 3, white); box(0, 9, 6, 8, 6, white); box(24, 13, 1, 4, 6, ['#e6e6e2', '#f0f0ee']);
     box(14, 0, 4, 2, 2, ['#f3b43a', '#e9a62c']); box(14, 4, 2, 2, 2, ['#d8312b', '#c92a25']);
-    // legs: a thin leg down the middle of each side of the box, toes at the bottom (the rest clear)
+    // legs: a thin leg down the middle of each side of the box, toes at the bottom (the rest clear; only the near
+    // faces are drawn, so from any side it is one leg — with the far faces seen through the gaps it looked like three)
     for (const x of [27, 30, 33, 36]) for (let y = 3; y < 8; y++) px(x, y, hex(y === 7 ? '#c9861f' : '#e8a23a'));
     for (const x of [29, 30, 31, 35, 36, 37]) px(x, 7, hex('#dc9530'));
     const [fx, fy] = front(0, 0, 4, 3); px(fx, fy + 1, hex('#111111')); px(fx + 3, fy + 1, hex('#111111'));
@@ -306,11 +312,13 @@ export const OWN_SKINS = {
     px(fx + 1, fy + 2, hex('#3d6332')); px(fx + 6, fy + 2, hex('#3d6332'));
   }),
   skeleton: () => skin(64, 32, 7, ({px, area, box, front, hex, r}) => {
-    const bone = ['#c9c9c4', '#bdbdb8', '#d4d4cf'], gap = ['#3a3a38'];
-    box(0, 0, 8, 8, 8, bone); box(16, 16, 8, 12, 4, gap); box(40, 16, 2, 12, 2, bone); box(0, 16, 2, 12, 2, bone);
-    // ribs and spine
-    for (let y = 21; y < 30; y += 2) area(20, y, 8, 1, bone);
-    area(23, 20, 2, 12, bone); area(32, 20, 8, 12, gap);
+    const bone = ['#c9c9c4', '#bdbdb8', '#d4d4cf'];
+    box(0, 0, 8, 8, 8, bone); box(40, 16, 2, 12, 2, bone); box(0, 16, 2, 12, 2, bone);
+    // the body a cage of bones with clear gaps (the far side shows through, as the game's): ribs round all four sides,
+    // the spine down the front and back, the shoulders and the hips
+    area(20, 16, 8, 4, bone); area(28, 16, 8, 4, bone);
+    for (let y = 21; y < 28; y += 2) area(16, y, 24, 1, bone);
+    area(23, 20, 2, 12, bone); area(35, 20, 2, 12, bone); area(16, 20, 24, 1, bone); area(16, 29, 24, 3, bone);
     const [fx, fy] = front(0, 0, 8, 8);
     area(fx + 1, fy + 3, 2, 2, ['#151515']); area(fx + 5, fy + 3, 2, 2, ['#151515']); px(fx + 3, fy + 5, hex('#333333')); px(fx + 4, fy + 5, hex('#333333'));
     for (let i = 1; i < 7; i++) px(fx + i, fy + 6, hex(i % 2 ? '#2a2a2a' : '#bdbdb8'));

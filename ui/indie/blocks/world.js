@@ -8,7 +8,7 @@ import {portalHolds, portalSpot, buildPortal} from './portal.js';
 import {villagersIn} from './village.js';
 import {lodTile, lodPlan} from './lod.js';
 import {BLOCKS, ID, MINY, HEIGHT, SECTIONS, SEA, withMeta, dropsOf, itemInfo} from './blocks.js';
-import {meshSection} from './mesh.js';
+import {meshSection, sectionVis, ALL_OPEN} from './mesh.js';
 import {rng} from './noise.js';
 
 const N = BLOCKS.length;
@@ -621,7 +621,9 @@ export class World {
   /** Can this column's sections be meshed (all eight neighbours are here)? */
   ready(c) { for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) if (!this.col(c.cx + dx, c.cz + dz)) return false; return true; }
   meshOne(c, si) {
-    if (!c.sections[si] || !c.sections[si].some(v => v)) { this.post({type: 'mesh', cx: c.cx, cz: c.cz, sy: si, solid: null, trans: null}); return; }
+    // with the mesh: which of its sides see each other through it (cave culling), and whether any sky light is in it
+    // (one with none casts no shadow anyone in the sun could see: the land above it does)
+    if (!c.sections[si] || !c.sections[si].some(v => v)) { this.post({type: 'mesh', cx: c.cx, cz: c.cz, sy: si, solid: null, trans: null, vis: ALL_OPEN, sun: true}); return; }
     const pad = new Uint16Array(18 * 18 * 18), lit = new Uint8Array(18 * 18 * 18);
     const gx = new Int32Array(18 * 18), fx = new Int32Array(18 * 18), wx = new Int32Array(18 * 18);
     const tints = new Map();
@@ -645,7 +647,8 @@ export class World {
       }
     }
     const m = meshSection(pad, lit, {grass: gx, foliage: fx, water: wx}, this.tex, {ox: c.cx * 16, oz: c.cz * 16, wave: this.wave});
-    this.post({type: 'mesh', cx: c.cx, cz: c.cz, sy: si, solid: m.solid.length ? m.solid : null, trans: m.trans.length ? m.trans : null}, [m.solid.buffer, m.trans.buffer]);
+    const ls = c.light[si], sun = !ls ? si > c.topSec : ls.some(v => v >= 16) || (c.light[si + 1] || []).some?.(v => v >= 16) || si + 1 > c.topSec;
+    this.post({type: 'mesh', cx: c.cx, cz: c.cz, sy: si, solid: m.solid.length ? m.solid : null, faces: m.faces, trans: m.trans.length ? m.trans : null, vis: sectionVis(c.sections[si]), sun}, [m.solid.buffer, m.trans.buffer]);
   }
   /** Sends the page its copy of a column's blocks and light. */
   sendColumn(c) {
@@ -747,19 +750,19 @@ export class World {
   // ---------- the distant view ----------
   /** Makes the distant view's tiles nearest first (a finer one where the player came nearer) and lets go of far ones. */
   lodWork(t0, budget) {
-    if (!this.lodRadius || this.nether) { if (this.lodSent.size) { for (const k of this.lodSent.keys()) { const [tx, tz] = k.split(',').map(Number); this.post({type: 'lodDrop', tx, tz}); } this.lodSent.clear(); } return false; }
+    if (!this.lodRadius || this.nether) { if (this.lodSent.size) { for (const k of this.lodSent.keys()) { const [tx, tz, size] = k.split(',').map(Number); this.post({type: 'lodDrop', tx, tz, size}); } this.lodSent.clear(); } return false; }
     const [cx, cz] = this.center, plan = lodPlan(cx, cz, this.lodRadius, this.radius), want = new Set();
     let made = 0;
     for (const t of plan) {
-      const k = `${t.tx},${t.tz}`;
+      const k = `${t.tx},${t.tz},${t.size}`;
       want.add(k);
       if (this.lodSent.get(k) === t.step || performance.now() - t0 > budget) continue;
-      const {data, quads} = lodTile(this.seed, t.tx, t.tz, t.step);
+      const {data, quads} = lodTile(this.seed, t.tx, t.tz, t.step, t.size);
       this.lodSent.set(k, t.step);
-      this.post({type: 'lod', tx: t.tx, tz: t.tz, step: t.step, data, quads}, [data]);
+      this.post({type: 'lod', tx: t.tx, tz: t.tz, size: t.size, step: t.step, data, quads}, [data]);
       made++;
     }
-    for (const k of this.lodSent.keys()) if (!want.has(k)) { const [tx, tz] = k.split(',').map(Number); this.lodSent.delete(k); this.post({type: 'lodDrop', tx, tz}); }
+    for (const k of this.lodSent.keys()) if (!want.has(k)) { const [tx, tz, size] = k.split(',').map(Number); this.lodSent.delete(k); this.post({type: 'lodDrop', tx, tz, size}); }
     return made > 0;
   }
   // ---------- making land ahead of time (like Chunky) ----------
