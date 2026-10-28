@@ -125,6 +125,12 @@ export function play(name, v = 0, k = 1) {
     // a paddle dipping into the water (on land it scrapes)
     case 'paddle': burst(1100, 0.9, 0.16 * k, 0.3, {pitch: r}); burst(450, 1.2, 0.08 * k, 0.25, {at: 0.04}); break;
     case 'paddle_land': burst(600, 1.5, 0.12 * k, 0.15, {pitch: r}); break;
+    // the deep sea: a sponge soaking up water, guardians' moans, a beam charging (rising), the elder's curse
+    case 'sponge': burst(700, 0.8, 0.35, 0.35, {pitch: 0.8}); burst(2600, 1.2, 0.15, 0.25, {at: 0.08}); break;
+    case 'guardian': tone(180 + Math.random() * 60, 0.08 * k, 0.6, {type: 'sine', slide: 1.3}); burst(600, 0.8, 0.06 * k, 0.5); break;
+    case 'elder_guardian': tone(110 + Math.random() * 30, 0.1 * k, 1.1, {type: 'sine', slide: 0.8}); tone(165, 0.05 * k, 1, {type: 'triangle', slide: 0.8}); break;
+    case 'guardian_beam': tone(220, 0.07 * k, 3.6, {type: 'sawtooth', slide: 4}); tone(330, 0.04 * k, 3.6, {type: 'sine', slide: 4}); break;
+    case 'curse': tone(80, 0.18, 2.2, {type: 'sawtooth', slide: 1.6}); tone(160, 0.1, 2, {type: 'sine', slide: 0.5, at: 0.1}); burst(400, 0.5, 0.2, 1.6, {pitch: 0.6}); break;
   }
 }
 // note blocks: the instrument (by the block under it) and its pitch, 0–24 from F♯ two octaves up (the game's)

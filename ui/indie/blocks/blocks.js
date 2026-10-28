@@ -403,6 +403,14 @@ block('sea_lantern', '海晶灯', {tex: all('sea_lantern'), hard: 0.3, light: 15
 block('dried_kelp_block', '干海带块', {tex: tbs('dried_kelp_top', 'dried_kelp_bottom', 'dried_kelp_side'), hard: 0.5, tool: T.HOE, cat: 'build'});
 // the turtle's eggs (state & 3: one to four less one; state >> 2: how near hatching, 0–2)
 block('turtle_egg', '海龟蛋', {tex: all('turtle_egg'), stages: ['turtle_egg', 'turtle_egg_slightly_cracked', 'turtle_egg_very_cracked'], shape: 'eggs', pass: 'cutout', hard: 0.5, solid: false, drop: null, itemIcon: 'turtle_egg_item'});
+// ---------- the deep sea (0.8.76) ----------
+// sponges: a dry one soaks up the water round it (six blocks out, sixty-five at most) and is wet then; a wet one dries
+// in a furnace, or at once in the Nether. The monuments' wet sponges are the only ones the world makes.
+block('sponge', '海绵', {tex: all('sponge'), hard: 0.6, tool: T.HOE, cat: 'build'});
+block('wet_sponge', '湿海绵', {tex: all('wet_sponge'), hard: 0.6, tool: T.HOE, cat: 'build'});
+// a bubble column: water a soul sand (state 0, up) or a magma block (state 1, down) sends bubbles through, from the
+// block up to the top of the water; drawn and swum in as water
+block('bubble_column', '气泡柱', {shape: 'none', pass: 'none', solid: false, opaque: false, replace: true, hard: 100, drop: null, item: false, water: true, filter: 2});
 
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
@@ -513,7 +521,7 @@ item('glow_ink_sac', '荧光墨囊');
 for (const [f, zh] of [['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚']]) item(`${f}_bucket`, `${zh}桶`, {stack: 1, pour: 'water', fish: f});
 item('turtle_scute', '海龟鳞甲'); item('nautilus_shell', '鹦鹉螺壳');
 item('turtle_helmet', '海龟壳', {stack: 1, armor: {slot: 0, mat: 'turtle', points: 2, tough: 0, uses: 275}, enchantability: 9, repair: 'turtle_scute'});
-for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
+for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟'], ['guardian', '守卫者'], ['elder_guardian', '远古守卫者']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
 
 export const ITEMS = I;
 

@@ -53,6 +53,10 @@ button{font:inherit;color:inherit}
 .debug{position:absolute;left:calc(2*var(--u));top:calc(2*var(--u));font:calc(6.5*var(--u))/1.35 ui-monospace,Menlo,Consolas,monospace;white-space:pre;text-shadow:1px 1px 0 #000;background:rgba(0,0,0,.25);padding:calc(2*var(--u))}
 .hurt{position:absolute;inset:0;background:radial-gradient(transparent 55%,rgba(200,0,0,.45));opacity:0;transition:opacity .4s}
 .water{position:absolute;inset:0;background:rgba(20,60,160,.25);display:none}
+/* the elder guardian's curse: its face looms up and fades */
+.curse{position:absolute;left:50%;top:50%;width:62vmin;height:62vmin;transform:translate(-50%,-50%);image-rendering:pixelated;opacity:0;pointer-events:none}
+.curse.show{animation:curse 1.8s ease-in-out}
+@keyframes curse{0%{opacity:0;transform:translate(-50%,-50%) scale(.55)}30%{opacity:.8;transform:translate(-50%,-50%) scale(1)}70%{opacity:.6;transform:translate(-50%,-50%) scale(1.05)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.2)}}
 .sleep{position:absolute;inset:0;background:#05050a;opacity:0;transition:opacity .25s}
 .portalfx{position:absolute;inset:0;opacity:0;pointer-events:none;background:radial-gradient(circle at 50% 50%,rgba(150,60,255,.35),rgba(80,10,170,.85));mix-blend-mode:screen;animation:portalfx 3s linear infinite}
 @keyframes portalfx{0%{filter:hue-rotate(0)}50%{filter:hue-rotate(-25deg)}100%{filter:hue-rotate(0)}}
@@ -205,6 +209,7 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
     <div class="hurt"></div>
     <div class="sleep"></div>
     <div class="portalfx"></div>
+    <canvas class="curse" width="12" height="12"></canvas>
     <div class="cross"></div>
     <div class="effects"></div>
     <div class="debug" hidden></div>

@@ -17,6 +17,8 @@ export const EFFECTS = {
   invisibility: {zh: '隐身', color: 0xF6F6F6, good: true},
   absorption: {zh: '伤害吸收', color: 0x2552A5, good: true},
   resistance: {zh: '抗性提升', color: 0x99453A, good: true},
+  // the elder guardian's curse: digging slower (the game's 0.3, 0.09, 0.0027, 0.00081 a level)
+  mining_fatigue: {zh: '挖掘疲劳', color: 0x4A4217, good: false},
   instant_health: {zh: '瞬间治疗', color: 0xF82423, good: true, instant: true},
   instant_damage: {zh: '瞬间伤害', color: 0xA9656A, good: false, instant: true},
 };

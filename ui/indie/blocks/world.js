@@ -6,6 +6,7 @@ import {generateColumn, newColumn, BIOMES, growTree, worldOf} from './gen.js';
 import {generateNether} from './nether.js';
 import {portalHolds, portalSpot, buildPortal} from './portal.js';
 import {villagersIn} from './village.js';
+import {monumentsNear} from './monument.js';
 import {lodTile, lodPlan} from './lod.js';
 import {BLOCKS, ID, MINY, HEIGHT, SECTIONS, SEA, withMeta, dropsOf, itemInfo} from './blocks.js';
 import {meshSection, sectionVis, ALL_OPEN} from './mesh.js';
@@ -263,6 +264,10 @@ export class World {
       // a coral block looks for water a few seconds after something by it changed (the game's; a reef as it was made stays)
       else if (CORAL_BLOCKS.has(id)) this.schedule(nx, ny, nz, 60 + Math.floor(this.r() * 40));
       else if (PAIRED.has(id) || id === ID.vine) this.schedule(nx, ny, nz, 1);
+      // a bubble column looks at its ground and passes itself up; soul sand and magma blocks start one
+      else if (id === ID.bubble_column) this.schedule(nx, ny, nz, 5);
+      else if (id === ID.soul_sand || id === ID.magma_block) this.schedule(nx, ny, nz, 20);
+      else if (id === ID.sponge || id === ID.wet_sponge) this.schedule(nx, ny, nz, 1);
     }
   }
   schedule(x, y, z, delay) { const k = `${x},${y},${z}`; const t = this.tick + delay; if (!this.due.has(k) || this.due.get(k) > t) this.due.set(k, t); }
@@ -465,6 +470,10 @@ export class World {
   update(x, y, z) {
     const v = this.get(x, y, z), id = v & 0xFFF;
     if (!v) return;
+    if (id === ID.bubble_column || id === ID.soul_sand || id === ID.magma_block) { this.bubbles(x, y, z, v); return; }
+    // a dry sponge soaks up the water round it; a wet one dries at once in the Nether
+    if (id === ID.sponge) { this.soak(x, y, z); return; }
+    if (id === ID.wet_sponge) { if (this.nether) { this.set(x, y, z, ID.sponge); this.post({type: 'sound', name: 'fizz', x: x + 0.5, y: y + 0.5, z: z + 0.5}); } return; }
     // concrete powder touching water at a side or above sets into concrete (with water under it, it falls in and sets there)
     const sets = BLOCKS[id].sets;
     if (sets && DIRS.some(([dx, dy, dz]) => dy !== -1 && (this.get(x + dx, y + dy, z + dz) & 0xFFF) === ID.water)) { this.set(x, y, z, ID[sets]); return; }
@@ -490,6 +499,51 @@ export class World {
     if (LIQUID.has(id)) this.flow(x, y, z, v);
     // a portal whose frame is broken goes out (and the rest of it after it)
     if (id === ID.nether_portal && !portalHolds((a, b, c) => this.get(a, b, c), x, y, z, v)) this.set(x, y, z, 0);
+  }
+  /**
+   * Bubble columns: soul sand (up, state 0) or a magma block (down, state 1) under still water makes the water over it a
+   * column, on up through the still water to its top. A column whose ground is gone is water again (from the bottom
+   * up); one over the other kind of ground turns.
+   */
+  bubbles(x, y, z, v) {
+    const id = v & 0xFFF;
+    let kind = id === ID.soul_sand ? 0 : id === ID.magma_block ? 1 : -1;
+    if (id === ID.bubble_column) {
+      const below = this.get(x, y - 1, z), bid = below & 0xFFF;
+      kind = bid === ID.soul_sand ? 0 : bid === ID.magma_block ? 1 : bid === ID.bubble_column ? below >>> 12 & 1 : -1;
+      if (kind < 0) { this.set(x, y, z, ID.water); return; }
+      if ((v >>> 12 & 1) !== kind) { this.set(x, y, z, withMeta(ID.bubble_column, kind)); return; }
+    }
+    for (let yy = y + 1; yy < MINY + HEIGHT; yy++) {
+      const up = this.get(x, yy, z), uid = up & 0xFFF;
+      if (!((uid === ID.water && !(up >>> 12)) || (uid === ID.bubble_column && (up >>> 12 & 1) !== kind))) break;
+      this.set(x, yy, z, withMeta(ID.bubble_column, kind));
+    }
+  }
+  /**
+   * A dry sponge by water takes it up — six blocks out, sixty-four blocks at most (kelp and seagrass in it break, a
+   * bubble column goes too) — and is wet then.
+   */
+  soak(x, y, z) {
+    if (!DIRS.some(([dx, dy, dz]) => isWater(this.get(x + dx, y + dy, z + dz)))) return;
+    const seen = new Set([`${x},${y},${z}`]), queue = [[x, y, z, 0]];
+    let taken = 0;
+    for (let q = 0; q < queue.length && taken < 64; q++) {
+      const [cx, cy, cz, d] = queue[q];
+      if (d >= 6) continue;
+      for (const [dx, dy, dz] of DIRS) {
+        const nx = cx + dx, ny = cy + dy, nz = cz + dz, k = `${nx},${ny},${nz}`;
+        if (seen.has(k) || taken >= 64) continue;
+        seen.add(k);
+        const nid = this.get(nx, ny, nz) & 0xFFF;
+        if (nid === ID.water || nid === ID.bubble_column) this.set(nx, ny, nz, 0);
+        else if (nid === ID.kelp || nid === ID.kelp_plant || nid === ID.seagrass || nid === ID.tall_seagrass) { this.breakBlock(nx, ny, nz); this.set(nx, ny, nz, 0); }
+        else continue;
+        taken++;
+        queue.push([nx, ny, nz, d + 1]);
+      }
+    }
+    if (taken) { this.set(x, y, z, ID.wet_sponge); this.post({type: 'sound', name: 'sponge', x: x + 0.5, y: y + 0.5, z: z + 0.5}); }
   }
   /** Where the other half of a door (above or below) or a bed (head or foot) is. */
   partner(x, y, z, v) {
@@ -526,6 +580,8 @@ export class World {
     if (id === ID.mangrove_propagule) return v >>> 12 & 8 ? (this.get(x, y + 1, z) & 0xFFF) === ID.mangrove_leaves : DIRT.has(bid) || bid === ID.farmland || bid === ID.clay;
     if (b.shape === 'petals') return DIRT.has(bid);
     if (id === ID.kelp || id === ID.kelp_plant) return bid === ID.kelp_plant || bid === ID.kelp || (SEA_FLOOR.has(bid) && OPAQUE[bid] === 1);
+    // a coral fan on a wall (state 1–4: the wall east, west, south, north of it, as a torch's)
+    if (b.shape === 'fan' && v >>> 12 & 7) { const [dx, dz] = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]][v >>> 12 & 7]; return OPAQUE[this.get(x + dx, y, z + dz) & 0xFFF] === 1; }
     if (WET.has(id) || b.shape === 'fan' || /coral$/.test(b.name)) return OPAQUE[bid] === 1 || (id === ID.tall_seagrass && v >>> 12 & 8 && bid === ID.tall_seagrass);
     if (id === ID.turtle_egg) return OPAQUE[bid] === 1;
     if (b.shape === 'cross') return DIRT.has(bid) || bid === ID.farmland || (b.name.endsWith('mushroom') && OPAQUE[bid] === 1);
@@ -573,7 +629,8 @@ export class World {
     if (next > 7) return;
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx, nz = z + dz, n = this.get(nx, y, nz);
-      if (this.canFlow(n, id) || (same(n) && (n >>> 12) !== 0 && (n >>> 12) < 8 && (n >>> 12) > next)) this.pour(nx, y, nz, id, next, n);
+      // (a sea plant's state is not a water level: kelp's age, how many pickles, which wall a fan is on)
+      if (this.canFlow(n, id) || (same(n) && !WET.has(n & 0xFFF) && (n >>> 12) !== 0 && (n >>> 12) < 8 && (n >>> 12) > next)) this.pour(nx, y, nz, id, next, n);
     }
   }
   canFlow(n, id) {
@@ -689,6 +746,9 @@ export class World {
     // the villagers (and the golem) of a village part here
     const people = villagersIn(seed, c.cx, c.cz);
     if (people.length) return people;
+    // the three elder guardians of a monument, each where it keeps its room
+    const elders = monumentsNear(seed, x0 + 8, z0 + 8, 0).flatMap(m => m.elders).filter(([x, , z]) => Math.floor(x / 16) === c.cx && Math.floor(z / 16) === c.cz);
+    if (elders.length) return elders.map(([x, y, z]) => ['elder_guardian', x, y, z, {persist: true, home: [x, y, z]}]);
     const h = (salt) => { let n = Math.imul(seed ^ (c.cx * 73856093) ^ (c.cz * 19349663) ^ salt, 2654435761); n ^= n >>> 15; return (n >>> 0) / 4294967296; };
     if (h(1) > 0.12) return [];
     const biome = BIOMES[c.biome[8 * 16 + 8]].name;

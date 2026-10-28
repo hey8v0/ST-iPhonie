@@ -23,6 +23,7 @@ import {Carts, CARTS} from './carts.js';
 import {Boats, BOAT_W, BOAT_H, waterTop} from './boats.js';
 import {unlockSound, play, setVolume, setRain, note as noteSound} from './sound.js';
 import {seedOf} from './noise.js';
+import {monumentsNear} from './monument.js';
 import {runCommand, DIFFICULTIES, defaultRules} from './commands.js';
 import {spawnPoint, BIOMES} from './gen.js';
 import {findFrame, portalFill, across, nearestPortal, SEARCH} from './portal.js';
@@ -79,7 +80,7 @@ async function loadTextures() {
   renderer.setImage('clouds', sky.clouds || ownClouds(), {repeat: true});
   // mob skins: the pack's (in the same layout) or ours; their sizes, since a pack's may be bigger
   skinSizes = {};
-  for (const k of Object.keys(MODELS)) { const img = skins?.[k] || OWN_SKINS[k](); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; }
+  for (const k of Object.keys(MODELS)) { const img = skins?.[k] || OWN_SKINS[k](); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; skinPics[k] = img; }
   // villagers by trade: the pack's villager with its plains clothes and the trade's over them, or ours
   for (const prof of VILLAGER_SKINS) {
     let img = ownVillager(prof);
@@ -116,7 +117,7 @@ async function loadTextures() {
   style.textContent = `.screen.dirt{background-image:url(${dirtUrl})}`;
   animFrames = built.animated.map(a => ({...a, at: -1}));
 }
-let animFrames = [], skinSizes = {}, greyArmor = {};
+let animFrames = [], skinSizes = {}, greyArmor = {}, skinPics = {};
 
 // ---------- HUD pictures (our own) ----------
 function sprite9(rows, pal) {
@@ -224,6 +225,7 @@ function startWorld(meta) {
     xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain', looting: () => enchOf(held(), 'looting'),
     nether: () => G.dim === 'nether', seed: meta.seed, invisible: () => !!G.effects.invisibility,
     difficulty: () => meta.difficulty || 'normal', spawning: () => (meta.rules || defaultRules()).doMobSpawning,
+    monuments: (x, z) => G.dim === 'nether' ? [] : monumentsNear(meta.seed, Math.floor(x), Math.floor(z), 16), effectOf: id => G.effects[id] || null, curse: () => curse(),
   });
   G.mobs.load(meta.mobs);
   // minecarts (kept in the save like the animals)
@@ -841,7 +843,7 @@ function placeFrom(t, stack) {
     if (b.shape === 'gate') meta = pf;
     // a trapdoor hangs on the side it was put against (on a floor or ceiling: the side towards the player)
     if (b.shape === 'trapdoor') meta = (t.face === 2 || t.face === 3 ? facingBack() : {0: 1, 1: 3, 4: 2, 5: 0}[t.face]) | (upper ? 8 : 0);
-    if (b.shape === 'torch') { if (t.face === 3) return false; meta = t.face === 2 ? 0 : [2, 1, 0, 0, 4, 3][t.face]; }
+    if (b.shape === 'torch' || b.shape === 'fan') { if (t.face === 3) return false; meta = t.face === 2 ? 0 : [2, 1, 0, 0, 4, 3][t.face]; }
     if (b.shape === 'wall') { if (t.face >= 2 && t.face <= 3) return false; meta = [3, 1, 0, 0, 0, 2][t.face]; }
     if (b.shape === 'slab') meta = t.face === 3 || (t.face !== 2 && t.hit[1] - Math.floor(t.hit[1]) > 0.5) ? 1 : 0;
     if (b.name.endsWith('_leaves')) meta = 1;
@@ -860,6 +862,7 @@ function placeFrom(t, stack) {
     if (b.water) {
       if ((here & 0xFFF) !== ID.water || here >>> 12) return false;
       if (b.name === 'kelp' && (under === ID.kelp || under === ID.kelp_plant)) { if (under === ID.kelp) setBlock(x, y - 1, z, ID.kelp_plant); }
+      else if (b.shape === 'fan' && meta) { const [dx, dz] = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]][meta]; if (!BLOCKS[G.mirror.get(x + dx, y, z + dz) & 0xFFF].opaque) return false; }
       else if (!ub.opaque) return false;
     }
     // bamboo: on bamboo it goes on up (as thick as the one under it), on its ground it is a shoot
@@ -1479,6 +1482,61 @@ function eatTick() {
   play('burp'); drawHud(true);
 }
 
+/**
+ * Bubble columns: one over soul sand lifts what is in it (and throws it up where it meets the air), one over a magma
+ * block pulls it down (the game's numbers); bubbles rise or swirl down in the columns round the player.
+ */
+let columns = [];
+function bubbleTick() {
+  const b = G.body, bx = Math.floor(b.x), bz = Math.floor(b.z);
+  if (!G.riding && !b.flying) for (const y of new Set([Math.floor(b.y + 0.1), Math.floor(b.y + 1)])) {
+    const v = G.mirror.get(bx, y, bz);
+    if ((v & 0xFFF) !== ID.bubble_column) continue;
+    const top = !G.mirror.get(bx, y + 1, bz);
+    b.vy = v >>> 12 & 1 ? Math.max(top ? -0.9 : -0.3, b.vy - 0.03) : Math.min(top ? 1.8 : 0.7, b.vy + (top ? 0.1 : 0.06));
+    break;
+  }
+  // the columns near: looked for twice a second, bubbles from a few of them every tick
+  if (G.ticks % 10 === 0) {
+    columns = [];
+    for (let y = Math.floor(b.y) - 8; y <= Math.floor(b.y) + 8; y++) for (let z = bz - 10; z <= bz + 10; z++) for (let x = bx - 10; x <= bx + 10; x++) {
+      const v = G.mirror.get(x, y, z);
+      if ((v & 0xFFF) === ID.bubble_column && columns.length < 400) columns.push([x, y, z, v >>> 12 & 1]);
+    }
+  }
+  for (let k = 0; k < Math.min(columns.length, 6); k++) { const [x, y, z, down] = columns[Math.floor(Math.random() * columns.length)]; G.ents.puff(x + 0.3 + Math.random() * 0.4, y + Math.random(), z + 0.3 + Math.random() * 0.4, down ? 'bubble_down' : 'bubble_up'); }
+}
+/** The elder guardian's curse: its face looms up over the screen and fades, with its moan (the game's). */
+function curse() {
+  play('curse');
+  const img = skinPics.elder_guardian, c = $('.curse');
+  if (!img || !c) return;
+  const k = img.width / 64, g = c.getContext('2d');
+  g.imageSmoothingEnabled = false; g.clearRect(0, 0, 12, 12);
+  g.drawImage(img, 16 * k, 16 * k, 12 * k, 12 * k, 0, 0, 12, 12);
+  g.drawImage(img, 9 * k, 1 * k, 2 * k, 2 * k, 5, 5, 2, 2);
+  c.classList.remove('show'); void c.offsetWidth; c.classList.add('show');
+}
+/** Guardians' beams: from the eye to the middle of the player, purple going to yellow as it charges (the game's). */
+let beamV = null;
+function beamThings(view) {
+  const list = G.mobs.list.filter(m => m.beamT > 0 && !m.dead);
+  if (!list.length || G.dead) return [];
+  const v = (beamV ||= new Verts(512)).reset(), layer = LAYER.guardian_beam ?? 0, pb = G.body;
+  for (const m of list) {
+    const f = (m.beamT / m.def.beam) ** 2, tint = (64 + Math.floor(f * 191)) << 16 | (32 + Math.floor(f * 191)) << 8 | (128 - Math.floor(f * 64));
+    const a = [m.x - view.x, m.y + m.body.height / 2 - view.y, m.z - view.z], e = [pb.x - view.x, pb.y + 0.9 - view.y, pb.z - view.z];
+    const d = [e[0] - a[0], e[1] - a[1], e[2] - a[2]], len = Math.hypot(...d);
+    if (len < 0.5) continue;
+    const u = d.map(c => c / len), side = Math.hypot(u[0], u[2]) > 0.01 ? [u[2], 0, -u[0]] : [1, 0, 0], sl = Math.hypot(...side), s1 = side.map(c => c / sl * 0.09);
+    const s2 = [u[1] * s1[2] - u[2] * s1[1], u[2] * s1[0] - u[0] * s1[2], u[0] * s1[1] - u[1] * s1[0]];
+    for (let t = 0; t < len; t += 1) {
+      const t1 = Math.min(len, t + 1), p0 = a.map((c, i) => c + u[i] * t), p1 = a.map((c, i) => c + u[i] * t1), vv = Math.round((t1 - t) * 16);
+      for (const w of [s1, s2]) { const c = [[p0, -1, 0, 0], [p0, 1, 16, 0], [p1, 1, 16, vv], [p1, -1, 0, vv]]; for (const [p, q, uu, vt] of [...c, ...c.reverse()]) v.v(p[0] + w[0] * q, p[1] + w[1] * q, p[2] + w[2] * q, 256, 128, layer, uu, vt, 255, 255, 2 << 2, tint); }
+    }
+  }
+  return v.n ? [{verts: v, x: view.x, y: view.y, z: view.z, model: mat.identity(), center: 128, bright: 1}] : [];
+}
 // ---------- one tick (20 a second) ----------
 let ctl = {fwd: 0, side: 0, jump: false, sneak: false, sprint: false, attack: false, use: false, aim: null};
 function tick() {
@@ -1496,6 +1554,7 @@ function tick() {
     if (w.raining || w.thundering) Object.assign(w, {raining: false, thundering: false, rain: 0, thunder: 0, rainT: 12000 + Math.floor(Math.random() * 168000), thunderT: 12000 + Math.floor(Math.random() * 168000)});
   }
   const r = G.riding ? {landed: 0, stepped: 0} : b.tick(G.sleeping ? {} : {...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false, speed: 0.1 * speedFactor(G.effects)});
+  bubbleTick();
   if (portalTick()) return;
   if (G.mode !== 'creative' && b.flying) b.flying = false;
   input.setFlying(b.flying);
@@ -1544,7 +1603,8 @@ function tick() {
       const bk = G.breaking, same = bk && bk.x === t.x && bk.y === t.y && bk.z === t.z && bk.v === t.v;
       if (!same) G.breaking = {x: t.x, y: t.y, z: t.z, v: t.v, p: 0};
       // under water (without 水下速掘) and off the ground the game digs five times slower each
-      const mult = (b.headInWater && !enchOf(G.inv.worn(0), 'aqua_affinity') ? 0.2 : 1) * (!b.onGround && !b.flying ? 0.2 : 1);
+      const mult = (b.headInWater && !enchOf(G.inv.worn(0), 'aqua_affinity') ? 0.2 : 1) * (!b.onGround && !b.flying ? 0.2 : 1)
+        * (G.effects.mining_fatigue ? [0.3, 0.09, 0.0027, 0.00081][Math.min(3, G.effects.mining_fatigue.amp)] : 1);
       const secs = breakTime(BLOCKS[t.v & 0xFFF], heldTool(), {efficiency: enchOf(held(), 'efficiency'), mult});
       if (secs === 0) { if (!G.breakWait) { breakBlock(t); G.breaking = null; G.breakWait = 5; } }
       else if (secs < Infinity && !G.breakWait) {
@@ -2043,6 +2103,7 @@ function frame(now) {
   extras.blobs = blobVerts(view, a);
   const bolt = boltVerts(view);
   if (bolt?.n) extras.things.push({verts: bolt, x: view.x, y: view.y, z: view.z, model: mat.identity(), center: 128, bright: 1});
+  extras.things.push(...beamThings(view));
   const fishing = fishingDraw(view, lightAt);
   if (fishing) { extras.things.push(fishing.thing); extras.lines = fishing.lines; }
   extras.things.push(...tableBooks(view, lightAt));

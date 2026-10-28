@@ -56,6 +56,8 @@ for (const [mat, tex] of [['leather', 'leather'], ['chainmail', 'chainmail'], ['
 // the sea's: squids, the fish (the tropical one's white picture, tinted), the turtle; the turtle shell worn
 Object.assign(SKINS, {squid: ['entity/squid/squid.png'], glow_squid: ['entity/squid/glow_squid.png'], cod: ['entity/fish/cod.png'], salmon: ['entity/fish/salmon.png'], tropical_fish: ['entity/fish/tropical_a.png'],
   pufferfish: ['entity/fish/pufferfish.png'], turtle: ['entity/turtle/big_sea_turtle.png'], armor_turtle: ['entity/equipment/humanoid/turtle_scute.png', 'models/armor/turtle_layer_1.png']});
+// the deep sea's guardians
+Object.assign(SKINS, {guardian: ['entity/guardian.png'], elder_guardian: ['entity/guardian_elder.png']});
 // boats: each wood's (the bamboo raft is bamboo's), with a chest in the bigger picture
 for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) { SKINS[`boat_${w}`] = [`entity/boat/${w}.png`]; SKINS[`chest_boat_${w}`] = [`entity/chest_boat/${w}.png`]; }
 const MOON_PHASES = ['full_moon', 'waning_gibbous', 'third_quarter', 'waning_crescent', 'new_moon', 'waxing_crescent', 'first_quarter', 'waxing_gibbous'];

@@ -377,6 +377,12 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
         const side = pickle ? [0, 4, 4, 4 + h] : [1, 3, 1 + w, 3 + h], end = pickle ? [4, 0, 8, 4] : [6, 6, 6 + w, 6 + w];
         box(out, x, y, z, x0, 0, z0, x0 + w, h, z0 + w, () => layer, WHITE, {uvs: [side, side, end, end, side, side]});
       }
+    } else if (shape === 'fan' && meta & 7) {
+      // a coral fan on a wall (state 1–4: the wall east, west, south, north of it): two sheets hinged at the wall's
+      // middle, one tilted up and one down (the game's ±22.5°), spreading away from it
+      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.tex.all), side = meta & 7;
+      const P = (u, h, d) => side === 1 ? [x + 1 - d, y + h, z + u] : side === 2 ? [x + d, y + h, z + 1 - u] : side === 3 ? [x + 1 - u, y + h, z + 1 - d] : [x + u, y + h, z + d];
+      for (const t of [0.36, -0.36]) quad(out, [P(0, 0.5, 0), P(1, 0.5, 0), P(1, 0.5 + t, 0.94), P(0, 0.5 + t, 0.94)], layer, UVQ, lt, lb, WHITE, 3);
     } else if (shape === 'fan') {
       // a coral fan: two sheets crossed, low, leaning out from the middle
       const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.tex.all), cx = x + 0.5, cz = z + 0.5, h = y + 0.25;
@@ -479,7 +485,8 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
       }
       return cnt ? sum / cnt : 0;
     };
-    const top = same(above) ? null : [corner(0, 1), corner(1, 1), corner(1, 0), corner(0, 0)];  // (above: a plant in the water too)
+    // (above: a plant in the water too; under a full block no surface — seen from below it is not the sky's)
+    const top = same(above) || isOpaque(above) ? null : [corner(0, 1), corner(1, 1), corner(1, 0), corner(0, 0)];
     const still = tex(id === WATER ? 'water_still' : 'lava_still'), flow = tex(id === WATER ? 'water_flow' : 'lava_flow');
     const own = L(at(x, y, z)), flags = 4;
     if (top) {

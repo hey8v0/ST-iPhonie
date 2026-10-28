@@ -8,6 +8,9 @@ const PI = Math.PI;
 const part = (name, tex, boxes, pivot = [0, 0, 0], rot = [0, 0, 0], children = []) => ({name, tex, boxes, pivot, rot, children});
 const legs4 = (tex, box, pts, mirrorLeft = false) => pts.map(([x, y, z], i) => part(`leg${i}`, tex, [[...box, 0, mirrorLeft && i % 2 === 1]], [x, y, z]));
 
+// the guardian's twelve spikes: where each sits round the body and how it is turned (the game's, in halves of π)
+const SPIKE = {x: [0, 0, 8, -8, -8, 8, 8, -8, 0, 0, 8, -8], y: [-8, -8, -8, -8, 0, 0, 0, 0, 8, 8, 8, 8], z: [8, -8, 0, 0, -8, -8, 8, 8, 8, -8, 0, 0],
+  rx: [1.75, 0.25, 0, 0, 0.5, 0.5, 0.5, 0.5, 1.25, 0.75, 0, 0], ry: [0, 0, 0, 0, 0.25, 1.75, 1.25, 0.75, 0, 0, 0, 0], rz: [0, 0, 0.25, 1.75, 0, 0, 0, 0, 0, 0, 0.75, 1.25]};
 export const MODELS = {
   pig: {skin: [64, 32], size: [0.9, 0.9], parts: [
     part('head', [0, 0], [[-4, -4, -8, 8, 8, 8]], [0, 12, -6], [0, 0, 0], [part('snout', [16, 16], [[-2, 0, -9, 4, 3, 1]])]),
@@ -130,6 +133,21 @@ export const MODELS = {
     part('leg0', [1, 23], [[-2, 0, 0, 4, 1, 10]], [-3.5, 22, 11]), part('leg1', [1, 12], [[-2, 0, 0, 4, 1, 10]], [3.5, 22, 11]),
     part('leg2', [27, 30], [[-13, 0, -2, 13, 1, 5]], [-5, 21, -4]), part('leg3', [27, 24], [[0, 0, -2, 13, 1, 5]], [5, 21, -4]),
   ]},
+  // the deep sea's guardian: a box of a body with plates on four sides, an eye in front, twelve spikes (in while it
+  // swims) and a tail of three parts with a fin (the game's boxes; the body turns round its middle)
+  guardian: {skin: [64, 64], size: [0.85, 0.85], parts: [
+    part('head', [0, 0], [[-6, -6, -8, 12, 12, 16]], [0, 16, 0], [0, 0, 0], [
+      part('side0', [0, 28], [[-8, -6, -6, 2, 12, 12]]), part('side1', [0, 28], [[6, -6, -6, 2, 12, 12, 0, true]]),
+      part('top', [16, 40], [[-6, -8, -6, 12, 2, 12]]), part('bottom', [16, 40], [[-6, 6, -6, 12, 2, 12]]),
+      ...SPIKE.x.map((_, i) => part(`spike${i}`, [0, 0], [[-1, -4.5, -1, 2, 9, 2]], [SPIKE.x[i], SPIKE.y[i], SPIKE.z[i]], [PI * SPIKE.rx[i], PI * SPIKE.ry[i], PI * SPIKE.rz[i]])),
+      part('eye', [8, 0], [[-1, -1, 0, 2, 2, 1]], [0, 0, -8.25]),
+      part('tail0', [40, 0], [[-2, -2, 7, 4, 4, 8]], [0, 0, 0], [0, 0, 0], [
+        part('tail1', [0, 54], [[0, -2, 0, 3, 3, 7]], [-1.5, 0.5, 14], [0, 0, 0], [
+          part('tail2', [41, 32], [[0, -2, 0, 2, 2, 6]], [0.5, 0.5, 6], [0, 0, 0], [part('fin', [25, 19], [[1, -5.5, 3, 1, 9, 9]])]),
+        ]),
+      ]),
+    ]),
+  ]},
   // the player (seen from behind or the front): the 64×64 layout, each part with its outer layer a little bigger
   player: {skin: [64, 64], size: [0.6, 1.8], parts: [
     part('head', [0, 0], [[-4, -8, -4, 8, 8, 8]], [0, 0, 0], [0, 0, 0], [part('hat', [32, 0], [[-4, -8, -4, 8, 8, 8, 0.5]])]),
@@ -141,6 +159,8 @@ export const MODELS = {
   ]},
 };
 MODELS.glow_squid = {...MODELS.squid};
+// the elder guardian: the guardian drawn 2.35 times as big (the game's), on its own skin
+MODELS.elder_guardian = {...MODELS.guardian, size: [1.9975, 1.9975], scale: 2.35};
 // worn armour over the player, in the game's 64×32 layouts: the outer one (helmet, chestplate, boots) and the inner one
 // (leggings); each piece draws only its parts
 export const ARMOR_MODELS = {
@@ -248,6 +268,14 @@ export function animate(kind, rot, pose) {
     if (kind === 'cod') set('tail_fin', 0, beat, 0);
     if (kind === 'tropical_fish') set('tail', 0, beat, 0);
     if (kind === 'salmon') { set('body_back', 0, beat * 0.6, 0); }
+  } else if (kind === 'guardian' || kind === 'elder_guardian') {
+    // the spikes: out while it keeps still, drawn in by up to 0.55 while it swims (the game's), each trembling a little;
+    // the tail sways; the eye turns a little towards what it watches
+    const drawn = (1 - (pose.spikes ?? 1)) * 0.55;
+    for (let i = 0; i < 12; i++) { const k = 1 + Math.cos(pose.age * 1.5 + i) * 0.01 - drawn; rot[`@spike${i}`] = [SPIKE.x[i] * k, SPIKE.y[i] * k, SPIKE.z[i] * k]; }
+    const t = pose.tail || 0;
+    set('tail0', 0, Math.sin(t) * PI * 0.05, 0); set('tail1', 0, Math.sin(t) * PI * 0.1, 0); set('tail2', 0, Math.sin(t) * PI * 0.15, 0);
+    rot['@eye'] = [pose.eyeX || 0, pose.eyeY || 0, -8.25];
   } else if (kind === 'pufferfish') {
     set('right_fin', 0, 0, -0.2 + 0.4 * Math.sin(pose.age * 0.2)); set('left_fin', 0, 0, 0.2 - 0.4 * Math.sin(pose.age * 0.2));
   } else if (kind === 'turtle') {
@@ -322,7 +350,7 @@ export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}
         for (let k = 0; k < 4; k++) { const i = mirror ? 3 - k : k, P = V[vs[i]]; out.push(P[0], P[1], P[2], Math.min(1, Math.max(0, uv[i][0] / tw)), Math.min(1, Math.max(0, uv[i][1] / th)), shade); }
       }
     }
-    for (const c of p.children) walk({...c, name: c.name}, R, here(c.pivot));
+    for (const c of p.children) walk({...c, name: c.name}, R, here(rot[`@${c.name}`] || c.pivot));
   };
   for (const p of m.parts) if (!only || only.includes(p.name)) walk(p, ID3, rot[`@${p.name}`] || p.pivot);
   return out;
@@ -542,7 +570,31 @@ Object.assign(OWN_SKINS, {
     const [fx, fy] = front(3, 0, 6, 6);
     px(fx, fy + 1, hex('#141414')); px(fx + 5, fy + 1, hex('#141414'));
   }),
+  guardian: () => guardianSkin(81, ['#5d8c7c', '#55806f', '#669888', '#4e7868'], ['#e07a3a', '#c86a2e', '#d4733a'], ['#3e6a5c', '#365e52']),
+  elder_guardian: () => guardianSkin(82, ['#cfcbb8', '#c4c0ad', '#d9d5c2', '#bab6a3'], ['#7a7c98', '#6a6c88', '#86889e'], ['#9a9786', '#8e8b7a']),
 });
+/** A guardian's skin (the game's 64×64 layout): its body in one colour with patches of another, a darker face round the
+ *  eye, pale spikes with darker tips, the eye pink with a light glint, the tail striped with the patches' colour. */
+function guardianSkin(seed, body, spots, face) {
+  return skin(64, 64, seed, ({px, area, box, front, hex, r}) => {
+    box(0, 0, 12, 12, 16, body); box(0, 28, 2, 12, 12, body); box(16, 40, 12, 2, 12, body);
+    for (let k = 0; k < 16; k++) area(16 + Math.floor(r() * 46), Math.floor(r() * 26), 2 + Math.floor(r() * 2), 1 + Math.floor(r() * 2), spots);
+    for (let k = 0; k < 8; k++) area(Math.floor(r() * 24), 40 + Math.floor(r() * 10), 2, 2, spots);
+    // the face: darker round where the eye sits
+    const [fx, fy] = front(0, 0, 12, 16);
+    area(fx + 2, fy + 2, 8, 8, face);
+    // spikes: pale, the tips darker
+    box(0, 0, 2, 9, 2, ['#e8dcc0', '#dcd0b0', '#f0e6cc']);
+    for (const x of [0, 2, 4, 6]) area(x, 2, 2, 2, ['#9a7a4a', '#8a6a3a']);
+    // the eye
+    box(8, 0, 2, 2, 1, ['#d84a5a', '#c83a4c']); px(9, 1, hex('#f8e0e4'));
+    // the tail: body colour, ringed with the patches' colour; the fin
+    box(40, 0, 4, 4, 8, body); box(0, 54, 3, 3, 7, body); box(41, 32, 2, 2, 6, body);
+    for (const x of [42, 46, 54, 58]) area(x, 8, 1, 4, spots);
+    for (const x of [2, 9, 13]) area(x, 61, 1, 3, spots);
+    box(25, 19, 1, 9, 9, spots); area(25, 28, 9, 9, spots); area(35, 28, 9, 9, spots);
+  });
+}
 // a villager's clothes by trade: the robe, its trim, and something of the trade (ours)
 const VILLAGER_CLOTHES = {none: ['#6e4b30', '#5a3c26'], nitwit: ['#3a8a3a', '#2a6a2a'], farmer: ['#8a6a2a', '#d8c060', 'hat'], fisherman: ['#3a6a8a', '#d8c060', 'hat'],
   shepherd: ['#8a5a3a', '#f0f0f0'], fletcher: ['#6a7a3a', '#e8e8e8', 'feather'], librarian: ['#e8e4d8', '#a82a2a'], cleric: ['#7a2a8a', '#e8c040'],

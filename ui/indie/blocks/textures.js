@@ -1505,6 +1505,19 @@ for (const [c, cols] of Object.entries(CORAL)) {
 BLOCK_ART.prismarine = () => mottled(1021, ['#5a9c8c', '#63a596', '#6eb0a0', '#7fbfae', '#548f86'], {cells: 4, grain: 0.35, smooth: 0.55});
 BLOCK_ART.prismarine_bricks = () => { const p = mottled(1022, ['#63a99a', '#6cb2a2', '#76baaa'], {cells: 8, grain: 0.3}); for (let x = 0; x < S; x++) for (const y of [0, 7, 8, 15]) p.set(x, y, hex(y % 8 === 0 ? '#9ad4c4' : '#3e7a6c')); for (let y = 0; y < S; y++) for (const x of y < 8 ? [0, 8] : [4, 12]) p.set(x, y, hex('#3e7a6c')); return p; };
 BLOCK_ART.dark_prismarine = () => { const p = mottled(1023, ['#2e4a3e', '#345446', '#3a5c4e'], {cells: 4, grain: 0.3}); for (let i = 0; i < S; i++) for (const k of [0, 15]) { p.set(i, k, hex('#1c3028')); p.set(k, i, hex('#1c3028')); } for (let i = 4; i < 12; i++) { p.set(i, 4, hex('#22382e')); p.set(i, 11, hex('#22382e')); p.set(4, i, hex('#22382e')); p.set(11, i, hex('#22382e')); } return p; };
+// sponges: yellow, full of holes (darker round their rims); the wet one browner and darker, its holes holding water
+const sponge = (seed, pal, hole, rim) => {
+  const p = mottled(seed, pal, {cells: 4, grain: 0.3}), r = rng(seed + 1);
+  for (let k = 0; k < 13; k++) {
+    const x = Math.floor(r() * S), y = Math.floor(r() * S), big = r() < 0.4;
+    p.set(x, y, hex(hole)); if (big) { p.set(x + 1, y, hex(hole)); p.set(x, y + 1, hex(rim)); p.set(x + 1, y + 1, hex(rim)); } else p.set(x, y + 1, hex(rim));
+  }
+  return p;
+};
+BLOCK_ART.sponge = () => sponge(1041, ['#c3b44a', '#cfc052', '#dacb5c', '#e4d76a'], '#7d7020', '#a8992e');
+BLOCK_ART.wet_sponge = () => sponge(1042, ['#9a9030', '#a69c36', '#b1a73e', '#8c8228'], '#3e4a28', '#6e6a22');
+// a guardian's beam (tinted as it charges): bright down its middle, bands along it
+BLOCK_ART.guardian_beam = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const c = 1 - Math.abs(x - 7.5) / 8, band = (y % 4 < 2 ? 1 : 0.8); const v = Math.round(255 * Math.min(1, (0.45 + c * 0.6) * band)); p.set(x, y, [v, v, v]); } return p; };
 BLOCK_ART.sea_lantern = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const edge = x === 0 || y === 0 || x === 15 || y === 15, cross = x === 7 || x === 8 || y === 7 || y === 8; p.set(x, y, hex(edge ? '#8ab4a8' : cross ? '#c8e8e0' : (x + y) % 5 === 0 ? '#f4fffc' : '#dff4ee')); } return p; };
 ITEM_ART.prismarine_shard = () => icon([{mask: mask().poly([[4, 13], [6, 3], [12, 6], [10, 13]]), color: '#63a596', light: '#a6dccd', dark: '#3e7a6c', outline: '#14302a'}]);
 ITEM_ART.prismarine_crystals = () => { const p = icon([{mask: mask().disc(6, 10, 2.6).disc(10.5, 7, 2.4).disc(9, 12, 1.8), color: '#c8ecdf', light: '#ffffff', dark: '#86b4a6', outline: '#2c4a42'}]); for (const [x, y] of [[6, 9], [10, 6]]) p.set(x, y, hex('#ffffff')); return p; };
@@ -1528,7 +1541,7 @@ const eggs = (crack, seed) => {
 BLOCK_ART.turtle_egg = () => eggs(0, 1031); BLOCK_ART.turtle_egg_slightly_cracked = () => eggs(1, 1031); BLOCK_ART.turtle_egg_very_cracked = () => eggs(2, 1031);
 ITEM_ART.turtle_egg_item = () => icon([{mask: mask().disc(8, 9, 4, 5), color: '#eee8cc', light: '#ffffff', dark: '#b8b08a', outline: '#4a4630'}], {sparkle: [[6, 7]]});
 for (const [k, [a, b]] of Object.entries({squid: ['#223b4d', '#708899'], glow_squid: ['#095656', '#85f1bc'], cod: ['#c1a76a', '#e5c48b'], salmon: ['#a00f10', '#0e8474'], tropical_fish: ['#ef6915', '#fff9ef'],
-  pufferfish: ['#f6b201', '#37c3f2'], turtle: ['#e7e7e7', '#00afaf']})) ITEM_ART[`${k}_spawn_egg`] = () => {
+  pufferfish: ['#f6b201', '#37c3f2'], turtle: ['#e7e7e7', '#00afaf'], guardian: ['#5a8272', '#f17d30'], elder_guardian: ['#ceccba', '#747693']})) ITEM_ART[`${k}_spawn_egg`] = () => {
   const p = icon([{mask: mask().disc(8, 9, 4.6, 5.8), color: a, light: toHex(mix(hex(a), [255, 255, 255], 0.35)), dark: toHex(mul(hex(a), 0.62)), outline: '#1a1a1a'}]), r = rng(nameSeed(k));
   for (let n = 0; n < 9; n++) { const x = 5 + Math.floor(r() * 7), y = 5 + Math.floor(r() * 8); if (p.alpha(x, y) && p.alpha(x + 1, y)) { p.set(x, y, hex(b)); if (r() < 0.6) p.set(x + 1, y, mul(hex(b), 0.85)); } }
   return p;

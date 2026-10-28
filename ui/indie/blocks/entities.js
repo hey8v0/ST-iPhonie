@@ -128,7 +128,8 @@ export class Entities {
       explosion: [40, 0x8a8a8a, 0.35, 0.35, 30, -0.01], meal: [12, 0x7ce05a, 0.06, 0.07, 20, -0.005], magic: [10, 0x9a6aff, 0.12, 0.07, 16, 0.01],
       bubble: [3, 0xd8ecff, 0.02, 0.05, 12, -0.01], splash: [8, 0x9ac8ff, 0.08, 0.05, 14, 0.03], swirl: [1, 0xffffff, 0.03, 0.07, 18, -0.006], shatter: [40, 0xffffff, 0.18, 0.08, 22, 0.01],
       portal: [2, 0xa04cff, 0.08, 0.06, 26, -0.004], note: [1, 0x40ff40, 0.01, 0.13, 14, -0.008], flame: [2, 0xffa020, 0.03, 0.07, 12, -0.008],
-      ink: [30, 0x0c0c14, 0.14, 0.16, 34, 0], glow_ink: [30, 0x3ae0c0, 0.14, 0.16, 34, 0]}[kind];
+      ink: [30, 0x0c0c14, 0.14, 0.16, 34, 0], glow_ink: [30, 0x3ae0c0, 0.14, 0.16, 34, 0],
+      bubble_up: [1, 0xe4f2ff, 0.01, 0.05, 26, -0.01], bubble_down: [1, 0xe4f2ff, 0.01, 0.05, 26, 0.012]}[kind];
     if (!S) return;
     const [n, base, spread, size, life, g] = S, tint = color ?? base, layer = LAYER.white_wool ?? 0;
     for (let i = 0; i < n; i++) this.particles.push({x: x + (Math.random() - 0.5) * spread * 4, y: y + (Math.random() - 0.5) * spread * 4, z: z + (Math.random() - 0.5) * spread * 4,

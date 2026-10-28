@@ -10,6 +10,7 @@ import {collisionBoxes} from './shapes.js';
 import {fortressAt, spawnersNear} from './nether.js';
 import {newWork, PROFESSIONS, restock} from './trades.js';
 import {BIOMES} from './gen.js';
+import {MONUMENT_Y} from './monument.js';
 
 // the swamps' biome numbers (the mangrove swamp too), and the columns of land where slimes come up deep down (one in ten, by the world's seed)
 const SWAMPS = new Set(BIOMES.map((b, i) => b.name === 'swamp' || b.name === 'mangrove_swamp' ? i : -1).filter(i => i >= 0));
@@ -44,6 +45,14 @@ export const MOBS = {
   tropical_fish: {zh: '热带鱼', health: 3, speed: 0.1, passive: true, water: 'fish', breed: [], drops: [['tropical_fish', 1, 1]], rare: ['bone_meal'], bucket: 'tropical_fish_bucket'},
   pufferfish: {zh: '河豚', health: 3, speed: 0.08, passive: true, water: 'fish', breed: [], drops: [['pufferfish', 1, 1]], rare: ['bone_meal'], bucket: 'pufferfish_bucket'},
   turtle: {zh: '海龟', health: 30, speed: 0.12, passive: true, amphibious: true, breed: ['seagrass'], drops: [['seagrass', 0, 2]]},
+  // the deep sea's: guardians in and round ocean monuments (a beam that charges four seconds, spikes that hurt who hits
+  // them while they keep still) and the three elder guardians keeping each monument (kept in the save; their beam
+  // charges three seconds, and now and then they curse the players near with mining fatigue). Out of the water they
+  // flop about but do not run out of air.
+  guardian: {zh: '守卫者', health: 30, speed: 0.18, hostile: true, water: 'guardian', range: 16, xp: 10, beam: 80, beamDamage: 6,
+    drops: [['prismarine_shard', 0, 2]], rare: ['cod', 'cod', 'cod', 'salmon', 'salmon', 'pufferfish', 'tropical_fish']},
+  elder_guardian: {zh: '远古守卫者', health: 80, speed: 0.1, hostile: true, keep: true, water: 'guardian', elder: true, range: 16, xp: 10, beam: 60, beamDamage: 8,
+    drops: [['prismarine_shard', 0, 2]], byPlayer: [['wet_sponge', 1, 1]], rare: ['cod', 'cod', 'cod', 'salmon', 'salmon', 'pufferfish', 'tropical_fish']},
 };
 // a tropical fish's colours (tinting its white picture): the game's sixteen dye colours
 const FISH_COLORS = COLORS.map(([, , h]) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255]);
@@ -82,6 +91,8 @@ export class Mob {
     // the sea's: air to hold out of the water, kept when let out of a bucket; a tropical fish's colour; a pufferfish's
     // swelling; a turtle's beach
     if (d.water) { this.air = 300; this.persist = !!extra.persist; this.tm = 0; this.tSpeed = 0.15; this.tentacles = 0; this.puff = 0; }
+    // a guardian's beam (ticks charged, 0 none), its spikes (1 out) and its tail's swing
+    if (d.water === 'guardian') { this.beamT = 0; this.spikes = 1; this.tail = 0; this.tailSpeed = 0.125; this.eyeX = 0; this.eyeY = 0; }
     if (kind === 'tropical_fish') this.color = extra.color ?? Math.floor(Math.random() * 16);
     if (kind === 'turtle') { this.beach = extra.beach || [Math.floor(x), Math.floor(y), Math.floor(z)]; this.egg = !!extra.egg; }
   }
@@ -114,7 +125,7 @@ export class Mobs {
       const m = this.list[i];
       if (!this.ctx.loaded(m.x, m.z)) continue;
       // monsters far away go
-      if (m.def.hostile) {
+      if (m.def.hostile && !m.persist) {
         const d = Math.hypot(m.x - player.x, m.z - player.z);
         if (d > 128 || (d > 40 && Math.random() < 1 / 800) || (this.ctx.daylight() > 0.8 && !m.def.undead && m.kind !== 'spider' && d > 24 && Math.random() < 1 / 400)) { this.list.splice(i, 1); continue; }
       }
@@ -129,6 +140,7 @@ export class Mobs {
     }
     this.spawnTick();
     this.seaSpawnTick();
+    this.monumentSpawnTick();
     this.spawnerTick();
     this.arrowTick();
     this.ballTick();
@@ -353,13 +365,22 @@ export class Mobs {
   swim(m) {
     const b = m.body, d = m.def, {player} = this.ctx;
     b.feel();
-    if (!b.inWater) { m.goal3 = null; if (--m.air <= -20) { m.air = 0; this.hurt(m, 2, null, 'drown'); } return; }
+    if (d.water === 'guardian') this.guardian(m);
+    if (!b.inWater) { m.goal3 = null; if (d.water !== 'guardian' && --m.air <= -20) { m.air = 0; this.hurt(m, 2, null, 'drown'); } return; }
+    if (m.beamT > 0) { m.goal3 = null; return; }
     m.air = 300;
+    // a guardian swims off now and then (the game's: about every four seconds) and keeps still in between
+    if (d.water === 'guardian') {
+      if (m.goal3 && Math.hypot(m.goal3[0] - m.x, m.goal3[1] - m.y, m.goal3[2] - m.z) < 1) m.goal3 = null;
+      if (!m.goal3 && Math.random() > 1 / 80) return;
+    }
     const far = !m.goal3 || Math.hypot(m.goal3[0] - m.x, m.goal3[1] - m.y, m.goal3[2] - m.z) < 1;
     if (far || m.wait-- <= 0 || (m.panic > 0 && m.age % 20 === 0)) {
       m.wait = 60 + Math.floor(Math.random() * 100);
       for (let k = 0; k < 8; k++) {
         const r = m.panic > 0 ? 10 : 6, gx = m.x + (Math.random() - 0.5) * r * 2, gy = m.y + (Math.random() - 0.5) * 6, gz = m.z + (Math.random() - 0.5) * r * 2;
+        // (an elder keeps to its room)
+        if (m.def.elder && m.home && Math.hypot(gx - m.home[0], gy - m.home[1], gz - m.home[2]) > 6) continue;
         if (this.ctx.loaded(gx, gz) && isWater(this.world.get(Math.floor(gx), Math.floor(gy), Math.floor(gz))) && isWater(this.world.get(Math.floor(gx), Math.floor(gy + 0.5), Math.floor(gz)))) { m.goal3 = [gx, gy, gz]; break; }
       }
     }
@@ -370,6 +391,58 @@ export class Mobs {
       if (m.puff > 0 && near && Math.hypot(player.x - m.x, player.y + 0.5 - m.y, player.z - m.z) < 1 + m.puff * 0.25 && m.attackT === 0) {
         m.attackT = 20; this.ctx.hurtPlayer(1 + m.puff, '被河豚扎死了', m); this.ctx.effect?.('poison', 0, 60 * m.puff);
       }
+    }
+  }
+  /**
+   * A guardian: it sees a player near (within 16, nothing solid between, more than three away when it starts) and keeps
+   * still, looking at them while its beam charges (the game's four seconds, an elder's three), then the beam hurts (6,
+   * an elder's 8; the difficulty scales it). Losing sight of them, it stops. Its spikes go in while it swims and come
+   * out while it keeps still; its tail sways (fast out of the water). An elder, once a minute, curses the players within
+   * fifty with mining fatigue III for five minutes (not again while they still have most of it).
+   */
+  guardian(m) {
+    const {player} = this.ctx, d = m.def, b = m.body;
+    const can = !player.dead && this.ctx.mode() !== 'creative' && this.ctx.difficulty?.() !== 'peaceful';
+    const ex = player.x, ey = player.y + (player.eye || 1.62), ez = player.z, my = m.y + b.height / 2;
+    const dist = Math.hypot(ex - m.x, ey - my, ez - m.z);
+    if (m.beamT > 0) {
+      if (!can || dist > d.range + 2 || !this.sees(m, player)) m.beamT = 0;
+      else if (++m.beamT >= d.beam) {
+        m.beamT = 0; m.cool = 30 + Math.floor(Math.random() * 30);
+        this.ctx.hurtPlayer(d.beamDamage, `被${d.zh}的激光杀死了`, m);
+      }
+    } else if (can && m.cool === 0 && b.inWater && dist < d.range && dist > 3 && m.age % 5 === m.id % 5 && this.sees(m, player)) {
+      m.beamT = 1; this.ctx.sound('guardian_beam', m.x, my, m.z);
+    }
+    if (m.beamT > 0) {
+      // keeping still, turned to them
+      b.vx *= 0.5; b.vy *= 0.5; b.vz *= 0.5;
+      m.yaw = turn(m.yaw, angleTo(m.x, m.z, ex, ez), 0.3);
+      m.headPitch = Math.atan2(my - ey, Math.hypot(ex - m.x, ez - m.z));
+    } else m.headPitch *= 0.9;
+    const speed = Math.hypot(b.vx, b.vy, b.vz), moving = speed > 0.03 && m.beamT === 0;
+    m.spikes += ((moving ? 0 : 1) - m.spikes) * (moving ? 0.25 : 0.06);
+    m.tailSpeed = !b.inWater ? 2 : moving ? (m.tailSpeed < 0.5 ? 4 : m.tailSpeed + (0.5 - m.tailSpeed) * 0.1) : m.tailSpeed + (0.125 - m.tailSpeed) * 0.2;
+    m.tail += m.tailSpeed;
+    if (m.age % 160 === m.id % 160 && Math.random() < 0.5) this.ctx.sound(d.elder ? 'elder_guardian' : 'guardian', m.x, my, m.z);
+    // the elder's curse
+    if (d.elder && (m.age + m.id) % 1200 === 0 && can && dist < 50) {
+      const had = this.ctx.effectOf?.('mining_fatigue');
+      if (!had || had.amp < 2 || had.t < 1200) { this.ctx.effect?.('mining_fatigue', 2, 6000); this.ctx.curse?.(m); }
+    }
+  }
+  /** Guardians come into an ocean monument's water while the player is near it (the game's: dark or light, all day). */
+  monumentSpawnTick() {
+    if (this.ctx.nether?.() || this.ctx.difficulty?.() === 'peaceful' || this.ctx.spawning?.() === false || Math.random() > 0.05) return;
+    const {player} = this.ctx, near = this.ctx.monuments?.(player.x, player.z) || [];
+    if (!near.length || this.count(m => m.kind === 'guardian' && !m.dead && Math.hypot(m.x - player.x, m.z - player.z) < 64) >= 10) return;
+    const mo = near[0];
+    for (let k = 0; k < 6; k++) {
+      const x = mo.x0 + Math.floor(Math.random() * 58), z = mo.z0 + Math.floor(Math.random() * 58), y = MONUMENT_Y + 1 + Math.floor(Math.random() * 20);
+      if (Math.hypot(x + 0.5 - player.x, y - player.y, z + 0.5 - player.z) < 16 || !this.ctx.loaded(x, z)) continue;
+      if (!isWater(this.world.get(x, y, z)) || !isWater(this.world.get(x, y + 1, z))) continue;
+      for (let i = 1 + Math.floor(Math.random() * 2); i > 0; i--) this.add('guardian', x + 0.5, y + 0.1, z + 0.5);
+      return;
     }
   }
   swimMove(m) {
@@ -475,6 +548,7 @@ export class Mobs {
     if (m.dead || (m.inv > 0 && why === 'hit')) return false;
     if (m.def.fireproof && (why === 'fire' || why === 'lava')) return false;
     m.health -= n; m.hurtT = 10; if (why === 'hit' || why === 'arrow') m.inv = 10;
+    if (m.def.water === 'guardian' && from?.player && why === 'hit' && m.spikes > 0.5) this.ctx.hurtPlayer(2, `被${m.def.zh}的尖刺扎死了`, null, 'thorns');
     if (from && !m.def.golem) {
       const a = Math.atan2(m.x - from.x, m.z - from.z), k = from.knock ?? 0.4;
       m.body.vx += Math.sin(a) * k; m.body.vz += Math.cos(a) * k; if (m.body.onGround) m.body.vy = 0.36;
@@ -502,6 +576,8 @@ export class Mobs {
       if (n > 0) this.ctx.drop({id: m.fire > 0 && cooked ? cooked : id, n}, m.x, m.y + 0.5, m.z);
     }
     if (m.kind === 'sheep' && !m.sheared) this.ctx.drop({id: `${m.color || 'white'}_wool`, n: 1}, m.x, m.y + 0.5, m.z);
+    if (m.def.water === 'guardian') { const q = Math.random(); if (q < 0.8 && Math.random() < 0.5) this.ctx.drop({id: q < 0.4 ? (m.fire > 0 ? 'cooked_cod' : 'cod') : 'prismarine_crystals', n: 1}, m.x, m.y + 0.5, m.z); }
+    if (m.killedByPlayer) for (const [id, lo, hi] of m.def.byPlayer || []) this.ctx.drop({id, n: lo + Math.floor(Math.random() * (hi - lo + 1))}, m.x, m.y + 0.5, m.z);
     if (m.def.rare && m.killedByPlayer && Math.random() < 0.025) this.ctx.drop({id: m.def.rare[Math.floor(Math.random() * m.def.rare.length)], n: 1}, m.x, m.y + 0.5, m.z);
     if (m.killedByPlayer) this.ctx.xp?.(m.def.cube ? m.mag : m.def.xp || (m.def.hostile ? 5 : 1 + Math.floor(Math.random() * 3)), m.x, m.y + 0.5, m.z);
   }
@@ -776,7 +852,7 @@ export class Mobs {
       if (dx * dx + dz * dz > view.far * view.far) continue;
       const b = m.body, a = view.alpha ?? 1, x = b.prev.x + (b.x - b.prev.x) * a - view.x, y = b.prev.y + (b.y - b.prev.y) * a - view.y, z = b.prev.z + (b.z - b.prev.z) * a - view.z;
       const rot = animate(m.kind, {}, {limb: m.limb, amount: m.amount, headYaw: -m.headYaw, headPitch: m.headPitch, age: m.age, attack: m.def.golem ? m.attackT / 10 : m.attackT > 10 ? 1 : 0, shake: m.shake > 0, aim: m.aim > 0 || (m.def.neutral && m.angry > 0), fall: !b.onGround, graze: m.graze > 0, squish: m.squish || 0,
-        tentacles: m.tentacles || 0, flop: m.def.water && !b.inWater, swim: m.swimming});
+        tentacles: m.tentacles || 0, flop: m.def.water && !b.inWater, swim: m.swimming, spikes: m.spikes, tail: m.tail, eyeX: m.eyeX, eyeY: m.eyeY});
       const s = (m.baby ? (m.kind === 'turtle' ? 0.3 : 0.5) : 1) * (MODELS[m.kind].scale || 1) * (m.mag || 1) * (m.kind === 'pufferfish' ? [1, 1.6, 2.2][m.puff || 0] : 1), roll = m.dead ? Math.min(1, m.dead / 10) * Math.PI / 2 : 0, swell = m.fuse ? Math.min(1, m.fuse / 30) * 0.3 * (1 + Math.sin(m.fuse * 0.9) * 0.15) : 0;
       const [sky, blk] = light(Math.floor(m.x), Math.floor(m.y + b.height / 2), Math.floor(m.z));
       // (the game draws a squid lower: its tentacles hang under its box)

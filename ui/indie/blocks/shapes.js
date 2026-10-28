@@ -265,7 +265,8 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'petals': return [[0, 0, 0, 1, px(3), 1]];
     case 'pickle': { const list = PICKLES[meta & 3]; return [[px(Math.min(...list.map(q => q[0]))), 0, px(Math.min(...list.map(q => q[1]))), px(Math.max(...list.map(q => q[0] + q[2]))), px(Math.max(...list.map(q => q[3]))), px(Math.max(...list.map(q => q[1] + q[2])))]]; }
     case 'eggs': return [[px(1), 0, px(1), px(15), px(7), px(15)]];
-    case 'fan': return [[px(2), 0, px(2), px(14), px(4), px(14)]];
+    // on a wall: eight high round its middle, eleven out from the wall (the game's)
+    case 'fan': { const s = meta & 7; return s ? [[s === 1 ? px(5) : 0, px(4), s === 3 ? px(5) : 0, s === 2 ? px(11) : 1, px(12), s === 4 ? px(11) : 1]] : [[px(2), 0, px(2), px(14), px(4), px(14)]]; }
     case 'rail': return [[0, 0, 0, 1, px(railSlope(BLOCKS[id].rail === 'rail' ? meta : meta & 7) ? 8 : 2), 1]];
     case 'lever': { const [x0, y0, z0, x1, y1, z1] = LEVER_BASE[meta & 7], a = meta & 7; return [(a < 2 ? [4, 0, 4, 12, 7, 12] : a < 4 ? [4, 9, 4, 12, 16, 12] : [Math.min(x0, 16 - x1 === 0 ? 10 : x0), 3, Math.min(z0, 16 - z1 === 0 ? 10 : z0), Math.max(x1, x0 === 0 ? 6 : x1), 13, Math.max(z1, z0 === 0 ? 6 : z1)]).map(px)]; }
     case 'button': case 'plate': case 'repeater': case 'comparator': case 'piston': case 'piston_head': case 'hopper': case 'detector': return inBlock(pieces(v, near));

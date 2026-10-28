@@ -6,6 +6,7 @@
 import {fractal, simplex, hash, rng} from './noise.js';
 import {ID, MINY, HEIGHT, SECTIONS, SEA, withMeta} from './blocks.js';
 import {drawVillages} from './village.js';
+import {drawMonuments} from './monument.js';
 import {growTree, BIG_TREES} from './trees.js';
 export {growTree};
 
@@ -243,6 +244,8 @@ export function generateColumn(seed, cx, cz) {
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) for (let y = MINY + 1; y <= -55; y++) if (!getBlock(col, x, y, z)) setBlock(col, x, y, z, lava);
   // 5. trees and plants (also the trees of the neighbours that reach in)
   decorate(w, col, x0, z0, L, Math.max(top, SEA));
+  // ocean monuments, over the sea floor and what grew on it
+  drawMonuments(col, seed);
   // heightmap: the top block
   const high = Math.min(MINY + HEIGHT - 1, Math.max(top, SEA) + 40);
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) { let y = high; while (y > MINY && !getBlock(col, x, y, z)) y--; col.height[z * 16 + x] = y; }
@@ -534,12 +537,24 @@ function seaLife(w, col, x0, z0, top) {
       const c = CORAL_KINDS[Math.floor(hash(seed + 53, wx >> 2, wz >> 2) * 5)], hgt = 1 + Math.floor(((patch + 0.05) * 3.2 + rnd2) * 1.5);
       let k = 0;
       for (; k < Math.min(hgt, depth - 2); k++) setBlock(col, x, y + 1 + k, z, ID[`${c}_coral_block`]);
+      // fans on the pillar's sides, in the water by it
+      for (let kk = 0; kk < k; kk++) for (const [dx, dz, meta] of [[1, 0, 2], [-1, 0, 1], [0, 1, 4], [0, -1, 3]]) {
+        const fx = x + dx, fz = z + dz, fy = y + 1 + kk;
+        if (fx < 0 || fz < 0 || fx > 15 || fz > 15 || !still(fx, fy, fz) || hash(seed + 54, wx * 4 + dx, fy, wz * 4 + dz) > 0.12) continue;
+        setBlock(col, fx, fy, fz, withMeta(ID[`${CORAL_KINDS[Math.floor(hash(seed + 55, wx, fy, wz + dz) * 5)]}_coral_fan`], meta));
+      }
       const on = y + 1 + k;
       if (still(x, on, z) && still(x, on + 1, z)) {
         if (rnd < 0.3) setBlock(col, x, on, z, ID[`${CORAL_KINDS[Math.floor(rnd2 * 5)]}_coral`]);
         else if (rnd < 0.55) setBlock(col, x, on, z, ID[`${CORAL_KINDS[Math.floor(rnd2 * 5)]}_coral_fan`]);
         else if (rnd < 0.6) setBlock(col, x, on, z, withMeta(ID.sea_pickle, Math.floor(rnd2 * 4)));
       }
+      continue;
+    }
+    // now and then on the deep sea floor a magma block, bubbles pulling down over it to the top
+    if (sea && depth > 12 && rnd > 0.9993) {
+      setBlock(col, x, y, z, ID.magma_block);
+      for (let k = y + 1; k <= SEA && still(x, k, z); k++) setBlock(col, x, k, z, withMeta(ID.bubble_column, 1));
       continue;
     }
     // kelp: stems one to ten high (the game's) in patches in the temperate and cold seas (not the warm one), never
