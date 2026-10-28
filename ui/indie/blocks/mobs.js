@@ -11,8 +11,8 @@ import {fortressAt, spawnersNear} from './nether.js';
 import {newWork, PROFESSIONS, restock} from './trades.js';
 import {BIOMES} from './gen.js';
 
-// the swamp's biome number, and the columns of land where slimes come up deep down (one in ten, by the world's seed)
-const SWAMP = BIOMES.findIndex(b => b.name === 'swamp');
+// the swamps' biome numbers (the mangrove swamp too), and the columns of land where slimes come up deep down (one in ten, by the world's seed)
+const SWAMPS = new Set(BIOMES.map((b, i) => b.name === 'swamp' || b.name === 'mangrove_swamp' ? i : -1).filter(i => i >= 0));
 const slimePlace = (seed, cx, cz) => { let h = (Number(seed) || 0) ^ Math.imul(cx, 0x5bd1e995) ^ Math.imul(cz, 0x27d4eb2d) ^ 0x3c6ef372; h = Math.imul(h ^ h >>> 15, 0x2c1b3c6d); h = Math.imul(h ^ h >>> 12, 0x297a2d39); return ((h ^ h >>> 15) >>> 0) % 10 === 0; };
 export const MOBS = {
   pig: {zh: '猪', health: 10, speed: 0.25, passive: true, breed: ['carrot', 'potato', 'beetroot'], drops: [['porkchop', 1, 3, 'cooked_porkchop']]},
@@ -392,7 +392,7 @@ export class Mobs {
     if (Math.hypot(x - player.x, z - player.z) < 24) return;
     const kinds = ['zombie', 'zombie', 'skeleton', 'skeleton', 'creeper', 'spider'];
     let kind = kinds[Math.floor(Math.random() * kinds.length)];
-    if ((y < 40 && slimePlace(this.ctx.seed, x >> 4, z >> 4)) || (y > 50 && y < 70 && this.world.biome?.(x, z) === SWAMP)) { if (Math.random() < 0.5) kind = 'slime'; }
+    if ((y < 40 && slimePlace(this.ctx.seed, x >> 4, z >> 4)) || (y > 50 && y < 70 && SWAMPS.has(this.world.biome?.(x, z)))) { if (Math.random() < 0.5) kind = 'slime'; }
     if (kind === 'spider' && (collisionBoxes(this.world.get(x + 1, y, z)) || collisionBoxes(this.world.get(x - 1, y, z)))) return;
     this.add(kind, x + 0.5, y, z + 0.5);
   }

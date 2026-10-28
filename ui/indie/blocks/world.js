@@ -29,7 +29,11 @@ const GRAVITY = new Set(BLOCKS.filter(b => b.gravity).map(b => b.id));
 const CROP = new Set([ID.wheat, ID.carrots, ID.potatoes, ID.beetroots]);
 const PAIRED = new Set(BLOCKS.filter(b => b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall').map(b => b.id));
 const FACE_DIR = [[0, 1], [-1, 0], [0, -1], [1, 0]];
-const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'plate', 'rail', 'lever', 'button', 'piston_head'].includes(b.shape)).map(b => b.id));
+const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'plate', 'rail', 'lever', 'button', 'piston_head', 'bamboo', 'petals'].includes(b.shape)).map(b => b.id));
+// the ground plants take root in (the game's dirt), what bamboo also stands in, and what mangrove roots grow into
+const DIRT = new Set([ID.grass_block, ID.dirt, ID.podzol, ID.coarse_dirt, ID.moss_block, ID.mud, ID.muddy_mangrove_roots]);
+const BAMBOO_GROUND = new Set([...DIRT, ID.sand, ID.red_sand, ID.gravel]);
+const MUDDY = new Set([ID.mud, ID.muddy_mangrove_roots, ID.mangrove_roots]);
 // redstone that lies on the ground: on a full block, the top half of a slab or a hopper
 const ON_GROUND = new Set(['wire', 'repeater', 'comparator', 'plate', 'rail']);
 // the tall flowers: bone meal gives another one
@@ -329,8 +333,14 @@ export class World {
         const nx = x + Math.floor(r() * 3) - 1, ny = y + Math.floor(r() * 5) - 3, nz = z + Math.floor(r() * 3) - 1;
         if (this.get(nx, ny, nz) === ID.dirt) { const a = this.get(nx, ny + 1, nz); if (!a || !OPAQUE[a & 0xFFF] && !LIQUID.has(a & 0xFFF)) { const l = this.light(nx, ny + 1, nz); if (Math.max(l & 15, l >> 4) >= 4) this.set(nx, ny, nz, ID.grass_block); } }
       }
-    } else if (b.name.endsWith('_sapling')) {
-      if (lit() >= 9 && r() < 1 / 7) this.growSapling(x, y, z, b.name.replace('_sapling', ''));
+    } else if (b.sapling) {
+      // (a propagule hanging under the leaves does not grow into a tree)
+      if (!(v >>> 12 & 8) && lit() >= 9 && r() < 1 / 7) this.growSapling(x, y, z, b.sapling);
+    } else if (id === ID.bamboo) {
+      // the top of a stalk grows one time in three (in the light), up to sixteen high
+      if (!(v >>> 12 & 8) && r() < 1 / 3 && !this.get(x, y + 1, z) && lit() >= 9) { const h = this.bambooBelow(x, y, z) + 1; if (h < 16) this.growBamboo(x, y, z, h); }
+    } else if (id === ID.bamboo_sapling) {
+      if (r() < 1 / 3 && !this.get(x, y + 1, z) && lit() >= 9) this.shootUp(x, y, z);
     } else if (CROP.has(id)) {
       const meta = v >>> 12;
       if (meta < 7 && lit() >= 9 && r() < (this.get(x, y - 1, z) >>> 12 ? 0.33 : 0.16)) this.set(x, y, z, withMeta(id, meta + 1));
@@ -380,8 +390,35 @@ export class World {
     for (let dy = 0; dy <= 1; dy++) for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) if ((this.get(x + dx, y + dy, z + dz) & 0xFFF) === ID.water) return true;
     return false;
   }
+  /** How many bamboo blocks are under this one (up to 16). */
+  bambooBelow(x, y, z) { let n = 0; while (n < 16 && (this.get(x, y - n - 1, z) & 0xFFF) === ID.bamboo) n++; return n; }
+  /**
+   * The game's bamboo growing from its top at (x, y, z), the stalk h high so far: the new top has large leaves when the
+   * one under it has leaves (the two under that then small and none), else small; thick once the stalk is three high;
+   * past eleven it may stop for good (at sixteen it does).
+   */
+  growBamboo(x, y, z, h) {
+    const v = this.get(x, y, z), below = this.get(x, y - 1, z), below2 = this.get(x, y - 2, z), isB = q => (q & 0xFFF) === ID.bamboo;
+    let leaves = 0;
+    if (h >= 1) {
+      if (!isB(below) || !(below >>> 12 & 3)) leaves = 1;
+      else { leaves = 2; if (isB(below2)) { this.set(x, y - 1, z, withMeta(ID.bamboo, (below >>> 12 & 12) | 1)); this.set(x, y - 2, z, withMeta(ID.bamboo, below2 >>> 12 & 12)); } }
+    }
+    const thick = (v >>> 12 & 4) || isB(below2) ? 4 : 0, done = (h >= 11 && this.r() < 0.25) || h === 15 ? 8 : 0;
+    this.set(x, y + 1, z, withMeta(ID.bamboo, leaves | thick | done));
+  }
+  /** A bamboo shoot comes up: bamboo with small leaves over it, and the shoot a stalk. */
+  shootUp(x, y, z) { this.set(x, y + 1, z, withMeta(ID.bamboo, 1)); this.set(x, y, z, ID.bamboo); }
   growSapling(x, y, z, kind) {
     const sap = this.get(x, y, z), put = (wx, wy, wz, v, force) => this.treePut(wx, wy, wz, v, force), get = (a, b, c) => this.get(a, b, c);
+    // a mangrove: from its propagule, nine in ten the tall kind; its roots find their way down through water and mud
+    // (where they cannot, it does not grow)
+    if (kind === 'mangrove') {
+      const soil = (a, b, c) => { const q = this.get(a, b, c), qb = BLOCKS[q & 0xFFF]; return !q || q === sap || qb.replace || qb.shape === 'cross' ? 0 : MUDDY.has(q & 0xFFF) ? 1 : 2; };
+      this.set(x, y, z, 0);
+      if (!growTree({x, y: y - 1, z, kind: this.r() < 0.85 ? 'tall_mangrove' : 'mangrove', r: this.r, soil}, put, get)) this.set(x, y, z, sap);
+      return;
+    }
     // four in a square: a giant spruce (or pine) or jungle tree; dark oak only grows from four
     let base = null;
     if (kind === 'spruce' || kind === 'jungle' || kind === 'dark_oak')
@@ -402,7 +439,7 @@ export class World {
   }
   treePut(x, y, z, v, force) {
     const old = this.get(x, y, z), ob = BLOCKS[old & 0xFFF];
-    if (force) { if (ob.name.endsWith('_log') || !old || ob.replace || ob.name.endsWith('_leaves') || ob.name.endsWith('_sapling') || old === ID.grass_block || old === ID.dirt) this.set(x, y, z, v); return; }
+    if (force) { if (ob.name.endsWith('_log') || !old || ob.replace || ob.name.endsWith('_leaves') || ob.sapling || old === ID.grass_block || old === ID.dirt || MUDDY.has(old & 0xFFF)) this.set(x, y, z, v); return; }
     if (!old || ob.replace) this.set(x, y, z, v);
   }
   /** A scheduled update: liquids flow, sand falls, plants with nothing under them break. */
@@ -422,6 +459,8 @@ export class World {
       }
       return;
     }
+    // a bamboo shoot with bamboo put on it is a stalk now
+    if (id === ID.bamboo_sapling && (this.get(x, y + 1, z) & 0xFFF) === ID.bamboo) { this.set(x, y, z, ID.bamboo); return; }
     if (PLANT.has(id)) { if (!this.supported(x, y, z, v)) this.breakBlock(x, y, z); return; }
     if (id === ID.vine) { const keep = this.vineHolds(x, y, z, v >>> 12); if (keep !== v >>> 12) this.set(x, y, z, keep ? withMeta(ID.vine, keep) : 0); return; }
     if (BLOCKS[id].shape === 'tall' && !(v >>> 12 & 8) && !this.supported(x, y, z, withMeta(ID.short_grass, 0))) { this.breakBlock(x, y, z); return; }
@@ -460,7 +499,12 @@ export class World {
     if (id === ID.cactus) return bid === ID.cactus || bid === ID.sand || bid === ID.red_sand;
     if (id === ID.dead_bush) return bid === ID.sand || bid === ID.red_sand || bid === ID.dirt || bid === ID.coarse_dirt || bid === ID.terracotta;
     if (b.shape === 'layer') return OPAQUE[bid] === 1 || BLOCKS[bid].name.endsWith('_leaves');
-    if (b.shape === 'cross') return bid === ID.grass_block || bid === ID.dirt || bid === ID.podzol || bid === ID.coarse_dirt || bid === ID.farmland || bid === ID.moss_block || bid === ID.mud || (b.name.endsWith('mushroom') && OPAQUE[bid] === 1);
+    // bamboo on bamboo or its ground; a propagule hangs from mangrove leaves (state 8) or grows in dirt and clay
+    if (id === ID.bamboo) return bid === ID.bamboo || bid === ID.bamboo_sapling || BAMBOO_GROUND.has(bid);
+    if (id === ID.bamboo_sapling) return BAMBOO_GROUND.has(bid);
+    if (id === ID.mangrove_propagule) return v >>> 12 & 8 ? (this.get(x, y + 1, z) & 0xFFF) === ID.mangrove_leaves : DIRT.has(bid) || bid === ID.farmland || bid === ID.clay;
+    if (b.shape === 'petals') return DIRT.has(bid);
+    if (b.shape === 'cross') return DIRT.has(bid) || bid === ID.farmland || (b.name.endsWith('mushroom') && OPAQUE[bid] === 1);
     return true;
   }
   /** The sides a vine still clings to: a full block there (or leaves), or the vine above hanging on that side. */
@@ -567,7 +611,18 @@ export class World {
       const m = v >>> 12, to = id === ID.beetroots ? (r() < 0.75 ? [2, 2, 4, 4, 7, 7, 7][m] : m) : Math.min(7, m + 2 + Math.floor(r() * 4));
       this.set(x, y, z, withMeta(id, to)); return true;
     }
-    if (b.name.endsWith('_sapling')) { if (r() < 0.45) this.growSapling(x, y, z, b.name.replace('_sapling', '')); return true; }
+    if (b.sapling) { if (v >>> 12 & 8) return false; if (r() < 0.45) this.growSapling(x, y, z, b.sapling); return true; }
+    // bamboo: one or two more at the top of its stalk (while it may grow); a shoot comes up; petals: one more flower,
+    // or with four one to pick up
+    if (id === ID.bamboo) {
+      let top = y; while ((this.get(x, top + 1, z) & 0xFFF) === ID.bamboo) top++;
+      let h = top - y + this.bambooBelow(x, y, z) + 1;
+      if (h >= 16 || this.get(x, top, z) >>> 12 & 8 || this.get(x, top + 1, z)) return false;
+      for (let k = 1 + Math.floor(r() * 2); k > 0 && h < 16 && !(this.get(x, top, z) >>> 12 & 8) && !this.get(x, top + 1, z); k--) this.growBamboo(x, top++, z, h++);
+      return true;
+    }
+    if (id === ID.bamboo_sapling) { if (this.get(x, y + 1, z)) return false; this.shootUp(x, y, z); return true; }
+    if (id === ID.pink_petals) { if ((v >>> 12 & 3) < 3) this.set(x, y, z, v + (1 << 12)); else this.post({type: 'drops', x: x + 0.5, y: y + 0.5, z: z + 0.5, items: [['pink_petals', 1]]}); return true; }
     if (id === ID.cocoa) { if ((v >>> 12) >> 2 >= 2) return false; this.set(x, y, z, withMeta(id, (v >>> 12) + 4)); return true; }
     if ((id === ID.short_grass || id === ID.fern) && !this.get(x, y + 1, z)) {
       const t = id === ID.fern ? ID.large_fern : ID.tall_grass;
@@ -596,7 +651,8 @@ export class World {
     if (h(1) > 0.12) return [];
     const biome = BIOMES[c.biome[8 * 16 + 8]].name;
     const kinds = {plains: ['pig', 'cow', 'sheep', 'chicken'], meadow: ['sheep', 'cow', 'chicken'], forest: ['pig', 'cow', 'chicken', 'sheep'], birch_forest: ['pig', 'chicken', 'sheep'], dark_forest: ['pig', 'chicken'],
-      taiga: ['sheep', 'pig'], snowy_taiga: ['sheep'], snowy_plains: ['sheep'], savanna: ['cow', 'sheep', 'chicken'], jungle: ['chicken', 'pig'], swamp: ['chicken'], beach: []}[biome];
+      taiga: ['sheep', 'pig'], snowy_taiga: ['sheep'], snowy_plains: ['sheep'], savanna: ['cow', 'sheep', 'chicken'], jungle: ['chicken', 'pig'], swamp: ['chicken'], beach: [],
+      cherry_grove: ['pig', 'sheep'], bamboo_jungle: ['chicken', 'pig']}[biome];
     if (!kinds || !kinds.length) return [];
     const kind = kinds[Math.floor(h(2) * kinds.length)], n = 2 + Math.floor(h(3) * 3), out = [];
     for (let k = 0; k < n * 4 && out.length < n; k++) {

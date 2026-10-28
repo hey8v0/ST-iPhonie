@@ -53,9 +53,11 @@ for (const [mat, tex] of [['leather', 'leather'], ['chainmail', 'chainmail'], ['
   SKINS[`armor_${mat}`] = [`entity/equipment/humanoid/${tex}.png`, `models/armor/${tex}_layer_1.png`];
   SKINS[`armor_${mat}_legs`] = [`entity/equipment/humanoid_leggings/${tex}.png`, `models/armor/${tex}_layer_2.png`];
 }
+// boats: each wood's (the bamboo raft is bamboo's), with a chest in the bigger picture
+for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) { SKINS[`boat_${w}`] = [`entity/boat/${w}.png`]; SKINS[`chest_boat_${w}`] = [`entity/chest_boat/${w}.png`]; }
 const MOON_PHASES = ['full_moon', 'waning_gibbous', 'third_quarter', 'waning_crescent', 'new_moon', 'waxing_crescent', 'first_quarter', 'waxing_gibbous'];
 // item pictures whose name the game also gives a block picture (ours are named apart)
-const ITEM_FILE = {repeater_item: 'repeater', comparator_item: 'comparator'};
+const ITEM_FILE = {repeater_item: 'repeater', comparator_item: 'comparator', mangrove_propagule_item: 'mangrove_propagule', pink_petals_item: 'pink_petals'};
 /**
  * Reads the pictures we use from a jar or resource pack: {label, files: {name: {png: Blob, meta}}, sky: {sun, moon,
  * clouds: Blob}, count}. onProgress(done, total).

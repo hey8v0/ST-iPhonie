@@ -1,10 +1,12 @@
 // Trees the way the game grows them: a trunk (straight, forking acacia, the giant 2×2, the mega jungle's with its
 // branches, dark oak's with the logs hanging round its top, fancy oak's with limbs), the leaves round each place the
 // trunk leaves for them (blob, spruce, pine, mega pine, acacia, dark oak, fancy, mega jungle, bush), then what grows
-// on a finished tree (vines on the trunk and hanging from the leaves, cocoa, podzol round a mega spruce). The numbers
-// are the game's own (trunk heights, radii, chances). put(x, y, z, block, force) writes one block: leaves only into
-// air, plants and leaves; force (logs, the dirt under the trunk) also over grass and dirt. get(x, y, z) reads what is
-// there (−1: not known, outside the column being made) — the decorations look where they may go.
+// on a finished tree (vines on the trunk and hanging from the leaves, cocoa, podzol round a mega spruce, a mangrove's
+// hanging propagules). The numbers are the game's own (trunk heights, radii, chances). put(x, y, z, block, force)
+// writes one block: leaves only into air, plants and leaves; force (logs, the dirt under the trunk) also over grass
+// and dirt. get(x, y, z) reads what is there (−1: not known, outside the column being made) — the decorations look
+// where they may go. A mangrove's roots ask soil(x, y, z): 0 open (air, water, a plant), 1 mud (they grow in, muddy),
+// 2 ground they stop at — known everywhere, so a tree comes out the same from every column it reaches into.
 import {ID, withMeta} from './blocks.js';
 
 // directions as in shapes.js: 0 south (+z), 1 west (−x), 2 north (−z), 3 east (+x)
@@ -15,14 +17,18 @@ const DIR = [[0, 1], [-1, 0], [0, -1], [1, 0]];
  * spruce, pine, mega_spruce, mega_pine, jungle, jungle_plain (from a sapling: no vines), mega_jungle, jungle_bush,
  * acacia, dark_oak.
  */
-export const TREE_KINDS = ['oak', 'fancy_oak', 'birch', 'tall_birch', 'swamp_oak', 'spruce', 'pine', 'mega_spruce', 'mega_pine', 'jungle', 'jungle_plain', 'mega_jungle', 'jungle_bush', 'acacia', 'dark_oak'];
+export const TREE_KINDS = ['oak', 'fancy_oak', 'birch', 'tall_birch', 'swamp_oak', 'spruce', 'pine', 'mega_spruce', 'mega_pine', 'jungle', 'jungle_plain', 'mega_jungle', 'jungle_bush', 'acacia', 'dark_oak',
+  'cherry', 'mangrove', 'tall_mangrove'];
 /** Kinds standing on four blocks (x..x+1, z..z+1). */
 export const BIG_TREES = new Set(['mega_spruce', 'mega_pine', 'mega_jungle', 'dark_oak']);
 
-/** Grows a tree whose trunk starts on the ground block at (x, y, z) (the trunk's first log is y + 1). r(): 0–1. */
-export function growTree({x, y, z, kind, r}, put, get = () => -1) {
+/**
+ * Grows a tree whose trunk starts on the ground block at (x, y, z) (the trunk's first log is y + 1). r(): 0–1.
+ * Returns whether it grew (a mangrove does not where its roots find no ground).
+ */
+export function growTree({x, y, z, kind, r, soil = null}, put, get = () => -1) {
   const int = n => Math.floor(r() * n), uniform = (a, b) => a + int(b - a + 1);
-  const wood = {fancy_oak: 'oak', swamp_oak: 'oak', tall_birch: 'birch', pine: 'spruce', mega_spruce: 'spruce', mega_pine: 'spruce', jungle_plain: 'jungle', mega_jungle: 'jungle', jungle_bush: 'jungle'}[kind] || kind;
+  const wood = {fancy_oak: 'oak', swamp_oak: 'oak', tall_birch: 'birch', pine: 'spruce', mega_spruce: 'spruce', mega_pine: 'spruce', jungle_plain: 'jungle', mega_jungle: 'jungle', jungle_bush: 'jungle', tall_mangrove: 'mangrove'}[kind] || kind;
   const log = ID[`${wood}_log`], leaf = ID[`${kind === 'jungle_bush' ? 'oak' : wood}_leaves`];
   const own = new Map(), logs = [], leaves = [];
   const key = (a, b, c) => `${a},${b},${c}`;
@@ -218,6 +224,115 @@ export function growTree({x, y, z, kind, r}, put, get = () => -1) {
     return coords.filter(c => keep(c.base)).map(c => ({x: c.at[0], y: c.at[1], z: c.at[2], ro: 0, large: false}));
   };
 
+  /**
+   * Cherry: a trunk of 7–8 and one to three branches (with three the trunk goes on to a crown of its own); a branch goes
+   * out one or two logs lying its way, then on out and up to its end, a step at a time, where its crown sits.
+   */
+  const cherryTrunk = () => {
+    const h = 7 + int(2), att = [];
+    dirt(x, y, z);
+    const start = Math.max(0, h - 1 + uniform(-4, -3));
+    let start2 = Math.max(0, h - 1 + uniform(-4, -3) - 1);
+    if (start2 >= start) start2++;
+    const n = 1 + int(3), top = n === 3 ? h : n === 2 ? Math.max(start, start2) + 1 : start + 1;
+    for (let i = 0; i < top; i++) placeLog(x, y + 1 + i, z);
+    if (n === 3) att.push({x, y: y + 1 + top, z, ro: 0, large: false});
+    const d = int(4);
+    att.push(cherryBranch(h, d, start, start < top - 1));
+    if (n >= 2) att.push(cherryBranch(h, (d + 2) % 4, start2, start2 < top - 1));
+    return att;
+  };
+  const cherryBranch = (h, d, from, beside) => {
+    let cx = x, cy = y + 1 + from, cz = z;
+    const endY = y + h + uniform(-1, 0), long = beside || endY - (y + 1) < from, len = uniform(2, 4) + (long ? 1 : 0);
+    const ex = x + DIR[d][0] * len, ez = z + DIR[d][1] * len, axis = d % 2 === 0 ? 2 : 1;
+    for (let k = 0; k < (long ? 2 : 1); k++) { cx += DIR[d][0]; cz += DIR[d][1]; placeLog(cx, cy, cz, axis); }
+    const up = endY > cy ? 1 : -1;
+    for (let guard = 0; guard < 32; guard++) {
+      const dist = Math.abs(ex - cx) + Math.abs(endY - cy) + Math.abs(ez - cz);
+      if (!dist) break;
+      const vert = r() < Math.abs(endY - cy) / dist;
+      if (vert) cy += up; else { cx += DIR[d][0]; cz += DIR[d][1]; }
+      placeLog(cx, cy, cz, vert ? 0 : axis);
+    }
+    return {x: ex, y: endY + 1, z: ez, ro: 0, large: false};
+  };
+  /** The cherry's crown: five rows (1, 2, 3, 3, 2 out), holes at the rim, leaves hanging one or two under the low rows. */
+  const cherryLeaves = a => {
+    const skip = (ax, dy, az, range) => {
+      if (dy === -1 && (ax === range || az === range) && r() < 0.25) return true;
+      const corner = ax === range && az === range;
+      return range > 2 ? corner || (ax + az > range * 2 - 2 && r() < 0.25) : corner && r() < 0.25;
+    };
+    const hang = (range, dy) => {
+      for (let dx = -range; dx <= range; dx++) for (let dz = -range; dz <= range; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== range || own.get(key(a.x + dx, a.y + dy, a.z + dz)) !== 2) continue;
+        if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) >= 7 || r() >= 1 / 6) continue;
+        placeLeaf(a.x + dx, a.y + dy - 1, a.z + dz);
+        if (Math.abs(dx) + Math.abs(dy - 1) + Math.abs(dz) < 7 && r() < 1 / 3) placeLeaf(a.x + dx, a.y + dy - 2, a.z + dz);
+      }
+    };
+    row(a.x, a.y, a.z, 1, 2, false, skip); row(a.x, a.y, a.z, 2, 1, false, skip); row(a.x, a.y, a.z, 3, 0, false, skip);
+    row(a.x, a.y, a.z, 3, -1, false, skip); hang(3, -1);
+    row(a.x, a.y, a.z, 2, -2, false, skip); hang(2, -2);
+  };
+  /**
+   * Mangrove: the trunk stands one to three over the ground on its roots — one right under it, and from each side one
+   * going out and down till it meets the ground (into mud it grows on, muddy) —; it grows 2–7 (the tall kind 4–14),
+   * now and then a branch stepping out and up from it, and the leaves come in clumps round its top and the branches.
+   */
+  const soilAt = soil || ((a, b, c) => get(a, b, c) <= 0 ? 0 : 2);
+  const rootSteps = (px, py, pz, d, base) => {
+    const down = [px, py - 1, pz], ox = px + DIR[d][0], oz = pz + DIR[d][1], dist = Math.abs(px - x) + Math.abs(py - base) + Math.abs(pz - z);
+    if (dist > 5 && dist <= 8) return r() < 0.2 ? [down, [ox, py - 1, oz]] : [down];
+    if (dist > 8) return [down];
+    if (r() < 0.2) return [down];
+    return r() < 0.5 ? [[ox, py, oz]] : [down];
+  };
+  const rootsFrom = (px, py, pz, d, base, roots, len) => {
+    if (len === 15 || roots.length > 15) return false;
+    for (const [qx, qy, qz] of rootSteps(px, py, pz, d, base)) {
+      if (soilAt(qx, qy, qz) === 2) continue;
+      roots.push([qx, qy, qz]);
+      if (!rootsFrom(qx, qy, qz, d, base, roots, len + 1)) return false;
+    }
+    return true;
+  };
+  const mangroveRoots = base => {
+    for (let yy = y + 1; yy < base; yy++) if (soilAt(x, yy, z) === 2) return false;
+    const list = [[x, base - 1, z]];
+    for (let d = 0; d < 4; d++) {
+      const sx = x + DIR[d][0], sz = z + DIR[d][1], roots = [];
+      if (!rootsFrom(sx, base, sz, d, base, roots, 0)) return false;
+      list.push(...roots, [sx, base, sz]);
+    }
+    for (const [a, b, c] of list) { const s = soilAt(a, b, c); if (s !== 2) put(a, b, c, s === 1 ? ID.muddy_mangrove_roots : ID.mangrove_roots, true); }
+    return true;
+  };
+  const mangroveTrunk = tall => {
+    const base = y + 1 + uniform(1, 3);
+    if (!mangroveRoots(base)) return null;
+    const h = tall ? 4 + int(2) + int(10) : 2 + int(2) + int(5), att = [];
+    for (let i = 0; i < h; i++) {
+      const yy = base + i;
+      placeLog(x, yy, z);
+      if (i < h - 1 && r() < 0.5) {
+        const d = int(4), off = Math.max(0, int(2) - int(2) - 1);
+        let bx = x, bz = z, top = yy + off;
+        for (let l = off, steps = uniform(1, 4); l < h && steps > 0; l++, steps--) {
+          if (l < 1) continue;
+          bx += DIR[d][0]; bz += DIR[d][1]; top = yy + l + 1;
+          placeLog(bx, yy + l, bz); att.push({x: bx, y: yy + l, z: bz});
+        }
+        if (top - yy > 1) att.push({x: bx, y: top, z: bz}, {x: bx, y: top - 2, z: bz});
+      }
+      if (i === h - 1) att.push({x, y: yy + 1, z});
+    }
+    return att;
+  };
+  /** Leaves strewn round a place: 70 tries within two across and one up or down (the mangrove's). */
+  const spread = a => { for (let k = 0; k < 70; k++) placeLeaf(a.x + int(3) - int(3), a.y + int(2) - int(2), a.z + int(3) - int(3)); };
+
   // ---------- the kinds ----------
   let att;
   switch (kind) {
@@ -243,7 +358,9 @@ export function growTree({x, y, z, kind, r}, put, get = () => -1) {
     case 'acacia': att = forking(); att.forEach(a => acaciaLeaves(a)); break;
     case 'dark_oak': att = darkOakTrunk(); att.forEach(a => darkOakLeaves(a)); break;
     case 'fancy_oak': att = fancyTrunk(); att.forEach(a => fancyLeaves(a)); break;
-    default: return;
+    case 'cherry': att = cherryTrunk(); att.forEach(a => cherryLeaves(a)); break;
+    case 'mangrove': case 'tall_mangrove': att = mangroveTrunk(kind === 'tall_mangrove'); if (!att) return false; att.forEach(a => spread(a)); break;
+    default: return false;
   }
 
   // ---------- what grows on it ----------
@@ -301,5 +418,17 @@ export function growTree({x, y, z, kind, r}, put, get = () => -1) {
   if (kind === 'swamp_oak') leaveVines(0.25);
   if (kind === 'jungle') { cocoa(0.2); trunkVines(); leaveVines(0.25); }
   if (kind === 'mega_jungle') { trunkVines(); leaveVines(0.25); }
+  // a mangrove's propagules: under one leaf in seven with two free below, not right beside another (the game's)
+  const propagules = () => {
+    const list = leaves.slice(), taken = new Set();
+    for (let i = list.length - 1; i > 0; i--) { const j = int(i + 1); [list[i], list[j]] = [list[j], list[i]]; }
+    for (const [a, b, c] of list) {
+      if (r() >= 0.14 || taken.has(key(a, b - 1, c)) || !isAir(a, b - 1, c) || !isAir(a, b - 2, c)) continue;
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) taken.add(key(a + dx, b - 1, c + dz));
+      put(a, b - 1, c, withMeta(ID.mangrove_propagule, 8));
+    }
+  };
   if (kind === 'mega_spruce' || kind === 'mega_pine') podzol();
+  if (kind === 'mangrove' || kind === 'tall_mangrove') { leaveVines(0.125); propagules(); }
+  return true;
 }

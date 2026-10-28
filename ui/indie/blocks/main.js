@@ -1,15 +1,15 @@
 // 方块世界: a block world in the spirit of the game, made from scratch. This page runs the game: the menus, the player,
 // breaking and placing, survival (health, hunger, air), the day, what is held, the HUD; the world itself is made and
 // kept by the worker (world.worker.js) and drawn by render.js.
-import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE} from './blocks.js';
+import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE, BOAT_WOODS} from './blocks.js';
 import {Mobs, MOBS} from './mobs.js';
-import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS} from './models.js';
+import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
 import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds} from './atlas.js';
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
 import {listWorlds, saveWorld, deleteWorld} from './db.js';
 import {Mirror} from './mirror.js';
-import {Body, raycast} from './player.js';
+import {Body, raycast, W as PLAYER_W} from './player.js';
 import {Inventory, furnaceTick, stackMax, ARMOR_AT, takeSmeltXp} from './inventory.js';
 import {enchOf, shelvesAround, fishLoot, protectionFactor, wears, seeded} from './enchant.js';
 import {InventoryUI, stackHtml} from './invui.js';
@@ -20,6 +20,7 @@ import {collisionBoxes, DIR, ATTACHED} from './shapes.js';
 import {fillLevel, insertOne, moveOne, pickSlot, plateLevel} from './machines.js';
 import {placeRail, isRail} from './rails.js';
 import {Carts, CARTS} from './carts.js';
+import {Boats, BOAT_W, BOAT_H, waterTop} from './boats.js';
 import {unlockSound, play, setVolume, setRain, note as noteSound} from './sound.js';
 import {seedOf} from './noise.js';
 import {runCommand, DIFFICULTIES, defaultRules} from './commands.js';
@@ -93,6 +94,11 @@ async function loadTextures() {
   // worn armour: the pack's pictures (leather there is grey, dyed its usual brown) or ours
   for (const m of Object.keys(ARMOR)) for (const [key, layer] of [[`armor_${m}`, 1], [`armor_${m}_legs`, 2]]) {
     const img = skins?.[key] || ownArmor(m, layer); renderer.setImage(`mob:${key}`, img); skinSizes[key] = [img.width, img.height]; greyArmor[key] = !!skins?.[key] && m === 'leather';
+  }
+  // boats: each wood's, with a chest and without (the pack's or ours)
+  for (const w of BOAT_WOODS) for (const chest of [false, true]) {
+    const key = `${chest ? 'chest_boat' : 'boat'}_${w}`, img = skins?.[key] || ownBoat(w, chest);
+    renderer.setImage(`mob:${key}`, img); skinSizes[key] = [img.width, img.height];
   }
   setPacked(built.from);
   packLabel = rec?.label || '';
@@ -222,6 +228,10 @@ function startWorld(meta) {
   G.carts = new Carts({world: mirror, sound: (n, x, y, z) => soundAt(n, x, y, z), drop: (s, x, y, z) => G.ents.drop(s, x, y, z), light: (x, y, z, f) => G.mobs.light(x, y, z, f),
     tiles: () => G.tiles, items: () => G.ents.items, ticks: () => G.ticks || 0, smoke: (x, y, z) => G.ents.puff(x, y, z, 'smoke')});
   G.carts.load(meta.carts); G.riding = null;
+  // boats (kept the same way); they are solid to the player, the mobs and each other
+  G.boats = new Boats({world: mirror, sound: (n, x, y, z) => soundAt(n, x, y, z), drop: (s, x, y, z) => G.ents.drop(s, x, y, z), fall: d => { if (d > 3) hurt(Math.ceil(d - 3), '摔得太重了', null, 'fall'); }});
+  G.boats.load(meta.boats);
+  mirror.solids = (body, x0, y0, z0, x1, y1, z1) => G.boats.solids(body, x0, y0, z0, x1, y1, z1);
   worker.onmessage = e => onWorker(e.data);
   worker.onerror = e => showError(`世界线程出错：${e.message || e}`);
   worker.postMessage({type: 'init', seed: meta.seed, layers: LAYER, radius: settings.dist, worldId: meta.id, center: [G.cx, G.cz], wave: settings.wave, dim: G.dim, lod: settings.lod});
@@ -319,8 +329,8 @@ function pause() {
 async function saveGame() {
   if (!G || !G.ready) return;
   const b = G.body, m = G.meta;
-  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, dim: G.dim, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], carts: G.carts.toJSON(), bed: G.bedPos, weather: G.weather,
-    player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total, enchSeed: G.enchSeed, effects: G.effects, absorb: G.absorb || 0}});
+  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, dim: G.dim, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], carts: G.carts.toJSON(), boats: G.boats.toJSON(), bed: G.bedPos, weather: G.weather,
+    player: {x: b.x, y: G.riding?.isBoat ? G.riding.body.y + BOAT_H : b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total, enchSeed: G.enchSeed, effects: G.effects, absorb: G.absorb || 0}});
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   // the worker writes the changed columns; this waits till it has (or three seconds)
   const g = G;
@@ -382,8 +392,8 @@ async function switchWorld(to, pos) {
   G.leaving = true; invUI.hide();
   const m = G.meta;
   await saveGame();
-  const here = {tiles: m.tiles, items: m.items, orbs: m.orbs, mobs: m.mobs, herds: m.herds, carts: m.carts}, there = m.away || {};
-  Object.assign(m, {away: here, dim: to, tiles: there.tiles || {}, items: there.items || [], orbs: there.orbs || [], mobs: there.mobs || [], herds: there.herds || [], carts: there.carts || []});
+  const here = {tiles: m.tiles, items: m.items, orbs: m.orbs, mobs: m.mobs, herds: m.herds, carts: m.carts, boats: m.boats}, there = m.away || {};
+  Object.assign(m, {away: here, dim: to, tiles: there.tiles || {}, items: there.items || [], orbs: there.orbs || [], mobs: there.mobs || [], herds: there.herds || [], carts: there.carts || [], boats: there.boats || []});
   m.player = {...m.player, x: pos.x, y: pos.y, z: pos.z, flying: false, health: G.health, food: G.food, sat: G.sat, effects: G.effects, absorb: G.absorb || 0};
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   G.worker.terminate(); renderer.clearAll(); renderer.clearLod();
@@ -779,6 +789,7 @@ function placeFrom(t, stack) {
   // slabs join into a double one, snow layers stack up
   if (b?.shape === 'slab' && (t.v & 0xFFF) === b.id && t.v >>> 12 !== 2 && ((t.face === 2 && t.v >>> 12 === 0) || (t.face === 3 && t.v >>> 12 === 1))) { setBlock(t.x, t.y, t.z, withMeta(b.id, 2)); return true; }
   if (b?.name === 'snow' && (t.v & 0xFFF) === b.id && (t.v >>> 12) < 7) { setBlock(t.x, t.y, t.z, withMeta(b.id, (t.v >>> 12) + 1)); return true; }
+  if (b?.name === 'pink_petals' && (t.v & 0xFFF) === b.id && (t.v >>> 12 & 3) < 3) { setBlock(t.x, t.y, t.z, t.v + (1 << 12)); play('place', ID.short_grass); return true; }
   // a vine goes on the side of a block that was aimed at (a full one or leaves), clinging to it; on a vine already
   // there it gets that side too
   if (b?.shape === 'vine') {
@@ -839,14 +850,21 @@ function placeFrom(t, stack) {
     if (b.shape === 'hopper') meta = t.face === 2 || t.face === 3 ? 3 : OPPOSITE[t.face];
     // plants need their ground
     const under = G.mirror.get(x, y - 1, z) & 0xFFF, ub = BLOCKS[under];
-    if (b.shape === 'cross' && !['grass_block', 'dirt', 'podzol', 'coarse_dirt', 'farmland', 'moss_block', 'mud', 'sand', 'red_sand'].includes(ub.name) && !(b.name === 'sugar_cane' && under === ID.sugar_cane) && !(b.name.endsWith('mushroom') && ub.opaque)) return false;
+    if (b.shape === 'cross' && !['grass_block', 'dirt', 'podzol', 'coarse_dirt', 'farmland', 'moss_block', 'mud', 'muddy_mangrove_roots', 'sand', 'red_sand', ...(b.name === 'mangrove_propagule' ? ['clay'] : [])].includes(ub.name) && !(b.name === 'sugar_cane' && under === ID.sugar_cane) && !(b.name.endsWith('mushroom') && ub.opaque)) return false;
+    if (b.shape === 'petals') { if (!['grass_block', 'dirt', 'podzol', 'coarse_dirt', 'moss_block', 'mud', 'muddy_mangrove_roots'].includes(ub.name)) return false; meta = facingBack() << 2; }
+    // bamboo: on bamboo it goes on up (as thick as the one under it), on its ground it is a shoot
+    if (b.name === 'bamboo') {
+      if (under === ID.bamboo || under === ID.bamboo_sapling) meta = under === ID.bamboo ? G.mirror.get(x, y - 1, z) >>> 12 & 4 : 0;
+      else if (['grass_block', 'dirt', 'podzol', 'coarse_dirt', 'moss_block', 'mud', 'muddy_mangrove_roots', 'sand', 'red_sand', 'gravel'].includes(ub.name)) { v = ID.bamboo_sapling; }
+      else return false;
+    }
     if (b.name === 'cactus' && !['sand', 'red_sand', 'cactus'].includes(ub.name)) return false;
     // dust, plates, repeaters, comparators and rails lie on a full block (or a slab's top half, a hopper); levers and
     // buttons hang on a full block
     if (['wire', 'plate', 'repeater', 'comparator', 'rail'].includes(b.shape) && !(ub.opaque || (ub.shape === 'slab' && G.mirror.get(x, y - 1, z) >>> 12 >= 1) || ub.name === 'hopper')) return false;
     if (b.shape === 'lever' || b.shape === 'button') { const [ax, ay, az] = FACES[ATTACHED[meta & 7]]; if (!BLOCKS[G.mirror.get(x + ax, y + ay, z + az) & 0xFFF].opaque) return false; }
     if ((b.shape === 'torch' && meta === 0) && !ub.opaque && ub.shape !== 'slab') return false;
-    v = withMeta(b.id, meta);
+    v ??= withMeta(b.id, meta);
     // not inside the player
     const boxes = collisionBoxes(v), [x0, y0, z0, x1, y1, z1] = G.body.aabb();
     if (boxes && boxes.some(q => x + q[0] < x1 && x + q[3] > x0 && y + q[1] < y1 && y + q[4] > y0 && z + q[2] < z1 && z + q[5] > z0)) return false;
@@ -999,11 +1017,35 @@ function cartUse(c, s) {
   if (c.inv) { input.enabled = false; input.unlock(); invUI.show('chest', c.inv); return; }
   if (c.kind === 'furnace_minecart' && (s?.id === 'coal' || s?.id === 'charcoal')) { useUp(); c.fuel += 3600; const [lx, , lz] = G.body.look(); c.push = [lx, lz]; }
 }
-/** Out of the minecart: standing on top of where it is. */
+/** Using a boat: getting in (sneaking at a chest boat opens its chest). */
+function boatUse(c) {
+  G.swing = 6;
+  if (c.inv && G.body.sneaking) { input.enabled = false; input.unlock(); invUI.show('chest', c.inv); return; }
+  if (!G.body.sneaking) { G.riding = c; Object.assign(G.body, {flying: false, sprinting: false}); }
+}
+/**
+ * Out of the minecart: standing on top of where it is. Out of a boat (the game's): onto the land ahead of where the
+ * player looks, if there is some there and room; else standing on the boat.
+ */
 function getOff() {
   const c = G.riding, b = G.body;
   G.riding = null;
   if (!c) return;
+  if (c.isBoat) {
+    const bb = c.body, f = -Math.sin(b.yaw), g = -Math.cos(b.yaw), m = Math.max(Math.abs(f), Math.abs(g)), d = (BOAT_W * Math.SQRT2 + PLAYER_W) / 2 + 1e-5;
+    const x = bb.x + f * d / m, z = bb.z + g * d / m, top = Math.floor(bb.y + BOAT_H), fx = Math.floor(x), fz = Math.floor(z);
+    const fits = y => { Object.assign(b, {x, y, z}); const q = b.aabb(); return !b.boxesIn(...q).some(o => o[0] < q[3] - 1e-6 && o[3] > q[0] + 1e-6 && o[1] < q[4] - 1e-6 && o[4] > q[1] + 1e-6 && o[2] < q[5] - 1e-6 && o[5] > q[2] + 1e-6); };
+    let at = null;
+    if (waterTop(G.mirror, fx, top - 1, fz) === null) for (const yy of [top, top - 1]) {
+      const boxes = collisionBoxes(G.mirror.get(fx, yy, fz));
+      if (!boxes) continue;
+      const fy = yy + Math.max(...boxes.map(o => o[4]));
+      if (fy - yy <= 1 && fits(fy)) { at = fy; break; }
+    }
+    if (at === null) { b.x = bb.x; b.y = bb.y + BOAT_H; b.z = bb.z; } else b.y = at;
+    b.prev = {x: b.x, y: b.y, z: b.z}; b.vx = b.vy = b.vz = 0;
+    return;
+  }
   b.x = c.body.x; b.y = c.body.y + 0.75; b.z = c.body.z; b.prev = {x: b.x, y: b.y, z: b.z}; b.vy = 0;
 }
 /** The use action (right click / tap / LT) on what is aimed at: a mob (feed, shear; a tap on a phone hits), or a block. */
@@ -1012,6 +1054,7 @@ function use(t, mob = null) {
   if (info?.tool?.kind === 'bow') return;
   G.swing = 6;
   if (mob?.isCart) { cartUse(mob, s); return; }
+  if (mob?.isBoat) { boatUse(mob); return; }
   if (mob) {
     if (s && mob.def.breed?.includes(s.id) && !mob.baby && !mob.love && !mob.loveWait) { mob.love = 600; useUp(); G.ents.puff(mob.x, mob.y + 1, mob.z, 'heart'); return; }
     if (s && mob.def.breed?.includes(s.id) && mob.baby) { mob.grow += 2400; useUp(); G.ents.puff(mob.x, mob.y + 0.6, mob.z, 'meal'); return; }
@@ -1054,7 +1097,8 @@ function use(t, mob = null) {
   }
   // bone meal, a lighter on TNT
   if (t && info?.meal) {
-    const id = t.v & 0xFFF, grows = (['wheat', 'carrots', 'potatoes', 'beetroots'].includes(b.name) && (t.v >>> 12) < 7) || b.name.endsWith('_sapling') || (id === ID.grass_block && !G.mirror.get(t.x, t.y + 1, t.z))
+    const id = t.v & 0xFFF, grows = (['wheat', 'carrots', 'potatoes', 'beetroots'].includes(b.name) && (t.v >>> 12) < 7) || (b.sapling && !(t.v >>> 12 & 8)) || (id === ID.grass_block && !G.mirror.get(t.x, t.y + 1, t.z))
+      || ['bamboo', 'bamboo_sapling', 'pink_petals'].includes(b.name)
       || (id === ID.cocoa && (t.v >>> 12) >> 2 < 2) || ((id === ID.short_grass || id === ID.fern) && !G.mirror.get(t.x, t.y + 1, t.z)) || ['sunflower', 'lilac', 'rose_bush', 'peony'].includes(b.name);
     if (grows) { G.worker.postMessage({type: 'meal', x: t.x, y: t.y, z: t.z}); useUp(); G.ents.puff(t.x + 0.5, t.y + 1, t.z + 0.5, 'meal'); play('meal'); }
     return;
@@ -1090,6 +1134,17 @@ function use(t, mob = null) {
       play('splash'); return;
     }
   }
+  if (info?.boat) {
+    const eye = eyePos(), dir = aimDir(), lt = raycast(G.mirror, eye[0], eye[1], eye[2], dir[0], dir[1], dir[2], reach(), true);
+    if (!lt) return;
+    const water = (lt.v & 0xFFF) === ID.water, [x, hy, z] = lt.hit, y = water ? waterTop(G.mirror, lt.x, lt.y, lt.z) : hy;
+    const probe = new Body(G.mirror, [BOAT_W, BOAT_H]);
+    Object.assign(probe, {x, y, z});
+    const q = probe.aabb();
+    if (probe.boxesIn(...q).some(o => o[0] < q[3] - 1e-6 && o[3] > q[0] + 1e-6 && o[1] < q[4] - 1e-6 && o[4] > q[1] + 1e-6 && o[2] < q[5] - 1e-6 && o[5] > q[2] + 1e-6)) return;
+    G.boats.add(s.id, x, y, z, {yaw: G.body.yaw}); useUp(); play('place', ID.oak_planks);
+    return;
+  }
   if (!t) return;
   // a minecart goes on the rail aimed at
   if (info?.cart) { if (isRail(t.v)) { G.carts.add(info.cart, t.x + 0.5, t.y + 0.0625, t.z + 0.5, {yaw: G.body.yaw}); useUp(); play('place', t.v); } return; }
@@ -1101,7 +1156,7 @@ function use(t, mob = null) {
     return;
   }
   // an axe takes the bark off a log or wood (it keeps lying the same way)
-  if (info?.tool?.kind === 'axe' && /_(log|wood)$/.test(b.name) && !b.name.startsWith('stripped_') && ID[`stripped_${b.name}`] !== undefined) {
+  if (info?.tool?.kind === 'axe' && /_(log|wood)$|^bamboo_block$/.test(b.name) && !b.name.startsWith('stripped_') && ID[`stripped_${b.name}`] !== undefined) {
     setBlock(t.x, t.y, t.z, withMeta(ID[`stripped_${b.name}`], t.v >>> 12)); wearTool(); play('place', t.v); return;
   }
   // a hoe makes farmland
@@ -1198,7 +1253,7 @@ const COMPOST = {wheat_seeds: 0.3, short_grass: 0.3, sugar_cane: 0.5, cactus: 0.
   nether_wart: 0.65, red_mushroom: 0.65, brown_mushroom: 0.65, bread: 0.85, baked_potato: 0.85, hay_block: 0.85,
   vine: 0.5, tall_grass: 0.5, large_fern: 0.65, cocoa_beans: 0.65, sunflower: 0.65, lilac: 0.65, rose_bush: 0.65, peony: 0.65, cookie: 0.85,
   beetroot_seeds: 0.3, beetroot: 0.65, pumpkin_pie: 1};
-const compostable = id => COMPOST[id] ?? (/_leaves$|_sapling$/.test(id) ? 0.3 : /^(dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|(red|orange|white|pink)_tulip)$/.test(id) ? 0.65 : 0);
+const compostable = id => COMPOST[id] ?? (/_leaves$|_sapling$|_propagule$|^pink_petals$|^mangrove_roots$/.test(id) ? 0.3 : /^(dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|(red|orange|white|pink)_tulip)$/.test(id) ? 0.65 : 0);
 /** The composter: what is held goes in (a chance of a level); full, it gives bone meal. */
 function compost(t) {
   const level = t.v >>> 12, s = held();
@@ -1324,7 +1379,7 @@ function gainXp(n) {
 }
 /** The player hits a mob: the held thing's damage, more when falling (a critical hit), the knock away. */
 function attackMob(m) {
-  if (m.isCart) { if (!G.attackWait) { G.carts.hit(m, damageOf(held()?.id), G.mode === 'creative'); G.attackWait = 8; G.swing = 6; } return; }
+  if (m.isCart || m.isBoat) { if (!G.attackWait) { (m.isCart ? G.carts : G.boats).hit(m, damageOf(held()?.id), G.mode === 'creative'); G.attackWait = 8; G.swing = 6; } return; }
   if (G.attackWait > 0 || m.dead) return;
   const b = G.body, s = held(), crit = !b.onGround && b.vy < 0 && !b.inWater && !b.climbing;
   let dmg = damageOf(s?.id) * (crit ? 1.5 : 1);
@@ -1421,8 +1476,8 @@ function tick() {
   input.setFlying(b.flying);
   // steps
   const moved = Math.hypot(b.x - b.prev.x, b.z - b.prev.z);
-  if (b.onGround && !b.sneaking) { G.walked += moved; if (G.walked - G.stepAt > 1.6) { G.stepAt = G.walked; play('step', G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z))); } }
-  if (b.inWater && moved > 0.05 && G.time % 12 === 0) play('swim');
+  if (b.onGround && !b.sneaking && !G.riding) { G.walked += moved; if (G.walked - G.stepAt > 1.6) { G.stepAt = G.walked; play('step', G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z))); } }
+  if (b.inWater && !G.riding && moved > 0.05 && G.time % 12 === 0) play('swim');
   survivalTick(r);
   eatTick();
   // potion effects wear off; regeneration heals, poison hurts (never to death); swirls round the player
@@ -1481,13 +1536,28 @@ function tick() {
   if (G.hurtT > 0) G.hurtT--;
   // mobs, items, experience, furnaces, the weather
   G.mobs.tick();
-  // minecarts roll; the player sitting in one goes with it (shift gets out; a powered activator rail throws them out)
-  const riding = G.riding && G.carts.list.includes(G.riding) ? {cart: G.riding, fwd: ctl.fwd, look: b.look()} : null;
-  if (!riding) G.riding = null;
-  G.carts.tick(riding);
-  if (riding && (ctl.sneak || riding.eject || !G.carts.list.includes(riding.cart))) getOff();
-  else if (riding) { const c = riding.cart.body; b.x = c.x; b.y = c.y + 0.3; b.z = c.z; b.prev = {x: c.prev.x, y: c.prev.y + 0.3, z: c.prev.z}; b.vx = b.vy = b.vz = 0; b.fall = 0; b.onGround = true; }
-  else if (G.carts.list.length) G.carts.shove(b.x, b.z, b.x - b.prev.x, b.z - b.prev.z);
+  // minecarts roll and boats float; the player sitting in one goes with it, sitting (shift gets out; a powered activator
+  // rail throws them out of a cart, three seconds under water out of a boat)
+  const inCart = G.riding?.isCart && G.carts.list.includes(G.riding) ? {cart: G.riding, fwd: ctl.fwd, look: b.look()} : null;
+  const inBoat = G.riding?.isBoat && G.boats.list.includes(G.riding) ? {boat: G.riding, fwd: ctl.fwd, side: ctl.side} : null;
+  if (!inCart && !inBoat) G.riding = null;
+  G.carts.tick(inCart);
+  G.boats.tick(inBoat);
+  const ride = inCart || inBoat;
+  if (ride && (ctl.sneak || ride.eject || !(inCart ? G.carts.list.includes(inCart.cart) : G.boats.list.includes(inBoat.boat)))) getOff();
+  else if (inCart) { const c = inCart.cart.body; b.x = c.x; b.y = c.y - 0.35; b.z = c.z; b.prev = {x: c.prev.x, y: c.prev.y - 0.35, z: c.prev.z}; b.vx = b.vy = b.vz = 0; b.fall = 0; b.onGround = true; }
+  else if (inBoat) {
+    // in a boat: on its seat, the view turning with it (and kept within 105° of the way it points)
+    const c = inBoat.boat, [px, py, pz] = G.boats.seat(c, true), [sx, sy, sz] = G.boats.seat(c);
+    b.prev = {x: px, y: py, z: pz}; b.x = sx; b.y = sy; b.z = sz; b.vx = b.vy = b.vz = 0; b.fall = 0; b.onGround = true;
+    b.yaw += c.yaw - c.prevYaw;
+    const rel = ((b.yaw - c.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    if (Math.abs(rel) > 1.8326) b.yaw = c.yaw + Math.sign(rel) * 1.8326;
+    b.feel();
+  } else {
+    if (G.carts.list.length) G.carts.shove(b.x, b.z, b.x - b.prev.x, b.z - b.prev.z);
+    if (G.boats.list.length) { const [px, pz] = G.boats.shove(b.x, b.y, b.z, PLAYER_W, b.height); b.vx += px; b.vz += pz; }
+  }
   G.ents.tick(b, stack => { if (G.dead) return stack; const left = G.inv.add(stack); drawHud(true); return left; });
   G.ents.orbTick(b, v => gainXp(v));
   weatherTick();
@@ -1495,6 +1565,7 @@ function tick() {
   // the body turns after the head when it has turned far, or when walking
   const turnBy = ((b.yaw - G.bodyYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
   if (moved > 0.01) G.bodyYaw += turnBy * 0.5; else if (Math.abs(turnBy) > 0.85) G.bodyYaw += turnBy - Math.sign(turnBy) * 0.85;
+  if (G.riding?.isBoat) G.bodyYaw = G.riding.yaw;
   G.limbAmt = (G.limbAmt || 0) + (Math.min(1, moved * 4) - (G.limbAmt || 0)) * 0.4;
   for (const [k, tile] of Object.entries(G.tiles)) if (tile.kind === 'brew') {
     // brewing stands brew whether their window is open or not
@@ -1554,8 +1625,10 @@ function targetAt() {
 /** The mob aimed at (within 3 blocks, the game's reach for hitting; 5 in creative): {mob, t} or null. */
 function mobAt() {
   const o = eyePos(), d = aimDir();
-  const r = G.mode === 'creative' ? 5 : 3, m = G.mobs.raycast(o[0], o[1], o[2], d[0], d[1], d[2], r), c = G.carts.raycast(o[0], o[1], o[2], d[0], d[1], d[2], r);
-  return c && c.mob !== G.riding && (!m || c.t < m.t) ? c : m;
+  const r = G.mode === 'creative' ? 5 : 3;
+  let best = G.mobs.raycast(o[0], o[1], o[2], d[0], d[1], d[2], r);
+  for (const c of [G.carts.raycast(o[0], o[1], o[2], d[0], d[1], d[2], r), G.boats.raycast(o[0], o[1], o[2], d[0], d[1], d[2], r)]) if (c && c.mob !== G.riding && (!best || c.t < best.t)) best = c;
+  return best;
 }
 
 // ---------- the HUD ----------
@@ -1669,6 +1742,17 @@ function cartThings(a, light) {
     return {verts: v, x, y, z, model: mat.model(1, c.yaw, c.pitch, shake)};
   });
 }
+/** Boats: the game's model in each wood's skin, its paddles rowing round, rocking a little when hit. */
+function boatModels(view, a, light) {
+  return G.boats.list.map(c => {
+    const b = c.body, x = b.prev.x + (b.x - b.prev.x) * a, y = b.prev.y + (b.y - b.prev.y) * a, z = b.prev.z + (b.z - b.prev.z) * a, yaw = c.prevYaw + (c.yaw - c.prevYaw) * a;
+    const kind = c.raft ? (c.chest ? 'chest_raft' : 'raft') : c.chest ? 'chest_boat' : 'boat', skin = `${c.chest ? 'chest_boat' : 'boat'}_${c.wood}`;
+    const rot = animate(kind, {}, {paddles: c.paddles.map((p, i) => p + (c.rowing[i] ? Math.PI / 8 * a : 0))}), f = c.hurt - a;
+    const roll = f > 0 ? Math.sin(f) * f * Math.max(0, c.damage - a) / 10 * c.hurtDir * Math.PI / 180 : 0;
+    const [sky, blk] = light(Math.floor(x), Math.floor(y + 0.4), Math.floor(z));
+    return {skin, verts: new Float32Array(buildModel(kind, rot, {x: x - view.x, y: y + 0.375 - 1.5 - view.y, z: z - view.z, yaw, roll}, [], skinSizes[skin])), light: [sky, blk], tint: [1, 1, 1], hurt: 0, white: 0};
+  });
+}
 /** Things thrown, in flight (potions, bottles, snowballs, eggs): turning over as they go. */
 function potionThings(light) {
   return G.thrown.map(p => {
@@ -1681,7 +1765,7 @@ function potionThings(light) {
 function playerModel(view, a, light) {
   const b = G.body, x = b.prev.x + (b.x - b.prev.x) * a - view.x, y = b.prev.y + (b.y - b.prev.y) * a - view.y, z = b.prev.z + (b.z - b.prev.z) * a - view.z;
   const turn = ((b.yaw - G.bodyYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-  const rot = animate('player', {}, {limb: G.walked * 4, amount: G.limbAmt || 0, headYaw: -turn, headPitch: -b.pitch, age: G.time, attack: G.swing > 0 ? 1 - G.swing / 6 : 0});
+  const rot = animate('player', {}, {limb: G.walked * 4, amount: G.riding ? 0 : G.limbAmt || 0, headYaw: -turn, headPitch: -b.pitch, age: G.time, attack: G.swing > 0 ? 1 - G.swing / 6 : 0, riding: !!G.riding});
   const pose = {x, y, z, yaw: G.bodyYaw, s: 0.9375}, [sky, blk] = light(Math.floor(b.x), Math.floor(b.y + 1), Math.floor(b.z)), hurtFlash = G.hurtT > 0 ? 1 : 0;
   const out = [{skin: 'player', verts: new Float32Array(buildModel('player', rot, pose, [], skinSizes.player)), light: [sky, blk], tint: [1, 1, 1], hurt: hurtFlash, white: 0}];
   for (let i = 0; i < 4; i++) {
@@ -1929,6 +2013,7 @@ function frame(now) {
   const lightAt = (bx, by, bz) => G.mirror.light(bx, by, bz);
   const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view), ...cartThings(a, lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
   if (G.view && !G.dead) extras.mobs.push(...playerModel(view, a, lightAt));
+  extras.mobs.push(...boatModels(view, a, lightAt));
   extras.weather = weatherVerts(view);
   extras.blobs = blobVerts(view, a);
   const bolt = boltVerts(view);
@@ -1946,7 +2031,7 @@ function frame(now) {
     // facingBack() is where a placed block's front looks: the player looks the other way
     const bx = Math.floor(b.x), by = Math.floor(b.y), bz = Math.floor(b.z), [sk, bl] = G.mirror.light(bx, by, bz), dir = ['北', '东', '南', '西'][facingBack()];
     const day = Math.floor(G.time / 24000) + 1, hour = Math.floor(((G.time % 24000) / 1000 + 6) % 24);
-    $('.debug').textContent = `方块世界  ${Math.round(1 / Math.max(dt, 0.001))} fps\nXYZ: ${b.x.toFixed(2)} / ${b.y.toFixed(2)} / ${b.z.toFixed(2)}\n方块: ${bx} ${by} ${bz}  区块: ${G.cx} ${G.cz}\n朝向: ${dir}  (${(b.yaw * 180 / Math.PI % 360).toFixed(1)} / ${(b.pitch * 180 / Math.PI).toFixed(1)})\n生物群系: ${BIOMES[G.mirror.biome(bx, bz)]?.zh}\n光照: 天空 ${sk}  方块 ${bl}\n第 ${day} 天 ${hour}:00\n区段: ${renderer.stats.drawn}/${renderer.stats.sections}  三角形: ${renderer.stats.tris}  难度: ${DIFFICULTIES[difficulty()]}\n${renderer.stats.gpu ? `显卡（毫秒）: ${Object.entries(renderer.stats.gpu).map(([k, v]) => `${{shadow: '影子', land: '地形', far: '远景', mobs: '生物', sky: '天空', water: '水', post: '后期'}[k] || k} ${v}`).join('  ')}\n` : ''}生物: ${G.mobs.count(m => m.def.passive)} 动物 / ${G.mobs.count(m => m.def.hostile)} 怪物\n天气: ${G.weather.thunder > 0.5 ? '雷雨' : G.weather.rain > 0.5 ? (fallsAt(bx, bz) === 'snow' ? '下雪' : '下雨') : '晴'}（${Math.round(G.weather.rain * 100)}%，${Math.round(G.weather.rainT / 20)} 秒后${G.weather.raining ? '停' : '下'}）  护甲: ${G.inv.armor().points}  等级: ${G.xp.level}\n种子: ${G.meta.seedText || G.meta.seed}${G.targetMob ? `\n看着: ${G.targetMob.def.zh}（${Math.ceil(G.targetMob.health)}/${G.targetMob.def.health}）` : ''}${G.target ? `\n看着: ${BLOCKS[G.target.v & 0xFFF].zh} (${G.target.x}, ${G.target.y}, ${G.target.z})` : ''}`;
+    $('.debug').textContent = `方块世界  ${Math.round(1 / Math.max(dt, 0.001))} fps\nXYZ: ${b.x.toFixed(2)} / ${b.y.toFixed(2)} / ${b.z.toFixed(2)}\n方块: ${bx} ${by} ${bz}  区块: ${G.cx} ${G.cz}\n朝向: ${dir}  (${(b.yaw * 180 / Math.PI % 360).toFixed(1)} / ${(b.pitch * 180 / Math.PI).toFixed(1)})\n生物群系: ${BIOMES[G.mirror.biome(bx, bz)]?.zh}\n光照: 天空 ${sk}  方块 ${bl}\n第 ${day} 天 ${hour}:00\n区段: ${renderer.stats.drawn}/${renderer.stats.sections}  三角形: ${renderer.stats.tris}  难度: ${DIFFICULTIES[difficulty()]}\n${renderer.stats.gpu ? `显卡（毫秒）: ${Object.entries(renderer.stats.gpu).map(([k, v]) => `${{shadow: '影子', land: '地形', far: '远景', mobs: '生物', sky: '天空', water: '水', post: '后期'}[k] || k} ${v}`).join('  ')}\n` : ''}生物: ${G.mobs.count(m => m.def.passive)} 动物 / ${G.mobs.count(m => m.def.hostile)} 怪物\n天气: ${G.weather.thunder > 0.5 ? '雷雨' : G.weather.rain > 0.5 ? (fallsAt(bx, bz) === 'snow' ? '下雪' : '下雨') : '晴'}（${Math.round(G.weather.rain * 100)}%，${Math.round(G.weather.rainT / 20)} 秒后${G.weather.raining ? '停' : '下'}）  护甲: ${G.inv.armor().points}  等级: ${G.xp.level}\n种子: ${G.meta.seedText || G.meta.seed}${G.targetMob ? `\n看着: ${G.targetMob.def ? `${G.targetMob.def.zh}（${Math.ceil(G.targetMob.health)}/${G.targetMob.def.health}）` : zhOf(G.targetMob.kind)}` : ''}${G.target ? `\n看着: ${BLOCKS[G.target.v & 0xFFF].zh} (${G.target.x}, ${G.target.y}, ${G.target.z})` : ''}`;
   }
 }
 // pads in menus and inventories

@@ -123,6 +123,35 @@ export const ARMOR_MODELS = {
 };
 /** Which model and parts each worn piece draws (0 helmet … 3 boots). */
 export const ARMOR_PARTS = [['armor_outer', ['head']], ['armor_outer', ['body', 'arm0', 'arm1']], ['armor_inner', ['body', 'leg0', 'leg1']], ['armor_outer', ['leg0', 'leg1']]];
+// boats, the game's (skins 128 × 64, with a chest 128 × 128): the hull — a bottom, the back and front and the two sides —
+// and two paddles; the chest boat with a chest at the back; the bamboo raft (two layers) and the raft with a chest. The
+// game's model lies along its x; its renderer turns it a quarter round, as the root part here does. Its y = 0 is 0.375
+// over the boat's bottom.
+const HULL = [
+  part('bottom', [0, 0], [[-14, -9, -3, 28, 16, 3]], [0, 3, 1], [PI / 2, 0, 0]),
+  part('back', [0, 19], [[-13, -7, -1, 18, 6, 2]], [-15, 4, 4], [0, PI * 1.5, 0]),
+  part('front', [0, 27], [[-8, -7, -1, 16, 6, 2]], [15, 4, 0], [0, PI / 2, 0]),
+  part('right', [0, 35], [[-14, -7, -1, 28, 6, 2]], [0, 4, -9], [0, PI, 0]),
+  part('left', [0, 43], [[-14, -7, -1, 28, 6, 2]], [0, 4, 9]),
+];
+const RAFT = [part('bottom', [0, 0], [[-14, -11, -4, 28, 20, 4], [-14, -9, -8, 28, 16, 4]], [0, -2.1, 1], [PI / 2, 0, 0])];
+const PADDLE_TILT = 0.19634955;
+const paddles = (y, left, right) => [
+  part('left_paddle', left, [[-1, 0, -5, 2, 2, 18], [-1.001, -3, 8, 1, 6, 7]], [3, y, 9], [0, 0, PADDLE_TILT]),
+  part('right_paddle', right, [[-1, 0, -5, 2, 2, 18], [0.001, -3, 8, 1, 6, 7]], [3, y, -9], [0, PI, PADDLE_TILT]),
+];
+const chest = dy => [
+  part('chest_bottom', [0, 76], [[0, 0, 0, 12, 8, 12]], [-2, -5 + dy, -6], [0, -PI / 2, 0]),
+  part('chest_lid', [0, 59], [[0, 0, 0, 12, 4, 12]], [-2, -9 + dy, -6], [0, -PI / 2, 0]),
+  part('chest_lock', [0, 59], [[-1, 0, 0, 2, 4, 1]], [-1, -6 + dy, 0], [0, -PI / 2, 0]),
+];
+const turned = parts => [part('root', [0, 0], [], [0, 0, 0], [0, PI / 2, 0], parts)];
+export const BOAT_MODELS = {
+  boat: {skin: [128, 64], parts: turned([...HULL, ...paddles(-5, [62, 0], [62, 20])])},
+  chest_boat: {skin: [128, 128], parts: turned([...HULL, ...paddles(-5, [62, 0], [62, 20]), ...chest(0)])},
+  raft: {skin: [128, 64], parts: turned([...RAFT, ...paddles(-4, [0, 24], [40, 24])])},
+  chest_raft: {skin: [128, 128], parts: turned([...RAFT, ...paddles(-4, [0, 24], [40, 24]), ...chest(-5.1)])},
+};
 
 // ---------- moving ----------
 /** Sets the parts' turning for a pose: {limb, amount, headYaw, headPitch, age, attack, aim, flap, fall}. */
@@ -146,11 +175,20 @@ export function animate(kind, rot, pose) {
     set('arm1', kind === 'zombie' ? arms : aim ? -PI / 2 + head[0] : swing() * 0.5, aim ? 0.5 + head[1] : 0, -Math.cos(pose.age * 0.09) * 0.05 - 0.05);
     set('leg0', swing() * 0.8); set('leg1', swing(PI) * 0.8);
   } else if (kind === 'player') {
-    // arms swing against the legs; a hit swings the right arm down and across
-    const walk = k => Math.cos(pose.limb * 0.6662 + k) * pose.amount, hit = Math.sin((pose.attack || 0) * PI);
-    set('arm0', walk(PI) - hit * 1.3, hit * 0.4, 0.05 + Math.cos(pose.age * 0.09) * 0.03);
-    set('arm1', walk(0), 0, -0.05 - Math.cos(pose.age * 0.09) * 0.03);
-    set('leg0', walk(0) * 1.4); set('leg1', walk(PI) * 1.4);
+    // arms swing against the legs; a hit swings the right arm down and across; sitting in a boat or a minecart the legs
+    // are out in front and the arms a little forward (the game's)
+    const walk = k => Math.cos(pose.limb * 0.6662 + k) * pose.amount, hit = Math.sin((pose.attack || 0) * PI), sit = pose.riding ? -PI / 5 : 0;
+    set('arm0', walk(PI) - hit * 1.3 + sit, hit * 0.4, 0.05 + Math.cos(pose.age * 0.09) * 0.03);
+    set('arm1', walk(0) + sit, 0, -0.05 - Math.cos(pose.age * 0.09) * 0.03);
+    if (pose.riding) { set('leg0', -1.4137167, PI / 10, 0.07853982); set('leg1', -1.4137167, -PI / 10, -0.07853982); }
+    else { set('leg0', walk(0) * 1.4); set('leg1', walk(PI) * 1.4); }
+  } else if (BOAT_MODELS[kind]) {
+    // the paddles row round (pose.paddles: how far each has gone round; the game's)
+    const lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
+    [0, 1].forEach(side => {
+      const t = pose.paddles?.[side] || 0, ry = lerp(-PI / 4, PI / 4, (Math.sin(-t + 1) + 1) / 2);
+      set(side ? 'right_paddle' : 'left_paddle', lerp(-PI / 3, -0.2617994, (Math.sin(-t) + 1) / 2), side ? PI - ry : ry, PADDLE_TILT);
+    });
   } else if (kind === 'villager') {
     set('leg0', swing() * 0.5); set('leg1', swing(PI) * 0.5);
     // shaking its head (no trade for you), or nodding as it trades
@@ -208,7 +246,7 @@ const ID3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
  * scaled and placed: at (x, y, z) relative to the camera, facing yaw (0 looks along −z), size s.
  */
 export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}, out, skinSize = null, only = null) {
-  const m = MODELS[kind] || ARMOR_MODELS[kind], [tw, th] = skinSize || m.skin;
+  const m = MODELS[kind] || ARMOR_MODELS[kind] || BOAT_MODELS[kind], [tw, th] = skinSize || m.skin;
   const cy = Math.cos(yaw), sy = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll), k = (1 + swell) * s / 16;
   // the game's model space → world: x and y turned over, the feet at 24, then the body's turn (and a fall-over roll)
   const place = p => {
@@ -430,6 +468,30 @@ export function ownVillager(prof) {
   });
 }
 export const VILLAGER_SKINS = Object.keys(VILLAGER_CLOTHES);
+// our boat skins: each wood's planks, boards along the hull, a darker inside; paddles of the same wood with a dark blade
+const BOAT_WOOD = {oak: '#b8945f', spruce: '#7a5a34', birch: '#c5b77b', jungle: '#a07351', acacia: '#a95a31', dark_oak: '#4c3220', mangrove: '#773634', cherry: '#e2b2aa', bamboo: '#c8ae4e'};
+/** Our skin for a boat of a wood (bamboo: the raft), with a chest or not, in the game's layout. */
+export function ownBoat(wood, withChest) {
+  const c = BOAT_WOOD[wood] || BOAT_WOOD.oak, raft = wood === 'bamboo';
+  return skin(128, withChest ? 128 : 64, 61 + wood.length * 7 + (withChest ? 3 : 0), ({area, box}) => {
+    const pal = [c, shadeHex(c, 0.95), shadeHex(c, 1.05)], seam = [shadeHex(c, 0.7), shadeHex(c, 0.66)], inside = [shadeHex(c, 0.8), shadeHex(c, 0.76)];
+    const boards = (u, v, w, h, step) => { for (let y = v + step - 1; y < v + h; y += step) area(u, y, w, 1, seam); };
+    if (raft) {
+      box(0, 0, 28, 20, 4, pal, 0.14); box(0, 0, 28, 16, 4, pal, 0.14);
+      for (let x = 3; x < 64; x += 4) area(x, 4, 1, 20, seam);
+    } else {
+      box(0, 0, 28, 16, 3, inside, 0.12); boards(0, 3, 62, 16, 4);
+      for (const [u, v, w] of [[0, 19, 18], [0, 27, 16], [0, 35, 28], [0, 43, 28]]) { box(u, v, w, 6, 2, pal, 0.14); boards(u, v + 2, 2 * (w + 2), 6, 3); }
+    }
+    const handle = [shadeHex(c, 0.9), shadeHex(c, 0.85)], blade = [shadeHex(c, 0.62), shadeHex(c, 0.58)];
+    for (const [u, v] of raft ? [[0, 24], [40, 24]] : [[62, 0], [62, 20]]) { box(u, v, 2, 2, 18, handle, 0.1); box(u, v, 1, 6, 7, blade, 0.1); }
+    if (withChest) {
+      const wood2 = ['#a87a3a', '#9e7234', '#b08240'], rim = ['#6e4a1e'];
+      box(0, 76, 12, 8, 12, wood2, 0.12); area(0, 88, 48, 1, rim); box(0, 59, 12, 4, 12, wood2, 0.12); area(0, 74, 48, 1, rim);
+      box(0, 59, 2, 4, 1, ['#d8d8d8', '#c4c4c4']);
+    }
+  });
+}
 export const MOB_KINDS =Object.keys(MODELS).filter(k => k !== 'sheep_wool' && k !== 'player');
 // our armour pictures, one per material and layer (1: helmet, chestplate, boots; 2: leggings), only where it is worn
 const ARMOR_PAL = {leather: ['#8f5530', '#9c5e36', '#a8683c', '#7e4a29'], chainmail: ['#8a8a8a', '#a2a2a2', '#6e6e6e', '#b8b8b8'], iron: ['#c6c6c6', '#d4d4d4', '#b8b8b8', '#e2e2e2'],

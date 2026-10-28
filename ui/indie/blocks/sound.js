@@ -122,6 +122,9 @@ export function play(name, v = 0, k = 1) {
     case 'door_close': burst(380, 2, 0.35 * k, 0.12, {pitch: r}); break;
     case 'iron_door': tone(330, 0.12 * k, 0.35, {type: 'triangle', slide: 0.97}); burst(2400, 4, 0.15 * k, 0.1); break;
     case 'empty': tone(1600, 0.08 * k, 0.05, {type: 'square'}); tone(1200, 0.06 * k, 0.05, {type: 'square', at: 0.06}); break;
+    // a paddle dipping into the water (on land it scrapes)
+    case 'paddle': burst(1100, 0.9, 0.16 * k, 0.3, {pitch: r}); burst(450, 1.2, 0.08 * k, 0.25, {at: 0.04}); break;
+    case 'paddle_land': burst(600, 1.5, 0.12 * k, 0.15, {pitch: r}); break;
   }
 }
 // note blocks: the instrument (by the block under it) and its pitch, 0–24 from F♯ two octaves up (the game's)

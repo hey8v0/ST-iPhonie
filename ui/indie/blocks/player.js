@@ -31,6 +31,8 @@ export class Body {
       if (!bs) continue;
       for (const b of bs) out.push([x + b[0], y + b[1], z + b[2], x + b[3], y + b[4], z + b[5]]);
     }
+    // and what is solid without being a block (boats), not this body itself
+    if (this.world.solids) for (const b of this.world.solids(this, x0, y0, z0, x1, y1, z1)) out.push(b);
     return out;
   }
   aabb(x = this.x, y = this.y, z = this.z) { const h = this.w / 2; return [x - h, y, z - h, x + h, y + this.height, z + h]; }

@@ -328,6 +328,49 @@ for (const [n, zh, kind] of [['rail', '铁轨', 'rail'], ['powered_rail', '动�
 // the redstone ones from before: the block of redstone gives power, TNT and the bell answer it
 for (const b of B) { if (b.name === 'redstone_block') Object.assign(b, {rs: 'block', cat: 'redstone'}); if (b.name === 'tnt') b.rs = 'tnt'; if (b.name === 'bell') b.rs = 'bell'; }
 
+// ---------- three more woods (0.8.73) ----------
+// Cherry (its leaves pink in their own picture, not tinted) and mangrove (leaves the game's fixed green; its sapling the
+// propagule — planted it grows into the tree, under the leaves it hangs, state 8 —; the roots the tree stands on, and
+// those that grew into mud), each with all its shaped wood. Bamboo: a stalk (state & 3 its leaves — 0 none, 1 small,
+// 2 large —, 4 thick, 8 done growing) that comes up from a shoot, and its woods: the block of nine stalks (stripped
+// too), the planks and their mosaic. Pink petals: one to four flowers on the ground (state & 3: how many less one;
+// state >> 2: the way they were put down).
+export const NEW_WOODS = [['cherry', '樱花木'], ['mangrove', '红树木']];
+for (const [w, zh] of NEW_WOODS) {
+  const short = zh.replace(/木$/, '');
+  block(`${w}_log`, `${short}原木`, {tex: tbs(`${w}_log_top`, `${w}_log_top`, `${w}_log`), hard: 2, tool: T.AXE, axis: true});
+  block(`${w}_wood`, zh, {tex: all(`${w}_log`), hard: 2, tool: T.AXE, axis: true, cat: 'build'});
+  block(`stripped_${w}_log`, `去皮${short}原木`, {tex: tbs(`stripped_${w}_log_top`, `stripped_${w}_log_top`, `stripped_${w}_log`), hard: 2, tool: T.AXE, axis: true, cat: 'build'});
+  block(`stripped_${w}_wood`, `去皮${zh}`, {tex: all(`stripped_${w}_log`), hard: 2, tool: T.AXE, axis: true, cat: 'build'});
+  block(`${w}_planks`, `${short}木板`, {tex: all(`${w}_planks`), hard: 2, tool: T.AXE});
+  block(`${w}_leaves`, `${short}树叶`, {tex: all(`${w}_leaves`), pass: 'cutout', hard: 0.2, tool: T.HOE, tint: w === 'cherry' ? null : '#92c648',
+    drop: r => { const x = r(); return x < 0.05 ? (w === 'cherry' ? 'cherry_sapling' : null) : x < 0.07 ? 'stick' : null; }});
+}
+plant('cherry_sapling', '樱花树苗');
+plant('mangrove_propagule', '红树胎生苗', {tex: {all: 'mangrove_propagule', hanging: 'mangrove_propagule_hanging'}, sapling: 'mangrove', itemIcon: 'mangrove_propagule_item'});
+block('mangrove_roots', '红树根', {tex: tbs('mangrove_roots_top', 'mangrove_roots_top', 'mangrove_roots_side'), pass: 'cutout', hard: 0.7, tool: T.AXE, opaque: false, filter: 1});
+block('muddy_mangrove_roots', '沾泥的红树根', {tex: tbs('muddy_mangrove_roots_top', 'muddy_mangrove_roots_top', 'muddy_mangrove_roots_side'), hard: 0.7, tool: T.SHOVEL, axis: true});
+block('bamboo', '竹子', {tex: {all: 'bamboo_stalk', small: 'bamboo_small_leaves', large: 'bamboo_large_leaves'}, shape: 'bamboo', pass: 'cutout', hard: 1, tool: T.AXE, opaque: false, filter: 0, itemIcon: 'bamboo'});
+block('bamboo_sapling', '竹笋', {tex: all('bamboo_stage0'), shape: 'cross', pass: 'cutout', hard: 1, tool: T.AXE, solid: false, item: false, drop: 'bamboo'});
+block('bamboo_block', '竹块', {tex: tbs('bamboo_block_top', 'bamboo_block_top', 'bamboo_block'), hard: 2, tool: T.AXE, axis: true, cat: 'build'});
+block('stripped_bamboo_block', '去皮竹块', {tex: tbs('stripped_bamboo_block_top', 'stripped_bamboo_block_top', 'stripped_bamboo_block'), hard: 2, tool: T.AXE, axis: true, cat: 'build'});
+block('bamboo_planks', '竹板', {tex: all('bamboo_planks'), hard: 2, tool: T.AXE});
+block('bamboo_mosaic', '竹马赛克', {tex: all('bamboo_mosaic'), hard: 2, tool: T.AXE, cat: 'build'});
+for (const [w, zh, mat] of [['cherry', '樱花木', 'cherry_planks'], ['mangrove', '红树木', 'mangrove_planks'], ['bamboo', '竹', 'bamboo_planks'], ['bamboo_mosaic', '竹马赛克', 'bamboo_mosaic']]) {
+  block(`${w}_slab`, `${zh}台阶`, {tex: all(mat), shape: 'slab', hard: 2, tool: T.AXE, opaque: false, filter: 0});
+  block(`${w}_stairs`, `${zh}楼梯`, {tex: all(mat), shape: 'stairs', hard: 2, tool: T.AXE, ...shaped});
+  if (w === 'bamboo_mosaic') continue;
+  block(`${w}_fence`, `${zh}栅栏`, {tex: all(mat), shape: 'fence', hard: 2, tool: T.AXE, ...shaped});
+  block(`${w}_fence_gate`, `${zh}栅栏门`, {tex: all(mat), shape: 'gate', hard: 2, tool: T.AXE, use: 'toggle', ...shaped});
+  block(`${w}_door`, `${zh}门`, {tex: {top: `${w}_door_top`, bottom: `${w}_door_bottom`}, shape: 'door', pass: 'cutout', hard: 3, tool: T.AXE, use: 'toggle', ...shaped});
+  block(`${w}_trapdoor`, `${zh}活板门`, {tex: all(`${w}_trapdoor`), shape: 'trapdoor', pass: 'cutout', hard: 3, tool: T.AXE, use: 'toggle', ...shaped});
+  block(`${w}_button`, `${zh}按钮`, {tex: all(mat), shape: 'button', hard: 0.5, tool: T.AXE, ...RS, rs: 'button', use: 'button', press: 30, wood: true});
+  block(`${w}_pressure_plate`, `${zh}压力板`, {tex: all(mat), shape: 'plate', hard: 0.5, tool: T.AXE, ...RS, rs: 'plate'});
+}
+block('pink_petals', '粉红色花簇', {tex: all('pink_petals'), shape: 'petals', pass: 'cutout', hard: 0, solid: false, opaque: false, filter: 0, itemIcon: 'pink_petals_item', drop: (r, meta) => ['pink_petals', (meta & 3) + 1]});
+// what grows into a tree, and which (the bamboo shoot is no tree's)
+for (const b of B) if (b.name.endsWith('_sapling') && b.name !== 'bamboo_sapling') b.sapling = b.name.replace('_sapling', '');
+
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
 // experience from ores mined with the right tool (the game's ranges)
@@ -422,16 +465,27 @@ item('slime_ball', '黏液球');
 for (const [n, zh] of [['minecart', '矿车'], ['chest_minecart', '运输矿车'], ['furnace_minecart', '动力矿车'], ['tnt_minecart', 'TNT 矿车'], ['hopper_minecart', '漏斗矿车']])
   item(n, zh, {stack: 1, cart: n, cat: 'redstone'});
 I.redstone.place = 'redstone_wire';
+// boats: one of each wood (bamboo's is a raft), and one with a chest; they burn a minute
+export const BOAT_WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo'];
+const WOOD_ZH = {oak: '橡木', spruce: '云杉木', birch: '白桦木', jungle: '丛林木', acacia: '金合欢木', dark_oak: '深色橡木', mangrove: '红树木', cherry: '樱花木'};
+export const boatItem = (wood, chest) => wood === 'bamboo' ? (chest ? 'bamboo_chest_raft' : 'bamboo_raft') : `${wood}_${chest ? 'chest_boat' : 'boat'}`;
+for (const w of BOAT_WOODS) for (const chest of [false, true])
+  item(boatItem(w, chest), w === 'bamboo' ? (chest ? '运输竹筏' : '竹筏') : `${WOOD_ZH[w]}${chest ? '运输船' : '船'}`, {stack: 1, boat: w, chest, fuel: 60});
 
 export const ITEMS = I;
 
+// what of wood burns (seconds): shaped wood and the wood blocks 15, doors 10, slabs 7.5
+const WOODS_RE = 'oak|spruce|birch|jungle|acacia|dark_oak|cherry|mangrove|bamboo';
+const WOOD_FUEL = new RegExp(`^(${WOODS_RE})_(fence|fence_gate|trapdoor|stairs)$|^(stripped_)?(${WOODS_RE})_wood$|^stripped_.*_log$|^(stripped_)?bamboo_block$|^bamboo_mosaic(_stairs)?$`);
+const WOOD_DOOR = new RegExp(`^(${WOODS_RE})_door$`), WOOD_SLAB = new RegExp(`^(${WOODS_RE}|bamboo_mosaic)_slab$`);
 /** Anything that can be held: a block (that can be an item) or an item. */
 export function itemInfo(name) {
   const b = BY_NAME[name];
   if (b && b.item) {
-    const wood = /^(oak|spruce|birch|jungle|acacia|dark_oak)_(fence|fence_gate|trapdoor|stairs)$|^(stripped_)?(oak|spruce|birch|jungle|acacia|dark_oak)_wood$|^stripped_.*_log$/.test(name), door = /^(oak|spruce|birch|jungle|acacia|dark_oak)_door$/.test(name);
+    const wood = WOOD_FUEL.test(name), door = WOOD_DOOR.test(name);
     return {name, zh: b.zh, block: b, icon: null, cat: b.cat, stack: door || b.shape === 'bed' ? (b.shape === 'bed' ? 1 : 64) : 64,
-      fuel: /_(planks|log)$/.test(name) || wood ? 15 : door ? 10 : /^(oak|spruce|birch|jungle|acacia|dark_oak)_slab$/.test(name) ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'bookshelf' || name === 'ladder' ? 15 : /_sapling$/.test(name) ? 5 : name === 'coal_block' ? 800 : 0};
+      fuel: /_(planks|log)$/.test(name) || wood ? 15 : door ? 10 : WOOD_SLAB.test(name) ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'bookshelf' || name === 'ladder' ? 15
+        : /_sapling$|_propagule$/.test(name) ? 5 : name === 'bamboo' ? 2.5 : name === 'coal_block' ? 800 : 0};
   }
   return I[name] || null;
 }
@@ -448,6 +502,8 @@ export function breakTime(block, tool, {efficiency = 0, mult = 1} = {}) {
   if (block.hard === 0) return 0;
   let speed = tool && block.tool === tool.kind ? tool.speed : 1;
   if (tool?.kind === 'sword' && block.name.endsWith('_leaves')) speed = 1.5;
+  // a sword cuts bamboo at once
+  if (tool?.kind === 'sword' && (block.name === 'bamboo' || block.name === 'bamboo_sapling')) return 0;
   if (tool?.kind === 'shears') speed = block.name.endsWith('_leaves') ? 15 : block.name.endsWith('_wool') ? 5 : 1;
   if (efficiency && speed > 1) speed += efficiency * efficiency + 1;
   speed *= mult;

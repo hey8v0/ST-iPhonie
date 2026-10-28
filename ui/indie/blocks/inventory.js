@@ -1,7 +1,7 @@
 // What the player carries and makes: stacks, the inventory (36 slots, the first 9 the hotbar), crafting (2×2 in the
 // inventory, 3×3 at a crafting table; shaped recipes may be mirrored), the furnace (smelting and fuel) and chests.
 // Recipes are the game's.
-import {itemInfo, BLOCKS, ITEMS, COLORS, ID} from './blocks.js';
+import {itemInfo, BLOCKS, ITEMS, COLORS, ID, BOAT_WOODS, boatItem} from './blocks.js';
 
 export const stackMax = id => itemInfo(id)?.stack || 64;
 export const same = (a, b) => a && b && a.id === b.id && !a.dmg && !b.dmg && !a.ench && !b.ench && a.pot === b.pot;
@@ -49,7 +49,7 @@ export function clean(s) {
 const TAGS = {
   planks: BLOCKS.filter(b => b.name.endsWith('_planks')).map(b => b.name),
   logs: BLOCKS.filter(b => /_(log|wood)$/.test(b.name)).map(b => b.name),
-  wooden_slabs: ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak'].map(w => `${w}_slab`),
+  wooden_slabs: ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak', 'cherry', 'mangrove', 'bamboo', 'bamboo_mosaic'].map(w => `${w}_slab`),
   stone_tool: ['cobblestone', 'cobbled_deepslate'],
   coals: ['coal', 'charcoal'],
   wool: COLORS.map(c => `${c[0]}_wool`),
@@ -251,6 +251,31 @@ shaped(['I I', 'IPI', 'IRI'], {I: 'iron_ingot', P: 'stone_pressure_plate', R: 'r
 shaped(['ISI', 'ITI', 'ISI'], {I: 'iron_ingot', S: 'stick', T: 'redstone_torch'}, 'activator_rail', 6);
 shaped(['I I', 'III'], {I: 'iron_ingot'}, 'minecart');
 for (const [load, cart] of [['chest', 'chest_minecart'], ['furnace', 'furnace_minecart'], ['tnt', 'tnt_minecart'], ['hopper', 'hopper_minecart']]) shapeless([load, 'minecart'], cart);
+// ---------- cherry, mangrove, bamboo; boats ----------
+for (const w of ['cherry', 'mangrove']) {
+  shapeless([`${w}_log`], `${w}_planks`, 4);
+  shaped(['##', '##'], {'#': `${w}_log`}, `${w}_wood`, 3);
+  shaped(['##', '##'], {'#': `stripped_${w}_log`}, `stripped_${w}_wood`, 3);
+  for (const from of [`${w}_wood`, `stripped_${w}_log`, `stripped_${w}_wood`]) shapeless([from], `${w}_planks`, 4);
+}
+shaped(['###', '###', '###'], {'#': 'bamboo'}, 'bamboo_block');
+for (const from of ['bamboo_block', 'stripped_bamboo_block']) shapeless([from], 'bamboo_planks', 2);
+shaped(['#', '#'], {'#': 'bamboo'}, 'stick');
+shaped(['#', '#'], {'#': 'bamboo_slab'}, 'bamboo_mosaic');
+for (const [w, p] of [['cherry', 'cherry_planks'], ['mangrove', 'mangrove_planks'], ['bamboo', 'bamboo_planks'], ['bamboo_mosaic', 'bamboo_mosaic']]) {
+  shaped(['###'], {'#': p}, `${w}_slab`, 6);
+  shaped(['#  ', '## ', '###'], {'#': p}, `${w}_stairs`, 4);
+  if (w === 'bamboo_mosaic') continue;
+  shaped(['#S#', '#S#'], {'#': p, S: 'stick'}, `${w}_fence`, 3);
+  shaped(['S#S', 'S#S'], {'#': p, S: 'stick'}, `${w}_fence_gate`);
+  shaped(['##', '##', '##'], {'#': p}, `${w}_door`, 3);
+  shaped(['###', '###'], {'#': p}, `${w}_trapdoor`, 2);
+  shapeless([p], `${w}_button`);
+  shaped(['##'], {'#': p}, `${w}_pressure_plate`);
+}
+shapeless(['mud', 'mangrove_roots'], 'muddy_mangrove_roots');
+shapeless(['pink_petals'], 'pink_dye');
+for (const w of BOAT_WOODS) { shaped(['# #', '###'], {'#': `${w}_planks`}, boatItem(w, false)); shapeless([boatItem(w, false), 'chest'], boatItem(w, true)); }
 export const RECIPES = R;
 
 /** What a crafting grid (w × h stacks, row by row) makes: {out, recipe} or null. */

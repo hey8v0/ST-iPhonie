@@ -6,7 +6,7 @@
 // A vertex is 16 bytes: x, y, z (uint16, 1/16 block, from one block before the section's corner), texture layer (uint16), u, v (uint8, 0–16),
 // sky light, block light (uint8, level × 17), shade (uint8: bits 0–1 corner shade, 2–4 face, 5–7 wave kind), tint r, g, b.
 import {BLOCKS, ID, idOf, metaOf} from './blocks.js';
-import {pieces, wireLinks, WIRE_SIDES, LEVER_BASE, railSlope} from './shapes.js';
+import {pieces, wireLinks, WIRE_SIDES, LEVER_BASE, railSlope, plantOffset} from './shapes.js';
 
 // shapes drawn from their pieces (shapes.js)
 const PIECED = new Set(['stairs', 'fence', 'gate', 'pane', 'door', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'brewing', 'portal', 'composter', 'lectern', 'bell', 'stonewall', 'carpet', 'button', 'plate', 'detector', 'hopper']);
@@ -342,12 +342,29 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
         box(out, x, y, z, x0, y0, z0, x1, y1, z1, texFor, t, {faces, cull: [x1 === 16, x0 === 0, y1 === 16, y0 === 0, z1 === 16, z0 === 0]});
       }
     } else if (shape === 'cross') {
-      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.tex.all);
+      // (a mangrove propagule hanging under the leaves has its own picture)
+      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(meta & 8 && b.tex.hanging ? b.tex.hanging : b.tex.all);
       const h = hash2(ox + x, oz + z), jx = (id === ID.sugar_cane ? 0 : (h & 15) / 15 - 0.5) * 0.4, jz = (id === ID.sugar_cane ? 0 : (h >> 4 & 15) / 15 - 0.5) * 0.4;
       // 2: a plant that waves, 3: one that stands still (the shaded look finds plants by these)
       const cx = x + 0.5 + jx, cz = z + 0.5 + jz, r = 0.45, flags = wave && id !== ID.sugar_cane ? 2 : 3;
       quad(out, [[cx - r, y, cz - r], [cx + r, y, cz + r], [cx + r, y + 1, cz + r], [cx - r, y + 1, cz - r]], layer, UVQ, lt, lb, tintC, flags);
       quad(out, [[cx - r, y, cz + r], [cx + r, y, cz - r], [cx + r, y + 1, cz - r], [cx - r, y + 1, cz + r]], layer, UVQ, lt, lb, tintC, flags);
+    } else if (shape === 'bamboo') {
+      // a stalk, thin or thick, moved off the middle the same all the way up its column (the game's), and its leaves:
+      // two sheets crossed through it
+      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, [dx, dz] = plantOffset(ox + x, oz + z), layer = tex(b.tex.all), thick = meta & 4;
+      const a0 = thick ? 6.5 : 7, a1 = thick ? 9.5 : 9, side = thick ? [3, 0, 6, 16] : [0, 0, 2, 16], end = thick ? [13, 0, 16, 3] : [13, 0, 15, 2];
+      box(out, x, y, z, a0 + dx, 0, a0 + dz, a1 + dx, 16, a1 + dz, () => layer, WHITE, {uvs: [side, side, end, end, side, side]});
+      if (meta & 3) {
+        const lay = tex((meta & 3) === 2 ? b.tex.large : b.tex.small), cx = x + 0.5 + dx / 16, cz = z + 0.5 + dz / 16;
+        quad(out, [[cx - 0.5, y, cz], [cx + 0.5, y, cz], [cx + 0.5, y + 1, cz], [cx - 0.5, y + 1, cz]], lay, UVQ, lt, lb, WHITE, 3);
+        quad(out, [[cx, y, cz + 0.5], [cx, y, cz - 0.5], [cx, y + 1, cz - 0.5], [cx, y + 1, cz + 0.5]], lay, UVQ, lt, lb, WHITE, 3);
+      }
+    } else if (shape === 'petals') {
+      // pink petals: a quarter of the picture for each flower, lying just over the ground, filled round the way they
+      // were put down
+      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.tex.all), n = (meta & 3) + 1, turn = meta >> 2 & 3;
+      for (let q = 0; q < n; q++) { const [qx, qz] = [[0, 0], [0, 0.5], [0.5, 0.5], [0.5, 0]][(q + turn) & 3]; flatRect(out, x, y + 3 / 16, z, qx, qz, qx + 0.5, qz + 0.5, layer, lt, lb, WHITE); }
     } else if (shape === 'crop') {
       const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, layer = tex(b.stages ? b.stages[Math.min(7, meta)] : `wheat_stage${Math.min(7, meta)}`), top = y + 1 - 1 / 16;
       for (const k of [4 / 16, 12 / 16]) {

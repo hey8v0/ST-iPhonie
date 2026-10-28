@@ -116,7 +116,7 @@ export const iconKey = s => s.pot ? `${s.id}:${s.pot}` : s.id;
 // panes, bars, the brewing stand and the bell are flat pictures, as in the game
 const ICON_STATE = {stairs: 2, fence: 0, gate: 0, trapdoor: 0, bed: 2 | 4, chest: 0, enchanting: 0, anvil: 1, composter: 0, lectern: 0, stonewall: 0, carpet: 0, button: 0, plate: 0, detector: 0};
 // blocks with their own flat item picture (doors)
-const LAYER_ITEM = new Set(['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak'].map(w => `${w}_door`));
+const LAYER_ITEM = new Set(['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'cherry', 'mangrove', 'bamboo'].map(w => `${w}_door`));
 /**
  * A shaped block drawn as its pieces in the same isometric view as the cubes: for each piece the top, the front (south)
  * and the right (east) face, back pieces first. face(name, tint, shade) gives a texture picture.

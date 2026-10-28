@@ -1301,6 +1301,145 @@ ITEM_ART.furnace_minecart = () => cartIcon(cartLoad('#7a7a7a', '#9a9a9a', '#4a4a
 ITEM_ART.tnt_minecart = () => cartIcon(cartLoad('#d8301e', '#ff6a4a', '#8a1a10', '#3a0a06'));
 ITEM_ART.hopper_minecart = () => cartIcon({mask: mask().poly([[3, 1.5], [13, 1.5], [11, 7], [5, 7]]), color: '#4c4c4c', light: '#6e6e6e', dark: '#2e2e2e', outline: '#141414'});
 
+// ---------- cherry, mangrove, bamboo ----------
+const shadeOf = (h, k) => toHex(mul(hex(h), k));
+/** A grey picture's light and dark turned into a colour's (leaves that are not tinted: the cherry's pink). */
+const colorize = (p, dark, light) => { const a = hex(dark), b = hex(light); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const [g, , , al] = p.get(x, y); if (al) p.set(x, y, mix(a, b, clamp((g - 50) / 170, 0, 1)), al); } return p; };
+// bark, its dark streaks, planks, the rings of the cut end, stripped wood
+const MORE_WOOD = {cherry: ['#3e2830', '#2a1a22', '#e2b2aa', ['#e0a7a0', '#cb918b', '#ad7671'], '#d29891'], mangrove: ['#5a4632', '#3d3022', '#773634', ['#7d3b36', '#69302c', '#532420'], '#7a3832']};
+for (const [w, [bark, dark, plank, rings, stripped]] of Object.entries(MORE_WOOD)) {
+  const s = nameSeed(w);
+  BLOCK_ART[`${w}_log`] = () => {
+    const p = log(s, bark, dark, null);
+    // the cherry's bark has light rings across it
+    if (w === 'cherry') { const r = rng(s + 9); for (let k = 0; k < 7; k++) { const x = Math.floor(r() * 13), y = Math.floor(r() * S), l = 2 + Math.floor(r() * 3); for (let i = 0; i < l; i++) p.set(x + i, y, hex('#6a4652')); } }
+    return p;
+  };
+  BLOCK_ART[`${w}_log_top`] = () => logTop(s, bark, rings);
+  BLOCK_ART[`${w}_planks`] = () => planks(s + 1, plank);
+  BLOCK_ART[`stripped_${w}_log`] = () => { const p = pic(), n = tileNoise(s + 2, 4); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, mul(hex(stripped), (x % 3 === 0 ? 0.88 : 1) * (0.9 + n(x, y) * 0.14) * (0.96 + hash(s + 2, x, y >> 2) * 0.06))); return p; };
+  BLOCK_ART[`stripped_${w}_log_top`] = () => logTop(s + 3, stripped, rings);
+  BLOCK_ART[`${w}_door_top`] = () => door(plank, true, w === 'cherry' ? 'glass' : 'holes'); BLOCK_ART[`${w}_door_bottom`] = () => door(plank, false, w === 'cherry' ? 'glass' : 'holes');
+  BLOCK_ART[`${w}_trapdoor`] = () => trapdoor(plank, true);
+  ITEM_ART[`${w}_door`] = () => doorIcon(plank, w === 'cherry');
+}
+// cherry leaves: pink, a few white blossoms; mangrove leaves grey (tinted green), thick
+BLOCK_ART.cherry_leaves = () => { const p = colorize(leaves(nameSeed('cherry') + 4, {holes: 0.12, lo: 70, hi: 205}), '#c96f98', '#fcd6e8'), r = rng(901); for (let k = 0; k < 12; k++) { const x = Math.floor(r() * S), y = Math.floor(r() * S); if (p.alpha(x, y)) p.set(x, y, hex('#fff2f8')); } return p; };
+BLOCK_ART.mangrove_leaves = () => leaves(nameSeed('mangrove') + 4, {holes: 0.07, lo: 60, hi: 180, cells: 8});
+BLOCK_ART.cherry_sapling = () => {
+  const p = pic(), r = rng(902);
+  for (let y = 8; y < 16; y++) p.set(7 + (y > 12 ? 0 : 1), y, hex('#4a2e36'));
+  for (let k = 0; k < 30; k++) { const a = r() * Math.PI * 2, d = Math.sqrt(r()) * 4.4, x = Math.round(7.5 + Math.cos(a) * d), y = Math.round(5.5 + Math.sin(a) * d * 0.85); p.set(x, y, hex(r() < 0.25 ? '#fff0f6' : r() < 0.5 ? '#f3a6c8' : '#e486b0')); }
+  return p;
+};
+// the propagule: planted, a long seedling with two leaves on top; hanging under the leaves, the pod on its stalk
+BLOCK_ART.mangrove_propagule = () => {
+  const p = pic();
+  for (let y = 5; y < 16; y++) p.set(8, y, hex(y > 12 ? '#6a5a2a' : y > 9 ? '#7a8a2e' : '#8aa83a'));
+  for (const [x0, dir] of [[7, -1], [9, 1]]) for (let i = 0; i < 4; i++) { p.set(x0 + dir * i, 4 - (i > 1 ? 1 : 0), hex(i === 3 ? '#4f8a22' : '#6aa82e')); p.set(x0 + dir * i, 5 - (i > 2 ? 1 : 0), hex('#3f7a1a')); }
+  return p;
+};
+BLOCK_ART.mangrove_propagule_hanging = () => {
+  const p = pic();
+  for (let y = 0; y < 4; y++) p.set(8, y, hex('#5a7a2a'));
+  for (const [x, y] of [[6, 1], [7, 2], [9, 2], [10, 1]]) p.set(x, y, hex('#5f9a2a'));
+  for (let y = 4; y < 14; y++) { const w = y < 6 ? 1 : y < 11 ? 2 : 1; for (let x = 8 - (w - 1); x <= 8 + (w > 1 ? 1 : 0); x++) p.set(x, y, hex(y > 11 ? '#7a6a2a' : x === 8 ? '#9ab84a' : '#7a9a32')); }
+  p.set(8, 14, hex('#5a4a1e'));
+  return p;
+};
+ITEM_ART.mangrove_propagule_item = () => icon([{mask: mask().line(4, 13, 11, 4, 2.2), color: '#8aa83a', light: '#b4cf5a', dark: '#5a7a22', outline: '#24340c'},
+  {mask: mask().line(11, 4, 13.5, 1.5, 1.2).line(11, 4, 14, 4.5, 1.2), color: '#4f9a2a', light: '#7cc44a', dark: '#2e6216', outline: '#103008'}, {mask: mask().disc(4, 13, 1.3), color: '#6a5a2a', dark: '#3a2e12', outline: '#1e1808'}]);
+// mangrove roots: brown strands crossing, open between; in mud the gaps are mud
+const rootStrands = (p, seed, cols) => {
+  const r = rng(seed), m = mask();
+  for (let k = 0; k < 6; k++) { const x0 = r() * 16, x1 = x0 + (r() - 0.5) * 14; m.curve([[x0, -1], [(x0 + x1) / 2 + (r() - 0.5) * 6, 8], [x1, 17]], 1.6 + r() * 0.8); }
+  for (let k = 0; k < 3; k++) { const y0 = r() * 16; m.line(-1, y0, 17, y0 + (r() - 0.5) * 10, 1.3); }
+  const n = tileNoise(seed + 1, 4);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (m.m[y * S + x]) p.set(x, y, hex(cols[clamp(Math.floor(n(x, y) * cols.length + (hash(seed, x, y) - 0.5) * 1.2), 0, cols.length - 1)]));
+  return p;
+};
+const ROOT = ['#3e3024', '#4c3b2b', '#5a4734', '#69553e'], WET_MUD = ['#36302f', '#3d3635', '#453d3b'];
+BLOCK_ART.mangrove_roots_side = () => rootStrands(pic(), 911, ROOT);
+BLOCK_ART.mangrove_roots_top = () => rootStrands(pic(), 912, ROOT);
+BLOCK_ART.muddy_mangrove_roots_side = () => rootStrands(mottled(913, WET_MUD, {cells: 4, grain: 0.4}), 914, ROOT);
+BLOCK_ART.muddy_mangrove_roots_top = () => rootStrands(mottled(915, WET_MUD, {cells: 4, grain: 0.4}), 916, ROOT);
+// bamboo: the stalk's picture laid out as the game's (the thin stalk's sides in columns 0–1, the thick one's in 3–5, the
+// cut end at 13–15 at the top, the bottom end below it), its leaves (small, large: crossed through the stalk), the shoot
+const BAMBOO = ['#86b23e', '#6c9a2c', '#557f20'];
+BLOCK_ART.bamboo_stalk = () => {
+  const p = pic();
+  for (let y = 0; y < S; y++) {
+    const node = y === 5 || y === 13, ring = y === 4 || y === 12;
+    for (const [x, k] of [[0, 0], [1, 2], [3, 0], [4, 1], [5, 2]]) p.set(x, y, node ? hex('#3f6416') : ring ? mix(hex(BAMBOO[k]), [230, 240, 180], 0.35) : hex(BAMBOO[k]));
+  }
+  for (const y0 of [0, 4]) for (let y = y0; y < y0 + 3; y++) for (let x = 13; x < 16; x++) p.set(x, y, x === 14 && y === y0 + 1 ? hex('#c8d890') : hex(BAMBOO[1]));
+  return p;
+};
+const bambooLeaves = (list, seed) => {
+  const m = mask();
+  for (const [x0, y0, x1, y1, w] of list) m.line(x0, y0, x1, y1, w);
+  const p = pic(), n = tileNoise(seed, 4);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (m.m[y * S + x]) p.set(x, y, mul(hex('#5e9c2a'), 0.78 + n(x, y) * 0.4));
+  return p;
+};
+BLOCK_ART.bamboo_small_leaves = () => bambooLeaves([[8, 4, 13, 7, 1.6], [8, 6, 3, 9, 1.6], [8, 2, 11, 1, 1.3]], 921);
+BLOCK_ART.bamboo_large_leaves = () => bambooLeaves([[8, 2, 15, 6, 2], [8, 4, 1, 8, 2], [8, 7, 14.5, 12, 2], [8, 9, 2, 14, 2], [8, 1, 3, 0.5, 1.5], [8, 5, 12, 2, 1.5]], 922);
+BLOCK_ART.bamboo_stage0 = () => { const p = pic(); for (let y = 10; y < 16; y++) for (let x = 7; x < 9; x++) p.set(x, y, hex(x === 7 ? BAMBOO[0] : BAMBOO[2])); for (const [x, y] of [[6, 10], [5, 9], [9, 11], [10, 10], [11, 9], [8, 9], [8, 8]]) p.set(x, y, hex('#5e9c2a')); return p; };
+ITEM_ART.bamboo = () => icon([{mask: mask().line(3.5, 13.5, 11.5, 2.5, 2.4), color: '#6c9a2c', light: '#9ccc4c', dark: '#3f6416', outline: '#1e300a'}, {mask: mask().line(9.5, 5, 13.5, 6.5, 1.3).line(6.5, 9.5, 3, 9, 1.3), color: '#5e9c2a', dark: '#2e6216', outline: '#103008'}]);
+// the bamboo blocks: stalks bound side by side (green; stripped yellow), their cut ends on top; planks of split bamboo,
+// and the mosaic of short pieces this way and that
+const stalks = (cols, seed) => { const p = pic(), r = rng(seed); for (let x0 = 0; x0 < S; x0 += 4) { const node = Math.floor(r() * 16); for (let y = 0; y < S; y++) for (let k = 0; k < 4; k++) p.set(x0 + k, y, (y === node || y === (node + 8) % 16) && k > 0 ? mul(hex(cols[1]), 0.72) : hex(cols[k === 0 ? 2 : k === 1 ? 0 : 1])); } return p; };
+const stalkEnds = (cols, inner) => { const p = pic().fill(hex(cols[2])); for (const [cx, cy] of [[4, 4], [12, 4], [4, 12], [12, 12]]) for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy); if (d < 3.6) p.set(x, y, hex(d < 2 ? inner : cols[d < 2.9 ? 0 : 1])); } return p; };
+const BAMBOO_GREEN = ['#7fa83a', '#6a922c', '#4f7420'], BAMBOO_YELLOW = ['#d8c262', '#c4ad4c', '#a08a36'];
+BLOCK_ART.bamboo_block = () => stalks(BAMBOO_GREEN, 931);
+BLOCK_ART.bamboo_block_top = () => stalkEnds(BAMBOO_GREEN, '#c8b874');
+BLOCK_ART.stripped_bamboo_block = () => stalks(BAMBOO_YELLOW, 932);
+BLOCK_ART.stripped_bamboo_block_top = () => stalkEnds(BAMBOO_YELLOW, '#e8dca0');
+const BAMBOO_PLANK = '#c8ae4e';
+BLOCK_ART.bamboo_planks = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, mul(hex(BAMBOO_PLANK), (x % 4 === 3 ? 0.74 : x % 4 === 0 ? 1.08 : 1) * (0.95 + hash(941, x, y >> 1) * 0.08) * ((y + (x >> 2) * 5) % 8 === 0 ? 0.86 : 1))); return p; };
+BLOCK_ART.bamboo_mosaic = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const flat = ((x >> 3) + (y >> 3)) % 2 === 0, a = flat ? y % 4 : x % 4; p.set(x, y, mul(hex(BAMBOO_PLANK), (a === 3 ? 0.72 : a === 0 ? 1.1 : 1) * (0.95 + hash(942, x >> 1, y >> 1) * 0.08) * ((flat ? x : y) % 8 === 0 ? 0.8 : 1))); } return p; };
+BLOCK_ART.bamboo_door_top = () => door(BAMBOO_PLANK, true, 'holes'); BLOCK_ART.bamboo_door_bottom = () => door(BAMBOO_PLANK, false, 'holes');
+BLOCK_ART.bamboo_trapdoor = () => trapdoor(BAMBOO_PLANK, true);
+ITEM_ART.bamboo_door = () => doorIcon(BAMBOO_PLANK, false);
+// pink petals: little four-petalled flowers in each quarter (a quarter is drawn for each flower put down)
+BLOCK_ART.pink_petals = () => {
+  // two flowers a quarter, five petals round a pale middle (each kept inside its quarter), a green leaf or two between
+  const p = pic(), r = rng(951), PINK = ['#f8bad5', '#f09cc2', '#df82ae'];
+  const flower = (cx, cy, turn) => {
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const d = Math.hypot(dx, dy);
+      if (d > 2.3 || (Math.abs(dx) === 2 && Math.abs(dy) === 2)) continue;
+      const petal = Math.floor(((Math.atan2(dy, dx) + Math.PI) / (2 * Math.PI) * 5 + turn) % 5);
+      p.set(cx + dx, cy + dy, hex(d < 0.6 ? '#f7e3a0' : d > 1.9 ? PINK[2] : PINK[petal % 2]));
+    }
+  };
+  for (const [qx, qy] of [[0, 0], [8, 0], [0, 8], [8, 8]]) {
+    flower(qx + 2 + Math.floor(r() * 2), qy + 2 + Math.floor(r() * 2), r() * 5);
+    flower(qx + 5, qy + 5, r() * 5);
+    for (let k = 0; k < 2; k++) { const x = qx + 1 + Math.floor(r() * 6), y = qy + 1 + Math.floor(r() * 6); if (!p.alpha(x, y)) { p.set(x, y, hex('#5f9a35')); if (!p.alpha(x + 1, y)) p.set(x + 1, y, hex('#4a7f28')); } }
+  }
+  return p;
+};
+ITEM_ART.pink_petals_item = () => {
+  const p = icon([{mask: mask().line(8, 15, 8, 8, 1.1).line(8, 11, 4.5, 8, 1).line(8, 10, 11.5, 7, 1), color: '#5a8a2a', dark: '#2e5216', outline: '#102008'}]);
+  for (const [cx, cy] of [[8, 6], [4, 6], [12, 5]]) { for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) p.set(cx + dx, cy + dy, hex('#f09ac0')); p.set(cx, cy, hex('#f2d27a')); }
+  return p;
+};
+// boats: the hull from the side in its wood, the inside darker, an oar behind it (a chest in a chest boat); the raft flat
+const BOAT_PLANK = {oak: '#b8945f', spruce: '#7a5a34', birch: '#c5b77b', jungle: '#a07351', acacia: '#a95a31', dark_oak: '#4c3220', mangrove: '#773634', cherry: '#e2b2aa', bamboo: BAMBOO_PLANK};
+const boatIcon = (w, chest) => {
+  const c = BOAT_PLANK[w], wood = {color: c, light: shadeOf(c, 1.22), dark: shadeOf(c, 0.66), outline: shadeOf(c, 0.3), grain: true}, layers = [];
+  layers.push({mask: mask().line(2.5, 2.5, 13, 12.5, 1.3).disc(12.6, 12.2, 1.4), ...HANDLE});
+  if (w === 'bamboo') layers.push({mask: mask().poly([[1, 9.5], [15, 9.5], [14.5, 12.5], [1.5, 12.5]]), ...wood});
+  else {
+    layers.push({mask: mask().poly([[1, 7.5], [15, 7.5], [12.5, 12.5], [3.5, 12.5]]), ...wood});
+    layers.push({mask: mask().poly([[2.5, 8], [13.5, 8], [13, 9.5], [3, 9.5]]), color: shadeOf(c, 0.55), dark: shadeOf(c, 0.45), light: shadeOf(c, 0.6)});
+  }
+  if (chest) layers.push({mask: mask().poly([[8.5, w === 'bamboo' ? 5 : 3.5], [13.5, w === 'bamboo' ? 5 : 3.5], [13.5, w === 'bamboo' ? 9.5 : 8], [8.5, w === 'bamboo' ? 9.5 : 8]]), color: '#a87a3a', light: '#c89a52', dark: '#6e4a1e', outline: '#2e2010'});
+  return icon(layers);
+};
+for (const w of Object.keys(BOAT_PLANK)) for (const chest of [false, true]) ITEM_ART[w === 'bamboo' ? (chest ? 'bamboo_chest_raft' : 'bamboo_raft') : `${w}_${chest ? 'chest_boat' : 'boat'}`] = () => boatIcon(w, chest);
+
 /** Frames per animated texture and ticks per frame. */
 export const ANIMATED = {water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};
 /** Our drawing of a texture by name: {w, h, frames: [Uint8ClampedArray], time} or null when we have none. */
