@@ -51,7 +51,7 @@ const custom={model:'custom',models:['custom'],source:'',groups:[
  group('voices','音色',[rows('voices','音色',[t('name','名字'),t('voice','音色 / 参考音频'),{...t('ref_text','参考文本'),optional:true},{...t('ref_lang','参考语言'),optional:true},{...t('model1','模型 1（比如 GPT 的 .ckpt）'),optional:true},{...t('model2','模型 2（比如 SoVITS 的 .pth）'),optional:true}],200,'角色的「音色」选这里的名字。「音色 / 参考音频」填进 {{voice}}（音色 ID，或参考音频在后端那台电脑上的路径），参考文本、参考语言填进 {{ref_text}} {{ref_lang}}（参考语言空着就跟台词一样）。')])
 ]};
 const doubao={model:'seed-tts-2.0',models:['seed-tts-2.0','seed-tts-1.0','seed-tts-1.0-concurr','seed-icl-2.0','seed-icl-1.0','seed-icl-1.0-concurr'],source:'https://docs.volcengine.com/docs/DoubaoVoice/HTTPChunkedSSEUnidirectionalStreaming-V3?lang=zh',groups:[
- group('connection','连接',[t('url','接口地址','默认借酒馆转发，需要服务端开启 enableCorsProxy；也可以填自己的豆包兼容中转完整地址。'),t('appId','旧版 App ID（可不填）','新版控制台只需 API Key。旧版填 App ID，并把 Access Token 存在上面的密钥中。')]),
+ group('connection','连接',[t('url','接口地址','默认借酒馆转发，酒馆要开着 enableCorsProxy（云酒馆找服务商开）；开不了就填自己搭的中转的完整地址，做法见使用说明「豆包语音」。豆包官方地址不能直接填，网页访问不了。'),t('appId','旧版 App ID（可不填）','新版控制台只需 API Key。旧版填 App ID，并把 Access Token 存在上面的密钥中。')]),
  group('audio','声音',[s('format','音频格式','mp3',[['mp3','MP3'],['pcm','PCM（自动封装 WAV）']]),s('sample_rate','采样率',24000,[8000,16000,22050,24000,32000,44100,48000].map(v=>[v,String(v)])),n('speech_rate','语速',0,-50,100,1),n('loudness_rate','音量',0,-50,100,1),n('pitch','音调',0,-12,12,1)]),
  group('style','语气',[t('context','语音指令','仅合成 2.0 和复刻 2.0 表现力版支持。可写「你可以说得温柔一点吗」。台词情绪会附在指令里，不当作正文朗读。'),s('cloneModel','复刻 2.0 效果','seed-tts-2.0-standard',[['seed-tts-2.0-standard','标准'],['seed-tts-2.0-expressive','表现力增强']])]),
  group('voices','自己的音色',[rows('voices','音色',[t('name','名字'),t('id','音色 ID')],200,'从火山控制台音色库复制 ID；模型版本需与音色对应。复刻音色也可添加。')])
@@ -103,6 +103,11 @@ let fishCompat=new Set(['s2.1-pro','s2.1-pro-free','s2-pro','s1']);
 export function setFishCompat(ids){const next=new Set((ids||[]).map(id=>String(id).replace(/^fish-audio\//,'')).filter(Boolean));if(!next.size)return false;const changed=catalogs.fish.models.some(m=>next.has(m)!==fishCompat.has(m));fishCompat=next;return changed;}
 /** Whether this connection's model is sent to Fish's own /v1/tts (an OpenAI-form relay takes every model its own way). */
 export const fishNative=c=>!fishOpenAI(c)&&!fishCompat.has(c?.model);
+/** 豆包's server lets no web page ask it (no CORS): through the tavern's proxy, or through a relay of one's own. */
+export const DOUBAO_PROXY_NOTE='这个酒馆关着转发（enableCorsProxy），豆包的服务器又不让网页直接访问，所以连不上。两个办法任选一个：① 请酒馆的管理员（云酒馆就找服务商）在 config.yaml 里把 enableCorsProxy 改成 true，再重启酒馆；② 自己搭一个中转，把地址填进豆包的「接口地址」，做法在使用说明的「豆包语音」里。';
+export const DOUBAO_DIRECT_NOTE='豆包的服务器不让网页直接访问，「接口地址」不能直接填 openspeech.bytedance.com：改回默认的 /proxy/https://openspeech.bytedance.com/api/v3/tts/unidirectional（酒馆要开着 enableCorsProxy），或者填自己搭的中转，做法在使用说明的「豆包语音」里。';
+export const DOUBAO_RELAY_NOTE='连不上「接口地址」里的中转：地址填错了、中转没开、网络不通（workers.dev 在国内常常打不开，要绑自己的域名），或者中转没加跨域许可（CORS）。使用说明「豆包语音」里的中转已经加好了。';
+export const DOUBAO_PROXY_PAGE='酒馆的转发返回的是网页而不是声音：这个酒馆没有能用的转发（TauriTavern 这类手机酒馆 App 没有这个功能）。在豆包的「接口地址」填自己搭的中转，做法在使用说明的「豆包语音」里。';
 /** A /v1/tts request without a relay goes through the tavern's proxy: what to do when that is off. */
 export const FISH_PROXY_NOTE='这个模型现在只在 Fish 自己的接口上，网页不能直接调用，要借酒馆转发：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆。用中转的不用改。';
 /** TauriTavern (the tavern as a phone and desktop app, Rust instead of Node) has no /proxy/ yet, and gives extensions

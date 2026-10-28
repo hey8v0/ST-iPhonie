@@ -76,13 +76,13 @@ export function drawApp(ctx) {
     if (e === 'comfy') { try { comfy = api.comfyLoraInfo(); } catch (error) { comfy = {nodes: [], sources: [], disabled: [], controls: [], error: error.message, missing: ''}; } }
     if (comfyAddress !== d.comfy.url) { comfyAddress = d.comfy.url; comfyInfo = null; comfyRequest++; }
     if (tab === 'vibe' || tab === 'lora') tab = e === 'nai' ? 'vibe' : e === 'comfy' ? 'lora' : 'prompt';
-    if (tab === 'refs' && e !== 'nai') tab = 'prompt';
+    if (tab === 'refs' && e === 'comfy') tab = 'prompt';
     const shown = results[current];
     const main = shown ? await urlFor(shown.photoId) : '';
     const thumbs = await Promise.all(results.map(r => urlFor(r.photoId)));
     if (v.disposed || ticket !== epoch) return;
     const size = SIZES.find(([, , w, h]) => w === d.params.width && h === d.params.height)?.[0] || 'custom';
-    const tabs = [['prompt', '提示词'], ['chars', '角色'], ...(e === 'nai' ? [['refs', '参考图' + (refs.badge() ? ` · ${refs.badge()}` : '')]] : []), ['params', '参数'], ...(e === 'nai' ? [['vibe', 'Vibe']] : e === 'comfy' ? [['lora', 'LoRA']] : [])];
+    const tabs = [['prompt', '提示词'], ['chars', '角色'], ...(e !== 'comfy' ? [['refs', '参考图' + (refs.badge() ? ` · ${refs.badge()}` : '')]] : []), ['params', '参数'], ...(e === 'nai' ? [['vibe', 'Vibe']] : e === 'comfy' ? [['lora', 'LoRA']] : [])];
     v.root.dataset.engine = e;
     let body = '';
     if (tab === 'prompt') body = `
@@ -301,6 +301,7 @@ export function drawApp(ctx) {
   });
   v.on('input', '[data-vibe-search]', el => vibes.search(el.value));
   v.on('input', '[data-ref-slider]', el => refs.slide(el));
+  v.on('input', '[data-ref-label]', el => refs.label(el));
   v.on('change', '[data-ref-slider]', () => render());
   v.on('change', '[data-read-png]', async el => { const file = el.files?.[0]; el.value = ''; if (file) await readPng(file); });
   v.on('change', '[data-vibe-file]', async el => { const files = [...el.files]; el.value = ''; await vibes.importFiles(files); });
@@ -421,7 +422,7 @@ export function drawApp(ctx) {
     render();
   }
   async function generate() {
-    const s = style(), q = quote(), extra = eng() === 'nai' ? refs.payload() : {base: null, refs: []};
+    const s = style(), q = quote(), extra = eng() !== 'comfy' ? refs.payload() : {base: null, refs: []};
     const paid = await askPaid(q, count);
     if (paid === false) return;
     await drawMany({

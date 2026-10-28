@@ -43,6 +43,20 @@ export async function fitReference(win, blob) {
   return {image: base64Of(canvas), preview: thumb.toDataURL('image/jpeg', .8)};
 }
 
+/**
+ * A GPT 参考图: the picture in its own shape, no longer than `side` on its long side, as JPEG on white (every relay
+ * takes JPEG, and it keeps 16 of them small to send): {image (base64), type, width, height, preview}.
+ */
+export async function fitGptReference(win, blob, side = 1536) {
+  const img = await loadImage(win, blob), k = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight));
+  const width = Math.max(1, Math.round(img.naturalWidth * k)), height = Math.max(1, Math.round(img.naturalHeight * k));
+  const canvas = canvasOf(win.document, width, height), g = canvas.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, width, height); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, width, height);
+  const thumb = canvasOf(win.document, 160, Math.max(1, Math.round(160 * height / width)));
+  thumb.getContext('2d').drawImage(canvas, 0, 0, thumb.width, thumb.height);
+  return {image: canvas.toDataURL('image/jpeg', .92).split(',')[1], type: 'image/jpeg', width, height, preview: thumb.toDataURL('image/jpeg', .8)};
+}
+
 /** A picture redrawn at width×height (增强 sends it larger): {image (base64 PNG), width, height, preview}. */
 export async function scaledPicture(win, blob, width, height) {
   const img = await loadImage(win, blob), canvas = canvasOf(win.document, width, height), g = canvas.getContext('2d');
@@ -61,17 +75,18 @@ export async function pictureData(win, blob) {
   return {image: base64Of(canvas), width: img.naturalWidth, height: img.naturalHeight};
 }
 
-/** Picks a picture from the album or the device: its Blob, or null when nothing was picked. */
-export function pickPicture(ctx, api, title = '选一张图') {
+/** Picks a picture from the album or the device: its Blob, or null when nothing was picked. multiple: several files
+ *  may be picked from the device at once, and the answer is a list (one from the album). */
+export function pickPicture(ctx, api, title = '选一张图', {multiple = false} = {}) {
   return new Promise(async resolve => {
     let done = false;
     const finish = value => { if (done) return; done = true; resolve(value); d.close(); };
     const rows = (await api.listPhotos()).slice(0, 60), urls = [];
-    const d = ctx.dialog(title, `<div class="actions" style="margin-top:0"><label class="secondary file-button">${icon('import')}从手机里选<input type="file" data-pick-file accept="image/png,image/jpeg,image/webp" hidden></label></div>
+    const d = ctx.dialog(title, `<div class="actions" style="margin-top:0"><label class="secondary file-button">${icon('import')}从手机里选${multiple ? '（可以多选）' : ''}<input type="file" data-pick-file accept="image/png,image/jpeg,image/webp"${multiple ? ' multiple' : ''} hidden></label></div>
       ${rows.length ? `<p class="hint">或者从相册里选：</p><div class="photo-grid pick-photos">${rows.map(r => `<button type="button" data-pick-photo="${esc(r.id)}" aria-label="选 ${esc(r.name)}"><img alt="${esc(r.name)}"></button>`).join('')}</div>` : '<p class="hint">相册里还没有图。</p>'}`);
     d.onClose?.(() => { for (const url of urls) ctx.win.URL.revokeObjectURL(url); if (!done) { done = true; resolve(null); } });
-    d.body.addEventListener('change', e => { const file = e.target.closest('[data-pick-file]')?.files?.[0]; if (file) finish(file); });
-    d.body.addEventListener('click', async e => { const id = e.target.closest('[data-pick-photo]')?.dataset.pickPhoto; if (!id) return; const photo = await api.getPhoto(id); if (photo?.blob) finish(photo.blob); });
+    d.body.addEventListener('change', e => { const files = [...(e.target.closest('[data-pick-file]')?.files || [])]; if (files.length) finish(multiple ? files : files[0]); });
+    d.body.addEventListener('click', async e => { const id = e.target.closest('[data-pick-photo]')?.dataset.pickPhoto; if (!id) return; const photo = await api.getPhoto(id); if (photo?.blob) finish(multiple ? [photo.blob] : photo.blob); });
     for (const row of rows) {
       const photo = await api.getPhoto(row.id).catch(() => null), img = d.body.querySelector(`[data-pick-photo="${CSS.escape(row.id)}"] img`);
       if (!photo?.blob || !img) continue;

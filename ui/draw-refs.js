@@ -1,10 +1,12 @@
-// The 参考图 tab of the drawing app (NovelAI): a base picture — 图生图 (draw over it, as strongly as asked) or, with an
+// The 参考图 tab of the drawing app. NovelAI: a base picture — 图生图 (draw over it, as strongly as asked) or, with an
 // area painted, 局部重绘 (draw only that again) — and 角色参考 (NovelAI's Precise Reference: the same character, style
-// or both in a new picture; V4.5 only). Kept for this visit of the app; the pictures go with the next drawing.
+// or both in a new picture; V4.5 only). GPT: up to 16 pictures it draws after, known by their order (图 1, 图 2 …),
+// each with what it is in the user's words. Kept for this visit of the app; the pictures go with the next drawing.
 import {esc, btn, help} from './common.js';
 import {icon} from './icons.js';
 import {takesReference, REFERENCE_ANLAS} from '../core/novelai.js';
-import {fitBase, fitReference, pickPicture, maskEditor} from './draw-images.js';
+import {GPT_MAX_REFS, gptTakesRefs} from '../core/image-engines.js';
+import {fitBase, fitReference, fitGptReference, pickPicture, maskEditor} from './draw-images.js';
 
 const KINDS = [['character', '角色'], ['style', '画风'], ['both', '角色+画风']];
 const MAX_REFS = 4;
@@ -15,6 +17,9 @@ export function refPanel({ctx, api, rerender, shown}) {
   let base = null;
   const refs = [];
   const model = () => api.getState().draw.params.model;
+  /** GPT's: [{image, type, preview, label}]. */
+  const gptRefs = [];
+  const gpt = () => api.getState().draw.engine === 'gpt', gptModel = () => api.getState().draw.gpt.model;
 
   function baseHTML() {
     if (!base) return `<div class="ref-empty"><div class="actions">${btn('ref-base-pick', icon('import') + '选一张', 'secondary')}${shown() ? btn('ref-base-shown', icon('image') + '用上面这张', 'secondary') : ''}</div></div>`;
@@ -33,9 +38,24 @@ export function refPanel({ctx, api, rerender, shown}) {
         <div class="actions ref-actions">${btn('ref-remove', icon('trash') + '去掉', 'text-button', `data-index="${i}"`)}</div></div></div>`).join('') : '')
       + (refs.length < MAX_REFS ? `<div class="actions">${btn('ref-add', icon('add') + '加一张参考', 'secondary')}${shown() ? btn('ref-add-shown', icon('image') + '用上面这张', 'secondary') : ''}</div>` : '');
   }
+  function gptHTML() {
+    const g = api.getState().draw.gpt, takes = gptTakesRefs(g.model);
+    const cards = gptRefs.map((r, i) => `<div class="ref-card"><div class="ref-thumb"><img src="${esc(r.preview)}" alt="图 ${i + 1}"><span class="ref-num">图 ${i + 1}</span></div>
+      <div class="ref-main"><label class="field"><span>这是什么</span><input type="text" data-ref-label data-index="${i}" maxlength="80" value="${esc(r.label)}" placeholder="可不填" aria-label="图 ${i + 1} 是什么"></label>
+        <div class="actions ref-actions">${i ? btn('ref-up', icon('up') + '往前', 'text-button', `data-index="${i}"`) : ''}${btn('ref-remove', icon('trash') + '去掉', 'text-button', `data-index="${i}"`)}</div></div></div>`).join('');
+    const add = btn('ref-add', icon('add') + '加参考图', 'secondary') + (shown() ? btn('ref-add-shown', icon('image') + '用上面这张', 'secondary') : '');
+    return `<div class="ref-section gpt-refs"><p class="hint ref-about" data-keep-hint>放几张图给 GPT 照着画：角色、衣服、物件、画风都行，最多 ${GPT_MAX_REFS} 张。按顺序是图 1、图 2……，提示词里可以直接写「图 1 的女孩坐在图 2 的沙发上」；填了「这是什么」的，会一起告诉 GPT。</p>`
+      + (takes ? '' : `<p class="hint ref-note" data-keep-hint>${icon('alert')}${esc(g.model)} 不能带参考图。在「参数」里换成 gpt-image 模型才会生效。</p>`)
+      + (/^\/proxy\//.test(g.url) ? `<p class="hint ref-note" data-keep-hint>${icon('alert')}GPT 的接口地址是酒馆转发（/proxy/ 开头），转发带不了图：要用参考图，接口地址得填直连的中转。</p>` : '')
+      + cards
+      + (gptRefs.length >= GPT_MAX_REFS ? '' : gptRefs.length ? `<div class="actions">${add}</div>` : `<div class="ref-empty"><div class="actions">${add}</div></div>`)
+      + (gptRefs.length && takes ? `<p class="hint ref-cost" data-keep-hint>${icon('alert')}带参考图时走 GPT 的改图接口（/images/edits），中转要支持它；参考图算进输入的费用，图越多越贵。</p>` : '')
+      + '</div>';
+  }
   /** A fold of this tab: closed until it holds something (or is opened), its state on the right of its title. */
   const fold = (group, glyph, title, sub, pill, on, body) => `<details class="ref-fold" data-group="${group}"${on ? ' open' : ''}><summary>${icon(glyph)}<span class="ref-fold-title"><b>${title}</b><small>${sub}</small></span><span class="ref-pill${on ? ' on' : ''}">${esc(pill)}</span></summary><div class="fold-body ref-section">${body}</div></details>`;
   function html() {
+    if (gpt()) return gptHTML();
     const takes = takesReference(model());
     const cost = [base && '有底图的图不在 Opus 免费档里，每张都扣 Anlas', refs.length && takes && `每张参考每张图多扣 ${REFERENCE_ANLAS} Anlas，用参考时不带 Vibe`].filter(Boolean);
     return fold('ref-base', 'image', '底图', '图生图 · 局部重绘', base ? (base.mask ? '局部重绘' : '图生图') : '没有', !!base,
@@ -58,6 +78,14 @@ export function refPanel({ctx, api, rerender, shown}) {
     refs.push({...await fitReference(ctx.win, blob), kind: 'character', strength: .6, fidelity: .5});
     rerender();
   }
+  /** GPT: one picture or several (picked together), as many as there is room for. */
+  async function addGptRefs(picked) {
+    const list = [picked].flat().filter(Boolean), room = GPT_MAX_REFS - gptRefs.length;
+    if (!list.length) return;
+    for (const blob of list.slice(0, room)) gptRefs.push({...await fitGptReference(ctx.win, blob), label: ''});
+    if (list.length > room) ctx.notify(`最多 ${GPT_MAX_REFS} 张，多出来的 ${list.length - room} 张没有放进去`);
+    rerender();
+  }
 
   /** Clicks of this tab (data-action ref-*). True when it was one. */
   async function click(el) {
@@ -74,9 +102,10 @@ export function refPanel({ctx, api, rerender, shown}) {
           if (mask !== null && base) { if (mask && !base.mask) base.strength = .99; base.mask = mask; rerender(); }
           return true;
         }
-        case 'ref-add': await addRef(await pickPicture(ctx, api, '选一张参考图')); return true;
-        case 'ref-add-shown': await addRef(await shownBlob()); return true;
-        case 'ref-remove': refs.splice(i, 1); rerender(); return true;
+        case 'ref-add': if (gpt()) await addGptRefs(await pickPicture(ctx, api, '选参考图', {multiple: true})); else await addRef(await pickPicture(ctx, api, '选一张参考图')); return true;
+        case 'ref-add-shown': if (gpt()) await addGptRefs(await shownBlob()); else await addRef(await shownBlob()); return true;
+        case 'ref-remove': (gpt() ? gptRefs : refs).splice(i, 1); rerender(); return true;
+        case 'ref-up': if (i > 0 && gptRefs[i]) { [gptRefs[i - 1], gptRefs[i]] = [gptRefs[i], gptRefs[i - 1]]; rerender(); } return true;
         case 'ref-kind': refs[i].kind = el.dataset.kind; rerender(); return true;
       }
     } catch (error) { ctx.notify(error.message, {error: true}); return true; }
@@ -90,18 +119,22 @@ export function refPanel({ctx, api, rerender, shown}) {
     else if (base) base[key] = value;
   }
 
+  /** What a GPT 参考图 is, as typed (no redraw, so typing goes on). */
+  function label(el) { const r = gptRefs[Number(el.dataset.index)]; if (r) r.label = el.value.slice(0, 80); }
+
   return {
-    html, click, slide,
+    html, click, slide, label,
     /** Uses a picture from elsewhere in the app (a result's tools). */
     useAsBase: setBase, useAsRef: addRef,
-    /** What goes with the next drawing (NovelAI only). */
+    /** What goes with the next drawing: NovelAI's base and references, or GPT's references. */
     payload() {
+      if (gpt()) return {base: null, refs: gptTakesRefs(gptModel()) ? gptRefs.map(r => ({image: r.image, type: r.type, label: r.label.trim()})) : []};
       return {base: base ? {image: base.image, width: base.width, height: base.height, strength: base.strength, noise: base.noise, ...(base.mask ? {mask: base.mask} : {})} : null,
         refs: takesReference(model()) ? refs.map(r => ({image: r.image, kind: r.kind, strength: r.strength, fidelity: r.fidelity})) : []};
     },
     /** For the quote: whether a base picture is set and how many references go. */
     extra() { return {base: !!base, refs: takesReference(model()) ? refs.length : 0}; },
     /** A short word for the tab (底图 / 参考 counts). */
-    badge() { const n = (base ? 1 : 0) + refs.length; return n ? String(n) : ''; }
+    badge() { const n = gpt() ? gptRefs.length : (base ? 1 : 0) + refs.length; return n ? String(n) : ''; }
   };
 }

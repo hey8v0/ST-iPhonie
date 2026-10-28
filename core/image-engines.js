@@ -18,7 +18,9 @@ export const OPENAI_BASE = 'https://api.openai.com/v1';
 export const GPT_IMAGE_MODELS = ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2', 'gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3'];
 export const GPT_QUALITIES = ['auto', 'low', 'medium', 'high'];
 export const GPT_ORIENTATIONS = ['portrait', 'landscape', 'square'];
-export const defaultGpt = () => ({url: '', model: 'gpt-image-1', quality: 'auto', orientation: 'portrait', ask: true, style: ''});
+export const defaultGpt = () => ({url: '', model: 'gpt-image-2', quality: 'auto', orientation: 'portrait', ask: true, style: ''});
+/** Reference pictures one GPT picture can take (/images/edits takes up to 16). */
+export const GPT_MAX_REFS = 16;
 
 /** A GPT address: '' for OpenAI itself; a relay's address ends at /v1 (a pasted …/images/generations is cut off). */
 export function gptBase(value, pageProtocol = globalThis.location?.protocol) {
@@ -46,6 +48,8 @@ export function normalizeGpt(value) {
   };
 }
 const dalle = model => /^dall-e/i.test(model);
+/** Whether a model takes reference pictures: the GPT image models do (/images/edits); DALL·E 3 does not. */
+export const gptTakesRefs = model => !dalle(model);
 /** The size GPT is asked for: its models take only a few. */
 export function gptSize(model, orientation) {
   if (dalle(model)) return {portrait: '1024x1792', landscape: '1792x1024', square: '1024x1024'}[orientation] || '1024x1024';
@@ -69,10 +73,16 @@ function place(position) {
   const x = ['far left', 'left', 'center', 'right', 'far right'][column], y = row < 2 ? 'upper part' : row > 2 ? 'lower part' : '';
   return y ? `${x}, ${y} of the picture` : `${x} of the picture`;
 }
-/** One English request for GPT from the picture: scene tags, then each person's tags and place in the frame. */
-export function gptPrompt({prompt = '', characters = []} = {}) {
+/** One English request for GPT from the picture: scene tags, then each person's tags and place in the frame. Reference
+ *  pictures go by their order (image 1, image 2 …), each with what the user wrote it is. */
+export function gptPrompt({prompt = '', characters = [], refs = []} = {}) {
   const scene = plainTags(prompt), people = characters.map(c => ({tags: plainTags(c.prompt), where: place(c.position)})).filter(c => c.tags);
   const lines = ['Draw one illustration described by the Danbooru-style tags and short phrases below. Follow them closely; do not add text or captions to the picture.'];
+  if (refs.length) {
+    lines.push(refs.length === 1 ? 'One reference image is attached (image 1). Keep the look of the characters, things and style it shows.'
+      : `${refs.length} reference images are attached in order, image 1 to image ${refs.length}. Keep the look of the characters, things and style they show.`);
+    refs.forEach((r, i) => { const label = String(r?.label || '').replace(/\s+/g, ' ').trim(); if (label) lines.push(`Image ${i + 1}: ${label}.`); });
+  }
   if (scene) lines.push('Scene and style: ' + scene + '.');
   people.forEach((c, i) => lines.push(`Character ${i + 1}${c.where ? ` (${c.where})` : ''}: ${c.tags}.`));
   if (people.length > 1) lines.push(`Exactly ${people.length} distinct characters; keep each one's features separate.`);
@@ -181,10 +191,23 @@ async function gptPicture({fetch, url, signal}) {
   }
 }
 
-/** Draws one picture with a GPT image model. Returns a Blob. */
-export async function gptGenerate({fetch = globalThis.fetch, settings, key, prompt, size, signal}) {
+/** /images/edits takes multipart: the fields as text and the pictures as files (image for one, image[] for several, as
+ *  OpenAI's own SDK sends them and the common relays read them). */
+function editForm(fields, pictures) {
+  const form = new FormData(), name = pictures.length > 1 ? 'image[]' : 'image';
+  for (const [key, value] of Object.entries(fields)) form.append(key, String(value));
+  pictures.forEach((p, i) => { const type = p.type || 'image/png'; form.append(name, base64Blob(p.image, type), `reference-${i + 1}.${type === 'image/jpeg' ? 'jpg' : type.split('/')[1]}`); });
+  return form;
+}
+/** Draws one picture with a GPT image model. Returns a Blob. refs: reference pictures [{image (base64), type}] — with
+ *  them the picture is asked of /images/edits. */
+export async function gptGenerate({fetch = globalThis.fetch, settings, key, prompt, size, refs = [], signal}) {
   if (!key) throw Error('还没有填写 GPT 生图的密钥');
   const base = settings.url || OPENAI_BASE, relay = base !== OPENAI_BASE;
+  const pictures = (refs || []).filter(r => r?.image).slice(0, GPT_MAX_REFS);
+  if (pictures.length && !gptTakesRefs(settings.model)) throw Error(`${settings.model} 不能带参考图：在「参数」里换成 gpt-image 模型，或者去掉参考图`);
+  // The tavern's proxy sends a body on as JSON: files do not survive it.
+  if (pictures.length && proxyAddress(base)) throw Error('参考图要按文件上传，酒馆的转发（/proxy/ 开头的地址）只能转文字、带不了图：用参考图时，GPT 的接口地址要填直连的中转');
   const body = {model: settings.model, prompt, n: 1, size};
   if (dalle(settings.model)) { body.response_format = 'b64_json'; if (/dall-e-3/i.test(settings.model)) body.quality = settings.quality === 'high' ? 'hd' : 'standard'; }
   else if (settings.quality !== 'auto') body.quality = settings.quality;
@@ -192,7 +215,8 @@ export async function gptGenerate({fetch = globalThis.fetch, settings, key, prom
   if (relay) body.response_format = 'b64_json';
   const post = async payload => {
     signal?.throwIfAborted();
-    try { return await fetch(base + '/images/generations', {method: 'POST', headers: {Authorization: 'Bearer ' + key, 'Content-Type': 'application/json'}, body: JSON.stringify(payload), signal}); }
+    const init = pictures.length ? {headers: {Authorization: 'Bearer ' + key}, body: editForm(payload, pictures)} : {headers: {Authorization: 'Bearer ' + key, 'Content-Type': 'application/json'}, body: JSON.stringify(payload)};
+    try { return await fetch(base + (pictures.length ? '/images/edits' : '/images/generations'), {method: 'POST', ...init, signal}); }
     catch (error) { signal?.throwIfAborted(); if (error?.name === 'AbortError') throw error; throw Error(relay ? '连不上中转：请确认地址正确、中转允许跨域（CORS）' : '连不上 OpenAI，请检查网络'); }
   };
   const read = async response => {

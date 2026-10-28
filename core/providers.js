@@ -2,7 +2,7 @@ import {buildDoubaoRequest,doubaoAudio,DOUBAO_VOICES} from './doubao.js';
 import {proxyAddress} from './proxy-url.js';
 import { validateKey, MULTI_KEY, keyTail } from './keys.js';
 import { languageCode } from './languages.js';
-import { TTSParameters as P, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, FISH_TAURI_NOTE, FISH_PROXY_PAGE, tauriTavern, setFishCompat } from './parameters.js';
+import { TTSParameters as P, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, FISH_TAURI_NOTE, FISH_PROXY_PAGE, DOUBAO_PROXY_NOTE, DOUBAO_DIRECT_NOTE, DOUBAO_RELAY_NOTE, DOUBAO_PROXY_PAGE, tauriTavern, setFishCompat } from './parameters.js';
 import { speakable } from './voice-fx.js';
 import { buildCustomRequest, customInit, readCustomAnswer, customVoices, readVoiceList } from './custom-voice.js';
 import { unpacked, audioKind } from './audio-bytes.js';
@@ -128,7 +128,7 @@ export async function httpError(engine,response,what='',secrets=[],relay=false){
  const code=[detail.code,detail.status,detail.type].find(x=>typeof x==='string'&&REASONS[x])||(typeof detail.code==='string'?detail.code:typeof detail.status==='string'?detail.status:'');
  // 「Providing X is not supported with the 'M' model」names the field: say that plainly.
  const refused=typeof detail.message==='string'&&detail.message.match(/Providing (\S+) is not supported with the '([^']+)' model/);
- if(response.status===403&&/CORS proxy is disabled/i.test(detail.message||''))return Error('酒馆的跨域代理未开启：把 config.yaml 的 enableCorsProxy 改成 true 后重启酒馆');
+ if(/CORS proxy is disabled/i.test(detail.message||''))return Error(engine==='doubao'?DOUBAO_PROXY_NOTE:'酒馆的跨域代理未开启：把 config.yaml 的 enableCorsProxy 改成 true 后重启酒馆');
  const reason=refused?`${refused[2]} 不接受 ${refused[1]} 这一项设置`:REASONS[code]||FALLBACK[response.status]||'请求失败';
  const hide=text=>secrets.filter(k=>typeof k==='string'&&k.length>=4).reduce((t,k)=>t.split(k).join('***'),String(text)).replace(/[A-Za-z0-9_-]{24,}/g,t=>/\d/.test(t)&&/[A-Za-z]/.test(t)?'***':t);
  const said=hide([code,typeof detail.message==='string'?detail.message.slice(0,200):'',detail.param?'参数 '+detail.param:''].filter(Boolean).join('：'));
@@ -186,6 +186,8 @@ export class Providers{
   }
   // A new audio was paid for: the balance shown on the engine card is out of date.
   try{this.onSpend?.(request.engine);}catch{}
+  // A tavern without a proxy (an app tavern) answers /proxy/ with its own page.
+  if(request.engine==='doubao'&&proxyAddress(request.url)&&/text\/html/i.test(response.headers.get('Content-Type')||'')){await response.body?.cancel?.().catch(()=>{});throw Error(DOUBAO_PROXY_PAGE);}
   if(request.engine==='doubao'){try{return audioBlob(doubaoAudio(await limitedBytes(response)),request);}catch(error){for(const key of (this.keys.get('doubao')||'').split('\n').filter(Boolean))error.message=error.message.split(key).join('***');throw error;}}
   if(request.engine==='mimo')return decodeMimo(response,request);
   if(request.engine==='mini')return decodeMini(response,request,this.fetcher,signal);if(response.headers.get('Content-Type')?.includes('json'))throw Error(names[request.engine]+' 未返回音频');const bytes=await limitedBytes(response);return audioBlob(await unpacked(bytes)||bytes,request);}
@@ -202,7 +204,7 @@ export class Providers{
   const {url,init}=customInit(request,this.keys.get('custom')||'');
   const send=async(target,how=init)=>{try{return await fetchWithPolicy(this.fetcher,target,how,signal);}catch(error){if(signal?.aborted||!this.proxy||!/无法连接/.test(error.message))throw error;
    const relayed=await this.proxy(target,how,signal).catch(()=>null);if(!relayed)throw Error('连不上自己的接口：地址不对、服务没开，或者它不让网页直接访问（可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆）');
-   if(relayed.status===403&&/CORS proxy is disabled/i.test(await relayed.clone().text().catch(()=>'')))throw Error('自己的接口不让网页直接访问：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆');return relayed;}};
+   if(/CORS proxy is disabled/i.test(await relayed.clone().text().catch(()=>'')))throw Error('自己的接口不让网页直接访问：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆');return relayed;}};
   // 换模型: only when this voice's model is not the one loaded last.
   const loaded=(request.before||[]).join('\n');
   if(loaded&&this.customLoaded!==loaded){this.customLoaded='';for(const step of request.before){const {url:target,init:get}=customInit({...request,url:step,method:'GET',body:undefined});const r=await send(target,get).catch(e=>{throw Error('换模型失败：'+e.message);});
@@ -232,7 +234,7 @@ export class Providers{
   try{this.onSpend?.('eleven');}catch{}
   const bytes=await limitedBytes(response);if(!bytes.length)throw Error('ElevenLabs 没有返回声音');
   return new Blob([bytes],{type:'audio/mpeg'});}
- post(request,body,signal){if(request.engine==='doubao'){const key=this.currentKey('doubao'),headers={'Content-Type':'application/json','X-Api-Resource-Id':request.resourceId,'X-Api-Request-Id':crypto.randomUUID(),...(request.appId?{'X-Api-App-Id':request.appId,'X-Api-Access-Key':key}:{'X-Api-Key':key})};if(!key)throw Error('请先填写豆包语音的 API Key');return this.fetch(request.url,{method:'POST',headers,body:JSON.stringify(body)},signal);}
+ post(request,body,signal){if(request.engine==='doubao'){const key=this.currentKey('doubao'),headers={'Content-Type':'application/json','X-Api-Resource-Id':request.resourceId,'X-Api-Request-Id':crypto.randomUUID(),...(request.appId?{'X-Api-App-Id':request.appId,'X-Api-Access-Key':key}:{'X-Api-Key':key})};if(!key)throw Error('请先填写豆包语音的 API Key');return this.fetch(request.url,{method:'POST',headers,body:JSON.stringify(body)},signal).catch(error=>{if(!/无法连接/.test(error.message)||proxyAddress(request.url))throw error;throw Error(/^https?:\/\/openspeech\.bytedance\.com\//i.test(request.url)?DOUBAO_DIRECT_NOTE:DOUBAO_RELAY_NOTE);});}
  const init={method:'POST',headers:{...this.headers(request.engine),'Content-Type':'application/json',...request.headers},body:JSON.stringify(body)};return request.viaTavern?this.viaTavern(request.url,init,signal):this.fetch(request.url,init,signal);}
  /** Fish's own /v1/tts lets no web page call it: asked through the tavern's proxy, which must be switched on. */
  async viaTavern(url,init,signal){if(!this.proxy)throw Error(FISH_PROXY_NOTE);const r=await this.proxy(url,init,signal).catch(error=>{if(signal?.aborted)throw error;throw Error('连不上酒馆的转发。'+FISH_PROXY_NOTE);});
