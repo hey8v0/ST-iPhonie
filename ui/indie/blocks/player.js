@@ -181,14 +181,20 @@ export class Body {
     if (r.hitX) this.vx = 0; if (r.hitZ) this.vz = 0;
     const wasGround = this.onGround;
     this.onGround = r.down;
-    if (r.hitY) { if (this.vy < 0 && this.fall > 0) { result.landed = this.fall; } this.vy = 0; }
+    if (r.hitY) {
+      // a slime block throws back what lands on it (not one sneaking), and takes the fall
+      const under = this.vy < 0 ? this.world.get(Math.floor(this.x), Math.floor(this.y - 0.05), Math.floor(this.z)) : 0;
+      if (BLOCKS[under & 0xFFF]?.slime && !this.sneaking && this.vy < -0.1) { this.vy = -this.vy; this.fall = 0; }
+      else { if (this.vy < 0 && this.fall > 0) { result.landed = this.fall; } this.vy = 0; }
+    }
     // against a wall on a ladder or vine: up (after the landing above, or standing on the ground it never starts — the game's order)
     if (this.climbing && (r.hitX || r.hitZ) && !this.sneaking) this.vy = 0.2;
     if (this.onGround) this.fall = 0; else if (this.y < sy) this.fall += sy - this.y;
     if (this.onGround && !wasGround && !result.landed) result.landed = 0.001;
     this.vy = (this.vy - 0.08) * 0.98;
     // soul sand holds the feet: walking on it is slower (the game's 0.4)
-    const hold = this.onGround ? BLOCKS[below & 0xFFF]?.slow || 1 : 1;
+    // (a slime block too, unless sneaking: the game's 0.4, a little more while bouncing)
+    const hold = !this.onGround ? 1 : BLOCKS[below & 0xFFF]?.slime ? (this.sneaking || Math.abs(this.vy) >= 0.1 ? 1 : 0.4 + Math.abs(this.vy) * 0.2) : BLOCKS[below & 0xFFF]?.slow || 1;
     this.vx *= slip * hold; this.vz *= slip * hold;
     if (Math.abs(this.vx) < 0.003) this.vx = 0; if (Math.abs(this.vz) < 0.003) this.vz = 0;
     return result;

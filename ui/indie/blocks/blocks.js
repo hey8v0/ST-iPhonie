@@ -280,6 +280,54 @@ for (const [t, zh] of [['red', '红色'], ['orange', '橙色'], ['white', '白�
 block('beetroots', '甜菜根', {tex: all('beetroots_stage0'), stages: [0, 0, 1, 1, 2, 2, 2, 3].map(s => `beetroots_stage${s}`), shape: 'crop', pass: 'cutout', hard: 0, solid: false, item: false,
   drop: (r, meta) => meta >= 7 ? [['beetroot', 1], ['beetroot_seeds', 1 + Math.floor(r() * 3)]] : ['beetroot_seeds', 1]});
 
+// ---------- redstone ----------
+// Dust (state: its power 0–15; which way it runs comes from its neighbours when it is drawn); torches, lit and unlit (state
+// as a torch's: 0 standing, 1–4 leaning from a wall east, west, south, north of it); levers and buttons (state: 0/1 on a
+// floor, 2/3 under a ceiling — lying along z / x — 4–7 on a wall, facing south, west, north, east; 8 when on); pressure
+// plates (state: the power they give); repeaters (state: the way the signal goes 0–3, as a facing, and the delay less one
+// in 4|8) and comparators (facing, 4 subtracting), each with a powered block; lamps (an off and a lit block); pistons
+// and their heads (state: the way the head points, as FACES 0–5; 8 extended / a sticky head); observers (the side they
+// watch; 8 while giving their pulse), dispensers and droppers (the side they fire from; 8 just fired), hoppers (FACES 3
+// down or a side they put into; 8 locked by power), note blocks, daylight detectors (power; and an inverted one), iron
+// doors and trapdoors (opened by power only), targets (power), slime blocks, rails (state: their shape, the game's 0–9;
+// the special ones 0–5 and 8 when on). How they work: redstone.js, in the world worker.
+const RS = {...shaped, solid: false, cat: 'redstone'};
+block('redstone_wire', '红石线', {tex: {all: 'redstone_dust_dot', line0: 'redstone_dust_line0', line1: 'redstone_dust_line1'}, shape: 'wire', pass: 'cutout', hard: 0, ...RS, drop: 'redstone', item: false, rs: 'wire'});
+block('redstone_torch', '红石火把', {tex: all('redstone_torch'), shape: 'torch', pass: 'cutout', hard: 0, ...RS, light: 7, rs: 'torch'});
+block('redstone_torch_off', '红石火把', {tex: all('redstone_torch_off'), shape: 'torch', pass: 'cutout', hard: 0, ...RS, item: false, drop: 'redstone_torch', rs: 'torch'});
+block('lever', '拉杆', {tex: {all: 'cobblestone', handle: 'lever'}, shape: 'lever', pass: 'cutout', hard: 0.5, ...RS, rs: 'lever', use: 'lever', itemIcon: 'lever'});
+block('stone_button', '石头按钮', {tex: all('stone'), shape: 'button', hard: 0.5, ...RS, rs: 'button', use: 'button', press: 20});
+for (const [w, zh] of WOODS) block(`${w}_button`, `${zh}按钮`, {tex: all(`${w}_planks`), shape: 'button', hard: 0.5, tool: T.AXE, ...RS, rs: 'button', use: 'button', press: 30, wood: true});
+block('stone_pressure_plate', '石质压力板', {tex: all('stone'), shape: 'plate', hard: 0.5, tool: T.PICK, tier: 0, ...RS, rs: 'plate', mobsOnly: true});
+for (const [w, zh] of WOODS) block(`${w}_pressure_plate`, `${zh}压力板`, {tex: all(`${w}_planks`), shape: 'plate', hard: 0.5, tool: T.AXE, ...RS, rs: 'plate'});
+block('light_weighted_pressure_plate', '轻质测重压力板', {tex: all('gold_block'), shape: 'plate', hard: 0.5, tool: T.PICK, tier: 0, ...RS, rs: 'plate', weight: 1});
+block('heavy_weighted_pressure_plate', '重质测重压力板', {tex: all('iron_block'), shape: 'plate', hard: 0.5, tool: T.PICK, tier: 0, ...RS, rs: 'plate', weight: 10});
+for (const [n, zh, top, torch, extra] of [['repeater', '红石中继器', 'repeater', 'redstone_torch_off', {}], ['repeater_on', '红石中继器', 'repeater_on', 'redstone_torch', {item: false, drop: 'repeater', on: true}],
+  ['comparator', '红石比较器', 'comparator', 'redstone_torch_off', {}], ['comparator_on', '红石比较器', 'comparator_on', 'redstone_torch', {item: false, drop: 'comparator', on: true}]]) {
+  const kind = n.replace('_on', '');
+  block(n, zh, {tex: {top, side: 'smooth_stone', bottom: 'smooth_stone', torch}, shape: kind, pass: 'cutout', hard: 0, ...shaped, cat: 'redstone', rs: kind, use: kind, itemIcon: `${kind}_item`, ...extra});
+}
+block('redstone_lamp', '红石灯', {tex: all('redstone_lamp'), hard: 0.3, rs: 'lamp', cat: 'redstone'});
+block('redstone_lamp_on', '红石灯', {tex: all('redstone_lamp_on'), hard: 0.3, light: 15, item: false, drop: 'redstone_lamp', rs: 'lamp'});
+for (const [n, zh, top, sticky] of [['piston', '活塞', 'piston_top', false], ['sticky_piston', '粘性活塞', 'piston_top_sticky', true]])
+  block(n, zh, {tex: {top, side: 'piston_side', bottom: 'piston_bottom', inner: 'piston_inner'}, shape: 'piston', hard: 1.5, tool: T.PICK, opaque: false, filter: 15, rs: 'piston', sticky, facing6: true, cat: 'redstone'});
+block('piston_head', '活塞臂', {tex: {top: 'piston_top', sticky: 'piston_top_sticky', side: 'piston_side'}, shape: 'piston_head', hard: 1.5, tool: T.PICK, opaque: false, filter: 0, item: false, drop: null, rs: 'head'});
+block('observer', '侦测器', {tex: {front: 'observer_front', back: 'observer_back', backOn: 'observer_back_on', side: 'observer_side', top: 'observer_top'}, hard: 3, tool: T.PICK, tier: 0, rs: 'observer', facing6: true, cat: 'redstone'});
+for (const [n, zh] of [['dispenser', '发射器'], ['dropper', '投掷器']])
+  block(n, zh, {tex: {front: `${n}_front`, frontV: `${n}_front_vertical`, side: 'furnace_side', top: 'furnace_top'}, hard: 3.5, tool: T.PICK, tier: 0, rs: n, facing6: true, use: 'dispenser', cat: 'redstone'});
+block('hopper', '漏斗', {tex: {all: 'hopper_outside', inside: 'hopper_inside', top: 'hopper_top'}, shape: 'hopper', hard: 3, tool: T.PICK, tier: 0, ...shaped, rs: 'hopper', use: 'hopper', itemIcon: 'hopper', cat: 'redstone'});
+block('note_block', '音符盒', {tex: all('note_block'), hard: 0.8, tool: T.AXE, rs: 'note', use: 'note', cat: 'redstone'});
+for (const [n, top, extra] of [['daylight_detector', 'daylight_detector_top', {}], ['daylight_detector_inverted', 'daylight_detector_inverted_top', {item: false, drop: 'daylight_detector'}]])
+  block(n, '阳光探测器', {tex: {top, side: 'daylight_detector_side', bottom: 'daylight_detector_side'}, shape: 'detector', hard: 0.2, tool: T.AXE, ...shaped, rs: 'detector', use: 'invert', inverted: n.endsWith('inverted'), cat: 'redstone', ...extra});
+block('iron_door', '铁门', {tex: {top: 'iron_door_top', bottom: 'iron_door_bottom'}, shape: 'door', pass: 'cutout', hard: 5, tool: T.PICK, tier: 0, ...shaped, iron: true, itemIcon: 'iron_door', cat: 'redstone'});
+block('iron_trapdoor', '铁活板门', {tex: all('iron_trapdoor'), shape: 'trapdoor', pass: 'cutout', hard: 5, tool: T.PICK, tier: 0, ...shaped, iron: true, cat: 'redstone'});
+block('target', '标靶', {tex: tbs('target_top', 'target_top', 'target_side'), hard: 0.5, tool: T.HOE, rs: 'target', cat: 'redstone'});
+block('slime_block', '黏液块', {tex: all('slime_block'), pass: 'translucent', hard: 0, opaque: false, filter: 1, slime: true, slip: 0.8, cat: 'redstone'});
+for (const [n, zh, kind] of [['rail', '铁轨', 'rail'], ['powered_rail', '动力铁轨', 'powered'], ['detector_rail', '探测铁轨', 'detector'], ['activator_rail', '激活铁轨', 'activator']])
+  block(n, zh, {tex: kind === 'rail' ? {all: 'rail', corner: 'rail_corner'} : {all: n, on: `${n}_on`}, shape: 'rail', pass: 'cutout', hard: 0.7, tool: T.PICK, ...RS, rs: 'rail', rail: kind});
+// the redstone ones from before: the block of redstone gives power, TNT and the bell answer it
+for (const b of B) { if (b.name === 'redstone_block') Object.assign(b, {rs: 'block', cat: 'redstone'}); if (b.name === 'tnt') b.rs = 'tnt'; if (b.name === 'bell') b.rs = 'bell'; }
+
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
 // experience from ores mined with the right tool (the game's ranges)
@@ -336,7 +384,7 @@ item('milk_bucket', '奶桶', {stack: 1, drink: true});
 item('experience_bottle', '附魔之瓶', {thrown: true, glint: true});
 // spawn eggs: each of the world's creatures, let out where it is used
 for (const [k, zh] of [['pig', '猪'], ['cow', '牛'], ['sheep', '羊'], ['chicken', '鸡'], ['zombie', '僵尸'], ['skeleton', '骷髅'], ['creeper', '苦力怕'], ['spider', '蜘蛛'],
-  ['zombified_piglin', '僵尸猪灵'], ['ghast', '恶魂'], ['blaze', '烈焰人'], ['villager', '村民'], ['iron_golem', '铁傀儡'], ['magma_cube', '岩浆怪']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
+  ['zombified_piglin', '僵尸猪灵'], ['ghast', '恶魂'], ['blaze', '烈焰人'], ['villager', '村民'], ['iron_golem', '铁傀儡'], ['magma_cube', '岩浆怪'], ['slime', '史莱姆']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
 
 export const TIERS = {wooden: {zh: '木', tier: 0, speed: 2, uses: 59, enchantability: 15}, stone: {zh: '石', tier: 1, speed: 4, uses: 131, enchantability: 5}, iron: {zh: '铁', tier: 2, speed: 6, uses: 250, enchantability: 14},
   golden: {zh: '金', tier: 0, speed: 12, uses: 32, enchantability: 22}, diamond: {zh: '钻石', tier: 3, speed: 8, uses: 1561, enchantability: 10}};
@@ -369,6 +417,12 @@ export function addXp(x, n) {
 }
 /** How hard a hit with this (an item name, or nothing) is. */
 export const damageOf = name => (name && I[name]?.damage) || 1;
+// redstone: dust is put down from the item; slime balls (from slimes) for sticky pistons and slime blocks; minecarts
+item('slime_ball', '黏液球');
+for (const [n, zh] of [['minecart', '矿车'], ['chest_minecart', '运输矿车'], ['furnace_minecart', '动力矿车'], ['tnt_minecart', 'TNT 矿车'], ['hopper_minecart', '漏斗矿车']])
+  item(n, zh, {stack: 1, cart: n, cat: 'redstone'});
+I.redstone.place = 'redstone_wire';
+
 export const ITEMS = I;
 
 /** Anything that can be held: a block (that can be an item) or an item. */

@@ -9,7 +9,11 @@ import {BLOCKS, ID, MINY, COLORS} from './blocks.js';
 import {collisionBoxes} from './shapes.js';
 import {fortressAt, spawnersNear} from './nether.js';
 import {newWork, PROFESSIONS, restock} from './trades.js';
+import {BIOMES} from './gen.js';
 
+// the swamp's biome number, and the columns of land where slimes come up deep down (one in ten, by the world's seed)
+const SWAMP = BIOMES.findIndex(b => b.name === 'swamp');
+const slimePlace = (seed, cx, cz) => { let h = (Number(seed) || 0) ^ Math.imul(cx, 0x5bd1e995) ^ Math.imul(cz, 0x27d4eb2d) ^ 0x3c6ef372; h = Math.imul(h ^ h >>> 15, 0x2c1b3c6d); h = Math.imul(h ^ h >>> 12, 0x297a2d39); return ((h ^ h >>> 15) >>> 0) % 10 === 0; };
 export const MOBS = {
   pig: {zh: '猪', health: 10, speed: 0.25, passive: true, breed: ['carrot', 'potato', 'beetroot'], drops: [['porkchop', 1, 3, 'cooked_porkchop']]},
   cow: {zh: '牛', health: 10, speed: 0.2, passive: true, breed: ['wheat'], drops: [['beef', 1, 3, 'cooked_beef'], ['leather', 0, 2]]},
@@ -26,7 +30,9 @@ export const MOBS = {
   // villages (kept in the save like animals): villagers trade and run from zombies; the iron golem guards them
   villager: {zh: '村民', health: 20, speed: 0.25, passive: true, keep: true, breed: [], drops: []},
   iron_golem: {zh: '铁傀儡', health: 100, speed: 0.25, keep: true, golem: true, range: 16, xp: 0, drops: [['iron_ingot', 3, 5], ['poppy', 0, 2]]},
-  magma_cube: {zh: '岩浆怪', health: 16, speed: 0.2, hostile: true, fireproof: true, range: 16, drops: [['magma_cream', 0, 1]]},
+  magma_cube: {zh: '岩浆怪', health: 16, speed: 0.2, hostile: true, fireproof: true, range: 16, cube: true, drops: [['magma_cream', 0, 1]]},
+  // slimes: hopping cubes like the magma cube, in swamps at night and deep under ground in one place in ten; the small ones drop slime balls
+  slime: {zh: '史莱姆', health: 16, speed: 0.2, hostile: true, range: 16, cube: true, drops: [['slime_ball', 0, 2]]},
 };
 for (const [k, m] of Object.entries(MOBS)) { m.kind = k; m.size = MODELS[k].size; }
 const WOOL = COLORS.map(c => c[0]);
@@ -59,7 +65,7 @@ export class Mob {
       Object.assign(this, extra.offers ? {prof, xp: extra.xp || 0, seed, offers: extra.offers} : PROFESSIONS[prof] ? newWork(prof, seed) : {prof, xp: 0, seed, offers: []});
       this.job = extra.job || null; this.shake = 0; this.trading = false;
     }
-    if (kind === 'magma_cube') { this.mag = extra.mag || [1, 2, 4][Math.floor(Math.random() * 3)]; this.body.w *= this.mag; this.body.hgt *= this.mag; if (extra.health == null) this.health = this.mag * this.mag; this.hop = 10; this.squish = 0; }
+    if (d.cube) { this.mag = extra.mag || [1, 2, 4][Math.floor(Math.random() * 3)]; this.body.w *= this.mag; this.body.hgt *= this.mag; if (extra.health == null) this.health = this.mag * this.mag; this.hop = 10; this.squish = 0; }
   }
   get x() { return this.body.x; } get y() { return this.body.y; } get z() { return this.body.z; }
   toJSON() {
@@ -130,7 +136,7 @@ export class Mobs {
     if (m.kind === 'iron_golem' && this.golem(m, pd)) return;
     if (m.kind === 'ghast') { this.ghast(m, pd, alive && pd < range); return; }
     if (m.kind === 'blaze') { this.blaze(m, pd, py, alive && pd < range); return; }
-    if (m.kind === 'magma_cube') { this.cube(m, pd, py, alive && pd < range && Math.abs(py) < 16); return; }
+    if (m.def.cube) { this.cube(m, pd, py, alive && pd < range && Math.abs(py) < 16); return; }
     // monsters
     if (d.hostile) {
       const dark = this.ctx.dark(m.x, m.y + 1, m.z);
@@ -294,8 +300,8 @@ export class Mobs {
     if (m.kind === 'spider' && b.collidedX && fwd) b.vy = 0.2;
     // a blaze rises to the player's height and sinks slowly; a magma cube's slices squash when it lands
     if (d.flies === 'blaze') { if (m.rise) b.vy += (0.3 - b.vy) * 0.3; else if (!b.onGround && b.vy < 0) b.vy *= 0.6; }
-    if (m.kind === 'magma_cube') { if (r.landed) m.squish = -0.5; m.squish *= 0.6; }
-    if (r.landed > 3 && !d.flies && m.kind !== 'magma_cube' && !d.golem) this.hurt(m, Math.ceil(r.landed - 3), null, 'fall');
+    if (m.def.cube) { if (r.landed) m.squish = -0.5; m.squish *= 0.6; }
+    if (r.landed > 3 && !d.flies && !d.cube && !d.golem) this.hurt(m, Math.ceil(r.landed - 3), null, 'fall');
     // the head follows what it looks at
     if (m.lookAt) {
       const dx = m.lookAt[0] - m.x, dy = m.lookAt[1] - (m.y + b.eye), dz = m.lookAt[2] - m.z, h = Math.hypot(dx, dz);
@@ -339,15 +345,16 @@ export class Mobs {
     this.ctx.burst(m.x, m.y + m.body.height / 2, m.z, 'poof');
     if (m.baby) return;
     // a magma cube breaks into two to four of half its size; only the bigger ones drop magma cream
-    if (m.kind === 'magma_cube' && m.mag > 1) for (let k = 2 + Math.floor(Math.random() * 3); k > 0; k--) this.add('magma_cube', m.x + (Math.random() - 0.5) * m.mag * 0.5, m.y + 0.5, m.z + (Math.random() - 0.5) * m.mag * 0.5, {mag: m.mag / 2});
-    const drops = m.kind === 'magma_cube' && m.mag === 1 ? [] : m.kind === 'blaze' && !m.killedByPlayer ? [] : m.def.drops;
+    if (m.def.cube && m.mag > 1) for (let k = 2 + Math.floor(Math.random() * 3); k > 0; k--) this.add(m.kind, m.x + (Math.random() - 0.5) * m.mag * 0.5, m.y + 0.5, m.z + (Math.random() - 0.5) * m.mag * 0.5, {mag: m.mag / 2});
+    // (only the bigger magma cubes drop magma cream, only the smallest slimes slime balls)
+    const drops = (m.kind === 'magma_cube' && m.mag === 1) || (m.kind === 'slime' && m.mag > 1) ? [] : m.kind === 'blaze' && !m.killedByPlayer ? [] : m.def.drops;
     for (const [id, lo, hi, cooked] of drops) {
       const n = lo + Math.floor(Math.random() * (hi - lo + 1 + (m.killedByPlayer ? this.ctx.looting?.() || 0 : 0)));
       if (n > 0) this.ctx.drop({id: m.fire > 0 && cooked ? cooked : id, n}, m.x, m.y + 0.5, m.z);
     }
     if (m.kind === 'sheep' && !m.sheared) this.ctx.drop({id: `${m.color || 'white'}_wool`, n: 1}, m.x, m.y + 0.5, m.z);
     if (m.def.rare && m.killedByPlayer && Math.random() < 0.025) this.ctx.drop({id: m.def.rare[Math.floor(Math.random() * m.def.rare.length)], n: 1}, m.x, m.y + 0.5, m.z);
-    if (m.killedByPlayer) this.ctx.xp?.(m.kind === 'magma_cube' ? m.mag : m.def.xp || (m.def.hostile ? 5 : 1 + Math.floor(Math.random() * 3)), m.x, m.y + 0.5, m.z);
+    if (m.killedByPlayer) this.ctx.xp?.(m.def.cube ? m.mag : m.def.xp || (m.def.hostile ? 5 : 1 + Math.floor(Math.random() * 3)), m.x, m.y + 0.5, m.z);
   }
   /** The mob a ray from the eye hits first within reach: {mob, t} or null. */
   raycast(ox, oy, oz, dx, dy, dz, reach) {
@@ -383,7 +390,9 @@ export class Mobs {
     if (!collisionBoxes(below) || BLOCKS[below & 0xFFF].shape === 'slab' || (below & 0xFFF) === ID.bedrock || here || above) return;
     if (!this.ctx.dark(x + 0.5, y, z + 0.5, true)) return;
     if (Math.hypot(x - player.x, z - player.z) < 24) return;
-    const kinds = ['zombie', 'zombie', 'skeleton', 'skeleton', 'creeper', 'spider'], kind = kinds[Math.floor(Math.random() * kinds.length)];
+    const kinds = ['zombie', 'zombie', 'skeleton', 'skeleton', 'creeper', 'spider'];
+    let kind = kinds[Math.floor(Math.random() * kinds.length)];
+    if ((y < 40 && slimePlace(this.ctx.seed, x >> 4, z >> 4)) || (y > 50 && y < 70 && this.world.biome?.(x, z) === SWAMP)) { if (Math.random() < 0.5) kind = 'slime'; }
     if (kind === 'spider' && (collisionBoxes(this.world.get(x + 1, y, z)) || collisionBoxes(this.world.get(x - 1, y, z)))) return;
     this.add(kind, x + 0.5, y, z + 0.5);
   }
@@ -463,7 +472,7 @@ export class Mobs {
     if (m.aim >= 78) m.aim = -100;
     if (m.age % 160 === m.id % 160 && Math.random() < 0.5) this.ctx.sound('blaze', m.x, m.y, m.z);
   }
-  /** A magma cube hops (only moving in the air), more often when after the player; touching the player hurts them. */
+  /** A magma cube or a slime hops (only moving in the air), more often when after the player; touching the player hurts them (not a small slime). */
   cube(m, pd, py, hunting) {
     const p = this.ctx.player, b = m.body;
     if (hunting) { m.yaw = turn(m.yaw, angleTo(m.x, m.z, p.x, p.z), 0.6); m.lookAt = [p.x, p.y + p.eye, p.z]; }
@@ -472,9 +481,10 @@ export class Mobs {
     if (b.onGround && --m.hop <= 0) {
       b.vy = 0.42 + m.mag * 0.1; m.squish = 1;
       m.hop = Math.floor((10 + Math.random() * 20) / (hunting ? 3 : 1));
-      this.ctx.sound('magma_cube', m.x, m.y, m.z);
+      this.ctx.sound(m.kind, m.x, m.y, m.z);
     }
-    if (hunting && pd < b.w / 2 + 0.6 && py > -b.hgt && py < 1.5 && m.attackT === 0) { m.attackT = 20; this.ctx.hurtPlayer({1: 3, 2: 4, 4: 6}[m.mag] || 3, `被${m.def.zh}杀死了`, m); }
+    const dmg = (m.kind === 'slime' ? {1: 0, 2: 2, 4: 4} : {1: 3, 2: 4, 4: 6})[m.mag] ?? 3;
+    if (dmg && hunting && pd < b.w / 2 + 0.6 && py > -b.hgt && py < 1.5 && m.attackT === 0) { m.attackT = 20; this.ctx.hurtPlayer(dmg, `被${m.def.zh}杀死了`, m); }
   }
   // ---------- fireballs ----------
   /** A ghast's big fireball (it explodes) or a blaze's small one (it burns), flying at the player. */
@@ -551,7 +561,7 @@ export class Mobs {
       a.life++;
       if (a.stuck) {
         if (a.life > 1200) { this.arrows.splice(i, 1); continue; }
-        if (a.from === 'player' && a.pickup && Math.hypot(player.x - a.x, player.y + 1 - a.y, player.z - a.z) < 1.5 && this.ctx.give({id: 'arrow', n: 1})) { this.arrows.splice(i, 1); this.ctx.sound('pop'); }
+        if ((a.from === 'player' || a.from === 'dispenser') && a.pickup && Math.hypot(player.x - a.x, player.y + 1 - a.y, player.z - a.z) < 1.5 && this.ctx.give({id: 'arrow', n: 1})) { this.arrows.splice(i, 1); this.ctx.sound('pop'); }
         // the block it is in went away: fall
         if (!collisionBoxes(this.world.get(Math.floor(a.x), Math.floor(a.y), Math.floor(a.z)))) a.stuck = false;
         continue;

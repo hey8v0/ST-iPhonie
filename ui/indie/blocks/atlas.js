@@ -69,11 +69,12 @@ export function makeIcons(built) {
     const g = c.getContext('2d');
     g.imageSmoothingEnabled = false;
     const b = info.block;
-    if (b && ICON_STATE[b.shape] !== undefined && !LAYER_ITEM.has(b.name)) {
+    if (b?.itemIcon) g.drawImage(face(b.itemIcon, null), 0, 0, N, N);
+    else if (b && ICON_STATE[b.shape] !== undefined && !LAYER_ITEM.has(b.name)) {
       isoPieces(g, b, (name, tint, shade) => face2(name, tint, shade), size);
-    } else if (b && ['cube', 'slab', 'cactus', 'farmland', 'layer'].includes(b.shape) && b.tex) {
+    } else if (b && ['cube', 'slab', 'cactus', 'farmland', 'layer', 'piston'].includes(b.shape) && b.tex) {
       const t = b.tex, tint = tintColor(b.tint);
-      const top = face(t.all || t.top, tint), side = face(t.all || (b.facing && t.front) || t.side, b.name === 'grass_block' ? null : tint);
+      const top = face(t.all || t.top, tint), side = face(t.all || ((b.facing || b.facing6) && t.front) || t.side, b.name === 'grass_block' ? null : tint);
       const side2 = face(t.all || t.side, b.name === 'grass_block' ? null : tint);
       const h = b.shape === 'slab' ? 0.5 : b.shape === 'layer' ? 0.125 : 1;
       // an isometric cube: the top a diamond from (16, 0), the front face on the left, the side on the right; a slab
@@ -113,7 +114,7 @@ export const iconKey = s => s.pot ? `${s.id}:${s.pot}` : s.id;
 
 // how a shaped block shows in the inventory: its state, and what joins it (a fence or a wall joined left and right);
 // panes, bars, the brewing stand and the bell are flat pictures, as in the game
-const ICON_STATE = {stairs: 2, fence: 0, gate: 0, trapdoor: 0, bed: 2 | 4, chest: 0, enchanting: 0, anvil: 1, composter: 0, lectern: 0, stonewall: 0, carpet: 0};
+const ICON_STATE = {stairs: 2, fence: 0, gate: 0, trapdoor: 0, bed: 2 | 4, chest: 0, enchanting: 0, anvil: 1, composter: 0, lectern: 0, stonewall: 0, carpet: 0, button: 0, plate: 0, detector: 0};
 // blocks with their own flat item picture (doors)
 const LAYER_ITEM = new Set(['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak'].map(w => `${w}_door`));
 /**
@@ -141,7 +142,7 @@ function isoPieces(g, b, face, size) {
     g.save(); g.setTransform(pu[0] - p0[0], pu[1] - p0[1], pv[0] - p0[0], pv[1] - p0[1], p0[0], p0[1]);
     g.drawImage(img, sx, sy, sw, sh, 0, 0, 1, 1); g.restore();
   };
-  const list = pieces(v, near).map(p => ({...p, b: p.box.map(q => q / 16)})).sort((a, c) => (a.b[0] + a.b[2]) * 2 + a.b[1] - ((c.b[0] + c.b[2]) * 2 + c.b[1]));
+  const list = (b.shape === 'button' ? [{box: [5, 6, 6, 11, 10, 10], role: 'main'}] : pieces(v, near)).map(p => ({...p, b: p.box.map(q => q / 16)})).sort((a, c) => (a.b[0] + a.b[2]) * 2 + a.b[1] - ((c.b[0] + c.b[2]) * 2 + c.b[1]));
   for (const {b: [x0, y0, z0, x1, y1, z1], role} of list) {
     const S = size;
     let [n, t] = texOf(role, 2); quad(face(n, t, 0), P(x0, y1, z0), P(x1, y1, z0), P(x0, y1, z1), x0 * S, z0 * S, (x1 - x0) * S, (z1 - z0) * S);

@@ -54,6 +54,8 @@ for (const [mat, tex] of [['leather', 'leather'], ['chainmail', 'chainmail'], ['
   SKINS[`armor_${mat}_legs`] = [`entity/equipment/humanoid_leggings/${tex}.png`, `models/armor/${tex}_layer_2.png`];
 }
 const MOON_PHASES = ['full_moon', 'waning_gibbous', 'third_quarter', 'waning_crescent', 'new_moon', 'waxing_crescent', 'first_quarter', 'waxing_gibbous'];
+// item pictures whose name the game also gives a block picture (ours are named apart)
+const ITEM_FILE = {repeater_item: 'repeater', comparator_item: 'comparator'};
 /**
  * Reads the pictures we use from a jar or resource pack: {label, files: {name: {png: Blob, meta}}, sky: {sun, moon,
  * clouds: Blob}, count}. onProgress(done, total).
@@ -69,7 +71,7 @@ export async function readPack(file, onProgress = () => {}) {
   const base = root + 'assets/minecraft/textures/';
   const wanted = [];
   for (const name of TEXTURE_NAMES) {
-    const path = [`${base}block/${name}.png`, `${base}item/${name}.png`].find(p => index.has(p));
+    const path = (ITEM_FILE[name] ? [`${base}item/${ITEM_FILE[name]}.png`] : [`${base}block/${name}.png`, `${base}item/${name}.png`]).find(p => index.has(p));
     if (path) wanted.push([name, path]);
   }
   if (!wanted.length) throw Error('这个文件里没有方块贴图。选游戏版本文件夹里的 .jar，或者资源包 .zip');

@@ -62,6 +62,7 @@ function voice(kind, mood, k) {
     case 'ghast': if (mood === 'warn') { tone(900, 0.2 * g, 0.7, {type: 'sawtooth', slide: 1.4}); burst(2400, 1, 0.15 * g, 0.6); } else if (mood === 'shoot') burst(600, 0.6, 0.35 * g, 0.5, {pitch: 0.7}); else { tone(420 * p, 0.12 * g, 1.4 * long, {type: 'triangle', slide: 0.6}); tone(640 * p, 0.06 * g, 1.2 * long, {type: 'sine', slide: 0.5, at: 0.1}); } break;
     case 'blaze': if (mood === 'shoot') { burst(1200, 0.7, 0.3 * g, 0.4); tone(160, 0.12 * g, 0.4, {type: 'sawtooth', slide: 0.5}); } else burst(800 * p, 0.5, 0.18 * g, 0.9 * long, {pitch: 0.6}); break;
     case 'magma': burst(400 * p, 1.2, 0.2 * g, 0.18); tone(90 * p, 0.12 * g, 0.15, {type: 'sine', slide: 0.6}); break;
+    case 'slime': burst(600 * p, 1.5, 0.22 * g, 0.12); tone(160 * p, 0.1 * g, 0.12, {type: 'sine', slide: 0.5}); break;
     // a villager's 「hmm」 (rising for yes, falling for no), the golem's clank
     case 'villager': { const up = mood === 'yes' ? 1.4 : mood === 'no' ? 0.6 : 0.9 + Math.random() * 0.3; tone(190 * p, 0.14 * g, 0.18 * long, {type: 'sawtooth', slide: up}); tone(240 * p, 0.08 * g, 0.16 * long, {type: 'square', slide: up, at: 0.14}); break; }
     case 'iron': burst(300 * p, 2, 0.35 * g, 0.25); tone(110 * p, 0.2 * g, 0.3, {type: 'triangle', slide: 0.7}); break;
@@ -72,7 +73,7 @@ export function play(name, v = 0, k = 1) {
   if (!ctx || !sound.volume || k <= 0) return;
   // a mob's sound: its kind first, what happened last (zombified_piglin_hurt, ghast_warn)
   const parts = name.split('_'), kind = parts[0], mood = parts.length > 1 ? parts.at(-1) : undefined;
-  if (['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'spider', 'creeper', 'zombified', 'ghast', 'blaze', 'magma', 'villager', 'iron'].includes(kind)) { voice(kind, mood, k); return; }
+  if (['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'spider', 'creeper', 'zombified', 'ghast', 'blaze', 'magma', 'slime', 'villager', 'iron'].includes(kind)) { voice(kind, mood, k); return; }
   const [f, q, g] = MAT[materialOf(v)] || MAT.stone, r = 0.85 + Math.random() * 0.3;
   switch (name) {
     case 'break': burst(f, q, g * 0.9, 0.22, {pitch: r}); burst(f * 0.6, q, g * 0.5, 0.18, {pitch: r, at: 0.03}); break;
@@ -114,7 +115,24 @@ export function play(name, v = 0, k = 1) {
     case 'glass': for (let i = 0; i < 4; i++) burst(4200 + Math.random() * 2000, 5, 0.25 * k, 0.12, {at: i * 0.03}); break;
     case 'bell': [880, 1320, 1760].forEach((fr, i) => tone(fr, 0.16 / (i + 1), 2.4, {type: 'sine', at: 0.002 * i})); tone(440, 0.08, 2.8, {type: 'triangle'}); break;
     case 'brew': for (let i = 0; i < 5; i++) tone(400 + Math.random() * 500, 0.06 * k, 0.07, {slide: 1.8, at: i * 0.09}); break;
+    // redstone: a piston's push and pull, doors swung by power (iron ones ring), a dispenser with nothing in it
+    case 'piston_out': burst(260, 0.8, 0.45 * k, 0.22, {pitch: r}); tone(95, 0.18 * k, 0.16, {type: 'square', slide: 1.4}); break;
+    case 'piston_in': burst(220, 0.8, 0.4 * k, 0.2, {pitch: r}); tone(120, 0.16 * k, 0.14, {type: 'square', slide: 0.7}); break;
+    case 'door_open': burst(520, 2, 0.3 * k, 0.18, {pitch: r}); tone(180, 0.08 * k, 0.2, {type: 'sawtooth', slide: 1.3}); break;
+    case 'door_close': burst(380, 2, 0.35 * k, 0.12, {pitch: r}); break;
+    case 'iron_door': tone(330, 0.12 * k, 0.35, {type: 'triangle', slide: 0.97}); burst(2400, 4, 0.15 * k, 0.1); break;
+    case 'empty': tone(1600, 0.08 * k, 0.05, {type: 'square'}); tone(1200, 0.06 * k, 0.05, {type: 'square', at: 0.06}); break;
   }
+}
+// note blocks: the instrument (by the block under it) and its pitch, 0–24 from F♯ two octaves up (the game's)
+const NOTE_VOICE = {harp: ['triangle', 1], bass: ['sawtooth', 0.25], snare: [null, 1], hat: [null, 2], basedrum: [null, 0.5], bell: ['sine', 2], flute: ['sine', 1], chime: ['sine', 4],
+  guitar: ['sawtooth', 0.5], xylophone: ['square', 2], iron_xylophone: ['square', 1], cow_bell: ['square', 1], didgeridoo: ['sawtooth', 0.25], bit: ['square', 1], banjo: ['sawtooth', 1], pling: ['sine', 1]};
+export function note(instrument, pitch, k = 1) {
+  if (!ctx || !sound.volume || k <= 0) return;
+  const [type, oct] = NOTE_VOICE[instrument] || NOTE_VOICE.harp, f = 185 * 2 ** (pitch / 12) * oct;
+  if (!type) { burst(f * 4, oct > 1 ? 6 : 1.5, 0.4 * k, oct > 1 ? 0.06 : 0.14); if (instrument === 'basedrum') tone(70, 0.4 * k, 0.18, {type: 'sine', slide: 0.6}); return; }
+  tone(f, 0.22 * k, instrument === 'bell' || instrument === 'chime' ? 1.6 : instrument === 'pling' ? 0.9 : 0.45, {type});
+  if (instrument === 'pling' || instrument === 'bell') tone(f * 2, 0.08 * k, 0.6, {type: 'sine'});
 }
 // rain: a soft hiss that keeps going, as loud as it rains where the player is (quieter under a roof)
 let rainSrc = null, rainGain = null;

@@ -222,6 +222,35 @@ shaped(['###', '#A#', '###'], {'#': 'gold_ingot', A: 'apple'}, 'golden_apple');
 shapeless(['pumpkin', 'sugar', 'egg'], 'pumpkin_pie');
 shapeless(['red_mushroom', 'brown_mushroom', 'bowl'], 'mushroom_stew');
 shapeless(['beetroot', 'beetroot', 'beetroot', 'beetroot', 'beetroot', 'beetroot', 'bowl'], 'beetroot_soup');
+// ---------- redstone ----------
+shaped(['R', 'S'], {R: 'redstone', S: 'stick'}, 'redstone_torch');
+shaped(['S', 'C'], {S: 'stick', C: 'cobblestone'}, 'lever');
+shapeless(['stone'], 'stone_button');
+shaped(['##'], {'#': 'stone'}, 'stone_pressure_plate');
+for (const w of ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak']) { shapeless([`${w}_planks`], `${w}_button`); shaped(['##'], {'#': `${w}_planks`}, `${w}_pressure_plate`); }
+shaped(['##'], {'#': 'gold_ingot'}, 'light_weighted_pressure_plate');
+shaped(['##'], {'#': 'iron_ingot'}, 'heavy_weighted_pressure_plate');
+shaped(['TRT', 'SSS'], {T: 'redstone_torch', R: 'redstone', S: 'stone'}, 'repeater');
+shaped([' T ', 'TQT', 'SSS'], {T: 'redstone_torch', Q: 'quartz', S: 'stone'}, 'comparator');
+shaped([' R ', 'RGR', ' R '], {R: 'redstone', G: 'glowstone'}, 'redstone_lamp');
+shaped(['PPP', 'CIC', 'CRC'], {P: '#planks', C: 'cobblestone', I: 'iron_ingot', R: 'redstone'}, 'piston');
+shaped(['S', 'P'], {S: 'slime_ball', P: 'piston'}, 'sticky_piston');
+shaped(['CCC', 'RRQ', 'CCC'], {C: 'cobblestone', R: 'redstone', Q: 'quartz'}, 'observer');
+shaped(['CCC', 'CBC', 'CRC'], {C: 'cobblestone', B: 'bow', R: 'redstone'}, 'dispenser');
+shaped(['CCC', 'C C', 'CRC'], {C: 'cobblestone', R: 'redstone'}, 'dropper');
+shaped(['I I', 'ICI', ' I '], {I: 'iron_ingot', C: 'chest'}, 'hopper');
+shaped(['PPP', 'PRP', 'PPP'], {P: '#planks', R: 'redstone'}, 'note_block');
+shaped(['GGG', 'QQQ', 'SSS'], {G: 'glass', Q: 'quartz', S: '#wooden_slabs'}, 'daylight_detector');
+shaped(['II', 'II', 'II'], {I: 'iron_ingot'}, 'iron_door', 3);
+shaped(['II', 'II'], {I: 'iron_ingot'}, 'iron_trapdoor');
+shaped([' R ', 'RHR', ' R '], {R: 'redstone', H: 'hay_block'}, 'target');
+shaped(['###', '###', '###'], {'#': 'slime_ball'}, 'slime_block'); shapeless(['slime_block'], 'slime_ball', 9);
+shaped(['I I', 'ISI', 'I I'], {I: 'iron_ingot', S: 'stick'}, 'rail', 16);
+shaped(['G G', 'GSG', 'GRG'], {G: 'gold_ingot', S: 'stick', R: 'redstone'}, 'powered_rail', 6);
+shaped(['I I', 'IPI', 'IRI'], {I: 'iron_ingot', P: 'stone_pressure_plate', R: 'redstone'}, 'detector_rail', 6);
+shaped(['ISI', 'ITI', 'ISI'], {I: 'iron_ingot', S: 'stick', T: 'redstone_torch'}, 'activator_rail', 6);
+shaped(['I I', 'III'], {I: 'iron_ingot'}, 'minecart');
+for (const [load, cart] of [['chest', 'chest_minecart'], ['furnace', 'furnace_minecart'], ['tnt', 'tnt_minecart'], ['hopper', 'hopper_minecart']]) shapeless([load, 'minecart'], cart);
 export const RECIPES = R;
 
 /** What a crafting grid (w × h stacks, row by row) makes: {out, recipe} or null. */

@@ -27,6 +27,54 @@ const wallJoins = n => { const s = shapeOf(n); return s === 'stonewall' || s ===
  * The pieces a shaped block is drawn from: [{box: [x0, y0, z0, x1, y1, z1] (1/16), role}] — role picks the picture:
  * main (the block's own faces), wool (a bed's colour), pillow, wood, latch. null for blocks that are not drawn this way.
  */
+// ---------- redstone ----------
+// levers and buttons hang on a face: state & 7 — 0/1 on a floor (lying along z / x), 2/3 under a ceiling, 4–7 on a wall
+// facing south, west, north, east; the block they hang on lies that way (as FACES: 3 down, 2 up, 5 north, 0 east …)
+export const ATTACHED = [3, 3, 2, 2, 5, 0, 4, 1];
+export const LEVER_BASE = [[5, 0, 4, 11, 3, 12], [4, 0, 5, 12, 3, 11], [5, 13, 4, 11, 16, 12], [4, 13, 5, 12, 16, 11], [5, 4, 0, 11, 12, 3], [13, 4, 5, 16, 12, 11], [5, 4, 13, 11, 12, 16], [0, 4, 5, 3, 12, 11]];
+const button = (a, d) => [[6, 0, 5, 10, d, 11], [5, 0, 6, 11, d, 10], [6, 16 - d, 5, 10, 16, 11], [5, 16 - d, 6, 11, 16, 10], [5, 6, 0, 11, 10, d], [16 - d, 6, 5, 16, 10, 11], [5, 6, 16 - d, 11, 10, 16], [0, 6, 5, d, 10, 11]][a];
+// a piston pushed out: its base the back 12 of the block; its head a plate at the far side and the arm back into the base
+// (state & 7: the way the head points, as FACES)
+const PISTON_BASE = [[0, 0, 0, 12, 16, 16], [4, 0, 0, 16, 16, 16], [0, 0, 0, 16, 12, 16], [0, 4, 0, 16, 16, 16], [0, 0, 0, 16, 16, 12], [0, 0, 4, 16, 16, 16]];
+const HEAD_PLATE = [[12, 0, 0, 16, 16, 16], [0, 0, 0, 4, 16, 16], [0, 12, 0, 16, 16, 16], [0, 0, 0, 16, 4, 16], [0, 0, 12, 16, 16, 16], [0, 0, 0, 16, 16, 4]];
+const HEAD_ARM = [[-4, 6, 6, 12, 10, 10], [4, 6, 6, 20, 10, 10], [6, -4, 6, 10, 12, 10], [6, 4, 6, 10, 20, 10], [6, 6, -4, 10, 10, 12], [6, 6, 4, 10, 10, 20]];
+// a hopper: the bowl (four walls round a floor), the middle, and the spout down or to a side (state & 7: FACES 3, 0, 1, 4, 5)
+const HOPPER_SPOUT = {3: [6, 0, 6, 10, 4, 10], 0: [12, 4, 6, 16, 8, 10], 1: [0, 4, 6, 4, 8, 10], 4: [6, 4, 12, 10, 8, 16], 5: [6, 4, 0, 10, 8, 4]};
+// what dust joins: a block that gives power (or a repeater along its way, an observer with its back to it)
+const RS_KIND = BLOCKS.map(b => b.rs || '');
+const HSIDES = [[0, 1, 0], [1, -1, 0], [4, 0, 1], [5, 0, -1]];
+const OPP6 = [1, 0, 3, 2, 5, 4];
+/** Does redstone carry power through this block (a full solid one — not glass, a block of redstone, an observer)? */
+export const conducts = v => !!BLOCKS[v & 0xFFF]?.opaque && !['block', 'observer', 'piston'].includes(RS_KIND[v & 0xFFF]);
+function dustJoins(n, f) {
+  const k = RS_KIND[n & 0xFFF], m = n >>> 12;
+  if (!k || k === 'lamp' || k === 'piston' || k === 'head' || k === 'note' || k === 'tnt' || k === 'bell' || k === 'hopper' || k === 'dispenser' || k === 'dropper') return false;
+  if (k === 'repeater') return (f === 0 || f === 1) === ((m & 3) % 2 === 1);
+  if (k === 'observer') return (m & 7) === f;
+  if (k === 'rail') return BLOCKS[n & 0xFFF].rail === 'detector';
+  return true;
+}
+/**
+ * Which ways redstone dust runs (the game's): for each side — east, west, south, north (FACES 0, 1, 4, 5) — 0 not, 1
+ * along the ground (to dust beside it or a step down, or to what gives or takes power), 2 also up the side of the
+ * block there to dust on top of it. Joined nowhere it runs all four ways; joined one way, straight through.
+ */
+export function wireLinks(near) {
+  const out = [0, 0, 0, 0], high = conducts(near(0, 1, 0));
+  HSIDES.forEach(([f, dx, dz], i) => {
+    const n = near(dx, 0, dz);
+    if (RS_KIND[n & 0xFFF] === 'wire' || dustJoins(n, f)) out[i] = 1;
+    else if (!high && BLOCKS[n & 0xFFF]?.opaque && RS_KIND[near(dx, 1, dz) & 0xFFF] === 'wire') out[i] = 2;
+    else if (!BLOCKS[n & 0xFFF]?.opaque && RS_KIND[near(dx, -1, dz) & 0xFFF] === 'wire') out[i] = 1;
+  });
+  const n = out.filter(Boolean).length;
+  if (!n) return [1, 1, 1, 1];
+  if (n === 1) { const i = out.findIndex(Boolean); out[i ^ 1] = out[i ^ 1] || 1; }
+  return out;
+}
+export const WIRE_SIDES = HSIDES;
+/** Is a rail's shape (0–9, the game's) a slope? 2–5 go up to the east, west, north, south. */
+export const railSlope = m => m >= 2 && m <= 5;
 export function pieces(v, near = () => 0) {
   const id = v & 0xFFF, meta = v >>> 12, b = BLOCKS[id];
   const f = meta & 3;
@@ -115,6 +163,18 @@ export function pieces(v, near = () => 0) {
       const age = Math.min(2, meta >> 2), hw = [2, 3, 4][age], h = [5, 7, 9][age], y0 = 12 - h;
       return [{box: [[8 - hw, y0, 15 - 2 * hw, 8 + hw, 12, 15], [1, y0, 8 - hw, 1 + 2 * hw, 12, 8 + hw], [8 - hw, y0, 1, 8 + hw, 12, 1 + 2 * hw], [15 - 2 * hw, y0, 8 - hw, 15, 12, 8 + hw]][f], role: 'main'}];
     }
+    case 'button': return [{box: button(meta & 7, meta & 8 ? 1 : 2), role: 'main'}];
+    case 'plate': return [{box: [1, 0, 1, 15, 1, 15], role: 'main'}];
+    case 'lever': return [{box: LEVER_BASE[meta & 7], role: 'main'}];
+    case 'detector': return [{box: [0, 0, 0, 16, 6, 16], role: 'main'}];
+    case 'repeater': case 'comparator': return [{box: [0, 0, 0, 16, 2, 16], role: 'main'}];
+    case 'piston': return [{box: meta & 8 ? PISTON_BASE[meta & 7] : [0, 0, 0, 16, 16, 16], role: 'main'}];
+    case 'piston_head': return [{box: HEAD_PLATE[meta & 7], role: 'main'}, {box: HEAD_ARM[meta & 7], role: 'arm'}];
+    case 'hopper': {
+      const out = [[0, 10, 0, 16, 16, 2], [0, 10, 14, 16, 16, 16], [0, 10, 2, 2, 16, 14], [14, 10, 2, 16, 16, 14]].map(box => ({box, role: 'main'}));
+      out.push({box: [2, 10, 2, 14, 11, 14], role: 'inside'}, {box: [4, 4, 4, 12, 10, 12], role: 'main'}, {box: HOPPER_SPOUT[meta & 7] || HOPPER_SPOUT[3], role: 'main'});
+      return out;
+    }
     case 'anvil': {
       // the game's: a wide foot, a narrow waist, the long top lying along the way it faces
       const parts = [[2, 0, 2, 14, 4, 14], [4, 4, 3, 12, 5, 13], [6, 5, 4, 10, 10, 12], [3, 10, 0, 13, 16, 16]];
@@ -124,6 +184,8 @@ export function pieces(v, near = () => 0) {
   return null;
 }
 const toBlock = list => list.map(({box}) => box.map(px));
+/** The same, kept inside the block (a piston head's arm reaches into the base). */
+const inBlock = list => list.map(({box}) => box.map(v => px(Math.max(0, Math.min(16, v)))));
 
 /** Boxes that stop the player. near: the blocks around (for fences, panes). */
 export function collisionBoxes(v, near = () => 0) {
@@ -139,6 +201,7 @@ export function collisionBoxes(v, near = () => 0) {
     case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
     case 'brewing': return [[px(7), 0, px(7), px(9), px(14), px(9)], [px(2), 0, px(1), px(15), px(2), px(15)]];
     case 'lectern': case 'bell': case 'cocoa': return toBlock(pieces(v, near));
+    case 'repeater': case 'comparator': case 'piston': case 'piston_head': case 'hopper': case 'detector': return inBlock(pieces(v, near));
   }
   if (!b.solid) {
     if (b.shape === 'layer' && meta > 0) return [[0, 0, 0, 1, px(meta * 2), 1]];
@@ -181,6 +244,10 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'vine': { const out = VINE.filter((q, d) => meta & 1 << d); return out.length ? out : [VINE[0]]; }
     case 'tall': return [[px(2), 0, px(2), px(14), 1, px(14)]];
     case 'lectern': case 'bell': case 'cocoa': return toBlock(pieces(v, near));
+    case 'wire': return [[0, 0, 0, 1, px(1), 1]];
+    case 'rail': return [[0, 0, 0, 1, px(railSlope(BLOCKS[id].rail === 'rail' ? meta : meta & 7) ? 8 : 2), 1]];
+    case 'lever': { const [x0, y0, z0, x1, y1, z1] = LEVER_BASE[meta & 7], a = meta & 7; return [(a < 2 ? [4, 0, 4, 12, 7, 12] : a < 4 ? [4, 9, 4, 12, 16, 12] : [Math.min(x0, 16 - x1 === 0 ? 10 : x0), 3, Math.min(z0, 16 - z1 === 0 ? 10 : z0), Math.max(x1, x0 === 0 ? 6 : x1), 13, Math.max(z1, z0 === 0 ? 6 : z1)]).map(px)]; }
+    case 'button': case 'plate': case 'repeater': case 'comparator': case 'piston': case 'piston_head': case 'hopper': case 'detector': return inBlock(pieces(v, near));
     case 'stairs': case 'fence': case 'gate': case 'pane': case 'door': case 'trapdoor': case 'chest': case 'anvil': case 'stonewall': case 'carpet': return toBlock(pieces(v, near));
     default: return FULL;
   }

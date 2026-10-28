@@ -79,6 +79,7 @@ export const MODELS = {
     part('head', [0, 0], [[-4, -4, -4, 8, 8, 8]]),
     ...Array.from({length: 12}, (_, i) => part(`rod${i}`, [0, 16], [[0, 0, 0, 2, 8, 2]])),
   ]},
+  slime: {skin: [64, 32], size: [0.52, 0.52], parts: [part('body', [0, 0], [[-4, 16, -4, 8, 8, 8]])]},
   magma_cube: {skin: [64, 32], size: [0.52, 0.52], parts: [
     ...Array.from({length: 8}, (_, i) => part(`slice${i}`, i === 2 ? [24, 10] : i === 3 ? [24, 19] : [0, i], [[-4, 16 + i, -4, 8, 1, 8]])),
     part('core', [0, 16], [[-2, 18, -2, 4, 4, 4]]),
@@ -377,6 +378,11 @@ export const OWN_SKINS = {
     for (let k = 0; k < 20; k++) px(Math.floor(r() * 32), Math.floor(r() * 16), hex('#a85a08'));
     const [fx, fy] = front(0, 0, 8, 8);
     area(fx + 1, fy + 3, 2, 1, ['#2a1404']); area(fx + 5, fy + 3, 2, 1, ['#2a1404']); area(fx + 2, fy + 6, 4, 1, ['#6a3008']);
+  }),
+  slime: () => skin(64, 32, 25, ({area, box, front, px, hex}) => {
+    box(0, 0, 8, 8, 8, ['#6fbf4f', '#78c858', '#68b448', '#80d060']);
+    const [fx, fy] = front(0, 0, 8, 8);
+    area(fx + 1, fy + 2, 2, 2, ['#2e5a24']); area(fx + 5, fy + 2, 2, 2, ['#2e5a24']); px(fx + 4, fy + 5, hex('#2e5a24'));
   }),
   magma_cube: () => skin(64, 32, 24, ({area, box, front, px, hex, r}) => {
     const crust = ['#3a1a10', '#4a2214', '#2e140c'];

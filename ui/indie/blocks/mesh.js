@@ -6,10 +6,13 @@
 // A vertex is 16 bytes: x, y, z (uint16, 1/16 block, from one block before the section's corner), texture layer (uint16), u, v (uint8, 0–16),
 // sky light, block light (uint8, level × 17), shade (uint8: bits 0–1 corner shade, 2–4 face, 5–7 wave kind), tint r, g, b.
 import {BLOCKS, ID, idOf, metaOf} from './blocks.js';
-import {pieces} from './shapes.js';
+import {pieces, wireLinks, WIRE_SIDES, LEVER_BASE, railSlope} from './shapes.js';
 
 // shapes drawn from their pieces (shapes.js)
-const PIECED = new Set(['stairs', 'fence', 'gate', 'pane', 'door', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'brewing', 'portal', 'composter', 'lectern', 'bell', 'stonewall', 'carpet']);
+const PIECED = new Set(['stairs', 'fence', 'gate', 'pane', 'door', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'brewing', 'portal', 'composter', 'lectern', 'bell', 'stonewall', 'carpet', 'button', 'plate', 'detector', 'hopper']);
+// redstone dust's colour at each power (the game's: dark red at nothing, bright red at full)
+const DUST = Array.from({length: 16}, (_, p) => { const f = p / 15, c = v => Math.round(Math.max(0, Math.min(1, v)) * 255); return c(f * 0.6 + (f > 0 ? 0.4 : 0.3)) << 16 | c(f * f * 0.7 - 0.5) << 8 | c(f * f * 0.6 - 0.7); });
+const OPP = [1, 0, 3, 2, 5, 4], AXIS = [0, 0, 1, 1, 2, 2];
 
 export const STRIDE = 16;
 const P = 18, P2 = P * P;
@@ -68,6 +71,7 @@ const CORNER_UV = [[0, 16], [16, 16], [16, 0], [0, 0]];
 // the game's texture coordinates for a face of a box, from a point on it (1/16 units)
 const AUTO_UV = [p => [16 - p[2], 16 - p[1]], p => [p[2], 16 - p[1]], p => [p[0], p[2]], p => [p[0], 16 - p[2]], p => [p[0], 16 - p[1]], p => [16 - p[0], 16 - p[1]]];
 const CORNER_SIGN = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+const rotTo = (f, d) => { const n = FACE[d].n, F = FACE[f], dot = a => a[0] * n[0] + a[1] * n[1] + a[2] * n[2]; return dot(F.v) > 0 ? 0 : dot(F.u) > 0 ? 1 : dot(F.v) < 0 ? 2 : dot(F.u) < 0 ? 3 : 0; };
 
 /** A growable byte buffer of vertices. */
 class Out {
@@ -165,6 +169,15 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
     if (both) for (let c = 3; c >= 0; c--) out.vert(pts[c][0], pts[c][1], pts[c][2], layer, uv[c][0], uv[c][1], lt * 17, lb * 17, f << 2 | flags << 5, tintC);
   }
   const UVQ = [[0, 16], [16, 16], [16, 0], [0, 0]];
+  // a block facing one of six ways (FACES in state & 7; 8 on): its front, its back, and the sides — an observer's top
+  // (the arrow to its face) on the two sides across its line of sight, a dispenser's or dropper's furnace stone
+  const faceTex6 = (b, f, meta) => {
+    const F = meta & 7, on = meta & 8, t = b.tex, vert = F === 2 || F === 3;
+    if (f === F) return [tex(vert && t.frontV ? t.frontV : t.front), 0];
+    if (f === OPP[F]) return [tex(t.back ? (on && t.backOn ? t.backOn : t.back) : vert ? t.top : t.side), 0];
+    if (t.back) return [tex((vert ? f === 4 || f === 5 : f === 2 || f === 3) ? t.top : t.side), rotTo(f, F)];
+    return [tex(vert || f === 2 || f === 3 ? t.top : t.side), 0];
+  };
   const faceTex = (b, f, meta) => {
     const t = b.tex;
     if (!t) return -1;
@@ -178,6 +191,69 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
     if (f === 3) return tex(t.bottom);
     if (b.facing && t.front && f === FRONT[meta & 3]) return tex(t.frontOn && meta & 4 ? t.frontOn : t.front);
     return tex(t.side);
+  };
+
+  /** A rectangle lying flat at height h (blocks) over the cell, [x0, z0]–[x1, z1] in blocks, its picture where it lies. */
+  function flatRect(out, x, h, z, x0, z0, x1, z1, layer, lt, lb, tintC, rot = 0) {
+    const pts = [[x + x0, h, z + z1], [x + x1, h, z + z1], [x + x1, h, z + z0], [x + x0, h, z + z0]];
+    const uv = [[x0 * 16, z1 * 16], [x1 * 16, z1 * 16], [x1 * 16, z0 * 16], [x0 * 16, z0 * 16]];
+    for (let c = 0; c < 4; c++) { const [u, w] = rot ? CORNER_UV[(c + rot) & 3] : uv[c]; out.vert(pts[c][0], pts[c][1], pts[c][2], layer, u, w, lt * 17, lb * 17, 2 << 2, tintC); }
+  }
+  /** A whole square on face f of the cell, moved off blocks out along its normal (negative: inward), its picture turned rot. */
+  function square(out, f, x, y, z, off, layer, rot, lt, lb, tintC) {
+    const F = FACE[f];
+    for (let c = 0; c < 4; c++) {
+      const cu = c === 1 || c === 2 ? 1 : 0, cv = c >= 2 ? 1 : 0, [u, w] = CORNER_UV[(c + rot) & 3];
+      out.vert(x + F.o[0] + F.u[0] * cu + F.v[0] * cv + F.n[0] * off, y + F.o[1] + F.u[1] * cu + F.v[1] * cv + F.n[1] * off, z + F.o[2] + F.u[2] * cu + F.v[2] * cv + F.n[2] * off,
+        layer, u, w, lt * 17, lb * 17, f << 2, tintC);
+    }
+  }
+  /**
+   * A box (1/16) of a block that points one way (a piston, its head): the faces across that way keep the game's picture,
+   * the others show it standing up the way the block points (its top toward the front), from the back of the block.
+   */
+  function axisBox(out, x, y, z, lo, hi, F, texOf, {cull = null, arm = false} = {}) {
+    const own = L(at(x, y, z)), a = AXIS[F], pos = F % 2 === 0;
+    for (let f = 0; f < 6; f++) {
+      const Fc = FACE[f];
+      if (cull && cull[f] && isOpaque(pad[at(x + Fc.n[0], y + Fc.n[1], z + Fc.n[2])])) continue;
+      const layer = texOf(f);
+      if (layer < 0) continue;
+      const nb = L(at(x + Fc.n[0], y + Fc.n[1], z + Fc.n[2])), lt = Math.max(own >> 4, nb >> 4), lb = Math.max(own & 15, nb & 15);
+      const b2 = 3 - a - AXIS[f];
+      for (let c = 0; c < 4; c++) {
+        const cu = c === 1 || c === 2 ? 1 : 0, cv = c >= 2 ? 1 : 0, p = [0, 0, 0];
+        for (let k = 0; k < 3; k++) {
+          if (Fc.n[k] !== 0) p[k] = Fc.n[k] > 0 ? hi[k] : lo[k];
+          else if (Fc.u[k] !== 0) p[k] = (Fc.u[k] > 0) === (cu === 1) ? hi[k] : lo[k];
+          else p[k] = (Fc.v[k] > 0) === (cv === 1) ? hi[k] : lo[k];
+        }
+        let u, w;
+        if (AXIS[f] === a) [u, w] = AUTO_UV[f](p);
+        else { const h = pos ? p[a] : 16 - p[a]; u = p[b2]; w = arm ? 4 + (h + 4) * 0.75 : 16 - h; }
+        out.vert(x + p[0] / 16, y + p[1] / 16, z + p[2] / 16, layer, u, w, lt * 17, lb * 17, f << 2, WHITE);
+      }
+    }
+  }
+  /** Moves the vertices made since s (1/16 units within the cell) through fn([x, y, z]) → [x, y, z]. */
+  function bend(out, s, x, y, z, fn) {
+    const u16 = out.u16;
+    for (let k = s; k < out.n; k++) {
+      const h = k * STRIDE >> 1, q = fn([u16[h] - (x + 1) * 16, u16[h + 1] - (y + 1) * 16, u16[h + 2] - (z + 1) * 16]);
+      u16[h] = Math.round(q[0] + (x + 1) * 16); u16[h + 1] = Math.round(q[1] + (y + 1) * 16); u16[h + 2] = Math.round(q[2] + (z + 1) * 16);
+    }
+  }
+  const TORCH_UV = [[7, 6, 9, 11], [7, 6, 9, 11], [7, 6, 9, 8], [7, 13, 9, 15], [7, 6, 9, 11], [7, 6, 9, 11]];
+  const HANDLE_UV = [[7, 6, 9, 16], [7, 6, 9, 16], [7, 6, 9, 8], [7, 13, 9, 15], [7, 6, 9, 16], [7, 6, 9, 16]];
+  // a lever's handle: out of the base along the face it hangs on, leaning 45° one way (off) or the other (on)
+  const LEVER_FRAME = [[[0, 1, 0], [0, 0, 1], [8, 1, 8]], [[0, 1, 0], [1, 0, 0], [8, 1, 8]], [[0, -1, 0], [0, 0, 1], [8, 15, 8]], [[0, -1, 0], [1, 0, 0], [8, 15, 8]],
+    [[0, 0, 1], [0, 1, 0], [8, 8, 1]], [[-1, 0, 0], [0, 1, 0], [15, 8, 8]], [[0, 0, -1], [0, 1, 0], [8, 8, 15]], [[1, 0, 0], [0, 1, 0], [1, 8, 8]]];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  // a repeater's or comparator's parts, laid out for one facing north (the signal going to −z), turned to its facing
+  const turnXZ = (fc, [x0, y0, z0, x1, y1, z1]) => {
+    const t = ([px, pz]) => fc === 3 ? [16 - pz, px] : fc === 0 ? [16 - px, 16 - pz] : fc === 1 ? [pz, 16 - px] : [px, pz];
+    const [ax, az] = t([x0, z0]), [bx, bz] = t([x1, z1]);
+    return [Math.min(ax, bx), y0, Math.min(az, bz), Math.max(ax, bx), y1, Math.max(az, bz)];
   };
 
   for (let y = 0; y < 16; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
@@ -199,15 +275,67 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
         let rot = 0;
         if (b.axis && (meta & 3) === 1 && f !== 0 && f !== 1) rot = 1;
         if (b.axis && (meta & 3) === 2 && (f === 0 || f === 1)) rot = 1;
+        if (b.facing6) [layer, rot] = faceTex6(b, f, meta);
         cubeFace(out, x, y, z, f, layer, t, rot, ORE[id] ? 5 : leaf && wave ? 1 : 0);
         if (id === ID.grass_block && meta !== 1 && f !== 2 && f !== 3) cubeFace(out, x, y, z, f, tex('grass_block_side_overlay'), tintC);
+      }
+    } else if (shape === 'wire') {
+      // dust: the blob in the middle and a line out to each side it runs to (up the side of a block where it climbs),
+      // coloured by its power
+      const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)], links = wireLinks(near), L0 = L(i), lt = L0 >> 4, lb = L0 & 15, c = DUST[meta & 15], h = y + 1 / 16;
+      flatRect(out, x, h, z, 0, 0, 1, 1, tex(b.tex.all), lt, lb, c);
+      WIRE_SIDES.forEach(([f, dx, dz], k) => {
+        if (!links[k]) return;
+        const [x0, z0, x1, z1] = dx > 0 ? [0.5, 0, 1, 1] : dx < 0 ? [0, 0, 0.5, 1] : dz > 0 ? [0, 0.5, 1, 1] : [0, 0, 1, 0.5];
+        flatRect(out, x, h, z, x0, z0, x1, z1, tex(dx ? b.tex.line1 : b.tex.line0), lt, lb, c);
+        if (links[k] === 2) square(out, OPP[f], x + dx, y, z + dz, 1 / 16, tex(b.tex.line0), 0, lt, lb, c);
+      });
+    } else if (shape === 'repeater' || shape === 'comparator') {
+      // a stone slab with the wire's picture on top, turned the way the signal goes, and its little torches: a repeater's
+      // at the front and one set back by its delay; a comparator's two at the back (lit when it gives power) and one at
+      // the front (lit when it subtracts)
+      const fc = meta & 3, L0 = L(i), lt = L0 >> 4, lb = L0 & 15, sideL = tex(b.tex.side);
+      box(out, x, y, z, 0, 0, 0, 16, 2, 16, f => f === 2 ? -1 : sideL, WHITE, {cull: [0, 0, 0, 1, 0, 0]});
+      flatRect(out, x, y + 2 / 16, z, 0, 0, 1, 1, tex(b.tex.top), lt, lb, WHITE, [2, 3, 0, 1][fc]);
+      const on = tex(b.tex.torch), off = tex('redstone_torch_off'), lit = tex('redstone_torch');
+      const torches = shape === 'repeater' ? [[7, 2, on], [7, 6 + 2 * ((meta >> 2) & 3), on]] : [[7, 2, meta & 4 ? lit : off], [3, 11, on], [11, 11, on]];
+      for (const [tx, tz, layer] of torches) { const q = turnXZ(fc, [tx, 2, tz, tx + 2, 7, tz + 2]); box(out, x, y, z, q[0], q[1], q[2], q[3], q[4], q[5], () => layer, WHITE, {uvs: TORCH_UV}); }
+    } else if (shape === 'lever') {
+      // the cobblestone base on the face it hangs on, and the handle leaning out of it
+      const a = meta & 7, [bx0, by0, bz0, bx1, by1, bz1] = LEVER_BASE[a];
+      box(out, x, y, z, bx0, by0, bz0, bx1, by1, bz1, () => tex(b.tex.all), WHITE);
+      const s = out.n, [N, T, P] = LEVER_FRAME[a], B = cross(T, N), lean = (meta & 8 ? 1 : -1) * (a >= 4 ? -1 : 1) * Math.PI / 4, cs = Math.cos(lean), sn = Math.sin(lean);
+      box(out, x, y, z, 7, 0, 7, 9, 10, 9, () => tex(b.tex.handle), WHITE, {uvs: HANDLE_UV});
+      bend(out, s, x, y, z, ([px, py, pz]) => {
+        const qx = px - 8, qy = py * cs - (pz - 8) * sn, qz = py * sn + (pz - 8) * cs;
+        return [P[0] + B[0] * qx + N[0] * qy + T[0] * qz, P[1] + B[1] * qx + N[1] * qy + T[1] * qz, P[2] + B[2] * qx + N[2] * qy + T[2] * qz];
+      });
+    } else if (shape === 'piston' || shape === 'piston_head') {
+      // the head's face (wood; slime on a sticky one) the way it points, the back, the sides standing toward the front;
+      // pushed out, the base's front shows the inside and the head is a plate on an arm
+      const F = meta & 7, ext = shape === 'piston' && meta & 8;
+      for (const {box: bx, role} of pieces(v)) {
+        const texOf = f => role === 'arm' ? tex(b.tex.side) : shape === 'piston_head' ? (f === F || f === OPP[F] ? tex(meta & 8 ? b.tex.sticky : b.tex.top) : tex(b.tex.side))
+          : f === F ? tex(ext ? b.tex.inner : b.tex.top) : f === OPP[F] ? tex(b.tex.bottom) : tex(b.tex.side);
+        axisBox(out, x, y, z, bx.slice(0, 3), bx.slice(3), F, texOf, {cull: role === 'arm' ? null : ext ? [1, 1, 1, 1, 1, 1].map((c, f) => f === F ? 0 : 1) : [1, 1, 1, 1, 1, 1], arm: role === 'arm'});
+      }
+    } else if (shape === 'rail') {
+      // a rail on the ground (its picture turned along its way; a bend from the corner picture), or up a slope
+      const kind = b.rail, m = kind === 'rail' ? meta : meta & 7, L0 = L(i), lt = L0 >> 4, lb = L0 & 15, h = 1 / 16;
+      const layer = tex(m >= 6 ? b.tex.corner : kind !== 'rail' && meta & 8 ? b.tex.on : b.tex.all);
+      if (!railSlope(m)) flatRect(out, x, y + h, z, 0, 0, 1, 1, layer, lt, lb, WHITE, m >= 6 ? m - 6 : m === 1 ? 1 : 0);
+      else {
+        // 2 up to the east, 3 west, 4 north, 5 south: the low edge on the ground, the high one a block up
+        const up = [[1, 0], [-1, 0], [0, -1], [0, 1]][m - 2], hy = (px, pz) => y + h + ((up[0] ? (up[0] > 0 ? px : 1 - px) : (up[1] > 0 ? pz : 1 - pz)));
+        const pts = [[0, 1], [1, 1], [1, 0], [0, 0]].map(([px, pz]) => [x + px, hy(px, pz), z + pz]), rot = up[0] ? 1 : 0;
+        quad(out, pts, layer, [0, 1, 2, 3].map(c => CORNER_UV[(c + rot) & 3]), lt, lb, WHITE, 0, 2, true);
       }
     } else if (PIECED.has(shape)) {
       const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)];
       for (const {box: [x0, y0, z0, x1, y1, z1], role} of pieces(v, near)) {
         const texFor = f => role === 'main' ? (shape === 'pane' && (f === 2 || f === 3) ? tex(b.tex.edge || b.tex.all) : faceTex(b, f, meta))
           : role === 'door_top' ? tex(b.tex.top) : role === 'door_bottom' ? tex(b.tex.bottom) : role === 'wood' ? tex('oak_planks') : role === 'latch' ? tex('iron_block') : role === 'base' ? tex(b.tex.base) : role === 'post' ? tex(b.tex.post)
-          : role === 'compost' ? tex('composter_compost') : role === 'ready' ? tex('composter_ready') : tex('white_wool');
+          : role === 'compost' ? tex('composter_compost') : role === 'ready' ? tex('composter_ready') : role === 'inside' ? tex(b.tex.inside) : tex('white_wool');
         const t = role === 'wool' ? parseInt(b.color.slice(1), 16) : role === 'main' ? tintC : WHITE;
         // a portal's sheet shows no edge where it meets more of itself
         const faces = shape === 'portal' ? FACE.reduce((m, F, f) => (pad[at(x + F.n[0], y + F.n[1], z + F.n[2])] & 0xFFF) === id ? m & ~(1 << f) : m, 63) : 63;

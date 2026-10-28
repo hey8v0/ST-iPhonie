@@ -16,14 +16,17 @@ export function itemLook(id, s = null) {
   if (s?.pot) return {flat: LAYER.potion_overlay, tint: potionColor(s.pot), over: LAYER[id]};
   const info = itemInfo(id);
   const b = info?.block;
+  // a block whose item has its own picture (repeaters, comparators, the hopper, the iron door, the lever)
+  if (b?.itemIcon) return {flat: LAYER[b.itemIcon] ?? 0, tint: 0xFFFFFF};
   // doors have a flat picture of their own; other shaped blocks show as a small block of what they are made of
   if (b && LAYER[b.name] !== undefined && !b.tex?.all) return {flat: LAYER[b.name], tint: 0xFFFFFF};
-  if (b && ['cube', 'slab', 'farmland', 'cactus', 'layer', 'stairs', 'fence', 'gate', 'pane', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'stonewall', 'carpet'].includes(b.shape) && b.tex) {
+  if (b && ['cube', 'slab', 'farmland', 'cactus', 'layer', 'stairs', 'fence', 'gate', 'pane', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'stonewall', 'carpet', 'piston', 'detector'].includes(b.shape) && b.tex) {
     const t = b.tex, L = n => LAYER[n] ?? 0, tint = b.color ? parseInt(b.color.slice(1), 16) : tintNum(b.tint);
     if (t.all) return {cube: Array(6).fill(L(t.all)), tints: Array(6).fill(tint), half: b.shape === 'slab' || b.shape === 'layer' || b.shape === 'carpet'};
+    if (b.facing6) { const s = L(t.side), top = L(t.top); return {cube: [s, s, top, top, L(t.front || t.top), s], tints: Array(6).fill(0xFFFFFF)}; }
     const side = L(t.side), front = t.front ? L(t.front) : side;
     const grass = b.name === 'grass_block';
-    return {cube: [side, side, L(t.top), L(t.bottom), front, side], tints: [grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint, tint, 0xFFFFFF, grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint], half: b.shape === 'slab'};
+    return {cube: [side, side, L(t.top), L(t.bottom), front, side], tints: [grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint, tint, 0xFFFFFF, grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint], half: b.shape === 'slab' || b.shape === 'detector'};
   }
   const name = b ? (b.name === 'wheat' ? 'wheat_stage7' : b.tex?.all || b.tex?.side) : info?.icon || id;
   return {flat: LAYER[name] ?? 0, tint: b ? tintNum(b.tint) : packed.has(name) && info?.tint ? tintNum(info.tint) : 0xFFFFFF};
@@ -124,7 +127,7 @@ export class Entities {
     const S = {smoke: [4, 0x4a4a4a, 0.02, 0.1, 30, -0.005], poof: [14, 0xdddddd, 0.08, 0.12, 20, -0.01], heart: [6, 0xff3a5a, 0.02, 0.12, 30, -0.004], crit: [10, 0xfff2b0, 0.15, 0.08, 14, 0.02],
       explosion: [40, 0x8a8a8a, 0.35, 0.35, 30, -0.01], meal: [12, 0x7ce05a, 0.06, 0.07, 20, -0.005], magic: [10, 0x9a6aff, 0.12, 0.07, 16, 0.01],
       bubble: [3, 0xd8ecff, 0.02, 0.05, 12, -0.01], splash: [8, 0x9ac8ff, 0.08, 0.05, 14, 0.03], swirl: [1, 0xffffff, 0.03, 0.07, 18, -0.006], shatter: [40, 0xffffff, 0.18, 0.08, 22, 0.01],
-      portal: [2, 0xa04cff, 0.08, 0.06, 26, -0.004], flame: [2, 0xffa020, 0.03, 0.07, 12, -0.008]}[kind];
+      portal: [2, 0xa04cff, 0.08, 0.06, 26, -0.004], note: [1, 0x40ff40, 0.01, 0.13, 14, -0.008], flame: [2, 0xffa020, 0.03, 0.07, 12, -0.008]}[kind];
     if (!S) return;
     const [n, base, spread, size, life, g] = S, tint = color ?? base, layer = LAYER.white_wool ?? 0;
     for (let i = 0; i < n; i++) this.particles.push({x: x + (Math.random() - 0.5) * spread * 4, y: y + (Math.random() - 0.5) * spread * 4, z: z + (Math.random() - 0.5) * spread * 4,

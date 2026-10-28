@@ -9,6 +9,8 @@ import {villagersIn} from './village.js';
 import {lodTile, lodPlan} from './lod.js';
 import {BLOCKS, ID, MINY, HEIGHT, SECTIONS, SEA, withMeta, dropsOf, itemInfo} from './blocks.js';
 import {meshSection, sectionVis, ALL_OPEN} from './mesh.js';
+import {Redstone} from './redstone.js';
+import {ATTACHED} from './shapes.js';
 import {rng} from './noise.js';
 
 const N = BLOCKS.length;
@@ -27,7 +29,9 @@ const GRAVITY = new Set(BLOCKS.filter(b => b.gravity).map(b => b.id));
 const CROP = new Set([ID.wheat, ID.carrots, ID.potatoes, ID.beetroots]);
 const PAIRED = new Set(BLOCKS.filter(b => b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall').map(b => b.id));
 const FACE_DIR = [[0, 1], [-1, 0], [0, -1], [1, 0]];
-const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet'].includes(b.shape)).map(b => b.id));
+const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'plate', 'rail', 'lever', 'button', 'piston_head'].includes(b.shape)).map(b => b.id));
+// redstone that lies on the ground: on a full block, the top half of a slab or a hopper
+const ON_GROUND = new Set(['wire', 'repeater', 'comparator', 'plate', 'rail']);
 // the tall flowers: bone meal gives another one
 const TALL_FLOWERS = new Set([ID.sunflower, ID.lilac, ID.rose_bush, ID.peony]);
 const hexRGB = h => parseInt(h.slice(1), 16);
@@ -42,6 +46,7 @@ export class World {
     this.seed = seed; this.tex = tex; this.post = post; this.store = store; this.radius = radius; this.worldId = worldId;
     this.dim = dim; this.nether = dim === 'nether'; this.sky = this.nether ? 0 : 0xF0;
     this.cols = new Map(); this.center = [0, 0]; this.dirty = new Set(); this.saved = new Set(); this.loading = new Set();
+    this.redstone = new Redstone(this);
     this.tick = 0; this.due = new Map(); this.ack = 0; this.wave = true;
     this.r = rng(seed ^ 0x5bd1e995);
     this.decay = new Map();
@@ -49,6 +54,7 @@ export class World {
     this.lodRadius = 0; this.lodSent = new Map(); this.pregen = null;
   }
   col(cx, cz) { return this.cols.get(key(cx, cz)); }
+  has(x, z) { return this.cols.has(key(x >> 4, z >> 4)); }
   // ---------- blocks and light ----------
   get(x, y, z) {
     if (y < MINY || y >= MINY + HEIGHT) return 0;
@@ -201,7 +207,7 @@ export class World {
   }
   // ---------- changing blocks ----------
   /** Sets a block and puts its light right; returns the old value. */
-  set(x, y, z, v, {from = 'world'} = {}) {
+  set(x, y, z, v, {from = 'world', quietWire = false} = {}) {
     if (y < MINY || y >= MINY + HEIGHT) return 0;
     const c = this.cols.get(key(x >> 4, z >> 4));
     if (!c) return 0;
@@ -226,6 +232,7 @@ export class World {
       this.spread(blkRefill, false);
     }
     this.react(x, y, z);
+    this.redstone.changed(x, y, z, old, v, quietWire);
     // a log gone: the leaves around it may have lost their tree
     if (BLOCKS[old & 0xFFF].name.endsWith('_log') && !BLOCKS[v & 0xFFF].name.endsWith('_log')) {
       for (let dy = -4; dy <= 4; dy++) for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
@@ -242,7 +249,7 @@ export class World {
       if (LIQUID.has(id)) this.schedule(nx, ny, nz, id === ID.water ? 5 : this.nether ? 10 : 30);
       else if (id === ID.nether_portal) this.schedule(nx, ny, nz, 1);
       else if (GRAVITY.has(id)) this.schedule(nx, ny, nz, 2);
-      else if (PLANT.has(id) && dy !== -1) this.schedule(nx, ny, nz, 1);
+      else if (PLANT.has(id)) this.schedule(nx, ny, nz, 1);
       else if (PAIRED.has(id) || id === ID.vine) this.schedule(nx, ny, nz, 1);
     }
   }
@@ -263,6 +270,7 @@ export class World {
       for (const [k, t] of this.due) if (t <= this.tick) now.push(k);
       for (const k of now) { this.due.delete(k); const [x, y, z] = k.split(',').map(Number); this.update(x, y, z); }
     }
+    this.redstone.step();
     // random ticks near the player
     const [px, pz] = this.center;
     for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
@@ -440,6 +448,10 @@ export class World {
     }
     if (b.shape === 'wall') { const [dx, dz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][v >>> 12 & 3]; return OPAQUE[this.get(x + dx, y, z + dz) & 0xFFF] === 1; }
     if (b.shape === 'lantern') return !!below && BLOCKS[bid].solid;
+    if (ON_GROUND.has(b.shape)) return OPAQUE[bid] === 1 || (BLOCKS[bid].shape === 'slab' && below >>> 12 >= 1) || bid === ID.hopper;
+    if (b.shape === 'lever' || b.shape === 'button') { const [dx, dy, dz] = DIRS[ATTACHED[v >>> 12 & 7]]; return OPAQUE[this.get(x + dx, y + dy, z + dz) & 0xFFF] === 1; }
+    // a piston's head: its piston, pushed out, right behind it
+    if (b.shape === 'piston_head') { const F = v >>> 12 & 7, [dx, dy, dz] = DIRS[F ^ 1], base = this.get(x + dx, y + dy, z + dz); return BLOCKS[base & 0xFFF].shape === 'piston' && (base >>> 12) === (F | 8); }
     if (b.shape === 'carpet') return !!below && !LIQUID.has(bid);
     if (id === ID.cocoa) { const [dx, dz] = FACE_DIR[v >>> 12 & 3]; return (this.get(x + dx, y, z + dz) & 0xFFF) === ID.jungle_log; }
     if (CROP.has(id)) return bid === ID.farmland;
@@ -673,7 +685,9 @@ export class World {
     const k = key(cx, cz);
     if (this.cols.has(k)) return;
     const c = this.store?.has(cx, cz) ? await this.store.load(cx, cz).catch(() => null) : null;
-    if (!this.cols.has(k)) this.addColumn(c || (this.nether ? generateNether : generateColumn)(this.seed, cx, cz));
+    if (this.cols.has(k)) return;
+    this.addColumn(c || (this.nether ? generateNether : generateColumn)(this.seed, cx, cz));
+    if (c) this.redstone.scan(c);
   }
   /**
    * A new portal for someone coming out near (x, y, z): on the ground nearby with room round it (the overworld's
@@ -712,10 +726,12 @@ export class World {
       // a column made ahead of time is new to the world: its animals come now
       let fresh = !!c?.pregen;
       if (c) c.pregen = false;
+      const stored = !!c;
       if (!c) { c = (this.nether ? generateNether : generateColumn)(this.seed, cx, cz); fresh = true; }
       this.loading.delete(k);
       if (this.cols.has(k)) continue;
       this.addColumn(c);
+      if (stored) this.redstone.scan(c);
       if (fresh && !this.nether) { const herd = this.herdFor(c); if (herd.length) this.post({type: 'herd', cx, cz, list: herd}); }
     }
     // 2. meshes: changed sections of columns whose neighbours are all here, nearest first

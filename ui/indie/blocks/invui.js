@@ -42,10 +42,11 @@ const KINDS = [
   ['color', '染色方块', n => catOf(n) === 'color' || /_wool$|_bed$/.test(n)],
   ['nature', '自然方块', n => { const b = BLOCKS.find(x => x.name === n); return !!b && /grass|dirt|podzol|sand|gravel|clay|ore$|_log$|leaves|sapling|fern|dandelion|poppy|orchid|allium|bluet|daisy|cornflower|lily|dead_bush|sugar_cane|cactus|mushroom|snow|ice|pumpkin|melon|moss|mud|bedrock|stone$|deepslate$/.test(n); }],
   ['use', '功能方块', n => /crafting|furnace|(^|_)chest$|torch|ladder|lantern|glowstone|tnt|bookshelf|_bed$|door|gate|enchanting|anvil|brewing/.test(n)],
-  ['tools', '工具', n => /_pickaxe|_axe|_shovel|_hoe|bucket|shears|flint_and_steel/.test(n)],
+  ['redstone', '红石', n => catOf(n) === 'redstone' || ['redstone', 'tnt', 'chest', 'barrel', 'furnace', 'lectern', 'bell', 'oak_door', 'oak_trapdoor', 'oak_fence_gate'].includes(n)],
+  ['tools', '工具', n => /_pickaxe|_axe|_shovel|_hoe|bucket|shears|flint_and_steel|minecart/.test(n)],
   ['combat', '战斗', n => /_sword|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
   ['food', '食物与饮品', n => FOODY(n) || BOTTLES.includes(n)],
-  ['items', '原材料', n => !BLOCKS.find(x => x.name === n) && !FOODY(n) && !BOTTLES.includes(n) && !itemInfo(n)?.spawn && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket|shears|flint_and_steel|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
+  ['items', '原材料', n => !BLOCKS.find(x => x.name === n) && !FOODY(n) && !BOTTLES.includes(n) && !itemInfo(n)?.spawn && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket|shears|flint_and_steel|minecart|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
   ['spawn', '刷怪蛋', n => !!itemInfo(n)?.spawn],
   ['bag', '背包', null],
 ];
@@ -222,7 +223,9 @@ export class InventoryUI {
       body = `<h3>${esc(PROFESSIONS[v.prof]?.zh || '村民')} · ${LEVELS[lv]}</h3><div class="vxp"><i style="width:${Math.round(bar * 100)}%"></i></div>`
         + `<div class="trade"><div class="offers">${sec('of').map(offer).join('')}</div><div class="tpay">${sec('t').map(st => slot(st)).join('')}<div class="arrow"></div>${slot(sec('to')[0], ' big')}</div></div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'chest') {
-      body = `<h3>${esc(this.data.title || '箱子')}</h3><div class="slots">${sec('chest').map(s => slot(s)).join('')}</div><h3>物品栏</h3>${bag}`;
+      // a chest's three rows; a dispenser's or dropper's 3 × 3, a hopper's five (cols)
+      const cols = this.data.cols || 9, grid = cols === 9 ? '' : ` style="grid-template-columns:repeat(${cols},calc(18*var(--u)));width:max-content;margin:0 auto"`;
+      body = `<h3>${esc(this.data.title || '箱子')}</h3><div class="slots"${grid}>${sec('chest').map(s => slot(s)).join('')}</div><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'enchant') {
       // each offer: the level it needs (green when it can be had), a hint of what it gives, what it costs
       const offers = this.offers(), level = this.game.xp?.().level || 0, lapis = this.grid[1]?.n || 0, creative = this.game.creative?.();

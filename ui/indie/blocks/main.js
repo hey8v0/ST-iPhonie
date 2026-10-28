@@ -1,7 +1,7 @@
 // 方块世界: a block world in the spirit of the game, made from scratch. This page runs the game: the menus, the player,
 // breaking and placing, survival (health, hunger, air), the day, what is held, the HUD; the world itself is made and
 // kept by the worker (world.worker.js) and drawn by render.js.
-import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp} from './blocks.js';
+import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE} from './blocks.js';
 import {Mobs, MOBS} from './mobs.js';
 import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
@@ -16,8 +16,11 @@ import {InventoryUI, stackHtml} from './invui.js';
 import {Entities, itemLook, setPacked} from './entities.js';
 import {Input} from './input.js';
 import {Screens} from './screens.js';
-import {collisionBoxes, DIR} from './shapes.js';
-import {unlockSound, play, setVolume, setRain} from './sound.js';
+import {collisionBoxes, DIR, ATTACHED} from './shapes.js';
+import {fillLevel, insertOne, moveOne, pickSlot, plateLevel} from './machines.js';
+import {placeRail, isRail} from './rails.js';
+import {Carts, CARTS} from './carts.js';
+import {unlockSound, play, setVolume, setRain, note as noteSound} from './sound.js';
 import {seedOf} from './noise.js';
 import {runCommand, DIFFICULTIES, defaultRules} from './commands.js';
 import {spawnPoint, BIOMES} from './gen.js';
@@ -200,6 +203,8 @@ function startWorld(meta) {
   // which world this is (the overworld or the Nether), the potion effects on the player, potions in flight, and the
   // portal: how long they have stood in one (not again till they step out after coming through)
   G.dim = meta.dim === 'nether' ? 'nether' : 'overworld'; G.effects = start.effects || {}; G.absorb = start.absorb || 0; G.thrown = [];
+  // pressure plates pressed now, and how full each container was last told to the world
+  G.plates = new Map(); G.fills = new Map();
   G.inPortal = 0; G.portalBlocked = meta.arrive ? 'wait' : false; G.portalWaitT = 0; G.arriving = false; G.leaving = false;
   ents.loadOrbs(meta.orbs);
   G.mobs = new Mobs({
@@ -213,6 +218,10 @@ function startWorld(meta) {
     difficulty: () => meta.difficulty || 'normal', spawning: () => (meta.rules || defaultRules()).doMobSpawning,
   });
   G.mobs.load(meta.mobs);
+  // minecarts (kept in the save like the animals)
+  G.carts = new Carts({world: mirror, sound: (n, x, y, z) => soundAt(n, x, y, z), drop: (s, x, y, z) => G.ents.drop(s, x, y, z), light: (x, y, z, f) => G.mobs.light(x, y, z, f),
+    tiles: () => G.tiles, items: () => G.ents.items, ticks: () => G.ticks || 0, smoke: (x, y, z) => G.ents.puff(x, y, z, 'smoke')});
+  G.carts.load(meta.carts); G.riding = null;
   worker.onmessage = e => onWorker(e.data);
   worker.onerror = e => showError(`世界线程出错：${e.message || e}`);
   worker.postMessage({type: 'init', seed: meta.seed, layers: LAYER, radius: settings.dist, worldId: meta.id, center: [G.cx, G.cz], wave: settings.wave, dim: G.dim, lod: settings.lod});
@@ -224,7 +233,11 @@ function onWorker(m) {
   else if (m.type === 'mesh') { renderer.setSection(m.cx, m.sy, m.cz, m.solid, m.trans, m.vis, m.sun, m.faces); G.meshes++; }
   else if (m.type === 'drop') { G.mirror.drop(m.cx, m.cz); renderer.dropColumn(m.cx, m.cz); }
   else if (m.type === 'drops') for (const [id, n] of m.items) G.ents.drop({id, n}, m.x, m.y, m.z);
-  else if (m.type === 'sound') soundAt(m.name, m.x, m.y, m.z);
+  else if (m.type === 'sound') soundAt(m.iron && m.name.startsWith('door') ? 'iron_door' : m.name, m.x, m.y, m.z);
+  else if (m.type === 'prime') G.mobs.light(m.x, m.y, m.z);
+  else if (m.type === 'note') noteAt(m.x, m.y, m.z);
+  else if (m.type === 'dispense') dispense(m);
+  else if (m.type === 'pushed') pushed(m.cells, m.dir);
   else if (m.type === 'herd') {
     // each place has its animals once (a column made again after it went out of range keeps none)
     const k = `${m.cx},${m.cz}`;
@@ -306,7 +319,7 @@ function pause() {
 async function saveGame() {
   if (!G || !G.ready) return;
   const b = G.body, m = G.meta;
-  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, dim: G.dim, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], bed: G.bedPos, weather: G.weather,
+  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, dim: G.dim, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], carts: G.carts.toJSON(), bed: G.bedPos, weather: G.weather,
     player: {x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total, enchSeed: G.enchSeed, effects: G.effects, absorb: G.absorb || 0}});
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   // the worker writes the changed columns; this waits till it has (or three seconds)
@@ -369,8 +382,8 @@ async function switchWorld(to, pos) {
   G.leaving = true; invUI.hide();
   const m = G.meta;
   await saveGame();
-  const here = {tiles: m.tiles, items: m.items, orbs: m.orbs, mobs: m.mobs, herds: m.herds}, there = m.away || {};
-  Object.assign(m, {away: here, dim: to, tiles: there.tiles || {}, items: there.items || [], orbs: there.orbs || [], mobs: there.mobs || [], herds: there.herds || []});
+  const here = {tiles: m.tiles, items: m.items, orbs: m.orbs, mobs: m.mobs, herds: m.herds, carts: m.carts}, there = m.away || {};
+  Object.assign(m, {away: here, dim: to, tiles: there.tiles || {}, items: there.items || [], orbs: there.orbs || [], mobs: there.mobs || [], herds: there.herds || [], carts: there.carts || []});
   m.player = {...m.player, x: pos.x, y: pos.y, z: pos.z, flying: false, health: G.health, food: G.food, sat: G.sat, effects: G.effects, absorb: G.absorb || 0};
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   G.worker.terminate(); renderer.clearAll(); renderer.clearLod();
@@ -441,9 +454,14 @@ function giveEffect(id, amp, ticks) {
 const THROWN = {splash_potion: [0.5, 0.1, 0.05], experience_bottle: [0.7, 0.2, 0.07], snowball: [1.5, 0, 0.03], egg: [1.5, 0, 0.03]};
 /** Something thrown the way the player looks: a splash potion, a bottle o' enchanting, a snowball, an egg. */
 function throwItem(s) {
-  const d = G.body.look(), eye = eyePos(), [speed, up, g] = THROWN[s.id] || THROWN.snowball;
-  G.thrown.push({x: eye[0] + d[0] * 0.3, y: eye[1] - 0.1, z: eye[2] + d[2] * 0.3, vx: d[0] * speed, vy: d[1] * speed + up, vz: d[2] * speed, g, s: {...s, n: 1}, age: 0});
+  const d = G.body.look(), eye = eyePos();
+  launch(s, eye[0] + d[0] * 0.3, eye[1] - 0.1, eye[2] + d[2] * 0.3, d);
   G.swing = 6; play('throw');
+}
+/** One of a stack sent flying from a place along d (by the player, or a dispenser). */
+function launch(s, x, y, z, d) {
+  const [speed, up, g] = THROWN[s.id] || THROWN.snowball;
+  G.thrown.push({x, y, z, vx: d[0] * speed, vy: d[1] * speed + up, vz: d[2] * speed, g, s: {...s, n: 1}, age: 0});
 }
 /** Thrown things fly (falling a little), and land on a block or a mob. */
 function thrownTick() {
@@ -746,7 +764,7 @@ function breakBlock(t) {
   if (b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall') { const [ox, oy, oz] = partnerOf(x, y, z, v); if ((G.mirror.get(ox, oy, oz) & 0xFFF) === b.id) setBlock(ox, oy, oz, 0); }
   // what was inside goes out
   const k = `${x},${y},${z}`, tile = G.tiles[k];
-  if (tile) { for (const s of tile.slots || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; }
+  if (tile) { for (const s of tile.slots || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; if (G.fills.has(k)) { G.fills.delete(k); G.worker.postMessage({type: 'fill', x, y, z, level: null}); } }
   G.ents.burst(x, y, z, v, 28);
   play('break', v);
   if (survival) { if (b.hard > 0) wearTool(); G.exh += 0.005; }
@@ -755,7 +773,7 @@ const SHEARED = new Set(['short_grass', 'fern', 'dead_bush', 'vine', 'tall_grass
 /** Which way the player faces (0 south, 1 west, 2 north, 3 east) — a block placed faces back at them. */
 function facingBack() { const y = ((G.body.yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2); const q = Math.round(y / (Math.PI / 2)) % 4; return [0, 3, 2, 1][q]; }
 function placeFrom(t, stack) {
-  const info = itemInfo(stack.id), b = info?.block;
+  const info = itemInfo(stack.id), b = info?.block || (info?.place ? BLOCKS[ID[info.place]] : null);
   const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face];
   const tb = BLOCKS[t.v & 0xFFF];
   // slabs join into a double one, snow layers stack up
@@ -812,32 +830,188 @@ function placeFrom(t, stack) {
     if (b.shape === 'wall') { if (t.face >= 2 && t.face <= 3) return false; meta = [3, 1, 0, 0, 0, 2][t.face]; }
     if (b.shape === 'slab') meta = t.face === 3 || (t.face !== 2 && t.hit[1] - Math.floor(t.hit[1]) > 0.5) ? 1 : 0;
     if (b.name.endsWith('_leaves')) meta = 1;
+    // redstone: levers and buttons hang on the face they were put against (on a floor or ceiling lying the way the player
+    // looks); repeaters and comparators send their signal the way the player looks; pistons, dispensers and droppers face
+    // the player (up or down too), an observer looks away from them; a hopper's spout goes into what it was put against
+    if (b.shape === 'lever' || b.shape === 'button') meta = t.face === 2 ? pf % 2 : t.face === 3 ? 2 + pf % 2 : {4: 4, 1: 5, 5: 6, 0: 7}[t.face];
+    if (b.shape === 'repeater' || b.shape === 'comparator') meta = pf;
+    if (b.facing6) meta = b.rs === 'observer' ? look6() : OPPOSITE[look6()];
+    if (b.shape === 'hopper') meta = t.face === 2 || t.face === 3 ? 3 : OPPOSITE[t.face];
     // plants need their ground
     const under = G.mirror.get(x, y - 1, z) & 0xFFF, ub = BLOCKS[under];
     if (b.shape === 'cross' && !['grass_block', 'dirt', 'podzol', 'coarse_dirt', 'farmland', 'moss_block', 'mud', 'sand', 'red_sand'].includes(ub.name) && !(b.name === 'sugar_cane' && under === ID.sugar_cane) && !(b.name.endsWith('mushroom') && ub.opaque)) return false;
     if (b.name === 'cactus' && !['sand', 'red_sand', 'cactus'].includes(ub.name)) return false;
+    // dust, plates, repeaters, comparators and rails lie on a full block (or a slab's top half, a hopper); levers and
+    // buttons hang on a full block
+    if (['wire', 'plate', 'repeater', 'comparator', 'rail'].includes(b.shape) && !(ub.opaque || (ub.shape === 'slab' && G.mirror.get(x, y - 1, z) >>> 12 >= 1) || ub.name === 'hopper')) return false;
+    if (b.shape === 'lever' || b.shape === 'button') { const [ax, ay, az] = FACES[ATTACHED[meta & 7]]; if (!BLOCKS[G.mirror.get(x + ax, y + ay, z + az) & 0xFFF].opaque) return false; }
     if ((b.shape === 'torch' && meta === 0) && !ub.opaque && ub.shape !== 'slab') return false;
     v = withMeta(b.id, meta);
     // not inside the player
     const boxes = collisionBoxes(v), [x0, y0, z0, x1, y1, z1] = G.body.aabb();
     if (boxes && boxes.some(q => x + q[0] < x1 && x + q[3] > x0 && y + q[1] < y1 && y + q[4] > y0 && z + q[2] < z1 && z + q[5] > z0)) return false;
   }
+  // a rail takes its shape from the rails round it, and they turn to meet it
+  if (b?.shape === 'rail') { placeRail((a, c, d) => G.mirror.get(a, c, d), setBlock, x, y, z, v); play('place', v); return true; }
   setBlock(x, y, z, v);
   makeTile(x, y, z, b);
   play('place', v);
   return true;
+}
+/** The nearest of the six ways the player looks (FACES). */
+function look6() {
+  const [dx, dy, dz] = G.body.look(), ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
+  return ay >= ax && ay >= az ? (dy > 0 ? 2 : 3) : ax >= az ? (dx > 0 ? 0 : 1) : (dz > 0 ? 4 : 5);
 }
 /** What a block keeps of its own (a furnace's fire, a chest's things), made when it is put down. */
 function makeTile(x, y, z, b) {
   if (b?.use === 'furnace') G.tiles[`${x},${y},${z}`] = {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0};
   if (b?.use === 'chest') G.tiles[`${x},${y},${z}`] = {kind: 'chest', slots: new Array(27).fill(null)};
   if (b?.use === 'enchant') G.tiles[`${x},${y},${z}`] = {kind: 'enchant'};
+  if (b?.use === 'dispenser') G.tiles[`${x},${y},${z}`] = {kind: 'dispenser', slots: new Array(9).fill(null), title: b.zh, cols: 3};
+  if (b?.use === 'hopper') G.tiles[`${x},${y},${z}`] = {kind: 'hopper', slots: new Array(5).fill(null), title: '漏斗', cols: 5};
+  if (b?.use === 'note') G.tiles[`${x},${y},${z}`] = {kind: 'note', note: 0};
+}
+// ---------- redstone on the page ----------
+// what the block under a note block makes it sound like (the game's instruments)
+const INSTRUMENTS = [[/^glowstone$/, 'pling'], [/_planks$|_log$|_wood$|bookshelf|chest|crafting|note_block|_fence|_door$|_trapdoor$|barrel|composter|lectern/, 'bass'], [/sand$|gravel|concrete_powder/, 'snare'],
+  [/glass/, 'hat'], [/^gold_block$/, 'bell'], [/^clay$/, 'flute'], [/^packed_ice$/, 'chime'], [/_wool$/, 'guitar'], [/^iron_block$/, 'iron_xylophone'], [/^soul_sand$/, 'cow_bell'],
+  [/pumpkin/, 'didgeridoo'], [/^emerald_block$/, 'bit'], [/^hay_block$/, 'banjo'], [/stone|ore$|brick|obsidian|netherrack|deepslate|quartz|tuff|calcite|terracotta|granite|diorite|andesite/, 'basedrum']];
+/** A note block plays its note (if nothing is on top of it), with a note flying up in its colour. */
+function noteAt(x, y, z) {
+  if (G.mirror.get(x, y + 1, z)) return;
+  const n = G.tiles[`${x},${y},${z}`]?.note || 0, under = BLOCKS[G.mirror.get(x, y - 1, z) & 0xFFF].name, inst = INSTRUMENTS.find(([re]) => re.test(under))?.[1] || 'harp';
+  const d = Math.hypot(x + 0.5 - G.body.x, y + 0.5 - G.body.y, z + 0.5 - G.body.z);
+  if (d < 48) noteSound(inst, n, Math.max(0.15, 1 - d / 48));
+  const h = n / 24 * 6, c = k => Math.round(255 * Math.max(0, Math.min(1, Math.abs((h + k) % 6 - 3) - 1)));
+  G.ents.puff(x + 0.5, y + 1.2, z + 0.5, 'note', c(0) << 16 | c(4) << 8 | c(2));
+}
+/**
+ * A dispenser or dropper fires (the world says when): one thing from a slot picked at random. A dropper puts it into a
+ * container in front or drops it; a dispenser shoots arrows, throws what can be thrown, pours and fills buckets, uses bone
+ * meal, lights TNT, hatches spawn eggs, shears sheep, fills bottles — else drops it too. Empty: a click.
+ */
+function dispense({x, y, z, face, drop}) {
+  const tile = G.tiles[`${x},${y},${z}`];
+  if (!tile?.slots) return;
+  const pick = pickSlot(tile), [dx, dy, dz] = FACES[face], fx = x + dx, fy = y + dy, fz = z + dz;
+  if (!pick) { soundAt('empty', x + 0.5, y + 0.5, z + 0.5); return; }
+  const [i, s] = pick, info = itemInfo(s.id), front = G.mirror.get(fx, fy, fz), ox = x + 0.5 + dx * 0.7, oy = y + 0.5 + dy * 0.7 - (dy ? 0 : 0.15), oz = z + 0.5 + dz * 0.7;
+  const used = () => { s.n--; if (!s.n) tile.slots[i] = null; };
+  const swap = to => { if (s.n === 1) tile.slots[i] = to; else { used(); if (!insertOne(tile, to, false)) G.ents.drop(to, ox, oy, oz); } };
+  const spill = () => { G.ents.drop({...s, n: 1}, ox, oy, oz, {dir: [dx + (Math.random() - 0.5) * 0.2, dy + 0.1, dz + (Math.random() - 0.5) * 0.2]}); used(); soundAt('click', ox, oy, oz); G.ents.puff(ox, oy, oz, 'smoke'); };
+  if (drop) {
+    const into = G.tiles[`${fx},${fy},${fz}`];
+    if (into && insertOne(into, s, face === 3)) { used(); return; }
+    spill(); return;
+  }
+  const empty = !front || BLOCKS[front & 0xFFF].replace;
+  if (s.id === 'arrow') { G.mobs.arrows.push({x: ox, y: oy, z: oz, vx: dx * 1.1 + (Math.random() - 0.5) * 0.05, vy: dy * 1.1 + 0.1, vz: dz * 1.1 + (Math.random() - 0.5) * 0.05, from: 'dispenser', life: 0, stuck: false, dmg: 2, pickup: true}); used(); soundAt('bow', ox, oy, oz); return; }
+  if (info?.thrown) { launch(s, ox, oy, oz, [dx, dy + 0.1, dz]); used(); soundAt('throw', ox, oy, oz); return; }
+  if (info?.pour && empty) { setBlock(fx, fy, fz, ID[info.pour]); swap({id: 'bucket', n: 1}); soundAt('splash', ox, oy, oz); return; }
+  if (s.id === 'bucket' && [ID.water, ID.lava].includes(front & 0xFFF) && !(front >>> 12)) { setBlock(fx, fy, fz, 0); swap({id: (front & 0xFFF) === ID.water ? 'water_bucket' : 'lava_bucket', n: 1}); soundAt('splash', ox, oy, oz); return; }
+  if (s.id === 'glass_bottle' && (front & 0xFFF) === ID.water) { swap({id: 'potion', n: 1, pot: 'water'}); soundAt('splash', ox, oy, oz); return; }
+  if (info?.meal) { G.worker.postMessage({type: 'meal', x: fx, y: fy, z: fz}); used(); G.ents.puff(fx + 0.5, fy + 0.5, fz + 0.5, 'meal'); return; }
+  if (s.id === 'tnt' && empty) { G.mobs.light(fx, fy, fz); used(); return; }
+  if (info?.spawn && empty) { G.mobs.add(info.spawn, fx + 0.5, fy, fz + 0.5); used(); return; }
+  if (info?.cart && isRail(front)) { G.carts.add(info.cart, fx + 0.5, fy + 0.0625, fz + 0.5); used(); return; }
+  if (info?.tool?.kind === 'shears') {
+    const sheep = G.mobs.list.find(m => m.kind === 'sheep' && !m.sheared && !m.baby && !m.dead && Math.floor(m.x) === fx && Math.floor(m.z) === fz && Math.abs(m.y - fy) < 1.5);
+    if (sheep) { sheep.sheared = true; G.ents.drop({id: `${sheep.color || 'white'}_wool`, n: 1 + Math.floor(Math.random() * 3)}, sheep.x, sheep.y + 1, sheep.z); s.dmg = (s.dmg || 0) + 1; if (s.dmg >= (info.tool.uses || 238)) tile.slots[i] = null; soundAt('shear', ox, oy, oz); return; }
+  }
+  spill();
+}
+/** Blocks a piston moved carry what stands in them along (the player, mobs, items). */
+function pushed(cells, dir) {
+  const [dx, dy, dz] = FACES[dir], inside = (x0, y0, z0, x1, y1, z1) => cells.some(([cx, cy, cz]) => x1 > cx && x0 < cx + 1 && y1 > cy && y0 < cy + 1 && z1 > cz && z0 < cz + 1);
+  const shove = b => { b.x += dx; b.y += dy; b.z += dz; b.prev = {x: b.prev.x + dx, y: b.prev.y + dy, z: b.prev.z + dz}; if (dy > 0) b.vy = Math.max(b.vy, 0); };
+  if (inside(...G.body.aabb())) shove(G.body);
+  for (const m of G.mobs.list) if (!m.dead && inside(...m.body.aabb())) shove(m.body);
+  for (const it of G.ents.items) if (inside(it.x - 0.125, it.y, it.z - 0.125, it.x + 0.125, it.y + 0.25, it.z + 0.125)) { it.x += dx; it.y += dy; it.z += dz; }
+}
+/**
+ * Pressure plates weigh what stands on them every tick (stone: players and mobs; wood: anything; gold one a thing,
+ * iron one each ten); a plate lets go a second after the last thing left it (a weighted one half a second).
+ */
+function platesTick() {
+  const on = new Map();
+  const add = (x, y, z, kind) => {
+    const bx = Math.floor(x), by = Math.floor(y + 0.01), bz = Math.floor(z), v = G.mirror.get(bx, by, bz);
+    const pb = BLOCKS[v & 0xFFF];
+    if (pb.shape !== 'plate' && !(kind === 'cart' && pb.rail === 'detector')) return;
+    const k = `${bx},${by},${bz}`;
+    if (!on.has(k)) on.set(k, {x: bx, y: by, z: bz, list: []});
+    on.get(k).list.push({kind});
+  };
+  if (!G.dead && !G.body.flying) add(G.body.x, G.body.y, G.body.z, 'player');
+  for (const m of G.mobs.list) if (!m.dead) add(m.x, m.y, m.z, 'mob');
+  for (const it of G.ents.items) add(it.x, it.y, it.z, 'item');
+  for (const c of G.carts.list) add(c.body.x, c.body.y, c.body.z, 'cart');
+  for (const [k, p] of on) { const b = BLOCKS[G.mirror.get(p.x, p.y, p.z) & 0xFFF], level = plateLevel(b, p.list); if (level) G.plates.set(k, {...p, level, at: G.ticks}); }
+  for (const [k, p] of G.plates) {
+    const v = G.mirror.get(p.x, p.y, p.z), b = BLOCKS[v & 0xFFF];
+    if (b.shape !== 'plate' && b.rail !== 'detector') { G.plates.delete(k); continue; }
+    const level = G.ticks - p.at < (b.weight ? 10 : 20) ? (on.has(k) ? plateLevel(b, on.get(k).list) || p.level : p.level) : 0;
+    if (!level) G.plates.delete(k);
+    const want = b.rail ? (v >>> 12 & 7) | (level ? 8 : 0) : level;
+    if ((v >>> 12) !== want) { setBlock(p.x, p.y, p.z, withMeta(b.id, want)); if (!b.rail) soundAt('click', p.x + 0.5, p.y, p.z + 0.5); }
+  }
+}
+/**
+ * Hoppers, every eight ticks unless power locks them: one item into what the spout points at, and one out of the
+ * container above (from a furnace what is done) — or items lying in their bowl taken in.
+ */
+function hoppersTick() {
+  for (const [k, tile] of Object.entries(G.tiles)) {
+    if (tile.kind !== 'hopper') continue;
+    if (tile.cool > 0) { tile.cool--; continue; }
+    const [x, y, z] = k.split(',').map(Number);
+    if (!G.mirror.has(x, z)) continue;
+    const v = G.mirror.get(x, y, z);
+    if ((v & 0xFFF) !== ID.hopper || v >>> 12 & 8) continue;
+    const cartAt = (cx, cy, cz) => G.carts.list.find(c => c.inv && Math.floor(c.body.x) === cx && Math.floor(c.body.y + 0.01) === cy && Math.floor(c.body.z) === cz)?.inv;
+    const F = v >>> 12 & 7, [dx, dy, dz] = FACES[F], target = G.tiles[`${x + dx},${y + dy},${z + dz}`] || cartAt(x + dx, y + dy, z + dz), above = G.tiles[`${x},${y + 1},${z}`] || cartAt(x, y + 1, z);
+    let did = !!target && moveOne(tile, target, F === 3);
+    if (above) did = moveOne(above, tile, true) || did;
+    else for (const it of G.ents.items) {
+      if (Math.floor(it.x) !== x || Math.floor(it.z) !== z || it.y < y + 0.6 || it.y > y + 1.6) continue;
+      while (it.stack.n > 0 && insertOne(tile, it.stack, true)) { it.stack.n--; did = true; }
+      if (!it.stack.n) G.ents.items.splice(G.ents.items.indexOf(it), 1);
+      break;
+    }
+    if (did) tile.cool = 8;
+  }
+}
+/** How full each container is, told to the world when it changes (comparators read it there). */
+function fillsTick() {
+  for (const [k, tile] of Object.entries(G.tiles)) {
+    const level = fillLevel(tile);
+    if (level == null || G.fills.get(k) === level) continue;
+    G.fills.set(k, level);
+    const [x, y, z] = k.split(',').map(Number);
+    G.worker.postMessage({type: 'fill', x, y, z, level});
+  }
+}
+/** Using a minecart: get in (an empty one); open its chest or hopper; a coal for a furnace one (it sets off the way the player looks). */
+function cartUse(c, s) {
+  G.swing = 6;
+  if (c.kind === 'minecart') { if (!G.body.sneaking) { G.riding = c; G.body.flying = false; } return; }
+  if (c.inv) { input.enabled = false; input.unlock(); invUI.show('chest', c.inv); return; }
+  if (c.kind === 'furnace_minecart' && (s?.id === 'coal' || s?.id === 'charcoal')) { useUp(); c.fuel += 3600; const [lx, , lz] = G.body.look(); c.push = [lx, lz]; }
+}
+/** Out of the minecart: standing on top of where it is. */
+function getOff() {
+  const c = G.riding, b = G.body;
+  G.riding = null;
+  if (!c) return;
+  b.x = c.body.x; b.y = c.body.y + 0.75; b.z = c.body.z; b.prev = {x: b.x, y: b.y, z: b.z}; b.vy = 0;
 }
 /** The use action (right click / tap / LT) on what is aimed at: a mob (feed, shear; a tap on a phone hits), or a block. */
 function use(t, mob = null) {
   const s = held(), info = s ? itemInfo(s.id) : null, b = t ? BLOCKS[t.v & 0xFFF] : null;
   if (info?.tool?.kind === 'bow') return;
   G.swing = 6;
+  if (mob?.isCart) { cartUse(mob, s); return; }
   if (mob) {
     if (s && mob.def.breed?.includes(s.id) && !mob.baby && !mob.love && !mob.loveWait) { mob.love = 600; useUp(); G.ents.puff(mob.x, mob.y + 1, mob.z, 'heart'); return; }
     if (s && mob.def.breed?.includes(s.id) && mob.baby) { mob.grow += 2400; useUp(); G.ents.puff(mob.x, mob.y + 0.6, mob.z, 'meal'); return; }
@@ -917,6 +1091,8 @@ function use(t, mob = null) {
     }
   }
   if (!t) return;
+  // a minecart goes on the rail aimed at
+  if (info?.cart) { if (isRail(t.v)) { G.carts.add(info.cart, t.x + 0.5, t.y + 0.0625, t.z + 0.5, {yaw: G.body.yaw}); useUp(); play('place', t.v); } return; }
   // a spawn egg: its mob on the block aimed at (no monsters on peaceful)
   if (info?.spawn) {
     if (MOBS[info.spawn].hostile && difficulty() === 'peaceful') return;
@@ -932,7 +1108,7 @@ function use(t, mob = null) {
   if (info?.tool?.kind === 'hoe' && t.face === 2 && ['grass_block', 'dirt'].includes(b.name) && !G.mirror.get(t.x, t.y + 1, t.z)) { setBlock(t.x, t.y, t.z, ID.farmland); wearTool(); play('place', ID.dirt); return; }
   // a shovel makes a path
   if (info?.tool?.kind === 'shovel' && t.face !== 3 && ['grass_block', 'dirt', 'podzol', 'coarse_dirt'].includes(b.name) && !G.mirror.get(t.x, t.y + 1, t.z)) { setBlock(t.x, t.y, t.z, ID.dirt_path); wearTool(); play('place', ID.grass_block); return; }
-  if (s && (info.block?.item || info.plant)) { if (placeFrom(t, s)) useUp(); }
+  if (s && (info.block?.item || info.plant || info.place)) { if (placeFrom(t, s)) useUp(); }
 }
 // ---------- fishing ----------
 /** Throws the bobber the way the player looks. */
@@ -1037,6 +1213,15 @@ function openBlock(kind, t) {
   const k = `${t.x},${t.y},${t.z}`;
   if (kind === 'compost') { compost(t); return; }
   if (kind === 'bell') { play('bell'); G.swing = 6; return; }
+  // a lever flips; a button is pressed (the world lets it go); a repeater's delay goes round 1–4; a comparator turns
+  // subtracting or back; a note block goes a note up (and plays it); a daylight detector turns inverted or back
+  const m = t.v >>> 12, id = t.v & 0xFFF;
+  if (kind === 'lever') { setBlock(t.x, t.y, t.z, withMeta(id, m ^ 8)); play('click'); G.swing = 6; return; }
+  if (kind === 'button') { if (!(m & 8)) { setBlock(t.x, t.y, t.z, withMeta(id, m | 8)); play('click'); } G.swing = 6; return; }
+  if (kind === 'repeater') { setBlock(t.x, t.y, t.z, withMeta(id, (m & 3) | ((m >> 2) + 1 & 3) << 2)); play('click'); G.swing = 6; return; }
+  if (kind === 'comparator') { setBlock(t.x, t.y, t.z, withMeta(id, m ^ 4)); play('click'); G.swing = 6; return; }
+  if (kind === 'note') { const tile = G.tiles[k] ||= {kind: 'note', note: 0}; tile.note = (tile.note + 1) % 25; noteAt(t.x, t.y, t.z); G.swing = 6; return; }
+  if (kind === 'invert') { setBlock(t.x, t.y, t.z, withMeta(id === ID.daylight_detector ? ID.daylight_detector_inverted : ID.daylight_detector, m)); play('click'); G.swing = 6; return; }
   input.enabled = false; input.unlock();
   if (kind === 'crafting') invUI.show('crafting');
   // a smoker or a blast furnace is a furnace of its own kind
@@ -1046,6 +1231,8 @@ function openBlock(kind, t) {
   if (kind === 'barrel') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: new Array(27).fill(null), title: '木桶'});
   if (kind === 'enchant') { G.tiles[k] ||= {kind: 'enchant'}; invUI.show('enchant', {pos: {x: t.x, y: t.y, z: t.z}, shelves: shelvesAround((x, y, z) => G.mirror.get(x, y, z), t.x, t.y, t.z, ID.bookshelf)}); }
   if (kind === 'anvil') invUI.show('anvil', {pos: {x: t.x, y: t.y, z: t.z}});
+  if (kind === 'dispenser') invUI.show('chest', G.tiles[k] ||= {kind: 'dispenser', slots: new Array(9).fill(null), title: BLOCKS[t.v & 0xFFF].zh, cols: 3});
+  if (kind === 'hopper') invUI.show('chest', G.tiles[k] ||= {kind: 'hopper', slots: new Array(5).fill(null), title: '漏斗', cols: 5});
   if (kind === 'brew') invUI.show('brew', G.tiles[k] ||= {kind: 'brew', slots: [null, null, null, null, null], fuel: 0, time: 0});
 }
 /** An anvil used: one time in eight-ish (12%) it wears a step (new → chipped → damaged → gone). */
@@ -1137,6 +1324,7 @@ function gainXp(n) {
 }
 /** The player hits a mob: the held thing's damage, more when falling (a critical hit), the knock away. */
 function attackMob(m) {
+  if (m.isCart) { if (!G.attackWait) { G.carts.hit(m, damageOf(held()?.id), G.mode === 'creative'); G.attackWait = 8; G.swing = 6; } return; }
   if (G.attackWait > 0 || m.dead) return;
   const b = G.body, s = held(), crit = !b.onGround && b.vy < 0 && !b.inWater && !b.climbing;
   let dmg = damageOf(s?.id) * (crit ? 1.5 : 1);
@@ -1217,6 +1405,8 @@ function tick() {
   const b = G.body;
   // nothing moves while going through a portal, or while the one on the other side is made
   if (G.arriving || G.leaving) return;
+  // ticks played (the world's clock may stand still)
+  G.ticks = (G.ticks || 0) + 1;
   if (rules().doDaylightCycle) G.time++;
   // asleep: the screen goes dark; after five seconds it is morning
   if (G.sleeping && ++G.sleeping >= 100) {
@@ -1225,7 +1415,7 @@ function tick() {
     const w = G.weather;
     if (w.raining || w.thundering) Object.assign(w, {raining: false, thundering: false, rain: 0, thunder: 0, rainT: 12000 + Math.floor(Math.random() * 168000), thunderT: 12000 + Math.floor(Math.random() * 168000)});
   }
-  const r = b.tick(G.sleeping ? {} : {...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false, speed: 0.1 * speedFactor(G.effects)});
+  const r = G.riding ? {landed: 0, stepped: 0} : b.tick(G.sleeping ? {} : {...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false, speed: 0.1 * speedFactor(G.effects)});
   if (portalTick()) return;
   if (G.mode !== 'creative' && b.flying) b.flying = false;
   input.setFlying(b.flying);
@@ -1291,6 +1481,13 @@ function tick() {
   if (G.hurtT > 0) G.hurtT--;
   // mobs, items, experience, furnaces, the weather
   G.mobs.tick();
+  // minecarts roll; the player sitting in one goes with it (shift gets out; a powered activator rail throws them out)
+  const riding = G.riding && G.carts.list.includes(G.riding) ? {cart: G.riding, fwd: ctl.fwd, look: b.look()} : null;
+  if (!riding) G.riding = null;
+  G.carts.tick(riding);
+  if (riding && (ctl.sneak || riding.eject || !G.carts.list.includes(riding.cart))) getOff();
+  else if (riding) { const c = riding.cart.body; b.x = c.x; b.y = c.y + 0.3; b.z = c.z; b.prev = {x: c.prev.x, y: c.prev.y + 0.3, z: c.prev.z}; b.vx = b.vy = b.vz = 0; b.fall = 0; b.onGround = true; }
+  else if (G.carts.list.length) G.carts.shove(b.x, b.z, b.x - b.prev.x, b.z - b.prev.z);
   G.ents.tick(b, stack => { if (G.dead) return stack; const left = G.inv.add(stack); drawHud(true); return left; });
   G.ents.orbTick(b, v => gainXp(v));
   weatherTick();
@@ -1307,11 +1504,15 @@ function tick() {
     const was = tile.burn > 0, lit = furnaceTick(tile);
     if (was !== lit) { const [x, y, z] = k.split(',').map(Number), v = G.mirror.get(x, y, z); if (BLOCKS[v & 0xFFF]?.use === 'furnace') setBlock(x, y, z, withMeta(v & 0xFFF, (v >>> 12 & 3) | (lit ? 4 : 0))); }
   }
-  if (invUI.open && (invUI.kind === 'furnace' || invUI.kind === 'brew') && G.time % 4 === 0) invUI.refresh();
+  platesTick();
+  hoppersTick();
+  if (G.time % 10 === 0) fillsTick();
+  if (invUI.open && (invUI.kind === 'furnace' || invUI.kind === 'brew' || (invUI.kind === 'chest' && invUI.data?.kind === 'hopper')) && G.time % 4 === 0) invUI.refresh();
   // the worker: where we are, how dark the sky is
   const cx = Math.floor(b.x / 16), cz = Math.floor(b.z / 16);
   if (cx !== G.cx || cz !== G.cz) { G.cx = cx; G.cz = cz; G.worker.postMessage({type: 'center', cx, cz}); }
-  if (G.time % 100 === 0) G.worker.postMessage({type: 'day', dark: Math.round((1 - environment(G.time).daylight) * 11), snow: G.weather.rain > 0.5});
+  // (every second of play, not of the world's clock: it may stand still, or be set by a command)
+  if (G.ticks % 20 === 0) { const daylight = environment(G.time).daylight; G.worker.postMessage({type: 'day', dark: Math.round((1 - daylight) * 11), snow: G.weather.rain > 0.5, daylight}); }
   if (performance.now() - G.saveAt > 30000) { G.saveAt = performance.now(); saveGame(); }
 }
 
@@ -1353,7 +1554,8 @@ function targetAt() {
 /** The mob aimed at (within 3 blocks, the game's reach for hitting; 5 in creative): {mob, t} or null. */
 function mobAt() {
   const o = eyePos(), d = aimDir();
-  return G.mobs.raycast(o[0], o[1], o[2], d[0], d[1], d[2], G.mode === 'creative' ? 5 : 3);
+  const r = G.mode === 'creative' ? 5 : 3, m = G.mobs.raycast(o[0], o[1], o[2], d[0], d[1], d[2], r), c = G.carts.raycast(o[0], o[1], o[2], d[0], d[1], d[2], r);
+  return c && c.mob !== G.riding && (!m || c.t < m.t) ? c : m;
 }
 
 // ---------- the HUD ----------
@@ -1444,6 +1646,28 @@ function fireThings(view) {
   if (!G.mobs.balls.length) return [];
   if (!fireVerts) { fireVerts = new Verts(16); fireVerts.flat(0.5, LAYER.fire_charge, 255, 255, 256, 32); }
   return G.mobs.balls.map(f => ({verts: fireVerts, x: f.x, y: f.y, z: f.z, model: mat.model(f.big ? 1 : 0.32, view.yaw), bright: 1}));
+}
+/** A box (in the thing's own units) into verts, a picture per face (east, west, up, down, south, north), each one whole. */
+function boxVerts(v, x0, y0, z0, x1, y1, z1, layers, sky, blk, tints = null) {
+  const F = [[[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]], [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]],
+    [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]], [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]]];
+  const UV = [[0, 16], [16, 16], [16, 0], [0, 0]];
+  for (let f = 0; f < 6; f++) for (let c = 0; c < 4; c++) v.v(F[f][c][0], F[f][c][1], F[f][c][2], 256, 32, layers[f], UV[c][0], UV[c][1], sky, blk, f << 2, tints ? tints[f] : 0xFFFFFF);
+}
+/** Minecarts: an iron box, long the way it faces, with what it carries inside; tipped on a slope; shaking a little when hit. */
+function cartThings(a, light) {
+  return G.carts.list.map(c => {
+    const b = c.body, x = b.prev.x + (b.x - b.prev.x) * a, y = b.prev.y + (b.y - b.prev.y) * a, z = b.prev.z + (b.z - b.prev.z) * a;
+    const [sky, blk] = light(Math.floor(x), Math.floor(y + 0.4), Math.floor(z)), S = sky * 17, K = blk * 17, v = new Verts(256);
+    const side = LAYER.minecart_side ?? 0, inner = LAYER.minecart_inside ?? 0, box = (q, top) => boxVerts(v, ...q, [side, side, top, side, side, side], S, K);
+    box([-0.44, 0.06, -0.62, 0.44, 0.19, 0.62], inner);
+    for (const q of [[-0.44, 0.19, -0.62, -0.31, 0.69, 0.62], [0.31, 0.19, -0.62, 0.44, 0.69, 0.62], [-0.31, 0.19, -0.62, 0.31, 0.69, -0.49], [-0.31, 0.19, 0.49, 0.31, 0.69, 0.62]]) box(q, side);
+    // (a hopper's item is a flat picture: its cube from the hopper's own faces)
+    const load = CARTS[c.kind], hop = LAYER.hopper_outside ?? 0, look = load === 'hopper' ? {cube: [hop, hop, LAYER.hopper_top ?? 0, hop, hop, hop]} : load && itemLook(load);
+    if (look?.cube) boxVerts(v, -0.3, 0.19, -0.3, 0.3, 0.79, 0.3, look.cube, S, K, look.tints);
+    const shake = c.hurt ? Math.sin(c.hurt * 1.3) * c.hurt / 50 : 0;
+    return {verts: v, x, y, z, model: mat.model(1, c.yaw, c.pitch, shake)};
+  });
 }
 /** Things thrown, in flight (potions, bottles, snowballs, eggs): turning over as they go. */
 function potionThings(light) {
@@ -1703,7 +1927,7 @@ function frame(now) {
   const tick20 = Math.floor(G.time);
   for (const an of animFrames) { const f = Math.floor(tick20 / an.time) % an.frames.length; if (f !== an.at) { an.at = f; renderer.updateLayer(an.layer, an.frames[f]); } }
   const lightAt = (bx, by, bz) => G.mirror.light(bx, by, bz);
-  const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
+  const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view), ...cartThings(a, lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
   if (G.view && !G.dead) extras.mobs.push(...playerModel(view, a, lightAt));
   extras.weather = weatherVerts(view);
   extras.blobs = blobVerts(view, a);
