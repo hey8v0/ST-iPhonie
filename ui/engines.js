@@ -66,9 +66,11 @@ export function enginesApp(ctx) {
   const textPreset = () => textDraft.presets.find(p => p.id === textDraft.active) || textDraft.presets[0];
   const nameOf = id => id === 'nai' ? 'NovelAI' : id === 'gpt' ? 'GPT 生图' : id === 'comfy' ? 'ComfyUI' : id === 'llm' ? '文字模型' : id === 'embed' ? '向量模型' : engines[id];
   function card(id, tag = 'button') {
-    const comfy = id === 'comfy', saved = comfy ? !!api.getState().draw.comfy.url : api.keyStatus(id), nai = id === 'nai', llm = id === 'llm', vector = id === 'embed', d = api.getState().draw;
-    const em = vector ? (engine === 'embed' && embedDraft ? embedDraft : api.getState().embed) : null;
-    const name = nameOf(id), t = llm ? (engine === 'llm' && textDraft ? textDraft : api.getState().text) : null, custom = t?.source === 'custom';
+    // the settings once per card (each read is a copy of all of them)
+    const st = api.getState();
+    const comfy = id === 'comfy', saved = comfy ? !!st.draw.comfy.url : api.keyStatus(id), nai = id === 'nai', llm = id === 'llm', vector = id === 'embed', d = st.draw;
+    const em = vector ? (engine === 'embed' && embedDraft ? embedDraft : st.embed) : null;
+    const name = nameOf(id), t = llm ? (engine === 'llm' && textDraft ? textDraft : st.text) : null, custom = t?.source === 'custom';
     const fields = vector ? [['MODEL', em.model || '未填写'], ['MEMORY', em.enabled ? '语义检索' : '本地检索']]
       : id === 'gpt' ? [['MODEL', d.gpt.model], ['QUALITY', d.gpt.quality.toUpperCase()]]
       : comfy ? [['MODEL', d.comfy.model ? d.comfy.model.replace(/\.[^.]*$/, '').slice(0, 18) : '未选'], ['WORKFLOW', d.comfy.workflows.find(p => p.id === d.comfy.activeWorkflow)?.name || '默认工作流']]
@@ -77,14 +79,14 @@ export function enginesApp(ctx) {
       : nai
       ? [['TIER', subscription ? TIERS[subscription.tier] || '未知' : '—'], ['ANLAS', subscription ? String(subscription.anlas) : '—']]
       : id === 'custom'
-        ? [['API', (api.getState().connections.custom.params.url || '').replace(/^https?:\/\//, '').split('/')[0] || '未填写'], ['VOICES', (api.getState().connections.custom.params.voices || []).length + ' 个']]
+        ? [['API', (st.connections.custom.params.url || '').replace(/^https?:\/\//, '').split('/')[0] || '未填写'], ['VOICES', (st.connections.custom.params.voices || []).length + ' 个']]
       : PRICED.includes(id) && saved
-        ? [['MODEL', api.getState().connections[id].model], [id === 'eleven' ? 'CREDITS' : 'BALANCE', balanceText(id)]]
-        : [['MODEL', api.getState().connections[id].model], ['ROLES', api.getState().routes.filter(r => r.engine === id && r.voice).length + ' 个角色']];
+        ? [['MODEL', st.connections[id].model], [id === 'eleven' ? 'CREDITS' : 'BALANCE', balanceText(id)]]
+        : [['MODEL', st.connections[id].model], ['ROLES', st.routes.filter(r => r.engine === id && r.voice).length + ' 个角色']];
     const front = frontOf(id) === id;
     const attrs = tag === 'button' ? `data-action="engine" data-engine="${id}" aria-label="${name}，${front ? '点一下打开' : '点一下抽到最前面'}"` : `data-engine="${id}"`;
     const dots = comfy ? '' : `•••• •••• •••• ${api.keyHint?.(id) || '••••'}`;
-    const ownApi = id === 'custom' ? (api.getState().connections.custom.params.url || '').replace(/^https?:\/\//, '') : '';
+    const ownApi = id === 'custom' ? (st.connections.custom.params.url || '').replace(/^https?:\/\//, '') : '';
     const number = id === 'custom' ? (ownApi || '还没填接口地址 · 点卡片去填写') : vector ? (em.enabled ? (saved ? dots : '未绑定密钥 · 本地接口可以不填') : '没开 · 记忆用本地检索') : comfy ? d.comfy.url.replace(/^https?:\/\//, '') : llm ? (custom ? (saved ? dots : '未绑定密钥 · 点卡片去填写') : '用酒馆当前连接的模型') : saved ? dots : '未绑定密钥 · 点卡片去填写';
     return `<${tag} class="bank-card${tag === 'div' ? ' detail-card' : ''}" ${attrs}>${spark()}
       <span class="card-top"><span class="card-name">${name}</span><span class="card-kind">${IMAGE.includes(id) ? 'IMAGE' : llm ? 'TEXT' : vector ? 'VECTOR' : 'VOICE'}${icon('nfc')}</span></span>

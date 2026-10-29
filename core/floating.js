@@ -16,6 +16,9 @@ const SHAPE = ['x', 'y', 'w', 'h', 'r', 'glyph'];
 // The canvas the sound waves are drawn on, beside the bar (CSS px).
 const WAVES_W = 132, WAVES_H = 180;
 const TIPS = 'sttts-floating-tips';
+// The glow colours of floating.css (--glow-rgb), for the waves' canvas. Kept here: reading them from the page's styles
+// makes the browser work out the whole tavern page's styles in the middle of a frame.
+export const FLOAT_GLOW = Object.freeze({idle: '58,156,240', fish: '34,104,196', mini: '242,169,59', eleven: '194,68,122', mimo: '228,85,42', doubao: '96,120,19', custom: '46,148,100'});
 const clamp = (v, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
 
 function ensureStyle() {
@@ -123,14 +126,18 @@ export class FloatingPlayer {
     this.arm(8000);
   }
   get barForm() { return this.box.dataset.form === 'bar'; }
-  width() { return document.documentElement.clientWidth || innerWidth; }
-  height() { return window.visualViewport?.height || innerHeight; }
+  // The screen's size, measured when the window changes (place), never in a frame: reading it then makes the browser
+  // lay out the whole tavern page first, every frame (that cost 7–42 ms a frame while the phone opened).
+  measure() { this.vw = document.documentElement.clientWidth || innerWidth; this.vh = window.visualViewport?.height || innerHeight; }
+  width() { if (!this.vw) this.measure(); return this.vw; }
+  height() { if (!this.vh) this.measure(); return this.vh; }
   label(mode = this.mode) { return mode === 'docked' ? (this.barForm ? '展开 ST-iPhonie 悬浮条' : '展开 ST-iPhonie 悬浮球') : '打开小手机，可拖动'; }
   applyTheme() {
     const theme = this.theme();
     this.box.dataset.theme = theme === 'dark' || theme === 'system' && this.colorScheme.matches ? 'dark' : 'light';
   }
   place() {
+    this.measure();
     const form = phoneScreen() ? 'bar' : 'ball';
     if (form !== this.box.dataset.form) this.setForm(form);
     this.box.dataset.side = this.side;
@@ -293,7 +300,6 @@ export class FloatingPlayer {
     this.message = value.message;
     this.orb.title = this.mode === 'docked' ? this.label() : value.message || '打开小手机';
     this.applyTheme();
-    this.glowRgb = '';
     if (this.barForm && before !== this.phase) {
       if (this.phase === 'idle') this.restSoon(); else this.wake();
       if (this.mode === 'docked' && !this.launching) this.aim('glide', ['x', 'w', 'h', 'r']);
@@ -488,7 +494,7 @@ export class FloatingPlayer {
     this.painted = true;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, WAVES_W, WAVES_H);
-    const rgb = this.glowRgb ||= (this.root.ownerDocument.defaultView?.getComputedStyle?.(this.box).getPropertyValue('--glow-rgb') || '').trim() || '58,156,240';
+    const rgb = ['playing', 'paused', 'generating'].includes(this.phase) && FLOAT_GLOW[this.engine] || FLOAT_GLOW.idle;
     const edge = this.wavesRight ? WAVES_W : 0, cy = WAVES_H / 2, cx = S.x.x - this.wavesLeft;
     const radial = (x, r, alpha) => {
       const fill = ctx.createRadialGradient(x, cy, 2, x, cy, r);

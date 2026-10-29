@@ -62,15 +62,17 @@ export function normalizeSource(value = {}, i = 0) {
   });
 }
 /**
- * A source filled in by 「按这个格式填」 for a self-hosted 网易云 API before is brought up to today's format: its search
- * gets pages (before 0.8.77 it had none), and albums, artists and playlists are filled in where it has none of their
- * addresses. The rest stays as the user has it (a cookie in the song address, the name, addresses they wrote).
+ * A 网易云 API source (a self-hosted NeteaseCloudMusicApi: its search at …/search or …/cloudsearch?keywords=, the songs
+ * in result.songs), whether filled in by 「按这个格式填」 before or typed by hand, gets what today's format has: albums,
+ * artists and playlists where it has none of their addresses, and an old 「按这个格式填」 search (before 0.8.77) gets
+ * pages. The rest stays as the user has it (a cookie in the song address, the name, addresses they wrote).
  */
 function upgraded(s) {
+  const api = /^(.+?)\/(?:cloud)?search\?(?:[^#]*&)?keywords=\{\{query\}\}/.exec(s.search);
+  if (!api || s.listPath !== 'result.songs') return s;
+  const now = SELF_HOSTED.find(t => t.id === 'netease-api').fill(api[1]), none = kind => !s[kind + 'Search'] && !s[kind + 'Songs'];
   const old = /^(.+)\/cloudsearch\?keywords=\{\{query\}\}&(?:type=1&)?limit=\d+(&offset=\{\{offset\}\})?$/.exec(s.search);
-  if (!old || s.listPath !== 'result.songs') return s;
-  const now = SELF_HOSTED.find(t => t.id === 'netease-api').fill(old[1]), none = kind => !s[kind + 'Search'] && !s[kind + 'Songs'];
-  if (!old[2] && none('album') && none('artist')) s.search = now.search;
+  if (old && !old[2] && none('album') && none('artist')) s.search = now.search;
   for (const kind of Object.keys(GROUP_KINDS)) if (none(kind)) for (const k of ['Search', 'ListPath', 'Songs', 'SongsPath']) s[kind + k] = now[kind + k];
   return s;
 }

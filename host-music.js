@@ -95,7 +95,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
         if (url.startsWith('blob:')) URL.revokeObjectURL(url);
         url = got.src; el.src = url; level();
         await el.play();
-        if (!lyrics.length && t.source && t.songId) backend.musicLyric(t.source, t.songId, {title: t.title, artist: t.artist}).then(text => { if (mine === ticket && text) { lyrics = parseLyrics(text); emit(); } }).catch(error => backend.reportDiagnostic?.('音乐歌词', error, 'warn'));
+        if (!lyrics.length && t.source && t.songId) backend.musicLyric(t.source, t.songId, {title: t.title, artist: t.artist}).then(text => { if (text) backend.keepLyric?.(t, text).catch(() => {}); if (mine === ticket && text) { lyrics = parseLyrics(text); emit(); } }).catch(error => backend.reportDiagnostic?.('音乐歌词', error, 'warn'));
         return;
       } catch (error) {
         if (mine !== ticket) return;
@@ -141,7 +141,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
       const k = songKey(s);
       if (seen.has(k)) continue;
       seen.add(k);
-      out.push(s.kind === 'heard' ? {title: s.title, artist: s.artist, ...(s.source && s.songId ? {origin: 'source', source: s.source, songId: s.songId} : {})} : s);
+      out.push(s.kind === 'heard' ? {title: s.title, artist: s.artist, rowId: s.id, ...(s.lyric ? {lyric: s.lyric} : {}), ...(s.source && s.songId ? {origin: 'source', source: s.source, songId: s.songId} : {})} : s);
     }
     return out;
   }
@@ -232,6 +232,8 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     /** 顺序播放, 随机播放 or 单曲循环 (kept in the settings). */
     setMode(mode) { backend.saveMusic?.({mode}); emit(); },
     play: t => playList([t], 0),
+    /** The songs of a kind of list as the tracks that would play (listOf). */
+    songsOf: which => listOf(which),
     seek(seconds) { if (audio && Number.isFinite(seconds)) { audio.currentTime = Math.max(0, seconds); emit(); } },
     /** The voice player's phase: music is turned down while a line is voiced. */
     voice(voicePhase) { const on = ['playing', 'generating'].includes(voicePhase); if (on !== voiced) { voiced = on; level(); } },

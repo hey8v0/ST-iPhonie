@@ -37,7 +37,7 @@ const MODE_ICON = {order: 'repeat', shuffle: 'shuffle', one: 'repeat1'};
 
 export function musicApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'music');
-  let mode = 'main', tab = 'library', songs = [], results = [], searchErrors = [], query = '', searching = false, epoch = 0, editing = null, showLyrics = false, test = null, sourceTest = 0;
+  let mode = 'main', tab = 'library', songs = [], results = [], searchErrors = [], searchNote = '', query = '', searching = false, epoch = 0, editing = null, showLyrics = false, test = null, sourceTest = 0;
   // 正文点的歌; what the search looks for (单曲 / 专辑 / 歌手), the albums or artists found, the page, whether there is
   // more; an album or artist opened: {g, songs, page, more, loading, error}
   let heard = [], kind = 'song', groups = [], page = 0, more = false, group = null;
@@ -150,7 +150,8 @@ export function musicApp(ctx) {
         + searchErrors.map(e => `<p class="hint">「${esc(e.source)}」：${esc(e.message)}</p>`).join('')
         + (found.length ? `<div class="group">${kind === 'song' ? results.map((x, i) => songRow(x, i, 'results')).join('') : groups.map(groupRow).join('')}</div>`
           : !sources.length ? empty('还没有音源', '插件不自带音源。在右上角「设置 → 音源」里添加你自己的音源地址，就能在这里搜歌。', 'search') : '')
-        + (searching ? '<p class="hint" role="status">正在搜……</p>' : more && found.length ? `<div class="actions">${btn('more-results', '加载更多', 'secondary')}</div>` : '');
+        + (searching ? '<p class="hint" role="status">正在搜……</p>' : more && found.length ? `<div class="actions">${btn('more-results', '加载更多', 'secondary')}</div>` : '')
+        + (searchNote && !searching ? `<p class="hint">${esc(searchNote)}</p>` : '');
     v.draw(heading('音乐', btn('settings', icon('sliders'), 'round-button', 'aria-label="音乐设置"'), `Music · ${songs.length} 首`)
       + nowPlaying()
       + `<div class="segmented" role="group" aria-label="歌单、正文点的歌或搜索">${[['library', '歌单'], ['heard', '正文点的歌'], ['search', '搜索']].map(([k, l]) => `<button data-action="tab" data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>`
@@ -255,13 +256,16 @@ export function musicApp(ctx) {
 
   /** Searches (songs, albums or artists); more: the next page added under the ones found. */
   async function search(next = false) {
-    if (!next) { query = v.root.querySelector('[data-music-query]')?.value.trim() || ''; page = 0; results = []; groups = []; more = false; }
+    if (!next) { query = v.root.querySelector('[data-music-query]')?.value.trim() || ''; page = 0; results = []; groups = []; more = false; searchNote = ''; }
     if (!query) return;
     searching = true; searchErrors = []; render();
     try {
-      const found = await api.searchMusic(query, '', {kind, page});
+      // what was found already, so a source whose address does not say how to turn pages can be tried page by page
+      const seen = next ? (kind === 'song' ? results : groups).map(x => x.source + '|' + x.id) : [];
+      const found = await api.searchMusic(query, '', {kind, page, seen});
       if (kind === 'song') results = [...results, ...found.songs]; else groups = [...groups, ...found.groups];
       more = !!found.more; searchErrors = found.errors;
+      searchNote = found.unpaged?.length ? `${found.unpaged.map(n => `「${n}」`).join('、')}只给了第一页：搜索地址没写怎么翻页，插件试了几种常见的翻页写法也没取到更多。在音源设置里给搜索地址加上 {{offset}}（或 {{page}}）和 {{limit}}，就能接着翻。` : '';
       if (!(kind === 'song' ? results : groups).length && !searchErrors.length) searchErrors = [{source: '搜索', message: '没有搜到'}];
     }
     catch (error) { searchErrors = [{source: '搜索', message: error.message}]; more = false; }
@@ -273,11 +277,14 @@ export function musicApp(ctx) {
   /** A song of 正文点的歌 into the 歌单: as found on a source when it was played, or looked up by its name now. */
   async function keepHeard(s) {
     let row = s.source && s.songId ? {title: s.title, artist: s.artist, source: s.source, songId: s.songId} : null;
+    // its lyrics (kept while it played) go along
+    const lyric = s.lyric ? {lyric: s.lyric} : {};
+    if (row) Object.assign(row, lyric);
     if (!row) {
       const found = await api.searchMusic([s.title, s.artist].filter(Boolean).join(' '));
       const m = bestMatch(found.songs, s);
       if (!m) throw Error(`没在音源里找到「${s.title}」`);
-      row = {title: m.title, artist: m.artist, source: m.source, songId: m.id};
+      row = {title: m.title, artist: m.artist, source: m.source, songId: m.id, ...lyric};
     }
     await keep([row], `「${row.title}」`);
   }
@@ -370,7 +377,7 @@ export function musicApp(ctx) {
     const i = Number(el.dataset.i);
     switch (el.dataset.action) {
       case 'tab': tab = el.dataset.tab; picked = null; render(); break;
-      case 'kind': kind = el.dataset.kind; results = []; groups = []; more = false; searchErrors = []; if (query) search(); else render(); break;
+      case 'kind': kind = el.dataset.kind; results = []; groups = []; more = false; searchErrors = []; searchNote = ''; if (query) search(); else render(); break;
       case 'more-results': page++; search(true); break;
       case 'open-group': group = {g: groups[i], songs: [], page: 0, more: false, loading: false, error: ''}; mode = 'group'; loadGroup(); break;
       case 'group-more': group.page++; loadGroup(); break;

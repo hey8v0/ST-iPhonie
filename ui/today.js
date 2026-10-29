@@ -7,7 +7,7 @@
 import {esc, avatar, plate} from './common.js';
 import {icon, wave} from './icons.js';
 import {APPS} from './apps.js';
-import {preview} from './chat.js';
+import {preview} from './chat-preview.js';
 import {nudge, moving} from './carry.js';
 import {WIDGETS, SIZE_NAMES, normalizeWidgets, makeWidget} from '../core/widgets.js';
 import {yuan} from '../core/wallet.js';

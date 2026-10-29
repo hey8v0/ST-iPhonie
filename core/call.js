@@ -3,10 +3,12 @@
 // A call is spoken: every line the contact says is written in the voice format of the active voice preset (the same
 // tags as story dialogue), so it can be read aloud with the contact's own voice. Rules come from the chat preset, the
 // ones used in 电话. The finished call is kept in the private chat as one message of kind 'call'.
+import {callClock, callSummary} from './call-summary.js';
 import {promptText} from './prompt-rules.js';
 import {parseDialogue} from './protocol.js';
 import {messageLine, knowsRule} from './chat.js';
 import {languageName} from './languages.js';
+export {callClock, callSummary};
 
 // perTurn: lines kept from one answer (each is read aloud one after another); a talkative contact may say a lot.
 export const CALL_LIMITS = Object.freeze({lines: 80, perTurn: 10, ring: [15, 60], history: 12});
@@ -28,11 +30,6 @@ const who = (from, user) => from === 'me' ? user : from;
 /** How the call reads in a transcript (the prompt of the next turn, or the chat history). */
 export function callTranscript(lines, user) {
   return lines.map(l => `${who(l.from, user)}：${l.translation || l.text}`).join('\n');
-}
-/** Seconds as 3:07 or 1:02:09. */
-export function callClock(seconds) {
-  const s = Math.max(0, Math.round(Number(seconds) || 0)), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, pad = n => String(n).padStart(2, '0');
-  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
 }
 
 /**
@@ -89,11 +86,3 @@ export function parseCallReply(reply, {name, user = '我', voiceFormat, voiced =
   return {lines: out, hangup};
 }
 
-/** Short words for how a call ended, as the chat shows it. */
-export function callSummary(m) {
-  const mine = m.dir === 'out';
-  if (m.state === 'answered') return `语音通话 ${callClock(m.duration)}`;
-  if (m.state === 'missed') return mine ? '对方无人接听' : m.voicemail?.length ? '未接来电 · 有语音留言' : '未接来电';
-  if (m.state === 'declined') return mine ? '对方已拒绝' : '已拒绝';
-  return mine ? '已取消' : '对方已取消';
-}

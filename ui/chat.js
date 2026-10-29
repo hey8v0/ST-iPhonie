@@ -10,6 +10,7 @@ import {saveFile, downloadAction, shareAction, shareFile, canShareFiles} from '.
 import {momentsPanel, momentsNew, momentsSeen} from './moments.js';
 import {PROFILE_STATUS, BUBBLES, FRAMES, BACKGROUNDS, parseStickers} from '../core/chat.js';
 import {callSummary} from '../core/call.js';
+import {preview, BLESSING, you, patText, noticeText, seconds} from './chat-preview.js';
 import {pendant} from './pendants.js';
 import {memorySheet} from './chat-memory.js';
 import {pictureInputs, photoTags, photoCast} from '../core/draw.js';
@@ -17,6 +18,7 @@ import {chatScene, sceneArt, sceneDark, syncMotion} from './chat-scenes.js';
 import {PREMIUM, yuan} from '../core/wallet.js';
 import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
 import {thumbBlob} from './thumbs.js';
+export {preview};
 
 // Chat app, QQ style: 消息 (conversations, with search, 置顶 and 免打扰), 联系人 (特别关心, friends, groups, profile cards)
 // and 动态 (朋友圈, ui/moments.js). Tapping your own avatar opens 我: name, status, signature and 个性装扮 (chat bubble,
@@ -37,35 +39,10 @@ function stamp(at) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 const dayLabel = at => { const s = stamp(at); return s.includes(':') ? '今天' : s; };
-const BLESSING = '恭喜发财，大吉大利';
-const you = who => who === 'me' ? '你' : who;
-const patText = m => `${you(m.from)} 拍了拍 ${you(m.target)}`;
-const noticeText = m => you(m.from) + String(m.text).replaceAll('{对方}', you(m.target));
 // Messages drawn as a centred line instead of a bubble.
 const LINE_KINDS = ['system', 'pat', 'notice', 'recall'];
-export function preview(m) {
-  if (!m) return '还没有消息';
-  switch (m.kind) {
-    case 'voice': return `[语音] ${seconds(m)}″`;
-    case 'photo': return '[图片]';
-    case 'sticker': return '[表情包]';
-    case 'redpacket': return '[红包] ' + (m.text || BLESSING);
-    case 'transfer': return '[转账] ¥' + m.amount;
-    case 'gift': return '[礼物] ' + (m.gift?.name || '');
-    case 'location': return '[位置] ' + m.text;
-    case 'song': return '[音乐] ' + (m.song?.title || '');
-    case 'file': return '[文件] ' + m.name;
-    case 'dice': return '[骰子]';
-    case 'call': return `[${callSummary(m)}]`;
-    case 'pat': return patText(m);
-    case 'notice': return noticeText(m);
-    case 'recall': return you(m.from) + ' 撤回了一条消息';
-    default: return m.text;
-  }
-}
 const quotable = m => ['text', 'voice', 'photo', 'location'].includes(m.kind);
 const quoteText = m => m.kind === 'voice' ? m.translation || m.text : m.kind === 'photo' ? '[图片]' + (m.text ? ' ' + m.text : '') : m.kind === 'sticker' ? '[表情包] ' + m.text : m.kind === 'location' ? '[位置] ' + m.text : m.text;
-const seconds = m => Math.max(1, Math.min(60, Math.round((m.text || '').length / 5)));
 const lineOf = m => ({role: m.from, emotion: m.emotion || 'calm', text: m.text, translation: m.translation || ''});
 const WAVE_HEIGHTS = [6, 12, 18, 10, 16, 22, 14, 8, 16, 20, 12, 7, 14, 10];
 // Dice pips on a 3×3 grid, by face.

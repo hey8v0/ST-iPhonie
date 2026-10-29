@@ -310,7 +310,19 @@ export class TTSBackend {
         try { listener({ type: 'playback', revision: this.revision, ...this.player.snapshot() }); } catch { this.listeners.delete(listener); throw Error('界面无法接收播放状态'); }
         return () => this.listeners.delete(listener);
     }
-    getState() { this.assertOpen(); return clone(this.settings); }
+    // A copy for every caller (it may be changed), made from a string kept for the moment's work: the phone asks for the
+    // settings dozens of times a render (an 引擎 card up to seven times), and parsing that string is two to four times
+    // quicker than copying the settings each time. The string goes when this piece of work is done (a microtask), so the
+    // next read sees anything changed since, as before. The settings are kept as JSON in the tavern anyway.
+    getState() {
+        this.assertOpen();
+        if (this.stateOf !== this.settings) {
+            this.stateJson = JSON.stringify(this.settings);
+            this.stateOf = this.settings;
+            queueMicrotask(() => { this.stateOf = null; });
+        }
+        return JSON.parse(this.stateJson);
+    }
     getSnapshot() { return { state: this.getState(), revision: this.revision }; }
     save(next, expectedRevision) {
         this.assertOpen();
@@ -1431,9 +1443,12 @@ export class TTSBackend {
     /**
      * Searches the enabled sources (or one) for songs ({songs: [{source, sourceName, id, title, artist}]}) or, with
      * kind 'album' / 'artist', albums or artists ({groups: [{source, sourceName, kind, id, name, artist, count}]}) — on
-     * the sources that say how. page 0, 1, …: more is true when a source searching in pages gave a full one.
+     * the sources that say how. page 0, 1, …: more is true when a source gave a full page. seen: 'source|id' of what
+     * was found already. An address with no {{offset}} / {{page}} in it may still give pages: after its first page the
+     * usual ways of asking for one are tried in turn (as groupSongs does), and the first that gives results not had yet
+     * is kept for that source and that kind of search; none does: the source is named in unpaged.
      */
-    async searchMusic(query, sourceId = '', { kind = 'song', page = 0 } = {}) {
+    async searchMusic(query, sourceId = '', { kind = 'song', page = 0, seen } = {}) {
         this.assertOpen();
         const words = String(query || '').trim().slice(0, 100);
         if (!words) throw Error(kind === 'album' ? '写一下专辑名' : kind === 'artist' ? '写一下歌手名' : '写一下想听的歌');
@@ -1441,18 +1456,30 @@ export class TTSBackend {
         if (!all.length) throw Error('还没有能用的音源：先在「音乐 → 设置 → 音源」里添加一个');
         const key = GROUP_KINDS[kind] ? kind + 'Search' : 'search', sources = all.filter(s => s[key]);
         if (!sources.length) throw Error(`音源都不能搜${GROUP_KINDS[kind]}：在音源设置的「搜专辑、歌手和歌单」里填地址（自己搭的网易云后端会自动填好）`);
-        const songs = [], groups = [], errors = [], at = { query: words, offset: page * 30, page: page + 1, limit: 30 };
+        const songs = [], groups = [], errors = [], unpaged = [], at = { query: words, offset: page * 30, page: page + 1, limit: 30 };
+        const had = new Set((Array.isArray(seen) ? seen : []).map(String));
         let more = false;
         await Promise.all(sources.map(async s => {
             try {
-                const json = await this.musicFetch(fillSource(s[key], at));
-                const found = (key === 'search' ? readSearch(s, json) : readGroups(s, json, kind)).map(x => ({ ...x, sourceName: s.name }));
+                const read = json => (key === 'search' ? readSearch(s, json) : readGroups(s, json, kind)).map(x => ({ ...x, sourceName: s.name }));
+                let found = null;
+                if (paged(s[key]) || page === 0) found = read(await this.musicFetch(fillSource(s[key], at)));
+                else {
+                    const wayKey = s.id + '|' + key + '|' + s[key], known = (this.pageWays ||= new Map()).get(wayKey);
+                    for (const way of known ? [known] : PAGE_WAYS) {
+                        const got = await this.musicFetch(fillSource(withPages(s[key], way), at)).then(read).catch(() => null);
+                        const fresh = (got || []).filter(x => !had.has(x.source + '|' + x.id));
+                        if (fresh.length) { this.pageWays.set(wayKey, way); found = fresh; break; }
+                    }
+                    if (!found && !known) unpaged.push(s.name);
+                    found ||= [];
+                }
                 (key === 'search' ? songs : groups).push(...found);
-                if (paged(s[key]) && found.length >= 20) more = true;
+                if (found.length >= 20) more = true;
             }
             catch (error) { errors.push({ source: s.name, message: error.message }); }
         }));
-        return key === 'search' ? { songs, errors, more } : { groups, errors, more };
+        return key === 'search' ? { songs, errors, more, unpaged } : { groups, errors, more, unpaged };
     }
     /**
      * The songs of an album, an artist or a playlist a search found: {songs, more} — page 0, 1, … of `limit` songs (at
@@ -1461,7 +1488,8 @@ export class TTSBackend {
      *
      * An address with no {{offset}} / {{page}} in it may still give pages: after its first page the usual ways of
      * asking for one are tried in turn, and the first that gives songs not had yet is kept for that source while the
-     * tavern page is open. None does: {songs: [], more: false, unpaged: true} — the first page is all there is.
+     * tavern page is open (for that address: an address changed is tried again). None does: {songs: [], more: false,
+     * unpaged: true} — the first page is all there is.
      */
     async groupSongs(sourceId, kind, id, page = 0, { limit = 50, offset, seen } = {}) {
         this.assertOpen();
@@ -1473,7 +1501,7 @@ export class TTSBackend {
             const songs = await get(template);
             return { songs, more: songs.length >= Math.min(20, size) };
         }
-        const had = new Set((Array.isArray(seen) ? seen : []).map(String)), key = sourceId + '|' + kind, known = (this.pageWays ||= new Map()).get(key);
+        const had = new Set((Array.isArray(seen) ? seen : []).map(String)), key = sourceId + '|' + kind + '|' + template, known = (this.pageWays ||= new Map()).get(key);
         for (const way of known ? [known] : PAGE_WAYS) {
             const songs = await get(withPages(template, way)).catch(() => null), fresh = (songs || []).filter(x => !had.has(String(x.id)));
             if (fresh.length) { this.pageWays.set(key, way); return { songs: fresh, more: songs.length >= Math.min(20, size) }; }
@@ -1490,11 +1518,32 @@ export class TTSBackend {
         // (later than the last one even within the same millisecond, so the newest is always on top)
         this.heardAt = Math.max(Date.now(), (this.heardAt || 0) + 1);
         const row = { id: 'heard:' + songKey(song), kind: 'heard', at: this.heardAt, title, artist: String(song.artist || '').trim().slice(0, 200) };
+        const old = await this.music.get(row.id).catch(() => null);
         if (song.source && song.songId) Object.assign(row, { source: String(song.source).slice(0, 60), songId: String(song.songId).slice(0, 200) });
-        else { const old = await this.music.get(row.id).catch(() => null); if (old?.source && old.songId) Object.assign(row, { source: old.source, songId: old.songId }); }
+        else if (old?.source && old.songId) Object.assign(row, { source: old.source, songId: old.songId });
+        // its lyrics, once they were fetched (keepLyric), stay with it
+        const lyric = song.lyric || old?.lyric;
+        if (lyric) row.lyric = String(lyric).slice(0, 60000);
         await this.music.put([row], { keep: MUSIC_LIMITS.heard });
         this.emit('music', { heard: true });
         return row;
+    }
+    /** Lyrics fetched while a song played, kept with it: in 正文点的歌, and in the 歌单 where it is there without any. The
+     *  next time it plays they show at once, even when its source cannot be reached. song: the track ({rowId or id,
+     *  title, artist}); true when kept anywhere. */
+    async keepLyric(song, text) {
+        this.assertOpen();
+        const lyric = String(text || '').slice(0, 60000);
+        if (!lyric.trim() || !song?.title) return false;
+        const ids = [...new Set([song.rowId, song.id, 'heard:' + songKey(song)].filter(id => typeof id === 'string' && /^(?:heard|song):/.test(id)))];
+        let kept = false;
+        for (const id of ids) {
+            const row = await this.music.get(id).catch(() => null);
+            if (!row || row.lyric || !['heard', 'song'].includes(row.kind)) continue;
+            await this.music.change(id, r => { if (!r.lyric) r.lyric = lyric; }).catch(() => null);
+            kept = true;
+        }
+        return kept;
     }
     async forgetHeard(ids) { for (const id of ids) await this.music.remove(id); this.emit('music', { heard: true }); return true; }
     async clearHeard() { await this.music.clear('heard'); this.emit('music', { heard: true }); return true; }
@@ -2143,8 +2192,10 @@ export class TTSBackend {
             if (this.closed) return null;
             const kept = await this.library.getThumb?.(id);
             if (kept) return kept.blob;
+            // nothing here can read a picture (not a browser): the grid shows the photo itself
+            if (typeof createImageBitmap !== 'function') return null;
             const photo = await this.library.getPhoto(id);
-            if (!photo?.blob || typeof createImageBitmap !== 'function') return null;
+            if (!photo?.blob) return null;
             const made = await makeThumb(photo.blob);
             if (!this.closed) await this.library.saveThumb?.(id, made);
             return made.blob;

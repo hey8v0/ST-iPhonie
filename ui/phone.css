@@ -142,6 +142,10 @@ a{color:var(--accent-ink)}
 .apps-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 6px;padding:4px 14px 8px}
 .app-icon{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:0;min-height:84px;color:inherit}
 .app-icon:active .icon-tile{transform:scale(.88);transition-duration:.1s}
+/* An app whose code is still coming (a tap in the first moment after the phone opened): the icon breathes. */
+.icon-tile[data-loading]{animation:icon-coming .9s ease-in-out infinite}
+@keyframes icon-coming{50%{transform:scale(.9);filter:brightness(.94)}}
+@media (prefers-reduced-motion:reduce){.icon-tile[data-loading]{animation:none;opacity:.75}}
 .icon-tile{position:relative;width:60px;height:60px;border-radius:19px;display:grid;place-items:center;overflow:hidden;color:#fff;transition:transform .3s var(--spring);background:linear-gradient(160deg,var(--t1),var(--t2));box-shadow:inset 0 2px 0 rgba(255,255,255,.55),inset 0 -3px 0 rgba(0,0,0,.08),0 6px 14px -6px color-mix(in srgb,var(--t2) 80%,#000)}
 .icon-tile:after{content:"";position:absolute;inset:3px 3px 50% 3px;border-radius:16px 16px 40% 40%;background:linear-gradient(rgba(255,255,255,.33),rgba(255,255,255,0));pointer-events:none}
 .icon-tile .glyph{width:46px;height:46px}

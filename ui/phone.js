@@ -7,25 +7,7 @@ import {glyph, icon, spark, wave} from './icons.js';
 import {esc, avatar, plate, setAvatarPictures} from './common.js';
 import {APPS, HOME, SLOT} from './apps.js';
 import {wallpaperLook, motionLayer} from './wallpapers.js';
-import {rolesApp} from './roles.js';
-import {enginesApp} from './engines.js';
-import {presetsApp} from './presets.js';
-import {libraryApp, galleryApp, notesApp, listenApp} from './media-apps.js';
-import {settingsApp} from './settings.js';
-import {drawApp} from './draw.js';
-import {forumApp} from './forum.js';
-import {peekApp} from './peek.js';
-import {chatApp} from './chat.js';
-import {soundsApp} from './sounds.js';
-import {assistantApp} from './assistant.js';
-import {musicApp} from './music.js';
-import {gamesApp} from './games.js';
-import {bookApp} from './book.js';
-import {indieApp} from './indie.js';
-import {paintApp} from './paint.js';
-import {vnApp} from './vn.js';
-import {logsApp} from './logs.js';
-import {momentsNew, momentsSeen} from './moments.js';
+import {momentsNew, momentsSeen} from './moments-seen.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
 import {bindNativeSelects} from './popup-select.js';
@@ -33,7 +15,25 @@ import {grow, launch, nudge, within, visible, islandIn, moving} from './carry.js
 import {todayPage} from './today.js';
 
 // App factories, keyed by the ids in apps.js.
-const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp, assistant: assistantApp, music: musicApp, games: gamesApp, picbook: bookApp, indie: indieApp, paint: paintApp, vn: vnApp, logs: logsApp};
+// The apps: each one's module loads when the app is first opened, or in an idle moment after the phone is up
+// (preloadApps), so opening the phone loads only its shell (about 20 modules, not 125).
+const LOADERS = {
+  roles: () => import('./roles.js').then(m => m.rolesApp), engines: () => import('./engines.js').then(m => m.enginesApp),
+  presets: () => import('./presets.js').then(m => m.presetsApp), library: () => import('./media-apps.js').then(m => m.libraryApp),
+  gallery: () => import('./media-apps.js').then(m => m.galleryApp), notes: () => import('./media-apps.js').then(m => m.notesApp),
+  listen: () => import('./media-apps.js').then(m => m.listenApp), settings: () => import('./settings.js').then(m => m.settingsApp),
+  draw: () => import('./draw.js').then(m => m.drawApp), chat: () => import('./chat.js').then(m => m.chatApp),
+  forum: () => import('./forum.js').then(m => m.forumApp), peek: () => import('./peek.js').then(m => m.peekApp),
+  sounds: () => import('./sounds.js').then(m => m.soundsApp), assistant: () => import('./assistant.js').then(m => m.assistantApp),
+  music: () => import('./music.js').then(m => m.musicApp), games: () => import('./games.js').then(m => m.gamesApp),
+  picbook: () => import('./book.js').then(m => m.bookApp), indie: () => import('./indie.js').then(m => m.indieApp),
+  paint: () => import('./paint.js').then(m => m.paintApp), vn: () => import('./vn.js').then(m => m.vnApp), logs: () => import('./logs.js').then(m => m.logsApp)
+};
+const FACTORIES = {}, loading = {};
+/** An app's module, once (a load that failed is tried again next time). */
+function loadApp(name) {
+  return loading[name] ||= LOADERS[name]().then(factory => (FACTORIES[name] = factory), error => { delete loading[name]; throw error; });
+}
 const ACTIVE_PHASES = ['playing', 'paused', 'generating', 'waiting'];
 
 // Network and battery in the status bar come from the user's own device (where the browser tells them).
@@ -62,7 +62,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   signal.addEventListener('abort', stopDiagnostics, {once: true});
   let today = null;
   const media = win.matchMedia('(prefers-color-scheme: dark)'), motion = win.matchMedia('(prefers-reduced-motion: reduce)');
-  let panelVisible = true, active = null, locked = false, sheet = null, disposed = false;
+  let panelVisible = true, active = null, locked = false, sheet = null, disposed = false, wanted = null;
   let lastPhase = '', preferences = null, appearanceKey = '', appearanceEpoch = 0, toastTimer, animation, openTimer, unread = 0, unreadTimer, fresh = 0, freshTimer;
   let playback = api.status();
 
@@ -274,7 +274,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const routeFor = name => findRoute(api.getState().routes, name);
   const engineOf = name => { const r = routeFor(name); return r?.voice ? r.engine : 'none'; };
   const ctx = {api, doc, win, notify, dialog, confirm, help, lock, open, routeFor, engineOf, openPendingRole: name => openPendingRole(name), visible: name => active === name && !locked,
-    editEngine: id => views.get('engines')?.edit?.(id), showPresetKind: kind => views.get('presets')?.showKind?.(kind), openDraw: request => { open('draw'); views.get('draw')?.load?.(request); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
+    editEngine: id => withView('engines', v => v.edit?.(id)), showPresetKind: kind => withView('presets', v => v.showKind?.(kind)), openDraw: request => { open('draw'); withView('draw', v => v.load?.(request)); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
   installMotion(win, mount, signal);
   // On a computer the phone is a floating window: its top bar moves it.
   const stageBar = $('.stage-bar'), sizeButton = $('[data-system=size]');
@@ -309,7 +309,18 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   function stopCarry() { const o = launching ? {at: launching.openness(), speed: launching.speed()} : null; for (const a of carrying) a?.cancel(); carrying = []; launching = null; delete screen.dataset.carrying; return o; }
   const iconOf = name => home.querySelector(`.app-icon[data-app="${name}"] .icon-tile`);
   function open(name, roleId, from = null) {
-    if (!FACTORIES[name]) return;
+    if (!LOADERS[name]) return;
+    if (!FACTORIES[name]) {
+      // Its module has not come yet (a tap in the first moment after the phone opened): it comes, then the app opens,
+      // unless another was asked for meanwhile. The icon breathes until then.
+      wanted = name;
+      const mark = from || iconOf(name);
+      mark?.setAttribute?.('data-loading', '');
+      loadApp(name).then(() => { mark?.removeAttribute?.('data-loading'); if (wanted !== name || disposed) return; wanted = null; open(name, roleId, from); },
+        error => { mark?.removeAttribute?.('data-loading'); if (wanted !== name || disposed) return; wanted = null; notify('这个 App 没有打开：' + (error?.message || '加载失败'), {error: true}); });
+      return;
+    }
+    wanted = null;
     sheet?.close(null);
     unlock();
     const source = from || (!active && !home.hidden ? iconOf(name) : null);
@@ -421,7 +432,24 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const route = routeFor(name);
     if (route) { open('roles', route.id); return; }
     open('roles');
-    views.get('roles')?.create?.(name);
+    withView('roles', v => v.create?.(name));
+  }
+  /** Runs fn with an app's view: at once when its module is here, else once it has come (open() makes the view first). */
+  function withView(name, fn) {
+    if (FACTORIES[name]) { const v = views.get(name); if (v) fn(v); return; }
+    loadApp(name).then(() => { const v = views.get(name); if (v && !disposed) fn(v); }, () => {});
+  }
+  /** The other apps' modules, one by one in idle moments once the phone is up, so a tap opens them at once. */
+  function preloadApps() {
+    const order = [...new Set([...HOME.dock, ...HOME.pages.flat(), ...Object.keys(LOADERS)])].filter(n => LOADERS[n]);
+    const idle = fn => win.requestIdleCallback ? win.requestIdleCallback(fn, {timeout: 3000}) : win.setTimeout(fn, 150);
+    let i = 0;
+    const next = () => {
+      while (i < order.length && FACTORIES[order[i]]) i++;
+      if (disposed || i >= order.length) return;
+      loadApp(order[i++]).catch(() => {}).finally(() => idle(next));
+    };
+    idle(next);
   }
 
   // ---------- Clock and theme ----------
@@ -604,13 +632,19 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     for (const bar of mount.querySelectorAll('.wave i,.visualizer i')) bar.style.removeProperty('transform');
     for (const el of mount.querySelectorAll('.portrait')) el.style.removeProperty('--level');
     if (disposed || !panelVisible || doc.hidden || motion.matches || playback.phase !== 'playing' || !api.getState().general.waveformEnabled) return;
-    let before = 0;
+    // The waves are looked up a few times a second, not on every frame: a lookup goes through the whole phone page.
+    // Bars no longer playing when they are looked up again go back to rest.
+    let before = 0, looked = -1e9, five = [], vizs = [], portraits = [];
     const draw = time => {
       if (time - before > 32) {
         const levels = api.levels();
-        const five = [...mount.querySelectorAll('.island-wave .wave i,.live-wave .wave i,[data-state=playing] .wave i')];
+        if (time - looked > 400) {
+          const now = [...mount.querySelectorAll('.island-wave .wave i,.live-wave .wave i,[data-state=playing] .wave i')];
+          for (const bar of five) if (!now.includes(bar)) bar.style.removeProperty('transform');
+          five = now; vizs = [...mount.querySelectorAll('.visualizer')]; portraits = [...mount.querySelectorAll('.portrait')]; looked = time;
+        }
         five.forEach((bar, i) => bar.style.transform = 'scaleY(' + (.2 + .8 * (levels[i % 5] || 0)) + ')');
-        for (const viz of mount.querySelectorAll('.visualizer')) {
+        for (const viz of vizs) {
           const bars = viz.children, n = bars.length;
           for (let i = 0; i < n; i++) {
             const envelope = .35 + .65 * Math.sin(Math.PI * (i + .5) / n);
@@ -618,7 +652,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
           }
         }
         const average = levels.reduce((a, b) => a + b, 0) / (levels.length || 1);
-        for (const el of mount.querySelectorAll('.portrait')) el.style.setProperty('--level', average.toFixed(3));
+        for (const el of portraits) el.style.setProperty('--level', average.toFixed(3));
         before = time;
       }
       animation = win.requestAnimationFrame(draw);
@@ -958,9 +992,9 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   // 'chat:moments': the chat app on 动态 (the 动态小窗's tap).
   function openPart(value) {
     const [name, part] = String(value || '').split(':');
-    if (!FACTORIES[name]) return false;
+    if (!LOADERS[name]) return false;
     open(name);
-    if (part === 'moments') views.get('chat')?.showMoments?.();
+    if (part === 'moments') withView('chat', v => v.showMoments?.());
     return true;
   }
   function takeApp() { return openPart(api.takeApp?.()); }
@@ -969,7 +1003,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const request = api.takeDraw?.();
     if (!request) return false;
     open('draw');
-    views.get('draw')?.load?.(request);
+    withView('draw', v => v.load?.(request));
     return true;
   }
   win.stTtsOpenDraw = () => run(takeDraw);
@@ -978,7 +1012,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const id = api.takeThread?.();
     if (!id) return false;
     open('chat');
-    views.get('chat')?.openThread?.(id);
+    withView('chat', v => v.openThread?.(id));
     return true;
   }
   win.stTtsOpenThread = () => run(takeThread);
@@ -1034,7 +1068,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
   win.addEventListener('pagehide', dispose, {signal});
   today = todayPage({doc, win, api, open, confirm, dialog, notify, signal, engineOf, appIcon, playback: () => playback, battery: () => batteryState(battery),
-    openThread: (id, from) => { open('chat', undefined, from); views.get('chat')?.openThread?.(id); }});
+    openThread: (id, from) => { open('chat', undefined, from); withView('chat', v => v.openThread?.(id)); }});
   applyThemeMode();
   renderHome();
   run(() => today.refresh());
@@ -1064,7 +1098,9 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     notify(error.message, {error: true});
     return appearance(fallback);
   });
-  return {ready, open, home: showHome, back, lock, unlock, dispose, views, get active() { return active; }, get locked() { return locked; }};
+  // Once the phone is up, the other apps come in idle moments.
+  ready.then(() => { if (!disposed) win.setTimeout(preloadApps, 600); });
+  return {ready, open, home: showHome, back, lock, unlock, dispose, views, loadApps: () => Promise.all(Object.keys(LOADERS).map(loadApp)), get active() { return active; }, get locked() { return locked; }};
 }
 
 if (typeof window !== 'undefined' && window.document.getElementById('root')) {
