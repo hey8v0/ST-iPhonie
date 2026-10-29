@@ -3,6 +3,7 @@
 // water are drawn in grey and tinted by the biome when the world is drawn, like the game does. Animated ones (water,
 // lava) have several frames.
 import {rng, hash} from './noise.js';
+import {SHERDS, drawMotif} from './pottery.js';
 import {COLORS} from './blocks.js';
 
 const S = 16;
@@ -1760,6 +1761,33 @@ BLOCK_ART.cartography_table_side3 = () => {
   for (let y = 3; y < 13; y++) { p.set(3, y, hex(y % 2 ? '#d9c27a' : '#b89a4a')); p.set(4, y, hex('#e8d69a')); }
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 10, y - 8); if (d < 3.6) p.set(x, y, hex(d > 2.6 ? '#7a7a7a' : '#d8d8d8')); }
   p.set(10, 7, hex('#c43a2a')); p.set(10, 8, hex('#c43a2a')); p.set(10, 9, hex('#3a3a3a'));
+  return p;
+};
+
+// ---------- after 0.8.85: archaeology ----------
+// suspicious sand and gravel: the block with a few dark lumps in it; brushed (stages 1–3) its middle swept clean — light
+// streaks round a darker hollow that grows
+for (const base of ['sand', 'gravel']) for (let stage = 0; stage < 4; stage++) BLOCK_ART[`suspicious_${base}_${stage}`] = () => {
+  const p = BLOCK_ART[base](), r = rng(base === 'sand' ? 811 : 823);
+  for (let k = 0; k < 7; k++) { const x = Math.floor(r() * 15), y = Math.floor(r() * 15); for (const [dx, dy] of [[0, 0], [1, 0], [0, 1]]) p.set(x + dx, y + dy, mul(p.get(x + dx, y + dy), 0.74)); }
+  if (stage) {
+    const rad = 2.5 + stage * 1.6;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (d < rad) p.set(x, y, mul(p.get(x, y), d < rad - 2.2 ? 0.78 : (x * 3 + y) % 4 ? 1.1 : 0.9)); }
+  }
+  return p;
+};
+// the brush: a wooden handle, a copper band, a tuft of feather
+ITEM_ART.brush = () => sprite(['................', '..........ffF...', '.........fffFf..', '........ffffFf..', '.......ffffFf...', '........fFff....', '.......cCc......', '......cCc.......',
+  '.....wW.........', '....wW..........', '...wW...........', '..wW............', '.wW.............', '................', '................', '................'],
+  {f: '#efe6cf', F: '#c9bc9c', c: '#d2733f', C: '#9a4a22', w: '#a0703f', W: '#6b4825'});
+// the decorated pot (its item's picture; the pot itself is drawn from its model): rim, neck, body
+ITEM_ART.decorated_pot = () => sprite(['................', '....kkkkkkkk....', '....kTttttTk....', '......kttk......', '...kkkkkkkkkk...', '..kTtttttttttk..', '..kttttttttttk..', '..ktbbtttbbttk..',
+  '..kttttttttttk..', '..ktbbtttbbttk..', '..kttttttttttk..', '..kttttttttttk..', '..kTtttttttttk..', '...kkkkkkkkkk...', '................', '................'],
+  {k: '#5c2e1c', t: '#a35d3e', T: '#c47a55', b: '#7a3f28'});
+// pottery sherds: a broken piece of terracotta with its picture
+for (const s of SHERDS) ITEM_ART[`${s}_pottery_sherd`] = () => {
+  const p = icon([{mask: mask().poly([[2.5, 4], [7, 1.5], [13, 2.5], [14.5, 8], [12.5, 14], [6, 14.5], [1.5, 10]]), color: '#b8693f', light: '#d4875a', dark: '#8a4a2c', outline: '#4a2414'}]);
+  drawMotif(s, 3, 3, (x, y) => { if (p.alpha(x, y)) p.set(x, y, hex('#4e2416')); });
   return p;
 };
 

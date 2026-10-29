@@ -223,6 +223,8 @@ export function collisionBoxes(v, near = () => 0) {
     case 'bed': return [[0, 0, 0, 1, px(9), 1]];
     case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
     case 'brewing': return [[px(7), 0, px(7), px(9), px(14), px(9)], [px(2), 0, px(1), px(15), px(2), px(15)]];
+    // a decorated pot: its body (its neck stands over the block, as the game's)
+    case 'pot': return [[px(1), 0, px(1), px(15), 1, px(15)]];
     case 'lectern': case 'bell': case 'cocoa': return toBlock(pieces(v, near));
     case 'repeater': case 'comparator': case 'piston': case 'piston_head': case 'hopper': case 'detector': return inBlock(pieces(v, near));
   }
@@ -282,6 +284,7 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'wire': return [[0, 0, 0, 1, px(1), 1]];
     // string: a thin box over the ground, lower once strung (the game's); a tripwire hook: the plank and hook off its wall
     case 'tripwire': return meta & 1 ? [[0, px(1), 0, 1, px(2.5), 1]] : [[0, 0, 0, 1, px(8), 1]];
+    case 'pot': return [[px(1), 0, px(1), px(15), 1, px(15)]];
     case 'hook': return [[[px(5), 0, 0, px(11), px(10), px(6)], [px(10), 0, px(5), 1, px(10), px(11)], [px(5), 0, px(10), px(11), px(10), 1], [0, 0, px(5), px(6), px(10), px(11)]][meta & 3]];
     case 'bamboo': { const [ox, oz] = plantOffset(near.x, near.z), r = (meta & 3) === 2 ? 5 : 3; return [[px(8 - r + ox), 0, px(8 - r + oz), px(8 + r + ox), 1, px(8 + r + oz)]]; }
     case 'petals': return [[0, 0, 0, 1, px(3), 1]];

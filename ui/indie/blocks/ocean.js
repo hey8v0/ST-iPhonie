@@ -214,7 +214,15 @@ export function ruinPlan(p, warm) {
       for (let k = 1 + Math.floor(r() * 2); k > 0; k--) { const q = Math.floor(r() * 4), qx = q & 1, qz = q >> 1; chests.push([qx * m + 2 + Math.floor(r() * (m - 3)), 1, qz * m + 2 + Math.floor(r() * (m - 3)), 'underwater_ruin_big', Math.floor(r() * 4)]); }
     }
     for (const [x, y, z, , f] of chests) put(x, y, z, withMeta(ID.chest, f));
-    return {P, H, chests};
+    // up to five of its floor's sand (warm) or gravel (cold) blocks hide a thing (the game's 1.20)
+    const sus = [], rs = rng(p.seed ^ 0x51a7), from = warm ? ID.sand : ID.gravel, spots = [];
+    for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) if (P[at(F, x, 0, z)] === from) spots.push([x, z]);
+    for (let k = 0; k < 5 && spots.length; k++) {
+      const [x, z] = spots.splice(Math.floor(rs() * spots.length), 1)[0];
+      P[at(F, x, 0, z)] = warm ? ID.suspicious_sand : ID.suspicious_gravel;
+      sus.push([x, 0, z, warm ? 'ocean_ruin_warm_archaeology' : 'ocean_ruin_cold_archaeology']);
+    }
+    return {P, H, chests, sus};
   });
 }
 
@@ -382,11 +390,16 @@ function drawBergs(col, seed) {
     }
   }
 }
-/** The chests of the sea's structures in a column, with their loot tables: [[x, y, z, table]] (only where a chest is). */
+/** The chests (and suspicious sand and gravel) of the sea's structures in a column, with their loot tables: [[x, y, z,
+ *  table]] (only where one is). */
 export function lootIn(seed, col) {
   const out = [], x0 = col.cx * 16, z0 = col.cz * 16;
-  const keep = (x, y, z, table) => { if (x >= x0 && x < x0 + 16 && z >= z0 && z < z0 + 16 && BLOCKS[getBlock(col, x - x0, y, z - z0) & 0xFFF].use === 'chest') out.push([x, y, z, table]); };
-  for (const g of near(ruinsIn, RUIN_REGION, seed, x0, z0, 40)) for (const p of g.pieces) for (const [lx, ly, lz, table] of ruinPlan(p, g.warm).chests) { const [wx, wz] = toWorld(p, lx, lz); keep(wx, p.y + ly, wz, table); }
+  const keep = (x, y, z, table) => {
+    if (x < x0 || x >= x0 + 16 || z < z0 || z >= z0 + 16) return;
+    const b = BLOCKS[getBlock(col, x - x0, y, z - z0) & 0xFFF];
+    if (b.use === 'chest' || b.brushable) out.push([x, y, z, table]);
+  };
+  for (const g of near(ruinsIn, RUIN_REGION, seed, x0, z0, 40)) for (const p of g.pieces) { const plan = ruinPlan(p, g.warm); for (const [lx, ly, lz, table] of [...plan.chests, ...plan.sus]) { const [wx, wz] = toWorld(p, lx, lz); keep(wx, p.y + ly, wz, table); } }
   for (const s of near(shipwreckIn, SHIP_REGION, seed, x0, z0, 32)) for (const [lx, ly, lz, table] of shipPlan(s).chests) { const [wx, wz] = toWorld(s, lx, lz); keep(wx, s.y + ly, wz, table); }
   if (treasureIn(seed, col.cx, col.cz)) for (let y = SEA + 20; y > SEA - 26; y--) if ((getBlock(col, 9, y, 9) & 0xFFF) === ID.chest) { keep(x0 + 9, y, z0 + 9, 'buried_treasure'); break; }
   return out;

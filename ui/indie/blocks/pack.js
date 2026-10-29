@@ -7,6 +7,7 @@
 // game's model pictures (laid out as its models are).
 import {TEXTURE_NAMES} from './atlas.js';
 import {getOne, putOne, delOne} from './db.js';
+import {SHERDS} from './pottery.js';
 
 const u16 = (b, at) => b[at] | b[at + 1] << 8;
 const u32 = (b, at) => (b[at] | b[at + 1] << 8 | b[at + 2] << 16 | b[at + 3] << 24) >>> 0;
@@ -69,6 +70,9 @@ SKINS.polar_bear = ['entity/bear/polarbear.png', 'entity/bear/polar_bear.png'];
 SKINS.enderman = ['entity/enderman/enderman.png'];
 // signs: a picture for each wood
 for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) { SKINS[`sign_${w}`] = [`entity/signs/${w}.png`]; SKINS[`hanging_${w}`] = [`entity/signs/hanging/${w}.png`]; }
+// the decorated pot: its base, a brick side, each sherd's pattern
+SKINS.pot_base = ['entity/decorated_pot/decorated_pot_base.png']; SKINS.pot_side = ['entity/decorated_pot/decorated_pot_side.png'];
+for (const s of SHERDS) SKINS[`pot_${s}`] = [`entity/decorated_pot/${s}_pottery_pattern.png`];
 SKINS.enderman_eyes = ['entity/enderman/enderman_eyes.png'];
 // the conduit as the game draws it: its shell, cage, the eye open and shut, the whirling water (strips of frames)
 Object.assign(SKINS, {conduit_shell: ['entity/conduit/base.png'], conduit_cage: ['entity/conduit/cage.png'], conduit_eye_open: ['entity/conduit/open_eye.png'], conduit_eye_closed: ['entity/conduit/closed_eye.png'],

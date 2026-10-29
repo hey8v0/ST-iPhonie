@@ -2,6 +2,7 @@
 // fly to the player when near) and particles (bits of a block flying off when it breaks, splashes).
 import {collisionBoxes} from './shapes.js';
 import {itemInfo, BLOCKS, ID} from './blocks.js';
+import {same} from './inventory.js';
 import {Verts, mat} from './render.js';
 import {LAYER, dialName} from './atlas.js';
 import {potionColor} from './brew.js';
@@ -97,10 +98,10 @@ export class Entities {
     return bs && bs.some(b => x >= bx + b[0] && x <= bx + b[3] && y >= by + b[1] && y <= by + b[4] && z >= bz + b[2] && z <= bz + b[5]);
   }
   /** Drops a stack at a place, flying out a little (or thrown along dir). */
-  drop(stack, x, y, z, {dir = null, delay = 10} = {}) {
+  drop(stack, x, y, z, {dir = null, delay = 10, still = false} = {}) {
     if (!stack || !stack.n) return;
     const a = Math.random() * Math.PI * 2;
-    const v = dir ? [dir[0] * 0.3, dir[1] * 0.3 + 0.1, dir[2] * 0.3] : [Math.cos(a) * 0.06, 0.2, Math.sin(a) * 0.06];
+    const v = still ? [0, 0, 0] : dir ? [dir[0] * 0.3, dir[1] * 0.3 + 0.1, dir[2] * 0.3] : [Math.cos(a) * 0.06, 0.2, Math.sin(a) * 0.06];
     this.items.push({stack: {...stack}, x, y, z, vx: v[0], vy: v[1], vz: v[2], age: 0, delay, spin: Math.random() * 6});
   }
   /** One tick: items fall and settle, join, and come to the player (who takes them with take(stack) → left over). */
@@ -130,8 +131,8 @@ export class Entities {
       }
       it.vx *= 0.92; it.vz *= 0.92; it.vy *= 0.98;
       if (inWater) { it.vx *= 0.9; it.vz *= 0.9; it.vy *= 0.9; }
-      // join a stack of the same nearby
-      if (it.age % 10 === 0) for (const o of this.items) if (o !== it && o.stack.id === it.stack.id && !o.stack.dmg && !it.stack.dmg && Math.abs(o.x - it.x) < 1 && Math.abs(o.y - it.y) < 0.6 && Math.abs(o.z - it.z) < 1 && o.stack.n + it.stack.n <= (itemInfo(it.stack.id)?.stack || 64)) { o.stack.n += it.stack.n; it.stack.n = 0; }
+      // join a stack of the same nearby (the same map, the same pot's sides …)
+      if (it.age % 10 === 0) for (const o of this.items) if (o !== it && same(o.stack, it.stack) && Math.abs(o.x - it.x) < 1 && Math.abs(o.y - it.y) < 0.6 && Math.abs(o.z - it.z) < 1 && o.stack.n + it.stack.n <= (itemInfo(it.stack.id)?.stack || 64)) { o.stack.n += it.stack.n; it.stack.n = 0; }
       if (!it.stack.n) this.items.splice(i, 1);
     }
     for (let i = this.particles.length - 1; i >= 0; i--) {

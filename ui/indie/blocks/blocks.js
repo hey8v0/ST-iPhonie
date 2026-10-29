@@ -3,6 +3,7 @@
 // pack picked by the player is found by the same names; our own textures (textures.js) use them too.
 // A block in the world is a 16-bit number: the low 12 bits are the block (its place in BLOCKS — never reorder, only
 // add at the end: saves keep a palette of names anyway), the high 4 bits its state (axis, facing, level, layers …).
+import {SHERDS, SHERD_ZH} from './pottery.js';
 
 export const MINY = -64, HEIGHT = 384, SECTIONS = HEIGHT / 16, SEA = 63;
 export const idOf = v => v & 0xFFF, metaOf = v => v >>> 12, withMeta = (id, meta) => id | meta << 12;
@@ -477,6 +478,15 @@ const TRAPPED_CHEST = block('trapped_chest', '陷阱箱', {tex: {top: 'trapped_c
 // the cartography table (each side its own picture, as the game's): maps copied, zoomed out and locked; a
 // cartographer's work block
 block('cartography_table', '制图台', {tex: {top: 'cartography_table_top', bottom: 'dark_oak_planks', side: 'cartography_table_side3', south: 'cartography_table_side1', west: 'cartography_table_side2'}, hard: 2.5, tool: T.AXE, use: 'cartography', cat: 'use'});
+// ---------- after 0.8.85 ----------
+// archaeology (the game's 1.20): suspicious sand and gravel (state: how far brushed, 0–3) hold a thing from their loot
+// table, which a brush brings out bit by bit (the page); one that falls breaks to nothing, and broken they give
+// nothing. The decorated pot: four sides of brick or pottery sherds (the page keeps which, and draws it), one stack of
+// one thing put in it; it stands in water as a chest does.
+for (const [name, zh, base] of [['suspicious_sand', '可疑的沙子', 'sand'], ['suspicious_gravel', '可疑的沙砾', 'gravel']])
+  block(name, zh, {tex: all(`${name}_0`), ages: [0, 1, 2, 3].map(k => `${name}_${k}`), hard: 0.25, tool: T.SHOVEL, gravity: true, drop: null, brushable: base, cat: 'nature'});
+const DECORATED_POT = block('decorated_pot', '饰纹陶罐', {tex: all('terracotta'), shape: 'pot', pass: 'cutout', hard: 0, facing: true, opaque: false, filter: 0, drop: null, use: 'pot', itemIcon: 'decorated_pot', cat: 'use'});
+{ const {id, name, ...rest} = DECORATED_POT; WATERLOGGED[id] = block(`waterlogged_${name}`, DECORATED_POT.zh, {...rest, ...WET, item: false, dry: name}).id; }
 
 // what burns, and how readily (the game's: [how much it draws fire to the air by it, how likely it is to catch and burn
 // away]): wood shaped and wooden things 5/20, logs and wood 5/5, leaves 30/60, wool 30/60, plants 60/100 …; what stands
@@ -604,6 +614,10 @@ item('trident', '三叉戟', {stack: 1, tool: {kind: 'trident', tier: -1, speed:
 for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟'], ['guardian', '守卫者'], ['elder_guardian', '远古守卫者'], ['drowned', '溺尸'], ['dolphin', '海豚'], ['polar_bear', '北极熊'], ['enderman', '末影人']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
 // an ender pearl: thrown, it takes whoever threw it where it lands
 item('ender_pearl', '末影珍珠', {stack: 16, thrown: true});
+// archaeology: the brush (a feather, a copper ingot and a stick; it wears a point each time it brushes a thing out) and
+// the pottery sherds (pottery.js), for the sides of a decorated pot
+item('brush', '刷子', {stack: 1, tool: {kind: 'brush', tier: -1, speed: 1, uses: 64}});
+for (const s of SHERDS) item(`${s}_pottery_sherd`, `${SHERD_ZH[s]}纹样陶片`);
 
 // the sea's treasure and what finds the way: the heart of the sea (buried treasure) and the conduit made with it — a
 // small block that, in water and framed with prismarine, gives 潮涌能量 round it (put into water it stands in the water,

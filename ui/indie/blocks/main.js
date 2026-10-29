@@ -3,14 +3,14 @@
 // kept by the worker (world.worker.js) and drawn by render.js.
 import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE, BOAT_WOODS, WATERLOGGED, SIGN_WOODS} from './blocks.js';
 import {Mobs, MOBS} from './mobs.js';
-import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat, handFrame, FISH_SKINS, ownFishSkin, CONDUIT_SKINS, ownConduitSkin, ownWind, ownSign, ownHangingSign} from './models.js';
+import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat, handFrame, FISH_SKINS, ownFishSkin, CONDUIT_SKINS, ownConduitSkin, ownWind, ownSign, ownHangingSign, POT_SKINS, ownPotSkin, potQuads} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
 import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds, dials} from './atlas.js';
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
 import {listWorlds, saveWorld, deleteWorld} from './db.js';
 import {Mirror} from './mirror.js';
 import {Body, raycast, W as PLAYER_W, isWater} from './player.js';
-import {Inventory, furnaceTick, stackMax, ARMOR_AT, takeSmeltXp} from './inventory.js';
+import {Inventory, furnaceTick, stackMax, ARMOR_AT, takeSmeltXp, same} from './inventory.js';
 import {enchOf, shelvesAround, fishLoot, protectionFactor, wears, seeded} from './enchant.js';
 import {InventoryUI, stackHtml} from './invui.js';
 import {Entities, itemLook, setPacked, setAtlas, thickItem} from './entities.js';
@@ -29,7 +29,7 @@ import {runCommand, DIFFICULTIES, defaultRules} from './commands.js';
 import {spawnPoint, BIOMES} from './gen.js';
 import {findFrame, portalFill, across, nearestPortal, SEARCH} from './portal.js';
 import {applyPotion, addEffect, effectsTick, speedFactor, hitBonus, EFFECTS, levelName, brewTick, swirlColor, potionColor} from './brew.js';
-import {lootChest, STEWS} from './loot.js';
+import {lootChest, lootItem, STEWS} from './loot.js';
 import {treasureNear, conduitFrame, wreckNear} from './ocean.js';
 import {Maps} from './maps.js';
 
@@ -90,6 +90,8 @@ async function loadTextures() {
   for (const k of Object.keys(MODELS)) { const img = skins?.[k] || OWN_SKINS[k](); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; skinPics[k] = img; }
   // signs' wood
   for (const w of SIGN_WOODS) for (const [k, own] of [[`sign_${w}`, ownSign], [`hanging_${w}`, ownHangingSign]]) { const img = skins?.[k] || own(w); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; }
+  // decorated pots: the base, and each side's picture (brick, the sherds' patterns)
+  for (const k of POT_SKINS) { const img = skins?.[k] || ownPotSkin(k); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; }
   // villagers by trade: the pack's villager with its plains clothes and the trade's over them, or ours
   for (const prof of VILLAGER_SKINS) {
     let img = ownVillager(prof);
@@ -214,7 +216,7 @@ function startWorld(meta) {
   G = {
     meta, worker, mirror, body, ents, mode: meta.mode || 'survival', inv: Inventory.from(meta.inv), hot: start.hot || 0, time: meta.time || 0,
     health: start.health ?? 20, food: start.food ?? 20, sat: start.sat ?? 5, exh: 0, air: 300, tiles: meta.tiles || {}, spawn: meta.spawn || (sp ? {x: sp.x, y: sp.y, z: sp.z} : {x: start.x, y: start.y, z: start.z}),
-    needGround: !meta.player, ready: false, campfires: new Map(), signs: new Map(), tripwires: new Map(), tripAt: new Map(), tripTold: new Map(), meshes: 0, cx: Math.floor(start.x / 16), cz: Math.floor(start.z / 16),
+    needGround: !meta.player, ready: false, campfires: new Map(), signs: new Map(), tripwires: new Map(), tripAt: new Map(), tripTold: new Map(), pots: new Map(), brushes: new Set(), brushT: 0, meshes: 0, cx: Math.floor(start.x / 16), cz: Math.floor(start.z / 16),
     breaking: null, breakWait: 0, useWait: 0, swing: 0, eating: 0, hurtT: 0, regen: 0, starve: 0, lastHit: 0, walked: 0, stepAt: 0, dead: false, saveAt: performance.now(), hand: new Verts(64), outline: null, target: null,
   };
   ents.load(meta.items);
@@ -225,6 +227,8 @@ function startWorld(meta) {
   G.conduitList = Object.entries(G.tiles).filter(([, t]) => t.kind === 'conduit').map(([k, t]) => [...k.split(',').map(Number), t]);
   // large chests: their two halves share their 54 slots again (a save keeps them twice)
   for (const [k, t] of Object.entries(G.tiles)) if (t.half === 'right' && G.tiles[t.pair]?.pair === k && G.tiles[t.pair].slots?.length === 54) t.slots = G.tiles[t.pair].slots;
+  // suspicious blocks part brushed when the game was saved settle back from there
+  for (const [k, t] of Object.entries(G.tiles)) if (t.kind === 'brush' && t.count) { t.reset = 0; G.brushes.add(k); }
   // chests the land was made with, not opened yet: their loot tables; the world's maps
   G.loot = meta.loot || {};
   G.maps = new Maps(meta.maps, blockColor);
@@ -246,6 +250,8 @@ function startWorld(meta) {
     world: mirror, player: body, mode: () => G.mode, daylight: () => environment(G.time).daylight, held: () => held(),
     dark: (x, y, z, spawn) => isDark(x, y, z, spawn), loaded: (x, z) => mirror.has(Math.floor(x), Math.floor(z)),
     hurtPlayer: (n, why, from, kind) => hurt(n, why, from, kind), explode: (x, y, z, power, src, fire) => explode(x, y, z, power, src, null, fire),
+    // an arrow or a trident hitting a decorated pot shatters it
+    potHit: (x, y, z) => potHit(x, y, z),
     sound: (name, x, y, z) => soundAt(name, x, y, z), drop: (s, x, y, z, o) => G.ents.drop(s, x, y, z, o), give: s => !G.inv.add(s),
     burst: (x, y, z, kind) => G.ents.puff(x, y, z, kind), setBlock: (x, y, z, v) => setBlock(x, y, z, v), effect: (id, amp, ticks) => giveEffect(id, amp, ticks),
     xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain', staring: m => staring(m), looting: () => enchOf(held(), 'looting'),
@@ -273,9 +279,9 @@ function startWorld(meta) {
 }
 function onWorker(m) {
   if (!G) return;
-  if (m.type === 'column') { G.mirror.column(m); campfiresIn(m); signsIn(m); tripwiresIn(m); }
+  if (m.type === 'column') { G.mirror.column(m); campfiresIn(m); signsIn(m); tripwiresIn(m); potsIn(m); }
   else if (m.type === 'mesh') { renderer.setSection(m.cx, m.sy, m.cz, m.solid, m.trans, m.vis, m.sun, m.faces); G.meshes++; }
-  else if (m.type === 'drop') { G.mirror.drop(m.cx, m.cz); renderer.dropColumn(m.cx, m.cz); G.campfires.delete(`${m.cx},${m.cz}`); G.signs.delete(`${m.cx},${m.cz}`); G.tripwires.delete(`${m.cx},${m.cz}`); }
+  else if (m.type === 'drop') { G.mirror.drop(m.cx, m.cz); renderer.dropColumn(m.cx, m.cz); G.campfires.delete(`${m.cx},${m.cz}`); G.signs.delete(`${m.cx},${m.cz}`); G.tripwires.delete(`${m.cx},${m.cz}`); G.pots.delete(`${m.cx},${m.cz}`); }
   else if (m.type === 'drops') for (const [id, n] of m.items) G.ents.drop({id, n}, m.x, m.y, m.z);
   else if (m.type === 'sound') soundAt(m.iron && m.name.startsWith('door') ? 'iron_door' : m.name, m.x, m.y, m.z);
   else if (m.type === 'prime') G.mobs.light(m.x, m.y, m.z);
@@ -1032,8 +1038,8 @@ function wearTool(n = 1) {
 // ---------- breaking and placing ----------
 function setBlock(x, y, z, v) {
   G.worker.postMessage(G.mirror.set(x, y, z, v));
-  // (a campfire, a sign or a string put down is known at once)
-  for (const [is, known] of [[CAMP, G.campfires], [SIGN, G.signs], [TRIP, G.tripwires]]) if (is[v & 0xFFF]) { const k = `${x >> 4},${z >> 4}`, list = known.get(k) || []; if (!list.some(p => p[0] === x && p[1] === y && p[2] === z)) known.set(k, [...list, [x, y, z]]); }
+  // (a campfire, a sign, a string or a pot put down is known at once)
+  for (const [is, known] of [[CAMP, G.campfires], [SIGN, G.signs], [TRIP, G.tripwires], [POTS, G.pots]]) if (is[v & 0xFFF]) { const k = `${x >> 4},${z >> 4}`, list = known.get(k) || []; if (!list.some(p => p[0] === x && p[1] === y && p[2] === z)) known.set(k, [...list, [x, y, z]]); }
 }
 
 // ---------- campfires ----------
@@ -1352,14 +1358,17 @@ function breakBlock(t) {
   if (b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall') { const [ox, oy, oz] = partnerOf(x, y, z, v); if ((G.mirror.get(ox, oy, oz) & 0xFFF) === b.id) setBlock(ox, oy, oz, 0); }
   // what was inside goes out (a chest the land was made with, never opened, its loot)
   const k = `${x},${y},${z}`;
-  if (G.loot[k]) G.tiles[k] = {kind: 'chest', slots: lootOf(k, x, y, z)};
+  // (suspicious sand or gravel broken: its thing is lost)
+  if (G.loot[k]) { if (b.use === 'chest') G.tiles[k] = {kind: 'chest', slots: lootOf(k, x, y, z)}; else delete G.loot[k]; }
   const tile = G.tiles[k];
   // a large chest's half: its own 27 go out, and the other half is a chest of its own again
   if (tile?.pair) unpairChest(k, tile);
+  // a decorated pot: broken with a tool it falls apart into its sides, else it comes away whole
+  if (b.shape === 'pot' && survival) potDrops(tile, x, y, z, POT_BREAKERS.has(heldTool()?.kind));
   if (tile) { for (const s of tile.slots || tile.food || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; if (G.fills.has(k)) { G.fills.delete(k); G.worker.postMessage({type: 'fill', x, y, z, level: null}); } }
   G.ents.burst(x, y, z, v, 28);
   play('break', v);
-  if (survival) { if (b.hard > 0) wearTool(); G.exh += 0.005; }
+  if (survival) { if (b.hard > 0 && heldTool()?.kind !== 'brush') wearTool(); G.exh += 0.005; }
 }
 const SHEARED = new Set(['short_grass', 'fern', 'dead_bush', 'vine', 'tall_grass', 'large_fern']);
 /** Which way the player faces (0 south, 1 west, 2 north, 3 east) — a block placed faces back at them. */
@@ -1473,7 +1482,7 @@ function placeFrom(t, stack) {
   // a rail takes its shape from the rails round it, and they turn to meet it
   if (b?.shape === 'rail') { placeRail((a, c, d) => G.mirror.get(a, c, d), setBlock, x, y, z, v); play('place', v); return true; }
   setBlock(x, y, z, v);
-  makeTile(x, y, z, b);
+  makeTile(x, y, z, b, stack);
   play('place', v);
   return true;
 }
@@ -1483,7 +1492,7 @@ function look6() {
   return ay >= ax && ay >= az ? (dy > 0 ? 2 : 3) : ax >= az ? (dx > 0 ? 0 : 1) : (dz > 0 ? 4 : 5);
 }
 /** What a block keeps of its own (a furnace's fire, a chest's things), made when it is put down. */
-function makeTile(x, y, z, b) {
+function makeTile(x, y, z, b, stack = null) {
   delete G.loot[`${x},${y},${z}`];
   if (b?.shape === 'conduit') { G.tiles[`${x},${y},${z}`] = {kind: 'conduit'}; (G.conduitList ||= []).push([x, y, z, G.tiles[`${x},${y},${z}`]]); }
   if (b?.use === 'furnace') G.tiles[`${x},${y},${z}`] = {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0};
@@ -1492,6 +1501,8 @@ function makeTile(x, y, z, b) {
   if (b?.use === 'dispenser') G.tiles[`${x},${y},${z}`] = {kind: 'dispenser', slots: new Array(9).fill(null), title: b.zh, cols: 3};
   if (b?.use === 'hopper') G.tiles[`${x},${y},${z}`] = {kind: 'hopper', slots: new Array(5).fill(null), title: '漏斗', cols: 5};
   if (b?.use === 'note') G.tiles[`${x},${y},${z}`] = {kind: 'note', note: 0};
+  // a decorated pot keeps the sides it was made with
+  if (b?.shape === 'pot') G.tiles[`${x},${y},${z}`] = {kind: 'pot', ...(stack?.sherds ? {sherds: [...stack.sherds]} : {}), slots: [null]};
 }
 // ---------- redstone on the page ----------
 // what the block under a note block makes it sound like (the game's instruments)
@@ -1589,6 +1600,146 @@ function platesTick() {
     if ((v >>> 12) !== want) { setBlock(p.x, p.y, p.z, withMeta(b.id, want)); if (!b.rail) soundAt('click', p.x + 0.5, p.y, p.z + 0.5); }
   }
 }
+// ---------- archaeology ----------
+/**
+ * The brush (the game's): held use on a block brushes it, a stroke each half second — dust off the side brushed and a
+ * sound — for ten seconds at most (then use must be pressed again). Each stroke on suspicious sand or gravel brushes it
+ * a step further, ten in all (its picture changes at the first, third and sixth); the thing in it, chosen from its loot
+ * table at the first stroke, shows more and more on that side, and at the tenth drops out there, the block plain sand
+ * or gravel and the brush a point worn. Left two seconds it settles back, two strokes each fifth of a second.
+ */
+function brushTick(brushing) {
+  if (!brushing || !G.target) { G.brushT = 0; return; }
+  if (++G.brushT > 200 || G.brushT % 10 !== 5) return;
+  const t = G.target, b = BLOCKS[t.v & 0xFFF], [nx, ny, nz] = FACES[t.face];
+  const kind = b.brushable || (/sand$/.test(b.name) ? 'sand' : b.name === 'gravel' ? 'gravel' : '');
+  soundAt(kind ? `brush_${kind}` : 'brush', t.x + 0.5, t.y + 0.5, t.z + 0.5);
+  G.ents.burst(t.x + nx * 0.55, t.y + ny * 0.55, t.z + nz * 0.55, t.v, 5);
+  if (b.brushable) brushStroke(t);
+}
+/** How brushed a suspicious block looks after its strokes (the game's: none; 1–2; 3–5; 6–9). */
+const dusted = n => n === 0 ? 0 : n < 3 ? 1 : n < 6 ? 2 : 3;
+function setDusted(x, y, z, v, n) { if ((v >>> 12 & 3) !== dusted(n)) setBlock(x, y, z, withMeta(v & 0xFFF, dusted(n))); }
+function brushStroke(t) {
+  const k = `${t.x},${t.y},${t.z}`, b = BLOCKS[t.v & 0xFFF];
+  const tile = G.tiles[k]?.kind === 'brush' ? G.tiles[k] : (G.tiles[k] = {kind: 'brush', count: 0});
+  // what is in it: from its loot table at the first stroke (one put there by hand holds nothing)
+  if (!('item' in tile)) { const table = G.loot[k]; delete G.loot[k]; tile.item = table ? lootItem(table, G.meta.seed, t.x, t.y, t.z) : null; }
+  tile.face ??= t.face;
+  tile.reset = G.ticks + 40;
+  G.brushes.add(k);
+  if (++tile.count < 10) { setDusted(t.x, t.y, t.z, t.v, tile.count); return; }
+  // brushed out: the thing drops on the side brushed, and the block is plain
+  delete G.tiles[k]; G.brushes.delete(k);
+  const [nx, ny, nz] = FACES[tile.face];
+  if (tile.item) G.ents.drop(tile.item, t.x + nx + 0.5, t.y + ny + 0.5, t.z + nz + 0.5, {still: true});
+  setBlock(t.x, t.y, t.z, b.brushable === 'gravel' ? ID.gravel : ID.sand);
+  G.ents.burst(t.x, t.y, t.z, t.v, 12);
+  soundAt('brush_done', t.x + 0.5, t.y + 0.5, t.z + 0.5);
+  wearTool();
+}
+/** Suspicious blocks left alone settle back (and those that are gone are forgotten). */
+function brushesTick() {
+  for (const k of G.brushes) {
+    const [x, y, z] = k.split(',').map(Number);
+    if (!G.mirror.has(x, z)) continue;
+    const tile = G.tiles[k], v = G.mirror.get(x, y, z);
+    if (tile?.kind !== 'brush' || !BLOCKS[v & 0xFFF].brushable) { if (tile?.kind === 'brush') delete G.tiles[k]; G.brushes.delete(k); continue; }
+    if (!tile.count || G.ticks < tile.reset) continue;
+    tile.count = Math.max(0, tile.count - 2); tile.reset = G.ticks + 4;
+    setDusted(x, y, z, v, tile.count);
+    if (!tile.count) { delete tile.face; G.brushes.delete(k); }
+  }
+}
+/** The things coming out of suspicious blocks as they are brushed: half size, turned, further out each step (the game's). */
+const brushVerts = new Map();
+let brushAtlas = null;
+function brushThings(light) {
+  if (brushAtlas !== built) { brushVerts.clear(); brushAtlas = built; }
+  const out = [];
+  for (const k of G.brushes) {
+    const tile = G.tiles[k], [x, y, z] = k.split(',').map(Number), v = G.mirror.get(x, y, z), stage = v >>> 12 & 3;
+    if (tile?.kind !== 'brush' || !tile.item || !stage || tile.face == null || !BLOCKS[v & 0xFFF].brushable) continue;
+    const F = tile.face, f = stage / 10 * 0.75, p = [0.5, 0.5, 0.5], [nx, ny, nz] = FACES[F];
+    if (F === 0) p[0] = 0.73 + f; else if (F === 1) p[0] = 0.25 - f; else if (F === 2) p[1] = 0.75 + f; else if (F === 3) p[1] = 0.27 - f; else if (F === 4) p[2] = 0.73 + f; else p[2] = 0.25 - f;
+    const [sky, blk] = light(x + nx, y + ny, z + nz), look = itemLook(tile.item.id, tile.item), key = `${tile.item.id}|${tile.item.pot || ''}|${sky}|${blk}`;
+    let vv = brushVerts.get(key);
+    if (!vv) {
+      vv = new Verts(look.cube ? 48 : 512);
+      if (look.cube) vv.cube(0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints); else if (look.over != null) vv.flatLook(0.5, look, sky * 17, blk * 17, 256, 32); else thickItem(vv, look.flat, look.tint, sky * 17, blk * 17);
+      brushVerts.set(key, vv);
+    }
+    out.push({verts: vv, x: x + p[0], y: y + p[1], z: z + p[2], model: mat.model(0.5, (86 + (F < 2 ? 90 : 0)) * Math.PI / 180)});
+  }
+  return out;
+}
+
+// ---------- decorated pots ----------
+// (the page keeps each pot's sides and what is in it, and draws it; it wobbles when used)
+const POTS = new Uint8Array(4096);
+for (const id of [ID.decorated_pot, WATERLOGGED[ID.decorated_pot]]) POTS[id] = 1;
+// what breaks a pot into its sides (the game's: swords, axes, pickaxes, shovels, hoes, the trident)
+const POT_BREAKERS = new Set(['sword', 'axe', 'pickaxe', 'shovel', 'hoe', 'trident']);
+/** The pots in a column the worker sent (as the signs are kept). */
+function potsIn(m) {
+  const found = [];
+  m.sections.forEach((s, si) => { if (s) for (let i = 0; i < 4096; i++) if (POTS[s[i] & 0xFFF]) found.push([m.cx * 16 + (i & 15), MINY + si * 16 + (i >> 8), m.cz * 16 + (i >> 4 & 15)]); });
+  const k = `${m.cx},${m.cz}`;
+  if (found.length) G.pots.set(k, found); else G.pots.delete(k);
+}
+/** A pot's four sides as items (brick for a blank one): back, left, right, front. */
+const potSides = sherds => [0, 1, 2, 3].map(i => sherds?.[i] || 'brick');
+/**
+ * Using a pot (the game's): what is held goes in, one at a time, while it is empty or holds the same and has room — it
+ * wobbles (in creative nothing is used up); with nothing that fits it shakes.
+ */
+function potUse(t) {
+  const k = `${t.x},${t.y},${t.z}`, tile = G.tiles[k] ||= {kind: 'pot', slots: [null]}, s = held(), cur = tile.slots[0];
+  G.swing = 6;
+  if (s && (!cur || (same(cur, s) && cur.n < stackMax(cur.id)))) {
+    if (cur) cur.n++; else tile.slots[0] = {...s, n: 1};
+    if (G.mode !== 'creative') useUp();
+    tile.wobble = {at: G.ticks, up: true};
+    soundAt('pot_insert', t.x + 0.5, t.y + 0.5, t.z + 0.5);
+    G.ents.puff(t.x + 0.5, t.y + 1.3, t.z + 0.5, 'poof');
+    drawHud(true);
+  } else { tile.wobble = {at: G.ticks, up: false}; soundAt('pot_fail', t.x + 0.5, t.y + 0.5, t.z + 0.5); }
+}
+/** A pot broken: shattered (by a tool, an arrow) it falls apart into its sides; else it comes away whole. */
+function potDrops(tile, x, y, z, shatter) {
+  if (shatter) { for (const id of potSides(tile?.sherds)) G.ents.drop({id, n: 1}, x + 0.5, y + 0.5, z + 0.5); soundAt('pot_shatter', x + 0.5, y + 0.5, z + 0.5); }
+  else G.ents.drop({id: 'decorated_pot', n: 1, ...(tile?.sherds ? {sherds: [...tile.sherds]} : {})}, x + 0.5, y + 0.4, z + 0.5);
+}
+/** An arrow or a trident hitting a pot shatters it (what was in it falls out). */
+function potHit(x, y, z) {
+  const v = G.mirror.get(x, y, z);
+  if (!POTS[v & 0xFFF]) return;
+  const k = `${x},${y},${z}`, tile = G.tiles[k];
+  setBlock(x, y, z, BLOCKS[v & 0xFFF].water ? ID.water : 0);
+  potDrops(tile, x, y, z, true);
+  for (const s of tile?.slots || []) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5);
+  delete G.tiles[k];
+  G.ents.burst(x, y, z, v, 20);
+}
+/** The pots near, through the mob pipeline: their base and four sides, wobbling a moment after use (the game's wobbles). */
+function potModels(view, alpha, light) {
+  const out = [];
+  for (const list of G.pots.values()) for (const [x, y, z] of list) {
+    const v = G.mirror.get(x, y, z);
+    if (!POTS[v & 0xFFF] || Math.hypot(x + 0.5 - G.body.x, z + 0.5 - G.body.z) > 64) continue;
+    const tile = G.tiles[`${x},${y},${z}`], [sky, blk] = light(x, y, z), w = tile?.wobble;
+    const sides = potSides(tile?.sherds).map(id => id === 'brick' ? 'pot_side' : `pot_${id.replace('_pottery_sherd', '')}`);
+    let wob = null;
+    if (w) {
+      const tt = (G.ticks - w.at + (alpha || 0)) / (w.up ? 7 : 10), a = tt * Math.PI * 2;
+      if (tt > 1) delete tile.wobble;
+      else if (tt >= 0) wob = w.up ? [-1.5 * (Math.cos(a) + 0.5) * Math.sin(a / 2) * 0.015625, 0, Math.sin(a) * 0.015625] : [0, Math.sin(-tt * 3 * Math.PI) * 0.125 * (1 - tt), 0];
+    }
+    for (const [skin, verts] of potQuads(x - view.x, y - view.y, z - view.z, v >>> 12 & 3, sides, wob)) out.push({skin, verts, light: [sky, blk], tint: [1, 1, 1], hurt: 0, white: 0});
+  }
+  return out;
+}
+
 // ---------- tripwire ----------
 // (the world works out the hooks; the page sees what is on each string)
 const TRIP = new Uint8Array(4096);
@@ -1963,6 +2114,7 @@ function openBlock(kind, t) {
   const k = `${t.x},${t.y},${t.z}`;
   if (kind === 'compost') { compost(t); return; }
   if (kind === 'bell') { play('bell'); G.swing = 6; return; }
+  if (kind === 'pot') { potUse(t); return; }
   // a lever flips; a button is pressed (the world lets it go); a repeater's delay goes round 1–4; a comparator turns
   // subtracting or back; a note block goes a note up (and plays it); a daylight detector turns inverted or back
   const m = t.v >>> 12, id = t.v & 0xFFF;
@@ -2342,6 +2494,9 @@ function tick() {
   // a bow: held use draws it (on a phone: holding the screen), letting go shoots; a trident the same (on a phone held
   // anywhere but on a mob, which it stabs), let go after half a second
   const handKind = itemInfo(held()?.id)?.tool?.kind, bow = handKind === 'bow', trident = handKind === 'trident';
+  // a brush: held use brushes the block aimed at (on a phone: holding the screen on a block, which then is not dug)
+  const brushHand = handKind === 'brush';
+  brushTick(brushHand && !G.dead && (ctl.use || (input.mode === 'touch' && ctl.attack && !G.targetMob)));
   const drawing = !G.dead && (ctl.use || (input.mode === 'touch' && ctl.attack && (bow || !G.targetMob)));
   if (bow && drawing) { if (G.mode === 'creative' || G.inv.count('arrow') > 0) G.draw++; }
   else if (trident && drawing) { if (canThrow(held())) G.draw++; else G.draw = 0; }
@@ -2364,7 +2519,7 @@ function tick() {
   const t = G.target;
   if (G.breakWait > 0) G.breakWait--;
   if (G.pearlWait > 0) G.pearlWait--;
-  const aiming = bow || (trident && G.draw > 0);
+  const aiming = bow || (trident && G.draw > 0) || (brushHand && input.mode === 'touch' && !G.targetMob);
   if (ctl.attack && G.targetMob && !G.dead && !aiming) { attackMob(G.targetMob); G.breaking = null; }
   // fire on the face of the block hit goes out (the game's)
   else if (ctl.attack && t && !G.dead && !aiming && fireOn(t)) { if (!G.breakWait) { const [x, y, z] = fireOn(t); setBlock(x, y, z, 0); soundAt('fizz', x + 0.5, y + 0.5, z + 0.5); G.breakWait = 6; G.swing = 6; } G.breaking = null; }
@@ -2435,6 +2590,7 @@ function tick() {
   }
   platesTick();
   tripwiresTick();
+  brushesTick();
   hoppersTick();
   campfiresTick();
   if (G.ticks % 10 === 0) fillsTick();
@@ -2559,6 +2715,11 @@ function handModel(view) {
   if (G.draw > 0 && itemInfo(s.id)?.tool?.kind === 'trident') {
     const f = Math.min(1, G.draw / 10), shake = f >= 1 ? Math.sin(G.time * 1.3) * 0.004 : 0;
     return {verts: v, model: mat.model(1, Math.PI / 2 + 0.15, 1.2, -0.61, 0.47 + sideBob, -0.1 + bob + shake, -1.05 + f * 0.2)};
+  }
+  // a brush brushing: swept to and fro across the block, once each half second (the game's)
+  if (G.brushT > 0 && G.brushT <= 200 && itemInfo(s.id)?.tool?.kind === 'brush') {
+    const a = Math.cos((((G.brushT - 1) % 10) + (view.alpha || 0)) / 10 * Math.PI * 2);
+    return {verts: v, model: mat.model(0.62, -Math.PI / 2 + 0.25 + a * 0.35, -0.55, 0.55 + a * 0.5, 0.5 + sideBob, -0.55 + bob, -0.85)};
   }
   return {verts: v, model: mat.model(0.62, -Math.PI / 2 + 0.25, tool ? 0.1 - sw * 1.2 : -sw * 0.6, tool ? 0.55 : 0.2, 0.62 + sideBob - sw * 0.15, -0.45 + bob + eat + sw * 0.08, -0.8 - sw * 0.15)};
 }
@@ -2973,10 +3134,10 @@ function frame(now) {
   const tick20 = Math.floor(G.time);
   for (const an of animFrames) { const f = Math.floor(tick20 / an.time) % an.frames.length; if (f !== an.at) { an.at = f; renderer.updateLayer(an.layer, an.frames[f]); } }
   const lightAt = (bx, by, bz) => G.mirror.light(bx, by, bz);
-  const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view), ...campfireThings(lightAt), ...endermanThings(lightAt), ...cartThings(a, lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
+  const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view), ...campfireThings(lightAt), ...endermanThings(lightAt), ...brushThings(lightAt), ...cartThings(a, lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
   if (G.view && !G.dead) { extras.mobs.push(...playerModel(view, a, lightAt)); if (G.selfHeld) extras.things.push(G.selfHeld); }
   extras.things.push(...mobHeld(view));
-  extras.mobs.push(...boatModels(view, a, lightAt), ...conduitModels(view, a, lightAt), ...signModels(view, lightAt));
+  extras.mobs.push(...boatModels(view, a, lightAt), ...conduitModels(view, a, lightAt), ...signModels(view, lightAt), ...potModels(view, a, lightAt));
   extras.weather = weatherVerts(view);
   extras.blobs = blobVerts(view, a);
   const bolt = boltVerts(view);

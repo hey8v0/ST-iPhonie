@@ -7,6 +7,7 @@ import {fractal, simplex, hash, rng} from './noise.js';
 import {ID, MINY, HEIGHT, SECTIONS, SEA, withMeta} from './blocks.js';
 import {drawVillages} from './village.js';
 import {drawMonuments} from './monument.js';
+import {drawDesert} from './desert.js';
 import {drawOcean} from './ocean.js';
 import {growTree, BIG_TREES} from './trees.js';
 export {growTree};
@@ -248,6 +249,8 @@ export function generateColumn(seed, cx, cz) {
   // ocean monuments, over the sea floor and what grew on it; then ruins, shipwrecks and buried treasure
   drawMonuments(col, seed);
   drawOcean(col, seed);
+  // desert pyramids and wells
+  drawDesert(col, seed);
   // heightmap: the top block
   const high = Math.min(MINY + HEIGHT - 1, Math.max(top, SEA) + 40);
   for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) { let y = high; while (y > MINY && !getBlock(col, x, y, z)) y--; col.height[z * 16 + x] = y; }

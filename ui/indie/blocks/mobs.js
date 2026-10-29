@@ -1218,6 +1218,7 @@ export class Mobs {
       }
       const bs = collisionBoxes(this.world.get(Math.floor(nx), Math.floor(ny), Math.floor(nz)));
       if (bs && bs.some(q => nx - Math.floor(nx) >= q[0] && nx - Math.floor(nx) <= q[3] && ny - Math.floor(ny) >= q[1] && ny - Math.floor(ny) <= q[4] && nz - Math.floor(nz) >= q[2] && nz - Math.floor(nz) <= q[5])) {
+        this.ctx.potHit?.(Math.floor(nx), Math.floor(ny), Math.floor(nz));
         a.x = nx; a.y = ny; a.z = nz; a.stuck = true; a.life = 0; this.ctx.sound('trident_ground', nx, ny, nz); break;
       }
       a.x = nx; a.y = ny; a.z = nz;
@@ -1258,6 +1259,8 @@ export class Mobs {
         if (bs && bs.some(q => nx - Math.floor(nx) >= q[0] && nx - Math.floor(nx) <= q[3] && ny - Math.floor(ny) >= q[1] && ny - Math.floor(ny) <= q[4] && nz - Math.floor(nz) >= q[2] && nz - Math.floor(nz) <= q[5])) {
           // (it stays where it went in: kept just outside, the block seemed gone the next tick and it fell, over and over —
           // an arrow in a wall never went away)
+          // (a decorated pot it hits shatters)
+          this.ctx.potHit?.(Math.floor(nx), Math.floor(ny), Math.floor(nz));
           a.x = nx; a.y = ny; a.z = nz; a.stuck = true; a.life = 0; this.ctx.sound('arrow_hit', nx, ny, nz); hit = true; break;
         }
         a.x = nx; a.y = ny; a.z = nz;

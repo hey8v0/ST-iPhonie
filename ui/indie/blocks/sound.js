@@ -106,6 +106,15 @@ export function play(name, v = 0, k = 1) {
     case 'trip_attach': tone(910, 0.07, 0.035, {type: 'square'}); break;
     case 'trip_detach': tone(1560, 0.07, 0.035, {type: 'square'}); break;
     case 'carto': burst(3800, 2.5, 0.12, 0.09); burst(3000, 2.5, 0.1, 0.12, {at: 0.1}); break;
+    // a brush brushing (sand, gravel, anything else) and a thing brushed out; a decorated pot taking something, shaking
+    // when nothing fits, shattering
+    case 'brush': burst(2600, 1.2, 0.1 * k, 0.22, {pitch: r}); break;
+    case 'brush_sand': burst(1900, 0.9, 0.14 * k, 0.28, {pitch: r}); break;
+    case 'brush_gravel': burst(1100, 1.4, 0.16 * k, 0.24, {pitch: r}); burst(700, 2, 0.08 * k, 0.1, {at: 0.08, pitch: r}); break;
+    case 'brush_done': burst(1500, 0.8, 0.2 * k, 0.35); tone(660, 0.12, 0.05, {at: 0.05}); tone(990, 0.12, 0.04, {at: 0.14}); break;
+    case 'pot_insert': tone(520 + Math.random() * 80, 0.08, 0.08, {type: 'triangle'}); burst(1800, 1.2, 0.06, 0.08); break;
+    case 'pot_fail': tone(260, 0.1, 0.06, {type: 'triangle'}); break;
+    case 'pot_shatter': burst(3500, 0.9, 0.35 * k, 0.3); burst(1600, 1.2, 0.25 * k, 0.25, {at: 0.04}); break;
     case 'fall': burst(300, 1, 0.5 * k, 0.25); break;
     case 'levelup': [523, 659, 784].forEach((fr, i) => tone(fr, 0.15, 0.25, {at: i * 0.08})); break;
     case 'explode': burst(160, 0.6, 0.9 * k, 1.1); burst(900, 0.8, 0.5 * k, 0.4); tone(55, 0.5 * k, 0.9, {type: 'sawtooth', slide: 0.5}); break;

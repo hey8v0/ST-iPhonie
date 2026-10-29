@@ -2,6 +2,7 @@
 // the order the game uses), parts turning at their pivots, and how each kind moves its legs, head, arms and wings.
 // Model space is the game's: 1/16 block units, y pointing down, the feet at y = 24, the front towards −z. Our own skins
 // are drawn here in the same layouts, so a skin from the player's own game fits the same boxes.
+import {SHERDS, drawMotif} from './pottery.js';
 
 const PI = Math.PI;
 /** A part: texture corner [u, v], boxes [x, y, z, w, h, d, inflate, mirror], pivot, rotation [x, y, z], children. */
@@ -520,6 +521,64 @@ export function ownSign(wood) {
       area(fx + 1, fy + 6, 22, 1, [shadeHex(wd, 0.8)], 0.08);
     }
   });
+}
+// ---------- the decorated pot ----------
+// (the game's model: a body 14 × 16 × 14, a neck 6 × 1 × 6 and a rim 8 × 3 × 8 over it, so it stands a quarter of a block
+// over its own. Its sides are each a picture of their own — brick, or a sherd's pattern; its neck, rim, top and bottom
+// are on the base picture, 32 × 32, laid out as the game's.)
+export const POT_SKINS = ['pot_base', 'pot_side', ...SHERDS.map(s => `pot_${s}`)];
+const POT_CLAY = ['#a65f3f', '#9d593a', '#ad6644'];
+/** Ours: a decorated pot's base, or a side (brick, or a sherd's picture in dark lines). */
+export function ownPotSkin(k) {
+  if (k === 'pot_base') return skin(32, 32, 181, ({area}) => { area(0, 0, 32, 11, ['#8f4f33', '#97563a', '#88492f']); area(0, 13, 14, 14, POT_CLAY, 0.12); area(14, 13, 14, 14, ['#7d4329', '#844830'], 0.1); });
+  const name = k.slice(4);
+  return skin(16, 16, 183 + SHERDS.indexOf(name), ({area, px, hex}) => {
+    area(0, 0, 16, 16, POT_CLAY, 0.12);
+    area(0, 0, 16, 1, ['#7a3f27']); area(0, 15, 16, 1, ['#7a3f27']); area(0, 2, 16, 1, ['#8d4a2f']); area(0, 13, 16, 1, ['#8d4a2f']);
+    if (name !== 'side') drawMotif(name, 3, 4, (x, y) => px(x, y, hex('#4a2216')));
+  });
+}
+/**
+ * A decorated pot's faces: at (ox, oy, oz) — its block's corner, from the camera — facing f (its front: 0 south, 1 west,
+ * 2 north, 3 east), the skins of its sides [back, left, right, front], wobbling by [about x, about y, about z] (radians,
+ * round its foot). → [[skin, verts]], each face both ways round.
+ */
+export function potQuads(ox, oy, oz, f, sides, wob = null) {
+  const [ax, ay, az] = wob || [0, 0, 0], cx = Math.cos(ax), sx = Math.sin(ax), cy = Math.cos(ay), sy = Math.sin(ay), cz = Math.cos(az), sz = Math.sin(az);
+  // a point of the model (1/16 units, laid out facing south): wobbled round its foot, turned to its facing, put in place
+  const place = (x, y, z) => {
+    let px = x - 8, py = y, pz = z - 8;
+    [py, pz] = [py * cx - pz * sx, py * sx + pz * cx];
+    [px, py] = [px * cz - py * sz, px * sz + py * cz];
+    [px, pz] = [px * cy + pz * sy, -px * sy + pz * cy];
+    for (let k = 0; k < f; k++) [px, pz] = [-pz, px];
+    return [ox + (px + 8) / 16, oy + py / 16, oz + (pz + 8) / 16];
+  };
+  // a face: its corners (bottom left, bottom right, top right, top left, seen from outside), its part of the picture
+  // [u0, v0, u1, v1] in pixels of a picture size across, its shade (the models' own)
+  const face = (out, corners, [u0, v0, u1, v1], size, shade) => {
+    const uv = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
+    for (const order of [[0, 1, 2, 3], [3, 2, 1, 0]]) for (const i of order) out.push(...place(...corners[i]), uv[i][0] / size, uv[i][1] / size, shade);
+  };
+  const out = [];
+  [[[15, 0, 1], [1, 0, 1], [1, 16, 1], [15, 16, 1]], [[1, 0, 1], [1, 0, 15], [1, 16, 15], [1, 16, 1]], [[15, 0, 15], [15, 0, 1], [15, 16, 1], [15, 16, 15]], [[1, 0, 15], [15, 0, 15], [15, 16, 15], [1, 16, 15]]]
+    .forEach((c, i) => { const v = []; face(v, c, [1, 0, 15, 16], 16, i === 1 || i === 2 ? 0.7 : 0.8); out.push([sides[i], new Float32Array(v)]); });
+  const b = [];
+  face(b, [[1, 16, 15], [15, 16, 15], [15, 16, 1], [1, 16, 1]], [0, 13, 14, 27], 32, 1);
+  face(b, [[1, 0, 1], [15, 0, 1], [15, 0, 15], [1, 0, 15]], [14, 13, 28, 27], 32, 0.5);
+  const cube = (x0, y0, z0, x1, y1, z1, u, v) => {
+    const w = x1 - x0, h = y1 - y0, d = z1 - z0;
+    face(b, [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]], [u + d, v, u + d + w, v + d], 32, 1);
+    face(b, [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]], [u + d + w, v, u + d + 2 * w, v + d], 32, 0.5);
+    face(b, [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], [u, v + d, u + d, v + d + h], 32, 0.7);
+    face(b, [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]], [u + d, v + d, u + d + w, v + d + h], 32, 0.8);
+    face(b, [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]], [u + d + w, v + d, u + 2 * d + w, v + d + h], 32, 0.7);
+    face(b, [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], [u + 2 * d + w, v + d, u + 2 * d + 2 * w, v + d + h], 32, 0.8);
+  };
+  cube(5, 16, 5, 11, 17, 11, 0, 5);
+  cube(4, 17, 4, 12, 20, 12, 0, 0);
+  out.push(['pot_base', new Float32Array(b)]);
+  return out;
 }
 const hexc = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 function rnd(seed) { let a = seed | 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }

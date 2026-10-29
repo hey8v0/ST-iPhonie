@@ -2,9 +2,8 @@
 // when they act, redstone.js): hoppers moving one item at a time, what a dispenser or dropper fires, how full a container
 // is (for comparators), pressure plates weighing what stands on them. The game's rules (Java edition).
 import {itemInfo} from './blocks.js';
-import {stackMax} from './inventory.js';
+import {stackMax, same} from './inventory.js';
 
-const same = (a, b) => a.id === b.id && a.pot === b.pot && !a.dmg && !b.dmg && !a.ench && !b.ench;
 /** The things a container holds, as [where, stack] (a furnace's input, fuel and output; the others' slots). */
 const held = tile => tile.kind === 'furnace' ? [['input', tile.input], ['fuel', tile.fuel], ['output', tile.output]] : (tile.slots || []).map((s, i) => [i, s]);
 const take = (tile, at) => { const s = tile.kind === 'furnace' ? tile[at] : tile.slots[at]; s.n--; if (!s.n) { if (tile.kind === 'furnace') tile[at] = null; else tile.slots[at] = null; } };
@@ -12,7 +11,7 @@ const take = (tile, at) => { const s = tile.kind === 'furnace' ? tile[at] : tile
 /** How full a container is for a comparator (the game's: 0 empty, else 1 + 14 × how full its slots are on average), or null. */
 export function fillLevel(tile) {
   const list = held(tile);
-  if (!list.length || !['chest', 'furnace', 'brew', 'dispenser', 'hopper'].includes(tile.kind)) return null;
+  if (!list.length || !['chest', 'furnace', 'brew', 'dispenser', 'hopper', 'pot'].includes(tile.kind)) return null;
   let f = 0, any = false;
   for (const [, s] of list) if (s) { any = true; f += s.n / stackMax(s.id); }
   return any ? Math.floor(1 + f / list.length * 14) : 0;

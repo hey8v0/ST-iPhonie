@@ -3,9 +3,10 @@
 // Recipes are the game's.
 import {STEWS} from './loot.js';
 import {itemInfo, BLOCKS, ITEMS, COLORS, ID, BOAT_WOODS, boatItem} from './blocks.js';
+import {SHERDS} from './pottery.js';
 
 export const stackMax = id => itemInfo(id)?.stack || 64;
-export const same = (a, b) => a && b && a.id === b.id && !a.dmg && !b.dmg && !a.ench && !b.ench && a.pot === b.pot && a.stew === b.stew && a.map === b.map;
+export const same = (a, b) => a && b && a.id === b.id && !a.dmg && !b.dmg && !a.ench && !b.ench && a.pot === b.pot && a.stew === b.stew && a.map === b.map && String(a.sherds || '') === String(b.sherds || '');
 export const copy = s => s ? {...s} : null;
 
 /** The carried slots (the first 9 the hotbar); after them the four worn ones, head to feet. */
@@ -304,6 +305,7 @@ shaped([' # ', '#R#', ' # '], {'#': 'iron_ingot', R: 'redstone'}, 'compass');
 shaped([' # ', '#R#', ' # '], {'#': 'gold_ingot', R: 'redstone'}, 'clock');
 shaped(['###', '#C#', '###'], {'#': 'paper', C: 'compass'}, 'map');
 shaped(['pp', '##', '##'], {p: 'paper', '#': '#planks'}, 'cartography_table');
+shaped(['f', 'c', '|'], {f: 'feather', c: 'copper_ingot', '|': 'stick'}, 'brush');
 shapeless(['red_mushroom', 'brown_mushroom', 'bowl', '#stew_flowers'], 'suspicious_stew', 1, (out, ids) => ({...out, stew: ids.find(id => STEWS[id])}));
 export const RECIPES = R;
 
@@ -311,6 +313,12 @@ export const RECIPES = R;
 export function craft(grid, w) {
   const h = grid.length / w;
   const ids = grid.map(s => s?.id || null);
+  // a decorated pot: brick or pottery sherds round the middle of the table (the game's: the top one is its back, the
+  // left and right ones its sides, the bottom one its front)
+  if (w === 3 && grid.length === 9 && ids.every((id, i) => i % 2 ? !!id && (id === 'brick' || SHERD_IDS.has(id)) : !id)) {
+    const sherds = [1, 3, 5, 7].map(i => ids[i] === 'brick' ? null : ids[i]);
+    return {out: {id: 'decorated_pot', n: 1, ...(sherds.some(Boolean) ? {sherds} : {})}, recipe: POT_RECIPE};
+  }
   // the filled part of the grid
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
   ids.forEach((id, i) => { if (id) { const x = i % w, y = Math.floor(i / w); x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } });
@@ -337,6 +345,7 @@ export function craft(grid, w) {
   }
   return null;
 }
+const SHERD_IDS = new Set(SHERDS.map(s => `${s}_pottery_sherd`)), POT_RECIPE = {out: {id: 'decorated_pot', n: 1}};
 /** Takes one of each ingredient from the grid after crafting (buckets would give back the bucket — none use them yet). */
 export function useGrid(grid) { for (let i = 0; i < grid.length; i++) if (grid[i]) { grid[i].n--; if (!grid[i].n) grid[i] = null; } }
 

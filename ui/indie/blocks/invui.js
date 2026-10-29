@@ -26,7 +26,7 @@ export function stackHtml(s, icons) {
 export function stackTip(s) {
   const info = itemInfo(s.id), uses = usesOf(info);
   if (s.pot) return [potionName(s), ...potionLines(s)].join('\n');
-  return [s.label || zhOf(s.id), ...Object.entries(s.ench || {}).map(([n, l]) => enchName(n, l)), ...(info?.armor ? [`护甲 +${info.armor.points}`] : []), ...(uses ? [`耐久度 ${uses - (s.dmg || 0)}/${uses}`] : [])].join('\n');
+  return [s.label || zhOf(s.id), ...(s.sherds || []).filter(Boolean).map(zhOf), ...Object.entries(s.ench || {}).map(([n, l]) => enchName(n, l)), ...(info?.armor ? [`护甲 +${info.armor.points}`] : []), ...(uses ? [`耐久度 ${uses - (s.dmg || 0)}/${uses}`] : [])].join('\n');
 }
 // creative: every enchanted book at its highest level
 const BOOKS = Object.entries(ENCHANTS).map(([n, e]) => ({id: 'enchanted_book', n: 1, ench: {[n]: e.max}}));
@@ -41,12 +41,12 @@ const KINDS = [
   ['build', '建筑方块', n => catOf(n) === 'build' || (!catOf(n) && !!BLOCKS.find(x => x.name === n) && /planks|cobble|bricks|smooth_stone|slab|stairs|fence|pane|bars|door|glass|sandstone|terracotta|_block$|obsidian|bookshelf|stone$|granite|diorite|andesite|tuff|calcite|deepslate$|mossy|_wall$/.test(n) && !/ore$/.test(n) && n !== 'grass_block')],
   ['color', '染色方块', n => catOf(n) === 'color' || /_wool$|_bed$/.test(n)],
   ['nature', '自然方块', n => { const b = BLOCKS.find(x => x.name === n); return !!b && /grass|dirt|podzol|sand|gravel|clay|ore$|_log$|leaves|sapling|propagule|bamboo$|petals|roots|kelp$|seagrass|pickle|coral$|coral_fan$|turtle_egg|fern|dandelion|poppy|orchid|allium|bluet|daisy|cornflower|lily|dead_bush|sugar_cane|cactus|mushroom|snow|ice|pumpkin|melon|moss|mud|bedrock|stone$|deepslate$/.test(n); }],
-  ['use', '功能方块', n => /crafting|furnace|(^|_)chest$|torch|ladder|lantern|glowstone|tnt|bookshelf|_bed$|door|gate|enchanting|anvil|brewing/.test(n)],
+  ['use', '功能方块', n => catOf(n) === 'use' || /crafting|furnace|(^|_)chest$|torch|ladder|lantern|glowstone|tnt|bookshelf|_bed$|door|gate|enchanting|anvil|brewing/.test(n)],
   ['redstone', '红石', n => catOf(n) === 'redstone' || ['redstone', 'tnt', 'chest', 'barrel', 'furnace', 'lectern', 'bell', 'oak_door', 'oak_trapdoor', 'oak_fence_gate'].includes(n)],
-  ['tools', '工具', n => /_pickaxe|_axe|_shovel|_hoe|bucket|shears|flint_and_steel|minecart|_boat$|_raft$/.test(n)],
+  ['tools', '工具', n => /_pickaxe|_axe|_shovel|_hoe|bucket|shears|flint_and_steel|minecart|_boat$|_raft$|^brush$/.test(n)],
   ['combat', '战斗', n => /_sword|^bow$|^arrow$|^trident$|_helmet|_chestplate|_leggings|_boots/.test(n)],
   ['food', '食物与饮品', n => FOODY(n) || BOTTLES.includes(n)],
-  ['items', '原材料', n => !BLOCKS.find(x => x.name === n) && !FOODY(n) && !BOTTLES.includes(n) && !itemInfo(n)?.spawn && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket|shears|flint_and_steel|minecart|_boat$|_raft$|^bow$|^arrow$|^trident$|_helmet|_chestplate|_leggings|_boots/.test(n)],
+  ['items', '原材料', n => !BLOCKS.find(x => x.name === n) && !FOODY(n) && !BOTTLES.includes(n) && !itemInfo(n)?.spawn && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket|shears|flint_and_steel|minecart|_boat$|_raft$|^brush$|^bow$|^arrow$|^trident$|_helmet|_chestplate|_leggings|_boots/.test(n)],
   ['spawn', '刷怪蛋', n => !!itemInfo(n)?.spawn],
   ['bag', '背包', null],
 ];

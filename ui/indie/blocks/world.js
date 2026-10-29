@@ -8,6 +8,7 @@ import {portalHolds, portalSpot, buildPortal} from './portal.js';
 import {villagersIn} from './village.js';
 import {lootIn, drownedIn} from './ocean.js';
 import {monumentsNear} from './monument.js';
+import {desertLootIn} from './desert.js';
 import {lodTile, lodPlan} from './lod.js';
 import {BLOCKS, ID, MINY, HEIGHT, SECTIONS, SEA, withMeta, dropsOf, itemInfo} from './blocks.js';
 import {meshSection, sectionVis, ALL_OPEN} from './mesh.js';
@@ -511,6 +512,8 @@ export class World {
     if (GRAVITY.has(id)) {
       const below = this.get(x, y - 1, z), bb = BLOCKS[below & 0xFFF];
       if (y > MINY && (!below || LIQUID.has(below & 0xFFF) || bb.replace && !bb.solid)) {
+        // suspicious sand or gravel falling breaks to nothing, its thing lost (the game's)
+        if (BLOCKS[id].brushable) { this.set(x, y, z, 0); this.post({type: 'sound', name: 'break', x: x + 0.5, y: y + 0.5, z: z + 0.5}); return; }
         this.set(x, y, z, 0);
         if (below && !LIQUID.has(below & 0xFFF)) this.breakBlock(x, y - 1, z);
         this.set(x, y - 1, z, sets && (below & 0xFFF) === ID.water ? ID[sets] : v);
@@ -1097,8 +1100,9 @@ export class World {
       if (stored) this.redstone.scan(c);
       if (fresh && !this.nether) {
         const herd = this.herdFor(c); if (herd.length) this.post({type: 'herd', cx, cz, list: herd});
-        // the chests of the sea's ruins and wrecks and buried treasure made here: their loot tables
-        const loot = lootIn(this.seed, c); if (loot.length) this.post({type: 'loot', list: loot});
+        // the chests (and suspicious sand and gravel) of the sea's ruins and wrecks, buried treasure and the desert's
+        // pyramids and wells made here: their loot tables
+        const loot = [...lootIn(this.seed, c), ...desertLootIn(this.seed, c)]; if (loot.length) this.post({type: 'loot', list: loot});
       }
     }
     // 2. meshes: changed sections of columns whose neighbours are all here, nearest first

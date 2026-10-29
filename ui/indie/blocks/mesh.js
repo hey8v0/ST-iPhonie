@@ -460,8 +460,8 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
         if (dz) { const z0 = dz < 0 ? 0 : 1 - k, z1 = dz < 0 ? k : 1; quad(out, [[x + a, h, z + z0], [x + c, h, z + z0], [x + c, h, z + z1], [x + a, h, z + z1]], T, uv, L0 >> 4, L0 & 15, WHITE, 0, 2); }
         else { const x0 = dx < 0 ? 0 : 1 - k, x1 = dx < 0 ? k : 1; quad(out, [[x + x0, h, z + a], [x + x0, h, z + c], [x + x1, h, z + c], [x + x1, h, z + a]], T, uv, L0 >> 4, L0 & 15, WHITE, 0, 2); }
       }
-    } else if (shape === 'conduit' || shape === 'sign' || shape === 'wall_sign' || shape === 'hanging_sign' || shape === 'wall_hanging_sign') {
-      // (nothing: the page draws a conduit, its shell or, awake, its cage, eye and whirling water; and signs)
+    } else if (shape === 'conduit' || shape === 'sign' || shape === 'wall_sign' || shape === 'hanging_sign' || shape === 'wall_hanging_sign' || shape === 'pot') {
+      // (nothing: the page draws a conduit, its shell or, awake, its cage, eye and whirling water; signs and decorated pots)
     } else if (PIECED.has(shape)) {
       const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)];
       for (const {box: [x0, y0, z0, x1, y1, z1], role, seam} of pieces(v, near)) {
