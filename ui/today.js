@@ -8,6 +8,7 @@ import {esc, avatar, plate} from './common.js';
 import {icon, wave} from './icons.js';
 import {APPS} from './apps.js';
 import {preview} from './chat-preview.js';
+import {previewBlob} from './thumbs.js';
 import {nudge, moving} from './carry.js';
 import {WIDGETS, SIZE_NAMES, normalizeWidgets, makeWidget} from '../core/widgets.js';
 import {yuan} from '../core/wallet.js';
@@ -31,7 +32,7 @@ export function todayPage(deps) {
     <div class="today-foot"><button type="button" class="today-edit" data-today="edit">编辑</button></div>`;
   const grid = root.querySelector('.today-grid'), results = root.querySelector('.today-results'), search = root.querySelector('[data-today-search]');
   let list = normalizeWidgets(undefined), editing = false, drag = null, press = null, swallow = 0, ticket = 0, pending = false;
-  const data = {threads: [], notes: [], photo: null, photoId: ''};
+  const data = {threads: [], notes: [], photo: null, photoKey: ''};
 
   // ---------- What each widget shows ----------
   const now = () => new Date();
@@ -130,11 +131,13 @@ export function todayPage(deps) {
     if (photos) {
       // 精选照片: one of the album, another each hour.
       const rows = [...photos].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)), pick = rows.length ? rows[Math.floor(Date.now() / 3.6e6) % rows.length].id : '';
-      if (pick !== data.photoId) {
-        const photo = pick ? await safe(() => api.getPhoto(pick)) : null;
+      // A small widget shows the photo's middle-sized picture once one was made (ui/thumbs.js); a bigger one, the photo.
+      const small = list.every(w => w.kind !== 'photo' || w.size === 's'), key = pick && `${pick}|${small}`;
+      if (key !== data.photoKey) {
+        const blob = pick ? (small && await previewBlob(api, pick)) || (await safe(() => api.getPhoto(pick)))?.blob : null;
         if (mine !== ticket) return;
         if (data.photo) win.URL.revokeObjectURL(data.photo);
-        data.photoId = pick; data.photo = photo?.blob ? win.URL.createObjectURL(photo.blob) : null;
+        data.photoKey = key; data.photo = blob ? win.URL.createObjectURL(blob) : null;
       }
     }
     paint(['chat', 'notes', 'photo']);

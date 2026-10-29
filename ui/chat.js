@@ -17,7 +17,7 @@ import {pictureInputs, photoTags, photoCast} from '../core/draw.js';
 import {chatScene, sceneArt, sceneDark, syncMotion} from './chat-scenes.js';
 import {PREMIUM, yuan} from '../core/wallet.js';
 import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
-import {thumbBlob} from './thumbs.js';
+import {thumbBlob, previewBlob} from './thumbs.js';
 export {preview};
 
 // Chat app, QQ style: 消息 (conversations, with search, 置顶 and 免打扰), 联系人 (特别关心, friends, groups, profile cards)
@@ -62,7 +62,7 @@ export function chatApp(ctx) {
   let unreadTotal = 0, freshMoments = 0;
   let panel = null, quote = null;
   const drafts = new Map(), live = typeof api.chatReply === 'function';
-  const photoURLs = new Map(), recalled = new Map(), transcribed = new Set();
+  const photoURLs = new Map(), bubbleURLs = new Map(), recalled = new Map(), transcribed = new Set();
   let press = null, pressedAt = 0;
   const voiceText = () => api.getState().chat.voiceText || {mode: 'translation', auto: false};
   /** 转文字 for a voice message: the translation, the original line, or both (original first). */
@@ -577,7 +577,6 @@ export function chatApp(ctx) {
         {label: '消息选项', run: safe(() => messageMenu(message))}]});
   }
 
-  // Album photos sent in the chat; each picture is read once and kept while the app is open.
   /** A picker's photos as small pictures (ui/thumbs.js), let go when the picker closes. */
   function pickerThumbs(d, rows) {
     const urls = [], byId = new Map(rows.map(r => [r.id, r]));
@@ -587,6 +586,8 @@ export function chatApp(ctx) {
       if (row) thumbBlob(api, row).then(blob => { if (!blob || !d.live) return; const url = ctx.win.URL.createObjectURL(blob); urls.push(url); img.src = url; });
     }
   }
+  // Album photos sent in the chat; each picture is read once and kept while the app is open. A bubble shows the photo's
+  // middle-sized picture once one was made (ui/thumbs.js); the viewer, downloads and the chat background the photo itself.
   async function photoURL(id) {
     if (!photoURLs.has(id)) {
       const photo = await api.getPhoto(id);
@@ -594,9 +595,16 @@ export function chatApp(ctx) {
     }
     return photoURLs.get(id);
   }
+  async function bubbleURL(id) {
+    if (!bubbleURLs.has(id)) {
+      const blob = await previewBlob(api, id);
+      bubbleURLs.set(id, blob ? ctx.win.URL.createObjectURL(blob) : await photoURL(id));
+    }
+    return bubbleURLs.get(id);
+  }
   async function paintPhotos() {
     for (const img of v.root.querySelectorAll('img[data-chat-photo]')) {
-      const url = await photoURL(img.dataset.chatPhoto);
+      const url = await bubbleURL(img.dataset.chatPhoto);
       if (!img.isConnected) continue;
       if (url) img.src = url; else img.closest('.chat-photo')?.classList.add('missing');
     }
@@ -1601,7 +1609,7 @@ export function chatApp(ctx) {
   /** 动态, from the tavern page's 动态小窗. */
   v.showMoments = () => { mode = 'list'; tab = 'moments'; threadId = null; search = ''; moments.only(''); v.root.scrollTop = 0; render(); };
   const dispose = v.dispose;
-  v.dispose = () => { ctx.win.clearTimeout(pace.timer); moments.dispose(); for (const url of photoURLs.values()) if (url) ctx.win.URL.revokeObjectURL(url); photoURLs.clear(); dispose(); };
+  v.dispose = () => { ctx.win.clearTimeout(pace.timer); moments.dispose(); for (const url of new Set([...photoURLs.values(), ...bubbleURLs.values()])) if (url) ctx.win.URL.revokeObjectURL(url); photoURLs.clear(); bubbleURLs.clear(); dispose(); };
   render();
   return v;
 }

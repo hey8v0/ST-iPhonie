@@ -17,25 +17,33 @@ export function rolesApp(ctx) {
   let current = null;
   const changed = () => { const el = v.root.querySelector('[data-save-state]'); if (el) el.textContent = '未保存'; };
   // A MiMo voice description can run to a few sentences: cards show its start, the editor shows it whole.
-  const voiceLabel = voice => { const name = voiceNames.get(voice) || favorites().find(f => f.voice === voice)?.name || voice; return name.length > 16 ? name.slice(0, 15) + '…' : name; };
+  // The 音色收藏夹's names by voice: read once per drawing of the list (each read of the settings copies all of them, and
+  // asking once per role made the list slower with every role).
+  const poolNames = () => new Map(favorites().map(f => [f.voice, f.name]));
+  const voiceLabel = (voice, pool = poolNames()) => { const name = voiceNames.get(voice) || pool.get(voice) || voice; return name.length > 16 ? name.slice(0, 15) + '…' : name; };
   // 音色收藏夹 (stored as voicePool: 自动挑音色 picks from it first): voices kept with a name and a note of the user's own.
   const favorites = () => api.getState().voicePool || [];
   const isFavorite = (engine, voice) => favorites().some(f => f.engine === engine && f.voice === voice);
 
+  let listDrawn = '';
   function renderList() {
-    const roles = api.getState().routes;
+    const roles = api.getState().routes, pool = poolNames();
     const cards = roles.map((r, i) => {
       const voiced = !!r.voice, engine = voiced ? r.engine : 'none';
       return `<button class="role-card" data-action="edit-role" data-id="${esc(r.id)}" data-engine="${engine}">
         <span class="role-top"><span class="role-no">${number(i)}</span>${voiced ? halo() : ''}${avatar(r.name, engine, 54)}</span>
         <span class="role-body"><strong>${esc(r.name)}</strong>${voiced
-          ? `<span>${plate(engines[r.engine])}</span><small>${esc(voiceLabel(r.voice))}<br>${esc(r.language ? languageName(r.language) : '跟随默认语言')}</small>${r.autoVoice ? '<small class="auto-chip">自动挑的</small>' : ''}`
+          ? `<span>${plate(engines[r.engine])}</span><small>${esc(voiceLabel(r.voice, pool))}<br>${esc(r.language ? languageName(r.language) : '跟随默认语言')}</small>${r.autoVoice ? '<small class="auto-chip">自动挑的</small>' : ''}`
           : '<small class="unset">待选择音色</small><small>出现在聊天里时会等你配音</small>'}</span></button>`;
     }).join('');
-    v.draw(heading('角色', help('给聊天里说话的角色配一个声音。也可以直接点聊天里的声波，遇到没配过的角色会带你来这里。') + btn('add-role', icon('add'), 'round-button', 'aria-label="新增角色"'), `Character · ${String(roles.length).padStart(2, '0')}`)
+    const html = heading('角色', help('给聊天里说话的角色配一个声音。也可以直接点聊天里的声波，遇到没配过的角色会带你来这里。') + btn('add-role', icon('add'), 'round-button', 'aria-label="新增角色"'), `Character · ${String(roles.length).padStart(2, '0')}`)
       + autoGroup()
-      + `<div class="role-grid">${cards}<button class="role-card add" data-action="add-role">${icon('add')}新增角色</button></div>`
-      );
+      + `<div class="role-grid">${cards}<button class="role-card add" data-action="add-role">${icon('add')}新增角色</button></div>`;
+    // Reopening 角色 draws the list again only when something in it changed: with dozens of roles, drawing them all
+    // again for nothing was most of the time it took. (A switch flipped but not saved still gets drawn again.)
+    if (html === listDrawn && v.root.querySelector('.role-grid') && ![...v.root.querySelectorAll('input[type=checkbox]')].some(b => b.checked !== b.defaultChecked)) return;
+    listDrawn = html;
+    v.draw(html);
   }
   /** 自动挑音色: the switch, and the 音色收藏夹 it picks from first. */
   function autoGroup() {
@@ -45,6 +53,7 @@ export function rolesApp(ctx) {
   }
 
   function renderEditor() {
+    listDrawn = '';
     const r = current, c = api.getState().connections[r.engine], schema = api.engineSchema(r.engine);
     const saved = api.getState().routes.findIndex(x => x.id === r.id), pending = api.pendingRole() === r.name && !!r.name;
     const voiced = !!r.voice, model = r.model || c.model;

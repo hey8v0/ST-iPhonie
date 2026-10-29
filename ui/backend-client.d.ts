@@ -737,6 +737,9 @@ export interface BackendFacade {
     getPhoto(id: string): Promise<Photo | null>;
     /** The photo's small picture for grids, made and kept the first time it is asked for; null when the photo is gone or unreadable. */
     photoThumb(id: string): Promise<Blob | null>;
+    /** The photo's middle-sized picture for chat bubbles, posts and the 今天 widget, or null: then the photo itself shows (and
+     *  one is made in the background for next time, where one is worth having). */
+    photoPreview(id: string): Promise<Blob | null>;
     deletePhoto(id: string): Promise<boolean>;
     /** Deletes several album photos at once; 朋友圈 and 查手机 pictures among them go back to «not drawn». */
     deletePhotos(ids: string[]): Promise<number>;

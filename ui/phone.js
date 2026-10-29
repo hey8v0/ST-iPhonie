@@ -13,6 +13,7 @@ import {installMotion} from './motion.js';
 import {bindNativeSelects} from './popup-select.js';
 import {grow, launch, nudge, within, visible, islandIn, moving} from './carry.js';
 import {todayPage} from './today.js';
+import {thumbBlob} from './thumbs.js';
 
 // App factories, keyed by the ids in apps.js.
 // The apps: each one's module loads when the app is first opened, or in an idle moment after the phone is up
@@ -58,6 +59,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const doc = win.document;
   const controller = new win.AbortController(), signal = controller.signal;
   const views = new Map(), assets = new Map();
+  let wallURL = '';
   const stopDiagnostics = installDiagnostics(win, (...args) => api.reportDiagnostic?.(...args));
   signal.addEventListener('abort', stopDiagnostics, {once: true});
   let today = null;
@@ -271,7 +273,14 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
   const help = text => dialog('说明', `<p class="help-copy" data-keep-hint>${esc(text)}</p>`);
 
-  const routeFor = name => findRoute(api.getState().routes, name);
+  // The roles, read once per piece of work and then let go (a microtask), so the next read sees any change: engineOf
+  // is asked for every message, contact and post drawn, and each read of the settings copies all of them.
+  let roleCache = null;
+  const roleList = () => {
+    if (!roleCache) { roleCache = api.getState().routes; (win.queueMicrotask || queueMicrotask)(() => { roleCache = null; }); }
+    return roleCache;
+  };
+  const routeFor = name => findRoute(roleList(), name);
   const engineOf = name => { const r = routeFor(name); return r?.voice ? r.engine : 'none'; };
   const ctx = {api, doc, win, notify, dialog, confirm, help, lock, open, routeFor, engineOf, openPendingRole: name => openPendingRole(name), visible: name => active === name && !locked,
     editEngine: id => withView('engines', v => v.edit?.(id)), showPresetKind: kind => withView('presets', v => v.showKind?.(kind)), openDraw: request => { open('draw'); withView('draw', v => v.load?.(request)); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
@@ -575,13 +584,15 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const key = JSON.stringify([phone.wallpaper, phone.icons, phone.iconStyle, dark]);
     if (key === appearanceKey) return;
     const ticket = ++appearanceEpoch;
-    const photoIds = new Set([phone.wallpaper.kind === 'photo' ? phone.wallpaper.photoId : null, ...Object.values(phone.icons).filter(x => x?.kind === 'photo').map(x => x.photoId)].filter(Boolean));
-    const records = await Promise.all([...photoIds].map(async id => [id, await api.getPhoto(id)]));
+    // The wallpaper is the photo itself; an icon, a few dozen pixels wide, the photo's small picture (ui/thumbs.js).
+    const iconIds = [...new Set(Object.values(phone.icons).filter(x => x?.kind === 'photo').map(x => x.photoId))];
+    const [wall, ...pictures] = await Promise.all([phone.wallpaper.kind === 'photo' ? api.getPhoto(phone.wallpaper.photoId).then(r => r?.blob) : null, ...iconIds.map(id => thumbBlob(api, {id}))]);
     if (disposed || ticket !== appearanceEpoch) return;
-    for (const url of assets.values()) win.URL.revokeObjectURL(url);
+    for (const url of [...assets.values(), wallURL]) if (url) win.URL.revokeObjectURL(url);
     assets.clear();
-    for (const [id, record] of records) if (record) assets.set(id, win.URL.createObjectURL(record.blob));
-    const photo = phone.wallpaper.kind === 'photo' ? assets.get(phone.wallpaper.photoId) : null;
+    iconIds.forEach((id, i) => { if (pictures[i]) assets.set(id, win.URL.createObjectURL(pictures[i])); });
+    wallURL = wall ? win.URL.createObjectURL(wall) : '';
+    const photo = wallURL || null;
     const look = wallpaperLook(phone.wallpaper.key, dark);
     const vars = photo
       ? {'--wall': `linear-gradient(#0000001f,#0000001f),url("${photo}")`, '--wall-size': 'cover', '--wall-pos': 'center', '--wall-ink': '#fff', '--label-halo': '#000'}
@@ -699,9 +710,10 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       if (a.kind === 'text') { delete map[name]; continue; }
       used.add(a.photoId);
       if (!avatarURLs.has(a.photoId)) {
-        const photo = await api.getPhoto(a.photoId).catch(() => null);
+        // an avatar is a few dozen pixels wide: the photo's small picture (ui/thumbs.js)
+        const blob = await thumbBlob(api, {id: a.photoId});
         if (run !== avatarRun || disposed) return;
-        avatarURLs.set(a.photoId, photo?.blob ? win.URL.createObjectURL(photo.blob) : '');
+        avatarURLs.set(a.photoId, blob ? win.URL.createObjectURL(blob) : '');
       }
       if (avatarURLs.get(a.photoId)) map[name] = avatarURLs.get(a.photoId);
     }
@@ -1051,8 +1063,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     calls.dispose();
     for (const url of avatarURLs.values()) if (url) win.URL.revokeObjectURL(url);
     setAvatarPictures({});
-    for (const url of assets.values()) win.URL.revokeObjectURL(url);
-    assets.clear();
+    for (const url of [...assets.values(), wallURL]) if (url) win.URL.revokeObjectURL(url);
+    assets.clear(); wallURL = '';
     win.clearInterval(clockTimer); win.clearTimeout(todayTimer);
     today?.dispose();
     win.clearTimeout(toastTimer);

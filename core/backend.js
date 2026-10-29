@@ -37,7 +37,7 @@ import { installDrawSettings } from './backend-draw.js';
 import { createStorageBudget } from './storage-budget.js';
 import { DialoguePlayer } from './player.js';
 import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS } from './library.js';
-import { makeThumb } from './thumbnail.js';
+import { makeThumb, makePreview } from './thumbnail.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, guardParams, isFree, isV5, normalizeDrawParams, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, drawCast, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
 import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive } from './chat.js';
@@ -109,6 +109,9 @@ const DRAWN_SOURCES = [
 export class TTSBackend {
     // photoThumb jobs, one at a time: a grid asks for many at once and each decodes a whole photo.
     #thumbs = Promise.resolve();
+    // the middle-sized pictures being made (photoPreview), one at a time in a line of their own, so they never hold up a grid
+    #previews = Promise.resolve();
+    #previewing = new Set();
     constructor({ settings, persist = () => {}, notify = () => {}, change = () => {}, unknown = () => {},
         providers = new Providers(), cache, library, keyStore, sink, novelai, chats, indexedDB = globalThis.indexedDB, syncStorage = () => globalThis.localStorage,
         imageFetch = (...args) => globalThis.fetch(...args), soundPack = '', speech = null, tavernHeaders = () => globalThis.SillyTavern?.getContext?.()?.getRequestHeaders?.() || {} } = {}) {
@@ -2205,6 +2208,28 @@ export class TTSBackend {
     }
     /** A new photo gets its small picture a moment later, in the background. */
     #thumbSoon(id) { if (id && typeof createImageBitmap === 'function') setTimeout(() => this.photoThumb(id), 400); }
+    /** A photo's middle-sized picture for chat bubbles, posts and the 今天 widget (core/thumbnail.js): the kept one, else
+     *  null, and the photo itself shows. One not made yet is made when the page is idle, for next time (making it on the
+     *  spot would hold the bubble back); a photo hardly bigger, or one that moves, needs none. */
+    async photoPreview(id) {
+        if (this.closed) return null;
+        const kept = await this.library.getPreview?.(id).catch(() => null);
+        if (kept) return kept.blob || null;
+        this.#previewSoon(id);
+        return null;
+    }
+    #previewSoon(id) {
+        if (!id || typeof createImageBitmap !== 'function' || this.#previewing.has(id)) return;
+        this.#previewing.add(id);
+        const idle = () => new Promise(resolve => typeof requestIdleCallback === 'function' ? requestIdleCallback(() => resolve(), { timeout: 2000 }) : setTimeout(resolve, 50));
+        this.#previews = this.#previews.then(idle).then(async () => {
+            if (this.closed || await this.library.getPreview?.(id)) return;
+            const photo = await this.library.getPhoto(id);
+            if (!photo?.blob) return;
+            const made = await makePreview(photo.blob);
+            if (!this.closed) await this.library.savePreview?.(id, made);
+        }).catch(() => {}).finally(() => this.#previewing.delete(id));
+    }
     async #forgetPhotos(gone) {
         let posts = 0;
         for (const post of await this.moments.list()) {
@@ -2479,7 +2504,7 @@ export class TTSBackend {
             getFavorite: id => this.library.getFavorite(id), playFavorite: id => this.playFavorite(id),
             deleteFavorite: id => this.mutateLibrary('favorites', 'deleteFavorite', id),
             listPhotos: () => this.library.listPhotos(), addPhoto: value => this.mutateLibrary('photos', 'addPhoto', value),
-            getPhoto: id => this.library.getPhoto(id), photoThumb: id => this.photoThumb(id), deletePhoto: id => this.deletePhotos([id]).then(n => n > 0), deletePhotos: ids => this.deletePhotos(ids),
+            getPhoto: id => this.library.getPhoto(id), photoThumb: id => this.photoThumb(id), photoPreview: id => this.photoPreview(id), deletePhoto: id => this.deletePhotos([id]).then(n => n > 0), deletePhotos: ids => this.deletePhotos(ids),
             listNotes: () => this.library.listNotes(), saveNote: value => this.mutateLibrary('notes', 'saveNote', value), deleteNote: id => this.mutateLibrary('notes', 'deleteNote', id),
             listBooks: () => this.library.listBooks(), getBook: id => this.library.getBook(id), saveBook: value => this.mutateLibrary('books', 'saveBook', clone(value)), deleteBook: id => this.mutateLibrary('books', 'deleteBook', id),
             getPhone: () => this.getPhone(), savePhone: patch => this.savePhone(patch), libraryStats: () => this.library.stats(), storageBudget: () => this.budget.read(),

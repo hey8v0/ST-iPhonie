@@ -16,6 +16,7 @@
  * whether an owned row existed. Every write resolves only after transaction commit.
  * The lists of photos, favorites, references and vibes read 'meta' (each row without its file), not the files; listPhotos
  * adds `thumb`, the photo's small picture for grids, where one was made (saveThumb; core/thumbnail.js makes them).
+ * A photo's middle-sized picture for chat bubbles and posts is kept apart (savePreview), so no list reads it.
  */
 import {connectionLost, lostError} from './idb.js';
 import {normalizeWidgets} from './widgets.js';
@@ -109,7 +110,9 @@ export class LocalLibrary {
    // 4 added 'sizes', each row's size on its own ({scope, store, id, bytes}), so a save no longer reads every picture and recording.
    // 5 added 'meta', the picture and recording rows without their files ({scope, store, id, data}), so a list reads no
    // files, and 'thumbs', the photos' small pictures for grids ({scope, id, type, bytes, w, h}).
-   try{req=this.#factory.open('st-tts-library-v1',5);}catch(e){rejectOnce(e);return;}
+   // 6 added 'previews', the photos' middle-sized pictures for chat bubbles and posts ({scope, id, type, bytes, w, h}, or
+   // {scope, id, same: true} when the photo itself does as well), made when a photo is first shown there.
+   try{req=this.#factory.open('st-tts-library-v1',6);}catch(e){rejectOnce(e);return;}
    req.onupgradeneeded=event=>{
     const db=req.result,tx=req.transaction,old=event.oldVersion;
     for(const name of STORES){if(db.objectStoreNames.contains(name))continue;const store=db.createObjectStore(name,{keyPath:['scope','id']});store.createIndex('scope','scope');}
@@ -125,6 +128,7 @@ export class LocalLibrary {
      const meta=tx.objectStore('meta');
      if(old)each(MEDIA,(name,row)=>meta.put(metaRow(row.scope,name,row)));
     }
+    if(!db.objectStoreNames.contains('previews'))db.createObjectStore('previews',{keyPath:['scope','id']}).createIndex('scope','scope');
    };
    req.onerror=()=>rejectOnce(req.error);
    req.onblocked=()=>rejectOnce(fail('另一个页面占用了本地资料，请关闭旧页面后重试','STORAGE_BLOCKED'));
@@ -161,7 +165,7 @@ export class LocalLibrary {
   const limit=await this.#room();this.#keep();
   return this.#run(db=>new Promise((resolve,reject)=>{
    let tx,result,ownError,pending=1;const rows={},ops=[],ledger=new Map(),key=(name,id)=>name+'\n'+id;
-   try{tx=db.transaction([...STORES,'sizes','meta','thumbs'],'readwrite');}catch(e){reject(friendly(e));return;}
+   try{tx=db.transaction([...STORES,'sizes','meta','thumbs','previews'],'readwrite');}catch(e){reject(friendly(e));return;}
    tx.oncomplete=()=>resolve(structuredClone(result));
    tx.onabort=()=>reject(ownError||friendly(tx.error));tx.onerror=()=>{};
    for(const name of STORES)rows[name]=new RowView();
@@ -175,11 +179,11 @@ export class LocalLibrary {
      for(const [op,name,x] of ops){if(op==='put')after.set(key(name,x.id),x._bytes);else after.delete(key(name,x));}
      let total=0;for(const n of after.values())total+=n;
      if(total>limit)throw fail(`本地资料已达到 ${sizeText(limit)} 上限（这个浏览器给小手机的空间），请删除不需要的内容后再保存`,'LIBRARY_FULL');
-     // 'meta' follows every picture and recording; a photo saved again or deleted loses its small picture
-     const meta=tx.objectStore('meta'),thumbs=tx.objectStore('thumbs');
+     // 'meta' follows every picture and recording; a photo saved again or deleted loses its smaller pictures
+     const meta=tx.objectStore('meta'),thumbs=tx.objectStore('thumbs'),previews=tx.objectStore('previews');
      for(const [op,name,x] of ops){
-      if(op==='put'){tx.objectStore(name).put(x);sizes.put({scope:this.#scope,store:name,id:x.id,bytes:x._bytes});if(MEDIA.includes(name))meta.put(metaRow(this.#scope,name,x));if(name==='photos')thumbs.delete([this.#scope,x.id]);}
-      else{tx.objectStore(name).delete([this.#scope,x]);sizes.delete([this.#scope,name,x]);if(MEDIA.includes(name))meta.delete([this.#scope,name,x]);if(name==='photos')thumbs.delete([this.#scope,x]);}
+      if(op==='put'){tx.objectStore(name).put(x);sizes.put({scope:this.#scope,store:name,id:x.id,bytes:x._bytes});if(MEDIA.includes(name))meta.put(metaRow(this.#scope,name,x));if(name==='photos'){thumbs.delete([this.#scope,x.id]);previews.delete([this.#scope,x.id]);}}
+      else{tx.objectStore(name).delete([this.#scope,x]);sizes.delete([this.#scope,name,x]);if(MEDIA.includes(name))meta.delete([this.#scope,name,x]);if(name==='photos'){thumbs.delete([this.#scope,x]);previews.delete([this.#scope,x]);}}
      }
     }catch(e){ownError=friendly(e);tx.abort();}
    };
@@ -248,10 +252,24 @@ export class LocalLibrary {
  async saveThumb(id,{blob,w,h}={}){
   identifier(id);
   if(typeof blob?.arrayBuffer!=='function'||!blob.size||blob.size>2*1024*1024)throw fail('缩略图无效');
-  const bytes=await blob.arrayBuffer(),type=blob.type||'image/jpeg';
+  return this.#keepFor(id,'thumbs',{type:blob.type||'image/jpeg',bytes:await blob.arrayBuffer(),w:Math.round(w)||0,h:Math.round(h)||0});
+ }
+ /** A photo's middle-sized picture for chat bubbles and posts: {blob, w, h}; {same: true} when the photo itself does
+  *  as well; null when none was made yet. */
+ async getPreview(id){const row=await this.#read('previews',identifier(id));return !row?null:row.same?{same:true}:{blob:new Blob([row.bytes],{type:row.type}),w:row.w,h:row.h};}
+ /** Keeps a photo's middle-sized picture ({blob, w, h}), or that it needs none ({same: true}); as saveThumb. */
+ async savePreview(id,made={}){
+  identifier(id);
+  if(made?.same===true)return this.#keepFor(id,'previews',{same:true});
+  const {blob,w,h}=made||{};
+  if(typeof blob?.arrayBuffer!=='function'||!blob.size||blob.size>4*1024*1024)throw fail('预览图无效');
+  return this.#keepFor(id,'previews',{type:blob.type||'image/jpeg',bytes:await blob.arrayBuffer(),w:Math.round(w)||0,h:Math.round(h)||0});
+ }
+ /** Puts a photo's smaller picture into `store` while the photo is there; resolves whether it was kept. */
+ #keepFor(id,store,row){
   return this.#run(db=>new Promise((resolve,reject)=>{
    let tx,kept=false;
-   try{tx=db.transaction(['meta','thumbs'],'readwrite');const photo=tx.objectStore('meta').get([this.#scope,'photos',id]);photo.onsuccess=()=>{if(!photo.result)return;tx.objectStore('thumbs').put({scope:this.#scope,id,type,bytes,w:Math.round(w)||0,h:Math.round(h)||0});kept=true;};}
+   try{tx=db.transaction(['meta',store],'readwrite');const photo=tx.objectStore('meta').get([this.#scope,'photos',id]);photo.onsuccess=()=>{if(!photo.result)return;tx.objectStore(store).put({...row,scope:this.#scope,id});kept=true;};}
    catch(e){reject(friendly(e));return;}
    tx.oncomplete=()=>resolve(kept);tx.onabort=()=>reject(friendly(tx.error));tx.onerror=()=>{};
   }));

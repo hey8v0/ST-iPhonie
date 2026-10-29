@@ -413,6 +413,9 @@ details>div{padding-bottom:10px}
 /* ---------- Roles ---------- */
 .role-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding-bottom:10px}
 .role-card{position:relative;display:flex;flex-direction:column;min-height:186px;text-align:left;overflow:hidden;background:var(--card);border-radius:22px;box-shadow:var(--shadow)}
+/* Cards off screen are not laid out until they scroll near: with dozens of roles, laying them all out was most of
+   what opening 角色 cost. */
+.role-card:not(.add){content-visibility:auto;contain-intrinsic-size:auto 186px}
 .role-card:active{transform:scale(.98)}
 .role-top{position:relative;height:72px;background:repeating-linear-gradient(-45deg,rgba(255,255,255,.15) 0 8px,transparent 8px 16px),linear-gradient(135deg,var(--e),color-mix(in srgb,var(--e) 45%,#fff))}
 :root[data-theme=dark] .role-top{background:repeating-linear-gradient(-45deg,rgba(255,255,255,.08) 0 8px,transparent 8px 16px),linear-gradient(135deg,var(--e),color-mix(in srgb,var(--e) 45%,var(--card)))}

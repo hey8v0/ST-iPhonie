@@ -3,7 +3,7 @@
 // sends what the user does. It draws into the chat app's view, inside the frame the chat app gives it (tabs and all).
 import {esc, btn, empty, avatar, field, textArea, input, toggle, help} from './common.js';
 import {icon} from './icons.js';
-import {thumbBlob} from './thumbs.js';
+import {thumbBlob, previewBlob} from './thumbs.js';
 import {openImageViewer} from '../image-viewer.js';
 import {downloadAction, shareAction} from '../download.js';
 import {aura} from './aura.js';
@@ -27,7 +27,7 @@ function ago(at) {
  * visible(): whether the 动态 tab is on screen (only then does it count as seen).
  */
 export function momentsPanel(ctx, {v, frame, me, visible}) {
-  const {api} = ctx, urls = new Map();
+  const {api} = ctx, urls = new Map(), shown = new Map();
   let epoch = 0, posts = [], author = '';
   const nameOf = who => who === 'me' ? me().name : who;
   const urlFor = async id => {
@@ -36,6 +36,11 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
     const url = photo ? ctx.win.URL.createObjectURL(photo.blob) : '';
     urls.set(id, url);
     return url;
+  };
+  // In the list a post shows its photo's middle-sized picture once one was made (ui/thumbs.js); opened, the photo itself.
+  const listURL = async id => {
+    if (!shown.has(id)) { const blob = await previewBlob(api, id); shown.set(id, blob ? ctx.win.URL.createObjectURL(blob) : await urlFor(id)); }
+    return shown.get(id);
   };
   const face = (who, size) => who === 'me' ? me().avatar(size) : avatar(who, ctx.engineOf(who), size);
 
@@ -76,7 +81,7 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
     // Seen only when it is on screen: the panel also redraws in the background when new posts arrive.
     if (visible()) { markSeen(ctx.win); ctx.momentsSeen?.(); }
     for (const img of v.root.querySelectorAll('img[data-photo]')) {
-      const url = await urlFor(img.dataset.photo);
+      const url = await listURL(img.dataset.photo);
       if (ticket !== epoch || v.disposed) return;
       if (url) img.src = url; else img.closest('.moment-photo')?.replaceWith(Object.assign(ctx.doc.createElement('p'), {className: 'moment-note', textContent: '配图已经从相册删掉了'}));
     }
@@ -230,6 +235,6 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
     render, click,
     /** Shows one person's posts (their profile's 「TA 的动态」), or everyone's. */
     only(name = '') { author = name; },
-    dispose() { epoch++; for (const url of urls.values()) if (url) ctx.win.URL.revokeObjectURL(url); urls.clear(); }
+    dispose() { epoch++; for (const url of new Set([...urls.values(), ...shown.values()])) if (url) ctx.win.URL.revokeObjectURL(url); urls.clear(); shown.clear(); }
   };
 }
