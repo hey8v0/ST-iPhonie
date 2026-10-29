@@ -59,9 +59,28 @@ export const MOBS = {
   // swimmer and give them 海豚的恩惠, show the way to a wreck for a fish, and bite back together
   drowned: {zh: '溺尸', health: 20, speed: 0.23, hostile: true, undead: true, damage: 3, range: 35, drops: [['rotten_flesh', 0, 2]]},
   dolphin: {zh: '海豚', health: 10, speed: 1.2, passive: true, water: 'dolphin', breed: [], drops: [['cod', 0, 1, 'cooked_cod']]},
+  // polar bears: on the snowy plains and the ice of frozen seas, a grown one with a cub now and then; they wander and
+  // swim, fight back when hit (the bears near with them), and a grown one with its cub near goes for whoever comes close
+  polar_bear: {zh: '北极熊', health: 30, speed: 0.25, passive: true, breed: [], damage: 6, drops: []},
 };
-// a tropical fish's colours (tinting its white picture): the game's sixteen dye colours
-const FISH_COLORS = COLORS.map(([, , h]) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255]);
+// a tropical fish's colours (tinting its white pictures): the game's sixteen dye colours, in its order
+const FISH_COLORS = ['f9fffe', 'f9801d', 'c74ebd', '3ab3da', 'fed83d', '80c71f', 'f38baa', '474f52', '9d9d97', '169c9c', '8932b8', '3c44aa', '835432', '5e7c16', 'b02e26', '1d1d21']
+  .map(h => [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255));
+// tropical fish (the game's): a small or a large body, six patterns for each, a body colour and a pattern colour —
+// nine in ten are one of the twenty-two kinds the game names, the rest anything; a school shares one look
+const PATTERNS = ['kob', 'sunstreak', 'snooper', 'dasher', 'brinely', 'spotty', 'flopper', 'stripey', 'glitter', 'blockfish', 'betty', 'clayfish'];
+const DYE = Object.fromEntries(COLORS.map(([c], i) => [c, i]));
+const COMMON_FISH = [['stripey', 'orange', 'gray'], ['flopper', 'gray', 'gray'], ['flopper', 'gray', 'blue'], ['clayfish', 'white', 'gray'], ['sunstreak', 'blue', 'gray'], ['kob', 'orange', 'white'],
+  ['spotty', 'pink', 'light_blue'], ['blockfish', 'purple', 'yellow'], ['clayfish', 'white', 'red'], ['spotty', 'white', 'yellow'], ['glitter', 'white', 'gray'], ['clayfish', 'white', 'orange'],
+  ['dasher', 'cyan', 'pink'], ['brinely', 'lime', 'light_blue'], ['betty', 'red', 'white'], ['snooper', 'gray', 'red'], ['blockfish', 'red', 'white'], ['flopper', 'white', 'yellow'],
+  ['kob', 'red', 'white'], ['sunstreak', 'gray', 'white'], ['dasher', 'cyan', 'yellow'], ['flopper', 'yellow', 'yellow']];
+/** A tropical fish's look packed as the game packs it: body shape | pattern << 8 | body colour << 16 | pattern colour << 24. */
+export const packFish = (pattern, base, color) => { const i = PATTERNS.indexOf(pattern); return (i >= 6 ? 1 : 0) | (i % 6) << 8 | base << 16 | color << 24; };
+/** [shape (0 small, 1 large), pattern (0–5), body colour, pattern colour]. */
+export const fishLook = v => [v & 255, v >> 8 & 255, v >> 16 & 255, v >>> 24 & 255];
+const randomFish = r => r() < 0.9 ? (([p, b, c]) => packFish(p, DYE[b], DYE[c]))(COMMON_FISH[Math.floor(r() * COMMON_FISH.length)]) : packFish(PATTERNS[Math.floor(r() * 12)], Math.floor(r() * 16), Math.floor(r() * 16));
+// how many follow one leader in a school (the game's)
+const SCHOOL = {cod: 8, salmon: 5, tropical_fish: 8};
 for (const [k, m] of Object.entries(MOBS)) { m.kind = k; m.size = MODELS[k].size; }
 const WOOL = COLORS.map(c => c[0]);
 // a sheep's natural colour: mostly white, a few greys and blacks, now and then brown or pink
@@ -99,7 +118,8 @@ export class Mob {
     if (d.water) { this.air = 300; this.persist = !!extra.persist; this.tm = 0; this.tSpeed = 0.15; this.tentacles = 0; this.puff = 0; }
     // a guardian's beam (ticks charged, 0 none), its spikes (1 out) and its tail's swing
     if (d.water === 'guardian') { this.beamT = 0; this.spikes = 1; this.tail = 0; this.tailSpeed = 0.125; this.eyeX = 0; this.eyeY = 0; }
-    if (kind === 'tropical_fish') this.color = extra.color ?? Math.floor(Math.random() * 16);
+    // (one saved before it had a pattern: the small kob, white spots, in its old colour)
+    if (kind === 'tropical_fish') this.variant = extra.variant ?? (extra.color != null ? packFish('kob', extra.color, 0) : randomFish(Math.random));
     if (kind === 'turtle') { this.beach = extra.beach || [Math.floor(x), Math.floor(y), Math.floor(z)]; this.egg = !!extra.egg; }
     // what it holds (drawn in its hand): a skeleton its bow, a zombified piglin its golden sword, a drowned one time in
     // ten a trident (five in eight of those) or a fishing rod, and one in thirty-three a nautilus shell in its other hand
@@ -108,13 +128,16 @@ export class Mob {
     this.off = extra.off !== undefined ? extra.off : kind === 'drowned' && Math.random() < 0.03 ? {id: 'nautilus_shell', n: 1} : null;
     // a dolphin holds its breath four minutes, and dries out in two out of the water
     if (kind === 'dolphin') { this.air = 4800; this.moist = 2400; }
+    // kept in the save and never going away (a drowned standing in a ruin since it was made)
+    if (extra.persist) this.persist = true;
   }
   get x() { return this.body.x; } get y() { return this.body.y; } get z() { return this.body.z; }
   toJSON() {
     const b = this.body;
     return {kind: this.kind, x: +b.x.toFixed(2), y: +b.y.toFixed(2), z: +b.z.toFixed(2), yaw: +this.yaw.toFixed(2), health: this.health, baby: this.baby || undefined, grow: this.grow || undefined, color: this.color || undefined, sheared: this.sheared || undefined,
       home: this.home || undefined, ...(this.kind === 'villager' ? {prof: this.prof, xp: this.xp, seed: this.seed, offers: this.offers, job: this.job || undefined} : {}),
-      ...(this.persist ? {persist: true} : {}), ...(this.kind === 'turtle' ? {beach: this.beach, egg: this.egg || undefined} : {})};
+      ...(this.persist ? {persist: true} : {}), ...(this.kind === 'turtle' ? {beach: this.beach, egg: this.egg || undefined} : {}),
+      ...(this.kind === 'tropical_fish' ? {variant: this.variant} : {}), ...(this.hold ? {hold: this.hold} : {}), ...(this.off ? {off: this.off} : {})};
   }
 }
 
@@ -167,11 +190,21 @@ export class Mobs {
     if (m.baby && ++m.grow >= 24000) { m.baby = false; m.body.w = d.size[0]; m.body.hgt = d.size[1]; if (m.kind === 'turtle') this.ctx.drop({id: 'turtle_scute', n: 1}, m.x, m.y + 0.3, m.z); }
     if (d.water) { this.swim(m); return; }
     if (m.kind === 'turtle' && this.turtle(m)) return;
+    // a creeper lit with flint and steel goes off whatever happens, a second and a half on (the game's)
+    if (m.lit) { if (++m.fuse >= 30) { this.list.splice(this.list.indexOf(m), 1); this.ctx.explode(m.x, m.y + 0.8, m.z, 3, m); return; } }
     // fire: the sun on the undead, lava
     const sky = this.ctx.world.light(Math.floor(m.x), Math.floor(m.y + b.height * 0.8), Math.floor(m.z))[0];
     const wet = b.inWater || (sky >= 15 && !!this.ctx.raining?.(m.x, m.z));
     if (d.undead && this.ctx.daylight() > 0.6 && sky >= 15 && !wet) m.fire = Math.max(m.fire, 160);
     if (b.inLava && !d.fireproof) m.fire = 300;
+    // standing in fire (soul fire hurts more): alight for eight seconds (the game's)
+    // (any the body touches: the corners of its box at its feet and middle)
+    let flame = 0;
+    for (const dy of [0.05, b.hgt / 2]) for (const dx of [-b.w / 2 + 0.001, b.w / 2 - 0.001]) for (const dz of [-b.w / 2 + 0.001, b.w / 2 - 0.001]) {
+      const id = this.world.get(Math.floor(m.x + dx), Math.floor(m.y + dy), Math.floor(m.z + dz)) & 0xFFF;
+      if (id === ID.soul_fire || (id === ID.fire && !flame)) flame = id;
+    }
+    if ((flame === ID.fire || flame === ID.soul_fire) && !d.fireproof) { m.fire = Math.max(m.fire, 160); if (m.age % 10 === 0) this.hurt(m, flame === ID.soul_fire ? 2 : 1, null, 'fire'); }
     if (d.fireproof) m.fire = 0;
     if (wet && !b.inLava) m.fire = 0;
     // burning hurts once a second (counted on its own: the sun keeps setting the fire's time back, so its time never
@@ -216,13 +249,15 @@ export class Mobs {
           if (m.aim >= 30 + (m.id % 20)) { m.aim = 0; this.shoot(m, player); }
         } else if (m.kind === 'creeper') {
           m.goal = [player.x, player.z];
-          if (pd < 3 && Math.abs(py) < 3) { m.input.fwd = 0; if (m.fuse === 0) this.ctx.sound('fuse', m.x, m.y, m.z); m.fuse++; }
+          if (m.lit) m.input.fwd = 0;
+          else if (pd < 3 && Math.abs(py) < 3) { m.input.fwd = 0; if (m.fuse === 0) this.ctx.sound('fuse', m.x, m.y, m.z); m.fuse++; }
           else { m.input.fwd = 1; if (pd > 7) m.fuse = Math.max(0, m.fuse - 1); else if (m.fuse) m.fuse++; }
           if (m.fuse >= 30) { this.list.splice(this.list.indexOf(m), 1); this.ctx.explode(m.x, m.y + 0.8, m.z, 3, m); return; }
         }
         return;
       }
-      m.fuse = Math.max(0, m.fuse - 1); m.aim = 0;
+      if (!m.lit) m.fuse = Math.max(0, m.fuse - 1);
+      m.aim = 0;
       // a zombie (or a drowned) with no player to chase goes for a villager
       if (m.kind === 'zombie' || m.kind === 'drowned') {
         if (m.age % 10 === 0) m.prey = this.nearest(m, o => o.kind === 'villager', 24);
@@ -236,6 +271,7 @@ export class Mobs {
       // a drowned out of the water by day makes for water near (the game's: within ten blocks)
       if (m.kind === 'drowned' && !b.inWater && this.ctx.daylight() > 0.6 && m.age % 20 === m.id % 20) { const w = this.waterNear(m, 10); if (w) { m.goal = w; m.wait = 100; } }
     }
+    if (m.kind === 'polar_bear' && this.bear(m, pd, py)) return;
     // animals: run when hurt, come to their food, find a mate
     if (d.passive) {
       if (m.panic > 0) { if (!m.goal || m.wait-- <= 0) { m.goal = [m.x + (Math.random() - 0.5) * 16, m.z + (Math.random() - 0.5) * 16]; m.wait = 30; } m.input.fwd = 1; m.input.mod = 1.25; return; }
@@ -273,6 +309,23 @@ export class Mobs {
     }
     if (!m.lookAt && pd < 8 && Math.random() < 0.02) m.lookUntil = m.age + 40;
     if (m.lookUntil > m.age) m.lookAt = [player.x, player.y + player.eye, player.z];
+  }
+  /**
+   * A polar bear (the game's): a grown one goes for the player when angry (hit, or one of its kind near was) or when a
+   * cub is by it and the player comes within eight; it rears up and strikes (6). A cub only runs. True while it fights.
+   */
+  bear(m, pd, py) {
+    const {player} = this.ctx, alive = !player.dead && this.ctx.mode() !== 'creative' && this.ctx.difficulty?.() !== 'peaceful';
+    if (m.stand > 0) m.stand--;
+    if (m.baby) return false;
+    if (alive && !(m.angry > 0) && pd < 8 && m.age % 20 === m.id % 20 && this.list.some(o => o.kind === 'polar_bear' && o.baby && !o.dead && Math.hypot(o.x - m.x, o.z - m.z) < 8)) { m.angry = 200; this.ctx.sound('polar_warning', m.x, m.y, m.z); }
+    if (!(m.angry > 0) || !alive || pd > 20) return false;
+    m.panic = 0; m.goal = [player.x, player.z]; m.input.fwd = 1; m.input.mod = 1.25; m.lookAt = [player.x, player.y + player.eye, player.z];
+    if (pd < 2.6 && py > -2 && py < 2) {
+      m.stand = Math.max(m.stand || 0, 12);
+      if (m.attackT === 0 && m.stand > 6) { m.attackT = 20; this.ctx.hurtPlayer(m.def.damage, `被${m.def.zh}杀死了`, m); this.ctx.sound('polar_hurt', m.x, m.y, m.z); }
+    }
+    return true;
   }
   /** The nearest other mob within reach that fn accepts, or null. */
   nearest(m, fn, reach) {
@@ -393,6 +446,8 @@ export class Mobs {
     if (!b.inWater) { m.goal3 = null; if (d.water !== 'guardian' && --m.air <= -20) { m.air = 0; this.hurt(m, 2, null, 'drown'); } return; }
     if (m.beamT > 0) { m.goal3 = null; return; }
     m.air = 300;
+    // in a school: after its leader
+    if (d.water === 'fish' && !(m.panic > 0) && this.school(m)) return;
     // a guardian swims off now and then (the game's: about every four seconds) and keeps still in between
     if (d.water === 'guardian') {
       if (m.goal3 && Math.hypot(m.goal3[0] - m.x, m.goal3[1] - m.y, m.goal3[2] - m.z) < 1) m.goal3 = null;
@@ -416,6 +471,26 @@ export class Mobs {
         m.attackT = 20; this.ctx.hurtPlayer(1 + m.puff, '被河豚扎死了', m); this.ctx.effect?.('poison', 0, 60 * m.puff);
       }
     }
+  }
+  /**
+   * Fish swimming in schools (the game's): one leads where it likes; up to cod 8, salmon 5, tropical fish 8 of its kind
+   * near it (within 8) follow it, keeping round it; one left more than 11 behind, or whose leader is scared off, is on
+   * its own again. True while it follows.
+   */
+  school(m) {
+    const max = SCHOOL[m.kind], L = m.leader;
+    if (!max) return false;
+    if (L && (L.dead || L.panic > 0 || !this.list.includes(L) || Math.hypot(L.x - m.x, L.y - m.y, L.z - m.z) > 11)) m.leader = null;
+    if (!m.leader && m.age % 40 === m.id % 40 && !this.list.some(o => o.leader === m)) {
+      const near = this.list.filter(o => o !== m && o.kind === m.kind && !o.dead && !o.leader && Math.hypot(o.x - m.x, o.y - m.y, o.z - m.z) < 8);
+      // (a school with room, else one on its own to lead a new one)
+      m.leader = near.find(o => this.list.some(f => f.leader === o) && this.count(f => f.leader === o) < max - 1) || near.find(o => !this.list.some(f => f.leader === o)) || null;
+    }
+    const l = m.leader;
+    if (!l) return false;
+    if (!m.off || m.age % 60 === 0) m.off = [(Math.random() - 0.5) * 2.4, (Math.random() - 0.5), (Math.random() - 0.5) * 2.4];
+    m.goal3 = [l.x + m.off[0], l.y + m.off[1], l.z + m.off[2]];
+    return true;
   }
   /**
    * A guardian: it sees a player near (within 16, nothing solid between, more than three away when it starts) and keeps
@@ -560,6 +635,13 @@ export class Mobs {
     const rain = !!this.ctx.raining?.(m.x, m.z) && this.world.light(wx, Math.floor(m.y + 0.6), wz)[0] >= 15;
     if (b.inWater || rain) m.moist = 2400; else if (--m.moist <= 0 && m.age % 10 === 0) this.hurt(m, 1, null, 'dry');
     m.fast = false;
+    // what it carries in its mouth it tosses away again after a moment (the game's: up and ahead, not to be had for two
+    // seconds), and it may play again a few seconds later
+    if (m.carry && --m.carryT <= 0) {
+      const fx = -Math.sin(m.yaw), fz = -Math.cos(m.yaw);
+      this.ctx.drop(m.carry, m.x + fx * 0.6, m.y + 0.5, m.z + fz * 0.6, {dir: [fx, 0.5, fz], delay: 40});
+      m.carry = null; m.playT = m.age + Math.floor(Math.random() * 100);
+    }
     if (!b.inWater) { m.goal3 = null; return; }
     if (m.age % 200 === m.id % 200 && Math.random() < 0.5) this.ctx.sound('dolphin', m.x, m.y, m.z);
     const pd = Math.hypot(player.x - m.x, player.y + 0.5 - m.y, player.z - m.z), there = !m.goal3 || Math.hypot(m.goal3[0] - m.x, m.goal3[1] - m.y, m.goal3[2] - m.z) < 1.5;
@@ -587,6 +669,10 @@ export class Mobs {
       // alongside a swimmer
       m.goal3 = pd < 2.5 ? null : [player.x, player.y + 0.5, player.z]; m.fast = true;
       if (Math.random() < 1 / 6) this.ctx.effect?.('dolphins_grace', 0, 100);
+    } else if (this.followBoat(m)) {
+      m.fast = true;
+    } else if (this.playWith(m)) {
+      m.fast = true;
     } else if (there || m.wait-- <= 0) {
       m.wait = 60 + Math.floor(Math.random() * 100);
       for (let k = 0; k < 8; k++) {
@@ -601,6 +687,33 @@ export class Mobs {
     if (Math.hypot(b.vx, b.vz) < 0.08 || (!sx && !sz) || Math.random() > 0.2) return;
     if (![0, 1, 4, 5, 6, 7].every(s => { const x = wx + sx * s, z = wz + sz * s; return isWater(this.world.get(x, by, z)) && !this.world.get(x, by + 1, z) && !this.world.get(x, by + 2, z); })) return;
     b.vx += sx * 0.6; b.vy += 0.7; b.vz += sz * 0.6; m.leapT = 60;
+  }
+  /** A dolphin by a boat the player paddles (within 8, then while within 20): up behind it, then racing on ten blocks
+   *  ahead of it, falling back behind when twelve off (the game's). True while it follows. */
+  followBoat(m) {
+    const boat = this.ctx.boat?.(), d = boat && Math.hypot(boat.x - m.x, boat.z - m.z);
+    if (!boat || d > (m.boating ? 20 : 8)) { m.boating = null; return false; }
+    if (!m.boating || (m.boating === 'ahead' && d > 12)) m.boating = 'to'; else if (m.boating === 'to' && d < 4) m.boating = 'ahead';
+    const l = Math.hypot(boat.vx, boat.vz) || 1, k = m.boating === 'to' ? -1.5 : 10;
+    // (just under the top of the water: where it leaps)
+    m.goal3 = [boat.x + boat.vx / l * k, boat.y - 0.6, boat.z + boat.vz / l * k];
+    return true;
+  }
+  /** A dolphin playing (the game's): it goes for a thing floating in the water within 8, takes it in its mouth when it
+   *  gets there, and soon tosses it away. True while it is after one. */
+  playWith(m) {
+    if (m.carry || (m.playT || 0) > m.age) return false;
+    const items = this.ctx.items?.() || [];
+    let best = null, bd = 8;
+    for (const it of items) {
+      if (it.delay > 0 || !isWater(this.world.get(Math.floor(it.x), Math.floor(it.y), Math.floor(it.z)))) continue;
+      const d = Math.hypot(it.x - m.x, it.y - m.y, it.z - m.z);
+      if (d < bd) { bd = d; best = it; }
+    }
+    if (!best) return false;
+    m.goal3 = [best.x, best.y, best.z];
+    if (bd < 1.2) { items.splice(items.indexOf(best), 1); m.carry = best.stack; m.carryT = 10 + Math.floor(Math.random() * 20); this.ctx.sound('dolphin', m.x, m.y, m.z); }
+    return true;
   }
   /** A dolphin given a fish: glad, and it leads the way to the nearest shipwreck or ocean ruin (if there is one). */
   feedDolphin(m) {
@@ -706,8 +819,8 @@ export class Mobs {
       n = kind === 'pufferfish' ? 1 : 2 + Math.floor(Math.random() * 3);
     }
     if (!kind) return;
-    const color = Math.floor(Math.random() * 16);
-    for (let k = 0; k < n; k++) this.add(kind, x + 0.5 + (Math.random() - 0.5), y + 0.2, z + 0.5 + (Math.random() - 0.5), {color});
+    const variant = randomFish(Math.random);
+    for (let k = 0; k < n; k++) this.add(kind, x + 0.5 + (Math.random() - 0.5), y + 0.2, z + 0.5 + (Math.random() - 0.5), {variant});
   }
   /** Can a mob see the player (nothing solid between their eyes)? */
   sees(m, p) {
@@ -733,6 +846,8 @@ export class Mobs {
     if (m.def.golem && from?.player) m.angry = 1200;
     // hit one zombified piglin and those around it come for you too
     if (m.def.neutral && from?.player) for (const o of this.list) if (o.kind === m.kind && Math.hypot(o.x - m.x, o.z - m.z) < 20) o.angry = 600 + Math.floor(Math.random() * 400);
+    // a polar bear hit by someone: a grown one comes for them; a cub runs, and the grown bears round it come (the game's)
+    if (m.kind === 'polar_bear' && from?.player) for (const o of this.list) if (o.kind === 'polar_bear' && !o.baby && (o === m || (m.baby && Math.hypot(o.x - m.x, o.z - m.z) < 20))) o.angry = 400;
     // a dolphin hit by someone: it and the dolphins round it bite back
     if (m.kind === 'dolphin' && from?.player) for (const o of this.list) if (o.kind === 'dolphin' && Math.hypot(o.x - m.x, o.y - m.y, o.z - m.z) < 10) o.angry = 400;
     this.ctx.sound(m.health <= 0 ? `${m.kind}_death` : `${m.kind}_hurt`, m.x, m.y, m.z);
@@ -751,6 +866,9 @@ export class Mobs {
       if (n > 0) this.ctx.drop({id: m.fire > 0 && cooked ? cooked : id, n}, m.x, m.y + 0.5, m.z);
     }
     if (m.kind === 'sheep' && !m.sheared) this.ctx.drop({id: `${m.color || 'white'}_wool`, n: 1}, m.x, m.y + 0.5, m.z);
+    if (m.carry) this.ctx.drop({...m.carry}, m.x, m.y + 0.5, m.z);
+    // a polar bear: raw cod three times in four, else raw salmon, 0–2 (the game's; cooked if it burned)
+    if (m.kind === 'polar_bear') { const fish = Math.random() < 0.75 ? 'cod' : 'salmon', n = Math.floor(Math.random() * (3 + (m.killedByPlayer ? this.ctx.looting?.() || 0 : 0))); if (n) this.ctx.drop({id: m.fire > 0 ? `cooked_${fish}` : fish, n}, m.x, m.y + 0.5, m.z); }
     if (m.def.water === 'guardian') { const q = Math.random(); if (q < 0.8 && Math.random() < 0.5) this.ctx.drop({id: q < 0.4 ? (m.fire > 0 ? 'cooked_cod' : 'cod') : 'prismarine_crystals', n: 1}, m.x, m.y + 0.5, m.z); }
     if (m.killedByPlayer) for (const [id, lo, hi] of m.def.byPlayer || []) this.ctx.drop({id, n: lo + Math.floor(Math.random() * (hi - lo + 1))}, m.x, m.y + 0.5, m.z);
     // a drowned killed by the player: copper now and then (the game's 11%, 2% more a level of 抢夺)
@@ -938,7 +1056,7 @@ export class Mobs {
           const [x0, y0, z0, x1, y1, z1] = m.body.aabb();
           if (nx > x0 - r && nx < x1 + r && ny > y0 - r && ny < y1 + r && nz > z0 - r && nz < z1 + r) hit = {mob: m};
         }
-        if (!hit && collisionBoxes(this.world.get(Math.floor(nx), Math.floor(ny), Math.floor(nz)))) hit = {block: true};
+        if (!hit && collisionBoxes(this.world.get(Math.floor(nx), Math.floor(ny), Math.floor(nz)))) hit = {block: true, at: [f.x, f.y, f.z]};
         f.x = nx; f.y = ny; f.z = nz;
       }
       if (!hit) continue;
@@ -946,9 +1064,11 @@ export class Mobs {
       const by = f.from === 'player' ? {player: true, x: f.x, z: f.z} : null;
       if (f.big) {
         if (hit.mob) this.hurt(hit.mob, 6, by || {x: f.x, z: f.z}, 'hit');
-        this.ctx.explode(f.x, f.y, f.z, 1, f.from === 'player' ? null : f.from);
-      } else if (hit.player) this.ctx.hurtPlayer(5, `被${f.from?.def?.zh || ''}的火球烧死了`, {x: f.x, z: f.z}, 'fire');
+        this.ctx.explode(f.x, f.y, f.z, 1, f.from === 'player' ? null : f.from, true);
+      } else if (hit.player) this.ctx.hurtPlayer(5, f.from?.def ? `被${f.from.def.zh}的火球烧死了` : '被火球烧死了', {x: f.x, z: f.z}, 'fire');
       else if (hit.mob) { this.hurt(hit.mob, 5, by, 'fire'); if (!hit.mob.def.fireproof) hit.mob.fire = Math.max(hit.mob.fire, 100); }
+      // (a small one sets fire where it hits a block, the game's)
+      else if (hit.block) this.ctx.fire?.(Math.floor(hit.at[0]), Math.floor(hit.at[1]), Math.floor(hit.at[2]));
     }
   }
   // ---------- arrows ----------
@@ -1106,7 +1226,7 @@ export class Mobs {
       if (dx * dx + dz * dz > view.far * view.far) continue;
       const b = m.body, a = view.alpha ?? 1, x = b.prev.x + (b.x - b.prev.x) * a - view.x, y = b.prev.y + (b.y - b.prev.y) * a - view.y, z = b.prev.z + (b.z - b.prev.z) * a - view.z;
       const rot = animate(m.kind, {}, {limb: m.limb, amount: m.amount, headYaw: -m.headYaw, headPitch: m.headPitch, age: m.age, attack: m.def.golem ? m.attackT / 10 : m.attackT > 10 ? 1 : 0, shake: m.shake > 0, aim: m.aim > 0 || (m.def.neutral && m.angry > 0), fall: !b.onGround, graze: m.graze > 0, squish: m.squish || 0,
-        tentacles: m.tentacles || 0, flop: m.def.water && !b.inWater, swim: m.swimming, spikes: m.spikes, tail: m.tail, eyeX: m.eyeX, eyeY: m.eyeY, spear: m.spear});
+        tentacles: m.tentacles || 0, flop: m.def.water && !b.inWater, swim: m.swimming, spikes: m.spikes, tail: m.tail, eyeX: m.eyeX, eyeY: m.eyeY, spear: m.spear, stand: Math.min(1, (m.stand || 0) / 6), young: m.baby});
       const s = (m.baby ? (m.kind === 'turtle' ? 0.3 : 0.5) : 1) * (MODELS[m.kind].scale || 1) * (m.mag || 1) * (m.kind === 'pufferfish' ? [1, 1.6, 2.2][m.puff || 0] : 1), roll = m.dead ? Math.min(1, m.dead / 10) * Math.PI / 2 : 0, swell = m.fuse ? Math.min(1, m.fuse / 30) * 0.3 * (1 + Math.sin(m.fuse * 0.9) * 0.15) : 0;
       const [sky, blk] = light(Math.floor(m.x), Math.floor(m.y + b.height / 2), Math.floor(m.z));
       // (the game draws a squid lower: its tentacles hang under its box)
@@ -1114,24 +1234,32 @@ export class Mobs {
       const pose = {x, y: y - (m.def.water === 'squid' ? 0.7 : 0), z, yaw: m.yaw + (m.conv > 0 ? Math.cos(m.age * 3.25) * 0.022 : 0), s, roll, swell}, hurt = m.hurtT > 0 || m.dead ? 1 : 0, white = m.fuse && Math.floor(m.fuse / 5) % 2 ? 0.6 : 0;
       const fire = m.fire > 0 || m.def.glow ? 1 : 0;
       const skin = m.kind === 'villager' ? `villager_${m.prof || 'none'}` : m.kind;
-      out.push({skin, verts: new Float32Array(buildModel(m.kind, rot, pose, [], sizes[skin])), light: [sky, Math.max(blk, fire ? 14 : 0)], tint: m.kind === 'tropical_fish' ? FISH_COLORS[m.color] || [1, 1, 1] : [1, 1, 1], hurt, white});
+      if (m.kind === 'tropical_fish') {
+        // its body in its colour, the pattern over it in the other (a little bigger, the game's)
+        const [shape, pattern, base, color] = fishLook(m.variant), body = shape ? 'tropical_fish_b' : 'tropical_fish', over = `fish_${shape ? 'b' : 'a'}${pattern + 1}`;
+        out.push({skin: body, verts: new Float32Array(buildModel(body, rot, pose, [], sizes[body])), light: [sky, blk], tint: FISH_COLORS[base] || [1, 1, 1], hurt, white});
+        out.push({skin: over, verts: new Float32Array(buildModel(shape ? 'fish_pattern_b' : 'fish_pattern_a', rot, pose, [], sizes[over])), light: [sky, blk], tint: FISH_COLORS[color] || [1, 1, 1], hurt, white});
+        continue;
+      }
+      out.push({skin, verts: new Float32Array(buildModel(m.kind, rot, pose, [], sizes[skin])), light: [sky, Math.max(blk, fire ? 14 : 0)], tint: [1, 1, 1], hurt, white});
       if (m.kind === 'sheep' && !m.sheared) out.push({skin: 'sheep_wool', verts: new Float32Array(buildModel('sheep_wool', rot, pose, [], sizes.sheep_wool)), light: [sky, blk], tint: WOOL_TINT[m.color] || [1, 1, 1], hurt, white: 0});
       if (m.kind === 'drowned') out.push({skin: 'drowned_outer', verts: new Float32Array(buildModel('drowned_outer', rot, pose, [], sizes.drowned_outer)), light: [sky, blk], tint: [1, 1, 1], hurt, white: 0});
       if (m.hold || m.off) held.push({kind: m.kind, rot, pose, hold: m.hold, off: m.off, light: [sky, blk], spear: !!m.spear});
+      if (m.carry) held.push({kind: m.kind, rot, pose, hold: m.carry, part: 'nose', light: [sky, blk]});
     }
     this.held = held;
     return out;
   }
   // (the player's tridents thrown and not back yet are kept with them)
   toJSON() {
-    return [...this.list.filter(m => (m.def.passive || m.def.keep) && !m.dead && (!m.def.water || m.persist)).map(m => m.toJSON()),
+    return [...this.list.filter(m => (m.def.passive || m.def.keep || m.persist) && !m.dead && (!m.def.water || m.persist)).map(m => m.toJSON()),
       ...this.arrows.filter(a => a.trident && a.from === 'player').map(a => ({kind: 'trident', x: +a.x.toFixed(3), y: +a.y.toFixed(3), z: +a.z.toFixed(3), vx: a.vx, vy: a.vy, vz: a.vz,
         stuck: a.stuck, life: a.life, dir: a.dir, dealt: a.dealt || undefined, back: a.back || undefined, creative: a.creative || undefined, trident: a.trident}))];
   }
   load(list) {
     for (const s of list || []) {
       if (s.kind === 'trident') { if (s.trident) this.arrows.push({...s, from: 'player', dmg: 8}); }
-      else if (MOBS[s.kind]?.passive || MOBS[s.kind]?.keep) this.add(s.kind, s.x, s.y, s.z, s);
+      else if (MOBS[s.kind]?.passive || MOBS[s.kind]?.keep || s.persist) this.add(s.kind, s.x, s.y, s.z, s);
     }
   }
 }

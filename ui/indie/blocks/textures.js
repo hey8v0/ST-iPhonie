@@ -1558,6 +1558,28 @@ ITEM_ART.prismarine_shard = () => icon([{mask: mask().poly([[4, 13], [6, 3], [12
 ITEM_ART.prismarine_crystals = () => { const p = icon([{mask: mask().disc(6, 10, 2.6).disc(10.5, 7, 2.4).disc(9, 12, 1.8), color: '#c8ecdf', light: '#ffffff', dark: '#86b4a6', outline: '#2c4a42'}]); for (const [x, y] of [[6, 9], [10, 6]]) p.set(x, y, hex('#ffffff')); return p; };
 // the trident: a long shaft corner to corner, wrapped near its foot, a crossbar and three prongs at its head (ours:
 // sea-green, the head pale)
+// fire: flames licking up from the bottom — yellow at their roots, orange, red at the tips — flickering upward (sixteen
+// frames); soul fire the same in white and blues
+const flames = (f, seed, pal) => {
+  const p = pic(), n = tileNoise(seed, 4), m = tileNoise(seed + 1, 8);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const up = (S - 1 - y) / (S - 1), v = n(x, (y + f) & 15) * 0.65 + m(x, (y + f * 2) & 15) * 0.35, edge = 1 - Math.abs(x - 7.5) / 8;
+    const heat = v * (0.6 + edge * 0.4) + 0.5 - up * 0.78;
+    if (heat > 0.3) p.set(x, y, hex(heat > 0.75 ? pal[0] : heat > 0.58 ? pal[1] : heat > 0.43 ? pal[2] : pal[3]));
+  }
+  return p;
+};
+BLOCK_ART.fire_0 = f => flames(f, 411, ['#fff6b0', '#ffc531', '#f07a14', '#c43c0c']);
+BLOCK_ART.fire_1 = f => flames(f, 417, ['#fff6b0', '#ffb820', '#ec6a10', '#b8320a']);
+BLOCK_ART.soul_fire_0 = f => flames(f, 423, ['#f0ffff', '#8af2ff', '#36bcd8', '#1a6a8a']);
+BLOCK_ART.soul_fire_1 = f => flames(f, 429, ['#f0ffff', '#7ae8ff', '#2eaed0', '#185e7e']);
+// frosted ice: ice with white cracks, more of them at each age as it melts
+for (let a = 0; a < 4; a++) BLOCK_ART[`frosted_ice_${a}`] = () => {
+  const p = mottled(131, ['#8eb4f2', '#9cc0f5', '#aacaf7'], {cells: 4, grain: 0.2}), r = rng(907 + a * 13);
+  for (let i = 0; i < p.d.length; i += 4) p.d[i + 3] = 165;
+  for (let k = 0; k < 3 + a * 4; k++) { let x = Math.floor(r() * S), y = Math.floor(r() * S); for (let s = 0; s < 3 + a; s++) { p.set(x, y, [232, 242, 255], 220); x = (x + (r() < 0.5 ? 1 : S - 1)) % S; y = (y + 1) % S; } }
+  return p;
+};
 ITEM_ART.trident = () => icon([
   {mask: mask().line(1.5, 14.5, 10.2, 5.8, 1.5), color: '#3f8f86', light: '#74c8bc', dark: '#245a52', outline: '#0e2a26'},
   {mask: mask().line(2.2, 13.8, 4.6, 11.4, 1.9), color: '#5a4630', light: '#7a6244', dark: '#3a2c1c', outline: '#1a140c'},
@@ -1583,7 +1605,7 @@ const eggs = (crack, seed) => {
 BLOCK_ART.turtle_egg = () => eggs(0, 1031); BLOCK_ART.turtle_egg_slightly_cracked = () => eggs(1, 1031); BLOCK_ART.turtle_egg_very_cracked = () => eggs(2, 1031);
 ITEM_ART.turtle_egg_item = () => icon([{mask: mask().disc(8, 9, 4, 5), color: '#eee8cc', light: '#ffffff', dark: '#b8b08a', outline: '#4a4630'}], {sparkle: [[6, 7]]});
 for (const [k, [a, b]] of Object.entries({squid: ['#223b4d', '#708899'], glow_squid: ['#095656', '#85f1bc'], cod: ['#c1a76a', '#e5c48b'], salmon: ['#a00f10', '#0e8474'], tropical_fish: ['#ef6915', '#fff9ef'],
-  pufferfish: ['#f6b201', '#37c3f2'], turtle: ['#e7e7e7', '#00afaf'], guardian: ['#5a8272', '#f17d30'], elder_guardian: ['#ceccba', '#747693'], drowned: ['#8ff1d7', '#799c65'], dolphin: ['#223b4d', '#f9f9f9']})) ITEM_ART[`${k}_spawn_egg`] = () => {
+  pufferfish: ['#f6b201', '#37c3f2'], turtle: ['#e7e7e7', '#00afaf'], guardian: ['#5a8272', '#f17d30'], elder_guardian: ['#ceccba', '#747693'], drowned: ['#8ff1d7', '#799c65'], dolphin: ['#223b4d', '#f9f9f9'], polar_bear: ['#eeeede', '#d5d6cd']})) ITEM_ART[`${k}_spawn_egg`] = () => {
   const p = icon([{mask: mask().disc(8, 9, 4.6, 5.8), color: a, light: toHex(mix(hex(a), [255, 255, 255], 0.35)), dark: toHex(mul(hex(a), 0.62)), outline: '#1a1a1a'}]), r = rng(nameSeed(k));
   for (let n = 0; n < 9; n++) { const x = 5 + Math.floor(r() * 7), y = 5 + Math.floor(r() * 8); if (p.alpha(x, y) && p.alpha(x + 1, y)) { p.set(x, y, hex(b)); if (r() < 0.6) p.set(x + 1, y, mul(hex(b), 0.85)); } }
   return p;
@@ -1640,7 +1662,7 @@ ITEM_ART.filled_map = () => {
 };
 
 /** Frames per animated texture and ticks per frame. */
-export const ANIMATED = {water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};
+export const ANIMATED = {fire_0: {frames: 16, time: 1}, fire_1: {frames: 16, time: 1}, soul_fire_0: {frames: 16, time: 1}, soul_fire_1: {frames: 16, time: 1}, water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};
 /** Our drawing of a texture by name: {w, h, frames: [Uint8ClampedArray], time} or null when we have none. */
 export function ownTexture(name) {
   const art = BLOCK_ART[name] || ITEM_ART[name];

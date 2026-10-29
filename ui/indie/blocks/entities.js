@@ -1,12 +1,38 @@
 // Things that move in the world but are not blocks: dropped items (they fall, bounce, join others of their kind and
 // fly to the player when near) and particles (bits of a block flying off when it breaks, splashes).
 import {collisionBoxes} from './shapes.js';
-import {itemInfo, BLOCKS} from './blocks.js';
+import {itemInfo, BLOCKS, ID} from './blocks.js';
 import {Verts, mat} from './render.js';
 import {LAYER, dialName} from './atlas.js';
 import {potionColor} from './brew.js';
 
 const DEFAULT_TINT = {grass: 0x91bd59, foliage: 0x77ab2f, water: 0x3f76e4};
+// the pictures as they are now (their clear pixels shape a thing's edges), and the things built from them
+let atlas = null;
+const itemVerts = new Map();
+/** The block and item pictures in use (buildLayers'), for the edges of things drawn thick. */
+export function setAtlas(built) { atlas = built; itemVerts.clear(); }
+/**
+ * An item's picture as the game holds it, a sixteenth of a block thick: the picture on both faces, and a thin side along
+ * every pixel edge with a clear pixel (or nothing) beyond it, in that pixel's colour (a flat picture seen edge-on was
+ * not there at all: a skeleton's bow from in front).
+ */
+export function thickItem(v, layer, tint, sky, blk) {
+  const t = 1 / 32, d = atlas?.layers[layer], n = atlas?.size || 16;
+  for (const z of [t, -t]) v.flat(0.5, layer, sky, blk, 256, 32, tint, z);
+  if (!d) return;
+  const solid = (i, j) => i >= 0 && j >= 0 && i < 16 && j < 16 && d[(Math.floor((j + 0.5) * n / 16) * n + Math.floor((i + 0.5) * n / 16)) * 4 + 3] > 0;
+  const quad = (P, UV, f) => { for (const k of [0, 1, 2, 3, 3, 2, 1, 0]) v.v(P[k][0], P[k][1], P[k][2], 256, 32, layer, UV[k][0], UV[k][1], sky, blk, f << 2, tint); };
+  for (let j = 0; j < 16; j++) for (let i = 0; i < 16; i++) {
+    if (!solid(i, j)) continue;
+    const x0 = i / 16 - 0.5, x1 = x0 + 1 / 16, y1 = 0.5 - j / 16, y0 = y1 - 1 / 16, across = [[i, j + 1], [i + 1, j + 1], [i + 1, j], [i, j]], along = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]];
+    // (the side shows its pixel all over: u and v each run across that one pixel)
+    if (!solid(i - 1, j)) quad([[x0, y0, -t], [x0, y0, t], [x0, y1, t], [x0, y1, -t]], across, 1);
+    if (!solid(i + 1, j)) quad([[x1, y0, t], [x1, y0, -t], [x1, y1, -t], [x1, y1, t]], across, 0);
+    if (!solid(i, j - 1)) quad([[x0, y1, t], [x1, y1, t], [x1, y1, -t], [x0, y1, -t]], along, 2);
+    if (!solid(i, j + 1)) quad([[x0, y0, -t], [x1, y0, -t], [x1, y0, t], [x0, y0, t]], along, 3);
+  }
+}
 const tintNum = t => t == null ? 0xFFFFFF : t.startsWith('#') ? parseInt(t.slice(1), 16) : DEFAULT_TINT[t];
 /**
  * The faces' texture layers of an item as a little cube (or one flat picture): {cube: [6 layers], tints} | {flat, tint,
@@ -89,6 +115,9 @@ export class Entities {
         if (!left) { this.items.splice(i, 1); this.onPickup?.(it); continue; }
         it.stack = left;
       }
+      // in fire or lava a thing burns away (the game's)
+      const under = this.world.get(Math.floor(it.x), Math.floor(it.y + 0.1), Math.floor(it.z)) & 0xFFF;
+      if (under === ID.lava || under === ID.fire || under === ID.soul_fire) { this.items.splice(i, 1); this.puff(it.x, it.y + 0.3, it.z, 'smoke'); this.onBurn?.(it); continue; }
       // pulled a little toward the player when close
       const inWater = (this.world.get(Math.floor(it.x), Math.floor(it.y), Math.floor(it.z)) & 0xFFF) === BLOCKS.find(b => b.name === 'water').id;
       it.vy -= inWater ? -0.01 : 0.04;
@@ -161,12 +190,25 @@ export class Entities {
     const out = [];
     for (const it of this.items) {
       const look = itemLook(it.stack.id, it.stack), [sky, blk] = light(Math.floor(it.x), Math.floor(it.y + 0.2), Math.floor(it.z));
-      const v = new Verts(48);
-      const bob = Math.sin((it.age + time * 20) * 0.1 + it.spin) * 0.06 + 0.1;
-      if (look.cube) v.cube(look.half ? 0.5 : 0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints);
-      else v.flatLook(0.5, look, sky * 17, blk * 17, 256, 32);
-      const s = look.cube ? 0.25 : 0.4, copies = it.stack.n > 16 ? 3 : it.stack.n > 1 ? 2 : 1;
-      for (let c = 0; c < copies; c++) out.push({verts: v, x: it.x + c * 0.06, y: it.y + bob + s / 2 + c * 0.05, z: it.z + c * 0.04, model: mat.model(s, (it.age / 20 + it.spin) % (Math.PI * 2))});
+      // (built once for a look in a light: a block as a little block, a thing a sixteenth thick, as the game's are)
+      const key = `${look.cube ? `c${it.stack.id}` : `${look.flat}|${look.tint}|${look.over ?? ''}`}|${sky}|${blk}`;
+      let v = itemVerts.get(key);
+      if (!v) {
+        if (itemVerts.size > 400) itemVerts.clear();
+        v = new Verts(look.cube ? 48 : 512);
+        if (look.cube) v.cube(0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints);
+        else if (look.over != null) v.flatLook(0.5, look, sky * 17, blk * 17, 256, 32);
+        else thickItem(v, look.flat, look.tint, sky * 17, blk * 17);
+        itemVerts.set(key, v);
+      }
+      // bobbing a tenth of a block and turning (the game's); a stack shows more of them (up to five): a thing's stacked
+      // close behind it, a block's a little apart
+      const bob = Math.sin((it.age + time * 20) * 0.1 + it.spin) * 0.1 + 0.1, yaw = (it.age / 20 + it.spin) % (Math.PI * 2);
+      const s = look.cube ? 0.25 : 0.5, n = it.stack.n, copies = n > 48 ? 5 : n > 32 ? 4 : n > 16 ? 3 : n > 1 ? 2 : 1;
+      for (let c = 0; c < copies; c++) {
+        const [ox, oy, oz] = look.cube ? [c * 0.06, c * 0.05, c * 0.04] : [Math.sin(yaw) * c * 0.047, 0, Math.cos(yaw) * c * 0.047];
+        out.push({verts: v, x: it.x + ox, y: it.y + bob + s / 2 + oy, z: it.z + oz, model: mat.model(s, yaw)});
+      }
     }
     if (this.particles.length || this.orbs.length) {
       const v = this.pv.reset(), cx = view.x, cy = view.y, cz = view.z;

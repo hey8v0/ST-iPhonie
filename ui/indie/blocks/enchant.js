@@ -25,7 +25,10 @@ export const ENCHANTS = {
   respiration: {zh: '水下呼吸', max: 3, w: 2, on: armor(0), cost: [10, 10, 30], mult: [4, 2]},
   aqua_affinity: {zh: '水下速掘', max: 1, w: 2, on: armor(0), cost: [1, 0, 40], mult: [4, 2]},
   // boots: walking under water as fast as on land
-  depth_strider: {zh: '深海探索者', max: 3, w: 2, on: armor(3), cost: [10, 10, 15], mult: [4, 2]},
+  depth_strider: {zh: '深海探索者', max: 3, w: 2, on: armor(3), cost: [10, 10, 15], group: 'boots', mult: [4, 2]},
+  // boots, found only (never from the table): the water round the feet freezes into frosted ice as they walk, and
+  // magma blocks do not burn them; not with 深海探索者
+  frost_walker: {zh: '冰霜行者', max: 2, w: 2, on: armor(3), cost: [10, 10, 15], group: 'boots', mult: [4, 2], treasure: true},
   thorns: {zh: '荆棘', max: 3, w: 1, on: armor(1), anvil: armor(), cost: [10, 20, 50], mult: [8, 4]},
   sharpness: {zh: '锋利', max: 5, w: 10, on: sword, anvil: i => sword(i) || kind(i) === 'axe', cost: [1, 11, 20], group: 'damage', mult: [1, 1]},
   smite: {zh: '亡灵杀手', max: 5, w: 5, on: sword, anvil: i => sword(i) || kind(i) === 'axe', cost: [5, 8, 20], group: 'damage', mult: [2, 1]},

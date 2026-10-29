@@ -63,6 +63,13 @@ Object.assign(SKINS, {squid: ['entity/squid/squid.png'], glow_squid: ['entity/sq
 // the deep sea's guardians
 Object.assign(SKINS, {guardian: ['entity/guardian/guardian.png', 'entity/guardian.png'], elder_guardian: ['entity/guardian/guardian_elder.png', 'entity/guardian_elder.png']});
 // the drowned (its body, and the rags and weed over it) and the dolphin
+// the polar bear
+SKINS.polar_bear = ['entity/bear/polarbear.png', 'entity/bear/polar_bear.png'];
+// the conduit as the game draws it: its shell, cage, the eye open and shut, the whirling water (strips of frames)
+Object.assign(SKINS, {conduit_shell: ['entity/conduit/base.png'], conduit_cage: ['entity/conduit/cage.png'], conduit_eye_open: ['entity/conduit/open_eye.png'], conduit_eye_closed: ['entity/conduit/closed_eye.png'],
+  conduit_wind: ['entity/conduit/wind.png'], conduit_wind_vertical: ['entity/conduit/wind_vertical.png']});
+// tropical fish: the large one's body, and the twelve patterns laid over the two bodies (tinted with the pattern's colour)
+Object.assign(SKINS, {tropical_fish_b: ['entity/fish/tropical_b.png'], ...Object.fromEntries([1, 2, 3, 4, 5, 6].flatMap(i => [[`fish_a${i}`, [`entity/fish/tropical_a_pattern_${i}.png`]], [`fish_b${i}`, [`entity/fish/tropical_b_pattern_${i}.png`]]]))});
 Object.assign(SKINS, {drowned: ['entity/zombie/drowned.png'], drowned_outer: ['entity/zombie/drowned_outer_layer.png'], dolphin: ['entity/dolphin/dolphin.png', 'entity/dolphin.png']});
 // boats: each wood's (the bamboo raft is bamboo's), with a chest in the bigger picture
 for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) { SKINS[`boat_${w}`] = [`entity/boat/${w}.png`]; SKINS[`chest_boat_${w}`] = [`entity/chest_boat/${w}.png`]; }

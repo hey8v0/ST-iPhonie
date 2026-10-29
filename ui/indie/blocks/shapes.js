@@ -244,7 +244,7 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
   if (!v) return null;
   const id = v & 0xFFF, meta = v >>> 12, b = BLOCKS[id];
   switch (b.shape) {
-    case 'none': return null;
+    case 'none': case 'fire': return null;
     case 'liquid': return liquids && (meta === 0) ? FULL : null;
     case 'cross':
       if (b.name.endsWith('_sapling') || b.name === 'dead_bush' || b.name === 'short_grass' || b.name === 'fern') return [[px(2), 0, px(2), px(14), px(13), px(14)]];

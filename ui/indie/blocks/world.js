@@ -6,7 +6,7 @@ import {generateColumn, newColumn, BIOMES, growTree, worldOf} from './gen.js';
 import {generateNether} from './nether.js';
 import {portalHolds, portalSpot, buildPortal} from './portal.js';
 import {villagersIn} from './village.js';
-import {lootIn} from './ocean.js';
+import {lootIn, drownedIn} from './ocean.js';
 import {monumentsNear} from './monument.js';
 import {lodTile, lodPlan} from './lod.js';
 import {BLOCKS, ID, MINY, HEIGHT, SECTIONS, SEA, withMeta, dropsOf, itemInfo} from './blocks.js';
@@ -15,6 +15,10 @@ import {Redstone} from './redstone.js';
 import {ATTACHED} from './shapes.js';
 import {rng} from './noise.js';
 
+// fire: how a block burns ([draws fire, catches]); the lands where no rain falls; the damp ones where fire burns out sooner
+const NO_BURN = [0, 0], burnOf = v => BLOCKS[v & 0xFFF]?.burn || NO_BURN;
+const DRY = new Set(BIOMES.map((b, i) => /desert|savanna|badlands/.test(b.name) ? i : -1).filter(i => i >= 0));
+const HUMID = new Set(BIOMES.map((b, i) => /jungle|swamp/.test(b.name) ? i : -1).filter(i => i >= 0));
 const N = BLOCKS.length;
 const FILTER = new Uint8Array(N), EMIT = new Uint8Array(N), OPAQUE = new Uint8Array(N);
 for (const b of BLOCKS) { FILTER[b.id] = b.opaque ? 15 : b.filter; EMIT[b.id] = b.light; OPAQUE[b.id] = b.opaque ? 1 : 0; }
@@ -269,6 +273,11 @@ export class World {
       else if (id === ID.bubble_column) this.schedule(nx, ny, nz, 5);
       else if (id === ID.soul_sand || id === ID.magma_block) this.schedule(nx, ny, nz, 20);
       else if (id === ID.sponge || id === ID.wet_sponge) this.schedule(nx, ny, nz, 1);
+      // frosted ice starts melting three to six seconds after it is made (the game's)
+      else if (id === ID.frosted_ice) this.schedule(nx, ny, nz, 60 + Math.floor(this.r() * 60));
+      // fire burns on in one and a half to two seconds; by a change it goes out at once if it can no longer be there (the game's)
+      else if (id === ID.fire) { if ((dx || dy || dz) && !this.fireHolds(nx, ny, nz)) this.set(nx, ny, nz, 0); else this.schedule(nx, ny, nz, 30 + Math.floor(this.r() * 10)); }
+      else if (id === ID.soul_fire) this.schedule(nx, ny, nz, 1);
     }
   }
   schedule(x, y, z, delay) { const k = `${x},${y},${z}`; const t = this.tick + delay; if (!this.due.has(k) || this.due.get(k) > t) this.due.set(k, t); }
@@ -338,6 +347,7 @@ export class World {
   }
   randomTick(x, y, z, v) {
     const id = v & 0xFFF, b = BLOCKS[id], r = this.r;
+    if (id === ID.lava) { this.lavaFire(x, y, z); return; }
     const skyAbove = () => this.light(x, y + 1, z);
     const lit = () => { const l = skyAbove(); return Math.max(l & 15, (l >> 4) - this.darkness) ; };
     if (id === ID.grass_block) {
@@ -472,6 +482,10 @@ export class World {
     const v = this.get(x, y, z), id = v & 0xFFF;
     if (!v) return;
     if (id === ID.bubble_column || id === ID.soul_sand || id === ID.magma_block) { this.bubbles(x, y, z, v); return; }
+    if (id === ID.frosted_ice) { this.frost(x, y, z, v); return; }
+    if (id === ID.fire) { this.burn(x, y, z, v); return; }
+    // (soul fire keeps only on soul sand)
+    if (id === ID.soul_fire) { if ((this.get(x, y - 1, z) & 0xFFF) !== ID.soul_sand) this.set(x, y, z, 0); return; }
     // a dry sponge soaks up the water round it; a wet one dries at once in the Nether
     if (id === ID.sponge) { this.soak(x, y, z); return; }
     if (id === ID.wet_sponge) { if (this.nether) { this.set(x, y, z, ID.sponge); this.post({type: 'sound', name: 'fizz', x: x + 0.5, y: y + 0.5, z: z + 0.5}); } return; }
@@ -661,8 +675,8 @@ export class World {
    * (blast resistance); blocks it gets through break. Drops: each block one time in `power`. TNT in it is lit.
    * Returns {drops: [[name, n, x, y, z]], tnt: [[x, y, z]]}.
    */
-  explode(cx, cy, cz, power) {
-    const hit = new Set(), r = this.r;
+  explode(cx, cy, cz, power, fire = false) {
+    const hit = new Set(), open = new Set(), r = this.r;
     for (let i = 0; i < 16; i++) for (let j = 0; j < 16; j++) for (let k = 0; k < 16; k++) {
       if (i && i !== 15 && j && j !== 15 && k && k !== 15) continue;
       let dx = i / 15 * 2 - 1, dy = j / 15 * 2 - 1, dz = k / 15 * 2 - 1;
@@ -671,6 +685,7 @@ export class World {
       while (f > 0) {
         const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z), v = this.get(bx, by, bz);
         if (v) { f -= (BLOCKS[v & 0xFFF].blast + 0.3) * 0.3; if (f > 0) hit.add(`${bx},${by},${bz}`); }
+        else if (fire && f > 0) open.add(`${bx},${by},${bz}`);
         x += dx * 0.3; y += dy * 0.3; z += dz * 0.3; f -= 0.22500001;
       }
     }
@@ -681,6 +696,12 @@ export class World {
       if (v === ID.tnt) { tnt.push([x, y, z]); this.set(x, y, z, 0); continue; }
       if (r() < 1 / power) for (const [name, n] of dropsOf(b, v >>> 12, r)) drops.push([name, n, x + 0.5, y + 0.5, z + 0.5]);
       this.set(x, y, z, 0);
+    }
+    // a fiery one (a ghast's fireball, a bed going off): fire in a third of the places it reached that are open over
+    // something solid (the game's)
+    if (fire) for (const k of [...hit, ...open]) {
+      const [x, y, z] = k.split(',').map(Number);
+      if (r() < 1 / 3 && !this.get(x, y, z) && OPAQUE[this.get(x, y - 1, z) & 0xFFF]) this.set(x, y, z, (this.get(x, y - 1, z) & 0xFFF) === ID.soul_sand ? ID.soul_fire : ID.fire);
     }
     return {drops, tnt};
   }
@@ -741,6 +762,102 @@ export class World {
     }
     return false;
   }
+  /**
+   * Frosted ice melting (the game's): where it is light enough (by day under the sky, or by a light: more than 11 less
+   * its age), now and then (one time in three, or always with fewer than four frosted ice round it), it melts a little
+   * — its fourth age goes to water, and then the frosted ice round it melts a little too; else it waits one or two
+   * seconds more. In the dark it keeps.
+   */
+  frost(x, y, z, v) {
+    const age = v >>> 12 & 3, ln = this.light(x, y, z), lit = Math.max((ln >> 4) - this.darkness, ln & 15);
+    const few = DIRS.filter(([dx, dy, dz]) => (this.get(x + dx, y + dy, z + dz) & 0xFFF) === ID.frosted_ice).length < 4;
+    if ((this.r() < 1 / 3 || few) && lit > 10 - age && this.melt(x, y, z, v)) {
+      for (const [dx, dy, dz] of DIRS) {
+        const n = this.get(x + dx, y + dy, z + dz);
+        if ((n & 0xFFF) === ID.frosted_ice && !this.melt(x + dx, y + dy, z + dz, n)) this.schedule(x + dx, y + dy, z + dz, 20 + Math.floor(this.r() * 20));
+      }
+    } else this.schedule(x, y, z, 20 + Math.floor(this.r() * 20));
+  }
+  // ---------- fire ----------
+  /** The biome at a place (0 where the land is not here). */
+  biomeAt(x, z) { const c = this.col(x >> 4, z >> 4); return c ? c.biome[(z & 15) * 16 + (x & 15)] : 0; }
+  /** Whether fire can be at (x, y, z) (the game's): over something solid, or by something that burns. */
+  fireHolds(x, y, z) { const below = this.get(x, y - 1, z); return !!(below && BLOCKS[below & 0xFFF].solid) || this.burnsNear(x, y, z); }
+  /** Something that burns by (x, y, z), at a side, over or under it. */
+  burnsNear(x, y, z) { return DIRS.some(([dx, dy, dz]) => burnOf(this.get(x + dx, y + dy, z + dz))[0] > 0); }
+  /** Rain falls on (x, y, z): it is raining, rain (not snow) falls on this land, and the sky is over it. */
+  rainsAt(x, y, z) { if (!this.snowing || this.nether) return false; const bi = this.biomeAt(x, z); return !BIOMES[bi].cold && !DRY.has(bi) && (this.light(x, y, z) >> 4) >= 15; }
+  nearRain(x, y, z) { return this.rainsAt(x, y, z) || this.rainsAt(x + 1, y, z) || this.rainsAt(x - 1, y, z) || this.rainsAt(x, y, z + 1) || this.rainsAt(x, y, z - 1); }
+  /**
+   * Fire, every one and a half to two seconds (the game's): it goes out where it cannot be, in the rain (more likely the
+   * older it is), and burning on nothing that burns by itself before long — on netherrack and magma blocks it burns
+   * for ever; it grows older; what burns round it catches (the game's chances) and is burnt away or burns on (TNT
+   * goes off); and it leaps into the air near it (one round, up to four over it) where something burns, the younger the
+   * likelier, less in the jungles and swamps.
+   */
+  burn(x, y, z, v) {
+    this.schedule(x, y, z, 30 + Math.floor(this.r() * 10));
+    if (this.fireTick === false) return;
+    if (!this.fireHolds(x, y, z)) { this.set(x, y, z, 0); return; }
+    const below = this.get(x, y - 1, z) & 0xFFF, forever = below === ID.netherrack || below === ID.magma_block, age = v >>> 12 & 15;
+    if (!forever && this.nearRain(x, y, z) && this.r() < 0.2 + age * 0.03) { this.set(x, y, z, 0); return; }
+    if (this.r() < 1 / 3 && age < 15) this.set(x, y, z, withMeta(ID.fire, age + 1));
+    if (!forever) {
+      if (!this.burnsNear(x, y, z)) { if (!BLOCKS[below].solid || age > 3) this.set(x, y, z, 0); return; }
+      if (age === 15 && this.r() < 0.25 && !(burnOf(below)[0] > 0)) { this.set(x, y, z, 0); return; }
+    }
+    const humid = HUMID.has(this.biomeAt(x, z)), k = humid ? -50 : 0;
+    for (const [dx, dy, dz] of DIRS) this.catchFire(x + dx, y + dy, z + dz, (dy ? 250 : 300) + k, age);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 4; dy++) {
+      if (!dx && !dy && !dz) continue;
+      const nx = x + dx, ny = y + dy, nz = z + dz, odds = this.igniteOdds(nx, ny, nz);
+      if (odds <= 0) continue;
+      let chance = Math.floor((odds + 40 + 14) / (age + 30));
+      if (humid) chance = Math.floor(chance / 2);
+      if (chance > 0 && Math.floor(this.r() * (100 + Math.max(0, dy - 1) * 100)) <= chance && !this.nearRain(nx, ny, nz)) this.set(nx, ny, nz, withMeta(ID.fire, Math.min(15, age + (this.r() < 0.2 ? 1 : 0))));
+    }
+  }
+  /** A block by a fire catching (the game's: its chance out of 300 at the sides, 250 over and under): now and then it
+   *  burns on as fire itself (the younger the fire, the likelier), else it is burnt away; TNT goes off. */
+  catchFire(x, y, z, chance, age) {
+    const v = this.get(x, y, z), burns = burnOf(v)[1];
+    if (!burns || Math.floor(this.r() * chance) >= burns) return;
+    if (Math.floor(this.r() * (age + 10)) < 5 && !this.rainsAt(x, y, z)) this.set(x, y, z, withMeta(ID.fire, Math.min(15, age + (this.r() < 0.2 ? 1 : 0))));
+    else this.set(x, y, z, 0);
+    if ((v & 0xFFF) === ID.tnt) this.post({type: 'prime', x, y, z});
+  }
+  /** How readily fire leaps into (x, y, z): only into air, as much as the thing by it that most draws fire. */
+  igniteOdds(x, y, z) {
+    if (this.get(x, y, z)) return 0;
+    let best = 0;
+    for (const [dx, dy, dz] of DIRS) best = Math.max(best, burnOf(this.get(x + dx, y + dy, z + dz))[0]);
+    return best;
+  }
+  /** Lava now and then sets fire near it (the game's): up to two blocks over it where something burns beside, or on top
+   *  of a burning thing at its side. */
+  lavaFire(x, y, z) {
+    if (this.fireTick === false) return;
+    const r = this.r, n = Math.floor(r() * 3);
+    if (n > 0) {
+      let px = x, py = y, pz = z;
+      for (let j = 0; j < n; j++) {
+        px += Math.floor(r() * 3) - 1; py++; pz += Math.floor(r() * 3) - 1;
+        const v = this.get(px, py, pz);
+        if (!v) { if (this.burnsNear(px, py, pz)) { this.set(px, py, pz, ID.fire); return; } }
+        else if (BLOCKS[v & 0xFFF].solid) return;
+      }
+    } else for (let k = 0; k < 3; k++) {
+      const px = x + Math.floor(r() * 3) - 1, pz = z + Math.floor(r() * 3) - 1;
+      if (!this.get(px, y + 1, pz) && burnOf(this.get(px, y, pz))[1] > 0) this.set(px, y + 1, pz, ID.fire);
+    }
+  }
+  /** Frosted ice a step older; at its fourth, water again (true then). */
+  melt(x, y, z, v) {
+    const age = v >>> 12 & 3;
+    if (age < 3) { this.set(x, y, z, withMeta(ID.frosted_ice, age + 1)); return false; }
+    this.set(x, y, z, this.nether ? 0 : ID.water);
+    return true;
+  }
   /** Animals living on a column made for the first time: [[kind, x, y, z, extra]] (the page keeps each place once). */
   herdFor(c) {
     const seed = this.seed, x0 = c.cx * 16, z0 = c.cz * 16;
@@ -750,20 +867,24 @@ export class World {
     // the three elder guardians of a monument, each where it keeps its room
     const elders = monumentsNear(seed, x0 + 8, z0 + 8, 0).flatMap(m => m.elders).filter(([x, , z]) => Math.floor(x / 16) === c.cx && Math.floor(z / 16) === c.cz);
     if (elders.length) return elders.map(([x, y, z]) => ['elder_guardian', x, y, z, {persist: true, home: [x, y, z]}]);
+    // drowned standing in the sea's ruins since they were made (they stay)
+    const drowned = drownedIn(seed, c.cx, c.cz);
+    if (drowned.length) return drowned.map(([x, y, z]) => ['drowned', x, y, z, {persist: true}]);
     const h = (salt) => { let n = Math.imul(seed ^ (c.cx * 73856093) ^ (c.cz * 19349663) ^ salt, 2654435761); n ^= n >>> 15; return (n >>> 0) / 4294967296; };
     if (h(1) > 0.12) return [];
     const biome = BIOMES[c.biome[8 * 16 + 8]].name;
     const kinds = {plains: ['pig', 'cow', 'sheep', 'chicken'], meadow: ['sheep', 'cow', 'chicken'], forest: ['pig', 'cow', 'chicken', 'sheep'], birch_forest: ['pig', 'chicken', 'sheep'], dark_forest: ['pig', 'chicken'],
-      taiga: ['sheep', 'pig'], snowy_taiga: ['sheep'], snowy_plains: ['sheep'], savanna: ['cow', 'sheep', 'chicken'], jungle: ['chicken', 'pig'], swamp: ['chicken'], beach: ['turtle'],
+      taiga: ['sheep', 'pig'], snowy_taiga: ['sheep'], snowy_plains: ['sheep', 'sheep', 'sheep', 'polar_bear'], frozen_ocean: ['polar_bear'], savanna: ['cow', 'sheep', 'chicken'], jungle: ['chicken', 'pig'], swamp: ['chicken'], beach: ['turtle'],
       cherry_grove: ['pig', 'sheep'], bamboo_jungle: ['chicken', 'pig']}[biome];
     if (!kinds || !kinds.length) return [];
-    const kind = kinds[Math.floor(h(2) * kinds.length)], n = 2 + Math.floor(h(3) * 3), out = [];
+    // (polar bears one or two: a grown one, then its cub)
+    const kind = kinds[Math.floor(h(2) * kinds.length)], n = kind === 'polar_bear' ? 1 + Math.floor(h(3) * 2) : 2 + Math.floor(h(3) * 3), out = [];
     for (let k = 0; k < n * 4 && out.length < n; k++) {
       const lx = Math.floor(h(10 + k) * 16), lz = Math.floor(h(40 + k) * 16), top = c.height[lz * 16 + lx];
       const g = this.get(x0 + lx, top, z0 + lz) & 0xFFF;
-      if (g !== ID.grass_block && g !== ID.podzol && !(kind === 'turtle' && g === ID.sand)) continue;
+      if (g !== ID.grass_block && g !== ID.podzol && !(kind === 'turtle' && g === ID.sand) && !(kind === 'polar_bear' && (g === ID.ice || g === ID.packed_ice || g === ID.snow_block || g === ID.blue_ice))) continue;
       if (this.get(x0 + lx, top + 1, z0 + lz) && !BLOCKS[this.get(x0 + lx, top + 1, z0 + lz) & 0xFFF].replace) continue;
-      out.push([kind, x0 + lx + 0.5, top + 1, z0 + lz + 0.5]);
+      out.push([kind, x0 + lx + 0.5, top + 1, z0 + lz + 0.5, ...(kind === 'polar_bear' && out.length ? [{baby: true}] : [])]);
     }
     return out;
   }

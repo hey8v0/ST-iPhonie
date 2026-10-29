@@ -183,6 +183,34 @@ Object.assign(MODELS, {
     ]),
   ]},
 });
+// the polar bear (128×64, the game's): a head with its muzzle and ears, a long body with the hump at its shoulders
+// lying along it, four thick legs; it rears up on its hind legs to strike
+MODELS.polar_bear = {skin: [128, 64], size: [1.4, 1.4], parts: [
+  part('head', [0, 0], [[-3.5, -3, -3, 7, 7, 7]], [0, 10, -16], [0, 0, 0], [part('mouth', [0, 44], [[-2.5, 1, -6, 5, 3, 3]]), part('ear0', [26, 0], [[-4.5, -4, -1, 2, 2, 1]]), part('ear1', [26, 0], [[2.5, -4, -1, 2, 2, 1, 0, true]])]),
+  part('body', [0, 19], [[-5, -13, -7, 14, 14, 11]], [-2, 9, 12], [PI / 2, 0, 0], [part('hump', [39, 0], [[-4, -25, -7, 12, 12, 10]])]),
+  part('leg0', [50, 22], [[-2, 0, -2, 4, 10, 8]], [-4.5, 14, 6]), part('leg1', [50, 22], [[-2, 0, -2, 4, 10, 8]], [4.5, 14, 6]),
+  part('leg2', [50, 40], [[-2, 0, -2, 4, 10, 6]], [-3.5, 14, -8]), part('leg3', [50, 40], [[-2, 0, -2, 4, 10, 6]], [3.5, 14, -8]),
+]};
+// tropical fish (32×32 each, not mob kinds of their own): the large body (the game's boxes: a deep body, a long tail,
+// fins above and below), and the pattern laid over either body — the same boxes a hair bigger, on the pattern's picture
+const inflated = (parts, k) => parts.map(p => ({...p, boxes: p.boxes.map(([x, y, z, w, h, d, inf = 0, m = false]) => [x, y, z, w, h, d, inf + k, m]), children: inflated(p.children, k)}));
+export const FISH_MODELS = {
+  tropical_fish_b: {skin: [32, 32], size: [0.5, 0.4], parts: [
+    part('body', [0, 20], [[-1, -3, -3, 2, 6, 6]], [0, 19, 0]), part('tail', [21, 16], [[0, -3, 0, 0, 6, 5]], [0, 19, 3]),
+    part('right_fin', [2, 16], [[-2, 0, 0, 2, 2, 0]], [-1, 20, 0], [0, PI / 4, 0]), part('left_fin', [2, 12], [[0, 0, 0, 2, 2, 0]], [1, 20, 0], [0, -PI / 4, 0]),
+    part('top_fin', [20, 11], [[0, -4, 0, 0, 4, 6]], [0, 16, -3]), part('bottom_fin', [20, 21], [[0, 0, 0, 0, 4, 6]], [0, 22, -3]),
+  ]},
+};
+FISH_MODELS.fish_pattern_a = {...MODELS.tropical_fish, parts: inflated(MODELS.tropical_fish.parts, 0.008)};
+FISH_MODELS.fish_pattern_b = {...FISH_MODELS.tropical_fish_b, parts: inflated(FISH_MODELS.tropical_fish_b.parts, 0.008)};
+// the conduit as the game draws it (by the page, not with the land; each centred at y 16, half a block up): its shell
+// while it rests; awake, a cage of prismarine, an eye, and boxes of whirling water round it (6, 8 and 16 across)
+export const CONDUIT_MODELS = {
+  conduit_shell: {skin: [32, 16], parts: [part('shell', [0, 0], [[-3, -3, -3, 6, 6, 6]], [0, 16, 0])]},
+  conduit_cage: {skin: [32, 16], parts: [part('cage', [0, 0], [[-4, -4, -4, 8, 8, 8]], [0, 16, 0])]},
+  conduit_eye: {skin: [16, 16], parts: [part('eye', [0, 0], [[-4, -4, 0, 8, 8, 0, 0.01]], [0, 16, 0])]},
+  conduit_wind: {skin: [64, 32], parts: [part('wind', [0, 0], [[-8, -8, -8, 16, 16, 16]], [0, 16, 0])]},
+};
 // worn armour over the player, in the game's 64×32 layouts: the outer one (helmet, chestplate, boots) and the inner one
 // (leggings); each piece draws only its parts
 export const ARMOR_MODELS = {
@@ -315,6 +343,13 @@ export function animate(kind, rot, pose) {
     // flippers: rowing in the water, paddling slowly on land
     const sw = Math.cos(pose.limb * (pose.swim ? 0.6662 * 0.6 : 0.6662 * 5)) * (pose.swim ? 0.5 : 0.25) * Math.max(pose.amount, pose.swim ? 0.6 : 0);
     set('leg0', sw, 0, 0); set('leg1', -sw, 0, 0); set('leg2', 0, 0, sw); set('leg3', 0, 0, -sw);
+  } else if (kind === 'polar_bear') {
+    // walking, its legs swing; rearing up (the game's): the body tilts back on the hind legs, the front legs and head go up
+    set('leg0', swing()); set('leg1', swing(PI)); set('leg2', swing(PI)); set('leg3', swing());
+    const f = (pose.stand || 0) ** 2, g = 1 - f;
+    set('body', PI / 2 - f * PI * 0.35); rot['@body'] = [-2, 9 * g + 11 * f, 12];
+    for (const leg of ['leg2', 'leg3']) { rot[`@${leg}`] = [leg === 'leg2' ? -3.5 : 3.5, 14 * g - 6 * f, -8 * g - 4 * f]; rot[leg][0] -= f * PI * 0.45; }
+    rot['@head'] = pose.young ? [0, 10 * g - 9 * f, -16 * g - 7 * f] : [0, 10 * g - 14 * f, -16 * g - 3 * f]; head[0] += f * PI * 0.15;
   } else if (kind === 'dolphin') {
     // the whole body pitched the way it swims (the head with it); swimming, it rocks and its tail beats (the game's)
     const w = Math.cos(pose.age * 0.3), moving = pose.amount > 0.05 || pose.swim;
@@ -361,7 +396,7 @@ const ID3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
  * scaled and placed: at (x, y, z) relative to the camera, facing yaw (0 looks along −z), size s.
  */
 export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}, out, skinSize = null, only = null) {
-  const m = MODELS[kind] || ARMOR_MODELS[kind] || BOAT_MODELS[kind], [tw, th] = skinSize || m.skin;
+  const m = MODELS[kind] || ARMOR_MODELS[kind] || BOAT_MODELS[kind] || FISH_MODELS[kind] || CONDUIT_MODELS[kind], [tw, th] = skinSize || m.skin;
   const cy = Math.cos(yaw), sy = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll), k = (1 + swell) * s / 16;
   // the game's model space → world: x and y turned over, the feet at 24, then the body's turn (and a fall-over roll)
   const place = p => {
@@ -399,12 +434,19 @@ export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}
  * the arm's own three directions (x across, y down the arm, z back) in the world, each a model unit long}. arm: a
  * part's name ('arm0' the right arm, 'arm1' the left); null if the model has none.
  */
-export function handFrame(kind, rot, {x, y, z, yaw, s = 1, roll = 0}, arm) {
-  const p = MODELS[kind]?.parts.find(q => q.name === arm);
-  if (!p) return null;
-  const R = rotZYX(rot[arm] || p.rot), pv = rot[`@${arm}`] || p.pivot, [bx, by, bz, w, h, d] = p.boxes[0];
-  // the fist: the middle of the arm's end, a pixel in
-  const r = mul3(R, [bx + w / 2, by + h - 1, bz + d / 2]), fist = [pv[0] + r[0], pv[1] + r[1], pv[2] + r[2]];
+export function handFrame(kind, rot, {x, y, z, yaw, s = 1, roll = 0}, arm, point = null) {
+  // the part, wherever it is in the model (a dolphin's nose is its head's, its head its body's)
+  let found = null;
+  const find = (p, M, at) => {
+    const R = mulM(M, rotZYX(rot[p.name] || p.rot));
+    if (p.name === arm) { found = {p, R, at}; return true; }
+    return p.children.some(c => { const v = mul3(R, rot[`@${c.name}`] || c.pivot); return find(c, R, [at[0] + v[0], at[1] + v[1], at[2] + v[2]]); });
+  };
+  for (const p of MODELS[kind]?.parts || []) if (find(p, ID3, rot[`@${p.name}`] || p.pivot)) break;
+  if (!found) return null;
+  const {p, R, at: pv} = found, [bx, by, bz, w, h, d] = p.boxes[0];
+  // the fist (by default): the middle of the arm's end, a pixel in
+  const r = mul3(R, point || [bx + w / 2, by + h - 1, bz + d / 2]), fist = [pv[0] + r[0], pv[1] + r[1], pv[2] + r[2]];
   const cy = Math.cos(yaw), sy = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll), k = s / 16;
   // (the model's space to the world's as buildModel does it: x and y turned over, the feet at 24, the roll, the turn)
   const toWorld = (v, point) => {
@@ -610,10 +652,10 @@ Object.assign(OWN_SKINS, {
     area(0, 12, 22, 1, belly); area(0, 25, 22, 1, belly); area(20, 10, 12, 11, ['#6e2a20', '#7a3226']); area(0, 0, 8, 6, ['#7a3226']);
     px(25, 4, hex('#101010')); px(22, 4, hex('#101010'));
   }),
+  // white, so its colour comes from the tint: the body, its tail and fins a little greyer, an eye on each side
   tropical_fish: () => skin(32, 32, 75, ({px, area, box, hex}) => {
-    // white, so its colour comes from the tint; a darker band and the eye
-    box(0, 0, 2, 3, 6, ['#f4f4f4', '#ececec', '#ffffff']); area(22, 0, 12, 9, ['#e0e0e0']); area(2, 12, 4, 6, ['#e4e4e4']); area(10, 0, 12, 9, ['#e4e4e4']);
-    area(6, 6, 6, 3, ['#bcbcbc']); px(6, 7, hex('#101010')); px(14, 7, hex('#101010'));
+    box(0, 0, 2, 3, 6, ['#f4f4f4', '#ececec', '#ffffff']); area(22, 0, 10, 3, ['#e0e0e0']); area(10, 1, 12, 3, ['#e4e4e4']); area(2, 12, 4, 2, ['#e4e4e4']); area(2, 16, 4, 2, ['#e4e4e4']);
+    px(4, 7, hex('#101010')); px(9, 7, hex('#101010'));
   }),
   pufferfish: () => skin(32, 32, 76, ({px, area, box, hex}) => {
     box(0, 27, 3, 2, 3, ['#e8c838', '#f0d24a', '#dcb82c']); box(24, 6, 1, 1, 1, ['#141414']); box(28, 6, 1, 1, 1, ['#141414']);
@@ -631,6 +673,16 @@ Object.assign(OWN_SKINS, {
   }),
   guardian: () => guardianSkin(81, ['#5d8c7c', '#55806f', '#669888', '#4e7868'], ['#e07a3a', '#c86a2e', '#d4733a'], ['#3e6a5c', '#365e52']),
   elder_guardian: () => guardianSkin(82, ['#cfcbb8', '#c4c0ad', '#d9d5c2', '#bab6a3'], ['#7a7c98', '#6a6c88', '#86889e'], ['#9a9786', '#8e8b7a']),
+  // ours: a polar bear's white fur (a little creamy, shaded), a black nose and eyes, darker paws
+  polar_bear: () => skin(128, 64, 89, ({px, area, box, front, hex}) => {
+    const fur = ['#f2f1ea', '#e9e8df', '#f7f6f0', '#e2e1d6'];
+    box(0, 0, 7, 7, 7, fur); box(0, 44, 5, 3, 3, fur); box(26, 0, 2, 2, 1, ['#dcdbd0']); box(0, 19, 14, 14, 11, fur); box(39, 0, 12, 12, 10, fur);
+    box(50, 22, 4, 10, 8, fur); box(50, 40, 4, 10, 6, fur);
+    area(62, 22, 4, 8, ['#b8b6aa']); area(60, 40, 4, 6, ['#b8b6aa']);
+    const [fx, fy] = front(0, 0, 7, 7), [mx, my] = front(0, 44, 5, 3);
+    px(fx + 1, fy + 2, hex('#111111')); px(fx + 5, fy + 2, hex('#111111'));
+    area(mx + 1, my, 3, 1, ['#1a1a1a']); px(mx + 2, my + 2, hex('#3a3a3a'));
+  }),
   // ours: a drowned's blue-green flesh, a torn sea-blue shirt, ragged trousers, bare shins and feet, pale glowing eyes
   drowned: () => skin(64, 64, 86, ({px, area, box, front, hex, r}) => {
     const flesh = ['#4f8c82', '#467f76', '#58968c', '#3f766d'], shirt = ['#4a7c86', '#43717a', '#52868f'], pants = ['#35506a', '#2f4860', '#3a5874'];
@@ -682,6 +734,63 @@ function guardianSkin(seed, body, spots, face) {
     for (const x of [2, 9, 13]) area(x, 61, 1, 3, spots);
     box(25, 19, 1, 9, 9, spots); area(25, 28, 9, 9, spots); area(35, 28, 9, 9, spots);
   });
+}
+// our tropical fish: the large body (white, tinted like the small one) and the twelve patterns (white where the pattern
+// is, tinted with its colour; clear elsewhere) — on each body's sides (the head at the side's front edge), fins, tail
+const FISH_PAINT = {
+  a1: on => { on(3, 6, 3, 3); on(8, 6, 3, 3); on(10, 1, 12, 3); },
+  a2: on => { on(0, 7, 6, 1); on(8, 7, 6, 1); on(22, 1, 10, 1); },
+  a3: on => { on(6, 0, 2, 6); on(0, 6, 6, 1); on(8, 6, 6, 1); on(10, 1, 12, 3); },
+  a4: on => { for (const u of [0, 2, 4, 9, 11, 13]) on(u, 6, 1, 3); },
+  a5: on => { on(0, 8, 6, 1); on(8, 8, 6, 1); on(8, 0, 2, 6); on(2, 12, 4, 2); on(2, 16, 4, 2); },
+  a6: on => { for (const [u, v] of [[1, 6], [3, 8], [5, 7], [9, 7], [11, 6], [13, 8], [23, 1], [25, 0], [29, 2], [30, 0]]) on(u, v); },
+  b1: on => { on(0, 26, 3, 6); on(11, 26, 3, 6); on(21, 21, 10, 6); },
+  b2: on => { for (const u of [0, 2, 4, 9, 11, 13]) on(u, 26, 1, 6); for (const u of [21, 23, 25, 27, 29, 31]) on(u, 17, 1, 4); },
+  b3: on => { for (const [u, v] of [[1, 27], [4, 29], [2, 31], [5, 26], [9, 30], [12, 27], [10, 28], [13, 31], [22, 18], [28, 19], [23, 28], [29, 29]]) on(u, v); },
+  b4: on => { on(3, 26, 3, 6); on(8, 26, 3, 6); on(20, 17, 12, 4); on(20, 27, 12, 4); },
+  b5: on => { for (const v of [27, 30]) { on(0, v, 6, 1); on(8, v, 6, 1); } on(21, 22, 10, 1); on(21, 25, 10, 1); },
+  b6: on => { for (const [u, v] of [[0, 27], [3, 29], [9, 26], [11, 29], [4, 26]]) on(u, v, 2, 2); on(20, 27, 12, 4); },
+};
+export const FISH_SKINS = ['tropical_fish_b', ...Object.keys(FISH_PAINT).map(k => `fish_${k}`)];
+/** One of our tropical fish pictures by its name (FISH_SKINS). */
+export function ownFishSkin(name) {
+  if (name === 'tropical_fish_b') return skin(32, 32, 78, ({px, area, box, hex}) => {
+    box(0, 20, 2, 6, 6, ['#f4f4f4', '#ececec', '#ffffff']); area(21, 21, 10, 6, ['#e0e0e0']); area(20, 17, 12, 4, ['#e4e4e4']); area(20, 27, 12, 4, ['#e4e4e4']);
+    area(2, 12, 4, 2, ['#e4e4e4']); area(2, 16, 4, 2, ['#e4e4e4']); px(4, 27, hex('#101010')); px(9, 27, hex('#101010'));
+  });
+  return skin(32, 32, 79 + name.charCodeAt(5) * 7 + Number(name.slice(6)), ({px, r}) => {
+    const on = (u, v, w = 1, h = 1) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const k = 236 + Math.floor(r() * 20); px(u + i, v + j, [k, k, k]); } };
+    FISH_PAINT[name.slice(5)]?.(on);
+  });
+}
+// the conduit (ours): a shell of pale plates with dark seams; a cage of prismarine bars round open windows; its eye
+// open (a blue iris, a dark pupil, a glint) and shut; the water whirling round it (streaks, in four frames)
+export const CONDUIT_SKINS = ['conduit_shell', 'conduit_cage', 'conduit_eye_open', 'conduit_eye_closed'];
+export function ownConduitSkin(name) {
+  if (name === 'conduit_shell') return skin(32, 16, 91, ({px, box, hex}) => {
+    box(0, 0, 6, 6, 6, ['#a99a80', '#9a8b72', '#b3a48a']);
+    for (let v = 0; v < 12; v++) for (let u = 0; u < 24; u++) if ((u % 3 === 2 || v % 3 === 2) && (v >= 6 || (u >= 6 && u < 18))) px(u, v, hex('#6e624e'));
+  });
+  if (name === 'conduit_cage') return skin(32, 16, 92, ({px, hex, r}) => {
+    const bar = ['#5a9a8c', '#6aa898', '#4e8a7c', '#78b4a4'];
+    const face = (u, v) => { for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) if (i === 0 || j === 0 || i === 7 || j === 7 || i === 3 || i === 4 || j === 3 || j === 4) px(u + i, v + j, hex(bar[Math.floor(r() * bar.length)])); };
+    face(8, 0); face(16, 0); for (const u of [0, 8, 16, 24]) face(u, 8);
+  });
+  if (name === 'conduit_eye_open') return skin(16, 16, 93, ({px, hex}) => {
+    for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) { const d = Math.hypot(i - 3.5, j - 3.5); if (d < 3.9) px(i, j, hex(d > 3 ? '#0b2a3a' : d > 1.6 ? '#2f8fd0' : '#0a1a2a')); }
+    px(2, 2, hex('#cdf6ff'));
+  });
+  return skin(16, 16, 94, ({px, hex}) => { for (let i = 1; i < 7; i++) { px(i, 3, hex('#2a5a6a')); px(i, 4, hex('#0b2a3a')); } for (const i of [1, 3, 5]) px(i, 5, hex('#0b2a3a')); });
+}
+/** Our conduit's whirling water: four frames of light streaks going round it (64 × 32 each, the wind box's layout);
+ *  the vertical one's streaks go slanting. */
+export function ownWind(vertical) {
+  return [0, 1, 2, 3].map(f => skin(64, 32, vertical ? 99 : 95, ({px, r}) => {
+    for (let k = 0; k < 70; k++) {
+      const len = 2 + Math.floor(r() * 4), y0 = Math.floor(r() * 32), x0 = Math.floor(r() * 64), shade = 210 + Math.floor(r() * 40);
+      for (let i = 0; i < len; i++) px((x0 + i + f * 4) % 64, vertical ? (y0 + i) % 32 : y0, [shade - 30, shade, 255], 200);
+    }
+  }));
 }
 // a villager's clothes by trade: the robe, its trim, and something of the trade (ours)
 const VILLAGER_CLOTHES = {none: ['#6e4b30', '#5a3c26'], nitwit: ['#3a8a3a', '#2a6a2a'], farmer: ['#8a6a2a', '#d8c060', 'hat'], fisherman: ['#3a6a8a', '#d8c060', 'hat'],

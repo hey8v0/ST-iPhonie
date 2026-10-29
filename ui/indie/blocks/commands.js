@@ -9,7 +9,7 @@ import {EFFECTS} from './brew.js';
 
 export const DIFFICULTIES = {peaceful: '和平', easy: '简单', normal: '普通', hard: '困难'};
 const MODES = {survival: '生存模式', creative: '创造模式'};
-export const RULES = {keepInventory: '死亡不掉落', doDaylightCycle: '昼夜更替', doMobSpawning: '生成怪物', doWeatherCycle: '天气变化'};
+export const RULES = {keepInventory: '死亡不掉落', doDaylightCycle: '昼夜更替', doMobSpawning: '生成怪物', doWeatherCycle: '天气变化', doFireTick: '火焰蔓延'};
 // the times of day by name, the game's numbers
 const TIMES = {day: 1000, noon: 6000, sunset: 12000, night: 13000, midnight: 18000, sunrise: 23000};
 const HELP = [
@@ -128,7 +128,8 @@ export function runCommand(line, ctx) {
     case 'gamerule': {
       const name = Object.keys(RULES).find(k => k.toLowerCase() === (a[0] || '').toLowerCase());
       if (!name) return no(`规则有：${Object.keys(RULES).map(k => `${k}（${RULES[k]}）`).join('、')}`);
-      if (a[1] == null) return ok(`${name} 是 ${ctx.rules[name] ? 'true' : 'false'}`);
+      // (a world made before a rule was added has it as the game's default)
+      if (a[1] == null) return ok(`${name} 是 ${(ctx.rules[name] ?? defaultRules()[name]) ? 'true' : 'false'}`);
       const on = {true: true, false: false, 开: true, 关: false}[a[1].toLowerCase()];
       if (on == null) return no(`用法：/gamerule ${name} true|false`);
       ctx.setRule(name, on);
@@ -161,4 +162,4 @@ export function runCommand(line, ctx) {
   }
 }
 /** The game rules a world starts with. */
-export const defaultRules = () => ({keepInventory: false, doDaylightCycle: true, doMobSpawning: true, doWeatherCycle: true});
+export const defaultRules = () => ({keepInventory: false, doDaylightCycle: true, doMobSpawning: true, doWeatherCycle: true, doFireTick: true});

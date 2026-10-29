@@ -225,6 +225,8 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
   const faceTex = (b, f, meta) => {
     const t = b.tex;
     if (!t) return -1;
+    // (a block whose picture goes with its age: frosted ice melting)
+    if (b.ages) return tex(b.ages[Math.min(b.ages.length - 1, meta & 3)]);
     if (t.all) return tex(t.all);
     if (b.axis) {
       const axis = meta & 3; // 0 y, 1 x, 2 z
@@ -378,9 +380,22 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
       }
     } else if (shape === 'bed') {
       bed(solid, x, y, z, b, meta);
+    } else if (shape === 'fire') {
+      // fire (the game's models): on a floor four sheets leaning across it, a block and a half high; with nothing under
+      // it, a sheet against each side that burns
+      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, A = tex(b.tex.all), B2 = tex(b.tex.alt || b.tex.all), H = 1.4, below = pad[at(x, y - 1, z)];
+      const sides = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dz]) => BLOCKS[pad[at(x + dx, y, z + dz)] & 0xFFF]?.burn);
+      if ((below && BLOCKS[below & 0xFFF].solid) || !sides.length) {
+        quad(out, [[x, y, z + 0.74], [x + 1, y, z + 0.74], [x + 1, y + H, z + 0.26], [x, y + H, z + 0.26]], A, UVQ, lt, lb, WHITE, 3);
+        quad(out, [[x, y, z + 0.26], [x + 1, y, z + 0.26], [x + 1, y + H, z + 0.74], [x, y + H, z + 0.74]], B2, UVQ, lt, lb, WHITE, 3);
+        quad(out, [[x + 0.74, y, z], [x + 0.74, y, z + 1], [x + 0.26, y + H, z + 1], [x + 0.26, y + H, z]], B2, UVQ, lt, lb, WHITE, 3);
+        quad(out, [[x + 0.26, y, z], [x + 0.26, y, z + 1], [x + 0.74, y + H, z + 1], [x + 0.74, y + H, z]], A, UVQ, lt, lb, WHITE, 3);
+      } else for (const [dx, dz] of sides) {
+        if (dx) { const px = dx > 0 ? x + 0.99 : x + 0.01; quad(out, [[px, y, z], [px, y, z + 1], [px, y + H, z + 1], [px, y + H, z]], A, UVQ, lt, lb, WHITE, 3); }
+        else { const pz = dz > 0 ? z + 0.99 : z + 0.01; quad(out, [[x, y, pz], [x + 1, y, pz], [x + 1, y + H, pz], [x, y + H, pz]], A, UVQ, lt, lb, WHITE, 3); }
+      }
     } else if (shape === 'conduit') {
-      // the whole picture on each face of the small block
-      box(out, x, y, z, 5, 5, 5, 11, 11, 11, () => tex(b.tex.all), WHITE, {uvs: Array(6).fill([0, 0, 16, 16])});
+      // (nothing: the page draws a conduit, its shell or, awake, its cage, eye and whirling water)
     } else if (PIECED.has(shape)) {
       const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)];
       for (const {box: [x0, y0, z0, x1, y1, z1], role, seam} of pieces(v, near)) {

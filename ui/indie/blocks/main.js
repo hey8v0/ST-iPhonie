@@ -3,7 +3,7 @@
 // kept by the worker (world.worker.js) and drawn by render.js.
 import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE, BOAT_WOODS, WATERLOGGED} from './blocks.js';
 import {Mobs, MOBS} from './mobs.js';
-import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat, handFrame} from './models.js';
+import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat, handFrame, FISH_SKINS, ownFishSkin, CONDUIT_SKINS, ownConduitSkin, ownWind} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
 import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds, dials} from './atlas.js';
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
@@ -13,7 +13,7 @@ import {Body, raycast, W as PLAYER_W, isWater} from './player.js';
 import {Inventory, furnaceTick, stackMax, ARMOR_AT, takeSmeltXp} from './inventory.js';
 import {enchOf, shelvesAround, fishLoot, protectionFactor, wears, seeded} from './enchant.js';
 import {InventoryUI, stackHtml} from './invui.js';
-import {Entities, itemLook, setPacked} from './entities.js';
+import {Entities, itemLook, setPacked, setAtlas, thickItem} from './entities.js';
 import {Input} from './input.js';
 import {Screens} from './screens.js';
 import {collisionBoxes, DIR, ATTACHED} from './shapes.js';
@@ -76,7 +76,7 @@ async function loadTextures() {
   const rec = await loadPackRecord();
   const {textures, sky, skins, stale} = await decodePack(rec);
   packStale = stale;
-  built = buildLayers(textures);
+  built = buildLayers(textures); setAtlas(built);
   renderer.setTextures(built.size, built.layers);
   icons = makeIcons(built);
   // (held things are drawn from the pictures' clear pixels)
@@ -98,6 +98,15 @@ async function loadTextures() {
     }
     renderer.setImage(`mob:villager_${prof}`, img); skinSizes[`villager_${prof}`] = [img.width, img.height];
   }
+  // the conduit's: its shell, cage and eyes; the water whirling round it, in frames (a pack's strip cut up)
+  for (const k of CONDUIT_SKINS) { const img = skins?.[k] || ownConduitSkin(k); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; }
+  windFrames = {h: [], v: []};
+  for (const [dir, key] of [['h', 'conduit_wind'], ['v', 'conduit_wind_vertical']]) {
+    const strip = skins?.[key], list = strip ? cutFrames(strip) : ownWind(dir === 'v');
+    list.forEach((img, i) => { const name = `conduit_wind_${dir}${i}`; renderer.setImage(`mob:${name}`, img); skinSizes[name] = [img.width, img.height]; windFrames[dir].push(name); });
+  }
+  // tropical fish: the large body and the patterns, the pack's or ours
+  for (const k of FISH_SKINS) { const img = skins?.[k] || ownFishSkin(k); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; }
   // worn armour: the pack's pictures (leather there is grey, dyed its usual brown) or ours
   for (const m of Object.keys(ARMOR)) for (const [key, layer] of [[`armor_${m}`, 1], [`armor_${m}_legs`, 2]]) {
     const img = skins?.[key] || ownArmor(m, layer); renderer.setImage(`mob:${key}`, img); skinSizes[key] = [img.width, img.height]; greyArmor[key] = !!skins?.[key] && m === 'leather';
@@ -207,7 +216,10 @@ function startWorld(meta) {
   };
   ents.load(meta.items);
   ents.onPickup = () => play('pop');
+  ents.onBurn = it => soundAt('fizz', it.x, it.y, it.z);
   G.herds = new Set(meta.herds || []);
+  // the conduits, drawn by the page
+  G.conduitList = Object.entries(G.tiles).filter(([, t]) => t.kind === 'conduit').map(([k, t]) => [...k.split(',').map(Number), t]);
   // large chests: their two halves share their 54 slots again (a save keeps them twice)
   for (const [k, t] of Object.entries(G.tiles)) if (t.half === 'right' && G.tiles[t.pair]?.pair === k && G.tiles[t.pair].slots?.length === 54) t.slots = G.tiles[t.pair].slots;
   // chests the land was made with, not opened yet: their loot tables; the world's maps
@@ -230,15 +242,17 @@ function startWorld(meta) {
   G.mobs = new Mobs({
     world: mirror, player: body, mode: () => G.mode, daylight: () => environment(G.time).daylight, held: () => held(),
     dark: (x, y, z, spawn) => isDark(x, y, z, spawn), loaded: (x, z) => mirror.has(Math.floor(x), Math.floor(z)),
-    hurtPlayer: (n, why, from, kind) => hurt(n, why, from, kind), explode: (x, y, z, power, src) => explode(x, y, z, power, src),
-    sound: (name, x, y, z) => soundAt(name, x, y, z), drop: (s, x, y, z) => G.ents.drop(s, x, y, z), give: s => !G.inv.add(s),
+    hurtPlayer: (n, why, from, kind) => hurt(n, why, from, kind), explode: (x, y, z, power, src, fire) => explode(x, y, z, power, src, null, fire),
+    sound: (name, x, y, z) => soundAt(name, x, y, z), drop: (s, x, y, z, o) => G.ents.drop(s, x, y, z, o), give: s => !G.inv.add(s),
     burst: (x, y, z, kind) => G.ents.puff(x, y, z, kind), setBlock: (x, y, z, v) => setBlock(x, y, z, v), effect: (id, amp, ticks) => giveEffect(id, amp, ticks),
     xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain', looting: () => enchOf(held(), 'looting'),
     nether: () => G.dim === 'nether', seed: meta.seed, invisible: () => !!G.effects.invisibility,
     difficulty: () => meta.difficulty || 'normal', spawning: () => (meta.rules || defaultRules()).doMobSpawning,
     monuments: (x, z) => G.dim === 'nether' ? [] : monumentsNear(meta.seed, Math.floor(x), Math.floor(z), 16), effectOf: id => G.effects[id] || null, curse: () => curse(),
     strike: (x, y, z) => strike(x, y, z), thundering: () => G.weather.thundering && G.weather.thunder > 0.5, wreck: (x, z) => G.dim === 'nether' ? null : wreckNear(meta.seed, x, z),
-    swimming: () => G.body.inWater && !G.riding && Math.hypot(G.body.x - G.body.prev.x, G.body.z - G.body.prev.z) > 0.02,
+    swimming: () => G.body.inWater && !G.riding && Math.hypot(G.body.x - G.body.prev.x, G.body.z - G.body.prev.z) > 0.02, fire: (x, y, z) => setFire(x, y, z),
+    // the boat the player is paddling (going along), and the things lying about (dolphins play with them)
+    boat: () => { const b = G.riding?.isBoat ? G.riding.body : null; return b && Math.hypot(b.vx, b.vz) > 0.02 ? {x: b.x, y: b.y, z: b.z, vx: b.vx, vz: b.vz} : null; }, items: () => G.ents.items,
   });
   G.mobs.load(meta.mobs);
   // minecarts (kept in the save like the animals)
@@ -271,7 +285,7 @@ function onWorker(m) {
     const k = `${m.cx},${m.cz}`;
     if (G.herds.has(k)) return;
     G.herds.add(k);
-    if (G.mobs.count(x => x.def.passive) < 160) for (const [kind, x, y, z, extra] of m.list) G.mobs.add(kind, x, y, z, extra);
+    if (G.mobs.count(x => x.def.passive) < 160) for (const [kind, x, y, z, extra] of m.list) if (!(MOBS[kind]?.hostile && difficulty() === 'peaceful')) G.mobs.add(kind, x, y, z, extra);
   } else if (m.type === 'loot') {
     // chests of shipwrecks, ruins and buried treasure: their loot tables until first opened (one already opened keeps
     // what it has)
@@ -301,8 +315,8 @@ function isDark(x, y, z, spawn = false) {
   return spawn ? blk === 0 && lit <= Math.floor(Math.random() * 8) : lit <= 7;
 }
 /** An explosion: the worker breaks the blocks; here what is near is hurt and pushed. */
-function explode(x, y, z, power, src, why = null) {
-  G.worker.postMessage({type: 'explode', x, y, z, power});
+function explode(x, y, z, power, src, why = null, fire = false) {
+  G.worker.postMessage({type: 'explode', x, y, z, power, fire});
   G.mobs.blast(x, y, z, power);
   const b = G.body, dx = b.x - x, dy = b.y + 0.9 - y, dz = b.z - z, d = Math.hypot(dx, dy, dz), r = power * 2;
   if (d < r) {
@@ -451,7 +465,7 @@ function portalTick() {
   if (G.portalBlocked === 'wait') G.portalBlocked = true;
   if (G.portalBlocked) return false;
   if (G.inPortal === 0) play('portal');
-  if (G.time % 4 === 0) G.ents.puff(b.x, b.y + 1, b.z, 'portal');
+  if (G.ticks % 4 === 0) G.ents.puff(b.x, b.y + 1, b.z, 'portal');
   if (++G.inPortal < (G.mode === 'creative' ? 1 : 80)) return false;
   G.inPortal = 0; G.portalBlocked = true;
   travel();
@@ -563,7 +577,73 @@ function seaTick() {
   showMap(m);
   if (G.ticks % 40 === 0) conduitsTick();
 }
+/**
+ * 冰霜行者 (the game's): walking on the ground, the still water just under the feet within 2 + the level (at most 16)
+ * with air over it freezes into frosted ice, which melts again by itself (the world does that).
+ */
+function frostWalk() {
+  const b = G.body, lv = enchOf(G.inv.worn(3), 'frost_walker');
+  if (!lv || !b.onGround || G.riding || G.dead) return;
+  const r = Math.min(16, 2 + lv), y = Math.floor(b.y + 0.01) - 1, bx = Math.floor(b.x), bz = Math.floor(b.z);
+  for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+    const x = bx + dx, z = bz + dz;
+    if (Math.hypot(x + 0.5 - b.x, y + 0.5 - b.y, z + 0.5 - b.z) > r) continue;
+    const v = G.mirror.get(x, y, z);
+    if ((v & 0xFFF) === ID.water && !(v >>> 12) && !G.mirror.get(x, y + 1, z)) setBlock(x, y, z, ID.frosted_ice);
+  }
+}
+/** Burning: the fire's own picture (as it flickers) over the bottom of the view, at both sides (the game's). */
+let fireShown = false, fireAt = -1;
+function fireView(on) {
+  const el = $('.fireview');
+  if (on !== fireShown) { el.style.display = on ? 'block' : 'none'; fireShown = on; fireAt = -1; }
+  const an = on && animFrames.find(a => a.layer === LAYER.fire_1);
+  if (!an || an.at < 0 || an.at === fireAt) return;
+  fireAt = an.at;
+  const n = built.size, img = new ImageData(new Uint8ClampedArray(an.frames[an.at]), n, n);
+  for (const c of el.querySelectorAll('canvas')) { if (c.width !== n) { c.width = n; c.height = n; } c.getContext('2d').putImageData(img, 0, 0); }
+}
 let mapShown = null, mapPaintAt = 0;
+// ---------- the conduit, drawn ----------
+// its cage turns round this slanted line (the game's), here as the part's x, y, z turns
+const CAGE_AXIS = [0.5, 1, 0.5].map(v => v / Math.hypot(0.5, 1, 0.5));
+function axisTurns([ux, uy, uz], a) {
+  const c = Math.cos(a), s = Math.sin(a), t = 1 - c;
+  const r00 = t * ux * ux + c, r10 = t * ux * uy + s * uz, r20 = t * ux * uz - s * uy, r21 = t * uy * uz + s * ux, r22 = t * uz * uz + c;
+  return [Math.atan2(r21, r22), -Math.asin(Math.max(-1, Math.min(1, r20))), Math.atan2(r10, r00)];
+}
+let windFrames = {h: [], v: []};
+/** A strip of frames (a pack's whirling water: each frame half as high as it is wide) cut into pictures. */
+function cutFrames(strip) {
+  const w = strip.width, fh = Math.max(1, w / 2), n = Math.max(1, Math.floor(strip.height / fh));
+  return Array.from({length: n}, (_, i) => { const c = document.createElement('canvas'); c.width = w; c.height = fh; c.getContext('2d').drawImage(strip, 0, i * fh, w, fh, 0, 0, w, fh); return c; });
+}
+/**
+ * The conduits near, as the game draws them: asleep, its shell, still; awake, a cage turning round a slanted line and
+ * bobbing, an eye in it turned to the camera (open while it hunts a monster), and the water whirling round it in two
+ * boxes (turned another way every 66 ticks, its picture going on every 3).
+ */
+function conduitModels(view, a, light) {
+  const out = [], t = (G.ticks || 0) + a;
+  for (const [x, y, z, tile] of G.conduitList || []) {
+    const id = G.mirror.get(x, y, z) & 0xFFF;
+    if ((id !== ID.conduit && id !== ID.waterlogged_conduit) || Math.abs(x + 0.5 - view.x) > 96 || Math.abs(z + 0.5 - view.z) > 96) continue;
+    const L = [light(x, y, z)[0], 15], at = {x: x + 0.5 - view.x, y: y - view.y, z: z + 0.5 - view.z, yaw: 0};
+    const push = (model, skin, rot, pose = {}) => { if (skinSizes[skin]) out.push({skin, verts: new Float32Array(buildModel(model, rot, {...at, ...pose}, [], skinSizes[skin])), light: L, tint: [1, 1, 1], hurt: 0, white: 0}); };
+    const spin = (tile.rot || 0) + (tile.active && tile.awakeAt != null ? (t - tile.awakeAt) * -0.0375 : 0);
+    if (!tile.active) { push('conduit_shell', 'conduit_shell', {shell: [0, spin, 0]}); continue; }
+    const f = Math.sin(t * 0.1) / 2 + 0.5, lift = (f * f + f) * 0.2 - 0.2;
+    push('conduit_cage', 'conduit_cage', {cage: axisTurns(CAGE_AXIS, spin)}, {y: at.y + lift});
+    const phase = Math.floor((G.ticks || 0) / 66) % 3, frames = phase === 1 ? windFrames.v : windFrames.h, w = frames[Math.floor(t / 3) % Math.max(1, frames.length)];
+    if (w) {
+      push('conduit_wind', w, {wind: phase === 1 ? [Math.PI / 2, 0, 0] : phase === 2 ? [0, 0, Math.PI / 2] : [0, 0, 0]});
+      push('conduit_wind', w, {wind: [Math.PI, 0, Math.PI]}, {s: 0.875, y: at.y + 0.0625});
+    }
+    const ex = x + 0.5, ey = y + 0.5 + lift, ez = z + 0.5, dx = view.x - ex, dy = view.y - ey, dz = view.z - ez, l = Math.hypot(dx, dy, dz) || 1, s = 2 / 3;
+    push('conduit_eye', tile.hunting ? 'conduit_eye_open' : 'conduit_eye_closed', {eye: [Math.asin(-dy / l), 0, 0]}, {y: at.y + lift + 0.5 - s / 2, yaw: Math.atan2(-dx, -dz), s});
+  }
+  return out;
+}
 function showMap(m) {
   const el = $('.mapview');
   if (!m || paused || invUI.open || G.dead) { if (mapShown) { el.style.display = 'none'; mapShown = null; } return; }
@@ -581,22 +661,28 @@ function showMap(m) {
  */
 function conduitsTick() {
   const b = G.body, get = (x, y, z) => G.mirror.get(x, y, z), sky = (x, y, z) => G.mirror.light(Math.floor(x), Math.floor(y), Math.floor(z))[0] >= 15;
+  G.conduitList = [];
   for (const [k, tile] of Object.entries(G.tiles)) {
     if (tile.kind !== 'conduit') continue;
     const [x, y, z] = k.split(',').map(Number);
+    G.conduitList.push([x, y, z, tile]);
     if (!G.mirror.has(x, z) || Math.abs(x - b.x) > 128 || Math.abs(z - b.z) > 128) continue;
     const id = G.mirror.get(x, y, z) & 0xFFF;
     if (id !== ID.conduit && id !== ID.waterlogged_conduit) { delete G.tiles[k]; continue; }
     const frame = conduitFrame(get, x, y, z), was = tile.active;
     tile.active = frame >= 16;
     if (tile.active && !was) play('bell');
+    // (its turning: kept where it stopped while it sleeps; whether it is after a monster: its eye open)
+    if (tile.active && (tile.awakeAt == null || tile.awakeAt > G.ticks)) tile.awakeAt = G.ticks;
+    if (!tile.active && was && tile.awakeAt != null) { tile.rot = (tile.rot || 0) + (G.ticks - tile.awakeAt) * -0.0375; delete tile.awakeAt; }
+    tile.hunting = false;
     if (!tile.active) continue;
     const cx = x + 0.5, cy = y + 0.5, cz = z + 0.5;
     if (Math.hypot(b.x - cx, b.y + 0.9 - cy, b.z - cz) <= Math.floor(frame / 7) * 16 && (b.inWater || (fallsAt(Math.floor(b.x), Math.floor(b.z)) === 'rain' && sky(b.x, b.y + 1.6, b.z)))) giveEffect('conduit_power', 0, 260);
     if (frame >= 42) {
       let best = null, bd = 8;
       for (const mob of G.mobs.list) { if (!mob.def.hostile || mob.dead || !mob.body?.inWater) continue; const d = Math.hypot(mob.x - cx, mob.y - cy, mob.z - cz); if (d < bd) { bd = d; best = mob; } }
-      if (best) { G.mobs.hurt(best, 4, null, 'magic'); for (let t = 0; t <= 1; t += 0.2) G.ents.puff(cx + (best.x - cx) * t, cy + (best.y + 0.5 - cy) * t, cz + (best.z - cz) * t, 'swirl', 0x1DC2D1); }
+      if (best) { tile.hunting = true; G.mobs.hurt(best, 4, null, 'magic'); for (let t = 0; t <= 1; t += 0.2) G.ents.puff(cx + (best.x - cx) * t, cy + (best.y + 0.5 - cy) * t, cz + (best.z - cz) * t, 'swirl', 0x1DC2D1); }
     }
     // the sea's bits drift into it
     for (let n = 0; n < 4; n++) { const a = Math.random() * Math.PI * 2, r = 1.5 + Math.random() * 2; G.ents.puff(cx + Math.cos(a) * r, cy + (Math.random() - 0.5) * 2, cz + Math.sin(a) * r, 'swirl', 0x8fd8ff); }
@@ -814,10 +900,10 @@ function fallsAt(x, z) {
 /** The highest block that stops rain on a column (cached for a second), +1. */
 function topAt(x, z) {
   const k = `${x},${z}`, c = G.tops.get(k);
-  if (c && G.time - c[1] < 20) return c[0];
+  if (c && G.ticks - c[1] < 20) return c[0];
   let y = Math.min(MINY + HEIGHT - 1, Math.floor(G.body.y) + 40);
   while (y > MINY && !G.mirror.get(x, y, z)) y--;
-  G.tops.set(k, [y + 1, G.time]);
+  G.tops.set(k, [y + 1, G.ticks]);
   return y + 1;
 }
 /** The game's cycle: clear for half a day to a week, rain for half a day to a day; thunder on its own clock, only while it rains. */
@@ -882,12 +968,34 @@ function strike(x, y, z) {
   const b = G.body, d = Math.hypot(b.x - x, b.z - z);
   play('thunder', 0, Math.max(0.35, 1 - d / 96));
   if (d < 3 && Math.abs(b.y - y) < 4) hurt(5, '被闪电击中了', null, 'lightning');
+  // fire where it strikes, and on normal and hard a few round it (the game's)
+  if (rules().doFireTick !== false) {
+    const fx = Math.floor(x), fy = Math.floor(y), fz = Math.floor(z), more = difficulty() === 'normal' || difficulty() === 'hard';
+    setFire(fx, fy, fz);
+    if (more) for (let k = 0; k < 4; k++) setFire(fx + Math.floor(Math.random() * 3) - 1, fy + Math.floor(Math.random() * 3) - 1, fz + Math.floor(Math.random() * 3) - 1);
+  }
   for (const m of [...G.mobs.list]) {
     if (m.dead || Math.hypot(m.x - x, m.z - z) >= 3 || Math.abs(m.y - y) >= 4) continue;
     // a pig struck becomes a zombified piglin (the game's)
     if (m.kind === 'pig') { G.mobs.list.splice(G.mobs.list.indexOf(m), 1); G.mobs.add('zombified_piglin', m.x, m.y, m.z, {yaw: m.yaw}); continue; }
     G.mobs.hurt(m, 5, null, 'lightning'); m.fire = 160;
   }
+}
+
+/** Fire put at (x, y, z) where it can be (the game's: only into air, over something solid or by something that
+ *  burns); over soul sand it is soul fire. True if it was put. */
+function setFire(x, y, z) {
+  if (!G.mirror.has(x, z) || G.mirror.get(x, y, z)) return false;
+  const below = G.mirror.get(x, y - 1, z) & 0xFFF, soul = below === ID.soul_sand;
+  const burns = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].some(([dx, dy, dz]) => BLOCKS[G.mirror.get(x + dx, y + dy, z + dz) & 0xFFF]?.burn);
+  if (!soul && !BLOCKS[below]?.solid && !burns) return false;
+  setBlock(x, y, z, soul ? ID.soul_fire : ID.fire);
+  return true;
+}
+/** The fire burning on the face of a block aimed at (the game's: hitting the block puts it out): [x, y, z] or null. */
+function fireOn(t) {
+  const [dx, dy, dz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face] || [0, 1, 0], v = G.mirror.get(t.x + dx, t.y + dy, t.z + dz) & 0xFFF;
+  return v === ID.fire || v === ID.soul_fire ? [t.x + dx, t.y + dy, t.z + dz] : null;
 }
 
 // ---------- held item, hotbar ----------
@@ -1053,7 +1161,7 @@ function look6() {
 /** What a block keeps of its own (a furnace's fire, a chest's things), made when it is put down. */
 function makeTile(x, y, z, b) {
   delete G.loot[`${x},${y},${z}`];
-  if (b?.shape === 'conduit') G.tiles[`${x},${y},${z}`] = {kind: 'conduit'};
+  if (b?.shape === 'conduit') { G.tiles[`${x},${y},${z}`] = {kind: 'conduit'}; (G.conduitList ||= []).push([x, y, z, G.tiles[`${x},${y},${z}`]]); }
   if (b?.use === 'furnace') G.tiles[`${x},${y},${z}`] = {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0};
   if (b?.use === 'chest') { G.tiles[`${x},${y},${z}`] = {kind: 'chest', slots: new Array(27).fill(null)}; pairChest(x, y, z); }
   if (b?.use === 'enchant') G.tiles[`${x},${y},${z}`] = {kind: 'enchant'};
@@ -1097,7 +1205,18 @@ function dispense({x, y, z, face, drop}) {
   const empty = !front || BLOCKS[front & 0xFFF].replace;
   if (s.id === 'arrow') { G.mobs.arrows.push({x: ox, y: oy, z: oz, vx: dx * 1.1 + (Math.random() - 0.5) * 0.05, vy: dy * 1.1 + 0.1, vz: dz * 1.1 + (Math.random() - 0.5) * 0.05, from: 'dispenser', life: 0, stuck: false, dmg: 2, pickup: true}); used(); soundAt('bow', ox, oy, oz); return; }
   if (info?.thrown) { launch(s, ox, oy, oz, [dx, dy + 0.1, dz]); used(); soundAt('throw', ox, oy, oz); return; }
-  if (info?.pour && empty) { setBlock(fx, fy, fz, ID[info.pour]); swap({id: 'bucket', n: 1}); soundAt('splash', ox, oy, oz); return; }
+  // flint and steel lights the TNT in front, or sets fire there; a fire charge flies off as a small fireball (the game's)
+  if (info?.tool?.kind === 'fire') {
+    if ((front & 0xFFF) === ID.tnt) { setBlock(fx, fy, fz, 0); G.mobs.light(fx, fy, fz); } else if (!setFire(fx, fy, fz)) { soundAt('empty', x + 0.5, y + 0.5, z + 0.5); return; }
+    s.dmg = (s.dmg || 0) + 1; if (s.dmg >= info.tool.uses) tile.slots[i] = null; soundAt('ignite', ox, oy, oz); return;
+  }
+  if (s.id === 'fire_charge') {
+    const j = () => (Math.random() - Math.random()) * 0.115;
+    G.mobs.balls.push({x: ox, y: oy, z: oz, vx: 0, vy: 0, vz: 0, ax: (dx + j()) * 0.05, ay: (dy + j()) * 0.05, az: (dz + j()) * 0.05, big: false, from: 'dispenser', life: 0});
+    used(); soundAt('blaze_shoot', ox, oy, oz); return;
+  }
+  // (a fish bucket lets its fish go into the water it pours, as the game's does)
+  if (info?.pour && empty) { setBlock(fx, fy, fz, ID[info.pour]); if (info.fish && G.dim !== 'nether') G.mobs.add(info.fish, fx + 0.5, fy + 0.2, fz + 0.5, {persist: true, variant: s.variant}); swap({id: 'bucket', n: 1}); soundAt('splash', ox, oy, oz); return; }
   if (s.id === 'bucket' && [ID.water, ID.lava].includes(front & 0xFFF) && !(front >>> 12)) { setBlock(fx, fy, fz, 0); swap({id: (front & 0xFFF) === ID.water ? 'water_bucket' : 'lava_bucket', n: 1}); soundAt('splash', ox, oy, oz); return; }
   if (s.id === 'glass_bottle' && (front & 0xFFF) === ID.water) { swap({id: 'potion', n: 1, pot: 'water'}); soundAt('splash', ox, oy, oz); return; }
   if (info?.meal) { G.worker.postMessage({type: 'meal', x: fx, y: fy, z: fz}); used(); G.ents.puff(fx + 0.5, fy + 0.5, fz + 0.5, 'meal'); return; }
@@ -1229,6 +1348,8 @@ function use(t, mob = null) {
   if (mob) {
     // a fish for a dolphin: it shows the way to a wreck
     if ((s?.id === 'cod' || s?.id === 'salmon') && mob.kind === 'dolphin' && !mob.dead) { G.mobs.feedDolphin(mob); useUp(); return; }
+    // flint and steel on a creeper: it is lit (the game's)
+    if (info?.tool?.kind === 'fire' && mob.kind === 'creeper' && !mob.dead && !mob.lit) { mob.lit = true; play('ignite'); soundAt('fuse', mob.x, mob.y, mob.z); wearTool(); return; }
     if (s && mob.def.breed?.includes(s.id) && !mob.baby && !mob.love && !mob.loveWait) { mob.love = 600; useUp(); G.ents.puff(mob.x, mob.y + 1, mob.z, 'heart'); return; }
     if (s && mob.def.breed?.includes(s.id) && mob.baby) { mob.grow += 2400; useUp(); G.ents.puff(mob.x, mob.y + 0.6, mob.z, 'meal'); return; }
     if (info?.tool?.kind === 'shears' && mob.kind === 'sheep' && !mob.sheared && !mob.baby) {
@@ -1241,7 +1362,7 @@ function use(t, mob = null) {
     if (s?.id === 'water_bucket' && mob.def.bucket && !mob.dead) {
       G.mobs.list.splice(G.mobs.list.indexOf(mob), 1);
       if (G.mode !== 'creative') useUp();
-      handBack({id: mob.def.bucket, n: 1}); play('splash'); drawHud(true); return;
+      handBack({id: mob.def.bucket, n: 1, ...(mob.variant != null ? {variant: mob.variant} : {})}); play('splash'); drawHud(true); return;
     }
     // a bucket on a cow: milk (in creative the empty bucket stays, and the milk comes as well)
     if (s?.id === 'bucket' && mob.kind === 'cow' && !mob.baby) {
@@ -1282,7 +1403,14 @@ function use(t, mob = null) {
     if (grows) { G.worker.postMessage({type: 'meal', x: t.x, y: t.y, z: t.z}); useUp(); G.ents.puff(t.x + 0.5, t.y + 1, t.z + 0.5, 'meal'); play('meal'); }
     return;
   }
-  if (t && info?.tool?.kind === 'fire') { if (b.name === 'tnt') { setBlock(t.x, t.y, t.z, 0); G.mobs.light(t.x, t.y, t.z); } else lightPortal(t); play('ignite'); wearTool(); return; }
+  // flint and steel (or a fire charge, used up) on a block: TNT lit, a portal's frame lit, else fire set on that face
+  if (t && (info?.tool?.kind === 'fire' || s?.id === 'fire_charge')) {
+    const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face];
+    if (b.name === 'tnt') { setBlock(t.x, t.y, t.z, 0); G.mobs.light(t.x, t.y, t.z); }
+    else if (!lightPortal(t) && !setFire(t.x + nx, t.y + ny, t.z + nz)) return;
+    if (s.id === 'fire_charge') { useUp(); play('blaze_shoot'); } else { play('ignite'); wearTool(); }
+    return;
+  }
   // food when hungry (a golden apple any time, in creative too)
   if (info?.food && ((G.mode !== 'creative' && G.food < 20) || info.always)) { G.eating = info.fast ? 16 : 32; return; }
   // a potion is drunk (as long as eating takes), a splash potion thrown
@@ -1304,7 +1432,7 @@ function use(t, mob = null) {
     }
     // a fish bucket emptied into the water aimed at (no block in reach): the fish goes into it
     if (info?.fish && lt && isWater(lt.v) && (!t || lt.t < t.t)) {
-      G.mobs.add(info.fish, lt.x + 0.5, lt.y + 0.3, lt.z + 0.5, {persist: true});
+      G.mobs.add(info.fish, lt.x + 0.5, lt.y + 0.3, lt.z + 0.5, {persist: true, variant: s.variant});
       if (G.mode !== 'creative') { G.inv.slots[G.hot] = {id: 'bucket', n: 1}; drawHud(true); }
       play('splash'); return;
     }
@@ -1315,7 +1443,7 @@ function use(t, mob = null) {
       // water poured in the Nether boils away
       if (info.pour === 'water' && G.dim === 'nether') { G.ents.puff(x + 0.5, y + 0.5, z + 0.5, 'smoke'); play('fizz'); }
       else setBlock(x, y, z, ID[info.pour]);
-      if (info.fish && G.dim !== 'nether') G.mobs.add(info.fish, x + 0.5, y + 0.2, z + 0.5, {persist: true});
+      if (info.fish && G.dim !== 'nether') G.mobs.add(info.fish, x + 0.5, y + 0.2, z + 0.5, {persist: true, variant: s.variant});
       if (G.mode !== 'creative') { G.inv.slots[G.hot] = {id: 'bucket', n: 1}; drawHud(true); }
       play('splash'); return;
     }
@@ -1426,7 +1554,7 @@ function partnerOf(x, y, z, v) {
 /** A bed: the place to wake up from now on; at night (and no monster near) sleep till morning. */
 function sleepIn(t) {
   // a bed in the Nether blows up (the game's 「刻意的游戏设计」)
-  if (G.dim === 'nether') { const [ox, oy, oz] = partnerOf(t.x, t.y, t.z, t.v); setBlock(t.x, t.y, t.z, 0); setBlock(ox, oy, oz, 0); explode(t.x + 0.5, t.y + 0.5, t.z + 0.5, 5, null, '被[刻意的游戏设计]杀死了'); return; }
+  if (G.dim === 'nether') { const [ox, oy, oz] = partnerOf(t.x, t.y, t.z, t.v); setBlock(t.x, t.y, t.z, 0); setBlock(ox, oy, oz, 0); explode(t.x + 0.5, t.y + 0.5, t.z + 0.5, 5, null, '被[刻意的游戏设计]杀死了', true); return; }
   const day = ((G.time % 24000) + 24000) % 24000, night = (day >= 12542 && day <= 23459) || G.weather.thunder > 0.9;
   if (!G.bedPos || G.bedPos.x !== t.x || G.bedPos.y !== t.y || G.bedPos.z !== t.z) { G.bedPos = {x: t.x, y: t.y, z: t.z}; toast('已设置重生点'); }
   if (!night) { toast('你只能在夜里或雷雨天睡觉'); return; }
@@ -1514,6 +1642,8 @@ function hurt(n, why, from = null, kind = 'hit') {
   if (from) { const d = difficulty(); if (d === 'peaceful') return; if (d === 'easy') n = Math.min(n, n / 2 + 1); if (d === 'hard') n *= 1.5; }
   // 抗火: no harm from fire, lava or magma
   if (G.effects.fire_resistance && (kind === 'lava' || kind === 'fire')) return;
+  // (a fireball sets them alight)
+  if (kind === 'fire' && from) G.fireT = Math.max(G.fireT || 0, 100);
   // a moment after a hit nothing hurts again (a stronger hit only adds what it has more)
   if (G.invuln > 0) { if (n <= G.lastDmg) return; const extra = n - G.lastDmg; G.lastDmg = n; n = extra; }
   else { G.invuln = 10; G.lastDmg = n; }
@@ -1604,22 +1734,40 @@ function die(why) {
 }
 function survivalTick(r) {
   const b = G.body;
-  if (G.mode === 'creative') { G.health = 20; G.food = 20; G.air = 300; return; }
+  if (G.mode === 'creative') { G.health = 20; G.food = 20; G.air = 300; G.fireT = 0; return; }
+  // on fire: in fire (soul fire hurts more) or lava, and for a while after (the game's eight and fifteen seconds), a
+  // point a second; water or the rain puts it out; 抗火 keeps the harm off
+  {
+    const fx = Math.floor(b.x), fz = Math.floor(b.z), hw = b.w / 2 - 0.001;
+    // (any the body touches, as the game's: the corners of its box at its feet, middle and head; soul fire first)
+    let flame = 0;
+    for (const dy of [0.05, b.hgt / 2, b.hgt - 0.05]) for (const dx of [-hw, hw]) for (const dz of [-hw, hw]) {
+      const id = G.mirror.get(Math.floor(b.x + dx), Math.floor(b.y + dy), Math.floor(b.z + dz)) & 0xFFF;
+      if (id === ID.soul_fire || (id === ID.fire && !flame)) flame = id;
+    }
+    if (flame) { G.fireT = Math.max(G.fireT || 0, 160); if (G.ticks % 10 === 0) hurt(flame === ID.soul_fire ? 2 : 1, '被烧死了', null, 'fire'); }
+    if (b.inLava) G.fireT = Math.max(G.fireT || 0, 300);
+    if (G.fireT > 0) {
+      if (b.inWater || (fallsAt(fx, fz) === 'rain' && topAt(fx, fz) <= Math.floor(b.y + 1.8))) G.fireT = 0;
+      else if (--G.fireT % 20 === 0) hurt(1, '被烧死了', null, 'fire');
+    }
+  }
   // peaceful: never hungry, the hearts come back by themselves (one each second)
-  if (difficulty() === 'peaceful') { if (G.food < 20 || G.sat < 5) { G.food = 20; G.sat = Math.max(G.sat, 5); drawHud(true); } if (G.health < 20 && G.time % 20 === 0) { G.health = Math.min(20, G.health + 1); drawHud(true); } }
+  if (difficulty() === 'peaceful') { if (G.food < 20 || G.sat < 5) { G.food = 20; G.sat = Math.max(G.sat, 5); drawHud(true); } if (G.health < 20 && G.ticks % 20 === 0) { G.health = Math.min(20, G.health + 1); drawHud(true); } }
   // a turtle shell worn: water breathing kept at ten seconds while the head is out of the water
-  if (G.inv.worn(0)?.id === 'turtle_helmet' && !b.headInWater && G.time % 20 === 0) giveEffect('water_breathing', 0, 200);
+  if (G.inv.worn(0)?.id === 'turtle_helmet' && !b.headInWater && G.ticks % 20 === 0) giveEffect('water_breathing', 0, 200);
   // a hay bale takes four fifths of a fall
   const onHay = (G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z)) & 0xFFF) === ID.hay_block;
   if (r.landed > 3 && !b.inWater) hurt(Math.ceil((r.landed - 3) * (onHay ? 0.2 : 1)), '摔得太重了', null, 'fall');
   if (r.landed > 2) play('fall', 0, Math.min(1, r.landed / 8));
   // air
   if (b.headInWater && !G.effects.water_breathing && !G.effects.conduit_power) { if (Math.random() < 1 / (enchOf(G.inv.worn(0), 'respiration') + 1)) G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了', null, 'drown'); } } else G.air = Math.min(300, G.air + 4);
-  if ((b.inLava) && G.time % 10 === 0) hurt(4, '掉进了岩浆', null, 'lava');
-  if (b.touchCactus && G.time % 10 === 0) hurt(1, '被仙人掌扎死了', null, 'cactus');
+  if ((b.inLava) && G.ticks % 10 === 0) hurt(4, '掉进了岩浆', null, 'lava');
+  if (b.touchCactus && G.ticks % 10 === 0) hurt(1, '被仙人掌扎死了', null, 'cactus');
   // magma burns feet, unless sneaking
-  if (b.onGround && !b.sneaking && G.time % 10 === 0 && (G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z)) & 0xFFF) === ID.magma_block) hurt(1, '发现了地板是熔岩做的', null, 'fire');
-  if (b.y < MINY - 64 && G.time % 10 === 0) hurt(4, '掉出了世界', null, 'void');
+  // (not with 冰霜行者 on)
+  if (b.onGround && !b.sneaking && G.ticks % 10 === 0 && !enchOf(G.inv.worn(3), 'frost_walker') && (G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z)) & 0xFFF) === ID.magma_block) hurt(1, '发现了地板是熔岩做的', null, 'fire');
+  if (b.y < MINY - 64 && G.ticks % 10 === 0) hurt(4, '掉出了世界', null, 'void');
   // hunger
   if (b.sprinting) G.exh += 0.1 * Math.hypot(b.x - b.prev.x, b.z - b.prev.z);
   if (r.jumped) G.exh += b.sprinting ? 0.2 : 0.05;
@@ -1735,7 +1883,7 @@ function tick() {
   // steps
   const moved = Math.hypot(b.x - b.prev.x, b.z - b.prev.z);
   if (b.onGround && !b.sneaking && !G.riding) { G.walked += moved; if (G.walked - G.stepAt > 1.6) { G.stepAt = G.walked; play('step', G.mirror.get(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z))); } }
-  if (b.inWater && !G.riding && moved > 0.05 && G.time % 12 === 0) play('swim');
+  if (b.inWater && !G.riding && moved > 0.05 && G.ticks % 12 === 0) play('swim');
   survivalTick(r);
   eatTick();
   // potion effects wear off; regeneration heals, poison hurts (never to death); swirls round the player
@@ -1744,11 +1892,12 @@ function tick() {
       feed: n => { G.food = Math.min(20, G.food + n); G.sat = Math.min(G.food, G.sat + n * 2); drawHud(true); }, health: () => G.health});
     if (gone.includes('absorption') && G.absorb) { G.absorb = 0; drawHud(true); }
     const c = swirlColor(G.effects);
-    if (c != null && G.view && G.time % 3 === 0 && !G.effects.invisibility) G.ents.puff(b.x + (Math.random() - 0.5) * 0.6, b.y + Math.random() * 1.8, b.z + (Math.random() - 0.5) * 0.6, 'swirl', c);
-    if (G.time % 10 === 0) drawEffects();
+    if (c != null && G.view && G.ticks % 3 === 0 && !G.effects.invisibility) G.ents.puff(b.x + (Math.random() - 0.5) * 0.6, b.y + Math.random() * 1.8, b.z + (Math.random() - 0.5) * 0.6, 'swirl', c);
+    if (G.ticks % 10 === 0) drawEffects();
   } else if (fxKey) drawEffects();
   thrownTick();
   seaTick();
+  frostWalk();
   if (G.attackWait > 0) G.attackWait--;
   if (G.invuln > 0) G.invuln--;
   // a bow: held use draws it (on a phone: holding the screen), letting go shoots; a trident the same (on a phone held
@@ -1777,6 +1926,8 @@ function tick() {
   if (G.breakWait > 0) G.breakWait--;
   const aiming = bow || (trident && G.draw > 0);
   if (ctl.attack && G.targetMob && !G.dead && !aiming) { attackMob(G.targetMob); G.breaking = null; }
+  // fire on the face of the block hit goes out (the game's)
+  else if (ctl.attack && t && !G.dead && !aiming && fireOn(t)) { if (!G.breakWait) { const [x, y, z] = fireOn(t); setBlock(x, y, z, 0); soundAt('fizz', x + 0.5, y + 0.5, z + 0.5); G.breakWait = 6; G.swing = 6; } G.breaking = null; }
   else if (ctl.attack && t && !G.dead && !aiming) {
     // digging swings the arm over and over: a new swing once the last is half way (as the game does)
     if (G.swing <= 3) G.swing = 7;
@@ -1791,7 +1942,7 @@ function tick() {
       if (secs === 0) { if (!G.breakWait) { breakBlock(t); G.breaking = null; G.breakWait = 5; } }
       else if (secs < Infinity && !G.breakWait) {
         G.breaking.p += 1 / (secs * 20);
-        if (G.time % 4 === 0) { play('hit', t.v); G.ents.burst(t.x, t.y, t.z, t.v, 2); }
+        if (G.ticks % 4 === 0) { play('hit', t.v); G.ents.burst(t.x, t.y, t.z, t.v, 2); }
         if (G.breaking.p >= 1) { breakBlock(t); G.breaking = null; G.breakWait = 5; }
       }
     }
@@ -1844,13 +1995,13 @@ function tick() {
   }
   platesTick();
   hoppersTick();
-  if (G.time % 10 === 0) fillsTick();
-  if (invUI.open && (invUI.kind === 'furnace' || invUI.kind === 'brew' || (invUI.kind === 'chest' && invUI.data?.kind === 'hopper')) && G.time % 4 === 0) invUI.refresh();
+  if (G.ticks % 10 === 0) fillsTick();
+  if (invUI.open && (invUI.kind === 'furnace' || invUI.kind === 'brew' || (invUI.kind === 'chest' && invUI.data?.kind === 'hopper')) && G.ticks % 4 === 0) invUI.refresh();
   // the worker: where we are, how dark the sky is
   const cx = Math.floor(b.x / 16), cz = Math.floor(b.z / 16);
   if (cx !== G.cx || cz !== G.cz) { G.cx = cx; G.cz = cz; G.worker.postMessage({type: 'center', cx, cz}); }
   // (every second of play, not of the world's clock: it may stand still, or be set by a command)
-  if (G.ticks % 20 === 0) { const daylight = environment(G.time).daylight; G.worker.postMessage({type: 'day', dark: Math.round((1 - daylight) * 11), snow: G.weather.rain > 0.5, daylight}); }
+  if (G.ticks % 20 === 0) { const daylight = environment(G.time).daylight; G.worker.postMessage({type: 'day', dark: Math.round((1 - daylight) * 11), snow: G.weather.rain > 0.5, daylight, fire: rules().doFireTick !== false}); }
   if (performance.now() - G.saveAt > 30000) { G.saveAt = performance.now(); saveGame(); }
 }
 
@@ -1958,7 +2109,8 @@ function handModel(view) {
     v.cube(0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints);
     return {verts: v, model: mat.model(0.38, Math.PI / 4 + sw * 0.6, -0.05 - sw * 0.5, 0, 0.58 + sideBob - sw * 0.2, -0.5 + bob + eat + sw * 0.1, -0.78 - sw * 0.2)};
   }
-  v.flatLook(0.5, look, sky * 17, blk * 17, 256, 32);
+  // (a sixteenth thick, as the game draws what is in the hand; a potion's bottle stays a picture)
+  if (look.over != null) v.flatLook(0.5, look, sky * 17, blk * 17, 256, 32); else thickItem(v, look.flat, look.tint, sky * 17, blk * 17);
   const tool = !!itemInfo(s.id)?.tool;
   // a trident drawn back to throw: raised over the shoulder, its prongs ahead, pulled back as it charges (shaking a
   // little once it is ready)
@@ -2106,7 +2258,10 @@ function playerModel(view, a, light) {
 // round when it is raised to throw, its prongs ahead again), a bow upright — how far along its length the fist holds
 // it, its size
 const GRIPS = {tool: [[0, 1, 0], [0, 0, -1], [-1, 0, 0], 0.35, 0.85], trident: [[0, 1, 0], [0, 0, -1], [-1, 0, 0], -0.15, 1.1], spear: [[0, 1, 0], [0, 0, 1], [1, 0, 0], -0.15, 1.1],
-  bow: [[0, -1, 0], [0, 0, -1], [1, 0, 0], 0, 0.9], item: [[0, 1, 0], [0, 0, -1], [-1, 0, 0], 0.05, 0.5]};
+  bow: [[0, -1, 0], [0, 0, -1], [1, 0, 0], 0, 0.9], item: [[0, 1, 0], [0, 0, -1], [-1, 0, 0], 0.05, 0.5],
+  // (in a dolphin's mouth: upright, along its beak, not turned)
+  mouth: [[0, 0, -1], [0, -1, 0], [-1, 0, 0], 0, 0.5]};
+const STRAIGHT = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
 // (the picture turned an eighth round: its corner-to-corner line along its length)
 const TURN45 = [[Math.SQRT1_2, Math.SQRT1_2, 0], [-Math.SQRT1_2, Math.SQRT1_2, 0], [0, 0, 1]];
 const mulV = (C, v) => [0, 1, 2].map(r => C[0][r] * v[0] + C[1][r] * v[1] + C[2][r] * v[2]), mulC = (A, B) => B.map(c => mulV(A, c));
@@ -2114,9 +2269,9 @@ const heldVerts = new Map();
 /** A thing in a model's hand (a mob's, the player's), to draw: the model as posed (rot, pose), its arm, the stack;
  *  spear: a trident raised to throw. */
 function heldThing(view, kind, rot, pose, arm, stack, sky, blk, spear = false) {
-  const f = handFrame(kind, rot, pose, arm), info = itemInfo(stack.id);
+  const f = handFrame(kind, rot, pose, arm, arm === 'nose' ? [0, 3, -7.5] : null), info = itemInfo(stack.id);
   if (!f || !info) return null;
-  const look = itemLook(stack.id, stack), tk = info.tool?.kind, [gx, gy, gz, off, size] = GRIPS[look.cube ? 'item' : tk === 'bow' ? 'bow' : tk === 'trident' ? (spear ? 'spear' : 'trident') : info.tool ? 'tool' : 'item'];
+  const look = itemLook(stack.id, stack), tk = info.tool?.kind, [gx, gy, gz, off, size] = GRIPS[arm === 'nose' ? 'mouth' : look.cube ? 'item' : tk === 'bow' ? 'bow' : tk === 'trident' ? (spear ? 'spear' : 'trident') : info.tool ? 'tool' : 'item'];
   const key = `${stack.id}|${sky}|${blk}`;
   let v = heldVerts.get(key);
   if (!v) {
@@ -2125,35 +2280,14 @@ function heldThing(view, kind, rot, pose, arm, stack, sky, blk, spear = false) {
     if (look.cube) v.cube(0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints); else if (look.over != null) v.flatLook(0.5, look, sky * 17, blk * 17, 256, 32); else thickItem(v, look.flat, look.tint, sky * 17, blk * 17);
     heldVerts.set(key, v);
   }
-  const k = 16 * (look.cube ? 0.4 : size), A = mulC(f.ax, [gx, gy, gz]), M = mulC(A, TURN45).map(c => c.map(q => q * k)), T = f.at.map((q, i) => q + A[1][i] * off * k);
+  const k = 16 * (look.cube ? 0.4 : size), A = mulC(f.ax, [gx, gy, gz]), M = mulC(A, arm === 'nose' ? STRAIGHT : TURN45).map(c => c.map(q => q * k)), T = f.at.map((q, i) => q + A[1][i] * off * k);
   return {verts: v, x: view.x + T[0], y: view.y + T[1], z: view.z + T[2], model: new Float32Array([...M[0], 0, ...M[1], 0, ...M[2], 0, 0, 0, 0, 1])};
-}
-/**
- * An item's picture as the game holds it, a sixteenth of a block thick: the picture on both faces, and a thin side along
- * every pixel edge with a clear pixel (or nothing) beyond it, in that pixel's colour (a flat picture seen edge-on was
- * not there at all: a skeleton's bow from in front).
- */
-function thickItem(v, layer, tint, sky, blk) {
-  const t = 1 / 32, d = built?.layers[layer], n = built?.size || 16;
-  for (const z of [t, -t]) v.flat(0.5, layer, sky, blk, 256, 32, tint, z);
-  if (!d) return;
-  const solid = (i, j) => i >= 0 && j >= 0 && i < 16 && j < 16 && d[(Math.floor((j + 0.5) * n / 16) * n + Math.floor((i + 0.5) * n / 16)) * 4 + 3] > 0;
-  const quad = (P, UV, f) => { for (const k of [0, 1, 2, 3, 3, 2, 1, 0]) v.v(P[k][0], P[k][1], P[k][2], 256, 32, layer, UV[k][0], UV[k][1], sky, blk, f << 2, tint); };
-  for (let j = 0; j < 16; j++) for (let i = 0; i < 16; i++) {
-    if (!solid(i, j)) continue;
-    const x0 = i / 16 - 0.5, x1 = x0 + 1 / 16, y1 = 0.5 - j / 16, y0 = y1 - 1 / 16, across = [[i, j + 1], [i + 1, j + 1], [i + 1, j], [i, j]], along = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]];
-    // (the side shows its pixel all over: u and v each run across that one pixel)
-    if (!solid(i - 1, j)) quad([[x0, y0, -t], [x0, y0, t], [x0, y1, t], [x0, y1, -t]], across, 1);
-    if (!solid(i + 1, j)) quad([[x1, y0, t], [x1, y0, -t], [x1, y1, -t], [x1, y1, t]], across, 0);
-    if (!solid(i, j - 1)) quad([[x0, y1, t], [x1, y1, t], [x1, y1, -t], [x0, y1, -t]], along, 2);
-    if (!solid(i, j + 1)) quad([[x0, y0, -t], [x1, y0, -t], [x1, y0, t], [x0, y0, t]], along, 3);
-  }
 }
 /** What the mobs near hold (a skeleton's bow, a drowned's trident …), as things to draw. */
 function mobHeld(view) {
   const out = [];
   for (const h of G.mobs.held || []) {
-    if (h.hold) out.push(heldThing(view, h.kind, h.rot, h.pose, 'arm0', h.hold, ...h.light, h.spear));
+    if (h.hold) out.push(heldThing(view, h.kind, h.rot, h.pose, h.part || 'arm0', h.hold, ...h.light, h.spear));
     if (h.off) out.push(heldThing(view, h.kind, h.rot, h.pose, 'arm1', h.off, ...h.light));
   }
   return out.filter(Boolean);
@@ -2387,6 +2521,7 @@ function frame(now) {
   $('.hurt').style.opacity = G.hurtT ? 0.9 : 0;
   $('.sleep').style.opacity = G.sleeping ? Math.min(1, G.sleeping / 60) : 0;
   $('.portalfx').style.opacity = G.inPortal ? Math.min(0.8, G.inPortal / 80) : 0;
+  fireView(G.fireT > 0 && !G.view && !G.dead && !hudHidden);
   // 夜视: everything seen as if lit
   if (G.effects.night_vision) env.bright = Math.max(env.bright || 0, 0.7);
   // 潮涌能量: under water as if lit; 失明: almost nothing seen
@@ -2399,7 +2534,7 @@ function frame(now) {
   const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view), ...cartThings(a, lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
   if (G.view && !G.dead) { extras.mobs.push(...playerModel(view, a, lightAt)); if (G.selfHeld) extras.things.push(G.selfHeld); }
   extras.things.push(...mobHeld(view));
-  extras.mobs.push(...boatModels(view, a, lightAt));
+  extras.mobs.push(...boatModels(view, a, lightAt), ...conduitModels(view, a, lightAt));
   extras.weather = weatherVerts(view);
   extras.blobs = blobVerts(view, a);
   const bolt = boltVerts(view);
@@ -2464,7 +2599,7 @@ async function boot() {
   addEventListener('pagehide', () => saveGame());
   setVolume(settings.volume);
   screens.loading('正在准备材质…', 0.3);
-  try { await loadTextures(); } catch (e) { showError(`材质没读成：${e.message || e}`); built = buildLayers(null); renderer.setTextures(built.size, built.layers); icons = makeIcons(built); }
+  try { await loadTextures(); } catch (e) { showError(`材质没读成：${e.message || e}`); built = buildLayers(null); setAtlas(built); renderer.setTextures(built.size, built.layers); icons = makeIcons(built); }
   screens.title();
   requestAnimationFrame(frame);
 }

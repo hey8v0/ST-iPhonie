@@ -426,7 +426,24 @@ for (const b of B.slice()) if ((WETTABLE.has(b.shape) || b.name === 'ladder') &&
   const {id, name, ...rest} = b;
   WATERLOGGED[id] = block(`waterlogged_${name}`, b.zh, {...rest, ...WET, item: false, dry: name}).id;
 }
+// ---------- after 0.8.81 (new blocks still at the end) ----------
+// frosted ice (what 冰霜行者 makes of the water under the feet): it melts a little at a time (its four ages, its
+// picture cracking more each time) back into water; slippery like ice; nothing drops and it is no item
+block('frosted_ice', '霜冰', {tex: all('frosted_ice_0'), ages: ['frosted_ice_0', 'frosted_ice_1', 'frosted_ice_2', 'frosted_ice_3'], pass: 'translucent', hard: 0.5, drop: null, item: false, filter: 2, slip: 0.98});
+// fire (its age in its state, 0–15): it burns on something solid or by something that burns, spreads and goes out (the
+// world does it, world.js burn); soul fire, blue, on soul sand: it burns for ever and spreads nowhere
+block('fire', '火', {tex: {all: 'fire_0', alt: 'fire_1'}, shape: 'fire', pass: 'cutout', hard: 0, solid: false, opaque: false, filter: 0, replace: true, drop: null, item: false, light: 15});
+block('soul_fire', '灵魂火', {tex: {all: 'soul_fire_0', alt: 'soul_fire_1'}, shape: 'fire', pass: 'cutout', hard: 0, solid: false, opaque: false, filter: 0, replace: true, drop: null, item: false, light: 10});
 
+// what burns, and how readily (the game's: [how much it draws fire to the air by it, how likely it is to catch and burn
+// away]): wood shaped and wooden things 5/20, logs and wood 5/5, leaves 30/60, wool 30/60, plants 60/100 …; what stands
+// in water does not burn
+const BURN_WOODS = 'oak|spruce|birch|jungle|acacia|dark_oak|cherry|mangrove';
+const BURNS = [[new RegExp(`^(${BURN_WOODS})_(planks|slab|stairs|fence|fence_gate)$|^bamboo_(planks|mosaic|slab|stairs|fence|fence_gate|mosaic_slab|mosaic_stairs)$|^(composter|mangrove_roots|beehive|bee_nest)$`), [5, 20]],
+  [new RegExp(`^(stripped_)?(${BURN_WOODS})_(log|wood)$|^(stripped_)?bamboo_block$|^coal_block$`), [5, 5]], [/_leaves$/, [30, 60]], [/^(bookshelf|lectern)$/, [30, 20]], [/^tnt$/, [15, 100]],
+  [/^(short_grass|fern|dead_bush|tall_grass|large_fern|sunflower|lilac|rose_bush|peony|dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|red_tulip|orange_tulip|white_tulip|pink_tulip|pink_petals|sweet_berry_bush)$/, [60, 100]],
+  [/_wool$/, [30, 60]], [/^vine$/, [15, 100]], [/^hay_block$/, [60, 20]], [/^target$/, [15, 20]], [/_carpet$/, [60, 20]], [/^dried_kelp_block$/, [30, 60]], [/^(bamboo|scaffolding)$/, [60, 60]]];
+for (const b of B) { const hit = BURNS.find(([re]) => re.test(b.name)); if (hit && !b.water) b.burn = hit[1]; }
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
 // experience from ores mined with the right tool (the game's ranges)
@@ -539,7 +556,7 @@ item('turtle_helmet', '海龟壳', {stack: 1, armor: {slot: 0, mat: 'turtle', po
 // the trident (the drowned's): thrown with held use, or a weapon in the hand; its enchantments (enchant.js) bring it
 // back, throw its holder through water or rain instead, call lightning down in a storm, hurt the sea's creatures more
 item('trident', '三叉戟', {stack: 1, tool: {kind: 'trident', tier: -1, speed: 1, uses: 250}, damage: 9, enchantability: 1});
-for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟'], ['guardian', '守卫者'], ['elder_guardian', '远古守卫者'], ['drowned', '溺尸'], ['dolphin', '海豚']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
+for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟'], ['guardian', '守卫者'], ['elder_guardian', '远古守卫者'], ['drowned', '溺尸'], ['dolphin', '海豚'], ['polar_bear', '北极熊']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
 
 // the sea's treasure and what finds the way: the heart of the sea (buried treasure) and the conduit made with it — a
 // small block that, in water and framed with prismarine, gives 潮涌能量 round it (put into water it stands in the water,
