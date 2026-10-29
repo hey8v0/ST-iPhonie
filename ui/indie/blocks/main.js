@@ -68,10 +68,11 @@ async function toggleFullscreen() {
 }
 
 // ---------- textures ----------
-let built = null, icons = {}, packLabel = '', dirtUrl = '';
+let built = null, icons = {}, packLabel = '', dirtUrl = '', packStale = false, staleTold = false;
 async function loadTextures() {
   const rec = await loadPackRecord();
-  const {textures, sky, skins} = await decodePack(rec);
+  const {textures, sky, skins, stale} = await decodePack(rec);
+  packStale = stale;
   built = buildLayers(textures);
   renderer.setTextures(built.size, built.layers);
   icons = makeIcons(built);
@@ -151,7 +152,7 @@ const TICK = 50;
 
 function api() {
   return {
-    sound: n => play(n), inTavern: () => inTavern, packLabel: () => packLabel, padMode: () => input?.mode === 'pad',
+    sound: n => play(n), inTavern: () => inTavern, packLabel: () => packLabel, packStale: () => packStale, padMode: () => input?.mode === 'pad',
     listWorlds, deleteWorld: id => deleteWorld(id), play: w => startWorld(w), createWorld,
     settings: () => settings, setSetting: (k, v) => { settings[k] = v; saveSettings(); applySetting(k); },
     importPack: async (file, onProgress) => { const p = await readPack(file, onProgress); await savePack(p); await reloadTextures(); return `${p.label}（${p.count} 张贴图）`; },
@@ -311,6 +312,8 @@ function checkReady() {
   if (near < 9) { screens.loading('正在生成世界…', Math.min(0.95, 0.3 + near / 12)); return false; }
   G.ready = true;
   screens.hide(); hud.hidden = false; drawHud(true);
+  // a pack taken by an older version kept only the pictures used then: say how to have the rest (once a visit)
+  if (packStale && !staleTold) { staleTold = true; setTimeout(() => toast('材质是以前的版本导入的，后来加的方块和物品还是自带的画法：在「材质」里重新选一次 jar 就都换上了'), 2500); }
   if (G.meta.arrive) arrive();
   if (!G.meta.player) toast(G.mode === 'creative' ? '创造模式：按 E（或物品栏右边的 ⋯）拿方块，双击跳跃飞起来' : '生存模式：先撸一棵树（按住挖），做工作台吧');
   resume();

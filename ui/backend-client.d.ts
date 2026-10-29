@@ -361,14 +361,18 @@ export interface ChatMessage { id: string; from: 'me' | string; kind: ChatKind; 
 /** pinned: 置顶. muted: 免打扰 (its unread messages do not count toward the badge). */
 /** 删好友 on a private chat: by 'me' the user deleted the contact (their messages wait as requests); by 'them' the contact deleted the user. */
 /** A music source the user added: search and link addresses ({{query}}, {{id}}) and where the answers keep each field. */
-export interface MusicSource { id: string; name: string; enabled: boolean; search: string; url: string; lyric: string; listPath: string; idPath: string; titlePath: string; artistPath: string; urlPath: string; lyricPath: string; }
-/** 音乐: bgm 'off' | 'tap' | 'auto' (the story picks songs with <bgm>), its rule, the volume, turning down for voice lines, songs shared in chats. */
-export interface MusicSettings { bgm: 'off' | 'tap' | 'auto'; rule: string; volume: number; duck: boolean; share: boolean; sources: MusicSource[]; }
+export interface MusicSource { id: string; name: string; enabled: boolean; search: string; url: string; lyric: string; listPath: string; idPath: string; titlePath: string; artistPath: string; urlPath: string; lyricPath: string; direct: boolean; albumSearch: string; albumListPath: string; albumSongs: string; albumSongsPath: string; artistSearch: string; artistListPath: string; artistSongs: string; artistSongsPath: string; }
+/** 音乐: bgm 'off' | 'tap' | 'auto' (the story picks songs with <bgm>), its rule, the volume, turning down for voice lines, songs shared in chats, how lists go on, whether some of the 歌单 goes with the rule as a taste. */
+export interface MusicSettings { bgm: 'off' | 'tap' | 'auto'; rule: string; volume: number; duck: boolean; share: boolean; mode: 'order' | 'shuffle' | 'one'; taste: boolean; sources: MusicSource[]; }
 /** A 歌单 song: a file on this device, or a song of a source (its link is fetched when it plays). */
 export interface MusicSong { id: string; kind: 'song'; at: number; title: string; artist: string; origin: 'file' | 'source'; source?: string; songId?: string; lyric?: string; size?: number; mime?: string; }
 export interface MusicFound { source: string; sourceName: string; id: string; title: string; artist: string; }
+/** An album or an artist a search found (an album's artist; how many songs, when the source says). */
+export interface MusicGroup { source: string; sourceName: string; kind: 'album' | 'artist'; id: string; name: string; artist: string; count: number; }
+/** 正文点的歌: a song the story picked (where it was found, once it was). */
+export interface MusicHeard { id: string; kind: 'heard'; at: number; title: string; artist: string; source?: string; songId?: string; }
 /** What plays now (the tavern page's player). */
-export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
+export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; mode: 'order' | 'shuffle' | 'one'; from: '' | 'library' | 'heard' | 'mixed'; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
 export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; from?: string };
 export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; }
 export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; }
@@ -769,8 +773,14 @@ export interface BackendFacade {
     /** 音效 options. */
     saveSounds(patch: Partial<SoundSettings>): SoundSettings;
     saveMusic(patch: Partial<MusicSettings>): MusicSettings;
-    /** Searches the enabled music sources (or one). */
-    searchMusic(query: string, sourceId?: string | Partial<MusicSource>): Promise<{ songs: MusicFound[]; errors: { source: string; message: string }[] }>;
+    /** Searches the enabled music sources (or one): songs (kind 'song', the default), or albums / artists (groups); page 0, 1, … (more: a full page came). */
+    searchMusic(query: string, sourceId?: string | Partial<MusicSource>, options?: { kind?: 'song' | 'album' | 'artist'; page?: number }): Promise<{ songs?: MusicFound[]; groups?: MusicGroup[]; errors: { source: string; message: string }[]; more: boolean }>;
+    /** The songs of an album or artist a search found. */
+    groupSongs(sourceId: string, kind: 'album' | 'artist', id: string, page?: number): Promise<{ songs: MusicFound[]; more: boolean }>;
+    /** 正文点的歌, newest first. */
+    listHeard(): Promise<MusicHeard[]>;
+    forgetHeard(ids: string[]): Promise<boolean>;
+    clearHeard(): Promise<boolean>;
     musicLink(sourceId: string | Partial<MusicSource>, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
     musicLyric(sourceId: string, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
     listSongs(): Promise<MusicSong[]>;
@@ -972,8 +982,12 @@ export interface BackendAPI extends BackendFacade {
     /** Whether photos the user sends reach the chat's model as pictures (else only their words). */
     chatSeesPictures?(): Promise<boolean>;
     musicStatus(): MusicStatus;
-    /** Plays a list (the 歌单, search results) from one of its songs. */
-    musicPlayList(list: MusicTrack[], at?: number): Promise<void>;
+    /** Plays a list (the 歌单, search results) from one of its songs; which: the kind of list, for the music to go on with after a song the story picks. */
+    musicPlayList(list: MusicTrack[], at?: number, which?: 'library' | 'heard' | 'mixed'): Promise<void>;
+    /** Plays the whole 歌单, 正文点的歌, or both (from a song at random with 随机播放). */
+    musicPlayFrom?(which: 'library' | 'heard' | 'mixed'): Promise<void>;
+    /** 顺序播放, 随机播放 or 单曲循环. */
+    musicMode?(mode: 'order' | 'shuffle' | 'one'): void;
     /** Plays one song; a song given only by name is looked up in the 歌单, then the sources. */
     musicPlay(track: MusicTrack): Promise<void>;
     musicToggle(): Promise<void>;

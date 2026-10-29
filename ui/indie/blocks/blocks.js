@@ -132,7 +132,7 @@ for (const [w, zh] of [['oak', '橡木'], ['spruce', '云杉木'], ['birch', '�
 }
 block('glass_pane', '玻璃板', {tex: {all: 'glass', edge: 'glass_pane_top'}, shape: 'pane', pass: 'cutout', hard: 0.3, drop: null, ...shaped});
 block('iron_bars', '铁栏杆', {tex: all('iron_bars'), shape: 'pane', pass: 'cutout', hard: 5, tool: T.PICK, tier: 0, ...shaped});
-for (const [c, zh, h] of COLORS) block(`${c}_bed`, `${zh}床`, {tex: all('white_wool'), shape: 'bed', hard: 0.2, color: h, use: 'bed', ...shaped});
+for (const [c, zh, h] of COLORS) block(`${c}_bed`, `${zh}床`, {tex: {all: `${c}_bed_foot_up`, top: `${c}_bed_head_up`}, shape: 'bed', hard: 0.2, color: h, use: 'bed', ...shaped});
 // enchanting and repairing: the table (three quarters high, a little light) and the anvil (facing; it wears from new to
 // chipped to damaged, and falls like sand)
 block('enchanting_table', '附魔台', {tex: tbs('enchanting_table_top', 'enchanting_table_bottom', 'enchanting_table_side'), shape: 'enchanting', hard: 5, tool: T.PICK, tier: 0, light: 7, use: 'enchant', blast: 1200, ...shaped});

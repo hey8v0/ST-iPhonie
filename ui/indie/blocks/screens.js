@@ -103,6 +103,7 @@ export class Screens {
     const label = this.api.packLabel();
     this.show(`<h2>材质</h2>
       <p class="note">现在用的：${esc(label || '方块世界自己画的材质')}</p>
+      ${label && this.api.packStale?.() ? '<p class="note" style="color:#ffd76a">这份是以前的版本导入的，只存了当时用到的贴图：后来加的方块和物品、箱子、床这些还是自带的画法。重新选一次同一个 jar（或资源包）就都换上了。</p>' : ''}
       <p class="note">有正版《我的世界》Java 版的话，可以用它自己的材质：选游戏文件夹里 <b>versions/版本号/版本号.jar</b>（比如 .minecraft/versions/26.3/26.3.jar），或者一个资源包 .zip。只读取用得到的贴图，存在这台设备的浏览器里，不会上传，也不会分享给别人；别的设备要用得在那台设备上再选一次。</p>
       <div class="btns"><button class="btn half" data-a="pick">选择文件…</button>${label ? '<button class="btn half" data-a="remove">换回自己的</button>' : ''}</div>
       <div class="bar" hidden><i></i></div><p class="note msg"></p>

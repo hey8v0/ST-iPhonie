@@ -5,7 +5,7 @@ import {PROMPT_BLOCKS, normalizePromptRules} from './prompt-rules.js';
 import { normalizeVn, spriteRequest, castFiles, moveCastFiles } from './vn.js';
 import { currentModel } from './model-files.js';
 import { MomentStore } from './moments-store.js';
-import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, missingLink, trialOnly, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
+import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readGroups, paged, songKey, readLink, missingLink, trialOnly, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
@@ -1381,7 +1381,7 @@ export class TTSBackend {
     // ---------- 音乐 ----------
     /** Music options: {bgm, rule, volume, duck, share, sources}. Sources are checked before they are kept. */
     saveMusic(patch) {
-        const next = this.getState(), allowed = ['bgm', 'rule', 'volume', 'duck', 'share', 'sources'];
+        const next = this.getState(), allowed = ['bgm', 'rule', 'volume', 'duck', 'share', 'sources', 'mode', 'taste'];
         const merged = { ...next.music, ...Object.fromEntries(Object.entries(patch || {}).filter(([key]) => allowed.includes(key))) };
         if (Array.isArray(patch?.sources)) { if (patch.sources.length > MUSIC_LIMITS.sources) throw Error(`最多 ${MUSIC_LIMITS.sources} 个音源`); merged.sources = patch.sources.map((s, i) => validateSource(normalizeSource(s, i))); }
         next.music = normalizeMusic(merged);
@@ -1420,20 +1420,57 @@ export class TTSBackend {
         if (!s) throw Error('这个音源已经不在了');
         return clone(s);
     }
-    /** Searches the enabled sources (or one): {songs: [{source, sourceName, id, title, artist}], errors: [{source, message}]}. */
-    async searchMusic(query, sourceId = '') {
+    /**
+     * Searches the enabled sources (or one) for songs ({songs: [{source, sourceName, id, title, artist}]}) or, with
+     * kind 'album' / 'artist', albums or artists ({groups: [{source, sourceName, kind, id, name, artist, count}]}) — on
+     * the sources that say how. page 0, 1, …: more is true when a source searching in pages gave a full one.
+     */
+    async searchMusic(query, sourceId = '', { kind = 'song', page = 0 } = {}) {
         this.assertOpen();
         const words = String(query || '').trim().slice(0, 100);
-        if (!words) throw Error('写一下想听的歌');
-        const sources = sourceId && typeof sourceId === 'object' ? [this.musicSource(sourceId)] : clone(this.settings.music.sources.filter(s => sourceId ? s.id === sourceId : s.enabled));
-        if (!sources.length) throw Error('还没有能用的音源：先在「音乐 → 设置 → 音源」里添加一个');
-        const songs = [], errors = [];
+        if (!words) throw Error(kind === 'album' ? '写一下专辑名' : kind === 'artist' ? '写一下歌手名' : '写一下想听的歌');
+        const all = sourceId && typeof sourceId === 'object' ? [this.musicSource(sourceId)] : clone(this.settings.music.sources.filter(s => sourceId ? s.id === sourceId : s.enabled));
+        if (!all.length) throw Error('还没有能用的音源：先在「音乐 → 设置 → 音源」里添加一个');
+        const key = kind === 'album' || kind === 'artist' ? kind + 'Search' : 'search', sources = all.filter(s => s[key]);
+        if (!sources.length) throw Error(`音源都不能搜${kind === 'album' ? '专辑' : '歌手'}：在音源设置的「搜专辑和歌手」里填地址（自己搭的网易云后端会自动填好）`);
+        const songs = [], groups = [], errors = [], at = { query: words, offset: page * 30, page: page + 1, limit: 30 };
+        let more = false;
         await Promise.all(sources.map(async s => {
-            try { songs.push(...readSearch(s, await this.musicFetch(fillSource(s.search, { query: words }))).map(x => ({ ...x, sourceName: s.name }))); }
+            try {
+                const json = await this.musicFetch(fillSource(s[key], at));
+                const found = (key === 'search' ? readSearch(s, json) : readGroups(s, json, kind)).map(x => ({ ...x, sourceName: s.name }));
+                (key === 'search' ? songs : groups).push(...found);
+                if (paged(s[key]) && found.length >= 20) more = true;
+            }
             catch (error) { errors.push({ source: s.name, message: error.message }); }
         }));
-        return { songs, errors };
+        return key === 'search' ? { songs, errors, more } : { groups, errors, more };
     }
+    /** The songs of an album or an artist a search found: {songs, more} (page 0, 1, …, for sources that give them in pages). */
+    async groupSongs(sourceId, kind, id, page = 0) {
+        this.assertOpen();
+        const s = this.musicSource(sourceId), template = s[kind === 'artist' ? 'artistSongs' : 'albumSongs'];
+        if (!template) throw Error('这个音源不能取专辑或歌手的歌');
+        const json = await this.musicFetch(fillSource(template, { id, offset: page * 50, page: page + 1, limit: 50 }));
+        const songs = readSearch(s, json, s[kind === 'artist' ? 'artistSongsPath' : 'albumSongsPath']).map(x => ({ ...x, sourceName: s.name }));
+        return { songs, more: paged(template) && songs.length >= 20 };
+    }
+    /** 正文点的歌: the songs the story picked, newest first, each once (the oldest go past MUSIC_LIMITS.heard). */
+    async listHeard() { this.assertOpen(); return this.music.list('heard'); }
+    /** Keeps a song the story picked (again: it moves to the top; once found on a source, where it was found). */
+    async heard(song) {
+        this.assertOpen();
+        const title = String(song?.title || '').trim().slice(0, 200);
+        if (!title) return null;
+        const row = { id: 'heard:' + songKey(song), kind: 'heard', at: Date.now(), title, artist: String(song.artist || '').trim().slice(0, 200) };
+        if (song.source && song.songId) Object.assign(row, { source: String(song.source).slice(0, 60), songId: String(song.songId).slice(0, 200) });
+        else { const old = await this.music.get(row.id).catch(() => null); if (old?.source && old.songId) Object.assign(row, { source: old.source, songId: old.songId }); }
+        await this.music.put([row], { keep: MUSIC_LIMITS.heard });
+        this.emit('music', { heard: true });
+        return row;
+    }
+    async forgetHeard(ids) { for (const id of ids) await this.music.remove(id); this.emit('music', { heard: true }); return true; }
+    async clearHeard() { await this.music.clear('heard'); this.emit('music', { heard: true }); return true; }
     /** A playable link for a song of a source. */
     async musicLink(sourceId, songId, hint = {}) {
         this.assertOpen();
@@ -2289,7 +2326,8 @@ export class TTSBackend {
             },
             assistantMemoryRemove: (id, nodeId) => this.assistantMemoryRevise(id, book => removeNode(book, nodeId)),
             assistantMemoryForget: id => this.assistantMemoryForget(id),
-            saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId) => this.searchMusic(query, clone(sourceId)), musicLink: (sourceId, songId, hint) => this.musicLink(clone(sourceId), songId, clone(hint || {})), musicLyric: (sourceId, songId, hint) => this.musicLyric(sourceId, songId, clone(hint || {})),
+            saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId, options) => this.searchMusic(query, clone(sourceId), clone(options || {})), groupSongs: (sourceId, kind, id, page) => this.groupSongs(sourceId, kind, String(id), Number(page) || 0),
+            listHeard: () => this.listHeard(), forgetHeard: ids => this.forgetHeard([...(ids || [])]), clearHeard: () => this.clearHeard(), musicLink: (sourceId, songId, hint) => this.musicLink(clone(sourceId), songId, clone(hint || {})), musicLyric: (sourceId, songId, hint) => this.musicLyric(sourceId, songId, clone(hint || {})),
             listSongs: () => this.listSongs(), songBlob: id => this.songBlob(id), addSongs: list => this.addSongs(list), updateSong: (id, patch) => this.updateSong(id, clone(patch || {})), deleteSongs: ids => this.deleteSongs([...(ids || [])]),
             saveSounds: patch => this.saveSounds(clone(patch)), listSounds: () => this.listSounds(), soundBlob: id => this.soundBlob(id), addSounds: list => this.addSounds(list), updateSound: (id, patch) => this.updateSound(id, clone(patch || {})), deleteSounds: ids => this.deleteSounds([...(ids || [])]),
             packInfo: () => this.packInfo(), soundMissing: () => this.soundMissing(), dismissMissing: (type, name) => this.dismissMissing(type, name), generateSound: input => this.generateSound(clone(input || {})), exportSounds: (ids, name) => this.exportSounds(ids ? [...ids] : null, name), importSounds: (file, options) => this.importSounds(file, clone(options || {})),

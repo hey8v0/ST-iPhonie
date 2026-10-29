@@ -26,6 +26,19 @@ for (const b of BLOCKS) {
   if (b.tint?.startsWith('#')) TINT_FIXED[b.id] = parseInt(b.tint.slice(1), 16); else TINT[b.id] = b.tint;
 }
 const WATER = ID.water, LAVA = ID.lava, LEAVES = new Uint8Array(N);
+// the game's bed model (26.x, template_bed_head / template_bed_foot): elements of a half lying with its head north;
+// each face [its part of the picture, which picture]
+const BED_HEAD = [
+  {from: [0, 3, 0], to: [16, 9, 16], faces: {down: [[0, 0, 16, 16], 'down'], up: [[0, 0, 16, 16], 'up'], north: [[0, 7, 16, 13], 'north'], west: [[0, 7, 16, 13], 'west'], east: [[0, 7, 16, 13], 'east']}},
+  {from: [0, 0, 0], to: [3, 3, 3], faces: {down: [[6, 13, 9, 16], 'west'], north: [[13, 13, 16, 16], 'north'], south: [[3, 13, 6, 16], 'west'], west: [[0, 13, 3, 16], 'west'], east: [[10, 13, 13, 16], 'north']}},
+  {from: [13, 0, 0], to: [16, 3, 3], faces: {down: [[7, 13, 10, 16], 'east'], north: [[0, 13, 3, 16], 'north'], south: [[10, 13, 13, 16], 'east'], west: [[3, 13, 6, 16], 'north'], east: [[13, 13, 16, 16], 'east']}},
+];
+const BED_FOOT = [
+  {from: [0, 3, 0], to: [16, 9, 16], faces: {down: [[0, 0, 16, 16], 'down'], up: [[0, 0, 16, 16], 'up'], south: [[0, 7, 16, 13], 'south'], west: [[0, 7, 16, 13], 'west'], east: [[0, 7, 16, 13], 'east']}},
+  {from: [0, 0, 13], to: [3, 3, 16], faces: {down: [[7, 13, 10, 16], 'west'], north: [[10, 13, 13, 16], 'west'], south: [[0, 13, 3, 16], 'south'], west: [[13, 13, 16, 16], 'west'], east: [[3, 13, 6, 16], 'south']}},
+  {from: [13, 0, 13], to: [16, 3, 16], faces: {down: [[6, 13, 9, 16], 'east'], north: [[3, 13, 6, 16], 'east'], south: [[13, 13, 16, 16], 'south'], west: [[10, 13, 13, 16], 'south'], east: [[0, 13, 3, 16], 'east']}},
+];
+const TURN = {north: 'east', east: 'south', south: 'west', west: 'north', up: 'up', down: 'down'}, FACE_OF = {east: 0, west: 1, up: 2, down: 3, south: 4, north: 5};
 // the sea's plants stand in water: their cell is drawn with water in it, and water beside them is water to them
 const WET = new Uint8Array(N);
 for (const b of BLOCKS) if (b.water) WET[b.id] = 1;
@@ -161,7 +174,8 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
       }
       // texture coordinates: given ([u0, v0, u1, v1], top left first, as seen from outside), or the game's own rule
       let uv;
-      if (uvs && uvs[f]) { const [u0, v0, u1, v1] = uvs[f]; uv = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]]; }
+      // (a part turned on its face: {uv, rot} quarter turns)
+      if (uvs && uvs[f]) { const q = uvs[f], [u0, v0, u1, v1] = q.uv || q, r = q.rot || 0, base = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]]; uv = [0, 1, 2, 3].map(c => base[(c + r) & 3]); }
       else uv = corners.map(p => AUTO_UV[f](p));
       for (let c = 0; c < 4; c++) out.vert(x + corners[c][0] / 16, y + corners[c][1] / 16, z + corners[c][2] / 16, layer, uv[c][0], uv[c][1], lt * 17, lb * 17, f << 2 | flags << 5, tintC);
     }
@@ -172,6 +186,25 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
     if (both) for (let c = 3; c >= 0; c--) out.vert(pts[c][0], pts[c][1], pts[c][2], layer, uv[c][0], uv[c][1], lt * 17, lb * 17, f << 2 | flags << 5, tintC);
   }
   const UVQ = [[0, 16], [16, 16], [16, 0], [0, 0]];
+  // a bed: the game's model (26.x) for a half lying with its head to the north, turned by the way it lies; each face
+  // its picture's part ([u0, v0, u1, v1]) and which picture (the colour's own, or the shared underside and head end)
+  function bed(out, x, y, z, b, meta) {
+    const head = meta & 4, k = [2, 3, 0, 1][meta & 3], c = b.name.slice(0, -4), half = head ? 'head' : 'foot';
+    const pics = {down: 'bed_down', up: `${c}_bed_${half}_up`, north: 'bed_head_north', south: `${c}_bed_foot_south`, west: `${c}_bed_${half}_west`, east: `${c}_bed_${half}_east`};
+    for (const el of head ? BED_HEAD : BED_FOOT) {
+      let [x0, y0, z0] = el.from, [x1, y1, z1] = el.to;
+      for (let i = 0; i < k; i++) [x0, z0, x1, z1] = [16 - z1, x0, 16 - z0, x1];
+      const uvs = [], layers = [];
+      let mask = 0;
+      for (const [dir, [uv, which]] of Object.entries(el.faces)) {
+        let d = dir;
+        for (let i = 0; i < k; i++) d = TURN[d];
+        const f = FACE_OF[d];
+        uvs[f] = d === 'up' || d === 'down' ? {uv, rot: d === 'up' ? k : (4 - k) & 3} : uv; layers[f] = tex(pics[which]); mask |= 1 << f;
+      }
+      box(out, x, y, z, x0, y0, z0, x1, y1, z1, f => layers[f], WHITE, {faces: mask, uvs, cull: [x1 === 16, x0 === 0, y1 === 16, y0 === 0, z1 === 16, z0 === 0]});
+    }
+  }
   // a block facing one of six ways (FACES in state & 7; 8 on): its front, its back, and the sides — an observer's top
   // (the arrow to its face) on the two sides across its line of sight, a dispenser's or dropper's furnace stone
   const faceTex6 = (b, f, meta) => {
@@ -335,11 +368,13 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
         const pts = [[0, 1], [1, 1], [1, 0], [0, 0]].map(([px, pz]) => [x + px, hy(px, pz), z + pz]), rot = up[0] ? 1 : 0;
         quad(out, pts, layer, [0, 1, 2, 3].map(c => CORNER_UV[(c + rot) & 3]), lt, lb, WHITE, 0, 2, true);
       }
+    } else if (shape === 'bed') {
+      bed(solid, x, y, z, b, meta);
     } else if (PIECED.has(shape)) {
       const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)];
       for (const {box: [x0, y0, z0, x1, y1, z1], role} of pieces(v, near)) {
         const texFor = f => role === 'main' ? (shape === 'pane' && (f === 2 || f === 3) ? tex(b.tex.edge || b.tex.all) : faceTex(b, f, meta))
-          : role === 'door_top' ? tex(b.tex.top) : role === 'door_bottom' ? tex(b.tex.bottom) : role === 'wood' ? tex('oak_planks') : role === 'latch' ? tex('iron_block') : role === 'base' ? tex(b.tex.base) : role === 'post' ? tex(b.tex.post)
+          : role === 'door_top' ? tex(b.tex.top) : role === 'door_bottom' ? tex(b.tex.bottom) : role === 'wood' ? tex('oak_planks') : role === 'latch' ? tex('chest_latch') : role === 'base' ? tex(b.tex.base) : role === 'post' ? tex(b.tex.post)
           : role === 'compost' ? tex('composter_compost') : role === 'ready' ? tex('composter_ready') : role === 'inside' ? tex(b.tex.inside) : tex('white_wool');
         const t = role === 'wool' ? parseInt(b.color.slice(1), 16) : role === 'main' ? tintC : WHITE;
         // a portal's sheet shows no edge where it meets more of itself

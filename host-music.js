@@ -1,7 +1,7 @@
 // 音乐 on the tavern page: one <audio> that plays the 歌单, search results, the story's background music (<bgm>) and
 // songs characters share, so it goes on while the phone is put away. While a voice line plays it is turned down (when
 // 说台词时调小 is on). What is playing is told to the story and the phone chats (一起听), and shown on the island.
-import {parseBgm, bgmRule, musicPromptPlan, listeningNote, parseLyrics, lyricAt, matchScore, MUSIC_LIMITS} from './core/music.js';
+import {parseBgm, bgmRule, musicPromptPlan, listeningNote, parseLyrics, lyricAt, matchScore, songKey, MUSIC_LIMITS} from './core/music.js';
 
 const RECENT_KEY = 'sttts.bgmRecent', PLAYED_KEY = 'sttts.bgmPlayed', DUCK = 0.3;
 const label = t => t ? (t.artist ? `${t.title} - ${t.artist}` : t.title) : '';
@@ -10,6 +10,9 @@ const hash = text => { let h = 0; for (const c of String(text)) h = (h * 31 + c.
 export function createMusicHost({context, settings, backend, notice = () => {}, doc = globalThis.document, AudioClass = globalThis.Audio, storage = globalThis.localStorage}) {
   const opts = () => settings()?.music || {};
   let audio = null, queue = [], index = -1, track = null, phase = 'idle', message = '', lyrics = [], ticket = 0, url = '', voiced = false, closed = false, lastEmit = 0;
+  // which list plays (歌单, 正文点的歌, both): after a song the story picked, the music goes on with it; the order
+  // songs were played in at random (上一首 goes back through it)
+  let from = '', shuffled = [];
   let library = [], soundAt = 0;
   const onSound = () => { soundAt = Date.now(); };
   doc?.addEventListener?.('sttts-sound', onSound);
@@ -31,7 +34,13 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
         if (Date.now() - soundAt < 3000 && !audio.ended) { audio.play().catch(() => set('paused')); return; }
         set('paused');
       });
-      audio.addEventListener('ended', () => { if (track?.from === 'bgm') { audio.currentTime = 0; audio.play().catch(error => set('error', error.message || '背景音乐续播失败')); } else next(); });
+      // A song ends: 单曲循环 plays it again; otherwise the list goes on (after the story's song, the list last played,
+      // or 正文点的歌)
+      audio.addEventListener('ended', () => {
+        if (opts().mode === 'one') { audio.currentTime = 0; audio.play().catch(error => set('error', error.message || '续播失败')); return; }
+        if (track?.from === 'bgm') { goOn().catch(e => notice(e.message)); return; }
+        next(1, true);
+      });
       audio.addEventListener('timeupdate', () => { const now = Date.now(); if (now - lastEmit > 900) emit(); });
       // While loading, start() hears of it (play() fails) and tries the other sources.
       audio.addEventListener('error', () => { if (track && ['playing', 'paused'].includes(phase)) set('error', '这首歌放不出来（链接失效，或者是试听版）'); });
@@ -104,15 +113,49 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     set('error', error.message);
     throw error;
   }
-  /** Plays a list from one of its songs (the 歌单, search results); a single song is a list of one. */
-  function playList(list, at = 0) {
+  /** Plays a list from one of its songs (the 歌单, search results); a single song is a list of one. which: the kind of
+   *  list ('library', 'heard', 'mixed'), for the music to go on with after a song the story picks. */
+  function playList(list, at = 0, which = '') {
     queue = (Array.isArray(list) ? list : [list]).slice(0, MUSIC_LIMITS.songs).map(t => ({...t}));
     index = Math.min(Math.max(0, at), queue.length - 1);
+    shuffled = [index];
+    if (which) from = which;
     return start(queue[index]);
   }
-  function next(step = 1) {
-    if (!queue.length) { stop(); return Promise.resolve(); }
-    index = (index + step + queue.length) % queue.length;
+  /** The songs of a kind of list as tracks: the 歌单, 正文点的歌, or both (each song once). */
+  async function listOf(which) {
+    const mine = which === 'heard' ? [] : await backend.listSongs?.().catch(() => []) || [];
+    const heard = which === 'library' ? [] : await backend.listHeard?.().catch(() => []) || [];
+    const seen = new Set(), out = [];
+    for (const s of [...mine, ...heard]) {
+      const k = songKey(s);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(s.kind === 'heard' ? {title: s.title, artist: s.artist, ...(s.source && s.songId ? {origin: 'source', source: s.source, songId: s.songId} : {})} : s);
+    }
+    return out;
+  }
+  /** Plays a whole list (at random from anywhere in it when 随机播放 is on). */
+  async function playFrom(which) {
+    const list = await listOf(which);
+    if (!list.length) throw Error(which === 'heard' ? '正文还没有点过歌' : '歌单还是空的');
+    return playList(list, opts().mode === 'shuffle' ? Math.floor(Math.random() * list.length) : 0, which);
+  }
+  /** After a song the story picked: the list last played goes on (正文点的歌 when none was), from a song not just played. */
+  async function goOn() {
+    const done = track, list = (await listOf(from || 'heard')).filter(s => songKey(s) !== songKey(done));
+    if (!list.length) { if (audio) { audio.currentTime = 0; return audio.play().catch(error => set('error', error.message || '续播失败')); } return; }
+    return playList(list, opts().mode === 'shuffle' ? Math.floor(Math.random() * list.length) : 0);
+  }
+  function next(step = 1, auto = false) {
+    if (!queue.length) { if (track?.from === 'bgm') return goOn().catch(e => notice(e.message)); stop(); return Promise.resolve(); }
+    const mode = opts().mode;
+    if (auto && mode === 'one') return start(queue[index]).catch(e => notice(e.message));
+    // at random: another song than this one (上一首: back through the ones played)
+    if (mode === 'shuffle' && queue.length > 1) {
+      if (step < 0 && shuffled.length > 1) { shuffled.pop(); index = shuffled.at(-1); }
+      else { let k = index; while (k === index) k = Math.floor(Math.random() * queue.length); index = k; shuffled = [...shuffled, k].slice(-200); }
+    } else index = (index + step + queue.length) % queue.length;
     return start(queue[index]).catch(e => notice(e.message));
   }
   function stop() { ticket++; audio?.pause(); if (audio) audio.removeAttribute('src'); if (url.startsWith('blob:')) URL.revokeObjectURL(url); url = ''; track = null; queue = []; index = -1; lyrics = []; set('idle'); }
@@ -132,7 +175,11 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     if (track?.from === 'bgm' && track.title === want.title && phase === 'playing') return;
     recent = [label(want), ...recent.filter(x => x !== label(want))].slice(0, MUSIC_LIMITS.recent); keep(RECENT_KEY, recent);
     queue = []; index = -1;
-    return start({title: want.title, artist: want.artist, from: 'bgm'});
+    // kept in 正文点的歌 (where it was found too, once it plays)
+    backend.heard?.({title: want.title, artist: want.artist}).catch(() => {});
+    const t = {title: want.title, artist: want.artist, from: 'bgm'};
+    await start(t);
+    if (t.source && t.songId && track === t) backend.heard?.(t).catch(() => {});
   }
   /** A story reply was drawn: with 自动放, its last <bgm> plays (once per version of the reply). */
   async function rendered(id) {
@@ -162,11 +209,13 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
   function status() {
     const position = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0, duration = audio && Number.isFinite(audio.duration) ? audio.duration : 0, at = lyricAt(lyrics, position);
     return {phase, message, track: track ? {title: track.title, artist: track.artist, from: track.from || '', origin: track.origin || '', id: track.id || '', source: track.source || '', songId: track.songId || ''} : null,
-      position, duration, volume: opts().volume ?? 0.6, queue: queue.length, index,
+      position, duration, volume: opts().volume ?? 0.6, queue: queue.length, index, mode: opts().mode || 'order', from,
       lyric: at >= 0 ? lyrics[at].text : '', lyricIndex: at, lyrics: lyrics.map(l => ({at: l.at, text: l.text}))};
   }
   return {
-    playList, next: () => next(1), prev: () => next(-1), toggle, stop, status, rendered, tap, stage, promptPlan,
+    playList, playFrom, next: () => next(1), prev: () => next(-1), toggle, stop, status, rendered, tap, stage, promptPlan,
+    /** 顺序播放, 随机播放 or 单曲循环 (kept in the settings). */
+    setMode(mode) { backend.saveMusic?.({mode}); emit(); },
     play: t => playList([t], 0),
     seek(seconds) { if (audio && Number.isFinite(seconds)) { audio.currentTime = Math.max(0, seconds); emit(); } },
     /** The voice player's phase: music is turned down while a line is voiced. */

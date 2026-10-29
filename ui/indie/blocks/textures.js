@@ -1518,6 +1518,33 @@ BLOCK_ART.sponge = () => sponge(1041, ['#c3b44a', '#cfc052', '#dacb5c', '#e4d76a
 BLOCK_ART.wet_sponge = () => sponge(1042, ['#9a9030', '#a69c36', '#b1a73e', '#8c8228'], '#3e4a28', '#6e6a22');
 // a guardian's beam (tinted as it charges): bright down its middle, bands along it
 BLOCK_ART.guardian_beam = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const c = 1 - Math.abs(x - 7.5) / 8, band = (y % 4 < 2 ? 1 : 0.8); const v = Math.round(255 * Math.min(1, (0.45 + c * 0.6) * band)); p.set(x, y, [v, v, v]); } return p; };
+// a chest's latch (our own: iron; with the game's pictures, cut from its chest)
+BLOCK_ART.chest_latch = () => metal('#d8d8d8', '#f4f4f4', '#9c9c9c');
+// beds, laid out as the game's bed model (26.x): the mattress's band is rows 7–12 of a side, the legs rows 13–15;
+// the head's top has the pillow at its north edge (the top of the picture), the blanket coming up to it; a side's
+// head end is towards the north (on the east side the right, on the west the left)
+const BED_WOOD = ['#8a6034', '#9a6c3c', '#7a5229', '#a87844'];
+function bedPic(base, kind) {
+  const p = pic(), b = hex(base), shade = (c, k) => c.map(v => Math.max(0, Math.min(255, Math.round(v * k)))), white = [236, 236, 230], sheet = [218, 218, 212];
+  const blanket = (x, y) => shade(b, 0.92 + ((x * 7 + y * 13) % 5) * 0.03 - (y % 4 === 0 ? 0.06 : 0)), wood = (x, y) => hex(BED_WOOD[(x * 3 + y * 5) % 4]);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    let c;
+    if (kind === 'down') c = wood(x, y);
+    else if (kind === 'head_up') c = y < 9 ? (x >= 2 && x <= 13 && y >= 2 && y <= 6 ? (x === 2 || x === 13 || y === 2 || y === 6 ? [200, 200, 196] : white) : sheet) : y < 11 ? shade(white, 0.97) : blanket(x, y);
+    else if (kind === 'foot_up') c = y === 15 ? shade(b, 0.75) : blanket(x, y);
+    else if (y >= 13) c = wood(x, y);
+    else if (y < 7) c = [0, 0, 0];
+    // a side's band: the blanket over the white mattress (at the head, the sheet by the pillow)
+    else {
+      const byPillow = (kind === 'head_east' && x >= 10) || (kind === 'head_west' && x <= 5) || kind === 'head_north';
+      c = y <= 9 ? (byPillow ? sheet : blanket(x, y)) : y === 12 ? [180, 180, 174] : white;
+    }
+    p.set(x, y, c, y < 7 && !/up|down/.test(kind) ? 0 : 255);
+  }
+  return p;
+}
+for (const [c, , base] of COLORS) for (const kind of ['head_up', 'head_east', 'head_west', 'foot_up', 'foot_east', 'foot_west', 'foot_south']) BLOCK_ART[`${c}_bed_${kind}`] = () => bedPic(base, kind);
+BLOCK_ART.bed_down = () => bedPic('#ffffff', 'down'); BLOCK_ART.bed_head_north = () => bedPic('#e9ecec', 'head_north');
 BLOCK_ART.sea_lantern = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const edge = x === 0 || y === 0 || x === 15 || y === 15, cross = x === 7 || x === 8 || y === 7 || y === 8; p.set(x, y, hex(edge ? '#8ab4a8' : cross ? '#c8e8e0' : (x + y) % 5 === 0 ? '#f4fffc' : '#dff4ee')); } return p; };
 ITEM_ART.prismarine_shard = () => icon([{mask: mask().poly([[4, 13], [6, 3], [12, 6], [10, 13]]), color: '#63a596', light: '#a6dccd', dark: '#3e7a6c', outline: '#14302a'}]);
 ITEM_ART.prismarine_crystals = () => { const p = icon([{mask: mask().disc(6, 10, 2.6).disc(10.5, 7, 2.4).disc(9, 12, 1.8), color: '#c8ecdf', light: '#ffffff', dark: '#86b4a6', outline: '#2c4a42'}]); for (const [x, y] of [[6, 9], [10, 6]]) p.set(x, y, hex('#ffffff')); return p; };

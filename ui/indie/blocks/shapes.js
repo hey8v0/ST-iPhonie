@@ -128,14 +128,11 @@ export function pieces(v, near = () => 0) {
     case 'door': return [{box: panel(meta & 4 ? (f + 1) % 4 : f), role: meta & 8 ? 'door_top' : 'door_bottom'}];
     case 'trapdoor': return [{box: meta & 4 ? panel(f) : meta & 8 ? [0, 13, 0, 16, 16, 16] : [0, 0, 0, 16, 3, 16], role: 'main'}];
     case 'bed': {
-      const head = meta & 4, legs = [[0, 0, 0, 3, 3, 3], [13, 0, 0, 16, 3, 3], [0, 0, 13, 3, 3, 16], [13, 0, 13, 16, 3, 16]];
-      const out = [{box: [0, 3, 0, 16, 9, 16], role: 'wool'}, ...legs.map(box => ({box, role: 'wood'}))];
-      if (head) {
-        // the pillow lies at the end the bed's head points to
-        const p = [[2, 9, 6, 14, 10, 14], [2, 9, 2, 10, 10, 14], [2, 9, 2, 14, 10, 10], [6, 9, 2, 14, 10, 14]][f];
-        out.push({box: p, role: 'pillow'});
-      }
-      return out;
+      // the game's bed (26.x): a mattress six high on legs three high, two legs at this half's own end (the head's at
+      // the end its head points to, the foot's at the far end)
+      const [dx, dz] = [[0, 1], [-1, 0], [0, -1], [1, 0]][f], s = meta & 4 ? 1 : -1, ex = dx * s, ez = dz * s;
+      const legs = ex ? [[ex > 0 ? 13 : 0, 0, 0], [ex > 0 ? 13 : 0, 0, 13]] : [[0, 0, ez > 0 ? 13 : 0], [13, 0, ez > 0 ? 13 : 0]];
+      return [{box: [0, 3, 0, 16, 9, 16], role: 'bed'}, ...legs.map(([x, y, z]) => ({box: [x, y, z, x + 3, y + 3, z + 3], role: 'bed'}))];
     }
     case 'chest': {
       const latch = [[7, 7, 15, 9, 11, 16], [0, 7, 7, 1, 11, 9], [7, 7, 0, 9, 11, 1], [15, 7, 7, 16, 11, 9]][f];
