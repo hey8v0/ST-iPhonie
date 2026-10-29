@@ -23,8 +23,23 @@ const scaleTo = (d, w, h, size) => {
  * The layers: {size, layers: [Uint8Array], animated: [{layer, frames, time}], from: {name: 'pack' | 'own'}}.
  * pack: Map(name → {w, h, frames: [Uint8Array], time}) or null.
  */
+// a large chest's halves: the chest's picture with its border on one side (l, r, t, b) left out, where the halves meet
+// (a pack's made from its chest; ours are drawn so)
+const SEAMED = /^(chest_(?:top|side|front))_([lrtb])$/;
+function seamless(t, side) {
+  const {w} = t, h = t.frames[0].length / 4 / w, b = Math.max(1, Math.round(w / 16));
+  const frames = t.frames.map(src => {
+    const d = new Uint8Array(src), at = (x, y) => (y * w + x) * 4, copy = (x, y, sx, sy) => d.set(src.subarray(at(sx, sy), at(sx, sy) + 4), at(x, y));
+    for (let k = 0; k < b; k++) for (let i = 0; i < (side === 'l' || side === 'r' ? h : w); i++) {
+      if (side === 'l') copy(k, i, k + b, i); else if (side === 'r') copy(w - 1 - k, i, w - 1 - k - b, i);
+      else if (side === 't') copy(i, k, i, k + b); else copy(i, h - 1 - k, i, h - 1 - k - b);
+    }
+    return d;
+  });
+  return {...t, frames};
+}
 export function buildLayers(pack) {
-  const pick = name => (pack && pack.get(name)) || ownTexture(name);
+  const pick = name => { const m = SEAMED.exec(name); if (m && pack?.get(m[1])) return seamless(pack.get(m[1]), m[2]); return (pack && pack.get(name)) || ownTexture(name); };
   const all = TEXTURE_NAMES.map(pick);
   // one size for all: the largest square frame there is (16 for the game's own, more for HD packs), at most 64
   const size = Math.min(64, Math.max(16, ...all.map(t => t.w)));

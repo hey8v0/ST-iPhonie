@@ -62,6 +62,8 @@ Object.assign(SKINS, {squid: ['entity/squid/squid.png'], glow_squid: ['entity/sq
   pufferfish: ['entity/fish/pufferfish.png'], turtle: ['entity/turtle/turtle.png', 'entity/turtle/big_sea_turtle.png'], armor_turtle: ['entity/equipment/humanoid/turtle_scute.png', 'models/armor/turtle_layer_1.png']});
 // the deep sea's guardians
 Object.assign(SKINS, {guardian: ['entity/guardian/guardian.png', 'entity/guardian.png'], elder_guardian: ['entity/guardian/guardian_elder.png', 'entity/guardian_elder.png']});
+// the drowned (its body, and the rags and weed over it) and the dolphin
+Object.assign(SKINS, {drowned: ['entity/zombie/drowned.png'], drowned_outer: ['entity/zombie/drowned_outer_layer.png'], dolphin: ['entity/dolphin/dolphin.png', 'entity/dolphin.png']});
 // boats: each wood's (the bamboo raft is bamboo's), with a chest in the bigger picture
 for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) { SKINS[`boat_${w}`] = [`entity/boat/${w}.png`]; SKINS[`chest_boat_${w}`] = [`entity/chest_boat/${w}.png`]; }
 const MOON_PHASES = ['full_moon', 'waning_gibbous', 'third_quarter', 'waning_crescent', 'new_moon', 'waxing_crescent', 'first_quarter', 'waxing_gibbous'];

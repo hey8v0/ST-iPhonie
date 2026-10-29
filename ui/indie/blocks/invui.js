@@ -44,9 +44,9 @@ const KINDS = [
   ['use', '功能方块', n => /crafting|furnace|(^|_)chest$|torch|ladder|lantern|glowstone|tnt|bookshelf|_bed$|door|gate|enchanting|anvil|brewing/.test(n)],
   ['redstone', '红石', n => catOf(n) === 'redstone' || ['redstone', 'tnt', 'chest', 'barrel', 'furnace', 'lectern', 'bell', 'oak_door', 'oak_trapdoor', 'oak_fence_gate'].includes(n)],
   ['tools', '工具', n => /_pickaxe|_axe|_shovel|_hoe|bucket|shears|flint_and_steel|minecart|_boat$|_raft$/.test(n)],
-  ['combat', '战斗', n => /_sword|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
+  ['combat', '战斗', n => /_sword|^bow$|^arrow$|^trident$|_helmet|_chestplate|_leggings|_boots/.test(n)],
   ['food', '食物与饮品', n => FOODY(n) || BOTTLES.includes(n)],
-  ['items', '原材料', n => !BLOCKS.find(x => x.name === n) && !FOODY(n) && !BOTTLES.includes(n) && !itemInfo(n)?.spawn && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket|shears|flint_and_steel|minecart|_boat$|_raft$|^bow$|^arrow$|_helmet|_chestplate|_leggings|_boots/.test(n)],
+  ['items', '原材料', n => !BLOCKS.find(x => x.name === n) && !FOODY(n) && !BOTTLES.includes(n) && !itemInfo(n)?.spawn && !/_pickaxe|_axe|_shovel|_hoe|_sword|bucket|shears|flint_and_steel|minecart|_boat$|_raft$|^bow$|^arrow$|^trident$|_helmet|_chestplate|_leggings|_boots/.test(n)],
   ['spawn', '刷怪蛋', n => !!itemInfo(n)?.spawn],
   ['bag', '背包', null],
 ];

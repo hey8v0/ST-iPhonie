@@ -240,6 +240,20 @@ export function treasureNear(seed, x, z, radius = 50) {
   }
   return best;
 }
+/** The nearest shipwreck or ocean ruin within radius (where a dolphin given a fish leads: the game looks 50 chunks
+ *  round), or null: {x, y, z} (its middle). */
+export function wreckNear(seed, x, z, radius = 800) {
+  let best = null, bestD = Infinity;
+  const look = (fn, region, mids) => {
+    for (let rz = Math.floor((z - radius) / region); rz <= Math.floor((z + radius) / region); rz++) for (let rx = Math.floor((x - radius) / region); rx <= Math.floor((x + radius) / region); rx++) {
+      const s = fn(seed, rx, rz);
+      if (s) for (const p of mids(s)) { const d = Math.hypot(p.x - x, p.z - z); if (d <= radius && d < bestD) { bestD = d; best = p; } }
+    }
+  };
+  look(shipwreckIn, SHIP_REGION, s => [{x: s.x0 + (s.turn % 2 ? s.FL : s.FW) / 2, y: s.y + 2, z: s.z0 + (s.turn % 2 ? s.FW : s.FL) / 2}]);
+  look(ruinsIn, RUIN_REGION, r => r.pieces.slice(0, 1).map(p => ({x: p.x0 + p.FW / 2, y: p.y + 1, z: p.z0 + p.FL / 2})));
+  return best;
+}
 
 // ---------- conduits ----------
 const FRAME = new Set(['prismarine', 'prismarine_bricks', 'dark_prismarine', 'sea_lantern'].map(n => ID[n]));

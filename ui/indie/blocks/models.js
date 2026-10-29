@@ -161,6 +161,28 @@ export const MODELS = {
 MODELS.glow_squid = {...MODELS.squid};
 // the elder guardian: the guardian drawn 2.35 times as big (the game's), on its own skin
 MODELS.elder_guardian = {...MODELS.guardian, size: [1.9975, 1.9975], scale: 2.35};
+// the drowned: a zombie of the sea in the game's own humanoid layout (its left arm and leg have places of their own),
+// with an outer layer of rags and weed drawn a little bigger over it; the dolphin (64×64): a long body that pitches the
+// way it swims, the head and its beak, a fin on the back, two at the sides, the tail and its flukes
+const humanoid = (inf = 0) => [
+  part('head', [0, 0], [[-4, -8, -4, 8, 8, 8, inf]], [0, 0, 0], [0, 0, 0], [part('hat', [32, 0], [[-4, -8, -4, 8, 8, 8, inf + 0.5]])]),
+  part('body', [16, 16], [[-4, 0, -2, 8, 12, 4, inf]]),
+  part('arm0', [40, 16], [[-3, -2, -2, 4, 12, 4, inf]], [-5, 2, 0]), part('arm1', [32, 48], [[-1, -2, -2, 4, 12, 4, inf]], [5, 2, 0]),
+  part('leg0', [0, 16], [[-2, 0, -2, 4, 12, 4, inf]], [-1.9, 12, 0]), part('leg1', [16, 48], [[-2, 0, -2, 4, 12, 4, inf]], [1.9, 12, 0]),
+];
+Object.assign(MODELS, {
+  drowned: {skin: [64, 64], size: [0.6, 1.95], parts: humanoid()},
+  drowned_outer: {skin: [64, 64], size: [0.6, 1.95], parts: humanoid(0.25)},
+  dolphin: {skin: [64, 64], size: [0.9, 0.6], parts: [
+    part('body', [22, 0], [[-4, -7, 0, 8, 7, 13]], [0, 22, -5], [0, 0, 0], [
+      part('back_fin', [51, 0], [[-0.5, 0, 8, 1, 4, 5]], [0, 0, 0], [PI / 3, 0, 0]),
+      part('left_fin', [48, 20], [[-0.5, -4, 0, 1, 4, 7, 0, true]], [2, -2, 4], [PI / 3, 0, 2.0943952]),
+      part('right_fin', [48, 20], [[-0.5, -4, 0, 1, 4, 7]], [-2, -2, 4], [PI / 3, 0, -2.0943952]),
+      part('tail', [0, 19], [[-2, -2.5, 0, 4, 5, 11]], [0, -2.5, 11], [-0.10471976, 0, 0], [part('tail_fin', [19, 20], [[-5, -0.5, 0, 10, 1, 6]], [0, 0, 9])]),
+      part('head', [0, 0], [[-4, -3, -3, 8, 7, 6]], [0, -4, -3], [0, 0, 0], [part('nose', [0, 13], [[-1, 2, -7, 2, 2, 4]])]),
+    ]),
+  ]},
+});
 // worn armour over the player, in the game's 64×32 layouts: the outer one (helmet, chestplate, boots) and the inner one
 // (leggings); each piece draws only its parts
 export const ARMOR_MODELS = {
@@ -221,12 +243,20 @@ export function animate(kind, rot, pose) {
     set('leg0', swing()); set('leg1', swing(PI)); set('body', PI / 2);
     const f = pose.fall ? (Math.sin(pose.age * 1.8) + 1) * 0.9 : 0;
     set('wing0', 0, 0, f); set('wing1', 0, 0, -f);
-  } else if (kind === 'zombie' || kind === 'skeleton') {
-    const aim = kind === 'skeleton' && pose.aim;
-    const arms = kind === 'zombie' ? -PI / 2 + Math.sin(pose.age * 0.067) * 0.05 - (pose.attack || 0) * 0.6 : aim ? -PI / 2 : swing(PI) * 0.5;
+  } else if (kind === 'zombie' || kind === 'skeleton' || kind === 'drowned' || kind === 'drowned_outer') {
+    const aim = kind === 'skeleton' && pose.aim, zombie = kind !== 'skeleton';
+    const arms = zombie ? -PI / 2 + Math.sin(pose.age * 0.067) * 0.05 - (pose.attack || 0) * 0.6 : aim ? -PI / 2 : swing(PI) * 0.5;
     set('arm0', aim ? -PI / 2 + head[0] : arms, aim ? -0.1 + head[1] : 0, Math.cos(pose.age * 0.09) * 0.05 + 0.05);
-    set('arm1', kind === 'zombie' ? arms : aim ? -PI / 2 + head[0] : swing() * 0.5, aim ? 0.5 + head[1] : 0, -Math.cos(pose.age * 0.09) * 0.05 - 0.05);
+    set('arm1', zombie ? arms : aim ? -PI / 2 + head[0] : swing() * 0.5, aim ? 0.5 + head[1] : 0, -Math.cos(pose.age * 0.09) * 0.05 - 0.05);
     set('leg0', swing() * 0.8); set('leg1', swing(PI) * 0.8);
+    // a drowned: its trident raised to throw (the game's: the arm half way, then back over the head); swimming after
+    // someone, its arms reach over its head and its legs kick
+    if (pose.spear) rot.arm0 = [rot.arm0[0] * 0.5 - PI, 0, rot.arm0[2]];
+    if (pose.swim && zombie) {
+      const k = Math.sin(0.1 * pose.age);
+      rot.arm0 = [-2.5132742 + k * 0.35, 0, -0.15]; rot.arm1 = [-2.5132742 - k * 0.35, 0, 0.15];
+      rot.leg0[0] += k * 0.55; rot.leg1[0] -= k * 0.55; head[0] = 0;
+    }
   } else if (kind === 'player') {
     // arms swing against the legs; a hit swings the right arm down and across; sitting in a boat or a minecart the legs
     // are out in front and the arms a little forward (the game's)
@@ -235,6 +265,9 @@ export function animate(kind, rot, pose) {
     set('arm1', walk(0) + sit, 0, -0.05 - Math.cos(pose.age * 0.09) * 0.03);
     if (pose.riding) { set('leg0', -1.4137167, PI / 10, 0.07853982); set('leg1', -1.4137167, -PI / 10, -0.07853982); }
     else { set('leg0', walk(0) * 1.4); set('leg1', walk(PI) * 1.4); }
+    // drawing a bow: both arms out at what they look at; a trident drawn back: raised over the head
+    if (pose.bow) { set('arm0', -PI / 2 + head[0], -0.1 + head[1], 0); set('arm1', -PI / 2 + head[0], 0.5 + head[1], 0); }
+    if (pose.spear) rot.arm0 = [rot.arm0[0] * 0.5 - PI, 0, rot.arm0[2]];
   } else if (BOAT_MODELS[kind]) {
     // the paddles row round (pose.paddles: how far each has gone round; the game's)
     const lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
@@ -282,6 +315,12 @@ export function animate(kind, rot, pose) {
     // flippers: rowing in the water, paddling slowly on land
     const sw = Math.cos(pose.limb * (pose.swim ? 0.6662 * 0.6 : 0.6662 * 5)) * (pose.swim ? 0.5 : 0.25) * Math.max(pose.amount, pose.swim ? 0.6 : 0);
     set('leg0', sw, 0, 0); set('leg1', -sw, 0, 0); set('leg2', 0, 0, sw); set('leg3', 0, 0, -sw);
+  } else if (kind === 'dolphin') {
+    // the whole body pitched the way it swims (the head with it); swimming, it rocks and its tail beats (the game's)
+    const w = Math.cos(pose.age * 0.3), moving = pose.amount > 0.05 || pose.swim;
+    set('body', (pose.headPitch || 0) + (moving ? -0.05 - 0.05 * w : 0), pose.headYaw || 0, 0);
+    head[0] = 0; head[1] = 0;
+    set('tail', moving ? -0.1 * w : -0.10471976); set('tail_fin', moving ? -0.2 * w : 0);
   } else if (kind === 'ghast') {
     for (let i = 0; i < 9; i++) set(`tentacle${i}`, 0.2 * Math.sin(pose.age * 0.3 + i) + 0.4);
   } else if (kind === 'blaze') {
@@ -354,6 +393,26 @@ export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}
   };
   for (const p of m.parts) if (!only || only.includes(p.name)) walk(p, ID3, rot[`@${p.name}`] || p.pivot);
   return out;
+}
+/**
+ * A model's hand, for what it holds: {at: the fist, placed as buildModel places the model (relative to the camera); ax:
+ * the arm's own three directions (x across, y down the arm, z back) in the world, each a model unit long}. arm: a
+ * part's name ('arm0' the right arm, 'arm1' the left); null if the model has none.
+ */
+export function handFrame(kind, rot, {x, y, z, yaw, s = 1, roll = 0}, arm) {
+  const p = MODELS[kind]?.parts.find(q => q.name === arm);
+  if (!p) return null;
+  const R = rotZYX(rot[arm] || p.rot), pv = rot[`@${arm}`] || p.pivot, [bx, by, bz, w, h, d] = p.boxes[0];
+  // the fist: the middle of the arm's end, a pixel in
+  const r = mul3(R, [bx + w / 2, by + h - 1, bz + d / 2]), fist = [pv[0] + r[0], pv[1] + r[1], pv[2] + r[2]];
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll), k = s / 16;
+  // (the model's space to the world's as buildModel does it: x and y turned over, the feet at 24, the roll, the turn)
+  const toWorld = (v, point) => {
+    let lx = -v[0] * k, ly = ((point ? 24 : 0) - v[1]) * k, lz = v[2] * k;
+    if (roll) { const nx = lx * cr - ly * sr; ly = lx * sr + ly * cr; lx = nx; }
+    return [(point ? x : 0) + lx * cy + lz * sy, (point ? y : 0) + ly, (point ? z : 0) - lx * sy + lz * cy];
+  };
+  return {at: toWorld(fist, true), ax: [0, 1, 2].map(i => toWorld([R[i], R[3 + i], R[6 + i]], false))};
 }
 
 // ---------- our own skins ----------
@@ -572,6 +631,35 @@ Object.assign(OWN_SKINS, {
   }),
   guardian: () => guardianSkin(81, ['#5d8c7c', '#55806f', '#669888', '#4e7868'], ['#e07a3a', '#c86a2e', '#d4733a'], ['#3e6a5c', '#365e52']),
   elder_guardian: () => guardianSkin(82, ['#cfcbb8', '#c4c0ad', '#d9d5c2', '#bab6a3'], ['#7a7c98', '#6a6c88', '#86889e'], ['#9a9786', '#8e8b7a']),
+  // ours: a drowned's blue-green flesh, a torn sea-blue shirt, ragged trousers, bare shins and feet, pale glowing eyes
+  drowned: () => skin(64, 64, 86, ({px, area, box, front, hex, r}) => {
+    const flesh = ['#4f8c82', '#467f76', '#58968c', '#3f766d'], shirt = ['#4a7c86', '#43717a', '#52868f'], pants = ['#35506a', '#2f4860', '#3a5874'];
+    box(0, 0, 8, 8, 8, flesh); box(16, 16, 8, 12, 4, shirt); box(40, 16, 4, 12, 4, flesh); box(32, 48, 4, 12, 4, flesh);
+    box(0, 16, 4, 12, 4, pants); box(16, 48, 4, 12, 4, pants);
+    for (let k = 0; k < 26; k++) px(16 + Math.floor(r() * 24), 20 + Math.floor(r() * 12), hex(flesh[k % 4]));
+    for (const [u, v] of [[0, 16], [16, 48]]) { area(u, v + 11, 16, 5, flesh); area(u + 8, v, 4, 4, flesh); }
+    const [fx, fy] = front(0, 0, 8, 8);
+    area(fx + 1, fy + 3, 2, 1, ['#a8f0ff']); area(fx + 5, fy + 3, 2, 1, ['#a8f0ff']); area(fx + 2, fy + 6, 4, 1, ['#20403a']);
+    px(fx + 1, fy + 2, hex('#2c5a52')); px(fx + 6, fy + 2, hex('#2c5a52'));
+  }),
+  // over it only weed — strands hanging down the head, body, arms and legs, some lying on the head — the rest clear
+  drowned_outer: () => skin(64, 64, 87, ({px, hex, r}) => {
+    const weed = ['#3e7a2c', '#4b8a36', '#335f24', '#5a9a40'];
+    for (const [u, v, w, h, d, n] of [[0, 0, 8, 8, 8, 14], [16, 16, 8, 12, 4, 10], [40, 16, 4, 12, 4, 5], [32, 48, 4, 12, 4, 5], [0, 16, 4, 12, 4, 4], [16, 48, 4, 12, 4, 4]]) {
+      for (let k = 0; k < n; k++) { const x = u + Math.floor(r() * 2 * (w + d)), len = 2 + Math.floor(r() * Math.min(h - 1, 6)); for (let y = 0; y < len; y++) px(x, v + d + y, hex(weed[(k + y) % 4])); }
+    }
+    for (let k = 0; k < 12; k++) px(8 + Math.floor(r() * 8), Math.floor(r() * 8), hex(weed[k % 4]));
+  }),
+  // ours: a dolphin blue-grey above, pale beneath (its belly, the underside of its beak and tail), dark eyes
+  dolphin: () => skin(64, 64, 88, ({px, area, box, hex}) => {
+    const back = ['#6c7d98', '#647590', '#7486a2'], belly = ['#cdd6e2', '#c4cdda', '#d6dee8'], fin = ['#5c6c86', '#566580'];
+    box(22, 0, 8, 7, 13, back); box(0, 0, 8, 7, 6, back); box(0, 13, 2, 2, 4, back); box(0, 19, 4, 5, 11, back);
+    box(19, 20, 10, 1, 6, fin); box(51, 0, 1, 4, 5, fin); box(48, 20, 1, 4, 7, fin);
+    area(43, 0, 8, 13, belly); area(14, 0, 8, 6, belly); area(6, 13, 2, 4, belly); area(15, 19, 4, 11, belly);
+    area(22, 17, 42, 3, belly); area(0, 11, 28, 2, belly); area(0, 33, 30, 2, belly); area(0, 18, 12, 1, belly);
+    for (const x of [3, 16]) { px(x, 9, hex('#15171d')); px(x, 8, hex('#2a2e38')); px(x + (x === 3 ? 1 : -1), 9, hex('#1c1f27')); }
+    px(4, 8, hex('#e8eef6')); px(15, 8, hex('#e8eef6'));
+  }),
 });
 /** A guardian's skin (the game's 64×64 layout): its body in one colour with patches of another, a darker face round the
  *  eye, pale spikes with darker tips, the eye pink with a light glint, the tail striped with the patches' colour. */
@@ -640,7 +728,7 @@ export function ownBoat(wood, withChest) {
     }
   });
 }
-export const MOB_KINDS =Object.keys(MODELS).filter(k => k !== 'sheep_wool' && k !== 'player');
+export const MOB_KINDS = Object.keys(MODELS).filter(k => k !== 'sheep_wool' && k !== 'drowned_outer' && k !== 'player');
 // our armour pictures, one per material and layer (1: helmet, chestplate, boots; 2: leggings), only where it is worn
 const ARMOR_PAL = {turtle: ['#4a9a3a', '#56a644', '#3e8a30', '#62b250'], leather: ['#8f5530', '#9c5e36', '#a8683c', '#7e4a29'], chainmail: ['#8a8a8a', '#a2a2a2', '#6e6e6e', '#b8b8b8'], iron: ['#c6c6c6', '#d4d4d4', '#b8b8b8', '#e2e2e2'],
   golden: ['#e9c33a', '#f2d24e', '#d9ae2a', '#fae27a'], diamond: ['#4fd1cb', '#62e0d9', '#3fbcb6', '#8ff0ea']};

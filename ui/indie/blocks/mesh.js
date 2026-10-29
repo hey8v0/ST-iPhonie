@@ -214,6 +214,14 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
     if (t.back) return [tex((vert ? f === 4 || f === 5 : f === 2 || f === 3) ? t.top : t.side), rotTo(f, F)];
     return [tex(vert || f === 2 || f === 3 ? t.top : t.side), 0];
   };
+  // the game's texture directions on each face (AUTO_UV): which way u and v run in the world
+  const UV_DIR = [[[0, 0, -1], [0, -1, 0]], [[0, 0, 1], [0, -1, 0]], [[1, 0, 0], [0, 0, 1]], [[1, 0, 0], [0, 0, -1]], [[1, 0, 0], [0, -1, 0]], [[-1, 0, 0], [0, -1, 0]]];
+  /** A large chest's half: its face's picture with no border on the side where the other half is (seam: [x, z]). */
+  const halfTex = (b, f, meta, [sx, sz]) => {
+    const t = b.tex, name = f === 2 ? t.top : f === 3 ? t.bottom : f === FRONT[meta & 3] ? t.front : t.side, [u, w] = UV_DIR[f];
+    const du = u[0] * sx + u[2] * sz, dv = w[0] * sx + w[2] * sz, side = du > 0 ? 'r' : du < 0 ? 'l' : dv > 0 ? 'b' : dv < 0 ? 't' : '';
+    return tex(side ? `${name}_${side}` : name);
+  };
   const faceTex = (b, f, meta) => {
     const t = b.tex;
     if (!t) return -1;
@@ -375,13 +383,15 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
       box(out, x, y, z, 5, 5, 5, 11, 11, 11, () => tex(b.tex.all), WHITE, {uvs: Array(6).fill([0, 0, 16, 16])});
     } else if (PIECED.has(shape)) {
       const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)];
-      for (const {box: [x0, y0, z0, x1, y1, z1], role} of pieces(v, near)) {
-        const texFor = f => role === 'main' ? (shape === 'pane' && (f === 2 || f === 3) ? tex(b.tex.edge || b.tex.all) : faceTex(b, f, meta))
+      for (const {box: [x0, y0, z0, x1, y1, z1], role, seam} of pieces(v, near)) {
+        const texFor = f => role === 'half' ? halfTex(b, f, meta, seam) : role === 'main' ? (shape === 'pane' && (f === 2 || f === 3) ? tex(b.tex.edge || b.tex.all) : faceTex(b, f, meta))
           : role === 'door_top' ? tex(b.tex.top) : role === 'door_bottom' ? tex(b.tex.bottom) : role === 'wood' ? tex('oak_planks') : role === 'latch' ? tex('chest_latch') : role === 'base' ? tex(b.tex.base) : role === 'post' ? tex(b.tex.post)
           : role === 'compost' ? tex('composter_compost') : role === 'ready' ? tex('composter_ready') : role === 'inside' ? tex(b.tex.inside) : tex('white_wool');
-        const t = role === 'wool' ? parseInt(b.color.slice(1), 16) : role === 'main' ? tintC : WHITE;
+        const t = role === 'wool' ? parseInt(b.color.slice(1), 16) : role === 'main' || role === 'half' ? tintC : WHITE;
         // a portal's sheet shows no edge where it meets more of itself
-        const faces = shape === 'portal' ? FACE.reduce((m, F, f) => (pad[at(x + F.n[0], y + F.n[1], z + F.n[2])] & 0xFFF) === id ? m & ~(1 << f) : m, 63) : 63;
+        // (a large chest's half has no face where it meets the other)
+        const faces = shape === 'portal' ? FACE.reduce((m, F, f) => (pad[at(x + F.n[0], y + F.n[1], z + F.n[2])] & 0xFFF) === id ? m & ~(1 << f) : m, 63)
+          : seam ? 63 & ~(1 << FACE.findIndex(F => F.n[0] === seam[0] && F.n[1] === 0 && F.n[2] === seam[1])) : 63;
         box(out, x, y, z, x0, y0, z0, x1, y1, z1, texFor, t, {faces, cull: [x1 === 16, x0 === 0, y1 === 16, y0 === 0, z1 === 16, z0 === 0]});
       }
     } else if (shape === 'cross') {

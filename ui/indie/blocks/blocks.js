@@ -536,7 +536,10 @@ item('glow_ink_sac', '荧光墨囊');
 for (const [f, zh] of [['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚']]) item(`${f}_bucket`, `${zh}桶`, {stack: 1, pour: 'water', fish: f});
 item('turtle_scute', '海龟鳞甲'); item('nautilus_shell', '鹦鹉螺壳');
 item('turtle_helmet', '海龟壳', {stack: 1, armor: {slot: 0, mat: 'turtle', points: 2, tough: 0, uses: 275}, enchantability: 9, repair: 'turtle_scute'});
-for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟'], ['guardian', '守卫者'], ['elder_guardian', '远古守卫者']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
+// the trident (the drowned's): thrown with held use, or a weapon in the hand; its enchantments (enchant.js) bring it
+// back, throw its holder through water or rain instead, call lightning down in a storm, hurt the sea's creatures more
+item('trident', '三叉戟', {stack: 1, tool: {kind: 'trident', tier: -1, speed: 1, uses: 250}, damage: 9, enchantability: 1});
+for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟'], ['guardian', '守卫者'], ['elder_guardian', '远古守卫者'], ['drowned', '溺尸'], ['dolphin', '海豚']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
 
 // the sea's treasure and what finds the way: the heart of the sea (buried treasure) and the conduit made with it — a
 // small block that, in water and framed with prismarine, gives 潮涌能量 round it (put into water it stands in the water,

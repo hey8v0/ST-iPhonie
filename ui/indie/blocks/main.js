@@ -3,7 +3,7 @@
 // kept by the worker (world.worker.js) and drawn by render.js.
 import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE, BOAT_WOODS, WATERLOGGED} from './blocks.js';
 import {Mobs, MOBS} from './mobs.js';
-import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat} from './models.js';
+import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat, handFrame} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
 import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds, dials} from './atlas.js';
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
@@ -29,7 +29,7 @@ import {spawnPoint, BIOMES} from './gen.js';
 import {findFrame, portalFill, across, nearestPortal, SEARCH} from './portal.js';
 import {applyPotion, addEffect, effectsTick, speedFactor, hitBonus, EFFECTS, levelName, brewTick, swirlColor, potionColor} from './brew.js';
 import {lootChest, STEWS} from './loot.js';
-import {treasureNear, conduitFrame} from './ocean.js';
+import {treasureNear, conduitFrame, wreckNear} from './ocean.js';
 import {Maps} from './maps.js';
 
 const $ = s => document.querySelector(s);
@@ -79,6 +79,8 @@ async function loadTextures() {
   built = buildLayers(textures);
   renderer.setTextures(built.size, built.layers);
   icons = makeIcons(built);
+  // (held things are drawn from the pictures' clear pixels)
+  heldVerts.clear();
   renderer.setImage('sun', sky.sun || ownSun(), {linear: false});
   renderer.setImage('moon', sky.moon || ownMoon());
   renderer.setImage('clouds', sky.clouds || ownClouds(), {repeat: true});
@@ -206,6 +208,8 @@ function startWorld(meta) {
   ents.load(meta.items);
   ents.onPickup = () => play('pop');
   G.herds = new Set(meta.herds || []);
+  // large chests: their two halves share their 54 slots again (a save keeps them twice)
+  for (const [k, t] of Object.entries(G.tiles)) if (t.half === 'right' && G.tiles[t.pair]?.pair === k && G.tiles[t.pair].slots?.length === 54) t.slots = G.tiles[t.pair].slots;
   // chests the land was made with, not opened yet: their loot tables; the world's maps
   G.loot = meta.loot || {};
   G.maps = new Maps(meta.maps, blockColor);
@@ -233,6 +237,8 @@ function startWorld(meta) {
     nether: () => G.dim === 'nether', seed: meta.seed, invisible: () => !!G.effects.invisibility,
     difficulty: () => meta.difficulty || 'normal', spawning: () => (meta.rules || defaultRules()).doMobSpawning,
     monuments: (x, z) => G.dim === 'nether' ? [] : monumentsNear(meta.seed, Math.floor(x), Math.floor(z), 16), effectOf: id => G.effects[id] || null, curse: () => curse(),
+    strike: (x, y, z) => strike(x, y, z), thundering: () => G.weather.thundering && G.weather.thunder > 0.5, wreck: (x, z) => G.dim === 'nether' ? null : wreckNear(meta.seed, x, z),
+    swimming: () => G.body.inWater && !G.riding && Math.hypot(G.body.x - G.body.prev.x, G.body.z - G.body.prev.z) > 0.02,
   });
   G.mobs.load(meta.mobs);
   // minecarts (kept in the save like the animals)
@@ -473,6 +479,51 @@ function drinkMilk() {
   play('burp'); drawHud(true); drawEffects();
 }
 /** An effect from food (a golden apple's); 伤害吸收 gives its golden hearts at once (two a level). */
+// ---------- large chests ----------
+/** Which half of a large chest a chest put at (x, y, z) facing f makes (1 the left, 2 the right, as seen from in
+ *  front) with a single chest of the same facing beside it; 0 when there is none. */
+function chestHalf(x, y, z, f) {
+  const [fx, fz] = DIR[f], lx = -fz, lz = fx;
+  for (const [dx, dz, half] of [[lx, lz, 2], [-lx, -lz, 1]]) {
+    const n = G.mirror.get(x + dx, y, z + dz);
+    if (BLOCKS[n & 0xFFF].use === 'chest' && (n >>> 12 & 3) === f && !(n >>> 14 & 3)) return half;
+  }
+  return 0;
+}
+/** A chest put down as a large chest's half: the other half becomes the other side, and the two share 54 slots (the
+ *  left half's 27 first). */
+function pairChest(x, y, z) {
+  const v = G.mirror.get(x, y, z), meta = v >>> 12, half = meta >> 2 & 3;
+  if (half !== 1 && half !== 2) return;
+  const [fx, fz] = DIR[meta & 3], [sx, sz] = half === 1 ? [fz, -fx] : [-fz, fx], px = x + sx, pz = z + sz, pv = G.mirror.get(px, y, pz);
+  if (BLOCKS[pv & 0xFFF].use !== 'chest') { setBlock(x, y, z, withMeta(v & 0xFFF, meta & 3)); return; }
+  setBlock(px, y, pz, withMeta(pv & 0xFFF, (pv >>> 12 & 3) | (3 - half) << 2));
+  const k = `${x},${y},${z}`, pk = `${px},${y},${pz}`, mine = G.tiles[k], other = G.tiles[pk] ||= {kind: 'chest', slots: lootOf(pk, px, y, pz) || new Array(27).fill(null)};
+  const [left, right] = half === 1 ? [mine, other] : [other, mine], slots = [...left.slots.slice(0, 27), ...right.slots.slice(0, 27)];
+  Object.assign(left, {slots, half: 'left', pair: half === 1 ? pk : k});
+  Object.assign(right, {slots, half: 'right', pair: half === 1 ? k : pk});
+}
+/** A large chest's half on its own again: its own 27 slots kept (the other half's to it, the other half a chest of its
+ *  own with its 27). */
+function unpairChest(k, tile) {
+  const other = G.tiles[tile.pair], own = tile.half === 'left' ? tile.slots.slice(0, 27) : tile.slots.slice(27, 54);
+  if (other?.pair === k) {
+    other.slots = other.half === 'left' ? tile.slots.slice(0, 27) : tile.slots.slice(27, 54);
+    const [ox, oy, oz] = tile.pair.split(',').map(Number), ov = G.mirror.get(ox, oy, oz);
+    if (BLOCKS[ov & 0xFFF].use === 'chest') setBlock(ox, oy, oz, withMeta(ov & 0xFFF, ov >>> 12 & 3));
+    delete other.pair; delete other.half;
+  }
+  tile.slots = own.length === 27 ? own : new Array(27).fill(null); delete tile.pair; delete tile.half;
+}
+/** What a chest opens: its own 27, or a large chest's 54 (its two halves'); a half whose other half is gone is a
+ *  chest of its own again. */
+function chestView(k, tile, t) {
+  if (!tile.pair) return tile;
+  if (G.tiles[tile.pair]?.pair === k && G.tiles[tile.pair].slots === tile.slots && (t.v >>> 14 & 3)) return {kind: 'chest', slots: tile.slots, title: '大型箱子'};
+  unpairChest(k, tile);
+  setBlock(t.x, t.y, t.z, withMeta(t.v & 0xFFF, t.v >>> 12 & 3));
+  return tile;
+}
 /** A chest the land was made with, opened (or broken) for the first time: its things from its loot table (null when it
  *  is not one). A treasure map in it leads to the buried treasure nearest the chest. */
 function lootOf(k, x, y, z) {
@@ -831,7 +882,12 @@ function strike(x, y, z) {
   const b = G.body, d = Math.hypot(b.x - x, b.z - z);
   play('thunder', 0, Math.max(0.35, 1 - d / 96));
   if (d < 3 && Math.abs(b.y - y) < 4) hurt(5, '被闪电击中了', null, 'lightning');
-  for (const m of G.mobs.list) if (!m.dead && Math.hypot(m.x - x, m.z - z) < 3 && Math.abs(m.y - y) < 4) { G.mobs.hurt(m, 5, null, 'lightning'); m.fire = 160; }
+  for (const m of [...G.mobs.list]) {
+    if (m.dead || Math.hypot(m.x - x, m.z - z) >= 3 || Math.abs(m.y - y) >= 4) continue;
+    // a pig struck becomes a zombified piglin (the game's)
+    if (m.kind === 'pig') { G.mobs.list.splice(G.mobs.list.indexOf(m), 1); G.mobs.add('zombified_piglin', m.x, m.y, m.z, {yaw: m.yaw}); continue; }
+    G.mobs.hurt(m, 5, null, 'lightning'); m.fire = 160;
+  }
 }
 
 // ---------- held item, hotbar ----------
@@ -872,6 +928,8 @@ function breakBlock(t) {
   const k = `${x},${y},${z}`;
   if (G.loot[k]) G.tiles[k] = {kind: 'chest', slots: lootOf(k, x, y, z)};
   const tile = G.tiles[k];
+  // a large chest's half: its own 27 go out, and the other half is a chest of its own again
+  if (tile?.pair) unpairChest(k, tile);
   if (tile) { for (const s of tile.slots || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; if (G.fills.has(k)) { G.fills.delete(k); G.worker.postMessage({type: 'fill', x, y, z, level: null}); } }
   G.ents.burst(x, y, z, v, 28);
   play('break', v);
@@ -970,6 +1028,8 @@ function placeFrom(t, stack) {
     if (['wire', 'plate', 'repeater', 'comparator', 'rail'].includes(b.shape) && !(ub.opaque || (ub.shape === 'slab' && G.mirror.get(x, y - 1, z) >>> 12 >= 1) || ub.name === 'hopper')) return false;
     if (b.shape === 'lever' || b.shape === 'button') { const [ax, ay, az] = FACES[ATTACHED[meta & 7]]; if (!BLOCKS[G.mirror.get(x + ax, y + ay, z + az) & 0xFFF].opaque) return false; }
     if ((b.shape === 'torch' && meta === 0) && !ub.opaque && ub.shape !== 'slab') return false;
+    // a chest beside a single chest of the same facing (not sneaking) makes a large chest with it
+    if (b.use === 'chest' && !G.body.sneaking) { const half = chestHalf(x, y, z, meta & 3); if (half) meta = (meta & 3) | half << 2; }
     // put into still water, what can stand in water does (a fence, a slab, a chest, the conduit …)
     const wl = WATERLOGGED[b.id], wv = G.mirror.get(x, y, z);
     if (wl && (wv & 0xFFF) === ID.water && !(wv >>> 12)) v = withMeta(wl, meta);
@@ -995,7 +1055,7 @@ function makeTile(x, y, z, b) {
   delete G.loot[`${x},${y},${z}`];
   if (b?.shape === 'conduit') G.tiles[`${x},${y},${z}`] = {kind: 'conduit'};
   if (b?.use === 'furnace') G.tiles[`${x},${y},${z}`] = {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0};
-  if (b?.use === 'chest') G.tiles[`${x},${y},${z}`] = {kind: 'chest', slots: new Array(27).fill(null)};
+  if (b?.use === 'chest') { G.tiles[`${x},${y},${z}`] = {kind: 'chest', slots: new Array(27).fill(null)}; pairChest(x, y, z); }
   if (b?.use === 'enchant') G.tiles[`${x},${y},${z}`] = {kind: 'enchant'};
   if (b?.use === 'dispenser') G.tiles[`${x},${y},${z}`] = {kind: 'dispenser', slots: new Array(9).fill(null), title: b.zh, cols: 3};
   if (b?.use === 'hopper') G.tiles[`${x},${y},${z}`] = {kind: 'hopper', slots: new Array(5).fill(null), title: '漏斗', cols: 5};
@@ -1162,11 +1222,13 @@ function getOff() {
 /** The use action (right click / tap / LT) on what is aimed at: a mob (feed, shear; a tap on a phone hits), or a block. */
 function use(t, mob = null) {
   const s = held(), info = s ? itemInfo(s.id) : null, b = t ? BLOCKS[t.v & 0xFFF] : null;
-  if (info?.tool?.kind === 'bow') return;
+  if (info?.tool?.kind === 'bow' || info?.tool?.kind === 'trident') return;
   G.swing = 6;
   if (mob?.isCart) { cartUse(mob, s); return; }
   if (mob?.isBoat) { boatUse(mob); return; }
   if (mob) {
+    // a fish for a dolphin: it shows the way to a wreck
+    if ((s?.id === 'cod' || s?.id === 'salmon') && mob.kind === 'dolphin' && !mob.dead) { G.mobs.feedDolphin(mob); useUp(); return; }
     if (s && mob.def.breed?.includes(s.id) && !mob.baby && !mob.love && !mob.loveWait) { mob.love = 600; useUp(); G.ents.puff(mob.x, mob.y + 1, mob.z, 'heart'); return; }
     if (s && mob.def.breed?.includes(s.id) && mob.baby) { mob.grow += 2400; useUp(); G.ents.puff(mob.x, mob.y + 0.6, mob.z, 'meal'); return; }
     if (info?.tool?.kind === 'shears' && mob.kind === 'sheep' && !mob.sheared && !mob.baby) {
@@ -1408,7 +1470,7 @@ function openBlock(kind, t) {
   // a smoker or a blast furnace is a furnace of its own kind
   const type = BLOCKS[t.v & 0xFFF].cook;
   if (kind === 'furnace') invUI.show('furnace', G.tiles[k] ||= {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0, ...(type ? {type} : {})});
-  if (kind === 'chest') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: lootOf(k, t.x, t.y, t.z) || new Array(27).fill(null)});
+  if (kind === 'chest') invUI.show('chest', chestView(k, G.tiles[k] ||= {kind: 'chest', slots: lootOf(k, t.x, t.y, t.z) || new Array(27).fill(null)}, t));
   if (kind === 'barrel') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: new Array(27).fill(null), title: '木桶'});
   if (kind === 'enchant') { G.tiles[k] ||= {kind: 'enchant'}; invUI.show('enchant', {pos: {x: t.x, y: t.y, z: t.z}, shelves: shelvesAround((x, y, z) => G.mirror.get(x, y, z), t.x, t.y, t.z, ID.bookshelf)}); }
   if (kind === 'anvil') invUI.show('anvil', {pos: {x: t.x, y: t.y, z: t.z}});
@@ -1511,18 +1573,19 @@ function attackMob(m) {
   let dmg = damageOf(s?.id) * (crit ? 1.5 : 1);
   if (G.mode === 'creative' && !s) dmg = Math.max(dmg, 1);
   // 锋利 half a point a level and a half more; 亡灵杀手 and 节肢杀手 2.5 a level on their own kind
-  const sharp = enchOf(s, 'sharpness'), smite = m.def.undead ? enchOf(s, 'smite') : 0, bane = m.kind === 'spider' ? enchOf(s, 'bane_of_arthropods') : 0;
-  dmg = Math.max(0, dmg + (sharp ? sharp * 0.5 + 0.5 : 0) + smite * 2.5 + bane * 2.5 + hitBonus(G.effects));
+  // (穿刺 2.5 a level on the sea's creatures)
+  const sharp = enchOf(s, 'sharpness'), smite = m.def.undead ? enchOf(s, 'smite') : 0, bane = m.kind === 'spider' ? enchOf(s, 'bane_of_arthropods') : 0, impale = m.def.water || m.kind === 'turtle' ? enchOf(s, 'impaling') : 0;
+  dmg = Math.max(0, dmg + (sharp ? sharp * 0.5 + 0.5 : 0) + smite * 2.5 + bane * 2.5 + impale * 2.5 + hitBonus(G.effects));
   const hit = G.mobs.hurt(m, dmg, {x: b.x, z: b.z, player: true, knock: (b.sprinting ? 0.9 : 0.4) + enchOf(s, 'knockback') * 0.5});
   G.attackWait = 8; G.swing = 6; G.exh += 0.1;
   if (hit) {
     play('attack', 0, 1);
     if (crit) G.ents.puff(m.x, m.y + m.body.height * 0.7, m.z, 'crit');
-    if (sharp || smite || bane) G.ents.puff(m.x, m.y + m.body.height * 0.7, m.z, 'magic');
+    if (sharp || smite || bane || impale) G.ents.puff(m.x, m.y + m.body.height * 0.7, m.z, 'magic');
     const fire = enchOf(s, 'fire_aspect');
     if (fire) m.fire = Math.max(m.fire, 80 * fire);
     const kind = itemInfo(s?.id)?.tool?.kind;
-    if (kind) wearTool(kind === 'sword' ? 1 : 2);
+    if (kind) wearTool(kind === 'sword' || kind === 'trident' ? 1 : 2);
   }
   if (b.sprinting) b.sprinting = false;
 }
@@ -1588,6 +1651,13 @@ function eatTick() {
  * block pulls it down (the game's numbers); bubbles rise or swirl down in the columns round the player.
  */
 let columns = [];
+/** Something in a bubble column (its velocity in vy): lifted, and thrown up where the column meets the air, or pulled down. */
+function bubbleOn(o, x, y, z) {
+  const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z), v = G.mirror.get(bx, by, bz);
+  if ((v & 0xFFF) !== ID.bubble_column) return;
+  const top = !G.mirror.get(bx, by + 1, bz);
+  o.vy = v >>> 12 & 1 ? Math.max(top ? -0.9 : -0.3, o.vy - 0.03) : Math.min(top ? 1.8 : 0.7, o.vy + (top ? 0.1 : 0.06));
+}
 function bubbleTick() {
   const b = G.body, bx = Math.floor(b.x), bz = Math.floor(b.z);
   if (!G.riding && !b.flying) for (const y of new Set([Math.floor(b.y + 0.1), Math.floor(b.y + 1)])) {
@@ -1597,6 +1667,9 @@ function bubbleTick() {
     b.vy = v >>> 12 & 1 ? Math.max(top ? -0.9 : -0.3, b.vy - 0.03) : Math.min(top ? 1.8 : 0.7, b.vy + (top ? 0.1 : 0.06));
     break;
   }
+  // dropped things and mobs in a column go the same way (boats: boats.js)
+  for (const it of G.ents.items) bubbleOn(it, it.x, it.y + 0.1, it.z);
+  for (const m of G.mobs.list) if (!m.dead) bubbleOn(m.body, m.x, m.y + 0.1, m.z);
   // the columns near: looked for twice a second, bubbles from a few of them every tick
   if (G.ticks % 10 === 0) {
     columns = [];
@@ -1654,7 +1727,7 @@ function tick() {
     const w = G.weather;
     if (w.raining || w.thundering) Object.assign(w, {raining: false, thundering: false, rain: 0, thunder: 0, rainT: 12000 + Math.floor(Math.random() * 168000), thunderT: 12000 + Math.floor(Math.random() * 168000)});
   }
-  const r = G.riding ? {landed: 0, stepped: 0} : b.tick(G.sleeping ? {} : {...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false, speed: 0.1 * speedFactor(G.effects)});
+  const r = G.riding ? {landed: 0, stepped: 0} : b.tick(G.sleeping ? {} : {...ctl, autoJump: ctl.autoJump && settings.autoJump, flyStay: false, speed: 0.1 * speedFactor(G.effects), grace: !!G.effects.dolphins_grace, strider: enchOf(G.inv.worn(3), 'depth_strider')});
   bubbleTick();
   if (portalTick()) return;
   if (G.mode !== 'creative' && b.flying) b.flying = false;
@@ -1678,12 +1751,16 @@ function tick() {
   seaTick();
   if (G.attackWait > 0) G.attackWait--;
   if (G.invuln > 0) G.invuln--;
-  // a bow: held use draws it (on a phone: holding the screen), letting go shoots
-  const bow = itemInfo(held()?.id)?.tool?.kind === 'bow';
-  if (bow && !G.dead && (ctl.use || (input.mode === 'touch' && ctl.attack))) { if (G.mode === 'creative' || G.inv.count('arrow') > 0) G.draw++; }
+  // a bow: held use draws it (on a phone: holding the screen), letting go shoots; a trident the same (on a phone held
+  // anywhere but on a mob, which it stabs), let go after half a second
+  const handKind = itemInfo(held()?.id)?.tool?.kind, bow = handKind === 'bow', trident = handKind === 'trident';
+  const drawing = !G.dead && (ctl.use || (input.mode === 'touch' && ctl.attack && (bow || !G.targetMob)));
+  if (bow && drawing) { if (G.mode === 'creative' || G.inv.count('arrow') > 0) G.draw++; }
+  else if (trident && drawing) { if (canThrow(held())) G.draw++; else G.draw = 0; }
   else if (G.draw > 0) {
     const f = Math.min(1, G.draw / 20), power = Math.min(1, (f * f + f * 2) / 3);
-    if (power >= 0.1) {
+    if (trident) { if (G.draw >= 10) letGo(held()); }
+    else if (bow && power >= 0.1) {
       // 无限: the arrow is not used up (and cannot be picked up)
       const bowItem = held(), infinite = G.mode === 'creative' || enchOf(bowItem, 'infinity') > 0;
       G.mobs.shootFromPlayer(b, b.look(), power, !infinite, {strength: enchOf(bowItem, 'power'), punch: enchOf(bowItem, 'punch'), flame: enchOf(bowItem, 'flame')});
@@ -1692,13 +1769,15 @@ function tick() {
     }
     G.draw = 0;
   }
+  if (G.riptide > 0) spinTick();
   // a fireball in front is hit back
   if (ctl.attack && !G.attackWait && !G.dead && G.mobs.deflect(eyePos(), aimDir())) { G.attackWait = 8; G.swing = 6; }
   // hitting a mob, else breaking
   const t = G.target;
   if (G.breakWait > 0) G.breakWait--;
-  if (ctl.attack && G.targetMob && !G.dead && !bow) { attackMob(G.targetMob); G.breaking = null; }
-  else if (ctl.attack && t && !G.dead && !bow) {
+  const aiming = bow || (trident && G.draw > 0);
+  if (ctl.attack && G.targetMob && !G.dead && !aiming) { attackMob(G.targetMob); G.breaking = null; }
+  else if (ctl.attack && t && !G.dead && !aiming) {
     // digging swings the arm over and over: a new swing once the last is half way (as the game does)
     if (G.swing <= 3) G.swing = 7;
     if (G.mode === 'creative') { if (!G.breakWait) { breakBlock(t); G.breakWait = 6; } G.breaking = null; }
@@ -1881,20 +1960,72 @@ function handModel(view) {
   }
   v.flatLook(0.5, look, sky * 17, blk * 17, 256, 32);
   const tool = !!itemInfo(s.id)?.tool;
+  // a trident drawn back to throw: raised over the shoulder, its prongs ahead, pulled back as it charges (shaking a
+  // little once it is ready)
+  if (G.draw > 0 && itemInfo(s.id)?.tool?.kind === 'trident') {
+    const f = Math.min(1, G.draw / 10), shake = f >= 1 ? Math.sin(G.time * 1.3) * 0.004 : 0;
+    return {verts: v, model: mat.model(1, Math.PI / 2 + 0.15, 1.2, -0.61, 0.47 + sideBob, -0.1 + bob + shake, -1.05 + f * 0.2)};
+  }
   return {verts: v, model: mat.model(0.62, -Math.PI / 2 + 0.25, tool ? 0.1 - sw * 1.2 : -sw * 0.6, tool ? 0.55 : 0.2, 0.62 + sideBob - sw * 0.15, -0.45 + bob + eat + sw * 0.08, -0.8 - sw * 0.15)};
 }
 
+// ---------- the trident ----------
+/** Riptide works in water, or out in the rain under the open sky. */
+function riptideWet() {
+  const b = G.body;
+  return b.inWater || (fallsAt(Math.floor(b.x), Math.floor(b.z)) === 'rain' && G.mirror.light(Math.floor(b.x), Math.floor(b.y + 1.6), Math.floor(b.z))[0] >= 15);
+}
+/** Whether a trident can be drawn back: not one about to break, nor one with 激流 out of the water and the rain. */
+const canThrow = s => !!s && (s.dmg || 0) < itemInfo(s.id).tool.uses - 1 && (!enchOf(s, 'riptide') || riptideWet());
+/**
+ * A trident let go: thrown the way they look (in survival it leaves the hand) — or, with 激流, its holder launched
+ * (the game's: 3 × (1 + level) / 4 the way they look, lifted off the ground first) to spin through what they meet for
+ * a second. Either wears it by one.
+ */
+function letGo(s) {
+  const b = G.body, rip = enchOf(s, 'riptide');
+  if (!canThrow(s)) return;
+  wearTool();
+  if (rip) {
+    const d = b.look(), f = 3 * (1 + rip) / 4;
+    if (b.onGround) b.move(0, 1.2, 0);
+    b.vx += d[0] * f; b.vy += d[1] * f; b.vz += d[2] * f;
+    G.riptide = 20; play('riptide');
+    return;
+  }
+  const left = G.inv.slots[G.hot];
+  if (!left) return;
+  G.mobs.throwTrident(b, b.look(), left, G.mode === 'creative');
+  if (G.mode !== 'creative') G.inv.slots[G.hot] = null;
+  play('trident_throw'); drawHud(true);
+}
+/** Spinning from 激流: the first mob met is hit (8; 穿刺 on the sea's creatures) and the player bounces back off it; a
+ *  wall stops the spin (the game's). */
+function spinTick() {
+  G.riptide--;
+  const b = G.body, s = held(), [x0, y0, z0, x1, y1, z1] = b.aabb();
+  for (const m of G.mobs.list) {
+    if (m.dead) continue;
+    const [a0, b0, c0, a1, b1, c1] = m.body.aabb();
+    if (a0 > x1 + 0.3 || a1 < x0 - 0.3 || b0 > y1 + 0.3 || b1 < y0 - 0.3 || c0 > z1 + 0.3 || c1 < z0 - 0.3) continue;
+    G.mobs.hurt(m, 8 + (m.def.water || m.kind === 'turtle' ? enchOf(s, 'impaling') * 2.5 : 0), {x: b.x, z: b.z, player: true});
+    play('attack'); b.vx *= -0.2; b.vy *= -0.2; b.vz *= -0.2; G.riptide = 0;
+    return;
+  }
+  if (b.collidedX) G.riptide = 0;
+}
 /** Arrows in flight or stuck, and lit TNT (flashing white), as things to draw. */
 let arrowVerts = null, tntVerts = null;
 function shotThings(light) {
   const out = [];
   for (const ar of G.mobs.arrows) {
     const [sky, blk] = light(Math.floor(ar.x), Math.floor(ar.y), Math.floor(ar.z));
-    const v = (arrowVerts ||= {}), key = sky * 16 + blk;
-    const verts = v[key] ||= (() => { const q = new Verts(16); q.arrow(0.5, LAYER.arrow, sky * 17, blk * 17, 256, 32); return q; })();
-    if (!ar.stuck) { ar.dir = [ar.vx, ar.vy, ar.vz]; }
-    const [dx, dy, dz] = ar.dir || [0, -1, 0], l = Math.hypot(dx, dy, dz) || 1;
-    out.push({verts, x: ar.x, y: ar.y, z: ar.z, model: mat.model(0.5, Math.atan2(dx, dz), Math.acos(Math.max(-1, Math.min(1, dy / l))), 0)});
+    // (a trident: its own picture, bigger, its prongs where it hit; flying back to its thrower it comes foot first)
+    const layer = ar.trident ? LAYER.trident : LAYER.arrow, v = (arrowVerts ||= {}), key = `${layer}|${sky * 16 + blk}`;
+    const verts = v[key] ||= (() => { const q = new Verts(16); q.arrow(0.5, layer, sky * 17, blk * 17, 256, 32); return q; })();
+    if (!ar.stuck) ar.dir = ar.back ? [-ar.vx, -ar.vy, -ar.vz] : [ar.vx, ar.vy, ar.vz];
+    const [dx, dy, dz] = ar.dir || [0, -1, 0], l = Math.hypot(dx, dy, dz) || 1, back = ar.trident ? 0.55 : 0;
+    out.push({verts, x: ar.x - dx / l * back, y: ar.y - dy / l * back, z: ar.z - dz / l * back, model: mat.model(ar.trident ? 1.1 : 0.5, Math.atan2(dx, dz), Math.acos(Math.max(-1, Math.min(1, dy / l))), 0)});
   }
   for (const t of G.mobs.tnt) {
     if (!tntVerts) { tntVerts = new Verts(32); tntVerts.cube(0.5, [LAYER.tnt_side, LAYER.tnt_side, LAYER.tnt_top, LAYER.tnt_bottom, LAYER.tnt_side, LAYER.tnt_side], 255, 255, 256, 32); }
@@ -1955,7 +2086,9 @@ function potionThings(light) {
 function playerModel(view, a, light) {
   const b = G.body, x = b.prev.x + (b.x - b.prev.x) * a - view.x, y = b.prev.y + (b.y - b.prev.y) * a - view.y, z = b.prev.z + (b.z - b.prev.z) * a - view.z;
   const turn = ((b.yaw - G.bodyYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-  const rot = animate('player', {}, {limb: G.walked * 4, amount: G.riding ? 0 : G.limbAmt || 0, headYaw: -turn, headPitch: -b.pitch, age: G.time, attack: G.swing > 0 ? 1 - G.swing / 6 : 0, riding: !!G.riding});
+  const s = held(), sk = itemInfo(s?.id)?.tool?.kind;
+  const rot = animate('player', {}, {limb: G.walked * 4, amount: G.riding ? 0 : G.limbAmt || 0, headYaw: -turn, headPitch: -b.pitch, age: G.time, attack: G.swing > 0 ? 1 - G.swing / 6 : 0, riding: !!G.riding,
+    bow: sk === 'bow' && G.draw > 0, spear: sk === 'trident' && G.draw > 0});
   const pose = {x, y, z, yaw: G.bodyYaw, s: 0.9375}, [sky, blk] = light(Math.floor(b.x), Math.floor(b.y + 1), Math.floor(b.z)), hurtFlash = G.hurtT > 0 ? 1 : 0;
   const out = [{skin: 'player', verts: new Float32Array(buildModel('player', rot, pose, [], skinSizes.player)), light: [sky, blk], tint: [1, 1, 1], hurt: hurtFlash, white: 0}];
   for (let i = 0; i < 4; i++) {
@@ -1964,7 +2097,66 @@ function playerModel(view, a, light) {
     const [model, parts] = ARMOR_PARTS[i], skin = `armor_${am.mat}${model === 'armor_inner' ? '_legs' : ''}`;
     out.push({skin, verts: new Float32Array(buildModel(model, rot, pose, [], skinSizes[skin], parts)), light: [sky, blk], tint: greyArmor[skin] ? [0.63, 0.4, 0.25] : [1, 1, 1], hurt: hurtFlash, white: 0});
   }
+  G.selfHeld = s ? heldThing(view, 'player', rot, pose, 'arm0', s, sky, blk, sk === 'trident' && G.draw > 0) : null;
   return out;
+}
+// ---------- what is held, seen from outside ----------
+// how a thing sits in a hand (the game's held models): its picture's axes in the arm's own (x across, y down the arm, z
+// back) — a tool or a trident lengthways across the fist, its head ahead (a trident is held nearer its foot, and turned
+// round when it is raised to throw, its prongs ahead again), a bow upright — how far along its length the fist holds
+// it, its size
+const GRIPS = {tool: [[0, 1, 0], [0, 0, -1], [-1, 0, 0], 0.35, 0.85], trident: [[0, 1, 0], [0, 0, -1], [-1, 0, 0], -0.15, 1.1], spear: [[0, 1, 0], [0, 0, 1], [1, 0, 0], -0.15, 1.1],
+  bow: [[0, -1, 0], [0, 0, -1], [1, 0, 0], 0, 0.9], item: [[0, 1, 0], [0, 0, -1], [-1, 0, 0], 0.05, 0.5]};
+// (the picture turned an eighth round: its corner-to-corner line along its length)
+const TURN45 = [[Math.SQRT1_2, Math.SQRT1_2, 0], [-Math.SQRT1_2, Math.SQRT1_2, 0], [0, 0, 1]];
+const mulV = (C, v) => [0, 1, 2].map(r => C[0][r] * v[0] + C[1][r] * v[1] + C[2][r] * v[2]), mulC = (A, B) => B.map(c => mulV(A, c));
+const heldVerts = new Map();
+/** A thing in a model's hand (a mob's, the player's), to draw: the model as posed (rot, pose), its arm, the stack;
+ *  spear: a trident raised to throw. */
+function heldThing(view, kind, rot, pose, arm, stack, sky, blk, spear = false) {
+  const f = handFrame(kind, rot, pose, arm), info = itemInfo(stack.id);
+  if (!f || !info) return null;
+  const look = itemLook(stack.id, stack), tk = info.tool?.kind, [gx, gy, gz, off, size] = GRIPS[look.cube ? 'item' : tk === 'bow' ? 'bow' : tk === 'trident' ? (spear ? 'spear' : 'trident') : info.tool ? 'tool' : 'item'];
+  const key = `${stack.id}|${sky}|${blk}`;
+  let v = heldVerts.get(key);
+  if (!v) {
+    if (heldVerts.size > 200) heldVerts.clear();
+    v = new Verts(512);
+    if (look.cube) v.cube(0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints); else if (look.over != null) v.flatLook(0.5, look, sky * 17, blk * 17, 256, 32); else thickItem(v, look.flat, look.tint, sky * 17, blk * 17);
+    heldVerts.set(key, v);
+  }
+  const k = 16 * (look.cube ? 0.4 : size), A = mulC(f.ax, [gx, gy, gz]), M = mulC(A, TURN45).map(c => c.map(q => q * k)), T = f.at.map((q, i) => q + A[1][i] * off * k);
+  return {verts: v, x: view.x + T[0], y: view.y + T[1], z: view.z + T[2], model: new Float32Array([...M[0], 0, ...M[1], 0, ...M[2], 0, 0, 0, 0, 1])};
+}
+/**
+ * An item's picture as the game holds it, a sixteenth of a block thick: the picture on both faces, and a thin side along
+ * every pixel edge with a clear pixel (or nothing) beyond it, in that pixel's colour (a flat picture seen edge-on was
+ * not there at all: a skeleton's bow from in front).
+ */
+function thickItem(v, layer, tint, sky, blk) {
+  const t = 1 / 32, d = built?.layers[layer], n = built?.size || 16;
+  for (const z of [t, -t]) v.flat(0.5, layer, sky, blk, 256, 32, tint, z);
+  if (!d) return;
+  const solid = (i, j) => i >= 0 && j >= 0 && i < 16 && j < 16 && d[(Math.floor((j + 0.5) * n / 16) * n + Math.floor((i + 0.5) * n / 16)) * 4 + 3] > 0;
+  const quad = (P, UV, f) => { for (const k of [0, 1, 2, 3, 3, 2, 1, 0]) v.v(P[k][0], P[k][1], P[k][2], 256, 32, layer, UV[k][0], UV[k][1], sky, blk, f << 2, tint); };
+  for (let j = 0; j < 16; j++) for (let i = 0; i < 16; i++) {
+    if (!solid(i, j)) continue;
+    const x0 = i / 16 - 0.5, x1 = x0 + 1 / 16, y1 = 0.5 - j / 16, y0 = y1 - 1 / 16, across = [[i, j + 1], [i + 1, j + 1], [i + 1, j], [i, j]], along = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]];
+    // (the side shows its pixel all over: u and v each run across that one pixel)
+    if (!solid(i - 1, j)) quad([[x0, y0, -t], [x0, y0, t], [x0, y1, t], [x0, y1, -t]], across, 1);
+    if (!solid(i + 1, j)) quad([[x1, y0, t], [x1, y0, -t], [x1, y1, -t], [x1, y1, t]], across, 0);
+    if (!solid(i, j - 1)) quad([[x0, y1, t], [x1, y1, t], [x1, y1, -t], [x0, y1, -t]], along, 2);
+    if (!solid(i, j + 1)) quad([[x0, y0, -t], [x1, y0, -t], [x1, y0, t], [x0, y0, t]], along, 3);
+  }
+}
+/** What the mobs near hold (a skeleton's bow, a drowned's trident …), as things to draw. */
+function mobHeld(view) {
+  const out = [];
+  for (const h of G.mobs.held || []) {
+    if (h.hold) out.push(heldThing(view, h.kind, h.rot, h.pose, 'arm0', h.hold, ...h.light, h.spear));
+    if (h.off) out.push(heldThing(view, h.kind, h.rot, h.pose, 'arm1', h.off, ...h.light));
+  }
+  return out.filter(Boolean);
 }
 /** The bobber (a little picture turned to the camera) and the line to the rod's tip, sagging; the tip is at the right
  *  hand: on the screen's right in first person, at the model's hand in third. */
@@ -2144,7 +2336,7 @@ function frame(now) {
   const a = paused ? 1 : acc / TICK, x = b.prev.x + (b.x - b.prev.x) * a, y = b.prev.y + (b.y - b.prev.y) * a, z = b.prev.z + (b.z - b.prev.z) * a;
   const bobT = G.walked * 2.2, bobbing = settings.bob && b.onGround && !b.flying && !G.view ? 1 : 0;
   // shaking after an explosion; a drawn bow zooms in
-  const shake = G.shake > 0 ? (G.shake -= dt * 20, G.shake * 0.004) : 0, zoom = 1 - Math.min(1, G.draw / 20) * 0.15;
+  const shake = G.shake > 0 ? (G.shake -= dt * 20, G.shake * 0.004) : 0, zoom = 1 - (itemInfo(held()?.id)?.tool?.kind === 'bow' ? Math.min(1, G.draw / 20) * 0.15 : 0);
   const view = {x, y: y + b.eye + Math.abs(Math.sin(bobT)) * 0.04 * bobbing, z, yaw: b.yaw + (Math.random() - 0.5) * shake, pitch: b.pitch + Math.abs(Math.cos(bobT)) * 0.006 * bobbing + (Math.random() - 0.5) * shake,
     fov: (settings.fov + (b.sprinting ? 8 : 0) + (b.flying && b.sprinting ? 4 : 0)) * zoom * Math.PI / 180, far: settings.dist * 16, alpha: a,
     // the distant view: out to its reach, drawn only past the columns the worker keeps
@@ -2205,7 +2397,8 @@ function frame(now) {
   for (const an of animFrames) { const f = Math.floor(tick20 / an.time) % an.frames.length; if (f !== an.at) { an.at = f; renderer.updateLayer(an.layer, an.frames[f]); } }
   const lightAt = (bx, by, bz) => G.mirror.light(bx, by, bz);
   const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view), ...cartThings(a, lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
-  if (G.view && !G.dead) extras.mobs.push(...playerModel(view, a, lightAt));
+  if (G.view && !G.dead) { extras.mobs.push(...playerModel(view, a, lightAt)); if (G.selfHeld) extras.things.push(G.selfHeld); }
+  extras.things.push(...mobHeld(view));
   extras.mobs.push(...boatModels(view, a, lightAt));
   extras.weather = weatherVerts(view);
   extras.blobs = blobVerts(view, a);

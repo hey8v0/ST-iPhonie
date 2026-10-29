@@ -135,6 +135,14 @@ export function pieces(v, near = () => 0) {
       return [{box: [0, 3, 0, 16, 9, 16], role: 'bed'}, ...legs.map(([x, y, z]) => ({box: [x, y, z, x + 3, y + 3, z + 3], role: 'bed'}))];
     }
     case 'chest': {
+      // a large chest's half (state >> 2: 1 the left one, 2 the right one, as seen from in front): its box reaches the
+      // other half (seam: that way), the latch is half of the large chest's one in the middle
+      const half = meta >> 2 & 3;
+      if (half === 1 || half === 2) {
+        const [fx, fz] = DIR[f], [sx, sz] = half === 1 ? [fz, 0 - fx] : [0 - fz, fx];
+        const at = (d, s) => d ? (d > 0 ? [15, 16] : [0, 1]) : s > 0 ? [15, 16] : [0, 1], [lx0, lx1] = at(fx, sx), [lz0, lz1] = at(fz, sz);
+        return [{box: [sx < 0 ? 0 : 1, 0, sz < 0 ? 0 : 1, sx > 0 ? 16 : 15, 14, sz > 0 ? 16 : 15], role: 'half', seam: [sx, sz]}, {box: [lx0, 7, lz0, lx1, 11, lz1], role: 'latch'}];
+      }
       const latch = [[7, 7, 15, 9, 11, 16], [0, 7, 7, 1, 11, 9], [7, 7, 0, 9, 11, 1], [15, 7, 7, 16, 11, 9]][f];
       return [{box: [1, 0, 1, 15, 14, 15], role: 'main'}, {box: latch, role: 'latch'}];
     }

@@ -360,11 +360,18 @@ function furnace(face, on) {
   }
   return p;
 }
-function chest(face) {
+// a chest's face; seam: the side (l, r, t, b) where a large chest's other half meets it — no border there, the band
+// running on, and no latch on the front (a large chest's is in the middle, where the halves meet)
+function chest(face, seam = '') {
   const p = planks(nameSeed('chest'), '#a2733d'), dark = hex('#3f2a14'), band = hex('#6b4a25');
-  for (let i = 0; i < S; i++) { p.set(i, 0, dark); p.set(i, 15, dark); p.set(0, i, dark); p.set(15, i, dark); }
-  if (face !== 'top') { for (let x = 1; x < 15; x++) { p.set(x, 5, dark); p.set(x, 6, band); } }
-  if (face === 'front') { p.rect(7, 4, 8, 8, hex('#c9c9c9')); p.set(7, 8, hex('#777777')); p.set(8, 8, hex('#777777')); }
+  for (let i = 0; i < S; i++) {
+    if (seam !== 't') p.set(i, 0, dark);
+    if (seam !== 'b') p.set(i, 15, dark);
+    if (seam !== 'l') p.set(0, i, dark);
+    if (seam !== 'r') p.set(15, i, dark);
+  }
+  if (face !== 'top') { for (let x = seam === 'l' ? 0 : 1; x < (seam === 'r' ? 16 : 15); x++) { p.set(x, 5, dark); p.set(x, 6, band); } }
+  if (face === 'front' && !seam) { p.rect(7, 4, 8, 8, hex('#c9c9c9')); p.set(7, 8, hex('#777777')); p.set(8, 8, hex('#777777')); }
   return p;
 }
 function tnt(face) {
@@ -505,6 +512,7 @@ const BLOCK_ART = {
   crafting_table_top: () => crafting('top'), crafting_table_side: () => crafting('side'), crafting_table_front: () => crafting('front'),
   furnace_top: () => furnace('top'), furnace_side: () => furnace('side'), furnace_front: () => furnace('front', false), furnace_front_on: () => furnace('front', true),
   chest_top: () => chest('top'), chest_side: () => chest('side'), chest_front: () => chest('front'),
+  ...Object.fromEntries(['top', 'side', 'front'].flatMap(face => ['l', 'r', 't', 'b'].map(s => [`chest_${face}_${s}`, () => chest(face, s)]))),
   torch: () => torch(), lantern: () => lantern(), ladder: () => ladder(), glass: () => glass(), bricks: () => bricks(151), stone_bricks: () => stoneBricks(153), bookshelf: () => bookshelf(),
   glowstone: () => lumps(161, ['#8a6a2c', '#b98f3f', '#d9b25a', '#f2d27a', '#ffe7a6'], {count: 11, seam: '#6b4f22', edge: 0.2}),
   smooth_stone: () => { const p = mottled(171, ['#9a9a9a', '#a1a1a1', '#a8a8a8'], {cells: 4, grain: 0.2}); for (let i = 0; i < S; i++) { p.set(i, 0, hex('#c2c2c2')); p.set(0, i, hex('#c2c2c2')); p.set(i, 15, hex('#6f6f6f')); p.set(15, i, hex('#6f6f6f')); } return p; },
@@ -1548,6 +1556,13 @@ BLOCK_ART.bed_down = () => bedPic('#ffffff', 'down'); BLOCK_ART.bed_head_north =
 BLOCK_ART.sea_lantern = () => { const p = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const edge = x === 0 || y === 0 || x === 15 || y === 15, cross = x === 7 || x === 8 || y === 7 || y === 8; p.set(x, y, hex(edge ? '#8ab4a8' : cross ? '#c8e8e0' : (x + y) % 5 === 0 ? '#f4fffc' : '#dff4ee')); } return p; };
 ITEM_ART.prismarine_shard = () => icon([{mask: mask().poly([[4, 13], [6, 3], [12, 6], [10, 13]]), color: '#63a596', light: '#a6dccd', dark: '#3e7a6c', outline: '#14302a'}]);
 ITEM_ART.prismarine_crystals = () => { const p = icon([{mask: mask().disc(6, 10, 2.6).disc(10.5, 7, 2.4).disc(9, 12, 1.8), color: '#c8ecdf', light: '#ffffff', dark: '#86b4a6', outline: '#2c4a42'}]); for (const [x, y] of [[6, 9], [10, 6]]) p.set(x, y, hex('#ffffff')); return p; };
+// the trident: a long shaft corner to corner, wrapped near its foot, a crossbar and three prongs at its head (ours:
+// sea-green, the head pale)
+ITEM_ART.trident = () => icon([
+  {mask: mask().line(1.5, 14.5, 10.2, 5.8, 1.5), color: '#3f8f86', light: '#74c8bc', dark: '#245a52', outline: '#0e2a26'},
+  {mask: mask().line(2.2, 13.8, 4.6, 11.4, 1.9), color: '#5a4630', light: '#7a6244', dark: '#3a2c1c', outline: '#1a140c'},
+  {mask: mask().line(8.4, 3.6, 12.4, 7.6, 1.5).line(10.4, 5.6, 14.6, 1.4, 1.3).line(8.6, 3.8, 11.6, 0.8, 1.2).line(12.2, 7.4, 15.2, 4.4, 1.2), color: '#a8e4da', light: '#e4fff8', dark: '#5c9c90', outline: '#163a34'},
+]);
 ITEM_ART.nautilus_shell = () => icon([{mask: mask().disc(8, 9, 5.4, 5).cut(mask().disc(6.5, 8, 1.6)), color: '#e8d8c4', light: '#fff4e8', dark: '#b89a7a', outline: '#4a3a2a', grain: true}, {mask: mask().curve([[9, 4.5], [12.5, 8], [9, 13]], 1.2), color: '#c8784a', dark: '#8a4a2a'}]);
 ITEM_ART.glow_ink_sac = () => icon([{mask: blob(8, 9, 4.6, 3302), color: '#2f8a8a', light: '#7af0d8', dark: '#1a4a4a', outline: '#062020', grain: true}], {sparkle: [[6, 7], [9, 10]]});
 // buckets with a fish in them: the water bucket, the fish over its water
@@ -1568,7 +1583,7 @@ const eggs = (crack, seed) => {
 BLOCK_ART.turtle_egg = () => eggs(0, 1031); BLOCK_ART.turtle_egg_slightly_cracked = () => eggs(1, 1031); BLOCK_ART.turtle_egg_very_cracked = () => eggs(2, 1031);
 ITEM_ART.turtle_egg_item = () => icon([{mask: mask().disc(8, 9, 4, 5), color: '#eee8cc', light: '#ffffff', dark: '#b8b08a', outline: '#4a4630'}], {sparkle: [[6, 7]]});
 for (const [k, [a, b]] of Object.entries({squid: ['#223b4d', '#708899'], glow_squid: ['#095656', '#85f1bc'], cod: ['#c1a76a', '#e5c48b'], salmon: ['#a00f10', '#0e8474'], tropical_fish: ['#ef6915', '#fff9ef'],
-  pufferfish: ['#f6b201', '#37c3f2'], turtle: ['#e7e7e7', '#00afaf'], guardian: ['#5a8272', '#f17d30'], elder_guardian: ['#ceccba', '#747693']})) ITEM_ART[`${k}_spawn_egg`] = () => {
+  pufferfish: ['#f6b201', '#37c3f2'], turtle: ['#e7e7e7', '#00afaf'], guardian: ['#5a8272', '#f17d30'], elder_guardian: ['#ceccba', '#747693'], drowned: ['#8ff1d7', '#799c65'], dolphin: ['#223b4d', '#f9f9f9']})) ITEM_ART[`${k}_spawn_egg`] = () => {
   const p = icon([{mask: mask().disc(8, 9, 4.6, 5.8), color: a, light: toHex(mix(hex(a), [255, 255, 255], 0.35)), dark: toHex(mul(hex(a), 0.62)), outline: '#1a1a1a'}]), r = rng(nameSeed(k));
   for (let n = 0; n < 9; n++) { const x = 5 + Math.floor(r() * 7), y = 5 + Math.floor(r() * 8); if (p.alpha(x, y) && p.alpha(x + 1, y)) { p.set(x, y, hex(b)); if (r() < 0.6) p.set(x + 1, y, mul(hex(b), 0.85)); } }
   return p;

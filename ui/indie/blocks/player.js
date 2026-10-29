@@ -96,7 +96,8 @@ export class Body {
     climb = isClimbable(this.world.get(fx, fy, fz)) || isClimbable(this.world.get(fx, fy + 1, fz));
     for (let y = Math.floor(y0 - 0.01); y <= Math.floor(y1); y++) for (let z = Math.floor(z0 - 0.02); z <= Math.floor(z1 + 0.02); z++) for (let x = Math.floor(x0 - 0.02); x <= Math.floor(x1 + 0.02); x++) if ((this.world.get(x, y, z) & 0xFFF) === ID.cactus) cactus = true;
     const ey = this.y + this.eye, ev = this.world.get(Math.floor(this.x), Math.floor(ey), Math.floor(this.z));
-    this.headInWater = WATERY[ev & 0xFFF] === 1 && ey < Math.floor(ey) + 0.89;
+    // (the top of a water block is open only where there is no more water over it: deep down the head was out now and then)
+    this.headInWater = WATERY[ev & 0xFFF] === 1 && (ey < Math.floor(ey) + 0.89 || WATERY[this.world.get(Math.floor(this.x), Math.floor(ey) + 1, Math.floor(this.z)) & 0xFFF] === 1);
     this.headInLava = (ev & 0xFFF) === ID.lava;
     this.inWater = water; this.inLava = lava; this.climbing = climb && !this.flying; this.touchCactus = cactus;
   }
@@ -135,14 +136,17 @@ export class Body {
       return result;
     }
     if (this.inWater || this.inLava) {
-      accel(0.02);
+      // 深海探索者 (boots, up to III; half as much off the bottom): the water slows and pushes as the land does; 海豚的
+      // 恩惠: it hardly slows at all (the game's 0.96 a tick, 0.8 without)
+      const k = this.inWater ? 0.8 : 0.5, ds = this.inWater ? Math.min(3, input.strider || 0) * (this.onGround ? 1 : 0.5) / 3 : 0;
+      const kh = this.inWater && input.grace ? 0.96 : k + (0.546 - k) * ds;
+      accel(0.02 + ((input.speed ?? 0.1) - 0.02) * ds);
       if (input.jump) this.vy += 0.04;
       const r = this.move(this.vx, this.vy, this.vz);
-      const k = this.inWater ? 0.8 : 0.5;
       // the bump first, then the slowing and the sinking (the game's order): standing on the bottom, each tick sinks
       // into it and stands again — the other way round every other tick floated free and the view shook
       if (r.hitX) this.vx = 0; if (r.hitZ) this.vz = 0; if (r.hitY) this.vy = 0;
-      this.vx *= k; this.vz *= k; this.vy = this.vy * k - 0.02;
+      this.vx *= kh; this.vz *= kh; this.vy = this.vy * k - 0.02;
       // climbing out at the edge
       if ((r.hitX || r.hitZ) && input.jump) this.vy = 0.3;
       this.onGround = r.down; this.fall = 0; this.collidedX = r.hitX || r.hitZ;

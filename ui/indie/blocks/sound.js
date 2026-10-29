@@ -66,6 +66,9 @@ function voice(kind, mood, k) {
     // a villager's 「hmm」 (rising for yes, falling for no), the golem's clank
     case 'villager': { const up = mood === 'yes' ? 1.4 : mood === 'no' ? 0.6 : 0.9 + Math.random() * 0.3; tone(190 * p, 0.14 * g, 0.18 * long, {type: 'sawtooth', slide: up}); tone(240 * p, 0.08 * g, 0.16 * long, {type: 'square', slide: up, at: 0.14}); break; }
     case 'iron': burst(300 * p, 2, 0.35 * g, 0.25); tone(110 * p, 0.2 * g, 0.3, {type: 'triangle', slide: 0.7}); break;
+    // the sea's: a drowned's gurgling groan (a whoosh when it throws), a dolphin's clicks and whistle (a crunch eating)
+    case 'drowned': if (mood === 'shoot') { burst(800, 0.8, 0.28 * g, 0.35, {pitch: 0.8}); tone(420, 0.08 * g, 0.25, {type: 'triangle', slide: 0.5}); } else { tone(78 * p, 0.16 * g, 0.9 * long, {type: 'sawtooth', slide: 0.65}); burst(240 * p, 2, 0.14 * g, 0.8 * long); burst(900 * p, 3, 0.05 * g, 0.5, {at: 0.12}); } break;
+    case 'dolphin': if (mood === 'eat') { for (let i = 0; i < 3; i++) burst(1500, 1.5, 0.22 * g, 0.06, {at: i * 0.1}); } else { for (let i = 0; i < 6; i++) tone(2100 * p + Math.random() * 700, 0.04 * g, 0.03, {type: 'square', at: i * 0.05}); tone(1700 * p, 0.05 * g, 0.4 * long, {type: 'sine', slide: 1.7, at: 0.32}); } break;
   }
 }
 /** Plays a sound: break, place, step, hit (digging), pop, splash, fizz, hurt, eat, burp, click, levelup, and the mobs'. */
@@ -73,7 +76,7 @@ export function play(name, v = 0, k = 1) {
   if (!ctx || !sound.volume || k <= 0) return;
   // a mob's sound: its kind first, what happened last (zombified_piglin_hurt, ghast_warn)
   const parts = name.split('_'), kind = parts[0], mood = parts.length > 1 ? parts.at(-1) : undefined;
-  if (['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'spider', 'creeper', 'zombified', 'ghast', 'blaze', 'magma', 'slime', 'villager', 'iron'].includes(kind)) { voice(kind, mood, k); return; }
+  if (['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'spider', 'creeper', 'zombified', 'ghast', 'blaze', 'magma', 'slime', 'villager', 'iron', 'drowned', 'dolphin'].includes(kind)) { voice(kind, mood, k); return; }
   const [f, q, g] = MAT[materialOf(v)] || MAT.stone, r = 0.85 + Math.random() * 0.3;
   switch (name) {
     case 'break': burst(f, q, g * 0.9, 0.22, {pitch: r}); burst(f * 0.6, q, g * 0.5, 0.18, {pitch: r, at: 0.03}); break;
@@ -131,6 +134,13 @@ export function play(name, v = 0, k = 1) {
     case 'elder_guardian': tone(110 + Math.random() * 30, 0.1 * k, 1.1, {type: 'sine', slide: 0.8}); tone(165, 0.05 * k, 1, {type: 'triangle', slide: 0.8}); break;
     case 'guardian_beam': tone(220, 0.07 * k, 3.6, {type: 'sawtooth', slide: 4}); tone(330, 0.04 * k, 3.6, {type: 'sine', slide: 4}); break;
     case 'curse': tone(80, 0.18, 2.2, {type: 'sawtooth', slide: 1.6}); tone(160, 0.1, 2, {type: 'sine', slide: 0.5, at: 0.1}); burst(400, 0.5, 0.2, 1.6, {pitch: 0.6}); break;
+    // the trident: thrown, hitting, sticking in the ground (it rings), flying back, the thunder it calls; riptide's rush
+    case 'trident_throw': burst(700, 0.8, 0.32 * k, 0.35, {pitch: 0.8}); tone(520, 0.08 * k, 0.25, {type: 'triangle', slide: 0.5}); break;
+    case 'trident_hit': burst(1600, 2, 0.35 * k, 0.12); tone(900, 0.1 * k, 0.2, {type: 'triangle', slide: 0.7}); break;
+    case 'trident_ground': burst(800, 2, 0.35 * k, 0.1); tone(1250, 0.07 * k, 0.45, {type: 'sine', slide: 0.98}); tone(1880, 0.04 * k, 0.35, {type: 'sine'}); break;
+    case 'trident_return': tone(600, 0.08 * k, 0.6, {type: 'sine', slide: 2}); burst(2400, 1, 0.08 * k, 0.5); break;
+    case 'trident_thunder': burst(90, 0.5, 0.7 * k, 1.8, {pitch: 0.8}); tone(60, 0.3 * k, 1.5, {type: 'sawtooth', slide: 0.6}); burst(1500, 0.7, 0.2 * k, 0.4); break;
+    case 'riptide': burst(500, 0.6, 0.45 * k, 0.8, {pitch: 0.6}); tone(220, 0.15 * k, 0.6, {type: 'sawtooth', slide: 2.5}); burst(1800, 0.8, 0.2 * k, 0.5, {at: 0.1}); break;
   }
 }
 // note blocks: the instrument (by the block under it) and its pitch, 0–24 from F♯ two octaves up (the game's)

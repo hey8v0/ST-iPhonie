@@ -114,6 +114,13 @@ export class Boats {
       if (r.hitZ) b.vz = 0;
       if (r.hitY) b.vy = 0;
       b.onGround = r.down;
+      // over the top of a bubble column: three seconds, then thrown up (hard with the player in it) or pulled under (its
+      // rider thrown out) — the game's
+      const cx = Math.floor(b.x), cy = Math.floor(b.y + 0.1), cz = Math.floor(b.z), cv = this.ctx.world.get(cx, cy, cz);
+      if ((cv & 0xFFF) === ID.bubble_column && !this.ctx.world.get(cx, cy + 1, cz)) {
+        c.bubble = c.bubble || 60;
+        if (--c.bubble === 0) { if (cv >>> 12 & 1) { b.vy -= 0.7; if (ridden) rider.eject = true; } else b.vy = ridden ? 2.7 : 0.6; }
+      } else c.bubble = 0;
       // a fall of more than three onto land breaks it (not into water)
       if (r.down) {
         if (c.fall > 3 && waterTop(this.ctx.world, Math.floor(b.x), Math.floor(b.y - 0.01), Math.floor(b.z)) === null && waterTop(this.ctx.world, Math.floor(b.x), Math.floor(b.y + 0.01), Math.floor(b.z)) === null) {

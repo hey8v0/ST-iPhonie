@@ -21,6 +21,8 @@ export const EFFECTS = {
   mining_fatigue: {zh: '挖掘疲劳', color: 0x4A4217, good: false},
   // the conduit's: breathing under water, seeing there as by day, digging a fifth faster (the game's 急迫 I)
   conduit_power: {zh: '潮涌能量', color: 0x1DC2D1, good: true},
+  // a dolphin's, swimming with it: the water hardly slows the player
+  dolphins_grace: {zh: '海豚的恩惠', color: 0x88A3BE, good: true},
   // a suspicious stew's: food at once, jumping higher, seeing almost nothing, withering (it can kill)
   saturation: {zh: '饱和', color: 0xF82423, good: true},
   jump_boost: {zh: '跳跃提升', color: 0xFDFF84, good: true},

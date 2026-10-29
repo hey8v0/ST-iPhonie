@@ -8,11 +8,13 @@ const kind = info => info?.tool?.kind;
 const DIG = new Set(['pickaxe', 'axe', 'shovel', 'hoe']);
 const armor = slot => info => !!info?.armor && (slot == null || info.armor.slot === slot);
 const sword = info => kind(info) === 'sword', dig = info => DIG.has(kind(info)), bow = info => kind(info) === 'bow', rod = info => kind(info) === 'rod';
+const trident = info => kind(info) === 'trident';
 const lasting = info => !!(info?.tool?.uses || info?.armor);
 /**
  * name: {zh, max, w (weight), on (the table offers it on), anvil (it can be put on with the anvil; default: on),
- * cost: [base, per level, range] (level l fits base + per·(l−1) … that + range), group (one of a group only),
- * mult: [item, book] (the anvil's cost per level), treasure (never from the table)}.
+ * cost: [base, per level, range, top] (level l fits base + per·(l−1) … that + range, or … top when there is one),
+ * group (one of a group only), not (those it cannot be with), mult: [item, book] (the anvil's cost per level),
+ * treasure (never from the table)}.
  */
 export const ENCHANTS = {
   protection: {zh: '保护', max: 4, w: 10, on: armor(), cost: [1, 11, 11], group: 'protect', mult: [1, 1]},
@@ -22,6 +24,8 @@ export const ENCHANTS = {
   projectile_protection: {zh: '弹射物保护', max: 4, w: 5, on: armor(), cost: [3, 6, 6], group: 'protect', mult: [2, 1]},
   respiration: {zh: '水下呼吸', max: 3, w: 2, on: armor(0), cost: [10, 10, 30], mult: [4, 2]},
   aqua_affinity: {zh: '水下速掘', max: 1, w: 2, on: armor(0), cost: [1, 0, 40], mult: [4, 2]},
+  // boots: walking under water as fast as on land
+  depth_strider: {zh: '深海探索者', max: 3, w: 2, on: armor(3), cost: [10, 10, 15], mult: [4, 2]},
   thorns: {zh: '荆棘', max: 3, w: 1, on: armor(1), anvil: armor(), cost: [10, 20, 50], mult: [8, 4]},
   sharpness: {zh: '锋利', max: 5, w: 10, on: sword, anvil: i => sword(i) || kind(i) === 'axe', cost: [1, 11, 20], group: 'damage', mult: [1, 1]},
   smite: {zh: '亡灵杀手', max: 5, w: 5, on: sword, anvil: i => sword(i) || kind(i) === 'axe', cost: [5, 8, 20], group: 'damage', mult: [2, 1]},
@@ -37,18 +41,25 @@ export const ENCHANTS = {
   punch: {zh: '冲击', max: 2, w: 2, on: bow, cost: [12, 20, 25], mult: [4, 2]},
   flame: {zh: '火矢', max: 1, w: 2, on: bow, cost: [20, 0, 30], mult: [4, 2]},
   infinity: {zh: '无限', max: 1, w: 1, on: bow, cost: [20, 0, 30], group: 'mend', mult: [8, 4]},
+  // the trident's: it comes back; its holder thrown through water or rain instead (not with those two); lightning in a
+  // storm; more hurt to the sea's creatures
+  loyalty: {zh: '忠诚', max: 3, w: 5, on: trident, cost: [12, 7, 0, 50], mult: [2, 1]},
+  riptide: {zh: '激流', max: 3, w: 2, on: trident, cost: [17, 7, 0, 50], not: ['loyalty', 'channeling'], mult: [4, 2]},
+  channeling: {zh: '引雷', max: 1, w: 1, on: trident, cost: [25, 0, 25], mult: [8, 4]},
+  impaling: {zh: '穿刺', max: 5, w: 2, on: trident, cost: [1, 8, 20], mult: [4, 2]},
   luck_of_the_sea: {zh: '海之眷顾', max: 3, w: 2, on: rod, cost: [15, 9, 50], mult: [4, 2]},
   lure: {zh: '饵钓', max: 3, w: 2, on: rod, cost: [15, 9, 50], mult: [4, 2]},
   mending: {zh: '经验修补', max: 1, w: 2, on: lasting, cost: [25, 25, 50], group: 'mend', mult: [4, 2], treasure: true},
 };
-const minCost = (e, l) => e.cost[0] + e.cost[1] * (l - 1), maxCost = (e, l) => minCost(e, l) + e.cost[2];
+const minCost = (e, l) => e.cost[0] + e.cost[1] * (l - 1), maxCost = (e, l) => e.cost[3] ?? minCost(e, l) + e.cost[2];
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 /** 锋利 III. */
 export const enchName = (name, level) => `${ENCHANTS[name]?.zh || name}${ENCHANTS[name]?.max === 1 ? '' : ' ' + (ROMAN[level] || level)}`;
 /** A stack's level of an enchantment (0 without). */
 export const enchOf = (stack, name) => stack?.ench?.[name] || 0;
-/** Two enchantments that cannot be on one item (protections, the damage ones, silk touch with fortune, infinity with mending). */
-export const clash = (a, b) => a !== b && !!ENCHANTS[a]?.group && ENCHANTS[a].group === ENCHANTS[b]?.group;
+/** Two enchantments that cannot be on one item (protections, the damage ones, silk touch with fortune, infinity with
+ *  mending, riptide with loyalty or channeling). */
+export const clash = (a, b) => a !== b && ((!!ENCHANTS[a]?.group && ENCHANTS[a].group === ENCHANTS[b]?.group) || !!ENCHANTS[a]?.not?.includes(b) || !!ENCHANTS[b]?.not?.includes(a));
 const isBook = id => id === 'book' || id === 'enchanted_book';
 /** Whether an enchantment can be on an item (the anvil's rule; a book takes any). */
 export function canHave(id, name) {
