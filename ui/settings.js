@@ -268,7 +268,7 @@ export function settingsApp(ctx) {
           <div class="field"><div class="meter-label"><span>播放音量</span><output>${Math.round(phone.volume * 100)}%</output></div><input class="slider" type="range" data-field="volume" min="0" max="100" value="${Math.round(phone.volume * 100)}" aria-label="播放音量"></div>
         </div></details>`
       + groupTitle('手机')
-      + `<div class="group">${toggle('floatingEnabled', '悬浮入口', s.general.floatingEnabled, '在酒馆里显示可以拖动的小球，点开再点一次进入手机。')}
+      + `<div class="group">${toggle('floatingEnabled', '悬浮入口', s.general.floatingEnabled, '在酒馆里显示可以拖动的入口：电脑上是小球，手机上是贴在屏幕边的小方条。点一下展开，再点一次进入手机。')}
           <div class="setting-row"><span class="row-text"><strong>按角色卡分开${help('打开后，每张角色卡（群聊是每个群）一部手机：聊天记录、朋友圈、论坛、查手机各管各的，换卡就换手机；联系人只有这张卡的角色、在这张卡剧情里说过话的角色，和在这张卡里手动加的联系人。「我」跟着酒馆给这张卡锁定的人设走。\n\n打开之前就有的聊天和动态没有归属，每张卡都看得到；不想要的可以删掉。关掉分区后，所有东西又会一起显示。')}</strong><small>${space.key ? '现在是' + esc(space.name || '这张角色卡') + (s.chat.partition === 'card' ? ' 的手机' : '') : '没有打开角色卡'}</small></span><input class="switch" type="checkbox" data-field="partition" aria-label="按角色卡分开" ${s.chat.partition === 'card' ? 'checked' : ''}></div></div>`
       + groupTitle('资料')
       + `<div class="group">${syncRows()}

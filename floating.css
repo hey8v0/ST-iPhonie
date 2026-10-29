@@ -1,31 +1,36 @@
-/* ST-iPhonie floating ball. Plain DOM, every rule scoped under #sttts-floating so tavern themes cannot reach in
-   and dock scripts can clone the ball. Idle: sky gradient. Playing: the engine's colour with a pulsing ring.
-   Docked: the ball tucks behind the screen edge; the first tap brings it out, the second opens the phone. */
+/* ST-iPhonie floating entry. Plain DOM, every rule scoped under #sttts-floating so tavern themes cannot reach in
+   and dock scripts can clone it. Two forms (core/floating.js). On a computer or tablet the round ball: docked, it
+   tucks behind the screen edge; the first tap brings it out, the second opens the phone. On a phone a small bar on the
+   screen edge: a tap turns it into a block, a tap on the block opens the phone. Idle: sky gradient. While a line is
+   made, plays or waits paused: its voice engine's colour, the two colours fading over. */
+@property --sttts-c1{syntax:'<color>';inherits:true;initial-value:#9ad8ff}
+@property --sttts-c2{syntax:'<color>';inherits:true;initial-value:#3a9cf0}
 #sttts-floating{all:initial;position:fixed;z-index:30010;width:58px;height:58px;display:block;color-scheme:light;font-family:"PingFang SC","Microsoft YaHei",sans-serif;pointer-events:none}
 #sttts-floating *,#sttts-floating *:before,#sttts-floating *:after{box-sizing:border-box}
 #sttts-floating svg{display:block;overflow:visible}
 
-#sttts-floating .float{--t1:#9ad8ff;--t2:#3a9cf0;--ring:#fff;--glow:rgba(58,156,240,.55);--ink:#fff;position:relative;display:block;width:58px;height:58px;margin:0;padding:0;pointer-events:auto}
-#sttts-floating .float[data-phase=playing][data-engine=fish],#sttts-floating .float[data-phase=paused][data-engine=fish],#sttts-floating .float[data-phase=generating][data-engine=fish]{--t1:#8fc2ff;--t2:#2268c4;--glow:rgba(34,104,196,.55)}
-#sttts-floating .float[data-phase=playing][data-engine=mini],#sttts-floating .float[data-phase=paused][data-engine=mini],#sttts-floating .float[data-phase=generating][data-engine=mini]{--t1:#ffd98a;--t2:#f2a93b;--glow:rgba(242,169,59,.6);--ink:#3b2400}
-#sttts-floating .float[data-phase=playing][data-engine=eleven],#sttts-floating .float[data-phase=paused][data-engine=eleven],#sttts-floating .float[data-phase=generating][data-engine=eleven]{--t1:#ffadc9;--t2:#c2447a;--glow:rgba(194,68,122,.55)}
-#sttts-floating .float[data-phase=playing][data-engine=mimo],#sttts-floating .float[data-phase=paused][data-engine=mimo],#sttts-floating .float[data-phase=generating][data-engine=mimo]{--t1:#ffb59a;--t2:#e4552a;--glow:rgba(228,85,42,.55)}
+#sttts-floating .float{--sttts-c1:#9ad8ff;--sttts-c2:#3a9cf0;--ring:#fff;--glow:rgba(58,156,240,.55);--glow-rgb:58,156,240;--ink:#fff;position:relative;display:block;width:58px;height:58px;margin:0;padding:0;pointer-events:auto;transition:--sttts-c1 .5s ease,--sttts-c2 .5s ease}
+/* The six voice engines (ui/common.js engines): a light top over the engine's button colour (ui/phone.css). */
+#sttts-floating .float[data-phase=playing][data-engine=fish],#sttts-floating .float[data-phase=paused][data-engine=fish],#sttts-floating .float[data-phase=generating][data-engine=fish]{--sttts-c1:#8fc2ff;--sttts-c2:#2268c4;--glow:rgba(34,104,196,.55);--glow-rgb:34,104,196}
+#sttts-floating .float[data-phase=playing][data-engine=mini],#sttts-floating .float[data-phase=paused][data-engine=mini],#sttts-floating .float[data-phase=generating][data-engine=mini]{--sttts-c1:#ffd98a;--sttts-c2:#f2a93b;--glow:rgba(242,169,59,.6);--glow-rgb:242,169,59;--ink:#3b2400}
+#sttts-floating .float[data-phase=playing][data-engine=eleven],#sttts-floating .float[data-phase=paused][data-engine=eleven],#sttts-floating .float[data-phase=generating][data-engine=eleven]{--sttts-c1:#ffadc9;--sttts-c2:#c2447a;--glow:rgba(194,68,122,.55);--glow-rgb:194,68,122}
+#sttts-floating .float[data-phase=playing][data-engine=mimo],#sttts-floating .float[data-phase=paused][data-engine=mimo],#sttts-floating .float[data-phase=generating][data-engine=mimo]{--sttts-c1:#ffb59a;--sttts-c2:#e4552a;--glow:rgba(228,85,42,.55);--glow-rgb:228,85,42}
+#sttts-floating .float[data-phase=playing][data-engine=doubao],#sttts-floating .float[data-phase=paused][data-engine=doubao],#sttts-floating .float[data-phase=generating][data-engine=doubao]{--sttts-c1:#c2dc6c;--sttts-c2:#607813;--glow:rgba(96,120,19,.55);--glow-rgb:96,120,19}
+#sttts-floating .float[data-phase=playing][data-engine=custom],#sttts-floating .float[data-phase=paused][data-engine=custom],#sttts-floating .float[data-phase=generating][data-engine=custom]{--sttts-c1:#8fdcb3;--sttts-c2:#2e9464;--glow:rgba(46,148,100,.55);--glow-rgb:46,148,100}
 #sttts-floating .float[data-theme=dark]{--ring:#1c2150;color-scheme:dark}
 
 #sttts-floating .orb{all:unset;box-sizing:border-box;position:relative;width:58px;height:58px;padding:0;margin:0;border:3px solid var(--ring);border-radius:50%;display:grid;place-items:center;color:var(--ink);overflow:visible;touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer;-webkit-tap-highlight-color:transparent;
-  background:linear-gradient(160deg,var(--t1),var(--t2));
+  background:linear-gradient(160deg,var(--sttts-c1),var(--sttts-c2));
   box-shadow:inset 0 2px 0 rgba(255,255,255,.55),inset 0 -3px 0 rgba(0,0,0,.08),0 8px 20px -6px var(--glow),0 2px 6px rgba(0,0,0,.18);
-  transition:transform 240ms cubic-bezier(.3,1.4,.5,1),box-shadow 180ms,background 240ms,border-radius 240ms}
+  transition:transform 240ms cubic-bezier(.3,1.4,.5,1),box-shadow 180ms,border-radius 240ms,color .5s ease}
 #sttts-floating .orb:focus-visible{outline:2.5px solid #1f74cc;outline-offset:4px}
 #sttts-floating .orb:before{content:"";position:absolute;inset:3px 5px 50% 5px;border-radius:50% 50% 40% 40%;background:linear-gradient(rgba(255,255,255,.45),rgba(255,255,255,0));pointer-events:none}
-#sttts-floating .orb svg.wave{position:relative;width:30px;height:30px;fill:currentColor;color:var(--ink);pointer-events:none}
-#sttts-floating .wave rect{fill:currentColor;transform-box:fill-box;transform-origin:center;will-change:transform}
+#sttts-floating .orb svg.wave{position:relative;width:30px;height:30px;fill:currentColor;color:var(--ink);transition:color .5s ease;pointer-events:none}
+#sttts-floating .wave rect{fill:currentColor}
 #sttts-floating .spark{position:absolute;top:-4px;right:-3px;width:14px;height:14px;color:#fff;fill:#fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.25));transition:opacity 160ms;pointer-events:none}
-#sttts-floating .pulse{position:absolute;inset:-3px;display:block;border-radius:50%;border:2px solid var(--t2);opacity:0;pointer-events:none}
+#sttts-floating .pulse{position:absolute;inset:-3px;display:block;border-radius:50%;border:2px solid var(--sttts-c2);opacity:0;pointer-events:none}
 #sttts-floating .float[data-phase=playing] .pulse{animation:sttts-float-pulse 1.6s ease-out infinite}
-#sttts-floating .float[data-phase=generating] .orb svg.wave{animation:sttts-float-think 1s ease-in-out infinite}
 @keyframes sttts-float-pulse{0%{opacity:.7;transform:scale(1)}100%{opacity:0;transform:scale(1.45)}}
-@keyframes sttts-float-think{50%{opacity:.5}}
 /* Arrow shown on the part of the ball that peeks out when docked. */
 #sttts-floating .edge-mark{position:absolute;top:50%;left:9px;display:block;width:8px;height:8px;margin-top:-4px;border:solid #fff;border-width:0 0 2.5px 2.5px;border-radius:1px;transform:rotate(45deg);opacity:0;transition:opacity 160ms;pointer-events:none;filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))}
 
@@ -43,4 +48,26 @@
 @media(hover:hover){#sttts-floating .float[data-mode=docked] .orb:hover{transform:translateX(28px)}#sttts-floating .float[data-mode=docked][data-side=left] .orb:hover{transform:translateX(-28px)}}
 #sttts-floating .float[data-dragging=true] .orb{transition:none;transform:scale(1.06);box-shadow:0 16px 34px -8px var(--glow),0 4px 10px rgba(0,0,0,.2)}
 #sttts-floating .orb:active{transform:scale(.94)}
-@media(prefers-reduced-motion:reduce){#sttts-floating .orb,#sttts-floating .edge-mark,#sttts-floating .spark{transition:none}#sttts-floating .pulse,#sttts-floating .orb svg.wave{animation:none!important}#sttts-floating .wave rect{will-change:auto}}
+
+/* The phone's bar (data-form=bar). The script places and shapes it every frame: the root's place and size, the orb's
+   corners, squash, fade and shadow, the wave icon. Only the bar's strip at the screen edge (.hit) or the block itself
+   takes touches, so the chat beside it still scrolls. */
+#sttts-floating .waves,#sttts-floating .hit,#sttts-floating .hint,#sttts-floating .shine{display:none}
+#sttts-floating .float[data-form=bar]{width:100%;height:100%;pointer-events:none}
+#sttts-floating .float[data-form=bar] .orb{position:absolute;inset:0;width:100%;height:100%;display:block;border:0;overflow:hidden;transition:color .5s ease;pointer-events:auto}
+#sttts-floating .float[data-form=bar][data-mode=docked] .orb{pointer-events:none}
+#sttts-floating .float[data-form=bar] .orb:before{inset:7% 18% auto 18%;height:40%;border-radius:999px;background:linear-gradient(rgba(255,255,255,.6),rgba(255,255,255,0));opacity:var(--sttts-gloss,1)}
+#sttts-floating .float[data-form=bar] .orb svg.wave{position:absolute;left:50%;top:50%;width:28px;height:28px;margin:-14px 0 0 -14px}
+#sttts-floating .float[data-form=bar] .pulse,#sttts-floating .float[data-form=bar] .spark,#sttts-floating .float[data-form=bar] .edge-mark{display:none}
+#sttts-floating .float[data-form=bar] .waves{display:block;position:absolute;left:0;top:0;width:132px;height:180px;pointer-events:none}
+#sttts-floating .float[data-form=bar] .hit{display:block;position:absolute;left:0;top:0;width:20px;height:49px;pointer-events:auto;touch-action:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+/* While a line is being made, a light sweeps down the bar. */
+#sttts-floating .float[data-form=bar] .shine{display:block;position:absolute;inset:0;opacity:0;pointer-events:none;background:linear-gradient(180deg,transparent 0 32%,rgba(255,255,255,.85) 50%,transparent 68% 100%);background-size:100% 260%}
+#sttts-floating .float[data-form=bar][data-phase=generating] .shine{opacity:1;animation:sttts-float-sweep 1.15s cubic-bezier(.45,0,.55,1) infinite}
+@keyframes sttts-float-sweep{from{background-position:0 115%}to{background-position:0 -15%}}
+/* A first-time tip beside the bar. */
+#sttts-floating .float[data-form=bar] .hint{display:block;position:absolute;left:0;top:0;white-space:nowrap;font-size:12.5px;font-weight:600;line-height:1.2;color:#fff;background:rgba(20,26,52,.86);padding:7px 11px;border-radius:999px;box-shadow:0 8px 20px -8px rgba(0,0,0,.45);opacity:0;transform:translateX(var(--hx,0px)) scale(.94);transition:opacity .22s ease,transform .42s cubic-bezier(.3,1.4,.5,1);pointer-events:none}
+#sttts-floating .float[data-form=bar][data-side=right] .hint{--hx:10px}
+#sttts-floating .float[data-form=bar][data-side=left] .hint{--hx:-10px}
+#sttts-floating .float[data-form=bar] .hint.on{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){#sttts-floating .float,#sttts-floating .orb,#sttts-floating .edge-mark,#sttts-floating .spark,#sttts-floating .hint,#sttts-floating .orb svg.wave{transition:none}#sttts-floating .pulse,#sttts-floating .shine{animation:none!important}}

@@ -139,15 +139,35 @@ export class BrowserAudio {
    } catch (error) { finish(error); }
   });
  }
- levels() {
-  if (!this.analyser) return [];
-  const data = new Uint8Array(this.analyser.frequencyBinCount);
-  this.analyser.getByteFrequencyData(data);
-  return [0, 1, 2, 3, 4].map(i => {
-   let sum = 0;
-   for (let j = 0; j < 6; j++) sum += data[i * 6 + j];
-   return Math.min(1, Math.pow(sum / (6 * 255), .65));
-  });
+ /** How loud the voice is now, 0–1: the last 21 ms of sound in decibels against the loudest of late, so the line's
+  *  loudest syllables fill the wave and one 26 dB quieter leaves it empty, whether the voice or the volume is loud or
+  *  quiet. It rises in a hundredth of a second or two and falls in a few, like a meter. 0 before anything played. */
+ loudness(now = performance.now()) {
+  if (!this.analyser || !this.lips) return 0;
+  const m = this.meter ??= { at: now, level: 0, peak: -30, wave: new Float32Array(this.lips.fftSize), trail: [] };
+  // Several waves read it in one frame (the floating ball, the story's wave, the phone): the first reading counts.
+  if (m.trail.length && now - m.at < 8) return m.level;
+  this.lips.getFloatTimeDomainData(m.wave);
+  let sum = 0;
+  for (const v of m.wave) sum += v * v;
+  const db = 10 * Math.log10(sum / m.wave.length + 1e-10), dt = Math.min(.1, Math.max(0, now - m.at) / 1000);
+  // The loudest of late sinks 4 dB a second once the voice drops, never below −42 dB, so a pause stays a pause.
+  m.peak = Math.max(db, -42, m.peak - 4 * dt);
+  const target = db < -66 ? 0 : Math.min(1, Math.max(0, (db - m.peak + 26) / 26));
+  m.level += (target - m.level) * (1 - Math.exp(-dt / (target > m.level ? .018 : .07)));
+  m.at = now;
+  m.trail.push([now, m.level]);
+  while (m.trail.length > 2 && now - m.trail[1][0] > 100) m.trail.shift();
+  return m.level;
+ }
+ /** The wave's five bars, 0–1, from how loud the voice is: the middle bar is the voice now, the bars beside it what it
+  *  was 35 and 70 ms before, so each syllable runs out from the middle. [] before anything played. */
+ levels(now = performance.now()) {
+  if (!this.analyser || !this.lips) return [];
+  this.loudness(now);
+  const trail = this.meter.trail;
+  const then = ago => { for (let i = trail.length - 1; i > 0; i--) if (now - trail[i][0] >= ago) return trail[i][1]; return trail[0][1]; };
+  return [.74, .9, 1, .9, .74].map((gain, i) => gain * then(Math.abs(i - 2) * 35));
  }
  /** The mouth for the sound playing now (core/model-files.js mouthShape), null before anything played. */
  mouth() {
@@ -174,7 +194,7 @@ export class BrowserAudio {
   const context = this.context;
   this.gain?.disconnect();
   this.analyser?.disconnect();
-  this.context = this.analyser = this.gain = null;
+  this.context = this.analyser = this.gain = this.lips = this.meter = null;
   this.decoded.clear(); this.decodeBytes = 0;
   return context?.close();
  }
