@@ -1,9 +1,9 @@
 // 方块世界: a block world in the spirit of the game, made from scratch. This page runs the game: the menus, the player,
 // breaking and placing, survival (health, hunger, air), the day, what is held, the HUD; the world itself is made and
 // kept by the worker (world.worker.js) and drawn by render.js.
-import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE, BOAT_WOODS, WATERLOGGED} from './blocks.js';
+import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE, BOAT_WOODS, WATERLOGGED, SIGN_WOODS} from './blocks.js';
 import {Mobs, MOBS} from './mobs.js';
-import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat, handFrame, FISH_SKINS, ownFishSkin, CONDUIT_SKINS, ownConduitSkin, ownWind} from './models.js';
+import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat, handFrame, FISH_SKINS, ownFishSkin, CONDUIT_SKINS, ownConduitSkin, ownWind, ownSign} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
 import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds, dials} from './atlas.js';
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
@@ -14,6 +14,7 @@ import {Inventory, furnaceTick, stackMax, ARMOR_AT, takeSmeltXp} from './invento
 import {enchOf, shelvesAround, fishLoot, protectionFactor, wears, seeded} from './enchant.js';
 import {InventoryUI, stackHtml} from './invui.js';
 import {Entities, itemLook, setPacked, setAtlas, thickItem} from './entities.js';
+import {smeltsIn, smeltOf} from './inventory.js';
 import {Input} from './input.js';
 import {Screens} from './screens.js';
 import {collisionBoxes, DIR, ATTACHED} from './shapes.js';
@@ -87,6 +88,8 @@ async function loadTextures() {
   // mob skins: the pack's (in the same layout) or ours; their sizes, since a pack's may be bigger
   skinSizes = {};
   for (const k of Object.keys(MODELS)) { const img = skins?.[k] || OWN_SKINS[k](); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; skinPics[k] = img; }
+  // signs' wood
+  for (const w of SIGN_WOODS) { const img = skins?.[`sign_${w}`] || ownSign(w); renderer.setImage(`mob:sign_${w}`, img); skinSizes[`sign_${w}`] = [img.width, img.height]; }
   // villagers by trade: the pack's villager with its plains clothes and the trade's over them, or ours
   for (const prof of VILLAGER_SKINS) {
     let img = ownVillager(prof);
@@ -211,7 +214,7 @@ function startWorld(meta) {
   G = {
     meta, worker, mirror, body, ents, mode: meta.mode || 'survival', inv: Inventory.from(meta.inv), hot: start.hot || 0, time: meta.time || 0,
     health: start.health ?? 20, food: start.food ?? 20, sat: start.sat ?? 5, exh: 0, air: 300, tiles: meta.tiles || {}, spawn: meta.spawn || (sp ? {x: sp.x, y: sp.y, z: sp.z} : {x: start.x, y: start.y, z: start.z}),
-    needGround: !meta.player, ready: false, meshes: 0, cx: Math.floor(start.x / 16), cz: Math.floor(start.z / 16),
+    needGround: !meta.player, ready: false, campfires: new Map(), signs: new Map(), meshes: 0, cx: Math.floor(start.x / 16), cz: Math.floor(start.z / 16),
     breaking: null, breakWait: 0, useWait: 0, swing: 0, eating: 0, hurtT: 0, regen: 0, starve: 0, lastHit: 0, walked: 0, stepAt: 0, dead: false, saveAt: performance.now(), hand: new Verts(64), outline: null, target: null,
   };
   ents.load(meta.items);
@@ -245,7 +248,7 @@ function startWorld(meta) {
     hurtPlayer: (n, why, from, kind) => hurt(n, why, from, kind), explode: (x, y, z, power, src, fire) => explode(x, y, z, power, src, null, fire),
     sound: (name, x, y, z) => soundAt(name, x, y, z), drop: (s, x, y, z, o) => G.ents.drop(s, x, y, z, o), give: s => !G.inv.add(s),
     burst: (x, y, z, kind) => G.ents.puff(x, y, z, kind), setBlock: (x, y, z, v) => setBlock(x, y, z, v), effect: (id, amp, ticks) => giveEffect(id, amp, ticks),
-    xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain', looting: () => enchOf(held(), 'looting'),
+    xp: (n, x, y, z) => G.ents.xp(n, x, y, z), raining: (x, z) => fallsAt(Math.floor(x), Math.floor(z)) === 'rain', staring: m => staring(m), looting: () => enchOf(held(), 'looting'),
     nether: () => G.dim === 'nether', seed: meta.seed, invisible: () => !!G.effects.invisibility,
     difficulty: () => meta.difficulty || 'normal', spawning: () => (meta.rules || defaultRules()).doMobSpawning,
     monuments: (x, z) => G.dim === 'nether' ? [] : monumentsNear(meta.seed, Math.floor(x), Math.floor(z), 16), effectOf: id => G.effects[id] || null, curse: () => curse(),
@@ -270,9 +273,9 @@ function startWorld(meta) {
 }
 function onWorker(m) {
   if (!G) return;
-  if (m.type === 'column') G.mirror.column(m);
+  if (m.type === 'column') { G.mirror.column(m); campfiresIn(m); signsIn(m); }
   else if (m.type === 'mesh') { renderer.setSection(m.cx, m.sy, m.cz, m.solid, m.trans, m.vis, m.sun, m.faces); G.meshes++; }
-  else if (m.type === 'drop') { G.mirror.drop(m.cx, m.cz); renderer.dropColumn(m.cx, m.cz); }
+  else if (m.type === 'drop') { G.mirror.drop(m.cx, m.cz); renderer.dropColumn(m.cx, m.cz); G.campfires.delete(`${m.cx},${m.cz}`); G.signs.delete(`${m.cx},${m.cz}`); }
   else if (m.type === 'drops') for (const [id, n] of m.items) G.ents.drop({id, n}, m.x, m.y, m.z);
   else if (m.type === 'sound') soundAt(m.iron && m.name.startsWith('door') ? 'iron_door' : m.name, m.x, m.y, m.z);
   else if (m.type === 'prime') G.mobs.light(m.x, m.y, m.z);
@@ -694,11 +697,12 @@ function giveEffect(id, amp, ticks) {
   drawEffects();
 }
 // how fast each thrown thing leaves the hand, how much it rises over the aim, and how fast it falls (the game's, a tick)
-const THROWN = {splash_potion: [0.5, 0.1, 0.05], experience_bottle: [0.7, 0.2, 0.07], snowball: [1.5, 0, 0.03], egg: [1.5, 0, 0.03]};
+const THROWN = {splash_potion: [0.5, 0.1, 0.05], experience_bottle: [0.7, 0.2, 0.07], snowball: [1.5, 0, 0.03], egg: [1.5, 0, 0.03], ender_pearl: [1.5, 0, 0.03]};
 /** Something thrown the way the player looks: a splash potion, a bottle o' enchanting, a snowball, an egg. */
 function throwItem(s) {
   const d = G.body.look(), eye = eyePos();
   launch(s, eye[0] + d[0] * 0.3, eye[1] - 0.1, eye[2] + d[2] * 0.3, d);
+  Object.assign(G.thrown.at(-1), {owner: 'player', dim: G.dim});
   G.swing = 6; play('throw');
 }
 /** One of a stack sent flying from a place along d (by the player, or a dispenser). */
@@ -728,10 +732,19 @@ function thrownTick() {
  */
 function landed(p, x, y, z, mob) {
   const id = p.s.id;
+  // an ender pearl takes its thrower there (just short of what it hit), with five points of a fall's harm
+  if (id === 'ender_pearl') {
+    G.ents.puff(x, y, z, 'portal'); soundAt('enderman_teleport', x, y, z);
+    if (p.owner !== 'player' || G.dead || p.dim !== G.dim) return;
+    const b = G.body, l = Math.hypot(p.vx, p.vz) || 1, at = {x: x - p.vx / l * 0.31, y: p.vy > 0 && !mob ? y - 1.81 : y, z: z - p.vz / l * 0.31};
+    Object.assign(b, at, {vx: 0, vy: 0, vz: 0, fall: 0}); Object.assign(b.prev, at);
+    hurt(5, '摔得太重了', null, 'fall');
+    return;
+  }
   if (id === 'splash_potion') { splash(x, y, z, p.s.pot); return; }
   if (id === 'experience_bottle') { G.ents.puff(x, y, z, 'shatter', 0x5a8cff); soundAt('glass', x, y, z); G.ents.xp(3 + Math.floor(Math.random() * 5) + Math.floor(Math.random() * 5), x, y + 0.2, z); return; }
   G.ents.crumbs(x, y, z, id);
-  if (mob) G.mobs.hurt(mob, id === 'snowball' && mob.kind === 'blaze' ? 3 : 0, {x: x - p.vx, z: z - p.vz, player: true});
+  if (mob) G.mobs.hurt(mob, id === 'snowball' && mob.kind === 'blaze' ? 3 : 0, {x: x - p.vx, z: z - p.vz, player: true}, 'thrown');
   if (id === 'egg' && Math.random() < 1 / 8) for (let k = Math.random() < 1 / 32 ? 4 : 1; k > 0; k--) G.mobs.add('chicken', x, y, z, {baby: true});
 }
 function splash(x, y, z, pot) {
@@ -986,7 +999,7 @@ function strike(x, y, z) {
  *  burns); over soul sand it is soul fire. True if it was put. */
 function setFire(x, y, z) {
   if (!G.mirror.has(x, z) || G.mirror.get(x, y, z)) return false;
-  const below = G.mirror.get(x, y - 1, z) & 0xFFF, soul = below === ID.soul_sand;
+  const below = G.mirror.get(x, y - 1, z) & 0xFFF, soul = below === ID.soul_sand || below === ID.soul_soil;
   const burns = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].some(([dx, dy, dz]) => BLOCKS[G.mirror.get(x + dx, y + dy, z + dz) & 0xFFF]?.burn);
   if (!soul && !BLOCKS[below]?.solid && !burns) return false;
   setBlock(x, y, z, soul ? ID.soul_fire : ID.fire);
@@ -1015,7 +1028,266 @@ function wearTool(n = 1) {
 }
 
 // ---------- breaking and placing ----------
-function setBlock(x, y, z, v) { G.worker.postMessage(G.mirror.set(x, y, z, v)); }
+function setBlock(x, y, z, v) {
+  G.worker.postMessage(G.mirror.set(x, y, z, v));
+  // (a campfire put down is known at once)
+  for (const [is, known] of [[CAMP, G.campfires], [SIGN, G.signs]]) if (is[v & 0xFFF]) { const k = `${x >> 4},${z >> 4}`, list = known.get(k) || []; if (!list.some(p => p[0] === x && p[1] === y && p[2] === z)) known.set(k, [...list, [x, y, z]]); }
+}
+
+// ---------- campfires ----------
+// (lit: state bit 4 clear, not standing in water)
+const CAMP = new Uint8Array(4096);
+for (const id of [ID.campfire, ID.soul_campfire, WATERLOGGED[ID.campfire], WATERLOGGED[ID.soul_campfire]]) CAMP[id] = 1;
+const campLit = v => CAMP[v & 0xFFF] && !(v >>> 12 & 4) && !BLOCKS[v & 0xFFF].water;
+const soulCamp = v => BLOCKS[v & 0xFFF].name.includes('soul_campfire');
+// ---------- signs ----------
+const SIGN = new Uint8Array(4096);
+for (const b of BLOCKS) if (b.shape === 'sign' || b.shape === 'wall_sign') SIGN[b.id] = 1;
+/** The signs in a column the worker sent (as the campfires are kept). */
+function signsIn(m) {
+  const found = [];
+  m.sections.forEach((s, si) => { if (s) for (let i = 0; i < 4096; i++) if (SIGN[s[i] & 0xFFF]) found.push([m.cx * 16 + (i & 15), MINY + si * 16 + (i >> 8), m.cz * 16 + (i >> 4 & 15)]); });
+  const k = `${m.cx},${m.cz}`;
+  if (found.length) G.signs.set(k, found); else G.signs.delete(k);
+}
+/**
+ * How a sign stands: the way its front faces ([dx, dz]), its middle as the board is drawn from, and whether it is on
+ * a wall (the game's: standing, sixteen ways, the board over a post; on a wall, the board against it, lower down).
+ */
+function signPose(x, y, z, v) {
+  const m = v >>> 12;
+  if (BLOCKS[v & 0xFFF].shape === 'sign') { const a = m * Math.PI / 8; return {wall: false, d: [-Math.sin(a), Math.cos(a)], at: [x + 0.5, y - 0.5, z + 0.5]}; }
+  const [sx, sz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][m & 3];
+  return {wall: true, d: [-sx, -sz], at: [x + 0.5 + sx * 0.4375, y - 0.8125, z + 0.5 + sz * 0.4375]};
+}
+// the text's colours (a dye's), written plain they are darker (four tenths, the game's); glowing, with a dark outline
+const SIGN_INK = {white: 0xffffff, orange: 0xff681f, magenta: 0xff00ff, light_blue: 0x9ac0cd, yellow: 0xffff00, lime: 0xbfff00, pink: 0xff69b4, gray: 0x808080,
+  light_gray: 0xd3d3d3, cyan: 0x00ffff, purple: 0xa020f0, blue: 0x0000ff, brown: 0xa52a2d, green: 0x00ff00, red: 0xff0000, black: 0x000000};
+const rgb = n => `rgb(${n >> 16 & 255},${n >> 8 & 255},${n & 255})`, darker = n => (Math.floor((n >> 16 & 255) * 0.4) << 16) | (Math.floor((n >> 8 & 255) * 0.4) << 8) | Math.floor((n & 255) * 0.4);
+const SIGN_FONT = 'bold 16px "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif', SIGN_LINE = 180;
+/** A side's words drawn for the board (192×96: two pixels to the game's text unit; four lines ten units apart). */
+const signPics = new Map();
+function signPicture(k, side, text) {
+  const state = JSON.stringify(text), had = signPics.get(`${k}|${side}`);
+  if (had?.state === state) return had.name;
+  const c = had?.canvas || document.createElement('canvas'), g = c.getContext('2d');
+  c.width = 192; c.height = 96; g.clearRect(0, 0, 192, 96);
+  g.font = SIGN_FONT; g.textAlign = 'center'; g.textBaseline = 'middle';
+  const ink = SIGN_INK[text.color] ?? 0, fill = text.glow ? (text.color === 'black' ? 0xf0ebcc : ink) : darker(ink);
+  text.lines.forEach((line, i) => {
+    if (!line) return;
+    const y = 48 + (i - 1.5) * 20;
+    if (text.glow) { g.lineWidth = 4; g.strokeStyle = rgb(text.color === 'black' ? 0 : darker(ink)); g.strokeText(line, 96, y); }
+    g.fillStyle = rgb(fill); g.fillText(line, 96, y);
+  });
+  const name = `signtext:${k}:${side}`;
+  renderer.setImage(`mob:${name}`, c);
+  signPics.set(`${k}|${side}`, {state, canvas: c, name});
+  return name;
+}
+/** The signs near: the board (and post) in its wood, and the words on either side over it. */
+function signModels(view, light) {
+  const out = [], s = 2 / 3, k16 = s / 16;
+  for (const list of G.signs.values()) for (const [x, y, z] of list) {
+    const v = G.mirror.get(x, y, z), b = BLOCKS[v & 0xFFF];
+    if (!SIGN[v & 0xFFF] || Math.hypot(x + 0.5 - G.body.x, z + 0.5 - G.body.z) > 64) continue;
+    const {wall, d, at} = signPose(x, y, z, v), yaw = Math.atan2(-d[0], -d[1]), cy = Math.cos(yaw), sy = Math.sin(yaw), [sky, blk] = light(x, y, z);
+    const ox = at[0] - view.x, oy = at[1] - view.y, oz = at[2] - view.z, skin = `sign_${b.signWood}`;
+    out.push({skin, verts: new Float32Array(buildModel(wall ? 'wall_sign' : 'sign', {}, {x: ox, y: oy, z: oz, yaw, s}, [], skinSizes[skin])), light: [sky, blk], tint: [1, 1, 1], hurt: 0, white: 0});
+    // the words: a sheet over each face of the board (the game's model space, as buildModel places it)
+    const tile = G.tiles[`${x},${y},${z}`];
+    if (tile?.kind !== 'sign') continue;
+    for (const [side, mz] of [['front', -1.12], ['back', 1.12]]) {
+      const text = tile[side];
+      if (!text?.lines.some(Boolean)) continue;
+      const name = signPicture(`${x},${y},${z}`, side, text), place = (mx, my) => { const lx = -mx * k16, ly = (24 - my) * k16, lz = mz * k16; return [ox + lx * cy + lz * sy, oy + ly, oz - lx * sy + lz * cy]; };
+      // (read from in front of that side: the back's turned the other way)
+      const L = side === 'front' ? -12 : 12, R = -L, corners = [[L, -14, 0, 0], [R, -14, 1, 0], [R, -2, 1, 1], [L, -2, 0, 1]], vs = [];
+      for (const order of [[0, 1, 2, 3], [3, 2, 1, 0]]) for (const i of order) { const [mx, my, u, w] = corners[i]; vs.push(...place(mx, my), u, w, 1); }
+      out.push({skin: name, verts: new Float32Array(vs), light: text.glow ? [15, 15] : [sky, blk], tint: [1, 1, 1], hurt: 0, white: 0, noShadow: true});
+    }
+  }
+  return out;
+}
+/** Which side of a sign the player is on: its front or its back. */
+function signSide(x, y, z, v) { const {d} = signPose(x, y, z, v); return (G.body.x - (x + 0.5)) * d[0] + (G.body.z - (z + 0.5)) * d[1] >= 0 ? 'front' : 'back'; }
+const DYES = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black'];
+/** Using a sign: a dye colours the words on the side the player is at, a glow ink sac makes them glow (an ink sac
+ *  puts that out) — only where something is written; anything else opens that side to write on (the game's). */
+function signUse(t, s) {
+  const k = `${t.x},${t.y},${t.z}`, side = signSide(t.x, t.y, t.z, t.v), tile = G.tiles[k], text = tile?.[side];
+  const dye = s && DYES.find(c => s.id === `${c}_dye`);
+  if (text?.lines.some(Boolean) && (dye || s?.id === 'glow_ink_sac' || s?.id === 'ink_sac')) {
+    if (dye && text.color !== dye) text.color = dye;
+    else if (s.id === 'glow_ink_sac' && !text.glow) text.glow = true;
+    else if (s.id === 'ink_sac' && text.glow) text.glow = false;
+    else return;
+    useUp(); play(s.id === 'ink_sac' ? 'splash' : 'pop');
+    return;
+  }
+  editSign(k, side);
+}
+let signEl = null;
+/** Writing on a sign: its side's four lines over a picture of it (each only as long as fits; the sign shows them as
+ *  they are typed). Enter goes to the next line, on the last one (or 完成) it is done; Esc is done too. */
+function editSign(k, side) {
+  if (!G || G.dead || paused || invUI.open || chatEl || signEl) return;
+  const [x, y, z] = k.split(',').map(Number), b = BLOCKS[G.mirror.get(x, y, z) & 0xFFF];
+  if (!SIGN[b.id]) return;
+  const tile = G.tiles[k] ||= {kind: 'sign'}, text = tile[side] ||= {lines: ['', '', '', ''], color: 'black', glow: false};
+  input.enabled = false; input.unlock();
+  const el = signEl = document.createElement('div'), wood = {oak: '#b8945f', spruce: '#82603a', birch: '#d7c185', jungle: '#b88764', acacia: '#ba6337', dark_oak: '#6a4628', mangrove: '#8a4440', cherry: '#e2b2a8', bamboo: '#d6c25a'}[b.signWood];
+  el.className = 'signedit';
+  el.innerHTML = `<div class="board" style="--wood:${wood}">${text.lines.map((l, i) => `<input type="text" autocomplete="off" spellcheck="false" data-i="${i}" aria-label="第 ${i + 1} 行">`).join('')}</div><button type="button">完成</button>`;
+  $('.chatlog').after(el);
+  const boxes = [...el.querySelectorAll('input')], g = document.createElement('canvas').getContext('2d');
+  g.font = SIGN_FONT;
+  const close = () => {
+    if (signEl !== el) return;
+    el.remove(); signEl = null;
+    if (!tile.front?.lines.some(Boolean) && !tile.back?.lines.some(Boolean)) delete G.tiles[k];
+    if (G && !paused && !G.dead) { input.enabled = true; if (input.mode !== 'touch') input.lock(); }
+  };
+  boxes.forEach((box, i) => {
+    box.value = text.lines[i];
+    box.addEventListener('input', () => { while (box.value && g.measureText(box.value).width > SIGN_LINE) box.value = box.value.slice(0, -1); text.lines[i] = box.value; });
+    box.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Escape' || (e.key === 'Enter' && i === 3)) { e.preventDefault(); close(); }
+      else if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); boxes[(i + 1) % 4].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); boxes[(i + 3) % 4].focus(); }
+    });
+  });
+  el.querySelector('button').addEventListener('click', close);
+  setTimeout(() => boxes[0].focus(), 0);
+}
+/**
+ * A sign put down: standing on the top of a block (turned to face the player, sixteen ways) or on the side of one
+ * (against it); not under a ceiling, and only on something solid. Then it is written on. True if it was put.
+ */
+function placeSign(t, b) {
+  if (t.face === 3) return false;
+  const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face], tb = BLOCKS[t.v & 0xFFF];
+  const into = tb.replace, x = into ? t.x : t.x + nx, y = into ? t.y : t.y + ny, z = into ? t.z : t.z + nz, here = G.mirror.get(x, y, z);
+  if (here && !BLOCKS[here & 0xFFF].replace) return false;
+  let v;
+  if (t.face === 2 || into) {
+    const under = G.mirror.get(x, y - 1, z);
+    if (!under || !BLOCKS[under & 0xFFF].solid) return false;
+    const deg = ((G.body.yaw * 180 / Math.PI) % 360 + 360) % 360;
+    v = withMeta(b.id, Math.floor(16 - deg / 22.5 + 0.5) & 15);
+  } else {
+    if (!tb.solid) return false;
+    v = withMeta(ID[b.wallSign], [3, 1, 0, 0, 0, 2][t.face]);
+  }
+  setBlock(x, y, z, v);
+  delete G.tiles[`${x},${y},${z}`];
+  setTimeout(() => editSign(`${x},${y},${z}`, 'front'), 0);
+  return true;
+}
+/** The campfires in a column the worker sent (kept a column at a time; checked again as they are used). */
+function campfiresIn(m) {
+  const found = [];
+  m.sections.forEach((s, si) => { if (s) for (let i = 0; i < 4096; i++) if (CAMP[s[i] & 0xFFF]) found.push([m.cx * 16 + (i & 15), MINY + si * 16 + (i >> 8), m.cz * 16 + (i >> 4 & 15)]); });
+  const k = `${m.cx},${m.cz}`;
+  if (found.length) G.campfires.set(k, found); else G.campfires.delete(k);
+}
+/**
+ * Each tick, the campfires near: a lit one sends up smoke (2–3 puffs in ticks one in nine; much higher over a hay
+ * bale), crackles now and then and spits a spark; what is on one cooks while it burns (thirty seconds, then it pops
+ * off cooked) and cools back while it is out (the game's).
+ */
+function campfiresTick() {
+  const b = G.body;
+  for (const list of G.campfires.values()) for (const [x, y, z] of list) {
+    const v = G.mirror.get(x, y, z);
+    if (!CAMP[v & 0xFFF]) continue;
+    const lit = campLit(v), d = Math.hypot(x + 0.5 - b.x, y + 0.5 - b.y, z + 0.5 - b.z);
+    if (lit && d < 64) {
+      if (Math.random() < 0.11) { const signal = (G.mirror.get(x, y - 1, z) & 0xFFF) === ID.hay_block; for (let k = 2 + (Math.random() < 0.5 ? 1 : 0); k > 0; k--) G.ents.campfireSmoke(x + 0.5, y + 0.45, z + 0.5, signal); }
+      if (d < 16 && Math.random() < 0.1) soundAt('campfire', x + 0.5, y + 0.5, z + 0.5);
+      if (Math.random() < 0.04) G.ents.puff(x + 0.5, y + 0.5, z + 0.5, 'flame');
+    }
+    const tile = G.tiles[`${x},${y},${z}`];
+    if (tile?.kind !== 'campfire') continue;
+    for (let i = 0; i < 4; i++) {
+      const s = tile.food[i];
+      if (!s) continue;
+      if (!lit) { tile.cook[i] = Math.max(0, tile.cook[i] - 2); continue; }
+      if (++tile.cook[i] >= 600) { tile.food[i] = null; tile.cook[i] = 0; G.ents.drop({id: smeltOf(s.id) || s.id, n: 1}, x + 0.5, y + 0.6, z + 0.5); }
+    }
+    if (!tile.food.some(Boolean)) delete G.tiles[`${x},${y},${z}`];
+  }
+}
+/**
+ * Using a campfire: food that cooks goes on it (in the first of its four places free; full, nothing happens); a
+ * shovel puts a lit one out; a lighter or a fire charge lights one that is out (not one in water). True if done.
+ */
+function campfireUse(t, s, info) {
+  const v = t.v, id = v & 0xFFF, meta = v >>> 12, k = `${t.x},${t.y},${t.z}`, at = [t.x + 0.5, t.y + 0.5, t.z + 0.5];
+  if (s && smeltsIn('food', s.id)) {
+    const tile = G.tiles[k] ||= {kind: 'campfire', food: [null, null, null, null], cook: [0, 0, 0, 0]}, i = tile.food.indexOf(null);
+    if (i >= 0) { tile.food[i] = {id: s.id, n: 1}; tile.cook[i] = 0; useUp(); play('place', ID.oak_log); }
+    return true;
+  }
+  if (campLit(v) && heldTool()?.kind === 'shovel') { setBlock(t.x, t.y, t.z, withMeta(id, meta | 4)); soundAt('fizz', ...at); G.ents.puff(...at, 'smoke'); wearTool(); return true; }
+  if (!campLit(v) && !BLOCKS[id].water && (info?.tool?.kind === 'fire' || s?.id === 'fire_charge')) {
+    setBlock(t.x, t.y, t.z, withMeta(id, meta & 3));
+    if (s.id === 'fire_charge') { useUp(); play('blaze_shoot'); } else { play('ignite'); wearTool(); }
+    return true;
+  }
+  return false;
+}
+/**
+ * Whether the player looks an enderman in the eye (the game's: their aim inside a cone round its eyes that narrows
+ * with distance, nothing in between, 64 blocks at most).
+ */
+function staring(m) {
+  if (G.dead || G.mode === 'creative' || G.mode === 'spectator') return false;
+  const e = eyePos(), d = G.body.look(), dx = m.x - e[0], dy = m.y + m.body.height * 0.88 - e[1], dz = m.z - e[2], l = Math.hypot(dx, dy, dz);
+  if (l > 64 || l < 0.5 || (dx * d[0] + dy * d[1] + dz * d[2]) / l <= 1 - 0.025 / l) return false;
+  return !raycast(G.mirror, e[0], e[1], e[2], dx / l, dy / l, dz / l, l, false, true);
+}
+/** The blocks endermen hold, in front of them between their hands. */
+const heldBlockVerts = new Map();
+let heldBlockAtlas = null;
+function endermanThings(light) {
+  if (heldBlockAtlas !== built) { heldBlockVerts.clear(); heldBlockAtlas = built; }
+  const out = [];
+  for (const m of G.mobs.list) {
+    if (m.kind !== 'enderman' || !m.carried || m.dead) continue;
+    const name = BLOCKS[m.carried]?.name, look = name && itemLook(name);
+    if (!look) continue;
+    const [sky, blk] = light(Math.floor(m.x), Math.floor(m.y + 1.5), Math.floor(m.z)), key = `${name}|${sky}|${blk}`;
+    let v = heldBlockVerts.get(key);
+    if (!v) { v = new Verts(look.cube ? 48 : 512); if (look.cube) v.cube(0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints); else thickItem(v, look.flat, look.tint, sky * 17, blk * 17); heldBlockVerts.set(key, v); }
+    const fx = -Math.sin(m.yaw), fz = -Math.cos(m.yaw);
+    out.push({verts: v, x: m.x + fx * 0.5, y: m.y + 1.55, z: m.z + fz * 0.5, model: mat.model(0.5, m.yaw + Math.PI / 4, 0.35)});
+  }
+  return out;
+}
+/** What cooks on the campfires near, lying on them in their four places (the game's places and size). */
+const foodVerts = new Map();
+let foodAtlas = null;
+function campfireThings(light) {
+  if (foodAtlas !== built) { foodVerts.clear(); foodAtlas = built; }
+  const out = [];
+  for (const [k, tile] of Object.entries(G.tiles)) {
+    if (tile.kind !== 'campfire') continue;
+    const [x, y, z] = k.split(',').map(Number), v = G.mirror.get(x, y, z), facing = v >>> 12 & 3;
+    if (!CAMP[v & 0xFFF] || Math.hypot(x - G.body.x, z - G.body.z) > 48) continue;
+    const [sky, blk] = light(x, y + 1, z);
+    tile.food.forEach((s, i) => {
+      if (!s) return;
+      const look = itemLook(s.id), key = `${s.id}|${sky}|${blk}`;
+      let vv = foodVerts.get(key);
+      if (!vv) { vv = new Verts(512); if (look.cube) vv.cube(0.5, look.cube, sky * 17, blk * 17, 256, 32, look.tints); else thickItem(vv, look.flat, look.tint, sky * 17, blk * 17); foodVerts.set(key, vv); }
+      const a = ((i + facing) % 4) * Math.PI / 2, c = Math.cos(a), sn = Math.sin(a);
+      out.push({verts: vv, x: x + 0.5 - 0.3125 * (c + sn), y: y + 0.449, z: z + 0.5 + 0.3125 * (sn - c), model: mat.model(0.375, a, -Math.PI / 2)});
+    });
+  }
+  return out;
+}
 function breakBlock(t) {
   const {x, y, z, v} = t, b = BLOCKS[v & 0xFFF], survival = G.mode !== 'creative';
   // ice over something becomes water when broken (unless creative)
@@ -1038,7 +1310,7 @@ function breakBlock(t) {
   const tile = G.tiles[k];
   // a large chest's half: its own 27 go out, and the other half is a chest of its own again
   if (tile?.pair) unpairChest(k, tile);
-  if (tile) { for (const s of tile.slots || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; if (G.fills.has(k)) { G.fills.delete(k); G.worker.postMessage({type: 'fill', x, y, z, level: null}); } }
+  if (tile) { for (const s of tile.slots || tile.food || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; if (G.fills.has(k)) { G.fills.delete(k); G.worker.postMessage({type: 'fill', x, y, z, level: null}); } }
   G.ents.burst(x, y, z, v, 28);
   play('break', v);
   if (survival) { if (b.hard > 0) wearTool(); G.exh += 0.005; }
@@ -1048,6 +1320,7 @@ const SHEARED = new Set(['short_grass', 'fern', 'dead_bush', 'vine', 'tall_grass
 function facingBack() { const y = ((G.body.yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2); const q = Math.round(y / (Math.PI / 2)) % 4; return [0, 3, 2, 1][q]; }
 function placeFrom(t, stack) {
   const info = itemInfo(stack.id), b = info?.block || (info?.place ? BLOCKS[ID[info.place]] : null);
+  if (b?.shape === 'sign') return placeSign(t, b);
   const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face];
   const tb = BLOCKS[t.v & 0xFFF];
   // slabs join into a double one, snow layers stack up
@@ -1204,7 +1477,7 @@ function dispense({x, y, z, face, drop}) {
   }
   const empty = !front || BLOCKS[front & 0xFFF].replace;
   if (s.id === 'arrow') { G.mobs.arrows.push({x: ox, y: oy, z: oz, vx: dx * 1.1 + (Math.random() - 0.5) * 0.05, vy: dy * 1.1 + 0.1, vz: dz * 1.1 + (Math.random() - 0.5) * 0.05, from: 'dispenser', life: 0, stuck: false, dmg: 2, pickup: true}); used(); soundAt('bow', ox, oy, oz); return; }
-  if (info?.thrown) { launch(s, ox, oy, oz, [dx, dy + 0.1, dz]); used(); soundAt('throw', ox, oy, oz); return; }
+  if (info?.thrown && s.id !== 'ender_pearl') { launch(s, ox, oy, oz, [dx, dy + 0.1, dz]); used(); soundAt('throw', ox, oy, oz); return; }
   // flint and steel lights the TNT in front, or sets fire there; a fire charge flies off as a small fireball (the game's)
   if (info?.tool?.kind === 'fire') {
     if ((front & 0xFFF) === ID.tnt) { setBlock(fx, fy, fz, 0); G.mobs.light(fx, fy, fz); } else if (!setFire(fx, fy, fz)) { soundAt('empty', x + 0.5, y + 0.5, z + 0.5); return; }
@@ -1379,6 +1652,8 @@ function use(t, mob = null) {
     // a potion is drunk or thrown whatever is in front; otherwise a tap on a phone hits
     if (!info?.drink && !info?.thrown) { if (input.mode === 'touch' && mob.kind !== 'villager' && mob.kind !== 'iron_golem') attackMob(mob); return; }
   }
+  if (t && CAMP[t.v & 0xFFF] && !G.body.sneaking && campfireUse(t, s, info)) return;
+  if (t && SIGN[t.v & 0xFFF] && !G.body.sneaking) { signUse(t, s); return; }
   if (t && b.use === 'toggle' && !G.body.sneaking) { toggle(t); return; }
   if (t && b.use === 'bed' && !G.body.sneaking) { sleepIn(t); return; }
   if (t && b.use && !G.body.sneaking) { openBlock(b.use, t); return; }
@@ -1415,7 +1690,8 @@ function use(t, mob = null) {
   if (info?.food && ((G.mode !== 'creative' && G.food < 20) || info.always)) { G.eating = info.fast ? 16 : 32; return; }
   // a potion is drunk (as long as eating takes), a splash potion thrown
   if (info?.drink) { G.eating = 32; return; }
-  if (info?.thrown) { throwItem(s); useUp(); return; }
+  // (an ender pearl a second apart)
+  if (info?.thrown) { if (s.id === 'ender_pearl') { if (G.pearlWait > 0) return; G.pearlWait = 20; } throwItem(s); useUp(); return; }
   // a glass bottle fills at water
   if (s?.id === 'glass_bottle') {
     const eye = eyePos(), dir = aimDir(), lt = raycast(G.mirror, eye[0], eye[1], eye[2], dir[0], dir[1], dir[2], reach(), true);
@@ -1429,6 +1705,21 @@ function use(t, mob = null) {
       const full = {id: (lt.v & 0xFFF) === ID.water ? 'water_bucket' : 'lava_bucket', n: 1};
       if (G.mode !== 'creative') { useUp(); const left = G.inv.add(full); if (left) G.ents.drop(left, G.body.x, G.body.y + 1, G.body.z); }
       play('splash'); drawHud(true); return;
+    }
+    // the water of a block standing in water taken out (the game's)
+    const tb = t && BLOCKS[t.v & 0xFFF];
+    if (s.id === 'bucket' && tb?.water && tb.dry) {
+      setBlock(t.x, t.y, t.z, withMeta(ID[tb.dry], t.v >>> 12));
+      if (G.mode !== 'creative') { useUp(); const left = G.inv.add({id: 'water_bucket', n: 1}); if (left) G.ents.drop(left, G.body.x, G.body.y + 1, G.body.z); }
+      play('splash'); drawHud(true); return;
+    }
+    // water poured into a block that can stand in it: it does (a lit campfire goes out)
+    if (info?.pour === 'water' && t && WATERLOGGED[t.v & 0xFFF] && G.dim !== 'nether' && !info.fish) {
+      const id = t.v & 0xFFF, lit = campLit(t.v);
+      setBlock(t.x, t.y, t.z, withMeta(WATERLOGGED[id], CAMP[id] ? t.v >>> 12 | 4 : t.v >>> 12));
+      if (lit) { soundAt('fizz', t.x + 0.5, t.y + 0.5, t.z + 0.5); G.ents.puff(t.x + 0.5, t.y + 0.5, t.z + 0.5, 'smoke'); }
+      if (G.mode !== 'creative') { G.inv.slots[G.hot] = {id: 'bucket', n: 1}; drawHud(true); }
+      play('splash'); return;
     }
     // a fish bucket emptied into the water aimed at (no block in reach): the fish goes into it
     if (info?.fish && lt && isWater(lt.v) && (!t || lt.t < t.t)) {
@@ -1747,6 +2038,9 @@ function survivalTick(r) {
     }
     if (flame) { G.fireT = Math.max(G.fireT || 0, 160); if (G.ticks % 10 === 0) hurt(flame === ID.soul_fire ? 2 : 1, '被烧死了', null, 'fire'); }
     if (b.inLava) G.fireT = Math.max(G.fireT || 0, 300);
+    // a lit campfire stood in hurts, not with 冰霜行者 on (the game's); it sets nothing alight
+    const camp = G.mirror.get(fx, Math.floor(b.y + 0.01), fz);
+    if (campLit(camp) && !enchOf(G.inv.worn(3), 'frost_walker') && G.ticks % 10 === 0) hurt(soulCamp(camp) ? 2 : 1, '被烧死了', null, 'fire');
     if (G.fireT > 0) {
       if (b.inWater || (fallsAt(fx, fz) === 'rain' && topAt(fx, fz) <= Math.floor(b.y + 1.8))) G.fireT = 0;
       else if (--G.fireT % 20 === 0) hurt(1, '被烧死了', null, 'fire');
@@ -1924,6 +2218,7 @@ function tick() {
   // hitting a mob, else breaking
   const t = G.target;
   if (G.breakWait > 0) G.breakWait--;
+  if (G.pearlWait > 0) G.pearlWait--;
   const aiming = bow || (trident && G.draw > 0);
   if (ctl.attack && G.targetMob && !G.dead && !aiming) { attackMob(G.targetMob); G.breaking = null; }
   // fire on the face of the block hit goes out (the game's)
@@ -1995,6 +2290,7 @@ function tick() {
   }
   platesTick();
   hoppersTick();
+  campfiresTick();
   if (G.ticks % 10 === 0) fillsTick();
   if (invUI.open && (invUI.kind === 'furnace' || invUI.kind === 'brew' || (invUI.kind === 'chest' && invUI.data?.kind === 'hopper')) && G.ticks % 4 === 0) invUI.refresh();
   // the worker: where we are, how dark the sky is
@@ -2531,10 +2827,10 @@ function frame(now) {
   const tick20 = Math.floor(G.time);
   for (const an of animFrames) { const f = Math.floor(tick20 / an.time) % an.frames.length; if (f !== an.at) { an.at = f; renderer.updateLayer(an.layer, an.frames[f]); } }
   const lightAt = (bx, by, bz) => G.mirror.light(bx, by, bz);
-  const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view), ...cartThings(a, lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
+  const extras = {things: [...G.ents.drawList(view, env.time, lightAt), ...shotThings(lightAt), ...potionThings(lightAt), ...fireThings(view), ...campfireThings(lightAt), ...endermanThings(lightAt), ...cartThings(a, lightAt)], mobs: G.mobs.drawList(view, lightAt, skinSizes)};
   if (G.view && !G.dead) { extras.mobs.push(...playerModel(view, a, lightAt)); if (G.selfHeld) extras.things.push(G.selfHeld); }
   extras.things.push(...mobHeld(view));
-  extras.mobs.push(...boatModels(view, a, lightAt), ...conduitModels(view, a, lightAt));
+  extras.mobs.push(...boatModels(view, a, lightAt), ...conduitModels(view, a, lightAt), ...signModels(view, lightAt));
   extras.weather = weatherVerts(view);
   extras.blobs = blobVerts(view, a);
   const bolt = boltVerts(view);

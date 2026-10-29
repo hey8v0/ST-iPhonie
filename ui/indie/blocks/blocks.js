@@ -434,6 +434,24 @@ block('frosted_ice', '霜冰', {tex: all('frosted_ice_0'), ages: ['frosted_ice_0
 // world does it, world.js burn); soul fire, blue, on soul sand: it burns for ever and spreads nowhere
 block('fire', '火', {tex: {all: 'fire_0', alt: 'fire_1'}, shape: 'fire', pass: 'cutout', hard: 0, solid: false, opaque: false, filter: 0, replace: true, drop: null, item: false, light: 15});
 block('soul_fire', '灵魂火', {tex: {all: 'soul_fire_0', alt: 'soul_fire_1'}, shape: 'fire', pass: 'cutout', hard: 0, solid: false, opaque: false, filter: 0, replace: true, drop: null, item: false, light: 10});
+// ---------- after 0.8.82 ----------
+// (soul soil: soul fire burns on it as on soul sand)
+block('soul_soil', '灵魂土', {tex: all('soul_soil'), hard: 0.5, tool: T.SHOVEL, cat: 'nature'});
+// campfires (state: facing in the low bits, put out at bit 2): two logs on two, burning; they light the place, cook
+// four things put on them, send smoke up (much higher over a hay bale) and hurt what stands in them. Soul campfires
+// burn blue and dimmer. One standing in water is put out (a copy of each, as other things in water are).
+const CAMPFIRE = block('campfire', '营火', {tex: {all: 'campfire_log', lit: 'campfire_log_lit', fire: 'campfire_fire'}, shape: 'campfire', pass: 'cutout', hard: 2, tool: T.AXE, facing: true, opaque: false, filter: 0, light: 15, drop: [['charcoal', 2]], itemIcon: 'campfire', cat: 'use'});
+const SOUL_CAMPFIRE = block('soul_campfire', '灵魂营火', {tex: {all: 'campfire_log', lit: 'soul_campfire_log_lit', fire: 'soul_campfire_fire'}, shape: 'campfire', pass: 'cutout', hard: 2, tool: T.AXE, facing: true, opaque: false, filter: 0, light: 10, drop: [['soul_soil', 1]], itemIcon: 'soul_campfire', cat: 'use'});
+for (const c of [CAMPFIRE, SOUL_CAMPFIRE]) { const {id, name, ...rest} = c; WATERLOGGED[id] = block(`waterlogged_${name}`, c.zh, {...rest, ...WET, item: false, dry: name, light: 0}).id; }
+// signs, a pair for each wood: one standing on a post (turned sixteen ways, its state), one on a wall (its state the
+// side the wall is on, as a ladder's). The page draws them: the board (and post) in the wood's picture, and what is
+// written on either side of the board.
+export const SIGN_WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo'];
+const SIGN_ZH = {oak: '橡木', spruce: '云杉木', birch: '白桦木', jungle: '丛林木', acacia: '金合欢木', dark_oak: '深色橡木', mangrove: '红树木', cherry: '樱花木', bamboo: '竹'};
+for (const w of SIGN_WOODS) {
+  block(`${w}_sign`, `${SIGN_ZH[w]}告示牌`, {tex: all(`${w}_planks`), shape: 'sign', pass: 'cutout', hard: 1, tool: T.AXE, solid: false, opaque: false, filter: 0, signWood: w, wallSign: `${w}_wall_sign`, itemIcon: `${w}_sign`, cat: 'use'});
+  block(`${w}_wall_sign`, `${SIGN_ZH[w]}告示牌`, {tex: all(`${w}_planks`), shape: 'wall_sign', pass: 'cutout', hard: 1, tool: T.AXE, solid: false, opaque: false, filter: 0, signWood: w, item: false, drop: `${w}_sign`, cat: 'use'});
+}
 
 // what burns, and how readily (the game's: [how much it draws fire to the air by it, how likely it is to catch and burn
 // away]): wood shaped and wooden things 5/20, logs and wood 5/5, leaves 30/60, wool 30/60, plants 60/100 …; what stands
@@ -556,7 +574,9 @@ item('turtle_helmet', '海龟壳', {stack: 1, armor: {slot: 0, mat: 'turtle', po
 // the trident (the drowned's): thrown with held use, or a weapon in the hand; its enchantments (enchant.js) bring it
 // back, throw its holder through water or rain instead, call lightning down in a storm, hurt the sea's creatures more
 item('trident', '三叉戟', {stack: 1, tool: {kind: 'trident', tier: -1, speed: 1, uses: 250}, damage: 9, enchantability: 1});
-for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟'], ['guardian', '守卫者'], ['elder_guardian', '远古守卫者'], ['drowned', '溺尸'], ['dolphin', '海豚'], ['polar_bear', '北极熊']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
+for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟'], ['guardian', '守卫者'], ['elder_guardian', '远古守卫者'], ['drowned', '溺尸'], ['dolphin', '海豚'], ['polar_bear', '北极熊'], ['enderman', '末影人']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
+// an ender pearl: thrown, it takes whoever threw it where it lands
+item('ender_pearl', '末影珍珠', {stack: 16, thrown: true});
 
 // the sea's treasure and what finds the way: the heart of the sea (buried treasure) and the conduit made with it — a
 // small block that, in water and framed with prismarine, gives 潮涌能量 round it (put into water it stands in the water,
@@ -583,8 +603,8 @@ export function itemInfo(name) {
   const b = BY_NAME[name];
   if (b && b.item) {
     const wood = WOOD_FUEL.test(name), door = WOOD_DOOR.test(name);
-    return {name, zh: b.zh, block: b, icon: null, cat: b.cat, stack: door || b.shape === 'bed' ? (b.shape === 'bed' ? 1 : 64) : 64,
-      fuel: /_(planks|log)$/.test(name) || wood ? 15 : door ? 10 : WOOD_SLAB.test(name) ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'bookshelf' || name === 'ladder' ? 15
+    return {name, zh: b.zh, block: b, icon: null, cat: b.cat, stack: door || b.shape === 'bed' ? (b.shape === 'bed' ? 1 : 64) : b.shape === 'sign' ? 16 : 64,
+      fuel: /_(planks|log)$/.test(name) || wood ? 15 : door || b.shape === 'sign' ? 10 : WOOD_SLAB.test(name) ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'bookshelf' || name === 'ladder' ? 15
         : /_sapling$|_propagule$/.test(name) ? 5 : name === 'bamboo' ? 2.5 : name === 'coal_block' ? 800 : name === 'dried_kelp_block' ? 200 : 0};
   }
   return I[name] || null;

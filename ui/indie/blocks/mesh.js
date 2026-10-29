@@ -394,8 +394,34 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
         if (dx) { const px = dx > 0 ? x + 0.99 : x + 0.01; quad(out, [[px, y, z], [px, y, z + 1], [px, y + H, z + 1], [px, y + H, z]], A, UVQ, lt, lb, WHITE, 3); }
         else { const pz = dz > 0 ? z + 0.99 : z + 0.01; quad(out, [[x, y, pz], [x + 1, y, pz], [x + 1, y + H, pz], [x, y + H, pz]], A, UVQ, lt, lb, WHITE, 3); }
       }
-    } else if (shape === 'conduit') {
-      // (nothing: the page draws a conduit, its shell or, awake, its cage, eye and whirling water)
+    } else if (shape === 'campfire') {
+      // a campfire (the game's model): two logs lying along the way it faces, two across them on top, a bed of ash
+      // between the lower ones; lit, their sides toward the fire and the bed glow, and two crossed sheets of fire stand
+      // on it (the picture's rows: bark along the top four, the log's end under it, the bed in rows 8–13)
+      const lit = !(meta & 4) && !b.water, LOG = tex(b.tex.all), HOT = lit ? tex(b.tex.lit) : LOG, alongX = meta & 1;
+      const LEN = [0, 0, 16, 4], END = [0, 4, 4, 8], LONG = {uv: LEN, rot: 1}, BED = [0, 8, 16, 14];
+      // [x0, z0, x1, z1] as for facing north and south (swapped for east and west), y, and per face (east, west, up,
+      // down, south, north) [uv, glowing]
+      const logs = [
+        [1, 0, 5, 16, 0, 4, [[LEN, 1], [LEN, 0], [LONG, 0], [LONG, 0], [END, 0], [END, 0]]],
+        [11, 0, 15, 16, 0, 4, [[LEN, 0], [LEN, 1], [LONG, 0], [LONG, 0], [END, 0], [END, 0]]],
+        [0, 11, 16, 15, 3, 7, [[END, 0], [END, 0], [LEN, 1], [LEN, 0], [LEN, 0], [LEN, 1]]],
+        [0, 1, 16, 5, 3, 7, [[END, 0], [END, 0], [LEN, 1], [LEN, 0], [LEN, 1], [LEN, 0]]],
+        [5, 0, 11, 16, 0, 1, [[[0, 15, 16, 16], 0], [[0, 15, 16, 16], 0], [{uv: BED, rot: 1}, 1], [{uv: BED, rot: 1}, 0], [[0, 15, 6, 16], 0], [[10, 15, 16, 16], 0]]],
+      ];
+      for (const [ax0, az0, ax1, az1, y0, y1, faces] of logs) {
+        // turned a quarter: x and z swap, and so do the east/west and south/north faces (a long face's picture turns)
+        const [x0, z0, x1, z1] = alongX ? [az0, ax0, az1, ax1] : [ax0, az0, ax1, az1];
+        const f = alongX ? [faces[4], faces[5], faces[2], faces[3], faces[0], faces[1]].map((q, k) => k === 2 || k === 3 ? [q[0].uv ? {uv: q[0].uv, rot: (q[0].rot + 1) & 3} : {uv: q[0], rot: 1}, q[1]] : q) : faces;
+        box(out, x, y, z, x0, y0, z0, x1, y1, z1, k => f[k][1] ? HOT : LOG, WHITE, {uvs: f.map(q => q[0]), cull: [false, false, false, y0 === 0, false, false]});
+      }
+      if (lit) {
+        const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, F = tex(b.tex.fire), lo = y + 1 / 16, hi = y + 17 / 16;
+        quad(out, [[x + 0.1, lo, z + 0.1], [x + 0.9, lo, z + 0.9], [x + 0.9, hi, z + 0.9], [x + 0.1, hi, z + 0.1]], F, UVQ, lt, lb, WHITE, 3);
+        quad(out, [[x + 0.9, lo, z + 0.1], [x + 0.1, lo, z + 0.9], [x + 0.1, hi, z + 0.9], [x + 0.9, hi, z + 0.1]], F, UVQ, lt, lb, WHITE, 3);
+      }
+    } else if (shape === 'conduit' || shape === 'sign' || shape === 'wall_sign') {
+      // (nothing: the page draws a conduit, its shell or, awake, its cage, eye and whirling water; and signs)
     } else if (PIECED.has(shape)) {
       const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)];
       for (const {box: [x0, y0, z0, x1, y1, z1], role, seam} of pieces(v, near)) {

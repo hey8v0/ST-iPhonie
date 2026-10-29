@@ -1573,6 +1573,57 @@ BLOCK_ART.fire_0 = f => flames(f, 411, ['#fff6b0', '#ffc531', '#f07a14', '#c43c0
 BLOCK_ART.fire_1 = f => flames(f, 417, ['#fff6b0', '#ffb820', '#ec6a10', '#b8320a']);
 BLOCK_ART.soul_fire_0 = f => flames(f, 423, ['#f0ffff', '#8af2ff', '#36bcd8', '#1a6a8a']);
 BLOCK_ART.soul_fire_1 = f => flames(f, 429, ['#f0ffff', '#7ae8ff', '#2eaed0', '#185e7e']);
+// campfires (the game's layout of the picture: the bark along the top four rows, the log's end in the 4×4 under its
+// left end, the bed in rows 8–13, its edge in the last row): logs and grey ash; lit, glowing cracks along the bark's
+// lower edge and embers in the bed, flickering (four frames); the fire on it, taller and thinner than fire's
+const campfireLog = (f, lit, soul) => {
+  const p = pic(), n = tileNoise(901, 4), m = tileNoise(907, 8), hot = soul ? ['#e8ffff', '#5ce4ff', '#1e8ab0', '#123c52'] : ['#fff2a0', '#ffa630', '#d4500e', '#4a1c0a'];
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    let c = null;
+    if (y < 4) {
+      const v = n(x, y * 3) * 0.6 + m(x * 2, y) * 0.4;
+      c = y === 0 || (y === 3 && v < 0.5) ? '#3c2c1c' : v > 0.62 ? '#6e5536' : v > 0.4 ? '#5a4429' : '#4a3720';
+      if (lit && y >= 2 && m(x + f * 3, y + f) > 0.62) c = hot[y === 3 ? 1 : 2];
+    } else if (y < 8 && x < 4) {
+      const d = Math.max(Math.abs(x - 1.5), Math.abs(y - 5.5));
+      c = d > 1.4 ? '#4a3720' : d > 0.6 ? '#b8955c' : '#8e6c40';
+    } else if (y >= 8 && y < 14) {
+      const v = n(x + f * 2, y * 2) * 0.5 + m(x, y + f * 4) * 0.5;
+      c = lit ? (v > 0.66 ? hot[0] : v > 0.52 ? hot[1] : v > 0.38 ? hot[2] : hot[3]) : (v > 0.6 ? '#7a7a76' : v > 0.4 ? '#5e5e5a' : '#454542');
+    } else if (y === 15) c = lit ? hot[3] : '#3a3a38';
+    if (c) p.set(x, y, hex(c));
+  }
+  return p;
+};
+BLOCK_ART.campfire_log = () => campfireLog(0, false, false);
+BLOCK_ART.campfire_log_lit = f => campfireLog(f, true, false);
+BLOCK_ART.soul_campfire_log_lit = f => campfireLog(f, true, true);
+const campFlames = (f, seed, pal) => { const p = flames(f, seed, pal), q = pic(); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const sx = Math.round(7.5 + (x - 7.5) * 1.25); if (sx >= 0 && sx < S && p.alpha(sx, y)) q.set(x, y, p.get(sx, y).slice(0, 3)); } return q; };
+BLOCK_ART.campfire_fire = f => campFlames(f, 433, ['#fff6b0', '#ffc531', '#f07a14', '#c43c0c']);
+BLOCK_ART.soul_campfire_fire = f => campFlames(f, 439, ['#f0ffff', '#8af2ff', '#36bcd8', '#1a6a8a']);
+// soul soil: dark brown earth with paler streaks and a few faces in it
+BLOCK_ART.soul_soil = () => { const p = pic(), n = tileNoise(913, 4), m = tileNoise(917, 8); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const v = n(x, y) * 0.5 + m(x, y) * 0.5; p.set(x, y, hex(v > 0.66 ? '#6a5242' : v > 0.48 ? '#56402f' : v > 0.3 ? '#463326' : '#38291e')); } for (const [x, y] of [[3, 4], [10, 9]]) { p.set(x, y, hex('#2a1e15')); p.set(x + 2, y, hex('#2a1e15')); p.rect(x, y + 2, x + 2, y + 2, hex('#2a1e15')); } return p; };
+// the items: two logs crossed under a flame
+const campIcon = soul => { const p = pic(), fl = soul ? ['#e8ffff', '#5ce4ff', '#1e8ab0'] : ['#fff2a0', '#ffa630', '#d4500e'];
+  for (let k = 0; k < 11; k++) { p.rect(2 + k, 12 - (k >> 2), 3 + k, 13 - (k >> 2), hex(k % 3 ? '#6e5536' : '#4a3720')); p.rect(13 - k, 12 - (k >> 2), 14 - k, 13 - (k >> 2), hex(k % 3 ? '#5a4429' : '#3c2c1c')); }
+  for (let y = 2; y < 11; y++) { const w = Math.max(0, Math.round((y - 2) * 0.45)); for (let x = 8 - w; x <= 7 + w; x++) p.set(x, y, hex(fl[Math.min(2, Math.abs(x - 7.5) > w - 1.5 ? 2 : y < 6 ? 0 : 1)])); }
+  return p; };
+// a puff of campfire smoke: a soft round cloud, ragged at the edge (clear outside it)
+BLOCK_ART.campfire_smoke = () => { const p = pic(), n = tileNoise(921, 4), m = tileNoise(925, 8); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 7.5, y - 7.5) / 7.5 + (n(x, y) - 0.5) * 0.5; if (d < 0.95) { const v = m(x, y); p.set(x, y, hex(v > 0.6 ? '#d6d6d2' : v > 0.35 ? '#c2c2be' : '#adada9')); } } return p; };
+// an ender pearl: a round dark sea-green pearl, a paler swirl in it
+ITEM_ART.ender_pearl = () => { const p = pic(); for (let y = 3; y < 13; y++) for (let x = 3; x < 13; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (d > 5) continue; const sw = Math.sin(Math.atan2(y - 7.5, x - 7.5) * 2 + d) > 0.4; p.set(x, y, hex(d > 4.2 ? '#0b3b36' : sw ? '#3ca88e' : d < 1.6 ? '#7fe0c8' : '#1d6e60')); } p.set(6, 5, hex('#c8fff0')); return p; };
+// a sign as an item: the board on its post, in the wood's colour
+const SIGN_ICON = {oak: ['#b8945f', '#6e5236'], spruce: ['#82603a', '#4a3520'], birch: ['#d7c185', '#9a8456'], jungle: ['#b88764', '#6a4a30'], acacia: ['#ba6337', '#6a3a22'],
+  dark_oak: ['#5a3a1e', '#2c1d0e'], mangrove: ['#8a4440', '#45201c'], cherry: ['#e2b2a8', '#8c5a52'], bamboo: ['#d6c25a', '#8a7a2e']};
+for (const [w, [c, post]] of Object.entries(SIGN_ICON)) ITEM_ART[`${w}_sign`] = () => {
+  const p = pic(), dark = hex(post), wood = hex(c);
+  p.rect(7, 10, 8, 15, dark);
+  p.rect(1, 2, 14, 10, dark); p.rect(2, 3, 13, 9, wood);
+  for (const y of [5, 7]) for (let x = 4; x <= 11; x++) if ((x + y) % 4) p.set(x, y, dark);
+  return p;
+};
+ITEM_ART.campfire = () => campIcon(false);
+ITEM_ART.soul_campfire = () => campIcon(true);
 // frosted ice: ice with white cracks, more of them at each age as it melts
 for (let a = 0; a < 4; a++) BLOCK_ART[`frosted_ice_${a}`] = () => {
   const p = mottled(131, ['#8eb4f2', '#9cc0f5', '#aacaf7'], {cells: 4, grain: 0.2}), r = rng(907 + a * 13);
@@ -1605,7 +1656,7 @@ const eggs = (crack, seed) => {
 BLOCK_ART.turtle_egg = () => eggs(0, 1031); BLOCK_ART.turtle_egg_slightly_cracked = () => eggs(1, 1031); BLOCK_ART.turtle_egg_very_cracked = () => eggs(2, 1031);
 ITEM_ART.turtle_egg_item = () => icon([{mask: mask().disc(8, 9, 4, 5), color: '#eee8cc', light: '#ffffff', dark: '#b8b08a', outline: '#4a4630'}], {sparkle: [[6, 7]]});
 for (const [k, [a, b]] of Object.entries({squid: ['#223b4d', '#708899'], glow_squid: ['#095656', '#85f1bc'], cod: ['#c1a76a', '#e5c48b'], salmon: ['#a00f10', '#0e8474'], tropical_fish: ['#ef6915', '#fff9ef'],
-  pufferfish: ['#f6b201', '#37c3f2'], turtle: ['#e7e7e7', '#00afaf'], guardian: ['#5a8272', '#f17d30'], elder_guardian: ['#ceccba', '#747693'], drowned: ['#8ff1d7', '#799c65'], dolphin: ['#223b4d', '#f9f9f9'], polar_bear: ['#eeeede', '#d5d6cd']})) ITEM_ART[`${k}_spawn_egg`] = () => {
+  pufferfish: ['#f6b201', '#37c3f2'], turtle: ['#e7e7e7', '#00afaf'], guardian: ['#5a8272', '#f17d30'], elder_guardian: ['#ceccba', '#747693'], drowned: ['#8ff1d7', '#799c65'], dolphin: ['#223b4d', '#f9f9f9'], polar_bear: ['#eeeede', '#d5d6cd'], enderman: ['#161616', '#000000']})) ITEM_ART[`${k}_spawn_egg`] = () => {
   const p = icon([{mask: mask().disc(8, 9, 4.6, 5.8), color: a, light: toHex(mix(hex(a), [255, 255, 255], 0.35)), dark: toHex(mul(hex(a), 0.62)), outline: '#1a1a1a'}]), r = rng(nameSeed(k));
   for (let n = 0; n < 9; n++) { const x = 5 + Math.floor(r() * 7), y = 5 + Math.floor(r() * 8); if (p.alpha(x, y) && p.alpha(x + 1, y)) { p.set(x, y, hex(b)); if (r() < 0.6) p.set(x + 1, y, mul(hex(b), 0.85)); } }
   return p;
@@ -1662,7 +1713,7 @@ ITEM_ART.filled_map = () => {
 };
 
 /** Frames per animated texture and ticks per frame. */
-export const ANIMATED = {fire_0: {frames: 16, time: 1}, fire_1: {frames: 16, time: 1}, soul_fire_0: {frames: 16, time: 1}, soul_fire_1: {frames: 16, time: 1}, water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};
+export const ANIMATED = {campfire_log_lit: {frames: 4, time: 4}, soul_campfire_log_lit: {frames: 4, time: 4}, campfire_fire: {frames: 16, time: 1}, soul_campfire_fire: {frames: 16, time: 1}, fire_0: {frames: 16, time: 1}, fire_1: {frames: 16, time: 1}, soul_fire_0: {frames: 16, time: 1}, soul_fire_1: {frames: 16, time: 1}, water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};
 /** Our drawing of a texture by name: {w, h, frames: [Uint8ClampedArray], time} or null when we have none. */
 export function ownTexture(name) {
   const art = BLOCK_ART[name] || ITEM_ART[name];

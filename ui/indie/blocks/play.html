@@ -48,6 +48,11 @@ button{font:inherit;color:inherit}
 .chatlog{position:absolute;left:calc(2*var(--u));bottom:calc(76*var(--u));max-width:min(70%,calc(320*var(--u)));display:flex;flex-direction:column;font-size:calc(7*var(--u));pointer-events:none;white-space:pre-wrap}
 .chatlog div{background:rgba(0,0,0,.45);padding:calc(.6*var(--u)) calc(2.5*var(--u));transition:opacity 1s}
 .chatlog div.bad{color:#ff6b6b}.chatlog div.old{opacity:0}.chatlog.open div.old{opacity:1}
+.signedit{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:calc(6*var(--u));background:rgba(0,0,0,.45)}
+.signedit .board{width:min(92vw,calc(150*var(--u)));padding:calc(5*var(--u)) calc(4*var(--u));box-sizing:border-box;background:var(--wood,#b8945f);border:calc(2*var(--u)) solid rgba(0,0,0,.35);display:grid;gap:calc(1*var(--u));box-shadow:0 calc(3*var(--u)) 0 rgba(0,0,0,.35)}
+.signedit input{width:100%;box-sizing:border-box;background:transparent;border:none;outline:none;text-align:center;font:inherit;font-weight:700;font-size:calc(10*var(--u));color:#1d1d21;padding:calc(1*var(--u)) 0;user-select:text;-webkit-user-select:text;touch-action:auto;caret-color:#000}
+.signedit input:focus{background:rgba(255,255,255,.18)}
+.signedit button{font:inherit;font-size:calc(9*var(--u));padding:calc(3*var(--u)) calc(14*var(--u));background:#6b6b6b;color:#fff;border:calc(1*var(--u)) solid #222;box-shadow:inset 0 calc(-2*var(--u)) 0 rgba(0,0,0,.35)}
 .chatbar{position:absolute;left:calc(2*var(--u));right:calc(2*var(--u));bottom:calc(64*var(--u) + env(safe-area-inset-bottom,0px));z-index:5}
 .chatbar input{width:100%;box-sizing:border-box;background:rgba(0,0,0,.6);color:#fff;border:none;outline:none;font:inherit;font-size:calc(8*var(--u));padding:calc(2.5*var(--u)) calc(3*var(--u));user-select:text;-webkit-user-select:text;touch-action:auto}
 .debug{position:absolute;left:calc(2*var(--u));top:calc(2*var(--u));font:calc(6.5*var(--u))/1.35 ui-monospace,Menlo,Consolas,monospace;white-space:pre;text-shadow:1px 1px 0 #000;background:rgba(0,0,0,.25);padding:calc(2*var(--u))}

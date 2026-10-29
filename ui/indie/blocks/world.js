@@ -26,7 +26,9 @@ for (const b of BLOCKS) { FILTER[b.id] = b.opaque ? 15 : b.filter; EMIT[b.id] = 
 const filterOf = v => { const id = v & 0xFFF; return (BLOCKS[id].shape === 'slab' && v >>> 12 === 2) ? 15 : FILTER[id]; };
 // furnaces (and smokers, blast furnaces) glow while lit (state bit 4)
 const FURNACES = new Set(BLOCKS.filter(b => b.use === 'furnace').map(b => b.id));
-const emitOf = v => FURNACES.has(v & 0xFFF) ? (v >>> 12 & 4 ? 13 : 0) : (v & 0xFFF) === ID.sea_pickle ? 6 + 3 * (v >>> 12 & 3) : EMIT[v & 0xFFF];
+// (a campfire put out, state bit 4, gives none)
+const CAMPFIRES = new Set([ID.campfire, ID.soul_campfire]);
+const emitOf = v => FURNACES.has(v & 0xFFF) ? (v >>> 12 & 4 ? 13 : 0) : CAMPFIRES.has(v & 0xFFF) ? (v >>> 12 & 4 ? 0 : EMIT[v & 0xFFF]) : (v & 0xFFF) === ID.sea_pickle ? 6 + 3 * (v >>> 12 & 3) : EMIT[v & 0xFFF];
 const key = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
 const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 const NEIGHBOURS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -35,7 +37,7 @@ const GRAVITY = new Set(BLOCKS.filter(b => b.gravity).map(b => b.id));
 const CROP = new Set([ID.wheat, ID.carrots, ID.potatoes, ID.beetroots]);
 const PAIRED = new Set(BLOCKS.filter(b => b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall').map(b => b.id));
 const FACE_DIR = [[0, 1], [-1, 0], [0, -1], [1, 0]];
-const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'plate', 'rail', 'lever', 'button', 'piston_head', 'bamboo', 'petals', 'pickle', 'eggs', 'fan'].includes(b.shape)).map(b => b.id));
+const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'plate', 'rail', 'lever', 'button', 'piston_head', 'bamboo', 'petals', 'pickle', 'eggs', 'fan', 'sign', 'wall_sign'].includes(b.shape)).map(b => b.id));
 // the ground plants take root in (the game's dirt), what bamboo also stands in, and what mangrove roots grow into
 const DIRT = new Set([ID.grass_block, ID.dirt, ID.podzol, ID.coarse_dirt, ID.moss_block, ID.mud, ID.muddy_mangrove_roots]);
 const BAMBOO_GROUND = new Set([...DIRT, ID.sand, ID.red_sand, ID.gravel]);
@@ -485,7 +487,7 @@ export class World {
     if (id === ID.frosted_ice) { this.frost(x, y, z, v); return; }
     if (id === ID.fire) { this.burn(x, y, z, v); return; }
     // (soul fire keeps only on soul sand)
-    if (id === ID.soul_fire) { if ((this.get(x, y - 1, z) & 0xFFF) !== ID.soul_sand) this.set(x, y, z, 0); return; }
+    if (id === ID.soul_fire) { const under = this.get(x, y - 1, z) & 0xFFF; if (under !== ID.soul_sand && under !== ID.soul_soil) this.set(x, y, z, 0); return; }
     // a dry sponge soaks up the water round it; a wet one dries at once in the Nether
     if (id === ID.sponge) { this.soak(x, y, z); return; }
     if (id === ID.wet_sponge) { if (this.nether) { this.set(x, y, z, ID.sponge); this.post({type: 'sound', name: 'fizz', x: x + 0.5, y: y + 0.5, z: z + 0.5}); } return; }
@@ -577,6 +579,8 @@ export class World {
     }
     if (b.shape === 'wall') { const [dx, dz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][v >>> 12 & 3]; return OPAQUE[this.get(x + dx, y, z + dz) & 0xFFF] === 1; }
     if (b.shape === 'lantern') return !!below && BLOCKS[bid].solid;
+    if (b.shape === 'sign') return !!below && BLOCKS[bid].solid;
+    if (b.shape === 'wall_sign') { const [dx, dz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][v >>> 12 & 3], w = this.get(x + dx, y, z + dz); return !!w && BLOCKS[w & 0xFFF].solid; }
     if (ON_GROUND.has(b.shape)) return OPAQUE[bid] === 1 || (BLOCKS[bid].shape === 'slab' && below >>> 12 >= 1) || bid === ID.hopper;
     if (b.shape === 'lever' || b.shape === 'button') { const [dx, dy, dz] = DIRS[ATTACHED[v >>> 12 & 7]]; return OPAQUE[this.get(x + dx, y + dy, z + dz) & 0xFFF] === 1; }
     // a piston's head: its piston, pushed out, right behind it
@@ -701,7 +705,7 @@ export class World {
     // something solid (the game's)
     if (fire) for (const k of [...hit, ...open]) {
       const [x, y, z] = k.split(',').map(Number);
-      if (r() < 1 / 3 && !this.get(x, y, z) && OPAQUE[this.get(x, y - 1, z) & 0xFFF]) this.set(x, y, z, (this.get(x, y - 1, z) & 0xFFF) === ID.soul_sand ? ID.soul_fire : ID.fire);
+      if (r() < 1 / 3 && !this.get(x, y, z) && OPAQUE[this.get(x, y - 1, z) & 0xFFF]) this.set(x, y, z, [ID.soul_sand, ID.soul_soil].includes(this.get(x, y - 1, z) & 0xFFF) ? ID.soul_fire : ID.fire);
     }
     return {drops, tnt};
   }

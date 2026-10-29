@@ -4,7 +4,7 @@
 // cubes that split); the sea's (fish, squids, turtles, guardians, the drowned with their tridents, dolphins); arrows,
 // thrown tridents, fireballs; lit TNT. Their bodies move with the player's physics (player.js); what they look like is in
 // models.js. Numbers (health, speed, damage, drops) are the game's.
-import {Body, isWater} from './player.js';
+import {Body, isWater, raycast} from './player.js';
 import {buildModel, animate, MODELS} from './models.js';
 import {BLOCKS, ID, MINY, COLORS, SEA, withMeta, itemInfo} from './blocks.js';
 import {collisionBoxes} from './shapes.js';
@@ -61,6 +61,8 @@ export const MOBS = {
   dolphin: {zh: '海豚', health: 10, speed: 1.2, passive: true, water: 'dolphin', breed: [], drops: [['cod', 0, 1, 'cooked_cod']]},
   // polar bears: on the snowy plains and the ice of frozen seas, a grown one with a cub now and then; they wander and
   // swim, fight back when hit (the bears near with them), and a grown one with its cub near goes for whoever comes close
+  // the enderman: leaves it be until looked in the eye or hit; shot at, it is gone; hurt by water
+  enderman: {zh: '末影人', health: 40, speed: 0.3, hostile: true, neutral: true, damage: 7, range: 64, drops: [['ender_pearl', 0, 1]]},
   polar_bear: {zh: '北极熊', health: 30, speed: 0.25, passive: true, breed: [], damage: 6, drops: []},
 };
 // a tropical fish's colours (tinting its white pictures): the game's sixteen dye colours, in its order
@@ -81,6 +83,9 @@ export const fishLook = v => [v & 255, v >> 8 & 255, v >> 16 & 255, v >>> 24 & 2
 const randomFish = r => r() < 0.9 ? (([p, b, c]) => packFish(p, DYE[b], DYE[c]))(COMMON_FISH[Math.floor(r() * COMMON_FISH.length)]) : packFish(PATTERNS[Math.floor(r() * 12)], Math.floor(r() * 16), Math.floor(r() * 16));
 // how many follow one leader in a school (the game's)
 const SCHOOL = {cod: 8, salmon: 5, tropical_fish: 8};
+// what an enderman takes up: earth, sand, gravel, clay, small flowers, mushrooms, a pumpkin or melon, TNT, cactus
+const HOLDABLE = new Set(['grass_block', 'dirt', 'coarse_dirt', 'podzol', 'rooted_dirt', 'mycelium', 'mud', 'moss_block', 'sand', 'red_sand', 'gravel', 'clay', 'pumpkin', 'carved_pumpkin', 'melon', 'tnt', 'cactus',
+  'brown_mushroom', 'red_mushroom', 'dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'red_tulip', 'orange_tulip', 'white_tulip', 'pink_tulip', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley'].map(n => ID[n]).filter(id => id != null));
 for (const [k, m] of Object.entries(MOBS)) { m.kind = k; m.size = MODELS[k].size; }
 const WOOL = COLORS.map(c => c[0]);
 // a sheep's natural colour: mostly white, a few greys and blacks, now and then brown or pink
@@ -205,6 +210,9 @@ export class Mobs {
       if (id === ID.soul_fire || (id === ID.fire && !flame)) flame = id;
     }
     if ((flame === ID.fire || flame === ID.soul_fire) && !d.fireproof) { m.fire = Math.max(m.fire, 160); if (m.age % 10 === 0) this.hurt(m, flame === ID.soul_fire ? 2 : 1, null, 'fire'); }
+    // in (on) a lit campfire: hurt, not set alight (the game's)
+    const camp = this.world.get(Math.floor(m.x), Math.floor(m.y + 0.01), Math.floor(m.z));
+    if ((camp & 0xFFF) === ID.campfire || (camp & 0xFFF) === ID.soul_campfire) { if (!(camp >>> 12 & 4) && !d.fireproof && m.age % 10 === 0) this.hurt(m, (camp & 0xFFF) === ID.soul_campfire ? 2 : 1, null, 'fire'); }
     if (d.fireproof) m.fire = 0;
     if (wet && !b.inLava) m.fire = 0;
     // burning hurts once a second (counted on its own: the sun keeps setting the fire's time back, so its time never
@@ -224,6 +232,7 @@ export class Mobs {
     if (m.kind === 'ghast') { this.ghast(m, pd, alive && pd < range); return; }
     if (m.kind === 'blaze') { this.blaze(m, pd, py, alive && pd < range); return; }
     if (m.def.cube) { this.cube(m, pd, py, alive && pd < range && Math.abs(py) < 16); return; }
+    if (m.kind === 'enderman' && this.enderman(m, pd)) return;
     // monsters
     if (d.hostile) {
       const dark = this.ctx.dark(m.x, m.y + 1, m.z);
@@ -233,7 +242,7 @@ export class Mobs {
       if (hunts) {
         m.lookAt = [player.x, player.y + player.eye, player.z];
         if (m.kind === 'drowned') this.drowned(m, pd, py);
-        else if (m.kind === 'zombie' || m.kind === 'spider' || m.kind === 'zombified_piglin') {
+        else if (m.kind === 'zombie' || m.kind === 'spider' || m.kind === 'zombified_piglin' || m.kind === 'enderman') {
           m.goal = [player.x, player.z]; m.input.fwd = 1;
           if (m.kind === 'spider' && b.onGround && pd < 5 && pd > 2 && m.cool === 0 && Math.random() < 0.15) { const a = angleTo(m.x, m.z, player.x, player.z); b.vx += -Math.sin(a) * 0.5; b.vz += -Math.cos(a) * 0.5; b.vy = 0.4; m.cool = 20; }
           if (pd < (m.kind === 'spider' ? 1.6 : 1.4) + d.size[0] / 2 && py > -1.5 && py < 2 && m.attackT === 0) {
@@ -326,6 +335,65 @@ export class Mobs {
       if (m.attackT === 0 && m.stand > 6) { m.attackT = 20; this.ctx.hurtPlayer(m.def.damage, `被${m.def.zh}杀死了`, m); this.ctx.sound('polar_hurt', m.x, m.y, m.z); }
     }
     return true;
+  }
+  /**
+   * An enderman (the game's): purple sparks about it; water and rain hurt it; by day in the open, not angry, now and
+   * then it goes elsewhere; looked in the eye (the player's aim on its head, nothing between) it screams and comes for
+   * them, standing still while stared at close by and jumping nearer when far off; it takes up blocks of earth, sand,
+   * flowers and the like and, much later, puts them down. True when it has done its thinking.
+   */
+  enderman(m, pd) {
+    const {player} = this.ctx, b = m.body, alive = !player.dead && this.ctx.mode() !== 'creative';
+    if (Math.random() < 0.3) this.ctx.burst(m.x + (Math.random() - 0.5) * 0.6, m.y + Math.random() * b.height, m.z + (Math.random() - 0.5) * 0.6, 'portal');
+    const sky = this.world.light(Math.floor(m.x), Math.floor(m.y + b.height), Math.floor(m.z))[0];
+    if ((b.inWater || (sky >= 15 && this.ctx.raining?.(m.x, m.z))) && m.age % 10 === 0) this.hurt(m, 1, null, 'drown');
+    const day = this.ctx.daylight();
+    if (!(m.angry > 0) && day > 0.5 && sky >= 15 && Math.random() * 30 < (day - 0.4) * 2) this.teleport(m);
+    if (alive && !(m.angry > 0) && pd < 64 && m.age % 4 === 0 && this.ctx.staring?.(m)) { m.angry = 600; this.ctx.sound('enderman_stare', m.x, m.y, m.z); }
+    if (alive && m.angry > 0) {
+      if (pd < 32) m.angry = Math.max(m.angry, 100);
+      if (pd < 16 && this.ctx.staring?.(m)) { m.goal = null; m.input.fwd = 0; m.lookAt = [player.x, player.y + player.eye, player.z]; return true; }
+      if (pd > 16 && m.age % 30 === 0) this.teleportToward(m, player);
+    }
+    if (!m.carried && Math.random() < 1 / 20) {
+      const x = Math.floor(m.x - 2 + Math.random() * 4), y = Math.floor(m.y + Math.random() * 3), z = Math.floor(m.z - 2 + Math.random() * 4), v = this.world.get(x, y, z);
+      if (HOLDABLE.has(v & 0xFFF) && this.sees(m, x, y, z)) { this.ctx.setBlock(x, y, z, 0); m.carried = v & 0xFFF; }
+    } else if (m.carried && Math.random() < 1 / 2000) {
+      const x = Math.floor(m.x - 1 + Math.random() * 2), y = Math.floor(m.y + Math.random() * 2), z = Math.floor(m.z - 1 + Math.random() * 2), under = this.world.get(x, y - 1, z);
+      const full = collisionBoxes(under)?.some(q => q[0] === 0 && q[2] === 0 && q[3] === 1 && q[5] === 1 && q[4] >= 1);
+      if (!this.world.get(x, y, z) && full && (under & 0xFFF) !== ID.bedrock) { this.ctx.setBlock(x, y, z, m.carried); m.carried = 0; }
+    }
+    return false;
+  }
+  /** Whether an enderman sees a block from its eyes (it is the first thing on the way to its middle). */
+  sees(m, x, y, z) {
+    const ex = m.x, ey = m.y + m.body.height * 0.88, ez = m.z, dx = x + 0.5 - ex, dy = y + 0.5 - ey, dz = z + 0.5 - ez, l = Math.hypot(dx, dy, dz) || 1;
+    const hit = raycast(this.world, ex, ey, ez, dx / l, dy / l, dz / l, l + 0.5);
+    return !!hit && hit.x === x && hit.y === y && hit.z === z;
+  }
+  /** An enderman goes to (x, y, z), or rather to the floor under it, if it fits there out of the water. True if it went. */
+  teleportTo(m, x, y, z) {
+    const w = this.world, fx = Math.floor(x), fz = Math.floor(z);
+    let fy = Math.floor(y);
+    if (!this.ctx.loaded(fx, fz) || fy < MINY + 1) return false;
+    while (fy > MINY + 1 && !collisionBoxes(w.get(fx, fy - 1, fz))) fy--;
+    if (fy <= MINY + 1) return false;
+    for (let k = -1; k < 3; k++) { const v = w.get(fx, fy + k, fz), bb = BLOCKS[v & 0xFFF]; if (bb.shape === 'liquid' || bb.water || (k >= 0 && collisionBoxes(v))) return false; }
+    for (let k = 0; k < 8; k++) this.ctx.burst(m.x + (Math.random() - 0.5) * 0.6, m.y + Math.random() * m.body.height, m.z + (Math.random() - 0.5) * 0.6, 'portal');
+    this.ctx.sound('enderman_teleport', m.x, m.y, m.z);
+    Object.assign(m.body, {x: fx + 0.5, y: fy, z: fz + 0.5, vx: 0, vy: 0, vz: 0});
+    if (m.body.prev) Object.assign(m.body.prev, {x: fx + 0.5, y: fy, z: fz + 0.5});
+    m.goal = null;
+    this.ctx.sound('enderman_teleport', m.x, m.y, m.z);
+    return true;
+  }
+  /** Somewhere within 32 blocks (the game's), a few tries. */
+  teleport(m) { for (let k = 0; k < 16; k++) if (this.teleportTo(m, m.x + (Math.random() - 0.5) * 64, m.y + Math.floor(Math.random() * 64) - 32, m.z + (Math.random() - 0.5) * 64)) return true; return false; }
+  /** Sixteen blocks nearer to someone, give or take. */
+  teleportToward(m, p) {
+    const dx = m.x - p.x, dy = m.y + m.body.height / 2 - (p.y + p.eye), dz = m.z - p.z, l = Math.hypot(dx, dy, dz) || 1;
+    for (let k = 0; k < 8; k++) if (this.teleportTo(m, m.x + (Math.random() - 0.5) * 8 - dx / l * 16, m.y + Math.floor(Math.random() * 16) - 8 - dy / l * 16, m.z + (Math.random() - 0.5) * 8 - dz / l * 16)) return true;
+    return false;
   }
   /** The nearest other mob within reach that fn accepts, or null. */
   nearest(m, fn, reach) {
@@ -832,6 +900,8 @@ export class Mobs {
   /** A hit: damage, a knock away from the source, the red flash; dead at no health. */
   hurt(m, n, from = null, why = 'hit') {
     if (m.dead || (m.inv > 0 && why === 'hit')) return false;
+    // an enderman: what is shot or thrown at it misses (it is somewhere else), it comes for the one who shot
+    if (m.kind === 'enderman' && ['arrow', 'trident', 'thrown', 'fireball'].includes(why)) { if (from?.player) m.angry = Math.max(m.angry, 400); for (let k = 0; k < 4 && !this.teleport(m); k++); return false; }
     if (m.def.fireproof && (why === 'fire' || why === 'lava')) return false;
     m.health -= n; m.hurtT = 10; if (why === 'hit' || why === 'arrow') m.inv = 10;
     if (m.def.water === 'guardian' && from?.player && why === 'hit' && m.spikes > 0.5) this.ctx.hurtPlayer(2, `被${m.def.zh}的尖刺扎死了`, null, 'thorns');
@@ -845,7 +915,9 @@ export class Mobs {
     if (m.kind === 'villager' && from?.player) for (const o of this.list) if (o.kind === 'iron_golem' && Math.hypot(o.x - m.x, o.z - m.z) < 24) o.angry = 1200;
     if (m.def.golem && from?.player) m.angry = 1200;
     // hit one zombified piglin and those around it come for you too
-    if (m.def.neutral && from?.player) for (const o of this.list) if (o.kind === m.kind && Math.hypot(o.x - m.x, o.z - m.z) < 20) o.angry = 600 + Math.floor(Math.random() * 400);
+    if (m.def.neutral && from?.player && m.kind !== 'enderman') for (const o of this.list) if (o.kind === m.kind && Math.hypot(o.x - m.x, o.z - m.z) < 20) o.angry = 600 + Math.floor(Math.random() * 400);
+    // (hurt by no one, by water or a fall or fire, nine times in ten it goes somewhere else)
+    if (m.kind === 'enderman' && !from && m.health > 0 && Math.random() < 0.9) this.teleport(m);
     // a polar bear hit by someone: a grown one comes for them; a cub runs, and the grown bears round it come (the game's)
     if (m.kind === 'polar_bear' && from?.player) for (const o of this.list) if (o.kind === 'polar_bear' && !o.baby && (o === m || (m.baby && Math.hypot(o.x - m.x, o.z - m.z) < 20))) o.angry = 400;
     // a dolphin hit by someone: it and the dolphins round it bite back
@@ -867,6 +939,8 @@ export class Mobs {
     }
     if (m.kind === 'sheep' && !m.sheared) this.ctx.drop({id: `${m.color || 'white'}_wool`, n: 1}, m.x, m.y + 0.5, m.z);
     if (m.carry) this.ctx.drop({...m.carry}, m.x, m.y + 0.5, m.z);
+    // what an enderman held
+    if (m.carried && BLOCKS[m.carried]?.item) this.ctx.drop({id: BLOCKS[m.carried].name, n: 1}, m.x, m.y + 1, m.z);
     // a polar bear: raw cod three times in four, else raw salmon, 0–2 (the game's; cooked if it burned)
     if (m.kind === 'polar_bear') { const fish = Math.random() < 0.75 ? 'cod' : 'salmon', n = Math.floor(Math.random() * (3 + (m.killedByPlayer ? this.ctx.looting?.() || 0 : 0))); if (n) this.ctx.drop({id: m.fire > 0 ? `cooked_${fish}` : fish, n}, m.x, m.y + 0.5, m.z); }
     if (m.def.water === 'guardian') { const q = Math.random(); if (q < 0.8 && Math.random() < 0.5) this.ctx.drop({id: q < 0.4 ? (m.fire > 0 ? 'cooked_cod' : 'cod') : 'prismarine_crystals', n: 1}, m.x, m.y + 0.5, m.z); }
@@ -920,6 +994,8 @@ export class Mobs {
     if (Math.hypot(x - player.x, z - player.z) < 24) return;
     const kinds = ['zombie', 'zombie', 'skeleton', 'skeleton', 'creeper', 'spider'];
     let kind = kinds[Math.floor(Math.random() * kinds.length)];
+    // an enderman now and then (the game's 10 to the others' 100), where three blocks are free for it
+    if (Math.random() < 0.025 && !this.world.get(x, y + 2, z)) kind = 'enderman';
     if ((y < 40 && slimePlace(this.ctx.seed, x >> 4, z >> 4)) || (y > 50 && y < 70 && SWAMPS.has(this.world.biome?.(x, z)))) { if (Math.random() < 0.5) kind = 'slime'; }
     if (kind === 'spider' && (collisionBoxes(this.world.get(x + 1, y, z)) || collisionBoxes(this.world.get(x - 1, y, z)))) return;
     this.add(kind, x + 0.5, y, z + 0.5);
@@ -1226,7 +1302,7 @@ export class Mobs {
       if (dx * dx + dz * dz > view.far * view.far) continue;
       const b = m.body, a = view.alpha ?? 1, x = b.prev.x + (b.x - b.prev.x) * a - view.x, y = b.prev.y + (b.y - b.prev.y) * a - view.y, z = b.prev.z + (b.z - b.prev.z) * a - view.z;
       const rot = animate(m.kind, {}, {limb: m.limb, amount: m.amount, headYaw: -m.headYaw, headPitch: m.headPitch, age: m.age, attack: m.def.golem ? m.attackT / 10 : m.attackT > 10 ? 1 : 0, shake: m.shake > 0, aim: m.aim > 0 || (m.def.neutral && m.angry > 0), fall: !b.onGround, graze: m.graze > 0, squish: m.squish || 0,
-        tentacles: m.tentacles || 0, flop: m.def.water && !b.inWater, swim: m.swimming, spikes: m.spikes, tail: m.tail, eyeX: m.eyeX, eyeY: m.eyeY, spear: m.spear, stand: Math.min(1, (m.stand || 0) / 6), young: m.baby});
+        tentacles: m.tentacles || 0, flop: m.def.water && !b.inWater, swim: m.swimming, spikes: m.spikes, tail: m.tail, eyeX: m.eyeX, eyeY: m.eyeY, spear: m.spear, stand: Math.min(1, (m.stand || 0) / 6), young: m.baby, carry: !!m.carried, creepy: m.kind === 'enderman' && m.angry > 0});
       const s = (m.baby ? (m.kind === 'turtle' ? 0.3 : 0.5) : 1) * (MODELS[m.kind].scale || 1) * (m.mag || 1) * (m.kind === 'pufferfish' ? [1, 1.6, 2.2][m.puff || 0] : 1), roll = m.dead ? Math.min(1, m.dead / 10) * Math.PI / 2 : 0, swell = m.fuse ? Math.min(1, m.fuse / 30) * 0.3 * (1 + Math.sin(m.fuse * 0.9) * 0.15) : 0;
       const [sky, blk] = light(Math.floor(m.x), Math.floor(m.y + b.height / 2), Math.floor(m.z));
       // (the game draws a squid lower: its tentacles hang under its box)
@@ -1243,6 +1319,8 @@ export class Mobs {
       }
       out.push({skin, verts: new Float32Array(buildModel(m.kind, rot, pose, [], sizes[skin])), light: [sky, Math.max(blk, fire ? 14 : 0)], tint: [1, 1, 1], hurt, white});
       if (m.kind === 'sheep' && !m.sheared) out.push({skin: 'sheep_wool', verts: new Float32Array(buildModel('sheep_wool', rot, pose, [], sizes.sheep_wool)), light: [sky, blk], tint: WOOL_TINT[m.color] || [1, 1, 1], hurt, white: 0});
+      // an enderman's eyes glow (the same model a hair bigger, in its eyes' picture, lit as in full light)
+      if (m.kind === 'enderman') out.push({skin: 'enderman_eyes', verts: new Float32Array(buildModel('enderman_eyes', rot, pose, [], sizes.enderman_eyes)), light: [15, 15], tint: [1, 1, 1], hurt: 0, white: 0});
       if (m.kind === 'drowned') out.push({skin: 'drowned_outer', verts: new Float32Array(buildModel('drowned_outer', rot, pose, [], sizes.drowned_outer)), light: [sky, blk], tint: [1, 1, 1], hurt, white: 0});
       if (m.hold || m.off) held.push({kind: m.kind, rot, pose, hold: m.hold, off: m.off, light: [sky, blk], spear: !!m.spear});
       if (m.carry) held.push({kind: m.kind, rot, pose, hold: m.carry, part: 'nose', light: [sky, blk]});

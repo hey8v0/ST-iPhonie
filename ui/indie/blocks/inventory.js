@@ -53,6 +53,7 @@ const TAGS = {
   wooden_slabs: ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak', 'cherry', 'mangrove', 'bamboo', 'bamboo_mosaic'].map(w => `${w}_slab`),
   stone_tool: ['cobblestone', 'cobbled_deepslate'],
   coals: ['coal', 'charcoal'],
+  soul_soils: ['soul_sand', 'soul_soil'],
   stew_flowers: Object.keys(STEWS),
   wool: COLORS.map(c => `${c[0]}_wool`),
 };
@@ -159,6 +160,9 @@ shaped(['##', '##'], {'#': 'nether_brick'}, 'nether_bricks');
 shaped(['#B#', '#B#'], {'#': 'nether_bricks', B: 'nether_brick'}, 'nether_brick_fence', 6);
 shaped(['#  ', '## ', '###'], {'#': 'nether_bricks'}, 'nether_brick_stairs', 4);
 shapeless(['blaze_powder', '#coals', 'gunpowder'], 'fire_charge', 3);
+shaped([' s ', 'scs', 'LLL'], {s: 'stick', c: '#coals', L: '#logs'}, 'campfire');
+for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) shaped(['###', '###', ' | '], {'#': `${w}_planks`, '|': 'stick'}, `${w}_sign`, 3);
+shaped([' s ', 'scs', 'LLL'], {s: 'stick', c: '#soul_soils', L: '#logs'}, 'soul_campfire');
 // ---------- dyes and colours ----------
 // dyes from flowers (two from a tall one), bone meal, cocoa, lapis, beetroot, ink; and mixed
 const DYE_FROM = {white: ['bone_meal', 'lily_of_the_valley'], orange: ['orange_tulip'], magenta: ['allium', ['lilac', 2]], light_blue: ['blue_orchid'], yellow: ['dandelion', ['sunflower', 2]],

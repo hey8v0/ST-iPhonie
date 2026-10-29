@@ -233,6 +233,7 @@ export function collisionBoxes(v, near = () => 0) {
   switch (b.shape) {
     case 'slab': return meta === 2 ? FULL : meta === 1 ? [[0, 0.5, 0, 1, 1, 1]] : [[0, 0, 0, 1, 0.5, 1]];
     case 'cactus': return [[px(1), 0, px(1), px(15), px(15), px(15)]];
+    case 'campfire': return [[0, 0, 0, 1, px(7), 1]];
     case 'farmland': return [[0, 0, 0, 1, px(15), 1]];
     default: return FULL;
   }
@@ -261,6 +262,10 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'wall': return [[[0, 0, 0, 1, 1, px(3)], [px(13), 0, 0, 1, 1, 1], [0, 0, px(13), 1, 1, 1], [0, 0, 0, px(3), 1, 1]][meta & 3]];
     case 'bed': return [[0, 0, 0, 1, px(9), 1]];
     case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
+    case 'campfire': return [[0, 0, 0, 1, px(7), 1]];
+    // a sign: a post's column standing; on a wall, the board against it (the game's)
+    case 'sign': return [[px(4), 0, px(4), px(12), 1, px(12)]];
+    case 'wall_sign': return [[[0, px(4.5), 0, 1, px(12.5), px(2)], [px(14), px(4.5), 0, 1, px(12.5), 1], [0, px(4.5), px(14), 1, px(12.5), 1], [0, px(4.5), 0, px(2), px(12.5), 1]][meta & 3]];
     case 'brewing': return [[px(2), 0, px(1), px(15), px(14), px(15)]];
     case 'portal': return null;
     // a vine: a thin sheet on each side it clings to

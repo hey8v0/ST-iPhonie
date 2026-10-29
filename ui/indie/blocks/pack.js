@@ -65,6 +65,11 @@ Object.assign(SKINS, {guardian: ['entity/guardian/guardian.png', 'entity/guardia
 // the drowned (its body, and the rags and weed over it) and the dolphin
 // the polar bear
 SKINS.polar_bear = ['entity/bear/polarbear.png', 'entity/bear/polar_bear.png'];
+// the enderman, its eyes
+SKINS.enderman = ['entity/enderman/enderman.png'];
+// signs: a picture for each wood
+for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) SKINS[`sign_${w}`] = [`entity/signs/${w}.png`];
+SKINS.enderman_eyes = ['entity/enderman/enderman_eyes.png'];
 // the conduit as the game draws it: its shell, cage, the eye open and shut, the whirling water (strips of frames)
 Object.assign(SKINS, {conduit_shell: ['entity/conduit/base.png'], conduit_cage: ['entity/conduit/cage.png'], conduit_eye_open: ['entity/conduit/open_eye.png'], conduit_eye_closed: ['entity/conduit/closed_eye.png'],
   conduit_wind: ['entity/conduit/wind.png'], conduit_wind_vertical: ['entity/conduit/wind_vertical.png']});

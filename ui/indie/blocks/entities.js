@@ -168,6 +168,11 @@ export class Entities {
     for (let i = 0; i < n; i++) this.particles.push({x: x + (Math.random() - 0.5) * spread * 4, y: y + (Math.random() - 0.5) * spread * 4, z: z + (Math.random() - 0.5) * spread * 4,
       vx: (Math.random() - 0.5) * spread, vy: Math.random() * spread + 0.02, vz: (Math.random() - 0.5) * spread, g, life: life + Math.floor(Math.random() * 10), layer, uv: [4, 4, 8, 8], size: size * (0.6 + Math.random() * 0.8), tint, air: true});
   }
+  /** Campfire smoke: a big grey puff rising slowly a few blocks, from a signal fire (a hay bale under it) much higher. */
+  campfireSmoke(x, y, z, signal) {
+    this.particles.push({x: x + (Math.random() - 0.5) * 0.4, y: y + 0.3 + Math.random() * 0.3, z: z + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 0.006, vy: 0.05 + Math.random() * 0.02, vz: (Math.random() - 0.5) * 0.006,
+      g: -0.0013, life: (signal ? 260 : 70) + Math.floor(Math.random() * 50), layer: LAYER.campfire_smoke ?? LAYER.white_wool ?? 0, uv: [0, 0, 16, 16], size: 0.32 + Math.random() * 0.22, tint: 0x8e8e8a, air: true});
+  }
   /** A raindrop landing: two or three little drops jumping off where it fell (off water, paler and one more). */
   drip(x, y, z, water) {
     for (let i = 0, n = water ? 3 : 2; i < n; i++) this.particles.push({x: x + (Math.random() - 0.5) * 0.12, y: y + 0.03, z: z + (Math.random() - 0.5) * 0.12,

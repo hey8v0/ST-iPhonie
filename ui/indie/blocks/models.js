@@ -183,6 +183,22 @@ Object.assign(MODELS, {
     ]),
   ]},
 });
+// the enderman (64×32, the game's): a humanoid stretched thin, its limbs 30 long, its head over a jaw (the head lifts
+// off it, the mouth open, when it is angry); its eyes a second picture over the same model, glowing
+const enderParts = (k = 0) => [
+  part('head', [0, 0], [[-4, -8, -4, 8, 8, 8, k]], [0, -13, 0]), part('jaw', [0, 16], [[-4, -8, -4, 8, 8, 8, k - 0.5]], [0, -13, 0]),
+  part('body', [32, 16], [[-4, 0, -2, 8, 12, 4, k]], [0, -14, 0]),
+  part('arm0', [56, 0], [[-1, -2, -1, 2, 30, 2, k]], [-5, -12, 0]), part('arm1', [56, 0], [[-1, -2, -1, 2, 30, 2, k, true]], [5, -12, 0]),
+  // (its legs a pixel higher than the game's, whose feet sink a pixel into the ground)
+  part('leg0', [56, 0], [[-1, 0, -1, 2, 30, 2, k]], [-2, -6, 0]), part('leg1', [56, 0], [[-1, 0, -1, 2, 30, 2, k, true]], [2, -6, 0]),
+];
+MODELS.enderman = {skin: [64, 32], size: [0.6, 2.9], parts: enderParts()};
+MODELS.enderman_eyes = {skin: [64, 32], size: [0.6, 2.9], parts: enderParts(0.02)};
+// a sign (64×32, the game's): the board 24×12×2 and, standing, the post 2×14×2 under it; drawn at two thirds
+export const SIGN_MODELS = {
+  sign: {skin: [64, 32], size: [1, 1], parts: [part('board', [0, 0], [[-12, -14, -1, 24, 12, 2]]), part('post', [0, 14], [[-1, -2, -1, 2, 14, 2]])]},
+  wall_sign: {skin: [64, 32], size: [1, 1], parts: [part('board', [0, 0], [[-12, -14, -1, 24, 12, 2]])]},
+};
 // the polar bear (128×64, the game's): a head with its muzzle and ears, a long body with the hump at its shoulders
 // lying along it, four thick legs; it rears up on its hind legs to strike
 MODELS.polar_bear = {skin: [128, 64], size: [1.4, 1.4], parts: [
@@ -343,6 +359,14 @@ export function animate(kind, rot, pose) {
     // flippers: rowing in the water, paddling slowly on land
     const sw = Math.cos(pose.limb * (pose.swim ? 0.6662 * 0.6 : 0.6662 * 5)) * (pose.swim ? 0.5 : 0.25) * Math.max(pose.amount, pose.swim ? 0.6 : 0);
     set('leg0', sw, 0, 0); set('leg1', -sw, 0, 0); set('leg2', 0, 0, sw); set('leg3', 0, 0, -sw);
+  } else if (kind === 'enderman' || kind === 'enderman_eyes') {
+    // walking, its long limbs swing half as far, never past 0.4; holding a block, both arms held out to it; angry, its
+    // head lifted off its jaw (the game's)
+    const half = k => Math.max(-0.4, Math.min(0.4, swing(k) * 0.5));
+    set('leg0', half()); set('leg1', half(PI)); set('arm0', half(PI)); set('arm1', half());
+    if (pose.carry) { set('arm0', -0.5, 0, 0.05); set('arm1', -0.5, 0, -0.05); }
+    rot.jaw = [head[0], head[1], 0];
+    if (pose.creepy) rot['@head'] = [0, -18, 0];
   } else if (kind === 'polar_bear') {
     // walking, its legs swing; rearing up (the game's): the body tilts back on the hind legs, the front legs and head go up
     set('leg0', swing()); set('leg1', swing(PI)); set('leg2', swing(PI)); set('leg3', swing());
@@ -396,7 +420,7 @@ const ID3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
  * scaled and placed: at (x, y, z) relative to the camera, facing yaw (0 looks along −z), size s.
  */
 export function buildModel(kind, rot, {x, y, z, yaw, s = 1, roll = 0, swell = 0}, out, skinSize = null, only = null) {
-  const m = MODELS[kind] || ARMOR_MODELS[kind] || BOAT_MODELS[kind] || FISH_MODELS[kind] || CONDUIT_MODELS[kind], [tw, th] = skinSize || m.skin;
+  const m = MODELS[kind] || ARMOR_MODELS[kind] || BOAT_MODELS[kind] || FISH_MODELS[kind] || CONDUIT_MODELS[kind] || SIGN_MODELS[kind], [tw, th] = skinSize || m.skin;
   const cy = Math.cos(yaw), sy = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll), k = (1 + swell) * s / 16;
   // the game's model space → world: x and y turned over, the feet at 24, then the body's turn (and a fall-over roll)
   const place = p => {
@@ -458,6 +482,22 @@ export function handFrame(kind, rot, {x, y, z, yaw, s = 1, roll = 0}, arm, point
 }
 
 // ---------- our own skins ----------
+// a sign's wood, as its planks are: [the board's, the post's (darker)]
+const SIGN_COLORS = {oak: ['#b8945f', '#6e5236'], spruce: ['#82603a', '#4a3520'], birch: ['#d7c185', '#9a8456'], jungle: ['#b88764', '#6a4a30'], acacia: ['#ba6337', '#6a3a22'],
+  dark_oak: ['#4f3218', '#2c1d0e'], mangrove: ['#773934', '#45201c'], cherry: ['#e2b2a8', '#8c5a52'], bamboo: ['#d6c25a', '#8a7a2e']};
+/** Ours: a sign of a wood: the board's faces in plank colour, its edge darker, a seam across it; the post darker. */
+export function ownSign(wood) {
+  const [wd, post] = SIGN_COLORS[wood] || SIGN_COLORS.oak;
+  return skin(64, 32, 131 + Object.keys(SIGN_COLORS).indexOf(wood), ({area, box}) => {
+    const shades = k => [shadeHex(wd, k), shadeHex(wd, k * 0.94), shadeHex(wd, k * 1.05)];
+    box(0, 0, 24, 12, 2, shades(1)); box(0, 14, 2, 14, 2, [post, shadeHex(post, 0.9), shadeHex(post, 1.08)]);
+    for (const [fx, fy] of [[2, 2], [28, 2]]) {
+      const edge = [shadeHex(wd, 0.62)];
+      area(fx, fy, 24, 1, edge, 0.1); area(fx, fy + 11, 24, 1, edge, 0.1); area(fx, fy, 1, 12, edge, 0.1); area(fx + 23, fy, 1, 12, edge, 0.1);
+      area(fx + 1, fy + 6, 22, 1, [shadeHex(wd, 0.8)], 0.08);
+    }
+  });
+}
 const hexc = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 function rnd(seed) { let a = seed | 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 /** A skin canvas painter: fill(region, colours), the six faces of a box, single pixels. */
@@ -673,6 +713,17 @@ Object.assign(OWN_SKINS, {
   }),
   guardian: () => guardianSkin(81, ['#5d8c7c', '#55806f', '#669888', '#4e7868'], ['#e07a3a', '#c86a2e', '#d4733a'], ['#3e6a5c', '#365e52']),
   elder_guardian: () => guardianSkin(82, ['#cfcbb8', '#c4c0ad', '#d9d5c2', '#bab6a3'], ['#7a7c98', '#6a6c88', '#86889e'], ['#9a9786', '#8e8b7a']),
+  // ours: an enderman all near-black (a purple cast, shaded), its eyes purple; the eyes' picture only those
+  enderman: () => skin(64, 32, 93, ({px, box, front, hex}) => {
+    const black = ['#161616', '#1b1520', '#121212', '#1e1a22'];
+    box(0, 0, 8, 8, 8, black); box(0, 16, 8, 8, 8, ['#0e0e10', '#141016']); box(32, 16, 8, 12, 4, black); box(56, 0, 2, 30, 2, black);
+    const [fx, fy] = front(0, 0, 8, 8);
+    for (const x of [fx + 1, fx + 2, fx + 5, fx + 6]) px(x, fy + 4, hex(x === fx + 2 || x === fx + 5 ? '#e079fa' : '#cc00fa'));
+  }),
+  enderman_eyes: () => skin(64, 32, 94, ({px, front, hex}) => {
+    const [fx, fy] = front(0, 0, 8, 8);
+    for (const x of [fx + 1, fx + 2, fx + 5, fx + 6]) px(x, fy + 4, hex(x === fx + 2 || x === fx + 5 ? '#f0a8ff' : '#e055ff'));
+  }),
   // ours: a polar bear's white fur (a little creamy, shaded), a black nose and eyes, darker paws
   polar_bear: () => skin(128, 64, 89, ({px, area, box, front, hex}) => {
     const fur = ['#f2f1ea', '#e9e8df', '#f7f6f0', '#e2e1d6'];

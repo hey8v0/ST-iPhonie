@@ -69,6 +69,11 @@ function voice(kind, mood, k) {
     // the sea's: a drowned's gurgling groan (a whoosh when it throws), a dolphin's clicks and whistle (a crunch eating)
     case 'drowned': if (mood === 'shoot') { burst(800, 0.8, 0.28 * g, 0.35, {pitch: 0.8}); tone(420, 0.08 * g, 0.25, {type: 'triangle', slide: 0.5}); } else { tone(78 * p, 0.16 * g, 0.9 * long, {type: 'sawtooth', slide: 0.65}); burst(240 * p, 2, 0.14 * g, 0.8 * long); burst(900 * p, 3, 0.05 * g, 0.5, {at: 0.12}); } break;
     // a polar bear's grunt, its roar when it warns or strikes
+    case 'enderman': if (mood === 'teleport') { tone(260 * p, 0.12 * g, 0.4, {type: 'sine', slide: 2.6}); burst(900, 0.7, 0.1 * g, 0.35); }
+      else if (mood === 'stare') { tone(150 * p, 0.2 * g, 1.3, {type: 'sawtooth', slide: 3}); tone(470 * p, 0.07 * g, 1, {type: 'square', slide: 0.55}); }
+      else if (mood === 'hurt') { tone(240 * p, 0.16 * g, 0.35, {type: 'sawtooth', slide: 0.55}); burst(700, 1, 0.1 * g, 0.2); }
+      else if (mood === 'death') { tone(300 * p, 0.2 * g, 1.4, {type: 'sawtooth', slide: 0.25}); burst(500, 0.8, 0.12 * g, 1); }
+      else { tone(110 * p, 0.09 * g, 0.7 * long, {type: 'triangle', slide: 1.8}); tone(90 * p, 0.06 * g, 0.7 * long, {type: 'sine', slide: 0.6, at: 0.15}); } break;
     case 'polar': if (mood === 'warning' || mood === 'hurt') { tone(95 * p, 0.2 * g, 0.6 * long, {type: 'sawtooth', slide: 0.75}); burst(300 * p, 1, 0.22 * g, 0.55 * long); } else { tone(120 * p, 0.12 * g, 0.4 * long, {type: 'sawtooth', slide: 0.85}); burst(400 * p, 1.2, 0.08 * g, 0.35); } break;
     case 'dolphin': if (mood === 'eat') { for (let i = 0; i < 3; i++) burst(1500, 1.5, 0.22 * g, 0.06, {at: i * 0.1}); } else { for (let i = 0; i < 6; i++) tone(2100 * p + Math.random() * 700, 0.04 * g, 0.03, {type: 'square', at: i * 0.05}); tone(1700 * p, 0.05 * g, 0.4 * long, {type: 'sine', slide: 1.7, at: 0.32}); } break;
   }
@@ -78,7 +83,7 @@ export function play(name, v = 0, k = 1) {
   if (!ctx || !sound.volume || k <= 0) return;
   // a mob's sound: its kind first, what happened last (zombified_piglin_hurt, ghast_warn)
   const parts = name.split('_'), kind = parts[0], mood = parts.length > 1 ? parts.at(-1) : undefined;
-  if (['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'spider', 'creeper', 'zombified', 'ghast', 'blaze', 'magma', 'slime', 'villager', 'iron', 'drowned', 'dolphin', 'polar'].includes(kind)) { voice(kind, mood, k); return; }
+  if (['pig', 'cow', 'sheep', 'chicken', 'zombie', 'skeleton', 'spider', 'creeper', 'zombified', 'ghast', 'blaze', 'magma', 'slime', 'villager', 'iron', 'drowned', 'dolphin', 'polar', 'enderman'].includes(kind)) { voice(kind, mood, k); return; }
   const [f, q, g] = MAT[materialOf(v)] || MAT.stone, r = 0.85 + Math.random() * 0.3;
   switch (name) {
     case 'break': burst(f, q, g * 0.9, 0.22, {pitch: r}); burst(f * 0.6, q, g * 0.5, 0.18, {pitch: r, at: 0.03}); break;
@@ -89,6 +94,7 @@ export function play(name, v = 0, k = 1) {
     case 'splash': burst(1200, 0.7, 0.5, 0.45, {pitch: 0.9}); burst(500, 1, 0.3, 0.6, {at: 0.05}); break;
     case 'swim': burst(900, 0.8, 0.12, 0.25); break;
     case 'fizz': burst(5000, 0.6, 0.35, 0.5); break;
+    case 'campfire': for (let i = 0; i < 3; i++) burst(1800 + Math.random() * 3200, 0.9, 0.08 * k, 0.035, {at: i * (0.04 + Math.random() * 0.12)}); break;
     case 'hurt': tone(240, 0.25, 0.18, {type: 'square', slide: 0.6}); burst(800, 2, 0.15, 0.1); break;
     case 'eat': for (let i = 0; i < 3; i++) burst(1500, 1.5, 0.25, 0.06, {at: i * 0.11, pitch: 0.8 + Math.random() * 0.4}); break;
     case 'burp': tone(110, 0.3, 0.35, {type: 'sawtooth', slide: 0.7}); break;
