@@ -371,8 +371,10 @@ export interface MusicFound { source: string; sourceName: string; id: string; ti
 export interface MusicGroup { source: string; sourceName: string; kind: 'album' | 'artist'; id: string; name: string; artist: string; count: number; }
 /** 正文点的歌: a song the story picked (where it was found, once it was). */
 export interface MusicHeard { id: string; kind: 'heard'; at: number; title: string; artist: string; source?: string; songId?: string; }
+/** A 歌单 the user made: its songs (ids of 全部's songs), the newest on top. */
+export interface MusicPlaylist { id: string; kind: 'playlist'; at: number; name: string; songs: string[]; }
 /** What plays now (the tavern page's player). */
-export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; mode: 'order' | 'shuffle' | 'one'; from: '' | 'library' | 'heard' | 'mixed'; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
+export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; mode: 'order' | 'shuffle' | 'one'; from: string; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
 export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; from?: string };
 export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; }
 export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; }
@@ -787,6 +789,15 @@ export interface BackendFacade {
     songBlob(id: string): Promise<Blob | null>;
     addSongs(list: ({ title: string; artist?: string; blob: Blob } | { title: string; artist?: string; source: string; songId: string })[]): Promise<MusicSong[]>;
     updateSong(id: string, patch: { title?: string; artist?: string; lyric?: string }): Promise<MusicSong>;
+    /** Adds songs to 全部 and into a 歌单 the user made (kept: how many were not in it yet). */
+    addSongsTo(playlistId: string, list: ({ title: string; artist?: string; blob: Blob } | { title: string; artist?: string; source: string; songId: string })[]): Promise<{ added: MusicSong[]; kept: number }>;
+    /** The 歌单 the user made, in the order they were made. */
+    listPlaylists(): Promise<MusicPlaylist[]>;
+    /** Makes a 歌单 (no id) or renames one. */
+    savePlaylist(value: { id?: string; name: string }): Promise<MusicPlaylist>;
+    deletePlaylist(id: string): Promise<boolean>;
+    addToPlaylist(id: string, songIds: string[]): Promise<{ playlist: MusicPlaylist; kept: number }>;
+    removeFromPlaylist(id: string, songIds: string[]): Promise<MusicPlaylist>;
     deleteSongs(ids: string[]): Promise<boolean>;
     listSounds(): Promise<SoundRow[]>;
     soundBlob(id: string): Promise<Blob | null>;
@@ -983,9 +994,10 @@ export interface BackendAPI extends BackendFacade {
     chatSeesPictures?(): Promise<boolean>;
     musicStatus(): MusicStatus;
     /** Plays a list (the 歌单, search results) from one of its songs; which: the kind of list, for the music to go on with after a song the story picks. */
-    musicPlayList(list: MusicTrack[], at?: number, which?: 'library' | 'heard' | 'mixed'): Promise<void>;
-    /** Plays the whole 歌单, 正文点的歌, or both (from a song at random with 随机播放). */
-    musicPlayFrom?(which: 'library' | 'heard' | 'mixed'): Promise<void>;
+    musicPlayList(list: MusicTrack[], at?: number, which?: string): Promise<void>;
+    /** Plays the whole 歌单 ('library'), 正文点的歌 ('heard'), both ('mixed'), or a 歌单 the user made ('playlist:…', with
+     *  '+heard' for it and 正文点的歌 together); from a song at random with 随机播放. */
+    musicPlayFrom?(which: string): Promise<void>;
     /** 顺序播放, 随机播放 or 单曲循环. */
     musicMode?(mode: 'order' | 'shuffle' | 'one'): void;
     /** Plays one song; a song given only by name is looked up in the 歌单, then the sources. */

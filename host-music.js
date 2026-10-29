@@ -122,10 +122,16 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     if (which) from = which;
     return start(queue[index]);
   }
-  /** The songs of a kind of list as tracks: the 歌单, 正文点的歌, or both (each song once). */
+  /** The songs of a kind of list as tracks: the 歌单 (all of it, or one the user made: 'playlist:…'), 正文点的歌, or
+   *  both ('mixed', or 'playlist:…+heard'); each song once. */
   async function listOf(which) {
-    const mine = which === 'heard' ? [] : await backend.listSongs?.().catch(() => []) || [];
-    const heard = which === 'library' ? [] : await backend.listHeard?.().catch(() => []) || [];
+    const [base, plus] = String(which || '').split('+');
+    let mine = base === 'heard' ? [] : await backend.listSongs?.().catch(() => []) || [];
+    if (base.startsWith('playlist:')) {
+      const list = (await backend.listPlaylists?.().catch(() => []) || []).find(p => p.id === base), byId = new Map(mine.map(s => [s.id, s]));
+      mine = list ? list.songs.map(id => byId.get(id)).filter(Boolean) : [];
+    }
+    const heard = base === 'heard' || base === 'mixed' || plus === 'heard' ? await backend.listHeard?.().catch(() => []) || [] : [];
     const seen = new Set(), out = [];
     for (const s of [...mine, ...heard]) {
       const k = songKey(s);
@@ -138,12 +144,15 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
   /** Plays a whole list (at random from anywhere in it when 随机播放 is on). */
   async function playFrom(which) {
     const list = await listOf(which);
-    if (!list.length) throw Error(which === 'heard' ? '正文还没有点过歌' : '歌单还是空的');
+    if (!list.length) throw Error(which === 'heard' ? '正文还没有点过歌' : String(which).startsWith('playlist:') ? '这个歌单还是空的' : '歌单还是空的');
     return playList(list, opts().mode === 'shuffle' ? Math.floor(Math.random() * list.length) : 0, which);
   }
   /** After a song the story picked: the list last played goes on (正文点的歌 when none was), from a song not just played. */
   async function goOn() {
-    const done = track, list = (await listOf(from || 'heard')).filter(s => songKey(s) !== songKey(done));
+    const done = track, others = async which => (await listOf(which)).filter(s => songKey(s) !== songKey(done));
+    let list = await others(from || 'heard');
+    // nothing else there (or that 歌单 was deleted): 正文点的歌
+    if (!list.length && from && from !== 'heard') list = await others('heard');
     if (!list.length) { if (audio) { audio.currentTime = 0; return audio.play().catch(error => set('error', error.message || '续播失败')); } return; }
     return playList(list, opts().mode === 'shuffle' ? Math.floor(Math.random() * list.length) : 0);
   }

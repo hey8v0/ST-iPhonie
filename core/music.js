@@ -10,12 +10,14 @@ import {promptText} from './prompt-rules.js';
 export const BGM_MODES = Object.freeze(['off', 'tap', 'auto']);
 export const BGM_MODE_NAMES = Object.freeze({off: '关', tap: '点一下才放', auto: '自动放'});
 // recent: the songs played lately told to the story (not to repeat); heard: the songs the story has picked, kept to play
-// again (the newest, once each); taste: how many of the 歌单 go with the rule as a taste of what the user likes
-export const MUSIC_LIMITS = Object.freeze({file: 40 * 1024 * 1024, sources: 20, songs: 2000, rule: 6000, recent: 8, heard: 200, taste: 20, page: 50});
+// again (the newest, once each); taste: how many of the 歌单 go with the rule as a taste of what the user likes; lists:
+// how many 歌单 of their own the user can make
+export const MUSIC_LIMITS = Object.freeze({file: 40 * 1024 * 1024, sources: 20, songs: 2000, rule: 6000, recent: 8, heard: 200, taste: 20, page: 50, lists: 50});
 /** How a list goes on when a song ends: in order (round again at the end), at random, or the same song again. */
 export const PLAY_MODES = Object.freeze(['order', 'shuffle', 'one']);
 export const PLAY_MODE_NAMES = Object.freeze({order: '顺序播放', shuffle: '随机播放', one: '单曲循环'});
-/** Where a list comes from: the 歌单, the songs the story picked, or both. */
+/** Where a list comes from: the 歌单, the songs the story picked, or both (a 歌单 the user made is 'playlist:…', with
+ *  '+heard' for it and 正文点的歌 together). */
 export const PLAY_FROM = Object.freeze({library: '歌单', heard: '正文点的歌', mixed: '歌单和正文点的歌'});
 
 export const DEFAULT_BGM_RULE = [
@@ -34,7 +36,7 @@ const clip = (value, max) => String(value ?? '').slice(0, max);
 const path = value => clip(value, 120).trim().replace(/[^\w.$[\]-]/g, '');
 /** One music source as kept: addresses must be http(s) and say where the search words and the song id go. */
 export function normalizeSource(value = {}, i = 0) {
-  return {
+  return upgraded({
     id: clip(value.id, 60).trim() || `source-${i + 1}`,
     name: clip(value.name, 30).trim() || `音源 ${i + 1}`,
     enabled: value.enabled !== false,
@@ -47,7 +49,19 @@ export function normalizeSource(value = {}, i = 0) {
     // artist's songs are ({{id}}) and where in that answer the song list is
     albumSearch: clip(value.albumSearch, 1000).trim(), albumListPath: path(value.albumListPath), albumSongs: clip(value.albumSongs, 1000).trim(), albumSongsPath: path(value.albumSongsPath),
     artistSearch: clip(value.artistSearch, 1000).trim(), artistListPath: path(value.artistListPath), artistSongs: clip(value.artistSongs, 1000).trim(), artistSongsPath: path(value.artistSongsPath)
-  };
+  });
+}
+/**
+ * A source filled in by 「按这个格式填」 for a self-hosted 网易云 API before 0.8.77 (20 songs, no pages, no albums or
+ * artists) is brought up to today's format: its search gets pages, albums and artists are filled in; the rest stays as
+ * the user has it (a cookie in the song address, the name).
+ */
+function upgraded(s) {
+  const old = /^(.+)\/cloudsearch\?keywords=\{\{query\}\}&limit=\d+$/.exec(s.search);
+  if (!old || s.listPath !== 'result.songs' || s.albumSearch || s.albumSongs || s.artistSearch || s.artistSongs) return s;
+  const now = SELF_HOSTED.find(t => t.id === 'netease-api').fill(old[1]);
+  for (const k of ['search', 'albumSearch', 'albumListPath', 'albumSongs', 'albumSongsPath', 'artistSearch', 'artistListPath', 'artistSongs', 'artistSongsPath']) s[k] = now[k];
+  return s;
 }
 export function validateSource(s) {
   // A web address, or one on the tavern itself (/api/plugins/… of a server plugin the user installed).

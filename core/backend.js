@@ -79,6 +79,8 @@ async function smallVibeImage(base64) {
     } catch { return base64; }
 }
 const clone = value => structuredClone(value);
+// a 歌单 the user made was deleted meanwhile (in another tab, say)
+const listGone = error => { throw error?.code === 'MISSING' ? Error('这个歌单已经删掉了') : error; };
 const assistantTransferRows = docs => normalizeAssistantThreads(docs.filter(row => row.kind === 'assistant').map(thread => ({...thread,
     memory: docs.find(row => row.id === bookId(thread.id) && row.memoryRevision === (thread.memoryRevision || 0)) || null,
 })));
@@ -1497,28 +1499,85 @@ export class TTSBackend {
         if (!s.lyric) return '';
         try { const value = pickPath(await this.musicFetch(fillSource(s.lyric, { id: songId, title: hint.title, artist: hint.artist })), s.lyricPath); return typeof value === 'string' ? value.slice(0, 60000) : ''; } catch { return ''; }
     }
-    /** The 歌单: songs without their files. */
+    /** The 歌单 (全部): songs without their files. */
     async listSongs() { this.assertOpen(); return (await this.music.list('song')).map(({ blob, ...row }) => row); }
     async songBlob(id) { const row = await this.music.get(id); return row?.blob || null; }
     /** Adds files ({title, artist, blob}) or source songs ({title, artist, source, songId}) to the 歌单. */
-    async addSongs(list) {
+    async addSongs(list) { return (await this.storeSongs(list)).added; }
+    /** Adds songs to the 歌单 and puts them into one the user made: {added: the songs new to the 歌单, kept: how many
+     *  went into that one (those in it already stay where they are)}. */
+    async addSongsTo(playlistId, list) {
+        const { added, ids } = await this.storeSongs(list);
+        const { kept } = await this.addToPlaylist(playlistId, ids);
+        return { added, kept };
+    }
+    /** Keeps songs in the 歌单: {added: the new ones, ids: each song's own (new, or the one the 歌单 had already)}. */
+    async storeSongs(list) {
         this.assertOpen();
-        const now = Date.now(), have = await this.listSongs();
-        if (have.length + list.length > MUSIC_LIMITS.songs) throw Error(`歌单最多 ${MUSIC_LIMITS.songs} 首`);
+        const now = Date.now(), have = await this.listSongs(), ids = [], made = [];
         const rows = list.map((value, i) => {
             const row = songRow({ ...value, origin: value.blob ? 'file' : 'source' }, now + i);
-            if (row.origin === 'source') { const dup = have.find(h => h.source === row.source && h.songId === row.songId); if (dup) return null; return row; }
+            if (row.origin === 'source') {
+                const dup = [...have, ...made].find(h => h.source === row.source && h.songId === row.songId);
+                ids.push((dup || row).id);
+                if (dup) return null;
+                made.push(row);
+                return row;
+            }
             let blob;
             try { blob = Blob.prototype.slice.call(value.blob, 0, undefined, value.blob?.type || ''); } catch { throw Error(`「${row.title}」不是能用的音频文件`); }
             if (!blob.size) throw Error(`「${row.title}」是空文件`);
             if (blob.size > MUSIC_LIMITS.file) throw Error(`「${row.title}」太大了（一首最多 ${MUSIC_LIMITS.file / 1024 / 1024} MB）`);
             const type = String(blob.type || '').toLowerCase();
             if (type && !type.startsWith('audio/') && !['application/octet-stream', 'video/mp4', 'video/webm', 'video/ogg'].includes(type)) throw Error(`「${row.title}」不是音频文件`);
+            ids.push(row.id);
             return { ...row, blob, size: blob.size, mime: type };
         }).filter(Boolean);
+        if (have.length + rows.length > MUSIC_LIMITS.songs) throw Error(`歌单最多 ${MUSIC_LIMITS.songs} 首`);
         if (rows.length) await this.music.put(rows);
         this.emit('music', { library: true });
-        return rows.map(({ blob, ...row }) => row);
+        return { added: rows.map(({ blob, ...row }) => row), ids };
+    }
+    /** The 歌单 the user made: [{id, name, at, songs: [song ids, the newest on top]}], in the order they were made. */
+    async listPlaylists() { this.assertOpen(); return (await this.music.list('playlist')).sort((a, b) => a.at - b.at); }
+    /** Makes a 歌单 ({name}) or renames one ({id, name}). */
+    async savePlaylist({ id = '', name = '' } = {}) {
+        this.assertOpen();
+        const title = String(name || '').trim().slice(0, 40), all = await this.listPlaylists();
+        if (!title) throw Error('给歌单起个名字');
+        if (all.some(p => p.name === title && p.id !== id)) throw Error(`已经有叫「${title}」的歌单了`);
+        let row;
+        if (id) row = await this.music.change(id, p => { p.name = title; }).catch(listGone);
+        else {
+            if (all.length >= MUSIC_LIMITS.lists) throw Error(`最多建 ${MUSIC_LIMITS.lists} 个歌单`);
+            [row] = await this.music.put([{ id: 'playlist:' + globalThis.crypto.randomUUID().slice(0, 8), kind: 'playlist', at: Date.now(), name: title, songs: [] }]);
+        }
+        this.emit('music', { library: true });
+        return row;
+    }
+    /** Deletes a 歌单 the user made (its songs stay in 全部). */
+    async deletePlaylist(id) { this.assertOpen(); await this.music.remove(id); this.emit('music', { library: true }); return true; }
+    /** Puts songs of the 歌单 into one the user made, on top: {playlist, kept: how many were not in it yet}. */
+    async addToPlaylist(id, songIds) {
+        this.assertOpen();
+        const known = new Set((await this.listSongs()).map(s => s.id)), want = [...new Set(songIds.map(String))].filter(s => known.has(s));
+        let kept = 0;
+        const playlist = await this.music.change(id, p => {
+            const fresh = want.filter(s => !p.songs.includes(s));
+            if (p.songs.length + fresh.length > MUSIC_LIMITS.songs) throw Error(`一个歌单最多 ${MUSIC_LIMITS.songs} 首`);
+            kept = fresh.length;
+            p.songs = [...fresh, ...p.songs];
+        }).catch(listGone);
+        this.emit('music', { library: true });
+        return { playlist, kept };
+    }
+    /** Takes songs out of a 歌单 the user made (they stay in 全部). */
+    async removeFromPlaylist(id, songIds) {
+        this.assertOpen();
+        const gone = new Set(songIds.map(String));
+        const playlist = await this.music.change(id, p => { p.songs = p.songs.filter(s => !gone.has(s)); }).catch(listGone);
+        this.emit('music', { library: true });
+        return playlist;
     }
     async updateSong(id, patch = {}) {
         const saved = await this.music.change(id, row => {
@@ -1529,7 +1588,15 @@ export class TTSBackend {
         this.emit('music', { library: true });
         const { blob, ...row } = saved; return row;
     }
-    async deleteSongs(ids) { for (const id of ids) await this.music.remove(id); this.emit('music', { library: true }); return true; }
+    /** Deletes songs from the 歌单 (and so from every 歌单 the user made). */
+    async deleteSongs(ids) {
+        const gone = new Set(ids.map(String));
+        for (const id of gone) await this.music.remove(id);
+        const lists = (await this.music.list('playlist')).filter(p => p.songs.some(s => gone.has(s)));
+        if (lists.length) await this.music.put(lists.map(p => ({ ...p, songs: p.songs.filter(s => !gone.has(s)) })));
+        this.emit('music', { library: true });
+        return true;
+    }
     /** A song asked for by name (<bgm>, a shared song): the 歌单 first, then the first fitting search result. */
     async findSong(want) {
         // The 歌单 only when the title is the same (晴天 is not 晴天（Live）); a search may be looser.
@@ -2329,6 +2396,8 @@ export class TTSBackend {
             saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId, options) => this.searchMusic(query, clone(sourceId), clone(options || {})), groupSongs: (sourceId, kind, id, page) => this.groupSongs(sourceId, kind, String(id), Number(page) || 0),
             listHeard: () => this.listHeard(), forgetHeard: ids => this.forgetHeard([...(ids || [])]), clearHeard: () => this.clearHeard(), musicLink: (sourceId, songId, hint) => this.musicLink(clone(sourceId), songId, clone(hint || {})), musicLyric: (sourceId, songId, hint) => this.musicLyric(sourceId, songId, clone(hint || {})),
             listSongs: () => this.listSongs(), songBlob: id => this.songBlob(id), addSongs: list => this.addSongs(list), updateSong: (id, patch) => this.updateSong(id, clone(patch || {})), deleteSongs: ids => this.deleteSongs([...(ids || [])]),
+            addSongsTo: (id, list) => this.addSongsTo(String(id), list), listPlaylists: () => this.listPlaylists(), savePlaylist: value => this.savePlaylist(clone(value || {})), deletePlaylist: id => this.deletePlaylist(String(id)),
+            addToPlaylist: (id, ids) => this.addToPlaylist(String(id), [...(ids || [])]), removeFromPlaylist: (id, ids) => this.removeFromPlaylist(String(id), [...(ids || [])]),
             saveSounds: patch => this.saveSounds(clone(patch)), listSounds: () => this.listSounds(), soundBlob: id => this.soundBlob(id), addSounds: list => this.addSounds(list), updateSound: (id, patch) => this.updateSound(id, clone(patch || {})), deleteSounds: ids => this.deleteSounds([...(ids || [])]),
             packInfo: () => this.packInfo(), soundMissing: () => this.soundMissing(), dismissMissing: (type, name) => this.dismissMissing(type, name), generateSound: input => this.generateSound(clone(input || {})), exportSounds: (ids, name) => this.exportSounds(ids ? [...ids] : null, name), importSounds: (file, options) => this.importSounds(file, clone(options || {})),
             saveText: patch => this.saveText(clone(patch)), setTextKey: (id, key) => this.setTextKey(id, key), clearTextKey: id => this.clearTextKey(id), textKeyHint: id => this.textKeyHint(id), textModels: draft => this.textModels(clone(draft || {})),

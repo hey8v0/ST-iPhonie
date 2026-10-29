@@ -1,5 +1,6 @@
-// 音乐: the phone's music player. 正在播放 at the top (progress, lyrics, 顺序 / 随机 / 单曲循环), the 歌单 (files the
-// user added and songs saved from a search), 正文点的歌 (the songs the story picked, to play again or keep), 搜索 over
+// 音乐: the phone's music player. 正在播放 at the top (progress, lyrics, 顺序 / 随机 / 单曲循环), the 歌单 (全部: files
+// the user added and songs saved from a search; and 歌单 the user makes of them), 正文点的歌 (the songs the story
+// picked, to play again or keep), 搜索 over
 // the user's own music sources (songs, albums, artists; more pages), and 设置: 背景音乐 (off / tap / auto), its rule,
 // the volume and the sources. Playing happens in the tavern page (host-music.js), so it goes on while the phone is put
 // away.
@@ -36,6 +37,8 @@ export function musicApp(ctx) {
   // 正文点的歌; what the search looks for (单曲 / 专辑 / 歌手), the albums or artists found, the page, whether there is
   // more; an album or artist opened: {g, songs, page, more, loading, error}
   let heard = [], kind = 'song', groups = [], page = 0, more = false, group = null;
+  // the 歌单 the user made; the one shown ('' for 全部) and the songs shown
+  let lists = [], shelf = '', shown = [];
   const state = () => api.getState().music;
   const now = () => { try { return api.musicStatus?.() || null; } catch { return null; } };
 
@@ -101,9 +104,13 @@ export function musicApp(ctx) {
     if (mode === 'source') return renderSource();
     if (mode === 'group') return renderGroup();
     songs = await api.listSongs().catch(() => []);
+    lists = await api.listPlaylists?.().catch(() => []) || [];
     if (tab === 'heard') heard = await api.listHeard?.().catch(() => []) || [];
     if (v.disposed || ticket !== epoch) return;
-    const s = state(), sources = s.sources.filter(x => x.enabled);
+    const s = state(), sources = s.sources.filter(x => x.enabled), byId = new Map(songs.map(x => [x.id, x]));
+    const mine = lists.find(p => p.id === shelf) || null;
+    if (!mine) shelf = '';
+    shown = mine ? mine.songs.map(id => byId.get(id)).filter(Boolean) : songs;
     const kinds = [['song', '单曲'], ...(sources.some(x => x.albumSearch) ? [['album', '专辑']] : []), ...(sources.some(x => x.artistSearch) ? [['artist', '歌手']] : [])];
     if (!kinds.some(([k]) => k === kind)) kind = 'song';
     const found = kind === 'song' ? results : groups;
@@ -112,8 +119,11 @@ export function musicApp(ctx) {
         + `<p class="hint">正文点过的歌都记在这里（最新的在上面，同一首只记一次，最多 200 首）。点 + 加进歌单。</p><div class="group">${heard.map((x, i) => songRow(x, i, 'heard')).join('')}</div>`
         : empty('正文还没有点过歌', '在「设置 → 背景音乐」打开点歌后，剧情每次挑的歌都会记在这里，可以再放、加进歌单。', 'music'))
       : tab === 'library'
-      ? `<div class="actions" style="margin-top:0"><label class="primary file-button">${icon('add')}添加本机的歌<input type="file" data-music-file multiple accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" aria-label="选择音乐文件"></label>${songs.length ? btn('play-all', icon('play', true) + '全部播放', 'secondary') + btn('play-mixed', icon('shuffle'), 'icon-button', 'aria-label="和正文点的歌一起放" title="和正文点的歌一起放"') : ''}</div>`
-        + (songs.length ? `<div class="group">${songs.map((x, i) => songRow(x, i, 'library')).join('')}</div>` : empty('歌单还是空的', '添加手机或电脑里的歌（文件名是「歌手 - 歌名」会自动认出歌手），或者在「搜索」里找歌加进来。', 'music'))
+      ? `<div class="filter-row music-shelves" role="group" aria-label="歌单">${btn('shelf', `全部 <small>${songs.length}</small>`, '', `data-shelf="" aria-pressed="${!mine}"`)}${lists.map(p => p === mine ? btn('list-menu', `${esc(p.name)} <small>${p.songs.filter(id => byId.has(id)).length}</small>${icon('more')}`, '', `data-shelf="${esc(p.id)}" aria-pressed="true" title="再点一下改名字或删掉"`) : btn('shelf', `${esc(p.name)} <small>${p.songs.filter(id => byId.has(id)).length}</small>`, '', `data-shelf="${esc(p.id)}" aria-pressed="false"`)).join('')}${btn('new-list', icon('add') + (lists.length ? '' : '新建歌单'), '', 'aria-label="新建歌单"')}</div>`
+        + `<div class="actions music-tools" style="margin-top:0"><label class="primary file-button">${icon('add')}添加本机的歌<input type="file" data-music-file multiple accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" aria-label="选择音乐文件"></label>${shown.length ? btn('play-all', icon('play', true) + '全部播放', 'secondary') + btn('play-mixed', icon('shuffle'), 'icon-button', 'aria-label="和正文点的歌一起放" title="和正文点的歌一起放"') : ''}</div>`
+        + (shown.length ? `<div class="group">${shown.map((x, i) => songRow(x, i, 'library')).join('')}</div>`
+          : mine ? empty('这个歌单还是空的', '在「搜索」「正文点的歌」里点 ＋ 放进来，或者在「全部」里点歌右边的「⋯」选它；也可以直接添加本机的歌。', 'music')
+          : empty('歌单还是空的', '添加手机或电脑里的歌（文件名是「歌手 - 歌名」会自动认出歌手），或者在「搜索」里找歌加进来。', 'music'))
       : (kinds.length > 1 ? `<div class="segmented music-kinds" role="group" aria-label="搜什么">${kinds.map(([k, l]) => `<button data-action="kind" data-kind="${k}" aria-pressed="${kind === k}">${l}</button>`).join('')}</div>` : '')
         + `<form class="music-search" data-music-search><input type="search" data-music-query value="${esc(query)}" placeholder="${!sources.length ? '先在设置里添加音源' : kind === 'album' ? '专辑名' : kind === 'artist' ? '歌手名' : '歌名、歌手'}" aria-label="搜歌" ${sources.length ? '' : 'disabled'}>${btn('search', icon('search'), 'round-button', `aria-label="搜索" ${sources.length && !searching ? '' : 'disabled'}`)}</form>`
         + searchErrors.map(e => `<p class="hint">「${esc(e.source)}」：${esc(e.message)}</p>`).join('')
@@ -215,15 +225,66 @@ export function musicApp(ctx) {
       if (!m) throw Error(`没在音源里找到「${s.title}」`);
       row = {title: m.title, artist: m.artist, source: m.source, songId: m.id};
     }
-    const added = await api.addSongs([row]);
-    ctx.notify(added.length ? `「${row.title}」加进歌单了` : '歌单里已经有这首了');
+    await keep([row], `「${row.title}」`);
+  }
+  /** Songs found into the 歌单: straight into 全部 while the user has made no 歌单 of their own, else into the one they
+   *  pick (or only 全部). what: how the songs are named in the message. */
+  async function keep(rows, what) {
+    const to = lists.length ? await pickList(what) : {id: '', name: ''};
+    if (!to) return;
+    try {
+      if (to.id) {
+        const {kept} = await api.addSongsTo(to.id, rows);
+        ctx.notify(!kept ? `「${to.name}」里已经有了` : kept < rows.length ? `放进「${to.name}」${kept} 首（别的已经在里面了）` : `${what}放进「${to.name}」了`);
+      } else {
+        const n = (await api.addSongs(rows)).length;
+        ctx.notify(!n ? (rows.length > 1 ? '这些歌歌单里都有了' : '歌单里已经有这首了') : n < rows.length ? `加了 ${n} 首（别的歌单里已经有了）` : `${what}加进歌单了`);
+      }
+    } catch (error) { ctx.notify(error.message, {error: true}); }
+  }
+  /** Which 歌单 songs go into: {id, name} (id '' for only 全部), one made right here, or null when closed. */
+  function pickList(what) {
+    return new Promise(resolve => {
+      const rows = [...lists.map(p => [p.id, p.name, `${p.songs.length} 首`]), ['', '只放进「全部」', '不放进哪个歌单']];
+      const d = ctx.dialog('放进哪个歌单', `<p class="hint" style="margin-top:0">${esc(what)}</p><div class="group">${rows.map(([id, name, note]) => `<button type="button" class="list-row music-pick" data-pick="${esc(id)}"><span><strong>${esc(name)}</strong><small>${esc(note)}</small></span></button>`).join('')}</div>`
+        + `<div class="group pad">${field('新建一个歌单', input('new-list-name', '', 'text', 'maxlength="40" placeholder="歌单名字"'))}<div class="actions" style="margin:6px 0 0">${btn('pick-new', icon('add') + '新建并放进去', 'secondary')}</div></div>`);
+      let done = false;
+      const finish = value => { if (!done) { done = true; resolve(value); } };
+      d.onClose(() => finish(null));
+      d.body.addEventListener('click', async e => {
+        const pick = e.target.closest('[data-pick]');
+        if (pick) { finish({id: pick.dataset.pick, name: lists.find(p => p.id === pick.dataset.pick)?.name || ''}); d.close(); return; }
+        if (!e.target.closest('[data-action=pick-new]')) return;
+        try { const p = await api.savePlaylist({name: d.body.querySelector('[data-field=new-list-name]')?.value || ''}); finish({id: p.id, name: p.name}); d.close(); }
+        catch (error) { ctx.notify(error.message, {error: true}); }
+      });
+    });
+  }
+  /** Makes a 歌单, or (p) renames or deletes one. */
+  function listDialog(p = null) {
+    const d = ctx.dialog(p ? '歌单' : '新建歌单', `<div class="group pad">${field('名字', input('list-name', p?.name || '', 'text', 'maxlength="40" placeholder="比如：下雨天听的"'))}</div>
+      <div class="savebar">${p ? btn('list-delete', '删除歌单', 'danger') : ''}${btn('list-save', p ? '保存' : '新建', 'primary')}</div>`);
+    d.body.addEventListener('click', async e => {
+      const b = e.target.closest('[data-action]');
+      if (!b) return;
+      try {
+        if (b.dataset.action === 'list-save') shelf = (await api.savePlaylist({id: p?.id || '', name: d.body.querySelector('[data-field=list-name]')?.value || ''})).id;
+        if (b.dataset.action === 'list-delete') { if (!await ctx.confirm(`删除歌单「${p.name}」？`, '只删掉这个歌单，里面的歌还在「全部」里。')) return; await api.deletePlaylist(p.id); shelf = ''; }
+        d.close(); render();
+      } catch (error) { ctx.notify(error.message, {error: true}); }
+    });
   }
 
   v.on('submit', '[data-music-search]', (el, e) => { e.preventDefault(); search(); });
   v.on('change', '[data-music-file]', async el => {
     const files = [...el.files]; el.value = '';
     if (!files.length) return;
-    try { const added = await api.addSongs(files.map(f => ({...titleFromFile(f.name), blob: f}))); ctx.notify(`加了 ${added.length} 首`); }
+    try {
+      const rows = files.map(f => ({...titleFromFile(f.name), blob: f}));
+      // shown a 歌单 of their own: into it too
+      const added = shelf ? (await api.addSongsTo(shelf, rows)).added : await api.addSongs(rows);
+      ctx.notify(`加了 ${added.length} 首`);
+    }
     catch (error) { ctx.notify(error.message, {error: true}); }
     render();
   });
@@ -242,13 +303,12 @@ export function musicApp(ctx) {
       case 'open-group': group = {g: groups[i], songs: [], page: 0, more: false, loading: false, error: ''}; mode = 'group'; loadGroup(); break;
       case 'group-more': group.page++; loadGroup(); break;
       case 'group-play': play(group.songs, 0); break;
-      case 'group-save': {
-        try { const added = await api.addSongs(group.songs.map(s => ({title: s.title, artist: s.artist, source: s.source, songId: s.id}))); ctx.notify(added.length ? `加了 ${added.length} 首` : '这些歌歌单里都有了'); }
-        catch (error) { ctx.notify(error.message, {error: true}); }
-        break;
-      }
+      case 'group-save': await keep(group.songs.map(s => ({title: s.title, artist: s.artist, source: s.source, songId: s.id})), `「${group.g.name}」的 ${group.songs.length} 首歌`); break;
       case 'play-heard': playFrom('heard'); break;
-      case 'play-mixed': playFrom('mixed'); break;
+      case 'play-mixed': playFrom(tab === 'library' && shelf ? shelf + '+heard' : 'mixed'); break;
+      case 'shelf': shelf = el.dataset.shelf; render(); break;
+      case 'new-list': listDialog(); break;
+      case 'list-menu': { const p = lists.find(x => x.id === shelf); if (p) listDialog(p); break; }
       case 'heard-save': try { await keepHeard(heard[i]); } catch (error) { ctx.notify(error.message, {error: true}); } break;
       case 'heard-forget': await api.forgetHeard?.([heard[i].id]); render(); break;
       case 'heard-clear': if (await ctx.confirm('清空正文点的歌？', '只是清掉这个列表，歌单不受影响。')) { await api.clearHeard?.(); render(); } break;
@@ -260,8 +320,8 @@ export function musicApp(ctx) {
       }
       case 'settings': mode = 'settings'; render(); break;
       case 'search': search(); break;
-      case 'play': el.dataset.list === 'heard' ? play(heardTracks(), i, 'heard') : el.dataset.list === 'group' ? play(group.songs, i) : el.dataset.list === 'results' ? play(results, i) : play(songs, i, 'library'); break;
-      case 'play-all': playFrom('library'); break;
+      case 'play': el.dataset.list === 'heard' ? play(heardTracks(), i, 'heard') : el.dataset.list === 'group' ? play(group.songs, i) : el.dataset.list === 'results' ? play(results, i) : play(shown, i, shelf || 'library'); break;
+      case 'play-all': playFrom(shelf || 'library'); break;
       case 'music-toggle': api.musicToggle?.(); break;
       case 'music-next': api.musicNext?.(); break;
       case 'music-prev': api.musicPrev?.(); break;
@@ -270,20 +330,30 @@ export function musicApp(ctx) {
       case 'lyric-seek': api.musicSeek?.(Number(el.dataset.at)); break;
       case 'save-song': {
         const s = (el.dataset.list === 'group' ? group.songs : results)[i];
-        try { const added = await api.addSongs([{title: s.title, artist: s.artist, source: s.source, songId: s.id}]); ctx.notify(added.length ? `「${s.title}」加进歌单了` : '歌单里已经有这首了'); }
-        catch (error) { ctx.notify(error.message, {error: true}); }
+        await keep([{title: s.title, artist: s.artist, source: s.source, songId: s.id}], `「${s.title}」`);
         break;
       }
       case 'song-menu': {
-        const s = songs[i];
-        const d = ctx.dialog(s.title, `<div class="group pad">${field('歌名', input('song-title', s.title, 'text', 'maxlength="200"'))}${field('歌手', input('song-artist', s.artist, 'text', 'maxlength="200"'))}${s.origin === 'file' ? field('歌词（LRC，可不填）', textArea('song-lyric', s.lyric || '', 'rows="5" placeholder="[00:12.30]第一句歌词"'), '带时间的 LRC 歌词会跟着歌一句句显示，也会显示在音乐小窗里。') : ''}</div>
-          <div class="savebar">${btn('song-delete', '从歌单删掉', 'danger')}${btn('song-save', '保存', 'primary')}</div>`);
+        // in 全部: deleted from everywhere; in a 歌单 of the user's: only taken out of it. Which 歌单 it is in switches on and off.
+        const s = shown[i], here = lists.find(p => p.id === shelf);
+        const d = ctx.dialog(s.title, `<div class="group pad">${field('歌名', input('song-title', s.title, 'text', 'maxlength="200"'))}${field('歌手', input('song-artist', s.artist, 'text', 'maxlength="200"'))}${s.origin === 'file' ? field('歌词（LRC，可不填）', textArea('song-lyric', s.lyric || '', 'rows="5" placeholder="[00:12.30]第一句歌词"'), '带时间的 LRC 歌词会跟着歌一句句显示，也会显示在音乐小窗里。') : ''}</div>`
+          + (lists.length ? `${groupTitle('放在哪些歌单里')}<div class="group pad">${lists.map(p => toggle('in-' + p.id, p.name, p.songs.includes(s.id))).join('')}</div>` : '')
+          + `<div class="savebar">${here ? btn('song-out', `从「${esc(here.name)}」拿掉`, 'danger') : btn('song-delete', lists.length ? '删掉这首' : '从歌单删掉', 'danger')}${btn('song-save', '保存', 'primary')}</div>`);
+        d.onClose(() => { if (!v.disposed && mode === 'main') render(); });
+        d.body.addEventListener('change', async e => {
+          const box = e.target.closest('[data-field^="in-"]');
+          if (!box) return;
+          const id = box.dataset.field.slice(3);
+          try { if (box.checked) await api.addToPlaylist(id, [s.id]); else await api.removeFromPlaylist(id, [s.id]); }
+          catch (error) { box.checked = !box.checked; ctx.notify(error.message, {error: true}); }
+        });
         d.body.addEventListener('click', async e => {
           const b = e.target.closest('[data-action]');
           if (!b) return;
           try {
             if (b.dataset.action === 'song-save') { const val = k => d.body.querySelector(`[data-field=${k}]`)?.value ?? ''; await api.updateSong(s.id, {title: val('song-title'), artist: val('song-artist'), ...(s.origin === 'file' ? {lyric: val('song-lyric')} : {})}); }
-            if (b.dataset.action === 'song-delete') { if (!await ctx.confirm(`删掉「${s.title}」？`, s.origin === 'file' ? '这首歌的文件会从这台设备上删掉。' : '只是从歌单拿掉。')) return; await api.deleteSongs([s.id]); }
+            if (b.dataset.action === 'song-out') await api.removeFromPlaylist(here.id, [s.id]);
+            if (b.dataset.action === 'song-delete') { if (!await ctx.confirm(`删掉「${s.title}」？`, (s.origin === 'file' ? '这首歌的文件会从这台设备上删掉' : '会从歌单里拿掉') + (lists.length ? '，每个歌单里也都没有了。' : '。'))) return; await api.deleteSongs([s.id]); }
             d.close(); render();
           } catch (error) { ctx.notify(error.message, {error: true}); }
         });
