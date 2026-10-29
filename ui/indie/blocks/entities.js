@@ -3,7 +3,7 @@
 import {collisionBoxes} from './shapes.js';
 import {itemInfo, BLOCKS} from './blocks.js';
 import {Verts, mat} from './render.js';
-import {LAYER} from './atlas.js';
+import {LAYER, dialName} from './atlas.js';
 import {potionColor} from './brew.js';
 
 const DEFAULT_TINT = {grass: 0x91bd59, foliage: 0x77ab2f, water: 0x3f76e4};
@@ -28,7 +28,7 @@ export function itemLook(id, s = null) {
     const grass = b.name === 'grass_block';
     return {cube: [side, side, L(t.top), L(t.bottom), front, side], tints: [grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint, tint, 0xFFFFFF, grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint], half: b.shape === 'slab' || b.shape === 'detector'};
   }
-  const name = b ? (b.name === 'wheat' ? 'wheat_stage7' : b.tex?.all || b.tex?.side) : info?.icon || id;
+  const name = b ? (b.name === 'wheat' ? 'wheat_stage7' : b.tex?.all || b.tex?.side) : dialName(id) || info?.icon || id;
   return {flat: LAYER[name] ?? 0, tint: b ? tintNum(b.tint) : packed.has(name) && info?.tint ? tintNum(info.tint) : 0xFFFFFF};
 }
 /** The names whose picture came from the player's pack (leather from a pack is grey and gets its colour). */

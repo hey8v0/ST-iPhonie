@@ -58,6 +58,10 @@ button{font:inherit;color:inherit}
 .curse.show{animation:curse 1.8s ease-in-out}
 @keyframes curse{0%{opacity:0;transform:translate(-50%,-50%) scale(.55)}30%{opacity:.8;transform:translate(-50%,-50%) scale(1)}70%{opacity:.6;transform:translate(-50%,-50%) scale(1.05)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.2)}}
 .sleep{position:absolute;inset:0;background:#05050a;opacity:0;transition:opacity .25s}
+.blind{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,rgba(0,0,0,.55) 0,rgba(0,0,0,.97) 24%);opacity:0;transition:opacity .6s;pointer-events:none}
+/* a map held in the hand: the paper at the bottom of the screen */
+.mapview{position:absolute;left:50%;bottom:calc(36*var(--u));transform:translateX(-50%);width:min(44vh,58vw);aspect-ratio:1;padding:calc(6*var(--u));box-sizing:border-box;background:#d8c48e;border:calc(1.5*var(--u)) solid #6a4e28;box-shadow:0 0 0 calc(1*var(--u)) #2e2010,0 calc(3*var(--u)) calc(8*var(--u)) rgba(0,0,0,.45);display:none;pointer-events:none}
+.mapview canvas{width:100%;height:100%;display:block;image-rendering:pixelated}
 .portalfx{position:absolute;inset:0;opacity:0;pointer-events:none;background:radial-gradient(circle at 50% 50%,rgba(150,60,255,.35),rgba(80,10,170,.85));mix-blend-mode:screen;animation:portalfx 3s linear infinite}
 @keyframes portalfx{0%{filter:hue-rotate(0)}50%{filter:hue-rotate(-25deg)}100%{filter:hue-rotate(0)}}
 .effects{position:absolute;top:calc(4*var(--u));right:calc(48*var(--u) + env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:calc(2*var(--u));pointer-events:none}
@@ -209,6 +213,7 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
     <div class="hurt"></div>
     <div class="sleep"></div>
     <div class="portalfx"></div>
+    <div class="blind"></div>
     <canvas class="curse" width="12" height="12"></canvas>
     <div class="cross"></div>
     <div class="effects"></div>
@@ -218,6 +223,7 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
     <div class="name"></div>
     <div class="bars"><div class="row hearts"></div><div class="row r food"></div><div class="row r air"></div><div class="row armor"></div><div class="row absorb"></div></div>
     <div class="xp"><i></i><b></b></div>
+    <div class="mapview"><canvas width="128" height="128"></canvas></div>
     <div class="hotbar"></div>
     <button class="pausebtn" aria-label="暂停"></button>
   </div>

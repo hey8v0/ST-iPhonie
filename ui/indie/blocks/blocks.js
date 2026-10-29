@@ -117,7 +117,8 @@ const stagesOf = n => [0, 0, 1, 1, 2, 2, 2, 3].map(s => `${n}_stage${s}`);
 block('carrots', '胡萝卜', {tex: all('carrots_stage0'), stages: stagesOf('carrots'), shape: 'crop', pass: 'cutout', hard: 0, solid: false, item: false,
   drop: (r, meta) => ['carrot', meta >= 7 ? 2 + Math.floor(r() * 4) : 1]});
 block('potatoes', '土豆', {tex: all('potatoes_stage0'), stages: stagesOf('potatoes'), shape: 'crop', pass: 'cutout', hard: 0, solid: false, item: false,
-  drop: (r, meta) => ['potato', meta >= 7 ? 2 + Math.floor(r() * 4) : 1]});
+  // ripe ones now and then give a poisonous potato too (the game's 2 %)
+  drop: (r, meta) => meta >= 7 && r() < 0.02 ? [['potato', 2 + Math.floor(r() * 4)], ['poisonous_potato', 1]] : ['potato', meta >= 7 ? 2 + Math.floor(r() * 4) : 1]});
 // building: stairs (state: facing 0–3, upside down 4), fences and gates (gate: facing, open 4), panes, doors (facing,
 // open 4, upper half 8), trapdoors (facing, open 4, at the top 8), beds (facing from foot to head, head 4)
 const shaped = {opaque: false, filter: 0};
@@ -411,6 +412,20 @@ block('wet_sponge', '湿海绵', {tex: all('wet_sponge'), hard: 0.6, tool: T.HOE
 // a bubble column: water a soul sand (state 0, up) or a magma block (state 1, down) sends bubbles through, from the
 // block up to the top of the water; drawn and swum in as water
 block('bubble_column', '气泡柱', {shape: 'none', pass: 'none', solid: false, opaque: false, replace: true, hard: 100, drop: null, item: false, water: true, filter: 2});
+// ---------- the sea's treasure (0.8.79) ----------
+// (new blocks always go at the end: a saved world keeps its blocks by their numbers)
+// the conduit (made of the heart of the sea, see the items): a small block that, in water and framed with prismarine,
+// gives 潮涌能量 round it
+block('conduit', '潮涌核心', {tex: all('conduit'), shape: 'conduit', pass: 'cutout', hard: 3, tool: T.PICK, solid: false, opaque: false, filter: 0, light: 15, cat: 'use'});
+// standing in water (the game's waterlogged state): a copy of each block of these kinds, drawn in still water, swum
+// in, leaving its water when broken. A block put into still water — by the player, or with the land under the sea — is
+// its copy (dry: the block it is a copy of).
+export const WATERLOGGED = {};
+const WETTABLE = new Set(['fence', 'gate', 'slab', 'stairs', 'pane', 'chest', 'stonewall', 'trapdoor', 'lantern', 'conduit']);
+for (const b of B.slice()) if ((WETTABLE.has(b.shape) || b.name === 'ladder') && b.item && !b.water) {
+  const {id, name, ...rest} = b;
+  WATERLOGGED[id] = block(`waterlogged_${name}`, b.zh, {...rest, ...WET, item: false, dry: name}).id;
+}
 
 export const BLOCKS = B;
 export const BY_NAME = Object.fromEntries(B.map(b => [b.name, b]));
@@ -522,6 +537,20 @@ for (const [f, zh] of [['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish'
 item('turtle_scute', '海龟鳞甲'); item('nautilus_shell', '鹦鹉螺壳');
 item('turtle_helmet', '海龟壳', {stack: 1, armor: {slot: 0, mat: 'turtle', points: 2, tough: 0, uses: 275}, enchantability: 9, repair: 'turtle_scute'});
 for (const [k, zh] of [['squid', '鱿鱼'], ['glow_squid', '发光鱿鱼'], ['cod', '鳕鱼'], ['salmon', '鲑鱼'], ['tropical_fish', '热带鱼'], ['pufferfish', '河豚'], ['turtle', '海龟'], ['guardian', '守卫者'], ['elder_guardian', '远古守卫者']]) item(`${k}_spawn_egg`, `${zh}刷怪蛋`, {spawn: k});
+
+// the sea's treasure and what finds the way: the heart of the sea (buried treasure) and the conduit made with it — a
+// small block that, in water and framed with prismarine, gives 潮涌能量 round it (put into water it stands in the water,
+// as the game's does); iron nuggets; from a shipwreck's stores poisonous potatoes and suspicious stew (its flower's
+// effect, the stack's stew); the compass (it points to the world's spawn) and the clock (the time), their pictures
+// turning; maps: an empty one becomes a map of where it is used, a filled one carries its own (the stack's map)
+item('heart_of_the_sea', '海洋之心');
+item('iron_nugget', '铁粒');
+item('poisonous_potato', '毒马铃薯', {food: 2, sat: 1.2, effects: [['poison', 0, 5, 0.6]]});
+item('suspicious_stew', '迷之炖菜', {food: 6, sat: 7.2, stack: 1, bowl: true});
+item('compass', '指南针', {icon: 'compass_16', dial: 'compass'});
+item('clock', '时钟', {icon: 'clock_00', dial: 'clock'});
+item('map', '空地图');
+item('filled_map', '地图', {stack: 1, hidden: true});
 
 export const ITEMS = I;
 

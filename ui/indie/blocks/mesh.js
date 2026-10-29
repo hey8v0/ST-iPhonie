@@ -370,6 +370,9 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
       }
     } else if (shape === 'bed') {
       bed(solid, x, y, z, b, meta);
+    } else if (shape === 'conduit') {
+      // the whole picture on each face of the small block
+      box(out, x, y, z, 5, 5, 5, 11, 11, 11, () => tex(b.tex.all), WHITE, {uvs: Array(6).fill([0, 0, 16, 16])});
     } else if (PIECED.has(shape)) {
       const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)];
       for (const {box: [x0, y0, z0, x1, y1, z1], role} of pieces(v, near)) {

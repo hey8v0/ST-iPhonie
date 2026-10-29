@@ -1464,7 +1464,9 @@ export class TTSBackend {
         this.assertOpen();
         const title = String(song?.title || '').trim().slice(0, 200);
         if (!title) return null;
-        const row = { id: 'heard:' + songKey(song), kind: 'heard', at: Date.now(), title, artist: String(song.artist || '').trim().slice(0, 200) };
+        // (later than the last one even within the same millisecond, so the newest is always on top)
+        this.heardAt = Math.max(Date.now(), (this.heardAt || 0) + 1);
+        const row = { id: 'heard:' + songKey(song), kind: 'heard', at: this.heardAt, title, artist: String(song.artist || '').trim().slice(0, 200) };
         if (song.source && song.songId) Object.assign(row, { source: String(song.source).slice(0, 60), songId: String(song.songId).slice(0, 200) });
         else { const old = await this.music.get(row.id).catch(() => null); if (old?.source && old.songId) Object.assign(row, { source: old.source, songId: old.songId }); }
         await this.music.put([row], { keep: MUSIC_LIMITS.heard });

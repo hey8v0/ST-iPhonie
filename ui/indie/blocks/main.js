@@ -1,11 +1,11 @@
 // 方块世界: a block world in the spirit of the game, made from scratch. This page runs the game: the menus, the player,
 // breaking and placing, survival (health, hunger, air), the day, what is held, the HUD; the world itself is made and
 // kept by the worker (world.worker.js) and drawn by render.js.
-import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE, BOAT_WOODS} from './blocks.js';
+import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE, BOAT_WOODS, WATERLOGGED} from './blocks.js';
 import {Mobs, MOBS} from './mobs.js';
 import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
-import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds} from './atlas.js';
+import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds, dials} from './atlas.js';
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
 import {listWorlds, saveWorld, deleteWorld} from './db.js';
 import {Mirror} from './mirror.js';
@@ -28,6 +28,9 @@ import {runCommand, DIFFICULTIES, defaultRules} from './commands.js';
 import {spawnPoint, BIOMES} from './gen.js';
 import {findFrame, portalFill, across, nearestPortal, SEARCH} from './portal.js';
 import {applyPotion, addEffect, effectsTick, speedFactor, hitBonus, EFFECTS, levelName, brewTick, swirlColor, potionColor} from './brew.js';
+import {lootChest, STEWS} from './loot.js';
+import {treasureNear, conduitFrame} from './ocean.js';
+import {Maps} from './maps.js';
 
 const $ = s => document.querySelector(s);
 const app = $('#app'), canvas = $('#view'), hud = $('#hud'), invRoot = $('#inv');
@@ -203,6 +206,9 @@ function startWorld(meta) {
   ents.load(meta.items);
   ents.onPickup = () => play('pop');
   G.herds = new Set(meta.herds || []);
+  // chests the land was made with, not opened yet: their loot tables; the world's maps
+  G.loot = meta.loot || {};
+  G.maps = new Maps(meta.maps, blockColor);
   G.bedPos = meta.bed || null; G.sleeping = 0;
   G.draw = 0; G.attackWait = 0; G.targetMob = null;
   G.xp = {level: start.xpLevel || 0, prog: start.xpProg || 0, total: start.xpTotal || 0};
@@ -260,6 +266,10 @@ function onWorker(m) {
     if (G.herds.has(k)) return;
     G.herds.add(k);
     if (G.mobs.count(x => x.def.passive) < 160) for (const [kind, x, y, z, extra] of m.list) G.mobs.add(kind, x, y, z, extra);
+  } else if (m.type === 'loot') {
+    // chests of shipwrecks, ruins and buried treasure: their loot tables until first opened (one already opened keeps
+    // what it has)
+    for (const [x, y, z, table] of m.list) { const k = `${x},${y},${z}`; if (!G.tiles[k]) G.loot[k] = table; }
   } else if (m.type === 'exploded') {
     for (const [id, n, x, y, z] of m.drops) G.ents.drop({id, n}, x, y, z);
     for (const [x, y, z] of m.tnt) G.mobs.light(x, y, z, 10 + Math.floor(Math.random() * 20));
@@ -337,7 +347,7 @@ function pause() {
 async function saveGame() {
   if (!G || !G.ready) return;
   const b = G.body, m = G.meta;
-  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, dim: G.dim, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], carts: G.carts.toJSON(), boats: G.boats.toJSON(), bed: G.bedPos, weather: G.weather,
+  Object.assign(m, {played: Date.now(), time: G.time, mode: G.mode, dim: G.dim, inv: G.inv.slots, tiles: G.tiles, items: G.ents.toJSON(), orbs: G.ents.orbsJSON(), spawn: G.spawn, mobs: G.mobs.toJSON(), herds: [...G.herds], loot: G.loot, maps: G.maps.toJSON(), carts: G.carts.toJSON(), boats: G.boats.toJSON(), bed: G.bedPos, weather: G.weather,
     player: {x: b.x, y: G.riding?.isBoat ? G.riding.body.y + BOAT_H : b.y, z: b.z, yaw: b.yaw, pitch: b.pitch, flying: b.flying, health: G.health, food: G.food, sat: G.sat, hot: G.hot, xpLevel: G.xp.level, xpProg: G.xp.prog, xpTotal: G.xp.total, enchSeed: G.enchSeed, effects: G.effects, absorb: G.absorb || 0}});
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   // the worker writes the changed columns; this waits till it has (or three seconds)
@@ -400,8 +410,8 @@ async function switchWorld(to, pos) {
   G.leaving = true; invUI.hide();
   const m = G.meta;
   await saveGame();
-  const here = {tiles: m.tiles, items: m.items, orbs: m.orbs, mobs: m.mobs, herds: m.herds, carts: m.carts, boats: m.boats}, there = m.away || {};
-  Object.assign(m, {away: here, dim: to, tiles: there.tiles || {}, items: there.items || [], orbs: there.orbs || [], mobs: there.mobs || [], herds: there.herds || [], carts: there.carts || [], boats: there.boats || []});
+  const here = {tiles: m.tiles, loot: m.loot, items: m.items, orbs: m.orbs, mobs: m.mobs, herds: m.herds, carts: m.carts, boats: m.boats}, there = m.away || {};
+  Object.assign(m, {away: here, dim: to, tiles: there.tiles || {}, loot: there.loot || {}, items: there.items || [], orbs: there.orbs || [], mobs: there.mobs || [], herds: there.herds || [], carts: there.carts || [], boats: there.boats || []});
   m.player = {...m.player, x: pos.x, y: pos.y, z: pos.z, flying: false, health: G.health, food: G.food, sat: G.sat, effects: G.effects, absorb: G.absorb || 0};
   try { await saveWorld(m); } catch (e) { toast(`存档没存上：${e.message || e}`); }
   G.worker.terminate(); renderer.clearAll(); renderer.clearLod();
@@ -463,6 +473,84 @@ function drinkMilk() {
   play('burp'); drawHud(true); drawEffects();
 }
 /** An effect from food (a golden apple's); 伤害吸收 gives its golden hearts at once (two a level). */
+/** A chest the land was made with, opened (or broken) for the first time: its things from its loot table (null when it
+ *  is not one). A treasure map in it leads to the buried treasure nearest the chest. */
+function lootOf(k, x, y, z) {
+  const table = G.loot[k];
+  if (!table) return null;
+  delete G.loot[k];
+  const seed = G.meta.seed;
+  return lootChest(table, seed, x, y, z, {map: () => { const t = treasureNear(seed, x, z); return t ? G.maps.treasure(seed, t) : null; }});
+}
+/** A block's colour for maps: its top picture's average (tinted as it is drawn). */
+function blockColor(id) {
+  const b = BLOCKS[id], name = b.tex?.top || b.tex?.all || b.tex?.side, d = built?.layers[LAYER[name]];
+  if (!d) return null;
+  let r = 0, g = 0, bl = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 8) { r += d[i]; g += d[i + 1]; bl += d[i + 2]; n++; }
+  if (!n) return null;
+  const tint = b.tint === 'grass' ? 0x91bd59 : b.tint === 'foliage' ? 0x77ab2f : b.tint?.startsWith?.('#') ? parseInt(b.tint.slice(1), 16) : 0xFFFFFF;
+  return [r / n * (tint >> 16 & 255) / 255, g / n * (tint >> 8 & 255) / 255, bl / n * (tint & 255) / 255];
+}
+/** The sea's things each tick: the compass and the clock turning, a map in hand drawn in and shown, conduits, the
+ *  effects that change the body (jumping). */
+function seaTick() {
+  const b = G.body;
+  // the compass points to the world's spawn, the clock shows the time (the game's frames: the needle up when facing it,
+  // the dial at noon at 0); in the Nether both spin
+  if (G.dim === 'nether') { dials.compass = (dials.compass + 1 + (Math.random() < 0.4 ? 1 : 0)) % 32; dials.clock = (dials.clock + 3) % 64; }
+  else {
+    const dx = G.spawn.x - b.x, dz = G.spawn.z - b.z, fx = -Math.sin(b.yaw), fz = -Math.cos(b.yaw);
+    const rel = Math.atan2(dx * -fz + dz * fx, dx * fx + dz * fz);
+    dials.compass = ((Math.round(16 + rel / (Math.PI * 2) * 32) % 32) + 32) % 32;
+    dials.clock = Math.floor((((G.time - 6000) % 24000 + 24000) % 24000) / 24000 * 64) % 64;
+  }
+  b.jumpBoost = G.effects.jump_boost ? G.effects.jump_boost.amp + 1 : 0;
+  // a map in hand: drawn in round its holder, and shown
+  const s = held(), m = s?.id === 'filled_map' ? G.maps.get(s.map) : null;
+  if (m && m.dim === G.dim && G.ticks % 2 === 0) G.maps.explore(m, b.x, b.z, (x, y, z) => G.mirror.get(x, y, z), (x, z) => G.mirror.top(x, z));
+  showMap(m);
+  if (G.ticks % 40 === 0) conduitsTick();
+}
+let mapShown = null, mapPaintAt = 0;
+function showMap(m) {
+  const el = $('.mapview');
+  if (!m || paused || invUI.open || G.dead) { if (mapShown) { el.style.display = 'none'; mapShown = null; } return; }
+  if (mapShown !== m) { el.style.display = 'block'; mapShown = m; mapPaintAt = 0; }
+  if (performance.now() - mapPaintAt < 150) return;
+  mapPaintAt = performance.now();
+  const b = G.body;
+  G.maps.paint(el.querySelector('canvas').getContext('2d'), m, {x: b.x, z: b.z, yaw: b.yaw, dim: G.dim});
+}
+// ---------- conduits ----------
+/**
+ * The game's conduits, every two seconds: one standing in water with water all round it and at least 16 blocks of
+ * its frame works — 潮涌能量 for 13 seconds to the player within 16 blocks for every 7 of the frame, in the water or
+ * the rain; with the whole frame (42) it also hurts the nearest monster in the water within 8 blocks.
+ */
+function conduitsTick() {
+  const b = G.body, get = (x, y, z) => G.mirror.get(x, y, z), sky = (x, y, z) => G.mirror.light(Math.floor(x), Math.floor(y), Math.floor(z))[0] >= 15;
+  for (const [k, tile] of Object.entries(G.tiles)) {
+    if (tile.kind !== 'conduit') continue;
+    const [x, y, z] = k.split(',').map(Number);
+    if (!G.mirror.has(x, z) || Math.abs(x - b.x) > 128 || Math.abs(z - b.z) > 128) continue;
+    const id = G.mirror.get(x, y, z) & 0xFFF;
+    if (id !== ID.conduit && id !== ID.waterlogged_conduit) { delete G.tiles[k]; continue; }
+    const frame = conduitFrame(get, x, y, z), was = tile.active;
+    tile.active = frame >= 16;
+    if (tile.active && !was) play('bell');
+    if (!tile.active) continue;
+    const cx = x + 0.5, cy = y + 0.5, cz = z + 0.5;
+    if (Math.hypot(b.x - cx, b.y + 0.9 - cy, b.z - cz) <= Math.floor(frame / 7) * 16 && (b.inWater || (fallsAt(Math.floor(b.x), Math.floor(b.z)) === 'rain' && sky(b.x, b.y + 1.6, b.z)))) giveEffect('conduit_power', 0, 260);
+    if (frame >= 42) {
+      let best = null, bd = 8;
+      for (const mob of G.mobs.list) { if (!mob.def.hostile || mob.dead || !mob.body?.inWater) continue; const d = Math.hypot(mob.x - cx, mob.y - cy, mob.z - cz); if (d < bd) { bd = d; best = mob; } }
+      if (best) { G.mobs.hurt(best, 4, null, 'magic'); for (let t = 0; t <= 1; t += 0.2) G.ents.puff(cx + (best.x - cx) * t, cy + (best.y + 0.5 - cy) * t, cz + (best.z - cz) * t, 'swirl', 0x1DC2D1); }
+    }
+    // the sea's bits drift into it
+    for (let n = 0; n < 4; n++) { const a = Math.random() * Math.PI * 2, r = 1.5 + Math.random() * 2; G.ents.puff(cx + Math.cos(a) * r, cy + (Math.random() - 0.5) * 2, cz + Math.sin(a) * r, 'swirl', 0x8fd8ff); }
+  }
+}
 function giveEffect(id, amp, ticks) {
   addEffect(G.effects, id, amp, ticks);
   if (id === 'absorption') G.absorb = Math.max(G.absorb || 0, 4 * (amp + 1));
@@ -780,8 +868,10 @@ function breakBlock(t) {
     if (b.xp && !silk) G.ents.xp(b.xp[0] + Math.floor(Math.random() * (b.xp[1] - b.xp[0] + 1)), x + 0.5, y + 0.5, z + 0.5);
   }
   if (b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall') { const [ox, oy, oz] = partnerOf(x, y, z, v); if ((G.mirror.get(ox, oy, oz) & 0xFFF) === b.id) setBlock(ox, oy, oz, 0); }
-  // what was inside goes out
-  const k = `${x},${y},${z}`, tile = G.tiles[k];
+  // what was inside goes out (a chest the land was made with, never opened, its loot)
+  const k = `${x},${y},${z}`;
+  if (G.loot[k]) G.tiles[k] = {kind: 'chest', slots: lootOf(k, x, y, z)};
+  const tile = G.tiles[k];
   if (tile) { for (const s of tile.slots || [tile.input, tile.fuel, tile.output]) if (s) G.ents.drop(s, x + 0.5, y + 0.5, z + 0.5); delete G.tiles[k]; if (G.fills.has(k)) { G.fills.delete(k); G.worker.postMessage({type: 'fill', x, y, z, level: null}); } }
   G.ents.burst(x, y, z, v, 28);
   play('break', v);
@@ -880,6 +970,9 @@ function placeFrom(t, stack) {
     if (['wire', 'plate', 'repeater', 'comparator', 'rail'].includes(b.shape) && !(ub.opaque || (ub.shape === 'slab' && G.mirror.get(x, y - 1, z) >>> 12 >= 1) || ub.name === 'hopper')) return false;
     if (b.shape === 'lever' || b.shape === 'button') { const [ax, ay, az] = FACES[ATTACHED[meta & 7]]; if (!BLOCKS[G.mirror.get(x + ax, y + ay, z + az) & 0xFFF].opaque) return false; }
     if ((b.shape === 'torch' && meta === 0) && !ub.opaque && ub.shape !== 'slab') return false;
+    // put into still water, what can stand in water does (a fence, a slab, a chest, the conduit …)
+    const wl = WATERLOGGED[b.id], wv = G.mirror.get(x, y, z);
+    if (wl && (wv & 0xFFF) === ID.water && !(wv >>> 12)) v = withMeta(wl, meta);
     v ??= withMeta(b.id, meta);
     // not inside the player
     const boxes = collisionBoxes(v), [x0, y0, z0, x1, y1, z1] = G.body.aabb();
@@ -899,6 +992,8 @@ function look6() {
 }
 /** What a block keeps of its own (a furnace's fire, a chest's things), made when it is put down. */
 function makeTile(x, y, z, b) {
+  delete G.loot[`${x},${y},${z}`];
+  if (b?.shape === 'conduit') G.tiles[`${x},${y},${z}`] = {kind: 'conduit'};
   if (b?.use === 'furnace') G.tiles[`${x},${y},${z}`] = {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0};
   if (b?.use === 'chest') G.tiles[`${x},${y},${z}`] = {kind: 'chest', slots: new Array(27).fill(null)};
   if (b?.use === 'enchant') G.tiles[`${x},${y},${z}`] = {kind: 'enchant'};
@@ -1163,6 +1258,8 @@ function use(t, mob = null) {
       play('splash'); return;
     }
   }
+  // an empty map becomes the map of where it is used
+  if (s?.id === 'map') { const filled = G.maps.make(Math.floor(G.body.x), Math.floor(G.body.z), G.dim); useUp(); handBack(filled); drawHud(true); return; }
   if (info?.boat) {
     const eye = eyePos(), dir = aimDir(), lt = raycast(G.mirror, eye[0], eye[1], eye[2], dir[0], dir[1], dir[2], reach(), true);
     if (!lt) return;
@@ -1311,7 +1408,7 @@ function openBlock(kind, t) {
   // a smoker or a blast furnace is a furnace of its own kind
   const type = BLOCKS[t.v & 0xFFF].cook;
   if (kind === 'furnace') invUI.show('furnace', G.tiles[k] ||= {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0, ...(type ? {type} : {})});
-  if (kind === 'chest') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: new Array(27).fill(null)});
+  if (kind === 'chest') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: lootOf(k, t.x, t.y, t.z) || new Array(27).fill(null)});
   if (kind === 'barrel') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: new Array(27).fill(null), title: '木桶'});
   if (kind === 'enchant') { G.tiles[k] ||= {kind: 'enchant'}; invUI.show('enchant', {pos: {x: t.x, y: t.y, z: t.z}, shelves: shelvesAround((x, y, z) => G.mirror.get(x, y, z), t.x, t.y, t.z, ID.bookshelf)}); }
   if (kind === 'anvil') invUI.show('anvil', {pos: {x: t.x, y: t.y, z: t.z}});
@@ -1454,7 +1551,7 @@ function survivalTick(r) {
   if (r.landed > 3 && !b.inWater) hurt(Math.ceil((r.landed - 3) * (onHay ? 0.2 : 1)), '摔得太重了', null, 'fall');
   if (r.landed > 2) play('fall', 0, Math.min(1, r.landed / 8));
   // air
-  if (b.headInWater && !G.effects.water_breathing) { if (Math.random() < 1 / (enchOf(G.inv.worn(0), 'respiration') + 1)) G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了', null, 'drown'); } } else G.air = Math.min(300, G.air + 4);
+  if (b.headInWater && !G.effects.water_breathing && !G.effects.conduit_power) { if (Math.random() < 1 / (enchOf(G.inv.worn(0), 'respiration') + 1)) G.air--; if (G.air <= -20) { G.air = 0; hurt(2, '淹死了', null, 'drown'); } } else G.air = Math.min(300, G.air + 4);
   if ((b.inLava) && G.time % 10 === 0) hurt(4, '掉进了岩浆', null, 'lava');
   if (b.touchCactus && G.time % 10 === 0) hurt(1, '被仙人掌扎死了', null, 'cactus');
   // magma burns feet, unless sneaking
@@ -1478,7 +1575,8 @@ function eatTick() {
   if (s.id === 'milk_bucket') { drinkMilk(); return; }
   if (info.drink) { drink(s); return; }
   G.food = Math.min(20, G.food + info.food); G.sat = Math.min(G.food, G.sat + (info.sat || info.food * 0.6));
-  for (const [id, amp, secs] of info.effects || []) giveEffect(id, amp, secs * 20);
+  for (const [id, amp, secs, chance = 1] of info.effects || []) if (Math.random() < chance) giveEffect(id, amp, secs * 20);
+  if (s.stew && STEWS[s.stew]) { const [id, amp, secs] = STEWS[s.stew]; giveEffect(id, amp, Math.max(1, Math.round(secs * 20))); }
   useUp();
   // a stew or a soup leaves its bowl
   if (info.bowl && G.mode !== 'creative') handBack({id: 'bowl', n: 1});
@@ -1569,13 +1667,15 @@ function tick() {
   eatTick();
   // potion effects wear off; regeneration heals, poison hurts (never to death); swirls round the player
   if (Object.keys(G.effects).length) {
-    const gone = effectsTick(G.effects, {heal: n => { if (G.health < 20 && !G.dead) { G.health = Math.min(20, G.health + n); drawHud(true); } }, harm: n => hurt(n, '中毒了', null, 'magic'), health: () => G.health});
+    const gone = effectsTick(G.effects, {heal: n => { if (G.health < 20 && !G.dead) { G.health = Math.min(20, G.health + n); drawHud(true); } }, harm: (n, kind) => hurt(n, kind === 'wither' ? '凋零了' : '中毒了', null, 'magic'),
+      feed: n => { G.food = Math.min(20, G.food + n); G.sat = Math.min(G.food, G.sat + n * 2); drawHud(true); }, health: () => G.health});
     if (gone.includes('absorption') && G.absorb) { G.absorb = 0; drawHud(true); }
     const c = swirlColor(G.effects);
     if (c != null && G.view && G.time % 3 === 0 && !G.effects.invisibility) G.ents.puff(b.x + (Math.random() - 0.5) * 0.6, b.y + Math.random() * 1.8, b.z + (Math.random() - 0.5) * 0.6, 'swirl', c);
     if (G.time % 10 === 0) drawEffects();
   } else if (fxKey) drawEffects();
   thrownTick();
+  seaTick();
   if (G.attackWait > 0) G.attackWait--;
   if (G.invuln > 0) G.invuln--;
   // a bow: held use draws it (on a phone: holding the screen), letting go shoots
@@ -1607,7 +1707,7 @@ function tick() {
       if (!same) G.breaking = {x: t.x, y: t.y, z: t.z, v: t.v, p: 0};
       // under water (without 水下速掘) and off the ground the game digs five times slower each
       const mult = (b.headInWater && !enchOf(G.inv.worn(0), 'aqua_affinity') ? 0.2 : 1) * (!b.onGround && !b.flying ? 0.2 : 1)
-        * (G.effects.mining_fatigue ? [0.3, 0.09, 0.0027, 0.00081][Math.min(3, G.effects.mining_fatigue.amp)] : 1);
+        * (G.effects.mining_fatigue ? [0.3, 0.09, 0.0027, 0.00081][Math.min(3, G.effects.mining_fatigue.amp)] : 1) * (G.effects.conduit_power ? 1.2 : 1);
       const secs = breakTime(BLOCKS[t.v & 0xFFF], heldTool(), {efficiency: enchOf(held(), 'efficiency'), mult});
       if (secs === 0) { if (!G.breakWait) { breakBlock(t); G.breaking = null; G.breakWait = 5; } }
       else if (secs < Infinity && !G.breakWait) {
@@ -1696,7 +1796,8 @@ function handleEvents(events) {
     else if (e === 'view') { G.view = (G.view + 1) % 3; toast(['第一人称', '第三人称（背后）', '第三人称（正面）'][G.view]); }
     else if (e === 'use') { const t = targetAt(), m = mobAt(); if (m && (!t || m.t < t.t)) use(null, m.mob); else use(t); G.useWait = 5; }
     else if (e === 'pick' && G.target) {
-      const id = BLOCKS[G.target.v & 0xFFF].name, name = BLOCKS[G.target.v & 0xFFF].item ? id : null;
+      // (a block standing in water picks the block itself)
+      const tb = BLOCKS[G.target.v & 0xFFF], id = tb.dry || tb.name, name = BLOCKS[ID[id]]?.item ? id : null;
       if (!name) continue;
       const at = G.inv.slots.findIndex(s => s?.id === name);
       if (at >= 0 && at < 9) G.hot = at;
@@ -1724,7 +1825,8 @@ let hudKey = '';
 function drawHud(force = false) {
   if (!G) return;
   const armor = G.inv.armor().points;
-  const key = JSON.stringify([G.inv.slots.slice(0, 9), G.hot, Math.ceil(G.health), Math.ceil(G.absorb || 0), G.food, Math.ceil(G.air / 30), G.mode, input?.mode, armor, G.xp.level, Math.round(G.xp.prog * 182)]);
+  const turning = G.inv.slots.slice(0, 9).some(s => s && itemInfo(s.id)?.dial) ? [dials.compass, dials.clock] : 0;
+  const key = JSON.stringify([turning, G.inv.slots.slice(0, 9), G.hot, Math.ceil(G.health), Math.ceil(G.absorb || 0), G.food, Math.ceil(G.air / 30), G.mode, input?.mode, armor, G.xp.level, Math.round(G.xp.prog * 182)]);
   if (!force && key === hudKey) return;
   hudKey = key;
   const hb = $('.hotbar');
@@ -2095,6 +2197,9 @@ function frame(now) {
   $('.portalfx').style.opacity = G.inPortal ? Math.min(0.8, G.inPortal / 80) : 0;
   // 夜视: everything seen as if lit
   if (G.effects.night_vision) env.bright = Math.max(env.bright || 0, 0.7);
+  // 潮涌能量: under water as if lit; 失明: almost nothing seen
+  if (G.effects.conduit_power && env.underwater) env.bright = Math.max(env.bright || 0, 0.7);
+  $('.blind').style.opacity = G.effects.blindness ? 1 : 0;
   // animated textures
   const tick20 = Math.floor(G.time);
   for (const an of animFrames) { const f = Math.floor(tick20 / an.time) % an.frames.length; if (f !== an.at) { an.at = f; renderer.updateLayer(an.layer, an.frames[f]); } }

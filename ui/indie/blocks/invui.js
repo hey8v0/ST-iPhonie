@@ -22,11 +22,11 @@ export function stackHtml(s, icons) {
   const glint = s.ench || s.id === 'enchanted_book' || info?.glint ? `<i class="glint" style="-webkit-mask-image:url(${src});mask-image:url(${src})"></i>` : '';
   return `<img class="icon" src="${src}" alt="">${glint}${s.n > 1 ? `<span class="n">${s.n}</span>` : ''}${dur}`;
 }
-/** What a stack is, for its tip: the name, its enchantments, armour, uses. */
+/** What a stack is, for its tip: the name (one of its own: a map's), its enchantments, armour, uses. */
 export function stackTip(s) {
   const info = itemInfo(s.id), uses = usesOf(info);
   if (s.pot) return [potionName(s), ...potionLines(s)].join('\n');
-  return [zhOf(s.id), ...Object.entries(s.ench || {}).map(([n, l]) => enchName(n, l)), ...(info?.armor ? [`护甲 +${info.armor.points}`] : []), ...(uses ? [`耐久度 ${uses - (s.dmg || 0)}/${uses}`] : [])].join('\n');
+  return [s.label || zhOf(s.id), ...Object.entries(s.ench || {}).map(([n, l]) => enchName(n, l)), ...(info?.armor ? [`护甲 +${info.armor.points}`] : []), ...(uses ? [`耐久度 ${uses - (s.dmg || 0)}/${uses}`] : [])].join('\n');
 }
 // creative: every enchanted book at its highest level
 const BOOKS = Object.entries(ENCHANTS).map(([n, e]) => ({id: 'enchanted_book', n: 1, ench: {[n]: e.max}}));
@@ -129,7 +129,7 @@ export class InventoryUI {
   }
   items() {
     const k = KINDS.find(x => x[0] === this.tab) || KINDS[0], q = this.query.trim().toLowerCase();
-    const plain = ALL_ITEMS.filter(id => id !== 'enchanted_book' && id !== 'potion' && id !== 'splash_potion' && k[2](id) && (!q || zhOf(id).includes(q) || id.includes(q))).map(id => ({id, n: 1}));
+    const plain = ALL_ITEMS.filter(id => id !== 'enchanted_book' && id !== 'potion' && id !== 'splash_potion' && !itemInfo(id)?.hidden && k[2](id) && (!q || zhOf(id).includes(q) || id.includes(q))).map(id => ({id, n: 1}));
     // enchanted books with the ingredients, potions with food and drink (the game's tabs)
     const books = k[0] === 'all' || k[0] === 'items' ? BOOKS.filter(b => !q || '附魔书'.includes(q) || enchName(...Object.entries(b.ench)[0]).includes(q)) : [];
     const potions = k[0] === 'all' || k[0] === 'food' ? POTION_STACKS.filter(p => !q || potionName(p).includes(q) || p.pot.includes(q)) : [];

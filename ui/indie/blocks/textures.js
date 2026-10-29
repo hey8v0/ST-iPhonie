@@ -1574,6 +1574,56 @@ for (const [k, [a, b]] of Object.entries({squid: ['#223b4d', '#708899'], glow_sq
   return p;
 };
 
+// the sea's treasure: the heart of the sea (a blue orb in a pale shell), iron nuggets, the poisonous potato (green and
+// spotted), suspicious stew (the stew darker), the conduit (a shell cage round a blue eye)
+ITEM_ART.heart_of_the_sea = () => icon([{mask: mask().disc(8, 8.5, 5.8, 5.4), color: '#d8c8a4', light: '#f4ead2', dark: '#9a8a66', outline: '#3a3020'}, {mask: mask().disc(8, 8.5, 4.2, 3.9), color: '#2f6fbe', light: '#8fd8ff', dark: '#173f80', outline: '#0b1c3c'},
+  {mask: mask().disc(7, 7.5, 1.6), color: '#c8f4ff', light: '#ffffff', dark: '#7ac8ee'}], {sparkle: [[6, 6]]});
+ITEM_ART.iron_nugget = () => icon([{mask: mask().disc(7, 9, 3.2, 2.6).disc(10, 7.5, 2.4), color: '#d8d8d8', light: '#ffffff', dark: '#9a9a9a', outline: '#3c3c3c'}], {sparkle: [[6, 8]]});
+ITEM_ART.poisonous_potato = () => { const p = icon([{mask: mask().disc(8, 8.5, 5, 4), color: '#b4b45a', light: '#d6d684', dark: '#74742e', outline: '#2a2a0e', grain: true}]); for (const [x, y] of [[6, 7], [9, 10], [11, 7], [7, 11]]) p.set(x, y, hex('#5e8a2a')); return p; };
+ITEM_ART.suspicious_stew = () => bowlOf('#8a5a34');
+BLOCK_ART.conduit = () => {
+  const p = pic();
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5), plate = (Math.floor(x / 4) + Math.floor(y / 4)) % 2;
+    p.set(x, y, d < 3 ? (d < 1.6 ? hex('#cdf6ff') : hex('#3a8fd0')) : d < 4 ? hex('#1e3f5a') : x % 4 === 0 || y % 4 === 0 ? hex('#5a4f3e') : plate ? hex('#a99a80') : hex('#8f8168'));
+  }
+  return p;
+};
+// the compass: a dark case, a pale face, the needle (its red end) pointing (f − 16) / 32 of a turn clockwise from up —
+// the game's frames, 16 straight up and 0 down
+const compassPic = f => {
+  const p = icon([{mask: mask().disc(8, 8, 6.4), color: '#6c6c6c', light: '#9c9c9c', dark: '#3c3c3c', outline: '#1e1e1e'}, {mask: mask().disc(8, 8, 4.6), color: '#c9c3b6', light: '#e8e2d4', dark: '#9a9486'}]);
+  const a = (f - 16) / 32 * Math.PI * 2, dx = Math.sin(a), dy = -Math.cos(a);
+  for (let t = 3.6; t >= -2.6; t -= 0.4) p.set(Math.floor(8 + dx * t), Math.floor(8 + dy * t), hex(t > 0.4 ? '#d8261e' : '#505050'));
+  p.set(7, 7, hex('#2a2a2a'));
+  return p;
+};
+for (let f = 0; f < 32; f++) ITEM_ART[`compass_${String(f).padStart(2, '0')}`] = () => compassPic(f);
+// the clock: a gold rim; in the top half the sky's dial turning (day with the sun, night with the moon), the ground
+// below — frame f / 64 of a day from noon (the game's frames, 0 at noon)
+const clockPic = f => {
+  const p = icon([{mask: mask().disc(8, 8, 6.4), color: '#e8c33a', light: '#fff1a0', dark: '#a8801a', outline: '#4a3608'}]), a = f / 64 * Math.PI * 2;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const vx = x + 0.5 - 8, vy = y + 0.5 - 8;
+    if (vx * vx + vy * vy > 4.7 * 4.7) continue;
+    if (vy > 0.5) { p.set(x, y, hex(vy > 3 ? '#4a3018' : '#6a4a26')); continue; }
+    // the dial turned back by the time: its upper half is day, the lower night
+    const u = vx * Math.cos(a) + vy * Math.sin(a), w = -vx * Math.sin(a) + vy * Math.cos(a);
+    const sun = Math.hypot(u, w + 3) < 1.5, moon = Math.hypot(u, w - 3) < 1.3;
+    p.set(x, y, hex(sun ? '#ffe14a' : moon ? '#e8e8f0' : w < 0 ? '#5aa8ff' : '#18205a'));
+  }
+  return p;
+};
+for (let f = 0; f < 64; f++) ITEM_ART[`clock_${String(f).padStart(2, '0')}`] = () => clockPic(f);
+// maps: the paper (empty), and drawn on (land and water)
+const PAPER = {color: '#e6d6a8', light: '#f6ecd0', dark: '#bca878', outline: '#5a4426', grain: true};
+ITEM_ART.map = () => icon([{mask: mask().poly([[2, 2.5], [14, 2], [14, 14], [2, 13.5]]), ...PAPER}]);
+ITEM_ART.filled_map = () => {
+  const p = icon([{mask: mask().poly([[2, 2.5], [14, 2], [14, 14], [2, 13.5]]), ...PAPER}]);
+  for (let y = 4; y < 12; y++) for (let x = 4; x < 12; x++) { const n = hash(77, x >> 1, y >> 1); p.set(x, y, hex(n < 0.35 ? '#6f8fc8' : n < 0.75 ? '#7aa04e' : '#a8884e')); }
+  return p;
+};
+
 /** Frames per animated texture and ticks per frame. */
 export const ANIMATED = {water_still: {frames: 16, time: 2}, water_flow: {frames: 16, time: 1}, lava_still: {frames: 16, time: 4}, lava_flow: {frames: 16, time: 2}, magma: {frames: 3, time: 8}, nether_portal: {frames: 16, time: 1}};
 /** Our drawing of a texture by name: {w, h, frames: [Uint8ClampedArray], time} or null when we have none. */

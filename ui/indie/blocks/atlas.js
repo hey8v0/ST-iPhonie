@@ -100,6 +100,11 @@ export function makeIcons(built) {
     }
     out[name] = c.toDataURL();
   }
+  // the compass's and the clock's frames (the one shown follows dials)
+  for (const [id, n] of [['compass', 32], ['clock', 64]]) for (let f = 0; f < n; f++) {
+    const name = `${id}_${String(f).padStart(2, '0')}`, c = document.createElement('canvas'), g = c.getContext('2d');
+    c.width = c.height = N; g.imageSmoothingEnabled = false; g.drawImage(face(name, null), 0, 0, N, N); out[name] = c.toDataURL();
+  }
   // potions: the bottle over its liquid in the potion's colour, a picture for each kind ('potion:swiftness' …)
   for (const id of ['potion', 'splash_potion']) for (const pot of Object.keys(POTIONS)) {
     const c = document.createElement('canvas'), g = c.getContext('2d');
@@ -109,8 +114,12 @@ export function makeIcons(built) {
   }
   return out;
 }
-/** The picture of a stack: a potion's by its kind. */
-export const iconKey = s => s.pot ? `${s.id}:${s.pot}` : s.id;
+/** Where the compass's needle and the clock's dial are now (frames; the page sets them each tick). */
+export const dials = {compass: 16, clock: 0};
+/** A dial's frame picture for an item that has one (the compass, the clock), else null. */
+export const dialName = id => id === 'compass' ? `compass_${String(dials.compass).padStart(2, '0')}` : id === 'clock' ? `clock_${String(dials.clock).padStart(2, '0')}` : null;
+/** The picture of a stack: a potion's by its kind, a compass's or a clock's as it points now. */
+export const iconKey = s => s.pot ? `${s.id}:${s.pot}` : dialName(s.id) || s.id;
 
 // how a shaped block shows in the inventory: its state, and what joins it (a fence or a wall joined left and right);
 // panes, bars, the brewing stand and the bell are flat pictures, as in the game

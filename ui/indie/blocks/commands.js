@@ -25,7 +25,8 @@ const byZh = (list, zhOf) => { const m = new Map(); for (const k of list) m.set(
 let ITEM_ZH = null, MOB_ZH = null, EFFECT_ZH = null, BLOCK_ZH = null;
 const itemId = s => { s = s.replace(/^minecraft:/, ''); if (itemInfo(s)) return s; ITEM_ZH ||= byZh(ALL_ITEMS, k => itemInfo(k)?.zh || k); return ITEM_ZH.get(s) || null; };
 const mobId = s => { s = s.replace(/^minecraft:/, ''); if (MOBS[s]) return s; MOB_ZH ||= byZh(Object.keys(MOBS), k => MOBS[k].zh); return MOB_ZH.get(s) || null; };
-const blockId = s => { s = s.replace(/^minecraft:/, ''); if (BY_NAME[s]) return s; BLOCK_ZH ||= byZh(BLOCKS.map(b => b.name), k => BY_NAME[k].zh); return BLOCK_ZH.get(s) || null; };
+// (by its Chinese name, a block itself, not its copy standing in water)
+const blockId = s => { s = s.replace(/^minecraft:/, ''); if (BY_NAME[s]) return s; BLOCK_ZH ||= byZh(BLOCKS.filter(b => !b.dry).map(b => b.name), k => BY_NAME[k].zh); return BLOCK_ZH.get(s) || null; };
 const effectId = s => { s = s.replace(/^minecraft:/, ''); if (EFFECTS[s]) return s; EFFECT_ZH ||= byZh(Object.keys(EFFECTS), k => EFFECTS[k].zh); return EFFECT_ZH.get(s) || null; };
 const pick = (s, table) => { s = (s || '').toLowerCase(); if (table[s] != null) return s; return Object.keys(table).find(k => table[k] === s || (typeof table[k] === 'string' && table[k].startsWith(s) && s.length >= 2)) || null; };
 const num = s => /^-?\d+(\.\d+)?$/.test(s || '') ? Number(s) : null;

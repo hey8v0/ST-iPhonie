@@ -6,6 +6,7 @@ import {generateColumn, newColumn, BIOMES, growTree, worldOf} from './gen.js';
 import {generateNether} from './nether.js';
 import {portalHolds, portalSpot, buildPortal} from './portal.js';
 import {villagersIn} from './village.js';
+import {lootIn} from './ocean.js';
 import {monumentsNear} from './monument.js';
 import {lodTile, lodPlan} from './lod.js';
 import {BLOCKS, ID, MINY, HEIGHT, SECTIONS, SEA, withMeta, dropsOf, itemInfo} from './blocks.js';
@@ -890,7 +891,11 @@ export class World {
       if (this.cols.has(k)) continue;
       this.addColumn(c);
       if (stored) this.redstone.scan(c);
-      if (fresh && !this.nether) { const herd = this.herdFor(c); if (herd.length) this.post({type: 'herd', cx, cz, list: herd}); }
+      if (fresh && !this.nether) {
+        const herd = this.herdFor(c); if (herd.length) this.post({type: 'herd', cx, cz, list: herd});
+        // the chests of the sea's ruins and wrecks and buried treasure made here: their loot tables
+        const loot = lootIn(this.seed, c); if (loot.length) this.post({type: 'loot', list: loot});
+      }
     }
     // 2. meshes: changed sections of columns whose neighbours are all here, nearest first
     if (this.dirty.size) {

@@ -19,6 +19,13 @@ export const EFFECTS = {
   resistance: {zh: '抗性提升', color: 0x99453A, good: true},
   // the elder guardian's curse: digging slower (the game's 0.3, 0.09, 0.0027, 0.00081 a level)
   mining_fatigue: {zh: '挖掘疲劳', color: 0x4A4217, good: false},
+  // the conduit's: breathing under water, seeing there as by day, digging a fifth faster (the game's 急迫 I)
+  conduit_power: {zh: '潮涌能量', color: 0x1DC2D1, good: true},
+  // a suspicious stew's: food at once, jumping higher, seeing almost nothing, withering (it can kill)
+  saturation: {zh: '饱和', color: 0xF82423, good: true},
+  jump_boost: {zh: '跳跃提升', color: 0xFDFF84, good: true},
+  blindness: {zh: '失明', color: 0x1F1F23, good: false},
+  wither: {zh: '凋零', color: 0x736156, good: false},
   instant_health: {zh: '瞬间治疗', color: 0xF82423, good: true, instant: true},
   instant_damage: {zh: '瞬间伤害', color: 0xA9656A, good: false, instant: true},
 };
@@ -98,14 +105,18 @@ export function applyPotion(effects, pot, {share = 1, heal = () => {}, harm = ()
 }
 /**
  * One tick of the effects: counts them down and does what they do over time. heal(n), harm(n, kind) act on the
- * body; health() is how much it has (poison never takes the last half heart). Returns the effects that ran out.
+ * body, feed(n) on its hunger; health() is how much it has (poison never takes the last half heart, wither does).
+ * Returns the effects that ran out.
  */
-export function effectsTick(effects, {heal = () => {}, harm = () => {}, health = () => 20} = {}) {
+export function effectsTick(effects, {heal = () => {}, harm = () => {}, feed = () => {}, health = () => 20} = {}) {
   const gone = [];
   for (const [id, e] of Object.entries(effects)) {
     // regeneration: half a heart every 50 ticks at I (25 at II…); poison: every 25 (12 at II)
     if (id === 'regeneration') { const every = Math.max(1, 50 >> e.amp); if (e.t % every === 0) heal(1); }
     if (id === 'poison') { const every = Math.max(1, 25 >> e.amp); if (e.t % every === 0 && health() > 1) harm(1, 'poison'); }
+    // wither: half a heart every 40 ticks at I (20 at II…); saturation: a point of food (and two of saturation) a tick a level
+    if (id === 'wither') { const every = Math.max(1, 40 >> e.amp); if (e.t % every === 0) harm(1, 'wither'); }
+    if (id === 'saturation') feed(e.amp + 1);
     if (--e.t <= 0) { delete effects[id]; gone.push(id); }
   }
   return gone;

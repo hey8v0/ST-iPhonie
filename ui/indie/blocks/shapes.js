@@ -139,6 +139,8 @@ export function pieces(v, near = () => 0) {
       return [{box: [1, 0, 1, 15, 14, 15], role: 'main'}, {box: latch, role: 'latch'}];
     }
     case 'enchanting': return [{box: [0, 0, 0, 16, 12, 16], role: 'main'}];
+    // the conduit: six across in the middle of its place
+    case 'conduit': return [{box: [5, 5, 5, 11, 11, 11], role: 'main'}];
     // the brewing stand: the rod, three arms holding the bottles' places, and the three-footed stone base
     case 'brewing': return [{box: [7, 0, 7, 9, 14, 9], role: 'main'}, {box: [9, 11, 7.5, 14, 12, 8.5], role: 'main'}, {box: [3, 11, 3, 7, 12, 4], role: 'main'}, {box: [3, 11, 12, 7, 12, 13], role: 'main'},
       {box: [9, 0, 5, 15, 2, 11], role: 'base'}, {box: [2, 0, 1, 8, 2, 7], role: 'base'}, {box: [2, 0, 9, 8, 2, 15], role: 'base'}];
@@ -209,7 +211,7 @@ export function collisionBoxes(v, near = () => 0) {
     case 'stonewall': return toBlock(pieces(v, near)).map(q => [q[0], 0, q[2], q[3], 1.5, q[5]]);
     case 'carpet': return [[0, 0, 0, 1, px(1), 1]];
     case 'gate': return meta & 4 ? null : (meta & 3) % 2 === 0 ? [[0, 0, px(6), 1, 1.5, px(10)]] : [[px(6), 0, 0, px(10), 1.5, 1]];
-    case 'pane': case 'stairs': case 'door': case 'trapdoor': case 'chest': case 'anvil': return toBlock(pieces(v, near));
+    case 'pane': case 'stairs': case 'door': case 'trapdoor': case 'chest': case 'anvil': case 'conduit': return toBlock(pieces(v, near));
     case 'bed': return [[0, 0, 0, 1, px(9), 1]];
     case 'enchanting': return [[0, 0, 0, 1, px(12), 1]];
     case 'brewing': return [[px(7), 0, px(7), px(9), px(14), px(9)], [px(2), 0, px(1), px(15), px(2), px(15)]];
@@ -267,7 +269,7 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'rail': return [[0, 0, 0, 1, px(railSlope(BLOCKS[id].rail === 'rail' ? meta : meta & 7) ? 8 : 2), 1]];
     case 'lever': { const [x0, y0, z0, x1, y1, z1] = LEVER_BASE[meta & 7], a = meta & 7; return [(a < 2 ? [4, 0, 4, 12, 7, 12] : a < 4 ? [4, 9, 4, 12, 16, 12] : [Math.min(x0, 16 - x1 === 0 ? 10 : x0), 3, Math.min(z0, 16 - z1 === 0 ? 10 : z0), Math.max(x1, x0 === 0 ? 6 : x1), 13, Math.max(z1, z0 === 0 ? 6 : z1)]).map(px)]; }
     case 'button': case 'plate': case 'repeater': case 'comparator': case 'piston': case 'piston_head': case 'hopper': case 'detector': return inBlock(pieces(v, near));
-    case 'stairs': case 'fence': case 'gate': case 'pane': case 'door': case 'trapdoor': case 'chest': case 'anvil': case 'stonewall': case 'carpet': return toBlock(pieces(v, near));
+    case 'stairs': case 'fence': case 'gate': case 'pane': case 'door': case 'trapdoor': case 'chest': case 'anvil': case 'stonewall': case 'carpet': case 'conduit': return toBlock(pieces(v, near));
     default: return FULL;
   }
 }

@@ -32,6 +32,9 @@ export class Mirror {
     const l = s ? s[((y - MINY) & 15) << 8 | (z & 15) << 4 | (x & 15)] : si > c.topSec || y > (c.height?.[(z & 15) * 16 + (x & 15)] ?? Infinity) ? 0xF0 : 0;
     return [l >> 4, l & 15];
   }
+  /** Where to look down from for the top block of a place (the column's height when made, a little over it), or
+   *  null where nothing is loaded. */
+  top(x, z) { const c = this.cols.get(key(x >> 4, z >> 4)); return c?.height ? c.height[(z & 15) * 16 + (x & 15)] + 4 : null; }
   biome(x, z) { const c = this.cols.get(key(x >> 4, z >> 4)); return c ? c.biome[(z & 15) * 16 + (x & 15)] : 0; }
   write(x, y, z, v) {
     const c = this.cols.get(key(x >> 4, z >> 4));

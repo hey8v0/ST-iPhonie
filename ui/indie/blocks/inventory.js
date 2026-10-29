@@ -1,10 +1,11 @@
 // What the player carries and makes: stacks, the inventory (36 slots, the first 9 the hotbar), crafting (2×2 in the
 // inventory, 3×3 at a crafting table; shaped recipes may be mirrored), the furnace (smelting and fuel) and chests.
 // Recipes are the game's.
+import {STEWS} from './loot.js';
 import {itemInfo, BLOCKS, ITEMS, COLORS, ID, BOAT_WOODS, boatItem} from './blocks.js';
 
 export const stackMax = id => itemInfo(id)?.stack || 64;
-export const same = (a, b) => a && b && a.id === b.id && !a.dmg && !b.dmg && !a.ench && !b.ench && a.pot === b.pot;
+export const same = (a, b) => a && b && a.id === b.id && !a.dmg && !b.dmg && !a.ench && !b.ench && a.pot === b.pot && a.stew === b.stew && a.map === b.map;
 export const copy = s => s ? {...s} : null;
 
 /** The carried slots (the first 9 the hotbar); after them the four worn ones, head to feet. */
@@ -52,13 +53,15 @@ const TAGS = {
   wooden_slabs: ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak', 'cherry', 'mangrove', 'bamboo', 'bamboo_mosaic'].map(w => `${w}_slab`),
   stone_tool: ['cobblestone', 'cobbled_deepslate'],
   coals: ['coal', 'charcoal'],
+  stew_flowers: Object.keys(STEWS),
   wool: COLORS.map(c => `${c[0]}_wool`),
 };
 const matches = (key, id) => key.startsWith('#') ? TAGS[key.slice(1)]?.includes(id) : key === id;
 const R = [];
 /** A shaped recipe: rows of letters, a key letter → id or #tag, and what it makes. */
 const shaped = (rows, keys, id, n = 1) => R.push({rows, keys, out: {id, n}});
-const shapeless = (ins, id, n = 1) => R.push({ins, out: {id, n}});
+// then(out, ids): what the result carries from what went in (a stew's flower)
+const shapeless = (ins, id, n = 1, then = null) => R.push({ins, out: {id, n}, then});
 for (const w of ['oak', 'birch', 'spruce', 'jungle', 'acacia', 'dark_oak']) shapeless([`${w}_log`], `${w}_planks`, 4);
 shaped(['#', '#'], {'#': '#planks'}, 'stick', 4);
 shaped(['##', '##'], {'#': '#planks'}, 'crafting_table');
@@ -285,6 +288,13 @@ for (const [mat, base] of [['prismarine', 'prismarine'], ['prismarine_bricks', '
 shaped(['###', '###'], {'#': 'prismarine'}, 'prismarine_wall', 6);
 shaped(['###', '###', '###'], {'#': 'dried_kelp'}, 'dried_kelp_block'); shapeless(['dried_kelp_block'], 'dried_kelp', 9);
 shaped(['###', '# #'], {'#': 'turtle_scute'}, 'turtle_helmet');
+// the sea's treasure and the finders
+shaped(['###', '#H#', '###'], {'#': 'nautilus_shell', H: 'heart_of_the_sea'}, 'conduit');
+shaped(['###', '###', '###'], {'#': 'iron_nugget'}, 'iron_ingot'); shapeless(['iron_ingot'], 'iron_nugget', 9);
+shaped([' # ', '#R#', ' # '], {'#': 'iron_ingot', R: 'redstone'}, 'compass');
+shaped([' # ', '#R#', ' # '], {'#': 'gold_ingot', R: 'redstone'}, 'clock');
+shaped(['###', '#C#', '###'], {'#': 'paper', C: 'compass'}, 'map');
+shapeless(['red_mushroom', 'brown_mushroom', 'bowl', '#stew_flowers'], 'suspicious_stew', 1, (out, ids) => ({...out, stew: ids.find(id => STEWS[id])}));
 export const RECIPES = R;
 
 /** What a crafting grid (w × h stacks, row by row) makes: {out, recipe} or null. */
@@ -301,7 +311,7 @@ export function craft(grid, w) {
     if (r.ins) {
       if (r.ins.length !== filled.length) continue;
       const left = [...filled];
-      if (r.ins.every(k => { const i = left.findIndex(id => matches(k, id)); if (i < 0) return false; left.splice(i, 1); return true; })) return {out: {...r.out}, recipe: r};
+      if (r.ins.every(k => { const i = left.findIndex(id => matches(k, id)); if (i < 0) return false; left.splice(i, 1); return true; })) return {out: r.then ? r.then({...r.out}, filled) : {...r.out}, recipe: r};
       continue;
     }
     const rh = r.rows.length, rw = Math.max(...r.rows.map(s => s.length));
@@ -334,6 +344,9 @@ const SMELT = {
   ...Object.fromEntries(COLORS.map(([c]) => [`${c}_terracotta`, `${c}_glazed_terracotta`])),
 };
 for (const l of TAGS.logs) SMELT[l] = 'charcoal';
+// iron and gold tools, weapons and armour melt down to a nugget
+for (const [mat, nugget] of [['iron', 'iron_nugget'], ['golden', 'gold_nugget']]) for (const k of ['pickaxe', 'axe', 'shovel', 'hoe', 'sword', 'helmet', 'chestplate', 'leggings', 'boots']) SMELT[`${mat}_${k}`] = nugget;
+for (const k of ['helmet', 'chestplate', 'leggings', 'boots']) SMELT[`chainmail_${k}`] = 'iron_nugget';
 export const smeltOf = id => SMELT[id] || null;
 // experience for each thing smelted, given when the result is taken out (the game's numbers)
 const SMELT_XP = {iron_ingot: 0.7, copper_ingot: 0.7, gold_ingot: 1, diamond: 1, emerald: 1, lapis_lazuli: 0.2, redstone: 0.3, coal: 0.1, charcoal: 0.15,

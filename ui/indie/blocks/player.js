@@ -161,7 +161,8 @@ export class Body {
     // auto-jump (touch), as the game does it: a step ahead taller than a slab and up to 1.2 high, jumped before reaching it
     const hop = !input.jump && input.autoJump && this.onGround && !this.jumpWait && !this.sneaking && !this.climbing && this.stepAhead(fwd, side, sinY, cosY);
     if ((input.jump || hop) && this.onGround && !this.jumpWait) {
-      this.vy = 0.42; this.jumpWait = 10;
+      // 跳跃提升: a tenth of a block a second more a level
+      this.vy = 0.42 + 0.1 * (this.jumpBoost || 0); this.jumpWait = 10;
       if (this.sprinting) { this.vx += -sinY * 0.2; this.vz += -cosY * 0.2; }
       result.jumped = true;
     }
