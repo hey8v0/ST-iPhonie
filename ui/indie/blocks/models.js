@@ -198,7 +198,15 @@ MODELS.enderman_eyes = {skin: [64, 32], size: [0.6, 2.9], parts: enderParts(0.02
 export const SIGN_MODELS = {
   sign: {skin: [64, 32], size: [1, 1], parts: [part('board', [0, 0], [[-12, -14, -1, 24, 12, 2]]), part('post', [0, 14], [[-1, -2, -1, 2, 14, 2]])]},
   wall_sign: {skin: [64, 32], size: [1, 1], parts: [part('board', [0, 0], [[-12, -14, -1, 24, 12, 2]])]},
+  // hanging signs (the game's): the board 14×10×2 at full size; two pairs of crossed chain links over it, or (under
+  // something less than a full block) one V of chain; on a wall, the bar it hangs from
+  hanging_sign: {skin: [64, 32], size: [1, 1], parts: [part('board', [0, 12], [[-7, 0, -1, 14, 10, 2]]), ...hangChains()]},
+  hanging_sign_v: {skin: [64, 32], size: [1, 1], parts: [part('board', [0, 12], [[-7, 0, -1, 14, 10, 2]]), part('v_chains', [14, 6], [[-6, -6, 0, 12, 6, 0]])]},
+  wall_hanging_sign: {skin: [64, 32], size: [1, 1], parts: [part('board', [0, 12], [[-7, 0, -1, 14, 10, 2]]), part('plank', [0, 0], [[-8, -6, -2, 16, 2, 4]]), ...hangChains()]},
 };
+function hangChains() {
+  return [[-5, 0, 'l1', -PI / 4], [-5, 6, 'l2', PI / 4], [5, 0, 'r1', -PI / 4], [5, 6, 'r2', PI / 4]].map(([x, u, n, turn]) => part(`chain_${n}`, [u, 6], [[-1.5, 0, 0, 3, 6, 0]], [x, -6, 0], [0, turn, 0]));
+}
 // the polar bear (128×64, the game's): a head with its muzzle and ears, a long body with the hump at its shoulders
 // lying along it, four thick legs; it rears up on its hind legs to strike
 MODELS.polar_bear = {skin: [128, 64], size: [1.4, 1.4], parts: [
@@ -485,6 +493,21 @@ export function handFrame(kind, rot, {x, y, z, yaw, s = 1, roll = 0}, arm, point
 // a sign's wood, as its planks are: [the board's, the post's (darker)]
 const SIGN_COLORS = {oak: ['#b8945f', '#6e5236'], spruce: ['#82603a', '#4a3520'], birch: ['#d7c185', '#9a8456'], jungle: ['#b88764', '#6a4a30'], acacia: ['#ba6337', '#6a3a22'],
   dark_oak: ['#4f3218', '#2c1d0e'], mangrove: ['#773934', '#45201c'], cherry: ['#e2b2a8', '#8c5a52'], bamboo: ['#d6c25a', '#8a7a2e']};
+// a stripped log's colour, for hanging signs
+const STRIPPED = {oak: '#b49156', spruce: '#7c5c37', birch: '#c8b67e', jungle: '#b18559', acacia: '#ae5c3b', dark_oak: '#5f4429', mangrove: '#783a35', cherry: '#d79b9b', bamboo: '#d7c35c'};
+/** Ours: a hanging sign of a wood: the board and bar in its stripped log's colour, the board's edge darker, the chains
+ *  grey links (clear between them). */
+export function ownHangingSign(wood) {
+  const c = STRIPPED[wood] || STRIPPED.oak;
+  return skin(64, 32, 151 + Object.keys(STRIPPED).indexOf(wood), ({area, box, px, hex}) => {
+    const shades = k => [shadeHex(c, k), shadeHex(c, k * 0.94), shadeHex(c, k * 1.05)];
+    box(0, 12, 14, 10, 2, shades(1)); box(0, 0, 16, 2, 4, shades(0.8));
+    for (const [fx, fy] of [[2, 14], [18, 14]]) { const edge = [shadeHex(c, 0.62)]; area(fx, fy, 14, 1, edge, 0.1); area(fx, fy + 9, 14, 1, edge, 0.1); area(fx, fy, 1, 10, edge, 0.1); area(fx + 13, fy, 1, 10, edge, 0.1); }
+    const link = [hex('#5d6266'), hex('#3c4044')];
+    for (const u of [0, 6]) for (let y = 0; y < 6; y++) { px(u + 1, 6 + y, link[y % 2]); if (y % 2) { px(u, 6 + y, link[1]); px(u + 2, 6 + y, link[1]); } }
+    for (let k = 0; k < 6; k++) for (const j of [0, 1]) { px(14 + k + j, 11 - k, link[(k + j) % 2]); px(25 - k - j, 11 - k, link[(k + j) % 2]); }
+  });
+}
 /** Ours: a sign of a wood: the board's faces in plank colour, its edge darker, a seam across it; the post darker. */
 export function ownSign(wood) {
   const [wd, post] = SIGN_COLORS[wood] || SIGN_COLORS.oak;
@@ -846,7 +869,8 @@ export function ownWind(vertical) {
 // a villager's clothes by trade: the robe, its trim, and something of the trade (ours)
 const VILLAGER_CLOTHES = {none: ['#6e4b30', '#5a3c26'], nitwit: ['#3a8a3a', '#2a6a2a'], farmer: ['#8a6a2a', '#d8c060', 'hat'], fisherman: ['#3a6a8a', '#d8c060', 'hat'],
   shepherd: ['#8a5a3a', '#f0f0f0'], fletcher: ['#6a7a3a', '#e8e8e8', 'feather'], librarian: ['#e8e4d8', '#a82a2a'], cleric: ['#7a2a8a', '#e8c040'],
-  armorer: ['#3a3a3a', '#8a8a8a', 'apron'], toolsmith: ['#4a4a5a', '#8a6a3a', 'apron'], butcher: ['#e8e8e8', '#b83a3a', 'apron']};
+  armorer: ['#3a3a3a', '#8a8a8a', 'apron'], toolsmith: ['#4a4a5a', '#8a6a3a', 'apron'], butcher: ['#e8e8e8', '#b83a3a', 'apron'],
+  cartographer: ['#e6dec4', '#6a4a2a', 'monocle']};
 /** Our villager skin for a trade ('none': no work yet), in the game's 64×64 villager layout. */
 export function ownVillager(prof) {
   const [robe, trim, mark] = VILLAGER_CLOTHES[prof] || VILLAGER_CLOTHES.none;
@@ -861,6 +885,8 @@ export function ownVillager(prof) {
     if (mark === 'hat') area(0, 0, 32, 8, [trim, trim, '#c0a848']);
     if (mark === 'apron') { const [bx, by] = front(0, 38, 8, 6); area(bx + 1, by + 2, 6, 16, [trim]); }
     if (mark === 'feather') { area(8, 0, 2, 8, [trim]); px(9, 0, hex('#ffffff')); }
+    // (a cartographer's monocle: gold round the right eye)
+    if (mark === 'monocle') for (const [dx, dy] of [[5, 4], [6, 4], [4, 5], [7, 5], [5, 6], [6, 6]]) px(fx + dx, fy + dy, hex('#d8b030'));
   });
 }
 export const VILLAGER_SKINS = Object.keys(VILLAGER_CLOTHES);

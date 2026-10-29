@@ -27,6 +27,9 @@ onmessage = async e => {
     else if (m.type === 'day') { world.dayDark = m.dark; world.snowing = !!m.snow; world.fireTick = m.fire !== false; world.redstone.dark = m.dark; if (m.daylight != null) world.redstone.daylight = m.daylight; }
     // how full a container is (the page keeps them), for comparators
     else if (m.type === 'fill') world.redstone.fill(m.x, m.y, m.z, m.level);
+    // whether something is on a string; how many have a trapped chest open (the page sees both)
+    else if (m.type === 'trip') world.trip(m.x, m.y, m.z, !!m.on);
+    else if (m.type === 'trapped') world.redstone.open(m.x, m.y, m.z, m.n);
     else if (m.type === 'explode') { const r = world.explode(m.x, m.y, m.z, m.power, !!m.fire); post({type: 'exploded', id: m.id, ...r}); }
     else if (m.type === 'meal') post({type: 'meal', x: m.x, y: m.y, z: m.z, took: world.meal(m.x, m.y, m.z)});
     else if (m.type === 'flush') { await world.flush(); post({type: 'flushed', id: m.id}); }

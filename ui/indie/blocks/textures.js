@@ -361,8 +361,9 @@ function furnace(face, on) {
   return p;
 }
 // a chest's face; seam: the side (l, r, t, b) where a large chest's other half meets it — no border there, the band
-// running on, and no latch on the front (a large chest's is in the middle, where the halves meet)
-function chest(face, seam = '') {
+// running on, and no latch on the front (a large chest's is in the middle, where the halves meet); a trapped chest's latch
+// is in red
+function chest(face, seam = '', trapped = false) {
   const p = planks(nameSeed('chest'), '#a2733d'), dark = hex('#3f2a14'), band = hex('#6b4a25');
   for (let i = 0; i < S; i++) {
     if (seam !== 't') p.set(i, 0, dark);
@@ -371,7 +372,7 @@ function chest(face, seam = '') {
     if (seam !== 'r') p.set(15, i, dark);
   }
   if (face !== 'top') { for (let x = seam === 'l' ? 0 : 1; x < (seam === 'r' ? 16 : 15); x++) { p.set(x, 5, dark); p.set(x, 6, band); } }
-  if (face === 'front' && !seam) { p.rect(7, 4, 8, 8, hex('#c9c9c9')); p.set(7, 8, hex('#777777')); p.set(8, 8, hex('#777777')); }
+  if (face === 'front' && !seam) { if (trapped) p.rect(6, 3, 9, 9, hex('#a32a1e')); p.rect(7, 4, 8, 8, hex('#c9c9c9')); p.set(7, 8, hex('#777777')); p.set(8, 8, hex('#777777')); }
   return p;
 }
 function tnt(face) {
@@ -513,6 +514,7 @@ const BLOCK_ART = {
   furnace_top: () => furnace('top'), furnace_side: () => furnace('side'), furnace_front: () => furnace('front', false), furnace_front_on: () => furnace('front', true),
   chest_top: () => chest('top'), chest_side: () => chest('side'), chest_front: () => chest('front'),
   ...Object.fromEntries(['top', 'side', 'front'].flatMap(face => ['l', 'r', 't', 'b'].map(s => [`chest_${face}_${s}`, () => chest(face, s)]))),
+  ...Object.fromEntries(['top', 'side', 'front'].flatMap(face => ['', '_l', '_r', '_t', '_b'].map(s => [`trapped_chest_${face}${s}`, () => chest(face, s.slice(1), true)]))),
   torch: () => torch(), lantern: () => lantern(), ladder: () => ladder(), glass: () => glass(), bricks: () => bricks(151), stone_bricks: () => stoneBricks(153), bookshelf: () => bookshelf(),
   glowstone: () => lumps(161, ['#8a6a2c', '#b98f3f', '#d9b25a', '#f2d27a', '#ffe7a6'], {count: 11, seam: '#6b4f22', edge: 0.2}),
   smooth_stone: () => { const p = mottled(171, ['#9a9a9a', '#a1a1a1', '#a8a8a8'], {cells: 4, grain: 0.2}); for (let i = 0; i < S; i++) { p.set(i, 0, hex('#c2c2c2')); p.set(0, i, hex('#c2c2c2')); p.set(i, 15, hex('#6f6f6f')); p.set(15, i, hex('#6f6f6f')); } return p; },
@@ -1622,6 +1624,18 @@ for (const [w, [c, post]] of Object.entries(SIGN_ICON)) ITEM_ART[`${w}_sign`] = 
   for (const y of [5, 7]) for (let x = 4; x <= 11; x++) if ((x + y) % 4) p.set(x, y, dark);
   return p;
 };
+// a chain: two strips of links, three wide, down the picture (the game's layout); as an item, a short chain aslant
+BLOCK_ART.chain = () => { const p = pic(), dark = hex('#2f3336'), mid = hex('#4a4f53'), light = hex('#6c7276'); for (const u of [0, 3]) for (let y = 0; y < 16; y++) { const ring = (y + u) % 4 < 2; if (ring) { p.set(u, y, dark); p.set(u + 2, y, dark); } else p.set(u + 1, y, y % 2 ? light : mid); } return p; };
+ITEM_ART.chain_item = () => { const p = pic(), dark = hex('#2f3336'), light = hex('#6c7276'); for (let k = 0; k < 6; k++) { const x = 3 + k * 2, y = 12 - k * 2; p.rect(x, y, x + 1, y + 1, k % 2 ? light : dark); if (!(k % 2)) { p.set(x + 2, y, dark); p.set(x, y - 1, dark); } } return p; };
+// a hanging sign as an item: a board on two chains
+const HANG_ICON = {oak: '#b49156', spruce: '#7c5c37', birch: '#c8b67e', jungle: '#b18559', acacia: '#ae5c3b', dark_oak: '#5f4429', mangrove: '#783a35', cherry: '#d79b9b', bamboo: '#d7c35c'};
+for (const [w, c] of Object.entries(HANG_ICON)) ITEM_ART[`${w}_hanging_sign`] = () => {
+  const p = pic(), wood = hex(c), edge = hex('#3a2a18'), link = hex('#4a4f53');
+  for (let y = 1; y < 6; y++) { p.set(4, y, link); p.set(11, y, link); }
+  p.rect(1, 6, 14, 14, edge); p.rect(2, 7, 13, 13, wood);
+  for (const y of [9, 11]) for (let x = 4; x <= 11; x++) if ((x + y) % 4) p.set(x, y, edge);
+  return p;
+};
 ITEM_ART.campfire = () => campIcon(false);
 ITEM_ART.soul_campfire = () => campIcon(true);
 // frosted ice: ice with white cracks, more of them at each age as it melts
@@ -1709,6 +1723,43 @@ ITEM_ART.map = () => icon([{mask: mask().poly([[2, 2.5], [14, 2], [14, 14], [2, 
 ITEM_ART.filled_map = () => {
   const p = icon([{mask: mask().poly([[2, 2.5], [14, 2], [14, 14], [2, 13.5]]), ...PAPER}]);
   for (let y = 4; y < 12; y++) for (let x = 4; x < 12; x++) { const n = hash(77, x >> 1, y >> 1); p.set(x, y, hex(n < 0.35 ? '#6f8fc8' : n < 0.75 ? '#7aa04e' : '#a8884e')); }
+  return p;
+};
+
+// ---------- after 0.8.84: tripwire, the trapped chest's latch, the cartography table ----------
+// string as the game lays its picture out: along the top two rows (the rest clear)
+BLOCK_ART.tripwire = () => { const p = pic(); for (let x = 0; x < S; x++) { p.set(x, 0, hex(x % 3 ? '#e4e4e4' : '#bcbcbc')); p.set(x, 1, hex(x % 3 === 1 ? '#c9c9c9' : '#9c9c9c')); } return p; };
+// a tripwire hook (its item's picture too): the iron ring on top, the wooden stick down from it
+BLOCK_ART.tripwire_hook = () => {
+  const p = pic(), light = hex('#d6d6d6'), mid = hex('#a0a0a0'), dark = hex('#5e5e5e'), wood = hex('#9a7040'), shade = hex('#634626');
+  for (let i = 5; i <= 10; i++) { p.set(i, 2, i < 8 ? light : mid); p.set(i, 7, dark); p.set(5, i - 3, i < 8 ? light : mid); p.set(10, i - 3, dark); }
+  for (let y = 8; y < S; y++) { p.set(7, y, wood); p.set(8, y, shade); }
+  return p;
+};
+// the trapped chest's latch: grey in red (where the latch's front shows: columns 7–8 on a chest, 0 and 15 on a large
+// chest's two halves; rows 5–8)
+BLOCK_ART.trapped_chest_latch = () => { const p = pic().fill(hex('#a32a1e')); for (const x of [0, 7, 8, 15]) p.rect(x, 6, x, 7, hex('#c9c9c9')); p.set(7, 7, hex('#8a8a8a')); p.set(15, 7, hex('#8a8a8a')); for (let i = 0; i < S; i++) p.set(i, 0, hex('#c4463a')); return p; };
+// the cartography table: dark oak, a map laid on top; on its sides a map pinned up, rolled maps on a shelf, a ruler and
+// a compass
+const cartoPaper = (p, x0, y0, x1, y1, seed) => {
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const n = hash(seed, x >> 1, y >> 1); p.set(x, y, hex(n < 0.28 ? '#7d9fc9' : n < 0.52 ? '#8aa85c' : '#dccb9c')); }
+  for (let x = x0; x <= x1; x++) { p.set(x, y0, hex('#b9a578')); p.set(x, y1, hex('#8f7b52')); }
+  for (let y = y0; y <= y1; y++) { p.set(x0, y, hex('#b9a578')); p.set(x1, y, hex('#8f7b52')); }
+  return p;
+};
+BLOCK_ART.cartography_table_top = () => cartoPaper(BLOCK_ART.dark_oak_planks(), 2, 2, 13, 13, 611);
+BLOCK_ART.cartography_table_side1 = () => { const p = cartoPaper(BLOCK_ART.dark_oak_planks(), 4, 3, 11, 10, 613); p.rect(7, 2, 8, 2, hex('#c43a2a')); return p; };
+BLOCK_ART.cartography_table_side2 = () => {
+  const p = BLOCK_ART.dark_oak_planks();
+  p.rect(1, 9, 14, 9, hex('#2a1d0e'));
+  for (const x of [2, 6, 10]) { p.rect(x, 5, x + 3, 8, hex('#dccb9c')); p.rect(x, 5, x, 8, hex('#b9a578')); p.set(x + 3, 6, hex('#a32a1e')); }
+  return p;
+};
+BLOCK_ART.cartography_table_side3 = () => {
+  const p = BLOCK_ART.dark_oak_planks();
+  for (let y = 3; y < 13; y++) { p.set(3, y, hex(y % 2 ? '#d9c27a' : '#b89a4a')); p.set(4, y, hex('#e8d69a')); }
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.hypot(x - 10, y - 8); if (d < 3.6) p.set(x, y, hex(d > 2.6 ? '#7a7a7a' : '#d8d8d8')); }
+  p.set(10, 7, hex('#c43a2a')); p.set(10, 8, hex('#c43a2a')); p.set(10, 9, hex('#3a3a3a'));
   return p;
 };
 

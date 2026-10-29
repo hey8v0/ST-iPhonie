@@ -37,7 +37,11 @@ const GRAVITY = new Set(BLOCKS.filter(b => b.gravity).map(b => b.id));
 const CROP = new Set([ID.wheat, ID.carrots, ID.potatoes, ID.beetroots]);
 const PAIRED = new Set(BLOCKS.filter(b => b.shape === 'door' || b.shape === 'bed' || b.shape === 'tall').map(b => b.id));
 const FACE_DIR = [[0, 1], [-1, 0], [0, -1], [1, 0]];
-const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'plate', 'rail', 'lever', 'button', 'piston_head', 'bamboo', 'petals', 'pickle', 'eggs', 'fan', 'sign', 'wall_sign'].includes(b.shape)).map(b => b.id));
+const PLANT = new Set(BLOCKS.filter(b => ['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'plate', 'rail', 'lever', 'button', 'piston_head', 'bamboo', 'petals', 'pickle', 'eggs', 'fan', 'sign', 'wall_sign', 'hanging_sign', 'wall_hanging_sign', 'hook', 'tripwire'].includes(b.shape)).map(b => b.id));
+// what a hanging sign can hang from (as well as anything solid)
+const HANG_ON = new Set(['fence', 'stonewall', 'chain', 'pane', 'gate']);
+// string and its hooks (a change to either: the hooks look along their string again)
+const TRIPPING = new Set([ID.tripwire, ID.tripwire_hook]);
 // the ground plants take root in (the game's dirt), what bamboo also stands in, and what mangrove roots grow into
 const DIRT = new Set([ID.grass_block, ID.dirt, ID.podzol, ID.coarse_dirt, ID.moss_block, ID.mud, ID.muddy_mangrove_roots]);
 const BAMBOO_GROUND = new Set([...DIRT, ID.sand, ID.red_sand, ID.gravel]);
@@ -68,6 +72,8 @@ export class World {
     this.tick = 0; this.due = new Map(); this.ack = 0; this.wave = true;
     this.r = rng(seed ^ 0x5bd1e995);
     this.decay = new Map();
+    // tripwire hooks to look along their string again (a pulse over; read back on)
+    this.hookDue = new Map();
     // the distant view: its reach (columns; 0 none) and the tiles sent (key → cell size); a pre-generation under way
     this.lodRadius = 0; this.lodSent = new Map(); this.pregen = null;
   }
@@ -250,6 +256,7 @@ export class World {
       this.spread(blkRefill, false);
     }
     this.react(x, y, z);
+    if (TRIPPING.has(old & 0xFFF) || TRIPPING.has(v & 0xFFF)) this.tripped(x, y, z, old, v);
     this.redstone.changed(x, y, z, old, v, quietWire);
     // a log gone: the leaves around it may have lost their tree
     if (BLOCKS[old & 0xFFF].name.endsWith('_log') && !BLOCKS[v & 0xFFF].name.endsWith('_log')) {
@@ -298,6 +305,13 @@ export class World {
       const now = [];
       for (const [k, t] of this.due) if (t <= this.tick) now.push(k);
       for (const k of now) { this.due.delete(k); const [x, y, z] = k.split(',').map(Number); this.update(x, y, z); }
+    }
+    // tripwire hooks due to look along their string again
+    for (const [k, t] of this.hookDue) {
+      if (t > this.tick) continue;
+      this.hookDue.delete(k);
+      const [x, y, z] = k.split(',').map(Number), v = this.get(x, y, z);
+      if ((v & 0xFFF) === ID.tripwire_hook) this.hookLine(x, y, z, v);
     }
     this.redstone.step();
     // random ticks near the player
@@ -580,7 +594,12 @@ export class World {
     if (b.shape === 'wall') { const [dx, dz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][v >>> 12 & 3]; return OPAQUE[this.get(x + dx, y, z + dz) & 0xFFF] === 1; }
     if (b.shape === 'lantern') return !!below && BLOCKS[bid].solid;
     if (b.shape === 'sign') return !!below && BLOCKS[bid].solid;
+    if (b.shape === 'hanging_sign') { const above = this.get(x, y + 1, z), ab = BLOCKS[above & 0xFFF]; return !!above && (ab.solid || HANG_ON.has(ab.shape)); }
+    // (on a wall, a hanging sign's bar holds on at either end)
+    if (b.shape === 'wall_hanging_sign') { const [dx, dz] = [[1, 0], [-1, 0], [0, 1], [0, -1]][v >>> 12 & 3]; return [1, -1].some(k => { const n = this.get(x + dz * k, y, z - dx * k), nb = BLOCKS[n & 0xFFF]; return !!n && (nb.solid || HANG_ON.has(nb.shape)); }); }
     if (b.shape === 'wall_sign') { const [dx, dz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][v >>> 12 & 3], w = this.get(x + dx, y, z + dz); return !!w && BLOCKS[w & 0xFFF].solid; }
+    // a tripwire hook: the full block behind it
+    if (b.shape === 'hook') { const [dx, dz] = FACE_DIR[v >>> 12 & 3]; return OPAQUE[this.get(x - dx, y, z - dz) & 0xFFF] === 1; }
     if (ON_GROUND.has(b.shape)) return OPAQUE[bid] === 1 || (BLOCKS[bid].shape === 'slab' && below >>> 12 >= 1) || bid === ID.hopper;
     if (b.shape === 'lever' || b.shape === 'button') { const [dx, dy, dz] = DIRS[ATTACHED[v >>> 12 & 7]]; return OPAQUE[this.get(x + dx, y + dy, z + dz) & 0xFFF] === 1; }
     // a piston's head: its piston, pushed out, right behind it
@@ -605,6 +624,66 @@ export class World {
     if (id === ID.turtle_egg) return OPAQUE[bid] === 1;
     if (b.shape === 'cross') return DIRT.has(bid) || bid === ID.farmland || (b.name.endsWith('mushroom') && OPAQUE[bid] === 1);
     return true;
+  }
+  // ---------- tripwire ----------
+  /**
+   * A tripwire hook looks along the way it points, past up to forty strings, for a hook pointing back (the game's): the
+   * two are strung when every block between is string (none cut with shears where it just changed), and on while
+   * something is on one of the strings. removed: this hook is going; at, wire: a string that changed — how far along,
+   * and its state then (a string just broken counts as pressed, so its hooks give a pulse; one cut with shears doesn't).
+   */
+  hookLine(x, y, z, v, removed = false, at = -1, wire = 0) {
+    const m = v >>> 12, f = m & 3, [dx, dz] = FACE_DIR[f], was = [!!(m & 4), !!(m & 8)], line = [];
+    let strung = !removed, on = false, far = 0;
+    for (let j = 1; j < 42; j++) {
+      let n = this.get(x + dx * j, y, z + dz * j);
+      if ((n & 0xFFF) === ID.tripwire_hook) { if ((n >>> 12 & 3) === (f ^ 2)) far = j; break; }
+      if ((n & 0xFFF) !== ID.tripwire && j !== at) { strung = false; continue; }
+      // (the string that changed: as it was told; this hook looks again half a second on)
+      if (j === at) { n = wire; this.hookDue.set(`${x},${y},${z}`, this.tick + 10); if (n >>> 12 & 4) strung = false; }
+      if (!(n >>> 12 & 4) && n >>> 12 & 2) on = true;
+      line[j] = true;
+    }
+    strung = strung && far > 1;
+    on = on && strung;
+    const state = s => withMeta(ID.tripwire_hook, s | (strung ? 4 : 0) | (on ? 8 : 0));
+    if (far) { this.set(x + dx * far, y, z + dz * far, state(f ^ 2)); this.hookSound(x + dx * far, y, z + dz * far, strung, on, was); }
+    this.hookSound(x, y, z, strung, on, was);
+    if (!removed) this.set(x, y, z, state(f));
+    // the string between strung or let go
+    if (was[0] !== strung) for (let j = 1; j < far; j++) {
+      const n = this.get(x + dx * j, y, z + dz * j);
+      if (line[j] && (n & 0xFFF) === ID.tripwire) this.set(x + dx * j, y, z + dz * j, withMeta(ID.tripwire, strung ? n >>> 12 | 1 : n >>> 12 & ~1));
+    }
+  }
+  /** A hook's click: going on (low), off (lower), strung, or let go (the game's). */
+  hookSound(x, y, z, strung, on, [wasStrung, wasOn]) {
+    const name = on && !wasOn ? 'trip_on' : !on && wasOn ? 'trip_off' : strung && !wasStrung ? 'trip_attach' : !strung && wasStrung ? 'trip_detach' : '';
+    if (name) this.post({type: 'sound', name, x: x + 0.5, y: y + 0.5, z: z + 0.5});
+  }
+  /** A string or a hook put down, changed or gone: the hooks it concerns look along their string again. */
+  tripped(x, y, z, old, v) {
+    const H = ID.tripwire_hook, S = ID.tripwire, oid = old & 0xFFF, id = v & 0xFFF;
+    if (oid === H && id !== H && old >>> 12 & 12) this.hookLine(x, y, z, old, true);
+    if (id === H && oid !== H) this.hookLine(x, y, z, v);
+    if (id === S && (oid !== S || (old ^ v) >>> 12 & 2)) this.stringChanged(x, y, z, v);
+    else if (oid === S && id !== S) this.stringChanged(x, y, z, old | 2 << 12);
+  }
+  /** A string changed: the hooks it runs between look again (the game looks south and west of it for a hook pointing back). */
+  stringChanged(x, y, z, wire) {
+    for (const f of [0, 1]) {
+      const [dx, dz] = FACE_DIR[f];
+      for (let i = 1; i < 42; i++) {
+        const n = this.get(x + dx * i, y, z + dz * i);
+        if ((n & 0xFFF) === ID.tripwire_hook) { if ((n >>> 12 & 3) === (f ^ 2)) this.hookLine(x + dx * i, y, z + dz * i, n, false, i, wire); break; }
+        if ((n & 0xFFF) !== ID.tripwire) break;
+      }
+    }
+  }
+  /** The page says whether something is on a string. */
+  trip(x, y, z, on) {
+    const v = this.get(x, y, z);
+    if ((v & 0xFFF) === ID.tripwire && !!(v >>> 12 & 2) !== on) this.set(x, y, z, withMeta(ID.tripwire, on ? v >>> 12 | 2 : v >>> 12 & ~2));
   }
   /** The sides a vine still clings to: a full block there (or leaves), or the vine above hanging on that side. */
   vineHolds(x, y, z, faces) {

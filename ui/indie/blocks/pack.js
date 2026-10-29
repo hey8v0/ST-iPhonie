@@ -49,7 +49,7 @@ export const SKINS = {
   zombie: ['entity/zombie/zombie.png'], skeleton: ['entity/skeleton/skeleton.png'], creeper: ['entity/creeper/creeper.png'], spider: ['entity/spider/spider.png'],
   player: ['entity/player/wide/steve.png', 'entity/steve.png'],
   villager: ['entity/villager/villager.png'], villager_type: ['entity/villager/type/plains.png'], iron_golem: ['entity/iron_golem/iron_golem.png'],
-  ...Object.fromEntries(['farmer', 'fisherman', 'shepherd', 'fletcher', 'librarian', 'cleric', 'armorer', 'toolsmith', 'butcher', 'nitwit'].map(p => [`villager_prof_${p}`, [`entity/villager/profession/${p}.png`]])),
+  ...Object.fromEntries(['farmer', 'fisherman', 'shepherd', 'fletcher', 'librarian', 'cleric', 'armorer', 'toolsmith', 'butcher', 'nitwit', 'cartographer'].map(p => [`villager_prof_${p}`, [`entity/villager/profession/${p}.png`]])),
   zombified_piglin: ['entity/piglin/zombified_piglin.png'], ghast: ['entity/ghast/ghast.png'], blaze: ['entity/blaze/blaze.png', 'entity/blaze.png'], magma_cube: ['entity/slime/magmacube.png'],
 };
 // worn armour: newer versions keep it under equipment/, older ones as <material>_layer_1 / _2 (gold is "gold" there)
@@ -68,7 +68,7 @@ SKINS.polar_bear = ['entity/bear/polarbear.png', 'entity/bear/polar_bear.png'];
 // the enderman, its eyes
 SKINS.enderman = ['entity/enderman/enderman.png'];
 // signs: a picture for each wood
-for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) SKINS[`sign_${w}`] = [`entity/signs/${w}.png`];
+for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) { SKINS[`sign_${w}`] = [`entity/signs/${w}.png`]; SKINS[`hanging_${w}`] = [`entity/signs/hanging/${w}.png`]; }
 SKINS.enderman_eyes = ['entity/enderman/enderman_eyes.png'];
 // the conduit as the game draws it: its shell, cage, the eye open and shut, the whirling water (strips of frames)
 Object.assign(SKINS, {conduit_shell: ['entity/conduit/base.png'], conduit_cage: ['entity/conduit/cage.png'], conduit_eye_open: ['entity/conduit/open_eye.png'], conduit_eye_closed: ['entity/conduit/closed_eye.png'],
@@ -80,7 +80,7 @@ Object.assign(SKINS, {drowned: ['entity/zombie/drowned.png'], drowned_outer: ['e
 for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) { SKINS[`boat_${w}`] = [`entity/boat/${w}.png`]; SKINS[`chest_boat_${w}`] = [`entity/chest_boat/${w}.png`]; }
 const MOON_PHASES = ['full_moon', 'waning_gibbous', 'third_quarter', 'waning_crescent', 'new_moon', 'waxing_crescent', 'first_quarter', 'waxing_gibbous'];
 // item pictures whose name the game also gives a block picture (ours are named apart)
-const ITEM_FILE = {repeater_item: 'repeater', comparator_item: 'comparator', mangrove_propagule_item: 'mangrove_propagule', pink_petals_item: 'pink_petals', kelp_item: 'kelp', seagrass_item: 'seagrass', sea_pickle_item: 'sea_pickle', turtle_egg_item: 'turtle_egg'};
+const ITEM_FILE = {chain_item: 'chain', repeater_item: 'repeater', comparator_item: 'comparator', mangrove_propagule_item: 'mangrove_propagule', pink_petals_item: 'pink_petals', kelp_item: 'kelp', seagrass_item: 'seagrass', sea_pickle_item: 'sea_pickle', turtle_egg_item: 'turtle_egg'};
 // pictures kept elsewhere than under their own name (newer versions first; paths under textures/, without .png)
 const ALSO = {quartz_pillar: ['block/quartz_pillar_side'], enchanted_golden_apple: ['item/enchanted_golden_apple', 'item/golden_apple'],
   fishing_hook: ['entity/fishing/fishing_hook', 'entity/fishing_hook'], guardian_beam: ['entity/guardian/guardian_beam', 'entity/guardian_beam'],
@@ -165,6 +165,11 @@ const CUTS = {
   chest_side: [['entity/chest/normal'], 64, [[0, 33, 14, 10, 0, 0, 16, 16, true], [0, 14, 14, 5, 1, 2, 14, 5, true], [0, 33, 14, 9, 1, 7, 14, 9, true]]],
   chest_front: [['entity/chest/normal'], 64, [[42, 33, 14, 10, 0, 0, 16, 16, true], [42, 14, 14, 5, 1, 2, 14, 5, true], [42, 33, 14, 9, 1, 7, 14, 9, true]]],
   chest_latch: [['entity/chest/normal'], 64, [[4, 1, 2, 4, 0, 0, 16, 16, true]]],
+  // the trapped chest's, cut the same way from its own picture
+  trapped_chest_top: [['entity/chest/trapped'], 64, [[28, 0, 14, 14, 0, 0, 16, 16], [28, 0, 14, 14, 1, 1, 14, 14]]],
+  trapped_chest_side: [['entity/chest/trapped'], 64, [[0, 33, 14, 10, 0, 0, 16, 16, true], [0, 14, 14, 5, 1, 2, 14, 5, true], [0, 33, 14, 9, 1, 7, 14, 9, true]]],
+  trapped_chest_front: [['entity/chest/trapped'], 64, [[42, 33, 14, 10, 0, 0, 16, 16, true], [42, 14, 14, 5, 1, 2, 14, 5, true], [42, 33, 14, 9, 1, 7, 14, 9, true]]],
+  trapped_chest_latch: [['entity/chest/trapped'], 64, [[4, 1, 2, 4, 0, 0, 16, 16, true]]],
   minecart_side: [['entity/minecart/minecart', 'entity/minecart'], 64, [[2, 2, 16, 8, 0, 0, 16, 16]]],
   minecart_inside: [['entity/minecart/minecart', 'entity/minecart'], 64, [[24, 12, 20, 16, 0, 0, 16, 16]]],
   bell_body: [['entity/bell/bell_body'], 32, [[0, 6, 24, 7, 0, 0, 16, 16, true]]],

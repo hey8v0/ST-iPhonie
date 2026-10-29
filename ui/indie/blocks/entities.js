@@ -52,9 +52,9 @@ export function itemLook(id, s = null) {
     const t = b.tex, L = n => LAYER[n] ?? 0, tint = b.color ? parseInt(b.color.slice(1), 16) : tintNum(b.tint);
     if (t.all) return {cube: Array(6).fill(L(t.all)), tints: Array(6).fill(tint), half: b.shape === 'slab' || b.shape === 'layer' || b.shape === 'carpet'};
     if (b.facing6) { const s = L(t.side), top = L(t.top); return {cube: [s, s, top, top, L(t.front || t.top), s], tints: Array(6).fill(0xFFFFFF)}; }
-    const side = L(t.side), front = t.front ? L(t.front) : side;
+    const side = L(t.side), front = t.front ? L(t.front) : t.south ? L(t.south) : side, own = k => t[k] ? L(t[k]) : side;
     const grass = b.name === 'grass_block';
-    return {cube: [side, side, L(t.top), L(t.bottom), front, side], tints: [grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint, tint, 0xFFFFFF, grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint], half: b.shape === 'slab' || b.shape === 'detector'};
+    return {cube: [own('east'), own('west'), L(t.top), L(t.bottom), front, own('north')], tints: [grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint, tint, 0xFFFFFF, grass ? 0xFFFFFF : tint, grass ? 0xFFFFFF : tint], half: b.shape === 'slab' || b.shape === 'detector'};
   }
   const name = b ? (b.name === 'wheat' ? 'wheat_stage7' : b.tex?.all || b.tex?.side) : dialName(id) || info?.icon || id;
   return {flat: LAYER[name] ?? 0, tint: b ? tintNum(b.tint) : packed.has(name) && info?.tint ? tintNum(info.tint) : 0xFFFFFF};

@@ -234,6 +234,7 @@ export function collisionBoxes(v, near = () => 0) {
     case 'slab': return meta === 2 ? FULL : meta === 1 ? [[0, 0.5, 0, 1, 1, 1]] : [[0, 0, 0, 1, 0.5, 1]];
     case 'cactus': return [[px(1), 0, px(1), px(15), px(15), px(15)]];
     case 'campfire': return [[0, 0, 0, 1, px(7), 1]];
+    case 'chain': return [CHAIN_BOX[meta & 3] || CHAIN_BOX[0]];
     case 'farmland': return [[0, 0, 0, 1, px(15), 1]];
     default: return FULL;
   }
@@ -241,6 +242,8 @@ export function collisionBoxes(v, near = () => 0) {
 const VINE = [[0, 0, px(15), 1, 1, 1], [0, 0, 0, px(1), 1, 1], [0, 0, 0, 1, 1, px(1)], [px(15), 0, 0, 1, 1, 1]];
 const TORCH = [null, [px(11), px(3), px(5.5), 1, px(13), px(10.5)], [0, px(3), px(5.5), px(5), px(13), px(10.5)], [px(5.5), px(3), px(11), px(10.5), px(13), 1], [px(5.5), px(3), 0, px(10.5), px(13), px(5)]];
 /** Boxes of the outline when aimed at (null: can't be aimed at). Liquids only when asked for. */
+// a chain along y, x or z (its state as a log's)
+const CHAIN_BOX = [[px(6.5), 0, px(6.5), px(9.5), 1, px(9.5)], [0, px(6.5), px(6.5), 1, px(9.5), px(9.5)], [px(6.5), px(6.5), 0, px(9.5), px(9.5), 1]];
 export function selectionBoxes(v, liquids = false, near = () => 0) {
   if (!v) return null;
   const id = v & 0xFFF, meta = v >>> 12, b = BLOCKS[id];
@@ -265,6 +268,10 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'campfire': return [[0, 0, 0, 1, px(7), 1]];
     // a sign: a post's column standing; on a wall, the board against it (the game's)
     case 'sign': return [[px(4), 0, px(4), px(12), 1, px(12)]];
+    case 'chain': return [CHAIN_BOX[meta & 3] || CHAIN_BOX[0]];
+    // a hanging sign: what hangs under a block; on a wall, the bar and the board under it (the game's)
+    case 'hanging_sign': return [[px(3), 0, px(3), px(13), 1, px(13)]];
+    case 'wall_hanging_sign': return (meta & 3) < 2 ? [[px(6), px(14), 0, px(10), 1, 1], [px(7), 0, px(1), px(9), px(10), px(15)]] : [[0, px(14), px(6), 1, 1, px(10)], [px(1), 0, px(7), px(15), px(10), px(9)]];
     case 'wall_sign': return [[[0, px(4.5), 0, 1, px(12.5), px(2)], [px(14), px(4.5), 0, 1, px(12.5), 1], [0, px(4.5), px(14), 1, px(12.5), 1], [0, px(4.5), 0, px(2), px(12.5), 1]][meta & 3]];
     case 'brewing': return [[px(2), 0, px(1), px(15), px(14), px(15)]];
     case 'portal': return null;
@@ -273,6 +280,9 @@ export function selectionBoxes(v, liquids = false, near = () => 0) {
     case 'tall': return [[px(2), 0, px(2), px(14), 1, px(14)]];
     case 'lectern': case 'bell': case 'cocoa': return toBlock(pieces(v, near));
     case 'wire': return [[0, 0, 0, 1, px(1), 1]];
+    // string: a thin box over the ground, lower once strung (the game's); a tripwire hook: the plank and hook off its wall
+    case 'tripwire': return meta & 1 ? [[0, px(1), 0, 1, px(2.5), 1]] : [[0, 0, 0, 1, px(8), 1]];
+    case 'hook': return [[[px(5), 0, 0, px(11), px(10), px(6)], [px(10), 0, px(5), 1, px(10), px(11)], [px(5), 0, px(10), px(11), px(10), 1], [0, 0, px(5), px(6), px(10), px(11)]][meta & 3]];
     case 'bamboo': { const [ox, oz] = plantOffset(near.x, near.z), r = (meta & 3) === 2 ? 5 : 3; return [[px(8 - r + ox), 0, px(8 - r + oz), px(8 + r + ox), 1, px(8 + r + oz)]]; }
     case 'petals': return [[0, 0, 0, 1, px(3), 1]];
     case 'pickle': { const list = PICKLES[meta & 3]; return [[px(Math.min(...list.map(q => q[0]))), 0, px(Math.min(...list.map(q => q[1]))), px(Math.max(...list.map(q => q[0] + q[2]))), px(Math.max(...list.map(q => q[3]))), px(Math.max(...list.map(q => q[1] + q[2])))]]; }

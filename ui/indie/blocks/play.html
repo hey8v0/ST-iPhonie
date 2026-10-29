@@ -180,6 +180,15 @@ h2{margin:0 0 calc(4*var(--u));font-size:calc(10*var(--u));text-shadow:var(--u) 
 .cost{margin:0;text-align:center;font-size:calc(7*var(--u));color:#3c8a12;font-weight:700}
 .win .note{color:#555;margin:0 auto}
 .cost.bad{color:#c0292b}
+.carto{display:flex;align-items:center;gap:calc(4*var(--u));justify-content:center}
+.carto .cin{display:flex;flex-direction:column;gap:calc(4*var(--u))}
+.cmap{position:relative;width:calc(52*var(--u));height:calc(52*var(--u));background:#d8c9a0;box-shadow:inset 0 0 0 calc(1*var(--u)) #8b7a52}
+.cmap img{position:absolute;left:0;top:0;width:100%;height:100%;image-rendering:pixelated}
+.cmap.zoom img{left:25%;top:25%;width:50%;height:50%}
+.cmap.copy img{width:86%;height:86%}
+.cmap.copy img+img{left:14%;top:14%}
+.cmap .lock{position:absolute;right:6%;bottom:6%;width:24%;height:18%;background:#c9a227;border-radius:calc(1*var(--u))}
+.cmap .lock::before{content:'';position:absolute;left:18%;right:18%;bottom:100%;height:80%;border:calc(2*var(--u)) solid #8d8d8d;border-bottom:0;border-radius:50% 50% 0 0}
 /* trading: the villager's offers down the left (sold out ones crossed through), the payment and what it gives on the right */
 .vxp{height:calc(3*var(--u));background:#3a3a3a;margin:0 calc(30*var(--u)) calc(3*var(--u))}
 .vxp i{display:block;height:100%;background:#7ec82a}

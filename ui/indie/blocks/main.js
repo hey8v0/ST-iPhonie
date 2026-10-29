@@ -3,7 +3,7 @@
 // kept by the worker (world.worker.js) and drawn by render.js.
 import {BLOCKS, ID, MINY, HEIGHT, itemInfo, zhOf, breakTime, harvests, dropsOf, withMeta, damageOf, ARMOR, throughArmor, addXp, FACES, OPPOSITE, BOAT_WOODS, WATERLOGGED, SIGN_WOODS} from './blocks.js';
 import {Mobs, MOBS} from './mobs.js';
-import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat, handFrame, FISH_SKINS, ownFishSkin, CONDUIT_SKINS, ownConduitSkin, ownWind, ownSign} from './models.js';
+import {MODELS, OWN_SKINS, ARMOR_PARTS, ownArmor, buildModel, animate, ownVillager, VILLAGER_SKINS, ownBoat, handFrame, FISH_SKINS, ownFishSkin, CONDUIT_SKINS, ownConduitSkin, ownWind, ownSign, ownHangingSign} from './models.js';
 import {Renderer, Verts, mat} from './render.js';
 import {buildLayers, makeIcons, LAYER, ownSun, ownMoon, ownClouds, dials} from './atlas.js';
 import {readPack, savePack, removePack, loadPackRecord, decodePack} from './pack.js';
@@ -24,7 +24,7 @@ import {Carts, CARTS} from './carts.js';
 import {Boats, BOAT_W, BOAT_H, waterTop} from './boats.js';
 import {unlockSound, play, setVolume, setRain, note as noteSound} from './sound.js';
 import {seedOf} from './noise.js';
-import {monumentsNear} from './monument.js';
+import {monumentsNear, monumentNear} from './monument.js';
 import {runCommand, DIFFICULTIES, defaultRules} from './commands.js';
 import {spawnPoint, BIOMES} from './gen.js';
 import {findFrame, portalFill, across, nearestPortal, SEARCH} from './portal.js';
@@ -89,7 +89,7 @@ async function loadTextures() {
   skinSizes = {};
   for (const k of Object.keys(MODELS)) { const img = skins?.[k] || OWN_SKINS[k](); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; skinPics[k] = img; }
   // signs' wood
-  for (const w of SIGN_WOODS) { const img = skins?.[`sign_${w}`] || ownSign(w); renderer.setImage(`mob:sign_${w}`, img); skinSizes[`sign_${w}`] = [img.width, img.height]; }
+  for (const w of SIGN_WOODS) for (const [k, own] of [[`sign_${w}`, ownSign], [`hanging_${w}`, ownHangingSign]]) { const img = skins?.[k] || own(w); renderer.setImage(`mob:${k}`, img); skinSizes[k] = [img.width, img.height]; }
   // villagers by trade: the pack's villager with its plains clothes and the trade's over them, or ours
   for (const prof of VILLAGER_SKINS) {
     let img = ownVillager(prof);
@@ -214,7 +214,7 @@ function startWorld(meta) {
   G = {
     meta, worker, mirror, body, ents, mode: meta.mode || 'survival', inv: Inventory.from(meta.inv), hot: start.hot || 0, time: meta.time || 0,
     health: start.health ?? 20, food: start.food ?? 20, sat: start.sat ?? 5, exh: 0, air: 300, tiles: meta.tiles || {}, spawn: meta.spawn || (sp ? {x: sp.x, y: sp.y, z: sp.z} : {x: start.x, y: start.y, z: start.z}),
-    needGround: !meta.player, ready: false, campfires: new Map(), signs: new Map(), meshes: 0, cx: Math.floor(start.x / 16), cz: Math.floor(start.z / 16),
+    needGround: !meta.player, ready: false, campfires: new Map(), signs: new Map(), tripwires: new Map(), tripAt: new Map(), tripTold: new Map(), meshes: 0, cx: Math.floor(start.x / 16), cz: Math.floor(start.z / 16),
     breaking: null, breakWait: 0, useWait: 0, swing: 0, eating: 0, hurtT: 0, regen: 0, starve: 0, lastHit: 0, walked: 0, stepAt: 0, dead: false, saveAt: performance.now(), hand: new Verts(64), outline: null, target: null,
   };
   ents.load(meta.items);
@@ -273,9 +273,9 @@ function startWorld(meta) {
 }
 function onWorker(m) {
   if (!G) return;
-  if (m.type === 'column') { G.mirror.column(m); campfiresIn(m); signsIn(m); }
+  if (m.type === 'column') { G.mirror.column(m); campfiresIn(m); signsIn(m); tripwiresIn(m); }
   else if (m.type === 'mesh') { renderer.setSection(m.cx, m.sy, m.cz, m.solid, m.trans, m.vis, m.sun, m.faces); G.meshes++; }
-  else if (m.type === 'drop') { G.mirror.drop(m.cx, m.cz); renderer.dropColumn(m.cx, m.cz); G.campfires.delete(`${m.cx},${m.cz}`); G.signs.delete(`${m.cx},${m.cz}`); }
+  else if (m.type === 'drop') { G.mirror.drop(m.cx, m.cz); renderer.dropColumn(m.cx, m.cz); G.campfires.delete(`${m.cx},${m.cz}`); G.signs.delete(`${m.cx},${m.cz}`); G.tripwires.delete(`${m.cx},${m.cz}`); }
   else if (m.type === 'drops') for (const [id, n] of m.items) G.ents.drop({id, n}, m.x, m.y, m.z);
   else if (m.type === 'sound') soundAt(m.iron && m.name.startsWith('door') ? 'iron_door' : m.name, m.x, m.y, m.z);
   else if (m.type === 'prime') G.mobs.light(m.x, m.y, m.z);
@@ -497,13 +497,15 @@ function drinkMilk() {
 }
 /** An effect from food (a golden apple's); 伤害吸收 gives its golden hearts at once (two a level). */
 // ---------- large chests ----------
-/** Which half of a large chest a chest put at (x, y, z) facing f makes (1 the left, 2 the right, as seen from in
- *  front) with a single chest of the same facing beside it; 0 when there is none. */
-function chestHalf(x, y, z, f) {
+/** Chests of one kind: a chest joins a chest, a trapped chest a trapped chest (in water or not). */
+const sameChest = (n, b) => BLOCKS[n & 0xFFF].use === 'chest' && (BLOCKS[n & 0xFFF].rs || '') === (b.rs || '');
+/** Which half of a large chest a chest (b) put at (x, y, z) facing f makes (1 the left, 2 the right, as seen from in
+ *  front) with a single chest of its kind and facing beside it; 0 when there is none. */
+function chestHalf(x, y, z, f, b) {
   const [fx, fz] = DIR[f], lx = -fz, lz = fx;
   for (const [dx, dz, half] of [[lx, lz, 2], [-lx, -lz, 1]]) {
     const n = G.mirror.get(x + dx, y, z + dz);
-    if (BLOCKS[n & 0xFFF].use === 'chest' && (n >>> 12 & 3) === f && !(n >>> 14 & 3)) return half;
+    if (sameChest(n, b) && (n >>> 12 & 3) === f && !(n >>> 14 & 3)) return half;
   }
   return 0;
 }
@@ -513,7 +515,7 @@ function pairChest(x, y, z) {
   const v = G.mirror.get(x, y, z), meta = v >>> 12, half = meta >> 2 & 3;
   if (half !== 1 && half !== 2) return;
   const [fx, fz] = DIR[meta & 3], [sx, sz] = half === 1 ? [fz, -fx] : [-fz, fx], px = x + sx, pz = z + sz, pv = G.mirror.get(px, y, pz);
-  if (BLOCKS[pv & 0xFFF].use !== 'chest') { setBlock(x, y, z, withMeta(v & 0xFFF, meta & 3)); return; }
+  if (!sameChest(pv, BLOCKS[v & 0xFFF])) { setBlock(x, y, z, withMeta(v & 0xFFF, meta & 3)); return; }
   setBlock(px, y, pz, withMeta(pv & 0xFFF, (pv >>> 12 & 3) | (3 - half) << 2));
   const k = `${x},${y},${z}`, pk = `${px},${y},${pz}`, mine = G.tiles[k], other = G.tiles[pk] ||= {kind: 'chest', slots: lootOf(pk, px, y, pz) || new Array(27).fill(null)};
   const [left, right] = half === 1 ? [mine, other] : [other, mine], slots = [...left.slots.slice(0, 27), ...right.slots.slice(0, 27)];
@@ -1030,8 +1032,8 @@ function wearTool(n = 1) {
 // ---------- breaking and placing ----------
 function setBlock(x, y, z, v) {
   G.worker.postMessage(G.mirror.set(x, y, z, v));
-  // (a campfire put down is known at once)
-  for (const [is, known] of [[CAMP, G.campfires], [SIGN, G.signs]]) if (is[v & 0xFFF]) { const k = `${x >> 4},${z >> 4}`, list = known.get(k) || []; if (!list.some(p => p[0] === x && p[1] === y && p[2] === z)) known.set(k, [...list, [x, y, z]]); }
+  // (a campfire, a sign or a string put down is known at once)
+  for (const [is, known] of [[CAMP, G.campfires], [SIGN, G.signs], [TRIP, G.tripwires]]) if (is[v & 0xFFF]) { const k = `${x >> 4},${z >> 4}`, list = known.get(k) || []; if (!list.some(p => p[0] === x && p[1] === y && p[2] === z)) known.set(k, [...list, [x, y, z]]); }
 }
 
 // ---------- campfires ----------
@@ -1041,8 +1043,17 @@ for (const id of [ID.campfire, ID.soul_campfire, WATERLOGGED[ID.campfire], WATER
 const campLit = v => CAMP[v & 0xFFF] && !(v >>> 12 & 4) && !BLOCKS[v & 0xFFF].water;
 const soulCamp = v => BLOCKS[v & 0xFFF].name.includes('soul_campfire');
 // ---------- signs ----------
+// each kind: its model, its wood's picture, its size, the board's face in model space [x0, y0, x1, y1], the picture of
+// its words [w, h], the font's size, the lines' spacing, how long a line may be (the game's: 90 text units, hanging 60)
+const SIGN_KIND = {
+  sign: {skin: 'sign', s: 2 / 3, board: [-12, -14, 12, -2], pic: [192, 96], font: 16, gap: 20, limit: 180},
+  wall_sign: {skin: 'sign', s: 2 / 3, board: [-12, -14, 12, -2], pic: [192, 96], font: 16, gap: 20, limit: 180},
+  hanging_sign: {skin: 'hanging', s: 1, board: [-7, 0, 7, 10], pic: [140, 100], font: 15, gap: 20, limit: 126},
+  wall_hanging_sign: {skin: 'hanging', s: 1, board: [-7, 0, 7, 10], pic: [140, 100], font: 15, gap: 20, limit: 126},
+};
+const signFont = px => `bold ${px}px "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif`;
 const SIGN = new Uint8Array(4096);
-for (const b of BLOCKS) if (b.shape === 'sign' || b.shape === 'wall_sign') SIGN[b.id] = 1;
+for (const b of BLOCKS) if (SIGN_KIND[b.shape]) SIGN[b.id] = 1;
 /** The signs in a column the worker sent (as the campfires are kept). */
 function signsIn(m) {
   const found = [];
@@ -1055,30 +1066,34 @@ function signsIn(m) {
  * a wall (the game's: standing, sixteen ways, the board over a post; on a wall, the board against it, lower down).
  */
 function signPose(x, y, z, v) {
-  const m = v >>> 12;
-  if (BLOCKS[v & 0xFFF].shape === 'sign') { const a = m * Math.PI / 8; return {wall: false, d: [-Math.sin(a), Math.cos(a)], at: [x + 0.5, y - 0.5, z + 0.5]}; }
-  const [sx, sz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][m & 3];
-  return {wall: true, d: [-sx, -sz], at: [x + 0.5 + sx * 0.4375, y - 0.8125, z + 0.5 + sz * 0.4375]};
+  const m = v >>> 12, shape = BLOCKS[v & 0xFFF].shape;
+  if (shape === 'sign') { const a = m * Math.PI / 8; return {model: 'sign', d: [-Math.sin(a), Math.cos(a)], at: [x + 0.5, y - 0.5, z + 0.5]}; }
+  if (shape === 'wall_sign') { const [sx, sz] = [[0, -1], [1, 0], [0, 1], [-1, 0]][m & 3]; return {model: 'wall_sign', d: [-sx, -sz], at: [x + 0.5 + sx * 0.4375, y - 0.8125, z + 0.5 + sz * 0.4375]}; }
+  // hanging: its top at the block's top; under less than a full block its chains meet in a V
+  if (shape === 'hanging_sign') {
+    const a = m * Math.PI / 8, above = G.mirror.get(x, y + 1, z), full = !!above && (collisionBoxes(above) || []).some(q => q[0] === 0 && q[2] === 0 && q[3] === 1 && q[5] === 1 && q[1] === 0);
+    return {model: full ? 'hanging_sign' : 'hanging_sign_v', d: [-Math.sin(a), Math.cos(a)], at: [x + 0.5, y - 0.875, z + 0.5]};
+  }
+  return {model: 'wall_hanging_sign', d: [[1, 0], [-1, 0], [0, 1], [0, -1]][m & 3], at: [x + 0.5, y - 0.875, z + 0.5]};
 }
 // the text's colours (a dye's), written plain they are darker (four tenths, the game's); glowing, with a dark outline
 const SIGN_INK = {white: 0xffffff, orange: 0xff681f, magenta: 0xff00ff, light_blue: 0x9ac0cd, yellow: 0xffff00, lime: 0xbfff00, pink: 0xff69b4, gray: 0x808080,
   light_gray: 0xd3d3d3, cyan: 0x00ffff, purple: 0xa020f0, blue: 0x0000ff, brown: 0xa52a2d, green: 0x00ff00, red: 0xff0000, black: 0x000000};
 const rgb = n => `rgb(${n >> 16 & 255},${n >> 8 & 255},${n & 255})`, darker = n => (Math.floor((n >> 16 & 255) * 0.4) << 16) | (Math.floor((n >> 8 & 255) * 0.4) << 8) | Math.floor((n & 255) * 0.4);
-const SIGN_FONT = 'bold 16px "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif', SIGN_LINE = 180;
 /** A side's words drawn for the board (192×96: two pixels to the game's text unit; four lines ten units apart). */
 const signPics = new Map();
-function signPicture(k, side, text) {
-  const state = JSON.stringify(text), had = signPics.get(`${k}|${side}`);
+function signPicture(k, side, text, kind) {
+  const state = JSON.stringify(text) + kind.font, had = signPics.get(`${k}|${side}`);
   if (had?.state === state) return had.name;
-  const c = had?.canvas || document.createElement('canvas'), g = c.getContext('2d');
-  c.width = 192; c.height = 96; g.clearRect(0, 0, 192, 96);
-  g.font = SIGN_FONT; g.textAlign = 'center'; g.textBaseline = 'middle';
+  const c = had?.canvas || document.createElement('canvas'), g = c.getContext('2d'), [W, H] = kind.pic;
+  c.width = W; c.height = H; g.clearRect(0, 0, W, H);
+  g.font = signFont(kind.font); g.textAlign = 'center'; g.textBaseline = 'middle';
   const ink = SIGN_INK[text.color] ?? 0, fill = text.glow ? (text.color === 'black' ? 0xf0ebcc : ink) : darker(ink);
   text.lines.forEach((line, i) => {
     if (!line) return;
-    const y = 48 + (i - 1.5) * 20;
-    if (text.glow) { g.lineWidth = 4; g.strokeStyle = rgb(text.color === 'black' ? 0 : darker(ink)); g.strokeText(line, 96, y); }
-    g.fillStyle = rgb(fill); g.fillText(line, 96, y);
+    const y = H / 2 + (i - 1.5) * kind.gap;
+    if (text.glow) { g.lineWidth = 4; g.strokeStyle = rgb(text.color === 'black' ? 0 : darker(ink)); g.strokeText(line, W / 2, y); }
+    g.fillStyle = rgb(fill); g.fillText(line, W / 2, y);
   });
   const name = `signtext:${k}:${side}`;
   renderer.setImage(`mob:${name}`, c);
@@ -1087,22 +1102,22 @@ function signPicture(k, side, text) {
 }
 /** The signs near: the board (and post) in its wood, and the words on either side over it. */
 function signModels(view, light) {
-  const out = [], s = 2 / 3, k16 = s / 16;
+  const out = [];
   for (const list of G.signs.values()) for (const [x, y, z] of list) {
     const v = G.mirror.get(x, y, z), b = BLOCKS[v & 0xFFF];
     if (!SIGN[v & 0xFFF] || Math.hypot(x + 0.5 - G.body.x, z + 0.5 - G.body.z) > 64) continue;
-    const {wall, d, at} = signPose(x, y, z, v), yaw = Math.atan2(-d[0], -d[1]), cy = Math.cos(yaw), sy = Math.sin(yaw), [sky, blk] = light(x, y, z);
-    const ox = at[0] - view.x, oy = at[1] - view.y, oz = at[2] - view.z, skin = `sign_${b.signWood}`;
-    out.push({skin, verts: new Float32Array(buildModel(wall ? 'wall_sign' : 'sign', {}, {x: ox, y: oy, z: oz, yaw, s}, [], skinSizes[skin])), light: [sky, blk], tint: [1, 1, 1], hurt: 0, white: 0});
+    const kind = SIGN_KIND[b.shape], s = kind.s, k16 = s / 16, {model, d, at} = signPose(x, y, z, v), yaw = Math.atan2(-d[0], -d[1]), cy = Math.cos(yaw), sy = Math.sin(yaw), [sky, blk] = light(x, y, z);
+    const ox = at[0] - view.x, oy = at[1] - view.y, oz = at[2] - view.z, skin = `${kind.skin}_${b.signWood}`;
+    out.push({skin, verts: new Float32Array(buildModel(model, {}, {x: ox, y: oy, z: oz, yaw, s}, [], skinSizes[skin])), light: [sky, blk], tint: [1, 1, 1], hurt: 0, white: 0});
     // the words: a sheet over each face of the board (the game's model space, as buildModel places it)
     const tile = G.tiles[`${x},${y},${z}`];
     if (tile?.kind !== 'sign') continue;
     for (const [side, mz] of [['front', -1.12], ['back', 1.12]]) {
       const text = tile[side];
       if (!text?.lines.some(Boolean)) continue;
-      const name = signPicture(`${x},${y},${z}`, side, text), place = (mx, my) => { const lx = -mx * k16, ly = (24 - my) * k16, lz = mz * k16; return [ox + lx * cy + lz * sy, oy + ly, oz - lx * sy + lz * cy]; };
+      const name = signPicture(`${x},${y},${z}`, side, text, kind), place = (mx, my) => { const lx = -mx * k16, ly = (24 - my) * k16, lz = mz * k16; return [ox + lx * cy + lz * sy, oy + ly, oz - lx * sy + lz * cy]; };
       // (read from in front of that side: the back's turned the other way)
-      const L = side === 'front' ? -12 : 12, R = -L, corners = [[L, -14, 0, 0], [R, -14, 1, 0], [R, -2, 1, 1], [L, -2, 0, 1]], vs = [];
+      const [bx0, by0, bx1, by1] = kind.board, L = side === 'front' ? bx0 : bx1, R = side === 'front' ? bx1 : bx0, corners = [[L, by0, 0, 0], [R, by0, 1, 0], [R, by1, 1, 1], [L, by1, 0, 1]], vs = [];
       for (const order of [[0, 1, 2, 3], [3, 2, 1, 0]]) for (const i of order) { const [mx, my, u, w] = corners[i]; vs.push(...place(mx, my), u, w, 1); }
       out.push({skin: name, verts: new Float32Array(vs), light: text.glow ? [15, 15] : [sky, blk], tint: [1, 1, 1], hurt: 0, white: 0, noShadow: true});
     }
@@ -1136,12 +1151,14 @@ function editSign(k, side) {
   if (!SIGN[b.id]) return;
   const tile = G.tiles[k] ||= {kind: 'sign'}, text = tile[side] ||= {lines: ['', '', '', ''], color: 'black', glow: false};
   input.enabled = false; input.unlock();
-  const el = signEl = document.createElement('div'), wood = {oak: '#b8945f', spruce: '#82603a', birch: '#d7c185', jungle: '#b88764', acacia: '#ba6337', dark_oak: '#6a4628', mangrove: '#8a4440', cherry: '#e2b2a8', bamboo: '#d6c25a'}[b.signWood];
+  const kind = SIGN_KIND[b.shape], hanging = kind.skin === 'hanging', el = signEl = document.createElement('div');
+  const wood = (hanging ? {oak: '#b49156', spruce: '#7c5c37', birch: '#c8b67e', jungle: '#b18559', acacia: '#ae5c3b', dark_oak: '#6f5232', mangrove: '#783a35', cherry: '#d79b9b', bamboo: '#d7c35c'}
+    : {oak: '#b8945f', spruce: '#82603a', birch: '#d7c185', jungle: '#b88764', acacia: '#ba6337', dark_oak: '#6a4628', mangrove: '#8a4440', cherry: '#e2b2a8', bamboo: '#d6c25a'})[b.signWood];
   el.className = 'signedit';
   el.innerHTML = `<div class="board" style="--wood:${wood}">${text.lines.map((l, i) => `<input type="text" autocomplete="off" spellcheck="false" data-i="${i}" aria-label="第 ${i + 1} 行">`).join('')}</div><button type="button">完成</button>`;
   $('.chatlog').after(el);
   const boxes = [...el.querySelectorAll('input')], g = document.createElement('canvas').getContext('2d');
-  g.font = SIGN_FONT;
+  g.font = signFont(kind.font);
   const close = () => {
     if (signEl !== el) return;
     el.remove(); signEl = null;
@@ -1150,7 +1167,7 @@ function editSign(k, side) {
   };
   boxes.forEach((box, i) => {
     box.value = text.lines[i];
-    box.addEventListener('input', () => { while (box.value && g.measureText(box.value).width > SIGN_LINE) box.value = box.value.slice(0, -1); text.lines[i] = box.value; });
+    box.addEventListener('input', () => { while (box.value && g.measureText(box.value).width > kind.limit) box.value = box.value.slice(0, -1); text.lines[i] = box.value; });
     box.addEventListener('keydown', e => {
       e.stopPropagation();
       if (e.key === 'Escape' || (e.key === 'Enter' && i === 3)) { e.preventDefault(); close(); }
@@ -1166,6 +1183,7 @@ function editSign(k, side) {
  * (against it); not under a ceiling, and only on something solid. Then it is written on. True if it was put.
  */
 function placeSign(t, b) {
+  if (b.shape === 'hanging_sign') return placeHangingSign(t, b);
   if (t.face === 3) return false;
   const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face], tb = BLOCKS[t.v & 0xFFF];
   const into = tb.replace, x = into ? t.x : t.x + nx, y = into ? t.y : t.y + ny, z = into ? t.z : t.z + nz, here = G.mirror.get(x, y, z);
@@ -1179,6 +1197,32 @@ function placeSign(t, b) {
   } else {
     if (!tb.solid) return false;
     v = withMeta(ID[b.wallSign], [3, 1, 0, 0, 0, 2][t.face]);
+  }
+  setBlock(x, y, z, v);
+  delete G.tiles[`${x},${y},${z}`];
+  setTimeout(() => editSign(`${x},${y},${z}`, 'front'), 0);
+  return true;
+}
+/**
+ * A hanging sign put up: under a block (or a fence, a wall, a chain …) hanging on its chains — under a full block
+ * turned the four ways nearest to facing the player, under anything else sixteen ways; on the side of a block, on a bar
+ * out of it, its face across the way to the player. Not on a floor. Then it is written on.
+ */
+function placeHangingSign(t, b) {
+  if (t.face === 2) return false;
+  const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face], tb = BLOCKS[t.v & 0xFFF];
+  const x = t.x + nx, y = t.y + ny, z = t.z + nz, here = G.mirror.get(x, y, z), holds = tb.solid || ['fence', 'stonewall', 'chain', 'pane', 'gate'].includes(tb.shape);
+  if ((here && !BLOCKS[here & 0xFFF].replace) || !holds) return false;
+  let v;
+  if (t.face === 3) {
+    const full = (collisionBoxes(t.v) || []).some(q => q[0] === 0 && q[2] === 0 && q[3] === 1 && q[5] === 1 && q[1] === 0), deg = ((G.body.yaw * 180 / Math.PI) % 360 + 360) % 360;
+    let r = Math.floor(16 - deg / 22.5 + 0.5) & 15;
+    if (full && !G.body.sneaking) r = (Math.round(r / 4) * 4) & 15;
+    v = withMeta(b.id, r);
+  } else {
+    // its face looks across the bar, toward the player's side
+    const across = [[nz, -nx], [-nz, nx]], toPlayer = [G.body.x - (x + 0.5), G.body.z - (z + 0.5)], d = across[0][0] * toPlayer[0] + across[0][1] * toPlayer[1] >= 0 ? across[0] : across[1];
+    v = withMeta(ID[b.wallSign], [[1, 0], [-1, 0], [0, 1], [0, -1]].findIndex(([a, c]) => a === d[0] && c === d[1]));
   }
   setBlock(x, y, z, v);
   delete G.tiles[`${x},${y},${z}`];
@@ -1290,6 +1334,8 @@ function campfireThings(light) {
 }
 function breakBlock(t) {
   const {x, y, z, v} = t, b = BLOCKS[v & 0xFFF], survival = G.mode !== 'creative';
+  // string cut with shears gives its hooks no pulse (the game's: it is disarmed first)
+  if (b.name === 'tripwire' && heldTool()?.kind === 'shears') setBlock(x, y, z, withMeta(b.id, v >>> 12 | 4));
   // ice over something becomes water when broken (unless creative)
   const below = G.mirror.get(x, y - 1, z);
   setBlock(x, y, z, b.water || (survival && b.name === 'ice' && below && collisionBoxes(below)) ? ID.water : 0);
@@ -1320,7 +1366,7 @@ const SHEARED = new Set(['short_grass', 'fern', 'dead_bush', 'vine', 'tall_grass
 function facingBack() { const y = ((G.body.yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2); const q = Math.round(y / (Math.PI / 2)) % 4; return [0, 3, 2, 1][q]; }
 function placeFrom(t, stack) {
   const info = itemInfo(stack.id), b = info?.block || (info?.place ? BLOCKS[ID[info.place]] : null);
-  if (b?.shape === 'sign') return placeSign(t, b);
+  if (b?.shape === 'sign' || b?.shape === 'hanging_sign') return placeSign(t, b);
   const [nx, ny, nz] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][t.face];
   const tb = BLOCKS[t.v & 0xFFF];
   // slabs join into a double one, snow layers stack up
@@ -1383,6 +1429,8 @@ function placeFrom(t, stack) {
     // looks); repeaters and comparators send their signal the way the player looks; pistons, dispensers and droppers face
     // the player (up or down too), an observer looks away from them; a hopper's spout goes into what it was put against
     if (b.shape === 'lever' || b.shape === 'button') meta = t.face === 2 ? pf % 2 : t.face === 3 ? 2 + pf % 2 : {4: 4, 1: 5, 5: 6, 0: 7}[t.face];
+    // a tripwire hook goes on the side of a full block, pointing away from it
+    if (b.shape === 'hook') { if (t.face === 2 || t.face === 3) return false; meta = {4: 0, 1: 1, 5: 2, 0: 3}[t.face]; }
     if (b.shape === 'repeater' || b.shape === 'comparator') meta = pf;
     if (b.facing6) meta = b.rs === 'observer' ? look6() : OPPOSITE[look6()];
     if (b.shape === 'hopper') meta = t.face === 2 || t.face === 3 ? 3 : OPPOSITE[t.face];
@@ -1409,8 +1457,11 @@ function placeFrom(t, stack) {
     if (['wire', 'plate', 'repeater', 'comparator', 'rail'].includes(b.shape) && !(ub.opaque || (ub.shape === 'slab' && G.mirror.get(x, y - 1, z) >>> 12 >= 1) || ub.name === 'hopper')) return false;
     if (b.shape === 'lever' || b.shape === 'button') { const [ax, ay, az] = FACES[ATTACHED[meta & 7]]; if (!BLOCKS[G.mirror.get(x + ax, y + ay, z + az) & 0xFFF].opaque) return false; }
     if ((b.shape === 'torch' && meta === 0) && !ub.opaque && ub.shape !== 'slab') return false;
-    // a chest beside a single chest of the same facing (not sneaking) makes a large chest with it
-    if (b.use === 'chest' && !G.body.sneaking) { const half = chestHalf(x, y, z, meta & 3); if (half) meta = (meta & 3) | half << 2; }
+    if (b.shape === 'hook') { const [dx, dz] = DIR[meta]; if (!BLOCKS[G.mirror.get(x - dx, y, z - dz) & 0xFFF].opaque) return false; }
+    // (string not into water or lava)
+    if (b.shape === 'tripwire' && BLOCKS[G.mirror.get(x, y, z) & 0xFFF].shape === 'liquid') return false;
+    // a chest beside a single chest of its kind and facing (not sneaking) makes a large chest with it
+    if (b.use === 'chest' && !G.body.sneaking) { const half = chestHalf(x, y, z, meta & 3, b); if (half) meta = (meta & 3) | half << 2; }
     // put into still water, what can stand in water does (a fence, a slab, a chest, the conduit …)
     const wl = WATERLOGGED[b.id], wv = G.mirror.get(x, y, z);
     if (wl && (wv & 0xFFF) === ID.water && !(wv >>> 12)) v = withMeta(wl, meta);
@@ -1536,6 +1587,43 @@ function platesTick() {
     if (!level) G.plates.delete(k);
     const want = b.rail ? (v >>> 12 & 7) | (level ? 8 : 0) : level;
     if ((v >>> 12) !== want) { setBlock(p.x, p.y, p.z, withMeta(b.id, want)); if (!b.rail) soundAt('click', p.x + 0.5, p.y, p.z + 0.5); }
+  }
+}
+// ---------- tripwire ----------
+// (the world works out the hooks; the page sees what is on each string)
+const TRIP = new Uint8Array(4096);
+TRIP[ID.tripwire] = 1;
+/** The strings in a column the worker sent (as the campfires are kept). */
+function tripwiresIn(m) {
+  const found = [];
+  m.sections.forEach((s, si) => { if (s) for (let i = 0; i < 4096; i++) if (TRIP[s[i] & 0xFFF]) found.push([m.cx * 16 + (i & 15), MINY + si * 16 + (i >> 8), m.cz * 16 + (i >> 4 & 15)]); });
+  const k = `${m.cx},${m.cz}`;
+  if (found.length) G.tripwires.set(k, found); else G.tripwires.delete(k);
+}
+/**
+ * Every other tick, what is on each string: anything at all (the player, mobs, things lying there, arrows, carts and
+ * boats) in its box — over the ground, lower once strung — presses it, and it lets go half a second after the last thing
+ * left it (the game's). The world is told when that changes; it turns the hooks on or off.
+ */
+function tripwiresTick() {
+  if (G.ticks % 2 || !G.tripwires.size) return;
+  const boxes = [];
+  if (!G.dead && G.mode !== 'spectator') boxes.push(G.body.aabb());
+  for (const m of G.mobs.list) if (!m.dead) boxes.push(m.body.aabb());
+  for (const it of G.ents.items) boxes.push([it.x - 0.125, it.y, it.z - 0.125, it.x + 0.125, it.y + 0.25, it.z + 0.125]);
+  for (const a of G.mobs.arrows) boxes.push([a.x - 0.1, a.y - 0.1, a.z - 0.1, a.x + 0.1, a.y + 0.1, a.z + 0.1]);
+  for (const c of [...G.carts.list, ...G.boats.list]) boxes.push(c.body.aabb());
+  for (const list of G.tripwires.values()) for (const [x, y, z] of list) {
+    const v = G.mirror.get(x, y, z), k = `${x},${y},${z}`;
+    if (!TRIP[v & 0xFFF]) { G.tripAt.delete(k); continue; }
+    const y0 = y + (v >>> 12 & 1 ? 1 / 16 : 0), y1 = y + (v >>> 12 & 1 ? 2.5 / 16 : 0.5);
+    if (boxes.some(q => q[0] < x + 1 && q[3] > x && q[1] < y1 && q[4] > y0 && q[2] < z + 1 && q[5] > z)) G.tripAt.set(k, G.ticks);
+    const on = G.ticks - (G.tripAt.get(k) ?? -99) < 10, told = G.tripTold.get(k);
+    if (!on) G.tripAt.delete(k);
+    if (!!(v >>> 12 & 2) === on) { G.tripTold.delete(k); continue; }
+    if (told?.on === on && G.ticks - told.at < 20) continue;
+    G.tripTold.set(k, {on, at: G.ticks});
+    G.worker.postMessage({type: 'trip', x, y, z, on});
   }
 }
 /**
@@ -1890,12 +1978,69 @@ function openBlock(kind, t) {
   const type = BLOCKS[t.v & 0xFFF].cook;
   if (kind === 'furnace') invUI.show('furnace', G.tiles[k] ||= {kind: 'furnace', input: null, fuel: null, output: null, burn: 0, burnMax: 0, cook: 0, ...(type ? {type} : {})});
   if (kind === 'chest') invUI.show('chest', chestView(k, G.tiles[k] ||= {kind: 'chest', slots: lootOf(k, t.x, t.y, t.z) || new Array(27).fill(null)}, t));
+  if (kind === 'chest' && BLOCKS[id].rs === 'trapped') trapOpen(k);
   if (kind === 'barrel') invUI.show('chest', G.tiles[k] ||= {kind: 'chest', slots: new Array(27).fill(null), title: '木桶'});
   if (kind === 'enchant') { G.tiles[k] ||= {kind: 'enchant'}; invUI.show('enchant', {pos: {x: t.x, y: t.y, z: t.z}, shelves: shelvesAround((x, y, z) => G.mirror.get(x, y, z), t.x, t.y, t.z, ID.bookshelf)}); }
   if (kind === 'anvil') invUI.show('anvil', {pos: {x: t.x, y: t.y, z: t.z}});
+  if (kind === 'cartography') invUI.show('cartography', {pos: {x: t.x, y: t.y, z: t.z}});
   if (kind === 'dispenser') invUI.show('chest', G.tiles[k] ||= {kind: 'dispenser', slots: new Array(9).fill(null), title: BLOCKS[t.v & 0xFFF].zh, cols: 3});
   if (kind === 'hopper') invUI.show('chest', G.tiles[k] ||= {kind: 'hopper', slots: new Array(5).fill(null), title: '漏斗', cols: 5});
   if (kind === 'brew') invUI.show('brew', G.tiles[k] ||= {kind: 'brew', slots: [null, null, null, null, null], fuel: 0, time: 0});
+}
+/** A trapped chest opened: the world gives power by it (both halves of a large one) till it is shut. */
+function trapOpen(k) {
+  const tile = G.tiles[k], list = [k];
+  if (tile?.pair && G.tiles[tile.pair]?.pair === k) list.push(tile.pair);
+  G.trapped = list.map(p => p.split(',').map(Number));
+  for (const [x, y, z] of G.trapped) G.worker.postMessage({type: 'trapped', x, y, z, n: 1});
+}
+function trapShut() {
+  if (!G?.trapped) return;
+  for (const [x, y, z] of G.trapped) G.worker.postMessage({type: 'trapped', x, y, z, n: 0});
+  G.trapped = null;
+}
+// ---------- the cartography table ----------
+/**
+ * What a map and what is put with it make at the cartography table (the game's): with an empty map, two of the map;
+ * with paper, the map of four times the land round the same place (a step out, to 1:16 at most; blank till it is walked
+ * again); with a glass pane, a copy locked as it is (never drawn in again). {out, how} — or {why} when it can't; make:
+ * really make the new map (else only what would come out).
+ */
+function cartography(a, b, make = false) {
+  const m = a?.id === 'filled_map' ? G.maps.get(a.map) : null;
+  if (!m || !b) return null;
+  if (b.id === 'map') return {out: {...a, n: 2}, how: 'copy'};
+  if (b.id === 'paper') {
+    if (m.locked) return {why: '锁定的地图不能再缩小'};
+    if (m.kind !== 'map') return {why: '这种地图不能缩小'};
+    if (m.scale >= 4) return {why: '已经缩到最小的比例了（1:16）'};
+    if (!make) return {out: {id: 'filled_map', n: 1, label: '地图'}, how: 'zoom', scale: m.scale + 1};
+    const z = G.maps.add(m.x, m.z, m.dim, m.scale + 1);
+    return {out: {id: 'filled_map', n: 1, map: z.id, label: `地图 #${z.id}`}, how: 'zoom'};
+  }
+  if (b.id === 'glass_pane') {
+    if (m.locked) return {why: '这张地图已经锁定了'};
+    if (!make) return {out: {...a, n: 1}, how: 'lock'};
+    const c = G.maps.copy(m.id, {locked: true});
+    return {out: {...a, n: 1, map: c.id, label: `${m.kind === 'map' ? `地图 #${c.id}` : a.label || '地图'}（已锁定）`}, how: 'lock'};
+  }
+  return null;
+}
+/** A map's picture (the cartography table shows it). */
+function mapPicture(s) {
+  const m = G.maps.get(s?.map), c = document.createElement('canvas');
+  if (!m) return '';
+  c.width = c.height = 128;
+  G.maps.paint(c.getContext('2d'), m, null);
+  return c.toDataURL();
+}
+/**
+ * A cartographer's explorer map, made as it is bought: the coast round the ocean monument nearest the villager, the
+ * monument marked (an empty map when there is none for thousands of blocks).
+ */
+function explorerMap(s, v) {
+  const t = monumentNear(G.meta.seed, v.x, v.z);
+  return t ? G.maps.treasure(G.meta.seed, t, {scale: 2, mark: 'monument', label: s.label}) : {id: 'map', n: 1};
 }
 /** An anvil used: one time in eight-ish (12%) it wears a step (new → chipped → damaged → gone). */
 function anvilUsed() {
@@ -2289,6 +2434,7 @@ function tick() {
     if (was !== lit) { const [x, y, z] = k.split(',').map(Number), v = G.mirror.get(x, y, z); if (BLOCKS[v & 0xFFF]?.use === 'furnace') setBlock(x, y, z, withMeta(v & 0xFFF, (v >>> 12 & 3) | (lit ? 4 : 0))); }
   }
   platesTick();
+  tripwiresTick();
   hoppersTick();
   campfiresTick();
   if (G.ticks % 10 === 0) fillsTick();
@@ -2877,14 +3023,18 @@ async function boot() {
   input = new Input(app, canvas, {rotated: () => rotated, sensitivity: () => settings.sens, onMode: m => { document.body.classList.toggle('touchmode', m === 'touch'); drawHud(true); screens?.markFocus(); }});
   if (isTouch) document.body.classList.add('touchmode'), input.mode = 'touch';
   screens = new Screens($('#screens'), api());
-  invUI = new InventoryUI(invRoot, {get inv() { return G.inv; }, get icons() { return icons; }, drop: s => { const b = G.body; G.ents.drop(s, b.x, b.y + 1.2, b.z, {dir: b.look(), delay: 40}); }, sound: n => play(n), closed: (kind, data) => { if (kind === 'trade') data.v.trading = false; closedInventory(); }, toApp: (x, y) => input.toApp(x, y), rotated: () => rotated, crafted: () => play('place', ID.crafting_table),
+  invUI = new InventoryUI(invRoot, {get inv() { return G.inv; }, get icons() { return icons; }, drop: s => { const b = G.body; G.ents.drop(s, b.x, b.y + 1.2, b.z, {dir: b.look(), delay: 40}); }, sound: n => play(n), closed: (kind, data) => { if (kind === 'trade') data.v.trading = false; trapShut(); closedInventory(); }, toApp: (x, y) => input.toApp(x, y), rotated: () => rotated, crafted: () => play('place', ID.crafting_table),
     // what was smelted gives its experience when taken out
     took: f => { const n = takeSmeltXp(f); if (n) { const b = G.body; G.ents.xp(n, b.x, b.y + 1, b.z); } }, worn: () => play('equip'),
     // the enchanting table and the anvil: the player's levels, creative, paying, the enchanting seed
     xp: () => G.xp, creative: () => G.mode === 'creative', spend: n => { G.xp.level = Math.max(0, G.xp.level - n); drawHud(true); },
     seed: () => G.enchSeed, reseed: () => { G.enchSeed = Math.floor(Math.random() * 2 ** 31); }, anvilUsed: () => anvilUsed(),
     // a trade with a villager: its 「嗯」, a few points of experience for the player (the game's 3–6)
-    traded: v => { play('villager_yes'); const b = G.body; G.ents.xp(3 + Math.floor(Math.random() * 4), v.x, v.y + 1, v.z); }});
+    traded: v => { play('villager_yes'); const b = G.body; G.ents.xp(3 + Math.floor(Math.random() * 4), v.x, v.y + 1, v.z); },
+    // a cartographer's explorer map, made as it is bought; the cartography table: what comes out (made as it is taken),
+    // the map put in and its picture
+    explorerMap: (s, v) => explorerMap(s, v), carto: (a, b) => cartography(a, b), cartoMake: (a, b) => cartography(a, b, true)?.out || null,
+    mapOf: s => G.maps.get(s.map), mapPic: s => mapPicture(s)});
   // tapping the hotbar picks a slot; ⋯ opens the inventory
   $('.hotbar').addEventListener('pointerdown', e => { if (!G || paused) return; const s = e.target.closest('[data-i]'); if (s) { G.hot = Number(s.dataset.i); drawHud(true); } if (e.target.closest('[data-inv]')) openInventory(); e.stopPropagation(); });
   $('.pausebtn').addEventListener('click', () => pause());

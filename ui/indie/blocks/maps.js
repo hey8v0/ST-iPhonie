@@ -2,8 +2,9 @@
 // drawn in as its holder walks over it with the map in hand (one block a pixel, the game's colours, brighter where the
 // land rises to the north and the sea darker where it is deep). A treasure map (from a shipwreck's or a ruin's chest)
 // shows the coast round a buried treasure, two blocks a pixel, with a red X where to dig. Held in the main hand a map
-// shows at the bottom of the screen with a white mark for where its holder is. Maps live in the world's save; a stack
-// carries its map's number.
+// shows at the bottom of the screen with a white mark for where its holder is. At the cartography table a map is copied,
+// zoomed out (a new blank map, twice the scale) or locked (a copy never drawn in again); a cartographer sells an explorer
+// map of the coast round the nearest ocean monument. Maps live in the world's save; a stack carries its map's number.
 import {BLOCKS, ID, MINY} from './blocks.js';
 import {landAt, worldOf, BIOMES} from './gen.js';
 
@@ -39,22 +40,30 @@ export class Maps {
   }
   /** An empty map used at (x, z): the stack of the new map. */
   make(x, z, dim) { const m = this.add(x, z, dim, 0); return {id: 'filled_map', n: 1, map: m.id, label: `地图 #${m.id}`}; }
+  /** A copy of a map under a new number (extra: what is different, as {locked: true}). */
+  copy(id, extra = {}) {
+    const m = this.get(id), c = {...m, id: this.next++, px: new Uint8Array(m.px), ...extra};
+    this.list.set(c.id, c);
+    return c;
+  }
   /**
    * A treasure map for a chest: the coast round a buried treasure (target {x, z}) drawn from the land's kinds (sea or
-   * land, the coast darker, the sea striped), its stack. seed: the world's.
+   * land, the coast darker, the sea striped), its stack. seed: the world's. A cartographer's explorer map is one too, a
+   * step further out (scale 2), its mark the monument's.
    */
-  treasure(seed, target) {
-    const m = this.add(target.x, target.z, 'overworld', 1, 'treasure', [target.x, target.z]), w = worldOf(seed), k = 2;
+  treasure(seed, target, {scale = 1, mark = 'x', label = '藏宝图'} = {}) {
+    const m = this.add(target.x, target.z, 'overworld', scale, 'treasure', [target.x, target.z]), w = worldOf(seed), k = 1 << scale;
+    if (mark !== 'x') m.mark = mark;
     const sea = new Uint8Array(130 * 130);
     for (let py = -1; py <= 128; py++) for (let px = -1; px <= 128; px++) {
-      const name = BIOMES[landAt(w, m.x - 128 + px * k, m.z - 128 + py * k).biome].name;
+      const name = BIOMES[landAt(w, m.x - 64 * k + px * k, m.z - 64 * k + py * k).biome].name;
       sea[(py + 1) * 130 + px + 1] = name.endsWith('ocean') || name.endsWith('river') ? 1 : 0;
     }
     for (let py = 0; py < 128; py++) for (let px = 0; px < 128; px++) {
       const at = (dx, dy) => sea[(py + 1 + dy) * 130 + px + 1 + dx];
       m.px[py * 128 + px] = at(0, 0) ? (py % 4 === 0 && (px + (py >> 2)) % 2 === 0 ? T_STRIPE : T_WATER) : at(1, 0) || at(-1, 0) || at(0, 1) || at(0, -1) ? T_COAST : T_LAND;
     }
-    return {id: 'filled_map', n: 1, map: m.id, label: '藏宝图'};
+    return {id: 'filled_map', n: 1, map: m.id, label};
   }
   /** A block's map colour (the game's for the common ones; the others the nearest to their picture's colour). */
   baseOf(id) {
@@ -76,7 +85,7 @@ export class Maps {
    * way): get(x, y, z) and top(x, z) read the loaded world (top: the highest block, or null where nothing is loaded).
    */
   explore(m, x, z, get, top) {
-    if (m.kind !== 'map') return false;
+    if (m.kind !== 'map' || m.locked) return false;
     const k = 1 << m.scale, cx = Math.floor((x - m.x) / k) + 64, cz = Math.floor((z - m.z) / k) + 64, reach = 64 / k;
     const step = this.step = (this.step + 1) & 7;
     let changed = false;
@@ -123,8 +132,14 @@ export class Maps {
     const k = 1 << m.scale, pos = (x, z) => [(x - m.x) / k + 64, (z - m.z) / k + 64];
     if (m.target) {
       const [tx, ty] = pos(m.target[0], m.target[1]);
-      g.strokeStyle = '#b01818'; g.lineWidth = 2.2;
-      g.beginPath(); g.moveTo(tx - 4, ty - 4); g.lineTo(tx + 4, ty + 4); g.moveTo(tx + 4, ty - 4); g.lineTo(tx - 4, ty + 4); g.stroke();
+      if (m.mark === 'monument') {
+        // an ocean monument: a little stepped temple in sea green
+        g.fillStyle = '#2a9a8a'; g.strokeStyle = '#0d3a34'; g.lineWidth = 1;
+        for (const [w, h, dy] of [[9, 3, 1], [6, 3, -2], [3, 2, -4]]) { g.fillRect(tx - w / 2, ty + dy, w, h); g.strokeRect(tx - w / 2, ty + dy, w, h); }
+      } else {
+        g.strokeStyle = '#b01818'; g.lineWidth = 2.2;
+        g.beginPath(); g.moveTo(tx - 4, ty - 4); g.lineTo(tx + 4, ty + 4); g.moveTo(tx + 4, ty - 4); g.lineTo(tx - 4, ty + 4); g.stroke();
+      }
     }
     if (holder && holder.dim === m.dim) {
       const [hx, hy] = pos(holder.x, holder.z), inside = hx >= 0 && hx < 128 && hy >= 0 && hy < 128;

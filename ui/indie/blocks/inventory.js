@@ -68,6 +68,8 @@ shaped(['#', '#'], {'#': '#planks'}, 'stick', 4);
 shaped(['##', '##'], {'#': '#planks'}, 'crafting_table');
 shaped(['###', '# #', '###'], {'#': '#stone_tool'}, 'furnace');
 shaped(['###', '# #', '###'], {'#': '#planks'}, 'chest');
+shapeless(['chest', 'tripwire_hook'], 'trapped_chest');
+shaped(['i', '|', '#'], {i: 'iron_ingot', '|': 'stick', '#': '#planks'}, 'tripwire_hook', 2);
 shaped(['c', 's'], {c: '#coals', s: 'stick'}, 'torch', 4);
 for (const [mat, key] of [['wooden', '#planks'], ['stone', '#stone_tool'], ['iron', 'iron_ingot'], ['golden', 'gold_ingot'], ['diamond', 'diamond']]) {
   shaped(['XXX', ' S ', ' S '], {X: key, S: 'stick'}, `${mat}_pickaxe`);
@@ -162,6 +164,9 @@ shaped(['#  ', '## ', '###'], {'#': 'nether_bricks'}, 'nether_brick_stairs', 4);
 shapeless(['blaze_powder', '#coals', 'gunpowder'], 'fire_charge', 3);
 shaped([' s ', 'scs', 'LLL'], {s: 'stick', c: '#coals', L: '#logs'}, 'campfire');
 for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) shaped(['###', '###', ' | '], {'#': `${w}_planks`, '|': 'stick'}, `${w}_sign`, 3);
+shaped(['n', 'i', 'n'], {n: 'iron_nugget', i: 'iron_ingot'}, 'chain');
+// hanging signs: two chains over six stripped logs (bamboo: stripped bamboo blocks) make six
+for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo']) shaped(['c c', 'sss', 'sss'], {c: 'chain', s: w === 'bamboo' ? 'stripped_bamboo_block' : `stripped_${w}_log`}, `${w}_hanging_sign`, 6);
 shaped([' s ', 'scs', 'LLL'], {s: 'stick', c: '#soul_soils', L: '#logs'}, 'soul_campfire');
 // ---------- dyes and colours ----------
 // dyes from flowers (two from a tall one), bone meal, cocoa, lapis, beetroot, ink; and mixed
@@ -298,6 +303,7 @@ shaped(['###', '###', '###'], {'#': 'iron_nugget'}, 'iron_ingot'); shapeless(['i
 shaped([' # ', '#R#', ' # '], {'#': 'iron_ingot', R: 'redstone'}, 'compass');
 shaped([' # ', '#R#', ' # '], {'#': 'gold_ingot', R: 'redstone'}, 'clock');
 shaped(['###', '#C#', '###'], {'#': 'paper', C: 'compass'}, 'map');
+shaped(['pp', '##', '##'], {p: 'paper', '#': '#planks'}, 'cartography_table');
 shapeless(['red_mushroom', 'brown_mushroom', 'bowl', '#stew_flowers'], 'suspicious_stew', 1, (out, ids) => ({...out, stew: ids.find(id => STEWS[id])}));
 export const RECIPES = R;
 

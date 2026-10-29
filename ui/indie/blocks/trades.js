@@ -1,7 +1,7 @@
 // Villagers' work and trades, as the game (Java Edition) has them: each profession has its work block and five levels
 // (新手, 学徒, 老手, 专家, 大师); at each level a villager offers two trades picked from that level's list, and trading
 // with it earns it experience toward the next. An offer: {buy: stack, buy2?: stack, sell: stack, uses, max, xp}. Trades
-// for things this world does not have yet (maps, cookies, banners…) are left out.
+// for things this world does not have yet (cookies, banners, item frames…) are left out.
 import {ENCHANTS, chooseEnchants, enchanted, seeded} from './enchant.js';
 import {COLORS} from './blocks.js';
 
@@ -91,6 +91,15 @@ export const PROFESSIONS = {
     [T([S('mutton', 7)], E(1)), T([S('beef', 10)], E(1))],
     [T([S('beef', 10)], E(1)), T([E(1)], S('cooked_beef', 5))],
     [T([S('mutton', 7)], E(1)), T([E(1)], S('cooked_mutton', 5))],
+  ]},
+  // the cartographer: paper, glass panes and compasses bought, empty maps sold, and an explorer map that leads to the
+  // nearest ocean monument (made as it is bought); the woodland map, item frames and banners are not in this world yet
+  cartographer: {zh: '制图师', block: 'cartography_table', levels: [
+    [T([S('paper', 24)], E(1)), T([E(7)], S('map'), 12)],
+    [T([S('glass_pane', 11)], E(1)), T([E(13)], {id: 'filled_map', n: 1, explorer: 'monument', label: '海洋探险家地图'}, 12, S('compass'))],
+    [T([S('compass')], E(1), 12)],
+    [],
+    [],
   ]},
 };
 // what each level's trades give the villager (the game's: 1–2 at first, up to 30 for a master's)

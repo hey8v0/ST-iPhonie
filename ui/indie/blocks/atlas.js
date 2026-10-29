@@ -25,7 +25,7 @@ const scaleTo = (d, w, h, size) => {
  */
 // a large chest's halves: the chest's picture with its border on one side (l, r, t, b) left out, where the halves meet
 // (a pack's made from its chest; ours are drawn so)
-const SEAMED = /^(chest_(?:top|side|front))_([lrtb])$/;
+const SEAMED = /^((?:trapped_)?chest_(?:top|side|front))_([lrtb])$/;
 function seamless(t, side) {
   const {w} = t, h = t.frames[0].length / 4 / w, b = Math.max(1, Math.round(w / 16));
   const frames = t.frames.map(src => {
@@ -89,8 +89,8 @@ export function makeIcons(built) {
       isoPieces(g, b, (name, tint, shade) => face2(name, tint, shade), size);
     } else if (b && ['cube', 'slab', 'cactus', 'farmland', 'layer', 'piston'].includes(b.shape) && b.tex) {
       const t = b.tex, tint = tintColor(b.tint);
-      const top = face(t.all || t.top, tint), side = face(t.all || ((b.facing || b.facing6) && t.front) || t.side, b.name === 'grass_block' ? null : tint);
-      const side2 = face(t.all || t.side, b.name === 'grass_block' ? null : tint);
+      const top = face(t.all || t.top, tint), side = face(t.all || ((b.facing || b.facing6) && t.front) || t.south || t.side, b.name === 'grass_block' ? null : tint);
+      const side2 = face(t.all || t.east || t.side, b.name === 'grass_block' ? null : tint);
       const h = b.shape === 'slab' ? 0.5 : b.shape === 'layer' ? 0.125 : 1;
       // an isometric cube: the top a diamond from (16, 0), the front face on the left, the side on the right; a slab
       // or a snow layer is the lower part of it
@@ -153,7 +153,7 @@ function isoPieces(g, b, face, size) {
     if (role === 'wool') return ['white_wool', color];
     if (role === 'pillow') return ['white_wool', null];
     if (role === 'wood') return ['oak_planks', null];
-    if (role === 'latch') return ['iron_block', null];
+    if (role === 'latch') return [b.tex.latch || 'iron_block', null];
     const t = b.tex;
     if (role === 'base') return [t.base, null];
     if (role === 'compost' || role === 'ready') return [`composter_${role === 'ready' ? 'ready' : 'compost'}`, null];

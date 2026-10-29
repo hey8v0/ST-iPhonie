@@ -65,8 +65,9 @@ export class InventoryUI {
   /** Opens a window: 'player' | 'crafting' | 'furnace' (data: its state) | 'chest' (data: {slots}) | 'creative'. */
   show(kind, data = null) {
     this.kind = kind; this.data = data; this.open = true; this.root.hidden = false;
-    // what is put in while the window is open (crafting grid; the enchanting table's item and lapis; the anvil's two) goes back when it closes
-    this.grid = new Array(kind === 'crafting' ? 9 : kind === 'player' ? 4 : kind === 'enchant' || kind === 'anvil' || kind === 'trade' ? 2 : 0).fill(null);
+    // what is put in while the window is open (crafting grid; the enchanting table's item and lapis; the anvil's two, the
+    // cartography table's) goes back when it closes
+    this.grid = new Array(kind === 'crafting' ? 9 : kind === 'player' ? 4 : kind === 'enchant' || kind === 'anvil' || kind === 'trade' || kind === 'cartography' ? 2 : 0).fill(null);
     this.sel = -1;
     this.focus = 0;
     this.draw();
@@ -95,6 +96,12 @@ export class InventoryUI {
       if (this.kind === 'anvil') {
         add('v', 0, this.grid); add('v', 1, this.grid);
         list.push({key: 'v:out', section: 'vo', get: () => anvilResult(this.grid[0], this.grid[1])?.out || null, set: () => {}, out: 'anvil'});
+      }
+      // the cartography table: a map, and an empty map, paper or a glass pane with it; what comes out
+      if (this.kind === 'cartography') {
+        add('m', 0, this.grid, {accept: s => s.id === 'filled_map'});
+        add('m', 1, this.grid, {accept: s => s.id === 'map' || s.id === 'paper' || s.id === 'glass_pane'});
+        list.push({key: 'm:out', section: 'mo', get: () => this.game.carto?.(this.grid[0], this.grid[1])?.out || null, set: () => {}, out: 'carto'});
       }
       if (this.kind === 'player' || this.kind === 'crafting') {
         this.grid.forEach((_, i) => add('g', i, this.grid));
@@ -183,8 +190,10 @@ export class InventoryUI {
       if (!t || t.i !== first.i) break;
       const c = this.cursor, sell = v.offers[t.i].sell;
       if (how !== 'shift' && c && !(same(c, sell) && c.n + sell.n <= stackMax(c.id))) break;
-      const got = trade(v, t.i, this.grid);
+      let got = trade(v, t.i, this.grid);
       if (!got) break;
+      // (a cartographer's explorer map is made as it is bought)
+      if (got.explorer) got = this.game.explorerMap?.(got, v) || got;
       this.sel = t.i;
       if (how === 'shift') { const left = this.game.inv.add(got); if (left) this.game.drop(left); }
       else if (c) c.n += got.n; else this.cursor = got;
@@ -237,6 +246,14 @@ export class InventoryUI {
       const r = anvilResult(this.grid[0], this.grid[1]), level = this.game.xp?.().level || 0, creative = this.game.creative?.();
       const cost = !r ? '' : r.tooMuch && !creative ? '<p class="cost bad">过于昂贵！</p>' : `<p class="cost${!creative && level < r.cost ? ' bad' : ''}">花费等级：${r.cost}</p>`;
       body = `<h3>铁砧</h3><div class="anvil">${slot(sec('v')[0])}<span class="plus">+</span>${slot(sec('v')[1])}<div class="arrow"></div>${slot(sec('vo')[0], ' big')}</div>${cost}<h3>物品栏</h3>${bag}`;
+    } else if (this.kind === 'cartography') {
+      // the map and what goes with it; a picture of what comes out (two of the map, the map smaller on a bigger sheet, or
+      // with a lock on it); the result, and what it is
+      const r = this.game.carto?.(this.grid[0], this.grid[1]), m = this.grid[0] ? this.game.mapOf?.(this.grid[0]) : null, pic = m ? this.game.mapPic?.(this.grid[0]) : '';
+      const how = r?.out ? r.how : '', img = pic ? `<img src="${pic}" alt="">` : '';
+      const note = r?.why || (how === 'copy' ? '复制：多出一张一样的地图' : how === 'zoom' ? `缩小一级（比例 1:${1 << r.scale}）：画的范围变成四倍；新地图是空白的，拿着走一遍才画上` : how === 'lock' ? '锁定：这张地图以后不会再变'
+        : m ? `比例 1:${1 << m.scale}${m.locked ? ' · 已锁定' : ''}。放纸缩小一级，放空地图复制，放玻璃板锁定` : '放一张地图进来');
+      body = `<h3>制图台</h3><div class="carto"><div class="cin">${sec('m').map(s => slot(s)).join('')}</div><div class="cmap ${how}">${img}${how === 'copy' ? img : ''}${how === 'lock' ? '<i class="lock"></i>' : ''}</div><div class="arrow"></div>${slot(sec('mo')[0], ' big')}</div><p class="cost${r?.why ? ' bad' : ''}">${esc(note)}</p><h3>物品栏</h3>${bag}`;
     } else if (this.kind === 'creative') {
       const tabs = `<div class="tabs">${KINDS.map(([k, label]) => `<button data-tab="${k}" class="${k === this.tab ? 'on' : ''}">${label}</button>`).join('')}</div>`;
       if (this.tab === 'bag') body = `${tabs}<h3>背包</h3><div class="craft">${worn}</div>${bag}`;
@@ -345,6 +362,16 @@ export class InventoryUI {
       if (this.open) this.draw();
       return;
     }
+    if (s.out === 'carto') {
+      // the new map is made as it is taken (into an empty hand, or the inventory with shift); one of each goes into it
+      const got = this.game.carto?.(this.grid[0], this.grid[1])?.out && (!c || how === 'shift') ? this.game.cartoMake?.(this.grid[0], this.grid[1]) : null;
+      if (got) {
+        for (const i of [0, 1]) this.grid[i] = this.grid[i].n > 1 ? {...this.grid[i], n: this.grid[i].n - 1} : null;
+        if (how === 'shift') { const left = this.game.inv.add(got); if (left) this.game.drop(left); } else this.cursor = got;
+        this.game.sound?.('carto');
+      }
+      this.draw(); return;
+    }
     if (s.out === 'craft') {
       const w = this.kind === 'crafting' ? 3 : 2;
       const once = () => { const r = craft(this.grid, w); if (!r) return null; useGrid(this.grid); return r.out; };
@@ -379,6 +406,13 @@ export class InventoryUI {
     // armour goes on, when its slot is free
     const piece = itemInfo(st.id)?.armor, slotFor = piece && (s.section === 'hot' || s.section === 'main') && this.list.find(x => x.worn === piece.slot);
     if (slotFor && !slotFor.get()) { slotFor.set(st); s.set(null); this.game.worn?.(); return; }
+    // to the cartography table: a map on top, an empty map, paper or a glass pane under it
+    const toMap = this.kind === 'cartography' && (s.section === 'hot' || s.section === 'main') ? (st.id === 'filled_map' ? 0 : ['map', 'paper', 'glass_pane'].includes(st.id) ? 1 : -1) : -1;
+    if (toMap >= 0) {
+      const h = this.grid[toMap];
+      if (!h) { this.grid[toMap] = st; s.set(null); } else if (same(h, st)) { const k = Math.min(stackMax(st.id) - h.n, st.n); h.n += k; st.n -= k; if (!st.n) s.set(null); }
+      return;
+    }
     // to the enchanting table (lapis to its place, one item on it) or the anvil's free side
     if ((this.kind === 'enchant' || this.kind === 'anvil') && (s.section === 'hot' || s.section === 'main')) {
       if (this.kind === 'enchant') {

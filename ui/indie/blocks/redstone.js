@@ -1,7 +1,8 @@
 // Redstone, by the game's rules (Java edition), worked out in the world worker, which every block change passes through:
 // what gives power (dust, torches, levers, buttons, pressure plates, the block of redstone, repeaters, comparators,
-// observers, daylight detectors, targets, detector rails) and what answers it (lamps, pistons, doors, trapdoors and gates,
-// TNT, note blocks, bells, dispensers and droppers, hoppers, powered and activator rails).
+// observers, daylight detectors, targets, detector rails, tripwire hooks, trapped chests) and what answers it (lamps,
+// pistons, doors, trapdoors and gates, TNT, note blocks, bells, dispensers and droppers, hoppers, powered and activator
+// rails).
 //
 // Power: a block gives some to each neighbour, and some push it into a solid block ("strong": a torch into the block above
 // it, a lever or button into the block it hangs on, a pressure plate into the block under it, a repeater, comparator or
@@ -25,7 +26,7 @@ const NEAR2 = [];
 for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) <= 2) NEAR2.push([dx, dy, dz]);
 // pushed by a piston: what breaks instead of moving, and what cannot move at all (what keeps things the page holds: chests,
 // furnaces …; bedrock, obsidian, a piston's head or a piston pushed out)
-const BREAKS = new Set(['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'lever', 'button', 'plate', 'door', 'bed', 'tall', 'vine', 'cactus', 'portal']);
+const BREAKS = new Set(['cross', 'crop', 'torch', 'wall', 'layer', 'lantern', 'cocoa', 'carpet', 'wire', 'repeater', 'comparator', 'lever', 'button', 'plate', 'door', 'bed', 'tall', 'vine', 'cactus', 'portal', 'hook', 'tripwire']);
 const KEEPS = new Set(['furnace', 'chest', 'barrel', 'enchant', 'brew', 'dispenser', 'hopper', 'note']);
 const fixed = v => { const b = BLOCKS[v & 0xFFF]; return b.hard < 0 || b.name === 'obsidian' || KIND[b.id] === 'head' || (KIND[b.id] === 'piston' && !!(v >>> 12 & 8)) || KEEPS.has(b.use); };
 const LIQUID = new Set([ID.water, ID.lava]);
@@ -38,6 +39,7 @@ export class Redstone {
     this.was = new Map();      // the last power seen by what answers only a change of it (doors, note blocks, bells)
     this.comps = new Map();    // each comparator's output
     this.fills = new Map();    // how full the page says each container is (0–15), for comparators
+    this.trapped = new Map();  // how many have each trapped chest open (the page says)
     this.flips = new Map(); this.burnt = new Map();   // torches' recent flips; burnt out till
     this.detectors = new Set(); this.daylight = 1; this.dark = 0;
     this.loose = new Set();    // pressure plates and detector rails read back pressed: let go (the page presses them again if something is there)
@@ -56,6 +58,9 @@ export class Redstone {
       case 'block': return strong ? 0 : 15;
       case 'lever': case 'button': return !(m & 8) ? 0 : !strong || t === ATTACHED[m & 7] ? 15 : 0;
       case 'plate': return !strong || t === 3 ? m : 0;
+      // a tripwire hook on: strongly into the block it hangs on (behind it); a trapped chest open: strongly down
+      case 'hook': return !(m & 8) ? 0 : !strong || t === OPPOSITE[F4[m & 3]] ? 15 : 0;
+      case 'trapped': { const n = Math.min(15, this.trapped.get(key(x, y, z)) || 0); return !strong || t === 3 ? n : 0; }
       case 'repeater': return id === ID.repeater_on && t === F4[m & 3] ? 15 : 0;
       case 'comparator': return t === F4[m & 3] ? this.compOut(x, y, z, v) : 0;
       case 'observer': return m & 8 && t === OPPOSITE[m & 7] ? 15 : 0;
@@ -179,6 +184,8 @@ export class Redstone {
         this.later.set(key(x, y, z), this.w.tick + 20);
         if (p === 'detector') this.detectors.add(key(x, y, z));
         if ((p === 'plate' && s[i] >>> 12) || (p === 'rail' && s[i] >>> 12 & 8 && BLOCKS[s[i] & 0xFFF].rail === 'detector')) this.loose.add(key(x, y, z));
+        // (a hook read back on looks along its string again soon: what is on the string says, a pulse is over)
+        if (p === 'hook' && s[i] >>> 12 & 8) this.w.hookDue?.set(key(x, y, z), this.w.tick + 20);
       }
     }
   }
@@ -189,6 +196,12 @@ export class Redstone {
     this.gen++; this.around(x, y, z); this.flush();
   }
 
+  /** The page says how many have a trapped chest open (0: shut); what is round it looks again. */
+  open(x, y, z, n) {
+    const k = key(x, y, z);
+    if (n) this.trapped.set(k, n); else this.trapped.delete(k);
+    this.gen++; this.around(x, y, z); this.flush();
+  }
   /** A part's answer to what changed near it: at once (lamps on, doors, pistons, TNT …) or a few ticks on. */
   answer(x, y, z, v) {
     const id = v & 0xFFF, m = v >>> 12, b = BLOCKS[id], k = key(x, y, z);

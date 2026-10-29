@@ -6,13 +6,15 @@
 // A vertex is 16 bytes: x, y, z (uint16, 1/16 block, from one block before the section's corner), texture layer (uint16), u, v (uint8, 0–16),
 // sky light, block light (uint8, level × 17), shade (uint8: bits 0–1 corner shade, 2–4 face, 5–7 wave kind), tint r, g, b.
 import {BLOCKS, ID, idOf, metaOf} from './blocks.js';
-import {pieces, wireLinks, WIRE_SIDES, LEVER_BASE, railSlope, plantOffset, PICKLES, EGGS} from './shapes.js';
+import {pieces, wireLinks, WIRE_SIDES, LEVER_BASE, railSlope, plantOffset, PICKLES, EGGS, DIR} from './shapes.js';
 
 // shapes drawn from their pieces (shapes.js)
 const PIECED = new Set(['stairs', 'fence', 'gate', 'pane', 'door', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'brewing', 'portal', 'composter', 'lectern', 'bell', 'stonewall', 'carpet', 'button', 'plate', 'detector', 'hopper']);
 // redstone dust's colour at each power (the game's: dark red at nothing, bright red at full)
 const DUST = Array.from({length: 16}, (_, p) => { const f = p / 15, c = v => Math.round(Math.max(0, Math.min(1, v)) * 255); return c(f * 0.6 + (f > 0 ? 0.4 : 0.3)) << 16 | c(f * f * 0.7 - 0.5) << 8 | c(f * f * 0.6 - 0.7); });
 const OPP = [1, 0, 3, 2, 5, 4], AXIS = [0, 0, 1, 1, 2, 2];
+// a side with a picture of its own (the cartography table's), by face
+const SIDE_KEY = ['east', 'west', 'up', 'down', 'south', 'north'];
 
 export const STRIDE = 16;
 const P = 18, P2 = P * P;
@@ -236,7 +238,7 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
     if (f === 2) return tex(t.top);
     if (f === 3) return tex(t.bottom);
     if (b.facing && t.front && f === FRONT[meta & 3]) return tex(t.frontOn && meta & 4 ? t.frontOn : t.front);
-    return tex(t.side);
+    return tex(t[SIDE_KEY[f]] || t.side);
   };
 
   /** A rectangle lying flat at height h (blocks) over the cell, [x0, z0]–[x1, z1] in blocks, its picture where it lies. */
@@ -420,13 +422,51 @@ export function meshSection(pad, light, tint, tex, {ox = 0, oz = 0, wave = true}
         quad(out, [[x + 0.1, lo, z + 0.1], [x + 0.9, lo, z + 0.9], [x + 0.9, hi, z + 0.9], [x + 0.1, hi, z + 0.1]], F, UVQ, lt, lb, WHITE, 3);
         quad(out, [[x + 0.9, lo, z + 0.1], [x + 0.1, lo, z + 0.9], [x + 0.1, hi, z + 0.9], [x + 0.9, hi, z + 0.1]], F, UVQ, lt, lb, WHITE, 3);
       }
-    } else if (shape === 'conduit' || shape === 'sign' || shape === 'wall_sign') {
+    } else if (shape === 'chain') {
+      // a chain (the game's model): two sheets crossed along its axis, each a strip of links three wide
+      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, T = tex(b.tex.all), ax = meta & 3, a = 6.5 / 16, c = 0.5, e = 9.5 / 16;
+      const sheet = (pts, u0) => quad(out, pts.map(([p, q, r]) => [x + p, y + q, z + r]), T, [[u0, 16], [u0 + 3, 16], [u0 + 3, 0], [u0, 0]], lt, lb, WHITE, 0, 2, true);
+      if (ax === 1) { sheet([[0, a, c], [0, e, c], [1, e, c], [1, a, c]], 0); sheet([[0, c, a], [0, c, e], [1, c, e], [1, c, a]], 3); }
+      else if (ax === 2) { sheet([[c, a, 0], [c, e, 0], [c, e, 1], [c, a, 1]], 0); sheet([[a, c, 0], [e, c, 0], [e, c, 1], [a, c, 1]], 3); }
+      else { sheet([[a, 0, c], [e, 0, c], [e, 1, c], [a, 1, c]], 0); sheet([[c, 0, a], [c, 0, e], [c, 1, e], [c, 1, a]], 3); }
+    } else if (shape === 'tripwire') {
+      // string: a thread just over the ground (lower once strung between hooks), out to each side where there is more
+      // string or a hook pointing at it — straight through when it runs along one line (or joins nothing); its picture's
+      // top two rows along it
+      const L0 = L(i), lt = L0 >> 4, lb = L0 & 15, T = tex(b.tex.all), h = y + (meta & 1 ? 1 : 2) / 16, a = 7 / 16, c = 8 / 16;
+      const [s, w, n, e] = DIR.map(([dx, dz], f) => { const o = pad[at(x + dx, y, z + dz)]; return (o & 0xFFF) === id || ((o & 0xFFF) === ID.tripwire_hook && (o >>> 12 & 3) === (f ^ 2)); });
+      const ns = (z0, z1) => quad(out, [[x + a, h, z + z0], [x + c, h, z + z0], [x + c, h, z + z1], [x + a, h, z + z1]], T, [[z0 * 16, 0], [z0 * 16, 2], [z1 * 16, 2], [z1 * 16, 0]], lt, lb, WHITE, 0, 2);
+      const ew = (x0, x1) => quad(out, [[x + x0, h, z + a], [x + x0, h, z + c], [x + x1, h, z + c], [x + x1, h, z + a]], T, [[x0 * 16, 0], [x0 * 16, 2], [x1 * 16, 2], [x1 * 16, 0]], lt, lb, WHITE, 0, 2);
+      if (!w && !e) ns(0, 1);
+      else if (!s && !n) ew(0, 1);
+      else { if (s) ns(0.5, 1); if (n) ns(0, 0.5); if (w) ew(0, 0.5); if (e) ew(0.5, 1); }
+    } else if (shape === 'hook') {
+      // a tripwire hook, laid out pointing north and turned to its facing: the plank on the wall, and out of it the stick
+      // with the iron ring at its end — level, tipped down to the string once strung, a little further down while on;
+      // strung, a piece of string from the ring out to the next
+      const fc = meta & 3, wood = tex(b.tex.wood), iron = tex('iron_block'), L0 = L(i), s0 = out.n;
+      const [deg, cy, rz] = meta & 8 ? [-55, 0, 10] : meta & 4 ? [-45, 1, 9] : [0, 5, 8], cs = Math.cos(deg * Math.PI / 180), sn = Math.sin(deg * Math.PI / 180);
+      const yaw = ([px, py, pz]) => fc === 3 ? [16 - pz, py, px] : fc === 0 ? [16 - px, py, 16 - pz] : fc === 1 ? [pz, py, 16 - px] : [px, py, pz];
+      box(out, x, y, z, 6, 1, 14, 10, 9, 16, () => wood, WHITE);
+      bend(out, s0, x, y, z, yaw);
+      const s1 = out.n;
+      box(out, x, y, z, 7, 4, 9, 9, 6, 14, () => wood, WHITE);
+      bend(out, s1, x, y, z, ([px, py, pz]) => { const dy = py - 5, dz = pz - 14; return yaw([px, 5 + dy * cs - dz * sn, 14 + dz * cs + dy * sn]); });
+      const s2 = out.n;
+      for (const [x0, y0, x1, y1] of [[6, cy + 1, 10, cy + 2], [6, cy - 2, 10, cy - 1], [6, cy - 1, 7, cy + 1], [9, cy - 1, 10, cy + 1]]) box(out, x, y, z, x0, y0, rz, x1, y1, rz + 1, () => iron, WHITE);
+      bend(out, s2, x, y, z, yaw);
+      if (meta & 4) {
+        const [dx, dz] = DIR[fc], h = y + 1 / 16, a = 7 / 16, c = 8 / 16, k = (rz + 1) / 16, T = tex('tripwire'), uv = [[0, 0], [0, 2], [k * 16, 2], [k * 16, 0]];
+        if (dz) { const z0 = dz < 0 ? 0 : 1 - k, z1 = dz < 0 ? k : 1; quad(out, [[x + a, h, z + z0], [x + c, h, z + z0], [x + c, h, z + z1], [x + a, h, z + z1]], T, uv, L0 >> 4, L0 & 15, WHITE, 0, 2); }
+        else { const x0 = dx < 0 ? 0 : 1 - k, x1 = dx < 0 ? k : 1; quad(out, [[x + x0, h, z + a], [x + x0, h, z + c], [x + x1, h, z + c], [x + x1, h, z + a]], T, uv, L0 >> 4, L0 & 15, WHITE, 0, 2); }
+      }
+    } else if (shape === 'conduit' || shape === 'sign' || shape === 'wall_sign' || shape === 'hanging_sign' || shape === 'wall_hanging_sign') {
       // (nothing: the page draws a conduit, its shell or, awake, its cage, eye and whirling water; and signs)
     } else if (PIECED.has(shape)) {
       const near = (dx, dy, dz) => pad[at(x + dx, y + dy, z + dz)];
       for (const {box: [x0, y0, z0, x1, y1, z1], role, seam} of pieces(v, near)) {
         const texFor = f => role === 'half' ? halfTex(b, f, meta, seam) : role === 'main' ? (shape === 'pane' && (f === 2 || f === 3) ? tex(b.tex.edge || b.tex.all) : faceTex(b, f, meta))
-          : role === 'door_top' ? tex(b.tex.top) : role === 'door_bottom' ? tex(b.tex.bottom) : role === 'wood' ? tex('oak_planks') : role === 'latch' ? tex('chest_latch') : role === 'base' ? tex(b.tex.base) : role === 'post' ? tex(b.tex.post)
+          : role === 'door_top' ? tex(b.tex.top) : role === 'door_bottom' ? tex(b.tex.bottom) : role === 'wood' ? tex('oak_planks') : role === 'latch' ? tex(b.tex.latch || 'chest_latch') : role === 'base' ? tex(b.tex.base) : role === 'post' ? tex(b.tex.post)
           : role === 'compost' ? tex('composter_compost') : role === 'ready' ? tex('composter_ready') : role === 'inside' ? tex(b.tex.inside) : tex('white_wool');
         const t = role === 'wool' ? parseInt(b.color.slice(1), 16) : role === 'main' || role === 'half' ? tintC : WHITE;
         // a portal's sheet shows no edge where it meets more of itself

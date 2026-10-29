@@ -43,6 +43,23 @@ export function monumentsNear(seed, x, z, margin = 6) {
   }
   return out;
 }
+/** The middle of the ocean monument nearest a spot (looking out a region at a time, about 6000 blocks at most), or null. */
+export function monumentNear(seed, x, z, radius = 12) {
+  const rx0 = Math.floor(x / REGION), rz0 = Math.floor(z / REGION);
+  let best = null, bestD = Infinity;
+  for (let r = 0; r <= radius; r++) {
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+      const m = monumentIn(seed, rx0 + dx, rz0 + dz);
+      if (!m) continue;
+      const cx = m.x0 + W / 2, cz = m.z0 + W / 2, d = Math.hypot(cx - x, cz - z);
+      if (d < bestD) { bestD = d; best = {x: Math.floor(cx), z: Math.floor(cz)}; }
+    }
+    // (nothing further out can be nearer)
+    if (best && bestD <= r * REGION) return best;
+  }
+  return best;
+}
 /** Whether a point is inside a monument's box (guardians come there). */
 export const inMonument = (m, x, y, z) => x >= m.x0 && x < m.x0 + W && z >= m.z0 && z < m.z0 + W && y >= MONUMENT_Y && y < MONUMENT_Y + H;
 

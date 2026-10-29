@@ -452,6 +452,31 @@ for (const w of SIGN_WOODS) {
   block(`${w}_sign`, `${SIGN_ZH[w]}告示牌`, {tex: all(`${w}_planks`), shape: 'sign', pass: 'cutout', hard: 1, tool: T.AXE, solid: false, opaque: false, filter: 0, signWood: w, wallSign: `${w}_wall_sign`, itemIcon: `${w}_sign`, cat: 'use'});
   block(`${w}_wall_sign`, `${SIGN_ZH[w]}告示牌`, {tex: all(`${w}_planks`), shape: 'wall_sign', pass: 'cutout', hard: 1, tool: T.AXE, solid: false, opaque: false, filter: 0, signWood: w, item: false, drop: `${w}_sign`, cat: 'use'});
 }
+// ---------- after 0.8.84 ----------
+// a chain: iron links along an axis (its state, as a log's), thin to walk into; it can stand in water
+const CHAIN = block('chain', '锁链', {tex: all('chain'), shape: 'chain', pass: 'cutout', hard: 5, tool: T.PICK, tier: 0, axis: true, opaque: false, filter: 0, itemIcon: 'chain_item', cat: 'build'});
+{ const {id, name, ...rest} = CHAIN; WATERLOGGED[id] = block(`waterlogged_${name}`, CHAIN.zh, {...rest, ...WET, item: false, dry: name}).id; }
+// hanging signs, a pair for each wood: one hanging from under a block on two chains (turned sixteen ways; under
+// something less than a full block its chains meet in a V), one hanging from a bar out of a wall (its state the way its
+// face looks). Both are written on, on either side.
+for (const w of SIGN_WOODS) {
+  block(`${w}_hanging_sign`, `悬挂式${SIGN_ZH[w]}告示牌`, {tex: all(`${w}_planks`), shape: 'hanging_sign', pass: 'cutout', hard: 1, tool: T.AXE, solid: false, opaque: false, filter: 0, signWood: w, wallSign: `${w}_wall_hanging_sign`, itemIcon: `${w}_hanging_sign`, cat: 'use'});
+  block(`${w}_wall_hanging_sign`, `悬挂式${SIGN_ZH[w]}告示牌`, {tex: all(`${w}_planks`), shape: 'wall_hanging_sign', pass: 'cutout', hard: 1, tool: T.AXE, solid: false, opaque: false, filter: 0, signWood: w, item: false, drop: `${w}_hanging_sign`, cat: 'use'});
+}
+// tripwire hooks (state: bits 0–1 the way the hook points, 0 south, 1 west, 2 north, 3 east; 4 strung to a hook facing
+// it; 8 on) and the string between two of them, forty at most (state: 1 strung, 2 something on it, 4 cut with shears).
+// Something on the string turns both hooks on: power round them, and strongly into the block each hangs on; string
+// broken (but not cut with shears) gives a pulse. How: world.js (the hooks look along their string) and the page (what
+// is on it).
+block('tripwire_hook', '绊线钩', {tex: {all: 'tripwire_hook', wood: 'oak_planks'}, shape: 'hook', pass: 'cutout', hard: 0, ...RS, rs: 'hook', itemIcon: 'tripwire_hook'});
+block('tripwire', '绊线', {tex: all('tripwire'), shape: 'tripwire', pass: 'cutout', hard: 0, ...RS, item: false, drop: 'string'});
+// the trapped chest: a chest that gives power while it is open, strongly into the block under it; it makes a large
+// chest only with another trapped chest (and stands in water, as a chest does)
+const TRAPPED_CHEST = block('trapped_chest', '陷阱箱', {tex: {top: 'trapped_chest_top', bottom: 'trapped_chest_top', side: 'trapped_chest_side', front: 'trapped_chest_front', latch: 'trapped_chest_latch'}, shape: 'chest', hard: 2.5, tool: T.AXE, facing: true, use: 'chest', opaque: false, filter: 0, rs: 'trapped', cat: 'redstone'});
+{ const {id, name, ...rest} = TRAPPED_CHEST; WATERLOGGED[id] = block(`waterlogged_${name}`, TRAPPED_CHEST.zh, {...rest, ...WET, item: false, dry: name}).id; }
+// the cartography table (each side its own picture, as the game's): maps copied, zoomed out and locked; a
+// cartographer's work block
+block('cartography_table', '制图台', {tex: {top: 'cartography_table_top', bottom: 'dark_oak_planks', side: 'cartography_table_side3', south: 'cartography_table_side1', west: 'cartography_table_side2'}, hard: 2.5, tool: T.AXE, use: 'cartography', cat: 'use'});
 
 // what burns, and how readily (the game's: [how much it draws fire to the air by it, how likely it is to catch and burn
 // away]): wood shaped and wooden things 5/20, logs and wood 5/5, leaves 30/60, wool 30/60, plants 60/100 …; what stands
@@ -556,6 +581,8 @@ item('slime_ball', '黏液球');
 for (const [n, zh] of [['minecart', '矿车'], ['chest_minecart', '运输矿车'], ['furnace_minecart', '动力矿车'], ['tnt_minecart', 'TNT 矿车'], ['hopper_minecart', '漏斗矿车']])
   item(n, zh, {stack: 1, cart: n, cat: 'redstone'});
 I.redstone.place = 'redstone_wire';
+// string put down is a tripwire
+I.string.place = 'tripwire';
 // boats: one of each wood (bamboo's is a raft), and one with a chest; they burn a minute
 export const BOAT_WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo'];
 const WOOD_ZH = {oak: '橡木', spruce: '云杉木', birch: '白桦木', jungle: '丛林木', acacia: '金合欢木', dark_oak: '深色橡木', mangrove: '红树木', cherry: '樱花木'};
@@ -590,7 +617,7 @@ item('suspicious_stew', '迷之炖菜', {food: 6, sat: 7.2, stack: 1, bowl: true
 item('compass', '指南针', {icon: 'compass_16', dial: 'compass'});
 item('clock', '时钟', {icon: 'clock_00', dial: 'clock'});
 item('map', '空地图');
-item('filled_map', '地图', {stack: 1, hidden: true});
+item('filled_map', '地图', {hidden: true});
 
 export const ITEMS = I;
 
@@ -603,8 +630,8 @@ export function itemInfo(name) {
   const b = BY_NAME[name];
   if (b && b.item) {
     const wood = WOOD_FUEL.test(name), door = WOOD_DOOR.test(name);
-    return {name, zh: b.zh, block: b, icon: null, cat: b.cat, stack: door || b.shape === 'bed' ? (b.shape === 'bed' ? 1 : 64) : b.shape === 'sign' ? 16 : 64,
-      fuel: /_(planks|log)$/.test(name) || wood ? 15 : door || b.shape === 'sign' ? 10 : WOOD_SLAB.test(name) ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'bookshelf' || name === 'ladder' ? 15
+    return {name, zh: b.zh, block: b, icon: null, cat: b.cat, stack: door || b.shape === 'bed' ? (b.shape === 'bed' ? 1 : 64) : b.shape === 'sign' || b.shape === 'hanging_sign' ? 16 : 64,
+      fuel: /_(planks|log)$/.test(name) || wood ? 15 : door || b.shape === 'sign' || b.shape === 'hanging_sign' ? 10 : WOOD_SLAB.test(name) ? 7.5 : name === 'crafting_table' || name === 'chest' || name === 'trapped_chest' || name === 'cartography_table' || name === 'bookshelf' || name === 'ladder' ? 15
         : /_sapling$|_propagule$/.test(name) ? 5 : name === 'bamboo' ? 2.5 : name === 'coal_block' ? 800 : name === 'dried_kelp_block' ? 200 : 0};
   }
   return I[name] || null;
