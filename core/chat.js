@@ -401,7 +401,7 @@ export function knowsRule(names, user, {prompts = {}, group = false} = {}) {
   const one = names.length === 1 ? names[0] : '';
   return promptText(prompts, 'knows', 'text', {'谁': one || '各人', '每个人': one || '每个人', '用户': user, '告诉': one ? ' TA ' : '自己', '某人': one || '一个人', '那人': one || '这个人', '群聊': group});
 }
-export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', nudge = false, pictures = []}) {
+export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', groups = '', nudge = false, pictures = []}) {
   const group = thread.type === 'group';
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
@@ -417,11 +417,13 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     '聊天对象资料': members.map(m => `- ${m.name}：${(m.persona || m.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n'),
     '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': story.map(s => `${s.name}：${s.text}`).join('\n'),
     '论坛': forum.trim() ? promptText(prompts, 'chat-forum', 'text', {'论坛内容': forum.trim()}) : '',
+    // a private chat: what was said lately in the groups the contact is in too
+    '同群': !group && groups.trim() ? promptText(prompts, 'chat-groups', 'text', {'用户': user, '对象': partner, '群消息': groups.trim()}) : '',
     '记忆': memory.trim(),
     '知情范围': story.length || earlier.trim() ? knowsRule(group ? members.map(m => m.name) : [partner], user, {group, prompts}) : '',
     '名单': members.map(m => m.name).join('、'),
     '语音': speakers.length > 0, '语音格式': voiceFormat, '语音语言': speakers.map(m => `${m.name}：${languageName(m.language || 'zh')}`).join('，'),
-    '出图': images, '表情包': stickers.slice(-80).map(s => s.name ?? s).join('、'), '打电话': dialing, '朋友圈': posting, '分享歌曲': !!music?.share, '删好友': !group && !asking,
+    '出图': images, '表情包': stickers.slice(-80).map(s => s.name ?? s).join('、'), '打电话': dialing, '朋友圈': posting, '分享歌曲': !!music?.share, '删好友': !group && !asking, '私聊': group,
     '正在听': music?.listening ? listeningNote(music.listening, user, prompts) : '', '好友申请': asking, '看图': pictures.length > 0});
   // pictures: [{id, url}] — photos sent along for a model that sees; the record numbers them [图片1], [图片2]… in order.
   const seen = new Map(pictures.map((p, i) => [p.id, i + 1]));
@@ -441,7 +443,7 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
 
 const NAME_LINE = /^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]\s*(.*)$/;
 const unquote = s => s.trim().replace(/^[「“"『](.*)[」”"』]$/s, '$1').trim();
-const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|配图|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
+const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|配图|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|私聊|私信|悄悄话|私发|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
 const LUCKY = ['6.66', '8.88', '5.20', '13.14', '16.80', '1.88'];
 // Drawing tags from what the model wrote: the English words (Chinese in them is left out), comma separated.
 const tagsOf = s => String(s).replace(/[一-鿿]+/g, ' ').split(/[,，]/).map(t => t.replace(/\s+/g, ' ').trim()).filter(Boolean).join(', ').slice(0, 600);
@@ -473,6 +475,8 @@ function special(from, content, {names, user, stickers = []}) {
     case '打电话': case '语音通话': case '来电': return {from, kind: 'call', reason: (text || arg.trim()).slice(0, 200)};
     // A song shared (「[分享歌曲] 歌名 - 歌手｜想说的话」): a card the user can play.
     case '分享歌曲': case '分享音乐': case '分享歌': case '歌曲': case '音乐': { const [what, ...note] = (arg.trim() ? arg.trim() + (text ? '｜' + text : '') : text).split(/[|｜]/); const song = songOf(what); return song.title ? {from, kind: 'song', song, text: note.join(' ').trim().slice(0, 200)} : null; }
+    // 「[私聊] …」 in a group: what someone says to the user alone (it goes to that one's private chat, not the group).
+    case '私聊': case '私信': case '悄悄话': case '私发': { const said = (arg.trim() ? arg.trim() + (text ? ' ' + text : '') : text).slice(0, 4000); return said ? {from, kind: 'dm', text: said} : null; }
     // 删好友: the contact deletes the user; answering the user's 好友申请.
     case '删除好友': case '删好友': case '拉黑': return {from, kind: 'unfriend'};
     case '通过好友': case '通过好友申请': case '同意好友': case '接受好友': return {from, kind: 'befriend'};

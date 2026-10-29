@@ -6,7 +6,7 @@
 // away.
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, empty, help} from './common.js';
 import {icon} from './icons.js';
-import {BGM_MODES, BGM_MODE_NAMES, DEFAULT_BGM_RULE, SELF_HOSTED, PLAY_MODES, PLAY_MODE_NAMES, titleFromFile, normalizeSource, bestMatch} from '../core/music.js';
+import {BGM_MODES, BGM_MODE_NAMES, DEFAULT_BGM_RULE, SELF_HOSTED, PLAY_MODES, PLAY_MODE_NAMES, GROUP_KINDS, MUSIC_LIMITS, titleFromFile, normalizeSource, bestMatch} from '../core/music.js';
 
 const clock = s => !Number.isFinite(s) || s <= 0 ? '0:00' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const label = t => t ? (t.artist ? `${t.title} - ${t.artist}` : t.title) : '';
@@ -22,13 +22,17 @@ const SOURCE_FIELDS = [
   ['urlPath', '播放链接在哪', 'url 或 data.url'],
   ['lyricPath', '歌词在哪', 'lyric']
 ];
-// searching albums and artists (optional): where to search, where the list is, where an album's or artist's songs are
+// searching albums, artists and playlists (optional): where to search, where the list is, where one's songs are
 const GROUP_FIELDS = [
   ['albumSearch', '搜专辑的地址', 'https://…?keywords={{query}}&offset={{offset}}'], ['albumListPath', '专辑列表在哪', 'result.albums'],
   ['albumSongs', '专辑里的歌的地址', 'https://…/album?id={{id}}'], ['albumSongsPath', '专辑的歌在哪', 'songs'],
   ['artistSearch', '搜歌手的地址', 'https://…?keywords={{query}}&offset={{offset}}'], ['artistListPath', '歌手列表在哪', 'result.artists'],
-  ['artistSongs', '歌手的歌的地址', 'https://…/artist/songs?id={{id}}&offset={{offset}}'], ['artistSongsPath', '歌手的歌在哪', 'songs']
+  ['artistSongs', '歌手的歌的地址', 'https://…/artist/songs?id={{id}}&offset={{offset}}'], ['artistSongsPath', '歌手的歌在哪', 'songs'],
+  ['playlistSearch', '搜歌单的地址', 'https://…?keywords={{query}}&offset={{offset}}'], ['playlistListPath', '歌单列表在哪', 'result.playlists'],
+  ['playlistSongs', '歌单里的歌的地址', 'https://…/playlist/track/all?id={{id}}&limit={{limit}}&offset={{offset}}'], ['playlistSongsPath', '歌单的歌在哪', 'songs']
 ];
+// the songs of a 歌单 shown at a time (more on asking), and of an album, artist or playlist opened from the search
+const STEP = 100, GROUP_SHOWN = 200;
 const MODE_ICON = {order: 'repeat', shuffle: 'shuffle', one: 'repeat1'};
 
 export function musicApp(ctx) {
@@ -37,8 +41,9 @@ export function musicApp(ctx) {
   // 正文点的歌; what the search looks for (单曲 / 专辑 / 歌手), the albums or artists found, the page, whether there is
   // more; an album or artist opened: {g, songs, page, more, loading, error}
   let heard = [], kind = 'song', groups = [], page = 0, more = false, group = null;
-  // the 歌单 the user made; the one shown ('' for 全部) and the songs shown
-  let lists = [], shelf = '', shown = [];
+  // the 歌单 the user made; the one shown ('' for 全部) and its songs; what the filter looks for in them, how many show;
+  // 多选: the songs picked (null when not picking)
+  let lists = [], shelf = '', shown = [], filter = '', limit = STEP, picked = null;
   const state = () => api.getState().music;
   const now = () => { try { return api.musicStatus?.() || null; } catch { return null; } };
 
@@ -89,12 +94,28 @@ export function musicApp(ctx) {
     }
   }
   const where = (s, list) => list === 'results' || list === 'group' ? ' · ' + esc(s.sourceName || '') : list === 'heard' ? '' : s.origin === 'source' ? ' · ' + esc(state().sources.find(x => x.id === s.source)?.name || '音源') : ' · 本机';
-  const songRow = (s, i, list) => `<div class="list-row music-row" data-list="${list}" data-i="${i}"><button type="button" class="music-row-main" data-action="play" data-list="${list}" data-i="${i}"><span><strong>${esc(s.title)}</strong><small>${esc(s.artist || '未知歌手')}${where(s, list)}</small></span></button>${
-    list === 'results' || list === 'group' ? btn('save-song', icon('add'), 'icon-button', `data-list="${list}" data-i="${i}" aria-label="加进歌单"`)
+  // (in 多选 a song of the 歌单 is ticked on and off instead of played)
+  const songRow = (s, i, list) => `<div class="list-row music-row${list === 'library' && picked?.has(s.id) ? ' picked' : ''}" data-list="${list}" data-i="${i}"><button type="button" class="music-row-main" data-action="play" data-list="${list}" data-i="${i}"${list === 'library' && picked ? ` aria-pressed="${picked.has(s.id)}"` : ''}><span><strong>${esc(s.title)}</strong><small>${esc(s.artist || '未知歌手')}${where(s, list)}</small></span></button>${
+    list === 'library' && picked ? `<span class="music-check" aria-hidden="true">${picked.has(s.id) ? icon('check') : ''}</span>`
+    : list === 'results' || list === 'group' ? btn('save-song', icon('add'), 'icon-button', `data-list="${list}" data-i="${i}" aria-label="加进歌单"`)
     : list === 'heard' ? btn('heard-save', icon('add'), 'icon-button', `data-i="${i}" aria-label="加进歌单"`) + btn('heard-forget', icon('trash'), 'icon-button', `data-i="${i}" aria-label="从正文点的歌里拿掉"`)
     : btn('song-menu', icon('more'), 'icon-button', `data-i="${i}" aria-label="这首歌的选项"`)}</div>`;
-  /** An album or an artist found: opens its songs. */
-  const groupRow = (g, i) => `<div class="list-row music-row"><button type="button" class="music-row-main" data-action="open-group" data-i="${i}"><span><strong>${esc(g.name)}</strong><small>${esc([g.kind === 'album' ? g.artist || '专辑' : '歌手', g.count ? `${g.count} 首` : '', g.sourceName].filter(Boolean).join(' · '))}</small></span></button>${icon('next')}</div>`;
+  /** What an album, an artist or a playlist found is: an album's artist, who made a playlist; how many songs. */
+  const groupNote = g => [g.kind === 'album' ? g.artist || '专辑' : g.kind === 'playlist' ? (g.artist ? `${g.artist} 的歌单` : '歌单') : '歌手', g.count ? `${g.count} 首` : '', g.sourceName].filter(Boolean).join(' · ');
+  /** An album, an artist or a playlist found: opens its songs. */
+  const groupRow = (g, i) => `<div class="list-row music-row"><button type="button" class="music-row-main" data-action="open-group" data-i="${i}"><span><strong>${esc(g.name)}</strong><small>${esc(groupNote(g))}</small></span></button>${icon('next')}</div>`;
+  /** The songs of the 歌单 shown that the filter finds: [[song, its place in the 歌单], …]. */
+  const foundRows = () => { const q = filter.trim().toLowerCase(); return shown.map((x, i) => [x, i]).filter(([x]) => !q || `${x.title} ${x.artist}`.toLowerCase().includes(q)); };
+  /** The rows of the 歌单 shown (those found, `limit` of them), more on asking; in 多选 the bar of what to do with them. */
+  function libraryRows() {
+    const found = foundRows(), here = lists.find(p => p.id === shelf), none = picked && !picked.size ? 'disabled' : '';
+    return (found.length ? `<div class="group">${found.slice(0, limit).map(([x, i]) => songRow(x, i, 'library')).join('')}</div>` : `<p class="hint">没有找到「${esc(filter.trim())}」</p>`)
+      + (found.length > limit ? `<div class="actions">${btn('show-more', `再显示 ${Math.min(STEP, found.length - limit)} 首（还有 ${found.length - limit} 首）`, 'secondary')}</div>` : '')
+      + (picked ? `<div class="savebar music-pickbar"><span class="music-picked">已选 ${picked.size} 首</span>${btn('pick-all', found.length && found.every(([x]) => picked.has(x.id)) ? '全不选' : '全选', 'secondary small')}`
+        + `${btn('pick-add', '加到歌单', 'secondary small', none)}${here ? btn('pick-out', '拿掉', 'secondary small', none) : ''}${btn('pick-delete', '删除', 'danger small', none)}</div>` : '');
+  }
+  /** Draws the rows of the 歌单 again (the filter, more of them, ticks), keeping the rest of the page as it is. */
+  const redrawRows = () => { const box = v.root.querySelector('[data-music-list]'); if (box) box.innerHTML = libraryRows(); };
   /** The songs of the 正文点的歌 list as the player takes them (found on a source already, or to be looked up by name). */
   const heardTracks = () => heard.map(s => ({title: s.title, artist: s.artist, ...(s.source && s.songId ? {origin: 'source', source: s.source, songId: s.songId} : {})}));
 
@@ -111,7 +132,7 @@ export function musicApp(ctx) {
     const mine = lists.find(p => p.id === shelf) || null;
     if (!mine) shelf = '';
     shown = mine ? mine.songs.map(id => byId.get(id)).filter(Boolean) : songs;
-    const kinds = [['song', '单曲'], ...(sources.some(x => x.albumSearch) ? [['album', '专辑']] : []), ...(sources.some(x => x.artistSearch) ? [['artist', '歌手']] : [])];
+    const kinds = [['song', '单曲'], ...Object.entries(GROUP_KINDS).filter(([k]) => sources.some(x => x[k + 'Search']))];
     if (!kinds.some(([k]) => k === kind)) kind = 'song';
     const found = kind === 'song' ? results : groups;
     const list = tab === 'heard'
@@ -121,11 +142,11 @@ export function musicApp(ctx) {
       : tab === 'library'
       ? `<div class="filter-row music-shelves" role="group" aria-label="歌单">${btn('shelf', `全部 <small>${songs.length}</small>`, '', `data-shelf="" aria-pressed="${!mine}"`)}${lists.map(p => p === mine ? btn('list-menu', `${esc(p.name)} <small>${p.songs.filter(id => byId.has(id)).length}</small>${icon('more')}`, '', `data-shelf="${esc(p.id)}" aria-pressed="true" title="再点一下改名字或删掉"`) : btn('shelf', `${esc(p.name)} <small>${p.songs.filter(id => byId.has(id)).length}</small>`, '', `data-shelf="${esc(p.id)}" aria-pressed="false"`)).join('')}${btn('new-list', icon('add') + (lists.length ? '' : '新建歌单'), '', 'aria-label="新建歌单"')}</div>`
         + `<div class="actions music-tools" style="margin-top:0"><label class="primary file-button">${icon('add')}添加本机的歌<input type="file" data-music-file multiple accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" aria-label="选择音乐文件"></label>${shown.length ? btn('play-all', icon('play', true) + '全部播放', 'secondary') + btn('play-mixed', icon('shuffle'), 'icon-button', 'aria-label="和正文点的歌一起放" title="和正文点的歌一起放"') : ''}</div>`
-        + (shown.length ? `<div class="group">${shown.map((x, i) => songRow(x, i, 'library')).join('')}</div>`
+        + (shown.length ? `${shown.length > 1 ? `<div class="music-filter"><input type="search" data-music-filter value="${esc(filter)}" placeholder="在这 ${shown.length} 首里找" aria-label="在歌单里找歌">${btn(picked ? 'pick-done' : 'pick-start', picked ? '完成' : icon('check') + '多选', 'secondary small')}</div>` : ''}<div data-music-list>${libraryRows()}</div>`
           : mine ? empty('这个歌单还是空的', '在「搜索」「正文点的歌」里点 ＋ 放进来，或者在「全部」里点歌右边的「⋯」选它；也可以直接添加本机的歌。', 'music')
           : empty('歌单还是空的', '添加手机或电脑里的歌（文件名是「歌手 - 歌名」会自动认出歌手），或者在「搜索」里找歌加进来。', 'music'))
       : (kinds.length > 1 ? `<div class="segmented music-kinds" role="group" aria-label="搜什么">${kinds.map(([k, l]) => `<button data-action="kind" data-kind="${k}" aria-pressed="${kind === k}">${l}</button>`).join('')}</div>` : '')
-        + `<form class="music-search" data-music-search><input type="search" data-music-query value="${esc(query)}" placeholder="${!sources.length ? '先在设置里添加音源' : kind === 'album' ? '专辑名' : kind === 'artist' ? '歌手名' : '歌名、歌手'}" aria-label="搜歌" ${sources.length ? '' : 'disabled'}>${btn('search', icon('search'), 'round-button', `aria-label="搜索" ${sources.length && !searching ? '' : 'disabled'}`)}</form>`
+        + `<form class="music-search" data-music-search><input type="search" data-music-query value="${esc(query)}" placeholder="${!sources.length ? '先在设置里添加音源' : GROUP_KINDS[kind] ? GROUP_KINDS[kind] + '名' : '歌名、歌手'}" aria-label="搜歌" ${sources.length ? '' : 'disabled'}>${btn('search', icon('search'), 'round-button', `aria-label="搜索" ${sources.length && !searching ? '' : 'disabled'}`)}</form>`
         + searchErrors.map(e => `<p class="hint">「${esc(e.source)}」：${esc(e.message)}</p>`).join('')
         + (found.length ? `<div class="group">${kind === 'song' ? results.map((x, i) => songRow(x, i, 'results')).join('') : groups.map(groupRow).join('')}</div>`
           : !sources.length ? empty('还没有音源', '插件不自带音源。在右上角「设置 → 音源」里添加你自己的音源地址，就能在这里搜歌。', 'search') : '')
@@ -145,15 +166,39 @@ export function musicApp(ctx) {
     paintNow();
   }
 
-  /** An album or an artist opened from the search: its songs (more pages for sources that give them so). */
+  /** An album, an artist or a playlist opened from the search: its songs (more pages for sources that give them so;
+   *  the first GROUP_SHOWN listed, all of them taken in by 全部加进歌单). */
   function renderGroup() {
-    const g = group.g;
-    v.draw(heading(g.name, '', g.kind === 'album' ? 'Album' : 'Artist')
-      + `<p class="hint" style="margin-top:0">${esc([g.kind === 'album' ? g.artist : '歌手', g.count ? `${g.count} 首` : '', g.sourceName].filter(Boolean).join(' · '))}</p>`
-      + (group.songs.length ? `<div class="actions" style="margin-top:0">${btn('group-play', icon('play', true) + '全部播放', 'primary')}${btn('group-save', icon('add') + '全部加进歌单', 'secondary')}</div><div class="group">${group.songs.map((x, i) => songRow(x, i, 'group')).join('')}</div>` : '')
-      + (group.loading ? '<p class="hint" role="status">正在取歌……</p>' : '')
+    const g = group.g, n = group.songs.length;
+    v.draw(heading(g.name, '', {album: 'Album', artist: 'Artist', playlist: 'Playlist'}[g.kind] || 'Album')
+      + `<p class="hint" style="margin-top:0">${esc(groupNote(g))}</p>`
+      + (n ? `<div class="actions" style="margin-top:0">${btn('group-play', icon('play', true) + '全部播放', 'primary')}${btn('group-save', icon('add') + '全部加进歌单', 'secondary', group.taking ? 'disabled' : '')}</div><div class="group">${group.songs.slice(0, GROUP_SHOWN).map((x, i) => songRow(x, i, 'group')).join('')}</div>`
+        + (n > GROUP_SHOWN ? `<p class="hint">这里列出前 ${GROUP_SHOWN} 首（已取到 ${n} 首），「全部加进歌单」会加全部。</p>` : '') : '')
+      + (group.loading ? `<p class="hint" role="status">${group.taking ? `正在取歌：${n}${g.count ? ' / ' + g.count : ''} 首……` : '正在取歌……'}</p>` : '')
       + (group.error ? `<p class="hint">${esc(group.error)}</p>` : !group.loading && !group.songs.length ? '<p class="hint">里面没有歌</p>' : '')
       + (group.more && !group.loading ? `<div class="actions">${btn('group-more', '加载更多', 'secondary')}</div>` : ''));
+  }
+  /**
+   * 全部加进歌单: the pages not loaded yet are fetched first (as many at a time as the source's address lets ask for;
+   * a source counting in pages keeps its own page size), then all go in at once.
+   */
+  async function keepGroup() {
+    const g = group;
+    if (g.more) {
+      const tpl = state().sources.find(x => x.id === g.g.source)?.[g.g.kind + 'Songs'] || '', size = /\{\{offset\}\}/.test(tpl) ? MUSIC_LIMITS.bulk : 50;
+      g.loading = g.taking = true; renderGroup();
+      try {
+        while (g.more && group === g && g.songs.length < MUSIC_LIMITS.songs) {
+          const got = await api.groupSongs(g.g.source, g.g.kind, g.g.id, ++g.page, {limit: size, offset: g.songs.length});
+          g.songs = [...g.songs, ...got.songs]; g.more = !!got.more && got.songs.length > 0;
+          if (group === g && !v.disposed && mode === 'group') renderGroup();
+        }
+      } catch (error) { g.error = error.message; }
+      g.loading = g.taking = false;
+      if (group !== g || v.disposed) return;
+      renderGroup();
+    }
+    if (g.songs.length) await keep(g.songs.map(s => ({title: s.title, artist: s.artist, source: s.source, songId: s.id})), `「${g.g.name}」的 ${g.songs.length} 首歌`);
   }
   async function loadGroup() {
     const g = group, mine = group;
@@ -184,7 +229,7 @@ export function musicApp(ctx) {
     v.draw(heading(editing.index < 0 ? '添加音源' : '编辑音源', '', 'Source')
       + (editing.index < 0 ? groupTitle('自己搭的后端', help('在自己电脑上、或者手机的 Termux 里跑音乐接口程序（比如网易云音乐 API 这一类）的话，填上它的地址，下面的格式会自动填好。酒馆里装了提供音乐接口的服务端插件的话，地址写成酒馆自己的地址（以 / 开头，比如 /api/plugins/插件名/search?…），会带着酒馆的登录去问。插件不带任何别人的服务器地址。\n\n电脑上跑的后端，手机要用电脑的局域网地址（比如 http://192.168.1.5:3000）。会员歌要看你的后端有没有登录。')) + `<div class="group pad">${SELF_HOSTED.map(t => `<div class="field"><span>${esc(t.name)}</span><div class="music-selfhost">${t.local ? '<small class="hint" style="flex:1;margin:0">装在你酒馆里，不用填地址</small>' : input('base-' + t.id, '', 'url', `placeholder="${esc(t.example)}" autocomplete="off" spellcheck="false"`)}${btn('fill-template', t.local ? '填好' : '按这个格式填', 'secondary small', `data-template="${esc(t.id)}"`)}</div></div>`).join('')}</div>` : '')
       + `<div class="group pad">${SOURCE_FIELDS.slice(0, 3).map(sourceField).join('')}</div>
-      <details data-group="source-groups"><summary>搜专辑和歌手（可不填） ${help('音源的接口能搜专辑、歌手的话，在这里填：搜的地址（写 {{query}}）、结果列表在哪、取专辑或歌手里的歌的地址（写 {{id}}）、歌在哪。地址里写 {{offset}}（从第几首开始）或 {{page}}（第几页）、{{limit}}（一页几首），就能「加载更多」。用上面「自己搭的后端」时会自动填好。')}</summary><div class="fold-body">${GROUP_FIELDS.map(([k, l, ph]) => field(l, input('src-' + k, d[k] || '', k.endsWith('Path') ? 'text' : 'url', `placeholder="${esc(ph)}" autocomplete="off" spellcheck="false"`))).join('')}</div></details>
+      <details data-group="source-groups"><summary>搜专辑、歌手和歌单（可不填） ${help('音源的接口能搜专辑、歌手、歌单的话，在这里填：搜的地址（写 {{query}}）、结果列表在哪、取专辑、歌手或歌单里的歌的地址（写 {{id}}）、歌在哪。地址里写 {{offset}}（从第几首开始）或 {{page}}（第几页）、{{limit}}（一页几首），就能「加载更多」。用上面「自己搭的后端」时会自动填好。')}</summary><div class="fold-body">${GROUP_FIELDS.map(([k, l, ph]) => field(l, input('src-' + k, d[k] || '', k.endsWith('Path') ? 'text' : 'url', `placeholder="${esc(ph)}" autocomplete="off" spellcheck="false"`))).join('')}</div></details>
       <details data-group="source-paths"><summary>歌词和结果在哪 ${help('按接口文档填：结果里列表、歌曲 ID、歌名、歌手、播放链接、歌词分别在哪（用点隔开的路径，比如 data.url）。用上面「自己搭的后端」一键填的话，这些都填好了。')}<small class="fold-note">${d.listPath || d.urlPath ? '填好了' : '空着自动找'}</small></summary><div class="fold-body">${SOURCE_FIELDS.slice(3).map(sourceField).join('')}
         ${toggle('src-direct', '取歌地址直接就是音频', d.direct === true, '有的接口取歌时不回 JSON，而是直接给音频，或者跳转到音频文件（比如 Meting 这类、go-music-api 的 /stream）。打开后，取歌地址填好歌曲 ID 就直接拿来播放，「播放链接在哪」不用管。不打开时，接口给的是音频也会自动认出来（要能读到它）。')}</div></details>
       <div class="actions">${btn('test-source', icon('search') + '用「晴天」试一试', 'secondary')}</div>
@@ -242,10 +287,11 @@ export function musicApp(ctx) {
       }
     } catch (error) { ctx.notify(error.message, {error: true}); }
   }
-  /** Which 歌单 songs go into: {id, name} (id '' for only 全部), one made right here, or null when closed. */
-  function pickList(what) {
+  /** Which 歌单 songs go into: {id, name} (id '' for only 全部 — not offered when they are in it already), one made
+   *  right here, or null when closed. */
+  function pickList(what, {only = true} = {}) {
     return new Promise(resolve => {
-      const rows = [...lists.map(p => [p.id, p.name, `${p.songs.length} 首`]), ['', '只放进「全部」', '不放进哪个歌单']];
+      const rows = [...lists.map(p => [p.id, p.name, `${p.songs.length} 首`]), ...(only ? [['', '只放进「全部」', '不放进哪个歌单']] : [])];
       const d = ctx.dialog('放进哪个歌单', `<p class="hint" style="margin-top:0">${esc(what)}</p><div class="group">${rows.map(([id, name, note]) => `<button type="button" class="list-row music-pick" data-pick="${esc(id)}"><span><strong>${esc(name)}</strong><small>${esc(note)}</small></span></button>`).join('')}</div>`
         + `<div class="group pad">${field('新建一个歌单', input('new-list-name', '', 'text', 'maxlength="40" placeholder="歌单名字"'))}<div class="actions" style="margin:6px 0 0">${btn('pick-new', icon('add') + '新建并放进去', 'secondary')}</div></div>`);
       let done = false;
@@ -260,6 +306,16 @@ export function musicApp(ctx) {
       });
     });
   }
+  /** How a 歌单 with songs is deleted: 'only' (its songs stay in 全部), 'songs' (they go too), or null. */
+  function deleteHow(p) {
+    return new Promise(resolve => {
+      const d = ctx.dialog(`删除歌单「${p.name}」`, `<p class="hint" style="margin-top:0">里面的 ${p.songs.length} 首歌怎么办？</p><div class="group">${[['only', '只删歌单', '歌还留在「全部」里'], ['songs', '连歌一起删', '这些歌也从「全部」里删掉（别的歌单里也有的会留着）']].map(([k, a, note]) => `<button type="button" class="list-row music-pick" data-del="${k}"><span><strong>${a}</strong><small>${note}</small></span></button>`).join('')}</div>`);
+      let done = false;
+      const finish = value => { if (!done) { done = true; resolve(value); } };
+      d.onClose(() => finish(null));
+      d.body.addEventListener('click', e => { const t = e.target.closest('[data-del]'); if (t) { finish(t.dataset.del); d.close(); } });
+    });
+  }
   /** Makes a 歌单, or (p) renames or deletes one. */
   function listDialog(p = null) {
     const d = ctx.dialog(p ? '歌单' : '新建歌单', `<div class="group pad">${field('名字', input('list-name', p?.name || '', 'text', 'maxlength="40" placeholder="比如：下雨天听的"'))}</div>
@@ -269,7 +325,12 @@ export function musicApp(ctx) {
       if (!b) return;
       try {
         if (b.dataset.action === 'list-save') shelf = (await api.savePlaylist({id: p?.id || '', name: d.body.querySelector('[data-field=list-name]')?.value || ''})).id;
-        if (b.dataset.action === 'list-delete') { if (!await ctx.confirm(`删除歌单「${p.name}」？`, '只删掉这个歌单，里面的歌还在「全部」里。')) return; await api.deletePlaylist(p.id); shelf = ''; }
+        if (b.dataset.action === 'list-delete') {
+          const how = p.songs.length ? await deleteHow(p) : await ctx.confirm(`删除歌单「${p.name}」？`, '这个歌单是空的。') ? 'only' : null;
+          if (!how) return;
+          await api.deletePlaylist(p.id, {withSongs: how === 'songs'}); shelf = '';
+          ctx.notify(how === 'songs' ? `删掉了歌单「${p.name}」和里面的歌` : `删掉了歌单「${p.name}」`);
+        }
         d.close(); render();
       } catch (error) { ctx.notify(error.message, {error: true}); }
     });
@@ -289,6 +350,8 @@ export function musicApp(ctx) {
     render();
   });
   v.on('change', '[data-music-seek]', el => api.musicSeek?.(Number(el.value)));
+  // finding songs in a long 歌单 as one types (only its rows are drawn again, the box keeps its focus)
+  v.on('input', '[data-music-filter]', el => { filter = el.value; limit = STEP; redrawRows(); });
   v.on('input', '[data-music-seek]', el => { const p = v.root.querySelector('[data-music-pos]'); if (p) p.textContent = clock(Number(el.value)); });
   v.on('change', '[data-music-volume]', el => { api.saveMusic({volume: Number(el.value) / 100}); renderSettings(); });
   v.on('change', '[data-source-on]', el => { const list = structuredClone(state().sources); list[Number(el.dataset.sourceOn)].enabled = el.checked; try { saveSources(list); } catch (error) { ctx.notify(error.message, {error: true}); renderSettings(); } });
@@ -297,16 +360,35 @@ export function musicApp(ctx) {
   v.on('click', '[data-action]', async el => {
     const i = Number(el.dataset.i);
     switch (el.dataset.action) {
-      case 'tab': tab = el.dataset.tab; render(); break;
+      case 'tab': tab = el.dataset.tab; picked = null; render(); break;
       case 'kind': kind = el.dataset.kind; results = []; groups = []; more = false; searchErrors = []; if (query) search(); else render(); break;
       case 'more-results': page++; search(true); break;
       case 'open-group': group = {g: groups[i], songs: [], page: 0, more: false, loading: false, error: ''}; mode = 'group'; loadGroup(); break;
       case 'group-more': group.page++; loadGroup(); break;
       case 'group-play': play(group.songs, 0); break;
-      case 'group-save': await keep(group.songs.map(s => ({title: s.title, artist: s.artist, source: s.source, songId: s.id})), `「${group.g.name}」的 ${group.songs.length} 首歌`); break;
+      case 'group-save': await keepGroup(); break;
       case 'play-heard': playFrom('heard'); break;
       case 'play-mixed': playFrom(tab === 'library' && shelf ? shelf + '+heard' : 'mixed'); break;
-      case 'shelf': shelf = el.dataset.shelf; render(); break;
+      case 'shelf': shelf = el.dataset.shelf; filter = ''; limit = STEP; picked = null; render(); break;
+      case 'show-more': limit += STEP; redrawRows(); break;
+      // 多选: tick songs, then put them in a 歌单, take them out of this one, or delete them
+      case 'pick-start': picked = new Set(); render(); break;
+      case 'pick-done': picked = null; render(); break;
+      case 'pick-all': { const found = foundRows(), all = found.length && found.every(([x]) => picked.has(x.id)); for (const [x] of found) all ? picked.delete(x.id) : picked.add(x.id); redrawRows(); break; }
+      case 'pick-add': {
+        const ids = [...picked], to = await pickList(`选中的 ${ids.length} 首歌`, {only: false});
+        if (!to?.id) break;
+        try { const {kept} = await api.addToPlaylist(to.id, ids); ctx.notify(kept ? `放进「${to.name}」${kept} 首` : `「${to.name}」里都有了`); picked = null; render(); }
+        catch (error) { ctx.notify(error.message, {error: true}); }
+        break;
+      }
+      case 'pick-out': { const here = lists.find(p => p.id === shelf), ids = [...picked]; if (!here || !ids.length) break; await api.removeFromPlaylist(here.id, ids); ctx.notify(`从「${here.name}」拿掉了 ${ids.length} 首`); picked = null; render(); break; }
+      case 'pick-delete': {
+        const ids = [...picked];
+        if (!ids.length || !await ctx.confirm(`删掉选中的 ${ids.length} 首？`, (lists.length ? '每个歌单里也都没有了。' : '') + (songs.some(x => picked.has(x.id) && x.origin === 'file') ? '本机的歌文件会从这台设备上删掉。' : ''))) break;
+        await api.deleteSongs(ids); ctx.notify(`删掉了 ${ids.length} 首`); picked = null; render();
+        break;
+      }
       case 'new-list': listDialog(); break;
       case 'list-menu': { const p = lists.find(x => x.id === shelf); if (p) listDialog(p); break; }
       case 'heard-save': try { await keepHeard(heard[i]); } catch (error) { ctx.notify(error.message, {error: true}); } break;
@@ -320,7 +402,8 @@ export function musicApp(ctx) {
       }
       case 'settings': mode = 'settings'; render(); break;
       case 'search': search(); break;
-      case 'play': el.dataset.list === 'heard' ? play(heardTracks(), i, 'heard') : el.dataset.list === 'group' ? play(group.songs, i) : el.dataset.list === 'results' ? play(results, i) : play(shown, i, shelf || 'library'); break;
+      case 'play': if (picked && el.dataset.list === 'library') { const s = shown[i]; if (s) { picked.has(s.id) ? picked.delete(s.id) : picked.add(s.id); redrawRows(); } break; }
+        el.dataset.list === 'heard' ? play(heardTracks(), i, 'heard') : el.dataset.list === 'group' ? play(group.songs, i) : el.dataset.list === 'results' ? play(results, i) : play(shown, i, shelf || 'library'); break;
       case 'play-all': playFrom(shelf || 'library'); break;
       case 'music-toggle': api.musicToggle?.(); break;
       case 'music-next': api.musicNext?.(); break;

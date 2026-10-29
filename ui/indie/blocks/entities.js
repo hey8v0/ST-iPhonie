@@ -18,9 +18,11 @@ export function itemLook(id, s = null) {
   const b = info?.block;
   // a block whose item has its own picture (repeaters, comparators, the hopper, the iron door, the lever)
   if (b?.itemIcon) return {flat: LAYER[b.itemIcon] ?? 0, tint: 0xFFFFFF};
-  // doors have a flat picture of their own; other shaped blocks show as a small block of what they are made of
-  if (b && LAYER[b.name] !== undefined && !b.tex?.all) return {flat: LAYER[b.name], tint: 0xFFFFFF};
-  if (b && ['cube', 'slab', 'farmland', 'cactus', 'layer', 'stairs', 'fence', 'gate', 'pane', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'stonewall', 'carpet', 'piston', 'detector'].includes(b.shape) && b.tex) {
+  // blocks show as a small block of what they are made of (a log too, though its side's picture has its name);
+  // doors and the like have a flat picture of their own
+  const blocky = b && BLOCKY.has(b.shape) && b.tex;
+  if (b && !blocky && LAYER[b.name] !== undefined && !b.tex?.all) return {flat: LAYER[b.name], tint: 0xFFFFFF};
+  if (blocky) {
     const t = b.tex, L = n => LAYER[n] ?? 0, tint = b.color ? parseInt(b.color.slice(1), 16) : tintNum(b.tint);
     if (t.all) return {cube: Array(6).fill(L(t.all)), tints: Array(6).fill(tint), half: b.shape === 'slab' || b.shape === 'layer' || b.shape === 'carpet'};
     if (b.facing6) { const s = L(t.side), top = L(t.top); return {cube: [s, s, top, top, L(t.front || t.top), s], tints: Array(6).fill(0xFFFFFF)}; }
@@ -31,6 +33,8 @@ export function itemLook(id, s = null) {
   const name = b ? (b.name === 'wheat' ? 'wheat_stage7' : b.tex?.all || b.tex?.side) : dialName(id) || info?.icon || id;
   return {flat: LAYER[name] ?? 0, tint: b ? tintNum(b.tint) : packed.has(name) && info?.tint ? tintNum(info.tint) : 0xFFFFFF};
 }
+// the shapes an item shows as a small block of
+const BLOCKY = new Set(['cube', 'slab', 'farmland', 'cactus', 'layer', 'stairs', 'fence', 'gate', 'pane', 'trapdoor', 'bed', 'chest', 'enchanting', 'anvil', 'stonewall', 'carpet', 'piston', 'detector']);
 /** The names whose picture came from the player's pack (leather from a pack is grey and gets its colour). */
 const packed = new Set();
 export function setPacked(from) { packed.clear(); for (const [n, f] of Object.entries(from || {})) if (f === 'pack') packed.add(n); }

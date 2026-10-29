@@ -361,14 +361,14 @@ export interface ChatMessage { id: string; from: 'me' | string; kind: ChatKind; 
 /** pinned: 置顶. muted: 免打扰 (its unread messages do not count toward the badge). */
 /** 删好友 on a private chat: by 'me' the user deleted the contact (their messages wait as requests); by 'them' the contact deleted the user. */
 /** A music source the user added: search and link addresses ({{query}}, {{id}}) and where the answers keep each field. */
-export interface MusicSource { id: string; name: string; enabled: boolean; search: string; url: string; lyric: string; listPath: string; idPath: string; titlePath: string; artistPath: string; urlPath: string; lyricPath: string; direct: boolean; albumSearch: string; albumListPath: string; albumSongs: string; albumSongsPath: string; artistSearch: string; artistListPath: string; artistSongs: string; artistSongsPath: string; }
+export interface MusicSource { id: string; name: string; enabled: boolean; search: string; url: string; lyric: string; listPath: string; idPath: string; titlePath: string; artistPath: string; urlPath: string; lyricPath: string; direct: boolean; albumSearch: string; albumListPath: string; albumSongs: string; albumSongsPath: string; artistSearch: string; artistListPath: string; artistSongs: string; artistSongsPath: string; playlistSearch: string; playlistListPath: string; playlistSongs: string; playlistSongsPath: string; }
 /** 音乐: bgm 'off' | 'tap' | 'auto' (the story picks songs with <bgm>), its rule, the volume, turning down for voice lines, songs shared in chats, how lists go on, whether some of the 歌单 goes with the rule as a taste. */
 export interface MusicSettings { bgm: 'off' | 'tap' | 'auto'; rule: string; volume: number; duck: boolean; share: boolean; mode: 'order' | 'shuffle' | 'one'; taste: boolean; sources: MusicSource[]; }
 /** A 歌单 song: a file on this device, or a song of a source (its link is fetched when it plays). */
 export interface MusicSong { id: string; kind: 'song'; at: number; title: string; artist: string; origin: 'file' | 'source'; source?: string; songId?: string; lyric?: string; size?: number; mime?: string; }
 export interface MusicFound { source: string; sourceName: string; id: string; title: string; artist: string; }
 /** An album or an artist a search found (an album's artist; how many songs, when the source says). */
-export interface MusicGroup { source: string; sourceName: string; kind: 'album' | 'artist'; id: string; name: string; artist: string; count: number; }
+export interface MusicGroup { source: string; sourceName: string; kind: 'album' | 'artist' | 'playlist'; id: string; name: string; artist: string; count: number; }
 /** 正文点的歌: a song the story picked (where it was found, once it was). */
 export interface MusicHeard { id: string; kind: 'heard'; at: number; title: string; artist: string; source?: string; songId?: string; }
 /** A 歌单 the user made: its songs (ids of 全部's songs), the newest on top. */
@@ -776,9 +776,9 @@ export interface BackendFacade {
     saveSounds(patch: Partial<SoundSettings>): SoundSettings;
     saveMusic(patch: Partial<MusicSettings>): MusicSettings;
     /** Searches the enabled music sources (or one): songs (kind 'song', the default), or albums / artists (groups); page 0, 1, … (more: a full page came). */
-    searchMusic(query: string, sourceId?: string | Partial<MusicSource>, options?: { kind?: 'song' | 'album' | 'artist'; page?: number }): Promise<{ songs?: MusicFound[]; groups?: MusicGroup[]; errors: { source: string; message: string }[]; more: boolean }>;
-    /** The songs of an album or artist a search found. */
-    groupSongs(sourceId: string, kind: 'album' | 'artist', id: string, page?: number): Promise<{ songs: MusicFound[]; more: boolean }>;
+    searchMusic(query: string, sourceId?: string | Partial<MusicSource>, options?: { kind?: 'song' | 'album' | 'artist' | 'playlist'; page?: number }): Promise<{ songs?: MusicFound[]; groups?: MusicGroup[]; errors: { source: string; message: string }[]; more: boolean }>;
+    /** The songs of an album, artist or playlist a search found: a page of `limit` (at most 200), from `offset`. */
+    groupSongs(sourceId: string, kind: 'album' | 'artist' | 'playlist', id: string, page?: number, options?: { limit?: number; offset?: number }): Promise<{ songs: MusicFound[]; more: boolean }>;
     /** 正文点的歌, newest first. */
     listHeard(): Promise<MusicHeard[]>;
     forgetHeard(ids: string[]): Promise<boolean>;
@@ -795,7 +795,8 @@ export interface BackendFacade {
     listPlaylists(): Promise<MusicPlaylist[]>;
     /** Makes a 歌单 (no id) or renames one. */
     savePlaylist(value: { id?: string; name: string }): Promise<MusicPlaylist>;
-    deletePlaylist(id: string): Promise<boolean>;
+    /** Deletes a 歌单 (withSongs: its songs too, but for those in another 歌单). */
+    deletePlaylist(id: string, options?: { withSongs?: boolean }): Promise<boolean>;
     addToPlaylist(id: string, songIds: string[]): Promise<{ playlist: MusicPlaylist; kept: number }>;
     removeFromPlaylist(id: string, songIds: string[]): Promise<MusicPlaylist>;
     deleteSongs(ids: string[]): Promise<boolean>;

@@ -113,8 +113,13 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         texts: [forum, people.map(p => p.name).join('、'), ...recent.map(r => `${r.name}: ${r.text}`), ...thread.messages.slice(-preset.history).map(m => messageLine(m, user))]});
       // 记忆: the written-up older chat, and older messages that match the latest ones.
       const query = thread.messages.filter(m => m.kind !== 'system').slice(-6).map(m => messageLine(m, user)).join('\n');
+      // 私聊带同群消息: what was said lately in the groups the contact is in too
+      let shared = '';
+      if (thread.type === 'dm' && promptOn(s.promptRules, 'chat-groups')) {
+        try { shared = await sharedGroups(thread.members[0], user); } catch (error) { backend.reportDiagnostic?.('聊天 · 同群消息', error, 'warn'); }
+      }
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
-      const request = pics => buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
+      const request = pics => buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
       const answer = cleanTagged(await answerFor(ctx, request, await pictures(ctx, thread, preset)), preset.cleanTags);
       // 「[不发]」 (also as 「名字：[不发]」) is a no, not a message.
       const text = nudge ? answer.split('\n').filter(line => !/\[不发\]/.test(line)).join('\n') : answer;
@@ -139,6 +144,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   async function settle(threadId, items) {
     const thread = await backend.chats.get(threadId), taken = new Set(), out = [], posts = [];
     let calling = null, cutting = false;
+    const whispers = [];
     let latest = thread;
     for (const item of items) {
       // 「[删除好友]」: the contact deletes the user (private chats only; the user finds out on their next message).
@@ -146,6 +152,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (item.kind === 'befriend' || item.kind === 'refuse') continue;
       // 「[朋友圈] …」: posted to 朋友圈 while chatting, not a chat message.
       if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, ...(item.imageTags ? {imageTags: item.imageTags} : {}), source: 'chat', space: thread?.space || backend.cardKey()}); continue; }
+      // 「[私聊] …」 in a group: said to the user alone — it goes to that one's private chat (in a private chat it is just
+      // a message).
+      if (item.kind === 'dm') { if (thread.type === 'group') whispers.push(item); else out.push({from: item.from, kind: 'text', text: item.text}); continue; }
       // 「[打电话] …」: the contact calls right after this reply (private chats only; one call).
       if (item.kind === 'call') { if (thread.type === 'dm' && !calling) calling = item; continue; }
       if (item.kind !== 'claim') { out.push(item); continue; }
@@ -167,6 +176,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     let saved = out.length ? await backend.chats.append(threadId, out) : latest;
     if (cutting) { saved = await backend.chats.update(threadId, {friend: {by: 'them', at: Date.now(), requests: []}}); calling = null; refreshCuts(); }
     if (calling) setTimeout(() => onCall(calling.from, calling.reason), 1200);
+    // (a moment after the group's own messages)
+    if (whispers.length) setTimeout(() => whisper(whispers).catch(error => backend.reportDiagnostic?.('聊天 · 私聊', error, 'warn')), 900);
     return saved;
   }
 
@@ -346,6 +357,26 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   async function dmWith(name) {
     const here = currentDm(await backend.threads(), name);
     return here || backend.chatMutate(null, () => backend.chats.create({type: 'dm', members: [name], space: backend.cardKey()}));
+  }
+  /** What someone in a group said to the user alone (「[私聊]」): into their private chat, unread, with a note. */
+  async function whisper(items) {
+    const byName = new Map();
+    for (const item of items) byName.set(item.from, [...(byName.get(item.from) || []), {from: item.from, kind: 'text', text: item.text}]);
+    for (const [name, list] of byName) {
+      const t = await dmWith(name);
+      // one who has deleted the user does not write to them
+      if (t.friend?.by === 'them') continue;
+      if (await arrive(t.id, list)) notice(`${name} 私聊了你`);
+    }
+  }
+  /** The groups here the contact is in too (the two talked in last): their latest messages, for a private chat's request. */
+  async function sharedGroups(name, user) {
+    const groups = (await backend.threads()).filter(t => t.type === 'group' && t.members.includes(name) && t.last).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 2), parts = [];
+    for (const g of groups) {
+      const lines = ((await backend.chats.get(g.id))?.messages || []).filter(m => m.kind !== 'system').slice(-12).map(m => messageLine(m, user)).filter(Boolean);
+      if (lines.length) parts.push(`「${g.name}」\n${lines.join('\n')}`);
+    }
+    return parts.join('\n\n');
   }
   /** Messages that came to the phone: kept unread, said on the island, and photos drawn when that costs nothing. */
   async function arrive(threadId, items, from = null) {

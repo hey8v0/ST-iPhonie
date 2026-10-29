@@ -11,8 +11,11 @@ export const BGM_MODES = Object.freeze(['off', 'tap', 'auto']);
 export const BGM_MODE_NAMES = Object.freeze({off: '关', tap: '点一下才放', auto: '自动放'});
 // recent: the songs played lately told to the story (not to repeat); heard: the songs the story has picked, kept to play
 // again (the newest, once each); taste: how many of the 歌单 go with the rule as a taste of what the user likes; lists:
-// how many 歌单 of their own the user can make
-export const MUSIC_LIMITS = Object.freeze({file: 40 * 1024 * 1024, sources: 20, songs: 2000, rule: 6000, recent: 8, heard: 200, taste: 20, page: 50, lists: 50});
+// how many 歌单 of their own the user can make; bulk: how many songs one request takes when a whole album, artist or
+// playlist is taken in
+export const MUSIC_LIMITS = Object.freeze({file: 40 * 1024 * 1024, sources: 20, songs: 10000, rule: 6000, recent: 8, heard: 200, taste: 20, page: 50, lists: 50, bulk: 200});
+/** What can be searched besides songs (each with its own addresses on a source). */
+export const GROUP_KINDS = Object.freeze({album: '专辑', artist: '歌手', playlist: '歌单'});
 /** How a list goes on when a song ends: in order (round again at the end), at random, or the same song again. */
 export const PLAY_MODES = Object.freeze(['order', 'shuffle', 'one']);
 export const PLAY_MODE_NAMES = Object.freeze({order: '顺序播放', shuffle: '随机播放', one: '单曲循环'});
@@ -45,22 +48,24 @@ export function normalizeSource(value = {}, i = 0) {
     artistPath: path(value.artistPath) || 'artist', urlPath: path(value.urlPath) || 'url', lyricPath: path(value.lyricPath) || 'lyric',
     // 取歌地址 answers with the audio itself (or sends on to it), not with JSON: the address is played as it is.
     direct: value.direct === true,
-    // searching albums and artists (optional): where to search ({{query}}), where their list is, where an album's or
-    // artist's songs are ({{id}}) and where in that answer the song list is
+    // searching albums, artists and playlists (optional): where to search ({{query}}), where their list is, where one's
+    // songs are ({{id}}) and where in that answer the song list is
     albumSearch: clip(value.albumSearch, 1000).trim(), albumListPath: path(value.albumListPath), albumSongs: clip(value.albumSongs, 1000).trim(), albumSongsPath: path(value.albumSongsPath),
-    artistSearch: clip(value.artistSearch, 1000).trim(), artistListPath: path(value.artistListPath), artistSongs: clip(value.artistSongs, 1000).trim(), artistSongsPath: path(value.artistSongsPath)
+    artistSearch: clip(value.artistSearch, 1000).trim(), artistListPath: path(value.artistListPath), artistSongs: clip(value.artistSongs, 1000).trim(), artistSongsPath: path(value.artistSongsPath),
+    playlistSearch: clip(value.playlistSearch, 1000).trim(), playlistListPath: path(value.playlistListPath), playlistSongs: clip(value.playlistSongs, 1000).trim(), playlistSongsPath: path(value.playlistSongsPath)
   });
 }
 /**
- * A source filled in by 「按这个格式填」 for a self-hosted 网易云 API before 0.8.77 (20 songs, no pages, no albums or
- * artists) is brought up to today's format: its search gets pages, albums and artists are filled in; the rest stays as
- * the user has it (a cookie in the song address, the name).
+ * A source filled in by 「按这个格式填」 for a self-hosted 网易云 API before is brought up to today's format: its search
+ * gets pages (before 0.8.77 it had none), and albums, artists and playlists are filled in where it has none of their
+ * addresses. The rest stays as the user has it (a cookie in the song address, the name, addresses they wrote).
  */
 function upgraded(s) {
-  const old = /^(.+)\/cloudsearch\?keywords=\{\{query\}\}&limit=\d+$/.exec(s.search);
-  if (!old || s.listPath !== 'result.songs' || s.albumSearch || s.albumSongs || s.artistSearch || s.artistSongs) return s;
-  const now = SELF_HOSTED.find(t => t.id === 'netease-api').fill(old[1]);
-  for (const k of ['search', 'albumSearch', 'albumListPath', 'albumSongs', 'albumSongsPath', 'artistSearch', 'artistListPath', 'artistSongs', 'artistSongsPath']) s[k] = now[k];
+  const old = /^(.+)\/cloudsearch\?keywords=\{\{query\}\}&(?:type=1&)?limit=\d+(&offset=\{\{offset\}\})?$/.exec(s.search);
+  if (!old || s.listPath !== 'result.songs') return s;
+  const now = SELF_HOSTED.find(t => t.id === 'netease-api').fill(old[1]), none = kind => !s[kind + 'Search'] && !s[kind + 'Songs'];
+  if (!old[2] && none('album') && none('artist')) s.search = now.search;
+  for (const kind of Object.keys(GROUP_KINDS)) if (none(kind)) for (const k of ['Search', 'ListPath', 'Songs', 'SongsPath']) s[kind + k] = now[kind + k];
   return s;
 }
 export function validateSource(s) {
@@ -69,7 +74,7 @@ export function validateSource(s) {
   if (!web(s.search) || !s.search.includes('{{query}}')) throw Error('「搜索地址」要以 http(s):// 开头（酒馆自己的地址以 / 开头），并且在放搜索词的地方写 {{query}}');
   if (!web(s.url) || !s.url.includes('{{id}}')) throw Error('「取歌地址」要以 http(s):// 开头（酒馆自己的地址以 / 开头），并且在放歌曲 ID 的地方写 {{id}}');
   if (s.lyric && (!web(s.lyric) || !s.lyric.includes('{{id}}'))) throw Error('「歌词地址」要以 http(s):// 或 / 开头，并且写 {{id}}（不需要歌词就空着）');
-  for (const [kind, zh] of [['album', '专辑'], ['artist', '歌手']]) {
+  for (const [kind, zh] of Object.entries(GROUP_KINDS)) {
     const find = s[kind + 'Search'], songs = s[kind + 'Songs'];
     if (!find && !songs) continue;
     if (!web(find) || !find.includes('{{query}}')) throw Error(`「搜${zh}的地址」要以 http(s):// 或 / 开头，并且写 {{query}}（不搜${zh}就两个都空着）`);
@@ -110,20 +115,21 @@ function firstList(value, depth = 0) {
   return null;
 }
 const names = value => Array.isArray(value) ? value.map(v => typeof v === 'object' && v ? v.name || '' : v).filter(Boolean).join(' / ') : typeof value === 'object' && value ? String(value.name || '') : String(value ?? '');
-/** A search answer (or an album's or artist's songs) as songs: [{source, id, title, artist}]. */
-export function readSearch(source, json, listPath = source.listPath) {
+/** A search answer (or an album's, artist's or playlist's songs) as songs: [{source, id, title, artist}], at most max. */
+export function readSearch(source, json, listPath = source.listPath, max = MUSIC_LIMITS.page) {
   const list = (listPath ? pick(json, listPath) : null) || firstList(json) || [];
-  return (Array.isArray(list) ? list : []).slice(0, MUSIC_LIMITS.page).map(item => ({
+  return (Array.isArray(list) ? list : []).slice(0, max).map(item => ({
     source: source.id, id: clip(pick(item, source.idPath) ?? '', 200), title: clip(names(pick(item, source.titlePath)), 200).trim(), artist: clip(names(pick(item, source.artistPath)), 200).trim()
   })).filter(s => s.id && s.title);
 }
-/** Albums or artists found: [{source, id, name, artist, count}] (an album's artist; how many songs it has, when said). */
+/** Albums, artists or playlists found: [{source, id, name, artist, count}] (an album's artist, who made a playlist; how
+ *  many songs, when said). */
 export function readGroups(source, json, kind) {
   const listPath = source[kind + 'ListPath'], list = (listPath ? pick(json, listPath) : null) || firstList(json) || [];
   return (Array.isArray(list) ? list : []).slice(0, MUSIC_LIMITS.page).map(item => ({
     source: source.id, kind, id: clip(item?.id ?? item?.mid ?? '', 200), name: clip(names(item?.name ?? item?.title), 200).trim(),
-    artist: kind === 'album' ? clip(names(item?.artist ?? item?.artists ?? item?.singer), 200).trim() : '',
-    count: Number(item?.size ?? item?.musicSize ?? item?.songCount) || 0
+    artist: kind === 'album' ? clip(names(item?.artist ?? item?.artists ?? item?.singer), 200).trim() : kind === 'playlist' ? clip(names(item?.creator?.nickname ?? item?.creator ?? item?.creatorName), 200).trim() : '',
+    count: Number(item?.size ?? item?.musicSize ?? item?.songCount ?? item?.trackCount) || 0
   })).filter(g => g.id && g.name);
 }
 /** Whether a source searches in pages (its address says where the page goes): then a full page may have more after it. */
@@ -204,7 +210,8 @@ export const SELF_HOSTED = Object.freeze([
     fill: base => ({name: '网易云（我的后端）', search: base + '/cloudsearch?keywords={{query}}&type=1&limit=30&offset={{offset}}', url: base + '/song/url/v1?id={{id}}&level=standard&randomCNIP=true', lyric: base + '/lyric?id={{id}}',
       listPath: 'result.songs', idPath: 'id', titlePath: 'name', artistPath: 'ar', urlPath: 'data[0].url', lyricPath: 'lrc.lyric',
       albumSearch: base + '/cloudsearch?keywords={{query}}&type=10&limit=30&offset={{offset}}', albumListPath: 'result.albums', albumSongs: base + '/album?id={{id}}', albumSongsPath: 'songs',
-      artistSearch: base + '/cloudsearch?keywords={{query}}&type=100&limit=30&offset={{offset}}', artistListPath: 'result.artists', artistSongs: base + '/artist/songs?id={{id}}&order=hot&limit=50&offset={{offset}}', artistSongsPath: 'songs'})}
+      artistSearch: base + '/cloudsearch?keywords={{query}}&type=100&limit=30&offset={{offset}}', artistListPath: 'result.artists', artistSongs: base + '/artist/songs?id={{id}}&order=hot&limit={{limit}}&offset={{offset}}', artistSongsPath: 'songs',
+      playlistSearch: base + '/cloudsearch?keywords={{query}}&type=1000&limit=30&offset={{offset}}', playlistListPath: 'result.playlists', playlistSongs: base + '/playlist/track/all?id={{id}}&limit={{limit}}&offset={{offset}}', playlistSongsPath: 'songs'})}
 ]);
 
 // ---------- Lyrics ----------

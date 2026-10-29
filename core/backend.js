@@ -5,7 +5,7 @@ import {PROMPT_BLOCKS, normalizePromptRules} from './prompt-rules.js';
 import { normalizeVn, spriteRequest, castFiles, moveCastFiles } from './vn.js';
 import { currentModel } from './model-files.js';
 import { MomentStore } from './moments-store.js';
-import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readGroups, paged, songKey, readLink, missingLink, trialOnly, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
+import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readGroups, paged, songKey, readLink, missingLink, trialOnly, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath, GROUP_KINDS } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
@@ -1433,8 +1433,8 @@ export class TTSBackend {
         if (!words) throw Error(kind === 'album' ? '写一下专辑名' : kind === 'artist' ? '写一下歌手名' : '写一下想听的歌');
         const all = sourceId && typeof sourceId === 'object' ? [this.musicSource(sourceId)] : clone(this.settings.music.sources.filter(s => sourceId ? s.id === sourceId : s.enabled));
         if (!all.length) throw Error('还没有能用的音源：先在「音乐 → 设置 → 音源」里添加一个');
-        const key = kind === 'album' || kind === 'artist' ? kind + 'Search' : 'search', sources = all.filter(s => s[key]);
-        if (!sources.length) throw Error(`音源都不能搜${kind === 'album' ? '专辑' : '歌手'}：在音源设置的「搜专辑和歌手」里填地址（自己搭的网易云后端会自动填好）`);
+        const key = GROUP_KINDS[kind] ? kind + 'Search' : 'search', sources = all.filter(s => s[key]);
+        if (!sources.length) throw Error(`音源都不能搜${GROUP_KINDS[kind]}：在音源设置的「搜专辑、歌手和歌单」里填地址（自己搭的网易云后端会自动填好）`);
         const songs = [], groups = [], errors = [], at = { query: words, offset: page * 30, page: page + 1, limit: 30 };
         let more = false;
         await Promise.all(sources.map(async s => {
@@ -1448,14 +1448,19 @@ export class TTSBackend {
         }));
         return key === 'search' ? { songs, errors, more } : { groups, errors, more };
     }
-    /** The songs of an album or an artist a search found: {songs, more} (page 0, 1, …, for sources that give them in pages). */
-    async groupSongs(sourceId, kind, id, page = 0) {
+    /**
+     * The songs of an album, an artist or a playlist a search found: {songs, more} — page 0, 1, … of `limit` songs (at
+     * most MUSIC_LIMITS.bulk, for sources whose address says how many); offset: where the page starts, when the pages
+     * before were of another size.
+     */
+    async groupSongs(sourceId, kind, id, page = 0, { limit = 50, offset } = {}) {
         this.assertOpen();
-        const s = this.musicSource(sourceId), template = s[kind === 'artist' ? 'artistSongs' : 'albumSongs'];
-        if (!template) throw Error('这个音源不能取专辑或歌手的歌');
-        const json = await this.musicFetch(fillSource(template, { id, offset: page * 50, page: page + 1, limit: 50 }));
-        const songs = readSearch(s, json, s[kind === 'artist' ? 'artistSongsPath' : 'albumSongsPath']).map(x => ({ ...x, sourceName: s.name }));
-        return { songs, more: paged(template) && songs.length >= 20 };
+        const s = this.musicSource(sourceId), template = GROUP_KINDS[kind] ? s[kind + 'Songs'] : '';
+        if (!template) throw Error(`这个音源不能取${GROUP_KINDS[kind] || '专辑'}里的歌`);
+        const size = Math.max(1, Math.min(MUSIC_LIMITS.bulk, Math.floor(limit) || 50));
+        const json = await this.musicFetch(fillSource(template, { id, offset: offset ?? page * size, page: page + 1, limit: size }));
+        const songs = readSearch(s, json, s[kind + 'SongsPath'], size).map(x => ({ ...x, sourceName: s.name }));
+        return { songs, more: paged(template) && songs.length >= Math.min(20, size) };
     }
     /** 正文点的歌: the songs the story picked, newest first, each once (the oldest go past MUSIC_LIMITS.heard). */
     async listHeard() { this.assertOpen(); return this.music.list('heard'); }
@@ -1516,14 +1521,16 @@ export class TTSBackend {
     /** Keeps songs in the 歌单: {added: the new ones, ids: each song's own (new, or the one the 歌单 had already)}. */
     async storeSongs(list) {
         this.assertOpen();
-        const now = Date.now(), have = await this.listSongs(), ids = [], made = [];
+        const now = Date.now(), have = await this.listSongs(), ids = [];
+        // a source's songs already here (or earlier in this list), by where they are
+        const known = new Map(have.filter(h => h.origin === 'source').map(h => [h.source + '\n' + h.songId, h]));
         const rows = list.map((value, i) => {
             const row = songRow({ ...value, origin: value.blob ? 'file' : 'source' }, now + i);
             if (row.origin === 'source') {
-                const dup = [...have, ...made].find(h => h.source === row.source && h.songId === row.songId);
+                const k = row.source + '\n' + row.songId, dup = known.get(k);
                 ids.push((dup || row).id);
                 if (dup) return null;
-                made.push(row);
+                known.set(k, row);
                 return row;
             }
             let blob;
@@ -1557,15 +1564,25 @@ export class TTSBackend {
         this.emit('music', { library: true });
         return row;
     }
-    /** Deletes a 歌单 the user made (its songs stay in 全部). */
-    async deletePlaylist(id) { this.assertOpen(); await this.music.remove(id); this.emit('music', { library: true }); return true; }
+    /** Deletes a 歌单 the user made: its songs stay in 全部, or (withSongs) go too — but for those in another 歌单. */
+    async deletePlaylist(id, { withSongs = false } = {}) {
+        this.assertOpen();
+        if (withSongs) {
+            const lists = await this.listPlaylists(), elsewhere = new Set(lists.filter(p => p.id !== id).flatMap(p => p.songs));
+            const gone = (lists.find(p => p.id === id)?.songs || []).filter(s => !elsewhere.has(s));
+            if (gone.length) await this.music.removeMany(gone);
+        }
+        await this.music.remove(id);
+        this.emit('music', { library: true });
+        return true;
+    }
     /** Puts songs of the 歌单 into one the user made, on top: {playlist, kept: how many were not in it yet}. */
     async addToPlaylist(id, songIds) {
         this.assertOpen();
         const known = new Set((await this.listSongs()).map(s => s.id)), want = [...new Set(songIds.map(String))].filter(s => known.has(s));
         let kept = 0;
         const playlist = await this.music.change(id, p => {
-            const fresh = want.filter(s => !p.songs.includes(s));
+            const inside = new Set(p.songs), fresh = want.filter(s => !inside.has(s));
             if (p.songs.length + fresh.length > MUSIC_LIMITS.songs) throw Error(`一个歌单最多 ${MUSIC_LIMITS.songs} 首`);
             kept = fresh.length;
             p.songs = [...fresh, ...p.songs];
@@ -1593,7 +1610,7 @@ export class TTSBackend {
     /** Deletes songs from the 歌单 (and so from every 歌单 the user made). */
     async deleteSongs(ids) {
         const gone = new Set(ids.map(String));
-        for (const id of gone) await this.music.remove(id);
+        await this.music.removeMany([...gone]);
         const lists = (await this.music.list('playlist')).filter(p => p.songs.some(s => gone.has(s)));
         if (lists.length) await this.music.put(lists.map(p => ({ ...p, songs: p.songs.filter(s => !gone.has(s)) })));
         this.emit('music', { library: true });
@@ -2395,10 +2412,10 @@ export class TTSBackend {
             },
             assistantMemoryRemove: (id, nodeId) => this.assistantMemoryRevise(id, book => removeNode(book, nodeId)),
             assistantMemoryForget: id => this.assistantMemoryForget(id),
-            saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId, options) => this.searchMusic(query, clone(sourceId), clone(options || {})), groupSongs: (sourceId, kind, id, page) => this.groupSongs(sourceId, kind, String(id), Number(page) || 0),
+            saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId, options) => this.searchMusic(query, clone(sourceId), clone(options || {})), groupSongs: (sourceId, kind, id, page, options) => this.groupSongs(sourceId, kind, String(id), Number(page) || 0, clone(options || {})),
             listHeard: () => this.listHeard(), forgetHeard: ids => this.forgetHeard([...(ids || [])]), clearHeard: () => this.clearHeard(), musicLink: (sourceId, songId, hint) => this.musicLink(clone(sourceId), songId, clone(hint || {})), musicLyric: (sourceId, songId, hint) => this.musicLyric(sourceId, songId, clone(hint || {})),
             listSongs: () => this.listSongs(), songBlob: id => this.songBlob(id), addSongs: list => this.addSongs(list), updateSong: (id, patch) => this.updateSong(id, clone(patch || {})), deleteSongs: ids => this.deleteSongs([...(ids || [])]),
-            addSongsTo: (id, list) => this.addSongsTo(String(id), list), listPlaylists: () => this.listPlaylists(), savePlaylist: value => this.savePlaylist(clone(value || {})), deletePlaylist: id => this.deletePlaylist(String(id)),
+            addSongsTo: (id, list) => this.addSongsTo(String(id), list), listPlaylists: () => this.listPlaylists(), savePlaylist: value => this.savePlaylist(clone(value || {})), deletePlaylist: (id, options) => this.deletePlaylist(String(id), clone(options || {})),
             addToPlaylist: (id, ids) => this.addToPlaylist(String(id), [...(ids || [])]), removeFromPlaylist: (id, ids) => this.removeFromPlaylist(String(id), [...(ids || [])]),
             saveSounds: patch => this.saveSounds(clone(patch)), listSounds: () => this.listSounds(), soundBlob: id => this.soundBlob(id), addSounds: list => this.addSounds(list), updateSound: (id, patch) => this.updateSound(id, clone(patch || {})), deleteSounds: ids => this.deleteSounds([...(ids || [])]),
             packInfo: () => this.packInfo(), soundMissing: () => this.soundMissing(), dismissMissing: (type, name) => this.dismissMissing(type, name), generateSound: input => this.generateSound(clone(input || {})), exportSounds: (ids, name) => this.exportSounds(ids ? [...ids] : null, name), importSounds: (file, options) => this.importSounds(file, clone(options || {})),
