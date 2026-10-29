@@ -14,6 +14,8 @@
  *        meta its summary (name, thumbnail, strength, which models are encoded); listVibes omits blob.
  * getPhoto/getReference/getFavorite return null for missing IDs; deletes return
  * whether an owned row existed. Every write resolves only after transaction commit.
+ * The lists of photos, favorites, references and vibes read 'meta' (each row without its file), not the files; listPhotos
+ * adds `thumb`, the photo's small picture for grids, where one was made (saveThumb; core/thumbnail.js makes them).
  */
 import {connectionLost, lostError} from './idb.js';
 import {normalizeWidgets} from './widgets.js';
@@ -24,6 +26,8 @@ export const PHONE_WALLPAPERS = Object.freeze(['sky','silver','midnight','rose',
 export const PHONE_SKINS = Object.freeze(['sky','aero','fresh']);
 export const PHONE_GLYPHS = Object.freeze([...new Set(['default',...PHONE_APPS,'wave','book','music','camera','sliders','note','person','microphone','star','headphones'])]);
 const STORES = ['notes','photos','favorites','phone','references','vibes','books'];
+// The stores whose rows carry a file (a picture or a recording): their lists come from 'meta'.
+const MEDIA = ['photos','favorites','references','vibes'];
 const sizeText=n=>n>=1024**3?`${(n/1024**3).toFixed(1).replace(/\.0$/,'')} GB`:`${Math.round(n/1024**2)} MB`;
 const IMAGE_TYPES = new Set(['image/jpeg','image/png','image/webp','image/avif','image/gif']);
 const encoder = new TextEncoder();
@@ -62,6 +66,8 @@ function bytes(row){const metadata={...row};delete metadata.blob;delete metadata
 // The size worked out when the row was saved: adding up the whole library on every save no longer turns every note
 // and 绘本 into text again.
 const sizeOf=row=>Number.isFinite(row._bytes)?row._bytes:bytes(row);
+// A picture's or recording's row without its file, as the lists read it ('meta').
+function metaRow(scope,store,row){const data={...row};delete data.blob;delete data.scope;delete data._bytes;return {scope,store,id:row.id,data};}
 /** The rows of one store as a change sees them: every id (has, keys), and the rows it asked for (get, values). */
 class RowView {
  #ids=new Set();#rows=new Map();
@@ -101,15 +107,24 @@ export class LocalLibrary {
    const rejectOnce=e=>{if(!settled){settled=true;reject(friendly(e));}};
    // Version 2 added the vibes store, 3 the books (绘本): an upgrade only creates the stores that are missing, the others keep their rows.
    // 4 added 'sizes', each row's size on its own ({scope, store, id, bytes}), so a save no longer reads every picture and recording.
-   try{req=this.#factory.open('st-tts-library-v1',4);}catch(e){rejectOnce(e);return;}
+   // 5 added 'meta', the picture and recording rows without their files ({scope, store, id, data}), so a list reads no
+   // files, and 'thumbs', the photos' small pictures for grids ({scope, id, type, bytes, w, h}).
+   try{req=this.#factory.open('st-tts-library-v1',5);}catch(e){rejectOnce(e);return;}
    req.onupgradeneeded=event=>{
-    const db=req.result,tx=req.transaction;
+    const db=req.result,tx=req.transaction,old=event.oldVersion;
     for(const name of STORES){if(db.objectStoreNames.contains(name))continue;const store=db.createObjectStore(name,{keyPath:['scope','id']});store.createIndex('scope','scope');}
-    if(db.objectStoreNames.contains('sizes'))return;
-    const sizes=db.createObjectStore('sizes',{keyPath:['scope','store','id']});sizes.createIndex('scope','scope');
-    if(!event.oldVersion)return;
-    // the rows there were: each one's size, once
-    for(const name of STORES){const cursor=tx.objectStore(name).openCursor();cursor.onsuccess=()=>{const c=cursor.result;if(!c)return;const row=c.value;if(typeof row?.scope==='string'&&typeof row.id==='string')sizes.put({scope:row.scope,store:name,id:row.id,bytes:sizeOf(row)});c.continue();};}
+    // the rows there were, read once
+    const each=(names,fn)=>{for(const name of names){const cursor=tx.objectStore(name).openCursor();cursor.onsuccess=()=>{const c=cursor.result;if(!c)return;const row=c.value;if(typeof row?.scope==='string'&&typeof row.id==='string')fn(name,row);c.continue();};}};
+    if(!db.objectStoreNames.contains('sizes')){
+     const sizes=db.createObjectStore('sizes',{keyPath:['scope','store','id']});sizes.createIndex('scope','scope');
+     if(old)each(STORES,(name,row)=>sizes.put({scope:row.scope,store:name,id:row.id,bytes:sizeOf(row)}));
+    }
+    if(!db.objectStoreNames.contains('meta')){
+     db.createObjectStore('meta',{keyPath:['scope','store','id']}).createIndex('store',['scope','store']);
+     db.createObjectStore('thumbs',{keyPath:['scope','id']}).createIndex('scope','scope');
+     const meta=tx.objectStore('meta');
+     if(old)each(MEDIA,(name,row)=>meta.put(metaRow(row.scope,name,row)));
+    }
    };
    req.onerror=()=>rejectOnce(req.error);
    req.onblocked=()=>rejectOnce(fail('另一个页面占用了本地资料，请关闭旧页面后重试','STORAGE_BLOCKED'));
@@ -146,7 +161,7 @@ export class LocalLibrary {
   const limit=await this.#room();this.#keep();
   return this.#run(db=>new Promise((resolve,reject)=>{
    let tx,result,ownError,pending=1;const rows={},ops=[],ledger=new Map(),key=(name,id)=>name+'\n'+id;
-   try{tx=db.transaction([...STORES,'sizes'],'readwrite');}catch(e){reject(friendly(e));return;}
+   try{tx=db.transaction([...STORES,'sizes','meta','thumbs'],'readwrite');}catch(e){reject(friendly(e));return;}
    tx.oncomplete=()=>resolve(structuredClone(result));
    tx.onabort=()=>reject(ownError||friendly(tx.error));tx.onerror=()=>{};
    for(const name of STORES)rows[name]=new RowView();
@@ -160,9 +175,11 @@ export class LocalLibrary {
      for(const [op,name,x] of ops){if(op==='put')after.set(key(name,x.id),x._bytes);else after.delete(key(name,x));}
      let total=0;for(const n of after.values())total+=n;
      if(total>limit)throw fail(`本地资料已达到 ${sizeText(limit)} 上限（这个浏览器给小手机的空间），请删除不需要的内容后再保存`,'LIBRARY_FULL');
+     // 'meta' follows every picture and recording; a photo saved again or deleted loses its small picture
+     const meta=tx.objectStore('meta'),thumbs=tx.objectStore('thumbs');
      for(const [op,name,x] of ops){
-      if(op==='put'){tx.objectStore(name).put(x);sizes.put({scope:this.#scope,store:name,id:x.id,bytes:x._bytes});}
-      else{tx.objectStore(name).delete([this.#scope,x]);sizes.delete([this.#scope,name,x]);}
+      if(op==='put'){tx.objectStore(name).put(x);sizes.put({scope:this.#scope,store:name,id:x.id,bytes:x._bytes});if(MEDIA.includes(name))meta.put(metaRow(this.#scope,name,x));if(name==='photos')thumbs.delete([this.#scope,x.id]);}
+      else{tx.objectStore(name).delete([this.#scope,x]);sizes.delete([this.#scope,name,x]);if(MEDIA.includes(name))meta.delete([this.#scope,name,x]);if(name==='photos')thumbs.delete([this.#scope,x]);}
      }
     }catch(e){ownError=friendly(e);tx.abort();}
    };
@@ -181,7 +198,23 @@ export class LocalLibrary {
    done();
   }));
  }
- async #list(name,metadata=false){const rows=await this.#read(name);return rows.sort((a,b)=>b.updatedAt-a.updatedAt||a.id.localeCompare(b.id)).map(row=>publicRow(row,metadata));}
+ async #list(name,metadata=false){
+  const rows=metadata&&MEDIA.includes(name)?await this.#metaRows(name):(await this.#read(name)).map(row=>publicRow(row,metadata));
+  return rows.sort((a,b)=>b.updatedAt-a.updatedAt||a.id.localeCompare(b.id));
+ }
+ /** The rows of a picture or recording store without their files ('meta'); photos with their small pictures. */
+ async #metaRows(name){
+  return this.#run(db=>new Promise((resolve,reject)=>{
+   let tx,rows=[];const thumbs=new Map();
+   try{
+    tx=db.transaction(name==='photos'?['meta','thumbs']:['meta'],'readonly');
+    const req=tx.objectStore('meta').index('store').getAll([this.#scope,name]);req.onsuccess=()=>{rows=req.result.map(r=>r.data);};
+    if(name==='photos'){const got=tx.objectStore('thumbs').index('scope').getAll(this.#scope);got.onsuccess=()=>{for(const t of got.result)thumbs.set(t.id,t);};}
+   }catch(e){reject(friendly(e));return;}
+   tx.oncomplete=()=>resolve(rows.map(row=>{const t=thumbs.get(row.id);return t?{...row,thumb:new Blob([t.bytes],{type:t.type})}:row;}));
+   tx.onabort=()=>reject(friendly(tx.error));tx.onerror=()=>{};
+  }));
+ }
  async #remove(name,id){identifier(id);return this.#mutate(({remove})=>remove(name,id),{});}
  async listNotes(){return this.#list('notes');}
  async saveNote(input){
@@ -208,6 +241,21 @@ export class LocalLibrary {
   return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,name,blob,type:blob.type,size:blob.size,...(info?.length?{info}:{}),createdAt:rows[store].get(id)?.createdAt??now,updatedAt:now};put(store,row);return publicRow(row);},{[store]:[id]});
  }
  async getPhoto(id){return publicRow(await this.#read('photos',identifier(id)));}
+ /** A photo's small picture for grids, {blob, w, h}, or null when none was made yet. */
+ async getThumb(id){const row=await this.#read('thumbs',identifier(id));return row?{blob:new Blob([row.bytes],{type:row.type}),w:row.w,h:row.h}:null;}
+ /** Keeps a photo's small picture; a photo that is gone keeps none. It is not counted in the library's size (it is made
+  *  again whenever it is missing). Resolves whether it was kept. */
+ async saveThumb(id,{blob,w,h}={}){
+  identifier(id);
+  if(typeof blob?.arrayBuffer!=='function'||!blob.size||blob.size>2*1024*1024)throw fail('缩略图无效');
+  const bytes=await blob.arrayBuffer(),type=blob.type||'image/jpeg';
+  return this.#run(db=>new Promise((resolve,reject)=>{
+   let tx,kept=false;
+   try{tx=db.transaction(['meta','thumbs'],'readwrite');const photo=tx.objectStore('meta').get([this.#scope,'photos',id]);photo.onsuccess=()=>{if(!photo.result)return;tx.objectStore('thumbs').put({scope:this.#scope,id,type,bytes,w:Math.round(w)||0,h:Math.round(h)||0});kept=true;};}
+   catch(e){reject(friendly(e));return;}
+   tx.oncomplete=()=>resolve(kept);tx.onabort=()=>reject(friendly(tx.error));tx.onerror=()=>{};
+  }));
+ }
  async deletePhoto(id){
   identifier(id);return this.#mutate(({rows,put,remove})=>{
    const removed=remove('photos',id),phone=rows.phone.get('preferences');

@@ -16,6 +16,7 @@ import {pictureInputs, photoTags, photoCast} from '../core/draw.js';
 import {chatScene, sceneArt, sceneDark, syncMotion} from './chat-scenes.js';
 import {PREMIUM, yuan} from '../core/wallet.js';
 import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
+import {thumbBlob} from './thumbs.js';
 
 // Chat app, QQ style: 消息 (conversations, with search, 置顶 and 免打扰), 联系人 (特别关心, friends, groups, profile cards)
 // and 动态 (朋友圈, ui/moments.js). Tapping your own avatar opens 我: name, status, signature and 个性装扮 (chat bubble,
@@ -600,6 +601,15 @@ export function chatApp(ctx) {
   }
 
   // Album photos sent in the chat; each picture is read once and kept while the app is open.
+  /** A picker's photos as small pictures (ui/thumbs.js), let go when the picker closes. */
+  function pickerThumbs(d, rows) {
+    const urls = [], byId = new Map(rows.map(r => [r.id, r]));
+    d.onClose(() => { for (const url of urls) ctx.win.URL.revokeObjectURL(url); });
+    for (const img of d.body.querySelectorAll('img[data-chat-photo]')) {
+      const row = byId.get(img.dataset.chatPhoto);
+      if (row) thumbBlob(api, row).then(blob => { if (!blob || !d.live) return; const url = ctx.win.URL.createObjectURL(blob); urls.push(url); img.src = url; });
+    }
+  }
   async function photoURL(id) {
     if (!photoURLs.has(id)) {
       const photo = await api.getPhoto(id);
@@ -725,10 +735,10 @@ export function chatApp(ctx) {
       }).catch(error => ctx.notify(error.message));
     });
     for (const row of rows) {
-      const photo = await api.getPhoto(row.id);
+      const blob = await thumbBlob(api, row);
       if (!d.live) return;
       const img = [...d.body.querySelectorAll('img[data-photo]')].find(x => x.dataset.photo === row.id);
-      if (photo && img) { const url = ctx.win.URL.createObjectURL(photo.blob); local.push(url); img.src = url; }
+      if (blob && img) { const url = ctx.win.URL.createObjectURL(blob); local.push(url); img.src = url; }
     }
   }
   function sendPacket() {
@@ -1126,7 +1136,7 @@ export function chatApp(ctx) {
       <label class="secondary file-button">${icon('import')}上传图片<input type="file" accept="image/*" data-avatar-file hidden></label>
       ${rows.length ? `<div class="photo-grid pick-photos">${rows.map(r => `<button data-avatar-photo="${esc(r.id)}" aria-label="用 ${esc(r.name)} 当头像"${chosen?.photoId === r.id ? ' aria-pressed="true"' : ''}><img data-chat-photo="${esc(r.id)}" alt=""></button>`).join('')}</div>` : '<p class="hint">相册里还没有照片。</p>'}
       <div class="actions">${btn('avatar-tavern', reset, 'secondary')}${btn('avatar-text', '只显示文字', 'text-button')}</div>`);
-    for (const img of d.body.querySelectorAll('img[data-chat-photo]')) photoURL(img.dataset.chatPhoto).then(url => { if (url) img.src = url; });
+    pickerThumbs(d, rows);
     const choose = value => { d.close(); api.saveChatOptions({avatars: {[key]: value}}); ctx.notify('头像已换好'); };
     d.body.addEventListener('click', e => {
       const photo = e.target.closest('[data-avatar-photo]')?.dataset.avatarPhoto;
@@ -1207,7 +1217,7 @@ export function chatApp(ctx) {
     const rows = await api.listPhotos();
     if (!rows.length) throw Error('相册里还没有照片，先在相册里导入一张');
     const d = ctx.dialog('选一张聊天背景', `<div class="photo-grid pick-photos">${rows.slice(0, 30).map(r => `<button data-bg-photo="${esc(r.id)}" aria-label="用 ${esc(r.name)} 当背景"><img data-chat-photo="${esc(r.id)}" alt="${esc(r.name)}"></button>`).join('')}</div>`);
-    for (const img of d.body.querySelectorAll('img[data-chat-photo]')) photoURL(img.dataset.chatPhoto).then(url => { if (url) img.src = url; });
+    pickerThumbs(d, rows);
     d.body.addEventListener('click', e => {
       const id = e.target.closest('[data-bg-photo]')?.dataset.bgPhoto;
       if (!id) return;

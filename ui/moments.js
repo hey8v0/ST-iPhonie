@@ -3,6 +3,7 @@
 // sends what the user does. It draws into the chat app's view, inside the frame the chat app gives it (tabs and all).
 import {esc, btn, empty, avatar, field, textArea, input, toggle, help} from './common.js';
 import {icon} from './icons.js';
+import {thumbBlob} from './thumbs.js';
 import {openImageViewer} from '../image-viewer.js';
 import {downloadAction, shareAction} from '../download.js';
 import {aura} from './aura.js';
@@ -119,7 +120,13 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
         else render();
       }
     });
-    for (const img of d.body.querySelectorAll('img[data-photo]')) urlFor(img.dataset.photo).then(url => { if (url) img.src = url; });
+    // the album's photos as small pictures, let go when the sheet closes
+    const byId = new Map(photos.map(r => [r.id, r])), local = [];
+    d.onClose(() => { for (const url of local) ctx.win.URL.revokeObjectURL(url); });
+    for (const img of d.body.querySelectorAll('img[data-photo]')) {
+      const row = byId.get(img.dataset.photo);
+      if (row) thumbBlob(api, row).then(blob => { if (!blob || !d.live) return; const url = ctx.win.URL.createObjectURL(blob); local.push(url); img.src = url; });
+    }
   }
   function commentOn(id, to = '') {
     const reply = to && to !== 'me';

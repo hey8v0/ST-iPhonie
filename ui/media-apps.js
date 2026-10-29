@@ -1,6 +1,7 @@
 import {createView, esc, engines, btn, heading, empty, size, field, input, textArea, groupTitle, avatar, help, pictureCopies} from './common.js';
 import {icon, wave, halo} from './icons.js';
 import {openAlbum} from './album-viewer.js';
+import {thumbBlob} from './thumbs.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {saveFile, shareFile, canShareFiles, zipFiles} from '../download.js';
 import {decodeMono, joinClips, encodeWav, JOIN_RATE} from '../core/audio-join.js';
@@ -121,10 +122,14 @@ export function galleryApp(ctx) {
       ? `<div class="photo-grid${selecting ? ' selecting' : ''}">${rows.map(r => `<button data-action="photo" data-id="${esc(r.id)}" aria-label="${selecting ? '选择' : '查看'} ${esc(r.name)}"${selecting ? ` aria-pressed="${selecting.has(r.id)}"` : ''}><img loading="lazy" data-photo="${esc(r.id)}" alt="${esc(r.name)}"></button>`).join('')}</div>`
         + (selecting ? `<div class="select-bar"><span data-select-count>${countText()}</span>${btn('select-all', allText(), 'text-button')}${btn('select-download', icon('download') + '下载', 'secondary', selecting.size ? '' : 'disabled')}${btn('select-delete', icon('trash') + '删除', 'danger', selecting.size ? '' : 'disabled')}</div>` : '')
       : empty('留住喜欢的画面', '从本地导入照片，也可以设为手机壁纸。', 'image')));
+    // The small pictures already made show at once; the others are made one by one in the grid's order, and kept.
+    const imgs = new Map([...v.root.querySelectorAll('[data-photo]')].map(el => [el.dataset.photo, el]));
+    for (const row of rows) if (row.thumb && imgs.has(row.id)) imgs.get(row.id).src = urlFor(row.thumb);
     for (const row of rows) {
-      const photo = await api.getPhoto(row.id);
+      if (row.thumb) continue;
+      const blob = await thumbBlob(api, row);
       if (v.disposed || ticket !== epoch) return;
-      if (photo) { const img = [...v.root.querySelectorAll('[data-photo]')].find(el => el.dataset.photo === row.id); if (img) img.src = urlFor(photo.blob); }
+      if (blob && imgs.has(row.id)) imgs.get(row.id).src = urlFor(blob);
     }
   }
   const countText = () => selecting.size ? `已选 ${selecting.size} 张` : '点照片来选择';

@@ -37,6 +37,7 @@ import { installDrawSettings } from './backend-draw.js';
 import { createStorageBudget } from './storage-budget.js';
 import { DialoguePlayer } from './player.js';
 import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS } from './library.js';
+import { makeThumb } from './thumbnail.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, guardParams, isFree, isV5, normalizeDrawParams, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, drawCast, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
 import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive } from './chat.js';
@@ -106,6 +107,8 @@ const DRAWN_SOURCES = [
     ['book', '绘本插图', /^绘本-.+-\d+\.(?:png|jpe?g|webp)$/],
 ];
 export class TTSBackend {
+    // photoThumb jobs, one at a time: a grid asks for many at once and each decodes a whole photo.
+    #thumbs = Promise.resolve();
     constructor({ settings, persist = () => {}, notify = () => {}, change = () => {}, unknown = () => {},
         providers = new Providers(), cache, library, keyStore, sink, novelai, chats, indexedDB = globalThis.indexedDB, syncStorage = () => globalThis.localStorage,
         imageFetch = (...args) => globalThis.fetch(...args), soundPack = '', speech = null, tavernHeaders = () => globalThis.SillyTavern?.getContext?.()?.getRequestHeaders?.() || {} } = {}) {
@@ -1218,6 +1221,7 @@ export class TTSBackend {
                 const info = this.pictureInfo(engine, made, picture);
                 if (made.refs) info.push(['参考图', `${made.refs} 张`]);
                 const photo = await this.library.addPhoto({ name: (name || DRAW_ENGINE_NAMES[engine]) + '-' + (made.seed >= 0 ? made.seed : Date.now()) + '.' + ext, blob: made.blob, info });
+                this.#thumbSoon(photo.id);
                 this.emit('library', { collection: 'photos' });
                 this.emit('draw', { phase: 'done' });
                 return { photoId: photo.id, seed: made.seed, params: made.params, prompt: made.prompt, engine, blob: made.blob, info };
@@ -1246,6 +1250,7 @@ export class TTSBackend {
             if (request.body.action !== 'generate') info.push(['方式', request.body.action === 'infill' ? `局部重绘 · 强度 ${request.body.parameters.strength}` : `图生图 · 强度 ${request.body.parameters.strength} · 噪声 ${request.body.parameters.noise}`]);
             if (request.refs) info.push(['角色参考', `${request.refs} 张`]);
             const photo = await this.library.addPhoto({ name: (name || 'NovelAI') + '-' + request.seed + '.png', blob, info });
+            this.#thumbSoon(photo.id);
             this.emit('library', { collection: 'photos' });
             this.emit('draw', { phase: 'done' });
             // Paid images change the Anlas balance and V5 images use up the allowance: read the subscription again next time.
@@ -1276,6 +1281,7 @@ export class TTSBackend {
             this.assertOpen();
             const info = [['引擎', 'NovelAI'], ['工具', label], ['原图', `${width} × ${height}`], ...(body.prompt ? [['说明', body.prompt.replace(';;', ' · ')]] : []), ['画于', new Date().toLocaleString('zh-CN', { hour12: false })]];
             const photo = await this.library.addPhoto({ name: `${name}-${label}-${Date.now()}.png`, blob, info });
+            this.#thumbSoon(photo.id);
             this.emit('library', { collection: 'photos' });
             this.emit('draw', { phase: 'done' });
             if (this.subscription) this.subscription.checkedAt = 0;
@@ -2130,6 +2136,24 @@ export class TTSBackend {
         this.emit('phone', { preferences: await this.getPhone() });
         return gone.size;
     }
+    /** A photo's small picture for grids: the kept one, else made from the photo now and kept (core/thumbnail.js).
+     *  null when the photo is gone or cannot be read; the grid then shows the photo itself. */
+    photoThumb(id) {
+        const job = this.#thumbs.then(async () => {
+            if (this.closed) return null;
+            const kept = await this.library.getThumb?.(id);
+            if (kept) return kept.blob;
+            const photo = await this.library.getPhoto(id);
+            if (!photo?.blob || typeof createImageBitmap !== 'function') return null;
+            const made = await makeThumb(photo.blob);
+            if (!this.closed) await this.library.saveThumb?.(id, made);
+            return made.blob;
+        }).catch(() => null);
+        this.#thumbs = job;
+        return job;
+    }
+    /** A new photo gets its small picture a moment later, in the background. */
+    #thumbSoon(id) { if (id && typeof createImageBitmap === 'function') setTimeout(() => this.photoThumb(id), 400); }
     async #forgetPhotos(gone) {
         let posts = 0;
         for (const post of await this.moments.list()) {
@@ -2334,6 +2358,7 @@ export class TTSBackend {
     }
     async mutateLibrary(collection, method, ...args) {
         const result = await this.library[method](...args.map(clone));
+        if (method === 'addPhoto') this.#thumbSoon(result?.id);
         if (method === 'deleteNote') this.noteGone('notes', [args[0]]);
         if (method === 'deletePhoto') this.noteGone('photos', [args[0]]);
         this.emit('library', { collection });
@@ -2403,7 +2428,7 @@ export class TTSBackend {
             getFavorite: id => this.library.getFavorite(id), playFavorite: id => this.playFavorite(id),
             deleteFavorite: id => this.mutateLibrary('favorites', 'deleteFavorite', id),
             listPhotos: () => this.library.listPhotos(), addPhoto: value => this.mutateLibrary('photos', 'addPhoto', value),
-            getPhoto: id => this.library.getPhoto(id), deletePhoto: id => this.deletePhotos([id]).then(n => n > 0), deletePhotos: ids => this.deletePhotos(ids),
+            getPhoto: id => this.library.getPhoto(id), photoThumb: id => this.photoThumb(id), deletePhoto: id => this.deletePhotos([id]).then(n => n > 0), deletePhotos: ids => this.deletePhotos(ids),
             listNotes: () => this.library.listNotes(), saveNote: value => this.mutateLibrary('notes', 'saveNote', value), deleteNote: id => this.mutateLibrary('notes', 'deleteNote', id),
             listBooks: () => this.library.listBooks(), getBook: id => this.library.getBook(id), saveBook: value => this.mutateLibrary('books', 'saveBook', clone(value)), deleteBook: id => this.mutateLibrary('books', 'deleteBook', id),
             getPhone: () => this.getPhone(), savePhone: patch => this.savePhone(patch), libraryStats: () => this.library.stats(), storageBudget: () => this.budget.read(),
