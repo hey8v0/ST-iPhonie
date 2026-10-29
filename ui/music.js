@@ -174,6 +174,7 @@ export function musicApp(ctx) {
       + `<p class="hint" style="margin-top:0">${esc(groupNote(g))}</p>`
       + (n ? `<div class="actions" style="margin-top:0">${btn('group-play', icon('play', true) + '全部播放', 'primary')}${btn('group-save', icon('add') + '全部加进歌单', 'secondary', group.taking ? 'disabled' : '')}</div><div class="group">${group.songs.slice(0, GROUP_SHOWN).map((x, i) => songRow(x, i, 'group')).join('')}</div>`
         + (n > GROUP_SHOWN ? `<p class="hint">这里列出前 ${GROUP_SHOWN} 首（已取到 ${n} 首），「全部加进歌单」会加全部。</p>` : '') : '')
+      + (group.note ? `<p class="hint">${esc(group.note)}</p>` : '')
       + (group.loading ? `<p class="hint" role="status">${group.taking ? `正在取歌：${n}${g.count ? ' / ' + g.count : ''} 首……` : '正在取歌……'}</p>` : '')
       + (group.error ? `<p class="hint">${esc(group.error)}</p>` : !group.loading && !group.songs.length ? '<p class="hint">里面没有歌</p>' : '')
       + (group.more && !group.loading ? `<div class="actions">${btn('group-more', '加载更多', 'secondary')}</div>` : ''));
@@ -189,8 +190,8 @@ export function musicApp(ctx) {
       g.loading = g.taking = true; renderGroup();
       try {
         while (g.more && group === g && g.songs.length < MUSIC_LIMITS.songs) {
-          const got = await api.groupSongs(g.g.source, g.g.kind, g.g.id, ++g.page, {limit: size, offset: g.songs.length});
-          g.songs = [...g.songs, ...got.songs]; g.more = !!got.more && got.songs.length > 0;
+          const got = await api.groupSongs(g.g.source, g.g.kind, g.g.id, ++g.page, {limit: size, offset: g.songs.length, seen: g.songs.map(s => s.id)});
+          takeIn(g, got);
           if (group === g && !v.disposed && mode === 'group') renderGroup();
         }
       } catch (error) { g.error = error.message; }
@@ -200,10 +201,18 @@ export function musicApp(ctx) {
     }
     if (g.songs.length) await keep(g.songs.map(s => ({title: s.title, artist: s.artist, source: s.source, songId: s.id})), `「${g.g.name}」的 ${g.songs.length} 首歌`);
   }
+  /** A page of songs taken in, each once: no more after it when the source says so, when as many as it said it holds
+   *  are here, or when its address gives no other page (said under the list). */
+  function takeIn(g, got) {
+    const had = new Set(g.songs.map(s => s.id)), fresh = got.songs.filter(s => !had.has(s.id) && had.add(s.id));
+    g.songs = [...g.songs, ...fresh];
+    g.more = !!got.more && fresh.length > 0 && !(g.g.count && g.songs.length >= g.g.count);
+    if (got.unpaged) g.note = `这个音源只给了这 ${g.songs.length} 首：它的地址没写怎么翻页，插件试了几种常见的翻页写法也没取到更多。在音源设置里给「${GROUP_KINDS[g.g.kind] || '专辑'}里的歌的地址」写上 {{offset}} 或 {{page}}，就能取全部。`;
+  }
   async function loadGroup() {
     const g = group, mine = group;
     g.loading = true; renderGroup();
-    try { const got = await api.groupSongs(g.g.source, g.g.kind, g.g.id, g.page); if (group !== mine) return; g.songs = [...g.songs, ...got.songs]; g.more = !!got.more; g.error = ''; }
+    try { const got = await api.groupSongs(g.g.source, g.g.kind, g.g.id, g.page, {offset: g.songs.length, seen: g.songs.map(s => s.id)}); if (group !== mine) return; takeIn(g, got); g.error = ''; }
     catch (error) { if (group !== mine) return; g.error = error.message; g.more = false; }
     g.loading = false;
     if (!v.disposed && mode === 'group') renderGroup();
@@ -218,7 +227,7 @@ export function musicApp(ctx) {
       + `<div class="group pad"><div class="field"><div class="meter-label"><span>音量</span><output>${Math.round(s.volume * 100)}%</output></div><input class="slider" type="range" min="0" max="100" step="5" value="${Math.round(s.volume * 100)}" data-music-volume aria-label="音量"></div>
         ${toggle('duck', '说台词时调小', s.duck, '朗读台词时音乐自动变小，念完恢复。')}
         ${s.bgm !== 'off' ? toggle('taste', '点歌时参考我的歌单', s.taste, '每次随机挑歌单里的一些歌给剧情模型当口味参考，让它选风格相近的别的歌，每次都换不一样的；关掉就完全不带歌单。') : ''}
-        ${toggle('share', '角色会给你分享歌', s.share, '手机聊天里，角色偶尔会分享一首歌给你（一张歌曲卡片，点一下就放）；你在放歌时，角色和正文也知道你在听什么（一起听）。')}</div>`
+        ${toggle('share', '角色会给你分享歌', s.share, '手机聊天里，角色偶尔会分享一首歌给你（一张歌曲卡片，点一下就放）；你自己放歌时，手机聊天里的角色也知道你在听什么（一起听；背景音乐不算，正文也不会知道，免得写进剧情）。')}</div>`
       + groupTitle('音源', help('插件不自带任何音源。音源是两个网址：一个用来搜歌（在放搜索词的地方写 {{query}}），一个用来取歌的播放链接（在放歌曲 ID 的地方写 {{id}}）；再告诉插件结果里列表、歌名、歌手、链接分别在哪（用点隔开的路径，比如 data.url）。\n\n音源不让网页直接读取时，会改用酒馆自带的代理（要在酒馆的 config.yaml 里把 enableCorsProxy 改成 true）。'))
       + `<div class="group">${s.sources.map((x, i) => `<div class="list-row music-source"><span><strong>${esc(x.name)}</strong><small>${esc(x.search.replace(/^https?:\/\//, '').split('/')[0])}</small></span><input class="switch" type="checkbox" data-source-on="${i}" aria-label="启用 ${esc(x.name)}" ${x.enabled ? 'checked' : ''}>${btn('edit-source', icon('edit'), 'icon-button', `data-i="${i}" aria-label="编辑 ${esc(x.name)}"`)}</div>`).join('') || '<p class="hint" style="padding:12px 16px">还没有音源。</p>'}</div>
         <div class="actions">${btn('add-source', icon('add') + '添加音源', 'secondary')}</div>`);

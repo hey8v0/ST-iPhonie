@@ -1,7 +1,9 @@
 // 音乐 on the tavern page: one <audio> that plays the 歌单, search results, the story's background music (<bgm>) and
 // songs characters share, so it goes on while the phone is put away. While a voice line plays it is turned down (when
-// 说台词时调小 is on). What is playing is told to the story and the phone chats (一起听), and shown on the island.
-import {parseBgm, bgmRule, musicPromptPlan, listeningNote, parseLyrics, lyricAt, matchScore, songKey, MUSIC_LIMITS} from './core/music.js';
+// 说台词时调小 is on). What the user plays themselves is told to the phone chats (一起听) and shown on the island; the
+// story is never told what plays (it wrote the music into the story), only which songs played lately, so as not to
+// pick them again.
+import {parseBgm, bgmRule, musicPromptPlan, parseLyrics, lyricAt, matchScore, songKey, MUSIC_LIMITS} from './core/music.js';
 
 const RECENT_KEY = 'sttts.bgmRecent', PLAYED_KEY = 'sttts.bgmPlayed', DUCK = 0.3;
 const label = t => t ? (t.artist ? `${t.title} - ${t.artist}` : t.title) : '';
@@ -49,7 +51,9 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     return audio;
   }
   function level() { if (audio) audio.volume = Math.min(1, Math.max(0, (opts().volume ?? 0.6) * (voiced && opts().duck !== false ? DUCK : 1))); }
-  function emit() { lastEmit = Date.now(); backend.listening = phase === 'playing' && track && track.from !== 'bgm' ? {title: track.title, artist: track.artist} : null; backend.emit('music', {status: true}); }
+  // (background music, the story's song or the list going on after it, is not the user listening)
+  const background = t => !!t && (t.from === 'bgm' || t.bg === true);
+  function emit() { lastEmit = Date.now(); backend.listening = phase === 'playing' && track && !background(track) ? {title: track.title, artist: track.artist} : null; backend.emit('music', {status: true}); }
   function set(next, words = '') { if (next === 'error') backend.reportDiagnostic?.('音乐播放', {message: words, track: {title: track?.title, artist: track?.artist}, mediaCode: audio?.error?.code}); phase = next; message = words; emit(); }
 
   /** The song's file or link: a 歌单 file, a source song (its link is fetched each time: they expire), or a name to look up. */
@@ -154,7 +158,8 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     // nothing else there (or that 歌单 was deleted): 正文点的歌
     if (!list.length && from && from !== 'heard') list = await others('heard');
     if (!list.length) { if (audio) { audio.currentTime = 0; return audio.play().catch(error => set('error', error.message || '续播失败')); } return; }
-    return playList(list, opts().mode === 'shuffle' ? Math.floor(Math.random() * list.length) : 0);
+    // (still background music: not told to the chats as the user listening)
+    return playList(list.map(s => ({...s, bg: true})), opts().mode === 'shuffle' ? Math.floor(Math.random() * list.length) : 0);
   }
   function next(step = 1, auto = false) {
     if (!queue.length) { if (track?.from === 'bgm') return goOn().catch(e => notice(e.message)); stop(); return Promise.resolve(); }
@@ -208,11 +213,12 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
   }
   /** 视觉小说: the story reached a <bgm>; the song already playing goes on. */
   function stage(id, at) { const want = bgmOf(id)[at]; return want ? playBgm(want).catch(e => notice('背景音乐：' + e.message)) : undefined; }
-  /** The rule for the story request, and 一起听 when the user plays a song themselves. */
+  /** The rule for the story request: the songs played lately, the background music playing now first (the list going
+   *  on after the story's song plays songs it did not pick). */
   function promptPlan() {
-    const user = context()?.name1 || '我', rule = bgmRule(opts(), {prompts: settings()?.promptRules, recent, library, user});
-    const listening = backend.listening ? listeningNote(backend.listening, user, settings()?.promptRules) : '';
-    return [...musicPromptPlan(rule), ...(listening ? [{key: 'sttts.entry.listening', text: listening, position: 1, depth: 2, role: 0}] : [])];
+    const user = context()?.name1 || '我', now = background(track) && ['playing', 'paused', 'loading'].includes(phase) ? label(track) : '';
+    const told = now ? [now, ...recent.filter(x => x !== now)] : recent;
+    return musicPromptPlan(bgmRule(opts(), {prompts: settings()?.promptRules, recent: told, library, user}));
   }
 
   function status() {

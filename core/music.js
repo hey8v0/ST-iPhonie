@@ -23,14 +23,20 @@ export const PLAY_MODE_NAMES = Object.freeze({order: '顺序播放', shuffle: '�
  *  '+heard' for it and 正文点的歌 together). */
 export const PLAY_FROM = Object.freeze({library: '歌单', heard: '正文点的歌', mixed: '歌单和正文点的歌'});
 
-export const DEFAULT_BGM_RULE = [
+const RULE_STEPS = [
   '【背景音乐】给这段正文选一首最贴合此刻的歌当背景音乐：',
   '1. 先想清楚现在的场景特征和人物心境，还有上一首放的是什么（不要重复）。',
   '2. 从不同曲风里各想两三首：古典、管弦、传统和风这类；承载回忆的老歌金曲；华语、J-pop、欧美流行；电子、独立、Vocaloid 这类新颖的。',
   '3. 优先选有人声演唱的歌，人声的都不合适才选纯音乐或原声带；不限国家、地区和语言，选最能一瞬间点燃这个场景的那一首。',
-  '4. 在正文最开头单独一行写 <bgm>歌名 - 歌手</bgm>，歌名和歌手写原文（方便搜到）。场景和情绪没变时不写，继续放上一首。',
+  '4. 在正文最开头单独一行写 <bgm>歌名 - 歌手</bgm>，歌名和歌手写原文（方便搜到）。场景和情绪没变时不写，继续放上一首。'
+];
+export const DEFAULT_BGM_RULE = [...RULE_STEPS,
+  '5. 背景音乐是给读者听的配乐，剧情里的人听不到：正文里不要写到放歌、换歌，也不要让谁说起在听什么歌。',
   '最近放过：{{最近}}'
 ].join('\n');
+// the default rule before 0.8.83 (kept by everyone who saved the music settings): brought up to today's
+const OLD_RULES = [[...RULE_STEPS, '最近放过：{{最近}}'].join('\n')];
+const sameRule = (a, b) => String(a).replace(/\r\n?/g, '\n').trim() === String(b).trim();
 
 export function defaultMusic() {
   return {bgm: 'off', rule: DEFAULT_BGM_RULE, volume: 0.6, duck: true, share: true, mode: 'order', taste: true, sources: []};
@@ -91,7 +97,7 @@ export function normalizeMusic(value) {
   const seen = new Set();
   return {
     bgm: BGM_MODES.includes(value.bgm) ? value.bgm : base.bgm,
-    rule: typeof value.rule === 'string' && value.rule.trim() ? clip(value.rule, MUSIC_LIMITS.rule) : base.rule,
+    rule: typeof value.rule === 'string' && value.rule.trim() && !OLD_RULES.some(r => sameRule(value.rule, r)) ? clip(value.rule, MUSIC_LIMITS.rule) : base.rule,
     volume: Number.isFinite(Number(value.volume)) ? Math.min(1, Math.max(0, Number(value.volume))) : base.volume,
     duck: value.duck !== false, share: value.share !== false,
     mode: PLAY_MODES.includes(value.mode) ? value.mode : base.mode, taste: value.taste !== false,
@@ -133,6 +139,18 @@ export function readGroups(source, json, kind) {
   })).filter(g => g.id && g.name);
 }
 /** Whether a source searches in pages (its address says where the page goes): then a full page may have more after it. */
+/** The usual ways music APIs count their pages, tried in turn on an address that does not say how (NetEase's offset
+ *  and limit; page with limit, pagesize or size; QQ's p and n; pageNo and pageSize). */
+export const PAGE_WAYS = Object.freeze(['offset={{offset}}&limit={{limit}}', 'page={{page}}&limit={{limit}}', 'page={{page}}&pagesize={{limit}}', 'page={{page}}&size={{limit}}', 'p={{page}}&n={{limit}}', 'pageNo={{page}}&pageSize={{limit}}']);
+/** An address with a way of counting pages put in (a parameter it has already is changed, the others added). */
+export function withPages(template, way) {
+  let out = String(template);
+  for (const pair of String(way).split('&')) {
+    const [k, v] = pair.split('='), at = new RegExp(`([?&]${k}=)[^&#]*`);
+    out = at.test(out) ? out.replace(at, `$1${v}`) : out.replace(/(#.*)?$/, rest => (out.includes('?') ? '&' : '?') + pair + rest);
+  }
+  return out;
+}
 export const paged = template => /\{\{(?:offset|page)\}\}/.test(String(template || ''));
 /** An address with {{query}} / {{id}} (and, for sources that like a hint, {{title}} / {{artist}}; for pages, {{offset}} /
  *  {{page}} / {{limit}}) filled in. */

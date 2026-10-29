@@ -5,7 +5,7 @@ import {PROMPT_BLOCKS, normalizePromptRules} from './prompt-rules.js';
 import { normalizeVn, spriteRequest, castFiles, moveCastFiles } from './vn.js';
 import { currentModel } from './model-files.js';
 import { MomentStore } from './moments-store.js';
-import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readGroups, paged, songKey, readLink, missingLink, trialOnly, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath, GROUP_KINDS } from './music.js';
+import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readGroups, paged, PAGE_WAYS, withPages, songKey, readLink, missingLink, trialOnly, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath, GROUP_KINDS } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
@@ -1451,16 +1451,28 @@ export class TTSBackend {
     /**
      * The songs of an album, an artist or a playlist a search found: {songs, more} — page 0, 1, … of `limit` songs (at
      * most MUSIC_LIMITS.bulk, for sources whose address says how many); offset: where the page starts, when the pages
-     * before were of another size.
+     * before were of another size; seen: the ids had already (for an address that does not say how its pages go).
+     *
+     * An address with no {{offset}} / {{page}} in it may still give pages: after its first page the usual ways of
+     * asking for one are tried in turn, and the first that gives songs not had yet is kept for that source while the
+     * tavern page is open. None does: {songs: [], more: false, unpaged: true} — the first page is all there is.
      */
-    async groupSongs(sourceId, kind, id, page = 0, { limit = 50, offset } = {}) {
+    async groupSongs(sourceId, kind, id, page = 0, { limit = 50, offset, seen } = {}) {
         this.assertOpen();
         const s = this.musicSource(sourceId), template = GROUP_KINDS[kind] ? s[kind + 'Songs'] : '';
         if (!template) throw Error(`这个音源不能取${GROUP_KINDS[kind] || '专辑'}里的歌`);
         const size = Math.max(1, Math.min(MUSIC_LIMITS.bulk, Math.floor(limit) || 50));
-        const json = await this.musicFetch(fillSource(template, { id, offset: offset ?? page * size, page: page + 1, limit: size }));
-        const songs = readSearch(s, json, s[kind + 'SongsPath'], size).map(x => ({ ...x, sourceName: s.name }));
-        return { songs, more: paged(template) && songs.length >= Math.min(20, size) };
+        const get = async address => readSearch(s, await this.musicFetch(fillSource(address, { id, offset: offset ?? page * size, page: page + 1, limit: size })), s[kind + 'SongsPath'], size).map(x => ({ ...x, sourceName: s.name }));
+        if (paged(template) || page === 0) {
+            const songs = await get(template);
+            return { songs, more: songs.length >= Math.min(20, size) };
+        }
+        const had = new Set((Array.isArray(seen) ? seen : []).map(String)), key = sourceId + '|' + kind, known = (this.pageWays ||= new Map()).get(key);
+        for (const way of known ? [known] : PAGE_WAYS) {
+            const songs = await get(withPages(template, way)).catch(() => null), fresh = (songs || []).filter(x => !had.has(String(x.id)));
+            if (fresh.length) { this.pageWays.set(key, way); return { songs: fresh, more: songs.length >= Math.min(20, size) }; }
+        }
+        return { songs: [], more: false, unpaged: !known };
     }
     /** 正文点的歌: the songs the story picked, newest first, each once (the oldest go past MUSIC_LIMITS.heard). */
     async listHeard() { this.assertOpen(); return this.music.list('heard'); }
