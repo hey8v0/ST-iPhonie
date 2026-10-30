@@ -1583,6 +1583,8 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .file-pick input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
 .file-pick:focus-within{outline:2px solid var(--e,var(--accent));outline-offset:2px}
 .key-actions>.file-pick{justify-content:center}
+.key-actions>.file-pick>span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.key-actions>.file-pick .icon{width:18px;height:18px}
 
 /* ---------- 商城的装扮 (core/wallet.js PREMIUM): richer than the free ones, some with slow motion ---------- */
 @keyframes aurora-flow{0%{background-position:0% 50%}100%{background-position:300% 50%}}
@@ -1673,6 +1675,36 @@ button.gift-item[data-short]{opacity:.55}
 .gift-open{display:grid;justify-items:center;gap:6px;padding:8px 0 4px;text-align:center}
 .gift-open .go-emoji{font-size:64px;line-height:1.1;filter:drop-shadow(0 6px 10px #ff5e8e44)}
 .gift-open .go-name{margin:0;font-size:20px;font-weight:800}
+/* ComfyUI nodes: a card each, opened for its values */
+.comfy-open{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+.comfy-plan-actions a.chip-button{flex:1;display:inline-flex;align-items:center;text-decoration:none}
+.comfy-node-search{margin:0 0 8px}
+.comfy-nodes{overflow:hidden}
+.comfy-node{background:none;border-radius:0;margin:0;padding:0;box-shadow:none;border-bottom:1px solid var(--line)}
+.comfy-node:last-child{border-bottom:0}
+.comfy-node>summary{gap:8px;min-height:54px;padding:8px 14px}
+.comfy-node>summary:after{margin-left:2px}
+.comfy-node>summary .chip{flex:none}
+.comfy-node.off .comfy-node-name{opacity:.5}
+.comfy-node-name{flex:1;min-width:0;display:grid;gap:1px}
+.comfy-node-name strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.comfy-node-name small{font-size:11.5px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.comfy-node-body{display:grid;gap:10px;padding:2px 14px 14px;min-width:0}
+.comfy-node-body:empty{display:none}
+.comfy-node-body .field{margin:0;min-width:0}
+.comfy-node-body .setting-row{padding:0;min-height:36px}
+.comfy-field>span small,.comfy-link>span small,.comfy-node-body .setting-row>span small{margin-left:6px;font-weight:500;font-size:11px;color:var(--ink2)}
+.comfy-field textarea{width:100%;box-sizing:border-box;resize:vertical}
+.comfy-field .select{display:block;min-width:0}
+.comfy-field select{width:100%;min-width:0;text-overflow:ellipsis}
+.comfy-field-tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.comfy-field-tools .file-pick{min-height:32px;padding:4px 12px;font-size:12.5px}
+.comfy-follow{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:40px;padding:4px 6px 4px 12px;border-radius:12px;background:var(--card2);font-size:13px;min-width:0}
+.comfy-follow>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.comfy-follow .chip-button{flex:none}
+.comfy-link{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--ink2);min-width:0}
+.comfy-link>small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.comfy-other{display:block;overflow:auto;max-height:90px;font-size:12px;word-break:break-all}
 /* ComfyUI LoRA list: one row each, changed in place */
 .lora-list{display:grid;gap:4px}
 .lora-row{display:grid;gap:4px;padding:8px 0;border-bottom:1px solid var(--line)}
@@ -2637,7 +2669,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .sw-chosen .sw-main{background:color-mix(in srgb,var(--accent) 13%,var(--card))}
 @keyframes sw-pop{0%{transform:scale(.55)}55%{transform:scale(1.18)}100%{transform:none}}
 /* The bar for what to do with the rows picked: it floats up over the bottom of the list. */
-.sw-bar{position:sticky;bottom:12px;z-index:6;display:flex;align-items:center;gap:6px;margin:10px 0 16px;padding:7px;border-radius:22px;background:color-mix(in srgb,var(--card) 86%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.4);backdrop-filter:blur(14px) saturate(1.4);box-shadow:0 16px 36px -14px rgba(20,40,90,.5),inset 0 0 0 1px var(--line);animation:sw-bar-in .44s cubic-bezier(.2,1.3,.3,1)}
+.sw-bar{position:sticky;bottom:12px;z-index:6;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 16px;padding:7px;border-radius:22px;background:color-mix(in srgb,var(--card) 86%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.4);backdrop-filter:blur(14px) saturate(1.4);box-shadow:0 16px 36px -14px rgba(20,40,90,.5),inset 0 0 0 1px var(--line);animation:sw-bar-in .44s cubic-bezier(.2,1.3,.3,1)}
 .sw-bar[hidden]{display:none}
 .sw-bar.sw-leaving{animation:sw-bar-out .22s ease-in forwards}
 @keyframes sw-bar-in{from{opacity:0;transform:translateY(26px) scale(.94)}}
@@ -2651,11 +2683,14 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .sw-bar button:disabled{opacity:.4;cursor:default}
 .sw-bar svg{width:17px;height:17px}
 .sw-count{font-size:12.5px;font-weight:700;color:var(--ink2);white-space:nowrap;padding-left:2px}
+.sw-count i{font-style:normal}
 .sw-bar-gap{flex:1}
 .sw-bar.many .sw-bar-act span{display:none}
-/* A narrow bar (a phone, two actions with their words): the buttons draw in closer instead of running off the edge. */
+/* A narrow bar (a phone, a sheet): step by step the buttons draw in, the count keeps only its number, then the actions only their icons; a font too big for all that wraps instead of running off the edge. */
 .sw-bar{container-type:inline-size}
-@container (max-width:340px){.sw-bar button{padding:0 9px}}
+@container (max-width:350px){.sw-bar button{padding:0 9px}}
+@container (max-width:325px){.sw-count i{display:none}}
+@container (max-width:272px){.sw-bar-act span{display:none}}
 .sw-bar.many .sw-bar-act{padding:0 11px}
 .sw-hint{margin:-6px 4px 14px}
 /* With a mouse: a ⋯ on the row under the pointer opens its actions (a touch screen swipes instead). */

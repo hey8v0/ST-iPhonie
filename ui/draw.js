@@ -5,6 +5,7 @@ import {openAlbum} from './album-viewer.js';
 import {vibePanel} from './vibes.js';
 import {comfyPlans} from './comfy-plans.js';
 import {comfyLoraPanel} from './comfy-lora-panel.js';
+import {comfyNodePanel} from './comfy-nodes.js';
 import {styleSheets} from './draw-styles.js';
 import {tokenBudget, loadCounter, countPicture, countField, tagCost} from '../core/tokens.js';
 import {refPanel} from './draw-refs.js';
@@ -25,10 +26,11 @@ export function drawApp(ctx) {
   /** The tools for the shown picture: folded until asked for. */
   let toolsOpen = false;
   // ComfyUI: models, samplers and schedulers read from it (null until 读取 is pressed).
-  let comfyInfo = null, comfyRequest = 0, comfyAddress = '';
+  let comfyInfo = null, comfyRequest = 0, comfyAddress = '', comfyReading = false;
   const plans = comfyPlans(ctx, () => render());
   const vibes = vibePanel({ctx, api, root: () => v.root, rerender: () => render()});
   const loras = comfyLoraPanel({ctx, api, root: () => v.root, rerender: () => render()});
+  const nodes = comfyNodePanel({ctx, api, rerender: () => render()});
   const refs = refPanel({ctx, api, rerender: () => render(), shown: () => results[current] || null});
   let queue = api.drawQueue?.() || [], cloudError = api.cloudQueueError?.() || '', cloudNote = null;
   const jobState = j => j.state === 'running' ? '正在画' : j.state === 'busy' ? `账号正忙，稍后重试（第 ${j.attempt} 次）` : j.state === 'spacing' ? '马上开始'
@@ -82,7 +84,7 @@ export function drawApp(ctx) {
     const thumbs = await Promise.all(results.map(r => urlFor(r.photoId)));
     if (v.disposed || ticket !== epoch) return;
     const size = SIZES.find(([, , w, h]) => w === d.params.width && h === d.params.height)?.[0] || 'custom';
-    const tabs = [['prompt', '提示词'], ['chars', '角色'], ...(e !== 'comfy' ? [['refs', '参考图' + (refs.badge() ? ` · ${refs.badge()}` : '')]] : []), ['params', '参数'], ...(e === 'nai' ? [['vibe', 'Vibe']] : e === 'comfy' ? [['lora', 'LoRA']] : [])];
+    const tabs = [['prompt', '提示词'], ['chars', '角色'], ...(e !== 'comfy' ? [['refs', '参考图' + (refs.badge() ? ` · ${refs.badge()}` : '')]] : []), ['params', '参数'], ...(e === 'nai' ? [['vibe', 'Vibe']] : e === 'comfy' ? [['lora', '工作流']] : [])];
     v.root.dataset.engine = e;
     let body = '';
     if (tab === 'prompt') body = `
@@ -98,7 +100,8 @@ export function drawApp(ctx) {
         ${btn('position', '让模型自己决定位置', 'text-button', `data-index="${i}" data-position="-1" aria-pressed="${c.position < 0}"`)}</div>`).join('') : empty('还没有加入角色', e === 'gpt' ? '每个角色的外貌和在画面里的位置，会写进给 GPT 的描述里。' : e === 'comfy' ? 'ComfyUI 没有分角色的提示词：每个人的外貌接在提示词后面，位置不起作用。' : 'V4 / 4.5 可以给每个角色单独写外貌，并指定在画面里的大致位置。', 'person'))
       + `<div class="token-meter" data-token-meter="positive" hidden></div><div class="actions">${btn('add-char', icon('add') + '从角色里添加', 'secondary')}${btn('add-custom', icon('add') + '手动添加', 'secondary')}</div>`;
     if (tab === 'params' && e === 'gpt') body = gptParams(d.gpt);
-    if (tab === 'params' && e === 'comfy') body = comfyParams(d.comfy, comfy.controls);
+    // The lists are read as soon as the page is looked at; they can be typed in when ComfyUI does not answer.
+    if (tab === 'params' && e === 'comfy') { body = comfyParams(d.comfy, comfy); if (!comfyInfo && !comfyReading) { comfyReading = true; readComfy().finally(() => { comfyReading = false; }); } }
     if (tab === 'params' && e === 'nai') body = `
       <div class="group pad">
         ${field('模型', select('model', d.params.model, api.drawCatalog.models.map(m => [m, api.drawCatalog.modelNames[m] || m])), /^nai-diffusion-5/.test(d.params.model) ? 'V5 对 Opus 不是无限的：免费档内的图用一份会慢慢恢复的免费额度，用完后改扣 Anlas。V4.5 及更早的模型仍然无限。' : '')}
@@ -128,7 +131,7 @@ export function drawApp(ctx) {
       </div></div></details>`;
     if (tab === 'vibe') body = vibes.html();
     if (tab === 'refs') body = refs.html();
-    if (tab === 'lora') body = plans.summary(comfy) + loras.html(comfy);
+    if (tab === 'lora') { body = plans.summary(comfy) + loras.html(comfy) + nodes.html(); nodes.load(); }
     if (tab === 'chat') body = `
       ${d.enabled ? '' : `<div class="banner">${icon('image')}<span>正文出图没有开启，在「设置 · 正文」里打开（配图方式也在那里）。</span>${btn('go-settings', '去打开', 'chip-button')}</div>`}<div class="group">${toggle('auto', '新回复自动出图', d.auto, '只自动画不花钱的：NovelAI 免费档内的图、ComfyUI 的图；GPT 生图在「每张先问」关掉后也会自动画。其余的正文里会显示“点击生成”。')}${toggle('fold', '正文图片默认收起', d.fold, '收起后正文里只留一个小缩略图，点开再看，手机上不占地方。每张图也可以单独收起或展开。')}</div>
       <div class="group">${toggle('strip', '发给模型时去掉旧出图块', d.strip, '出图块留在聊天记录里（图片靠它显示），但之后每次请求模型时会把它们去掉，省下上下文。')}</div>
@@ -195,8 +198,10 @@ export function drawApp(ctx) {
       <div class="group">${toggle('gptAsk', '每张先问', g.ask, 'GPT 生图每张都要花钱。打开时，每张图画之前都先问你，新回复也不会自动画（正文里显示“点击生成”）。关掉后不再问，新回复会自动画，费用自己留意。')}</div>`;
   }
   /** ComfyUI: model, size, steps, CFG, sampler, scheduler and seed (the workflow decides what it uses). */
-  function comfyParams(c, controls) {
+  function comfyParams(c, {controls, modelKind}) {
     const has = key => controls.includes(key), info = comfyInfo;
+    // An imported workflow's loader takes one kind of model: only those are offered.
+    const models = modelKind ? info?.models?.filter(m => m.loader === modelKind) : info?.models;
     const size = SIZES.find(([, , w, h]) => w === c.width && h === c.height)?.[0] || 'custom';
     const choose = (key, value, list, placeholder) => list?.length
       ? select(key, value, [['', '请选择'], ...(list.some(x => (typeof x === 'string' ? x : x.value) === value) || !value ? [] : [[value, value]]), ...list.map(x => typeof x === 'string' ? [x, x] : [x.value, x.text])])
@@ -205,13 +210,13 @@ export function drawApp(ctx) {
     return `<div class="group pad">
       <div class="row-heading"><strong>出图参数 ${help('这里只显示工作流留给插件填写的参数。工作流写死的值由工作流决定，需要在 ComfyUI 修改后重新导入。改动马上保存进正在用的方案。')}</strong>${btn('comfy-read', icon('refresh'), 'round-button', 'aria-label="刷新模型和采样器"')}</div>
       ${info?.error ? `<div class="comfy-note error-copy">列表读取失败，可手填 ${help(info.error)}</div>` : ''}
-      ${has('model') ? field('模型', choose('comfy-model', c.model, info?.models, '刷新列表，或填模型文件名')) : `<div class="comfy-note">模型由工作流指定 ${help('当前工作流没有模型占位符，模型选择保留在工作流内。')}</div>`}
+      ${has('model') ? field('模型', choose('comfy-model', c.model, models, '刷新列表，或填模型文件名')) : `<div class="comfy-note">模型由工作流指定 ${help('当前工作流没有模型占位符，模型选择保留在工作流内。')}</div>`}
       ${has('clip') ? `${info?.clipError ? `<div class="comfy-note error-copy">CLIP 列表读不到，可手填 ${help(info.clipError)}</div>` : ''}${field('CLIP', choose('comfy-clip', c.clip, info?.clips, 'CLIP 文件名，如 qwen_3_06b_base.safetensors'), '这个模型的文本编码器单独放在 ComfyUI 的 text_encoders（或 clip）文件夹里，选它对应的那个。')}`
         + field('CLIP 类型', choose('comfy-clipType', c.clipType, info?.clipTypes, 'stable_diffusion'), '按模型说明选，和 ComfyUI 里「加载 CLIP」节点的类型一样。') : ''}
       ${has('vae') ? field('VAE', choose('comfy-vae', c.vae, info?.vaes, 'VAE 文件名'), '将潜在图像解码成图片的模型，文件要先安装在 ComfyUI。') : ''}
       ${has('width') && has('height') ? `<div class="field"><span>画幅</span><div class="size-chips">${SIZES.map(([k, label, w, h]) => `<button data-action="comfy-size" data-size="${k}" aria-pressed="${size === k}"><i style="width:${w / 100}px;height:${h / 100}px"></i>${label}<small>${w}×${h}</small></button>`).join('')}</div></div>` : ''}
       <div class="comfy-strengths">${has('width') ? field('宽度', input('comfy-width', c.width, 'number', 'min="64" max="4096" step="8"')) : ''}${has('height') ? field('高度', input('comfy-height', c.height, 'number', 'min="64" max="4096" step="8"')) : ''}</div>
-      ${slider('steps', '步数', 1, 150)}${slider('scale', '提示词相关性 CFG', 0, 30, .1)}
+      ${slider('steps', '步数', 1, 150)}${slider('scale', '提示词相关性 CFG', 0, 30, .1)}${slider('denoise', '重绘幅度', 0, 1, .01)}
       ${has('sampler') ? field('采样器', choose('comfy-sampler', c.sampler, info?.samplers, 'euler_ancestral')) : ''}
       ${has('scheduler') ? field('噪声调度', choose('comfy-scheduler', c.scheduler, info?.schedulers, 'normal')) : ''}
       ${slider('clipSkip', 'CLIP Skip', 1, 12)}
@@ -254,6 +259,8 @@ export function drawApp(ctx) {
   };
   v.refresh = () => { render(); refreshSubscription(); };
   v.onDraw = event => {
+    // A step of a picture: only its words change, nothing is redrawn under a finger.
+    if (event.steps) { const busyLabel = v.root.querySelector('.canvas-busy'); if (busyLabel) busyLabel.textContent = `${engineName()} 正在画 ${event.steps}`; return; }
     if (event.subscription) subscription = event.subscription;
     if (event.queue) { queue = event.queue; cloudError = event.cloud || ''; }
     if (event.subscription || event.queue || event.vibes && tab === 'vibe') render();
@@ -261,7 +268,7 @@ export function drawApp(ctx) {
   const dispose = v.dispose;
   let viewer = null;
   v.back = () => { if (viewer?.open) { viewer.close(); return true; } return false; };
-  v.dispose = () => { epoch++; viewer?.close(); comfyRequest++; plans.dispose(); loras.dispose(); for (const url of urls.values()) ctx.win.URL.revokeObjectURL(url); urls.clear(); dispose(); };
+  v.dispose = () => { epoch++; viewer?.close(); comfyRequest++; plans.dispose(); loras.dispose(); nodes.dispose(); for (const url of urls.values()) ctx.win.URL.revokeObjectURL(url); urls.clear(); dispose(); };
 
   v.on('input', '[data-field]', el => {
     const key = el.dataset.field;
@@ -300,6 +307,12 @@ export function drawApp(ctx) {
     render();
   });
   v.on('input', '[data-vibe-search]', el => vibes.search(el.value));
+  v.on('input', '[data-node-search]', el => nodes.search(v.root, el.value));
+  v.on('change', '[data-node-value]', el => nodes.change(el));
+  v.on('change', '[data-node-file]', el => nodes.pick(el));
+  v.on('change', '[data-node-switch]', el => nodes.switched(el));
+  v.on('change', '[data-node-output]', el => nodes.output(el));
+  v.root.addEventListener('toggle', event => { if (event.target.matches?.('[data-node-card]')) nodes.toggled(event.target); }, true);
   v.on('input', '[data-ref-slider]', el => refs.slide(el));
   v.on('input', '[data-ref-label]', el => refs.label(el));
   v.on('change', '[data-ref-slider]', () => render());
@@ -308,6 +321,7 @@ export function drawApp(ctx) {
   v.on('click', '[data-action]', async el => {
     if (eng() === 'comfy' && await plans.click(el)) return;
     if (eng() === 'comfy' && await loras.click(el)) return;
+    if (el.dataset.action?.startsWith('node-') && await nodes.click(el)) return;
     if (el.dataset.action?.startsWith('vibe-') && await vibes.click(el)) return;
     if (el.dataset.action?.startsWith('ref-') && await refs.click(el)) return;
     if (el.dataset.action?.startsWith('tool-') && await tools(el)) return;

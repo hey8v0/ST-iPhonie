@@ -73,7 +73,8 @@ export function enginesApp(ctx) {
     const name = nameOf(id), t = llm ? (engine === 'llm' && textDraft ? textDraft : st.text) : null, custom = t?.source === 'custom';
     const fields = vector ? [['MODEL', em.model || '未填写'], ['MEMORY', em.enabled ? '语义检索' : '本地检索']]
       : id === 'gpt' ? [['MODEL', d.gpt.model], ['QUALITY', d.gpt.quality.toUpperCase()]]
-      : comfy ? [['MODEL', d.comfy.model ? d.comfy.model.replace(/\.[^.]*$/, '').slice(0, 18) : '未选'], ['WORKFLOW', d.comfy.workflows.find(p => p.id === d.comfy.activeWorkflow)?.name || '默认工作流']]
+      // A workflow that names its own model has nothing left to choose.
+      : comfy ? [['MODEL', d.comfy.workflow && !d.comfy.workflow.includes('"%model%"') ? '工作流决定' : d.comfy.model ? d.comfy.model.replace(/\.[^.]*$/, '').slice(0, 18) : '未选'], ['WORKFLOW', d.comfy.workflows.find(p => p.id === d.comfy.activeWorkflow)?.name || '默认工作流']]
       : llm
       ? [['SOURCE', custom ? 'CUSTOM API' : 'TAVERN'], ['MODEL', custom ? t.presets.find(p => p.id === t.active)?.model || '未填写' : '跟随酒馆']]
       : nai
@@ -225,12 +226,14 @@ export function enginesApp(ctx) {
     const c = api.getState().draw.comfy, info = comfyInfo;
     v.root.dataset.engine = 'comfy';
     v.draw(heading('ComfyUI', '', 'Image Card') + card('comfy', 'div') + `<div class="group">${drawingWith('comfy')}</div>`
-      + groupTitle('连接', help('生成图片经酒馆服务器连接 ComfyUI。地址填酒馆所在电脑能访问的地址；同机一般是 http://127.0.0.1:8188，另一台电脑需使用局域网地址和 --listen。'))
+      + groupTitle('连接', help('出图由酒馆转发给 ComfyUI，地址要填酒馆所在设备能打开的。\n\n· 酒馆和 ComfyUI 在同一台电脑：http://127.0.0.1:8188\n· 酒馆装在手机上，或 ComfyUI 在另一台电脑：http://那台电脑的局域网地址:端口（如 192.168.1.11:8188）。ComfyUI 要加 --listen，防火墙要放行这个端口。'))
       + `<div class="group pad">
         ${field('ComfyUI 地址', `<div class="music-selfhost">${input('comfy-url', c.url, 'url', 'autocomplete="off" placeholder="http://127.0.0.1:8188"')}${btn('comfy-test', icon('refresh') + '测试', 'secondary small')}</div>`, '填完点一下别处就保存了。')}
-        ${info ? `<div class="comfy-note${info.error ? ' error-copy' : ''}">${info.error ? `连接失败 ${help(info.error)}` : '连接正常'}</div>` : ''}
-        ${field('LoRA 列表连接', select('comfy-transport', c.loraTransport, [['tavern', '经酒馆代理'], ['direct', '浏览器直连']]), '列表读取经酒馆代理时需要 enableCorsProxy。浏览器直连需要 ComfyUI 允许跨域，且当前设备能访问这个地址。生成图片仍经酒馆转发。')}
-      </div><div class="actions">${btn('open-draw', icon('paint') + '去绘画 · 方案与 LoRA', 'secondary')}</div>`);
+        ${info ? `<div class="comfy-note${info.error ? ' error-copy' : ''}">${info.error ? `${/^https?:\/\/(127\.|localhost|\[::1\])/i.test(c.url) ? '连接失败：127.0.0.1 是酒馆所在的设备，ComfyUI 在别的电脑上要填它的局域网地址' : '连接失败'} ${help(info.error)}` : `连接正常${info.models?.length ? ` · ${info.models.length} 个模型` : ''}`}</div>` : ''}
+        <details class="tool-fold"><summary>${icon('alert')}读不到节点和文件列表？</summary><div>
+          ${field('读取方式', select('comfy-transport', c.loraTransport, [['tavern', '经酒馆代理'], ['direct', '浏览器直连']]), '节点选项、LoRA 列表和 ComfyUI 里存的工作流要这样读（出图不用）。一种读不到时会自动试另一种。\n\n· 经酒馆代理：酒馆 config.yaml 里设 enableCorsProxy: true，改完重启酒馆。\n· 浏览器直连：ComfyUI 加 --enable-cors-header，而且这台设备打得开 ComfyUI 的地址。\n\n都不行也能画：用文件导入工作流，文件名手填。')}
+        </div></details>
+      </div><div class="actions">${btn('open-draw', icon('paint') + '去绘画 · 工作流与 LoRA', 'secondary')}<a class="secondary comfy-open" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">打开 ComfyUI 网页</a></div>`);
   }
   async function loadComfy() {
     const token = ++comfyRequest, url = v.root.querySelector('[data-field=comfy-url]')?.value;
@@ -238,6 +241,9 @@ export function enginesApp(ctx) {
     let info;
     try { info = await api.comfyCatalog(url); }
     catch (error) { info = {error: error.message}; }
+    // A first connection needs no further step: the first checkpoint it has is used until another is picked.
+    const now = api.getState().draw.comfy, first = info.models?.find(m => m.loader === 'checkpoint');
+    if (!v.disposed && first && !now.model && !now.workflow) { api.saveDraw({comfy: {model: first.value, loader: 'checkpoint'}}); ctx.notify(`模型先用 ${first.text}，可以在绘图的「参数」里换`); }
     if (!v.disposed && token === comfyRequest && engine === 'comfy' && v.root.querySelector('[data-field=comfy-url]')?.value === url) {
       comfyInfo = info; render(); v.root.querySelector('[data-field=comfy-url]').value = url;
     }

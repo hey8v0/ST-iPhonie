@@ -1,7 +1,8 @@
 // The drawing settings of the backend (core/backend.js): ComfyUI workflows and their LoRAs, 绘图 settings, 画风
 // (with the NovelAI parameters each one keeps), 绘图预设, the prompt preview, the NovelAI subscription and what a
 // picture costs. Methods of TTSBackend, kept in a file of their own (installDrawSettings puts them on its prototype).
-import { DRAW_ENGINES, normalizeGpt, gptBase, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, defaultWorkflow, COMFY_PARAM_KEYS, applyComfyWorkflow } from './image-engines.js';
+import { DRAW_ENGINES, normalizeGpt, gptBase, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, defaultWorkflow, COMFY_PARAM_KEYS, applyComfyWorkflow, comfyParams, comfySpecs, comfySavedList, comfySavedRead, comfyRecent, comfyUpload } from './image-engines.js';
+import { readPictureWorkflow, parseWorkflow, uiToApi, uiNodeTypes, mapWorkflow, promptCandidates, promptWords, describeNodes, setNodeValues, switchNodesOff, findProblems, nodeTypes, modelKindOf } from './comfy-graph.js';
 import { activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource } from './comfy-loras.js';
 import { relayUrl, guardParams, isFree, isV5, normalizeDrawParams, takesReference, REFERENCE_ANLAS } from './novelai.js';
 import { PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, normalizeVibeSettings, styleParams } from './draw.js';
@@ -9,6 +10,20 @@ import { activeChatPreset } from './chat.js';
 import { VIBE_ANLAS } from './vibes.js';
 
 const clone = value => structuredClone(value);
+const BLANK_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+/** The scheme in use, ready to change: the built-in default stays as it is, so the first change makes a copy and switches to it. */
+function ownScheme(c, stem) {
+    let row = c.workflows.find(p => p.id === c.activeWorkflow), copied = false;
+    if (row.id === 'default') {
+        if (c.workflows.length >= COMFY_LIMITS.presets) throw Error(`最多保存 ${COMFY_LIMITS.presets} 套 ComfyUI 方案，请先删掉一套`);
+        let name = stem, n = 2;
+        while (c.workflows.some(p => p.name === name)) name = `${stem} (${n++})`;
+        const workflow = defaultWorkflow(row);
+        row = { ...clone(row), id: crypto.randomUUID(), name, workflow, sourceWorkflow: workflow, disabledLoras: [] };
+        c.workflows.push(row); copied = true;
+    }
+    return { row, copied };
+}
 
 class DrawSettings {
     /**
@@ -21,8 +36,8 @@ class DrawSettings {
         const info = inspectLoras(workflow);
         // controls: the parameters the workflow leaves to the plugin (only these are shown); missing: what stops a picture.
         const controls = workflowPlaceholders(workflow).map(k => k === 'clip_skip' ? 'clipSkip' : k === 'clip_type' ? 'clipType' : k);
-        return clone({ ...info, disabled: row.disabledLoras || [], auto: pickLoraSource(workflow), builtIn: row.id === 'default', restorable: !!row.sourceWorkflow && row.sourceWorkflow !== row.workflow,
-            controls, missing: controls.includes('model') && !c.model ? '还没有选模型：在「参数」里读取模型列表再选一个' : '' });
+        return clone({ ...info, disabled: row.disabledLoras || [], auto: pickLoraSource(workflow), builtIn: row.id === 'default', restorable: !!row.sourceWorkflow && (row.sourceWorkflow !== row.workflow || !!row.disabledNodes?.length || !!row.output),
+            controls, fills: workflowPlaceholders(workflow), modelKind: row.workflow ? modelKindOf(workflow) : '', missing: controls.includes('model') && !c.model ? '还没有选模型：在「参数」里读取模型列表再选一个' : '' });
     }
     /**
      * Changes the LoRAs of the scheme in use and saves it at once: {updates: [{id, lora_name?, strength_model?,
@@ -32,15 +47,7 @@ class DrawSettings {
     editComfyLoras(change = {}) {
         this.assertOpen();
         const next = this.getState(), c = next.draw.comfy;
-        let row = c.workflows.find(p => p.id === c.activeWorkflow), copied = false;
-        if (row.id === 'default') {
-            if (c.workflows.length >= COMFY_LIMITS.presets) throw Error(`最多保存 ${COMFY_LIMITS.presets} 套 ComfyUI 方案，请先删掉一套`);
-            const stem = '默认工作流 · LoRA'; let name = stem, n = 2;
-            while (c.workflows.some(p => p.name === name)) name = `${stem} (${n++})`;
-            const workflow = defaultWorkflow(row);
-            row = { ...clone(row), id: crypto.randomUUID(), name, workflow, sourceWorkflow: workflow, disabledLoras: [] };
-            c.workflows.push(row); copied = true;
-        }
+        const { row, copied } = ownScheme(c, '默认工作流 · LoRA');
         const add = change.add ? { ...change.add, source: change.add.source || pickLoraSource(row.workflow) } : undefined;
         if (add && !add.source) throw Error('这个工作流有好几条模型线路，请选一下 LoRA 接在哪里');
         row.workflow = editLoras(row.workflow, { updates: change.updates || [], remove: change.remove, add });
@@ -53,11 +60,108 @@ class DrawSettings {
         this.save(next);
         return { copied, name: row.name, info: this.comfyLoraInfo() };
     }
+    /** What ComfyUI says of the node types in use, kept per address (fresh: after installing something). */
+    async comfyNodeSpecs({ fresh = false, types, signal } = {}) {
+        this.assertOpen();
+        const c = this.settings.draw.comfy, row = c.workflows.find(p => p.id === c.activeWorkflow);
+        if (fresh || this.comfySpecCache?.url !== c.url) this.comfySpecCache = { url: c.url, specs: {}, way: this.comfySpecCache?.url === c.url ? this.comfySpecCache.way : c.loraTransport };
+        const cache = this.comfySpecCache, wanted = types || nodeTypes(row.workflow || defaultWorkflow(row)), missing = wanted.filter(t => !cache.specs[t]);
+        if (missing.length) { const read = await comfySpecs({ fetch: this.imageFetch, url: c.url, transport: cache.way, types: missing, signal }); Object.assign(cache.specs, read.specs); cache.way = read.way; }
+        return Object.fromEntries(wanted.filter(t => cache.specs[t]).map(t => [t, cache.specs[t]]));
+    }
+    /** Every node of the scheme in use, as the drawing app lists them (core/comfy-graph.js: describeNodes). */
+    comfyNodeList() {
+        const c = this.settings.draw.comfy, row = c.workflows.find(p => p.id === c.activeWorkflow);
+        return clone(describeNodes(row.workflow || defaultWorkflow(row), { specs: this.comfySpecCache?.url === c.url ? this.comfySpecCache.specs : {}, off: row.disabledNodes || [], output: row.output || '' }));
+    }
+    /**
+     * Changes the nodes of the scheme in use and saves it at once: {set: [{id, key, value}], off: {id: true/false},
+     * output: a node's id or '', params: values for the 参数 page}. The built-in default is copied first, as for LoRAs.
+     */
+    editComfyNodes(change = {}) {
+        this.assertOpen();
+        const next = this.getState(), c = next.draw.comfy, { row, copied } = ownScheme(c, '默认工作流 · 修改');
+        if (change.set?.length) row.workflow = setNodeValues(row.workflow, change.set);
+        const off = new Set(row.disabledNodes || []);
+        for (const [id, on] of Object.entries(change.off || {})) { if (on) off.add(id); else off.delete(id); }
+        row.disabledNodes = [...off];
+        if ('output' in change) row.output = String(change.output || '');
+        if (change.params) Object.assign(row, comfyParams({ ...row, ...change.params }));
+        // What would stop a picture is refused now, not when it is drawn.
+        checkWorkflow(row.workflow); switchNodesOff(row.workflow, row.disabledNodes);
+        applyComfyWorkflow(c, row.id);
+        this.save(next);
+        return { copied, name: row.name };
+    }
+    /**
+     * Reads a workflow from what it came in (text: any of its JSON forms; buffer: a picture ComfyUI saved) and works out
+     * which node takes what: {workflow, params, mapped, needsPrompt, candidates}. prompt: {id, key} when the user was asked.
+     */
+    async prepareComfyImport({ text, buffer, prompt } = {}) {
+        this.assertOpen();
+        let source = text;
+        if (buffer) {
+            const picture = await readPictureWorkflow(buffer);
+            source = picture.prompt || picture.workflow;
+            if (!source) throw Error('这张图里没有工作流：要用 ComfyUI 存下来的原图，发到别处压缩过的不行');
+        }
+        const parsed = parseWorkflow(source);
+        // The text as it came when it is the graph: a workflow with %prompt% in it stays exactly as it is.
+        let graph = parsed.wrapped ? parsed.api : source;
+        if (parsed.ui) {
+            let specs = {};
+            try { specs = await this.comfyNodeSpecs({ types: uiNodeTypes(parsed.ui) }); } catch { /* the file itself may name them */ }
+            try { graph = uiToApi(parsed.ui, specs); }
+            catch (error) { throw Error(`${error.message}。连上 ComfyUI 再导入，或者在 ComfyUI 里用「导出 (API)」（Export (API)）重新导出`); }
+        }
+        const plan = mapWorkflow(graph, { prompt });
+        return { ...plan, candidates: plan.needsPrompt ? promptCandidates(graph) : [] };
+    }
+    /** Workflows saved in ComfyUI itself, and what it drew lately ([{id, label, graph}]): both read like the LoRA list. */
+    async comfySavedWorkflows() { this.assertOpen(); const c = this.settings.draw.comfy; return comfySavedList({ fetch: this.imageFetch, url: c.url, transport: c.loraTransport }); }
+    async comfySavedWorkflow(name) { this.assertOpen(); const c = this.settings.draw.comfy; return comfySavedRead({ fetch: this.imageFetch, url: c.url, transport: c.loraTransport, name: String(name || '') }); }
+    async comfyRecentRuns() {
+        this.assertOpen();
+        const c = this.settings.draw.comfy, runs = await comfyRecent({ fetch: this.imageFetch, url: c.url, transport: c.loraTransport });
+        return runs.map(run => ({ id: run.id, label: promptWords(run.graph) || run.id.slice(0, 8), graph: JSON.stringify(run.graph) }));
+    }
+    /** A picture for a LoadImage node: goes into ComfyUI's input folder; answers the name to put in the node. */
+    async comfyUploadPicture(file) {
+        this.assertOpen();
+        const kind = /^image\/(\w+)/.exec(file.type || '')?.[1] || 'png';
+        return comfyUpload({ fetch: this.imageFetch, url: this.settings.draw.comfy.url, blob: file, name: file.name || `st-iphonie-${Date.now()}.${kind}` });
+    }
+    /**
+     * What a workflow written for the tavern's own image generation also takes: the avatars of the chat in use, as
+     * base64 (a blank pixel when there is none, as there), and the placeholders added there with their replacements.
+     */
+    async comfyTavernValues(workflow) {
+        const values = {}, used = workflowPlaceholders(workflow), files = this.comfyPictures() || {};
+        for (const [name, url] of [['char_avatar', files.character], ['user_avatar', files.user]]) {
+            if (!used.includes(name)) continue;
+            values[name] = BLANK_PIXEL;
+            try {
+                const response = url ? await this.assetFetch(url) : null;
+                if (response?.ok) { const bytes = new Uint8Array(await response.arrayBuffer()); let text = ''; for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192)); values[name] = btoa(text); }
+            } catch { /* the blank pixel, as in the tavern */ }
+        }
+        for (const { find, replace } of files.placeholders || []) if (find && !Object.hasOwn(values, find)) values[find] = String(replace ?? '');
+        return values;
+    }
+    /** ComfyUI turned a workflow down and the tavern does not say why: looks for what it does not have. */
+    async comfyRefusal(error, workflow, c) {
+        try {
+            const { specs } = await comfySpecs({ fetch: this.imageFetch, url: c.url, transport: this.comfySpecCache?.url === c.url ? this.comfySpecCache.way : c.loraTransport, types: nodeTypes(workflow) });
+            const problems = findProblems(workflow, specs);
+            if (problems.length) return Object.assign(Error('ComfyUI 没接受这个工作流：' + problems.slice(0, 3).join('；')), { status: 0 });
+        } catch { /* cannot look: what is known already says it */ }
+        return error;
+    }
     /** The scheme in use back to the workflow it was imported with (its LoRA edits undone). */
     restoreComfyWorkflow() {
         const next = this.getState(), c = next.draw.comfy, row = c.workflows.find(p => p.id === c.activeWorkflow);
         if (!row.sourceWorkflow) throw Error('这套方案没有可以恢复的原始工作流');
-        row.workflow = row.sourceWorkflow; row.disabledLoras = [];
+        row.workflow = row.sourceWorkflow; row.disabledLoras = []; row.disabledNodes = []; row.output = '';
         applyComfyWorkflow(c, row.id); this.save(next);
         return this.comfyLoraInfo();
     }
@@ -78,7 +182,8 @@ class DrawSettings {
         // Validate bypass wiring before acknowledging a saved scheme.
         activeLoraWorkflow(workflow, disabledLoras);
         const sourceWorkflow = checkWorkflow(patch.sourceWorkflow ?? old?.sourceWorkflow);
-        const row = {id: old?.id || crypto.randomUUID(), name, workflow, disabledLoras, ...(sourceWorkflow ? {sourceWorkflow} : {}), ...Object.fromEntries(COMFY_PARAM_KEYS.map(key => [key, patch.params?.[key] ?? (old || c)[key]]))};
+        const disabledNodes = patch.disabledNodes ?? old?.disabledNodes, output = patch.output ?? old?.output;
+        const row = {id: old?.id || crypto.randomUUID(), name, workflow, disabledLoras, ...(disabledNodes?.length ? {disabledNodes} : {}), ...(output ? {output} : {}), ...(sourceWorkflow ? {sourceWorkflow} : {}), ...Object.fromEntries(COMFY_PARAM_KEYS.map(key => [key, patch.params?.[key] ?? (old || c)[key]]))};
         if (old) c.workflows[c.workflows.indexOf(old)] = row; else c.workflows.push(row);
         applyComfyWorkflow(c, row.id); this.save(next);
         return clone(this.settings.draw.comfy.workflows.find(p => p.id === row.id));

@@ -23,8 +23,9 @@ import { normalizeSounds, soundRow, readPack, missingKey, soundName, packRows, P
 import { decodeMono, encodeWav } from './audio-join.js';
 import { BACKUP_PARTS, PART_STORES, writeBackup, readBackup, sealKeys, openKeys } from './backup.js';
 import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, SHOP_GIFTS, LEDGER_KINDS, premiumOf, decorKey, cents, yuan, shopGifts, normalizeGift, validateGift } from './wallet.js';
-import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, GPT_MAX_REFS, normalizeGpt, gptBase, gptSize, gptPrompt, gptGenerate, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, comfyClips, defaultWorkflow, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS, applyComfyWorkflow } from './image-engines.js';
+import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, GPT_MAX_REFS, normalizeGpt, gptBase, gptSize, gptPrompt, gptGenerate, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, comfyClips, comfyProgress, defaultWorkflow, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS, applyComfyWorkflow } from './image-engines.js';
 import {activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource} from './comfy-loras.js';
+import {keepOneOutput, switchNodesOff} from './comfy-graph.js';
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases } from './routes.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
@@ -114,7 +115,7 @@ export class TTSBackend {
     #previewing = new Set();
     constructor({ settings, persist = () => {}, notify = () => {}, change = () => {}, unknown = () => {},
         providers = new Providers(), cache, library, keyStore, sink, novelai, chats, indexedDB = globalThis.indexedDB, syncStorage = () => globalThis.localStorage,
-        imageFetch = (...args) => globalThis.fetch(...args), soundPack = '', speech = null, tavernHeaders = () => globalThis.SillyTavern?.getContext?.()?.getRequestHeaders?.() || {} } = {}) {
+        imageFetch = (...args) => globalThis.fetch(...args), soundPack = '', speech = null, comfyPictures = () => ({}), tavernHeaders = () => globalThis.SillyTavern?.getContext?.()?.getRequestHeaders?.() || {} } = {}) {
         this.settings = normalizeSettings(settings);
         validateSettings(this.settings);
         this.persist = persist;
@@ -164,6 +165,8 @@ export class TTSBackend {
         // GPT 生图 and ComfyUI: the key of the GPT image engine; requests go out with these (tests pass their own).
         this.gptKey = '';
         this.assetFetch = imageFetch;
+        // Where the tavern keeps the avatars of the chat in use, for workflows that draw from them.
+        this.comfyPictures = comfyPictures;
         this.musicTransport = this.requestLog.fetch((...args) => this.assetFetch(...args), '音乐音源');
         this.imageFetch = this.requestLog.fetch(withProxyHeaders(imageFetch, tavernHeaders), '绘图接口');
         this.proxyFetch = this.requestLog.fetch(withProxyHeaders(imageFetch, tavernHeaders), '酒馆转发');
@@ -1196,8 +1199,13 @@ export class TTSBackend {
         }
         const c = comfy || draw.comfy, seed = p.seed >= 0 ? p.seed : Math.floor(Math.random() * 4294967295);
         const text = comfyPrompt({ prompt, negative, characters });
-        const workflow = fillWorkflow(activeLoraWorkflow(c.workflow || defaultWorkflow(c), c.disabledLoras), comfyValues(c, { prompt: text.prompt, negative: text.negative, width: p.width, height: p.height, seed }));
-        const blob = await comfyGenerate({ fetch: this.imageFetch, headers: this.tavernHeaders(), url: c.url, workflow, signal });
+        const graph = keepOneOutput(switchNodesOff(activeLoraWorkflow(c.workflow || defaultWorkflow(c), c.disabledLoras), c.disabledNodes || []), c.output || '');
+        const workflow = fillWorkflow(graph, { ...comfyValues(c, { prompt: text.prompt, negative: text.negative, width: p.width, height: p.height, seed }), ...await this.comfyTavernValues(graph) });
+        const stopSteps = comfyProgress({ url: c.url, onStep: (value, max) => this.emit('draw', { steps: `${value}/${max} 步` }) });
+        let blob;
+        try { blob = await comfyGenerate({ fetch: this.imageFetch, headers: this.tavernHeaders(), url: c.url, workflow, signal }); }
+        catch (error) { throw error.refused ? await this.comfyRefusal(error, workflow, c) : error; }
+        finally { stopSteps(); }
         return { blob, seed, params: { model: c.model || '工作流', width: p.width, height: p.height, steps: c.steps, scale: c.scale, sampler: c.sampler }, prompt: text.prompt };
     }
     /** How a picture was drawn, as the viewer's 参数 rows (kept with the album photo). */
@@ -1225,7 +1233,7 @@ export class TTSBackend {
             if (quote.free === false && !allowPaid) return Promise.reject(Object.assign(Error('GPT 生图每张都要花钱，需要确认后再生成'), { code: 'PAID' }));
             // A queued ComfyUI picture keeps the scheme it was asked with, whatever is changed while it waits.
             const c = this.settings.draw.comfy;
-            const comfy = engine === 'comfy' ? clone(Object.fromEntries(['url', 'workflow', 'disabledLoras', ...COMFY_PARAM_KEYS].map(k => [k, c[k]]))) : undefined;
+            const comfy = engine === 'comfy' ? clone(Object.fromEntries(['url', 'workflow', 'disabledLoras', 'disabledNodes', 'output', ...COMFY_PARAM_KEYS].map(k => [k, c[k]]))) : undefined;
             const picture = {prompt, negative, characters: clone(characters), quote, comfy, refs: gptRefs};
             const job = this.drawQueue.add({ key, label: label || String(prompt).slice(0, 40), task: async signal => {
                 this.assertOpen();
@@ -2509,6 +2517,8 @@ export class TTSBackend {
             saveComfyWorkflow: patch => this.saveComfyWorkflow(patch), selectComfyWorkflow: id => this.selectComfyWorkflow(id), deleteComfyWorkflow: id => this.deleteComfyWorkflow(id),
             comfyLoraInfo: () => this.comfyLoraInfo(), editComfyLoras: change => this.editComfyLoras(clone(change || {})), restoreComfyWorkflow: () => this.restoreComfyWorkflow(),
             comfyLoras: options => this.comfyLoras(options),
+            comfyNodeSpecs: options => this.comfyNodeSpecs(options), comfyNodeList: () => this.comfyNodeList(), editComfyNodes: change => this.editComfyNodes(clone(change || {})), prepareComfyImport: source => this.prepareComfyImport(source),
+            comfySavedWorkflows: () => this.comfySavedWorkflows(), comfySavedWorkflow: name => this.comfySavedWorkflow(name), comfyRecentRuns: () => this.comfyRecentRuns(), comfyUploadPicture: file => this.comfyUploadPicture(file),
             saveDrawPreset: preset => this.saveDrawPreset(preset), deleteDrawPreset: id => this.deleteDrawPreset(id), previewDrawPrompt: preset => this.previewDrawPrompt(preset),
             naiSubscription: refresh => this.naiSubscription(refresh), naiProbe: () => this.naiProbe(), fishCatalog: () => this.providers.fishCatalog(), fishProbe: () => { this.assertOpen(); keyCheck('fish'); return this.providers.probeFish(clone(this.settings.connections.fish)); },
             listVibes: () => this.listVibes(), compactVibes: () => this.compactVibes(), importVibes: (files, options) => this.importVibes(files, clone(options || {})), updateVibe: (id, patch) => this.updateVibe(id, clone(patch || {})), deleteVibe: id => this.deleteVibe(id), deleteVibes: ids => this.deleteVibes([...(ids || [])]), exportVibes: target => this.exportVibes(clone(target || {})), vibePlan: model => clone(this.vibePlan(model || this.settings.draw.params.model)), drawQuote: (params, extra) => this.drawQuote(params, extra), naiTool: input => this.naiTool(clone(input || {})),

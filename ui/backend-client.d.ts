@@ -243,6 +243,8 @@ export interface ComfyWorkflow { id: string; name: string; workflow: string; sou
  *  controls: the parameters its workflow takes; missing: what stops a picture; restorable: its imported workflow can be put back. */
 export interface ComfyLoraInfo { error?: string; nodes: Array<{id: string; name: string; strength_model: number; strength_clip?: number; modelOnly: boolean; reason?: string}>; sources: Array<{id: string; name: string; modelOnly: boolean}>;
     disabled: string[]; auto: string; builtIn: boolean; restorable: boolean; controls: string[]; missing: string; }
+export interface ComfyNodeField { key: string; label: string; kind: 'text' | 'number' | 'bool' | 'combo' | 'link' | 'other'; value?: unknown; role?: string; follow?: string; absent?: boolean; options?: unknown[]; upload?: boolean; long?: boolean; min?: number; max?: number; step?: number | string; from?: {id: string; title: string}; }
+export interface ComfyNode { id: string; type: string; title: string; fills: string[]; off: boolean; canOff: boolean; isOutput: boolean; output: boolean; unknown: boolean; fields: ComfyNodeField[]; }
 export interface ComfySettings extends Omit<ComfyWorkflow, 'id' | 'name'> { url: string; loraTransport: 'tavern' | 'direct'; style: string; activeWorkflow: string; workflows: ComfyWorkflow[]; }
 export interface VibeGroup { id: string; name: string; items: Array<{ vibe: string; strength: number }>; }
 export interface VibeSettings { enabled: boolean; use: { kind: '' | 'group' | 'vibe'; id: string }; groups: VibeGroup[]; }
@@ -655,6 +657,20 @@ export interface BackendFacade {
     selectComfyWorkflow(id: string): void;
     deleteComfyWorkflow(id: string): void;
     comfyLoras(options?: {transport?: 'tavern' | 'direct'; signal?: AbortSignal}): Promise<string[]>;
+    /** What ComfyUI says of the node types in use (read through the tavern's proxy or directly); kept per address. */
+    comfyNodeSpecs(options?: {fresh?: boolean; types?: string[]; signal?: AbortSignal}): Promise<Record<string, unknown>>;
+    /** Every node of the scheme in use, with all its values. */
+    comfyNodeList(): ComfyNode[];
+    /** Changes the nodes of the scheme in use and saves it; on the built-in default a copy is made first (copied: true). */
+    editComfyNodes(change: {set?: Array<{id: string; key: string; value: string | number | boolean | null}>; off?: Record<string, boolean>; output?: string; params?: Partial<ComfyWorkflow>}): {copied: boolean; name: string};
+    /** Reads a workflow in any form (text: JSON; buffer: a picture ComfyUI saved) and works out which node takes what. */
+    prepareComfyImport(source: {text?: string; buffer?: ArrayBuffer; prompt?: {id: string; key: string}}): Promise<{workflow: string; params: Partial<ComfyWorkflow>; mapped: string[]; needsPrompt: boolean; candidates: Array<{id: string; key: string; title: string; text: string}>}>;
+    /** Workflows saved in ComfyUI itself, one of them as text, and what it drew lately. */
+    comfySavedWorkflows(): Promise<string[]>;
+    comfySavedWorkflow(name: string): Promise<string>;
+    comfyRecentRuns(): Promise<Array<{id: string; label: string; graph: string}>>;
+    /** Puts a picture into ComfyUI's input folder; answers the name to put in the node. */
+    comfyUploadPicture(file: File): Promise<string>;
     /** after: a new style (a copy) goes right below this one, in its group. */
     saveStyle(style: Omit<DrawStyle, 'id'> & { id?: string; after?: string }): DrawStyle;
     deleteStyle(id: string): DrawSettings;

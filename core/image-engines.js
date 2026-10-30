@@ -273,9 +273,9 @@ export const defaultWorkflow = c => c?.loader === 'unet' || c?.loader === 'gguf'
 /** The kind of a model in the tavern's list, from how it names it. */
 export const loaderOf = text => /^UNet:/i.test(String(text || '')) ? 'unet' : /^GGUF:/i.test(String(text || '')) ? 'gguf' : 'checkpoint';
 export const COMFY_LIMITS = {workflow: 300000, presets: 20};
-const COMFY_DEFAULT_PARAMS = {model: '', loader: 'checkpoint', clip: '', clipType: 'stable_diffusion', vae: '', sampler: 'euler_ancestral', scheduler: 'normal', steps: 28, scale: 6, width: 832, height: 1216, clipSkip: 2};
+const COMFY_DEFAULT_PARAMS = {model: '', loader: 'checkpoint', clip: '', clipType: 'stable_diffusion', vae: '', sampler: 'euler_ancestral', scheduler: 'normal', steps: 28, scale: 6, width: 832, height: 1216, clipSkip: 2, denoise: 1};
 export const COMFY_PARAM_KEYS = Object.keys(COMFY_DEFAULT_PARAMS);
-export const defaultComfy = () => ({url: 'http://127.0.0.1:8188', loraTransport: 'tavern', workflow: '', disabledLoras: [], ...COMFY_DEFAULT_PARAMS, style: '', activeWorkflow: 'default', workflows: [{id: 'default', name: '默认工作流', workflow: '', disabledLoras: [], ...COMFY_DEFAULT_PARAMS}]});
+export const defaultComfy = () => ({url: 'http://127.0.0.1:8188', loraTransport: 'tavern', workflow: '', disabledLoras: [], disabledNodes: [], output: '', ...COMFY_DEFAULT_PARAMS, style: '', activeWorkflow: 'default', workflows: [{id: 'default', name: '默认工作流', workflow: '', disabledLoras: [], ...COMFY_DEFAULT_PARAMS}]});
 
 export function comfyUrl(value) {
   const raw = String(value ?? '').trim();
@@ -285,7 +285,7 @@ export function comfyUrl(value) {
   return (url.origin + url.pathname).replace(/\/+$/, '');
 }
 /** The placeholders a workflow uses ("%prompt%" → prompt). */
-export const workflowPlaceholders = text => [...new Set([...String(text).matchAll(/"%([a-z_]+)%"/g)].map(m => m[1]))];
+export const workflowPlaceholders = text => [...new Set([...String(text).matchAll(/"%([a-z_]+)%"|%(prompt|negative_prompt)%/g)].map(m => m[1] || m[2]))];
 /** Repair a placeholder typed with literal quotes in a ComfyUI text field.
  * JSON strings already have their own quotes, so an input of "\"%prompt%\"" exports as "\\\"%prompt%\\\"".
  * Only touch complete quoted placeholders in node inputs; never rewrite ordinary prompt text or metadata.
@@ -324,7 +324,7 @@ export function comfyParams(c) {
   return {
     model: word(c.model, ''), loader: COMFY_LOADERS.includes(c.loader) ? c.loader : base.loader, clip: word(c.clip, ''), clipType: word(c.clipType, base.clipType) || base.clipType, vae: word(c.vae, ''), sampler: word(c.sampler, base.sampler) || base.sampler, scheduler: word(c.scheduler, base.scheduler) || base.scheduler,
     steps: n(c.steps, 1, 150, base.steps), scale: n(c.scale, 0, 30, base.scale, .1),
-    width: n(c.width, 64, 4096, base.width, 8), height: n(c.height, 64, 4096, base.height, 8), clipSkip: n(c.clipSkip, 1, 12, base.clipSkip)
+    width: n(c.width, 64, 4096, base.width, 8), height: n(c.height, 64, 4096, base.height, 8), clipSkip: n(c.clipSkip, 1, 12, base.clipSkip), denoise: Number.isFinite(Number(c.denoise)) && c.denoise !== null && c.denoise !== '' ? Math.min(1, Math.max(0, Number(c.denoise))) : base.denoise
   };
 }
 /** Copy a selected preset into the existing fields used by the drawing pipeline. */
@@ -333,6 +333,7 @@ export function applyComfyWorkflow(c, id = c.activeWorkflow) {
   if (!p) throw Error('这套工作流已经不在了');
   c.activeWorkflow = id; c.workflow = p.workflow;
   c.disabledLoras = [...(p.disabledLoras || [])];
+  c.disabledNodes = [...(p.disabledNodes || [])]; c.output = p.output || '';
   for (const key of COMFY_PARAM_KEYS) c[key] = p[key];
   return c;
 }
@@ -360,7 +361,10 @@ export function normalizeComfy(value) {
     ids.add(id);
     const disabledLoras = workflow ? tryOr(() => normalizeDisabledLoras(workflow, row.disabledLoras || []), []) : [];
     const sourceWorkflow = row.sourceWorkflow ? tryOr(() => checkWorkflow(row.sourceWorkflow), '') : '';
-    workflows.push({id, name: id === 'default' ? '默认工作流' : String(row.name || '未命名工作流').trim().slice(0, 60) || '未命名工作流', workflow, disabledLoras, ...(sourceWorkflow ? {sourceWorkflow} : {}), ...comfyParams(row)});
+    // Nodes switched off and the picture kept: only while those nodes are still in the workflow.
+    const known = workflow && (row.output || row.disabledNodes?.length) ? tryOr(() => JSON.parse(workflow), {}) : {};
+    const disabledNodes = (Array.isArray(row.disabledNodes) ? row.disabledNodes : []).filter(n => typeof n === 'string' && Object.hasOwn(known, n));
+    workflows.push({id, name: id === 'default' ? '默认工作流' : String(row.name || '未命名工作流').trim().slice(0, 60) || '未命名工作流', workflow, disabledLoras, ...(disabledNodes.length ? {disabledNodes} : {}), ...(typeof row.output === 'string' && Object.hasOwn(known, row.output) ? {output: row.output} : {}), ...(sourceWorkflow ? {sourceWorkflow} : {}), ...comfyParams(row)});
   }
   const builtIn = workflows.find(p => p.id === 'default') || {...base.workflows[0], ...params};
   const list = [builtIn, ...workflows.filter(p => p !== builtIn)].slice(0, COMFY_LIMITS.presets);
@@ -404,7 +408,10 @@ export function comfyPrompt({prompt = '', negative = '', characters = []} = {}) 
 /** The workflow with every placeholder filled; a placeholder left over is named so the user can fix the workflow. */
 export function fillWorkflow(text, values) {
   let out = String(text || defaultWorkflow(values));
-  for (const [name, value] of Object.entries(values)) out = out.replaceAll(`"%${name}%"`, JSON.stringify(value));
+  for (const [name, value] of Object.entries(values)) out = out.replaceAll(`"%${name}%"`, () => JSON.stringify(value));
+  // Words kept around the prompt ("worst quality, %negative_prompt%"), without a comma left hanging when there is nothing to add.
+  if (!values.negative_prompt) out = out.replace(/,\s*%negative_prompt%/g, '');
+  out = out.replace(/%(prompt|negative_prompt)%/g, (mark, name) => Object.hasOwn(values, name) ? JSON.stringify(String(values[name])).slice(1, -1) : mark);
   const left = workflowPlaceholders(out);
   if (left.length) throw Error('工作流里有插件不认识的占位符：' + left.map(x => `%${x}%`).join('、') + '。请在 ComfyUI 里把它们换成具体的值');
   return out;
@@ -414,7 +421,7 @@ export function comfyValues(c, {prompt, negative, width, height, seed}) {
   if (!c.model && used.includes('model')) throw Error('还没有选 ComfyUI 的模型，请在绘画 App 的参数里选择');
   if (!c.clip && used.includes('clip')) throw Error('这个模型要单独加载 CLIP（文本编码器），请在绘画 App 的参数里选择');
   if (!c.vae && used.includes('vae')) throw Error('这个模型要单独加载 VAE，请在绘画 App 的参数里选择');
-  return {prompt, negative_prompt: negative, seed, steps: c.steps, scale: c.scale, width, height, sampler: c.sampler, scheduler: c.scheduler, model: c.model, loader: c.loader, clip: c.clip, clip_type: c.clipType, vae: c.vae, denoise: 1, clip_skip: -c.clipSkip};
+  return {prompt, negative_prompt: negative, seed, steps: c.steps, scale: c.scale, width, height, sampler: c.sampler, scheduler: c.scheduler, model: c.model, loader: c.loader, clip: c.clip, clip_type: c.clipType, vae: c.vae, denoise: c.denoise ?? 1, clip_skip: -c.clipSkip};
 }
 
 /** Calls the tavern's ComfyUI proxy. headers: the tavern's request headers (CSRF token). */
@@ -424,7 +431,11 @@ async function tavern(fetch, headers, path, body, signal) {
   catch (error) { if (error?.name === 'AbortError') throw error; throw Error('连不上酒馆服务器'); }
   return response;
 }
-const comfyDown = url => `酒馆连不上 ComfyUI（${url}）：请确认 ComfyUI 开着、地址填的是酒馆所在电脑能打开的地址`;
+const COMFY_UNREACHABLE = /fetch failed|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT|error sending request|connection refused|timed out/i;
+// 127.0.0.1 is the device the tavern runs on, which is the phone itself for a tavern installed on a phone.
+const comfyDown = url => `酒馆连不上 ComfyUI（${url}）：` + (/^https?:\/\/(127\.|localhost|\[::1\])/i.test(url)
+  ? '127.0.0.1 指酒馆所在的设备。ComfyUI 在别的电脑上时，要填那台电脑的局域网地址（如 192.168.x.x），ComfyUI 加 --listen，防火墙放行这个端口。'
+  : '请确认 ComfyUI 开着、加了 --listen、防火墙放行了这个端口；用酒馆所在的设备打开这个地址，能看到 ComfyUI 就是通的。');
 export async function comfyGenerate({fetch = globalThis.fetch, headers = {}, url, workflow, signal}) {
   const response = await tavern(fetch, headers, 'generate', {url, prompt: `{"prompt": ${workflow}}`}, signal);
   const text = await response.text().catch(() => '');
@@ -432,7 +443,9 @@ export async function comfyGenerate({fetch = globalThis.fetch, headers = {}, url
     if (response.status === 404) throw Error('这个酒馆没有 ComfyUI 转发接口（/api/sd/comfy），请更新酒馆');
     if (response.status === 403) throw Error('酒馆拒绝了请求（403），请刷新酒馆页面再试');
     const reason = text.replace(/\s+/g, ' ').trim().slice(0, 300);
-    throw Object.assign(Error(/fetch failed|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH/i.test(reason) || !reason ? comfyDown(url) : 'ComfyUI 没画成：' + reason), {status: response.status === 429 ? 429 : 0});
+    // The tavern passes on only this much when ComfyUI turns a workflow down; the caller looks for what is missing.
+    if (/^ComfyUI returned an error\.?$/i.test(reason)) throw Object.assign(Error('ComfyUI 没接受这个工作流，多半是它那边没有某个模型或节点'), {refused: true, status: 0});
+    throw Object.assign(Error(COMFY_UNREACHABLE.test(reason) || !reason ? comfyDown(url) : 'ComfyUI 没画成：' + reason), {status: response.status === 429 ? 429 : 0});
   }
   let data; try { data = JSON.parse(text); } catch { throw Error('ComfyUI 返回的内容不是图片'); }
   if (!data?.data) throw Error('ComfyUI 没有返回图片（工作流里要有保存图片的节点）');
@@ -464,15 +477,27 @@ export async function comfyClips({fetch = globalThis.fetch, url, transport = 'ta
   return {clips: [...new Set(list(req.clip_name))].sort((a, b) => a.localeCompare(b)), types: [...new Set(list(req.type))]};
 }
 async function comfyNode({fetch, url, transport, signal, node, what}) {
-  const endpoint = comfyUrl(url) + '/object_info/' + node;
-  const direct = transport === 'direct';
+  return (await comfyJson({fetch, url, transport, signal, what, path: '/object_info/' + encodeURIComponent(node)})).data;
+}
+/** Reads JSON from ComfyUI the way chosen, then the other way: {data, way}. Reports why the chosen way failed. */
+async function comfyJson({fetch, url, transport, path, signal, what}) {
   if (!['tavern', 'direct'].includes(transport)) throw Error(what + '读取方式无效');
+  let first;
+  for (const way of transport === 'direct' ? ['direct', 'tavern'] : ['tavern', 'direct']) {
+    try { return {data: await comfyRead({fetch, endpoint: comfyUrl(url) + path, direct: way === 'direct', signal, what}), way}; }
+    catch (error) { if (signal?.aborted || error.empty) throw error; first ??= error; }
+  }
+  throw first;
+}
+async function comfyRead({fetch, endpoint, direct, signal, what}) {
   // AbortSignal.any / .timeout are missing on older iPhones (Safari before 17.4): one controller does both.
   const control = new AbortController(), timer = setTimeout(() => control.abort(), 15000);
   if (signal) { if (signal.aborted) control.abort(); else signal.addEventListener('abort', () => control.abort(), {once: true}); }
   const combined = control.signal;
   let response;
-  try { response = await fetch(direct ? endpoint : '/proxy/' + endpoint, {method: 'GET', credentials: direct ? 'omit' : 'same-origin', headers: {Accept: 'application/json'}, signal: combined}); }
+  // The tavern's proxy route drops a query and decodes once: such an address goes whole, encoded.
+  const proxied = '/proxy/' + (/[?%]/.test(endpoint) ? encodeURIComponent(endpoint) : endpoint);
+  try { response = await fetch(direct ? endpoint : proxied, {method: 'GET', credentials: direct ? 'omit' : 'same-origin', headers: {Accept: 'application/json'}, signal: combined}); }
   catch (error) {
     clearTimeout(timer);
     if (signal?.aborted) throw error;
@@ -482,9 +507,75 @@ async function comfyNode({fetch, url, transport, signal, node, what}) {
   const text = await response.text();
   if (!response.ok) {
     if (!direct && /CORS proxy is disabled/i.test(text)) throw Error('酒馆代理尚未开启：在酒馆 config.yaml 设置 enableCorsProxy: true 后重启，或选择浏览器直连。也可以先手填文件名。');
-    throw Error(`${what}读取失败（HTTP ${response.status}），请检查连接方式和 ComfyUI 地址；也可手填文件名。`);
+    // ComfyUI's answer until the first workflow is saved: its folder does not exist yet. Asking another way says the same.
+    throw Object.assign(Error(`${what}读取失败（HTTP ${response.status}），请检查连接方式和 ComfyUI 地址；也可手填文件名。`), {empty: /directory not found/i.test(text)});
   }
   try { return JSON.parse(text); } catch { throw Error(what + '接口返回的不是 JSON，请检查地址是否指向 ComfyUI'); }
+}
+/**
+ * ComfyUI's steps while a picture is drawn, from its own socket (the tavern's proxy carries none). Best effort: from a
+ * device that cannot reach ComfyUI, or an https page, there are simply no steps to show. Answers the way to stop.
+ */
+export function comfyProgress({url, onStep, Socket = globalThis.WebSocket}) {
+  let socket;
+  try {
+    const address = new URL(comfyUrl(url));
+    address.protocol = address.protocol === 'https:' ? 'wss:' : 'ws:';
+    address.pathname = address.pathname.replace(/\/$/, '') + '/ws';
+    address.search = '?clientId=' + crypto.randomUUID();
+    socket = new Socket(address.href);
+  } catch { return () => {}; }
+  socket.addEventListener('message', event => {
+    if (typeof event.data !== 'string') return;
+    try { const message = JSON.parse(event.data); if (message.type === 'progress' && message.data?.max > 1) onStep(message.data.value, message.data.max); } catch { /* not a message for us */ }
+  });
+  socket.addEventListener('error', () => {});
+  return () => { try { socket.close(); } catch { /* already gone */ } };
+}
+/** What ComfyUI says of some node types: {specs: {type: spec}, way}. Types it does not know are left out. */
+export async function comfySpecs({fetch = globalThis.fetch, url, transport = 'tavern', types = [], signal}) {
+  const todo = [...new Set(types)], specs = {};
+  if (!todo.length) return {specs, way: transport};
+  const one = async (type, route) => { const read = await comfyJson({fetch, url, transport: route, signal, what: '节点信息', path: '/object_info/' + encodeURIComponent(type)}); if (read.data?.[type]) specs[type] = read.data[type]; return read.way; };
+  // The first answer settles the route: a tavern without the proxy is asked once, not for every node.
+  const way = await one(todo.shift(), transport);
+  const worker = async () => { while (todo.length) { const type = todo.shift(); try { await one(type, way); } catch (error) { if (signal?.aborted) throw error; } } };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  return {specs, way};
+}
+/** The workflows saved in ComfyUI itself (its 工作流 list): names under user/…/workflows, newest first. */
+export async function comfySavedList({fetch = globalThis.fetch, url, transport = 'tavern', signal}) {
+  let data;
+  try { ({data} = await comfyJson({fetch, url, transport, signal, what: '工作流列表', path: '/api/userdata?dir=workflows&recurse=true&split=false&full_info=true'})); }
+  catch (error) { if (error.empty) return []; throw error; }
+  const rows = (Array.isArray(data) ? data : []).map(r => typeof r === 'string' ? {path: r, modified: 0} : {path: String(r?.path || ''), modified: Number(r?.modified) || 0});
+  return rows.filter(r => /\.json$/i.test(r.path) && !/(^|\/)\./.test(r.path)).sort((a, b) => b.modified - a.modified).map(r => r.path);
+}
+export async function comfySavedRead({fetch = globalThis.fetch, url, transport = 'tavern', name, signal}) {
+  const {data} = await comfyJson({fetch, url, transport, signal, what: '工作流', path: '/api/userdata/' + encodeURIComponent('workflows/' + name)});
+  return JSON.stringify(data);
+}
+/** What ComfyUI drew lately, newest first: [{id, graph}], the very workflow of each run, in the API's form. */
+export async function comfyRecent({fetch = globalThis.fetch, url, transport = 'tavern', limit = 20, signal}) {
+  const {data} = await comfyJson({fetch, url, transport, signal, what: '最近画过的图', path: '/history?max_items=' + limit});
+  return Object.entries(data && typeof data === 'object' ? data : {}).filter(([, h]) => h?.status?.status_str !== 'error' && h?.prompt?.[2]).map(([id, h]) => ({id, number: Number(h.prompt[0]) || 0, graph: h.prompt[2]})).sort((a, b) => b.number - a.number);
+}
+/**
+ * Puts a picture into ComfyUI's input folder, from the browser (the tavern's proxy cannot carry a file). Without
+ * ComfyUI's cross-origin setting the answer cannot be read, but a ComfyUI opened to the network still takes the file.
+ */
+export async function comfyUpload({fetch = globalThis.fetch, url, blob, name, signal}) {
+  const endpoint = comfyUrl(url) + '/upload/image', form = () => { const f = new FormData(); f.append('image', blob, name); f.append('overwrite', 'true'); return f; };
+  let response;
+  try { response = await fetch(endpoint, {method: 'POST', body: form(), credentials: 'omit', signal}); }
+  catch (error) {
+    if (signal?.aborted) throw error;
+    try { await fetch(endpoint, {method: 'POST', body: form(), mode: 'no-cors', credentials: 'omit', signal}); return name; }
+    catch { throw Error('这台设备传不到 ComfyUI：可以把图放进 ComfyUI 的 input 文件夹，再选文件名'); }
+  }
+  if (!response.ok) throw Error(`ComfyUI 没收下这张图（HTTP ${response.status}）：可以把图放进 ComfyUI 的 input 文件夹，再选文件名`);
+  const saved = await response.json().catch(() => ({}));
+  return saved.name ? (saved.subfolder ? saved.subfolder + '/' : '') + saved.name : name;
 }
 /** The workflows saved in the tavern (its image generation settings): names, and one's text. */
 export async function tavernWorkflows({fetch = globalThis.fetch, headers = {}}) {

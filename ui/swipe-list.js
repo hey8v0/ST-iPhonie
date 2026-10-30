@@ -71,7 +71,7 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
   function paintChoice() {
     list.classList.toggle('sw-choosing', !!chosen);
     for (const r of rows()) { const on = !!chosen?.has(r.dataset.swipe); r.classList.toggle('sw-chosen', on); r.setAttribute('aria-selected', String(on)); }
-    if (chosen) { bar.hidden = false; bar.querySelector('.sw-count').textContent = `已选 ${chosen.size} 项`; for (const b of bar.querySelectorAll('.sw-bar-act')) b.disabled = !chosen.size; }
+    if (chosen) { bar.hidden = false; bar.querySelector('.sw-count').innerHTML = `<i>已选 </i>${chosen.size}<i> 项</i>`; for (const b of bar.querySelectorAll('.sw-bar-act')) b.disabled = !chosen.size; }
     else if (!bar.hidden) { bar.classList.add('sw-leaving'); win.setTimeout(() => { if (!chosen) { bar.hidden = true; bar.classList.remove('sw-leaving'); } }, reduced() ? 0 : 220); }
   }
   /** A row picked, or let go when it was picked; the last one let go ends choosing. */
