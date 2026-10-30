@@ -265,7 +265,7 @@ a{color:var(--accent-ink)}
 .list-row>.icon{width:18px;height:18px;color:var(--ink2)}
 .field{display:flex;flex-direction:column;gap:7px;margin:14px 0;min-width:0}
 .field>span:first-child{font-size:13px;font-weight:800;display:flex;align-items:center;gap:6px}
-.field input,.field textarea,.select select,input.search,textarea[data-field],input[data-field]:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]):not([type=file]){width:100%;min-width:0;max-width:100%;font-size:16px;min-height:44px;padding:10px 13px;color:var(--ink);background:var(--card2);border:1.5px solid var(--line);border-radius:14px;line-height:1.5}
+.field input,.field textarea,.select select,input.search,textarea[data-field],input[data-field]:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]):not([type=file]),.grid-entry input[type=text],.grid-entry textarea,.pos-guide input{width:100%;min-width:0;max-width:100%;font-size:16px;min-height:44px;padding:10px 13px;color:var(--ink);background:var(--card2);border:1.5px solid var(--line);border-radius:14px;line-height:1.5}
 .field textarea,textarea[data-field]{display:block;resize:vertical;min-height:96px}
 .field textarea.code,textarea.code{font-family:"JetBrains Mono",ui-monospace,Consolas,monospace;font-size:13px;min-height:120px}
 .field input[type=file]{padding:9px;font-size:13px}
@@ -1905,7 +1905,7 @@ button.gift-item[data-short]{opacity:.55}
 .album-arrow.prev{left:8px}.album-arrow.next{right:8px}
 .album-arrow:disabled{opacity:0;pointer-events:none}
 .album-bar{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;justify-content:space-around;padding:22px 8px 26px;background:linear-gradient(transparent,rgba(0,0,0,.65));transition:opacity .2s}
-.album-bar button{display:grid;justify-items:center;gap:4px;min-width:64px;color:#fff;font-size:11px;font-weight:700}
+.album-bar button{display:grid;justify-items:center;gap:4px;flex:0 1 64px;min-width:0;color:#fff;font-size:11px;font-weight:700;white-space:nowrap}
 .album-bar button svg{width:22px;height:22px}
 .album-bar button.album-danger{color:#ff9a9a}
 .album-bar button:disabled{opacity:.5}

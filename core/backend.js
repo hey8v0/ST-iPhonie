@@ -45,7 +45,7 @@ import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, 
 import { ChatStore, money, currentDm } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
 import { CloudQueue, KeyHashQueue, newRoomCode, validRoom, sha256Hex } from './cloud-queue.js';
-import { vibeKey, readVibeFile, imageVibe, mergeVibe, encodingFor, withEncoding, vibeSummary, vibeParameters, singleFile, bundleFile, chatu8File, strength as vibeStrength, MAX_FREE_VIBES, VIBE_ANLAS } from './vibes.js';
+import { vibeKey, vibeMode, vibeReady, readVibeFile, imageVibe, encodingVibe, mergeVibe, encodingFor, withEncoding, vibeSummary, vibeParameters, rawVibeParameters, encodingsOnly, embedVibeFile, embeddedVibeFile, singleFile, bundleFile, chatu8File, extracted as vibeExtracted, strength as vibeStrength, MAX_FREE_VIBES, VIBE_ANLAS } from './vibes.js';
 /** musicFetch's answer when a 取歌地址 gave the song itself. */
 const AUDIO = Symbol('audio');
 
@@ -78,6 +78,18 @@ async function smallVibeImage(base64) {
         g.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close?.();
         const small = canvas.toDataURL('image/jpeg', 0.92).replace(/^data:[^,]*,/, '');
         return small && small.length < base64.length * 0.8 ? small : base64;
+    } catch { return base64; }
+}
+/** A vibe's picture as V3 takes it: fitted whole into 448×448 on black, as a PNG. Unchanged where there is no canvas. */
+async function rawVibeImage(base64) {
+    try {
+        if (typeof createImageBitmap !== 'function' || !globalThis.document?.createElement) return base64;
+        const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(base64), c => c.charCodeAt(0))]));
+        const canvas = document.createElement('canvas'), g = canvas.getContext('2d'), scale = Math.min(448 / bitmap.width, 448 / bitmap.height), w = bitmap.width * scale, h = bitmap.height * scale;
+        canvas.width = canvas.height = 448;
+        g.fillStyle = '#000'; g.fillRect(0, 0, 448, 448);
+        g.drawImage(bitmap, (448 - w) / 2, (448 - h) / 2, w, h); bitmap.close?.();
+        return canvas.toDataURL('image/png').replace(/^data:[^,]*,/, '');
     } catch { return base64; }
 }
 const clone = value => structuredClone(value);
@@ -1034,8 +1046,10 @@ export class TTSBackend {
         for (const file of [...(files || [])]) {
             const name = String(file?.name || 'vibe');
             try {
-                const picture = /^image\//.test(file.type || '') && !/\.naiv4vibe/i.test(name) || /\.(png|jpe?g|webp|avif|gif)$/i.test(name) && !/\.naiv4vibe/i.test(name);
-                const found = picture ? { vibes: [await imageVibe(name, await this.base64(file))], groups: [] } : await readVibeFile(name, await file.text());
+                // By how the name ends: x.naiv4vibebundle.png is a picture with a vibe in it.
+                const picture = !/\.naiv4vibe(bundle)?$/i.test(name) && (/^image\//.test(file.type || '') || /\.(png|jpe?g|webp|avif|gif)$/i.test(name));
+                const carried = picture ? await embeddedVibeFile(await file.arrayBuffer()).catch(() => null) : null;
+                const found = picture && !carried ? { vibes: [await imageVibe(name, await this.base64(file), '', this.settings.draw.params.model)], groups: [] } : await readVibeFile(name, carried || await file.text());
                 for (const doc of found.vibes) {
                     if (this.vibes.has(doc.id)) {
                         const merged = mergeVibe(await this.vibeDoc(doc.id), doc);
@@ -1084,11 +1098,49 @@ export class TTSBackend {
         this.emit('draw', { vibes: true });
         return { count, before: total(rows), after: total(await this.library.listVibes()) };
     }
-    /** Renames a vibe or sets its own strength (used when it is used alone, and as the default when added to a group). */
+    /** A picture (PNG, as a Blob) with the vibes of exportVibes' target inside, where NovelAI's app reads them: {name, blob}. */
+    async embedVibes(target, picture, name = '') {
+        const file = await this.exportVibes(target), text = await file.blob.text();
+        const stem = String(name || '').replace(/\.[^.]+$/, '') || file.name.replace(/\.[^.]+$/, '');
+        return { name: `${stem}.${target.group ? 'naiv4vibebundle' : 'naiv4vibe'}.png`, blob: new Blob([embedVibeFile(await picture.arrayBuffer(), text)], { type: 'image/png' }) };
+    }
+    /** Vibes read from a picture's parameters (they are encodings there): kept, and used as a group, or added to the group in use. */
+    async importPictureVibes(list, { model, name = '读入的 Vibe', append = false } = {}) {
+        this.assertOpen();
+        const items = [];
+        if (!vibeKey(model)) model = 'nai-diffusion-4-5-full';
+        for (const [i, v] of (list || []).entries()) {
+            const doc = await encodingVibe(`${name} ${i + 1}`, v.encoding, model, v.ie, v.strength);
+            await this.storeVibe(this.vibes.has(doc.id) ? mergeVibe(await this.vibeDoc(doc.id), doc) : doc);
+            items.push({ vibe: doc.id, strength: vibeStrength(v.strength) });
+        }
+        if (!items.length) return null;
+        const next = this.getState(), v = next.draw.vibe, using = append && v.use.kind === 'group' ? v.groups.find(g => g.id === v.use.id) : null;
+        if (using) { for (const item of items) if (!using.items.some(x => x.vibe === item.vibe)) using.items.push(item); }
+        else {
+            const taken = new Set(v.groups.map(g => g.name));
+            let groupName = name, n = 1;
+            while (taken.has(groupName)) groupName = `${name} (${++n})`;
+            const id = crypto.randomUUID();
+            v.groups.push({ id, name: groupName, items });
+            v.use = { kind: 'group', id };
+        }
+        v.enabled = true;
+        next.draw.vibe = normalizeVibeSettings(v);
+        this.save(next);
+        this.emit('draw', { vibes: true });
+        return items.length;
+    }
+    /** Renames a vibe, sets its own strength (used when it is used alone, and as the default when added to a group) or its 提取信息量. */
     async updateVibe(id, patch = {}) {
         const doc = await this.vibeDoc(id);
         if ('name' in patch) { const name = String(patch.name || '').trim().slice(0, 80); if (!name) throw Error('请填写 Vibe 名字'); doc.name = name; }
         if ('strength' in patch) doc.importInfo.strength = vibeStrength(patch.strength, doc.importInfo.strength);
+        if ('ie' in patch && vibeExtracted(patch.ie) !== doc.importInfo.information_extracted) {
+            // Without its picture a vibe has only the encodings it came with.
+            if (!doc.image) throw Error('这个 Vibe 没有原图，不能改提取信息量');
+            doc.importInfo.information_extracted = vibeExtracted(patch.ie); doc.importInfo.picked = true;
+        }
         const summary = await this.storeVibe(doc);
         this.emit('draw', { vibes: true });
         return clone(summary);
@@ -1107,16 +1159,25 @@ export class TTSBackend {
         this.emit('draw', { vibes: true });
         return gone.size;
     }
-    /** A file to save: {vibe: id} → .naiv4vibe; {group: id} → .naiv4vibebundle; {all: true} → everything, in the 智绘姬 form. */
+    /**
+     * A file to save: {vibe: id} → .naiv4vibe; {group: id} → .naiv4vibebundle; {all: true} → everything, in the 智绘姬 form.
+     * encodings: without the pictures, only what the model in use needs (it cannot be encoded again for anything else).
+     */
     async exportVibes(target = {}) {
         const safe = name => String(name).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60) || 'vibe';
-        if (target.vibe) { const doc = await this.vibeDoc(target.vibe); // Not marked as JSON: saving would add .json after .naiv4vibe.
+        const asked = async doc => {
+            if (!target.encodings) return doc;
+            const only = await encodingsOnly(doc, this.settings.draw.params.model);
+            if (!only) throw Error(`「${doc.name}」还没有当前模型和提取信息量的编码：先用它画一张，或者换成有编码的模型`);
+            return only;
+        };
+        if (target.vibe) { const doc = await asked(await this.vibeDoc(target.vibe)); // Not marked as JSON: saving would add .json after .naiv4vibe.
             return { name: safe(doc.name) + '.naiv4vibe', blob: new Blob([singleFile(doc)], { type: 'application/octet-stream' }) }; }
         if (target.group) {
             const group = this.settings.draw.vibe.groups.find(g => g.id === target.group);
             if (!group) throw Error('这个 Vibe 组已经不在了');
             const entries = [];
-            for (const item of group.items) if (this.vibes.has(item.vibe)) entries.push({ doc: await this.vibeDoc(item.vibe), strength: item.strength });
+            for (const item of group.items) if (this.vibes.has(item.vibe)) entries.push({ doc: await asked(await this.vibeDoc(item.vibe)), strength: item.strength });
             if (!entries.length) throw Error('这个组里没有 Vibe');
             return { name: safe(group.name) + '.naiv4vibebundle', blob: new Blob([bundleFile(entries)], { type: 'application/octet-stream' }) };
         }
@@ -1129,25 +1190,38 @@ export class TTSBackend {
     /**
      * The vibes a picture with this model would use (see VibePlan in ui/backend-client.d.ts). The free-tier guard keeps
      * the first four; a vibe without an encoding for the model is encoded first (2 Anlas), or left out without a picture.
+     * V3 takes the pictures themselves: nothing is encoded, and a vibe without its picture is left out. One switched off
+     * in its group is not used.
      */
     vibePlan(model) {
-        const v = this.settings.draw.vibe, empty = { on: false, model: !!vibeKey(model), used: [], skipped: [], over: 0, encode: 0, extra: 0 };
+        const v = this.settings.draw.vibe, mode = vibeMode(model), empty = { on: false, model: !!mode, used: [], skipped: [], over: 0, encode: 0, extra: 0 };
         if (!v.enabled || !v.use.kind) return empty;
-        const items = v.use.kind === 'group' ? (v.groups.find(g => g.id === v.use.id)?.items || []).map(i => ({ id: i.vibe, strength: i.strength }))
+        const items = v.use.kind === 'group' ? (v.groups.find(g => g.id === v.use.id)?.items || []).filter(i => i.enabled !== false).map(i => ({ id: i.vibe, strength: i.strength }))
             : [{ id: v.use.id, strength: this.vibes.get(v.use.id)?.strength ?? 0.6 }];
         const key = vibeKey(model), used = [], skipped = [];
         for (const item of items) {
             const s = this.vibes.get(item.id);
             if (!s) { skipped.push({ name: '已删除的 Vibe', why: 'missing' }); continue; }
-            if (!key) { skipped.push({ name: s.name, why: 'model' }); continue; }
-            const encoded = s.keys.includes(key);
+            if (!mode) { skipped.push({ name: s.name, why: 'model' }); continue; }
+            if (mode === 'raw') { if (s.image) used.push({ id: item.id, name: s.name, strength: item.strength, encode: false }); else skipped.push({ name: s.name, why: 'no-encoding' }); continue; }
+            const encoded = vibeReady(s, key);
             if (!encoded && !s.image) { skipped.push({ name: s.name, why: 'no-encoding' }); continue; }
             used.push({ id: item.id, name: s.name, strength: item.strength, encode: !encoded });
         }
         if (used.length > 16) used.length = 16;
         const over = this.settings.draw.guard ? Math.max(0, used.length - MAX_FREE_VIBES) : 0;
         if (over) used.length = MAX_FREE_VIBES;
-        return { on: true, model: !!key, used, skipped, over, encode: used.filter(u => u.encode).length, extra: Math.max(0, used.length - MAX_FREE_VIBES) };
+        return { on: true, model: !!mode, used, skipped, over, encode: used.filter(u => u.encode).length, extra: Math.max(0, used.length - MAX_FREE_VIBES) };
+    }
+    /** What a picture sends for its vibes: the encodings (encoded first where missing), or on V3 the pictures themselves. */
+    async vibeFields(used, model, signal) {
+        const normalize = this.settings.draw.vibe.normalize !== false;
+        if (vibeMode(model) === 'raw') {
+            const list = [];
+            for (const u of used) { const doc = await this.vibeDoc(u.id); list.push({ image: await rawVibeImage(doc.image), ie: doc.importInfo.information_extracted, strength: u.strength }); }
+            return rawVibeParameters(list, normalize);
+        }
+        return vibeParameters(await this.vibeEncodings(used, model, signal), normalize);
     }
     /** The encodings to send, encoding (and keeping) those missing for the model first. */
     async vibeEncodings(used, model, signal) {
@@ -1235,7 +1309,7 @@ export class TTSBackend {
         const engine = this.settings.draw.engine;
         if (!this.drawReady()) return Promise.reject(Error(this.drawMissing()));
         // 底图 (图生图 / 局部重绘) and 角色参考 are NovelAI's: the drawing app sends them only when NovelAI draws.
-        const extra = engine === 'nai' ? { base: !!base?.image, refs: (refs || []).filter(r => r?.image).length, ...(base?.image ? { size: { width: base.width, height: base.height } } : {}) } : {};
+        const extra = engine === 'nai' ? { base: !!base?.image, mask: !!base?.mask, refs: (refs || []).filter(r => r?.image).length, ...(base?.image ? { size: { width: base.width, height: base.height } } : {}) } : {};
         // GPT's 参考图 (up to 16, known by their order): the pictures and what the user wrote each one is.
         const gptRefs = engine === 'gpt' ? (refs || []).filter(r => typeof r?.image === 'string' && r.image).slice(0, GPT_MAX_REFS).map(r => ({ image: r.image, type: /^image\/(png|jpeg|webp)$/.test(r.type) ? r.type : 'image/png', label: String(r.label || '').slice(0, 80) })) : [];
         const quote = this.drawQuote(params, extra);
@@ -1271,7 +1345,8 @@ export class TTSBackend {
         const job = this.drawQueue.add({ key, label: label || String(prompt).slice(0, 40), task: async signal => {
             this.assertOpen();
             this.emit('draw', { phase: 'generating' });
-            if (quote.vibes.used.length && !request.refs) Object.assign(request.body.parameters, vibeParameters(await this.vibeEncodings(quote.vibes.used, request.params.model, signal), this.settings.draw.vibe.normalize !== false));
+            // References and 局部重绘 go without vibes, as in NovelAI's own app.
+            if (quote.vibes.used.length && !request.refs && request.body.action !== 'infill') Object.assign(request.body.parameters, await this.vibeFields(quote.vibes.used, request.params.model, signal));
             this.novelai.relay = this.settings.draw.relay.url;
             const send = () => stream ? this.novelai.generateStream(request.body, signal, frame => this.emit('draw', { steps: frame.steps > 1 ? `${Math.min(frame.step + 1, frame.steps)}/${frame.steps} 步` : '', preview: frame.image })) : this.novelai.generate(request.body, signal);
             let blob;
@@ -2532,7 +2607,7 @@ export class TTSBackend {
             validatePreset: preset => { try { validatePreset(preset); return ''; } catch (error) { return message(error); } },
             previewPrompt: preset => this.previewPrompt(preset), promptPlan: () => clone(promptPlan(this.settings, modelRules(this.settings))), parse: text => this.parse(text),
             voiceBalance: (engine, refresh) => this.voiceBalance(engine, refresh), keyStatus: engine => this.keyStatus(engine), keyHint: engine => this.keyHint(engine), keyPool: engine => this.keyPool(engine), keyList: engine => this.keyList(engine), addKeys: (engine, value) => this.addKeys(engine, value), removeKey: (engine, index) => this.removeKey(engine, index), useKey: (engine, index) => this.useKey(engine, index), setKey: (engine, key) => this.setKey(engine, key), clearKey: engine => this.clearKey(engine),
-            saveDraw: patch => this.saveDraw(patch), saveStyle: style => this.saveStyle(style), deleteStyle: id => this.deleteStyle(id), deleteStyles: ids => this.deleteStyles(clone(ids || [])), arrangeStyles: tree => this.arrangeStyles(clone(tree)),
+            saveDraw: patch => this.saveDraw(patch), saveStyle: style => this.saveStyle(style), deleteStyle: id => this.deleteStyle(id), deleteStyles: ids => this.deleteStyles(clone(ids || [])), arrangeStyles: tree => this.arrangeStyles(clone(tree)), arrangeChunks: tree => this.arrangeChunks(clone(tree)),
             imageConnectionList: engine => this.imageConnectionList(engine), saveImageConnection: (engine, patch) => this.saveImageConnection(engine, patch), selectImageConnection: (engine, id) => this.selectImageConnection(engine, id), deleteImageConnection: (engine, id) => this.deleteImageConnection(engine, id),
             drawReady: () => this.drawReady(), drawMissing: () => this.drawMissing(), paidPrompt: () => this.paidPrompt(), comfyCatalog: url => this.comfyCatalog(url), comfyClips: options => this.comfyClips(options), comfyWorkflows: () => this.comfyWorkflows(), comfyWorkflow: name => this.comfyWorkflow(name),
             saveComfyWorkflow: patch => this.saveComfyWorkflow(patch), selectComfyWorkflow: id => this.selectComfyWorkflow(id), deleteComfyWorkflow: id => this.deleteComfyWorkflow(id),
@@ -2543,7 +2618,7 @@ export class TTSBackend {
             comfySavedWorkflows: () => this.comfySavedWorkflows(), comfySavedWorkflow: name => this.comfySavedWorkflow(name), comfyRecentRuns: () => this.comfyRecentRuns(), comfyUploadPicture: file => this.comfyUploadPicture(file),
             saveDrawPreset: preset => this.saveDrawPreset(preset), deleteDrawPreset: id => this.deleteDrawPreset(id), previewDrawPrompt: preset => this.previewDrawPrompt(preset),
             naiSubscription: refresh => this.naiSubscription(refresh), naiProbe: () => this.naiProbe(), fishCatalog: () => this.providers.fishCatalog(), fishProbe: () => { this.assertOpen(); keyCheck('fish'); return this.providers.probeFish(clone(this.settings.connections.fish)); },
-            listVibes: () => this.listVibes(), compactVibes: () => this.compactVibes(), importVibes: (files, options) => this.importVibes(files, clone(options || {})), updateVibe: (id, patch) => this.updateVibe(id, clone(patch || {})), deleteVibe: id => this.deleteVibe(id), deleteVibes: ids => this.deleteVibes([...(ids || [])]), exportVibes: target => this.exportVibes(clone(target || {})), vibePlan: model => clone(this.vibePlan(model || this.settings.draw.params.model)), drawQuote: (params, extra) => this.drawQuote(params, extra), naiTool: input => this.naiTool(clone(input || {})),
+            listVibes: () => this.listVibes(), compactVibes: () => this.compactVibes(), importVibes: (files, options) => this.importVibes(files, clone(options || {})), updateVibe: (id, patch) => this.updateVibe(id, clone(patch || {})), deleteVibe: id => this.deleteVibe(id), deleteVibes: ids => this.deleteVibes([...(ids || [])]), exportVibes: target => this.exportVibes(clone(target || {})), embedVibes: (target, picture, name) => this.embedVibes(clone(target || {}), picture, name), importPictureVibes: (list, options) => this.importPictureVibes(clone(list || []), clone(options || {})), vibePlan: model => clone(this.vibePlan(model || this.settings.draw.params.model)), drawQuote: (params, extra) => this.drawQuote(params, extra), naiTool: input => this.naiTool(clone(input || {})),
             generateImage: input => this.generateImage(input).then(({ blob, ...result }) => result),
             drawQueue: () => this.drawQueue.list(), cancelDraw: key => this.drawQueue.cancel(key), cancelAllDraws: () => this.drawQueue.cancelAll(),
             cloudQueueError: () => this.drawQueue.remoteError, testCloudQueue: value => this.testCloudQueue(value), newRoomCode: () => newRoomCode(),

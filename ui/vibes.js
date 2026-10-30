@@ -1,12 +1,14 @@
 // The Vibe tab of the drawing app: one switch for every picture, the groups (tap one to use it), the single vibes,
 // import (.naiv4vibe, .naiv4vibebundle, 智绘姬 exports, pictures) and export. The vibes themselves stay in the backend.
-import {esc, btn, field, input, toggle, help, groupTitle} from './common.js';
+import {esc, btn, field, input, toggle, help, groupTitle, menu} from './common.js';
 import {icon} from './icons.js';
 import {saveFile} from '../download.js';
+import {vibeKey, vibeMode} from '../core/vibes.js';
+import {pickPicture, pictureData} from './draw-images.js';
 
 const MAX_FREE = 4;
 const tileImage = s => s.thumb ? `<img src="${esc(s.thumb)}" alt="">` : `<span class="vibe-blank">${icon('image')}</span>`;
-const encodedNote = s => s.keys.length ? '已编码' : s.image ? '第一次用要编码' : '没有原图';
+const encodedNote = s => (s.ready || s.keys).length ? '已编码' : s.image ? '第一次用要编码' : '没有原图';
 /** A search box appears once the lists are this long. */
 const SEARCH_FROM = 8;
 const matches = (name, query) => !query || String(name).toLowerCase().includes(query.trim().toLowerCase());
@@ -32,7 +34,7 @@ export function vibePanel({ctx, api, root, rerender}) {
     if (!v.enabled) return 'Vibe 已关闭。打开后，不管用哪个画风，每张图都会带上选中的 Vibe。';
     if (!v.use.kind) return '还没有选：点一个 Vibe 组，或者打开单个 Vibe 点「单独使用」。';
     const model = api.getState().draw.params.model;
-    if (!plan.model) return `当前模型 ${model} 不能用 Vibe（V5 还不支持），出图时会跳过。换成 V4.5 才会生效。`;
+    if (!plan.model) return `当前模型 ${model} 不能用 Vibe（V5 还不支持），出图时会跳过。换成 V3、V4 或 V4.5 才会生效。`;
     const group = v.use.kind === 'group' ? v.groups.find(g => g.id === v.use.id) : null;
     const parts = [`正在用：${group ? `组「${esc(group.name)}」` : `「${esc(plan.used[0]?.name || plan.skipped[0]?.name || '')}」`} · ${plan.used.length} 个`];
     if (plan.over) parts.push(`免费档守卫只用前 ${MAX_FREE} 个，后面 ${plan.over} 个这次不用`);
@@ -68,16 +70,16 @@ export function vibePanel({ctx, api, root, rerender}) {
       ? `<div class="vibe-selectbar"><strong>已选 ${picked.vibes.size} 个 Vibe${picked.groups.size ? `、${picked.groups.size} 个组` : ''}</strong>${btn('vibe-pick-done', '完成', 'chip-button')}</div>
         <div class="actions" style="margin-top:0">${btn('vibe-pick-group', icon('add') + '加入组', 'secondary', picked.vibes.size ? '' : 'disabled')}${btn('vibe-pick-delete', icon('trash') + '删除', 'danger', count ? '' : 'disabled')}</div>`
       // The buttons fold away (ui/common.js keeps the fold open across redraws); with nothing saved yet they are open.
-      : `<details class="tool-fold" data-group="vibe-tools"${list.length + v.groups.length ? '' : ' open'}><summary>${icon('layers')}导入与管理<small>导入 · 新建组 · 多选 · 导出</small></summary><div><div class="actions" style="margin-top:0">${btn('vibe-import', icon('import') + '导入', 'secondary')}${btn('vibe-new-group', icon('add') + '新建组', 'secondary')}${list.length + v.groups.length ? btn('vibe-select', icon('check') + '多选', 'secondary') : ''}${list.length ? btn('vibe-export-all', icon('download') + '全部导出', 'secondary') : ''}${api.chatu8Vibes?.() ? btn('vibe-chatu8', icon('import') + '从智绘姬导入', 'secondary') : ''}</div></div></details>`;
+      : `<details class="tool-fold" data-group="vibe-tools"${list.length + v.groups.length ? '' : ' open'}><summary>${icon('layers')}导入与管理<small>导入 · 新建组 · 多选 · 导出</small></summary><div><div class="actions" style="margin-top:0">${btn('vibe-import', icon('import') + '导入', 'secondary')}${btn('vibe-from-photo', icon('image') + '选一张图', 'secondary')}${btn('vibe-new-group', icon('add') + '新建组', 'secondary')}${list.length + v.groups.length ? btn('vibe-select', icon('check') + '多选', 'secondary') : ''}${list.length ? btn('vibe-export-all', icon('download') + '全部导出', 'secondary') : ''}${api.chatu8Vibes?.() ? btn('vibe-chatu8', icon('import') + '从智绘姬导入', 'secondary') : ''}</div></div></details>`;
     const tools = (kind, items, info) => `<span class="title-tools">${pickAll(kind, items)}${help(info)}</span>`;
-    return `<div class="group">${toggle('vibeEnabled', '使用 Vibe', v.enabled, '打开后，不管用哪个画风或画师串，绘图 App 和正文出图的每张图都会带上选中的 Vibe（一个组，或者单个 Vibe）。\n\n只有 V4 / V4.5 模型能用，V5 还不支持，会自动跳过。\n\n费用：一张图片第一次用要编码，扣 2 Anlas，编码存下来以后再用就不扣了；一次最多 4 个不额外收费，第 5 个起每多一个扣 2 Anlas。免费档守卫打开时只用前 4 个。')}${toggle('vibeNormalize', '强度自动缩放', v.normalize !== false, '几个 Vibe 的强度加起来超过 1 时按比例缩小，官方建议这样，结果更稳。关掉就按填的强度发。')}</div>
+    return `<div class="group">${toggle('vibeEnabled', '使用 Vibe', v.enabled, '打开后，不管用哪个画风或画师串，绘图 App 和正文出图的每张图都会带上选中的 Vibe（一个组，或者单个 Vibe）。\n\nV3、V4、V4.5 能用，V5 还不支持，会自动跳过；局部重绘不带 Vibe（官网也这样）。\n\n费用：一张图片第一次用要编码，扣 2 Anlas，编码存下来以后再用就不扣了（V3 不用编码）；一次最多 4 个不额外收费，第 5 个起每多一个扣 2 Anlas。免费档守卫打开时只用前 4 个。')}${toggle('vibeNormalize', '强度自动缩放', v.normalize !== false, '几个 Vibe 的强度加起来超过 1 时按比例缩小，官方建议这样，结果更稳。关掉就按填的强度发。')}</div>
       <p class="hint vibe-plan">${planText()}</p>
       ${buttons}
       <input type="file" data-vibe-file multiple hidden accept=".naiv4vibe,.naiv4vibebundle,.json,image/png,image/jpeg,image/webp">
       ${list.length + v.groups.length > SEARCH_FROM ? `<div class="vibe-search">${icon('search')}<input type="search" data-vibe-search value="${esc(query)}" placeholder="搜索组和 Vibe 的名字" aria-label="搜索 Vibe"></div>` : ''}
       ${groupTitle(`Vibe 组 · ${v.groups.length}`, tools('groups', v.groups, '点一个组就用这个组。组里每个 Vibe 有自己的强度；强度加起来超过 1 时会按比例缩回 1。\n\n导入官网的 .naiv4vibebundle 或智绘姬导出的 Vibe 组，会自动建好组。\n\n「多选」可以一次删除好几个组。'))}
       ${v.groups.length ? `<div class="vibe-groups vibe-scroll" data-list="groups" data-keep-scroll="vibe-groups">${groupRows}</div><p class="hint" data-none="groups"${v.groups.some(g => matches(g.name, query)) ? ' hidden' : ''}>没有名字里带「${esc(query)}」的组。</p>` : '<p class="hint">还没有组。导入组文件，或者点「新建组」。</p>'}
-      ${groupTitle(`单个 Vibe · ${list.length}`, tools('vibes', list, '可以导入：官网的 .naiv4vibe（单个）、.naiv4vibebundle（一组）、智绘姬「导出全部」的 Vibe 组文件，以及普通图片（第一次用时编码）。已经有的 Vibe 不会重复添加。再点一次「从智绘姬导入」，已经有的 Vibe 会改成智绘姬里的名字。\n\n「多选」可以一次删除好几个，或者一起加进一个组。\n\nVibe 保存在当前浏览器里；换设备用 设置 → 备份与恢复（勾「Vibe 和 Vibe 组」），或者先导出再导入。'))}
+      ${groupTitle(`单个 Vibe · ${list.length}`, tools('vibes', list, '可以导入：官网的 .naiv4vibe（单个）、.naiv4vibebundle（一组）、智绘姬「导出全部」的 Vibe 组文件、嵌着 Vibe 的图片，以及普通图片（第一次用时编码）。画出来的图可以在「用这张图继续」或相册里当 Vibe。已经有的 Vibe 不会重复添加。再点一次「从智绘姬导入」，已经有的 Vibe 会改成智绘姬里的名字。\n\n「多选」可以一次删除好几个，或者一起加进一个组。\n\nVibe 保存在当前浏览器里；换设备用 设置 → 备份与恢复（勾「Vibe 和 Vibe 组」），或者先导出再导入。'))}
       ${list.length ? `<div class="vibe-grid vibe-scroll" data-list="vibes" data-keep-scroll="vibe-grid">${tiles}</div><p class="hint" data-none="vibes"${list.some(s => matches(s.name, query)) ? ' hidden' : ''}>没有名字里带「${esc(query)}」的 Vibe。</p>` : '<p class="hint">还没有 Vibe。点「导入」。</p>'}`;
   }
 
@@ -109,8 +111,37 @@ export function vibePanel({ctx, api, root, rerender}) {
   }
 
   async function save(file) { ctx.notify('已下载 ' + await saveFile(ctx.doc, file.blob, file.name)); }
+  /** 导出: the file as it is, only the encodings, or inside a picture. target: {vibe} or {group}. */
+  async function exportMenu(target) {
+    const asked = await menu(ctx, '导出', [{key: 'file', icon: 'download', label: '导出文件', note: target.group ? '.naiv4vibebundle，带原图' : '.naiv4vibe，带原图'},
+      {key: 'encodings', icon: 'download', label: '只导出编码', note: '不带原图，文件小；之后不能换模型或提取信息量重新编码'},
+      {key: 'picture', icon: 'image', label: '嵌进一张图', note: '放在图片的信息里，导入这张图就能读回来'}]);
+    if (asked === 'file') await save(await api.exportVibes(target));
+    else if (asked === 'encodings') await save(await api.exportVibes({...target, encodings: true}));
+    else if (asked === 'picture') {
+      const picked = await pickPicture(ctx, api, '嵌进哪张图');
+      if (!picked) return;
+      // Whatever kind of picture was picked, it goes out as a PNG.
+      const png = Uint8Array.from(ctx.win.atob((await pictureData(ctx.win, picked)).image), c => c.charCodeAt(0));
+      await save(await api.embedVibes(target, new ctx.win.Blob([png], {type: 'image/png'}), picked.name || ''));
+    }
+  }
+  /** Pictures from the album or the device, each a new vibe. */
+  async function fromPhotos() {
+    const picked = await pickPicture(ctx, api, '选图当 Vibe', {multiple: true});
+    if (picked?.length) report(await api.importVibes(picked.map((blob, i) => blob.name ? blob : new ctx.win.File([blob], `图片 ${i + 1}.png`, {type: blob.type || 'image/png'}))));
+  }
+  /** Where a 提取信息量 stands: encoded already (free), or to be encoded at first use. */
+  function ieNote(s, value) {
+    if (!s.image) return s.keys.length ? '这个 Vibe 只有编码，不能改提取信息量' : '没有原图，也没有编码，用不了';
+    const key = vibeKey(api.getState().draw.params.model), mode = vibeMode(api.getState().draw.params.model);
+    if (mode === 'raw') return 'V3 不用编码，直接带上图片';
+    // A vibe saved before the values were kept: what it has is at its own value.
+    const done = s.ies ? (s.ies[key] || []).includes(Number(value)) : s.keys.includes(key) && Number(value) === s.ie;
+    return done ? '这个值编码过了，用它不扣 Anlas' : '这个值还没有编码：第一次用时扣 2 Anlas';
+  }
 
-  /** A vibe: rename, its own strength, use it alone, add it to a group, export, delete. */
+  /** A vibe: rename, its own strength and 提取信息量, use it alone, add it to a group, export, delete. */
   function openVibe(id) {
     const s = vibes().find(x => x.id === id);
     if (!s) return;
@@ -118,17 +149,22 @@ export function vibePanel({ctx, api, root, rerender}) {
     const d = ctx.dialog(s.name, `<div class="vibe-detail">${tileImage(s)}</div>
       <div class="group pad">${field('名字', input('vibe-name', s.name, 'text', 'maxlength="80"'))}
         <div class="field"><div class="meter-label"><span>强度${help('单独使用时的强度，也是加进组时的默认强度。越高越像这张图。')}</span><output>${s.strength}</output></div><input class="slider" type="range" data-field="vibe-strength" min="0" max="1" step="0.05" value="${s.strength}" aria-label="强度"></div>
-        <p class="hint" style="padding:0">${s.keys.length ? '已编码：' + s.keys.join('、') + '（用这些模型不再扣 Anlas）' : s.image ? '还没有编码：第一次用时编码，扣 2 Anlas' : '没有原图，也没有编码，用不了'} · 提取信息量 ${s.ie}</p></div>
+        <div class="field"><div class="meter-label"><span>提取信息量${help('从图里提取多少信息：高一些更接近原图的内容和细节，低一些只留大概的画风。每换一个没用过的值要重新编码，扣 2 Anlas；用过的值存着，不再扣。')}</span><output>${s.ie}</output></div><input class="slider" type="range" data-field="vibe-ie" min="0.01" max="1" step="0.01" value="${s.ie}" aria-label="提取信息量"${s.image ? '' : ' disabled'}></div>
+        <p class="hint" style="padding:0" data-vibe-ie-note>${ieNote(s, s.ie)}</p></div>
       ${groups.length ? `<div class="group pad">${field('加入组', `<span class="select"><select data-field="vibe-group" aria-label="加入组">${groups.map(g => `<option value="${esc(g.id)}">${esc(g.name)}${g.items.some(i => i.vibe === id) ? '（已在）' : ''}</option>`).join('')}</select></span>`)}<div class="actions" style="margin-top:0">${btn('vibe-to-group', icon('add') + '加入', 'secondary')}</div></div>` : ''}
       <div class="actions">${btn('vibe-save', '保存', 'primary')}${btn('vibe-alone', '单独使用', 'secondary')}${btn('vibe-export', icon('download') + '导出', 'secondary')}${btn('vibe-delete', icon('trash') + '删除', 'danger')}</div>`);
-    d.body.addEventListener('input', e => { if (e.target.dataset.field === 'vibe-strength') e.target.previousElementSibling.querySelector('output').textContent = e.target.value; });
+    d.body.addEventListener('input', e => {
+      const key = e.target.dataset.field;
+      if (key === 'vibe-strength' || key === 'vibe-ie') e.target.previousElementSibling.querySelector('output').textContent = e.target.value;
+      if (key === 'vibe-ie') d.body.querySelector('[data-vibe-ie-note]').textContent = ieNote(s, e.target.value);
+    });
     d.body.addEventListener('click', async e => {
       const b = e.target.closest('[data-action]');
       if (!b) return;
       try {
-        if (b.dataset.action === 'vibe-save') { await api.updateVibe(id, {name: d.body.querySelector('[data-field=vibe-name]').value, strength: Number(d.body.querySelector('[data-field=vibe-strength]').value)}); d.close(); rerender(); ctx.notify('已保存'); }
+        if (b.dataset.action === 'vibe-save') { await api.updateVibe(id, {name: d.body.querySelector('[data-field=vibe-name]').value, strength: Number(d.body.querySelector('[data-field=vibe-strength]').value), ...(s.image ? {ie: Number(d.body.querySelector('[data-field=vibe-ie]').value)} : {})}); d.close(); rerender(); ctx.notify('已保存'); }
         if (b.dataset.action === 'vibe-alone') { api.saveDraw({vibe: {enabled: true, use: {kind: 'vibe', id}}}); d.close(); rerender(); ctx.notify(`正在用「${s.name}」`); }
-        if (b.dataset.action === 'vibe-export') await save(await api.exportVibes({vibe: id}));
+        if (b.dataset.action === 'vibe-export') await exportMenu({vibe: id});
         if (b.dataset.action === 'vibe-to-group') {
           const gid = d.body.querySelector('[data-field=vibe-group]').value, all = structuredClone(state().groups), g = all.find(x => x.id === gid);
           if (!g) return;
@@ -154,10 +190,10 @@ export function vibePanel({ctx, api, root, rerender}) {
       const keep = d.body.querySelector('[data-list=add]')?.scrollTop || 0;
       const list = vibes(), byId = new Map(list.map(s => [s.id, s])), outside = list.filter(s => !draft.items.some(i => i.vibe === s.id));
       d.body.innerHTML = `<div class="group pad">${field('组名', input('group-name', draft.name, 'text', 'maxlength="40"'))}</div>
-        ${groupTitle(`组里的 Vibe · ${draft.items.length}`, help('第 5 个起每多一个扣 2 Anlas；免费档守卫打开时只用前 4 个。'))}
-        <div class="group pad">${draft.items.map((item, n) => { const s = byId.get(item.vibe); return `<div class="vibe-item${n >= MAX_FREE ? ' beyond' : ''}">${s ? tileImage(s) : `<span class="vibe-blank">${icon('alert')}</span>`}
+        ${groupTitle(`组里的 Vibe · ${draft.items.length}`, help('关掉的这次不用，也不算钱，不用从组里移出。第 5 个起每多一个扣 2 Anlas；免费档守卫打开时只用前 4 个。'))}
+        <div class="group pad">${draft.items.map((item, n) => { const s = byId.get(item.vibe), on = item.enabled !== false, place = draft.items.slice(0, n).filter(i => i.enabled !== false).length; return `<div class="vibe-item${on && place >= MAX_FREE ? ' beyond' : ''}${on ? '' : ' off'}">${s ? tileImage(s) : `<span class="vibe-blank">${icon('alert')}</span>`}
           <div class="grow"><div class="meter-label"><span>${esc(s?.name || '已删除')}</span><output>${item.strength}</output></div><input class="slider" type="range" data-item-strength="${n}" min="0" max="1" step="0.05" value="${item.strength}" aria-label="${esc(s?.name || '')} 强度"></div>
-          <button type="button" class="text-button" data-item-remove="${n}">移出</button></div>`; }).join('') || '<p class="hint">组里还没有 Vibe，从下面加。</p>'}</div>
+          <input class="switch" type="checkbox" data-item-on="${n}" aria-label="这次用 ${esc(s?.name || '')}" ${on ? 'checked' : ''}><button type="button" class="text-button" data-item-remove="${n}">移出</button></div>`; }).join('') || '<p class="hint">组里还没有 Vibe，从下面加。</p>'}</div>
         ${outside.length ? groupTitle(`加进来 · ${outside.length}`) + (outside.length > SEARCH_FROM ? `<div class="vibe-search">${icon('search')}<input type="search" data-add-search value="${esc(find)}" placeholder="搜索名字" aria-label="搜索要加的 Vibe"></div>` : '')
           + `<div class="vibe-grid small vibe-scroll" data-list="add">${outside.map(s => `<button type="button" class="vibe-tile" data-name="${esc(s.name)}"${matches(s.name, find) ? '' : ' hidden'} data-item-add="${esc(s.id)}" aria-label="加入 ${esc(s.name)}">${tileImage(s)}<span class="vibe-name">${esc(s.name)}</span></button>`).join('')}</div><p class="hint" data-none="add"${outside.some(s => matches(s.name, find)) ? ' hidden' : ''}>没有名字里带「${esc(find)}」的 Vibe。</p>` : ''}
         <div class="actions">${btn('group-save', '保存', 'primary')}${btn('group-use', '使用这个组', 'secondary')}${btn('group-export', icon('download') + '导出', 'secondary')}${btn('group-delete', icon('trash') + '删除组', 'danger')}</div>`;
@@ -170,6 +206,7 @@ export function vibePanel({ctx, api, root, rerender}) {
       if (e.target.dataset.addSearch !== undefined) { find = e.target.value; filterList(d.body.querySelector('[data-list=add]'), find); return; }
       if (e.target.dataset.itemStrength !== undefined) { draft.items[Number(e.target.dataset.itemStrength)].strength = Number(e.target.value); e.target.previousElementSibling.querySelector('output').textContent = e.target.value; }
       if (e.target.dataset.field === 'group-name') draft.name = e.target.value;
+      if (e.target.dataset.itemOn !== undefined) { const item = draft.items[Number(e.target.dataset.itemOn)]; if (e.target.checked) delete item.enabled; else item.enabled = false; paint(); }
     });
     d.body.addEventListener('click', async e => {
       const b = e.target.closest('button');
@@ -180,7 +217,7 @@ export function vibePanel({ctx, api, root, rerender}) {
         switch (b.dataset.action) {
           case 'group-save': commit(); d.close(); rerender(); ctx.notify('组已保存'); break;
           case 'group-use': commit(); api.saveDraw({vibe: {enabled: true, use: {kind: 'group', id: gid}}}); d.close(); rerender(); ctx.notify(`正在用「${draft.name}」`); break;
-          case 'group-export': commit(); await save(await api.exportVibes({group: gid})); break;
+          case 'group-export': commit(); await exportMenu({group: gid}); break;
           case 'group-delete':
             d.close();
             if (await ctx.confirm('删除这个组？', `组「${draft.name}」会被删除，里面的 Vibe 还在。`)) {
@@ -198,6 +235,7 @@ export function vibePanel({ctx, api, root, rerender}) {
   async function click(el) {
     switch (el.dataset.action) {
       case 'vibe-import': root().querySelector('[data-vibe-file]')?.click(); return true;
+      case 'vibe-from-photo': await fromPhotos(); return true;
       case 'vibe-use-group': {
         const v = state(), same = v.use.kind === 'group' && v.use.id === el.dataset.id;
         api.saveDraw({vibe: same ? {use: {kind: '', id: ''}} : {enabled: true, use: {kind: 'group', id: el.dataset.id}}});

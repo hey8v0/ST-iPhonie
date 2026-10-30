@@ -5,9 +5,10 @@ import { DRAW_ENGINES, normalizeGpt, gptBase, normalizeComfy, comfyUrl, checkWor
 import { readPictureWorkflow, parseWorkflow, uiToApi, uiNodeTypes, mapWorkflow, promptCandidates, promptWords, describeNodes, setNodeValues, switchNodesOff, findProblems, nodeTypes, modelKindOf } from './comfy-graph.js';
 import { activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource } from './comfy-loras.js';
 import { relayUrl, guardParams, isFree, isV5, normalizeDrawParams, takesReference, REFERENCE_ANLAS } from './novelai.js';
-import { PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, normalizeVibeSettings, normalizeChunks, styleParams } from './draw.js';
+import { PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, normalizeVibeSettings, normalizeChunks, tidyChunkGroups, normalizeLocks, normalizePositionGrid, normalizeMaskLook, styleParams } from './draw.js';
 import { activeChatPreset } from './chat.js';
 import { VIBE_ANLAS } from './vibes.js';
+import { normalizeGrid } from './nai-grid.js';
 
 const clone = value => structuredClone(value);
 const BLANK_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -203,8 +204,12 @@ class DrawSettings {
         if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw Error('绘图设置格式无效');
         const next = this.getState(), draw = next.draw;
         if ('queue' in patch) draw.queue = normalizeDraw({ queue: { ...draw.queue, ...clone(patch.queue) } }).queue;
-        if ('chunks' in patch) draw.chunks = normalizeChunks(clone(patch.chunks));
-        for (const key of ['enabled', 'auto', 'guard', 'fold', 'strip', 'stream']) if (key in patch) { if (typeof patch[key] !== 'boolean') throw Error('开关设置无效'); draw[key] = patch[key]; }
+        if ('chunks' in patch) { draw.chunks = normalizeChunks(clone(patch.chunks)); tidyChunkGroups(draw); }
+        if ('locks' in patch) draw.locks = normalizeLocks(patch.locks);
+        if ('grid' in patch) draw.grid = normalizeGrid(clone(patch.grid));
+        if ('positionGrid' in patch) draw.positionGrid = normalizePositionGrid(clone(patch.positionGrid));
+        if ('maskLook' in patch) draw.maskLook = normalizeMaskLook({ ...draw.maskLook, ...clone(patch.maskLook) });
+        for (const key of ['enabled', 'auto', 'guard', 'fold', 'strip', 'stream', 'autoDownload']) if (key in patch) { if (typeof patch[key] !== 'boolean') throw Error('开关设置无效'); draw[key] = patch[key]; }
         if ('mode' in patch) { if (!['separate', 'inline'].includes(patch.mode)) throw Error('配图方式无效'); draw.mode = patch.mode; }
         if ('vibe' in patch) draw.vibe = normalizeVibeSettings({ ...draw.vibe, ...clone(patch.vibe || {}) });
         if ('relay' in patch) {
@@ -212,7 +217,7 @@ class DrawSettings {
             draw.relay = { url: 'url' in relay ? relayUrl(relay.url) : draw.relay.url, assumeOpus: 'assumeOpus' in relay ? !!relay.assumeOpus : draw.relay.assumeOpus };
             this.subscription = null;
         }
-        if ('params' in patch) draw.params = normalizeDrawParams({ ...draw.params, ...clone(patch.params) });
+        if ('params' in patch) { draw.params = normalizeDrawParams({ ...draw.params, ...clone(patch.params) }); delete draw.params.uncondScale; } // 负面强度 belongs to one picture of 参数网格.
         if ('engine' in patch) { if (!DRAW_ENGINES.includes(patch.engine)) throw Error('绘图引擎无效'); draw.engine = patch.engine; }
         if ('gpt' in patch) {
             const g = patch.gpt && typeof patch.gpt === 'object' ? clone(patch.gpt) : {};
@@ -278,6 +283,32 @@ class DrawSettings {
         if (!left.length) throw Error('请至少保留一个画风预设');
         next.draw.styles = left;
         return this.save(next).draw;
+    }
+    /** The 提示词片段 list in a new order with its 分类, in the shape of arrangeStyles (a 片段's id under `style`). */
+    arrangeChunks(tree) {
+        if (!Array.isArray(tree)) throw Error('片段顺序无效');
+        const next = this.getState(), byId = new Map(next.draw.chunks.map(c => [c.id, c])), order = [], groups = [], seen = new Set();
+        const take = (id, group) => {
+            const c = byId.get(String(id));
+            if (!c || seen.has(c.id)) return false;
+            seen.add(c.id);
+            if (group) c.group = group; else delete c.group;
+            order.push(c);
+            return true;
+        };
+        for (const entry of tree) {
+            if (entry?.group && typeof entry.group === 'object') {
+                const g = { id: String(entry.group.id || crypto.randomUUID()), name: String(entry.group.name ?? '').trim().slice(0, 40) || '新建分类', open: entry.group.open !== false };
+                let any = false;
+                for (const id of Array.isArray(entry.styles) ? entry.styles : []) any = take(id, g.id) || any;
+                if (any && !groups.some(x => x.id === g.id)) groups.push(g);
+            } else take(entry?.style);
+        }
+        for (const c of next.draw.chunks) if (!seen.has(c.id)) { delete c.group; order.push(c); }
+        next.draw.chunks = order;
+        next.draw.chunkGroups = groups;
+        this.save(next);
+        return clone(this.settings.draw);
     }
     /** The 画风 list in a new order with its groups: tree [{style: id} | {group: {id, name, open}, styles: [id]}].
      *  Styles not given keep their order after the rest; a group with no style given goes. */
@@ -364,7 +395,8 @@ class DrawSettings {
     /**
      * Whether params cost Anlas. free: true (covered), false (costs Anlas), null (subscription unknown). extra: {base,
      * refs, size} — a picture is drawn at its base's size (size), which decides the Opus free tier as ever; each 角色参考
-     * adds REFERENCE_ANLAS. (NovelAI's own app counts 图生图 and 局部重绘 as free when they are small enough.)
+     * adds REFERENCE_ANLAS. (NovelAI's own app counts 图生图 and 局部重绘 as free when they are small enough.) mask: it is
+     * 局部重绘, which takes no vibes.
      */
     drawQuote(params, extra = {}) {
         const engine = this.settings.draw.engine;
@@ -377,8 +409,8 @@ class DrawSettings {
         const sized = extra?.size?.width > 0 && extra?.size?.height > 0 ? { ...effective, width: extra.size.width, height: extra.size.height } : effective;
         const vibes = this.vibePlan(effective.model), vibeAnlas = (vibes.encode + vibes.extra) * VIBE_ANLAS, free = isFree(sized, subscription);
         const refs = takesReference(effective.model) ? Math.max(0, Number(extra?.refs) || 0) : 0, referenceAnlas = refs * REFERENCE_ANLAS, base = !!extra?.base;
-        // With references no vibe is sent, so the vibes cost nothing then.
-        const vibeCost = refs ? 0 : vibeAnlas, paid = !!(vibeCost || referenceAnlas);
+        // With references or a mask no vibe is sent, so the vibes cost nothing then. 负面强度 other than 100% (参数网格) costs more.
+        const vibeCost = refs || extra?.mask ? 0 : vibeAnlas, uncond = requested.uncondScale !== undefined && requested.uncondScale !== 1, paid = !!(vibeCost || referenceAnlas || uncond);
         return { params: effective, clamped: JSON.stringify(effective) !== JSON.stringify(requested), free: paid && free !== false ? false : free, guard: this.settings.draw.guard,
             v5: isV5(effective.model), usage: this.subscription?.usage ? clone(this.subscription.usage) : null, vibes, vibeAnlas: vibeCost, referenceAnlas, base };
     }

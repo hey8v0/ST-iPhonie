@@ -18,6 +18,7 @@ import {promptText, promptTemplate} from './prompt-rules.js';
 import {defaultDrawParams, normalizeDrawParams, guardParams, relayUrl, NAI_MODEL_NAMES} from './novelai.js';
 import {tokenBudget, counterNow, estimateTokens, countField, tagCost} from './tokens.js';
 import {strength as vibeStrength} from './vibes.js';
+import {normalizeGrid} from './nai-grid.js';
 import {DRAW_ENGINES, DRAW_ENGINE_NAMES, defaultGpt, normalizeGpt, defaultComfy, normalizeComfy} from './image-engines.js';
 import {escapeHTML, isPlaceholderRole} from './protocol.js';
 
@@ -305,7 +306,7 @@ export function normalizeVibeSettings(value) {
   const v = value && typeof value === 'object' ? value : {};
   const groups = (Array.isArray(v.groups) ? v.groups : []).slice(0, 200).map(g => ({
     id: /^[\w-]{1,64}$/.test(String(g?.id || '')) ? String(g.id) : crypto.randomUUID(), name: text(g?.name, 40).trim() || 'Vibe 组',
-    items: (Array.isArray(g?.items) ? g.items : []).filter(i => /^[0-9a-f]{64}$/.test(String(i?.vibe || ''))).filter((i, n, all) => all.findIndex(x => x.vibe === i.vibe) === n).slice(0, 50).map(i => ({vibe: i.vibe, strength: vibeStrength(i.strength)}))
+    items: (Array.isArray(g?.items) ? g.items : []).filter(i => /^[0-9a-f]{64}$/.test(String(i?.vibe || ''))).filter((i, n, all) => all.findIndex(x => x.vibe === i.vibe) === n).slice(0, 50).map(i => ({vibe: i.vibe, strength: vibeStrength(i.strength), ...(i.enabled === false ? {enabled: false} : {})}))
   }));
   const kind = ['group', 'vibe'].includes(v.use?.kind) ? v.use.kind : '', id = typeof v.use?.id === 'string' ? v.use.id : '';
   const use = kind === 'group' && groups.some(g => g.id === id) || kind === 'vibe' && /^[0-9a-f]{64}$/.test(id) ? {kind, id} : {kind: '', id: ''};
@@ -319,41 +320,68 @@ export function normalizeChunks(value) {
     const name = text(c?.name, CHUNK_LIMITS.name).replace(/[!\n]/g, '').trim(), words = text(c?.text, CHUNK_LIMITS.text);
     if (!name || names.has(name) || out.length >= CHUNK_LIMITS.count) continue;
     names.add(name);
-    out.push({id: /^[\w-]{1,64}$/.test(String(c?.id || '')) ? String(c.id) : crypto.randomUUID(), name, text: words});
+    out.push({id: /^[\w-]{1,64}$/.test(String(c?.id || '')) ? String(c.id) : crypto.randomUUID(), name, text: words,
+      ...(/^#[0-9a-f]{6}$/i.test(String(c?.color || '')) ? {color: String(c.color)} : {}), ...(c?.group ? {group: String(c.group)} : {})});
   }
   return out;
+}
+/** 锁定设置: what a picture's settings do not change when they are taken back (读图, 用它的设置). [key, name]. */
+export const LOCKS = Object.freeze([['model', '模型'], ['mode', '模式'], ['prompt', '提示词'], ['negative', '负面'], ['characters', '角色'], ['positions', '角色位置'], ['vibes', 'Vibe'], ['size', '尺寸'], ['steps', '步数'], ['scale', 'Scale'], ['cfgRescale', 'Rescale'], ['variety', 'Variety+'], ['sampler', '采样器'], ['schedule', '噪声调度'], ['seed', '种子'], ['smea', 'SMEA'], ['decrisper', 'Decrisper'], ['legacyUc', '旧版负面'], ['ucPreset', '负面预设'], ['quality', '质量标签']]);
+const LOCK_KEYS = new Set(LOCKS.map(([key]) => key));
+export const normalizeLocks = value => [...new Set((Array.isArray(value) ? value : []).map(String))].filter(key => LOCK_KEYS.has(key));
+/** The parameters to take from a picture, without the ones locked. */
+export function unlockedParams(params, locks = []) {
+  const out = {...params}, gone = new Set(locks);
+  if (gone.has('size')) { delete out.width; delete out.height; }
+  for (const key of ['model', 'mode', 'steps', 'scale', 'cfgRescale', 'variety', 'sampler', 'schedule', 'seed', 'smea', 'decrisper', 'legacyUc', 'ucPreset', 'quality']) if (gone.has(key)) delete out[key];
+  return out;
+}
+/** 站位画布的辅助线. */
+export const POSITION_GRIDS = Object.freeze(['none', 'thirds', 'golden', 'grid']);
+export function normalizePositionGrid(value) {
+  const size = v => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(12, Math.max(2, n)) : 5; };
+  return {type: POSITION_GRIDS.includes(value?.type) ? value.type : 'none', columns: size(value?.columns), rows: size(value?.rows)};
+}
+/** How 局部重绘's paint looks while painting: only there, the mask sent is the same. */
+export const MASK_PATTERNS = Object.freeze([['solid', '实心'], ['stripes', '线'], ['dots', '点'], ['crosshatch', '交叉'], ['grid', '网格'], ['checker', '棋盘'], ['hearts', '爱心']]);
+export function normalizeMaskLook(value) {
+  const opacity = Number(value?.opacity);
+  return {color: /^#[0-9a-f]{6}$/i.test(String(value?.color || '')) ? String(value.color) : '#ff2e6a', opacity: Number.isFinite(opacity) ? Math.min(100, Math.max(10, Math.round(opacity / 5) * 5)) : 60,
+    border: !!value?.border, pattern: MASK_PATTERNS.some(([k]) => k === value?.pattern) ? value.pattern : 'solid'};
 }
 export function defaultDraw() {
   return {enabled: false, auto: true, guard: true, fold: false, mode: 'separate', strip: true, engine: 'nai', gpt: defaultGpt(), comfy: defaultComfy(),
     connections: {nai: normalizeImageConnections('nai'), gpt: normalizeImageConnections('gpt')},
     queue: {gap: 3, retries: 4, cloud: {enabled: false, kind: 'room', url: '', room: ''}}, relay: {url: '', assumeOpus: false}, vibe: defaultVibe(), params: defaultDrawParams(),
-    chunks: [], stream: false, styles: [structuredClone(DEFAULT_STYLE)], styleGroups: [], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
+    chunks: [], chunkGroups: [], stream: false, autoDownload: false, locks: [], grid: normalizeGrid(), positionGrid: normalizePositionGrid(), maskLook: normalizeMaskLook(), styles: [structuredClone(DEFAULT_STYLE)], styleGroups: [], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
 }
 
-/** 画风 groups made tidy, in place: each group's styles together where its first one is, a group with no styles gone,
- *  a style naming no group there is out of groups. */
-export function tidyStyleGroups(d) {
+/** A grouped list made tidy: each group's rows together where its first one is, a group with no rows gone, a row naming
+ *  no group there out of groups. [rows, groups]. */
+function tidyGroups(rows, list) {
   const groups = new Map();
-  for (const g of Array.isArray(d.styleGroups) ? d.styleGroups : []) {
+  for (const g of Array.isArray(list) ? list : []) {
     if (!g || typeof g !== 'object' || !g.id || groups.has(String(g.id))) continue;
     groups.set(String(g.id), {id: String(g.id), name: String(g.name ?? '').trim().slice(0, 40) || '新建组', open: g.open !== false});
   }
   const out = [], placed = new Set();
-  for (const s of d.styles) if (s.group && !groups.has(s.group)) delete s.group;
-  for (const s of d.styles) {
+  for (const s of rows) if (s.group && !groups.has(s.group)) delete s.group;
+  for (const s of rows) {
     if (placed.has(s)) continue;
     if (!s.group) { out.push(s); placed.add(s); continue; }
-    for (const m of d.styles) if (m.group === s.group && !placed.has(m)) { out.push(m); placed.add(m); }
+    for (const m of rows) if (m.group === s.group && !placed.has(m)) { out.push(m); placed.add(m); }
   }
-  d.styles = out;
   const used = new Set(out.map(s => s.group).filter(Boolean));
-  d.styleGroups = [...groups.values()].filter(g => used.has(g.id));
-  return d;
+  return [out, [...groups.values()].filter(g => used.has(g.id))];
 }
-/** The 画风 list as it shows: [{style} | {group, styles}] in order. */
-export function styleTree(d) {
-  const groups = new Map((d.styleGroups || []).map(g => [g.id, g])), out = [], open = new Map();
-  for (const style of d.styles) {
+/** 画风 groups made tidy, in place. */
+export function tidyStyleGroups(d) { [d.styles, d.styleGroups] = tidyGroups(d.styles, d.styleGroups); return d; }
+/** 提示词片段 groups (分类) made tidy, in place. */
+export function tidyChunkGroups(d) { [d.chunks, d.chunkGroups] = tidyGroups(d.chunks, d.chunkGroups); return d; }
+/** A grouped list as it shows: [{style} | {group, styles}] in order (a 片段 goes under the same names as a 画风). */
+function layerTree(rows, list) {
+  const groups = new Map((list || []).map(g => [g.id, g])), out = [], open = new Map();
+  for (const style of rows) {
     const group = style.group && groups.get(style.group);
     if (!group) { out.push({style}); continue; }
     if (!open.has(group.id)) { const entry = {group, styles: []}; open.set(group.id, entry); out.push(entry); }
@@ -361,6 +389,8 @@ export function styleTree(d) {
   }
   return out;
 }
+export const styleTree = d => layerTree(d.styles, d.styleGroups);
+export const chunkTree = d => layerTree(d.chunks || [], d.chunkGroups);
 
 /** Connection presets contain no secrets. Legacy single connections become the default preset. */
 export function normalizeImageConnections(engine, value, legacy = {}) {
@@ -421,7 +451,13 @@ export function normalizeDraw(value) {
   }
   d.vibe = normalizeVibeSettings(d.vibe);
   d.chunks = normalizeChunks(d.chunks);
+  tidyChunkGroups(d);
   d.stream = !!d.stream;
+  d.autoDownload = !!d.autoDownload;
+  d.locks = normalizeLocks(d.locks);
+  d.grid = normalizeGrid(d.grid);
+  d.positionGrid = normalizePositionGrid(d.positionGrid);
+  d.maskLook = normalizeMaskLook(d.maskLook);
   d.params = normalizeDrawParams(d.params);
   d.styles = (Array.isArray(d.styles) && d.styles.length ? d.styles : base.styles).map(s => ({id: String(s.id || crypto.randomUUID()), name: text(s.name, 60) || '画风', artist: text(s.artist, 4000), positive: text(s.positive, 4000), negative: text(s.negative, 4000),
     ...(s.params && typeof s.params === 'object' ? {params: styleParams({...d.params, ...s.params})} : {}), ...(s.group ? {group: String(s.group)} : {})}));

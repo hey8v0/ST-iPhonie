@@ -5,6 +5,10 @@ import {esc} from './common.js';
 import {thumbBlob} from './thumbs.js';
 import {icon} from './icons.js';
 import {REFERENCE_SIZES, NAI_MODELS} from '../core/novelai.js';
+import {normalizeMaskLook, MASK_PATTERNS} from '../core/draw.js';
+import {pngText} from '../core/png-text.js';
+
+export {pngText};
 
 /** A blob as a loaded <img> (its object URL is let go once it is drawn). */
 export function loadImage(win, blob) {
@@ -76,6 +80,45 @@ export async function pictureData(win, blob) {
   return {image: base64Of(canvas), width: img.naturalWidth, height: img.naturalHeight};
 }
 
+/** Whether this page may put a picture on the clipboard (only a secure address may). */
+export const canCopyPicture = win => typeof win.ClipboardItem === 'function' && typeof win.navigator?.clipboard?.write === 'function';
+/**
+ * A picture on the clipboard, as a PNG, the one kind every browser takes. picture: a Blob or the promise of one: Safari
+ * only allows this inside the tap, so the clipboard is asked at once and the picture follows.
+ */
+export async function copyPicture(win, picture) {
+  const png = Promise.resolve(picture).then(async blob => {
+    if (blob.type === 'image/png') return blob;
+    const {image} = await pictureData(win, blob);
+    return new win.Blob([Uint8Array.from(win.atob(image), c => c.charCodeAt(0))], {type: 'image/png'});
+  });
+  await win.navigator.clipboard.write([new win.ClipboardItem({'image/png': png})]);
+}
+
+/**
+ * 参数网格's sheet: the pictures in their rows and columns with the labels of the axes, as a JPEG (it holds many).
+ * cells: [{blob | null, xLabel, yLabel}], row by row; a picture that did not come leaves its place empty.
+ */
+export async function composeGrid(win, {cells, columns, rows, axisX = '', axisY = ''}) {
+  const shown = await Promise.all(cells.map(c => c.blob ? loadImage(win, c.blob).catch(() => null) : null)), first = shown.find(Boolean);
+  if (!first) return null;
+  const k = Math.min(1, 512 / Math.max(first.naturalWidth, first.naturalHeight)), w = Math.round(first.naturalWidth * k), h = Math.round(first.naturalHeight * k), gap = 6;
+  const top = cells.some(c => c.xLabel) ? 40 + (axisX ? 28 : 0) : 8, left = cells.some(c => c.yLabel) ? 150 : 8;
+  const canvas = canvasOf(win.document, left + columns * (w + gap) + 2, top + rows * (h + gap) + 2), g = canvas.getContext('2d');
+  g.fillStyle = '#14161c'; g.fillRect(0, 0, canvas.width, canvas.height);
+  g.fillStyle = '#fff'; g.font = '600 17px system-ui, sans-serif'; g.textBaseline = 'middle';
+  const fit = (text, room) => { let t = String(text); if (g.measureText(t).width <= room) return t; while (t.length > 1 && g.measureText(t + '…').width > room) t = t.slice(0, -1); return t + '…'; };
+  if (axisX || axisY) { g.fillStyle = 'rgba(255,255,255,.6)'; if (axisX) g.fillText(fit(axisX, canvas.width - left - 8), left, 16); if (axisY) g.fillText(fit(axisY, left - 16), 8, top - 18); g.fillStyle = '#fff'; }
+  cells.forEach((cell, i) => {
+    const x = left + (i % columns) * (w + gap), y = top + Math.floor(i / columns) * (h + gap);
+    if (shown[i]) g.drawImage(shown[i], x, y, w, h);
+    else { g.fillStyle = 'rgba(255,255,255,.08)'; g.fillRect(x, y, w, h); g.fillStyle = '#fff'; }
+    if (i < columns && cell.xLabel) g.fillText(fit(cell.xLabel, w), x, top - 18);
+    if (i % columns === 0 && cell.yLabel) g.fillText(fit(cell.yLabel, left - 16), 8, y + h / 2);
+  });
+  return new Promise(resolve => canvas.toBlob(blob => resolve(blob && {blob, width: canvas.width, height: canvas.height}), 'image/jpeg', .9));
+}
+
 /** Picks a picture from the album or the device: its Blob, or null when nothing was picked. multiple: several files
  *  may be picked from the device at once, and the answer is a list (one from the album). */
 export function pickPicture(ctx, api, title = '选一张图', {multiple = false} = {}) {
@@ -101,36 +144,74 @@ export function pickPicture(ctx, api, title = '选一张图', {multiple = false}
  * white where it is drawn again, in NovelAI's 8-pixel blocks; '' when nothing is painted), focus}, or null when left
  * without saving. mask: the one painted before, to go on with. focus: {x, y, w, h, context} — 聚焦重绘's box, drawn large.
  */
-export function maskEditor(ctx, {src, width, height, mask = '', focus = null}) {
+/** How the paint shows: a tile of the pattern in the colour, on a picture's own scale (holes are see-through). null for solid. */
+function maskTile(doc, pattern, color, side) {
+  if (pattern === 'solid') return null;
+  const n = Math.max(8, Math.round(side / 48)), tile = canvasOf(doc, n, n), g = tile.getContext('2d'), line = Math.max(1.5, n / 8);
+  g.fillStyle = g.strokeStyle = color; g.lineWidth = line;
+  const path = (...points) => { g.beginPath(); g.moveTo(points[0], points[1]); g.lineTo(points[2], points[3]); g.stroke(); };
+  if (pattern === 'stripes' || pattern === 'crosshatch') { path(-1, n + 1, n + 1, -1); path(-1, 1, 1, -1); path(n - 1, n + 1, n + 1, n - 1); }
+  if (pattern === 'crosshatch') { path(-1, -1, n + 1, n + 1); path(n - 1, -1, n + 1, 1); path(-1, n - 1, 1, n + 1); }
+  if (pattern === 'dots') { g.beginPath(); g.arc(n / 2, n / 2, n / 4, 0, Math.PI * 2); g.fill(); }
+  if (pattern === 'grid') { path(0, 0, n, 0); path(0, 0, 0, n); }
+  if (pattern === 'checker') { g.fillRect(0, 0, n / 2, n / 2); g.fillRect(n / 2, n / 2, n / 2, n / 2); }
+  if (pattern === 'hearts') { const r = n / 5, x = n / 2, y = n * .42; g.beginPath(); g.arc(x - r, y, r, Math.PI, 0); g.arc(x + r, y, r, Math.PI, 0); g.lineTo(x, y + r * 2.4); g.closePath(); g.fill(); }
+  return tile;
+}
+export function maskEditor(ctx, {src, width, height, mask = '', focus = null, look = null, onLook = () => {}}) {
   return new Promise(resolve => {
     const doc = ctx.doc, host = doc.querySelector('.screen') || doc.body, layer = doc.createElement('div');
     layer.className = 'mask-editor';
     layer.innerHTML = `<header><button type="button" data-mask="cancel" class="text-button">取消</button><b>涂出要重画的地方</b><button type="button" data-mask="done" class="primary small">好了</button></header>
       <div class="mask-stage"><div class="mask-frame"><img alt="" src="${esc(src)}"><canvas></canvas><span class="mask-box" hidden></span></div></div>
+      <div class="mask-look" hidden></div>
       <footer><div class="segmented"><button type="button" data-mask="paint" aria-pressed="true">${icon('paint')}涂</button><button type="button" data-mask="erase" aria-pressed="false">${icon('backspace')}擦</button><button type="button" data-mask="focus" aria-pressed="false">${icon('expand')}聚焦</button></div>
         <label class="mask-size"><span>笔刷</span><input type="range" min="2" max="40" value="10" aria-label="笔刷大小"></label>
         <label class="mask-context" hidden><span>周围参考</span><input type="range" min="0" max="256" step="16" value="${focus?.context ?? 64}" aria-label="周围留多少给 AI 参考"></label>
-        <button type="button" data-mask="clear" class="text-button">全部擦掉</button></footer>
+        <button type="button" data-mask="style" class="text-button" aria-expanded="false">样式</button><button type="button" data-mask="clear" class="text-button">全部擦掉</button></footer>
       <p class="mask-tip" hidden>框出要细化的地方（比如脸）：这块放大后重画，细节更多。框里不涂就整块重画。</p>`;
     host.append(layer);
     // The picture as large as the space allows, in its own shape.
     const stage = layer.querySelector('.mask-stage'), frame = layer.querySelector('.mask-frame');
     const fit = () => { const r = stage.getBoundingClientRect(), k = Math.min((r.width - 24) / width, (r.height - 12) / height); frame.style.width = Math.max(40, width * k) + 'px'; frame.style.height = Math.max(40, height * k) + 'px'; };
     fit(); ctx.win.addEventListener('resize', fit);
-    const canvas = layer.querySelector('canvas'), g = canvas.getContext('2d');
+    // What is seen, in the look picked; the mask itself is read from `truth`, painted plainly beside it.
+    const canvas = layer.querySelector('canvas'), g = canvas.getContext('2d'), truth = canvasOf(doc, width, height), t = truth.getContext('2d');
     canvas.width = width; canvas.height = height;
+    let shown = normalizeMaskLook(look), paintStyle = shown.color;
+    /** Draws what is painted again in the look. */
+    function dress() {
+      const tile = maskTile(doc, shown.pattern, shown.color, Math.max(width, height));
+      paintStyle = tile ? g.createPattern(tile, 'repeat') : shown.color;
+      g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, width, height); g.drawImage(truth, 0, 0);
+      g.globalCompositeOperation = 'source-in'; g.fillStyle = paintStyle; g.fillRect(0, 0, width, height);
+      g.globalCompositeOperation = 'source-over';
+      canvas.style.opacity = shown.opacity / 100;
+      canvas.style.filter = shown.border ? 'drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)' : '';
+    }
+    const lookBox = layer.querySelector('.mask-look');
+    const lookHTML = () => `<label class="mask-size"><span>颜色</span><input type="color" data-look="color" value="${esc(shown.color)}" aria-label="遮罩颜色"></label>
+      <label class="mask-size"><span>透明度</span><input type="range" data-look="opacity" min="10" max="100" step="5" value="${shown.opacity}" aria-label="遮罩透明度"></label>
+      <label class="mask-size"><span>描边</span><input type="checkbox" class="switch" data-look="border" aria-label="描边"${shown.border ? ' checked' : ''}></label>
+      <div class="segmented">${MASK_PATTERNS.map(([k, l]) => `<button type="button" data-look-pattern="${k}" aria-pressed="${k === shown.pattern}">${l}</button>`).join('')}</div>`;
+    // Seen while it moves; kept when it is let go.
+    const setLook = patch => { shown = normalizeMaskLook({...shown, ...patch}); dress(); };
+    lookBox.addEventListener('input', e => { const key = e.target.dataset.look; if (key === 'color' || key === 'opacity') setLook({[key]: e.target.value}); if (key === 'border') setLook({border: e.target.checked}); });
+    lookBox.addEventListener('change', () => onLook(shown));
+    dress();
     let erase = false, down = false, last = null, painted = false, mode = 'paint', box = focus ? {x: focus.x, y: focus.y, w: focus.w, h: focus.h} : null, from = null;
     const boxEl = layer.querySelector('.mask-box');
     const showBox = () => { boxEl.hidden = !box; if (box) Object.assign(boxEl.style, {left: box.x / width * 100 + '%', top: box.y / height * 100 + '%', width: box.w / width * 100 + '%', height: box.h / height * 100 + '%'}); };
     showBox();
-    if (mask) { const old = new ctx.win.Image(); old.onload = () => { g.drawImage(old, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = '#ff2e6a'; g.fillRect(0, 0, width, height); g.globalCompositeOperation = 'source-over'; painted = true; }; old.src = 'data:image/png;base64,' + mask; }
+    if (mask) { const old = new ctx.win.Image(); old.onload = () => { t.drawImage(old, 0, 0); painted = true; dress(); }; old.src = 'data:image/png;base64,' + mask; }
     const brush = () => Number(layer.querySelector('.mask-size input').value) / 100 * Math.max(width, height) / 4;
     const at = e => { const r = canvas.getBoundingClientRect(); return {x: (e.clientX - r.left) / r.width * width, y: (e.clientY - r.top) / r.height * height}; };
     function stroke(from, to) {
-      g.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
-      // Pink to see on any picture; the mask itself is read from where something is painted (blocks()).
-      g.strokeStyle = g.fillStyle = '#ff2e6a'; g.lineWidth = brush() * 2; g.lineCap = g.lineJoin = 'round';
-      g.beginPath(); g.moveTo(from.x, from.y); g.lineTo(to.x, to.y); g.stroke();
+      for (const [c, style] of [[g, paintStyle], [t, '#fff']]) {
+        c.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
+        c.strokeStyle = c.fillStyle = style; c.lineWidth = brush() * 2; c.lineCap = c.lineJoin = 'round';
+        c.beginPath(); c.moveTo(from.x, from.y); c.lineTo(to.x, to.y); c.stroke();
+      }
       if (!erase) painted = true;
     }
     canvas.addEventListener('pointerdown', e => { down = true; canvas.setPointerCapture?.(e.pointerId); last = at(e); if (mode === 'focus') { from = last; box = null; showBox(); } else stroke(last, last); e.preventDefault(); });
@@ -148,17 +229,20 @@ export function maskEditor(ctx, {src, width, height, mask = '', focus = null}) {
     doc.addEventListener('keydown', key, true);
     const close = value => { doc.removeEventListener('keydown', key, true); ctx.win.removeEventListener('resize', fit); layer.remove(); resolve(value); };
     layer.addEventListener('click', e => {
+      const pattern = e.target.closest('[data-look-pattern]')?.dataset.lookPattern;
+      if (pattern) { setLook({pattern}); onLook(shown); for (const b of lookBox.querySelectorAll('[data-look-pattern]')) b.setAttribute('aria-pressed', String(b.dataset.lookPattern === pattern)); return; }
       const what = e.target.closest('[data-mask]')?.dataset.mask;
+      if (what === 'style') { lookBox.hidden = !lookBox.hidden; if (!lookBox.hidden && !lookBox.firstChild) lookBox.innerHTML = lookHTML(); e.target.closest('[data-mask]').setAttribute('aria-expanded', String(!lookBox.hidden)); ctx.win.requestAnimationFrame?.(fit); return; }
       if (what === 'cancel') close(null);
       else if (what === 'paint' || what === 'erase' || what === 'focus') {
         mode = what; erase = what === 'erase';
         for (const b of layer.querySelectorAll('[data-mask=paint],[data-mask=erase],[data-mask=focus]')) b.setAttribute('aria-pressed', String(b.dataset.mask === what));
         layer.querySelector('.mask-size').hidden = what === 'focus'; layer.querySelector('.mask-context').hidden = what !== 'focus'; layer.querySelector('.mask-tip').hidden = what !== 'focus';
       }
-      else if (what === 'clear') { g.clearRect(0, 0, width, height); painted = false; box = null; showBox(); }
+      else if (what === 'clear') { g.clearRect(0, 0, width, height); t.clearRect(0, 0, width, height); painted = false; box = null; showBox(); }
       else if (what === 'done') {
         const big = box && box.w >= 16 && box.h >= 16;
-        close({mask: painted ? blocks(doc, canvas) : '', focus: big ? {x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h), context: Number(layer.querySelector('.mask-context input').value)} : null});
+        close({mask: painted ? blocks(doc, truth) : '', focus: big ? {x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h), context: Number(layer.querySelector('.mask-context input').value)} : null});
       }
     });
   });
@@ -203,41 +287,23 @@ export async function composeFocused(win, {image, width, height, x, y, w, h, mas
   g.drawImage(part, x, y);
   return new Promise((resolve, reject) => whole.toBlob(out => out ? resolve(out) : reject(Error('合成图片失败')), 'image/png'));
 }
-/** 扩图: the picture with empty space around it, and a mask of just that space: {image, mask, width, height, preview}. */
+/**
+ * 改尺寸: each side moved out (empty space, added to the mask so only it is drawn) or in (cropped, a negative number);
+ * both on opposite sides shifts the picture. What was painted before moves with it. {image, mask, width, height, preview}.
+ */
 export async function padBase(win, base, {top = 0, left = 0, right = 0, bottom = 0}) {
   const doc = win.document, width = base.width + left + right, height = base.height + top + bottom;
+  if (width < 64 || height < 64) throw Error('裁得太小了');
   const picture = canvasOf(doc, width, height), g = picture.getContext('2d');
   g.fillStyle = '#fff'; g.fillRect(0, 0, width, height);
   g.drawImage(await pictureOf(win, base.image), left, top, base.width, base.height);
-  const space = canvasOf(doc, width, height), sg = space.getContext('2d');
-  sg.fillStyle = '#fff'; sg.fillRect(0, 0, width, height);
-  sg.clearRect(left, top, base.width, base.height);
-  return {image: base64Of(picture), mask: blocks(doc, space), width, height, preview: picture.toDataURL('image/jpeg', .8)};
+  const space = canvasOf(doc, width, height), sg = space.getContext('2d'), grown = top > 0 || left > 0 || right > 0 || bottom > 0;
+  if (grown) { sg.fillStyle = '#fff'; sg.fillRect(0, 0, width, height); sg.clearRect(left, top, base.width, base.height); }
+  if (base.mask) { sg.imageSmoothingEnabled = false; sg.drawImage(await pictureOf(win, base.mask), left, top, base.width, base.height); }
+  return {image: base64Of(picture), mask: grown || base.mask ? blocks(doc, space) : '', width, height, preview: picture.toDataURL('image/jpeg', .8)};
 }
 
 // ---------- 读参数 ----------
-/** The text chunks of a PNG ({keyword: text}); {} when it is not a PNG. */
-export async function pngText(buffer) {
-  const bytes = new Uint8Array(buffer), view = new DataView(buffer), out = {};
-  if (bytes[0] !== 0x89 || bytes[1] !== 0x50) return out;
-  for (let at = 8; at + 8 <= bytes.length;) {
-    const length = view.getUint32(at), type = String.fromCharCode(...bytes.subarray(at + 4, at + 8)), data = bytes.subarray(at + 8, at + 8 + length);
-    if (type === 'tEXt' || type === 'iTXt') {
-      const zero = data.indexOf(0), key = new TextDecoder('latin1').decode(data.subarray(0, zero));
-      let text = data.subarray(zero + 1);
-      if (type === 'iTXt') {
-        const compressed = text[0], rest = text.subarray(2), lang = rest.indexOf(0), trans = rest.indexOf(0, lang + 1);
-        text = rest.subarray(trans + 1);
-        if (compressed && typeof DecompressionStream === 'function') text = new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
-      }
-      out[key] = new TextDecoder(type === 'tEXt' ? 'latin1' : 'utf-8').decode(text);
-      if (type === 'tEXt') try { out[key] = new TextDecoder('utf-8', {fatal: true}).decode(text); } catch { /* latin1 it is */ }
-    }
-    if (type === 'IEND') break;
-    at += 12 + length;
-  }
-  return out;
-}
 const MODEL_WORDS = [[/V5/i, /curated/i, 'nai-diffusion-5-curated'], [/V5/i, null, 'nai-diffusion-5-full'], [/V4\.5/i, /curated/i, 'nai-diffusion-4-5-curated'], [/V4\.5/i, null, 'nai-diffusion-4-5-full'],
   [/V4/i, /curated/i, 'nai-diffusion-4-curated-preview'], [/V4/i, null, 'nai-diffusion-4-full'], [/V3/i, /furry/i, 'nai-diffusion-furry-3'], [/V3/i, null, 'nai-diffusion-3']];
 /**
@@ -262,7 +328,17 @@ export async function readNovelAI(buffer) {
     // What the settings had added is in the prompt already: read back, the presets start off so as not to add it twice.
     quality: 'none', ucPreset: 'none', decrisper: c.dynamic_thresholding === true ? true : undefined, variety: c.skip_cfg_above_sigma ? true : undefined,
     smea: c.sm === true ? (c.sm_dyn === true ? 'dyn' : 'on') : c.sm === false ? 'off' : undefined}).filter(([, v]) => v !== undefined && v !== null && v !== ''));
-  const prompt = String(v4?.base_caption ?? c.prompt ?? text.Description ?? '');
+  let prompt = String(v4?.base_caption ?? c.prompt ?? text.Description ?? '');
   if (!prompt.trim() && !characters.length) return null;
-  return {prompt, negative: String(v4n?.base_caption ?? c.uc ?? ''), characters, params};
+  // 模式 is written in front of the prompt: read back, it is the setting again rather than words.
+  const dataset = /^(fur|background) dataset, /.exec(prompt);
+  if (dataset) { prompt = prompt.slice(dataset[0].length); params.mode = dataset[1] === 'fur' ? 'furry' : 'background'; }
+  if (c.v4_negative_prompt?.legacy_uc === true) params.legacyUc = true;
+  // Vibes come as encodings, each with its strength and 提取信息量 (V3's are pictures, which its app does not take back either).
+  const strengths = c.reference_strength_multiple, ies = c.reference_information_extracted_multiple;
+  const vibes = Array.isArray(c.reference_image_multiple) && !/V3/i.test(source) ? c.reference_image_multiple.filter(x => typeof x === 'string' && x).map((encoding, i) => ({encoding, strength: num(strengths?.[i]) ?? .6, ie: num(ies?.[i]) ?? 1})) : [];
+  // What ||a|b|| came to in this picture, kept beside what was written.
+  const drawn = c.actual_prompts?.prompt, drawnNo = c.actual_prompts?.negative_prompt;
+  const actual = drawn ? {prompt: String(drawn.base_caption ?? prompt).replace(/^(fur|background) dataset, /, ''), negative: String(drawnNo?.base_caption ?? ''), characters: (drawn.char_captions || []).map((ch, i) => ({prompt: String(ch.char_caption || ''), negative: String(drawnNo?.char_captions?.[i]?.char_caption || '')}))} : null;
+  return {prompt, negative: String(v4n?.base_caption ?? c.uc ?? ''), characters, params, vibes, actual, model: params.model || ''};
 }

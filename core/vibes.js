@@ -1,14 +1,22 @@
-// Vibe Transfer (NovelAI V4 / V4.5): reference images turned into "vibes" that steer the look of every picture.
+// Vibe Transfer (NovelAI V3 / V4 / V4.5): reference images turned into "vibes" that steer the look of every picture.
 // A vibe is kept in NovelAI's own .naiv4vibe form (identifier 'novelai-vibe-transfer', version 1): the image, a
 // thumbnail, and its encodings per model and per 提取信息量 (information_extracted). Encoding an image costs 2 Anlas,
-// once per model; an encoding already in the file is reused for free. V5 and V3 do not take these vibes.
-// Files read: .naiv4vibe, .naiv4vibebundle, 智绘姬 (st-chatu8) group exports {groups, vibeData, vibePresets}, images.
-// Files written: .naiv4vibe (one), .naiv4vibebundle (a group), and the 智绘姬 form (everything, with the groups).
+// once per model and 提取信息量; an encoding already in the file is reused for free. V3 takes the picture itself, not an
+// encoding; V5 takes no vibes at all.
+// Files read: .naiv4vibe, .naiv4vibebundle, 智绘姬 (st-chatu8) group exports {groups, vibeData, vibePresets}, images, and
+// pictures that carry a vibe (their naidata text, as NovelAI writes it).
+// Files written: .naiv4vibe (one), .naiv4vibebundle (a group), the 智绘姬 form (everything, with the groups), and either
+// of the first two without the picture (encodings only) or inside a PNG.
 import {sha256Hex} from './hash.js';
+import {pngText, addPngText} from './png-text.js';
 
 /** The key a model's encodings sit under in a .naiv4vibe; '' for models without vibes (V5, V3). */
 export const VIBE_KEYS = Object.freeze({'nai-diffusion-4-5-full': 'v4-5full', 'nai-diffusion-4-5-curated': 'v4-5curated', 'nai-diffusion-4-full': 'v4full', 'nai-diffusion-4-curated-preview': 'v4curated'});
 export const vibeKey = model => VIBE_KEYS[model] || '';
+/** How a model takes vibes: 'encoded' (V4, V4.5), 'raw' (V3: the picture itself), '' (V5). */
+export const vibeMode = model => VIBE_KEYS[model] ? 'encoded' : /^nai-diffusion-(furry-)?3/.test(model) ? 'raw' : '';
+/** What a new vibe starts with, as NovelAI's app has it for the model in use. */
+export const vibeDefaults = model => ({strength: 0.6, information_extracted: !vibeMode(model) || model === 'nai-diffusion-4-5-full' ? 0.7 : 1});
 /** Up to four vibes a picture costs nothing extra; each one more adds 2 Anlas. Encoding also costs 2 Anlas. */
 export const MAX_FREE_VIBES = 4;
 export const VIBE_ANLAS = 2;
@@ -22,7 +30,7 @@ export const sha256 = text => sha256Hex(text);
 /** NovelAI names an encoding variant by the hash of its parameters: sha256('information_extracted:1') for 1. */
 export const variantKey = ie => sha256('information_extracted:' + String(extracted(ie)));
 const firstEncoding = doc => Object.values(doc.encodings || {}).flatMap(v => Object.values(v)).find(v => v?.encoding)?.encoding || '';
-const baseName = name => String(name || '').replace(/\.(naiv4vibe|naiv4vibebundle|json|png|jpe?g|webp|avif|gif)$/i, '').trim();
+const baseName = name => String(name || '').replace(/(\.(naiv4vibe|naiv4vibebundle|json|png|jpe?g|webp|avif|gif))+$/i, '').trim();
 const uuidish = text => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text) || /^[0-9a-f]{32,}$/i.test(text);
 
 /** A vibe in the form kept and written: NovelAI's own, cleaned. Its id is NovelAI's: the hash of the image (or the encoding). */
@@ -43,15 +51,19 @@ export async function normalizeVibe(raw, fallbackName = 'Vibe') {
     name: String(raw.name || '').trim().slice(0, 80) || fallbackName.slice(0, 80) || 'Vibe',
     ...(typeof raw.thumbnail === 'string' && /^data:image\/[^;]+;base64,/.test(raw.thumbnail) ? {thumbnail: raw.thumbnail} : {}),
     createdAt: Number(raw.createdAt) > 0 ? Number(raw.createdAt) : Date.now(),
-    importInfo: {model: typeof info.model === 'string' && info.model ? info.model : 'nai-diffusion-4-5-full', information_extracted: extracted(info.information_extracted), strength: strength(info.strength)}};
+    importInfo: {model: typeof info.model === 'string' && info.model ? info.model : 'nai-diffusion-4-5-full', information_extracted: extracted(info.information_extracted), strength: strength(info.strength), ...(info.picked === true ? {picked: true} : {})}};
   // A file's own id is kept (a vibe whose picture was made small keeps the id of the picture it was made from).
   doc.id = typeof raw.id === 'string' && /^[0-9a-f]{64}$/.test(raw.id) ? raw.id : await sha256(image || firstEncoding(doc));
   return doc;
 }
 
-/** A vibe made from a picture: no encoding yet (the first use pays for it). */
-export async function imageVibe(name, base64, thumbnail = '') {
-  return normalizeVibe({identifier: SINGLE, version: 1, type: 'image', image: base64, encodings: {}, name: baseName(name) || '图片', ...(thumbnail ? {thumbnail} : {}), importInfo: {model: 'nai-diffusion-4-5-full', information_extracted: 1, strength: 0.6}});
+/** A vibe made from a picture: no encoding yet (the first use pays for it). model: the one in use, for its starting 提取信息量 (else 1). */
+export async function imageVibe(name, base64, thumbnail = '', model = '') {
+  return normalizeVibe({identifier: SINGLE, version: 1, type: 'image', image: base64, encodings: {}, name: baseName(name) || '图片', ...(thumbnail ? {thumbnail} : {}), importInfo: {model: vibeKey(model) ? model : 'nai-diffusion-4-5-full', information_extracted: model ? vibeDefaults(model).information_extracted : 1, strength: 0.6}});
+}
+/** A vibe known only by its encoding (read from a picture's parameters): it cannot be encoded again. */
+export function encodingVibe(name, encoding, model, ie = 1, s = 0.6) {
+  return normalizeVibe({identifier: SINGLE, version: 1, type: 'encoding', encodings: {[vibeKey(model)]: {unknown: {encoding, params: {information_extracted: extracted(ie)}}}}, name, importInfo: {model, information_extracted: extracted(ie), strength: strength(s)}});
 }
 
 /** Adds what `incoming` has and `doc` lacks (encodings, image, thumbnail); the kept name and strength stay. */
@@ -104,12 +116,15 @@ export async function readVibeFile(name, text) {
   throw fail('认不出这个文件：支持 .naiv4vibe、.naiv4vibebundle、智绘姬导出的 Vibe 组和图片');
 }
 
-/** The encoding to send for a model: the one at the vibe's own 提取信息量, else any for that model; '' when it needs encoding. */
+/**
+ * The encoding to send for a model: the one at the vibe's own 提取信息量, else any for that model; '' when it needs
+ * encoding. A 提取信息量 the user picked counts: a vibe with its picture is encoded for it rather than sent as something else.
+ */
 export function encodingFor(doc, key, ie = doc?.importInfo?.information_extracted) {
   const variants = key && doc?.encodings?.[key];
   if (!variants) return '';
-  const list = Object.values(variants).filter(v => v?.encoding);
-  return (list.find(v => v.params?.information_extracted === extracted(ie)) || variants.unknown || list[0])?.encoding || '';
+  const list = Object.values(variants).filter(v => v?.encoding), exact = list.find(v => v.params?.information_extracted === extracted(ie));
+  return (exact || (doc.image && doc.importInfo?.picked ? null : variants.unknown || list[0]))?.encoding || '';
 }
 /** Stores a new encoding on the vibe (a copy). */
 export async function withEncoding(doc, key, ie, encoding) {
@@ -121,8 +136,13 @@ export async function withEncoding(doc, key, ie, encoding) {
 /** The small description kept beside each vibe: enough for the list and for knowing what a picture would cost. */
 export function vibeSummary(doc) {
   return {id: doc.id, name: doc.name, thumb: doc.thumbnail || '', strength: doc.importInfo.strength, ie: doc.importInfo.information_extracted, image: !!doc.image,
-    keys: Object.keys(doc.encodings).filter(key => Object.values(doc.encodings[key]).some(v => v?.encoding))};
+    keys: Object.keys(doc.encodings).filter(key => Object.values(doc.encodings[key]).some(v => v?.encoding)),
+    // The models that need no encoding at the 提取信息量 picked now, and the values each has been encoded at.
+    ready: Object.keys(doc.encodings).filter(key => encodingFor(doc, key)),
+    ies: Object.fromEntries(Object.keys(doc.encodings).map(key => [key, [...new Set(Object.values(doc.encodings[key]).filter(v => v?.encoding).map(v => v.params?.information_extracted))]]))};
 }
+/** Whether a summary has what a model needs, without paying (a summary saved before `ready` goes by `keys`). */
+export const vibeReady = (summary, key) => (summary.ready || summary.keys || []).includes(key);
 
 /** The request fields for the vibes, as NovelAI's own site sends them; strengths over 1 in total are scaled back to 1. */
 export function vibeParameters(list, normalize = true) {
@@ -131,7 +151,33 @@ export function vibeParameters(list, normalize = true) {
     reference_strength_multiple: list.map(v => Math.round(v.strength * scale * 1000) / 1000), normalize_reference_strength_multiple: normalize};
 }
 
-const forFile = (doc, s = doc.importInfo.strength) => ({...structuredClone(doc), importInfo: {...doc.importInfo, strength: strength(s)}});
+/** V3's fields: the pictures themselves (fitted by the caller), each with its 提取信息量 and strength. list: [{image, ie, strength}]. */
+export const rawVibeParameters = (list, normalize = true) => ({reference_image_multiple: list.map(v => v.image), reference_information_extracted_multiple: list.map(v => extracted(v.ie)),
+  reference_strength_multiple: list.map(v => v.strength), normalize_reference_strength_multiple: normalize});
+
+const forFile = (doc, s = doc.importInfo.strength) => { const {picked, ...info} = doc.importInfo; return {...structuredClone(doc), importInfo: {...info, strength: strength(s)}}; };
+/**
+ * A vibe as an encodings-only file holds it, for the model named: no picture or thumbnail, so it is small, but it cannot
+ * be encoded again for another model or 提取信息量. null when it has no encoding for that model yet.
+ */
+export async function encodingsOnly(doc, model) {
+  const key = vibeKey(model), encoding = encodingFor(doc, key);
+  if (!encoding) return null;
+  const ie = extracted(doc.importInfo.information_extracted);
+  return {identifier: SINGLE, version: 1, type: 'encoding', id: await sha256(encoding), encodings: {[key]: {unknown: {encoding, params: {information_extracted: ie}}}}, name: doc.name, createdAt: doc.createdAt, importInfo: {...doc.importInfo, model}};
+}
+const utf8Base64 = text => { let out = ''; const bytes = new TextEncoder().encode(text); for (let i = 0; i < bytes.length; i += 8192) out += String.fromCharCode(...bytes.subarray(i, i + 8192)); return btoa(out); };
+/** A vibe file's text inside a PNG, where NovelAI's app looks for it. */
+export const embedVibeFile = (buffer, text) => addPngText(buffer, 'naidata', utf8Base64(text));
+/** The vibe file's text a picture carries, or null. */
+export async function embeddedVibeFile(buffer) {
+  const text = (await pngText(buffer)).naidata;
+  if (!text) return null;
+  try {
+    const json = new TextDecoder().decode(Uint8Array.from(atob(text.trim()), c => c.charCodeAt(0))), data = JSON.parse(json);
+    return data?.identifier === SINGLE || data?.identifier === BUNDLE ? json : null;
+  } catch { return null; }
+}
 /** One vibe as a .naiv4vibe file's text. */
 export const singleFile = (doc, s) => JSON.stringify(forFile(doc, s), null, 2);
 /** A group as a .naiv4vibebundle file's text. entries: [{doc, strength}]. */

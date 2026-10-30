@@ -87,3 +87,74 @@
 .savebar .draw-count+.primary{flex:1}
 /* 变体 / 增强: choices with their numbers under them */
 .sheet .segmented button small{display:block;font-size:10.5px;font-weight:500;opacity:.75;margin-top:1px}
+/* 提示词框里的权重、随机和片段：一层底色叠在框上，字还是框自己的 */
+.word-mark{position:relative;display:block;min-width:0}
+.word-mark>textarea{display:block;width:100%}
+.char-body .word-mark{flex:1 1 0}
+.word-mark-layer{position:absolute;inset:0;z-index:1;box-sizing:border-box;border:0 solid transparent;overflow:hidden;white-space:pre-wrap;overflow-wrap:break-word;color:transparent;pointer-events:none;user-select:none}
+.word-mark-layer span{border-radius:3px}
+.w-up.w1{background:color-mix(in srgb,#ff9f43 22%,transparent)}.w-up.w2{background:color-mix(in srgb,#ff9f43 36%,transparent)}.w-up.w3{background:color-mix(in srgb,#ff9f43 50%,transparent)}
+.w-down.w1{background:color-mix(in srgb,#4c9cf0 20%,transparent)}.w-down.w2{background:color-mix(in srgb,#4c9cf0 32%,transparent)}.w-down.w3{background:color-mix(in srgb,#4c9cf0 46%,transparent)}
+.w-neg{background:color-mix(in srgb,#e8505c 34%,transparent)}.w-rand{background:color-mix(in srgb,#a070e0 26%,transparent)}.w-chunk{background:color-mix(in srgb,#30b8a8 28%,transparent)}
+/* 随机提示词 */
+.random-card .row-heading{gap:6px}
+.random-card .row-heading strong{white-space:nowrap}
+.random-card .chip-button{padding:0 10px;white-space:nowrap}
+.random-words{margin:8px 0 0;font-size:12.5px;line-height:1.5;color:var(--ink2);overflow-wrap:anywhere}
+.random-words b{color:var(--ink);font-weight:700}
+/* 站位画布的辅助线 */
+.pos-line{position:absolute;background:color-mix(in srgb,var(--ink) 30%,transparent);pointer-events:none}
+.pos-line.v{top:0;bottom:0;width:1px}.pos-line.h{left:0;right:0;height:1px}
+.pos-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 10px}
+.pos-guide{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2)}
+.pos-guide .select{min-width:92px}
+.pos-guide input{width:52px}
+/* 片段的分类和颜色 */
+.chunk-line{gap:10px}
+.chunk-line small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chunk-line>span{min-width:0;flex:1}
+.chunk-dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--line)}
+.chunk-colors{display:flex;flex-wrap:wrap;gap:8px}
+.chunk-colors button{width:30px;height:30px;border-radius:50%;background:var(--card2);box-shadow:inset 0 0 0 2px var(--line)}
+.chunk-colors button[aria-pressed=true]{outline:2.5px solid var(--ink);outline-offset:2px}
+[data-chunk-page][hidden]{display:none}
+/* 参数网格、锁定 */
+.grid-axis{display:flex;flex-direction:column;gap:8px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line)}
+.grid-axis>b{font-size:13px}
+.grid-entry{display:flex;flex-direction:column;gap:6px;width:100%}
+.grid-entry .inline-row{display:flex;align-items:center;gap:4px}
+.grid-entry .select{flex:1;min-width:0}
+.grid-entry textarea,.grid-entry input[type=text]{width:100%;box-sizing:border-box}
+.grid-choices{display:flex;flex-wrap:wrap;gap:6px}
+.grid-choices button{min-height:32px;padding:4px 11px;border-radius:12px;background:var(--card2);color:var(--ink);font-size:12.5px;font-weight:700}
+.grid-choices button[aria-pressed=true]{background:var(--e-btn,var(--accent-btn));color:var(--e-on,var(--on-accent))}
+/* 读图 */
+.import-picture{display:grid;place-items:center;margin-bottom:10px}
+.import-picture img{max-width:min(220px,62%);max-height:220px;border-radius:14px;background:var(--card2)}
+.import-row small{display:block;font-size:11px;font-weight:500;color:var(--ink2)}
+.import-row.locked{opacity:.6}
+.import-row small .icon{width:11px;height:11px;vertical-align:-1px}
+.import-how{margin:0 14px 10px}
+/* 单个开关、额度、遮罩样式 */
+.ref-card.off .ref-thumb{opacity:.45}
+.ref-card .ref-actions{align-items:center}
+.vibe-item.off>img,.vibe-item.off>.vibe-blank,.vibe-item.off .grow{opacity:.45}
+/* 组里一行：图、名字、开关、移出，滑块在下面占满 */
+.vibe-item{display:grid;grid-template-columns:44px minmax(0,1fr) auto auto;align-items:center;gap:0 8px}
+.vibe-item>img,.vibe-item>.vibe-blank{grid-row:1/3}
+.vibe-item .grow{display:contents}
+.vibe-item .meter-label{grid-column:2;min-width:0}
+.vibe-item .slider{grid-column:2/-1}
+.vibe-item .switch{grid-column:3;grid-row:1}
+.vibe-item .text-button{grid-column:4;grid-row:1;min-height:36px;padding:4px 6px}
+.chip.as-button{border:0;cursor:pointer;font-family:inherit}
+.usage-sheet p{margin:8px 0 0;font-size:13px}
+.mask-look{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px 14px;padding:0 14px 6px;font-size:12px}
+.mask-look[hidden]{display:none}
+.mask-look .mask-size{display:inline-flex;align-items:center;gap:6px}
+.mask-look .segmented{flex:1 1 100%;margin:0}
+.mask-look .segmented button{min-height:32px;font-size:12px}
+.mask-look input[type=color]{width:34px;height:26px;padding:0;border:0;background:none}
+.mask-look input[type=range]{width:96px}
+/* 窄屏时「生成（会扣 Anlas）」折成两行，不挤出屏幕 */
+[data-app=draw] .savebar>.primary{min-width:0;white-space:normal;line-height:1.15}

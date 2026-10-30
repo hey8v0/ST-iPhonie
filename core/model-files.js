@@ -58,7 +58,7 @@ export function readZip(input) {
   return files;
 }
 let CRC = null;
-function crc32(b) {
+export function crc32(b) {
   CRC ??= Array.from({length: 256}, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ c >>> 1 : c >>> 1; return c >>> 0; });
   let c = 0xffffffff;
   for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ c >>> 8;

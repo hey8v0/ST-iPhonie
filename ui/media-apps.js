@@ -2,6 +2,7 @@ import {createView, esc, engines, btn, heading, empty, size, field, input, textA
 import {icon, wave, halo} from './icons.js';
 import {openAlbum} from './album-viewer.js';
 import {thumbBlob} from './thumbs.js';
+import {canCopyPicture, copyPicture} from './draw-images.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {saveFile, shareFile, canShareFiles, zipFiles} from '../download.js';
 import {decodeMono, joinClips, encodeWav, JOIN_RATE} from '../core/audio-join.js';
@@ -154,7 +155,13 @@ export function galleryApp(ctx) {
       load: async id => { const p = await api.getPhoto(id); return p?.packed ? {...p, info: [...(p.info || []), ['压缩', `已压缩，原图 ${size(p.packed.size)}`]]} : p; },
       actions: [
         {key: 'wallpaper', icon: 'image', label: '设为壁纸', run: async id => { await api.savePhone({wallpaper: {kind: 'photo', photoId: id}}); ctx.notify('已设为壁纸'); }},
+        {key: 'vibe', icon: 'layers', label: '当 Vibe', run: async id => {
+          const {source, name} = await photoFile(id), r = await api.importVibes([new ctx.win.File([source], name || 'Vibe.png', {type: source.type || 'image/png'})]);
+          if (r.errors.length) throw Error(r.errors[0].message);
+          ctx.notify(r.updated && !r.added ? '这张图已经是 Vibe 了' : '已存成 Vibe，在绘图的 Vibe 页里');
+        }},
         {key: 'download', icon: 'download', label: '下载', run: async id => { const {source, name} = await photoFile(id); const [file] = await pictureCopies(ctx, [{blob: source, name}]) || []; if (file) await saveAs(ctx, file); }},
+        ...(canCopyPicture(ctx.win) ? [{key: 'copy', icon: 'copy', label: '复制', run: async id => { try { await copyPicture(ctx.win, photoFile(id).then(f => f.source)); ctx.notify('已复制'); } catch { ctx.notify('这个浏览器不让复制图片', {error: true}); } }}] : []),
         ...(canShareFiles(ctx.win) ? [{key: 'share', icon: 'share', label: '分享', run: async id => { const {source, name} = await photoFile(id); try { await shareFile(ctx.doc, source, name); } catch (error) { ctx.notify(error.message, {error: !/已取消/.test(error.message)}); } }}] : []),
         {key: 'delete', icon: 'trash', label: '删除', danger: true, run: async id => {
           if (!await ctx.confirm('删除这张照片？', '使用它的壁纸和图标会恢复默认。')) return;

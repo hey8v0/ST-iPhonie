@@ -40,7 +40,7 @@ export const NAI_MAX_PIXELS = 3145728;
 export function naiFeatures(model) {
   const m = String(model || ''), v5 = isV5(m), v45 = /^nai-diffusion-4-5/.test(m), v4 = /^nai-diffusion-4(?!-5)/.test(m), v3 = /^nai-diffusion-(furry-)?3/.test(m), captions = v5 || v45 || v4;
   return {v5, v45, v4, v3, captions, characters: v5 ? 22 : captions ? 6 : 0, freePosition: v5, positionOne: v5, schedule: !v5, variety: !v5, varietySigma: v45 ? 58 : 19, smea: v3, decrisper: v3,
-    mode: captions, transparent: v5, reference: v45, effort: m === 'nai-diffusion-5-full', inpaintStrength: captions, enhanceWords: v5 || v45, autoText: v5};
+    mode: captions, transparent: v5, reference: v45, effort: m === 'nai-diffusion-5-full', inpaintStrength: captions, enhanceWords: v5 || v45, autoText: v5, legacyUc: v4, maxEnhance: v5};
 }
 export const samplersFor = model => naiFeatures(model).v3 ? NAI_SAMPLERS : NAI_SAMPLERS.slice(0, 6);
 /** The noise schedules a sampler takes on a model; none on V5 (always karras) and for DDIM and DPM Fast. */
@@ -123,6 +123,10 @@ export function normalizeDrawParams(value = {}) {
   p.ucPreset = ucPresets(p.model).some(u => u.id === p.ucPreset) ? p.ucPreset : 'none';
   p.smea = ['auto', 'on', 'dyn', 'off'].includes(p.smea) ? p.smea : 'auto';
   p.decrisper = !!p.decrisper && f.decrisper;
+  // 旧版负面 is V4's; 负面强度 only comes with a picture of 参数网格 (100% is what is sent without it).
+  if (p.legacyUc && f.legacyUc) p.legacyUc = true; else delete p.legacyUc;
+  const uncond = Number(p.uncondScale);
+  if (p.uncondScale !== undefined && p.uncondScale !== '' && Number.isFinite(uncond)) p.uncondScale = Math.min(1.5, Math.max(0, uncond)); else delete p.uncondScale;
   return p;
 }
 
@@ -185,6 +189,14 @@ export function augmentBody({tool, image, width, height, prompt = '', mood = 'ne
 }
 /** 放大 doubles a picture; 0 when that is too big. */
 export const upscaleBy = (width, height) => width * 2 <= UPSCALE_MAX && height * 2 <= UPSCALE_MAX ? 2 : 0;
+/** 增强 at 最大 (V5): the picture is sent as it is and comes back at this size, twice as large at most. */
+export function maxEnhanceSize(width, height, times = 2) {
+  const grid = 8 * times, w = Math.floor(width / grid) * grid * times, h = Math.floor(height / grid) * grid * times, k = Math.min(1, Math.sqrt(NAI_MAX_PIXELS / (w * h)));
+  let out = [32 * Math.round(w * k / 32), 32 * Math.round(h * k / 32)];
+  if (out[0] * out[1] > NAI_MAX_PIXELS) out = [32 * Math.floor(w * k / 32), 32 * Math.floor(h * k / 32)];
+  if (out[0] < 32 || out[1] < 32) throw Error('这张图太细长了，不能增强');
+  return {width: out[0], height: out[1]};
+}
 const clampTo = (value, min, max, fallback) => { const n = Number(value); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback; };
 
 // ---------- the words, as NovelAI's own app puts them together ----------
@@ -286,7 +298,7 @@ export function buildImageRequest({prompt, negative = '', characters = [], param
   const words = finalWords({prompt, negative, characters, params: p, chunks}), chars = words.characters;
   let input = words.prompt;
   // 增强 asks for less of what an enlarged picture tends to look like, before a Text: part as ever.
-  if (base?.enhance && f.enhanceWords && !input.includes('upscaled, blurry')) { const mark = input.match(TEXT_MARK), add = ', -2::upscaled, blurry::,'; input = mark ? input.slice(0, mark.index) + add + input.slice(mark.index) : input + add; }
+  if (base?.enhance && !base.upscaled && f.enhanceWords && !input.includes('upscaled, blurry')) { const mark = input.match(TEXT_MARK), add = ', -2::upscaled, blurry::,'; input = mark ? input.slice(0, mark.index) + add + input.slice(mark.index) : input + add; }
   const steps = medium ? 14 : p.steps, sampler = medium ? 'k_euler_ancestral' : p.sampler;
   const sm = f.smea && sampler !== 'ddim_v3' && !base?.image && (p.smea === 'on' || p.smea === 'dyn' || (p.smea === 'auto' && p.width * p.height >= 2166785));
   const parameters = {
@@ -314,8 +326,9 @@ export function buildImageRequest({prompt, negative = '', characters = [], param
       use_coords: useCoords,
       characterPrompts: chars.map(c => ({prompt: c.prompt, uc: c.negative || '', center: center(c), enabled: true})),
       v4_prompt: {caption: {base_caption: input, char_captions: chars.map(c => ({char_caption: c.prompt, centers: [center(c)]}))}, use_coords: useCoords, use_order: true},
-      v4_negative_prompt: {caption: {base_caption: words.negative, char_captions: chars.map(c => ({char_caption: c.negative || '', centers: [center(c)]}))}, legacy_uc: false}
+      v4_negative_prompt: {caption: {base_caption: words.negative, char_captions: chars.map(c => ({char_caption: c.negative || '', centers: [center(c)]}))}, legacy_uc: !!p.legacyUc}
     });
+    if (p.legacyUc) parameters.legacy_uc = true;
   } else {
     // V3 has no character captions: appearances are appended to the main prompt.
     const extra = chars.map(c => c.prompt).filter(Boolean).join(', ');
@@ -331,13 +344,16 @@ export function buildImageRequest({prompt, negative = '', characters = [], param
     director_reference_secondary_strength_values: director.map(r => +(1 - clampTo(r.fidelity, -1, 1, .5)).toFixed(3)),
     director_reference_information_extracted: director.map(() => 1)
   });
-  else if (vibes.length && vibeKey(p.model)) Object.assign(parameters, vibeParameters(vibes, normalizeVibes));
+  // 局部重绘 takes no vibes: NovelAI's app does not send them with a mask.
+  else if (vibes.length && vibeKey(p.model) && action !== 'infill') Object.assign(parameters, vibeParameters(vibes, normalizeVibes));
   if (base?.image) {
     const strength = clampTo(base.strength, .01, action === 'infill' ? 1 : .99, .7);
     Object.assign(parameters, {image: base.image, strength: Math.min(strength, .99), add_original_image: base.overlay !== false, extra_noise_seed: Math.max(0, seed - 1),
       // 局部重绘: how much of what is under the mask stays is its own setting on the newer models; fully redrawn at 1.
-      ...(action === 'infill' ? {mask: base.mask, ...(f.inpaintStrength && strength < 1 ? {img2img: {strength, color_correct: true}} : {})} : {noise: clampTo(base.noise, 0, .99, 0), ...(base.enhance ? {color_correct: false} : {})})});
+      ...(action === 'infill' ? {mask: base.mask, ...(f.inpaintStrength && strength < 1 ? {img2img: {strength, color_correct: true}} : {})} : {noise: clampTo(base.noise, 0, .99, 0), ...(base.enhance ? {color_correct: false} : {}), ...(base.upscaled && f.maxEnhance ? {upscaled_enhance: true} : {})})});
   }
+  // A picture of 参数网格: 负面强度 other than 100%; NovelAI does not take a plain 0.
+  if (p.uncondScale !== undefined && p.uncondScale !== 1) parameters.uncond_scale = p.uncondScale || 1e-5;
   // What the official app sends with 透明背景 on (V5): the picture comes back with straight alpha.
   if (p.transparent) Object.assign(parameters, {straight_alpha: true, tag_hint_transparent_background: true});
   const model = medium ? 'nai-diffusion-5-full-medium' : p.model;
@@ -383,7 +399,10 @@ export async function unzipImages(buffer, limit = Infinity) {
 /** Subscription summary. Opus (tier 3) while active means free small images; `usage` is the V5 allowance when NovelAI reports it. */
 export function readSubscription(data = {}) {
   const steps = data.trainingStepsLeft || {}, tier = Number(data.tier) || 0, active = data.active === true;
-  const usage = data.usage && Number.isFinite(Number(data.usage.percent)) ? {percent: Math.max(0, Math.min(100, Math.round(Number(data.usage.percent)))), negative: data.usage.isNegative === true} : null;
+  const usage = data.usage && Number.isFinite(Number(data.usage.percent)) ? {percent: Math.max(0, Math.min(100, Math.round(Number(data.usage.percent)))), negative: data.usage.isNegative === true,
+    // What its app shows of the allowance: how much was bought on top, and how soon the next percent comes back.
+    ...(Number(data.usage.purchasedPercent) > 0 ? {purchased: Math.round(Number(data.usage.purchasedPercent))} : {}), ...(Number(data.usage.percent) > 100 ? {over: true} : {}),
+    ...(Number(data.usage.timeUntilNextPercent) > 0 ? {nextPercentIn: Number(data.usage.timeUntilNextPercent)} : {})} : null;
   const unlimited = active && (tier === 3 || data.perks?.unlimitedImageGeneration === true);
   const anlas = typeof steps === 'number' ? steps : (Number(steps.fixedTrainingStepsLeft) || 0) + (Number(steps.purchasedTrainingSteps) || 0);
   return {tier, active, unlimited, usage, anlas, checkedAt: Date.now()};
@@ -504,3 +523,6 @@ export class NovelAIClient {
 }
 
 export const TIER_NAMES = {0: '未订阅', 1: 'Tablet', 2: 'Scroll', 3: 'Opus'};
+/** The V5 allowance in pictures, and how much of it comes back in a day, as NovelAI's app reckons them. */
+export const usageImages = percent => Math.round(17.3 * percent);
+export const usageRefillPerDay = usage => usage?.nextPercentIn > 0 ? Math.round(86400 / usage.nextPercentIn * 10) / 10 : 0;
