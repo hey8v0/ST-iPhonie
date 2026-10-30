@@ -57,8 +57,8 @@ function speaking(s) {
 }
 
 export class FloatingPlayer {
-  constructor({openSettings, position, savePosition, levels, loudness, theme, motion}) {
-    Object.assign(this, {openSettings, savePosition, levels, loudness, theme, motion});
+  constructor({openSettings, prepare, position, savePosition, levels, loudness, theme, motion}) {
+    Object.assign(this, {openSettings, prepare, savePosition, levels, loudness, theme, motion});
     this.side = position?.side === 'left' ? 'left' : 'right';
     this.y = Number.isFinite(position?.y) ? Math.max(0, Math.min(1, position.y)) : .58;
     this.phase = 'idle';
@@ -85,6 +85,8 @@ export class FloatingPlayer {
       press: new Spring(0), lift: new Spring(0), pop: new Spring(0, 300, 13), launch: new Spring(0), rest: new Spring(0)};
     this.ripples = [];
     this.nextWave = 0;
+    // What render() last wrote on each element: a style that stays the same is not written again.
+    this.written = new WeakMap();
     this.abort = new AbortController();
     const opts = {signal: this.abort.signal};
     document.body.append(this.root);
@@ -151,9 +153,12 @@ export class FloatingPlayer {
   /** The ball, or the phone's bar: what the script set for the other form goes, the bar starts where it belongs. */
   setForm(form) {
     this.box.dataset.form = form;
+    this.root.dataset.form = form;
+    this.written = new WeakMap();
     this.drag = null;
     delete this.box.dataset.dragging;
     for (const k of ['top', 'left', 'right', 'width', 'height', 'transform']) this.root.style.removeProperty(k);
+    for (const k of ['width', 'height']) this.box.style.removeProperty(k);
     for (const k of ['transform', 'border-radius', 'opacity', 'box-shadow', '--sttts-gloss']) this.orb.style.removeProperty(k);
     for (const k of ['opacity', 'transform']) this.glyph.style.removeProperty(k);
     this.hit.style.removeProperty('display');
@@ -181,7 +186,8 @@ export class FloatingPlayer {
   /** A tap on the docked pill or bar expands it first; a click forwarded while the ball is hidden opens the phone at once. */
   activate() {
     if (Date.now() - (this.lastDrag || 0) < 400) return;
-    if (this.mode === 'docked' && !this.hidden) { this.setMode('rest'); if (this.barForm) this.tip('block'); return; }
+    // Brought out: the phone is likely next, so it may get ready now (index.js preparePanel).
+    if (this.mode === 'docked' && !this.hidden) { this.setMode('rest'); if (this.barForm) this.tip('block'); this.prepare?.(); return; }
     if (!this.hidden) { if (this.barForm) this.launch(); this.setMode('docked'); }
     this.openSettings();
   }
@@ -402,7 +408,14 @@ export class FloatingPlayer {
     for (const k of ['y', 'w', 'r', 'glyph']) S[k].set(t[k]);
     S.h.set(t.h * .5);
     S.x.set(this.side === 'right' ? this.width() + 14 : -14);
+    // Behind a phone that covers the screen nobody sees it slide back: it does when the phone is closed (cover).
+    if (this.covered) { this.backLater = true; this.render(); return; }
     this.aim('back', ['x', 'h']);
+  }
+  /** The phone covers the screen (on a phone it opens full screen), or no longer does. */
+  cover(on) {
+    this.covered = !!on;
+    if (!on && this.backLater) { this.backLater = false; if (this.barForm) this.aim('back', ['x', 'h']); }
   }
   // A bar left alone fades a little; anything that happens brings it back.
   restSoon() {
@@ -441,34 +454,44 @@ export class FloatingPlayer {
     const scale = 1 - g * press * .07 + lift * .04 + g * pop * .18 + launch * .32;
     // Moving fast, the block stretches along the way it goes.
     const ax = g * clamp(Math.abs(S.x.v) / 2600, 0, .16), ay = g * clamp(Math.abs(S.y.v) / 2600, 0, .16);
-    const vw = this.width(), left = S.x.x - w / 2, top = S.y.x - h / 2, root = this.root.style, orb = this.orb.style;
-    root.width = w.toFixed(2) + 'px';
-    root.height = h.toFixed(2) + 'px';
-    root.transform = `translate3d(${left.toFixed(2)}px,${top.toFixed(2)}px,0)`;
-    orb.borderRadius = Math.min(Math.max(0, S.r.x), w / 2, h / 2).toFixed(2) + 'px';
-    orb.transform = `scale(${(scale * (1 + ax - ay * .6)).toFixed(4)},${(scale * (1 + ay - ax * .6)).toFixed(4)})`;
-    orb.opacity = ((1 - launch) * (1 - .4 * clamp(S.rest.x))).toFixed(3);
+    const vw = this.width(), left = S.x.x - w / 2, top = S.y.x - h / 2, put = (el, prop, value) => this.put(el, prop, value);
+    // The size changes on the inner box. The root stays 1 px and keeps layout inside it (floating.css): its size changing
+    // every frame made the browser lay the tavern page out again each frame (20–30 ms a frame on a long chat).
+    put(this.box, 'width', w.toFixed(2) + 'px');
+    put(this.box, 'height', h.toFixed(2) + 'px');
+    put(this.root, 'transform', `translate3d(${left.toFixed(2)}px,${top.toFixed(2)}px,0)`);
+    put(this.orb, 'borderRadius', Math.min(Math.max(0, S.r.x), w / 2, h / 2).toFixed(2) + 'px');
+    put(this.orb, 'transform', `scale(${(scale * (1 + ax - ay * .6)).toFixed(4)},${(scale * (1 + ay - ax * .6)).toFixed(4)})`);
+    put(this.orb, 'opacity', ((1 - launch) * (1 - .4 * clamp(S.rest.x))).toFixed(3));
     const glow = (.32 + barish * v * .45 + press * .25 + lift * .1).toFixed(3);
-    orb.boxShadow = `inset 0 0 0 ${(1 + g).toFixed(2)}px rgba(255,255,255,${(.35 + .55 * g).toFixed(3)}),0 ${(3 + g * 7 + lift * 10).toFixed(1)}px ${(8 + g * 16 + lift * 18).toFixed(1)}px ${(-3 - g * 5).toFixed(1)}px rgba(var(--glow-rgb),${glow}),0 1px ${(2 + lift * 6).toFixed(1)}px rgba(0,0,0,${(.14 + lift * .1).toFixed(3)})`;
-    orb.setProperty('--sttts-gloss', (.55 + .45 * g).toFixed(3));
-    this.glyph.style.opacity = clamp((g - .35) / .65).toFixed(3);
-    this.glyph.style.transform = `translateY(${(-v * 1.5).toFixed(2)}px) scale(${((.55 + .45 * g) * (1 + v * .06)).toFixed(3)})`;
+    put(this.orb, 'boxShadow', `inset 0 0 0 ${(1 + g).toFixed(2)}px rgba(255,255,255,${(.35 + .55 * g).toFixed(3)}),0 ${(3 + g * 7 + lift * 10).toFixed(1)}px ${(8 + g * 16 + lift * 18).toFixed(1)}px ${(-3 - g * 5).toFixed(1)}px rgba(var(--glow-rgb),${glow}),0 1px ${(2 + lift * 6).toFixed(1)}px rgba(0,0,0,${(.14 + lift * .1).toFixed(3)})`);
+    put(this.orb, '--sttts-gloss', (.55 + .45 * g).toFixed(3));
+    put(this.glyph, 'opacity', clamp((g - .35) / .65).toFixed(3));
+    put(this.glyph, 'transform', `translateY(${(-v * 1.5).toFixed(2)}px) scale(${((.55 + .45 * g) * (1 + v * .06)).toFixed(3)})`);
     // The bar is thin, so a strip at the screen edge a little bigger than it takes the touch; nothing else around it does.
-    const right = this.side === 'right', hit = this.hit.style, carried = this.drag?.moved;
-    hit.display = this.mode === 'docked' && !this.launching || this.drag?.el === this.hit ? 'block' : 'none';
+    const right = this.side === 'right', carried = this.drag?.moved;
+    put(this.hit, 'display', this.mode === 'docked' && !this.launching || this.drag?.el === this.hit ? 'block' : 'none');
     if (this.mode === 'docked' && !carried) {
-      hit.height = (h + 12).toFixed(1) + 'px';
-      hit.transform = `translate3d(${((right ? vw - 20 : 0) - left).toFixed(2)}px,${(-6).toFixed(1)}px,0)`;
+      put(this.hit, 'height', (h + 12).toFixed(1) + 'px');
+      put(this.hit, 'transform', `translate3d(${((right ? vw - 20 : 0) - left).toFixed(2)}px,${(-6).toFixed(1)}px,0)`);
     }
     // The waves' canvas sits on the edge the bar is on (carried: the edge it would go to), level with the bar.
     this.wavesRight = carried ? S.x.x >= vw / 2 : right;
     this.wavesLeft = this.wavesRight ? vw - WAVES_W : 0;
-    this.canvas.style.transform = `translate3d(${(this.wavesLeft - left).toFixed(2)}px,${(S.y.x - WAVES_H / 2 - top).toFixed(2)}px,0)`;
+    put(this.canvas, 'transform', `translate3d(${(this.wavesLeft - left).toFixed(2)}px,${(S.y.x - WAVES_H / 2 - top).toFixed(2)}px,0)`);
     if (this.hint.classList.contains('on')) {
       const [hw, hh] = this.hintSize || [0, 0], half = w * scale / 2, x = right ? S.x.x - half - 12 - hw : S.x.x + half + 12;
-      this.hint.style.left = (clamp(x, 8, vw - hw - 8) - left).toFixed(1) + 'px';
-      this.hint.style.top = (S.y.x - hh / 2 - top).toFixed(1) + 'px';
+      put(this.hint, 'left', (clamp(x, 8, vw - hw - 8) - left).toFixed(1) + 'px');
+      put(this.hint, 'top', (S.y.x - hh / 2 - top).toFixed(1) + 'px');
     }
+  }
+  /** Writes a style unless render() already wrote that very value there. */
+  put(el, prop, value) {
+    let last = this.written.get(el);
+    if (!last) this.written.set(el, last = new Map());
+    if (last.get(prop) === value) return;
+    last.set(prop, value);
+    if (prop.startsWith('--')) el.style.setProperty(prop, value); else el.style[prop] = value;
   }
   spawnRipples(now) {
     const v = this.voice.x;

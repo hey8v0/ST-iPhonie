@@ -2,7 +2,8 @@
 
 /* ---------- Phone dialog ---------- */
 #sttts-panel{padding:0;border:0;border-radius:0;width:min(470px,98vw);height:min(940px,98dvh);max-width:100vw;max-height:100dvh;background:transparent;box-shadow:none;overflow:hidden}
-#sttts-panel:not(.floating){position:fixed;inset:auto;margin:0;box-sizing:border-box;min-width:0;min-height:0;max-width:none;max-height:none;transform:none;translate:none;rotate:none;scale:none}
+/* Full screen the phone opens as a plain dialog (index.js openPanel), above the whole tavern page as a modal one was. */
+#sttts-panel:not(.floating){position:fixed;inset:auto;margin:0;box-sizing:border-box;min-width:0;min-height:0;max-width:none;max-height:none;transform:none;translate:none;rotate:none;scale:none;z-index:2147482000}
 #sttts-panel::backdrop{background:#0d103088;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
 /* On a computer: a floating phone beside the story (index.js placePanel) */
 #sttts-panel.floating{position:fixed;inset:auto;margin:0;z-index:9000;max-width:none;max-height:none;filter:drop-shadow(0 22px 34px rgba(0,0,0,.38))}

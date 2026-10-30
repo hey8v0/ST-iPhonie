@@ -5,8 +5,12 @@
    made, plays or waits paused: its voice engine's colour, the two colours fading over. */
 @property --sttts-c1{syntax:'<color>';inherits:true;initial-value:#9ad8ff}
 @property --sttts-c2{syntax:'<color>';inherits:true;initial-value:#3a9cf0}
-#sttts-floating{all:initial;position:fixed;z-index:30010;width:58px;height:58px;display:block;color-scheme:light;font-family:"PingFang SC","Microsoft YaHei",sans-serif;pointer-events:none}
+#sttts-floating{all:initial;position:fixed;z-index:30010;width:58px;height:58px;contain:size layout style;display:block;color-scheme:light;font-family:"PingFang SC","Microsoft YaHei",sans-serif;pointer-events:none}
 #sttts-floating *,#sttts-floating *:before,#sttts-floating *:after{box-sizing:border-box}
+/* The root keeps layout inside it (contain above): the wave's bars moving while a line plays, and the phone's bar changing
+   shape, made the browser lay the whole tavern page out again every frame (20–30 ms a frame). The bar's root stays 1 px
+   and the shape changes inside it. */
+#sttts-floating[data-form=bar]{width:1px;height:1px}
 #sttts-floating svg{display:block;overflow:visible}
 
 #sttts-floating .float{--sttts-c1:#9ad8ff;--sttts-c2:#3a9cf0;--ring:#fff;--glow:rgba(58,156,240,.55);--glow-rgb:58,156,240;--ink:#fff;position:relative;display:block;width:58px;height:58px;margin:0;padding:0;pointer-events:auto;transition:--sttts-c1 .5s ease,--sttts-c2 .5s ease}
@@ -53,8 +57,8 @@
    corners, squash, fade and shadow, the wave icon. Only the bar's strip at the screen edge (.hit) or the block itself
    takes touches, so the chat beside it still scrolls. */
 #sttts-floating .waves,#sttts-floating .hit,#sttts-floating .hint,#sttts-floating .shine{display:none}
-#sttts-floating .float[data-form=bar]{width:100%;height:100%;pointer-events:none}
-#sttts-floating .float[data-form=bar] .orb{position:absolute;inset:0;width:100%;height:100%;display:block;border:0;overflow:hidden;transition:color .5s ease;pointer-events:auto}
+#sttts-floating .float[data-form=bar]{position:absolute;left:0;top:0;width:56px;height:56px;pointer-events:none}
+#sttts-floating .float[data-form=bar] .orb{position:absolute;inset:0;width:100%;height:100%;display:block;border:0;overflow:hidden;transition:color .5s ease;pointer-events:auto;will-change:transform}
 #sttts-floating .float[data-form=bar][data-mode=docked] .orb{pointer-events:none}
 #sttts-floating .float[data-form=bar] .orb:before{inset:7% 18% auto 18%;height:40%;border-radius:999px;background:linear-gradient(rgba(255,255,255,.6),rgba(255,255,255,0));opacity:var(--sttts-gloss,1)}
 #sttts-floating .float[data-form=bar] .orb svg.wave{position:absolute;left:50%;top:50%;width:28px;height:28px;margin:-14px 0 0 -14px}

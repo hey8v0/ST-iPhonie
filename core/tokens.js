@@ -17,18 +17,27 @@ export function tokenBudget(model) {
   return null;
 }
 
+// The counters are built by generators that pause every few thousand entries: built on the spot (tests, counters made
+// by hand) they run straight through; loaded in the background (loadCounter) the page gets its turn between the parts.
+// The V5 vocabulary took 213 ms in one piece on a computer, so a phone stood still for most of a second.
+const finish = build => { let step = build.next(); while (!step.done) step = build.next(); return step.value; };
+const pause = () => globalThis.scheduler?.yield ? globalThis.scheduler.yield() : new Promise(resolve => setTimeout(resolve, 0));
+async function finishSoon(build) { let step = build.next(); while (!step.done) { await pause(); step = build.next(); } return step.value; }
+
 // ---------- T5: Unigram ----------
-export function t5Counter({unk, pieces, scores}) {
+export function t5Counter(vocab) { return finish(t5Build(vocab)); }
+function* t5Build({unk, pieces, scores}) {
   const root = new Map(), at = new WeakMap();
   const low = Math.min(...scores) - 10, score = scores.slice();
   score[unk] = low;
   // A trie by code point, walked by UTF-16 code unit (as NovelAI's is): pieces with characters outside the BMP never
   // match, and such characters fall back to one unknown token per code unit.
-  pieces.forEach((piece, id) => {
+  for (let id = 0; id < pieces.length; id++) {
     let node = root;
-    for (const ch of piece) { let next = node.get(ch); if (!next) { next = new Map(); node.set(ch, next); } node = next; }
+    for (const ch of pieces[id]) { let next = node.get(ch); if (!next) { next = new Map(); node.set(ch, next); } node = next; }
     at.set(node, id);
-  });
+    if (id % 4000 === 3999) yield;
+  }
   function word(w) {
     const n = w.length, ending = Array.from({length: n + 1}, () => []);
     ending[0].push({best: 0, count: 0});
@@ -96,11 +105,19 @@ const BYTES = (() => {
   for (let b = 0; b < 256; b++) out[b] = String.fromCharCode(keep.has(b) ? b : 256 + extra++);
   return out;
 })();
-export function qwenCounter(merges) {
-  const rank = new Map();
+export function qwenCounter(merges) { return finish(qwenBuild(merges)); }
+function* qwenBuild(merges) {
+  const rank = new Map(), text = String(merges);
   let r = 0;
-  // Line ends as git may have written them on Windows (\r\n): a stray \r would make every merge miss.
-  for (const line of String(merges).split(/\r?\n/)) if (line) rank.set(line, r++);
+  // Line by line, so a part can stop anywhere. Line ends as git may have written them on Windows (\r\n): a stray \r
+  // would make every merge miss.
+  for (let at = 0; at < text.length;) {
+    let end = text.indexOf('\n', at);
+    if (end < 0) end = text.length;
+    const line = text.slice(at, end < text.length && end > at && text.charCodeAt(end - 1) === 13 ? end - 1 : end);
+    if (line) { rank.set(line, r++); if (r % 10000 === 0) yield; }
+    at = end + 1;
+  }
   const encoder = new TextEncoder(), cache = new Map();
   function word(w) {
     let c = cache.get(w);
@@ -153,16 +170,21 @@ export function loadCounter(kind, {read} = {}) {
   if (loaded.has(kind)) return loaded.get(kind);
   const file = kind === 't5' ? 't5.json' : 'qwen.txt';
   const get = read || (async name => { const r = await fetch(new URL('../tokenizers/' + name, import.meta.url)); if (!r.ok) throw Error('读不到分词表'); return r.text(); });
-  const job = Promise.resolve(get(file)).then(text => kind === 't5' ? t5Counter(JSON.parse(text)) : qwenCounter(text));
+  const job = Promise.resolve(get(file)).then(text => finishSoon(kind === 't5' ? t5Build(JSON.parse(text)) : qwenBuild(text)));
   job.catch(() => loaded.delete(kind));
   loaded.set(kind, job);
   return job;
 }
-/** The counter when it is already loaded (for code that cannot wait), else null — and the loading starts. */
-const ready = new Map();
+/** The counter when it is already loaded (for code that cannot wait), else null — and the loading starts, when the
+ *  page is idle (the story's picture rule asks for it while the tavern is still loading; it counts roughly till then). */
+const ready = new Map(), asked = new Set();
 export function counterNow(kind) {
   if (ready.has(kind)) return ready.get(kind);
-  loadCounter(kind).then(c => ready.set(kind, c)).catch(() => {});
+  if (!asked.has(kind)) {
+    asked.add(kind);
+    const load = () => loadCounter(kind).then(c => ready.set(kind, c)).catch(() => {}).finally(() => asked.delete(kind)), idle = globalThis.requestIdleCallback;
+    if (idle) idle(load, {timeout: 4000}); else load();
+  }
   return null;
 }
 // What one ordinary tag costs with a tokenizer (its comma and space included), measured on everyday tags.

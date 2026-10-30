@@ -406,6 +406,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   function homeIn() {
     win.clearTimeout(homeTimer);
     delete screen.dataset.homeIn;
+    const pages = [...doc.querySelectorAll('.home-page')], shown = pages[pageNow()];
+    for (const page of pages) page.toggleAttribute('data-in', page === shown);
     void screen.offsetWidth;
     screen.dataset.homeIn = '';
     homeTimer = win.setTimeout(() => delete screen.dataset.homeIn, 800);
@@ -499,8 +501,9 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       ? `<div class="clock-block"><p class="home-date" data-clock="date"></p><p class="home-clock" data-clock="large"></p></div><div class="widgets"><button class="widget live-wave" data-system="island" data-widget="playing"></button><div class="widget" data-widget="cast"></div></div>`
       : ''}<div class="apps-grid">${ids.map(appIcon).join('')}</div></div>`).join('');
     // 今天 (ui/today.js) stays first and is not drawn again; the app pages after it are.
-    const pagesEl = $('.home-pages'), made = doc.createElement('template');
+    const pagesEl = $('.home-pages'), made = doc.createElement('template'), coming = [...pagesEl.querySelectorAll('.home-page')].findIndex(p => p.hasAttribute('data-in'));
     made.innerHTML = pages;
+    if (coming >= 0) made.content.children[coming]?.toggleAttribute('data-in', true);
     pagesEl.replaceChildren(...(today ? [today.root] : []), ...made.content.children);
     placeHome();
     $('.dots').innerHTML = shown.length > 1 ? shown.map((_, i) => `<i${i === pageNow() ? ' data-on' : ''}></i>`).join('') : '';

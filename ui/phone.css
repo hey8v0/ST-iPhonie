@@ -950,13 +950,14 @@ details>div{padding-bottom:10px}
 .screen[data-opening=true] .app-content>.view>:nth-child(5){animation-delay:.16s}
 .screen[data-opening=true] .app-content>.view>:nth-child(6){animation-delay:.2s}
 .screen[data-opening=true] .app-content>.view>:nth-child(n+7){animation-delay:.24s}
-.screen[data-home-in] .home-page .app-icon{animation:pop-in .4s var(--spring) both}
-.screen[data-home-in] .home-page .app-icon:nth-child(2){animation-delay:.03s}
-.screen[data-home-in] .home-page .app-icon:nth-child(3){animation-delay:.06s}
-.screen[data-home-in] .home-page .app-icon:nth-child(4){animation-delay:.09s}
-.screen[data-home-in] .home-page .app-icon:nth-child(5){animation-delay:.12s}
-.screen[data-home-in] .home-page .app-icon:nth-child(6){animation-delay:.15s}
-.screen[data-home-in] .home-page .app-icon:nth-child(n+7){animation-delay:.18s}
+/* Only the page in view (homeIn marks it): the other page's icons came in too, out of sight, each a layer to draw. */
+.screen[data-home-in] .home-page[data-in] .app-icon{animation:pop-in .4s var(--spring) both}
+.screen[data-home-in] .home-page[data-in] .app-icon:nth-child(2){animation-delay:.03s}
+.screen[data-home-in] .home-page[data-in] .app-icon:nth-child(3){animation-delay:.06s}
+.screen[data-home-in] .home-page[data-in] .app-icon:nth-child(4){animation-delay:.09s}
+.screen[data-home-in] .home-page[data-in] .app-icon:nth-child(5){animation-delay:.12s}
+.screen[data-home-in] .home-page[data-in] .app-icon:nth-child(6){animation-delay:.15s}
+.screen[data-home-in] .home-page[data-in] .app-icon:nth-child(n+7){animation-delay:.18s}
 .screen[data-home-in] .widget{animation:rise-in .34s var(--spring-soft) both}
 .screen[data-home-in] .widget+.widget{animation-delay:.06s}
 .view[data-switching] .qq-page{animation:rise-in .34s cubic-bezier(.2,.8,.2,1)}

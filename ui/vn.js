@@ -69,10 +69,19 @@ export function vnApp(ctx) {
     }});
   }
 
+  /** The phone's colours copied for the stage when they changed; false when none can be read here. */
+  function keepPalette() {
+    const p = phonePalette(ctx.win, v.root);
+    if (!p.box) return false;
+    if (JSON.stringify(p) !== JSON.stringify(state().palette)) try { api.saveVn({palette: p}); } catch { /* not a colour the stage takes */ }
+    return true;
+  }
   function render() {
     const s = state();
-    // 跟随小手机: the copy of the phone's colours is kept up to date (another skin, dark mode).
-    if (s.box === 'phone') { const p = phonePalette(ctx.win, v.root); if (JSON.stringify(p) !== JSON.stringify(s.palette)) try { api.saveVn({palette: p}); } catch { /* not a colour the stage takes */ } }
+    // 跟随小手机: the copy of the phone's colours is kept up to date (another skin, dark mode). Drawn while it is not on the
+    // page (the first drawing comes before the app is put on screen; another app open), the view reads no colours: the
+    // copy stays (saving them wiped it) and they are read again once it is on screen.
+    if (s.box === 'phone' && !keepPalette()) ctx.win.requestAnimationFrame(() => { if (!v.disposed && state().box === 'phone') keepPalette(); });
     v.draw(heading('视觉小说', '', 'Visual Novel')
       + `<div class="vn-hero"><strong class="vn-hero-title">开演</strong>
         <p>把酒馆里的剧情放成 galgame：背景、立绘、对话框，配音一句一句来。看到最后还能直接写下一段。</p>
