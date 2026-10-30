@@ -1,6 +1,6 @@
 import {createView, esc, btn, field, input, select, textArea, toggle, heading, size, languageField, typedLanguages, groupTitle, help, copyText} from './common.js';
 import {buildReport} from '../core/diagnostics.js';
-import {saveFile} from '../download.js';
+import {saveFile, zipFiles} from '../download.js';
 import {browserSpeech, cleanSkip, cleanBody, NARRATION_RATES, NARRATOR} from '../core/narration.js';
 import {icon, GLYPH_NAMES} from './icons.js';
 import {APPS} from './apps.js';
@@ -168,6 +168,73 @@ export function settingsApp(ctx) {
     const total = library ? `已用 ${size(library.bytes + (cache.available ? cache.bytes : 0))} · 最多 ${size(library.limit + (cache.available ? cache.limit || 0 : 0))}` : '无法读取';
     return `<details class="storage-fold" data-group="storage-parts"><summary><span>本地资料</span><small>${total}</small></summary>${parts.join('') || '<div class="setting-row"><span>什么都没有存</span></div>'}</details>`;
   }
+  /**
+   * 压缩旧图: the album's drawn PNGs kept as WebP at full size (core/thumbnail.js packPicture). The originals can be
+   * downloaded first, in zips of under 150 MB (a phone holds a whole zip in memory while making it). Pressing 压缩 asks
+   * once more on the button itself: a confirm would close this sheet.
+   */
+  async function packOld() {
+    let plan = await api.packablePhotos(30), part = 0, sure = false;
+    const sync = api.syncStatus?.()?.enabled;
+    const d = ctx.dialog('压缩相册里的旧图', `<p class="help-copy" data-keep-hint>压缩后原图就没有了，想留原图请先打包下载。</p>
+      <p class="help-copy">画出来的图多是 PNG，一张一两 MB，大的更多。压成同样大小的 WebP，看起来基本一样，一般只剩十分之一。图里带的 NovelAI 参数会去掉（点开照片看到的「参数」还在）。设成壁纸、图标、头像和聊天背景的图，还有会动的图，不会压缩。${sync ? '开着「保存到酒馆」，酒馆里那份也会换成压缩后的。' : ''}</p>
+      ${field('压缩哪些', select('pack-days', '30', [['30', '30 天前存的'], ['7', '7 天前存的'], ['0', '全部']]))}
+      <p class="hint" data-pack-plan aria-live="polite"></p>
+      <div class="actions">${btn('pack-download', icon('download') + '先打包下载原图', 'secondary')}${btn('pack-go', '压缩', 'primary')}</div>`);
+    const LIMIT = 150 * 1024 * 1024;
+    const parts = () => {
+      const out = [];
+      for (const p of plan.photos) { const last = out.at(-1); if (last && last.bytes + p.size <= LIMIT) { last.list.push(p); last.bytes += p.size; } else out.push({list: [p], bytes: p.size}); }
+      return out.map(x => x.list);
+    };
+    const $ = s => d.body.querySelector(s);
+    const show = (note = '') => {
+      const n = parts().length;
+      $('[data-pack-plan]').textContent = note || (plan.count ? `${plan.count} 张，共 ${size(plan.bytes)}${n > 1 ? `；原图分 ${n} 包下载，每包不到 150 MB` : ''}` : '没有要压缩的图');
+      $('[data-action=pack-download]').disabled = $('[data-action=pack-go]').disabled = !plan.count;
+      $('[data-action=pack-download]').innerHTML = icon('download') + (n && part >= n ? '原图都下载好了' : n > 1 ? `先打包下载原图（第 ${part + 1}/${n} 包）` : '先打包下载原图');
+      $('[data-action=pack-go]').textContent = sure ? '确定压缩？原图会没有' : '压缩';
+    };
+    show();
+    d.body.addEventListener('change', async e => {
+      if (!e.target.matches('[data-field=pack-days]')) return;
+      plan = await api.packablePhotos(Number(e.target.value)); part = 0; sure = false;
+      if (d.live) show();
+    });
+    d.body.addEventListener('click', async e => {
+      const b = e.target.closest('[data-action]');
+      if (!b || b.disabled) return;
+      if (b.dataset.action === 'pack-download') {
+        const all = parts(), list = all[part];
+        if (!list) return;
+        b.disabled = true;
+        try {
+          const files = [];
+          for (const p of list) { const photo = await api.getPhoto(p.id); if (photo?.blob) files.push({name: photo.name, blob: photo.blob}); }
+          const t = new Date(), stamp = `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}`;
+          const name = await saveFile(ctx.doc, await zipFiles(files), `ST-iPhonie 原图 ${stamp}${all.length > 1 ? ` 第 ${part + 1} 包` : ''} ${files.length} 张`);
+          part++;
+          ctx.notify(`已下载 ${files.length} 张原图：${name}`);
+        } catch (error) { ctx.notify(error.message, {error: true}); }
+        if (d.live) show();
+      }
+      if (b.dataset.action === 'pack-go') {
+        if (!sure) { sure = true; show(); return; }
+        const ids = plan.photos.map(p => p.id), total = {count: 0, skipped: 0, before: 0, after: 0};
+        d.body.querySelectorAll('button, select').forEach(x => { x.disabled = true; });
+        try {
+          for (let i = 0; i < ids.length && d.live; i += 4) {
+            show(`正在压缩 ${i + 1}–${Math.min(i + 4, ids.length)} / ${ids.length}……`);
+            const r = await api.packPhotos(ids.slice(i, i + 4));
+            for (const k of Object.keys(total)) total[k] += r[k];
+          }
+          ctx.notify(total.count ? `压缩了 ${total.count} 张，从 ${size(total.before)} 变成 ${size(total.after)}${total.skipped ? `；${total.skipped} 张压了也省不了多少，保持原样` : ''}` : '这些图压了也省不了多少，都保持原样');
+        } catch (error) { ctx.notify(error.message, {error: true}); }
+        d.close();
+        await render();
+      }
+    });
+  }
   /** 清除相册里的绘图: pick which of the drawn photos go (all ticked), with how many and how big each is. */
   async function clearDrawn() {
     const drawn = await api.generatedPhotos();
@@ -211,7 +278,7 @@ export function settingsApp(ctx) {
 
   /** 存储空间: the voice cache switch, what this device holds, the clearing, and the copy in the tavern. */
   async function renderStorage(ticket) {
-    const [cache, library, drawn, budget] = await Promise.all([api.cacheStats(), api.libraryStats().catch(() => null), api.generatedPhotos().catch(() => null), api.storageBudget().catch(() => null)]);
+    const [cache, library, drawn, budget, pack] = await Promise.all([api.cacheStats(), api.libraryStats().catch(() => null), api.generatedPhotos().catch(() => null), api.storageBudget().catch(() => null), api.packablePhotos?.(0).catch(() => null)]);
     const chatPictures = api.chatPictureStats?.() || null, st = api.syncStatus?.();
     if (v.disposed || ticket !== epoch) return;
     const s = api.getState();
@@ -222,6 +289,7 @@ export function settingsApp(ctx) {
       + `<div class="group">
           <div class="setting-row"><span class="row-text"><strong>语音缓存</strong><small>收藏和其他资料会保留</small></span>${btn('clear-cache', icon('trash') + '清理', 'chip-button')}</div>
           <div class="setting-row"><span class="row-text"><strong>相册里的绘图</strong><small>绘图 App、正文、查手机、朋友圈画出来的图</small></span>${btn('clear-drawn', icon('trash') + '清除', 'chip-button', drawn?.count ? '' : 'disabled')}</div>
+          <div class="setting-row"><span class="row-text"><strong>压缩相册里的旧图</strong><small>${pack?.count ? `${pack.count} 张 PNG 可以压；` : ''}画出来的 PNG 压成看起来一样的 WebP，一般省下九成</small></span>${btn('pack-old', '压缩', 'chip-button', pack?.count ? '' : 'disabled')}</div>
           ${chatPictures ? `<div class="setting-row"><span class="row-text"><strong>当前聊天的正文图片</strong><small>存在酒馆里，出图标签还在，可以再画</small></span>${btn('clear-chat-pictures', icon('trash') + '清除', 'chip-button', chatPictures.count ? '' : 'disabled')}</div>` : ''}
           ${st?.available ? `<div class="setting-row"><span class="row-text"><strong>酒馆里存的那份</strong><small>只删酒馆里存的，这台设备上的不动</small></span>${btn('sync-clear', icon('trash') + '删除', 'chip-button', st.busy ? 'disabled' : '')}</div>` : ''}
         </div>`);
@@ -419,6 +487,9 @@ export function settingsApp(ctx) {
         break;
       case 'clear-drawn':
         await clearDrawn();
+        break;
+      case 'pack-old':
+        await packOld();
         break;
       case 'clear-chat-pictures':
         if (await ctx.confirm('清除当前聊天的正文图片？', '图片文件会从酒馆删除，出图标签还在，之后可以点“点击生成”重新画。相册里的副本不受影响。')) { const r = await v.busy(el, () => api.clearChatPictures()); await render(); ctx.notify(`已清除 ${r.count} 张` + (r.failed ? `，${r.failed} 张没删掉` : '')); }

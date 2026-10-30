@@ -512,6 +512,8 @@ export interface MediaMetadata extends LocalTimestamps {
     size: number;
     /** listPhotos only: the photo's small picture for grids, once one was made (photoThumb). */
     thumb?: Blob;
+    /** Photos made smaller by 压缩旧图: when, and how big the original was. */
+    packed?: {at: number; size: number};
 }
 export interface Photo extends MediaMetadata { blob: Blob; }
 export interface PhotoInput { name?: string; blob: Blob; }
@@ -740,6 +742,11 @@ export interface BackendFacade {
     /** The photo's middle-sized picture for chat bubbles, posts and the 今天 widget, or null: then the photo itself shows (and
      *  one is made in the background for next time, where one is worth having). */
     photoPreview(id: string): Promise<Blob | null>;
+    /** 压缩旧图: the album's PNGs not made smaller yet, saved more than `days` days ago (0: all), without the wallpaper, icons,
+     *  avatars and chat background. */
+    packablePhotos(days?: number): Promise<{photos: {id: string; name: string; size: number}[]; count: number; bytes: number}>;
+    /** Keeps these photos as WebP (JPEG) at full size; the originals are gone. Bytes are of the ones made smaller. */
+    packPhotos(ids: string[]): Promise<{count: number; skipped: number; before: number; after: number}>;
     deletePhoto(id: string): Promise<boolean>;
     /** Deletes several album photos at once; 朋友圈 and 查手机 pictures among them go back to «not drawn». */
     deletePhotos(ids: string[]): Promise<number>;

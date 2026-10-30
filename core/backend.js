@@ -37,7 +37,7 @@ import { installDrawSettings } from './backend-draw.js';
 import { createStorageBudget } from './storage-budget.js';
 import { DialoguePlayer } from './player.js';
 import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS } from './library.js';
-import { makeThumb, makePreview } from './thumbnail.js';
+import { makeThumb, makePreview, packPicture } from './thumbnail.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, guardParams, isFree, isV5, normalizeDrawParams, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, drawCast, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
 import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive } from './chat.js';
@@ -2230,6 +2230,34 @@ export class TTSBackend {
             if (!this.closed) await this.library.savePreview?.(id, made);
         }).catch(() => {}).finally(() => this.#previewing.delete(id));
     }
+    /** 压缩旧图: the album's PNGs not made smaller yet, saved more than `days` days ago (0: all), leaving out the ones the
+     *  phone shows as wallpaper, an icon, an avatar or the chat background. {photos: [{id, name, size}], count, bytes}. */
+    async packablePhotos(days = 0) {
+        this.assertOpen();
+        const phone = await this.getPhone(), chat = this.getState().chat || {};
+        const shown = a => a?.kind === 'photo' ? a.photoId : null;
+        const used = new Set([shown(phone.wallpaper), ...Object.values(phone.icons || {}).map(shown), ...Object.values(chat.avatars || {}).map(shown), chat.profile?.backgroundPhoto].filter(Boolean));
+        const before = Date.now() - Math.max(0, Number(days) || 0) * 864e5;
+        const rows = (await this.library.listPhotos()).filter(r => r.type === 'image/png' && !r.packed && r.packTried !== r.size && !used.has(r.id) && (!days || (r.createdAt || 0) <= before));
+        return { photos: rows.map(({ id, name, size }) => ({ id, name, size })), count: rows.length, bytes: rows.reduce((n, r) => n + (r.size || 0), 0) };
+    }
+    /** Makes these photos smaller one by one (core/thumbnail.js packPicture); ones not worth it stay as they are (and are
+     *  not offered again).
+     *  {count, skipped, before, after} (bytes of the ones made smaller). */
+    async packPhotos(ids) {
+        this.assertOpen();
+        if (typeof createImageBitmap !== 'function') throw Error('这里压缩不了图片，请在浏览器里打开小手机');
+        let count = 0, skipped = 0, before = 0, after = 0;
+        for (const id of ids) {
+            if (this.closed) break;
+            const photo = await this.library.getPhoto(id);
+            if (!photo?.blob || photo.packed) continue;
+            const small = await packPicture(photo.blob).catch(() => null);
+            if (small && await this.library.packPhoto(id, small)) { count++; before += photo.size; after += small.size; } else { skipped++; await this.library.packPhoto(id, null).catch(() => {}); }
+        }
+        if (count) this.emit('library', { collection: 'photos' });
+        return { count, skipped, before, after };
+    }
     async #forgetPhotos(gone) {
         let posts = 0;
         for (const post of await this.moments.list()) {
@@ -2504,7 +2532,7 @@ export class TTSBackend {
             getFavorite: id => this.library.getFavorite(id), playFavorite: id => this.playFavorite(id),
             deleteFavorite: id => this.mutateLibrary('favorites', 'deleteFavorite', id),
             listPhotos: () => this.library.listPhotos(), addPhoto: value => this.mutateLibrary('photos', 'addPhoto', value),
-            getPhoto: id => this.library.getPhoto(id), photoThumb: id => this.photoThumb(id), photoPreview: id => this.photoPreview(id), deletePhoto: id => this.deletePhotos([id]).then(n => n > 0), deletePhotos: ids => this.deletePhotos(ids),
+            getPhoto: id => this.library.getPhoto(id), photoThumb: id => this.photoThumb(id), photoPreview: id => this.photoPreview(id), packablePhotos: days => this.packablePhotos(days), packPhotos: ids => this.packPhotos([...(ids || [])].map(String)), deletePhoto: id => this.deletePhotos([id]).then(n => n > 0), deletePhotos: ids => this.deletePhotos(ids),
             listNotes: () => this.library.listNotes(), saveNote: value => this.mutateLibrary('notes', 'saveNote', value), deleteNote: id => this.mutateLibrary('notes', 'deleteNote', id),
             listBooks: () => this.library.listBooks(), getBook: id => this.library.getBook(id), saveBook: value => this.mutateLibrary('books', 'saveBook', clone(value)), deleteBook: id => this.mutateLibrary('books', 'deleteBook', id),
             getPhone: () => this.getPhone(), savePhone: patch => this.savePhone(patch), libraryStats: () => this.library.stats(), storageBudget: () => this.budget.read(),

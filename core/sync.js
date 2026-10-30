@@ -8,7 +8,8 @@
 //   st-iphonie-chats.json       chat threads          st-iphonie-moments.json   朋友圈 posts
 //   st-iphonie-notes.json       notes                 st-iphonie-photos.json    album index (no pictures)
 //   st-iphonie-memories.json    complete chat books   st-iphonie-assistant.json assistant threads with memory: book | null
-//   st-iphonie-p-<id>.<ext>     one file per picture, written once (a picture never changes)
+//   st-iphonie-p-<id>.<ext>     one file per picture, written once (a picture never changes); a photo made smaller by
+//                               压缩旧图 is another picture, st-iphonie-p-<id>-c<when>.<ext>, and wins over the original
 //
 // A sync reads the tavern's copy first. A part changed only there is taken as it is (so deletions carry over); a part
 // changed on both sides is merged item by item (the newer item wins, messages and comments are joined); then what
@@ -22,7 +23,8 @@ export const SYNC_PARTS = Object.freeze({chats: '聊天记录', moments: '朋友
 export const MANIFEST = 'st-iphonie-sync.json';
 export const partFile = part => `st-iphonie-${part}.json`;
 const EXT = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif'};
-export const photoFile = row => `st-iphonie-p-${String(row.id).replace(/[^a-zA-Z0-9_-]/g, '_')}.${EXT[row.type] || 'png'}`;
+const packedAt = row => Number.isFinite(row?.packed?.at) ? row.packed.at : 0;
+export const photoFile = row => `st-iphonie-p-${String(row.id).replace(/[^a-zA-Z0-9_-]/g, '_')}${packedAt(row) ? '-c' + packedAt(row).toString(36) : ''}.${EXT[row.type] || 'png'}`;
 
 export function defaultSync() { return {enabled: false}; }
 export function normalizeSync(value) { return {enabled: value?.enabled === true}; }
@@ -37,7 +39,7 @@ const rowTime = row => Number.isFinite(row.updatedAt) ? row.updatedAt : Number.i
 const newerWhole = (a, b) => rowTime(b) > rowTime(a) || (rowTime(b) === rowTime(a) && stableText(b) > stableText(a)) ? b : a;
 /** The JSON that is compared and written for a part: items in id order, the album without its pictures. */
 export function canonical(part, items) {
-  if (part === 'photos') return byId(items.map(({id, name, type, size, createdAt, updatedAt}) => ({id, name, type, size, createdAt, updatedAt})));
+  if (part === 'photos') return byId(items.map(({id, name, type, size, createdAt, updatedAt, packed}) => ({id, name, type, size, createdAt, updatedAt, ...(packed ? {packed} : {})})));
   if (wholePart(part)) return byId(items).map(stableValue);
   return byId(items);
 }
@@ -126,6 +128,8 @@ export function mergePart(part, local, remote, gone = {}) {
       out.push({...here, ...theirs, likes: [...new Set([...(here.likes || []), ...(theirs.likes || [])])], comments: union(here.comments, theirs.comments).sort((a, b) => a.at - b.at), photoId: theirs.photoId || here.photoId});
     } else if (wholePart(part)) out.push(newerWhole(here, theirs));
     else if (part === 'notes') out.push(newer(here, theirs, n => n.updatedAt));
+    // a photo made smaller (压缩旧图) on one side is smaller on both; otherwise this side's copy is the same picture
+    else if (part === 'photos') out.push(packedAt(theirs) > packedAt(here) ? theirs : here);
     else out.push(here);
   }
   return [...out, ...mine.values()];
@@ -164,8 +168,14 @@ export async function runSync({stores, files, memory = {}, readGone = () => memo
       result = changedHere ? mergePart(part, items, theirs, gone[part]) : prune(part, theirs, gone[part]);
       if (part === 'photos') {
         const have = new Map(items.map(r => [r.id, r]));
-        result = await Promise.all(result.map(async row => have.get(row.id) || {...row, blob: await files.read(photoFile(row), {blob: true})}));
-        result = result.filter(row => row.blob);
+        result = await Promise.all(result.map(async row => {
+          const mine = have.get(row.id);
+          if (mine && packedAt(mine) >= packedAt(row)) return mine;
+          // theirs is new here, or was made smaller there: its picture (what was drawn with stays from here)
+          const blob = await files.read(photoFile(row), {blob: true});
+          return blob ? {...mine, ...row, blob} : mine || null;
+        }));
+        result = result.filter(row => row?.blob);
       }
     }
     if (fromRemote || JSON.stringify(canonical(part, result)) !== text) {

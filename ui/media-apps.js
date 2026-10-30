@@ -150,7 +150,8 @@ export function galleryApp(ctx) {
     let changed = false;
     album = openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: shown, index: Math.max(0, shown.indexOf(id)), from,
       to: id => [...v.root.querySelectorAll('.photo-grid [data-id]')].find(b => b.dataset.id === id)?.getBoundingClientRect(),
-      load: id => api.getPhoto(id),
+      // a photo made smaller by 压缩旧图 says so under 参数
+      load: async id => { const p = await api.getPhoto(id); return p?.packed ? {...p, info: [...(p.info || []), ['压缩', `已压缩，原图 ${size(p.packed.size)}`]]} : p; },
       actions: [
         {key: 'wallpaper', icon: 'image', label: '设为壁纸', run: async id => { await api.savePhone({wallpaper: {kind: 'photo', photoId: id}}); ctx.notify('已设为壁纸'); }},
         {key: 'download', icon: 'download', label: '下载', run: async id => { const {source, name} = await photoFile(id); const [file] = await pictureCopies(ctx, [{blob: source, name}]) || []; if (file) await saveAs(ctx, file); }},
