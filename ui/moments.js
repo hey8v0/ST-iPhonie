@@ -8,7 +8,7 @@ import {openImageViewer} from '../image-viewer.js';
 import {downloadAction, shareAction} from '../download.js';
 import {aura} from './aura.js';
 import {editTags} from '../host-ask.js';
-import {pictureInputs, photoTags, photoCast} from '../core/draw.js';
+import {pictureInputs, photoTags, photoPicture} from '../core/draw.js';
 import {momentsSeen, momentsNew, markSeen} from './moments-seen.js';
 export {momentsSeen, momentsNew};
 
@@ -216,7 +216,7 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
     const inDraw = async i => {
       const now = await current(), names = [...api.getState().routes.map(r => r.name), api.userName?.() || me().name];
       const tags = photoTags({text: now.text, tags: now.imageTags, owner: now.author, names});
-      ctx.openDraw({...pictureInputs(api.getState(), {prompt: tags, characters: photoCast({text: now.text, tags, owner: now.author, names})}), tag: tags, seed: Number(versions[i].photo.info?.find(row => row[0] === '种子')?.[1])});
+      ctx.openDraw({...pictureInputs(api.getState(), photoPicture(api.getState(), {text: now.text, tags: now.imageTags, owner: now.author, names})), tag: tags, seed: Number(versions[i].photo.info?.find(row => row[0] === '种子')?.[1])});
     };
     let viewer;
     const safe = fn => async i => { viewer?.close(); try { return await fn(i); } catch (error) { ctx.notify(error.message, {error: true}); return false; } };

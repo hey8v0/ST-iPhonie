@@ -176,7 +176,7 @@ export function normalizeAvatars(value) {
 }
 
 export function normalizeContact(c = {}) {
-  return {id: String(c.id || crypto.randomUUID()), name: text(c.name, 40).trim(), persona: text(c.persona, CHAT_LIMITS.persona), ...(c.space ? {space: text(c.space, 300)} : {})};
+  return {id: String(c.id || crypto.randomUUID()), name: text(c.name, 40).trim(), persona: text(c.persona, CHAT_LIMITS.persona), ...(c.space ? {space: text(c.space, 300)} : {}), ...(c.save ? {save: text(c.save, 400)} : {})};
 }
 
 // ---------- 表情包 ----------
@@ -217,7 +217,7 @@ export function normalizeChat(value) {
   const presets = (Array.isArray(value.presets) && value.presets.length ? value.presets : base.presets).map(normalizeChatPreset);
   const contacts = (Array.isArray(value.contacts) ? value.contacts : []).slice(0, CHAT_LIMITS.contacts).map(normalizeContact).filter(c => c.name);
   const starred = [...new Set((Array.isArray(value.starred) ? value.starred : []).map(n => text(n, 40).trim()).filter(Boolean))].slice(0, CHAT_LIMITS.contacts);
-  return {presets, activePreset: presets.some(p => p.id === value.activePreset) ? value.activePreset : presets[0].id, contacts, voiceText: normalizeVoiceText(value.voiceText), profile: normalizeProfile(value.profile), wallet: normalizeWallet(value.wallet), starred, avatars: normalizeAvatars(value.avatars), partition: value.partition === 'card' ? 'card' : 'none', pace: value.pace !== false, stickers: normalizeStickers(value.stickers), proactive: normalizeProactive(value.proactive), remarks: normalizeNames(value.remarks, 20), netNames: normalizeNames(value.netNames, 30)};
+  return {presets, activePreset: presets.some(p => p.id === value.activePreset) ? value.activePreset : presets[0].id, contacts, voiceText: normalizeVoiceText(value.voiceText), profile: normalizeProfile(value.profile), wallet: normalizeWallet(value.wallet), starred, avatars: normalizeAvatars(value.avatars), partition: ['card', 'chat'].includes(value.partition) ? value.partition : 'none', ...(value.firstSaves && typeof value.firstSaves === 'object' ? {firstSaves: Object.fromEntries(Object.entries(value.firstSaves).filter(([, v]) => typeof v === 'string').slice(-500))} : {}), pace: value.pace !== false, stickers: normalizeStickers(value.stickers), proactive: normalizeProactive(value.proactive), remarks: normalizeNames(value.remarks, 20), netNames: normalizeNames(value.netNames, 30)};
 }
 
 // ---------- 主动发消息: characters text the user on their own ----------
@@ -329,15 +329,32 @@ export const activeChatPreset = chat => chat.presets.find(p => p.id === chat.act
  * group). space: {key, name, members} of the card open now. Items carry the key they were made under; items from before
  * (no key) are shared by every card.
  */
-export const inSpace = (item, space) => !space?.key || !item?.space || item.space === space.key;
-/** The space to filter by: the open card's, when partition is on and a card is open; else null (everything). */
-export const activeSpace = (settings, space) => settings.chat?.partition === 'card' && space?.key ? space : null;
+export const inSpace = (item, space) => {
+  if (!space?.key) return true;
+  if (!space.card) return !item?.space || item.space === space.key;
+  // 按聊天: what was made in this tavern chat; what has no chat of its own (from before) stays with the first one of its card.
+  if (item?.save === space.key || item?.space === space.key) return true;
+  return !item?.save && !!space.first && (!item?.space || item.space === space.card);
+};
+/**
+ * The space to filter by: the open card's with partition 'card'; with 'chat' (one phone per tavern chat, so a new chat
+ * of the same card starts from nothing) that chat's, key `card#chat`, card its card, first whether it holds the card's
+ * older things. null: everything (partition off, or no card open).
+ */
+export function activeSpace(settings, space) {
+  const how = settings.chat?.partition;
+  if (!space?.key || (how !== 'card' && how !== 'chat')) return null;
+  if (how === 'card' || !space.save) return space;
+  return {...space, key: `${space.key}#${space.save}`, card: space.key, first: settings.chat.firstSaves?.[space.key] === space.save};
+}
+/** Whether a role belongs to the space: by being tagged there (see tagRoles). */
+export const roleInSpace = (r, space) => Array.isArray(r.cards) && (r.cards.includes(space.key) || (!!space.first && r.cards.includes(space.card)));
 export function chatContacts(settings, space = null) {
   // A card's contacts: its own character(s), the roles that have spoken (or been named) in its story, roles added to
   // it, and contacts added under it. A role no story has met yet is in none until one does: it used to be in every
   // card, so that roles made before cards were kept (most of them) made every card's phone look the same. A role
   // made while a card is open belongs to that card; any role can be added from 联系人 →「＋」.
-  const here = r => !space?.key || (space.members || []).includes(r.name) || (Array.isArray(r.cards) && r.cards.includes(space.key));
+  const here = r => !space?.key || (space.members || []).includes(r.name) || roleInSpace(r, space);
   const roles = settings.routes.filter(r => !isPlaceholderRole(r.name) && here(r)).map(r => ({name: r.name, source: 'role', voice: !!r.voice, engine: r.voice ? r.engine : 'none', language: r.language || settings.general.defaultLanguage,
     // 角色资料: written in the 角色 App, else a contact of the same name's (a contact given a voice keeps who they are).
     persona: String(r.persona || settings.chat.contacts.find(c => c.name === r.name)?.persona || '').slice(0, CHAT_LIMITS.persona)}));

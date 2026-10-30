@@ -41,7 +41,7 @@ import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS }
 import { makeThumb, makePreview, packPicture } from './thumbnail.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, ucPresets, qualityPresets, upscaleBody, guardParams, isFree, isV5, normalizeDrawParams, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, drawCast, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
-import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive } from './chat.js';
+import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, roleInSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive } from './chat.js';
 import { ChatStore, money, currentDm } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
 import { CloudQueue, KeyHashQueue, newRoomCode, validRoom, sha256Hex } from './cloud-queue.js';
@@ -418,7 +418,7 @@ export class TTSBackend {
         // 角色资料: who they are, for the phone's apps when the tavern has no card for them.
         if (typeof route.persona === 'string') { route.persona = route.persona.slice(0, 4000); if (!route.persona.trim()) delete route.persona; } else delete route.persona;
         // A new role belongs to the card it was made in (分区); one made with no card open is everyone's.
-        if (index < 0 && this.cardKey() && !route.cards?.length) route.cards = [this.cardKey()];
+        if (index < 0 && this.cardKey() && !route.cards?.length) route.cards = [this.cardKey(), ...(this.saveKey() ? [this.saveKey()] : [])];
         if (index >= 0) next.routes[index] = route; else next.routes.push(route);
         next.selected = id;
         this.save(next);
@@ -1437,7 +1437,7 @@ export class TTSBackend {
         const next = this.getState(), contact = validateContact(normalizeContact(clone(value || {})), next.routes);
         if (next.chat.contacts.some(c => c.name === contact.name && c.id !== contact.id)) throw Error('已经有同名的联系人');
         const index = next.chat.contacts.findIndex(c => c.id === contact.id);
-        if (index < 0 && this.cardKey()) contact.space = this.cardKey();
+        if (index < 0 && this.cardKey()) Object.assign(contact, this.spaceTag());
         if (index >= 0 && next.chat.contacts[index].space) contact.space = next.chat.contacts[index].space;
         if (index < 0) next.chat.contacts.push(contact); else next.chat.contacts[index] = contact;
         this.save(next);
@@ -1457,7 +1457,7 @@ export class TTSBackend {
         // 主动发消息: {on, every, dailyMax}.
         if (patch?.proactive && typeof patch.proactive === 'object') next.chat.proactive = normalizeProactive({ ...next.chat.proactive, ...patch.proactive });
         if (Array.isArray(patch?.stickers)) next.chat.stickers = normalizeStickers(patch.stickers);
-        if (patch?.partition !== undefined) { if (!['none', 'card'].includes(patch.partition)) throw Error('分区方式无效'); next.chat.partition = patch.partition; }
+        if (patch?.partition !== undefined) { if (!['none', 'card', 'chat'].includes(patch.partition)) throw Error('分区方式无效'); next.chat.partition = patch.partition; queueMicrotask(() => this.emit('partition', {})); }
         // remarks (备注) and netNames (网名): {name: other name | '' | null}; empty takes it away.
         for (const key of ['remarks', 'netNames']) if (patch?.[key] && typeof patch[key] === 'object') {
             const merged = { ...next.chat[key] };
@@ -2108,9 +2108,15 @@ export class TTSBackend {
     // ---------- 分区 ----------
     /** The card open in the tavern now: {key, name, members}. With 分区 on, the phone shows that card's own things. */
     setSpace(space) {
-        const next = { key: String(space?.key || '').slice(0, 300), name: String(space?.name || '').slice(0, 80), members: (Array.isArray(space?.members) ? space.members : []).map(String).filter(Boolean).slice(0, 30) };
-        if (next.key === this.space.key && next.name === this.space.name && next.members.join('\n') === this.space.members.join('\n')) return;
+        const next = { key: String(space?.key || '').slice(0, 300), name: String(space?.name || '').slice(0, 80), members: (Array.isArray(space?.members) ? space.members : []).map(String).filter(Boolean).slice(0, 30), ...(space?.save ? { save: String(space.save).slice(0, 80) } : {}) };
+        if (next.key === this.space.key && next.save === this.space.save && next.name === this.space.name && next.members.join('\n') === this.space.members.join('\n')) return;
         this.space = next;
+        // 按聊天: the first chat of a card seen takes what the card had from before.
+        if (next.key && next.save && this.settings.chat?.partition === 'chat' && !this.settings.chat.firstSaves?.[next.key]) {
+            const state = this.getState();
+            state.chat.firstSaves = { ...state.chat.firstSaves, [next.key]: next.save };
+            this.save(state);
+        }
         // The card's own characters belong to it (so they do not show up in other cards as roles no story has met).
         if (next.key && next.members.length) this.tagRoles(next.members, next.key);
         this.emit('space', { space: clone(next) });
@@ -2124,17 +2130,23 @@ export class TTSBackend {
     /** The card open now, whether 分区 is on or not: new things remember the card they were made in, so turning 分区 on
      *  later sorts them. ('' when no card is open: shared.) */
     cardKey() { return this.space.key || ''; }
+    /** The tavern chat open now, when the tavern says (分区 按聊天): `card#chat`, else ''. New things remember it too. */
+    saveKey() { return this.space.key && this.space.save ? `${this.space.key}#${this.space.save}` : ''; }
+    /** What a new thing is marked with. */
+    spaceTag() { return { space: this.cardKey(), ...(this.saveKey() ? { save: this.saveKey() } : {}) }; }
     /** Who the picture rules name: the open card's people and the given speakers (null: everyone). */
     drawCast(speakers = []) { return drawCast(this.settings, this.space, speakers); }
     /** The roles that speak in a card's story belong to that card's contacts. Saved only when something changed. */
     tagRoles(names, key = this.space.key) {
+        // Met in a tavern chat: that goes for its card as well.
+        const keys = key && key === this.saveKey() ? [this.space.key, key] : [key];
         if (!key || !names?.length) return false;
         const want = new Set(names.map(String)), next = this.getState();
         let changed = false;
         for (const route of next.routes) {
             if (!want.has(route.name)) continue;
-            const cards = Array.isArray(route.cards) ? route.cards : [];
-            if (!cards.includes(key)) { route.cards = [...cards, key].slice(-100); changed = true; }
+            const cards = Array.isArray(route.cards) ? route.cards : [], add = keys.filter(k => !cards.includes(k));
+            if (add.length) { route.cards = [...cards, ...add].slice(-100); changed = true; }
         }
         if (changed) this.save(next);
         return changed;
@@ -2147,7 +2159,7 @@ export class TTSBackend {
     crowd() {
         const here = this.here(), all = this.contacts();
         if (!here) return all;
-        const own = all.filter(c => c.source === 'manual' || (here.members || []).includes(c.name) || this.settings.routes.some(r => r.name === c.name && Array.isArray(r.cards) && r.cards.includes(here.key)));
+        const own = all.filter(c => c.source === 'manual' || (here.members || []).includes(c.name) || this.settings.routes.some(r => r.name === c.name && roleInSpace(r, here)));
         return own.length ? own : all;
     }
     /** Phone chats of the card open now. */
@@ -2156,7 +2168,7 @@ export class TTSBackend {
     async clearHere(list, remove, clearAll) {
         const here = this.here();
         if (!here) return clearAll();
-        const mine = (await list()).filter(x => x.space === here.key);
+        const mine = (await list()).filter(x => here.card ? inSpace(x, here) : x.space === here.key);
         for (const x of mine) await remove(x.id);
         return mine.length;
     }
@@ -2171,10 +2183,10 @@ export class TTSBackend {
         return result;
     }
     /** New posts from the board (characters and strangers), with made-up likes and 热度; the oldest go past the limit. */
-    async addForumPosts(posts, { source = 'auto', space = this.cardKey() } = {}) {
+    async addForumPosts(posts, { source = 'auto', space = this.cardKey(), save = this.saveKey() } = {}) {
         // The first post the model wrote is shown on top (newest first).
         const now = Date.now(), id = () => crypto.randomUUID();
-        const docs = posts.map((p, i) => cleanForumPost({ ...p, source, space, ...(source === 'me' ? { likes: 0, heat: 1 } : startingHeat(p)) }, id(), now - i * 10, id));
+        const docs = posts.map((p, i) => cleanForumPost({ ...p, source, space, ...(save ? { save } : {}), ...(source === 'me' ? { likes: 0, heat: 1 } : startingHeat(p)) }, id(), now - i * 10, id));
         return this.appsMutate('forum', () => this.apps.put(docs, { keep: FORUM_LIMITS.posts }));
     }
     /** id: the 热搜 of the card the request was made for (hotId() when it was asked). */
@@ -2217,7 +2229,7 @@ export class TTSBackend {
     /** The private chat with `name` on this card (made when there is none yet). */
     async dmThread(name) {
         const here = currentDm(await this.threads(), name);
-        return here || this.chats.create({ type: 'dm', members: [name], space: this.cardKey() });
+        return here || this.chats.create({ type: 'dm', members: [name], ...this.spaceTag() });
     }
     /** The user deletes a contact: the chat is put away (kept), and what they send meanwhile becomes 好友申请. */
     async unfriend(name) {
@@ -2670,7 +2682,7 @@ export class TTSBackend {
             saveText: patch => this.saveText(clone(patch)), setTextKey: (id, key) => this.setTextKey(id, key), clearTextKey: id => this.clearTextKey(id), textKeyHint: id => this.textKeyHint(id), textModels: draft => this.textModels(clone(draft || {})),
             syncStatus: () => this.syncStatus(), saveSync: patch => this.saveSync(clone(patch)), syncNow: () => this.syncNow().then(() => this.syncStatus()), clearSyncFiles: () => this.clearSyncFiles(),
             listMoments: async () => { const here = this.here(); return (await this.moments.list()).filter(p => inSpace(p, here)); }, getMoment: id => this.moments.get(id),
-            postMoment: ({ text, photoId } = {}) => this.momentsMutate(async () => (await this.moments.add([{ author: 'me', source: 'me', text, photoId, space: this.cardKey() }]))[0]),
+            postMoment: ({ text, photoId } = {}) => this.momentsMutate(async () => (await this.moments.add([{ author: 'me', source: 'me', text, photoId, ...this.spaceTag() }]))[0]),
             likeMoment: (id, on = true) => this.momentsMutate(() => this.moments.like(id, 'me', on)),
             // One of the pictures drawn for a post becomes the one shown.
             momentsPickImage: (id, photoId) => this.momentsMutate(async () => { const post = await this.moments.get(id); if (!post || ![post.photoId, ...(post.imageVersions || [])].includes(photoId)) throw Error('这张配图已经不在了'); return this.moments.setImage(id, { photoId }); }),
@@ -2698,7 +2710,7 @@ export class TTSBackend {
             sendPaid: (threadId, message) => this.sendPaid(threadId, message), takeSent: (threadId, messageId, accept) => this.takeSent(threadId, messageId, accept !== false),
             shopCatalog: () => clone({ premium: PREMIUM, kinds: DECOR_KINDS, gifts: shopGifts(this.settings.chat.wallet), ledgerKinds: LEDGER_KINDS }), saveContact: contact => this.saveContact(contact), deleteContact: id => this.deleteContact(id), chatContacts: all => clone(all ? chatContacts(this.settings) : this.contacts()), addRoleContact: name => this.addRoleContact(name),
             listThreads: () => this.threads(), getThread: id => this.chats.get(id), chatUnread: async () => (await this.threads()).reduce((n, t) => n + (t.muted ? 0 : t.unread), 0),
-            createThread: value => this.chatMutate(null, () => this.chats.create({ ...clone(value), space: this.cardKey() })),
+            createThread: value => this.chatMutate(null, () => this.chats.create({ ...clone(value), ...this.spaceTag() })),
             updateThread: (id, patch) => this.chatMutate(id, () => this.chats.update(id, clone(patch))),
             deleteThread: id => this.chatMutate(id, async () => { const done = await this.chats.remove(id); this.noteGone('chats', [id]); await this.memoryForget(id).catch(() => {}); return done; }),
             // 记忆: what a chat remembers; a summary can be corrected or deleted (what it covered is used again).

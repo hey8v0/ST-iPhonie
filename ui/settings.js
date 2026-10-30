@@ -337,7 +337,7 @@ export function settingsApp(ctx) {
         </div></details>`
       + groupTitle('手机')
       + `<div class="group">${toggle('floatingEnabled', '悬浮入口', s.general.floatingEnabled, '在酒馆里显示可以拖动的入口：电脑上是小球，手机上是贴在屏幕边的小方条。点一下展开，再点一次进入手机。')}
-          <div class="setting-row"><span class="row-text"><strong>按角色卡分开${help('打开后，每张角色卡（群聊是每个群）一部手机：聊天记录、朋友圈、论坛、查手机各管各的，换卡就换手机；联系人只有这张卡的角色、在这张卡剧情里说过话的角色，和在这张卡里手动加的联系人。「我」跟着酒馆给这张卡锁定的人设走。\n\n打开之前就有的聊天和动态没有归属，每张卡都看得到；不想要的可以删掉。关掉分区后，所有东西又会一起显示。')}</strong><small>${space.key ? '现在是' + esc(space.name || '这张角色卡') + (s.chat.partition === 'card' ? ' 的手机' : '') : '没有打开角色卡'}</small></span><input class="switch" type="checkbox" data-field="partition" aria-label="按角色卡分开" ${s.chat.partition === 'card' ? 'checked' : ''}></div></div>`
+          <div class="setting-row"><span class="row-text"><strong>手机分开${help('按角色卡：每张角色卡（群聊是每个群）一部手机：聊天记录、朋友圈、论坛、查手机各管各的，换卡就换手机；联系人只有这张卡的角色、在这张卡剧情里说过话的角色，和在这张卡里手动加的联系人。「我」跟着酒馆给这张卡锁定的人设走。打开之前就有的聊天和动态没有归属，每张卡都看得到。\n\n按聊天：每个酒馆聊天一部手机。同一张卡开新聊天（重开一个轮回）就是一部新手机：聊天记录、拉黑、朋友圈、论坛、查手机和剧情里出场过的人都从头来，正文也不会再提上一个聊天里的拉黑；回到旧聊天，旧的都还在。以前的内容归第一个打开的聊天，所以先进你想留着它们的那个聊天，再选「按聊天」。\n\n改回不分开，所有东西又会一起显示。')}</strong><small>${space.key ? '现在是' + esc(space.name || '这张角色卡') + (s.chat.partition === 'card' ? ' 的手机' : s.chat.partition === 'chat' ? ' 这个聊天的手机' : '') : '没有打开角色卡'}</small></span><span class="select partition-select">${`<select data-field="partition" aria-label="手机分开">${[['none', '不分开'], ['card', '按角色卡'], ['chat', '按聊天']].map(([k, l]) => `<option value="${k}"${s.chat.partition === k ? ' selected' : ''}>${l}</option>`).join('')}</select>`}</span></div></div>`
       + groupTitle('资料')
       + `<div class="group">${syncRows()}
           <button class="list-row" data-action="backup"><span><strong>备份到文件</strong><small>换设备或误删时能找回</small></span>${icon('next')}</button>
@@ -371,7 +371,7 @@ export function settingsApp(ctx) {
     else if (key === 'defaultLanguage') api.updateGeneral({defaultLanguage: el.value});
     else if (key === 'volume') await api.setVolume(Number(el.value) / 100);
     else if (key === 'lockOnOpen') await api.savePhone({lockOnOpen: el.checked});
-    else if (key === 'partition') { api.saveChatOptions({partition: el.checked ? 'card' : 'none'}); ctx.notify(el.checked ? '已按角色卡分开' : '已关闭分区，所有内容一起显示'); }
+    else if (key === 'partition') { api.saveChatOptions({partition: el.value}); ctx.notify({card: '已按角色卡分开', chat: '已按聊天分开：开新聊天就是一部新手机'}[el.value] || '已关闭分区，所有内容一起显示'); }
   });
   v.on('input', '[data-field=backup-password],[data-field=backup-again],[data-field=restore-password]', el => {
     if (el.dataset.field === 'restore-password') { if (restore) restore.password = el.value; return; }

@@ -13,7 +13,7 @@ import {callSummary} from '../core/call.js';
 import {preview, BLESSING, you, patText, noticeText, seconds} from './chat-preview.js';
 import {pendant} from './pendants.js';
 import {memorySheet} from './chat-memory.js';
-import {pictureInputs, photoTags, photoCast} from '../core/draw.js';
+import {pictureInputs, photoTags, photoPicture} from '../core/draw.js';
 import {chatScene, sceneArt, sceneDark, syncMotion} from './chat-scenes.js';
 import {PREMIUM, yuan} from '../core/wallet.js';
 import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
@@ -545,7 +545,7 @@ export function chatApp(ctx) {
     const request = m => {
       const names = [...api.getState().routes.map(r => r.name), api.userName?.() || myName()];
       const tags = photoTags({text: m.text, tags: m.imageTags, owner: m.from, names});
-      return {...pictureInputs(api.getState(), {prompt: tags, characters: photoCast({text: m.text, tags, owner: m.from, names})}), tag: tags};
+      return {...pictureInputs(api.getState(), photoPicture(api.getState(), {text: m.text, tags: m.imageTags, owner: m.from, names})), tag: tags};
     };
     const draw = async tags => {
       const m = await current(); if (!m) throw Error('这条消息已不存在');

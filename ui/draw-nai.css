@@ -68,7 +68,7 @@
 .mask-editor header .text-button{color:#ddd}
 .mask-editor footer{flex-wrap:wrap;justify-content:center;padding-bottom:calc(env(safe-area-inset-bottom,0px) + 18px)}
 .mask-editor .segmented{margin:0}
-.mask-editor .segmented button{display:inline-flex;align-items:center;gap:4px}
+.mask-editor .segmented button{display:inline-flex;align-items:center;justify-content:center;gap:4px}
 .mask-editor .segmented .icon{width:16px;height:16px}
 .mask-editor footer .text-button{color:#ff8fa8}
 .mask-stage{flex:1;min-height:0;display:grid;place-items:center;padding:6px 12px}
@@ -151,10 +151,13 @@
 .usage-sheet p{margin:8px 0 0;font-size:13px}
 .mask-look{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px 14px;padding:0 14px 6px;font-size:12px}
 .mask-look[hidden]{display:none}
-.mask-look .mask-size{display:inline-flex;align-items:center;gap:6px}
+.mask-look-row{display:inline-flex;align-items:center;gap:6px;color:#ccc}
+.mask-look-row input{accent-color:#ff2e6a}
+.mask-look .segmented button{padding:0 2px}
 .mask-look .segmented{flex:1 1 100%;margin:0}
 .mask-look .segmented button{min-height:32px;font-size:12px}
 .mask-look input[type=color]{width:34px;height:26px;padding:0;border:0;background:none}
 .mask-look input[type=range]{width:96px}
 /* 窄屏时「生成（会扣 Anlas）」折成两行，不挤出屏幕 */
 [data-app=draw] .savebar>.primary{min-width:0;white-space:normal;line-height:1.15}
+.partition-select{flex:none;width:112px}

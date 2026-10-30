@@ -60,7 +60,7 @@ export function createCallHost({context, settings, backend, notice, ringing = ()
 
   async function dmThread(name) {
     const existing = currentDm(await backend.threads(), name);
-    return existing || backend.chats.create({type: 'dm', members: [name], space: backend.spaceKey()});
+    return existing || backend.chats.create({type: 'dm', members: [name], space: backend.here()?.card || backend.spaceKey(), ...(backend.saveKey() ? {save: backend.saveKey()} : {})});
   }
   /** Keeps the finished call in the private chat. A missed incoming call counts as unread. */
   async function keep(c, voicemail = []) {

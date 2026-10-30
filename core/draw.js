@@ -977,14 +977,34 @@ export function photoTags({text = '', tags = '', owner = '', names = []}) {
   return kept.join(', ');
 }
 
+const PERSON_TAGS = /\b(?:\d+\+?\s*(?:girl|boy|other)s?|girls?|boys?|wom[ae]n|m[ae]n|person|people|solo|selfie|portrait|upper body|cowboy shot|full body|close-?up|looking at viewer|from behind|smil(?:e|ing)|hair|eyes|wearing|hands?)\b/i;
+/** Tags that say what someone looks like: on a phone photo of someone with a saved look they would fight it. */
+const LOOK_TAGS = /\b(?:hair|eyes|bangs|ponytail|twintails|braids?|ahoge|sidelocks|hair ornament)\b/i;
+/**
+ * A phone photo's words and people for pictureInputs: the people's saved looks go in, so the looks a model made up for
+ * the photo leave its tags; people counted when the model did not, from the looks themselves. settings: for the looks.
+ */
+export function photoPicture(settings, {text = '', tags = '', owner = '', names = []}) {
+  const drawn = photoTags({text, tags, owner, names}), cast = photoCast({text, tags: drawn, owner, names}), roles = drawable(settings);
+  const looks = cast.map(n => roles.find(r => sameName(r.name, n))?.appearance || '').filter(Boolean);
+  if (!looks.length) return {prompt: drawn, characters: cast};
+  let list = drawn.split(',').map(t => t.trim()).filter(t => t && !LOOK_TAGS.test(t));
+  if (!/\b\d+\+?\s*(?:girl|boy|other)s?\b/i.test(drawn)) {
+    const count = word => looks.filter(l => new RegExp(`\\b(?:1\\s*)?${word}\\b`, 'i').test(l)).length, said = (n, word) => n ? [`${n}${word}${n > 1 ? 's' : ''}`] : [];
+    list = [...said(count('girl'), 'girl'), ...said(count('boy'), 'boy'), ...list.filter(t => !/^(?:girls?|boys?)$/i.test(t))];
+  }
+  return {prompt: sceneTags(list.join(', '), cast.length), characters: cast};
+}
+
 /**
  * Who a phone photo (查手机相册, a chat photo, a 朋友圈 picture) shows, as names for pictureInputs: nobody when its tags
  * show no person (a view, a meal); the people its description names (registered roles, the user); the owner too when
  * it is a selfie or a photo together, or when nobody else is named. names: everyone who could be in it.
  */
 export function photoCast({text = '', tags = '', owner = '', names = []}) {
-  if (!/(\d+(?:girl|boy|other)s?|solo|selfie|portrait|upper body|cowboy shot)/i.test(tags)) return [];
   const said = String(text);
+  // A model does not always count people: 「girl, smile, cafe」 shows someone just as 「1girl」 does.
+  if (/\bno humans\b/i.test(tags) || !(PERSON_TAGS.test(tags) || /自拍|合照|合影/.test(said))) return [];
   const others = [...new Set(names)].filter(n => n && n !== '我' && n !== owner && !sameName(n, owner))
     .map(n => [n, said.indexOf(n)]).filter(([, at]) => at >= 0).sort((a, b) => a[1] - b[1]).map(([n]) => n);
   const self = !others.length || (owner && said.includes(owner)) || /自拍|合照|合影|我们|我和|和我|selfie/i.test(said);

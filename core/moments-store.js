@@ -26,6 +26,7 @@ function cleanPost(p, id, at) {
   if (['waiting', 'done', 'failed'].includes(p.imageState)) out.imageState = p.imageState;
   if (p.imageNote) out.imageNote = clip(p.imageNote, 200);
   if (p.space) out.space = clip(p.space, 300);
+  if (p.save) out.save = clip(p.save, 400);
   out.likes = [...new Set((Array.isArray(p.likes) ? p.likes : []).map(person).filter(Boolean))].slice(0, 50);
   return out;
 }

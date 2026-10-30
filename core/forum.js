@@ -107,7 +107,7 @@ export function cleanPost(p, id, at, newId) {
   if (!text) throw Error('帖子内容为空');
   const replies = (Array.isArray(p.replies) ? p.replies : []).slice(-FORUM_LIMITS.replies).map((r, i) => cleanReply(r, r?.id || newId(), Number.isFinite(r?.at) ? r.at : at + i + 1));
   return {id, kind: 'forum', author, title, text, at, source: ['auto', 'me'].includes(p.source) ? p.source : 'auto',
-    likes: Math.max(0, Math.round(Number(p.likes) || 0)), liked: p.liked === true, heat: Math.max(0, Math.round(Number(p.heat) || 0)), replies, ...(p.space ? {space: clip(p.space, 300)} : {})};
+    likes: Math.max(0, Math.round(Number(p.likes) || 0)), liked: p.liked === true, heat: Math.max(0, Math.round(Number(p.heat) || 0)), replies, ...(p.space ? {space: clip(p.space, 300)} : {}), ...(p.save ? {save: clip(p.save, 400)} : {})};
 }
 export function cleanReply(r, id, at) {
   const from = person(r?.from), said = clip(r?.text, FORUM_LIMITS.reply).trim();

@@ -4,7 +4,7 @@
 import {buildMomentsRequest, parseMoments, storyLines, MOMENTS_LIMITS} from './core/moments.js';
 import {inSpace, activeChatPreset, cleanTagged} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {pictureInputs, photoCast, photoTags} from './core/draw.js';
+import {pictureInputs, photoPicture} from './core/draw.js';
 
 export function createMomentsHost({context, settings, backend, notice, memory = null}) {
   // 记忆: what each of them talked about with the user in private (written-up layers only).
@@ -49,13 +49,13 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   /** New posts from the characters. auto: made by the story counter, not by the user. */
   function refresh({auto = false} = {}) {
     return run('refresh', async ctx => {
-      const space = backend.cardKey(), {s, preset, crowd, user, names} = base();
+      const space = backend.cardKey(), save = backend.saveKey(), {s, preset, crowd, user, names} = base();
       const recent = (await backend.moments.list()).filter(p => inSpace(p, backend.here())).slice(0, 6);
       const story = storyLines(ctx.chat, preset, user);
       const request = buildMomentsRequest({prompts: settings().promptRules, preset, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, images: s.moments.images, memory: await remembered(crowd.map(p => p.name)), lore: await lore(preset, crowd, story, recent.map(p => `${p.author}: ${p.text}`))});
       const found = parseMoments(await ask(ctx, request), {names, user, mode: 'posts'});
       if (!found.posts.length) throw Error('这次没有收到新动态，可以再刷新一次');
-      const posts = await backend.momentsMutate(() => backend.moments.add(found.posts.map(p => ({...p, space, source: auto ? 'auto' : 'manual', imageState: p.imageTags && s.moments.images ? 'waiting' : undefined}))));
+      const posts = await backend.momentsMutate(() => backend.moments.add(found.posts.map(p => ({...p, space, ...(save ? {save} : {}), source: auto ? 'auto' : 'manual', imageState: p.imageTags && s.moments.images ? 'waiting' : undefined}))));
       drawNew(posts);
       return posts;
     });
@@ -101,9 +101,8 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
     if (!backend.drawReady()) { await set({imageState: 'failed', imageNote: backend.drawMissing()}); return null; }
     try {
       // The saved looks of who the picture shows: the people the post names, else the poster (a selfie).
-      const names = [...settings().routes.map(r => r.name), userName()], drawn = photoTags({text: post.text, tags: post.imageTags, owner: post.author, names});
-      const cast = photoCast({text: post.text, tags: drawn, owner: post.author, names});
-      const input = pictureInputs(settings(), {prompt: drawn, characters: cast}, '');
+      const names = [...settings().routes.map(r => r.name), userName()];
+      const input = pictureInputs(settings(), photoPicture(settings(), {text: post.text, tags: post.imageTags, owner: post.author, names}), '');
       await set({imageState: 'waiting', imageNote: ''});
       const result = await backend.generateImage({...input, allowPaid, name: `朋友圈-${post.author}`, key: `moments:${postId}`, label: `朋友圈 · ${post.author}`});
       const now = await backend.moments.get(postId);

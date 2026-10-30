@@ -5,7 +5,7 @@
 import {currentDm, currentWindow} from './core/chats.js';
 import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {pictureInputs, photoCast, photoTags, tagTextRequest, tagTextAnswer} from './core/draw.js';
+import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer} from './core/draw.js';
 import {storyLines} from './core/moments.js';
 import {forumContext} from './core/forum.js';
 import {promptOn} from './core/prompt-rules.js';
@@ -102,7 +102,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       // Voice switched off: nobody sends voice messages.
       if (s.general.voiceEnabled === false) for (const p of people) p.voice = false;
       if (!nudge) backend.emit('chat', {threadId, typing: true});
-      const recent = story(preset), forumSpace = s.chat.partition === 'card' ? {key: thread.space || backend.cardKey()} : null;
+      const recent = story(preset), forumSpace = s.chat.partition === 'card' ? {key: thread.space || backend.cardKey()} : s.chat.partition === 'chat' ? backend.here() : null;
       let forum = '';
       if (promptOn(s.promptRules, 'chat-forum')) {
         try { forum = forumContext((await backend.apps.list('forum')).filter(p => inSpace(p, forumSpace)), user, s.chat.netNames); }
@@ -151,7 +151,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (item.kind === 'unfriend') { if (thread.type === 'dm') cutting = true; continue; }
       if (item.kind === 'befriend' || item.kind === 'refuse') continue;
       // 「[朋友圈] …」: posted to 朋友圈 while chatting, not a chat message.
-      if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, ...(item.imageTags ? {imageTags: item.imageTags} : {}), source: 'chat', space: thread?.space || backend.cardKey()}); continue; }
+      if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, ...(item.imageTags ? {imageTags: item.imageTags} : {}), source: 'chat', space: thread?.space || backend.cardKey(), ...(thread?.save || backend.saveKey() ? {save: thread?.save || backend.saveKey()} : {})}); continue; }
       // 「[私聊] …」 in a group: said to the user alone — it goes to that one's private chat (in a private chat it is just
       // a message).
       if (item.kind === 'dm') { if (thread.type === 'group') whispers.push(item); else out.push({from: item.from, kind: 'text', text: item.text}); continue; }
@@ -245,9 +245,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         await set({imageTags: tags});
       }
       // The saved looks of who the photo shows: the people its description names, else the sender (a selfie).
-      const names = [...settings().routes.map(r => r.name), userName()], drawn = photoTags({text: m.text, tags: m.imageTags, owner: m.from, names});
-      const cast = photoCast({text: m.text, tags: drawn, owner: m.from, names});
-      const input = pictureInputs(settings(), {prompt: drawn, characters: cast}, '');
+      const names = [...settings().routes.map(r => r.name), userName()];
+      const input = pictureInputs(settings(), photoPicture(settings(), {text: m.text, tags: m.imageTags, owner: m.from, names}), '');
       await set({imageState: 'waiting', imageNote: ''});
       const result = await backend.generateImage({...input, allowPaid, name: `聊天-${m.from}`, key: `chat-photo:${messageId}`, label: `聊天 · ${m.from}`});
       await backend.chatMutate(threadId, async () => {
@@ -302,8 +301,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   function refreshCuts() {
     Promise.resolve().then(() => backend.chats.list()).then(list => {
       cutsLoaded = true;
-      cuts = list.filter(t => t.type === 'dm' && t.friend).map(t => ({name: t.members[0], by: t.friend.by, space: t.space || ''}));
-      groups = list.filter(t => t.type === 'group').map(t => ({name: t.name, space: t.space || ''}));
+      cuts = list.filter(t => t.type === 'dm' && t.friend).map(t => ({name: t.members[0], by: t.friend.by, space: t.space || '', save: t.save || ''}));
+      groups = list.filter(t => t.type === 'group').map(t => ({name: t.name, space: t.space || '', save: t.save || ''}));
     }).catch(() => {});
   }
   refreshCuts();
@@ -333,7 +332,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   async function phoneAfterPlan() {
     if (!phoneTurn()) return '';
     const list = await backend.chats.list().catch(() => null);
-    if (list) groups = list.filter(t => t.type === 'group').map(t => ({name: t.name, space: t.space || ''}));
+    if (list) groups = list.filter(t => t.type === 'group').map(t => ({name: t.name, space: t.space || '', save: t.save || ''}));
     return phoneAfterRule(activeChatPreset(settings().chat), {user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.()});
   }
   /** The 正文 rule for the story request while 正文联动手机 is on: who can send what, and how (<phone>). */
@@ -356,7 +355,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   /** The private chat with `name` here (this card, with 分区), made when there is none yet. */
   async function dmWith(name) {
     const here = currentDm(await backend.threads(), name);
-    return here || backend.chatMutate(null, () => backend.chats.create({type: 'dm', members: [name], space: backend.cardKey()}));
+    return here || backend.chatMutate(null, () => backend.chats.create({type: 'dm', members: [name], ...backend.spaceTag()}));
   }
   /** What someone in a group said to the user alone (「[私聊]」): into their private chat, unread, with a note. */
   async function whisper(items) {

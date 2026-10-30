@@ -6,7 +6,7 @@ import {buildPeekRequest, parsePeek, peekId, mergePeek} from './core/peek.js';
 import {storyLines} from './core/moments.js';
 import {inSpace, activeChatPreset, cleanTagged} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {pictureInputs, sizeFor, photoCast, photoTags} from './core/draw.js';
+import {pictureInputs, sizeFor, photoPicture} from './core/draw.js';
 
 const PEOPLE = 12;
 
@@ -49,7 +49,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   function forumRefresh() {
     return run('forum', async ctx => {
       // The card asked for: the tavern may move to another one while the model writes.
-      const space = backend.cardKey(), hotId = backend.hotId(), {preset, crowd, user} = base(), handles = netNames();
+      const space = backend.cardKey(), save = backend.saveKey(), hotId = backend.hotId(), {preset, crowd, user} = base(), handles = netNames();
       const recent = (await backend.apps.list('forum')).filter(p => inSpace(p, backend.here())).slice(0, 8), hot = (await backend.apps.get(hotId))?.topics || [];
       const story = storyLines(ctx.chat, preset, user);
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, hot, lore: await lore(preset, crowd, story, [...hot, ...recent.map(p => p.title)])});
@@ -57,7 +57,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       await keepNames(found.names, crowd);
       if (!found.posts.length) throw Error('这次没有刷出新帖子，可以再刷新一次');
       if (found.hot.length) await backend.setForumHot(found.hot, hotId);
-      return backend.addForumPosts(found.posts, {space});
+      return backend.addForumPosts(found.posts, {space, save});
     });
   }
   /** Replies to the user's new post. */
@@ -120,11 +120,10 @@ export function createAppsHost({context, settings, backend, memory = null}) {
     if (!backend.drawReady()) throw Error(backend.drawMissing() + '，相册只能看文字');
     const set = patch => backend.appsMutate('peek', () => backend.apps.change(id, doc => { const target = pick(doc); Object.assign(target, patch); for (const k of Object.keys(patch)) if (patch[k] === '') delete target[k]; }));
     // The saved looks of who the photo shows: the people its description names, else the owner (a selfie).
-    const names = [...settings().routes.map(r => r.name), userName()], drawn = photoTags({text: photo.text, tags: photo.tags, owner: name, names});
-    const cast = photoCast({text: photo.text, tags: drawn, owner: name, names});
+    const names = [...settings().routes.map(r => r.name), userName()], picture = photoPicture(settings(), {text: photo.text, tags: photo.tags, owner: name, names});
     try {
       await set({state: 'waiting', note: ''});
-      const input = pictureInputs(settings(), {prompt: drawn, characters: cast}, '');
+      const input = pictureInputs(settings(), picture, '');
       // A wallpaper stands upright like the phone (a square size becomes 832×1216 for 1024: about as many pixels, so the
       // free tier still holds).
       if (wall) { const up = sizeFor(input.params, '竖'), side = up.width, snap64 = n => Math.max(64, Math.round(n / 64) * 64); input.params = {...input.params, ...(up.width === up.height ? {width: snap64(side * .8125), height: snap64(side * 1.1875)} : up)}; }

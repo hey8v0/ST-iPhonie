@@ -147,7 +147,7 @@ export function pickPicture(ctx, api, title = '选一张图', {multiple = false}
 /** How the paint shows: a tile of the pattern in the colour, on a picture's own scale (holes are see-through). null for solid. */
 function maskTile(doc, pattern, color, side) {
   if (pattern === 'solid') return null;
-  const n = Math.max(8, Math.round(side / 48)), tile = canvasOf(doc, n, n), g = tile.getContext('2d'), line = Math.max(1.5, n / 8);
+  const n = Math.max(12, Math.round(side / 24)), tile = canvasOf(doc, n, n), g = tile.getContext('2d'), line = Math.max(1.5, n / 8);
   g.fillStyle = g.strokeStyle = color; g.lineWidth = line;
   const path = (...points) => { g.beginPath(); g.moveTo(points[0], points[1]); g.lineTo(points[2], points[3]); g.stroke(); };
   if (pattern === 'stripes' || pattern === 'crosshatch') { path(-1, n + 1, n + 1, -1); path(-1, 1, 1, -1); path(n - 1, n + 1, n + 1, n - 1); }
@@ -166,7 +166,7 @@ export function maskEditor(ctx, {src, width, height, mask = '', focus = null, lo
       <div class="mask-stage"><div class="mask-frame"><img alt="" src="${esc(src)}"><canvas></canvas><span class="mask-box" hidden></span></div></div>
       <div class="mask-look" hidden></div>
       <footer><div class="segmented"><button type="button" data-mask="paint" aria-pressed="true">${icon('paint')}涂</button><button type="button" data-mask="erase" aria-pressed="false">${icon('backspace')}擦</button><button type="button" data-mask="focus" aria-pressed="false">${icon('expand')}聚焦</button></div>
-        <label class="mask-size"><span>笔刷</span><input type="range" min="2" max="40" value="10" aria-label="笔刷大小"></label>
+        <label class="mask-size mask-brush"><span>笔刷</span><input type="range" min="2" max="40" value="10" aria-label="笔刷大小"></label>
         <label class="mask-context" hidden><span>周围参考</span><input type="range" min="0" max="256" step="16" value="${focus?.context ?? 64}" aria-label="周围留多少给 AI 参考"></label>
         <button type="button" data-mask="style" class="text-button" aria-expanded="false">样式</button><button type="button" data-mask="clear" class="text-button">全部擦掉</button></footer>
       <p class="mask-tip" hidden>框出要细化的地方（比如脸）：这块放大后重画，细节更多。框里不涂就整块重画。</p>`;
@@ -190,9 +190,9 @@ export function maskEditor(ctx, {src, width, height, mask = '', focus = null, lo
       canvas.style.filter = shown.border ? 'drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)' : '';
     }
     const lookBox = layer.querySelector('.mask-look');
-    const lookHTML = () => `<label class="mask-size"><span>颜色</span><input type="color" data-look="color" value="${esc(shown.color)}" aria-label="遮罩颜色"></label>
-      <label class="mask-size"><span>透明度</span><input type="range" data-look="opacity" min="10" max="100" step="5" value="${shown.opacity}" aria-label="遮罩透明度"></label>
-      <label class="mask-size"><span>描边</span><input type="checkbox" class="switch" data-look="border" aria-label="描边"${shown.border ? ' checked' : ''}></label>
+    const lookHTML = () => `<label class="mask-look-row"><span>颜色</span><input type="color" data-look="color" value="${esc(shown.color)}" aria-label="遮罩颜色"></label>
+      <label class="mask-look-row"><span>透明度</span><input type="range" data-look="opacity" min="10" max="100" step="5" value="${shown.opacity}" aria-label="遮罩透明度"></label>
+      <label class="mask-look-row"><span>描边</span><input type="checkbox" class="switch" data-look="border" aria-label="描边"${shown.border ? ' checked' : ''}></label>
       <div class="segmented">${MASK_PATTERNS.map(([k, l]) => `<button type="button" data-look-pattern="${k}" aria-pressed="${k === shown.pattern}">${l}</button>`).join('')}</div>`;
     // Seen while it moves; kept when it is let go.
     const setLook = patch => { shown = normalizeMaskLook({...shown, ...patch}); dress(); };
@@ -204,7 +204,7 @@ export function maskEditor(ctx, {src, width, height, mask = '', focus = null, lo
     const showBox = () => { boxEl.hidden = !box; if (box) Object.assign(boxEl.style, {left: box.x / width * 100 + '%', top: box.y / height * 100 + '%', width: box.w / width * 100 + '%', height: box.h / height * 100 + '%'}); };
     showBox();
     if (mask) { const old = new ctx.win.Image(); old.onload = () => { t.drawImage(old, 0, 0); painted = true; dress(); }; old.src = 'data:image/png;base64,' + mask; }
-    const brush = () => Number(layer.querySelector('.mask-size input').value) / 100 * Math.max(width, height) / 4;
+    const brush = () => Number(layer.querySelector('.mask-brush input').value) / 100 * Math.max(width, height) / 4;
     const at = e => { const r = canvas.getBoundingClientRect(); return {x: (e.clientX - r.left) / r.width * width, y: (e.clientY - r.top) / r.height * height}; };
     function stroke(from, to) {
       for (const [c, style] of [[g, paintStyle], [t, '#fff']]) {
@@ -237,7 +237,7 @@ export function maskEditor(ctx, {src, width, height, mask = '', focus = null, lo
       else if (what === 'paint' || what === 'erase' || what === 'focus') {
         mode = what; erase = what === 'erase';
         for (const b of layer.querySelectorAll('[data-mask=paint],[data-mask=erase],[data-mask=focus]')) b.setAttribute('aria-pressed', String(b.dataset.mask === what));
-        layer.querySelector('.mask-size').hidden = what === 'focus'; layer.querySelector('.mask-context').hidden = what !== 'focus'; layer.querySelector('.mask-tip').hidden = what !== 'focus';
+        layer.querySelector('.mask-brush').hidden = what === 'focus'; layer.querySelector('.mask-context').hidden = what !== 'focus'; layer.querySelector('.mask-tip').hidden = what !== 'focus';
       }
       else if (what === 'clear') { g.clearRect(0, 0, width, height); t.clearRect(0, 0, width, height); painted = false; box = null; showBox(); }
       else if (what === 'done') {
