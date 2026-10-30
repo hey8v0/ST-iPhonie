@@ -28,6 +28,7 @@ import {activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pic
 import {keepOneOutput, switchNodesOff} from './comfy-graph.js';
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases } from './routes.js';
+import { cleanAddress, reachService, explainReach, detectService, scanTargets } from './custom-detect.js';
 import { arrangeRows } from './layers.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
 import { normalizeMarks, withMarks } from './voice-fx.js';
@@ -220,7 +221,7 @@ export class TTSBackend {
     }
     /** Reads the Fish reference audio and the MiMo clone samples the settings use into memory, for requests. */
     async loadReferences() {
-        for (const reference of [...this.settings.connections.fish.params.references, ...(this.settings.connections.mimo?.params.samples || [])]) {
+        for (const reference of [...this.settings.connections.fish.params.references, ...(this.settings.connections.mimo?.params.samples || []), ...(this.settings.connections.custom?.params.voices || []).filter(v => v.ref_file).map(v => ({ audio: v.ref_file }))]) {
             const record = await this.library.getReference(reference.audio);
             if (record && !this.closed) { const audio = await this.base64(record.blob); if (!this.closed) this.providers.references.set(record.id, audio); }
         }
@@ -1808,7 +1809,8 @@ export class TTSBackend {
         if (id) row = await this.music.change(id, p => { p.name = title; }).catch(listGone);
         else {
             if (all.length >= MUSIC_LIMITS.lists) throw Error(`最多建 ${MUSIC_LIMITS.lists} 个歌单`);
-            [row] = await this.music.put([{ id: 'playlist:' + globalThis.crypto.randomUUID().slice(0, 8), kind: 'playlist', at: Date.now(), name: title, songs: [] }]);
+            // (Later than the last one, also within the same millisecond: the 歌单 stay in the order they were made.)
+            [row] = await this.music.put([{ id: 'playlist:' + globalThis.crypto.randomUUID().slice(0, 8), kind: 'playlist', at: Math.max(Date.now(), (all.at(-1)?.at || 0) + 1), name: title, songs: [] }]);
         }
         this.emit('music', { library: true });
         return row;
@@ -2536,6 +2538,7 @@ export class TTSBackend {
         const next = this.getState();
         next.connections.fish.params.references = next.connections.fish.params.references.filter(reference => reference.audio !== id);
         next.connections.mimo.params.samples = next.connections.mimo.params.samples.filter(sample => sample.audio !== id);
+        for (const voice of next.connections.custom?.params.voices || []) if (voice.ref_file === id) voice.ref_file = '';
         this.save(next); await this.library.deleteReference(id); this.providers.references.delete(id);
     }
     getEngineSchema(engine, connection = this.settings.connections[engine]) {
@@ -2594,7 +2597,10 @@ export class TTSBackend {
         this.assertOpen();
         this.player.stop('试一试自己的接口');
         const unlock = Promise.resolve(this.player.sink.unlock?.());
-        const c = clone(connection || this.settings.connections.custom), voice = (c.params?.voices || []).find(v => String(v.name || '').trim());
+        const c = clone(connection || this.settings.connections.custom);
+        let voice = (c.params?.voices || []).find(v => String(v.name || '').trim());
+        // None added: the first the service lists.
+        if (!voice && c.params?.listUrl) { const listed = await this.providers.voices('custom', c).catch(() => null); if (listed?.voices?.[0]) voice = { name: listed.voices[0].id }; }
         const lang = languageCode(this.settings.general.defaultLanguage || 'zh').split('-')[0] || 'zh';
         const text = ({ zh: '你好，这是一句试音。', ja: 'こんにちは、テストです。', en: 'Hello, this is a test.', ko: '안녕하세요, 테스트입니다.' })[lang] || '你好，这是一句试音。';
         const request = buildRequest('custom', c, { voice: voice ? String(voice.name).trim() : '', language: lang }, { text, emotion: '' });
@@ -2603,6 +2609,32 @@ export class TTSBackend {
         this.assertOpen();
         this.player.playBlob(blob, { speaker: voice ? String(voice.name).trim() : '自己的接口', engine: 'custom', line: { role: voice ? String(voice.name).trim() : '', text, translation: '', emotion: '' } });
         return { voice: voice ? String(voice.name).trim() : '', bytes: blob.size, type: blob.type };
+    }
+    /** Whether a service can be reached, and if not why, in plain words. */
+    async customReach(address) {
+        this.assertOpen();
+        const { base, notes, error } = cleanAddress(address);
+        if (error || !base) return { ok: false, message: error || '先填服务的地址', notes };
+        const reach = await reachService(base, this.providers.customTools());
+        return reach.via ? { ok: true, base, notes, via: reach.via } : { ok: false, base, notes, ...explainReach(reach, base) };
+    }
+    /** 自动识别: which service answers there, and the settings for it (nothing is saved here). */
+    async customDetect(address) {
+        const reach = await this.customReach(address);
+        if (!reach.ok) return reach;
+        const tools = this.providers.customTools();
+        const ask = async path => {
+            const target = /^https?:/i.test(path) ? path : reach.base + path;
+            try { const r = await (reach.via === 'proxy' ? tools.proxy(target) : tools.direct(target)); return { status: r.status, ok: r.ok, type: r.headers.get('content-type') || '', text: await r.text() }; } catch { return null; }
+        };
+        return { ...reach, found: await detectService(reach.base, ask) };
+    }
+    /** No address typed: the addresses where something answers, among those such services usually take. */
+    async customScan() {
+        this.assertOpen();
+        const { direct } = this.providers.customTools();
+        const answers = await Promise.all(scanTargets().map(async url => { try { await direct(url, { mode: 'no-cors', signal: AbortSignal.timeout(1500) }); return url; } catch { return ''; } }));
+        return answers.filter(Boolean);
     }
     async playFavorite(id) {
         this.assertOpen();
@@ -2718,7 +2750,7 @@ export class TTSBackend {
             previewRequest: (engine, connection, route, line) => { const request = buildRequest(engine, connection || this.settings.connections[engine], route, line, this.providers.references); if (request.body.provider?.options?.['fish-audio']?.references) for (const ref of request.body.provider.options['fish-audio'].references) ref.audio = '[本地参考音频]'; if (request.body.audio?.voice?.startsWith?.('data:')) request.body.audio.voice = '[本地克隆样本：' + route.voice + ']'; return request; },
             status: () => this.player.snapshot(), subscribe: listener => this.subscribe(listener), levels: () => this.player.sink.levels(),
             pendingRole: () => this.player.pending, stop: () => this.player.stop(), toggle: () => this.player.toggle(), resume: () => this.player.continuePending(),
-            audition: route => this.audition(route), customTest: connection => this.customTest(clone(connection || null)), lineState: line => this.player.lineState(line),
+            audition: route => this.audition(route), customTest: connection => this.customTest(clone(connection || null)), customReach: address => this.customReach(String(address ?? '')), customDetect: address => this.customDetect(String(address ?? '')), customScan: () => this.customScan(), lineState: line => this.player.lineState(line),
             setVolume: value => this.savePhone({ volume: value }), getVolume: () => this.player.getVolume(),
             cacheStats: () => this.cache.stats(), clearCache: () => this.clearCache(), listAudio: () => this.cache.list(),
             deleteAudio: async key => { if (this.player.requestKey === key) this.player.stop('音频已删除'); if (this.prepared?.key === key) this.prepared = null; await this.cache.remove(key); this.emit('library', { collection: 'cache' }); },

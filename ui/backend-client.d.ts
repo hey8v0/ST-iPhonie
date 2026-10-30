@@ -780,6 +780,12 @@ export interface BackendFacade {
     toggle(): void | Promise<void>;
     resume(): void | Promise<void>;
     audition(route: RouteInput): void;
+    /** 自己的接口: whether a service can be reached; if not, why and what to do, in plain words. */
+    customReach(address: string): Promise<{ok: boolean; base?: string; via?: string; notes?: string[]; message?: string; hint?: string; address?: string}>;
+    /** 自己的接口 → 自动识别: which service answers there and the settings for it; nothing is saved. */
+    customDetect(address: string): Promise<{ok: boolean; base?: string; via?: string; notes?: string[]; message?: string; hint?: string; address?: string; found?: {id: string; name: string; params: Record<string, unknown> | null; unknown: string[]; voices?: number; note?: string} | null}>;
+    /** 自己的接口: where something answers among the ports such services usually take. */
+    customScan(): Promise<string[]>;
     /** 自己的接口 → 试一试: says one line with the first voice of these (unsaved) settings. */
     customTest(connection?: unknown): Promise<{ voice: string; bytes: number; type: string }>;
     lineState(line: DialogueLine): Promise<LineState>;

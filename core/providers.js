@@ -4,7 +4,7 @@ import { validateKey, MULTI_KEY, keyTail } from './keys.js';
 import { languageCode } from './languages.js';
 import { TTSParameters as P, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, FISH_TAURI_NOTE, FISH_PROXY_PAGE, DOUBAO_PROXY_NOTE, DOUBAO_DIRECT_NOTE, DOUBAO_RELAY_NOTE, DOUBAO_PROXY_PAGE, tauriTavern, setFishCompat } from './parameters.js';
 import { speakable } from './voice-fx.js';
-import { buildCustomRequest, customInit, readCustomAnswer, customVoices, readVoiceList } from './custom-voice.js';
+import { buildCustomRequest, customInit, readCustomAnswer, customVoices, readVoiceList, gradioRoot, referenceFile, serviceSaid } from './custom-voice.js';
 import { unpacked, audioKind } from './audio-bytes.js';
 const names={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'小米 MiMo',doubao:'豆包语音',custom:'自己的接口'};
 export const miniBase=c=>'https://'+(c.region==='cn'?'api.minimaxi.com':c.region==='uw'?'api-uw.minimax.io':'api.minimax.io');
@@ -201,8 +201,15 @@ export class Providers{
   this.customTurn=turn;return turn;
  }
  async speakCustomNow(request,signal){
-  const {url,init}=customInit(request,this.keys.get('custom')||'');
+  const key=this.currentKey('custom'),audio=request.refFile?this.references.get(request.refFile):'';
+  if(request.refFile&&!audio)throw Error('参考音频读不出来了：在引擎 App「自己的接口」的音色里重新上传一段');
+  const uploaded=audio&&request.answer==='gradio'?await this.gradioUpload(request,audio,signal):'';
+  const {url,init}=customInit(request,key,{audio,uploaded});
+  // Links and later steps are read with the same headers, less the head of a body they do not have.
+  const asked=Object.fromEntries(Object.entries(init.headers).filter(([h])=>h.toLowerCase()!=='content-type'));
   const send=async(target,how=init)=>{try{return await fetchWithPolicy(this.fetcher,target,how,signal);}catch(error){if(signal?.aborted||!this.proxy||!/无法连接/.test(error.message))throw error;
+   // The tavern's proxy passes JSON on and nothing else.
+   if(how.body&&typeof how.body!=='string')throw Error('连不上自己的接口。这种接口收表单或文件，酒馆的转发传不了：服务开着吗？地址和端口对吗？它要自己允许跨域');
    const relayed=await this.proxy(target,how,signal).catch(()=>null);if(!relayed)throw Error('连不上自己的接口：地址不对、服务没开，或者它不让网页直接访问（可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆）');
    if(/CORS proxy is disabled/i.test(await relayed.clone().text().catch(()=>'')))throw Error('自己的接口不让网页直接访问：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆');return relayed;}};
   // 换模型: only when this voice's model is not the one loaded last.
@@ -210,13 +217,27 @@ export class Providers{
   if(loaded&&this.customLoaded!==loaded){this.customLoaded='';for(const step of request.before){const {url:target,init:get}=customInit({...request,url:step,method:'GET',body:undefined});const r=await send(target,get).catch(e=>{throw Error('换模型失败：'+e.message);});
    if(!r.ok){const said=(await r.text().catch(()=>'')).replace(/\s+/g,' ').slice(0,160);throw Error('换模型失败（HTTP '+r.status+'）'+(said?'：'+said:'')+'：检查音色里模型的路径');}await r.body?.cancel?.().catch(()=>{});}this.customLoaded=loaded;}
   const response=await send(url);
-  return readCustomAnswer(response,request,{read:limitedBytes,load:link=>send(link,{method:'GET',headers:init.headers})});
+  return readCustomAnswer(response,request,{read:limitedBytes,load:link=>send(link,{method:'GET',headers:asked}),wave:wavePCM}).catch(error=>{if(request.answer==='gradio')this.gradioFiles?.clear();throw error;});
+ }
+ /** How a service is asked while it is being set up (core/custom-detect.js): quickly, with the key if there is one. */
+ customTools(){const key=this.currentKey('custom'),headers=key?{Authorization:'Bearer '+key}:{};
+  return {direct:(url,init={})=>this.fetcher(url,{credentials:'omit',referrerPolicy:'no-referrer',...(init.mode?{}:{headers}),signal:AbortSignal.timeout(init.mode?2500:6000),...init}),
+   proxy:this.proxy?url=>this.proxy(url,{method:'GET',headers},AbortSignal.timeout(8000)):null};}
+ /** A Gradio app takes a reference audio by where it keeps it: uploaded once a page, asked again after anything failed. */
+ async gradioUpload(request,audio,signal){
+  const root=gradioRoot(request.url),slot=root+'|'+request.refFile;this.gradioFiles??=new Map();
+  if(this.gradioFiles.has(slot))return this.gradioFiles.get(slot);
+  const form=new FormData();form.append('files',referenceFile(audio));
+  const r=await fetchWithPolicy(this.fetcher,root+'/upload',{method:'POST',body:form},signal).catch(()=>{throw Error('参考音频传不上去：连不上 Gradio 的上传地址，它要能被网页直接访问（这一步酒馆转发不了）');});
+  if(!r.ok)throw Error(`参考音频传不上去（HTTP ${r.status}）：${serviceSaid(await r.text().catch(()=>''))}`);
+  const path=(await r.json().catch(()=>[]))?.[0];if(typeof path!=='string'||!path)throw Error('参考音频传上去了，但 Gradio 没说放在哪');
+  this.gradioFiles.set(slot,path);return path;
  }
  /** 自己的接口's voices: the ones added by hand, and (音色列表地址) the ones the service lists. */
  async customVoiceList(c,search=''){
   const own=customVoices(c),q=search.trim().toLowerCase();let listed=[],note='';
   const url=String(c.params.listUrl||'').trim();
-  if(proxyAddress(url)||/^https?:\/\//i.test(url)){const {url:target,init}=customInit({url,method:'GET',headers:String(c.params.headers||'')},this.keys.get('custom')||'');
+  if(proxyAddress(url)||/^https?:\/\//i.test(url)){const {url:target,init}=customInit({url,method:'GET',headers:String(c.params.headers||'')},this.currentKey('custom'));
    let r=await fetchWithPolicy(this.fetcher,target,init).catch(()=>null);if(!r&&this.proxy)r=await this.proxy(target,init).catch(()=>null);
    if(!r)note='音色列表地址连不上';else if(!r.ok)note='音色列表地址回答 HTTP '+r.status;else{try{listed=readVoiceList(await r.json(),String(c.params.listPath||'').trim());}catch{note='音色列表回的不是 JSON';}}
    listed=listed.filter(v=>!own.some(o=>o.id===v.id));}

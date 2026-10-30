@@ -183,3 +183,12 @@
 .role-try{align-items:center;margin-top:4px}
 .role-tried{margin-top:8px}
 .role-tried img{display:block;max-width:100%;max-height:320px;margin:0 auto;border-radius:14px}
+/* 自己的接口：自动识别的结果 */
+.custom-report{margin:8px 0 12px;padding:10px 12px;border-radius:14px;background:var(--card2);font-size:13px;line-height:1.5}
+.custom-report p{margin:0}
+.custom-report .hint{margin-top:4px;white-space:pre-line}
+.custom-report.good{background:color-mix(in srgb,var(--accent) 12%,var(--card2))}
+.custom-report.bad{background:color-mix(in srgb,var(--danger) 10%,var(--card2))}
+.custom-report .grid-choices,.custom-report .actions{margin-top:8px}
+.custom-now{margin:-4px 0 12px}
+.custom-services{margin-bottom:6px}

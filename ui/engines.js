@@ -4,7 +4,8 @@ const TIERS = {0: '未订阅', 1: 'Tablet', 2: 'Scroll', 3: 'Opus'};
 import {icon, spark} from './icons.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {fly} from './carry.js';
-import {CUSTOM_TEMPLATES, voicesFromFolder, shortLanguage, customHint} from '../core/custom-voice.js';
+import {CUSTOM_TEMPLATES, voicesFromFolder, shortLanguage, customHint, customSlots} from '../core/custom-voice.js';
+import {cleanAddress, fromCurl} from '../core/custom-detect.js';
 
 export function enginesApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'engines'), drafts = new Map();
@@ -378,16 +379,17 @@ export function enginesApp(ctx) {
       + card(engine, 'div')
       + groupTitle('连接')
       + `<div class="group pad">
+          ${engine === 'custom' ? customAddressRow() : ''}
           ${keyRows(engine)}
           ${field(saved ? '再加一个密钥' : engine === 'custom' ? '密钥（不用密钥的接口可以不填）' : 'API Key', textArea('key', '', `rows="1" class="code key-paste" autocomplete="off" spellcheck="false" placeholder="${saved ? '粘贴新的密钥' : '粘贴密钥，多个就每行一个'}"`), '粘贴完点一下别处就保存了。可以保存多个账号的密钥，新加的排在后面，不用的可以单独删掉。先用排在前面的；某个密钥被拒（401、403）、额度用完（402）或请求太频繁（429）时，自动换下一个重试，这次打开页面里不再用它。想手动换，点那个密钥的「用这个」：马上改用它，并把它排到第一个，以后打开也先用它。\n\n密钥只保存在当前浏览器和酒馆地址，按账户分别保存。')}
           ${schema.models.length > 1 ? field('默认模型', select('model', c.model, schema.models.map(m => [m.id, m.id, !m.supported])), unsupported || [schema.modelNote, '角色没有单独指定模型时使用这里的模型。'].filter(Boolean).join('\n\n')) : ''}
           ${engine === 'mini' ? field('服务区域', select('region', c.region, [['cn', '国内'], ['global', '国际'], ['uw', '国际 · 低延迟入口']])) : ''}
         </div>`
       + (fish ? `<details data-group="fish-relay"><summary>中转<small class="fold-note">${fish.relay ? esc(fish.relay.replace(/^https?:\/\//, '')) : '直连 Fish Audio'}</small></summary><div class="fold-body">${fishRelay()}</div></details>` : '')
-      + (engine === 'custom' ? customImport() + customTemplates() : '')
+      + (engine === 'custom' ? customServices() + customCurl() + (!c.params.url || /GPT-SoVITS/i.test(c.params.service || '') ? customImport() : '') : '')
       + balanceGroup()
-      + groupTitle(engine === 'custom' ? '接口和音色' : '参数')
-      + schema.groups.map((g, i) => `<details data-group="${engine}:${g.id}" ${i === 0 ? 'open' : ''}><summary>${esc(g.title)}</summary><div>${g.fields.map(f => control(f, c)).join('')}</div></details>`).join('')
+      + (engine === 'custom' ? '' : groupTitle('参数'))
+      + (engine === 'custom' ? customGroups(schema, c) : schema.groups).map((g, i) => `<details data-group="${engine}:${g.id}" ${i === 0 ? 'open' : ''}><summary>${esc(g.title)}</summary><div>${g.fields.map(f => control(f, c)).join('')}</div></details>`).join('')
       + (tags.length || schema.sounds?.length ? `<details data-group="tags"><summary>情绪与语气标签</summary><div><div class="tags">${tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>${engine === 'mini' && c.model.startsWith('speech-2.8') ? '<div class="tags">' + ['laughs', 'chuckle', 'coughs', 'clear-throat', 'groans', 'breath', 'pant', 'inhale', 'exhale', 'gasps', 'sniffs', 'sighs', 'snorts', 'burps', 'lip-smacking', 'humming', 'hissing', 'emm', 'sneezes'].map(x => `<span class="tag">(${x})</span>`).join('') + '</div>' : ''}${schema.sounds?.length ? '<div class="tags">' + schema.sounds.map(x => `<span class="tag">(${esc(x)})</span>`).join('') + '</div>' : ''}<a href="${esc(schema.source)}" target="_blank" rel="noopener noreferrer">查看官方文档</a></div></details>` : '')
       + (engine === 'custom' ? `<div class="actions">${btn('custom-test', icon('play', true) + '试一试', 'secondary')}</div><p class="hint" data-custom-test style="white-space:pre-line"></p>` : '')
       + `<div class="savebar"><span class="save-state" data-save-state>${dirty ? '未保存' : '已保存'}</span>${btn('save-connection', '保存配置', 'primary')}</div>`);
@@ -409,10 +411,60 @@ export function enginesApp(ctx) {
     for (const [r, v] of pairs) api.saveRoute({...r, engine: 'custom', voice: v.name});
     return pairs.length;
   }
-  /** 自己的接口: one-click formats of well-known self-hosted services (only the user's own address goes in). */
-  function customTemplates() {
-    return `<details data-group="custom-templates"><summary>一键格式 ${help('用自己电脑（或者局域网里别的电脑）上跑的语音服务时，填上它的地址，点「按这个格式填」，下面的接口设置就填好了，再添加音色、保存。插件不带任何别人的服务器地址。\n\n别的服务：照它的接口文档，自己在下面填地址、请求体和回答的格式。')}<small class="fold-note">${CUSTOM_TEMPLATES.map(t => t.name.replace(/（.*）/, '')).join('、')}</small></summary><div class="fold-body">${CUSTOM_TEMPLATES.map(t => field(t.name, `<div class="music-selfhost">${input('voice-base-' + t.id, '', 'url', `placeholder="${esc(t.example)}" autocomplete="off" spellcheck="false"`)}${btn('voice-template', '按这个格式填', 'secondary small', `data-template="${esc(t.id)}"`)}</div>`, t.note)).join('')}</div></details>`;
+  // ---------- 自己的接口: where the service is, and what it is ----------
+  let customAddress = null, customFound = null, customNote = '';
+  const customBaseOf = p => { const m = String(p.url || '').replace(/^\/proxy\//, '').match(/^https?:\/\/[^/?#]+/i); return m ? m[0] : ''; };
+  function customAddressRow() {
+    const c = draft(), address = customAddress ?? customBaseOf(c.params);
+    return field('服务地址', `<div class="music-selfhost">${input('custom-base', address, 'url', 'placeholder="http://127.0.0.1:9880" autocomplete="off" spellcheck="false"')}${btn('custom-detect', '自动识别', 'secondary small')}</div>`, '跑语音服务的地址，点「自动识别」，插件会读这个服务的接口说明，把下面都填好。空着点，会在这台电脑和酒馆那台电脑上找常见的端口。\n\n手机上用的话，地址不能写 127.0.0.1（那是手机自己），要写电脑的局域网 IP。')
+      + (customFound ? customReport(customFound) : c.params.service ? `<p class="hint custom-now">现在用的：${esc(c.params.service)}</p>` : '');
   }
+  function customReport(r) {
+    const notes = (r.notes || []).map(n => `<p class="hint">${esc(n)}</p>`).join('');
+    if (r.scan) return notes + `<div class="custom-report"><p>${r.scan.length ? '这些地址上有服务，点一个：' : '常见的端口上都没找到服务：先把服务开起来，再点一次。不在这台电脑上的话，直接填它的地址。'}</p>${r.scan.length ? `<div class="grid-choices">${r.scan.map(a => `<button type="button" data-action="custom-try" data-address="${esc(a)}">${esc(a.replace(/^https?:\/\//, ''))}</button>`).join('')}</div>` : ''}</div>`;
+    if (!r.ok) return notes + `<div class="custom-report bad"><p>✗ ${esc(r.message)}</p>${r.hint ? `<p class="hint">👉 ${esc(r.hint)}</p>` : ''}${r.address ? `<div class="actions">${btn('custom-try', '试试 ' + esc(r.address.replace(/^https?:\/\//, '')), 'secondary small', `data-address="${esc(r.address)}"`)}</div>` : ''}</div>`;
+    if (!r.found?.params) return notes + `<div class="custom-report"><p>服务连上了，${esc(r.found?.note || '但认不出是什么')}。在下面选一个，或者粘贴它文档里的 curl 命令。</p></div>`;
+    const voices = r.found.voices ? `服务里有 ${r.found.voices} 个音色，角色 App 里能直接选` : customSlots(r.found.params).has('ref_audio') || customSlots(r.found.params).has('ref_audio_base64') ? '在下面的「音色」里上传参考音频' : customSlots(r.found.params).has('ref_text') ? '在下面的「音色」里填参考音频' : '在下面的「音色」里添加音色';
+    return notes + `<div class="custom-report good"><p>✓ 认出来了：${esc(r.found.name)}${r.via === 'proxy' ? '（走酒馆转发）' : ''}</p><p class="hint">${esc(voices)}，再点「试一试」。</p>${r.found.unknown?.length ? `<p class="hint">这几项没认出来，到高级设置的请求体里补：${esc(r.found.unknown.join('、'))}</p>` : ''}</div>`;
+  }
+  /** Common services, for when one cannot be read. */
+  function customServices() {
+    const c = draft(), lost = customFound?.ok && !customFound.found?.params;
+    return `<details data-group="custom-services"${lost ? ' open' : ''}><summary>常见的服务<small class="fold-note">${c.params.service ? esc(c.params.service) : '认不出来时手动选'}</small></summary><div class="fold-body"><div class="grid-choices custom-services">${CUSTOM_TEMPLATES.map(t => `<button type="button" data-action="custom-service" data-template="${esc(t.id)}" aria-pressed="${c.params.service === (t.fill?.('').service ?? t.name)}">${esc(t.short)}</button>`).join('')}</div>${customNote ? `<p class="hint" style="white-space:pre-line">${esc(customNote)}</p>` : ''}</div></details>`;
+  }
+  function customCurl() {
+    return `<details data-group="custom-curl"><summary>粘贴 curl 命令${help('列表里没有的服务：它的文档里一般有一条 curl 示例，整条粘贴进来就行。插件认出哪个是台词、哪个是音色，密钥会存好。\n\n认错了可以在高级设置里改，或者在命令里直接写 {{text}} {{voice}}。')}</summary><div class="fold-body">${textArea('custom-curl', '', 'class="code" rows="3" autocomplete="off" spellcheck="false" placeholder="curl -X POST http://127.0.0.1:9000/tts -d ..."')}<div class="actions">${btn('custom-curl', '读取', 'secondary')}</div></div></details>`;
+  }
+  /** Voices first; of their columns only what these settings use; the raw settings out of the way. */
+  function customGroups(schema, c) {
+    const used = customSlots(c.params), upload = used.has('ref_audio') || used.has('ref_audio_base64'), by = id => schema.groups.find(g => g.id === id);
+    const shown = col => col.key === 'name' || (col.key === 'voice' ? used.has('voice') || !upload : col.key === 'ref_file' ? upload : used.has(col.key));
+    const voices = by('voices'), rows = voices.fields[0];
+    const columns = rows.columns.filter(shown).map(col => col.key === 'voice' ? {...col, label: used.has('ref_text') ? '参考音频路径（在跑服务的电脑上）' : '音色 ID（空着就用名字）'} : col);
+    return [{...voices, fields: [{...rows, columns}]}, {...by('api'), title: '高级设置'}];
+  }
+  /** Settings found or picked: kept right away, so nothing is lost by not pressing 保存. */
+  function keepCustom(params, voices = []) {
+    const c = draft();
+    c.params = {...c.params, ...params};
+    if (voices.length && !(c.params.voices || []).length) c.params.voices = voices;
+    try { api.saveConnection('custom', c); dirty = false; } catch (error) { changed(); dirty = true; ctx.notify(error.message, {error: true}); }
+  }
+  async function customDetect(address) {
+    const typed = String(address ?? '').trim();
+    if (!typed) {
+      const scan = await api.customScan();
+      if (scan.length === 1) return customDetect(scan[0]);
+      customFound = {scan}; render();
+      return;
+    }
+    const r = await api.customDetect(typed);
+    customFound = r;
+    if (r.base) customAddress = r.base;
+    if (r.ok && r.found?.params) { keepCustom(r.found.params); customNote = ''; }
+    render();
+  }
+
   /** 向量模型: an OpenAI-compatible Embeddings API for 记忆 (core/embed.js). Off: 记忆 searches locally. */
   function renderEmbed() {
     const e = embedDraft, hint = api.keyHint('embed'), saved = !!hint;
@@ -465,6 +517,7 @@ export function enginesApp(ctx) {
     if (id === 'embed') { embedDraft = structuredClone(api.getState().embed); embedModels = []; dirty = false; render(); v.root.scrollTop = 0; return; }
     if (id === 'nai') { render(); v.root.scrollTop = 0; loadSubscription(false); return; }
     if (id === 'gpt' || id === 'comfy') { render(); v.root.scrollTop = 0; return; }
+    if (id === 'custom') { customAddress = null; customFound = null; customNote = ''; }
     if (!drafts.has(id)) drafts.set(id, structuredClone(api.getState().connections[id]));
     dirty = JSON.stringify(draft()) !== JSON.stringify(api.getState().connections[id]);
     render();
@@ -497,10 +550,11 @@ export function enginesApp(ctx) {
     if (engine !== 'gpt' || !['key', 'gpt-url'].includes(el.dataset.field)) return;
     resetGptModels(); updateGptModels();
   });
+  v.on('input', '[data-field=custom-base]', el => { customAddress = el.value; });
   v.on('pointerdown', '[data-action=reveal-key]', (el, event) => event.preventDefault());
   v.on('change', '[data-field]', el => {
     if (el.dataset.field === 'key') { saveTypedKey(el); return; }
-    if (el.dataset.field === 'image-name') return;
+    if (el.dataset.field === 'image-name' || /^custom-/.test(el.dataset.field)) return;
     if (engine === 'embed') {
       const key = el.dataset.field.replace(/^embed-/, '');
       if (!['enabled', 'url', 'model'].includes(key)) return;
@@ -575,7 +629,7 @@ export function enginesApp(ctx) {
         const label = el.nextElementSibling;
         if (label) label.textContent = '正在存……';
         try {
-          const id = await api.reference(file, {wav: engine === 'mimo'});
+          const id = await api.reference(file, {wav: engine === 'mimo' || engine === 'custom'});
           if (!c.params[f.key].includes(row)) return;
           row[col.key] = id;
           // A clone sample is named after its file when it has no name yet; the list is saved right away when every
@@ -606,7 +660,7 @@ export function enginesApp(ctx) {
     if (!voices.length) { ctx.notify('这个文件夹里没找到角色：要选放着一个个角色文件夹的那一层', {error: true}); return; }
     const c = draft(), kept = (c.params.voices || []).filter(x => !voices.some(n => n.name === String(x.name).trim()));
     c.params = {...c.params, voices: [...kept, ...voices].slice(0, 200)};
-    if (!String(c.params.url || '').trim()) c.params = {...c.params, ...CUSTOM_TEMPLATES[0].fill('http://127.0.0.1:9880')};
+    if (!String(c.params.url || '').trim()) c.params = {...c.params, ...CUSTOM_TEMPLATES[0].fill(cleanAddress(customAddress).base || 'http://127.0.0.1:9880')};
     api.saveConnection('custom', c); dirty = false; render();
     ctx.notify(`导入了 ${voices.length} 个角色${skipped.length ? `（${skipped.join('、')} 没找到参考音频）` : ''}，已保存`);
     const n = await matchRoles(voices);
@@ -762,12 +816,30 @@ export function enginesApp(ctx) {
         v.root.querySelector('[data-voice-folder]')?.click();
         break;
       }
-      case 'voice-template': {
-        const t = CUSTOM_TEMPLATES.find(x => x.id === el.dataset.template), base = v.root.querySelector(`[data-field="voice-base-${el.dataset.template}"]`)?.value.trim().replace(/\/+$/, '') || '';
-        if (!t || !/^https?:\/\/[^\s/]+/i.test(base)) { ctx.notify('先填服务的地址，比如 ' + t?.example, {error: true}); break; }
-        draft().params = {...draft().params, ...t.fill(base)};
-        changed(); render();
-        ctx.notify('接口填好了：再在下面「音色」里添加音色，然后保存配置');
+      case 'custom-detect': await v.busy(el, async () => { el.textContent = '正在看…'; try { await customDetect(v.root.querySelector('[data-field=custom-base]')?.value); } finally { el.textContent = '自动识别'; } }); break;
+      case 'custom-try': customAddress = el.dataset.address; await v.busy(el, () => customDetect(el.dataset.address)); break;
+      case 'custom-service': {
+        const t = CUSTOM_TEMPLATES.find(x => x.id === el.dataset.template);
+        if (!t) break;
+        const typed = cleanAddress(v.root.querySelector('[data-field=custom-base]')?.value);
+        // An address of its own stays, a default fills in; one that has a fixed address does not care.
+        const base = t.fixed || typed.base || (t.port ? `http://127.0.0.1:${t.port}` : '');
+        customNote = t.note; customFound = null; customAddress = base || null;
+        if (t.detect) { await v.busy(el, () => customDetect(base)); if (customFound) { customNote = t.note; render(); } break; }
+        if (!base) { render(); ctx.notify('先填服务的地址，比如 ' + t.example, {error: true}); break; }
+        keepCustom(t.fill(base), t.voices || []);
+        render();
+        ctx.notify('接口填好了');
+        break;
+      }
+      case 'custom-curl': {
+        const box = v.root.querySelector('[data-field=custom-curl]'), read = fromCurl(box?.value || '');
+        if (read.error) { ctx.notify(read.error, {error: true}); break; }
+        if (read.key) { try { api.addKeys('custom', read.key); } catch { /* it can be typed above */ } }
+        customFound = null; customAddress = null; customNote = '';
+        keepCustom(read.params);
+        render();
+        ctx.notify(['接口填好了', ...read.notes].join('，'));
         break;
       }
       case 'custom-test': {
@@ -777,7 +849,13 @@ export function enginesApp(ctx) {
           try {
             const r = await api.customTest(draft());
             if (out()) out().textContent = `✓ 接口通了，${r.voice ? `用音色「${r.voice}」` : ''}念了一句（${Math.round(r.bytes / 1024)} KB）。记得保存配置。`;
-          } catch (error) { const hint = customHint(error.message); if (out()) out().textContent = '✗ ' + error.message + (hint ? '\n👉 ' + hint : ''); }
+          } catch (error) {
+            // Could not be asked: why, from the service itself.
+            const lost = /连不上|无法连接/.test(error.message) && draft().params.url ? await api.customReach(draft().params.url).catch(() => null) : null;
+            if (lost && !lost.ok && lost.base) { customFound = lost; render(); if (out()) out().textContent = ''; return; }
+            const hint = customHint(error.message);
+            if (out()) out().textContent = '✗ ' + error.message + (hint ? '\n👉 ' + hint : '');
+          }
         });
         break;
       }
