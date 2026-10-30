@@ -1,7 +1,9 @@
 // Drawing settings, the LLM-facing drawing preset, and <img>…</img> picture blocks in chat text.
 //
 // Two kinds of preset live here:
-//   styles  - "画风预设" edited in the drawing app: artist tags, fixed positive and fixed negative tags for NovelAI.
+//   styles  - "画风预设" edited in the drawing app: artist tags, fixed positive and fixed negative tags for NovelAI. Their
+//             order is the list's (dragged in the app); a style's `group` names one of styleGroups ({id, name, open}),
+//             and a group's styles sit together where its first one is.
 //   presets - "绘图预设" edited in the preset app: the rules the model follows when it plans pictures.
 //
 // A picture block is a plain paired tag (other plugins can exclude <img></img>) holding one line per field:
@@ -313,7 +315,39 @@ export function defaultDraw() {
   return {enabled: false, auto: true, guard: true, fold: false, mode: 'separate', strip: true, engine: 'nai', gpt: defaultGpt(), comfy: defaultComfy(),
     connections: {nai: normalizeImageConnections('nai'), gpt: normalizeImageConnections('gpt')},
     queue: {gap: 3, retries: 4, cloud: {enabled: false, kind: 'room', url: '', room: ''}}, relay: {url: '', assumeOpus: false}, vibe: defaultVibe(), params: defaultDrawParams(),
-    styles: [structuredClone(DEFAULT_STYLE)], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
+    styles: [structuredClone(DEFAULT_STYLE)], styleGroups: [], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
+}
+
+/** 画风 groups made tidy, in place: each group's styles together where its first one is, a group with no styles gone,
+ *  a style naming no group there is out of groups. */
+export function tidyStyleGroups(d) {
+  const groups = new Map();
+  for (const g of Array.isArray(d.styleGroups) ? d.styleGroups : []) {
+    if (!g || typeof g !== 'object' || !g.id || groups.has(String(g.id))) continue;
+    groups.set(String(g.id), {id: String(g.id), name: String(g.name ?? '').trim().slice(0, 40) || '新建组', open: g.open !== false});
+  }
+  const out = [], placed = new Set();
+  for (const s of d.styles) if (s.group && !groups.has(s.group)) delete s.group;
+  for (const s of d.styles) {
+    if (placed.has(s)) continue;
+    if (!s.group) { out.push(s); placed.add(s); continue; }
+    for (const m of d.styles) if (m.group === s.group && !placed.has(m)) { out.push(m); placed.add(m); }
+  }
+  d.styles = out;
+  const used = new Set(out.map(s => s.group).filter(Boolean));
+  d.styleGroups = [...groups.values()].filter(g => used.has(g.id));
+  return d;
+}
+/** The 画风 list as it shows: [{style} | {group, styles}] in order. */
+export function styleTree(d) {
+  const groups = new Map((d.styleGroups || []).map(g => [g.id, g])), out = [], open = new Map();
+  for (const style of d.styles) {
+    const group = style.group && groups.get(style.group);
+    if (!group) { out.push({style}); continue; }
+    if (!open.has(group.id)) { const entry = {group, styles: []}; open.set(group.id, entry); out.push(entry); }
+    open.get(group.id).styles.push(style);
+  }
+  return out;
 }
 
 /** Connection presets contain no secrets. Legacy single connections become the default preset. */
@@ -376,7 +410,8 @@ export function normalizeDraw(value) {
   d.vibe = normalizeVibeSettings(d.vibe);
   d.params = normalizeDrawParams(d.params);
   d.styles = (Array.isArray(d.styles) && d.styles.length ? d.styles : base.styles).map(s => ({id: String(s.id || crypto.randomUUID()), name: text(s.name, 60) || '画风', artist: text(s.artist, 4000), positive: text(s.positive, 4000), negative: text(s.negative, 4000),
-    ...(s.params && typeof s.params === 'object' ? {params: styleParams({...d.params, ...s.params})} : {})}));
+    ...(s.params && typeof s.params === 'object' ? {params: styleParams({...d.params, ...s.params})} : {}), ...(s.group ? {group: String(s.group)} : {})}));
+  tidyStyleGroups(d);
   d.activeStyle = d.styles.some(s => s.id === d.activeStyle) ? d.activeStyle : d.styles[0].id;
   // From before 画风 kept parameters: the one in use keeps the parameters in use now.
   const using = d.styles.find(s => s.id === d.activeStyle);

@@ -157,15 +157,48 @@ class DrawSettings {
         // Its parameters: the ones given (a copy keeps the original's), else the ones it had.
         const params = value.params && typeof value.params === 'object' ? value.params : was?.params;
         if (params) style.params = styleParams({ ...next.draw.params, ...params });
-        if (index < 0) next.draw.styles.push(style); else next.draw.styles[index] = style;
+        // It stays in its group; a new one given `after` (a copy) goes right below that style, in its group.
+        const after = index < 0 && value.after ? next.draw.styles.findIndex(s => s.id === value.after) : -1;
+        if (was?.group) style.group = was.group; else if (after >= 0 && next.draw.styles[after].group) style.group = next.draw.styles[after].group;
+        if (index >= 0) next.draw.styles[index] = style; else if (after >= 0) next.draw.styles.splice(after + 1, 0, style); else next.draw.styles.push(style);
         this.save(next);
         return clone(this.settings.draw.styles.find(s => s.id === style.id));
     }
-    deleteStyle(id) {
-        const next = this.getState();
-        if (next.draw.styles.length === 1) throw Error('请至少保留一个画风预设');
-        next.draw.styles = next.draw.styles.filter(s => s.id !== id);
+    deleteStyle(id) { return this.deleteStyles([id]); }
+    /** Several 画风 at once (a group's, the ones picked): one save; at least one has to stay. */
+    deleteStyles(ids) {
+        const next = this.getState(), gone = new Set([...(ids || [])].map(String));
+        const left = next.draw.styles.filter(s => !gone.has(s.id));
+        if (!left.length) throw Error('请至少保留一个画风预设');
+        next.draw.styles = left;
         return this.save(next).draw;
+    }
+    /** The 画风 list in a new order with its groups: tree [{style: id} | {group: {id, name, open}, styles: [id]}].
+     *  Styles not given keep their order after the rest; a group with no style given goes. */
+    arrangeStyles(tree) {
+        if (!Array.isArray(tree)) throw Error('画风顺序无效');
+        const next = this.getState(), byId = new Map(next.draw.styles.map(s => [s.id, s])), order = [], groups = [], seen = new Set();
+        const take = (id, group) => {
+            const s = byId.get(String(id));
+            if (!s || seen.has(s.id)) return false;
+            seen.add(s.id);
+            if (group) s.group = group; else delete s.group;
+            order.push(s);
+            return true;
+        };
+        for (const entry of tree) {
+            if (entry?.group && typeof entry.group === 'object') {
+                const g = { id: String(entry.group.id || crypto.randomUUID()), name: String(entry.group.name ?? '').trim().slice(0, 40) || '新建组', open: entry.group.open !== false };
+                let any = false;
+                for (const id of Array.isArray(entry.styles) ? entry.styles : []) any = take(id, g.id) || any;
+                if (any && !groups.some(x => x.id === g.id)) groups.push(g);
+            } else take(entry?.style);
+        }
+        for (const s of next.draw.styles) if (!seen.has(s.id)) { delete s.group; order.push(s); }
+        next.draw.styles = order;
+        next.draw.styleGroups = groups;
+        this.save(next);
+        return clone(this.settings.draw);
     }
     saveDrawPreset(value) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('绘图预设格式无效');

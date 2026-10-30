@@ -4,13 +4,15 @@
 // closes it. The list scrolls as usual: only a sideways move takes the row.
 // With a mouse the same is at hand without swiping: a ⋯ on the row under the pointer (or the right button) opens its
 // actions, and Ctrl / ⌘ / Shift with a click picks rows, as when choosing files.
+// A list that can be put in order (options.sort): a row held still lifts, and the finger (or the mouse) moves it; the
+// list hands the move over to sort.start's session, and nothing scrolls under it meanwhile.
 //
 // swipeRow(id, inner, actions) writes a row; mountSwipeList(list, options) brings every row under `list` to life, also
 // the ones drawn later (a paged list, a list drawn again).
 import {esc} from './common.js';
 import {icon} from './icons.js';
 
-const PICK = 56, BUTTON = 64, GAP = 8;
+const PICK = 56, BUTTON = 64, GAP = 8, HOLD = 360;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 /** How far a row slides past where it stops: less and less the further it is pulled. */
 const rubber = (over, room = 90) => room * (1 - Math.exp(-over / room));
@@ -28,9 +30,11 @@ export function swipeRow(id, inner, actions = [], {className = '', label = ''} =
 /**
  * list: the element holding the rows. onAction(key, id, button): an action behind a row was tapped. onTap(id, event):
  * a row was tapped (not on a button of its own). bulk: [{key, label, icon, danger}] for the choosing bar;
- * onBulk(key, ids): one of them (choosing ends when it resolves). Returns {close(), done(), get chosen()}.
+ * onBulk(key, ids): one of them (choosing ends when it resolves). sort: {start(row, {x, y}) → {move(x, y), drop(), cancel()}
+ * | null}, called when a row has been held still; the session gets the moves until the finger is lifted.
+ * Returns {close(), done(), get chosen()}.
  */
-export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bulk = [], onBulk = () => {}, hint = '', mouseHint = ''} = {}) {
+export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bulk = [], onBulk = () => {}, hint = '', mouseHint = '', sort = null} = {}) {
   const win = ctx.win, doc = ctx.doc;
   let open = null, press = null, chosen = null, suppress = 0;
   const rows = () => [...list.querySelectorAll('.sw-row[data-swipe]')];
@@ -90,22 +94,33 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
   // ---------- a finger on a row ----------
   list.addEventListener('pointerdown', e => {
     const main = e.target.closest('.sw-main');
-    if (!main || e.button > 0 || press || e.target.closest('.sw-more')) return;
+    if (!main || e.button > 0 || press || e.target.closest('.sw-more, input, textarea, select, [contenteditable]')) return;
     const row = main.closest('.sw-row');
-    press = {id: e.pointerId, x: e.clientX, y: e.clientY, row, main, mode: '', start: open === row ? -room(row) : 0, at: Date.now(), vx: 0, last: {x: e.clientX, t: e.timeStamp || Date.now()}, crossed: false};
+    const p = press = {id: e.pointerId, x: e.clientX, y: e.clientY, row, main, mode: '', start: open === row ? -room(row) : 0, at: Date.now(), vx: 0, last: {x: e.clientX, t: e.timeStamp || Date.now()}, crossed: false};
+    // Held still: the row lifts to be moved (not while rows are being picked, nor from an open row).
+    if (sort && !chosen && open !== row) p.timer = win.setTimeout(() => {
+      if (press !== p || p.mode) return;
+      const session = sort.start(row, {x: p.x, y: p.y});
+      if (!session) return;
+      p.mode = 'drag'; p.session = session;
+      close(); buzz();
+      try { main.setPointerCapture(p.id); } catch { /* fine */ }
+    }, HOLD);
   });
   list.addEventListener('pointermove', e => {
     const p = press;
     if (!p || e.pointerId !== p.id) return;
+    if (p.mode === 'drag') { p.session.move(e.clientX, e.clientY); return; }
     const dx = e.clientX - p.x, dy = e.clientY - p.y;
     if (!p.mode) {
       if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        win.clearTimeout(p.timer);
         p.mode = 'swipe';
         if (open && open !== p.row) close();
         p.row.classList.add('sw-drag');
         p.main.style.transition = 'none';
         try { p.main.setPointerCapture(e.pointerId); } catch { /* fine */ }
-      } else if (Math.abs(dy) > 8) { press = null; return; }
+      } else if (Math.abs(dy) > 8) { win.clearTimeout(p.timer); press = null; return; }
       else return;
     }
     const w = room(p.row), raw = p.start + dx;
@@ -124,12 +139,14 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
     const t = e.timeStamp || Date.now();
     if (t > p.last.t) { p.vx = (e.clientX - p.last.x) / (t - p.last.t); p.last = {x: e.clientX, t}; }
   });
-  // While a row is being swiped the list must not scroll sideways or bounce.
-  list.addEventListener('touchmove', e => { if (press?.mode === 'swipe' && e.cancelable) e.preventDefault(); }, {passive: false});
+  // While a row is being swiped or moved the list must not scroll or bounce under it.
+  list.addEventListener('touchmove', e => { if ((press?.mode === 'swipe' || press?.mode === 'drag') && e.cancelable) e.preventDefault(); }, {passive: false});
   const release = e => {
     const p = press;
     if (!p || e.pointerId !== p.id) return;
     press = null;
+    win.clearTimeout(p.timer);
+    if (p.mode === 'drag') { suppress = Date.now(); if (e.type === 'pointercancel') p.session.cancel(); else p.session.drop(); return; }
     if (p.mode !== 'swipe') return;
     suppress = Date.now();
     const w = room(p.row), x = p.x2 ?? 0, fresh = (e.timeStamp || Date.now()) - p.last.t < 90, v = fresh ? p.vx : 0;
@@ -159,7 +176,11 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
     if (onTap && !e.target.closest('button, a, input, select, textarea, label')) onTap(row.dataset.swipe, e);
   }, true);
   // A mouse: the right button opens a row's actions.
-  list.addEventListener('contextmenu', e => { const row = e.target.closest('.sw-row'); if (!row || !row.querySelector('.sw-act')) return; e.preventDefault(); if (open === row) close(); else openRow(row); });
+  // A finger held on a row of a list that can be put in order lifts it: the long press's menu does not come.
+  list.addEventListener('contextmenu', e => {
+    if (sort && press) { e.preventDefault(); return; }
+    const row = e.target.closest('.sw-row'); if (!row || !row.querySelector('.sw-act')) return; e.preventDefault(); if (open === row) close(); else openRow(row);
+  });
   list.addEventListener('keydown', e => {
     const row = e.target.closest('.sw-row');
     if (e.key === 'Escape') { if (open) { close(); e.stopPropagation(); } else if (chosen) { done(); e.stopPropagation(); } return; }
@@ -172,6 +193,6 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
   return {
     close, done,
     get chosen() { return chosen ? [...chosen] : null; },
-    dispose() { watch.disconnect(); doc.removeEventListener('pointerdown', outside, true); bar.remove(); },
+    dispose() { win.clearTimeout(press?.timer); if (press?.mode === 'drag') press.session.cancel(); press = null; watch.disconnect(); doc.removeEventListener('pointerdown', outside, true); bar.remove(); },
   };
 }

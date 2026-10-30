@@ -200,7 +200,9 @@ export interface AssistantMessage extends AssistantVariant { id: string; role: '
 export interface AssistantThread { id: string; kind: 'assistant'; title: string; titleEdited?: boolean; revision?: number; memoryRevision?: number; restoredAt?: number; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
 export interface AssistantThreadSummary extends Omit<AssistantThread, 'messages'> { messageCount: number; preview: string; }
 /** 画风预设: artist and fixed tags sent to NovelAI. */
-export interface DrawStyle { id: string; name: string; artist: string; positive: string; negative: string; }
+export interface DrawStyle { id: string; name: string; artist: string; positive: string; negative: string; /** The 画风 group it is in. */ group?: string; }
+/** A 画风 group in the drawing app: shown open (its styles under it) or closed. */
+export interface DrawStyleGroup { id: string; name: string; open: boolean; }
 /** 绘图预设: rules injected into the chat request so the model writes <img> tags. */
 export interface DrawPreset { id: string; name: string; /** Pictures per reply, 1 to drawCountMax. */ count: number; injection: Injection; entries: PresetEntry[]; }
 export interface DrawSettings {
@@ -219,7 +221,7 @@ export interface DrawSettings {
     strip: boolean;
     queue: DrawQueueSettings;
     params: DrawParams;
-    styles: DrawStyle[]; activeStyle: string;
+    styles: DrawStyle[]; styleGroups: DrawStyleGroup[]; activeStyle: string;
     presets: DrawPreset[]; activePreset: string;
     /** A NovelAI relay ('' = NovelAI itself); assumeOpus counts small pictures as free when the relay gives no subscription. */
     relay: { url: string; assumeOpus: boolean };
@@ -653,8 +655,13 @@ export interface BackendFacade {
     selectComfyWorkflow(id: string): void;
     deleteComfyWorkflow(id: string): void;
     comfyLoras(options?: {transport?: 'tavern' | 'direct'; signal?: AbortSignal}): Promise<string[]>;
-    saveStyle(style: Omit<DrawStyle, 'id'> & { id?: string }): DrawStyle;
+    /** after: a new style (a copy) goes right below this one, in its group. */
+    saveStyle(style: Omit<DrawStyle, 'id'> & { id?: string; after?: string }): DrawStyle;
     deleteStyle(id: string): DrawSettings;
+    /** Several at once; at least one has to stay. */
+    deleteStyles(ids: string[]): DrawSettings;
+    /** The 画风 list in a new order, with its groups (styles not given keep their order after the rest). */
+    arrangeStyles(tree: Array<{style: string} | {group: Partial<DrawStyleGroup>; styles: string[]}>): DrawSettings;
     saveDrawPreset(preset: Omit<DrawPreset, 'id'> & { id?: string }): DrawPreset;
     deleteDrawPreset(id: string): DrawSettings;
     /** Text injected for the active drawing preset, or for the given draft. */

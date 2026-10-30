@@ -44,19 +44,21 @@
   --sttts-under:var(--SmartThemeUnderlineColor,var(--sttts-em));
   display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;width:34px;height:28px;min-height:28px;margin:0 2px;padding:3px 5px;
   font:inherit;border:0;border-radius:999px;box-shadow:none;background:transparent;cursor:pointer;touch-action:manipulation;
-  color:color-mix(in srgb,var(--sttts-body) 50%,transparent);transition:color 160ms,background 160ms,box-shadow 160ms}
-#chat [data-sttts-action="line"]:hover{background:color-mix(in srgb,var(--sttts-body) 9%,transparent)}
+  color:color-mix(in srgb,var(--sttts-body) 50%,transparent);transition:color 160ms,background 160ms}
+/* Only the wave is drawn: no ring and no pill around it in any state. A line made and not yet heard keeps its dot under
+   the wave, a line heard its bar; playing, the bars move with the voice. Pointed at with a mouse, the wave lifts a little. */
+@media (hover:hover){#chat [data-sttts-action="line"]:hover [data-sttts-wave]{transform:scale(1.12)}}
 #chat [data-sttts-action="line"]:focus-visible{outline:2px solid var(--sttts-quote);outline-offset:2px}
-#chat [data-sttts-state="unbound"]{color:color-mix(in srgb,var(--sttts-em) 60%,transparent);outline:1px dashed color-mix(in srgb,var(--sttts-em) 45%,transparent);outline-offset:-3px}
+#chat [data-sttts-state="unbound"]{color:color-mix(in srgb,var(--sttts-em) 60%,transparent)}
 #chat [data-sttts-state="unbound"] [data-sttts-bar]{height:3px!important;flex-basis:3px;width:3px;border-radius:50%}
 #chat [data-sttts-state="ungenerated"] [data-sttts-bar]{opacity:.55}
 #chat [data-sttts-state="ready"]{color:var(--sttts-quote);background:radial-gradient(circle,currentColor 0 1.6px,transparent 2px) center bottom 1px/4px 4px no-repeat}
-#chat [data-sttts-state="playing"],#chat [data-sttts-state="generating"],#chat [data-sttts-state="paused"]{color:var(--sttts-quote);background:color-mix(in srgb,var(--sttts-quote) 18%,transparent);box-shadow:0 0 0 1.5px color-mix(in srgb,var(--sttts-quote) 45%,transparent)}
+#chat [data-sttts-state="playing"],#chat [data-sttts-state="generating"],#chat [data-sttts-state="paused"]{color:var(--sttts-quote)}
 #chat [data-sttts-state="generating"] [data-sttts-bar]{animation:sttts-think 1s ease-in-out infinite}
 #chat [data-sttts-state="generating"] [data-sttts-bar]:nth-child(2n){animation-delay:-.5s}
 #chat [data-sttts-state="played"]{color:var(--sttts-under);background:linear-gradient(currentColor,currentColor) center bottom 2px/16px 2px no-repeat}
-#chat [data-sttts-state="waiting"]{color:color-mix(in srgb,var(--sttts-quote) 70%,transparent);outline:1.5px dashed var(--sttts-quote);outline-offset:-3px;animation:sttts-wait 1.4s ease-in-out infinite}
-#chat [data-sttts-wave]{display:inline-flex;align-items:center;justify-content:center;gap:3px;width:22px;height:20px;background:none;box-shadow:none;border:0;padding:0;margin:0}
+#chat [data-sttts-state="waiting"]{color:color-mix(in srgb,var(--sttts-quote) 70%,transparent);animation:sttts-wait 1.4s ease-in-out infinite}
+#chat [data-sttts-wave]{display:inline-flex;align-items:center;justify-content:center;gap:3px;width:22px;height:20px;background:none;box-shadow:none;border:0;padding:0;margin:0;transition:transform .22s cubic-bezier(.3,1.6,.5,1)}
 #chat [data-sttts-bar]{display:block;flex:0 0 2.5px;width:2.5px;height:9px;border-radius:2px;background:currentColor;box-shadow:none;border:0;margin:0;padding:0;transform-origin:center}
 #chat [data-sttts-bar]:nth-child(2){height:15px}#chat [data-sttts-bar]:nth-child(3){height:20px}#chat [data-sttts-bar]:nth-child(4){height:13px}#chat [data-sttts-bar]:nth-child(5){height:7px}
 @keyframes sttts-think{50%{transform:scaleY(.45)}}

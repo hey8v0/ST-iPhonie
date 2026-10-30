@@ -2653,6 +2653,9 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .sw-count{font-size:12.5px;font-weight:700;color:var(--ink2);white-space:nowrap;padding-left:2px}
 .sw-bar-gap{flex:1}
 .sw-bar.many .sw-bar-act span{display:none}
+/* A narrow bar (a phone, two actions with their words): the buttons draw in closer instead of running off the edge. */
+.sw-bar{container-type:inline-size}
+@container (max-width:340px){.sw-bar button{padding:0 9px}}
 .sw-bar.many .sw-bar-act{padding:0 11px}
 .sw-hint{margin:-6px 4px 14px}
 /* With a mouse: a ⋯ on the row under the pointer opens its actions (a touch screen swipes instead). */
@@ -2731,6 +2734,37 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .pick-delete .danger{flex:none;min-height:36px;padding:0 14px;white-space:nowrap}
 .style-row small.style-params{display:block;margin-top:2px;font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .style-param-line{margin:0;padding:10px 12px;border-radius:12px;background:var(--card2);font-size:12.5px;line-height:1.5}
+/* 画风 list (ui/draw-styles.js), as Procreate's layers: groups that fold, rows that lift and are moved. A group's body
+   opens and shuts by its grid row (0fr / 1fr), so the rows under it follow smoothly. */
+.style-list{display:flex;flex-direction:column}
+.style-list .style-group-body+.sw-row,.style-group-inner>.sw-row{border-top:1px solid var(--line)}
+.style-list .sw-main{-webkit-touch-callout:none}
+.style-group-body{display:grid;grid-template-rows:1fr;transition:grid-template-rows .36s cubic-bezier(.2,.9,.25,1.04)}
+.style-group-body[data-closed]{grid-template-rows:0fr}
+.style-group-inner{min-height:0;overflow:hidden}
+.style-list.sorting .style-group-body:not([data-closed])>.style-group-inner{overflow:visible}
+.style-group-inner .sw-body{position:relative;padding-left:22px}
+.style-group-inner .sw-body::before{content:"";position:absolute;left:8px;top:12px;bottom:12px;width:2px;border-radius:2px;background:color-mix(in srgb,var(--accent) 32%,transparent)}
+.style-group-row{min-height:56px}
+/* .list-row>span stretches; these two keep their size */
+.list-row.style-group-row>span.style-group-chevron,.list-row.style-group-row>span.style-group-art{flex:none}
+/* the search box stays on top while the long list scrolls, the sheet's top padding covered too */
+.style-picker .picker-search{top:-6px;margin-top:-6px;padding-top:6px}
+.style-group-chevron{flex:none;display:grid;place-items:center;width:16px;margin-right:-4px;color:var(--ink2);transition:transform .34s cubic-bezier(.2,1.5,.35,1)}
+.style-group-chevron svg{width:15px;height:15px}
+.style-group-row[aria-expanded=true] .style-group-chevron{transform:rotate(90deg)}
+.style-group-art{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:var(--accent-soft);color:var(--accent-ink);transition:transform .3s cubic-bezier(.2,1.6,.4,1)}
+.style-group-art svg{width:18px;height:18px}
+.style-group-name-input{box-sizing:border-box;width:100%;min-width:0;font:inherit;font-weight:800;color:var(--ink);background:var(--card2);border:1.5px solid var(--accent);border-radius:10px;padding:3px 8px;outline:none}
+/* Lifted: the row follows the finger (its transform, set by the script), its face lifts on a spring (.sw-main's own
+   transition), the others glide aside. */
+.style-list .sw-row.lifted{z-index:10;overflow:visible}
+.style-list .sw-row.lifted .sw-main{border-radius:16px;background:color-mix(in srgb,var(--accent) 6%,var(--card));box-shadow:0 18px 34px -16px rgba(20,40,90,.5),0 0 0 1.5px color-mix(in srgb,var(--accent) 35%,transparent)}
+.style-list.sorting .sw-row:not(.lifted){transition:transform .24s cubic-bezier(.2,.9,.25,1)}
+.style-list .sw-row.drop-into .sw-main{background:color-mix(in srgb,var(--accent) 18%,var(--card))}
+.style-list .sw-row.lifted.into .sw-main{opacity:.72}
+.style-list .sw-row.drop-into .style-group-art{transform:scale(1.14)}
+@media (prefers-reduced-motion:reduce){.style-group-body,.style-group-chevron,.style-group-art,.style-list.sorting .sw-row:not(.lifted){transition:none}}
 
 /* 视觉小说 › 模型: the card on a character's 立绘 page and the preview where the model moves. */
 .vn-model-card{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 12px;padding:12px 14px;border-radius:18px;border:1px solid var(--line);background:linear-gradient(135deg,var(--accent-soft),var(--card));color:var(--ink);font:inherit;text-align:left;cursor:pointer}
