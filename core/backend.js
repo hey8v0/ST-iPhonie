@@ -28,6 +28,7 @@ import {activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pic
 import {keepOneOutput, switchNodesOff} from './comfy-graph.js';
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases } from './routes.js';
+import { arrangeRows } from './layers.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
 import { normalizeMarks, withMarks } from './voice-fx.js';
 import { TTSParameters, FISH_API, tauriTavern } from './parameters.js';
@@ -92,6 +93,8 @@ async function rawVibeImage(base64) {
         return canvas.toDataURL('image/png').replace(/^data:[^,]*,/, '');
     } catch { return base64; }
 }
+/** The card a role was first met in (a 按聊天 mark, card#save, is not a card). */
+const firstCard = route => (Array.isArray(route.cards) ? route.cards.find(k => !k.includes('#')) : '') || '';
 const clone = value => structuredClone(value);
 // a 歌单 the user made was deleted meanwhile (in another tab, say)
 const listGone = error => { throw error?.code === 'MISSING' ? Error('这个歌单已经删掉了') : error; };
@@ -417,12 +420,84 @@ export class TTSBackend {
         const route = normalizeRoute({ ...(index >= 0 ? next.routes[index] : { engine: 'fish', voice: '', model: '', language: '' }), ...clone(value), id, name: value.name.trim() });
         // 角色资料: who they are, for the phone's apps when the tavern has no card for them.
         if (typeof route.persona === 'string') { route.persona = route.persona.slice(0, 4000); if (!route.persona.trim()) delete route.persona; } else delete route.persona;
-        // A new role belongs to the card it was made in (分区); one made with no card open is everyone's.
-        if (index < 0 && this.cardKey() && !route.cards?.length) route.cards = [this.cardKey(), ...(this.saveKey() ? [this.saveKey()] : [])];
+        // 固定负面: the tags kept away from this person in every picture.
+        if (typeof route.negative === 'string') { route.negative = route.negative.slice(0, 1000); if (!route.negative.trim()) delete route.negative; } else delete route.negative;
+        // 不分组, picked: it stays out of the group of its card too.
+        if (route.group) delete route.loose; else { delete route.group; if (value.group === '') route.loose = true; }
+        // A new role belongs to the card it was made in (分区), and goes in that card's group unless it was given one
+        // (no group at all, when that was picked); one made with no card open is everyone's.
+        if (index < 0 && this.cardKey() && !route.cards?.length) {
+            route.cards = [this.cardKey(), ...(this.saveKey() ? [this.saveKey()] : [])];
+            if (value.group === undefined) this.#joinCard(next, route, this.cardKey(), this.space.name);
+        }
         if (index >= 0) next.routes[index] = route; else next.routes.push(route);
         next.selected = id;
         this.save(next);
         return clone(this.settings.routes.find(row => row.id === id));
+    }
+    /**
+     * A role first met in a card goes in that card's group. There is none until the card has two roles: one person in a
+     * group of their own would only make the list longer. A role taken out of a group by hand (loose) stays out.
+     * name: the card's name, else one is made from its key.
+     */
+    #joinCard(next, route, key, name = '') {
+        if (route.loose) return;
+        next.roleGroups ??= [];
+        let group = next.roleGroups.find(g => g.card === key);
+        if (group) { route.group = group.id; return; }
+        const mates = next.routes.filter(r => r !== route && !r.group && !r.loose && firstCard(r) === key);
+        if (!mates.length) return;
+        group = { id: crypto.randomUUID(), name: String(name || key.replace(/^[a-z]+:/, '').replace(/\.[^.]+$/, '') || '角色').slice(0, 40), open: true, card: key };
+        next.roleGroups.push(group);
+        for (const r of [...mates, route]) r.group = group.id;
+    }
+    /** The role list in a new order with its groups, in the shape of arrangeStyles (a role's id under `style`). */
+    arrangeRoles(tree) {
+        if (!Array.isArray(tree)) throw Error('角色顺序无效');
+        const next = this.getState(), had = new Set(next.routes.filter(r => r.group).map(r => r.id));
+        [next.routes, next.roleGroups] = arrangeRows(next.routes, tree);
+        for (const r of next.routes) { if (r.group) delete r.loose; else if (had.has(r.id)) r.loose = true; }
+        return clone(this.save(next).routes);
+    }
+    /**
+     * Once: the roles met before there were groups go in a group of the card they were first met in, the groups first,
+     * then the others. cards: [{key, name}], the tavern's, for the groups' names. Whether anything was done.
+     */
+    sortRolesByCard(cards = []) {
+        if (this.settings.roleGroupsSorted) return false;
+        const next = this.getState(), names = new Map(cards.map(c => [c.key, c.name]));
+        next.roleGroupsSorted = true;
+        for (const route of next.routes) { const key = firstCard(route); if (key && !route.group) this.#joinCard(next, route, key, names.get(key)); }
+        // Shut, so the list fits on a screen or two; the card being played opens by itself.
+        for (const group of next.roleGroups || []) group.open = false;
+        next.routes = [...next.routes.filter(r => r.group), ...next.routes.filter(r => !r.group)];
+        this.save(next);
+        return true;
+    }
+    /** Several roles at once (a group's, the ones picked): one save. */
+    deleteRoutes(ids) {
+        let next = this.getState();
+        for (const id of ids || []) next = removeRoute(next, String(id));
+        return this.save(next);
+    }
+    /**
+     * Several roles that are one person: the first with a voice stays (else the first), the others' names become its 别名,
+     * and it takes what it lacks from them. Returns the role kept.
+     */
+    mergeRoutes(ids) {
+        const next = this.getState(), list = (ids || []).map(id => next.routes.find(r => r.id === String(id))).filter(Boolean);
+        if (list.length < 2) throw Error('至少选两个角色才能合并');
+        const keep = list.find(r => r.voice) || list[0], others = list.filter(r => r !== keep);
+        keep.aliases = cleanAliases([...(keep.aliases || []), ...others.flatMap(r => [r.name, ...(r.aliases || [])])], keep.name);
+        for (const key of ['appearance', 'negative', 'persona']) if (!keep[key]?.trim()) { const from = others.find(r => r[key]?.trim()); if (from) keep[key] = from[key]; }
+        keep.bindings = Object.assign({}, ...others.map(r => r.bindings), keep.bindings);
+        // Its cards too; a role that is everyone's stays so.
+        if (keep.cards?.length) { if (others.some(r => !r.cards?.length)) delete keep.cards; else keep.cards = [...new Set([keep.cards, ...others.map(r => r.cards)].flat())]; }
+        const gone = new Set(others.map(r => r.id));
+        next.routes = next.routes.filter(r => !gone.has(r.id));
+        if (gone.has(next.selected)) next.selected = keep.id;
+        this.save(next);
+        return clone(this.settings.routes.find(r => r.id === keep.id));
     }
     /** 候选音色池: the voices 自动挑音色 picks from first. */
     saveVoicePool(list) {
@@ -2147,6 +2222,8 @@ export class TTSBackend {
             if (!want.has(route.name)) continue;
             const cards = Array.isArray(route.cards) ? route.cards : [], add = keys.filter(k => !cards.includes(k));
             if (add.length) { route.cards = [...cards, ...add].slice(-100); changed = true; }
+            // Met in a story for the first time: it goes in that card's group.
+            if (!cards.length && !route.group) this.#joinCard(next, route, keys[0], keys[0] === this.space.key ? this.space.name : '');
         }
         if (changed) this.save(next);
         return changed;
@@ -2619,7 +2696,7 @@ export class TTSBackend {
             validatePreset: preset => { try { validatePreset(preset); return ''; } catch (error) { return message(error); } },
             previewPrompt: preset => this.previewPrompt(preset), promptPlan: () => clone(promptPlan(this.settings, modelRules(this.settings))), parse: text => this.parse(text),
             voiceBalance: (engine, refresh) => this.voiceBalance(engine, refresh), keyStatus: engine => this.keyStatus(engine), keyHint: engine => this.keyHint(engine), keyPool: engine => this.keyPool(engine), keyList: engine => this.keyList(engine), addKeys: (engine, value) => this.addKeys(engine, value), removeKey: (engine, index) => this.removeKey(engine, index), useKey: (engine, index) => this.useKey(engine, index), setKey: (engine, key) => this.setKey(engine, key), clearKey: engine => this.clearKey(engine),
-            saveDraw: patch => this.saveDraw(patch), saveStyle: style => this.saveStyle(style), deleteStyle: id => this.deleteStyle(id), deleteStyles: ids => this.deleteStyles(clone(ids || [])), arrangeStyles: tree => this.arrangeStyles(clone(tree)), arrangeChunks: tree => this.arrangeChunks(clone(tree)),
+            arrangeRoles: tree => this.arrangeRoles(clone(tree)), sortRolesByCard: cards => this.sortRolesByCard(clone(cards || [])), deleteRoutes: ids => this.deleteRoutes(clone(ids || [])), mergeRoutes: ids => this.mergeRoutes(clone(ids || [])), saveDraw: patch => this.saveDraw(patch), saveStyle: style => this.saveStyle(style), deleteStyle: id => this.deleteStyle(id), deleteStyles: ids => this.deleteStyles(clone(ids || [])), arrangeStyles: tree => this.arrangeStyles(clone(tree)), arrangeChunks: tree => this.arrangeChunks(clone(tree)),
             imageConnectionList: engine => this.imageConnectionList(engine), saveImageConnection: (engine, patch) => this.saveImageConnection(engine, patch), selectImageConnection: (engine, id) => this.selectImageConnection(engine, id), deleteImageConnection: (engine, id) => this.deleteImageConnection(engine, id),
             drawReady: () => this.drawReady(), drawMissing: () => this.drawMissing(), paidPrompt: () => this.paidPrompt(), comfyCatalog: url => this.comfyCatalog(url), comfyClips: options => this.comfyClips(options), comfyWorkflows: () => this.comfyWorkflows(), comfyWorkflow: name => this.comfyWorkflow(name),
             saveComfyWorkflow: patch => this.saveComfyWorkflow(patch), selectComfyWorkflow: id => this.selectComfyWorkflow(id), deleteComfyWorkflow: id => this.deleteComfyWorkflow(id),

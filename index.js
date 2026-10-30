@@ -449,6 +449,7 @@ function connect(source){
   musicSeek:seconds=>{check();musicHost.seek(Number(seconds));},
   play:(id,line)=>{check();playMessage(id,line);},
   audition:route=>{check();playbackMessage=null;api.audition(route);},
+  tavernCards:()=>{check();const ctx=context();return [...(ctx?.characters||[]).filter(c=>c?.avatar).map(c=>({key:'card:'+c.avatar,name:c.name||''})),...(ctx?.groups||[]).filter(g=>g?.id).map(g=>({key:'group:'+g.id,name:g.name||''}))];},
   recentMessages:limit=>{check();return pictures.recentMessages(Math.min(60,Math.max(1,Number(limit)||8)));},
   insertImage:(id,photoId)=>{check();return pictures.insertImage(id,photoId);},
   suggestPrompt:()=>{check();return pictures.suggestPrompt();},

@@ -90,7 +90,8 @@
 /* 提示词框里的权重、随机和片段：一层底色叠在框上，字还是框自己的 */
 .word-mark{position:relative;display:block;min-width:0}
 .word-mark>textarea{display:block;width:100%}
-.char-body .word-mark{flex:1 1 0}
+/* (not stretched: the layer is as tall as this, and would show past the box) */
+.char-body .word-mark{flex:1 1 0;align-self:flex-start}
 .word-mark-layer{position:absolute;inset:0;z-index:1;box-sizing:border-box;border:0 solid transparent;overflow:hidden;white-space:pre-wrap;overflow-wrap:break-word;color:transparent;pointer-events:none;user-select:none}
 .word-mark-layer span{border-radius:3px}
 .w-up.w1{background:color-mix(in srgb,#ff9f43 22%,transparent)}.w-up.w2{background:color-mix(in srgb,#ff9f43 36%,transparent)}.w-up.w3{background:color-mix(in srgb,#ff9f43 50%,transparent)}
@@ -106,6 +107,10 @@
 .pos-line{position:absolute;background:color-mix(in srgb,var(--ink) 30%,transparent);pointer-events:none}
 .pos-line.v{top:0;bottom:0;width:1px}.pos-line.h{left:0;right:0;height:1px}
 .pos-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 10px}
+.pos-tools-all{justify-content:flex-end;margin-top:4px}
+.char-pos>summary .chip{margin-left:4px}
+.char-pos-body{display:flex;align-items:flex-start;gap:12px}
+.char-pos-body .pos-tools{flex:1;min-width:0}
 .pos-guide{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2)}
 .pos-guide .select{min-width:92px}
 .pos-guide input{width:52px}
@@ -161,3 +166,20 @@
 /* 窄屏时「生成（会扣 Anlas）」折成两行，不挤出屏幕 */
 [data-app=draw] .savebar>.primary{min-width:0;white-space:normal;line-height:1.15}
 .partition-select{flex:none;width:112px}
+/* 角色 App：列表是图层的样子 */
+.role-list.sorting{overflow:visible}
+.role-list .sw-row{content-visibility:auto;contain-intrinsic-size:auto 73px}
+.role-list .sw-row.style-group{contain-intrinsic-size:auto 68px}
+.role-list .style-group-row strong,.role-list .style-group-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.role-list .sw-row.lifted,.role-list.sorting .sw-row{content-visibility:visible}
+.role-row-text strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.role-row-text small{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.role-voice{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.role-row-text .auto-chip{margin:0;flex:none}
+.list-row.style-group-row>span.chip{flex:none}
+.role-search{margin:0 0 8px}
+.role-filters{margin:0 0 10px}
+.role-none{padding:14px}
+.role-try{align-items:center;margin-top:4px}
+.role-tried{margin-top:8px}
+.role-tried img{display:block;max-width:100%;max-height:320px;margin:0 auto;border-radius:14px}

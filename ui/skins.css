@@ -31,7 +31,7 @@
 :root[data-skin=aero] .app-window{background:radial-gradient(130% 55% at 50% -12%,#bdeeff 0,#bdeeff00 70%),radial-gradient(90% 40% at 100% 110%,#d8f7c4 0,#d8f7c400 70%),var(--bg)}
 :root[data-skin=aero][data-theme=dark] .app-window{background:radial-gradient(130% 55% at 50% -12%,#0b4a66 0,#0b4a6600 70%),radial-gradient(90% 40% at 100% 110%,#0d4a3a 0,#0d4a3a00 70%),var(--bg)}
 :root[data-skin=aero] .view:before{background-image:radial-gradient(circle 16px at 70% 30%,#ffffff00 0 60%,var(--aero-edge) 80%,#fff0 100%),radial-gradient(circle 9px at 40% 60%,#ffffff00 0 55%,var(--aero-edge) 80%,#fff0 100%),radial-gradient(circle 6px at 88% 72%,#ffffff00 0 50%,var(--aero-edge) 80%,#fff0 100%);background-size:120px 110px;opacity:.9}
-:root[data-skin=aero] .group,:root[data-skin=aero] details:not(:where(.assistant-actions,.assistant-add-menu)),:root[data-skin=aero] .role-card,:root[data-skin=aero] .code-preview{background:var(--aero-gloss),var(--card);border:1px solid var(--aero-edge);box-shadow:inset 0 1px 0 var(--aero-edge),var(--shadow)}
+:root[data-skin=aero] .group,:root[data-skin=aero] details:not(:where(.assistant-actions,.assistant-add-menu)),:root[data-skin=aero] .code-preview{background:var(--aero-gloss),var(--card);border:1px solid var(--aero-edge);box-shadow:inset 0 1px 0 var(--aero-edge),var(--shadow)}
 :root[data-skin=aero] .page-heading h1 span{background:none;padding:0;color:var(--accent-ink);text-shadow:0 1px 0 #fff,0 0 14px rgba(40,180,240,.35)}
 :root[data-skin=aero][data-theme=dark] .page-heading h1 span{text-shadow:0 0 14px rgba(72,210,255,.5)}
 :root[data-skin=aero] .primary,:root[data-skin=aero] .segmented button[aria-pressed=true],:root[data-skin=aero] .engine-tab[aria-pressed=true],:root[data-skin=aero] .play-round{
@@ -101,7 +101,7 @@
 :root[data-skin=fresh] .page-heading h1 span{background:none;padding:0;text-decoration:underline wavy color-mix(in srgb,var(--accent) 70%,transparent) 1.5px;text-underline-offset:9px}
 :root[data-skin=fresh] .page-heading h1 .spark{color:var(--pink);width:13px;height:13px}
 :root[data-skin=fresh] .group-title{font-family:var(--serif);font-weight:700;letter-spacing:.14em}
-:root[data-skin=fresh] .group,:root[data-skin=fresh] details:not(:where(.assistant-actions,.assistant-add-menu)),:root[data-skin=fresh] .role-card,:root[data-skin=fresh] .code-preview{border-radius:16px;box-shadow:inset 0 0 0 1px var(--line),var(--shadow)}
+:root[data-skin=fresh] .group,:root[data-skin=fresh] details:not(:where(.assistant-actions,.assistant-add-menu)),:root[data-skin=fresh] .code-preview{border-radius:16px;box-shadow:inset 0 0 0 1px var(--line),var(--shadow)}
 :root[data-skin=fresh] .primary,:root[data-skin=fresh] .secondary,:root[data-skin=fresh] .danger{font-weight:700;letter-spacing:.06em}
 :root[data-skin=fresh] .primary{box-shadow:0 8px 16px -10px color-mix(in srgb,var(--e-btn,var(--accent-btn)) 90%,#000)}
 :root[data-skin=fresh] .primary:active:not(:disabled){transform:scale(.97);box-shadow:none}

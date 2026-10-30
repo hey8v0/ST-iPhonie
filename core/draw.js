@@ -19,6 +19,7 @@ import {defaultDrawParams, normalizeDrawParams, guardParams, relayUrl, NAI_MODEL
 import {tokenBudget, counterNow, estimateTokens, countField, tagCost} from './tokens.js';
 import {strength as vibeStrength} from './vibes.js';
 import {normalizeGrid} from './nai-grid.js';
+import {tidyGroups, layerTree} from './layers.js';
 import {DRAW_ENGINES, DRAW_ENGINE_NAMES, defaultGpt, normalizeGpt, defaultComfy, normalizeComfy} from './image-engines.js';
 import {escapeHTML, isPlaceholderRole} from './protocol.js';
 
@@ -356,39 +357,10 @@ export function defaultDraw() {
     chunks: [], chunkGroups: [], stream: false, autoDownload: false, locks: [], grid: normalizeGrid(), positionGrid: normalizePositionGrid(), maskLook: normalizeMaskLook(), styles: [structuredClone(DEFAULT_STYLE)], styleGroups: [], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
 }
 
-/** A grouped list made tidy: each group's rows together where its first one is, a group with no rows gone, a row naming
- *  no group there out of groups. [rows, groups]. */
-function tidyGroups(rows, list) {
-  const groups = new Map();
-  for (const g of Array.isArray(list) ? list : []) {
-    if (!g || typeof g !== 'object' || !g.id || groups.has(String(g.id))) continue;
-    groups.set(String(g.id), {id: String(g.id), name: String(g.name ?? '').trim().slice(0, 40) || '新建组', open: g.open !== false});
-  }
-  const out = [], placed = new Set();
-  for (const s of rows) if (s.group && !groups.has(s.group)) delete s.group;
-  for (const s of rows) {
-    if (placed.has(s)) continue;
-    if (!s.group) { out.push(s); placed.add(s); continue; }
-    for (const m of rows) if (m.group === s.group && !placed.has(m)) { out.push(m); placed.add(m); }
-  }
-  const used = new Set(out.map(s => s.group).filter(Boolean));
-  return [out, [...groups.values()].filter(g => used.has(g.id))];
-}
 /** 画风 groups made tidy, in place. */
 export function tidyStyleGroups(d) { [d.styles, d.styleGroups] = tidyGroups(d.styles, d.styleGroups); return d; }
 /** 提示词片段 groups (分类) made tidy, in place. */
 export function tidyChunkGroups(d) { [d.chunks, d.chunkGroups] = tidyGroups(d.chunks, d.chunkGroups); return d; }
-/** A grouped list as it shows: [{style} | {group, styles}] in order (a 片段 goes under the same names as a 画风). */
-function layerTree(rows, list) {
-  const groups = new Map((list || []).map(g => [g.id, g])), out = [], open = new Map();
-  for (const style of rows) {
-    const group = style.group && groups.get(style.group);
-    if (!group) { out.push({style}); continue; }
-    if (!open.has(group.id)) { const entry = {group, styles: []}; open.set(group.id, entry); out.push(entry); }
-    open.get(group.id).styles.push(style);
-  }
-  return out;
-}
 export const styleTree = d => layerTree(d.styles, d.styleGroups);
 export const chunkTree = d => layerTree(d.chunks || [], d.chunkGroups);
 
@@ -941,6 +913,8 @@ export function peopleCount(prompt) {
   return n;
 }
 const drawable = settings => settings.routes.filter(r => r.appearance?.trim() && !isPlaceholderRole(r.name));
+/** The role a name in a picture means: by its name, else by one of its 别名 (roles merged keep their old names that way). */
+const roleNamed = (roles, name) => roles.find(r => sameName(r.name, name)) || roles.find(r => r.aliases?.some(a => sameName(a, name)));
 /**
  * Roles whose appearance goes into an older one-line picture tag. Names in the tag come first; when the tag names
  * nobody we know, the roles mentioned in the story just before the tag are used, up to the number of people.
@@ -948,7 +922,7 @@ const drawable = settings => settings.routes.filter(r => r.appearance?.trim() &&
 export function pictureRoles(settings, tag, text = '') {
   const roles = drawable(settings), named = [];
   for (const name of tag.characters) {
-    const role = roles.find(r => sameName(r.name, name));
+    const role = roleNamed(roles, name);
     if (role && !named.includes(role)) named.push(role);
   }
   if (named.length || !text) return named;
@@ -986,7 +960,7 @@ const LOOK_TAGS = /\b(?:hair|eyes|bangs|ponytail|twintails|braids?|ahoge|sideloc
  */
 export function photoPicture(settings, {text = '', tags = '', owner = '', names = []}) {
   const drawn = photoTags({text, tags, owner, names}), cast = photoCast({text, tags: drawn, owner, names}), roles = drawable(settings);
-  const looks = cast.map(n => roles.find(r => sameName(r.name, n))?.appearance || '').filter(Boolean);
+  const looks = cast.map(n => roleNamed(roles, n)?.appearance || '').filter(Boolean);
   if (!looks.length) return {prompt: drawn, characters: cast};
   let list = drawn.split(',').map(t => t.trim()).filter(t => t && !LOOK_TAGS.test(t));
   if (!/\b\d+\+?\s*(?:girl|boy|other)s?\b/i.test(drawn)) {
@@ -1024,6 +998,16 @@ export function sceneTags(tags, people) {
  *  the others (all of them when no 站位 is given), and ComfyUI joins every negative into one. */
 const PEOPLE_TAG = /^(?:\d\+?\s*)?(?:girls?|boys?|others?|males?|females?|man|men|woman|women|multiple (?:girls|boys|others)|(?:male|female) focus)$/i;
 export const withoutPeopleTags = tags => String(tags || '').split(',').map(t => t.trim()).filter(t => t && !PEOPLE_TAG.test(t.replace(/^[\d.]+::|::$/g, '').replace(/[()\[\]{}]/g, '').trim())).join(', ');
+/** A role's 固定负面 for a picture; with others in it, without the gender and count tags that would hit them too. */
+const fixedNegative = (role, others = false) => { const tags = String(role?.negative || '').trim(); return others ? withoutPeopleTags(tags) : tags; };
+/**
+ * 试画一张 from the 角色 App: this look as it stands (saved or not), alone, on the 画风 in use: inputs for generateImage.
+ */
+export function lookTest(settings, {appearance = '', negative = ''} = {}) {
+  const draw = settings.draw, style = activeStyle(draw) || {}, gender = genderOf(appearance);
+  const words = [style.artist, style.positive, ...(gender ? [`1${gender}, solo`] : []), 'upper body, looking at viewer, simple background'].map(x => String(x || '').trim()).filter(Boolean);
+  return {prompt: words.join(', '), negative: String(style.negative || '').trim(), characters: [{prompt: soloTags(String(appearance).trim()), negative: String(negative).trim(), position: -1}], params: {...(draw.guard ? guardParams(draw.params) : draw.params), seed: -1}};
+}
 /** Character prompts count nobody: 1girl/1boy/1other in a fixed appearance become girl/boy/other. */
 const soloTags = tags => String(tags).replace(/\b1\s*(girl|boy|other)\b/gi, '$1');
 function mergeTags(...lists) {
@@ -1057,7 +1041,7 @@ export function pictureInputs(settings, tag, text = '') {
   if (!spec) {
     const roles = pictureRoles(settings, tag, text);
     return {prompt: [...head, tag.prompt].join(', '), negative: style.negative.trim(),
-      characters: roles.map(r => ({prompt: r.appearance.trim(), negative: '', position: -1})), names: roles.map(r => r.name), params};
+      characters: roles.map(r => ({prompt: r.appearance.trim(), negative: fixedNegative(r, roles.length > 1), position: -1})), names: roles.map(r => r.name), params};
   }
   const roles = drawable(settings);
   // A block with no 角色 lines still shows somebody when its scene counts people: the registered ones the reply
@@ -1065,7 +1049,7 @@ export function pictureInputs(settings, tag, text = '') {
   if (!spec.cast.length && peopleCount(spec.tags)) {
     const seen = pictureRoles(settings, {...tag, characters: [], prompt: spec.tags}, text);
     if (seen.length) return {prompt: [...head, sceneTags(spec.tags, seen.length), spec.nl].filter(Boolean).join(', '), negative: style.negative.trim(),
-      characters: seen.map(r => ({prompt: soloTags(r.appearance.trim()), negative: '', position: -1})), names: seen.map(r => r.name), params};
+      characters: seen.map(r => ({prompt: soloTags(r.appearance.trim()), negative: fixedNegative(r, seen.length > 1), position: -1})), names: seen.map(r => r.name), params};
   }
   const many = spec.cast.length > 1, taken = new Set();
   // Two people on one cell are drawn as one: a later one moves to the nearest free cell (below, above, right, left).
@@ -1081,8 +1065,10 @@ export function pictureInputs(settings, tag, text = '') {
     return cell;
   };
   const characters = spec.cast.map(c => {
-    const fixed = roles.find(r => sameName(r.name, c.name))?.appearance || spec.register.find(x => sameName(x.name, c.name))?.appearance || '';
-    return {prompt: [mergeTags(soloTags(fixed), c.tags), c.nl].filter(Boolean).join(', '), negative: many ? mergeTags(withoutPeopleTags(c.negative), 'fused bodies') : c.negative || '', position: place(c.position)};
+    const role = roleNamed(roles, c.name), fixed = role?.appearance || spec.register.find(x => sameName(x.name, c.name))?.appearance || '';
+    // 固定负面 first (a role can have one with no 外貌 yet), then what this picture asks. Gender and count tags would hit the others.
+    const unwanted = mergeTags((role || roleNamed(settings.routes, c.name))?.negative, c.negative);
+    return {prompt: [mergeTags(soloTags(fixed), c.tags), c.nl].filter(Boolean).join(', '), negative: many ? mergeTags(withoutPeopleTags(unwanted), 'fused bodies') : unwanted, position: place(c.position)};
   });
   return {prompt: [...head, sceneTags(spec.tags, spec.cast.length), spec.nl].filter(Boolean).join(', '), negative: style.negative.trim(), characters, names: spec.cast.map(c => c.name), params};
 }

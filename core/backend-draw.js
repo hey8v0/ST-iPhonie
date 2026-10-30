@@ -9,6 +9,7 @@ import { PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDra
 import { activeChatPreset } from './chat.js';
 import { VIBE_ANLAS } from './vibes.js';
 import { normalizeGrid } from './nai-grid.js';
+import { arrangeRows } from './layers.js';
 
 const clone = value => structuredClone(value);
 const BLANK_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -287,26 +288,8 @@ class DrawSettings {
     /** The 提示词片段 list in a new order with its 分类, in the shape of arrangeStyles (a 片段's id under `style`). */
     arrangeChunks(tree) {
         if (!Array.isArray(tree)) throw Error('片段顺序无效');
-        const next = this.getState(), byId = new Map(next.draw.chunks.map(c => [c.id, c])), order = [], groups = [], seen = new Set();
-        const take = (id, group) => {
-            const c = byId.get(String(id));
-            if (!c || seen.has(c.id)) return false;
-            seen.add(c.id);
-            if (group) c.group = group; else delete c.group;
-            order.push(c);
-            return true;
-        };
-        for (const entry of tree) {
-            if (entry?.group && typeof entry.group === 'object') {
-                const g = { id: String(entry.group.id || crypto.randomUUID()), name: String(entry.group.name ?? '').trim().slice(0, 40) || '新建分类', open: entry.group.open !== false };
-                let any = false;
-                for (const id of Array.isArray(entry.styles) ? entry.styles : []) any = take(id, g.id) || any;
-                if (any && !groups.some(x => x.id === g.id)) groups.push(g);
-            } else take(entry?.style);
-        }
-        for (const c of next.draw.chunks) if (!seen.has(c.id)) { delete c.group; order.push(c); }
-        next.draw.chunks = order;
-        next.draw.chunkGroups = groups;
+        const next = this.getState();
+        [next.draw.chunks, next.draw.chunkGroups] = arrangeRows(next.draw.chunks, tree, '新建分类');
         this.save(next);
         return clone(this.settings.draw);
     }
@@ -314,26 +297,8 @@ class DrawSettings {
      *  Styles not given keep their order after the rest; a group with no style given goes. */
     arrangeStyles(tree) {
         if (!Array.isArray(tree)) throw Error('画风顺序无效');
-        const next = this.getState(), byId = new Map(next.draw.styles.map(s => [s.id, s])), order = [], groups = [], seen = new Set();
-        const take = (id, group) => {
-            const s = byId.get(String(id));
-            if (!s || seen.has(s.id)) return false;
-            seen.add(s.id);
-            if (group) s.group = group; else delete s.group;
-            order.push(s);
-            return true;
-        };
-        for (const entry of tree) {
-            if (entry?.group && typeof entry.group === 'object') {
-                const g = { id: String(entry.group.id || crypto.randomUUID()), name: String(entry.group.name ?? '').trim().slice(0, 40) || '新建组', open: entry.group.open !== false };
-                let any = false;
-                for (const id of Array.isArray(entry.styles) ? entry.styles : []) any = take(id, g.id) || any;
-                if (any && !groups.some(x => x.id === g.id)) groups.push(g);
-            } else take(entry?.style);
-        }
-        for (const s of next.draw.styles) if (!seen.has(s.id)) { delete s.group; order.push(s); }
-        next.draw.styles = order;
-        next.draw.styleGroups = groups;
+        const next = this.getState();
+        [next.draw.styles, next.draw.styleGroups] = arrangeRows(next.draw.styles, tree);
         this.save(next);
         return clone(this.settings.draw);
     }

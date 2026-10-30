@@ -494,7 +494,7 @@ export function spriteRequest(settings, name, {appearance, rule, extra = '', see
   return {
     prompt: [...head, want, more, backdrop, looks ? '' : name].filter(Boolean).join(', '),
     negative: [String(style.negative || '').trim(), SPRITE_NEGATIVE].filter(Boolean).join(', '),
-    characters: looks ? [{prompt: looks, negative: '', position: -1}] : [],
+    characters: looks ? [{prompt: looks, negative: String(route?.negative || '').trim(), position: -1}] : [],
     params: {...draw.params, ...sizeFor(draw.params, '竖'), seed: Number.isInteger(seed) && seed >= 0 ? seed : -1, transparent: clear && !!backdrop},
   };
 }

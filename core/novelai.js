@@ -279,7 +279,9 @@ export function finalWords({prompt = '', negative = '', characters = [], params 
   const uc = medium ? withUcPreset(p.model, 'heavy', text, '') : withUcPreset(p.model, p.ucPreset, text, expandChunks(negative, chunks));
   text = withMode(text, p.mode);
   if (f.autoText) text = withAutoText(text, chars);
-  return {prompt: text, negative: uc, characters: chars};
+  // Models without character prompts take everyone's negative in the one they have.
+  const theirs = f.captions ? '' : chars.map(c => String(c.negative || '').trim()).filter(Boolean).join(', ');
+  return {prompt: text, negative: theirs ? [uc, theirs].filter(Boolean).join(', ') : uc, characters: chars};
 }
 
 /**

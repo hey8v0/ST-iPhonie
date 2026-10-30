@@ -75,6 +75,12 @@ export interface Route {
     bindings: Partial<Record<Engine, VoiceBinding>>;
     /** Fixed appearance tags added when this character appears in a picture. */
     appearance?: string;
+    /** 固定负面: tags kept away from this character in every picture. */
+    negative?: string;
+    /** The group it is in, in the 角色 App (Settings.roleGroups). */
+    group?: string;
+    /** Taken out of a group by hand: it does not go in its card's group by itself. */
+    loose?: boolean;
     /** The voice was picked by 自动挑音色 (cleared when it is changed by hand), with the voice's name and why. */
     autoVoice?: boolean; autoName?: string; autoReason?: string;
     /** 别名: other names the story calls this role by; their lines use this voice. */
@@ -150,6 +156,9 @@ export interface Settings {
     /** 候选音色池 for 自动挑音色. */
     voicePool?: VoicePoolEntry[];
     selected: string;
+    roleGroups: RoleGroup[];
+    /** The roles from before there were groups have been sorted by card. */
+    roleGroupsSorted?: boolean;
     activePreset: string;
     routes: Route[];
     connections: Record<Engine, Connection>;
@@ -204,6 +213,8 @@ export interface AssistantThread { id: string; kind: 'assistant'; title: string;
 export interface AssistantThreadSummary extends Omit<AssistantThread, 'messages'> { messageCount: number; preview: string; }
 /** 画风预设: artist and fixed tags sent to NovelAI. */
 export interface DrawStyle { id: string; name: string; artist: string; positive: string; negative: string; /** The 画风 group it is in. */ group?: string; }
+/** A group in the 角色 App; card: the tavern card whose new roles go in it. */
+export interface RoleGroup { id: string; name: string; open: boolean; card?: string; }
 /** A 画风 group in the drawing app: shown open (its styles under it) or closed. */
 export interface DrawStyleGroup { id: string; name: string; open: boolean; }
 /** 绘图预设: rules injected into the chat request so the model writes <img> tags. */
@@ -622,6 +633,16 @@ export interface BackendFacade {
     /** 自动挑音色 for one character again (in the tavern): resolves to the saved route, marked autoVoice. */
     autoPickVoice?(name: string): Promise<Route>;
     deleteRoute(id: string): Settings;
+    /** Several at once: one save. */
+    deleteRoutes(ids: string[]): Settings;
+    /** Roles that are one person: the first with a voice stays, the others' names become its 别名. Returns the one kept. */
+    mergeRoutes(ids: string[]): Route;
+    /** The role list in a new order with its groups (a role's id under `style`). */
+    arrangeRoles(tree: Array<{style: string} | {group: Partial<RoleGroup>; styles: string[]}>): Route[];
+    /** Once: roles met before there were groups go in a group of the card they were first met in. Whether anything was done. */
+    sortRolesByCard(cards?: Array<{key: string; name: string}>): boolean;
+    /** The tavern's cards and group chats, by the key roles remember them by (in the tavern). */
+    tavernCards?(): Array<{key: string; name: string}>;
     /** Returns a changed draft; it does not save the route. */
     switchRouteEngine(route: RouteInput, engine: Engine): Route;
     /** A role's 别名 cleaned: from a comma list or an array, without its own name. */

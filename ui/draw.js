@@ -124,13 +124,13 @@ export function drawApp(ctx) {
     if (tab === 'chars') body = (characters.length ? characters.map((c, i) => {
       const cell = cellOf(c), at = centerOf(c);
       const others = characters.map((o, j) => { const dot = centerOf(o); return dot ? `<i class="pos-dot${j === i ? ' on' : ''}" style="left:${(dot.x * 100).toFixed(1)}%;top:${(dot.y * 100).toFixed(1)}%">${j + 1}</i>` : ''; }).join('');
-      return `<div class="group pad draw-char${c.enabled === false ? ' off' : ''}" data-engine="${ctx.engineOf(c.name)}"><div class="row-heading">${avatar(c.name, ctx.engineOf(c.name), 30)}<strong style="flex:1">${esc(c.name)}</strong><span class="chip">位置 ${free ? (at ? `${Math.round(at.x * 100)}, ${Math.round(at.y * 100)}` : '自动') : POSITION(cell)}</span>${i ? btn('char-move', icon('up'), 'text-button', `data-index="${i}" data-to="${i - 1}" aria-label="往前"`) : ''}${charsOn ? `<input class="switch" type="checkbox" data-char-on data-index="${i}" aria-label="这张图画 ${esc(c.name)}" ${c.enabled === false ? '' : 'checked'}>` : ''}${btn('remove-char', icon('trash'), 'text-button', `data-index="${i}" aria-label="移除 ${esc(c.name)}"`)}</div>
-        <div class="char-body">${box(textArea('char', c.prompt, `data-index="${i}" rows="3" aria-label="${esc(c.name)} 的提示词"`))}
-          ${free ? `<div class="pos-free" data-pos-pad data-index="${i}" style="aspect-ratio:${p.width}/${p.height}" role="group" aria-label="在画面里点一下放这个人">${guideHTML(d.positionGrid)}${others}</div>` : `<div class="pos-grid" aria-label="画面位置">${Array.from({length: 25}, (_, k) => `<button data-action="position" data-index="${i}" data-position="${k}" aria-pressed="${cell === k}" aria-label="位置 ${POSITION(k)}"></button>`).join('')}</div>`}</div>
+      const placed = free ? (at ? `${Math.round(at.x * 100)}, ${Math.round(at.y * 100)}` : '自动') : POSITION(cell);
+      return `<div class="group pad draw-char${c.enabled === false ? ' off' : ''}" data-engine="${ctx.engineOf(c.name)}"><div class="row-heading">${avatar(c.name, ctx.engineOf(c.name), 30)}<strong style="flex:1">${esc(c.name)}</strong>${i ? btn('char-move', icon('up'), 'text-button', `data-index="${i}" data-to="${i - 1}" aria-label="往前"`) : ''}${charsOn ? `<input class="switch" type="checkbox" data-char-on data-index="${i}" aria-label="这张图画 ${esc(c.name)}" ${c.enabled === false ? '' : 'checked'}>` : ''}${btn('remove-char', icon('trash'), 'text-button', `data-index="${i}" aria-label="移除 ${esc(c.name)}"`)}</div>
+        <div class="char-body">${box(textArea('char', c.prompt, `data-index="${i}" rows="3" aria-label="${esc(c.name)} 的提示词"`))}</div>
         ${charsOn ? `<details class="tool-fold" data-group="char-neg-${i}"${c.negative?.trim() ? ' open' : ''}><summary>这个人的负面</summary><div>${box(textArea('char-neg', c.negative || '', `data-index="${i}" rows="2" aria-label="${esc(c.name)} 的负面" placeholder="别的角色的特征串到这个人身上时，写在这里"`))}</div></details>` : ''}
-        <div class="pos-tools">${btn('position', '让模型自己决定位置', 'text-button', `data-index="${i}" data-position="-1" aria-pressed="${!at}"`)}${free && i === 0 ? guideControl(d.positionGrid) : ''}</div></div>`;
+        ${e === 'comfy' ? '' : `<details class="tool-fold char-pos" data-group="char-pos-${i}"><summary>位置<span class="chip">${placed}</span></summary><div class="char-pos-body">${free ? `<div class="pos-free" data-pos-pad data-index="${i}" style="aspect-ratio:${p.width}/${p.height}" role="group" aria-label="在画面里点一下放这个人">${guideHTML(d.positionGrid)}${others}</div>` : `<div class="pos-grid" aria-label="画面位置">${Array.from({length: 25}, (_, k) => `<button data-action="position" data-index="${i}" data-position="${k}" aria-pressed="${cell === k}" aria-label="位置 ${POSITION(k)}"></button>`).join('')}</div>`}<div class="pos-tools">${btn('position', '让模型自己决定位置', 'text-button', `data-index="${i}" data-position="-1" aria-pressed="${!at}"`)}</div></div></details>`}</div>`;
     }).join('') : empty('还没有加入角色', e === 'gpt' ? '每个角色的外貌和在画面里的位置，会写进给 GPT 的描述里。' : e === 'comfy' ? 'ComfyUI 没有分角色的提示词：每个人的外貌接在提示词后面，位置不起作用。' : 'V4 / 4.5 可以给每个角色单独写外貌，并指定在画面里的大致位置。', 'person'))
-      + `<div class="token-meter" data-token-meter="positive" hidden></div><div class="actions">${btn('add-char', icon('add') + '从角色里添加', 'secondary')}${btn('add-custom', icon('add') + '手动添加', 'secondary')}</div>`;
+      + `<div class="token-meter" data-token-meter="positive" hidden></div><div class="actions">${btn('add-char', icon('add') + '从角色里添加', 'secondary')}${btn('add-custom', icon('add') + '手动添加', 'secondary')}</div>${free && characters.length ? `<div class="pos-tools pos-tools-all">${guideControl(d.positionGrid)}</div>` : ''}`;
     if (tab === 'params' && e === 'gpt') body = gptParams(d.gpt);
     // The lists are read as soon as the page is looked at; they can be typed in when ComfyUI does not answer.
     if (tab === 'params' && e === 'comfy') { body = comfyParams(d.comfy, comfy); if (!comfyInfo && !comfyReading) { comfyReading = true; readComfy().finally(() => { comfyReading = false; }); } }
@@ -175,7 +175,7 @@ export function drawApp(ctx) {
     // A new picture goes on top of the column: show it.
     if (newest) { newest = false; const side = v.root.querySelector('.canvas-side'); if (side) side.scrollTop = 0; }
     meters();
-    grow(v.root.querySelector('[data-field=idea]'));
+    for (const el of v.root.querySelectorAll('[data-field=idea],[data-field=char]')) grow(el);
     words.markAll(v.root);
   }
   /** 随机提示词 while it is in use: drawn instead of what is written, until it is put in the box or let go. */
@@ -226,7 +226,7 @@ export function drawApp(ctx) {
    * the user types; the vocabulary loads the first time.
    */
   let meterTicket = 0;
-  /** 想画什么 grows with what is written (browsers without field-sizing), up to about ten lines, then scrolls. */
+  /** 想画什么 and a person's prompt grow with what is written (browsers without field-sizing), up to about ten lines, then scroll. */
   function grow(el) { if (!el || ctx.win.CSS?.supports?.('field-sizing', 'content')) return; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight + 2, 260) + 'px'; }
   async function meters() {
     const boxes = [...v.root.querySelectorAll('[data-token-meter]')], budget = eng() === 'nai' ? tokenBudget(state().params.model) : null;
@@ -317,7 +317,7 @@ export function drawApp(ctx) {
     randomText = ''; randomChars = null;
     seed = Number.isInteger(request.seed) ? request.seed : -1;
     const routes = api.getState().routes;
-    characters = (request.characters || []).map(c => ({name: routes.find(r => r.appearance?.trim() === c.prompt?.trim())?.name || '角色', prompt: c.prompt, position: c.position ?? -1}));
+    characters = (request.characters || []).map(c => ({name: routes.find(r => r.appearance?.trim() === c.prompt?.trim())?.name || '角色', prompt: c.prompt, ...(c.negative ? {negative: c.negative} : {}), position: c.position ?? -1}));
     tab = 'prompt';
     render();
   };
@@ -356,7 +356,7 @@ export function drawApp(ctx) {
     if (key === 'idea') { idea = el.value; grow(el); }
     else if (key === 'prompt') { prompt = el.value; meters(); words.typed(el); }
     else if (key === 'negative') { negative = el.value; meters(); words.typed(el); }
-    else if (key === 'char') { characters[Number(el.dataset.index)].prompt = el.value; meters(); words.typed(el); }
+    else if (key === 'char') { characters[Number(el.dataset.index)].prompt = el.value; grow(el); meters(); words.typed(el); }
     else if (key === 'char-neg') { characters[Number(el.dataset.index)].negative = el.value; words.typed(el); }
     else if (key === 'seed') seed = el.value === '' ? -1 : Math.max(-1, Math.floor(Number(el.value) || -1));
   });
@@ -867,23 +867,30 @@ export function drawApp(ctx) {
     for (const name of names) {
       const r = routes.find(x => x.name === name);
       if (!r || characters.some(c => c.name === r.name)) continue;
-      characters.push({name: r.name, prompt: r.appearance || '', position: -1});
+      characters.push({name: r.name, prompt: r.appearance || '', ...(r.negative ? {negative: r.negative} : {}), position: -1});
       added.push(r.name);
     }
     return added;
   }
   function pickCharacter() {
-    const routes = api.getState().routes;
+    // The card in the tavern now first: with dozens of roles from other cards the ones wanted are otherwise far down.
+    const space = api.phoneSpace?.() || {}, here = r => !!space.key && ((space.members || []).includes(r.name) || !!r.cards?.includes(space.key)), all = api.getState().routes;
+    const routes = [...all.filter(here), ...all.filter(r => !here(r))];
     const d = ctx.dialog('从角色里添加', routes.length
-      ? `<div class="group">${routes.map(r => `<button class="list-row" data-pick="${esc(r.id)}">${avatar(r.name, r.voice ? r.engine : 'none', 36)}<span><strong>${esc(r.name)}</strong><small>${esc(r.appearance?.trim() || '还没有填写外貌 tag')}</small></span>${icon('add')}</button>`).join('')}</div>`
+      ? `${routes.length > 8 ? '<div class="field"><input class="search" type="search" data-pick-search placeholder="搜索名字" aria-label="搜索角色"></div>' : ''}<div class="group">${routes.map(r => `<button class="list-row" data-pick="${esc(r.id)}" data-name="${esc([r.name, ...(r.aliases || [])].join(' ').toLowerCase())}">${avatar(r.name, r.voice ? r.engine : 'none', 36)}<span><strong>${esc(r.name)}</strong><small>${esc(r.appearance?.trim() || '还没有填写外貌 tag')}</small></span>${icon('add')}</button>`).join('')}</div>`
       : '<p class="hint">还没有角色。可以先在角色 App 里新增，并填写外貌 tag。</p>');
     d.body.addEventListener('click', e => {
       const b = e.target.closest('[data-pick]');
       if (!b) return;
       const r = routes.find(x => x.id === b.dataset.pick);
-      characters.push({name: r.name, prompt: r.appearance || '', position: -1});
+      characters.push({name: r.name, prompt: r.appearance || '', ...(r.negative ? {negative: r.negative} : {}), position: -1});
       d.close();
       render();
+    });
+    d.body.addEventListener('input', e => {
+      if (e.target.dataset?.pickSearch === undefined) return;
+      const word = e.target.value.trim().toLowerCase();
+      for (const b of d.body.querySelectorAll('[data-pick]')) b.hidden = !!word && !b.dataset.name.includes(word);
     });
   }
 

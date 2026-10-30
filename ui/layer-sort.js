@@ -12,8 +12,9 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 /**
  * list: the element with the rows. tree(): the list as [{style: id} | {group: {id, name, open}, styles: [id]}] (a row of
  * any kind goes under `style`). commit(next): keeps such a list. paint(): draws the rows. groupName(): a name for a new group.
+ * scroller(): what scrolls when the finger nears its edge, when that is not the sheet or the list's parent.
  */
-export function layerSort({ctx, list, tree, commit, paint, groupName}) {
+export function layerSort({ctx, list, tree, commit, paint, groupName, scroller = null}) {
   const {win} = ctx;
   const buzz = () => { try { win.navigator?.vibrate?.(8); } catch { /* none */ } };
   const rows = () => [...list.querySelectorAll('.sw-row[data-swipe]')];
@@ -82,7 +83,7 @@ export function layerSort({ctx, list, tree, commit, paint, groupName}) {
   /** Held still: the row lifts; the session follows the finger and puts the row down where it lets go. */
   function lift(row, point) {
     const id = row.dataset.swipe, gid = id.startsWith('g:') ? id.slice(2) : '', main = row.querySelector('.sw-main');
-    const box = list.closest('.sheet-body') || list.parentElement, frame = box.getBoundingClientRect();
+    const box = scroller?.() || list.closest('.sheet-body') || list.parentElement, frame = box.getBoundingClientRect();
     const closed = g => !!bodyOf(g)?.hasAttribute('data-closed');
     // A group is carried shut, its 画风 under it.
     const own = gid ? bodyOf(gid) : null, wasOpen = !!own && !own.hasAttribute('data-closed');
