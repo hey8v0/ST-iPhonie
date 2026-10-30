@@ -5,7 +5,7 @@ import { DRAW_ENGINES, normalizeGpt, gptBase, normalizeComfy, comfyUrl, checkWor
 import { readPictureWorkflow, parseWorkflow, uiToApi, uiNodeTypes, mapWorkflow, promptCandidates, promptWords, describeNodes, setNodeValues, switchNodesOff, findProblems, nodeTypes, modelKindOf } from './comfy-graph.js';
 import { activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource } from './comfy-loras.js';
 import { relayUrl, guardParams, isFree, isV5, normalizeDrawParams, takesReference, REFERENCE_ANLAS } from './novelai.js';
-import { PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, normalizeVibeSettings, styleParams } from './draw.js';
+import { PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, normalizeVibeSettings, normalizeChunks, styleParams } from './draw.js';
 import { activeChatPreset } from './chat.js';
 import { VIBE_ANLAS } from './vibes.js';
 
@@ -203,7 +203,8 @@ class DrawSettings {
         if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw Error('绘图设置格式无效');
         const next = this.getState(), draw = next.draw;
         if ('queue' in patch) draw.queue = normalizeDraw({ queue: { ...draw.queue, ...clone(patch.queue) } }).queue;
-        for (const key of ['enabled', 'auto', 'guard', 'fold', 'strip']) if (key in patch) { if (typeof patch[key] !== 'boolean') throw Error('开关设置无效'); draw[key] = patch[key]; }
+        if ('chunks' in patch) draw.chunks = normalizeChunks(clone(patch.chunks));
+        for (const key of ['enabled', 'auto', 'guard', 'fold', 'strip', 'stream']) if (key in patch) { if (typeof patch[key] !== 'boolean') throw Error('开关设置无效'); draw[key] = patch[key]; }
         if ('mode' in patch) { if (!['separate', 'inline'].includes(patch.mode)) throw Error('配图方式无效'); draw.mode = patch.mode; }
         if ('vibe' in patch) draw.vibe = normalizeVibeSettings({ ...draw.vibe, ...clone(patch.vibe || {}) });
         if ('relay' in patch) {
@@ -362,7 +363,8 @@ class DrawSettings {
     }
     /**
      * Whether params cost Anlas. free: true (covered), false (costs Anlas), null (subscription unknown). extra: {base,
-     * refs} — a base picture (图生图 / 局部重绘) is never in the Opus free tier, and each 角色参考 adds REFERENCE_ANLAS.
+     * refs, size} — a picture is drawn at its base's size (size), which decides the Opus free tier as ever; each 角色参考
+     * adds REFERENCE_ANLAS. (NovelAI's own app counts 图生图 and 局部重绘 as free when they are small enough.)
      */
     drawQuote(params, extra = {}) {
         const engine = this.settings.draw.engine;
@@ -372,10 +374,11 @@ class DrawSettings {
         // Through a relay that does not pass the subscription on, the user may say the account is Opus: small non-V5 images count as free.
         const relay = this.settings.draw.relay, subscription = this.subscription || (relay.url && relay.assumeOpus ? { unlimited: true, active: true, usage: null, assumed: true } : null);
         // Vibes: encoding one (first use) and every vibe past four cost Anlas, so such a picture is not free.
-        const vibes = this.vibePlan(effective.model), vibeAnlas = (vibes.encode + vibes.extra) * VIBE_ANLAS, free = isFree(effective, subscription);
+        const sized = extra?.size?.width > 0 && extra?.size?.height > 0 ? { ...effective, width: extra.size.width, height: extra.size.height } : effective;
+        const vibes = this.vibePlan(effective.model), vibeAnlas = (vibes.encode + vibes.extra) * VIBE_ANLAS, free = isFree(sized, subscription);
         const refs = takesReference(effective.model) ? Math.max(0, Number(extra?.refs) || 0) : 0, referenceAnlas = refs * REFERENCE_ANLAS, base = !!extra?.base;
         // With references no vibe is sent, so the vibes cost nothing then.
-        const vibeCost = refs ? 0 : vibeAnlas, paid = !!(vibeCost || referenceAnlas || base);
+        const vibeCost = refs ? 0 : vibeAnlas, paid = !!(vibeCost || referenceAnlas);
         return { params: effective, clamped: JSON.stringify(effective) !== JSON.stringify(requested), free: paid && free !== false ? false : free, guard: this.settings.draw.guard,
             v5: isV5(effective.model), usage: this.subscription?.usage ? clone(this.subscription.usage) : null, vibes, vibeAnlas: vibeCost, referenceAnlas, base };
     }

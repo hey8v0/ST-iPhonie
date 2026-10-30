@@ -97,19 +97,21 @@ export function pickPicture(ctx, api, title = '选一张图', {multiple = false}
 }
 
 /**
- * 局部重绘: paint over what is to be drawn again. Opens over the phone; resolves with the mask (base64 PNG at
- * width×height, white where it is drawn again, in NovelAI's 8-pixel blocks), '' when everything was wiped off, or null
- * when left without saving. mask: the one painted before, to go on with.
+ * 局部重绘: paint over what is to be drawn again. Opens over the phone; resolves with {mask (base64 PNG at width×height,
+ * white where it is drawn again, in NovelAI's 8-pixel blocks; '' when nothing is painted), focus}, or null when left
+ * without saving. mask: the one painted before, to go on with. focus: {x, y, w, h, context} — 聚焦重绘's box, drawn large.
  */
-export function maskEditor(ctx, {src, width, height, mask = ''}) {
+export function maskEditor(ctx, {src, width, height, mask = '', focus = null}) {
   return new Promise(resolve => {
     const doc = ctx.doc, host = doc.querySelector('.screen') || doc.body, layer = doc.createElement('div');
     layer.className = 'mask-editor';
     layer.innerHTML = `<header><button type="button" data-mask="cancel" class="text-button">取消</button><b>涂出要重画的地方</b><button type="button" data-mask="done" class="primary small">好了</button></header>
-      <div class="mask-stage"><div class="mask-frame"><img alt="" src="${esc(src)}"><canvas></canvas></div></div>
-      <footer><div class="segmented"><button type="button" data-mask="paint" aria-pressed="true">${icon('paint')}涂</button><button type="button" data-mask="erase" aria-pressed="false">${icon('backspace')}擦</button></div>
+      <div class="mask-stage"><div class="mask-frame"><img alt="" src="${esc(src)}"><canvas></canvas><span class="mask-box" hidden></span></div></div>
+      <footer><div class="segmented"><button type="button" data-mask="paint" aria-pressed="true">${icon('paint')}涂</button><button type="button" data-mask="erase" aria-pressed="false">${icon('backspace')}擦</button><button type="button" data-mask="focus" aria-pressed="false">${icon('expand')}聚焦</button></div>
         <label class="mask-size"><span>笔刷</span><input type="range" min="2" max="40" value="10" aria-label="笔刷大小"></label>
-        <button type="button" data-mask="clear" class="text-button">全部擦掉</button></footer>`;
+        <label class="mask-context" hidden><span>周围参考</span><input type="range" min="0" max="256" step="16" value="${focus?.context ?? 64}" aria-label="周围留多少给 AI 参考"></label>
+        <button type="button" data-mask="clear" class="text-button">全部擦掉</button></footer>
+      <p class="mask-tip" hidden>框出要细化的地方（比如脸）：这块放大后重画，细节更多。框里不涂就整块重画。</p>`;
     host.append(layer);
     // The picture as large as the space allows, in its own shape.
     const stage = layer.querySelector('.mask-stage'), frame = layer.querySelector('.mask-frame');
@@ -117,7 +119,10 @@ export function maskEditor(ctx, {src, width, height, mask = ''}) {
     fit(); ctx.win.addEventListener('resize', fit);
     const canvas = layer.querySelector('canvas'), g = canvas.getContext('2d');
     canvas.width = width; canvas.height = height;
-    let erase = false, down = false, last = null, painted = false;
+    let erase = false, down = false, last = null, painted = false, mode = 'paint', box = focus ? {x: focus.x, y: focus.y, w: focus.w, h: focus.h} : null, from = null;
+    const boxEl = layer.querySelector('.mask-box');
+    const showBox = () => { boxEl.hidden = !box; if (box) Object.assign(boxEl.style, {left: box.x / width * 100 + '%', top: box.y / height * 100 + '%', width: box.w / width * 100 + '%', height: box.h / height * 100 + '%'}); };
+    showBox();
     if (mask) { const old = new ctx.win.Image(); old.onload = () => { g.drawImage(old, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = '#ff2e6a'; g.fillRect(0, 0, width, height); g.globalCompositeOperation = 'source-over'; painted = true; }; old.src = 'data:image/png;base64,' + mask; }
     const brush = () => Number(layer.querySelector('.mask-size input').value) / 100 * Math.max(width, height) / 4;
     const at = e => { const r = canvas.getBoundingClientRect(); return {x: (e.clientX - r.left) / r.width * width, y: (e.clientY - r.top) / r.height * height}; };
@@ -128,8 +133,14 @@ export function maskEditor(ctx, {src, width, height, mask = ''}) {
       g.beginPath(); g.moveTo(from.x, from.y); g.lineTo(to.x, to.y); g.stroke();
       if (!erase) painted = true;
     }
-    canvas.addEventListener('pointerdown', e => { down = true; canvas.setPointerCapture?.(e.pointerId); last = at(e); stroke(last, last); e.preventDefault(); });
-    canvas.addEventListener('pointermove', e => { if (!down) return; const p = at(e); stroke(last, p); last = p; e.preventDefault(); });
+    canvas.addEventListener('pointerdown', e => { down = true; canvas.setPointerCapture?.(e.pointerId); last = at(e); if (mode === 'focus') { from = last; box = null; showBox(); } else stroke(last, last); e.preventDefault(); });
+    canvas.addEventListener('pointermove', e => {
+      if (!down) return;
+      const p = at(e);
+      if (mode === 'focus') { const x = Math.max(0, Math.min(from.x, p.x)), y = Math.max(0, Math.min(from.y, p.y)); box = {x, y, w: Math.min(width, Math.max(from.x, p.x)) - x, h: Math.min(height, Math.max(from.y, p.y)) - y}; showBox(); }
+      else { stroke(last, p); last = p; }
+      e.preventDefault();
+    });
     const up = () => { down = false; last = null; };
     canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
     // Escape, and the phone's back (which sends one), leave the brush without saving and go no further.
@@ -139,9 +150,16 @@ export function maskEditor(ctx, {src, width, height, mask = ''}) {
     layer.addEventListener('click', e => {
       const what = e.target.closest('[data-mask]')?.dataset.mask;
       if (what === 'cancel') close(null);
-      else if (what === 'paint' || what === 'erase') { erase = what === 'erase'; for (const b of layer.querySelectorAll('[data-mask=paint],[data-mask=erase]')) b.setAttribute('aria-pressed', String(b.dataset.mask === what)); }
-      else if (what === 'clear') { g.clearRect(0, 0, width, height); painted = false; }
-      else if (what === 'done') close(painted ? blocks(doc, canvas) : '');
+      else if (what === 'paint' || what === 'erase' || what === 'focus') {
+        mode = what; erase = what === 'erase';
+        for (const b of layer.querySelectorAll('[data-mask=paint],[data-mask=erase],[data-mask=focus]')) b.setAttribute('aria-pressed', String(b.dataset.mask === what));
+        layer.querySelector('.mask-size').hidden = what === 'focus'; layer.querySelector('.mask-context').hidden = what !== 'focus'; layer.querySelector('.mask-tip').hidden = what !== 'focus';
+      }
+      else if (what === 'clear') { g.clearRect(0, 0, width, height); painted = false; box = null; showBox(); }
+      else if (what === 'done') {
+        const big = box && box.w >= 16 && box.h >= 16;
+        close({mask: painted ? blocks(doc, canvas) : '', focus: big ? {x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h), context: Number(layer.querySelector('.mask-context input').value)} : null});
+      }
     });
   });
 }
@@ -155,6 +173,46 @@ function blocks(doc, canvas) {
   const out = canvasOf(doc, width, height), og = out.getContext('2d');
   og.imageSmoothingEnabled = false; og.drawImage(small, 0, 0, small.width * 8, small.height * 8);
   return base64Of(out);
+}
+
+const pictureOf = (win, base64) => { const bytes = Uint8Array.from(win.atob(base64), c => c.charCodeAt(0)); return loadImage(win, new win.Blob([bytes], {type: 'image/png'})); };
+/**
+ * 聚焦重绘: the box and what is around it, enlarged to about a megapixel, is what NovelAI draws ({request}); the rest of
+ * the picture stays here to put it back with composeFocused ({compose}). Nothing painted in the box: all of it is drawn.
+ */
+export async function focusedBase(win, base) {
+  const doc = win.document, {focus, width, height} = base, context = focus.context ?? 64;
+  const x0 = Math.max(0, Math.floor(focus.x - context)), y0 = Math.max(0, Math.floor(focus.y - context)), x1 = Math.min(width, Math.ceil(focus.x + focus.w + context)), y1 = Math.min(height, Math.ceil(focus.y + focus.h + context));
+  const cw = x1 - x0, ch = y1 - y0, k = Math.sqrt(1048576 / (cw * ch)), tw = Math.max(64, Math.floor(cw * k / 64) * 64), th = Math.max(64, Math.floor(ch * k / 64) * 64);
+  const picture = canvasOf(doc, tw, th), pg = picture.getContext('2d');
+  pg.imageSmoothingQuality = 'high'; pg.drawImage(await pictureOf(win, base.image), x0, y0, cw, ch, 0, 0, tw, th);
+  const painted = canvasOf(doc, tw, th), mg = painted.getContext('2d');
+  if (base.mask) { mg.imageSmoothingEnabled = false; mg.drawImage(await pictureOf(win, base.mask), x0, y0, cw, ch, 0, 0, tw, th); }
+  const sx = tw / cw, sy = th / ch, inBox = () => { mg.fillStyle = '#fff'; mg.fillRect((focus.x - x0) * sx, (focus.y - y0) * sy, focus.w * sx, focus.h * sy); };
+  if (!base.mask || !mg.getImageData(0, 0, tw, th).data.some((v, i) => i % 4 === 3 && v > 24)) inBox();
+  const mask = blocks(doc, painted);
+  return {request: {image: base64Of(picture), mask, width: tw, height: th, strength: base.strength, noise: 0, overlay: true},
+    compose: {image: base.image, width, height, x: x0, y: y0, w: cw, h: ch, mask}};
+}
+/** The enlarged part back in the whole picture, through its mask with a soft edge: a PNG. */
+export async function composeFocused(win, {image, width, height, x, y, w, h, mask}, blob) {
+  const doc = win.document, whole = canvasOf(doc, width, height), g = whole.getContext('2d'), part = canvasOf(doc, w, h), pg = part.getContext('2d');
+  g.drawImage(await pictureOf(win, image), 0, 0, width, height);
+  pg.imageSmoothingQuality = 'high'; pg.drawImage(await loadImage(win, blob), 0, 0, w, h);
+  pg.globalCompositeOperation = 'destination-in'; pg.drawImage(await pictureOf(win, mask), 0, 0, w, h);
+  g.drawImage(part, x, y);
+  return new Promise((resolve, reject) => whole.toBlob(out => out ? resolve(out) : reject(Error('合成图片失败')), 'image/png'));
+}
+/** 扩图: the picture with empty space around it, and a mask of just that space: {image, mask, width, height, preview}. */
+export async function padBase(win, base, {top = 0, left = 0, right = 0, bottom = 0}) {
+  const doc = win.document, width = base.width + left + right, height = base.height + top + bottom;
+  const picture = canvasOf(doc, width, height), g = picture.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, width, height);
+  g.drawImage(await pictureOf(win, base.image), left, top, base.width, base.height);
+  const space = canvasOf(doc, width, height), sg = space.getContext('2d');
+  sg.fillStyle = '#fff'; sg.fillRect(0, 0, width, height);
+  sg.clearRect(left, top, base.width, base.height);
+  return {image: base64Of(picture), mask: blocks(doc, space), width, height, preview: picture.toDataURL('image/jpeg', .8)};
 }
 
 // ---------- 读参数 ----------
@@ -185,7 +243,8 @@ const MODEL_WORDS = [[/V5/i, /curated/i, 'nai-diffusion-5-curated'], [/V5/i, nul
 /**
  * What a NovelAI PNG was drawn with: {prompt, negative, characters: [{prompt, negative, position}], params: {model?,
  * width, height, steps, scale, sampler, schedule, cfgRescale, seed}}, or null when the picture says nothing of it.
- * Character positions come back as the 5×5 grid cell nearest their centre (-1 when they had none).
+ * Character positions come back as the 5×5 grid cell nearest their centre (-1 when they had none), and for V5, which
+ * places people anywhere, also as the centre itself.
  */
 export async function readNovelAI(buffer) {
   const text = await pngText(buffer);
@@ -194,12 +253,15 @@ export async function readNovelAI(buffer) {
   if (!c || typeof c !== 'object') return null;
   const v4 = c.v4_prompt?.caption, v4n = c.v4_negative_prompt?.caption, coords = c.v4_prompt?.use_coords;
   const cell = ({x, y} = {}) => coords && Number.isFinite(x) && Number.isFinite(y) ? Math.min(4, Math.max(0, Math.round((y - .1) / .2))) * 5 + Math.min(4, Math.max(0, Math.round((x - .1) / .2))) : -1;
-  const characters = (v4?.char_captions || []).map((ch, i) => ({prompt: String(ch.char_caption || ''), negative: String(v4n?.char_captions?.[i]?.char_caption || ''), position: cell(ch.centers?.[0])})).filter(ch => ch.prompt.trim());
+  const characters = (v4?.char_captions || []).map((ch, i) => ({prompt: String(ch.char_caption || ''), negative: String(v4n?.char_captions?.[i]?.char_caption || ''), position: cell(ch.centers?.[0]), ...(coords && /V5/i.test(String(text.Source || '') + String(text.Software || '')) && Number.isFinite(ch.centers?.[0]?.x) && Number.isFinite(ch.centers?.[0]?.y) ? {center: {x: ch.centers[0].x, y: ch.centers[0].y}} : {})})).filter(ch => ch.prompt.trim());
   const source = String(text.Source || '') + ' ' + String(text.Software || '');
   const model = MODEL_WORDS.find(([version, kind]) => version.test(source) && (!kind || kind.test(source)))?.[2];
   const num = v => Number.isFinite(Number(v)) ? Number(v) : undefined;
   const params = Object.fromEntries(Object.entries({model: NAI_MODELS.includes(model) ? model : undefined, width: num(c.width), height: num(c.height), steps: num(c.steps), scale: num(c.scale),
-    sampler: c.sampler, schedule: c.noise_schedule, cfgRescale: num(c.cfg_rescale), seed: num(c.seed)}).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+    sampler: c.sampler, schedule: c.noise_schedule, cfgRescale: num(c.cfg_rescale), seed: num(c.seed),
+    // What the settings had added is in the prompt already: read back, the presets start off so as not to add it twice.
+    quality: 'none', ucPreset: 'none', decrisper: c.dynamic_thresholding === true ? true : undefined, variety: c.skip_cfg_above_sigma ? true : undefined,
+    smea: c.sm === true ? (c.sm_dyn === true ? 'dyn' : 'on') : c.sm === false ? 'off' : undefined}).filter(([, v]) => v !== undefined && v !== null && v !== ''));
   const prompt = String(v4?.base_caption ?? c.prompt ?? text.Description ?? '');
   if (!prompt.trim() && !characters.length) return null;
   return {prompt, negative: String(v4n?.base_caption ?? c.uc ?? ''), characters, params};

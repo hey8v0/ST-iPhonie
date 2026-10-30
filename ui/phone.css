@@ -1675,6 +1675,41 @@ button.gift-item[data-short]{opacity:.55}
 .gift-open{display:grid;justify-items:center;gap:6px;padding:8px 0 4px;text-align:center}
 .gift-open .go-emoji{font-size:64px;line-height:1.1;filter:drop-shadow(0 6px 10px #ff5e8e44)}
 .gift-open .go-name{margin:0;font-size:20px;font-weight:800}
+/* NovelAI: words suggested under a prompt box, people placed anywhere (V5), the picture on its way, the box to redraw */
+.word-suggest{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;max-height:132px;overflow:auto}
+.word-suggest button{all:unset;box-sizing:border-box;display:inline-flex;align-items:baseline;gap:5px;min-height:32px;padding:5px 10px;border-radius:12px;background:var(--card2);color:var(--ink);font-size:12.5px;font-weight:600;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.word-suggest button:active{filter:brightness(.94)}
+.word-suggest button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.word-suggest small{font-size:10.5px;font-weight:500;color:var(--ink2)}
+.size-custom{align-items:center;gap:6px}
+.size-custom input{flex:1;min-width:0;width:0}
+.size-custom .chip-button{flex:none}
+.draw-char.off .char-body{opacity:.5}
+.draw-char .row-heading .switch,.draw-char .row-heading .chip{flex:none}
+.draw-char .row-heading strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pos-free{position:relative;flex:none;width:132px;max-height:190px;align-self:flex-start;border-radius:12px;background:var(--card2);box-shadow:inset 0 0 0 1.5px var(--line);overflow:hidden;touch-action:none;cursor:crosshair}
+.pos-dot{position:absolute;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-style:normal;font-weight:800;background:var(--line);color:var(--ink2);pointer-events:none}
+.pos-dot.on{background:var(--accent-btn);color:var(--on-accent);box-shadow:0 2px 6px rgba(0,0,0,.25)}
+.canvas-preview{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none}
+.canvas-busy{z-index:1}
+.ref-thumb{position:relative}
+.ref-focus{position:absolute;box-sizing:border-box;border:2px solid #ff2e6a;border-radius:3px;pointer-events:none}
+.mask-frame{position:relative}
+.mask-box{position:absolute;box-sizing:border-box;border:2px solid #ff2e6a;background:rgba(255,46,106,.12);border-radius:3px;pointer-events:none}
+.mask-box[hidden],.mask-context[hidden],.mask-size[hidden],.mask-tip[hidden]{display:none}
+.mask-context{display:flex;align-items:center;gap:8px;font-size:12px;flex:1;min-width:0}
+.mask-context input{flex:1;min-width:0}
+.mask-editor footer{flex-wrap:wrap}
+.mask-editor footer .segmented{flex:1 1 100%;margin:0}
+.mask-tip{margin:0;padding:0 14px 10px;font-size:12px;color:rgba(255,255,255,.72)}
+.pad-sides{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.pad-step{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.pad-step output{font-variant-numeric:tabular-nums;font-weight:700}
+.pad-step .chip-button{min-width:40px;justify-content:center}
+.chunk-head{display:flex;align-items:center;justify-content:space-between;margin:0 2px 10px}
+.chunk-row{display:flex;align-items:center;gap:4px;padding-right:8px}
+.chunk-row .list-row{flex:1;min-width:0}
+.chunk-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* ComfyUI nodes: a card each, opened for its values */
 .comfy-open{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
 .comfy-plan-actions a.chip-button{flex:1;display:inline-flex;align-items:center;text-decoration:none}

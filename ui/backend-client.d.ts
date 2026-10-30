@@ -172,6 +172,8 @@ export interface Settings {
 export interface DrawParams {
     model: string; width: number; height: number; steps: number; scale: number;
     sampler: string; schedule: string; /** -1 picks a random seed. */ seed: number; cfgRescale: number; variety: boolean;
+    /** V5 Full: 'medium' is its smaller model, with steps and sampler fixed. */ effort: 'high' | 'medium'; /** What the prompt starts with on V4 and newer. */ mode: 'anime' | 'furry' | 'background';
+    /** Preset ids of the model (qualityPresets, ucPresets in core/novelai.js). */ quality: string; ucPreset: string; /** V3 only. */ smea: 'auto' | 'on' | 'dyn' | 'off'; decrisper: boolean; transparent?: boolean;
 }
 export type AssistantPresetId = 'companion';
 export interface AssistantPresetEntry { id: string; title: string; text: string; enabled: boolean; }
@@ -205,7 +207,13 @@ export interface DrawStyle { id: string; name: string; artist: string; positive:
 export interface DrawStyleGroup { id: string; name: string; open: boolean; }
 /** 绘图预设: rules injected into the chat request so the model writes <img> tags. */
 export interface DrawPreset { id: string; name: string; /** Pictures per reply, 1 to drawCountMax. */ count: number; injection: Injection; entries: PresetEntry[]; }
+/** 提示词片段: words kept under a name (!macro:name!). */
+export interface PromptChunk { id: string; name: string; text: string; }
 export interface DrawSettings {
+    /** 提示词片段. */
+    chunks: PromptChunk[];
+    /** 边画边看 in the drawing app. */
+    stream: boolean;
     connections: Record<'nai' | 'gpt', {active: string; presets: ImageConnection[]}>;
     /** Inject the drawing preset into chat requests. */
     enabled: boolean;
@@ -247,12 +255,12 @@ export interface ComfyNodeField { key: string; label: string; kind: 'text' | 'nu
 export interface ComfyNode { id: string; type: string; title: string; fills: string[]; off: boolean; canOff: boolean; isOutput: boolean; output: boolean; unknown: boolean; fields: ComfyNodeField[]; }
 export interface ComfySettings extends Omit<ComfyWorkflow, 'id' | 'name'> { url: string; loraTransport: 'tavern' | 'direct'; style: string; activeWorkflow: string; workflows: ComfyWorkflow[]; }
 export interface VibeGroup { id: string; name: string; items: Array<{ vibe: string; strength: number }>; }
-export interface VibeSettings { enabled: boolean; use: { kind: '' | 'group' | 'vibe'; id: string }; groups: VibeGroup[]; }
+export interface VibeSettings { enabled: boolean; use: { kind: '' | 'group' | 'vibe'; id: string }; groups: VibeGroup[]; /** Strengths adding up to more than 1 are scaled down. */ normalize: boolean; }
 /** One saved vibe as the phone sees it: never the image or the encodings. keys: models it is encoded for (v4-5full …). */
 export interface VibeSummary { id: string; name: string; thumb: string; strength: number; ie: number; image: boolean; keys: string[]; }
 /** The vibes a picture would use: encode = how many need encoding first (2 Anlas each), over = left out by the free-tier guard. */
 export interface VibePlan { on: boolean; model: boolean; used: Array<{ id: string; name: string; strength: number; encode: boolean }>; skipped: Array<{ name: string; why: 'missing' | 'model' | 'no-encoding' }>; over: number; encode: number; extra: number; }
-export interface DrawSettingsPatch { enabled?: boolean; auto?: boolean; guard?: boolean; fold?: boolean; queue?: Partial<DrawQueueSettings>; params?: Partial<DrawParams>; activeStyle?: string; activePreset?: string; relay?: Partial<{ url: string; assumeOpus: boolean }>; vibe?: Partial<VibeSettings>; engine?: DrawEngine; gpt?: Partial<GptImageSettings>; comfy?: Partial<ComfySettings>; }
+export interface DrawSettingsPatch { chunks?: PromptChunk[]; stream?: boolean; enabled?: boolean; auto?: boolean; guard?: boolean; fold?: boolean; queue?: Partial<DrawQueueSettings>; params?: Partial<DrawParams>; activeStyle?: string; activePreset?: string; relay?: Partial<{ url: string; assumeOpus: boolean }>; vibe?: Partial<VibeSettings>; engine?: DrawEngine; gpt?: Partial<GptImageSettings>; comfy?: Partial<ComfySettings>; }
 /** gap: seconds between two NovelAI requests (0-60). retries: how often an "account busy" (429) is retried (0-10). */
 export interface DrawQueueSettings { gap: number; retries: number; cloud: CloudQueueSettings; }
 /** Shared queue service (cloud-queue/worker.js) that everyone using one NovelAI account joins with the same room code. */
@@ -270,10 +278,12 @@ export interface DrawQuote { params: DrawParams; clamped: boolean; /** null when
     vibes: VibePlan; vibeAnlas: number; /** 角色参考: Anlas they add; base: a base picture is used. */ referenceAnlas?: number; base?: boolean;
     /** GPT / ComfyUI only: which engine; paid: GPT (every picture costs money). */
     engine?: DrawEngine; paid?: boolean; }
-export interface DrawCharacter { prompt: string; negative?: string; /** 0-24 on a 5x5 grid, -1 lets the model decide. */ position: number; }
+export interface DrawCharacter { prompt: string; negative?: string; /** 0-24 on a 5x5 grid, -1 lets the model decide. */ position: number; /** V5: anywhere in the picture, 0-1 (other models take the nearest grid cell). */ center?: { x: number; y: number }; /** false: left out of this picture. */ enabled?: boolean; }
 export interface DrawInput { prompt: string; negative?: string; characters?: DrawCharacter[]; params?: Partial<DrawParams>; allowPaid?: boolean; name?: string; /** Queue key; the same key joins the waiting job. */ key?: string; label?: string;
     /** NovelAI: 图生图 (no mask) or 局部重绘 (mask: white where it is drawn again); the picture is drawn at the base's size. */
-    base?: { image: string; width: number; height: number; strength: number; noise?: number; mask?: string } | null;
+    base?: { image: string; width: number; height: number; strength: number; noise?: number; mask?: string; /** 局部重绘: put the untouched parts back as they were. */ overlay?: boolean; /** 增强. */ enhance?: boolean } | null;
+    /** 边画边看 when it is switched on: the steps and the picture on its way come as 'draw' events. */
+    preview?: boolean;
     /** NovelAI V4.5: 角色参考 (fitted pictures). */
     refs?: Array<{ image: string; kind: 'character' | 'style' | 'both'; strength: number; fidelity: number }>; }
 /** seed is -1 for GPT (it takes none); params are what the engine used (GPT has no steps). */
@@ -695,7 +705,9 @@ export interface BackendFacade {
     /** extra: a base picture (图生图 / 局部重绘) and how many 角色参考 — both cost Anlas. */
     drawQuote(params?: Partial<DrawParams>, extra?: { base?: boolean; refs?: number }): DrawQuote;
     /** NovelAI's 导演工具 (tool: bg-removal | lineart | sketch | colorize | emotion | declutter) or 放大 (tool: upscale) on a picture; the result goes into the album. */
-    naiTool(input: { tool: string; image: string; width: number; height: number; prompt?: string; mood?: string; defry?: number; name?: string }): Promise<DrawResult & { tool: string }>;
+    naiTool(input: { tool: string; image: string; width: number; height: number; prompt?: string; mood?: string; defry?: number; name?: string }): Promise<DrawResult & { tool: string; more: Array<DrawResult & { tool: string }> }>;
+    /** Tags beginning with a word, for the model and mode in use. */
+    naiSuggestTags(word: string, options?: { signal?: AbortSignal }): Promise<Array<{ tag: string; count: number }>>;
     /** Saved vibes (summaries, newest first). */
     listVibes(): VibeSummary[];
     /** Makes the pictures of saved vibes small (encodings stay): how many changed, and the bytes before and after. */

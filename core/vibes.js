@@ -125,10 +125,10 @@ export function vibeSummary(doc) {
 }
 
 /** The request fields for the vibes, as NovelAI's own site sends them; strengths over 1 in total are scaled back to 1. */
-export function vibeParameters(list) {
-  const total = list.reduce((sum, v) => sum + v.strength, 0), scale = total > 1 ? 1 / total : 1;
+export function vibeParameters(list, normalize = true) {
+  const total = list.reduce((sum, v) => sum + Math.abs(v.strength), 0), scale = normalize && total > 1 ? 1 / total : 1;
   return {reference_image_multiple_cached: list.map(v => ({cache_secret_key: crypto.randomUUID(), data: v.encoding})),
-    reference_strength_multiple: list.map(v => Math.round(v.strength * scale * 1000) / 1000), normalize_reference_strength_multiple: true};
+    reference_strength_multiple: list.map(v => Math.round(v.strength * scale * 1000) / 1000), normalize_reference_strength_multiple: normalize};
 }
 
 const forFile = (doc, s = doc.importInfo.strength) => ({...structuredClone(doc), importInfo: {...doc.importInfo, strength: strength(s)}});

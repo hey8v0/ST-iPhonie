@@ -287,7 +287,7 @@ const OLD_DEFAULT_RULES = [
 
 // The NovelAI parameters a 画风 keeps: an artist string often wants its own model, sampler, steps and CFG. Picking the
 // 画风 puts them back; changing them while it is in use changes its own. The size and the seed belong to each picture.
-export const STYLE_PARAM_KEYS = Object.freeze(['model', 'steps', 'scale', 'sampler', 'schedule', 'cfgRescale', 'variety']);
+export const STYLE_PARAM_KEYS = Object.freeze(['model', 'steps', 'scale', 'sampler', 'schedule', 'cfgRescale', 'variety', 'effort', 'mode', 'quality', 'ucPreset', 'smea', 'decrisper']);
 /** The part of the drawing parameters a 画风 keeps. */
 export const styleParams = params => { const p = normalizeDrawParams(params); return Object.fromEntries(STYLE_PARAM_KEYS.map(k => [k, p[k]])); };
 const DEFAULT_STYLE = {id: 'default', name: '默认画风', artist: '', positive: 'masterpiece, best quality, very aesthetic, absurdres', negative: 'lowres, bad anatomy, bad hands, text, error, missing fingers, extra digits, cropped, worst quality, jpeg artifacts, signature, watermark, blurry'};
@@ -309,13 +309,25 @@ export function normalizeVibeSettings(value) {
   }));
   const kind = ['group', 'vibe'].includes(v.use?.kind) ? v.use.kind : '', id = typeof v.use?.id === 'string' ? v.use.id : '';
   const use = kind === 'group' && groups.some(g => g.id === id) || kind === 'vibe' && /^[0-9a-f]{64}$/.test(id) ? {kind, id} : {kind: '', id: ''};
-  return {enabled: !!v.enabled, use, groups};
+  return {enabled: !!v.enabled, use, groups, normalize: v.normalize !== false};
+}
+/** 提示词片段 (NovelAI's Prompt Chunks): words kept under a name, written as !macro:名字! or picked after typing @. */
+export const CHUNK_LIMITS = {count: 200, name: 40, text: 8000};
+export function normalizeChunks(value) {
+  const out = [], names = new Set();
+  for (const c of Array.isArray(value) ? value : []) {
+    const name = text(c?.name, CHUNK_LIMITS.name).replace(/[!\n]/g, '').trim(), words = text(c?.text, CHUNK_LIMITS.text);
+    if (!name || names.has(name) || out.length >= CHUNK_LIMITS.count) continue;
+    names.add(name);
+    out.push({id: /^[\w-]{1,64}$/.test(String(c?.id || '')) ? String(c.id) : crypto.randomUUID(), name, text: words});
+  }
+  return out;
 }
 export function defaultDraw() {
   return {enabled: false, auto: true, guard: true, fold: false, mode: 'separate', strip: true, engine: 'nai', gpt: defaultGpt(), comfy: defaultComfy(),
     connections: {nai: normalizeImageConnections('nai'), gpt: normalizeImageConnections('gpt')},
     queue: {gap: 3, retries: 4, cloud: {enabled: false, kind: 'room', url: '', room: ''}}, relay: {url: '', assumeOpus: false}, vibe: defaultVibe(), params: defaultDrawParams(),
-    styles: [structuredClone(DEFAULT_STYLE)], styleGroups: [], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
+    chunks: [], stream: false, styles: [structuredClone(DEFAULT_STYLE)], styleGroups: [], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
 }
 
 /** 画风 groups made tidy, in place: each group's styles together where its first one is, a group with no styles gone,
@@ -408,6 +420,8 @@ export function normalizeDraw(value) {
     applyImageConnection(d, engine);
   }
   d.vibe = normalizeVibeSettings(d.vibe);
+  d.chunks = normalizeChunks(d.chunks);
+  d.stream = !!d.stream;
   d.params = normalizeDrawParams(d.params);
   d.styles = (Array.isArray(d.styles) && d.styles.length ? d.styles : base.styles).map(s => ({id: String(s.id || crypto.randomUUID()), name: text(s.name, 60) || '画风', artist: text(s.artist, 4000), positive: text(s.positive, 4000), negative: text(s.negative, 4000),
     ...(s.params && typeof s.params === 'object' ? {params: styleParams({...d.params, ...s.params})} : {}), ...(s.group ? {group: String(s.group)} : {})}));

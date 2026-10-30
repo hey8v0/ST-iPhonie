@@ -39,7 +39,7 @@ import { createStorageBudget } from './storage-budget.js';
 import { DialoguePlayer } from './player.js';
 import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS } from './library.js';
 import { makeThumb, makePreview, packPicture } from './thumbnail.js';
-import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, guardParams, isFree, isV5, normalizeDrawParams, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
+import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, ucPresets, qualityPresets, upscaleBody, guardParams, isFree, isV5, normalizeDrawParams, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, drawCast, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
 import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive } from './chat.js';
 import { ChatStore, money, currentDm } from './chats.js';
@@ -1144,6 +1144,7 @@ export class TTSBackend {
             if (!encoded && !s.image) { skipped.push({ name: s.name, why: 'no-encoding' }); continue; }
             used.push({ id: item.id, name: s.name, strength: item.strength, encode: !encoded });
         }
+        if (used.length > 16) used.length = 16;
         const over = this.settings.draw.guard ? Math.max(0, used.length - MAX_FREE_VIBES) : 0;
         if (over) used.length = MAX_FREE_VIBES;
         return { on: true, model: !!key, used, skipped, over, encode: used.filter(u => u.encode).length, extra: Math.max(0, used.length - MAX_FREE_VIBES) };
@@ -1212,20 +1213,29 @@ export class TTSBackend {
     pictureInfo(engine, { params = {}, seed, prompt }, { negative = '', characters = [] } = {}) {
         return [
             ['引擎', DRAW_ENGINE_NAMES[engine] || engine], ['模型', NAI_MODEL_NAMES[params.model] || params.model],
-            ['尺寸', params.width && params.height ? `${params.width} × ${params.height}` : ''], ['步数', params.steps], ['CFG', params.scale], ['采样器', params.sampler],
+            ['尺寸', params.width && params.height ? `${params.width} × ${params.height}` : ''], ['步数', params.steps], ['CFG', params.scale], ['Rescale', params.cfgRescale || ''], ['采样器', params.sampler],
+            ...(params.effort === 'medium' ? [['努力程度', '中']] : []), ...(params.quality && params.quality !== 'none' ? [['质量标签', qualityPresets(params.model).find(q => q.id === params.quality)?.name]] : []), ...(params.ucPreset && params.ucPreset !== 'none' ? [['负面预设', ucPresets(params.model).find(u => u.id === params.ucPreset)?.name]] : []),
             ['种子', seed >= 0 ? seed : ''], ['画于', new Date().toLocaleString('zh-CN', { hour12: false })],
             ['提示词', prompt], ['负面', negative], ['角色', (characters || []).map(c => c?.prompt).filter(Boolean).join(' | ')]
         ].filter(([, v]) => v !== undefined && v !== null && String(v).trim());
     }
+    /** Tags that begin with a word, as NovelAI's own prompt box suggests them; it answers for the model and mode in use. */
+    async naiSuggestTags(word, { signal } = {}) {
+        this.assertOpen();
+        if (!this.novelai.configured) return [];
+        this.novelai.relay = this.settings.draw.relay.url;
+        const p = this.settings.draw.params;
+        return this.novelai.suggestTags({ model: p.model, prompt: word, mode: p.mode, signal });
+    }
     /** Generates one image and keeps it in the album. Requests wait in the NovelAI queue (see draw-queue.js).
      *  key identifies the job in the queue (the same key joins the job already waiting); label is shown in the line. */
-    generateImage({ prompt, negative = '', characters = [], params, allowPaid = false, name = '', key, label = '', base = null, refs = [] } = {}) {
+    generateImage({ prompt, negative = '', characters = [], params, allowPaid = false, name = '', key, label = '', base = null, refs = [], preview = false } = {}) {
         this.assertOpen();
         if (!String(prompt || '').trim()) return Promise.reject(Error('请先写提示词'));
         const engine = this.settings.draw.engine;
         if (!this.drawReady()) return Promise.reject(Error(this.drawMissing()));
         // 底图 (图生图 / 局部重绘) and 角色参考 are NovelAI's: the drawing app sends them only when NovelAI draws.
-        const extra = engine === 'nai' ? { base: !!base?.image, refs: (refs || []).filter(r => r?.image).length } : {};
+        const extra = engine === 'nai' ? { base: !!base?.image, refs: (refs || []).filter(r => r?.image).length, ...(base?.image ? { size: { width: base.width, height: base.height } } : {}) } : {};
         // GPT's 参考图 (up to 16, known by their order): the pictures and what the user wrote each one is.
         const gptRefs = engine === 'gpt' ? (refs || []).filter(r => typeof r?.image === 'string' && r.image).slice(0, GPT_MAX_REFS).map(r => ({ image: r.image, type: /^image\/(png|jpeg|webp)$/.test(r.type) ? r.type : 'image/png', label: String(r.label || '').slice(0, 80) })) : [];
         const quote = this.drawQuote(params, extra);
@@ -1253,26 +1263,31 @@ export class TTSBackend {
             return job;
         }
         if (quote.free === false && !allowPaid) return Promise.reject(Object.assign(Error('这张图会扣 Anlas，需要确认后再生成'), { code: 'PAID' }));
-        const request = buildImageRequest({ prompt, negative, characters, params: quote.params, base: extra.base ? clone(base) : null, refs: extra.refs ? clone(refs) : [] });
+        let request;
+        try { request = buildImageRequest({ prompt, negative, characters, params: quote.params, base: extra.base ? clone(base) : null, refs: extra.refs ? clone(refs) : [], chunks: this.settings.draw.chunks || [] }); }
+        catch (error) { return Promise.reject(error); }
+        // 边画边看: the drawing app asks for it, when it is switched on; a picture from the story just comes when it is done.
+        const stream = preview && this.settings.draw.stream;
         const job = this.drawQueue.add({ key, label: label || String(prompt).slice(0, 40), task: async signal => {
             this.assertOpen();
             this.emit('draw', { phase: 'generating' });
-            if (quote.vibes.used.length && !request.refs) Object.assign(request.body.parameters, vibeParameters(await this.vibeEncodings(quote.vibes.used, request.params.model, signal)));
+            if (quote.vibes.used.length && !request.refs) Object.assign(request.body.parameters, vibeParameters(await this.vibeEncodings(quote.vibes.used, request.params.model, signal), this.settings.draw.vibe.normalize !== false));
             this.novelai.relay = this.settings.draw.relay.url;
+            const send = () => stream ? this.novelai.generateStream(request.body, signal, frame => this.emit('draw', { steps: frame.steps > 1 ? `${Math.min(frame.step + 1, frame.steps)}/${frame.steps} 步` : '', preview: frame.image })) : this.novelai.generate(request.body, signal);
             let blob;
-            try { blob = await this.novelai.generate(request.body, signal); }
+            try { blob = await send(); }
             catch (error) {
                 // 透明背景's flags are not in NovelAI's public documents: refused, the picture is asked for once more without them.
                 const p = request.body.parameters;
                 if (!p.straight_alpha || ![400, 422, 500].includes(error?.status)) throw error;
                 delete p.straight_alpha; delete p.tag_hint_transparent_background;
-                blob = await this.novelai.generate(request.body, signal);
+                blob = await send();
             }
             this.assertOpen();
             const info = this.pictureInfo('nai', { params: request.params, seed: request.seed, prompt: request.body.input }, { negative, characters });
             if (request.body.action !== 'generate') info.push(['方式', request.body.action === 'infill' ? `局部重绘 · 强度 ${request.body.parameters.strength}` : `图生图 · 强度 ${request.body.parameters.strength} · 噪声 ${request.body.parameters.noise}`]);
             if (request.refs) info.push(['角色参考', `${request.refs} 张`]);
-            const photo = await this.library.addPhoto({ name: (name || 'NovelAI') + '-' + request.seed + '.png', blob, info });
+            const photo = await this.library.addPhoto({ name: (name || 'NovelAI') + '-' + request.seed + (blob.type === 'image/webp' ? '.webp' : blob.type === 'image/jpeg' ? '.jpg' : '.png'), blob, info });
             this.#thumbSoon(photo.id);
             this.emit('library', { collection: 'photos' });
             this.emit('draw', { phase: 'done' });
@@ -1286,7 +1301,8 @@ export class TTSBackend {
     /**
      * NovelAI's tools on a picture (base64 PNG of width×height): 导演工具 (tool: a DIRECTOR_TOOLS key, with prompt, mood,
      * defry for 上色 / 换表情) or tool 'upscale' (放大 by upscaleBy). Waits in the NovelAI queue like a drawing; the result
-     * goes into the album. They cost Anlas, so the drawing app asks first.
+     * goes into the album, and what 去背景 gives besides (it answers with several versions) as `more`. They cost Anlas,
+     * so the drawing app asks first.
      */
     naiTool({ tool, image, width, height, prompt = '', mood = 'neutral', defry = 0, name = 'NovelAI' } = {}) {
         this.assertOpen();
@@ -1294,21 +1310,26 @@ export class TTSBackend {
         if (!image || !(width > 0) || !(height > 0)) return Promise.reject(Error('没有图片'));
         const scale = tool === 'upscale' ? upscaleBy(width, height) : 0;
         if (tool === 'upscale' && !scale) return Promise.reject(Error(`这张图已经很大了，放大后会超过 ${UPSCALE_MAX} 像素`));
-        const body = tool === 'upscale' ? { image, width, height, scale } : augmentBody({ tool, image, width, height, prompt, mood, defry });
+        const body = tool === 'upscale' ? upscaleBody(image) : augmentBody({ tool, image, width, height, prompt, mood, defry });
         const label = tool === 'upscale' ? `放大 ×${scale}` : DIRECTOR_TOOLS[tool];
         const job = this.drawQueue.add({ key: `nai-tool:${tool}:${Date.now()}`, label: '绘图 App · ' + label, task: async signal => {
             this.assertOpen();
             this.emit('draw', { phase: 'generating' });
             this.novelai.relay = this.settings.draw.relay.url;
-            const blob = tool === 'upscale' ? await this.novelai.upscale(body, signal) : await this.novelai.augment(body, signal);
+            const blobs = tool === 'upscale' ? [await this.novelai.upscale(body, signal)] : await this.novelai.augment(body, signal);
             this.assertOpen();
             const info = [['引擎', 'NovelAI'], ['工具', label], ['原图', `${width} × ${height}`], ...(body.prompt ? [['说明', body.prompt.replace(';;', ' · ')]] : []), ['画于', new Date().toLocaleString('zh-CN', { hour12: false })]];
-            const photo = await this.library.addPhoto({ name: `${name}-${label}-${Date.now()}.png`, blob, info });
-            this.#thumbSoon(photo.id);
+            const results = [];
+            for (const [i, blob] of blobs.entries()) {
+                const named = blobs.length > 1 ? `${label} ${i + 1}` : label;
+                const photo = await this.library.addPhoto({ name: `${name}-${named}-${Date.now()}.png`, blob, info: blobs.length > 1 ? info.map(([k, v]) => k === '工具' ? [k, named] : [k, v]) : info });
+                this.#thumbSoon(photo.id);
+                results.push({ photoId: photo.id, seed: -1, params: { width: width * (scale || 1), height: height * (scale || 1) }, prompt: named, engine: 'nai', tool });
+            }
             this.emit('library', { collection: 'photos' });
             this.emit('draw', { phase: 'done' });
             if (this.subscription) this.subscription.checkedAt = 0;
-            return { photoId: photo.id, seed: -1, params: { width: width * (scale || 1), height: height * (scale || 1) }, prompt: label, engine: 'nai', tool };
+            return { ...results[0], more: results.slice(1) };
         } });
         job.catch(error => { this.emit('draw', { phase: error.cancelled ? 'cancelled' : 'error', message: error.message }); });
         return job;
@@ -2517,6 +2538,7 @@ export class TTSBackend {
             saveComfyWorkflow: patch => this.saveComfyWorkflow(patch), selectComfyWorkflow: id => this.selectComfyWorkflow(id), deleteComfyWorkflow: id => this.deleteComfyWorkflow(id),
             comfyLoraInfo: () => this.comfyLoraInfo(), editComfyLoras: change => this.editComfyLoras(clone(change || {})), restoreComfyWorkflow: () => this.restoreComfyWorkflow(),
             comfyLoras: options => this.comfyLoras(options),
+            naiSuggestTags: (word, options) => this.naiSuggestTags(word, options),
             comfyNodeSpecs: options => this.comfyNodeSpecs(options), comfyNodeList: () => this.comfyNodeList(), editComfyNodes: change => this.editComfyNodes(clone(change || {})), prepareComfyImport: source => this.prepareComfyImport(source),
             comfySavedWorkflows: () => this.comfySavedWorkflows(), comfySavedWorkflow: name => this.comfySavedWorkflow(name), comfyRecentRuns: () => this.comfyRecentRuns(), comfyUploadPicture: file => this.comfyUploadPicture(file),
             saveDrawPreset: preset => this.saveDrawPreset(preset), deleteDrawPreset: id => this.deleteDrawPreset(id), previewDrawPrompt: preset => this.previewDrawPrompt(preset),
