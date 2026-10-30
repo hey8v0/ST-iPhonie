@@ -210,11 +210,20 @@ export function assistantSummary(thread) {
 }
 
 // 「好，按这个画吧」「就画这张」: a go-ahead for what was just discussed, not a new picture described.
-const CONFIRM_DRAW = /^(?:(?:好[的啊呀]?|可以|嗯|那|就|请|行)[，,、！!。\s]*)*(?:按(?:这个|那个|刚才|上面|你说的|我们讨论的)(?:方案|想法|出图块|提示词)?(?:来)?(?:画|生成|生图)|(?:就)?画(?:这张|这个|这块|它)|开始(?:画|生成|生图)|画吧|生成吧|可以画了)[吧啊呀。！!\s]*$/u;
+const CONFIRM_DRAW = /^(?:(?:好[的啊呀]?|可以|嗯|那|就|请|行)[，,、！!。\s]*)*(?:按(?:这个|那个|刚才|上面|你说的|我们讨论的)(?:方案|想法|出图块|提示词)?(?:来)?(?:画|生成|生图)|(?:就)?画(?:这张|这个|这块|它)|开始(?:画|生成|生图)|画吧|生成吧|可以画了|直接(?:画|生成|生图|出图))[吧啊呀。！!\s]*$/u;
+// 「直接画一只猫」「不用确认，画吧」: no card first. Asking whether it can (「能直接出图吗」) is not that.
+const DIRECT_DRAW = /(?:直接|立刻|马上|现在就)(?:给我|帮我|就|来)?(?:画|出图|生图|生成|出一?张|来一?张)|(?:不用|不要|别|无需)(?:再)?(?:问|确认|讨论|写出图块|出图块)[^。！？\n]{0,10}(?:画|出图|生图)/u;
+const CAN_IT = /^(?:你)?(?:能|能不能|可以|可不可以|会|会不会)[^，,。]{0,6}(?:出图|生图|画图|画画|画)[吗嘛呢？?]*$/u;
 /** The user's turn is only a go-ahead (「按这个画吧」), after which the block just discussed is drawn as it is. */
 export function assistantConfirmsImage(messages) {
   if (messages?.at(-1)?.role !== 'user') return false;
   return CONFIRM_DRAW.test(String(messages.at(-1).text || '').trim());
+}
+/** The user's turn asks for the picture itself, with no card to look at first. */
+export function assistantDirectImage(messages) {
+  if (messages?.at(-1)?.role !== 'user') return false;
+  const raw = String(messages.at(-1).text || '').trim();
+  return DIRECT_DRAW.test(raw) && !CAN_IT.test(raw);
 }
 /** Explicit drawing requests only; examples, questions about capability and negative instructions stay chat. */
 export function assistantWantsImage(messages) {
@@ -222,13 +231,14 @@ export function assistantWantsImage(messages) {
   // All consecutive messages form one user turn. A later cancellation wins over an earlier drawing request.
   for (let i = messages.length - 1; i >= 0 && messages[i].role === 'user'; i--) {
     const raw = messages[i].text.trim();
-    if (/(?:先|暂时)(?:别|不要|不)(?:急着)?(?:画|生图|生成)|只(?:想)?(?:讨论|聊|要提示词)/u.test(raw)) return false;
+    if (/(?:先|暂时)(?:别|不要|不)(?:急着|直接)?(?:画|生图|生成|出图)|只(?:想)?(?:讨论|聊|要提示词)/u.test(raw)) return false;
     const earlier = messages.slice(0, i).slice(-6);
     const imageContext = earlier.some(m => m.meta?.image || /生图|画一|绘图|构图|提示词|出图块|<img\b|生成.{0,4}(?:图片|图像)|帮我画/i.test(m.text || ''));
     if (imageContext && CONFIRM_DRAW.test(raw)) return true;
-    if (/^(?:不要|别|不用|先不|暂时不)(?:再|帮我|给我)?(?:画|生图|生成|绘制)|^(?:算了|先聊聊|取消生图)/u.test(raw)) return false;
-    if (/(?:能不能|可以|会|怎么|如何).{0,8}(?:生图|画图|生成图片)[？?]?$/u.test(raw)) continue;
-    if (/^(?:(?:请|麻烦|现在|再|给我|帮我|帮忙|为我|替我)\s*)*(?:画(?!风|面|师|质|作|法)|生图[：:\s]|生成(?:一[张幅个]|图片|图像|照片|插画)|绘制|draw\s|generate\s+(?:an?\s+)?image)/iu.test(raw)) return true;
+    if (/^(?:不要|别|不用|先不|暂时不)(?:再|帮我|给我|直接)?(?:画|生图|生成|绘制|出图)|^(?:算了|先聊聊|取消生图)/u.test(raw)) return false;
+    if (/(?:能不能|可以|会|怎么|如何).{0,8}(?:生图|画图|生成图片)[？?]?$/u.test(raw) || CAN_IT.test(raw)) continue;
+    if (DIRECT_DRAW.test(raw)) return true;
+    if (/^(?:(?:请|麻烦|现在|再|给我|帮我|帮忙|为我|替我)\s*)*(?:画(?!风|面|师|质|作|法)|生图[：:\s]|生成(?:一[张幅个]|图片|图像|照片|插画)|绘制|出图|出一?张|来一?张|draw\s|generate\s+(?:an?\s+)?image)/iu.test(raw)) return true;
   }
   return false;
 }

@@ -7,7 +7,7 @@ import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, ASSISTANT_WANTS_MUSIC, assistant
 import {songOf} from '../core/music.js';
 import {icon, glyph} from './icons.js';
 import {assistantMarkdown, assistantHTMLMarkdown} from './assistant-markdown.js';
-import {parsePictures} from '../core/draw.js';
+import {assistantBlocks} from '../core/draw.js';
 import {normalizeMemory} from '../core/memory.js';
 import {memorySheet} from './chat-memory.js';
 
@@ -30,7 +30,7 @@ export function assistantParts(text, {beautified = false} = {}) {
   let at = 0, match;
   while ((match = fences.exec(value))) {
     if (match.index > at) parts.push({kind: 'text', text: value.slice(at, match.index)});
-    const language = match[1].trim(), only = parsePictures(match[2]).filter(t => t.spec);
+    const language = match[1].trim(), only = assistantBlocks(match[2]);
     const kind = /^html?$/i.test(language) ? 'html' : visualFence(language, match[2]) ? 'ui' : only.length === 1 && !match[2].slice(0, only[0].start).trim() && !match[2].slice(only[0].end).trim() ? 'picture' : 'code';
     parts.push({kind, language, text: kind === 'ui' || kind === 'picture' ? match[2].trim() : match[2]});
     at = fences.lastIndex;
@@ -52,17 +52,17 @@ export function assistantParts(text, {beautified = false} = {}) {
     }
     if (cursor < part.text.length) expanded.push({kind: 'text', text: part.text.slice(cursor), ...(story ? {story: true} : {})});
   }
-  // 出图块 (<img>…</img> with 画幅/场景/角色 lines) in the reply become picture cards.
+  // 出图块 (<img>…</img>, also in a story) in the reply become picture cards, however they were written.
   const pictured = [];
   for (const part of expanded) {
-    const blocks = part.kind === 'text' && !part.story ? parsePictures(part.text).filter(t => t.spec) : [];
+    const blocks = part.kind === 'text' ? assistantBlocks(part.text) : [], same = part.story ? {story: true} : {};
     if (!blocks.length) { pictured.push(part); continue; }
     let from = 0;
     for (const t of blocks) {
-      if (t.start > from) pictured.push({kind: 'text', text: part.text.slice(from, t.start)});
+      if (t.start > from) pictured.push({kind: 'text', text: part.text.slice(from, t.start), ...same});
       pictured.push({kind: 'picture', text: part.text.slice(t.start, t.end)}); from = t.end;
     }
-    if (from < part.text.length) pictured.push({kind: 'text', text: part.text.slice(from)});
+    if (from < part.text.length) pictured.push({kind: 'text', text: part.text.slice(from), ...same});
   }
   // 「[放歌] 歌名 - 歌手｜一句话」 lines become song cards.
   const sung = [], line = /^[ \t]*(?:[-*>][ \t]*)?\[(?:放歌|点歌|分享歌曲|歌曲)\][ \t]*([^\n]+?)[ \t]*$/gm;
@@ -144,7 +144,7 @@ export function shieldVisuals(text, display) {
   while (String(text).includes(marker)) marker += 'X';
   const hold = value => { kept.push(value); return `${marker}${kept.length - 1}END`; };
   let out = String(text).replace(/```([^\n`]*)\n([\s\S]*?)```/g, (all, language, body) => visualFence(language, body) || /^html?$/i.test(language.trim()) ? hold(all) : all);
-  for (const t of parsePictures(out).filter(t => t.spec).reverse()) out = out.slice(0, t.start) + hold(out.slice(t.start, t.end)) + out.slice(t.end);
+  for (const t of assistantBlocks(out).reverse()) out = out.slice(0, t.start) + hold(out.slice(t.start, t.end)) + out.slice(t.end);
   if (!kept.length) return display(text);
   return String(display(out)).replace(new RegExp(marker + '(\\d+)END', 'g'), (all, i) => kept[Number(i)] ?? all);
 }
@@ -163,12 +163,14 @@ export function assistantSongHTML(part, attrs = '') {
 const SIZE_NAMES = {竖: '竖图', 横: '横图', 方: '方图', portrait: '竖图', landscape: '横图', square: '方图'};
 /** An 出图块 as a card: what it draws, 复制 and 画这张. */
 export function assistantPictureHTML(text, attrs = '', {live = false} = {}) {
-  const [tag] = parsePictures(text).filter(t => t.spec);
+  const [tag] = assistantBlocks(text);
   if (!tag) return `<pre class="assistant-code"><code>${esc(text)}</code></pre>`;
-  const spec = tag.spec, size = SIZE_NAMES[String(spec.size || '').trim().split(/\s*[/／]\s*/)[0]] || (spec.size ? spec.size : '竖图');
+  // Written with no fields: all of it is the scene, and the names say who.
+  const spec = tag.spec || {size: '', tags: tag.prompt, cast: tag.characters.map(name => ({name, tags: '', negative: '', position: ''})), register: []}, size = SIZE_NAMES[String(spec.size || '').trim().split(/\s*[/／]\s*/)[0]] || (spec.size ? spec.size : '竖图');
   const row = (label, body) => `<div class="aui-pic-row"><span>${esc(label)}</span><p>${body}</p></div>`;
   return `<div class="aui aui-pic"><div class="aui-pic-head">${icon('image')}<strong>出图块</strong><span class="aui-tag">${esc(size)}</span></div>`
     + (spec.tags ? row('场景', esc(spec.tags)) : '')
+    + (tag.negative ? row('不要', esc(tag.negative)) : '')
     + spec.cast.map(c => row(c.name, `${esc(c.tags)}${c.negative ? `<small>不要：${esc(c.negative)}</small>` : ''}${c.position ? `<small>站位 ${esc(c.position)}</small>` : ''}`)).join('')
     + spec.register.map(r => row('新外貌', `<b>${esc(r.name)}</b> ${esc(r.appearance)}`)).join('')
     + (live ? '' : `<div class="aui-tools">${btn('pic-copy', icon('copy') + '复制', 'text-button', attrs)}${btn('pic-draw', icon('paint') + '画这张', 'aui-go', attrs)}</div>`)

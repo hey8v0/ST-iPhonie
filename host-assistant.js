@@ -1,11 +1,11 @@
 // Independent conversations with the phone's text model. Nothing here writes to the tavern story or selects its preset.
 import {promptText} from './core/prompt-rules.js';
-import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, ASSISTANT_WANTS_MUSIC, assistantMusicRule, buildAssistantPrompt, normalizeAssistant, assistantHistory, assistantMeta, assistantReasoningFormat, assistantReasoningTimer, assistantThoughts, assistantWantsImage, assistantConfirmsImage} from './core/assistant.js';
+import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, ASSISTANT_WANTS_MUSIC, assistantMusicRule, buildAssistantPrompt, normalizeAssistant, assistantHistory, assistantMeta, assistantReasoningFormat, assistantReasoningTimer, assistantThoughts, assistantWantsImage, assistantConfirmsImage, assistantDirectImage} from './core/assistant.js';
 import {activeText, customRequest, streamText, responseMetadata, failure, replyText} from './core/llm.js';
 import {modelRules} from './core/state.js';
 import {tavernAssistantPresets, buildTavernAssistantMessages} from './assistant-presets.js';
 import {createAssistantContext} from './assistant-context.js';
-import {assistantDrawGuide, parsePictures, pictureInputs} from './core/draw.js';
+import {assistantBlocks, assistantDrawGuide, pictureInputs} from './core/draw.js';
 import {createAssistantMemoryHost, assistantMemoryThread} from './host-assistant-memory.js';
 
 // 智能界面: small native pieces of UI the model may put in a reply (like ChatGPT's visual answers), drawn by the phone
@@ -114,9 +114,9 @@ export function assistantTalksPictures(messages) {
  * Returns {prompt: what is stored and drawn (the block itself), imageReply: the words with the picture's place}.
  */
 export function assistantPicture(text, style = {}) {
-  const raw = String(text || '').trim(), [tag] = parsePictures(raw).filter(t => t.spec);
+  const raw = String(text || '').trim(), [tag] = assistantBlocks(raw);
   if (tag) {
-    const block = raw.slice(tag.start, tag.end), rest = parsePictures(raw.slice(tag.end)).reduceRight((out, t) => out.slice(0, t.start) + out.slice(t.end), raw.slice(tag.end));
+    const block = raw.slice(tag.start, tag.end), rest = assistantBlocks(raw.slice(tag.end)).reduceRight((out, t) => out.slice(0, t.start) + out.slice(t.end), raw.slice(tag.end));
     const before = raw.slice(0, tag.start).replace(/```[a-z]*\s*$/i, '').trim() || '我按刚才的方案画了一张：', after = rest.replace(/^\s*```/, '').trim();
     if (block.length > 5000) throw Error('助手的出图块太长了，请重试');
     if (before.length + after.length > 30000 || [before, after].some(t => t.includes(ASSISTANT_IMAGE_SLOT))) throw Error('图片回复内容格式无效，请重试');
@@ -131,8 +131,8 @@ export function assistantPicture(text, style = {}) {
 /** What goes to the drawing engine: an 出图块 exactly as in the story (画风, each person's saved look, 站位, size); an
  *  older plain prompt as it was. */
 export function assistantInputs(settings, prompt, style = {}) {
-  const [tag] = /<img\b/i.test(prompt) ? parsePictures(prompt) : [];
-  if (tag) { const {names, ...input} = pictureInputs(settings, tag, ''); return input; }
+  const [tag] = /<img\b/i.test(prompt) ? assistantBlocks(prompt) : [];
+  if (tag) { const {names, ...input} = pictureInputs(settings, tag, ''); return {...input, negative: [input.negative, tag.negative].filter(Boolean).join(', ')}; }
   return {prompt, negative: style.negative || ''};
 }
 
@@ -201,11 +201,12 @@ export function createAssistantHost({context, settings, backend, presets = taver
       // 「帮我画……」 gets an 出图块 card first; the picture is drawn on 画这张, or on a go-ahead right after a card (that
       // card, as written). A go-ahead after a talk without a card still writes one and draws it.
       // 重 roll answers the same turn again by the same rules: 「帮我画」 gets a new card, a go-ahead draws again.
-      const wants = !oldImage && assistantWantsImage(historyMessages), confirming = wants && assistantConfirmsImage(historyMessages);
+      // 「直接画……」 skips the card: the block is written and drawn in one go.
+      const wants = !oldImage && assistantWantsImage(historyMessages), confirming = wants && assistantConfirmsImage(historyMessages), direct = wants && assistantDirectImage(historyMessages);
       const shown = confirming ? historyMessages.findLast(m => m.role === 'assistant') : null;
-      const card = shown && !shown.meta?.image ? parsePictures(assistantThoughts(shown.text, shown.meta?.reasoningFormat).text).filter(t => t.spec).at(-1) : null;
+      const card = shown && !shown.meta?.image ? assistantBlocks(assistantThoughts(shown.text, shown.meta?.reasoningFormat).text).at(-1) : null;
       const cardText = card ? assistantThoughts(shown.text, shown.meta?.reasoningFormat).text.slice(card.start, card.end) : '';
-      const drawing = !!oldImage || !!cardText || confirming;
+      const drawing = !!oldImage || !!cardText || confirming || direct;
       const proposing = wants && !drawing;
       checkSignal(controller.signal);
       if (drawing) {
@@ -319,7 +320,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
   async function drawBlock(id, block, {allowPaid = false} = {}) {
     checkOpen();
     if (jobs.has(id)) throw Error('这段助手对话正在回复，请等一下或先取消');
-    const [tag] = parsePictures(String(block || '')).filter(t => t.spec);
+    const [tag] = assistantBlocks(String(block || ''));
     if (!tag || String(block).length > 5000) throw Error('这个出图块读不出来，请让助手重新写一个');
     if (!backend.drawReady()) throw Error(backend.drawMissing());
     if (backend.drawQuote().free === false && !allowPaid) throw Object.assign(Error('生图需要确认费用'), {code: 'PAID'});

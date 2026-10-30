@@ -877,6 +877,58 @@ export function parsePictures(message) {
   return found;
 }
 
+// ---------- <img> blocks in the 助手 App ----------
+// A reply there is written for this very app, so whatever it puts in <img>…</img> is meant to be drawn: other names for
+// the fields, tags with no field at all, <img prompt="…">. The story keeps to parsePictures: its text may come from any
+// preset, and what looks like a tag there may be someone else's.
+const OTHER_NAMES = [[/^(提示词|正面|正面提示词|标签|画面|画面描述|场景描述|tags?|prompts?|positive|scene)$/i, '场景'], [/^(比例|方向|画幅比例|size|ratio|orientation|aspect)$/i, '画幅'],
+  [/^(characters?|cast|persons?|people)$/i, '角色'], [/^(description|nl)$/i, '描述'], [/^(appearance|register)$/i, '新外貌'], [/^(负面|反向|负面提示词|反向提示词|不要|negative|uc)$/i, 'negative']];
+function readLooseBody(body) {
+  const lines = [], loose = [];
+  let negative = '', named = false, list = false;
+  for (const raw of String(body).split(/\r?\n/)) {
+    const line = raw.trim().replace(/^(?:[-*•·]|\d+[.、)）])\s*/, '');
+    if (!line) continue;
+    const m = line.match(/^([^\s:：|｜,，]{1,8}?)\s*\d*\s*[:：]\s*(.*)$/);
+    const name = m && (OTHER_NAMES.find(([word]) => word.test(m[1]))?.[1] ?? (FIELDS[m[1]] ? m[1] : ''));
+    if (!name) { if (list && /[|｜]/.test(line)) lines.push(line); else loose.push(line); continue; }
+    named = true;
+    if (name === 'negative') { negative = [negative, m[2].trim()].filter(Boolean).join(', '); list = false; continue; }
+    lines.push(`${name}：${m[2]}`);
+    list = ['cast', 'register'].includes(FIELDS[name]);
+  }
+  if (!named) return null;
+  // Tags on a line of their own among the named ones.
+  if (loose.length) lines.push('场景：' + loose.join(', '));
+  return {spec: parseBlock(lines.join('\n')), negative};
+}
+/**
+ * Every picture block of a 助手 reply, however it was written: {start, end, prompt, characters, spec (or null), negative}.
+ * Images with src are left alone, and so is an <img> that says nothing to draw.
+ */
+export function assistantBlocks(message) {
+  const text = String(message), found = [], open = /<img\b(?![^<>]*\bsrc\s*=)([^<>]*?)\/?>/gi;
+  let m;
+  while ((m = open.exec(text))) {
+    // 「`<img>` 开头」: words about the tag.
+    if (text[m.index - 1] === '`') continue;
+    const start = m.index, after = text.slice(open.lastIndex), close = /<\/img\s*>/i.exec(after), next = after.search(/<img\b/i);
+    let end = open.lastIndex, body = '';
+    if (close && (next < 0 || close.index < next)) { body = after.slice(0, close.index); end += close.index + close[0].length; open.lastIndex = end; }
+    const said = attribute(m[1], 'prompt') ?? '', who = attribute(m[1], 'characters') ?? '', read = body.trim() ? readLooseBody(body) : null;
+    if (read) {
+      const {spec} = read;
+      if (spec?.tags || spec?.nl || spec?.cast.length) found.push({start, end, prompt: spec.tags, characters: spec.cast.map(c => c.name), spec, negative: read.negative});
+      continue;
+    }
+    const [tags, ...names] = (body.trim() || said).split(/[|｜]/);
+    const prompt = tags.split(/\r?\n/).map(l => l.trim()).filter(Boolean).join(', ').slice(0, 4000);
+    // (「用 <img> 开头、</img> 结尾」 is not something to draw.)
+    if (prompt.length >= 4 && !/[、，,：:]$/.test(prompt)) found.push({start, end, prompt, characters: (who || names.join(',')).split(/[,，、]/).map(x => x.trim()).filter(Boolean), spec: null, negative: ''});
+  }
+  return found;
+}
+
 /** Replaces picture blocks with placeholders that the host fills in after rendering. */
 export function renderPictures(message, marker, {passive = false, pictures = {}} = {}) {
   const tags = parsePictures(message);
