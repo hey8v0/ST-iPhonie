@@ -53,10 +53,10 @@
 #sttts-floating .float[data-dragging=true] .orb{transition:none;transform:scale(1.06);box-shadow:0 16px 34px -8px var(--glow),0 4px 10px rgba(0,0,0,.2)}
 #sttts-floating .orb:active{transform:scale(.94)}
 
-/* The phone's bar (data-form=bar). The script places and shapes it every frame: the root's place and size, the orb's
-   corners, squash, fade and shadow, the wave icon. Only the bar's strip at the screen edge (.hit) or the block itself
-   takes touches, so the chat beside it still scrolls. */
-#sttts-floating .waves,#sttts-floating .hit,#sttts-floating .hint,#sttts-floating .shine{display:none}
+/* The phone's bar (data-form=bar). Only the bar's strip at the screen edge (.hit) or the block itself takes touches, so the
+   chat beside it still scrolls. Where the browser cannot play it (data-gpu, below), the script shapes it every frame. */
+#sttts-floating .waves,#sttts-floating .hit,#sttts-floating .hint,#sttts-floating .shine,#sttts-floating .pill,#sttts-floating .lift{display:none}
+#sttts-floating .shape,#sttts-floating .squash{display:contents}
 #sttts-floating .float[data-form=bar]{position:absolute;left:0;top:0;width:56px;height:56px;pointer-events:none}
 #sttts-floating .float[data-form=bar] .orb{position:absolute;inset:0;width:100%;height:100%;display:block;border:0;overflow:hidden;transition:color .5s ease;pointer-events:auto;will-change:transform}
 #sttts-floating .float[data-form=bar][data-mode=docked] .orb{pointer-events:none}
@@ -66,9 +66,20 @@
 #sttts-floating .float[data-form=bar] .waves{display:block;position:absolute;left:0;top:0;width:132px;height:180px;pointer-events:none}
 #sttts-floating .float[data-form=bar] .hit{display:block;position:absolute;left:0;top:0;width:20px;height:49px;pointer-events:auto;touch-action:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
 /* While a line is being made, a light sweeps down the bar. */
-#sttts-floating .float[data-form=bar] .shine{display:block;position:absolute;inset:0;opacity:0;pointer-events:none;background:linear-gradient(180deg,transparent 0 32%,rgba(255,255,255,.85) 50%,transparent 68% 100%);background-size:100% 260%}
-#sttts-floating .float[data-form=bar][data-phase=generating] .shine{opacity:1;animation:sttts-float-sweep 1.15s cubic-bezier(.45,0,.55,1) infinite}
-@keyframes sttts-float-sweep{from{background-position:0 115%}to{background-position:0 -15%}}
+#sttts-floating .float[data-form=bar] .shine{display:block;position:absolute;left:0;right:0;top:0;height:260%;opacity:0;pointer-events:none;background:linear-gradient(180deg,transparent 0 32%,rgba(255,255,255,.85) 50%,transparent 68% 100%)}
+#sttts-floating .float[data-form=bar][data-phase=generating] .shine{opacity:1;will-change:transform;animation:sttts-float-sweep 1.15s cubic-bezier(.45,0,.55,1) infinite}
+@keyframes sttts-float-sweep{from{transform:translateY(-70.8%)}to{transform:translateY(9.2%)}}
+/* Played by the browser (core/floating.js, data-gpu): the box only moves, the block and the bar are each drawn once at their
+   own size and only scaled and faded, each on a layer of its own, so nothing is laid out or painted again while they move. */
+#sttts-floating[data-form=bar]>.waves{display:block;position:absolute;left:0;top:0;width:132px;height:180px;pointer-events:none}
+#sttts-floating .float[data-gpu]{width:56px;height:56px;will-change:transform}
+#sttts-floating .float[data-gpu] .shape{display:block;position:absolute;inset:0;pointer-events:none;will-change:opacity}
+#sttts-floating .float[data-gpu] .lift{display:block;position:absolute;inset:0;border-radius:19px;box-shadow:0 13px 34px -8px rgba(var(--glow-rgb),.5),0 3px 8px rgba(0,0,0,.24);opacity:0;will-change:transform,opacity}
+#sttts-floating .float[data-gpu] .squash{display:block;position:absolute;left:23px;top:9.5px;width:10px;height:37px;will-change:transform}
+#sttts-floating .float[data-gpu] .pill{display:block;position:absolute;inset:0;overflow:hidden;border-radius:5px;background:linear-gradient(160deg,var(--sttts-c1),var(--sttts-c2));box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 3px 8px -3px rgba(var(--glow-rgb),.32),0 1px 2px rgba(0,0,0,.14);will-change:transform,opacity}
+#sttts-floating .float[data-gpu] .pill:before{content:"";position:absolute;inset:7% 18% auto 18%;height:40%;border-radius:999px;background:linear-gradient(rgba(255,255,255,.6),rgba(255,255,255,0));opacity:.55}
+#sttts-floating .float[data-gpu] .orb{border-radius:19px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.9),0 10px 24px -8px rgba(var(--glow-rgb),.32),0 1px 2px rgba(0,0,0,.14);will-change:transform,opacity}
+#sttts-floating .float[data-gpu] g.wave{transform-box:view-box;transform-origin:50% 50%}
 /* A first-time tip beside the bar. */
 #sttts-floating .float[data-form=bar] .hint{display:block;position:absolute;left:0;top:0;white-space:nowrap;font-size:12.5px;font-weight:600;line-height:1.2;color:#fff;background:rgba(20,26,52,.86);padding:7px 11px;border-radius:999px;box-shadow:0 8px 20px -8px rgba(0,0,0,.45);opacity:0;transform:translateX(var(--hx,0px)) scale(.94);transition:opacity .22s ease,transform .42s cubic-bezier(.3,1.4,.5,1);pointer-events:none}
 #sttts-floating .float[data-form=bar][data-side=right] .hint{--hx:10px}
