@@ -149,17 +149,26 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
 
   // ---------- Sheets ----------
-  /** add: a 「＋」 in the title bar (its label), for a list that grows there; listened for as a click on [data-sheet-add]. */
-  function dialog(title, html, {top = false, add = ''} = {}) {
-    sheet?.close(null);
+  /** Every sheet open, the one on top first. */
+  function closeSheets() { while (sheet) sheet.close(null); }
+  /**
+   * add: a 「＋」 in the title bar (its label), for a list that grows there; listened for as a click on [data-sheet-add].
+   * over: this sheet goes on top of the one open, which is there again when this one closes. Any other sheet takes the
+   * place of the one on top.
+   */
+  function dialog(title, html, {top = false, add = '', over = false} = {}) {
+    const under = (over ? sheet : sheet?.under) || null;
+    if (!over) sheet?.close(null);
     const focus = doc.activeElement, overlay = doc.createElement('div');
     overlay.className = 'overlay' + (top ? ' top' : '');
+    if (under) under.overlay.inert = true;
+    if (over) overlay.dataset.over = '';
     overlay.innerHTML = `<section class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><header class="sheet-header"><h2>${esc(title)}</h2>${add ? `<button type="button" class="sheet-add" data-sheet-add aria-label="${esc(add)}">${icon('add')}</button>` : ''}<button class="nav-button" data-sheet-close aria-label="关闭">${icon('close')}</button></header><div class="sheet-body">${html}</div></section>`;
     screen.append(overlay);
     let live = true;
     const callbacks = [];
     const result = {
-      overlay,
+      overlay, under,
       body: overlay.querySelector('.sheet-body'),
       get live() { return live; },
       onClose(fn) { callbacks.push(fn); },
@@ -167,7 +176,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
         if (!live) return;
         live = false;
         leave(overlay, from);
-        if (sheet === result) sheet = null;
+        if (sheet === result) sheet = under?.live ? under : null;
+        if (under?.live && sheet === under) under.overlay.inert = false;
         syncInert();
         for (const callback of callbacks) callback(value);
         if (focus?.isConnected && !focus.closest('[inert]')) focus.focus({preventScroll: true});
@@ -330,7 +340,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       return;
     }
     wanted = null;
-    sheet?.close(null);
+    closeSheets();
     unlock();
     const source = from || (!active && !home.hidden ? iconOf(name) : null);
     const was = stopCarry();
@@ -361,7 +371,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     v.onPlayback?.(playback);
   }
   function showHome(immediate = false) {
-    sheet?.close(null);
+    closeSheets();
     if (locked) return;
     const leaving = active, was = stopCarry();
     if (leaving) views.get(leaving)?.leave?.();
@@ -421,7 +431,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     showHome();
   }
   function lock() {
-    sheet?.close(null);
+    closeSheets();
     if (active) views.get(active)?.leave?.();
     locked = true;
     renderLock();
@@ -1046,7 +1056,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const reopening = visible && !panelVisible;
     panelVisible = visible;
     if (visible) { callState(); run(refreshAvatars); floatingBar(); }
-    if (!visible) { sheet?.close(null); if (active) views.get(active)?.leave?.(); }
+    if (!visible) { closeSheets(); if (active) views.get(active)?.leave?.(); }
     else if (takeDraw()) { /* opened from a chat picture */ }
     else if (takeThread()) { /* opened from a message card */ }
     else if (takeApp()) { /* opened from the music island */ }
@@ -1061,7 +1071,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     appearanceEpoch++;
     unsubscribe();
     controller.abort();
-    sheet?.close(null);
+    closeSheets();
     for (const v of views.values()) v.dispose();
     calls.dispose();
     for (const url of avatarURLs.values()) if (url) win.URL.revokeObjectURL(url);

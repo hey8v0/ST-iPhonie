@@ -349,6 +349,7 @@ details>div{padding-bottom:10px}
 /* ---------- Sheets, toast, lock ---------- */
 .overlay,.overlay-out{position:absolute;inset:0;z-index:60;display:flex;align-items:flex-end;padding:10px 10px 22px;background:rgba(10,20,40,.36);animation:fade .2s}
 .overlay-out,.overlay-out .sheet{animation:none;pointer-events:none}
+.overlay[data-over]{background:rgba(10,20,40,.22)}
 .overlay.top{align-items:flex-start;padding-top:52px;background:rgba(20,40,80,.3);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
 @keyframes fade{from{opacity:0}}
 .sheet{width:100%;max-height:84%;display:flex;flex-direction:column;background:var(--bg);border-radius:28px;box-shadow:0 10px 40px rgba(0,0,0,.25);animation:sheet-in .32s var(--spring-soft)}

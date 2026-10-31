@@ -123,6 +123,7 @@ function tavernFiles(){const headers=()=>({'Content-Type':'application/json',...
   // when the tavern lets it, and returns where it landed.
   async readPath(path){const r=await fetch('/'+String(path).replace(/^\//,''),{cache:'no-store'});if(r.status===404)return null;if(!r.ok)throw Error(`读不到酒馆里的 ${path}（${r.status}）`);return r.blob();},
   async hasPath(path){const url='/'+String(path).replace(/^\//,'');let r=await fetch(url,{method:'HEAD',cache:'no-store'});if(r.status===405)r=await fetch(url,{cache:'no-store'});return r.ok;},
+  async removePath(path){const r=await fetch('/api/images/delete',{method:'POST',headers:headers(),body:JSON.stringify({path})});if(!r.ok&&r.status!==404)throw Error(`删不掉酒馆里的 ${path}（${r.status}）`);},
   async writePath(path,blob){const p=String(path).replace(/^\//,''),parts=p.split('/'),file=parts.pop();
    if(/^user\/files\//.test(p)){await this.write(file,blob);return p;}
    const ext=(file.match(/\.(\w+)$/)||[])[1]?.toLowerCase()||'png',folder=parts.slice(2).join('/');

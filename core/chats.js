@@ -89,7 +89,7 @@ function cleanMessage(m, id, at) {
 }
 
 export class ChatStore {
-  #scope; #factory; #now; #id; #db = null; #opening = null; #closed = false;
+  #scope; #factory; #now; #id; #db = null; #opening = null; #closed = false; #madeAt = 0;
   constructor(scope, {indexedDB = globalThis.indexedDB, now = Date.now, id = () => globalThis.crypto.randomUUID()} = {}) {
     this.#scope = String(scope); this.#factory = indexedDB; this.#now = now; this.#id = id;
   }
@@ -166,7 +166,8 @@ export class ChatStore {
     if (!list.length) throw fail('请选择聊天对象');
     if (list.length > CHAT_STORE_LIMITS.members) throw fail('群聊最多 20 人');
     if (type === 'group' && list.length < 2) throw fail('群聊至少要选两个人');
-    const now = this.#now(), row = {scope: this.#scope, id: this.#id(), type: type === 'group' ? 'group' : 'dm', name: clip(name, 40).trim() || (type === 'group' ? list.join('、').slice(0, 40) : list[0]), members: type === 'group' ? list : [list[0]], unread: 0, createdAt: now, updatedAt: now, messages: [], ...(space ? {space: clip(space, 300)} : {}), ...(save ? {save: clip(save, 400)} : {}), ...(type === 'group' && windowOf ? {windowOf: clip(windowOf, 512)} : {})};
+    // Later than the one before, even in the same millisecond: the window started last is the one in use (openedLast).
+    const now = this.#madeAt = Math.max(this.#now(), this.#madeAt + 1), row = {scope: this.#scope, id: this.#id(), type: type === 'group' ? 'group' : 'dm', name: clip(name, 40).trim() || (type === 'group' ? list.join('、').slice(0, 40) : list[0]), members: type === 'group' ? list : [list[0]], unread: 0, createdAt: now, updatedAt: now, messages: [], ...(space ? {space: clip(space, 300)} : {}), ...(save ? {save: clip(save, 400)} : {}), ...(type === 'group' && windowOf ? {windowOf: clip(windowOf, 512)} : {})};
     await this.#tx('readwrite', (store, done) => { store.put(row); done(); });
     return this.#public(row);
   }

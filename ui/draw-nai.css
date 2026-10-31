@@ -192,3 +192,41 @@
 .custom-report .grid-choices,.custom-report .actions{margin-top:8px}
 .custom-now{margin:-4px 0 12px}
 .custom-services{margin-bottom:6px}
+/* 画风列表：和图层一样的卡片，左边是效果图（没有图也是同样大小的格子，排起来整齐），在用的整行换颜色 */
+.style-picker .style-list .sw-row{border-top:0;padding-bottom:6px;content-visibility:auto;contain-intrinsic-size:auto 94px}
+.style-picker .style-list .sw-row.style-group{contain-intrinsic-size:auto 62px}
+.style-picker .style-list.sorting .sw-row,.style-picker .style-list .sw-row.lifted{content-visibility:visible}
+.style-picker .style-list .sw-actions{bottom:6px}
+.style-picker .style-list .sw-main,.style-picker .style-list .sw-open .sw-main{border-radius:16px;background:var(--card)}
+.style-picker .style-list .sw-chosen .sw-main{background:color-mix(in srgb,var(--accent) 16%,var(--card))}
+.style-picker .style-group-inner .sw-row{margin-left:22px}
+.style-picker .style-group-inner .sw-body{padding-left:0}
+.style-picker .style-group-inner .sw-body::before{display:none}
+.style-picker .style-list .list-row{min-height:0;padding:8px 12px 8px 8px;gap:12px}
+.style-picker .style-list .style-group-row{min-height:56px;padding:10px 12px 10px 14px}
+.style-row>span{min-width:0}
+.style-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.style-cover{flex:none;position:relative;display:grid;place-items:center;box-sizing:border-box;width:56px;height:72px;padding:0;border-radius:11px;overflow:hidden;background:var(--card2);color:var(--ink2);box-shadow:inset 0 0 0 1px var(--line);transition:transform .25s cubic-bezier(.2,1.5,.4,1)}
+button.style-cover:active{transform:scale(.94)}
+.style-cover svg{width:20px;height:20px;opacity:.65}
+.style-cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 18%;pointer-events:none;-webkit-user-drag:none}
+.style-picker .style-list .sw-row.style-on .sw-main,.style-picker .style-list .sw-row.style-on.lifted .sw-main{background:var(--accent-btn)}
+.style-on .style-row strong,.style-on .style-row small,.style-on .style-row small.style-params,.style-on .sw-more{color:var(--on-accent)}
+.style-on .style-row small{opacity:.8}
+.style-on .style-cover{background:color-mix(in srgb,var(--on-accent) 16%,transparent);color:var(--on-accent);box-shadow:none}
+.style-on .sw-check{border-color:color-mix(in srgb,var(--on-accent) 70%,transparent)}
+.chip-cover{flex:none;width:20px;height:20px;border-radius:50%;object-fit:cover;object-position:50% 18%}
+/* 效果图的弹窗 */
+.cover-big{margin-bottom:12px;border-radius:16px;overflow:hidden;background:var(--card2)}
+.cover-big button{display:block;width:100%;padding:0}
+.cover-big img{display:block;width:100%;max-height:44vh;object-fit:contain}
+.cover-none{display:grid;place-items:center;height:132px;color:var(--ink2)}
+.cover-none svg{width:34px;height:34px;opacity:.5}
+.cover-actions{margin-top:0}
+.cover-clear{justify-content:center}
+.style-edit-cover{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.style-edit-cover>span{flex:1;min-width:0;display:grid;gap:2px}
+.style-edit-cover small{font-size:12px;color:var(--ink2)}
+.cover-choice{width:100%;gap:12px;padding:8px;margin-bottom:6px;border-radius:16px;background:var(--card);text-align:left}
+.list-row.cover-choice>span.style-cover{flex:none}
+.cover-choice strong{font-size:15px}

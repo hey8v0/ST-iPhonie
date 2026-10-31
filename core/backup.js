@@ -8,7 +8,7 @@ export const BACKUP_FORMAT = 2;
 /** The parts a backup can hold, in the order they are shown. settings brings the reference audio and the phone's look. */
 export const BACKUP_PARTS = Object.freeze({
   settings: '设置、预设和角色音色',
-  vnFiles: '视觉小说的立绘和模型',
+  vnFiles: '视觉小说的立绘和模型、画风效果图',
   chats: '聊天记录',
   memories: '聊天记忆',
   assistant: '助手会话与记忆',

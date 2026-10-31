@@ -6,7 +6,7 @@ import {vibePanel} from './vibes.js';
 import {comfyPlans} from './comfy-plans.js';
 import {comfyLoraPanel} from './comfy-lora-panel.js';
 import {comfyNodePanel} from './comfy-nodes.js';
-import {styleSheets} from './draw-styles.js';
+import {styleSheets, watchCovers} from './draw-styles.js';
 import {tokenBudget, loadCounter, countPicture, countField, tagCost} from '../core/tokens.js';
 import {refPanel} from './draw-refs.js';
 import {pictureData, readNovelAI, fitBase, scaledPicture, enhanceSizes, composeFocused, composeGrid, canCopyPicture, copyPicture} from './draw-images.js';
@@ -164,7 +164,7 @@ export function drawApp(ctx) {
       + `<div class="segmented draw-engines" role="group" aria-label="用哪个画">${api.drawCatalog.engines.map(k => `<button data-action="draw-engine" data-pick="${k}" aria-pressed="${k === e}">${esc(engineName(k))}</button>`).join('')}</div>`
       + (keyed ? '' : `<div class="banner">${icon('key')}<span>${esc(api.drawMissing())}。</span>${btn('go-key', '去填写', 'chip-button')}</div>`)
       + queueCard()
-      + `<div class="draw-meta">${btn('pick-style', icon('layers') + esc(style().name) + icon('down'), 'chip-button')}${costChip(q)}${e === 'nai' ? `<label class="chip-button file-button read-png" title="从 NovelAI 画的 PNG 读回提示词、角色和参数">${icon('import')}读图<input type="file" data-read-png accept="image/png,image/jpeg,image/webp" aria-label="从 NovelAI 的图读参数" hidden></label>` : ''}</div>
+      + `<div class="draw-meta">${btn('pick-style', (style().cover ? `<img class="chip-cover" src="${esc(style().cover.thumb)}" alt="" draggable="false">` : icon('layers')) + esc(style().name) + icon('down'), 'chip-button')}${costChip(q)}${e === 'nai' ? `<label class="chip-button file-button read-png" title="从 NovelAI 画的 PNG 读回提示词、角色和参数">${icon('import')}读图<input type="file" data-read-png accept="image/png,image/jpeg,image/webp" aria-label="从 NovelAI 的图读参数" hidden></label>` : ''}</div>
         <div class="canvas-card"><div class="canvas-main${main ? '' : ' empty'}" style="aspect-ratio:${p.width}/${p.height}">${main ? `<button type="button" class="canvas-zoom" data-action="zoom" aria-label="放大查看"><img src="${esc(main)}" alt="生成的图片"></button>` : `<span>${comfy && !(comfy.controls.includes('width') && comfy.controls.includes('height')) ? '尺寸由工作流决定' : `${p.width} × ${p.height}`}<br>还没有图</span>`}${busy ? `<span class="canvas-busy">${esc(engineName(e))} 正在画……</span>` : ''}</div>
           ${results.length ? `<div class="canvas-side" data-keep-scroll="results">${thumbs.map((url, i) => `<button class="thumb" data-action="thumb" data-index="${i}" aria-pressed="${i === current}" aria-label="第 ${i + 1} 张">${url ? `<img src="${esc(url)}" alt="">` : ''}</button>`).join('')}</div>` : ''}</div>
         ${shown ? `<p class="hint canvas-meta">${[shown.tool ? (shown.prompt || '') : shown.params.model, `${shown.params.width}×${shown.params.height}`, shown.params.steps ? shown.params.steps + ' 步' : '', shown.seed >= 0 ? '种子 ' + shown.seed : ''].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
@@ -602,7 +602,7 @@ export function drawApp(ctx) {
       negative: joinWords([s.negative, negative]),
       characters: people.filter(c => c.prompt.trim()).map(({name, ...c}) => ({...c})),
       params: eng() === 'nai' ? {...state().params, seed} : {seed}, name: engineName().replace(/\s+/g, ''), label: '绘图 App · ' + (words.trim().slice(0, 24) || s.name),
-      source: {prompt: words, negative, characters: structuredClone(people), params: {...state().params}},
+      source: {prompt: words, negative, characters: structuredClone(people), params: {...state().params}, styleId: styleId()},
       ...(extra.base ? {base: extra.base} : {}), ...(extra.refs.length ? {refs: extra.refs} : {}), ...(extra.focus ? {focus: extra.focus} : {})
     }, count, paid === true);
   }
@@ -726,7 +726,7 @@ export function drawApp(ctx) {
   /** [action, icon, name, what it does, costs Anlas] */
   const PICTURE_TOOLS = [['tool-base', 'image', '当底图', '图生图 · 局部重绘', false], ['tool-ref', 'person', '当参考', '角色参考 · V4.5', false], ['tool-vibe', 'layers', '当 Vibe', '学它的画风', false], ['tool-variation', 'layers', '变体', '照着再画几张', false],
     ['tool-enhance', 'star', '增强', '放大后补细节', true], ['tool-upscale', 'expand', '放大', '2 倍', true], ['tool-director', 'wand', '导演工具', '去背景 · 线稿 · 换表情…', true],
-    ['tool-settings', 'edit', '用它的设置', '提示词和参数', false], ['tool-seed', 'dice', '用它的种子', '接着微调', false]];
+    ['tool-settings', 'edit', '用它的设置', '提示词和参数', false], ['tool-seed', 'dice', '用它的种子', '接着微调', false], ['tool-cover', 'image', '当效果图', '放到它的画风上', false]];
   /** One line under the picture; opened, a grid of what can be done with it. */
   const toolsHTML = () => `<div class="pic-tools${toolsOpen ? ' open' : ''}"><button type="button" class="pic-tools-toggle" data-action="tools-toggle" aria-expanded="${toolsOpen}">${icon('wand')}<span><b>用这张图继续</b><small>${toolsOpen ? '收起' : '底图 · 参考 · Vibe · 变体 · 增强 · 放大 · 导演工具 · 设置'}</small></span>${icon('down')}</button>`
     + (toolsOpen ? `<div class="pic-tools-grid" role="group" aria-label="用这张图">${PICTURE_TOOLS.map(([action, glyph, name, what, paid]) => `<button type="button" class="pic-tool" data-action="${action}"${paid && busy ? ' disabled' : ''}><span class="pic-tool-ico">${icon(glyph)}</span><b>${name}</b><small>${what}</small>${paid ? '<em>扣 Anlas</em>' : ''}</button>`).join('')}</div>` : '') + '</div>';
@@ -756,6 +756,12 @@ export function drawApp(ctx) {
           return true;
         }
         case 'tool-director': directorSheet(); return true;
+        case 'tool-cover': {
+          // On the 画风 it was drawn with, whichever is in use now.
+          const made = results[current]?.source?.styleId, target = state().styles.find(s => s.id === made) || style();
+          await api.setStyleCover(target.id, await shownBlob()); render(); ctx.notify(`已放到「${target.name}」的效果图`);
+          return true;
+        }
         case 'tool-seed': { const r = results[current]; if (!(r?.seed >= 0)) { ctx.notify('这张图没有种子'); return true; } seed = r.seed; tab = 'params'; render(); ctx.notify(`种子换成 ${r.seed}`); return true; }
         case 'tool-settings': {
           const r = results[current];
@@ -895,7 +901,8 @@ export function drawApp(ctx) {
   }
 
   // 画风: ui/draw-styles.js.
-  const {pickStyle, editStyle} = styleSheets({ctx, state, styleId, style, render});
+  const {pickStyle, editStyle} = styleSheets({ctx, state, styleId, style, render, shownPicture: () => results[current] ? shownBlob() : null, afterPaid: () => refreshSubscription(true)});
+  watchCovers(v.root);
 
   render();
   refreshSubscription();

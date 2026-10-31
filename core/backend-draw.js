@@ -10,8 +10,16 @@ import { activeChatPreset } from './chat.js';
 import { VIBE_ANLAS } from './vibes.js';
 import { normalizeGrid } from './nai-grid.js';
 import { arrangeRows } from './layers.js';
+import { makeThumb } from './thumbnail.js';
 
 const clone = value => structuredClone(value);
+// 效果图: a small picture for the list and a bigger one to look at, by their shorter sides; files of their own in the tavern.
+const COVER_SIZES = {s: 180, l: 720}, COVER_FILE = /^\/?user\/images\/ST-iPhonie\/style-[^/]+$/;
+/** Deletes a 画风's old 效果图 files, unless a copy of it still shows them. */
+function sweepCovers(backend, covers) {
+    const used = JSON.stringify(backend.settings.draw.styles.map(s => s.cover || null));
+    for (const path of covers.filter(Boolean).flatMap(c => [c.thumb, c.full])) if (COVER_FILE.test(path) && !used.includes(JSON.stringify(path))) backend.syncFiles?.removePath?.(path).catch(() => {});
+}
 const BLANK_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 /** The scheme in use, ready to change: the built-in default stays as it is, so the first change makes a copy and switches to it. */
 function ownScheme(c, stem) {
@@ -269,6 +277,9 @@ class DrawSettings {
         // Its parameters: the ones given (a copy keeps the original's), else the ones it had.
         const params = value.params && typeof value.params === 'object' ? value.params : was?.params;
         if (params) style.params = styleParams({ ...next.draw.params, ...params });
+        // Its 效果图 is its own to change (setStyleCover); a copy starts with the original's.
+        const cover = index >= 0 ? was.cover : value.cover;
+        if (cover) style.cover = cover;
         // It stays in its group; a new one given `after` (a copy) goes right below that style, in its group.
         const after = index < 0 && value.after ? next.draw.styles.findIndex(s => s.id === value.after) : -1;
         if (was?.group) style.group = was.group; else if (after >= 0 && next.draw.styles[after].group) style.group = next.draw.styles[after].group;
@@ -280,10 +291,41 @@ class DrawSettings {
     /** Several 画风 at once (a group's, the ones picked): one save; at least one has to stay. */
     deleteStyles(ids) {
         const next = this.getState(), gone = new Set([...(ids || [])].map(String));
-        const left = next.draw.styles.filter(s => !gone.has(s.id));
+        const left = next.draw.styles.filter(s => !gone.has(s.id)), covers = next.draw.styles.filter(s => gone.has(s.id)).map(s => s.cover);
         if (!left.length) throw Error('请至少保留一个画风预设');
         next.draw.styles = left;
-        return this.save(next).draw;
+        const saved = this.save(next).draw;
+        sweepCovers(this, covers);
+        return saved;
+    }
+    /**
+     * 效果图 of a 画风, from any picture. Files in the tavern, so every device that opens it sees them (the settings only
+     * name them), and apart from the album, so deleting the photo does not take it away.
+     */
+    async setStyleCover(id, blob) {
+        this.assertOpen();
+        if (!this.syncFiles?.writePath) throw Error('要在酒馆里打开小手机，才能存效果图');
+        if (!this.settings.draw.styles.some(s => s.id === id)) throw Error('这个画风已经不在了');
+        if (!blob) throw Error('这张图已经不在了');
+        let small, big;
+        try { [small, big] = [await makeThumb(blob, COVER_SIZES.s), await makeThumb(blob, COVER_SIZES.l)]; } catch { throw Error('这张图读不出来，换一张试试'); }
+        const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6), file = (kind, made) => `user/images/ST-iPhonie/style-${stamp}-${kind}.${made.blob.type === 'image/webp' ? 'webp' : 'jpg'}`;
+        const cover = { thumb: await this.syncFiles.writePath(file('s', small), small.blob), full: await this.syncFiles.writePath(file('l', big), big.blob) };
+        const next = this.getState(), style = next.draw.styles.find(s => s.id === id);
+        // Deleted while the files went up.
+        if (!style) { sweepCovers(this, [cover]); throw Error('这个画风已经不在了'); }
+        const old = style.cover;
+        style.cover = cover;
+        this.save(next);
+        sweepCovers(this, [old]);
+        return clone(cover);
+    }
+    clearStyleCover(id) {
+        const next = this.getState(), style = next.draw.styles.find(s => s.id === id), old = style?.cover;
+        if (!old) return;
+        delete style.cover;
+        this.save(next);
+        sweepCovers(this, [old]);
     }
     /** The 提示词片段 list in a new order with its 分类, in the shape of arrangeStyles (a 片段's id under `style`). */
     arrangeChunks(tree) {

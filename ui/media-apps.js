@@ -155,6 +155,12 @@ export function galleryApp(ctx) {
       load: async id => { const p = await api.getPhoto(id); return p?.packed ? {...p, info: [...(p.info || []), ['压缩', `已压缩，原图 ${size(p.packed.size)}`]]} : p; },
       actions: [
         {key: 'wallpaper', icon: 'image', label: '设为壁纸', run: async id => { await api.savePhone({wallpaper: {kind: 'photo', photoId: id}}); ctx.notify('已设为壁纸'); }},
+        {key: 'cover', icon: 'paint', label: '当效果图', run: async id => {
+          const photo = await api.getPhoto(id);
+          if (!photo?.blob) throw Error('这张照片已经不在了');
+          const {coverFromAlbum} = await import('./draw-styles.js');
+          coverFromAlbum(ctx, photo.blob, (photo.info || []).map(row => row[1]).join(' '));
+        }},
         {key: 'vibe', icon: 'layers', label: '当 Vibe', run: async id => {
           const {source, name} = await photoFile(id), r = await api.importVibes([new ctx.win.File([source], name || 'Vibe.png', {type: source.type || 'image/png'})]);
           if (r.errors.length) throw Error(r.errors[0].message);

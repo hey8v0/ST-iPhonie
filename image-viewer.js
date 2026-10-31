@@ -56,7 +56,7 @@ const infoHTML = info => Array.isArray(info)
  * from: the element the picture was shown in (its size and place are where the viewer starts).
  * info: details shown under the 参数 button, as [[label, value]] rows or plain text.
  * caption: words shown over the bottom of the picture (what a chat photo shows); a tap hides them with the bars.
- * gallery: {items: [{src, alt, info}], index, onIndex?(i)} to page through versions with ‹ ›.
+ * gallery: {items: [{src, alt, info, caption}], index, onIndex?(i)} to page through versions with ‹ ›.
  * actions: [{label, danger?, run(index)}] extra buttons; `run` may return a promise; the viewer closes after an
  * action unless it returns false.
  */
@@ -80,7 +80,7 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
   root.setAttribute('aria-label', '查看图片');
   root.innerHTML = `<img alt="">
     <div class="sttts-viewer-top"><button data-v="info" aria-pressed="false" hidden>参数</button>${paged ? '<span class="sttts-viewer-count" aria-live="polite"></span>' : ''}<button class="sttts-viewer-close" data-v="close" aria-label="关闭">×</button></div>
-    <div class="sttts-viewer-info" hidden></div>${caption ? `<p class="sttts-viewer-caption">${esc(caption)}</p>` : ''}
+    <div class="sttts-viewer-info" hidden></div>${caption || items.some(item => item.caption) ? '<p class="sttts-viewer-caption"></p>' : ''}
     <div class="sttts-viewer-bar">${paged ? '<button data-v="prev" aria-label="上一个版本">‹</button><button data-v="next" aria-label="下一个版本">›</button>' : ''}<button data-v="out" aria-label="缩小">－</button><output aria-live="polite"></output><button data-v="in" aria-label="放大">＋</button><button data-v="full">实际像素</button>${actions.map((a, i) => `<button data-action="${i}"${a.danger ? ' data-danger' : ''}></button>`).join('')}</div>`;
   const img = root.querySelector('img'), label = root.querySelector('output'), bar = root.querySelector('.sttts-viewer-bar');
   const panel = root.querySelector('.sttts-viewer-info'), infoButton = root.querySelector('[data-v=info]'), count = root.querySelector('.sttts-viewer-count');
@@ -157,6 +157,8 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     index = i;
     const item = items[index];
     img.alt = item.alt ?? alt;
+    const words = root.querySelector('.sttts-viewer-caption');
+    if (words) words.textContent = item.caption ?? caption;
     const details = item.info ?? info;
     infoButton.hidden = !details;
     panel.innerHTML = details ? infoHTML(details) : '';

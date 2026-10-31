@@ -362,6 +362,18 @@ export function tidyStyleGroups(d) { [d.styles, d.styleGroups] = tidyGroups(d.st
 /** 提示词片段 groups (分类) made tidy, in place. */
 export function tidyChunkGroups(d) { [d.chunks, d.chunkGroups] = tidyGroups(d.chunks, d.chunkGroups); return d; }
 export const styleTree = d => layerTree(d.styles, d.styleGroups);
+/** A 效果图 is the tavern's own picture files; a link to anywhere else in imported settings is not shown. */
+const COVER_PATH = /^\/?user\/images\/[^"\\?#]+$/;
+/** The 画风 a picture was drawn with, by the 画师串 in its words (the longest that fits); null when none does. */
+export function styleOfWords(d, words) {
+  const text = String(words || '');
+  return d.styles.filter(s => s.artist.trim() && text.includes(s.artist.trim())).sort((a, b) => b.artist.trim().length - a.artist.trim().length)[0] || null;
+}
+/** 画一张 for a 画风's 效果图: inputs for generateImage, with that 画风's own settings whichever one is in use. */
+export function styleSample(d, style, words) {
+  const params = {...d.params, ...(style.params || {}), seed: -1};
+  return {prompt: [style.artist, style.positive, words].map(x => String(x || '').trim()).filter(Boolean).join(', '), negative: String(style.negative || '').trim(), characters: [], params: d.guard ? guardParams(params) : params};
+}
 export const chunkTree = d => layerTree(d.chunks || [], d.chunkGroups);
 
 /** Connection presets contain no secrets. Legacy single connections become the default preset. */
@@ -432,7 +444,7 @@ export function normalizeDraw(value) {
   d.maskLook = normalizeMaskLook(d.maskLook);
   d.params = normalizeDrawParams(d.params);
   d.styles = (Array.isArray(d.styles) && d.styles.length ? d.styles : base.styles).map(s => ({id: String(s.id || crypto.randomUUID()), name: text(s.name, 60) || '画风', artist: text(s.artist, 4000), positive: text(s.positive, 4000), negative: text(s.negative, 4000),
-    ...(s.params && typeof s.params === 'object' ? {params: styleParams({...d.params, ...s.params})} : {}), ...(s.group ? {group: String(s.group)} : {})}));
+    ...(s.params && typeof s.params === 'object' ? {params: styleParams({...d.params, ...s.params})} : {}), ...(s.group ? {group: String(s.group)} : {}), ...(COVER_PATH.test(s.cover?.thumb) && COVER_PATH.test(s.cover?.full) ? {cover: {thumb: String(s.cover.thumb), full: String(s.cover.full)}} : {})}));
   tidyStyleGroups(d);
   d.activeStyle = d.styles.some(s => s.id === d.activeStyle) ? d.activeStyle : d.styles[0].id;
   // From before 画风 kept parameters: the one in use keeps the parameters in use now.

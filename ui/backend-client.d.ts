@@ -722,6 +722,9 @@ export interface BackendFacade {
     deleteStyles(ids: string[]): DrawSettings;
     /** The 画风 list in a new order, with its groups (styles not given keep their order after the rest). */
     arrangeStyles(tree: Array<{style: string} | {group: Partial<DrawStyleGroup>; styles: string[]}>): DrawSettings;
+    /** 效果图 of a 画风, from any picture: kept as files in the tavern. */
+    setStyleCover(id: string, blob: Blob): Promise<{thumb: string; full: string}>;
+    clearStyleCover(id: string): void;
     /** The 提示词片段 list in a new order with its 分类, in the same shape (a 片段's id under `style`). */
     arrangeChunks(tree: Array<{style: string} | {group: Partial<DrawStyleGroup>; styles: string[]}>): DrawSettings;
     saveDrawPreset(preset: Omit<DrawPreset, 'id'> & { id?: string }): DrawPreset;
