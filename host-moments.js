@@ -37,7 +37,7 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
     return busy;
   }
   async function ask(ctx, request) {
-    const text = await backend.generateText(ctx, {prompt: request, trimNames: false});
+    const text = await backend.generateText(ctx, {use: 'moments', prompt: request, trimNames: false});
     return cleanTagged(String(text || ''), activeChatPreset(settings().chat).cleanTags);
   }
   const base = () => {

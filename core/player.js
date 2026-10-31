@@ -202,7 +202,8 @@ export class BrowserAudio {
 
 export class DialoguePlayer {
  /** speech: the browser's voice for a 旁白 read with 系统朗读 (core/narration.js browserSpeech), or null. */
- constructor({ settings, providers, cache, sink = new BrowserAudio(), change = () => {}, unknown = () => {}, prepared = () => {}, speech = null }) {
+ constructor({ settings, providers, cache, sink = new BrowserAudio(), change = () => {}, unknown = () => {}, prepared = () => {}, speech = null, voiced = () => {} }) {
+  this.voiced = voiced;
   Object.assign(this, { settings, providers, cache, sink, change, unknown, prepared, speech });
   this.epoch = 0;
   this.phase = 'idle';
@@ -331,7 +332,10 @@ export class DialoguePlayer {
       if (!still()) return null;
       request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
      }
-     return this.providers.synthesize(request, signal);
+     const audio = await this.providers.synthesize(request, signal);
+     // Made anew, not from the cache: what the 账本 counts.
+     this.voiced(route.engine, line.text);
+     return audio;
     })(), entry = { job, signal };
     this.making.set(key, entry);
     const done = () => { if (this.making.get(key) === entry) this.making.delete(key); };

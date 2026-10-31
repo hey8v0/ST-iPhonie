@@ -62,7 +62,7 @@ export function paintApp(ctx) {
     v.draw(`<header class="page-heading"><div><span class="eyebrow">Paint</span><h1><span>画画</span></h1></div><div class="heading-actions">${btn('paint-new', '＋ 新画布', 'chip-button')}</div></header>`
       + (works.length ? `<div class="paint-works">${works.map(w => `<div class="paint-work"><button type="button" class="paint-thumb" data-work="${esc(w.id)}" aria-label="打开 ${esc(w.name)}"><img data-thumb="${esc(w.id)}" alt=""></button><span class="paint-work-name"><strong>${esc(w.name)}</strong><small>${w.width}×${w.height} · ${esc(stamp(w.updatedAt))}</small></span>${btn('work-more', I.more, 'icon-button', `data-id="${esc(w.id)}" aria-label="${esc(w.name)} 的选项"`)}</div>`).join('')}</div>`
         : empty('还没有作品', '点右上角「新画布」开始画。手机上用手指画，电脑上可以接数位板，笔的压力会让线条有粗细。', 'draw'))
-      + '<p class="hint">作品存在这个浏览器里。两指捏合缩放、旋转，两指点一下撤销、三指点一下重做；按住不动取色。</p>');
+      + '<p class="hint">作品存在这个浏览器里，备份和「保存到酒馆」都会带上。两指捏合缩放、旋转，两指点一下撤销、三指点一下重做；按住不动取色。</p>');
     for (const img of v.root.querySelectorAll('[data-thumb]')) { const w = works.find(x => x.id === img.dataset.thumb); if (w?.thumb) img.src = ctx.win.URL.createObjectURL(w.thumb); }
   }
   function newSheet() {
@@ -95,7 +95,7 @@ export function paintApp(ctx) {
       d.body.addEventListener('click', async e => { if (!e.target.closest('[data-action=work-name-save]')) return; const name = d.body.querySelector('[data-field=work-name]').value.trim() || w.name; d.close(); await store.rename(id, name); renderGallery(); });
     }
     if (pickd === 'album') { const full = await store.get(id); const layers = await Promise.all(full.layers.map(async l => ({...l, image: l.blob ? await ctx.win.createImageBitmap(l.blob) : null}))); await toAlbum(createPicture(ctx.doc, {...full, layers}), full.name); }
-    if (pickd === 'delete' && await ctx.confirm('删除这幅作品？', '删掉就找不回来了（存到相册的那份还在）。')) { await store.remove(id); renderGallery(); }
+    if (pickd === 'delete' && await ctx.confirm('删除这幅作品？', '删掉就找不回来了（存到相册的那份还在）。')) { await store.remove(id); ctx.api.paintChanged?.([id]); renderGallery(); }
   }
 
   // ---------- 保存 ----------
@@ -111,6 +111,7 @@ export function paintApp(ctx) {
       t.width = Math.round(p.width * s); t.height = Math.round(p.height * s);
       t.getContext('2d')?.drawImage(flat, 0, 0, t.width, t.height);
       await store.put({id: w.id, name: w.name, width: p.width, height: p.height, background: p.background, showBackground: p.showBackground, active: p.active, createdAt: w.createdAt, updatedAt: Date.now(), thumb: await blobOf(t), layers, groups});
+      ctx.api.paintChanged?.();
       if (pic === p) savedAt = at;
     }).catch(error => ctx.notify('作品没存上：' + error.message, {error: true})).finally(() => { saving = null; });
     return saving;

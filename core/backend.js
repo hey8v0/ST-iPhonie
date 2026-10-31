@@ -21,7 +21,9 @@ import { normalizeSync, runSync, removeSync, joinGone, SYNC_PARTS } from './sync
 import { normalizePool } from './auto-voice.js';
 import { normalizeSounds, soundRow, readPack, missingKey, soundName, packRows, PACK_FORMAT, SOUND_LIMITS, SOUND_KINDS } from './sounds.js';
 import { decodeMono, encodeWav } from './audio-join.js';
-import { BACKUP_PARTS, PART_STORES, writeBackup, readBackup, sealKeys, openKeys } from './backup.js';
+import { BACKUP_PARTS, PART_STORES, ROW_PARTS, fieldsOf, writeBackup, readBackup, rowJSON, withBlobs, sealKeys, openKeys } from './backup.js';
+import { paintStore } from './paint-store.js';
+import { Ledger } from './ledger.js';
 import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, SHOP_GIFTS, LEDGER_KINDS, premiumOf, decorKey, cents, yuan, shopGifts, normalizeGift, validateGift } from './wallet.js';
 import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, GPT_MAX_REFS, normalizeGpt, gptBase, gptSize, gptPrompt, gptGenerate, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, comfyClips, comfyProgress, defaultWorkflow, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS, applyComfyWorkflow } from './image-engines.js';
 import {activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource} from './comfy-loras.js';
@@ -44,7 +46,7 @@ import { makeThumb, makePreview, packPicture } from './thumbnail.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, ucPresets, qualityPresets, upscaleBody, guardParams, isFree, isV5, normalizeDrawParams, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, drawCast, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
 import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, roleInSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive } from './chat.js';
-import { ChatStore, money, currentDm } from './chats.js';
+import { ChatStore, money, currentDm, searchThreads } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
 import { CloudQueue, KeyHashQueue, newRoomCode, validRoom, sha256Hex } from './cloud-queue.js';
 import { vibeKey, vibeMode, vibeReady, readVibeFile, imageVibe, encodingVibe, mergeVibe, encodingFor, withEncoding, vibeSummary, vibeParameters, rawVibeParameters, encodingsOnly, embedVibeFile, embeddedVibeFile, singleFile, bundleFile, chatu8File, extracted as vibeExtracted, strength as vibeStrength, MAX_FREE_VIBES, VIBE_ANLAS } from './vibes.js';
@@ -98,6 +100,10 @@ async function rawVibeImage(base64) {
 const firstCard = route => (Array.isArray(route.cards) ? route.cards.find(k => !k.includes('#')) : '') || '';
 const clone = value => structuredClone(value);
 // a 歌单 the user made was deleted meanwhile (in another tab, say)
+// Which documents of the apps' stores make up a part of a backup and of 保存到酒馆 (画画的作品 has a store of its own).
+const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], music: ['song', 'playlist', 'heard'], sounds: ['sound'] });
+// The tavern takes 500 MB a request, and a file goes as base64.
+const tooBigToSync = work => (work?.bytes || 0) > 300 * 1024 * 1024;
 const listGone = error => { throw error?.code === 'MISSING' ? Error('这个歌单已经删掉了') : error; };
 const assistantTransferRows = docs => normalizeAssistantThreads(docs.filter(row => row.kind === 'assistant').map(thread => ({...thread,
     memory: docs.find(row => row.id === bookId(thread.id) && row.memoryRevision === (thread.memoryRevision || 0)) || null,
@@ -170,6 +176,9 @@ export class TTSBackend {
         // 音效 (core/sounds.js): the sound library and the names the story asked for that it has none of. Its own database: big.
         this.sounds = new AppStore(this.settings.scope, { indexedDB, database: 'st-iphonie-sounds-v1' });
         this.music = new AppStore(this.settings.scope, { indexedDB, database: 'st-iphonie-music-v1' });
+        // 画画的作品: the phone draws in them; here they are only read and put back (backups, 保存到酒馆).
+        this.paintWorks = paintStore({ indexedDB });
+        this.ledger = new Ledger({ store: this.apps, device: () => this.#device() });
         // 自带音效包: the folder of the plugin's sounds (sounds/pack.json lists them); '' when there is none (tests).
         this.soundPack = soundPack;
         this.packLoad = null;
@@ -205,6 +214,7 @@ export class TTSBackend {
             settings: () => this.settings, providers, cache: this.cache, ...(sink ? { sink } : {}), unknown, speech,
             change: state => { if (state.phase === 'error') this.reportDiagnostic('语音播放', {message: state.message}); change(state); this.emit('playback', state); },
             prepared: audio => { this.prepared = audio; this.emit('audio-ready', this.audioInfo(audio)); },
+            voiced: (engine, text) => this.ledger.voice(engine, text),
         });
     }
     async initialize() {
@@ -226,6 +236,54 @@ export class TTSBackend {
             if (record && !this.closed) { const audio = await this.base64(record.blob); if (!this.closed) this.providers.references.set(record.id, audio); }
         }
     }
+    // ---------- The apps' own rows in a backup and in 保存到酒馆 ----------
+    partStore(part) { return part === 'music' ? this.music : part === 'sounds' ? this.sounds : this.apps; }
+    async partRows(part) {
+        if (part === 'paint') return this.paintWorks.all();
+        if (part === 'ledger') await this.ledger.flush();
+        if (part === 'ledger' || part === 'peek') return this.apps.listFrom(part + ':');
+        const kinds = PART_KINDS[part];
+        return (await this.partStore(part).list()).filter(row => kinds.includes(row.kind));
+    }
+    /**
+     * Puts a part's rows back, those of other kinds staying as they are. Another's rows are of no use here: checked for
+     * what the app needs to show them. replace: this part's rows now are only these; merge: makes the list when it is written.
+     */
+    async putPartRows(part, rows, { replace = false, merge } = {}) {
+        if (part === 'paint') return this.paintWorks.importWorks(rows.filter(row => row && typeof row.id === 'string' && Array.isArray(row.layers)), { replace });
+        const kinds = PART_KINDS[part], fileBacked = row => row.kind === 'sound' || (row.kind === 'song' && row.origin !== 'source');
+        const clean = rows.filter(row => row && typeof row.id === 'string' && kinds.includes(row.kind) && (merge || !fileBacked(row) || typeof row.blob?.arrayBuffer === 'function')), ids = new Set(clean.map(row => row.id));
+        const done = await this.partStore(part).transformKinds(kinds, old => merge ? merge(old) : replace ? clean : [...old.filter(row => !ids.has(row.id)), ...clean]);
+        return done.length;
+    }
+    /** Something that costs Anlas has gone through: the balance is read again in a moment, and what went goes in the 账本. */
+    spentAnlas() {
+        this.anlasDue = true;
+        clearTimeout(this.anlasTimer);
+        this.anlasTimer = setTimeout(() => { if (!this.closed) this.naiSubscription(true).catch(() => {}); }, 2500);
+        this.anlasTimer.unref?.();
+    }
+    /** Tells the app a part's rows changed under it. */
+    partsChanged(part) {
+        if (part === 'music') this.emit('music', { library: true, heard: true });
+        else if (part === 'forum' || part === 'peek' || part === 'sounds' || part === 'ledger' || part === 'paint') this.emit(part, {});
+    }
+    /** What the backup page shows of the parts that are not simply counted. */
+    async backupCounts() {
+        this.assertOpen();
+        const bytes = rows => rows.reduce((n, row) => n + (row.blob?.size || row.size || row.bytes || 0), 0);
+        const [docs, music, sounds, works] = await Promise.all([this.apps.list(), this.music.list(), this.sounds.list('sound'), this.paintRows().catch(() => [])]);
+        const songs = music.filter(row => row.kind === 'song' && row.origin !== 'source');
+        return { forum: docs.filter(row => row.kind === 'forum').length, peek: docs.filter(row => row.kind === 'peek').length, ledger: new Set(docs.filter(row => row.kind === 'ledger').map(row => row.day)).size, playlists: music.filter(row => row.kind === 'playlist').length, songs: songs.length, musicBytes: bytes(songs), sounds: sounds.length, soundBytes: bytes(sounds), works: works.length, workBytes: bytes(works) };
+    }
+    /** The works' list; one saved before it kept its size has its layers read for that. */
+    async paintRows() {
+        const works = await this.paintWorks.list();
+        for (const work of works) if (work.bytes === undefined) work.bytes = ((await this.paintWorks.get(work.id))?.layers || []).reduce((n, layer) => n + (layer.blob?.size || 0), 0);
+        return works;
+    }
+    /** A work of 画画 was saved or deleted in the phone. */
+    paintChanged(gone = []) { this.noteGone('paint', gone); this.scheduleSync(); }
     /** A backup file of the chosen parts (core/backup.js BACKUP_PARTS). Keys and the account scope are never written. */
     async exportBackup(parts = Object.keys(BACKUP_PARTS), version = '', { password = '' } = {}) {
         this.assertOpen();
@@ -251,14 +309,17 @@ export class TTSBackend {
             vnFiles = [];
             for (const path of paths) { const blob = await this.syncFiles.readPath(path).catch(() => null); if (blob) vnFiles.push({ path, blob }); }
         }
-        const blob = await writeBackup({ version, settings, library, chats, moments, keys, vibeGroups, memories, assistant, vnFiles });
+        const rows = {};
+        for (const part of want) if (ROW_PARTS.includes(part)) rows[part] = await this.partRows(part);
+        const blob = await writeBackup({ version, settings, library, chats, moments, keys, vibeGroups, memories, assistant, vnFiles, rows });
         const day = new Date(), pad = n => String(n).padStart(2, '0');
         return { blob, name: `ST-iPhonie 备份 ${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}` };
     }
     /** What a backup file holds, to show before restoring. */
     async inspectBackup(file) {
         this.assertOpen();
-        const backup = await readBackup(file);
+        // Only what it holds: the pictures and songs are not read for this.
+        const backup = await readBackup(file, { wanted: new Set() });
         return { version: backup.version, createdAt: backup.createdAt, summary: backup.summary };
     }
     /**
@@ -268,8 +329,9 @@ export class TTSBackend {
      */
     async importBackup(file, { parts = [], replace = false, password = '' } = {}) {
         this.assertOpen();
-        const backup = await readBackup(file), want = new Set(parts.filter(part => BACKUP_PARTS[part])), done = {};
+        const want = new Set(parts.filter(part => BACKUP_PARTS[part])), done = {};
         if (!want.size) throw Error('请至少选一项要恢复的内容');
+        const backup = await readBackup(file, { wanted: fieldsOf([...want]) });
         // Keys first: a wrong password stops the restore before anything else changes.
         let keys = null;
         if (want.has('keys') && backup.keys) keys = await openKeys(backup.keys, password);
@@ -313,6 +375,12 @@ export class TTSBackend {
         if (want.has('moments') && backup.moments) { done.moments = await this.moments.importPosts(backup.moments, { replace }); this.emit('moments', {}); }
         if (want.has('memories') && backup.memories) done.memories = await this.importChatMemories(backup.memories, {replace, restoring: true});
         if (want.has('assistant') && backup.assistant) done.assistant = await this.importAssistantThreads(backup.assistant, {replace, restoring: true});
+        for (const part of ROW_PARTS) {
+            if (!want.has(part) || !backup.rows[part]) continue;
+            done[part] = await this.putPartRows(part, backup.rows[part], { replace });
+            this.reviveSync(part, backup.rows[part].map(row => String(row?.id)));
+            this.partsChanged(part);
+        }
         if (keys) { let count = 0; for (const [engine, key] of Object.entries(keys)) { try { this.setKey(engine, key); count++; } catch { /* an engine this version does not know */ } } done.keys = count; }
         for (const collection of ['favorites', 'photos', 'notes', 'books']) if (collection in done) this.emit('library', { collection });
         if ('phone' in done || 'photos' in done) this.emit('phone', { preferences: await this.getPhone() });
@@ -322,7 +390,7 @@ export class TTSBackend {
     emit(type, data = {}) {
         if (this.closed) return;
         const event = { type, revision: this.revision, ...clone(data) };
-        if (!this.syncApplying && (type === 'chat' || type === 'moments' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && ['notes', 'photos'].includes(data.collection)))) this.scheduleSync();
+        if (!this.syncApplying && (type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
         for (const listener of this.listeners) { try { listener(clone(event)); } catch { /* One view cannot stop the other subscribers. */ } }
     }
     subscribe(listener) {
@@ -810,15 +878,25 @@ export class TTSBackend {
         if (this.syncState.busy) return this.syncState.running;
         clearTimeout(this.syncTimer);
         const stores = {
-            read: async part => part === 'chats' ? this.chats.exportThreads() : part === 'moments' ? this.moments.exportPosts() : part === 'memories' ? this.exportChatMemories() : part === 'assistant' ? this.exportAssistantThreads() : (await this.library.exportRows([part]))[part],
+            read: async part => part === 'paint' ? (await this.paintRows()).filter(work => !tooBigToSync(work)) : PART_KINDS[part] ? this.partRows(part) : part === 'chats' ? this.chats.exportThreads() : part === 'moments' ? this.moments.exportPosts() : part === 'memories' ? this.exportChatMemories() : part === 'assistant' ? this.exportAssistantThreads() : (await this.library.exportRows([part]))[part],
             write: async (part, items, options) => {
                 if (part === 'chats') await this.chats.importThreads(items, options);
                 else if (part === 'moments') await this.moments.importPosts(items, options);
                 else if (part === 'memories') await this.importChatMemories(items, {...options, notifySync: false});
                 else if (part === 'assistant') await this.importAssistantThreads(items, {...options, notifySync: false});
+                else if (part === 'paint') {
+                    // What came from the tavern is a file of layers: opened before the store's transaction starts.
+                    const opened = await Promise.all(items.map(async row => row.blob ? { ...row, ...withBlobs(JSON.parse(await row.blob.text())), blob: undefined } : row));
+                    await this.paintWorks.importWorks(opened, { ...options, skip: tooBigToSync });
+                }
+                else if (PART_KINDS[part]) await this.putPartRows(part, items, options);
                 else await this.library.importRows({ [part]: items }, options);
             },
-            photoBlob: row => row.blob,
+            fileBlob: async (part, row) => {
+                if (part !== 'paint') return row.blob;
+                const work = await this.paintWorks.get(row.id);
+                return new Blob([await rowJSON({ thumb: work?.thumb ?? row.thumb, layers: work?.layers || [] })], { type: 'application/json' });
+            },
         };
         this.syncState = { ...this.syncState, busy: true, pending: false, error: '' };
         this.emit('sync', this.syncStatus());
@@ -836,6 +914,9 @@ export class TTSBackend {
                     else if (part === 'moments') this.emit('moments', {});
                     else if (part === 'memories') this.emit('memory', {threadId: '', reset: true});
                     else if (part === 'assistant') this.emit('assistant', {threadId: '', restored: true});
+                    else if (part === 'vibes') { await this.loadVibes(); this.emit('draw', { vibes: true }); }
+                    else if (part === 'references') await this.loadReferences();
+                    else if (PART_KINDS[part] || part === 'paint') this.partsChanged(part);
                     else this.emit('library', { collection: part });
                 }
                 if (preferences) this.emit('phone', { preferences });
@@ -877,8 +958,10 @@ export class TTSBackend {
      * Writes phone text (chat, 朋友圈, calls, picture plans) with the chosen model. context: the tavern context, used
      * when the source is the tavern's model. request: {prompt, responseLength?, ...} as for generateRaw.
      */
-    async generateText(context, request) {
-        return this.requestLog.run('文字模型', {source: this.settings.text.source, model: activeText(this.settings.text).model, ...request}, () => this.generateTextRaw(context, request));
+    async generateText(context, { use = 'other', ...request }) {
+        const answer = await this.requestLog.run('文字模型', {source: this.settings.text.source, model: activeText(this.settings.text).model, ...request}, () => this.generateTextRaw(context, request));
+        this.ledger.text(use, request.prompt, answer);
+        return answer;
     }
     async generateTextRaw(context, request) {
         const text = activeText(this.settings.text);
@@ -919,7 +1002,11 @@ export class TTSBackend {
     saveEmbed(patch) { const next = this.getState(); next.embed = normalizeEmbed({ ...this.settings.embed, ...(patch && typeof patch === 'object' ? patch : {}) }); return this.save(next).embed; }
     embedReady() { return embedReady(this.settings.embed); }
     /** Vectors for texts with the 向量模型 (draft: options not saved yet, for 测试连接). */
-    embed(texts, draft = null) { const embed = draft ? normalizeEmbed({ ...this.settings.embed, ...draft, enabled: true }) : this.settings.embed; return embedTexts({ embed, key: this.embedKey, texts, fetch: this.embedFetch }); }
+    async embed(texts, draft = null) {
+        const embed = draft ? normalizeEmbed({ ...this.settings.embed, ...draft, enabled: true }) : this.settings.embed, vectors = await embedTexts({ embed, key: this.embedKey, texts, fetch: this.embedFetch });
+        if (!draft) this.ledger.embed(texts);
+        return vectors;
+    }
     async embedModels(draft) {
         const url = normalizeEmbed({ ...this.settings.embed, ...(draft || {}) }).url;
         try { return await listModels({ text: { url }, key: this.embedKey }); } catch (error) { throw Error(error.message.replace(/^文字模型/, '向量模型')); }
@@ -1228,6 +1315,7 @@ export class TTSBackend {
         this.assertOpen();
         const gone = new Set([...(ids || [])].map(String).filter(id => this.vibes.has(id)));
         for (const id of gone) { await this.library.deleteVibe(id); this.vibes.delete(id); }
+        this.noteGone('vibes', [...gone]);
         const next = this.getState(), v = next.draw.vibe;
         for (const group of v.groups) group.items = group.items.filter(item => !gone.has(item.vibe));
         if (v.use.kind === 'vibe' && gone.has(v.use.id)) v.use = { kind: '', id: '' };
@@ -1307,6 +1395,7 @@ export class TTSBackend {
             if (!encoding) {
                 this.novelai.relay = this.settings.draw.relay.url;
                 encoding = await this.novelai.encodeVibe(doc.image, model, doc.importInfo.information_extracted, signal);
+                this.spentAnlas();
                 doc = await withEncoding(doc, key, doc.importInfo.information_extracted, encoding);
                 await this.storeVibe(doc);
                 if (this.subscription) this.subscription.checkedAt = 0;
@@ -1404,6 +1493,7 @@ export class TTSBackend {
                 const info = this.pictureInfo(engine, made, picture);
                 if (made.refs) info.push(['参考图', `${made.refs} 张`]);
                 const photo = await this.library.addPhoto({ name: (name || DRAW_ENGINE_NAMES[engine]) + '-' + (made.seed >= 0 ? made.seed : Date.now()) + '.' + ext, blob: made.blob, info });
+                this.ledger.image(engine);
                 this.#thumbSoon(photo.id);
                 this.emit('library', { collection: 'photos' });
                 this.emit('draw', { phase: 'done' });
@@ -1439,6 +1529,8 @@ export class TTSBackend {
             if (request.body.action !== 'generate') info.push(['方式', request.body.action === 'infill' ? `局部重绘 · 强度 ${request.body.parameters.strength}` : `图生图 · 强度 ${request.body.parameters.strength} · 噪声 ${request.body.parameters.noise}`]);
             if (request.refs) info.push(['角色参考', `${request.refs} 张`]);
             const photo = await this.library.addPhoto({ name: (name || 'NovelAI') + '-' + request.seed + (blob.type === 'image/webp' ? '.webp' : blob.type === 'image/jpeg' ? '.jpg' : '.png'), blob, info });
+            this.ledger.image('nai');
+            if (quote.free === false) this.spentAnlas();
             this.#thumbSoon(photo.id);
             this.emit('library', { collection: 'photos' });
             this.emit('draw', { phase: 'done' });
@@ -1479,6 +1571,8 @@ export class TTSBackend {
             }
             this.emit('library', { collection: 'photos' });
             this.emit('draw', { phase: 'done' });
+            this.ledger.image('nai', blobs.length);
+            this.spentAnlas();
             if (this.subscription) this.subscription.checkedAt = 0;
             return { ...results[0], more: results.slice(1) };
         } });
@@ -1728,8 +1822,8 @@ export class TTSBackend {
         }
         return kept;
     }
-    async forgetHeard(ids) { for (const id of ids) await this.music.remove(id); this.emit('music', { heard: true }); return true; }
-    async clearHeard() { await this.music.clear('heard'); this.emit('music', { heard: true }); return true; }
+    async forgetHeard(ids) { for (const id of ids) await this.music.remove(id); this.noteGone('music', ids); this.emit('music', { heard: true }); return true; }
+    async clearHeard() { await this.dropping('music', () => this.partRows('music'), () => this.music.clear('heard')); this.emit('music', { heard: true }); return true; }
     /** A playable link for a song of a source. */
     async musicLink(sourceId, songId, hint = {}) {
         this.assertOpen();
@@ -1806,7 +1900,7 @@ export class TTSBackend {
         if (!title) throw Error('给歌单起个名字');
         if (all.some(p => p.name === title && p.id !== id)) throw Error(`已经有叫「${title}」的歌单了`);
         let row;
-        if (id) row = await this.music.change(id, p => { p.name = title; }).catch(listGone);
+        if (id) row = await this.music.change(id, p => { p.name = title; p.updatedAt = Date.now(); }).catch(listGone);
         else {
             if (all.length >= MUSIC_LIMITS.lists) throw Error(`最多建 ${MUSIC_LIMITS.lists} 个歌单`);
             // (Later than the last one, also within the same millisecond: the 歌单 stay in the order they were made.)
@@ -1822,8 +1916,10 @@ export class TTSBackend {
             const lists = await this.listPlaylists(), elsewhere = new Set(lists.filter(p => p.id !== id).flatMap(p => p.songs));
             const gone = (lists.find(p => p.id === id)?.songs || []).filter(s => !elsewhere.has(s));
             if (gone.length) await this.music.removeMany(gone);
+            this.noteGone('music', gone);
         }
         await this.music.remove(id);
+        this.noteGone('music', [id]);
         this.emit('music', { library: true });
         return true;
     }
@@ -1837,6 +1933,7 @@ export class TTSBackend {
             if (p.songs.length + fresh.length > MUSIC_LIMITS.songs) throw Error(`一个歌单最多 ${MUSIC_LIMITS.songs} 首`);
             kept = fresh.length;
             p.songs = [...fresh, ...p.songs];
+            p.updatedAt = Date.now();
         }).catch(listGone);
         this.emit('music', { library: true });
         return { playlist, kept };
@@ -1845,7 +1942,7 @@ export class TTSBackend {
     async removeFromPlaylist(id, songIds) {
         this.assertOpen();
         const gone = new Set(songIds.map(String));
-        const playlist = await this.music.change(id, p => { p.songs = p.songs.filter(s => !gone.has(s)); }).catch(listGone);
+        const playlist = await this.music.change(id, p => { p.songs = p.songs.filter(s => !gone.has(s)); p.updatedAt = Date.now(); }).catch(listGone);
         this.emit('music', { library: true });
         return playlist;
     }
@@ -1854,6 +1951,7 @@ export class TTSBackend {
             if ('title' in patch) { const t = String(patch.title || '').trim().slice(0, 200); if (!t) throw Error('歌名不能空着'); row.title = t; }
             if ('artist' in patch) row.artist = String(patch.artist || '').trim().slice(0, 200);
             if ('lyric' in patch) { if (patch.lyric) row.lyric = String(patch.lyric).slice(0, 60000); else delete row.lyric; }
+            row.updatedAt = Date.now();
         });
         this.emit('music', { library: true });
         const { blob, ...row } = saved; return row;
@@ -1862,8 +1960,9 @@ export class TTSBackend {
     async deleteSongs(ids) {
         const gone = new Set(ids.map(String));
         await this.music.removeMany([...gone]);
+        this.noteGone('music', [...gone]);
         const lists = (await this.music.list('playlist')).filter(p => p.songs.some(s => gone.has(s)));
-        if (lists.length) await this.music.put(lists.map(p => ({ ...p, songs: p.songs.filter(s => !gone.has(s)) })));
+        if (lists.length) await this.music.put(lists.map(p => ({ ...p, songs: p.songs.filter(s => !gone.has(s)), updatedAt: Date.now() })));
         this.emit('music', { library: true });
         return true;
     }
@@ -1954,6 +2053,7 @@ export class TTSBackend {
         const pack = list.filter(id => id.startsWith('pack:'));
         if (pack.length) this.saveSounds({ packHidden: [...(this.settings.sounds.packHidden || []), ...pack] });
         for (const id of list) if (!id.startsWith('pack:')) await this.sounds.remove(id);
+        this.noteGone('sounds', list.filter(id => !id.startsWith('pack:')));
         if (list.length) this.emit('sounds', {});
         return list.length;
     }
@@ -1975,6 +2075,7 @@ export class TTSBackend {
         if (!/[a-z]/i.test(text)) throw Error('写一句英文描述（比如 heavy wooden door knock），ElevenLabs 才知道做什么声音');
         const ambience = type === 'ambience';
         const blob = await this.providers.soundEffect({ text, loop: ambience, seconds: ambience ? 22 : 0 }, signal);
+        this.ledger.sfx();
         const [row] = await this.addSounds([{ name, type, layer: 'bed', source: 'eleven', describe: text, blob }]);
         return row;
     }
@@ -2243,6 +2344,12 @@ export class TTSBackend {
     }
     /** Phone chats of the card open now. */
     async threads() { const here = this.here(); return (await this.chats.list()).filter(t => inSpace(t, here)); }
+    /** Messages holding these words, in the chats the list shows (core/chats.js searchThreads). */
+    async searchChatMessages(query, options = {}) {
+        this.assertOpen();
+        const here = this.here();
+        return searchThreads((await this.chats.exportThreads()).filter(t => inSpace(t, here) && !(t.type === 'dm' && t.friend?.by === 'me')), query, options);
+    }
     /** Removes what was made under the open card (or everything, with 分区 off). */
     async clearHere(list, remove, clearAll) {
         const here = this.here();
@@ -2540,6 +2647,7 @@ export class TTSBackend {
         next.connections.mimo.params.samples = next.connections.mimo.params.samples.filter(sample => sample.audio !== id);
         for (const voice of next.connections.custom?.params.voices || []) if (voice.ref_file === id) voice.ref_file = '';
         this.save(next); await this.library.deleteReference(id); this.providers.references.delete(id);
+        this.noteGone('references', [id]);
     }
     getEngineSchema(engine, connection = this.settings.connections[engine]) {
         engineCheck(engine); modelCheck(engine, connection.model);
@@ -2690,6 +2798,8 @@ export class TTSBackend {
         if (method === 'addPhoto') this.#thumbSoon(result?.id);
         if (method === 'deleteNote') this.noteGone('notes', [args[0]]);
         if (method === 'deletePhoto') this.noteGone('photos', [args[0]]);
+        if (method === 'deleteBook') this.noteGone('books', [args[0]]);
+        if (method === 'deleteFavorite') this.noteGone('favorites', [args[0]]);
         this.emit('library', { collection });
         if (method === 'deletePhoto') this.emit('phone', { preferences: await this.getPhone() });
         return result;
@@ -2708,6 +2818,8 @@ export class TTSBackend {
     api() {
         const methods = {
             reportDiagnostic: (source, detail, level) => this.reportDiagnostic(source, detail, level),
+            backupCounts: () => this.backupCounts(), paintChanged: gone => this.paintChanged(clone(gone || [])),
+            ledgerDays: (from, to) => this.ledger.days(from, to), clearLedger: async () => { this.noteGone('ledger', await this.ledger.clear()); },
             getRequestLogs: () => this.requestLog.list(), clearRequestLogs: () => this.requestLog.clear(),
             /** 系统提示词: one block as the user changed it ({enabled?, parts: {key: text}}), or null for the shipped one. */
             savePromptRule: (id, rule) => {
@@ -2804,13 +2916,13 @@ export class TTSBackend {
             postForum: async ({ title = '', text = '' } = {}) => (await this.addForumPosts([{ author: 'me', title, text }], { source: 'me' }))[0],
             replyForum: async (id, { text, to } = {}) => { const post = await this.addForumReplies(id, [{ from: 'me', text, to }]); return { post, reply: post.replies.at(-1) }; },
             likeForum: (id, on = true) => this.appsMutate('forum', () => this.apps.change(id, post => { if (post.liked === !!on) return; post.liked = !!on; post.likes = Math.max(0, post.likes + (on ? 1 : -1)); })),
-            deleteForumReply: (id, replyId) => this.appsMutate('forum', () => this.apps.change(id, post => { post.replies = post.replies.filter(r => r.id !== replyId); })),
-            deleteForum: id => this.appsMutate('forum', () => this.apps.remove(id)),
-            clearForum: () => this.appsMutate('forum', async () => { const n = await this.clearHere(() => this.apps.list('forum'), id => this.apps.remove(id), () => this.apps.clear('forum')); await this.apps.remove(this.hotId()); return n; }),
+            deleteForumReply: (id, replyId) => { this.noteGone('forum', [`${id}/${replyId}`]); return this.appsMutate('forum', () => this.apps.change(id, post => { post.replies = post.replies.filter(r => r.id !== replyId); })); },
+            deleteForum: id => { this.noteGone('forum', [id]); return this.appsMutate('forum', () => this.apps.remove(id)); },
+            clearForum: () => this.appsMutate('forum', () => this.dropping('forum', () => this.partRows('forum'), async () => { const n = await this.clearHere(() => this.apps.list('forum'), id => this.apps.remove(id), () => this.apps.clear('forum')); await this.apps.remove(this.hotId()); return n; })),
             // 查手机: the open card's snapshot of a person, else the shared one from before 分区.
             listPeeks: async () => { const here = this.here(); return (await this.apps.list('peek')).filter(p => inSpace(p, here)); },
             getPeek: async name => (await this.apps.get(peekId(name, this.spaceKey()))) || (this.spaceKey() ? this.apps.get(peekId(name)) : null),
-            deletePeek: name => this.appsMutate('peek', async () => { await this.apps.remove(peekId(name, this.spaceKey())); if (this.spaceKey()) await this.apps.remove(peekId(name)); return true; }),
+            deletePeek: name => this.appsMutate('peek', async () => { await this.apps.remove(peekId(name, this.spaceKey())); if (this.spaceKey()) await this.apps.remove(peekId(name)); this.noteGone('peek', [peekId(name, this.spaceKey()), peekId(name)]); return true; }),
             /** 分区: the card open now ({key, name}) and whether 分区 is on. */
             phoneSpace: () => ({ ...clone(this.space), on: !!this.here() }),
             saveChatPreset: preset => this.saveChatPreset(preset), deleteChatPreset: id => this.deleteChatPreset(id), selectChatPreset: id => this.selectChatPreset(id),
@@ -2819,6 +2931,7 @@ export class TTSBackend {
             wallet: () => this.wallet(), buyDecoration: (kind, key) => this.buyDecoration(kind, key), saveGift: gift => this.saveGift(gift), deleteGift: id => this.deleteGift(id),
             sendPaid: (threadId, message) => this.sendPaid(threadId, message), takeSent: (threadId, messageId, accept) => this.takeSent(threadId, messageId, accept !== false),
             shopCatalog: () => clone({ premium: PREMIUM, kinds: DECOR_KINDS, gifts: shopGifts(this.settings.chat.wallet), ledgerKinds: LEDGER_KINDS }), saveContact: contact => this.saveContact(contact), deleteContact: id => this.deleteContact(id), chatContacts: all => clone(all ? chatContacts(this.settings) : this.contacts()), addRoleContact: name => this.addRoleContact(name),
+            searchChatMessages: (query, options) => this.searchChatMessages(String(query ?? ''), clone(options || {})),
             listThreads: () => this.threads(), getThread: id => this.chats.get(id), chatUnread: async () => (await this.threads()).reduce((n, t) => n + (t.muted ? 0 : t.unread), 0),
             createThread: value => this.chatMutate(null, () => this.chats.create({ ...clone(value), ...this.spaceTag() })),
             updateThread: (id, patch) => this.chatMutate(id, () => this.chats.update(id, clone(patch))),
@@ -2852,13 +2965,15 @@ export class TTSBackend {
         this.closed = true; this.prepared = null; this.listeners.clear(); this.providers.clear();
         this.chats.close();
         clearTimeout(this.syncTimer);
+        clearTimeout(this.anlasTimer);
         this.moments.close();
-        this.apps.close();
+        this.paintWorks.close();
         this.memoryStore.close();
         this.sounds.close();
         this.music.close();
         this.drawQueue.cancelAll();
-        this.closing = Promise.all([this.player.close(), this.cache.close(), this.library.close(), Promise.resolve(this.keyStore.flush?.()).then(() => this.keyStore.close?.())]);
+        // The 账本 writes what is waiting first: it keeps its numbers with the apps.
+        this.closing = Promise.all([this.ledger.close().finally(() => this.apps.close()), this.player.close(), this.cache.close(), this.library.close(), Promise.resolve(this.keyStore.flush?.()).then(() => this.keyStore.close?.())]);
         await this.closing;
     }
 }

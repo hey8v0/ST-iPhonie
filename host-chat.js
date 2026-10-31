@@ -52,11 +52,11 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
   /** The contact's answer; with pictures, through the request that carries them, and in words only if that fails. */
   async function answerFor(ctx, request, pics) {
-    if (!pics.length) return backend.generateText(ctx, {prompt: request([]), trimNames: false});
-    try { return await ask(ctx, backend, settings(), request(pics), {label: '聊天 · 看图'}); }
+    if (!pics.length) return backend.generateText(ctx, {use: 'chat', prompt: request([]), trimNames: false});
+    try { return await ask(ctx, backend, settings(), request(pics), {label: '聊天 · 看图', use: 'chat'}); }
     catch (error) {
       backend.reportDiagnostic?.('聊天 · 看图', error, 'warn');
-      const answer = await backend.generateText(ctx, {prompt: request([]), trimNames: false});
+      const answer = await backend.generateText(ctx, {use: 'chat', prompt: request([]), trimNames: false});
       blind.add(seeKey(ctx));
       return answer;
     }
@@ -239,7 +239,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         // Drawn on its own (not asked for) only when it costs nothing: no words spent turning it into tags otherwise.
         if (!allowPaid && backend.drawQuote?.()?.free === false) throw Object.assign(Error('要花钱'), {code: 'PAID'});
         await set({imageState: 'waiting', imageNote: ''});
-        const tags = tagTextAnswer(await backend.generateText(context(), {prompt: tagTextRequest(settings(), m.text, 'translate'), plainText: true, trimNames: false, responseLength: Math.min(6000, 1500 + m.text.length * 3)})).replace(/\s+/g, ' ').trim().slice(0, 6000);
+        const tags = tagTextAnswer(await backend.generateText(context(), {use: 'picture', prompt: tagTextRequest(settings(), m.text, 'translate'), plainText: true, trimNames: false, responseLength: Math.min(6000, 1500 + m.text.length * 3)})).replace(/\s+/g, ' ').trim().slice(0, 6000);
         if (!tags) throw Error('没把照片的描述写成画图用的 tag，再点一次试试');
         m.imageTags = tags;
         await set({imageTags: tags});
@@ -277,7 +277,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       const recent = story(preset);
       const remembered = memory ? (await memory.contextFor(thread, {query: said}).catch(() => ({text: ''}))).text : '';
       const prompt = buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat: '', memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: s.chat.stickers || [], asking: said});
-      const reply = cleanTagged(await backend.generateText(ctx, {prompt, trimNames: false}), preset.cleanTags);
+      const reply = cleanTagged(await backend.generateText(ctx, {use: 'chat', prompt, trimNames: false}), preset.cleanTags);
       const items = parseChatReply(reply, {members: people.map(p => ({...p, voice: false})), user, voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []});
       const yes = items.findIndex(i => i.kind === 'befriend'), no = items.find(i => i.kind === 'refuse');
       if (yes < 0 || (no && items.indexOf(no) < yes)) {

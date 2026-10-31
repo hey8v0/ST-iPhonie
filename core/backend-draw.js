@@ -381,6 +381,8 @@ class DrawSettings {
         this.novelai.relay = this.settings.draw.relay.url;
         const revision = this.imageConnectionRevision, subscription = await this.novelai.subscription();
         if (revision !== this.imageConnectionRevision) return null;
+        // Anlas went since the balance was last read: how much, for the 账本 (a refill in between hides it, and nothing is made up).
+        if (this.anlasDue) { this.anlasDue = false; if (this.subscription && subscription.anlas < this.subscription.anlas) this.ledger.anlas(this.subscription.anlas - subscription.anlas); }
         this.subscription = subscription;
         this.emit('draw', { subscription: this.subscription });
         return clone(this.subscription);

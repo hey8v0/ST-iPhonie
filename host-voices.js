@@ -11,7 +11,7 @@ const ENGINE_NAMES = {fish: 'Fish Audio', mini: 'MiniMax', eleven: 'ElevenLabs',
 export function createVoiceHost({context, settings, backend, saidBy = () => []}) {
   const working = new Map();
   let chain = Promise.resolve();
-  const ask = prompt => backend.generateText(context(), {prompt, trimNames: false, responseLength: 1500});
+  const ask = prompt => backend.generateText(context(), {use: 'voices', prompt, trimNames: false, responseLength: 1500});
 
   function profileOf(name) {
     const ctx = context(), card = ctx?.characters?.find?.(c => c?.name === name);

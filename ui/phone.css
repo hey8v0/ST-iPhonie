@@ -751,6 +751,13 @@ details>div{padding-bottom:10px}
 .conv{display:flex;gap:12px;align-items:center;width:100%;text-align:left;padding:12px 16px;position:relative;min-height:72px}
 .conv+.conv:before{content:"";position:absolute;top:0;left:76px;right:14px;height:1px;background:var(--line)}
 .conv .grow{flex:1;min-width:0}
+.conv-hit{min-height:62px;padding-block:9px}
+.conv-hit mark{padding:0 1px;border-radius:4px;background:var(--accent-soft);color:var(--accent-ink);font-weight:800}
+/* The message a search led to: a soft patch behind it that fades. */
+.msg-found{position:relative;isolation:isolate}
+.msg-found:before{content:"";position:absolute;inset:-5px -8px;z-index:-1;border-radius:16px;background:var(--accent-soft);pointer-events:none;animation:msg-found 2.4s ease-out forwards}
+@keyframes msg-found{0%,45%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.msg-found:before{animation-duration:.01s;animation-delay:2s}}
 .conv-top{display:flex;align-items:center;gap:6px}
 .conv-top strong{font-size:16px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conv-time{margin-left:auto;font-size:12px;color:var(--ink2);flex-shrink:0}

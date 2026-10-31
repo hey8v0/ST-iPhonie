@@ -44,7 +44,9 @@ async function completionSnapshot(ctx, presetName, load = loadCompletionModule) 
 export async function requestAssistantText(ctx, backend, settings, messages, options = {}) {
   const prompt = messages.filter(m => typeof m.content !== 'string' || m.content.trim());
   const run = () => requestAssistantTextRaw(ctx, backend, settings, prompt, options);
-  return backend.requestLog ? backend.requestLog.run(options.label || '助手', {connection: activeText(settings.text).source, messages: prompt}, run) : run();
+  const result = await (backend.requestLog ? backend.requestLog.run(options.label || '助手', {connection: activeText(settings.text).source, messages: prompt}, run) : run());
+  backend.ledger?.text(options.use || 'assistant', prompt, typeof result === 'string' ? result : result?.text);
+  return result;
 }
 async function requestAssistantTextRaw(ctx, backend, settings, messages, {presetName = '', signal, completion, loadCompletion = loadCompletionModule, details = false, reasoningFormat = assistantReasoningFormat(ctx.powerUserSettings?.reasoning), now, onProgress} = {}) {
   const text = activeText(settings.text), timer = assistantReasoningTimer(reasoningFormat, now);

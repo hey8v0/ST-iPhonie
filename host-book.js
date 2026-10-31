@@ -37,7 +37,7 @@ export function createBookHost({context, settings, backend, steps, lines, voiced
   }
   /** The text model's answer to a system and a user prompt (the 绘本 written from the story). */
   async function write(system, user, {length = 8192} = {}) {
-    const text = await backend.generateText(context(), {prompt: [{role: 'system', content: String(system)}, {role: 'user', content: String(user)}], trimNames: false, responseLength: length});
+    const text = await backend.generateText(context(), {use: 'book', prompt: [{role: 'system', content: String(system)}, {role: 'user', content: String(user)}], trimNames: false, responseLength: length});
     if (!String(text || '').trim()) throw Error('文字模型没有回答，看看连接再试一次');
     return String(text);
   }

@@ -54,6 +54,16 @@ export class AppStore {
     const rows = await this.#tx('readonly', (store, done) => this.#all(store, done));
     return rows.filter(r => !kind || r.kind === kind).sort((a, b) => b.at - a.at).map(r => this.#public(r));
   }
+  /** Documents whose ids begin with this, the newest first, without reading the others (助手's memory can be big). */
+  async listFrom(prefix) {
+    const Range = globalThis.IDBKeyRange, begins = String(prefix);
+    const rows = await this.#tx('readonly', (store, done) => {
+      if (!Range) { this.#all(store, done); return; }
+      const req = store.getAll(Range.bound([this.#scope, begins], [this.#scope, begins + '￿']));
+      req.onsuccess = () => done(req.result);
+    });
+    return rows.filter(r => r.id.startsWith(begins)).sort((a, b) => b.at - a.at).map(r => this.#public(r));
+  }
   async get(id) { return this.#tx('readonly', (store, done) => { const req = store.get([this.#scope, String(id)]); req.onsuccess = () => done(this.#public(req.result)); }); }
   async getMany(ids) {
     const keys = [...new Set(ids.map(String))];

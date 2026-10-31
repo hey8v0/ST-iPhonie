@@ -23,8 +23,8 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   const people = () => backend.crowd().slice(0, PEOPLE).map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
   const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
     texts: [crowd.map(p => p.name).join('、'), ...story.map(r => `${r.name}: ${r.text}`), ...texts]});
-  async function ask(ctx, prompt, preset) {
-    return cleanTagged(String(await backend.generateText(ctx, {prompt, trimNames: false}) || ''), preset.cleanTags);
+  async function ask(ctx, prompt, preset, use) {
+    return cleanTagged(String(await backend.generateText(ctx, {prompt, trimNames: false, use}) || ''), preset.cleanTags);
   }
   /** One request per app at a time; the phone shows it as busy. */
   function run(app, task) {
@@ -53,7 +53,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       const recent = (await backend.apps.list('forum')).filter(p => inSpace(p, backend.here())).slice(0, 8), hot = (await backend.apps.get(hotId))?.topics || [];
       const story = storyLines(ctx.chat, preset, user);
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, hot, lore: await lore(preset, crowd, story, [...hot, ...recent.map(p => p.title)])});
-      const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'posts', handles});
+      const found = parseForum(await ask(ctx, prompt, preset, 'forum'), {user, mode: 'posts', handles});
       await keepNames(found.names, crowd);
       if (!found.posts.length) throw Error('这次没有刷出新帖子，可以再刷新一次');
       if (found.hot.length) await backend.setForumHot(found.hot, hotId);
@@ -68,7 +68,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       if (!post) throw Error('这个帖子已经不在了');
       const story = storyLines(ctx.chat, preset, user);
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'react', people: crowd, story, user, userPersona: userPersona(), post, lore: await lore(preset, crowd, story, [postLines(post, user)])});
-      const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'react', handles});
+      const found = parseForum(await ask(ctx, prompt, preset, 'forum'), {user, mode: 'react', handles});
       await keepNames(found.names, crowd);
       if (!found.replies.length) throw Error('这次没有人回复，可以再试一次');
       return backend.addForumReplies(postId, found.replies);
@@ -84,7 +84,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       // Keep the topic in one scan unit: even a shallow scan needs the original question and recent discussion.
       const discussion = postLines(post, user) + `\n本次回复${mine.to ? '（回复 ' + mine.to + '）' : ''}：${mine.text}`;
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'reply', people: crowd, story, user, userPersona: userPersona(), post, reply: mine, lore: await lore(preset, crowd, story, [discussion])});
-      const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'reply', handles});
+      const found = parseForum(await ask(ctx, prompt, preset, 'forum'), {user, mode: 'reply', handles});
       await keepNames(found.names, crowd);
       if (!found.replies.length) throw Error('这次没有人接话，可以再试一次');
       return backend.addForumReplies(postId, found.replies);
@@ -104,7 +104,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       const remembered = memory ? await memory.aboutPeople([name]).catch(() => '') : '';
       const before = keep ? (await backend.apps.get(peekId(name, key))) || (key ? await backend.apps.get(peekId(name)) : null) : null;
       const prompt = buildPeekRequest({prompts: settings().promptRules, preset, before, earlier: memory?.storyMemory() || '', person, story, user, userPersona: userPersona(), history, memory: remembered, images: !!backend.drawReady(), lore: await lore(preset, [person], story, history.map(m => m.text || ''))});
-      const found = parsePeek(await ask(ctx, prompt, preset), {name, user});
+      const found = parsePeek(await ask(ctx, prompt, preset, 'peek'), {name, user});
       return backend.savePeek({name, ...mergePeek(before, found)}, key);
     });
   }

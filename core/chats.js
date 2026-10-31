@@ -22,11 +22,43 @@ const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'tran
 const CALL_STATES = ['answered', 'missed', 'declined', 'cancelled'];
 const spoken = (list, max, withFrom) => (Array.isArray(list) ? list : []).slice(-max).filter(l => l && String(l.text || l.translation || '').trim()).map(l => ({...(withFrom ? {from: clip(l.from, 40).trim() || 'me'} : {}), text: clip(l.text || l.translation, 1000), translation: clip(l.translation || l.text, 1000), emotion: clip(l.emotion || 'calm', 100)}));
 const STATES = {redpacket: ['sent', 'opened'], transfer: ['sent', 'accepted', 'returned'], gift: ['sent', 'accepted', 'returned']};
+/** The messages that can be edited: their words; a photo keeps its picture. */
+export const EDITABLE_KINDS = Object.freeze(['text', 'voice', 'photo']);
 /** A private chat's 删好友 state, checked; null when there is none. */
 export function cleanFriend(f) {
   if (!f || typeof f !== 'object' || !['me', 'them'].includes(f.by)) return null;
   const requests = (Array.isArray(f.requests) ? f.requests : []).filter(r => r && String(r.text || '').trim()).slice(-10).map(r => ({text: clip(r.text, 300).trim(), at: Number.isFinite(r.at) ? r.at : 0}));
   return {by: f.by, at: Number.isFinite(f.at) ? f.at : 0, requests};
+}
+/** The words a search looks through in a message. */
+export function messageWords(m) {
+  switch (m?.kind) {
+    case 'text': case 'photo': case 'sticker': case 'redpacket': case 'transfer': return m.text || '';
+    case 'voice': return [m.text, m.translation].filter(Boolean).join(' ');
+    case 'location': return [m.text, m.detail].filter(Boolean).join(' ');
+    case 'gift': return m.gift?.name || '';
+    case 'song': return [m.song?.title, m.song?.artist].filter(Boolean).join(' ');
+    case 'file': return m.name || '';
+    case 'call': return [...(m.lines || []), ...(m.voicemail || [])].map(l => l.translation || l.text || '').join(' ');
+    default: return '';
+  }
+}
+/**
+ * The messages whose words hold what is asked, in any case, the newest first: {hits: [{thread, id, from, at, before,
+ * hit, after}] (at most limit, with the words around the find), total}.
+ */
+export function searchThreads(threads, query, {limit = 60, around = 16, tail = 44} = {}) {
+  const q = String(query ?? '').trim().toLowerCase(), found = [];
+  if (!q) return {hits: [], total: 0};
+  for (const t of threads) for (const m of t.messages || []) {
+    const words = messageWords(m), at = words.toLowerCase().indexOf(q);
+    if (at >= 0) found.push({t, m, words, at});
+  }
+  found.sort((a, b) => b.m.at - a.m.at);
+  return {total: found.length, hits: found.slice(0, limit).map(({t, m, words, at}) => {
+    const from = Math.max(0, at - around), end = at + q.length;
+    return {thread: t.id, id: m.id, from: m.from, at: m.at, before: (from ? '…' : '') + words.slice(from, at), hit: words.slice(at, end), after: words.slice(end, end + tail)};
+  })};
 }
 /** Money as a string with two decimals, 0.01 to 200000; null when the value is not an amount. */
 export function money(value) {
@@ -210,8 +242,8 @@ export class ChatStore {
     });
   }
   /**
-   * Changes one message: {state, openedBy} for a red packet or transfer, or {recall: true} to withdraw it
-   * (the message keeps its place and sender and loses its content).
+   * Changes one message: {state, openedBy} for a red packet or transfer, {text, translation} to edit its words, or
+   * {recall: true} to withdraw it (the message keeps its place and sender and loses its content).
    */
   async updateMessage(id, messageId, patch = {}) {
     return this.#change(id, row => {
@@ -221,6 +253,14 @@ export class ChatStore {
       if (patch.recall) {
         for (const key of Object.keys(m)) if (!['id', 'from', 'at', 'updatedAt'].includes(key)) delete m[key];
         Object.assign(m, {kind: 'recall', text: ''});
+        return;
+      }
+      if ('text' in patch) {
+        if (!EDITABLE_KINDS.includes(m.kind)) throw fail('这条消息不能编辑');
+        const text = clip(patch.text, CHAT_STORE_LIMITS.text).trim();
+        if (!text && m.kind !== 'photo') throw fail('消息不能是空的');
+        m.text = text;
+        if (m.kind === 'voice' && 'translation' in patch) m.translation = clip(patch.translation, CHAT_STORE_LIMITS.text).trim();
         return;
       }
       // A contact's photo: its drawing (photoId '' takes the picture away again).

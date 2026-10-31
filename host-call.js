@@ -157,7 +157,7 @@ export function createCallHost({context, settings, backend, notice, ringing = ()
     }
     const prompt = buildCallRequest({prompts: settings().promptRules, preset, mode, contact: c.contact, lines: c.lines, history, story, user, userPersona: userPersona(),
       voiceFormat, voiceRules: c.voiced ? modelRules(s, [c.name]) : '', reason: c.reason, lore, memory: c.memory || '', earlier: memory?.storyMemory() || ''});
-    const text = cleanTagged(await backend.generateText(ctx, {prompt, trimNames: false}), preset.cleanTags);
+    const text = cleanTagged(await backend.generateText(ctx, {use: 'call', prompt, trimNames: false}), preset.cleanTags);
     return parseCallReply(text, {name: c.name, user, voiceFormat, voiced: c.voiced});
   }
 

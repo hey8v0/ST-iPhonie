@@ -1,4 +1,4 @@
-import {currentDm, chatWindows, currentWindow, groupKey} from '../core/chats.js';
+import {currentDm, chatWindows, currentWindow, groupKey, EDITABLE_KINDS} from '../core/chats.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, avatar, avatarPicture, empty, help, copyText} from './common.js';
 import {songOf} from '../core/music.js';
@@ -58,6 +58,8 @@ export function chatApp(ctx) {
   const you = who => who === 'me' ? '你' : shown(who);
   // mode: list (the tabs) · thread · profile (a contact's card) · me (the user's card and 个性装扮) · contact-edit
   // selecting: the messages picked (null when not picking); pickFor: what for, 'bring' (带进剧情) or 'delete' (多选删除).
+  // hits: what the search found in the messages ({q, found}, ui/chat.js findHits); jump: the message to show when the thread is drawn.
+  let hits = null, hitTimer = 0, hitTurn = 0, jump = null, knownThreads = [], listEmpty = false;
   let mode = 'list', tab = 'msgs', search = '', searching = false, profileOf = '', threadId = null, thread = null, selecting = null, pickFor = 'bring', contactDraft = null, epoch = 0, stick = false;
   let unreadTotal = 0, freshMoments = 0;
   let panel = null, quote = null;
@@ -174,9 +176,33 @@ export function chatApp(ctx) {
     const spark = t.type === 'dm' && t.streak >= 3 ? `<span class="spark" title="聊天火花：连续 ${t.streak} 天">🔥${t.streak}</span>` : '';
     return `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? '<span class="tag-s">群</span>' : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${atMe}${esc(who + preview(last))}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
   }
+  /** The messages found, under what the list found by name. */
+  function hitsHTML({hits: list, total}) {
+    const rows = list.map(h => {
+      const t = knownThreads.find(x => x.id === h.thread);
+      if (!t) return '';
+      const who = h.from === 'me' ? '我：' : t.type === 'group' ? shown(h.from) + '：' : '';
+      return `<button class="conv conv-hit" data-action="open-hit" data-id="${esc(t.id)}" data-mid="${esc(h.id)}">${threadAvatar(t, 42)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}<span class="conv-time">${stamp(h.at)}</span></span><span class="conv-bot"><span class="pv">${esc(who + h.before)}<mark>${esc(h.hit)}</mark>${esc(h.after)}</span></span></span></button>`;
+    }).join('');
+    if (rows) return groupTitle(total > list.length ? `聊天记录 · ${total} 条，这里是最新的 ${list.length} 条` : `聊天记录 · ${total} 条`) + `<div class="conv-list qq-list">${rows}</div>`;
+    return listEmpty ? `<p class="hint">没有找到「${esc(search)}」</p>` : '';
+  }
+  /** Looks through the messages a moment after the typing stops, and fills in the place kept for it in the list. */
+  function findHits(q) {
+    ctx.win.clearTimeout(hitTimer);
+    const turn = ++hitTurn;
+    hitTimer = ctx.win.setTimeout(async () => {
+      const found = await api.searchChatMessages(q).catch(() => ({hits: [], total: 0}));
+      if (v.disposed || turn !== hitTurn) return;
+      hits = {q, found};
+      const box = v.root.querySelector('[data-chat-hits]');
+      if (box) box.innerHTML = hitsHTML(found);
+    }, 220);
+  }
   async function renderMessages(ticket) {
     const [threads] = await Promise.all([api.listThreads(), counts()]);
     if (v.disposed || ticket !== epoch) return;
+    knownThreads = threads;
     const q = search.trim().toLowerCase(), me = myName();
     // A chat with someone the user deleted is put away until they are added back.
     const away = new Set(threads.filter(t => t.type === 'dm' && t.friend?.by === 'me').map(t => t.members[0]));
@@ -187,13 +213,17 @@ export function chatApp(ctx) {
     const rows = threads.filter(t => !(t.type === 'dm' && t.friend?.by === 'me')).filter(t => q ? [t.name, t.label, ...t.members, preview(t.last)].some(x => String(x || '').toLowerCase().includes(q)) : inUse(t)).map(t => ({...t, unread: q ? t.unread : unreadOf(t)}));
     const people = q ? api.chatContacts().filter(c => c.name.toLowerCase().includes(q) && !away.has(c.name) && !threads.some(t => t.type === 'dm' && t.members[0] === c.name)) : [];
     const bring = pendingBring();
+    listEmpty = !rows.length && !people.length;
+    const known = hits?.q === q;
     v.draw(frame(`<header class="qq-top"><button type="button" class="qq-me" data-action="me" aria-label="我的资料和个性装扮">${myAvatar(42)}<span class="qq-me-text"><strong>${esc(me)}</strong><small>${statusLine()}</small></span></button>${btn('plus-menu', icon('add'), 'round-button', 'aria-label="发起聊天、添加联系人"')}</header>
       <label class="qq-search">${icon('search')}<input data-field="chat-search" type="search" value="${esc(search)}" placeholder="搜索聊天和联系人" aria-label="搜索" autocomplete="off"></label>`
       + (bring ? `<div class="banner bring-banner">${icon('book')}<span>和${esc(bring.name)}的 ${bring.count} 条消息会带进下一次正文</span>${btn('cancel-bring', '取消', 'chip-button')}</div>` : '')
       + (live ? '' : '<div class="banner">' + icon('alert') + '<span>在酒馆里打开小手机时，联系人才会回复。</span></div>')
       + (rows.length ? `<div class="conv-list qq-list">${rows.map(t => convRow(t, me)).join('')}</div>` : q ? '' : empty('还没有聊天', '点右上角的加号，和角色私聊，或者拉一个群。联系人来自角色 App，也可以手动添加。', 'chat'))
       + (people.length ? groupTitle('联系人') + `<div class="group">${people.map(c => `<button class="list-row" data-action="dm-open" data-name="${esc(c.name)}">${avatar(c.name, c.engine, 40)}<span><strong>${esc(shown(c.name))}</strong><small>发消息</small></span>${icon('next')}</button>`).join('')}</div>` : '')
-      + (q && !rows.length && !people.length ? `<p class="hint">没有找到「${esc(search)}」</p>` : '')));
+      + (q ? `<div data-chat-hits>${known ? hitsHTML(hits.found) : ''}</div>` : '')));
+    if (q) findHits(q);
+    else { hitTurn++; ctx.win.clearTimeout(hitTimer); }
     if (searching) { const box = v.root.querySelector('[data-field=chat-search]'); box?.focus({preventScroll: true}); box?.setSelectionRange?.(box.value.length, box.value.length); }
   }
 
@@ -448,6 +478,9 @@ export function chatApp(ctx) {
     if ((atBottom || stick) && !older) drawn.count = SHOWN;
     drawn.from = kept >= 0 ? kept : Math.max(0, list.length - drawn.count);
     if (firstPicked >= 0 && firstPicked < drawn.from) drawn.from = firstPicked;
+    // Come from a search: from a little before that message.
+    const target = jump ? list.findIndex(m => m.id === jump) : -1;
+    if (target >= 0 && target - 5 < drawn.from) drawn.from = Math.max(0, target - 5);
     drawn.count = list.length - drawn.from; drawn.first = list[drawn.from]?.id ?? null;
     const look = profile();
     const bg = look.backgroundPhoto ? 'photo' : look.background, scene = chatScene(bg);
@@ -466,9 +499,11 @@ export function chatApp(ctx) {
     </div>`);
     const msgs = v.root.querySelector('.msgs');
     if (scene) syncMotion(v.root, ctx.win);
-    if (older) msgs.scrollTop = msgs.scrollHeight - older.fromBottom;
+    const found = target >= 0 ? [...msgs.querySelectorAll('.msg[data-mid]')].find(el => el.dataset.mid === jump) : null;
+    if (found) { msgs.scrollTop += found.getBoundingClientRect().top - msgs.getBoundingClientRect().top - msgs.clientHeight / 3; found.classList.add('msg-found'); }
+    else if (older) msgs.scrollTop = msgs.scrollHeight - older.fromBottom;
     else if (atBottom || stick) msgs.scrollTop = msgs.scrollHeight;
-    stick = false; older = null;
+    stick = false; older = null; jump = null;
     pace.fresh = null;
     if (focused) v.root.querySelector('[data-field=draft]')?.focus({preventScroll: true});
     paintVoices();
@@ -627,8 +662,9 @@ export function chatApp(ctx) {
     const done = tab === 'contacts' ? renderContactsTab(ticket) : tab === 'moments' ? counts().then(() => { if (ticket === epoch) return moments.render(); }) : renderMessages(ticket);
     return back === null ? done : Promise.resolve(done).then(() => { if (ticket === epoch) v.root.scrollTop = back; });
   }
-  function open(id) {
-    threadId = id; mode = 'thread'; selecting = null; stick = true; panel = null; quote = null;
+  /** at: a message to show in it (from a search), not the latest. */
+  function open(id, at = null) {
+    threadId = id; mode = 'thread'; selecting = null; stick = !at; jump = at; panel = null; quote = null;
     return render();
   }
 
@@ -981,7 +1017,7 @@ export function chatApp(ctx) {
     const voice = m.kind === 'voice', open = voice && (voiceText().auto || transcribed.has(m.id));
     const d = sheet('消息', `${voice ? '' : `<p class="help-copy">${esc(shown)}</p>`}
       ${voice ? `<div class="actions">${btn('transcribe', icon('book') + (open ? '收起文字' : '转文字'), 'primary')}${btn('download', icon('download') + '下载语音', 'secondary')}${canShareFiles(ctx.win) ? btn('share', icon('share') + '分享', 'secondary') : ''}</div>` : ''}
-      <div class="actions">${quotable(m) ? btn('quote', icon('reply') + '引用', 'secondary') : ''}${copyable ? btn('copy', icon('copy') + '复制', 'secondary') : ''}</div>
+      <div class="actions">${quotable(m) ? btn('quote', icon('reply') + '引用', 'secondary') : ''}${copyable ? btn('copy', icon('copy') + '复制', 'secondary') : ''}${EDITABLE_KINDS.includes(m.kind) ? btn('edit', icon('edit') + '编辑', 'secondary') : ''}</div>
       <div class="actions">${canRecall ? btn('recall', icon('undo') + '撤回', 'secondary') : ''}${btn('pick-delete', icon('check') + '多选删除', 'secondary')}${btn('delete', icon('trash') + '删除', 'danger')}</div>
       ${last && live ? `<div class="actions">${btn('reroll', icon('refresh') + '重新回复这一轮', 'secondary')}</div>` : ''}`, {
       transcribe: () => {
@@ -993,6 +1029,7 @@ export function chatApp(ctx) {
       download: async () => { d.close(); const {blob, name} = await api.audioFile({line: lineOf(m)}); ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, name)); },
       share: async () => { d.close(); const {blob, name} = await api.audioFile({line: lineOf(m)}); await shareFile(ctx.doc, blob, name); },
       quote: () => { d.close(); quote = {from: m.from, text: quoteText(m).slice(0, 200)}; panel = null; render(); },
+      edit: () => { d.close(); editMessage(m); },
       copy: async () => { d.close(); ctx.notify(await copyText(ctx.win, m.kind === 'voice' ? m.text : quoteText(m)) ? '已复制' : '这个浏览器不让复制，可以长按文字手动复制'); },
       recall: async () => {
         d.close();
@@ -1003,6 +1040,21 @@ export function chatApp(ctx) {
       // Picking like 带进剧情: this one first, then tap others or drag the bars (到最早 / 到最新 take in all on that side).
       'pick-delete': () => { d.close(); selecting = new Set(LINE_KINDS.includes(m.kind) ? [] : [m.id]); pickFor = 'delete'; panel = null; quote = null; render(); },
       reroll: async () => { d.close(); await reroll(); }
+    });
+  }
+  /** A message's words, the user's or a contact's: what the chat reads from here on. */
+  function editMessage(m) {
+    const voice = m.kind === 'voice', photo = m.kind === 'photo';
+    const d = sheet(photo ? '编辑图片说明' : '编辑消息', `${field(voice ? '说的话' : photo ? '图片说明' : '内容', textArea('edit-text', m.text, `rows="${voice ? 3 : 6}" maxlength="4000"`))}
+      ${voice ? field('译文', textArea('edit-translation', m.translation || '', 'rows="3" maxlength="4000"'), '改了说的话，下次播放会重新配音。') : ''}
+      <div class="actions">${btn('edit-save', '保存', 'primary')}</div>`, {
+      'edit-save': async () => {
+        const text = value(d, 'edit-text');
+        if (!text && !photo) { ctx.notify('消息不能是空的'); return; }
+        await api.updateChatMessage(threadId, m.id, {text, ...(voice ? {translation: value(d, 'edit-translation')} : {})});
+        d.close();
+        ctx.notify('改好了');
+      }
     });
   }
   // Removes the contacts' latest messages (after the user's last one) and asks again.
@@ -1386,6 +1438,7 @@ export function chatApp(ctx) {
         if (tab !== el.dataset.tab) { v.root.dataset.switching = el.dataset.tab; ctx.win.clearTimeout(switchTimer); switchTimer = ctx.win.setTimeout(() => delete v.root.dataset.switching, 420); }
         tab = el.dataset.tab; search = ''; if (tab === 'moments') moments.only(''); v.root.scrollTop = 0; render(); break;
       }
+      case 'open-hit': await open(el.dataset.id, el.dataset.mid); break;
       case 'open': {
         // The contact's picture in the list flies up to the top of the chat (ui/carry.js).
         const from = el.firstElementChild?.getBoundingClientRect();

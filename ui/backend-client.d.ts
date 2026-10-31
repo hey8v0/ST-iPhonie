@@ -802,7 +802,14 @@ export interface BackendFacade {
     latestAudio(): ReadyAudio | null;
     favoriteAudio(key: string): Promise<Favorite>;
     /** The parts a backup can hold, key -> label. */
-    backupParts(): Record<'settings' | 'chats' | 'moments' | 'notes' | 'photos' | 'favorites' | 'vibes' | 'keys', string>;
+    backupParts(): Record<'settings' | 'vnFiles' | 'chats' | 'memories' | 'assistant' | 'moments' | 'forum' | 'peek' | 'notes' | 'photos' | 'favorites' | 'vibes' | 'books' | 'music' | 'sounds' | 'paint' | 'ledger' | 'keys', string>;
+    /** What the backup page shows of the parts that are not simply counted. */
+    backupCounts(): Promise<{forum: number; peek: number; ledger: number; playlists: number; songs: number; musicBytes: number; sounds: number; soundBytes: number; works: number; workBytes: number}>;
+    /** 账本: one row a day between two days ('YYYY-MM-DD'), the oldest first. */
+    ledgerDays(from?: string, to?: string): Promise<{day: string; text?: Record<string, {calls: number; input: number; output: number}>; voice?: Record<string, {lines: number; chars: number}>; image?: Record<string, number>; anlas?: number; embed?: {calls: number; chars: number}; sfx?: number}[]>;
+    clearLedger(): Promise<void>;
+    /** A work of 画画 was saved, or these were deleted. */
+    paintChanged(gone?: string[]): void;
     /** A backup file of the chosen parts, named for saving. Never contains keys. */
     /** parts may include 'keys', which needs `password` (at least 6 characters): the keys are sealed with it. */
     exportBackup(parts: string[], version?: string, options?: { password?: string }): Promise<{ blob: Blob; name: string }>;
@@ -992,6 +999,8 @@ export interface BackendFacade {
     chatContacts(all?: boolean): ChatContact[];
     /** A role from the 角色 App joins this card's contacts. */
     addRoleContact(name: string): ChatContact[];
+    /** Messages holding these words, the newest first, with the words around each find. */
+    searchChatMessages(query: string, options?: {limit?: number; around?: number; tail?: number}): Promise<{hits: {thread: string; id: string; from: string; at: number; before: string; hit: string; after: string}[]; total: number}>;
     listThreads(): Promise<ChatThreadSummary[]>;
     getThread(id: string): Promise<ChatThread | null>;
     chatUnread(): Promise<number>;
@@ -1017,7 +1026,7 @@ export interface BackendFacade {
     refriend(threadId: string): Promise<ChatThread>;
     deleteChatMessages(id: string, ids: string[]): Promise<ChatThread>;
     /** {state, openedBy} for a red packet or transfer, or {recall: true} to withdraw a message. */
-    updateChatMessage(id: string, messageId: string, patch: { state?: string; openedBy?: string; recall?: boolean; photoId?: string; imageTags?: string; imageVersions?: string[] }): Promise<ChatThread>;
+    updateChatMessage(id: string, messageId: string, patch: { text?: string; translation?: string; state?: string; openedBy?: string; recall?: boolean; photoId?: string; imageTags?: string; imageVersions?: string[] }): Promise<ChatThread>;
     markThreadRead(id: string): Promise<ChatThread>;
     /** Plays a voice message through the normal player. */
     /** Plays one voice line, or several in a row (a voicemail). */

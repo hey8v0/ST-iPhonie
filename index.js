@@ -131,7 +131,7 @@ function tavernFiles(){const headers=()=>({'Content-Type':'application/json',...
    if(!r.ok)throw Error(`立绘没能存回酒馆（${r.status}${r.status===413?'，文件太大':''}）`);return (await r.json()).path;}};}
 const deviceName=()=>(/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent||'')?'手机':'电脑')+' · '+browserName();
 // Leaving the page (or switching away on a phone) saves what is waiting, so the other device sees it.
-function flushSync(){if(document.visibilityState==='hidden'&&backend?.syncState?.pending)backend.syncNow().catch(()=>{});}
+function flushSync(){if(document.visibilityState!=='hidden'||!backend)return;backend.ledger?.flush().catch(()=>{});if(backend.syncState?.pending)backend.syncNow().catch(()=>{});}
 function notice(message){remember(message);if(globalThis.toastr)globalThis.toastr.info(message,'ST-iPhonie');else console.info('[ST-iPhonie]',message);}
 function formats(){return knownFormats(settings);}
 // 回复后单独配音 (core/voice-plan.js, run by the picture host with 回复后单独配图): the story request carries no voice rule;

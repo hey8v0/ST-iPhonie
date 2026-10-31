@@ -1,15 +1,19 @@
-// 保存到酒馆: the phone's own data (chats, memories, assistant, 朋友圈, notes, album) kept as files in the tavern user's folder, so another
-// browser or device of the same tavern account sees the same phone, and clearing a browser loses nothing.
-// Settings already live in the tavern; keys never leave the browser; the voice cache and saved voices stay local
-// (they are large, and a voice can be made again).
+// 保存到酒馆: the phone's own data (see SYNC_PARTS) kept as files in the tavern user's folder, so another browser or device
+// of the same tavern account sees the same phone, and clearing a browser loses nothing.
+// Settings already live in the tavern; keys never leave the browser; the voice cache stays local (a voice can be made
+// again). The phone's look is each device's own.
 //
 // Files (in data/<user>/user/files, written with the tavern's /api/files/upload):
 //   st-iphonie-sync.json        {app, kind:'sync', format, savedAt, device, deviceName, parts:{part:{hash, count}}}
 //   st-iphonie-chats.json       chat threads          st-iphonie-moments.json   朋友圈 posts
 //   st-iphonie-notes.json       notes                 st-iphonie-photos.json    album index (no pictures)
 //   st-iphonie-memories.json    complete chat books   st-iphonie-assistant.json assistant threads with memory: book | null
+//   st-iphonie-forum.json, -peek, -music, -sounds, -paint, -ledger, -books, -vibes, -favorites, -references  the same way
 //   st-iphonie-p-<id>.<ext>     one file per picture, written once (a picture never changes); a photo made smaller by
 //                               压缩旧图 is another picture, st-iphonie-p-<id>-c<when>.<ext>, and wins over the original
+//   st-iphonie-m-, -s-, -v-, -f-, -r-<id>   a song, a sound, a vibe, a saved voice, a reference voice: one file each, like
+//                               the pictures; a part's JSON lists them without the file (FILES)
+//   st-iphonie-w-<id>-<when>.json   a work of 画画: its layers, a new file each time it was saved
 //
 // A sync reads the tavern's copy first. A part changed only there is taken as it is (so deletions carry over); a part
 // changed on both sides is merged item by item (the newer item wins, messages and comments are joined); then what
@@ -19,12 +23,26 @@
 import {sha256Hex} from './hash.js';
 
 export const SYNC_FORMAT = 2;
-export const SYNC_PARTS = Object.freeze({chats: '聊天记录', moments: '朋友圈', notes: '备忘录', photos: '相册', memories: '聊天记忆', assistant: '助手会话与记忆'});
+export const SYNC_PARTS = Object.freeze({chats: '聊天记录', moments: '朋友圈', notes: '备忘录', photos: '相册', memories: '聊天记忆', assistant: '助手会话与记忆', forum: '论坛', peek: '查手机', books: '绘本', vibes: 'Vibe', favorites: '收藏的语音', references: '参考音频', music: '音乐', sounds: '音效', paint: '画画的作品', ledger: '账本'});
 export const MANIFEST = 'st-iphonie-sync.json';
 export const partFile = part => `st-iphonie-${part}.json`;
 const EXT = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif'};
 const packedAt = row => Number.isFinite(row?.packed?.at) ? row.packed.at : 0;
 export const photoFile = row => `st-iphonie-p-${String(row.id).replace(/[^a-zA-Z0-9_-]/g, '_')}${packedAt(row) ? '-c' + packedAt(row).toString(36) : ''}.${EXT[row.type] || 'png'}`;
+const plain = id => String(id).replace(/[^a-zA-Z0-9_-]/g, '_');
+const SOUND_EXT = {'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'aac', 'audio/flac': 'flac', 'audio/x-flac': 'flac', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/ogg': 'ogg', 'audio/webm': 'webm', 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/ogg': 'ogg'};
+const voiceFile = letter => row => `st-iphonie-${letter}-${plain(row.id)}.${SOUND_EXT[row.mime || row.type] || 'bin'}`;
+/** The file a row of a part has in the tavern, or null when it has none (a song from a music source, a 歌单). */
+export const FILES = Object.freeze({
+  photos: photoFile,
+  music: row => row.kind === 'song' && row.origin !== 'source' ? voiceFile('m')(row) : null,
+  sounds: voiceFile('s'),
+  favorites: voiceFile('f'),
+  references: voiceFile('r'),
+  // A vibe's file changes as strengths are encoded for it: its time tells them apart.
+  vibes: row => `st-iphonie-v-${plain(row.id)}-${(Number(row.updatedAt) || 0).toString(36)}.bin`,
+  paint: row => `st-iphonie-w-${plain(row.id)}-${(Number(row.updatedAt) || 0).toString(36)}.json`,
+});
 
 export function defaultSync() { return {enabled: false}; }
 export function normalizeSync(value) { return {enabled: value?.enabled === true}; }
@@ -41,11 +59,14 @@ const newerWhole = (a, b) => rowTime(b) > rowTime(a) || (rowTime(b) === rowTime(
 export function canonical(part, items) {
   if (part === 'photos') return byId(items.map(({id, name, type, size, createdAt, updatedAt, packed}) => ({id, name, type, size, createdAt, updatedAt, ...(packed ? {packed} : {})})));
   if (wholePart(part)) return byId(items).map(stableValue);
+  // The files are apart; a work's list has its small picture in its file too.
+  if (part in FILES) return byId(items.map(({blob, thumb, layers, ...row}) => row));
   return byId(items);
 }
 export async function hashText(text) { return sha256Hex(text); }
 
 const GONE_DAYS = 90, GONE_MAX = 3000;
+const REMADE = new Set(['forum', 'peek', 'books', 'vibes', 'favorites', 'references', 'music', 'sounds', 'paint', 'ledger']);
 /**
  * Deletions: {part: {key: at}}. The key is the item's id, or `itemId/childId` for a chat message or a post comment.
  * Joins several lists, keeps the last GONE_DAYS days and at most GONE_MAX keys a part (the newest).
@@ -67,9 +88,13 @@ export function prune(part, items, gone = {}) {
   const has = key => Object.hasOwn(gone, key);
   // Only an explicit backup restore can supersede an assistant deletion. Ordinary edits cannot revive old copies.
   const restored = x => part === 'assistant' && Number.isFinite(x.restoredAt) && x.restoredAt > gone[String(x.id)];
-  return items.filter(x => !has(String(x.id)) || restored(x)).map(x =>
+  // Here an id can come again (the same person's phone looked at again, today's 账本 after clearing it): what was made
+  // after it was deleted is a new one, and only an older copy stays deleted.
+  const remade = x => REMADE.has(part) && rowTime(x) > gone[String(x.id)];
+  return items.filter(x => !has(String(x.id)) || restored(x) || remade(x)).map(x =>
     part === 'chats' && Array.isArray(x.messages) && x.messages.some(m => has(`${x.id}/${m.id}`)) ? {...x, messages: x.messages.filter(m => !has(`${x.id}/${m.id}`))}
     : part === 'moments' && Array.isArray(x.comments) && x.comments.some(c => has(`${x.id}/${c.id}`)) ? {...x, comments: x.comments.filter(c => !has(`${x.id}/${c.id}`))}
+    : part === 'forum' && Array.isArray(x.replies) && x.replies.some(r => has(`${x.id}/${r.id}`)) ? {...x, replies: x.replies.filter(r => !has(`${x.id}/${r.id}`))}
     : x);
 }
 const newer = (a, b, time) => (time(b) || 0) > (time(a) || 0) ? b : a;
@@ -105,7 +130,7 @@ function rebase(part, before, incoming, current) {
     const merged = { ...(result.get(row.id) || row) };
     for (const key of new Set([...Object.keys(previous), ...Object.keys(row)])) {
       if (JSON.stringify(row[key]) === JSON.stringify(previous[key])) continue;
-      if ((part === 'chats' && key === 'messages') || (part === 'moments' && key === 'comments')) merged[key] = rebase('', previous[key] || [], merged[key] || [], row[key] || []).sort((a, b) => a.at - b.at);
+      if ((part === 'chats' && key === 'messages') || (part === 'moments' && key === 'comments') || (part === 'forum' && key === 'replies')) merged[key] = rebase('', previous[key] || [], merged[key] || [], row[key] || []).sort((a, b) => a.at - b.at);
       else if (Object.hasOwn(row, key)) merged[key] = row[key];
       else delete merged[key];
     }
@@ -130,18 +155,21 @@ export function mergePart(part, local, remote, gone = {}) {
     else if (part === 'notes') out.push(newer(here, theirs, n => n.updatedAt));
     // a photo made smaller (压缩旧图) on one side is smaller on both; otherwise this side's copy is the same picture
     else if (part === 'photos') out.push(packedAt(theirs) > packedAt(here) ? theirs : here);
+    else if (part === 'forum' && here.kind === 'forum') out.push({...here, ...theirs, likes: Math.max(here.likes || 0, theirs.likes || 0), heat: Math.max(here.heat || 0, theirs.heat || 0), liked: here.liked || theirs.liked, replies: union(here.replies, theirs.replies).sort((a, b) => a.at - b.at)});
+    else if (part in SYNC_PARTS) out.push(newer(here, theirs, rowTime));
     else out.push(here);
   }
   return [...out, ...mine.values()];
 }
 
 /**
- * Runs one sync. stores: {read(part) → items (photos: rows with blobs), write(part, items, {replace, merge}), photoBlob(row)}
+ * Runs one sync. stores: {read(part) → items (those with files: rows with blobs), write(part, items, {replace, merge}), fileBlob(part, row)}
  * write must run the synchronous merge(currentRows) callback inside the same transaction as its replacement.
  * files: {read(name, {blob}) → text | Blob | null, write(name, text | Blob), remove(name)}; memory: {hashes, savedAt}.
  * Returns {memory, pulled:[parts], pushed:[parts], merged:[parts], savedAt, remote}.
  */
 export async function runSync({stores, files, memory = {}, readGone = () => memory.gone, device = '', deviceName = '', now = () => Date.now(), parts = Object.keys(SYNC_PARTS)}) {
+  const blobOf = (part, row) => stores.fileBlob ? stores.fileBlob(part, row) : stores.photoBlob(row);
   const hashes = {...(memory.hashes || {})}, pulled = [], pushed = [], merged = [];
   let gone = joinGone([memory.gone], now());
   let manifest = null;
@@ -176,6 +204,17 @@ export async function runSync({stores, files, memory = {}, readGone = () => memo
           return blob ? {...mine, ...row, blob} : mine || null;
         }));
         result = result.filter(row => row?.blob);
+      } else if (FILES[part]) {
+        const have = new Map(items.map(r => [r.id, r])), fileOf = FILES[part], out = [];
+        for (const row of result) {
+          const mine = have.get(row.id), name = fileOf(row);
+          // no file of its own, or the same one as here
+          if (!name || (mine && fileOf(mine) === name)) { out.push({...mine, ...row}); continue; }
+          const blob = await files.read(name, {blob: true});
+          if (blob) out.push({...mine, ...row, blob: blob.slice(0, blob.size, row.mime || row.type || blob.type)});
+          else if (mine) out.push(mine);
+        }
+        result = out;
       }
     }
     if (fromRemote || JSON.stringify(canonical(part, result)) !== text) {
@@ -191,10 +230,12 @@ export async function runSync({stores, files, memory = {}, readGone = () => memo
       hash = await hashText(text);
     }
     if (hash !== remoteHash) {
-      if (part === 'photos') {
-        const theirs = new Set((remoteHash ? JSON.parse(await files.read(partFile('photos')) || '[]') : []).map(photoFile));
-        const mine = new Set(items.map(photoFile));
-        for (const row of items) if (!theirs.has(photoFile(row))) await files.write(photoFile(row), await stores.photoBlob(row));
+      const fileOf = FILES[part];
+      if (fileOf) {
+        // The files first: a list in the tavern never names one that is not there.
+        const theirs = new Set((remoteHash ? JSON.parse(await files.read(partFile(part)) || '[]') : []).map(fileOf).filter(Boolean));
+        const mine = new Set(items.map(fileOf).filter(Boolean));
+        for (const row of items) { const name = fileOf(row); if (name && !theirs.has(name)) await files.write(name, await blobOf(part, row)); }
         for (const name of theirs) if (!mine.has(name)) await files.remove(name).catch(() => {});
       }
       await files.write(partFile(part), text);
@@ -220,11 +261,14 @@ export async function runSync({stores, files, memory = {}, readGone = () => memo
 export async function removeSync(files) {
   const raw = await files.read(MANIFEST);
   if (raw === null) return 0;
-  let parts = [], photos = [];
+  let parts = [];
+  const own = [];
   try { parts = Object.keys(JSON.parse(raw)?.parts || {}); } catch { /* a broken manifest: the known parts below */ }
-  try { photos = (JSON.parse(await files.read(partFile('photos')) || '[]') || []).map(photoFile); } catch { /* no album index */ }
+  for (const [part, fileOf] of Object.entries(FILES)) {
+    try { own.push(...(JSON.parse(await files.read(partFile(part)) || '[]') || []).map(fileOf).filter(Boolean)); } catch { /* no list */ }
+  }
   // Removing a file that is not there counts as removed.
-  const names = [...photos, ...[...new Set([...Object.keys(SYNC_PARTS), ...parts])].map(partFile), MANIFEST];
+  const names = [...own, ...[...new Set([...Object.keys(SYNC_PARTS), ...parts])].map(partFile), MANIFEST];
   for (const name of names) await files.remove(name);
   return names.length;
 }

@@ -1,0 +1,37 @@
+/* 账本 (ui/ledger.js): the numbers wear the ink, the marks one colour; the day being read is the dark one. */
+.ledger-period{margin-bottom:12px}
+.ledger-month{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 2px 12px}
+.ledger-month strong{font-size:15px;font-weight:800}
+.ledger-month .round-button:disabled{opacity:.35}
+.ledger-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.ledger-tile{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0;padding:12px 14px;border-radius:18px;background:var(--card);box-shadow:var(--shadow);color:var(--ink);text-align:left;transition:transform .14s,box-shadow .14s}
+.ledger-tile small{font-size:12px;font-weight:700;color:var(--ink2)}
+.ledger-tile strong{font-size:24px;font-weight:800;line-height:1.15;overflow-wrap:anywhere}
+.ledger-tile strong i{margin-left:3px;font-size:12px;font-style:normal;font-weight:700;color:var(--ink2)}
+button.ledger-tile:active{transform:scale(.97)}
+.ledger-tile[aria-pressed=true]{box-shadow:inset 0 0 0 2px var(--accent-btn),var(--shadow)}
+.ledger-chart{margin-bottom:6px;padding:12px 14px 10px;border-radius:18px;background:var(--card);box-shadow:var(--shadow)}
+.ledger-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
+.ledger-read{margin:0;font-size:13px;font-weight:800;color:var(--ink)}
+.ledger-top{flex:none;font-size:11px;font-weight:700}
+.ledger-plot{display:grid;grid-template-columns:repeat(var(--days),minmax(0,1fr));align-items:end;height:112px;border-bottom:1px solid var(--line);touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.ledger-col{display:flex;align-items:flex-end;justify-content:center;height:100%;min-width:0;padding:0 1px}
+.ledger-col i{display:block;width:100%;max-width:18px;border-radius:3px 3px 0 0;background:color-mix(in srgb,var(--accent-btn) 45%,var(--card));pointer-events:none;transition:background .12s}
+.ledger-col[data-on] i{background:var(--accent-btn)}
+.ledger-col:focus-visible{outline:2px solid var(--accent);outline-offset:-1px}
+.ledger-axis{display:grid;grid-template-columns:repeat(var(--days),minmax(0,1fr));margin-top:4px;font-size:10.5px;font-weight:700;color:var(--ink2);font-variant-numeric:tabular-nums}
+.ledger-axis span{justify-self:center;white-space:nowrap}
+.ledger-none{margin:0 4px 12px}
+.ledger-table{margin:0 0 6px;font-size:13px}
+.ledger-table summary{padding:8px 4px;font-weight:800;color:var(--ink2);cursor:pointer}
+.ledger-table-row{display:flex;justify-content:space-between;gap:12px;padding:7px 4px;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+.ledger-table-row b{font-weight:800}
+.ledger-row{padding:11px 0}
+.ledger-row+.ledger-row{border-top:1px solid var(--line)}
+.ledger-row-top{display:flex;justify-content:space-between;gap:12px;font-size:14px;font-weight:700}
+.ledger-row-top b{flex:none;font-weight:800;font-variant-numeric:tabular-nums}
+.ledger-bar{display:block;height:5px;margin-top:6px;border-radius:3px;background:color-mix(in srgb,var(--accent-btn) 14%,var(--card));overflow:hidden}
+.ledger-bar b{display:block;height:100%;border-radius:3px;background:var(--accent-btn)}
+.ledger-row small{display:block;margin-top:5px;font-size:12px}
+.ledger-actions{justify-content:center;margin-top:6px}
+@media (forced-colors:active){.ledger-col i,.ledger-bar b{background:Highlight}.ledger-tile[aria-pressed=true]{outline:2px solid Highlight}}

@@ -28,7 +28,8 @@ const LOADERS = {
   sounds: () => import('./sounds.js').then(m => m.soundsApp), assistant: () => import('./assistant.js').then(m => m.assistantApp),
   music: () => import('./music.js').then(m => m.musicApp), games: () => import('./games.js').then(m => m.gamesApp),
   picbook: () => import('./book.js').then(m => m.bookApp), indie: () => import('./indie.js').then(m => m.indieApp),
-  paint: () => import('./paint.js').then(m => m.paintApp), vn: () => import('./vn.js').then(m => m.vnApp), logs: () => import('./logs.js').then(m => m.logsApp)
+  paint: () => import('./paint.js').then(m => m.paintApp), vn: () => import('./vn.js').then(m => m.vnApp), logs: () => import('./logs.js').then(m => m.logsApp),
+  ledger: () => import('./ledger.js').then(m => m.ledgerApp)
 };
 const FACTORIES = {}, loading = {};
 /** An app's module, once (a load that failed is tried again next time). */

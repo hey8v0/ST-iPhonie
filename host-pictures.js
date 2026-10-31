@@ -147,7 +147,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   async function planOnce(id, source) {
     let last = {text: source, count: 0};
     for (let round = 0; round < 2 && !last.count; round++) {
-      const reply = await backend.generateText(context(), {prompt: await pictureRequest(id, source), trimNames: false, responseLength: planLength(settings(), activeDrawPreset().count)});
+      const reply = await backend.generateText(context(), {use: 'picture', prompt: await pictureRequest(id, source), trimNames: false, responseLength: planLength(settings(), activeDrawPreset().count)});
       last = insertPlanned(source, reply);
       if (!last.count) backend.reportDiagnostic?.('正文出图', {message: round ? '又试了一次，还是没有挑出画面' : '没有挑出画面，再试一次', reply: String(reply ?? '').slice(0, 2000)}, 'warn');
     }
@@ -196,7 +196,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const phoneRule = phoned && phone?.wanted() ? await phone.rule() : '';
       const prompt = withPhone(asked, phoneRule);
       const length = (wantVoice ? Math.min(3000, 400 + source.length * 2) : 0) + (wantPictures ? planLength(s, preset.count) : 0) + (phoneRule ? 500 : 0);
-      const answer = await backend.generateText(ctx, {prompt, trimNames: false, responseLength: Math.min(10000, length)});
+      const answer = await backend.generateText(ctx, {use: 'picture', prompt, trimNames: false, responseLength: Math.min(10000, length)});
       if (context().chat[id] !== message) return {voiced: 0, pictured: 0};
       const {rest: reply, phone: sent} = phoneRule ? phoneSection(answer) : {rest: answer, phone: ''};
       let text = source, pictured = 0, voiced = 0;
@@ -418,7 +418,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   /** Reads a picture's English tags in Chinese ('translate'), or changes them the way the user says ('revise'), with the phone's text model. */
   async function tagText(text, mode, wish = '') {
     if (!String(text).trim()) throw Error('框里是空的');
-    const answer = tagTextAnswer(await backend.generateText(context(), {prompt: tagTextRequest(settings(), text, mode, wish), plainText: true, trimNames: false, responseLength: Math.min(6000, 1500 + String(text).length * 3)}));
+    const answer = tagTextAnswer(await backend.generateText(context(), {use: 'picture', prompt: tagTextRequest(settings(), text, mode, wish), plainText: true, trimNames: false, responseLength: Math.min(6000, 1500 + String(text).length * 3)}));
     if (!answer) throw Error('模型没有回内容，再试一次');
     return answer;
   }
@@ -521,7 +521,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     // chain of thought or XML template the model then writes out.
     const ctx = context(), chat = ctx.chat || [];
     const prompt = suggestRequest(settings(), {before: before(chat.length, 6), only: castNow()});
-    const reply = await backend.generateText(ctx, {prompt, plainText: true, trimNames: false, responseLength: promptLength(settings())});
+    const reply = await backend.generateText(ctx, {use: 'picture', prompt, plainText: true, trimNames: false, responseLength: promptLength(settings())});
     const result = readSuggestion(settings(), reply);
     if (!result.prompt) throw Error('模型没有写出提示词，再试一次');
     return withCount(result);
@@ -547,7 +547,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     for (let round = 0; prompt && round < 2 && used < left * 0.75; round++) {
       messages = fillUpRequest(messages, {prompts: s.promptRules, line: result.prompt, people: result.people, used, left, tags: Math.floor((left - used) / tagCost(count)), sentences: sentenceCount(s)});
       let more;
-      try { more = readSuggestion(s, await backend.generateText(context(), {prompt: messages, plainText: true, trimNames: false, responseLength: promptLength(s)})); } catch { break; }
+      try { more = readSuggestion(s, await backend.generateText(context(), {use: 'picture', prompt: messages, plainText: true, trimNames: false, responseLength: promptLength(s)})); } catch { break; }
       const now = countField(count, more.prompt);
       if (!more.prompt || now <= used || now > left) break;
       result = {prompt: more.prompt, people: [...new Set([...result.people, ...more.people])]};
@@ -559,7 +559,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   async function writePrompt(idea, cast = []) {
     if (!String(idea || '').trim()) throw Error('先说说想画什么');
     const names = (Array.isArray(cast) ? cast : []).map(String).slice(0, 8), prompt = writeRequest(settings(), {idea, cast: names, only: castNow()});
-    const reply = await backend.generateText(context(), {prompt, plainText: true, trimNames: false, responseLength: promptLength(settings())});
+    const reply = await backend.generateText(context(), {use: 'picture', prompt, plainText: true, trimNames: false, responseLength: promptLength(settings())});
     const result = readSuggestion(settings(), reply);
     if (!result.prompt) throw Error('模型没有写出提示词，再试一次');
     // Filled up to the limit only when the idea asks for it; otherwise a precise line of whatever length it takes.
