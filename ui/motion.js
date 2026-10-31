@@ -7,13 +7,13 @@ const RIPPLE = '.list-row,.conv,.control-tile,.segmented button,.qq-tabs button,
 const SPOT = '.widget,.bank-card,.control-tile,.qq-card';
 
 /** A copy of the chosen button's fill, under the buttons, carried from where it was (from) to the new one (to). */
-function slidePill(win, bar, to, from) {
+export function slidePill(win, bar, to, from) {
   const box = bar.getBoundingClientRect(), end = to.getBoundingClientRect();
   if (Math.abs(end.left - from.left) < 2 || !end.width) return;
   const look = win.getComputedStyle(to), pill = win.document.createElement('i');
   pill.className = 'seg-pill';
   pill.setAttribute('aria-hidden', 'true');
-  pill.style.cssText = `left:${end.left - box.left - bar.clientLeft}px;top:${end.top - box.top - bar.clientTop}px;width:${end.width}px;height:${end.height}px;background:${look.backgroundColor};box-shadow:${look.boxShadow};border-radius:${look.borderRadius}`;
+  pill.style.cssText = `left:${end.left - box.left - bar.clientLeft}px;top:${end.top - box.top - bar.clientTop}px;width:${end.width}px;height:${end.height}px;background:${look.backgroundImage && look.backgroundImage !== 'none' ? look.backgroundImage : look.backgroundColor};box-shadow:${look.boxShadow};border-radius:${look.borderRadius}`;
   to.classList.add('seg-arriving');
   bar.prepend(pill);
   // The button takes its own fill back at once (its transition would show a flicker where the copy just was).

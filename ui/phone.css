@@ -153,6 +153,14 @@ button[aria-pressed=true] small,.primary small{color:inherit;opacity:.85}
 .icon-tile img{width:100%;height:100%;object-fit:cover}
 .screen[data-icon-style=glass] .icon-tile{background:rgba(255,255,255,.28);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.6)}
 .screen[data-icon-style=mono] .icon-tile{filter:grayscale(1)}
+/* 单色 in a colour: the tile and the picture on it drawn with one hue, no filter to pay for each frame. */
+.screen[data-icon-style=mono][data-mono-hue] .icon-tile,.mono-preview[data-mono-hue] .icon-tile{filter:none;--t1:hsl(var(--mono-hue) 58% 80%)!important;--t2:hsl(var(--mono-hue) 50% 42%)!important;--tac:hsl(var(--mono-hue) 70% 92%)!important}
+.screen[data-icon-style=mono][data-mono-hue] .icon-tile img{filter:grayscale(1) sepia(1) hue-rotate(calc(var(--mono-hue) * 1deg - 40deg)) saturate(2.4)}
+/* An icon that is the user's picture is that picture alone: nothing of the tile behind it, whatever the skin or style. */
+:root .screen .icon-tile.photo-tile{background:none!important;box-shadow:none!important;outline:0!important;rotate:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+:root .screen .icon-tile.photo-tile:after{display:none}
+.icon-tile.photo-tile img{position:absolute;inset:0}
+.icon-tile img.see-through{object-fit:contain}
 .app-label{font-size:12px;font-weight:800;white-space:nowrap;text-shadow:0 0 3px var(--label-halo,#fff),0 0 6px var(--label-halo,#fff)}
 .app-icon.slot .icon-tile{background:rgba(255,255,255,.22);box-shadow:inset 0 0 0 2.5px rgba(255,255,255,.7);color:rgba(255,255,255,.85)}
 .app-icon.slot .icon-tile:after{display:none}
@@ -2738,7 +2746,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .segmented{position:relative}
 .segmented button{position:relative;z-index:1}
 .seg-pill{position:absolute;z-index:0;pointer-events:none;transform-origin:left center}
-.segmented button.seg-arriving{background:transparent!important;box-shadow:none!important;transition:color .2s,transform .35s cubic-bezier(.3,1.7,.45,1)}
+.segmented button.seg-arriving{background:transparent!important;border-color:transparent!important;box-shadow:none!important;transition:color .2s,transform .35s cubic-bezier(.3,1.7,.45,1)}
 /* Decorated bubbles move only on the last few messages: dozens of moving bubbles would cost a phone every frame. */
 .chat-thread .msg:not(:nth-last-child(-n+6)) .chat-bubble,.chat-thread .msg:not(:nth-last-child(-n+6)) .chat-bubble::before,.chat-thread .msg:not(:nth-last-child(-n+6)) .chat-bubble::after{animation-play-state:paused}
 /* A long note folded into a small 「ⓘ 说明」 (ui/motion.js); tapped, the note opens under it. */

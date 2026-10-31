@@ -54,6 +54,18 @@ export const wallpapers = {
   }
 };
 
+/** The wallpaper that goes with a 自定义主题, made from its colours: a sky of its main colour, by night its dark with stars. */
+export function customWallpaper(theme, dark) {
+  if (dark) {
+    const t = theme.night;
+    return {name: '主题色', ink: '#fff', clock: 'glow', stroke: t.accent, halo: '#000', motion: 'stars', size: `${starSize},auto,auto`,
+      background: `${stars},radial-gradient(60% 30% at 80% 100%,${t.pink}55 0,#fff0 70%),linear-gradient(180deg,${t.page} 0%,${t.bg} 48%,${t['accent-soft']} 88%,${t['accent-soft']} 100%)`};
+  }
+  const t = theme.day;
+  return {name: '主题色', ink: t.ink, clock: 'stroke', stroke: t['accent-btn'], shadow: t['accent-ink'], halo: '#fff', motion: 'clouds',
+    background: `${clouds},radial-gradient(40% 25% at 85% 12%,#ffffff55 0,#fff0 70%),linear-gradient(180deg,${t.accent} 0%,color-mix(in srgb,${t.accent} 55%,#fff) 36%,${t['accent-soft']} 62%,${t.bg} 100%)`};
+}
+
 // Returns the look to apply for a builtin key, honouring the dark variant.
 export function wallpaperLook(key, dark) {
   const w = wallpapers[key] || wallpapers.sky;
@@ -96,6 +108,7 @@ export function motionLayer(scene, {random = false, className = 'wall-motion'} =
 // Phone skins (see skins.css). preview: [page, card, accent, second colour] for the picker in Settings.
 export const skins = {
   sky: {name: '晴空贴纸', preview: ['#8fd0ff', '#ffffff', '#1f74cc', '#ff7eaa']},
-  aero: {name: 'Frutiger Aero', preview: ['#4cc3f6', '#f4fdff', '#1494d2', '#5cc93a']},
-  fresh: {name: '文艺小清新', preview: ['#dfe9dc', '#fffdf8', '#6d977f', '#dfa39b']}
+  aero: {name: 'Aero', preview: ['#4cc3f6', '#f4fdff', '#1494d2', '#5cc93a']},
+  fresh: {name: '文艺小清新', preview: ['#dfe9dc', '#fffdf8', '#6d977f', '#dfa39b']},
+  custom: {name: '自定义', preview: ['#f3c7d6', '#ffffff', '#c94a78', '#7fb6d9']}
 };

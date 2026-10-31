@@ -186,8 +186,8 @@
 :root[data-skin=fresh] .tool-ico:not([data-tool=redpacket]):not([data-tool=transfer]){background:var(--card);box-shadow:inset 0 0 0 1px var(--line)}
 
 /* ---------- Skin picker (settings) ---------- */
-.skin-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px 0 6px}
-.skin-choice{display:flex;flex-direction:column;align-items:stretch;gap:6px;font-size:12px;font-weight:800;color:var(--ink);text-align:center;min-height:44px}
+.skin-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:12px 0 6px}
+.skin-choice{display:flex;flex-direction:column;align-items:stretch;gap:6px;font-size:11.5px;font-weight:800;color:var(--ink);text-align:center;min-height:44px}
 .skin-choice>span{position:relative;display:block;aspect-ratio:3/4;border-radius:14px;overflow:hidden;box-shadow:inset 0 0 0 2px var(--line)}
 .skin-choice[aria-pressed=true]>span{box-shadow:0 0 0 3px var(--accent-btn)}
 .skin-choice i{position:absolute;left:12%;right:12%;height:18%;border-radius:6px}
@@ -195,6 +195,34 @@
 .skin-choice i:nth-of-type(2){top:68%;right:40%}
 .skin-choice b{position:absolute;left:12%;top:12%;width:24%;aspect-ratio:1;border-radius:6px}
 @media (prefers-reduced-motion:reduce){:root[data-skin] .primary,:root[data-skin] .secondary{transition:none}}
+/* 自定义主题 (ui/theme-editor.js) */
+.theme-edit-row .theme-dots{display:flex;flex:none;margin-left:auto;margin-right:6px}
+.theme-dots i{width:16px;height:16px;border-radius:50%;margin-left:-5px;box-shadow:0 0 0 2px var(--card)}
+.theme-presets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 6px;padding-block:14px}
+.theme-preset{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:0;font-size:12px;font-weight:700;color:var(--ink)}
+.theme-preset i{position:relative;display:block;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--a) 0 50%,var(--b) 50%);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 14%,transparent);transition:transform .25s var(--spring,ease)}
+.theme-preset:active i{transform:scale(.9)}
+.theme-preset[aria-pressed=true] i{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--accent-btn)}
+.theme-row{display:flex;align-items:center;gap:12px;min-height:44px}
+.theme-row>span{flex:none;width:58px;font-size:13px;font-weight:700}
+.theme-row>b{flex:1;min-width:0;font-size:13px;font-weight:700}
+.theme-range{flex:1;min-width:0;height:16px;margin:0;border-radius:999px;background:var(--track);-webkit-appearance:none;appearance:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 12%,transparent);touch-action:pan-y}
+.theme-range::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:var(--thumb,#fff);box-shadow:0 0 0 3px #fff,0 2px 8px rgba(0,0,0,.35)}
+.theme-range::-moz-range-thumb{width:24px;height:24px;border:0;border-radius:50%;background:var(--thumb,#fff);box-shadow:0 0 0 3px #fff,0 2px 8px rgba(0,0,0,.35)}
+.theme-swatch{position:relative;flex:none;display:block;width:34px;height:34px;border-radius:50%;background:var(--c);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 18%,transparent);overflow:hidden;cursor:pointer}
+.theme-swatch input{position:absolute;inset:-6px;width:calc(100% + 12px);height:calc(100% + 12px);padding:0;border:0;opacity:0;cursor:pointer}
+.theme-each summary{font-weight:800}
+.theme-each .segmented{margin:12px 0 4px}
+.theme-token{display:flex;align-items:center;gap:10px;min-height:48px;border-top:1px solid var(--line)}
+.theme-token>span{flex:1;min-width:0;font-size:13px;font-weight:700}
+.theme-token input.theme-hex{flex:none;width:92px;min-height:34px;padding:4px 8px;border:1px solid var(--line);border-radius:10px;background:var(--card2);color:var(--ink);font:600 13px ui-monospace,Consolas,monospace;text-transform:lowercase}
+.theme-warn{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;padding:8px 12px;border-radius:12px;background:var(--danger-soft);color:var(--danger);font-size:13px;font-weight:700}
+.theme-warn button{flex:none;min-height:32px;padding:4px 12px;border-radius:999px;background:var(--danger);color:var(--on-danger,#fff);font-size:12px;font-weight:800}
+.mono-tools .segmented{margin:6px 0 10px}
+.mono-preview{display:flex;justify-content:space-between;gap:6px;margin-top:10px}
+.mono-preview .icon-tile{width:48px;height:48px;border-radius:15px;background:linear-gradient(160deg,var(--t1),var(--t2))!important;outline:0!important;rotate:none!important;color:#fff}
+.mono-preview:not([data-mono-hue]) .icon-tile{filter:grayscale(1)}
+.mono-preview .icon-tile .glyph{width:36px;height:36px}
 /* 引擎 card pockets: glass in Aero, an airmail envelope in 文艺小清新. */
 :root[data-skin=aero] .card-pocket{background:var(--aero-gloss),color-mix(in srgb,var(--e-soft) 40%,var(--card));border:1px solid var(--aero-edge);box-shadow:inset 0 1px 0 var(--aero-edge),var(--shadow)}
 :root[data-skin=aero] .pocket-icon{background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0) 52%),var(--e-btn);box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 6px 14px -8px var(--e)}

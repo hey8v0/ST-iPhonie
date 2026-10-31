@@ -4,7 +4,10 @@ import {saveFile, zipFiles} from '../download.js';
 import {browserSpeech, cleanSkip, cleanBody, NARRATION_RATES, NARRATOR} from '../core/narration.js';
 import {icon, GLYPH_NAMES} from './icons.js';
 import {APPS} from './apps.js';
-import {wallpapers, skins} from './wallpapers.js';
+import {wallpapers, skins, customWallpaper} from './wallpapers.js';
+import {glyph} from './icons.js';
+import {cleanTheme, deriveTheme, wheelHue, THEME_PRESETS} from '../core/theme-colors.js';
+import {themeEditor} from './theme-editor.js';
 
 const MARKS = {ok: '✓', warn: '!', error: '✕', info: '·'};
 const IMAGE_TYPES = 'image/png,image/jpeg,image/webp,image/avif,image/gif';
@@ -79,7 +82,8 @@ export function settingsApp(ctx) {
       if (b.dataset.action === 'nar-role') { d.close(); ctx.openPendingRole(NARRATOR); }
     });
   }
-  let appearance = null, check = null, backup = null, restore = null, storage = false, epoch = 0;
+  let appearance = null, check = null, backup = null, restore = null, storage = false, epoch = 0, editingTheme = null;
+  const themes = themeEditor({ctx, v});
   const glyphName = key => APPS[key]?.name || GLYPH_NAMES[key] || key;
 
   // The self-check page: what core/diagnostics.js found, grouped, with the plain report to copy, save or send.
@@ -255,7 +259,7 @@ export function settingsApp(ctx) {
       catch (error) { go.disabled = false; ctx.notify(error.message, {error: true}); }
     });
   }
-  v.onSync = () => { if (!appearance && !check && !backup && !restore) render().catch(() => {}); };
+  v.onSync = () => { if (!appearance && !check && !backup && !restore && !editingTheme) render().catch(() => {}); };
 
   async function runCheck() {
     check = {loading: true};
@@ -266,18 +270,26 @@ export function settingsApp(ctx) {
   }
 
   function renderAppearance() {
-    const d = appearance;
+    const d = appearance, choices = d.theme ? {custom: customWallpaper(d.theme, ctx.doc.documentElement.dataset.theme === 'dark'), ...wallpapers} : wallpapers;
     v.draw(heading('壁纸与图标', '', 'Appearance')
       + groupTitle('壁纸')
-      + `<div class="group pad"><div class="wallpaper-options">${Object.entries(wallpapers).map(([key, w]) => `<button class="wallpaper-choice" data-action="wallpaper" data-key="${key}" aria-pressed="${d.wallpaper.kind === 'builtin' && d.wallpaper.key === key}"><span style="--p:${w.background};--ps:${w.size || 'auto'};--pp:${w.pos || 'center'}"></span>${w.name}</button>`).join('')}</div>
+      + `<div class="group pad"><div class="wallpaper-options">${Object.entries(choices).map(([key, w]) => `<button class="wallpaper-choice" data-action="wallpaper" data-key="${key}" aria-pressed="${d.wallpaper.kind === 'builtin' && d.wallpaper.key === key}"><span style="--p:${w.background};--ps:${w.size || 'auto'};--pp:${w.pos || 'center'}"></span>${w.name}</button>`).join('')}</div>
         <label class="secondary file-button">${icon('image')}选择本地图片作壁纸<input type="file" data-personal-file="wallpaper" aria-label="选择本地壁纸" accept="${IMAGE_TYPES}"></label>
         ${d.wallpaper.kind === 'photo' ? `<p class="hint">现在用的是自己的照片。</p><div class="actions">${btn('photo-off', '换回主题壁纸', 'secondary')}${btn('photo-delete', icon('trash') + '删除这张照片', 'danger')}</div>` : ''}
-        ${field('图标外观', select('iconStyle', d.iconStyle, [['color', '彩色'], ['glass', '玻璃'], ['mono', '单色']]))}</div>`
+        ${field('图标外观', select('iconStyle', d.iconStyle, [['color', '彩色'], ['glass', '玻璃'], ['mono', '单色']]))}${d.iconStyle === 'mono' ? monoTools(d) : ''}</div>`
       + groupTitle('应用图标')
       + `<div class="group">${Object.entries(APPS).map(([app, meta]) => `<div class="icon-settings-row"><strong>${meta.name}</strong>${select('glyph', d.icons[app]?.kind === 'glyph' ? d.icons[app].key : 'default', api.phoneCatalog.glyphs.map(key => [key, glyphName(key)]), `data-icon-app="${app}"`).replace('aria-label="glyph"', `aria-label="${meta.name}图标"`)}<label class="chip-button file-button">${d.icons[app]?.kind === 'photo' ? '换图' : '用图片'}<input type="file" data-personal-file="icon" data-app="${app}" aria-label="${meta.name}图标图片" accept="${IMAGE_TYPES}"></label></div>`).join('')}</div>`
       + `<div class="savebar">${btn('cancel-appearance', '取消', 'secondary')}${btn('save-appearance', '应用', 'primary')}</div>`);
   }
 
+  /** The colour of 单色 icons: grey, the theme's, or a hue of one's own; a few icons show it (the home screen is not in sight). */
+  function monoTools(d) {
+    const way = d.monoHue === null || d.monoHue === undefined ? 'grey' : d.monoHue === 'theme' ? 'theme' : 'hue', hue = typeof d.monoHue === 'number' ? d.monoHue : 210;
+    const shown = way === 'grey' ? null : way === 'theme' ? null : hue;
+    return `<div class="mono-tools"><div class="field" style="margin-bottom:0"><span>单色的颜色</span><div class="segmented">${[['grey', '灰色'], ['theme', '跟主题'], ['hue', '自己选']].map(([key, label]) => `<button data-action="mono-way" data-value="${key}" aria-pressed="${way === key}">${label}</button>`).join('')}</div></div>
+      ${way === 'hue' ? `<div class="theme-row"><span>色相</span><input class="theme-range" type="range" min="0" max="360" value="${hue}" data-mono-hue-range aria-label="单色图标的色相" style="--track:linear-gradient(90deg,hsl(0 80% 60%),hsl(60 80% 55%),hsl(120 70% 50%),hsl(180 70% 50%),hsl(240 80% 62%),hsl(300 75% 58%),hsl(360 80% 60%));--thumb:hsl(${hue} 70% 55%)"></div>` : ''}
+      <div class="mono-preview"${shown !== null || way === 'theme' ? ' data-mono-hue' : ''} style="--mono-hue:${way === 'theme' ? d.themeHue : hue}">${['chat', 'roles', 'music', 'gallery', 'settings'].map(app => { const [t1, t2, tac] = APPS[app].colors; return `<span class="icon-tile" style="--t1:${t1};--t2:${t2};--tac:${tac}">${glyph(app)}</span>`; }).join('')}</div></div>`;
+  }
   /** 存储空间: the voice cache switch, what this device holds, the clearing, and the copy in the tavern. */
   async function renderStorage(ticket) {
     const [cache, library, drawn, budget, pack] = await Promise.all([api.cacheStats(), api.libraryStats().catch(() => null), api.generatedPhotos().catch(() => null), api.storageBudget().catch(() => null), api.packablePhotos?.(0).catch(() => null)]);
@@ -299,6 +311,7 @@ export function settingsApp(ctx) {
 
   async function render() {
     const ticket = ++epoch;
+    if (editingTheme) { editingTheme.render(); return; }
     if (appearance) { renderAppearance(); return; }
     if (check) { renderCheck(); return; }
     if (backup) { await renderBackup(ticket); return; }
@@ -307,12 +320,14 @@ export function settingsApp(ctx) {
     const [phone, cache, library] = await Promise.all([api.getPhone(), api.cacheStats(), api.libraryStats().catch(() => null)]);
     if (v.disposed || ticket !== epoch) return;
     const s = api.getState(), space = api.phoneSpace?.() || {};
-    const wallName = phone.wallpaper.kind === 'builtin' ? wallpapers[phone.wallpaper.key]?.name : '自己的照片';
+    const wallName = phone.wallpaper.kind === 'builtin' ? (phone.wallpaper.key === 'custom' ? '主题色' : wallpapers[phone.wallpaper.key]?.name) : '自己的照片';
+    const mine = phone.skin === 'custom' ? cleanTheme(phone.customTheme) : null, skinLook = key => key === 'custom' && phone.customTheme ? [phone.customTheme.day['accent-soft'], phone.customTheme.day.card, phone.customTheme.day['accent-btn'], phone.customTheme.pink] : skins[key].preview;
     const used = library ? size(library.bytes + (cache.available ? cache.bytes : 0)) : '';
     v.draw(heading('设置', '', 'Settings')
       + groupTitle('外观')
       + `<div class="group pad">
-          <div class="field"><span>主题风格</span><div class="skin-options">${Object.entries(skins).map(([key, s]) => `<button class="skin-choice" data-action="skin" data-value="${key}" aria-pressed="${(phone.skin || 'sky') === key}"><span style="background:${s.preview[0]}"><b style="background:${s.preview[3]}"></b><i style="background:${s.preview[1]}"></i><i style="background:${s.preview[2]}"></i></span>${s.name}</button>`).join('')}</div></div>
+          <div class="field"><span>主题风格</span><div class="skin-options">${Object.entries(skins).map(([key, s]) => `<button class="skin-choice" data-action="skin" data-value="${key}" aria-pressed="${(phone.skin || 'sky') === key}"><span style="background:${skinLook(key)[0]}"><b style="background:${skinLook(key)[3]}"></b><i style="background:${skinLook(key)[1]}"></i><i style="background:${skinLook(key)[2]}"></i></span>${s.name}</button>`).join('')}</div></div>
+          ${mine ? `<button class="list-row theme-edit-row" data-action="edit-theme"><span><strong>改配色</strong><small>${esc(mine.name || '我的配色')}</small></span><span class="theme-dots" aria-hidden="true">${[mine.day['accent-btn'], mine.pink, mine.day['accent-soft']].map(c => `<i style="background:${c}"></i>`).join('')}</span>${icon('next')}</button>` : ''}
           <div class="field"><span>日夜</span><div class="segmented" style="margin:0">${[['system', '跟随系统'], ['light', '日间'], ['dark', '夜间']].map(([key, label]) => `<button data-action="theme" data-value="${key}" aria-pressed="${phone.theme === key}">${label}</button>`).join('')}</div></div>
           <button class="list-row" data-action="appearance"><span><strong>壁纸与图标</strong><small>${wallName} · ${({color: '彩色', glass: '玻璃', mono: '单色'})[phone.iconStyle]}图标</small></span>${icon('next')}</button>
           ${toggle('wallpaperMotion', '动态壁纸', s.general.wallpaperMotion !== false, '内置壁纸会慢慢动起来：晴空飘云、夜里星星闪烁和流星、水感晴空的泡泡和夜里的极光、青草信笺的落叶和夜里的萤火虫、樱色的花瓣。用自己的照片当壁纸时不动；系统开启「减少动态效果」时也保持静止。控制中心里也能开关。')}
@@ -350,13 +365,23 @@ export function settingsApp(ctx) {
           <button class="list-row" data-action="about"><span><strong>关于 ST-iPhonie</strong></span>${icon('next')}</button></div>`);
   }
 
-  v.back = () => { if (!appearance && !check && !backup && !restore && !storage) return false; appearance = check = backup = restore = null; storage = false; render().catch(e => ctx.notify(e.message)); return true; };
-  v.refresh = () => { if (!appearance) return render(); };
+  v.back = () => { if (!appearance && !check && !backup && !restore && !storage && !editingTheme) return false; editingTheme?.leave(); editingTheme = null; appearance = check = backup = restore = null; storage = false; render().catch(e => ctx.notify(e.message)); return true; };
+  v.refresh = () => { if (!appearance && !editingTheme) return render(); };
   v.on('input', '[data-field=volume]', el => { el.previousElementSibling.querySelector('output').textContent = el.value + '%'; });
+  /** What the 壁纸与图标 page changes, and what it only shows: the 主题色 wallpaper, the theme's hue. */
+  function appearanceOf(p) {
+    const theme = cleanTheme(p.customTheme);
+    return {wallpaper: p.wallpaper, icons: p.icons, iconStyle: p.iconStyle, monoHue: p.monoHue ?? null, theme: p.skin === 'custom' ? theme : null, themeHue: wheelHue(p.skin === 'custom' && theme ? theme.day['accent-btn'] : (skins[p.skin] || skins.sky).preview[2])};
+  }
+  v.on('input', '[data-mono-hue-range]', el => {
+    appearance.monoHue = Number(el.value);
+    el.style.setProperty('--thumb', `hsl(${el.value} 70% 55%)`);
+    v.root.querySelector('.mono-preview')?.style.setProperty('--mono-hue', el.value);
+  });
   v.on('change', '[data-field]', async el => {
     const key = el.dataset.field;
     if (appearance) {
-      if (key === 'iconStyle') appearance.iconStyle = el.value;
+      if (key === 'iconStyle') { appearance.iconStyle = el.value; renderAppearance(); }
       if (key === 'glyph') appearance.icons[el.dataset.iconApp] = el.value === 'default' ? null : {kind: 'glyph', key: el.value};
       return;
     }
@@ -426,8 +451,21 @@ export function settingsApp(ctx) {
       case 'voice-mode': api.updateGeneral({voiceMode: el.dataset.value}); await render(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配音' : '以后模型写正文时顺手写配音'); break;
       case 'voice-latest': await v.busy(el, async () => { const n = await api.planLatestVoice(); ctx.notify(n ? `配好了 ${n} 句台词` : '这条回复里没有找到台词'); }); break;
       // A skin brings its own wallpaper, unless a personal photo is the wallpaper.
-      case 'skin': { const p = await api.getPhone(); await api.savePhone({skin: el.dataset.value, ...(p.wallpaper.kind === 'builtin' ? {wallpaper: {kind: 'builtin', key: el.dataset.value}} : {})}); await render(); break; }
-      case 'appearance': { const p = await api.getPhone(); appearance = {wallpaper: p.wallpaper, icons: p.icons, iconStyle: p.iconStyle}; await render(); break; }
+      case 'skin': {
+        const p = await api.getPhone(), key = el.dataset.value, first = key === 'custom' && !p.customTheme, again = key === 'custom' && p.skin === 'custom';
+        if (!again) await api.savePhone({skin: key, ...(first ? {customTheme: deriveTheme({name: '我的配色', ...THEME_PRESETS[0]})} : {}), ...(p.wallpaper.kind === 'builtin' ? {wallpaper: {kind: 'builtin', key}} : {})});
+        // The first time there is nothing of one's own yet, and tapped again it can only mean this: to the colours.
+        if (first || again) { editingTheme = themes; await themes.start(); v.root.scrollTop = 0; } else await render();
+        break;
+      }
+      case 'edit-theme': editingTheme = themes; await themes.start(); v.root.scrollTop = 0; break;
+      case 'appearance': { const p = await api.getPhone(); appearance = appearanceOf(p); await render(); break; }
+      case 'mono-way': {
+        const way = el.dataset.value;
+        appearance.monoHue = way === 'grey' ? null : way === 'theme' ? 'theme' : typeof appearance.monoHue === 'number' ? appearance.monoHue : 210;
+        renderAppearance();
+        break;
+      }
       case 'wallpaper': appearance.wallpaper = {kind: 'builtin', key: el.dataset.key}; await render(); break;
       // Stop using a photo: back to the skin's own wallpaper, which follows day and night.
       case 'builtin-wallpaper': { const p = await api.getPhone(); await api.savePhone({wallpaper: {kind: 'builtin', key: p.skin || 'sky'}}); await render(); ctx.notify('已换回主题壁纸'); break; }
@@ -438,13 +476,13 @@ export function settingsApp(ctx) {
         const p = await api.getPhone();
         if (p.wallpaper.kind !== 'builtin' || p.wallpaper.key !== (p.skin || 'sky')) await api.savePhone({wallpaper: {kind: 'builtin', key: p.skin || 'sky'}});
         const now = await api.getPhone();
-        appearance = {wallpaper: now.wallpaper, icons: now.icons, iconStyle: now.iconStyle};
+        appearance = appearanceOf(now);
         await render();
         ctx.notify('照片已删除');
         break;
       }
       case 'cancel-appearance': appearance = null; await render(); break;
-      case 'save-appearance': await v.busy(el, async () => { await api.savePhone(appearance); appearance = null; await render(); ctx.notify('外观已应用'); }); break;
+      case 'save-appearance': await v.busy(el, async () => { const {theme, themeHue, ...look} = appearance; await api.savePhone(look); appearance = null; await render(); ctx.notify('外观已应用'); }); break;
       case 'storage': storage = true; await render(); v.root.scrollTop = 0; break;
       case 'self-check': case 'run-check': await runCheck(); break;
       case 'backup': backup = {parts: new Set(Object.keys(api.backupParts()).filter(part => part !== 'keys')), password: '', again: ''}; await render(); break;

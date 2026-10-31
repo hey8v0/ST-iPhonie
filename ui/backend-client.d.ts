@@ -525,6 +525,10 @@ export interface PhonePreferences {
     wallpaper: Wallpaper;
     icons: Partial<Record<PhoneApp, AppIcon>>;
     iconStyle: 'color' | 'glass' | 'mono';
+    /** The colour of 单色 icons; none: grey. */
+    monoHue?: number | 'theme' | null;
+    /** 自定义主题 (core/theme-colors.js). */
+    customTheme?: {name: string; accent: string; tint: number; pink: string; ownPink?: boolean; day: Record<string, string>; night: Record<string, string>} | null;
     skin: PhoneSkin;
     lockOnOpen: boolean;
     volume: number;
