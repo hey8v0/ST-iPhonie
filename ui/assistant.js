@@ -1,6 +1,7 @@
 import {createView, esc, btn, heading, field, select, toggle, copyText, menu} from './common.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {openImageViewer} from '../image-viewer.js';
+import {viewerHeart} from './photo-heart.js';
 import {downloadAction, shareAction} from '../download.js';
 import {ASSISTANT_FILE_ACCEPT} from '../assistant-files.js';
 import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, ASSISTANT_WANTS_MUSIC, assistantAttachments, assistantThoughts} from '../core/assistant.js';
@@ -713,7 +714,7 @@ export function assistantApp(ctx) {
         if (!src) return;
         const photo = await api.getPhoto(id); if (v.disposed) return;
         if (!photo) { ctx.notify('这张图片已从相册移除'); imageURLs.delete(id); win.URL.revokeObjectURL(src); el.textContent = '图片已从相册移除'; return; }
-        openImageViewer({doc: ctx.doc, src, alt: '助手生成的图片', from: el.querySelector('img'), info: photo.info, actions: [downloadAction(ctx.doc, async () => ({source: photo.blob, name: photo.name}), ctx.notify), shareAction(ctx.doc, async () => ({source: photo.blob, name: photo.name}), ctx.notify)]}); return;
+        openImageViewer({doc: ctx.doc, src, alt: '助手生成的图片', from: el.querySelector('img'), info: photo.info, actions: [await viewerHeart(api, () => id, ctx.notify), downloadAction(ctx.doc, async () => ({source: photo.blob, name: photo.name}), ctx.notify), shareAction(ctx.doc, async () => ({source: photo.blob, name: photo.name}), ctx.notify)]}); return;
       }
       case 'remove-file': fileDrafts.set(threadId, attachments().filter((_, i) => i !== Number(el.dataset.file))); drawChat(); return;
       case 'reroll': return reroll(message);

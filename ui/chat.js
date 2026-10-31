@@ -5,6 +5,7 @@ import {songOf} from '../core/music.js';
 import {icon} from './icons.js';
 import {fly} from './carry.js';
 import {openImageViewer} from '../image-viewer.js';
+import {viewerHeart} from './photo-heart.js';
 import {editTags} from '../host-ask.js';
 import {saveFile, downloadAction, shareAction, shareFile, canShareFiles} from '../download.js';
 import {momentsPanel, momentsNew, momentsSeen} from './moments.js';
@@ -599,10 +600,12 @@ export function chatApp(ctx) {
     };
     let viewer;
     const safe = fn => async i => { viewer?.close(); try { return await fn(i); } catch (error) { ctx.notify(error.message, {error: true}); return false; } };
+    const heart = await viewerHeart(api, i => versions[i].photoId, ctx.notify);
+    if (v.disposed || threadId !== id) return;
     viewer = openImageViewer({doc: ctx.doc, from: img, caption: message.text || '',
       gallery: {items: versions.map(v => ({src: v.src, alt: message.text || '', info: v.photo.info})), index: Math.max(0, versions.findIndex(v => v.photoId === message.photoId)),
         onIndex: i => api.updateChatMessage(id, mid, {photoId: versions[i].photoId}).catch(error => ctx.notify(error.message))},
-      actions: [downloadAction(ctx.doc, i => ({source: versions[i].photo.blob, name: versions[i].photo.name}), ctx.notify),
+      actions: [heart, downloadAction(ctx.doc, i => ({source: versions[i].photo.blob, name: versions[i].photo.name}), ctx.notify),
         ...(message.imageTags && api.chatDrawPhoto ? [
           {label: '重画', run: safe(() => draw())},
           {label: '改提示词再画', run: safe(rewrite)},

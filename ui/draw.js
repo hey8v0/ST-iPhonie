@@ -73,6 +73,22 @@ export function drawApp(ctx) {
   const style = () => { const d = state(); return d.styles.find(s => s.id === styleId()) || d.styles[0]; };
   // A result as a file: NovelAI_种子.png.
   const resultFile = async result => { const photo = await api.getPhoto(result.photoId); if (!photo) throw Error('这张图已经不在相册里了'); return {source: photo.blob, name: `${(api.drawCatalog.engineNames?.[result.engine] || 'NovelAI').replace(/\s+/g, '')}_${result.seed >= 0 ? result.seed : photo.name}`}; };
+  // 收藏: right there on what was just drawn.
+  let hearts = new Set();
+  function paintHearts() {
+    const b = v.root.querySelector('.canvas-heart'), on = hearts.has(results[current]?.photoId);
+    if (b) { b.setAttribute('aria-pressed', String(on)); b.setAttribute('aria-label', on ? '取消收藏' : '收藏'); b.querySelector('svg')?.setAttribute('fill', on ? 'currentColor' : 'none'); }
+    for (const t of v.root.querySelectorAll('.thumb[data-index]')) t.toggleAttribute('data-fav', hearts.has(results[Number(t.dataset.index)]?.photoId));
+  }
+  const readHearts = () => api.favoritePhotoIds?.().then(ids => { hearts = new Set(ids); paintHearts(); }).catch(() => {});
+  v.onAlbums = readHearts;
+  async function heart(id) {
+    const on = !hearts.has(id);
+    if (on) hearts.add(id); else hearts.delete(id);
+    paintHearts();
+    try { await api.favoritePhotos([id], on); }
+    catch (error) { if (on) hearts.delete(id); else hearts.add(id); paintHearts(); ctx.notify(error.message, {error: true}); }
+  }
   const urlFor = async id => {
     if (urls.has(id)) return urls.get(id);
     const photo = await api.getPhoto(id);
@@ -165,8 +181,8 @@ export function drawApp(ctx) {
       + (keyed ? '' : `<div class="banner">${icon('key')}<span>${esc(api.drawMissing())}。</span>${btn('go-key', '去填写', 'chip-button')}</div>`)
       + queueCard()
       + `<div class="draw-meta">${btn('pick-style', (style().cover ? `<img class="chip-cover" src="${esc(style().cover.thumb)}" alt="" draggable="false">` : icon('layers')) + esc(style().name) + icon('down'), 'chip-button')}${costChip(q)}${e === 'nai' ? `<label class="chip-button file-button read-png" title="从 NovelAI 画的 PNG 读回提示词、角色和参数">${icon('import')}读图<input type="file" data-read-png accept="image/png,image/jpeg,image/webp" aria-label="从 NovelAI 的图读参数" hidden></label>` : ''}</div>
-        <div class="canvas-card"><div class="canvas-main${main ? '' : ' empty'}" style="aspect-ratio:${p.width}/${p.height}">${main ? `<button type="button" class="canvas-zoom" data-action="zoom" aria-label="放大查看"><img src="${esc(main)}" alt="生成的图片"></button>` : `<span>${comfy && !(comfy.controls.includes('width') && comfy.controls.includes('height')) ? '尺寸由工作流决定' : `${p.width} × ${p.height}`}<br>还没有图</span>`}${busy ? `<span class="canvas-busy">${esc(engineName(e))} 正在画……</span>` : ''}</div>
-          ${results.length ? `<div class="canvas-side" data-keep-scroll="results">${thumbs.map((url, i) => `<button class="thumb" data-action="thumb" data-index="${i}" aria-pressed="${i === current}" aria-label="第 ${i + 1} 张">${url ? `<img src="${esc(url)}" alt="">` : ''}</button>`).join('')}</div>` : ''}</div>
+        <div class="canvas-card"><div class="canvas-main${main ? '' : ' empty'}" style="aspect-ratio:${p.width}/${p.height}">${main ? `<button type="button" class="canvas-zoom" data-action="zoom" aria-label="放大查看"><img src="${esc(main)}" alt="生成的图片"></button><button type="button" class="canvas-heart" data-action="heart" aria-pressed="${hearts.has(shown?.photoId)}" aria-label="${hearts.has(shown?.photoId) ? '取消收藏' : '收藏'}">${icon('heart', hearts.has(shown?.photoId))}</button>` : `<span>${comfy && !(comfy.controls.includes('width') && comfy.controls.includes('height')) ? '尺寸由工作流决定' : `${p.width} × ${p.height}`}<br>还没有图</span>`}${busy ? `<span class="canvas-busy">${esc(engineName(e))} 正在画……</span>` : ''}</div>
+          ${results.length ? `<div class="canvas-side" data-keep-scroll="results">${thumbs.map((url, i) => `<button class="thumb" data-action="thumb" data-index="${i}" aria-pressed="${i === current}" aria-label="第 ${i + 1} 张"${hearts.has(results[i].photoId) ? ' data-fav' : ''}>${url ? `<img src="${esc(url)}" alt="">` : ''}</button>`).join('')}</div>` : ''}</div>
         ${shown ? `<p class="hint canvas-meta">${[shown.tool ? (shown.prompt || '') : shown.params.model, `${shown.params.width}×${shown.params.height}`, shown.params.steps ? shown.params.steps + ' 步' : '', shown.seed >= 0 ? '种子 ' + shown.seed : ''].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
         ${shown && e === 'nai' && keyed ? toolsHTML() : ''}
         <div class="segmented draw-tabs">${tabs.map(([k, l]) => `<button data-action="tab" data-tab="${k}" aria-pressed="${k === tab}">${l}</button>`).join('')}</div>
@@ -464,6 +480,15 @@ export function drawApp(ctx) {
       case 'random-use': prompt = randomText; if (randomChars) characters = randomChars; randomText = ''; randomChars = null; render(); break;
       case 'random-clear': randomText = ''; randomChars = null; render(); break;
       case 'thumb': current = index; render(); break;
+      case 'heart': {
+        const id = results[current]?.photoId;
+        if (!id) break;
+        const was = hearts.has(id);
+        el.classList.remove('pop');
+        if (!was) { void el.offsetWidth; el.classList.add('pop'); }
+        await heart(id);
+        break;
+      }
       case 'cancel-job': api.cancelDraw(el.dataset.key); break;
       case 'cloud-kind': api.saveDraw({queue: {cloud: {...cloudFields(), kind: el.dataset.kind}}}); cloudNote = null; render(); break;
       case 'new-room': { const room = api.newRoomCode(); v.root.querySelector('[data-cloud=room]').value = room; api.saveDraw({queue: {cloud: cloudFields()}}); cloudNote = {ok: true, text: '已生成房间码。把队列地址和房间码发给共用账号的朋友。'}; render(); break; }
@@ -491,6 +516,7 @@ export function drawApp(ctx) {
         viewer = openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: results.map(r => r.photoId), index: Math.max(0, current), from: img?.getBoundingClientRect() || null,
           load: id => api.getPhoto(id),
           actions: [
+            {key: 'fav', icon: 'heart', label: '收藏', labelOn: '已收藏', on: id => hearts.has(id), run: id => heart(id)},
             {key: 'download', icon: 'download', label: '下载', run: async id => { const {source, name} = await file(id); const [copy] = await pictureCopies(ctx, [{blob: source, name}]) || []; if (copy) ctx.notify('已下载 ' + await saveFile(ctx.doc, copy.blob, copy.name)); }},
             ...(canCopyPicture(ctx.win) ? [{key: 'copy', icon: 'copy', label: '复制', run: async id => { try { await copyPicture(ctx.win, file(id).then(f => f.source)); ctx.notify('已复制'); } catch { ctx.notify('这个浏览器不让复制图片', {error: true}); } }}] : []),
             ...(canShareFiles(ctx.win) ? [{key: 'share', icon: 'share', label: '分享', run: async id => { const {source, name} = await file(id); try { await shareFile(ctx.doc, source, name); } catch (error) { ctx.notify(error.message, {error: !/已取消/.test(error.message)}); } }}] : []),
@@ -904,6 +930,7 @@ export function drawApp(ctx) {
   const {pickStyle, editStyle} = styleSheets({ctx, state, styleId, style, render, shownPicture: () => results[current] ? shownBlob() : null, afterPaid: () => refreshSubscription(true)});
   watchCovers(v.root);
 
+  readHearts();
   render();
   refreshSubscription();
   return v;

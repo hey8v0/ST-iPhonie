@@ -15,7 +15,8 @@ const bytes = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1,
 const when = t => { const d = new Date(t), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
 
 /**
- * ids: the photos in order; load(id) → {blob, name, size, createdAt, info}. actions: [{key, icon, label, danger, run(id)}];
+ * ids: the photos in order; load(id) → {blob, name, size, createdAt, info}. actions: [{key, icon, label, danger, more, on, labelOn, run(id)}];
+ * more: behind the bar's 更多. on(id): the action is a switch (收藏), and this says whether it is on for this photo.
  * a run that resolves to 'removed' takes the photo out of the row (the next one shows; none left closes). from: where
  * the photo was tapped (a rect); the picture grows out of it once it has loaded (ui/carry.js). to(id): where that
  * photo is in the grid (a rect), for a swipe down to put it back there.
@@ -24,6 +25,8 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
   const {doc, win} = ctx;
   let list = ids.slice(), at = Math.min(list.length - 1, Math.max(0, index)), closed = false, moving = false, chrome = true, info = false;
   const urls = new Map(), names = new Map(), infos = new Map(), details = new Map();
+  const actionButton = i => { const a = actions[i]; return `<button type="button" data-av-action="${i}" data-album="${esc(a.key || '')}"${a.danger ? ' class="album-danger"' : ''}>${icon(a.icon || 'star')}<span>${esc(a.label)}</span></button>`; };
+  const onBar = actions.map((_, i) => i).filter(i => !actions[i].more), behind = actions.map((_, i) => i).filter(i => actions[i].more);
   const root = doc.createElement('div');
   root.className = 'album-viewer';
   root.setAttribute('role', 'dialog');
@@ -33,10 +36,26 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
   root.innerHTML = `<div class="album-stage"><div class="album-track">${[0, 1, 2].map(i => `<figure class="album-slide" data-slot="${i}"><img alt="" draggable="false" hidden></figure>`).join('')}</div></div>
     <header class="album-top"><button type="button" class="album-round" data-av="close" aria-label="返回相册">${icon('back')}</button><span class="album-title"><b data-av-count aria-live="polite"></b><small data-av-name></small></span><button type="button" class="album-round" data-av="zoom" aria-label="放大查看">${icon('search')}</button></header>
     <button type="button" class="album-arrow prev" data-av="prev" aria-label="上一张">${icon('back')}</button><button type="button" class="album-arrow next" data-av="next" aria-label="下一张">${icon('next')}</button>
-    <footer class="album-bar">${actions.map((a, i) => `<button type="button" data-av-action="${i}" data-album="${esc(a.key || '')}"${a.danger ? ' class="album-danger"' : ''}>${icon(a.icon || 'star')}<span>${esc(a.label)}</span></button>`).join('')}</footer>
+    <footer class="album-bar">${onBar.filter(i => !actions[i].danger).map(actionButton).join('')}${behind.length ? `<button type="button" data-av="more" aria-expanded="false">${icon('more')}<span>更多</span></button>` : ''}${onBar.filter(i => actions[i].danger).map(actionButton).join('')}</footer>
+    ${behind.length ? `<section class="album-more" aria-label="更多" hidden>${behind.map(actionButton).join('')}</section>` : ''}
     <section class="album-info" aria-label="照片信息" hidden></section>`;
   host.append(root);
-  const track = root.querySelector('.album-track'), stage = root.querySelector('.album-stage'), slots = [...root.querySelectorAll('.album-slide img')], sheet = root.querySelector('.album-info');
+  const track = root.querySelector('.album-track'), stage = root.querySelector('.album-stage'), slots = [...root.querySelectorAll('.album-slide img')], sheet = root.querySelector('.album-info'), moreBox = root.querySelector('.album-more');
+  function setMore(open) {
+    if (!moreBox) return;
+    moreBox.hidden = !open;
+    root.querySelector('[data-av=more]').setAttribute('aria-expanded', String(open));
+  }
+  /** What is a switch shows how it stands for the photo in view. */
+  function paintSwitches() {
+    actions.forEach((a, i) => {
+      if (!a.on) return;
+      const b = root.querySelector(`[data-av-action="${i}"]`), on = !!a.on(list[at]);
+      b.setAttribute('aria-pressed', String(on));
+      b.querySelector('svg')?.setAttribute('fill', on ? 'currentColor' : 'none');
+      b.querySelector('span').textContent = on ? a.labelOn || a.label : a.label;
+    });
+  }
 
   async function ensure(id) {
     if (urls.has(id)) return urls.get(id);
@@ -74,7 +93,7 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
     track.style.transform = `translateX(-${SLIDE}%)`;
     for (const img of slots) { img.style.transform = ''; img.style.transition = ''; }
     z = 1; zx = 0; zy = 0; root.removeAttribute('data-zoomed');
-    title(); describe();
+    title(); describe(); paintSwitches();
   }
   // ---------- Details: a swipe up ----------
   /** The details of the photo shown: what the sheet says. */
@@ -189,6 +208,7 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
   // ---------- Swiping and tapping ----------
   let drag = null, lastTap = 0, tapTimer = 0;
   stage.addEventListener('pointerdown', e => {
+    setMore(false);
     if (e.button > 0 || moving) return;
     pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
     try { stage.setPointerCapture?.(e.pointerId); } catch { /* a pointer the browser no longer tracks */ }
@@ -276,12 +296,18 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
     if (v === 'prev') return go(-1);
     if (v === 'next') return go(1);
     if (v === 'zoom') return zoom();
+    if (v === 'more') return setMore(moreBox.hidden);
     const action = actions[Number(b.dataset.avAction)];
     if (!action) return;
+    setMore(false);
     const id = list[at];
     try {
       b.disabled = true;
       const result = await action.run(id);
+      if (action.on) {
+        paintSwitches();
+        if (action.on(id) && list[at] === id) { b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); }
+      }
       if (result === 'removed' && !closed) {
         const gone = urls.get(id);
         if (gone) { win.URL.revokeObjectURL(gone); urls.delete(id); }

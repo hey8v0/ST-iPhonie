@@ -662,6 +662,11 @@ details>div{padding-bottom:10px}
 .thumb{width:52px;flex-shrink:0;aspect-ratio:2/3;border-radius:8px;overflow:hidden;padding:0;background:var(--card2);box-shadow:0 0 0 2px var(--line)}
 .thumb[aria-pressed=true]{box-shadow:0 0 0 3px var(--e)}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.canvas-heart{position:absolute;right:8px;bottom:8px;z-index:1;display:grid;place-items:center;width:40px;height:40px;border-radius:50%;color:#fff;background:rgba(10,12,24,.42);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.canvas-heart svg{width:22px;height:22px}
+.canvas-heart[aria-pressed=true]{color:#ff5c7c;background:rgba(255,255,255,.9)}
+.thumb[data-fav]{position:relative}
+.thumb[data-fav]::after{content:'';position:absolute;left:3px;bottom:3px;width:13px;height:13px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 20.5s-8-4.9-8-10.7A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 2.8c0 5.8-8 10.7-8 10.7z'/%3E%3C/svg%3E") center/contain no-repeat;filter:drop-shadow(0 1px 2px rgba(0,0,0,.65))}
 .canvas-meta{text-align:center;font-family:"JetBrains Mono",ui-monospace,Consolas,monospace;font-size:11px}
 .style-card summary svg{width:18px;height:18px;color:var(--e)}
 .style-card summary .save-state{margin-left:auto;margin-right:6px}
@@ -1859,12 +1864,58 @@ button.gift-item[data-short]{opacity:.55}
 
 /* 相册: choosing several photos to delete. */
 .gallery-tools{display:flex;gap:6px;align-items:center}
+/* 相册 (ui/gallery.js): 图库 by the day, 相簿 as cards, bars that stay at the bottom however short the page. */
+.view[data-app=gallery]{display:flex;flex-direction:column}
+.view[data-app=gallery]>*{flex-shrink:0}
+.photo-day{margin:14px 2px 6px;font-size:13px;font-weight:800;color:var(--ink2)}
+.view[data-app=gallery] .photo-grid,.album-pick{gap:3px;margin:0;touch-action:pan-y;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.view[data-app=gallery] .photo-grid button,.album-pick button{position:relative;border-radius:8px;box-shadow:none;transition:transform .24s cubic-bezier(.3,1.4,.5,1)}
+.view[data-app=gallery] .photo-grid img,.album-pick img{pointer-events:none;-webkit-user-drag:none}
+.photo-grid button[data-fav]::before{content:'';position:absolute;left:5px;bottom:5px;z-index:1;width:17px;height:17px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 20.5s-8-4.9-8-10.7A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 2.8c0 5.8-8 10.7-8 10.7z'/%3E%3C/svg%3E") center/contain no-repeat;filter:drop-shadow(0 1px 2px rgba(0,0,0,.65))}
+.segmented.album-tabs{position:sticky;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:3;align-self:center;width:188px;margin:auto 0 0;background:color-mix(in srgb,var(--card) 86%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3);box-shadow:0 12px 28px -12px rgba(20,40,90,.45),inset 0 0 0 1px var(--line)}
+.album-tabs[hidden]{display:none}
+.album-tabs button{flex:1}
+.album-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 12px;margin:2px 0 14px}
+.album-card{position:relative;display:grid;gap:2px;min-width:0;padding:0;text-align:left;touch-action:pan-y;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:transform .2s cubic-bezier(.3,1.3,.5,1)}
+.album-card:active:not(.album-lifted){transform:scale(.97)}
+.album-card strong{margin-top:6px;font-size:14px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.album-card small{font-size:12px;color:var(--ink2)}
+.album-cover{position:relative;display:grid;place-items:center;aspect-ratio:1;overflow:hidden;border-radius:18px;background:var(--card2);color:var(--ink2);box-shadow:var(--shadow)}
+.album-cover img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none;-webkit-user-drag:none}
+.album-cover>svg{width:34px;height:34px;opacity:.5}
+.album-cover.favs{background:color-mix(in srgb,var(--accent-soft) 70%,var(--card2))}
+.album-cover.favs::after{content:'';position:absolute;left:10px;bottom:10px;width:24px;height:24px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 20.5s-8-4.9-8-10.7A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 2.8c0 5.8-8 10.7-8 10.7z'/%3E%3C/svg%3E") center/contain no-repeat;filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
+.album-card-new .album-cover{background:none;box-shadow:inset 0 0 0 2px var(--line)}
+.album-card-new strong{color:var(--ink2)}
+.album-lifted{z-index:6;pointer-events:none;transition:none}
+.album-lifted .album-cover{box-shadow:0 22px 38px -12px rgba(0,0,0,.5)}
+.album-sources,.album-pick-list{padding-inline:14px}
+.album-pick-list{padding-inline:0}
+.list-row>span.album-cover:not(.avatar):not(.plate){flex:0 0 46px;height:46px;border-radius:12px;box-shadow:none}
+.list-row>span.album-cover>svg{width:22px;height:22px}
+.list-row:disabled{opacity:.5}
+.album-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 2px 8px}
+.album-summary small{font-size:12.5px;color:var(--ink2)}
+.export-sum{margin:0 0 12px;text-align:center;font-size:15px;font-weight:800}
+.export-kind{margin-bottom:6px}
+.export-go{flex-direction:column}
+.export-go>*{justify-content:center}
+.album-pick-go{position:sticky;bottom:0;z-index:2;margin:10px 0 0}
+.album-pick-go .primary{flex:1;justify-content:center}
+.photo-grid.selecting button[aria-pressed=true]{transform:scale(.9)}
 .photo-grid.selecting button{position:relative}
 .photo-grid.selecting button::after{content:'';position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:50%;border:2px solid #fff;background:rgba(0,0,0,.25);box-shadow:0 1px 4px rgba(0,0,0,.35)}
 .photo-grid.selecting button[aria-pressed=true]::after{background:var(--accent-btn) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center/14px no-repeat;border-color:var(--accent-btn)}
 .photo-grid.selecting button[aria-pressed=true] img{opacity:.78}
-.select-bar{position:sticky;bottom:0;display:flex;align-items:center;gap:8px;margin:10px -4px 0;padding:10px 12px;border-radius:16px;background:var(--card);box-shadow:0 -6px 18px -10px rgba(20,40,80,.4);z-index:2}
-.select-bar>span{flex:1;font-size:13px;font-weight:700;color:var(--ink2)}
+.select-bar{position:sticky;bottom:calc(env(safe-area-inset-bottom,0px) + 10px);z-index:3;display:grid;gap:4px;margin:auto -6px 0;padding:6px 10px;border-radius:22px;background:color-mix(in srgb,var(--card) 90%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.4);backdrop-filter:blur(14px) saturate(1.4);box-shadow:0 16px 36px -14px rgba(20,40,90,.5),inset 0 0 0 1px var(--line);animation:sw-bar-in .44s cubic-bezier(.2,1.3,.3,1)}
+.select-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:30px;padding-inline:4px;font-size:13px;font-weight:800;color:var(--ink)}
+.select-head .text-button{min-height:30px;padding:2px 4px;font-size:13px}
+.select-acts{display:flex;gap:2px}
+.select-act{flex:1 1 0;min-width:0;display:grid;justify-items:center;gap:2px;padding:6px 0;border-radius:14px;font-size:11px;font-weight:700;color:var(--ink);white-space:nowrap}
+.select-act svg{width:21px;height:21px}
+.select-act:active{background:var(--card2)}
+.select-act:disabled{opacity:.38}
+.select-act.select-danger{color:var(--danger)}
 
 /* 自动挑音色: the mark on a card, and the note in the editor. */
 .auto-chip{display:inline-block;margin-top:4px;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--accent-btn) 18%,transparent);color:var(--accent-ink);font-size:10.5px;font-weight:800}
@@ -1910,8 +1961,16 @@ button.gift-item[data-short]{opacity:.55}
 .album-bar button{display:grid;justify-items:center;gap:4px;flex:0 1 64px;min-width:0;color:#fff;font-size:11px;font-weight:700;white-space:nowrap}
 .album-bar button svg{width:22px;height:22px}
 .album-bar button.album-danger{color:#ff9a9a}
+.album-bar button[aria-pressed=true]{color:#ff7d97}
+.album-bar button.pop svg,.canvas-heart.pop svg{animation:heart-pop .36s cubic-bezier(.3,1.3,.5,1)}
+@keyframes heart-pop{0%{transform:scale(.6)}55%{transform:scale(1.28)}100%{transform:scale(1)}}
+.album-more{position:absolute;right:10px;bottom:92px;z-index:3;display:grid;min-width:172px;padding:6px;border-radius:18px;background:rgba(36,36,40,.94);box-shadow:0 14px 34px rgba(0,0,0,.45);animation:album-sheet .24s cubic-bezier(.2,.9,.25,1)}
+.album-more[hidden]{display:none}
+.album-more button{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 12px;border-radius:12px;color:#fff;font-size:14px;font-weight:700;text-align:left}
+.album-more button:active{background:rgba(255,255,255,.12)}
+.album-more svg{width:20px;height:20px;flex-shrink:0}
 .album-bar button:disabled{opacity:.5}
-.album-viewer:is([data-chrome=off],[data-pulling],[data-leaving]) :is(.album-top,.album-bar,.album-arrow),.album-viewer[data-info] .album-bar,.album-viewer[data-leaving] .album-info{opacity:0;pointer-events:none}
+.album-viewer:is([data-chrome=off],[data-pulling],[data-leaving]) :is(.album-top,.album-bar,.album-arrow,.album-more),.album-viewer[data-info] .album-bar,.album-viewer[data-leaving] .album-info{opacity:0;pointer-events:none}
 /* A swipe down: the black lightens with the pull, and the photo goes back into the grid. A swipe up: the details. */
 .album-viewer:not([data-pulling]){transition:background-color .25s}
 .album-viewer[data-leaving] .album-slide img{transition:transform .28s cubic-bezier(.23,1,.32,1),opacity .28s}
@@ -1999,7 +2058,8 @@ button.gift-item[data-short]{opacity:.55}
 /* A full-screen blur costs a phone every frame something moves over it: only there while 今天 is coming in. */
 .home[data-today-in] .today-veil{display:block}
 .home[data-today] .home-foot,.home[data-today] .dots,.home[data-today] .phone-dock{pointer-events:none}
-.today-page{flex:0 0 100%;scroll-snap-align:start;position:relative;overflow-y:auto;overflow-x:hidden;padding:52px 14px calc(env(safe-area-inset-bottom,0px) + 36px);scrollbar-width:none;overscroll-behavior-y:contain;color:var(--ink);container-type:inline-size;-webkit-mask-image:linear-gradient(#000 calc(100% - 26px),transparent);mask-image:linear-gradient(#000 calc(100% - 26px),transparent)}
+/* A photo as wallpaper gives the home screen's words a dark shadow: not for these cards, which have a background of their own. */
+.today-page{flex:0 0 100%;scroll-snap-align:start;position:relative;overflow-y:auto;overflow-x:hidden;padding:52px 14px calc(env(safe-area-inset-bottom,0px) + 36px);scrollbar-width:none;overscroll-behavior-y:contain;color:var(--ink);text-shadow:none;container-type:inline-size;-webkit-mask-image:linear-gradient(#000 calc(100% - 26px),transparent);mask-image:linear-gradient(#000 calc(100% - 26px),transparent)}
 .today-page::-webkit-scrollbar{display:none}
 .today-top{display:flex;align-items:center;gap:8px;margin:0 2px 14px;min-height:38px}
 .today-search{flex:1;display:flex;align-items:center;gap:6px;height:38px;padding:0 12px;border-radius:12px;background:color-mix(in srgb,var(--card) 58%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);color:var(--ink2)}
@@ -2742,6 +2802,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 }
 .sw-more:focus-visible{opacity:1;transform:none;outline:2px solid var(--accent);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.sw-main,.sw-act,.sw-check,.sw-check svg{transition:none}.sw-bar,.sw-chosen .sw-check{animation:none}}
+@media (prefers-reduced-motion:reduce){.view[data-app=gallery] .photo-grid button,.album-pick button,.album-card{transition:none}.select-bar,.album-more,.album-bar button.pop svg,.canvas-heart.pop svg{animation:none}}
 /* 分段: the fill carried from the old button to the new one (ui/motion.js); the buttons stay over it. */
 .segmented{position:relative}
 .segmented button{position:relative;z-index:1}

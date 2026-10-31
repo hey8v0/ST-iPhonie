@@ -3,7 +3,7 @@
 // so every device that opens the chat sees the same picture.
 //
 // A finished picture shows only the image. One tap folds it to a line of text (and back); a double tap opens the
-// viewer, which holds everything else: the versions
+// viewer, which holds everything else: 收藏, the versions
 // (‹ ›), the parameters (参数), redraw (also with the prompt changed first), open in the drawing app, fold and delete.
 //
 // Each tag keeps every version it was drawn in: {versions: [{url, seed, width, height, …}], index}.
@@ -58,6 +58,32 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
 
   // The queue changes often (positions, retry countdowns): redraw the placeholders when it does.
   backend.subscribe?.(event => { if (event.type === 'draw' && event.queue) scheduleRender(); });
+  // 收藏 in the viewer: which album photos have the heart, read when it opens. A picture of the story has its copy in the
+  // album (generate), or gets one when it is first given the heart.
+  let hearts = new Set();
+  /** The picture's copy in the album: the one it knows; else one of the same seed; else made from the tavern's file. */
+  async function albumCopy(message, tag, list, index) {
+    const version = list[index];
+    if (version.photoId && await backend.library.getPhoto(version.photoId).catch(() => null)) return version.photoId;
+    const named = version.seed >= 0 ? (await backend.library.listPhotos()).find(row => String(row.name).startsWith(`chat-${version.seed}.`)) : null;
+    let id = named?.id;
+    if (!id) {
+      const response = await fetch(version.url);
+      if (!response.ok) throw Error('读不到这张图的文件（' + response.status + '）');
+      const blob = await response.blob();
+      id = (await backend.mutateLibrary('photos', 'addPhoto', {name: `chat-${version.seed >= 0 ? version.seed : Date.now()}.${/webp/.test(blob.type) ? 'webp' : /jpe?g/.test(blob.type) ? 'jpg' : 'png'}`, blob, info: pictureInfo(version, tag).filter(row => row[1] !== undefined && row[1] !== null && row[1] !== '')})).id;
+    }
+    version.photoId = id;
+    keep(message, tag.hash, list, shown(message, tag.hash)?.index ?? index);
+    saveSoon();
+    return id;
+  }
+  /** The heart of one version, given or taken away. */
+  async function toggleHeart(message, tag, list, index) {
+    const was = !!list[index]?.photoId && hearts.has(list[index].photoId), id = await albumCopy(message, tag, list, index);
+    await backend.favoritePhotos([id], !was);
+    if (was) hearts.delete(id); else hearts.add(id);
+  }
 
   async function upload(blob, name) {
     const ctx = context();
@@ -105,7 +131,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const now = context().chat[id];
       if (now === message && parsePictures(now.mes).some(t => t.hash === tag.hash)) {
         const list = versionsOf(stored(now, tag.hash));
-        list.push({url, seed: result.seed, width: result.params.width, height: result.params.height, model: result.params.model, steps: result.params.steps, prompt: tag.prompt, characters: inputs.names, at: Date.now()});
+        list.push({url, photoId: result.photoId, seed: result.seed, width: result.params.width, height: result.params.height, model: result.params.model, steps: result.params.steps, prompt: tag.prompt, characters: inputs.names, at: Date.now()});
         keep(now, tag.hash, list, list.length - 1);
         await context().saveChat();
         if (settings().general.hideStoryWaves) redrawMessage(id, now);
@@ -389,16 +415,17 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const list = versionsOf(stored(message, tag.hash));
       // Paging in the viewer also changes which version the chat shows.
       const pick = i => { if (i !== shown(message, tag.hash)?.index) { keep(message, tag.hash, list, i); saveSoon(); scheduleRender(); } };
-      viewerCode().then(({openImageViewer}) => openImageViewer({doc: document, from: source?.querySelector?.('img') || source,
+      Promise.all([viewerCode(), Promise.resolve(backend.favoritePhotoIds?.()).catch(() => null)]).then(([{openImageViewer}, ids]) => (hearts = new Set(ids || []), openImageViewer({doc: document, from: source?.querySelector?.('img') || source,
         gallery: {items: list.map(v => ({src: v.url, alt: tag.prompt, info: pictureInfo(v, tag)})), index: pic.index, onIndex: pick},
         actions: [
+          {label: i => list[i].photoId && hearts.has(list[i].photoId) ? '♥ 已收藏' : '♡ 收藏', run: i => toggleHeart(message, tag, list, i).then(() => false, error => { notice(error.message); return false; })},
           downloadAction(document, i => ({source: list[i].url, name: [(list[i].characters || []).join('、') || context()?.name2 || 'ST-iPhonie', list[i].seed].filter(v => v !== undefined && v !== '').join('_')}), notice),
           {label: '重画', run: () => act('redo', id, message, tag)},
           {label: '改提示词再画', run: () => rewrite(id, tag).then(ok => ok ? undefined : false, error => { notice(error.message); return false; })},
           {label: '在绘图中打开', run: () => act('open', id, message, tag)},
           {label: '收起', run: () => act('fold', id, message, tag)},
           {label: '删除这版', danger: true, run: i => { pick(i); return remove(id, tag).then(done => done ? undefined : false); }}
-        ]})).catch(error => notice(error.message));
+        ]}))).catch(error => notice(error.message));
     }
     if (action === 'delete') remove(id, tag).catch(error => notice(error.message));
   }

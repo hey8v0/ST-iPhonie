@@ -30,8 +30,8 @@ export const BACKUP_PARTS = Object.freeze({
 });
 /** Which library stores each part covers. */
 export const PART_STORES = Object.freeze({settings: ['references', 'phone'], vnFiles: [], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], books: ['books'], chats: [], memories: [], assistant: [], moments: [], forum: [], peek: [], music: [], sounds: [], paint: [], ledger: [], looks: [], keys: []});
-/** The rows outside the library that a backup holds under a part's own name. */
-export const ROW_PARTS = Object.freeze(['forum', 'peek', 'music', 'sounds', 'paint', 'ledger', 'looks']);
+/** The rows outside the library that a backup holds under a part's own name. albums (相册的分类) go with the part 相册. */
+export const ROW_PARTS = Object.freeze(['forum', 'peek', 'music', 'sounds', 'paint', 'ledger', 'looks', 'albums']);
 /** Parts chosen by default: keys only when the user turns them on. */
 export const DEFAULT_BACKUP_PARTS = Object.freeze(Object.keys(BACKUP_PARTS).filter(part => part !== 'keys'));
 export const KEY_PASSWORD_MIN = 6;
@@ -217,7 +217,7 @@ export async function walkBackup(chunks, wants = () => true) {
 }
 
 /** The fields of a backup's data that restoring these parts reads. */
-export const fieldsOf = parts => new Set(parts.flatMap(part => part === 'vibes' ? ['vibes', 'vibeGroups'] : PART_STORES[part]?.length ? PART_STORES[part] : [part]));
+export const fieldsOf = parts => new Set(parts.flatMap(part => part === 'vibes' ? ['vibes', 'vibeGroups'] : part === 'photos' ? ['photos', 'albums'] : PART_STORES[part]?.length ? PART_STORES[part] : [part]));
 
 /** Reads a backup file back: {version, createdAt, settings, chats, memories, assistant, library: {store: rows[]}, rows: {part: rows[]}, summary}.
  *  Throws a plain Chinese message for files that are not ST-iPhonie backups. wanted: the fields to keep (fieldsOf);

@@ -857,6 +857,15 @@ export interface BackendFacade {
     deleteBook(id: string): Promise<boolean>;
     getPhone(): Promise<PhonePreferences>;
     savePhone(patch: PhonePatch): Promise<PhonePreferences>;
+    /** 相册的分类 (core/albums.js): 收藏 and the 相簿 one made; only ids of photos, apart from the pictures. */
+    listAlbums(): Promise<{id: string; name: string; photos: string[]; at: number; order?: number}[]>;
+    favoritePhotoIds(): Promise<string[]>;
+    favoritePhotos(ids: string[], on?: boolean): Promise<boolean>;
+    saveAlbum(value: {id?: string; name: string}): Promise<Record<string, any>>;
+    deleteAlbum(id: string): Promise<boolean>;
+    addToAlbum(id: string, ids: string[]): Promise<{added: number}>;
+    removeFromAlbum(id: string, ids: string[]): Promise<boolean>;
+    arrangeAlbums(ids: string[]): Promise<boolean>;
     /** 我的主题 (core/looks.js): the themes kept, without their files; one with its file; kept; its name; gone (not while the phone shows its pictures); its pictures. */
     listLooks(): Promise<Record<string, any>[]>;
     getLook(id: string): Promise<Record<string, any> | null>;

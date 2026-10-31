@@ -5,6 +5,7 @@ import {esc, btn, empty, avatar, field, textArea, input, toggle, help} from './c
 import {icon} from './icons.js';
 import {thumbBlob, previewBlob} from './thumbs.js';
 import {openImageViewer} from '../image-viewer.js';
+import {viewerHeart} from './photo-heart.js';
 import {downloadAction, shareAction} from '../download.js';
 import {aura} from './aura.js';
 import {editTags} from '../host-ask.js';
@@ -220,10 +221,12 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
     };
     let viewer;
     const safe = fn => async i => { viewer?.close(); try { return await fn(i); } catch (error) { ctx.notify(error.message, {error: true}); return false; } };
+    const heart = await viewerHeart(api, i => versions[i].photoId, ctx.notify);
+    if (v.disposed) return;
     viewer = openImageViewer({doc: ctx.doc, from: img, caption: post.text || '',
       gallery: {items: versions.map(x => ({src: x.src, alt: post.text || '', info: x.photo.info})), index: Math.max(0, versions.findIndex(x => x.photoId === post.photoId)),
         onIndex: i => api.momentsPickImage(post.id, versions[i].photoId).then(() => render(), error => ctx.notify(error.message))},
-      actions: [downloadAction(ctx.doc, i => ({source: versions[i].photo.blob, name}), ctx.notify), shareAction(ctx.doc, i => ({source: versions[i].photo.blob, name}), ctx.notify),
+      actions: [heart, downloadAction(ctx.doc, i => ({source: versions[i].photo.blob, name}), ctx.notify), shareAction(ctx.doc, i => ({source: versions[i].photo.blob, name}), ctx.notify),
         ...(drawn ? [
           {label: '重画', run: safe(() => redraw())},
           {label: '改提示词再画', run: safe(rewrite)},

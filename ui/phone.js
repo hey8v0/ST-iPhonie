@@ -22,7 +22,7 @@ import {thumbBlob} from './thumbs.js';
 const LOADERS = {
   roles: () => import('./roles.js').then(m => m.rolesApp), engines: () => import('./engines.js').then(m => m.enginesApp),
   presets: () => import('./presets.js').then(m => m.presetsApp), library: () => import('./media-apps.js').then(m => m.libraryApp),
-  gallery: () => import('./media-apps.js').then(m => m.galleryApp), notes: () => import('./media-apps.js').then(m => m.notesApp),
+  gallery: () => import('./gallery.js').then(m => m.galleryApp), notes: () => import('./media-apps.js').then(m => m.notesApp),
   listen: () => import('./media-apps.js').then(m => m.listenApp), settings: () => import('./settings.js').then(m => m.settingsApp),
   draw: () => import('./draw.js').then(m => m.drawApp), chat: () => import('./chat.js').then(m => m.chatApp),
   forum: () => import('./forum.js').then(m => m.forumApp), peek: () => import('./peek.js').then(m => m.peekApp),
@@ -1012,6 +1012,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       const key = ({favorites: 'library', cache: 'library', photos: 'gallery', notes: 'notes', books: 'picbook'})[event.collection];
       if (active === key) run(() => views.get(key)?.refresh());
     }
+    if (event.type === 'albums') { if (active === 'gallery') run(() => views.get('gallery')?.refresh()); views.get('draw')?.onAlbums?.(); }
     if (event.type === 'audio-ready') views.get('listen')?.onPlayback?.(api.status());
     if (event.type === 'draw') views.get('draw')?.onDraw?.(event);
     if (event.type === 'logs') views.get('logs')?.onLogs?.();

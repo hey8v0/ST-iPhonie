@@ -58,7 +58,7 @@ const infoHTML = info => Array.isArray(info)
  * caption: words shown over the bottom of the picture (what a chat photo shows); a tap hides them with the bars.
  * gallery: {items: [{src, alt, info, caption}], index, onIndex?(i)} to page through versions with ‹ ›.
  * actions: [{label, danger?, run(index)}] extra buttons; `run` may return a promise; the viewer closes after an
- * action unless it returns false.
+ * action unless it returns false. label: words, or label(index) for words that follow the picture shown (收藏 / 已收藏).
  */
 export function openImageViewer({doc = document, src, alt = '', actions = [], from = null, info = null, gallery = null, caption = ''}) {
   actions = actions.filter(Boolean);
@@ -88,7 +88,8 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
   const narrow = !!win.matchMedia?.('(max-width:480px)').matches, barKept = paged || actions.length > 0 || !narrow;
   bar.hidden = !barKept;
   root.toggleAttribute('data-nobar', !barKept);
-  actions.forEach((a, i) => { root.querySelector(`[data-action="${i}"]`).textContent = a.label; });
+  const paintActions = () => actions.forEach((a, i) => { root.querySelector(`[data-action="${i}"]`).textContent = typeof a.label === 'function' ? a.label(index) : a.label; });
+  paintActions();
   doc.body.append(root);
 
   let s = 1, tx = 0, ty = 0, fit = 1, base = 1, closed = false, opened = false, chrome = true, tapTimer = 0, wheelTimer = 0;
@@ -155,6 +156,7 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
 
   function show(i) {
     index = i;
+    paintActions();
     const item = items[index];
     img.alt = item.alt ?? alt;
     const words = root.querySelector('.sttts-viewer-caption');
@@ -329,7 +331,7 @@ export function openImageViewer({doc = document, src, alt = '', actions = [], fr
     else if (v === 'full') zoomAt(1, ...center(), true);
     else if (b.dataset.action !== undefined) {
       const result = await actions[Number(b.dataset.action)].run(index);
-      if (result !== false) close();
+      if (result !== false) close(); else paintActions();
     }
   });
   root.dataset.chrome = 'on';

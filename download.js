@@ -111,6 +111,25 @@ export async function shareFile(doc, source, base) {
   return name;
 }
 
+/** The share sheet with several files at once (on a phone: 存储图像, 保存到文件). files: [{name, blob}]. */
+export async function shareFiles(doc, files) {
+  const win = doc.defaultView, nav = win.navigator, used = new Set();
+  if (!canShareFiles(win)) throw Error('这个浏览器不能分享文件，请用「打包下载」');
+  const list = files.map(({name, blob}) => {
+    let made = fileName(name, blob.type);
+    const dot = made.lastIndexOf('.'), stem = dot > 0 ? made.slice(0, dot) : made, end = dot > 0 ? made.slice(dot) : '';
+    for (let n = 2; used.has(made); n++) made = `${stem} (${n})${end}`;
+    used.add(made);
+    return new win.File([blob], made, {type: blob.type || 'application/octet-stream'});
+  });
+  if (!nav.canShare({files: list})) throw Error('这个浏览器一次分享不了这么多，请用「打包下载」');
+  try { await nav.share({files: list}); }
+  catch (error) {
+    if (error?.name === 'AbortError') throw Error('已取消分享');
+    throw Error('分享没有打开（点得太久以前了？）再点一次试试');
+  }
+}
+
 /** A 下载 button for the image viewer: keeps the viewer open and reports how it went. */
 export function downloadAction(doc, pick, notify = () => {}) {
   return {label: '下载', run: async index => {

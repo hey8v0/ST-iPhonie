@@ -8,7 +8,7 @@
 //   st-iphonie-chats.json       chat threads          st-iphonie-moments.json   朋友圈 posts
 //   st-iphonie-notes.json       notes                 st-iphonie-photos.json    album index (no pictures)
 //   st-iphonie-memories.json    complete chat books   st-iphonie-assistant.json assistant threads with memory: book | null
-//   st-iphonie-forum.json, -peek, -music, -sounds, -paint, -ledger, -looks, -books, -vibes, -favorites, -references  the same way
+//   st-iphonie-forum.json, -peek, -music, -sounds, -paint, -ledger, -looks, -albums, -books, -vibes, -favorites, -references  the same way
 //   st-iphonie-p-<id>.<ext>     one file per picture, written once (a picture never changes); a photo made smaller by
 //                               压缩旧图 is another picture, st-iphonie-p-<id>-c<when>.<ext>, and wins over the original
 //   st-iphonie-m-, -s-, -v-, -f-, -r-<id>   a song, a sound, a vibe, a saved voice, a reference voice: one file each, like
@@ -24,7 +24,7 @@
 import {sha256Hex} from './hash.js';
 
 export const SYNC_FORMAT = 2;
-export const SYNC_PARTS = Object.freeze({chats: '聊天记录', moments: '朋友圈', notes: '备忘录', photos: '相册', memories: '聊天记忆', assistant: '助手会话与记忆', forum: '论坛', peek: '查手机', books: '绘本', vibes: 'Vibe', favorites: '收藏的语音', references: '参考音频', music: '音乐', sounds: '音效', paint: '画画的作品', ledger: '账本', looks: '我的主题'});
+export const SYNC_PARTS = Object.freeze({chats: '聊天记录', moments: '朋友圈', notes: '备忘录', photos: '相册', memories: '聊天记忆', assistant: '助手会话与记忆', forum: '论坛', peek: '查手机', books: '绘本', vibes: 'Vibe', favorites: '收藏的语音', references: '参考音频', music: '音乐', sounds: '音效', paint: '画画的作品', ledger: '账本', looks: '我的主题', albums: '相册的分类'});
 export const MANIFEST = 'st-iphonie-sync.json';
 export const partFile = part => `st-iphonie-${part}.json`;
 const EXT = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif'};
@@ -158,6 +158,8 @@ export function mergePart(part, local, remote, gone = {}) {
     else if (part === 'notes') out.push(newer(here, theirs, n => n.updatedAt));
     // a photo made smaller (压缩旧图) on one side is smaller on both; otherwise this side's copy is the same picture
     else if (part === 'photos') out.push(packedAt(theirs) > packedAt(here) ? theirs : here);
+    // A heart given on either side stays (the rare heart taken away on one side at the same time comes back: better than one lost).
+    else if (part === 'albums') { const base = newer(here, theirs, rowTime), other = base === here ? theirs : here; out.push({...base, photos: [...new Set([...(base.photos || []), ...(other.photos || [])])]}); }
     else if (part === 'forum' && here.kind === 'forum') out.push({...here, ...theirs, likes: Math.max(here.likes || 0, theirs.likes || 0), heat: Math.max(here.heat || 0, theirs.heat || 0), liked: here.liked || theirs.liked, replies: union(here.replies, theirs.replies).sort((a, b) => a.at - b.at)});
     else if (part in SYNC_PARTS) out.push(newer(here, theirs, rowTime));
     else out.push(here);

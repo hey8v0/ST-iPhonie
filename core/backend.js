@@ -23,6 +23,7 @@ import { normalizeSounds, soundRow, readPack, missingKey, soundName, packRows, P
 import { decodeMono, encodeWav } from './audio-join.js';
 import { BACKUP_PARTS, PART_STORES, ROW_PARTS, fieldsOf, writeBackup, readBackup, rowJSON, withBlobs, sealKeys, openKeys } from './backup.js';
 import { lookPictures, lookThumb } from './looks.js';
+import { DRAWN_SOURCES, FAVORITES, ALBUM_LIMITS, albumName, albumsInOrder } from './albums.js';
 import { paintStore } from './paint-store.js';
 import { Ledger } from './ledger.js';
 import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, SHOP_GIFTS, LEDGER_KINDS, premiumOf, decorKey, cents, yuan, shopGifts, normalizeGift, validateGift } from './wallet.js';
@@ -102,7 +103,7 @@ const firstCard = route => (Array.isArray(route.cards) ? route.cards.find(k => !
 const clone = value => structuredClone(value);
 // a 歌单 the user made was deleted meanwhile (in another tab, say)
 // Which documents of the apps' stores make up a part of a backup and of 保存到酒馆 (画画的作品 has a store of its own).
-const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], looks: ['look'], music: ['song', 'playlist', 'heard'], sounds: ['sound'] });
+const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], looks: ['look'], albums: ['album'], music: ['song', 'playlist', 'heard'], sounds: ['sound'] });
 // The tavern takes 500 MB a request, and a file goes as base64.
 const tooBigToSync = work => (work?.bytes || 0) > 300 * 1024 * 1024;
 const listGone = error => { throw error?.code === 'MISSING' ? Error('这个歌单已经删掉了') : error; };
@@ -121,15 +122,6 @@ const audioName = (role, said) => [String(role || '').trim(), String(said || '')
 
 // Where the phone drew an album photo, by the name it gave it: the drawing app (named after the engine), in-text
 // pictures, 查手机 and 朋友圈. Each name ends in the seed (or the time) and the file type.
-const DRAWN_SOURCES = [
-    ['draw', '绘图 App', /^(?:NovelAI|GPT ?生图|ComfyUI)-\d+\.(?:png|jpe?g|webp)$/],
-    ['chat', '正文图片', /^chat-\d+\.(?:png|jpe?g|webp)$/],
-    ['peek', '查手机', /^查手机-.+-\d+\.(?:png|jpe?g|webp)$/],
-    ['moments', '朋友圈', /^朋友圈-.+-\d+\.(?:png|jpe?g|webp)$/],
-    ['assistant', '助手生图', /^assistant-\d+\.(?:png|jpe?g|webp)$/],
-    ['chatapp', '聊天图片', /^聊天-.+-\d+\.(?:png|jpe?g|webp)$/],
-    ['book', '绘本插图', /^绘本-.+-\d+\.(?:png|jpe?g|webp)$/],
-];
 export class TTSBackend {
     // photoThumb jobs, one at a time: a grid asks for many at once and each decodes a whole photo.
     #thumbs = Promise.resolve();
@@ -242,7 +234,7 @@ export class TTSBackend {
     async partRows(part) {
         if (part === 'paint') return this.paintWorks.all();
         if (part === 'ledger') await this.ledger.flush();
-        if (part === 'ledger' || part === 'peek' || part === 'looks') return this.apps.listFrom(part + ':');
+        if (part === 'ledger' || part === 'peek' || part === 'looks' || part === 'albums') return this.apps.listFrom(part + ':');
         const kinds = PART_KINDS[part];
         return (await this.partStore(part).list()).filter(row => kinds.includes(row.kind));
     }
@@ -267,7 +259,7 @@ export class TTSBackend {
     /** Tells the app a part's rows changed under it. */
     partsChanged(part) {
         if (part === 'music') this.emit('music', { library: true, heard: true });
-        else if (part === 'forum' || part === 'peek' || part === 'sounds' || part === 'ledger' || part === 'paint' || part === 'looks') this.emit(part, {});
+        else if (part === 'forum' || part === 'peek' || part === 'sounds' || part === 'ledger' || part === 'paint' || part === 'looks' || part === 'albums') this.emit(part, {});
     }
     /** What the backup page shows of the parts that are not simply counted. */
     async backupCounts() {
@@ -312,6 +304,7 @@ export class TTSBackend {
         }
         const rows = {};
         for (const part of want) if (ROW_PARTS.includes(part)) rows[part] = await this.partRows(part);
+        if (want.includes('photos')) rows.albums = await this.partRows('albums');
         const blob = await writeBackup({ version, settings, library, chats, moments, keys, vibeGroups, memories, assistant, vnFiles, rows });
         const day = new Date(), pad = n => String(n).padStart(2, '0');
         return { blob, name: `ST-iPhonie 备份 ${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}` };
@@ -377,7 +370,7 @@ export class TTSBackend {
         if (want.has('memories') && backup.memories) done.memories = await this.importChatMemories(backup.memories, {replace, restoring: true});
         if (want.has('assistant') && backup.assistant) done.assistant = await this.importAssistantThreads(backup.assistant, {replace, restoring: true});
         for (const part of ROW_PARTS) {
-            if (!want.has(part) || !backup.rows[part]) continue;
+            if (!want.has(part === 'albums' ? 'photos' : part) || !backup.rows[part]) continue;
             done[part] = await this.putPartRows(part, backup.rows[part], { replace });
             this.reviveSync(part, backup.rows[part].map(row => String(row?.id)));
             this.partsChanged(part);
@@ -391,7 +384,7 @@ export class TTSBackend {
     emit(type, data = {}) {
         if (this.closed) return;
         const event = { type, revision: this.revision, ...clone(data) };
-        if (!this.syncApplying && (type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || type === 'looks' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
+        if (!this.syncApplying && (type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || type === 'looks' || type === 'albums' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
         for (const listener of this.listeners) { try { listener(clone(event)); } catch { /* One view cannot stop the other subscribers. */ } }
     }
     subscribe(listener) {
@@ -2399,6 +2392,76 @@ export class TTSBackend {
         return look?.kind === 'look' && look.blob ? lookPictures(look) : null;
     }
 
+    // ---------- 相册的分类 (core/albums.js) ----------
+    /** 收藏 and the 相簿 one made, in order: [{id, name, photos, at, order}]. */
+    async listAlbums() { this.assertOpen(); return albumsInOrder(await this.apps.listFrom('albums:')); }
+    async favoritePhotoIds() { this.assertOpen(); return (await this.apps.get(FAVORITES))?.photos || []; }
+    /** Gives these photos the heart, or takes it away. */
+    async favoritePhotos(ids, on = true) {
+        this.assertOpen();
+        const list = [...new Set((ids || []).map(String))], now = Date.now();
+        const edit = row => { const inside = new Set(row.photos); row.photos = on ? [...list.filter(id => !inside.has(id)), ...row.photos] : row.photos.filter(id => !list.includes(id)); row.updatedAt = now; };
+        await this.appsMutate('albums', () => this.apps.change(FAVORITES, edit).catch(async error => {
+            if (error?.code !== 'MISSING') throw error;
+            const row = { id: FAVORITES, kind: 'album', name: '收藏', at: now, updatedAt: now, photos: [] };
+            edit(row);
+            await this.apps.put([row]);
+        }));
+        return true;
+    }
+    /** Makes a 相簿 ({name}) or renames one ({id, name}). */
+    async saveAlbum({ id = '', name = '' } = {}) {
+        this.assertOpen();
+        const title = albumName(name), all = await this.listAlbums();
+        if (!title) throw Error('给相簿起个名字');
+        if (title === '收藏' || all.some(row => row.name === title && row.id !== id)) throw Error(`已经有叫「${title}」的相簿了`);
+        if (id === FAVORITES) throw Error('收藏不能改名');
+        if (id) return this.appsMutate('albums', () => this.apps.change(id, row => { row.name = title; row.updatedAt = Date.now(); }));
+        if (all.length > ALBUM_LIMITS.albums) throw Error(`最多建 ${ALBUM_LIMITS.albums} 个相簿`);
+        const now = Date.now(), row = { id: 'albums:' + now.toString(36) + Math.random().toString(36).slice(2, 8), kind: 'album', name: title, at: now, updatedAt: now, order: Math.max(0, ...all.map(a => a.order || 0)) + 1, photos: [] };
+        await this.appsMutate('albums', () => this.apps.put([row]));
+        return row;
+    }
+    /** A 相簿 goes; its photos stay in the album. */
+    async deleteAlbum(id) {
+        if (id === FAVORITES) throw Error('收藏不能删');
+        this.noteGone('albums', [id]);
+        await this.appsMutate('albums', () => this.apps.remove(id));
+        return true;
+    }
+    /** Puts photos into a 相簿, on top; {added: how many were not in it yet}. */
+    async addToAlbum(id, ids) {
+        this.assertOpen();
+        let added = 0;
+        await this.appsMutate('albums', () => this.apps.change(id, row => {
+            const inside = new Set(row.photos), fresh = [...new Set((ids || []).map(String))].filter(x => !inside.has(x));
+            added = fresh.length;
+            row.photos = [...fresh, ...row.photos];
+            row.updatedAt = Date.now();
+        }));
+        return { added };
+    }
+    /** Takes photos out of a 相簿 (they stay in the album). */
+    async removeFromAlbum(id, ids) {
+        this.assertOpen();
+        const gone = new Set((ids || []).map(String));
+        await this.appsMutate('albums', () => this.apps.change(id, row => { row.photos = row.photos.filter(x => !gone.has(x)); row.updatedAt = Date.now(); }));
+        return true;
+    }
+    /** The 相簿 one made, in this order (收藏 stays first). */
+    async arrangeAlbums(ids) {
+        this.assertOpen();
+        const rows = await this.listAlbums(), now = Date.now(), place = new Map((ids || []).map((id, i) => [String(id), i + 1]));
+        const moved = rows.filter(row => place.has(row.id) && row.id !== FAVORITES && row.order !== place.get(row.id)).map(row => ({ ...row, order: place.get(row.id), updatedAt: now }));
+        if (moved.length) await this.appsMutate('albums', () => this.apps.put(moved));
+        return true;
+    }
+    /** Photos deleted: no 相簿 lists them any more. */
+    async albumsForget(gone) {
+        const changed = (await this.apps.listFrom('albums:')).filter(row => (row.photos || []).some(id => gone.has(id))).map(row => ({ ...row, photos: row.photos.filter(id => !gone.has(id)), updatedAt: Date.now() }));
+        if (changed.length) await this.appsMutate('albums', () => this.apps.put(changed));
+    }
+
     // ---------- 论坛 ----------
     /** Runs a change to an app's documents and tells the phone ('forum' or 'peek'). */
     async appsMutate(type, task) {
@@ -2600,6 +2663,7 @@ export class TTSBackend {
         return { count, skipped, before, after };
     }
     async #forgetPhotos(gone) {
+        await this.albumsForget(gone);
         let posts = 0;
         for (const post of await this.moments.list()) {
             if (![post.photoId, ...(post.imageVersions || [])].some(id => gone.has(id))) continue;
@@ -2916,6 +2980,7 @@ export class TTSBackend {
             listNotes: () => this.library.listNotes(), saveNote: value => this.mutateLibrary('notes', 'saveNote', value), deleteNote: id => this.mutateLibrary('notes', 'deleteNote', id),
             listBooks: () => this.library.listBooks(), getBook: id => this.library.getBook(id), saveBook: value => this.mutateLibrary('books', 'saveBook', clone(value)), deleteBook: id => this.mutateLibrary('books', 'deleteBook', id),
             getPhone: () => this.getPhone(), savePhone: patch => this.savePhone(patch), libraryStats: () => this.library.stats(), storageBudget: () => this.budget.read(),
+            listAlbums: () => this.listAlbums(), favoritePhotoIds: () => this.favoritePhotoIds(), favoritePhotos: (ids, on) => this.favoritePhotos([...(ids || [])], on !== false), saveAlbum: value => this.saveAlbum(clone(value || {})), deleteAlbum: id => this.deleteAlbum(String(id)), addToAlbum: (id, ids) => this.addToAlbum(String(id), [...(ids || [])]), removeFromAlbum: (id, ids) => this.removeFromAlbum(String(id), [...(ids || [])]), arrangeAlbums: ids => this.arrangeAlbums([...(ids || [])]),
             listLooks: () => this.listLooks(), getLook: id => this.apps.get(String(id)), saveLook: look => this.saveLook(look), renameLook: (id, patch) => this.renameLook(String(id), clone(patch || {})), deleteLook: id => this.deleteLook(String(id)), lookFiles: id => this.lookFiles(String(id)),
             generatedPhotos: () => this.generatedPhotos().then(({ count, bytes, sources }) => ({ count, bytes, sources: Object.fromEntries(Object.entries(sources).map(([k, { ids, ...rest }]) => [k, rest])) })), deleteGeneratedPhotos: sources => this.deleteGeneratedPhotos(sources),
             saveMoments: patch => this.saveMoments(clone(patch)), saveCalls: patch => this.saveCalls(clone(patch)),
