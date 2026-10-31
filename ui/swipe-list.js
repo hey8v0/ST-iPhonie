@@ -22,7 +22,7 @@ const width = n => n * (BUTTON + GAP) + GAP;
 export function swipeRow(id, inner, actions = [], {className = '', label = ''} = {}) {
   const n = actions.length;
   return `<div class="sw-row${className ? ' ' + className : ''}" data-swipe="${esc(id)}" style="--sw-w:${width(n)}px">`
-    + `<div class="sw-actions">${actions.map((a, i) => `<button type="button" class="sw-act${a.danger ? ' danger' : ''}" data-sw-act="${esc(a.key)}" style="--i:${n - 1 - i}" tabindex="-1" aria-label="${esc(a.label)}${label ? ' ' + esc(label) : ''}">${icon(a.icon || 'star')}<span>${esc(a.label)}</span></button>`).join('')}</div>`
+    + `<div class="sw-actions">${actions.map((a, i) => `<button type="button" class="sw-act${a.danger ? ' sw-danger' : ''}" data-sw-act="${esc(a.key)}" style="--i:${n - 1 - i}" tabindex="-1" aria-label="${esc(a.label)}${label ? ' ' + esc(label) : ''}">${icon(a.icon || 'star')}<span>${esc(a.label)}</span></button>`).join('')}</div>`
     + `<div class="sw-main"><span class="sw-check" aria-hidden="true">${icon('check')}</span><div class="sw-body">${inner}</div>`
     + (n ? `<button type="button" class="sw-more" data-sw-more aria-label="更多操作${label ? ' ' + esc(label) : ''}" aria-expanded="false">⋯</button>` : '') + `</div></div>`;
 }
@@ -62,7 +62,7 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
   const bar = doc.createElement('div');
   bar.className = 'sw-bar' + (bulk.length > 2 ? ' many' : ''); bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', '多选'); bar.hidden = true;
   bar.innerHTML = `<button type="button" class="sw-bar-all" data-sw-bulk="all">全选</button><span class="sw-count" aria-live="polite"></span><span class="sw-bar-gap"></span>`
-    + bulk.map(b => `<button type="button" class="sw-bar-act${b.danger ? ' danger' : ''}" data-sw-bulk="${esc(b.key)}" aria-label="${esc(b.label)}">${icon(b.icon || 'star')}<span>${esc(b.label)}</span></button>`).join('')
+    + bulk.map(b => `<button type="button" class="sw-bar-act${b.danger ? ' sw-danger' : ''}" data-sw-bulk="${esc(b.key)}" aria-label="${esc(b.label)}">${icon(b.icon || 'star')}<span>${esc(b.label)}</span></button>`).join('')
     + `<button type="button" class="sw-bar-done" data-sw-bulk="done">完成</button>`;
   list.after(bar);
   // The hint for the way this device is used: swiping on a touch screen, ⋯ and Ctrl with a mouse.

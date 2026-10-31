@@ -59,7 +59,7 @@
    ===================================================================== */
 :root[data-skin=fresh]{
   color-scheme:light;
-  --page:#eceee4;--bg:#f7f5ee;--card:#fffdf8;--card2:#f2f0e7;--ink:#3b4740;--ink2:#7b857d;--line:#e3e0d4;
+  --page:#eceee4;--bg:#f7f5ee;--card:#fffdf8;--card2:#f2f0e7;--ink:#3b4740;--ink2:#6a756c;--line:#e3e0d4;
   --accent:#8fb09a;--accent-ink:#4c7660;--accent-soft:#e2ece2;--accent-btn:#6d977f;--on-accent:#fff;
   --pink:#dfa39b;--dot:#dcd8c8;--shadow:0 10px 22px -16px rgba(70,80,60,.5);
   --danger:#bb5a52;--danger-soft:#f7e4e0;

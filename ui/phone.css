@@ -66,6 +66,7 @@ h1,h2,h3,p{margin:0}
 a{color:var(--accent-ink)}
 .mono{font-family:"JetBrains Mono","Cascadia Mono",ui-monospace,Consolas,monospace}
 .muted,small{color:var(--ink2)}
+button[aria-pressed=true] small,.primary small{color:inherit;opacity:.85}
 .startup{padding:32px;white-space:pre-wrap;background:var(--bg)}
 
 /* ---------- Stage and device ---------- */
@@ -436,7 +437,7 @@ details>div{padding-bottom:10px}
 .engine-tab[aria-pressed=true]{background:var(--e-btn);color:var(--e-on);box-shadow:0 4px 0 color-mix(in srgb,var(--e-btn) 65%,#000)}
 .engine-tab[aria-pressed=true] small{color:var(--e-on);opacity:.85}
 .voice-row{display:flex;align-items:center;gap:12px;padding:12px 0 4px}
-.disc{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;background:var(--e-soft);color:var(--e)}
+.disc{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;background:var(--e-soft);color:var(--e-ink)}
 .voice-row>div{flex:1;min-width:0}
 .voice-row strong{display:block;font-size:16px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .voice-row small{display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -599,7 +600,7 @@ details>div{padding-bottom:10px}
 .play-caption{position:relative;font-size:18px;font-weight:700;line-height:1.75;min-height:60px;white-space:pre-wrap;overflow-wrap:anywhere}
 .dialogue-foot{position:relative;display:flex;align-items:center;justify-content:space-between;margin-top:4px;font-size:12px;color:var(--ink2)}
 .dialogue-foot svg{width:14px;height:14px;color:var(--e)}
-.reply-picker-toggle{flex:none;display:grid;place-items:center;width:36px;height:36px;margin:-8px -8px -8px 8px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--e);cursor:pointer}
+.reply-picker-toggle{flex:none;display:grid;place-items:center;width:36px;height:36px;margin:-8px -8px -8px 8px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--e-ink);cursor:pointer}
 .reply-picker-toggle:hover,.reply-picker-toggle:focus-visible{background:var(--e-soft)}
 .reply-picker-toggle svg{transition:transform .18s ease}
 .reply-picker-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
@@ -996,6 +997,7 @@ html[data-keyboard=true] *{animation:none!important;transition:none!important}
 .check-row small{display:block;margin-top:2px;font-size:12.5px;line-height:1.45;color:var(--ink2);white-space:pre-wrap;overflow-wrap:anywhere}
 .check-mark{flex:none;width:20px;height:20px;margin-top:1px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--accent-soft);color:var(--accent-ink)}
 .check-row[data-level=warn] .check-mark{background:color-mix(in srgb,#e0a030 24%,transparent);color:#b07412}
+:root[data-theme=dark] .check-row[data-level=warn] .check-mark{color:#f0b95a}
 .check-row[data-level=error] .check-mark{background:var(--danger-soft);color:var(--danger)}
 .check-row[data-level=info] .check-mark{background:transparent;color:var(--ink2)}
 .report-text{margin:10px 0}
@@ -1850,13 +1852,13 @@ button.gift-item[data-short]{opacity:.55}
 .select-bar>span{flex:1;font-size:13px;font-weight:700;color:var(--ink2)}
 
 /* 自动挑音色: the mark on a card, and the note in the editor. */
-.auto-chip{display:inline-block;margin-top:4px;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--accent-btn) 18%,transparent);color:var(--accent-btn);font-size:10.5px;font-weight:800}
+.auto-chip{display:inline-block;margin-top:4px;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--accent-btn) 18%,transparent);color:var(--accent-ink);font-size:10.5px;font-weight:800}
 .auto-banner{align-items:center}
 .auto-banner>span{flex:1}
 
 /* A contact's photo drawn from its words: drawing, or a button to draw it. */
 .ph-note{display:block;margin-top:4px;font-size:11.5px;font-weight:700;color:var(--ink2)}
-.ph-draw{all:unset;cursor:pointer;display:inline-block;margin-top:5px;padding:3px 10px;border-radius:999px;background:color-mix(in srgb,var(--accent-btn) 16%,transparent);color:var(--accent-btn);font-size:11.5px;font-weight:800}
+.ph-draw{all:unset;cursor:pointer;display:inline-block;margin-top:5px;padding:3px 10px;border-radius:999px;background:color-mix(in srgb,var(--accent-btn) 16%,transparent);color:var(--accent-ink);font-size:11.5px;font-weight:800}
 
 /* 音效 App: the ambience playing, 缺的声音, and each name's versions. */
 .list-row.static{cursor:default}
@@ -2627,10 +2629,10 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .vn-look strong{font-size:13px}
 .vn-look small{font-size:11px;color:var(--ink2)}
 .vn-look-pic{position:relative}
-.vn-look-n{position:absolute;right:4px;bottom:4px;padding:1px 6px;border-radius:999px;background:var(--accent);color:var(--on-accent);font-size:10px;font-weight:700;line-height:1.6;font-style:normal;white-space:nowrap}
+.vn-look-n{position:absolute;right:4px;bottom:4px;padding:1px 6px;border-radius:999px;background:var(--accent-btn);color:var(--on-accent);font-size:10px;font-weight:700;line-height:1.6;font-style:normal;white-space:nowrap}
 .vn-outfits{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
 .vn-outfit{display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:13px;cursor:pointer}
-.vn-outfit[aria-pressed=true]{background:var(--accent);border-color:transparent;color:var(--on-accent)}
+.vn-outfit[aria-pressed=true]{background:var(--accent-btn);border-color:transparent;color:var(--on-accent)}
 .vn-outfit i{font-style:normal;font-size:10px;padding:0 5px;border-radius:999px;background:color-mix(in srgb,currentColor 16%,transparent)}
 .vn-outfit.add{border-style:dashed;color:var(--ink2)}
 .vn-outfit .icon{width:14px;height:14px}
@@ -2669,8 +2671,9 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
   transform:translateX(calc((1 - min(var(--sw-p),1)) * (16px + var(--i) * 16px))) scale(calc(.55 + .45 * min(var(--sw-p),1)));
   transition:transform .46s cubic-bezier(.2,1.35,.3,1) calc(var(--i) * 35ms),opacity .24s,background .15s,filter .15s}
 .sw-act svg{width:20px;height:20px}
-/* Text on --danger: white on the day themes; on night themes (a light --danger) their dark --danger-soft (--on-danger). */
-.sw-act.danger{color:var(--on-danger,#fff);background:var(--danger)}
+/* Text on --danger: white on the day themes; on night themes (a light --danger) their dark --danger-soft (--on-danger).
+   Not the class .danger: that is the outlined button, which the skins restyle (a clear background, white text on it). */
+.sw-act.sw-danger{color:var(--on-danger,#fff);background:var(--danger)}
 .sw-act:hover{filter:brightness(1.05)}
 .sw-act:active{filter:brightness(.92)}
 .sw-act:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -2698,7 +2701,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .sw-bar button:active{transform:scale(.95)}
 .sw-bar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .sw-bar .sw-bar-act{background:var(--accent-soft);color:var(--accent-ink)}
-.sw-bar .sw-bar-act.danger{background:var(--danger);color:var(--on-danger,#fff)}
+.sw-bar .sw-bar-act.sw-danger{background:var(--danger);color:var(--on-danger,#fff)}
 .sw-bar .sw-bar-done{background:var(--accent-btn);color:var(--on-accent)}
 .sw-bar button:disabled{opacity:.4;cursor:default}
 .sw-bar svg{width:17px;height:17px}
@@ -2835,7 +2838,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .vn-model-stage .hint{color:#d8d4ee;padding:0 18px;text-align:center}
 .vn-model-feel{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
 .vn-model-feel .chip-button{min-height:32px;padding:0 12px;border:0;cursor:pointer}
-.vn-model-feel .chip-button[aria-pressed=true]{background:var(--accent);color:var(--on-accent)}
+.vn-model-feel .chip-button[aria-pressed=true]{background:var(--accent-btn);color:var(--on-accent)}
 .vn-model-slider{display:grid;grid-template-columns:3em 1fr;align-items:center;gap:10px;margin:0 0 8px;font-size:13px;color:var(--ink2)}
 .vn-model-map{display:grid;gap:8px;margin:0 0 6px}
 .vn-model-map-row{display:grid;grid-template-columns:2.6em minmax(0,1fr) minmax(0,1fr);align-items:center;gap:6px;font-size:13px}
