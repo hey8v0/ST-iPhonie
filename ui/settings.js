@@ -82,8 +82,9 @@ export function settingsApp(ctx) {
       if (b.dataset.action === 'nar-role') { d.close(); ctx.openPendingRole(NARRATOR); }
     });
   }
-  let appearance = null, check = null, backup = null, restore = null, storage = false, epoch = 0, editingTheme = null;
+  let appearance = null, check = null, backup = null, restore = null, storage = false, epoch = 0, subPage = null;
   const themes = themeEditor({ctx, v});
+  let looks = null;
   const glyphName = key => APPS[key]?.name || GLYPH_NAMES[key] || key;
 
   // The self-check page: what core/diagnostics.js found, grouped, with the plain report to copy, save or send.
@@ -104,7 +105,7 @@ export function settingsApp(ctx) {
     if (v.disposed || ticket !== epoch) return;
     const s = api.getState(), n = (value, unit) => value === null || value === undefined ? '读不到' : `${value} ${unit}`;
     const big = bytes => bytes ? ` · 约 ${size(bytes)}` : '';
-    const rowCounts = more ? {forum: `${more.forum} 个帖子`, peek: `${more.peek} 部手机`, music: `${more.playlists} 个歌单 · ${more.songs} 首本机的歌${big(more.musicBytes)}`, sounds: `${more.sounds} 个声音${big(more.soundBytes)}`, paint: `${more.works} 幅${big(more.workBytes)}`, ledger: `${more.ledger} 天的用量`} : {forum: '读不到', peek: '读不到', music: '读不到', sounds: '读不到', paint: '读不到', ledger: '读不到'};
+    const rowCounts = more ? {forum: `${more.forum} 个帖子`, peek: `${more.peek} 部手机`, music: `${more.playlists} 个歌单 · ${more.songs} 首本机的歌${big(more.musicBytes)}`, sounds: `${more.sounds} 个声音${big(more.soundBytes)}`, paint: `${more.works} 幅${big(more.workBytes)}`, ledger: `${more.ledger} 天的用量`, looks: `${more.looks} 个${big(more.lookBytes)}`} : {forum: '读不到', peek: '读不到', music: '读不到', sounds: '读不到', paint: '读不到', ledger: '读不到', looks: '读不到'};
     const counts = {...rowCounts, settings: `${s.routes.length} 个角色 · ${s.presets.length} 个配音预设`, vnFiles: vnFileCount(s), chats: n(threads?.length, '段'), memories: '各段聊天的摘要、阶段总结和长期总览', assistant: n(assistant?.length, '段会话'), moments: n(moments?.length, '条'), notes: n(library?.notes, '条'), photos: n(library?.photos, '张'), favorites: n(library?.favorites, '段'), vibes: library ? `${library.vibes} 个 · ${s.draw.vibe.groups.length} 组` : '读不到', books: n(library?.books, '本'), keys: savedKeys() ? `这台浏览器里的 ${savedKeys()} 个密钥` : '这台浏览器里还没有密钥'};
     v.draw(heading('备份', help('备份是一个 .json 文件，可以存在电脑、手机或网盘里。相册、本机的歌和画画的作品都在文件里，可能很大：每项下面写了大约多大，不要的可以关掉。\n视觉小说的立绘和模型存在酒馆里，设置只记着它们在哪；勾上「视觉小说的立绘和模型」才会把图片和模型文件一起放进备份，换个酒馆或者后来删了也能恢复。\n聊天记录和聊天记忆可以分别选择；助手会话连同各自的记忆一起保存。助手已发送的图片和文字附件随会话保存，生成的图片需同时勾选「相册」。向量检索缓存不备份，恢复后需要时重建。\n密钥默认不放进去；打开「密钥」后会用你设的密码加密，恢复时输入同一个密码才能取出来，没有密码的人拿到文件也看不到密钥。\n语音缓存不备份，需要时会重新生成。相册、收藏和 Vibe 多的话，文件会比较大。'), 'Backup')
       + `<div class="group">${Object.entries(api.backupParts()).map(([key, label]) => key === 'keys' && !savedKeys() ? `<div class="setting-row"><span class="row-text"><strong>${esc(label)}</strong><small>这台浏览器里还没有密钥</small></span></div>` : partRow(key, label, counts[key], backup.parts.has(key))).join('')}</div>`
@@ -124,7 +125,7 @@ export function settingsApp(ctx) {
   // Restore: what the chosen file holds, which parts to take, and whether to merge or replace.
   function renderRestore() {
     const {info, parts, replace} = restore, sum = info.summary, labels = api.backupParts();
-    const counts = {forum: sum.forum != null && `${sum.forum} 项`, peek: sum.peek != null && `${sum.peek} 部手机`, music: sum.music != null && `${sum.music} 项`, sounds: sum.sounds != null && `${sum.sounds} 个声音`, paint: sum.paint != null && `${sum.paint} 幅`, ledger: sum.ledger != null && `${sum.ledger} 项`, settings: sum.settings && `${sum.settings.roles} 个角色 · ${sum.settings.presets} 个配音预设`, vnFiles: sum.vnFiles != null && `${sum.vnFiles} 个文件（酒馆里缺的才放回去）`, chats: sum.chats !== null && `${sum.chats} 段`, memories: sum.memories != null && `${sum.memories} 份记忆`, assistant: sum.assistant != null && `${sum.assistant} 段会话`, moments: sum.moments != null && `${sum.moments} 条`, notes: sum.notes !== null && `${sum.notes} 条`, photos: sum.photos !== null && `${sum.photos} 张`, favorites: sum.favorites !== null && `${sum.favorites} 段`, vibes: sum.vibes != null && `${sum.vibes.vibes} 个 · ${sum.vibes.groups} 组`, books: sum.books != null && `${sum.books} 本`, keys: sum.keys != null && `${sum.keys} 个密钥（要输入备份时的密码）`};
+    const counts = {forum: sum.forum != null && `${sum.forum} 项`, peek: sum.peek != null && `${sum.peek} 部手机`, music: sum.music != null && `${sum.music} 项`, sounds: sum.sounds != null && `${sum.sounds} 个声音`, paint: sum.paint != null && `${sum.paint} 幅`, ledger: sum.ledger != null && `${sum.ledger} 项`, looks: sum.looks != null && `${sum.looks} 个主题`, settings: sum.settings && `${sum.settings.roles} 个角色 · ${sum.settings.presets} 个配音预设`, vnFiles: sum.vnFiles != null && `${sum.vnFiles} 个文件（酒馆里缺的才放回去）`, chats: sum.chats !== null && `${sum.chats} 段`, memories: sum.memories != null && `${sum.memories} 份记忆`, assistant: sum.assistant != null && `${sum.assistant} 段会话`, moments: sum.moments != null && `${sum.moments} 条`, notes: sum.notes !== null && `${sum.notes} 条`, photos: sum.photos !== null && `${sum.photos} 张`, favorites: sum.favorites !== null && `${sum.favorites} 段`, vibes: sum.vibes != null && `${sum.vibes.vibes} 个 · ${sum.vibes.groups} 组`, books: sum.books != null && `${sum.books} 本`, keys: sum.keys != null && `${sum.keys} 个密钥（要输入备份时的密码）`};
     const when = info.createdAt ? new Date(info.createdAt).toLocaleString('zh-CN', {hour12: false}) : '未知';
     v.draw(heading('恢复', '', 'Restore')
       + `<div class="group pad"><p class="help-copy">备份时间：${esc(when)}${info.version ? ` · 插件 ${esc(info.version)}` : ''}</p></div>`
@@ -137,7 +138,7 @@ export function settingsApp(ctx) {
       + `<div class="actions">${btn('do-restore', icon('refresh') + '开始恢复', 'primary', parts.size ? '' : 'disabled')}</div>`);
   }
   const partRow = (key, label, detail, on) => `<div class="setting-row"><span class="row-text"><strong>${esc(label)}</strong><small>${esc(detail)}</small></span><input class="switch" type="checkbox" data-part="${key}" aria-label="${esc(label)}" ${on ? 'checked' : ''}></div>`;
-  const restored = done => [done.keys && `${done.keys} 个密钥`, done.settings && '设置和预设', done.vnFiles && `${done.vnFiles} 个立绘和模型文件`, done.forum && `${done.forum} 项论坛内容`, done.peek && `${done.peek} 部查手机`, done.music && `${done.music} 项音乐`, done.sounds && `${done.sounds} 个声音`, done.paint && `${done.paint} 幅画`, done.ledger && '账本', done.chats && `${done.chats} 段聊天`, done.memories && `${done.memories} 份聊天记忆`, done.assistant && `${done.assistant} 段助手会话`, done.moments && `${done.moments} 条朋友圈`, done.notes && `${done.notes} 条备忘录`, done.photos && `${done.photos} 张照片`, done.favorites && `${done.favorites} 段收藏`, done.vibes && `${done.vibes} 个 Vibe`, done.books && `${done.books} 本绘本`].filter(Boolean).join('、');
+  const restored = done => [done.keys && `${done.keys} 个密钥`, done.settings && '设置和预设', done.vnFiles && `${done.vnFiles} 个立绘和模型文件`, done.forum && `${done.forum} 项论坛内容`, done.peek && `${done.peek} 部查手机`, done.music && `${done.music} 项音乐`, done.sounds && `${done.sounds} 个声音`, done.paint && `${done.paint} 幅画`, done.ledger && '账本', done.looks && `${done.looks} 个主题`, done.chats && `${done.chats} 段聊天`, done.memories && `${done.memories} 份聊天记忆`, done.assistant && `${done.assistant} 段助手会话`, done.moments && `${done.moments} 条朋友圈`, done.notes && `${done.notes} 条备忘录`, done.photos && `${done.photos} 张照片`, done.favorites && `${done.favorites} 段收藏`, done.vibes && `${done.vibes} 个 Vibe`, done.books && `${done.books} 本绘本`].filter(Boolean).join('、');
 
   /** 保存到酒馆: the switch, and when it is on, when it last synced and what the tavern holds. */
   function syncRows() {
@@ -149,7 +150,7 @@ export function settingsApp(ctx) {
       : st.error ? '同步失败：' + st.error
       : st.lastAt ? '上次同步 ' + time(st.lastAt) : st.pending ? '有改动，马上同步' : '还没同步过';
     const remote = st.remote?.savedAt ? `酒馆里的是${st.remote.deviceName ? ' ' + st.remote.deviceName + ' ' : ''}在 ${time(st.remote.savedAt)} 存的` : '';
-    return toggle('syncEnabled', '保存到酒馆', st.enabled, '聊天和记忆、助手、朋友圈、论坛、查手机、备忘录、相册、绘本、Vibe、收藏的语音、音乐、音效、画画的作品和账本存进酒馆里你账号的文件夹（data/你的用户名/user/files）。换一台设备、换个浏览器打开酒馆，小手机里的东西都还在；清了浏览器数据也不会丢。有改动几秒后自动保存，打开小手机时自动读取别的设备的新内容。两台设备都改了同一段聊天或同一条朋友圈时，会合并成一份（消息和评论都保留）；只有一边改过就直接用那一边的。助手已发送的附件随会话保存，生成的图片保存在相册。密钥不会存进去；语音缓存、收藏的语音和向量检索缓存也不存，需要时重新生成。\n\n想删掉酒馆里存的那份：存储空间 → 酒馆里存的那份。')
+    return toggle('syncEnabled', '保存到酒馆', st.enabled, '聊天和记忆、助手、朋友圈、论坛、查手机、备忘录、相册、绘本、Vibe、收藏的语音、音乐、音效、画画的作品、账本和我的主题存进酒馆里你账号的文件夹（data/你的用户名/user/files）。换一台设备、换个浏览器打开酒馆，小手机里的东西都还在；清了浏览器数据也不会丢。有改动几秒后自动保存，打开小手机时自动读取别的设备的新内容。两台设备都改了同一段聊天或同一条朋友圈时，会合并成一份（消息和评论都保留）；只有一边改过就直接用那一边的。助手已发送的附件随会话保存，生成的图片保存在相册。密钥不会存进去；语音缓存、收藏的语音和向量检索缓存也不存，需要时重新生成。\n\n想删掉酒馆里存的那份：存储空间 → 酒馆里存的那份。')
       + (st.enabled ? `<div class="setting-row"><span class="row-text"><strong data-sync-state>${esc(state)}</strong>${remote ? `<small>${esc(remote)}</small>` : ''}</span>${btn('sync-now', icon('refresh') + '立即同步', 'chip-button', st.busy || !st.available ? 'disabled' : '')}</div>` : '');
   }
   async function clearTavernCopy() {
@@ -160,13 +161,14 @@ export function settingsApp(ctx) {
    * 本地资料: one row with what this device holds in all (voice cache included); opened, each kind with its count
    * and size, and the in-text pictures of this chat, which are kept in the tavern.
    */
-  function storageFold(cache, library, drawn, chatPictures, budget) {
+  function storageFold(cache, library, drawn, chatPictures, budget, kept) {
     const row = (label, note, amount, extra = '') => `<div class="setting-row"><span class="row-text"><strong>${label}</strong>${note ? `<small>${note}</small>` : ''}</span><small class="part-size">${amount}</small>${extra}</div>`;
     const parts = [
       cache.available && cache.count ? row('语音缓存', `${cache.count} 段`, size(cache.bytes)) : '',
       ...(library ? [['photos', '相册', '张'], ['favorites', '语音收藏', '段'], ['references', '参考音频', '段'], ['vibes', 'Vibe 参考图', '张'], ['notes', '备忘录', '条']].filter(([k]) => library[k])
         .map(([k, label, unit]) => row(label, `${library[k]} ${unit}${k === 'photos' && drawn?.count ? `，画出来的 ${drawn.count} 张` : ''}`, size(library.sizes?.[k] || 0),
           k === 'vibes' && (library.sizes?.vibes || 0) > 300 * 1024 * library.vibes ? btn('vibes-compact', '压缩原图', 'chip-button') : '')) : []),
+      kept?.length ? row('我的主题', `${kept.length} 个`, size(kept.reduce((n, look) => n + (look.size || 0), 0))) : '',
       chatPictures?.count ? row('当前聊天的正文图片', `${chatPictures.count} 张`, '存在酒馆') : '',
       // How much there is: a share of what this browser gives the site, so a computer keeps more than a phone.
       library ? row('最多能存', `只是上限，不会先占着：手机里实际只用上面这些。相册和收藏这些最多 ${size(library.limit)}，语音缓存最多 ${size(cache.limit || 0)}（满了先清最早的）${budget?.quota ? `；按浏览器给小手机所在网站的 ${size(budget.quota)} 算的` : ''}${budget?.persisted ? '，已设为长期保存' : ''}。`, '') : ''
@@ -259,7 +261,7 @@ export function settingsApp(ctx) {
       catch (error) { go.disabled = false; ctx.notify(error.message, {error: true}); }
     });
   }
-  v.onSync = () => { if (!appearance && !check && !backup && !restore && !editingTheme) render().catch(() => {}); };
+  v.onSync = () => { if (subPage) subPage.synced?.(); else if (!appearance && !check && !backup && !restore) render().catch(() => {}); };
 
   async function runCheck() {
     check = {loading: true};
@@ -276,9 +278,10 @@ export function settingsApp(ctx) {
       + `<div class="group pad"><div class="wallpaper-options">${Object.entries(choices).map(([key, w]) => `<button class="wallpaper-choice" data-action="wallpaper" data-key="${key}" aria-pressed="${d.wallpaper.kind === 'builtin' && d.wallpaper.key === key}"><span style="--p:${w.background};--ps:${w.size || 'auto'};--pp:${w.pos || 'center'}"></span>${w.name}</button>`).join('')}</div>
         <label class="secondary file-button">${icon('image')}选择本地图片作壁纸<input type="file" data-personal-file="wallpaper" aria-label="选择本地壁纸" accept="${IMAGE_TYPES}"></label>
         ${d.wallpaper.kind === 'photo' ? `<p class="hint">现在用的是自己的照片。</p><div class="actions">${btn('photo-off', '换回主题壁纸', 'secondary')}${btn('photo-delete', icon('trash') + '删除这张照片', 'danger')}</div>` : ''}
+        ${d.wallpaper.kind === 'look' ? `<p class="hint">现在用的是「我的主题」里的壁纸。</p><div class="actions">${btn('photo-off', '换回主题壁纸', 'secondary')}</div>` : ''}
         ${field('图标外观', select('iconStyle', d.iconStyle, [['color', '彩色'], ['glass', '玻璃'], ['mono', '单色']]))}${d.iconStyle === 'mono' ? monoTools(d) : ''}</div>`
       + groupTitle('应用图标')
-      + `<div class="group">${Object.entries(APPS).map(([app, meta]) => `<div class="icon-settings-row"><strong>${meta.name}</strong>${select('glyph', d.icons[app]?.kind === 'glyph' ? d.icons[app].key : 'default', api.phoneCatalog.glyphs.map(key => [key, glyphName(key)]), `data-icon-app="${app}"`).replace('aria-label="glyph"', `aria-label="${meta.name}图标"`)}<label class="chip-button file-button">${d.icons[app]?.kind === 'photo' ? '换图' : '用图片'}<input type="file" data-personal-file="icon" data-app="${app}" aria-label="${meta.name}图标图片" accept="${IMAGE_TYPES}"></label></div>`).join('')}</div>`
+      + `<div class="group">${Object.entries(APPS).map(([app, meta]) => `<div class="icon-settings-row"><strong>${meta.name}</strong>${select('glyph', d.icons[app]?.kind === 'glyph' ? d.icons[app].key : 'default', api.phoneCatalog.glyphs.map(key => [key, glyphName(key)]), `data-icon-app="${app}"`).replace('aria-label="glyph"', `aria-label="${meta.name}图标"`)}<label class="chip-button file-button">${d.icons[app]?.kind === 'photo' || d.icons[app]?.kind === 'look' ? '换图' : '用图片'}<input type="file" data-personal-file="icon" data-app="${app}" aria-label="${meta.name}图标图片" accept="${IMAGE_TYPES}"></label></div>`).join('')}</div>`
       + `<div class="savebar">${btn('cancel-appearance', '取消', 'secondary')}${btn('save-appearance', '应用', 'primary')}</div>`);
   }
 
@@ -292,13 +295,13 @@ export function settingsApp(ctx) {
   }
   /** 存储空间: the voice cache switch, what this device holds, the clearing, and the copy in the tavern. */
   async function renderStorage(ticket) {
-    const [cache, library, drawn, budget, pack] = await Promise.all([api.cacheStats(), api.libraryStats().catch(() => null), api.generatedPhotos().catch(() => null), api.storageBudget().catch(() => null), api.packablePhotos?.(0).catch(() => null)]);
+    const [cache, library, drawn, budget, pack, kept] = await Promise.all([api.cacheStats(), api.libraryStats().catch(() => null), api.generatedPhotos().catch(() => null), api.storageBudget().catch(() => null), api.packablePhotos?.(0).catch(() => null), api.listLooks?.().catch(() => null)]);
     const chatPictures = api.chatPictureStats?.() || null, st = api.syncStatus?.();
     if (v.disposed || ticket !== epoch) return;
     const s = api.getState();
     v.draw(heading('存储空间', '', 'Storage')
       + `<div class="group">${toggle('cacheEnabled', '保存语音缓存', s.general.cacheEnabled, '已生成的音频用于重播。清缓存不会删除收藏、相册、备忘录或参考音频。')}
-          ${storageFold(cache, library, drawn, chatPictures, budget)}</div>`
+          ${storageFold(cache, library, drawn, chatPictures, budget, kept)}</div>`
       + groupTitle('清理')
       + `<div class="group">
           <div class="setting-row"><span class="row-text"><strong>语音缓存</strong><small>收藏和其他资料会保留</small></span>${btn('clear-cache', icon('trash') + '清理', 'chip-button')}</div>
@@ -311,7 +314,7 @@ export function settingsApp(ctx) {
 
   async function render() {
     const ticket = ++epoch;
-    if (editingTheme) { editingTheme.render(); return; }
+    if (subPage) { subPage.render(); return; }
     if (appearance) { renderAppearance(); return; }
     if (check) { renderCheck(); return; }
     if (backup) { await renderBackup(ticket); return; }
@@ -320,7 +323,7 @@ export function settingsApp(ctx) {
     const [phone, cache, library] = await Promise.all([api.getPhone(), api.cacheStats(), api.libraryStats().catch(() => null)]);
     if (v.disposed || ticket !== epoch) return;
     const s = api.getState(), space = api.phoneSpace?.() || {};
-    const wallName = phone.wallpaper.kind === 'builtin' ? (phone.wallpaper.key === 'custom' ? '主题色' : wallpapers[phone.wallpaper.key]?.name) : '自己的照片';
+    const wallName = phone.wallpaper.kind === 'builtin' ? (phone.wallpaper.key === 'custom' ? '主题色' : wallpapers[phone.wallpaper.key]?.name) : phone.wallpaper.kind === 'look' ? '主题的壁纸' : '自己的照片';
     const mine = phone.skin === 'custom' ? cleanTheme(phone.customTheme) : null, skinLook = key => key === 'custom' && phone.customTheme ? [phone.customTheme.day['accent-soft'], phone.customTheme.day.card, phone.customTheme.day['accent-btn'], phone.customTheme.pink] : skins[key].preview;
     const used = library ? size(library.bytes + (cache.available ? cache.bytes : 0)) : '';
     v.draw(heading('设置', '', 'Settings')
@@ -330,6 +333,7 @@ export function settingsApp(ctx) {
           ${mine ? `<button class="list-row theme-edit-row" data-action="edit-theme"><span><strong>改配色</strong><small>${esc(mine.name || '我的配色')}</small></span><span class="theme-dots" aria-hidden="true">${[mine.day['accent-btn'], mine.pink, mine.day['accent-soft']].map(c => `<i style="background:${c}"></i>`).join('')}</span>${icon('next')}</button>` : ''}
           <div class="field"><span>日夜</span><div class="segmented" style="margin:0">${[['system', '跟随系统'], ['light', '日间'], ['dark', '夜间']].map(([key, label]) => `<button data-action="theme" data-value="${key}" aria-pressed="${phone.theme === key}">${label}</button>`).join('')}</div></div>
           <button class="list-row" data-action="appearance"><span><strong>壁纸与图标</strong><small>${wallName} · ${({color: '彩色', glass: '玻璃', mono: '单色'})[phone.iconStyle]}图标</small></span>${icon('next')}</button>
+          <button class="list-row" data-action="looks"><span><strong>我的主题</strong><small>配色、壁纸和图标存成一套，能发给别人</small></span>${icon('next')}</button>
           ${toggle('wallpaperMotion', '动态壁纸', s.general.wallpaperMotion !== false, '内置壁纸会慢慢动起来：晴空飘云、夜里星星闪烁和流星、水感晴空的泡泡和夜里的极光、青草信笺的落叶和夜里的萤火虫、樱色的花瓣。用自己的照片当壁纸时不动；系统开启「减少动态效果」时也保持静止。控制中心里也能开关。')}
           ${toggle('lockOnOpen', '打开时显示锁屏', phone.lockOnOpen, '锁屏可随时跳过，是插件内的外观，不是手机安全锁。想看一眼锁屏，点控制中心里的「锁屏」。')}
         </div>`
@@ -365,8 +369,8 @@ export function settingsApp(ctx) {
           <button class="list-row" data-action="about"><span><strong>关于 ST-iPhonie</strong></span>${icon('next')}</button></div>`);
   }
 
-  v.back = () => { if (!appearance && !check && !backup && !restore && !storage && !editingTheme) return false; editingTheme?.leave(); editingTheme = null; appearance = check = backup = restore = null; storage = false; render().catch(e => ctx.notify(e.message)); return true; };
-  v.refresh = () => { if (!appearance && !editingTheme) return render(); };
+  v.back = () => { if (!appearance && !check && !backup && !restore && !storage && !subPage) return false; subPage?.leave(); subPage = null; appearance = check = backup = restore = null; storage = false; render().catch(e => ctx.notify(e.message)); return true; };
+  v.refresh = () => { if (!appearance && !subPage) return render(); };
   v.on('input', '[data-field=volume]', el => { el.previousElementSibling.querySelector('output').textContent = el.value + '%'; });
   /** What the 壁纸与图标 page changes, and what it only shows: the 主题色 wallpaper, the theme's hue. */
   function appearanceOf(p) {
@@ -455,10 +459,17 @@ export function settingsApp(ctx) {
         const p = await api.getPhone(), key = el.dataset.value, first = key === 'custom' && !p.customTheme, again = key === 'custom' && p.skin === 'custom';
         if (!again) await api.savePhone({skin: key, ...(first ? {customTheme: deriveTheme({name: '我的配色', ...THEME_PRESETS[0]})} : {}), ...(p.wallpaper.kind === 'builtin' ? {wallpaper: {kind: 'builtin', key}} : {})});
         // The first time there is nothing of one's own yet, and tapped again it can only mean this: to the colours.
-        if (first || again) { editingTheme = themes; await themes.start(); v.root.scrollTop = 0; } else await render();
+        if (first || again) { subPage = themes; await themes.start(); v.root.scrollTop = 0; } else await render();
         break;
       }
-      case 'edit-theme': editingTheme = themes; await themes.start(); v.root.scrollTop = 0; break;
+      case 'edit-theme': subPage = themes; await themes.start(); v.root.scrollTop = 0; break;
+      case 'looks': {
+        if (!looks) { const {looksPage} = await import('./looks.js'); looks = looksPage({ctx, v}); }
+        subPage = looks;
+        await looks.start();
+        v.root.scrollTop = 0;
+        break;
+      }
       case 'appearance': { const p = await api.getPhone(); appearance = appearanceOf(p); await render(); break; }
       case 'mono-way': {
         const way = el.dataset.value;

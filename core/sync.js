@@ -1,19 +1,20 @@
 // 保存到酒馆: the phone's own data (see SYNC_PARTS) kept as files in the tavern user's folder, so another browser or device
 // of the same tavern account sees the same phone, and clearing a browser loses nothing.
 // Settings already live in the tavern; keys never leave the browser; the voice cache stays local (a voice can be made
-// again). The phone's look is each device's own.
+// again). How the phone looks now is each device's own; the themes it can put on (我的主题) are kept here too.
 //
 // Files (in data/<user>/user/files, written with the tavern's /api/files/upload):
 //   st-iphonie-sync.json        {app, kind:'sync', format, savedAt, device, deviceName, parts:{part:{hash, count}}}
 //   st-iphonie-chats.json       chat threads          st-iphonie-moments.json   朋友圈 posts
 //   st-iphonie-notes.json       notes                 st-iphonie-photos.json    album index (no pictures)
 //   st-iphonie-memories.json    complete chat books   st-iphonie-assistant.json assistant threads with memory: book | null
-//   st-iphonie-forum.json, -peek, -music, -sounds, -paint, -ledger, -books, -vibes, -favorites, -references  the same way
+//   st-iphonie-forum.json, -peek, -music, -sounds, -paint, -ledger, -looks, -books, -vibes, -favorites, -references  the same way
 //   st-iphonie-p-<id>.<ext>     one file per picture, written once (a picture never changes); a photo made smaller by
 //                               压缩旧图 is another picture, st-iphonie-p-<id>-c<when>.<ext>, and wins over the original
 //   st-iphonie-m-, -s-, -v-, -f-, -r-<id>   a song, a sound, a vibe, a saved voice, a reference voice: one file each, like
 //                               the pictures; a part's JSON lists them without the file (FILES)
 //   st-iphonie-w-<id>-<when>.json   a work of 画画: its layers, a new file each time it was saved
+//   st-iphonie-t-<id>-<when>.zip    a 主题 (core/looks.js), a new file each time it was saved
 //
 // A sync reads the tavern's copy first. A part changed only there is taken as it is (so deletions carry over); a part
 // changed on both sides is merged item by item (the newer item wins, messages and comments are joined); then what
@@ -23,7 +24,7 @@
 import {sha256Hex} from './hash.js';
 
 export const SYNC_FORMAT = 2;
-export const SYNC_PARTS = Object.freeze({chats: '聊天记录', moments: '朋友圈', notes: '备忘录', photos: '相册', memories: '聊天记忆', assistant: '助手会话与记忆', forum: '论坛', peek: '查手机', books: '绘本', vibes: 'Vibe', favorites: '收藏的语音', references: '参考音频', music: '音乐', sounds: '音效', paint: '画画的作品', ledger: '账本'});
+export const SYNC_PARTS = Object.freeze({chats: '聊天记录', moments: '朋友圈', notes: '备忘录', photos: '相册', memories: '聊天记忆', assistant: '助手会话与记忆', forum: '论坛', peek: '查手机', books: '绘本', vibes: 'Vibe', favorites: '收藏的语音', references: '参考音频', music: '音乐', sounds: '音效', paint: '画画的作品', ledger: '账本', looks: '我的主题'});
 export const MANIFEST = 'st-iphonie-sync.json';
 export const partFile = part => `st-iphonie-${part}.json`;
 const EXT = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif'};
@@ -42,6 +43,8 @@ export const FILES = Object.freeze({
   // A vibe's file changes as strengths are encoded for it: its time tells them apart.
   vibes: row => `st-iphonie-v-${plain(row.id)}-${(Number(row.updatedAt) || 0).toString(36)}.bin`,
   paint: row => `st-iphonie-w-${plain(row.id)}-${(Number(row.updatedAt) || 0).toString(36)}.json`,
+  // A new name changes its row, not its file: made is when the file was written.
+  looks: row => `st-iphonie-t-${plain(row.id)}-${(Number(row.made) || 0).toString(36)}.zip`,
 });
 
 export function defaultSync() { return {enabled: false}; }
@@ -66,7 +69,7 @@ export function canonical(part, items) {
 export async function hashText(text) { return sha256Hex(text); }
 
 const GONE_DAYS = 90, GONE_MAX = 3000;
-const REMADE = new Set(['forum', 'peek', 'books', 'vibes', 'favorites', 'references', 'music', 'sounds', 'paint', 'ledger']);
+const REMADE = new Set(['forum', 'peek', 'books', 'vibes', 'favorites', 'references', 'music', 'sounds', 'paint', 'ledger', 'looks']);
 /**
  * Deletions: {part: {key: at}}. The key is the item's id, or `itemId/childId` for a chat message or a post comment.
  * Joins several lists, keeps the last GONE_DAYS days and at most GONE_MAX keys a part (the newest).

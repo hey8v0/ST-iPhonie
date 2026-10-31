@@ -4,8 +4,8 @@
  * Photos/references: {id,name,type,size,createdAt,updatedAt,blob}; lists omit blob.
  * Favorites: {id,requestKey,role,text,translation,engine,model,voice,type,size,
  *             createdAt,updatedAt,blob}; listFavorites omits blob.
- * Phone: {wallpaper:{kind:'builtin',key}|{kind:'photo',photoId},
- *         icons:{[appId]:{kind:'glyph',key}|{kind:'photo',photoId}},
+ * Phone: {wallpaper:{kind:'builtin',key}|{kind:'photo',photoId}|{kind:'look',id} (a picture of a 主题, core/looks.js),
+ *         icons:{[appId]:{kind:'glyph',key}|{kind:'photo',photoId}|{kind:'look',id}}, look?:{id,at}|null (the 主题 last put on),
  *         iconStyle:'color'|'glass'|'mono',skin:PHONE_SKINS[number],lockOnOpen:boolean,volume:number (0..1),
  *         monoHue?:number (0..360)|'theme'|null (the colour of 单色 icons; none: grey), customTheme?: core/theme-colors.js,
  *         widgets:[{id,kind,size}] (the 今天 page, core/widgets.js)}.
@@ -37,6 +37,9 @@ const encoder = new TextEncoder();
 const defaults = () => ({wallpaper:{kind:'builtin',key:'sky'},icons:{},iconStyle:'color',skin:'sky',lockOnOpen:false,volume:1});
 const fail = (message,code='INVALID') => Object.assign(new Error(message),{code});
 const validHue=value=>value===null||value==='theme'||(typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=360);
+const validLook=value=>value===null||(!!value&&typeof value.id==='string'&&value.id.length<=512&&Number.isFinite(value.at));
+// A 主题 can bring an icon for an app this version does not have: it stays, and shows once the plugin has that app.
+const iconFields=icons=>fields(icons,[...PHONE_APPS,...Object.keys(Object(icons)).filter(app=>/^[a-z][a-z0-9_-]{0,39}$/.test(app)&&(icons[app]===null||icons[app]?.kind==='look'))]);
 function fields(value, allowed) {
  if(!value||Object.prototype.toString.call(value)!=='[object Object]')throw fail('请提供有效的设置内容');
  for(const key of Object.keys(value))if(!allowed.includes(key))throw fail('不支持的字段：'+key);
@@ -322,17 +325,18 @@ export class LocalLibrary {
  async deleteFavorite(id){return this.#remove('favorites',id);}
  async getPhone(){const row=await this.#read('phone','preferences');if(!row)return {...defaults(),widgets:normalizeWidgets()};const result={...defaults(),...publicRow(row)};delete result.id;delete result.createdAt;delete result.updatedAt;if(!PHONE_SKINS.includes(result.skin))result.skin='sky';if(result.wallpaper?.kind==='builtin'&&!PHONE_WALLPAPERS.includes(result.wallpaper.key))result.wallpaper=defaults().wallpaper;result.widgets=normalizeWidgets(result.widgets);return result;}
  async savePhone(patch){
-  fields(patch,['wallpaper','icons','iconStyle','skin','lockOnOpen','volume','widgets','monoHue','customTheme']);
+  fields(patch,['wallpaper','icons','iconStyle','skin','lockOnOpen','volume','widgets','monoHue','customTheme','look']);
   let clean;try{clean=structuredClone(patch);}catch{throw fail('手机设置包含无法保存的内容');}
   if('iconStyle'in clean&&!['color','glass','mono'].includes(clean.iconStyle))throw fail('图标样式无效');
   if('skin'in clean&&!PHONE_SKINS.includes(clean.skin))throw fail('主题风格无效');
   if('monoHue'in clean&&!validHue(clean.monoHue))throw fail('单色图标的颜色无效');
+  if('look'in clean&&!validLook(clean.look))throw fail('主题无效');
   if('customTheme'in clean&&clean.customTheme!==null){clean.customTheme=cleanTheme(clean.customTheme);if(!clean.customTheme)throw fail('配色无效');}
   if('lockOnOpen'in clean&&typeof clean.lockOnOpen!=='boolean')throw fail('锁屏设置无效');
   if('volume'in clean&&(typeof clean.volume!=='number'||!Number.isFinite(clean.volume)||clean.volume<0||clean.volume>1))throw fail('音量必须在 0 到 1 之间');
   if('widgets'in clean){if(!Array.isArray(clean.widgets))throw fail('小组件列表无效');clean.widgets=normalizeWidgets(clean.widgets);}
   if('wallpaper'in clean)this.#appearance(clean.wallpaper,'wallpaper');
-  if('icons'in clean){fields(clean.icons,PHONE_APPS);for(const value of Object.values(clean.icons))if(value!==null)this.#appearance(value,'icon');}
+  if('icons'in clean){iconFields(clean.icons);for(const value of Object.values(clean.icons))if(value!==null)this.#appearance(value,'icon');}
   return this.#mutate(({rows,put})=>{
    const existing=rows.phone.get('preferences'),now=this.#time(),next={...defaults(),...(existing?publicRow(existing):{}),...clean};
    next.icons={...(existing?.icons||{})};for(const [key,value] of Object.entries(clean.icons||{})){if(value===null)delete next.icons[key];else next.icons[key]=value;}
@@ -343,6 +347,7 @@ export class LocalLibrary {
  }
  #appearance(value,target){
   if(value?.kind==='photo'){fields(value,['kind','photoId']);identifier(value.photoId);}
+  else if(value?.kind==='look'){fields(value,['kind','id']);identifier(value.id);}
   else if(target==='wallpaper'&&value?.kind==='builtin'){fields(value,['kind','key']);if(!PHONE_WALLPAPERS.includes(value.key))throw fail('壁纸选项无效');}
   else if(target==='icon'&&value?.kind==='glyph'){fields(value,['kind','key']);if(!PHONE_GLYPHS.includes(value.key))throw fail('图标选项无效');}
   else throw fail(target==='wallpaper'?'壁纸设置无效':'图标设置无效');
@@ -387,9 +392,9 @@ export class LocalLibrary {
   if(name==='photos'||name==='references'){const media=name==='photos',blob=blobValue(row.blob,media?LIBRARY_LIMITS.photo:LIBRARY_LIMITS.reference,media?'图片':'参考音频',media?'image':'audio',row.name);return {id:identifier(row.id),name:string(row.name??(media?'图片':'reference.wav'),media?'图片名称':'音频名称',512,true),blob,type:blob.type,size:blob.size,...dates,...(media&&infoRows(row.info).length?{info:infoRows(row.info)}:{}),...(media&&packedMark(row.packed)?{packed:packedMark(row.packed)}:{})};}
   if(name==='favorites'){if(!['fish','mini','eleven','mimo','doubao','custom'].includes(row.engine))throw fail('备份里的收藏语音引擎无效');const blob=blobValue(row.blob,LIBRARY_LIMITS.total,'音频','audio');return {id:identifier(row.id),requestKey:string(row.requestKey,'音频编号',512,true),role:string(row.role,'角色名',200,true),text:string(row.text,'原文',1_000_000,true),translation:string(row.translation??'','译文',1_000_000),engine:row.engine,model:string(row.model??'','模型',200),voice:string(row.voice??'','音色',512),blob,type:blob.type,size:blob.size,...dates};}
   if(name==='vibes'){if(!row.meta||typeof row.meta!=='object'||Array.isArray(row.meta))throw fail('备份里的 Vibe 信息无效');const blob=blobValue(row.blob,LIBRARY_LIMITS.vibe,'Vibe 文件','data');return {id:identifier(row.id),name:string(row.name,'Vibe 名字',80,true),meta:structuredClone(row.meta),blob,size:blob.size,...dates};}
-  const {wallpaper,icons,iconStyle,skin,lockOnOpen,volume,widgets,monoHue,customTheme}={...defaults(),...row};
-  this.#appearance(wallpaper,'wallpaper');fields(icons,PHONE_APPS);for(const icon of Object.values(icons))this.#appearance(icon,'icon');
-  return {wallpaper,icons,iconStyle:['color','glass','mono'].includes(iconStyle)?iconStyle:'color',skin:PHONE_SKINS.includes(skin)?skin:'sky',lockOnOpen:lockOnOpen===true,volume:Number.isFinite(volume)?Math.min(1,Math.max(0,volume)):1,...(monoHue!==undefined&&validHue(monoHue)?{monoHue}:{}),...(cleanTheme(customTheme)?{customTheme:cleanTheme(customTheme)}:{}),...(Array.isArray(widgets)?{widgets:normalizeWidgets(widgets)}:{}),...dates};
+  const {wallpaper,icons,iconStyle,skin,lockOnOpen,volume,widgets,monoHue,customTheme,look}={...defaults(),...row};
+  this.#appearance(wallpaper,'wallpaper');iconFields(icons);for(const icon of Object.values(icons))this.#appearance(icon,'icon');
+  return {wallpaper,icons,iconStyle:['color','glass','mono'].includes(iconStyle)?iconStyle:'color',skin:PHONE_SKINS.includes(skin)?skin:'sky',lockOnOpen:lockOnOpen===true,volume:Number.isFinite(volume)?Math.min(1,Math.max(0,volume)):1,...(monoHue!==undefined&&validHue(monoHue)?{monoHue}:{}),...(cleanTheme(customTheme)?{customTheme:cleanTheme(customTheme)}:{}),...(look&&validLook(look)?{look}:{}),...(Array.isArray(widgets)?{widgets:normalizeWidgets(widgets)}:{}),...dates};
  }
  async #room(){try{const n=await this.#limit();return Number.isFinite(n)&&n>0?n:LIBRARY_LIMITS.total;}catch{return LIBRARY_LIMITS.total;}}
  async stats(){

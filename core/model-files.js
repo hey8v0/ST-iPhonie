@@ -28,11 +28,28 @@ async function inflate(data) {
   const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
+/** As inflate, stopping as soon as it is more than the zip said (a small file can unpack into gigabytes). */
+async function inflateAtMost(data, most) {
+  const reader = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader(), parts = [];
+  let total = 0;
+  for (;;) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > most) { await reader.cancel().catch(() => {}); throw Error('压缩包里的文件比它说的大'); }
+    parts.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const part of parts) { out.set(part, at); at += part.length; }
+  return out;
+}
 /**
  * The files of a zip: Map(path → {size, bytes(): Promise<Uint8Array>}), folders and macOS leftovers left out. Stored and
  * deflated entries are read; anything else (an encrypted zip, zip64, another method) is an error that says so.
+ * exact: for a file from someone else, a file does not unpack into more than the zip says it holds.
  */
-export function readZip(input) {
+export function readZip(input, {exact = false} = {}) {
   const b = input instanceof Uint8Array ? input : new Uint8Array(input);
   let end = -1;
   for (let i = b.length - 22; i >= Math.max(0, b.length - 65557); i--) if (u32(b, i) === 0x06054b50) { end = i; break; }
@@ -53,7 +70,7 @@ export function readZip(input) {
     if (method !== 0 && method !== 8) throw Error('压缩包用了读不了的压缩方式，请用「存储」或普通 zip 重新压缩');
     const start = local + 30 + u16(b, local + 26) + u16(b, local + 28), data = b.subarray(start, start + packed);
     let made = null;
-    files.set(path, {size, bytes: () => made ??= method === 0 ? Promise.resolve(data.slice()) : inflate(data)});
+    files.set(path, {size, bytes: () => made ??= method === 0 ? Promise.resolve(data.slice()) : exact ? inflateAtMost(data, size) : inflate(data)});
   }
   return files;
 }

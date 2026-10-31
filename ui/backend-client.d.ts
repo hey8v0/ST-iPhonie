@@ -527,6 +527,8 @@ export interface PhonePreferences {
     iconStyle: 'color' | 'glass' | 'mono';
     /** The colour of 单色 icons; none: grey. */
     monoHue?: number | 'theme' | null;
+    /** The 主题 last put on (core/looks.js). */
+    look?: {id: string; at: number} | null;
     /** 自定义主题 (core/theme-colors.js). */
     customTheme?: {name: string; accent: string; tint: number; pink: string; ownPink?: boolean; day: Record<string, string>; night: Record<string, string>} | null;
     skin: PhoneSkin;
@@ -855,6 +857,13 @@ export interface BackendFacade {
     deleteBook(id: string): Promise<boolean>;
     getPhone(): Promise<PhonePreferences>;
     savePhone(patch: PhonePatch): Promise<PhonePreferences>;
+    /** 我的主题 (core/looks.js): the themes kept, without their files; one with its file; kept; its name; gone (not while the phone shows its pictures); its pictures. */
+    listLooks(): Promise<Record<string, any>[]>;
+    getLook(id: string): Promise<Record<string, any> | null>;
+    saveLook(look: Record<string, any>): Promise<boolean>;
+    renameLook(id: string, patch: {name: string; author?: string}): Promise<boolean>;
+    deleteLook(id: string): Promise<boolean>;
+    lookFiles(id: string): Promise<{wallpaper: Blob | null; icons: Record<string, {blob: Blob; clear: boolean}>} | null>;
     libraryStats(): Promise<LibraryStats>;
     /** What this browser gives the site (quota, 0 when it does not say), the share for 本地资料 and for the voice cache, and whether it keeps them when space runs short. */
     storageBudget(): Promise<{ quota: number; library: number; voice: number; persisted: boolean }>;

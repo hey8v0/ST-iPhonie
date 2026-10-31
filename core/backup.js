@@ -18,6 +18,7 @@ export const BACKUP_PARTS = Object.freeze({
   peek: '查手机',
   notes: '备忘录',
   photos: '相册',
+  looks: '我的主题',
   favorites: '收藏的语音',
   vibes: 'Vibe 和 Vibe 组',
   books: '绘本',
@@ -28,9 +29,9 @@ export const BACKUP_PARTS = Object.freeze({
   keys: '密钥（用密码加密）'
 });
 /** Which library stores each part covers. */
-export const PART_STORES = Object.freeze({settings: ['references', 'phone'], vnFiles: [], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], books: ['books'], chats: [], memories: [], assistant: [], moments: [], forum: [], peek: [], music: [], sounds: [], paint: [], ledger: [], keys: []});
+export const PART_STORES = Object.freeze({settings: ['references', 'phone'], vnFiles: [], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], books: ['books'], chats: [], memories: [], assistant: [], moments: [], forum: [], peek: [], music: [], sounds: [], paint: [], ledger: [], looks: [], keys: []});
 /** The rows outside the library that a backup holds under a part's own name. */
-export const ROW_PARTS = Object.freeze(['forum', 'peek', 'music', 'sounds', 'paint', 'ledger']);
+export const ROW_PARTS = Object.freeze(['forum', 'peek', 'music', 'sounds', 'paint', 'ledger', 'looks']);
 /** Parts chosen by default: keys only when the user turns them on. */
 export const DEFAULT_BACKUP_PARTS = Object.freeze(Object.keys(BACKUP_PARTS).filter(part => part !== 'keys'));
 export const KEY_PASSWORD_MIN = 6;

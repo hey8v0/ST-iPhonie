@@ -223,6 +223,29 @@
 .mono-preview .icon-tile{width:48px;height:48px;border-radius:15px;background:linear-gradient(160deg,var(--t1),var(--t2))!important;outline:0!important;rotate:none!important;color:#fff}
 .mono-preview:not([data-mono-hue]) .icon-tile{filter:grayscale(1)}
 .mono-preview .icon-tile .glyph{width:36px;height:36px}
+/* 我的主题 (ui/looks.js) */
+.look-now{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding-block:14px}
+.look-now-text{flex:1 1 130px;min-width:0}
+.look-now-text strong{display:block;font-size:16px;font-weight:800;overflow-wrap:anywhere}
+.look-now-text small{display:block;margin-top:2px;font-size:12px;color:var(--ink2)}
+.look-now .actions{flex:none;margin:0}
+.look-list{padding-inline:16px}
+.look-row{min-height:84px;padding-block:8px}
+.look-row-text{flex:1;min-width:0}
+.list-row>span.look-thumb:not(.avatar):not(.plate){flex:0 0 104px;display:block;height:66px;border-radius:12px;overflow:hidden;background:var(--card2);box-shadow:inset 0 0 0 1px var(--line)}
+/* The middle of the little home screen: its icons on its wallpaper. */
+.look-thumb img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 55%}
+.list-row>span.look-on:not(.avatar):not(.plate){flex:0 0 26px;display:grid;place-items:center;height:26px;border-radius:50%;background:var(--accent-btn);color:var(--on-accent)}
+.look-on svg{width:16px;height:16px}
+.look-shot{display:block;width:min(52%,176px);aspect-ratio:9/16;margin:2px auto 12px;border-radius:20px;object-fit:cover;box-shadow:var(--shadow),0 0 0 1px var(--line)}
+.look-facts{margin:0 0 10px;text-align:center;font-size:12.5px;color:var(--ink2)}
+.look-chips{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.look-sheet .hint{text-align:center}
+.look-sheet-actions{justify-content:center;align-items:center}
+.look-sheet-more{justify-content:center;margin-top:0}
+.look-sheet-more>*,.look-sheet-actions>.look-worn{flex:0 0 auto}
+.look-worn{display:inline-flex;align-items:center;gap:4px;min-height:44px;padding:0 10px;font-size:14px;font-weight:800;color:var(--accent-ink)}
+.look-worn svg{width:18px;height:18px}
 /* 引擎 card pockets: glass in Aero, an airmail envelope in 文艺小清新. */
 :root[data-skin=aero] .card-pocket{background:var(--aero-gloss),color-mix(in srgb,var(--e-soft) 40%,var(--card));border:1px solid var(--aero-edge);box-shadow:inset 0 1px 0 var(--aero-edge),var(--shadow)}
 :root[data-skin=aero] .pocket-icon{background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0) 52%),var(--e-btn);box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 6px 14px -8px var(--e)}

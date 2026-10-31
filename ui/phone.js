@@ -523,11 +523,12 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
 
   // ---------- Home screen ----------
+  const lookIcon = (look, app) => `look:${look}:${app}`;
   function appIcon(id) {
     if (id === SLOT) return `<button class="app-icon slot" data-slot aria-label="预留位置"><span class="icon-tile">${icon('add')}</span><span class="app-label">预留</span></button>`;
     const meta = APPS[id], custom = preferences?.icons?.[id], [t1, t2, tac] = meta.colors;
-    const image = custom?.kind === 'photo' ? assets.get(custom.photoId) : null;
-    const art = image ? `<img src="${esc(image)}" alt=""${clearIcons.has(custom.photoId) ? ' class="see-through"' : ''}>` : glyph(custom?.kind === 'glyph' && custom.key !== 'default' ? custom.key : id);
+    const picture = custom?.kind === 'photo' ? custom.photoId : custom?.kind === 'look' ? lookIcon(custom.id, id) : '', image = picture ? assets.get(picture) : null;
+    const art = image ? `<img src="${esc(image)}" alt=""${clearIcons.has(picture) ? ' class="see-through"' : ''}>` : glyph(custom?.kind === 'glyph' && custom.key !== 'default' ? custom.key : id);
     // The chat icon: unread messages as a number; new 动态 alone as a dot.
     const count = id === 'chat' ? unread : 0, dot = id === 'chat' && !unread && fresh;
     const badge = count ? `<span class="badge app-badge">${count > 99 ? '99+' : count}</span>` : dot ? '<span class="badge app-badge dot"></span>' : '';
@@ -622,21 +623,33 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     today?.setList(phone.widgets);
     applyThemeMode();
     const dark = isDark();
-    const key = JSON.stringify([phone.wallpaper, phone.icons, phone.iconStyle, phone.monoHue, phone.skin, phone.skin === 'custom' || phone.wallpaper.key === 'custom' ? phone.customTheme : null, dark]);
+    const key = JSON.stringify([phone.wallpaper, phone.icons, phone.iconStyle, phone.monoHue, phone.skin, phone.skin === 'custom' || phone.wallpaper.key === 'custom' ? phone.customTheme : null, dark, phone.look?.at]);
     if (key === appearanceKey) return;
     const ticket = ++appearanceEpoch;
     // The wallpaper is the photo itself; an icon, a few dozen pixels wide, the photo's small picture (ui/thumbs.js).
     const iconIds = [...new Set(Object.values(phone.icons).filter(x => x?.kind === 'photo').map(x => x.photoId))];
     const [wall, ...pictures] = await Promise.all([phone.wallpaper.kind === 'photo' ? api.getPhoto(phone.wallpaper.photoId).then(r => r?.blob) : null, ...iconIds.map(id => thumbBlob(api, {id}))]);
+    // A theme's pictures are small already, and come out of its file together.
+    const lookIds = [...new Set([phone.wallpaper, ...Object.values(phone.icons)].filter(x => x?.kind === 'look').map(x => x.id))];
+    const lookFiles = new Map(await Promise.all(lookIds.map(async id => [id, await api.lookFiles?.(id).catch(() => null)])));
     if (disposed || ticket !== appearanceEpoch) return;
     for (const url of [...assets.values(), wallURL]) if (url) win.URL.revokeObjectURL(url);
     assets.clear();
     iconIds.forEach((id, i) => { if (pictures[i]) assets.set(id, win.URL.createObjectURL(pictures[i])); });
     clearIcons = new Set((await Promise.all(iconIds.map(async (id, i) => pictures[i] && await seeThrough(pictures[i]) ? id : null))).filter(Boolean));
+    for (const [app, one] of Object.entries(phone.icons)) {
+      const file = one?.kind === 'look' ? lookFiles.get(one.id)?.icons[app] : null;
+      if (!file?.blob) continue;
+      assets.set(lookIcon(one.id, app), win.URL.createObjectURL(file.blob));
+      if (file.clear) clearIcons.add(lookIcon(one.id, app));
+    }
     if (disposed || ticket !== appearanceEpoch) return;
-    wallURL = wall ? win.URL.createObjectURL(wall) : '';
+    const wallBlob = phone.wallpaper.kind === 'look' ? lookFiles.get(phone.wallpaper.id)?.wallpaper : wall;
+    wallURL = wallBlob ? win.URL.createObjectURL(wallBlob) : '';
     const photo = wallURL || null;
-    const look = phone.wallpaper.key === 'custom' ? customWallpaper(customTheme(phone), dark) : wallpaperLook(phone.wallpaper.key, dark);
+    // A picture that is not there (its theme was deleted on another device): the theme's own wallpaper.
+    const wallKey = phone.wallpaper.key || phone.skin;
+    const look = wallKey === 'custom' ? customWallpaper(customTheme(phone), dark) : wallpaperLook(wallKey, dark);
     const vars = photo
       ? {'--wall': `linear-gradient(#0000001f,#0000001f),url("${photo}")`, '--wall-size': 'cover', '--wall-pos': 'center', '--wall-ink': '#fff', '--label-halo': '#000'}
       : {'--wall': look.background, '--wall-size': look.size || 'auto', '--wall-pos': look.pos || 'center', '--wall-ink': look.ink, '--clock-stroke': look.stroke, '--clock-shadow': look.shadow || look.stroke, '--label-halo': look.halo};

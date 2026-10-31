@@ -22,6 +22,7 @@ import { normalizePool } from './auto-voice.js';
 import { normalizeSounds, soundRow, readPack, missingKey, soundName, packRows, PACK_FORMAT, SOUND_LIMITS, SOUND_KINDS } from './sounds.js';
 import { decodeMono, encodeWav } from './audio-join.js';
 import { BACKUP_PARTS, PART_STORES, ROW_PARTS, fieldsOf, writeBackup, readBackup, rowJSON, withBlobs, sealKeys, openKeys } from './backup.js';
+import { lookPictures, lookThumb } from './looks.js';
 import { paintStore } from './paint-store.js';
 import { Ledger } from './ledger.js';
 import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, SHOP_GIFTS, LEDGER_KINDS, premiumOf, decorKey, cents, yuan, shopGifts, normalizeGift, validateGift } from './wallet.js';
@@ -101,7 +102,7 @@ const firstCard = route => (Array.isArray(route.cards) ? route.cards.find(k => !
 const clone = value => structuredClone(value);
 // a 歌单 the user made was deleted meanwhile (in another tab, say)
 // Which documents of the apps' stores make up a part of a backup and of 保存到酒馆 (画画的作品 has a store of its own).
-const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], music: ['song', 'playlist', 'heard'], sounds: ['sound'] });
+const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], looks: ['look'], music: ['song', 'playlist', 'heard'], sounds: ['sound'] });
 // The tavern takes 500 MB a request, and a file goes as base64.
 const tooBigToSync = work => (work?.bytes || 0) > 300 * 1024 * 1024;
 const listGone = error => { throw error?.code === 'MISSING' ? Error('这个歌单已经删掉了') : error; };
@@ -241,7 +242,7 @@ export class TTSBackend {
     async partRows(part) {
         if (part === 'paint') return this.paintWorks.all();
         if (part === 'ledger') await this.ledger.flush();
-        if (part === 'ledger' || part === 'peek') return this.apps.listFrom(part + ':');
+        if (part === 'ledger' || part === 'peek' || part === 'looks') return this.apps.listFrom(part + ':');
         const kinds = PART_KINDS[part];
         return (await this.partStore(part).list()).filter(row => kinds.includes(row.kind));
     }
@@ -251,7 +252,7 @@ export class TTSBackend {
      */
     async putPartRows(part, rows, { replace = false, merge } = {}) {
         if (part === 'paint') return this.paintWorks.importWorks(rows.filter(row => row && typeof row.id === 'string' && Array.isArray(row.layers)), { replace });
-        const kinds = PART_KINDS[part], fileBacked = row => row.kind === 'sound' || (row.kind === 'song' && row.origin !== 'source');
+        const kinds = PART_KINDS[part], fileBacked = row => row.kind === 'sound' || row.kind === 'look' || (row.kind === 'song' && row.origin !== 'source');
         const clean = rows.filter(row => row && typeof row.id === 'string' && kinds.includes(row.kind) && (merge || !fileBacked(row) || typeof row.blob?.arrayBuffer === 'function')), ids = new Set(clean.map(row => row.id));
         const done = await this.partStore(part).transformKinds(kinds, old => merge ? merge(old) : replace ? clean : [...old.filter(row => !ids.has(row.id)), ...clean]);
         return done.length;
@@ -266,15 +267,15 @@ export class TTSBackend {
     /** Tells the app a part's rows changed under it. */
     partsChanged(part) {
         if (part === 'music') this.emit('music', { library: true, heard: true });
-        else if (part === 'forum' || part === 'peek' || part === 'sounds' || part === 'ledger' || part === 'paint') this.emit(part, {});
+        else if (part === 'forum' || part === 'peek' || part === 'sounds' || part === 'ledger' || part === 'paint' || part === 'looks') this.emit(part, {});
     }
     /** What the backup page shows of the parts that are not simply counted. */
     async backupCounts() {
         this.assertOpen();
         const bytes = rows => rows.reduce((n, row) => n + (row.blob?.size || row.size || row.bytes || 0), 0);
         const [docs, music, sounds, works] = await Promise.all([this.apps.list(), this.music.list(), this.sounds.list('sound'), this.paintRows().catch(() => [])]);
-        const songs = music.filter(row => row.kind === 'song' && row.origin !== 'source');
-        return { forum: docs.filter(row => row.kind === 'forum').length, peek: docs.filter(row => row.kind === 'peek').length, ledger: new Set(docs.filter(row => row.kind === 'ledger').map(row => row.day)).size, playlists: music.filter(row => row.kind === 'playlist').length, songs: songs.length, musicBytes: bytes(songs), sounds: sounds.length, soundBytes: bytes(sounds), works: works.length, workBytes: bytes(works) };
+        const songs = music.filter(row => row.kind === 'song' && row.origin !== 'source'), looks = docs.filter(row => row.kind === 'look');
+        return { looks: looks.length, lookBytes: bytes(looks), forum: docs.filter(row => row.kind === 'forum').length, peek: docs.filter(row => row.kind === 'peek').length, ledger: new Set(docs.filter(row => row.kind === 'ledger').map(row => row.day)).size, playlists: music.filter(row => row.kind === 'playlist').length, songs: songs.length, musicBytes: bytes(songs), sounds: sounds.length, soundBytes: bytes(sounds), works: works.length, workBytes: bytes(works) };
     }
     /** The works' list; one saved before it kept its size has its layers read for that. */
     async paintRows() {
@@ -390,7 +391,7 @@ export class TTSBackend {
     emit(type, data = {}) {
         if (this.closed) return;
         const event = { type, revision: this.revision, ...clone(data) };
-        if (!this.syncApplying && (type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
+        if (!this.syncApplying && (type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || type === 'looks' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
         for (const listener of this.listeners) { try { listener(clone(event)); } catch { /* One view cannot stop the other subscribers. */ } }
     }
     subscribe(listener) {
@@ -2360,6 +2361,44 @@ export class TTSBackend {
     }
     hotId() { const key = this.spaceKey(); return key ? 'forum-hot:' + key : 'forum-hot'; }
 
+    // ---------- 我的主题 (core/looks.js) ----------
+    /** The themes kept, newest first, without their files. One that came from another device gets its small picture here. */
+    async listLooks() {
+        const out = [];
+        for (const { blob, ...row } of await this.apps.listFrom('looks:')) {
+            if (!row.thumb && blob) {
+                row.thumb = await lookThumb({ blob }).catch(() => null);
+                if (row.thumb) await this.apps.change(row.id, doc => { doc.thumb = row.thumb; }).catch(() => {});
+            }
+            out.push(row);
+        }
+        return out;
+    }
+    async saveLook(look) {
+        if (!/^looks:[\w-]{1,80}$/.test(look?.id || '') || typeof look.blob?.arrayBuffer !== 'function') throw Error('主题内容无效');
+        await this.appsMutate('looks', () => this.apps.put([{ ...look, kind: 'look' }]));
+        return true;
+    }
+    async renameLook(id, { name, author }) {
+        const line = text => String(text ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 40);
+        if (!line(name)) throw Error('要有名字');
+        await this.appsMutate('looks', () => this.apps.change(id, doc => { doc.name = line(name); doc.author = line(author); doc.updatedAt = Date.now(); }));
+        return true;
+    }
+    /** A theme the phone is showing pictures of stays until another is put on. */
+    async deleteLook(id) {
+        const phone = await this.library.getPhone();
+        if ([phone.wallpaper, ...Object.values(phone.icons)].some(one => one?.kind === 'look' && one.id === id)) throw Error('手机现在正在用这个主题，先换一个再删');
+        this.noteGone('looks', [id]);
+        await this.appsMutate('looks', () => this.apps.remove(id));
+        return true;
+    }
+    /** A theme's pictures, as the phone shows them. */
+    async lookFiles(id) {
+        const look = await this.apps.get(id);
+        return look?.kind === 'look' && look.blob ? lookPictures(look) : null;
+    }
+
     // ---------- 论坛 ----------
     /** Runs a change to an app's documents and tells the phone ('forum' or 'peek'). */
     async appsMutate(type, task) {
@@ -2877,6 +2916,7 @@ export class TTSBackend {
             listNotes: () => this.library.listNotes(), saveNote: value => this.mutateLibrary('notes', 'saveNote', value), deleteNote: id => this.mutateLibrary('notes', 'deleteNote', id),
             listBooks: () => this.library.listBooks(), getBook: id => this.library.getBook(id), saveBook: value => this.mutateLibrary('books', 'saveBook', clone(value)), deleteBook: id => this.mutateLibrary('books', 'deleteBook', id),
             getPhone: () => this.getPhone(), savePhone: patch => this.savePhone(patch), libraryStats: () => this.library.stats(), storageBudget: () => this.budget.read(),
+            listLooks: () => this.listLooks(), getLook: id => this.apps.get(String(id)), saveLook: look => this.saveLook(look), renameLook: (id, patch) => this.renameLook(String(id), clone(patch || {})), deleteLook: id => this.deleteLook(String(id)), lookFiles: id => this.lookFiles(String(id)),
             generatedPhotos: () => this.generatedPhotos().then(({ count, bytes, sources }) => ({ count, bytes, sources: Object.fromEntries(Object.entries(sources).map(([k, { ids, ...rest }]) => [k, rest])) })), deleteGeneratedPhotos: sources => this.deleteGeneratedPhotos(sources),
             saveMoments: patch => this.saveMoments(clone(patch)), saveCalls: patch => this.saveCalls(clone(patch)),
             saveAssistant: patch => this.saveAssistant(patch), assistantThreads: () => this.assistantThreads(), assistantThread: id => this.assistantThread(id),

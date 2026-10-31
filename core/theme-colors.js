@@ -133,7 +133,11 @@ export function readThemeFile(text) {
   let parsed;
   try { parsed = JSON.parse(text); } catch { throw Error('这不是配色文件（读不出内容）'); }
   if (parsed?.app !== 'ST-iPhonie' || parsed.kind !== 'theme') throw Error('这不是小手机的配色文件');
-  const theme = cleanTheme(parsed), day = fixColors(theme.day), night = fixColors(theme.night);
+  return readableTheme(cleanTheme(parsed));
+}
+/** A set from someone else, with what is hard to read put right: {theme, fixed: how many colours had to change}. */
+export function readableTheme(theme) {
+  const day = fixColors(theme.day), night = fixColors(theme.night);
   const changed = Object.keys(THEME_TOKENS).filter(key => day[key] !== theme.day[key]).length + Object.keys(THEME_TOKENS).filter(key => night[key] !== theme.night[key]).length;
   return {theme: {...theme, day, night}, fixed: changed};
 }

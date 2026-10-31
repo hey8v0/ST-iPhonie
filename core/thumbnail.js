@@ -37,6 +37,47 @@ export async function packPicture(blob) {
   }
 }
 
+/**
+ * A picture for a 主题 (core/looks.js), no bigger than long and short, drawn anew so that only the picture comes along: not
+ * where it was taken, not what it was drawn with (NovelAI also hides that in the transparency, so what is not really
+ * see-through comes out without any; flat: never see-through, a wallpaper). A picture that moves stays as it is.
+ * redraw false: one small enough (long, short, most: its bytes) stays as it is too, only checked to be a picture.
+ * {blob, clear: it has see-through parts}. Throws when the picture cannot be read.
+ */
+export async function themePicture(win, blob, {long = Infinity, short = Infinity, most = Infinity, quality = .86, flat = false, redraw = true} = {}) {
+  const bitmap = await win.createImageBitmap(blob);
+  try {
+    const clear = !flat && seeThrough(win, bitmap), scale = Math.min(1, long / Math.max(bitmap.width, bitmap.height), short / Math.min(bitmap.width, bitmap.height));
+    if (await moving(blob) || (!redraw && scale === 1 && blob.size <= most)) return {blob, clear};
+    const canvas = win.document.createElement('canvas'), w = Math.max(1, Math.round(bitmap.width * scale)), h = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.width = w; canvas.height = h;
+    const g = canvas.getContext('2d');
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    if (!clear) { g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); }
+    g.drawImage(bitmap, 0, 0, w, h);
+    const make = (type, q) => new Promise(resolve => canvas.toBlob(resolve, type, q));
+    let out = await make('image/webp', quality);
+    // No WebP writer (Safari): PNG keeps what is see-through, JPEG is much smaller for the rest.
+    if (out?.type !== 'image/webp') out = clear ? await make('image/png') : await make('image/jpeg', Math.min(1, quality + .04));
+    if (!out?.size) throw Error('这张图处理不了');
+    return {blob: out, clear};
+  } finally {
+    bitmap.close?.();
+  }
+}
+/** Whether enough of a picture is see-through for it to show whole on its own, as an icon. */
+function seeThrough(win, bitmap) {
+  const size = 32, canvas = win.document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const g = canvas.getContext('2d', {willReadFrequently: true});
+  g.drawImage(bitmap, 0, 0, size, size);
+  const data = g.getImageData(0, 0, size, size).data;
+  let clear = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] < 200) clear++;
+  return clear >= size * size * .03;
+}
+
 const canvasOf = (w, h) => typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), {width: w, height: h});
 const encode = (canvas, type, quality) => canvas.convertToBlob ? canvas.convertToBlob({type, quality}) : new Promise(resolve => canvas.toBlob(resolve, type, quality));
 

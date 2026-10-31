@@ -45,7 +45,7 @@ export function themeEditor({ctx, v}) {
   }
   function render() {
     each = v.root.querySelector('.theme-each')?.open ?? each;
-    v.draw(heading('自定义主题', help('挑一套现成的，或者从图片取色，手机会马上变成这个颜色。动主色和浓淡时日夜两套一起算，文字保证看得清；单独改过的颜色这时会被重新算的盖掉。\n配色可以导出成文件发给别人，别人导入后就是同一套。文件里只有颜色。\n形状和质感是晴空贴纸的样子。'), 'My Theme')
+    v.draw(heading('自定义主题', help('挑一套现成的，或者从图片取色，手机会马上变成这个颜色。动主色和浓淡时日夜两套一起算，文字保证看得清；单独改过的颜色这时会被重新算的盖掉。\n配色可以导出成文件发给别人，别人导入后就是同一套。文件里只有颜色；想连壁纸和图标一起发，用设置里的「我的主题」。\n形状和质感是晴空贴纸的样子。'), 'My Theme')
       + `<div class="group pad theme-presets">${presetsHTML()}</div>`
       + `<div class="actions" style="margin-top:0">${btn('theme-picture', icon('image') + '从图片取色', 'secondary')}</div>`
       + groupTitle('颜色')
