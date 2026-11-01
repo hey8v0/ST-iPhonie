@@ -554,8 +554,6 @@ export interface MediaMetadata extends LocalTimestamps {
     name: string;
     type: string;
     size: number;
-    /** listPhotos only: the photo's small picture for grids, once one was made (photoThumb). */
-    thumb?: Blob;
     /** Photos made smaller by 压缩旧图: when, and how big the original was. */
     packed?: {at: number; size: number};
 }
@@ -836,6 +834,8 @@ export interface BackendFacade {
     getPhoto(id: string): Promise<Photo | null>;
     /** The photo's small picture for grids, made and kept the first time it is asked for; null when the photo is gone or unreadable. */
     photoThumb(id: string): Promise<Blob | null>;
+    /** The small pictures of these photos, those made so far, read in one go. */
+    photoThumbs(ids: string[]): Promise<{id: string; blob: Blob}[]>;
     /** The photo's middle-sized picture for chat bubbles, posts and the 今天 widget, or null: then the photo itself shows (and
      *  one is made in the background for next time, where one is worth having). */
     photoPreview(id: string): Promise<Blob | null>;

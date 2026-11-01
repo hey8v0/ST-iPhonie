@@ -2,7 +2,7 @@
 // as it is for the tools (放大, 导演工具), the brush that marks what 局部重绘 draws again, picking a picture from the
 // album or the device, and reading back what a NovelAI PNG was drawn with.
 import {esc} from './common.js';
-import {thumbBlob} from './thumbs.js';
+import {eachThumb} from './thumbs.js';
 import {icon} from './icons.js';
 import {REFERENCE_SIZES, NAI_MODELS} from '../core/novelai.js';
 import {normalizeMaskLook, MASK_PATTERNS} from '../core/draw.js';
@@ -131,11 +131,11 @@ export function pickPicture(ctx, api, title = '选一张图', {multiple = false}
     d.onClose?.(() => { for (const url of urls) ctx.win.URL.revokeObjectURL(url); if (!done) { done = true; resolve(null); } });
     d.body.addEventListener('change', e => { const files = [...(e.target.closest('[data-pick-file]')?.files || [])]; if (files.length) finish(multiple ? files : files[0]); });
     d.body.addEventListener('click', async e => { const id = e.target.closest('[data-pick-photo]')?.dataset.pickPhoto; if (!id) return; const photo = await api.getPhoto(id); if (photo?.blob) finish(multiple ? [photo.blob] : photo.blob); });
-    for (const row of rows) {
-      const blob = await thumbBlob(api, row), img = d.body.querySelector(`[data-pick-photo="${CSS.escape(row.id)}"] img`);
-      if (!blob || !img) continue;
+    await eachThumb(api, rows, (id, blob) => {
+      const img = d.body.querySelector(`[data-pick-photo="${CSS.escape(id)}"] img`);
+      if (!img) return;
       const url = ctx.win.URL.createObjectURL(blob); urls.push(url); img.src = url;
-    }
+    }, () => !done);
   });
 }
 

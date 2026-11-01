@@ -3,7 +3,7 @@
 // sends what the user does. It draws into the chat app's view, inside the frame the chat app gives it (tabs and all).
 import {esc, btn, empty, avatar, field, textArea, input, toggle, help} from './common.js';
 import {icon} from './icons.js';
-import {thumbBlob, previewBlob} from './thumbs.js';
+import {eachThumb, previewBlob} from './thumbs.js';
 import {openImageViewer} from '../image-viewer.js';
 import {viewerHeart} from './photo-heart.js';
 import {downloadAction, shareAction} from '../download.js';
@@ -122,12 +122,9 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
       }
     });
     // the album's photos as small pictures, let go when the sheet closes
-    const byId = new Map(photos.map(r => [r.id, r])), local = [];
+    const imgs = new Map([...d.body.querySelectorAll('img[data-photo]')].map(img => [img.dataset.photo, img])), local = [];
     d.onClose(() => { for (const url of local) ctx.win.URL.revokeObjectURL(url); });
-    for (const img of d.body.querySelectorAll('img[data-photo]')) {
-      const row = byId.get(img.dataset.photo);
-      if (row) thumbBlob(api, row).then(blob => { if (!blob || !d.live) return; const url = ctx.win.URL.createObjectURL(blob); local.push(url); img.src = url; });
-    }
+    eachThumb(api, photos.filter(r => imgs.has(r.id)), (id, blob) => { const url = ctx.win.URL.createObjectURL(blob); local.push(url); imgs.get(id).src = url; }, () => d.live).catch(() => {});
   }
   function commentOn(id, to = '') {
     const reply = to && to !== 'me';

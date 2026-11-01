@@ -18,7 +18,8 @@ import {pictureInputs, photoTags, photoPicture} from '../core/draw.js';
 import {chatScene, sceneArt, sceneDark, syncMotion} from './chat-scenes.js';
 import {PREMIUM, yuan} from '../core/wallet.js';
 import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
-import {thumbBlob, previewBlob} from './thumbs.js';
+import {eachThumb, previewBlob} from './thumbs.js';
+import {photoWall} from './photo-wall.js';
 export {preview};
 
 // Chat app, QQ style: 消息 (conversations, with search, 置顶 and 免打扰), 联系人 (特别关心, friends, groups, profile cards)
@@ -617,12 +618,9 @@ export function chatApp(ctx) {
 
   /** A picker's photos as small pictures (ui/thumbs.js), let go when the picker closes. */
   function pickerThumbs(d, rows) {
-    const urls = [], byId = new Map(rows.map(r => [r.id, r]));
+    const urls = [], imgs = new Map([...d.body.querySelectorAll('img[data-chat-photo]')].map(img => [img.dataset.chatPhoto, img]));
     d.onClose(() => { for (const url of urls) ctx.win.URL.revokeObjectURL(url); });
-    for (const img of d.body.querySelectorAll('img[data-chat-photo]')) {
-      const row = byId.get(img.dataset.chatPhoto);
-      if (row) thumbBlob(api, row).then(blob => { if (!blob || !d.live) return; const url = ctx.win.URL.createObjectURL(blob); urls.push(url); img.src = url; });
-    }
+    eachThumb(api, rows.filter(r => imgs.has(r.id)), (id, blob) => { const url = ctx.win.URL.createObjectURL(blob); urls.push(url); imgs.get(id).src = url; }, () => d.live).catch(() => {});
   }
   // Album photos sent in the chat; each picture is read once and kept while the app is open. A bubble shows the photo's
   // middle-sized picture once one was made (ui/thumbs.js); the viewer, downloads and the chat background the photo itself.
@@ -728,9 +726,10 @@ export function chatApp(ctx) {
   };
 
   async function sendPhoto() {
-    const rows = await api.listPhotos(), local = [];
+    const rows = await api.listPhotos();
     let chosen = null;
-    const d = sheet('发送照片', `<div class="photo-grid pick-photos">${rows.map(r => `<button data-action="pick-photo" data-id="${esc(r.id)}" aria-pressed="false" aria-label="选择 ${esc(r.name)}"><img data-photo="${esc(r.id)}" alt="${esc(r.name)}"></button>`).join('')}</div>
+    const pieces = photoWall({api, win: ctx.win, tile: (r, url) => `<button data-action="pick-photo" data-id="${esc(r.id)}" aria-pressed="${chosen === r.id}" aria-label="选择 ${esc(r.name)}"><img decoding="async" data-photo="${esc(r.id)}" alt="${esc(r.name)}"${url ? ` src="${esc(url)}"` : ''}></button>`});
+    const d = sheet('发送照片', `${pieces.html([{rows}], ' pick-photos')}
       ${rows.length ? '' : '<p class="help-copy">相册里还没有照片，可以直接从本地选一张。</p>'}
       <div class="actions"><label class="secondary file-button">${icon('import')}从本地选<input type="file" data-chat-file accept="image/png,image/jpeg,image/webp,image/avif,image/gif" aria-label="从本地选照片"></label></div>
       ${field('照片说明', input('caption', '', 'text', 'maxlength="200" placeholder="比如：下班路上的晚霞"'), '现在的模型看不到图片本身，只看得到这句说明，写清楚照片里有什么，对方才好接话。\n\n想让对方直接看图：用能识图的模型（比如 Gemini、Claude、GPT-4o 这类），并在酒馆的「AI 回复配置」里打开「发送内联媒体」；用小手机自己的文字连接时，只要模型能识图就行。')}
@@ -747,7 +746,8 @@ export function chatApp(ctx) {
         await post([{from: 'me', kind: 'photo', photoId: chosen, text: caption}]);
       }
     });
-    d.onClose(() => { for (const url of local) ctx.win.URL.revokeObjectURL(url); });
+    pieces.mount(d.body);
+    d.onClose(() => pieces.stop());
     api.chatSeesPictures?.().then(yes => { const box = d.body.querySelector('[data-field=caption]'), info = box?.closest('.field')?.querySelector('.info'); if (!yes || !box) return; box.placeholder = '可以不写，对方看得到照片'; info?.setAttribute('data-help', '现在的模型能看图，对方会直接看到这张照片；说明可以不写，写了就当作你配的话。'); }).catch(() => {});
     d.body.addEventListener('change', e => {
       const file = e.target.closest('[data-chat-file]')?.files?.[0];
@@ -758,12 +758,6 @@ export function chatApp(ctx) {
         await post([{from: 'me', kind: 'photo', photoId: photo.id, text: caption}]);
       }).catch(error => ctx.notify(error.message));
     });
-    for (const row of rows) {
-      const blob = await thumbBlob(api, row);
-      if (!d.live) return;
-      const img = [...d.body.querySelectorAll('img[data-photo]')].find(x => x.dataset.photo === row.id);
-      if (blob && img) { const url = ctx.win.URL.createObjectURL(blob); local.push(url); img.src = url; }
-    }
   }
   function sendPacket() {
     const d = sheet('发红包', `<div class="packet-sheet">${field('金额', input('amount', '6.66', 'text', 'inputmode="decimal" maxlength="9"'))}${field('祝福语', input('blessing', '', 'text', `maxlength="40" placeholder="${BLESSING}"`))}</div>

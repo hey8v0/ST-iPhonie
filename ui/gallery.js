@@ -4,7 +4,8 @@
 import {createView, esc, btn, heading, empty, size, field, input, groupTitle, menu, pictureCopies} from './common.js';
 import {icon} from './icons.js';
 import {openAlbum} from './album-viewer.js';
-import {thumbBlob} from './thumbs.js';
+import {eachThumb, thumbBlob} from './thumbs.js';
+import {photoWall} from './photo-wall.js';
 import {nudge} from './carry.js';
 import {canCopyPicture, copyPicture} from './draw-images.js';
 import {slideSelect} from './photo-select.js';
@@ -26,7 +27,7 @@ export function galleryApp(ctx) {
   const {api, win} = ctx, v = createView(ctx, 'gallery'), urls = new Map();
   // tab: 图库 or 相簿; place: inside a 相簿 ({kind: 'album', id}) or a source ({kind: 'source', key}); selecting: the photos
   // ticked (null when not choosing); shown: the ids in the grid, in order; viewer: the photo open full screen.
-  let epoch = 0, tab = 'all', place = null, selecting = null, shown = [], viewer = null, rows = [], albums = [], hearts = new Set(), gestureAt = 0;
+  let ownHeart = 0, epoch = 0, tab = 'all', place = null, selecting = null, shown = [], viewer = null, rows = [], byId = new Map(), sources = null, albums = [], hearts = new Set(), gestureAt = 0, drawn = '';
   const urlFor = (id, blob) => { if (!urls.has(id)) urls.set(id, win.URL.createObjectURL(blob)); return urls.get(id); };
   const importButton = `<label class="chip-button file-button">${icon('import')}导入<input type="file" data-photo-files multiple accept="${IMPORT_TYPES}" aria-label="导入照片"></label>`;
   const photoFile = async id => { const photo = await api.getPhoto(id); if (!photo) throw Error('这张照片已经不在了'); return {source: photo.blob, name: photo.name}; };
@@ -35,35 +36,37 @@ export function galleryApp(ctx) {
   async function read() {
     const [photos, lists] = await Promise.all([api.listPhotos(), api.listAlbums()]);
     rows = byNewest(photos);
-    const known = new Set(rows.map(r => r.id));
+    byId = new Map(rows.map(r => [r.id, r]));
+    sources = null;
+    const known = new Set(byId.keys());
     albums = albumsInOrder(lists, known);
     hearts = new Set(albums.find(a => a.id === FAVORITES)?.photos || []);
     for (const [id, url] of urls) if (!known.has(id)) { win.URL.revokeObjectURL(url); urls.delete(id); }
     if (selecting) selecting = new Set([...selecting].filter(id => known.has(id)));
   }
   const albumNow = () => place?.kind === 'album' ? albums.find(a => a.id === place.id) || (place.id === FAVORITES ? {id: FAVORITES, name: '收藏', photos: []} : null) : null;
-  const sourceNow = () => place?.kind === 'source' ? photoSources(rows).find(s => s.key === place.key) || null : null;
+  const sourcesNow = () => sources ||= photoSources(rows);
+  const sourceNow = () => place?.kind === 'source' ? sourcesNow().find(s => s.key === place.key) || null : null;
   /** The photos this page shows. */
   function here() {
     if (!place) return rows;
     if (place.kind === 'source') return sourceNow()?.rows || [];
-    const by = new Map(rows.map(r => [r.id, r]));
-    return (albumNow()?.photos || []).map(id => by.get(id)).filter(Boolean);
+    return (albumNow()?.photos || []).map(id => byId.get(id)).filter(Boolean);
   }
 
   // ---------- the pages ----------
-  const tile = r => `<button type="button" data-action="photo" data-id="${esc(r.id)}" aria-label="${selecting ? '选择' : '查看'} ${esc(r.name)}"${selecting ? ` aria-pressed="${selecting.has(r.id)}"` : ''}${hearts.has(r.id) ? ' data-fav' : ''}><img loading="lazy" decoding="async" draggable="false" data-photo="${esc(r.id)}" alt="${esc(r.name)}"${urls.has(r.id) ? ` src="${esc(urls.get(r.id))}"` : ''}></button>`;
-  const grid = (list, days = true) => (days ? photoDays(list) : [{label: '', rows: list}]).map(({label, rows: part}) => `${label ? `<h3 class="photo-day">${esc(label)}</h3>` : ''}<div class="photo-grid${selecting ? ' selecting' : ''}">${part.map(tile).join('')}</div>`).join('');
+  const wall = photoWall({api, win, tile: (r, url) => `<button type="button" data-action="photo" data-id="${esc(r.id)}" aria-label="${selecting ? '选择' : '查看'} ${esc(r.name)}"${selecting ? ` aria-pressed="${selecting.has(r.id)}"` : ''}${hearts.has(r.id) ? ' data-fav' : ''}><img decoding="async" draggable="false" data-photo="${esc(r.id)}" alt="${esc(r.name)}"${url ? ` src="${esc(url)}"` : ''}></button>`});
+  const grid = (list, days = true) => wall.html(days ? photoDays(list) : [{label: '', rows: list}], selecting ? ' selecting' : '');
   const tabs = () => place ? '' : `<div class="segmented album-tabs" role="group" aria-label="图库和相簿"${selecting ? ' hidden' : ''}>${[['all', '图库'], ['albums', '相簿']].map(([key, label]) => `<button type="button" data-action="album-tab" data-tab="${key}" aria-pressed="${tab === key}">${label}</button>`).join('')}</div>`;
   const toolsHTML = () => selecting ? btn('select-cancel', '取消', 'chip-button')
     : (here().length ? btn('select', icon('check') + '选择', 'chip-button') : '') + (place?.kind === 'album' ? btn('album-menu', icon('more'), 'chip-button', 'aria-label="更多"') : !place ? importButton : '');
   const cover = (id, extra = '') => `<span class="album-cover${extra}">${id ? `<img loading="lazy" decoding="async" draggable="false" data-photo="${esc(id)}" alt=""${urls.has(id) ? ` src="${esc(urls.get(id))}"` : ''}>` : icon('image')}</span>`;
   function albumsPage() {
-    const favs = albums.find(a => a.id === FAVORITES) || {id: FAVORITES, name: '收藏', photos: []}, mine = albums.filter(a => a.id !== FAVORITES), sources = photoSources(rows);
+    const favs = albums.find(a => a.id === FAVORITES) || {id: FAVORITES, name: '收藏', photos: []}, mine = albums.filter(a => a.id !== FAVORITES), from = sourcesNow();
     const card = a => `<button type="button" class="album-card" data-action="open-album" data-album-id="${esc(a.id)}"${a.id === FAVORITES ? '' : ' data-sort'}>${cover(a.photos[0], a.id === FAVORITES ? ' favs' : '')}<strong>${esc(a.name)}</strong><small>${a.photos.length} 张</small></button>`;
     return heading('相簿', btn('album-new', icon('add') + '新建', 'chip-button'), 'Albums')
       + `<div class="album-cards" data-album-cards>${[favs, ...mine].map(card).join('')}<button type="button" class="album-card album-card-new" data-action="album-new"><span class="album-cover">${icon('add')}</span><strong>新建相簿</strong></button></div>`
-      + (sources.length ? groupTitle('来源') + `<div class="group album-sources">${sources.map(s => `<button type="button" class="list-row" data-action="open-source" data-key="${esc(s.key)}">${cover(s.rows[0].id, ' mini')}<span><strong>${esc(s.label)}</strong><small>${s.rows.length} 张</small></span>${icon('next')}</button>`).join('')}</div>` : '')
+      + (from.length ? groupTitle('来源') + `<div class="group album-sources">${from.map(s => `<button type="button" class="list-row" data-action="open-source" data-key="${esc(s.key)}">${cover(s.rows[0].id, ' mini')}<span><strong>${esc(s.label)}</strong><small>${s.rows.length} 张</small></span>${icon('next')}</button>`).join('')}</div>` : '')
       + tabs();
   }
   function placePage() {
@@ -85,22 +88,24 @@ export function galleryApp(ctx) {
     if (!here().length) selecting = null;
     const onAlbums = !place && tab === 'albums';
     shown = onAlbums ? [] : here().map(r => r.id);
-    v.draw(place ? placePage() : onAlbums ? albumsPage() : libraryPage());
+    const page = place ? placePage() : onAlbums ? albumsPage() : libraryPage(), same = page + shown.join();
+    // Nothing to draw again (opened again, a heart): what is on the page stays, and only the hearts may have changed.
+    if (same === drawn) { for (const b of liveTiles()) b.toggleAttribute('data-fav', hearts.has(b.dataset.id)); return; }
+    drawn = same;
+    v.draw(page);
+    wall.mount(v.root);
     if (selecting) paintChoosing();
-    await fillPictures(ticket);
+    await fillCovers(ticket);
   }
-  /** The small pictures already made show at once; the others are made one by one, and kept. */
-  async function fillPictures(ticket) {
-    const by = new Map(rows.map(r => [r.id, r])), imgs = new Map();
-    for (const img of v.root.querySelectorAll('img[data-photo]')) { if (!imgs.has(img.dataset.photo)) imgs.set(img.dataset.photo, []); imgs.get(img.dataset.photo).push(img); }
+  const liveTiles = () => v.root.querySelectorAll('.photo-grid [data-id]');
+  /** The small pictures on the 相簿 page. */
+  async function fillCovers(ticket) {
+    const imgs = new Map();
+    for (const img of v.root.querySelectorAll('.album-cover img[data-photo]')) { if (!imgs.has(img.dataset.photo)) imgs.set(img.dataset.photo, []); imgs.get(img.dataset.photo).push(img); }
     const put = (id, blob) => { const url = urlFor(id, blob); for (const img of imgs.get(id)) if (img.getAttribute('src') !== url) img.src = url; };
     const later = [];
-    for (const id of imgs.keys()) { const row = by.get(id); if (urls.has(id)) put(id, null); else if (row?.thumb) put(id, row.thumb); else if (row) later.push(row); }
-    for (const row of later) {
-      const blob = await thumbBlob(api, row);
-      if (v.disposed || ticket !== epoch) return;
-      if (blob) put(row.id, blob);
-    }
+    for (const id of imgs.keys()) { if (urls.has(id)) put(id, null); else if (byId.has(id)) later.push(byId.get(id)); }
+    await eachThumb(api, later, put, () => !v.disposed && ticket === epoch);
   }
 
   // ---------- choosing several ----------
@@ -121,7 +126,7 @@ export function galleryApp(ctx) {
     const bar = v.root.querySelector('.select-bar');
     if (on && !bar) v.root.insertAdjacentHTML('beforeend', barHTML());
     if (!on) bar?.remove();
-    for (const b of v.root.querySelectorAll('.photo-grid [data-id]')) {
+    for (const b of liveTiles()) {
       const name = b.querySelector('img')?.alt || '';
       b.setAttribute('aria-label', `${on ? '选择' : '查看'} ${name}`);
       if (!on) b.removeAttribute('aria-pressed');
@@ -131,7 +136,7 @@ export function galleryApp(ctx) {
   /** Ticks change in place (the grid is not drawn again, which would load every picture again). */
   function syncSelection() {
     if (!selecting) return;
-    for (const b of v.root.querySelectorAll('.photo-grid [data-id]')) { const want = String(selecting.has(b.dataset.id)); if (b.getAttribute('aria-pressed') !== want) b.setAttribute('aria-pressed', want); }
+    for (const b of liveTiles()) { const want = String(selecting.has(b.dataset.id)); if (b.getAttribute('aria-pressed') !== want) b.setAttribute('aria-pressed', want); }
     const $ = key => v.root.querySelector(`[data-action=${key}]`), count = v.root.querySelector('[data-select-count]');
     if (count) count.textContent = countText();
     if ($('select-all')) $('select-all').textContent = allText();
@@ -143,7 +148,14 @@ export function galleryApp(ctx) {
   const leaveChoosing = () => { selecting = null; paintChoosing(); };
   const slide = slideSelect({ctx, root: v.root, order: () => shown, picked: id => !!selecting?.has(id), pick: (id, on) => { if (on) selecting.add(id); else selecting.delete(id); },
     choosing: () => !!selecting, begin: choose, changed: syncSelection, covered: () => v.root.querySelector('.select-bar')?.offsetHeight || 0});
-  const hearted = async (ids, on) => { await api.favoritePhotos(ids, on); for (const id of ids) { if (on) hearts.add(id); else hearts.delete(id); for (const b of v.root.querySelectorAll('.photo-grid [data-id]')) if (b.dataset.id === id) b.toggleAttribute('data-fav', on); } };
+  // In 图库 a heart changes no list, only the tiles, here: reading thousands of rows again would hold up the heart. Inside a 相簿 the page follows.
+  const hearted = async (ids, on) => {
+    const here = !place;
+    if (here) ownHeart++;
+    try { await api.favoritePhotos(ids, on); } finally { if (here) ownHeart--; }
+    for (const id of ids) { if (on) hearts.add(id); else hearts.delete(id); }
+    for (const b of liveTiles()) b.toggleAttribute('data-fav', hearts.has(b.dataset.id));
+  };
 
   // ---------- sheets ----------
   /** A name for a 相簿. go(name) keeps it; what it throws is said, and the sheet stays. */
@@ -163,7 +175,7 @@ export function galleryApp(ctx) {
   function putInto(ids, done = () => {}) {
     const mine = albums.filter(a => a.id !== FAVORITES);
     const d = ctx.dialog('放入相簿', `<div class="pick-list album-pick-list"><button type="button" class="list-row" data-new-album>${icon('add')}<span><strong>新建相簿</strong></span></button>${mine.map(a => { const all = ids.every(id => a.photos.includes(id)); return `<button type="button" class="list-row" data-into="${esc(a.id)}"${all ? ' disabled' : ''}>${cover(a.photos[0], ' mini')}<span><strong>${esc(a.name)}</strong><small>${a.photos.length} 张${all ? ' · 已经在里面了' : ''}</small></span></button>`; }).join('')}</div>`);
-    for (const img of d.body.querySelectorAll('img[data-photo]')) { const row = rows.find(r => r.id === img.dataset.photo); if (urls.has(img.dataset.photo)) img.src = urls.get(img.dataset.photo); else if (row) thumbBlob(api, row).then(blob => { if (blob && d.live) img.src = urlFor(row.id, blob); }); }
+    for (const img of d.body.querySelectorAll('img[data-photo]')) { const row = byId.get(img.dataset.photo); if (urls.has(img.dataset.photo)) img.src = urls.get(img.dataset.photo); else if (row) thumbBlob(api, row).then(blob => { if (blob && d.live) img.src = urlFor(row.id, blob); }); }
     d.body.addEventListener('click', async e => {
       const into = e.target.closest('[data-into]'), fresh = e.target.closest('[data-new-album]');
       try {
@@ -183,7 +195,10 @@ export function galleryApp(ctx) {
   function addPhotos(album) {
     const inside = new Set(album.photos), list = rows.filter(r => !inside.has(r.id)), picked = new Set();
     if (!list.length) { ctx.notify(rows.length ? '所有照片都在里面了' : '相册里还没有照片'); return; }
-    const d = ctx.dialog(`放进「${album.name}」`, `<div class="photo-grid selecting album-pick">${list.map(r => `<button type="button" data-id="${esc(r.id)}" aria-pressed="false" aria-label="选择 ${esc(r.name)}"><img loading="lazy" decoding="async" draggable="false" data-photo="${esc(r.id)}" alt="${esc(r.name)}"${urls.has(r.id) ? ` src="${esc(urls.get(r.id))}"` : ''}></button>`).join('')}</div><div class="actions album-pick-go"><button type="button" class="primary" data-action="go" disabled>点照片来选择，或者按住一滑</button></div>`);
+    const pieces = photoWall({api, win, tile: (r, url) => `<button type="button" data-id="${esc(r.id)}" aria-pressed="${picked.has(r.id)}" aria-label="选择 ${esc(r.name)}"><img decoding="async" draggable="false" data-photo="${esc(r.id)}" alt="${esc(r.name)}"${url ? ` src="${esc(url)}"` : ''}></button>`});
+    const d = ctx.dialog(`放进「${album.name}」`, `${pieces.html([{rows: list}], ' selecting album-pick')}<div class="actions album-pick-go"><button type="button" class="primary" data-action="go" disabled>点照片来选择，或者按住一滑</button></div>`);
+    pieces.mount(d.body);
+    d.onClose(() => pieces.stop());
     const tiles = () => d.body.querySelectorAll('.photo-grid [data-id]'), go = d.body.querySelector('[data-action=go]');
     const show = () => { for (const b of tiles()) b.setAttribute('aria-pressed', String(picked.has(b.dataset.id))); go.disabled = !picked.size; go.textContent = picked.size ? `放进去 ${picked.size} 张` : '点照片来选择，或者按住一滑'; };
     const sliding = slideSelect({ctx, root: d.body, scroller: d.body, order: () => list.map(r => r.id), picked: id => picked.has(id), pick: (id, on) => { if (on) picked.add(id); else picked.delete(id); }, choosing: () => true, changed: show, covered: () => go.offsetHeight + 12});
@@ -196,9 +211,6 @@ export function galleryApp(ctx) {
         catch (error) { go.disabled = false; ctx.notify(error.message, {error: true}); }
       }
     });
-    for (const row of list) if (row.thumb && !urls.has(row.id)) urlFor(row.id, row.thumb);
-    for (const img of d.body.querySelectorAll('img[data-photo]')) if (urls.has(img.dataset.photo)) img.src = urls.get(img.dataset.photo);
-    (async () => { for (const row of list) { if (urls.has(row.id)) continue; const blob = await thumbBlob(api, row); if (!d.live) return; if (blob) { const url = urlFor(row.id, blob), img = [...d.body.querySelectorAll('img[data-photo]')].find(x => x.dataset.photo === row.id); if (img) img.src = url; } } })().catch(() => {});
   }
   /**
    * 导出到手机: a whole 相簿 or what was picked. On a phone 存到手机相册 is the system's share sheet (保存图片), a few at a time;
@@ -275,7 +287,7 @@ export function galleryApp(ctx) {
     let changed = false;
     const album = albumNow();
     viewer = openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: shown, index: Math.max(0, shown.indexOf(id)), from,
-      to: x => [...v.root.querySelectorAll('.photo-grid [data-id]')].find(b => b.dataset.id === x)?.getBoundingClientRect(),
+      to: x => wall.reveal(x)?.getBoundingClientRect(),
       // a photo made smaller by 压缩旧图 says so under 参数
       load: async x => { const p = await api.getPhoto(x); return p?.packed ? {...p, info: [...(p.info || []), ['压缩', `已压缩，原图 ${size(p.packed.size)}`]]} : p; },
       actions: [
@@ -369,9 +381,9 @@ export function galleryApp(ctx) {
     return false;
   };
   // A finger on the grid is not interrupted: what came meanwhile shows when it is lifted, with the next change.
-  v.refresh = () => slide.active || lifted?.on ? undefined : render();
+  v.refresh = () => ownHeart || slide.active || lifted?.on ? undefined : render();
   const dispose = v.dispose;
-  v.dispose = () => { epoch++; viewer?.close(); for (const url of urls.values()) win.URL.revokeObjectURL(url); urls.clear(); dispose(); };
+  v.dispose = () => { epoch++; viewer?.close(); wall.stop(); for (const url of urls.values()) win.URL.revokeObjectURL(url); urls.clear(); dispose(); };
   v.on('change', '[data-photo-files]', async el => {
     el.disabled = true;
     try {

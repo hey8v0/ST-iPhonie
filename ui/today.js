@@ -120,25 +120,29 @@ export function todayPage(deps) {
     }
   }
   const has = kind => list.some(w => w.kind === kind);
+  // The album as last read for the photo widget: a list of thousands is not read again for every message.
+  let albumTurn = 0, pickedAt = '';
   /** What the chat, notes and photo widgets show, read again. */
   async function refresh() {
     const mine = ++ticket;
     const safe = p => Promise.resolve().then(p).catch(() => null);
-    const [threads, notes, photos] = await Promise.all([has('chat') ? safe(() => api.listThreads()) : null, has('notes') ? safe(() => api.listNotes()) : null, has('photo') ? safe(() => api.listPhotos()) : null]);
+    const hour = Math.floor(Date.now() / 3.6e6), small = list.every(w => w.kind !== 'photo' || w.size === 's'), turn = `${hour}|${small}|${albumTurn}`;
+    const [threads, notes, photos] = await Promise.all([has('chat') ? safe(() => api.listThreads()) : null, has('notes') ? safe(() => api.listNotes()) : null, has('photo') && turn !== pickedAt ? safe(() => api.listPhotos()) : null]);
     if (mine !== ticket) return;
     if (threads) data.threads = [...threads].sort((a, b) => (b.pinned - a.pinned) || ((b.last?.at || b.updatedAt || 0) - (a.last?.at || a.updatedAt || 0)));
     if (notes) data.notes = [...notes].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     if (photos) {
       // 精选照片: one of the album, another each hour.
-      const rows = [...photos].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)), pick = rows.length ? rows[Math.floor(Date.now() / 3.6e6) % rows.length].id : '';
+      const rows = [...photos].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)), pick = rows.length ? rows[hour % rows.length].id : '';
       // A small widget shows the photo's middle-sized picture once one was made (ui/thumbs.js); a bigger one, the photo.
-      const small = list.every(w => w.kind !== 'photo' || w.size === 's'), key = pick && `${pick}|${small}`;
+      const key = pick && `${pick}|${small}`;
       if (key !== data.photoKey) {
         const blob = pick ? (small && await previewBlob(api, pick)) || (await safe(() => api.getPhoto(pick)))?.blob : null;
         if (mine !== ticket) return;
         if (data.photo) win.URL.revokeObjectURL(data.photo);
         data.photoKey = key; data.photo = blob ? win.URL.createObjectURL(blob) : null;
       }
+      pickedAt = turn;
     }
     paint(['chat', 'notes', 'photo']);
   }
@@ -323,7 +327,7 @@ export function todayPage(deps) {
 
   render();
   return {
-    root, setList, refresh, paint, edit,
+    root, setList, refresh, paint, edit, albumChanged: () => { albumTurn++; },
     get editing() { return editing; },
     /** Leaving the page: editing and a search end. */
     leave() { edit(false); if (search.value) { search.value = ''; searchFor(''); } },

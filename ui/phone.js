@@ -1009,6 +1009,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (event.type === 'phone') run(() => appearance(event.preferences));
     if (['chat', 'library', 'space'].includes(event.type)) todayLater();
     if (event.type === 'library') {
+      if (event.collection === 'photos') today?.albumChanged();
       const key = ({favorites: 'library', cache: 'library', photos: 'gallery', notes: 'notes', books: 'picbook'})[event.collection];
       if (active === key) run(() => views.get(key)?.refresh());
     }

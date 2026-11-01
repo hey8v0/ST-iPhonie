@@ -15,8 +15,8 @@
  *        meta its summary (name, thumbnail, strength, which models are encoded); listVibes omits blob.
  * getPhoto/getReference/getFavorite return null for missing IDs; deletes return
  * whether an owned row existed. Every write resolves only after transaction commit.
- * The lists of photos, favorites, references and vibes read 'meta' (each row without its file), not the files; listPhotos
- * adds `thumb`, the photo's small picture for grids, where one was made (saveThumb; core/thumbnail.js makes them).
+ * The lists of photos, favorites, references and vibes read 'meta' (each row without its file), not the files.
+ * A photo's small picture for grids is kept apart (saveThumb, getThumbs; core/thumbnail.js makes them).
  * A photo's middle-sized picture for chat bubbles and posts is kept apart (savePreview), so no list reads it.
  */
 import {connectionLost, lostError} from './idb.js';
@@ -217,16 +217,15 @@ export class LocalLibrary {
   const rows=metadata&&MEDIA.includes(name)?await this.#metaRows(name):(await this.#read(name)).map(row=>publicRow(row,metadata));
   return rows.sort((a,b)=>b.updatedAt-a.updatedAt||a.id.localeCompare(b.id));
  }
- /** The rows of a picture or recording store without their files ('meta'); photos with their small pictures. */
+ /** The rows of a picture or recording store without their files ('meta'). */
  async #metaRows(name){
   return this.#run(db=>new Promise((resolve,reject)=>{
-   let tx,rows=[];const thumbs=new Map();
+   let tx,rows=[];
    try{
-    tx=db.transaction(name==='photos'?['meta','thumbs']:['meta'],'readonly');
+    tx=db.transaction(['meta'],'readonly');
     const req=tx.objectStore('meta').index('store').getAll([this.#scope,name]);req.onsuccess=()=>{rows=req.result.map(r=>r.data);};
-    if(name==='photos'){const got=tx.objectStore('thumbs').index('scope').getAll(this.#scope);got.onsuccess=()=>{for(const t of got.result)thumbs.set(t.id,t);};}
    }catch(e){reject(friendly(e));return;}
-   tx.oncomplete=()=>resolve(rows.map(row=>{const t=thumbs.get(row.id);return t?{...row,thumb:new Blob([t.bytes],{type:t.type})}:row;}));
+   tx.oncomplete=()=>resolve(rows);
    tx.onabort=()=>reject(friendly(tx.error));tx.onerror=()=>{};
   }));
  }
@@ -258,6 +257,19 @@ export class LocalLibrary {
  async getPhoto(id){return publicRow(await this.#read('photos',identifier(id)));}
  /** A photo's small picture for grids, {blob, w, h}, or null when none was made yet. */
  async getThumb(id){const row=await this.#read('thumbs',identifier(id));return row?{blob:new Blob([row.bytes],{type:row.type}),w:row.w,h:row.h}:null;}
+ /** The small pictures of these photos, those made so far, read in one go: [{id, blob}]. */
+ async getThumbs(ids){
+  const list=[...ids].map(identifier);
+  return this.#run(db=>new Promise((resolve,reject)=>{
+   let tx;const out=[];
+   try{
+    tx=db.transaction(['thumbs'],'readonly');const store=tx.objectStore('thumbs');
+    for(const id of list){const req=store.get([this.#scope,id]);req.onsuccess=()=>{if(req.result)out.push({id,blob:new Blob([req.result.bytes],{type:req.result.type})});};}
+   }catch(e){reject(friendly(e));return;}
+   tx.oncomplete=()=>resolve(out);
+   tx.onabort=()=>reject(friendly(tx.error));tx.onerror=()=>{};
+  }));
+ }
  /** Keeps a photo's small picture; a photo that is gone keeps none. It is not counted in the library's size (it is made
   *  again whenever it is missing). Resolves whether it was kept. */
  async saveThumb(id,{blob,w,h}={}){
