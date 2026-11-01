@@ -364,6 +364,11 @@ export function tidyChunkGroups(d) { [d.chunks, d.chunkGroups] = tidyGroups(d.ch
 export const styleTree = d => layerTree(d.styles, d.styleGroups);
 /** A 效果图 is the tavern's own picture files; a link to anywhere else in imported settings is not shown. */
 const COVER_PATH = /^\/?user\/images\/[^"\\?#]+$/;
+/**
+ * A picture file of the tavern, named from the tavern's root. An upload answers `/user/images/…`, on TauriTavern
+ * `user/images/…`, which the phone's frame would look for under its own folder.
+ */
+export const tavernPicture = path => typeof path === 'string' && path.startsWith('user/images/') ? '/' + path : path;
 /** The 画风 a picture was drawn with, by the 画师串 in its words (the longest that fits); null when none does. */
 export function styleOfWords(d, words) {
   const text = String(words || '');
@@ -444,7 +449,7 @@ export function normalizeDraw(value) {
   d.maskLook = normalizeMaskLook(d.maskLook);
   d.params = normalizeDrawParams(d.params);
   d.styles = (Array.isArray(d.styles) && d.styles.length ? d.styles : base.styles).map(s => ({id: String(s.id || crypto.randomUUID()), name: text(s.name, 60) || '画风', artist: text(s.artist, 4000), positive: text(s.positive, 4000), negative: text(s.negative, 4000),
-    ...(s.params && typeof s.params === 'object' ? {params: styleParams({...d.params, ...s.params})} : {}), ...(s.group ? {group: String(s.group)} : {}), ...(COVER_PATH.test(s.cover?.thumb) && COVER_PATH.test(s.cover?.full) ? {cover: {thumb: String(s.cover.thumb), full: String(s.cover.full)}} : {})}));
+    ...(s.params && typeof s.params === 'object' ? {params: styleParams({...d.params, ...s.params})} : {}), ...(s.group ? {group: String(s.group)} : {}), ...(COVER_PATH.test(s.cover?.thumb) && COVER_PATH.test(s.cover?.full) ? {cover: {thumb: tavernPicture(String(s.cover.thumb)), full: tavernPicture(String(s.cover.full))}} : {})}));
   tidyStyleGroups(d);
   d.activeStyle = d.styles.some(s => s.id === d.activeStyle) ? d.activeStyle : d.styles[0].id;
   // From before 画风 kept parameters: the one in use keeps the parameters in use now.

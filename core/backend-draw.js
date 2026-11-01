@@ -318,7 +318,7 @@ class DrawSettings {
         style.cover = cover;
         this.save(next);
         sweepCovers(this, [old]);
-        return clone(cover);
+        return clone(this.settings.draw.styles.find(s => s.id === id).cover);
     }
     clearStyleCover(id) {
         const next = this.getState(), style = next.draw.styles.find(s => s.id === id), old = style?.cover;

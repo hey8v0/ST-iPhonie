@@ -3,7 +3,7 @@
 // (settings.vn.cast), so every device sees them. A character can have a VRM or Live2D model instead (vn-model.js), kept
 // as a file in the tavern's user/files the same way.
 import {storySteps, userSteps, pickLook, inlinePictures, editLook} from './core/vn.js';
-import {parsePictures} from './core/draw.js';
+import {parsePictures, tavernPicture} from './core/draw.js';
 import {storyMessage, storyReply} from './core/outgoing.js';
 import {parseSounds} from './core/sounds.js';
 import {parseBgm} from './core/music.js';
@@ -220,7 +220,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       const ctx = context();
       const response = await fetch('/api/images/upload', {method: 'POST', headers: ctx.getRequestHeaders(), body: JSON.stringify({image: await backend.base64(blob), format: 'png', ch_name: 'ST-iPhonie', filename: 'vn-sprite-' + Date.now()})});
       if (!response.ok) throw Error('立绘没能存进酒馆（' + response.status + '）');
-      url = (await response.json()).path;
+      url = tavernPicture((await response.json()).path);
     }
     const s = settings(), removing = !blob && !use && !drop && typeof mix !== 'boolean' && !dropOutfit;
     const {entry, gone} = editLook(s.vn.cast?.[name], {look, outfit, url, add, use, drop: removing ? true : drop, mix, seed, dropOutfit});

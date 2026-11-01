@@ -4,7 +4,7 @@
 import {skippedRanges, narrationPieces, NARRATION_SKIP, NARRATION_BODY, cleanSkip} from './narration.js';
 import {normalizeModels, normalizeMoveFiles} from './model-files.js';
 import {visualEmotion, visualEffects, matchesVisualWord, visualWordEmotion, visualWordHits, doneBy} from './visual-emotion.js';
-import {activeStyle, sizeFor} from './draw.js';
+import {activeStyle, sizeFor, tavernPicture} from './draw.js';
 import {isV5} from './novelai.js';
 
 /** What a 立绘 asks of the picture, after the 画风 and before the character's own looks. Editable in the app. The
@@ -57,7 +57,7 @@ const words = (value,max=LIMIT.label) => [...new Set((Array.isArray(value) ? val
  * models: VRM / Live2D models (core/model-files.js normalizeModels); useModel: the one the stage shows in place of the
  * 立绘 ('' = the 立绘).
  */
-const urlOf = value => text(value, LIMIT.url);
+const urlOf = value => tavernPicture(text(value, LIMIT.url));
 function normalizeAlts(list) {
   const out = [], seen = new Set();
   for (const a of Array.isArray(list) ? list : []) {

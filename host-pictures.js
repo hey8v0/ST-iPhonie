@@ -11,7 +11,7 @@
 // When the last version is deleted the record becomes {removed: true, versions: []}, so it is not drawn again
 // automatically. Older records ({url, seed, …}) read as a single version.
 import {storyReply} from './core/outgoing.js';
-import {parsePictures, pictureInputs, planRequest, planLength, tagTextRequest, tagTextAnswer, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
+import {tavernPicture, parsePictures, pictureInputs, planRequest, planLength, tagTextRequest, tagTextAnswer, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
 import {tokenBudget, loadCounter, countField, tagCost, estimateTokens} from './core/tokens.js';
 import {editTags} from './host-ask.js';
 import {downloadAction} from './download.js';
@@ -93,7 +93,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       body: JSON.stringify({image: base64, format: 'png', ch_name: ctx.name2 || 'ST-iPhonie', filename: String(name).replace(/\./g, '_')})
     });
     if (!response.ok) throw Error('图片已生成，但上传到酒馆失败（' + response.status + '）');
-    return (await response.json()).path;
+    return tavernPicture((await response.json()).path);
   }
   /** Deletes a picture file from the tavern's image folder. A file that is already gone counts as deleted. */
   async function removeFile(url) {

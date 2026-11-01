@@ -9,7 +9,7 @@ import { TTSBackend } from './core/backend.js';
 import { normalizeSettings,validateSettings,modelRules,NAMESPACE } from './core/state.js';
 import { DEFAULT_FORMAT,parseDialogue,renderDialogue,plainDialogue,promptPlan,validatePreset,isPlaceholderRole,DEFAULT_PROMPT,knownFormats,dialogueProblems,escapeHTML,unwaveFramed,markDialogue,waveMarks,unmark,KEEP_REPLY } from './core/protocol.js';
 import { FloatingPlayer } from './core/floating.js';
-import { renderPictures, drawPromptPlan } from './core/draw.js';
+import { renderPictures, drawPromptPlan, tavernPicture } from './core/draw.js';
 import { outgoingChat, storyReply } from './core/outgoing.js';
 import { createPictureHost } from './host-pictures.js';
 import { createChatHost } from './host-chat.js';
@@ -128,7 +128,7 @@ function tavernFiles(){const headers=()=>({'Content-Type':'application/json',...
    if(/^user\/files\//.test(p)){await this.write(file,blob);return p;}
    const ext=(file.match(/\.(\w+)$/)||[])[1]?.toLowerCase()||'png',folder=parts.slice(2).join('/');
    const r=await fetch('/api/images/upload',{method:'POST',headers:headers(),body:JSON.stringify({image:await base64(blob),format:ext==='jpeg'?'jpg':ext,filename:file.replace(/\.\w+$/,''),...(folder?{ch_name:folder}:{})})});
-   if(!r.ok)throw Error(`立绘没能存回酒馆（${r.status}${r.status===413?'，文件太大':''}）`);return (await r.json()).path;}};}
+   if(!r.ok)throw Error(`立绘没能存回酒馆（${r.status}${r.status===413?'，文件太大':''}）`);return tavernPicture((await r.json()).path);}};}
 const deviceName=()=>(/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent||'')?'手机':'电脑')+' · '+browserName();
 // Leaving the page (or switching away on a phone) saves what is waiting, so the other device sees it.
 function flushSync(){if(document.visibilityState!=='hidden'||!backend)return;backend.ledger?.flush().catch(()=>{});if(backend.syncState?.pending)backend.syncNow().catch(()=>{});}
