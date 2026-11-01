@@ -2,11 +2,11 @@
 // library has none of (缺的声音: upload one, or have ElevenLabs make it), and the library by name: each name can have
 // several versions (played in turn), an ambience a 底子 that loops and 点缀 now and then. Playing happens in the tavern
 // page (host-sounds.js); this app only keeps the library.
-import {createView, esc, btn, field, input, select, toggle, heading, groupTitle, plate, empty, size, help} from './common.js';
+import {createView, esc, btn, field, input, select, toggle, heading, groupTitle, empty, size, help} from './common.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {icon} from './icons.js';
 import {saveFile} from '../download.js';
-import {KIND_NAMES, LAYER_NAMES, SOUND_SOURCES, soundName} from '../core/sounds.js';
+import {KIND_NAMES, SOUND_SOURCES, soundName} from '../core/sounds.js';
 
 const KINDS = [['sfx', '音效'], ['ambience|bed', '氛围音 · 底子'], ['ambience|dot', '氛围音 · 点缀']];
 const STRENGTH_CHOICES = [['', '不分轻重'], ['轻', '轻'], ['重', '重']];

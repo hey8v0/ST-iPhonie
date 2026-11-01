@@ -1,4 +1,4 @@
-import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, empty, menu} from './common.js';
+import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, menu} from './common.js';
 import {icon, glyph} from './icons.js';
 import {APPS} from './apps.js';
 import {MARK_CHOICES} from '../core/voice-fx.js';

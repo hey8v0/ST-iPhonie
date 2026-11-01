@@ -1,6 +1,7 @@
 import {createView, esc, engines, btn, heading, empty, size, field, input, textArea, groupTitle, avatar, help} from './common.js';
 import {icon, wave, halo} from './icons.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
+import {rowWindow} from './row-window.js';
 import {saveFile, zipFiles} from '../download.js';
 import {decodeMono, joinClips, encodeWav, JOIN_RATE} from '../core/audio-join.js';
 
@@ -8,14 +9,22 @@ const NOTE_COLORS = ['#fff4b0', '#ffd9e6', '#d9ecff', '#e3f5d9', '#efe0ff', '#ff
 const hash = text => [...String(text)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7);
 /** Saves the audio or picture a backend call returns ({blob, name}) and says under which name. */
 const saveAs = async (ctx, file) => { const {blob, name} = await file; ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, name)); };
-const dateLabel = time => new Date(time).toLocaleDateString('zh-CN', {month: 'numeric', day: 'numeric'});
+// One formatter for every row: making one costs far more than using it.
+const DAY = new Intl.DateTimeFormat('zh-CN', {month: 'numeric', day: 'numeric'});
+const dateLabel = time => { const d = new Date(time); return Number.isNaN(d.getTime()) ? '' : DAY.format(d); };
 
 export function libraryApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'library');
   let tab = 'favorites', role = '', epoch = 0, swipe = null, preview = null, playing = '';
+  const favoriteRow = r => swipeRow(r.id, `<div class="audio-row" data-engine="${esc(r.engine)}"><span class="disc play">${icon('play', true)}</span><div><p>“${esc(r.translation || r.text)}”</p><small>${esc(r.role)} · ${engines[r.engine] || r.engine} · ${size(r.size)} · ${dateLabel(r.createdAt)}</small></div></div>`,
+    [{key: 'download', label: '下载', icon: 'download'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}], {label: r.translation || r.text});
+  const cachedRow = r => { const line = r.metadata?.line || {}; return swipeRow(r.key, `<div class="audio-row${playing === r.key ? ' playing' : ''}" data-engine="${esc(r.metadata?.route?.engine || 'none')}"><span class="disc">${icon('wave')}</span><div><p>${esc(line.translation ? '“' + line.translation + '”' : '早期缓存的音频')}</p><small>${esc(line.role || '未知角色')} · ${size(r.bytes)}</small></div></div>`,
+    [{key: 'download', label: '下载', icon: 'download'}, {key: 'favorite', label: '收藏', icon: 'heart'}, {key: 'delete', label: '清理', icon: 'trash', danger: true}], {label: line.translation || ''}); };
+  // Thousands of lines are nothing unusual here: the cache keeps every line ever heard.
+  const list = rowWindow({win: ctx.win, id: r => r.id ?? r.key, row: r => r.id ? favoriteRow(r) : cachedRow(r)});
   const stopPreview = () => { if (preview) { preview.pause(); ctx.win.URL.revokeObjectURL(preview.src); } preview = null; playing = ''; v.root.querySelectorAll('.audio-row.playing').forEach(r => r.classList.remove('playing')); };
   const dispose = v.dispose;
-  v.dispose = () => { stopPreview(); swipe?.dispose(); dispose(); };
+  v.dispose = () => { stopPreview(); swipe?.dispose(); list.stop(); dispose(); };
   /** A cached line heard here (tap again to stop). */
   async function listen(key) {
     const was = playing;
@@ -40,8 +49,7 @@ export function libraryApp(ctx) {
     let body;
     if (tab === 'favorites') {
       body = shown.length
-        ? '<div class="group" data-audio-list>' + shown.map(r => swipeRow(r.id, `<div class="audio-row" data-engine="${esc(r.engine)}"><span class="disc play">${icon('play', true)}</span><div><p>“${esc(r.translation || r.text)}”</p><small>${esc(r.role)} · ${engines[r.engine] || r.engine} · ${size(r.size)} · ${dateLabel(r.createdAt)}</small></div></div>`,
-          [{key: 'download', label: '下载', icon: 'download'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}], {label: r.translation || r.text})).join('') + '</div>'
+        ? `<div class="group" data-audio-list>${list.html(shown)}</div>`
         : empty('把喜欢的对白留在这里', '在听取里点爱心，就能把生成过的台词收藏起来。', 'heart');
     } else {
       // One bar for the whole room (本地资料's and the cache's together): 收藏与资料 then the cache.
@@ -49,16 +57,16 @@ export function libraryApp(ctx) {
       body = `<div class="group pad"><strong>本机音频</strong><div class="storage-meter"><i style="width:${fav}%;background:var(--pink)"></i><i style="width:${used}%;background:var(--accent)"></i></div>
           <div class="legend"><span style="--c:var(--pink)">收藏与资料 ${library ? size(library.bytes) : '无法读取'}</span><span style="--c:var(--accent)">缓存 ${cache.available ? cache.count + ' 段 · ' + size(cache.bytes) : '不可用'}</span></div></div>`
         + (shown.length
-          ? '<div class="group" data-audio-list>' + shown.map(r => { const line = r.metadata?.line || {}; return swipeRow(r.key, `<div class="audio-row${playing === r.key ? ' playing' : ''}" data-engine="${esc(r.metadata?.route?.engine || 'none')}"><span class="disc">${icon('wave')}</span><div><p>${esc(line.translation ? '“' + line.translation + '”' : '早期缓存的音频')}</p><small>${esc(line.role || '未知角色')} · ${size(r.bytes)}</small></div></div>`,
-            [{key: 'download', label: '下载', icon: 'download'}, {key: 'favorite', label: '收藏', icon: 'heart'}, {key: 'delete', label: '清理', icon: 'trash', danger: true}], {label: line.translation || ''}); }).join('') + '</div>'
+          ? `<div class="group" data-audio-list>${list.html(shown)}</div>`
           : empty('还没有音频缓存', '点聊天里的声波生成过的台词会暂存在这里。'))
         + `<div class="actions">${btn('clear-cache', icon('trash') + '清理全部缓存', 'danger')}</div><p class="hint">收藏和缓存分开保存，清理缓存不会删掉收藏。</p>`;
     }
     swipe?.dispose(); swipe = null;
     v.draw(heading('音频收藏', '', 'Voice Library') + tabs + filters + body);
-    const list = v.root.querySelector('[data-audio-list]');
+    const box = v.root.querySelector('[data-audio-list]');
     const acts = tab === 'favorites' ? '下载、删除' : '下载、收藏、清理';
-    if (list) swipe = mountSwipeList(list, {ctx, hint: `点一下播放；左滑：${acts}；右滑：多选`, mouseHint: `点一下播放；右键或 ⋯：${acts}；按住 Ctrl 点：多选`,
+    if (box) list.mount(box, v.root); else list.stop();
+    if (box) swipe = mountSwipeList(box, {ctx, hint: `点一下播放；左滑：${acts}；右滑：多选`, mouseHint: `点一下播放；右键或 ⋯：${acts}；按住 Ctrl 点：多选`, ids: () => shown.map(r => r.id ?? r.key),
       onTap: id => (tab === 'favorites' ? api.playFavorite(id) : listen(id)).catch(error => ctx.notify(error.message, {error: true})),
       onAction: (key, id) => act(key, [id]).catch(error => ctx.notify(error.message, {error: true})),
       bulk: tab === 'favorites' ? [{key: 'download', label: '下载', icon: 'download'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}]

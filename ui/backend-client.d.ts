@@ -625,6 +625,8 @@ export interface BackendFacade {
     readonly drawCatalog: { readonly models: readonly string[]; readonly modelNames: Readonly<Record<string, string>>; readonly samplers: readonly string[]; readonly schedules: readonly string[];
         readonly engines: readonly DrawEngine[]; readonly engineNames: Readonly<Record<DrawEngine, string>>; readonly gptModels: readonly string[]; readonly gptQualities: readonly string[]; readonly comfyWorkflow: string };
     getState(): Settings;
+    /** The settings themselves, no copy: to read and never to change. For what is read for every row drawn (getState copies them all each time). */
+    readState(): Readonly<Settings>;
     getSnapshot(): SettingsSnapshot;
     save(next: Settings, expectedRevision?: number): Settings;
     updateGeneral(patch: Partial<GeneralSettings>): Settings;

@@ -1094,7 +1094,8 @@ html{color-scheme:light dark!important;background:transparent}
 @keyframes skeleton{from{background-position:130% 0}to{background-position:-30% 0}}
 .moments-feed{display:flex;flex-direction:column;gap:2px;margin:4px 0 16px;padding:4px 14px;border-radius:20px;background:var(--card);box-shadow:var(--shadow)}
 .moment{display:flex;gap:10px;padding:14px 0}
-.moment+.moment{border-top:1px solid var(--line)}
+.moment+.moment,.row-piece+.row-piece>.moment:first-child{border-top:1px solid var(--line)}
+.moments-feed>.row-piece{display:flex;flex-direction:column;gap:2px;min-width:0}
 .moment .avatar{flex:none}
 .moment-body{flex:1;min-width:0}
 .moment-name{display:block;font-size:15px;color:var(--accent-ink)}
@@ -1341,7 +1342,7 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .forum-hot li{display:flex;align-items:center;gap:8px;font-size:13px;min-width:0}
 .forum-hot .rank{flex:0 0 20px;height:20px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:900;background:var(--card2);color:var(--ink2)}
 .forum-hot .rank.top{background:#ff7a45;color:#fff}
-.forum-feed{display:grid;gap:10px}
+.forum-feed,.forum-feed>.row-piece{display:grid;gap:10px;min-width:0}
 .forum-card{all:unset;cursor:pointer;display:grid;gap:6px;padding:12px 14px;border-radius:20px;background:var(--card);box-shadow:var(--shadow);min-width:0}
 .forum-author{display:flex;align-items:center;gap:8px;min-width:0;font-size:13px}
 .forum-author b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -2742,7 +2743,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 
 /* ---------- 滑动列表 (ui/swipe-list.js): rows that swipe like Procreate's layers ---------- */
 .sw-row{position:relative;overflow:hidden;--sw-p:0;--sw-r:0;isolation:isolate}
-.sw-row+.sw-row{border-top:1px solid var(--line)}
+.sw-row+.sw-row,.row-piece+.row-piece>.sw-row:first-child{border-top:1px solid var(--line)}
 .sw-actions{position:absolute;top:0;bottom:0;right:0;width:var(--sw-w);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:0 4px 0 8px;box-sizing:border-box;z-index:0}
 .sw-act{all:unset;box-sizing:border-box;flex:none;width:64px;height:min(58px,calc(100% - 12px));min-height:44px;border-radius:16px;display:grid;place-items:center;align-content:center;gap:3px;cursor:pointer;color:var(--accent-ink);background:var(--accent-soft);font-size:11px;font-weight:800;letter-spacing:.02em;
   opacity:clamp(0,calc(var(--sw-p) * 2.4 - var(--i) * .5),1);

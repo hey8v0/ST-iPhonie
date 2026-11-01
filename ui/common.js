@@ -60,8 +60,8 @@ export const avatar = (name, engine = 'none', size = 48, key = name) => {
 };
 
 /** Rows that keep who they are when a page is drawn again: they glide to their new places (FLIP), new ones fade in. */
-const KEYED = '.sw-row[data-swipe],.conv[data-thread],.list-row[data-id],.list-row[data-name],.moment[data-id],.forum-card[data-id],[data-flip]';
-const keyOf = el => el.dataset.swipe || el.dataset.thread || el.dataset.flip || (el.dataset.id ? el.className.split(' ')[0] + ':' + el.dataset.id : 'name:' + el.dataset.name);
+const KEYED = '.sw-row[data-swipe],.conv[data-conv],.list-row[data-id],.list-row[data-name],.moment[data-id],.forum-card[data-id],[data-flip]';
+const keyOf = el => el.dataset.swipe || el.dataset.conv || el.dataset.flip || (el.dataset.id ? el.className.split(' ')[0] + ':' + el.dataset.id : 'name:' + el.dataset.name);
 const titleOf = root => root.querySelector('.page-heading h1')?.textContent || '';
 /** A tap on something that goes back (the phone's back, a 返回 of the app's own) makes the next page come from the left. */
 const BACKWARD = '[data-action$=back],[data-action^=back],[aria-label^="返回"],.nav-back';
@@ -89,8 +89,8 @@ export function createView(ctx, name) {
       root.animate([{transform: `translateX(${dir * 34}px)`, opacity: .35}, {transform: 'none', opacity: 1}], {duration: 340, easing: 'cubic-bezier(.2,.9,.25,1)'});
       return;
     }
-    // The first drawing of an app comes in with its own entrance.
-    if (!title) return;
+    // The first drawing of an app comes in with its own entrance. A page with no title (聊天's list) is the same page if it still has rows it had.
+    if (!title && ![...root.querySelectorAll(KEYED)].some(el => before.has(keyOf(el)))) return;
     let moved = 0;
     const fresh = [];
     for (const el of root.querySelectorAll(KEYED)) {
@@ -192,7 +192,8 @@ function bindCombos(root, signal) {
   root.addEventListener('input', e => { if (e.target.matches('.combo input') && e.target.ownerDocument.activeElement === e.target) show(e.target.closest('.field'), true, e.target.value); }, {signal});
   root.addEventListener('keydown', e => { if (e.key === 'Escape' && e.target.closest('.combo')) { const f = e.target.closest('.field'); if (!menuOf(e.target).hidden) { e.stopPropagation(); show(f, false); } } }, {signal});
   root.ownerDocument.addEventListener('pointerdown', e => {
-    for (const menu of root.querySelectorAll('.combo-menu:not([hidden])')) if (!menu.closest('.field').contains(e.target)) show(menu.closest('.field'), false);
+    // (引擎's model lists look like these menus but stay open, and sit outside any field.)
+    for (const menu of root.querySelectorAll('.combo-menu:not([hidden])')) { const field = menu.closest('.field'); if (field && !field.contains(e.target)) show(field, false); }
   }, {signal});
 }
 

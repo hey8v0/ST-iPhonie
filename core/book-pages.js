@@ -121,7 +121,6 @@ export function viewMarkup(book, view, {url = () => '', sprite = () => '', draft
   }
 
   const s = sheet.spread, r = rng(book.id + '#' + view.sheet), L = s.layout, def = SPREADS[L];
-  const total = s.words.reduce((n, w) => n + w.text.length, 0);
   const quote = w => /^[「『“"]/.test(w.text) ? esc(w.text) : `「${esc(w.text)}」`;
   const seg = k => { const w = s.words[k], body = w.role ? quote(w) : esc(w.text); return `<span data-k="${k}"${w.role ? ' class="bk-q"' : ''}>${body.replace(/\n/g, '<br>')}</span>`; };
   /** A block of words: the spread's heading over it (the first block only), long ones set justified and smaller. */

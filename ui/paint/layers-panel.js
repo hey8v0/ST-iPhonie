@@ -8,7 +8,7 @@
 import {esc} from '../common.js';
 import {icon} from '../icons.js';
 import {popupSelect,bindPopupSelect} from '../popup-select.js';
-import {BLENDS, activeLayer, addLayer, duplicateLayer, removeLayer, moveLayerTo, setLayer, clearLayer, fillLayer, mergeDown, mergeLayers, groupLayers, setLayerGroup, ungroupLayers, undo, redo} from './engine.js';
+import {BLENDS, addLayer, duplicateLayer, removeLayer, moveLayerTo, setLayer, clearLayer, fillLayer, mergeDown, mergeLayers, groupLayers, setLayerGroup, ungroupLayers, undo, redo} from './engine.js';
 
 const HOLD = 320, DOUBLE = 260, SWIPE = 168;
 const letter = blend => BLENDS.find(b => b[0] === blend)?.[2] || 'N';

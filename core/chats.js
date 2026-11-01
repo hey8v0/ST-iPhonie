@@ -120,10 +120,32 @@ function cleanMessage(m, id, at) {
   return out;
 }
 
+// Where the pages of a browser see that one of them wrote (a page with no storage of its own: only itself).
+const pageStorage = () => { try { return globalThis.localStorage || null; } catch { return null; } };
+const REVISIONS = new Map();
+
 export class ChatStore {
-  #scope; #factory; #now; #id; #db = null; #opening = null; #closed = false; #madeAt = 0;
-  constructor(scope, {indexedDB = globalThis.indexedDB, now = Date.now, id = () => globalThis.crypto.randomUUID()} = {}) {
-    this.#scope = String(scope); this.#factory = indexedDB; this.#now = now; this.#id = id;
+  #scope; #factory; #now; #id; #storage; #db = null; #opening = null; #closed = false; #madeAt = 0;
+  // What the list shows of each thread, id → summary. Reading it from the store means reading every message of every chat, and the
+  // phone asks for the list on every change of the settings; so it is kept, and follows the writes. #revision: what another page's
+  // write would change. #day: a streak depends on the date. #writes: a read that overlapped a write is not kept.
+  #summaries = null; #revision = ''; #day = ''; #writes = 0; #writing = new Set();
+  constructor(scope, {indexedDB = globalThis.indexedDB, now = Date.now, id = () => globalThis.crypto.randomUUID(), storage = pageStorage()} = {}) {
+    this.#scope = String(scope); this.#factory = indexedDB; this.#now = now; this.#id = id; this.#storage = storage;
+  }
+  #revisionNow(next) {
+    const key = 'st-iphonie-chats-rev:' + this.#scope;
+    try { if (this.#storage) { if (next) this.#storage.setItem(key, next); return this.#storage.getItem(key) || ''; } } catch { /* as if there were none */ }
+    if (next) REVISIONS.set(key, next);
+    return REVISIONS.get(key) || '';
+  }
+  /** A write has gone through: the summaries follow it (change, for one thread), or go; the other pages are told. */
+  #wrote(change) {
+    const kept = this.#summaries && this.#revisionNow() === this.#revision;
+    this.#writes++;
+    const next = this.#revisionNow(this.#now().toString(36) + Math.random().toString(36).slice(2, 8));
+    if (kept && change) { change(this.#summaries); this.#revision = next; }
+    else this.#summaries = null;
   }
   async #open() {
     if (this.#closed) throw fail('聊天记录已关闭', 'CLOSED');
@@ -138,29 +160,34 @@ export class ChatStore {
         if (this.#closed) { req.result.close(); reject(fail('聊天记录已关闭', 'CLOSED')); return; }
         this.#db = req.result;
         const db = this.#db;
-        db.onversionchange = () => { db.close(); if (this.#db === db) this.#db = null; };
+        db.onversionchange = () => { db.close(); this.#summaries = null; if (this.#db === db) this.#db = null; };
         db.onclose = () => { if (this.#db === db) this.#db = null; };
         resolve(db);
       };
     }).finally(() => { this.#opening = null; });
     return this.#opening;
   }
+  #tx(mode, work) {
+    const job = this.#run(mode, work);
+    if (mode === 'readwrite') { this.#writing.add(job); const over = () => this.#writing.delete(job); job.then(over, over); }
+    return job;
+  }
   // A dropped connection (iPhone Safari after the page sat in the background) is reopened once; nothing was written.
-  async #tx(mode, work, again = true) {
+  async #run(mode, work, again = true) {
     const db = await this.#open();
     try {
       return await new Promise((resolve, reject) => {
-        let result, own, tx;
+        let result, own, tx, change = null;
         try { tx = db.transaction('threads', mode); } catch (error) { reject(this.#closed ? fail('聊天记录已关闭', 'CLOSED') : lostError(error)); return; }
         const store = tx.objectStore('threads');
-        tx.oncomplete = () => resolve(result);
+        tx.oncomplete = () => { if (mode === 'readwrite') this.#wrote(change); resolve(result); };
         tx.onabort = () => reject(own || (connectionLost(tx.error) ? lostError(tx.error) : fail(tx.error?.name === 'QuotaExceededError' ? '设备存储空间不足，聊天没有保存' : '聊天记录没有保存，请重试', 'STORAGE')));
-        work(store, value => { result = value; }, error => { own = error; tx.abort(); });
+        work(store, value => { result = value; }, error => { own = error; tx.abort(); }, fn => { change = fn; });
       });
     } catch (error) {
       if (error?.code !== 'STORAGE_LOST' || this.#closed) throw error;
       if (this.#db === db) { try { db.close(); } catch {} this.#db = null; }
-      if (again) return this.#tx(mode, work, false);
+      if (again) return this.#run(mode, work, false);
       throw error;
     }
   }
@@ -168,11 +195,14 @@ export class ChatStore {
     const req = store.get([this.#scope, String(id)]);
     req.onsuccess = () => then(req.result || null);
   }
-  #public(row, full = true) {
+  #public(row) {
     if (!row) return null;
+    const {scope, ...rest} = row;
+    return structuredClone({pinned: false, muted: false, ...rest});
+  }
+  #summary(row) {
     const {scope, messages, ...rest} = row;
-    const base = {pinned: false, muted: false, ...rest};
-    return full ? structuredClone({...base, messages}) : structuredClone({...base, count: messages.length, last: messages.filter(m => m.kind !== 'system').at(-1) || null, streak: this.#streak(messages)});
+    return structuredClone({pinned: false, muted: false, ...rest, count: messages.length, last: messages.filter(m => m.kind !== 'system').at(-1) || null, streak: this.#streak(messages)});
   }
   #streak(messages) {
     const day = at => { const d = new Date(at); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
@@ -187,8 +217,22 @@ export class ChatStore {
   }
 
   async list() {
-    const rows = await this.#tx('readonly', (store, done) => { const req = store.index('scope').getAll(this.#scope); req.onsuccess = () => done(req.result); });
-    return rows.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updatedAt - a.updatedAt).map(row => this.#public(row, false));
+    // What was asked to be written before this is in the answer, as when every list came from the store.
+    while (this.#writing.size) await Promise.allSettled([...this.#writing]);
+    const day = new Date(this.#now()).toDateString();
+    if (!this.#summaries || this.#day !== day || this.#revision !== this.#revisionNow()) {
+      this.#summaries = null;
+      const writes = this.#writes, revision = this.#revisionNow();
+      const rows = await this.#tx('readonly', (store, done) => { const req = store.index('scope').getAll(this.#scope); req.onsuccess = () => done(req.result); });
+      const summaries = new Map(rows.map(row => [row.id, this.#summary(row)]));
+      if (writes !== this.#writes) return this.#ordered(summaries);
+      this.#summaries = summaries; this.#revision = revision; this.#day = day;
+    }
+    return this.#ordered(this.#summaries);
+  }
+  /** Pinned first, then the latest; each caller gets a copy of its own. */
+  #ordered(summaries) {
+    return [...summaries.values()].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map(t => structuredClone(t));
   }
   async get(id) {
     return this.#tx('readonly', (store, done) => this.#get(store, id, row => done(this.#public(row))));
@@ -200,15 +244,16 @@ export class ChatStore {
     if (type === 'group' && list.length < 2) throw fail('群聊至少要选两个人');
     // Later than the one before, even in the same millisecond: the window started last is the one in use (openedLast).
     const now = this.#madeAt = Math.max(this.#now(), this.#madeAt + 1), row = {scope: this.#scope, id: this.#id(), type: type === 'group' ? 'group' : 'dm', name: clip(name, 40).trim() || (type === 'group' ? list.join('、').slice(0, 40) : list[0]), members: type === 'group' ? list : [list[0]], unread: 0, createdAt: now, updatedAt: now, messages: [], ...(space ? {space: clip(space, 300)} : {}), ...(save ? {save: clip(save, 400)} : {}), ...(type === 'group' && windowOf ? {windowOf: clip(windowOf, 512)} : {})};
-    await this.#tx('readwrite', (store, done) => { store.put(row); done(); });
+    await this.#tx('readwrite', (store, done, abort, after) => { store.put(row); after(list => list.set(row.id, this.#summary(row))); done(); });
     return this.#public(row);
   }
   async #change(id, change) {
-    return this.#tx('readwrite', (store, done, abort) => this.#get(store, id, row => {
+    return this.#tx('readwrite', (store, done, abort, after) => this.#get(store, id, row => {
       if (!row) { abort(fail('这段聊天已不存在', 'MISSING')); return; }
       try { change(row); } catch (error) { abort(error); return; }
       if (row.messages.length > CHAT_STORE_LIMITS.messages) row.messages = row.messages.slice(-CHAT_STORE_LIMITS.messages);
       store.put(row);
+      after(list => list.set(row.id, this.#summary(row)));
       done(this.#public(row));
     }));
   }
@@ -297,7 +342,7 @@ export class ChatStore {
     return this.#change(id, row => { row.unread = 0; });
   }
   async remove(id) {
-    return this.#tx('readwrite', (store, done) => { store.delete([this.#scope, String(id)]); done(true); });
+    return this.#tx('readwrite', (store, done, abort, after) => { store.delete([this.#scope, String(id)]); after(list => list.delete(String(id))); done(true); });
   }
   async unread() {
     return (await this.list()).reduce((n, t) => n + (t.muted ? 0 : t.unread), 0);
@@ -332,7 +377,7 @@ export class ChatStore {
       };
     });
   }
-  close() { this.#closed = true; this.#db?.close(); this.#db = null; }
+  close() { this.#closed = true; this.#summaries = null; this.#db?.close(); this.#db = null; }
 }
 
 // ---------- 聊天窗口 ----------

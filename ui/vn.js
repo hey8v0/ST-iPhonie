@@ -53,7 +53,6 @@ export function vnApp(ctx) {
   function castRows() {
     const cast = castNow();
     if (!cast.length) return '<p class="hint">这张卡还没有登记的角色。正文里出现过的角色会自动登记，也可以在角色 App 里添加。</p>';
-    const worn = wearNow();
     return '<div data-cast-picker></div>';
   }
   function mountCastPicker(){

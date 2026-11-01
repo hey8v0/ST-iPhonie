@@ -1,6 +1,7 @@
 // 动态 (朋友圈) in the chat app: the characters' posts, likes and comments, and the user's own posts and comments.
 // New posts, reactions and replies are generated in the tavern page (host-moments.js); this panel only shows them and
 // sends what the user does. It draws into the chat app's view, inside the frame the chat app gives it (tabs and all).
+import {rowWindow} from './row-window.js';
 import {esc, btn, empty, avatar, field, textArea, input, toggle, help} from './common.js';
 import {icon} from './icons.js';
 import {eachThumb, previewBlob} from './thumbs.js';
@@ -28,7 +29,7 @@ function ago(at) {
  * visible(): whether the 动态 tab is on screen (only then does it count as seen).
  */
 export function momentsPanel(ctx, {v, frame, me, visible}) {
-  const {api} = ctx, urls = new Map(), shown = new Map();
+  const {api} = ctx, urls = new Map(), shown = new Map(), sizes = new Map();
   let epoch = 0, posts = [], author = '';
   const nameOf = who => who === 'me' ? me().name : who;
   const urlFor = async id => {
@@ -46,7 +47,9 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
   const face = (who, size) => who === 'me' ? me().avatar(size) : avatar(who, ctx.engineOf(who), size);
 
   function picture(p) {
-    if (p.photoId) return `<button type="button" class="moment-photo" data-action="view-photo" data-id="${esc(p.id)}" aria-label="查看配图"><img data-photo="${esc(p.photoId)}" alt="${esc(nameOf(p.author))} 的配图"></button>`;
+    // A picture seen before comes with the page, in the place it had: without it the page would be shorter for a moment and lose where it was.
+    const size = sizes.get(p.photoId), url = shown.get(p.photoId);
+    if (p.photoId) return `<button type="button" class="moment-photo" data-action="view-photo" data-id="${esc(p.id)}"${size ? ` style="${size}"` : ''} aria-label="查看配图"><img data-photo="${esc(p.photoId)}"${url ? ` src="${esc(url)}"` : ''} alt="${esc(nameOf(p.author))} 的配图"></button>`;
     if (!p.imageTags) return '';
     if (p.imageState === 'waiting') return '<p class="moment-note">配图正在画……</p>';
     // Without a drawing engine set up there is nothing to retry; once it is the note turns into a button again.
@@ -65,6 +68,23 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
         ${social}</div></article>`;
   }
 
+  /** The pictures of the posts that have come on the page. */
+  async function pictures(where) {
+    const ticket = epoch;
+    for (const img of where.querySelectorAll('img[data-photo]')) {
+      const id = img.dataset.photo, url = await listURL(id);
+      if (ticket !== epoch || v.disposed) return;
+      if (!img.isConnected) continue;
+      if (!url) { img.closest('.moment-photo')?.replaceWith(Object.assign(ctx.doc.createElement('p'), {className: 'moment-note', textContent: '配图已经从相册删掉了'})); continue; }
+      if (img.getAttribute('src') !== url) {
+        img.addEventListener('load', () => { if (img.offsetWidth && img.offsetHeight) sizes.set(id, `width:${img.offsetWidth}px;height:${img.offsetHeight}px`); }, {once: true});
+        img.src = url;
+      }
+    }
+  }
+  // The story writes these up to a few hundred: only those near the screen are on the page, and only their pictures are read.
+  const feed = rowWindow({win: ctx.win, id: p => p.id, row: p => post(p), filled: el => { pictures(el).catch(() => {}); }});
+
   async function render() {
     const ticket = ++epoch;
     const all = await api.listMoments();
@@ -76,16 +96,13 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
     v.draw(frame(`<div class="qzone-cover">${aura('theme')}<span class="qzone-title">好友动态</span><span class="qzone-tools">${tools}</span><span class="qzone-me">${who.avatar(58)}<strong>${esc(who.name)}</strong></span></div>`
       + (author ? `<div class="banner">${icon('person')}<span>只看 ${esc(nameOf(author))} 的动态</span>${btn('m-all', '看全部', 'chip-button')}</div>` : '')
       + (busy ? '<p class="moments-busy" role="status">朋友们正在刷动态……</p>' : '')
-      + (posts.length ? `<div class="moments-feed">${posts.map(post).join('')}</div>`
+      + (posts.length ? `<div class="moments-feed">${feed.html(posts)}</div>`
         : empty(author ? `${nameOf(author)} 还没有发过动态` : '还没有动态', author ? '' : '点封面右上角的刷新，角色们就会发动态；也可以自己先发一条。每次刷新会调用一次酒馆当前的模型。', 'image'))));
+    const box = v.root.querySelector('.moments-feed');
+    if (box) feed.mount(box, v.root); else feed.stop();
     v.root.scrollTop = scroll;
     // Seen only when it is on screen: the panel also redraws in the background when new posts arrive.
     if (visible()) { markSeen(ctx.win); ctx.momentsSeen?.(); }
-    for (const img of v.root.querySelectorAll('img[data-photo]')) {
-      const url = await listURL(img.dataset.photo);
-      if (ticket !== epoch || v.disposed) return;
-      if (url) img.src = url; else img.closest('.moment-photo')?.replaceWith(Object.assign(ctx.doc.createElement('p'), {className: 'moment-note', textContent: '配图已经从相册删掉了'}));
-    }
   }
 
   function sheet(title, html, handlers) {
@@ -235,6 +252,6 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
     render, click,
     /** Shows one person's posts (their profile's 「TA 的动态」), or everyone's. */
     only(name = '') { author = name; },
-    dispose() { epoch++; for (const url of new Set([...urls.values(), ...shown.values()])) if (url) ctx.win.URL.revokeObjectURL(url); urls.clear(); shown.clear(); }
+    dispose() { epoch++; feed.stop(); for (const url of new Set([...urls.values(), ...shown.values()])) if (url) ctx.win.URL.revokeObjectURL(url); urls.clear(); shown.clear(); }
   };
 }

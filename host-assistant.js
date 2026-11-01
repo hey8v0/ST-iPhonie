@@ -81,7 +81,8 @@ async function requestAssistantTextRaw(ctx, backend, settings, messages, {preset
       }};
       let answer = await streamText(response, info);
       if (!answer && info.raw) {
-        const json = JSON.parse(info.raw);
+        let json;
+        try { json = JSON.parse(info.raw); } catch { throw Error('文字模型：接口返回的不是 JSON，地址可能填错了'); }
         if (json.error) throw failure(response.status, info.raw);
         responseMetadata(json, meta);
         try { answer = replyText(json); } catch { answer = json.content?.filter(p => p.type === 'text').map(p => p.text).join('') || json.candidates?.[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('') || ''; }

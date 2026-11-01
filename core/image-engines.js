@@ -6,7 +6,7 @@
 //   ComfyUI: through the tavern's own ComfyUI proxy (/api/sd/comfy/…), so neither CORS nor a phone that cannot reach
 //   the computer's 127.0.0.1 gets in the way: the tavern server talks to ComfyUI. Workflows use the tavern's
 //   placeholders ("%prompt%", "%width%" …), so a workflow made for the tavern's image generation works here too.
-import {proxyAddress} from './proxy-url.js';
+import {proxyAddress, noTavernProxy} from './proxy-url.js';
 
 import {normalizeDisabledLoras} from './comfy-loras.js';
 
@@ -120,13 +120,15 @@ const imageType = format => ({jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'imag
 export async function gptModels({fetch = globalThis.fetch, settings, key}) {
   const base = settings.url || OPENAI_BASE, url = base + '/models';
   const headers = key ? {Authorization: 'Bearer ' + key} : {};
-  let response;
+  let response, relayed = false;
   try { response = await fetch(url, {headers}); }
   catch {
+    relayed = true;
     try { response = await fetch('/proxy/' + encodeURIComponent(url), {headers, credentials: 'same-origin'}); }
     catch { throw Error('读不到模型列表：连不上这个接口，或者它不允许网页直接访问（CORS），酒馆代理也无法连接。也可以直接在「模型」里填模型名'); }
   }
   const raw = await response.text().catch(() => '');
+  if (relayed && noTavernProxy(raw)) throw Error('读不到模型列表：这个接口不允许网页直接访问（CORS），这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有）。可以直接在「模型」里填模型名');
   if (!response.ok && /CORS proxy is disabled/i.test(raw)) throw Error('读不到模型列表：接口不允许跨域（CORS），酒馆代理尚未开启。请在 config.yaml 设置 enableCorsProxy: true 后重启，或直接在「模型」里填模型名');
   if (response.status === 401 || response.status === 403) throw Error('读不到模型列表：密钥不对或没有权限，先保存密钥再读');
   if (!response.ok) throw Error(`读不到模型列表（${response.status}）：这个接口可能没有模型列表，直接在「模型」里填模型名就行`);
@@ -178,6 +180,7 @@ async function gptPicture({fetch, url, signal}) {
       if (/CORS proxy is disabled/i.test(text)) throw Error('中转给的是图片链接，但浏览器打不开它（链接不允许跨域）。请在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆，插件会通过酒馆去取；或者请中转直接返回图片数据（b64_json）');
       throw Error(`中转给的图片链接打不开（${response.status}）`);
     }
+    if (proxy && /html/i.test(response.headers?.get('content-type') || '') && noTavernProxy(await response.clone().text().catch(() => ''))) throw Error('中转给的是图片链接，但浏览器打不开它（链接不允许跨域），这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有）：请中转直接返回图片数据（b64_json）');
     return pictureBlob(response);
   };
   try { return await read(url); }
@@ -505,6 +508,7 @@ async function comfyRead({fetch, endpoint, direct, signal, what}) {
   }
   clearTimeout(timer);
   const text = await response.text();
+  if (!direct && noTavernProxy(text)) throw Error('这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有）：读取方式选浏览器直连，ComfyUI 要允许跨域；也可以先手填文件名。');
   if (!response.ok) {
     if (!direct && /CORS proxy is disabled/i.test(text)) throw Error('酒馆代理尚未开启：在酒馆 config.yaml 设置 enableCorsProxy: true 后重启，或选择浏览器直连。也可以先手填文件名。');
     // ComfyUI's answer until the first workflow is saved: its folder does not exist yet. Asking another way says the same.

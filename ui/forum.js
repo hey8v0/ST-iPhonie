@@ -1,5 +1,6 @@
 // 论坛: a public board next to 朋友圈. The feed (热搜 on top, then posts), a post with its replies as floors, and the
 // user's own posts and replies. New posts, replies and the 热搜 are generated in the tavern page (host-apps.js).
+import {rowWindow} from './row-window.js';
 import {createView, esc, btn, field, input, textArea, heading, avatar, empty, menu} from './common.js';
 import {icon} from './icons.js';
 
@@ -15,10 +16,10 @@ const count = n => n >= 10000 ? (n / 10000).toFixed(1).replace(/\.0$/, '') + '�
 
 export function forumApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'forum');
-  let open = '', epoch = 0, posts = [];
-  const myName = () => api.getState().chat.profile?.name || api.userName?.() || '我';
+  let open = '', epoch = 0, posts = [], roles = new Set();
+  const myName = () => api.readState().chat.profile?.name || api.userName?.() || '我';
   // 网名: everyone shows by their screen name on the board (the user's, set in 论坛 → … → 网名; characters' given or made up once).
-  const net = () => api.getState().chat.netNames || {};
+  const net = () => api.readState().chat.netNames || {};
   const nameOf = who => who === 'me' ? net().me || myName() : net()[who] || who;
   const characters = () => new Set((api.chatContacts?.() || []).map(c => c.name));
   const face = (who, size) => who === 'me' ? avatar(myName(), 'none', size, 'me') : avatar(who, ctx.engineOf(who), size);
@@ -31,22 +32,27 @@ export function forumApp(ctx) {
       ${p.title ? `<strong class="forum-title">${esc(p.title)}</strong>` : ''}<span class="forum-excerpt">${esc(p.text)}</span>
       <span class="forum-meta"><span>${icon('eye')}${count(p.heat)}</span><span>${icon('bubble')}${p.replies.length}</span><span${p.liked ? ' class="on"' : ''}>${icon('heart', p.liked)}${count(p.likes)}</span></span></button>`;
   }
+  // Up to a couple of hundred posts: only those near the screen are on the page.
+  const feed = rowWindow({win: ctx.win, id: p => p.id, row: p => card(p, roles)});
   async function renderList(ticket) {
     const [all, hot] = await Promise.all([api.listForum(), api.forumHot()]);
     if (v.disposed || ticket !== epoch) return;
     posts = all;
-    const roles = characters();
+    roles = characters();
     const tools = btn('forum-refresh', icon('refresh'), 'round-button', `aria-label="刷新：看看论坛上的新帖子" ${busy() ? 'disabled' : ''}`) + btn('forum-new', icon('add'), 'round-button', 'aria-label="发帖"') + btn('forum-options', icon('more'), 'round-button', 'aria-label="论坛设置"');
     v.draw(heading('论坛', tools, `Forum · ${posts.length}`)
       + (hot.length ? `<div class="forum-hot"><strong>${icon('star')}热搜</strong><ol>${hot.map((t, i) => `<li><span class="rank${i < 3 ? ' top' : ''}">${i + 1}</span>${esc(t)}</li>`).join('')}</ol></div>` : '')
       + (busy() ? '<p class="moments-busy" role="status">论坛正在刷新……</p>' : '')
-      + (posts.length ? `<div class="forum-feed">${posts.map(p => card(p, roles)).join('')}</div>`
+      + (posts.length ? `<div class="forum-feed">${feed.html(posts)}</div>`
         : empty('论坛还没有帖子', '点右上角的刷新，角色和路人网友就会发帖、上热搜；也可以自己先发一个。每次刷新会调用一次模型。', 'bubble')));
+    const box = v.root.querySelector('.forum-feed');
+    if (box) feed.mount(box, v.root); else feed.stop();
   }
   async function renderPost(ticket) {
     const p = await api.getForumPost(open);
     if (v.disposed || ticket !== epoch) return;
     if (!p) { open = ''; return renderList(ticket); }
+    feed.stop();
     const roles = characters();
     v.draw(heading('帖子', '', 'Forum')
       + `<article class="forum-post"><div class="forum-author">${face(p.author, 36)}<b>${esc(nameOf(p.author))}</b>${badge(p.author, roles)}<time>${ago(p.at)}</time></div>

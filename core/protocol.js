@@ -72,13 +72,13 @@ function freeLines(message) {
 }
 export function parseDialogue(message,format=DEFAULT_FORMAT){const {literals,names}=compileFormat(format);message=String(message);if(message.length>500000)return [];if(format===FREE_FORMAT)return freeLines(message);
 // A straight quote right outside a curly one ("“你好”"<tts>…) counts as a second curly quote. Same length, so positions hold.
-if(literals[0]==='“')message=message.replace(/"(?=“)/g,'“').replace(/(?<=”)"/g,'”');
+if(literals[0]==='“')message=message.replace(/"(?=“)/g,'“').replace(/”"/g,'””');
 const family=tagFamily(format);if(family)message=repaired(message);
 const excluded=codeSpans(message),found=exactLines(message,literals,names,excluded);
 return (family?[...found,...looseLines(message,found,excluded)].sort((a,b)=>a.start-b.start):found).map(mendLine);}
 /** Voice tags in a reply that were not read as lines (lines: what was read), each with why, for the hint under the
  *  reply and the self-check. */
-export function dialogueProblems(message,lines=[]){const text=String(message);if(!/<tts\b/i.test(text)||text.length>500000)return [];const fixed=repaired(text.replace(/"(?=“)/g,'“').replace(/(?<=”)"/g,'”')),excluded=codeSpans(fixed),problems=[];
+export function dialogueProblems(message,lines=[]){const text=String(message);if(!/<tts\b/i.test(text)||text.length>500000)return [];const fixed=repaired(text.replace(/"(?=“)/g,'“').replace(/”"/g,'””')),excluded=codeSpans(fixed),problems=[];
 for(const m of fixed.matchAll(/<tts\b[^>]*>/g)){const at=m.index;if(lines.some(l=>at>=l.start&&at<l.end)||excluded.some(([a,b])=>at>=a&&at<b))continue;
 const close=fixed.indexOf('</tts>',at),next=fixed.indexOf('<tts',at+4),open=close<0||(next>=0&&next<close);
 const inner=open?'':fixed.slice(at+m[0].length,close),parts=inner.split('|'),role=decodeText(open?fixed.slice(at+m[0].length).split(/[|<\n]/)[0]:parts[0]).trim();

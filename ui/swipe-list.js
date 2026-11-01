@@ -32,13 +32,13 @@ export function swipeRow(id, inner, actions = [], {className = '', label = ''} =
  * a row was tapped (not on a button of its own). bulk: [{key, label, icon, danger}] for the choosing bar;
  * onBulk(key, ids): one of them (choosing ends when it resolves). sort: {start(row, {x, y}) → {move(x, y), drop(), cancel()}
  * | null}, called when a row has been held still; the session gets the moves until the finger is lifted.
+ * ids(): every row's id, for a list that does not have all its rows on the page (row-window.js).
  * Returns {close(), done(), get chosen()}.
  */
-export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bulk = [], onBulk = () => {}, hint = '', mouseHint = '', sort = null} = {}) {
+export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bulk = [], onBulk = () => {}, hint = '', mouseHint = '', sort = null, ids: everyId = null} = {}) {
   const win = ctx.win, doc = ctx.doc;
   let open = null, press = null, chosen = null, suppress = 0;
   const rows = () => [...list.querySelectorAll('.sw-row[data-swipe]')];
-  const rowOf = id => rows().find(r => r.dataset.swipe === id) || null;
   const buzz = () => { try { win.navigator?.vibrate?.(8); } catch { /* none */ } };
   const reduced = () => !!win.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const room = row => parseFloat(row.style.getPropertyValue('--sw-w')) || width(row.querySelectorAll('.sw-act').length);
@@ -82,7 +82,7 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
     if (!b || !chosen) return;
     const key = b.dataset.swBulk;
     if (key === 'done') return done();
-    if (key === 'all') { const ids = rows().map(r => r.dataset.swipe); chosen = chosen.size === ids.length ? new Set() : new Set(ids); return paintChoice(); }
+    if (key === 'all') { const ids = everyId ? everyId() : rows().map(r => r.dataset.swipe); chosen = chosen.size === ids.length ? new Set() : new Set(ids); return paintChoice(); }
     if (!chosen.size) return;
     b.disabled = true;
     try { await onBulk(key, [...chosen]); done(); } catch (error) { ctx.notify?.(error.message, {error: true}); } finally { b.disabled = false; }

@@ -40,7 +40,8 @@ const SYMMETRY = [['', '关闭', '只画一处'], ['v', '左右对称', '沿竖�
 
 export function paintApp(ctx) {
   const v = createView(ctx, 'paint'), store = paintStore(ctx.win), keys = new ctx.win.AbortController();
-  let mode = 'gallery', pic = null, work = null, stage = null, saving = null, saveTimer = 0, savedAt = 0, full = false;
+  let mode = 'gallery', pic = null, work = null, stage = null, saving = null, saveTimer = 0, savedAt = 0, full = false, thumbs = [];
+  const dropThumbs = () => { for (const url of thumbs) ctx.win.URL.revokeObjectURL(url); thumbs = []; };
   // The tools: which brush each of 画画 and 橡皮 uses, at what size and opacity; the colour and the ones used before.
   const tools = (() => { try { return JSON.parse(ctx.win.localStorage.getItem(TOOLS_KEY) || 'null') || {}; } catch { return {}; } })();
   tools.kind ||= 'brush'; tools.color ||= '#2b2b3a'; tools.recent ||= [];
@@ -63,7 +64,8 @@ export function paintApp(ctx) {
       + (works.length ? `<div class="paint-works">${works.map(w => `<div class="paint-work"><button type="button" class="paint-thumb" data-work="${esc(w.id)}" aria-label="打开 ${esc(w.name)}"><img data-thumb="${esc(w.id)}" alt=""></button><span class="paint-work-name"><strong>${esc(w.name)}</strong><small>${w.width}×${w.height} · ${esc(stamp(w.updatedAt))}</small></span>${btn('work-more', I.more, 'icon-button', `data-id="${esc(w.id)}" aria-label="${esc(w.name)} 的选项"`)}</div>`).join('')}</div>`
         : empty('还没有作品', '点右上角「新画布」开始画。手机上用手指画，电脑上可以接数位板，笔的压力会让线条有粗细。', 'draw'))
       + '<p class="hint">作品存在这个浏览器里，备份和「保存到酒馆」都会带上。两指捏合缩放、旋转，两指点一下撤销、三指点一下重做；按住不动取色。</p>');
-    for (const img of v.root.querySelectorAll('[data-thumb]')) { const w = works.find(x => x.id === img.dataset.thumb); if (w?.thumb) img.src = ctx.win.URL.createObjectURL(w.thumb); }
+    dropThumbs();
+    for (const img of v.root.querySelectorAll('[data-thumb]')) { const w = works.find(x => x.id === img.dataset.thumb); if (w?.thumb) { img.src = ctx.win.URL.createObjectURL(w.thumb); thumbs.push(img.src); } }
   }
   function newSheet() {
     const d = ctx.dialog('新画布', `<div class="pick-list">${SIZES.map(([k, l, wd, ht]) => `<button type="button" class="list-row" data-size="${k}"><span class="paint-size-shape" style="aspect-ratio:${wd}/${ht}"></span><span><strong>${l}</strong><small>${wd} × ${ht}</small></span></button>`).join('')}</div>`);
@@ -581,7 +583,7 @@ export function paintApp(ctx) {
   v.leave = () => { setFull(false); if (mode === 'edit') { if (pic?.float) { commitTransform(pic); useTool('brush'); } save(); } };
   v.refresh = () => { if (mode === 'gallery') renderGallery(); };
   const dispose = v.dispose;
-  v.dispose = () => { setFull(false); keys.abort(); ctx.win.clearTimeout(saveTimer); save(); closeEditor(); store.close(); dispose(); };
+  v.dispose = () => { setFull(false); keys.abort(); ctx.win.clearTimeout(saveTimer); save(); closeEditor(); store.close(); dropThumbs(); dispose(); };
   renderGallery();
   return v;
 }

@@ -21,7 +21,9 @@ export function logsApp(ctx) {
   const labels = {info: '记录', warn: '提醒', error: '错误'};
   const rows = () => api.getRequestLogs?.() || [];
   const filtered = () => rows().filter(r => (level === 'all' || r.level === level) && (!query || JSON.stringify(r).toLowerCase().includes(query.toLowerCase())));
-  const clock = at => new Date(at).toLocaleTimeString('zh-CN', {hour12: false});
+  // One formatter for every line: making one costs far more than using it.
+  const CLOCK = new Intl.DateTimeFormat('zh-CN', {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false});
+  const clock = at => { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : CLOCK.format(d); };
   const controls = scope => `<button class="icon-btn" data-log="time" aria-label="显示时间" aria-pressed="${times}">${icon('clock')}</button><button class="icon-btn" data-log="copy" data-scope="${scope}" aria-label="复制">${icon('copy')}</button><button class="icon-btn" data-log="download" data-scope="${scope}" aria-label="下载">${icon('download')}</button>`;
   function contents(row) {
     const lines = colorJSON({source: row.source, state: row.state, duration: row.duration, request: row.request, response: row.response});

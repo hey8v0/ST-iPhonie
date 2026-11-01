@@ -3,7 +3,7 @@
 // recent story messages and the chat history. Nothing is written into the story unless the user brings a chat
 // into it; that text is injected once, into the next story reply.
 import {currentDm, currentWindow} from './core/chats.js';
-import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace} from './core/chat.js';
+import {buildChatRequest, parseChatReply, bringText, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer} from './core/draw.js';
 import {storyLines} from './core/moments.js';

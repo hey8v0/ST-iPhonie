@@ -51,12 +51,6 @@ export function enginesApp(ctx) {
   const draft = () => drafts.get(engine);
   const changed = () => { dirty = true; const e = v.root.querySelector('[data-save-state]'); if (e) e.textContent = '未保存'; };
 
-  /** 已保存，末尾 ab12 · or, with several keys: 已保存 3 个，正在用第 2 个（末尾 ab12），1 个这次被拒已跳过. */
-  const keyState = id => {
-    const tail = api.keyHint?.(id) || '', pool = api.keyPool?.(id);
-    if (!pool || pool.count < 2) return '已保存' + (tail ? '，末尾 ' + esc(tail) : '');
-    return `已保存 ${pool.count} 个，正在用第 ${pool.current} 个${tail ? '（末尾 ' + esc(tail) + '）' : ''}${pool.refused ? `，${pool.refused} 个这次被拒已跳过` : ''}`;
-  };
   /** The saved keys of a voice engine, one row each: never the key, only its last characters. */
   const keyRows = id => {
     const list = api.keyList?.(id) || [];

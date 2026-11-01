@@ -1,4 +1,4 @@
-import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, avatar, empty, pictureCopies} from './common.js';
+import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, avatar, empty, pictureCopies} from './common.js';
 import {icon} from './icons.js';
 import {saveFile, shareFile, canShareFiles} from '../download.js';
 import {openAlbum} from './album-viewer.js';
@@ -927,7 +927,7 @@ export function drawApp(ctx) {
   }
 
   // 画风: ui/draw-styles.js.
-  const {pickStyle, editStyle} = styleSheets({ctx, state, styleId, style, render, shownPicture: () => results[current] ? shownBlob() : null, afterPaid: () => refreshSubscription(true)});
+  const {pickStyle} = styleSheets({ctx, state, styleId, style, render, shownPicture: () => results[current] ? shownBlob() : null, afterPaid: () => refreshSubscription(true)});
   watchCovers(v.root);
 
   readHearts();

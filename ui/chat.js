@@ -7,11 +7,11 @@ import {fly} from './carry.js';
 import {openImageViewer} from '../image-viewer.js';
 import {viewerHeart} from './photo-heart.js';
 import {editTags} from '../host-ask.js';
-import {saveFile, downloadAction, shareAction, shareFile, canShareFiles} from '../download.js';
+import {saveFile, downloadAction, shareFile, canShareFiles} from '../download.js';
 import {momentsPanel, momentsNew, momentsSeen} from './moments.js';
 import {PROFILE_STATUS, BUBBLES, FRAMES, BACKGROUNDS, parseStickers} from '../core/chat.js';
 import {callSummary} from '../core/call.js';
-import {preview, BLESSING, you, patText, noticeText, seconds} from './chat-preview.js';
+import {preview, BLESSING, patText, noticeText, seconds} from './chat-preview.js';
 import {pendant} from './pendants.js';
 import {memorySheet} from './chat-memory.js';
 import {pictureInputs, photoTags, photoPicture} from '../core/draw.js';
@@ -32,7 +32,9 @@ export {preview};
 // turns into 让对方回复 and asks the model. Replies come from the host (api.chatReply); outside the tavern the app still
 // stores and shows chats.
 
-const clock = at => new Date(at).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit', hour12: false});
+// One formatter for every message: making one costs far more than using it.
+const CLOCK = new Intl.DateTimeFormat('zh-CN', {hour: '2-digit', minute: '2-digit', hour12: false});
+const clock = at => { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : CLOCK.format(d); };
 function stamp(at) {
   const d = new Date(at), now = new Date();
   if (d.toDateString() === now.toDateString()) return clock(at);
@@ -55,7 +57,7 @@ const KAOMOJI = ['(｡•̀ᴗ-)✧', '(╥﹏╥)', '(๑•̀ㅂ•́)و✧', 
 export function chatApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'chat');
   // 备注: what the user calls a contact, shown in the chat app only (the models keep using the real name).
-  const remarks = () => api.getState().chat.remarks || {};
+  const remarks = () => api.readState().chat.remarks || {};
   /** What a person's avatar and 备注 are kept under: their name, or a key of their own when another card has someone of that name. */
   const ownKey = name => ctx.routeFor?.(name)?.ownKey || name;
   const shown = name => name === 'me' ? name : remarks()[ownKey(name)] || name;
@@ -68,9 +70,9 @@ export function chatApp(ctx) {
   let unreadTotal = 0, freshMoments = 0;
   let panel = null, quote = null;
   const drafts = new Map(), live = typeof api.chatReply === 'function';
-  const photoURLs = new Map(), bubbleURLs = new Map(), recalled = new Map(), transcribed = new Set();
+  const photoURLs = new Map(), bubbleURLs = new Map(), photoSizes = new Map(), recalled = new Map(), transcribed = new Set();
   let press = null, pressedAt = 0;
-  const voiceText = () => api.getState().chat.voiceText || {mode: 'translation', auto: false};
+  const voiceText = () => api.readState().chat.voiceText || {mode: 'translation', auto: false};
   /** 转文字 for a voice message: the translation, the original line, or both (original first). */
   function transcriptHTML(m) {
     // The engine's own marks ([sigh], <whisper>…</whisper>, (laughing), <#0.5#>) are for the voice, not for reading.
@@ -81,7 +83,7 @@ export function chatApp(ctx) {
   }
 
   // ---------- The user (我) ----------
-  const profile = () => api.getState().chat.profile;
+  const profile = () => api.readState().chat.profile;
   const myName = () => profile().name || api.userName?.() || '我';
   let switchTimer = 0;
   const myAvatar = size => `<span class="me-av" data-frame="${esc(profile().frame)}" style="--s:${size}px">${avatar(myName(), 'none', size, 'me')}${pendant(profile().frame)}</span>`;
@@ -147,7 +149,6 @@ export function chatApp(ctx) {
       if (mode === 'thread' && threadId === pace.thread) render();
     }, typeTime(m, first));
   }
-  const partner = () => thread.type === 'group' ? '群里' : thread.members[0];
   /**
    * 带进剧情: 这一次 (pick messages for the next story reply, once) or 一直带着 (the story always knows this chat: its
    * memory and whatever is not written up yet). Both can be on; what is picked goes in word for word as well.
@@ -354,7 +355,7 @@ export function chatApp(ctx) {
     switch (m.kind) {
       case 'voice': return `<button class="voice-msg" data-action="voice" ${mid} data-state="ungenerated" aria-label="播放 ${esc(m.from)} 的语音"><span class="v-ico">${icon('play', true)}</span><span class="v-wave">${WAVE_HEIGHTS.map(h => `<i style="height:${h}px"></i>`).join('')}</span><span class="v-sec">${seconds(m)}″</span></button>${voiceText().auto || transcribed.has(m.id) ? transcriptHTML(m) : ''}`;
       case 'photo': return m.photoId
-        ? `<button class="chat-photo" data-action="photo" ${mid} aria-label="查看照片"><img data-chat-photo="${esc(m.photoId)}" alt="${esc(m.text || '照片')}"></button>`
+        ? `<button class="chat-photo" data-action="photo" ${mid}${photoSizes.has(m.photoId) ? ` style="${photoSizes.get(m.photoId)}"` : ''} aria-label="查看照片"><img data-chat-photo="${esc(m.photoId)}"${bubbleURLs.get(m.photoId) ? ` src="${esc(bubbleURLs.get(m.photoId))}"` : ''} alt="${esc(m.text || '照片')}"></button>`
         : `<button class="chat-photo described" data-action="message" ${mid}><span class="ph-art">${icon('image')}</span><span class="ph-cap">${esc(m.text)}</span></button>${photoNote(m)}`;
       case 'file': return fileBody(m, mid);
       // A sticker: the picture without a bubble; its name when the picture cannot be loaded.
@@ -641,10 +642,14 @@ export function chatApp(ctx) {
     return bubbleURLs.get(id);
   }
   async function paintPhotos() {
+    // A photo seen before comes with the page, in the place it had: scrolled back up a chat, a new message would otherwise throw the page out of where it was.
     for (const img of v.root.querySelectorAll('img[data-chat-photo]')) {
-      const url = await bubbleURL(img.dataset.chatPhoto);
+      const id = img.dataset.chatPhoto, url = await bubbleURL(id);
       if (!img.isConnected) continue;
-      if (url) img.src = url; else img.closest('.chat-photo')?.classList.add('missing');
+      if (!url) { img.closest('.chat-photo')?.classList.add('missing'); continue; }
+      if (img.getAttribute('src') === url) continue;
+      img.addEventListener('load', () => { if (img.offsetWidth && img.offsetHeight) photoSizes.set(id, `width:${img.offsetWidth}px;height:${img.offsetHeight}px`); }, {once: true});
+      img.src = url;
     }
   }
 
