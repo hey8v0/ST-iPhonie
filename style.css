@@ -196,6 +196,8 @@
 .sttts-music-island[data-playing="1"] .mi-disc{animation-play-state:running}
 .sttts-music-island .mi-disc i{width:30%;height:30%;border-radius:50%;background:#000}
 .sttts-music-island .mi-line{min-width:0;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.sttts-music-island [data-long]{text-overflow:clip;text-align:left;-webkit-mask-image:linear-gradient(90deg,transparent,#000 8px,#000 calc(100% - 12px),transparent);mask-image:linear-gradient(90deg,transparent,#000 8px,#000 calc(100% - 12px),transparent)}
+.sttts-music-island [data-long]>span{display:inline-block;padding:0 8px 0 4px;will-change:transform}
 .sttts-music-island .mi-bars{flex:none;display:flex;align-items:center;gap:2px;height:14px}
 .sttts-music-island .mi-bars i{width:2.5px;height:30%;border-radius:2px;background:#ff8ab3;transform-origin:center}
 .sttts-music-island[data-playing="1"] .mi-bars i{animation:sttts-mi-bar .9s ease-in-out infinite}

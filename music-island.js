@@ -3,7 +3,7 @@
 // A tap opens it into a card (the song, the lines around, play/pause, next, ✕); a tap elsewhere takes it back in. A double tap opens the
 // phone's 音乐. Drag it anywhere (the place is remembered, by its middle: a longer or shorter line grows or shrinks it
 // evenly on both sides, so it stays where it was put); ✕ puts it away until the next song. It steps aside while the
-// call island is up.
+// call island is up. A line too long for its place moves along as it is sung.
 
 import {joinStack, stackTop} from './island-stack.js';
 import {hasWords} from './core/music.js';
@@ -15,6 +15,44 @@ const NEXT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentCol
 const CLOSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M7 7l10 10M17 7 7 17"/></svg>';
 const TAP = 260;
 
+/** About how long a line takes to sing, when the next one is a long way off (a break in the song): a character of Chinese, Japanese or Korean is a beat, a letter much less. */
+const singing = text => Math.max(2000, [...text].reduce((ms, c) => ms + (c.charCodeAt(0) > 0x2e7f ? 320 : c === ' ' ? 40 : 85), 0));
+/** When a line starts and how long it moves: {start: seconds, length: ms}. */
+export function lineTiming(lines, i, duration = 0) {
+  const line = lines[i], next = lines[i + 1]?.at ?? duration, gap = (next - line.at) * 1000;
+  return {start: line.at, length: Math.max(800, gap > 0 ? Math.min(gap, singing(line.text)) : singing(line.text))};
+}
+/**
+ * A place for one line of text (box, with the text in a span inside). Too long for it, the text moves, on the compositor: following the
+ * line being sung, or slowly to and fro when nothing says how long it lasts. It fits, or the reader wants no motion: it stays still.
+ */
+function movingLine(box, win) {
+  const inner = box.firstElementChild;
+  let shown = null, anim = null;
+  const still = () => { anim?.cancel(); anim = null; box.removeAttribute('data-long'); };
+  return {
+    forget() { shown = null; still(); },
+    show(text, timing, position, playing) {
+      const key = `${text}\u0001${timing?.start ?? ''}`;
+      if (key !== shown) {
+        shown = key;
+        still();
+        const over = box.scrollWidth - box.clientWidth;
+        if (over > 1 && typeof inner.animate === 'function' && !win.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+          box.setAttribute('data-long', '');
+          const at = (offset, x) => ({offset, transform: `translateX(${x}px)`}), travel = over + 14;
+          anim = timing ? inner.animate([at(0, 0), at(.08, 0), at(.95, -travel), at(1, -travel)], {duration: timing.length, fill: 'both'})
+            : inner.animate([at(0, 0), at(.2, 0), at(.8, -travel), at(1, -travel)], {duration: Math.max(4000, travel / 28 * 1000 / .6), iterations: Infinity, direction: 'alternate'});
+        }
+      }
+      if (!anim) return;
+      if (timing) { const want = Math.max(0, (position - timing.start) * 1000); if (Math.abs(anim.currentTime - want) > 700) anim.currentTime = Math.min(want, timing.length); }
+      if (playing && anim.playState === 'paused') anim.play();
+      else if (!playing && anim.playState !== 'paused') anim.pause();
+    },
+  };
+}
+
 /** status(): musicHost.status(). phoneOpen(), callShown(): whether to step aside. open(): the phone's 音乐. */
 export function createMusicIsland({doc = document, status, phoneOpen, callShown = () => false, open, toggle, next}) {
   const win = doc.defaultView;
@@ -22,12 +60,21 @@ export function createMusicIsland({doc = document, status, phoneOpen, callShown 
   el.className = 'sttts-music-island';
   el.hidden = true;
   el.setAttribute('role', 'region');
-  el.innerHTML = `<div class="mi-pill"><span class="mi-disc" aria-hidden="true"><i></i></span><span class="mi-line" data-mi-line></span><span class="mi-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div>
+  el.innerHTML = `<div class="mi-pill"><span class="mi-disc" aria-hidden="true"><i></i></span><span class="mi-line" data-mi-box><span data-mi-line></span></span><span class="mi-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div>
     <div class="mi-card"><div class="mi-row"><span class="mi-disc big" aria-hidden="true"><i></i></span><span class="mi-text"><b data-mi-title></b><small data-mi-sub></small></span>
       <button type="button" class="mi-btn" data-mi="toggle"></button><button type="button" class="mi-btn" data-mi="next" aria-label="下一首">${NEXT}</button><button type="button" class="mi-btn mi-close" data-mi="close" aria-label="收起">${CLOSE}</button></div>
-      <div class="mi-lyrics" aria-live="polite"><p data-mi-prev></p><p class="now" data-mi-now></p><p data-mi-next></p></div></div>`;
+      <div class="mi-lyrics" aria-live="polite"><p data-mi-prev></p><p class="now" data-mi-now-box><span data-mi-now></span></p><p data-mi-next></p></div></div>`;
   doc.body.append(el);
   let place = null, dismissed = '', now = null, built = '', expanded = false, tapTimer = 0, width = 0;
+  const pillLine = movingLine(el.querySelector('[data-mi-box]'), win), cardLine = movingLine(el.querySelector('[data-mi-now-box]'), win);
+  const forget = () => { pillLine.forget(); cardLine.forget(); };
+  /** What is on show now moves as it should: after anything that changes what can be measured. */
+  function move(s) {
+    const lines = s.lyrics || [], i = s.lyricIndex ?? -1, sung = i >= 0 ? lines[i]?.text : '', timing = sung ? lineTiming(lines, i, s.duration) : null, playing = s.phase === 'playing';
+    const shown = sel => el.querySelector(sel).textContent;
+    if (expanded) cardLine.show(shown('[data-mi-now]'), shown('[data-mi-now]') === sung ? timing : null, s.position, playing);
+    else pillLine.show(shown('[data-mi-line]'), shown('[data-mi-line]') === sung ? timing : null, s.position, playing);
+  }
   try { place = JSON.parse(win.localStorage.getItem(KEY) || 'null'); } catch { /* top middle */ }
   // {cx, y}: the middle across and the top, as parts of the window. (Kept before 0.7.40 as {x, y}, the left edge.)
   function where() {
@@ -61,6 +108,8 @@ export function createMusicIsland({doc = document, status, phoneOpen, callShown 
     if (expanded === on) return;
     expanded = on;
     el.dataset.expanded = on ? '1' : '';
+    forget();
+    if (now && !el.hidden) move(now);
     (win.requestAnimationFrame || (fn => win.setTimeout(fn, 16))).call(win, where);
   }
   /** Shown while a song is on (playing, paused or loading), the phone is away, no call island, and not put away. */
@@ -71,8 +120,9 @@ export function createMusicIsland({doc = document, status, phoneOpen, callShown 
     const show = on && !phoneOpen() && !callShown() && dismissed !== key(now);
     if (!show) { el.hidden = true; setExpanded(false); return; }
     draw(now);
-    if (el.hidden) { el.hidden = false; where(); }
+    if (el.hidden) { el.hidden = false; forget(); where(); }
     else if (el.offsetWidth !== width) where(); // near an edge, a longer line must not go off the screen
+    move(now);
   }
 
   let drag = null, lastTap = 0;
@@ -112,8 +162,8 @@ export function createMusicIsland({doc = document, status, phoneOpen, callShown 
   // A tap anywhere else takes the card back in.
   const away = e => { if (expanded && !el.contains(e.target)) setExpanded(false); };
   doc.addEventListener('pointerdown', away, true);
-  const onResize = () => { if (!el.hidden) where(); };
+  const onResize = () => { if (el.hidden) return; where(); forget(); if (now) move(now); };
   win.addEventListener('resize', onResize);
   return {refresh, get shown() { return !el.hidden; }, get expanded() { return expanded; },
-    dispose() { leave(); win.clearTimeout(tapTimer); doc.removeEventListener('pointerdown', away, true); win.removeEventListener('resize', onResize); el.remove(); }};
+    dispose() { leave(); forget(); win.clearTimeout(tapTimer); doc.removeEventListener('pointerdown', away, true); win.removeEventListener('resize', onResize); el.remove(); }};
 }
