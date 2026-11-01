@@ -1,8 +1,8 @@
 import {buildDoubaoRequest,doubaoAudio,DOUBAO_VOICES} from './doubao.js';
-import {proxyAddress} from './proxy-url.js';
+import {proxyAddress, noTavernProxy} from './proxy-url.js';
 import { validateKey, MULTI_KEY, keyTail } from './keys.js';
 import { languageCode } from './languages.js';
-import { TTSParameters as P, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, FISH_TAURI_NOTE, FISH_PROXY_PAGE, DOUBAO_PROXY_NOTE, DOUBAO_DIRECT_NOTE, DOUBAO_RELAY_NOTE, DOUBAO_PROXY_PAGE, tauriTavern, setFishCompat } from './parameters.js';
+import { TTSParameters as P, CUSTOM_NO_PROXY, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, FISH_TAURI_NOTE, FISH_PROXY_PAGE, DOUBAO_PROXY_NOTE, DOUBAO_DIRECT_NOTE, DOUBAO_RELAY_NOTE, DOUBAO_PROXY_PAGE, tauriTavern, setFishCompat } from './parameters.js';
 import { speakable } from './voice-fx.js';
 import { buildCustomRequest, customInit, readCustomAnswer, customVoices, readVoiceList, gradioRoot, referenceFile, serviceSaid } from './custom-voice.js';
 import { unpacked, audioKind } from './audio-bytes.js';
@@ -207,11 +207,13 @@ export class Providers{
   const {url,init}=customInit(request,key,{audio,uploaded});
   // Links and later steps are read with the same headers, less the head of a body they do not have.
   const asked=Object.fromEntries(Object.entries(init.headers).filter(([h])=>h.toLowerCase()!=='content-type'));
-  const send=async(target,how=init)=>{try{return await fetchWithPolicy(this.fetcher,target,how,signal);}catch(error){if(signal?.aborted||!this.proxy||!/无法连接/.test(error.message))throw error;
+  // What came through the tavern's proxy, asked by the plugin or written in the address: a tavern with none answers with its own page.
+  const passed=async r=>{const said=await r.clone().text().catch(()=>'');if(/CORS proxy is disabled/i.test(said))throw Error('自己的接口不让网页直接访问：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆');if(noTavernProxy(said))throw Error(CUSTOM_NO_PROXY);return r;};
+  const send=async(target,how=init)=>{let r;try{r=await fetchWithPolicy(this.fetcher,target,how,signal);}catch(error){if(signal?.aborted||!this.proxy||!/无法连接/.test(error.message))throw error;
    // The tavern's proxy passes JSON on and nothing else.
    if(how.body&&typeof how.body!=='string')throw Error('连不上自己的接口。这种接口收表单或文件，酒馆的转发传不了：服务开着吗？地址和端口对吗？它要自己允许跨域');
    const relayed=await this.proxy(target,how,signal).catch(()=>null);if(!relayed)throw Error('连不上自己的接口：地址不对、服务没开，或者它不让网页直接访问（可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆）');
-   if(/CORS proxy is disabled/i.test(await relayed.clone().text().catch(()=>'')))throw Error('自己的接口不让网页直接访问：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆');return relayed;}};
+   return passed(relayed);}return proxyAddress(target)?passed(r):r;};
   // 换模型: only when this voice's model is not the one loaded last.
   const loaded=(request.before||[]).join('\n');
   if(loaded&&this.customLoaded!==loaded){this.customLoaded='';for(const step of request.before){const {url:target,init:get}=customInit({...request,url:step,method:'GET',body:undefined});const r=await send(target,get).catch(e=>{throw Error('换模型失败：'+e.message);});
@@ -238,7 +240,7 @@ export class Providers{
   const own=customVoices(c),q=search.trim().toLowerCase();let listed=[],note='';
   const url=String(c.params.listUrl||'').trim();
   if(proxyAddress(url)||/^https?:\/\//i.test(url)){const {url:target,init}=customInit({url,method:'GET',headers:String(c.params.headers||'')},this.currentKey('custom'));
-   let r=await fetchWithPolicy(this.fetcher,target,init).catch(()=>null);if(!r&&this.proxy)r=await this.proxy(target,init).catch(()=>null);
+   let r=await fetchWithPolicy(this.fetcher,target,init).catch(()=>null);if(!r&&this.proxy){r=await this.proxy(target,init).catch(()=>null);if(r&&noTavernProxy(await r.clone().text().catch(()=>'')))r=null;}
    if(!r)note='音色列表地址连不上';else if(!r.ok)note='音色列表地址回答 HTTP '+r.status;else{try{listed=readVoiceList(await r.json(),String(c.params.listPath||'').trim());}catch{note='音色列表回的不是 JSON';}}
    listed=listed.filter(v=>!own.some(o=>o.id===v.id));}
   const all=[...own,...listed];

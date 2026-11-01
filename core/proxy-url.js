@@ -8,6 +8,17 @@ export function proxyAddress(value) {
  return raw;
 }
 
+/**
+ * What a tavern with no /proxy/ answers (TauriTavern for now): its own page, or that it knows no such path. Told by what came back and
+ * not by which tavern this is, so the day one has a proxy it simply works. A proxy passes on a service's own page too: that is not this.
+ */
+export function noTavernProxy(text, own = globalThis.document?.title) {
+ const head = String(text ?? '').slice(0, 4000);
+ if (/Unsupported endpoint/i.test(head)) return true;
+ const title = /<title[^>]*>([^<]*)/i.exec(head)?.[1].trim();
+ return !!title && (/^(SillyTavern|TauriTavern)\b/i.test(title) || title === own);
+}
+
 /** Tavern POST routes require its CSRF headers; never attach them to an upstream API. */
 export function withProxyHeaders(send, tavernHeaders) {
  return (input, init = {}, ...rest) => {

@@ -3,6 +3,7 @@
 // gets its one-click format; anything else can be told by a curl command from its docs. What cannot be read is also
 // told apart here: a service that is not running, one that lets no web page ask it, an address that means this device.
 import {CUSTOM_TEMPLATES, readVoiceList} from './custom-voice.js';
+import {noTavernProxy} from './proxy-url.js';
 
 const LOOPBACK = /^(localhost|127(\.\d+){3}|\[::1\])$/i;
 // What people paste after the address: the docs page, or the path of the speech call itself.
@@ -25,7 +26,8 @@ export function cleanAddress(raw) {
 
 /**
  * Whether and how a service can be asked. direct(url, init): the browser's own request; proxy(url): through the tavern.
- * {via: 'direct' | 'proxy' | '', state: 'ok' | 'blocked' | 'mixed' | 'loopback' | 'down', proxy: 'on' | 'off' | 'none'}
+ * {via: 'direct' | 'proxy' | '', state: 'ok' | 'blocked' | 'mixed' | 'loopback' | 'down', proxy: 'on' | 'off' | 'missing' | 'none'}
+ * (off: the tavern can turn it on; missing: this tavern has none.)
  */
 export async function reachService(base, {direct, proxy, page = globalThis.location}) {
   const target = new URL(base), loop = LOOPBACK.test(target.hostname), mixed = page?.protocol === 'https:' && target.protocol === 'http:' && !loop;
@@ -37,8 +39,8 @@ export async function reachService(base, {direct, proxy, page = globalThis.locat
   if (proxy) {
     try {
       const r = await proxy(base), said = await r.clone().text().catch(() => '');
-      // (A tavern app with no proxy answers with its own page.)
-      if (/CORS proxy is disabled/i.test(said) || (r.ok && /<title>\s*SillyTavern/i.test(said))) state = 'off';
+      if (/CORS proxy is disabled/i.test(said)) state = 'off';
+      else if (noTavernProxy(said)) state = 'missing';
       // The tavern's own 500: it could not reach the service either.
       else if (r.status === 500 && /^(internal server error)?$/i.test(said.trim())) state = 'on';
       else return {via: 'proxy', state: 'ok', proxy: 'on'};
@@ -48,13 +50,15 @@ export async function reachService(base, {direct, proxy, page = globalThis.locat
 }
 
 const TURN_ON = '在酒馆文件夹的 config.yaml 里把 enableCorsProxy 改成 true，重启酒馆，再点一次。云酒馆找服务商开。';
+const NO_PROXY = '这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有），服务要自己允许跨域（CORS），或者套一个允许跨域的中转。';
 /** What a failed reachService means, in plain words: {message, hint, address (a better one to try)}. */
 export function explainReach(r, base, page = globalThis.location) {
   const target = new URL(base), elsewhere = page?.hostname && !LOOPBACK.test(page.hostname) ? `${target.protocol}//${page.hostname}${target.port ? ':' + target.port : ''}` : '';
   if (r.state === 'blocked') return r.proxy === 'on'
     ? {message: '服务开着，但它不让网页直接访问，酒馆的转发也连不上它。', hint: '酒馆和服务不在同一台机器时会这样：让服务开跨域（CORS），或者把酒馆和服务放到能互相连通的地方。'}
+    : r.proxy === 'missing' ? {message: '服务开着，但它不让网页直接访问（没开跨域）。', hint: NO_PROXY}
     : {message: '服务开着，但它不让网页直接访问（没开跨域），酒馆的转发也没开。', hint: TURN_ON};
-  if (r.state === 'mixed') return {message: '酒馆是 https 打开的，浏览器不让它连 http 地址。', hint: r.proxy === 'on' ? '酒馆的转发也连不上它：看看地址对不对、服务开着没有，或者给服务配上 https。' : TURN_ON + '或者给服务配上 https。'};
+  if (r.state === 'mixed') return {message: '酒馆是 https 打开的，浏览器不让它连 http 地址。', hint: r.proxy === 'on' ? '酒馆的转发也连不上它：看看地址对不对、服务开着没有，或者给服务配上 https。' : r.proxy === 'missing' ? '这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有）：给服务配上 https。' : TURN_ON + '或者给服务配上 https。'};
   if (r.state === 'loopback') return {message: '127.0.0.1 指的是正在用的这台设备自己，这里连不到。', hint: `服务在电脑上的话，要写电脑的地址${elsewhere ? `（可能就是 ${elsewhere}）` : ''}，服务启动时要监听 0.0.0.0（GPT-SoVITS 加 -a 0.0.0.0），防火墙要放行这个端口。`, ...(elsewhere ? {address: elsewhere} : {})};
   return {message: '连不上：服务没开，或者地址、端口不对。', hint: LOOPBACK.test(target.hostname) ? '先看看服务的窗口有没有跑起来，窗口里会写端口。' : '服务开着的话，它要监听 0.0.0.0，那台电脑的防火墙要放行这个端口，两台设备要在同一个网络里。'};
 }

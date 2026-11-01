@@ -404,6 +404,7 @@ export function readVoiceList(json, path = '') {
 /** What to change when 自己的接口 fails, in plain words ('' when the message says it already). */
 export function customHint(message) {
   const m = String(message || '');
+  if (/没有转发功能/.test(m)) return '';
   if (/unpickling stack underflow|invalid load key|version.*(?:not|un)support/i.test(m)) return '这个模型是用更新版本的 GPT-SoVITS 训练的，现在开着的 GPT-SoVITS 读不了：换一个新版的 GPT-SoVITS，模型和设置都不用动。';
   if (/No such file|not exist|找不到|cannot find|FileNotFoundError/i.test(m)) return '路径对不上：模型和参考音频的路径要写跑 GPT-SoVITS 的那台电脑上的完整路径，检查文件夹和文件名有没有改过。';
   if (/3\s*[-~～到]\s*10|outside the .*range|参考音频.*秒/i.test(m)) return '参考音频要 3～10 秒：换一段长短合适的参考音频。';

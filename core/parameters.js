@@ -109,6 +109,8 @@ export const DOUBAO_PROXY_NOTE='这个酒馆关着转发（enableCorsProxy），
 export const DOUBAO_DIRECT_NOTE='豆包的服务器不让网页直接访问，「接口地址」不能直接填 openspeech.bytedance.com：改回默认的 /proxy/https://openspeech.bytedance.com/api/v3/tts/unidirectional（酒馆要开着 enableCorsProxy），或者填自己搭的中转，做法在使用说明的「豆包语音」里。';
 export const DOUBAO_RELAY_NOTE='连不上「接口地址」里的中转：地址填错了、中转没开、网络不通（workers.dev 在国内常常打不开，要绑自己的域名），或者中转没加跨域许可（CORS）。使用说明「豆包语音」里的中转已经加好了。';
 export const DOUBAO_PROXY_PAGE='酒馆的转发返回的是网页而不是声音：这个酒馆没有能用的转发（TauriTavern 这类手机酒馆 App 没有这个功能）。在豆包的「接口地址」填自己搭的中转，做法在使用说明的「豆包语音」里。';
+/** 自己的接口 could not be reached, and this tavern has no proxy to try. */
+export const CUSTOM_NO_PROXY='连不上自己的接口，这个酒馆又没有转发功能（TauriTavern 这类 App 酒馆现在没有）。按顺序检查：① 手机有没有联网；② 接口地址直接写 http:// 或 https:// 开头，不要 /proxy/；③ 服务在电脑上时不能写 127.0.0.1，要写电脑的局域网 IP，服务也要开放局域网访问（GPT-SoVITS 启动时加 -a 0.0.0.0）；④ 服务要允许跨域（CORS），或者套一个允许跨域的中转。';
 /** A /v1/tts request without a relay goes through the tavern's proxy: what to do when that is off. */
 export const FISH_PROXY_NOTE='这个模型现在只在 Fish 自己的接口上，网页不能直接调用，要借酒馆转发：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆。用中转的不用改。';
 /** TauriTavern (the tavern as a phone and desktop app, Rust instead of Node) has no /proxy/ yet, and gives extensions
