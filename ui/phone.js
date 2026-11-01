@@ -289,7 +289,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   // is asked for every message, contact and post drawn, and each read of the settings copies all of them.
   let roleCache = null;
   const roleList = () => {
-    if (!roleCache) { roleCache = api.getState().routes; (win.queueMicrotask || queueMicrotask)(() => { roleCache = null; }); }
+    if (!roleCache) { roleCache = api.rolesHere?.() || api.getState().routes; (win.queueMicrotask || queueMicrotask)(() => { roleCache = null; }); }
     return roleCache;
   };
   const routeFor = name => findRoute(roleList(), name);
@@ -777,6 +777,14 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       if (avatarURLs.get(a.photoId)) map[name] = avatarURLs.get(a.photoId);
     }
     for (const [id, url] of avatarURLs) if (!used.has(id)) { if (url) win.URL.revokeObjectURL(url); avatarURLs.delete(id); }
+    // A role with a key of its own (another card has someone of that name) shows its own choice, not the other one's.
+    for (const r of api.rolesHere?.() || []) {
+      if (!r.ownKey) continue;
+      if (chosen[r.ownKey]?.kind === 'text') delete map[r.name];
+      else if (map[r.ownKey]) map[r.name] = map[r.ownKey];
+      else if (chosen[r.name]) { delete map[r.name]; if (tavern.characters[r.name]) map[r.name] = tavern.characters[r.name]; }
+      if (map[r.name]) map[r.ownKey] = map[r.name];
+    }
     const key = JSON.stringify(map);
     if (key === avatarKey || disposed) return;
     avatarKey = key;
@@ -1025,7 +1033,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (event.type === 'call') calls.update(event.call);
     if (event.type === 'forum' || event.type === 'peek') { const app = event.type; if (active === app) run(() => views.get(app)?.refresh()); }
     // 分区: another card was opened in the tavern; the open app and the badges follow it.
-    if (event.type === 'space') { if (active && views.get(active)?.refresh) run(() => views.get(active).refresh()); countUnread(); countMoments(); }
+    if (event.type === 'space') { run(refreshAvatars); if (active && views.get(active)?.refresh) run(() => views.get(active).refresh()); countUnread(); countMoments(); }
     if (event.type === 'sync') {
       views.get('settings')?.onSync?.();
       // Content from another device: say so once, when that sync is over.

@@ -9,6 +9,7 @@ import {parseSounds} from './core/sounds.js';
 import {parseBgm} from './core/music.js';
 import {modelInfo, normalizeModel, currentModel, MODEL_LIMIT, vrmaInfo, wordList, MOVE_FILE_LIMIT} from './core/model-files.js';
 import {MOVES, moveFor} from './core/model-moves.js';
+import {findRoute, storeName} from './core/routes.js';
 
 const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? record.versions : record.url ? [{...record}] : [];
 /** The drawn picture of a story picture block, as shown in the chat (the chosen version). */
@@ -31,6 +32,8 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
   let stage = null, cursor = 0, endTimer = 0;
   const failed = new Set();
   const vn = () => settings().vn, picks = new Map();
+  /** What a character's pictures are kept under: their name, or a key of their own when another card has someone of that name. */
+  const castKey = name => findRoute(settings().routes, name)?.ownKey || name;
   const chat = () => context()?.chat || [];
 
   /** A message as the stage's steps; max: how long a page of text may be (绘本 takes whole lines). */
@@ -157,9 +160,9 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       source: {next: () => { while (cursor < chat().length) { const id = cursor++, steps = stepsOf(id); if (steps?.length) return {id, steps}; } return null; }},
       voice: {play: s => play(s.id, s.line), narrate: s => narrate(s.text), stop, on: voiceOn, mouth},
       models: {
-        has: name => !!currentModel(vn().cast?.[name]),
+        has: name => !!currentModel(vn().cast?.[castKey(name)]),
         load: async name => {
-          const entry = currentModel(vn().cast?.[name]), {createModelActor, modelBytes} = await import('./vn-model.js');
+          const entry = currentModel(vn().cast?.[castKey(name)]), {createModelActor, modelBytes} = await import('./vn-model.js');
           try { return await createModelActor({...entry}, await modelBytes(entry.path)); }
           // Once a stage: the 立绘 (or the avatar) stays in its place.
           catch (error) { if (!failed.has(name)) { failed.add(name); notice(`${name}的模型没能演出来：${error.message}`); } throw error; }
@@ -170,8 +173,8 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       cue: (s, {skipping}) => { if (s.kind === 'bgm') music(s.id, s.index); else sound(s.id, s.index, {skipping}); },
       face: (name, user) => { const key = user ? 'me' : name; if (Object.hasOwn(mine, key)) return mine[key]; return user ? tavern.me : tavern.characters?.[name] || avatars().characters?.[name] || ''; },
       sprite: (name, how) => {
-        const why = {}, cast = vn().cast || {}, url = pickLook(cast[name], {...how, name, names: [...new Set([...(how.names || []), ...Object.keys(cast)])], outfit: wear()[name] || '', why});
-        if (cast[name]) picks.set(name, {...why, line: String(how.line || '').slice(0, 40)});
+        const why = {}, cast = vn().cast || {}, url = pickLook(cast[castKey(name)], {...how, name, names: [...new Set([...(how.names || []), ...Object.keys(cast).map(storeName)])], outfit: wear()[name] || '', why});
+        if (cast[castKey(name)]) picks.set(name, {...why, line: String(how.line || '').slice(0, 40)});
         return url;
       },
       send,
@@ -223,8 +226,8 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       url = tavernPicture((await response.json()).path);
     }
     const s = settings(), removing = !blob && !use && !drop && typeof mix !== 'boolean' && !dropOutfit;
-    const {entry, gone} = editLook(s.vn.cast?.[name], {look, outfit, url, add, use, drop: removing ? true : drop, mix, seed, dropOutfit});
-    const saved = backend.saveVn({cast: {...s.vn.cast, [name]: entry}});
+    const store = castKey(name), {entry, gone} = editLook(s.vn.cast?.[store], {look, outfit, url, add, use, drop: removing ? true : drop, mix, seed, dropOutfit});
+    const saved = backend.saveVn({cast: {...s.vn.cast, [store]: entry}});
     // A file still used somewhere (the same upload in two places) stays.
     const used = JSON.stringify(saved?.cast ?? settings().vn.cast ?? {});
     for (const old of gone) if (old && old !== url && OWN.test(old) && !used.includes(JSON.stringify(old))) fetch('/api/images/delete', {method: 'POST', headers: context().getRequestHeaders(), body: JSON.stringify({path: old})}).catch(() => {});
@@ -253,7 +256,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     name = String(name || '').trim();
     if (!name) throw Error('没有角色名');
     if (blob) blob = await ownFile(blob);
-    const s = settings(), entry = s.vn.cast?.[name] || {sprite: '', looks: {}, actions: [], outfits: []};
+    const s = settings(), store = castKey(name), entry = s.vn.cast?.[store] || {sprite: '', looks: {}, actions: [], outfits: []};
     let models = [...(entry.models || [])], useModel = entry.useModel || '', target = id || useModel, gone = null;
     if (blob) {
       if (models.length >= MODEL_LIMIT) throw Error(`一个角色最多存 ${MODEL_LIMIT} 个模型，先删掉一个不用的`);
@@ -282,12 +285,12 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       models[at] = next;
     }
     const {model: _old, ...rest} = entry;
-    const saved = backend.saveVn({cast: {...s.vn.cast, [name]: {...rest, models, useModel}}});
+    const saved = backend.saveVn({cast: {...s.vn.cast, [store]: {...rest, models, useModel}}});
     if (gone) {
       fetch('/api/files/delete', {method: 'POST', headers: context().getRequestHeaders(), body: JSON.stringify({path: gone.path.replace(/^\//, '')})}).catch(() => {});
       import('./vn-model.js').then(m => m.forgetModelBytes(gone.path)).catch(() => {});
     }
-    const kept = (saved?.cast ?? settings().vn.cast)?.[name];
+    const kept = (saved?.cast ?? settings().vn.cast)?.[store];
     return (kept?.models || []).find(m => m.id === target) || null;
   }
 
@@ -297,7 +300,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
    * Live2D the model's own motions given words. A spec for the model's act(), or null.
    */
   function moveSpec(name, how = {}) {
-    const entry = vn().cast?.[name], model = currentModel(entry);
+    const entry = vn().cast?.[castKey(name)], model = currentModel(entry);
     if (!model) return null;
     const extra = [];
     if (model.kind === 'vrm') for (const m of vn().moves || []) extra.push({id: m.id, label: m.label, words: m.words});
@@ -349,7 +352,8 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     /** 绘本: a character's 立绘 for a feeling, in the 形象 this chat uses ('' when they have none). */
     bookSprite(name, emotion = '') {
       const cast = vn().cast || {};
-      return cast[name] ? pickLook(cast[name], {emotion, name, names: Object.keys(cast), outfit: wear()[name] || '', random: () => 0}) : '';
+      const own = cast[castKey(name)];
+      return own ? pickLook(own, {emotion, name, names: Object.keys(cast).map(storeName), outfit: wear()[name] || '', random: () => 0}) : '';
     },
     get showing() { return !!stage; },
     status(phase) { stage?.status(phase); },

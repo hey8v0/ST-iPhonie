@@ -20,3 +20,29 @@ export function roleName(routes,name){const n=String(name??'').trim(),list=(rout
 export function findRoute(routes,name){const n=roleName(routes,name);return (routes||[]).find(r=>r.name===n);}
 /** The lines of a reply with their speakers as roles: the 别名 a line was written with becomes the role's name. */
 export function withRoles(routes,lines){return lines.map(l=>{if(!l.role)return l;const role=roleName(routes,l.role);return role===l.role?l:{...l,role,said:l.role};});}
+// ---------- 同名 ----------
+// Two cards can each have their own 林晚: a name can be shared by roles of different cards, and each card sees its own.
+const keysOf=r=>Array.isArray(r?.cards)?r.cards:[];
+/**
+ * The roles as a card sees them: of those sharing a name, the one that belongs to it, else the one that belongs to no card, else the
+ * first. With nobody sharing a name this is the list itself, the same array: nothing changes for anyone who never does this.
+ */
+export function rolesSeen(routes,card=''){
+ const names=new Set();let shared=false;
+ for(const r of routes||[]){if(names.has(r?.name)){shared=true;break;}names.add(r?.name);}
+ if(!shared)return routes;
+ const rank=r=>card&&keysOf(r).includes(card)?2:keysOf(r).length?0:1,best=new Map();
+ for(const r of routes){const was=best.get(r.name);if(!was||rank(r)>rank(was))best.set(r.name,r);}
+ return routes.filter(r=>best.get(r.name)===r);
+}
+/** A name two roles cannot share: both of no card, or of the same card. '' when there is none. */
+export function rolesClash(routes){
+ const by=new Map();
+ for(const r of routes||[]){const name=String(r?.name??'').trim();for(const other of by.get(name)||[]){const mine=keysOf(r),theirs=keysOf(other);if(!mine.length&&!theirs.length||mine.some(k=>theirs.includes(k)))return name;}by.set(name,[...(by.get(name)||[]),r]);}
+ return '';
+}
+/** What a role's own things (立绘, avatar, 备注) are kept under: its name, or a key of its own for one made where the name was taken. */
+export const roleStore=r=>r?.ownKey||r?.name||'';
+export const ownKeyFor=(name,id)=>`${String(name).slice(0,30)}#${String(id).replace(/[^0-9a-z]/gi,'').slice(0,8)}`;
+/** The person a key of roleStore is about. */
+export const storeName=key=>String(key).replace(/#[0-9a-z]{1,8}$/i,'');

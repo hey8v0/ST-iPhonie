@@ -56,7 +56,9 @@ export function chatApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'chat');
   // 备注: what the user calls a contact, shown in the chat app only (the models keep using the real name).
   const remarks = () => api.getState().chat.remarks || {};
-  const shown = name => name === 'me' ? name : remarks()[name] || name;
+  /** What a person's avatar and 备注 are kept under: their name, or a key of their own when another card has someone of that name. */
+  const ownKey = name => ctx.routeFor?.(name)?.ownKey || name;
+  const shown = name => name === 'me' ? name : remarks()[ownKey(name)] || name;
   const you = who => who === 'me' ? '你' : shown(who);
   // mode: list (the tabs) · thread · profile (a contact's card) · me (the user's card and 个性装扮) · contact-edit
   // selecting: the messages picked (null when not picking); pickFor: what for, 'bring' (带进剧情) or 'delete' (多选删除).
@@ -247,7 +249,7 @@ export function chatApp(ctx) {
   }
   /** ＋ in 联系人: a role from the 角色 App that is not here yet, or someone outside the story by hand. */
   function addContact() {
-    const here = new Set(api.chatContacts().map(c => c.name)), roles = api.getState().routes.filter(r => r.name?.trim() && !here.has(r.name));
+    const here = new Set(api.chatContacts().map(c => c.name)), roles = (api.rolesHere?.() || api.getState().routes).filter(r => r.name?.trim() && !here.has(r.name));
     const d = ctx.dialog('添加联系人', `<div class="pick-list">
       ${roles.map(r => `<button class="list-row" data-add-role="${esc(r.name)}">${avatar(r.name, r.voice ? r.engine : 'none', 36)}<span><strong>${esc(r.name)}</strong><small>角色 App 里的角色${r.voice ? ' · 能发语音' : ''}</small></span>${icon('add')}</button>`).join('')}
       <button class="list-row" data-add-role="">${icon('edit')}<span><strong>手动添加</strong><small>剧情之外的人（同学、店员、网友……），写上人设就能聊</small></span></button></div>
@@ -275,7 +277,7 @@ export function chatApp(ctx) {
     v.draw(`<div class="qq-card" data-engine="${c.engine}"><span class="qq-card-cover" aria-hidden="true"></span>${avatar(c.name, c.engine, 84)}<h2>${esc(shown(c.name))}</h2>${shown(c.name) !== c.name ? `<p class="qq-card-real">昵称：${esc(c.name)}</p>` : ''}<p>${esc(signatureOf(c))}</p>
         <div class="qq-card-tags"><span class="chip">${c.source === 'role' ? '角色' : '手动联系人'}</span>${c.voice ? '<span class="chip">能发语音</span>' : ''}${star ? '<span class="chip">★ 特别关心</span>' : ''}</div></div>
       <div class="actions">${btn('profile-chat', icon('chat') + '发消息', 'primary')}${api.callDial ? btn('profile-call', icon('phone') + '打电话', 'secondary') : ''}${btn('profile-moments', icon('moments') + 'TA 的动态', 'secondary')}</div>
-      <div class="group">${btn('remark', `${icon('edit')}<span><strong>设置备注</strong><small>${esc(remarks()[c.name] || '只有你看得到，聊天里显示这个名字')}</small></span>`, 'list-row')}${btn('avatar-pick', `${icon('image')}<span><strong>换头像</strong><small>${esc(avatarState(c.name))}</small></span>`, 'list-row', `data-key="${esc(c.name)}"`)}${btn('star', `<span>${star ? '★ 取消特别关心' : '☆ 设为特别关心'}</span>`, 'list-row')}${manual ? `<button class="list-row" data-action="contact-edit" data-id="${esc(manual.id)}">${icon('edit')}<span><strong>编辑资料和人设</strong></span></button>` : ''}</div>
+      <div class="group">${btn('remark', `${icon('edit')}<span><strong>设置备注</strong><small>${esc(remarks()[ownKey(c.name)] || '只有你看得到，聊天里显示这个名字')}</small></span>`, 'list-row')}${btn('avatar-pick', `${icon('image')}<span><strong>换头像</strong><small>${esc(avatarState(c.name))}</small></span>`, 'list-row', `data-key="${esc(c.name)}"`)}${btn('star', `<span>${star ? '★ 取消特别关心' : '☆ 设为特别关心'}</span>`, 'list-row')}${manual ? `<button class="list-row" data-action="contact-edit" data-id="${esc(manual.id)}">${icon('edit')}<span><strong>编辑资料和人设</strong></span></button>` : ''}</div>
       <div class="actions">${btn('unfriend', '删除好友', 'danger')}</div>`);
     listeningOf(c.name).then(song => { const box = v.root.querySelector('.qq-card'); if (!song || !box || profileOf !== c.name || mode !== 'profile') return; box.insertAdjacentHTML('beforeend', `<button type="button" class="qq-listening" data-action="play-song" data-title="${esc(song.title)}" data-artist="${esc(song.artist)}">${icon('music')}<span>最近在听：${esc(song.title)}${song.artist ? ' - ' + esc(song.artist) : ''}</span></button>`); }).catch(() => {});
   }
@@ -1158,20 +1160,20 @@ export function chatApp(ctx) {
   }
   /** Where an avatar comes from, in words. */
   function avatarState(key) {
-    const chosen = api.getState().chat.avatars?.[key];
+    const chosen = api.getState().chat.avatars?.[ownKey(key)];
     if (chosen?.kind === 'photo') return '用的是相册里的照片';
     if (chosen?.kind === 'text') return '只显示文字';
     return avatarPicture(key) ? (key === 'me' ? '用的是酒馆里当前人设的头像' : '用的是酒馆角色卡的头像') : '只显示文字（酒馆里没有这个头像）';
   }
   /** Picks an avatar for the user ('me') or a contact: an album photo, a new picture, the tavern's avatar, or text. */
   async function avatarSheet(key, {title = '', reset = '用酒馆的头像'} = {}) {
-    const rows = (await api.listPhotos()).slice(0, 30), who = key === 'me' ? '我' : key, chosen = api.getState().chat.avatars?.[key];
+    const rows = (await api.listPhotos()).slice(0, 30), who = key === 'me' ? '我' : key, store = ownKey(key), chosen = api.getState().chat.avatars?.[store];
     const d = ctx.dialog(title || `${who}的头像`, `<p class="help-copy">点一张照片，或者上传一张新的。</p>
       <label class="secondary file-button">${icon('import')}上传图片<input type="file" accept="image/*" data-avatar-file hidden></label>
       ${rows.length ? `<div class="photo-grid pick-photos">${rows.map(r => `<button data-avatar-photo="${esc(r.id)}" aria-label="用 ${esc(r.name)} 当头像"${chosen?.photoId === r.id ? ' aria-pressed="true"' : ''}><img data-chat-photo="${esc(r.id)}" alt=""></button>`).join('')}</div>` : '<p class="hint">相册里还没有照片。</p>'}
       <div class="actions">${btn('avatar-tavern', reset, 'secondary')}${btn('avatar-text', '只显示文字', 'text-button')}</div>`);
     pickerThumbs(d, rows);
-    const choose = value => { d.close(); api.saveChatOptions({avatars: {[key]: value}}); ctx.notify('头像已换好'); };
+    const choose = value => { d.close(); api.saveChatOptions({avatars: {[store]: value}}); ctx.notify('头像已换好'); };
     d.body.addEventListener('click', e => {
       const photo = e.target.closest('[data-avatar-photo]')?.dataset.avatarPhoto;
       if (photo) return choose({kind: 'photo', photoId: photo});
@@ -1481,12 +1483,12 @@ export function chatApp(ctx) {
       }
       case 'new-friends': mode = 'friends'; render(); break;
       case 'remark': {
-        const name = profileOf, d = ctx.dialog('设置备注', `<div class="group pad">${field('备注', input('remark', remarks()[name] || '', 'text', `maxlength="20" placeholder="${esc(name)}"`), '只改你这边显示的名字（聊天列表、聊天、联系人）；角色那边还是用 TA 的名字，不会知道你给 TA 起了什么备注。空着就是不用备注。')}
+        const name = profileOf, d = ctx.dialog('设置备注', `<div class="group pad">${field('备注', input('remark', remarks()[ownKey(name)] || '', 'text', `maxlength="20" placeholder="${esc(name)}"`), '只改你这边显示的名字（聊天列表、聊天、联系人）；角色那边还是用 TA 的名字，不会知道你给 TA 起了什么备注。空着就是不用备注。')}
           <div class="actions">${btn('remark-save', '保存', 'primary')}</div></div>`);
         d.body.addEventListener('click', e => {
           if (!e.target.closest('[data-action=remark-save]')) return;
           const value = d.body.querySelector('[data-field=remark]').value.trim();
-          try { api.saveChatOptions({remarks: {[name]: value || null}}); d.close(); ctx.notify(value ? `备注改成「${value}」` : '不用备注了'); render(); } catch (error) { ctx.notify(error.message, {error: true}); }
+          try { api.saveChatOptions({remarks: {[ownKey(name)]: value || null}}); d.close(); ctx.notify(value ? `备注改成「${value}」` : '不用备注了'); render(); } catch (error) { ctx.notify(error.message, {error: true}); }
         });
         break;
       }

@@ -358,7 +358,8 @@ export function chatContacts(settings, space = null) {
   const roles = settings.routes.filter(r => !isPlaceholderRole(r.name) && here(r)).map(r => ({name: r.name, source: 'role', voice: !!r.voice, engine: r.voice ? r.engine : 'none', language: r.language || settings.general.defaultLanguage,
     // 角色资料: written in the 角色 App, else a contact of the same name's (a contact given a voice keeps who they are).
     persona: String(r.persona || settings.chat.contacts.find(c => c.name === r.name)?.persona || '').slice(0, CHAT_LIMITS.persona)}));
-  const manual = settings.chat.contacts.filter(c => !roles.some(r => r.name === c.name) && inSpace(c, space)).map(c => ({name: c.name, source: 'manual', id: c.id, voice: false, engine: 'none', language: '', persona: c.persona}));
+  // (Contacts of one name in different cards: with 分区 off everything is in one list, and a name is one person there.)
+  const manual = settings.chat.contacts.filter(c => !roles.some(r => r.name === c.name) && inSpace(c, space)).filter((c, i, all) => all.findIndex(x => x.name === c.name) === i).map(c => ({name: c.name, source: 'manual', id: c.id, voice: false, engine: 'none', language: '', persona: c.persona}));
   return [...roles, ...manual];
 }
 

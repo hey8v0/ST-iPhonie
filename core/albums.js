@@ -13,6 +13,7 @@ export const DRAWN_SOURCES = Object.freeze([
   ['assistant', '助手生图', /^assistant-\d+\.(?:png|jpe?g|webp)$/],
   ['chatapp', '聊天图片', /^聊天-.+-\d+\.(?:png|jpe?g|webp)$/],
   ['book', '绘本插图', /^绘本-.+-\d+\.(?:png|jpe?g|webp)$/],
+  ['plugin', '其他插件', /^插件-\d+\.(?:png|jpe?g|webp)$/],
 ]);
 /** What the drawing app's tools make (放大, 去背景, 网格 …) is the drawing app's too, though 清除绘图 has never counted it. */
 const FROM_DRAW = /^(?:NovelAI|GPT ?生图|ComfyUI)-/;

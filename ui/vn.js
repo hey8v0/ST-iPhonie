@@ -239,8 +239,8 @@ export function vnApp(ctx) {
     });
   }
   function changeOutfits(name, fn) {
-    const s = state(), entry = s.cast[name] || {sprite: '', looks: {}, actions: [], outfits: []};
-    api.saveVn({cast: {...s.cast, [name]: {...entry, outfits: fn([...(entry.outfits || [])])}}});
+    const s = state(), key = castOf(name).key || name, entry = s.cast[key] || {sprite: '', looks: {}, actions: [], outfits: []};
+    api.saveVn({cast: {...s.cast, [key]: {...entry, outfits: fn([...(entry.outfits || [])])}}});
   }
   /** 形象: its name and the looks to draw it with (clothes, hair); resolves to its id (null when not saved). */
   function editOutfit(name, outfit = null) {
@@ -281,8 +281,8 @@ export function vnApp(ctx) {
     return false;
   }
   function changeActions(name, fn) {
-    const s = state(), entry = s.cast[name] || {sprite: '', looks: {}, actions: []};
-    api.saveVn({cast: {...s.cast, [name]: {...entry, actions: fn([...(entry.actions || [])])}}});
+    const s = state(), key = castOf(name).key || name, entry = s.cast[key] || {sprite: '', looks: {}, actions: []};
+    api.saveVn({cast: {...s.cast, [key]: {...entry, actions: fn([...(entry.actions || [])])}}});
   }
   /** 动作: its name, what to draw (English tags) and the words in the story that bring it on. */
   function editAction(name, action = null, kind = action?.kind || 'action') {

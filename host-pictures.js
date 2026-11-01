@@ -11,7 +11,7 @@
 // When the last version is deleted the record becomes {removed: true, versions: []}, so it is not drawn again
 // automatically. Older records ({url, seed, …}) read as a single version.
 import {storyReply} from './core/outgoing.js';
-import {tavernPicture, parsePictures, pictureInputs, planRequest, planLength, tagTextRequest, tagTextAnswer, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
+import {tavernPicture, sizeFor, parsePictures, pictureInputs, planRequest, planLength, tagTextRequest, tagTextAnswer, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
 import {tokenBudget, loadCounter, countField, tagCost, estimateTokens} from './core/tokens.js';
 import {editTags} from './host-ask.js';
 import {downloadAction} from './download.js';
@@ -85,12 +85,12 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     if (was) hearts.delete(id); else hearts.add(id);
   }
 
-  async function upload(blob, name) {
+  async function upload(blob, name, folder = context().name2 || 'ST-iPhonie') {
     const ctx = context();
     const base64 = await backend.base64(blob);
     const response = await fetch('/api/images/upload', {
       method: 'POST', headers: ctx.getRequestHeaders(),
-      body: JSON.stringify({image: base64, format: 'png', ch_name: ctx.name2 || 'ST-iPhonie', filename: String(name).replace(/\./g, '_')})
+      body: JSON.stringify({image: base64, format: 'png', ch_name: folder, filename: String(name).replace(/\./g, '_')})
     });
     if (!response.ok) throw Error('图片已生成，但上传到酒馆失败（' + response.status + '）');
     return tavernPicture((await response.json()).path);
@@ -102,17 +102,42 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     if (!response.ok && response.status !== 404) throw Error('没能从酒馆删除图片文件（' + response.status + '）');
   }
 
-  /** Asks before spending Anlas (or paying for a GPT picture). Returns 'free', 'paid' or false (declined, or no key). */
-  async function allowed(interactive) {
+  /** Asks before spending Anlas (or paying for a GPT picture). Returns 'free', 'paid' or false (declined, or no key). params: the picture's, when they are its own; who: the other plugin asking. */
+  async function allowed(interactive, params, who = '') {
     if (!backend.drawReady()) { if (interactive) notice(backend.drawMissing() + '，请在小手机的引擎卡包里填写'); return false; }
     const engine = settings().draw.engine;
     // Through a relay counted as Opus, a subscription it does not pass on is expected, not worth a notice.
     if (engine === 'nai') try { await backend.naiSubscription(); } catch (error) { const relay = settings().draw.relay; if (!relay.url&&interactive)notice(error.message);else backend.reportDiagnostic?.('绘图订阅查询',{message:error.message,drawStillAvailable:true},'warn'); }
-    const quote = backend.drawQuote();
+    const quote = backend.drawQuote(params);
     if (quote.free === true) return 'free';
     if (!interactive) return false;
-    const why = engine === 'gpt' ? 'GPT 生图每张都要花钱（按 OpenAI 或中转的价格）。' : quote.free === null ? '暂时读不到 NovelAI 订阅信息，无法确认是否免费。' : '按当前参数和订阅，这张图会扣 Anlas。';
+    const why = (who ? `「${who}」想用小手机画一张图。\n` : '') + (engine === 'gpt' ? 'GPT 生图每张都要花钱（按 OpenAI 或中转的价格）。' : quote.free === null ? '暂时读不到 NovelAI 订阅信息，无法确认是否免费。' : '按当前参数和订阅，这张图会扣 Anlas。');
     return globalThis.confirm(why + '\n确定要生成吗？') ? 'paid' : false;
+  }
+
+  /**
+   * A picture another plugin asks for (host-public.js), drawn like one in the story: the engine, the 画风, the looks of the people
+   * named. One that costs is asked about first; with ask: false it is refused. It goes in the album, and in the tavern's files for
+   * its address. signal: an AbortSignal, to take it back.
+   */
+  async function drawFor({prompt, negative, characters = [], size, seed, ask = true, signal, from}) {
+    const words = String(prompt ?? '').trim().slice(0, 4000), who = String(from ?? '').trim().slice(0, 40);
+    if (!words) throw Object.assign(Error('请先写提示词'), {code: 'NO_PROMPT'});
+    if (!backend.drawReady()) throw Object.assign(Error(backend.drawMissing()), {code: 'NOT_READY'});
+    const s = settings(), own = {...sizeFor(s.draw.params, size), ...(Number.isInteger(seed) && seed >= 0 ? {seed} : {})};
+    const inputs = pictureInputs({...s, draw: {...s.draw, params: {...s.draw.params, ...own}}}, {prompt: words, characters: characters.map(String), spec: null});
+    const permission = await allowed(ask, inputs.params, who || '其他插件');
+    if (!permission) throw Object.assign(Error(ask ? '这张图要花钱，没有确认' : '这张图要花钱，需要确认后再画'), {code: 'PAID'});
+    if (signal?.aborted) throw Object.assign(Error('已取消'), {cancelled: true});
+    const key = 'plugin-' + crypto.randomUUID(), stop = () => backend.drawQueue?.cancel(key);
+    signal?.addEventListener('abort', stop, {once: true});
+    try {
+      const unwanted = String(negative ?? '').trim();
+      const result = await backend.generateImage({...inputs, ...(unwanted ? {negative: [inputs.negative, unwanted].filter(Boolean).join(', ')} : {}), allowPaid: permission === 'paid', name: '插件', key, label: `${who || '其他插件'} · ${words.slice(0, 24)}`});
+      // The picture is in the album either way: no address is no reason to lose it.
+      const url = await upload(result.blob, 'st-iphonie-' + Date.now(), 'ST-iPhonie').catch(() => '');
+      return {url, blob: result.blob, photoId: result.photoId, seed: result.seed, width: result.params.width, height: result.params.height, model: result.params.model, engine: result.engine, prompt: result.prompt};
+    } finally { signal?.removeEventListener('abort', stop); }
   }
 
   /** Queues one picture. Redrawing adds a version; the earlier versions stay. */
@@ -632,5 +657,5 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const permission = await allowed(true); if (!permission) return;
     for (const tag of tags) { if (context().chat[id] !== message) break; await generate(id, tag, {permission}); }
   }
-  return {tagText, drawMessage, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
+  return {drawFor, tagText, drawMessage, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
 }

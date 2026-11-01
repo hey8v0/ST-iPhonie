@@ -895,7 +895,7 @@ export function drawApp(ctx) {
   }
   /** The registered people a written prompt names, added to 角色 with their looks (once). Returns who was added. */
   function addPeople(names = []) {
-    const routes = api.getState().routes, added = [];
+    const routes = api.rolesHere?.() || api.getState().routes, added = [];
     for (const name of names) {
       const r = routes.find(x => x.name === name);
       if (!r || characters.some(c => c.name === r.name)) continue;

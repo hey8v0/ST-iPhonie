@@ -85,6 +85,10 @@ export interface Route {
     autoVoice?: boolean; autoName?: string; autoReason?: string;
     /** 别名: other names the story calls this role by; their lines use this voice. */
     aliases?: string[];
+    /** The cards this role is of. None: it is everyone's. */
+    cards?: string[];
+    /** What its 立绘, avatar and 备注 are kept under when it was made where its name was taken (another card has someone of that name). */
+    ownKey?: string;
 }
 export type RouteInput = Pick<Route, 'name'> & Partial<Omit<Route, 'name'>>;
 export type RequestRoute = Pick<Route, 'voice'> & Partial<Omit<Route, 'voice'>>;
@@ -992,6 +996,8 @@ export interface BackendFacade {
     clearForum(): Promise<number>;
     /** 分区: the character card open in the tavern ({key, name, members}) and whether 分区 is on. */
     phoneSpace(): { key: string; name: string; members: string[]; on: boolean };
+    /** The roles as the card open now sees them: of those sharing a name, only its own. */
+    rolesHere(): Route[];
     /** 查手机 snapshots, newest first; one per character. */
     listPeeks(): Promise<PeekSnapshot[]>;
     getPeek(name: string): Promise<PeekSnapshot | null>;

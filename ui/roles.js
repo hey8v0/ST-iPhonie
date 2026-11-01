@@ -31,33 +31,43 @@ export function rolesApp(ctx) {
   // ---------- the list: rows that go the way Procreate's layers do ----------
   let listDrawn = '', query = '', filter = '', swipe = null, sort = null, seenCard = null;
   const space = () => api.phoneSpace?.() || {};
-  const inCard = (r, sp) => !!sp.key && ((sp.members || []).includes(r.name) || !!r.cards?.includes(sp.key));
+  // (Another card's role of the same name is not this card's, though the name is among its people.)
+  const inCard = (r, sp) => !!sp.key && !sp.others?.has(r.id) && ((sp.members || []).includes(r.name) || !!r.cards?.includes(sp.key));
+  /** The roles another card has by a name someone here has too, with what is left of the list seen from here. */
+  const othersHere = roles => { const here = new Set((api.rolesHere?.() || roles).map(r => r.id)); return new Set(roles.filter(r => !here.has(r.id)).map(r => r.id)); };
+  /** Which card a role is of: said on a row when another role has its name. */
+  const cardLabel = (r, state) => {
+    const key = (r.cards || []).find(k => !k.includes('#'));
+    if (!key) return '所有卡';
+    return state.roleGroups?.find(g => g.card === key)?.name || (key === space().key && space().name) || key.replace(/^[a-z]+:/, '').replace(/\.[^.]+$/, '');
+  };
   /** What the 筛选 chips ask for. */
   const FILTERS = {card: ['这张卡', inCard], voice: ['待配音', r => !r.voice], look: ['没外貌', r => !r.appearance?.trim()]};
   const tree = () => layerTree(api.getState().routes, api.getState().roleGroups).map(e => e.style ? {style: e.style.id} : {group: {...e.group}, styles: e.styles.map(r => r.id)});
   const groupName = () => { const taken = new Set(api.getState().roleGroups.map(g => g.name)); for (let n = 1; ; n++) { const name = n === 1 ? '新建组' : `新建组 ${n}`; if (!taken.has(name)) return name; } };
   /** Picked rows as roles: a group's row stands for its roles. */
   const rolesOf = ids => [...new Set(ids.flatMap(id => id.startsWith('g:') ? tree().find(e => e.group?.id === id.slice(2))?.styles || [] : [id]))];
-  function roleRow(r, pool) {
+  function roleRow(r, pool, twin = '') {
     const voiced = !!r.voice, engine = voiced ? r.engine : 'none';
     const actions = [...(voiced ? [{key: 'audition', label: '试听', icon: 'play'}] : []), {key: 'edit', label: '改', icon: 'edit'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}];
-    return swipeRow(r.id, `<button type="button" class="list-row role-row" data-action="edit-role" data-id="${esc(r.id)}" data-engine="${engine}">${avatar(r.name, engine, 44)}<span class="role-row-text"><strong>${esc(r.name)}</strong>${voiced
+    return swipeRow(r.id, `<button type="button" class="list-row role-row" data-action="edit-role" data-id="${esc(r.id)}" data-engine="${engine}">${avatar(r.name, engine, 44, r.ownKey || r.name)}<span class="role-row-text"><strong>${esc(r.name)}${twin ? ` <span class="auto-chip">${esc(twin)}</span>` : ''}</strong>${voiced
       ? `<small>${plate(engines[r.engine])}<span class="role-voice">${esc(voiceLabel(r.voice, pool))}</span>${r.autoVoice ? ' <span class="auto-chip">自动挑的</span>' : ''}</small>`
       : '<small class="unset">待配音</small>'}</span></button>`, actions, {label: r.name});
   }
   const GROUP_ACTIONS = [{key: 'rename', label: '改名', icon: 'edit'}, {key: 'ungroup', label: '解散', icon: 'layers'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}];
   function listRows() {
-    const state = api.getState(), pool = poolNames(), sp = space(), word = query.trim().toLowerCase();
+    const state = api.getState(), pool = poolNames(), sp = {...space(), others: othersHere(state.routes)}, word = query.trim().toLowerCase();
+    const twin = r => state.routes.some(x => x.id !== r.id && x.name === r.name) ? cardLabel(r, state) : '';
     if (word || filter) {
       const shown = state.routes.filter(r => (!filter || FILTERS[filter][1](r, sp)) && (!word || [r.name, ...(r.aliases || []), r.voice ? voiceLabel(r.voice, pool) : ''].join(' ').toLowerCase().includes(word)));
-      return shown.map(r => roleRow(r, pool)).join('') || '<p class="hint role-none">没有这样的角色</p>';
+      return shown.map(r => roleRow(r, pool, twin(r))).join('') || '<p class="hint role-none">没有这样的角色</p>';
     }
-    return layerTree(state.routes, state.roleGroups).map(e => e.style ? roleRow(e.style, pool) : swipeRow('g:' + e.group.id, `<div class="list-row style-group-row" aria-expanded="${e.group.open}"><span class="style-group-chevron">${icon('chevron')}</span><span class="style-group-art">${icon('layers')}</span><span><strong data-group-name>${esc(e.group.name)}</strong><small>${e.styles.length} 个角色${e.styles.some(r => !r.voice) ? ` · ${e.styles.filter(r => !r.voice).length} 个待配音` : ''}</small></span>${sp.key && e.group.card === sp.key ? '<span class="chip">在玩</span>' : ''}</div>`, GROUP_ACTIONS, {className: 'style-group', label: e.group.name})
-      + `<div class="style-group-body" data-group-body="${esc(e.group.id)}"${e.group.open ? '' : ' data-closed'}><div class="style-group-inner">${e.styles.map(r => roleRow(r, pool)).join('')}</div></div>`).join('');
+    return layerTree(state.routes, state.roleGroups).map(e => e.style ? roleRow(e.style, pool, twin(e.style)) : swipeRow('g:' + e.group.id, `<div class="list-row style-group-row" aria-expanded="${e.group.open}"><span class="style-group-chevron">${icon('chevron')}</span><span class="style-group-art">${icon('layers')}</span><span><strong data-group-name>${esc(e.group.name)}</strong><small>${e.styles.length} 个角色${e.styles.some(r => !r.voice) ? ` · ${e.styles.filter(r => !r.voice).length} 个待配音` : ''}</small></span>${sp.key && e.group.card === sp.key ? '<span class="chip">在玩</span>' : ''}</div>`, GROUP_ACTIONS, {className: 'style-group', label: e.group.name})
+      + `<div class="style-group-body" data-group-body="${esc(e.group.id)}"${e.group.open ? '' : ' data-closed'}><div class="style-group-inner">${e.styles.map(r => roleRow(r, pool, twin(r))).join('')}</div></div>`).join('');
   }
   // (Whatever was being looked for stays in sight when so many have been deleted that the box would otherwise go.)
   function listTools(roles) {
-    const sp = space(), chips = Object.entries(FILTERS).map(([key, [label, test]]) => [key, label, roles.filter(r => test(r, sp)).length]).filter(([key, , n]) => n > 0 || filter === key);
+    const sp = {...space(), others: othersHere(roles)}, chips = Object.entries(FILTERS).map(([key, [label, test]]) => [key, label, roles.filter(r => test(r, sp)).length]).filter(([key, , n]) => n > 0 || filter === key);
     return (roles.length > 8 || query ? `<div class="field role-search"><input class="search" type="search" data-role-search value="${esc(query)}" placeholder="搜索名字、别名、音色" aria-label="搜索角色" autocomplete="off"></div>` : '')
       + ((roles.length > 3 || filter) && chips.length ? `<div class="grid-choices role-filters" role="group" aria-label="筛选">${chips.map(([key, label, n]) => `<button type="button" data-action="role-filter" data-key="${key}" aria-pressed="${filter === key}">${label} · ${n}</button>`).join('')}</div>` : '');
   }
@@ -194,7 +204,7 @@ export function rolesApp(ctx) {
       + (r.autoVoice && voiced ? `<div class="banner auto-banner">${icon('wave')}<span>这个音色是自动挑的${r.autoReason ? `（${esc(r.autoReason)}）` : ''}。不满意可以从列表换一个，或者${api.autoPickVoice ? '' : '在酒馆里打开小手机后'}「重新挑」。</span>${api.autoPickVoice && r.id ? btn('repick-voice', '重新挑', 'chip-button') : ''}</div>` : '')
       + `<div class="id-card${voiced ? '' : ' none'}" data-engine="${r.engine}">
           <div class="id-top"><span>VOICE ID CARD</span>${plate(saved >= 0 ? number(saved) : 'NEW')}</div>
-          <div class="id-main"><span class="id-photo">${halo()}${avatar(r.name || '新', voiced ? r.engine : 'none', 76)}</span>
+          <div class="id-main"><span class="id-photo">${halo()}${avatar(r.name || '新', voiced ? r.engine : 'none', 76, r.ownKey || r.name || '新')}</span>
             <div style="min-width:0;flex:1"><div class="id-name" data-id-name>${esc(r.name || '新角色')}</div>
             <div class="id-fields"><span>ENGINE</span><span>${engines[r.engine]}</span><span>VOICE</span><span data-id-voice>${esc(voiced ? voiceLabel(r.voice) : '未选择')}</span><span>LANG</span><span>${esc(r.language ? languageName(r.language) : '跟随默认')}</span></div></div></div>
           <div class="barcode">${barcode((r.name || '') + r.engine + (r.voice || ''))}</div><span class="id-stamp">${voiced ? '已配音' : '待配音'}</span>
@@ -393,14 +403,15 @@ export function rolesApp(ctx) {
           if (current.cards?.length) current.cards = twins.some(x => !x.cards?.length) ? [] : [...new Set([...current.cards, ...twins.flatMap(x => x.cards)])];
           for (const x of twins) { api.deleteRoute(x.id); drafts.delete(x.id); }
         }
-        const previous = current.id || 'new';
+        const previous = current.id || 'new', wasNew = !current.id;
         current = api.saveRoute(current);
         if (tried?.id === previous) tried.id = current.id;
         drafts.delete(previous);
         drafts.set(current.id, current);
         render();
         v.root.querySelector('[data-save-state]').textContent = '已保存';
-        ctx.notify('角色配音已保存');
+        // A name another card has too: said, because it is what the two cards will now do.
+        ctx.notify(wasNew && api.getState().routes.some(x => x.id !== current.id && x.name === current.name) ? `这张卡有自己的「${current.name}」了，别的卡不受影响` : '角色配音已保存');
         if (el.dataset.action === 'continue-role') api.resume();
         break;
       }
