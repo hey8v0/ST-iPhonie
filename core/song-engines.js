@@ -4,13 +4,16 @@
 // A service that keeps working after it answers says so with tools.onTask, so the song can be picked up after the page was reloaded.
 import {chunkPlan, styleFor} from './song.js';
 import {noTavernProxy} from './proxy-url.js';
+import {ACE_NODES, findAceModels, aceMissing, aceWorkflow, fillSongWorkflow, describeSongWorkflow, comfyRefusal, comfyFailure} from './song-comfy.js';
+import {findProblems} from './comfy-graph.js';
+import {comfyProgress} from './image-engines.js';
 
 /** Who has a key card of its own in 引擎 (ElevenLabs and MiniMax share their voice cards' keys; ComfyUI needs none). */
 export const SONG_KEYS = Object.freeze(['stepfun', 'lyria', 'replicate']);
 export const SING_ENGINES = Object.freeze(['stepfun', 'eleven', 'lyria', 'replicate', 'comfy', 'mini']);
 export const SING_NAMES = Object.freeze({stepfun: '阶跃星辰', eleven: 'ElevenLabs', lyria: 'Google Lyria', replicate: 'Replicate', comfy: 'ComfyUI（ACE-Step）', mini: 'MiniMax'});
 /** What a service keeps working on can be waited for again. */
-export const SING_RESUMES = Object.freeze(['stepfun', 'replicate']);
+export const SING_RESUMES = Object.freeze(['stepfun', 'replicate', 'comfy']);
 
 export const LYRIA_MODELS = Object.freeze([['lyria-3.5', 'Lyria 3.5（整首歌）'], ['lyria-3-clip-preview', 'Lyria 3 Clip（30 秒片段）']]);
 /** Models on Replicate that sing given words: which of their inputs takes what, and what one costs (read from their pages, 2026-11-02). */
@@ -249,70 +252,133 @@ async function mini({style, lyrics, instrumental, language, url}, {fetch, key}) 
   return {blob: decodeHex(json.data.audio, 'audio/mpeg')};
 }
 
-// ---------- ComfyUI: ACE-Step ----------
-const ACE_LANGUAGES = {中文: 'zh', 普通话: 'zh', 粤语: 'yue', 日语: 'ja', 英语: 'en', 韩语: 'ko'};
-/** ACE-Step 1.5's workflow, as ComfyUI's own template has it (audio_ace_step_1_5_checkpoint), in the form its /prompt takes. */
-export function aceWorkflow({checkpoint, style, lyrics, instrumental, language, seconds, seed}) {
-  const length = Math.round(Math.min(600, Math.max(10, Number(seconds) || 120))), bpm = Number(/(\d{2,3})\s*bpm/i.exec(style)?.[1]) || 120;
-  return {
-    1: {class_type: 'CheckpointLoaderSimple', inputs: {ckpt_name: checkpoint}},
-    2: {class_type: 'ModelSamplingAuraFlow', inputs: {model: ['1', 0], shift: 3}},
-    3: {class_type: 'TextEncodeAceStepAudio1.5', inputs: {clip: ['1', 1], tags: styleFor({style, language, instrumental}), lyrics: instrumental ? '[inst]' : lyrics, seed, bpm: Math.min(300, Math.max(10, bpm)), duration: length, timesignature: '4', language: ACE_LANGUAGES[language] || 'unknown', keyscale: 'E minor', generate_audio_codes: true, cfg_scale: 2, temperature: 0.85, top_p: 0.9, top_k: 0, min_p: 0}},
-    4: {class_type: 'ConditioningZeroOut', inputs: {conditioning: ['3', 0]}},
-    5: {class_type: 'EmptyAceStep1.5LatentAudio', inputs: {seconds: length, batch_size: 1}},
-    6: {class_type: 'KSampler', inputs: {model: ['2', 0], positive: ['3', 0], negative: ['4', 0], latent_image: ['5', 0], seed, steps: 8, cfg: 1, sampler_name: 'euler', scheduler: 'simple', denoise: 1}},
-    7: {class_type: 'VAEDecodeAudio', inputs: {samples: ['6', 0], vae: ['1', 2]}},
-    8: {class_type: 'SaveAudioMP3', inputs: {audio: ['7', 0], filename_prefix: 'audio/ST-iPhonie', quality: 'V0'}}
-  };
+// ---------- ComfyUI ----------
+const AUDIO_TYPES = {mp3: 'audio/mpeg', flac: 'audio/flac', wav: 'audio/wav', ogg: 'audio/ogg', opus: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac'};
+const comfyBase = url => String(url || '').trim().replace(/\/+$/, '');
+/** Why ComfyUI cannot be reached, from what each way answered. A song has to be read back, which the tavern's picture route cannot do. */
+function comfyUnreachable(base, reasons) {
+  const here = /^https?:\/\/(127\.|localhost|\[::1\])/i.test(base);
+  if (reasons.has('down')) return `酒馆连不上 ComfyUI（${base}）：` + (here ? '确认 ComfyUI 开着。127.0.0.1 指酒馆所在的设备，ComfyUI 在别的电脑上时，要填那台电脑的局域网地址（如 192.168.x.x），启动时加 --listen' : '确认 ComfyUI 开着、启动时加了 --listen、防火墙放行了这个端口');
+  if (reasons.has('noProxy')) return `读不到 ComfyUI（${base}）：这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有），要让 ComfyUI 启动时加 --enable-cors-header，地址填这台设备能打开的（手机上不能写 127.0.0.1）`;
+  if (reasons.has('proxyOff')) return `读不到 ComfyUI（${base}）：写歌要把做好的音频读回来，绘图走的通道带不了。两个办法选一个：酒馆 config.yaml 里把 enableCorsProxy 改成 true，重启酒馆；或者 ComfyUI 启动时加 --enable-cors-header`;
+  return `连不上 ComfyUI（${base}）：确认它开着、地址对；手机上不能写 127.0.0.1，要填电脑的局域网地址`;
 }
-async function comfy({style, lyrics, instrumental, language, seconds, url, transport}, {fetch, wait}) {
-  const base = String(url || '').trim().replace(/\/+$/, '');
-  if (!base) throw Error('先在「引擎 → ComfyUI」填上地址');
-  const through = path => transport === 'direct' ? base + path : '/proxy/' + encodeURIComponent(base + path);
-  const ask = async (path, init) => {
-    const response = await asking('ComfyUI', () => fetch(through(path), {...(transport === 'direct' ? {credentials: 'omit'} : {}), ...init}));
+/** ComfyUI, asked the way chosen, else the other way; the first answer settles the way for the rest of the song. */
+function comfyLink(fetch, base, transport) {
+  let way = transport === 'direct' ? 'direct' : 'tavern', settled = false;
+  const address = (w, path) => w === 'direct' ? base + path : '/proxy/' + encodeURIComponent(base + path);
+  const cannot = why => Object.assign(Error(why), {cannot: why});
+  const once = async (w, path, init = {}) => {
+    let response;
+    try { response = await fetch(address(w, path), {...(w === 'direct' ? {credentials: 'omit'} : {}), ...init}); }
+    catch (error) { if (error?.name === 'AbortError') throw error; throw cannot(w === 'direct' ? 'blocked' : 'tavern'); }
     const {json, text} = await bodyOf(response);
-    if (transport !== 'direct' && noTavernProxy(text)) throw Error('这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有）：在「引擎 → ComfyUI」把读取方式改成浏览器直连，ComfyUI 要允许跨域');
-    if (response.status === 403 && /CORS proxy is disabled/i.test(text)) throw Error('酒馆的转发没打开：在 config.yaml 里把 enableCorsProxy 改成 true，重启酒馆；或者把读取方式改成浏览器直连');
+    if (w !== 'direct' && noTavernProxy(text)) throw cannot('noProxy');
+    if (w !== 'direct' && response.status === 403 && /CORS proxy is disabled/i.test(text)) throw cannot('proxyOff');
+    // The tavern's proxy says only this when nothing answered at that address.
+    if (w !== 'direct' && response.status === 500 && !json) throw cannot('down');
     return {response, json, text};
   };
-  const specs = await ask('/object_info/CheckpointLoaderSimple');
-  const models = specs.json?.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0];
-  const checkpoint = Array.isArray(models) ? models.find(name => /ace.?step/i.test(name)) : null;
-  if (!checkpoint) throw Error('ComfyUI 里没有 ACE-Step 的模型：把 ace_step_1.5_turbo_aio.safetensors 放进 models/checkpoints，再刷新 ComfyUI');
-  const prompt = aceWorkflow({checkpoint, style, lyrics, instrumental, language, seconds, seed: Math.floor(Math.random() * 2 ** 32)});
-  const made = await ask('/prompt', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({prompt})});
-  if (!made.response.ok || !made.json?.prompt_id) {
-    const nodes = Object.values(made.json?.node_errors || {}).flatMap(n => n.errors || []).map(e => e.details || e.message).filter(Boolean);
-    throw Error(`ComfyUI 没接受这个工作流（要更新到带 ACE-Step 1.5 节点的版本）${nodes[0] || made.json?.error?.message ? '：' + said(nodes[0] || made.json.error.message) : ''}`);
+  return {
+    way: () => way,
+    async ask(path, init) {
+      if (settled) { try { return await once(way, path, init); } catch (error) { if (error?.cannot) throw Object.assign(Error(`连不上 ComfyUI（${base}）：确认它还开着`), {network: true}); throw error; } }
+      try { const answer = await once(way, path, init); settled = true; return answer; }
+      catch (first) {
+        if (!first?.cannot) throw first;
+        const other = way === 'direct' ? 'tavern' : 'direct';
+        try { const answer = await once(other, path, init); way = other; settled = true; return answer; }
+        catch (second) { if (!second?.cannot) throw second; throw Error(comfyUnreachable(base, new Set([first.cannot, second.cannot]))); }
+      }
+    },
+    file: path => asking('ComfyUI', () => fetch(address(way, path), way === 'direct' ? {credentials: 'omit'} : {}))
+  };
+}
+/** What this ComfyUI says of some node types: {type: spec}; those it does not have are left out. */
+async function comfySpecsOf(link, types) {
+  const out = {}, read = async type => { const {json} = await link.ask('/object_info/' + encodeURIComponent(type)); if (json?.[type]) out[type] = json[type]; return json; };
+  // The first answer settles the way: the others go at once, the same way.
+  const first = await read(types[0]);
+  if (!first || typeof first !== 'object') throw Error('这个地址回的不是 ComfyUI：看看地址对不对');
+  await Promise.all(types.slice(1).map(read));
+  return out;
+}
+const nodesOf = specs => (specs['TextEncodeAceStepAudio1.5'] || specs.TextEncodeAceStepAudio ? '' : '这个 ComfyUI 版本太旧，没有 ACE-Step 的节点：更新 ComfyUI');
+/**
+ * What ComfyUI singing would use here, without singing: {way, models, problem, names, own, problems}. own, problems: with a workflow of one's own,
+ * which boxes it takes and what ComfyUI does not have of it.
+ */
+export async function checkSongComfy({fetch, url, transport = 'tavern', workflow = '', map = {}}) {
+  const base = comfyBase(url);
+  if (!base) throw Error('先填上 ComfyUI 的地址');
+  const link = comfyLink(fetch, base, transport), specs = await comfySpecsOf(link, ACE_NODES);
+  if (workflow) {
+    const own = describeSongWorkflow(workflow, map), graph = JSON.parse(workflow), types = [...new Set(Object.values(graph).map(n => n?.class_type).filter(Boolean))];
+    const needed = await comfySpecsOf(link, types);
+    return {way: link.way(), own, problems: findProblems(workflow, needed)};
   }
-  const id = made.json.prompt_id;
-  const output = await polling({name: 'ComfyUI', every: 3000, limit: COMFY_LIMIT, wait, ask: async () => {
-    const {response, json} = await ask('/history/' + encodeURIComponent(id));
-    if (!response.ok) throw again(`ComfyUI 暂时没回答（${response.status}）`);
-    const job = json?.[id];
-    if (!job) return undefined;
-    if (job.status?.status_str === 'error') throw Error('ComfyUI 没做成：' + said(job.status?.messages?.find(m => m[0] === 'execution_error')?.[1]?.exception_message || '看 ComfyUI 的窗口里写了什么'));
-    const file = Object.values(job.outputs || {}).flatMap(o => o.audio || [])[0];
-    if (file) return file;
-    if (job.status?.completed) throw Error('ComfyUI 做完了，但没有音频');
-    return undefined;
-  }});
-  const file = await asking('ComfyUI', () => fetch(through(`/view?filename=${encodeURIComponent(output.filename)}&subfolder=${encodeURIComponent(output.subfolder || '')}&type=${encodeURIComponent(output.type || 'output')}`)));
+  const models = findAceModels(specs);
+  return {way: link.way(), models, problem: nodesOf(specs) || (models.kind ? '' : aceMissing(models))};
+}
+/** Stops a song on ComfyUI, as far as it can be stopped: what is running, what is waiting. */
+export async function stopComfySong({fetch, url, transport = 'tavern', task}) {
+  const base = comfyBase(url);
+  if (!base || !task) return;
+  const link = comfyLink(fetch, base, transport), post = (path, body) => link.ask(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}).catch(() => {});
+  await post('/interrupt', {prompt_id: task});
+  await post('/queue', {delete: [task]});
+}
+async function comfy({style, lyrics, instrumental, language, seconds, url, transport, workflow, map}, {fetch, wait, task, onTask, onStep}) {
+  const base = comfyBase(url);
+  if (!base) throw Error('先在「ComfyUI 设置」里填上地址');
+  const link = comfyLink(fetch, base, transport);
+  let id = task;
+  if (!id) {
+    const seed = Math.floor(Math.random() * 2 ** 32), song = {style, lyrics, instrumental, language, seconds, seed};
+    let prompt;
+    if (workflow) prompt = fillSongWorkflow(workflow, song, map);
+    else {
+      const specs = await comfySpecsOf(link, ACE_NODES), models = findAceModels(specs);
+      if (!models.kind) throw Error(aceMissing(models));
+      if (nodesOf(specs)) throw Error(nodesOf(specs));
+      prompt = aceWorkflow({models, specs, ...song});
+    }
+    const made = await link.ask('/prompt', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({prompt})});
+    if (!made.response.ok || !made.json?.prompt_id) throw Error(comfyRefusal(made.json, !!workflow));
+    id = made.json.prompt_id;
+    onTask(id, '');
+  }
+  const stopSteps = onStep ? comfyProgress({url: base, onStep}) : () => {};
+  let output;
+  try {
+    output = await polling({name: 'ComfyUI', every: 3000, limit: COMFY_LIMIT, wait, ask: async () => {
+      const {response, json} = await link.ask('/history/' + encodeURIComponent(id));
+      if (!response.ok) throw again(`ComfyUI 暂时没回答（${response.status}）`);
+      const job = json?.[id];
+      if (!job) return undefined;
+      if (job.status?.status_str === 'error') throw Error(comfyFailure(job));
+      const file = Object.values(job.outputs || {}).flatMap(o => Object.values(o || {}).flat()).find(x => typeof x?.filename === 'string' && /\.(mp3|flac|wav|ogg|opus|m4a|aac)$/i.test(x.filename));
+      if (file) return file;
+      if (job.status?.completed) throw Error('ComfyUI 做完了，但没有音频：工作流要有保存音频的节点');
+      return undefined;
+    }});
+  } finally { stopSteps(); }
+  const file = await link.file(`/view?filename=${encodeURIComponent(output.filename)}&subfolder=${encodeURIComponent(output.subfolder || '')}&type=${encodeURIComponent(output.type || 'output')}`);
   if (!file.ok) throw Error(`拿不到 ComfyUI 做好的音频（${file.status}）`);
-  return {blob: await file.blob()};
+  const blob = await file.blob(), type = AUDIO_TYPES[/\.(\w+)$/.exec(output.filename)?.[1].toLowerCase()];
+  return {blob: type && blob.type !== type ? new Blob([blob], {type}) : blob};
 }
 
 const RUNNERS = {stepfun, eleven, lyria, replicate, mini, comfy};
 /**
- * Sings a song. tools: {fetch, key, signal, onTask(task, model), task: a job to go back to, wait, now}. An answer of the service that comes
+ * Sings a song. tools: {fetch, key, signal, onTask(task, model), onStep(done, of), task: a job to go back to, wait, now}. An answer of the service that comes
  * as a file with no type of its own is taken as MP3.
  */
-export async function singSong(engine, request, {fetch, key = '', signal, onTask = () => {}, task = '', wait = sleeper(signal), now = Date.now} = {}) {
+export async function singSong(engine, request, {fetch, key = '', signal, onTask = () => {}, onStep = null, task = '', wait = sleeper(signal), now = Date.now} = {}) {
   const run = RUNNERS[engine];
   if (!run) throw Error('这一家还不能写歌');
   const send = (url, init = {}) => { signal?.throwIfAborted?.(); return fetch(url, {...init, ...(signal ? {signal} : {})}); };
-  const result = await run({...request, lyrics: String(request.lyrics ?? '')}, {fetch: send, key, onTask, wait, task, now});
+  const result = await run({...request, lyrics: String(request.lyrics ?? '')}, {fetch: send, key, onTask, onStep, wait, task, now});
   const blob = result.blob;
   return {...result, blob: !blob.type || blob.type === 'application/octet-stream' || blob.type === 'binary/octet-stream' ? new Blob([blob], {type: 'audio/mpeg'}) : blob};
 }

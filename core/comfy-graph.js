@@ -4,7 +4,7 @@
 export const isLink = v => Array.isArray(v) && v.length === 2 && (typeof v[0] === 'string' || typeof v[0] === 'number') && Number.isInteger(v[1]) && v[1] >= 0;
 const isGraph = data => !!data && typeof data === 'object' && !Array.isArray(data) && Object.values(data).some(n => n && typeof n === 'object' && typeof n.class_type === 'string');
 const graphOf = text => { const graph = typeof text === 'string' ? JSON.parse(text) : text; if (!graph || typeof graph !== 'object' || Array.isArray(graph)) throw Error('工作流格式不对'); return graph; };
-const titleOf = (node, id, spec) => `${nameOf(node, spec)} #${id}`;
+export const titleOf = (node, id, spec) => `${nameOf(node, spec)} #${id}`;
 // Node names as ComfyUI's Chinese interface has them, for the nodes nearly every workflow is made of.
 const NODE_NAMES = {CheckpointLoaderSimple: 'Checkpoint加载器（简易）', CheckpointLoader: 'Checkpoint加载器', UNETLoader: 'UNet加载器', UnetLoaderGGUF: 'UNet加载器（GGUF）', CLIPLoader: '加载CLIP', DualCLIPLoader: '双CLIP加载器', TripleCLIPLoader: '三CLIP加载器', VAELoader: '加载VAE', CLIPSetLastLayer: '设置CLIP最后一层', CLIPTextEncode: 'CLIP文本编码', CLIPTextEncodeSDXL: 'CLIP文本编码（SDXL）', CLIPTextEncodeFlux: 'CLIP文本编码（Flux）', ConditioningCombine: '条件合并', ConditioningZeroOut: '条件零化', ConditioningSetArea: '条件采样区域', FluxGuidance: 'Flux引导', KSampler: 'K采样器', KSamplerAdvanced: 'K采样器（高级）', SamplerCustom: '自定义采样器', SamplerCustomAdvanced: '自定义采样器（高级）', KSamplerSelect: 'K采样器选择', BasicScheduler: '基础调度器', BasicGuider: '基础引导器', CFGGuider: 'CFG引导器', RandomNoise: '随机噪波', EmptyLatentImage: '空Latent图像', EmptySD3LatentImage: '空Latent图像（SD3）', LatentUpscale: 'Latent缩放', LatentUpscaleBy: 'Latent按系数缩放', VAEDecode: 'VAE解码', VAEDecodeTiled: 'VAE解码（分块）', VAEEncode: 'VAE编码', ImageScale: '图像缩放', ImageScaleBy: '图像按系数缩放', UpscaleModelLoader: '放大模型加载器', ImageUpscaleWithModel: '使用模型放大图像', LoadImage: '加载图像', SaveImage: '保存图像', PreviewImage: '预览图像', ControlNetLoader: 'ControlNet加载器', ControlNetApply: '应用ControlNet', ControlNetApplyAdvanced: '应用ControlNet（高级）', ModelSamplingAuraFlow: '采样算法（AuraFlow）', ModelSamplingDiscrete: '采样算法（离散）', ModelSamplingFlux: '采样算法（Flux）', ModelSamplingSD3: '采样算法（SD3）'};
 /** A title the user gave stays (any title in Chinese is theirs or their interface's); ComfyUI's English default does not. */
@@ -234,7 +234,7 @@ const NOT_THE_TEXT = new Set(['clip', 'model', 'vae', 'control_net', 'image', 'i
 const placeholder = v => typeof v === 'string' && /^%[a-z_]+%$/.test(v);
 const SCALARS = ['value', 'text', 'string', 'seed', 'noise_seed', 'int', 'number', 'float', 'INT', 'STRING', 'FLOAT'];
 /** The node and input that really hold a value, going up through primitive nodes. null when it is worked out, not kept. */
-function holder(graph, id, key, want, depth = 0) {
+export function holder(graph, id, key, want, depth = 0) {
   const value = graph[id]?.inputs?.[key];
   if (typeof value === want) return {id, key};
   if (!isLink(value) || depth > 8) return null;

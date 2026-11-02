@@ -592,6 +592,152 @@ export function eraseAt(data, width, height, x, y, tolerance = 40) {
   return flood(data, width, height, [p0], far, tolerance);
 }
 
+/** What the background cut took too much of (a white shirt on a white background) comes back: by a tap (restoreAt) or a brush (restoreStroke). original: the picture as it was. */
+const PATCH_NEAR = 8, TAKEN = 12;
+/** How far each taken pixel is from anything kept, ×3 (a 3-4 chamfer). The picture's edge stops nothing: what is outside it is not known to be kept. */
+function distancesIn(taken, width, height) {
+  const n = width * height, d = new Int32Array(n), far = 1 << 28;
+  for (let p = 0; p < n; p++) d[p] = taken[p] ? far : 0;
+  for (let y = 0, p = 0; y < height; y++) for (let x = 0; x < width; x++, p++) {
+    if (!taken[p]) continue;
+    let v = d[p];
+    if (x > 0) v = Math.min(v, d[p - 1] + 3);
+    if (y > 0) { v = Math.min(v, d[p - width] + 3); if (x > 0) v = Math.min(v, d[p - width - 1] + 4); if (x < width - 1) v = Math.min(v, d[p - width + 1] + 4); }
+    d[p] = v;
+  }
+  for (let y = height - 1, p = n - 1; y >= 0; y--) for (let x = width - 1; x >= 0; x--, p--) {
+    if (!taken[p]) continue;
+    let v = d[p];
+    if (x < width - 1) v = Math.min(v, d[p + 1] + 3);
+    if (y < height - 1) { v = Math.min(v, d[p + width] + 3); if (x < width - 1) v = Math.min(v, d[p + width + 1] + 4); if (x > 0) v = Math.min(v, d[p + width - 1] + 4); }
+    d[p] = v;
+  }
+  return d;
+}
+const bringBack = (data, original, p) => { const i = p * 4; data[i] = original[i]; data[i + 1] = original[i + 1]; data[i + 2] = original[i + 2]; data[i + 3] = original[i + 3]; };
+/**
+ * 点一下补回: the taken pixels around the tap come back, as far as the narrow place that joins them to the rest of what was taken. A hole in a shirt is usually
+ * joined to the background by a thin leak, so joined-up is not enough: from the middle of the tapped part it goes outwards widest first, and stops where going on
+ * means squeezing through a narrow place into something much bigger, or reaching what touches the picture's edges. Nothing that narrow (the tap is out in the open
+ * background, or the hole lies wide open to it): a patch around the tap, the rest being one more tap or the brush. Returns how many pixels came back.
+ */
+export function restoreAt(data, original, width, height, x, y) {
+  const n = width * height;
+  x = Math.round(x); y = Math.round(y);
+  if (x < 0 || y < 0 || x >= width || y >= height) return 0;
+  const taken = new Uint8Array(n);
+  for (let p = 0; p < n; p++) if (original[p * 4 + 3] - data[p * 4 + 3] > TAKEN) taken[p] = 1;
+  // A tap a little beside it still means it.
+  let start = y * width + x;
+  if (!taken[start]) {
+    let best = Infinity, found = -1;
+    for (let dy = -PATCH_NEAR; dy <= PATCH_NEAR; dy++) for (let dx = -PATCH_NEAR; dx <= PATCH_NEAR; dx++) {
+      const qx = x + dx, qy = y + dy, far = dx * dx + dy * dy;
+      if (qx < 0 || qy < 0 || qx >= width || qy >= height || far >= best || !taken[qy * width + qx]) continue;
+      best = far; found = qy * width + qx;
+    }
+    if (found < 0) return 0;
+    start = found;
+  }
+  const around = p => { const px = p % width; return [px > 0 ? p - 1 : -1, px < width - 1 ? p + 1 : -1, p - width, p + width]; };
+  // All that is joined to it, and whether that reaches the top or the sides. The bottom does not count: a figure is often cut off there.
+  const part = new Int32Array(n), inPart = new Uint8Array(n);
+  let size = 0, open = false;
+  part[size++] = start; inPart[start] = 1;
+  for (let at = 0; at < size; at++) {
+    const p = part[at], px = p % width;
+    if (p < width || px === 0 || px === width - 1) open = true;
+    for (const q of around(p)) if (q >= 0 && q < n && taken[q] && !inPart[q]) { inPart[q] = 1; part[size++] = q; }
+  }
+  if (!open) { for (let at = 0; at < size; at++) bringBack(data, original, part[at]); return size; }
+  const d = distancesIn(taken, width, height);
+  // Up to the middle of the part tapped.
+  let top = start;
+  for (let moved = true, steps = 0; moved && steps < 8000; steps++) {
+    moved = false;
+    const px = top % width;
+    for (const q of [...around(top), px > 0 ? top - width - 1 : -1, px < width - 1 ? top - width + 1 : -1, px > 0 ? top + width - 1 : -1, px < width - 1 ? top + width + 1 : -1]) if (q >= 0 && q < n && inPart[q] && d[q] > d[top]) { top = q; moved = true; }
+  }
+  // Outwards, widest first: a pixel's level is the narrowest place on the way to it.
+  const peak = d[top], head = new Int32Array(peak + 2).fill(-1), next = new Int32Array(n), reached = new Uint8Array(n), order = new Int32Array(size), levels = new Int32Array(size);
+  const push = (p, level) => { next[p] = head[level]; head[level] = p; };
+  push(top, peak); reached[top] = 1;
+  let done = 0, level = peak, stopAt = -1;
+  const steps = [];
+  while (level >= 0) {
+    const p = head[level];
+    if (p < 0) { level--; continue; }
+    head[level] = next[p];
+    if (!steps.length || steps.at(-1).level !== level) steps.push({level, count: done});
+    const px = p % width;
+    // At what touches the top or the sides: that is the outside.
+    if (p < width || px === 0 || px === width - 1) { stopAt = level; break; }
+    order[done] = p; levels[done++] = level;
+    for (const q of around(p)) if (q >= 0 && q < n && inPart[q] && !reached[q]) { reached[q] = 1; push(q, Math.min(level, d[q])); }
+  }
+  const atLevel = i => i + 1 < steps.length ? steps[i + 1].count : done;
+  // Squeezing through something narrow into a place at least as big as all so far: what comes before it is the part.
+  let keep = done, neck = stopAt < 0 ? 0 : stopAt;
+  for (let i = 0; i + 1 < steps.length; i++) {
+    const before = atLevel(i), after = atLevel(i + 1);
+    if (before >= 60 && steps[i + 1].level <= peak * 0.6 && after >= before * 2) { keep = before; neck = steps[i + 1].level; break; }
+  }
+  if (stopAt >= 0 && keep === done) { keep = 0; for (let i = 0; i < done && levels[i] > stopAt; i++) keep = i + 1; }
+  let count = 0;
+  // Nothing narrow on the way: the tap is out in the open.
+  if (!keep || neck > peak * 0.6) {
+    const radius = Math.max(14, Math.round(Math.min(width, height) * 0.035)), r2 = radius * radius, seen = new Uint8Array(n), queue = new Int32Array(size);
+    let tail = 0;
+    queue[tail++] = start; seen[start] = 1;
+    for (let at = 0; at < tail; at++) {
+      const p = queue[at];
+      bringBack(data, original, p); count++;
+      for (const q of around(p)) {
+        if (q < 0 || q >= n || !inPart[q] || seen[q]) continue;
+        const dx = (q % width) - (start % width), dy = Math.floor(q / width) - Math.floor(start / width);
+        if (dx * dx + dy * dy <= r2) { seen[q] = 1; queue[tail++] = q; }
+      }
+    }
+    return count;
+  }
+  // The edges of the part: its pixels near what is kept are lower than the neck, so they are reached from it, only so far.
+  const mine = new Uint8Array(n);
+  let tail = 0;
+  const queue = new Int32Array(size);
+  for (let i = 0; i < keep; i++) { mine[order[i]] = 1; queue[tail++] = order[i]; }
+  const depth = Math.ceil(neck / 3) + 2;
+  let from = 0;
+  for (let round = 0; round < depth && from < tail; round++) {
+    const end = tail;
+    for (; from < end; from++) for (const q of around(queue[from])) if (q >= 0 && q < n && inPart[q] && !mine[q] && d[q] <= neck) { mine[q] = 1; queue[tail++] = q; }
+  }
+  for (let i = 0; i < tail; i++) { bringBack(data, original, queue[i]); count++; }
+  return count;
+}
+/** 涂回来: what lies under a stroke comes back, its edge soft. path: [[x, y], …], radius in the picture's pixels. Returns how many pixels changed. */
+export function restoreStroke(data, original, width, height, path, radius) {
+  const r = Math.max(1, radius), reach = r + 1, marks = new Map();
+  let count = 0;
+  const stamp = (cx, cy) => {
+    const x0 = Math.max(0, Math.floor(cx - reach)), x1 = Math.min(width - 1, Math.ceil(cx + reach)), y0 = Math.max(0, Math.floor(cy - reach)), y1 = Math.min(height - 1, Math.ceil(cy + reach));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const cover = Math.min(1, Math.max(0, r + 0.5 - Math.hypot(x - cx, y - cy))), i = (y * width + x) * 4;
+      if (!cover) continue;
+      const alpha = Math.round(original[i + 3] * cover);
+      if (alpha <= data[i + 3]) continue;
+      if (!data[i + 3] || cover === 1) { data[i] = original[i]; data[i + 1] = original[i + 1]; data[i + 2] = original[i + 2]; }
+      data[i + 3] = alpha;
+      if (!marks.has(i)) { marks.set(i, 1); count++; }
+    }
+  };
+  const gap = Math.max(1, r / 3);
+  path.forEach(([x, y], index) => {
+    const [px, py] = path[index - 1] || [x, y], length = Math.hypot(x - px, y - py), pieces = Math.max(1, Math.ceil(length / gap));
+    for (let k = index ? 1 : 0; k <= pieces; k++) stamp(px + (x - px) * k / pieces, py + (y - py) * k / pieces);
+  });
+  return count;
+}
+
 /** The box around what is not see-through (alpha above 8), with a little room: {x, y, width, height}; null when empty. */
 export function opaqueBounds(data, width, height, pad = 4) {
   let left = width, right = -1, top = height, bottom = -1;

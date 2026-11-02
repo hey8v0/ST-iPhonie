@@ -407,8 +407,16 @@ export class DialoguePlayer {
      this.line = line; this.speaker = line.role; this.engine = 'system'; this.requestKey = null; this.pending = null;
      if (!this.speech) { if (!this.skipped.includes('旁白（这个浏览器不能系统朗读）')) this.skipped.push('旁白（这个浏览器不能系统朗读）'); this.index++; continue; }
      if (!await this.waitForResume(epoch)) return;
-     this.emit('playing', '正在朗读 · ' + line.role);
-     await this.speech.speak(line.text, { voice: s.narration.systemVoice, rate: s.narration.rate, volume: this.volume }, signal);
+     for (let said = false; !said;) {
+      this.emit('playing', '正在朗读 · ' + line.role);
+      try { await this.speech.speak(line.text, { voice: s.narration.systemVoice, rate: s.narration.rate, volume: this.volume }, signal); said = true; }
+      catch (error) {
+       if (error?.name !== 'AbortError' || !this.current(epoch)) throw error;
+       // Paused (see toggle): this piece again on resuming. 整篇朗读 turned off under it (dropNarration): on with the lines.
+       if (this.phase !== 'paused') { said = true; continue; }
+       if (!await this.waitForResume(epoch)) return;
+      }
+     }
      if (!this.canContinue(epoch)) return;
      if (!await this.finishedLine(epoch)) return;
      continue;
@@ -499,7 +507,8 @@ export class DialoguePlayer {
   if (['playing', 'generating'].includes(this.phase)) {
    this.resumePhase = this.phase;
    const epoch = this.epoch;
-   this.speech?.pause();
+   // Many phones cannot hold the browser's speech: asked to, it just goes on talking. It is cut, and that piece said again on resuming.
+   if (this.line?.narration && this.engine === 'system') this.speech?.stop(); else this.speech?.pause();
    Promise.resolve(this.sink.pause()).catch(error => { if (this.current(epoch)) this.emit('error', error.message || '暂停失败'); });
    this.emit('paused', '已暂停');
   } else if (this.phase === 'paused') {
@@ -512,6 +521,13 @@ export class DialoguePlayer {
     this.wake = null;
    }).catch(error => { if (this.current(epoch)) this.emit('error', error.message || '请再次点击以开启声音'); });
   }
+ }
+ /** 整篇朗读 turned off part way through a reply: the lines go on, the story between them does not. */
+ dropNarration() {
+  if (!this.queue.some(line => line.narration)) return;
+  const current = this.queue[this.index];
+  this.queue = [...this.queue.slice(0, this.index + 1), ...this.queue.slice(this.index + 1).filter(line => !line.narration)];
+  if (current?.narration && this.engine === 'system' && this.phase === 'playing') this.speech?.stop();
  }
  async unlockAndRun() {
   const epoch = this.epoch;

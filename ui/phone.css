@@ -1364,6 +1364,10 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .write-singing .icon{flex:none;width:22px;height:22px;color:var(--accent);animation:write-sing 1.6s ease-in-out infinite}
 @keyframes write-sing{50%{transform:translateY(-3px) rotate(-8deg)}}
 .write-copy{display:flex;flex-wrap:wrap;gap:8px}
+.vn-review-tip{margin:0 0 6px;padding-top:2px}
+.write-comfy{margin:4px -6px 2px;width:calc(100% + 12px)}
+.write-ok{color:var(--accent-ink)}
+.write-own-name{font-weight:700;color:var(--ink)}
 .write-link{display:inline-flex;align-items:center;gap:4px;text-decoration:none}
 @media (prefers-reduced-motion:reduce){.write-singing .icon{animation:none}}
 .forum-card{all:unset;cursor:pointer;display:grid;gap:6px;padding:12px 14px;border-radius:20px;background:var(--card);box-shadow:var(--shadow);min-width:0}

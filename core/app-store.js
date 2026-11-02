@@ -1,7 +1,7 @@
 // Documents of the smaller phone apps (论坛 posts and its 热搜, 查手机 snapshots; in a database of their own, 记忆), kept in
 // this browser (IndexedDB) and scoped to the tavern account like the other local data. Each document is {id, kind, at, ...}; the apps check their own
 // fields (core/forum.js, core/peek.js) before anything is written.
-import {connectionLost, lostError} from './idb.js';
+import {connectionLost, lostError, breath} from './idb.js';
 const fail = (message, code = 'INVALID') => Object.assign(new Error(message), {code});
 
 export class AppStore {
@@ -42,7 +42,7 @@ export class AppStore {
     } catch (error) {
       if (error?.code !== 'STORAGE_LOST' || this.#closed) throw error;
       if (this.#db === db) { try { db.close(); } catch {} this.#db = null; }
-      if (again) return this.#tx(mode, work, false);
+      if (again) { await breath(); return this.#tx(mode, work, false); }
       throw error;
     }
   }

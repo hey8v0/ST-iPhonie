@@ -158,7 +158,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       doc, title: title(), subtitle: start > 0 ? `从第 ${start} 楼开始` : '从头开始', backdrop: backdrop(start), scene: chatBackground(),
       look: vn,
       source: {next: () => { while (cursor < chat().length) { const id = cursor++, steps = stepsOf(id); if (steps?.length) return {id, steps}; } return null; }},
-      voice: {play: s => play(s.id, s.line), narrate: s => narrate(s.text), stop, on: voiceOn, mouth},
+      voice: {play: s => play(s.id, s.line), narrate: s => narrate(s.text), stop, on: voiceOn, enable: () => backend.updateGeneral({voiceEnabled: true}), mouth},
       models: {
         has: name => !!currentModel(vn().cast?.[castKey(name)]),
         load: async name => {

@@ -366,7 +366,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   root.setAttribute('aria-label', '视觉小说');
   root.tabIndex = -1;
   root.innerHTML = `<div class="vn-stage"><div class="vn-bg"><div class="vn-bg-layer"></div><div class="vn-bg-layer"></div><div class="vn-fit"></div></div><div class="vn-cast"></div><div class="vn-grade"></div><div class="vn-rays"></div><div class="vn-lines"></div><div class="vn-tint"></div><div class="vn-bars"></div><div class="vn-cutin"><i><b></b><span></span></i></div><div class="vn-flash"></div><div class="vn-black"></div></div>
-    <div class="vn-box"><nav class="vn-menu" aria-label="视觉小说菜单"><button data-vn="auto" aria-pressed="false">自动</button><button data-vn="skip" aria-pressed="false">快进</button><button data-vn="more" aria-expanded="false" aria-label="更多">⋯</button><div class="vn-more" hidden><button data-vn="back">上一页</button><button data-vn="log">记录</button><button data-vn="voice" aria-pressed="false">语音</button><button data-vn="hide">隐藏</button><button data-vn="full" aria-pressed="false">全屏</button><button data-vn="close" aria-label="退出视觉小说">退出</button></div></nav><div class="vn-name" hidden><span></span></div><div class="vn-face"></div><span class="vn-voice" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p class="vn-text" aria-live="polite"></p><span class="vn-next" aria-hidden="true">▼</span>
+    <div class="vn-box"><nav class="vn-menu" aria-label="视觉小说菜单"><button data-vn="auto" aria-pressed="false">自动</button><button data-vn="skip" aria-pressed="false">快进</button><button data-vn="more" aria-expanded="false" aria-label="更多">⋯</button><div class="vn-more" hidden><button data-vn="back">上一页</button><button data-vn="log">记录</button><button data-vn="voice" aria-pressed="false">语音</button><button data-vn="narrate" aria-pressed="false">旁白</button><button data-vn="hide">隐藏</button><button data-vn="full" aria-pressed="false">全屏</button><button data-vn="close" aria-label="退出视觉小说">退出</button></div></nav><div class="vn-name" hidden><span></span></div><div class="vn-face"></div><span class="vn-voice" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p class="vn-text" aria-live="polite"></p><span class="vn-next" aria-hidden="true">▼</span>
       <div class="vn-input"><textarea rows="2" placeholder="接下来你要说什么、做什么？空着发送就让故事接着写" aria-label="接下来的剧情"></textarea><button data-vn="send">发送</button></div></div>
     <div class="vn-log" hidden><header><span>记 录</span><button data-vn="log-close">返回</button></header><ol></ol></div>
     <div class="vn-card"><strong></strong></div>
@@ -401,7 +401,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     root.toggleAttribute('data-fx', s.effects !== false && !win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
     if (!root.hasAttribute('data-fx')) { fx?.clear(); root.removeAttribute('data-memory'); }
     $('[data-vn=voice]').setAttribute('aria-pressed', String(s.voice && voice.on()));
-    $('[data-vn=voice]').hidden = !voice.on();
+    $('[data-vn=narrate]').setAttribute('aria-pressed', String(!!s.narrate));
   }
   applyLook();
   const full = $('[data-vn=full]');
@@ -941,7 +941,9 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   const actions = {
     more: () => setMore(more.hidden),
     back, auto: () => setAuto(!auto), skip: () => skip ? stopSkip() : startSkip(), log: openLog, 'log-close': closeLog, hide: () => setHidden(true),
-    voice: () => { const on = !look().voice; save({voice: on}); if (!on) voice.stop(); applyLook(); },
+    // On, it is on: also when it was the whole of 正文语音 that was off.
+    voice: () => { const on = !(look().voice && voice.on()); if (on && !voice.on()) voice.enable?.(); save({voice: on}); if (!on) voice.stop(); applyLook(); },
+    narrate: () => { const on = !look().narrate; save({narrate: on}); if (!on && step?.kind === 'narrate') voice.stop(); applyLook(); },
     full: () => { if (doc.fullscreenElement) doc.exitFullscreen?.(); else root.requestFullscreen?.().catch(() => {}); },
     close: () => close(), send: () => sendText(),
     replay: el => { const e = log[Number(el.dataset.i)]; if (e?.step) voice.play(e.step); },

@@ -525,6 +525,7 @@ export function musicApp(ctx) {
   };
   v.onMusic = event => {
     if (event.status) refreshNow();
+    else if (event.step) writer.step(event);
     else if (mode === 'draft') writer.changed();
     else if (mode === 'write-form') { /* being filled in: nothing else on the page depends on the music */ }
     else if (!event.heard || tab === 'heard') render();

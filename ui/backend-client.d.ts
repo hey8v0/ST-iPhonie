@@ -405,10 +405,11 @@ export interface ChatMessage { id: string; from: 'me' | string; kind: ChatKind; 
 /** A music source the user added: search and link addresses ({{query}}, {{id}}) and where the answers keep each field. */
 export interface MusicSource { id: string; name: string; enabled: boolean; search: string; url: string; lyric: string; listPath: string; idPath: string; titlePath: string; artistPath: string; urlPath: string; lyricPath: string; direct: boolean; albumSearch: string; albumListPath: string; albumSongs: string; albumSongsPath: string; artistSearch: string; artistListPath: string; artistSongs: string; artistSongsPath: string; playlistSearch: string; playlistListPath: string; playlistSongs: string; playlistSongsPath: string; }
 /** 音乐: bgm 'off' | 'tap' | 'auto' (the story picks songs with <bgm>), its rule, the volume, turning down for voice lines, songs shared in chats, how lists go on, whether some of the 歌单 goes with the rule as a taste. */
-export interface MusicSettings { writing: Omit<SongForm, 'about' | 'who' | 'instrumental'>; sing: {engine: string; lyriaModel: string; lyriaUrl: string; replicateModel: string}; bgm: 'off' | 'tap' | 'auto'; rule: string; volume: number; duck: boolean; share: boolean; mode: 'order' | 'shuffle' | 'one'; taste: boolean; sources: MusicSource[]; }
+export interface MusicSettings { writing: Omit<SongForm, 'about' | 'who' | 'instrumental'>; sing: {engine: string; lyriaModel: string; lyriaUrl: string; replicateModel: string; comfyOn: boolean; comfyOwn: boolean; comfyWorkflow: string; comfyName: string; comfyMap: {lyrics: string; style: string}}; bgm: 'off' | 'tap' | 'auto'; rule: string; volume: number; duck: boolean; share: boolean; mode: 'order' | 'shuffle' | 'one'; taste: boolean; sources: MusicSource[]; }
 /** A 歌单 song: a file on this device, or a song of a source (its link is fetched when it plays). */
 export interface SongForm { about?: string; who?: string; story?: boolean; instrumental?: boolean; language?: string; genre?: string; wording?: string; voice?: string; length?: 'short' | 'mid' | 'long'; }
 export interface SongDraft { id: string; kind: 'draft'; at: number; updatedAt: number; title: string; style: string; lyrics: string; instrumental: boolean; language: string; who: string; about: string; seconds: number; songs: string[]; state?: 'singing'; note?: string; job?: {engine: string; model: string; task: string; at: number}; }
+export interface SongWorkflowInfo { lyrics: string; style: string; output: string; seconds: number; seeds: number; fields: {at: string; title: string; text: string}[]; }
 export interface SingOption { id: string; name: string; ready: boolean; model: string; price: {free: boolean; text: string}; }
 export interface MusicSong { id: string; kind: 'song'; at: number; title: string; artist: string; origin: 'file' | 'source'; source?: string; songId?: string; lyric?: string; size?: number; mime?: string; }
 export interface MusicFound { source: string; sourceName: string; id: string; title: string; artist: string; }
@@ -934,6 +935,9 @@ export interface BackendFacade {
     cancelSing(id: string): boolean;
     /** A song made elsewhere, back to its draft and into the 歌单. */
     importSongFile(id: string, file: Blob): Promise<string>;
+    songComfyCheck(): Promise<{way: string; models?: {kind: string; names?: string[]; unsure?: boolean}; problem?: string; own?: SongWorkflowInfo; problems?: string[]}>;
+    prepareSongWorkflow(source: {text: string}): Promise<SongWorkflowInfo & {workflow: string}>;
+    songRecentRuns(): Promise<{id: string; label: string; graph: string}[]>;
     songBlob(id: string): Promise<Blob | null>;
     addSongs(list: ({ title: string; artist?: string; blob: Blob } | { title: string; artist?: string; source: string; songId: string })[]): Promise<MusicSong[]>;
     updateSong(id: string, patch: { title?: string; artist?: string; lyric?: string }): Promise<MusicSong>;

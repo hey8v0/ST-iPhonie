@@ -12,8 +12,8 @@ import {createView, esc, heading, help, toggle, avatar, menu} from './common.js'
 import {icon} from './icons.js';
 import {saveFile} from '../download.js';
 import {openAlbum} from './album-viewer.js';
-import {cutoutHistory, openCutoutEditor} from './cutout-editor.js';
-import {VN_SPEED_NAMES, VN_WAITS, VN_FONTS, VN_BOXES, SPRITE_RULE, EXPRESSIONS, cutBackground, clearEdges, eraseAt, opaqueBounds} from '../core/vn.js';
+import {cutoutHistory, openCutoutEditor, cutoutRenderer} from './cutout-editor.js';
+import {VN_SPEED_NAMES, VN_WAITS, VN_FONTS, VN_BOXES, SPRITE_RULE, EXPRESSIONS, opaqueBounds} from '../core/vn.js';
 
 const SWATCH = {night: ['#1c1d3c', '#ff8fb1'], day: ['#ffffff', '#4f9cf5'], sakura: ['#ffe3ee', '#e85d8f'], ink: ['#161310', '#c9a45c'], tavern: ['#2a2a30', '#e18a24'], phone: ['var(--card)', 'var(--accent)']};
 const segmented = (key, value, list) => `<div class="segmented" style="margin:0">${list.map(([k, l]) => `<button type="button" data-vn-set="${key}" data-value="${esc(k)}" aria-pressed="${String(value) === String(k)}">${l}</button>`).join('')}</div>`;
@@ -374,18 +374,10 @@ export function vnApp(ctx) {
 
   // ---------- background ----------
   const loadImage = blob => new Promise((resolve, reject) => { const url = ctx.win.URL.createObjectURL(blob), img = new ctx.win.Image(); img.onload = () => { ctx.win.URL.revokeObjectURL(url); resolve(img); }; img.onerror = () => { ctx.win.URL.revokeObjectURL(url); reject(Error('这张图打不开')); }; img.src = url; });
-  /** The picture on a canvas with its background taken off (cut) and the taps (点一下去掉) applied. */
-  async function processed(blob, {cut, strength, taps}, canvas = ctx.doc.createElement('canvas')) {
-    const img = blob instanceof ctx.win.HTMLImageElement ? blob : await loadImage(blob);
-    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
-    const g = canvas.getContext('2d', {willReadFrequently: true});
-    if (!g) throw Error('这个浏览器不能处理图片');
-    g.drawImage(img, 0, 0);
-    const data = g.getImageData(0, 0, canvas.width, canvas.height);
-    // Drawn with a transparent background (NovelAI V5): already cut out.
-    if (cut && !clearEdges(data.data, canvas.width, canvas.height)) cutBackground(data.data, canvas.width, canvas.height, strength);
-    for (const t of taps) eraseAt(data.data, canvas.width, canvas.height, t.x, t.y, strength);
-    g.putImageData(data, 0, 0);
+  /** The picture on a canvas with its background taken off, for a picture nobody is going to edit. */
+  async function processed(blob, options) {
+    const img = await loadImage(blob), canvas = ctx.doc.createElement('canvas');
+    cutoutRenderer(img, canvas)(options);
     return canvas;
   }
   /** Trimmed to the figure, as a PNG. */
@@ -407,17 +399,18 @@ export function vnApp(ctx) {
     try { img = await loadImage(blob); } catch (error) { ctx.notify(error.message, {error: true}); return; }
     if (v.disposed) return;
     const d = ctx.dialog(`立绘 · ${name} · ${look.label}`, `<div class="vn-review"><button type="button" class="vn-review-pic" data-action="vn-edit" aria-label="放大编辑"><canvas></canvas></button>
+      <p class="hint vn-review-tip">点图片放大：可以点一下去掉多余的，抠多了也能补回来。</p>
       <div class="group pad">${toggle('vn-cut', '去掉背景', true)}
       <div class="field"><span>强度</span><input type="range" data-field="vn-strength" min="8" max="120" step="2" value="40" aria-label="去背景强度"></div></div>
       <div class="actions vn-review-actions"><button type="button" class="secondary" data-action="vn-undo" disabled>${icon('undo')}撤回</button><button type="button" class="secondary" data-action="vn-redo" disabled><span class="vn-redo-icon">${icon('undo')}</span>重做</button><button type="button" class="secondary" data-action="vn-download">${icon('download')}下载</button>${again ? `<button type="button" class="secondary" data-action="vn-again">${icon('refresh')}再画一张</button>` : ''}${look.sprite ? `<button type="button" class="secondary" data-action="vn-use" data-replace>${icon('swap')}换掉原来的</button><button type="button" class="primary" data-action="vn-use">${icon('add')}加进这组</button>` : `<button type="button" class="primary" data-action="vn-use">${icon('check')}用这张</button>`}</div></div>`);
     const canvas = d.body.querySelector('canvas'), history = cutoutHistory();
-    let busy = Promise.resolve(), editor = null;
+    let busy = Promise.resolve(), editor = null, render = null;
     closeReview = () => d.close();
     d.onClose(() => { editor?.close(); closeReview = null; });
     const paint = () => {
       const opts = history.value;
       // Each queued render owns its options; an undo must not mutate an earlier render.
-      busy = busy.catch(() => {}).then(() => processed(img, opts, canvas));
+      busy = busy.catch(() => {}).then(() => (render ||= cutoutRenderer(img, canvas))(opts));
       busy.catch(error => ctx.notify(error.message, {error: true}));
       d.body.querySelector('[data-action=vn-undo]').disabled = !history.canUndo;
       d.body.querySelector('[data-action=vn-redo]').disabled = !history.canRedo;
@@ -429,6 +422,15 @@ export function vnApp(ctx) {
     const undo = () => { if (history.undo()) paint(); };
     const redo = () => { if (history.redo()) paint(); };
     const edit = value => { if (history.edit(value)) paint(); };
+    const addTap = tap => edit({...history.value, taps: [...history.value.taps, tap]});
+    /** A stroke on its way: what is under it shows at once; it is worked out properly when it ends. */
+    const paintBack = (a, b, r) => {
+      const g = canvas.getContext('2d');
+      g.save(); g.beginPath();
+      const angle = Math.atan2(b.y - a.y, b.x - a.x);
+      g.arc(a.x, a.y, r, angle + Math.PI / 2, angle - Math.PI / 2); g.arc(b.x, b.y, r, angle - Math.PI / 2, angle + Math.PI / 2);
+      g.closePath(); g.clip(); g.drawImage(img, 0, 0); g.restore();
+    };
     const download = async (doc = ctx.doc) => {
       try { await busy; await saveFile(doc, await trim(canvas), `${name} · ${look.label}.png`); }
       catch (error) { ctx.notify(error.message, {error: true}); }
@@ -449,7 +451,11 @@ export function vnApp(ctx) {
           await busy;
           if (!d.live || editor) return;
           editor = openCutoutEditor({doc: ctx.doc, canvas, history, onUndo: undo, onRedo: redo, onDownload: download,
-            onErase: point => edit({...history.value, taps: [...history.value.taps, point]}), onClose: () => { editor = null; }});
+            onErase: addTap, onPaintMove: paintBack, onPaintCancel: paint,
+            onPaint: ({points, radius}) => addTap({path: points.map(p => [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]), r: Math.round(radius * 10) / 10}),
+            // Nothing was taken there: no step to undo.
+            onRestore: point => { addTap({...point, keep: true}); busy.then(changed => { if (changed === 0) { history.undo(); paint(); ctx.notify('这里没有抠掉的地方'); } }, () => {}); },
+            onClose: () => { editor = null; }});
         } catch (error) { ctx.notify(error.message, {error: true}); }
         return;
       }

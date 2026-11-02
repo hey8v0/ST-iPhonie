@@ -130,7 +130,15 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     win.clearTimeout(toastTimer);
     toastTimer = win.setTimeout(hideToast, error ? 20000 : 4500);
   }
-  const fail = error => { api.reportDiagnostic?.('小手机界面', error); notify(error?.message, {error: true}); };
+  // Local storage gone: once in a while is enough, everything that reads it would say the same.
+  let lostAt = 0;
+  const fail = error => {
+    api.reportDiagnostic?.('小手机界面', error);
+    if (error?.code === 'STORAGE_LOST') { const now = Date.now(); if (now - lostAt < 20000) return; lostAt = now; }
+    notify(error?.message, {error: true});
+  };
+  /** Something brought up to date behind what the user is doing: its failing goes in the log, not over what they just did (a 画风 that saved fine). */
+  const quietly = fn => { try { const result = fn(); result?.catch?.(error => api.reportDiagnostic?.('小手机界面', error)); } catch (error) { api.reportDiagnostic?.('小手机界面', error); } };
   function run(fn) {
     try {
       const result = fn();
@@ -1013,7 +1021,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       lastPhase = event.phase;
       paintPlayback(event);
     }
-    if (event.type === 'settings') { theme(); renderWidgets(); today?.paint(['cast', 'wallet']); animate(); wallMotion(); run(refreshAvatars); }
+    if (event.type === 'settings') { theme(); renderWidgets(); today?.paint(['cast', 'wallet']); animate(); wallMotion(); quietly(refreshAvatars); }
     if (event.type === 'phone') run(() => appearance(event.preferences));
     if (['chat', 'library', 'space'].includes(event.type)) todayLater();
     if (event.type === 'library') {
@@ -1041,7 +1049,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       if (!event.busy && event.lastAt !== lastSyncAt && (r?.pulled?.length || r?.merged?.length)) notify(r.merged?.length ? '两台设备都有改动，已经合并好了' : '已读取别的设备的新内容');
       if (!event.busy) lastSyncAt = event.lastAt;
     }
-    if (event.type === 'settings') run(() => views.get('chat')?.onChat?.({}));
+    if (event.type === 'settings') quietly(() => views.get('chat')?.onChat?.({}));
   });
 
   // Unread chat messages, shown as a badge on the chat icon.

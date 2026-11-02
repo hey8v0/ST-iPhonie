@@ -2,7 +2,10 @@
 // on while the phone is put away; what comes back is one more file song in the 歌单. Methods of TTSBackend, kept in a file of their own
 // (installSongs puts them on its prototype).
 import { SONG_LIMITS, SONG_LENGTHS, songDraft, estimateLrc, songSections, singTime } from './song.js';
-import { singSong, singPrice, SING_ENGINES, SING_NAMES, SING_RESUMES, SONG_KEYS } from './song-engines.js';
+import { singSong, singPrice, checkSongComfy, stopComfySong, SING_ENGINES, SING_NAMES, SING_RESUMES, SONG_KEYS } from './song-engines.js';
+import { audioOutput, describeSongWorkflow } from './song-comfy.js';
+import { parseWorkflow, uiToApi, uiNodeTypes } from './comfy-graph.js';
+import { comfyRecent } from './image-engines.js';
 import { miniBase } from './providers.js';
 
 const clone = value => structuredClone(value);
@@ -29,7 +32,7 @@ class Songs {
     /** A key for singing: a card of its own in 引擎, or what the voice card of the same service holds. */
     songKey(engine) { return SONG_KEYS.includes(engine) ? this.songKeys[engine] || '' : engine === 'eleven' || engine === 'mini' ? this.providers.currentKey(engine) || '' : ''; }
     singModel(engine) { const s = this.settings.music.sing; return engine === 'lyria' ? s.lyriaModel : engine === 'replicate' ? s.replicateModel : ''; }
-    singReady(engine) { return engine === 'comfy' ? this.settings.draw.engine === 'comfy' || this.settings.draw.comfy.url !== 'http://127.0.0.1:8188' : !!this.songKey(engine); }
+    singReady(engine) { return engine === 'comfy' ? this.settings.music.sing.comfyOn || this.settings.draw.engine === 'comfy' || this.settings.draw.comfy.url !== 'http://127.0.0.1:8188' : !!this.songKey(engine); }
     /** Who can sing this song, and about what it costs each. */
     singOptions(draft = {}) {
         const seconds = secondsOf(songDraft(draft));
@@ -67,7 +70,13 @@ class Songs {
         return true;
     }
     /** Stops waiting for a song. What was already asked of the service may still be charged. */
-    cancelSing(id) { this.songJobs().get(id)?.control.abort(); return true; }
+    cancelSing(id) {
+        const job = this.songJobs().get(id);
+        job?.control.abort();
+        // On one's own ComfyUI a song given up on stops taking the computer's time.
+        if (job?.engine === 'comfy' && job.task) { const c = this.settings.draw.comfy; stopComfySong({ fetch: this.songFetch, url: c.url, transport: c.loraTransport, task: job.task }).catch(() => {}); }
+        return true;
+    }
     /**
      * Sings a draft and puts the song in the 歌单. A song that costs money needs allowPaid (code PAID otherwise, the message saying about how
      * much): the phone asks first. Resolves when it is done; the phone does not wait.
@@ -79,7 +88,7 @@ class Songs {
         if (this.songJobs().has(id)) throw Error('这首正在唱');
         if (!SING_ENGINES.includes(engine)) throw Error('先选一家来唱');
         if (!draft.instrumental && !draft.lyrics.trim()) throw Error('还没有歌词，写好了再唱');
-        if (!this.singReady(engine)) throw Error(engine === 'comfy' ? '先在「引擎 → ComfyUI」填上地址' : `先在「引擎 → ${SING_NAMES[engine]}」填上密钥`);
+        if (engine !== 'comfy' && !this.singReady(engine)) throw Error(`先在「引擎 → ${SING_NAMES[engine]}」填上密钥`);
         const model = this.singModel(engine), price = singPrice(engine, { model, seconds: secondsOf(draft) });
         if (!price.free && !allowPaid) throw Object.assign(Error(price.text), { code: 'PAID' });
         this.saveMusic({ sing: { engine } });
@@ -93,16 +102,17 @@ class Songs {
         return ids[0];
     }
     async runSong(draft, { engine, model, task = '' }) {
-        const id = draft.id, control = new AbortController(), job = { control, closing: false };
+        const id = draft.id, control = new AbortController(), job = { control, closing: false, engine, task };
         this.songJobs().set(id, job);
         try {
             await this.music.change(id, d => { d.state = 'singing'; d.job = { engine, model, task, at: Date.now() }; delete d.note; });
             this.emit('music', { draft: id });
-            const c = this.settings.draw.comfy;
+            const c = this.settings.draw.comfy, s = this.settings.music.sing, own = s.comfyOwn && s.comfyWorkflow;
             const request = { title: draft.title, style: draft.style, lyrics: draft.lyrics, instrumental: draft.instrumental, language: draft.language, seconds: secondsOf(draft), model,
-                url: engine === 'lyria' ? this.settings.music.sing.lyriaUrl : engine === 'comfy' ? c.url : engine === 'mini' ? miniBase(this.settings.connections.mini) : '', transport: c.loraTransport };
+                url: engine === 'lyria' ? this.settings.music.sing.lyriaUrl : engine === 'comfy' ? c.url : engine === 'mini' ? miniBase(this.settings.connections.mini) : '', transport: c.loraTransport, ...(engine === 'comfy' && own ? { workflow: s.comfyWorkflow, map: s.comfyMap } : {}) };
             const result = await singSong(engine, request, { fetch: this.songFetch, key: this.songKey(engine), signal: control.signal, task,
-                onTask: (taskId, used) => { this.music.change(id, d => { if (d.job) { d.job.task = taskId; if (used) d.job.model = used; } }).catch(() => {}); } });
+                onStep: (done, of) => this.emit('music', { draft: id, step: [done, of] }),
+                onTask: (taskId, used) => { job.task = taskId; this.music.change(id, d => { if (d.job) { d.job.task = taskId; if (used) d.job.model = used; } }).catch(() => {}); } });
             // A second tab of this tavern goes back to the same job: whoever gets here first keeps the song.
             if (!await this.music.change(id, d => { if (!d.job) throw Error('taken'); delete d.job; }).then(() => true, () => false)) { this.emit('music', { draft: id }); return null; }
             const songId = await this.keepSong(id, { ...draft, lyrics: draft.lyrics || result.words || '' }, result.blob, result.lyric);
@@ -133,9 +143,37 @@ class Songs {
     async resumeSongs() {
         for (const row of await this.music.list('draft')) {
             const job = row.job;
-            if (row.state !== 'singing' || this.songJobs().has(row.id) || !job?.task || !SING_RESUMES.includes(job.engine) || !this.songKey(job.engine)) continue;
+            if (row.state !== 'singing' || this.songJobs().has(row.id) || !job?.task || !SING_RESUMES.includes(job.engine) || (job.engine !== 'comfy' && !this.songKey(job.engine))) continue;
             this.runSong(row, { engine: job.engine, model: job.model, task: job.task }).catch(() => {});
         }
+    }
+    /** ComfyUI for singing, looked at: what it would use, or why it cannot. */
+    async songComfyCheck() {
+        this.assertOpen();
+        const c = this.settings.draw.comfy, s = this.settings.music.sing;
+        return checkSongComfy({ fetch: this.songFetch, url: c.url, transport: c.loraTransport, ...(s.comfyOwn && s.comfyWorkflow ? { workflow: s.comfyWorkflow, map: s.comfyMap } : {}) });
+    }
+    /** A workflow of one's own, read from any of its JSON forms: {workflow (the API's form), …what it takes}. */
+    async prepareSongWorkflow({ text } = {}) {
+        this.assertOpen();
+        const parsed = parseWorkflow(text);
+        let graph = parsed.api;
+        if (parsed.ui) {
+            let specs = {};
+            try { specs = await this.comfyNodeSpecs({ types: uiNodeTypes(parsed.ui) }); } catch { /* the file itself may name them */ }
+            try { graph = uiToApi(parsed.ui, specs); }
+            catch (error) { throw Error(`${error.message}。连上 ComfyUI 再导入，或者在 ComfyUI 里用「导出 (API)」（Export (API)）重新导出`); }
+        }
+        if (!audioOutput(graph)) throw Error('这个工作流没有保存音频的节点：它是画图的吗？写歌要能出音频的工作流');
+        const workflow = JSON.stringify(graph);
+        if (workflow.length > 300000) throw Error('这个工作流太大了');
+        return { workflow, ...describeSongWorkflow(graph) };
+    }
+    /** What ComfyUI made lately that came out as sound: [{id, label, graph}]. */
+    async songRecentRuns() {
+        this.assertOpen();
+        const c = this.settings.draw.comfy, runs = await comfyRecent({ fetch: this.imageFetch, url: c.url, transport: c.loraTransport });
+        return runs.filter(run => audioOutput(run.graph)).map(run => { const words = describeSongWorkflow(run.graph).fields[0]?.text; return { id: run.id, label: words || run.id.slice(0, 8), graph: JSON.stringify(run.graph) }; });
     }
     /** The page is going: nothing more is asked, and what is being sung stays marked so it can be picked up. */
     stopSongs() { for (const job of this.songJobs().values()) { job.closing = true; job.control.abort(); } }
@@ -148,5 +186,6 @@ export function installSongs(target) {
 export const songFacade = backend => ({
     listSongDrafts: () => backend.listSongDrafts(), getSongDraft: id => backend.getSongDraft(String(id)), saveSongDraft: value => backend.saveSongDraft(clone(value || {})),
     deleteSongDrafts: ids => backend.deleteSongDrafts([...ids].map(String)), singOptions: draft => backend.singOptions(clone(draft || {})),
-    singDraft: (id, options) => backend.singDraft(String(id), clone(options || {})), cancelSing: id => backend.cancelSing(String(id)), importSongFile: (id, file) => backend.importSongFile(String(id), file)
+    singDraft: (id, options) => backend.singDraft(String(id), clone(options || {})), cancelSing: id => backend.cancelSing(String(id)), importSongFile: (id, file) => backend.importSongFile(String(id), file),
+    songComfyCheck: () => backend.songComfyCheck(), prepareSongWorkflow: source => backend.prepareSongWorkflow(clone(source || {})), songRecentRuns: () => backend.songRecentRuns()
 });

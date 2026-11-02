@@ -19,7 +19,7 @@
  * A photo's small picture for grids is kept apart (saveThumb, getThumbs; core/thumbnail.js makes them).
  * A photo's middle-sized picture for chat bubbles and posts is kept apart (savePreview), so no list reads it.
  */
-import {connectionLost, lostError} from './idb.js';
+import {connectionLost, lostError, breath} from './idb.js';
 import {normalizeWidgets} from './widgets.js';
 import {normalizeBook} from './book.js';
 import {cleanTheme} from './theme-colors.js';
@@ -156,7 +156,7 @@ export class LocalLibrary {
  async #run(work,again=true){
   const db=await this.#open();
   try{return await work(db);}
-  catch(error){if(error?.code!=='STORAGE_LOST'||this.#closed)throw error;if(this.#db===db){try{db.close();}catch{}this.#db=null;}if(again)return this.#run(work,false);throw error;}
+  catch(error){if(error?.code!=='STORAGE_LOST'||this.#closed)throw error;if(this.#db===db){try{db.close();}catch{}this.#db=null;}if(again){await breath();return this.#run(work,false);}throw error;}
  }
  async #read(name,id){
   return this.#run(db=>new Promise((resolve,reject)=>{

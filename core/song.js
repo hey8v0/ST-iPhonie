@@ -33,7 +33,10 @@ export function normalizeSing(value) {
   const address = String(v.lyriaUrl ?? '').trim().replace(/\/+$/, '');
   return {
     engine: clip(v.engine, 20).trim(), lyriaModel: clip(v.lyriaModel, 60).trim() || 'lyria-3.5',
-    lyriaUrl: /^https?:\/\/[^\s]+$/i.test(address) ? clip(address, 500) : '', replicateModel: clip(v.replicateModel, 120).trim() || 'minimax/music-2.5'
+    lyriaUrl: /^https?:\/\/[^\s]+$/i.test(address) ? clip(address, 500) : '', replicateModel: clip(v.replicateModel, 120).trim() || 'minimax/music-2.5',
+    // ComfyUI: offered once it has been set up here; a workflow of one's own, kept whether it is in use or not, and which of its boxes take what.
+    comfyOn: v.comfyOn === true, comfyOwn: v.comfyOwn === true, comfyWorkflow: typeof v.comfyWorkflow === 'string' && v.comfyWorkflow.length <= 300000 ? v.comfyWorkflow : '', comfyName: clip(v.comfyName, 60),
+    comfyMap: {lyrics: clip(v.comfyMap?.lyrics, 200), style: clip(v.comfyMap?.style, 200)}
   };
 }
 

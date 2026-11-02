@@ -15,7 +15,7 @@
 // (the chat is put away; what the contact sends meanwhile waits as 好友申请 in requests); by 'them': the contact deleted
 // the user (the user's messages are refused until a 好友申请 is accepted).
 // streak (聊天火花): days in a row, up to today or yesterday, on which both the user and the other side wrote.
-import {connectionLost, lostError} from './idb.js';
+import {connectionLost, lostError, breath} from './idb.js';
 
 export const CHAT_STORE_LIMITS = Object.freeze({messages: 1000, text: 4000, members: 20, fileText: 30000});
 const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song', 'file'];
@@ -187,7 +187,7 @@ export class ChatStore {
     } catch (error) {
       if (error?.code !== 'STORAGE_LOST' || this.#closed) throw error;
       if (this.#db === db) { try { db.close(); } catch {} this.#db = null; }
-      if (again) return this.#run(mode, work, false);
+      if (again) { await breath(); return this.#run(mode, work, false); }
       throw error;
     }
   }
