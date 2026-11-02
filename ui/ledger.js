@@ -40,7 +40,7 @@ export function ledgerApp(ctx) {
     if (voice.length) out.push(groupTitle('配音') + `<div class="group">${rows(voice)}</div>`);
     const image = Object.entries(all.image || {}).map(([engine, n]) => ({name: PICTURES[engine] || engine, value: n, shown: counted(n, '张')}));
     if (image.length) out.push(groupTitle('出图') + `<div class="group">${rows(image)}</div>`);
-    const other = [...(all.embed ? [{name: '向量模型', value: all.embed.calls, shown: counted(all.embed.calls, '次'), note: counted(all.embed.chars, '字')}] : []), ...(all.sfx ? [{name: '生成音效', value: all.sfx, shown: counted(all.sfx, '个')}] : [])];
+    const other = [...(all.embed ? [{name: '向量模型', value: all.embed.calls, shown: counted(all.embed.calls, '次'), note: counted(all.embed.chars, '字')}] : []), ...(all.sfx ? [{name: '生成音效', value: all.sfx, shown: counted(all.sfx, '个')}] : []), ...(all.song ? (songs => [{name: '写歌', value: songs, shown: counted(songs, '首')}])(Object.values(all.song).reduce((a, b) => a + b, 0)) : [])];
     if (other.length) out.push(groupTitle('其他') + `<div class="group">${rows(other)}</div>`);
     return out.join('');
   }

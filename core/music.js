@@ -6,6 +6,7 @@
 // a song id ({{id}}), plus where in their JSON answers the list, the id, the title, the artist and the link are (dotted
 // paths such as data.list or data.url). A lyrics address is optional.
 import {promptText} from './prompt-rules.js';
+import {normalizeSongForm, normalizeSing} from './song.js';
 
 export const BGM_MODES = Object.freeze(['off', 'tap', 'auto']);
 export const BGM_MODE_NAMES = Object.freeze({off: '关', tap: '点一下才放', auto: '自动放'});
@@ -39,7 +40,7 @@ const OLD_RULES = [[...RULE_STEPS, '最近放过：{{最近}}'].join('\n')];
 const sameRule = (a, b) => String(a).replace(/\r\n?/g, '\n').trim() === String(b).trim();
 
 export function defaultMusic() {
-  return {bgm: 'off', rule: DEFAULT_BGM_RULE, volume: 0.6, duck: true, share: true, mode: 'order', taste: true, sources: []};
+  return {bgm: 'off', rule: DEFAULT_BGM_RULE, volume: 0.6, duck: true, share: true, mode: 'order', taste: true, sources: [], writing: normalizeSongForm(), sing: normalizeSing()};
 }
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const path = value => clip(value, 120).trim().replace(/[^\w.$[\]-]/g, '');
@@ -103,7 +104,8 @@ export function normalizeMusic(value) {
     volume: Number.isFinite(Number(value.volume)) ? Math.min(1, Math.max(0, Number(value.volume))) : base.volume,
     duck: value.duck !== false, share: value.share !== false,
     mode: PLAY_MODES.includes(value.mode) ? value.mode : base.mode, taste: value.taste !== false,
-    sources: sources.map(s => seen.has(s.id) ? {...s, id: s.id + '-' + seen.size} : s).filter(s => seen.add(s.id))
+    sources: sources.map(s => seen.has(s.id) ? {...s, id: s.id + '-' + seen.size} : s).filter(s => seen.add(s.id)),
+    writing: normalizeSongForm(value.writing), sing: normalizeSing(value.sing)
   };
 }
 

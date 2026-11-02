@@ -378,7 +378,7 @@ export function chatApp(ctx) {
         const fresh = Date.now() - m.at < 1500;
         return `<button class="dice-msg${fresh ? ' rolling' : ''}" data-action="message" ${mid} data-face="${esc(m.text)}" aria-label="骰子 ${esc(m.text)} 点">${Array.from({length: 9}, (_, i) => `<i${PIPS[m.text]?.includes(i) ? ' class="on"' : ''}></i>`).join('')}</button>`;
       }
-      case 'song': return `<button class="song-card" data-action="song" ${mid} aria-label="播放 ${esc(m.song?.title || '')}"><span class="sg-disc" aria-hidden="true">${icon('music')}</span><span class="sg-text"><strong>${esc(m.song?.title || '')}</strong><small>${esc(m.song?.artist || '')}</small>${m.text ? `<em>${esc(m.text)}</em>` : ''}</span><span class="sg-play" aria-hidden="true">${icon('play', true)}</span></button>`;
+      case 'song': return `<button class="song-card" data-action="song" ${mid} aria-label="播放 ${esc(m.song?.title || '')}"><span class="sg-disc" aria-hidden="true">${icon('music')}</span><span class="sg-text"><strong>${esc(m.song?.title || '')}</strong><small>${esc(m.song?.artist || '')}</small>${m.text ? `<em>${esc(m.text)}</em>` : ''}</span><span class="sg-play" aria-hidden="true">${icon(m.song?.draft ? 'edit' : 'play', !m.song?.draft)}</span></button>`;
       case 'call': return `<button class="call-msg${m.state === 'answered' ? '' : ' missed'}" data-action="call-log" ${mid}>${icon('phone', true)}<span>${esc(callSummary(m))}</span></button>`;
       default: return `<button class="chat-bubble" data-action="message" ${mid}>${esc(m.text)}</button>`;
     }
@@ -418,7 +418,7 @@ export function chatApp(ctx) {
   function toolsHTML() {
     const group = thread.type === 'group';
     const tools = [['photo', 'image', '照片'], ['emoji', 'smile', '表情'], ['redpacket', 'packet', '红包'], ...(group ? [] : [['transfer', 'swap', '转账'], ['gift', 'gift', '礼物']]),
-      ['file', 'file', '文件'], ['location', 'pin', '位置'], ['song', 'music', '分享歌'], ['pat', 'hand', '拍一拍'], ['dice', 'dice', '骰子']];
+      ['file', 'file', '文件'], ['location', 'pin', '位置'], ['song', 'music', '分享歌'], ['write', 'edit', '写首歌'], ['pat', 'hand', '拍一拍'], ['dice', 'dice', '骰子']];
     const tabs = `<div class="emoji-tabs" role="tablist">${[['emoji', '表情'], ['stickers', '表情包']].map(([k, t]) => `<button type="button" role="tab" data-action="panel-${k}" aria-selected="${panel === k}">${t}</button>`).join('')}</div>`;
     if (panel === 'stickers') {
       const list = api.getState().chat.stickers || [];
@@ -817,6 +817,33 @@ export function chatApp(ctx) {
         const text = value(d, 'note');
         d.close();
         await post([{from: 'me', kind: 'song', song, ...(text ? {text} : {})}]);
+      }
+    });
+  }
+  /** A song written in a chat: played once it has been sung, else its page, to read and sing. False when its draft has gone. */
+  async function openWritten(song) {
+    const draft = await api.getSongDraft?.(song.draft).catch(() => null);
+    if (!draft) return false;
+    const made = draft.songs.length ? (await api.listSongs().catch(() => [])).find(s => s.id === draft.songs.at(-1)) : null;
+    if (made) { api.musicPlayList?.([made], 0, 'library').catch(error => ctx.notify(error.message, {error: true})); return true; }
+    ctx.showSongDraft?.(song.draft);
+    return true;
+  }
+  /** Someone in the chat writes a song: the text model writes it as them, and a card comes from them. It is sung from its page, and only then costs anything. */
+  function writeSong() {
+    const group = thread.type === 'group', remembered = api.getState().music.writing, id = threadId;
+    const d = sheet('写首歌', `${group ? field('谁写', `<span class="select"><select data-field="who" aria-label="谁写">${thread.members.map(n => `<option value="${esc(n)}">${esc(shown(n))}</option>`).join('')}</select></span>`) : ''}
+      ${field('写什么', textArea('about', '', 'rows="3" maxlength="2000" placeholder="比如：写写我们第一次见面那天。不填就让 TA 自己想"'))}
+      ${field('语言', input('language', remembered.language, 'text', 'maxlength="200"'))}
+      ${field('曲风', input('genre', remembered.genre, 'text', 'maxlength="200" placeholder="可以不填，TA 自己定"'))}
+      <div class="actions">${btn('song-write', icon('send') + '让 TA 写', 'primary')}</div>
+      <p class="hint">会调用一次文字模型。写好以后是一张歌卡，点开能看歌词、唱出来。</p>`, {
+      'song-write': () => {
+        if (!api.songWriteFor) throw Error('要在酒馆里打开小手机，才能让 TA 写');
+        const form = {...remembered, who: group ? value(d, 'who') : thread.members[0], about: value(d, 'about'), language: value(d, 'language'), genre: value(d, 'genre')};
+        d.close();
+        ctx.notify(`${shown(form.who)}在写了，写好了会发过来`);
+        api.songWriteFor(id, form).catch(error => ctx.notify(error.message, {error: true}));
       }
     });
   }
@@ -1477,7 +1504,7 @@ export function chatApp(ctx) {
       case 'dm-open': await openDm(el.dataset.name); break;
       case 'profile': profileOf = el.dataset.name; mode = 'profile'; render(); break;
       case 'profile-chat': await openDm(profileOf); break;
-      case 'song': { const m = thread?.messages.find(x => x.id === el.dataset.mid); if (m?.song) { ctx.notify(`正在找「${m.song.title}」……`); api.musicPlay?.({...m.song, from: 'share'}).catch(error => ctx.notify(error.message, {error: true})); } break; }
+      case 'song': { const m = thread?.messages.find(x => x.id === el.dataset.mid); if (m?.song?.draft && await openWritten(m.song)) break; if (m?.song) { ctx.notify(`正在找「${m.song.title}」……`); api.musicPlay?.({...m.song, from: 'share'}).catch(error => ctx.notify(error.message, {error: true})); } break; }
       case 'play-song': api.musicPlay?.({title: el.dataset.title, artist: el.dataset.artist, from: 'share'}).catch(error => ctx.notify(error.message, {error: true})); break;
       case 'unfriend': {
         const name = profileOf;
@@ -1549,6 +1576,7 @@ export function chatApp(ctx) {
       case 'tool-gift': panel = null; syncPanel(); sendGift(); break;
       case 'tool-location': panel = null; syncPanel(); sendLocation(); break;
       case 'tool-song': panel = null; syncPanel(); await shareSong(); break;
+      case 'tool-write': panel = null; syncPanel(); writeSong(); break;
       case 'tool-page': { const box = el.closest('.chat-panel')?.querySelector('.tool-pages'); box?.scrollTo({left: Number(el.dataset.page) * box.clientWidth, behavior: 'smooth'}); break; }
       case 'tool-pat': panel = null; syncPanel(); await choosePat(); break;
       case 'tool-dice': panel = null; syncPanel(); await rollDice(); break;

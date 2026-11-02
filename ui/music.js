@@ -6,6 +6,7 @@
 // away.
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, empty, help} from './common.js';
 import {icon} from './icons.js';
+import {writePanel} from './music-write.js';
 import {BGM_MODES, BGM_MODE_NAMES, DEFAULT_BGM_RULE, SELF_HOSTED, PLAY_MODES, PLAY_MODE_NAMES, GROUP_KINDS, MUSIC_LIMITS, titleFromFile, normalizeSource, bestMatch} from '../core/music.js';
 
 const clock = s => !Number.isFinite(s) || s <= 0 ? '0:00' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -45,6 +46,10 @@ export function musicApp(ctx) {
   // 多选: the songs picked (null when not picking)
   let lists = [], shelf = '', shown = [], filter = '', limit = STEP, picked = null;
   const state = () => api.getState().music;
+  /** 写歌's pages come and go through this: where to be (top: from the start of the page). */
+  const go = (where, top = false) => { mode = where; if (where === 'main') tab = 'write'; render(); if (top) v.root.scrollTop = 0; };
+  go.mode = () => mode;
+  const writer = writePanel(ctx, {v, go});
   const now = () => { try { return api.musicStatus?.() || null; } catch { return null; } };
 
   // 正在播放: built once per song (and when the lyrics view opens or closes), then only patched — redrawn every second,
@@ -124,7 +129,10 @@ export function musicApp(ctx) {
     if (mode === 'settings') return renderSettings();
     if (mode === 'source') return renderSource();
     if (mode === 'group') return renderGroup();
+    if (mode === 'write-form') return writer.renderForm();
+    if (mode === 'draft') return writer.renderDraft();
     songs = await api.listSongs().catch(() => []);
+    if (tab === 'write') await writer.load();
     lists = await api.listPlaylists?.().catch(() => []) || [];
     if (tab === 'heard') heard = await api.listHeard?.().catch(() => []) || [];
     if (v.disposed || ticket !== epoch) return;
@@ -135,7 +143,7 @@ export function musicApp(ctx) {
     const kinds = [['song', '单曲'], ...Object.entries(GROUP_KINDS).filter(([k]) => sources.some(x => x[k + 'Search']))];
     if (!kinds.some(([k]) => k === kind)) kind = 'song';
     const found = kind === 'song' ? results : groups;
-    const list = tab === 'heard'
+    const list = tab === 'write' ? writer.listHTML() : tab === 'heard'
       ? (heard.length ? `<div class="actions" style="margin-top:0">${btn('play-heard', icon('play', true) + '全部播放', 'primary')}${btn('play-mixed', icon('shuffle') + '和歌单一起放', 'secondary')}${btn('heard-clear', icon('trash'), 'icon-button', 'aria-label="清空正文点的歌"')}</div>`
         + `<p class="hint">正文点过的歌都记在这里（最新的在上面，同一首只记一次，最多 200 首）。点 + 加进歌单。</p><div class="group">${heard.map((x, i) => songRow(x, i, 'heard')).join('')}</div>`
         : empty('正文还没有点过歌', '在「设置 → 背景音乐」打开点歌后，剧情每次挑的歌都会记在这里，可以再放、加进歌单。', 'music'))
@@ -154,8 +162,9 @@ export function musicApp(ctx) {
         + (searchNote && !searching ? `<p class="hint">${esc(searchNote)}</p>` : '');
     v.draw(heading('音乐', btn('settings', icon('sliders'), 'round-button', 'aria-label="音乐设置"'), `Music · ${songs.length} 首`)
       + nowPlaying()
-      + `<div class="segmented" role="group" aria-label="歌单、正文点的歌或搜索">${[['library', '歌单'], ['heard', '正文点的歌'], ['search', '搜索']].map(([k, l]) => `<button data-action="tab" data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>`
+      + `<div class="segmented" role="group" aria-label="歌单、正文点的歌、搜索或写歌">${[['library', '歌单'], ['heard', '正文点的歌'], ['search', '搜索'], ['write', '写歌']].map(([k, l]) => `<button data-action="tab" data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>`
       + list);
+    if (tab === 'write') writer.mountList(); else writer.dropList();
     paintNow();
   }
   /** Only the now-playing card changes while a song plays (the lists keep their scroll and taps); a new song or the
@@ -375,6 +384,7 @@ export function musicApp(ctx) {
   v.on('change', '[data-field=duck],[data-field=share],[data-field=taste]', el => api.saveMusic({[el.dataset.field]: el.checked}));
   v.on('click', '[data-action]', async el => {
     const i = Number(el.dataset.i);
+    if (el.dataset.action.startsWith('write-')) return writer.click(el);
     switch (el.dataset.action) {
       case 'tab': tab = el.dataset.tab; picked = null; render(); break;
       case 'kind': kind = el.dataset.kind; results = []; groups = []; more = false; searchErrors = []; searchNote = ''; if (query) search(); else render(); break;
@@ -507,12 +517,20 @@ export function musicApp(ctx) {
     }
   });
   v.back = () => {
+    if (writer.back()) return true;
     if (mode === 'source') { editing = null; test = null; mode = 'settings'; render(); return true; }
     if (mode === 'group') { group = null; mode = 'main'; render(); return true; }
     if (mode === 'settings') { mode = 'main'; render(); return true; }
     return false;
   };
-  v.onMusic = event => { if (event.status) refreshNow(); else if (!event.heard || tab === 'heard') render(); };
+  v.onMusic = event => {
+    if (event.status) refreshNow();
+    else if (mode === 'draft') writer.changed();
+    else if (mode === 'write-form') { /* being filled in: nothing else on the page depends on the music */ }
+    else if (!event.heard || tab === 'heard') render();
+  };
+  /** A song written, opened from elsewhere (its card in a chat). */
+  v.showDraft = id => writer.open(id);
   v.refresh = v.resume = () => render();
   render();
   return v;

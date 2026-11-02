@@ -13,11 +13,14 @@
   --mimo:#ff6a3d;--mimo-ink:#b13a12;--mimo-soft:#ffe6dc;--mimo-btn:#e4552a;--mimo-on:#fff;
   --doubao:#91ab2a;--doubao-ink:#4b620b;--doubao-soft:#eef5d6;--doubao-btn:#607813;--doubao-on:#fff;
   --custom:#3fae7a;--custom-ink:#1d6b47;--custom-soft:#dcf3e7;--custom-btn:#2e9464;--custom-on:#fff;
-  --nai:#7d80f2;--nai-ink:#3f43ad;--nai-soft:#ecebff;--nai-btn:#4f54c8;--nai-on:#fff;
-  --llm:#23b19c;--llm-ink:#0f6e60;--llm-soft:#d8f6ef;--llm-btn:#1a9a87;--llm-on:#fff;
-  --embed:#7c6cf0;--embed-ink:#4a3db8;--embed-soft:#ece9ff;--embed-btn:#6a5ae6;--embed-on:#fff;
+  --nai:#8a7cf2;--nai-ink:#4437b0;--nai-soft:#eeebff;--nai-btn:#5a4bd0;--nai-on:#fff;
+  --llm:#1f9c9a;--llm-ink:#0a5f5f;--llm-soft:#d6f3f2;--llm-btn:#0b6e6e;--llm-on:#fff;
+  --embed:#a9825c;--embed-ink:#6a4a2c;--embed-soft:#f4ebe1;--embed-btn:#7f5a3a;--embed-on:#fff;
   --gpt:#4f6d8a;--gpt-ink:#26415c;--gpt-soft:#e3ebf3;--gpt-btn:#3a5a7a;--gpt-on:#fff;
   --comfy:#b061d8;--comfy-ink:#6a2c8c;--comfy-soft:#f4e6fb;--comfy-btn:#9244bd;--comfy-on:#fff;
+  --stepfun:#3b4cb0;--stepfun-ink:#27357f;--stepfun-soft:#e4e7f8;--stepfun-btn:#1f2c74;--stepfun-on:#fff;
+  --lyria:#35c4e3;--lyria-ink:#0b6f88;--lyria-soft:#d9f5fb;--lyria-btn:#12a5c9;--lyria-on:#03272f;
+  --replicate:#b9385a;--replicate-ink:#8e1f3c;--replicate-soft:#fbe4ea;--replicate-btn:#8e1f3c;--replicate-on:#fff;
   font-family:"PingFang SC","HarmonyOS Sans SC","MiSans","Microsoft YaHei",system-ui,sans-serif;font-size:15px;
 }
 :root[data-theme=dark]{
@@ -32,11 +35,14 @@
   --mimo:#ff8a62;--mimo-ink:#ffb79c;--mimo-soft:#46261d;--mimo-btn:#ff8a62;--mimo-on:#2e0e04;
   --doubao:#c4dc73;--doubao-ink:#e3efae;--doubao-soft:#303b17;--doubao-btn:#bfdc66;--doubao-on:#192600;
   --custom:#62cf9a;--custom-ink:#9eecc4;--custom-soft:#18392b;--custom-btn:#62cf9a;--custom-on:#06231a;
-  --nai:#9ea1ff;--nai-ink:#c6c8ff;--nai-soft:#28295e;--nai-btn:#9ea1ff;--nai-on:#0b0c2a;
-  --llm:#5fd6c1;--llm-ink:#9ff0e1;--llm-soft:#173f3f;--llm-btn:#5fd6c1;--llm-on:#062421;
-  --embed:#a99cff;--embed-ink:#d3cbff;--embed-soft:#2a2550;--embed-btn:#a99cff;--embed-on:#140f33;
-  --gpt:#8fb0d1;--gpt-ink:#c0d6ec;--gpt-soft:#1f3047;--gpt-btn:#8fb0d1;--gpt-on:#0a1522;
+  --nai:#9c93ff;--nai-ink:#c6c2ff;--nai-soft:#28295e;--nai-btn:#5a52d6;--nai-on:#fff;
+  --llm:#3fbfb0;--llm-ink:#9ff0e1;--llm-soft:#173f3f;--llm-btn:#1f8f86;--llm-on:#fff;
+  --embed:#c9a27c;--embed-ink:#ecd3ba;--embed-soft:#3a2d22;--embed-btn:#8a6440;--embed-on:#fff;
+  --gpt:#8fa8c4;--gpt-ink:#c0d6ec;--gpt-soft:#1f3047;--gpt-btn:#4d6785;--gpt-on:#fff;
   --comfy:#cf95ef;--comfy-ink:#e6c4f8;--comfy-soft:#3a2348;--comfy-btn:#cf95ef;--comfy-on:#22082e;
+  --stepfun:#6f83e8;--stepfun-ink:#b8c4ff;--stepfun-soft:#1f2650;--stepfun-btn:#2f3fa6;--stepfun-on:#fff;
+  --lyria:#4fd2ee;--lyria-ink:#a5ebfa;--lyria-soft:#123a47;--lyria-btn:#4fd2ee;--lyria-on:#03272f;
+  --replicate:#e8688a;--replicate-ink:#ffb3c6;--replicate-soft:#46202e;--replicate-btn:#b03358;--replicate-on:#fff;
 }
 [data-engine=fish]{--e:var(--fish);--e-ink:var(--fish-ink);--e-soft:var(--fish-soft);--e-btn:var(--fish-btn);--e-on:var(--fish-on)}
 [data-engine=mini]{--e:var(--mini);--e-ink:var(--mini-ink);--e-soft:var(--mini-soft);--e-btn:var(--mini-btn);--e-on:var(--mini-on)}
@@ -48,6 +54,9 @@
 [data-engine=embed]{--e:var(--embed);--e-ink:var(--embed-ink);--e-soft:var(--embed-soft);--e-btn:var(--embed-btn);--e-on:var(--embed-on)}
 [data-engine=gpt]{--e:var(--gpt);--e-ink:var(--gpt-ink);--e-soft:var(--gpt-soft);--e-btn:var(--gpt-btn);--e-on:var(--gpt-on)}
 [data-engine=comfy]{--e:var(--comfy);--e-ink:var(--comfy-ink);--e-soft:var(--comfy-soft);--e-btn:var(--comfy-btn);--e-on:var(--comfy-on)}
+[data-engine=stepfun]{--e:var(--stepfun);--e-ink:var(--stepfun-ink);--e-soft:var(--stepfun-soft);--e-btn:var(--stepfun-btn);--e-on:var(--stepfun-on)}
+[data-engine=lyria]{--e:var(--lyria);--e-ink:var(--lyria-ink);--e-soft:var(--lyria-soft);--e-btn:var(--lyria-btn);--e-on:var(--lyria-on)}
+[data-engine=replicate]{--e:var(--replicate);--e-ink:var(--replicate-ink);--e-soft:var(--replicate-soft);--e-btn:var(--replicate-btn);--e-on:var(--replicate-on)}
 [data-engine=none]{--e:var(--ink2);--e-ink:var(--ink2);--e-soft:var(--card2);--e-btn:var(--ink2);--e-on:var(--card)}
 
 /* ---------- Base ---------- */
@@ -352,6 +361,7 @@ details>div{padding-bottom:10px}
 .wave i:nth-child(1){height:40%}.wave i:nth-child(2){height:75%}.wave i:nth-child(3){height:100%}.wave i:nth-child(4){height:65%}.wave i:nth-child(5){height:35%}
 .error-copy{color:var(--danger);white-space:pre-wrap;line-height:1.6}
 .hint{font-size:12px;color:var(--ink2);line-height:1.6;padding:6px 8px 0}
+.hint.error-copy{color:var(--danger)}
 .file-button{position:relative;cursor:pointer;overflow:hidden}
 .file-button input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
 
@@ -504,15 +514,17 @@ details>div{padding-bottom:10px}
 .card-name{font-size:21px;font-weight:900}
 .card-kind{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:900;letter-spacing:.16em;opacity:.9}
 .card-kind svg{width:18px;height:18px}
-.card-chip{width:42px;height:31px;margin-top:16px;border-radius:7px;position:relative;background:linear-gradient(135deg,#fbe7a8,#d8b155 60%,#f3d890);box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
+.card-chip{flex:none;width:42px;height:31px;margin-top:16px;border-radius:7px;position:relative;background:linear-gradient(135deg,#fbe7a8,#d8b155 60%,#f3d890);box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
 .card-chip:before{content:"";position:absolute;inset:7px 0;border-top:1px solid rgba(0,0,0,.25);border-bottom:1px solid rgba(0,0,0,.25)}
 .card-chip:after{content:"";position:absolute;inset:0 14px;border-left:1px solid rgba(0,0,0,.25);border-right:1px solid rgba(0,0,0,.25)}
 .card-number{font:600 17px "JetBrains Mono",ui-monospace,Consolas,monospace;letter-spacing:.14em;margin-top:12px}
 .card-number.none{font-family:inherit;font-size:13px;font-weight:800;letter-spacing:.04em}
+@media (max-width:359px){.card-pocket .card-number:not(.none,.address){font-size:15px;letter-spacing:.08em;white-space:nowrap}.card-bottom{gap:12px}.card-brand{display:none}}
 .card-bottom{display:flex;gap:20px;margin-top:auto;align-items:flex-end}
+.card-bottom>span:not(.card-brand){min-width:0}
 .card-bottom .k{display:block;font-size:9px;font-weight:900;letter-spacing:.14em;opacity:.8}
 .card-bottom .v{display:block;font-size:13px;font-weight:800;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.card-brand{margin-left:auto;font-size:12px;font-weight:900;letter-spacing:.08em;opacity:.9;white-space:nowrap}
+.card-brand{flex:none;margin-left:auto;font-size:12px;font-weight:900;letter-spacing:.08em;opacity:.9;white-space:nowrap}
 .detail-card{margin-bottom:18px}
 .key-state{display:inline-flex;align-items:center;gap:6px;font-weight:800;font-size:13px}
 .setting-row>span:first-child:has(+.key-state){flex-shrink:0}
@@ -1343,6 +1355,17 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .forum-hot .rank{flex:0 0 20px;height:20px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:900;background:var(--card2);color:var(--ink2)}
 .forum-hot .rank.top{background:#ff7a45;color:#fff}
 .forum-feed,.forum-feed>.row-piece{display:grid;gap:10px;min-width:0}
+/* 写歌 */
+.write-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.write-wish{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;margin-top:10px}
+.write-wish input{flex:1 1 190px;min-width:0}
+.write-wish button{flex:none}
+.write-singing{display:flex;align-items:center;gap:10px;margin:0;font-size:13.5px;line-height:1.5;color:var(--ink2)}
+.write-singing .icon{flex:none;width:22px;height:22px;color:var(--accent);animation:write-sing 1.6s ease-in-out infinite}
+@keyframes write-sing{50%{transform:translateY(-3px) rotate(-8deg)}}
+.write-copy{display:flex;flex-wrap:wrap;gap:8px}
+.write-link{display:inline-flex;align-items:center;gap:4px;text-decoration:none}
+@media (prefers-reduced-motion:reduce){.write-singing .icon{animation:none}}
 .forum-card{all:unset;cursor:pointer;display:grid;gap:6px;padding:12px 14px;border-radius:20px;background:var(--card);box-shadow:var(--shadow);min-width:0}
 .forum-author{display:flex;align-items:center;gap:8px;min-width:0;font-size:13px}
 .forum-author b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

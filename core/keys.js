@@ -1,6 +1,6 @@
 // Voice engines, NovelAI for drawing, and llm: the phone's own text model (an OpenAI-compatible API).
 import {connectionLost} from './idb.js';
-const engines=['fish','mini','eleven','mimo','doubao','custom','nai','llm','gpt','embed'];
+const engines=['fish','mini','eleven','mimo','doubao','custom','nai','llm','gpt','embed','stepfun','lyria','replicate'];
 // Keys copied from web pages and chat apps often carry invisible characters (zero-width spaces, line breaks), full-width
 // letters typed with a Chinese input method, quotes, or a "Bearer " prefix. No key contains any of these, and a service
 // answers such a key with 401 although the key itself is valid, so they are taken out before the key is kept or sent.

@@ -65,15 +65,19 @@
   --danger:#bb5a52;--danger-soft:#f7e4e0;
   --serif:"Noto Serif SC","Source Han Serif SC","Songti SC","STSong",serif;
   --leaf:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 120'%3E%3Cg stroke='%239db8a2' stroke-width='1.3' fill='%23d9e7d4'%3E%3Cpath d='M138 4C110 22 88 52 64 116' fill='none'/%3E%3Cellipse cx='121' cy='24' rx='12' ry='5' transform='rotate(-20 121 24)'/%3E%3Cellipse cx='113' cy='12' rx='10' ry='4.5' transform='rotate(-70 113 12)'/%3E%3Cellipse cx='102' cy='47' rx='13' ry='5' transform='rotate(-35 102 47)'/%3E%3Cellipse cx='89' cy='38' rx='11' ry='4.5' transform='rotate(-80 89 38)'/%3E%3Cellipse cx='86' cy='74' rx='13' ry='5' transform='rotate(-45 86 74)'/%3E%3Cellipse cx='72' cy='64' rx='11' ry='4.5' transform='rotate(-95 72 64)'/%3E%3C/g%3E%3Cg fill='%23f0d0c8'%3E%3Ccircle cx='40' cy='30' r='4'/%3E%3Ccircle cx='46' cy='34' r='4'/%3E%3Ccircle cx='44' cy='41' r='4'/%3E%3Ccircle cx='36' cy='41' r='4'/%3E%3Ccircle cx='34' cy='34' r='4'/%3E%3C/g%3E%3Ccircle cx='40' cy='36' r='2.6' fill='%23f1d98f'/%3E%3C/svg%3E");
-  /* Engine colours, muted to sit on paper: grey-blue, ochre, dusty rose, brick, greyish lilac. */
-  --fish:#7f9fb3;--fish-ink:#3f5d70;--fish-soft:#e3ebef;--fish-btn:#6b8ca0;--fish-on:#fff;
-  --mini:#c9a26a;--mini-ink:#7a5a2c;--mini-soft:#f3eadb;--mini-btn:#b58c52;--mini-on:#fff;
-  --eleven:#c98f8c;--eleven-ink:#8a4f4d;--eleven-soft:#f4e4e1;--eleven-btn:#b67a77;--eleven-on:#fff;
-  --mimo:#bf7254;--mimo-ink:#7e3d26;--mimo-soft:#f5e3db;--mimo-btn:#ad6347;--mimo-on:#fff;
-  --custom:#6f9a7c;--custom-ink:#3f6a4c;--custom-soft:#e2eee5;--custom-btn:#5e8a6b;--custom-on:#fff;
-  --nai:#9b91b5;--nai-ink:#5b5277;--nai-soft:#ebe7f1;--nai-btn:#867ba3;--nai-on:#fff;
-  --llm:#9aab7e;--llm-ink:#586a3e;--llm-soft:#ecf0e0;--llm-btn:#84985f;--llm-on:#fff;
-  --embed:#9a8fbf;--embed-ink:#5a4f80;--embed-soft:#eeebf6;--embed-btn:#8a7fb3;--embed-on:#fff;
+  /* Engine colours, muted to sit on paper: grey-blue, ochre, dusty rose, brick, greyish lilac, umber, ink blue, celadon, wine. */
+  --fish:#6f9fc4;--fish-ink:#3f5d70;--fish-soft:#e3ebef;--fish-btn:#5f8fb4;--fish-on:#fff;
+  --mini:#d6a54f;--mini-ink:#694b1e;--mini-soft:#f3eadb;--mini-btn:#b58c52;--mini-on:#fff;
+  --eleven:#d58a97;--eleven-ink:#7f3b49;--eleven-soft:#f4e4e1;--eleven-btn:#b67a77;--eleven-on:#fff;
+  --mimo:#c8683f;--mimo-ink:#692e16;--mimo-soft:#f5e3db;--mimo-btn:#ad6347;--mimo-on:#fff;
+  --custom:#5f9f72;--custom-ink:#2f5a3c;--custom-soft:#e2eee5;--custom-btn:#5e8a6b;--custom-on:#fff;
+  --nai:#a088d0;--nai-ink:#4f4478;--nai-soft:#ebe7f1;--nai-btn:#8877ad;--nai-on:#fff;
+  --llm:#7f9440;--llm-ink:#3f4c1c;--llm-soft:#ecf0e0;--llm-btn:#6f8435;--llm-on:#fff;
+  --embed:#8a6238;--embed-ink:#432d15;--embed-soft:#efe8df;--embed-btn:#74512c;--embed-on:#fff;
+  --gpt:#566b80;--gpt-ink:#22384e;--gpt-soft:#e3ebf3;--gpt-btn:#3a5a7a;--gpt-on:#fff;
+  --stepfun:#4a45a8;--stepfun-ink:#27256a;--stepfun-soft:#e6e6f0;--stepfun-btn:#3a3690;--stepfun-on:#fff;
+  --lyria:#4fc0b8;--lyria-ink:#175d5a;--lyria-soft:#e0f0ee;--lyria-btn:#44a39f;--lyria-on:#fff;
+  --replicate:#a8445f;--replicate-ink:#581d31;--replicate-soft:#f3e3e7;--replicate-btn:#8e3a50;--replicate-on:#fff;
   font-family:"PingFang SC","HarmonyOS Sans SC","MiSans","Microsoft YaHei",system-ui,sans-serif;
 }
 :root[data-skin=fresh][data-theme=dark]{
@@ -83,14 +87,18 @@
   --pink:#dfb1a6;--dot:#2e3731;--shadow:0 10px 22px -14px rgba(0,0,0,.8);
   --danger:#eba096;--danger-soft:#3e2724;--on-danger:#3e2724;
   --leaf:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 120'%3E%3Cg stroke='%236f8c76' stroke-width='1.3' fill='%232f3e33'%3E%3Cpath d='M138 4C110 22 88 52 64 116' fill='none'/%3E%3Cellipse cx='121' cy='24' rx='12' ry='5' transform='rotate(-20 121 24)'/%3E%3Cellipse cx='113' cy='12' rx='10' ry='4.5' transform='rotate(-70 113 12)'/%3E%3Cellipse cx='102' cy='47' rx='13' ry='5' transform='rotate(-35 102 47)'/%3E%3Cellipse cx='89' cy='38' rx='11' ry='4.5' transform='rotate(-80 89 38)'/%3E%3Cellipse cx='86' cy='74' rx='13' ry='5' transform='rotate(-45 86 74)'/%3E%3Cellipse cx='72' cy='64' rx='11' ry='4.5' transform='rotate(-95 72 64)'/%3E%3C/g%3E%3Cg fill='%23806660'%3E%3Ccircle cx='40' cy='30' r='4'/%3E%3Ccircle cx='46' cy='34' r='4'/%3E%3Ccircle cx='44' cy='41' r='4'/%3E%3Ccircle cx='36' cy='41' r='4'/%3E%3Ccircle cx='34' cy='34' r='4'/%3E%3C/g%3E%3Ccircle cx='40' cy='36' r='2.6' fill='%23c9b56e'/%3E%3C/svg%3E");
-  --fish:#9bb7c7;--fish-ink:#c6dbe6;--fish-soft:#2a3639;--fish-btn:#8fb0c2;--fish-on:#16201a;
-  --mini:#d4b483;--mini-ink:#ead3aa;--mini-soft:#3a3327;--mini-btn:#cda873;--mini-on:#1e1a12;
-  --eleven:#d4a3a0;--eleven-ink:#ecc7c4;--eleven-soft:#3b2a2a;--eleven-btn:#cc9793;--eleven-on:#221615;
-  --mimo:#d99577;--mimo-ink:#f0c3ae;--mimo-soft:#3d2a22;--mimo-btn:#d38b6c;--mimo-on:#24140d;
-  --custom:#93bd9f;--custom-ink:#c2e0ca;--custom-soft:#25352a;--custom-btn:#8ab696;--custom-on:#0f1d13;
-  --nai:#b3aacb;--nai-ink:#d3cce5;--nai-soft:#302d3b;--nai-btn:#a79dc4;--nai-on:#1a1826;
-  --llm:#a8bb86;--llm-ink:#d7e3c0;--llm-soft:#2d3525;--llm-btn:#a8bb86;--llm-on:#18200f;
-  --embed:#b3a9d6;--embed-ink:#ddd6f2;--embed-soft:#2e2a3d;--embed-btn:#b3a9d6;--embed-on:#1b1726;
+  --fish:#86b4d6;--fish-ink:#c6dbe6;--fish-soft:#2a3639;--fish-btn:#8fb0c2;--fish-on:#16201a;
+  --mini:#d9b36a;--mini-ink:#ead3aa;--mini-soft:#3a3327;--mini-btn:#cda873;--mini-on:#1e1a12;
+  --eleven:#dd9bb0;--eleven-ink:#ecc7c4;--eleven-soft:#3b2a2a;--eleven-btn:#cc9793;--eleven-on:#221615;
+  --mimo:#e0825a;--mimo-ink:#f0c3ae;--mimo-soft:#3d2a22;--mimo-btn:#d67f52;--mimo-on:#24140d;
+  --custom:#8fc98a;--custom-ink:#c2e0ca;--custom-soft:#25352a;--custom-btn:#8ab696;--custom-on:#0f1d13;
+  --nai:#a3a8ee;--nai-ink:#d3cce5;--nai-soft:#302d3b;--nai-btn:#9a9fe6;--nai-on:#1a1826;
+  --llm:#4fb8a8;--llm-ink:#c1e0d6;--llm-soft:#25352f;--llm-btn:#4f8a7b;--llm-on:#fff;
+  --embed:#a8875f;--embed-ink:#e3d3c4;--embed-soft:#352c24;--embed-btn:#8a6f57;--embed-on:#fff;
+  --gpt:#7d8796;--gpt-ink:#c3ccd8;--gpt-soft:#2a3038;--gpt-btn:#5f6e82;--gpt-on:#fff;
+  --stepfun:#6f70c8;--stepfun-ink:#c5c9ec;--stepfun-soft:#2b2d45;--stepfun-btn:#4a5094;--stepfun-on:#fff;
+  --lyria:#68d8e0;--lyria-ink:#c5ebe8;--lyria-soft:#22393a;--lyria-btn:#68d8e0;--lyria-on:#122020;
+  --replicate:#c8707f;--replicate-ink:#ecc4cc;--replicate-soft:#3b2a2e;--replicate-btn:#9c5568;--replicate-on:#fff;
 }
 :root[data-skin=fresh] .device{background:linear-gradient(135deg,#fbf9f2,#e3ddcc 34%,#f6f2e7 56%,#d7d0bd 80%,#f1ece0);box-shadow:0 0 0 1px #c9c1ab,0 24px 50px -22px rgba(70,70,50,.45)}
 :root[data-skin=fresh][data-theme=dark] .device{background:linear-gradient(135deg,#3a342d,#1c1915 36%,#2d2822 60%,#141210);box-shadow:0 0 0 1px #3d372f,0 24px 50px -20px #000}
@@ -149,7 +157,7 @@
 :root[data-skin=fresh][data-theme=dark] .bank-card{
   background:radial-gradient(circle at 84% 74%,transparent 0 27px,color-mix(in srgb,var(--e-ink) 20%,transparent) 27px 28.5px,transparent 29px 33px,color-mix(in srgb,var(--e-ink) 12%,transparent) 33px 34px,transparent 34.5px),
     repeating-linear-gradient(0deg,transparent 0 23px,color-mix(in srgb,var(--e-ink) 6%,transparent) 23px 24px),
-    linear-gradient(150deg,color-mix(in srgb,var(--e) 30%,#262d29),color-mix(in srgb,var(--e) 16%,#1d2320));
+    linear-gradient(150deg,color-mix(in srgb,var(--e) 46%,#262d29),color-mix(in srgb,var(--e) 30%,#1d2320));
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 18%,transparent),0 -6px 16px -10px rgba(0,0,0,.6),0 12px 22px -14px rgba(0,0,0,.8)}
 :root[data-skin=fresh] .bank-card .spark{display:none}
 /* 开演 on 文艺小清新: paper and ink like the engine cards, not a bright gradient. */

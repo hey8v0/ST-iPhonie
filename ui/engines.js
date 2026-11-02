@@ -1,3 +1,4 @@
+import {SONG_KEYS, SING_NAMES, LYRIA_MODELS, REPLICATE_MODELS} from '../core/song-engines.js';
 import {createView, esc, engines, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, menu} from './common.js';
 
 const TIERS = {0: '未订阅', 1: 'Tablet', 2: 'Scroll', 3: 'Opus'};
@@ -20,12 +21,13 @@ export function enginesApp(ctx) {
   const GROUPS = [
     {id: 'image', title: '图像', en: 'IMAGE', glyph: 'image', ids: ['nai', 'gpt', 'comfy']},
     {id: 'voice', title: '语音', en: 'VOICE', glyph: 'wave', ids: Object.keys(engines)},
-    {id: 'text', title: '文字', en: 'TEXT · VECTOR', glyph: 'chat', ids: ['embed', 'llm']}];
+    {id: 'text', title: '文字', en: 'TEXT · VECTOR', glyph: 'chat', ids: ['embed', 'llm']},
+    {id: 'music', title: '音乐', en: 'MUSIC', glyph: 'music', ids: [...SONG_KEYS].reverse()}];
   const groupOf = id => GROUPS.find(g => g.ids.includes(id));
   let order = (() => {
     const s = api.getState(), voices = Object.keys(engines).sort((a, b) => s.routes.filter(r => r.engine === a).length - s.routes.filter(r => r.engine === b).length);
     const drawing = ['nai', 'gpt', 'comfy'].filter(x => x !== s.draw.engine);
-    return [...drawing, s.draw.engine, ...voices, 'embed', 'llm'];
+    return [...drawing, s.draw.engine, ...voices, 'embed', 'llm', ...[...SONG_KEYS].reverse()];
   })();
   /** The card in front of its pocket. */
   const frontOf = id => groupOf(id).ids.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b)).at(-1);
@@ -59,14 +61,16 @@ export function enginesApp(ctx) {
   };
   /** The text model preset being edited (the draft's active one). */
   const textPreset = () => textDraft.presets.find(p => p.id === textDraft.active) || textDraft.presets[0];
-  const nameOf = id => id === 'nai' ? 'NovelAI' : id === 'gpt' ? 'GPT 生图' : id === 'comfy' ? 'ComfyUI' : id === 'llm' ? '文字模型' : id === 'embed' ? '向量模型' : engines[id];
+  const song = id => SONG_KEYS.includes(id);
+  const nameOf = id => song(id) ? SING_NAMES[id] : id === 'nai' ? 'NovelAI' : id === 'gpt' ? 'GPT 生图' : id === 'comfy' ? 'ComfyUI' : id === 'llm' ? '文字模型' : id === 'embed' ? '向量模型' : engines[id];
   function card(id, tag = 'button') {
     // the settings once per card (each read is a copy of all of them)
     const st = api.getState();
     const comfy = id === 'comfy', saved = comfy ? !!st.draw.comfy.url : api.keyStatus(id), nai = id === 'nai', llm = id === 'llm', vector = id === 'embed', d = st.draw;
     const em = vector ? (engine === 'embed' && embedDraft ? embedDraft : st.embed) : null;
     const name = nameOf(id), t = llm ? (engine === 'llm' && textDraft ? textDraft : st.text) : null, custom = t?.source === 'custom';
-    const fields = vector ? [['MODEL', em.model || '未填写'], ['MEMORY', em.enabled ? '语义检索' : '本地检索']]
+    const fields = song(id) ? [['MODEL', id === 'lyria' ? st.music.sing.lyriaModel : id === 'replicate' ? st.music.sing.replicateModel : 'StepAudio 3'], ['USE', '写歌']]
+      : vector ? [['MODEL', em.model || '未填写'], ['MEMORY', em.enabled ? '语义检索' : '本地检索']]
       : id === 'gpt' ? [['MODEL', d.gpt.model], ['QUALITY', d.gpt.quality.toUpperCase()]]
       // A workflow that names its own model has nothing left to choose.
       : comfy ? [['MODEL', d.comfy.workflow && !d.comfy.workflow.includes('"%model%"') ? '工作流决定' : d.comfy.model ? d.comfy.model.replace(/\.[^.]*$/, '').slice(0, 18) : '未选'], ['WORKFLOW', d.comfy.workflows.find(p => p.id === d.comfy.activeWorkflow)?.name || '默认工作流']]
@@ -85,7 +89,7 @@ export function enginesApp(ctx) {
     const ownApi = id === 'custom' ? (st.connections.custom.params.url || '').replace(/^https?:\/\//, '') : '';
     const number = id === 'custom' ? (ownApi || '还没填接口地址 · 点卡片去填写') : vector ? (em.enabled ? (saved ? dots : '未绑定密钥 · 本地接口可以不填') : '没开 · 记忆用本地检索') : comfy ? d.comfy.url.replace(/^https?:\/\//, '') : llm ? (custom ? (saved ? dots : '未绑定密钥 · 点卡片去填写') : '用酒馆当前连接的模型') : saved ? dots : '未绑定密钥 · 点卡片去填写';
     return `<${tag} class="bank-card${tag === 'div' ? ' detail-card' : ''}" ${attrs}>${spark()}
-      <span class="card-top"><span class="card-name">${name}</span><span class="card-kind">${IMAGE.includes(id) ? 'IMAGE' : llm ? 'TEXT' : vector ? 'VECTOR' : 'VOICE'}${icon('nfc')}</span></span>
+      <span class="card-top"><span class="card-name">${name}</span><span class="card-kind">${IMAGE.includes(id) ? 'IMAGE' : song(id) ? 'MUSIC' : llm ? 'TEXT' : vector ? 'VECTOR' : 'VOICE'}${icon('nfc')}</span></span>
       <span class="card-chip"></span>
       <span class="card-number${number.startsWith('•') || comfy || ownApi ? '' : ' none'}${comfy || ownApi ? ' address' : ''}">${number}</span>
       <span class="card-bottom">${fields.map(([k, value]) => `<span><span class="k">${k}</span><span class="v">${esc(value)}</span></span>`).join('')}<span class="card-brand">ST-iPhonie</span></span></${tag}>`;
@@ -298,12 +302,16 @@ export function enginesApp(ctx) {
       const ready = g.ids.filter(id => id === 'custom' ? !!s.connections.custom?.params?.url : api.keyStatus(id)).length, voiced = s.routes.filter(r => r.voice).length;
       return [ready ? `${ready} 家能用 · ${voiced} 个角色有音色` : '还没有绑定密钥', `${ready}/${g.ids.length}`];
     }
+    if (g.id === 'music') {
+      const ready = g.ids.filter(id => api.keyStatus(id)).length;
+      return [ready ? `${ready} 家能唱 · 音乐 App 里用` : '在音乐 App 的「写歌」里用', `${ready}/${g.ids.length}`];
+    }
     const custom = s.text.source === 'custom', vector = s.embed?.enabled;
     return [`${custom ? '自定义接口' : '酒馆主模型'}写字 · 记忆${vector ? '按意思找（向量）' : '本地检索'}`, `${(custom ? 1 : 0) + (vector ? 1 : 0)}/2`];
   }
   function renderList() {
     delete v.root.dataset.engine;
-    v.draw(heading('引擎', help('卡片分三个卡包：图像（绘图用的 NovelAI、GPT 生图、ComfyUI，绘图 App 里选用哪个画）、语音（Fish Audio、MiniMax、ElevenLabs、小米 MiMo）、文字（写手机里的字的文字模型，和给聊天记忆找旧聊天的向量模型）。点一张卡片把它抽到这个卡包的最前面，再点一下打开，查看连接和全部参数。ElevenLabs 和 Fish 的卡片上显示剩余额度。\n卡片只显示密钥是否保存，不显示内容；“已保存”不代表鉴权成功。'), `Wallet · ${String(GROUPS.reduce((n, g) => n + g.ids.length, 0)).padStart(2, '0')}`)
+    v.draw(heading('引擎', help('卡片分四个卡包：音乐（写歌时唱歌的服务，在音乐 App 的「写歌」里用；ElevenLabs 和 MiniMax 也能唱，用语音卡的密钥）、图像（绘图用的 NovelAI、GPT 生图、ComfyUI，绘图 App 里选用哪个画）、语音（Fish Audio、MiniMax、ElevenLabs、小米 MiMo）、文字（写手机里的字的文字模型，和给聊天记忆找旧聊天的向量模型）。点一张卡片把它抽到这个卡包的最前面，再点一下打开，查看连接和全部参数。ElevenLabs 和 Fish 的卡片上显示剩余额度。\n卡片只显示密钥是否保存，不显示内容；“已保存”不代表鉴权成功。'), `Wallet · ${String(GROUPS.reduce((n, g) => n + g.ids.length, 0)).padStart(2, '0')}`)
       + GROUPS.map(g => {
         const [note, count] = pocketNote(g), stack = g.ids.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b));
         return `<section class="card-pocket" data-pocket="${g.id}" data-engine="${stack.at(-1)}" aria-label="${g.title}卡包">
@@ -502,13 +510,32 @@ export function enginesApp(ctx) {
       + `<div class="savebar"><span class="save-state" data-save-state>${dirty ? '未保存' : '已保存'}</span>${btn('save-text', '保存', 'primary')}</div>`);
   }
 
-  const render = () => engine === 'nai' ? renderNovelAI() : engine === 'gpt' ? renderGpt() : engine === 'comfy' ? renderComfy() : engine === 'llm' ? renderText() : engine === 'embed' ? renderEmbed() : engine ? renderDetail() : renderList();
+  /** A card for singing: its key, and which model where there is a choice. Songs are made in 音乐 App's 写歌. */
+  function renderSong() {
+    const id = engine, hint = api.keyHint(id), saved = !!hint, s = api.getState().music.sing;
+    const keep = '填完点一下别处就保存了。密钥只保存在当前浏览器和酒馆地址，不会写进设置或备份。';
+    const about = {
+      stepfun: '阶跃星辰的 StepAudio 3 Music。在 platform.stepfun.com 注册（要实名），建一个 API Key。限时免费到 2026 年 11 月 8 日（北京时间），之后每小时音频 16 元，一首 3 分钟大约 0.8 元。一首多长由模型决定，通常 1 到 3 分钟。',
+      lyria: 'Google 的 Lyria，从 aistudio.google.com 拿密钥，要开了付费的才能用，一首 0.08 美元，没有免费额度。中国大陆和香港不在它的支持地区，在这些地方要填中转地址。',
+      replicate: 'Replicate 是一个模型平台，上面有 MiniMax、ACE-Step 这些会唱歌的模型，按次收费，从 replicate.com/account/api-tokens 拿密钥。\n\n它的接口不让网页直接访问，要经过酒馆的转发：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true，重启酒馆。TauriTavern 这类 App 酒馆现在没有转发，用不了。'
+    }[id];
+    v.root.dataset.engine = id;
+    v.draw(heading(nameOf(id), saved ? moreButton() : '', 'Music Card')
+      + card(id, 'div')
+      + groupTitle('连接', help(about))
+      + `<div class="group pad">${keyBox('API Key', saved && hint, {stepfun: '阶跃星辰开放平台的 API Key', lyria: 'Google AI Studio 的 API Key', replicate: 'r8_ 开头的 API Token'}[id], keep)}
+        ${id === 'lyria' ? field('模型', select('song-lyriaModel', s.lyriaModel, LYRIA_MODELS)) + field('中转地址（可不填）', input('song-lyriaUrl', s.lyriaUrl, 'url', 'autocomplete="off" placeholder="留空直连 Google"'), '填到 /v1beta 前面为止。中转要转发 /v1beta/interactions，还要允许网页直接访问。') : ''}
+        ${id === 'replicate' ? field('模型', `${input('song-replicateModel', s.replicateModel, 'text', 'autocomplete="off" spellcheck="false" placeholder="作者/模型名"')}<div class="write-chips" role="group" aria-label="模型">${REPLICATE_MODELS.map(m => `<button type="button" class="combo-chip" data-action="song-pick" data-model="${esc(m.id)}" aria-pressed="${m.id === s.replicateModel}">${esc(m.name)}<small>约 $${m.price}</small></button>`).join('')}</div>`, '点一个就选上。MiniMax Music 1.5 便宜，但歌词最多 600 字。别的模型写成「作者/模型名」：会读它要什么参数，有歌词和风格参数的才能用。') : ''}</div>`
+      + `<p class="hint">用它写歌：音乐 App → 写歌。</p>`);
+  }
+  const render = () => song(engine) ? renderSong() : engine === 'nai' ? renderNovelAI() : engine === 'gpt' ? renderGpt() : engine === 'comfy' ? renderComfy() : engine === 'llm' ? renderText() : engine === 'embed' ? renderEmbed() : engine ? renderDetail() : renderList();
   function edit(id) {
     resetGptModels();
     engine = id;
     if (!order.length || order.at(-1) !== id) order = [...order.filter(x => x !== id), id];
     if (id === 'llm') { textDraft = structuredClone(api.getState().text); dirty = false; render(); v.root.scrollTop = 0; return; }
     if (id === 'embed') { embedDraft = structuredClone(api.getState().embed); embedModels = []; dirty = false; render(); v.root.scrollTop = 0; return; }
+    if (song(id)) { render(); v.root.scrollTop = 0; return; }
     if (id === 'nai') { render(); v.root.scrollTop = 0; loadSubscription(false); return; }
     if (id === 'gpt' || id === 'comfy') { render(); v.root.scrollTop = 0; return; }
     if (id === 'custom') { customAddress = null; customFound = null; customNote = ''; }
@@ -548,6 +575,12 @@ export function enginesApp(ctx) {
   v.on('pointerdown', '[data-action=reveal-key]', (el, event) => event.preventDefault());
   v.on('change', '[data-field]', el => {
     if (el.dataset.field === 'key') { saveTypedKey(el); return; }
+    if (song(engine)) {
+      const key = el.dataset.field.replace(/^song-/, '');
+      if (!['lyriaModel', 'lyriaUrl', 'replicateModel'].includes(key)) return;
+      api.saveMusic({sing: {[key]: el.value.trim()}}); later(render); ctx.notify('保存好了');
+      return;
+    }
     if (el.dataset.field === 'image-name' || /^custom-/.test(el.dataset.field)) return;
     if (engine === 'embed') {
       const key = el.dataset.field.replace(/^embed-/, '');
@@ -579,7 +612,7 @@ export function enginesApp(ctx) {
     if (!typed) return;
     try {
       if (engine === 'nai' || engine === 'gpt') { saveImageField({key: typed}, '密钥已保存'); return; }
-      if (engine === 'embed') api.setKey('embed', typed);
+      if (engine === 'embed' || song(engine)) api.setKey(engine, typed);
       else if (engine === 'llm') api.setTextKey(textDraft.active, typed);
       else { const added = api.addKeys(engine, typed); balances.delete(engine); ctx.notify(added > 1 ? `已添加 ${added} 个密钥` : '密钥已保存'); later(render); loadBalance(engine, true); return; }
     } catch (error) { ctx.notify(error.message, {error: true}); return; }
@@ -597,7 +630,7 @@ export function enginesApp(ctx) {
   /** The 「⋯」 of an engine page: what is not needed every time. */
   async function engineMore(el) {
     const saved = engine === 'llm' ? !!api.textKeyHint?.(textDraft.active) : engine === 'embed' ? !!api.keyHint('embed') : api.keyStatus(engine), image = engine === 'nai' || engine === 'gpt';
-    const voice = !image && !['comfy', 'embed', 'llm'].includes(engine);
+    const voice = !image && !['comfy', 'embed', 'llm'].includes(engine) && !song(engine);
     const picked = await menu(ctx, nameOf(engine), [
       image && {key: 'image-connections', icon: 'swap', label: '连接', note: '新建、切换、改名、删除保存的几组连接'},
       engine === 'nai' && saved && {key: 'test-relay', icon: 'refresh', label: '测试连接', note: '发一个空请求试探出图接口，不出图、不扣 Anlas'},
@@ -796,6 +829,7 @@ export function enginesApp(ctx) {
         if (engine === 'llm') { if (await ctx.confirm('清除这套接口的密钥？', '其他接口预设的密钥不受影响。')) { api.clearTextKey(textDraft.active); render(); } break; }
         if (engine === 'nai' || engine === 'gpt') { if (await ctx.confirm('清除这组连接的密钥？', '其他连接的密钥保留，这组之后需要重新填写。')) { api.clearKey(engine); imageSaved(); } break; }
         if (await ctx.confirm(['nai', 'gpt'].includes(engine) ? '清除密钥？' : '清除全部密钥？', '之后使用这个引擎需要重新填写。')) { api.clearKey(engine); if (engine === 'nai') subscription = null; balances.delete(engine); render(); } break;
+      case 'song-pick': api.saveMusic({sing: {replicateModel: el.dataset.model}}); render(); break;
       case 'reveal-key': {
         const field = v.root.querySelector('[data-field=key]');
         const visible = field.classList.toggle('secret-visible');

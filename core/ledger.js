@@ -4,8 +4,8 @@
 // write over each other; what is shown adds them up. The story's own replies are the tavern's, and are not in here.
 
 /** What a text request is for, as generateText's `use` says it. */
-export const TEXT_USES = Object.freeze({chat: '聊天', moments: '朋友圈', forum: '论坛', peek: '查手机', call: '电话', memory: '记忆整理', assistant: '助手', picture: '配图和提示词', book: '绘本', voices: '挑音色', other: '其他'});
-const COUNTS = ['text', 'voice', 'image', 'anlas', 'embed', 'sfx'];
+export const TEXT_USES = Object.freeze({song: '写歌', chat: '聊天', moments: '朋友圈', forum: '论坛', peek: '查手机', call: '电话', memory: '记忆整理', assistant: '助手', picture: '配图和提示词', book: '绘本', voices: '挑音色', other: '其他'});
+const COUNTS = ['text', 'voice', 'image', 'anlas', 'embed', 'sfx', 'song'];
 const KEEP_DAYS = 800;
 const pad = n => String(n).padStart(2, '0');
 /** A time's day where the user is: 'YYYY-MM-DD'. */
@@ -58,6 +58,7 @@ export class Ledger {
   anlas(amount) { if (amount > 0) this.#note({anlas: Math.round(amount)}); }
   embed(texts) { this.#note({embed: {calls: 1, chars: (texts || []).reduce((n, text) => n + String(text ?? '').length, 0)}}); }
   sfx() { this.#note({sfx: 1}); }
+  song(engine) { this.#note({song: {[String(engine || 'other')]: 1}}); }
   /** Writes what is waiting. A failure keeps it for the next time. */
   flush() {
     clearTimeout(this.#timer); this.#timer = null;

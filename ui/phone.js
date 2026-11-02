@@ -295,7 +295,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const routeFor = name => findRoute(roleList(), name);
   const engineOf = name => { const r = routeFor(name); return r?.voice ? r.engine : 'none'; };
   const ctx = {api, doc, win, notify, dialog, confirm, help, lock, open, routeFor, engineOf, previewSide: side => previewSide(side), openPendingRole: name => openPendingRole(name), visible: name => active === name && !locked,
-    editEngine: id => withView('engines', v => v.edit?.(id)), showPresetKind: kind => withView('presets', v => v.showKind?.(kind)), openDraw: request => { open('draw'); withView('draw', v => v.load?.(request)); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
+    editEngine: id => withView('engines', v => v.edit?.(id)), showSongDraft: id => { open('music'); withView('music', v => v.showDraft?.(id)); }, showPresetKind: kind => withView('presets', v => v.showKind?.(kind)), openDraw: request => { open('draw'); withView('draw', v => v.load?.(request)); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
   installMotion(win, mount, signal);
   // On a computer the phone is a floating window: its top bar moves it.
   const stageBar = $('.stage-bar'), sizeButton = $('[data-system=size]');
