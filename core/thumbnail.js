@@ -8,6 +8,27 @@ export async function makeThumb(blob, short = 320) {
   return shrink(blob, (w, h) => Math.min(1, short / Math.min(w, h)));
 }
 
+/** A 角色参考图 as GPT is sent it: no longer than `side` on its long side, JPEG on white (every relay takes JPEG, and it
+ *  goes with every picture of that role). {blob, w, h}; throws when the picture cannot be read. */
+export async function gptReference(blob, side = 1536) {
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const scale = Math.min(1, side / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale)), h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = canvasOf(w, h), g = canvas.getContext('2d');
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, w, h);
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(bitmap, 0, 0, w, h);
+    const out = await encode(canvas, 'image/jpeg', .9);
+    if (!out?.size) throw Error('参考图没有做出来');
+    return {blob: out, w, h};
+  } finally {
+    bitmap.close?.();
+  }
+}
+
 /** The photo's middle-sized picture: its shorter side at most 720 px and its longer side at most 2160 (sharp at 3× in a
  *  chat bubble or a post), {blob, w, h}; {same: true} when the photo itself would do as well (hardly bigger) or moves
  *  (a GIF, an animated PNG or WebP keeps moving as it is). Throws when the picture cannot be read. */

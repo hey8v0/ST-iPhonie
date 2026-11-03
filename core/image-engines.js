@@ -74,17 +74,23 @@ function place(position) {
   return y ? `${x}, ${y} of the picture` : `${x} of the picture`;
 }
 /** One English request for GPT from the picture: scene tags, then each person's tags and place in the frame. Reference
- *  pictures go by their order (image 1, image 2 …), each with what the user wrote it is. */
+ *  pictures go by their order (image 1, image 2 …), each with what the user wrote it is. 角色参考图 ({role: true}) show
+ *  only what the people look like, and each person says which image is theirs (character.image). */
 export function gptPrompt({prompt = '', characters = [], refs = []} = {}) {
-  const scene = plainTags(prompt), people = characters.map(c => ({tags: plainTags(c.prompt), where: place(c.position)})).filter(c => c.tags);
+  const scene = plainTags(prompt), people = characters.map(c => ({tags: plainTags(c.prompt), where: place(c.position), image: c.image > 0 ? c.image : 0})).filter(c => c.tags || c.image);
   const lines = ['Draw one illustration described by the Danbooru-style tags and short phrases below. Follow them closely; do not add text or captions to the picture.'];
-  if (refs.length) {
+  if (refs.length && refs.every(r => r?.role)) {
+    const each = 'keep their face, hair, eyes and build, and their clothes unless the text says otherwise. Take the scene, pose and art style from the text, not from';
+    lines.push(refs.length === 1 ? `One reference image is attached (image 1). It shows what one of the characters looks like: ${each} the image.`
+      : `${refs.length} reference images are attached in order, image 1 to image ${refs.length}. Each shows what one of the characters looks like: ${each} the images.`);
+    refs.forEach((r, i) => { const label = String(r?.label || '').replace(/\s+/g, ' ').trim(); if (label) lines.push(`Image ${i + 1}: ${label}.`); });
+  } else if (refs.length) {
     lines.push(refs.length === 1 ? 'One reference image is attached (image 1). Keep the look of the characters, things and style it shows.'
       : `${refs.length} reference images are attached in order, image 1 to image ${refs.length}. Keep the look of the characters, things and style they show.`);
     refs.forEach((r, i) => { const label = String(r?.label || '').replace(/\s+/g, ' ').trim(); if (label) lines.push(`Image ${i + 1}: ${label}.`); });
   }
   if (scene) lines.push('Scene and style: ' + scene + '.');
-  people.forEach((c, i) => lines.push(`Character ${i + 1}${c.where ? ` (${c.where})` : ''}: ${c.tags}.`));
+  people.forEach((c, i) => { const notes = [c.where, c.image ? `the person in image ${c.image}` : ''].filter(Boolean); lines.push(`Character ${i + 1}${notes.length ? ` (${notes.join('; ')})` : ''}: ${c.tags || 'as in the image'}.`); });
   if (people.length > 1) lines.push(`Exactly ${people.length} distinct characters; keep each one's features separate.`);
   return lines.join('\n');
 }

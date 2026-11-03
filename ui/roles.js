@@ -3,6 +3,7 @@ import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {layerSort} from './layer-sort.js';
 import {layerTree} from '../core/layers.js';
 import {lookTest} from '../core/draw.js';
+import {pickPicture} from './draw-images.js';
 import {VOICE_GENDERS, VOICE_AGES, poolLine, readPoolFile, poolFile, guessVoice} from '../core/auto-voice.js';
 import {saveFile} from '../download.js';
 import {icon, halo} from './icons.js';
@@ -225,15 +226,16 @@ export function rolesApp(ctx) {
             ? field('音色描述', textArea('voice', r.voice, 'rows="3" placeholder="例如：二十岁出头的女生，声音清亮，带点慵懒，说话慢悠悠的"'), '用一到四句话描述：性别年龄、音色质感、情绪语气、语速节奏。不要写混响、回声这类后期效果，也不要写“普通”“正常”这种模糊的词。')
             : field(mimo === 'clone' ? '克隆样本' : r.engine === 'custom' ? '音色' : '音色 ID', input('voice', r.voice, 'text', `placeholder="${mimo === 'clone' ? '填克隆样本的名字，或从列表选择' : r.engine === 'custom' ? '「自己的接口」里音色的名字，或从列表选择' : '粘贴音色 ID 或从列表选择'}" autocomplete="off"`))}
         </div>
-        <details data-group="role-model"><summary>模型和台词语言<small class="fold-note">${esc((r.model || '跟随引擎') + ' · ' + (r.language ? languageName(r.language) : '跟随默认'))}</small></summary><div class="fold-body">
-          ${field('模型', select('model', r.model || '', [['', '跟随引擎 · ' + c.model], ...schema.models.map(m => [m.id, m.id, !m.supported])]))}
+        <details data-group="role-model"><summary>${modelTitle(r)}<small class="fold-note">${esc([modelNote(r), r.language ? languageName(r.language) : '跟随默认'].filter(Boolean).join(' · '))}</small></summary><div class="fold-body">
+          ${modelField(r, c, schema)}
           ${languageField('language', r.language || '', true, typedLanguages(api.getState()))}
         </div></details>
         <details data-group="role-persona"><summary>角色资料<small class="fold-note">${r.persona?.trim() ? r.persona.trim().length + ' 字' : '没写（读角色卡）'}</small></summary><div class="fold-body">${field('角色资料', textArea('persona', r.persona || '', 'rows="4" maxlength="4000" placeholder="例如：Hina，17 岁，学生会会长，嘴硬心软，和小春是青梅竹马"'), '聊天、论坛、朋友圈、查手机和电话写这个人时用的资料：身份、性格、说话方式、和谁是什么关系。\n\n酒馆里有这个人的角色卡时，不写也会读角色卡；写了就用这里的。没出场过、也没有角色卡的人（比如只在别的卡里出现的），在这里写几句，模型就不用凭空猜了。世界书照常按名字去找，最近的剧情也一直会带上。')}</div></details>
-        <details data-group="role-look"><summary>外貌 tag<small class="fold-note">${esc(r.appearance?.trim() ? r.appearance.trim().slice(0, 24) : '没写')}${r.negative?.trim() ? ' · 有固定负面' : ''}</small></summary><div class="fold-body">${field('外貌 tag', textArea('appearance', r.appearance || '', 'class="code" rows="3" placeholder="例如 1girl, long silver hair, blue eyes, slender"'), '这个角色入画时会自动补上这些 tag，让长相保持一致。写英文 danbooru tag，逗号分隔，只写不会变的特征：1girl 或 1boy、发型发色、瞳色、体型、显眼的特征；衣服、表情、动作让模型按剧情写。已有作品里的角色，把识别 tag 放最前，比如 hatsune miku (vocaloid)。\n\n新角色第一次入画时，模型写的外貌会自动填到这里，可以随时改。')}
+        <details data-group="role-look"><summary>外貌 tag<small class="fold-note">${esc(r.appearance?.trim() ? r.appearance.trim().slice(0, 24) : '没写')}${r.negative?.trim() ? ' · 有固定负面' : ''}${r.ref ? ' · 有参考图' : ''}</small></summary><div class="fold-body">${field('外貌 tag', textArea('appearance', r.appearance || '', 'class="code" rows="3" placeholder="例如 1girl, long silver hair, blue eyes, slender"'), '这个角色入画时会自动补上这些 tag，让长相保持一致。写英文 danbooru tag，逗号分隔，只写不会变的特征：1girl 或 1boy、发型发色、瞳色、体型、显眼的特征；衣服、表情、动作让模型按剧情写。已有作品里的角色，把识别 tag 放最前，比如 hatsune miku (vocaloid)。\n\n新角色第一次入画时，模型写的外貌会自动填到这里，可以随时改。')}
           ${field('固定负面', textArea('negative', r.negative || '', 'class="code" rows="2" maxlength="1000" placeholder="例如 glasses, short hair, freckles"'), '这个角色每次入画都不要出现的 tag，写总被画错的地方。\n\nNovelAI V4 以后这是这个人自己的负面；V3 和 ComfyUI 没有分人的负面，会合进整张图的。多人同框时，性别和人数类的词会自动去掉，不然会把别人也压掉。GPT 生图不读负面。')}
           <div class="actions role-try">${btn('role-try', icon('paint') + '试画一张', 'secondary')}${help('用现在写的外貌和负面、在用的画风画一张半身像，看看对不对，不用先保存。图也会存进相册。要扣 Anlas 或花钱时会先问。')}</div>
-          ${tried && tried.id === (r.id || 'new') ? `<div class="role-tried"><img src="${esc(tried.url)}" alt="试画的图"></div>` : ''}</div></details>
+          ${tried && tried.id === (r.id || 'new') ? `<div class="role-tried"><img src="${esc(tried.url)}" alt="试画的图"></div>` : ''}
+          ${refField(r)}</div></details>
         <div class="savebar" data-engine="${r.engine}"><span class="save-state" data-save-state>草稿</span>${btn('audition', icon('play', true) + '试听', 'secondary')}${btn('save-role', '保存', 'primary')}</div>
         ${pending ? `<div class="actions" data-engine="${r.engine}">${btn('continue-role', '保存并继续朗读', 'primary')}</div>` : ''}
         ${r.id ? `<div class="actions">${btn('delete-role', icon('trash') + '删除角色配音', 'text-button danger-text')}</div>` : ''}`);
@@ -381,11 +383,16 @@ export function rolesApp(ctx) {
   });
   // A MiMo model change turns the 音色 field into a description or a clone sample name.
   v.on('change', 'select[data-field]', el => { current[el.dataset.field] = el.value; changed(); if (el.dataset.field === 'model' && current.engine === 'mimo') render(); });
+  // A 参考图 whose files are gone (another tavern, a backup without them) shows as none.
+  v.root.addEventListener('error', e => { if (e.target.matches?.('.role-ref img')) e.target.remove(); }, true);
   v.on('click', '[data-action]', async el => {
     switch (el.dataset.action) {
       case 'add-role': create(); break;
       case 'role-filter': filter = filter === el.dataset.key ? '' : el.dataset.key; swipe?.done(); for (const b of v.root.querySelectorAll('[data-action=role-filter]')) b.setAttribute('aria-pressed', String(b.dataset.key === filter)); paintRows(); break;
       case 'role-try': await tryLook(el); break;
+      case 'role-ref-pick': { const blob = await pickPicture(ctx, api, '选一张参考图'); if (blob) await putRef(el, blob); break; }
+      case 'role-ref-tried': if (tried?.blob) await putRef(el, tried.blob); break;
+      case 'role-ref-clear': if (current?.id) { api.clearRoleRef(current.id); delete current.ref; render(); ctx.notify('参考图去掉了'); } break;
       case 'edit-role': edit(el.dataset.id); break;
       case 'route-engine':
         current = api.switchRouteEngine(current, el.dataset.engine);
@@ -441,6 +448,41 @@ export function rolesApp(ctx) {
     }
   });
 
+  /** 自己的接口's sets, when the role is on it. */
+  const customSets = r => r.engine === 'custom' ? api.customSetList?.() || [] : [];
+  function modelTitle(r) { return r.engine !== 'custom' ? '模型和台词语言' : customSets(r).length > 1 ? '用哪一套和台词语言' : '台词语言'; }
+  function modelNote(r) {
+    if (r.engine !== 'custom') return r.model || '跟随引擎';
+    const sets = customSets(r);
+    return sets.length > 1 ? sets.find(s => s.id === r.model)?.name || '跟随引擎' : '';
+  }
+  /** The model; for 自己的接口 with several sets, which one this role uses ('' follows the one in use). */
+  function modelField(r, c, schema) {
+    if (r.engine !== 'custom') return field('模型', select('model', r.model || '', [['', '跟随引擎 · ' + c.model], ...schema.models.map(m => [m.id, m.id, !m.supported])]));
+    const sets = customSets(r);
+    if (sets.length < 2) return '';
+    return field('用哪一套接口', select('model', sets.some(s => s.id === r.model) ? r.model : '', [['', '跟随引擎 · ' + (sets.find(s => s.current)?.name || '')], ...sets.map(s => [s.id, s.name])]),
+      '引擎里「自己的接口」存了好几套时，选这个角色用哪一套：音色从那一套里选，台词也发给那一套。「跟随引擎」就是那边正在用的那套。');
+  }
+  /** 参考图: a picture GPT draws this person from. Kept at once (not with 保存), so only a role already saved has one. */
+  function refField(r) {
+    const mine = tried && tried.id === (r.id || 'new');
+    const tools = r.id ? `<div class="actions">${btn('role-ref-pick', r.ref ? '换一张' : '从相册选', 'secondary small')}${mine ? btn('role-ref-tried', '用试画这张', 'secondary small') : ''}${r.ref ? btn('role-ref-clear', '去掉', 'text-button small') : ''}</div>` : '<p class="hint">先保存角色，再放参考图。</p>';
+    return field('参考图', `<div class="role-ref">${r.ref ? `<img src="${esc(r.ref.thumb)}" alt="${esc(r.name || '角色')}的参考图">` : ''}${tools}</div>`,
+      'GPT 画到这个人时，会照着这张图画脸、发型、身材和平常的衣服；画风、动作和场景还是按提示词。正文配图、聊天照片、朋友圈、查手机和绘本都会带上，没放图的人和以前一样。\n\n每多带一张图，GPT 画这张的费用就多一点。中转要支持改图接口（/images/edits），不支持时这张先不带参考图照常画；GPT 的地址是酒馆转发（/proxy/ 开头）或者模型是 dall-e-3 时也带不了。NovelAI 和 ComfyUI 不用这张图。\n\n图存在酒馆里：同一个酒馆的每台设备都能用，删掉相册里的原图它也还在。');
+  }
+  async function putRef(el, blob) {
+    const id = current?.id;
+    if (!id) return;
+    await v.busy(el, async () => {
+      try {
+        const ref = await api.setRoleRef(id, blob);
+        if (current?.id === id) { current.ref = ref; render(); }
+        ctx.notify('参考图放好了');
+      } catch (error) { ctx.notify(error.message, {error: true}); }
+    });
+  }
+
   /** 试画一张: this look as it stands, on the 画风 in use. */
   let tried = null;
   async function tryLook(el) {
@@ -455,7 +497,7 @@ export function rolesApp(ctx) {
         const made = await api.generateImage({...input, allowPaid: paid, name: '试画-' + name, label: `试画 · ${name}`}), photo = await api.getPhoto(made.photoId);
         if (!photo?.blob) return;
         if (tried) ctx.win.URL.revokeObjectURL(tried.url);
-        tried = {id, url: ctx.win.URL.createObjectURL(photo.blob)};
+        tried = {id, url: ctx.win.URL.createObjectURL(photo.blob), blob: photo.blob};
         if (current && (current.id || 'new') === id) { render(); changed(); }
       } finally { el.innerHTML = label; }
     });

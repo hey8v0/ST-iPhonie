@@ -1,7 +1,7 @@
 // The drawing settings of the backend (core/backend.js): ComfyUI workflows and their LoRAs, 绘图 settings, 画风
 // (with the NovelAI parameters each one keeps), 绘图预设, the prompt preview, the NovelAI subscription and what a
 // picture costs. Methods of TTSBackend, kept in a file of their own (installDrawSettings puts them on its prototype).
-import { DRAW_ENGINES, normalizeGpt, gptBase, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, defaultWorkflow, COMFY_PARAM_KEYS, applyComfyWorkflow, comfyParams, comfySpecs, comfySavedList, comfySavedRead, comfyRecent, comfyUpload } from './image-engines.js';
+import { DRAW_ENGINES, GPT_MAX_REFS, gptTakesRefs, normalizeGpt, gptBase, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, defaultWorkflow, COMFY_PARAM_KEYS, applyComfyWorkflow, comfyParams, comfySpecs, comfySavedList, comfySavedRead, comfyRecent, comfyUpload } from './image-engines.js';
 import { readPictureWorkflow, parseWorkflow, uiToApi, uiNodeTypes, mapWorkflow, promptCandidates, promptWords, describeNodes, setNodeValues, switchNodesOff, findProblems, nodeTypes, modelKindOf } from './comfy-graph.js';
 import { activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource } from './comfy-loras.js';
 import { relayUrl, guardParams, isFree, isV5, normalizeDrawParams, takesReference, REFERENCE_ANLAS } from './novelai.js';
@@ -10,7 +10,8 @@ import { activeChatPreset } from './chat.js';
 import { VIBE_ANLAS } from './vibes.js';
 import { normalizeGrid } from './nai-grid.js';
 import { arrangeRows } from './layers.js';
-import { makeThumb } from './thumbnail.js';
+import { makeThumb, gptReference } from './thumbnail.js';
+import { proxyAddress } from './proxy-url.js';
 
 const clone = value => structuredClone(value);
 // 效果图: a small picture for the list and a bigger one to look at, by their shorter sides; files of their own in the tavern.
@@ -19,6 +20,19 @@ const COVER_SIZES = {s: 180, l: 720}, COVER_FILE = /^\/?user\/images\/ST-iPhonie
 function sweepCovers(backend, covers) {
     const used = JSON.stringify(backend.settings.draw.styles.map(s => s.cover || null));
     for (const path of covers.filter(Boolean).flatMap(c => [c.thumb, c.full])) if (COVER_FILE.test(path) && !used.includes(JSON.stringify(path))) backend.syncFiles?.removePath?.(path).catch(() => {});
+}
+// 角色参考图: a small picture for the 角色 App and the one sent to GPT; files of their own in the tavern too.
+const ROLE_REF_FILE = /^\/?user\/images\/ST-iPhonie\/role-[^/]+$/;
+/** Deletes old 角色参考图 files that no role shows any more. */
+export function sweepRoleRefs(backend, refs) {
+    const used = JSON.stringify(backend.settings.routes.map(r => r.ref || null));
+    for (const path of refs.filter(Boolean).flatMap(r => [r.thumb, r.full])) if (ROLE_REF_FILE.test(path) && !used.includes(JSON.stringify(path))) backend.syncFiles?.removePath?.(path).catch(() => {});
+}
+async function base64Of(blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let text = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(text);
 }
 const BLANK_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 /** The scheme in use, ready to change: the built-in default stays as it is, so the first change makes a copy and switches to it. */
@@ -326,6 +340,70 @@ class DrawSettings {
         delete style.cover;
         this.save(next);
         sweepCovers(this, [old]);
+    }
+    /**
+     * 角色参考图: what a role looks like, sent to GPT with every picture they are in. Files in the tavern like a 画风's
+     * 效果图 (every device on it sees them, deleting the photo leaves them); the settings only name them. Only this and
+     * clearRoleRef change it: saving the role keeps the one it has.
+     */
+    async setRoleRef(id, blob) {
+        this.assertOpen();
+        if (!this.syncFiles?.writePath) throw Error('要在酒馆里打开小手机，才能存参考图');
+        if (!this.settings.routes.some(r => r.id === id)) throw Error('先保存这个角色，再放参考图');
+        if (!blob) throw Error('这张图已经不在了');
+        let small, big;
+        try { [small, big] = [await makeThumb(blob, 180), await gptReference(blob)]; } catch { throw Error('这张图读不出来，换一张试试'); }
+        const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6), file = (kind, made) => `user/images/ST-iPhonie/role-${stamp}-${kind}.${made.blob.type === 'image/webp' ? 'webp' : 'jpg'}`;
+        const ref = { thumb: await this.syncFiles.writePath(file('s', small), small.blob), full: await this.syncFiles.writePath(file('l', big), big.blob) };
+        const next = this.getState(), route = next.routes.find(r => r.id === id);
+        // Deleted while the files went up.
+        if (!route) { sweepRoleRefs(this, [ref]); throw Error('这个角色已经不在了'); }
+        const old = route.ref;
+        route.ref = ref;
+        this.save(next);
+        sweepRoleRefs(this, [old]);
+        return clone(this.settings.routes.find(r => r.id === id).ref);
+    }
+    clearRoleRef(id) {
+        const next = this.getState(), route = next.routes.find(r => r.id === id), old = route?.ref;
+        if (!old) return;
+        delete route.ref;
+        this.save(next);
+        sweepRoleRefs(this, [old]);
+    }
+    /**
+     * The 角色参考图 of the people in a GPT picture (roleRefs, in the characters' order, from pictureInputs), read from the
+     * tavern: {refs, characters} with each person pointing at their image. null when nobody in it has one, or this model,
+     * this address (the tavern's /proxy/ carries no files) or this relay (no /images/edits) cannot take them.
+     */
+    async roleReferences(roleRefs = [], characters = []) {
+        const gpt = this.settings.draw.gpt;
+        if (!roleRefs.some(r => r?.path) || !gptTakesRefs(gpt.model) || proxyAddress(gpt.url || '') || this.gptNoEdits?.has((gpt.url || '') + '|' + gpt.model) || !this.syncFiles?.readPath) return null;
+        const refs = [], at = new Map(), people = characters.map(c => ({ ...c }));
+        for (let i = 0; i < roleRefs.length; i++) {
+            const r = roleRefs[i];
+            if (!r?.path) continue;
+            let n = at.get(r.path);
+            if (!n && refs.length < GPT_MAX_REFS) {
+                const image = await this.roleRefImage(r.path).catch(() => null);
+                if (!image) continue;
+                refs.push({ ...image, label: String(r.name || '').slice(0, 80), role: true });
+                at.set(r.path, n = refs.length);
+            }
+            if (n && people[i]) people[i].image = n;
+        }
+        return refs.length ? { refs, characters: people } : null;
+    }
+    /** A 角色参考图 file as GPT takes it ({image: base64, type}), kept for the next pictures (the last few). */
+    async roleRefImage(path) {
+        const kept = this.refImages ??= new Map();
+        if (kept.has(path)) return kept.get(path);
+        const blob = await this.syncFiles.readPath(path);
+        if (!blob?.size) return null;
+        const image = { image: await base64Of(blob), type: /^image\/(png|jpeg|webp)$/.test(blob.type) ? blob.type : 'image/jpeg' };
+        kept.set(path, image);
+        if (kept.size > 12) kept.delete(kept.keys().next().value);
+        return image;
     }
     /** The 提示词片段 list in a new order with its 分类, in the shape of arrangeStyles (a 片段's id under `style`). */
     arrangeChunks(tree) {

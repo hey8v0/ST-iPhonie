@@ -346,6 +346,39 @@ export async function readCustomAnswer(response, request, {read, load, wave}) {
   return fromLink(value, request, {read, load});
 }
 
+// ---------- 几套接口 ----------
+// 自己的接口 keeps several sets ({id, name, params}): a GPT-SoVITS here, a 公益站 there. The one in use is also
+// connection.params, which is what the card and older pages change (it wins when they differ). A role may name its own
+// set (route.model; '' follows the one in use). Each set has its own key, by id (core/backend.js).
+export const CUSTOM_DEFAULT = 'default', CUSTOM_SETS_MAX = 20;
+const SET_ID = /^[\w-]{1,64}$/;
+const setName = (params, i) => String(params?.service || '').trim().slice(0, 40) || `接口 ${i + 1}`;
+/** The sets of a connection, repaired: settings from before them become one set, 'default'. {active, presets}. */
+export function normalizeCustomSets(connection, defaults = {}) {
+  const value = connection?.configs, rows = Array.isArray(value?.presets) && value.presets.length ? value.presets : [{id: CUSTOM_DEFAULT, params: connection?.params}];
+  const ids = new Set(), presets = [];
+  for (const row of rows.slice(0, CUSTOM_SETS_MAX)) {
+    if (!row || typeof row !== 'object') continue;
+    let id = String(row.id || '');
+    if (!SET_ID.test(id) || ids.has(id)) id = crypto.randomUUID();
+    ids.add(id);
+    const params = {...defaults, ...(row.params && typeof row.params === 'object' && !Array.isArray(row.params) ? structuredClone(row.params) : {})};
+    presets.push({id, name: String(row.name || '').trim().slice(0, 40) || setName(params, presets.length), params});
+  }
+  if (!presets.length) presets.push({id: CUSTOM_DEFAULT, name: setName(connection?.params, 0), params: {...defaults}});
+  const active = presets.some(p => p.id === value?.active) ? value.active : presets[0].id;
+  presets.find(p => p.id === active).params = structuredClone({...defaults, ...connection?.params});
+  return {active, presets};
+}
+/** The set a role's lines go to: its own (route.model) when it is there, else the one in use. */
+export const customSetOf = (connection, model) => connection?.configs?.presets?.some(p => p.id === model) ? model : connection?.configs?.active || CUSTOM_DEFAULT;
+/** A set's params (the one in use: connection.params). */
+export function customParams(connection, id) {
+  const sets = connection?.configs;
+  if (!sets?.presets || !id || id === sets.active) return connection?.params;
+  return sets.presets.find(p => p.id === id)?.params || connection?.params;
+}
+
 /** The voices of the list, for picking one for a role. */
 export function customVoices(c) {
   return (c.params.voices || []).filter(r => String(r.name || '').trim()).map(r => ({id: String(r.name).trim(), name: String(r.name).trim() + (r.voice ? ' · ' + String(r.voice).split(/[\\/]/).pop().slice(0, 40) : r.ref_file ? ' · 上传的参考音频' : '')}));

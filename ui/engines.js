@@ -147,6 +147,56 @@ export function enginesApp(ctx) {
     ctx.notify(note); later(imageSaved);
   }
   const later = fn => ctx.win.setTimeout(() => { if (!v.disposed) fn(); }, 0);
+  /** 自己的接口: which of its saved sets is in use, a row once there is more than one. */
+  function customSetRow() {
+    const list = api.customSetList?.() || [], current = list.find(p => p.current);
+    return list.length > 1 ? `<div class="setting-row"><span>在用的接口${help('存了好几套接口时，每套分别有地址、格式、音色和密钥。没单独选的角色用正在用的这一套；角色 App 里也可以给一个角色固定用哪一套。新建、切换、改名、删除在右上角「⋯ → 几套接口」里。')}</span>${btn('custom-sets', esc(current.name) + icon('next'), 'chip-button')}</div>` : '';
+  }
+  /** 自己的接口: one key a set, the new one in place of the old. */
+  function customKeyField(saved) {
+    return field(saved ? '换一个密钥' : '密钥（不用密钥的接口可以不填）', textArea('key', '', `rows="1" class="code key-paste" autocomplete="off" spellcheck="false" placeholder="${saved ? '粘贴新的密钥，换掉上面那个' : '粘贴密钥'}"`),
+      '粘贴完点一下别处就保存了。存了好几套接口时，每套有自己的密钥。\n\n密钥只保存在当前浏览器和酒馆地址，按账户分别保存。');
+  }
+  /** 自己的接口's saved sets: a tap uses one; swiped left 改名 / 删除; 「＋」 makes a new one. The page as it is is kept first. */
+  function customSetMenu() {
+    const list = api.customSetList();
+    const host = url => url.replace(/^https?:\/\//, '').split('/')[0];
+    const d = ctx.dialog('几套接口', `<div class="pick-list" data-set-list>${list.map(p => swipeRow(p.id, `<div class="list-row">${icon(p.current ? 'check' : 'next')}<span><strong>${esc(p.name)}</strong><small>${esc([p.url ? host(p.url) : '还没填地址', p.voices ? p.voices + ' 个音色' : '', p.configured ? (p.tail === '••••' ? '有密钥' : '•••• ' + p.tail) : '没填密钥'].filter(Boolean).join(' · '))}</small></span></div>`,
+      [{key: 'rename', label: '改名', icon: 'edit'}, ...(list.length > 1 ? [{key: 'delete', label: '删除', icon: 'trash', danger: true}] : [])], {label: p.name})).join('')}</div>`, {add: '新建一套接口'});
+    const keep = () => { if (dirty) { try { api.saveConnection('custom', draft()); } catch { /* the page still says what is wrong */ } } };
+    const fresh = note => { drafts.delete('custom'); customAddress = null; customFound = null; customNote = ''; dirty = false; render(); ctx.notify(note); };
+    const swipe = mountSwipeList(d.body.querySelector('[data-set-list]'), {ctx,
+      onTap: id => {
+        d.close();
+        if (id === list.find(p => p.current)?.id) return;
+        keep();
+        try { api.selectCustomSet(id); fresh(`改用「${list.find(p => p.id === id)?.name}」`); } catch (error) { ctx.notify(error.message, {error: true}); }
+      },
+      onAction: async (key, id) => {
+        const p = list.find(x => x.id === id);
+        if (!p) return;
+        if (key === 'rename') {
+          d.close();
+          const r = ctx.dialog('改名', `${field('名字', input('set-name', p.name, 'text', 'maxlength="40"'))}<div class="actions">${btn('set-rename', '保存', 'primary')}</div>`);
+          r.body.addEventListener('click', e => { if (!e.target.closest('[data-action=set-rename]')) return; try { api.saveCustomSet({id: p.id, name: r.body.querySelector('[data-field=set-name]').value}); r.close(); render(); } catch (error) { ctx.notify(error.message, {error: true}); } });
+          return;
+        }
+        if (key === 'delete') {
+          d.close();
+          const pinned = api.getState().routes.filter(r => r.engine === 'custom' && r.model === p.id).length;
+          if (!await ctx.confirm('删除这套接口？', `「${p.name}」的地址、音色和密钥会一起删掉，其他几套保留。${pinned ? `固定用它的 ${pinned} 个角色改用正在用的那套。` : ''}`)) return;
+          keep();
+          try { api.deleteCustomSet(p.id); fresh('已删除这套接口'); } catch (error) { ctx.notify(error.message, {error: true}); }
+        }
+      }});
+    d.onClose(() => swipe.dispose());
+    d.overlay.addEventListener('click', e => {
+      if (!e.target.closest('[data-sheet-add]')) return;
+      d.close(); keep();
+      try { api.saveCustomSet({}); fresh('新建了一套：填服务地址，或者在「常见的服务」里选'); } catch (error) { ctx.notify(error.message, {error: true}); }
+    });
+  }
+
   /** The image engine's saved connections: a tap uses one; swiped left 改名 / 删除; 「＋」 makes a new one. */
   function imageConnectionMenu() {
     const list = api.imageConnectionList(engine);
@@ -381,9 +431,9 @@ export function enginesApp(ctx) {
       + card(engine, 'div')
       + groupTitle('连接')
       + `<div class="group pad">
-          ${engine === 'custom' ? customAddressRow() : ''}
+          ${engine === 'custom' ? customSetRow() + customAddressRow() : ''}
           ${keyRows(engine)}
-          ${field(saved ? '再加一个密钥' : engine === 'custom' ? '密钥（不用密钥的接口可以不填）' : 'API Key', textArea('key', '', `rows="1" class="code key-paste" autocomplete="off" spellcheck="false" placeholder="${saved ? '粘贴新的密钥' : '粘贴密钥，多个就每行一个'}"`), '粘贴完点一下别处就保存了。可以保存多个账号的密钥，新加的排在后面，不用的可以单独删掉。先用排在前面的；某个密钥被拒（401、403）、额度用完（402）或请求太频繁（429）时，自动换下一个重试，这次打开页面里不再用它。想手动换，点那个密钥的「用这个」：马上改用它，并把它排到第一个，以后打开也先用它。\n\n密钥只保存在当前浏览器和酒馆地址，按账户分别保存。')}
+          ${engine === 'custom' ? customKeyField(saved) : field(saved ? '再加一个密钥' : 'API Key', textArea('key', '', `rows="1" class="code key-paste" autocomplete="off" spellcheck="false" placeholder="${saved ? '粘贴新的密钥' : '粘贴密钥，多个就每行一个'}"`), '粘贴完点一下别处就保存了。可以保存多个账号的密钥，新加的排在后面，不用的可以单独删掉。先用排在前面的；某个密钥被拒（401、403）、额度用完（402）或请求太频繁（429）时，自动换下一个重试，这次打开页面里不再用它。想手动换，点那个密钥的「用这个」：马上改用它，并把它排到第一个，以后打开也先用它。\n\n密钥只保存在当前浏览器和酒馆地址，按账户分别保存。')}
           ${schema.models.length > 1 ? field('默认模型', select('model', c.model, schema.models.map(m => [m.id, m.id, !m.supported])), unsupported || [schema.modelNote, '角色没有单独指定模型时使用这里的模型。'].filter(Boolean).join('\n\n')) : ''}
           ${engine === 'mini' ? field('服务区域', select('region', c.region, [['cn', '国内'], ['global', '国际'], ['uw', '国际 · 低延迟入口']])) : ''}
         </div>`
@@ -633,13 +683,14 @@ export function enginesApp(ctx) {
     const voice = !image && !['comfy', 'embed', 'llm'].includes(engine) && !song(engine);
     const picked = await menu(ctx, nameOf(engine), [
       image && {key: 'image-connections', icon: 'swap', label: '连接', note: '新建、切换、改名、删除保存的几组连接'},
+      engine === 'custom' && {key: 'custom-sets', icon: 'swap', label: '几套接口', note: '新建、切换、改名、删除存着的几套接口'},
       engine === 'nai' && saved && {key: 'test-relay', icon: 'refresh', label: '测试连接', note: '发一个空请求试探出图接口，不出图、不扣 Anlas'},
       voice && !['custom','doubao'].includes(engine) && {key: 'read-voices', icon: 'refresh', label: '测试连接', note: '读一次音色列表，看密钥能不能用'},
       engine === 'fish' && api.getState().connections.fish.relay && saved && {key: 'test-fish-relay', icon: 'refresh', label: '测试中转', note: '看中转转发了哪些接口，格式不对会自动切换'},
       engine === 'fish' && {key: 'references', icon: 'wave', label: '管理参考音频'},
       voice && {key: 'request-preview', icon: 'eye', label: '请求预览', note: '看看发给服务的请求长什么样'},
       engine === 'llm' && textDraft.presets.length > 1 && {key: 'text-delete', icon: 'trash', label: `删除「${textPreset().name}」这套接口`, danger: true},
-      saved && {key: 'clear-key', icon: 'trash', label: voice ? '清除全部密钥' : engine === 'llm' ? '清除这套接口的密钥' : '清除密钥', danger: true}]);
+      saved && {key: 'clear-key', icon: 'trash', label: engine === 'custom' || engine === 'llm' ? '清除这套接口的密钥' : voice ? '清除全部密钥' : '清除密钥', danger: true}]);
     if (picked) await act(picked, el);
   }
   const readValue = (el, f) => f.type === 'boolean' ? el.checked : f.type === 'number' ? (el.value === '' ? '' : Number(el.value)) : f.type === 'select' ? f.options.find(([key]) => String(key) === el.value)?.[0] : el.value;
@@ -698,6 +749,7 @@ export function enginesApp(ctx) {
     switch (action) {
       case 'engine-more': await engineMore(el); break;
       case 'image-connections': await imageConnectionMenu(); break;
+      case 'custom-sets': await customSetMenu(); break;
       case 'engine': if (frontOf(el.dataset.engine) === el.dataset.engine) { const from = el.getBoundingClientRect(); listScroll = v.root.scrollTop; edit(el.dataset.engine); lift(from); } else bringFront(el.dataset.engine); break;
       case 'text-source': textDraft.source = el.dataset.source; changed(); dirty = true; render(); break;
       case 'text-preset': if (textDraft.active !== el.dataset.id) { textDraft.active = el.dataset.id; models = []; changed(); dirty = true; render(); } break;
@@ -827,6 +879,7 @@ export function enginesApp(ctx) {
       }
       case 'clear-key': if (engine === 'embed') { if (await ctx.confirm('清除向量模型的密钥？', '之后用向量模型需要重新填写。')) { api.clearKey('embed'); render(); } break; }
         if (engine === 'llm') { if (await ctx.confirm('清除这套接口的密钥？', '其他接口预设的密钥不受影响。')) { api.clearTextKey(textDraft.active); render(); } break; }
+        if (engine === 'custom') { if (await ctx.confirm('清除这套接口的密钥？', '其他几套的密钥保留。')) { api.clearKey('custom'); render(); } break; }
         if (engine === 'nai' || engine === 'gpt') { if (await ctx.confirm('清除这组连接的密钥？', '其他连接的密钥保留，这组之后需要重新填写。')) { api.clearKey(engine); imageSaved(); } break; }
         if (await ctx.confirm(['nai', 'gpt'].includes(engine) ? '清除密钥？' : '清除全部密钥？', '之后使用这个引擎需要重新填写。')) { api.clearKey(engine); if (engine === 'nai') subscription = null; balances.delete(engine); render(); } break;
       case 'song-pick': api.saveMusic({sing: {replicateModel: el.dataset.model}}); render(); break;

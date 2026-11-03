@@ -183,6 +183,9 @@
 .role-try{align-items:center;margin-top:4px}
 .role-tried{margin-top:8px}
 .role-tried img{display:block;max-width:100%;max-height:320px;margin:0 auto;border-radius:14px}
+.role-ref{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.role-ref img{display:block;width:72px;height:72px;object-fit:cover;border-radius:12px;flex:none}
+.role-ref .actions{margin:0}
 /* 自己的接口：自动识别的结果 */
 .custom-report{margin:8px 0 12px;padding:10px 12px;border-radius:14px;background:var(--card2);font-size:13px;line-height:1.5}
 .custom-report p{margin:0}

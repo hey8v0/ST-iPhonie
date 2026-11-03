@@ -34,6 +34,7 @@ import {keepOneOutput, switchNodesOff} from './comfy-graph.js';
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases, rolesSeen, ownKeyFor, roleStore } from './routes.js';
 import { cleanAddress, reachService, explainReach, detectService, scanTargets } from './custom-detect.js';
+import { CUSTOM_DEFAULT, CUSTOM_SETS_MAX } from './custom-voice.js';
 import { arrangeRows } from './layers.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
 import { normalizeMarks, withMarks } from './voice-fx.js';
@@ -41,7 +42,7 @@ import { TTSParameters, FISH_API, tauriTavern } from './parameters.js';
 import { KeyStore, keyTail, validateKey, parseTextKeys, joinTextKeys } from './keys.js';
 import { Providers, buildRequest } from './providers.js';
 import { AudioCache } from './cache.js';
-import { installDrawSettings } from './backend-draw.js';
+import { installDrawSettings, sweepRoleRefs } from './backend-draw.js';
 import { installSongs, songFacade } from './backend-song.js';
 import { SONG_KEYS } from './song-engines.js';
 import { createStorageBudget } from './storage-budget.js';
@@ -116,7 +117,9 @@ const assistantTransferRows = docs => normalizeAssistantThreads(docs.filter(row 
 const engineCheck = engine => { if (!ENGINES.includes(engine)) throw Error('引擎无效'); };
 // Keys cover the voice engines, NovelAI for drawing, and llm (the phone's own text model).
 const keyCheck = engine => { if (engine !== 'nai' && engine !== 'llm' && engine !== 'gpt' && engine !== 'embed' && !SONG_KEYS.includes(engine)) engineCheck(engine); };
-const modelCheck = (engine, model) => { engineCheck(engine); if (model && !TTSParameters.catalogs[engine].models.includes(model)) throw Error('请选择列表中的模型'); };
+// 自己的接口: a role's model names one of its sets; one that is gone (deleted on another device) is not refused,
+// its lines go to the set in use.
+const modelCheck = (engine, model) => { engineCheck(engine); if (engine === 'custom' ? model && !/^[\w-]{1,64}$/.test(model) : model && !TTSParameters.catalogs[engine].models.includes(model)) throw Error('请选择列表中的模型'); };
 const message = error => error instanceof TypeError ? '设置格式无效，请检查字段和条目' : error.message;
 
 /** Framework-independent operations. Host callbacks own SillyTavern persistence and rendering. */
@@ -155,7 +158,7 @@ export class TTSBackend {
         this.requestLog = new RequestLog({change: () => this.emit('logs', {}), secrets: () => [
             ...this.keyStore.load().values(), ...(this.textKeys?.values() || []), this.gptKey, this.embedKey, this.novelai.key,
             ...(this.imageKeys?.nai?.values() || []), ...(this.imageKeys?.gpt?.values() || []),
-            ...(this.providers.keys?.values() || [])].flatMap(x => typeof x === 'string' ? x.split('\n').filter(Boolean) : [])});
+            ...(this.providers.keys?.values() || []), ...(this.providers.customKeys?.values() || [])].flatMap(x => typeof x === 'string' ? x.split('\n').filter(Boolean) : [])});
         if (typeof this.providers.fetcher === 'function') this.providers.fetcher = this.requestLog.fetch(withProxyHeaders(this.providers.fetcher.bind(this.providers), tavernHeaders), '语音模型');
         if (typeof this.novelai.fetch === 'function') this.novelai.fetch = this.requestLog.fetch(withProxyHeaders(this.novelai.fetch.bind(this.novelai), tavernHeaders), 'NovelAI');
         this.textKeys = new Map();
@@ -217,7 +220,7 @@ export class TTSBackend {
     }
     async initialize() {
         this.assertOpen();
-        try { await this.keyStore.open?.(); for (const [engine, key] of this.keyStore.load()) { if (engine === 'nai' || engine === 'gpt') this.imageKeys[engine] = parseTextKeys(key); else if (engine === 'llm') this.textKeys = parseTextKeys(key); else if (engine === 'embed') this.embedKey = String(key).trim(); else if (SONG_KEYS.includes(engine)) this.songKeys[engine] = key; else this.providers.setKey(engine, key); } this.activateImageKeys(); }
+        try { await this.keyStore.open?.(); for (const [engine, key] of this.keyStore.load()) { if (engine === 'nai' || engine === 'gpt') this.imageKeys[engine] = parseTextKeys(key); else if (engine === 'llm') this.textKeys = parseTextKeys(key); else if (engine === 'embed') this.embedKey = String(key).trim(); else if (SONG_KEYS.includes(engine)) this.songKeys[engine] = key; else if (engine === 'custom') this.providers.customKeys = parseTextKeys(key); else this.providers.setKey(engine, key); } this.activateImageKeys(); }
         catch (error) { this.notify(error.message); }
         try {
             const phone = await this.library.getPhone();
@@ -230,7 +233,7 @@ export class TTSBackend {
     }
     /** Reads the Fish reference audio and the MiMo clone samples the settings use into memory, for requests. */
     async loadReferences() {
-        for (const reference of [...this.settings.connections.fish.params.references, ...(this.settings.connections.mimo?.params.samples || []), ...(this.settings.connections.custom?.params.voices || []).filter(v => v.ref_file).map(v => ({ audio: v.ref_file }))]) {
+        for (const reference of [...this.settings.connections.fish.params.references, ...(this.settings.connections.mimo?.params.samples || []), ...[...new Set([this.settings.connections.custom?.params, ...(this.settings.connections.custom?.configs?.presets || []).map(p => p.params)].flatMap(p => p?.voices || []).map(v => v.ref_file).filter(Boolean))].map(audio => ({ audio }))]) {
             const record = await this.library.getReference(reference.audio);
             if (record && !this.closed) { const audio = await this.base64(record.blob); if (!this.closed) this.providers.references.set(record.id, audio); }
         }
@@ -303,7 +306,7 @@ export class TTSBackend {
         // The 视觉小说's 立绘 and 模型 are files in the tavern; the settings only name them. A backup carries the files.
         let vnFiles = null;
         if (want.includes('vnFiles')) {
-            const paths = castFiles([this.settings.vn.cast, this.settings.vn.moves, this.settings.draw.styles.map(s => s.cover || null)]);
+            const paths = castFiles([this.settings.vn.cast, this.settings.vn.moves, this.settings.draw.styles.map(s => s.cover || null), this.settings.routes.map(r => r.ref || null)]);
             if (paths.length && !this.syncFiles?.readPath) throw Error('要在酒馆里打开小手机，才能把视觉小说的立绘和模型放进备份（不要的话把这一项关掉）');
             vnFiles = [];
             for (const path of paths) { const blob = await this.syncFiles.readPath(path).catch(() => null); if (blob) vnFiles.push({ path, blob }); }
@@ -351,7 +354,7 @@ export class TTSBackend {
                 moved[tavernPicture(f.path)] = await this.syncFiles.writePath(f.path, f.blob);
                 done.vnFiles++;
             }
-            if (settings) { settings.vn.cast = moveCastFiles(settings.vn.cast, moved); settings.vn.moves = moveCastFiles(settings.vn.moves, moved); if (settings.draw?.styles) settings.draw.styles = moveCastFiles(settings.draw.styles, moved); }
+            if (settings) { settings.vn.cast = moveCastFiles(settings.vn.cast, moved); settings.vn.moves = moveCastFiles(settings.vn.moves, moved); if (settings.draw?.styles) settings.draw.styles = moveCastFiles(settings.draw.styles, moved); if (Array.isArray(settings.routes)) settings.routes = moveCastFiles(settings.routes, moved); }
         }
         const rows = {};
         for (const part of want) for (const store of PART_STORES[part]) if (backup.library[store]) rows[store] = backup.library[store];
@@ -359,7 +362,7 @@ export class TTSBackend {
         // settings that point at them.
         if (Object.keys(rows).length) Object.assign(done, await this.library.importRows(rows, { replace }));
         if (settings) { this.save(settings); done.settings = true; await this.loadReferences(); }
-        else if (moved && Object.entries(moved).some(([a, b]) => a !== b)) { this.saveVn({ cast: moveCastFiles(this.settings.vn.cast, moved), moves: moveCastFiles(this.settings.vn.moves, moved) }); const next = this.getState(); next.draw.styles = moveCastFiles(next.draw.styles, moved); this.save(next); }
+        else if (moved && Object.entries(moved).some(([a, b]) => a !== b)) { this.saveVn({ cast: moveCastFiles(this.settings.vn.cast, moved), moves: moveCastFiles(this.settings.vn.moves, moved) }); const next = this.getState(); next.draw.styles = moveCastFiles(next.draw.styles, moved); next.routes = moveCastFiles(next.routes, moved); this.save(next); }
         if (want.has('vibes') && backup.library.vibes) {
             // The groups: replace takes the backup's; merge keeps the current ones and adds or overwrites by id.
             const now = this.settings.draw.vibe, incoming = backup.vibeGroups || [];
@@ -487,6 +490,8 @@ export class TTSBackend {
         if (!value || typeof value.name !== 'string' || !value.name.trim() || isPlaceholderRole(value.name)) throw Error('请填写实际角色名');
         const id = value.id || crypto.randomUUID(), index = next.routes.findIndex(route => route.id === id);
         const route = normalizeRoute({ ...(index >= 0 ? next.routes[index] : { engine: 'fish', voice: '', model: '', language: '' }), ...clone(value), id, name: value.name.trim() });
+        // 参考图 changes only by setRoleRef / clearRoleRef: a page saving a role it read earlier keeps the one there is now.
+        if (index >= 0 && next.routes[index].ref) route.ref = clone(next.routes[index].ref); else delete route.ref;
         // 角色资料: who they are, for the phone's apps when the tavern has no card for them.
         if (typeof route.persona === 'string') { route.persona = route.persona.slice(0, 4000); if (!route.persona.trim()) delete route.persona; } else delete route.persona;
         // 固定负面: the tags kept away from this person in every picture.
@@ -568,8 +573,11 @@ export class TTSBackend {
     /** Several roles at once (a group's, the ones picked): one save. */
     deleteRoutes(ids) {
         let next = this.getState();
-        for (const id of ids || []) next = removeRoute(next, String(id));
-        return this.save(next);
+        const gone = new Set([...(ids || [])].map(String)), refs = next.routes.filter(r => gone.has(r.id)).map(r => r.ref);
+        for (const id of gone) next = removeRoute(next, id);
+        const saved = this.save(next);
+        sweepRoleRefs(this, refs);
+        return saved;
     }
     /**
      * Several roles that are one person: the first with a voice stays (else the first), the others' names become its 别名,
@@ -581,6 +589,8 @@ export class TTSBackend {
         const keep = list.find(r => r.voice) || list[0], others = list.filter(r => r !== keep);
         keep.aliases = cleanAliases([...(keep.aliases || []), ...others.flatMap(r => [r.name, ...(r.aliases || [])])], keep.name);
         for (const key of ['appearance', 'negative', 'persona']) if (!keep[key]?.trim()) { const from = others.find(r => r[key]?.trim()); if (from) keep[key] = from[key]; }
+        if (!keep.ref) { const from = others.find(r => r.ref); if (from) keep.ref = from.ref; }
+        const refs = others.map(r => r.ref);
         keep.bindings = Object.assign({}, ...others.map(r => r.bindings), keep.bindings);
         // Its cards too; a role that is everyone's stays so.
         if (keep.cards?.length) { if (others.some(r => !r.cards?.length)) delete keep.cards; else keep.cards = [...new Set([keep.cards, ...others.map(r => r.cards)].flat())]; }
@@ -588,6 +598,7 @@ export class TTSBackend {
         next.routes = next.routes.filter(r => !gone.has(r.id));
         if (gone.has(next.selected)) next.selected = keep.id;
         this.save(next);
+        sweepRoleRefs(this, refs);
         return clone(this.settings.routes.find(r => r.id === keep.id));
     }
     /** 候选音色池: the voices 自动挑音色 picks from first. */
@@ -599,7 +610,9 @@ export class TTSBackend {
     deleteRoute(id) {
         const route = this.settings.routes.find(row => row.id === id);
         if (route && (this.player.pending === route.name || this.player.queue.some(line => line.role === route.name))) this.player.stop('角色配音已删除');
-        return this.save(removeRoute(this.settings, id));
+        const saved = this.save(removeRoute(this.settings, id));
+        sweepRoleRefs(this, [route?.ref]);
+        return saved;
     }
     saveConnection(engine, patch) {
         engineCheck(engine);
@@ -610,6 +623,7 @@ export class TTSBackend {
         else delete patch.relay;
         if (engine === 'fish' && 'relayApi' in patch) { if (!['fish', 'openai'].includes(patch.relayApi)) throw Error('中转接口格式无效'); this.balances.delete('fish'); }
         else if (engine !== 'fish') delete patch.relayApi;
+        delete patch.configs;
         const next = this.getState();
         next.connections[engine] = { ...next.connections[engine], ...patch, params: { ...next.connections[engine].params, ...clone(patch.params || {}) } };
         this.save(next);
@@ -652,6 +666,8 @@ export class TTSBackend {
     setKey(engine, key) {
         keyCheck(engine); if (!String(key).trim()) throw Error('请填写密钥，或使用清除密钥');
         // The text model: a stored list (from a backup) replaces every preset's key; a plain key is the active preset's.
+        // 自己的接口: a stored list (from a backup) replaces every set's key; a plain key is the key of the set in use.
+        if (engine === 'custom') { this.storeCustomKeys(String(key).includes('\t') ? parseTextKeys(key) : new Map(this.providers.customKeys).set(this.customActive(), validateKey('custom', key))); return; }
         if (engine === 'llm') { if (String(key).includes('\t')) this.storeTextKeys(parseTextKeys(key)); else this.setTextKey(this.settings.text.active, key); return; }
         if (engine === 'embed') { const value = String(key).replace(/[\u200b-\u200d\ufeff]/g, '').replace(/^\s*Bearer\s+/i, '').trim(); this.keyStore.save('embed', value); this.embedKey = value; this.emit('keys', { engine, configured: true }); return; }
         if (engine === 'nai' || engine === 'gpt') {
@@ -667,6 +683,14 @@ export class TTSBackend {
     /** Voice engines keep several keys: new ones are added after those saved (repeats once). Returns how many were new. */
     addKeys(engine, value) {
         engineCheck(engine);
+        // 自己的接口: one key a set; a new one takes the place of the one saved.
+        if (engine === 'custom') {
+            const key = validateKey('custom', String(value ?? '').split(/\r?\n/).map(line => line.trim()).find(Boolean) || '');
+            if (!key) throw Error('请填写密钥');
+            if (this.providers.customKeys.get(this.customActive()) === key) throw Error('这个密钥已经保存过了');
+            this.setKey('custom', key);
+            return 1;
+        }
         const fresh = validateKey(engine, value).split('\n').filter(Boolean);
         if (!fresh.length) throw Error('请填写密钥');
         const saved = this.savedKeys(engine), added = fresh.filter(key => !saved.includes(key));
@@ -677,6 +701,7 @@ export class TTSBackend {
     /** Deletes one saved key by its place in the list (0-based); the last one deleted clears the engine's key. */
     removeKey(engine, index) {
         engineCheck(engine);
+        if (engine === 'custom') { this.clearKey('custom'); return; }
         const saved = this.savedKeys(engine);
         if (!Number.isInteger(index) || !saved[index]) throw Error('这个密钥已经不在了');
         saved.splice(index, 1);
@@ -688,6 +713,7 @@ export class TTSBackend {
      */
     useKey(engine, index) {
         engineCheck(engine);
+        if (engine === 'custom') return;
         const saved = this.savedKeys(engine), key = saved[index];
         if (!Number.isInteger(index) || !key) throw Error('这个密钥已经不在了');
         if (index > 0) this.setKey(engine, [key, ...saved.filter((_, i) => i !== index)].join('\n'));
@@ -696,7 +722,62 @@ export class TTSBackend {
     }
     savedKeys(engine) { return (this.providers.keys.get(engine) || '').split('\n').filter(Boolean); }
     /** The saved keys of a voice engine as the phone shows them: last characters, in use, refused this time. Never the keys. */
-    keyList(engine) { engineCheck(engine); return this.providers.keyList(engine); }
+    keyList(engine) {
+        engineCheck(engine);
+        if (engine === 'custom') { const key = this.providers.customKeys.get(this.customActive()); return key ? [{ tail: keyTail(key) || '••••', current: true, refused: false }] : []; }
+        return this.providers.keyList(engine);
+    }
+    /** 自己的接口: the set in use. */
+    customActive() { return this.settings.connections.custom?.configs?.active || CUSTOM_DEFAULT; }
+    storeCustomKeys(map) { this.keyStore.save('custom', joinTextKeys(map)); this.providers.customKeys = map; this.emit('keys', { engine: 'custom', configured: map.has(this.customActive()) }); }
+    /** 自己的接口's sets as the card lists them: name, address, voices, key (its last characters), the one in use. */
+    customSetList() {
+        const sets = this.settings.connections.custom.configs;
+        return sets.presets.map(p => { const key = this.providers.customKeys.get(p.id); return { id: p.id, name: p.name, current: p.id === sets.active, url: String(p.params.url || ''), service: String(p.params.service || ''), voices: (p.params.voices || []).length, configured: !!key, tail: key ? keyTail(key) || '••••' : '' }; });
+    }
+    /** A set renamed ({id, name}), or with no id a new one, empty and in use from now on. */
+    saveCustomSet({ id, name } = {}) {
+        const next = this.getState(), c = next.connections.custom, sets = c.configs;
+        if (id) {
+            const set = sets.presets.find(p => p.id === id);
+            if (!set) throw Error('这套接口已经不在了');
+            const named = String(name ?? '').trim();
+            if (!named || named.length > 40) throw Error('请填写名字（最多 40 字）');
+            set.name = named;
+            this.save(next);
+            return this.customSetList().find(p => p.id === id);
+        }
+        if (sets.presets.length >= CUSTOM_SETS_MAX) throw Error(`最多存 ${CUSTOM_SETS_MAX} 套接口`);
+        const fresh = { id: crypto.randomUUID(), name: String(name ?? '').trim().slice(0, 40) || `接口 ${sets.presets.length + 1}`, params: TTSParameters.defaults('custom') };
+        sets.presets.push(fresh);
+        sets.active = fresh.id;
+        c.params = clone(fresh.params);
+        this.save(next);
+        this.emit('keys', { engine: 'custom', configured: false });
+        return this.customSetList().find(p => p.id === fresh.id);
+    }
+    /** Another set in use from now on; the roles that follow the engine go with it. */
+    selectCustomSet(id) {
+        const next = this.getState(), c = next.connections.custom, set = c.configs.presets.find(p => p.id === id);
+        if (!set) throw Error('这套接口已经不在了');
+        if (c.configs.active === id) return;
+        c.configs.active = id;
+        c.params = clone(set.params);
+        this.save(next);
+        this.emit('keys', { engine: 'custom', configured: this.providers.customKeys.has(id) });
+    }
+    /** Deletes a set with its key; the roles that used it follow the one in use. */
+    deleteCustomSet(id) {
+        const next = this.getState(), c = next.connections.custom, sets = c.configs;
+        if (!sets.presets.some(p => p.id === id)) throw Error('这套接口已经不在了');
+        if (sets.presets.length < 2) throw Error('请至少保留一套接口');
+        sets.presets = sets.presets.filter(p => p.id !== id);
+        if (sets.active === id) { sets.active = sets.presets[0].id; c.params = clone(sets.presets[0].params); }
+        for (const r of next.routes) { if (r.engine === 'custom' && r.model === id) r.model = ''; if (r.bindings?.custom?.model === id) r.bindings.custom.model = ''; }
+        this.save(next);
+        if (this.providers.customKeys.has(id)) { const map = new Map(this.providers.customKeys); map.delete(id); this.storeCustomKeys(map); }
+        else this.emit('keys', { engine: 'custom', configured: this.providers.customKeys.has(this.customActive()) });
+    }
     /** The text model's keys, one per connection preset. */
     setTextKey(id, key) {
         if (!TEXT_PRESET_ID.test(String(id))) throw Error('文字模型预设无效');
@@ -711,6 +792,7 @@ export class TTSBackend {
     clearKey(engine) {
         keyCheck(engine);
         if (engine === 'llm') { this.clearTextKey(this.settings.text.active); return; }
+        if (engine === 'custom') { const map = new Map(this.providers.customKeys); map.delete(this.customActive()); this.storeCustomKeys(map); return; }
         if (engine === 'embed') { this.keyStore.save('embed', ''); this.embedKey = ''; this.emit('keys', { engine, configured: false }); return; }
         if (engine === 'nai' || engine === 'gpt') { this.assertImageIdle(); const map = new Map(this.imageKeys[engine]); map.delete(this.settings.draw.connections[engine].active); this.storeImageKeys(engine, map); return; }
         this.keyStore.save(engine, '');
@@ -731,10 +813,10 @@ export class TTSBackend {
         return clone(value);
     }
     /** The last 4 characters of the saved key ('' without one), so the user can tell which key is in use. */
-    keyHint(engine) { keyCheck(engine); if (SONG_KEYS.includes(engine)) return keyTail(this.songKeys[engine]) || (this.songKeys[engine] ? '••••' : ''); if (engine === 'nai' || engine === 'gpt') return keyTail(this.imageKeys[engine].get(this.settings.draw.connections[engine].active)); if (engine === 'llm') return this.textKeyHint(this.settings.text.active); if (engine === 'embed') return this.embedKey ? keyTail(this.embedKey) || '••••' : ''; return keyTail(this.providers.currentKey(engine)); }
+    keyHint(engine) { keyCheck(engine); if (engine === 'custom') { const key = this.providers.customKeys.get(this.customActive()); return key ? keyTail(key) || '••••' : ''; } if (SONG_KEYS.includes(engine)) return keyTail(this.songKeys[engine]) || (this.songKeys[engine] ? '••••' : ''); if (engine === 'nai' || engine === 'gpt') return keyTail(this.imageKeys[engine].get(this.settings.draw.connections[engine].active)); if (engine === 'llm') return this.textKeyHint(this.settings.text.active); if (engine === 'embed') return this.embedKey ? keyTail(this.embedKey) || '••••' : ''; return keyTail(this.providers.currentKey(engine)); }
     /** For a voice engine with keys: how many, which one is in use (1-based) and how many were refused while this page is open. */
     keyPool(engine) { engineCheck(engine); return this.providers.keyPool(engine); }
-    keyStatus(engine) { keyCheck(engine); return SONG_KEYS.includes(engine) ? !!this.songKeys[engine] : engine === 'nai' ? this.novelai.configured : engine === 'gpt' ? !!this.gptKey : engine === 'llm' ? this.textKeys.has(this.settings.text.active) : engine === 'embed' ? !!this.embedKey : this.providers.keys.has(engine); }
+    keyStatus(engine) { keyCheck(engine); return SONG_KEYS.includes(engine) ? !!this.songKeys[engine] : engine === 'nai' ? this.novelai.configured : engine === 'gpt' ? !!this.gptKey : engine === 'llm' ? this.textKeys.has(this.settings.text.active) : engine === 'embed' ? !!this.embedKey : engine === 'custom' ? this.providers.customKeys.has(this.customActive()) : this.providers.keys.has(engine); }
 
     // ---------- 钱包 and 商城 ----------
     wallet() { return clone(this.settings.chat.wallet); }
@@ -1452,12 +1534,25 @@ export class TTSBackend {
     async comfyWorkflows() { this.assertOpen(); return tavernWorkflows({ fetch: this.imageFetch, headers: this.tavernHeaders() }); }
     async comfyWorkflow(name) { this.assertOpen(); return tavernWorkflow({ fetch: this.imageFetch, headers: this.tavernHeaders(), name: String(name || '') }); }
     /** Draws with GPT or ComfyUI. Inputs are the NovelAI-shaped picture (scene prompt, one caption per person). */
-    async drawWithEngine(engine, { prompt, negative, characters, quote, signal, comfy, refs = [] }) {
+    async drawWithEngine(engine, { prompt, negative, characters, quote, signal, comfy, refs = [], roles = false }) {
         const draw = this.settings.draw, p = quote.params;
         if (engine === 'gpt') {
-            const text = gptPrompt({ prompt, characters, refs });
-            const blob = await gptGenerate({ fetch: this.imageFetch, settings: draw.gpt, key: this.gptKey, prompt: text, size: `${p.width}x${p.height}`, refs, signal });
-            return { blob, seed: -1, params: { model: draw.gpt.model, width: p.width, height: p.height }, prompt: text, refs: refs.length };
+            const paint = async list => {
+                const text = gptPrompt({ prompt, characters: list.length ? characters : characters.map(({ image, ...c }) => c), refs: list });
+                return { text, blob: await gptGenerate({ fetch: this.imageFetch, settings: draw.gpt, key: this.gptKey, prompt: text, size: `${p.width}x${p.height}`, refs: list, signal }) };
+            };
+            let made, sent = refs;
+            try { made = await paint(refs); }
+            catch (error) {
+                // A relay without /images/edits: the 角色参考图 are left out (of this picture, and of the next ones while the
+                // page is open), not the picture. That answer drew nothing, so nothing is paid twice.
+                const missing = [404, 405, 501].includes(error?.status) || error?.status === 400 && /not (supported|implemented)|unsupported|invalid url|no route|不支持/i.test(error.message);
+                if (!roles || !refs.length || !missing) throw error;
+                (this.gptNoEdits ??= new Set()).add((draw.gpt.url || '') + '|' + draw.gpt.model);
+                sent = [];
+                made = await paint(sent);
+            }
+            return { blob: made.blob, seed: -1, params: { model: draw.gpt.model, width: p.width, height: p.height }, prompt: made.text, refs: sent.length, ...(roles ? { faces: sent.map(r => r.label).filter(Boolean), dropped: !sent.length } : {}) };
         }
         const c = comfy || draw.comfy, seed = p.seed >= 0 ? p.seed : Math.floor(Math.random() * 4294967295);
         const text = comfyPrompt({ prompt, negative, characters });
@@ -1490,7 +1585,7 @@ export class TTSBackend {
     }
     /** Generates one image and keeps it in the album. Requests wait in the NovelAI queue (see draw-queue.js).
      *  key identifies the job in the queue (the same key joins the job already waiting); label is shown in the line. */
-    generateImage({ prompt, negative = '', characters = [], params, allowPaid = false, name = '', key, label = '', base = null, refs = [], preview = false } = {}) {
+    generateImage({ prompt, negative = '', characters = [], params, allowPaid = false, name = '', key, label = '', base = null, refs = [], roleRefs = [], preview = false } = {}) {
         this.assertOpen();
         if (!String(prompt || '').trim()) return Promise.reject(Error('请先写提示词'));
         const engine = this.settings.draw.engine;
@@ -1505,15 +1600,18 @@ export class TTSBackend {
             // A queued ComfyUI picture keeps the scheme it was asked with, whatever is changed while it waits.
             const c = this.settings.draw.comfy;
             const comfy = engine === 'comfy' ? clone(Object.fromEntries(['url', 'workflow', 'disabledLoras', 'disabledNodes', 'output', ...COMFY_PARAM_KEYS].map(k => [k, c[k]]))) : undefined;
-            const picture = {prompt, negative, characters: clone(characters), quote, comfy, refs: gptRefs};
+            // 角色参考图 (pictureInputs: the people in it who have one) go to GPT when nothing was given by hand.
+            const picture = {prompt, negative, characters: clone(characters), quote, comfy, refs: gptRefs, roleRefs: engine === 'gpt' && !gptRefs.length && Array.isArray(roleRefs) ? clone(roleRefs) : []};
             const job = this.drawQueue.add({ key, label: label || String(prompt).slice(0, 40), task: async signal => {
                 this.assertOpen();
                 this.emit('draw', { phase: 'generating' });
-                const made = await this.drawWithEngine(engine, { ...picture, signal });
+                const own = picture.roleRefs.length ? await this.roleReferences(picture.roleRefs, picture.characters) : null;
+                const made = await this.drawWithEngine(engine, { ...picture, ...(own ? { refs: own.refs, characters: own.characters, roles: true } : {}), signal });
                 this.assertOpen();
                 const ext = made.blob.type === 'image/jpeg' ? 'jpg' : made.blob.type === 'image/webp' ? 'webp' : 'png';
                 const info = this.pictureInfo(engine, made, picture);
-                if (made.refs) info.push(['参考图', `${made.refs} 张`]);
+                if (made.dropped) info.push(['参考图', '没带：中转不支持改图接口（/images/edits）']);
+                else if (made.refs) info.push(['参考图', made.faces?.length ? made.faces.join('、') : `${made.refs} 张`]);
                 const photo = await this.library.addPhoto({ name: (name || DRAW_ENGINE_NAMES[engine]) + '-' + (made.seed >= 0 ? made.seed : Date.now()) + '.' + ext, blob: made.blob, info });
                 this.ledger.image(engine);
                 this.#thumbSoon(photo.id);
@@ -2782,7 +2880,7 @@ export class TTSBackend {
         const next = this.getState();
         next.connections.fish.params.references = next.connections.fish.params.references.filter(reference => reference.audio !== id);
         next.connections.mimo.params.samples = next.connections.mimo.params.samples.filter(sample => sample.audio !== id);
-        for (const voice of next.connections.custom?.params.voices || []) if (voice.ref_file === id) voice.ref_file = '';
+        for (const voice of [next.connections.custom?.params, ...(next.connections.custom?.configs?.presets || []).map(p => p.params)].flatMap(p => p?.voices || [])) if (voice.ref_file === id) voice.ref_file = '';
         this.save(next); await this.library.deleteReference(id); this.providers.references.delete(id);
         this.noteGone('references', [id]);
     }
@@ -2860,14 +2958,14 @@ export class TTSBackend {
         this.assertOpen();
         const { base, notes, error } = cleanAddress(address);
         if (error || !base) return { ok: false, message: error || '先填服务的地址', notes };
-        const reach = await reachService(base, this.providers.customTools());
+        const reach = await reachService(base, this.providers.customTools(this.customActive()));
         return reach.via ? { ok: true, base, notes, via: reach.via } : { ok: false, base, notes, ...explainReach(reach, base) };
     }
     /** 自动识别: which service answers there, and the settings for it (nothing is saved here). */
     async customDetect(address) {
         const reach = await this.customReach(address);
         if (!reach.ok) return reach;
-        const tools = this.providers.customTools();
+        const tools = this.providers.customTools(this.customActive());
         const ask = async path => {
             const target = /^https?:/i.test(path) ? path : reach.base + path;
             try { const r = await (reach.via === 'proxy' ? tools.proxy(target) : tools.direct(target)); return { status: r.status, ok: r.ok, type: r.headers.get('content-type') || '', text: await r.text() }; } catch { return null; }
@@ -2877,7 +2975,7 @@ export class TTSBackend {
     /** No address typed: the addresses where something answers, among those such services usually take. */
     async customScan() {
         this.assertOpen();
-        const { direct } = this.providers.customTools();
+        const { direct } = this.providers.customTools(this.customActive());
         const answers = await Promise.all(scanTargets().map(async url => { try { await direct(url, { mode: 'no-cors', signal: AbortSignal.timeout(1500) }); return url; } catch { return ''; } }));
         return answers.filter(Boolean);
     }
@@ -2978,6 +3076,7 @@ export class TTSBackend {
             previewPrompt: preset => this.previewPrompt(preset), promptPlan: () => clone(promptPlan(this.seen, modelRules(this.seen))), rolesHere: () => clone(this.seen.routes), parse: text => this.parse(text),
             voiceBalance: (engine, refresh) => this.voiceBalance(engine, refresh), keyStatus: engine => this.keyStatus(engine), keyHint: engine => this.keyHint(engine), keyPool: engine => this.keyPool(engine), keyList: engine => this.keyList(engine), addKeys: (engine, value) => this.addKeys(engine, value), removeKey: (engine, index) => this.removeKey(engine, index), useKey: (engine, index) => this.useKey(engine, index), setKey: (engine, key) => this.setKey(engine, key), clearKey: engine => this.clearKey(engine),
             setStyleCover: (id, blob) => this.setStyleCover(String(id), blob), clearStyleCover: id => this.clearStyleCover(String(id)),
+            setRoleRef: (id, blob) => this.setRoleRef(String(id), blob), clearRoleRef: id => this.clearRoleRef(String(id)),
             arrangeRoles: tree => this.arrangeRoles(clone(tree)), sortRolesByCard: cards => this.sortRolesByCard(clone(cards || [])), deleteRoutes: ids => this.deleteRoutes(clone(ids || [])), mergeRoutes: ids => this.mergeRoutes(clone(ids || [])), saveDraw: patch => this.saveDraw(patch), saveStyle: style => this.saveStyle(style), deleteStyle: id => this.deleteStyle(id), deleteStyles: ids => this.deleteStyles(clone(ids || [])), arrangeStyles: tree => this.arrangeStyles(clone(tree)), arrangeChunks: tree => this.arrangeChunks(clone(tree)),
             imageConnectionList: engine => this.imageConnectionList(engine), saveImageConnection: (engine, patch) => this.saveImageConnection(engine, patch), selectImageConnection: (engine, id) => this.selectImageConnection(engine, id), deleteImageConnection: (engine, id) => this.deleteImageConnection(engine, id),
             drawReady: () => this.drawReady(), drawMissing: () => this.drawMissing(), paidPrompt: () => this.paidPrompt(), comfyCatalog: url => this.comfyCatalog(url), comfyClips: options => this.comfyClips(options), comfyWorkflows: () => this.comfyWorkflows(), comfyWorkflow: name => this.comfyWorkflow(name),
@@ -3000,6 +3099,7 @@ export class TTSBackend {
             previewRequest: (engine, connection, route, line) => { const request = buildRequest(engine, connection || this.settings.connections[engine], route, line, this.providers.references); if (request.body.provider?.options?.['fish-audio']?.references) for (const ref of request.body.provider.options['fish-audio'].references) ref.audio = '[本地参考音频]'; if (request.body.audio?.voice?.startsWith?.('data:')) request.body.audio.voice = '[本地克隆样本：' + route.voice + ']'; return request; },
             status: () => this.player.snapshot(), subscribe: listener => this.subscribe(listener), levels: () => this.player.sink.levels(),
             pendingRole: () => this.player.pending, stop: () => this.player.stop(), toggle: () => this.player.toggle(), resume: () => this.player.continuePending(),
+            customSetList: () => this.customSetList(), saveCustomSet: patch => this.saveCustomSet(clone(patch || {})), selectCustomSet: id => this.selectCustomSet(String(id)), deleteCustomSet: id => this.deleteCustomSet(String(id)),
             audition: route => this.audition(route), customTest: connection => this.customTest(clone(connection || null)), customReach: address => this.customReach(String(address ?? '')), customDetect: address => this.customDetect(String(address ?? '')), customScan: () => this.customScan(), lineState: line => this.player.lineState(line),
             setVolume: value => this.savePhone({ volume: value }), getVolume: () => this.player.getVolume(),
             cacheStats: () => this.cache.stats(), clearCache: () => this.clearCache(), listAudio: () => this.cache.list(),

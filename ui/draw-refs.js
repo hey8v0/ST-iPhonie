@@ -209,6 +209,19 @@ export function refPanel({ctx, api, rerender, shown}) {
     async zip(file) { try { await importRefs(file); } catch (error) { ctx.notify(error.message, {error: true}); } },
     /** Uses a picture from elsewhere in the app (a result's tools). */
     useAsBase: setBase, useAsRef: addRef,
+    /** A picture opened from the story (GPT): the 参考图 of the people in it, in their order, named; a file gone is left out. */
+    async useRoleRefs(list) {
+      const wanted = (list || []).filter(r => r?.path), seen = new Set();
+      if (!wanted.length) return;
+      gptRefs.length = 0;
+      for (const r of wanted) {
+        if (seen.has(r.path) || gptRefs.length >= GPT_MAX_REFS) continue;
+        seen.add(r.path);
+        try { const response = await ctx.win.fetch(r.path, {cache: 'no-store'}); if (response.ok) gptRefs.push({...await fitGptReference(ctx.win, await response.blob()), label: String(r.name || '').slice(0, 80)}); }
+        catch { /* gone: left out */ }
+      }
+      rerender();
+    },
     /** What goes with the next drawing: NovelAI's base and references, or GPT's references. */
     async payload() {
       if (gpt()) return {base: null, refs: gptTakesRefs(gptModel()) ? gptRefs.map(r => ({image: r.image, type: r.type, label: r.label.trim()})) : []};

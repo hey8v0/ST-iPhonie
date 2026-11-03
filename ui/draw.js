@@ -334,6 +334,7 @@ export function drawApp(ctx) {
     seed = Number.isInteger(request.seed) ? request.seed : -1;
     const routes = api.getState().routes;
     characters = (request.characters || []).map(c => ({name: routes.find(r => r.appearance?.trim() === c.prompt?.trim())?.name || '角色', prompt: c.prompt, ...(c.negative ? {negative: c.negative} : {}), position: c.position ?? -1}));
+    if (eng() === 'gpt' && request.roleRefs?.some(Boolean)) refs.useRoleRefs(request.roleRefs).catch(() => {});
     tab = 'prompt';
     render();
   };

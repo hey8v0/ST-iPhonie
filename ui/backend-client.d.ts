@@ -77,6 +77,8 @@ export interface Route {
     appearance?: string;
     /** 固定负面: tags kept away from this character in every picture. */
     negative?: string;
+    /** 参考图: what GPT draws this character from, two tavern files; changed only by setRoleRef / clearRoleRef. */
+    ref?: { thumb: string; full: string };
     /** The group it is in, in the 角色 App (Settings.roleGroups). */
     group?: string;
     /** Taken out of a group by hand: it does not go in its card's group by itself. */
@@ -99,6 +101,8 @@ export interface Connection {
     relay?: string;
     /** Fish relay only: Fish's own paths ('fish') or OpenAI's /v1/audio/speech ('openai'). */
     relayApi?: 'fish' | 'openai';
+    /** 自己的接口 only: its saved sets; the one in use is also `params` (changed by the custom set methods only). */
+    configs?: { active: string; presets: Array<{ id: string; name: string; params: Record<string, unknown> }> };
     /** Keys are the engine schema field keys, including dotted names. */
     params: Record<string, unknown>;
     parametersVersion?: number;
@@ -308,6 +312,8 @@ export interface DrawQuote { params: DrawParams; clamped: boolean; /** null when
     engine?: DrawEngine; paid?: boolean; }
 export interface DrawCharacter { prompt: string; negative?: string; /** 0-24 on a 5x5 grid, -1 lets the model decide. */ position: number; /** V5: anywhere in the picture, 0-1 (other models take the nearest grid cell). */ center?: { x: number; y: number }; /** false: left out of this picture. */ enabled?: boolean; }
 export interface DrawInput { prompt: string; negative?: string; characters?: DrawCharacter[]; params?: Partial<DrawParams>; allowPaid?: boolean; name?: string; /** Queue key; the same key joins the waiting job. */ key?: string; label?: string;
+    /** GPT: the 角色参考图 of the people in it (pictureInputs), by the characters' order; null for one with none. */
+    roleRefs?: Array<{ name: string; path: string } | null>;
     /** NovelAI: 图生图 (no mask) or 局部重绘 (mask: white where it is drawn again); the picture is drawn at the base's size. */
     base?: { image: string; width: number; height: number; strength: number; noise?: number; mask?: string; /** 局部重绘: put the untouched parts back as they were. */ overlay?: boolean; /** 增强. */ enhance?: boolean; /** 增强 at 最大 (V5): the picture as it is, doubled by NovelAI. */ upscaled?: boolean } | null;
     /** 边画边看 when it is switched on: the steps and the picture on its way come as 'draw' events. */
@@ -739,6 +745,9 @@ export interface BackendFacade {
     /** 效果图 of a 画风, from any picture: kept as files in the tavern. */
     setStyleCover(id: string, blob: Blob): Promise<{thumb: string; full: string}>;
     clearStyleCover(id: string): void;
+    /** 角色参考图: kept at once, as tavern files; the role must be saved first. */
+    setRoleRef(id: string, blob: Blob): Promise<{thumb: string; full: string}>;
+    clearRoleRef(id: string): void;
     /** The 提示词片段 list in a new order with its 分类, in the same shape (a 片段's id under `style`). */
     arrangeChunks(tree: Array<{style: string} | {group: Partial<DrawStyleGroup>; styles: string[]}>): DrawSettings;
     saveDrawPreset(preset: Omit<DrawPreset, 'id'> & { id?: string }): DrawPreset;
@@ -805,6 +814,13 @@ export interface BackendFacade {
     customScan(): Promise<string[]>;
     /** 自己的接口 → 试一试: says one line with the first voice of these (unsaved) settings. */
     customTest(connection?: unknown): Promise<{ voice: string; bytes: number; type: string }>;
+    /** 自己的接口's saved sets: never a key, only its last characters. */
+    customSetList(): Array<{ id: string; name: string; current: boolean; url: string; service: string; voices: number; configured: boolean; tail: string }>;
+    /** With an id: renames that set. Without: a new empty set, in use from now on. */
+    saveCustomSet(patch?: { id?: string; name?: string }): { id: string; name: string; current: boolean; url: string; service: string; voices: number; configured: boolean; tail: string };
+    selectCustomSet(id: string): void;
+    /** Its key goes too; roles that used it follow the set in use. At least one set stays. */
+    deleteCustomSet(id: string): void;
     lineState(line: DialogueLine): Promise<LineState>;
     /** Persists the volume; valid values are 0 through 1. */
     setVolume(value: number): Promise<PhonePreferences>;
