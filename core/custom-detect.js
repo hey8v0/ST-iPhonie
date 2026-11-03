@@ -29,14 +29,16 @@ export function cleanAddress(raw) {
 
 const TURN_ON = '在酒馆文件夹的 config.yaml 里把 enableCorsProxy 改成 true，重启酒馆，再点一次。云酒馆找服务商开。';
 const NO_PROXY = '这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有），服务要自己允许跨域（CORS），或者套一个允许跨域的中转。';
+const LOGIN = '这个酒馆开了密码登录，带着密钥经酒馆转发会顶掉登录，所以不走酒馆：要服务自己允许跨域（CORS），或者换一个没开密码登录的酒馆。';
 /** What a failed reachService means, in plain words: {message, hint, address (a better one to try)}. */
 export function explainReach(r, base, page = globalThis.location) {
   const target = new URL(base), elsewhere = page?.hostname && !LOOPBACK.test(page.hostname) ? `${target.protocol}//${page.hostname}${target.port ? ':' + target.port : ''}` : '';
   if (r.state === 'blocked') return r.proxy === 'on'
     ? {message: '服务开着，但它不让网页直接访问，酒馆的转发也连不上它。', hint: '酒馆和服务不在同一台机器时会这样：让服务开跨域（CORS），或者把酒馆和服务放到能互相连通的地方。'}
     : r.proxy === 'missing' ? {message: '服务开着，但它不让网页直接访问（没开跨域）。', hint: NO_PROXY}
+    : r.proxy === 'login' ? {message: '服务开着，但它不让网页直接访问（没开跨域）。', hint: LOGIN}
     : {message: '服务开着，但它不让网页直接访问（没开跨域），酒馆的转发也没开。', hint: TURN_ON};
-  if (r.state === 'mixed') return {message: '酒馆是 https 打开的，浏览器不让它连 http 地址。', hint: r.proxy === 'on' ? '酒馆的转发也连不上它：看看地址对不对、服务开着没有，或者给服务配上 https。' : r.proxy === 'missing' ? '这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有）：给服务配上 https。' : TURN_ON + '或者给服务配上 https。'};
+  if (r.state === 'mixed') return {message: '酒馆是 https 打开的，浏览器不让它连 http 地址。', hint: r.proxy === 'on' ? '酒馆的转发也连不上它：看看地址对不对、服务开着没有，或者给服务配上 https。' : r.proxy === 'missing' ? '这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有）：给服务配上 https。' : r.proxy === 'login' ? '这个酒馆开了密码登录，带着密钥经酒馆转发会顶掉登录，所以不走酒馆：要给服务配上 https，让它自己允许跨域（CORS）。' : TURN_ON + '或者给服务配上 https。'};
   if (r.state === 'loopback') return {message: '127.0.0.1 指的是正在用的这台设备自己，这里连不到。', hint: `服务在电脑上的话，要写电脑的地址${elsewhere ? `（可能就是 ${elsewhere}）` : ''}，服务启动时要监听 0.0.0.0（GPT-SoVITS 加 -a 0.0.0.0），防火墙要放行这个端口。`, ...(elsewhere ? {address: elsewhere} : {})};
   return {message: '连不上：服务没开，或者地址、端口不对。', hint: LOOPBACK.test(target.hostname) ? '先看看服务的窗口有没有跑起来，窗口里会写端口。' : '服务开着的话，它要监听 0.0.0.0，那台电脑的防火墙要放行这个端口，两台设备要在同一个网络里。'};
 }
@@ -249,14 +251,17 @@ export function fromCurl(source) {
   if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
   let target;
   try { target = new URL(url); } catch { return {error: '命令里的地址读不出来：' + url.slice(0, 60)}; }
-  // The headers: a key goes to the key store.
-  const kept = [];
+  // The headers: a key goes to the key store; one written as a stand-in ($VOICE_KEY, your-key) is asked for.
+  const kept = [], standIn = value => /^(your|xxx|\$|<)/i.test(value);
+  let wanted = false;
   for (const line of headers) {
     const m = line.match(/^\s*([\w-]+)\s*:\s*(.*)$/);
     if (!m || /^(content-type|accept|user-agent|content-length|host)$/i.test(m[1])) continue;
+    // A new id each request (Idempotency-Key: $(uuidgen)): kept as written, every line would get the first line's audio back.
+    if (/^(x-)?(idempotency-key|request-id)$/i.test(m[1])) { kept.push(`${m[1]}: {{id}}`); continue; }
     const bearer = m[2].match(/^Bearer\s+(.+)$/i);
-    if (/^authorization$/i.test(m[1]) && bearer) { if (!/\{\{/.test(bearer[1]) && !/^(your|xxx|\$)/i.test(bearer[1])) key = bearer[1].trim(); continue; }
-    if (/key|token|secret/i.test(m[1]) && !/\{\{/.test(m[2])) { if (!/^(your|xxx|\$)/i.test(m[2])) key = m[2].trim(); kept.push(`${m[1]}: {{key}}`); continue; }
+    if (/^authorization$/i.test(m[1]) && bearer) { if (!/\{\{/.test(bearer[1])) { if (standIn(bearer[1])) wanted = true; else key = bearer[1].trim(); } continue; }
+    if (/key|token|secret/i.test(m[1]) && !/\{\{/.test(m[2])) { if (standIn(m[2])) wanted = true; else key = m[2].trim(); kept.push(`${m[1]}: {{key}}`); continue; }
     kept.push(`${m[1]}: ${m[2]}`);
   }
   // The body.
@@ -291,6 +296,7 @@ export function fromCurl(source) {
   const address = target.origin + target.pathname + (flat ? '?' + flat : '');
   const notes = [];
   if (key) notes.push('命令里的密钥存好了');
+  else if (wanted) notes.push('命令里的密钥只是个占位，在上面「密钥」里粘贴自己的');
   return {params: {service: '粘贴的 curl 命令', url: address, method: method === 'GET' || (!method && !mappedBody) ? 'GET' : 'POST', body: mappedBody ? JSON.stringify(mappedBody, null, 2) : '', bodyType, headers: kept.join('\n'), answer: 'audio', path: '', before: '', pcmRate: 24000, langMap: '', listUrl: '', listPath: ''}, key, notes};
 }
 

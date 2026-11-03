@@ -5,6 +5,25 @@ import { requestHash } from './cache.js';
 import { effectChain, lineEffect } from './voice-fx.js';
 import { audioKind, unpacked, mp3FromFrame, undecodable } from './audio-bytes.js';
 import { mouthShape } from './model-files.js';
+import { joinAudio } from './audio-join.js';
+
+// A refusal because the line is too long (自己的接口 shaped like OpenAI's, ElevenLabs), not a reference audio. A 413 is
+// not one: that is a request too big, most often for the reference audio it carries, and cutting the line would not help.
+const LONG_CODES = new Set(['input_too_long', 'text_too_long', 'max_character_limit_exceeded']);
+const tooLong = error => !!error && (LONG_CODES.has(error.code)
+  || /too long|太长|过长/i.test(String(error.message || '')) && !/参考|reference|prompt/i.test(String(error.message || '')));
+/** A line cut in two near its middle: at a sentence end, else at a comma, else at a space; null when it cannot be. */
+export function halves(text) {
+  const t = String(text ?? '').trim();
+  if (t.length < 8) return null;
+  for (const marks of [/[。！？!?…；;.]+["”’」』）)]*/g, /[，,、：:]+/g, /\s+/g]) {
+    let best = -1;
+    for (const m of t.matchAll(marks)) { const at = m.index + m[0].length; if (at < t.length && (best < 0 || Math.abs(at - t.length / 2) < Math.abs(best - t.length / 2))) best = at; }
+    const parts = best > 0 ? [t.slice(0, best).trim(), t.slice(best).trim()] : null;
+    if (parts?.every(p => /[\p{L}\p{N}]/u.test(p))) return parts;
+  }
+  return null;
+}
 export { audioKind, mp3FromFrame } from './audio-bytes.js';
 
 const stopped = () => new DOMException('已停止', 'AbortError');
@@ -306,6 +325,20 @@ export class DialoguePlayer {
   if (this.phase === 'paused') await new Promise(resolve => { this.wake = resolve; });
   return this.canContinue(epoch);
  }
+ /**
+  * A line's audio from its engine. A line the service refuses as too long (some take 30 seconds a line, and a 旁白
+  * piece may run longer) is said in two parts cut at a sentence end, those again if need be, and the parts joined.
+  */
+ async say(engine, connection, route, line, request, signal, depth = 0) {
+  try { return await this.providers.synthesize(request, signal); }
+  catch (error) {
+   const parts = depth < 4 && tooLong(error) ? halves(line.text) : null;
+   if (!parts) throw error;
+   const audio = [];
+   for (const text of parts) { const part = { ...line, text }; audio.push(await this.say(engine, connection, route, part, buildRequest(engine, connection, route, part, this.providers.references), signal, depth + 1)); }
+   return joinAudio(audio);
+  }
+ }
  /** A line's audio: from the cache, or made and kept. found(fromCache, key) is told before any making starts. */
  async make(line, route, s, signal, found = () => {}, still = () => !signal.aborted) {
   const effective = { ...structuredClone(route), language: route.language || s.general.defaultLanguage, model: route.model || s.connections[route.engine].model };
@@ -332,7 +365,7 @@ export class DialoguePlayer {
       if (!still()) return null;
       request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
      }
-     const audio = await this.providers.synthesize(request, signal);
+     const audio = await this.say(route.engine, s.connections[route.engine], effective, line, request, signal);
      // Made anew, not from the cache: what the 账本 counts.
      this.voiced(route.engine, line.text);
      return audio;

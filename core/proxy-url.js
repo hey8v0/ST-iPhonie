@@ -44,8 +44,8 @@ export async function tavernLogin(fetcher, page = globalThis.location) {
 const LOOPBACK = /^(localhost|127(\.\d+){3}|\[::1\])$/i;
 /**
  * Whether and how a service can be asked. direct(url, init): the browser's own request; proxy(url): through the tavern.
- * {via: 'direct' | 'proxy' | '', state: 'ok' | 'blocked' | 'mixed' | 'loopback' | 'down', proxy: 'on' | 'off' | 'missing' | 'none'}
- * (off: the tavern can turn it on; missing: this tavern has none.)
+ * {via: 'direct' | 'proxy' | '', state: 'ok' | 'blocked' | 'mixed' | 'loopback' | 'down', proxy: 'on' | 'off' | 'missing' | 'login' | 'none'}
+ * (off: the tavern can turn it on; missing: this tavern has none; login: a key may not go through it, proxy threw {login}.)
  */
 export async function reachService(base, {direct, proxy, page = globalThis.location}) {
   const target = new URL(base), loop = LOOPBACK.test(target.hostname), mixed = page?.protocol === 'https:' && target.protocol === 'http:' && !loop;
@@ -56,7 +56,7 @@ export async function reachService(base, {direct, proxy, page = globalThis.locat
   let state = 'none';
   if (proxy) {
     try { const got = await proxyState(await proxy(base)); if (got === 'ok') return {via: 'proxy', state: 'ok', proxy: 'on'}; state = got === 'down' ? 'on' : got; }
-    catch { state = 'off'; }
+    catch (error) { state = error?.login ? 'login' : 'off'; }
   }
   return {via: '', proxy: state, state: mixed ? 'mixed' : open ? 'blocked' : loop && !LOOPBACK.test(page?.hostname || 'localhost') ? 'loopback' : 'down'};
 }

@@ -1,10 +1,10 @@
 import {buildDoubaoRequest,doubaoAudio,DOUBAO_VOICES} from './doubao.js';
-import {proxyAddress, noTavernProxy} from './proxy-url.js';
+import {proxyAddress, noTavernProxy, tavernLogin} from './proxy-url.js';
 import { validateKey, MULTI_KEY, keyTail } from './keys.js';
 import { languageCode } from './languages.js';
 import { TTSParameters as P, CUSTOM_NO_PROXY, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, FISH_TAURI_NOTE, FISH_PROXY_PAGE, DOUBAO_PROXY_NOTE, DOUBAO_DIRECT_NOTE, DOUBAO_RELAY_NOTE, DOUBAO_PROXY_PAGE, tauriTavern, setFishCompat } from './parameters.js';
 import { speakable } from './voice-fx.js';
-import { buildCustomRequest, customInit, readCustomAnswer, customVoices, readVoiceList, gradioRoot, referenceFile, serviceSaid } from './custom-voice.js';
+import { buildCustomRequest, customInit, readCustomAnswer, customVoices, readVoiceList, gradioRoot, referenceFile, serviceSaid, usesId } from './custom-voice.js';
 import { unpacked, audioKind } from './audio-bytes.js';
 const names={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'小米 MiMo',doubao:'豆包语音',custom:'自己的接口'};
 export const miniBase=c=>'https://'+(c.region==='cn'?'api.minimaxi.com':c.region==='uw'?'api-uw.minimax.io':'api.minimax.io');
@@ -141,9 +141,15 @@ export async function httpError(engine,response,what='',secrets=[],relay=false){
  return Object.assign(Error(names[engine]+(what?' '+what:'')+'：HTTP '+response.status+' · '+reason+(said?'（'+said+'）':'')),{status:response.status,code,refusedField:refused?.[1]||''});
 }
 const KEY_SWITCH=new Set([401,402,403,429]);
+const KEY_BEHIND_LOGIN='这个酒馆开了密码登录：带密钥的请求经酒馆转发会顶掉登录（浏览器会一直要密码），所以没有转发。这个服务要自己允许网页直接访问（跨域 CORS），或者换一个没开密码登录的酒馆';
+const originOf=target=>{try{return new URL(target,globalThis.location?.href).origin;}catch{return '';}};
+/** A pause that ends early, as stopped, when the signal says so. */
+const pause=(ms,signal)=>new Promise((resolve,reject)=>{if(signal?.aborted){reject(new DOMException('已停止','AbortError'));return;}const t=setTimeout(()=>{signal?.removeEventListener('abort',stop);resolve();},ms),stop=()=>{clearTimeout(t);reject(new DOMException('已停止','AbortError'));};signal?.addEventListener('abort',stop,{once:true});});
 export class Providers{
  // refused: fields a model said it does not take (model -> Set), left out of later requests while the page is open.
- constructor(fetcher=globalThis.fetch.bind(globalThis)){this.fetcher=fetcher;this.keys=new Map();this.references=new Map();this.refused=new Map();this.pools=new Map();}
+ constructor(fetcher=globalThis.fetch.bind(globalThis)){this.fetcher=fetcher;this.keys=new Map();this.references=new Map();this.refused=new Map();this.pools=new Map();
+  // 自己的接口: the {{id}} of lines that got no answer (sent again with it), the services only the tavern's proxy reaches.
+  this.unsettled=new Map();this.customVia=new Set();this.page=globalThis.location;}
  setKey(engine,key){key=validateKey(engine,key);if(key)this.keys.set(engine,key);else{this.keys.delete(engine);this.pools.delete(engine);}}
  // Several keys (one per line): the one in use and those refused while this page is open, remembered by the keys
  // themselves, so adding or deleting a key keeps both.
@@ -193,7 +199,8 @@ export class Providers{
   if(request.engine==='mini')return decodeMini(response,request,this.fetcher,signal);if(response.headers.get('Content-Type')?.includes('json'))throw Error(names[request.engine]+' 未返回音频');const bytes=await limitedBytes(response);return audioBlob(await unpacked(bytes)||bytes,request);}
  /**
   * 自己的接口: the request as the templates say, the key (optional) put in now. A service that does not let web pages
-  * ask it (no CORS) is asked again through the tavern's own proxy (this.proxy, set by the backend).
+  * ask it (no CORS) is asked again through the tavern's own proxy (this.proxy, set by the backend), and there at once
+  * from then on.
   */
  async speakCustom(request,signal){
   // One at a time: a model is switched for this line and must not be switched again by another before it is said.
@@ -204,27 +211,53 @@ export class Providers{
   const key=this.currentKey('custom'),audio=request.refFile?this.references.get(request.refFile):'';
   if(request.refFile&&!audio)throw Error('参考音频读不出来了：在引擎 App「自己的接口」的音色里重新上传一段');
   const uploaded=audio&&request.answer==='gradio'?await this.gradioUpload(request,audio,signal):'';
-  const {url,init}=customInit(request,key,{audio,uploaded});
+  // {{id}}: a line that got no answer last time goes again with the same one, so a service that keeps them
+  // (Idempotency-Key) answers with what it made instead of making and charging it twice. An answered line gets a new one.
+  const which=JSON.stringify([request.url,request.headers,request.body??null]),id=this.unsettled.get(which)||crypto.randomUUID();
+  const {url,init}=customInit(request,key,{audio,uploaded,id});
   // Links and later steps are read with the same headers, less the head of a body they do not have.
   const asked=Object.fromEntries(Object.entries(init.headers).filter(([h])=>h.toLowerCase()!=='content-type'));
   // What came through the tavern's proxy, asked by the plugin or written in the address: a tavern with none answers with its own page.
   const passed=async r=>{const said=await r.clone().text().catch(()=>'');if(/CORS proxy is disabled/i.test(said))throw Error('自己的接口不让网页直接访问：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆');if(noTavernProxy(said))throw Error(CUSTOM_NO_PROXY);return r;};
-  const send=async(target,how=init)=>{let r;try{r=await fetchWithPolicy(this.fetcher,target,how,signal);}catch(error){if(signal?.aborted||!this.proxy||!/无法连接/.test(error.message))throw error;
+  const tavern=async(target,how)=>{
    // The tavern's proxy passes JSON on and nothing else.
    if(how.body&&typeof how.body!=='string')throw Error('连不上自己的接口。这种接口收表单或文件，酒馆的转发传不了：服务开着吗？地址和端口对吗？它要自己允许跨域');
-   const relayed=await this.proxy(target,how,signal).catch(()=>null);if(!relayed)throw Error('连不上自己的接口：地址不对、服务没开，或者它不让网页直接访问（可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆）');
-   return passed(relayed);}return proxyAddress(target)?passed(r):r;};
+   const relayed=await this.tavern(target,how,signal).catch(error=>{if(error?.login||signal?.aborted)throw error;return null;});if(!relayed)throw Error('连不上自己的接口：地址不对、服务没开，或者它不让网页直接访问（可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆）');
+   return passed(relayed);};
+  // A service only the tavern's proxy reaches is asked there at once from then on (while the page is open).
+  const send=async(target,how=init)=>{const at=originOf(target);if(this.proxy&&at&&this.customVia.has(at))return tavern(target,how);
+   let r;try{r=await fetchWithPolicy(this.fetcher,target,how,signal);}catch(error){if(signal?.aborted||!this.proxy||!/无法连接/.test(error.message))throw error;const relayed=await tavern(target,how);if(at)this.customVia.add(at);return relayed;}
+   return proxyAddress(target)?passed(r):r;};
   // 换模型: only when this voice's model is not the one loaded last.
   const loaded=(request.before||[]).join('\n');
   if(loaded&&this.customLoaded!==loaded){this.customLoaded='';for(const step of request.before){const {url:target,init:get}=customInit({...request,url:step,method:'GET',body:undefined});const r=await send(target,get).catch(e=>{throw Error('换模型失败：'+e.message);});
    if(!r.ok){const said=(await r.text().catch(()=>'')).replace(/\s+/g,' ').slice(0,160);throw Error('换模型失败（HTTP '+r.status+'）'+(said?'：'+said:'')+'：检查音色里模型的路径');}await r.body?.cancel?.().catch(()=>{});}this.customLoaded=loaded;}
-  const response=await send(url);
-  return readCustomAnswer(response,request,{read:limitedBytes,load:link=>send(link,{method:'GET',headers:asked}),wave:wavePCM}).catch(error=>{if(request.answer==='gradio')this.gradioFiles?.clear();throw error;});
+  let answered=false;
+  try{
+   let response=await send(url);
+   // Given up on by the service while it was still being made (504): with an id it is asked again after a pause, and a
+   // service that keeps ids answers with what it made.
+   for(const wait of this.retryWaits||[5000,10000,20000,40000]){if(response.status!==504||!usesId(request))break;await response.body?.cancel?.().catch(()=>{});await pause(wait,signal);response=await send(url);}
+   if(response.status===504&&usesId(request)){await response.body?.cancel?.().catch(()=>{});throw Error('自己的接口那边排队太久：等了好几分钟还没做好，这句先跳过。过一会儿再播，会用同一个编号去要，不用重做');}
+   answered=true;
+   const blob=await readCustomAnswer(response,request,{read:limitedBytes,load:link=>send(link,{method:'GET',headers:asked}),wave:wavePCM});
+   this.unsettled.delete(which);return blob;
+  }catch(error){
+   if(request.answer==='gradio')this.gradioFiles?.clear();
+   // No answer, or not the end of one (cut off, stopped, still being made): the same id next time.
+   this.unsettled.delete(which);if(!answered){this.unsettled.set(which,id);if(this.unsettled.size>100)this.unsettled.delete(this.unsettled.keys().next().value);}
+   throw error;
+  }
  }
+ /**
+  * The tavern's proxy, for 自己的接口. A key sent as Authorization through a tavern behind a password login takes the
+  * login's place, and the browser asks for the tavern's password again and again: such a request is not sent.
+  */
+ async tavern(url,init,signal){if(Object.keys(init?.headers||{}).some(h=>/^authorization$/i.test(h))&&await(this.behindLogin??=tavernLogin(this.fetcher,this.page)))throw Object.assign(Error(KEY_BEHIND_LOGIN),{login:true});return this.proxy(url,init,signal);}
  /** How a service is asked while it is being set up (core/custom-detect.js): quickly, with the key if there is one. */
  customTools(){const key=this.currentKey('custom'),headers=key?{Authorization:'Bearer '+key}:{};
   return {direct:(url,init={})=>this.fetcher(url,{credentials:'omit',referrerPolicy:'no-referrer',...(init.mode?{}:{headers}),signal:AbortSignal.timeout(init.mode?2500:6000),...init}),
-   proxy:this.proxy?url=>this.proxy(url,{method:'GET',headers},AbortSignal.timeout(8000)):null};}
+   proxy:this.proxy?url=>this.tavern(url,{method:'GET',headers},AbortSignal.timeout(8000)):null};}
  /** A Gradio app takes a reference audio by where it keeps it: uploaded once a page, asked again after anything failed. */
  async gradioUpload(request,audio,signal){
   const root=gradioRoot(request.url),slot=root+'|'+request.refFile;this.gradioFiles??=new Map();
@@ -240,7 +273,7 @@ export class Providers{
   const own=customVoices(c),q=search.trim().toLowerCase();let listed=[],note='';
   const url=String(c.params.listUrl||'').trim();
   if(proxyAddress(url)||/^https?:\/\//i.test(url)){const {url:target,init}=customInit({url,method:'GET',headers:String(c.params.headers||'')},this.currentKey('custom'));
-   let r=await fetchWithPolicy(this.fetcher,target,init).catch(()=>null);if(!r&&this.proxy){r=await this.proxy(target,init).catch(()=>null);if(r&&noTavernProxy(await r.clone().text().catch(()=>'')))r=null;}
+   let r=await fetchWithPolicy(this.fetcher,target,init).catch(()=>null);if(!r&&this.proxy){r=await this.tavern(target,init).catch(()=>null);if(r&&noTavernProxy(await r.clone().text().catch(()=>'')))r=null;}
    if(!r)note='音色列表地址连不上';else if(!r.ok)note='音色列表地址回答 HTTP '+r.status;else{try{listed=readVoiceList(await r.json(),String(c.params.listPath||'').trim());}catch{note='音色列表回的不是 JSON';}}
    listed=listed.filter(v=>!own.some(o=>o.id===v.id));}
   const all=[...own,...listed];

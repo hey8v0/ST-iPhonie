@@ -52,3 +52,10 @@ export function encodeWav(samples, rate = JOIN_RATE) {
   }
   return new Blob([view.buffer], {type: 'audio/wav'});
 }
+
+/** One line's audio from its parts (said in parts because the service takes no more at once), a short breath between. */
+export async function joinAudio(blobs, win = globalThis, rate = 24000) {
+  const clips = [];
+  for (const blob of blobs) clips.push(await decodeMono(win, blob, rate));
+  return encodeWav(joinClips(clips, rate, 0.2), rate);
+}

@@ -3,10 +3,10 @@
 // each thing goes: {{text}} the line, {{lang}} its language (zh, ja, en, ko, yue…), {{emotion}} its 情绪, {{voice}} the
 // voice (an ID, or a reference audio's path on the machine that runs the service), {{ref_text}} {{ref_lang}} what is
 // said in the reference audio and in which language, {{ref_audio}} {{ref_audio_base64}} the reference audio uploaded
-// here, {{key}} the key. The body is sent as JSON, as a form or as multipart. The answer is found out from what comes
-// back: the audio itself, raw PCM, or JSON with a link to it or the audio in base64; a Gradio app's answer comes in two
-// steps. The voices are the user's own list (parameters.js, 自己的接口 → 音色). core/custom-detect.js works all this
-// out from the service.
+// here, {{key}} the key, {{id}} a new id for each line (the same one when that line is sent again: an Idempotency-Key).
+// The body is sent as JSON, as a form or as multipart. The answer is found out from what comes back: the audio itself,
+// raw PCM, or JSON with a link to it or the audio in base64; a Gradio app's answer comes in two steps. The voices are the
+// user's own list (parameters.js, 自己的接口 → 音色). core/custom-detect.js works all this out from the service.
 import {proxyAddress} from './proxy-url.js';
 import {languageCode} from './languages.js';
 import {pick} from './music.js';
@@ -90,7 +90,7 @@ export const CUSTOM_TEMPLATES = Object.freeze([
 ]);
 
 const SLOT = /\{\{\s*(text|lang|emotion|voice|ref_text|ref_lang|model1|model2)\s*\}\}/g;
-const KEY_SLOT = /\{\{\s*key\s*\}\}/g;
+const KEY_SLOT = /\{\{\s*key\s*\}\}/g, ID_SLOT = /\{\{\s*id\s*\}\}/g;
 const FILE_SLOT = /\{\{\s*ref_audio\s*\}\}/g, BASE64_SLOT = /\{\{\s*ref_audio_base64\s*\}\}/g, REF_SLOT = /\{\{\s*ref_audio(?:_base64)?\s*\}\}/, ONLY_FILE = /^\s*\{\{\s*ref_audio\s*\}\}\s*$/;
 /** Which slots these settings use: what they do not use is not asked for. */
 export function customSlots(p) {
@@ -161,13 +161,14 @@ export function referenceFile(audio) { const bytes = bytesOf(audio); return new 
 
 /**
  * fetch() arguments for a request, with the key in. audio: the reference audio (base64), when the request has one;
- * uploaded: where a Gradio app keeps it after it was uploaded there.
+ * uploaded: where a Gradio app keeps it after it was uploaded there; id: what {{id}} becomes (a new one, unless this
+ * line is being sent again).
  */
-export function customInit(request, key = '', {audio = '', uploaded = ''} = {}) {
-  const headers = {};
+export function customInit(request, key = '', {audio = '', uploaded = '', id = crypto.randomUUID()} = {}) {
+  const headers = {}, stamp = text => text.replace(ID_SLOT, id);
   for (const line of request.headers.split('\n')) {
     const m = line.match(/^\s*([!#$%&'*+.^_`|~0-9A-Za-z-]+)\s*:\s*(.*)$/);
-    if (m) headers[m[1]] = m[2].replace(KEY_SLOT, key).trim();
+    if (m) headers[m[1]] = stamp(m[2].replace(KEY_SLOT, key)).trim();
   }
   if (key && !/\{\{\s*key\s*\}\}/.test(request.headers) && !Object.keys(headers).some(h => h.toLowerCase() === 'authorization')) headers.Authorization = 'Bearer ' + key;
   const init = {method: request.method, headers};
@@ -177,18 +178,18 @@ export function customInit(request, key = '', {audio = '', uploaded = ''} = {}) 
       // The browser writes the head of these itself (a multipart one with its boundary).
       if (named) delete headers[named];
       const flat = Object.entries(request.body && typeof request.body === 'object' ? request.body : {});
-      if (request.bodyType === 'form') { init.body = new URLSearchParams(flat.map(([k, v]) => [k, formText(v)])); }
+      if (request.bodyType === 'form') { init.body = new URLSearchParams(flat.map(([k, v]) => [k, stamp(formText(v))])); }
       else {
         const form = new FormData();
-        for (const [k, v] of flat) { if (audio && typeof v === 'string' && ONLY_FILE.test(v)) form.append(k, referenceFile(audio)); else form.append(k, formText(v)); }
+        for (const [k, v] of flat) { if (audio && typeof v === 'string' && ONLY_FILE.test(v)) form.append(k, referenceFile(audio)); else form.append(k, stamp(formText(v))); }
         init.body = form;
       }
     } else {
-      init.body = JSON.stringify(request.refFile ? eachText(request.body, text => text.replace(BASE64_SLOT, audio).replace(FILE_SLOT, uploaded)) : request.body);
+      init.body = JSON.stringify(eachText(request.body, text => stamp(request.refFile ? text.replace(BASE64_SLOT, audio).replace(FILE_SLOT, uploaded) : text)));
       if (!named) headers['Content-Type'] = 'application/json';
     }
   }
-  return {url: request.url.replace(KEY_SLOT, encodeURIComponent(key)), init};
+  return {url: stamp(request.url.replace(KEY_SLOT, encodeURIComponent(key))), init};
 }
 
 /** The audio's type from its first bytes (services often say application/octet-stream). */
@@ -308,15 +309,28 @@ async function readGradio(response, request, {read, load}) {
   return fromLink(file.url, request, {read, load});
 }
 
+// What services shaped like OpenAI's put in error.code, in plain words (OpenAI's own, and ones speech services use).
+const CODES = {invalid_api_key: '密钥不对、过期了或者被撤销了', insufficient_quota: '额度用完了', quota_exhausted: '额度用完了',
+  rate_limit_exceeded: '请求太频繁了', concurrent_limit: '上一句还没合成完，同时只能合成一句', queue_full: '服务那边排队满了，过一会儿再试',
+  input_too_long: '这句太长了', empty_input: '台词是空的', voice_required: '没有填音色', voice_not_found: '没有这个音色，或者它还没公开',
+  unsupported_format: '不支持这个音频格式', cancelled: '这句在服务那边被取消了', timeout: '合成太久，服务那边不等了'};
+/** A refusal as an error: the status, what the service said (in plain words when its code is known), and its code. */
+export async function refusal(response) {
+  const text = await response.text().catch(() => ''), said = serviceSaid(text);
+  let code = '';
+  try { const json = JSON.parse(text); code = [json?.error?.code, json?.code].find(c => typeof c === 'string') || ''; } catch { /* not JSON */ }
+  const plain = Object.hasOwn(CODES, code) ? CODES[code] : '', words = plain ? plain + (said ? `（${said}）` : '') : said;
+  return Object.assign(Error(`自己的接口回答 HTTP ${response.status}${words ? '：' + words : ''}`), {status: response.status, ...(code ? {code} : {})});
+}
+/** Whether a request carries {{id}}: then it may be sent again with the same one. */
+export const usesId = request => /\{\{\s*id\s*\}\}/.test([request.url, request.headers, JSON.stringify(request.body ?? '')].join('\n'));
+
 /**
  * The audio from an answer. read(response) → Uint8Array (size-limited); load(url) → a Response for a link the answer
  * gave; wave(bytes, rate) → raw samples as a WAV.
  */
 export async function readCustomAnswer(response, request, {read, load, wave}) {
-  if (!response.ok) {
-    const said = serviceSaid(await response.text().catch(() => ''));
-    throw Error(`自己的接口回答 HTTP ${response.status}${said ? '：' + said : ''}`);
-  }
+  if (!response.ok) throw await refusal(response);
   const type = response.headers.get('content-type') || '';
   if (request.answer === 'gradio') return readGradio(response, request, {read, load});
   if (request.answer === 'audio') return audioFrom(await read(response), type, request, {load, read, wave});
@@ -411,11 +425,16 @@ export function customHint(message) {
   if (/连不上自己的接口|无法连接/.test(m)) return '服务开着吗？地址和端口对吗？在手机上用的话，地址里不能写 127.0.0.1，要写电脑的局域网 IP（比如 192.168.1.5），GPT-SoVITS 启动时加 -a 0.0.0.0。';
   if (/enableCorsProxy/.test(m)) return '';
   if (/请求超时/.test(m)) return '第一次换模型可能要等一阵，再点一次试试；还是超时就看看服务的窗口有没有报错。';
+  if (/密码登录|排队太久/.test(m)) return '';
+  if (/没有这个音色/.test(m)) return '「音色」里填的要和服务网站上写的一模一样（比如音色页地址最后那一段），而且那个音色要已经公开。';
+  if (/额度用完/.test(m)) return '等额度恢复，或者到服务的网站上看看还剩多少。';
+  if (/HTTP 429/.test(m)) return '请求太频繁了：过一会儿再试。';
   if (/HTTP 40[13]/.test(m)) return '服务拒绝了：密钥不对或者没填，检查上面的密钥。';
   if (/HTTP 404/.test(m)) return '地址的路径不对：检查接口地址后面那段（比如 GPT-SoVITS 是 /tts）。';
   if (/HTTP 405/.test(m)) return '请求方式不对：试试把 POST 换成 GET，或者反过来。';
   if (/text_lang|prompt_lang|is not supported in version/i.test(m)) return '这个语言这版 GPT-SoVITS 不认：v1 模型不支持粤语、韩语。';
   if (/HTTP 422|HTTP 400/.test(m)) return '服务看不懂请求：对照它的接口文档检查高级设置里请求体的名字；GPT-SoVITS 的话多半是参考音频或参考文本没填。';
+  if (/HTTP 504/.test(m)) return '服务那边排队或者合成太久：过一会儿再试。';
   if (/HTTP 5\d\d/.test(m)) return '服务自己出错了：看看服务的窗口里报了什么。';
   if (/是 text\/html|一个网页/.test(m)) return '回来的是网页：接口地址的路径不对，点「自动识别」或者对照它的接口文档改。';
   if (/不是音频|不是 JSON|里没有/.test(m)) return '检查高级设置里的「回答是什么」和「在 JSON 的哪里」。';
