@@ -955,7 +955,7 @@ export function renderPictures(message, marker, {passive = false, pictures = {}}
     if (passive) {
       const record = pictures[tag.hash], versions = record?.versions || (record?.url ? [record] : []);
       const picture = versions[Math.min(versions.length - 1, Math.max(0, record?.index ?? versions.length - 1))];
-      out += message.slice(at, tag.start) + (picture?.url ? `<img src="${escapeHTML(picture.url)}" alt="${escapeHTML(tag.prompt)}" loading="lazy">` : '');
+      out += message.slice(at, tag.start) + (picture?.url ? `<img data-sttts-plain src="${escapeHTML(picture.url)}" alt="${escapeHTML(tag.prompt)}" loading="lazy">` : '');
       at = tag.end; continue;
     }
     out += message.slice(at, tag.start) + `<span class="sttts-pic" data-sttts-pic="${tag.index}" data-sttts-hash="${escapeHTML(tag.hash)}" data-sttts-token="${escapeHTML(marker)}"></span>`;

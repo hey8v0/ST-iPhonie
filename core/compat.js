@@ -44,3 +44,13 @@ export function installCompat(g = globalThis) {
   define(g, 'structuredClone', value => clone(value, new Map()));
 }
 installCompat();
+
+/**
+ * The bytes of a Blob as one of this window: a file picked in the phone is the frame's (instanceof Blob says no to it).
+ * Throws when value is no Blob. The end is given as a number: Chromium before 141 (still the core of many browsers and
+ * Android WebViews) took a passed undefined as 0, and every song, sound and model came out an empty file.
+ */
+export function ownBlob(value, type = value?.type || '') {
+  const native = Blob.prototype;
+  return native.slice.call(value, 0, Object.getOwnPropertyDescriptor(native, 'size').get.call(value), type);
+}

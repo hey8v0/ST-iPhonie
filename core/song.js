@@ -83,6 +83,17 @@ export function singTime(line) {
   const s = String(line ?? ''), wide = s.match(WIDE)?.length || 0, words = s.replace(WIDE, ' ').split(/[^\p{L}\p{N}']+/u).filter(Boolean).length;
   return Math.max(1.6, (wide + words * 1.4) * 0.36);
 }
+/** The lengths a song can be asked to be, besides one that follows its words. */
+export const SONG_SECONDS = Object.freeze([30, 60, 90, 120, 150, 180, 210, 240, 300]);
+/**
+ * How long a song is asked to be, in seconds: the length chosen for it; else what its words take, with room for an intro, the breaks between
+ * parts and an ending (asked for less, a service cuts the song off before its words are sung); else, with no words, two minutes.
+ */
+export function songLength(draft = {}) {
+  if (Number(draft.seconds) > 0) return Math.min(600, Math.round(Number(draft.seconds)));
+  const sections = draft.instrumental ? [] : songSections(draft.lyrics), sung = sections.reduce((n, s) => n + s.lines.filter(sungLine).reduce((m, line) => m + singTime(line), 0), 0);
+  return sung ? Math.min(480, Math.max(30, Math.ceil((sung * 1.2 + sections.length * 8 + 16) / 10) * 10)) : SONG_LENGTHS.mid.seconds;
+}
 const lrcTime = at => { const s = Math.max(0, at), m = Math.floor(s / 60); return `[${String(m).padStart(2, '0')}:${(s - m * 60).toFixed(2).padStart(5, '0')}]`; };
 const INSTRUMENTAL_SECONDS = 8;
 

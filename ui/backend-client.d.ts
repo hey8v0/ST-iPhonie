@@ -410,7 +410,7 @@ export interface MusicSettings { writing: Omit<SongForm, 'about' | 'who' | 'inst
 export interface SongForm { about?: string; who?: string; story?: boolean; instrumental?: boolean; language?: string; genre?: string; wording?: string; voice?: string; length?: 'short' | 'mid' | 'long'; }
 export interface SongDraft { id: string; kind: 'draft'; at: number; updatedAt: number; title: string; style: string; lyrics: string; instrumental: boolean; language: string; who: string; about: string; seconds: number; songs: string[]; state?: 'singing'; note?: string; job?: {engine: string; model: string; task: string; at: number}; }
 export interface SongWorkflowInfo { lyrics: string; style: string; output: string; seconds: number; seeds: number; fields: {at: string; title: string; text: string}[]; }
-export interface SingOption { id: string; name: string; ready: boolean; model: string; price: {free: boolean; text: string}; }
+export interface SingOption { id: string; name: string; ready: boolean; model: string; price: {free: boolean; text: string}; /** Whether the length asked for (SongDraft.seconds) reaches the service. */ timed: boolean; }
 export interface MusicSong { id: string; kind: 'song'; at: number; title: string; artist: string; origin: 'file' | 'source'; source?: string; songId?: string; lyric?: string; size?: number; mime?: string; }
 export interface MusicFound { source: string; sourceName: string; id: string; title: string; artist: string; }
 /** An album or an artist a search found (an album's artist; how many songs, when the source says). */

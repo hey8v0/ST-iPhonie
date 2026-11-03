@@ -1,4 +1,5 @@
 import {withProxyHeaders, noTavernProxy} from './proxy-url.js';
+import { ownBlob } from './compat.js';
 import { normalizeNarration, NARRATOR } from './narration.js';
 import {RequestLog} from './request-log.js';
 import {PROMPT_BLOCKS, normalizePromptRules} from './prompt-rules.js';
@@ -1905,7 +1906,7 @@ export class TTSBackend {
                 return row;
             }
             let blob;
-            try { blob = Blob.prototype.slice.call(value.blob, 0, undefined, value.blob?.type || ''); } catch { throw Error(`「${row.title}」不是能用的音频文件`); }
+            try { blob = ownBlob(value.blob); } catch { throw Error(`「${row.title}」不是能用的音频文件`); }
             if (!blob.size) throw Error(`「${row.title}」是空文件`);
             if (blob.size > MUSIC_LIMITS.file) throw Error(`「${row.title}」太大了（一首最多 ${MUSIC_LIMITS.file / 1024 / 1024} MB）`);
             const type = String(blob.type || '').toLowerCase();
@@ -2042,10 +2043,9 @@ export class TTSBackend {
         const at = Date.now(), rows = (Array.isArray(list) ? list : [list]).map((value, i) => {
             const row = soundRow(value);
             if (!row.name) throw Error('给声音起个名字');
-            // Files selected in the phone iframe belong to another window, so instanceof Blob rejects them.
-            // Native slice validates Blob's internal data across realms and gives storage a local Blob.
+            // Files selected in the phone iframe belong to another window: core/compat.js ownBlob.
             let blob;
-            try { blob = Blob.prototype.slice.call(value?.blob, 0, undefined, value?.blob?.type || ''); }
+            try { blob = ownBlob(value?.blob); }
             catch { throw Error(`「${row.name}」不是能用的音频文件`); }
             if (!blob.size) throw Error(`「${row.name}」不是能用的音频文件`);
             if (blob.size > SOUND_LIMITS.file) throw Error(`「${row.name}」太大了（单个声音最多 ${SOUND_LIMITS.file / 1024 / 1024} MB）`);

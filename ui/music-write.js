@@ -4,17 +4,20 @@ import {esc, btn, field, input, textArea, select, toggle, heading, groupTitle, e
 import {describeSongWorkflow} from '../core/song-comfy.js';
 import {icon} from './icons.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
-import {SONG_LANGUAGES, SONG_GENRES, SONG_WORDINGS, SONG_VOICES, SONG_LENGTHS, SONG_LIMITS, normalizeSongForm} from '../core/song.js';
+import {SONG_LANGUAGES, SONG_GENRES, SONG_WORDINGS, SONG_VOICES, SONG_LENGTHS, SONG_LIMITS, SONG_SECONDS, songLength, normalizeSongForm} from '../core/song.js';
 
 const AUDIO_FILES = 'audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac';
 const SUNO = 'https://suno.com/create';
 const CHOICES = {language: SONG_LANGUAGES, genre: SONG_GENRES, wording: SONG_WORDINGS, voice: SONG_VOICES};
 /** Language is one choice; the others can be several. */
 const parts = value => String(value ?? '').split(/[、,，]/).map(s => s.trim()).filter(Boolean);
+const clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 export function writePanel(ctx, {v, go}) {
   const {api} = ctx;
   let drafts = [], form = null, draft = null, options = [], songs = [], swipe = null, working = '', engine = '', undo = null, shownState = '';
+  // How far ComfyUI said it was ([draft id, done, of]), kept over a redraw; 唱出来 pressed and the service not asked yet.
+  let stepOf = null, starting = false;
   const stateOf = d => JSON.stringify([d?.state || '', d?.note || '', d?.songs || []]);
 
   // ---------- The songs written ----------
@@ -73,7 +76,7 @@ export function writePanel(ctx, {v, go}) {
   async function open(id) {
     const row = await api.getSongDraft(id);
     if (!row) throw Error('这首歌的草稿已经删掉了');
-    draft = row; working = ''; undo = null; shownState = stateOf(row);
+    draft = row; working = ''; undo = null; shownState = stateOf(row); starting = false;
     await readAround();
     go('draft', true);
   }
@@ -83,18 +86,30 @@ export function writePanel(ctx, {v, go}) {
     // Gone while that was read.
     if (v.disposed || !draft) return;
     options = api.singOptions(draft);
-    const ready = options.filter(o => o.ready);
-    if (!ready.some(o => o.id === engine)) { const last = api.getState().music.sing.engine; engine = (ready.find(o => o.id === last) || ready[0])?.id || ''; }
+    // One that can sing now is picked; with none, the one used last (or the first) shows where its key goes.
+    const last = api.getState().music.sing.engine, usable = options.filter(o => o.ready || o.id === 'comfy' && last === 'comfy');
+    if (!usable.some(o => o.id === engine)) engine = (usable.find(o => o.id === last) || usable[0] || options.find(o => o.id === (engine || last)) || options[0])?.id || '';
   }
   const priceOf = id => options.find(o => o.id === id)?.price;
+  /** One's own ComfyUI needs no key: it is set up on the way. */
+  const canSing = () => engine === 'comfy' || !!options.find(o => o.id === engine)?.ready;
   function singBlock() {
-    if (draft.state === 'singing') return `<p class="write-singing" role="status">${icon('music')}<span>正在唱……通常要几十秒到几分钟。可以先去做别的，做好了会提醒你。</span></p><div class="actions" style="margin:6px 0 0">${btn('write-cancel', '不等了', 'secondary small')}</div>`;
-    const ready = options.filter(o => o.ready), note = draft.note ? `<p class="hint error-copy" role="alert">${esc(draft.note)}</p>` : '';
-    if (!ready.length && engine !== 'comfy') return `${note}<p class="hint" style="margin-top:0">还没有能唱的服务，填一家的密钥就能用。${priceOf('stepfun')?.free ? '阶跃星辰限时免费到 11 月 8 日。' : ''}</p><div class="actions" style="margin:6px 0 0">${btn('write-engines', icon('next') + '去填密钥', 'secondary')}${btn('write-comfy', '用自己的 ComfyUI', 'secondary')}</div>`;
-    return `${note}${field('用哪家唱', select('draft-engine', engine, options.filter(o => o.ready || o.id === 'comfy').map(o => [o.id, o.name])))}<p class="hint" data-sing-price>${esc(priceOf(engine)?.text || '')}</p>
-      <div data-sing-extra>${comfyRow()}</div>
-      <div class="actions" style="margin:6px 0 0">${btn('write-sing', icon('play', true) + (draft.songs.length ? '再唱一版' : '唱出来'), 'primary', working ? 'disabled' : '')}</div>`;
+    if (draft.state === 'singing') return `<p class="write-singing" role="status">${icon('music')}<span>${singingText()}</span></p><div class="actions" style="margin:6px 0 0">${btn('write-cancel', '不等了', 'secondary small')}</div>`;
+    const note = draft.note ? `<p class="hint error-copy" role="alert">${esc(draft.note)}</p>` : '';
+    // Every service is in the list, so none seems gone: one without its key says so, and leads to its card.
+    return `${note}${field('用哪家唱', select('draft-engine', engine, options.map(o => [o.id, o.ready || o.id === 'comfy' ? o.name : o.name + ' · 没填密钥'])))}<p class="hint" data-sing-price>${esc(priceOf(engine)?.text || '')}</p>
+      <div data-sing-extra>${singExtra()}</div>`;
   }
+  /** What goes with the one chosen: how long, ComfyUI's settings, and singing, or where to fill in its key. */
+  const singExtra = () => lengthRow() + comfyRow() + `<div class="actions" style="margin:6px 0 0">${canSing() ? btn('write-sing', icon('play', true) + (draft.songs.length ? '再唱一版' : '唱出来'), 'primary', working ? 'disabled' : '') : btn('write-engines', icon('next') + '去填密钥', 'secondary')}</div>`;
+  const autoLength = () => `${!draft.instrumental && draft.lyrics.trim() ? '按歌词' : '自动'}，约 ${clock(songLength({...draft, seconds: 0}))}`;
+  /** How long it is asked to be, where the service takes a length: as long as the words take, or a length chosen. */
+  const lengthRow = () => {
+    if (!options.find(o => o.id === engine)?.timed) return '';
+    const now = draft.seconds || 0, steps = now && !SONG_SECONDS.includes(now) ? [...SONG_SECONDS, now].sort((a, b) => a - b) : SONG_SECONDS;
+    return field('时长', select('draft-seconds', now, [[0, autoLength()], ...steps.map(s => [s, clock(s)])]),
+      '按歌词：估一下唱完这些词要多久，留出前奏、间奏和结尾。\n\n比歌词短的话，后面的词唱不到。用自己的 ComfyUI 工作流时，工作流里的时长也按这里的改。');
+  };
   const comfyRow = () => {
     if (engine !== 'comfy') return '';
     const s = api.getState().music.sing;
@@ -112,7 +127,7 @@ export function writePanel(ctx, {v, go}) {
       try { own = s.comfyWorkflow ? describeSongWorkflow(s.comfyWorkflow, s.comfyMap) : null; } catch { /* kept from something else: imported again below */ }
       const box = (key, label, value) => field(label, select('song-map-' + key, value, [['', '没有'], ...own.fields.map(f => [f.at, f.title])]));
       return `${own ? `<p class="hint write-own-name">${esc(s.comfyName || '导入的工作流')}</p>${box('lyrics', '歌词填到', own.lyrics)}${box('style', '风格填到', own.style)}
-          <p class="hint${own.output ? '' : ' error-copy'}">${own.output ? `音频从「${esc(own.output)}」取；时长 ${own.seconds} 处、种子 ${own.seeds} 处跟着改，别的都照工作流。` : '这个工作流没有保存音频的节点，唱不出来'}</p>` : ''}
+          <p class="hint${own.output ? '' : ' error-copy'}">${own.output ? `音频从「${esc(own.output)}」取；${own.seconds ? `时长 ${own.seconds} 处按写歌页选的改，` : ''}种子 ${own.seeds} 处每次换，别的都照工作流。` : '这个工作流没有保存音频的节点，唱不出来'}</p>` : ''}
         <div class="key-actions"><label class="file-pick"><input type="file" accept=".json,application/json" data-song-workflow-file aria-label="导入工作流文件"><span>${icon('add')}${own ? '换一个文件' : '导入文件'}</span></label>${btn('comfy-song-list', '从 ComfyUI 读取', 'secondary')}</div>
         <div data-song-list>${list}</div>`;
     }
@@ -210,6 +225,8 @@ export function writePanel(ctx, {v, go}) {
     if (!draft) return;
     const row = await api.getSongDraft(draft.id).catch(() => null);
     if (!row || !draft) return;
+    // Read before the service was asked: it would show 唱出来 again for a moment.
+    if (starting) { if (!row.state && !row.note && row.songs.length === draft.songs.length) return; starting = false; }
     const state = stateOf(row);
     if (state === shownState) return;
     shownState = state;
@@ -231,12 +248,25 @@ export function writePanel(ctx, {v, go}) {
   v.on('change', '[data-field="write-story"]', el => { form.story = el.checked; });
   v.on('change', '[data-field="write-instrumental"]', el => { form.instrumental = el.checked; renderForm(); });
   v.on('input', '[data-field="draft-title"],[data-field="draft-style"],[data-field="draft-lyrics"]', el => { if (draft) draft[el.dataset.field.slice(6)] = el.value; });
-  v.on('change', '[data-field="draft-title"],[data-field="draft-style"],[data-field="draft-lyrics"]', () => { save().catch(fail); });
+  v.on('change', '[data-field="draft-title"],[data-field="draft-style"],[data-field="draft-lyrics"]', el => {
+    save().catch(fail);
+    // New words, a new length to sing them in.
+    const box = v.root.querySelector('[data-field="draft-seconds"]');
+    if (el.dataset.field === 'draft-lyrics' && box) box.options[0].textContent = autoLength();
+  });
   v.on('change', '[data-field="draft-engine"]', el => {
     engine = el.value;
     const line = v.root.querySelector('[data-sing-price]'), extra = v.root.querySelector('[data-sing-extra]');
     if (line) line.textContent = priceOf(engine)?.text || '';
-    if (extra) extra.innerHTML = comfyRow();
+    if (extra) extra.innerHTML = singExtra();
+  });
+  v.on('change', '[data-field="draft-seconds"]', el => {
+    if (!draft) return;
+    draft.seconds = Number(el.value) || 0;
+    options = api.singOptions(draft);
+    const line = v.root.querySelector('[data-sing-price]');
+    if (line) line.textContent = priceOf(engine)?.text || '';
+    api.saveSongDraft({id: draft.id, seconds: draft.seconds}).catch(fail);
   });
   v.on('change', '[data-draft-file]', async el => {
     const file = el.files?.[0];
@@ -269,7 +299,7 @@ export function writePanel(ctx, {v, go}) {
         const f = formOut();
         try {
           api.saveMusic({writing: normalizeSongForm(f)});
-          const row = await api.saveSongDraft({title: '', style: [f.genre, f.voice].filter(Boolean).join(', '), lyrics: '', instrumental: f.instrumental, language: normalizeSongForm(f).language, who: f.who, about: f.about, seconds: SONG_LENGTHS[f.length].seconds});
+          const row = await api.saveSongDraft({title: '', style: [f.genre, f.voice].filter(Boolean).join(', '), lyrics: '', instrumental: f.instrumental, language: normalizeSongForm(f).language, who: f.who, about: f.about, seconds: f.instrumental ? SONG_LENGTHS[f.length].seconds : 0});
           await open(row.id);
         } catch (error) { fail(error); }
         break;
@@ -281,8 +311,8 @@ export function writePanel(ctx, {v, go}) {
           const price = priceOf(engine);
           if (!price) break;
           if (!price.free && !await ctx.confirm('这首要花钱', `${price.text}，确认后再做。`)) break;
-          draft.state = 'singing'; delete draft.note; shownState = stateOf(draft); renderDraft();
-          api.singDraft(draft.id, {engine, allowPaid: true}).catch(error => { if (draft) { delete draft.state; draft.note = error.message; shownState = stateOf(draft); if (go.mode() === 'draft') renderDraft(); } fail(error); });
+          draft.state = 'singing'; delete draft.note; shownState = stateOf(draft); stepOf = null; starting = true; renderDraft();
+          api.singDraft(draft.id, {engine, allowPaid: true}).catch(error => { starting = false; if (draft) { delete draft.state; draft.note = error.message; shownState = stateOf(draft); if (go.mode() === 'draft') renderDraft(); } fail(error); });
         } catch (error) { fail(error); }
         break;
       }
@@ -308,16 +338,18 @@ export function writePanel(ctx, {v, go}) {
         ctx.notify(await copyText(ctx.win, draft[what] || '') ? ({lyrics: '歌词', style: '风格', title: '歌名'}[what] + '复制好了') : '没复制上，长按框里的字手动复制吧');
         break;
       }
-      case 'write-engines': ctx.open('engines'); ctx.editEngine?.('stepfun'); break;
+      case 'write-engines': ctx.open('engines'); ctx.editEngine?.(engine && engine !== 'comfy' ? engine : 'stepfun'); break;
       case 'write-comfy': comfySheet(); break;
       case 'write-delete': if (await ctx.confirm('删除这首？', '只删歌词和风格，做好的歌还留在歌单里。')) { await api.deleteSongDrafts([draft.id]); draft = null; go('main'); } break;
     }
   }
-  /** How far along it is, while ComfyUI is singing: on the page as it stands. */
+  const singingText = () => `正在唱……${stepOf?.[0] === draft?.id ? `第 ${stepOf[1]} / ${stepOf[2]} 步` : '通常要几十秒到几分钟'}。可以先去做别的，做好了会提醒你。`;
+  /** How far along it is, while ComfyUI is singing: on the page as it stands, and after it is drawn again. */
   function step({draft: id, step: [done, of]}) {
+    stepOf = [id, done, of];
     if (draft?.id !== id) return;
     const line = v.root.querySelector('.write-singing span');
-    if (line) line.textContent = `正在唱……第 ${done} / ${of} 步。可以先去做别的，做好了会提醒你。`;
+    if (line) line.textContent = singingText();
   }
   return {load, listHTML, mountList, dropList, renderForm, renderDraft, click, changed, step,
     open: id => open(id).catch(fail),

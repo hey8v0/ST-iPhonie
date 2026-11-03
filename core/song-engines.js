@@ -36,6 +36,14 @@ export function singPrice(engine, {model = '', seconds = 120} = {}, now = Date.n
   const known = REPLICATE_MODELS.find(m => m.id === model);
   return {free: false, text: known ? `大约 ${yuan(known.price)} 美元一首（从 Replicate 账户扣）` : '按这个模型在 Replicate 上的价格收费'};
 }
+/** Whether the length a song is asked to be reaches the service. The others make it as long as they make it: words with ElevenLabs go by its plan. */
+export function singTakesLength(engine, {model = '', instrumental = false} = {}) {
+  if (engine === 'comfy') return true;
+  if (engine === 'lyria') return model !== 'lyria-3-clip-preview';
+  if (engine === 'eleven') return instrumental;
+  if (engine === 'replicate') { const known = REPLICATE_MODELS.find(m => m.id === model); return !known || !!known.duration; }
+  return false;
+}
 
 const sleeper = signal => ms => new Promise((resolve, reject) => {
   if (signal?.aborted) { reject(signal.reason || new DOMException('Aborted', 'AbortError')); return; }
@@ -380,5 +388,6 @@ export async function singSong(engine, request, {fetch, key = '', signal, onTask
   const send = (url, init = {}) => { signal?.throwIfAborted?.(); return fetch(url, {...init, ...(signal ? {signal} : {})}); };
   const result = await run({...request, lyrics: String(request.lyrics ?? '')}, {fetch: send, key, onTask, onStep, wait, task, now});
   const blob = result.blob;
+  if (!blob?.size) throw Error(`${SING_NAMES[engine].replace(/（.*/, '')}给回来的音频是空的（0 字节）：再做一次试试`);
   return {...result, blob: !blob.type || blob.type === 'application/octet-stream' || blob.type === 'binary/octet-stream' ? new Blob([blob], {type: 'audio/mpeg'}) : blob};
 }

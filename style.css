@@ -75,6 +75,11 @@
 #chat .sttts-pic-zoom{all:unset;display:block;width:100%;cursor:zoom-in}
 #chat .sttts-pic-zoom:focus-visible{outline:2px solid var(--sttts-quote);outline-offset:-2px}
 #chat [data-sttts-pic] img{display:block;width:100%;height:auto;cursor:zoom-in}
+/* Themes often size every picture in a message for 表情包 and icons (.mes_text img{max-width:3em!important}), and a story
+   picture was squeezed into a corner of its frame. Its own size wins: #chat thrice outranks the selectors of a theme. */
+#chat#chat#chat [data-sttts-pic] img,#chat#chat#chat img[data-sttts-plain]{display:block!important;width:100%!important;min-width:0!important;max-width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;aspect-ratio:auto!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;float:none!important}
+#chat#chat#chat img[data-sttts-plain]{width:min(100%,560px)!important;margin:10px 0 14px!important}
+#chat#chat#chat .sttts-pic-zoom{display:block!important;width:100%!important;min-width:0!important;max-width:none!important;height:auto!important;margin:0!important;padding:0!important;border:0!important;background:none!important}
 #chat .sttts-pic-removed{display:inline-flex;align-items:center;gap:8px;font-size:.8em;color:color-mix(in srgb,var(--sttts-body) 60%,transparent)}
 #chat .sttts-pic-removed button{font:inherit;color:var(--sttts-quote);background:transparent;border:0;padding:2px 4px;cursor:pointer;min-height:24px}
 #chat [data-sttts-pic][data-state="generating"] .sttts-pic-removed{margin-bottom:6px}

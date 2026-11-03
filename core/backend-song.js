@@ -1,8 +1,8 @@
 // 写歌 in the backend (core/backend.js): the drafts, kept with the music, and singing them. A song is sung here in the tavern page, so it goes
 // on while the phone is put away; what comes back is one more file song in the 歌单. Methods of TTSBackend, kept in a file of their own
 // (installSongs puts them on its prototype).
-import { SONG_LIMITS, SONG_LENGTHS, songDraft, estimateLrc, songSections, singTime } from './song.js';
-import { singSong, singPrice, checkSongComfy, stopComfySong, SING_ENGINES, SING_NAMES, SING_RESUMES, SONG_KEYS } from './song-engines.js';
+import { SONG_LIMITS, songDraft, estimateLrc, songLength } from './song.js';
+import { singSong, singPrice, singTakesLength, checkSongComfy, stopComfySong, SING_ENGINES, SING_NAMES, SING_RESUMES, SONG_KEYS } from './song-engines.js';
 import { audioOutput, describeSongWorkflow } from './song-comfy.js';
 import { parseWorkflow, uiToApi, uiNodeTypes } from './comfy-graph.js';
 import { comfyRecent } from './image-engines.js';
@@ -10,11 +10,6 @@ import { miniBase } from './providers.js';
 
 const clone = value => structuredClone(value);
 const USER_FIELDS = ['title', 'style', 'lyrics', 'instrumental', 'language', 'who', 'about', 'seconds'];
-/** About how long a song comes out, from its words or from the length asked for. */
-function secondsOf(draft) {
-    const sections = songSections(draft.lyrics), sung = sections.reduce((n, s) => n + s.lines.reduce((m, line) => m + singTime(line), 0), 0);
-    return draft.seconds || (sung ? Math.round(sung + sections.length * 4) : SONG_LENGTHS.mid.seconds);
-}
 /** How long a sound file plays, in seconds; 0 when the browser cannot say. */
 function playLength(blob) {
     const Audio = globalThis.Audio, urls = globalThis.URL;
@@ -33,10 +28,10 @@ class Songs {
     songKey(engine) { return SONG_KEYS.includes(engine) ? this.songKeys[engine] || '' : engine === 'eleven' || engine === 'mini' ? this.providers.currentKey(engine) || '' : ''; }
     singModel(engine) { const s = this.settings.music.sing; return engine === 'lyria' ? s.lyriaModel : engine === 'replicate' ? s.replicateModel : ''; }
     singReady(engine) { return engine === 'comfy' ? this.settings.music.sing.comfyOn || this.settings.draw.engine === 'comfy' || this.settings.draw.comfy.url !== 'http://127.0.0.1:8188' : !!this.songKey(engine); }
-    /** Who can sing this song, and about what it costs each. */
+    /** Who can sing this song, about what it costs each, and whether the length asked for reaches it (timed). */
     singOptions(draft = {}) {
-        const seconds = secondsOf(songDraft(draft));
-        return SING_ENGINES.map(id => { const model = this.singModel(id); return { id, name: SING_NAMES[id], ready: this.singReady(id), model, price: singPrice(id, { model, seconds }) }; });
+        const row = songDraft(draft), seconds = songLength(row);
+        return SING_ENGINES.map(id => { const model = this.singModel(id); return { id, name: SING_NAMES[id], ready: this.singReady(id), model, price: singPrice(id, { model, seconds }), timed: singTakesLength(id, { model, instrumental: row.instrumental }) }; });
     }
     /** A draft as the phone sees it: one marked as being sung with nothing singing it here was left behind (the page closed, another device). */
     draftView(row) {
@@ -89,14 +84,14 @@ class Songs {
         if (!SING_ENGINES.includes(engine)) throw Error('先选一家来唱');
         if (!draft.instrumental && !draft.lyrics.trim()) throw Error('还没有歌词，写好了再唱');
         if (engine !== 'comfy' && !this.singReady(engine)) throw Error(`先在「引擎 → ${SING_NAMES[engine]}」填上密钥`);
-        const model = this.singModel(engine), price = singPrice(engine, { model, seconds: secondsOf(draft) });
+        const model = this.singModel(engine), price = singPrice(engine, { model, seconds: songLength(draft) });
         if (!price.free && !allowPaid) throw Object.assign(Error(price.text), { code: 'PAID' });
         this.saveMusic({ sing: { engine } });
         return this.runSong(draft, { engine, model });
     }
     /** What a song goes with once it has come: a song row, its lyrics, a place in its draft. */
     async keepSong(id, draft, blob, lyric = '') {
-        const n = draft.songs.length, seconds = lyric || draft.instrumental ? 0 : await playLength(blob) || secondsOf(draft);
+        const n = draft.songs.length, seconds = lyric || draft.instrumental ? 0 : await playLength(blob) || songLength(draft);
         const { ids } = await this.storeSongs([{ title: (draft.title || '没有名字的歌') + (n ? ` · 第 ${n + 1} 版` : ''), artist: draft.who || '自己写的', blob, lyric: lyric || (draft.instrumental ? '' : estimateLrc(draft.lyrics, seconds)) }]);
         await this.music.change(id, d => { d.songs = [...(d.songs || []), ...ids].slice(-SONG_LIMITS.versions); d.updatedAt = Date.now(); delete d.state; delete d.job; delete d.note; });
         return ids[0];
@@ -108,7 +103,7 @@ class Songs {
             await this.music.change(id, d => { d.state = 'singing'; d.job = { engine, model, task, at: Date.now() }; delete d.note; });
             this.emit('music', { draft: id });
             const c = this.settings.draw.comfy, s = this.settings.music.sing, own = s.comfyOwn && s.comfyWorkflow;
-            const request = { title: draft.title, style: draft.style, lyrics: draft.lyrics, instrumental: draft.instrumental, language: draft.language, seconds: secondsOf(draft), model,
+            const request = { title: draft.title, style: draft.style, lyrics: draft.lyrics, instrumental: draft.instrumental, language: draft.language, seconds: songLength(draft), model,
                 url: engine === 'lyria' ? this.settings.music.sing.lyriaUrl : engine === 'comfy' ? c.url : engine === 'mini' ? miniBase(this.settings.connections.mini) : '', transport: c.loraTransport, ...(engine === 'comfy' && own ? { workflow: s.comfyWorkflow, map: s.comfyMap } : {}) };
             const result = await singSong(engine, request, { fetch: this.songFetch, key: this.songKey(engine), signal: control.signal, task,
                 onStep: (done, of) => this.emit('music', { draft: id, step: [done, of] }),

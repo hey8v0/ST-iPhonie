@@ -38,7 +38,8 @@ export function createSongHost({context, settings, backend, memory = null}) {
     if (!written.title && !written.style) throw Error('模型没有写歌名和风格，可以再试一次');
     return written;
   }
-  const seconds = form => SONG_LENGTHS[normalizeSongForm(form).length].seconds;
+  // A song with words is as long as they take to sing (core/song.js songLength): the length chosen only says how much to write.
+  const seconds = form => form.instrumental === true ? SONG_LENGTHS[normalizeSongForm(form).length].seconds : 0;
   /** The words of a new song, as a new draft. The choices stay for next time. */
   function write(form) {
     return run(async ctx => {
