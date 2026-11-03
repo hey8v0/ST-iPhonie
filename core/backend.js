@@ -33,7 +33,7 @@ import {activeLoraWorkflow} from './comfy-loras.js';
 import {keepOneOutput, switchNodesOff} from './comfy-graph.js';
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases, rolesSeen, ownKeyFor, roleStore } from './routes.js';
-import { cleanAddress, reachService, explainReach, detectService, scanTargets } from './custom-detect.js';
+import { cleanAddress, reachService, explainReach, detectService, scanTargets, findVoiceList, voiceIsName } from './custom-detect.js';
 import { CUSTOM_DEFAULT, CUSTOM_SETS_MAX } from './custom-voice.js';
 import { arrangeRows } from './layers.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
@@ -2944,6 +2944,8 @@ export class TTSBackend {
         let voice = (c.params?.voices || []).find(v => String(v.name || '').trim());
         // None added: the first the service lists.
         if (!voice && c.params?.listUrl) { const listed = await this.providers.voices('custom', c).catch(() => null); if (listed?.voices?.[0]) voice = { name: listed.voices[0].id }; }
+        // Still none where one is needed: what to do, not 「请先选择角色音色」 (there is no role here).
+        if (!voice && /\{\{\s*voice\s*\}\}/.test([c.params?.url, c.params?.body].join('\n'))) throw Error(voiceIsName(c.params) ? '先在下面的「音色」里添加一个音色再试：名字随便起，音色 ID 填服务里的（粘贴音色页的网址也行）' : '先在下面的「音色」里添加一个音色再试：参考音频和它说的话');
         const lang = languageCode(this.settings.general.defaultLanguage || 'zh').split('-')[0] || 'zh';
         const text = ({ zh: '你好，这是一句试音。', ja: 'こんにちは、テストです。', en: 'Hello, this is a test.', ko: '안녕하세요, 테스트입니다.' })[lang] || '你好，这是一句试音。';
         const request = buildRequest('custom', c, { voice: voice ? String(voice.name).trim() : '', language: lang }, { text, emotion: '' });
@@ -2965,12 +2967,28 @@ export class TTSBackend {
     async customDetect(address) {
         const reach = await this.customReach(address);
         if (!reach.ok) return reach;
+        const found = await detectService(reach.base, this.customAsk(reach));
+        // Only the tavern reaches it, so no page asks it straight and an id (Idempotency-Key) has no cross-origin check
+        // to pass: a service that keeps ids does not make a line twice when it is asked again.
+        if (found?.id === 'openai' && reach.via === 'proxy' && !/idempotency-key/i.test(found.params.headers || '')) found.params.headers = [found.params.headers, 'Idempotency-Key: {{id}}'].filter(Boolean).join('\n');
+        return { ...reach, found };
+    }
+    /** How a service that can be reached is asked while it is set up (through the tavern when only it reaches it). */
+    customAsk(reach) {
         const tools = this.providers.customTools(this.customActive());
-        const ask = async path => {
+        return async (path, init) => {
             const target = /^https?:/i.test(path) ? path : reach.base + path;
-            try { const r = await (reach.via === 'proxy' ? tools.proxy(target) : tools.direct(target)); return { status: r.status, ok: r.ok, type: r.headers.get('content-type') || '', text: await r.text() }; } catch { return null; }
+            try { const r = await (reach.via === 'proxy' ? tools.proxy(target, init) : tools.direct(target, init)); return { status: r.status, statusText: r.statusText, ok: r.ok, type: r.headers.get('content-type') || '', text: await r.text() }; } catch { return null; }
         };
-        return { ...reach, found: await detectService(reach.base, ask) };
+    }
+    /** The voices a service lists, for settings that name no list (picked by hand, read from a curl command): {listUrl, count} or null. */
+    async customFindVoices(params) {
+        this.assertOpen();
+        if (String(params?.listUrl || '').trim() || !voiceIsName(params)) return null;
+        let origin = '';
+        try { origin = new URL(String(params.url || '').replace(/^\/proxy\//, '')).origin; } catch { return null; }
+        const reach = await this.customReach(origin);
+        return reach.ok ? findVoiceList(reach.base, this.customAsk(reach)) : null;
     }
     /** No address typed: the addresses where something answers, among those such services usually take. */
     async customScan() {
@@ -3100,7 +3118,7 @@ export class TTSBackend {
             status: () => this.player.snapshot(), subscribe: listener => this.subscribe(listener), levels: () => this.player.sink.levels(),
             pendingRole: () => this.player.pending, stop: () => this.player.stop(), toggle: () => this.player.toggle(), resume: () => this.player.continuePending(),
             customSetList: () => this.customSetList(), saveCustomSet: patch => this.saveCustomSet(clone(patch || {})), selectCustomSet: id => this.selectCustomSet(String(id)), deleteCustomSet: id => this.deleteCustomSet(String(id)),
-            audition: route => this.audition(route), customTest: connection => this.customTest(clone(connection || null)), customReach: address => this.customReach(String(address ?? '')), customDetect: address => this.customDetect(String(address ?? '')), customScan: () => this.customScan(), lineState: line => this.player.lineState(line),
+            audition: route => this.audition(route), customTest: connection => this.customTest(clone(connection || null)), customReach: address => this.customReach(String(address ?? '')), customDetect: address => this.customDetect(String(address ?? '')), customScan: () => this.customScan(), customFindVoices: params => this.customFindVoices(clone(params || {})), lineState: line => this.player.lineState(line),
             setVolume: value => this.savePhone({ volume: value }), getVolume: () => this.player.getVolume(),
             cacheStats: () => this.cache.stats(), clearCache: () => this.clearCache(), listAudio: () => this.cache.list(),
             deleteAudio: async key => { if (this.player.requestKey === key) this.player.stop('音频已删除'); if (this.prepared?.key === key) this.prepared = null; await this.cache.remove(key); this.emit('library', { collection: 'cache' }); },

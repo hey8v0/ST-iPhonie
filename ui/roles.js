@@ -3,6 +3,7 @@ import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {layerSort} from './layer-sort.js';
 import {layerTree} from '../core/layers.js';
 import {lookTest} from '../core/draw.js';
+import {voiceFromLink} from '../core/custom-voice.js';
 import {pickPicture} from './draw-images.js';
 import {VOICE_GENDERS, VOICE_AGES, poolLine, readPoolFile, poolFile, guessVoice} from '../core/auto-voice.js';
 import {saveFile} from '../download.js';
@@ -224,7 +225,7 @@ export function rolesApp(ctx) {
           ${mimo !== 'design' && (voiced || favorites().some(f => f.engine === r.engine)) ? `<div class="actions fav-actions">${favorites().some(f => f.engine === r.engine) ? btn('pick-favorite', icon('heart', true) + '从收藏夹选', 'chip-button') : ''}${voiced ? (isFavorite(r.engine, r.voice) ? '<small class="hint">这个音色已收藏</small>' : btn('pool-add', icon('heart') + '收藏这个音色', 'text-button')) : ''}</div>` : ''}
           ${mimo === 'design'
             ? field('音色描述', textArea('voice', r.voice, 'rows="3" placeholder="例如：二十岁出头的女生，声音清亮，带点慵懒，说话慢悠悠的"'), '用一到四句话描述：性别年龄、音色质感、情绪语气、语速节奏。不要写混响、回声这类后期效果，也不要写“普通”“正常”这种模糊的词。')
-            : field(mimo === 'clone' ? '克隆样本' : r.engine === 'custom' ? '音色' : '音色 ID', input('voice', r.voice, 'text', `placeholder="${mimo === 'clone' ? '填克隆样本的名字，或从列表选择' : r.engine === 'custom' ? '「自己的接口」里音色的名字，或从列表选择' : '粘贴音色 ID 或从列表选择'}" autocomplete="off"`))}
+            : field(mimo === 'clone' ? '克隆样本' : r.engine === 'custom' ? '音色' : '音色 ID', input('voice', r.voice, 'text', `placeholder="${mimo === 'clone' ? '填克隆样本的名字，或从列表选择' : r.engine === 'custom' ? '音色的名字或者音色 ID，或从列表选择' : '粘贴音色 ID 或从列表选择'}" autocomplete="off"`), r.engine === 'custom' ? '「自己的接口」里添加过的音色写它的名字；没添加的，直接填服务认的音色 ID 就行（比如公益站音色页网址的最后一段，粘贴整个网址也可以）。服务列出了音色的，「从列表选」里都有。' : '')}
         </div>
         <details data-group="role-model"><summary>${modelTitle(r)}<small class="fold-note">${esc([modelNote(r), r.language ? languageName(r.language) : '跟随默认'].filter(Boolean).join(' · '))}</small></summary><div class="fold-body">
           ${modelField(r, c, schema)}
@@ -382,6 +383,15 @@ export function rolesApp(ctx) {
     if (el.dataset.field === 'voice') { const n = v.root.querySelector('[data-id-voice]'); if (n) n.textContent = el.value ? voiceLabel(el.value) : '未选择'; }
   });
   // A MiMo model change turns the 音色 field into a description or a clone sample name.
+  // 自己的接口: a voice's page pasted as the voice: its ID is the address's last part.
+  v.on('change', 'input[data-field=voice]', el => {
+    if (current?.engine !== 'custom') return;
+    const id = voiceFromLink(el.value);
+    if (id === el.value) return;
+    el.value = id; current.voice = id; changed();
+    const n = v.root.querySelector('[data-id-voice]'); if (n) n.textContent = id;
+    ctx.notify('取了音色页网址的最后一段：' + id);
+  });
   v.on('change', 'select[data-field]', el => { current[el.dataset.field] = el.value; changed(); if (el.dataset.field === 'model' && current.engine === 'mimo') render(); });
   // A 参考图 whose files are gone (another tavern, a backup without them) shows as none.
   v.root.addEventListener('error', e => { if (e.target.matches?.('.role-ref img')) e.target.remove(); }, true);

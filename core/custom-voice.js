@@ -379,6 +379,17 @@ export function customParams(connection, id) {
   return sets.presets.find(p => p.id === id)?.params || connection?.params;
 }
 
+/** A voice ID typed as the address of the voice's page (公益站 libraries): its last part. Anything else, or a link to
+ *  a file (an audio a service fetches), stays as it is. */
+export function voiceFromLink(value) {
+  const text = String(value ?? '').trim();
+  if (!/^https?:\/\/\S+$/i.test(text)) return value;
+  let last = '';
+  try { last = new URL(text).pathname.split('/').filter(Boolean).pop() || ''; } catch { return value; }
+  if (!last || /\.\w{2,5}$/.test(last)) return value;
+  try { return decodeURIComponent(last); } catch { return last; }
+}
+
 /** The voices of the list, for picking one for a role. */
 export function customVoices(c) {
   return (c.params.voices || []).filter(r => String(r.name || '').trim()).map(r => ({id: String(r.name).trim(), name: String(r.name).trim() + (r.voice ? ' · ' + String(r.voice).split(/[\\/]/).pop().slice(0, 40) : r.ref_file ? ' · 上传的参考音频' : '')}));
@@ -462,7 +473,7 @@ export function customHint(message) {
   if (/没有这个音色/.test(m)) return '「音色」里填的要和服务网站上写的一模一样（比如音色页地址最后那一段），而且那个音色要已经公开。';
   if (/额度用完/.test(m)) return '等额度恢复，或者到服务的网站上看看还剩多少。';
   if (/HTTP 429/.test(m)) return '请求太频繁了：过一会儿再试。';
-  if (/HTTP 40[13]/.test(m)) return '服务拒绝了：密钥不对或者没填，检查上面的密钥。';
+  if (/HTTP 40[13]|密钥不对、过期了或者被撤销了/.test(m)) return '服务拒绝了：密钥不对或者没填，检查上面的密钥。';
   if (/HTTP 404/.test(m)) return '地址的路径不对：检查接口地址后面那段（比如 GPT-SoVITS 是 /tts）。';
   if (/HTTP 405/.test(m)) return '请求方式不对：试试把 POST 换成 GET，或者反过来。';
   if (/text_lang|prompt_lang|is not supported in version/i.test(m)) return '这个语言这版 GPT-SoVITS 不认：v1 模型不支持粤语、韩语。';

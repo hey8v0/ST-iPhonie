@@ -2450,6 +2450,8 @@ button.aui-card:active{transform:scale(.98)}
 @media (prefers-reduced-motion:reduce){.music-now .music-cover::before,.music-tile-disc::before{animation:none}}
 .music-lyrics{overflow-x:hidden}
 .music-selfhost{display:flex;gap:8px;align-items:center}.music-selfhost input{flex:1;min-width:0}.music-selfhost button{flex:none;white-space:nowrap}
+.music-selfhost textarea.custom-box{flex:1;min-width:0;resize:none;field-sizing:content;min-height:0;max-height:8.5em;overflow-y:auto}
+.custom-steps{margin:4px 0 0;padding:0 8px 0 2.2em;font-size:12px;line-height:1.6;color:var(--ink2)}
 /* 预设编辑：折起来的部分在标题右边写一句现在的样子；规则一行一条，点开在弹窗里改 */
 .fold-note{margin-left:auto;min-width:0;max-width:58%;font-size:12px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}

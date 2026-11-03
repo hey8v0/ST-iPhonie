@@ -8,7 +8,7 @@ export {reachService};
 
 const LOOPBACK = /^(localhost|127(\.\d+){3}|\[::1\])$/i;
 // What people paste after the address: the docs page, or the path of the speech call itself.
-const TAIL = /\/(docs|redoc|openapi\.json|tts|tts_to_audio|v1\/audio\/speech|audio\/speech|v1\/tts|v1|voice(\/\w+)?|inference_\w+|api\/tts-generate|gradio_api(\/.*)?|ui|index\.html)\/?$/i;
+const TAIL = /\/(docs\/api|api-docs|api\/docs|docs|redoc|swagger(-ui)?(\.html)?|api-reference|openapi\.json|login|tts|tts_to_audio|v1\/audio\/speech|audio\/speech|v1\/tts|v1|voice(\/\w+)?|inference_\w+|api\/tts-generate|gradio_api(\/.*)?|ui|index\.html)\/?$/i;
 
 /** An address as people type it, made one that can be asked: {base, notes} or {error}. */
 export function cleanAddress(raw) {
@@ -302,6 +302,39 @@ export function fromCurl(source) {
 
 // ---------- telling which service it is ----------
 const template = id => CUSTOM_TEMPLATES.find(t => t.id === id);
+// Where services list their voices when they say nothing of it (OpenAI-shaped ones, FastAPI ones, a few others).
+const VOICE_LISTS = ['/v1/audio/voices', '/v1/voices', '/voices', '/api/voices', '/speakers', '/v1/speakers', '/api/speakers', '/speakers_list'];
+/** The voices a service lists, from the first of those addresses that gives some: {listUrl, count} or null. */
+export async function findVoiceList(base, ask) {
+  const answers = await Promise.all(VOICE_LISTS.map(path => ask(path).catch(() => null)));
+  for (const [i, r] of answers.entries()) {
+    if (!r?.ok) continue;
+    let json = null;
+    try { json = JSON.parse(r.text); } catch { continue; }
+    // A refusal in JSON is not a list of voices named error and detail.
+    if (!json || typeof json !== 'object' || !Array.isArray(json) && ('error' in json || 'detail' in json)) continue;
+    const count = readVoiceList(json).length;
+    if (count) return {listUrl: base + VOICE_LISTS[i], count};
+  }
+  return null;
+}
+/** Whether a settings' {{voice}} is a name the service knows (so a list of them helps), not a reference audio. */
+export const voiceIsName = params => /\{\{\s*voice\s*\}\}/.test([params?.url, params?.body].join('\n')) && !/\{\{\s*ref_(text|audio)/.test([params?.url, params?.body].join('\n'));
+/** Refused for want of a key: a 401 or 403 (one the tavern passed on as 400 「Unauthorized」 too), or a key named in the words. */
+function wantsKey(r) {
+  if (!r) return false;
+  if ([401, 403].includes(r.status) || /^(unauthori[sz]ed|forbidden)$/i.test(r.statusText || '')) return true;
+  let json = null;
+  try { json = JSON.parse(r.text); } catch { return false; }
+  return /api[ _-]?key|unauthori[sz]ed|not authenticated|authentication|bearer/i.test(JSON.stringify([json?.error, json?.detail, json?.message]));
+}
+/** An answer to an empty request that is OpenAI's way of refusing it: the route is there, shaped like OpenAI's. */
+function refusesLikeOpenAI(r) {
+  if (!r || ![400, 401, 403, 422].includes(r.status)) return false;
+  let json = null;
+  try { json = JSON.parse(r.text); } catch { return false; }
+  return !!json && typeof json === 'object' && (json.error !== undefined || json.detail !== undefined);
+}
 /** Paths that answer in a way only one service does, for those that publish nothing (Flask and the like). */
 const PROBES = [
   ['fish', '/v1/references/list?format=json', j => Array.isArray(j?.reference_ids)],
@@ -324,10 +357,11 @@ export async function detectService(base, ask) {
   const finish = async (found, extra = {}) => {
     const out = {...found, unknown: found.unknown || [], ...extra};
     if (out.params.listUrl) { const list = await read(out.params.listUrl); if (list?.ok && list.data) out.voices = readVoiceList(list.data, out.params.listPath).length; }
+    else if (voiceIsName(out.params)) { const list = await findVoiceList(base, ask); if (list) { out.params = {...out.params, listUrl: list.listUrl, listPath: ''}; out.voices = list.count; } }
     return out;
   };
   const known = (id, more = {}) => { const t = template(id); return finish({id, name: t.name, params: {...t.fill(base), ...more}}); };
-  const openai = async () => {
+  const openai = async (extra = {}) => {
     const [voices, others, models] = await Promise.all([read('/v1/audio/voices'), read('/v1/voices'), read('/v1/models')]);
     const list = models?.ok ? models.data?.data || models.data?.models : null, ids = Array.isArray(list) ? list.map(m => String(m?.id ?? m)) : [];
     if (ids.includes('kokoro')) return known('kokoro');
@@ -336,7 +370,7 @@ export async function detectService(base, ask) {
     if (model) params.body = params.body.replace('tts-1', model);
     if (voices?.ok && voices.data) params.listUrl = base + '/v1/audio/voices';
     else if (others?.ok && others.data) params.listUrl = base + '/v1/voices';
-    return finish({id: 'openai', name: t.name, params});
+    return finish({id: 'openai', name: t.name, params}, extra);
   };
   // A Gradio app first: new ones publish /openapi.json too, about Gradio's own routes.
   const gradio5 = (await read('/gradio_api/info'))?.data, info = gradio5?.named_endpoints ? gradio5 : (await read('/info'))?.data;
@@ -369,6 +403,10 @@ export async function detectService(base, ask) {
   const title = home?.text?.match(/<title[^>]*>([^<]*)/i)?.[1] || '';
   const named = TITLES.find(([, word]) => word.test(title));
   if (named) return known(named[0]);
+  // Nothing published, no path known: a speech route shaped like OpenAI's (公益站, relays) refuses an empty request the
+  // way OpenAI does. Nothing is made or paid for. Refused for want of a key: it says so.
+  const empty = await ask('/v1/audio/speech', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+  if (refusesLikeOpenAI(empty)) return openai(wantsKey(empty) ? {needsKey: true} : {});
   return null;
 }
 

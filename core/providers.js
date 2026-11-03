@@ -265,8 +265,8 @@ export class Providers{
  async tavern(url,init,signal){if(Object.keys(init?.headers||{}).some(h=>/^authorization$/i.test(h))&&await(this.behindLogin??=tavernLogin(this.fetcher,this.page)))throw Object.assign(Error(KEY_BEHIND_LOGIN),{login:true});return this.proxy(url,init,signal);}
  /** How a service is asked while it is being set up (core/custom-detect.js): quickly, with the key if there is one. */
  customTools(set){const key=this.customKey(set),headers=key?{Authorization:'Bearer '+key}:{};
-  return {direct:(url,init={})=>this.fetcher(url,{credentials:'omit',referrerPolicy:'no-referrer',...(init.mode?{}:{headers}),signal:AbortSignal.timeout(init.mode?2500:6000),...init}),
-   proxy:this.proxy?url=>this.tavern(url,{method:'GET',headers},AbortSignal.timeout(8000)):null};}
+  return {direct:(url,init={})=>this.fetcher(url,{credentials:'omit',referrerPolicy:'no-referrer',signal:AbortSignal.timeout(init.mode?2500:6000),...init,...(init.mode?{}:{headers:{...headers,...init.headers}})}),
+   proxy:this.proxy?(url,init={})=>this.tavern(url,{method:'GET',...init,headers:{...headers,...init.headers}},AbortSignal.timeout(8000)):null};}
  /** A Gradio app takes a reference audio by where it keeps it: uploaded once a page, asked again after anything failed. */
  async gradioUpload(request,audio,signal){
   const root=gradioRoot(request.url),slot=root+'|'+request.refFile;this.gradioFiles??=new Map();

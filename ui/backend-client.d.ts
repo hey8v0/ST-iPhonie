@@ -814,6 +814,8 @@ export interface BackendFacade {
     customScan(): Promise<string[]>;
     /** 自己的接口 → 试一试: says one line with the first voice of these (unsaved) settings. */
     customTest(connection?: unknown): Promise<{ voice: string; bytes: number; type: string }>;
+    /** The voices a service lists, for settings that name no list (picked by hand, a curl command): where, and how many. */
+    customFindVoices(params: Record<string, unknown>): Promise<{ listUrl: string; count: number } | null>;
     /** 自己的接口's saved sets: never a key, only its last characters. */
     customSetList(): Array<{ id: string; name: string; current: boolean; url: string; service: string; voices: number; configured: boolean; tail: string }>;
     /** With an id: renames that set. Without: a new empty set, in use from now on. */

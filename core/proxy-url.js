@@ -61,6 +61,12 @@ export async function reachService(base, {direct, proxy, page = globalThis.locat
   return {via: '', proxy: state, state: mixed ? 'mixed' : open ? 'blocked' : loop && !LOOPBACK.test(page?.hostname || 'localhost') ? 'loopback' : 'down'};
 }
 
+/**
+ * The tavern's proxy passes a service's 401 on as 400 with its words, 「Unauthorized」 (a 401 would make the browser drop
+ * the tavern's own login). Put back as the 401 it was, so a refused key reads as one for every engine that goes through
+ * the tavern. (Over HTTP/2 the words do not come along: the services' own words still say it.)
+ */
+export const unauthorizedBack = r => r && r.status === 400 && /^unauthori[sz]ed$/i.test(r.statusText || '') ? new Response(r.body, {status: 401, statusText: 'Unauthorized', headers: r.headers}) : r;
 /** Tavern POST routes require its CSRF headers; never attach them to an upstream API. */
 export function withProxyHeaders(send, tavernHeaders) {
  return (input, init = {}, ...rest) => {
@@ -77,6 +83,6 @@ export function withProxyHeaders(send, tavernHeaders) {
    const bearer = headers.get('Authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
    if (bearer) { headers.delete('Authorization'); headers.set('api-key', bearer); }
   }
-  return send(input, {...init, credentials: 'same-origin', headers}, ...rest);
+  return Promise.resolve(send(input, {...init, credentials: 'same-origin', headers}, ...rest)).then(unauthorizedBack);
  };
 }
