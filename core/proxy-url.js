@@ -43,13 +43,16 @@ export async function tavernLogin(fetcher, page = globalThis.location) {
 
 const LOOPBACK = /^(localhost|127(\.\d+){3}|\[::1\])$/i;
 /**
- * Whether and how a service can be asked. direct(url, init): the browser's own request; proxy(url): through the tavern.
+ * Whether and how a service can be asked. direct(url, init): the browser's own request; proxy(url): through the tavern;
+ * alsoTry: [path, init] of its API, asked straight when its own page cannot be.
  * {via: 'direct' | 'proxy' | '', state: 'ok' | 'blocked' | 'mixed' | 'loopback' | 'down', proxy: 'on' | 'off' | 'missing' | 'login' | 'none'}
  * (off: the tavern can turn it on; missing: this tavern has none; login: a key may not go through it, proxy threw {login}.)
  */
-export async function reachService(base, {direct, proxy, page = globalThis.location}) {
+export async function reachService(base, {direct, proxy, page = globalThis.location, alsoTry = []}) {
   const target = new URL(base), loop = LOOPBACK.test(target.hostname), mixed = page?.protocol === 'https:' && target.protocol === 'http:' && !loop;
   if (!mixed) { try { await direct(base); return {via: 'direct', state: 'ok', proxy: 'none'}; } catch { /* no answer it may read */ } }
+  // A site whose own page lets no other page in (a sign-in page) may still let them ask its API: alsoTry, [path, init].
+  if (!mixed) for (const [path, init] of alsoTry) { try { await direct(base + path, init); return {via: 'direct', state: 'ok', proxy: 'none'}; } catch { /* nor there */ } }
   // An answer that may not be read still shows the service is there.
   let open = false;
   if (!mixed) { try { await direct(base, {mode: 'no-cors'}); open = true; } catch { /* not there, for this device */ } }

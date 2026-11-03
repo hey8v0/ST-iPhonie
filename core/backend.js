@@ -33,7 +33,7 @@ import {activeLoraWorkflow} from './comfy-loras.js';
 import {keepOneOutput, switchNodesOff} from './comfy-graph.js';
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases, rolesSeen, ownKeyFor, roleStore } from './routes.js';
-import { cleanAddress, reachService, explainReach, detectService, scanTargets, findVoiceList, voiceIsName } from './custom-detect.js';
+import { cleanAddress, reachService, explainReach, detectService, scanTargets, findVoiceList, voiceIsName, API_PROBES } from './custom-detect.js';
 import { CUSTOM_DEFAULT, CUSTOM_SETS_MAX } from './custom-voice.js';
 import { arrangeRows } from './layers.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
@@ -2960,7 +2960,7 @@ export class TTSBackend {
         this.assertOpen();
         const { base, notes, error } = cleanAddress(address);
         if (error || !base) return { ok: false, message: error || '先填服务的地址', notes };
-        const reach = await reachService(base, this.providers.customTools(this.customActive()));
+        const reach = await reachService(base, { ...this.providers.customTools(this.customActive()), alsoTry: API_PROBES });
         return reach.via ? { ok: true, base, notes, via: reach.via } : { ok: false, base, notes, ...explainReach(reach, base) };
     }
     /** 自动识别: which service answers there, and the settings for it (nothing is saved here). */
@@ -2968,9 +2968,9 @@ export class TTSBackend {
         const reach = await this.customReach(address);
         if (!reach.ok) return reach;
         const found = await detectService(reach.base, this.customAsk(reach));
-        // Only the tavern reaches it, so no page asks it straight and an id (Idempotency-Key) has no cross-origin check
-        // to pass: a service that keeps ids does not make a line twice when it is asked again.
-        if (found?.id === 'openai' && reach.via === 'proxy' && !/idempotency-key/i.test(found.params.headers || '')) found.params.headers = [found.params.headers, 'Idempotency-Key: {{id}}'].filter(Boolean).join('\n');
+        // The empty request went with an id (Idempotency-Key) and got there (the service lets pages send one, or the tavern
+        // asked): every line carries one, and a service that keeps ids does not make a line twice when asked again.
+        if (found?.id === 'openai' && found.ids && !/idempotency-key/i.test(found.params.headers || '')) found.params.headers = [found.params.headers, 'Idempotency-Key: {{id}}'].filter(Boolean).join('\n');
         return { ...reach, found };
     }
     /** How a service that can be reached is asked while it is set up (through the tavern when only it reaches it). */

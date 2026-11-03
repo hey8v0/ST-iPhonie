@@ -318,6 +318,11 @@ export async function findVoiceList(base, ask) {
   }
   return null;
 }
+/**
+ * Where a speech service's API may let other pages ask it although its own page does not (a 公益站 behind a sign-in
+ * page): an empty speech request (refused, nothing made or paid for) and the descriptions services publish.
+ */
+export const API_PROBES = Object.freeze([['/v1/audio/speech', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}], ['/openapi.json'], ['/gradio_api/info']]);
 /** Whether a settings' {{voice}} is a name the service knows (so a list of them helps), not a reference audio. */
 export const voiceIsName = params => /\{\{\s*voice\s*\}\}/.test([params?.url, params?.body].join('\n')) && !/\{\{\s*ref_(text|audio)/.test([params?.url, params?.body].join('\n'));
 /** Refused for want of a key: a 401 or 403 (one the tavern passed on as 400 「Unauthorized」 too), or a key named in the words. */
@@ -404,9 +409,14 @@ export async function detectService(base, ask) {
   const named = TITLES.find(([, word]) => word.test(title));
   if (named) return known(named[0]);
   // Nothing published, no path known: a speech route shaped like OpenAI's (公益站, relays) refuses an empty request the
-  // way OpenAI does. Nothing is made or paid for. Refused for want of a key: it says so.
-  const empty = await ask('/v1/audio/speech', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
-  if (refusesLikeOpenAI(empty)) return openai(wantsKey(empty) ? {needsKey: true} : {});
+  // way OpenAI does. Nothing is made or paid for. Refused for want of a key: it says so. Asked with an id
+  // (Idempotency-Key) first: answered so, the service lets pages send one (or the tavern asks it), and every line can
+  // carry one; refused before it got there (a cross-origin check that does not allow it), asked again without.
+  const probe = more => ask('/v1/audio/speech', {method: 'POST', headers: {'Content-Type': 'application/json', ...more}, body: '{}'});
+  let empty = await probe({'Idempotency-Key': crypto.randomUUID()});
+  const ids = refusesLikeOpenAI(empty);
+  if (!ids) empty = await probe({});
+  if (refusesLikeOpenAI(empty)) return openai({...(wantsKey(empty) ? {needsKey: true} : {}), ...(ids ? {ids: true} : {})});
   return null;
 }
 
