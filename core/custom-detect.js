@@ -3,7 +3,8 @@
 // gets its one-click format; anything else can be told by a curl command from its docs. What cannot be read is also
 // told apart here: a service that is not running, one that lets no web page ask it, an address that means this device.
 import {CUSTOM_TEMPLATES, readVoiceList} from './custom-voice.js';
-import {noTavernProxy} from './proxy-url.js';
+import {reachService} from './proxy-url.js';
+export {reachService};
 
 const LOOPBACK = /^(localhost|127(\.\d+){3}|\[::1\])$/i;
 // What people paste after the address: the docs page, or the path of the speech call itself.
@@ -24,30 +25,7 @@ export function cleanAddress(raw) {
   return {base: url.origin + path, notes};
 }
 
-/**
- * Whether and how a service can be asked. direct(url, init): the browser's own request; proxy(url): through the tavern.
- * {via: 'direct' | 'proxy' | '', state: 'ok' | 'blocked' | 'mixed' | 'loopback' | 'down', proxy: 'on' | 'off' | 'missing' | 'none'}
- * (off: the tavern can turn it on; missing: this tavern has none.)
- */
-export async function reachService(base, {direct, proxy, page = globalThis.location}) {
-  const target = new URL(base), loop = LOOPBACK.test(target.hostname), mixed = page?.protocol === 'https:' && target.protocol === 'http:' && !loop;
-  if (!mixed) { try { await direct(base); return {via: 'direct', state: 'ok', proxy: 'none'}; } catch { /* no answer it may read */ } }
-  // An answer that may not be read still shows the service is there.
-  let open = false;
-  if (!mixed) { try { await direct(base, {mode: 'no-cors'}); open = true; } catch { /* not there, for this device */ } }
-  let state = 'none';
-  if (proxy) {
-    try {
-      const r = await proxy(base), said = await r.clone().text().catch(() => '');
-      if (/CORS proxy is disabled/i.test(said)) state = 'off';
-      else if (noTavernProxy(said)) state = 'missing';
-      // The tavern's own 500: it could not reach the service either.
-      else if (r.status === 500 && /^(internal server error)?$/i.test(said.trim())) state = 'on';
-      else return {via: 'proxy', state: 'ok', proxy: 'on'};
-    } catch { state = 'off'; }
-  }
-  return {via: '', proxy: state, state: mixed ? 'mixed' : open ? 'blocked' : loop && !LOOPBACK.test(page?.hostname || 'localhost') ? 'loopback' : 'down'};
-}
+// Whether and how a service can be asked: reachService, in core/proxy-url.js (the NovelAI relay asks it too).
 
 const TURN_ON = '在酒馆文件夹的 config.yaml 里把 enableCorsProxy 改成 true，重启酒馆，再点一次。云酒馆找服务商开。';
 const NO_PROXY = '这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有），服务要自己允许跨域（CORS），或者套一个允许跨域的中转。';

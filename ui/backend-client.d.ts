@@ -766,7 +766,7 @@ export interface BackendFacade {
     /** Makes the pictures of saved vibes small (encodings stay): how many changed, and the bytes before and after. */
     compactVibes(): Promise<{ count: number; before: number; after: number }>;
     /** Imports .naiv4vibe, .naiv4vibebundle, 智绘姬 exports and pictures; groups in the files become groups. */
-    importVibes(files: ArrayLike<File>, options?: { names?: boolean }): Promise<{ added: number; updated: number; renamed: number; groups: number; errors: Array<{ name: string; message: string }> }>;
+    importVibes(files: ArrayLike<File>): Promise<{ added: number; updated: number; groups: number; errors: Array<{ name: string; message: string }> }>;
     updateVibe(id: string, patch: { name?: string; strength?: number; /** 提取信息量; a vibe without its picture cannot change it. */ ie?: number }): Promise<VibeSummary>;
     /** Vibes read from a picture's parameters: a new group in use, or added to the group in use. How many, or null when none. */
     importPictureVibes(list: Array<{ encoding: string; strength: number; ie: number }>, options?: { model?: string; name?: string; append?: boolean }): Promise<number | null>;
@@ -990,7 +990,8 @@ export interface BackendFacade {
     /** Checks the Fish relay (or Fish itself): the speech path and the voice list; status 0 = no answer (address, CORS, HTTPS). */
     fishCatalog(): Promise<boolean>;
     fishProbe(): Promise<{ relay: boolean; base: string; openaiUrl: string; api: 'fish' | 'openai'; detected: '' | 'fish' | 'openai'; speech: { status: number; ok: boolean }; compat: { status: number; ok: boolean }; openai: { status: number; ok: boolean }; voices: { status: number; ok: boolean } }>;
-    naiProbe(): Promise<{ relay: boolean; draw: { ok: boolean; status: number }; subscription: { ok: true; tier: number } | { ok: false; status: number; message: string } }>;
+    /** draw.reason: why a relay gave no answer at all; draw.via 'proxy': only the tavern's /proxy/ reaches it, and drawing goes that way. */
+    naiProbe(): Promise<{ relay: boolean; draw: { ok: boolean; status: number; reason?: string; via?: 'proxy' }; subscription: { ok: true; tier: number } | { ok: false; status: number; message: string } }>;
     saveMoments(patch: Partial<Pick<MomentsSettings, 'auto' | 'every' | 'dailyMax' | 'images' | 'replyToMe'>>): MomentsSettings;
     /** Newest first. */
     listMoments(): Promise<MomentPost[]>;
@@ -1193,7 +1194,6 @@ export interface BackendAPI extends BackendFacade {
     callRetry(): Promise<void>;
     /** The tavern's own avatar pictures: the current persona's, and each character card's by name (URLs). */
     tavernAvatars(): { me: string; characters: Record<string, string> };
-    /** How many single vibes and groups 智绘姬 (st-chatu8) has in this tavern; 0 when it is not installed. */
     /** 论坛: new posts and the 热搜; replies to the user's post; answers to the user's reply. */
     forumRefresh(): Promise<ForumPost[]>;
     forumReact(id: string): Promise<ForumPost>;
@@ -1218,12 +1218,9 @@ export interface BackendAPI extends BackendFacade {
     /** Draws one album photo of a character's phone with NovelAI; allowPaid when it would cost Anlas. */
     /** index 'wallpaper' draws the wallpaper. */
     peekDraw(name: string, index: number | 'wallpaper', allowPaid?: boolean): Promise<string>;
-    chatu8Vibes(): number;
     /** The World Info books turned on now (global, character, chat, persona) with their entries that are on, for picking
      *  what the phone leaves out. Entry ids are "book#uid". */
     loreBooks(): Promise<Array<{ name: string; from: string[]; entries: Array<{ id: string; title: string; keys: string[]; constant: boolean; preview: string }> }>>;
-    /** Imports every vibe and group 智绘姬 keeps (read only: nothing of 智绘姬's changes). */
-    importChatu8(): Promise<{ added: number; updated: number; renamed: number; groups: number; errors: Array<{ name: string; message: string }> }>;
     /** On a computer the phone is a floating window beside the story (false when it is full screen). */
     panelFloating(): boolean;
     /** Moves the floating phone by its top bar, in screen coordinates; 'reset' puts it back at the right edge. */

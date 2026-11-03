@@ -1223,13 +1223,13 @@ export class TTSBackend {
         return summary;
     }
     /**
-     * Imports vibe files (.naiv4vibe, .naiv4vibebundle, 智绘姬 exports) and pictures. A vibe already saved gains what it
-     * lacked (encodings, image); groups in the files become groups here. names: a vibe already saved also takes the name
-     * 智绘姬 gives it (importing from 智绘姬 again). {added, updated, renamed, groups, errors: [{name, message}]}.
+     * Imports vibe files (.naiv4vibe, .naiv4vibebundle, 智绘姬 exports, which 全部导出 writes too) and pictures. A vibe
+     * already saved gains what it lacked (encodings, image); groups in the files become groups here.
+     * {added, updated, groups, errors: [{name, message}]}.
      */
-    async importVibes(files, { names = false } = {}) {
+    async importVibes(files) {
         this.assertOpen();
-        const result = { added: 0, updated: 0, renamed: 0, groups: 0, errors: [] }, groups = [];
+        const result = { added: 0, updated: 0, groups: 0, errors: [] }, groups = [];
         for (const file of [...(files || [])]) {
             const name = String(file?.name || 'vibe');
             try {
@@ -1239,9 +1239,7 @@ export class TTSBackend {
                 const found = picture && !carried ? { vibes: [await imageVibe(name, await this.base64(file), '', this.settings.draw.params.model)], groups: [] } : await readVibeFile(name, carried || await file.text());
                 for (const doc of found.vibes) {
                     if (this.vibes.has(doc.id)) {
-                        const merged = mergeVibe(await this.vibeDoc(doc.id), doc);
-                        if (names && found.named?.includes(doc.id) && merged.name !== doc.name) { merged.name = doc.name; result.renamed++; }
-                        await this.storeVibe(merged); result.updated++;
+                        await this.storeVibe(mergeVibe(await this.vibeDoc(doc.id), doc)); result.updated++;
                     }
                     else { await this.storeVibe(doc); result.added++; }
                 }
@@ -2991,7 +2989,7 @@ export class TTSBackend {
             comfySavedWorkflows: () => this.comfySavedWorkflows(), comfySavedWorkflow: name => this.comfySavedWorkflow(name), comfyRecentRuns: () => this.comfyRecentRuns(), comfyUploadPicture: file => this.comfyUploadPicture(file),
             saveDrawPreset: preset => this.saveDrawPreset(preset), deleteDrawPreset: id => this.deleteDrawPreset(id), previewDrawPrompt: preset => this.previewDrawPrompt(preset),
             naiSubscription: refresh => this.naiSubscription(refresh), naiProbe: () => this.naiProbe(), fishCatalog: () => this.providers.fishCatalog(), fishProbe: () => { this.assertOpen(); keyCheck('fish'); return this.providers.probeFish(clone(this.settings.connections.fish)); },
-            listVibes: () => this.listVibes(), compactVibes: () => this.compactVibes(), importVibes: (files, options) => this.importVibes(files, clone(options || {})), updateVibe: (id, patch) => this.updateVibe(id, clone(patch || {})), deleteVibe: id => this.deleteVibe(id), deleteVibes: ids => this.deleteVibes([...(ids || [])]), exportVibes: target => this.exportVibes(clone(target || {})), embedVibes: (target, picture, name) => this.embedVibes(clone(target || {}), picture, name), importPictureVibes: (list, options) => this.importPictureVibes(clone(list || []), clone(options || {})), vibePlan: model => clone(this.vibePlan(model || this.settings.draw.params.model)), drawQuote: (params, extra) => this.drawQuote(params, extra), naiTool: input => this.naiTool(clone(input || {})),
+            listVibes: () => this.listVibes(), compactVibes: () => this.compactVibes(), importVibes: files => this.importVibes(files), updateVibe: (id, patch) => this.updateVibe(id, clone(patch || {})), deleteVibe: id => this.deleteVibe(id), deleteVibes: ids => this.deleteVibes([...(ids || [])]), exportVibes: target => this.exportVibes(clone(target || {})), embedVibes: (target, picture, name) => this.embedVibes(clone(target || {}), picture, name), importPictureVibes: (list, options) => this.importPictureVibes(clone(list || []), clone(options || {})), vibePlan: model => clone(this.vibePlan(model || this.settings.draw.params.model)), drawQuote: (params, extra) => this.drawQuote(params, extra), naiTool: input => this.naiTool(clone(input || {})),
             generateImage: input => this.generateImage(input).then(({ blob, ...result }) => result),
             drawQueue: () => this.drawQueue.list(), cancelDraw: key => this.drawQueue.cancel(key), cancelAllDraws: () => this.drawQueue.cancelAll(),
             cloudQueueError: () => this.drawQueue.remoteError, testCloudQueue: value => this.testCloudQueue(value), newRoomCode: () => newRoomCode(),

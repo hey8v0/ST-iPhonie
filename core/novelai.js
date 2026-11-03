@@ -1,6 +1,7 @@
 // NovelAI image client used directly from the browser (image.novelai.net allows cross-origin requests).
-// The key stays in this browser; nothing here goes through the tavern server.
-import {proxyAddress} from './proxy-url.js';
+// The key stays in this browser; it goes through the tavern server only for a relay that lets no web page ask it, by
+// the tavern's own /proxy/ (enableCorsProxy), or when the user wrote the relay as /proxy/….
+import {proxyAddress, reachService, tavernLogin} from './proxy-url.js';
 
 import {vibeKey, vibeParameters} from './vibes.js';
 import {unpack} from './msgpack.js';
@@ -422,33 +423,100 @@ function failure(status, text, relay = false) {
   return Object.assign(Error(relay ? '经中转：' + message : message), {status});
 }
 
+/** An address asked through the tavern's /proxy/: its route drops a query and decodes once, so such an address goes encoded. */
+const proxied = target => '/proxy/' + (/[?%]/.test(target) ? encodeURIComponent(target) : target);
+const TAVERN_GONE = '连不上酒馆的转发：刷新一下页面，看看酒馆还开着没有';
+
+/**
+ * Why a relay gave this page no answer, in plain words, from core/proxy-url.js reachService (proxy 'login': the tavern
+ * asks for a browser login, which the relay's key would take the place of on the way through it). body: the request.
+ */
+export function relayTrouble(r, body = '') {
+  const mb = typeof body === 'string' ? body.length / 1048576 : 0;
+  if (r.via === 'direct') return mb >= 1
+    ? `中转连得上，但这次的请求没送到：它有 ${mb.toFixed(1)} MB（底图、角色参考、Vibe 都算在里面），中转可能不收这么大的。少带一些、换小一点的图再试，或者问问中转的提供者`
+    : '中转连得上，但这次没收到它的回答（中转出错或超时的时候常常不带跨域头，浏览器就读不到）：再试一次，一直这样就问问中转的提供者';
+  const turnOn = '在酒馆的 config.yaml 里把 enableCorsProxy 改成 true、重启酒馆，小手机会自动经酒馆去连';
+  if (r.state === 'blocked') return '中转开着，但它不让网页直接访问（没开跨域 CORS）。' + (r.proxy === 'off' ? turnOn
+    : ({missing: '这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有），', login: '酒馆开了密码登录，经酒馆转发时中转的密钥会顶掉登录，所以没走酒馆；', on: '酒馆的转发也连不上它，'}[r.proxy] || '') + '要中转自己允许跨域，问问中转的提供者');
+  if (r.state === 'mixed') return '酒馆是用 https 打开的，浏览器不让它连 http:// 的中转：给中转配上 https' + (r.proxy === 'off' ? '，或者' + turnOn : '');
+  if (r.state === 'loopback') return '中转地址是 127.0.0.1，指的是正在用的这台设备自己：在手机上用时，要写运行中转的那台电脑的地址';
+  return `连不上中转，它没有任何回应${r.proxy === 'on' ? '，酒馆那边也连不上它' : ''}：可能关了、换了地址、证书过期，或者这台设备的网络连不到它（有的中转要挂梯子）。问问中转的提供者，或者先换回 NovelAI 官方`;
+}
+
 export class NovelAIClient {
   // relay: the user's relay address ('' for NovelAI itself), set from the drawing settings before each call.
-  constructor(fetcher = (...args) => globalThis.fetch(...args)) { this.fetch = fetcher; this.key = ''; this.relay = ''; }
+  // viaTavern: relays only the tavern's /proxy/ reaches (they let no web page ask them), found when one gave no answer.
+  constructor(fetcher = (...args) => globalThis.fetch(...args), page = globalThis.location) { this.fetch = fetcher; this.page = page; this.now = Date.now; this.key = ''; this.relay = ''; this.viaTavern = new Set(); }
   setKey(key) { this.key = String(key || '').trim(); }
   get configured() { return !!this.key; }
   headers() {
     if (!this.key) throw Error('还没有填写 NovelAI 密钥');
     return {Authorization: 'Bearer ' + this.key, 'Content-Type': 'application/json'};
   }
+  /** Where base + path is asked: through the tavern's /proxy/ for a relay only it reaches. */
+  at(base, path) {
+    const through = proxyAddress(base) ? base.slice(7) : this.viaTavern.has(base) ? base : '';
+    return through ? proxied(through + path) : base + path;
+  }
   async call(path, init, host = NAI_HOST) {
-    const relay = this.relay;
+    const relay = this.relay, base = relay || host, started = this.now();
     let response;
-    try { response = await this.fetch((relay || host) + path, init); }
-    catch (error) { if (error?.name === 'AbortError') throw error; throw Error(relay ? '连不上中转：请确认地址正确、中转允许跨域（CORS）；酒馆用 HTTPS 打开时，中转也要用 HTTPS' : '连不上 NovelAI，请检查网络'); }
+    try { response = await this.fetch(this.at(base, path), init); }
+    catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      if (!relay) throw Error('连不上 NovelAI，请检查网络');
+      // Turned down at once (a preflight refused, nobody there) it was never drawn; a GET costs nothing. Either may go again.
+      response = await this.around(base, path, init, (init.method || 'GET') === 'GET' || this.now() - started < 3000);
+    }
     if (!response.ok) throw failure(response.status, await response.text().catch(() => ''), !!relay);
     return response;
   }
   /**
+   * A relay this page got no answer from. An empty request, which draws nothing, tells why: the relay is not there, it
+   * lets no web page ask it (CORS), or only this request did not get through (too big, say: then `unread`). When only the
+   * tavern's /proxy/ reaches the relay, it is asked that way from then on, and this request goes again if `again`: a
+   * request that failed only after a while may have been drawn and paid for all the same, its answer unread.
+   */
+  async around(base, path, init, again) {
+    if (proxyAddress(base) || this.viaTavern.has(base)) throw Error(TAVERN_GONE);
+    const r = await this.reach(base, init.signal);
+    init.signal?.throwIfAborted?.();
+    if (r.via !== 'proxy') throw Object.assign(Error(relayTrouble(r, init.body)), r.via === 'direct' ? {unread: true, again} : {});
+    this.viaTavern.add(base);
+    if (!again) throw Error('中转不让网页直接访问，已经改成经酒馆转发。这次等了一会儿才失败，中转那边可能已经做了，所以没有自动再发（免得扣两次）：再试一次就好');
+    return this.fetch(this.at(base, path), init);
+  }
+  /** How a relay can be asked from this page (core/proxy-url.js reachService), knocking with an empty request. */
+  async reach(base, signal) {
+    const soon = () => AbortSignal.any([AbortSignal.timeout(8000), ...(signal ? [signal] : [])]);
+    const knock = url => this.fetch(url, {method: 'POST', headers: this.headers(), body: '{}', signal: soon()});
+    let login = false;
+    const r = await reachService(base, {page: this.page, direct: (url, how) => how?.mode ? this.fetch(url, {...how, signal: soon()}) : knock(url + '/ai/generate-image'),
+      proxy: async url => { if ((login = await tavernLogin(this.fetch, this.page))) throw Error('login'); return knock(proxied(url + '/ai/generate-image')); }});
+    return login ? {...r, proxy: 'login'} : r;
+  }
+  /**
    * Checks the drawing route without drawing: an empty request that reaches NovelAI is refused as invalid (400/422),
-   * which costs nothing. {ok, status}: status 0 when the address cannot be reached at all.
+   * which costs nothing. {ok, status}: status 0 when the address cannot be reached at all, with why for a relay
+   * (reason); via 'proxy' when only the tavern reaches the relay, which is then asked that way.
    */
   async probe(signal) {
+    const relay = this.relay, base = relay || NAI_HOST;
+    const knock = () => this.fetch(this.at(base, '/ai/generate-image'), {method: 'POST', headers: this.headers(), body: '{}', signal});
     let response;
-    try { response = await this.fetch((this.relay || NAI_HOST) + '/ai/generate-image', {method: 'POST', headers: this.headers(), body: '{}', signal}); }
-    catch (error) { if (error?.name === 'AbortError') throw error; return {ok: false, status: 0}; }
+    try { response = await knock(); }
+    catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      if (!relay) return {ok: false, status: 0};
+      if (proxyAddress(base) || this.viaTavern.has(base)) return {ok: false, status: 0, reason: TAVERN_GONE};
+      const r = await this.reach(base, signal);
+      if (r.via !== 'proxy') return {ok: false, status: 0, reason: relayTrouble(r)};
+      this.viaTavern.add(base);
+      try { response = await knock(); } catch { return {ok: false, status: 0}; }
+    }
     await response.body?.cancel?.().catch(() => {});
-    return {ok: [400, 422, 429].includes(response.status) || response.ok, status: response.status};
+    return {ok: [400, 422, 429].includes(response.status) || response.ok, status: response.status, ...(this.viaTavern.has(base) ? {via: 'proxy'} : {})};
   }
   /** Encodes a picture (base64) into a vibe for a model: 2 Anlas. Returns the encoding as base64. */
   async encodeVibe(image, model, informationExtracted, signal) {
@@ -460,7 +528,10 @@ export class NovelAIClient {
     return btoa(text);
   }
   async subscription(signal) {
-    let response;try{response=await this.call('/user/subscription', {headers:this.headers(),signal});}catch(error){error.operation='subscription';if(error.name!=='AbortError')error.message='订阅查询失败：'+error.message;throw error;}
+    let response;try{response=await this.call('/user/subscription', {headers:this.headers(),signal});}catch(error){
+      // A relay that draws but gives no answer here does not pass the subscription on, as its 404 would say (the phone then offers 按 Opus 算).
+      if(error.unread)error=Object.assign(Error('这个中转没有回答查订阅（多半是没有转发这个接口），不影响出图'),{status:404});
+      error.operation='subscription';if(error.name!=='AbortError')error.message='订阅查询失败：'+error.message;throw error;}
     return readSubscription(await response.json());
   }
   async generate(body, signal) {
@@ -476,7 +547,8 @@ export class NovelAIClient {
     const request = {...body, parameters: {...body.parameters, stream: 'msgpack'}};
     let response;
     try { response = await this.call('/ai/generate-image-stream', {method: 'POST', headers: this.headers(), body: JSON.stringify(request), signal}); }
-    catch (error) { if ([404, 405, 501].includes(error?.status)) return this.generate(body, signal); throw error; }
+    // A relay without the stream may also answer its address with no CORS headers, at once: the empty request got through then.
+    catch (error) { if ([404, 405, 501].includes(error?.status) || error?.unread && error.again) return this.generate(body, signal); throw error; }
     const reader = response.body?.getReader?.();
     if (!reader) return unzipFirstImage(await response.arrayBuffer());
     const steps = body.parameters.steps;

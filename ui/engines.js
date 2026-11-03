@@ -99,8 +99,8 @@ export function enginesApp(ctx) {
   /** What the relay check found, one line each for drawing and the subscription. */
   function probeReport(r) {
     const d = r.draw, s = r.subscription, where = r.relay ? '中转' : 'NovelAI';
-    const draw = d.ok ? `✓ 出图接口通了${d.status === 429 ? '，不过账号现在正忙（429）' : ''}（只发了一个空请求试探，没有出图，不扣 Anlas）`
-      : d.status === 0 ? `✗ 连不上${where}：地址不对，或${r.relay ? '中转没有允许跨域（CORS）；酒馆用 HTTPS 打开时中转也要用 HTTPS' : '网络不通'}`
+    const draw = d.ok ? `✓ 出图接口通了${d.status === 429 ? '，不过账号现在正忙（429）' : ''}（只发了一个空请求试探，没有出图，不扣 Anlas）${d.via === 'proxy' ? '。中转不让网页直接访问，是经酒馆转发连上的，出图也会自动走酒馆' : ''}`
+      : d.status === 0 ? `✗ ${esc(d.reason || `连不上${where}：${r.relay ? '地址不对，或者中转没有允许跨域（CORS）' : '网络不通'}`)}`
       : [401, 403].includes(d.status) ? `✗ ${where}拒绝了密钥（${d.status}）：请填写${r.relay ? '中转要求的' : '正确的'}密钥`
       : d.status === 404 ? `✗ 出图接口 404：插件请求的是「${esc(api.getState().draw.relay.url || 'https://image.novelai.net')}/ai/generate-image」，${where}不认这个路径。中转地址只填到这个路径前面为止。`
       : `? 出图接口返回 ${d.status}，说不准能不能出图，可以直接试着画一张`;
@@ -174,7 +174,7 @@ export function enginesApp(ctx) {
     v.root.dataset.engine = 'nai';
     v.draw(heading('NovelAI', moreButton(), 'Image Card')
       + card('nai', 'div')
-      + groupTitle('连接', help('自己搭的 NovelAI 中转：路径要和官方一样（出图 /ai/generate-image，查订阅 /user/subscription），插件把请求原样发到「中转地址 + 路径」。留空就直连 NovelAI。\n\n中转要允许跨域（CORS）；酒馆用 HTTPS 打开时，中转也要用 HTTPS。填完点一下别处就保存了。'))
+      + groupTitle('连接', help('自己搭的 NovelAI 中转：路径要和官方一样（出图 /ai/generate-image，查订阅 /user/subscription），插件把请求原样发到「中转地址 + 路径」。留空就直连 NovelAI。\n\n中转不让网页直接访问（没开跨域 CORS）时，酒馆的 config.yaml 里 enableCorsProxy 是 true 的话，会自动经酒馆转发。酒馆用 HTTPS 打开时，中转也要用 HTTPS。连不上时，右上角「⋯」里的测试连接会说是哪里不通。填完点一下别处就保存了。'))
       + `<div class="group pad">${imageConnectionRow('nai')}
           ${keyBox(d.relay.url ? '中转密钥' : 'Persistent API Token', saved && (api.keyHint?.('nai') || '已保存'), d.relay.url ? '填中转要求的密钥' : '在 NovelAI 账户设置里获取，以 pst- 开头', d.relay.url ? '用了中转时，填中转要求的密钥（可能就是 NovelAI 的 pst- 密钥，也可能是中转自己发的）。密钥只保存在当前浏览器和酒馆地址。' : '插件直接连接 NovelAI，不经过酒馆。密钥只保存在当前浏览器和酒馆地址。')}
           ${field('中转地址', input('relay', d.relay.url, 'url', 'autocomplete="off" placeholder="留空直连，例如 https://nai.example.com"'))}

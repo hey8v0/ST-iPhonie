@@ -58,38 +58,6 @@ globalThis.stIphonieInterceptor=function(chat){if(!active)return;let list=[];try
 function ringing(name){if(panel?.open)return;remember(name+' 来电');const open=()=>openPanel();if(globalThis.toastr)globalThis.toastr.info('点这里打开小手机接听',`📞 ${name} 来电`,{timeOut:settings?.calls?.ring*1000||30000,extendedTimeOut:0,tapToDismiss:true,onclick:open});else console.info('[ST-iPhonie]',name+' 来电');}
 // The tavern's own avatars, for the phone: each character card's picture by name, and the current persona's.
 let personas=null;import(new URL('../../../personas.js',import.meta.url).href).then(m=>{personas=m;}).catch(()=>{});
-// 智绘姬 (st-chatu8) keeps its vibes in its own settings (vibePresets: single vibes, vibeGroups) and storage: a file on the
-// tavern (configImageStorage[id].path) or its IndexedDB (chatu8_config_images / config_images). Reading them the same
-// way brings every vibe and group over at once, in the form its own export uses. Nothing of 智绘姬's is changed.
-const CHATU8='st-chatu8';
-function chatu8Count(){const s=context()?.extensionSettings?.[CHATU8];return s?Object.keys(s.vibePresets||{}).length+Object.keys(s.vibeGroups||{}).length:0;}
-function chatu8Text(value){
- if(value==null)return '';if(value instanceof ArrayBuffer)return new TextDecoder().decode(new Uint8Array(value));
- if(typeof value==='object')return value.data!==undefined?chatu8Text(value.data):JSON.stringify(value);
- let text=String(value).trim();const bytes=b=>new TextDecoder().decode(Uint8Array.from(atob(b),c=>c.charCodeAt(0)));
- if(text.startsWith('data:')){const at=text.indexOf(','),meta=text.slice(5,at),body=text.slice(at+1);try{text=meta.includes(';base64')?bytes(body):decodeURIComponent(body);}catch{return '';}}
- else if(!text.startsWith('{')&&!text.startsWith('[')){try{text=bytes(text);}catch{}}
- return text;}
-/** 智绘姬's IndexedDB, opened read-only; null when it is not there (an upgrade is aborted, so none is created). */
-function chatu8Database(){return new Promise(resolve=>{let req;try{req=indexedDB.open('chatu8_config_images');}catch{resolve(null);return;}
- req.onupgradeneeded=()=>{try{req.transaction.abort();}catch{}};req.onerror=()=>resolve(null);req.onblocked=()=>resolve(null);
- req.onsuccess=()=>{const db=req.result;if(!db.objectStoreNames.contains('config_images')){db.close();resolve(null);}else resolve(db);};});}
-function chatu8Read(db,id){return new Promise(resolve=>{try{const r=db.transaction('config_images','readonly').objectStore('config_images').get(id);r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null);}catch{resolve(null);}});}
-async function chatu8Vibes(){
- const s=context()?.extensionSettings?.[CHATU8];
- if(!s)throw Error('没有找到智绘姬（st-chatu8）：要在装着智绘姬的同一个酒馆里导入');
- const presets=s.vibePresets||{},groups=s.vibeGroups||{},storage=s.configImageStorage||{};
- const ids=new Set([...Object.values(presets).map(p=>p?.vibeDataId),...Object.values(groups).flatMap(g=>(Array.isArray(g?.vibes)?g.vibes:[]).map(v=>v?.vibeDataId))].filter(id=>typeof id==='string'&&id));
- if(!ids.size)throw Error('智绘姬里还没有 Vibe');
- const db=await chatu8Database(),vibeData={};
- try{for(const id of ids){
-  let text='';const path=storage[id]?.path;
-  if(typeof path==='string'&&path.startsWith('/')){try{const r=await fetch(path);if(r.ok)text=chatu8Text(await r.text());}catch{}}
-  if(!text&&db)text=chatu8Text(await chatu8Read(db,id));
-  try{if(text)vibeData[id]=JSON.parse(text);}catch{}}}
- finally{db?.close();}
- if(!Object.keys(vibeData).length)throw Error('读不到智绘姬里的 Vibe 数据（可能存在别的浏览器里）：请在智绘姬里导出后再导入文件');
- return {groups,vibeData,vibePresets:presets};}
 /** 分区: the character card (or group) open in the tavern, {key, name, members}; key '' when none is open. */
 /** 分区 按聊天: this tavern chat's own mark, kept in the chat itself so that renaming it changes nothing and a new chat has none. */
 function chatSave(){const ctx=context(),meta=ctx?.chatMetadata;if(!meta||!ctx.getCurrentChatId?.())return '';if(!meta.stIphonieSave){meta.stIphonieSave=Date.now().toString(36)+Math.random().toString(36).slice(2,10);ctx.saveMetadataDebounced?.();}return String(meta.stIphonieSave);}
@@ -510,9 +478,7 @@ function connect(source){
    playFavorite:id=>{check();playbackMessage=null;return api.playFavorite(id);},
   diagnose:()=>{check();return diagnose();},
   tavernAvatars:()=>{check();return tavernAvatars();},
-  chatu8Vibes:()=>{check();return chatu8Count();},
   loreBooks:async()=>{check();return loreBooks(context);},
-  importChatu8:async()=>{check();return owner.importVibes([new File([JSON.stringify(await chatu8Vibes())],'智绘姬.json',{type:'application/json'})],{names:true});},
   panelFloating:()=>{check();return !!panel?.classList.contains('floating');},
   panelDrag:(phase,sx,sy)=>{check();return panelDrag(phase,sx,sy);},
   panelSize:()=>{check();return panelSize();},

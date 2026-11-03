@@ -110,8 +110,7 @@ export async function readVibeFile(name, text) {
       items: (Array.isArray(group?.vibes) ? group.vibes : []).map(ref => ({id: ids.get(ref?.vibeDataId), strength: strength(ref?.strength)})).filter(item => item.id)
     })).filter(group => group.items.length);
     if (!docs.size) throw fail('这个文件里没有能用的 Vibe');
-    // named: the vibes 智绘姬 has a name for, so a second import from it can bring those names over.
-    return {vibes: [...docs.values()], groups, named: [...named]};
+    return {vibes: [...docs.values()], groups};
   }
   throw fail('认不出这个文件：支持 .naiv4vibe、.naiv4vibebundle、智绘姬导出的 Vibe 组和图片');
 }
