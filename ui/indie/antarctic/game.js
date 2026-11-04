@@ -37,6 +37,9 @@ export const ITEMS = {
   frostfruit: {name: '霜晶果', type: 'forage', price: 60, seasons: [3]},
   shell: {name: '贝壳', type: 'forage', price: 20, beach: true},
   seaglass: {name: '海玻璃', type: 'forage', price: 35, beach: true},
+  // only what the tide leaves on 东海岸 (beachFinds), not on the farm's sand
+  kelp: {name: '海带', type: 'forage', price: 25},
+  conch: {name: '海螺', type: 'forage', price: 90},
   chest: {name: '木箱', type: 'place', recipe: {wood: 30}, note: '能放 24 格东西'},
   sprinkler: {name: '洒水器', type: 'place', recipe: {stone: 20, wood: 10}, note: '每天早上给上下左右四格浇水'},
   path: {name: '石板路', type: 'place', recipe: {stone: 1}, note: '铺在地上，好看'},
@@ -61,6 +64,9 @@ const isForage = id => ITEMS[id]?.type === 'forage';
 export const blocks = th => !!THINGS[th.id]?.block && !(th.id === 'tree' && th.stage < 2);
 
 const KEY = 'antarctic-farm-v1', CAN = 24;
+// the save before the last one (used when the last cannot be read), and one that could not be read, put aside rather
+// than written over
+const PREVIOUS = KEY + '.prev', BROKEN = KEY + '.broken';
 const emptyBag = () => Array(BAG).fill(null);
 export function newGame(field) {
   const tiles = {};
@@ -71,21 +77,61 @@ export function newGame(field) {
   [['hoe', 1], ['can', 1], ['axe', 1], ['pick', 1], ['seed:turnip', 12], ['seed:berry', 6]].forEach(([id, n], i) => { inv[i] = {id, n}; });
   return {day: 1, minutes: DAY_START, money: 200, shipped: {}, income: 0, tiles, things: null, inv, water: CAN, selected: 0, version: 2};
 }
-export function load(field) {
-  try {
-    const s = JSON.parse(localStorage.getItem(KEY));
-    if (s?.version === 2) return s;
-    if (s?.version === 1) { // the old bag (tools in a fixed row, seeds and harvest counted apart) becomes slots
-      const inv = emptyBag(), put = [['hoe', 1], ['can', 1], ['axe', 1], ['pick', 1], ...Object.entries(s.seeds || {}).filter(([, n]) => n).map(([k, n]) => ['seed:' + k, n]), ...Object.entries(s.bag || {}).filter(([, n]) => n)];
-      put.forEach(([id, n], i) => { if (i < BAG) inv[i] = {id, n}; });
-      const shipped = s.shipped || {};
-      Object.assign(s, {inv, selected: 0, things: null, shipped, version: 2}); delete s.seeds; delete s.bag;
-      return s;
-    }
-  } catch { /* a fresh game */ }
-  return newGame(field);
+/** A save as read (any version so far) brought up to today's, or null when it is not one. */
+export function upgrade(s) {
+  if (!s || typeof s !== 'object' || !Number.isFinite(s.day)) return null;
+  if (s.version === 2) return s;
+  if (s.version === 1) { // the old bag (tools in a fixed row, seeds and harvest counted apart) becomes slots
+    const inv = emptyBag(), put = [['hoe', 1], ['can', 1], ['axe', 1], ['pick', 1], ...Object.entries(s.seeds || {}).filter(([, n]) => n).map(([k, n]) => ['seed:' + k, n]), ...Object.entries(s.bag || {}).filter(([, n]) => n)];
+    put.forEach(([id, n], i) => { if (i < BAG) inv[i] = {id, n}; });
+    const shipped = s.shipped || {};
+    Object.assign(s, {inv, selected: 0, things: null, shipped, version: 2}); delete s.seeds; delete s.bag;
+    return s;
+  }
+  return null;
 }
-export function save(state) { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* storage may be off */ } }
+const stored = key => { try { return localStorage.getItem(key); } catch { return null; } };
+/** The game kept in this browser: the last save, else the one before it (the last could not be read: it is put aside,
+ *  never written over); a new game when there is none. fromPrevious: true when it had to fall back. */
+export function load(field) {
+  for (const key of [KEY, PREVIOUS]) {
+    const text = stored(key); if (!text) continue;
+    let s = null; try { s = upgrade(JSON.parse(text)); } catch { /* not readable */ }
+    if (s) { if (key === PREVIOUS) s.fromPrevious = true; return s; }
+    if (key === KEY) try { localStorage.setItem(BROKEN, text); } catch { /* storage may be off */ }
+  }
+  return Object.assign(newGame(field), {fresh: true}); // (fresh: nothing was kept here)
+}
+/** Keeps the game in this browser (the save before it stays as a spare); savedAt says when, so the newer of two copies
+ *  (this device's, the tavern's) can be told — kept as it is with keepTime (a copy taken over from the tavern). false
+ *  when the browser would not take it (full, or storage off). */
+export function save(state, keepTime = false) {
+  delete state.fromPrevious; delete state.fresh;
+  if (!keepTime || !state.savedAt) state.savedAt = Date.now();
+  try {
+    const text = JSON.stringify(state), old = localStorage.getItem(KEY);
+    if (old && old !== text) localStorage.setItem(PREVIOUS, old);
+    localStorage.setItem(KEY, text);
+    return true;
+  } catch { return false; }
+}
+/** Forgets the game kept in this browser (a fresh start). */
+export function wipe() { for (const key of [KEY, PREVIOUS]) try { localStorage.removeItem(key); } catch { /* storage may be off */ } }
+/** How far a game has been played, in game minutes. */
+export const progress = s => s ? (s.day - 1) * 24 * 60 + (s.minutes || 0) : -1;
+/**
+ * Which of two copies of the game to go on with: 'local' (this browser's) or 'remote' (the one kept in the tavern, maybe
+ * from another device) — the one saved later, as long as it has been played at least as far; when the later one is
+ * behind (a fresh start, or a device left with an old game), 'ask'.
+ */
+export function pickSave(local, remote) {
+  if (!remote) return 'local';
+  if (!local) return 'remote';
+  const a = local.savedAt || 0, b = remote.savedAt || 0;
+  if (a === b) return 'local';
+  const [later, earlier] = b > a ? [remote, local] : [local, remote];
+  return progress(later) >= progress(earlier) ? (later === remote ? 'remote' : 'local') : 'ask';
+}
 
 export const seasonOf = s => Math.floor((s.day - 1) / DAYS_PER_SEASON) % 4;
 export const inSeason = (kind, season) => CROPS[kind].seasons.includes(season);
@@ -182,6 +228,24 @@ function spawnForage(s, spots) {
   const season = seasonOf(s), land = Object.keys(ITEMS).filter(id => isForage(id) && ITEMS[id].seasons?.includes(season)), sea = Object.keys(ITEMS).filter(id => ITEMS[id].beach);
   const key = freeSpot(s, spots.grass); if (key) s.things[key] = {id: pickOne(land), age: 0};
   const shore = freeSpot(s, spots.sand); if (shore && Math.random() < .7) s.things[shore] = {id: pickOne(sea), age: 0};
+}
+
+/**
+ * What the tide leaves on 东海岸 for a day (a new lot each morning; what was not picked up is gone): shells, sea glass and
+ * driftwood (picked up as wood) on the dry beach; on the flat — seen and reached only at low water — kelp, shells, sea
+ * glass and now and then a conch. spots: {sand: [[x, y]…], flat: [[x, y]…]}, pixels of the shore; none closer than 14.
+ */
+export function beachFinds(spots, random = Math.random) {
+  const out = [], pickOne = list => list[Math.floor(random() * list.length)];
+  const lay = (list, n, kind) => {
+    for (let k = 0, tries = 0; k < n && list?.length && tries < n * 6; tries++) {
+      const [x, y] = pickOne(list); if (out.some(o => Math.hypot(o.x - x, o.y - y) < 14)) continue;
+      out.push({id: kind(random()), x, y}); k++;
+    }
+  };
+  lay(spots.sand, 3, r => r < .4 ? 'shell' : r < .62 ? 'seaglass' : 'driftwood');
+  lay(spots.flat, 4, r => r < .38 ? 'kelp' : r < .76 ? 'shell' : r < .9 ? 'seaglass' : 'conch');
+  return out;
 }
 
 // ── the pet ──

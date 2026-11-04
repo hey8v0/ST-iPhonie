@@ -365,16 +365,24 @@ listenTouches(globalThis);
 // The stage, the pictures, the box and the game come and go as children of the page.
 if(globalThis.MutationObserver&&document.body)new MutationObserver(list=>{if(list.some(m=>[...m.addedNodes,...m.removedNodes].some(n=>n.nodeType===1&&n.matches(OVER))))syncBack();}).observe(document.body,{childList:true});
 // 大游戏 over the whole tavern page: the game in a frame of its own (ui/indie/<name>/play.html), the phone closed meanwhile.
-// The game asks to leave with a message {type:'st-iphonie-game:close'}; its saves stay in this browser.
+// The game asks to leave with a message {type:'st-iphonie-game:close'}. 南极结界 keeps its save in the browser and hands it
+// to the phone as well ({type:'st-iphonie-game:save', id, data, savedAt}, answered 'saved'), and on starting asks for the
+// phone's copy ('load' → 'loaded' {save}), which 保存到酒馆 and backups carry between devices.
 let gameOverlay=null;
 const GAMES=new Set(['antarctic','blocks']);
 function closeGame(){if(!gameOverlay)return;gameOverlay.stop();gameOverlay.el.remove();gameOverlay=null;}
+// the phone's copy of a game's save: with 保存到酒馆 on, what the other devices saved is fetched first (a few seconds at most)
+async function gameSaveOf(name){if(!backend)return null;if(backend.settings?.sync?.enabled)await Promise.race([backend.syncNow().catch(()=>{}),new Promise(resolve=>setTimeout(resolve,6000))]);return backend.gameSave?.(name).catch(()=>null)??null;}
 function openGame(name){
  if(!GAMES.has(name))throw Error('没有这个游戏');
  closeGame();if(panel?.open)panel.close();
  const el=document.createElement('div');el.dataset.stttsOwned='game';el.style.cssText='position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;z-index:32010;overflow:hidden;background:#0c0b12;';
  const f=document.createElement('iframe');f.src=new URL(`ui/indie/${name}/play.html`,base).href;f.allow='fullscreen; gamepad';f.allowFullscreen=true;f.style.cssText='border:0;width:100%;height:100%;display:block;';
- const message=e=>{if(e.source===f.contentWindow&&e.data?.type==='st-iphonie-game:close')closeGame();};
+ const answer=reply=>f.contentWindow?.postMessage(reply,location.origin);
+ const message=e=>{if(e.source!==f.contentWindow)return;const d=e.data;
+  if(d?.type==='st-iphonie-game:close')closeGame();
+  else if(d?.type==='st-iphonie-game:load')gameSaveOf(name).then(save=>answer({type:'st-iphonie-game:loaded',id:d.id,save}));
+  else if(d?.type==='st-iphonie-game:save')Promise.resolve(backend?.putGameSave(name,d.data,d.savedAt)).catch(()=>false).then(()=>answer({type:'st-iphonie-game:saved',id:d.id}));};
  window.addEventListener('message',message);f.addEventListener('load',()=>f.contentWindow?.focus());
  el.append(f);document.body.append(el);
  gameOverlay={el,stop:()=>window.removeEventListener('message',message)};return true;}

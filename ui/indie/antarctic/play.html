@@ -59,8 +59,8 @@
   #tool { position: fixed; left: 50%; bottom: calc(var(--px) * 34); transform: translateX(-50%); padding: calc(var(--px) * 1.5) calc(var(--px) * 5); font-size: calc(var(--px) * 4.2); font-weight: 700; z-index: 2; pointer-events: none; opacity: 0; transition: opacity .3s; white-space: nowrap; }
   #tool.on { opacity: 1; }
 
-  /* messages pile up at the lower left and leave on their own */
-  #toasts { position: fixed; left: calc(var(--px) * 3); bottom: calc(var(--px) * 3); display: flex; flex-direction: column; align-items: flex-start; gap: calc(var(--px) * 2); z-index: 3; pointer-events: none; max-width: 34vw; }
+  /* messages pile up at the lower left, above the hotbar's height (so they never cover it), and leave on their own */
+  #toasts { position: fixed; left: calc(var(--px) * 3); bottom: calc(var(--px) * 36); display: flex; flex-direction: column; align-items: flex-start; gap: calc(var(--px) * 2); z-index: 3; pointer-events: none; max-width: 34vw; }
   .toast { display: flex; align-items: center; gap: calc(var(--px) * 2); padding: calc(var(--px) * 2.5) calc(var(--px) * 4.5) calc(var(--px) * 2.5) calc(var(--px) * 3); font-size: calc(var(--px) * 4.2); font-weight: 700; line-height: 1.35; animation: slide .25s ease-out; transition: opacity .4s, transform .4s; }
   .toast .icon { width: calc(var(--px) * 12); height: calc(var(--px) * 12); flex: none; }
   .toast.out { opacity: 0; transform: translateX(-20%); }
@@ -92,12 +92,19 @@
   .foot .purse { display: flex; align-items: center; gap: calc(var(--px) * 1.5); padding: calc(var(--px) * 1) calc(var(--px) * 3); color: #7a2e1a; }
   .foot .purse .icon { width: calc(var(--px) * 8); height: calc(var(--px) * 8); }
   .tabs { display: flex; gap: calc(var(--px) * 2); justify-content: center; margin-bottom: calc(var(--px) * 3); }
+  /* the menu keeps one height whichever page is open (the tabs stay put); a long page scrolls inside */
+  #menu.on { display: flex; flex-direction: column; height: min(88vh, calc(var(--px) * 146)); overflow: hidden; }
+  #menu .pane.on { flex: 1; min-height: 0; overflow: auto; }
+  #menu .tabs, #menu .foot { flex: none; }
   .tabs button.on { background: linear-gradient(180deg, #ffd27a, #e09a3c); color: var(--ink); text-shadow: none; }
   .pane { display: none; } .pane.on { display: block; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, calc(var(--px) * 20)); gap: calc(var(--px) * 1.5); justify-content: center; padding: calc(var(--px) * 3); }
   .grid .slot { cursor: default; }
   .empty { text-align: center; color: var(--ink2); padding: calc(var(--px) * 4); }
   .setting { display: flex; justify-content: space-between; align-items: center; padding: calc(var(--px) * 2.5) calc(var(--px) * 3); margin-bottom: calc(var(--px) * 1.5); font-weight: 700; }
+  .vol { display: flex; align-items: center; gap: calc(var(--px) * 2.5); }
+  .vol input { width: calc(var(--px) * 48); accent-color: var(--wood); }
+  .vol b { min-width: 3.4em; text-align: right; font-variant-numeric: tabular-nums; }
   .help { font-size: calc(var(--px) * 3.9); line-height: 1.7; padding: calc(var(--px) * 2) calc(var(--px) * 4); }
   .help b { color: #7a2e1a; }
   /* the world map */
@@ -163,12 +170,14 @@
   #ask p { margin: calc(var(--px) * 2) 0 calc(var(--px) * 4); font-weight: 700; font-size: calc(var(--px) * 4.8); }
   #ask .foot { justify-content: center; gap: calc(var(--px) * 4); }
 
+  /* until the game runs (the creator, a question about which save) the empty clock, bar and buttons stay out of sight */
+  body.booting #clockbox, body.booting #menuBtn, body.booting #bar, body.booting #use, body.booting #tool { visibility: hidden; }
   #fade { position: fixed; inset: 0; background: #06050a; opacity: 0; pointer-events: none; z-index: 5; }
   #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #0c0b12; z-index: 6; }
   #loading .frame { font-weight: 800; letter-spacing: calc(var(--px) * .6); padding: calc(var(--px) * 5) calc(var(--px) * 10); }
 </style>
 </head>
-<body>
+<body class="booting">
 <div id="stage"><canvas id="view"></canvas></div>
 <div id="clockbox" class="frame">
   <canvas id="dial" width="40" height="22"></canvas>
@@ -199,6 +208,7 @@
   </div>
   <div class="pane" data-pane="settings">
     <div class="setting well" id="leaveRow" hidden><span>保存并回到酒馆</span><button id="leave" class="wood">离开游戏</button></div>
+    <div class="setting well"><span>音量</span><span class="vol"><input id="volume" type="range" min="0" max="100" step="5" aria-label="音量"><b id="volumeText"></b></span></div>
     <div class="setting well"><span>换个样子（发型、衣服、宠物名字）</span><button id="relook" class="wood">捏人</button></div>
     <div class="setting well"><span>全屏</span><button id="full" class="wood">切换</button></div>
     <div class="setting well"><span>从头开始（清掉现在的进度）</span><button id="reset" class="wood">重新开始</button></div>
@@ -213,7 +223,7 @@
     <div>翻土 → 播种 → 每天浇水；作物只在自己的季节长，换季时不合季的会枯掉。</div>
     <div>收获后放进<b>出货箱</b>（手里拿着什么就放什么；拿着工具就把收获和采集物全放进去），第二天早上结算；在<b>信箱</b>邮购当季种子。</div>
     <div><b>清理农场</b>：杂草用什么都能拔（得纤维），树枝和树用斧头（得木头、松果），石头用镐（得石头）。每晚会再长出一些。地上的野菜、浆果、贝壳按使用就能捡。</div>
-    <div><b>探索</b>：农场东边的小路通往东海岸。潮水一天涨落两次，退潮时才走得到潮滩、礁石和小岛。靠近生物或地标按使用来观察，会记进菜单里的「见闻」。</div>
+    <div><b>探索</b>：农场东边的小路通往东海岸。潮水一天涨落两次，退潮时才走得到潮滩、礁石和小岛。靠近生物或地标按使用来观察，会记进菜单里的「见闻」。沙滩和潮滩上每天都有潮水冲上来的东西（贝壳、海玻璃、海带、漂流木，偶尔有海螺），按使用捡起来；潮滩上的要等退潮才露出来。</div>
     <div><b>制作</b>：菜单里的「制作」页，用木头、石头、纤维做木箱、洒水器、石板路、栅栏、篝火；拿在手上对着地面按使用放下，用镐或斧头收回来。</div>
     <div>走进家门回屋；梯子通到<b>阁楼</b>，在床边按使用睡觉。凌晨两点还没睡会累倒，醒来已经在床上。</div>
   </div>

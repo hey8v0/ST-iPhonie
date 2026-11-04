@@ -13,16 +13,26 @@ import {PETS, petSprite} from './pet.js';
 import * as G from './game.js';
 import {iconCanvas, itemIcon, seasonIcon, iconPixels} from './icons.js';
 import {thingArt, pathAlbedo} from './things.js';
+import {toolPixels, canPixels} from './tools.js';
+import * as audio from './sound.js';
 import {SHORE} from './shore.js';
 import {LORE, LORE_IDS, KINDS as LORE_KINDS, CRITTERS} from './lore.js';
 
-const VW = 320, VH = 180, SPEED = 66;
+// the view: 320 × 180 of the world on a 16:9 screen, each pixel shown as a whole number of the screen's; a wider or
+// taller screen sees a little more of the world instead of black bars (fit())
+let VW = 320, VH = 180;
+const SPEED = 66;
 // the size of the scene one is in (the farm, or a room)
 let W = FARM_W, H = FARM_H;
 const FIELD = {x0: 19, y0: 15, x1: 34, y1: 23};
 const canvas = document.querySelector('#view'), ctx = canvas.getContext('2d');
-canvas.width = VW; canvas.height = VH;
-const image = ctx.createImageData(VW, VH), screen = new Uint32Array(image.data.buffer);
+let image = null, screen = null;
+function setView(w, h) {
+  if (image && w === VW && h === VH) return;
+  VW = w; VH = h; canvas.width = w; canvas.height = h;
+  image = ctx.createImageData(w, h); screen = new Uint32Array(image.data.buffer);
+}
+setView(VW, VH);
 const unpack = c => [c & 255, c >>> 8 & 255, c >>> 16 & 255];
 const pack = (r, g, b) => (255 << 24 | Math.max(0, Math.min(255, b)) << 16 | Math.max(0, Math.min(255, g)) << 8 | Math.max(0, Math.min(255, r))) >>> 0;
 const hash = (x, y, s = 0) => { let h = (x * 374761393 + y * 668265263 + s * 1442695041) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
@@ -30,6 +40,10 @@ const $ = q => document.querySelector(q);
 
 // ── the world and the game ──────────────────────────────────────────────────────────────────────────────────────────
 const q = new URLSearchParams(location.search);
+// ?dev: N (or the pad's Y) skips an hour, and the state is reachable from outside (globalThis.__antarctic), for trying
+// things out; players never have it
+const DEV = q.has('dev');
+if (DEV) globalThis.__antarctic = {get game() { return game; }, get me() { return me; }, get scene() { return scene; }, get view() { return [VW, VH]; }, get prints() { return prints; }, get tide() { return tideNow; }, use: () => use(), facing: () => facing(), audio};
 let started = false, S = null, farm = null, shore = null, game = null, lightVersion = 0, relighting = null, litSeason = -1, scene = 'farm';
 const rooms = {}, ROOMS = ['house', 'attic'], OUTDOOR = ['farm', 'shore'];
 const me = {x: 0, y: 0, dir: 'down', t: 0, moving: false, busy: 0};
@@ -88,17 +102,77 @@ const entryOf = (name, key) => name === 'farm' ? (key === 'east' ? [FARM_W - 14,
 /** Walk through to another scene: fade out, go, light it if the hour has moved, fade in. */
 async function go(name, key) {
   if (fade.on) return;
-  fade.on = true; await fadeTo(1);
+  fade.on = true; audio.play(name === 'house' && key === 'door' || (scene === 'house' && name === 'farm') ? 'door' : ROOMS.includes(name) ? 'step' : null, 'wood'); await fadeTo(1);
   if (name === 'shore' && (!shore || shore.season !== litSeason)) await prepareShore();
   enter(name); [me.x, me.y, me.dir] = entryOf(name, key); me.t = 0; petPlace(me.x + (me.dir === 'left' ? 12 : -12), me.y + 6);
+  if (name === 'shore') beachToday();
   if (!S.px || Math.abs(G.hourOf(game) - (S.hour ?? -99)) >= .25) await relight(G.hourOf(game));
   store(); await fadeTo(0); fade.on = false;
   if (OUTDOOR.includes(name)) discover('place:' + name);
 }
-/** Saving also keeps where one is. */
-function store() { if (!game) return; game.at = {scene, x: Math.round(me.x), y: Math.round(me.y), dir: me.dir}; G.save(game); }
+// ── 保存到酒馆: inside ST-iPhonie the phone keeps the game too (its 保存到酒馆 and backups take it along), so another
+// device, or this one after its browser was cleared, goes on from where one was ─────────────────────────────────────
+const inTavern = parent !== window;
+const tavern = {asked: 0, waiting: new Map(), sent: 0, timer: 0};
+addEventListener('message', e => {
+  if (e.source !== parent || e.origin !== location.origin) return;
+  const d = e.data, done = tavern.waiting.get(d?.id);
+  if (!done || (d.type !== 'st-iphonie-game:loaded' && d.type !== 'st-iphonie-game:saved')) return;
+  tavern.waiting.delete(d.id); done(d.type === 'st-iphonie-game:loaded' ? d.save || null : true);
+});
+/** A word to the phone, and its answer (null when there is none in time, or outside the tavern). */
+function tavernAsk(message, wait) {
+  if (!inTavern) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const id = ++tavern.asked; tavern.waiting.set(id, resolve);
+    try { parent.postMessage({...message, id}, location.origin); } catch { tavern.waiting.delete(id); resolve(null); return; }
+    setTimeout(() => { if (tavern.waiting.delete(id)) resolve(null); }, wait);
+  });
+}
+/** Hands the game to the phone: at most every 20 s while playing; at once (answered when it is kept) on going to bed,
+ *  leaving, putting the game away. state: another game to hand over (a fresh start). */
+function tavernSave(now = false, state = game) {
+  if (!inTavern || !state) return Promise.resolve(null);
+  clearTimeout(tavern.timer);
+  const since = Date.now() - tavern.sent;
+  if (!now && since < 20000) { tavern.timer = setTimeout(() => tavernSave(true), 20000 - since); return Promise.resolve(null); }
+  tavern.sent = Date.now();
+  return tavernAsk({type: 'st-iphonie-game:save', data: state, savedAt: state.savedAt || Date.now()}, 4000);
+}
+const ago = at => { const m = Math.max(0, Math.round((Date.now() - at) / 60000)); return m < 2 ? '刚刚' : m < 60 ? m + ' 分钟前' : m < 1440 ? Math.round(m / 60) + ' 小时前' : Math.round(m / 1440) + ' 天前'; };
+/** This browser's game, or the tavern's copy (from another device, or from before the browser was cleared): the later
+ *  one, unless it is behind the other — then the player picks. */
+async function chooseGame(local) {
+  const got = await tavernAsk({type: 'st-iphonie-game:load'}, 12000), remote = G.upgrade(got?.data && typeof got.data === 'object' ? got.data : null);
+  const mine = local.fresh ? null : local, pick = G.pickSave(mine, remote);
+  let use = pick === 'remote' ? remote : mine;
+  if (pick === 'ask') {
+    $('#loading').style.display = 'none';
+    const yes = await confirm(`酒馆里存着另一份进度：${G.dateText(remote)}（${ago(remote.savedAt)}存的）。这台设备上的是${G.dateText(local)}（${ago(local.savedAt)}）。用哪一份？`, '用酒馆里的', '用这台设备的');
+    $('#loading').style.display = '';
+    use = yes ? remote : mine;
+  }
+  if (!use) return local; // nothing anywhere yet: a new game
+  if (use === remote) G.save(remote, true); // kept in this browser too, as it was saved
+  if (use.fromPrevious) setTimeout(() => say('最后一次的存档读不出来，用的是它前一份。'), 1800);
+  return use;
+}
+let resetting = false;
+/** Saving also keeps where one is; the phone gets it too (now and then, see tavernSave). */
+function store() {
+  if (!game || resetting) return;
+  game.at = {scene, x: Math.round(me.x), y: Math.round(me.y), dir: me.dir};
+  if (!G.save(game) && !store.warned) { store.warned = true; say('这台设备存不下存档了（浏览器的存储满了或被关掉了）' + (inTavern ? '；开了小手机的「保存到酒馆」的话，进度还存在酒馆里。' : '。')); }
+  tavernSave();
+}
+// put away (another tab, the phone locked, the game closed): kept at once
+const putAway = () => { if (started) { store(); tavernSave(true); } };
+addEventListener('pagehide', putAway);
+document.addEventListener('visibilitychange', () => { if (document.hidden) putAway(); audio.pause(document.hidden); });
+for (const type of ['pointerdown', 'keydown', 'touchend']) addEventListener(type, () => audio.unlock(), true);
 async function boot() {
-  game = q.has('new') ? G.newGame(FIELD) : G.load(FIELD);
+  game = G.load(FIELD); // (keys reach a question asked before the game is chosen)
+  if (q.has('new')) game = G.newGame(FIELD); else game = await chooseGame(game);
   if (q.get('h')) game.minutes = Number(q.get('h')) * 60;
   if (q.get('d')) game.day = Number(q.get('d'));
   const ready = prepareSeason(G.seasonOf(game));
@@ -121,7 +195,7 @@ async function boot() {
   petPlace(me.x + 12, me.y + 4);
   await relight(G.hourOf(game));
   $('#loading').remove();
-  started = true; hud(); requestAnimationFrame(loop);
+  started = true; document.body.classList.remove('booting'); hud(); requestAnimationFrame(loop);
 }
 
 // ── tiles ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -195,7 +269,7 @@ addEventListener('keydown', e => {
   if (k === ' ' || k === 'e' || k === 'j' || k === 'enter') { use(); e.preventDefault(); return; }
   if (k >= '0' && k <= '9' && k.length === 1) { select(k === '0' ? 9 : Number(k) - 1); return; }
   if (k === 'q' || k === 'tab') { select(game.selected + (e.shiftKey ? -1 : 1)); e.preventDefault(); return; }
-  if (k === 'n') { game.minutes += 60; return; }
+  if (k === 'n' && DEV) { game.minutes += 60; return; }
   keys.add(k); if (e.key.startsWith('Arrow')) e.preventDefault();
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
@@ -229,7 +303,7 @@ function pad() {
     if (press(9)) { using = 'gamepad'; openMenu(); continue; }
     if (press(0)) { using = 'gamepad'; use(); }
     if (press(4)) select(game.selected - 1); if (press(5)) select(game.selected + 1);
-    if (press(3)) game.minutes += 60;
+    if (press(3) && DEV) game.minutes += 60;
     let x = Math.abs(g.axes[0]) > .25 ? g.axes[0] : 0, y = Math.abs(g.axes[1]) > .25 ? g.axes[1] : 0;
     if (g.buttons[14]?.pressed) x = -1; if (g.buttons[15]?.pressed) x = 1; if (g.buttons[12]?.pressed) y = -1; if (g.buttons[13]?.pressed) y = 1;
     if (x || y) { using = 'gamepad'; return {x, y}; }
@@ -257,6 +331,7 @@ function navMove(dir) {
   const items = navItems(); if (!items.length) return;
   if (!nav.el || !items.includes(nav.el)) { navFocus(items.find(el => el.classList.contains('on')) || items[0]); return; }
   if ((dir === 'left' || dir === 'right') && nav.el.matches('.opt')) { nav.el.querySelector(dir === 'left' ? '.prev' : '.next')?.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, cancelable: true})); return; }
+  if ((dir === 'left' || dir === 'right') && nav.el.type === 'range') { const el = nav.el; el.value = Number(el.value) + (dir === 'left' ? -1 : 1) * Number(el.step || 1); el.dispatchEvent(new Event('input', {bubbles: true})); el.dispatchEvent(new Event('change', {bubbles: true})); return; }
   const r0 = nav.el.getBoundingClientRect(), c0 = [r0.left + r0.width / 2, r0.top + r0.height / 2];
   // things in the same row (or column) come first; failing that, the nearest that way
   let best = null, score = Infinity;
@@ -269,7 +344,7 @@ function navMove(dir) {
     const overlap = vertical ? r.left < r0.right && r.right > r0.left : r.top < r0.bottom && r.bottom > r0.top;
     const sc = (overlap ? 0 : 100000) + along + across * 2.2; if (sc < score) { score = sc; best = el; }
   }
-  if (best) navFocus(best);
+  if (best) { navFocus(best); audio.play('tick'); }
 }
 function navActivate() {
   const el = nav.el; if (!el || !navItems().includes(el)) { navMove('down'); return; }
@@ -332,25 +407,41 @@ const near = (p, r = 17) => { if (!p) return false; const [fx, fy] = front(); re
 function use() {
   if (!game || me.busy > 0 || fade.on || menu.open || dialog.open) return;
   if (shop.open) return;
-  if (game.pet && near([pet.x, pet.y + 4], 18)) { petIt(); return; }
-  if (scene === 'shore' && observe()) return;
+  // the pet only when facing it (beside you, it does not take the use from the tile in front)
+  if (game.pet && near([pet.x, pet.y + 4], 12)) { petIt(); return; }
+  if (scene === 'shore' && (pickBeach() || observe())) return;
   if (scene === 'shore' && near(SHORE.cave, 22)) { caveVisit(); return; }
   if (scene !== 'farm') { const p = S.spots.find(p => near([p.x, p.y], p.kind === 'lore' ? 34 : 21)); if (p) useSpot(p); return; }
   if (observeFarm()) return;
-  if (near(S.bin)) { const r = G.ship(game); say(r.say, r.done ? 'coin' : null); if (r.done) { burst('harvest', S.bin[0], S.bin[1] - 14); store(); hud(); } return; }
+  if (near(S.bin)) { const r = G.ship(game); say(r.say, r.done ? 'coin' : null); if (r.done) { audio.play('coin'); burst('harvest', S.bin[0], S.bin[1] - 14); store(); hud(); } return; }
   if (near(S.mailbox)) { openShop(); return; }
-  if (game.pet && near(BOWL, 15)) { if (G.held(game)?.id === 'can') { const r = G.fillBowl(game); say(r.say, r.done ? 'can' : null); if (r.done) { burst('water', BOWL[0], BOWL[1] - 4); store(); hud(); cache.delete('bowl'); } } else say(game.pet.bowl ? '水碗里有水。' : '水碗空了，用水壶倒点水吧。'); return; }
+  if (game.pet && near(BOWL, 15)) { if (G.held(game)?.id === 'can') { const r = G.fillBowl(game); say(r.say, r.done ? 'can' : null); if (r.done) { audio.play('water'); burst('water', BOWL[0], BOWL[1] - 4); store(); hud(); cache.delete('bowl'); } } else say(game.pet.bowl ? '水碗里有水。' : '水碗空了，用水壶倒点水吧。'); return; }
   // at the door, facing it: go in
   if (Math.hypot(me.x - S.door[0], me.y - S.door[1]) < 18 && me.dir === 'up') { go('house', 'door'); return; }
   const [tx, ty] = facing(), key = tx + ',' + ty, th = game.things?.[key], tool = G.held(game)?.id;
   // a chest opens (unless one means to pick it up with the pick or the axe)
   if (th?.id === 'chest' && tool !== 'pick' && tool !== 'axe') { openChest(key); return; }
+  // what is ripe, withered or lying there to pick up is taken by hand, whatever is held; a tool is swung (the can tipped)
+  // and does its work as it lands; seeds and things to set down go at once, the hand held out
+  const t = game.tiles[key], byHand = t?.crop?.dead || t?.crop?.stage === 3 || (th && G.ITEMS[th.id]?.type === 'forage'), swing = !byHand && SWINGS[tool];
+  if (swing) { me.act = {id: tool, t: 0, ...swing, landed: false, perform: () => actOn(tx, ty, key, th)}; me.busy = swing.dur; if (tool !== 'can') audio.play('swing'); return; }
+  me.act = {id: null, t: 0, dur: .24, land: 0, landed: true}; me.busy = .22;
+  actOn(tx, ty, key, th);
+}
+// using a tool: raised, brought down — what it does happens as it lands — then held a moment (dur: seconds; land: the
+// part of it when it lands)
+const SWINGS = {hoe: {dur: .38, land: .5}, axe: {dur: .42, land: .5}, pick: {dur: .42, land: .5}, can: {dur: .62, land: .45}};
+/** What is in hand done to a tile (G.act), and what shows of it. */
+const EFFECT_SOUNDS = {dig: 'dig', water: 'water', fill: 'fill', sow: 'sow', harvest: 'harvest', chop: 'chop', mine: 'mine', place: 'place'};
+function actOn(tx, ty, key, th) {
   const r = G.act(game, tx, ty, {tile: tileKind, free: tileFree});
+  // what it sounds like: the work done, or a tool landing on nothing it can work
+  audio.play(r.done ? EFFECT_SOUNDS[r.effect] : me.act?.id && me.act.id !== 'can' ? 'thud' : null); if (r.fell) audio.play('fell'); if (r.effect === 'harvest') pickedAt = performance.now();
   say(r.say, r.item || (r.effect === 'fill' ? 'can' : null));
   for (const d of r.drops || []) for (let k = 0; k < d.n; k++) spawnDrop(d.id, tx * T + 8, ty * T + (r.fell ? 6 : 11));
   if (r.got) { flyToHand(r.got, tx * T + 8, ty * T + 8); gotItem(r.got, 1); if (LORE[r.got]) discover(r.got); }
   if (r.done) {
-    me.busy = r.effect === 'chop' || r.effect === 'mine' ? .3 : .22; burst(r.effect, tx * T + 8, ty * T + (r.fell ? 2 : 10)); if (r.fell) burst('leaf', tx * T + 8, ty * T - 14);
+    burst(r.effect, tx * T + 8, ty * T + (r.fell ? 2 : 10)); if (r.fell) { burst('leaf', tx * T + 8, ty * T - 14); quake(.32, 2); }
     if (r.hitOnly) shakes.set(key, performance.now());
     if (r.changed) { rebuildDyn(); if (th?.id === 'campfire' || r.placed === 'campfire') farm.hour = -99; } // its light is part of the night's
     store(); hud(); cache.delete(key); thingCache.delete(key);
@@ -376,7 +467,7 @@ function confirm(text, yes, no) {
 $('#ask .yes').addEventListener('pointerdown', e => { e.preventDefault(); dialog.done(true); });
 $('#ask .no').addEventListener('pointerdown', e => { e.preventDefault(); dialog.done(false); });
 function petIt() {
-  const r = G.petPet(game); say(r.say);
+  const r = G.petPet(game); say(r.say); audio.play('pet');
   pet.hop = .35; pet.mode = 'idle'; pet.pose = 'sit'; pet.timer = 2.5; pet.dir = me.x < pet.x ? 'left' : me.x > pet.x + 6 ? 'right' : 'down';
   if (r.done) { for (let k = 0; k < 4; k++) effects.push({x: pet.x + (Math.random() - .5) * 10, y: pet.y - 14, vx: (Math.random() - .5) * 10, vy: -16 - Math.random() * 12, life: 1 + k * .15, heart: true, col: [255, 120, 150]}); store(); }
 }
@@ -388,14 +479,14 @@ const fade = {on: false, k: 0};
 /** A night's sleep (in bed, or passing out at 2:00): the day turns, and one wakes up in bed in the attic. */
 async function goToBed(text) {
   if (fade.on) return;
-  fade.on = true; say(text); await fadeTo(1);
+  fade.on = true; say(text); audio.play('sleep'); await fadeTo(1);
   const before = G.seasonOf(game);
   G.sleep(game, farmSpots()); rebuildDyn(); thingCache.clear();
   if (G.seasonOf(game) !== before) await prepareSeason(G.seasonOf(game));
   enter('attic'); [me.x, me.y, me.dir] = S.entry.bed; petPlace(me.x + 14, me.y + 8);
   if (roomSteps) roomSteps = null;
   S.px = null; await relight(G.hourOf(game));
-  store(); hud();
+  store(); tavernSave(true); hud();
   await new Promise(r => setTimeout(r, 250)); await fadeTo(0); fade.on = false;
   say(G.dateText(game) + '，早上好。', seasonIcon(G.seasonOf(game)));
   if (game.income) say('昨天出货收入 ' + game.income + ' 代币', 'coin');
@@ -406,7 +497,7 @@ async function goToBed(text) {
 const shop = {open: false, at: 0, kinds: []};
 const price = n => { const el = document.createElement('span'); el.className = 'price'; el.append(iconCanvas('coin'), n); return el; };
 function openShop() {
-  shop.open = true; shop.at = 0;
+  shop.open = true; shop.at = 0; audio.play('open');
   const season = G.seasonOf(game); shop.kinds = Object.keys(G.CROPS).filter(k => G.inSeason(k, season));
   $('#shop .sub').textContent = `现在是${G.SEASONS[season]}天，订单写好塞进信箱，当季的种子马上送到。`;
   const list = $('#shop .items'); list.innerHTML = '';
@@ -422,11 +513,11 @@ function openShop() {
   });
   $('#shop').classList.add('on'); shopPaint(); navFocus($('#shop .items button'));
 }
-function closeShop() { shop.open = false; $('#shop').classList.remove('on'); }
+function closeShop() { shop.open = false; $('#shop').classList.remove('on'); audio.play('close'); }
 function shopMove(d) { shop.at = (shop.at + d + shop.kinds.length) % shop.kinds.length; shopPaint(); }
 function purse() { for (const el of document.querySelectorAll('.purse')) el.replaceChildren(iconCanvas('coin'), game.money + ' 代币'); }
 function shopPaint() { [...$('#shop .items').children].forEach((r, i) => r.classList.toggle('on', i === shop.at)); purse(); }
-function shopBuy(n = 1) { const k = shop.kinds[shop.at]; if (!k) return; const r = G.buy(game, k, n); say(r.say, r.done ? 'packet' : null, k); if (r.done) { store(); hud(); } shopPaint(); }
+function shopBuy(n = 1) { const k = shop.kinds[shop.at]; if (!k) return; const r = G.buy(game, k, n); say(r.say, r.done ? 'packet' : null, k); if (r.done) { audio.play('coin'); store(); hud(); } shopPaint(); }
 $('#shop .close').addEventListener('pointerdown', e => { e.preventDefault(); closeShop(); });
 
 // ── 捏人: who you are, and who comes along. Each row steps through its choices (◀ ▶, left / right on keys and pads);
@@ -546,11 +637,11 @@ const menu = {open: false};
 const PANES = ['bag', 'lore', 'craft', 'map', 'settings', 'help'];
 function openMenu(pane) {
   if (activePanel() || fade.on) return;
-  menu.open = true; bag.picked = -1; bagPaint(); craftPaint(); purse(); $('#menu').classList.add('on');
+  menu.open = true; bag.picked = -1; bagPaint(); craftPaint(); purse(); $('#menu').classList.add('on'); audio.play('open');
   if (pane) showPane(pane); else if (paneNow() === 'map') requestAnimationFrame(mapPaint);
   navFocus($('#menu .tabs .on'));
 }
-function closeMenu() { menu.open = false; $('#menu').classList.remove('on'); }
+function closeMenu() { menu.open = false; $('#menu').classList.remove('on'); audio.play('close'); }
 function showPane(name) {
   for (const el of document.querySelectorAll('#menu [data-pane]')) el.classList.toggle('on', el.dataset.pane === name);
   if (name === 'map') requestAnimationFrame(mapPaint);
@@ -615,9 +706,9 @@ function craftPaint() {
 const chestUi = {open: false, key: null};
 function openChest(key) {
   if (activePanel()) return;
-  chestUi.open = true; chestUi.key = key; chestPaint(); $('#chestui').classList.add('on'); navFocus($('#chestgrid .slot'));
+  chestUi.open = true; chestUi.key = key; chestPaint(); $('#chestui').classList.add('on'); navFocus($('#chestgrid .slot')); audio.play('open');
 }
-function closeChest() { chestUi.open = false; $('#chestui').classList.remove('on'); store(); hud(); }
+function closeChest() { chestUi.open = false; $('#chestui').classList.remove('on'); audio.play('close'); store(); hud(); }
 function chestPaint() {
   const th = game.things[chestUi.key]; if (!th) { closeChest(); return; }
   th.items ??= Array(G.CHEST).fill(null);
@@ -630,6 +721,11 @@ function chestPaint() {
 }
 $('#chestui .close').addEventListener('pointerdown', e => { e.preventDefault(); closeChest(); });
 $('#relook').onclick = () => { closeMenu(); openCreator(true); };
+// the volume (kept by this browser): a slider, moved by keys and pads with left / right while it has the ring
+const volume = $('#volume'), volumeText = () => { $('#volumeText').textContent = volume.value === '0' ? '静音' : volume.value + '%'; };
+volume.value = Math.round(audio.sound.volume * 100); volumeText();
+volume.addEventListener('input', () => { audio.setVolume(volume.value / 100); volumeText(); });
+volume.addEventListener('change', () => audio.play('tick'));
 $('#menuBtn').addEventListener('pointerdown', e => { e.preventDefault(); menu.open ? closeMenu() : openMenu(); });
 $('#menu .close').addEventListener('pointerdown', e => { e.preventDefault(); closeMenu(); });
 
@@ -644,6 +740,7 @@ function update(dt) {
     if (Math.floor(game.minutes / 10) !== Math.floor(lastSaved / 10)) { lastSaved = game.minutes; hud(); if (Math.floor(game.minutes) % 60 < 2) store(); }
     if (!relighting && Math.abs(G.hourOf(game) - (S.hour ?? -99)) >= .25) relighting = relight(G.hourOf(game)).finally(() => { relighting = null; });
   }
+  if (me.act) { const a = me.act; a.t += dt; if (!a.landed && a.t >= a.dur * a.land) { a.landed = true; a.perform?.(); } if (a.t >= a.dur && me.act === a) me.act = null; }
   me.busy = Math.max(0, me.busy - dt);
   let {x, y} = wanted(); const len = Math.hypot(x, y);
   if (len > 1) { x /= len; y /= len; }
@@ -664,7 +761,9 @@ function update(dt) {
   cursor.still = me.moving ? 0 : cursor.still + dt;
   const wantCursor = scene === 'farm' && ((using === 'mouse' && mouse.active) || (groundTool && cursor.still > .35));
   cursor.k = Math.max(0, Math.min(1, cursor.k + (wantCursor ? dt * 4 : -dt * 8)));
-  for (const p of effects) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.heart ? 0 : 120) * dt; p.life -= dt; }
+  for (const p of effects) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.heart ? 0 : p.dust ? 14 : 120) * dt; p.life -= dt; }
+  tracks();
+  audio.ambient({scene, hour: G.hourOf(game), season: litSeason, fall: scene === 'farm' ? Math.max(0, 1 - Math.hypot(me.x - 45.5 * T, (me.y - 6 * T) * 1.2) / 280) : 0, fire: scene === 'house' && !!S.fire});
   petUpdate(dt);
   dropsUpdate(dt);
   if (scene === 'shore') { tideUpdate(dt); crittersUpdate(dt); }
@@ -675,7 +774,7 @@ function update(dt) {
 // ── drawing ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 const frames = new Map(), cropArt = new Map(), cache = new Map();
 let hero = null;
-function frame(dir, step) { hero ??= personFrom(game.look || DEFAULT_LOOK); const key = dir + step; if (!frames.has(key)) frames.set(key, person(hero, {view: dir === 'down' ? 'front' : dir === 'up' ? 'back' : 'side', step, flip: dir === 'right'})); return frames.get(key); }
+function frame(dir, step, use = null) { hero ??= personFrom(game.look || DEFAULT_LOOK); const key = dir + step + (use || ''); if (!frames.has(key)) frames.set(key, person(hero, {view: dir === 'down' ? 'front' : dir === 'up' ? 'back' : 'side', step, flip: dir === 'right', use})); return frames.get(key); }
 // a crop's picture by stage (-1: withered)
 function art(kind, stage) { const key = kind + stage; if (!cropArt.has(key)) cropArt.set(key, cropStage(G.CROPS[kind].art, stage)); return cropArt.get(key); }
 // the light that reaches a ground pixel, times an albedo, finished like the world
@@ -788,8 +887,10 @@ function dropsUpdate(dt) {
   if (got) { hud(); store(); }
 }
 // a note for what came into the bag: one per kind of thing, counting up as more comes
+let pickedAt = 0;
 function gotItem(id, n) {
   const box = $('#toasts'), name = G.ITEMS[id]?.name || id;
+  if (performance.now() - pickedAt > 80) audio.play('pickup'); pickedAt = performance.now();
   let t = [...box.children].find(t => t.dataset.item === id && !t.classList.contains('out'));
   if (!t) { t = document.createElement('div'); t.className = 'toast frame'; t.dataset.item = id; t.dataset.n = 0; t.append(itemIcon(id), document.createTextNode('')); box.append(t); while (box.children.length > 4) box.firstElementChild.remove(); }
   t.dataset.n = Number(t.dataset.n) + n; t.lastChild.textContent = name + '  +' + t.dataset.n;
@@ -799,7 +900,7 @@ function gotItem(id, n) {
 const dropPixels = new Map();
 function drawDrop(d, cx, cy) {
   if (!dropPixels.has(d.id)) dropPixels.set(d.id, iconPixels(d.id.startsWith('seed:') ? 'packet' : d.id, {crop: d.id.startsWith('seed:') ? d.id.slice(5) : null}).map(([x, y, c]) => [x, y, parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)]));
-  const bob = d.fly ? 0 : d.z > 0 ? 0 : Math.sin(performance.now() / 260 + d.x) * 1, scale = d.fly ? 1 - Math.min(.5, d.age) : .75;
+  const bob = d.fly || d.still ? 0 : d.z > 0 ? 0 : Math.sin(performance.now() / 260 + d.x) * 1, scale = d.fly ? 1 - Math.min(.5, d.age) : .75;
   const gx = Math.round(d.x), gy = Math.round(d.y), i0 = Math.max(0, Math.min(H - 1, gy)) * W + Math.max(0, Math.min(W - 1, gx));
   const L = S.light ? [S.light[i0 * 3], S.light[i0 * 3 + 1], S.light[i0 * 3 + 2]] : [1, 1, 1];
   if (!d.fly) for (let x = -3; x <= 3; x++) { const sx = gx + x - cx, sy = gy + 1 - cy; if (sx >= 0 && sy >= 0 && sx < VW && sy < VH) { const [r, g, b] = unpack(screen[sy * VW + sx]); screen[sy * VW + sx] = pack(r * .7 | 0, g * .7 | 0, b * .72 | 0); } }
@@ -889,6 +990,7 @@ function darkenGround(list, cx, cy, k) {
 function camera() {
   const cx = W > VW ? Math.round(Math.max(0, Math.min(W - VW, me.x - VW / 2))) : -Math.floor((VW - W) / 2);
   const cy = H > VH ? Math.round(Math.max(0, Math.min(H - VH, me.y - 16 - VH / 2))) : -Math.floor((VH - H) / 2);
+  if (performance.now() < shaking.until) { const j = () => Math.round((Math.random() - .5) * 2 * shaking.amp); return [W > VW ? Math.max(0, Math.min(W - VW, cx + j())) : cx, H > VH ? Math.max(0, Math.min(H - VH, cy + j())) : cy]; }
   return [cx, cy];
 }
 const DARK = pack(12, 11, 18);
@@ -900,7 +1002,7 @@ function draw(t) {
     if (x0 > 0) screen.fill(DARK, y * VW, y * VW + x0); if (x1 < VW) screen.fill(DARK, y * VW + x1, y * VW + VW);
     screen.set(S.px.subarray(wy * W + cx + x0, wy * W + cx + x1), y * VW + x0);
   }
-  if (OUTDOOR.includes(scene)) liveLayers(cx, cy, t); else roomLayers(cx, cy, t);
+  if (OUTDOOR.includes(scene)) { drawPrints(cx, cy); liveLayers(cx, cy, t); } else roomLayers(cx, cy, t);
   const sun = S.sun, lift = (sun.L[2] + .5) / 1.5, shadowK = [0, 1, 2].map(c => (sun.sky[c] + sun.sun[c] * lift * .08) / (sun.sky[c] + sun.sun[c] * lift));
   // the farm: ground first, then plants and people sorted by their feet
   const sprites = [];
@@ -919,6 +1021,7 @@ function draw(t) {
   if (!sun.night) for (const s of sprites) darkenGround(s.plant.shadowPx, cx, cy, shadowK);
   sprites.push({foot: Math.round(me.y), me: true});
   if (scene === 'farm') for (const d of game.drops || []) sprites.push({foot: Math.round(d.y), drop: d});
+  if (scene === 'shore') for (const o of game.beach?.items || []) if (!underWater(o)) sprites.push({foot: o.y, drop: {id: o.id, x: o.x, y: o.y, z: 0, age: 1, still: true}});
   for (const f of flyers) sprites.push({foot: 1e6, drop: f});
   if (game.pet) sprites.push({foot: Math.round(pet.y), pet: true});
   if (game.pet && scene === 'farm') { const b = bowlOf(); sprites.push({foot: BOWL[1], plant: b}); }
@@ -940,14 +1043,84 @@ function draw(t) {
   }
   for (const p of effects) {
     if (p.heart) { for (const [dx, dy] of HEART) blendAt(p.x + dx, p.y + dy, cx, cy, ...(dy === -1 && dx === -1 ? [255, 220, 230] : p.col), Math.min(1, p.life * 1.5)); continue; }
+    if (p.dust) { blendAt(p.x, p.y, cx, cy, ...p.col, Math.min(.55, p.life * 1.4)); continue; }
     const sx = Math.round(p.x) - cx, sy = Math.round(p.y) - cy; if (sx >= 0 && sy >= 0 && sx < VW && sy < VH) screen[sy * VW + sx] = pack(...p.col);
   }
   ctx.putImageData(image, 0, 0);
 }
 function drawMe(cx, cy, shadowK) {
-  const step = me.moving ? [0, 1, 0, 3][Math.floor(me.t * 8) % 4] : 0;
-  drawActor(frame(me.dir, step), me.x, me.y, me.busy > .1 ? 1 : 0, cx, cy, shadowK);
+  const step = me.moving ? [0, 1, 0, 3][Math.floor(me.t * 8) % 4] : 0, a = me.act;
+  // the pose: a tool raised, then brought down as it lands; the can (or an empty hand) held out
+  const use = !a ? null : a.id && a.id !== 'can' ? (a.t < a.dur * a.land * .7 ? 'up' : 'down') : 'reach';
+  const s = frame(me.dir, step, use), tool = a?.id && s.hand ? toolNow(a, s) : null;
+  if (tool?.behind) drawTool(tool, cx, cy);
+  drawActor(s, me.x, me.y, 0, cx, cy, shadowK);
+  if (tool && !tool.behind) drawTool(tool, cx, cy);
 }
+const easeOut = v => 1 - (1 - v) * (1 - v);
+/**
+ * The tool in hand now: its pixels from the hand, and whether it is behind her. From the side (facing left; mirrored
+ * to the right) it goes from back over the shoulder (40°) through the top down to the ground in front (−150°); facing
+ * us or away it turns toward the eye and away, its handle shortening. The can tips forward and pours.
+ */
+function toolNow(a, s) {
+  const k = Math.min(1, a.t / a.dur), dir = me.dir, side = dir === 'left' || dir === 'right', m = dir === 'right' ? -1 : 1;
+  const x = Math.round(me.x - s.fx) + s.hand[0], y = Math.round(me.y - s.fy) + s.hand[1];
+  if (a.id === 'can') {
+    const c = canPixels(side ? -m : 0, Math.min(1, k / .3));
+    return {px: c.px, x, y, behind: dir === 'up', spout: [x + c.spout[0], y + c.spout[1]], pour: k > .28 && k < .9};
+  }
+  const raise = Math.min(1, k / (a.land * .7)), down = Math.max(0, Math.min(1, (k - a.land * .7) / (a.land * .3))), L = a.id === 'hoe' ? 12 : 11;
+  let angle, length = L, behind = false;
+  if (side) { angle = (down > 0 ? 40 + (-150 - 40) * easeOut(down) : 10 + 30 * raise) * m; behind = down === 0; }
+  else if (dir === 'down') { if (!down) { angle = 0; length = L * (.6 + .4 * raise); behind = true; } else if (down < .5) { angle = 0; length = L * (1 - down * 2); } else { angle = 180; length = L * (down - .5) * 2; } }
+  else { angle = 0; length = down ? 4 + (L + 2 - 4) * easeOut(down) : 4 + 2 * raise; behind = true; }
+  const across = a.id === 'axe' ? (dir === 'left' ? 1 : -1) : (dir === 'left' ? -1 : 1);
+  return {px: toolPixels(a.id, angle, Math.max(1, Math.round(length)), across), x, y, behind};
+}
+/** The tool drawn in the light where she stands; the can's water falling to the tile in front. */
+function drawTool(tool, cx, cy) {
+  const i0 = Math.max(0, Math.min(H - 1, Math.round(me.y))) * W + Math.max(0, Math.min(W - 1, Math.round(me.x))), L = S.light ? [S.light[i0 * 3], S.light[i0 * 3 + 1], S.light[i0 * 3 + 2]] : [1, 1, 1];
+  for (const [dx, dy, c] of tool.px) {
+    const X = tool.x + dx, Y = tool.y + dy, sx = X - cx, sy = Y - cy;
+    if (sx < 0 || sy < 0 || sx >= VW || sy >= VH || X < 0 || Y < 0 || X >= W || Y >= H) continue;
+    screen[sy * VW + sx] = finish(c[0] * L[0], c[1] * L[1], c[2] * L[2], X, Y, S.sun);
+  }
+  if (tool.pour && Math.random() < .7) { const [sx, sy] = tool.spout; effects.push({x: sx, y: sy, vx: (Math.random() - .5) * 8 + (me.dir === 'left' ? -14 : me.dir === 'right' ? 14 : 0), vy: 18 + Math.random() * 10, life: .3 + Math.random() * .12, col: [150, 214, 250]}); }
+}
+// ── tracks: a footprint each step in dry sand, on the wet flat (the tide takes those) and in winter's frosty grass, fading
+// in half a minute; dust kicked up on a dry path or sand ──
+const prints = [], PRINT_LIFE = 32000;
+let stepWas = -1;
+function tracks() {
+  if (!me.moving || !S) { stepWas = -1; return; }
+  const k = Math.floor(me.t * 8) % 4; if (k === stepWas) return; stepWas = k;
+  if (k !== 1 && k !== 3) return; // a foot comes down
+  if (!S.mat) { audio.play('step', 'wood'); return; } // indoors: floorboards
+  const across = me.dir === 'up' || me.dir === 'down', x = Math.round(me.x + (across ? (k === 1 ? -2 : 1) : 0)), y = Math.round(me.y - 1 + (across ? 0 : k === 1 ? -1 : 0)), m = S.mat[y * W + x];
+  audio.play('step', m === 5 ? 'sand' : m === 11 ? 'wet' : m === 10 ? 'wood' : m === 2 || m === 3 ? 'path' : 'grass');
+  if (m === 5 || m === 11 || (m === 1 && litSeason === 3)) { prints.push({scene, x, y, across, m, at: performance.now()}); if (prints.length > 180) prints.shift(); }
+  if ((m === 2 || m === 5) && litSeason !== 3) for (let n = 0; n < 3; n++) effects.push({x: x + (Math.random() - .5) * 5, y: y - Math.random() * 2, vx: (Math.random() - .5) * 12 + (me.dir === 'left' ? 8 : me.dir === 'right' ? -8 : 0), vy: -5 - Math.random() * 7, life: .3 + Math.random() * .25, col: m === 5 ? [232, 214, 172] : [172, 140, 100], dust: true});
+}
+function drawPrints(cx, cy) {
+  const now = performance.now();
+  for (let i = prints.length - 1; i >= 0; i--) {
+    const p = prints[i], age = now - p.at, e = S.tideE?.[p.y * W + p.x];
+    if (age > PRINT_LIFE || (p.scene === scene && e !== undefined && e <= 1 && tideNow > e - .004)) { prints.splice(i, 1); continue; } // faded, or under the water
+    if (p.scene !== scene) continue;
+    const k = 1 - age / PRINT_LIFE, dark = p.m === 11 ? .68 : p.m === 5 ? .7 : 0;
+    // a foot's shape, heel to toe along the way walked
+    for (const [dx, dy] of p.across ? [[0, 0], [1, 0], [0, -1], [1, -1], [0, -2]] : [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1]]) {
+      const sx = p.x + dx - cx, sy = p.y + dy - cy; if (sx < 0 || sy < 0 || sx >= VW || sy >= VH) continue;
+      const s = sy * VW + sx, [r, g, b] = unpack(screen[s]);
+      if (dark) { const f = 1 - (1 - dark) * k; screen[s] = pack(r * f | 0, g * f | 0, b * (f + (1 - f) * .15) | 0); }
+      else screen[s] = pack(r + (70 - r) * .45 * k | 0, g + (104 - g) * .45 * k | 0, b + (78 - b) * .45 * k | 0); // frost pressed down: the grass shows
+    }
+  }
+}
+// the view trembling a moment (a tree coming down)
+const shaking = {until: 0, amp: 0};
+const quake = (sec, amp) => { shaking.until = performance.now() + sec * 1000; shaking.amp = amp; };
 /** Someone standing in the world (you, the pet): lit by the sun and the lamps there, casting shadows from both. */
 function drawActor(s, x, y, up, cx, cy, shadowK) {
   const ox = Math.round(x - s.fx), oy = Math.round(y - s.fy) - up, foot = Math.round(y), px = Math.round(x);
@@ -1122,7 +1295,7 @@ function tideUpdate(dt) {
     const up = (x, y) => S.tideE[Math.max(0, Math.min(H - 1, Math.round(y))) * W + Math.max(0, Math.min(W - 1, Math.round(x)))];
     const gx = Math.min(1.2, up(me.x + 8, me.y) ) - Math.min(1.2, up(me.x - 8, me.y)), gy = Math.min(1.2, up(me.x, me.y + 8)) - Math.min(1.2, up(me.x, me.y - 8)), l = Math.hypot(gx, gy) || 1;
     me.x += gx / l * 34 * dt; me.y += (gy ? gy / l : -1) * 34 * dt;
-    if (performance.now() - tideWarned > 6000) { tideWarned = performance.now(); say('潮水涨上来了！往岸上走。', 'shell'); }
+    if (performance.now() - tideWarned > 6000) { tideWarned = performance.now(); say('潮水涨上来了！往岸上走。', 'shell'); audio.play('splash'); }
   }
 }
 // the water over the flat, lit by the hour: clear and pale at its edge, deeper blue-green further in, foam at the line
@@ -1162,6 +1335,29 @@ function shoreSpots() {
   shoreLife.pools = Array.from({length: 5}, (_, k) => pools[Math.floor(hash(k, 5, 78) * pools.length)]).filter(Boolean);
   shoreLife.gulls = [[9.5, 17.4], [27.8, 16.2], [44.6, 17.6]].map(([tx, ty]) => ({x: tx * T, y: ty * T, away: 0}));
   shoreLife.ready = true;
+  shoreLife.beach = beachSpots(); beachToday();
+}
+// ── what the tide leaves each day (G.beachFinds): on the dry beach, and on the flat (there only seen and reached at low
+// water); picked up by using it, gone by the next morning ──
+function beachSpots() {
+  const E = shore.tideE, Wd = shore.W, M = shore.mat, sand = [], flat = [];
+  for (let y = 4 * T; y < shore.H - 2 * T; y += 5) for (let x = 2 * T; x < Wd - 2 * T; x += 5) {
+    const i = y * Wd + x, m = M[i]; if (shore.solid[i] || shore.owner[i] >= 0) continue;
+    if (m === 5 && M[i + 4] === 5 && M[i - 4] === 5 && M[i - 4 * Wd] === 5 && M[i + 4 * Wd] === 5) sand.push([x, y]);
+    else if (m === 11 && E[i] > .22 && E[i] < .82 && M[i + 4] === 11 && M[i - 4] === 11) flat.push([x, y]);
+  }
+  return {sand, flat};
+}
+function beachToday() { if (shoreLife.beach && game && game.beach?.day !== game.day) game.beach = {day: game.day, items: G.beachFinds(shoreLife.beach)}; }
+const underWater = o => { const e = shore?.tideE[o.y * shore.W + o.x]; return e !== undefined && e <= 1 && tideNow > e - .004; };
+function pickBeach() {
+  const list = game.beach?.items || [], i = list.findIndex(o => !underWater(o) && near([o.x, o.y + 3], 16));
+  if (i < 0) return false;
+  const o = list[i], id = o.id === 'driftwood' ? 'wood' : o.id, n = o.id === 'driftwood' ? 2 : 1, left = G.add(game, id, n);
+  if (left === n) { say('背包满了'); return true; }
+  list.splice(i, 1); flyToHand(id, o.x, o.y - 2); gotItem(id, n - left); if (LORE[id]) discover(id);
+  me.act = {id: null, t: 0, dur: .24, land: 0, landed: true}; me.busy = .2; store(); hud();
+  return true;
 }
 const seal = () => { const h = G.hourOf(game); return h >= 10 && h < 15.5 ? {x: 52.3 * T, y: 32.4 * T} : null; };
 function crittersUpdate(dt) {
@@ -1215,7 +1411,7 @@ function observe() {
 function caveVisit() {
   const e = shore.tideE[(SHORE.cave[1] + 4) * W + SHORE.cave[0]];
   if (e <= 1 && tideNow > e - .01) { say('洞口泡在海水里，等退潮吧。'); return; }
-  discover('cave'); if (game.lore?.cave && game.lore.cave < game.day) say(LORE.cave.text); else say('洞里黑漆漆的，深处好像有蓝色的光一闪。得带上灯再来。');
+  discover('cave'); if (game.lore?.cave && game.lore.cave < game.day) say(LORE.cave.text); else say('洞里黑漆漆的，深处好像有蓝色的光一闪。太黑了，还是别进去。');
 }
 // the farm's butterflies (day, spring to autumn) and fireflies (warm nights), where liveLayers draws them
 function farmCritterNear() {
@@ -1239,7 +1435,7 @@ function discover(id) {
   if (!LORE[id]) return;
   game.lore ??= {};
   if (game.lore[id]) return;
-  game.lore[id] = game.day; store();
+  game.lore[id] = game.day; store(); audio.play('lore');
   const box = $('#toasts'), t = document.createElement('div'); t.className = 'toast frame lore';
   t.append(iconCanvas('book'), document.createTextNode('见闻录 · 新的一页：' + LORE[id].name)); box.append(t);
   while (box.children.length > 4) box.firstElementChild.remove();
@@ -1468,13 +1664,23 @@ function loop(now) {
 }
 function fit() {
   const box = $('#stage'), w = box.clientWidth, h = box.clientHeight;
-  let k = Math.min(w / VW, h / VH); if (k >= 1) k = Math.max(1, Math.floor(k * 4) / 4);
+  // as many screen pixels to a world pixel as a 320 × 180 view allows, then as much more of the world as the screen
+  // has room for (a phone held sideways sees further left and right), up to 448 × 252
+  const k = Math.max(1, Math.floor(Math.min(w / 320, h / 180)));
+  setView(Math.max(1, Math.min(448, Math.ceil(w / k))), Math.max(1, Math.min(252, Math.ceil(h / k))));
   canvas.style.width = VW * k + 'px'; canvas.style.height = VH * k + 'px';
+  if (S?.px) draw(performance.now() / 1000);
 }
 addEventListener('resize', fit); fit();
 $('#full').onclick = () => { const el = document.documentElement; (document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen?.())?.catch?.(() => {}); };
-$('#reset').onclick = () => { if (confirm('重新开始一局吗？现在的进度会清掉。')) { localStorage.removeItem('antarctic-farm-v1'); location.search = ''; } };
+// a fresh start: asked first; the tavern's copy becomes the new game too (else it would come back on loading)
+$('#reset').onclick = () => confirm('从头开始吗？现在的进度会清掉，找不回来。', '从头开始', '算了').then(async yes => {
+  if (!yes) return;
+  resetting = true; G.wipe();
+  const fresh = G.newGame(FIELD); G.save(fresh); await tavernSave(true, fresh);
+  location.replace(location.pathname);
+});
 // inside the tavern (ST-iPhonie's 大游戏): a way back, saving first
-if (parent !== window) { $('#leaveRow').hidden = false; $('#leave').onclick = () => { if (game) store(); parent.postMessage({type: 'st-iphonie-game:close'}, location.origin); }; }
+if (inTavern) { $('#leaveRow').hidden = false; $('#leave').onclick = () => { if (game) { store(); tavernSave(true); } parent.postMessage({type: 'st-iphonie-game:close'}, location.origin); }; }
 if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
 setTimeout(() => boot().catch(e => { $('#loading').textContent = '准备失败：' + e.message; }), 30);

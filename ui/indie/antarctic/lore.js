@@ -37,7 +37,7 @@ export const LORE = {
   whalebone: {kind: '地标', name: '鲸骨拱', hint: '东海岸的沙滩高处，一道白色的拱。', text: '一副巨大的鲸骨半埋在沙里，肋骨弯成一排拱门。孩子们说鲸湾就是因它得名——大人们笑着说不是。', art: () => LORE_ART.whalebone()},
   wreck: {kind: '地标', name: '搁浅的小船', hint: '东海岸，沙滩上有条船。', text: '船身晒成了银灰色，船头还挂着一盏没了玻璃的灯。船舱里积满了沙，不知道它的主人后来去了哪里。', art: () => LORE_ART.wreck()},
   marker: {kind: '地标', name: '旧观测桩', hint: '退潮时，沙洲尽头的小岛上。', text: '一根方石桩，身上一圈圈刻度记着潮水的高低，刻着的符文还微微发着光。是知识库的观测桩——它好像还在工作。', art: () => LORE_ART.marker()},
-  cave: {kind: '地标', name: '海蚀洞', hint: '东边海崖的脚下，只有退潮时走得到。', text: '海崖脚下的洞口，里面黑漆漆的，深处偶尔闪过一点蓝光。涨潮时洞口会被海水淹没。得带上灯再来。', art: caveArt},
+  cave: {kind: '地标', name: '海蚀洞', hint: '东边海崖的脚下，只有退潮时走得到。', text: '海崖脚下的洞口，里面黑漆漆的，深处偶尔闪过一点蓝光。涨潮时洞口会被海水淹没。太黑了，看不清有多深，还是别贸然进去。', art: caveArt},
   gull: {kind: '生物', name: '白鸥', hint: '白天，在海边。', text: '海风里最吵闹的居民。它们会盯着你手里的东西看，看清楚不是吃的，才慢悠悠地飞走。', art: () => CRITTERS.gullStand},
   crab: {kind: '生物', name: '礁蟹', hint: '退潮后的礁石之间，跑得很快。', text: '退潮后在礁石间横着跑的小螃蟹，壳上的花纹和礁石几乎一样。人一靠近，就一溜烟钻进石缝里。', art: () => CRITTERS.crabA},
   seal: {kind: '生物', name: '斑海豹', hint: '中午前后，小岛的礁石上。', text: '中午前后，小岛的礁石上常有一只斑海豹在晒太阳。它看你的眼神像是在说：这块石头是我的。', art: () => CRITTERS.seal},
@@ -54,5 +54,7 @@ export const LORE = {
   frostfruit: {kind: '采集', name: '霜晶果', hint: '冬天的草丛里。', text: '冬天结的小果子，表面像结了一层霜，在手心里慢慢变暖。', art: icon('frostfruit')},
   shell: {kind: '采集', name: '贝壳', hint: '沙滩上。', text: '海浪送上岸的扇贝壳，纹路一圈一圈的。', art: icon('shell')},
   seaglass: {kind: '采集', name: '海玻璃', hint: '沙滩上。', text: '被海水磨圆了边的玻璃，对着光看是淡淡的蓝。不知道它原来是什么。', art: icon('seaglass')},
+  kelp: {kind: '采集', name: '海带', hint: '东海岸，退潮后的潮滩上。', text: '被潮水推上潮滩的海带，滑溜溜的，带着海的咸味。晒干了能放很久。', art: icon('kelp')},
+  conch: {kind: '采集', name: '海螺', hint: '东海岸，退潮后的潮滩上，不常见。', text: '螺壳上一圈一圈的花纹，像是被谁细细描过。贴在耳边，好像真能听见海。', art: icon('conch')},
 };
 export const LORE_IDS = Object.keys(LORE);

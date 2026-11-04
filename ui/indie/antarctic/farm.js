@@ -245,7 +245,7 @@ function terrain() {
 // A person as a world object: the sprite, normals from its outline, a cylinder for its shadow.
 export function person(key, pose = {}) {
   const s = sprite(key, pose);
-  return {w: s.w, h: s.h, px: s.px, nrm: pillow(s.px, s.w, s.h, 4), emit: new Uint8Array(s.w * s.h), fx: s.w / 2, fy: s.foot - 1, shapes: [{t: 'cyl', x: 0, y: -1, r: 4, h: 28}]};
+  return {w: s.w, h: s.h, px: s.px, nrm: pillow(s.px, s.w, s.h, 4), emit: new Uint8Array(s.w * s.h), fx: s.w / 2, fy: s.foot - 1, shapes: [{t: 'cyl', x: 0, y: -1, r: 4, h: 28}], hand: s.hand};
 }
 function placeObjects(without = []) {
   const list = [], put = (o, x, footY, extra = {}) => { if (without.includes(extra.person)) return; list.push({...o, x: Math.round(x - o.fx), y: Math.round(footY - o.fy), foot: Math.round(footY), fxw: Math.round(x), ...extra}); };

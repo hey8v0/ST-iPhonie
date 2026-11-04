@@ -107,7 +107,9 @@ const firstCard = route => (Array.isArray(route.cards) ? route.cards.find(k => !
 const clone = value => structuredClone(value);
 // a 歌单 the user made was deleted meanwhile (in another tab, say)
 // Which documents of the apps' stores make up a part of a backup and of 保存到酒馆 (画画的作品 has a store of its own).
-const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], looks: ['look'], albums: ['album'], music: ['song', 'playlist', 'heard', 'draft'], sounds: ['sound'] });
+const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], looks: ['look'], albums: ['album'], music: ['song', 'playlist', 'heard', 'draft'], sounds: ['sound'], games: ['gamesave'] });
+// the 大游戏 whose saves the phone keeps (方块世界's worlds are too big to carry; they stay in the browser)
+const GAME_SAVES = Object.freeze(['antarctic']);
 // The tavern takes 500 MB a request, and a file goes as base64.
 const tooBigToSync = work => (work?.bytes || 0) > 300 * 1024 * 1024;
 const listGone = error => { throw error?.code === 'MISSING' ? Error('这个歌单已经删掉了') : error; };
@@ -276,7 +278,7 @@ export class TTSBackend {
         const bytes = rows => rows.reduce((n, row) => n + (row.blob?.size || row.size || row.bytes || 0), 0);
         const [docs, music, sounds, works] = await Promise.all([this.apps.list(), this.music.list(), this.sounds.list('sound'), this.paintRows().catch(() => [])]);
         const songs = music.filter(row => row.kind === 'song' && row.origin !== 'source'), looks = docs.filter(row => row.kind === 'look');
-        return { looks: looks.length, lookBytes: bytes(looks), forum: docs.filter(row => row.kind === 'forum').length, peek: docs.filter(row => row.kind === 'peek').length, ledger: new Set(docs.filter(row => row.kind === 'ledger').map(row => row.day)).size, playlists: music.filter(row => row.kind === 'playlist').length, songs: songs.length, musicBytes: bytes(songs), sounds: sounds.length, soundBytes: bytes(sounds), works: works.length, workBytes: bytes(works) };
+        return { games: docs.filter(row => row.kind === 'gamesave').map(row => ({ game: row.game, day: Number(row.data?.day) || 0 })), looks: looks.length, lookBytes: bytes(looks), forum: docs.filter(row => row.kind === 'forum').length, peek: docs.filter(row => row.kind === 'peek').length, ledger: new Set(docs.filter(row => row.kind === 'ledger').map(row => row.day)).size, playlists: music.filter(row => row.kind === 'playlist').length, songs: songs.length, musicBytes: bytes(songs), sounds: sounds.length, soundBytes: bytes(sounds), works: works.length, workBytes: bytes(works) };
     }
     /** The works' list; one saved before it kept its size has its layers read for that. */
     async paintRows() {
@@ -286,6 +288,26 @@ export class TTSBackend {
     }
     /** A work of 画画 was saved or deleted in the phone. */
     paintChanged(gone = []) { this.noteGone('paint', gone); this.scheduleSync(); }
+    /** 大游戏's save as the phone keeps it ({data, savedAt}, or null): the game keeps its own in the browser too, and
+     *  goes on with the later of the two (index.js hands them over). */
+    async gameSave(game) {
+        this.assertOpen();
+        const row = await this.apps.get('gamesave:' + String(game)).catch(() => null);
+        return row?.data && typeof row.data === 'object' ? { data: row.data, savedAt: Number(row.updatedAt) || 0 } : null;
+    }
+    /** Keeps a game's save (one a game; 保存到酒馆 and backups take it along). An older one than kept is left (a copy
+     *  arriving late, or from a device behind): false. */
+    async putGameSave(game, data, savedAt) {
+        this.assertOpen();
+        if (!GAME_SAVES.includes(game)) throw Error('没有这个游戏');
+        if (!data || typeof data !== 'object' || !Number.isFinite(data.day)) throw Error('存档格式不对');
+        if (JSON.stringify(data).length > 4 * 1024 * 1024) throw Error('存档太大了');
+        const at = Number(savedAt) || Date.now(), id = 'gamesave:' + game, old = await this.apps.get(id).catch(() => null);
+        if (old && (Number(old.updatedAt) || 0) > at) return false;
+        await this.apps.put([{ id, kind: 'gamesave', game, at, updatedAt: at, data }]);
+        this.emit('games', { game });
+        return true;
+    }
     /** A backup file of the chosen parts (core/backup.js BACKUP_PARTS). Keys and the account scope are never written. */
     async exportBackup(parts = Object.keys(BACKUP_PARTS), version = '', { password = '' } = {}) {
         this.assertOpen();
@@ -393,7 +415,7 @@ export class TTSBackend {
     emit(type, data = {}) {
         if (this.closed) return;
         const event = { type, revision: this.revision, ...clone(data) };
-        if (!this.syncApplying && (type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || type === 'looks' || type === 'albums' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
+        if (!this.syncApplying && (type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || type === 'looks' || type === 'albums' || type === 'games' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
         for (const listener of this.listeners) { try { listener(clone(event)); } catch { /* One view cannot stop the other subscribers. */ } }
     }
     subscribe(listener) {

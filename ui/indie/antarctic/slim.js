@@ -381,10 +381,25 @@ const GROUP = {h: 'hair', H: 'hair', d: 'hair', D: 'hair', X: 'hair', r: 'hair',
   j: 'top', J: 'top', L: 'top', c: 'collar', t: 'collar', k: 'bottom', q: 'bottom', p: 'legs', P: 'legs', o: 'legs', O: 'legs', f: 'shoes', F: 'shoes', g: 'glass'};
 const SEAMS = [['hair', 'skin'], ['hair', 'top'], ['hair', 'arm'], ['hair', 'collar'], ['arm', 'skin'], ['arm', 'top'], ['top', 'bottom'], ['top', 'skin'], ['top', 'collar'], ['bottom', 'legs'], ['bottom', 'skin'], ['legs', 'shoes'], ['skin', 'shoes']];
 const seam = (a, b) => SEAMS.some(([x, y]) => x === a && y === b);
-function figure(p, {view = 'front', step = 0} = {}) {
+// Using something in the hands (use): 'up' — a tool raised (over the head; from the side, back over the shoulder),
+// 'down' — brought down in front, 'reach' — the arms held out in front (pouring, picking). Where the hands are, by view
+// (figure rows; from the side facing left): the game draws the tool from there.
+const HANDS = {front: {up: [7.5, -1], down: [7.5, 18], reach: [7.5, 18]}, back: {up: [7.5, -1], down: [7.5, 2], reach: [7.5, 16]}, side: {up: [11, 12], down: [2.5, 18], reach: [2.5, 15]}};
+function figure(p, {view = 'front', step = 0, use = null} = {}) {
   const side = view === 'side', base = side ? [...SIDE, ...Array(8).fill('................')] : TEMPLATE;
   const TOP = 4, rows = [...Array(TOP)].map(() => Array(16).fill('.')).concat(base.map(r => r.split('')));
   const at = (x, y) => rows[y + TOP]?.[x], put = (x, y, ch) => { if (rows[y + TOP]) rows[y + TOP][x] = ch; };
+  if (use && !side) { // the arms leave the sides: raised (behind the head), or brought together in front
+    for (let y = 14; y < 20; y++) for (const x of [2, 3, 12, 13]) if (GROUP[at(x, y)] === 'arm' || (y === 19 && GROUP[at(x, y)] === 'skin')) put(x, y, '.');
+    if (use !== 'up' && view === 'front') {
+      for (const [x, y, ch] of [[4, 14, 'a'], [4, 15, 'a'], [5, 16, 'a'], [5, 17, 'A'], [6, 18, 'A'], [11, 14, 'A'], [11, 15, 'A'], [10, 16, 'A'], [10, 17, 'A'], [9, 18, 'A']]) put(x, y, ch);
+      put(7, 18, 's'); put(8, 18, 'S');
+    }
+  }
+  if (side && use) { // the near arm: back over the shoulder, down and out in front, or held straight out
+    const arm = {up: [[8, 14, 'a'], [9, 13, 'a'], [10, 13, 'A'], [11, 12, 's'], [11, 13, 'S']], down: [[7, 14, 'a'], [6, 15, 'a'], [5, 16, 'A'], [4, 17, 'A'], [3, 18, 's'], [2, 18, 'S']], reach: [[7, 14, 'a'], [6, 14, 'A'], [5, 15, 'a'], [4, 15, 'A'], [3, 15, 's'], [2, 15, 'S']]}[use];
+    for (const [x, y, ch] of arm) put(x, y, ch);
+  }
   if (side) { // legs and the near arm, by the step: standing, or striding with the arm swinging the other way
     const legs = step === 1 ? [[[7, 22], [6, 23], [6, 24], [5, 25], [5, 26]], [[8, 22], [9, 23], [9, 24], [10, 25], [10, 26]]]
       : step === 3 ? [[[8, 22], [9, 23], [9, 24], [10, 25], [10, 26]], [[7, 22], [6, 23], [6, 24], [5, 25], [5, 26]]] : [[[7, 22], [7, 23], [7, 24], [7, 25], [7, 26]]];
@@ -395,8 +410,7 @@ function figure(p, {view = 'front', step = 0} = {}) {
       put(fx - 1, 26 + lift, 'f'); put(fx, 26 + lift, 'f');
     });
     const sw = step === 1 ? 1 : step === 3 ? -1 : 0; // the arm swings against the front leg
-    for (let y = 14; y < 19; y++) { const dx = Math.round((y - 14) / 4 * sw); put(7 + dx, y, 'a'); put(8 + dx, y, 'A'); }
-    put(7 + sw, 19, 's'); put(8 + sw, 19, 'S');
+    if (!use) { for (let y = 14; y < 19; y++) { const dx = Math.round((y - 14) / 4 * sw); put(7 + dx, y, 'a'); put(8 + dx, y, 'A'); } put(7 + sw, 19, 's'); put(8 + sw, 19, 'S'); }
   }
   // the clothes: the template wears the jacket and a short skirt; the others are changes to it
   const top = p.top || 'jacket', bottom = p.bottom || (p.legs === 'pants' ? 'pants' : 'skirt'), legwear = p.legwear || (p.legs === 'pants' ? 'pants' : 'bare');
@@ -490,7 +504,7 @@ function figure(p, {view = 'front', step = 0} = {}) {
   // seams: a pixel darkened where its part meets another (hair round the face, the hem of the jacket, the cuffs...)
   const lines = rows.map((row, y) => row.map((ch, x) => { const g = GROUP[ch]; if (!g) return false;
     return [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]].some(([X, Y]) => seam(g, GROUP[rows[Y]?.[X]])); }));
-  return {rows, lines, TOP};
+  return {rows, lines, TOP, hand: use ? HANDS[view]?.[use] || null : null};
 }
 
 export function card(key) {
@@ -562,5 +576,7 @@ export function sprite(key, pose = {}) {
     if (sides.length) { const k = sides.reduce((a, [, f2]) => a + f2, 0) / sides.length + (1 - y / h) * .08, [r, g, b] = unpack(sides[0][0]); out[i] = pack([r * k * .95 | 0, g * k * .88 | 0, b * k | 0]); }
   }
   if (pose.flip) for (let y = 0; y < h; y++) out.subarray(y * w, y * w + w).reverse();
-  return {w, h, px: out, foot: oy + f.rows.length};
+  // where the hands are (using something), in the sprite's pixels
+  const hand = f.hand ? [Math.round(pose.flip ? w - 1 - (ox + f.hand[0]) : ox + f.hand[0]), oy + f.TOP + f.hand[1]] : null;
+  return {w, h, px: out, foot: oy + f.rows.length, hand};
 }

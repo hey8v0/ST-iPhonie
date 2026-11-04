@@ -9,6 +9,7 @@ const BASE = {
   y: '#ffd45c', Y: '#e8a33a', r: '#e2404f', R: '#a5243a', o: '#e8873a', O: '#b45a22', v: '#9a7de8', V: '#6a4fbf', l: '#c46bb0', L: '#8a3f7c',
   x: '#ffffff', X: '#cfe0f0', e: '#b9dc9a', E: '#7aa86a',
   a: '#9a9aa6', A: '#6a6a78', q: '#c8c8d2', u: '#9a6a40', U: '#5e3d24', h: '#f2dcb0', t: '#c8a070',
+  i: '#a9b04c', j: '#6f7a2a', J: '#46501c',
 };
 const ICONS = {
   hoe: [
@@ -63,6 +64,9 @@ const ICONS = {
   frostfruit: ['.......G........', '......kGk.......', '.....kXxXk......', '....kXxxBXk.....', '...kXxxBBBXk....', '...kXxBBBbBk....', '...kXBBBbbBk....', '...kXBBbbbdk....', '....kBBbbddk....', '.....kbbddk.....', '......kddk......', '.......kk.......'],
   shell: ['....kkkkkkkk....', '...khhPhhPhhk...', '..khhPhhPhhPhk..', '..khPhhPhhPhhk..', '..kPhhPhhPhhPk..', '...khPhhPhhPk...', '....khhPhhPk....', '.....khhhhk.....', '......kPPk......', '.......kk.......'],
   seaglass: ['.....kkkk.......', '....kBxBBk......', '...kBxBBBbkk....', '...kBBBBbbbbk...', '..kBBBBbbbbbk...', '..kBBbbbbbbdk...', '...kBbbbbbddk...', '....kbbbbddk....', '.....kkkdkk.....', '........k.......'],
+  kelp: ['.........kk.....', '........kiik....', '.......kijjk....', '......kijjk.....', '.....kijjk......', '.....kjjk.......', '....kijk........', '....kjjik.......', '.....kjjik......', '......kjjjk.....', '.......kjJk.....', '......kjJk......', '.....kJJk.......', '......kk........'],
+  conch: ['.......kk.......', '......khhk......', '.....khthhk.....', '....khttfhhk....', '...khtffffhhk...', '...khfFFFffhk...', '..khfFoooFfhk...', '..khfFookFfhk...', '..kkhfFFkFhk....', '...kkhffFhk.....', '.....kkhhk......', '.......kk.......'],
+  driftwood: ['..........kkk...', '........kkqqak..', '......kkqqaaAk..', '....kkqqaaaAk...', '..kkqqaaaAAk....', '.kqqaaaAAkk.....', '.kqaaAAkk.......', '.kaAAkk.........', '..kkk...........'],
   chest: ['...kkkkkkkkkk...', '..kWWWWWWWWWWk..', '..kwwwwwwwwwwk..', '..kkkkkkkkkkkk..', '..kwwwwyywwwwk..', '..kwswwyYwwswk..', '..kwswwkkwwswk..', '..kwswwwwwwswk..', '..kwswwwwwwswk..', '..kssssssssssk..', '..kkkkkkkkkkkk..'],
   sprinkler: ['...B.......B....', '....B..k..B.....', '.......k........', '..B...kmk...B...', '.....kmMnk......', '....kmmMnnk.....', '...kmmmMMnnk....', '...kMMMMnnnk....', '..kaaaaaaaaak...', '..kAAAAAAAAAk...', '...kkkkkkkkk....'],
   path: ['..kkkk...kkkk...', '.kqqqak.kqqqak..', '.kqaaAk.kaaaAk..', '..kkkk...kkkk...', '.....kkkkk......', '....kqqqqak.....', '....kqaaaAk.....', '.....kkkkk......', '..kkkk...kkkk...', '.kqqak..kqqqak..', '.kaaAk..kaaaAk..', '..kkk....kkkk...'],
