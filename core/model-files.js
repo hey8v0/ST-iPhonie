@@ -74,6 +74,45 @@ export function readZip(input, {exact = false} = {}) {
   }
   return files;
 }
+/** A stream that fails once more than `most` bytes went through (a deflated file that unpacks into more than it said). */
+const atMost = most => { let total = 0; return new TransformStream({transform(chunk, out) { total += chunk.length; if (total > most) throw Error('压缩包里的文件比它说的大'); out.enqueue(chunk); }}); };
+/**
+ * readZip for a zip that is a picked file, never read whole (a pack of songs can be bigger than a phone holds in
+ * memory): Map(path → {size, blob(): Promise<Blob>}), each file got only when asked — a stored one is a slice of the
+ * zip, a deflated one is unpacked then, never into more than the zip says it holds. Folders and macOS leftovers are
+ * left out; a password, another method or zip64 is an error that says so.
+ */
+export async function readZipBlob(zip) {
+  const at = async (from, n) => new Uint8Array(await zip.slice(from, from + n).arrayBuffer());
+  const from = Math.max(0, zip.size - 65557), tail = await at(from, zip.size - from);
+  let end = -1;
+  for (let i = tail.length - 22; i >= 0; i--) if (u32(tail, i) === 0x06054b50) { end = i; break; }
+  if (end < 0) throw Error('这不是一个能读的 zip 压缩包');
+  const count = u16(tail, end + 10), size = u32(tail, end + 12), start = u32(tail, end + 16);
+  if (start === 0xffffffff || size === 0xffffffff || count === 0xffff) throw Error('压缩包太大（超过 4 GB 或 65535 个文件），请分成几个小一点的 zip');
+  const b = await at(start, size), files = new Map();
+  let p = 0;
+  for (let n = 0; n < count; n++) {
+    if (u32(b, p) !== 0x02014b50) throw Error('压缩包的目录坏了');
+    const flags = u16(b, p + 8), method = u16(b, p + 10), packed = u32(b, p + 20), length = u32(b, p + 24);
+    const nameLen = u16(b, p + 28), local = u32(b, p + 42), name = zipName(b.subarray(p + 46, p + 46 + nameLen), (flags & 0x800) !== 0), path = cleanPath(name);
+    p += 46 + nameLen + u16(b, p + 30) + u16(b, p + 32);
+    if (!path || /[/\\]$/.test(name) || /(^|\/)(__MACOSX|\.DS_Store)(\/|$)/.test(path) || /(^|\/)\._/.test(path)) continue;
+    if (flags & 1) throw Error('压缩包有密码，请解开以后重新压缩');
+    if (method !== 0 && method !== 8) throw Error('压缩包用了读不了的压缩方式，请用「存储」或普通 zip 重新压缩');
+    let made = null;
+    const open = async () => {
+      const h = await at(local, 30);
+      if (u32(h, 0) !== 0x04034b50) throw Error('压缩包坏了');
+      const data = zip.slice(local + 30 + u16(h, 26) + u16(h, 28), local + 30 + u16(h, 26) + u16(h, 28) + packed);
+      if (method === 0) return data;
+      if (typeof DecompressionStream !== 'function') throw Error('这个浏览器解不开压缩过的 zip：用「存储」方式重新压缩，或者直接选歌');
+      return new Response(data.stream().pipeThrough(new DecompressionStream('deflate-raw')).pipeThrough(atMost(length))).blob();
+    };
+    files.set(path, {size: length, blob: () => made ??= open()});
+  }
+  return files;
+}
 let CRC = null;
 export function crc32(b) {
   CRC ??= Array.from({length: 256}, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ c >>> 1 : c >>> 1; return c >>> 0; });

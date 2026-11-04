@@ -417,7 +417,7 @@ export interface SongForm { about?: string; who?: string; story?: boolean; instr
 export interface SongDraft { id: string; kind: 'draft'; at: number; updatedAt: number; title: string; style: string; lyrics: string; instrumental: boolean; language: string; who: string; about: string; seconds: number; songs: string[]; state?: 'singing'; note?: string; job?: {engine: string; model: string; task: string; at: number}; }
 export interface SongWorkflowInfo { lyrics: string; style: string; output: string; seconds: number; seeds: number; fields: {at: string; title: string; text: string}[]; }
 export interface SingOption { id: string; name: string; ready: boolean; model: string; price: {free: boolean; text: string}; /** Whether the length asked for (SongDraft.seconds) reaches the service. */ timed: boolean; }
-export interface MusicSong { id: string; kind: 'song'; at: number; title: string; artist: string; origin: 'file' | 'source'; source?: string; songId?: string; lyric?: string; size?: number; mime?: string; }
+export interface MusicSong { id: string; kind: 'song'; at: number; title: string; artist: string; origin: 'file' | 'source'; source?: string; songId?: string; lyric?: string; size?: number; mime?: string; file?: string; }
 export interface MusicFound { source: string; sourceName: string; id: string; title: string; artist: string; }
 /** An album or an artist a search found (an album's artist; how many songs, when the source says). */
 export interface MusicGroup { source: string; sourceName: string; kind: 'album' | 'artist' | 'playlist'; id: string; name: string; artist: string; count: number; }
@@ -961,6 +961,11 @@ export interface BackendFacade {
     updateSong(id: string, patch: { title?: string; artist?: string; lyric?: string }): Promise<MusicSong>;
     /** Adds songs to 全部 and into a 歌单 the user made (kept: how many were not in it yet). */
     addSongsTo(playlistId: string, list: ({ title: string; artist?: string; blob: Blob } | { title: string; artist?: string; source: string; songId: string })[]): Promise<{ added: MusicSong[]; kept: number }>;
+    /** Songs from files picked many at a time: those that cannot be kept are skipped (with why), files here already are
+     *  not kept twice (ids: each song's own; at: the first one's time, the others a millisecond older each). */
+    addSongFiles(list: { title: string; artist?: string; lyric?: string; blob: Blob; file: string }[], options?: { at?: number }): Promise<{ added: MusicSong[]; ids: string[]; same: string[]; skipped: { name: string; why: string }[]; lyrics: number }>;
+    /** .lrc files picked without their songs, given to the 本机的歌 of the same name. */
+    addLyrics(list: { file: string; lyric: string }[]): Promise<{ given: number; missed: string[] }>;
     /** The 歌单 the user made, in the order they were made. */
     listPlaylists(): Promise<MusicPlaylist[]>;
     /** Makes a 歌单 (no id) or renames one. */

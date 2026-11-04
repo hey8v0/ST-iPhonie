@@ -1,5 +1,6 @@
 // 音乐: the phone's music player. 正在播放 at the top (progress, lyrics, 顺序 / 随机 / 单曲循环), the 歌单 (全部: files
-// the user added and songs saved from a search; and 歌单 the user makes of them), 正文点的歌 (the songs the story
+// the user added — many at a time, zips too — and songs saved from a search; and 歌单 the user makes of them),
+// 正文点的歌 (the songs the story
 // picked, to play again or keep), 搜索 over
 // the user's own music sources (songs, albums, artists; more pages), and 设置: 背景音乐 (off / tap / auto), its rule,
 // the volume and the sources. Playing happens in the tavern page (host-music.js), so it goes on while the phone is put
@@ -7,7 +8,8 @@
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, empty, help} from './common.js';
 import {icon} from './icons.js';
 import {writePanel} from './music-write.js';
-import {BGM_MODES, BGM_MODE_NAMES, DEFAULT_BGM_RULE, SELF_HOSTED, PLAY_MODES, PLAY_MODE_NAMES, GROUP_KINDS, MUSIC_LIMITS, titleFromFile, normalizeSource, bestMatch} from '../core/music.js';
+import {BGM_MODES, BGM_MODE_NAMES, DEFAULT_BGM_RULE, SELF_HOSTED, PLAY_MODES, PLAY_MODE_NAMES, GROUP_KINDS, MUSIC_LIMITS, normalizeSource, bestMatch} from '../core/music.js';
+import {sortPicked, lots, readPicked, lrcText} from '../core/music-files.js';
 
 const clock = s => !Number.isFinite(s) || s <= 0 ? '0:00' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const label = t => t ? (t.artist ? `${t.title} - ${t.artist}` : t.title) : '';
@@ -35,6 +37,16 @@ const GROUP_FIELDS = [
 // the songs of a 歌单 shown at a time (more on asking), and of an album, artist or playlist opened from the search
 const STEP = 100, GROUP_SHOWN = 200;
 const MODE_ICON = {order: 'repeat', shuffle: 'shuffle', one: 'repeat1'};
+// 添加本机的歌 takes songs, their .lrc lyrics and zip packs (core/music-files.js)
+const ACCEPT = 'audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac,.lrc,.zip,application/zip';
+/** What one 添加本机的歌 did, in a line. */
+function addedText(r) {
+  if (!r.added && !r.lyrics && !r.same && !r.skipped.length) return '没有找到能加的歌';
+  return [r.added || (!r.lyrics && !r.same) ? `加了 ${r.added} 首` : '', r.lyrics ? `配上 ${r.lyrics} 首歌词` : '', r.same ? `${r.same} 首已经有了` : '', r.skipped.length ? `${r.skipped.length} 个没加` : ''].filter(Boolean).join('，');
+}
+/** Which files were not added, and why (under the line's 小 i). */
+const skippedText = r => r.skipped.slice(0, 40).map(s => `「${s.name}」${s.why}`).join('\n') + (r.skipped.length > 40 ? `\n……还有 ${r.skipped.length - 40} 个` : '')
+  + (r.others ? `\n\n另外 ${r.others} 个不是歌的文件（图片、文本这些）没管。` : '');
 
 export function musicApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'music');
@@ -45,6 +57,12 @@ export function musicApp(ctx) {
   // the 歌单 the user made; the one shown ('' for 全部) and its songs; what the filter looks for in them, how many show;
   // 多选: the songs picked (null when not picking)
   let lists = [], shelf = '', shown = [], filter = '', limit = STEP, picked = null;
+  // 添加本机的歌: how far it got ({done, total}) while songs go in; what it did, when not all went in
+  let adding = null, addedNote = null;
+  const addingText = () => adding.total ? `正在添加 ${adding.done} / ${adding.total} 首…` : '正在看选了哪些歌…';
+  /** The line under 添加本机的歌: how far it got, or (when not all went in) what it did, with which and why under 小 i. */
+  const addingLine = () => adding ? `<p class="hint music-adding" role="status" data-music-adding>${esc(addingText())}</p>`
+    : addedNote && (addedNote.skipped.length || addedNote.error) ? `<p class="hint music-adding" role="status">${esc(addedText(addedNote) + (addedNote.error ? '：' + addedNote.error : ''))}${addedNote.skipped.length || addedNote.others ? help(skippedText(addedNote)) : ''}</p>` : '';
   const state = () => api.getState().music;
   /** 写歌's pages come and go through this: where to be (top: from the start of the page). */
   const go = (where, top = false) => { mode = where; if (where === 'main') tab = 'write'; render(); if (top) v.root.scrollTop = 0; };
@@ -149,10 +167,11 @@ export function musicApp(ctx) {
         : empty('正文还没有点过歌', '在「设置 → 背景音乐」打开点歌后，剧情每次挑的歌都会记在这里，可以再放、加进歌单。', 'music'))
       : tab === 'library'
       ? `<div class="filter-row music-shelves" role="group" aria-label="歌单">${btn('shelf', `全部 <small>${songs.length}</small>`, '', `data-shelf="" aria-pressed="${!mine}"`)}${lists.map(p => p === mine ? btn('list-menu', `${esc(p.name)} <small>${p.songs.filter(id => byId.has(id)).length}</small>${icon('more')}`, '', `data-shelf="${esc(p.id)}" aria-pressed="true" title="再点一下改名字或删掉"`) : btn('shelf', `${esc(p.name)} <small>${p.songs.filter(id => byId.has(id)).length}</small>`, '', `data-shelf="${esc(p.id)}" aria-pressed="false"`)).join('')}${btn('new-list', icon('add') + (lists.length ? '' : '新建歌单'), '', 'aria-label="新建歌单"')}</div>`
-        + `<div class="actions music-tools" style="margin-top:0"><label class="primary file-button">${icon('add')}添加本机的歌<input type="file" data-music-file multiple accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" aria-label="选择音乐文件"></label>${shown.length ? btn('play-all', icon('play', true) + '全部播放', 'secondary') + btn('play-mixed', icon('shuffle'), 'icon-button', 'aria-label="和正文点的歌一起放" title="和正文点的歌一起放"') : ''}</div>`
+        + `<div class="actions music-tools" style="margin-top:0"><label class="primary file-button">${icon('add')}添加本机的歌<input type="file" data-music-file multiple accept="${ACCEPT}" aria-label="选择音乐文件"${adding ? ' disabled' : ''}></label>${shown.length ? btn('play-all', icon('play', true) + '全部播放', 'secondary') + btn('play-mixed', icon('shuffle'), 'icon-button', 'aria-label="和正文点的歌一起放" title="和正文点的歌一起放"') : ''}</div>`
+        + addingLine()
         + (shown.length ? `${shown.length > 1 ? `<div class="music-filter"><input type="search" data-music-filter value="${esc(filter)}" placeholder="在这 ${shown.length} 首里找" aria-label="在歌单里找歌">${btn(picked ? 'pick-done' : 'pick-start', picked ? '完成' : icon('check') + '多选', 'secondary small')}</div>` : ''}<div data-music-list>${libraryRows()}</div>`
           : mine ? empty('这个歌单还是空的', '在「搜索」「正文点的歌」里点 ＋ 放进来，或者在「全部」里点歌右边的「⋯」选它；也可以直接添加本机的歌。', 'music')
-          : empty('歌单还是空的', '添加手机或电脑里的歌（文件名是「歌手 - 歌名」会自动认出歌手），或者在「搜索」里找歌加进来。', 'music'))
+          : empty('歌单还是空的', '添加手机或电脑里的歌（一次可以选很多首，也可以选 zip 压缩包），或者在「搜索」里找歌加进来。', 'music'))
       : (kinds.length > 1 ? `<div class="segmented music-kinds" role="group" aria-label="搜什么">${kinds.map(([k, l]) => `<button data-action="kind" data-kind="${k}" aria-pressed="${kind === k}">${l}</button>`).join('')}</div>` : '')
         + `<form class="music-search" data-music-search><input type="search" data-music-query value="${esc(query)}" placeholder="${!sources.length ? '先在设置里添加音源' : GROUP_KINDS[kind] ? GROUP_KINDS[kind] + '名' : '歌名、歌手'}" aria-label="搜歌" ${sources.length ? '' : 'disabled'}>${btn('search', icon('search'), 'round-button', `aria-label="搜索" ${sources.length && !searching ? '' : 'disabled'}`)}</form>`
         + searchErrors.map(e => `<p class="hint">「${esc(e.source)}」：${esc(e.message)}</p>`).join('')
@@ -362,17 +381,45 @@ export function musicApp(ctx) {
   }
 
   v.on('submit', '[data-music-search]', (el, e) => { e.preventDefault(); search(); });
-  v.on('change', '[data-music-file]', async el => {
-    const files = [...el.files]; el.value = '';
-    if (!files.length) return;
+  /**
+   * 添加本机的歌: songs, .lrc lyrics or zips, kept a few songs at a time — the page says how far it got,
+   * and what fit stays when the device is full. Shown a 歌单 of their own, the songs go into it too, in the order picked.
+   */
+  async function addPicked(files) {
+    if (adding) return;
+    const into = shelf, ids = [], out = {added: 0, lyrics: 0, same: 0, skipped: [], others: 0, error: ''};
+    adding = {done: 0, total: 0}; addedNote = null; render();
+    const paint = () => { const el = v.root.querySelector('[data-music-adding]'); if (el) el.textContent = addingText(); };
     try {
-      const rows = files.map(f => ({...titleFromFile(f.name), blob: f}));
-      // shown a 歌单 of their own: into it too
-      const added = shelf ? (await api.addSongsTo(shelf, rows)).added : await api.addSongs(rows);
-      ctx.notify(`加了 ${added.length} 首`);
-    }
-    catch (error) { ctx.notify(error.message, {error: true}); }
-    render();
+      const {songs, lyrics, skipped, others} = await sortPicked(files);
+      out.skipped.push(...skipped); out.others = others;
+      adding.total = songs.length; paint();
+      const start = Date.now();
+      for (const lot of lots(songs)) {
+        const rows = [];
+        for (const s of lot) { try { rows.push(await readPicked(s)); } catch (error) { out.skipped.push({name: s.name, why: '读不出来：' + error.message}); } }
+        if (rows.length) {
+          let got;
+          try { got = await api.addSongFiles(rows, {at: start - adding.done}); }
+          catch (error) { throw /空间不足/.test(error.message) ? Error(`设备的空间满了，后面 ${adding.total - adding.done} 首没加`) : error; }
+          ids.push(...got.ids); out.added += got.added.length; out.lyrics += got.added.filter(x => x.lyric).length + got.lyrics; out.same += got.same.length; out.skipped.push(...got.skipped);
+        }
+        adding.done += lot.length; paint();
+      }
+      // .lrc files with no song picked: to the songs of the same name in the 歌单
+      const words = [];
+      for (const l of lyrics) { const lyric = await l.open().then(lrcText).catch(() => ''); if (lyric) words.push({file: l.name, lyric}); else out.skipped.push({name: l.name, why: '不是带时间的 LRC 歌词'}); }
+      if (words.length) { const got = await api.addLyrics(words); out.lyrics += got.given; out.skipped.push(...got.missed.map(name => ({name, why: '歌单里没有同名的歌'}))); }
+    } catch (error) { out.error = error.message; }
+    if (into && ids.length) await api.addToPlaylist(into, ids).catch(error => { out.error ||= error.message; });
+    adding = null; addedNote = out;
+    // (the list drawn first, then the message)
+    if (!v.disposed) await render();
+    ctx.notify(addedText(out) + (out.error ? '：' + out.error : ''), out.error ? {error: true} : {});
+  }
+  v.on('change', '[data-music-file]', el => {
+    const files = [...el.files]; el.value = '';
+    if (files.length) addPicked(files);
   });
   v.on('change', '[data-music-seek]', el => api.musicSeek?.(Number(el.value)));
   // finding songs in a long 歌单 as one types (only its rows are drawn again, the box keeps its focus)
@@ -386,7 +433,7 @@ export function musicApp(ctx) {
     const i = Number(el.dataset.i);
     if (el.dataset.action.startsWith('write-')) return writer.click(el);
     switch (el.dataset.action) {
-      case 'tab': tab = el.dataset.tab; picked = null; render(); break;
+      case 'tab': tab = el.dataset.tab; picked = null; addedNote = null; render(); break;
       case 'kind': kind = el.dataset.kind; results = []; groups = []; more = false; searchErrors = []; searchNote = ''; if (query) search(); else render(); break;
       case 'more-results': page++; search(true); break;
       case 'open-group': group = {g: groups[i], songs: [], page: 0, more: false, loading: false, error: ''}; mode = 'group'; loadGroup(); break;
@@ -395,7 +442,7 @@ export function musicApp(ctx) {
       case 'group-save': await keepGroup(); break;
       case 'play-heard': playFrom('heard'); break;
       case 'play-mixed': playFrom(tab === 'library' && shelf ? shelf + '+heard' : 'mixed'); break;
-      case 'shelf': shelf = el.dataset.shelf; filter = ''; limit = STEP; picked = null; render(); break;
+      case 'shelf': shelf = el.dataset.shelf; filter = ''; limit = STEP; picked = null; addedNote = null; render(); break;
       case 'show-more': limit += STEP; redrawRows(); break;
       // 多选: tick songs, then put them in a 歌单, take them out of this one, or delete them
       case 'pick-start': picked = new Set(); render(); break;
@@ -528,6 +575,9 @@ export function musicApp(ctx) {
     else if (event.step) writer.step(event);
     else if (mode === 'draft') writer.changed();
     else if (mode === 'write-form') { /* being filled in: nothing else on the page depends on the music */ }
+    // while songs go in only the line under 添加本机的歌 changes (a few songs at a time: a thousand would draw the page
+    // a hundred times); it is drawn whole once they are in
+    else if (adding && !event.heard) { /* drawn at the end */ }
     else if (!event.heard || tab === 'heard') render();
   };
   /** A song written, opened from elsewhere (its card in a chat). */

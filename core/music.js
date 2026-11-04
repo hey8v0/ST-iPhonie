@@ -324,7 +324,8 @@ export function bestMatch(songs, want) {
   for (const s of songs) { const n = matchScore(s, want); if (n > score) { best = s; score = n; } }
   return best;
 }
-/** A song row as kept in the library: {id, kind: 'song', at, title, artist, origin: 'file'|'source', size?, mime?, source?, songId?, lyric?}. */
+/** A song row as kept in the library: {id, kind: 'song', at, title, artist, origin: 'file'|'source', size?, mime?, file?, source?, songId?, lyric?}
+ *  (file: the name of the file it was added from, since 0.9.22). */
 export function songRow(value = {}, at = Date.now()) {
   const title = clip(value.title, 200).trim();
   if (!title) throw Error('给这首歌起个名字');
@@ -333,9 +334,30 @@ export function songRow(value = {}, at = Date.now()) {
   if (value.lyric) row.lyric = clip(value.lyric, 60000);
   return row;
 }
-/** A file name as 歌名 and 歌手 (「歌手 - 歌名.mp3」 is the usual way music files are named). */
+/** A file name as 歌名 and 歌手 (「歌手 - 歌名.mp3」 is the usual way music files are named; a track number in front,
+ *  「01. 歌名」「01 - 歌名」「1-01 歌名」「01 歌名」, is left out — with a 0 first only, so 「7 Rings」 stays). */
 export function titleFromFile(name) {
-  const base = String(name ?? '').replace(/\.[a-z0-9]{2,5}$/i, '').replace(/_/g, ' ').trim();
+  const whole = String(name ?? '').replace(/\.[a-z0-9]{2,5}$/i, '').replace(/_/g, ' ').trim();
+  const base = whole.replace(/^(?:\d{1,2}-)?(?:\d{1,3}\s*[.、．)]\s*|\d{1,3}\s+-\s+|0\d{1,2}\s+)(?=\S)/, '') || whole;
   const parts = base.split(/\s+-\s+/);
   return parts.length >= 2 ? {title: parts.slice(1).join(' - ').trim(), artist: parts[0].trim()} : {title: base, artist: ''};
+}
+/** Whether a picked file is a song the 歌单 has already: the same size and the same file name (a song kept before file
+ *  names were: the same title, as the tags or the file name give it). */
+export function sameFile(row, have) {
+  if (!have || have.origin === 'source' || !row?.size || row.size !== have.size) return false;
+  if (row.file && have.file) return row.file === have.file;
+  const t = loose(have.title);
+  return !!t && (t === loose(row.title) || (!!row.file && t === loose(titleFromFile(row.file).title)));
+}
+/** The 本机的歌 an .lrc file is for: the one whose file has the same name, else the one its name says (歌手 - 歌名;
+ *  only a 歌名 when one song alone has it). null when none is. */
+export function lyricOwner(name, songs) {
+  const stem = s => loose(String(s ?? '').replace(/\.[a-z0-9]{2,5}$/i, ''));
+  const own = songs.find(s => s.file && stem(s.file) === stem(name));
+  if (own) return own;
+  const want = titleFromFile(name), named = songs.find(s => songKey(s) === songKey(want));
+  if (named || want.artist) return named || null;
+  const titled = songs.filter(s => loose(s.title) === loose(want.title));
+  return titled.length === 1 ? titled[0] : null;
 }

@@ -2398,6 +2398,7 @@ button.aui-card:active{transform:scale(.98)}
 .music-row.picked .music-check{background:var(--accent-btn);box-shadow:none}.music-check svg{width:14px;height:14px}
 .music-pickbar{flex-wrap:wrap;gap:8px}.music-picked{flex:1 0 100%;font-size:13px;font-weight:700;color:var(--ink2)}
 .music-tools>.icon-button{flex:none}.music-tools>.primary,.music-tools>.secondary{padding-left:12px;padding-right:12px;gap:4px}
+.music-adding{margin:-2px 0 10px}.file-button:has(input:disabled){opacity:.55;cursor:progress}
 .music-pick{width:100%;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .music-search input,.music-filter input{flex:1;min-width:0;min-height:44px;border:2px solid var(--line);border-radius:999px;padding:9px 16px;background:var(--card);color:var(--ink);font:inherit;font-size:16px;-webkit-appearance:none;appearance:none;box-shadow:none}
 .music-search input::-webkit-search-decoration,.music-filter input::-webkit-search-decoration{-webkit-appearance:none}
