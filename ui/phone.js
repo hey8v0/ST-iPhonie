@@ -99,10 +99,12 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
 
   /** A short note out of the island (it grows out of it and goes back in). Errors stay longer (20 s), can be closed
    *  with ×, and can be selected to copy. */
-  let toastMove = null;
+  // toastTap: what tapping the note does (a message came in: its chat opens), or null.
+  let toastMove = null, toastTap = null;
   function hideToast() {
     const el = $('.toast');
     win.clearTimeout(toastTimer);
+    toastTap = null;
     if (el.hidden) return;
     toastMove?.cancel();
     toastMove = grow(win, el, islandIn($('.island'), el), {back: true, radius: 16, duration: 240});
@@ -110,12 +112,14 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const move = toastMove;
     move.finished.then(() => { if (toastMove !== move) return; el.hidden = true; move.cancel(); toastMove = null; }, () => {});
   }
-  function notify(text, {error = false} = {}) {
+  function notify(text, {error = false, tap = null} = {}) {
     if (disposed) return;
     if (error) api.noteError?.(text || '操作未完成');
     const el = $('.toast');
     el.innerHTML = `<span class="toast-text">${esc(text || '操作未完成')}</span>${error ? `<button type="button" class="toast-close" data-toast-close aria-label="关闭提示">${icon('close')}</button>` : ''}`;
     el.classList.toggle('error', error);
+    toastTap = typeof tap === 'function' ? tap : null;
+    el.classList.toggle('tappable', !!toastTap);
     el.setAttribute('role', error ? 'alert' : 'status');
     const fresh = el.hidden || !!toastMove;
     toastMove?.cancel(); toastMove = null;
@@ -148,14 +152,21 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
   bindNativeSelects(win.document);
   mount.addEventListener('click', e => {
-    if (!e.target.closest('[data-toast-close]')) return;
-    hideToast();
+    if (e.target.closest('[data-toast-close]')) { hideToast(); return; }
+    if (toastTap && e.target.closest('.toast')) { const go = toastTap; hideToast(); run(go); }
   });
   function syncInert() {
     home.inert = !!active || locked || !!sheet;
     frame.inert = !active || locked || !!sheet;
     for (const s of ['.statusbar', '.pull-tab', '.island', '.home-indicator']) $(s).inert = locked || !!sheet;
     lockscreen.inert = !locked || !!sheet;
+    syncStill();
+  }
+  // The wallpaper stands still under a sheet and while 今天 is in (phone.css). Marked on the screen rather than found
+  // with .screen:has(…), which made the browser restyle the whole screen on every element added or taken out inside.
+  function syncStill() {
+    screen.toggleAttribute('data-under-sheet', !!sheet);
+    screen.toggleAttribute('data-today-in', home.hasAttribute('data-today-in'));
   }
 
   // ---------- Sheets ----------
@@ -985,6 +996,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     home.style.setProperty('--today', into.toFixed(3));
     home.toggleAttribute('data-today', into > .5);
     home.toggleAttribute('data-today-in', into > .002);
+    syncStill();
     if (into < .2 && today?.editing) today.leave();
   }, {signal, passive: true});
   // Mouse and pen through pointer events; fingers through touch events, whose moves can be held back from scrolling.
@@ -1036,7 +1048,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (event.type === 'assistant') run(() => views.get('assistant')?.onAssistant?.(event));
     if (event.type === 'music') { run(() => views.get('music')?.onMusic?.(event)); paintMusic(); }
     if (event.type === 'balance') run(() => views.get('engines')?.onBalance?.(event));
-    if (event.type === 'chat') { run(() => views.get('chat')?.onChat?.(event)); countUnread(); if (event.incoming && !(active === 'chat' && views.get('chat')?.showing?.() === event.threadId)) notify(`${event.incoming.from}：${event.incoming.kind === 'text' ? event.incoming.text : '发来' + (event.incoming.count > 1 ? ` ${event.incoming.count} 条` : '一条') + '消息'}`.slice(0, 80)); }
+    if (event.type === 'chat') { run(() => views.get('chat')?.onChat?.(event)); countUnread(); if (event.incoming && !(active === 'chat' && views.get('chat')?.showing?.() === event.threadId)) notify(`${event.incoming.from}：${event.incoming.kind === 'text' ? event.incoming.text : '发来' + (event.incoming.count > 1 ? ` ${event.incoming.count} 条` : '一条') + '消息'}`.slice(0, 80), {tap: () => { open('chat'); withView('chat', v => v.openThread?.(event.threadId)); }}); }
     if (event.type === 'moments') { views.get('chat')?.onMoments?.(event); countMoments(); }
     if (event.type === 'call') calls.update(event.call);
     if (event.type === 'forum' || event.type === 'peek') { const app = event.type; if (active === app) run(() => views.get(app)?.refresh()); }

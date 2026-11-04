@@ -429,7 +429,7 @@ export interface MusicPlaylist { id: string; kind: 'playlist'; at: number; name:
 export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; mode: 'order' | 'shuffle' | 'one'; from: string; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
 export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; from?: string };
 export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; }
-export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; }
+export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
 /** streak: 聊天火花, days in a row both sides wrote. */
 export interface ChatThreadSummary extends Omit<ChatThread, 'messages'> { count: number; last: ChatMessage | null; streak: number; }
 export type ChatMessageInput = Omit<ChatMessage, 'id' | 'at'>;
@@ -1079,6 +1079,8 @@ export interface BackendFacade {
     searchChatMessages(query: string, options?: {limit?: number; around?: number; tail?: number}): Promise<{hits: {thread: string; id: string; from: string; at: number; before: string; hit: string; after: string}[]; total: number}>;
     listThreads(): Promise<ChatThreadSummary[]>;
     getThread(id: string): Promise<ChatThread | null>;
+    /** 重新回复的版本: another version of the chat's last round shows (the one showing is kept among them). */
+    chatShowVersion(id: string, index: number): Promise<ChatThread>;
     chatUnread(): Promise<number>;
     createThread(value: { type: 'dm' | 'group'; members: string[]; name?: string }): Promise<ChatThread>;
     updateThread(id: string, patch: { name?: string; members?: string[]; pinned?: boolean; muted?: boolean }): Promise<ChatThread>;

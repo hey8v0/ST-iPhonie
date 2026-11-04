@@ -2,7 +2,7 @@
 // (generateRaw): the prompt carries the chat preset, each contact's persona or character card, the user's persona,
 // recent story messages and the chat history. Nothing is written into the story unless the user brings a chat
 // into it; that text is injected once, into the next story reply.
-import {currentDm, currentWindow} from './core/chats.js';
+import {currentDm, currentWindow, lastRound} from './core/chats.js';
 import {buildChatRequest, parseChatReply, bringText, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer} from './core/draw.js';
@@ -27,7 +27,9 @@ const BRING_KEY = 'sttts.bring';
 export const BRING_NOTE = /^\d+ 条消息会带进下一次正文$/;
 
 export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}, onPosts = () => {},storage = globalThis.localStorage, loadCompletion = loadCompletionModule, picture = pictureUrl, ask = requestAssistantText}) {
-  const busy = new Map();
+  // busy: the reply being written for a chat (one at a time); stops: what lets it go (停止回复).
+  const busy = new Map(), stops = new Map();
+  const stopped = () => Object.assign(new Error('已停止回复'), {name: 'AbortError'});
   // 看图. A tavern connection sees when the tavern says so (its 发送内联图片, and a model it knows takes pictures); a
   // custom connection is tried. A model that failed with pictures and answered without them is not sent any again
   // until the page is reloaded.
@@ -51,12 +53,13 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     return out;
   }
   /** The contact's answer; with pictures, through the request that carries them, and in words only if that fails. */
-  async function answerFor(ctx, request, pics) {
-    if (!pics.length) return backend.generateText(ctx, {use: 'chat', prompt: request([]), trimNames: false});
-    try { return await ask(ctx, backend, settings(), request(pics), {label: '聊天 · 看图', use: 'chat'}); }
+  async function answerFor(ctx, request, pics, signal) {
+    if (!pics.length) return backend.generateText(ctx, {use: 'chat', prompt: request([]), trimNames: false, signal});
+    try { return await ask(ctx, backend, settings(), request(pics), {label: '聊天 · 看图', use: 'chat', signal}); }
     catch (error) {
+      if (signal?.aborted) throw error;
       backend.reportDiagnostic?.('聊天 · 看图', error, 'warn');
-      const answer = await backend.generateText(ctx, {use: 'chat', prompt: request([]), trimNames: false});
+      const answer = await backend.generateText(ctx, {use: 'chat', prompt: request([]), trimNames: false, signal});
       blind.add(seeKey(ctx));
       return answer;
     }
@@ -90,12 +93,17 @@ export function createChatHost({context, settings, backend, notice, memory = nul
 
   /** Asks the model for the contact's next messages and stores them. One request per chat at a time. */
   /** nudge: 主动找你 — the contact may also choose not to text (null then), and no 正在输入 shows meanwhile. */
-  function reply(threadId, {nudge = false} = {}) {
+  /** reroll: 重新回复这一轮 — the last round is asked again as if it were not there, and is replaced only when the new one
+   *  came (it stays among the round's versions); one that fails or is stopped changes nothing. */
+  function reply(threadId, {nudge = false, reroll = false} = {}) {
     if (busy.has(threadId)) return busy.get(threadId);
+    const controller = new AbortController(), signal = controller.signal;
     const job = (async () => {
       const ctx = context();
       const thread = await backend.chats.get(threadId);
       if (!thread) throw Error('这段聊天已不存在');
+      const last = reroll ? lastRound(thread.messages) : null;
+      if (last) { const old = new Set(last.round.map(m => m.id)); thread.messages = thread.messages.filter(m => !old.has(m.id)); }
       if (thread.friend?.by === 'me') throw Error(`你已经删除了${thread.members[0]}，在「联系人 → 新的朋友」里加回来才能聊天`);
       if (thread.friend?.by === 'them') throw Error(`${thread.members[0]}已经把你删了，先发送好友申请`);
       const s = settings(), preset = activeChatPreset(s.chat), people = members(thread), voiceFormat = backend.voiceFormat(), user = userName();
@@ -120,20 +128,26 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       }
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
       const request = pics => buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
-      const answer = cleanTagged(await answerFor(ctx, request, await pictures(ctx, thread, preset)), preset.cleanTags);
+      const answer = cleanTagged(await answerFor(ctx, request, await pictures(ctx, thread, preset), signal), preset.cleanTags);
+      // 停止 while it was being written: what comes late is let go (the tavern's own generation cannot be stopped).
+      if (signal.aborted) throw stopped();
       // 「[不发]」 (also as 「名字：[不发]」) is a no, not a message.
       const text = nudge ? answer.split('\n').filter(line => !/\[不发\]/.test(line)).join('\n') : answer;
       const items = parseChatReply(text, {members: people, user, voiceFormat, voiceNames: people.filter(p => p.voice).map(p => p.name), stickers: settings().chat.stickers || []});
       if (!items.length && nudge) return null;
       if (!items.length) throw Error('这次没有收到消息，可以再试一次');
       const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
-      const saved = await backend.chatMutate(threadId, () => settle(threadId, items));
+      const saved = await backend.chatMutate(threadId, () => settle(threadId, items, last));
       memory?.after(threadId);
       // The new photos with tags are drawn when the free tier covers them; the others wait for 画出来.
       for (const m of saved?.messages || []) if (!before.has(m.id) && m.kind === 'photo' && !m.photoId && (m.imageTags || backend.drawReady?.())) drawPhoto(threadId, m.id).catch(() => {});
+      // Asked for and come while the user is elsewhere: the phone says so (its note opens the chat); 主动找你 says it itself.
+      const fresh = (saved?.messages || []).filter(m => !before.has(m.id) && m.from !== 'me' && !['system', 'notice', 'recall'].includes(m.kind));
+      if (!nudge && fresh.length) backend.emit('chat', {threadId, incoming: {from: fresh.at(-1).from, text: fresh.at(-1).text || '', kind: fresh.at(-1).kind, count: fresh.length}});
       return saved;
-    })().finally(() => { busy.delete(threadId); backend.emit('chat', {threadId, typing: false}); });
-    busy.set(threadId, job);
+    })().catch(error => { throw signal.aborted ? stopped() : error; })
+      .finally(() => { busy.delete(threadId); stops.delete(threadId); backend.emit('chat', {threadId, typing: false}); });
+    busy.set(threadId, job); stops.set(threadId, controller);
     return job;
   }
 
@@ -141,7 +155,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    * Stores a reply. A claim takes (or returns) the user's latest red packet or transfer that is still waiting,
    * and leaves a notice where it happened.
    */
-  async function settle(threadId, items) {
+  async function settle(threadId, items, round = null) {
     const thread = await backend.chats.get(threadId), taken = new Set(), out = [], posts = [];
     let calling = null, cutting = false;
     const whispers = [];
@@ -173,7 +187,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     }
     // Their pictures are drawn the way 朋友圈's own are (onPosts).
     if (posts.length) await backend.momentsMutate(() => backend.moments.add(posts)).then(onPosts).catch(() => {});
-    let saved = out.length ? await backend.chats.append(threadId, out) : latest;
+    // 重新回复: the new round takes the old one's place (which stays among its versions).
+    let saved = !out.length ? latest : round ? await backend.replaceChatRound(threadId, round.after, out) : await backend.chats.append(threadId, out);
     if (cutting) { saved = await backend.chats.update(threadId, {friend: {by: 'them', at: Date.now(), requests: []}}); calling = null; refreshCuts(); }
     if (calling) setTimeout(() => onCall(calling.from, calling.reason), 1200);
     // (a moment after the group's own messages)
@@ -522,6 +537,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
 
   return {
     reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, phoneAfter, phoneAfterPlan, askFriend,
+    reroll: threadId => reply(threadId, {reroll: true}),
+    /** 停止回复: the reply being written for this chat is let go. */
+    cancel: threadId => { stops.get(threadId)?.abort(); },
     seesPictures: () => sees(),
     typing: threadId => busy.has(threadId),
     pendingBring: () => pending && {threadId: pending.threadId, name: pending.name, count: pending.count},

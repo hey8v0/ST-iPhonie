@@ -1,4 +1,4 @@
-import {currentDm, chatWindows, currentWindow, groupKey, EDITABLE_KINDS} from '../core/chats.js';
+import {currentDm, chatWindows, currentWindow, groupKey, EDITABLE_KINDS, lastRound} from '../core/chats.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, avatar, avatarPicture, empty, help, copyText} from './common.js';
 import {songOf} from '../core/music.js';
@@ -43,6 +43,12 @@ function stamp(at) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 const dayLabel = at => { const s = stamp(at); return s.includes(':') ? '今天' : s; };
+// A time between messages a while apart, as phones show it: the day first when it changes (today's just the time).
+const GAP = 5 * 60 * 1000;
+function timeLabel(m, prev) {
+  if (!prev || new Date(prev.at).toDateString() !== new Date(m.at).toDateString()) { const day = dayLabel(m.at); return day === '今天' ? clock(m.at) : `${day} ${clock(m.at)}`; }
+  return m.at - prev.at >= GAP ? clock(m.at) : '';
+}
 // Messages drawn as a centred line instead of a bubble.
 const LINE_KINDS = ['system', 'pat', 'notice', 'recall'];
 const quotable = m => ['text', 'voice', 'photo', 'location'].includes(m.kind);
@@ -70,6 +76,20 @@ export function chatApp(ctx) {
   let unreadTotal = 0, freshMoments = 0;
   let panel = null, quote = null;
   const drafts = new Map(), live = typeof api.chatReply === 'function';
+  // 草稿: what was typed and not sent stays with its chat in this browser, over a reload or the phone closed and opened.
+  const scope = api.getState().scope || 'local', draftKey = id => `st-iphonie-chat-draft:${scope}:${id}`;
+  function draftOf(id) {
+    if (!drafts.has(id)) { let saved = ''; try { saved = ctx.win.localStorage.getItem(draftKey(id)) || ''; } catch { /* this visit only */ } drafts.set(id, saved); }
+    return drafts.get(id);
+  }
+  function keepDraft(id, text) {
+    drafts.set(id, text);
+    try { if (text) ctx.win.localStorage.setItem(draftKey(id), text); else ctx.win.localStorage.removeItem(draftKey(id)); } catch { /* this visit only */ }
+  }
+  // failed: why a chat's last reply did not come (shown under it until the next try); unseen: messages come while the
+  // chat was scrolled up; unreadMark: where the unread ones began when the chat was opened ({id, count, show}).
+  const failed = new Map();
+  let unseen = 0, tailId = null, unreadMark = null;
   const photoURLs = new Map(), bubbleURLs = new Map(), photoSizes = new Map(), recalled = new Map(), transcribed = new Set();
   let press = null, pressedAt = 0;
   const voiceText = () => api.readState().chat.voiceText || {mode: 'translation', auto: false};
@@ -111,7 +131,7 @@ export function chatApp(ctx) {
   // A reply comes in like on a phone: its messages are stored at once (memory, unread counts and other devices see
   // them all), but the open chat shows the contact's new ones one by one, each after a typing bubble that lasts
   // about as long as typing it would — a short one pops up quickly, a long one keeps the dots going a while.
-  const pace = {thread: null, seen: new Set(), hidden: new Set(), queue: [], timer: 0, fresh: null};
+  const pace = {thread: null, seen: new Set(), hidden: new Set(), queue: [], timer: 0, fresh: null, instant: false};
   const AT_ONCE = ['system', 'recall', 'notice', 'pat'];
   function typeTime(m, first) {
     const len = [...String(m.text || '')].length;
@@ -129,7 +149,7 @@ export function chatApp(ctx) {
     for (const m of list) {
       if (pace.seen.has(m.id)) continue;
       pace.seen.add(m.id);
-      if (on && m.from !== 'me' && !AT_ONCE.includes(m.kind)) { pace.hidden.add(m.id); pace.queue.push(m); }
+      if (on && !pace.instant && m.from !== 'me' && !AT_ONCE.includes(m.kind)) { pace.hidden.add(m.id); pace.queue.push(m); }
     }
     // Messages deleted while waiting (清空、重新回复) are not waited for.
     const ids = new Set(list.map(m => m.id));
@@ -179,7 +199,9 @@ export function chatApp(ctx) {
     const atMe = t.type === 'group' && t.unread && last && last.from !== 'me' && String(last.text || '').includes('@' + me) ? '<em class="at-me">[有人@我]</em>' : '';
     const badge = t.unread ? `<span class="badge${t.muted ? ' muted' : ''}">${t.unread > 99 ? '99+' : t.unread}</span>` : '';
     const spark = t.type === 'dm' && t.streak >= 3 ? `<span class="spark" title="聊天火花：连续 ${t.streak} 天">🔥${t.streak}</span>` : '';
-    return `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? '<span class="tag-s">群</span>' : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${atMe}${esc(who + preview(last))}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
+    // A chat with words typed and not sent shows them, as phones do.
+    const typed = draftOf(t.id).trim(), pvLine = typed ? `<em class="draft-mark">[草稿]</em>${esc(typed)}` : `${atMe}${esc(who + preview(last))}`;
+    return `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? '<span class="tag-s">群</span>' : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${pvLine}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
   }
   /** The messages found, under what the list found by name. */
   function hitsHTML({hits: list, total}) {
@@ -409,7 +431,7 @@ export function chatApp(ctx) {
     return `<button type="button" class="ph-note ph-draw" data-action="photo-draw" data-mid="${esc(m.id)}">${esc(m.imageState === 'failed' && m.imageNote ? m.imageNote + ' · ' : '')}画出来</button>`;
   }
   function messageHTML(m, i, list) {
-    const day = i <= drawn.from || new Date(list[i - 1].at).toDateString() !== new Date(m.at).toDateString() ? `<div class="day">${dayLabel(m.at)}</div>` : '';
+    const when = timeLabel(m, i <= drawn.from ? null : list[i - 1]), day = when ? `<div class="day">${esc(when)}</div>` : '';
     if (LINE_KINDS.includes(m.kind)) return day + lineHTML(m);
     const me = m.from === 'me', group = thread.type === 'group', picked = selecting?.has(m.id);
     const quoted = m.quote ? `<span class="m-quote">${esc(you(m.quote.from))}：${esc(m.quote.text)}</span>` : '';
@@ -443,7 +465,7 @@ export function chatApp(ctx) {
     const group = thread.type === 'group';
     return `<div class="composer-wrap">
       ${quote ? `<div class="quote-bar"><span>回复 ${esc(you(quote.from))}：${esc(quote.text)}</span>${btn('quote-off', icon('close'), 'round-button', 'aria-label="取消引用"')}</div>` : ''}
-      <div class="composer">${btn('panel', icon('add'), 'round-button plus', `aria-label="更多功能" aria-expanded="${!!panel}"`)}<input class="field-in" data-field="draft" value="${esc(drafts.get(threadId) || '')}" placeholder="${group ? '发到群聊…' : '发消息…'}" enterkeyhint="send" autocomplete="off" aria-label="消息">${sendButton()}</div>
+      <div class="composer">${btn('panel', icon('add'), 'round-button plus', `aria-label="更多功能" aria-expanded="${!!panel}"`)}<input class="field-in" data-field="draft" value="${esc(draftOf(threadId))}" placeholder="${group ? '发到群聊…' : '发消息…'}" enterkeyhint="send" autocomplete="off" aria-label="消息">${sendButton()}</div>
       ${panel ? toolsHTML() : ''}</div>`;
   }
   // Only the latest messages are drawn: a chat is drawn again for every message that comes and every time the typing
@@ -458,12 +480,26 @@ export function chatApp(ctx) {
     drawn.count += SHOWN;
     render();
   }
-  async function renderThread(ticket) {
-    const loaded = await api.getThread(threadId);
+  /** again: only the typing dots came or went, nothing in the chat changed: drawn from the chat as it was read.
+   *  reading: reads of the chat on their way (a drawing from the chat in hand would come before them and stand in
+   *  their place, without what they were bringing). */
+  let reading = 0;
+  async function renderThread(ticket, again = false) {
+    let loaded = thread;
+    if (!again || thread?.id !== threadId) { reading++; try { loaded = await api.getThread(threadId); } finally { reading--; } }
     if (v.disposed || ticket !== epoch) return;
     thread = loaded;
     if (!thread) { mode = 'list'; threadId = null; older = null; return render(); }
-    if (drawn.thread !== threadId) drawn = {thread: threadId, count: SHOWN, from: 0, first: null};
+    if (drawn.thread !== threadId) {
+      drawn = {thread: threadId, count: SHOWN, from: 0, first: null};
+      // A chat opened: where its unread messages begin (a note offers to go up there when they are not on the screen).
+      unseen = 0; tailId = null; unreadMark = null;
+      let left = thread.unread || 0;
+      for (let k = thread.messages.length - 1; k >= 0 && left > 0; k--) {
+        const m = thread.messages[k];
+        if (m.from !== 'me' && !['system', 'notice', 'recall'].includes(m.kind) && !--left) unreadMark = {id: m.id, count: thread.unread, show: false, checked: false};
+      }
+    }
     if (thread.unread) api.markThreadRead(threadId).catch(() => {});
     const group = thread.type === 'group', contacts = api.chatContacts(true);
     const voiced = thread.members.filter(n => contacts.find(c => c.name === n)?.voice).length;
@@ -483,58 +519,133 @@ export function chatApp(ctx) {
     if ((atBottom || stick) && !older) drawn.count = SHOWN;
     drawn.from = kept >= 0 ? kept : Math.max(0, list.length - drawn.count);
     if (firstPicked >= 0 && firstPicked < drawn.from) drawn.from = firstPicked;
-    // Come from a search: from a little before that message.
+    // Come from a search (or the unread note): from a little before that message.
     const target = jump ? list.findIndex(m => m.id === jump) : -1;
     if (target >= 0 && target - 5 < drawn.from) drawn.from = Math.max(0, target - 5);
     drawn.count = list.length - drawn.from; drawn.first = list[drawn.from]?.id ?? null;
+    // 新消息 that come while the chat is scrolled up wait below: counted for the note that takes the chat down to them.
+    const tail = list.at(-1)?.id ?? null;
+    if (tailId && tail !== tailId && !atBottom && !stick) {
+      const from = list.findIndex(m => m.id === tailId);
+      if (from >= 0) unseen += list.slice(from + 1).filter(m => m.from !== 'me' && !LINE_KINDS.includes(m.kind)).length;
+    }
+    if (atBottom || stick) unseen = 0;
+    tailId = tail;
+    // 重新回复的版本: under the last round, while it is the last thing in the chat and nothing is being written.
+    const alts = thread.alts, round = alts ? lastRound(thread.messages) : null;
+    const versions = alts?.versions?.length > 1 && round.after === alts.after && round.round.length && typer === null && !selecting ? alts : null;
+    const why = typer === null ? failed.get(threadId) : '';
+    const rowsWanted = [];
+    if (drawn.from) rowsWanted.push({key: 'older', html: `<button type="button" class="chat-older" data-action="older">${icon('back')}更早的 ${drawn.from} 条消息</button>`});
+    if (list.length) list.slice(drawn.from).forEach((m, j) => rowsWanted.push({key: 'm:' + m.id, html: messageHTML(m, drawn.from + j, list)}));
+    else rowsWanted.push({key: 'empty', html: `<p class="chat-empty">${live ? '发几条消息都行，发完点右下角的气泡按钮让对方回复；输入框空着时发送键就会变成它。也可以直接点它，让对方先开口。' : '在酒馆里打开小手机时，联系人才会回复。'}</p>`});
+    if (versions) rowsWanted.push({key: 'versions', html: `<div class="chat-versions" role="group" aria-label="这一轮回复的版本">${btn('version', '‹', 'icon-button', `data-to="${versions.shown - 1}" aria-label="上一个版本" ${versions.shown > 0 ? '' : 'disabled'}`)}<span>${versions.shown + 1} / ${versions.versions.length}</span>${btn('version', '›', 'icon-button', `data-to="${versions.shown + 1}" aria-label="下一个版本" ${versions.shown < versions.versions.length - 1 ? '' : 'disabled'}`)}</div>`});
+    if (bring?.threadId === threadId) rowsWanted.push({key: 'bring', html: `<div class="sys">${icon('book')}${bring.count} 条消息会带进下一次正文 ${btn('cancel-bring', '取消', 'text-button')}</div>`});
+    if (why) rowsWanted.push({key: 'failed', html: `<div class="sys chat-failed" role="alert">${icon('alert')}<span>没回复成功：${esc(why)}</span><small>点右下角的气泡再试一次</small></div>`});
+    if (typer !== null) rowsWanted.push({key: 'typing', html: `<div class="msg typing-row" data-engine="${typer ? engine(typer) : 'none'}">${avatar(typer || '…', typer ? engine(typer) : 'none', 34)}<div class="m-body"><div class="chat-bubble typing" aria-label="对方正在输入"><i></i><i></i><i></i></div></div></div>`});
     const look = profile();
     const bg = look.backgroundPhoto ? 'photo' : look.background, scene = chatScene(bg);
     drawThread(`<div class="chat-thread${selecting ? ' selecting' : ''}" data-thread="${esc(threadId)}" data-bubble="${esc(look.bubble)}" data-bg="${esc(bg)}"${scene ? ` data-scene data-tone="${sceneDark(bg) ? 'dark' : 'light'}"` : ''}>
       <div class="th-head" data-engine="${group ? 'none' : engine(thread.members[0])}">${threadAvatar(thread, 38)}<div class="th-title"><strong>${esc(group ? thread.name : shown(thread.members[0] || thread.name))}</strong><small>${esc(sub)}</small></div>
         ${btn('bring', selecting ? '取消' : icon('book') + `<span class="bring-label">${thread.story ? '一直带着' : '带进剧情'}</span>`, 'chip-button', selecting ? '' : `aria-label="带进剧情" title="${thread.story ? '正文一直记得这段聊天' : '带进剧情'}"${thread.story ? ' data-on' : ''}`)}${!group && api.callDial ? btn('call', icon('phone'), 'round-button call-go', 'aria-label="语音通话"') : ''}${btn('thread-menu', icon('more'), 'round-button', 'aria-label="更多"')}</div>
-      <div class="msgs-wrap">${scene}<div class="msgs" role="log" aria-live="polite" data-keep-scroll="msgs-${esc(threadId)}">${drawn.from ? `<button type="button" class="chat-older" data-action="older">${icon('back')}更早的 ${drawn.from} 条消息</button>` : ''}${list.length ? list.slice(drawn.from).map((m, j) => messageHTML(m, drawn.from + j, list)).join('') : `<p class="chat-empty">${live ? '发几条消息都行，发完点右下角的气泡按钮让对方回复；输入框空着时发送键就会变成它。也可以直接点它，让对方先开口。' : '在酒馆里打开小手机时，联系人才会回复。'}</p>`}
-        ${bring?.threadId === threadId ? `<div class="sys">${icon('book')}${bring.count} 条消息会带进下一次正文 ${btn('cancel-bring', '取消', 'text-button')}</div>` : ''}
-        ${typer !== null ? `<div class="msg typing-row" data-engine="${typer ? engine(typer) : 'none'}">${avatar(typer || '…', typer ? engine(typer) : 'none', 34)}<div class="m-body"><div class="chat-bubble typing" aria-label="对方正在输入"><i></i><i></i><i></i></div></div></div>` : ''}</div></div>
+      <div class="msgs-wrap" data-bg="${esc(bg)}">${scene}<div class="msgs" role="log" aria-live="polite" data-keep-scroll="msgs-${esc(threadId)}"></div>${jumpChips()}</div>
       ${!group && thread.friend ? `<div class="friend-cut" role="status">${icon('alert')}<span>${thread.friend.by === 'me' ? `你已删除了${esc(thread.members[0])}` : `${esc(thread.members[0])}已把你从好友里删除了`}</span>${thread.friend.by === 'me' ? btn('refriend', '加回好友', 'chip-button', `data-id="${esc(thread.id)}"`) : btn('ask-friend', '发送好友申请', 'chip-button')}</div>` : ''}
       ${selecting
         ? (pickFor === 'delete'
           ? `<div class="bring-bar pick-delete"><span>${selecting.size ? pickedLabel(selecting.size) : '点一条消息开始，再拖上下的条条多选'}</span>${btn('pick-up', '到最早', 'text-button', selecting.size ? '' : 'disabled')}${btn('pick-down', '到最新', 'text-button', selecting.size ? '' : 'disabled')}${btn('delete-go', icon('trash') + '删除', 'danger', selecting.size ? '' : 'disabled')}</div>`
           : `<div class="bring-bar"><span>${selecting.size ? pickedLabel(selecting.size) : '点一条消息开始，再拖上下的条条多选'}</span>${btn('bring-go', '带进下一次正文', 'primary', selecting.size ? '' : 'disabled')}</div>`)
         : composerHTML()}
-    </div>`);
+    </div>`, rowsWanted);
     const msgs = v.root.querySelector('.msgs');
     if (scene) syncMotion(v.root, ctx.win);
     const found = target >= 0 ? [...msgs.querySelectorAll('.msg[data-mid]')].find(el => el.dataset.mid === jump) : null;
-    if (found) { msgs.scrollTop += found.getBoundingClientRect().top - msgs.getBoundingClientRect().top - msgs.clientHeight / 3; found.classList.add('msg-found'); }
+    if (found) { msgs.scrollTop += found.getBoundingClientRect().top - msgs.getBoundingClientRect().top - msgs.clientHeight / 3; found.classList.remove('msg-found'); void found.offsetWidth; found.classList.add('msg-found'); }
     else if (older) msgs.scrollTop = msgs.scrollHeight - older.fromBottom;
     else if (atBottom || stick) msgs.scrollTop = msgs.scrollHeight;
     stick = false; older = null; jump = null;
     pace.fresh = null;
+    // Opened with unread messages above what shows: the note that goes up to where they begin.
+    if (unreadMark && !unreadMark.checked) {
+      unreadMark.checked = true;
+      const first = [...msgs.querySelectorAll('.msg[data-mid]')].find(el => el.dataset.mid === unreadMark.id);
+      if (!first || first.getBoundingClientRect().top < msgs.getBoundingClientRect().top - 4) { unreadMark.show = true; syncChips(); }
+    }
     if (focused) v.root.querySelector('[data-field=draft]')?.focus({preventScroll: true});
     paintVoices();
     paintPhotos();
     if (look.backgroundPhoto) photoURL(look.backgroundPhoto).then(url => { const box = v.root.querySelector('.msgs'); if (box && url) box.style.backgroundImage = `url("${url}")`; });
   }
-  // A thread is drawn again often while the user may be typing (each message of a reply shows on its own, the typing
-  // dots come and go). The message box itself stays: a new one would put the caret at the start and break off a word
-  // the input method is still putting together. Everything around it is drawn anew.
-  function drawThread(html) {
+  /** The notes over the messages: 新消息 below (while scrolled up) and where the unread ones began (when opened). */
+  function jumpChips() {
+    return (unseen ? `<button type="button" class="chat-jump chat-jump-new" data-action="jump-new">${icon('down')}<span>${unseen} 条新消息</span></button>` : '')
+      + (unreadMark?.show ? `<button type="button" class="chat-jump chat-jump-unread" data-action="jump-unread">${icon('up')}<span>${unreadMark.count} 条未读</span></button>` : '');
+  }
+  function syncChips() {
+    const wrap = v.root.querySelector('.msgs-wrap');
+    if (!wrap) return;
+    for (const chip of wrap.querySelectorAll(':scope > .chat-jump')) chip.remove();
+    wrap.insertAdjacentHTML('beforeend', jumpChips());
+  }
+  // A chat is drawn again often: each message of a reply as it shows, the typing dots coming and going. Its rows stay as
+  // drawn (rows: key → {html, nodes}): a message that did not change keeps its nodes (its picture, its voice bar), and
+  // only new or changed rows are made. The box of messages stays, scrolled where it was, and so does the message box
+  // (a new one would put the caret at the start and break off a word the input method is still putting together).
+  // Drawing all of it anew each time took about 150 ms (2026-11-05, 60 messages, jsdom).
+  const rowCache = new Map();
+  function placeRows(box, wanted) {
+    const next = new Map(), nodes = [];
+    for (const {key, html} of wanted) {
+      let row = rowCache.get(key);
+      if (!row || row.html !== html) { const t = ctx.doc.createElement('template'); t.innerHTML = html; row = {html, nodes: [...t.content.childNodes]}; }
+      next.set(key, row); nodes.push(...row.nodes);
+    }
+    // In order, moving only what is out of place; what is no longer wanted goes.
+    let at = box.firstChild;
+    for (const node of nodes) { if (node === at) { at = at.nextSibling; continue; } box.insertBefore(node, at); }
+    while (at) { const after = at.nextSibling; at.remove(); at = after; }
+    rowCache.clear();
+    for (const [key, row] of next) rowCache.set(key, row);
+    // The last six messages are the ones whose decorated bubbles move (phone.css), marked on the rows themselves: with
+    // :nth-last-child() the browser restyled every message whenever a row came or went at the end.
+    const recent = new Set();
+    for (let el = box.lastElementChild; el && recent.size < 6; el = el.previousElementSibling) if (el.classList.contains('msg')) recent.add(el);
+    for (const el of box.querySelectorAll(':scope > .msg[data-recent]')) if (!recent.has(el)) el.removeAttribute('data-recent');
+    for (const el of recent) if (!el.hasAttribute('data-recent')) el.setAttribute('data-recent', '');
+  }
+  function drawThread(html, wanted) {
     const old = v.root.querySelector('.chat-thread'), box = old?.querySelector('[data-field=draft]');
     const template = ctx.doc.createElement('template');
     template.innerHTML = html;
     const fresh = template.content.querySelector('.chat-thread'), freshBox = fresh?.querySelector('[data-field=draft]');
-    if (!old || !box || !freshBox || old.dataset.thread !== fresh.dataset.thread || old.parentElement !== v.root) return v.draw(html);
-    const y = v.root.scrollTop, inner = new Map([...old.querySelectorAll('[data-keep-scroll]')].map(el => [el.dataset.keepScroll, el.scrollTop]));
+    const oldWrap = old?.querySelector(':scope > .msgs-wrap'), freshWrap = fresh?.querySelector(':scope > .msgs-wrap');
+    const inner = new Map([...v.root.querySelectorAll('[data-keep-scroll]')].map(el => [el.dataset.keepScroll, el.scrollTop]));
+    // Another chat, another page, or another scene behind the messages: drawn whole.
+    if (!old || old.dataset.thread !== fresh.dataset.thread || old.parentElement !== v.root || !oldWrap || !freshWrap || oldWrap.dataset.bg !== freshWrap.dataset.bg) {
+      rowCache.clear();
+      v.draw(html);
+      placeRows(v.root.querySelector('.msgs'), wanted);
+      for (const el of v.root.querySelectorAll('[data-keep-scroll]')) if (inner.has(el.dataset.keepScroll)) el.scrollTop = inner.get(el.dataset.keepScroll);
+      return;
+    }
+    const y = v.root.scrollTop;
     for (const name of old.getAttributeNames()) if (!fresh.hasAttribute(name)) old.removeAttribute(name);
     for (const name of fresh.getAttributeNames()) old.setAttribute(name, fresh.getAttribute(name));
-    // From the box outwards: each level gets the new children around the one that holds the box.
-    const keep = [box.parentElement, box.parentElement?.parentElement], put = [freshBox.parentElement, freshBox.parentElement?.parentElement];
-    if (keep[1]?.parentElement !== old || put[1]?.parentElement !== fresh) return v.draw(html);
-    around(old, keep[1], fresh, put[1]);
-    around(keep[1], keep[0], put[1], put[0]);
-    around(keep[0], box, put[0], freshBox);
-    const text = drafts.get(threadId) || '';
-    if (box.value !== text) box.value = text;
+    for (const chip of oldWrap.querySelectorAll(':scope > .chat-jump')) chip.remove();
+    for (const chip of [...freshWrap.querySelectorAll(':scope > .chat-jump')]) oldWrap.append(chip);
+    const pairs = new Map([[freshWrap, oldWrap]]);
+    if (box && freshBox) {
+      // From the box outwards: each level gets the new children around the one that holds the box.
+      const keep = [box.parentElement, box.parentElement?.parentElement], put = [freshBox.parentElement, freshBox.parentElement?.parentElement];
+      if (keep[1]?.parentElement === old && put[1]?.parentElement === fresh) {
+        around(keep[1], keep[0], put[1], put[0]);
+        around(keep[0], box, put[0], freshBox);
+        pairs.set(put[1], keep[1]);
+        const text = draftOf(threadId);
+        if (box.value !== text) box.value = text;
+      }
+    }
+    keepAround(old, fresh, pairs);
+    placeRows(oldWrap.querySelector('.msgs'), wanted);
     for (const el of old.querySelectorAll('[data-keep-scroll]')) if (inner.has(el.dataset.keepScroll)) el.scrollTop = inner.get(el.dataset.keepScroll);
     v.root.scrollTop = y;
   }
@@ -545,6 +656,18 @@ export function chatApp(ctx) {
     for (const node of [...from.childNodes]) {
       if (node === instead) { after = true; continue; }
       if (after) parent.append(node); else keep.before(node);
+    }
+  }
+  /** `parent` takes `from`'s children; the ones kept (pairs: the new one → the one kept, in the same order in both) stay
+   *  where they are, never taken out and put back (a box of messages would lose its scroll). */
+  function keepAround(parent, from, pairs) {
+    const kept = new Set(pairs.values());
+    for (const node of [...parent.childNodes]) if (!kept.has(node)) node.remove();
+    let anchor = parent.firstChild;
+    for (const node of [...from.childNodes]) {
+      const stay = pairs.get(node);
+      if (stay) { anchor = stay.nextSibling; continue; }
+      parent.insertBefore(node, anchor);
     }
   }
   // Opens or closes the + panel in place, so the message box keeps its text and focus.
@@ -655,14 +778,14 @@ export function chatApp(ctx) {
 
   // Leaving a list (消息 or 联系人) for a chat, a profile or a form remembers where it was; coming back to the same tab puts it there again.
   let shownMode = 'list', left = null;
-  function render() {
+  function render(again = false) {
     const ticket = ++epoch;
     if (shownMode === 'list' && mode !== 'list') left = {tab, top: v.root.scrollTop};
     const back = shownMode !== 'list' && mode === 'list' && left?.tab === tab ? left.top : null;
     shownMode = mode;
     v.root.classList.toggle('chat-mode', mode === 'thread');
     v.root.classList.toggle('qq-mode', mode === 'list');
-    if (mode === 'thread') return renderThread(ticket);
+    if (mode === 'thread') return renderThread(ticket, again);
     if (mode === 'profile') return renderProfile();
     if (mode === 'me') return renderMe();
     if (mode === 'contact-edit') return renderContactForm();
@@ -672,7 +795,7 @@ export function chatApp(ctx) {
   }
   /** at: a message to show in it (from a search), not the latest. */
   function open(id, at = null) {
-    threadId = id; mode = 'thread'; selecting = null; stick = !at; jump = at; panel = null; quote = null;
+    threadId = id; mode = 'thread'; selecting = null; stick = !at; jump = at; panel = null; quote = null; drawn.thread = null;
     return render();
   }
 
@@ -680,6 +803,7 @@ export function chatApp(ctx) {
   /** Puts the user's messages in the chat. Nothing goes to the model until the user asks for a reply. */
   async function post(messages) {
     stick = true;
+    failed.delete(threadId);
     await api.appendChat(threadId, messages, {read: true});
   }
   async function send() {
@@ -687,32 +811,39 @@ export function chatApp(ctx) {
     // An empty box asks the other side to reply to everything sent so far.
     if (!text) { if (live && el) requestReply(); return; }
     el.value = '';
-    drafts.delete(threadId);
+    keepDraft(threadId, '');
     syncSend();
     const q = quote;
     quote = null;
     await post([{from: 'me', kind: 'text', text, ...(q ? {quote: q} : {})}]);
   }
-  /** Paper plane while there is text; 让对方回复 when the box is empty. */
+  /** Paper plane while there is text; 让对方回复 when the box is empty; 停止 while the reply is being written. */
   const sendButton = () => {
-    const empty = !(drafts.get(threadId) || '').trim(), group = thread?.type === 'group';
+    const empty = !(draftOf(threadId)).trim(), group = thread?.type === 'group';
+    if (empty && live && typing() && api.chatCancel) return btn('stop-reply', icon('stop'), 'round-button send stop', 'aria-label="停止回复" title="停止回复"');
     return empty
       ? btn('send', icon('bubble'), 'round-button send ask', `aria-label="让${group ? '群里' : '对方'}回复" title="让${group ? '群里' : '对方'}回复" ${live ? '' : 'disabled'}`)
       : btn('send', icon('send'), 'round-button send', 'aria-label="发送" title="发送"');
   };
   function syncSend() {
-    const old = v.root.querySelector('.composer [data-action=send]');
+    const old = v.root.querySelector('.composer .send');
     if (!old) return;
-    const empty = !(drafts.get(threadId) || '').trim();
-    if (old.classList.contains('ask') === empty) return;
-    old.insertAdjacentHTML('afterend', sendButton());
+    const next = sendButton();
+    if (old.outerHTML === next) return;
+    old.insertAdjacentHTML('afterend', next);
     old.remove();
   }
-  function requestReply(id = threadId) {
+  function requestReply(id = threadId, again = false) {
     if (!live || !id) return;
-    const job = api.chatReply(id);
+    failed.delete(id);
+    const job = again ? api.chatReroll(id) : api.chatReply(id);
     if (mode === 'thread' && id === threadId) render();
-    job.catch(error => ctx.notify(error.message));
+    // 停止 is no failure; one that failed says why under the chat (the bubble asks again), or in a note when elsewhere.
+    job.catch(error => {
+      if (error?.name === 'AbortError' || v.disposed) return;
+      failed.set(id, error?.message || '回复没有完成');
+      if (mode === 'thread' && id === threadId) render(); else ctx.notify(error?.message || '回复没有完成');
+    });
   }
   /** Runs a sheet's buttons: `handlers[action](button)`; errors become notices. */
   function sheet(title, html, handlers) {
@@ -902,14 +1033,14 @@ export function chatApp(ctx) {
     const start = el.selectionStart ?? el.value.length, end = el.selectionEnd ?? el.value.length;
     el.value = el.value.slice(0, start) + text + el.value.slice(end);
     el.selectionStart = el.selectionEnd = start + text.length;
-    drafts.set(threadId, el.value);
+    keepDraft(threadId, el.value);
     syncSend();
   }
   function deleteChar() {
     const el = v.root.querySelector('[data-field=draft]');
     if (!el?.value) return;
     el.value = [...el.value].slice(0, -1).join('');
-    drafts.set(threadId, el.value);
+    keepDraft(threadId, el.value);
     syncSend();
   }
 
@@ -1088,8 +1219,10 @@ export function chatApp(ctx) {
       }
     });
   }
-  // Removes the contacts' latest messages (after the user's last one) and asks again.
+  // 重新回复这一轮: the host asks again and puts the new round in the old one's place only when it came (the old one stays
+  // among the versions). A host without it: the contacts' latest messages go first, as before.
   async function reroll() {
+    if (api.chatReroll) return requestReply(threadId, true);
     const list = thread.messages, cut = list.findLastIndex(m => m.from === 'me' && m.kind !== 'system');
     const drop = list.slice(cut + 1).filter(m => m.from !== 'me').map(m => m.id);
     if (drop.length) await api.deleteChatMessages(threadId, drop);
@@ -1332,12 +1465,20 @@ export function chatApp(ctx) {
     });
   }
 
-  v.on('input', '[data-field=draft]', el => { drafts.set(threadId, el.value); syncSend(); });
+  v.on('input', '[data-field=draft]', el => { keepDraft(threadId, el.value); syncSend(); });
   // The + panel's page dots follow the swipe (scroll does not bubble: heard on the way down); a chat scrolled up near
   // its top draws its earlier messages.
   v.root.addEventListener('scroll', e => {
     const box = e.target;
-    if (box.classList?.contains('msgs') && box.scrollTop < 240) showOlder();
+    if (box.classList?.contains('msgs')) {
+      if (box.scrollTop < 240) showOlder();
+      // Down at the newest: nothing waits below. The first unread one in sight: the note pointing up goes.
+      if (unseen && box.scrollHeight - box.scrollTop - box.clientHeight < 80) { unseen = 0; box.parentElement?.querySelector('.chat-jump-new')?.remove(); }
+      if (unreadMark?.show) {
+        const first = [...box.querySelectorAll('.msg[data-mid]')].find(el => el.dataset.mid === unreadMark.id);
+        if (first && first.getBoundingClientRect().top >= box.getBoundingClientRect().top - 4) { unreadMark.show = false; box.parentElement?.querySelector('.chat-jump-unread')?.remove(); }
+      }
+    }
     if (!box.classList?.contains('tool-pages')) return;
     const at = Math.round(box.scrollLeft / Math.max(1, box.clientWidth));
     for (const dot of box.parentElement.querySelectorAll('[data-action=tool-page]')) dot.setAttribute('aria-current', String(Number(dot.dataset.page) === at));
@@ -1415,6 +1556,8 @@ export function chatApp(ctx) {
       bar.removeEventListener('pointerup', up);
       bar.removeEventListener('pointercancel', up);
       selecting = picked;
+      // The drag marked and moved rows on the page itself: drawn anew from what is picked, not kept as they were drawn.
+      rowCache.clear();
       render();
     };
     bar.addEventListener('pointermove', move);
@@ -1552,6 +1695,16 @@ export function chatApp(ctx) {
         break;
       }
       case 'send': await send(); break;
+      case 'stop-reply': api.chatCancel?.(threadId); break;
+      // Another version of the last round: it shows at once (no typing dots for words already written).
+      case 'version': {
+        if (typing() || pace.queue.length) break;
+        pace.instant = true;
+        try { await api.chatShowVersion(threadId, Number(el.dataset.to)); await render(); } finally { pace.instant = false; }
+        break;
+      }
+      case 'jump-new': unseen = 0; stick = true; render(); break;
+      case 'jump-unread': { const id = unreadMark?.id; if (unreadMark) unreadMark.show = false; jump = id || null; render(); break; }
       case 'panel': panel = panel ? null : 'tools'; syncPanel(); break;
       case 'panel-tools': panel = 'tools'; syncPanel(); break;
       case 'tool-emoji': case 'panel-emoji': panel = 'emoji'; syncPanel(); break;
@@ -1584,7 +1737,7 @@ export function chatApp(ctx) {
       case 're-edit': {
         const text = recalled.get(el.dataset.mid) || '';
         recalled.delete(el.dataset.mid);
-        drafts.set(threadId, (drafts.get(threadId) || '') + text);
+        keepDraft(threadId, draftOf(threadId) + text);
         render();
         break;
       }
@@ -1686,8 +1839,13 @@ export function chatApp(ctx) {
   /** The chat on screen (null on the lists). */
   v.showing = () => mode === 'thread' ? threadId : null;
   v.onChat = event => {
-    if (mode === 'list' && tab !== 'moments') return render();
-    if (mode === 'thread' && (!event.threadId || event.threadId === threadId)) return render();
+    if (mode === 'list' && tab !== 'moments') return event.typing !== undefined && !event.incoming ? undefined : render();
+    if (mode === 'thread' && (!event.threadId || event.threadId === threadId)) {
+      // The typing dots alone: drawn from the chat in hand, unless a read is on its way (it draws them too).
+      const dots = event.typing !== undefined && !event.incoming && event.threadId === threadId;
+      if (dots && reading) return;
+      return render(dots);
+    }
   };
   v.onPlayback = () => { if (mode === 'thread') paintVoices(); };
   v.onMoments = () => { if (mode === 'list') render(); };

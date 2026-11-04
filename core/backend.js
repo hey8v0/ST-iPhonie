@@ -1086,14 +1086,15 @@ export class TTSBackend {
      * Writes phone text (chat, 朋友圈, calls, picture plans) with the chosen model. context: the tavern context, used
      * when the source is the tavern's model. request: {prompt, responseLength?, ...} as for generateRaw.
      */
-    async generateText(context, { use = 'other', ...request }) {
-        const answer = await this.requestLog.run('文字模型', {source: this.settings.text.source, model: activeText(this.settings.text).model, ...request}, () => this.generateTextRaw(context, request));
+    /** signal: the request is let go (停止回复). Kept out of the request log, which keeps copies of the request. */
+    async generateText(context, { use = 'other', signal, ...request }) {
+        const answer = await this.requestLog.run('文字模型', {source: this.settings.text.source, model: activeText(this.settings.text).model, ...request}, () => this.generateTextRaw(context, request, signal));
         this.ledger.text(use, request.prompt, answer);
         return answer;
     }
-    async generateTextRaw(context, request) {
+    async generateTextRaw(context, request, signal) {
         const text = activeText(this.settings.text);
-        if (text.source === 'custom') return customRequest({ text, key: this.textKeys.get(text.id) || '', prompt: request.prompt, responseLength: request.responseLength, fetch: this.textFetch });
+        if (text.source === 'custom') return customRequest({ text, key: this.textKeys.get(text.id) || '', prompt: request.prompt, responseLength: request.responseLength, fetch: this.textFetch, signal });
         if (!context?.generateRaw) throw Error('当前酒馆版本不支持后台生成');
         // The chat-completion request the tavern builds is kept, so an empty answer can be asked again as a stream:
         // "假流式" channels only answer streamed requests, and the tavern's background generation never streams.
@@ -2769,6 +2770,27 @@ export class TTSBackend {
         this.emit('chat', { threadId });
         return result;
     }
+    /** Messages that left a chat other than by 删除 (a round replaced, a version switched): gone for the sync too, and the
+     *  memory follows, as when they are deleted. */
+    async #chatLeft(threadId, before, after) {
+        const kept = new Set((after?.messages || []).map(m => m.id));
+        this.noteGone('chats', (before?.messages || []).filter(m => !kept.has(m.id)).map(m => `${threadId}/${m.id}`));
+        await this.memoryAfterDelete(threadId, before, after).catch(() => {});
+    }
+    /** 重新回复 came back: the chat's last round gives way to these messages (core/chats.js replaceRound). */
+    async replaceChatRound(threadId, after, messages, options) {
+        const before = await this.chats.get(threadId), saved = await this.chats.replaceRound(threadId, after, messages, options);
+        await this.#chatLeft(threadId, before, saved);
+        return saved;
+    }
+    /** Another version of the chat's last round shows (core/chats.js showRound). */
+    chatShowVersion(threadId, index) {
+        return this.chatMutate(threadId, async () => {
+            const before = await this.chats.get(threadId), after = await this.chats.showRound(threadId, index);
+            await this.#chatLeft(threadId, before, after);
+            return after;
+        });
+    }
     // ---------- 删好友 ----------
     /** The private chat with `name` on this card (made when there is none yet). */
     async dmThread(name) {
@@ -3331,6 +3353,7 @@ export class TTSBackend {
             deleteChatMessages: (id, ids) => this.chatMutate(id, async () => { const before = await this.chats.get(id); const thread = await this.chats.removeMessages(id, clone(ids)); this.noteGone('chats', (ids || []).map(m => `${id}/${m}`)); await this.memoryAfterDelete(id, before, thread).catch(() => {}); return thread; }),
             updateChatMessage: (id, messageId, patch) => this.chatMutate(id, () => this.chats.updateMessage(id, messageId, clone(patch || {}))),
             markThreadRead: id => this.chatMutate(id, () => this.chats.markRead(id)),
+            chatShowVersion: (id, index) => this.chatShowVersion(id, index),
             speak: line => this.speak(clone(line)), voiceFormat: () => this.voiceFormat(),
         };
         return Object.freeze({ apiVersion: BACKEND_API_VERSION, defaultPrompt: DEFAULT_PROMPT, defaultFormat: DEFAULT_FORMAT,
