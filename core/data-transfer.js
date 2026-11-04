@@ -82,7 +82,7 @@ function message(value, index) {
   const m = object(value, `助手消息[${index}]`), field = `助手消息[${index}]`;
   const id = string(m.id, field + '.id', 200, {id: true});
   if (!['user', 'assistant'].includes(m.role)) fail(field + '.role');
-  const text = string(m.text, field + '.text', ASSISTANT_LIMITS.text, {empty: true}), at = number(m.at, field + '.at');
+  const text = string(m.text, field + '.text', m.role === 'assistant' ? ASSISTANT_LIMITS.reply : ASSISTANT_LIMITS.text, {empty: true}), at = number(m.at, field + '.at');
   let attachments;
   if (m.attachments !== undefined) {
     if (m.role !== 'user') fail(field + '.attachments');
@@ -99,7 +99,7 @@ function message(value, index) {
     if (m.role !== 'assistant') fail(field + '.variants');
     variants = list(m.variants, field + '.variants', ASSISTANT_LIMITS.variants).map((value, i) => {
       const variant = object(value, `${field}.variants[${i}]`);
-      return {text: string(variant.text, `${field}.variants[${i}].text`, ASSISTANT_LIMITS.text), at: number(variant.at, `${field}.variants[${i}].at`),
+      return {text: string(variant.text, `${field}.variants[${i}].text`, ASSISTANT_LIMITS.reply), at: number(variant.at, `${field}.variants[${i}].at`),
         ...(variant.meta === undefined ? {} : {meta: metadata(variant.meta, `${field}.variants[${i}].meta`)})};
     });
     if (!variants.length) fail(field + '.variants');

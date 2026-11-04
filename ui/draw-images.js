@@ -120,19 +120,20 @@ export async function composeGrid(win, {cells, columns, rows, axisX = '', axisY 
 }
 
 /** Picks a picture from the album or the device: its Blob, or null when nothing was picked. multiple: several files
- *  may be picked from the device at once, and the answer is a list (one from the album). */
-export function pickPicture(ctx, api, title = '选一张图', {multiple = false} = {}) {
+ *  may be picked from the device at once, and the answer is a list (one from the album). albumOnly: the album alone
+ *  (where the device's files have their own button already). */
+export function pickPicture(ctx, api, title = '选一张图', {multiple = false, albumOnly = false} = {}) {
   return new Promise(async resolve => {
     let done = false;
     const finish = value => { if (done) return; done = true; resolve(value); d.close(); };
     const rows = (await api.listPhotos()).slice(0, 60), urls = [];
-    const d = ctx.dialog(title, `<div class="actions" style="margin-top:0"><label class="secondary file-button">${icon('import')}从手机里选${multiple ? '（可以多选）' : ''}<input type="file" data-pick-file accept="image/png,image/jpeg,image/webp"${multiple ? ' multiple' : ''} hidden></label></div>
-      ${rows.length ? `<p class="hint">或者从相册里选：</p><div class="photo-grid pick-photos">${rows.map(r => `<button type="button" data-pick-photo="${esc(r.id)}" aria-label="选 ${esc(r.name)}"><img alt="${esc(r.name)}"></button>`).join('')}</div>` : '<p class="hint">相册里还没有图。</p>'}`);
+    const d = ctx.dialog(title, `${albumOnly ? '' : `<div class="actions" style="margin-top:0"><label class="secondary file-button">${icon('import')}从手机里选${multiple ? '（可以多选）' : ''}<input type="file" data-pick-file accept="image/png,image/jpeg,image/webp"${multiple ? ' multiple' : ''} hidden></label></div>`}
+      ${rows.length ? `${albumOnly ? '' : '<p class="hint">或者从相册里选：</p>'}<div class="photo-grid pick-photos">${rows.map(r => `<button type="button" data-pick-photo="${esc(r.id)}" aria-label="选 ${esc(r.name)}"><img alt="${esc(r.name)}"></button>`).join('')}</div>` : '<p class="hint">相册里还没有图。</p>'}`);
     d.onClose?.(() => { for (const url of urls) ctx.win.URL.revokeObjectURL(url); if (!done) { done = true; resolve(null); } });
     d.body.addEventListener('change', e => { const files = [...(e.target.closest('[data-pick-file]')?.files || [])]; if (files.length) finish(multiple ? files : files[0]); });
     d.body.addEventListener('click', async e => { const id = e.target.closest('[data-pick-photo]')?.dataset.pickPhoto; if (!id) return; const photo = await api.getPhoto(id); if (photo?.blob) finish(multiple ? [photo.blob] : photo.blob); });
     await eachThumb(api, rows, (id, blob) => {
-      const img = d.body.querySelector(`[data-pick-photo="${CSS.escape(id)}"] img`);
+      const img = [...d.body.querySelectorAll('[data-pick-photo]')].find(el => el.dataset.pickPhoto === id)?.querySelector('img');
       if (!img) return;
       const url = ctx.win.URL.createObjectURL(blob); urls.push(url); img.src = url;
     }, () => !done);

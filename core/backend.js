@@ -8,7 +8,7 @@ import { currentModel } from './model-files.js';
 import { MomentStore } from './moments-store.js';
 import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readGroups, paged, PAGE_WAYS, withPages, songKey, readLink, missingLink, trialOnly, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, sameFile, lyricOwner, bestMatch, matchScore, pick as pickPath, GROUP_KINDS } from './music.js';
 import { AppStore } from './app-store.js';
-import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
+import { ASSISTANT_LIMITS, ASSISTANT_IMAGE_SLOT, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assistantMeta, assistantThoughts, assistantClip, assistantFirstTitle, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
 import { buildPeekRequest, cleanPeek, peekId } from './peek.js';
 import { languageCode } from './languages.js';
@@ -2298,8 +2298,26 @@ export class TTSBackend {
         this.emit('assistant', { settings: true });
         return result;
     }
-    /** Assistant conversations belong to this account, independently of the open story/card. */
-    async assistantThreads() { this.assertOpen(); return (await this.apps.list('assistant')).map(assistantSummary); }
+    /** Assistant conversations belong to this account, independently of the open story/card. With a query: only those
+     *  whose title or words have it (any case); one found in the words has match, the words around the first place. */
+    async assistantThreads(query = '') {
+        this.assertOpen();
+        const rows = await this.apps.list('assistant'), wanted = typeof query === 'string' ? query.trim().toLowerCase() : '';
+        if (!wanted) return rows.map(assistantSummary);
+        const found = [];
+        for (const thread of rows) {
+            if (String(thread.title || '').toLowerCase().includes(wanted)) { found.push(assistantSummary(thread)); continue; }
+            for (const m of thread.messages || []) {
+                const words = (m.role === 'assistant' ? assistantThoughts(m.text, m.meta?.reasoningFormat).text : String(m.text || '')).replaceAll(ASSISTANT_IMAGE_SLOT, ' ');
+                const at = words.toLowerCase().indexOf(wanted);
+                if (at < 0) continue;
+                const from = Math.max(0, at - 16);
+                found.push({...assistantSummary(thread), match: (from ? '…' : '') + words.slice(from, at + wanted.length + 40).replace(/\s+/g, ' ').trim()});
+                break;
+            }
+        }
+        return found;
+    }
     async assistantThread(id) {
         this.assertOpen();
         const thread = await this.apps.get(assistantId(id));
@@ -2376,7 +2394,7 @@ export class TTSBackend {
             if (thread.messages.length >= ASSISTANT_LIMITS.messages) throw Error('这条助手会话已达到 500 条消息，请新建对话后继续');
             const now = Math.max(Date.now(), Number(thread.updatedAt || thread.at) + 1);
             message.at = now;
-            if (message.role === 'user' && !thread.titleEdited && !thread.messages.some(item => item.role === 'user')) thread.title = (message.text || message.attachments?.[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, ASSISTANT_LIMITS.title);
+            if (message.role === 'user' && !thread.titleEdited && !thread.messages.some(item => item.role === 'user')) thread.title = assistantFirstTitle(message);
             thread.messages.push(message);
             thread.revision = (thread.revision || 0) + 1;
             thread.at = thread.updatedAt = now;
@@ -2402,15 +2420,63 @@ export class TTSBackend {
         if (typeof title !== 'string' || !title.trim() || title.trim().length > ASSISTANT_LIMITS.title) throw Error('会话名字请填写 1–80 个字符');
         return this.mutateAssistantThread(id, thread => { thread.title = title.trim(); thread.titleEdited = true; }, {history: false});
     }
+    /** A message's words changed. A reply's thinking is kept apart (in meta.reasoning) and expectedText is its words as
+     *  shown; a reply with a picture keeps its words. */
     async editAssistantMessage(id, messageId, text, expectedText) {
-        if (typeof text !== 'string' || text.length > ASSISTANT_LIMITS.text) throw Error('消息格式无效或超过 100000 字符');
+        if (typeof text !== 'string' || text.length > ASSISTANT_LIMITS.reply) throw Error('消息格式无效或太长');
         return this.mutateAssistantThread(id, thread => {
             const message = thread.messages.find(m => m.id === messageId);
-            if (message?.role !== 'user') throw Error('只能编辑自己发送的消息');
-            if (expectedText !== undefined && message.text !== expectedText) throw Error('这条消息已经被修改，请重新打开编辑');
-            if (!text.trim() && !message.attachments?.length) throw Error('消息不能为空');
-            message.text = text.trim(); message.editedAt = Date.now();
+            if (!message) throw Error('这条消息已经不在了');
+            if (message.role === 'user') {
+                if (text.length > ASSISTANT_LIMITS.text) throw Error('消息格式无效或超过 100000 字符');
+                if (expectedText !== undefined && message.text !== expectedText) throw Error('这条消息已经被修改，请重新打开编辑');
+                if (!text.trim() && !message.attachments?.length) throw Error('消息不能为空');
+                message.text = text.trim(); message.editedAt = Date.now();
+                return;
+            }
+            if (message.meta?.image) throw Error('带图片的回复不能编辑');
+            const parts = assistantThoughts(message.text, message.meta?.reasoningFormat);
+            if (expectedText !== undefined && parts.text.trim() !== expectedText.trim()) throw Error('这条回复已经变了，请重新打开编辑');
+            if (!text.trim()) throw Error('回复不能为空');
+            const reasoning = [message.meta?.reasoning?.trim(), parts.reasoning.trim()].filter(Boolean).filter((value, i, all) => all.indexOf(value) === i).join('\n\n');
+            const meta = assistantMeta({...message.meta, reasoning});
+            message.text = text.trim(); message.meta = meta; message.editedAt = Date.now();
+            const shown = message.selected || 0;
+            if (Array.isArray(message.variants) && message.variants[shown]) message.variants[shown] = {...message.variants[shown], text: message.text, meta};
         });
+    }
+    /** 从这里新开: a new conversation with this one's messages up to that one (words, files and pictures as they are). */
+    async forkAssistantThread(id, messageId) {
+        const source = await this.assistantThread(id);
+        if (!source) throw Error('这条助手会话已经不在了');
+        const index = source.messages.findIndex(m => m.id === messageId);
+        if (index < 0) throw Error('这条消息已经不在了');
+        const now = Date.now(), title = assistantClip(source.title || '新对话', ASSISTANT_LIMITS.title - 4) + '（分叉）';
+        const thread = { id: 'assistant:' + crypto.randomUUID(), kind: 'assistant', title, titleEdited: true, createdAt: now, updatedAt: now, at: now, messages: clone(source.messages.slice(0, index + 1)) };
+        const [saved] = await this.apps.put([thread]);
+        this.emit('assistant', { threadId: saved.id, persisted: true });
+        return saved;
+    }
+    /** 接着写: the last reply's words and details, now that more was written after it. */
+    async continueAssistantMessage(id, messageId, value, expectedRevision) {
+        const result = assistantMessage({ ...value, role: 'assistant' });
+        return this.mutateAssistantThread(id, thread => {
+            if (expectedRevision !== undefined && (thread.revision || 0) !== expectedRevision) throw Error('助手会话已变化，这次回复没有写入');
+            const message = thread.messages.at(-1);
+            if (message?.id !== messageId || message.role !== 'assistant') throw Error('这条回复已经不是最后一条了');
+            message.text = result.text;
+            if (result.meta) message.meta = result.meta; else delete message.meta;
+            const shown = message.selected || 0;
+            if (Array.isArray(message.variants) && message.variants[shown]) message.variants[shown] = { text: result.text, at: message.at, ...(result.meta ? { meta: result.meta } : {}) };
+        });
+    }
+    /** A title the model wrote: put on only while the conversation still has the one it started with (not renamed). */
+    async autoTitleAssistantThread(id, title, expectedTitle) {
+        const next = assistantClip(String(title || '').replace(/\s+/g, ' ').trim(), ASSISTANT_LIMITS.title);
+        if (!next) return null;
+        const thread = await this.assistantThread(id);
+        if (!thread || thread.titleEdited || thread.title !== expectedTitle || thread.title === next) return thread;
+        return this.mutateAssistantThread(id, row => { if (!row.titleEdited && row.title === expectedTitle) row.title = next; }, { history: false });
     }
     async deleteAssistantMessage(id, messageId) {
         return this.mutateAssistantThread(id, thread => {
@@ -3194,7 +3260,8 @@ export class TTSBackend {
             listLooks: () => this.listLooks(), getLook: id => this.apps.get(String(id)), saveLook: look => this.saveLook(look), renameLook: (id, patch) => this.renameLook(String(id), clone(patch || {})), deleteLook: id => this.deleteLook(String(id)), lookFiles: id => this.lookFiles(String(id)),
             generatedPhotos: () => this.generatedPhotos().then(({ count, bytes, sources }) => ({ count, bytes, sources: Object.fromEntries(Object.entries(sources).map(([k, { ids, ...rest }]) => [k, rest])) })), deleteGeneratedPhotos: sources => this.deleteGeneratedPhotos(sources),
             saveMoments: patch => this.saveMoments(clone(patch)), saveCalls: patch => this.saveCalls(clone(patch)),
-            saveAssistant: patch => this.saveAssistant(patch), assistantThreads: () => this.assistantThreads(), assistantThread: id => this.assistantThread(id),
+            saveAssistant: patch => this.saveAssistant(patch), assistantThreads: query => this.assistantThreads(query), assistantThread: id => this.assistantThread(id),
+            forkAssistantThread: (id, mid) => this.forkAssistantThread(id, mid),
             newAssistantThread: () => this.newAssistantThread(), appendAssistantMessage: (id, value, expectedLastId, expectedRevision) => this.appendAssistantMessage(id, value, expectedLastId, expectedRevision),
             renameAssistantThread: (id, title) => this.renameAssistantThread(id, title),
             editAssistantMessage: (id, mid, text, expectedText) => this.editAssistantMessage(id, mid, text, expectedText),

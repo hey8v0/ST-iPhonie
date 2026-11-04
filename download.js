@@ -6,9 +6,10 @@
 const EXTENSIONS = {
   'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/ogg': 'ogg',
   'audio/opus': 'opus', 'audio/flac': 'flac', 'audio/aac': 'aac', 'audio/mp4': 'm4a', 'audio/webm': 'webm',
-  'text/plain': 'txt', 'application/json': 'json', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/avif': 'avif', 'image/gif': 'gif', 'application/zip': 'zip'
+  'text/plain': 'txt', 'application/json': 'json', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/avif': 'avif', 'image/gif': 'gif', 'application/zip': 'zip',
+  'text/html': 'html', 'text/markdown': 'md'
 };
-const KNOWN = /\.(png|jpe?g|webp|avif|gif|mp3|wav|ogg|opus|flac|aac|m4a|webm|txt|json|zip)$/i;
+const KNOWN = /\.(png|jpe?g|webp|avif|gif|mp3|wav|ogg|opus|flac|aac|m4a|webm|txt|json|zip|html?|md)$/i;
 
 /** A file name every system accepts, ending in the extension that matches the file's type. */
 export function fileName(base, type = '', fallback = 'ST-iPhonie') {

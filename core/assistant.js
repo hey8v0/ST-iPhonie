@@ -5,7 +5,37 @@ import {DEFAULT_FORMAT, isPlaceholderRole} from './protocol.js';
 import {languageName} from './languages.js';
 import {normalizeMemory} from './memory.js';
 
-export const ASSISTANT_LIMITS = Object.freeze({messages: 500, text: 100_000, entries: 50, entryText: 20_000, title: 80, presets: 100, tavernEntries: 500, variants: 20, attachments: 8, fileBytes: 10 * 1024 * 1024, totalBytes: 20 * 1024 * 1024});
+// reply: what one answer of the assistant may hold (a whole widget's code can be long); what the user writes stays at text.
+export const ASSISTANT_LIMITS = Object.freeze({messages: 500, text: 100_000, reply: 500_000, entries: 50, entryText: 20_000, title: 80, presets: 100, tavernEntries: 500, variants: 20, attachments: 8, fileBytes: 10 * 1024 * 1024, totalBytes: 20 * 1024 * 1024});
+/** Why a reply is not whole: the model's length limit (length), 停止 (stopped), an error on the way (error), or longer
+ *  than a reply may be kept (limit, the rest was not kept). 接着写 goes on from there. */
+export const ASSISTANT_CUTS = Object.freeze(['length', 'stopped', 'error', 'limit']);
+/** The first max characters, never half of a character written with two code units. */
+export function assistantClip(value, max = ASSISTANT_LIMITS.reply) {
+  const text = String(value || '');
+  if (text.length <= max) return text;
+  const end = /[\uD800-\uDBFF]/.test(text[max - 1]) ? max - 1 : max;
+  return text.slice(0, end);
+}
+/** 接着写: the reply and what was written after it, as one. A code block the model opens again, or the end of the reply
+ *  written once more at the start, are left out. */
+export function assistantJoin(before, after) {
+  const head = String(before || '');
+  let tail = String(after || '');
+  if ((head.match(/```/g)?.length || 0) % 2) tail = tail.replace(/^\s*```[^\n`]*\n/, '');
+  for (let n = Math.min(400, head.length, tail.length); n >= 8; n--) if (head.endsWith(tail.slice(0, n))) { tail = tail.slice(n); break; }
+  return head + tail;
+}
+/** A conversation's own title until it has a better one: the first thing the user wrote. */
+export function assistantFirstTitle(message) {
+  return String(message?.text || message?.attachments?.[0]?.name || '新对话').replace(/\s+/g, ' ').trim().slice(0, ASSISTANT_LIMITS.title) || '新对话';
+}
+/** The title the model wrote for a conversation: one short line, no quotes, label or full stop; '' when there is none. */
+export function assistantTitleText(raw) {
+  let line = assistantThoughts(raw).text.split('\n').map(s => s.trim()).find(Boolean) || '';
+  line = line.replace(/^(?:标题|题目|会话标题|title)\s*[:：]\s*/i, '').replace(/^[「『“"'《【\[(（*#\s]+/, '').replace(/[」』”"'》】\])）*\s。．.！!？?，,、；;：:]+$/, '').trim();
+  return [...line].slice(0, 30).join('').trim();
+}
 const presetId = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(id) && !['__proto__','constructor','prototype'].includes(id);
 export const ASSISTANT_IMAGE_SLOT = '[[assistant-image]]';
 const record = value => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -112,7 +142,7 @@ export function assistantMessage(value, at = Date.now()) {
   if (!record(value) || !['user', 'assistant'].includes(value.role) || typeof value.text !== 'string') throw Error('助手消息格式无效');
   const attachments = value.role === 'user' ? assistantAttachments(value.attachments) : [];
   if (!value.text.trim() && !attachments.length) throw Error('请先填写消息');
-  if (value.text.length > ASSISTANT_LIMITS.text) throw Error('助手单条消息不能超过 100000 字符');
+  if (value.role === 'assistant' ? value.text.length > ASSISTANT_LIMITS.reply : value.text.length > ASSISTANT_LIMITS.text) throw Error(value.role === 'assistant' ? '助手单条回复不能超过 500000 字符' : '助手单条消息不能超过 100000 字符');
   return {id: crypto.randomUUID(), role: value.role, text: value.text.trim(), at,
     ...(attachments.length ? {attachments} : {}), ...(value.role === 'assistant' && value.meta ? {meta: assistantMeta(value.meta)} : {})};
 }
@@ -124,7 +154,8 @@ export function assistantMeta(value = {}) {
     provider: text(value.provider, 200), reasoning: text(value.reasoning, ASSISTANT_LIMITS.text),
     ...(Number.isFinite(value.reasoningMs) && value.reasoningMs >= 0 ? {reasoningMs: Math.min(value.reasoningMs, 86400000)} : {}),
     ...(record(value.image) && typeof value.image.photoId === 'string' && value.image.photoId.length <= 200 && value.image.photoId.trim() ? {image: {photoId: value.image.photoId, prompt: text(value.image.prompt, 6000)}} : {}),
-    ...(value.reasoningFormat ? {reasoningFormat: assistantReasoningFormat(value.reasoningFormat)} : {})};
+    ...(value.reasoningFormat ? {reasoningFormat: assistantReasoningFormat(value.reasoningFormat)} : {}),
+    ...(ASSISTANT_CUTS.includes(value.cut) ? {cut: value.cut} : {})};
 }
 export function assistantAttachments(value = []) {
   if (!Array.isArray(value) || value.length > ASSISTANT_LIMITS.attachments) throw Error('每条消息最多附加 8 个文件');

@@ -126,7 +126,10 @@ export async function streamText(response, info = {}) {
     info.alive?.();
     const choice = json?.choices?.[0];
     if (choice?.delta?.reasoning_content || choice?.delta?.reasoning || json?.candidates?.[0]?.content?.parts?.some?.(p => p?.thought)) info.thought = true;
+    // why the answer ended (length: the model's 最长回复 cut it off), as each kind of API says it
     if (choice?.finish_reason) info.finish = choice.finish_reason;
+    else if (json?.type === 'message_delta' && json.delta?.stop_reason) info.finish = json.delta.stop_reason;
+    else if (json?.candidates?.[0]?.finishReason) info.finish = json.candidates[0].finishReason;
     info.onChunk?.(json);
     text += info.chunkText ? info.chunkText(json) : chunkText(json);
     info.onProgress?.(text);
@@ -212,8 +215,9 @@ export async function customRequest({text, key, prompt, responseLength, fetch: s
     if (details) responseMetadata(json, meta);
     let reply = '';
     try { reply = replyText(json); } catch { /* no text */ }
-    if (reply.trim()) return reply;
     const choice = json?.choices?.[0];
+    if (choice?.finish_reason) meta.finish = choice.finish_reason;
+    if (reply.trim()) return reply;
     if (choice?.message?.reasoning_content || choice?.message?.reasoning) throw thoughtOnly(choice.finish_reason);
     return '';
   };
@@ -231,6 +235,7 @@ export async function customRequest({text, key, prompt, responseLength, fetch: s
   } else {
     const info = details ? {onChunk: json => responseMetadata(json, meta), onProgress: content => onProgress?.(content, meta)} : {};
     const reply = await first.read(alive => streamText(first.response, Object.assign(info, {alive})));
+    if (info.finish) meta.finish = info.finish;
     if (reply.trim()) return finish(reply);
     if (info.thought) throw thoughtOnly(info.finish);
     // Not a stream after all: an ordinary answer that did not say so.

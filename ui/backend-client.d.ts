@@ -214,11 +214,11 @@ export interface AssistantSettings {
     memory: MemoryOptions;
 }
 export interface AssistantAttachment { kind: 'text' | 'image'; name: string; size: number; text?: string; data?: string; }
-export interface AssistantMeta { image?: {photoId: string; prompt: string}; elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; reasoningMs?: number; reasoningFormat?: {prefix: string; suffix: string}; }
+export interface AssistantMeta { image?: {photoId: string; prompt: string}; elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; reasoningMs?: number; reasoningFormat?: {prefix: string; suffix: string}; /** Not whole: cut by the model's length limit, 停止, an error, or kept only up to the limit. */ cut?: 'length' | 'stopped' | 'error' | 'limit'; }
 export interface AssistantVariant { text: string; at: number; meta?: AssistantMeta; }
 export interface AssistantMessage extends AssistantVariant { id: string; role: 'user' | 'assistant'; attachments?: AssistantAttachment[]; editedAt?: number; variants?: AssistantVariant[]; selected?: number; }
 export interface AssistantThread { id: string; kind: 'assistant'; title: string; titleEdited?: boolean; revision?: number; memoryRevision?: number; restoredAt?: number; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
-export interface AssistantThreadSummary extends Omit<AssistantThread, 'messages'> { messageCount: number; preview: string; }
+export interface AssistantThreadSummary extends Omit<AssistantThread, 'messages'> { messageCount: number; preview: string; /** With a search: the words around where it was found. */ match?: string; }
 /** 画风预设: artist and fixed tags sent to NovelAI. */
 export interface DrawStyle { id: string; name: string; artist: string; positive: string; negative: string; /** The 画风 group it is in. */ group?: string; }
 /** A group in the 角色 App; card: the tavern card whose new roles go in it. */
@@ -913,14 +913,17 @@ export interface BackendFacade {
     saveChatPreset(preset: Partial<ChatPreset> & { name: string }): ChatPreset;
     /** Independent assistant settings; no conversation or model context is saved here. */
     saveAssistant(patch: Partial<AssistantSettings>): AssistantSettings;
-    /** Most recently updated first, independent of the selected story/card. */
-    assistantThreads(): Promise<AssistantThreadSummary[]>;
+    /** Most recently updated first, independent of the selected story/card. With a query: those whose title or words have it. */
+    assistantThreads(query?: string): Promise<AssistantThreadSummary[]>;
     assistantThread(id: string): Promise<AssistantThread | null>;
     newAssistantThread(): Promise<AssistantThread>;
     /** Rejects empty/oversized messages and threads already holding 500 messages. */
     appendAssistantMessage(id: string, message: Pick<AssistantMessage, 'role' | 'text' | 'attachments' | 'meta'>, expectedLastId?: string | null, expectedRevision?: number): Promise<AssistantThread>;
     renameAssistantThread(id: string, title: string): Promise<AssistantThread>;
+    /** A reply's words too (its thinking kept apart); not one with a picture. */
     editAssistantMessage(id: string, messageId: string, text: string, expectedText?: string): Promise<AssistantThread>;
+    /** 从这里新开: a new conversation with the messages up to that one. */
+    forkAssistantThread(id: string, messageId: string): Promise<AssistantThread>;
     deleteAssistantMessage(id: string, messageId: string): Promise<AssistantThread>;
     selectAssistantVariant(id: string, messageId: string, selected: number): Promise<AssistantThread>;
     deleteAssistantThread(id: string): Promise<boolean>;
