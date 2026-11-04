@@ -40,9 +40,13 @@ const MODE_ICON = {order: 'repeat', shuffle: 'shuffle', one: 'repeat1'};
 // 添加本机的歌 takes songs, their .lrc lyrics and zip packs (core/music-files.js)
 const ACCEPT = 'audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac,.lrc,.zip,application/zip';
 /** What one 添加本机的歌 did, in a line. */
+const NO_SONG = '歌单里没有同名的歌';
 function addedText(r) {
   if (!r.added && !r.lyrics && !r.same && !r.skipped.length) return '没有找到能加的歌';
-  return [r.added || (!r.lyrics && !r.same) ? `加了 ${r.added} 首` : '', r.lyrics ? `配上 ${r.lyrics} 首歌词` : '', r.same ? `${r.same} 首已经有了` : '', r.skipped.length ? `${r.skipped.length} 个没加` : ''].filter(Boolean).join('，');
+  // .lrc picked alone that found no song of its name: said as lyrics not given, not as 「加了 0 首」
+  const unmatched = r.skipped.filter(s => s.why === NO_SONG).length, other = r.skipped.length - unmatched;
+  return [r.added ? `加了 ${r.added} 首` : '', r.lyrics ? `配上 ${r.lyrics} 首歌词` : '', r.same ? `${r.same} 首已经有了` : '',
+    unmatched ? `${unmatched} 个歌词没配上（${NO_SONG}，和歌一起选就能配上）` : '', other ? `${other} 个没加` : ''].filter(Boolean).join('，');
 }
 /** Which files were not added, and why (under the line's 小 i). */
 const skippedText = r => r.skipped.slice(0, 40).map(s => `「${s.name}」${s.why}`).join('\n') + (r.skipped.length > 40 ? `\n……还有 ${r.skipped.length - 40} 个` : '')
@@ -409,7 +413,7 @@ export function musicApp(ctx) {
       // .lrc files with no song picked: to the songs of the same name in the 歌单
       const words = [];
       for (const l of lyrics) { const lyric = await l.open().then(lrcText).catch(() => ''); if (lyric) words.push({file: l.name, lyric}); else out.skipped.push({name: l.name, why: '不是带时间的 LRC 歌词'}); }
-      if (words.length) { const got = await api.addLyrics(words); out.lyrics += got.given; out.skipped.push(...got.missed.map(name => ({name, why: '歌单里没有同名的歌'}))); }
+      if (words.length) { const got = await api.addLyrics(words); out.lyrics += got.given; out.skipped.push(...got.missed.map(name => ({name, why: NO_SONG}))); }
     } catch (error) { out.error = error.message; }
     if (into && ids.length) await api.addToPlaylist(into, ids).catch(error => { out.error ||= error.message; });
     adding = null; addedNote = out;
@@ -421,6 +425,8 @@ export function musicApp(ctx) {
     const files = [...el.files]; el.value = '';
     if (files.length) addPicked(files);
   });
+  // The line of what an import did goes when tapped (its 小 i still opens), and when the app is left.
+  v.on('click', '.music-adding', (el, event) => { if (event.target.closest('[data-help]') || adding) return; addedNote = null; render(); });
   v.on('change', '[data-music-seek]', el => api.musicSeek?.(Number(el.value)));
   // finding songs in a long 歌单 as one types (only its rows are drawn again, the box keeps its focus)
   v.on('input', '[data-music-filter]', el => { filter = el.value; limit = STEP; redrawRows(); });
@@ -583,6 +589,8 @@ export function musicApp(ctx) {
   /** A song written, opened from elsewhere (its card in a chat). */
   v.showDraft = id => writer.open(id);
   v.refresh = v.resume = () => render();
+  const left = v.leave;
+  v.leave = () => { if (!adding && addedNote) { addedNote = null; v.root.querySelector('.music-adding:not([data-music-adding])')?.remove(); } left?.(); };
   render();
   return v;
 }
