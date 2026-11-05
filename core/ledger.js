@@ -4,7 +4,7 @@
 // write over each other; what is shown adds them up. The story's own replies are the tavern's, and are not in here.
 
 /** What a text request is for, as generateText's `use` says it. */
-export const TEXT_USES = Object.freeze({song: '写歌', chat: '聊天', moments: '朋友圈', forum: '论坛', peek: '查手机', call: '电话', memory: '记忆整理', assistant: '助手', picture: '配图和提示词', book: '绘本', voices: '挑音色', wardrobe: '衣柜', other: '其他'});
+export const TEXT_USES = Object.freeze({song: '写歌', chat: '聊天', moments: '朋友圈', forum: '论坛', peek: '查手机', call: '电话', memory: '记忆整理', assistant: '助手', picture: '配图和提示词', book: '绘本', voices: '挑音色', wardrobe: '衣柜', generator: '生成器', other: '其他'});
 const COUNTS = ['text', 'voice', 'image', 'anlas', 'embed', 'sfx', 'song'];
 const KEEP_DAYS = 800;
 const pad = n => String(n).padStart(2, '0');

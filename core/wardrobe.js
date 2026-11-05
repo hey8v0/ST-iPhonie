@@ -3,6 +3,8 @@
 // clothes it writes a hidden <outfit name="…">…</outfit> line, and the 衣柜 follows (no request of its own). No DOM here.
 // Kept in the apps store (core/app-store.js) as wardrobe:* documents: wardrobe-item, wardrobe-set, wardrobe-wear.
 
+import {promptText} from './prompt-rules.js';
+
 export const WARDROBE_CATEGORIES = Object.freeze(['上衣', '下装', '外套', '连衣裙', '鞋', '配饰', '整套']);
 export const WARDROBE_LIMITS = Object.freeze({items: 600, sets: 200, name: 40, description: 300, wear: 600, wish: 300, pool: 60});
 export const WARDROBE_KINDS = Object.freeze(['wardrobe-item', 'wardrobe-set', 'wardrobe-wear']);
@@ -47,10 +49,10 @@ export function cleanWear(doc, now = Date.now()) {
     pending: doc?.pending === true, at: time(doc?.at, now), ...space(doc)};
 }
 
-// ---------- the model ----------
+// ---------- the model (the words are the 衣柜 block of 系统提示词, core/prompt-rule-defaults.js) ----------
 /** Recognizing a photo of clothes: only what is seen, as JSON. */
-export function recognizeRequest(image) {
-  return [{role: 'system', content: `你在帮人整理衣柜。只依据图片里看得见的衣服，说出颜色、款式、材质或图案、鞋和配饰。单件就描述这一件；整身照描述看得见的整套。只输出 JSON：{"name":"简短名称（12 字以内）","category":"${WARDROBE_CATEGORIES.join('|')} 中的一个","description":"一两句精致准确的服装描述"}。不要猜人物是谁、品牌、季节，也不要写图片外的衣服。`},
+export function recognizeRequest(image, prompts = {}) {
+  return [{role: 'system', content: promptText(prompts, 'wardrobe', 'recognize', {'分类': WARDROBE_CATEGORIES.join('|')})},
     {role: 'user', content: [{type: 'text', text: '识别这张衣服的照片。'}, {type: 'image_url', image_url: {url: image}}]}];
 }
 /** {name, category, description} from what the model answered (a fenced or loose JSON, or plain words as the description). */
@@ -65,21 +67,19 @@ export function parseRecognition(text) {
  * Putting an outfit together: from the 衣柜 (the pieces picked, else all of them) or designed from the user's wish;
  * the scene of the story now, so it fits; the last one, not to repeat it. Answers 35–80 characters of plain words.
  */
-export function suggestRequest({wearer, mode = 'closet', wish = '', pool = [], last = '', scene = ''}) {
-  const system = `你是服装搭配师。只输出一段给角色扮演模型读的「${wearer}」此刻的穿着，35–80 个汉字：用静态描述交代上衣、下装、鞋或配饰、颜色和层次，语言精致具体。不写人物的动作、表情、心理、体貌和故事，不解释搭配理由，不要标题和列表。${mode === 'closet' ? '只能用下面给的衣物；衣物不够一整套时只写有的这些。' : ''}`;
-  const parts = [mode === 'closet' ? `衣柜里能用的（只能用这些）：\n${pool.slice(0, WARDROBE_LIMITS.pool).map(x => `- ${x.name}：${x.description}`).join('\n')}\n挑一套协调的穿着。${wish ? `偏好：${clip(wish, WARDROBE_LIMITS.wish)}。` : ''}` : `想要的样子：${clip(wish, WARDROBE_LIMITS.wish)}。按这个设计一套，不用参考衣柜。`];
-  if (scene) parts.push(`现在剧情里的场景（衣服要合适）：${clip(scene, 600)}`);
-  if (last) parts.push(`上一次搭的是：${clip(last, 200)}。能换就换一套不一样的。`);
-  return [{role: 'system', content: system}, {role: 'user', content: parts.join('\n\n')}];
+export function suggestRequest({wearer, mode = 'closet', wish = '', pool = [], last = '', scene = '', prompts = {}}) {
+  const values = {'穿的人': wearer, '从衣柜选': mode === 'closet', '衣物': pool.slice(0, WARDROBE_LIMITS.pool).map(x => `- ${x.name}：${x.description}`).join('\n'),
+    '偏好': clip(wish, WARDROBE_LIMITS.wish), '场景': clip(scene, 600), '上一套': clip(last, 200)};
+  return [{role: 'system', content: promptText(prompts, 'wardrobe', 'suggest', values)}, {role: 'user', content: promptText(prompts, 'wardrobe', 'suggestAsk', values)}];
 }
 /** An outfit as the model answered it: plain words, one paragraph. */
 export const cleanOutfit = text => String(text ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/^```\w*\s*|\s*```$/g, '').replace(/^[「“"]|[」”"]$/g, '').replace(/\s+/g, ' ').trim().slice(0, WARDROBE_LIMITS.wear);
 
 // ---------- the story ----------
 /** 穿上 for the next story reply: who wears what now (told once). */
-export const wearText = (list, user = '我') => list.length ? `【本轮的衣着】\n${list.map(w => `${ownerName(w.owner, user)}此刻穿着：${w.text}`).join('\n')}\n这些衣服只代表此刻；正文里换衣、脱衣、洗澡或睡觉时，按剧情自然改变。` : '';
+export const wearText = (list, user = '我', prompts = {}) => list.length ? promptText(prompts, 'wardrobe', 'wear', {'衣着': list.map(w => `${ownerName(w.owner, user)}此刻穿着：${w.text}`).join('\n')}) : '';
 /** The story's rule while the 衣柜 is in use: someone's clothes changed, a hidden line says what they wear now. */
-export const outfitRule = names => names.length ? `【衣着变化】正文里有人换了衣服（换装、脱下外套、换上睡衣……）时，在回复最后为每个换了的人单独写一行 <outfit name="名字">现在穿着的完整描述（20–60 字）</outfit>；没有人换就不写。名字只用：${names.join('、')}。` : '';
+export const outfitRule = (names, prompts = {}) => names.length ? promptText(prompts, 'wardrobe', 'rule', {'名单': names.join('、')}) : '';
 const TAG = /<outfit\b([^>]*)>([\s\S]*?)<\/outfit\s*>/gi;
 /** The <outfit> lines of a reply: [{name, text}], the last one of a name counting. */
 export function parseOutfits(text) {

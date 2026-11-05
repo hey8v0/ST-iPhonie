@@ -24,7 +24,7 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     if (!await sees(ctx)) throw Error('现在的文字模型看不了图片：换一个能看图的（小手机「引擎 → 文字模型」里的自定义接口，或在酒馆里开了发送内联图片的），或者自己写描述');
     const row = await backend.library.getPhoto(item.photoId);
     if (!row?.blob) throw one('这张照片已经不在相册里了');
-    const got = parseRecognition(await ask(ctx, backend, settings(), recognizeRequest(await picture(row.blob)), {label: '衣柜 · 识别', use: 'wardrobe'}));
+    const got = parseRecognition(await ask(ctx, backend, settings(), recognizeRequest(await picture(row.blob), settings().promptRules), {label: '衣柜 · 识别', use: 'wardrobe'}));
     if (!got.description) throw one('模型没说出这件衣服是什么样的：再试一次，或者自己写描述');
     return backend.saveWardrobeItem({...item, name: got.name || item.name, category: got.category || item.category, description: got.description, recognized: true});
   }
@@ -36,7 +36,7 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     const pool = items.filter(x => x.description && (!itemIds.length || itemIds.includes(x.id)));
     if (mode === 'closet' && !pool.length) throw Error('衣柜里还没有写了描述的衣服：先放几件进来，或者换成「自由设计」');
     if (mode !== 'closet' && !String(wish).trim()) throw Error('先写下想要什么样的');
-    const prompt = suggestRequest({wearer: ownerName(owner, userName()), mode, wish, pool, last: wears.find(w => w.owner === owner)?.text || '', scene: scene(ctx)});
+    const prompt = suggestRequest({prompts: settings().promptRules, wearer: ownerName(owner, userName()), mode, wish, pool, last: wears.find(w => w.owner === owner)?.text || '', scene: scene(ctx)});
     const text = cleanOutfit(await backend.generateText(ctx, {use: 'wardrobe', prompt, plainText: true, trimNames: false}));
     if (!text) throw Error('模型没搭出来，再试一次');
     return text;
@@ -77,14 +77,14 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     if (!cache.loaded) refresh();
     const user = userName(), out = [];
     if (cache.pending.length) {
-      out.push({key: 'sttts.entry.wardrobe', text: wearText(cache.pending, user), position: 1, depth: 1, role: 0});
+      out.push({key: 'sttts.entry.wardrobe', text: wearText(cache.pending, user, settings().promptRules), position: 1, depth: 1, role: 0});
       if (type && !['quiet', 'impersonate'].includes(type) && !dryRun) {
         const used = cache.pending;
         cache = {...cache, pending: []};
         backend.takeWardrobeWear().then(() => notice(`${used.map(w => ownerName(w.owner, user)).join('、')}的衣着带进这次正文了`)).catch(() => {});
       }
     }
-    const rule = outfitRule(cache.owners.map(o => ownerName(o, user)));
+    const rule = outfitRule(cache.owners.map(o => ownerName(o, user)), settings().promptRules);
     if (rule) out.push({key: 'sttts.entry.outfit', text: rule, position: 1, depth: 1, role: 0});
     return out;
   }

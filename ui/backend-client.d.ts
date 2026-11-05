@@ -431,6 +431,10 @@ export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; 
 export interface WardrobeItem { id: string; kind: 'wardrobe-item'; owner: string; name: string; category: string; description: string; photoId?: string; recognized: boolean; at: number; updatedAt: number; }
 export interface WardrobeSet { id: string; kind: 'wardrobe-set'; owner: string; name: string; description: string; items: string[]; at: number; updatedAt: number; }
 export interface WardrobeWear { id: string; kind: 'wardrobe-wear'; owner: string; text: string; from: 'phone' | 'story'; pending: boolean; at: number; }
+/** 小剧场 (core/generator.js): a script's line (旁白 lines are narration) or a card's HTML. */
+export interface TheaterLine { role: string; text: string; translation: string; emotion: string; narration?: boolean; }
+export interface Theater { id: string; kind: 'theater'; form: 'script' | 'card'; title: string; lines?: TheaterLine[]; html?: string; source: 'story' | 'card'; wish: string; at: number; space?: string; save?: string; }
+export interface GeneratorDirection { title: string; text: string; }
 export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; /** when the user last turned down a 好友申请 */ refused?: number; }
 export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 黑名单: what they sent meanwhile (held, never in the chat) and their 好友申请; refused: when the user last turned one down. The list carries count instead of held. */ blocked?: {at: number; held?: {kind: string; text: string; at: number}[]; count?: number; requests: {text: string; at: number}[]; refused?: number}; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
 /** streak: 聊天火花, days in a row both sides wrote. */
@@ -1129,6 +1133,9 @@ export interface BackendFacade {
     /** 穿上 (from: 'phone', told to the next story reply once) or what the story changed (from: 'story'). */
     setWardrobeWear(wear: { owner: string; text: string; from?: 'phone' | 'story' }): Promise<WardrobeWear>;
     clearWardrobeWear(owner: string): Promise<boolean>;
+    theaters(): Promise<Theater[]>;
+    saveTheater(doc: Partial<Theater>): Promise<Theater>;
+    deleteTheater(ids: string[]): Promise<boolean>;
     /** A 好友申请 from someone deleted or blocked: accepted (friends again) or turned down. */
     answerFriendRequest(threadId: string, accept: boolean): Promise<ChatThread>;
     deleteChatMessages(id: string, ids: string[]): Promise<ChatThread>;
@@ -1228,6 +1235,19 @@ export interface BackendAPI extends BackendFacade {
     wardrobeRecognize(itemId: string): Promise<WardrobeItem>;
     wardrobeSuggest(options: { owner: string; mode?: 'closet' | 'free'; wish?: string; itemIds?: string[] }): Promise<string>;
     wardrobeTryOn(options: { owner: string; text: string; allowPaid?: boolean }): Promise<string>;
+    /** 生成器 (host-generator.js): the card open now, what is being written, and each kind's request. */
+    generatorCard(): { name: string; group: boolean; messages: number; greetingOnly: boolean };
+    generatorBusy(): string;
+    generatorOpening(form: { mode?: 'random' | 'brief'; brief?: string; focus?: string; length?: string; before?: string; wish?: string }): Promise<string>;
+    generatorWriteOpening(text: string, options?: { append?: boolean }): Promise<{ how: 'swipe' | 'append' | 'ask'; index?: number; messages?: number }>;
+    generatorPersona(form: { wish?: string; length?: string }): Promise<{ name: string; description: string }>;
+    generatorSavePersona(value: { name: string; description: string }): Promise<{ avatarId: string; name: string }>;
+    generatorUsePersona(avatarId: string): Promise<void>;
+    generatorDirections(form: { wish?: string }): Promise<GeneratorDirection[]>;
+    generatorSteer(direction: GeneratorDirection | null): GeneratorDirection | null;
+    generatorSteering(): GeneratorDirection | null;
+    generatorTheater(form: { kind?: 'script' | 'card'; source?: 'story' | 'card'; length?: string; wish?: string; focus?: string }): Promise<Theater>;
+    generatorPlay(id: string): Promise<unknown>;
     /** Friends react to the user's post. */
     momentsReact(id: string): Promise<MomentPost>;
     /** Answers to the user's comment. */

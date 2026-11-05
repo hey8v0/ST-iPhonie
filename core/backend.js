@@ -29,6 +29,7 @@ import { DRAWN_SOURCES, FAVORITES, ALBUM_LIMITS, albumName, albumsInOrder } from
 import { paintStore } from './paint-store.js';
 import { Ledger } from './ledger.js';
 import { cleanItem, cleanSet, cleanWear, WARDROBE_LIMITS } from './wardrobe.js';
+import { cleanTheater, GENERATOR_LIMITS } from './generator.js';
 import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, LEDGER_KINDS, premiumOf, decorKey, cents, yuan, shopGifts, normalizeGift, validateGift } from './wallet.js';
 import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, GPT_MAX_REFS, gptBase, gptSize, gptPrompt, gptGenerate, comfyUrl, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, comfyClips, comfyProgress, defaultWorkflow, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS } from './image-engines.js';
 import {activeLoraWorkflow} from './comfy-loras.js';
@@ -109,7 +110,7 @@ const firstCard = route => (Array.isArray(route.cards) ? route.cards.find(k => !
 const clone = value => structuredClone(value);
 // a 歌单 the user made was deleted meanwhile (in another tab, say)
 // Which documents of the apps' stores make up a part of a backup and of 保存到酒馆 (画画的作品 has a store of its own).
-const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], wardrobe: ['wardrobe-item', 'wardrobe-set', 'wardrobe-wear'], looks: ['look'], albums: ['album'], music: ['song', 'playlist', 'heard', 'draft'], sounds: ['sound'], games: ['gamesave'] });
+const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], wardrobe: ['wardrobe-item', 'wardrobe-set', 'wardrobe-wear'], theater: ['theater'], looks: ['look'], albums: ['album'], music: ['song', 'playlist', 'heard', 'draft'], sounds: ['sound'], games: ['gamesave'] });
 // the 大游戏 whose saves the phone keeps (方块世界's worlds are too big to carry; they stay in the browser)
 const GAME_SAVES = Object.freeze(['antarctic']);
 // The tavern takes 500 MB a request, and a file goes as base64.
@@ -247,7 +248,7 @@ export class TTSBackend {
     async partRows(part) {
         if (part === 'paint') return this.paintWorks.all();
         if (part === 'ledger') await this.ledger.flush();
-        if (part === 'ledger' || part === 'peek' || part === 'looks' || part === 'albums' || part === 'wardrobe') return this.apps.listFrom(part + ':');
+        if (part === 'ledger' || part === 'peek' || part === 'looks' || part === 'albums' || part === 'wardrobe' || part === 'theater') return this.apps.listFrom(part + ':');
         const kinds = PART_KINDS[part];
         return (await this.partStore(part).list()).filter(row => kinds.includes(row.kind));
     }
@@ -272,7 +273,7 @@ export class TTSBackend {
     /** Tells the app a part's rows changed under it. */
     partsChanged(part) {
         if (part === 'music') this.emit('music', { library: true, heard: true });
-        else if (part === 'forum' || part === 'peek' || part === 'sounds' || part === 'ledger' || part === 'paint' || part === 'looks' || part === 'albums' || part === 'wardrobe') this.emit(part, {});
+        else if (part === 'forum' || part === 'peek' || part === 'sounds' || part === 'ledger' || part === 'paint' || part === 'looks' || part === 'albums' || part === 'wardrobe' || part === 'theater') this.emit(part, {});
     }
     /** What the backup page shows of the parts that are not simply counted. */
     async backupCounts() {
@@ -280,7 +281,7 @@ export class TTSBackend {
         const bytes = rows => rows.reduce((n, row) => n + (row.blob?.size || row.size || row.bytes || 0), 0);
         const [docs, music, sounds, works] = await Promise.all([this.apps.list(), this.music.list(), this.sounds.list('sound'), this.paintRows().catch(() => [])]);
         const songs = music.filter(row => row.kind === 'song' && row.origin !== 'source'), looks = docs.filter(row => row.kind === 'look');
-        return { wardrobe: docs.filter(row => row.kind === 'wardrobe-item' || row.kind === 'wardrobe-set').length, games: docs.filter(row => row.kind === 'gamesave').map(row => ({ game: row.game, day: Number(row.data?.day) || 0 })), looks: looks.length, lookBytes: bytes(looks), forum: docs.filter(row => row.kind === 'forum').length, peek: docs.filter(row => row.kind === 'peek').length, ledger: new Set(docs.filter(row => row.kind === 'ledger').map(row => row.day)).size, playlists: music.filter(row => row.kind === 'playlist').length, songs: songs.length, musicBytes: bytes(songs), sounds: sounds.length, soundBytes: bytes(sounds), works: works.length, workBytes: bytes(works) };
+        return { wardrobe: docs.filter(row => row.kind === 'wardrobe-item' || row.kind === 'wardrobe-set').length, theater: docs.filter(row => row.kind === 'theater').length, games: docs.filter(row => row.kind === 'gamesave').map(row => ({ game: row.game, day: Number(row.data?.day) || 0 })), looks: looks.length, lookBytes: bytes(looks), forum: docs.filter(row => row.kind === 'forum').length, peek: docs.filter(row => row.kind === 'peek').length, ledger: new Set(docs.filter(row => row.kind === 'ledger').map(row => row.day)).size, playlists: music.filter(row => row.kind === 'playlist').length, songs: songs.length, musicBytes: bytes(songs), sounds: sounds.length, soundBytes: bytes(sounds), works: works.length, workBytes: bytes(works) };
     }
     /** The works' list; one saved before it kept its size has its layers read for that. */
     async paintRows() {
@@ -417,7 +418,7 @@ export class TTSBackend {
     emit(type, data = {}) {
         if (this.closed) return;
         const event = { type, revision: this.revision, ...clone(data) };
-        if (!this.syncApplying && (type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || type === 'looks' || type === 'albums' || type === 'games' || type === 'wardrobe' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
+        if (!this.syncApplying && (type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || type === 'looks' || type === 'albums' || type === 'games' || type === 'wardrobe' || type === 'theater' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
         for (const listener of this.listeners) { try { listener(clone(event)); } catch { /* One view cannot stop the other subscribers. */ } }
     }
     subscribe(listener) {
@@ -2935,6 +2936,32 @@ export class TTSBackend {
         if (pending.length) await this.appsMutate('wardrobe', () => this.apps.put(pending.map(w => ({ ...w, pending: false, updatedAt: Date.now() }))));
         return pending;
     }
+    // ---------- 小剧场 (core/generator.js) ----------
+    /** The 小剧场 kept here (this card's, with 分区), newest first. */
+    async theaters() {
+        this.assertOpen();
+        const here = this.here();
+        return (await this.apps.listFrom('theater:')).filter(d => d.kind === 'theater' && inSpace(d, here)).sort((a, b) => b.at - a.at);
+    }
+    /** A 小剧场 kept (where it was written: its card, with 分区); the oldest go past the limit. */
+    async saveTheater(doc) {
+        this.assertOpen();
+        const old = doc?.id ? await this.apps.get(doc.id) : null;
+        const kept = cleanTheater({ ...(old || this.spaceTag()), ...doc, ...(old ? { at: old.at, space: old.space, save: old.save } : {}) });
+        const all = (await this.apps.listFrom('theater:')).filter(d => d.kind === 'theater' && d.id !== kept.id).sort((a, b) => b.at - a.at);
+        const gone = all.slice(GENERATOR_LIMITS.theaters - 1).map(d => d.id);
+        const [saved] = await this.appsMutate('theater', async () => { if (gone.length) await this.apps.removeMany(gone); return this.apps.put([kept]); });
+        if (gone.length) this.noteGone('theater', gone);
+        return saved;
+    }
+    async deleteTheater(ids) {
+        this.assertOpen();
+        const list = [...new Set((ids || []).map(String).filter(id => /^theater:/.test(id)))];
+        if (!list.length) return false;
+        await this.appsMutate('theater', () => this.apps.removeMany(list));
+        this.noteGone('theater', list);
+        return true;
+    }
     // ---------- 查手机 ----------
     /** A character's phone as the model made it up; replaces the earlier one of the same person. space: the card it was
      *  looked at under (spaceKey() when the look began; the tavern may have moved to another card while it was written). */
@@ -3072,7 +3099,7 @@ export class TTSBackend {
     speak(line) {
         const lines = (Array.isArray(line) ? line : [line]).filter(l => l?.role && l.text);
         if (!lines.length) throw Error('这条语音没有内容');
-        return this.player.start(lines.map(l => ({ role: l.role, emotion: l.emotion || 'calm', text: l.text, translation: l.translation || '' })), () => !this.closed);
+        return this.player.start(lines.map(l => ({ role: l.role, emotion: l.emotion || 'calm', text: l.text, translation: l.translation || '', ...(l.narration ? { narration: true } : {}) })), () => !this.closed);
     }
     /**
      * Album photos the phone drew, by where they were drawn (told apart by the name generateImage gives them):
@@ -3583,7 +3610,7 @@ export class TTSBackend {
             gptModels: () => this.gptModels(),
             embedTest: async draft => { const [v] = await this.embed(['测试一下向量模型'], clone(draft || {})); return v.length; },
             appendChat: (id, messages, options) => { this.assertOpen(); return this.appendChat(id, clone(messages), clone(options || {})); },
-            wardrobe: owner => this.wardrobe(String(owner || '')), saveWardrobeItem: item => this.saveWardrobeItem(clone(item)), saveWardrobeSet: set => this.saveWardrobeSet(clone(set)), deleteWardrobe: ids => this.deleteWardrobe([...(ids || [])]), setWardrobeWear: wear => this.setWardrobeWear(clone(wear || {})), clearWardrobeWear: owner => this.clearWardrobeWear(String(owner || '')),
+            wardrobe: owner => this.wardrobe(String(owner || '')), saveWardrobeItem: item => this.saveWardrobeItem(clone(item)), saveWardrobeSet: set => this.saveWardrobeSet(clone(set)), deleteWardrobe: ids => this.deleteWardrobe([...(ids || [])]), setWardrobeWear: wear => this.setWardrobeWear(clone(wear || {})), clearWardrobeWear: owner => this.clearWardrobeWear(String(owner || '')), theaters: () => this.theaters(), saveTheater: doc => this.saveTheater(clone(doc)), deleteTheater: ids => this.deleteTheater([...(ids || [])]),
             unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId), blockContact: name => this.blockContact(name), blockedNames: () => this.blockedNames(), unblockContact: threadId => this.unblockContact(threadId), answerFriendRequest: (threadId, accept) => this.answerFriendRequest(threadId, accept),
             deleteChatMessages: (id, ids) => this.chatMutate(id, async () => { const before = await this.chats.get(id); const thread = await this.chats.removeMessages(id, clone(ids)); this.noteGone('chats', (ids || []).map(m => `${id}/${m}`)); await this.memoryAfterDelete(id, before, thread).catch(() => {}); return thread; }),
             updateChatMessage: (id, messageId, patch) => this.chatMutate(id, () => this.chats.updateMessage(id, messageId, clone(patch || {}))),

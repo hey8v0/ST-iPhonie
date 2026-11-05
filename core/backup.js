@@ -27,13 +27,14 @@ export const BACKUP_PARTS = Object.freeze({
   paint: '画画的作品',
   ledger: '账本',
   wardrobe: '衣柜',
+  theater: '小剧场',
   games: '大游戏存档',
   keys: '密钥（用密码加密）'
 });
 /** Which library stores each part covers. */
-export const PART_STORES = Object.freeze({settings: ['references', 'phone'], vnFiles: [], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], books: ['books'], chats: [], memories: [], assistant: [], moments: [], forum: [], peek: [], music: [], sounds: [], paint: [], games: [], ledger: [], looks: [], wardrobe: [], keys: []});
+export const PART_STORES = Object.freeze({settings: ['references', 'phone'], vnFiles: [], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], books: ['books'], chats: [], memories: [], assistant: [], moments: [], forum: [], peek: [], music: [], sounds: [], paint: [], games: [], ledger: [], looks: [], wardrobe: [], theater: [], keys: []});
 /** The rows outside the library that a backup holds under a part's own name. albums (相册的分类) go with the part 相册. */
-export const ROW_PARTS = Object.freeze(['forum', 'peek', 'music', 'sounds', 'paint', 'ledger', 'looks', 'albums', 'games', 'wardrobe']);
+export const ROW_PARTS = Object.freeze(['forum', 'peek', 'music', 'sounds', 'paint', 'ledger', 'looks', 'albums', 'games', 'wardrobe', 'theater']);
 /** Parts chosen by default: keys only when the user turns them on. */
 export const DEFAULT_BACKUP_PARTS = Object.freeze(Object.keys(BACKUP_PARTS).filter(part => part !== 'keys'));
 export const KEY_PASSWORD_MIN = 6;
