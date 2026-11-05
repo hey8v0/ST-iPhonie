@@ -28,6 +28,8 @@ const GLYPHS = {
   games: '<rect x="6" y="18" width="52" height="30" rx="15"/><path d="M19 26v14M12 33h14" stroke="var(--t2)" stroke-width="4.5" stroke-linecap="round"/><circle cx="42" cy="29" r="3.6" fill="var(--tac)"/><circle cx="49" cy="36" r="3.6" fill="var(--tac)"/>',
   // An open picture book: two pages, a picture on the left, a ribbon.
   picbook: '<path d="M32 16C24 11 15 10 6 12v38c9-2 18-1 26 4 8-5 17-6 26-4V12c-9-2-18-1-26 4z"/><path d="M32 16v38" stroke="var(--t2)" stroke-width="3"/><path d="M11 38l6-8 5 5 4-4 3 7z" fill="var(--t2)"/><circle cx="20" cy="22" r="3" fill="var(--tac)"/><path d="M38 22h14M38 29h14M38 36h10" stroke="var(--t2)" stroke-width="2.6" stroke-linecap="round"/><path d="M45 8v14l3-3 3 3V8z" fill="var(--tac)"/>',
+  // A shirt on a hanger (its bar seen across the shoulders), a pocket in the accent.
+  wardrobe: '<path d="M32 21v-6.5a4 4 0 0 1 8 0v1" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><path d="M26 21 16 24 6 33l6.5 7.5 4.5-3.8V57h30V36.7l4.5 3.8L58 33l-10-9-10-3q-6 7-12 0z" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M26 21q6 7 12 0" fill="none" stroke="var(--t2)" stroke-width="3" stroke-linecap="round"/><rect x="36" y="39" width="7" height="7" rx="2" fill="var(--tac)"/><path d="M32 19.6 14.5 27.5M32 19.6l17.5 7.9" fill="none" stroke="var(--t2)" stroke-width="2.4" stroke-linecap="round"/>',
   // An account book with a coin on it.
   ledger: '<rect x="12" y="7" width="40" height="50" rx="6"/><path d="M20 7v50" stroke="var(--t2)" stroke-width="3"/><path d="M27 20h18M27 29h18M27 38h7" stroke="var(--t2)" stroke-width="3.2" stroke-linecap="round"/><circle cx="46" cy="46" r="10" fill="var(--tac)"/><path d="M42 41l4 5 4-5M46 46v6M42.5 48h7" fill="none" stroke="var(--t2)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
   // A scene with someone in it and a text box over it.
@@ -52,6 +54,7 @@ export function glyph(key) {
 
 const LINES = {
   gift: 'M4 11h16v9H4zM3 7h18v4H3zM12 7v13M12 7C10.5 4 7 3.5 7 6s3 1 5 1m0 0c1.5-3 5-3.5 5-1s-3 1-5 1', wallet: 'M4 7h15a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 7l12-3v3M15 13.5h2', shop: 'M5 8h14l-1.2 12H6.2zM9 10V6a3 3 0 0 1 6 0v4',
+  hanger: 'M9.6 6.2a2.4 2.4 0 1 1 2.4 2.4V10M12 10l-8.6 6.1A1.5 1.5 0 0 0 4.3 18.8h15.4a1.5 1.5 0 0 0 .9-2.7z',
   back: 'm15 5-7 7 7 7', home: 'm3 11 9-8 9 8M6 9v12h12V9M10 21v-7h4v7', close: 'm6 6 12 12M6 18 18 6', add: 'M12 5v14M5 12h14',
   next: 'm9 5 7 7-7 7', down: 'm6 9 6 6 6-6', up: 'm6 15 6-6 6 6', lock: 'M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5z',
   repeat: 'M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4', repeat1: 'M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4M11 10l1.5-1v6',

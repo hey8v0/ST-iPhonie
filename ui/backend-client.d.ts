@@ -428,6 +428,9 @@ export interface MusicPlaylist { id: string; kind: 'playlist'; at: number; name:
 /** What plays now (the tavern page's player). */
 export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; mode: 'order' | 'shuffle' | 'one'; from: string; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
 export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; from?: string };
+export interface WardrobeItem { id: string; kind: 'wardrobe-item'; owner: string; name: string; category: string; description: string; photoId?: string; recognized: boolean; at: number; updatedAt: number; }
+export interface WardrobeSet { id: string; kind: 'wardrobe-set'; owner: string; name: string; description: string; items: string[]; at: number; updatedAt: number; }
+export interface WardrobeWear { id: string; kind: 'wardrobe-wear'; owner: string; text: string; from: 'phone' | 'story'; pending: boolean; at: number; }
 export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; /** when the user last turned down a 好友申请 */ refused?: number; }
 export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 黑名单: what they sent meanwhile (held, never in the chat) and their 好友申请; refused: when the user last turned one down. The list carries count instead of held. */ blocked?: {at: number; held?: {kind: string; text: string; at: number}[]; count?: number; requests: {text: string; at: number}[]; refused?: number}; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
 /** streak: 聊天火花, days in a row both sides wrote. */
@@ -1118,6 +1121,14 @@ export interface BackendFacade {
     unblockContact(threadId: string): Promise<ChatThread>;
     /** The contacts blocked here: left out of 朋友圈 both ways. */
     blockedNames(): Promise<string[]>;
+    /** 衣柜 here (this card's, with 分区): clothes and outfits, newest first, and what each owner wears ('me' or 'role:名字'). */
+    wardrobe(owner?: string): Promise<{ items: WardrobeItem[]; sets: WardrobeSet[]; wears: WardrobeWear[] }>;
+    saveWardrobeItem(item: Partial<WardrobeItem> & { owner: string }): Promise<WardrobeItem>;
+    saveWardrobeSet(set: Partial<WardrobeSet> & { owner: string; description: string }): Promise<WardrobeSet>;
+    deleteWardrobe(ids: string[]): Promise<boolean>;
+    /** 穿上 (from: 'phone', told to the next story reply once) or what the story changed (from: 'story'). */
+    setWardrobeWear(wear: { owner: string; text: string; from?: 'phone' | 'story' }): Promise<WardrobeWear>;
+    clearWardrobeWear(owner: string): Promise<boolean>;
     /** A 好友申请 from someone deleted or blocked: accepted (friends again) or turned down. */
     answerFriendRequest(threadId: string, accept: boolean): Promise<ChatThread>;
     deleteChatMessages(id: string, ids: string[]): Promise<ChatThread>;
@@ -1213,6 +1224,10 @@ export interface BackendAPI extends BackendFacade {
     musicSeek(seconds: number): void;
     /** New 朋友圈 posts from the characters (one model request). */
     momentsRefresh(): Promise<MomentPost[]>;
+    /** 衣柜 (tavern side): a piece's photo recognized by a model that sees; an outfit put together; a 试穿图 drawn (code 'PAID' with prompt until allowPaid). */
+    wardrobeRecognize(itemId: string): Promise<WardrobeItem>;
+    wardrobeSuggest(options: { owner: string; mode?: 'closet' | 'free'; wish?: string; itemIds?: string[] }): Promise<string>;
+    wardrobeTryOn(options: { owner: string; text: string; allowPaid?: boolean }): Promise<string>;
     /** Friends react to the user's post. */
     momentsReact(id: string): Promise<MomentPost>;
     /** Answers to the user's comment. */

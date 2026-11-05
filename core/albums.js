@@ -13,21 +13,25 @@ export const DRAWN_SOURCES = Object.freeze([
   ['assistant', '助手生图', /^assistant-\d+\.(?:png|jpe?g|webp)$/],
   ['chatapp', '聊天图片', /^聊天-.+-\d+\.(?:png|jpe?g|webp)$/],
   ['book', '绘本插图', /^绘本-.+-\d+\.(?:png|jpe?g|webp)$/],
+  ['wardrobe', '衣柜试穿', /^衣柜试穿-.+-\d+\.(?:png|jpe?g|webp)$/],
   ['plugin', '其他插件', /^插件-\d+\.(?:png|jpe?g|webp)$/],
 ]);
 /** What the drawing app's tools make (放大, 去背景, 网格 …) is the drawing app's too, though 清除绘图 has never counted it. */
 const FROM_DRAW = /^(?:NovelAI|GPT ?生图|ComfyUI)-/;
 export const OWN_SOURCE = Object.freeze(['own', '自己导入的']);
+/** Photos kept by an app that it did not draw, told apart the same way: the 衣柜's are the user's own clothes, so 清除绘图 never counts them. */
+export const KEPT_SOURCES = Object.freeze([['closet', '衣柜', /^衣柜-.+-\d+\.(?:png|jpe?g|webp)$/]]);
+const SOURCES = [...DRAWN_SOURCES, ...KEPT_SOURCES];
 /** Where a photo came from, by its name. */
 export function sourceOf(name) {
   const text = String(name || '');
-  return DRAWN_SOURCES.find(([, , pattern]) => pattern.test(text))?.[0] || (FROM_DRAW.test(text) ? 'draw' : OWN_SOURCE[0]);
+  return SOURCES.find(([, , pattern]) => pattern.test(text))?.[0] || (FROM_DRAW.test(text) ? 'draw' : OWN_SOURCE[0]);
 }
 /** The photos by where they came from, those with any: [{key, label, rows}], in the order of the table. */
 export function photoSources(rows) {
   const by = new Map();
   for (const row of rows) { const key = sourceOf(row.name); if (!by.has(key)) by.set(key, []); by.get(key).push(row); }
-  return [...DRAWN_SOURCES.map(([key, label]) => [key, label]), OWN_SOURCE].filter(([key]) => by.has(key)).map(([key, label]) => ({key, label, rows: by.get(key)}));
+  return [...SOURCES.map(([key, label]) => [key, label]), OWN_SOURCE].filter(([key]) => by.has(key)).map(([key, label]) => ({key, label, rows: by.get(key)}));
 }
 
 const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];

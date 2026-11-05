@@ -76,7 +76,7 @@ export function skippedRanges(raw, skip = NARRATION_SKIP, body = NARRATION_BODY)
   add(/```[\s\S]*?(?:```|$)/g);
   // The phone's own tags, with what is inside (a picture's prompt, a sound's name, phone messages).
   add(/<img\b[^<>]*>[^<]*<\/img\s*>|<img\b[^<>]*\/?>/gi);
-  for (const tag of ['sfx', 'ambience', 'bgm', 'phone']) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, 'gi'));
+  for (const tag of ['sfx', 'ambience', 'bgm', 'phone', 'outfit']) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, 'gi'));
   // Status panels written as [HUD_START]…[HUD_END] (any NAME_START / NAME_END pair).
   add(/\[([A-Za-z][\w-]*)_START\][\s\S]*?(?:\[\1_END\]|$)/g);
   // Thinking and the listed tags: to their end, or to the end of the reply when it was never closed; 「开头…结尾」

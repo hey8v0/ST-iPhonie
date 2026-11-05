@@ -15,7 +15,7 @@ import {requestAssistantText, hasCompletionService, loadCompletionModule} from '
 /** 看图: the user's latest photos (at most this many, in the chat window) go along to a model that sees. */
 export const CHAT_PICTURES = 3;
 /** A photo as the model gets it: at most 1024 px on the long side, JPEG (on white, for see-through pictures). */
-async function pictureUrl(blob, doc = globalThis.document, side = 1024) {
+export async function pictureUrl(blob, doc = globalThis.document, side = 1024) {
   const bitmap = await createImageBitmap(blob), scale = Math.min(1, side / Math.max(bitmap.width, bitmap.height));
   const canvas = doc.createElement('canvas'); canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
   const g = canvas.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, canvas.width, canvas.height); g.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close?.();

@@ -30,7 +30,8 @@ const LOADERS = {
   music: () => import('./music.js').then(m => m.musicApp), games: () => import('./games.js').then(m => m.gamesApp),
   picbook: () => import('./book.js').then(m => m.bookApp), indie: () => import('./indie.js').then(m => m.indieApp),
   paint: () => import('./paint.js').then(m => m.paintApp), vn: () => import('./vn.js').then(m => m.vnApp), logs: () => import('./logs.js').then(m => m.logsApp),
-  ledger: () => import('./ledger.js').then(m => m.ledgerApp)
+  ledger: () => import('./ledger.js').then(m => m.ledgerApp),
+  wardrobe: () => import('./wardrobe.js').then(m => m.wardrobeApp)
 };
 const FACTORIES = {}, loading = {};
 /** An app's module, once (a load that failed is tried again next time). */
@@ -1047,6 +1048,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (event.type === 'logs') views.get('logs')?.onLogs?.();
     if (event.type === 'assistant') run(() => views.get('assistant')?.onAssistant?.(event));
     if (event.type === 'music') { run(() => views.get('music')?.onMusic?.(event)); paintMusic(); }
+    if (event.type === 'wardrobe') run(() => views.get('wardrobe')?.onWardrobe?.(event));
     if (event.type === 'balance') run(() => views.get('engines')?.onBalance?.(event));
     if (event.type === 'chat') { run(() => views.get('chat')?.onChat?.(event)); countUnread(); if (event.incoming && !(active === 'chat' && views.get('chat')?.showing?.() === event.threadId)) notify(`${event.incoming.from}：${event.incoming.kind === 'text' ? event.incoming.text : '发来' + (event.incoming.count > 1 ? ` ${event.incoming.count} 条` : '一条') + '消息'}`.slice(0, 80), {tap: () => { open('chat'); withView('chat', v => v.openThread?.(event.threadId)); }}); }
     if (event.type === 'moments') { views.get('chat')?.onMoments?.(event); countMoments(); }

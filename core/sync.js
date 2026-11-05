@@ -8,7 +8,7 @@
 //   st-iphonie-chats.json       chat threads          st-iphonie-moments.json   朋友圈 posts
 //   st-iphonie-notes.json       notes                 st-iphonie-photos.json    album index (no pictures)
 //   st-iphonie-memories.json    complete chat books   st-iphonie-assistant.json assistant threads with memory: book | null
-//   st-iphonie-forum.json, -peek, -music, -sounds, -paint, -ledger, -looks, -albums, -games, -books, -vibes, -favorites, -references  the same way
+//   st-iphonie-forum.json, -peek, -music, -sounds, -paint, -ledger, -looks, -albums, -games, -wardrobe, -books, -vibes, -favorites, -references  the same way
 //   st-iphonie-p-<id>.<ext>     one file per picture, written once (a picture never changes); a photo made smaller by
 //                               压缩旧图 is another picture, st-iphonie-p-<id>-c<when>.<ext>, and wins over the original
 //   st-iphonie-m-, -s-, -v-, -f-, -r-<id>   a song, a sound, a vibe, a saved voice, a reference voice: one file each, like
@@ -24,7 +24,7 @@
 import {sha256Hex} from './hash.js';
 
 export const SYNC_FORMAT = 2;
-export const SYNC_PARTS = Object.freeze({chats: '聊天记录', moments: '朋友圈', notes: '备忘录', photos: '相册', memories: '聊天记忆', assistant: '助手会话与记忆', forum: '论坛', peek: '查手机', books: '绘本', vibes: 'Vibe', favorites: '收藏的语音', references: '参考音频', music: '音乐', sounds: '音效', paint: '画画的作品', ledger: '账本', looks: '我的主题', albums: '相册的分类', games: '大游戏存档'});
+export const SYNC_PARTS = Object.freeze({chats: '聊天记录', moments: '朋友圈', notes: '备忘录', photos: '相册', memories: '聊天记忆', assistant: '助手会话与记忆', forum: '论坛', peek: '查手机', books: '绘本', vibes: 'Vibe', favorites: '收藏的语音', references: '参考音频', music: '音乐', sounds: '音效', paint: '画画的作品', ledger: '账本', looks: '我的主题', albums: '相册的分类', games: '大游戏存档', wardrobe: '衣柜'});
 export const MANIFEST = 'st-iphonie-sync.json';
 export const partFile = part => `st-iphonie-${part}.json`;
 const EXT = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif'};
@@ -69,7 +69,7 @@ export function canonical(part, items) {
 export async function hashText(text) { return sha256Hex(text); }
 
 const GONE_DAYS = 90, GONE_MAX = 3000;
-const REMADE = new Set(['forum', 'peek', 'books', 'vibes', 'favorites', 'references', 'music', 'sounds', 'paint', 'ledger', 'looks', 'games']);
+const REMADE = new Set(['forum', 'peek', 'books', 'vibes', 'favorites', 'references', 'music', 'sounds', 'paint', 'ledger', 'looks', 'games', 'wardrobe']);
 /**
  * Deletions: {part: {key: at}}. The key is the item's id, or `itemId/childId` for a chat message or a post comment.
  * Joins several lists, keeps the last GONE_DAYS days and at most GONE_MAX keys a part (the newest).
