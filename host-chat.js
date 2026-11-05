@@ -106,6 +106,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (last) { const old = new Set(last.round.map(m => m.id)); thread.messages = thread.messages.filter(m => !old.has(m.id)); }
       if (thread.friend?.by === 'me') throw Error(`你已经删除了${thread.members[0]}，在「联系人 → 新的朋友」里加回来才能聊天`);
       if (thread.friend?.by === 'them') throw Error(`${thread.members[0]}已经把你删了，先发送好友申请`);
+      if (thread.blocked) throw Error(`你已把${thread.members[0]}拉黑了，移出黑名单才能聊天`);
       const s = settings(), preset = activeChatPreset(s.chat), people = members(thread), voiceFormat = backend.voiceFormat(), user = userName();
       // Voice switched off: nobody sends voice messages.
       if (s.general.voiceEnabled === false) for (const p of people) p.voice = false;
@@ -163,7 +164,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     for (const item of items) {
       // 「[删除好友]」: the contact deletes the user (private chats only; the user finds out on their next message).
       if (item.kind === 'unfriend') { if (thread.type === 'dm') cutting = true; continue; }
-      if (item.kind === 'befriend' || item.kind === 'refuse') continue;
+      // Answers to a 好友申请 (handled where it was asked), and a 好友申请 between friends: not messages.
+      if (item.kind === 'befriend' || item.kind === 'refuse' || item.kind === 'request') continue;
       // 「[朋友圈] …」: posted to 朋友圈 while chatting, not a chat message.
       if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, ...(item.imageTags ? {imageTags: item.imageTags} : {}), source: 'chat', space: thread?.space || backend.cardKey(), ...(thread?.save || backend.saveKey() ? {save: thread?.save || backend.saveKey()} : {})}); continue; }
       // 「[私聊] …」 in a group: said to the user alone — it goes to that one's private chat (in a private chat it is just
@@ -278,6 +280,12 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
 
   // ---------- 删好友 ----------
+  /** One line of the 拦截记录 for what a blocked contact sent (a message, a call, a picture…). */
+  const HELD = {call: '来电', photo: '图片', sticker: '表情包', voice: '语音', location: '位置', redpacket: '红包', transfer: '转账', gift: '礼物', song: '分享歌曲', moment: '朋友圈', dm: '私聊', pat: '拍一拍'};
+  const heldOf = i => {
+    const words = i.kind === 'voice' ? i.translation || i.text : i.kind === 'call' ? i.reason : i.kind === 'song' ? [i.song?.title, i.song?.artist].filter(Boolean).join(' - ') : ['redpacket', 'transfer'].includes(i.kind) ? [i.amount, i.text].filter(Boolean).join(' ') : i.text;
+    return {kind: i.kind || 'text', text: ((HELD[i.kind] ? `[${HELD[i.kind]}] ` : '') + String(words || '').trim()).trim()};
+  };
   /** 发送好友申请 to someone who deleted the user: they decide (one model request). {accepted, thread}. */
   function askFriend(threadId, text) {
     if (busy.has(threadId)) return busy.get(threadId);
@@ -316,19 +324,28 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   function refreshCuts() {
     Promise.resolve().then(() => backend.chats.list()).then(list => {
       cutsLoaded = true;
-      cuts = list.filter(t => t.type === 'dm' && t.friend).map(t => ({name: t.members[0], by: t.friend.by, space: t.space || '', save: t.save || ''}));
+      const lately = at => at > 0 && Date.now() - at < 2 * 86400000;
+      cuts = list.filter(t => t.type === 'dm' && (t.friend || t.blocked || lately(t.befriended))).map(t => ({name: t.members[0], by: t.friend?.by || '', blocked: !!t.blocked, refused: Math.max(t.friend?.refused || 0, t.blocked?.refused || 0), accepted: !t.friend && !t.blocked ? t.befriended : 0, space: t.space || '', save: t.save || ''}));
       groups = list.filter(t => t.type === 'group').map(t => ({name: t.name, space: t.space || '', save: t.save || ''}));
     }).catch(() => {});
   }
   refreshCuts();
   backend.subscribe?.(event => { if (event?.type === 'chat' && event.friend) refreshCuts(); });
-  /** The story knows who deleted whom on the phone (a 冷战 shows in the story too). */
+  /** The story knows who deleted or blocked whom on the phone (a 冷战 shows in the story too), and a 好友申请 just turned down. */
   function friendsPlan() {
     if (!cutsLoaded) refreshCuts();
     const here = backend.here?.(), user = userName(), list = cuts.filter(c => inSpace(c, here));
     if (!list.length) return [];
-    const mine = list.filter(c => c.by === 'me').map(c => c.name), theirs = list.filter(c => c.by === 'them').map(c => c.name);
-    const text = ['【手机上的好友关系】', mine.length ? `${user}在手机上把${mine.join('、')}删了好友：TA 们发不了消息给${user}，只能发好友申请。` : '', theirs.length ? `${theirs.join('、')}在手机上把${user}删了好友：${user}发的消息会被拒收。` : ''].filter(Boolean).join(' ');
+    const blocked = list.filter(c => c.blocked).map(c => c.name), mine = list.filter(c => c.by === 'me' && !c.blocked).map(c => c.name), theirs = list.filter(c => c.by === 'them').map(c => c.name);
+    const refused = list.filter(c => c.refused && Date.now() - c.refused < 2 * 86400000).map(c => c.name), accepted = list.filter(c => c.accepted).map(c => c.name);
+    // How to ask, said only when the story can send to the phone at all (正文联动手机).
+    const how = settings().chat.proactive?.on ? `（<phone> 里单独一行写「名字：[好友申请] 验证消息」）` : '', they = names => names.length > 1 ? 'TA 们' : 'TA';
+    const text = ['【手机上的好友关系】',
+      mine.length ? `${user}在手机上把${mine.join('、')}删了好友：${they(mine)}发的消息${user}收不到，只能发好友申请${how}。` : '',
+      blocked.length ? `${user}在手机上把${blocked.join('、')}拉黑了：${they(blocked)}发的消息、打的电话${user}都收不到（${they(blocked)}自己知道被拉黑了），只能发好友申请${how}。` : '',
+      refused.length ? `${refused.join('、')}发来的好友申请刚被${user}拒绝了。` : '',
+      accepted.length ? `${user}刚在手机上把${accepted.join('、')}加回了好友（通过了好友申请），现在又能互发消息了。` : '',
+      theirs.length ? `${theirs.join('、')}在手机上把${user}删了好友：${user}发的消息会被拒收。` : ''].filter(Boolean).join(' ');
     return [{key: 'sttts.entry.friends', text, position: 1, depth: 2, role: 0}];
   }
 
@@ -378,8 +395,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     for (const item of items) byName.set(item.from, [...(byName.get(item.from) || []), {from: item.from, kind: 'text', text: item.text}]);
     for (const [name, list] of byName) {
       const t = await dmWith(name);
-      // one who has deleted the user does not write to them
+      // one who has deleted the user does not write to them; one the user blocked is held
       if (t.friend?.by === 'them') continue;
+      if (t.blocked) { await backend.holdMessages(t.id, list.map(heldOf)).catch(() => {}); continue; }
       if (await arrive(t.id, list)) notice(`${name} 私聊了你`);
     }
   }
@@ -471,9 +489,17 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         for (const [name, list] of byName) {
           try {
             const thread = await dmWith(name);
-            // Deleted by the user: what they send waits as 好友申请.
+            // Blocked by the user: a 好友申请 waits for an answer; anything else is held (拦截记录), without a word.
+            if (thread.blocked) {
+              const asks = list.filter(i => i.kind === 'request'), rest = list.filter(i => i.kind !== 'request').map(heldOf).filter(h => h.text);
+              if (asks.length) { const said = asks.map(i => i.text).filter(Boolean).join(' ') || `我是${name}`; await backend.friendRequest(thread.id, said); sent += 1; notice(`${name} 请求添加你为好友：${said.slice(0, 40)}`); }
+              if (rest.length) await backend.holdMessages(thread.id, rest).catch(() => {});
+              continue;
+            }
+            // Deleted by the user: what they send waits as 好友申请 (its 验证消息, when they wrote one).
             if (thread.friend?.by === 'me') {
-              const texts = list.filter(i => ['text', 'voice'].includes(i.kind)).map(i => i.translation || i.text).filter(Boolean);
+              const asked = list.filter(i => i.kind === 'request').map(i => i.text).filter(Boolean);
+              const texts = asked.length ? asked : list.filter(i => ['text', 'voice'].includes(i.kind)).map(i => i.translation || i.text).filter(Boolean);
               if (texts.length) { await backend.friendRequest(thread.id, texts.join(' ')); sent += 1; notice(`${name} 请求添加你为好友：${texts.join(' ').slice(0, 40)}`); }
               continue;
             }
@@ -508,7 +534,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     const ctx = context();
     // The card's own character first, else someone from the 角色 App.
     // Not someone who is not friends with the user right now (either way).
-    const apart = new Set((await backend.threads()).filter(t => t.type === 'dm' && t.friend).map(t => t.members[0]));
+    const apart = new Set((await backend.threads()).filter(t => t.type === 'dm' && (t.friend || t.blocked)).map(t => t.members[0]));
     const roles = backend.contacts().filter(c => c.source === 'role' && !apart.has(c.name)), now = ctx?.name2;
     const name = roles.find(c => c.name === now)?.name || roles[Math.floor(Math.random() * roles.length)]?.name;
     if (!name) return;

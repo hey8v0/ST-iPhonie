@@ -213,11 +213,15 @@ export function parseStickers(text) {
   }
   return normalizeStickers(out);
 }
+// Names are compared without quotes and brackets of any kind: a name kept as 配文“陷入沉思” is written back by models as
+// 配文"陷入沉思" (stickerName drops only the plain ones), and then it showed as words (0.9.27).
+const stickerKey = value => stickerName(value).replace(/[“”‘’「」『』﹁﹂﹃﹄＂＇〝〞〟‟„‚‛《》〈〉（）()]/g, '');
 /** The sticker a line names: the same name, else one that contains the other (two characters at least). */
 export function findSticker(stickers, name) {
-  const want = stickerName(name);
+  const want = stickerKey(name);
   if (!want) return null;
-  return stickers.find(s => s.name === want) || stickers.find(s => Math.min(s.name.length, want.length) >= 2 && (s.name.includes(want) || want.includes(s.name))) || null;
+  const keyed = stickers.map(s => [s, stickerKey(s.name)]);
+  return keyed.find(([, key]) => key === want)?.[0] || keyed.find(([, key]) => Math.min(key.length, want.length) >= 2 && (key.includes(want) || want.includes(key)))?.[0] || null;
 }
 
 export function normalizeChat(value) {
@@ -470,7 +474,7 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
 
 const NAME_LINE = /^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]\s*(.*)$/;
 const unquote = s => s.trim().replace(/^[「“"『](.*)[」”"』]$/s, '$1').trim();
-const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|配图|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|私聊|私信|悄悄话|私发|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
+const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|配图|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|私聊|私信|悄悄话|私发|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友|发送好友申请|好友申请|申请好友|加好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
 const LUCKY = ['6.66', '8.88', '5.20', '13.14', '16.80', '1.88'];
 // Drawing tags from what the model wrote: the English words (Chinese in them is left out), comma separated.
 const tagsOf = s => String(s).replace(/[一-鿿]+/g, ' ').split(/[,，]/).map(t => t.replace(/\s+/g, ' ').trim()).filter(Boolean).join(', ').slice(0, 600);
@@ -508,6 +512,8 @@ function special(from, content, {names, user, stickers = []}) {
     case '删除好友': case '删好友': case '拉黑': return {from, kind: 'unfriend'};
     case '通过好友': case '通过好友申请': case '同意好友': case '接受好友': return {from, kind: 'befriend'};
     case '拒绝好友': case '拒绝好友申请': return {from, kind: 'refuse', text: (text || arg.trim()).slice(0, 200)};
+    // 好友申请 from someone the user deleted or blocked (its words are the 验证消息); between friends it means nothing.
+    case '发送好友申请': case '好友申请': case '申请好友': case '加好友': return {from, kind: 'request', text: (arg.trim().replace(/^[:：]\s*/, '') + (arg.trim() && text ? ' ' : '') + text).trim().slice(0, 100)};
     case '图片': case '照片': {
       // 「描述｜英文 tag」: the tags draw it when a drawing engine is set up (Chinese words in them are left out).
       const [said, ...tags] = (text || arg.trim()).split(/[|｜]/);

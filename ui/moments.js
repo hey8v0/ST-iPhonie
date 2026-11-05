@@ -87,8 +87,10 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
 
   async function render() {
     const ticket = ++epoch;
-    const all = await api.listMoments();
+    // Posts of someone the user blocked (黑名单) stay out of sight while they are blocked.
+    const [list, blocked] = await Promise.all([api.listMoments(), api.blockedNames ? api.blockedNames().catch(() => []) : []]);
     if (ticket !== epoch || v.disposed) return;
+    const out = new Set(blocked), all = list.filter(p => !out.has(p.author));
     posts = author ? all.filter(p => p.author === author) : all;
     const busy = api.momentsBusy?.(), who = me();
     const tools = btn('m-refresh', icon('refresh'), 'round-button', `aria-label="刷新：让角色发新动态" ${busy ? 'disabled' : ''}`) + btn('m-new', icon('add'), 'round-button', 'aria-label="发动态"') + btn('m-options', icon('sliders'), 'round-button', 'aria-label="动态设置"');

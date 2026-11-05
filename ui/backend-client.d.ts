@@ -428,8 +428,8 @@ export interface MusicPlaylist { id: string; kind: 'playlist'; at: number; name:
 /** What plays now (the tavern page's player). */
 export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; mode: 'order' | 'shuffle' | 'one'; from: string; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
 export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; from?: string };
-export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; }
-export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
+export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; /** when the user last turned down a 好友申请 */ refused?: number; }
+export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 黑名单: what they sent meanwhile (held, never in the chat) and their 好友申请; refused: when the user last turned one down. The list carries count instead of held. */ blocked?: {at: number; held?: {kind: string; text: string; at: number}[]; count?: number; requests: {text: string; at: number}[]; refused?: number}; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
 /** streak: 聊天火花, days in a row both sides wrote. */
 export interface ChatThreadSummary extends Omit<ChatThread, 'messages'> { count: number; last: ChatMessage | null; streak: number; }
 export type ChatMessageInput = Omit<ChatMessage, 'id' | 'at'>;
@@ -1102,6 +1102,13 @@ export interface BackendFacade {
     unfriend(name: string): Promise<ChatThread>;
     /** Adds a deleted contact back, with their 好友申请 as messages. */
     refriend(threadId: string): Promise<ChatThread>;
+    /** 黑名单: the chat stays, what they send is held as 拦截记录, a 好友申请 waits. */
+    blockContact(name: string): Promise<ChatThread>;
+    unblockContact(threadId: string): Promise<ChatThread>;
+    /** The contacts blocked here: left out of 朋友圈 both ways. */
+    blockedNames(): Promise<string[]>;
+    /** A 好友申请 from someone deleted or blocked: accepted (friends again) or turned down. */
+    answerFriendRequest(threadId: string, accept: boolean): Promise<ChatThread>;
     deleteChatMessages(id: string, ids: string[]): Promise<ChatThread>;
     /** {state, openedBy} for a red packet or transfer, or {recall: true} to withdraw a message. */
     updateChatMessage(id: string, messageId: string, patch: { text?: string; translation?: string; state?: string; openedBy?: string; recall?: boolean; photoId?: string; imageTags?: string; imageVersions?: string[] }): Promise<ChatThread>;

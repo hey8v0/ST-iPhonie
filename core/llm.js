@@ -7,8 +7,10 @@
 import {proxyAddress} from './proxy-url.js';
 
 // idle: a streamed answer may go this long without sending anything (thinking counts as sending); whole: the longest
-// any request may take; timeout: an answer that is not streamed (it says nothing until it is done).
-export const TEXT_LIMITS = Object.freeze({maxTokens: [64, 128000], temperature: [0, 2], idle: 90000, whole: 600000, timeout: 300000});
+// any request may take; timeout: an answer that is not streamed (it says nothing until it is done). Longer since 0.9.27
+// (a model asked to write out its thoughts, not streamed, took more than 5 minutes): only a request the API has taken
+// and is still working on waits this long; one it refuses or cannot reach fails at once, and a chat can be stopped.
+export const TEXT_LIMITS = Object.freeze({maxTokens: [64, 128000], temperature: [0, 2], idle: 180000, whole: 900000, timeout: 600000});
 
 export function defaultTextPreset(id = 'default', name = '自定义接口') {
   return {id, name, url: '', model: '', temperature: 0.9, maxTokens: 1200, thinking: 'auto', stream: true};
@@ -161,7 +163,11 @@ export function failure(status, body, key = '') {
  * Calls the custom API. fetch is passed in (tests). A network error in a browser is usually the API refusing web
  * pages (CORS) or a wrong address; the message says so.
  */
-const TOO_SLOW = '文字模型：等太久了，接口没有回应';
+const minutes = ms => Math.round(ms / 60000);
+/** Why a request was given up for time: silent too long while streaming, not done without streaming, or too long in all. */
+const tooSlow = (stream, all) => Error(all ? `文字模型：这次请求超过 ${minutes(TEXT_LIMITS.whole)} 分钟了，停下了`
+  : stream ? `文字模型：等太久了，接口 ${minutes(TEXT_LIMITS.idle)} 分钟没有再发来任何内容`
+  : `文字模型：等太久了，等了 ${minutes(TEXT_LIMITS.timeout)} 分钟接口还没写完。不用流式时要等全部写完才有回答：模型想得久、写得长的话，把这个接口改成「流式」`);
 /** An answer that is empty because the model spent the whole length thinking (or only thought): say so, do not ask again. */
 const thoughtOnly = finish => Error(finish === 'length'
   ? '文字模型：模型把能写的长度都用在思考上了，没写出回复。把这个接口的「最长回复」调大，或者打开「关掉思考」'
@@ -190,20 +196,22 @@ export async function customRequest({text, key, prompt, responseLength, fetch: s
     const whole = AbortSignal.timeout ? AbortSignal.timeout(TEXT_LIMITS.whole) : null;
     const signals = [idle.signal, whole, signal].filter(Boolean);
     alive();
+    // Stopped by the user: said as such, not as too slow.
+    const late = () => signal?.aborted ? Object.assign(Error('已停止'), {name: 'AbortError'}) : tooSlow(stream, !!whole?.aborted);
     let response;
     try {
       response = await send(base + '/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json', ...(key ? {Authorization: 'Bearer ' + key} : {})}, body: JSON.stringify({...body, stream}),
         signal: signals.length > 1 && AbortSignal.any ? AbortSignal.any(signals) : idle.signal});
     } catch (error) {
       clearTimeout(timer);
-      if (error?.name === 'AbortError' || error?.name === 'TimeoutError') throw Error(TOO_SLOW);
+      if (error?.name === 'AbortError' || error?.name === 'TimeoutError') throw late();
       if (ARK.test(base)) throw Error('文字模型：火山方舟没有回答。它在密钥不对、模型名不对、没开通这个模型时返回的错误浏览器读不到，看起来就像连不上：请检查密钥，以及「模型」填的是不是推理接入点 ID（ep- 开头）或开通了的模型名');
       throw Error('文字模型：连不上这个接口。可能是地址写错了，或者这个接口不允许网页直接访问（CORS）');
     }
     /** Reads the answer while the timer keeps watch; clears it whatever happens. */
     const read = async work => {
       try { alive(); return await work(alive); }
-      catch (error) { if (error?.name === 'AbortError' || error?.name === 'TimeoutError') throw Error(TOO_SLOW); throw error; }
+      catch (error) { if (error?.name === 'AbortError' || error?.name === 'TimeoutError') throw late(); throw error; }
       finally { clearTimeout(timer); }
     };
     return {response, read};

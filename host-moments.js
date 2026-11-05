@@ -40,16 +40,17 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
     const text = await backend.generateText(ctx, {use: 'moments', prompt: request, trimNames: false});
     return cleanTagged(String(text || ''), activeChatPreset(settings().chat).cleanTags);
   }
-  const base = () => {
-    const s = settings(), preset = activeChatPreset(s.chat), crowd = people();
-    if (!crowd.length) throw Error('还没有能发朋友圈的人：先在角色 App 里添加角色，或在聊天里添加联系人');
+  // Who the user blocked (黑名单) neither posts nor comments: they cannot see the user's 朋友圈, nor the user theirs.
+  const base = async () => {
+    const s = settings(), preset = activeChatPreset(s.chat), out = new Set(await backend.blockedNames?.().catch(() => []) || []), crowd = people().filter(p => !out.has(p.name));
+    if (!crowd.length) throw Error(out.size ? '能发朋友圈的人都在黑名单里' : '还没有能发朋友圈的人：先在角色 App 里添加角色，或在聊天里添加联系人');
     return {s, preset, crowd, user: userName(), names: crowd.map(p => p.name)};
   };
 
   /** New posts from the characters. auto: made by the story counter, not by the user. */
   function refresh({auto = false} = {}) {
     return run('refresh', async ctx => {
-      const space = backend.cardKey(), save = backend.saveKey(), {s, preset, crowd, user, names} = base();
+      const space = backend.cardKey(), save = backend.saveKey(), {s, preset, crowd, user, names} = await base();
       const recent = (await backend.moments.list()).filter(p => inSpace(p, backend.here())).slice(0, 6);
       const story = storyLines(ctx.chat, preset, user);
       const request = buildMomentsRequest({prompts: settings().promptRules, preset, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, images: s.moments.images, memory: await remembered(crowd.map(p => p.name)), lore: await lore(preset, crowd, story, recent.map(p => `${p.author}: ${p.text}`))});
@@ -67,7 +68,7 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   /** Friends react to the user's new post. */
   function react(postId) {
     return run('react', async ctx => {
-      const {preset, crowd, user, names} = base();
+      const {preset, crowd, user, names} = await base();
       const post = await backend.moments.get(postId);
       if (!post) throw Error('这条动态已经不在了');
       const story = storyLines(ctx.chat, preset, user);
@@ -79,7 +80,7 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   /** Answers to the user's comment. */
   function reply(postId, commentId) {
     return run('reply', async ctx => {
-      const {preset, crowd, user, names} = base();
+      const {preset, crowd, user, names} = await base();
       const post = await backend.moments.get(postId), comment = post?.comments.find(c => c.id === commentId);
       if (!post || !comment) throw Error('这条评论已经不在了');
       const story = storyLines(ctx.chat, preset, user);

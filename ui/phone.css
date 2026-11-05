@@ -2308,6 +2308,17 @@ button.gift-item[data-short]{opacity:.55}
 .friend-cut span{flex:1;min-width:0}
 .friend-row{cursor:default}
 .friend-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.friend-row{flex-wrap:wrap;row-gap:4px}
+.friend-ask{flex:1 1 100%;margin:0 0 0 54px;font-size:13px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+/* 黑名单 (0.9.27): the banner of a blocked chat, its mark in the list, the 拦截记录. */
+.friend-cut.is-blocked{flex-wrap:wrap;row-gap:6px;padding-bottom:26px;background:var(--card2);color:var(--ink2)}
+.friend-cut.is-blocked span{flex:1 1 calc(100% - 32px)}
+.friend-cut.is-blocked>button:first-of-type{margin-left:auto}
+.friend-cut.is-blocked svg{color:var(--ink2)}
+.tag-blocked{background:var(--danger-soft,#ffe3e8);color:var(--danger,#c8364f)}
+.held-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.held-list li{display:flex;flex-direction:column;gap:2px;padding:9px 12px;border-radius:14px;background:var(--card2);font-size:14px;overflow-wrap:anywhere}
+.held-list time{font-size:11px;color:var(--ink2)}
 /* 助手 · 智能界面 and 出图块 cards: native pieces in a reply, in the phone's own colours. */
 .assistant-ui{display:grid;gap:10px;margin:8px 0}
 .aui{border:1px solid var(--line);border-radius:14px;background:var(--card2);padding:10px 12px;min-width:0}

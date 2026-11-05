@@ -2593,6 +2593,8 @@ export class TTSBackend {
         const own = all.filter(c => c.source === 'manual' || (here.members || []).includes(c.name) || this.settings.routes.some(r => r.name === c.name && roleInSpace(r, here)));
         return own.length ? own : all;
     }
+    /** Who the user has blocked here (黑名单): they neither post nor comment in 朋友圈, and their posts stay out of sight. */
+    async blockedNames() { return (await this.threads()).filter(t => t.type === 'dm' && t.blocked).map(t => t.members[0]); }
     /** Phone chats of the card open now. */
     async threads() { const here = this.here(); return (await this.chats.list()).filter(t => inSpace(t, here)); }
     /** Messages holding these words, in the chats the list shows (core/chats.js searchThreads). */
@@ -2813,15 +2815,65 @@ export class TTSBackend {
         if (thread?.friend?.by !== 'me') throw Error('TA 已经是你的好友了');
         const name = thread.members[0], requests = thread.friend.requests || [];
         await this.chats.append(threadId, [{ from: 'me', kind: 'system', text: `你已添加了${name}，现在可以开始聊天了` }, ...requests.map(r => ({ from: name, kind: 'text', text: r.text }))], { read: true });
-        const saved = await this.chats.update(threadId, { friend: null });
+        const saved = await this.chats.update(threadId, { friend: null, befriended: Date.now() });
         this.emit('chat', { threadId, friend: true });
         return saved;
     }
-    /** What a deleted contact sends arrives as 好友申请 (kept until the user adds them back). */
+    /** A 好友申请 from a contact the user deleted or blocked (kept until the user answers it). */
     async friendRequest(threadId, texts) {
         this.assertOpen();
         const saved = await this.chats.addRequest(threadId, texts);
         this.emit('chat', { threadId, friend: true, request: true });
+        return saved;
+    }
+    /** 黑名单: the user blocks a contact. The chat stays; what they send meanwhile is held (拦截记录), a 好友申请 waits. */
+    async blockContact(name) {
+        this.assertOpen();
+        if (!this.contacts().some(c => c.name === name)) throw Error(`联系人里没有「${name}」`);
+        const thread = await this.dmThread(name);
+        if (thread.blocked) return thread;
+        await this.chats.update(thread.id, { blocked: { at: Date.now(), held: [], requests: [] } });
+        const saved = await this.chats.append(thread.id, [{ from: 'me', kind: 'system', text: `你已把${name}加入黑名单` }], { read: true });
+        this.emit('chat', { threadId: thread.id, friend: true });
+        return saved;
+    }
+    /** Out of the 黑名单: what was held was never delivered and goes with it. */
+    async unblockContact(threadId) {
+        this.assertOpen();
+        const thread = await this.chats.get(threadId);
+        if (!thread?.blocked) throw Error('TA 不在黑名单里');
+        await this.chats.update(threadId, { blocked: null });
+        const saved = await this.chats.append(threadId, [{ from: 'me', kind: 'system', text: `你已把${thread.members[0]}移出黑名单` }], { read: true });
+        this.emit('chat', { threadId, friend: true });
+        return saved;
+    }
+    /** What a blocked contact sends: into the 拦截记录 only. */
+    async holdMessages(threadId, items) {
+        this.assertOpen();
+        const saved = await this.chats.hold(threadId, items);
+        this.emit('chat', { threadId, held: true });
+        return saved;
+    }
+    /**
+     * A 好友申请 answered (from someone the user deleted or blocked). Accepted: friends again and out of the 黑名单, the
+     * 申请 put in the chat; turned down: the 申请 go, and the story is told (refused) while they stay apart.
+     */
+    async answerFriendRequest(threadId, accept) {
+        this.assertOpen();
+        const thread = await this.chats.get(threadId);
+        const cut = thread?.friend?.by === 'me', blocked = !!thread?.blocked;
+        if (!thread || (!cut && !blocked)) throw Error('TA 已经是你的好友了');
+        const name = thread.members[0], requests = [...(cut ? thread.friend.requests : []), ...(thread.blocked?.requests || [])].sort((a, b) => a.at - b.at);
+        if (accept) {
+            await this.chats.append(threadId, [{ from: 'me', kind: 'system', text: `你通过了${name}的好友申请，现在可以开始聊天了` }, ...requests.map(r => ({ from: name, kind: 'text', text: r.text }))], { read: true });
+            const saved = await this.chats.update(threadId, { friend: null, blocked: null, befriended: Date.now() });
+            this.emit('chat', { threadId, friend: true });
+            return saved;
+        }
+        const now = Date.now();
+        await this.chats.update(threadId, { ...(cut ? { friend: { ...thread.friend, requests: [], refused: now } } : {}), ...(blocked ? { blocked: { ...thread.blocked, requests: [], refused: now } } : {}) });
+        const saved = await this.chats.append(threadId, [{ from: 'me', kind: 'system', text: `你拒绝了${name}的好友申请` }], { read: true });
+        this.emit('chat', { threadId, friend: true });
         return saved;
     }
     /** The user's messages to someone who deleted them: sent, then refused with the usual note. */
@@ -3349,7 +3401,7 @@ export class TTSBackend {
             gptModels: () => this.gptModels(),
             embedTest: async draft => { const [v] = await this.embed(['测试一下向量模型'], clone(draft || {})); return v.length; },
             appendChat: (id, messages, options) => { this.assertOpen(); return this.appendChat(id, clone(messages), clone(options || {})); },
-            unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId),
+            unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId), blockContact: name => this.blockContact(name), blockedNames: () => this.blockedNames(), unblockContact: threadId => this.unblockContact(threadId), answerFriendRequest: (threadId, accept) => this.answerFriendRequest(threadId, accept),
             deleteChatMessages: (id, ids) => this.chatMutate(id, async () => { const before = await this.chats.get(id); const thread = await this.chats.removeMessages(id, clone(ids)); this.noteGone('chats', (ids || []).map(m => `${id}/${m}`)); await this.memoryAfterDelete(id, before, thread).catch(() => {}); return thread; }),
             updateChatMessage: (id, messageId, patch) => this.chatMutate(id, () => this.chats.updateMessage(id, messageId, clone(patch || {}))),
             markThreadRead: id => this.chatMutate(id, () => this.chats.markRead(id)),

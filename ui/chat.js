@@ -201,7 +201,7 @@ export function chatApp(ctx) {
     const spark = t.type === 'dm' && t.streak >= 3 ? `<span class="spark" title="聊天火花：连续 ${t.streak} 天">🔥${t.streak}</span>` : '';
     // A chat with words typed and not sent shows them, as phones do.
     const typed = draftOf(t.id).trim(), pvLine = typed ? `<em class="draft-mark">[草稿]</em>${esc(typed)}` : `${atMe}${esc(who + preview(last))}`;
-    return `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? '<span class="tag-s">群</span>' : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${pvLine}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
+    return `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? '<span class="tag-s">群</span>' : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${t.type !== 'group' && t.blocked ? '<span class="tag-s tag-blocked">已拉黑</span>' : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${pvLine}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
   }
   /** The messages found, under what the list found by name. */
   function hitsHTML({hits: list, total}) {
@@ -260,11 +260,12 @@ export function chatApp(ctx) {
     if (v.disposed || ticket !== epoch) return;
     const cut = threads.filter(t => t.type === 'dm' && t.friend?.by === 'me'), away = new Set(cut.map(t => t.members[0]));
     const contacts = api.chatContacts().filter(c => !away.has(c.name)), stars = starred(), groups = threads.filter(t => t.type === 'group' && currentWindow(threads, t)?.id === t.id);
-    const asks = cut.reduce((n, t) => n + (t.friend.requests?.length ? 1 : 0), 0);
+    const blockedAsks = threads.filter(t => t.type === 'dm' && t.blocked?.requests?.length && t.friend?.by !== 'me');
+    const asks = cut.reduce((n, t) => n + (t.friend.requests?.length || t.blocked?.requests?.length ? 1 : 0), 0) + blockedAsks.length;
     const row = c => `<button class="list-row" data-action="profile" data-name="${esc(c.name)}">${avatar(c.name, c.engine, 42)}<span><strong>${esc(c.name)}</strong><small>${esc(signatureOf(c))}</small></span>${stars.includes(c.name) ? '<span class="star-mark" aria-label="特别关心">★</span>' : icon('next')}</button>`;
     const special = contacts.filter(c => stars.includes(c.name));
     v.draw(frame(heading('联系人', btn('contact-add', icon('add'), 'round-button', 'aria-label="添加联系人"'), 'Contacts')
-      + (cut.length ? `<div class="group"><button class="list-row" data-action="new-friends"><i class="friend-ico" aria-hidden="true">${icon('person')}</i><span><strong>新的朋友</strong><small>${asks ? `${asks} 个好友申请` : `删掉的好友（${cut.length}）可以在这里加回来`}</small></span>${asks ? `<b class="badge friend-badge">${asks}</b>` : icon('next')}</button></div>` : '')
+      + (cut.length || blockedAsks.length ? `<div class="group"><button class="list-row" data-action="new-friends"><i class="friend-ico" aria-hidden="true">${icon('person')}</i><span><strong>新的朋友</strong><small>${asks ? `${asks} 个好友申请` : `删掉的好友（${cut.length}）可以在这里加回来`}</small></span>${asks ? `<b class="badge friend-badge">${asks}</b>` : icon('next')}</button></div>` : '')
       + (special.length ? groupTitle('特别关心') + `<div class="group">${special.map(row).join('')}</div>` : '')
       + groupTitle(`好友 · ${contacts.length}`, help('角色 App 里的角色会自动出现在这里。开了「按角色卡分开」时，只有这张卡的角色、在这张卡的剧情里说过话或被提到的角色，以及在这张卡里加的联系人；别的角色点右上角的「＋」加进来。剧情之外的人（同学、店员、网友……）也在「＋」里手动添加，写上人设就能聊。'))
       + (contacts.length ? `<div class="group">${contacts.map(row).join('')}</div>` : '<p class="hint">还没有好友。</p>')
@@ -292,26 +293,37 @@ export function chatApp(ctx) {
       <div class="savebar">${btn('contact-cancel', '取消', 'secondary')}${btn('contact-save', '保存', 'primary')}</div>
       ${contactDraft.id ? `<div class="actions">${btn('contact-delete', '删除联系人', 'danger')}</div>` : ''}`);
   }
-  /** A contact's card: send a message, see their posts, 特别关心. */
-  function renderProfile() {
+  /** A contact's card: send a message, see their posts, 特别关心, 黑名单. */
+  async function renderProfile(ticket) {
+    const threads = await api.listThreads();
+    if (v.disposed || ticket !== epoch) return;
     const c = api.chatContacts().find(x => x.name === profileOf) || api.chatContacts(true).find(x => x.name === profileOf);
     if (!c) { mode = 'list'; return render(); }
+    const dm = currentDm(threads, c.name), blocked = !!dm?.blocked;
     const star = starred().includes(c.name), manual = c.source === 'manual' && api.getState().chat.contacts.find(x => x.name === c.name);
     v.draw(`<div class="qq-card" data-engine="${c.engine}"><span class="qq-card-cover" aria-hidden="true"></span>${avatar(c.name, c.engine, 84)}<h2>${esc(shown(c.name))}</h2>${shown(c.name) !== c.name ? `<p class="qq-card-real">昵称：${esc(c.name)}</p>` : ''}<p>${esc(signatureOf(c))}</p>
         <div class="qq-card-tags"><span class="chip">${c.source === 'role' ? '角色' : '手动联系人'}</span>${c.voice ? '<span class="chip">能发语音</span>' : ''}${star ? '<span class="chip">★ 特别关心</span>' : ''}</div></div>
-      <div class="actions">${btn('profile-chat', icon('chat') + '发消息', 'primary')}${api.callDial ? btn('profile-call', icon('phone') + '打电话', 'secondary') : ''}${btn('profile-moments', icon('moments') + 'TA 的动态', 'secondary')}</div>
+      <div class="actions">${btn('profile-chat', icon('chat') + '发消息', 'primary')}${api.callDial && !blocked ? btn('profile-call', icon('phone') + '打电话', 'secondary') : ''}${btn('profile-moments', icon('moments') + 'TA 的动态', 'secondary')}</div>
       <div class="group">${btn('remark', `${icon('edit')}<span><strong>设置备注</strong><small>${esc(remarks()[ownKey(c.name)] || '只有你看得到，聊天里显示这个名字')}</small></span>`, 'list-row')}${btn('avatar-pick', `${icon('image')}<span><strong>换头像</strong><small>${esc(avatarState(c.name))}</small></span>`, 'list-row', `data-key="${esc(c.name)}"`)}${btn('star', `<span>${star ? '★ 取消特别关心' : '☆ 设为特别关心'}</span>`, 'list-row')}${manual ? `<button class="list-row" data-action="contact-edit" data-id="${esc(manual.id)}">${icon('edit')}<span><strong>编辑资料和人设</strong></span></button>` : ''}</div>
-      <div class="actions">${btn('unfriend', '删除好友', 'danger')}</div>`);
+      <div class="actions">${blocked ? btn('unblock', '移出黑名单', 'secondary', `data-id="${esc(dm.id)}"`) : btn('block', '加入黑名单', 'secondary')}${btn('unfriend', '删除好友', 'danger')}</div>`);
     listeningOf(c.name).then(song => { const box = v.root.querySelector('.qq-card'); if (!song || !box || profileOf !== c.name || mode !== 'profile') return; box.insertAdjacentHTML('beforeend', `<button type="button" class="qq-listening" data-action="play-song" data-title="${esc(song.title)}" data-artist="${esc(song.artist)}">${icon('music')}<span>最近在听：${esc(song.title)}${song.artist ? ' - ' + esc(song.artist) : ''}</span></button>`); }).catch(() => {});
   }
-  /** 新的朋友: contacts the user deleted, with what they sent since (好友申请); 添加 brings them and the chat back. */
+  /** 新的朋友: contacts the user deleted, and 好友申请 from them or from someone blocked; 通过 or 拒绝 (添加 with none). */
   async function renderFriends(ticket) {
-    const cut = (await api.listThreads()).filter(t => t.type === 'dm' && t.friend?.by === 'me');
+    const threads = await api.listThreads();
     if (v.disposed || ticket !== epoch) return;
-    if (!cut.length) { mode = 'list'; tab = 'contacts'; return render(); }
+    const cut = threads.filter(t => t.type === 'dm' && t.friend?.by === 'me'), blocked = threads.filter(t => t.type === 'dm' && t.blocked?.requests?.length && t.friend?.by !== 'me');
+    if (!cut.length && !blocked.length) { mode = 'list'; tab = 'contacts'; return render(); }
+    const row = t => {
+      const name = t.members[0], asks = [...(t.friend?.requests || []), ...(t.blocked?.requests || [])], last = asks.at(-1), state = t.blocked ? '已拉黑' : '已删除';
+      const tools = asks.length ? btn('friend-no', '拒绝', 'chip-button', `data-id="${esc(t.id)}" aria-label="拒绝 ${esc(name)} 的好友申请"`) + btn('friend-yes', '通过', 'chip-button', `data-id="${esc(t.id)}" aria-label="通过 ${esc(name)} 的好友申请"`)
+        : btn('refriend', '添加', 'chip-button', `data-id="${esc(t.id)}" aria-label="把 ${esc(name)} 加回好友"`);
+      // The 验证消息 on a line of its own under the row: next to two buttons it had room for a word or two.
+      return `<div class="list-row friend-row">${avatar(name, engine(name), 42)}<span><strong>${esc(shown(name))}</strong><small>${state} · ${asks.length > 1 ? `${asks.length} 条好友申请` : asks.length ? '好友申请' : '还没有发来申请'}</small></span>${tools}${last ? `<p class="friend-ask">「${esc(last.text)}」</p>` : ''}</div>`;
+    };
     v.draw(heading('新的朋友', '', 'New Friends')
-      + `<p class="hint">删掉的好友在这里。TA 们这段时间发来的消息会变成好友申请；点「添加」就加回来，聊天记录和申请里的话都会回到聊天里。</p>`
-      + `<div class="group">${cut.map(t => { const name = t.members[0], asks = t.friend.requests || [], last = asks.at(-1); return `<div class="list-row friend-row">${avatar(name, engine(name), 42)}<span><strong>${esc(shown(name))}</strong><small>${last ? `${asks.length > 1 ? `${asks.length} 条申请 · ` : ''}「${esc(last.text)}」` : '已删除 · 还没有发来申请'}</small></span>${btn('refriend', asks.length ? '通过' : '添加', 'chip-button', `data-id="${esc(t.id)}" aria-label="把 ${esc(name)} 加回好友"`)}</div>`; }).join('')}</div>`);
+      + `<p class="hint">删掉的好友和拉黑的人发来的好友申请在这里。「通过」就加回来（也移出黑名单），申请里的话会放进聊天；「拒绝」了 TA 会知道。删掉的好友没发申请也能直接「添加」。</p>`
+      + `<div class="group">${[...cut, ...blocked].map(row).join('')}</div>`);
   }
   /** 最近在听: the last song this contact shared in your private chat. */
   async function listeningOf(name) {
@@ -547,14 +559,15 @@ export function chatApp(ctx) {
     const bg = look.backgroundPhoto ? 'photo' : look.background, scene = chatScene(bg);
     drawThread(`<div class="chat-thread${selecting ? ' selecting' : ''}" data-thread="${esc(threadId)}" data-bubble="${esc(look.bubble)}" data-bg="${esc(bg)}"${scene ? ` data-scene data-tone="${sceneDark(bg) ? 'dark' : 'light'}"` : ''}>
       <div class="th-head" data-engine="${group ? 'none' : engine(thread.members[0])}">${threadAvatar(thread, 38)}<div class="th-title"><strong>${esc(group ? thread.name : shown(thread.members[0] || thread.name))}</strong><small>${esc(sub)}</small></div>
-        ${btn('bring', selecting ? '取消' : icon('book') + `<span class="bring-label">${thread.story ? '一直带着' : '带进剧情'}</span>`, 'chip-button', selecting ? '' : `aria-label="带进剧情" title="${thread.story ? '正文一直记得这段聊天' : '带进剧情'}"${thread.story ? ' data-on' : ''}`)}${!group && api.callDial ? btn('call', icon('phone'), 'round-button call-go', 'aria-label="语音通话"') : ''}${btn('thread-menu', icon('more'), 'round-button', 'aria-label="更多"')}</div>
+        ${btn('bring', selecting ? '取消' : icon('book') + `<span class="bring-label">${thread.story ? '一直带着' : '带进剧情'}</span>`, 'chip-button', selecting ? '' : `aria-label="带进剧情" title="${thread.story ? '正文一直记得这段聊天' : '带进剧情'}"${thread.story ? ' data-on' : ''}`)}${!group && api.callDial && !thread.blocked ? btn('call', icon('phone'), 'round-button call-go', 'aria-label="语音通话"') : ''}${btn('thread-menu', icon('more'), 'round-button', 'aria-label="更多"')}</div>
       <div class="msgs-wrap" data-bg="${esc(bg)}">${scene}<div class="msgs" role="log" aria-live="polite" data-keep-scroll="msgs-${esc(threadId)}"></div>${jumpChips()}</div>
       ${!group && thread.friend ? `<div class="friend-cut" role="status">${icon('alert')}<span>${thread.friend.by === 'me' ? `你已删除了${esc(thread.members[0])}` : `${esc(thread.members[0])}已把你从好友里删除了`}</span>${thread.friend.by === 'me' ? btn('refriend', '加回好友', 'chip-button', `data-id="${esc(thread.id)}"`) : btn('ask-friend', '发送好友申请', 'chip-button')}</div>` : ''}
+      ${!group && thread.blocked ? `<div class="friend-cut is-blocked" role="status">${icon('alert')}<span>你已把${esc(shown(thread.members[0]))}拉黑${thread.blocked.held?.length ? ` · 拦截了 ${thread.blocked.held.length} 条` : ''}</span>${thread.blocked.held?.length ? btn('held', '拦截记录', 'chip-button') : ''}${btn('unblock', '移出黑名单', 'chip-button', `data-id="${esc(thread.id)}"`)}</div>` : ''}
       ${selecting
         ? (pickFor === 'delete'
           ? `<div class="bring-bar pick-delete"><span>${selecting.size ? pickedLabel(selecting.size) : '点一条消息开始，再拖上下的条条多选'}</span>${btn('pick-up', '到最早', 'text-button', selecting.size ? '' : 'disabled')}${btn('pick-down', '到最新', 'text-button', selecting.size ? '' : 'disabled')}${btn('delete-go', icon('trash') + '删除', 'danger', selecting.size ? '' : 'disabled')}</div>`
           : `<div class="bring-bar"><span>${selecting.size ? pickedLabel(selecting.size) : '点一条消息开始，再拖上下的条条多选'}</span>${btn('bring-go', '带进下一次正文', 'primary', selecting.size ? '' : 'disabled')}</div>`)
-        : composerHTML()}
+        : !group && thread.blocked ? '' : composerHTML()}
     </div>`, rowsWanted);
     const msgs = v.root.querySelector('.msgs');
     if (scene) syncMotion(v.root, ctx.win);
@@ -786,7 +799,7 @@ export function chatApp(ctx) {
     v.root.classList.toggle('chat-mode', mode === 'thread');
     v.root.classList.toggle('qq-mode', mode === 'list');
     if (mode === 'thread') return renderThread(ticket, again);
-    if (mode === 'profile') return renderProfile();
+    if (mode === 'profile') return renderProfile(ticket);
     if (mode === 'me') return renderMe();
     if (mode === 'contact-edit') return renderContactForm();
     if (mode === 'friends') return renderFriends(ticket);
@@ -1665,6 +1678,32 @@ export function chatApp(ctx) {
           const value = d.body.querySelector('[data-field=remark]').value.trim();
           try { api.saveChatOptions({remarks: {[ownKey(name)]: value || null}}); d.close(); ctx.notify(value ? `备注改成「${value}」` : '不用备注了'); render(); } catch (error) { ctx.notify(error.message, {error: true}); }
         });
+        break;
+      }
+      case 'block': {
+        const name = profileOf;
+        if (!name || !await ctx.confirm(`把「${name}」加入黑名单？`, 'TA 发来的消息和电话都会被拦截（拦截记录里能看），朋友圈互相看不到；TA 只能发好友申请，在「联系人 → 新的朋友」里通过或拒绝。和 TA 的聊天记录还在。')) break;
+        try { await api.blockContact(name); ctx.notify(`已把 ${name} 加入黑名单`); render(); }
+        catch (error) { ctx.notify(error.message, {error: true}); }
+        break;
+      }
+      case 'unblock': {
+        const id = el.dataset.id || threadId;
+        if (!id || !await ctx.confirm('移出黑名单？', '之后 TA 的消息和电话又能收到了；拦截记录会清掉。')) break;
+        try { await api.unblockContact(id); ctx.notify('已移出黑名单'); render(); }
+        catch (error) { ctx.notify(error.message, {error: true}); }
+        break;
+      }
+      // 拦截记录: what a blocked contact sent, newest first; it never went into the chat.
+      case 'held': {
+        const list = thread?.blocked?.held || [];
+        ctx.dialog(`拦截记录 · ${shown(thread?.members[0] || '')}`, list.length ? `<ol class="held-list">${list.slice().reverse().map(h => `<li><time>${esc(stamp(h.at))}</time><span>${esc(h.text)}</span></li>`).join('')}</ol><p class="hint">拉黑期间 TA 发来的，没有送进聊天。移出黑名单后这些记录会清掉。</p>` : '<p class="hint">还没有拦截到什么。</p>');
+        break;
+      }
+      case 'friend-yes': case 'friend-no': {
+        const yes = action === 'friend-yes';
+        try { const t = await api.answerFriendRequest(el.dataset.id, yes); ctx.notify(yes ? `已通过 ${t.members[0]} 的好友申请` : `已拒绝 ${t.members[0]} 的好友申请`); if (yes) open(t.id); else render(); }
+        catch (error) { ctx.notify(error.message, {error: true}); }
         break;
       }
       case 'refriend': {
