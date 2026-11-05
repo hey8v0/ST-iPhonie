@@ -17,7 +17,7 @@ export const field = (label, control, info = '') => `<div class="field"><span>${
 export const input = (key, value = '', type = 'text', attrs = '') => `<input data-field="${esc(key)}" aria-label="${esc(key)}" type="${type}" value="${esc(value)}" ${attrs}>`;
 export const select = (key, value, choices, attrs = '') => `<span class="select"><select data-field="${esc(key)}" aria-label="${esc(key)}" ${attrs}>${choices.map(([v, t, disabled]) => `<option value="${esc(v)}" ${String(value) === String(v) ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(t)}</option>`).join('')}</select></span>`;
 export const textArea = (key, value, attrs = '') => `<textarea data-field="${esc(key)}" aria-label="${esc(key)}" ${/\brows=/.test(attrs) ? '' : 'rows="5" '}${attrs}>${esc(value)}</textarea>`;
-export const toggle = (key, label, value, info = '') => `<div class="setting-row"><span>${esc(label)}${info ? help(info) : ''}</span><input class="switch" aria-label="${esc(label)}" type="checkbox" data-field="${esc(key)}" ${value ? 'checked' : ''}></div>`;
+export const toggle = (key, label, value, info = '') => `<div class="setting-row"><span class="switch-label">${esc(label)}${info ? help(info) : ''}</span><input class="switch" aria-label="${esc(label)}" type="checkbox" data-field="${esc(key)}" ${value ? 'checked' : ''}></div>`;
 export const empty = (title, detail = '', art = 'music') => `<div class="empty">${icon(art)}<h2>${esc(title)}</h2>${detail ? `<p>${esc(detail)}</p>` : ''}</div>`;
 
 // Page title: small English eyebrow, a big title with a marker underline, and optional actions.
@@ -157,7 +157,8 @@ export function languageField(key, value, inherit = true, typed = []) {
   const control = `<span class="combo">${input(key, value, 'text', `placeholder="${inherit ? '留空跟随默认，也可以直接打字' : '选一个，或直接打字，比如 粤语'}" autocomplete="off"`)}<button type="button" class="combo-open" data-combo-open aria-expanded="false" aria-label="展开全部语言">${icon('down')}</button></span><span class="combo-menu" role="group" aria-label="全部语言" hidden><button type="button" class="combo-chip combo-typed" data-combo-value="" hidden></button>${chips}</span>`;
   return field('台词语言', control, '列表里没有的语言，直接在框里打字就行，比如 粤语、上海话、Cantonese，模型会照着写台词。角色留空时用默认台词语言。ElevenLabs 只认语言代码（如 ja、yue），写成名字时它会自己听出来。');
 }
-function bindCombos(root, signal) {
+/** The language box's list: on a view's root (createView does it), or a sheet's body (with a signal that ends with it). */
+export function bindCombos(root, signal) {
   const menuOf = el => el.closest('.field')?.querySelector('.combo-menu');
   const show = (field, open, filter = '') => {
     const menu = field.querySelector('.combo-menu'), box = field.querySelector('.combo input');

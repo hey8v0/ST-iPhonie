@@ -74,7 +74,7 @@ export function presetsApp(ctx) {
     {
       const o = ops(kind), active = o.active();
       const draw = api.getState().draw;
-      body = (kind === 'draw' && !draw.enabled ? '<p class="hint">正文出图没有开启，在「设置 · 正文」里打开后，使用中的绘图预设才会加进聊天请求。</p>' : '')
+      body = (kind === 'draw' && !draw.enabled ? '<p class="hint">正文出图没有开启，在「设置 → 正文 → 正文出图」里打开后，使用中的绘图预设才会加进聊天请求。</p>' : '')
         + o.list().map(p => `<button class="preset-card" data-action="edit-preset" data-kind="${kind}" data-id="${esc(p.id)}"${p.id === active ? ' data-active' : ''}>${tile(app)}<span><strong>${esc(p.name || '未命名预设')}</strong><small>${kind === 'chat' ? `读正文 ${p.context} 条 · 聊天记录 ${p.history} 条` : kind === 'draw' ? `每条回复 ${p.count} 张 · ${p.entries.length} 条规则` : `${p.entries.length} 条规则 · ${esc(positions.find(x => x[0] === p.injection.position)?.[1] || '')}`}</small></span>${p.id === active ? plate('使用中') : icon('next')}</button>`).join('')
         + `<div class="actions">${btn('restore-default', icon('refresh') + '加回默认预设', 'text-button')}${help(kind === 'draw'
           ? '绘图预设是给正文模型看的出图规则：什么时候出图、标签怎么写。画师串和固定 tag 在绘图 App 的“画风”里。'

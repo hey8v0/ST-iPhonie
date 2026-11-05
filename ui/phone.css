@@ -313,6 +313,10 @@ button[aria-pressed=true] small,.primary small{color:inherit;opacity:.85}
 .setting-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:58px;padding:10px 0}
 .setting-row+.setting-row{border-top:1px solid var(--line)}
 .setting-row>span{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:14px;font-weight:700}
+/* A switch's name keeps its little i right after its last word: a long name folds into two even lines instead of leaving the
+   i alone on a line below. */
+.setting-row>.switch-label{display:block;text-wrap:balance}
+.setting-row>.switch-label>.info{vertical-align:middle;margin-left:6px}
 .setting-row small{font-weight:600}
 .switch{appearance:none;-webkit-appearance:none;width:50px;height:30px;border-radius:999px;background:var(--line);position:relative;flex-shrink:0;cursor:pointer;margin:0;transition:background .2s}
 .switch:after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.2);transition:transform .25s cubic-bezier(.3,1.4,.5,1)}
@@ -817,7 +821,7 @@ details>div{padding-bottom:10px}
 .group-av i:nth-child(1){left:0;top:4%}.group-av i:nth-child(2){right:0;top:4%}.group-av i:nth-child(3){left:22%;bottom:0}
 .pick-list{display:flex;flex-direction:column}
 .pick-list .list-row{min-height:56px;padding:8px 0}
-.pick-list .setting-row>span{gap:10px}
+.pick-list .setting-row>span{gap:10px}.pick-list .setting-row>.switch-label>.info{margin-left:10px}
 /* Thread: the view becomes a column with its own scrolling message list and a composer at the bottom. */
 .view.chat-mode{padding:0;overflow:hidden}
 .view.chat-mode:before{display:none}

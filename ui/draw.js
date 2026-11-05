@@ -169,14 +169,9 @@ export function drawApp(ctx) {
     if (tab === 'vibe') body = vibes.html();
     if (tab === 'refs') body = refs.html();
     if (tab === 'lora') { body = plans.summary(comfy) + loras.html(comfy) + nodes.html(); nodes.load(); }
-    if (tab === 'chat') body = `
-      ${d.enabled ? '' : `<div class="banner">${icon('image')}<span>正文出图没有开启，在「设置 · 正文」里打开（配图方式也在那里）。</span>${btn('go-settings', '去打开', 'chip-button')}</div>`}<div class="group">${toggle('auto', '新回复自动出图', d.auto, '只自动画不花钱的：NovelAI 免费档内的图、ComfyUI 的图；GPT 生图在「每张先问」关掉后也会自动画。其余的正文里会显示“点击生成”。')}${toggle('fold', '正文图片默认收起', d.fold, '收起后正文里只留一个小缩略图，点开再看，手机上不占地方。每张图也可以单独收起或展开。')}</div>
-      <div class="group">${toggle('strip', '发给模型时去掉旧出图块', d.strip, '出图块留在聊天记录里（图片靠它显示），但之后每次请求模型时会把它们去掉，省下上下文。')}</div>
-      <div class="group pad"><p class="hint" style="padding:6px 0">出图块长这样（一张图一块）：${help('场景和每个人分开写：人数、镜头、光线放场景；表情、视线、动作放各自的角色行。插件把画风固定串接在场景前面，把角色 App 里的固定外貌补进对应的角色行，再交给选中的绘图引擎（GPT 会整理成英文描述，ComfyUI 会合成一条提示词）。新角色第一次出现时，模型写的「新外貌」会自动存进角色 App。图片会上传到酒馆，并存进相册。')}</p><pre class="code-preview">${esc(api.picTagFormat)}</pre></div>
-      <p class="hint">每条回复固定出 ${(d.presets.find(p => p.id === d.activePreset) || d.presets[0]).count} 张图，在出图规则里改张数。</p><div class="actions">${btn('open-presets', icon('edit') + '编辑出图规则', 'secondary')}</div>`;
     const sub = e === 'gpt' ? d.gpt.model : e === 'comfy' ? '' : subscription ? `${TIERS[subscription.tier] || '订阅'} · ${subscription.anlas} Anlas` : keyed ? '读取中' : '';
-    // 正文出图 (how story replies get pictures) is set now and then: a chip by the title, not one more tab.
-    v.draw(heading('绘图', (keyed && sub ? `<span class="chip">${esc(sub)}</span>` : '') + btn('tab', icon('image') + '正文出图', 'chip-button', `data-tab="chat" aria-pressed="${tab === 'chat'}"`), engineName(e))
+    // (正文出图, how story replies get pictures, is set in 设置 → 正文 since 0.9.31: this app is its engines, 画风 and drawing.)
+    v.draw(heading('绘图', keyed && sub ? `<span class="chip">${esc(sub)}</span>` : '', engineName(e))
       + `<div class="segmented draw-engines" role="group" aria-label="用哪个画">${api.drawCatalog.engines.map(k => `<button data-action="draw-engine" data-pick="${k}" aria-pressed="${k === e}">${esc(engineName(k))}</button>`).join('')}</div>`
       + (keyed ? '' : `<div class="banner">${icon('key')}<span>${esc(api.drawMissing())}。</span>${btn('go-key', '去填写', 'chip-button')}</div>`)
       + queueCard()
@@ -502,9 +497,7 @@ export function drawApp(ctx) {
         break;
       }
       case 'cancel-all': if (await ctx.confirm('取消所有排队的图？', '正在画的那一张也会停下。')) api.cancelAllDraws(); break;
-      case 'go-settings': ctx.open('settings'); break;
       case 'go-key': ctx.open('engines'); ctx.editEngine?.(eng()); break;
-      case 'open-presets': ctx.open('presets'); ctx.showPresetKind?.('draw'); break;
       case 'position': characters[index].position = Number(el.dataset.position); delete characters[index].center; render(); break;
       case 'remove-char': characters.splice(index, 1); render(); break;
       case 'add-custom': if (roomForCharacter()) { characters.push({name: '角色', prompt: '', position: -1}); render(); } break;

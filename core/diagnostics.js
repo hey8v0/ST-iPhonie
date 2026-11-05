@@ -48,7 +48,7 @@ export function buildReport(f) {
   const v = f.voice || {};
   const silent = (v.roles || []).filter(r => !r.voice).map(r => r.name);
   add('配音', [
-    v.enabled === false ? item('warn', '正文语音已关闭', '设置 → 正文语音。关着的时候不会要求模型写语音标签，也不显示声波。') : item('ok', '正文语音已打开'),
+    v.enabled === false ? item('warn', '正文语音已关闭', '设置 → 正文 → 正文语音。关着的时候不会要求模型写语音标签，也不显示声波。') : item('ok', '正文语音已打开'),
     item('info', '当前预设', `${v.preset || '（没有）'} · 插入位置 ${v.injection || '未知'}`),
     item('info', '台词格式', v.format || '（没有）'),
     !(v.roles || []).length ? item('info', '还没有角色', '在正文里点一次声波，或者在「角色」里添加。')

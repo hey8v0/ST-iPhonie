@@ -1,4 +1,4 @@
-import {createView, esc, btn, field, input, select, textArea, toggle, heading, size, languageField, typedLanguages, groupTitle, help, copyText} from './common.js';
+import {createView, esc, btn, field, input, select, textArea, toggle, heading, size, languageField, typedLanguages, groupTitle, help, copyText, bindCombos} from './common.js';
 import {buildReport} from '../core/diagnostics.js';
 import {saveFile, zipFiles} from '../download.js';
 import {browserSpeech, cleanSkip, cleanBody, NARRATION_RATES, NARRATOR} from '../core/narration.js';
@@ -17,6 +17,19 @@ const IMAGE_TYPES = 'image/png,image/jpeg,image/webp,image/avif,image/gif';
 export function settingsApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'settings');
   const narrationNote = s => !s.narration.enabled ? '关 · 只读台词' : s.narration.voice === 'role' ? '开 · 旁白用「旁白」角色的配音' : '开 · 旁白用系统朗读';
+  const voiceNote = s => s.general.voiceEnabled === false ? '关' : s.general.voiceMode === 'separate' ? '开 · 回复后单独配音' : '开 · 正文里顺手写';
+  const drawNote = s => !s.draw.enabled ? '关' : s.draw.auto ? '开 · 新回复自动画' : '开 · 点了才画';
+  /** The page again after a sheet closes. When the phone itself goes, its sheets close before its apps stop: then a
+   *  failed read is nobody's business; otherwise it is said. */
+  const afterSheet = () => render().catch(error => { if (!v.disposed) ctx.notify(error.message, {error: true}); });
+  /** A sheet's language box opens its list like the page's does, until the sheet closes. */
+  const sheetCombos = d => { const stop = new ctx.win.AbortController(); bindCombos(d.body, stop.signal); d.onClose(() => stop.abort()); };
+  /** A sheet's buttons: what they do, and an error said in a toast. */
+  const sheetClicks = (d, run) => d.body.addEventListener('click', async e => {
+    const el = e.target.closest('[data-action]');
+    if (!el || !d.body.contains(el)) return;
+    try { await run(el.dataset.action, el); } catch (error) { ctx.notify(error.message, {error: true}); }
+  });
   /**
    * 整篇朗读: 播放全部 reads the story between the lines too, in the 旁白's voice — the system's (free, not kept) or the
    * 旁白 role's in the 角色 App (an engine's: costs its characters, kept). Tags listed are read past, lines in them too.
@@ -37,12 +50,81 @@ export function settingsApp(ctx) {
         <div class="field"><span>手机这边来找你，每天最多${help('填 0 是不限。正文里发来的和单独问出来的都算，只算真的发来的，TA 决定不发的那次不算。到了上限，今天的正文就不再被告知可以用手机。')}</span><input data-field="p-dailyMax" type="number" min="0" max="99" value="${o.dailyMax}" ${o.on ? '' : 'disabled'}></div></div>`;
     };
     paint();
-    d.onClose(() => render());
+    d.onClose(afterSheet);
     d.body.addEventListener('change', e => {
       const key = e.target.dataset.field?.replace(/^p-/, '');
       if (!key) return;
       try { api.saveChatOptions({proactive: {[key]: key === 'on' ? e.target.checked : Number(e.target.value)}}); } catch (error) { ctx.notify(error.message, {error: true}); }
       paint();
+    });
+  }
+  /**
+   * 正文语音: every switch of how the story is voiced, in one sheet (0.9.31: 自动挑音色 came from the 角色 App and
+   * 去掉旧配音标签 from 更多). 去掉旧配音标签 stays with the voice off, as old replies still carry their tags.
+   */
+  function voiceSheet() {
+    const d = ctx.dialog('正文语音', '');
+    sheetCombos(d);
+    const paint = () => {
+      if (!d.live) return;
+      const s = api.getState(), g = s.general, on = g.voiceEnabled !== false;
+      d.body.innerHTML = `<div class="group pad">${toggle('voiceEnabled', '正文语音', on, '关掉后，聊天请求里不再加入语音规则，模型只写普通对白；正文里已有的语音标签只显示中文译文，不显示声波；手机聊天里的联系人也只发文字。打开后恢复。')}
+        ${on ? `${languageField('defaultLanguage', g.defaultLanguage, false, typedLanguages(s))}
+          <div class="field"><span>配音方式${help('正文里顺手写：把配音规则加进正文请求，模型写故事时顺手把台词写成配音格式。只要一次请求，但规则较长，有时会影响正文，或者和破限、文风预设打架、漏写格式。\n\n回复后单独配音：正文模型只管写故事，不带任何配音规则；回复写完后，插件用同一个模型再单独请求一次，把正文里的台词配上音（声波稍等一会儿才出来）。格式更稳，不挤占正文，每条回复多一次请求。\n\n正文出图也选了「回复后单独配图」的话，配音和配图合成一次请求，不会多发两次。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配音']].map(([k, l]) => `<button type="button" data-action="voice-mode" data-value="${k}" aria-pressed="${(g.voiceMode || 'inline') === k}">${l}</button>`).join('')}</div>${g.voiceMode === 'separate' && api.planLatestVoice ? `<div class="actions" style="margin:6px 0 0">${btn('voice-latest', icon('wave') + '给最新回复配音', 'text-button')}</div>` : ''}</div>
+          ${toggle('pregenerate', '提前生成语音', g.pregenerate === true, '打开后，每条新回复写完，插件就在后台按顺序把里面的台词都生成好、存进缓存，不会自己播放；点声波时直接就能听，不用再等。\n\n会多花语音额度：没去听的回复、重 roll 掉的那一版也会生成。要开着「存储空间」里的「保存语音缓存」。\n\n不开也没关系：点「整条播放」时，播这一句的同时就在做下一句，句子之间不用等。')}
+          ${toggle('autoVoice', '自动挑音色', g.autoVoice === true, '大世界卡里角色多，可以打开这个：新角色第一次说话时，文字模型按 TA 在正文里的样子（角色卡、说过的话、剧情里的描写）挑一个音色填上，标「自动挑的」，不满意在角色 App 里换或重新挑。\n\n先从角色 App 的「音色收藏夹」里挑（标好男女、年龄的更容易挑中）；收藏夹里没有对得上的，再去引擎的音色库里搜（Fish 用公开音色库，MiniMax 用系统音色，ElevenLabs 用你账号里的音色）。挑一次会调用一两次文字模型。')}` : ''}</div>
+        <div class="group pad">${toggle('stripVoice', '发给模型时去掉旧配音标签', g.stripVoice !== false, '不改变酒馆里的正文显示；只是之后每次请求模型时，旧回复里的每句台词只留中文译文，标签和原文不发，省上下文，也不用自己写正则。旧回复全部去掉：留着的那条会被模型当成模板照着学，情绪和句式越写越固定；格式靠每次注入的语音规则就够了。出图块在「正文出图」里另有同样的开关。')}
+          ${on && g.stripVoice !== false ? toggle('voiceExample', '保留最近一条做示范', g.voiceExample === true, '最新一条带台词的回复不去掉，原样发给模型当格式示范。模型老是忘了写配音标签时再打开；打开后它容易照着这条学，越写越像。') : ''}</div>`;
+    };
+    paint();
+    d.onClose(afterSheet);
+    d.body.addEventListener('change', e => {
+      const el = e.target, key = el.dataset.field;
+      if (!['voiceEnabled', 'defaultLanguage', 'pregenerate', 'autoVoice', 'stripVoice', 'voiceExample'].includes(key)) return;
+      try {
+        // The language box keeps its list where it is: no repaint.
+        if (key === 'defaultLanguage') { api.updateGeneral({defaultLanguage: el.value}); return; }
+        api.updateGeneral({[key]: el.checked});
+        if (key === 'autoVoice') ctx.notify(el.checked ? '新角色第一次说话时会自动挑音色' : '已关闭自动挑音色');
+      } catch (error) { ctx.notify(error.message, {error: true}); }
+      paint();
+    });
+    sheetClicks(d, async (action, el) => {
+      if (action === 'voice-mode') { api.updateGeneral({voiceMode: el.dataset.value}); paint(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配音' : '以后模型写正文时顺手写配音'); }
+      if (action === 'voice-latest') await v.busy(el, async () => { const n = await api.planLatestVoice(); ctx.notify(n ? `配好了 ${n} 句台词` : '这条回复里没有找到台词'); });
+    });
+  }
+  /**
+   * 正文出图: every switch of how story replies get pictures, in one sheet (0.9.31: 自动出图, 默认收起 and 去掉旧出图块
+   * came from the 绘图 App, which keeps only its engines, 画风 and drawing). 默认收起 and 去掉旧出图块 stay with it off:
+   * the pictures already in the chat keep using them.
+   */
+  function drawSheet() {
+    const d = ctx.dialog('正文出图', '');
+    const paint = () => {
+      if (!d.live) return;
+      const w = api.getState().draw, on = !!w.enabled, rules = w.presets.find(p => p.id === w.activePreset) || w.presets[0];
+      d.body.innerHTML = `<div class="group pad">${toggle('drawEnabled', '正文出图', on, '开启后，绘图预设会加进聊天请求（或者回复写完再单独配图），让模型写出图块，插件照着画。用哪个引擎、什么画风在绘图 App 里选；免费档守卫在绘图 App 的「参数」里。')}
+        ${on ? `<div class="field"><span>配图方式${help('单独配图：正文模型只管写故事；回复写完后，插件用同一个模型再单独请求一次，读这条回复、挑画面、写出图块，再把图插到对应的段落后面。出图规则不会挤占正文，张数和格式更稳，每条回复多一次请求。正文语音也选了「回复后单独配音」的话，配音和配图合成一次请求。\n\n正文里顺手写：把出图规则加进正文请求，模型写故事时顺手写出图块。只要一次请求，但规则较长，偶尔会影响正文或漏写。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配图']].map(([k, l]) => `<button type="button" data-action="draw-mode" data-value="${k}" aria-pressed="${w.mode === k}">${l}</button>`).join('')}</div>${api.planLatestPictures ? `<div class="actions" style="margin:6px 0 0">${btn('draw-latest', icon('image') + '给最新回复配图', 'text-button')}</div>` : ''}</div>
+          ${toggle('drawAuto', '新回复自动出图', w.auto, '只自动画不花钱的：NovelAI 免费档内的图、ComfyUI 的图；GPT 生图在绘图 App 里关掉「每张先问」后也会自动画。其余的正文里会显示“点击生成”。')}
+          <button class="list-row" data-action="draw-rules"><span><strong>编辑出图规则</strong><small>每条回复出 ${rules?.count ?? 1} 张图</small></span>${icon('next')}</button>` : ''}</div>
+        <div class="group pad">${toggle('drawFold', '正文图片默认收起', w.fold, '收起后正文里只留一个小缩略图，点开再看，手机上不占地方。每张图也可以单独收起或展开。')}
+          ${toggle('drawStrip', '发给模型时去掉旧出图块', w.strip, '出图块留在聊天记录里（图片靠它显示），但之后每次请求模型时会把它们去掉，省下上下文。正文出图关着时也照样去掉。')}</div>`;
+    };
+    paint();
+    d.onClose(afterSheet);
+    const KEYS = {drawEnabled: 'enabled', drawAuto: 'auto', drawFold: 'fold', drawStrip: 'strip'};
+    d.body.addEventListener('change', e => {
+      const key = KEYS[e.target.dataset.field];
+      if (!key) return;
+      try { api.saveDraw({[key]: e.target.checked}); } catch (error) { ctx.notify(error.message, {error: true}); }
+      paint();
+    });
+    sheetClicks(d, async (action, el) => {
+      if (action === 'draw-mode') { api.saveDraw({mode: el.dataset.value}); paint(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配图' : '以后模型写正文时顺手写出图块'); }
+      if (action === 'draw-latest') await v.busy(el, () => api.planLatestPictures());
+      // To the rules in 预设 (opening an app closes the sheet).
+      if (action === 'draw-rules') { ctx.open('presets'); ctx.showPresetKind?.('draw'); }
     });
   }
   function narrationSheet() {
@@ -66,7 +148,7 @@ export function settingsApp(ctx) {
     // System voices can arrive a moment later.
     const later = () => paint();
     ctx.win.speechSynthesis?.addEventListener?.('voiceschanged', later);
-    d.onClose(() => { ctx.win.speechSynthesis?.removeEventListener?.('voiceschanged', later); render(); });
+    d.onClose(() => { ctx.win.speechSynthesis?.removeEventListener?.('voiceschanged', later); afterSheet(); });
     const save = patch => { try { api.saveNarration(patch); } catch (error) { ctx.notify(error.message, {error: true}); } paint(); };
     d.body.addEventListener('change', e => {
       const el = e.target;
@@ -340,21 +422,16 @@ export function settingsApp(ctx) {
           ${toggle('lockOnOpen', '打开时显示锁屏', phone.lockOnOpen, '锁屏可随时跳过，是插件内的外观，不是手机安全锁。想看一眼锁屏，点控制中心里的「锁屏」。')}
         </div>`
       + groupTitle('正文')
-      + `<div class="group pad">${languageField('defaultLanguage', s.general.defaultLanguage, false, typedLanguages(api.getState()))}
-          ${toggle('voiceEnabled', '正文语音', s.general.voiceEnabled !== false, '关掉后，聊天请求里不再加入语音规则，模型只写普通对白；正文里已有的语音标签只显示中文译文，不显示声波；手机聊天里的联系人也只发文字。打开后恢复。')}
-          ${s.general.voiceEnabled !== false ? `<div class="field"><span>配音方式${help('正文里顺手写：把配音规则加进正文请求，模型写故事时顺手把台词写成配音格式。只要一次请求，但规则较长，有时会影响正文，或者和破限、文风预设打架、漏写格式。\n\n回复后单独配音：正文模型只管写故事，不带任何配音规则；回复写完后，插件用同一个模型再单独请求一次，把正文里的台词配上音（声波稍等一会儿才出来）。格式更稳，不挤占正文，每条回复多一次请求。\n\n绘图里也选了「回复后单独配图」的话，配音和配图合成一次请求，不会多发两次。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配音']].map(([k, l]) => `<button data-action="voice-mode" data-value="${k}" aria-pressed="${(s.general.voiceMode || 'inline') === k}">${l}</button>`).join('')}</div>${s.general.voiceMode === 'separate' && api.planLatestVoice ? `<div class="actions" style="margin:6px 0 0">${btn('voice-latest', icon('wave') + '给最新回复配音', 'text-button')}</div>` : ''}</div>` : ''}
-          ${s.general.voiceEnabled !== false ? toggle('pregenerate', '提前生成语音', s.general.pregenerate === true, '打开后，每条新回复写完，插件就在后台按顺序把里面的台词都生成好、存进缓存，不会自己播放；点声波时直接就能听，不用再等。\n\n会多花语音额度：没去听的回复、重 roll 掉的那一版也会生成。要先打开下面「更多」里的「保存语音缓存」。\n\n不开也没关系：点「整条播放」时，播这一句的同时就在做下一句，句子之间不用等。') : ''}
-          ${toggle('drawEnabled', '正文出图', s.draw.enabled, '开启后，绘图预设会加进聊天请求，让模型在正文里写出图标签。新回复要不要自动画、图片要不要收起，在绘图 App 的「正文出图」里改；免费档守卫在绘图 App 的「参数」里。')}
-          ${s.draw.enabled ? `<div class="field"><span>配图方式${help('单独配图：正文模型只管写故事；回复写完后，插件用同一个模型再单独请求一次，读这条回复、挑画面、写出图块，再把图插到对应的段落后面。出图规则不会挤占正文，张数和格式更稳，每条回复多一次请求。上面配音也选了「回复后单独配音」的话，配音和配图合成一次请求。\n\n正文里顺手写：把出图规则加进正文请求，模型写故事时顺手写出图块。只要一次请求，但规则较长，偶尔会影响正文或漏写。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配图']].map(([k, l]) => `<button data-action="draw-mode" data-value="${k}" aria-pressed="${s.draw.mode === k}">${l}</button>`).join('')}</div>${api.planLatestPictures ? `<div class="actions" style="margin:6px 0 0">${btn('draw-latest', icon('image') + '给最新回复配图', 'text-button')}</div>` : ''}</div>` : ''}
+      // 正文语音 and 正文出图: each a row saying how it is set, with every switch of it in its sheet (0.9.31).
+      + `<div class="group pad"><button class="list-row" data-action="voice-sheet"><span><strong>正文语音</strong><small>${voiceNote(s)}</small></span>${icon('next')}</button>
+          <button class="list-row" data-action="draw-sheet"><span><strong>正文出图</strong><small>${drawNote(s)}</small></span>${icon('next')}</button>
           ${s.general.voiceEnabled !== false ? `<button class="list-row" data-action="narration"><span><strong>整篇朗读</strong><small>${narrationNote(s)}</small></span>${icon('next')}</button>` : ''}
           <button class="list-row" data-action="story-phone"><span><strong>正文联动手机</strong><small>${s.chat.proactive?.on ? '开 · 正文里的消息、照片、转账、来电会真的出现在手机上' : '关'}</small></span>${icon('next')}</button>
           ${toggle('voiceIsland', '台词小窗', s.general.voiceIsland === true, '在酒馆页面上浮一个小窗，列出最新一条回复里的台词，点哪句念哪句（再点暂停），「整条」从头念到尾。正文里的声波点不到时（比如手机上在看视觉小说，立绘盖住了正文）、或者想按自己的节奏一句句听时打开。可以拖到不挡视线的地方；✕ 收起到下一条回复。')}
         </div>
-        <details data-group="voice-more"><summary>更多<small class="fold-note">声波、旧配音标签、音量</small></summary><div class="fold-body">
+        <details data-group="voice-more"><summary>更多<small class="fold-note">按钮、声波、音量</small></summary><div class="fold-body">
           ${toggle('hideStoryWaves', '隐藏正文点击按钮', s.general.hideStoryWaves === true, '正文不插入声波、图片操作、音效和音乐按钮，已生成的图片仍显示。楼层工具栏也隐藏。可在小手机的「听取」里播放，在绘图和视觉小说 App 继续操作，适合与美化卡一起使用。')}
           ${s.general.hideStoryWaves !== true ? toggle('storyTools', '楼层工具按钮', s.general.storyTools !== false, '每层回复右边的小手机工具按钮：给这层楼生图、从这层看视觉小说、台词小窗、整条播放。关掉后不显示；长按声波的下载、收藏照常。') : ''}
-          ${toggle('stripVoice', '发给模型时去掉旧配音标签', s.general.stripVoice !== false, '不改变酒馆里的正文显示；只是之后每次请求模型时，旧回复里的每句台词只留中文译文，标签和原文不发，省上下文，也不用自己写正则。旧回复全部去掉：留着的那条会被模型当成模板照着学，情绪和句式越写越固定；格式靠每次注入的语音规则就够了。出图块在「绘图」里另有同样的开关。')}
-          ${s.general.stripVoice !== false ? toggle('voiceExample', '保留最近一条做示范', s.general.voiceExample === true, '最新一条带台词的回复不去掉，原样发给模型当格式示范。模型老是忘了写配音标签时再打开；打开后它容易照着这条学，越写越像。') : ''}
           ${toggle('waveformEnabled', '声波动效', s.general.waveformEnabled, '台词旁和手机里的声波随真实音频跳动。系统开启减少动态效果时保持静止。\n\n正文声波的颜色跟随酒馆主题：\n· 虚线小点：这个角色还没配音（斜体色）\n· 淡色：还没生成（正文色）\n· 引号色：已生成，可以播放\n· 引号色加底色：正在播放\n· 下划线色：已经播放过')}
           <div class="field"><div class="meter-label"><span>播放音量</span><output>${Math.round(phone.volume * 100)}%</output></div><input class="slider" type="range" data-field="volume" min="0" max="100" value="${Math.round(phone.volume * 100)}" aria-label="播放音量"></div>
         </div></details>`
@@ -398,10 +475,8 @@ export function settingsApp(ctx) {
       if (!el.checked && api.syncStatus?.()?.available && await ctx.confirm('也删掉酒馆里的那份吗？', '关掉后小手机不再往酒馆存。酒馆里已经存的聊天记录与记忆、助手会话与记忆、朋友圈、备忘录和相册还在，别的设备打开同步还能读到。点确定会把它们从酒馆删掉；这台设备上的内容不受影响。')) await clearTavernCopy();
       return;
     }
-    if (key === 'voiceEnabled') { api.updateGeneral({voiceEnabled: el.checked}); await render(); return; }
-    if (['voiceEnabled', 'hideStoryWaves', 'storyTools', 'voiceIsland', 'floatingEnabled', 'waveformEnabled', 'cacheEnabled', 'wallpaperMotion', 'stripVoice', 'voiceExample', 'pregenerate'].includes(key)) { api.updateGeneral({[key]: el.checked}); if (key === 'stripVoice') await render(); }
-    else if (key === 'drawEnabled') { api.saveDraw({enabled: el.checked}); await render(); }
-    else if (key === 'defaultLanguage') api.updateGeneral({defaultLanguage: el.value});
+    // (正文语音's and 正文出图's switches are in their sheets.)
+    if (['hideStoryWaves', 'storyTools', 'voiceIsland', 'floatingEnabled', 'waveformEnabled', 'cacheEnabled', 'wallpaperMotion'].includes(key)) api.updateGeneral({[key]: el.checked});
     else if (key === 'volume') await api.setVolume(Number(el.value) / 100);
     else if (key === 'lockOnOpen') await api.savePhone({lockOnOpen: el.checked});
     else if (key === 'partition') { api.saveChatOptions({partition: el.value}); ctx.notify({card: '已按角色卡分开', chat: '已按聊天分开：开新聊天就是一部新手机'}[el.value] || '已关闭分区，所有内容一起显示'); }
@@ -450,12 +525,10 @@ export function settingsApp(ctx) {
   v.on('click', '[data-action]', async el => {
     switch (el.dataset.action) {
       case 'theme': await api.savePhone({theme: el.dataset.value}); await render(); break;
-      case 'draw-mode': api.saveDraw({mode: el.dataset.value}); await render(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配图' : '以后模型写正文时顺手写出图块'); break;
-      case 'draw-latest': await v.busy(el, () => api.planLatestPictures()); break;
+      case 'voice-sheet': voiceSheet(); break;
+      case 'draw-sheet': drawSheet(); break;
       case 'narration': narrationSheet(); break;
       case 'story-phone': storyPhoneSheet(); break;
-      case 'voice-mode': api.updateGeneral({voiceMode: el.dataset.value}); await render(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配音' : '以后模型写正文时顺手写配音'); break;
-      case 'voice-latest': await v.busy(el, async () => { const n = await api.planLatestVoice(); ctx.notify(n ? `配好了 ${n} 句台词` : '这条回复里没有找到台词'); }); break;
       // A skin brings its own wallpaper, unless a personal photo is the wallpaper.
       case 'skin': {
         const p = await api.getPhone(), key = el.dataset.value, first = key === 'custom' && !p.customTheme, again = key === 'custom' && p.skin === 'custom';

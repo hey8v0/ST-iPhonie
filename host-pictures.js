@@ -269,7 +269,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
           phone.deliver(id).catch(() => {});
         }
       }
-      if (!voiced && !pictured) throw Error(wantVoice ? '这次没有配上音，可以在小手机的「设置 → 正文」里点「给最新回复配音」再试一次' : '这次没有挑出画面（试了两次），可以点这层楼右边的小手机工具按钮「给这层楼生图」再试；模型具体回了什么可以在小手机的「日志」App 里看');
+      if (!voiced && !pictured) throw Error(wantVoice ? '这次没有配上音，可以在小手机的「设置 → 正文 → 正文语音」里点「给最新回复配音」再试一次' : '这次没有挑出画面（试了两次），可以点这层楼右边的小手机工具按钮「给这层楼生图」再试；模型具体回了什么可以在小手机的「日志」App 里看');
       message.mes = text;
       if (Array.isArray(message.swipes)) message.swipes[message.swipe_id ?? 0] = text;
       await ctx.saveChat();
@@ -278,8 +278,8 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       if (sent) phone.deliver(id).catch(() => {});
       // The lines are in now: 提前生成 can make them.
       if (voiced) lined(id);
-      if (wantVoice && !voiced) notice('画面挑好了，台词这次没配上，可以在「设置 → 正文」里点「给最新回复配音」');
-      if (wantPictures && !pictured) notice('台词配好了，画面这次没挑出来，可以在「设置 → 正文」里点「给最新回复配图」');
+      if (wantVoice && !voiced) notice('画面挑好了，台词这次没配上，可以在「设置 → 正文 → 正文语音」里点「给最新回复配音」');
+      if (wantPictures && !pictured) notice('台词配好了，画面这次没挑出来，可以在「设置 → 正文 → 正文出图」里点「给最新回复配图」');
       return {voiced, pictured};
     } finally { planning.delete(id); }
   }

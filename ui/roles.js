@@ -1,4 +1,4 @@
-import {createView, esc, engines, btn, field, input, select, textArea, heading, help, groupTitle, plate, avatar, languageField, languageName, typedLanguages, toggle} from './common.js';
+import {createView, esc, engines, btn, field, input, select, textArea, heading, help, groupTitle, plate, avatar, languageField, languageName, typedLanguages} from './common.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {layerSort} from './layer-sort.js';
 import {layerTree} from '../core/layers.js';
@@ -76,7 +76,7 @@ export function rolesApp(ctx) {
   function listHTML(rows = listRows()) {
     const roles = api.getState().routes;
     return heading('角色', help('给聊天里说话的角色配一个声音。也可以直接点聊天里的声波，遇到没配过的角色会带你来这里。') + btn('add-role', icon('add'), 'round-button', 'aria-label="新增角色"'), `Character · ${String(roles.length).padStart(2, '0')}`)
-      + autoGroup() + listTools(roles)
+      + poolGroup() + listTools(roles)
       + (roles.length ? `<div class="group style-list role-list" data-role-list>${rows}</div>` : `<div class="actions">${btn('add-role', icon('add') + '新增角色', 'secondary')}</div>`);
   }
   /** Only the rows: typing in the search box keeps the keyboard up, and a moved row glides. */
@@ -187,11 +187,10 @@ export function rolesApp(ctx) {
     listDrawn = ''; render();
     ctx.notify(failed ? `挑好了 ${done} 个，有的没挑成：${failed}` : `挑好了 ${done} 个`, failed ? {error: true} : undefined);
   }
-  /** 自动挑音色: the switch, and the 音色收藏夹 it picks from first. */
-  function autoGroup() {
-    const state = api.getState(), on = state.general.autoVoice === true, pool = state.voicePool || [];
-    return `<div class="group">${toggle('autoVoice', '自动挑音色', on, '大世界卡里角色多，可以打开这个：新角色第一次说话时，文字模型按 TA 在正文里的样子（角色卡、说过的话、剧情里的描写）挑一个音色填上，标「自动挑的」，不满意随时换或重新挑。\n\n先从「音色收藏夹」里挑（标好男女、年龄的更容易挑中）；收藏夹里没有对得上的，再去引擎的音色库里搜（Fish 用公开音色库，MiniMax 用系统音色，ElevenLabs 用你账号里的音色）。挑一次会调用一两次文字模型。')}
-      <button class="list-row" data-action="voice-pool"><span><strong>音色收藏夹</strong><small>${pool.length ? `${pool.length} 个音色 · 角色页填音色时可以直接选` : '还是空的：在「从列表选」里点 ♡，或在收藏夹里手动添加'}</small></span>${icon('next')}</button></div>`;
+  /** The 音色收藏夹, which 自动挑音色 picks from first (its switch is in 设置 → 正文 → 正文语音 since 0.9.31). */
+  function poolGroup() {
+    const pool = api.getState().voicePool || [];
+    return `<div class="group"><button class="list-row" data-action="voice-pool"><span><strong>音色收藏夹</strong><small>${pool.length ? `${pool.length} 个音色 · 角色页填音色时可以直接选` : '还是空的：在「从列表选」里点 ♡，或在收藏夹里手动添加'}</small></span>${icon('next')}</button></div>`;
   }
 
   function renderEditor() {
@@ -373,7 +372,6 @@ export function rolesApp(ctx) {
   v.on('input', '[data-role-search]', el => { query = el.value; swipe?.done(); paintRows(); });
   const dispose = v.dispose;
   v.dispose = () => { swipe?.dispose(); swipe = null; if (tried) ctx.win.URL.revokeObjectURL(tried.url); dispose(); };
-  v.on('change', '[data-field=autoVoice]', el => { api.updateGeneral({autoVoice: el.checked}); ctx.notify(el.checked ? '新角色第一次说话时会自动挑音色' : '已关闭自动挑音色'); });
   v.on('input', '[data-field]', el => {
     if (!current) return;
     current[el.dataset.field] = el.value;
