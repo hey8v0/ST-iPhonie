@@ -6,6 +6,7 @@ import {PROMPT_BLOCKS, normalizePromptRules} from './prompt-rules.js';
 import { normalizeVn, spriteRequest, castFiles, moveCastFiles } from './vn.js';
 import { currentModel } from './model-files.js';
 import { MomentStore } from './moments-store.js';
+import { isGoMusic, goUrl, goData, goSongs, goGroups, goCategories, goQrSession, goQrState, goLogins, goSongParams, readGoId, GO_PLATFORMS, GO_LOGINS, GO_LIMITS } from './go-music.js';
 import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readGroups, paged, PAGE_WAYS, withPages, songKey, readLink, missingLink, trialOnly, asChina, playable, onTavern, isAudio, fill as fillSource, songRow, sameFile, lyricOwner, bestMatch, matchScore, pick as pickPath, GROUP_KINDS } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, ASSISTANT_IMAGE_SLOT, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assistantMeta, assistantThoughts, assistantClip, assistantFirstTitle, assertAssistantThread, assistantSummary } from './assistant.js';
@@ -1878,13 +1879,26 @@ export class TTSBackend {
         if (!words) throw Error(kind === 'album' ? '写一下专辑名' : kind === 'artist' ? '写一下歌手名' : '写一下想听的歌');
         const all = sourceId && typeof sourceId === 'object' ? [this.musicSource(sourceId)] : clone(this.settings.music.sources.filter(s => sourceId ? s.id === sourceId : s.enabled));
         if (!all.length) throw Error('还没有能用的音源：先在「音乐 → 设置 → 音源」里添加一个');
-        const key = GROUP_KINDS[kind] ? kind + 'Search' : 'search', sources = all.filter(s => s[key]);
+        const key = GROUP_KINDS[kind] ? kind + 'Search' : 'search', sources = all.filter(s => isGoMusic(s) ? kind !== 'artist' && !!s.base : s[key]);
         if (!sources.length) throw Error(`音源都不能搜${GROUP_KINDS[kind]}：在音源设置的「搜专辑、歌手和歌单」里填地址（自己搭的网易云后端会自动填好）`);
         const songs = [], groups = [], errors = [], unpaged = [], at = { query: words, offset: page * 30, page: page + 1, limit: 30 };
         const had = new Set((Array.isArray(seen) ? seen : []).map(String));
         let more = false;
         await Promise.all(sources.map(async s => {
             try {
+                // Go Music: one answer from all its platforms, taken in turns so the first ones are not all from one.
+                if (isGoMusic(s)) {
+                    if (page > 0) return;
+                    const data = goData(await this.musicFetch(goUrl(s.base, 'music/search', { q: words, type: kind, sources: s.platforms })));
+                    if (key === 'search') {
+                        const byPlatform = new Map();
+                        for (const song of goSongs(s, data?.songs)) byPlatform.set(song.platform, [...(byPlatform.get(song.platform) || []), song]);
+                        const lanes = [...byPlatform.values()];
+                        for (let i = 0; lanes.some(l => l.length > i) && songs.length < 150; i++) for (const lane of lanes) if (lane[i]) songs.push(lane[i]);
+                    }
+                    else groups.push(...goGroups(s, kind === 'album' ? data?.albums : data?.playlists, kind));
+                    return;
+                }
                 const read = json => (key === 'search' ? readSearch(s, json) : readGroups(s, json, kind)).map(x => ({ ...x, sourceName: s.name }));
                 let found = null;
                 if (paged(s[key]) || page === 0) found = read(await this.musicFetch(fillSource(s[key], at)));
@@ -1917,7 +1931,15 @@ export class TTSBackend {
      */
     async groupSongs(sourceId, kind, id, page = 0, { limit = 50, offset, seen } = {}) {
         this.assertOpen();
-        const s = this.musicSource(sourceId), template = GROUP_KINDS[kind] ? s[kind + 'Songs'] : '';
+        const s = this.musicSource(sourceId);
+        if (isGoMusic(s)) {
+            const g = readGoId(id);
+            if (!g || !['album', 'playlist'].includes(kind)) throw Error(`这个音源不能取${GROUP_KINDS[kind] || '专辑'}里的歌`);
+            if (page > 0) return { songs: [], more: false };
+            const data = goData(await this.musicFetch(goUrl(s.base, kind === 'album' ? 'album/detail' : 'playlist/detail', { source: g.platform, id: g.id })));
+            return { songs: goSongs(s, (Array.isArray(data) ? data : []).map(x => ({ ...x, source: x?.source || g.platform })), GO_LIMITS.songs), more: false };
+        }
+        const template = GROUP_KINDS[kind] ? s[kind + 'Songs'] : '';
         if (!template) throw Error(`这个音源不能取${GROUP_KINDS[kind] || '专辑'}里的歌`);
         const size = Math.max(1, Math.min(MUSIC_LIMITS.bulk, Math.floor(limit) || 50));
         const get = async address => readSearch(s, await this.musicFetch(fillSource(address, { id, offset: offset ?? page * size, page: page + 1, limit: size })), s[kind + 'SongsPath'], size).map(x => ({ ...x, sourceName: s.name }));
@@ -1943,7 +1965,7 @@ export class TTSBackend {
         this.heardAt = Math.max(Date.now(), (this.heardAt || 0) + 1);
         const row = { id: 'heard:' + songKey(song), kind: 'heard', at: this.heardAt, title, artist: String(song.artist || '').trim().slice(0, 200) };
         const old = await this.music.get(row.id).catch(() => null);
-        if (song.source && song.songId) Object.assign(row, { source: String(song.source).slice(0, 60), songId: String(song.songId).slice(0, 200) });
+        if (song.source && song.songId) Object.assign(row, { source: String(song.source).slice(0, 60), songId: String(song.songId).slice(0, 2000) });
         else if (old?.source && old.songId) Object.assign(row, { source: old.source, songId: old.songId });
         // its lyrics, once they were fetched (keepLyric), stay with it
         const lyric = song.lyric || old?.lyric;
@@ -1974,7 +1996,9 @@ export class TTSBackend {
     /** A playable link for a song of a source. */
     async musicLink(sourceId, songId, hint = {}) {
         this.assertOpen();
-        const s = this.musicSource(sourceId), address = fillSource(s.url, { id: songId, title: hint.title, artist: hint.artist });
+        const s = this.musicSource(sourceId);
+        if (isGoMusic(s)) return this.goMusicLink(s, songId, hint);
+        const address = fillSource(s.url, { id: songId, title: hint.title, artist: hint.artist });
         // The address itself is the song: played as it is (the tavern's own address stays as it is, the page's origin).
         const own = () => onTavern(address) ? address : playable(address, globalThis.location?.protocol);
         if (s.direct) return own();
@@ -1990,12 +2014,107 @@ export class TTSBackend {
         if (trialOnly(answer)) { this.trialLinks ??= new Set(); this.trialLinks.add(out); if (this.trialLinks.size > 50) this.trialLinks.delete(this.trialLinks.values().next().value); }
         return out;
     }
+    /** What to say when a link from musicLink plays (a Go Music song found on another platform), or ''. */
+    musicNote(link) { return this.musicNotes?.get(link) || ''; }
     /** Whether a link from musicLink is only a 30-second preview (a 会员 song, the source not logged in). */
     musicTrial(link) { return !!this.trialLinks?.has(link); }
     async musicLyric(sourceId, songId, hint = {}) {
         const s = this.musicSource(sourceId);
+        if (isGoMusic(s)) {
+            const song = readGoId(songId);
+            if (!song) return '';
+            try { const data = goData(await this.musicFetch(goUrl(s.base, 'music/lyric', { id: song.id, source: song.platform }))); return typeof data?.lyric === 'string' ? data.lyric.slice(0, 60000) : ''; } catch { return ''; }
+        }
         if (!s.lyric) return '';
         try { const value = pickPath(await this.musicFetch(fillSource(s.lyric, { id: songId, title: hint.title, artist: hint.artist })), s.lyricPath); return typeof value === 'string' ? value.slice(0, 60000) : ''; } catch { return ''; }
+    }
+    // ---------- Go Music (core/go-music.js) ----------
+    /** A Go Music source: saved (by id) or a draft being set up. */
+    goSource(id) {
+        const s = this.musicSource(id);
+        if (!isGoMusic(s)) throw Error('这不是 Go Music 音源');
+        return s;
+    }
+    /**
+     * Requests that send or answer with Cookies (the logins, 扫码): straight to the backend, else through the tavern's
+     * own proxy, and never into the request log — the backend names Cookies by platform, so the log would not hide them.
+     */
+    async goPrivate(url, init = {}) {
+        let response = null;
+        try { response = await this.assetFetch(url, { ...init, credentials: 'omit' }); }
+        catch { response = await this.assetFetch('/proxy/' + encodeURIComponent(url), { ...init, credentials: 'same-origin' }).catch(() => null); }
+        if (!response) throw Error('连不上 Go Music：地址不对，或者后端没有开着');
+        let json = null;
+        try { json = await response.json(); } catch { /* not JSON */ }
+        if (!response.ok) throw Error(`Go Music 回答：${String(json?.msg || json?.error || 'HTTP ' + response.status).slice(0, 200)}`);
+        return json;
+    }
+    /** Which platforms the backend holds a login for: {qq: true, …} (the Cookies stay with the backend). */
+    async goMusicLogins(sourceId) {
+        this.assertOpen();
+        return goLogins(await this.goPrivate(goUrl(this.goSource(sourceId).base, 'system/cookies')));
+    }
+    /** A Cookie the user pasted, sent on to the backend (empty: logged out there); the phone keeps nothing of it. */
+    async goMusicSetCookie(sourceId, platform, cookie) {
+        this.assertOpen();
+        const s = this.goSource(sourceId);
+        if (!GO_LOGINS.some(l => l.id === platform)) throw Error('这个平台不能登录');
+        const value = String(cookie ?? '').replace(/^\s*cookie\s*:\s*/i, '').trim().slice(0, 20000);
+        await this.goPrivate(goUrl(s.base, 'system/cookies'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [platform]: value }) });
+        this.emit('music', { logins: true });
+        return this.goMusicLogins(sourceId);
+    }
+    /** 扫码登录 started: {key, url (to draw), image (the platform's own picture, when it gives one), expiresAt}. */
+    async goMusicQr(sourceId, way) {
+        this.assertOpen();
+        const s = this.goSource(sourceId);
+        if (!GO_LOGINS.some(l => l.qr.includes(way))) throw Error('这个平台不能扫码登录');
+        return goQrSession(goData(await this.goPrivate(goUrl(s.base, `system/qr_login/${way}`), { method: 'POST' })));
+    }
+    /** Where a 扫码登录 is ({status, message}); on success the backend has kept the login itself. */
+    async goMusicQrCheck(sourceId, way, key) {
+        this.assertOpen();
+        const s = this.goSource(sourceId), state = goQrState(goData(await this.goPrivate(goUrl(s.base, `system/qr_login/${way}`, { key }))));
+        if (state.status === 'success') this.emit('music', { logins: true });
+        return state;
+    }
+    /** The logged-in account's own playlists on a platform (我喜欢, made, kept), as groups to open or take in. */
+    async goMusicAccountLists(sourceId, platform) {
+        this.assertOpen();
+        const s = this.goSource(sourceId);
+        let json;
+        try { json = await this.musicFetch(goUrl(s.base, 'playlist/user', { source: platform, page: 1, limit: 100 })); }
+        catch (error) { if (/\b401\b/.test(error.message)) throw Error(`${GO_PLATFORMS[platform] || platform}还没登录：先登录再来读`); throw error; }
+        return goGroups(s, goData(json)?.playlists, 'playlist');
+    }
+    /** 发现: the backend's 推荐歌单 (what 'recommend'), its 歌单分类 ('categories') or a category's playlists ('category'). */
+    async goMusicDiscover(sourceId, { what = 'recommend', platform = '', category = '', page = 1 } = {}) {
+        this.assertOpen();
+        const s = this.goSource(sourceId);
+        if (what === 'categories') return goCategories(goData(await this.musicFetch(goUrl(s.base, 'playlist/categories', { sources: s.platforms }))));
+        if (what === 'category') return goGroups(s, goData(await this.musicFetch(goUrl(s.base, 'playlist/category', { source: platform, category_id: category, page: Math.max(1, Math.floor(page) || 1), limit: 30 })))?.playlists, 'playlist');
+        return goGroups(s, goData(await this.musicFetch(goUrl(s.base, 'playlist/recommend', { sources: s.platforms }))), 'playlist');
+    }
+    /**
+     * A Go Music song to play: the backend is asked first whether this platform gives it at all (要会员, 没有版权,
+     * 下架); it does: its /stream plays it (the backend deals with the platform's referer). It does not: the same song
+     * on another platform (by name, singer and length), said in a note; none: why.
+     */
+    async goMusicLink(s, songId, hint = {}) {
+        const song = readGoId(songId), here = globalThis.location?.protocol;
+        if (!song) throw Error('这首歌的信息不全：重新搜一次再放');
+        const params = goSongParams(song, hint), platform = GO_PLATFORMS[song.platform] || song.platform;
+        const given = await this.musicFetch(goUrl(s.base, 'music/url', params)).then(json => !!goData(json)?.url).catch(() => false);
+        if (given) return playable(goUrl(s.base, 'music/stream', params), here);
+        const other = await this.musicFetch(goUrl(s.base, 'music/switch', { name: hint.title || '', artist: hint.artist || '', source: song.platform, duration: song.duration || '' })).catch(() => null);
+        if (other?.id && other?.source) {
+            const out = playable(goUrl(s.base, 'music/stream', { id: String(other.id), source: other.source, name: other.name || hint.title || '', artist: other.artist || hint.artist || '', duration: other.duration || '' }), here);
+            // said when it plays (musicNote), like a 30-second preview is
+            (this.musicNotes ??= new Map()).set(out, `「${hint.title || other.name}」在${platform}放不了，换成了${GO_PLATFORMS[other.source] || other.source}的`);
+            if (this.musicNotes.size > 50) this.musicNotes.delete(this.musicNotes.keys().next().value);
+            return out;
+        }
+        throw Error(`「${hint.title || '这首歌'}」在${platform}放不了（可能要会员、没有版权或者下架了），别的平台也没找到能放的`);
     }
     /** The 歌单 (全部): songs without their files. */
     async listSongs() { this.assertOpen(); return (await this.music.list('song')).map(({ blob, ...row }) => row); }
@@ -3350,6 +3469,7 @@ export class TTSBackend {
             },
             assistantMemoryRemove: (id, nodeId) => this.assistantMemoryRevise(id, book => removeNode(book, nodeId)),
             assistantMemoryForget: id => this.assistantMemoryForget(id),
+            goMusicLogins: id => this.goMusicLogins(clone(id)), goMusicSetCookie: (id, platform, cookie) => this.goMusicSetCookie(clone(id), String(platform), String(cookie ?? '')), goMusicQr: (id, way) => this.goMusicQr(clone(id), String(way)), goMusicQrCheck: (id, way, key) => this.goMusicQrCheck(clone(id), String(way), String(key)), goMusicAccountLists: (id, platform) => this.goMusicAccountLists(clone(id), String(platform)), goMusicDiscover: (id, options) => this.goMusicDiscover(clone(id), clone(options || {})),
             saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId, options) => this.searchMusic(query, clone(sourceId), clone(options || {})), groupSongs: (sourceId, kind, id, page, options) => this.groupSongs(sourceId, kind, String(id), Number(page) || 0, clone(options || {})),
             listHeard: () => this.listHeard(), forgetHeard: ids => this.forgetHeard([...(ids || [])]), clearHeard: () => this.clearHeard(), musicLink: (sourceId, songId, hint) => this.musicLink(clone(sourceId), songId, clone(hint || {})), musicLyric: (sourceId, songId, hint) => this.musicLyric(sourceId, songId, clone(hint || {})),
             listSongs: () => this.listSongs(), songBlob: id => this.songBlob(id), addSongs: list => this.addSongs(list), updateSong: (id, patch) => this.updateSong(id, clone(patch || {})), deleteSongs: ids => this.deleteSongs([...(ids || [])]),

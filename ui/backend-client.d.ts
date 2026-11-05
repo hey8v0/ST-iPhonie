@@ -409,7 +409,7 @@ export interface ChatMessage { id: string; from: 'me' | string; kind: ChatKind; 
 /** pinned: 置顶. muted: 免打扰 (its unread messages do not count toward the badge). */
 /** 删好友 on a private chat: by 'me' the user deleted the contact (their messages wait as requests); by 'them' the contact deleted the user. */
 /** A music source the user added: search and link addresses ({{query}}, {{id}}) and where the answers keep each field. */
-export interface MusicSource { id: string; name: string; enabled: boolean; search: string; url: string; lyric: string; listPath: string; idPath: string; titlePath: string; artistPath: string; urlPath: string; lyricPath: string; direct: boolean; albumSearch: string; albumListPath: string; albumSongs: string; albumSongsPath: string; artistSearch: string; artistListPath: string; artistSongs: string; artistSongsPath: string; playlistSearch: string; playlistListPath: string; playlistSongs: string; playlistSongsPath: string; }
+export interface MusicSource { id: string; name: string; enabled: boolean; /** 'go-music': the user's go-music-api (base, platforms); the address fields stay empty. */ kind?: 'go-music'; base?: string; platforms?: string[]; search: string; url: string; lyric: string; listPath: string; idPath: string; titlePath: string; artistPath: string; urlPath: string; lyricPath: string; direct: boolean; albumSearch: string; albumListPath: string; albumSongs: string; albumSongsPath: string; artistSearch: string; artistListPath: string; artistSongs: string; artistSongsPath: string; playlistSearch: string; playlistListPath: string; playlistSongs: string; playlistSongsPath: string; }
 /** 音乐: bgm 'off' | 'tap' | 'auto' (the story picks songs with <bgm>), its rule, the volume, turning down for voice lines, songs shared in chats, how lists go on, whether some of the 歌单 goes with the rule as a taste. */
 export interface MusicSettings { writing: Omit<SongForm, 'about' | 'who' | 'instrumental'>; sing: {engine: string; lyriaModel: string; lyriaUrl: string; replicateModel: string; comfyOn: boolean; comfyOwn: boolean; comfyWorkflow: string; comfyName: string; comfyMap: {lyrics: string; style: string}}; bgm: 'off' | 'tap' | 'auto'; rule: string; volume: number; duck: boolean; share: boolean; mode: 'order' | 'shuffle' | 'one'; taste: boolean; sources: MusicSource[]; }
 /** A 歌单 song: a file on this device, or a song of a source (its link is fetched when it plays). */
@@ -418,7 +418,7 @@ export interface SongDraft { id: string; kind: 'draft'; at: number; updatedAt: n
 export interface SongWorkflowInfo { lyrics: string; style: string; output: string; seconds: number; seeds: number; fields: {at: string; title: string; text: string}[]; }
 export interface SingOption { id: string; name: string; ready: boolean; model: string; price: {free: boolean; text: string}; /** Whether the length asked for (SongDraft.seconds) reaches the service. */ timed: boolean; }
 export interface MusicSong { id: string; kind: 'song'; at: number; title: string; artist: string; origin: 'file' | 'source'; source?: string; songId?: string; lyric?: string; size?: number; mime?: string; file?: string; }
-export interface MusicFound { source: string; sourceName: string; id: string; title: string; artist: string; }
+export interface MusicFound { source: string; sourceName: string; id: string; title: string; artist: string; /** Go Music: the platform it was found on */ platform?: string; }
 /** An album or an artist a search found (an album's artist; how many songs, when the source says). */
 export interface MusicGroup { source: string; sourceName: string; kind: 'album' | 'artist' | 'playlist'; id: string; name: string; artist: string; count: number; }
 /** 正文点的歌: a song the story picked (where it was found, once it was). */
@@ -943,6 +943,17 @@ export interface BackendFacade {
     clearHeard(): Promise<boolean>;
     musicLink(sourceId: string | Partial<MusicSource>, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
     musicLyric(sourceId: string, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
+    /** Go Music (the user's go-music-api): which platforms it holds a login for — never the Cookies themselves. */
+    goMusicLogins(sourceId: string | Partial<MusicSource>): Promise<Record<string, boolean>>;
+    /** A pasted Cookie sent on to the backend ('' logs that platform out there); the phone keeps nothing. */
+    goMusicSetCookie(sourceId: string | Partial<MusicSource>, platform: string, cookie: string): Promise<Record<string, boolean>>;
+    /** 扫码登录: way is netease, qq, qq_wx, kugou or bilibili; image is the platform's own picture (data:) when given, else url is drawn. */
+    goMusicQr(sourceId: string | Partial<MusicSource>, way: string): Promise<{ key: string; url: string; image: string; expiresAt: number }>;
+    goMusicQrCheck(sourceId: string | Partial<MusicSource>, way: string, key: string): Promise<{ status: 'waiting' | 'scanned' | 'success' | 'expired' | 'failed'; message: string }>;
+    /** The logged-in account's playlists on qq, netease or kugou (401: not logged in). */
+    goMusicAccountLists(sourceId: string | Partial<MusicSource>, platform: string): Promise<MusicGroup[]>;
+    /** 推荐歌单 (recommend), 歌单分类 (categories: [{platform, name, categories}]) or a category's playlists (category). */
+    goMusicDiscover(sourceId: string | Partial<MusicSource>, options?: { what?: 'recommend' | 'categories' | 'category'; platform?: string; category?: string; page?: number }): Promise<MusicGroup[] | { platform: string; name: string; categories: { id: string; name: string; group: string }[] }[]>;
     listSongs(): Promise<MusicSong[]>;
     /** 写歌: the songs written, newest first. */
     listSongDrafts(): Promise<SongDraft[]>;

@@ -62,6 +62,8 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     if (t.source && t.songId) {
       const src = await backend.musicLink(t.source, t.songId, {title: t.title, artist: t.artist});
       if (backend.musicTrial?.(src)) notice(`「${label(t)}」只拿到 30 秒试听：这首是会员歌，音源后端没登录会员账号`);
+      const note = backend.musicNote?.(src);
+      if (note) notice(note);
       return {src};
     }
     const found = await backend.findSong({title: t.title, artist: t.artist});

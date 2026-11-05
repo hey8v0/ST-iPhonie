@@ -7,6 +7,7 @@
 // paths such as data.list or data.url). A lyrics address is optional.
 import {promptText} from './prompt-rules.js';
 import {normalizeSongForm, normalizeSing} from './song.js';
+import {GO_MUSIC, GO_PLATFORMS, goBase, isGoMusic} from './go-music.js';
 
 export const BGM_MODES = Object.freeze(['off', 'tap', 'auto']);
 export const BGM_MODE_NAMES = Object.freeze({off: '关', tap: '点一下才放', auto: '自动放'});
@@ -44,8 +45,14 @@ export function defaultMusic() {
 }
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const path = value => clip(value, 120).trim().replace(/[^\w.$[\]-]/g, '');
-/** One music source as kept: addresses must be http(s) and say where the search words and the song id go. */
+/** One music source as kept: addresses must be http(s) and say where the search words and the song id go. A Go Music
+ *  source (the user's go-music-api, core/go-music.js) is only its address and the platforms it searches (none: the
+ *  backend's own choice); the address fields stay empty. */
 export function normalizeSource(value = {}, i = 0) {
+  if (value?.kind === GO_MUSIC) {
+    const base = normalizeSource({...value, kind: '', search: '', url: '', lyric: ''}, i);
+    return {...base, name: clip(value.name, 30).trim() || 'Go Music', kind: GO_MUSIC, base: goBase(value.base), platforms: [...new Set((Array.isArray(value.platforms) ? value.platforms : []).filter(p => GO_PLATFORMS[p]))]};
+  }
   return upgraded({
     id: clip(value.id, 60).trim() || `source-${i + 1}`,
     name: clip(value.name, 30).trim() || `音源 ${i + 1}`,
@@ -78,6 +85,10 @@ function upgraded(s) {
   return s;
 }
 export function validateSource(s) {
+  if (isGoMusic(s)) {
+    if (!s.base) throw Error('「Go Music 的地址」要以 http(s):// 开头，比如 http://127.0.0.1:8080（手机连电脑上的后端要写电脑的局域网地址）');
+    return s;
+  }
   // A web address, or one on the tavern itself (/api/plugins/… of a server plugin the user installed).
   const web = v => /^(?:https?:\/\/|\/(?!\/))[^\s]+$/i.test(v);
   if (!web(s.search) || !s.search.includes('{{query}}')) throw Error('「搜索地址」要以 http(s):// 开头（酒馆自己的地址以 / 开头），并且在放搜索词的地方写 {{query}}');
@@ -233,7 +244,10 @@ export const SELF_HOSTED = Object.freeze([
       listPath: 'result.songs', idPath: 'id', titlePath: 'name', artistPath: 'ar', urlPath: 'data[0].url', lyricPath: 'lrc.lyric',
       albumSearch: base + '/cloudsearch?keywords={{query}}&type=10&limit=30&offset={{offset}}', albumListPath: 'result.albums', albumSongs: base + '/album?id={{id}}', albumSongsPath: 'songs',
       artistSearch: base + '/cloudsearch?keywords={{query}}&type=100&limit=30&offset={{offset}}', artistListPath: 'result.artists', artistSongs: base + '/artist/songs?id={{id}}&order=hot&limit={{limit}}&offset={{offset}}', artistSongsPath: 'songs',
-      playlistSearch: base + '/cloudsearch?keywords={{query}}&type=1000&limit=30&offset={{offset}}', playlistListPath: 'result.playlists', playlistSongs: base + '/playlist/track/all?id={{id}}&limit={{limit}}&offset={{offset}}', playlistSongsPath: 'songs'})}
+      playlistSearch: base + '/cloudsearch?keywords={{query}}&type=1000&limit=30&offset={{offset}}', playlistListPath: 'result.playlists', playlistSongs: base + '/playlist/track/all?id={{id}}&limit={{limit}}&offset={{offset}}', playlistSongsPath: 'songs'})},
+  // go-music-api: its own kind of source (core/go-music.js), not a set of addresses
+  {id: 'go-music', name: 'Go Music（go-music-api，自己搭的；网易云、QQ 音乐、酷狗……一起搜，能在小手机里登录）', example: 'http://127.0.0.1:8080',
+    fill: base => ({kind: GO_MUSIC, name: 'Go Music', base, platforms: []})}
 ]);
 
 // ---------- Lyrics ----------
@@ -330,7 +344,7 @@ export function songRow(value = {}, at = Date.now()) {
   const title = clip(value.title, 200).trim();
   if (!title) throw Error('给这首歌起个名字');
   const row = {id: clip(value.id, 200) || 'song:' + globalThis.crypto.randomUUID(), kind: 'song', at, title, artist: clip(value.artist, 200).trim(), origin: value.origin === 'source' ? 'source' : 'file'};
-  if (row.origin === 'source') { row.source = clip(value.source, 60); row.songId = clip(value.songId, 200); if (!row.source || !row.songId) throw Error('这首歌缺少音源信息'); }
+  if (row.origin === 'source') { row.source = clip(value.source, 60); row.songId = clip(value.songId, 2000); if (!row.source || !row.songId) throw Error('这首歌缺少音源信息'); }
   if (value.lyric) row.lyric = clip(value.lyric, 60000);
   return row;
 }

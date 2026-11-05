@@ -2311,6 +2311,15 @@ button.gift-item[data-short]{opacity:.55}
 .friend-row{flex-wrap:wrap;row-gap:4px}
 .friend-ask{flex:1 1 100%;margin:0 0 0 54px;font-size:13px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
 /* 黑名单 (0.9.27): the banner of a blocked chat, its mark in the list, the 拦截记录. */
+/* Go Music (0.9.28): a login's QR code, the login rows, the categories of 发现. */
+.go-qr{display:grid;place-items:center;padding:6px 0}
+.go-qr img{width:min(240px,70vw);height:auto;image-rendering:pixelated;border-radius:12px;background:#fff}
+.go-login,.go-account{flex-wrap:wrap;row-gap:6px}
+.list-row.go-login>span:not(.avatar):not(.plate),.list-row.go-account>span:not(.avatar):not(.plate){flex:1 1 130px;min-width:0}
+.go-login small,.go-account small{display:block}
+.go-login>button,.go-account>button{flex-shrink:0}
+.list-row.go-login>span.go-tools:not(.avatar):not(.plate){flex:0 0 auto;display:flex;align-items:center;gap:6px;margin-left:auto}
+.go-cats{max-height:132px;overflow:auto}
 .friend-cut.is-blocked{flex-wrap:wrap;row-gap:6px;padding-bottom:26px;background:var(--card2);color:var(--ink2)}
 .friend-cut.is-blocked span{flex:1 1 calc(100% - 32px)}
 .friend-cut.is-blocked>button:first-of-type{margin-left:auto}

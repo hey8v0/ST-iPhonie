@@ -10,6 +10,9 @@ import {icon} from './icons.js';
 import {writePanel} from './music-write.js';
 import {BGM_MODES, BGM_MODE_NAMES, DEFAULT_BGM_RULE, SELF_HOSTED, PLAY_MODES, PLAY_MODE_NAMES, GROUP_KINDS, MUSIC_LIMITS, normalizeSource, bestMatch} from '../core/music.js';
 import {sortPicked, lots, readPicked, lrcText} from '../core/music-files.js';
+import {isGoMusic, GO_PLATFORMS, GO_LOGINS, GO_QR_NAMES, GO_ACCOUNT_LISTS} from '../core/go-music.js';
+import {qrMatrix, qrSvg} from '../core/qr.js';
+import {saveFile} from '../download.js';
 
 const clock = s => !Number.isFinite(s) || s <= 0 ? '0:00' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const label = t => t ? (t.artist ? `${t.title} - ${t.artist}` : t.title) : '';
@@ -128,7 +131,7 @@ export function musicApp(ctx) {
     : list === 'heard' ? btn('heard-save', icon('add'), 'icon-button', `data-i="${i}" aria-label="加进歌单"`) + btn('heard-forget', icon('trash'), 'icon-button', `data-i="${i}" aria-label="从正文点的歌里拿掉"`)
     : btn('song-menu', icon('more'), 'icon-button', `data-i="${i}" aria-label="这首歌的选项"`)}</div>`;
   /** What an album, an artist or a playlist found is: an album's artist, who made a playlist; how many songs. */
-  const groupNote = g => [g.kind === 'album' ? g.artist || '专辑' : g.kind === 'playlist' ? (g.artist ? `${g.artist} 的歌单` : '歌单') : '歌手', g.count ? `${g.count} 首` : '', g.sourceName].filter(Boolean).join(' · ');
+  const groupNote = g => [g.kind === 'album' ? g.artist || '专辑' : g.kind === 'playlist' ? (g.artist ? `${g.artist} 的歌单` : '歌单') : '歌手', g.count ? `${g.count} 首` : '', g.sourceName !== g.artist ? g.sourceName : ''].filter(Boolean).join(' · ');
   /** An album, an artist or a playlist found: opens its songs. */
   const groupRow = (g, i) => `<div class="list-row music-row"><button type="button" class="music-row-main" data-action="open-group" data-i="${i}"><span><strong>${esc(g.name)}</strong><small>${esc(groupNote(g))}</small></span></button>${icon('next')}</div>`;
   /** The songs of the 歌单 shown that the filter finds: [[song, its place in the 歌单], …]. */
@@ -182,7 +185,8 @@ export function musicApp(ctx) {
         + (found.length ? `<div class="group">${kind === 'song' ? results.map((x, i) => songRow(x, i, 'results')).join('') : groups.map(groupRow).join('')}</div>`
           : !sources.length ? empty('还没有音源', '插件不自带音源。在右上角「设置 → 音源」里添加你自己的音源地址，就能在这里搜歌。', 'search') : '')
         + (searching ? '<p class="hint" role="status">正在搜……</p>' : more && found.length ? `<div class="actions">${btn('more-results', '加载更多', 'secondary')}</div>` : '')
-        + (searchNote && !searching ? `<p class="hint">${esc(searchNote)}</p>` : '');
+        + (searchNote && !searching ? `<p class="hint">${esc(searchNote)}</p>` : '')
+        + discoverHTML();
     v.draw(heading('音乐', btn('settings', icon('sliders'), 'round-button', 'aria-label="音乐设置"'), `Music · ${songs.length} 首`)
       + nowPlaying()
       + `<div class="segmented" role="group" aria-label="歌单、正文点的歌、搜索或写歌">${[['library', '歌单'], ['heard', '正文点的歌'], ['search', '搜索'], ['write', '写歌']].map(([k, l]) => `<button data-action="tab" data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>`
@@ -262,10 +266,11 @@ export function musicApp(ctx) {
         ${s.bgm !== 'off' ? toggle('taste', '点歌时参考我的歌单', s.taste, '每次随机挑歌单里的一些歌给剧情模型当口味参考，让它选风格相近的别的歌，每次都换不一样的；关掉就完全不带歌单。') : ''}
         ${toggle('share', '角色会给你分享歌', s.share, '手机聊天里，角色偶尔会分享一首歌给你（一张歌曲卡片，点一下就放）；你自己放歌时，手机聊天里的角色也知道你在听什么（一起听；背景音乐不算，正文也不会知道，免得写进剧情）。')}</div>`
       + groupTitle('音源', help('插件不自带任何音源。音源是两个网址：一个用来搜歌（在放搜索词的地方写 {{query}}），一个用来取歌的播放链接（在放歌曲 ID 的地方写 {{id}}）；再告诉插件结果里列表、歌名、歌手、链接分别在哪（用点隔开的路径，比如 data.url）。\n\n音源不让网页直接读取时，会改用酒馆自带的代理（要在酒馆的 config.yaml 里把 enableCorsProxy 改成 true）。'))
-      + `<div class="group">${s.sources.map((x, i) => `<div class="list-row music-source"><span><strong>${esc(x.name)}</strong><small>${esc(x.search.replace(/^https?:\/\//, '').split('/')[0])}</small></span><input class="switch" type="checkbox" data-source-on="${i}" aria-label="启用 ${esc(x.name)}" ${x.enabled ? 'checked' : ''}>${btn('edit-source', icon('edit'), 'icon-button', `data-i="${i}" aria-label="编辑 ${esc(x.name)}"`)}</div>`).join('') || '<p class="hint" style="padding:12px 16px">还没有音源。</p>'}</div>
+      + `<div class="group">${s.sources.map((x, i) => `<div class="list-row music-source"><span><strong>${esc(x.name)}</strong><small>${esc((isGoMusic(x) ? 'Go Music · ' + x.base : x.search).replace(/^(Go Music · )?https?:\/\//, '$1').split('/')[0])}</small></span><input class="switch" type="checkbox" data-source-on="${i}" aria-label="启用 ${esc(x.name)}" ${x.enabled ? 'checked' : ''}>${btn('edit-source', icon('edit'), 'icon-button', `data-i="${i}" aria-label="编辑 ${esc(x.name)}"`)}</div>`).join('') || '<p class="hint" style="padding:12px 16px">还没有音源。</p>'}</div>
         <div class="actions">${btn('add-source', icon('add') + '添加音源', 'secondary')}</div>`);
   }
   function renderSource() {
+    if (isGoMusic(editing.draft)) return renderGoSource();
     const d = editing.draft;
     const sourceField = ([k, l, ph]) => field(l, input('src-' + k, d[k] || '', k.endsWith('Path') || k === 'name' ? 'text' : 'url', `placeholder="${esc(ph)}" autocomplete="off" spellcheck="false"`));
     v.draw(heading(editing.index < 0 ? '添加音源' : '编辑音源', '', 'Source')
@@ -280,11 +285,156 @@ export function musicApp(ctx) {
       <div class="savebar">${btn('cancel-source', '取消', 'secondary')}${btn('save-source', '保存', 'primary')}</div>`);
   }
   const readDraft = () => {
+    if (isGoMusic(editing.draft)) {
+      for (const k of ['name', 'base']) { const el = v.root.querySelector(`[data-field="src-${k}"]`); if (el) editing.draft[k] = el.value.trim(); }
+      return editing.draft;
+    }
     for (const [k] of [...SOURCE_FIELDS, ...GROUP_FIELDS]) { const el = v.root.querySelector(`[data-field="src-${k}"]`); if (el) editing.draft[k] = el.value.trim(); }
     const direct = v.root.querySelector('[data-field="src-direct"]'); if (direct) editing.draft.direct = direct.checked;
     return editing.draft;
   };
   function saveSources(list) { api.saveMusic({sources: list}); }
+
+  // ---------- Go Music (core/go-music.js): the user's own go-music-api ----------
+  // goLogin: which platforms the backend being edited holds a login for ({base, loading, logins, error});
+  // goAccount: per platform, the account's playlists read ({loading, lists, error, done, importing});
+  // discover: 发现 in the search tab ({source, view, recommend, categories, platform, category, lists, loading, error})
+  let goLogin = null, goAccount = {}, discover = null;
+  const goDraft = () => structuredClone(readDraft());
+  /** Which platforms the backend holds a login for: asked when its editor opens, after the address changes, after a login. */
+  async function loadLogins() {
+    const draft = goDraft(), mine = goLogin = {base: draft.base, loading: !!draft.base, logins: {}, error: ''};
+    if (!draft.base) return;
+    try { mine.logins = await api.goMusicLogins(draft); } catch (error) { mine.error = error.message; }
+    mine.loading = false;
+    if (goLogin === mine && !v.disposed && mode === 'source') renderSource();
+  }
+  /** A Go Music source being added or edited: its name, its address, which platforms it searches; then 登录 and, once
+   *  saved, the account's own playlists to take in. */
+  function renderGoSource() {
+    const d = editing.draft, saved = editing.index >= 0;
+    if (d.base && goLogin?.base !== d.base) loadLogins();
+    const L = goLogin?.base === d.base ? goLogin : null, logins = L?.logins || {};
+    const loginRow = l => `<div class="list-row go-login"><span><strong>${esc(l.name)}</strong><small>${!d.base ? '先填地址' : L?.loading ? '正在看……' : logins[l.id] ? '已登录' : '没登录'}</small></span>`
+      + (d.base ? `<span class="go-tools">${l.qr.length ? btn('go-qr', '扫码', 'secondary small', `data-login="${l.id}"`) : ''}${btn('go-cookie', '贴 Cookie', 'secondary small', `data-login="${l.id}"`)}${logins[l.id] ? btn('go-logout', '退出', 'text-button small', `data-login="${l.id}"`) : ''}</span>` : '') + '</div>';
+    const accountRows = GO_ACCOUNT_LISTS.filter(p => logins[p]).map(p => {
+      const a = goAccount[p];
+      return `<div class="list-row go-account"><span><strong>${esc(GO_PLATFORMS[p])}账号里的歌单</strong><small>${a?.loading ? '正在读……' : a?.error ? esc(a.error) : a?.lists ? `${a.lists.length} 个` : '包括「我喜欢」'}</small></span>${btn('go-lists', a?.lists ? '再读一次' : '读取', 'secondary small', `data-p="${p}" ${a?.loading ? 'disabled' : ''}`)}</div>`
+        + (a?.lists ? a.lists.map((g, i) => `<div class="list-row music-row"><span><strong>${esc(g.name)}</strong><small>${g.count ? g.count + ' 首' : '歌单'}</small></span>${btn('go-import', a.done.has(i) ? '已导入' : a.importing === i ? '导入中' : '导入', 'secondary small', `data-p="${p}" data-i="${i}" ${a.done.has(i) || a.importing !== undefined ? 'disabled' : ''}`)}</div>`).join('') : '');
+    }).join('');
+    v.draw(heading(saved ? '编辑音源' : '添加音源', '', 'Go Music')
+      + `<div class="group pad">${field('名字', input('src-name', d.name || '', 'text', 'maxlength="30" placeholder="Go Music"'))}${field('Go Music 的地址', input('src-base', d.base || '', 'url', 'placeholder="http://127.0.0.1:8080" autocomplete="off" spellcheck="false"'), '你自己跑的 go-music-api：同一台电脑写 127.0.0.1，手机连电脑上的要写电脑的局域网地址（比如 http://192.168.1.5:8080）。')}</div>`
+      + groupTitle('搜哪些平台', help('都不选就按后端自己的默认平台搜。选了的话只搜这些，「发现」里的推荐和分类也只看这些平台。'))
+      + `<div class="group pad"><div class="filter-row go-platforms" role="group" aria-label="搜哪些平台">${Object.entries(GO_PLATFORMS).map(([k, name]) => btn('go-platform', esc(name), '', `data-p="${k}" aria-pressed="${(d.platforms || []).includes(k)}"`)).join('')}</div></div>`
+      + `<div class="actions">${btn('test-source', icon('search') + '用「晴天」试一试', 'secondary')}</div>`
+      + (test ? `<div class="group pad music-test">${test.error ? `<p class="hint">${esc(test.error)}</p>` : `<p class="hint">搜到 ${test.songs.length} 首${test.link ? '，第一首也能放' : ''}：</p>${test.songs.slice(0, 5).map(s => `<p class="music-test-row">${esc(label(s))} · ${esc(s.sourceName || '')}</p>`).join('')}${test.linkError ? `<p class="hint">放第一首时：${esc(test.linkError)}</p>` : ''}`}</div>` : '')
+      + groupTitle('登录', help('会员歌、账号里的歌单要登录。「扫码」用那个平台的 App 扫；在手机上看时，点「存成图片」，再在 App 的扫一扫里从相册选它。「贴 Cookie」贴从网页版复制的整段 Cookie。登录都交给你自己的后端保存，小手机不存、也不显示。'))
+      + `<div class="group">${GO_LOGINS.map(loginRow).join('')}</div>`
+      + (L?.error ? `<p class="hint">${esc(L.error)}</p>` : '')
+      + (!saved ? '<p class="hint">保存以后，登录了的账号里的歌单能在这里导进小手机。</p>' : accountRows ? groupTitle('账号里的歌单') + `<div class="group">${accountRows}</div>` : '')
+      + (saved ? `<div class="actions">${btn('delete-source', icon('trash') + '删除这个音源', 'text-button danger-text')}</div>` : '')
+      + `<div class="savebar">${btn('cancel-source', '取消', 'secondary')}${btn('save-source', '保存', 'primary')}</div>`);
+  }
+  /** QQ 音乐 logs in by QQ or by WeChat: which one. */
+  function pickWay(login) {
+    return new Promise(resolve => {
+      const d = ctx.dialog(`${login.name}扫码登录`, `<div class="group">${login.qr.map(w => `<button type="button" class="list-row music-pick" data-way="${w}"><span><strong>${esc(GO_QR_NAMES[w] || w)}</strong></span></button>`).join('')}</div>`);
+      let done = false;
+      const finish = value => { if (!done) { done = true; resolve(value); } };
+      d.onClose(() => finish(null));
+      d.body.addEventListener('click', e => { const b = e.target.closest('[data-way]'); if (b) { finish(b.dataset.way); d.close(); } });
+    });
+  }
+  /** A login link as a picture to show (SVG: crisp at any size, and drawn anywhere). */
+  const qrPicture = text => text ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(qrSvg(text, {label: '登录二维码'})) : '';
+  /** The picture to keep (存成图片): a PNG, which a phone's gallery shows and a scanning app can pick from it. */
+  async function qrFile(text, src) {
+    if (!text) { const [head, body] = src.split(','); return new ctx.win.Blob([Uint8Array.from(ctx.win.atob(body), c => c.charCodeAt(0))], {type: head.slice(5).split(';')[0]}); }
+    const {size, dark} = qrMatrix(text), scale = 10, full = (size + 8) * scale, canvas = ctx.doc.createElement('canvas');
+    canvas.width = canvas.height = full;
+    const g = canvas.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, full, full); g.fillStyle = '#000';
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (dark[y][x]) g.fillRect((x + 4) * scale, (y + 4) * scale, scale, scale);
+    return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(Error('画不出图片')), 'image/png'));
+  }
+  /** 扫码登录: the code shown and asked about every 2 seconds while the sheet is open, until it is done or expired. */
+  async function qrLogin(login, way) {
+    const draft = goDraft();
+    let session;
+    try { session = await api.goMusicQr(draft, way); } catch (error) { ctx.notify(error.message, {error: true}); return; }
+    const src = session.image || qrPicture(session.url);
+    if (!src) { ctx.notify('后端没有给出二维码', {error: true}); return; }
+    const ask = `${GO_QR_NAMES[way] || '扫一扫'}这个二维码，在 App 里确认登录`;
+    const d = ctx.dialog(`${login.name}扫码登录`, `<div class="go-qr"><img src="${esc(src)}" alt="${esc(login.name)}的登录二维码" data-go-qr-img></div><p class="hint go-qr-state" role="status" data-go-qr-state>${esc(ask)}</p>`
+      + `<div class="actions">${btn('go-qr-save', icon('download') + '存成图片', 'secondary')}</div><p class="hint">在这台手机上看的话：点「存成图片」，再在 App 的扫一扫里从相册选它。</p>`);
+    const line = d.body.querySelector('[data-go-qr-state]');
+    let alive = true, misses = 0;
+    d.onClose(() => { alive = false; });
+    const tick = async () => {
+      if (!alive) return;
+      let s = null;
+      try { s = await api.goMusicQrCheck(draft, way, session.key); misses = 0; }
+      catch (error) { if (++misses >= 3) { alive = false; line.textContent = '问不到登录结果：' + error.message; return; } }
+      if (!alive) return;
+      if (s?.status === 'success') { alive = false; line.textContent = '登录好了'; ctx.notify(`${login.name}登录好了`); loadLogins(); ctx.win.setTimeout(() => d.close(), 900); return; }
+      if (s?.status === 'expired') { alive = false; line.textContent = '二维码过期了：关掉再点一次「扫码」'; return; }
+      if (s?.status === 'failed') { alive = false; line.textContent = '没登录成功' + (s.message ? '：' + s.message : ''); return; }
+      if (s) line.textContent = s.status === 'scanned' ? '扫好了：在 App 里点「确认登录」' : ask;
+      ctx.win.setTimeout(tick, 2000);
+    };
+    ctx.win.setTimeout(tick, 1500);
+    d.body.addEventListener('click', async e => {
+      if (!e.target.closest('[data-action=go-qr-save]')) return;
+      try { ctx.notify('存好了：' + await saveFile(ctx.doc, await qrFile(session.image ? '' : session.url, src), `${login.name}登录二维码`)); } catch (error) { ctx.notify(error.message, {error: true}); }
+    });
+  }
+  /** 贴 Cookie: sent on to the backend as it is; the phone keeps nothing. */
+  function cookieSheet(login) {
+    const d = ctx.dialog(`${login.name} · 贴 Cookie`, `<div class="group pad">${field('Cookie', textArea('go-cookie', '', 'rows="5" autocomplete="off" spellcheck="false" placeholder="从网页版复制的整段 Cookie"'), '直接交给你自己的 Go Music 后端保存，小手机不存、也不显示。')}</div>`
+      + `<p class="hint">怎么拿：电脑浏览器登录${esc(login.name)}的网页版，按 F12 打开开发者工具，在「网络」里刷新页面，点开一个请求，复制「请求标头」里 Cookie 后面的整段。</p><div class="savebar">${btn('go-cookie-save', '交给后端', 'primary')}</div>`);
+    d.body.addEventListener('click', async e => {
+      if (!e.target.closest('[data-action=go-cookie-save]')) return;
+      const value = d.body.querySelector('[data-field=go-cookie]')?.value.trim() || '';
+      if (!value) { ctx.notify('先把 Cookie 贴进来', {error: true}); return; }
+      try { await api.goMusicSetCookie(goDraft(), login.id, value); d.close(); ctx.notify(`${login.name}的 Cookie 交给后端了`); loadLogins(); }
+      catch (error) { ctx.notify(error.message, {error: true}); }
+    });
+  }
+  /** The Go Music source 发现 reads (the first one turned on). */
+  const goOn = () => state().sources.find(x => x.enabled && isGoMusic(x) && x.base) || null;
+  /** 发现: what the backend recommends, or its 歌单分类 and a category's playlists. */
+  async function loadDiscover(what = 'recommend', options = {}) {
+    const s = goOn();
+    if (!s) return;
+    if (!discover || discover.source !== s.id) discover = {source: s.id, view: 'recommend', recommend: null, categories: null, platform: '', category: '', lists: null, loading: '', error: ''};
+    const mine = discover;
+    mine.loading = what; mine.error = '';
+    try {
+      if (what === 'recommend') mine.recommend = await api.goMusicDiscover(s.id, {what});
+      if (what === 'categories') { mine.categories = await api.goMusicDiscover(s.id, {what}); mine.platform ||= mine.categories[0]?.platform || ''; }
+      if (what === 'category') mine.lists = await api.goMusicDiscover(s.id, {what, platform: options.platform, category: options.category});
+    } catch (error) { mine.error = error.message; }
+    if (discover !== mine) return;
+    mine.loading = '';
+    if (!v.disposed && mode === 'main' && tab === 'search') render();
+  }
+  /** 发现 under the search box while nothing is searched (a Go Music source turned on). */
+  function discoverHTML() {
+    const s = goOn();
+    if (!s || query || results.length || searching || kind !== 'song') return '';
+    if (!discover || discover.source !== s.id) { loadDiscover(); return '<p class="hint" role="status">正在看推荐的歌单……</p>'; }
+    const D = discover, rows = list => list?.length ? `<div class="group">${list.map((g, i) => `<div class="list-row music-row"><button type="button" class="music-row-main" data-action="open-discover" data-i="${i}"><span><strong>${esc(g.name)}</strong><small>${esc(groupNote(g))}</small></span></button>${icon('next')}</div>`).join('')}</div>` : '';
+    const cats = D.categories?.find(c => c.platform === D.platform);
+    return groupTitle('发现 · ' + esc(s.name))
+      + `<div class="segmented" role="group" aria-label="发现">${[['recommend', '推荐歌单'], ['category', '分类']].map(([k, l]) => `<button data-action="discover-view" data-view="${k}" aria-pressed="${D.view === k}">${l}</button>`).join('')}</div>`
+      + (D.view === 'recommend' ? (D.loading === 'recommend' ? '<p class="hint" role="status">正在读……</p>' : rows(D.recommend) || (D.error ? '' : '<p class="hint">后端没有推荐的歌单</p>'))
+        : (!D.categories ? (D.loading === 'categories' ? '<p class="hint" role="status">正在读分类……</p>' : '')
+          : `<div class="filter-row" role="group" aria-label="平台">${D.categories.map(c => btn('discover-platform', esc(c.name), '', `data-p="${esc(c.platform)}" aria-pressed="${c.platform === D.platform}"`)).join('')}</div>`
+            + (cats ? `<div class="filter-row go-cats" role="group" aria-label="分类">${cats.categories.map(c => btn('discover-category', esc(c.name), '', `data-c="${esc(c.id)}" aria-pressed="${c.id === D.category}"`)).join('')}</div>` : '')
+            + (D.loading === 'category' ? '<p class="hint" role="status">正在读……</p>' : rows(D.lists))))
+      + (D.error ? `<p class="hint">${esc(D.error)}</p>` : '');
+  }
+  const discoverList = () => discover?.view === 'recommend' ? discover.recommend || [] : discover?.lists || [];
 
   /** Searches (songs, albums or artists); more: the next page added under the ones found. */
   async function search(next = false) {
@@ -428,6 +578,8 @@ export function musicApp(ctx) {
   // The line of what an import did goes when tapped (its 小 i still opens), and when the app is left.
   v.on('click', '.music-adding', (el, event) => { if (event.target.closest('[data-help]') || adding) return; addedNote = null; render(); });
   v.on('change', '[data-music-seek]', el => api.musicSeek?.(Number(el.value)));
+  // a Go Music address typed: the logins are asked of it
+  v.on('change', '[data-field=src-base]', () => { if (editing && isGoMusic(editing.draft)) { readDraft(); renderSource(); } });
   // finding songs in a long 歌单 as one types (only its rows are drawn again, the box keeps its focus)
   v.on('input', '[data-music-filter]', el => { filter = el.value; limit = STEP; redrawRows(); });
   v.on('input', '[data-music-seek]', el => { const p = v.root.querySelector('[data-music-pos]'); if (p) p.textContent = clock(Number(el.value)); });
@@ -521,10 +673,64 @@ export function musicApp(ctx) {
         });
         break;
       }
+      case 'go-platform': {
+        readDraft();
+        const p = el.dataset.p, list = editing.draft.platforms || [];
+        editing.draft.platforms = list.includes(p) ? list.filter(x => x !== p) : [...list, p];
+        renderSource();
+        break;
+      }
+      case 'go-qr': {
+        const login = GO_LOGINS.find(l => l.id === el.dataset.login);
+        const way = login && (login.qr.length > 1 ? await pickWay(login) : login.qr[0]);
+        if (way) qrLogin(login, way);
+        break;
+      }
+      case 'go-cookie': { const login = GO_LOGINS.find(l => l.id === el.dataset.login); if (login) cookieSheet(login); break; }
+      case 'go-logout': {
+        const login = GO_LOGINS.find(l => l.id === el.dataset.login);
+        if (!login || !await ctx.confirm(`退出${login.name}？`, '后端会删掉这个平台的登录。')) break;
+        try { await api.goMusicSetCookie(goDraft(), login.id, ''); ctx.notify(`${login.name}退出了`); loadLogins(); } catch (error) { ctx.notify(error.message, {error: true}); }
+        break;
+      }
+      case 'go-lists': {
+        const p = el.dataset.p, a = goAccount[p] = {loading: true, lists: null, error: '', done: new Set(), importing: undefined}, source = state().sources[editing.index];
+        renderSource();
+        try { a.lists = await api.goMusicAccountLists(source.id, p); } catch (error) { a.error = error.message; }
+        a.loading = false;
+        if (!v.disposed && mode === 'source') renderSource();
+        break;
+      }
+      case 'go-import': {
+        const a = goAccount[el.dataset.p], g = a?.lists?.[i];
+        if (!g || a.importing !== undefined) break;
+        a.importing = i; renderSource();
+        try {
+          const {songs: got} = await api.groupSongs(g.source, 'playlist', g.id);
+          if (!got.length) throw Error(`「${g.name}」里没读到歌`);
+          const list = await api.savePlaylist({name: g.name});
+          const {kept} = await api.addSongsTo(list.id, got.map(s => ({title: s.title, artist: s.artist, source: s.source, songId: s.id})));
+          a.done.add(i);
+          ctx.notify(`「${g.name}」导入了 ${kept} 首，在「歌单」里`);
+        } catch (error) { ctx.notify(error.message, {error: true}); }
+        a.importing = undefined;
+        if (!v.disposed && mode === 'source') renderSource();
+        break;
+      }
+      case 'discover-view': {
+        if (!discover) break;
+        discover.view = el.dataset.view;
+        if (discover.view === 'category' && !discover.categories) loadDiscover('categories');
+        render();
+        break;
+      }
+      case 'discover-platform': if (!discover) break; discover.platform = el.dataset.p; discover.category = ''; discover.lists = null; render(); break;
+      case 'discover-category': if (!discover) break; discover.category = el.dataset.c; discover.lists = null; render(); loadDiscover('category', {platform: discover.platform, category: discover.category}); break;
+      case 'open-discover': { const g = discoverList()[i]; if (g) { group = {g, songs: [], page: 0, more: false, loading: false, error: ''}; mode = 'group'; loadGroup(); } break; }
       case 'bgm': api.saveMusic({bgm: el.dataset.mode}); renderSettings(); break;
       case 'reset-rule': api.saveMusic({rule: DEFAULT_BGM_RULE}); renderSettings(); break;
-      case 'add-source': editing = {index: -1, draft: normalizeSource({name: '', search: '', url: ''}, state().sources.length)}; editing.draft.name = ''; test = null; mode = 'source'; render(); break;
-      case 'edit-source': editing = {index: i, draft: structuredClone(state().sources[i])}; test = null; mode = 'source'; render(); break;
+      case 'add-source': goAccount = {}; editing = {index: -1, draft: normalizeSource({name: '', search: '', url: ''}, state().sources.length)}; editing.draft.name = ''; test = null; mode = 'source'; render(); break;
+      case 'edit-source': goAccount = {}; editing = {index: i, draft: structuredClone(state().sources[i])}; test = null; mode = 'source'; render(); break;
       case 'fill-template': {
         const t = SELF_HOSTED.find(x => x.id === el.dataset.template), box = v.root.querySelector(`[data-field="base-${t?.id}"]`);
         const base = (box?.value.trim() || t?.example || '').replace(/\/+$/, '');
