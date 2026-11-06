@@ -2,6 +2,8 @@
 // does not add its World Info to them. This asks the tavern which entries the same scan would turn on (the active
 // character's book, global and chat books, constant entries, keywords found in the given text) without changing
 // anything (dry run: no activation events, timers left alone), and returns their text for the phone's own prompt.
+// Books the phone alone reads (0.9.37, a preset's loreExtraBooks) are not on in the tavern, so its scan does not see them:
+// they are scanned here, by the tavern's own rules for keys (scanBooks).
 import {cleanTagged} from './core/chat.js';
 
 // The most of it a phone request takes unless the chat preset says (loreMax; 0: none of our own): whole entries only.
@@ -11,10 +13,11 @@ const LORE_MAX = 30000;
  * texts: what to scan, oldest first (the phone conversation, recent story, the contacts' names).
  * persona / characters: the user's persona and the contacts' card text, for entries that also match those.
  * skipBooks / skipEntries: books, and entries ("book#uid", picked in the phone), left out.
+ * extraBooks: books the phone reads too though the tavern has them off (the story never sees them).
  * cleanTags: tags whose blocks are taken out of the text (a status bar the story asks for, which the phone must not copy).
  * Returns '' when the tavern has no World Info for this (or is older than 1.12.14).
  */
-export async function worldInfoFor(context, {texts = [], persona = '', characters = '', skipBooks = [], skipEntries = [], cleanTags = [], max: most = LORE_MAX, report = () => {}, load = () => import('/scripts/world-info.js')} = {}) {
+export async function worldInfoFor(context, {texts = [], persona = '', characters = '', skipBooks = [], skipEntries = [], extraBooks = [], cleanTags = [], max: most = LORE_MAX, report = () => {}, load = () => import('/scripts/world-info.js'), random = Math.random} = {}) {
   const limit = most || Infinity;
   const note = (kind, error, level = 'error') => { try { report('世界书读取', {kind, message: error?.message || String(error), stack: error?.stack}, level); } catch {} };
   try {
@@ -38,6 +41,20 @@ export async function worldInfoFor(context, {texts = [], persona = '', character
       parts = [r?.worldInfoBefore, r?.worldInfoAfter, ...(r?.anBefore || []), ...(r?.anAfter || []),
         ...(r?.worldInfoDepth || []).flatMap(d => d?.entries || []), ...(r?.worldInfoExamples || []).map(e => e?.content)];
     }
+    // The phone's own books, after the tavern's (those come first when the budget is short).
+    const own = extraBooks.filter(name => typeof name === 'string' && name.trim() && !skipBooks.includes(name));
+    if (own.length) {
+      let wi = null;
+      try { wi = await load(); } catch { /* the defaults below */ }
+      const on = activeBooks(ctx, wi), books = [];
+      for (const name of own) {
+        if (on.has(name)) continue;
+        try { books.push({name, data: await ctx.loadWorldInfo?.(name)}); } catch (error) { note(`读不到只给手机的「${name}」`, error, 'warn'); }
+      }
+      const subst = text => typeof ctx.substituteParams === 'function' ? ctx.substituteParams(text) : text;
+      parts = [...parts, ...scanBooks(books, {text: scan.join('\n'), persona, characters, skipEntries, subst, random,
+        defaults: {caseSensitive: !!wi?.world_info_case_sensitive, wholeWords: !!wi?.world_info_match_whole_words}})];
+    }
     const seen = new Set(), out = [];
     let used = 0;
     for (const part of parts) {
@@ -55,15 +72,10 @@ export async function worldInfoFor(context, {texts = [], persona = '', character
 /** How an entry is named in a preset's list of entries left out. */
 export const entryId = (book, uid) => `${book}#${uid}`;
 
-/**
- * The books the tavern has turned on now (global, the character's own and extra books, the chat's, the persona's), each
- * with its entries that are not switched off: what the phone could read, for picking what it leaves out.
- */
-export async function loreBooks(context, load = () => import('/scripts/world-info.js')) {
-  const ctx = context(), from = new Map();
+/** The books the tavern has on now: name → where from (全局, 角色卡 for the card's own and extra books, 聊天, 人设). */
+function activeBooks(ctx, wi) {
+  const from = new Map();
   const add = (name, where) => { if (typeof name === 'string' && name.trim()) from.set(name, [...new Set([...(from.get(name) || []), where])]); };
-  let wi = null;
-  try { wi = await load(); } catch { /* without the module only the character, chat and persona books are known */ }
   for (const name of wi?.selected_world_info || []) add(name, '全局');
   const character = ctx?.characters?.[ctx?.characterId];
   add(character?.data?.extensions?.world, '角色卡');
@@ -71,6 +83,72 @@ export async function loreBooks(context, load = () => import('/scripts/world-inf
   for (const name of wi?.world_info?.charLore?.find(x => x?.name === file)?.extraBooks || []) add(name, '角色卡');
   add(ctx?.chatMetadata?.world_info, '聊天');
   add(ctx?.powerUserSettings?.persona_description_lorebook, '人设');
+  return from;
+}
+
+// A key written as /pattern/flags is a regex, as in the tavern (an unescaped / inside makes it plain text).
+const REGEX_KEY = /^\/([\s\S]+?)\/([gimsuy]*)$/;
+function keyRegex(key) {
+  const m = REGEX_KEY.exec(key);
+  if (!m || /(^|[^\\])\//.test(m[1])) return null;
+  try { return new RegExp(m[1].replace('\\/', '/'), m[2]); } catch { return null; }
+}
+const escapeRegex = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Whether one key is in the text: regex, case (the entry's or the tavern's), whole words (one word only). */
+function keyHit(text, key, entry, defaults) {
+  const regex = keyRegex(key);
+  if (regex) { regex.lastIndex = 0; return regex.test(text); }
+  const exact = entry.caseSensitive ?? defaults.caseSensitive ?? false, whole = entry.matchWholeWords ?? defaults.wholeWords ?? false;
+  const hay = exact ? text : text.toLowerCase(), word = exact ? key : key.toLowerCase();
+  if (!whole || /\s/.test(word)) return hay.includes(word);
+  return new RegExp(`(?:^|\\W)(${escapeRegex(word)})(?:$|\\W)`).test(hay);
+}
+/**
+ * The entries of books the phone alone reads that turn on for this text, by the tavern's rules: constant ones; else a
+ * primary key in the text, and the secondary keys by the entry's logic (AND ANY, NOT ALL, NOT ANY, AND ALL); an entry
+ * with a probability under 100 is rolled. Recursion, timers and groups are the tavern's own and are not kept here.
+ * books: [{name, data}] (data as loadWorldInfo gives it). Returns their contents, the lower insertion order first.
+ */
+export function scanBooks(books, {text = '', persona = '', characters = '', skipEntries = [], subst = s => s, defaults = {}, random = Math.random} = {}) {
+  const skip = new Set(skipEntries), out = [];
+  for (const {name, data} of books) {
+    for (const e of Object.values(data?.entries || {})) {
+      if (!e || e.disable || skip.has(entryId(name, e.uid)) || !String(e.content ?? '').trim()) continue;
+      if (e.useProbability && Number(e.probability ?? 100) < 100 && random() * 100 >= Number(e.probability)) continue;
+      if (!e.constant) {
+        const hay = [text, e.matchPersonaDescription ? persona : '', e.matchCharacterDescription ? characters : ''].filter(Boolean).join('\n');
+        const keys = (Array.isArray(e.key) ? e.key : []).map(k => String(subst(String(k)) ?? '').trim()).filter(Boolean);
+        if (!keys.some(k => keyHit(hay, k, e, defaults))) continue;
+        const second = e.selective !== false && Array.isArray(e.keysecondary) ? e.keysecondary.map(k => String(subst(String(k)) ?? '').trim()).filter(Boolean) : [];
+        if (second.length) {
+          const hits = second.map(k => keyHit(hay, k, e, defaults)), any = hits.some(Boolean), all = hits.every(Boolean);
+          const logic = Number(e.selectiveLogic ?? 0);
+          if (!(logic === 1 ? !all : logic === 2 ? !any : logic === 3 ? all : any)) continue;
+        }
+      }
+      out.push({order: Number(e.order) || 0, text: String(subst(String(e.content)) ?? '')});
+    }
+  }
+  return out.sort((a, b) => a.order - b.order).map(x => x.text);
+}
+
+/** Every book the tavern has, for picking ones the phone alone reads (sorted, as the tavern lists them). */
+export async function loreNames(load = () => import('/scripts/world-info.js')) {
+  const wi = await load();
+  return [...new Set((wi?.world_names || []).filter(n => typeof n === 'string' && n.trim()))];
+}
+
+/**
+ * The books the tavern has turned on now (global, the character's own and extra books, the chat's, the persona's) and
+ * the ones the phone alone reads (extra: from 只给手机), each with its entries that are not switched off: what the
+ * phone could read, for picking what it leaves out.
+ */
+export async function loreBooks(context, load = () => import('/scripts/world-info.js'), {extra = []} = {}) {
+  const ctx = context();
+  let wi = null;
+  try { wi = await load(); } catch { /* without the module only the character, chat and persona books are known */ }
+  const from = activeBooks(ctx, wi);
+  for (const name of extra) if (typeof name === 'string' && name.trim() && !from.has(name)) from.set(name, ['只给手机']);
   const books = [];
   for (const [name, where] of from) {
     let data = null;
@@ -85,4 +163,4 @@ export async function loreBooks(context, load = () => import('/scripts/world-inf
 }
 
 /** The 世界书 options of a chat preset, for worldInfoFor. */
-export const loreOptions = preset => ({skipBooks: preset.loreSkipBooks || [], skipEntries: preset.loreSkipEntries || [], cleanTags: preset.cleanTags || [], max: preset.loreMax ?? LORE_MAX});
+export const loreOptions = preset => ({skipBooks: preset.loreSkipBooks || [], skipEntries: preset.loreSkipEntries || [], extraBooks: preset.loreExtraBooks || [], cleanTags: preset.cleanTags || [], max: preset.loreMax ?? LORE_MAX});

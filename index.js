@@ -16,7 +16,7 @@ import { createPictureHost } from './host-pictures.js';
 import {publicApi, registerDrawCommand} from './host-public.js';
 import { createChatHost } from './host-chat.js';
 import { createMomentsHost } from './host-moments.js'; import { createWardrobeHost } from './host-wardrobe.js'; import { withoutOutfits } from './core/wardrobe.js'; import { createGeneratorHost } from './host-generator.js';
-import { loreBooks } from './host-lore.js';
+import { loreBooks, loreNames } from './host-lore.js';
 import { createAppsHost } from './host-apps.js';
 import { readAssistantFiles } from './assistant-files.js';
 import { createAssistantHost } from './host-assistant.js';
@@ -448,7 +448,7 @@ function connect(source){
   writePrompt:(idea,cast)=>{check();return pictures.writePrompt(idea,cast);},
   autoPickVoice:name=>{check();return voiceHost.pick(String(name||''),{force:true});},
   soundState:()=>{check();return soundHost.state();},
-  soundListen:id=>{check();return soundHost.listen(String(id||''));},
+  soundListen:id=>{check();return soundHost.listen(String(id||''));},soundTakeListen:(key,blob)=>{check();return soundHost.listenTake(String(key||''),blob);},soundPrompt:input=>{check();return soundHost.prompt({text:String(input?.text||''),mode:input?.mode==='apply'?'apply':'english',hint:String(input?.hint||'')});},
   soundStopAmbience:()=>{check();soundHost.stopAmbience();},
   chatPictureStats:()=>{check();return pictures.pictureStats();},
   planLatestPictures:()=>{check();return pictures.planLatest();},planLatestVoice:()=>{check();return pictures.voiceLatest();},
@@ -491,7 +491,7 @@ function connect(source){
    playFavorite:id=>{check();playbackMessage=null;return api.playFavorite(id);},
   diagnose:()=>{check();return diagnose();},
   tavernAvatars:()=>{check();return tavernAvatars();},
-  loreBooks:async()=>{check();return loreBooks(context);},
+  loreBooks:async options=>{check();return loreBooks(context,undefined,{extra:Array.isArray(options?.extra)?options.extra:[]});},loreNames:async()=>{check();return loreNames();},
   panelFloating:()=>{check();return !!panel?.classList.contains('floating');},
   panelDrag:(phase,sx,sy)=>{check();return panelDrag(phase,sx,sy);},
   panelSize:()=>{check();return panelSize();},

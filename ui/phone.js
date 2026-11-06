@@ -35,6 +35,13 @@ const LOADERS = {
   generator: () => import('./generator.js').then(m => m.generatorApp)
 };
 const FACTORIES = {}, loading = {};
+// After this long without its module, the phone says the tavern is slow (once a page, per app).
+export const SLOW_APP_MS = 8000;
+/** Says once, after ms, that what is waited for is still coming, if check() says it still is. Returns a cancel. */
+export function waitNote(win, ms, check, say) {
+  const timer = win.setTimeout(() => { if (check()) say(); }, ms);
+  return () => win.clearTimeout(timer);
+}
 /** An app's module, once (a load that failed is tried again next time). */
 function loadApp(name) {
   return loading[name] ||= LOADERS[name]().then(factory => (FACTORIES[name] = factory), error => { delete loading[name]; throw error; });
@@ -69,6 +76,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   let today = null;
   const media = win.matchMedia('(prefers-color-scheme: dark)'), motion = win.matchMedia('(prefers-reduced-motion: reduce)');
   let panelVisible = true, active = null, locked = false, sheet = null, disposed = false, wanted = null;
+  // Apps whose slow load was already said (once a page).
+  const slowSaid = new Set();
   let clearIcons = new Set(), lastPhase = '', preferences = null, appearanceKey = '', appearanceEpoch = 0, toastTimer, animation, openTimer, unread = 0, unreadTimer, fresh = 0, freshTimer;
   let playback = api.status();
 
@@ -355,13 +364,18 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   function open(name, roleId, from = null) {
     if (!LOADERS[name]) return;
     if (!FACTORIES[name]) {
-      // Its module has not come yet (a tap in the first moment after the phone opened): it comes, then the app opens,
-      // unless another was asked for meanwhile. The icon breathes until then.
+      // Its module has not come yet (a tap in the first moment after the phone opened, or a tavern that answers slowly):
+      // it comes, then the app opens, unless another was asked for meanwhile. The icon breathes until then; past a few
+      // seconds the phone says why (a tavern held back by a phone's power saving answers every file slowly).
       wanted = name;
       const mark = from || iconOf(name);
       mark?.setAttribute?.('data-loading', '');
-      loadApp(name).then(() => { mark?.removeAttribute?.('data-loading'); if (wanted !== name || disposed) return; wanted = null; open(name, roleId, from); },
-        error => { mark?.removeAttribute?.('data-loading'); if (wanted !== name || disposed) return; wanted = null; notify('这个 App 没有打开：' + (error?.message || '加载失败'), {error: true}); });
+      const said = slowSaid.has(name) ? () => {} : waitNote(win, SLOW_APP_MS, () => wanted === name && !FACTORIES[name] && !disposed, () => {
+        slowSaid.add(name);
+        notify(`「${APPS[name]?.name || name}」还在下载：酒馆这会儿回得很慢（手机开了省电模式、酒馆在后台被限制时常见）。下载好了会自己打开。`);
+      });
+      loadApp(name).then(() => { said(); mark?.removeAttribute?.('data-loading'); if (wanted !== name || disposed) return; wanted = null; open(name, roleId, from); },
+        error => { said(); mark?.removeAttribute?.('data-loading'); if (wanted !== name || disposed) return; wanted = null; notify('这个 App 没有打开：' + (error?.message || '加载失败'), {error: true}); });
       return;
     }
     wanted = null;
@@ -493,6 +507,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const idle = fn => win.requestIdleCallback ? win.requestIdleCallback(fn, {timeout: 3000}) : win.setTimeout(fn, 150);
     let i = 0;
     const next = () => {
+      // An app the user is waiting for goes first: on a slow tavern the files queue behind one another.
+      if (wanted && LOADERS[wanted] && !FACTORIES[wanted] && !disposed) { loadApp(wanted).catch(() => {}).finally(() => idle(next)); return; }
       while (i < order.length && FACTORIES[order[i]]) i++;
       if (disposed || i >= order.length) return;
       loadApp(order[i++]).catch(() => {}).finally(() => idle(next));

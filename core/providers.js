@@ -291,16 +291,24 @@ export class Providers{
   return {voices:q?all.filter(v=>v.name.toLowerCase().includes(q)||v.id.toLowerCase().includes(q)):all,more:false,token:'',note:note||(all.length?(listed.length?`自己添加的 ${own.length} 个，服务列出的 ${listed.length} 个`:'自己的接口里添加的音色'):'还没有音色：在引擎 App 的「自己的接口」里添加，或者填音色列表地址')};
  }
  /** ElevenLabs 音效 (text to sound effects): an English description to an MP3. seconds 0: ElevenLabs picks; loop: an ambience that loops seamlessly. */
- async soundEffect({text,seconds=0,loop=false},signal=new AbortController().signal){
-  const body={text:String(text||'').slice(0,450),model_id:'eleven_text_to_sound_v2',prompt_influence:.4,...(seconds?{duration_seconds:Math.min(30,Math.max(.5,Number(seconds)))}:{}),...(loop?{loop:true}:{})};
+ async soundEffect(options,signal=new AbortController().signal){return (await this.soundEffectTake(options,signal)).blob;}
+ /**
+  * One take of an effect, and what it cost (the character-cost header, when ElevenLabs lets the page read it; else null).
+  * model: eleven_text_to_sound_v3 unless said (v2 goes on 2027-03-01); influence: how closely it follows the prompt (0–1);
+  * format: an output_format (mp3_44100_192 needs Creator, wav_48000 Pro).
+  */
+ async soundEffectTake({text,seconds=0,loop=false,influence=.3,model='eleven_text_to_sound_v3',format='mp3_44100_128'},signal=new AbortController().signal){
+  const weight=Number(influence);
+  const body={text:String(text||'').slice(0,450),model_id:String(model||'eleven_text_to_sound_v3'),prompt_influence:Number.isFinite(weight)?Math.min(1,Math.max(0,weight)):.3,...(seconds?{duration_seconds:Math.min(30,Math.max(.5,Number(seconds)))}:{}),...(loop?{loop:true}:{})};
   if(!body.text.trim())throw Error('音效描述是空的');
-  const url='https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128',send=()=>this.fetch(url,{method:'POST',headers:{...this.headers('eleven'),'Content-Type':'application/json'},body:JSON.stringify(body)},signal);
+  const url='https://api.elevenlabs.io/v1/sound-generation?output_format='+encodeURIComponent(String(format||'mp3_44100_128')),send=()=>this.fetch(url,{method:'POST',headers:{...this.headers('eleven'),'Content-Type':'application/json'},body:JSON.stringify(body)},signal);
   let response=await send();const count=this.keyPool('eleven')?.count||0;
   for(let tried=1;!response.ok&&count>1&&tried<count&&KEY_SWITCH.has(response.status);tried++){if(!this.nextKey('eleven'))break;await response.body?.cancel?.().catch(()=>{});response=await send();}
   if(!response.ok)throw await httpError('eleven',response,'音效生成失败',[this.currentKey('eleven')]);
   try{this.onSpend?.('eleven');}catch{}
+  const cost=Number(response.headers?.get?.('character-cost'));
   const bytes=await limitedBytes(response);if(!bytes.length)throw Error('ElevenLabs 没有返回声音');
-  return new Blob([bytes],{type:'audio/mpeg'});}
+  return {blob:new Blob([bytes],{type:/^wav_/.test(String(format))?'audio/wav':/^opus_/.test(String(format))?'audio/ogg':'audio/mpeg'}),cost:Number.isFinite(cost)&&cost>=0?cost:null};}
  post(request,body,signal){if(request.engine==='doubao'){const key=this.currentKey('doubao'),headers={'Content-Type':'application/json','X-Api-Resource-Id':request.resourceId,'X-Api-Request-Id':crypto.randomUUID(),...(request.appId?{'X-Api-App-Id':request.appId,'X-Api-Access-Key':key}:{'X-Api-Key':key})};if(!key)throw Error('请先填写豆包语音的 API Key');return this.fetch(request.url,{method:'POST',headers,body:JSON.stringify(body)},signal).catch(error=>{if(!/无法连接/.test(error.message)||proxyAddress(request.url))throw error;throw Error(/^https?:\/\/openspeech\.bytedance\.com\//i.test(request.url)?DOUBAO_DIRECT_NOTE:DOUBAO_RELAY_NOTE);});}
  const init={method:'POST',headers:{...this.headers(request.engine),'Content-Type':'application/json',...request.headers},body:JSON.stringify(body)};return request.viaTavern?this.viaTavern(request.url,init,signal):this.fetch(request.url,init,signal);}
  /** Fish's own /v1/tts lets no web page call it: asked through the tavern's proxy, which must be switched on. */

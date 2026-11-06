@@ -718,8 +718,8 @@ export function chatApp(ctx) {
     paintPhotos();
     if (bgPhoto) photoURL(bgPhoto).then(url => { const box = v.root.querySelector('.msgs'); if (box && url) box.style.backgroundImage = `url("${url}")`; });
     eggs(list);
-    // 宠物: after the chat is drawn (the layer stays in .msgs-wrap when it is drawn again).
-    petsLayer.attach(v.root.querySelector('.msgs-wrap'), v.root.querySelector('.msgs'));
+    // 宠物: after the chat is drawn (the layer stays in .msgs-wrap when it is drawn again); where they were is kept by chat.
+    petsLayer.attach(v.root.querySelector('.msgs-wrap'), v.root.querySelector('.msgs'), {key: threadId, box: () => v.root.querySelector('[data-field=draft]')});
   }
   // 关键词彩蛋: the messages shown since this chat was opened, the first one that calls for an egg plays it.
   let eggSeen = {thread: null, ids: new Set()};
@@ -997,6 +997,7 @@ export function chatApp(ctx) {
     syncSend();
     const q = quote;
     quote = null;
+    petsLayer.sent();
     await post([{from: 'me', kind: 'text', text, ...(q ? {quote: q} : {})}]);
   }
   /** Paper plane while there is text; 让对方回复 when the box is empty; 停止 while the reply is being written. */
@@ -2273,7 +2274,7 @@ export function chatApp(ctx) {
     });
   }
 
-  v.on('input', '[data-field=draft]', (el, e) => { keepDraft(threadId, el.value); syncSend(); holdAuto(); atPicker(el, e); });
+  v.on('input', '[data-field=draft]', (el, e) => { keepDraft(threadId, el.value); syncSend(); holdAuto(); atPicker(el, e); if (el.value.trim()) petsLayer.typing(true); });
   // The + panel's page dots follow the swipe (scroll does not bubble: heard on the way down); a chat scrolled up near
   // its top draws its earlier messages.
   v.root.addEventListener('scroll', e => {

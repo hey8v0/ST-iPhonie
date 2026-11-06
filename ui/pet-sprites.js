@@ -1,13 +1,15 @@
 // 宠物 (0.9.36): the pets' pixel pictures, drawn here from small maps (no picture files): each kind is a left half
 // mirrored into a whole 20×20, with its eyes, mouth and legs put on for each frame. A frame strip per kind is drawn once
 // as an SVG picture and used as a CSS background (steps between frames are the browser's).
+// 0.9.37: asleep (legs tucked in), a yawn, dizzy, looking aside, and two frames of each kind's own habit (the cat licks
+// its paw, the chick pecks, the slime bounces — that one is CSS —, the crab snaps its claws).
 export const PET_SIZE = 20;
-export const PET_FRAMES = Object.freeze(['stand', 'blink', 'walk1', 'walk2', 'happy', 'sad', 'held', 'eat']);
+export const PET_FRAMES = Object.freeze(['stand', 'blink', 'walk1', 'walk2', 'happy', 'sad', 'held', 'eat', 'sleep', 'yawn', 'dizzy', 'look', 'habit1', 'habit2']);
 
 const mirror = half => half.map(row => row + [...row].reverse().join(''));
 // Eyes, 3 wide and 2 high ('_' keeps what is there); sad ones are mirrored for the right eye.
-const EYES = {open: ['ew_', 'ee_'], closed: ['___', 'kkk'], happy: ['_k_', 'k_k'], sad: ['k__', '_kk'], wide: ['ee_', 'ee_']};
-const FACE = {stand: 'open', blink: 'closed', walk1: 'open', walk2: 'open', happy: 'happy', sad: 'sad', held: 'wide', eat: 'closed'};
+const EYES = {open: ['ew_', 'ee_'], closed: ['___', 'kkk'], happy: ['_k_', 'k_k'], sad: ['k__', '_kk'], wide: ['ee_', 'ee_'], dizzy: ['k_k', '_k_'], look: ['_ew', '_ee']};
+const FACE = {stand: 'open', blink: 'closed', walk1: 'open', walk2: 'open', happy: 'happy', sad: 'sad', held: 'wide', eat: 'closed', sleep: 'closed', yawn: 'closed', dizzy: 'dizzy', look: 'look', habit1: 'closed', habit2: 'open'};
 
 export const PET_ART = Object.freeze({
   cat: {
@@ -22,7 +24,11 @@ export const PET_ART = Object.freeze({
       walk1: {18: '...kbbkbbbbbbbbbk...', 19: '....kk.kkkkkkkkk....'},
       walk2: {18: '...kbbbbbbbbbkbbk...', 19: '....kkkkkkkkk.kk....'},
       held: {18: '...kbbkbbbbbbkbbk...', 19: '...kbk.k....k.kbk...'},
+      sleep: {18: '...kbbbbbbbbbbbbk...', 19: '....kkkkkkkkkkkk....'},
+      habit1: {18: '...kbbkbbbbbbbbbk...', 19: '....kk.kkkkkkkkk....'},
     },
+    // A tongue out at the mouth (licking its paw).
+    mouths: {habit1: 'pp'},
   },
   chick: {
     palette: {k: '#7a5410', b: '#ffd84a', d: '#f0b92a', l: '#fff3a8', w: '#ffffff', e: '#3a2a08', o: '#ff9a2e', r: '#ff5a4a', p: '#ffb0a0', c: '#7fc8ff'},
@@ -35,6 +41,7 @@ export const PET_ART = Object.freeze({
       walk1: {19: '.....o.o....o.o.....'},
       walk2: {19: '......o.o.....o.o...'},
       held: {18: '.....kkkkkkkkkk.....', 19: '......o..oo..o......'},
+      sleep: {19: '....................'},
     },
   },
   slime: {
@@ -49,6 +56,7 @@ export const PET_ART = Object.freeze({
       walk2: {17: '.kddbbbbbbbbbbbbddk.', 18: '..kkdddddddddddddkk.', 19: '....kkkkkkkkkkkkkk..'},
       held: {18: '..kddddddddddddddk..', 19: '...kk..kkkkkk..kk...'},
     },
+    face: {habit1: 'happy', habit2: 'happy'},
   },
   crab: {
     palette: {k: '#7a2a22', b: '#ff6b5a', d: '#d94a3c', l: '#ffb3a7', w: '#ffffff', e: '#2a0f0c', p: '#ffb0b8', c: '#7fc8ff'},
@@ -61,7 +69,10 @@ export const PET_ART = Object.freeze({
       walk1: {18: '..k.k.k..kk..k.k.k..', 19: '.k.k.k........k.k.k.'},
       walk2: {18: '.k..k.k..kk..k.k..k.', 19: '...k.k.k....k.k.k...'},
       held: {17: '..k.kkkkkkkkkkkk.k..', 18: '..k..k.k....k.k..k..', 19: '..k..k.k....k.k..k..'},
+      sleep: {17: '..kkkkkkkkkkkkkkkk..', 18: '....................', 19: '....................'},
+      habit1: {2: 'kbbk............kbbk', 3: 'kbbbk..........kbbbk'},
     },
+    face: {habit1: 'open', habit2: 'happy'},
   },
 });
 
@@ -71,14 +82,17 @@ export function petFrame(kind, frame) {
   const rows = mirror(art.half).map(r => [...r]);
   for (const [y, cells] of Object.entries(art.extra || {})) for (const [x, ch] of Object.entries(cells)) rows[y][x] = ch;
   for (const [y, row] of Object.entries(art.legs?.[frame] || {})) if (row.length === PET_SIZE) rows[y] = [...row];
-  const eye = EYES[FACE[frame] || 'open'];
+  const face = art.face?.[frame] || FACE[frame] || 'open', eye = EYES[face];
   art.eyes.forEach(([x, y], side) => eye.forEach((line, dy) => [...line].forEach((ch, dx) => {
-    const col = side && FACE[frame] === 'sad' ? x + 2 - dx : x + dx;
+    const col = side && face === 'sad' ? x + 2 - dx : x + dx;
     if (ch !== '_') rows[y + dy][col] = ch;
   })));
-  // A tear under a sad eye; an open mouth eating or held up.
-  if (FACE[frame] === 'sad') { const [x, y] = art.eyes[0]; rows[y + 2][x] = 'c'; }
-  if (frame === 'eat' || frame === 'held') { const [x, y, [m]] = art.mouth; [...m].forEach((ch, dx) => { rows[y][x + dx] = frame === 'eat' ? 'p' : ch; }); }
+  // A tear under a sad eye; an open mouth eating or held up; a yawn opens it wide; a kind's own mouth for a habit.
+  if (face === 'sad') { const [x, y] = art.eyes[0]; rows[y + 2][x] = 'c'; }
+  const [mx, my, [m]] = art.mouth;
+  if (frame === 'eat' || frame === 'held') [...m].forEach((ch, dx) => { rows[my][mx + dx] = frame === 'eat' ? 'p' : ch; });
+  if (frame === 'yawn') [['k', 'k'], ['p', 'p'], ['k', 'k']].forEach((line, dy) => { if (rows[my + dy]) line.forEach((ch, dx) => { rows[my + dy][mx + dx] = ch; }); });
+  if (art.mouths?.[frame]) [...art.mouths[frame]].forEach((ch, dx) => { rows[my][mx + dx] = ch; });
   return rows.map(r => r.join(''));
 }
 

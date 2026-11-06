@@ -13,8 +13,52 @@ export const SOUND_SOURCES = Object.freeze({mine: '我传的', eleven: 'ElevenLa
 export const STRENGTHS = Object.freeze(['', '轻', '重']);
 export const SOUND_LIMITS = Object.freeze({file: 20 * 1024 * 1024, names: 150, versions: [1, 5]});
 
+// ElevenLabs 音效 (0.9.37): what its own page lets one choose. The last used are kept (make); 缺的声音 made by themselves
+// take the model, influence and quality from there (their kind decides loop and length).
+export const SFX_MODELS = Object.freeze({v3: 'eleven_text_to_sound_v3', v2: 'eleven_text_to_sound_v2'});
+// tier: the ElevenLabs plan it needs (mp3 192k from Creator, WAV from Pro); WAV is for effects that do not loop.
+export const SFX_FORMATS = Object.freeze({
+  mp3: Object.freeze({id: 'mp3_44100_128', label: 'MP3', mime: 'audio/mpeg'}),
+  mp3hq: Object.freeze({id: 'mp3_44100_192', label: 'MP3 192k', mime: 'audio/mpeg', tier: 'creator'}),
+  wav: Object.freeze({id: 'wav_48000', label: 'WAV 48k', mime: 'audio/wav', tier: 'pro', noLoop: true}),
+});
+// text: characters a prompt may have; seconds: a set length; count: takes a time; perSecond: credits a second of a set length.
+export const SFX_LIMITS = Object.freeze({text: 450, seconds: [0.5, 30], count: 4, perSecond: 40});
+const TIERS = ['free', 'starter', 'creator', 'pro', 'scale', 'business', 'growing_business', 'enterprise'];
+/** Whether an ElevenLabs plan has what a format needs ('' or unknown: not known, allowed; ElevenLabs answers if not). */
+export function tierHas(tier, need) {
+  if (!need) return true;
+  const at = TIERS.indexOf(String(tier || '').toLowerCase());
+  return at < 0 || at >= TIERS.indexOf(need);
+}
+export function defaultSfx() { return {model: 'v3', loop: false, seconds: 0, influence: 0.3, rewrite: true, count: 1, format: 'mp3'}; }
+export function normalizeSfx(value) {
+  const base = defaultSfx(), v = value && typeof value === 'object' ? value : {};
+  const seconds = Number(v.seconds), count = Math.round(Number(v.count)), format = Object.hasOwn(SFX_FORMATS, v.format) ? v.format : base.format;
+  return {
+    model: Object.hasOwn(SFX_MODELS, v.model) ? v.model : base.model,
+    // A loop is not made as WAV.
+    loop: v.loop === true && !SFX_FORMATS[format].noLoop,
+    // 0: ElevenLabs picks the length from the prompt.
+    seconds: Number.isFinite(seconds) && seconds > 0 ? Math.round(Math.min(SFX_LIMITS.seconds[1], Math.max(SFX_LIMITS.seconds[0], seconds)) * 10) / 10 : 0,
+    influence: unit(v.influence, base.influence),
+    rewrite: v.rewrite !== false,
+    count: Number.isFinite(count) ? Math.min(SFX_LIMITS.count, Math.max(1, count)) : base.count,
+    format,
+  };
+}
+/** About how many credits a set of takes costs: a set length, 40 a second each; an automatic one is known after. */
+export const sfxEstimate = o => o.seconds > 0 ? Math.round(o.seconds * SFX_LIMITS.perSecond) * o.count : null;
+/** What the text model wrote as a prompt: one line, no fences, quotes or "Prompt:", at most the limit. */
+export function sfxPromptText(answer, limit = SFX_LIMITS.text) {
+  let text = String(answer ?? '').replace(/```[a-z]*\n?|```/gi, '').trim();
+  text = text.replace(/^(?:english\s*)?(?:prompt|提示词|英文提示词|改好的描述|描述)\s*[:：]\s*/i, '');
+  text = text.replace(/\s+/g, ' ').trim().replace(/^["'“”「『]+|["'“”」』]+$/g, '').trim();
+  return text.slice(0, limit);
+}
+
 export function defaultSounds() {
-  return {enabled: false, ambienceVolume: 0.45, sfxVolume: 0.8, vary: true, tapOnly: false, generate: false, versions: 2, pack: true, packHidden: []};
+  return {enabled: false, ambienceVolume: 0.45, sfxVolume: 0.8, vary: true, tapOnly: false, generate: false, versions: 2, pack: true, packHidden: [], make: defaultSfx()};
 }
 const unit = (value, fallback) => { const n = Number(value); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : fallback; };
 export function normalizeSounds(value) {
@@ -31,7 +75,8 @@ export function normalizeSounds(value) {
     generate: value.generate === true,
     versions: Number.isFinite(versions) ? Math.min(SOUND_LIMITS.versions[1], Math.max(SOUND_LIMITS.versions[0], versions)) : base.versions,
     pack: value.pack !== false,
-    packHidden: [...new Set((Array.isArray(value.packHidden) ? value.packHidden : []).map(String).filter(id => id.startsWith('pack:')))].slice(0, 2000)
+    packHidden: [...new Set((Array.isArray(value.packHidden) ? value.packHidden : []).map(String).filter(id => id.startsWith('pack:')))].slice(0, 2000),
+    make: normalizeSfx(value.make)
   };
 }
 

@@ -5,7 +5,8 @@
 // - An ambience loops (its 底子, faded in and out) with its 点缀 now and then, until the next one or 停.
 // - A name the library has none of: ElevenLabs makes it when that is on and the tag has an English description,
 //   else it is noted under 缺的声音 in the 音效 App.
-import {parseSounds, findSounds, pickSound, variation, soundNames, soundRule, soundPromptPlan, readingGaps, latestAmbience} from './core/sounds.js';
+import {parseSounds, findSounds, pickSound, variation, soundNames, soundRule, soundPromptPlan, readingGaps, latestAmbience, sfxPromptText, SFX_LIMITS} from './core/sounds.js';
+import {promptText} from './core/prompt-rules.js';
 
 const FADE = 2.5, DOT_GAP = [8, 25], KEEP_BUFFERS = 40, LATE = 15000, VOICE_AGAIN = 60000;
 
@@ -339,6 +340,36 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     src.addEventListener?.('ended', () => { if (preview === mine) preview = null; });
     return true;
   }
+  /** 「ElevenLabs 做一个声音」 (0.9.37): a take not kept yet, heard as a library sound is (the same key again: stops it). */
+  async function listenTake(key, blob) {
+    if (preview) { const p = preview; preview = null; try { p.stop(); } catch {} if (p.soundId === key) return false; }
+    const mine = {soundId: key, stop() {}};
+    preview = mine;
+    audio();
+    try { await (ctx.state === 'running' ? null : ctx.resume()); } catch {}
+    if (!running()) { preview = null; throw Error('浏览器还不让出声：点一下页面再试'); }
+    let data;
+    try { data = await ctx.decodeAudioData(await blob.arrayBuffer()); } catch { if (preview === mine) preview = null; throw Error('这个版本放不出来'); }
+    if (closed || preview !== mine) return false;
+    const src = ctx.createBufferSource();
+    src.buffer = data; src.connect(sfxOut); src.start();
+    mine.stop = () => { try { src.stop(); } catch {} };
+    src.onended = () => { try { src.disconnect(); } catch {} if (preview === mine) preview = null; };
+    return true;
+  }
+  /**
+   * 音效提示词 (0.9.37): the phone's text model writes the English prompt (english) or rewrites a description by one
+   * suggestion (apply, in the description's own language). The words are the 系统提示词 block 「音效提示词」.
+   */
+  async function prompt({text = '', mode = 'english', hint = ''} = {}) {
+    const words = String(text || '').trim();
+    if (!words) throw Error('先写一句描述');
+    const rules = settings()?.promptRules, fill = {'描述': words.slice(0, 900), '建议': String(hint || '').trim().slice(0, 200), '字数': String(SFX_LIMITS.text)};
+    const messages = [{role: 'system', content: promptText(rules, 'sfx-prompt', 'system', fill)}, {role: 'user', content: promptText(rules, 'sfx-prompt', mode === 'apply' ? 'apply' : 'english', fill)}];
+    const answer = sfxPromptText(await backend.generateText(context(), {use: 'sound', prompt: messages, plainText: true, trimNames: false, responseLength: 400}));
+    if (!answer) throw Error('文字模型没有写出提示词，再试一次');
+    return answer;
+  }
   /** For the 音效 App: the ambience now (or waiting for a tap), what is being made. */
   function state() {
     return {ambience: ambience.name || '', waiting: wanted && wanted !== ambience.name ? wanted : '', running: running(), making: [...making.keys()].map(k => k.split('|')[1])};
@@ -355,5 +386,5 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     const c = ctx; ctx = null;
     setTimer(() => { try { c?.close(); } catch {} }, 200);
   }
-  return {unlock, received, rendered, voice, chatChanged, messageChanged, refresh, tap, stage, listen, state, promptPlan, close, stopAmbience: () => { wanted = ''; stopAmbience(1); }, reload, cue};
+  return {unlock, received, rendered, voice, chatChanged, messageChanged, refresh, tap, stage, listen, listenTake, prompt, state, promptPlan, close, stopAmbience: () => { wanted = ''; stopAmbience(1); }, reload, cue};
 }

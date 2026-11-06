@@ -802,8 +802,12 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   async function writeLetter(thread, m, now) {
     const s = settings(), preset = activeChatPreset(s.chat), user = userName(), person = members(thread)[0];
     const remembered = memory ? (await memory.contextFor(thread, {query: m.letter.text.slice(0, 200)}).catch(() => ({text: ''}))).text : '';
-    const prompt = letterRequest({prompts: s.promptRules, partner: person.name, persona: person.persona || person.card, user, userPersona: userPersona(), memory: remembered,
-      earlier: memory?.storyMemory() || '', story: story(preset), history: thread.messages.slice(-30), letter: m.letter.text, sentAt: m.at, now});
+    const recent = story(preset), history = thread.messages.slice(-30);
+    // 世界书 (0.9.37; letters were written without it): scanned over the letter, the chat lately and the story.
+    const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: person.persona || person.card || '',
+      texts: [person.name, ...recent.slice(-6).map(r => `${r.name}: ${r.text}`), ...history.slice(-12).map(x => messageLine(x, user)), m.letter.text]});
+    const prompt = letterRequest({prompts: s.promptRules, partner: person.name, persona: person.persona || person.card, user, userPersona: userPersona(), lore, memory: remembered,
+      earlier: memory?.storyMemory() || '', story: recent, history, letter: m.letter.text, sentAt: m.at, now});
     return letterText(await backend.generateText(context(), {use: 'chat', prompt, plainText: true, trimNames: false, responseLength: 2000}));
   }
   // The user's letters are looked for every five minutes (every chat read); letters on their way, every half minute

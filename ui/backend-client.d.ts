@@ -368,7 +368,7 @@ export interface CallState { id: number; name: string; dir: 'in' | 'out'; state:
     ended: { state: 'answered' | 'missed' | 'declined' | 'cancelled'; by: string; duration: number } | null; }
 export interface CallsSettings { auto: boolean; every: number; dailyMax: number; ring: number; }
 /** 音效: volumes 0..1; vary: each playing a little different; generate: missing sounds made by ElevenLabs, at most `versions` of a name. */
-export interface SoundSettings { enabled: boolean; ambienceVolume: number; sfxVolume: number; vary: boolean; generate: boolean; versions: number; /** 自带音效包 in use */ pack: boolean; /** shipped sounds taken out */ packHidden: string[]; }
+export interface SoundSettings { enabled: boolean; ambienceVolume: number; sfxVolume: number; vary: boolean; generate: boolean; versions: number; /** 自带音效包 in use */ pack: boolean; /** shipped sounds taken out */ packHidden: string[]; /** 「ElevenLabs 做一个声音」 as last used (0.9.37) */ make: { model: 'v3' | 'v2'; loop: boolean; seconds: number; influence: number; rewrite: boolean; count: number; format: 'mp3' | 'mp3hq' | 'wav' }; }
 /** A sound in the library (no audio): an ambience is a 底子 (bed, loops) or a 点缀 (dot, now and then). */
 export interface SoundRow { id: string; name: string; type: 'sfx' | 'ambience'; layer: '' | 'bed' | 'dot'; strength: '' | '轻' | '重'; source: 'mine' | 'eleven' | 'pack'; describe: string; seconds: number; mime: string; size: number; at: number; /** the shipped pack: original title and author */ credit?: string; }
 /** A name the story asked for that the library has none of. */
@@ -1012,6 +1012,10 @@ export interface BackendFacade {
     dismissMissing(type: 'sfx' | 'ambience', name: string): Promise<void>;
     /** ElevenLabs makes the sound from an English description and it is kept. */
     generateSound(input: { name: string; type: 'sfx' | 'ambience'; describe: string }): Promise<SoundRow>;
+    /** 「ElevenLabs 做一个声音」 (0.9.37): one take, not kept. model 'v3' | 'v2'; seconds 0: automatic; format 'mp3' | 'mp3hq' | 'wav'. */
+    makeSoundTake(input: { text: string; model?: 'v3' | 'v2'; loop?: boolean; seconds?: number; influence?: number; format?: 'mp3' | 'mp3hq' | 'wav' }): Promise<{ blob: Blob; cost: number | null; text: string }>;
+    /** A take kept: into the library as an ElevenLabs sound. */
+    keepSoundTake(input: { name: string; type?: 'sfx' | 'ambience'; layer?: 'bed' | 'dot'; describe?: string; blob: Blob }): Promise<SoundRow>;
     /** 音效包 (JSON) of these sounds, all when none. */
     exportSounds(ids?: string[] | null, name?: string): Promise<Blob>;
     importSounds(file: Blob | string, options?: { source?: 'pack' | 'mine' | 'eleven' }): Promise<{ added: number; skipped: number; name: string }>;
@@ -1329,7 +1333,10 @@ export interface BackendAPI extends BackendFacade {
     peekDraw(name: string, index: number | 'wallpaper', allowPaid?: boolean): Promise<string>;
     /** The World Info books turned on now (global, character, chat, persona) with their entries that are on, for picking
      *  what the phone leaves out. Entry ids are "book#uid". */
-    loreBooks(): Promise<Array<{ name: string; from: string[]; entries: Array<{ id: string; title: string; keys: string[]; constant: boolean; preview: string }> }>>;
+    /** extra: books the phone alone reads (listed with from 只给手机 when the tavern has them off). */
+    loreBooks(options?: { extra?: string[] }): Promise<Array<{ name: string; from: string[]; entries: Array<{ id: string; title: string; keys: string[]; constant: boolean; preview: string }> }>>;
+    /** Every book the tavern has (for picking ones the phone alone reads). */
+    loreNames(): Promise<string[]>;
     /** On a computer the phone is a floating window beside the story (false when it is full screen). */
     panelFloating(): boolean;
     /** Moves the floating phone by its top bar, in screen coordinates; 'reset' puts it back at the right edge. */

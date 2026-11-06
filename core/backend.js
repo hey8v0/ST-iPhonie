@@ -21,7 +21,7 @@ import { bookId, emptyBook, cleanBook, removeNode, pruneBook } from './memory.js
 import { normalizeMemoryBooks, normalizeAssistantThreads } from './data-transfer.js';
 import { normalizeSync, runSync, removeSync, joinGone, SYNC_PARTS } from './sync.js';
 import { normalizePool } from './auto-voice.js';
-import { normalizeSounds, soundRow, readPack, missingKey, soundName, packRows, PACK_FORMAT, SOUND_LIMITS, SOUND_KINDS } from './sounds.js';
+import { normalizeSounds, soundRow, readPack, missingKey, soundName, packRows, PACK_FORMAT, SOUND_LIMITS, SOUND_KINDS, normalizeSfx, SFX_MODELS, SFX_FORMATS, SFX_LIMITS } from './sounds.js';
 import { decodeMono, encodeWav } from './audio-join.js';
 import { BACKUP_PARTS, PART_STORES, ROW_PARTS, fieldsOf, writeBackup, readBackup, rowJSON, withBlobs, sealKeys, openKeys } from './backup.js';
 import { lookPictures, lookThumb } from './looks.js';
@@ -2362,7 +2362,7 @@ export class TTSBackend {
         return found ? { origin: 'source', source: found.source, songId: found.id, title: found.title, artist: found.artist, ...(match ? {} : { standIn: true }) } : null;
     }
     saveSounds(patch) {
-        const next = this.getState(), allowed = ['enabled', 'ambienceVolume', 'sfxVolume', 'vary', 'tapOnly', 'generate', 'versions', 'pack', 'packHidden'];
+        const next = this.getState(), allowed = ['enabled', 'ambienceVolume', 'sfxVolume', 'vary', 'tapOnly', 'generate', 'versions', 'pack', 'packHidden', 'make'];
         next.sounds = normalizeSounds({ ...next.sounds, ...Object.fromEntries(Object.entries(patch || {}).filter(([key]) => allowed.includes(key))) });
         return this.save(next).sounds;
     }
@@ -2456,10 +2456,32 @@ export class TTSBackend {
         if (!this.providers.currentKey('eleven')) throw Error('要先在引擎 App 里填 ElevenLabs 的密钥，才能生成音效');
         const text = String(describe || '').trim();
         if (!/[a-z]/i.test(text)) throw Error('写一句英文描述（比如 heavy wooden door knock），ElevenLabs 才知道做什么声音');
-        const ambience = type === 'ambience';
-        const blob = await this.providers.soundEffect({ text, loop: ambience, seconds: ambience ? 22 : 0 }, signal);
+        const ambience = type === 'ambience', o = normalizeSfx(this.settings.sounds.make);
+        // (A loop is never WAV: an ambience made this way is MP3 at the quality chosen, or plain MP3.)
+        const format = ambience && SFX_FORMATS[o.format].noLoop ? SFX_FORMATS.mp3.id : SFX_FORMATS[o.format].id;
+        const blob = await this.providers.soundEffect({ text, loop: ambience, seconds: ambience ? 22 : 0, model: SFX_MODELS[o.model], influence: o.influence, format }, signal);
         this.ledger.sfx();
         const [row] = await this.addSounds([{ name, type, layer: 'bed', source: 'eleven', describe: text, blob }]);
+        return row;
+    }
+    /**
+     * 「ElevenLabs 做一个声音」 (0.9.37): one take with the page's options, not kept until the user keeps it.
+     * text: the English prompt (the page has the text model write it when 改写 is on). Answers {blob, cost, text}.
+     */
+    async makeSoundTake({ text = '', model, loop, seconds, influence, format } = {}, signal) {
+        this.assertOpen();
+        if (!this.providers.currentKey('eleven')) throw Error('要先在引擎 App 里填 ElevenLabs 的密钥，才能生成音效');
+        const prompt = String(text || '').trim().slice(0, SFX_LIMITS.text);
+        if (!/[a-z]/i.test(prompt)) throw Error('要一句英文描述：写英文，或者打开「改写」让小手机的文字模型翻成英文');
+        const o = normalizeSfx({ model, loop, seconds, influence, format });
+        const take = await this.providers.soundEffectTake({ text: prompt, model: SFX_MODELS[o.model], loop: o.loop, seconds: o.seconds, influence: o.influence, format: SFX_FORMATS[o.format].id }, signal);
+        this.ledger.sfx();
+        return { blob: take.blob, cost: take.cost, text: prompt };
+    }
+    /** A take the user keeps: into the library as an ElevenLabs sound, under its name and kind. */
+    async keepSoundTake({ name, type = 'sfx', layer = 'bed', describe = '', blob } = {}) {
+        if (!(blob instanceof Blob) && typeof blob?.arrayBuffer !== 'function') throw Error('这个版本已经不在了');
+        const [row] = await this.addSounds([{ name, type, layer: type === 'ambience' && layer === 'dot' ? 'dot' : 'bed', source: 'eleven', describe: String(describe || '').slice(0, SFX_LIMITS.text), blob }]);
         return row;
     }
     /** 导出音效包: the chosen sounds (all when none are named) in one file to share. */
@@ -3652,7 +3674,7 @@ export class TTSBackend {
             addSongsTo: (id, list) => this.addSongsTo(String(id), list), addSongFiles: (list, options) => this.addSongFiles(list, clone(options || {})), addLyrics: list => this.addLyrics(clone(list || [])), listPlaylists: () => this.listPlaylists(), savePlaylist: value => this.savePlaylist(clone(value || {})), deletePlaylist: (id, options) => this.deletePlaylist(String(id), clone(options || {})),
             addToPlaylist: (id, ids) => this.addToPlaylist(String(id), [...(ids || [])]), removeFromPlaylist: (id, ids) => this.removeFromPlaylist(String(id), [...(ids || [])]),
             saveSounds: patch => this.saveSounds(clone(patch)), listSounds: () => this.listSounds(), soundBlob: id => this.soundBlob(id), addSounds: list => this.addSounds(list), updateSound: (id, patch) => this.updateSound(id, clone(patch || {})), deleteSounds: ids => this.deleteSounds([...(ids || [])]),
-            packInfo: () => this.packInfo(), soundMissing: () => this.soundMissing(), dismissMissing: (type, name) => this.dismissMissing(type, name), generateSound: input => this.generateSound(clone(input || {})), exportSounds: (ids, name) => this.exportSounds(ids ? [...ids] : null, name), importSounds: (file, options) => this.importSounds(file, clone(options || {})),
+            packInfo: () => this.packInfo(), soundMissing: () => this.soundMissing(), dismissMissing: (type, name) => this.dismissMissing(type, name), generateSound: input => this.generateSound(clone(input || {})), makeSoundTake: input => this.makeSoundTake(clone(input || {})), keepSoundTake: input => this.keepSoundTake({ ...(input || {}) }), exportSounds: (ids, name) => this.exportSounds(ids ? [...ids] : null, name), importSounds: (file, options) => this.importSounds(file, clone(options || {})),
             saveText: patch => this.saveText(clone(patch)), setTextKey: (id, key) => this.setTextKey(id, key), clearTextKey: id => this.clearTextKey(id), textKeyHint: id => this.textKeyHint(id), textModels: draft => this.textModels(clone(draft || {})),
             syncStatus: () => this.syncStatus(), saveSync: patch => this.saveSync(clone(patch)), syncNow: () => this.syncNow().then(() => this.syncStatus()), clearSyncFiles: () => this.clearSyncFiles(),
             listMoments: async () => { const here = this.here(); return (await this.moments.list()).filter(p => inSpace(p, here)); }, getMoment: id => this.moments.get(id),

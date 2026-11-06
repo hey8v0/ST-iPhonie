@@ -73,7 +73,7 @@ const DEFAULT_INJECTION = {position: 'in_chat', depth: 1, role: 'system'};
 // rev 7 (0.7.3): characters text the user from the story; presets made earlier get 正文里主动发消息 once.
 const PRESET_REV = 7;
 const OLD_RULES = Object.freeze({style: '你在一个手机聊天软件里，以联系人本人的身份回复{{用户}}。像真的在发手机消息：口语、简短，一次发一到三条，每条一两句话。可以用语气词和颜文字，不写动作、旁白和心理描写，不加引号。', group: '群聊里每次由一到三位成员接话，谁接话看话题和各自性格，成员之间也可以互相回应、吐槽。', 'c-style': '你在和{{用户}}打语音电话，说的每一句都会被念出来。像真人打电话一样说话：口语、句子短，一次说一到三句；会接话、会反问，会有停顿和语气词。身边发生的小事用说的话带出来（比如「等一下，我这边有点吵」），不写动作、旁白、心理描写和表情符号。守住人设和你们的关系，最近的剧情和聊天可以自然提起。'});
-const DEFAULT_PRESET = {id: 'default', name: '日常短信', rev: PRESET_REV, context: 6, history: 30, storyEach: 4000, storyTotal: 20000, loreMax: 30000, posts: 2, lore: true, loreSkipBooks: [], loreSkipEntries: [], cleanTags: [], bring: DEFAULT_BRING, injection: DEFAULT_INJECTION, entries: DEFAULT_CHAT_ENTRIES.map(e => ({...e, enabled: true}))};
+const DEFAULT_PRESET = {id: 'default', name: '日常短信', rev: PRESET_REV, context: 6, history: 30, storyEach: 4000, storyTotal: 20000, loreMax: 30000, posts: 2, lore: true, loreSkipBooks: [], loreSkipEntries: [], loreExtraBooks: [], cleanTags: [], bring: DEFAULT_BRING, injection: DEFAULT_INJECTION, entries: DEFAULT_CHAT_ENTRIES.map(e => ({...e, enabled: true}))};
 
 // How voice messages read in the phone: only the voice bar until the user asks for 转文字 (or `auto`),
 // then the translation, the original line, or both.
@@ -142,6 +142,8 @@ export function normalizeChatPreset(p = {}) {
     // Books and entries ("book#uid") left out of the phone's 世界书, and tags whose blocks are cleaned away.
     loreSkipBooks: lineList(p.loreSkipBooks),
     loreSkipEntries: lineList(p.loreSkipEntries, 1000),
+    // Books the phone reads too though the tavern has them off (0.9.37): the story never sees them.
+    loreExtraBooks: lineList(p.loreExtraBooks),
     cleanTags: tagList(p.cleanTags),
     bring: text(p.bring ?? DEFAULT_BRING, 4000),
     injection: {...DEFAULT_INJECTION, ...p.injection, depth: count(p.injection?.depth, 0, 10000, DEFAULT_INJECTION.depth)},
