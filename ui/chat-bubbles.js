@@ -179,20 +179,3 @@ export function bubbleEditor(ctx, api, set, {look = {}, saved = () => {}} = {}) 
   }
   return d;
 }
-
-/** One person's bubbles: as the user's (跟我的一样) or one of the sets. chosen(id | null). */
-export function personBubbleSheet(ctx, api, {name, current = '', look, chosen}) {
-  const list = sets(api);
-  syncBubbleCss(ctx.doc, list);
-  const d = ctx.dialog(`和${name}聊天的气泡`, `<div class="group bubble-sets">
-    <button type="button" class="list-row bubble-set-main" data-bubble-pick="" aria-pressed="${!current}"><span class="bubble-set-name"><strong>跟我的一样</strong><small>用「个性装扮」里换上的气泡</small></span></button>
-    ${list.map(s => `<button type="button" class="list-row bubble-set-main" data-bubble-pick="${esc(s.id)}" aria-pressed="${current === s.id}">${bubblePreview(s.id, look, {mini: true})}<span class="bubble-set-name"><strong>${esc(s.name)}</strong></span></button>`).join('')}</div>
-    ${list.length ? '' : '<p class="hint">还没有自定义的气泡：在「我 → 个性装扮 → 聊天气泡 → 自定义」里做一套。</p>'}`);
-  d.body.addEventListener('click', e => {
-    const b = e.target.closest('[data-bubble-pick]');
-    if (!b) return;
-    d.close();
-    chosen(b.dataset.bubblePick || null);
-  });
-  return d;
-}

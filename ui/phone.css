@@ -1004,7 +1004,7 @@ details>div{padding-bottom:10px}
 .screen[data-home-in] .home-page[data-in] .app-icon:nth-child(n+7){animation-delay:.18s}
 .screen[data-home-in] .widget{animation:rise-in .34s var(--spring-soft) both}
 .screen[data-home-in] .widget+.widget{animation-delay:.06s}
-.view[data-switching] .qq-page{animation:rise-in .34s cubic-bezier(.2,.8,.2,1)}
+.view[data-switching=msgs] .qq-page[data-page=msgs],.view[data-switching=contacts] .qq-page[data-page=contacts],.view[data-switching=moments] .qq-page[data-page=moments]{animation:rise-in .34s cubic-bezier(.2,.8,.2,1)}
 /* Presses: sink a little, spring back past rest */
 .list-row,.conv,.widget,.control-tile,.deco,.qq-card,.chat-bubble,.voice-msg,.call-msg,.moment-actions button{transition:transform .38s cubic-bezier(.3,1.7,.45,1)}
 .list-row:active,.conv:active,.deco:active,.control-tile:active,.voice-msg:active,.call-msg:active{transform:scale(.97);transition-duration:.08s}

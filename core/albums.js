@@ -23,7 +23,7 @@ export const OWN_SOURCE = Object.freeze(['own', '自己导入的']);
  * Photos kept by an app, told apart the same way, that 清除绘图 never counts: the 衣柜's are the user's own clothes; a
  * role's 表情包 are what that role sends (gone, their stickers would be empty); 聊天长图 are the user's own (0.9.33).
  */
-export const KEPT_SOURCES = Object.freeze([['closet', '衣柜', /^衣柜-.+-\d+\.(?:png|jpe?g|webp)$/], ['stickers', '表情包', /^表情包-.+-\d+\.(?:png|jpe?g|webp)$/], ['longshot', '聊天长图', /^聊天长图-\d{8}-\d{6}\.(?:png|jpe?g)$/]]);
+export const KEPT_SOURCES = Object.freeze([['closet', '衣柜', /^衣柜-.+-\d+\.(?:png|jpe?g|webp)$/], ['stickers', '表情包', /^表情包-.+-\d+\.(?:png|jpe?g|webp|gif)$/], ['longshot', '聊天长图', /^聊天长图-\d{8}-\d{6}\.(?:png|jpe?g)$/]]);
 const SOURCES = [...DRAWN_SOURCES, ...KEPT_SOURCES];
 /** Where a photo came from, by its name. */
 export function sourceOf(name) {

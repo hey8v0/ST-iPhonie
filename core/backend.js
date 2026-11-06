@@ -55,7 +55,7 @@ import { makeThumb, makePreview, packPicture } from './thumbnail.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, ucPresets, qualityPresets, upscaleBody, isV5, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, drawCast, defaultDraw, normalizeVibeSettings, applyImageConnection, tavernPicture } from './draw.js';
 import { normalizeBubbleSet, normalizeBubbleSets, normalizeBubbleOf, BUBBLE_LIMITS } from './bubble-css.js';
-import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, roleInSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive, normalizeRoleStickers } from './chat.js';
+import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, roleInSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive, normalizeRoleStickers, normalizeBgOf } from './chat.js';
 import { ChatStore, money, currentDm, searchThreads } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
 import { CloudQueue, KeyHashQueue, newRoomCode, validRoom, sha256Hex } from './cloud-queue.js';
@@ -1788,6 +1788,16 @@ export class TTSBackend {
             const merged = { ...next.chat.bubbleOf };
             for (const [who, id] of Object.entries(patch.bubbleOf)) { if (id && next.chat.bubbleSets.some(s => s.id === id)) merged[who] = id; else delete merged[who]; }
             next.chat.bubbleOf = normalizeBubbleOf(merged);
+        }
+        // bgOf: {person's own key: background | 'photo:<id>' | null} — 每个人的聊天背景 (a shop one only once bought).
+        if (patch?.bgOf && typeof patch.bgOf === 'object') {
+            const merged = { ...next.chat.bgOf };
+            for (const [who, bg] of Object.entries(patch.bgOf)) {
+                if (!bg) { delete merged[who]; continue; }
+                if (premiumOf('background', bg) && !next.chat.wallet.owned.includes(decorKey('background', bg))) throw Error('这件装扮还没买：先在商城里买下');
+                merged[who] = bg;
+            }
+            next.chat.bgOf = normalizeBgOf(merged);
         }
         // roleStickers: {role's own key: [{name, photoId}] | null} — 角色专属表情包.
         if (patch?.roleStickers && typeof patch.roleStickers === 'object') {

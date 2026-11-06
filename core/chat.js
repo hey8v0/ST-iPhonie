@@ -7,7 +7,7 @@ import {promptText, promptOn} from './prompt-rules.js';
 import {songOf, listeningNote} from './music.js';
 import {normalizeWallet, defaultWallet, PREMIUM, guessEmoji, yuan} from './wallet.js';
 import {parseDialogue, isPlaceholderRole} from './protocol.js';
-import {money} from './chats.js';
+import {money, oneEmoji, CHAIN_MODES} from './chats.js';
 import {callSummary} from './call.js';
 import {languageName} from './languages.js';
 import {normalizeMemory} from './memory.js';
@@ -81,7 +81,7 @@ export function normalizeVoiceText(v = {}) {
 }
 
 export function defaultChat() {
-  return {presets: [{...structuredClone(DEFAULT_PRESET), memory: normalizeMemory()}], activePreset: 'default', contacts: [], voiceText: {...DEFAULT_VOICE_TEXT}, profile: normalizeProfile(), starred: [], avatars: {}, partition: 'none', pace: true, wallet: defaultWallet(), stickers: [], proactive: normalizeProactive(), remarks: {}, netNames: {}, bubbleSets: [], bubbleOf: {}, roleStickers: {}};
+  return {presets: [{...structuredClone(DEFAULT_PRESET), memory: normalizeMemory()}], activePreset: 'default', contacts: [], voiceText: {...DEFAULT_VOICE_TEXT}, profile: normalizeProfile(), starred: [], avatars: {}, partition: 'none', pace: true, wallet: defaultWallet(), stickers: [], proactive: normalizeProactive(), remarks: {}, netNames: {}, bubbleSets: [], bubbleOf: {}, roleStickers: {}, bgOf: {}};
 }
 
 const text = (value, max) => String(value ?? '').slice(0, max);
@@ -167,6 +167,8 @@ export function normalizeProfile(p = {}) {
   return {name: text(p.name, 40).trim(), status: pick(p.status, PROFILE_STATUS, 'online'), statusText: text(p.statusText, 20).trim(), signature: text(p.signature, 80).trim(),
     // Bought looks (PREMIUM) are kept like the free ones; the backend checks they were bought before they are put on.
     // 'custom:<id>': a set of 自定义气泡 (one that is gone shows the default).
+    // 关键词彩蛋 (0.9.34): on unless turned off.
+    eggs: p.eggs !== false,
     bubble: /^custom:bset-[a-z0-9]{4,40}$/.test(String(p.bubble || '')) ? p.bubble : pick(OLD_LOOKS.bubble[p.bubble] || p.bubble, {...BUBBLES, ...PREMIUM.bubble}, 'default'), frame: pick(p.frame, {...FRAMES, ...PREMIUM.frame}, 'none'), background: pick(OLD_LOOKS.background[p.background] || p.background, {...BACKGROUNDS, ...PREMIUM.background}, 'none'), backgroundPhoto: text(p.backgroundPhoto, 512)};
 }
 
@@ -212,8 +214,8 @@ export const stickerName = value => String(value ?? '').replace(/[\s,，、;；|
 export function normalizeStickers(list) {
   const out = new Map();
   for (const s of Array.isArray(list) ? list : []) {
-    const name = stickerName(s?.name), url = stickerUrl(s?.url);
-    if (name && url) { out.delete(name); out.set(name, {name, url}); }
+    const name = stickerName(s?.name), url = stickerUrl(s?.url), photoId = String(s?.photoId || '').slice(0, 512);
+    if (name && (url || photoId)) { out.delete(name); out.set(name, photoId ? {name, photoId} : {name, url}); }
   }
   return [...out.values()].slice(-STICKER_LIMIT);
 }
@@ -249,6 +251,19 @@ export function findSticker(stickers, name) {
   return keyed.find(([, key]) => key === want)?.[0] || keyed.find(([, key]) => Math.min(key.length, want.length) >= 2 && (key.includes(want) || want.includes(key)))?.[0] || null;
 }
 
+/**
+ * 每个人的聊天背景 (0.9.34): {person's own key: a background (a free one or one of the shop) | 'photo:<photo id>'}. A
+ * private chat with them shows it instead of the user's own.
+ */
+export function normalizeBgOf(value) {
+  const out = {}, keys = {...BACKGROUNDS, ...PREMIUM.background};
+  for (const [who, bg] of Object.entries(value && typeof value === 'object' ? value : {}).slice(0, 400)) {
+    const v = String(bg || '');
+    if (who && (Object.hasOwn(keys, v) || /^photo:.{1,512}$/.test(v))) out[String(who).slice(0, 80)] = v;
+  }
+  return out;
+}
+
 // ---------- 角色专属表情包 (0.9.33) ----------
 // A role's own stickers: pictures drawn for them (or picked from the album), kept by the role's own key (同名角色 of
 // different cards apart) as {name, photoId}. Only that role sends them. The moods that can be drawn, with their tags.
@@ -282,7 +297,7 @@ export function normalizeChat(value) {
   const starred = [...new Set((Array.isArray(value.starred) ? value.starred : []).map(n => text(n, 40).trim()).filter(Boolean))].slice(0, CHAT_LIMITS.contacts);
   return {presets, activePreset: presets.some(p => p.id === value.activePreset) ? value.activePreset : presets[0].id, contacts, voiceText: normalizeVoiceText(value.voiceText), profile: normalizeProfile(value.profile), wallet: normalizeWallet(value.wallet), starred, avatars: normalizeAvatars(value.avatars), partition: ['card', 'chat'].includes(value.partition) ? value.partition : 'none', ...(value.firstSaves && typeof value.firstSaves === 'object' ? {firstSaves: Object.fromEntries(Object.entries(value.firstSaves).filter(([, v]) => typeof v === 'string').slice(-500))} : {}), pace: value.pace !== false, stickers: normalizeStickers(value.stickers), proactive: normalizeProactive(value.proactive), remarks: normalizeNames(value.remarks, 20), netNames: normalizeNames(value.netNames, 30),
     // 自定义气泡 (core/bubble-css.js): the sets, and whose set is whose.
-    bubbleSets: normalizeBubbleSets(value.bubbleSets), bubbleOf: normalizeBubbleOf(value.bubbleOf), roleStickers: normalizeRoleStickers(value.roleStickers)};
+    bubbleSets: normalizeBubbleSets(value.bubbleSets), bubbleOf: normalizeBubbleOf(value.bubbleOf), roleStickers: normalizeRoleStickers(value.roleStickers), bgOf: normalizeBgOf(value.bgOf)};
 }
 
 // ---------- 主动发消息: characters text the user on their own ----------
@@ -440,8 +455,15 @@ export const patText = (m, me) => `${nameOf(m.from, me)}拍了拍${nameOf(m.targ
 
 /** How a chat message reads in a transcript. */
 export function messageLine(m, user) {
+  const line = messageWordsFor(m, user);
+  // 消息回应: who put which emoji on it.
+  return line && m.reactions?.length ? `${line}（${m.reactions.map(r => `${nameOf(r.from, user)}贴了${r.emoji}`).join('，')}）` : line;
+}
+function messageWordsFor(m, user) {
   const who = nameOf(m.from, user), quote = m.quote ? `「回复 ${nameOf(m.quote.from, user)}：${m.quote.text}」` : '';
   switch (m.kind) {
+    // 群游戏: the card as it is now.
+    case 'game': return gameLine(m, user);
     case 'system': return '';
     case 'voice': return `${who}：${quote}[语音] ${m.translation || m.text}`;
     case 'photo': return `${who}：[图片${m.seen ? m.seen : ''}]${m.text ? ' ' + m.text : ''}`;
@@ -457,10 +479,34 @@ export function messageLine(m, user) {
     case 'pat': return `（${patText(m, user)}）`;
     case 'dice': return `${who}：[骰子] ${m.text} 点`;
     case 'notice': return `（${noticeText(m, user)}）`;
-    case 'recall': return `（${who}撤回了一条消息）`;
+    // A contact's recall: they know what they said, and believe it was not seen (the user's peek is never told).
+    case 'recall': return m.said && m.from !== 'me' ? `（${who}发了一条又马上撤回了：「${m.said}」。${nameOf('me', user)}看到的只有「${who}撤回了一条消息」）` : `（${who}撤回了一条消息）`;
     case 'call': return `（${who}${m.dir === 'out' ? '打了语音电话过去' : '打来语音电话'}：${callSummary(m)}）${m.lines?.length ? '通话里说了：' + m.lines.slice(-6).map(l => `${nameOf(l.from, user)}：${l.translation || l.text}`).join(' / ') : ''}${m.voicemail?.length ? '语音留言：' + m.voicemail.map(l => l.translation || l.text).join(' ') : ''}`;
     default: return `${who}：${quote}${m.text}`;
   }
+}
+
+// ---------- 群游戏 (0.9.34) ----------
+/** A game card as one line of the chat record. */
+function gameLine(m, user) {
+  const g = m.game || {}, who = nameOf(m.from, user);
+  if (g.type === 'vote') return `${who}：[发起投票] ${g.question}（选项：${g.options.join('、')}）${g.votes.length ? `已投：${g.votes.map(v => `${nameOf(v.from, user)}投了「${g.options[v.option]}」${v.why ? '（' + v.why + '）' : ''}`).join('，')}` : ''}${g.open ? '' : '（投票已结束）'}`;
+  if (g.type === 'truth') return `（${who}转了真心话大冒险的转盘，转到了${nameOf(g.target, user)}${g.choice ? `，${nameOf(g.target, user)}选了${g.choice}` : ''}）`;
+  if (g.type === 'chain') return `${who}：[发起${CHAIN_MODES[g.mode]}] 接龙记录：${g.entries.map(e => `${nameOf(e.from, user)}：${e.text}`).join(' → ')}${g.loser ? `（${nameOf(g.loser, user)}认输了）` : g.open ? '' : '（已结束）'}`;
+  return `${who}：[群游戏]`;
+}
+/**
+ * The games going on in a chat, as the turn tells them (the 群游戏 block of 系统提示词): the latest open vote and 接龙
+ * in what the request reads, and a 真心话大冒险 turn not yet played out (the latest card, nothing said after it but by
+ * its target's choice).
+ */
+export function gameNotes(prompts, messages, user = '我') {
+  const games = messages.filter(m => m.kind === 'game' && m.game), out = [];
+  const vote = games.findLast(m => m.game.type === 'vote' && m.game.open), chain = games.findLast(m => m.game.type === 'chain' && m.game.open), truth = games.at(-1)?.game?.type === 'truth' ? games.at(-1) : null;
+  if (vote) { const g = vote.game; out.push(promptText(prompts, 'games', 'vote', {'用户': user, '问题': g.question, '选项': g.options.map(o => `「${o}」`).join('、'), '已投': g.votes.map(v => nameOf(v.from, user)).join('、')})); }
+  if (truth && messages.indexOf(truth) >= messages.length - 8) { const g = truth.game; out.push(promptText(prompts, 'games', 'truth', {'用户': user, '谁': nameOf(g.target, user), '是用户': g.target === 'me', '已选': g.choice})); }
+  if (chain) { const g = chain.game; out.push(promptText(prompts, 'games', 'chain', {'用户': user, '玩法': CHAIN_MODES[g.mode], '最后一句': `${nameOf(g.entries.at(-1).from, user)}：${g.entries.at(-1).text}`, '成语': g.mode === 'idiom'})); }
+  return out.join('\n');
 }
 
 const fill = (template, values) => Object.entries(values).reduce((s, [k, v]) => s.replaceAll(`{{${k}}}`, v), template);
@@ -529,13 +575,15 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
   const clock = clockText(prompts, {now: time, last: lastTheirs(thread.messages)});
   // 按现实时间主动找你: what the moment is (早上, 睡前, 很久没聊), under the time.
   const moment = clock && nudge && ['morning', 'night', 'quiet'].includes(cue) ? promptText(prompts, 'now', cue, {'对象': partner, '用户': user}) : '';
-  const text = (clock ? clock + (moment ? '\n' + moment : '') + '\n\n' : '') + transcript + filesText(history, user) + turn;
+  // 群游戏 going on here: how to play it, under the record.
+  const games = group ? gameNotes(prompts, history, user) : '';
+  const text = (clock ? clock + (moment ? '\n' + moment : '') + '\n\n' : '') + transcript + filesText(history, user) + (games ? games + '\n\n' : '') + turn;
   return [{role: 'system', content: system}, {role: 'user', content: pictures.length ? [{type: 'text', text}, ...pictures.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : text}];
 }
 
 const NAME_LINE = /^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]\s*(.*)$/;
 const unquote = s => s.trim().replace(/^[「“"『](.*)[」”"』]$/s, '$1').trim();
-const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|配图|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|私聊|私信|悄悄话|私发|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友|发送好友申请|好友申请|申请好友|加好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
+const SPECIAL = /^\s*[[【]\s*(表情回应|贴表情|回应|撤回|投票|接龙|认输|表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|配图|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|私聊|私信|悄悄话|私发|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友|发送好友申请|好友申请|申请好友|加好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
 const LUCKY = ['6.66', '8.88', '5.20', '13.14', '16.80', '1.88'];
 // Drawing tags from what the model wrote: the English words (Chinese in them is left out), comma separated.
 const tagsOf = s => String(s).replace(/[一-鿿]+/g, ' ').split(/[,，]/).map(t => t.replace(/\s+/g, ' ').trim()).filter(Boolean).join(', ').slice(0, 600);
@@ -556,6 +604,14 @@ function special(from, content, {names, user, stickers = []}) {
   if (!m) return null;
   const [, what, arg, rest] = m, text = unquote(rest || '').replace(/<[^>]+>/g, '');
   switch (what) {
+    // 消息回应 (0.9.34): an emoji on the user's latest message — put there by the host, not a message.
+    case '表情回应': case '贴表情': case '回应': return {from, kind: 'react', emoji: oneEmoji(arg) || oneEmoji(text)};
+    // Sent and taken back at once: the user sees 「撤回了一条消息」 (and may peek at it); the contact believes it unseen.
+    case '撤回': { const said = (arg.trim() ? arg.trim() + (text ? ' ' + text : '') : text).trim().slice(0, 1000); return said ? {from, kind: 'recall', said} : null; }
+    // 群游戏: a vote (「[投票] 选项｜理由」), a line of the 接龙, giving up — the host puts them on the open card.
+    case '投票': { const [choice, ...why] = (arg.trim() ? arg.trim() + (text ? '｜' + text : '') : text).split(/[|｜]/); return choice.trim() ? {from, kind: 'vote', option: choice.trim().slice(0, 30), why: why.join(' ').trim().slice(0, 60)} : null; }
+    case '接龙': { const said = (arg.trim() ? arg.trim() + (text ? ' ' + text : '') : text).trim(); return said ? {from, kind: 'chain', text: said.slice(0, 120)} : null; }
+    case '认输': return {from, kind: 'chain', give: true};
     // A 朋友圈 post made while chatting: it goes to 朋友圈, not into the chat.
     case '朋友圈': case '发朋友圈': case '动态': {
       const {text: said, imageTags} = postPicture(text || arg.trim());

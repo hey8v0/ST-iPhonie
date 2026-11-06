@@ -177,6 +177,25 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (item.kind === 'dm') { if (thread.type === 'group') whispers.push(item); else out.push({from: item.from, kind: 'text', text: item.text}); continue; }
       // 「[打电话] …」: the contact calls right after this reply (private chats only; one call).
       if (item.kind === 'call') { if (thread.type === 'dm' && !calling) calling = item; continue; }
+      // 消息回应: on the user's latest message (the same emoji already there stays; one without an emoji is let go).
+      if (item.kind === 'react') {
+        if (!item.emoji) continue;
+        const target = latest.messages.findLast(m => m.from === 'me' && !['system', 'notice', 'pat', 'recall'].includes(m.kind));
+        if (target && target.reactions?.find(r => r.from === item.from)?.emoji !== item.emoji) latest = await backend.chats.updateMessage(threadId, target.id, {react: {from: item.from, emoji: item.emoji}});
+        continue;
+      }
+      // 群游戏: a vote on the open vote (its option found by its words), a line or a 认输 on the open 接龙.
+      if (item.kind === 'vote' || item.kind === 'chain') {
+        const type = item.kind === 'vote' ? 'vote' : 'chain', card = latest.messages.findLast(m => m.kind === 'game' && m.game?.type === type && m.game.open);
+        if (!card) { if (item.kind === 'chain' && item.text) out.push({from: item.from, kind: 'text', text: item.text}); continue; }
+        const g = card.game;
+        if (type === 'vote') {
+          const said = item.option.replace(/^[「“"]|[」”"]$/g, '').trim(), index = [g.options.indexOf(said), g.options.findIndex(o => said.includes(o)), g.options.findIndex(o => o.includes(said))].find(i => i >= 0);
+          if (index === undefined) continue;
+          latest = await backend.chats.updateMessage(threadId, card.id, {game: {votes: [...g.votes.filter(v => v.from !== item.from), {from: item.from, option: index, why: item.why}]}});
+        } else latest = await backend.chats.updateMessage(threadId, card.id, {game: item.give ? {open: false, loser: item.from} : {entries: [...g.entries, {from: item.from, text: item.text}]}});
+        continue;
+      }
       if (item.kind !== 'claim') { out.push(item); continue; }
       const kinds = item.what ? [item.what] : item.action === 'return' ? ['transfer'] : ['redpacket', 'transfer', 'gift'];
       const target = thread.messages.findLast(m => m.from === 'me' && kinds.includes(m.kind) && m.state === 'sent' && !taken.has(m.id));
@@ -483,11 +502,11 @@ export function createChatHost({context, settings, backend, notice, memory = nul
             const first = threads.find(t => t.type === 'group' && t.name === part.group), thread = first && currentWindow(threads, first);
             if (!thread) continue;
             const members = new Set(thread.members.filter(n => known.has(n)));
-            const items = parseChatReply(kept(part.text, members), {members: [...members].map(name => ({name, voice: false})), user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor([...members])});
+            const items = parseChatReply(kept(part.text, members), {members: [...members].map(name => ({name, voice: false})), user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor([...members])}).filter(onPhone);
             try { const n = items.length ? await arrive(thread.id, items, from) : 0; if (n) { sent += n; notice(`群「${thread.name}」有 ${n} 条新消息`); } } catch { /* not worth interrupting the story */ }
           }
         }
-        const items = blocks.flatMap(b => parseChatReply(kept(b), {members: people, user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor(people.map(p => p.name))}));
+        const items = blocks.flatMap(b => parseChatReply(kept(b), {members: people, user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor(people.map(p => p.name))})).filter(onPhone);
         const byName = new Map();
         for (const item of items) if (contacts.some(c => c.name === item.from)) byName.set(item.from, [...(byName.get(item.from) || []), item]);
         for (const [name, list] of byName) {
@@ -603,6 +622,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     }
   }
 
+  /** What the story sends to the phone is messages: a 回应, a vote or a line of 接龙 belong to a chat being answered. */
+  const onPhone = item => !['react', 'vote', 'chain'].includes(item.kind);
   /** The stickers these people may send: the user's collection, and each one's own (角色专属表情包, only they send those). */
   function stickersFor(names) {
     const s = settings(), routes = backend.seen?.routes || s.routes, own = s.chat.roleStickers || {};

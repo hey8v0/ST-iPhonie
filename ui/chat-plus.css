@@ -67,3 +67,73 @@
 .rs-moods{margin-bottom:12px}
 .rs-moods .status-chip small{margin-left:3px;font-size:10px;font-weight:700;opacity:.65}
 .chat-sticker img[data-chat-photo]:not([src]){visibility:hidden}
+
+/* ---------- 0.9.34: 消息回应 ---------- */
+.react-row{display:flex;gap:6px;margin:0 0 12px}
+.react-row button{flex:1;min-width:0;height:44px;border-radius:14px;font-size:22px;background:var(--card2);transition:transform .18s cubic-bezier(.3,1.6,.5,1)}
+.react-row button:active{transform:scale(.9)}
+.react-row button[aria-pressed=true]{background:color-mix(in srgb,var(--accent-btn) 18%,var(--card2));box-shadow:inset 0 0 0 2px var(--accent-btn)}
+.m-reacts{display:flex;flex-wrap:wrap;gap:4px;margin-top:1px}
+.msg.me .m-reacts{justify-content:flex-end}
+.m-react{display:inline-flex;align-items:center;gap:2px;height:22px;padding:0 7px;border-radius:999px;font-size:13px;line-height:1;background:var(--card);box-shadow:inset 0 0 0 1px var(--line)}
+.m-react small{font-size:11px;font-weight:800;color:var(--ink2)}
+.m-react.mine{background:color-mix(in srgb,var(--accent-btn) 14%,var(--card));box-shadow:inset 0 0 0 1.5px var(--accent-btn)}
+
+/* ---------- 角色撤回: tap to peek; the moment it comes, the words show and go ---------- */
+.recall-note{display:grid;justify-items:center;gap:3px}
+.recall-peek{display:inline-flex;align-items:center;gap:4px;font:inherit;color:inherit;text-decoration:underline dotted 1px;text-underline-offset:3px}
+.recall-peek svg{width:13px;height:13px;opacity:.6}
+.recall-said{max-width:80%;padding:4px 10px;border-radius:10px;background:var(--card2);color:var(--ink2);font-size:12.5px;font-style:italic;overflow-wrap:anywhere}
+.recall-ghost{display:block;max-width:70%;padding:7px 12px;border-radius:16px;background:var(--card);box-shadow:inset 0 0 0 1.5px var(--line);font-size:14px;color:var(--ink);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;animation:recall-go 1.5s ease forwards}
+@keyframes recall-go{0%,55%{opacity:1;transform:none;max-height:40px}100%{opacity:0;transform:scale(.6);max-height:0;padding-block:0;margin:0}}
+
+/* ---------- 群游戏 ---------- */
+.game-card{display:grid;gap:8px;width:236px;max-width:100%;padding:10px 12px;border-radius:18px;background:var(--card);box-shadow:inset 0 0 0 1.5px var(--line),0 3px 0 var(--line);color:var(--ink);text-align:left}
+.game-kind{font-size:11.5px;font-weight:800;color:var(--ink2)}
+.game-title{font-size:15px;line-height:1.4;overflow-wrap:anywhere}
+.game-foot{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:22px;font-size:11.5px;font-weight:700;color:var(--ink2)}
+.game-foot .text-button,.game-acts .text-button{min-height:26px;padding:2px 4px;font-size:12.5px}
+.game-acts{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.vote-opts{display:grid;gap:6px}
+.vote-opt{position:relative;display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 8px;min-height:38px;padding:6px 10px;border-radius:12px;overflow:hidden;background:var(--card2);text-align:left;font-size:13.5px;color:var(--ink)}
+.vote-opt>i{position:absolute;inset:0 auto 0 0;background:color-mix(in srgb,var(--accent-btn) 22%,transparent);transition:width .4s cubic-bezier(.2,.8,.2,1);pointer-events:none}
+.vote-opt>span,.vote-opt>small,.vote-opt>em{position:relative}
+.vote-opt>small{font-size:11.5px;font-weight:800;color:var(--ink2)}
+.vote-opt>em{grid-column:1/-1;font-style:normal;font-size:11px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vote-opt[aria-pressed=true]{box-shadow:inset 0 0 0 1.5px var(--accent-btn)}
+.vote-opt:disabled{opacity:1}
+.truth-wheel{position:relative;justify-self:center;width:96px;height:96px;border-radius:50%;background:conic-gradient(from 0deg,#ffd6e0,#ffe9a8,#c9f2d6,#c9e4ff,#e3d4ff,#ffd6e0);box-shadow:inset 0 0 0 3px #fff,0 2px 8px rgba(30,40,80,.15)}
+.truth-wheel i{position:absolute;left:50%;top:50%;width:24px;height:24px;margin:-12px;display:grid;place-items:center;border-radius:50%;background:#fff;font-style:normal;font-size:11px;font-weight:800;color:#445;transform:rotate(calc(360deg / var(--n) * var(--i))) translateY(-34px) rotate(calc(-360deg / var(--n) * var(--i)))}
+.truth-wheel i.hit{background:var(--accent-btn);color:var(--on-accent)}
+.game-truth.spinning .truth-wheel{animation:wheel-turn 1.4s cubic-bezier(.15,.75,.2,1)}
+.game-truth.spinning .game-title{animation:wheel-say 1.6s ease both}
+@keyframes wheel-turn{from{transform:rotate(-1080deg)}}
+@keyframes wheel-say{0%,80%{opacity:0;transform:translateY(4px)}}
+.chain-list{display:grid;gap:4px;margin:0;padding:0;list-style:none}
+.chain-list li{display:flex;gap:6px;font-size:13.5px;line-height:1.45}
+.chain-list b{flex:none;max-width:5em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--ink2)}
+.chain-list span{min-width:0;overflow-wrap:anywhere}
+.chain-more{font-size:11px;color:var(--ink2)}
+.game-pick .game-ico{display:grid;place-items:center;width:34px;font-size:22px}
+.vote-inputs{display:grid;gap:6px}
+
+/* ---------- 关键词彩蛋 ---------- */
+.chat-egg{position:absolute;inset:0;z-index:3;overflow:hidden;pointer-events:none;contain:strict}
+.chat-egg span{position:absolute;top:-36px;font-size:var(--s);line-height:1;opacity:0;will-change:transform,opacity;animation:egg-fall 2.1s cubic-bezier(.3,.6,.4,1) var(--d) forwards}
+.chat-egg[data-way=rise] span{top:auto;bottom:-36px;animation-name:egg-rise}
+.chat-egg[data-way=drift] span{animation-name:egg-drift;animation-duration:2.3s}
+@keyframes egg-fall{0%{opacity:0;transform:translateY(0) rotate(0)}12%{opacity:1}80%{opacity:1}100%{opacity:0;transform:translateY(var(--h)) rotate(var(--r))}}
+@keyframes egg-rise{0%{opacity:0;transform:translateY(0) scale(.6)}15%{opacity:1}75%{opacity:1}100%{opacity:0;transform:translateY(calc(var(--h) * -.85)) scale(1.1)}}
+@keyframes egg-drift{0%{opacity:0;transform:translate(0,0) rotate(0)}20%{opacity:1}80%{opacity:.9}100%{opacity:0;transform:translate(26px,calc(var(--h) * .55)) rotate(var(--r))}}
+@media (prefers-reduced-motion:reduce){.chat-egg{display:none}.recall-ghost{display:none}.game-truth.spinning .truth-wheel,.game-truth.spinning .game-title{animation:none}}
+
+/* ---------- 聊天装扮, 表情包从图片导入 ---------- */
+.deco-sample.look-same{display:grid;place-items:center;background:var(--card2);color:var(--ink2);box-shadow:inset 0 0 0 1.5px var(--line)}
+.deco-sample.look-same svg{width:18px;height:18px}
+.sticker-files{margin-top:-4px}
+.sticker-files .file-button{display:inline-flex;align-items:center;gap:6px}
+.sticker-names{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:12px 8px;margin-bottom:6px}
+.sticker-name{display:grid;justify-items:center;gap:5px}
+.sticker-name img{width:68px;height:68px;object-fit:contain;border-radius:12px;background:var(--card2)}
+.sticker-name input{width:100%;min-width:0;height:32px;padding:0 8px;font-size:13px;text-align:center}
+.sticker-row img[data-sticker-photo]:not([src]),.sticker-cell img[data-sticker-photo]:not([src]),.sticker-name img:not([src]){visibility:hidden}
