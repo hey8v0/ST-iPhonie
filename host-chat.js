@@ -2,10 +2,12 @@
 // (generateRaw): the prompt carries the chat preset, each contact's persona or character card, the user's persona,
 // recent story messages and the chat history. Nothing is written into the story unless the user brings a chat
 // into it; that text is injected once, into the next story reply.
+import {roleStore, findRoute} from './core/routes.js';
+import {bubbleRequest, splitBubbleAnswer} from './core/bubble-css.js';
 import {currentDm, currentWindow, lastRound} from './core/chats.js';
-import {buildChatRequest, parseChatReply, bringText, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace} from './core/chat.js';
+import {buildChatRequest, parseChatReply, bringText, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace, STICKER_MOODS} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer} from './core/draw.js';
+import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer, sizeFor} from './core/draw.js';
 import {storyLines} from './core/moments.js';
 import {forumContext} from './core/forum.js';
 import {promptOn} from './core/prompt-rules.js';
@@ -26,6 +28,8 @@ const BRING_KEY = 'sttts.bring';
 /** The note older versions wrote into the chat for a choice; the chat shows the pending choice by itself now. */
 export const BRING_NOTE = /^\d+ 条消息会带进下一次正文$/;
 
+// 按现实时间主动找你: the page's one clock (clockTimer), whichever chat host is the latest.
+let clockTimer = null;
 export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}, onPosts = () => {},storage = globalThis.localStorage, loadCompletion = loadCompletionModule, picture = pictureUrl, ask = requestAssistantText}) {
   // busy: the reply being written for a chat (one at a time); stops: what lets it go (停止回复).
   const busy = new Map(), stops = new Map();
@@ -95,7 +99,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   /** nudge: 主动找你 — the contact may also choose not to text (null then), and no 正在输入 shows meanwhile. */
   /** reroll: 重新回复这一轮 — the last round is asked again as if it were not there, and is replaced only when the new one
    *  came (it stays among the round's versions); one that fails or is stopped changes nothing. */
-  function reply(threadId, {nudge = false, reroll = false} = {}) {
+  function reply(threadId, {nudge = false, reroll = false, cue = '', time = 0} = {}) {
     if (busy.has(threadId)) return busy.get(threadId);
     const controller = new AbortController(), signal = controller.signal;
     const job = (async () => {
@@ -128,13 +132,13 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         try { shared = await sharedGroups(thread.members[0], user); } catch (error) { backend.reportDiagnostic?.('聊天 · 同群消息', error, 'warn'); }
       }
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
-      const request = pics => buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], nudge, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
+      const request = pics => buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), nudge, cue, time: time || Date.now(), music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
       const answer = cleanTagged(await answerFor(ctx, request, await pictures(ctx, thread, preset), signal), preset.cleanTags);
       // 停止 while it was being written: what comes late is let go (the tavern's own generation cannot be stopped).
       if (signal.aborted) throw stopped();
       // 「[不发]」 (also as 「名字：[不发]」) is a no, not a message.
       const text = nudge ? answer.split('\n').filter(line => !/\[不发\]/.test(line)).join('\n') : answer;
-      const items = parseChatReply(text, {members: people, user, voiceFormat, voiceNames: people.filter(p => p.voice).map(p => p.name), stickers: settings().chat.stickers || []});
+      const items = parseChatReply(text, {members: people, user, voiceFormat, voiceNames: people.filter(p => p.voice).map(p => p.name), stickers: stickersFor(people.map(p => p.name))});
       if (!items.length && nudge) return null;
       if (!items.length) throw Error('这次没有收到消息，可以再试一次');
       const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
@@ -299,9 +303,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       backend.emit('chat', {threadId, typing: true});
       const recent = story(preset);
       const remembered = memory ? (await memory.contextFor(thread, {query: said}).catch(() => ({text: ''}))).text : '';
-      const prompt = buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat: '', memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: s.chat.stickers || [], asking: said});
+      const prompt = buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat: '', memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), asking: said});
       const reply = cleanTagged(await backend.generateText(ctx, {use: 'chat', prompt, trimNames: false}), preset.cleanTags);
-      const items = parseChatReply(reply, {members: people.map(p => ({...p, voice: false})), user, voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []});
+      const items = parseChatReply(reply, {members: people.map(p => ({...p, voice: false})), user, voiceFormat: '', voiceNames: [], stickers: stickersFor(people.map(p => p.name))});
       const yes = items.findIndex(i => i.kind === 'befriend'), no = items.find(i => i.kind === 'refuse');
       if (yes < 0 || (no && items.indexOf(no) < yes)) {
         const saved = await backend.chatMutate(threadId, () => backend.chats.append(threadId, [{from: 'me', kind: 'system', text: `${name}没有通过你的好友申请${no?.text ? '：' + no.text : ''}`}], {read: true}));
@@ -479,11 +483,11 @@ export function createChatHost({context, settings, backend, notice, memory = nul
             const first = threads.find(t => t.type === 'group' && t.name === part.group), thread = first && currentWindow(threads, first);
             if (!thread) continue;
             const members = new Set(thread.members.filter(n => known.has(n)));
-            const items = parseChatReply(kept(part.text, members), {members: [...members].map(name => ({name, voice: false})), user: userName(), voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []});
+            const items = parseChatReply(kept(part.text, members), {members: [...members].map(name => ({name, voice: false})), user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor([...members])});
             try { const n = items.length ? await arrive(thread.id, items, from) : 0; if (n) { sent += n; notice(`群「${thread.name}」有 ${n} 条新消息`); } } catch { /* not worth interrupting the story */ }
           }
         }
-        const items = blocks.flatMap(b => parseChatReply(kept(b), {members: people, user: userName(), voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []}));
+        const items = blocks.flatMap(b => parseChatReply(kept(b), {members: people, user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor(people.map(p => p.name))}));
         const byName = new Map();
         for (const item of items) if (contacts.some(c => c.name === item.from)) byName.set(item.from, [...(byName.get(item.from) || []), item]);
         for (const [name, list] of byName) {
@@ -529,8 +533,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     }
     return gone;
   }
-  /** On the phone's turn with nothing sent: someone is asked whether they would text first now (they may say no). */
-  async function nudge() {
+  /** On the phone's turn with nothing sent: someone is asked whether they would text first now (they may say no). cue:
+   *  the real-time moment (按现实时间主动找你) — then it answers whether someone texted. */
+  async function nudge({cue = '', time = 0} = {}) {
     const ctx = context();
     // The card's own character first, else someone from the 角色 App.
     // Not someone who is not friends with the user right now (either way).
@@ -540,13 +545,50 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     if (!name) return;
     try {
       const thread = await dmWith(name), before = new Set((await backend.chats.get(thread.id))?.messages.map(x => x.id) || []);
-      const saved = await reply(thread.id, {nudge: true});
+      const saved = await reply(thread.id, {nudge: true, cue, time});
       const fresh = (saved?.messages || []).filter(x => !before.has(x.id) && x.from !== 'me');
       // Only messages sent count toward the day; 「[不发]」 does not.
-      if (!fresh.length) return;
+      if (!fresh.length) return false;
       notice(`${name} 给你发来 ${fresh.length} 条消息`); backend.emit('chat', {threadId: thread.id, incoming: {from: name, text: fresh.at(-1).text || '', kind: fresh.at(-1).kind, count: fresh.length}});
       counted();
-    } catch { /* not worth interrupting the story */ }
+      return true;
+    } catch { return false; /* not worth interrupting the story */ }
+  }
+
+  // ---------- 按现实时间主动找你 (0.9.33) ----------
+  // With 现实时间 on (系统提示词) and its switch on (正文联动手机), while the tavern page is open: in the morning (7–10),
+  // at bedtime (22–24) and after a long quiet (no message for 6 hours, 9–22), someone may text first — each moment once a
+  // day, within the day's limit, never from 1 to 7 in the morning. One phone request each; they may say no ([不发]).
+  const CLOCK_KEY = 'sttts.phoneClock', QUIET = 6 * 3600_000;
+  const dayOf = d => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  function clockDone(day) { try { const saved = JSON.parse(storage?.getItem(CLOCK_KEY) || 'null'); return saved?.day === day ? saved : {day}; } catch { return {day}; } }
+  let clockBusy = false;
+  /** One look at the time (the clock does it every few minutes); answers the moment someone was asked for, or ''. */
+  async function clockTick(now = new Date()) {
+    const s = settings(), o = s.chat.proactive || {}, h = now.getHours();
+    if (clockBusy || !o.clock || !promptOn(s.promptRules, 'now') || busy.size || (h >= 1 && h < 7) || (o.dailyMax > 0 && today().n >= o.dailyMax)) return '';
+    const done = clockDone(dayOf(now));
+    let cue = h >= 7 && h < 10 && !done.morning ? 'morning' : h >= 22 && !done.night ? 'night' : '';
+    if (!cue && h >= 9 && h < 22 && !done.quiet) {
+      const last = Math.max(0, ...(await backend.threads()).map(t => Number(t.last?.at) || 0));
+      if (last && now.getTime() - last >= QUIET) cue = 'quiet';
+    }
+    if (!cue) return '';
+    // Taken before asking: a failed or refused one is not asked again today.
+    try { storage?.setItem(CLOCK_KEY, JSON.stringify({...done, [cue]: now.getTime()})); } catch { /* this session only */ }
+    clockBusy = true;
+    try { await nudge({cue, time: now.getTime()}); } finally { clockBusy = false; }
+    return cue;
+  }
+  /** The clock while the page is open (index.js starts it): a first look after a minute, then every five. One for the
+   *  page: a host made again takes it over. */
+  function startClock({every = 5 * 60_000, first = 60_000, timers = globalThis} = {}) {
+    timers.clearTimeout?.(clockTimer?.first); timers.clearInterval?.(clockTimer?.every);
+    const look = () => { clockTick().catch(() => {}); };
+    clockTimer = {first: timers.setTimeout(look, first), every: timers.setInterval(look, every)};
+    // (Where timers can keep a process alive, as in Node, these do not.)
+    clockTimer.first?.unref?.(); clockTimer.every?.unref?.();
+    return () => { timers.clearTimeout(clockTimer.first); timers.clearInterval(clockTimer.every); clockTimer = null; };
   }
 
   /**
@@ -561,7 +603,49 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     }
   }
 
+  /** The stickers these people may send: the user's collection, and each one's own (角色专属表情包, only they send those). */
+  function stickersFor(names) {
+    const s = settings(), routes = backend.seen?.routes || s.routes, own = s.chat.roleStickers || {};
+    return [...(s.chat.stickers || []), ...[...new Set(names)].flatMap(name => (own[roleStore(findRoute(routes, name)) || name] || []).map(x => ({...x, owner: name})))];
+  }
+  /**
+   * 角色专属表情包: one sticker drawn for a role (a mood of STICKER_MOODS, its tags; wish: how they should look, in the
+   * user's words, turned into tags once), with their saved look, square. Kept as theirs. A picture that costs money is
+   * only drawn with allowPaid (the phone asks first); before that not even the words for its tags are spent.
+   */
+  const styleTags = new Map();
+  async function drawRoleSticker({name, mood, wish = '', allowPaid = false} = {}) {
+    if (!backend.drawReady()) throw Error(backend.drawMissing() || '还没有设置绘图引擎');
+    const paid = () => Object.assign(Error(backend.paidPrompt().note), {code: 'PAID', prompt: backend.paidPrompt()});
+    if (!allowPaid && backend.drawQuote?.()?.free === false) throw paid();
+    const s = settings(), feel = STICKER_MOODS.find(m => m[0] === mood) || [String(mood || '').slice(0, 20), ''], words = String(wish || '').trim();
+    if (!feel[0]) throw Error('选一个表情');
+    if (words && !styleTags.has(words)) styleTags.set(words, tagTextAnswer(await backend.generateText(context(), {use: 'picture', prompt: tagTextRequest(s, words, 'translate'), plainText: true, trimNames: false, responseLength: 1500})).replace(/\s+/g, ' ').trim());
+    const tags = ['solo', 'chibi', 'sticker', 'upper body', 'simple background', 'white background', feel[1], styleTags.get(words) || ''].filter(Boolean).join(', ');
+    const input = pictureInputs(s, photoPicture(s, {text: `${name}的表情包：${feel[0]}`, tags, owner: name, names: [name]}), '');
+    const side = sizeFor(s.draw.params, 'square');
+    input.params = {...input.params, width: side.width, height: side.height};
+    let made;
+    try { made = await backend.generateImage({...input, allowPaid, name: `表情包-${name}-${feel[0]}`, key: `sticker:${name}:${feel[0]}:${Date.now()}`, label: `表情包 · ${name}`}); }
+    catch (error) { if (error?.code === 'PAID') throw paid(); throw error; }
+    const key = roleStore(findRoute(backend.seen?.routes || s.routes, name)) || name, list = s.chat.roleStickers?.[key] || [];
+    backend.saveChatOptions({roleStickers: {[key]: [...list.filter(x => x.name !== feel[0]), {name: feel[0], photoId: made.photoId}]}});
+    return {name: feel[0], photoId: made.photoId};
+  }
+  /**
+   * 自定义气泡 「让模型改」: the two CSS texts rewritten to a wish by the phone's text model ({me, them}; the side not
+   * asked for comes back as it was). What it wrote is only shown; it is kept when the user saves it.
+   */
+  async function bubbleRewrite({me = '', them = '', wish = '', side = ''} = {}) {
+    if (!String(wish).trim()) throw Error('先写下想要什么样的气泡');
+    const answer = await backend.generateText(context(), {use: 'chat', prompt: bubbleRequest({prompts: settings().promptRules, user: userName(), me, them, side, wish}), plainText: true, trimNames: false, responseLength: 4000});
+    const got = splitBubbleAnswer(answer);
+    if (!got || !(got.me || got.them)) throw Error('模型没写出气泡的 CSS，再试一次');
+    return {me: side === 'them' ? me : got.me || me, them: side === 'me' ? them : got.them || them};
+  }
+
   return {
+    bubbleRewrite, drawRoleSticker, clockTick, startClock,
     reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, phoneAfter, phoneAfterPlan, askFriend,
     reroll: threadId => reply(threadId, {reroll: true}),
     /** 停止回复: the reply being written for this chat is let go. */

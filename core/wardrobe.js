@@ -6,7 +6,7 @@
 import {promptText} from './prompt-rules.js';
 
 export const WARDROBE_CATEGORIES = Object.freeze(['上衣', '下装', '外套', '连衣裙', '鞋', '配饰', '整套']);
-export const WARDROBE_LIMITS = Object.freeze({items: 600, sets: 200, name: 40, description: 300, wear: 600, wish: 300, pool: 60});
+export const WARDROBE_LIMITS = Object.freeze({items: 600, sets: 200, name: 40, description: 300, wear: 600, wish: 300, pool: 60, pieces: 12});
 export const WARDROBE_KINDS = Object.freeze(['wardrobe-item', 'wardrobe-set', 'wardrobe-wear']);
 /** Whose 衣柜: the user's own ('me') or a role's, by its name. */
 export const ownerKey = name => name ? 'role:' + String(name).slice(0, 40) : 'me';
@@ -28,9 +28,9 @@ export function cleanItem(doc, now = Date.now()) {
     category: WARDROBE_CATEGORIES.includes(doc?.category) ? doc.category : '', description, ...(photoId ? {photoId} : {}),
     recognized: doc?.recognized === true, at: time(doc?.at, now), updatedAt: time(doc?.updatedAt, now), ...space(doc)};
 }
-/** An outfit kept (存成一套): its words, and the pieces it was made of when there were any. */
+/** An outfit kept (存成一套): its words (as long as what is worn), and the pieces it was made of when there were any. */
 export function cleanSet(doc, now = Date.now()) {
-  const who = owner(doc?.owner), description = clip(doc?.description, WARDROBE_LIMITS.description);
+  const who = owner(doc?.owner), description = clip(doc?.description, WARDROBE_LIMITS.wear);
   if (!who) throw Error('这套衣服不知道是谁的');
   if (!description) throw Error('这套衣服还没有描述');
   const id = /^wardrobe:set:[\w-]{4,80}$/.test(doc?.id) ? doc.id : 'wardrobe:set:' + (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
@@ -71,6 +71,23 @@ export function suggestRequest({wearer, mode = 'closet', wish = '', pool = [], l
   const values = {'穿的人': wearer, '从衣柜选': mode === 'closet', '衣物': pool.slice(0, WARDROBE_LIMITS.pool).map(x => `- ${x.name}：${x.description}`).join('\n'),
     '偏好': clip(wish, WARDROBE_LIMITS.wish), '场景': clip(scene, 600), '上一套': clip(last, 200)};
   return [{role: 'system', content: promptText(prompts, 'wardrobe', 'suggest', values)}, {role: 'user', content: promptText(prompts, 'wardrobe', 'suggestAsk', values)}];
+}
+/**
+ * 存成一套 of an outfit designed freely (0.9.33): split into the pieces it is made of, so they go into the 衣柜 too. The
+ * words are the 衣柜 block's 拆成单件.
+ */
+export function splitRequest(text, prompts = {}) {
+  return [{role: 'system', content: promptText(prompts, 'wardrobe', 'split', {'分类': WARDROBE_CATEGORIES.join('|')})}, {role: 'user', content: '这套穿着：' + clip(text, WARDROBE_LIMITS.wear)}];
+}
+/** [{name, category, description}] from what the model answered: a JSON list (fenced, loose, or as {items}); at most 12. */
+export function parseSplit(text) {
+  const raw = String(text ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+  let list = [];
+  for (const candidate of [raw.replace(/^```(?:json)?\s*|\s*```$/g, ''), raw.match(/\[[\s\S]*\]/)?.[0], raw.match(/\{[\s\S]*\}/)?.[0]]) {
+    try { const got = JSON.parse(candidate); list = Array.isArray(got) ? got : Array.isArray(got?.items) ? got.items : []; if (list.length) break; } catch { /* next */ }
+  }
+  return list.filter(x => x && typeof x === 'object').map(x => ({name: clip(x.name, WARDROBE_LIMITS.name), category: WARDROBE_CATEGORIES.includes(String(x.category || '').trim()) ? String(x.category).trim() : '',
+    description: clip(x.description, WARDROBE_LIMITS.description)})).filter(x => x.description).slice(0, WARDROBE_LIMITS.pieces);
 }
 /** An outfit as the model answered it: plain words, one paragraph. */
 export const cleanOutfit = text => String(text ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/^```\w*\s*|\s*```$/g, '').replace(/^[「“"]|[」”"]$/g, '').replace(/\s+/g, ' ').trim().slice(0, WARDROBE_LIMITS.wear);

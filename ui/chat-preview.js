@@ -19,6 +19,7 @@ export function preview(m) {
     case 'location': return '[位置] ' + m.text;
     case 'song': return '[音乐] ' + (m.song?.title || '');
     case 'file': return '[文件] ' + m.name;
+    case 'forward': return '[聊天记录] ' + (m.title || '');
     case 'dice': return '[骰子]';
     case 'call': return `[${callSummary(m)}]`;
     case 'pat': return patText(m);

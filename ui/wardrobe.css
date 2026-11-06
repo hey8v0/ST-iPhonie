@@ -9,6 +9,12 @@
 .wardrobe-owner .avatar{transition:box-shadow .2s,transform .2s cubic-bezier(.3,1.4,.5,1)}
 .wardrobe-owner[aria-pressed=true]{color:var(--ink)}
 .wardrobe-owner[aria-pressed=true] .avatar{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent-btn);transform:scale(1.04)}
+.wardrobe-all .avatar svg{width:20px;height:20px}
+/* 「全部 N」 stays at the row's right end, the faces passing under it: it is the way to everyone, never to be scrolled to. */
+.wardrobe-all{position:sticky;right:-16px;z-index:1;box-sizing:border-box;width:86px;margin:0 -16px;padding:0 16px;background:linear-gradient(90deg,transparent,var(--bg) 16px)}
+.wardrobe-people{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:14px 4px;padding:2px 0 10px}
+.wardrobe-people .wardrobe-owner{width:auto;min-width:0}
+.wardrobe-people .wardrobe-owner[hidden]{display:none}
 .wardrobe-dot{position:absolute;top:0;right:5px;width:10px;height:10px;border-radius:50%;background:var(--accent-btn);box-shadow:0 0 0 2px var(--bg)}
 .wardrobe-wear{display:flex;align-items:flex-start;gap:6px;margin:0 0 12px;padding:10px 6px 10px 14px;border-radius:18px;background:var(--card);box-shadow:var(--shadow)}
 .wardrobe-wear>div{flex:1;min-width:0}

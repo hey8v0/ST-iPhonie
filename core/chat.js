@@ -11,7 +11,8 @@ import {money} from './chats.js';
 import {callSummary} from './call.js';
 import {languageName} from './languages.js';
 import {normalizeMemory} from './memory.js';
-import {OTHER_PICTURES} from './narration.js';
+import {OTHER_PICTURES, NARRATOR} from './narration.js';
+import {normalizeBubbleSets, normalizeBubbleOf} from './bubble-css.js';
 
 /** Another plugin's picture prompt kept in a reply (柏宝绘's <bbi_image>): not story, left out whole. */
 const OTHER_PICTURE_BLOCKS = new RegExp(`<(${OTHER_PICTURES.join('|')})\\b[^>]*>[\\s\\S]*?(?:<\\/\\1\\s*>|$)`, 'gi');
@@ -80,7 +81,7 @@ export function normalizeVoiceText(v = {}) {
 }
 
 export function defaultChat() {
-  return {presets: [{...structuredClone(DEFAULT_PRESET), memory: normalizeMemory()}], activePreset: 'default', contacts: [], voiceText: {...DEFAULT_VOICE_TEXT}, profile: normalizeProfile(), starred: [], avatars: {}, partition: 'none', pace: true, wallet: defaultWallet(), stickers: [], proactive: normalizeProactive(), remarks: {}, netNames: {}};
+  return {presets: [{...structuredClone(DEFAULT_PRESET), memory: normalizeMemory()}], activePreset: 'default', contacts: [], voiceText: {...DEFAULT_VOICE_TEXT}, profile: normalizeProfile(), starred: [], avatars: {}, partition: 'none', pace: true, wallet: defaultWallet(), stickers: [], proactive: normalizeProactive(), remarks: {}, netNames: {}, bubbleSets: [], bubbleOf: {}, roleStickers: {}};
 }
 
 const text = (value, max) => String(value ?? '').slice(0, max);
@@ -165,7 +166,8 @@ export function normalizeProfile(p = {}) {
   const pick = (value, list, fallback) => Object.hasOwn(list, value) ? value : fallback;
   return {name: text(p.name, 40).trim(), status: pick(p.status, PROFILE_STATUS, 'online'), statusText: text(p.statusText, 20).trim(), signature: text(p.signature, 80).trim(),
     // Bought looks (PREMIUM) are kept like the free ones; the backend checks they were bought before they are put on.
-    bubble: pick(OLD_LOOKS.bubble[p.bubble] || p.bubble, {...BUBBLES, ...PREMIUM.bubble}, 'default'), frame: pick(p.frame, {...FRAMES, ...PREMIUM.frame}, 'none'), background: pick(OLD_LOOKS.background[p.background] || p.background, {...BACKGROUNDS, ...PREMIUM.background}, 'none'), backgroundPhoto: text(p.backgroundPhoto, 512)};
+    // 'custom:<id>': a set of 自定义气泡 (one that is gone shows the default).
+    bubble: /^custom:bset-[a-z0-9]{4,40}$/.test(String(p.bubble || '')) ? p.bubble : pick(OLD_LOOKS.bubble[p.bubble] || p.bubble, {...BUBBLES, ...PREMIUM.bubble}, 'default'), frame: pick(p.frame, {...FRAMES, ...PREMIUM.frame}, 'none'), background: pick(OLD_LOOKS.background[p.background] || p.background, {...BACKGROUNDS, ...PREMIUM.background}, 'none'), backgroundPhoto: text(p.backgroundPhoto, 512)};
 }
 
 /**
@@ -247,13 +249,40 @@ export function findSticker(stickers, name) {
   return keyed.find(([, key]) => key === want)?.[0] || keyed.find(([, key]) => Math.min(key.length, want.length) >= 2 && (key.includes(want) || want.includes(key)))?.[0] || null;
 }
 
+// ---------- 角色专属表情包 (0.9.33) ----------
+// A role's own stickers: pictures drawn for them (or picked from the album), kept by the role's own key (同名角色 of
+// different cards apart) as {name, photoId}. Only that role sends them. The moods that can be drawn, with their tags.
+export const STICKER_MOODS = Object.freeze([
+  ['开心', 'happy, big smile, open mouth, sparkle'], ['委屈', 'pout, teary eyes, puppy eyes'], ['生气', 'angry, puffed cheeks, anger vein'],
+  ['晚安', 'sleepy, closed eyes, pillow, zzz'], ['比心', 'heart hands, wink, smile'], ['疑惑', 'confused, head tilt, question mark'],
+  ['哭哭', 'crying, streaming tears, wavy mouth'], ['得意', 'smug, smirk, hand on hip'], ['害羞', 'blush, embarrassed, covering face'],
+  ['震惊', 'surprised, shocked, open mouth, wide-eyed'], ['摸摸头', 'headpat, happy, closed eyes'], ['加油', 'fist pump, determined, clenched hands']]);
+export const ROLE_STICKER_LIMIT = 30;
+export function normalizeRoleStickers(value) {
+  const out = {};
+  for (const [who, list] of Object.entries(value && typeof value === 'object' ? value : {}).slice(0, 200)) {
+    const kept = new Map();
+    for (const s of Array.isArray(list) ? list : []) { const name = stickerName(s?.name), photoId = String(s?.photoId || '').slice(0, 512); if (name && photoId) { kept.delete(name); kept.set(name, {name, photoId}); } }
+    if (kept.size) out[String(who).slice(0, 80)] = [...kept.values()].slice(-ROLE_STICKER_LIMIT);
+  }
+  return out;
+}
+/** The stickers a request may name: the user's collection, then each one's own ({owner}) — only they send those. */
+function stickerList(list) {
+  const shared = list.filter(s => !s?.owner).slice(-80).map(s => s.name ?? s), own = new Map();
+  for (const s of list) if (s?.owner) own.set(s.owner, [...(own.get(s.owner) || []), s.name]);
+  return [shared.join('、'), ...[...own].map(([who, names]) => `${who}自己的（只有${who}能发）：${names.slice(0, ROLE_STICKER_LIMIT).join('、')}`)].filter(Boolean).join('；');
+}
+
 export function normalizeChat(value) {
   const base = defaultChat();
   if (!value || typeof value !== 'object') return base;
   const presets = (Array.isArray(value.presets) && value.presets.length ? value.presets : base.presets).map(normalizeChatPreset);
   const contacts = (Array.isArray(value.contacts) ? value.contacts : []).slice(0, CHAT_LIMITS.contacts).map(normalizeContact).filter(c => c.name);
   const starred = [...new Set((Array.isArray(value.starred) ? value.starred : []).map(n => text(n, 40).trim()).filter(Boolean))].slice(0, CHAT_LIMITS.contacts);
-  return {presets, activePreset: presets.some(p => p.id === value.activePreset) ? value.activePreset : presets[0].id, contacts, voiceText: normalizeVoiceText(value.voiceText), profile: normalizeProfile(value.profile), wallet: normalizeWallet(value.wallet), starred, avatars: normalizeAvatars(value.avatars), partition: ['card', 'chat'].includes(value.partition) ? value.partition : 'none', ...(value.firstSaves && typeof value.firstSaves === 'object' ? {firstSaves: Object.fromEntries(Object.entries(value.firstSaves).filter(([, v]) => typeof v === 'string').slice(-500))} : {}), pace: value.pace !== false, stickers: normalizeStickers(value.stickers), proactive: normalizeProactive(value.proactive), remarks: normalizeNames(value.remarks, 20), netNames: normalizeNames(value.netNames, 30)};
+  return {presets, activePreset: presets.some(p => p.id === value.activePreset) ? value.activePreset : presets[0].id, contacts, voiceText: normalizeVoiceText(value.voiceText), profile: normalizeProfile(value.profile), wallet: normalizeWallet(value.wallet), starred, avatars: normalizeAvatars(value.avatars), partition: ['card', 'chat'].includes(value.partition) ? value.partition : 'none', ...(value.firstSaves && typeof value.firstSaves === 'object' ? {firstSaves: Object.fromEntries(Object.entries(value.firstSaves).filter(([, v]) => typeof v === 'string').slice(-500))} : {}), pace: value.pace !== false, stickers: normalizeStickers(value.stickers), proactive: normalizeProactive(value.proactive), remarks: normalizeNames(value.remarks, 20), netNames: normalizeNames(value.netNames, 30),
+    // 自定义气泡 (core/bubble-css.js): the sets, and whose set is whose.
+    bubbleSets: normalizeBubbleSets(value.bubbleSets), bubbleOf: normalizeBubbleOf(value.bubbleOf), roleStickers: normalizeRoleStickers(value.roleStickers)};
 }
 
 // ---------- 主动发消息: characters text the user on their own ----------
@@ -262,8 +291,10 @@ export function normalizeChat(value) {
  * every this many story replies someone may text first (0: never; one phone request each), at most dailyMax a day.
  */
 // dailyMax 0: no limit a day.
+// clock (0.9.33): with 现实时间 on, someone may also text first by the real time — in the morning, at bedtime, after a
+// long quiet — while the tavern page is open (host-chat.js clockTick).
 export function normalizeProactive(value = {}) {
-  return {on: value?.on === true, every: count(value?.every, 0, 100, 0), dailyMax: count(value?.dailyMax, 0, 99, 3)};
+  return {on: value?.on === true, every: count(value?.every, 0, 100, 0), dailyMax: count(value?.dailyMax, 0, 99, 3), clock: value?.clock === true};
 }
 export const PHONE_TAG = /<phone\b([^>]*)>([\s\S]*?)<\/phone\s*>/gi;
 /**
@@ -391,7 +422,8 @@ export function chatContacts(settings, space = null) {
   // card, so that roles made before cards were kept (most of them) made every card's phone look the same. A role
   // made while a card is open belongs to that card; any role can be added from 联系人 →「＋」.
   const here = r => !space?.key || (space.members || []).includes(r.name) || roleInSpace(r, space);
-  const roles = settings.routes.filter(r => !isPlaceholderRole(r.name) && here(r)).map(r => ({name: r.name, source: 'role', voice: !!r.voice, engine: r.voice ? r.engine : 'none', language: r.language || settings.general.defaultLanguage,
+  // 旁白 is the voice that reads the story (整篇朗读), not someone to talk to.
+  const roles = settings.routes.filter(r => !isPlaceholderRole(r.name) && r.name !== NARRATOR && here(r)).map(r => ({name: r.name, source: 'role', voice: !!r.voice, engine: r.voice ? r.engine : 'none', language: r.language || settings.general.defaultLanguage,
     // 角色资料: written in the 角色 App, else a contact of the same name's (a contact given a voice keeps who they are).
     persona: String(r.persona || settings.chat.contacts.find(c => c.name === r.name)?.persona || '').slice(0, CHAT_LIMITS.persona)}));
   // (Contacts of one name in different cards: with 分区 off everything is in one list, and a name is one person there.)
@@ -415,6 +447,8 @@ export function messageLine(m, user) {
     case 'photo': return `${who}：[图片${m.seen ? m.seen : ''}]${m.text ? ' ' + m.text : ''}`;
     case 'file': return `${who}：[文件 ${m.name}]${m.text ? ' ' + m.text : ''}`;
     case 'sticker': return `${who}：[表情包] ${m.text}`;
+    // 合并转发: the record as it was forwarded, so whoever gets it can read it.
+    case 'forward': return `${who}：[转发的聊天记录：${m.title}]\n${(m.items || []).map(i => `  ${i.from}：${i.text}`).join('\n')}\n[聊天记录结束]`.slice(0, 4000);
     case 'redpacket': return `${who}：[红包 ¥${m.amount}] ${m.text || DEFAULT_BLESSING}（${m.state === 'opened' ? nameOf(m.openedBy, user) + '已领取' : '还没领取'}）`;
     case 'transfer': return `${who}：[转账 ¥${m.amount}]${m.text ? ' ' + m.text : ''}（${TRANSFER_STATE[m.state] || '待收款'}）`;
     case 'gift': return `${who}：[礼物 ${m.gift?.name || ''}${m.gift?.price ? ' ¥' + yuan(m.gift.price) : ''}]${m.text ? ' ' + m.text : ''}（${m.state === 'accepted' ? '已收下' : m.state === 'returned' ? '被退还了' : '还没收下'}）`;
@@ -455,7 +489,7 @@ export function knowsRule(names, user, {prompts = {}, group = false} = {}) {
   const one = names.length === 1 ? names[0] : '';
   return promptText(prompts, 'knows', 'text', {'谁': one || '各人', '每个人': one || '每个人', '用户': user, '告诉': one ? ' TA ' : '自己', '某人': one || '一个人', '那人': one || '这个人', '群聊': group});
 }
-export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', groups = '', nudge = false, pictures = [], time = Date.now()}) {
+export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', groups = '', nudge = false, cue = '', pictures = [], time = Date.now()}) {
   const group = thread.type === 'group';
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
@@ -477,7 +511,7 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     '知情范围': story.length || earlier.trim() ? knowsRule(group ? members.map(m => m.name) : [partner], user, {group, prompts}) : '',
     '名单': members.map(m => m.name).join('、'),
     '语音': speakers.length > 0, '语音格式': voiceFormat, '语音语言': speakers.map(m => `${m.name}：${languageName(m.language || 'zh')}`).join('，'),
-    '出图': images, '表情包': stickers.slice(-80).map(s => s.name ?? s).join('、'), '打电话': dialing, '朋友圈': posting, '分享歌曲': !!music?.share, '删好友': !group && !asking, '私聊': group,
+    '出图': images, '表情包': stickerList(stickers), '打电话': dialing, '朋友圈': posting, '分享歌曲': !!music?.share, '删好友': !group && !asking, '私聊': group,
     '正在听': music?.listening ? listeningNote(music.listening, user, prompts) : '', '好友申请': asking, '看图': pictures.length > 0});
   // pictures: [{id, url}] — photos sent along for a model that sees; the record numbers them [图片1], [图片2]… in order.
   const seen = new Map(pictures.map((p, i) => [p.id, i + 1]));
@@ -493,7 +527,9 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
   const transcript = history.length ? `【${group ? thread.name + '（群聊）' : '和' + partner}的聊天记录】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}\n\n` : '';
   // 现实时间, when turned on: ahead of the record, the way a phone shows the time above the messages.
   const clock = clockText(prompts, {now: time, last: lastTheirs(thread.messages)});
-  const text = (clock ? clock + '\n\n' : '') + transcript + filesText(history, user) + turn;
+  // 按现实时间主动找你: what the moment is (早上, 睡前, 很久没聊), under the time.
+  const moment = clock && nudge && ['morning', 'night', 'quiet'].includes(cue) ? promptText(prompts, 'now', cue, {'对象': partner, '用户': user}) : '';
+  const text = (clock ? clock + (moment ? '\n' + moment : '') + '\n\n' : '') + transcript + filesText(history, user) + turn;
   return [{role: 'system', content: system}, {role: 'user', content: pictures.length ? [{type: 'text', text}, ...pictures.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : text}];
 }
 
@@ -546,7 +582,7 @@ function special(from, content, {names, user, stickers = []}) {
       return said.trim() ? {from, kind: 'photo', text: said.trim().slice(0, 500), ...(imageTags ? {imageTags} : {})} : null;
     }
     // A sticker of the user's collection; a name it does not have stays words.
-    case '表情包': case '表情': { const said = arg.trim() || text, s = findSticker(stickers, said); return s ? {from, kind: 'sticker', text: s.name, url: s.url} : said ? {from, kind: 'text', text: `[${said.slice(0, 20)}]`} : null; }
+    case '表情包': case '表情': { const said = arg.trim() || text, s = findSticker(stickers.filter(x => !x?.owner || x.owner === from), said); return s ? {from, kind: 'sticker', text: s.name, ...(s.photoId ? {photoId: s.photoId} : {url: s.url})} : said ? {from, kind: 'text', text: `[${said.slice(0, 20)}]`} : null; }
     case '位置': case '定位': { const place = arg.trim() || text; return place ? {from, kind: 'location', text: place.slice(0, 100)} : null; }
     case '红包': return {from, kind: 'redpacket', amount: money(arg) || LUCKY[[...from + text].length % LUCKY.length], text: text.slice(0, 40) || DEFAULT_BLESSING, state: 'sent'};
     case '转账': { const amount = money(arg); return amount ? {from, kind: 'transfer', amount, text: text.slice(0, 40), state: 'sent'} : null; }

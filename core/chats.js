@@ -27,7 +27,9 @@ export function lastRound(messages) {
   const list = Array.isArray(messages) ? messages : [], at = list.findLastIndex(m => m.from === 'me' && m.kind !== 'system');
   return {after: at >= 0 ? String(list[at].id) : '', round: list.slice(at + 1).filter(m => m.from !== 'me')};
 }
-const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song', 'file'];
+const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song', 'file', 'forward'];
+/** 合并转发 (0.9.33): at most this many messages in one record, each this long. */
+export const FORWARD_LIMITS = Object.freeze({items: 80, text: 500, title: 60});
 const CALL_STATES = ['answered', 'missed', 'declined', 'cancelled'];
 const spoken = (list, max, withFrom) => (Array.isArray(list) ? list : []).slice(-max).filter(l => l && String(l.text || l.translation || '').trim()).map(l => ({...(withFrom ? {from: clip(l.from, 40).trim() || 'me'} : {}), text: clip(l.text || l.translation, 1000), translation: clip(l.translation || l.text, 1000), emotion: clip(l.emotion || 'calm', 100)}));
 const STATES = {redpacket: ['sent', 'opened'], transfer: ['sent', 'accepted', 'returned'], gift: ['sent', 'accepted', 'returned']};
@@ -57,6 +59,7 @@ export function messageWords(m) {
     case 'song': return [m.song?.title, m.song?.artist].filter(Boolean).join(' ');
     case 'file': return m.name || '';
     case 'call': return [...(m.lines || []), ...(m.voicemail || [])].map(l => l.translation || l.text || '').join(' ');
+    case 'forward': return [m.title, ...(m.items || []).map(i => i.text)].filter(Boolean).join(' ');
     default: return '';
   }
 }
@@ -76,6 +79,27 @@ export function searchThreads(threads, query, {limit = 60, around = 16, tail = 4
     const from = Math.max(0, at - around), end = at + q.length;
     return {thread: t.id, id: m.id, from: m.from, at: m.at, before: (from ? '…' : '') + words.slice(from, at), hit: words.slice(at, end), after: words.slice(end, end + tail)};
   })};
+}
+/**
+ * A message as one line of a forwarded record (合并转发): its words, and what it is when it is not words alone. The one
+ * who sent it is the record's from, not part of this.
+ */
+export function forwardLine(m) {
+  switch (m?.kind) {
+    case 'voice': return `[语音] ${m.translation || m.text || ''}`;
+    case 'photo': return `[图片]${m.text ? ' ' + m.text : ''}`;
+    case 'sticker': return `[表情包] ${m.text || ''}`;
+    case 'redpacket': return `[红包] ${m.text || '恭喜发财，大吉大利'}`;
+    case 'transfer': return `[转账 ¥${m.amount}]${m.text ? ' ' + m.text : ''}`;
+    case 'gift': return `[礼物] ${m.gift?.name || ''}${m.text ? ' ' + m.text : ''}`;
+    case 'location': return `[位置] ${m.text || ''}${m.detail ? '（' + m.detail + '）' : ''}`;
+    case 'song': return `[音乐] ${m.song?.title || ''}${m.song?.artist ? ' - ' + m.song.artist : ''}${m.text ? ' ' + m.text : ''}`;
+    case 'file': return `[文件] ${m.name || ''}`;
+    case 'dice': return `[骰子] ${m.text} 点`;
+    case 'call': return '[语音通话]';
+    case 'forward': return `[聊天记录] ${m.title || ''}`;
+    default: return m?.text || '';
+  }
 }
 /** Money as a string with two decimals, 0.01 to 200000; null when the value is not an amount. */
 export function money(value) {
@@ -117,8 +141,16 @@ function cleanMessage(m, id, at) {
   }
   // A song shared: what it is (played from the 歌单 or the user's music sources when tapped).
   if (kind === 'song') { const s = m.song && typeof m.song === 'object' ? m.song : {}; out.song = {title: clip(s.title, 120).trim(), artist: clip(s.artist, 120).trim(), ...(s.draft ? {draft: clip(s.draft, 200)} : {})}; if (!out.song.title) throw fail('歌曲缺少名字'); }
-  // A sticker keeps its address, so it still shows after it leaves the collection.
-  if (kind === 'sticker') { out.text = clip(m.text, 20); out.url = /^https?:\/\//i.test(String(m.url || '')) ? clip(m.url, 2000) : ''; }
+  // A sticker keeps its address, so it still shows after it leaves the collection; a role's own (表情包 drawn for them,
+  // 0.9.33) is a photo of the album.
+  if (kind === 'sticker') { out.text = clip(m.text, 20); out.url = /^https?:\/\//i.test(String(m.url || '')) ? clip(m.url, 2000) : ''; if (m.photoId) out.photoId = clip(m.photoId, 512); }
+  // 合并转发: a record of messages from another chat — its title and the lines, each who said it and what.
+  if (kind === 'forward') {
+    out.title = clip(m.title, FORWARD_LIMITS.title).trim() || '聊天记录';
+    out.items = (Array.isArray(m.items) ? m.items : []).filter(i => i && String(i.text ?? '').trim()).slice(0, FORWARD_LIMITS.items).map(i => ({from: clip(i.from, 40).trim() || '？', text: clip(i.text, FORWARD_LIMITS.text).trim()}));
+    if (!out.items.length) throw fail('转发的聊天记录是空的');
+    out.text = out.title;
+  }
   if (kind === 'pat' || kind === 'notice') out.target = clip(m.target, 40).trim() || 'me';
   if (kind === 'dice') out.text = String(Math.min(6, Math.max(1, Math.round(Number(m.text)) || 1)));
   if (kind === 'recall') out.text = '';

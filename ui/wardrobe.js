@@ -15,6 +15,9 @@ const PHOTO_TYPES = 'image/png,image/jpeg,image/webp';
 const UNSORTED = '未分类';
 /** Pieces put in at once (each is a request to the model that sees). */
 const AT_ONCE = 30;
+/** Faces in the row while there are many (0.9.33), with 「全部 N」 after them; up to one more, everyone is shown. */
+const ROW = 6;
+const RECENT_KEY = 'sttts-wardrobe-recent';
 const extOf = blob => /png/.test(blob?.type || '') ? 'png' : /webp/.test(blob?.type || '') ? 'webp' : 'jpg';
 const fileSafe = name => String(name || '').replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 20) || '我';
 const HELP = '衣柜是你和这张卡的角色（角色 App 里的）的，点上面的头像换人。\n放进照片后，能看图的文字模型会认出名字、分类和描述；认不出来时点「⋯」自己写。\n点衣服选中：「穿上」让下一次正文写进这身衣着（只这一次，之后跟着剧情走）；「去搭配」用选中的衣服搭一套，什么都没选就从整个衣柜挑。\n正文里有人换了衣服，「正在穿」会跟着变。\n试穿图用绘图引擎画，要花钱时先问你。\n放进来的照片在相册的「衣柜」里，试穿图在「衣柜试穿」里。';
@@ -22,22 +25,68 @@ const HELP = '衣柜是你和这张卡的角色（角色 App 里的）的，点�
 export function wardrobeApp(ctx) {
   const {api, win} = ctx, v = createView(ctx, 'wardrobe'), urls = new Map(), drafts = new Map(), recognizing = new Set();
   // owner: whose 衣柜 is open ('me' or 'role:<name>'); tab: 衣柜 or 搭配; picked: the pieces tapped (this owner's).
-  let owner = 'me', tab = 'closet', filter = 'all', picked = new Set(), all = {items: [], sets: [], wears: []}, turn = 0, soon = 0, suggesting = false, drawing = false;
+  let owner = 'me', tab = 'closet', filter = 'all', picked = new Set(), all = {items: [], sets: [], wears: []}, turn = 0, soon = 0, suggesting = false, drawing = false, saving = false;
   const me = () => api.userName?.() || '我';
   const who = (key = owner) => ownerName(key, me());
   function owners() {
     let roles = [];
     try { roles = (api.chatContacts?.() || []).filter(c => c.source === 'role'); } catch { /* closed */ }
-    const list = [{key: 'me', name: me(), face: avatar(me(), 'none', 40, 'me')}];
-    for (const c of roles) { const key = ownerKey(c.name); if (!list.some(o => o.key === key)) list.push({key, name: c.name, face: avatar(c.name, c.engine || 'none', 40, c.name)}); }
+    const list = [{key: 'me', name: me(), engine: 'none', pic: 'me'}];
+    for (const c of roles) { const key = ownerKey(c.name); if (!list.some(o => o.key === key)) list.push({key, name: c.name, engine: c.engine || 'none', pic: c.name}); }
     return list;
+  }
+  // Switched to lately (this browser only): with many people, they stay in the row.
+  const recent = () => { try { const got = JSON.parse(win.localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(got) ? got.filter(x => typeof x === 'string').slice(0, 12) : []; } catch { return []; } };
+  const noteRecent = key => { try { win.localStorage.setItem(RECENT_KEY, JSON.stringify([key, ...recent().filter(x => x !== key)].slice(0, 12))); } catch { /* this visit only */ } };
+  /**
+   * The row: everyone while they fit. With more, the user, whoever is open, those in the story just now and those switched
+   * to lately, ROW of them in the list's order (a tap never moves a face), then 「全部 N」.
+   */
+  function shownOwners(list) {
+    if (list.length <= ROW + 1) return list;
+    let present = [];
+    try { present = api.wardrobePresent?.() || []; } catch { /* closed */ }
+    const keep = new Set();
+    for (const key of ['me', owner, ...present, ...recent(), ...list.map(o => o.key)]) { if (keep.size >= ROW) break; if (list.some(o => o.key === key)) keep.add(key); }
+    return list.filter(o => keep.has(o.key));
+  }
+  const pending = key => all.wears.some(w => w.owner === key && w.pending);
+  const face = (o, size = 40, attr = 'data-owner') => `<button type="button" class="wardrobe-owner" ${attr}="${esc(o.key)}" data-find="${esc(o.name.toLowerCase())}" aria-pressed="${o.key === owner}">${avatar(o.name, o.engine, size, o.pic)}<span>${esc(o.name)}</span>${pending(o.key) ? '<i class="wardrobe-dot" aria-label="有要穿上的"></i>' : ''}</button>`;
+  /** 「全部 N」: everyone, as a grid of faces with a box to find someone by name. */
+  function ownersSheet() {
+    const list = owners();
+    const d = ctx.dialog(`全部 ${list.length} 个人`, `<div class="picker-search"><input type="search" data-owner-search placeholder="找人" aria-label="找人" autocomplete="off"></div>
+      <div class="wardrobe-people">${list.map(o => face(o, 48, 'data-pick-owner')).join('')}</div><p class="hint" data-owner-none hidden>没有找到这个名字</p>`);
+    const box = d.body.querySelector('[data-owner-search]');
+    box.addEventListener('input', () => {
+      const q = box.value.trim().toLowerCase();
+      let any = false;
+      for (const el of d.body.querySelectorAll('[data-pick-owner]')) { const hit = !q || el.dataset.find.includes(q); el.hidden = !hit; any ||= hit; }
+      d.body.querySelector('[data-owner-none]').hidden = any;
+    });
+    d.body.addEventListener('click', e => {
+      const key = e.target.closest('[data-pick-owner]')?.dataset.pickOwner;
+      if (!key) return;
+      d.close();
+      switchTo(key);
+    });
+  }
+  function switchTo(key) {
+    if (key === owner) return;
+    owner = key; picked = new Set(); filter = 'all';
+    noteRecent(key);
+    render();
   }
   const draft = (key = owner) => { if (!drafts.has(key)) drafts.set(key, {mode: 'closet', wish: '', result: '', photoId: ''}); return drafts.get(key); };
   const mine = () => all.items.filter(x => x.owner === owner);
   const seg = (action, value, label, now) => `<button type="button" data-action="${action}" data-value="${value}" aria-pressed="${value === now}">${esc(label)}</button>`;
 
   // ---------- drawing the page ----------
-  const ownersRow = list => `<div class="wardrobe-owners" role="group" aria-label="谁的衣柜" data-keep-scroll="owners">${list.map(o => `<button type="button" class="wardrobe-owner" data-owner="${esc(o.key)}" aria-pressed="${o.key === owner}">${o.face}<span>${esc(o.name)}</span>${all.wears.some(w => w.owner === o.key && w.pending) ? '<i class="wardrobe-dot" aria-label="有要穿上的"></i>' : ''}</button>`).join('')}</div>`;
+  function ownersRow(list) {
+    const shown = shownOwners(list), hidden = list.filter(o => !shown.includes(o));
+    const more = hidden.length ? `<button type="button" class="wardrobe-owner wardrobe-all" data-action="owners-all" aria-label="全部 ${list.length} 个人"><span class="avatar none" style="--s:40px">${icon('group')}</span><span>全部 ${list.length}</span>${hidden.some(o => pending(o.key)) ? '<i class="wardrobe-dot" aria-label="有要穿上的"></i>' : ''}</button>` : '';
+    return `<div class="wardrobe-owners" role="group" aria-label="谁的衣柜" data-keep-scroll="owners">${shown.map(o => face(o)).join('')}${more}</div>`;
+  }
   function wearCard(wear) {
     const state = wear.pending ? '下一次正文会写进去' : wear.from === 'story' ? '正文里换的' : '已经写进正文';
     return `<div class="wardrobe-wear${wear.pending ? ' pending' : ''}"><div><small>正在穿 · ${state}</small><p>${esc(wear.text)}</p></div>${btn('wear-off', '脱下', 'text-button')}</div>`;
@@ -70,7 +119,7 @@ export function wardrobeApp(ctx) {
       + field(d.mode === 'free' ? '想要什么样的' : '想要的风格（选填）', textArea('wish', d.wish, `rows="2" maxlength="${WARDROBE_LIMITS.wish}" placeholder="例如：入秋的日常装，温柔、轻便"`)) + source
       + `<div class="actions">${btn('suggest', suggesting ? '搭配中…' : '搭一套', 'primary', suggesting ? 'disabled' : '')}</div>`
       + field(`给${who()}的搭配`, textArea('result', d.result, `rows="4" maxlength="${WARDROBE_LIMITS.wear}" placeholder="搭好的在这里，也可以自己写"`))
-      + `<div class="actions wardrobe-result-acts">${btn('outfit-wear', '穿上这套', 'primary', none)}${btn('outfit-save', '存成一套', 'secondary', none)}${btn('outfit-draw', drawing ? '在画…' : '试穿图', 'secondary', drawing ? 'disabled' : none)}</div>${tryOn}`
+      + `<div class="actions wardrobe-result-acts">${btn('outfit-wear', '穿上这套', 'primary', none)}${btn('outfit-save', saving ? '存进衣柜…' : '存成一套', 'secondary', saving ? 'disabled' : none)}${btn('outfit-draw', drawing ? '在画…' : '试穿图', 'secondary', drawing ? 'disabled' : none)}</div>${tryOn}`
       + (sets.length ? groupTitle('存过的搭配') + `<div class="group wardrobe-sets">${sets.map(s => `<div class="list-row wardrobe-set" data-id="${esc(s.id)}"><button type="button" class="wardrobe-set-main" data-action="set-load" data-id="${esc(s.id)}"><strong>${esc(s.name)}</strong><small>${esc(s.description)}</small></button><button type="button" class="round-button" data-action="set-more" data-id="${esc(s.id)}" aria-label="${esc(s.name)} 的更多操作">${icon('more')}</button></div>`).join('')}</div>` : '');
   }
   function render() {
@@ -259,6 +308,20 @@ export function wardrobeApp(ctx) {
       ctx.notify('试穿图画好了，相册的「衣柜试穿」里也有');
     } finally { drawing = false; render(); }
   }
+  /**
+   * 存成一套: designed freely, the model splits it into pieces and they go into the 衣柜 too (one request); from the 衣柜,
+   * with the pieces picked. The same words again are not kept twice.
+   */
+  async function saveOutfit() {
+    const forWhom = owner, d = draft(forWhom), text = d.result.trim();
+    if (!text) return;
+    saving = true;
+    render();
+    try {
+      const got = await api.wardrobeSaveOutfit({owner: forWhom, text, mode: d.mode, itemIds: d.mode === 'closet' ? mine().filter(x => picked.has(x.id)).map(x => x.id) : []});
+      ctx.notify(got.again ? '这套存过了，在下面「存过的搭配」里' : got.added ? `存好了，拆成 ${got.added} 件放进了衣柜` : '存好了，在下面「存过的搭配」里');
+    } finally { saving = false; render(); }
+  }
   async function setMore(s) {
     const key = await menu(ctx, s.name, [{key: 'wear', icon: 'hanger', label: '穿上'}, {key: 'rename', icon: 'edit', label: '改名'}, {key: 'delete', icon: 'trash', label: '删除', danger: true}]);
     if (key === 'wear') { await api.setWardrobeWear({owner: s.owner, text: s.description}); ctx.notify(`${who(s.owner)}穿上了，下一次正文会写进去`); }
@@ -277,11 +340,7 @@ export function wardrobeApp(ctx) {
     if (picked.has(id)) picked.delete(id); else picked.add(id);
     syncPicks();
   }
-  v.on('click', '[data-owner]', el => {
-    if (el.dataset.owner === owner) return;
-    owner = el.dataset.owner; picked = new Set(); filter = 'all';
-    render();
-  });
+  v.on('click', '[data-owner]', el => switchTo(el.dataset.owner));
   v.on('click', '[data-filter]', el => { filter = el.dataset.filter; render(); });
   v.on('click', '[data-item]', (el, e) => { if (!e.target.closest('[data-action]')) toggle(el.dataset.item); });
   v.on('keydown', '[data-item]', (el, e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); toggle(el.dataset.item); } });
@@ -291,7 +350,7 @@ export function wardrobeApp(ctx) {
     if (key !== 'result') return;
     draft().result = e.target.value;
     const none = !e.target.value.trim();
-    for (const action of ['outfit-wear', 'outfit-save', 'outfit-draw']) { const b = v.root.querySelector(`[data-action=${action}]`); if (b && !(action === 'outfit-draw' && drawing)) b.disabled = none; }
+    for (const action of ['outfit-wear', 'outfit-save', 'outfit-draw']) { const b = v.root.querySelector(`[data-action=${action}]`); if (b && !(action === 'outfit-draw' && drawing) && !(action === 'outfit-save' && saving)) b.disabled = none; }
   });
   v.on('click', '[data-action]', async el => {
     const action = el.dataset.action, d = draft();
@@ -309,11 +368,8 @@ export function wardrobeApp(ctx) {
       case 'wear-off': await api.clearWardrobeWear(owner); ctx.notify('脱下了'); break;
       case 'suggest': await v.busy(el, suggest); break;
       case 'outfit-wear': if (d.result.trim()) { await api.setWardrobeWear({owner, text: d.result}); ctx.notify(`${who()}穿上了，下一次正文会写进去`); } break;
-      case 'outfit-save':
-        if (!d.result.trim()) break;
-        await api.saveWardrobeSet({owner, name: `搭配 ${all.sets.filter(x => x.owner === owner).length + 1}`, description: d.result, items: d.mode === 'closet' ? mine().filter(x => picked.has(x.id)).map(x => x.id) : []});
-        ctx.notify('存好了，在下面「存过的搭配」里');
-        break;
+      case 'outfit-save': await v.busy(el, saveOutfit); break;
+      case 'owners-all': ownersSheet(); break;
       case 'outfit-draw': await v.busy(el, tryOn); break;
       case 'tryon-open': if (d.photoId) openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: [d.photoId], from: el.getBoundingClientRect(), load: id => api.getPhoto(id)}); break;
       case 'set-load': {

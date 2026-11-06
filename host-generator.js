@@ -7,6 +7,7 @@ import {activeChatPreset} from './core/chat.js';
 import {storyLines} from './core/moments.js';
 import {languageName} from './core/languages.js';
 import {modelRules} from './core/state.js';
+import {NARRATOR} from './core/narration.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 
 export function createGeneratorHost({context, settings, backend, notice = () => {}, memory = null, personas = () => import('/scripts/personas.js'), fetcher = (...args) => globalThis.fetch(...args)}) {
@@ -30,6 +31,25 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
     if (preset.lore === false) return '';
     return worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: c ? [c.description, c.personality].filter(Boolean).join('\n') : '', texts: texts.filter(Boolean)});
   }
+  /** A role's own tavern card (one of the same name), for someone the 角色 App has nothing written about. */
+  function cardOf(name, ctx = context()) {
+    const ch = ctx?.characters?.find(x => x?.name === name), data = ch?.data || {};
+    if (!ch) return '';
+    const personality = ch.personality || data.personality || '';
+    return [ch.description || data.description || '', personality && '性格：' + personality].filter(Boolean).join('\n').replaceAll('{{char}}', name).replaceAll('{{user}}', userName()).trim().slice(0, 1200);
+  }
+  /**
+   * This card's people (角色 App; 旁白 is the reading voice, not one of them), each with what is written about them: the
+   * 角色 App's words, else their own tavern card. The open card's own character is the card itself.
+   */
+  function castOf(c, ctx = context()) {
+    const list = backend.contacts().filter(x => x.source === 'role' && x.name !== NARRATOR).slice(0, 16)
+      .map(x => ({name: x.name, persona: String(x.persona || '').trim() || (x.name === c?.name ? '' : cardOf(x.name, ctx))}));
+    if (!list.length && c) list.push({name: c.name, persona: ''});
+    return list;
+  }
+  /** What the 世界书 is looked through with for these people: their names and what is written about them. */
+  const castScan = cast => cast.flatMap(x => [x.name, x.persona]);
   let busy = '';
   function run(kind, task) {
     if (busy) return Promise.reject(Error('上一个还在写，等它写好了再来'));
@@ -47,8 +67,8 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
       if (!c) throw Error(ctx?.groupId ? '群聊没有单独的角色卡：打开一张角色卡再写开场白' : '先在酒馆里打开一张角色卡');
       const brief = form.mode === 'brief' ? String(form.brief || '').trim() : '';
       if (form.mode === 'brief' && !brief && !form.before) throw Error('先写下想要的开场情境');
-      const lw = await lore(c, [c.description, c.scenario, brief, form.focus, form.wish, c.greetings[0]]);
-      const text = cleanOpening(await ask(ctx, openingRequest({prompts: settings().promptRules, card: c, user: userName(), persona: userPersona(), lore: lw, brief, focus: form.focus, length: form.length, before: form.before || '', wish: form.wish || ''})));
+      const cast = castOf(c, ctx), lw = await lore(c, [c.description, c.scenario, brief, form.focus, form.wish, c.greetings[0], ...castScan(cast)]);
+      const text = cleanOpening(await ask(ctx, openingRequest({prompts: settings().promptRules, card: c, user: userName(), persona: userPersona(), lore: lw, cast, brief, focus: form.focus, length: form.length, before: form.before || '', wish: form.wish || ''})));
       if (!text) throw Error('模型没写出开场白，再试一次');
       return text;
     });
@@ -83,9 +103,9 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
   // ---------- User 人设 ----------
   function persona(form = {}) {
     return run('persona', async () => {
-      const ctx = context(), c = card(ctx);
-      const lw = c ? await lore(c, [c.description, c.scenario, form.wish]) : '';
-      const got = parsePersona(await ask(ctx, personaRequest({prompts: settings().promptRules, card: c, user: userName(), lore: lw, wish: form.wish || '', length: form.length})));
+      const ctx = context(), c = card(ctx), cast = castOf(c, ctx);
+      const lw = c ? await lore(c, [c.description, c.scenario, form.wish, ...castScan(cast)]) : '';
+      const got = parsePersona(await ask(ctx, personaRequest({prompts: settings().promptRules, card: c, user: userName(), persona: userPersona(), cast, lore: lw, wish: form.wish || '', length: form.length})));
       if (!got.description) throw Error('模型没写出人设，再试一次');
       return got;
     });
@@ -123,8 +143,8 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
     return run('direction', async () => {
       const ctx = context(), c = card(ctx), s = settings(), preset = activeChatPreset(s.chat), user = userName(), story = storyLines(ctx?.chat || [], preset, user);
       if (!story.length) throw Error('正文还没开始：先写几轮再来想走向');
-      const lw = await lore(c, [form.wish, ...story.map(r => `${r.name}: ${r.text}`)]);
-      const list = parseDirections(await ask(ctx, directionsRequest({prompts: s.promptRules, card: c, user, persona: userPersona(), lore: lw, earlier: memory?.storyMemory?.() || '', story, count: 4, wish: form.wish || ''})));
+      const cast = castOf(c, ctx), lw = await lore(c, [form.wish, ...castScan(cast), ...story.map(r => `${r.name}: ${r.text}`)]);
+      const list = parseDirections(await ask(ctx, directionsRequest({prompts: s.promptRules, card: c, user, persona: userPersona(), lore: lw, cast, earlier: memory?.storyMemory?.() || '', story, count: 4, wish: form.wish || ''})));
       if (!list.length) throw Error('模型没写出走向，再试一次');
       return list;
     });
@@ -159,10 +179,9 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
       const ctx = context(), c = card(ctx), s = settings(), preset = activeChatPreset(s.chat), user = userName(), fromStory = form.source !== 'card', script = form.kind !== 'card';
       const story = fromStory ? storyLines(ctx?.chat || [], preset, user) : [];
       if (!c && !story.length) throw Error('先在酒馆里打开一张角色卡');
-      const cast = backend.contacts().filter(x => x.source === 'role').map(x => ({name: x.name, persona: x.persona || ''}));
-      if (!cast.length && c) cast.push({name: c.name, persona: ''});
-      const voiced = script ? s.routes.filter(r => r.voice && (r.name === user || cast.some(x => x.name === r.name))).map(r => ({name: r.name, language: languageName(r.language || s.general.defaultLanguage || 'zh')})) : [];
-      const lw = await lore(c, [form.wish, form.focus, ...cast.map(x => x.name), ...story.map(r => `${r.name}: ${r.text}`)]);
+      const cast = castOf(c, ctx);
+      const voiced = script ? s.routes.filter(r => r.voice && r.name !== NARRATOR && (r.name === user || cast.some(x => x.name === r.name))).map(r => ({name: r.name, language: languageName(r.language || s.general.defaultLanguage || 'zh')})) : [];
+      const lw = await lore(c, [form.wish, form.focus, ...castScan(cast), ...story.map(r => `${r.name}: ${r.text}`)]);
       const voiceFormat = backend.voiceFormat();
       const prompt = theaterRequest({prompts: s.promptRules, form, card: c, user, persona: userPersona(), lore: lw, earlier: fromStory ? memory?.storyMemory?.() || '' : '', story, cast, voiced, voiceFormat, voiceRules: voiced.length ? modelRules(s, voiced.map(v => v.name)) : ''});
       const got = parseTheater(await ask(ctx, prompt), {kind: script ? 'script' : 'card', voiceFormat, voiced: voiced.map(v => v.name)});

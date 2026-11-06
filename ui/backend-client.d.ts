@@ -399,10 +399,14 @@ export interface Wallet { balance: number; ledger: Array<{ id: string; at: numbe
 export interface ShopGift { id: string; name: string; emoji: string; price: number; note: string; /** true for a gift the user added */ own?: boolean; }
 export type AvatarChoice = { kind: 'photo'; photoId: string } | { kind: 'text' };
 export interface ChatContact { name: string; source: 'role' | 'manual'; id?: string; voice: boolean; engine: Engine | 'none'; language: string; persona: string; }
-export type ChatKind = 'text' | 'voice' | 'photo' | 'system' | 'redpacket' | 'transfer' | 'location' | 'pat' | 'dice' | 'notice' | 'recall' | 'call' | 'gift';
+export type ChatKind = 'text' | 'voice' | 'photo' | 'system' | 'redpacket' | 'transfer' | 'location' | 'pat' | 'dice' | 'notice' | 'recall' | 'call' | 'gift' | 'sticker' | 'song' | 'file' | 'forward';
+/** 自定义气泡 (0.9.33): two CSS texts written against .bubble; worn as profile.bubble 'custom:<id>'. */
+export interface BubbleSet { id: string; name: string; me: string; them: string; at: number; }
+/** 合并转发: one line of a forwarded record. */
+export interface ForwardItem { from: string; text: string; }
 export interface CallLine { from: 'me' | string; text: string; translation: string; emotion: string; }
 /** notice: `text` says what `from` did, with {对方} standing for `target`. recall: a withdrawn message (no content). */
-export interface ChatMessage { id: string; from: 'me' | string; kind: ChatKind; text: string; translation?: string; emotion?: string; photoId?: string; amount?: string; /** kind 'gift': what it is (price 0 when a character sends it) */ gift?: { name: string; emoji: string; price: number }; state?: 'sent' | 'opened' | 'accepted' | 'returned' | 'answered' | 'missed' | 'declined' | 'cancelled'; openedBy?: string; detail?: string; target?: string; quote?: { from: string; text: string }; at: number;
+export interface ChatMessage { id: string; from: 'me' | string; kind: ChatKind; text: string; /** kind 'forward' (合并转发) */ title?: string; items?: ForwardItem[]; translation?: string; emotion?: string; photoId?: string; amount?: string; /** kind 'gift': what it is (price 0 when a character sends it) */ gift?: { name: string; emoji: string; price: number }; state?: 'sent' | 'opened' | 'accepted' | 'returned' | 'answered' | 'missed' | 'declined' | 'cancelled'; openedBy?: string; detail?: string; target?: string; quote?: { from: string; text: string }; at: number;
     imageTags?: string; imageVersions?: string[]; imageState?: 'waiting' | 'done' | 'failed'; imageNote?: string;
     /** call: who called (from), how it ended, how long it lasted, what was said and a missed call's voice message. */
     dir?: 'in' | 'out'; duration?: number; lines?: CallLine[]; voicemail?: Omit<CallLine, 'from'>[]; }
@@ -1085,7 +1089,17 @@ export interface BackendFacade {
     /** Takes (or returns) what a contact sent: red packet, transfer or gift. Money goes into the wallet, a gift into 收到的礼物. */
     takeSent(threadId: string, messageId: string, accept?: boolean): Promise<ChatThread>;
     shopCatalog(): { premium: Record<'bubble' | 'frame' | 'background', Record<string, [string, number]>>; kinds: Record<string, string>; gifts: ShopGift[]; ledgerKinds: Record<string, string> };
-    saveChatOptions(patch: { pace?: boolean; stickers?: Sticker[]; voiceText?: Partial<VoiceTextOptions>; profile?: Partial<ChatProfile>; starred?: string[]; /** null: back to the tavern's avatar */ avatars?: Record<string, AvatarChoice | null> }): ChatSettings;
+    saveChatOptions(patch: { pace?: boolean; stickers?: Sticker[]; voiceText?: Partial<VoiceTextOptions>; profile?: Partial<ChatProfile>; starred?: string[]; /** null: back to the tavern's avatar */ avatars?: Record<string, AvatarChoice | null>;
+        /** whose 自定义气泡 is whose (a person's own key → set id; null: as the user's) */ bubbleOf?: Record<string, string | null>;
+        /** 角色专属表情包: a role's own key → their stickers (null or []: none) */ roleStickers?: Record<string, { name: string; photoId: string }[] | null>;
+        proactive?: { on?: boolean; every?: number; dailyMax?: number; /** 按现实时间主动找你 */ clock?: boolean } }): ChatSettings;
+    /** 自定义气泡: a set new or changed (by id); a set taken away takes back whoever wore it. */
+    saveBubbleSet(set: Partial<BubbleSet> & { me?: string; them?: string }): BubbleSet;
+    deleteBubbleSet(id: string): ChatSettings;
+    /** 让模型改 (tavern side): the two texts rewritten to a wish; the side not asked for comes back as it was. */
+    bubbleRewrite?(options: { me: string; them: string; wish: string; side?: '' | 'me' | 'them' }): Promise<{ me: string; them: string }>;
+    /** 角色专属表情包 (tavern side): one mood drawn for a role and kept as theirs; code 'PAID' until allowPaid. */
+    drawRoleSticker?(options: { name: string; mood: string; wish?: string; allowPaid?: boolean }): Promise<{ name: string; photoId: string }>;
     saveContact(contact: Partial<Contact> & { name: string }): Contact;
     deleteContact(id: string): ChatSettings;
     /** Story roles (角色 App) first, then manual contacts. */
@@ -1236,7 +1250,11 @@ export interface BackendAPI extends BackendFacade {
     /** 衣柜 (tavern side): a piece's photo recognized by a model that sees; an outfit put together; a 试穿图 drawn (code 'PAID' with prompt until allowPaid). */
     wardrobeRecognize(itemId: string): Promise<WardrobeItem>;
     wardrobeSuggest(options: { owner: string; mode?: 'closet' | 'free'; wish?: string; itemIds?: string[] }): Promise<string>;
+    /** 存成一套: designed freely, split into pieces that go into the 衣柜 first; the same words kept again come back with again. */
+    wardrobeSaveOutfit(options: { owner: string; text: string; mode?: 'closet' | 'free'; itemIds?: string[] }): Promise<{ set: WardrobeSet; added: number; again: boolean }>;
     wardrobeTryOn(options: { owner: string; text: string; allowPaid?: boolean }): Promise<string>;
+    /** Who is in the story just now, as 衣柜 owners ('me', 'role:<name>'): they stay in the row of faces when there are many. */
+    wardrobePresent?(): string[];
     /** 生成器 (host-generator.js): the card open now, what is being written, and each kind's request. */
     generatorCard(): { name: string; group: boolean; messages: number; greetingOnly: boolean };
     generatorBusy(): string;
