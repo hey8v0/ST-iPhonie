@@ -1045,7 +1045,8 @@ details>div{padding-bottom:10px}
 .me-av[data-frame=flower] .pendant{transform-origin:50% 40%;animation:crown-sway 4s ease-in-out infinite}
 @keyframes crown-sway{50%{transform:rotate(-3deg)}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
-html[data-keyboard=true] *{animation:none!important;transition:none!important}
+/* Keys in use: what moves is at its end at once. Not animation:none — the first tap after would play every entrance again (a sheet jumped 30px under the finger). */
+html[data-keyboard=true] *{animation-duration:0s!important;animation-delay:0s!important;transition:none!important}
 
 /* Self-check */
 .check-summary{display:flex;flex-direction:column;gap:2px;margin:6px 0 4px;padding:14px 16px;border-radius:18px;background:var(--card);box-shadow:var(--shadow)}
@@ -2592,12 +2593,12 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .t2048.v128{background:#edcf72;color:#fff}.t2048.v256{background:#edcc61;color:#fff}.t2048.v512{background:#edc850;color:#fff}.t2048.v1024{background:#edc53f;color:#fff}.t2048.v2048{background:#edc22e;color:#fff}.t2048.v4096{background:#3c3a32;color:#fff}
 .t2048.new{animation:g-pop .18s ease-out}
 @keyframes g-pop{from{transform:scale(.4);opacity:.3}}
-/* 扫雷 */
+/* 扫雷 (its cells only: a bare .mine also caught the user's own 回应 chip and letter card) */
 .mines{display:grid;grid-template-columns:repeat(var(--n),1fr);gap:3px;width:min(100%,330px);padding:6px;border-radius:14px;background:var(--card2);box-shadow:var(--shadow)}
-.mine{aspect-ratio:1;display:grid;place-items:center;border-radius:6px;background:var(--accent-soft);font-size:15px;font-weight:900;color:var(--ink);box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--accent) 35%,transparent);-webkit-touch-callout:none}
-.mine.open{background:var(--card);box-shadow:none}
-.mine.boom{background:var(--danger-soft)}
-.mine[data-n="1"]{color:#2f7de1}.mine[data-n="2"]{color:#2e9e57}.mine[data-n="3"]{color:#e0464e}.mine[data-n="4"]{color:#6a4fd8}.mine[data-n="5"]{color:#b5651d}.mine[data-n="6"]{color:#1f9aa8}.mine[data-n="7"]{color:#333}.mine[data-n="8"]{color:#888}
+.mines .mine{aspect-ratio:1;display:grid;place-items:center;border-radius:6px;background:var(--accent-soft);font-size:15px;font-weight:900;color:var(--ink);box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--accent) 35%,transparent);-webkit-touch-callout:none}
+.mines .mine.open{background:var(--card);box-shadow:none}
+.mines .mine.boom{background:var(--danger-soft)}
+.mines .mine[data-n="1"]{color:#2f7de1}.mines .mine[data-n="2"]{color:#2e9e57}.mines .mine[data-n="3"]{color:#e0464e}.mines .mine[data-n="4"]{color:#6a4fd8}.mines .mine[data-n="5"]{color:#b5651d}.mines .mine[data-n="6"]{color:#1f9aa8}.mines .mine[data-n="7"]{color:#333}.mines .mine[data-n="8"]{color:#888}
 .mines-tools{display:flex;align-items:center;gap:12px}
 .mines-tools .game-status{white-space:nowrap}
 .mines-tools [aria-pressed=true]{background:var(--accent-btn);color:var(--on-accent,#fff)}

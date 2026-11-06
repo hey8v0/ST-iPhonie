@@ -3,7 +3,8 @@ import {callSummary} from '../core/call-summary.js';
 
 export const BLESSING = '恭喜发财，大吉大利';
 export const you = who => who === 'me' ? '你' : who;
-export const patText = m => `${you(m.from)} 拍了拍 ${you(m.target)}`;
+// 拍一拍后缀 (0.9.36): the patted one's own words come after.
+export const patText = m => `${you(m.from)} 拍了拍 ${you(m.target)}${m.suffix || ''}`;
 export const noticeText = m => you(m.from) + String(m.text).replaceAll('{对方}', you(m.target));
 /** How long a voice message lasts, from its words (about five a second). */
 export const seconds = m => Math.max(1, Math.min(60, Math.round((m.text || '').length / 5)));
@@ -20,6 +21,7 @@ export function preview(m) {
     case 'song': return '[音乐] ' + (m.song?.title || '');
     case 'file': return '[文件] ' + m.name;
     case 'forward': return '[聊天记录] ' + (m.title || '');
+    case 'letter': return '[信件]';
     case 'post': return '[帖子] ' + (m.post?.title || m.text || '');
     case 'outfit': return '[穿搭] ' + (m.outfit?.name || '');
     case 'dice': return '[骰子]';

@@ -1083,6 +1083,8 @@ export interface BackendFacade {
     /** 钱包 and 商城. */
     wallet(): Wallet;
     /** Buys a decoration once (paid from the wallet; too little left: an error with code 'BROKE'). */
+    /** 宠物 (0.9.36): food from the 商城 paid with 零钱 (1–10 at a time); answers the pets as they are after. */
+    buyPetFood(key: string, count?: number): unknown;
     buyDecoration(kind: 'bubble' | 'frame' | 'background', key: string): Wallet;
     saveGift(gift: Partial<ShopGift>): ShopGift;
     deleteGift(id: string): Wallet;
@@ -1096,6 +1098,7 @@ export interface BackendFacade {
         /** 角色专属表情包: a role's own key → their stickers (null or []: none) */ roleStickers?: Record<string, { name: string; photoId: string }[] | null>;
         /** 状态和签名 (0.9.35): a person's own key → what they set (merged; null takes it away) */ statusOf?: Record<string, { status?: string; text?: string; signature?: string } | null>;
         /** 查手机 × 聊天 (0.9.35): a person's own key → when the user looked into their phone (null: told) */ peeked?: Record<string, { at: number; what?: string } | null>;
+        /** 0.9.36: 自动回复; 拍一拍后缀 by a person's own key (null: none); the pets as a whole */ autoReply?: boolean; patOf?: Record<string, string | null>; pets?: unknown;
         proactive?: { on?: boolean; every?: number; dailyMax?: number; /** 按现实时间主动找你 */ clock?: boolean } }): ChatSettings;
     /** 自定义气泡: a set new or changed (by id); a set taken away takes back whoever wore it. */
     saveBubbleSet(set: Partial<BubbleSet> & { me?: string; them?: string }): BubbleSet;

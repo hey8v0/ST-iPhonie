@@ -23,6 +23,11 @@
 // only looks on (nothing can be sent there). Made by the user, or by a contact (「[建群]」 without the user).
 //   post (0.9.35): a forum post shared — post:{id ('' when it is not on the forum), title, author, text}
 //   outfit (0.9.35): clothes from the 衣柜 shown — outfit:{name, text, owner ('me' or whose 衣柜), photoId?}
+//   letter (0.9.36, 慢递信件): letter:{text, arriveAt (when it reaches the other side), opened, answered}
+//   pat: suffix (0.9.36, 拍一拍后缀) — the patted one's own words after it, as they were then.
+// notice (0.9.36, groups): 群公告 {text, by, at}; nicks: 群昵称 {name ('me' the user): nickname}.
+// post (0.9.36, private chats): letters on their way to the user — [{id, from, text, sentAt, arriveAt}], put in the chat
+// as a letter when they arrive.
 import {connectionLost, lostError, breath} from './idb.js';
 import {cleanBoard, BOARDS} from './board.js';
 
@@ -32,7 +37,7 @@ export function lastRound(messages) {
   const list = Array.isArray(messages) ? messages : [], at = list.findLastIndex(m => m.from === 'me' && m.kind !== 'system');
   return {after: at >= 0 ? String(list[at].id) : '', round: list.slice(at + 1).filter(m => m.from !== 'me')};
 }
-const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song', 'file', 'forward', 'game', 'post', 'outfit'];
+const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song', 'file', 'forward', 'game', 'post', 'outfit', 'letter'];
 /** 消息回应 (0.9.34): the emoji one can put on a message, one each person (the user's and the contacts'). */
 export const REACTIONS = Object.freeze(['❤️', '😂', '👍', '😮', '😢', '🎉']);
 const EMOJI = /\p{Extended_Pictographic}/u;
@@ -93,6 +98,30 @@ export function gameTitle(g) {
 export const FORWARD_LIMITS = Object.freeze({items: 80, text: 500, title: 60});
 /** A forum post or clothes shown in a chat (0.9.35): how long each part may be. note: what the one who shared it said. */
 export const SHARE_LIMITS = Object.freeze({title: 60, text: 600, note: 200});
+/** 慢递信件 (0.9.36): how long a letter may be; 群公告 and 群昵称. */
+export const LETTER_LIMITS = Object.freeze({text: 3000, post: 10});
+export const GROUP_LIMITS = Object.freeze({notice: 300, nick: 16});
+const timeOf = v => Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0;
+/** A group's 群公告, checked; null when there is none. */
+export function cleanNotice(n) {
+  const text = clip(n?.text, GROUP_LIMITS.notice).trim();
+  return text ? {text, by: clip(n.by, 40).trim() || 'me', at: timeOf(n.at)} : null;
+}
+/** A group's 群昵称: {name: nickname}, the empty ones and the same as the name left out. */
+export function cleanNicks(value) {
+  const out = {};
+  for (const [who, nick] of Object.entries(value && typeof value === 'object' ? value : {}).slice(0, 40)) {
+    const name = clip(who, 40).trim(), n = clip(nick, GROUP_LIMITS.nick).replace(/\s+/g, ' ').trim();
+    if (name && n && n !== name) out[name] = n;
+  }
+  return out;
+}
+/** Letters on their way to the user (a private chat's post), checked. */
+export function cleanPost(list) {
+  return (Array.isArray(list) ? list : []).filter(l => l && String(l.text ?? '').trim()).slice(0, LETTER_LIMITS.post)
+    .map(l => ({id: clip(l.id, 64) || Math.random().toString(36).slice(2, 10), from: clip(l.from, 40).trim(), text: clip(l.text, LETTER_LIMITS.text).trim(), sentAt: timeOf(l.sentAt), arriveAt: timeOf(l.arriveAt)}))
+    .filter(l => l.from);
+}
 const CALL_STATES = ['answered', 'missed', 'declined', 'cancelled'];
 const spoken = (list, max, withFrom) => (Array.isArray(list) ? list : []).slice(-max).filter(l => l && String(l.text || l.translation || '').trim()).map(l => ({...(withFrom ? {from: clip(l.from, 40).trim() || 'me'} : {}), text: clip(l.text || l.translation, 1000), translation: clip(l.translation || l.text, 1000), emotion: clip(l.emotion || 'calm', 100)}));
 const STATES = {redpacket: ['sent', 'opened'], transfer: ['sent', 'accepted', 'returned'], gift: ['sent', 'accepted', 'returned']};
@@ -126,6 +155,7 @@ export function messageWords(m) {
     case 'game': return [m.text, ...(m.game?.options || []), ...(m.game?.entries || []).map(e => e.text)].filter(Boolean).join(' ');
     case 'post': return [m.post?.title, m.post?.author, m.post?.text, m.post?.note].filter(Boolean).join(' ');
     case 'outfit': return [m.outfit?.name, m.outfit?.text, m.outfit?.note].filter(Boolean).join(' ');
+    case 'letter': return m.letter?.text || '';
     default: return '';
   }
 }
@@ -167,6 +197,7 @@ export function forwardLine(m) {
     case 'game': return `[${BOARDS[m.game?.type] ? '小游戏' : '群游戏'}] ${m.text || ''}`;
     case 'post': return `[帖子] ${m.post?.title || String(m.post?.text || '').slice(0, 30)}${m.post?.note ? ' ' + m.post.note : ''}`;
     case 'outfit': return `[穿搭] ${m.outfit?.name || ''}${m.outfit?.note ? ' ' + m.outfit.note : ''}`;
+    case 'letter': return `[信] ${String(m.letter?.text || '').slice(0, 60)}`;
     default: return m?.text || '';
   }
 }
@@ -221,6 +252,15 @@ function cleanMessage(m, id, at) {
     out.text = out.title;
   }
   if (kind === 'pat' || kind === 'notice') out.target = clip(m.target, 40).trim() || 'me';
+  // 拍一拍后缀: the patted one's own words, kept with the pat as they were.
+  if (kind === 'pat' && String(m.suffix ?? '').trim()) out.suffix = clip(m.suffix, 20).trim();
+  // 慢递信件: the words, when it reaches the other side, opened (a letter that came), answered (a letter of the user's).
+  if (kind === 'letter') {
+    const l = m.letter && typeof m.letter === 'object' ? m.letter : {};
+    out.letter = {text: clip(l.text, LETTER_LIMITS.text).trim(), arriveAt: timeOf(l.arriveAt), opened: l.opened === true, answered: l.answered === true};
+    if (!out.letter.text) throw fail('信是空的');
+    out.text = out.letter.text.slice(0, 30);
+  }
   if (kind === 'dice') out.text = String(Math.min(6, Math.max(1, Math.round(Number(m.text)) || 1)));
   // A contact's recall keeps what they said (said): the user may peek at it; what they are told is that it was not seen.
   if (kind === 'recall') { out.text = ''; if (from !== 'me' && String(m.said ?? '').trim()) out.said = clip(m.said, 1000).trim(); }
@@ -403,8 +443,18 @@ export class ChatStore {
       done(this.#public(row));
     }));
   }
-  async update(id, {name, members, pinned, muted, friend, blocked, befriended, story, open, label} = {}) {
+  async update(id, {name, members, pinned, muted, friend, blocked, befriended, story, open, label, notice, nicks, post} = {}) {
     return this.#change(id, row => {
+      // 群公告 (null takes it away) and 群昵称 (merged; an empty one taken away), groups only.
+      if (notice !== undefined && row.type === 'group') { const n = cleanNotice(notice); if (n) row.notice = n; else delete row.notice; }
+      if (nicks !== undefined && row.type === 'group') {
+        const merged = {...row.nicks};
+        for (const [who, nick] of Object.entries(nicks && typeof nicks === 'object' ? nicks : {})) { if (nick) merged[who] = nick; else delete merged[who]; }
+        const kept = cleanNicks(merged);
+        if (Object.keys(kept).length) row.nicks = kept; else delete row.nicks;
+      }
+      // Letters on their way (private chats): the list as it is now.
+      if (post !== undefined && row.type === 'dm') { const kept = cleanPost(post); if (kept.length) row.post = kept; else delete row.post; }
       // 聊天窗口: a private chat can have several; the one opened last is the one the list shows and replies go to.
       if (open === true) row.openedAt = this.#now();
       if (label !== undefined) { const text = clip(label, 40).trim(); if (text) row.label = text; else delete row.label; }
@@ -497,6 +547,13 @@ export class ChatStore {
         if (!m.reactions.length) delete m.reactions;
         return;
       }
+      // 慢递信件: opened, answered.
+      if (patch.letter) {
+        if (m.kind !== 'letter') throw fail('这条消息不是信');
+        if (patch.letter.opened !== undefined) m.letter.opened = patch.letter.opened === true;
+        if (patch.letter.answered !== undefined) m.letter.answered = patch.letter.answered === true;
+        return;
+      }
       // 群游戏: its state (a vote, a pick, a line of the chain), checked as a whole.
       if (patch.game) {
         if (m.kind !== 'game') throw fail('这条消息不是群游戏');
@@ -577,7 +634,7 @@ export class ChatStore {
       const members = [...new Set((Array.isArray(t.members) ? t.members : []).map(m => clip(m, 40).trim()).filter(Boolean))].slice(0, CHAT_STORE_LIMITS.members);
       if (!members.length) throw fail('备份里有一段聊天没有聊天对象');
       const messages = (Array.isArray(t.messages) ? t.messages : []).slice(-CHAT_STORE_LIMITS.messages).map(m => cleanMessage(m, clip(m?.id || this.#id(), 512), Number.isFinite(m?.at) ? m.at : now));
-      const row = {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true, ...(t.story === true ? {story: true} : {}), ...(Number.isFinite(t.openedAt) ? {openedAt: t.openedAt} : {}), ...(typeof t.label === 'string' && t.label.trim() ? {label: clip(t.label, 40).trim()} : {}), ...(t.type === 'group' && t.windowOf ? {windowOf: clip(t.windowOf, 512)} : {}), ...(t.type === 'group' && t.watch === true ? {watch: true} : {}),
+      const row = {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true, ...(t.story === true ? {story: true} : {}), ...(Number.isFinite(t.openedAt) ? {openedAt: t.openedAt} : {}), ...(typeof t.label === 'string' && t.label.trim() ? {label: clip(t.label, 40).trim()} : {}), ...(t.type === 'group' && t.windowOf ? {windowOf: clip(t.windowOf, 512)} : {}), ...(t.type === 'group' && t.watch === true ? {watch: true} : {}), ...(t.type === 'group' && cleanNotice(t.notice) ? {notice: cleanNotice(t.notice)} : {}), ...(t.type === 'group' && Object.keys(cleanNicks(t.nicks)).length ? {nicks: cleanNicks(t.nicks)} : {}), ...(t.type !== 'group' && cleanPost(t.post).length ? {post: cleanPost(t.post)} : {}),
         unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {}), ...(t.save ? {save: clip(t.save, 400)} : {}), ...(t.type !== 'group' && cleanFriend(t.friend) ? {friend: cleanFriend(t.friend)} : {}), ...(t.type !== 'group' && cleanBlocked(t.blocked) ? {blocked: cleanBlocked(t.blocked)} : {}), ...(t.type !== 'group' && Number.isFinite(t.befriended) && t.befriended > 0 ? {befriended: t.befriended} : {})};
       // 重新回复的版本 come along with a backup or a sync, while they still belong to the chat's last round.
       const alts = cleanAlts(t.alts, () => this.#id());

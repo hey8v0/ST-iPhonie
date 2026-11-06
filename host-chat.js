@@ -4,8 +4,8 @@
 // into it; that text is injected once, into the next story reply.
 import {roleStore, findRoute} from './core/routes.js';
 import {bubbleRequest, splitBubbleAnswer} from './core/bubble-css.js';
-import {currentDm, currentWindow, lastRound} from './core/chats.js';
-import {buildChatRequest, parseChatReply, bringText, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace, STICKER_MOODS, contactStatus} from './core/chat.js';
+import {currentDm, currentWindow, lastRound, chatWindows, forwardLine, messageWords} from './core/chats.js';
+import {buildChatRequest, parseChatReply, bringText, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace, STICKER_MOODS, contactStatus, letterRequest, letterText} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer, sizeFor} from './core/draw.js';
 import {storyLines} from './core/moments.js';
@@ -108,6 +108,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     for (const p of people) { const st = contactStatus(saved[ownOf(p.name)]); if (st.set || st.signature) out[p.name] = st; }
     return out;
   }
+  /** 拍一拍后缀 (0.9.36): the words after a pat of this one ('me': the user's own). */
+  const suffixOf = name => name === 'me' ? settings().chat.profile?.patSuffix || '' : settings().chat.patOf?.[ownOf(name)] || '';
   /** Where the forum of a chat is (分区). */
   const forumSpaceOf = thread => { const s = settings(); return s.chat.partition === 'card' ? {key: thread.space || backend.cardKey()} : s.chat.partition === 'chat' ? backend.here() : null; };
 
@@ -155,7 +157,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         try { shared = await sharedGroups(thread.members[0], user); } catch (error) { backend.reportDiagnostic?.('聊天 · 同群消息', error, 'warn'); }
       }
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
-      const request = pics => buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), nudge, cue, time: time || Date.now(), statuses: statusesOf(people), peeked: peekedNow ? peekedNow.what || true : '', posts, outfit, music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
+      const request = pics => buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), nudge, cue, time: time || Date.now(), statuses: statusesOf(people), peeked: peekedNow ? peekedNow.what || true : '', posts, outfit, pats: Object.fromEntries(people.map(p => [p.name, suffixOf(p.name)]).filter(([, s]) => s)), music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
       const answer = cleanTagged(await answerFor(ctx, request, await pictures(ctx, thread, preset), signal), preset.cleanTags);
       // 停止 while it was being written: what comes late is let go (the tavern's own generation cannot be stopped).
       if (signal.aborted) throw stopped();
@@ -209,6 +211,29 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         if (target && target.reactions?.find(r => r.from === item.from)?.emoji !== item.emoji) latest = await backend.chats.updateMessage(threadId, target.id, {react: {from: item.from, emoji: item.emoji}});
         continue;
       }
+      // ---------- 0.9.36 ----------
+      // 引用: the line they answer, found in the chat by its words (the latest one that has them; one said earlier in this
+      // same reply too); not found, just words.
+      if (item.kind === 'quote') {
+        const want = item.find.replace(/\s+/g, ''), target = [...latest.messages, ...out].findLast(m => !['system', 'notice', 'recall', 'pat'].includes(m.kind) && (!want || messageWords(m).replace(/\s+/g, '').includes(want)) && (want || m.from === 'me'));
+        out.push({from: item.from, kind: 'text', text: item.text, ...(target ? {quote: {from: target.from, text: forwardLine(target).slice(0, 200)}} : {})});
+        continue;
+      }
+      // 群公告, 改群名 (every window of the group), 群昵称: groups only.
+      if (item.kind === 'board' || item.kind === 'rename' || item.kind === 'nick') {
+        if (thread.type !== 'group') continue;
+        if (item.kind === 'board') { latest = await backend.chats.update(threadId, {notice: {text: item.text, by: item.from, at: Date.now()}}); out.push({from: item.from, kind: 'notice', target: 'me', text: `发布了群公告：${item.text}`}); }
+        if (item.kind === 'nick') latest = await backend.chats.update(threadId, {nicks: {[item.from]: item.text}});
+        if (item.kind === 'rename' && item.text !== thread.name) {
+          for (const t of chatWindows(await backend.threads(), thread)) await backend.chats.update(t.id, {name: item.text});
+          latest = await backend.chats.get(threadId);
+          out.push({from: item.from, kind: 'notice', target: 'me', text: `把群名改成了「${item.text}」`});
+        }
+        continue;
+      }
+      // 拍一拍后缀: kept as theirs; a pat carries the patted one's.
+      if (item.kind === 'pat-suffix') { try { backend.saveChatOptions({patOf: {[ownOf(item.from)]: item.text}}); } catch { /* not worth a failed reply */ } continue; }
+      if (item.kind === 'pat') { const suffix = suffixOf(item.target); out.push({...item, ...(suffix ? {suffix} : {})}); continue; }
       // ---------- 0.9.35 ----------
       // 「[建群]」: a group of contacts (the user in it only when named), made after this reply.
       if (item.kind === 'group') { if (!making) making = item; continue; }
@@ -768,6 +793,62 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     } finally { reminding = false; }
   }
 
+  // ---------- 慢递信件 (0.9.36) ----------
+  // A letter of the user's that has reached the other side is answered (one request), and the answer is on its way for
+  // a while (half the time the user's took, from 6 hours to 2 days); letters on their way that are due come into the
+  // chat. All of it while the tavern page is open: a letter the page was shut for is late, as letters are.
+  let lettering = false;
+  const letterFailed = new Map();
+  async function writeLetter(thread, m, now) {
+    const s = settings(), preset = activeChatPreset(s.chat), user = userName(), person = members(thread)[0];
+    const remembered = memory ? (await memory.contextFor(thread, {query: m.letter.text.slice(0, 200)}).catch(() => ({text: ''}))).text : '';
+    const prompt = letterRequest({prompts: s.promptRules, partner: person.name, persona: person.persona || person.card, user, userPersona: userPersona(), memory: remembered,
+      earlier: memory?.storyMemory() || '', story: story(preset), history: thread.messages.slice(-30), letter: m.letter.text, sentAt: m.at, now});
+    return letterText(await backend.generateText(context(), {use: 'chat', prompt, plainText: true, trimNames: false, responseLength: 2000}));
+  }
+  // The user's letters are looked for every five minutes (every chat read); letters on their way, every half minute
+  // (the list says which chats have any).
+  let lastScan = 0;
+  async function letterTick(now = Date.now(), {scan = now - lastScan >= 5 * 60_000} = {}) {
+    if (lettering) return 0;
+    lettering = true;
+    let came = 0;
+    try {
+      for (const t of (await backend.threads()).filter(x => x.type === 'dm')) {
+        if (!scan && !(t.post || []).some(l => l.arriveAt <= now)) continue;
+        const thread = await backend.chats.get(t.id), partner = thread?.members[0];
+        if (!thread) continue;
+        // Arrived at theirs, not answered yet (not if they are not friends now; one that failed is tried again later).
+        for (const m of thread.messages.filter(x => x.kind === 'letter' && x.from === 'me' && !x.letter.answered && x.letter.arriveAt <= now)) {
+          if (thread.friend || thread.blocked) { await backend.chatMutate(t.id, () => backend.chats.updateMessage(t.id, m.id, {letter: {answered: true}})); continue; }
+          if (now - (letterFailed.get(m.id) || 0) < 20 * 60_000) continue;
+          let text = '';
+          try { text = await writeLetter(thread, m, now); } catch (error) { backend.reportDiagnostic?.('聊天 · 回信', error, 'warn'); }
+          if (!text) { letterFailed.set(m.id, now); continue; }
+          const away = Math.round(Math.max(6 * 3600_000, Math.min(48 * 3600_000, (m.letter.arriveAt - m.at) / 2)));
+          await backend.chatMutate(t.id, async () => {
+            await backend.chats.updateMessage(t.id, m.id, {letter: {answered: true}});
+            const fresh = await backend.chats.get(t.id);
+            await backend.chats.update(t.id, {post: [...(fresh.post || []), {id: `l-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`, from: partner, text, sentAt: now, arriveAt: now + away}]});
+            await backend.chats.append(t.id, [{from: partner, kind: 'notice', target: 'me', text: '收到了{对方}的信'}], {read: true});
+          });
+        }
+        // Letters to the user that are due: into the chat, unread, said on the phone and in the tavern.
+        if ((thread.post || []).some(l => l.arriveAt <= now)) {
+          const arrived = await backend.chatMutate(t.id, async () => {
+            const fresh = await backend.chats.get(t.id), due = (fresh.post || []).filter(l => l.arriveAt <= now);
+            await backend.chats.update(t.id, {post: (fresh.post || []).filter(l => l.arriveAt > now)});
+            await backend.chats.append(t.id, due.map(l => ({from: l.from, kind: 'letter', letter: {text: l.text, arriveAt: l.arriveAt}})));
+            return due.length;
+          });
+          if (arrived) { came += arrived; notice(`✉️ 收到${partner}的来信`); backend.emit('chat', {threadId: t.id, incoming: {from: partner, text: '寄来一封信', kind: 'letter', count: arrived}}); }
+        }
+      }
+      if (scan) lastScan = now;
+    } finally { lettering = false; }
+    return came;
+  }
+
   // ---------- 查手机 × 聊天, 衣柜 × 聊天 (0.9.35) ----------
   // With 正文联动手机 on: the one whose phone was looked into may come to ask, a few minutes later (once; told in the next
   // private chat anyway); someone whose clothes changed in the story may send a picture asking how it looks.
@@ -809,7 +890,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    *  looked at every half minute. One for the page: a host made again takes it over. */
   function startClock({every = 5 * 60_000, first = 60_000, timers = globalThis} = {}) {
     timers.clearTimeout?.(clockTimer?.first); timers.clearInterval?.(clockTimer?.every); timers.clearInterval?.(clockTimer?.remind);
-    const look = () => { clockTick().catch(() => {}); }, remind = () => { remindTick().catch(() => {}); };
+    const look = () => { clockTick().catch(() => {}); }, remind = () => { remindTick().catch(() => {}); letterTick().catch(() => {}); };
     clockTimer = {first: timers.setTimeout(() => { look(); remind(); }, first), every: timers.setInterval(look, every), remind: timers.setInterval(remind, 30_000)};
     // (Where timers can keep a process alive, as in Node, these do not.)
     clockTimer.first?.unref?.(); clockTimer.every?.unref?.(); clockTimer.remind?.unref?.();
@@ -830,7 +911,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
 
   /** What the story sends to the phone is messages: a 回应, a vote, a line of 接龙, a move, a note, a post or putting on
    *  clothes belong to a chat being answered. */
-  const onPhone = item => !['react', 'vote', 'chain', 'move', 'undo', 'wear', 'memo', 'share-post'].includes(item.kind);
+  const onPhone = item => !['react', 'vote', 'chain', 'move', 'undo', 'wear', 'memo', 'share-post', 'quote', 'board', 'rename', 'nick'].includes(item.kind);
   /** The stickers these people may send: the user's collection, and each one's own (角色专属表情包, only they send those). */
   function stickersFor(names) {
     const s = settings(), routes = backend.seen?.routes || s.routes, own = s.chat.roleStickers || {};
@@ -873,7 +954,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
 
   return {
-    bubbleRewrite, drawRoleSticker, clockTick, startClock, remindTick, groupTalk, outfitChanged, peekLater, makeGroup,
+    bubbleRewrite, drawRoleSticker, clockTick, startClock, remindTick, groupTalk, outfitChanged, peekLater, makeGroup, letterTick,
     reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, phoneAfter, phoneAfterPlan, askFriend,
     reroll: threadId => reply(threadId, {reroll: true}),
     /** 停止回复: the reply being written for this chat is let go. */

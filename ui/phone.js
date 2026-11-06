@@ -1012,8 +1012,10 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   mount.addEventListener('touchmove', e => { const t = e.touches[0]; if (t && gesture && gestureMove(t.clientX, t.clientY) && e.cancelable) e.preventDefault(); }, {signal, passive: false});
   mount.addEventListener('touchend', e => { const t = e.changedTouches[0]; if (t) gestureEnd(t.clientX, t.clientY); }, {signal});
   mount.addEventListener('touchcancel', () => gestureEnd(0, 0, true), {signal});
+  // Words typed into a box are not getting around by keys (a phone's own keyboard sends keys too): animations stay.
+  const typing = el => el?.isContentEditable || el?.tagName === 'TEXTAREA' || (el?.tagName === 'INPUT' && /^(text|search|url|email|tel|password|number)$/.test(el.type));
   doc.addEventListener('keydown', e => {
-    doc.documentElement.dataset.keyboard = 'true';
+    if (!typing(e.target) || e.key === 'Tab' || e.key === 'Escape') doc.documentElement.dataset.keyboard = 'true';
     if (e.key === 'Escape') {
       e.preventDefault();
       if (sheet || locked || active) back(); else api.close();

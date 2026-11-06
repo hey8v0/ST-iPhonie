@@ -15,6 +15,7 @@ import {OTHER_PICTURES, NARRATOR} from './narration.js';
 import {normalizeBubbleSets, normalizeBubbleOf} from './bubble-css.js';
 import {BOARDS, boardText, cellName} from './board.js';
 import {ownerName} from './wardrobe.js';
+import {normalizePets} from './pets.js';
 
 /** Another plugin's picture prompt kept in a reply (柏宝绘's <bbi_image>): not story, left out whole. */
 const OTHER_PICTURE_BLOCKS = new RegExp(`<(${OTHER_PICTURES.join('|')})\\b[^>]*>[\\s\\S]*?(?:<\\/\\1\\s*>|$)`, 'gi');
@@ -83,7 +84,7 @@ export function normalizeVoiceText(v = {}) {
 }
 
 export function defaultChat() {
-  return {presets: [{...structuredClone(DEFAULT_PRESET), memory: normalizeMemory()}], activePreset: 'default', contacts: [], voiceText: {...DEFAULT_VOICE_TEXT}, profile: normalizeProfile(), starred: [], avatars: {}, partition: 'none', pace: true, wallet: defaultWallet(), stickers: [], proactive: normalizeProactive(), remarks: {}, netNames: {}, bubbleSets: [], bubbleOf: {}, roleStickers: {}, bgOf: {}, statusOf: {}, peeked: {}};
+  return {presets: [{...structuredClone(DEFAULT_PRESET), memory: normalizeMemory()}], activePreset: 'default', contacts: [], voiceText: {...DEFAULT_VOICE_TEXT}, profile: normalizeProfile(), starred: [], avatars: {}, partition: 'none', pace: true, wallet: defaultWallet(), stickers: [], proactive: normalizeProactive(), remarks: {}, netNames: {}, bubbleSets: [], bubbleOf: {}, roleStickers: {}, bgOf: {}, statusOf: {}, peeked: {}, autoReply: false, patOf: {}, pets: normalizePets()};
 }
 
 const text = (value, max) => String(value ?? '').slice(0, max);
@@ -167,6 +168,8 @@ const OLD_LOOKS = {bubble: {candy: 'jelly', mint: 'jelly', night: 'glow', ink: '
 export function normalizeProfile(p = {}) {
   const pick = (value, list, fallback) => Object.hasOwn(list, value) ? value : fallback;
   return {name: text(p.name, 40).trim(), status: pick(p.status, PROFILE_STATUS, 'online'), statusText: text(p.statusText, 20).trim(), signature: text(p.signature, 80).trim(),
+    // 拍一拍后缀 (0.9.36): what follows when someone pats the user (「拍了拍你的小脑袋」).
+    patSuffix: text(p.patSuffix, 20).trim(),
     // Bought looks (PREMIUM) are kept like the free ones; the backend checks they were bought before they are put on.
     // 'custom:<id>': a set of 自定义气泡 (one that is gone shows the default).
     // 关键词彩蛋 (0.9.34): on unless turned off.
@@ -301,7 +304,9 @@ export function normalizeChat(value) {
     // 自定义气泡 (core/bubble-css.js): the sets, and whose set is whose.
     bubbleSets: normalizeBubbleSets(value.bubbleSets), bubbleOf: normalizeBubbleOf(value.bubbleOf), roleStickers: normalizeRoleStickers(value.roleStickers), bgOf: normalizeBgOf(value.bgOf),
     // 状态和签名, 查手机 × 聊天 (0.9.35).
-    statusOf: normalizeStatusOf(value.statusOf), peeked: normalizePeeked(value.peeked)};
+    statusOf: normalizeStatusOf(value.statusOf), peeked: normalizePeeked(value.peeked),
+    // 0.9.36: 自动回复 (off unless turned on), 拍一拍后缀 of each person by their own key, 宠物.
+    autoReply: value.autoReply === true, patOf: normalizeNames(value.patOf, 20), pets: normalizePets(value.pets)};
 }
 
 // ---------- 状态和签名 (0.9.35) ----------
@@ -505,7 +510,7 @@ export const DEFAULT_BLESSING = '恭喜发财，大吉大利';
 const TRANSFER_STATE = {sent: '待收款', accepted: '已收款', returned: '已退还'};
 /** 「X 领取了 Y 的红包」-style lines; `me` is how the user is called (你 on screen, the user's name in prompts). */
 export const noticeText = (m, me) => nameOf(m.from, me) + String(m.text).replaceAll('{对方}', nameOf(m.target, me));
-export const patText = (m, me) => `${nameOf(m.from, me)}拍了拍${nameOf(m.target, me)}`;
+export const patText = (m, me) => `${nameOf(m.from, me)}拍了拍${nameOf(m.target, me)}${m.suffix || ''}`;
 
 /** How a chat message reads in a transcript. */
 export function messageLine(m, user) {
@@ -523,6 +528,8 @@ function messageWordsFor(m, user) {
     case 'photo': return `${who}：[图片${m.seen ? m.seen : ''}]${m.text ? ' ' + m.text : ''}`;
     case 'file': return `${who}：[文件 ${m.name}]${m.text ? ' ' + m.text : ''}`;
     case 'sticker': return `${who}：[表情包] ${m.text}`;
+    // 慢递信件 (0.9.36): one on its way is not read yet by the other side.
+    case 'letter': return m.letter?.arriveAt > Date.now() && !m.letter?.answered ? `（${who}寄出了一封信，还在路上，对方还没收到）` : `${who}：[信]\n${String(m.letter?.text || '').slice(0, 1500)}\n[信结束]`;
     // 论坛 × 聊天 and 衣柜 × 聊天 (0.9.35): what was shared, as it reads.
     case 'post': return `${who}：[分享帖子] 「${m.post?.title || ''}」${m.post?.author ? `（发帖的人：${nameOf(m.post.author, user)}）` : ''}${m.post?.text ? '\n  ' + m.post.text : ''}${m.post?.note ? '\n  ' + who + '说：' + m.post.note : ''}`;
     case 'outfit': return `${who}：[分享穿搭] ${ownerName(m.outfit?.owner, user)}的一身「${m.outfit?.name || ''}」：${m.outfit?.text || ''}${m.outfit?.note ? '｜' + m.outfit.note : ''}`;
@@ -580,6 +587,47 @@ export function boardResult(g, user = '我') {
   if (g.resigned) return `${nameOf(g.resigned, user)}认输了`;
   return g.winner ? `${nameOf(g.winner, user)}赢了` : '';
 }
+// ---------- 防复读 (0.9.36) ----------
+// Words people use a lot without meaning much: not taken for someone's habit.
+const COMMON = new Set(['我们', '你们', '他们', '什么', '怎么', '没有', '可以', '就是', '这个', '那个', '知道', '今天', '现在', '一下', '还是', '不是', '已经', '真的', '因为', '所以', '但是', '然后', '如果', '时候', '自己', '一个', '这样', '那样', '觉得', '我也', '你也', '是不', '不过']);
+/**
+ * What each of these people keeps using lately (their last 12 lines, at least 4): an opening (the first two to four
+ * characters), an ending (the last two before the stops) or a face (an emoji or 颜文字) in three lines or more.
+ * [{name, words}] — at most three words each, the most used first.
+ */
+export function repeatsOf(messages, names) {
+  const out = [];
+  for (const name of names) {
+    const lines = messages.filter(m => m.from === name && ['text', 'voice'].includes(m.kind)).slice(-12).map(m => String(m.kind === 'voice' ? m.translation || m.text : m.text || '').trim()).filter(Boolean);
+    if (lines.length < 4) continue;
+    const seen = new Map(), add = (word, line) => { if (word && !COMMON.has(word)) { const s = seen.get(word) || new Set(); s.add(line); seen.set(word, s); } };
+    lines.forEach((line, i) => {
+      const head = line.match(/^[\p{Script=Han}\p{L}]{2,}/u)?.[0] || '';
+      for (const n of [4, 3, 2]) if (head.length >= n) add(head.slice(0, n), i);
+      const tail = line.replace(/[\s。，！？!?.,~～…]+$/u, '').match(/[\p{Script=Han}]{2}$/u)?.[0];
+      add(tail, i);
+      for (const face of line.match(/\p{Extended_Pictographic}|[(（][^()（）\s]{2,12}[)）][^\s，。]{0,3}/gu) || []) add(face, i);
+    });
+    // The longest of words that come in the same lines stands for them (「嘿嘿嘿」 over 「嘿嘿」).
+    const words = [...seen].filter(([, s]) => s.size >= 3).sort((a, b) => b[1].size - a[1].size || b[0].length - a[0].length).map(([w]) => w);
+    const kept = words.filter((w, i) => !words.slice(0, i).some(x => x.includes(w) || w.includes(x))).slice(0, 3);
+    if (kept.length) out.push({name, words: kept});
+  }
+  return out;
+}
+
+// ---------- 慢递信件 (0.9.36) ----------
+const dateText = at => { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}月${d.getDate()}日`; };
+/** The request for a letter back: who writes it, what they know (story, memory, the phone chat), and the letter that came. */
+export function letterRequest({prompts = {}, partner, persona = '', user = '我', userPersona = '', lore = '', memory = '', earlier = '', story = [], history = [], letter = '', sentAt = 0, now = Date.now()}) {
+  const system = promptText(prompts, 'letter', 'system', {'用户': user, '对象': partner, '对象资料': String(persona || '').trim() || '（没有资料，按剧情里的表现来）',
+    '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': story.map(s => `${s.name}：${s.text}`).join('\n'),
+    '记忆': memory.trim(), '聊天记录': history.filter(m => m.kind !== 'letter').map(m => messageLine(m, user)).filter(Boolean).slice(-20).join('\n')});
+  return [{role: 'system', content: system}, {role: 'user', content: promptText(prompts, 'letter', 'ask', {'用户': user, '对象': partner, '来信': letter, '寄出': dateText(sentAt), '收到': dateText(now)})}];
+}
+/** A letter as the model wrote it: the words, without fences or a heading of its own. */
+export const letterText = answer => String(answer ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```[a-z]*\n?|```/g, '').replace(/^\s*(?:【?回信】?|回信[:：])\s*\n/, '').trim().slice(0, 3000);
+
 /** 状态和签名 (0.9.35): how to change them, and what the people of this chat set (statuses: {name: contactStatus}). */
 function statusPart(prompts, members, statuses) {
   if (!promptOn(prompts, 'status')) return '';
@@ -629,7 +677,7 @@ export function knowsRule(names, user, {prompts = {}, group = false} = {}) {
  * outfit: what they have just changed into (cue 'outfit', 衣柜 × 聊天). cue 'group': a group chats on its own (群里自己聊).
  * A 旁观群 (thread.watch) is talked in without the user.
  */
-export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', groups = '', nudge = false, cue = '', pictures = [], time = Date.now(), statuses = {}, peeked = '', posts = [], outfit = ''}) {
+export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', groups = '', nudge = false, cue = '', pictures = [], time = Date.now(), statuses = {}, peeked = '', posts = [], outfit = '', pats = {}}) {
   const group = thread.type === 'group', watch = group && thread.watch === true;
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
@@ -652,7 +700,9 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     '名单': members.map(m => m.name).join('、'),
     '语音': speakers.length > 0, '语音格式': voiceFormat, '语音语言': speakers.map(m => `${m.name}：${languageName(m.language || 'zh')}`).join('，'),
     '出图': images, '表情包': stickerList(stickers), '打电话': dialing, '朋友圈': posting, '分享歌曲': !!music?.share, '删好友': !group && !asking, '私聊': group && !watch,
-    '正在听': music?.listening ? listeningNote(music.listening, user, prompts) : '', '好友申请': asking, '看图': pictures.length > 0});
+    '正在听': music?.listening ? listeningNote(music.listening, user, prompts) : '', '好友申请': asking, '看图': pictures.length > 0,
+    // 拍一拍后缀 (0.9.36): who here has none yet (they may give themselves one).
+    '没后缀': members.filter(m => !pats[m.name]).map(m => m.name).join('、')});
   // 0.9.35: what else this chat knows and can do, each a block of 系统提示词 of its own.
   const extra = [
     // 旁观群: the user is not in it, and nobody there knows the user sees it.
@@ -662,7 +712,9 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     !watch && promptOn(prompts, 'watch') ? promptText(prompts, 'watch', 'make', {'用户': user}) : '',
     statusPart(prompts, members, statuses),
     !watch && promptOn(prompts, 'memo') ? promptText(prompts, 'memo', 'rule', {'用户': user}) : '',
-    !watch && posts.length && promptOn(prompts, 'forum-share') ? promptText(prompts, 'forum-share', 'rule', {'用户': user, '帖子': posts.slice(0, 8).map(p => `「${p.title}」${p.author ? `（${p.author}）` : ''}`).join('、')}) : ''].filter(Boolean);
+    !watch && posts.length && promptOn(prompts, 'forum-share') ? promptText(prompts, 'forum-share', 'rule', {'用户': user, '帖子': posts.slice(0, 8).map(p => `「${p.title}」${p.author ? `（${p.author}）` : ''}`).join('、')}) : '',
+    // 0.9.36: a group's 群公告 and 群昵称, and how to change them or @ someone.
+    group ? promptText(prompts, 'group-extra', 'rule', {'用户': user, '群公告': thread.notice?.text || '', '群昵称': Object.entries(thread.nicks || {}).map(([who, nick]) => `${nameOf(who, user)}在群里叫「${nick}」`).join('，')}) : ''].filter(Boolean);
   // pictures: [{id, url}] — photos sent along for a model that sees; the record numbers them [图片1], [图片2]… in order.
   const seen = new Map(pictures.map((p, i) => [p.id, i + 1]));
   const history = thread.messages.filter(m => m.kind !== 'system').slice(-preset.history).map(m => seen.has(m.id) ? {...m, seen: seen.get(m.id)} : m);
@@ -682,19 +734,25 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
   const clock = clockText(prompts, {now: time, last: lastTheirs(thread.messages)});
   // 按现实时间主动找你: what the moment is (早上, 睡前, 很久没聊), under the time.
   const moment = clock && nudge && ['morning', 'night', 'quiet'].includes(cue) ? promptText(prompts, 'now', cue, {'对象': partner, '用户': user}) : '';
+  // 防复读 (0.9.36): the openers, endings and faces someone here keeps using lately, to be left this time.
+  const repeats = promptOn(prompts, 'variety') ? repeatsOf(history, members.map(m => m.name)) : [];
+  // Someone @'d in the user's last message (groups): they answer.
+  const lastMine = history.findLast(m => m.from === 'me'), atted = group && lastMine ? members.map(m => m.name).filter(n => String(lastMine.text || '').includes('@' + n) || (thread.nicks?.[n] && String(lastMine.text || '').includes('@' + thread.nicks[n]))) : [];
   // Under the record: the games going on here (how to play them), and in a private chat what was peeked at on their phone
   // (told once: they may notice), clothes the user just showed them, what they have just changed into.
   const games = [gameNotes(prompts, history, user),
     !group && peeked && promptOn(prompts, 'peek-notice') ? promptText(prompts, 'peek-notice', 'text', {'用户': user, '对象': partner, '看了什么': typeof peeked === 'string' ? peeked : ''}) : '',
     !group ? outfitNote(prompts, history, partner, user) : '',
-    !group && nudge && cue === 'outfit' && outfit ? promptText(prompts, 'wardrobe', 'changed', {'用户': user, '对象': partner, '衣着': outfit}) : ''].filter(Boolean).join('\n');
+    !group && nudge && cue === 'outfit' && outfit ? promptText(prompts, 'wardrobe', 'changed', {'用户': user, '对象': partner, '衣着': outfit}) : '',
+    atted.length && last?.from === 'me' ? promptText(prompts, 'group-extra', 'at', {'用户': user, '谁': atted.join('、')}) : '',
+    repeats.length ? promptText(prompts, 'variety', 'text', {'复读': repeats.map(r => `${r.name}：${r.words.map(w => `「${w}」`).join('')}`).join('；')}) : ''].filter(Boolean).join('\n');
   const text = (clock ? clock + (moment ? '\n' + moment : '') + '\n\n' : '') + transcript + filesText(history, user) + (games ? games + '\n\n' : '') + turn;
   return [{role: 'system', content: [system, ...extra].join('\n\n')}, {role: 'user', content: pictures.length ? [{type: 'text', text}, ...pictures.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : text}];
 }
 
 const NAME_LINE = /^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]\s*(.*)$/;
 const unquote = s => s.trim().replace(/^[「“"『](.*)[」”"』]$/s, '$1').trim();
-const SPECIAL = /^\s*[[【]\s*(建群|拉群|改状态|状态|个性签名|改签名|签名|落子|下棋|悔棋|备忘录|记备忘|备忘|提醒|分享帖子|转发帖子|穿上|换上|表情回应|贴表情|回应|撤回|投票|接龙|认输|表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|配图|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|私聊|私信|悄悄话|私发|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友|发送好友申请|好友申请|申请好友|加好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
+const SPECIAL = /^\s*[[【]\s*(引用|发群公告|群公告|改群名|改群昵称|群昵称|改拍一拍后缀|拍一拍后缀|建群|拉群|改状态|状态|个性签名|改签名|签名|落子|下棋|悔棋|备忘录|记备忘|备忘|提醒|分享帖子|转发帖子|穿上|换上|表情回应|贴表情|回应|撤回|投票|接龙|认输|表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|配图|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|私聊|私信|悄悄话|私发|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友|发送好友申请|好友申请|申请好友|加好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
 const LUCKY = ['6.66', '8.88', '5.20', '13.14', '16.80', '1.88'];
 // Drawing tags from what the model wrote: the English words (Chinese in them is left out), comma separated.
 const tagsOf = s => String(s).replace(/[一-鿿]+/g, ' ').split(/[,，]/).map(t => t.replace(/\s+/g, ' ').trim()).filter(Boolean).join(', ').slice(0, 600);
@@ -716,6 +774,18 @@ function special(from, content, {names, user, stickers = []}) {
   const [, what, arg, rest] = m, text = unquote(rest || '').replace(/<[^>]+>/g, '');
   const all = (arg.trim() ? arg.trim() + (text ? '｜' + text : '') : text).trim();
   switch (what) {
+    // 引用 (0.9.36): 「[引用 那句话里的几个字] 回复的话」 — the host finds the line in the chat (one not found: just words).
+    case '引用': {
+      const [find, ...rest] = arg.trim() ? [arg.trim(), text] : text.split(/[|｜]/);
+      const said = (arg.trim() ? text : rest.join(' ')).trim();
+      return said ? {from, kind: 'quote', find: String(find || '').replace(/^[「“"]|[」”"]$/g, '').trim().slice(0, 60), text: said.slice(0, 4000)} : null;
+    }
+    // 群公告, 改群名, 群昵称 (0.9.36, groups): the host changes the group and leaves a line.
+    case '发群公告': case '群公告': return all ? {from, kind: 'board', text: all.slice(0, 300)} : null;
+    case '改群名': return all ? {from, kind: 'rename', text: all.replace(/^[「“"]|[」”"]$/g, '').trim().slice(0, 40)} : null;
+    case '改群昵称': case '群昵称': return all ? {from, kind: 'nick', text: all.replace(/^[「“"]|[」”"]$/g, '').trim().slice(0, 16)} : null;
+    // 拍一拍后缀 (0.9.36): their own words after a pat (「的小脑袋」), kept as theirs.
+    case '改拍一拍后缀': case '拍一拍后缀': return all ? {from, kind: 'pat-suffix', text: all.replace(/^[「“"]|[」”"]$/g, '').trim().slice(0, 20)} : null;
     // 旁观群 and groups a contact makes (0.9.35): 「[建群] 群名｜成员1、成员2」 — the host makes it (the user in it only when named).
     case '建群': case '拉群': {
       const [name, ...rest] = all.split(/[|｜]/), list = [...new Set(rest.join('、').split(/[、,，;；\s]+/).map(n => n.trim()).filter(Boolean))].slice(0, 20);
