@@ -55,7 +55,7 @@ import { makeThumb, makePreview, packPicture } from './thumbnail.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, ucPresets, qualityPresets, upscaleBody, isV5, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, drawCast, defaultDraw, normalizeVibeSettings, applyImageConnection, tavernPicture } from './draw.js';
 import { normalizeBubbleSet, normalizeBubbleSets, normalizeBubbleOf, BUBBLE_LIMITS } from './bubble-css.js';
-import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, roleInSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive, normalizeRoleStickers, normalizeBgOf } from './chat.js';
+import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, roleInSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive, normalizeRoleStickers, normalizeBgOf, normalizeStatusOf, normalizePeeked } from './chat.js';
 import { ChatStore, money, currentDm, searchThreads } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
 import { CloudQueue, KeyHashQueue, newRoomCode, validRoom, sha256Hex } from './cloud-queue.js';
@@ -1804,6 +1804,23 @@ export class TTSBackend {
             const merged = { ...next.chat.roleStickers };
             for (const [who, list] of Object.entries(patch.roleStickers)) { if (Array.isArray(list) && list.length) merged[who] = list; else delete merged[who]; }
             next.chat.roleStickers = normalizeRoleStickers(merged);
+        }
+        // statusOf (0.9.35, 状态和签名): {person's own key: {status, text} | {signature} | null} — what they set (with when),
+        // merged into what they had; null takes it all away.
+        if (patch?.statusOf && typeof patch.statusOf === 'object') {
+            const merged = { ...next.chat.statusOf }, now = Date.now();
+            for (const [who, s] of Object.entries(patch.statusOf)) {
+                if (!s) { delete merged[who]; continue; }
+                const had = merged[who] || {};
+                merged[who] = { ...had, ...('status' in s ? { status: s.status, text: s.text || '', at: now } : {}), ...('signature' in s ? { signature: s.signature, signAt: now } : {}) };
+            }
+            next.chat.statusOf = normalizeStatusOf(merged);
+        }
+        // peeked (0.9.35, 查手机 × 聊天): {person's own key: {at, what} | null}.
+        if (patch?.peeked && typeof patch.peeked === 'object') {
+            const merged = { ...next.chat.peeked };
+            for (const [who, v] of Object.entries(patch.peeked)) { if (v) merged[who] = v; else delete merged[who]; }
+            next.chat.peeked = normalizePeeked(merged);
         }
         // avatars: {name: choice | null}; null goes back to the tavern's avatar (or the first letter).
         if (patch?.avatars && typeof patch.avatars === 'object') { const merged = { ...next.chat.avatars }; for (const [name, a] of Object.entries(patch.avatars)) { if (a) merged[name] = a; else delete merged[name]; } next.chat.avatars = normalizeAvatars(merged); }
@@ -3635,6 +3652,8 @@ export class TTSBackend {
             // 查手机: the open card's snapshot of a person, else the shared one from before 分区.
             listPeeks: async () => { const here = this.here(); return (await this.apps.list('peek')).filter(p => inSpace(p, here)); },
             getPeek: async name => (await this.apps.get(peekId(name, this.spaceKey()))) || (this.spaceKey() ? this.apps.get(peekId(name)) : null),
+            /** 查手机 × 聊天 (0.9.35): the user looked into this one's phone (what: the parts opened); the next private chat is told. */
+            markPeeked: (name, what = '') => { const who = String(name || '').trim(); if (!who) return false; this.saveChatOptions({ peeked: { [roleStore(findRoute(this.seen.routes, who)) || who]: { at: Date.now(), what: String(what || '').slice(0, 60) } } }); this.emit('peeked', { name: who }); return true; },
             deletePeek: name => this.appsMutate('peek', async () => { await this.apps.remove(peekId(name, this.spaceKey())); if (this.spaceKey()) await this.apps.remove(peekId(name)); this.noteGone('peek', [peekId(name, this.spaceKey()), peekId(name)]); return true; }),
             /** 分区: the card open now ({key, name}) and whether 分区 is on. */
             phoneSpace: () => ({ ...clone(this.space), on: !!this.here() }),

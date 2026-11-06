@@ -5,6 +5,7 @@ import {activeStyle} from './core/draw.js';
 
 /** A list of names, as an array or written with commas. */
 const namesOf = value => (Array.isArray(value) ? value : String(value ?? '').split(/[,，、]/)).map(x => String(x ?? '').trim()).filter(Boolean);
+const nameOf = value => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
 
 /**
  * open(app): the phone opened, at an app when one is named. ask(title, text): a yes or no from the user (the tavern's own
@@ -13,26 +14,47 @@ const namesOf = value => (Array.isArray(value) ? value : String(value ?? '').spl
 export function publicApi({pictures, backend, open = () => {}, ask = async () => false, storage = globalThis.localStorage}) {
   return Object.freeze({
     // 2 (0.9.34): open and suggestContacts were added; what 1 had is as it was.
-    apiVersion: 2,
+    // 3 (0.9.35): suggestRoles was added, and both take {debug} (ask again each time: for a card's author trying it).
+    apiVersion: 3,
     /** Opens the phone, at an app when one is named: 'chat', 'wardrobe', 'generator', 'music', 'draw' … */
     open(app = '') { open(String(app || '').slice(0, 40)); },
     /**
      * A card's people for the phone's 联系人 ([{name, persona}], from a card's script): the user is asked first, once for
      * the same names on this card; names already here are left. Resolves to how many were added.
      */
-    async suggestContacts(list, {from = ''} = {}) {
+    async suggestContacts(list, {from = '', debug = false} = {}) {
       const have = new Set(backend.contacts().map(c => c.name)), want = [];
       for (const c of Array.isArray(list) ? list : []) {
-        const name = String(c?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+        const name = nameOf(c?.name);
         if (name && !have.has(name) && !want.some(x => x.name === name)) want.push({name, persona: String(c?.persona ?? '').slice(0, 4000)});
       }
       if (!want.length) return 0;
       const key = `sttts.suggested:${backend.cardKey?.() || ''}:${want.map(c => c.name).join('|')}`.slice(0, 500);
-      try { if (storage?.getItem(key)) return 0; storage?.setItem(key, '1'); } catch { /* asked each time then */ }
+      if (!debug) { try { if (storage?.getItem(key)) return 0; storage?.setItem(key, '1'); } catch { /* asked each time then */ } }
       const who = String(from || '').trim().slice(0, 40) || '这张卡';
       if (!await ask(`${who}想在小手机里加 ${want.length} 个联系人`, `${want.map(c => c.name).join('、')}。加了以后能在聊天 App 里和他们聊天，不想要以后也能删。要加吗？`)) return 0;
       let added = 0;
       for (const c of want) { try { backend.saveContact(c); added++; } catch { /* a name a role has here: left */ } }
+      return added;
+    },
+    /**
+     * A card's people for the 角色 App ([{name, persona, appearance}]: who they are, and how they look in pictures, as
+     * English tags), so all of the phone knows them — chats, 朋友圈, pictures, 衣柜. Asked first, as suggestContacts;
+     * names already here are left. Resolves to how many were added (they belong to the card open now).
+     */
+    async suggestRoles(list, {from = '', debug = false} = {}) {
+      const have = new Set(backend.contacts().map(c => c.name)), want = [];
+      for (const r of Array.isArray(list) ? list : []) {
+        const name = nameOf(r?.name);
+        if (name && !have.has(name) && !want.some(x => x.name === name)) want.push({name, persona: String(r?.persona ?? '').slice(0, 4000), appearance: String(r?.appearance ?? '').replace(/\s+/g, ' ').trim().slice(0, 2000)});
+      }
+      if (!want.length) return 0;
+      const key = `sttts.suggestedRoles:${backend.cardKey?.() || ''}:${want.map(r => r.name).join('|')}`.slice(0, 500);
+      if (!debug) { try { if (storage?.getItem(key)) return 0; storage?.setItem(key, '1'); } catch { /* asked each time then */ } }
+      const who = String(from || '').trim().slice(0, 40) || '这张卡';
+      if (!await ask(`${who}想在小手机的角色 App 里加 ${want.length} 个角色`, `${want.map(r => r.name).join('、')}。加了以后聊天、朋友圈、画图都认得他们${want.some(r => r.appearance) ? '（画图时用上卡里写的外貌）' : ''}，以后也能在角色 App 里改或删。要加吗？`)) return 0;
+      let added = 0;
+      for (const r of want) { try { backend.saveRoute({name: r.name, engine: 'fish', voice: '', persona: r.persona, ...(r.appearance ? {appearance: r.appearance} : {})}); added++; } catch { /* a name taken here, or one that is no name */ } }
       return added;
     },
     /** Whether a picture can be drawn now: {ready, missing, engine, style, free} (free: false costs money, null not known yet). */

@@ -70,7 +70,8 @@ const tile = (index, text) => { const h = (hash(text) + index * 47) % 360; retur
  * plays a song of theirs on the user's phone; close() is called when the user puts the phone down. Returns
  * {update(snap), back(), close()}.
  */
-export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, play = () => {}, close}) {
+// see (0.9.35, 查手机 × 聊天): told each part of the phone opened (消息, 相册 …; 'home' once it is unlocked).
+export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, play = () => {}, close, see = () => {}}) {
   const doc = ctx.doc, layer = doc.createElement('div');
   layer.className = 'peek-phone';
   layer.setAttribute('role', 'dialog');
@@ -196,7 +197,11 @@ export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, play = (
   }
   // Pictures load after the page is drawn; a phone closed meanwhile (or a backend gone) just leaves them out.
   const repaint = () => { paint().catch(() => {}); };
-  function go(next, index = -1, how = 'pp-anim-open') { page = next; item = index; enter = how; repaint(); layer.scrollTop = 0; }
+  function go(next, index = -1, how = 'pp-anim-open') {
+    page = next; item = index; enter = how; repaint(); layer.scrollTop = 0;
+    const part = next === 'home' ? 'home' : APPS[next]?.label || {thread: '消息', photo: '相册', note: '备忘录'}[next];
+    if (part) { try { see(part); } catch { /* the app's own business */ } }
+  }
   function shake(el) { el.classList.remove('pp-shake'); void el.offsetWidth; el.classList.add('pp-shake'); }
   function back() {
     if (closed) return false;

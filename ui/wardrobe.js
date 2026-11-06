@@ -10,6 +10,7 @@ import {slideSelect} from './photo-select.js';
 import {openAlbum} from './album-viewer.js';
 import {byNewest} from '../core/albums.js';
 import {WARDROBE_CATEGORIES, WARDROBE_LIMITS, ownerKey, ownerName} from '../core/wardrobe.js';
+import {shareToChat} from './share-to-chat.js';
 
 const PHOTO_TYPES = 'image/png,image/jpeg,image/webp';
 const UNSORTED = '未分类';
@@ -323,8 +324,13 @@ export function wardrobeApp(ctx) {
     } finally { saving = false; render(); }
   }
   async function setMore(s) {
-    const key = await menu(ctx, s.name, [{key: 'wear', icon: 'hanger', label: '穿上'}, {key: 'rename', icon: 'edit', label: '改名'}, {key: 'delete', icon: 'trash', label: '删除', danger: true}]);
+    const key = await menu(ctx, s.name, [{key: 'wear', icon: 'hanger', label: '穿上'}, {key: 'send', icon: 'share', label: '发给…'}, {key: 'rename', icon: 'edit', label: '改名'}, {key: 'delete', icon: 'trash', label: '删除', danger: true}]);
     if (key === 'wear') { await api.setWardrobeWear({owner: s.owner, text: s.description}); ctx.notify(`${who(s.owner)}穿上了，下一次正文会写进去`); }
+    // 衣柜 × 聊天 (0.9.35): the set as a card in a chat, with a picture of one of its pieces when there is one.
+    if (key === 'send') {
+      const photoId = s.items.map(id => all.items.find(x => x.id === id)?.photoId).find(Boolean) || '';
+      await shareToChat(ctx, {title: `把「${s.name}」发给…`, what: '这身', message: {kind: 'outfit', outfit: {name: s.name, text: s.description, owner: s.owner, ...(photoId ? {photoId} : {})}}});
+    }
     if (key === 'rename') {
       const d = ctx.dialog('改名', `${field('名字', input('name', s.name, 'text', `maxlength="${WARDROBE_LIMITS.name}"`))}<div class="actions">${btn('rename-save', '保存', 'primary')}</div>`);
       d.body.addEventListener('click', async e => {

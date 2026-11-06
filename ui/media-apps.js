@@ -4,6 +4,7 @@ import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {rowWindow} from './row-window.js';
 import {saveFile, zipFiles} from '../download.js';
 import {decodeMono, joinClips, encodeWav, JOIN_RATE} from '../core/audio-join.js';
+import {remindLabel} from '../core/remind.js';
 
 const NOTE_COLORS = ['#fff4b0', '#ffd9e6', '#d9ecff', '#e3f5d9', '#efe0ff', '#ffe6cc'];
 const hash = text => [...String(text)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7);
@@ -110,11 +111,14 @@ export function notesApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'notes'), drafts = new Map();
   let current = null, epoch = 0;
   const color = id => NOTE_COLORS[hash(id || 'new') % NOTE_COLORS.length];
+  // 备忘录 × 聊天 (0.9.35): a note a contact wrote down for the user, reminded at its time.
+  // On a card only when (it is narrow); on the note itself who wrote it down too.
+  const remindHTML = (n, full = false) => n.remind ? `<em class="note-remind${n.remind.done ? ' done' : ''}">⏰ ${n.remind.done && !full ? '已提醒' : esc(remindLabel(n.remind.at))}${full && n.remind.from ? ' · ' + esc(n.remind.from) + '提醒' : ''}${full && n.remind.done ? ' · 已提醒' : ''}</em>` : '';
   async function render() {
     const ticket = ++epoch;
     if (current) {
       v.draw(heading(current.id ? '备忘录' : '新备忘录', '', 'Memo')
-        + `<div class="note-paper" style="--nc:${color(current.id)}">${field('标题', input('title', current.title, 'text', 'maxlength="200" placeholder="标题"'))}${field('正文', textArea('text', current.text, 'rows="12" placeholder="写点什么…"'))}</div>
+        + remindHTML(current, true) + `<div class="note-paper" style="--nc:${color(current.id)}">${field('标题', input('title', current.title, 'text', 'maxlength="200" placeholder="标题"'))}${field('正文', textArea('text', current.text, 'rows="12" placeholder="写点什么…"'))}</div>
           <div class="savebar"><span class="save-state" data-save-state>草稿</span>${btn('save-note', '保存', 'primary')}</div>
           ${current.id ? `<div class="actions">${btn('delete-note', icon('trash') + '删除备忘录', 'danger')}</div>` : ''}`);
       return;
@@ -122,8 +126,8 @@ export function notesApp(ctx) {
     const rows = await api.listNotes();
     if (v.disposed || ticket !== epoch) return;
     v.draw(heading('备忘录', btn('add-note', icon('add'), 'round-button', 'aria-label="新增备忘录"'), `Memo · ${rows.length}`) + (rows.length
-      ? `<div class="notes-grid">${rows.map((n, i) => `<button class="note-card" style="--nc:${color(n.id)};--r:${(hash(n.id) % 5 - 2) * .6}deg" data-action="edit-note" data-id="${esc(n.id)}"><strong>${esc(n.title || '未命名')}</strong><small>${esc(n.text.slice(0, 80) || '空白备忘录')}</small><small>${dateLabel(n.updatedAt)}</small></button>`).join('')}</div>`
-      : empty('随手记下这一刻', '备忘录只由你手动记录，不读取聊天，也不会注入提示词。', 'edit')));
+      ? `<div class="notes-grid">${rows.map((n, i) => `<button class="note-card" style="--nc:${color(n.id)};--r:${(hash(n.id) % 5 - 2) * .6}deg" data-action="edit-note" data-id="${esc(n.id)}"><strong>${esc(n.title || '未命名')}</strong><small>${esc(n.text.slice(0, 80) || '空白备忘录')}</small><small>${dateLabel(n.updatedAt)}</small>${remindHTML(n)}</button>`).join('')}</div>`
+      : empty('随手记下这一刻', '自己随手记；聊天里 TA 也会帮你记下要做的事，到时间在手机上提醒你。备忘录不会写进提示词。', 'edit')));
   }
   v.back = () => { if (!current) return false; current = null; render().catch(e => ctx.notify(e.message)); return true; };
   v.refresh = () => { if (!current) return render(); };

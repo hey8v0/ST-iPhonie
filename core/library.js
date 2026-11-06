@@ -1,6 +1,6 @@
 /** Persistent, account-scoped data for the ST-TTS phone UI. No DOM or network access.
  * Public rows never expose the account scope or internal size accounting.
- * Notes: {id,title,text,createdAt,updatedAt}.
+ * Notes: {id,title,text,createdAt,updatedAt,remind?:{at,from,done}} (remind, 0.9.35: when a contact's note is reminded).
  * Photos/references: {id,name,type,size,createdAt,updatedAt,blob}; lists omit blob.
  * Favorites: {id,requestKey,role,text,translation,engine,model,voice,type,size,
  *             createdAt,updatedAt,blob}; listFavorites omits blob.
@@ -40,6 +40,12 @@ const validHue=value=>value===null||value==='theme'||(typeof value==='number'&&N
 const validLook=value=>value===null||(!!value&&typeof value.id==='string'&&value.id.length<=512&&Number.isFinite(value.at));
 // A 主题 can bring an icon for an app this version does not have: it stays, and shows once the plugin has that app.
 const iconFields=icons=>fields(icons,[...PHONE_APPS,...Object.keys(Object(icons)).filter(app=>/^[a-z][a-z0-9_-]{0,39}$/.test(app)&&(icons[app]===null||icons[app]?.kind==='look'))]);
+/** A note's reminder, checked: {at, from, done}; null when there is none. */
+function noteRemind(value){
+ if(!value||typeof value!=='object')return null;
+ const at=Number(value.at);if(!Number.isFinite(at)||at<=0)return null;
+ return {at,from:String(value.from??'').slice(0,40).trim(),done:value.done===true};
+}
 function fields(value, allowed) {
  if(!value||Object.prototype.toString.call(value)!=='[object Object]')throw fail('请提供有效的设置内容');
  for(const key of Object.keys(value))if(!allowed.includes(key))throw fail('不支持的字段：'+key);
@@ -232,8 +238,9 @@ export class LocalLibrary {
  async #remove(name,id){identifier(id);return this.#mutate(({remove})=>remove(name,id),{});}
  async listNotes(){return this.#list('notes');}
  async saveNote(input){
-  fields(input,['id','title','text']);const id=this.#makeId(input.id),title=string(input.title??'','标题',200),text=string(input.text??'','备忘录',1_000_000);
-  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id,title,text,createdAt:rows.notes.get(id)?.createdAt??now,updatedAt:now};put('notes',row);return row;},{notes:[id]});
+  fields(input,['id','title','text','remind']);const id=this.#makeId(input.id),title=string(input.title??'','标题',200),text=string(input.text??'','备忘录',1_000_000),remind=input.remind===undefined?undefined:noteRemind(input.remind);
+  // A note saved without remind (edited in 备忘录) keeps the one it had; null takes it away.
+  return this.#mutate(({rows,put})=>{const now=this.#time(),had=rows.notes.get(id),kept=remind===undefined?had?.remind:remind,row={id,title,text,createdAt:had?.createdAt??now,updatedAt:now,...(kept?{remind:kept}:{})};put('notes',row);return row;},{notes:[id]});
  }
  async deleteNote(id){return this.#remove('notes',id);}
  /** 绘本 (core/book.js): the books on the shelf, newest first; one; kept (made or changed); thrown away (its drawn pictures stay in 相册). */
@@ -399,7 +406,7 @@ export class LocalLibrary {
  #backupRow(name,row){
   if(!row||typeof row!=='object')throw fail('备份内容无效：'+name);
   const now=this.#time(),time=v=>Number.isFinite(v)&&v>0?v:now,dates={createdAt:time(row.createdAt),updatedAt:time(row.updatedAt)};
-  if(name==='notes')return {id:identifier(row.id),title:string(row.title??'','标题',200),text:string(row.text??'','备忘录',1_000_000),...dates};
+  if(name==='notes'){const remind=noteRemind(row.remind);return {id:identifier(row.id),title:string(row.title??'','标题',200),text:string(row.text??'','备忘录',1_000_000),...(remind?{remind}:{}),...dates};}
   if(name==='books'){const book=normalizeBook(row.book);return {id:identifier(book.id),book,...dates};}
   if(name==='photos'||name==='references'){const media=name==='photos',blob=blobValue(row.blob,media?LIBRARY_LIMITS.photo:LIBRARY_LIMITS.reference,media?'图片':'参考音频',media?'image':'audio',row.name);return {id:identifier(row.id),name:string(row.name??(media?'图片':'reference.wav'),media?'图片名称':'音频名称',512,true),blob,type:blob.type,size:blob.size,...dates,...(media&&infoRows(row.info).length?{info:infoRows(row.info)}:{}),...(media&&packedMark(row.packed)?{packed:packedMark(row.packed)}:{})};}
   if(name==='favorites'){if(!['fish','mini','eleven','mimo','doubao','custom'].includes(row.engine))throw fail('备份里的收藏语音引擎无效');const blob=blobValue(row.blob,LIBRARY_LIMITS.total,'音频','audio');return {id:identifier(row.id),requestKey:string(row.requestKey,'音频编号',512,true),role:string(row.role,'角色名',200,true),text:string(row.text,'原文',1_000_000,true),translation:string(row.translation??'','译文',1_000_000),engine:row.engine,model:string(row.model??'','模型',200),voice:string(row.voice??'','音色',512),blob,type:blob.type,size:blob.size,...dates};}

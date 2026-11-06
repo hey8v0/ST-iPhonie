@@ -8,7 +8,8 @@ import {activeText} from './core/llm.js';
 import {requestAssistantText, hasCompletionService, loadCompletionModule} from './host-assistant.js';
 import {pictureUrl} from './host-chat.js';
 
-export function createWardrobeHost({context, settings, backend, notice = () => {}, ask = requestAssistantText, loadCompletion = loadCompletionModule, picture = pictureUrl}) {
+// onChange (0.9.35, 衣柜 × 聊天): told whose clothes a story reply changed ([{name, text}], roles only), after they are kept.
+export function createWardrobeHost({context, settings, backend, notice = () => {}, ask = requestAssistantText, loadCompletion = loadCompletionModule, picture = pictureUrl, onChange = () => {}}) {
   const userName = () => context()?.name1 || '我';
   /** Whether the text model sees pictures (a tavern connection when the tavern says so; a custom one is tried). */
   async function sees(ctx = context()) {
@@ -129,13 +130,18 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     if (!m || m.is_user || m.is_system || typeof m.mes !== 'string') return 0;
     const found = parseOutfits(m.mes);
     if (!found.length) return 0;
-    const user = userName(), roles = new Set(settings().routes.map(r => r.name));
+    const user = userName(), roles = new Set(settings().routes.map(r => r.name)), news = [];
     let changed = 0;
     for (const {name, text} of found) {
       const owner = name === user ? 'me' : roles.has(name) ? ownerKey(name) : '';
       if (!owner) continue;
-      try { await backend.setWardrobeWear({owner, text, from: 'story'}); changed++; } catch { /* not worth interrupting the story */ }
+      try {
+        const before = owner === 'me' ? '' : (await backend.wardrobe(owner)).wears[0]?.text || '';
+        await backend.setWardrobeWear({owner, text, from: 'story'}); changed++;
+        if (owner !== 'me' && before.trim() !== text.trim()) news.push({name, text});
+      } catch { /* not worth interrupting the story */ }
     }
+    if (news.length) { try { onChange(news); } catch { /* the phone's own business */ } }
     return changed;
   }
   return {recognize, suggest, saveOutfit, tryOn, storyPlan, storyReplied, sees, present};

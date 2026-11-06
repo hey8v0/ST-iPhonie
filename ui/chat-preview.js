@@ -20,6 +20,8 @@ export function preview(m) {
     case 'song': return '[音乐] ' + (m.song?.title || '');
     case 'file': return '[文件] ' + m.name;
     case 'forward': return '[聊天记录] ' + (m.title || '');
+    case 'post': return '[帖子] ' + (m.post?.title || m.text || '');
+    case 'outfit': return '[穿搭] ' + (m.outfit?.name || '');
     case 'dice': return '[骰子]';
     case 'call': return `[${callSummary(m)}]`;
     case 'pat': return patText(m);

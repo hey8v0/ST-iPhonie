@@ -607,6 +607,10 @@ details>div{padding-bottom:10px}
 .note-card:before{content:"";position:absolute;top:-8px;left:50%;width:48px;height:16px;transform:translateX(-50%) rotate(-3deg);background:rgba(255,255,255,.65);border-radius:3px}
 .note-card strong{font-size:15px;font-weight:900;overflow-wrap:anywhere}
 .note-card small{font-size:12.5px;color:inherit;opacity:.8;line-height:1.55;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+/* 备忘录 × 聊天 (0.9.35): when a contact's note is reminded */
+.note-remind{display:inline-flex;align-items:center;gap:4px;align-self:flex-start;margin-top:auto;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.55);font-size:11.5px;font-style:normal;font-weight:800;color:#3a2e10}
+.note-remind.done{opacity:.6}
+.note-remind+.note-paper{margin-top:10px}
 .note-paper{padding:14px 18px;border-radius:8px 8px 26px 8px;color:#3a2e10;background:var(--nc,#fff4b0);background-image:repeating-linear-gradient(transparent 0 29px,rgba(0,0,0,.08) 29px 30px);box-shadow:var(--shadow)}
 .note-paper .field{margin:6px 0}
 .note-paper .field>span:first-child{display:none}

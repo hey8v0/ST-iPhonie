@@ -3,6 +3,7 @@
 import {rowWindow} from './row-window.js';
 import {createView, esc, btn, field, input, textArea, heading, avatar, empty, menu} from './common.js';
 import {icon} from './icons.js';
+import {shareToChat} from './share-to-chat.js';
 
 function ago(at) {
   const s = (Date.now() - at) / 1000;
@@ -57,7 +58,7 @@ export function forumApp(ctx) {
     v.draw(heading('帖子', '', 'Forum')
       + `<article class="forum-post"><div class="forum-author">${face(p.author, 36)}<b>${esc(nameOf(p.author))}</b>${badge(p.author, roles)}<time>${ago(p.at)}</time></div>
         ${p.title ? `<h3 class="forum-title">${esc(p.title)}</h3>` : ''}<p class="forum-text">${esc(p.text)}</p>
-        <div class="forum-meta"><span>${icon('eye')}${count(p.heat)} 热度</span>${btn('forum-like', icon('heart', p.liked) + count(p.likes), 'text-button' + (p.liked ? ' on' : ''), `aria-pressed="${p.liked}" aria-label="${p.liked ? '取消点赞' : '点赞'}"`)}${btn('forum-reply', icon('bubble') + '回复', 'text-button', `data-to=""`)}${btn('forum-delete', icon('trash'), 'text-button', 'aria-label="删除帖子"')}</div></article>`
+        <div class="forum-meta"><span>${icon('eye')}${count(p.heat)} 热度</span>${btn('forum-like', icon('heart', p.liked) + count(p.likes), 'text-button' + (p.liked ? ' on' : ''), `aria-pressed="${p.liked}" aria-label="${p.liked ? '取消点赞' : '点赞'}"`)}${btn('forum-reply', icon('bubble') + '回复', 'text-button', `data-to=""`)}${btn('forum-more', icon('more'), 'text-button', 'aria-label="转发或删除"')}</div></article>`
       + (busy() ? '<p class="moments-busy" role="status">大家正在回复……</p>' : '')
       + `<div class="forum-floors">${p.replies.map((r, i) => `<button type="button" class="forum-floor" data-action="${r.from === 'me' ? 'forum-my-reply' : 'forum-reply'}" data-to="${esc(r.from)}" data-reply="${esc(r.id)}">
           ${face(r.from, 30)}<span class="floor-body"><span class="floor-head"><b>${esc(nameOf(r.from))}</b>${badge(r.from, roles)}${r.from === p.author ? '<span class="forum-tag op">楼主</span>' : ''}<span class="floor-no">${i + 1}楼</span></span>
@@ -129,6 +130,8 @@ export function forumApp(ctx) {
   }
 
   v.back = () => { if (!open) return false; open = ''; render(); return true; };
+  /** A post shared into a chat, opened from there (gone since: the list). */
+  v.openPost = id => { open = String(id || ''); render().then(() => { v.root.scrollTop = 0; }).catch(() => {}); };
   v.refresh = () => render();
   v.on('click', '[data-action]', async el => {
     const post = posts.find(p => p.id === open);
@@ -141,7 +144,15 @@ export function forumApp(ctx) {
       case 'forum-like': { const p = post || await api.getForumPost(open); if (p) { await api.likeForum(open, !p.liked); await render(); } break; }
       case 'forum-reply': replyTo(el.dataset.to || ''); break;
       case 'forum-my-reply': if (await ctx.confirm('删除这条回复？')) { await api.deleteForumReply(open, el.dataset.reply); await render(); } break;
-      case 'forum-delete': if (await ctx.confirm('删除这个帖子？', '帖子和下面的回复会一起删除。')) { await api.deleteForum(open); open = ''; await render(); } break;
+      // 0.9.35: 转发 to a chat (论坛 × 聊天) and 删除 live under ⋯.
+      case 'forum-more': {
+        const p = post || await api.getForumPost(open);
+        if (!p) break;
+        const picked = await menu(ctx, p.title || '帖子', [{key: 'share', icon: 'share', label: '转发', note: '发给联系人或群，TA 读得到帖子'}, {key: 'delete', icon: 'trash', label: '删除', note: '帖子和下面的回复', danger: true}]);
+        if (picked === 'share') await shareToChat(ctx, {title: '转发给…', what: '帖子', message: {kind: 'post', post: {id: p.id, title: p.title || '', author: p.author, text: String(p.text || '').slice(0, 600)}}});
+        if (picked === 'delete' && await ctx.confirm('删除这个帖子？', '帖子和下面的回复会一起删除。')) { await api.deleteForum(open); open = ''; await render(); }
+        break;
+      }
     }
   });
   render().catch(error => ctx.notify(error.message));

@@ -72,10 +72,14 @@ export function peekApp(ctx) {
   function pick(s) {
     device?.close();
     const host = ctx.doc.querySelector('.screen') || v.root;
+    // 查手机 × 聊天 (0.9.35): once the phone was unlocked, its owner may notice (told in the next private chat with them).
+    const seen = new Set(), name = who;
+    let unlocked = false;
     device = peekPhone(ctx, {host, snap: s, canDraw: () => api.drawReady(), draw, photo: urlFor,
       view: img => openImageViewer({doc: ctx.doc, src: img.src, alt: img.alt, from: img}),
       play: song => { ctx.notify(`正在找「${song.title}」……`); api.musicPlay?.({...song, from: 'share'}).catch(error => ctx.notify(error.message, {error: true})); },
-      close: () => { device = null; if (!v.disposed) render().catch(() => {}); }});
+      see: part => { if (part === 'home') unlocked = true; else { unlocked = true; seen.add(part); } },
+      close: () => { device = null; if (unlocked) { try { api.markPeeked?.(name, [...seen].slice(0, 6).join('、')); } catch { /* not worth a word */ } } if (!v.disposed) render().catch(() => {}); }});
   }
   function look(keep = false) {
     const job = api.peekLook(who, keep), name = who;

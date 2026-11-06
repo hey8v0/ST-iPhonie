@@ -1071,6 +1071,8 @@ export interface BackendFacade {
     /** 查手机 snapshots, newest first; one per character. */
     listPeeks(): Promise<PeekSnapshot[]>;
     getPeek(name: string): Promise<PeekSnapshot | null>;
+    /** 查手机 × 聊天 (0.9.35): the user looked into this one's phone (what: the parts opened); the next private chat is told once. */
+    markPeeked(name: string, what?: string): boolean;
     deletePeek(name: string): Promise<boolean>;
     deleteChatPreset(id: string): ChatSettings;
     selectChatPreset(id: string): ChatSettings;
@@ -1092,6 +1094,8 @@ export interface BackendFacade {
     saveChatOptions(patch: { pace?: boolean; stickers?: Sticker[]; voiceText?: Partial<VoiceTextOptions>; profile?: Partial<ChatProfile>; starred?: string[]; /** null: back to the tavern's avatar */ avatars?: Record<string, AvatarChoice | null>;
         /** whose 自定义气泡 is whose (a person's own key → set id; null: as the user's) */ bubbleOf?: Record<string, string | null>;
         /** 角色专属表情包: a role's own key → their stickers (null or []: none) */ roleStickers?: Record<string, { name: string; photoId: string }[] | null>;
+        /** 状态和签名 (0.9.35): a person's own key → what they set (merged; null takes it away) */ statusOf?: Record<string, { status?: string; text?: string; signature?: string } | null>;
+        /** 查手机 × 聊天 (0.9.35): a person's own key → when the user looked into their phone (null: told) */ peeked?: Record<string, { at: number; what?: string } | null>;
         proactive?: { on?: boolean; every?: number; dailyMax?: number; /** 按现实时间主动找你 */ clock?: boolean } }): ChatSettings;
     /** 自定义气泡: a set new or changed (by id); a set taken away takes back whoever wore it. */
     saveBubbleSet(set: Partial<BubbleSet> & { me?: string; them?: string }): BubbleSet;
@@ -1114,7 +1118,8 @@ export interface BackendFacade {
     /** 重新回复的版本: another version of the chat's last round shows (the one showing is kept among them). */
     chatShowVersion(id: string, index: number): Promise<ChatThread>;
     chatUnread(): Promise<number>;
-    createThread(value: { type: 'dm' | 'group'; members: string[]; name?: string }): Promise<ChatThread>;
+    /** watch (0.9.35): a 旁观群 — a group without the user, only looked on. */
+    createThread(value: { type: 'dm' | 'group'; members: string[]; name?: string; watch?: boolean }): Promise<ChatThread>;
     updateThread(id: string, patch: { name?: string; members?: string[]; pinned?: boolean; muted?: boolean }): Promise<ChatThread>;
     deleteThread(id: string): Promise<boolean>;
     /** 记忆 of a chat (an empty book when nothing is written up yet). */

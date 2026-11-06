@@ -10,10 +10,12 @@
 .bubble-preview .msgs-wrap{flex:none}
 .bubble-preview .msgs{flex:none;overflow:visible;padding:16px 10px 14px;min-height:0}
 .bubble-preview .msg{max-width:88%}
-.bubble-preview.mini{width:118px;flex:none;margin:0;border-radius:12px;background:var(--card2);box-shadow:none}
-.bubble-preview.mini .msgs{padding:7px 6px;gap:5px;background-image:none;background:none}
+/* The small one is the large one zoomed out, whole: tails, borders and shadows keep their size to the words (with a
+   smaller font alone, the 漫画 tails stuck out past the edge and its shadows looked heavy). */
+.bubble-preview.mini{width:124px;flex:none;margin:0;border-radius:12px;background:var(--card2);box-shadow:none}
+.bubble-preview.mini .msgs{zoom:.66;padding:14px 18px;gap:12px;background-image:none;background:none}
 .bubble-preview.mini .msg{max-width:100%}
-.bubble-preview.mini .chat-bubble{font-size:11px;line-height:1.35;padding:4px 8px;white-space:nowrap}
+.bubble-preview.mini .chat-bubble{white-space:nowrap}
 .custom-deco .deco-sample{display:grid;place-items:center;background:var(--card2);color:var(--ink2);box-shadow:inset 0 0 0 1.5px var(--line)}
 .custom-deco .deco-sample svg{width:18px;height:18px}
 .deco-note{max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;font-weight:700;color:var(--ink2)}
@@ -137,3 +139,54 @@
 .sticker-name img{width:68px;height:68px;object-fit:contain;border-radius:12px;background:var(--card2)}
 .sticker-name input{width:100%;min-width:0;height:32px;padding:0 8px;font-size:13px;text-align:center}
 .sticker-row img[data-sticker-photo]:not([src]),.sticker-cell img[data-sticker-photo]:not([src]),.sticker-name img:not([src]){visibility:hidden}
+
+/* ---------- 0.9.35 ---------- */
+/* 小游戏对战: the board as a card (井字棋 3×3, 五子棋 9×9); the user's cells are tapped on the user's turn. Only the move just
+   made comes in (one cell), so a card drawn again does not play every mark over. */
+.board-grid{display:grid;grid-template-columns:repeat(var(--n),1fr);gap:4px;padding:6px;border-radius:12px;background:var(--card2)}
+.board-cell{position:relative;aspect-ratio:1;min-width:0;padding:0;border-radius:9px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line);color:var(--ink)}
+.board-cell:disabled{cursor:default;opacity:1}
+.board-cell:not(:disabled):active{transform:scale(.94)}
+.board-cell[data-mark]::before{position:absolute;inset:0;display:grid;place-items:center;line-height:1}
+.board-cell[data-last]::before{animation:mark-in .24s cubic-bezier(.2,.8,.2,1.35)}
+@keyframes mark-in{from{transform:scale(.3);opacity:0}}
+.game-board[data-board=ttt] .board-cell[data-mark]::before{font-size:30px;font-weight:900}
+.game-board[data-board=ttt] .board-cell[data-mark=x]::before{content:"×";color:var(--accent-ink)}
+.game-board[data-board=ttt] .board-cell[data-mark=o]::before{content:"○";color:#e0782f}
+.game-board[data-board=ttt] .board-cell[data-last]{box-shadow:inset 0 0 0 2px var(--accent)}
+.game-board .board-cell[data-win]{background:color-mix(in srgb,var(--accent) 24%,var(--card))}
+/* 五子棋: wood squares and stones; the lines are the 1px gaps between the squares (whole pixels, so no column looks
+   fainter than the next, as lines drawn through each square's middle did). */
+.game-board[data-board=gomoku] .board-grid{gap:1px;padding:1px;border:6px solid #e6c48c;border-radius:10px;background:#8b6a3e}
+.game-board[data-board=gomoku] .board-cell{border-radius:0;box-shadow:none;background:#e6c48c}
+.game-board[data-board=gomoku] .board-cell[data-mark]::before{content:"";inset:11%;border-radius:50%}
+.game-board[data-board=gomoku] .board-cell[data-mark=x]::before{background:radial-gradient(circle at 35% 30%,#6b6b6b,#111 62%)}
+.game-board[data-board=gomoku] .board-cell[data-mark=o]::before{background:radial-gradient(circle at 35% 30%,#fff,#d6d6d6 72%);box-shadow:0 0 0 1px #0003}
+.game-board[data-board=gomoku] .board-cell[data-last]::after{content:"";position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px;border-radius:50%;background:#e2443a}
+.game-board[data-board=gomoku] .board-cell[data-win]{background:#f4dca8}
+.game-board[data-board=gomoku] .board-cell[data-win]::before{box-shadow:0 0 0 2px #e2443a}
+/* A game takes the row's whole width (the board's squares are small enough as it is). */
+.msg[data-kind=game]{max-width:100%}
+/* 论坛 × 聊天, 衣柜 × 聊天: a post or clothes as a card */
+.share-card{display:grid;gap:3px;width:224px;max-width:100%;padding:10px 12px;border-radius:16px;background:var(--card);box-shadow:inset 0 0 0 1.5px var(--line),0 3px 0 var(--line);text-align:left;color:var(--ink)}
+.share-kind{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:800;color:var(--ink2)}
+.share-kind svg{width:13px;height:13px;flex:none}
+.share-card strong{font-size:14px;line-height:1.35;overflow-wrap:anywhere}
+.share-card small{font-size:12px;line-height:1.45;color:var(--ink2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.share-card em{font-style:normal;font-size:11px;font-weight:700;color:var(--ink2)}
+.share-note{margin-top:4px}
+.outfit-card{grid-template-columns:60px 1fr;align-items:center;gap:10px}
+.outfit-card img,.outfit-ico{width:60px;height:76px;border-radius:12px;object-fit:cover;background:var(--card2)}
+.outfit-card img:not([src]){visibility:hidden}
+.outfit-ico{display:grid;place-items:center;color:var(--ink2)}
+.share-text{display:grid;gap:3px;min-width:0}
+.outfit-photo{display:block;width:100%;max-height:46dvh;object-fit:contain;border-radius:16px;background:var(--card2)}
+.outfit-photo:not([src]){display:none}
+/* 旁观群: in place of the box to write in */
+.watch-bar{display:flex;align-items:center;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--card);font-size:12.5px;font-weight:700;color:var(--ink2)}
+.watch-bar>svg{width:16px;height:16px;flex:none}
+.watch-bar>span{flex:1;min-width:0}
+/* 状态和签名: on the card, in 联系人 (the dot keeps still in a list) and at the top of a chat */
+.qq-card-status{display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;font-weight:700}
+.list-row small .qq-dot,.th-title small .qq-dot{width:7px;height:7px;margin-right:4px;vertical-align:1px}
+.list-row small .qq-dot:after{animation:none}
