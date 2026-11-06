@@ -10,6 +10,9 @@ export const NARRATOR = '旁白';
 export const NARRATION_SKIP = Object.freeze(['小剧场', '状态栏', 'theater', 'status', 'statusbar', 'details']);
 /** Tags a preset wraps the story in: when a reply has one, only what is inside it is read. */
 export const NARRATION_BODY = Object.freeze(['content', '正文']);
+/** Tags other plugins write into a reply for a picture of theirs: never read, never on the 视觉小说 stage, never in
+ *  the story the phone's requests carry (core/chat.js plainStory). */
+export const OTHER_PICTURES = Object.freeze(['bbi_image']);
 const RATES = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5];
 
 export const defaultNarration = () => ({enabled: false, voice: 'system', systemVoice: '', rate: 1, skip: [...NARRATION_SKIP], body: [...NARRATION_BODY]});
@@ -77,6 +80,8 @@ export function skippedRanges(raw, skip = NARRATION_SKIP, body = NARRATION_BODY)
   // The phone's own tags, with what is inside (a picture's prompt, a sound's name, phone messages).
   add(/<img\b[^<>]*>[^<]*<\/img\s*>|<img\b[^<>]*\/?>/gi);
   for (const tag of ['sfx', 'ambience', 'bgm', 'phone', 'outfit']) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, 'gi'));
+  // Pictures other plugins keep in the reply as their prompt, shown in its place as the picture (柏宝绘's <bbi_image>).
+  for (const tag of OTHER_PICTURES) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?(?:<\\/${tag}\\s*>|$)`, 'gi'));
   // Status panels written as [HUD_START]…[HUD_END] (any NAME_START / NAME_END pair).
   add(/\[([A-Za-z][\w-]*)_START\][\s\S]*?(?:\[\1_END\]|$)/g);
   // Thinking and the listed tags: to their end, or to the end of the reply when it was never closed; 「开头…结尾」

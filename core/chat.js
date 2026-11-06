@@ -3,7 +3,7 @@
 //
 // A chat preset holds the rules the model follows when it answers in the phone, how many recent story messages
 // and chat messages it sees, and the template used when a chat is brought into the story.
-import {promptText} from './prompt-rules.js';
+import {promptText, promptOn} from './prompt-rules.js';
 import {songOf, listeningNote} from './music.js';
 import {normalizeWallet, defaultWallet, PREMIUM, guessEmoji, yuan} from './wallet.js';
 import {parseDialogue, isPlaceholderRole} from './protocol.js';
@@ -11,6 +11,29 @@ import {money} from './chats.js';
 import {callSummary} from './call.js';
 import {languageName} from './languages.js';
 import {normalizeMemory} from './memory.js';
+import {OTHER_PICTURES} from './narration.js';
+
+/** Another plugin's picture prompt kept in a reply (柏宝绘's <bbi_image>): not story, left out whole. */
+const OTHER_PICTURE_BLOCKS = new RegExp(`<(${OTHER_PICTURES.join('|')})\\b[^>]*>[\\s\\S]*?(?:<\\/\\1\\s*>|$)`, 'gi');
+
+const PERIODS = [[5, '凌晨'], [8, '早上'], [11, '上午'], [13, '中午'], [17, '下午'], [19, '傍晚'], [24, '晚上']];
+/** How long `ms` is, said the way people say it: 40 分钟, 3 个小时, 2 天, 3 个月. */
+function span(ms) {
+  const minutes = Math.round(ms / 60000), hours = Math.round(ms / 3600000), days = Math.round(ms / 86400000);
+  return minutes < 60 ? `${minutes} 分钟` : hours < 24 ? `${hours} 个小时` : days < 60 ? `${days} 天` : `${Math.round(days / 30)} 个月`;
+}
+/**
+ * 现实时间 (a block of 系统提示词, off unless turned on): the date and time on this device for the chat and call requests,
+ * and how long it has been since `last` (the other side's last message) when that is half an hour or more. '' when off.
+ */
+export function clockText(prompts, {now = Date.now(), last = 0} = {}) {
+  if (!promptOn(prompts, 'now')) return '';
+  const d = new Date(now), h = d.getHours(), pad = n => String(n).padStart(2, '0'), gap = last > 0 ? now - last : 0;
+  return promptText(prompts, 'now', 'text', {'日期': `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 星期${'日一二三四五六'[d.getDay()]}`,
+    '时刻': `${PERIODS.find(([end]) => h < end)[1]} ${pad(h)}:${pad(d.getMinutes())}`, '隔了多久': gap >= 30 * 60000 ? span(gap) : ''});
+}
+/** When the other side of a chat last said something (system lines and the user's own left out). */
+export const lastTheirs = messages => [...(messages || [])].reverse().find(m => m.from !== 'me' && m.kind !== 'system' && m.at > 0)?.at || 0;
 
 // loreMax, storyEach, storyTotal: characters (0: no limit of the phone's own; the tavern's World Info budget still applies).
 export const CHAT_LIMITS = Object.freeze({contacts: 200, persona: 4000, story: 100, history: 500, chars: 2_000_000});
@@ -432,7 +455,7 @@ export function knowsRule(names, user, {prompts = {}, group = false} = {}) {
   const one = names.length === 1 ? names[0] : '';
   return promptText(prompts, 'knows', 'text', {'谁': one || '各人', '每个人': one || '每个人', '用户': user, '告诉': one ? ' TA ' : '自己', '某人': one || '一个人', '那人': one || '这个人', '群聊': group});
 }
-export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', groups = '', nudge = false, pictures = []}) {
+export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', groups = '', nudge = false, pictures = [], time = Date.now()}) {
   const group = thread.type === 'group';
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
@@ -468,7 +491,9 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     '轮到回复': now && last?.from === 'me' ? (group ? '群里的成员' : partner) : '',
     '接着说': now && last && last.from !== 'me' ? (group ? '群里' : partner) : ''});
   const transcript = history.length ? `【${group ? thread.name + '（群聊）' : '和' + partner}的聊天记录】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}\n\n` : '';
-  const text = transcript + filesText(history, user) + turn;
+  // 现实时间, when turned on: ahead of the record, the way a phone shows the time above the messages.
+  const clock = clockText(prompts, {now: time, last: lastTheirs(thread.messages)});
+  const text = (clock ? clock + '\n\n' : '') + transcript + filesText(history, user) + turn;
   return [{role: 'system', content: system}, {role: 'user', content: pictures.length ? [{type: 'text', text}, ...pictures.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : text}];
 }
 
@@ -585,6 +610,7 @@ export function plainStory(textValue) {
     .replace(/<tts\b[^>]*>[\s\S]*?<\/tts\s*>/gi, '')
     .replace(/<(sfx|ambience)\b[^>]*>[^<>]*<\/\1\s*>/gi, '')
     .replace(/<img\b[^>]*>[^<]*<\/img\s*>|<img\b[^>]*>/gi, '')
+    .replace(OTHER_PICTURE_BLOCKS, ' ')
     .replace(/<[^>]+>/g, '')
     .replace(/\s+/g, ' ')
     .trim();

@@ -339,11 +339,29 @@ export class DialoguePlayer {
    return joinAudio(audio);
   }
  }
+ /** What a line asks its engine with its speaker's voice settings now, and the cache key of that (make() and retake()). */
+ async requestOf(line, route, s) {
+  const effective = { ...structuredClone(route), language: route.language || s.general.defaultLanguage, model: route.model || s.connections[route.engine].model };
+  const request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
+  return { effective, request, key: await requestHash(request) };
+ }
+ /**
+  * 重新配音: the audio kept for a line (the cache, and the copies kept at hand) is let go, so that playing it again makes a
+  * new take. An engine may still say it the same way (some always do).
+  */
+ async retake(line) {
+  const s = this.settings(), route = findRoute(s.routes, line?.role);
+  if (!route) throw Error(`「${line?.role || ''}」还没有在角色 App 里`);
+  const { key } = await this.requestOf(line, route, s), kept = this.readyAudio.get(key);
+  if (kept) { this.readyAudio.delete(key); this.readyBytes -= kept.size; }
+  this.played.delete(key);
+  if (s.general.cacheEnabled) await this.cache.remove(key);
+  return key;
+ }
  /** A line's audio: from the cache, or made and kept. found(fromCache, key) is told before any making starts. */
  async make(line, route, s, signal, found = () => {}, still = () => !signal.aborted) {
-  const effective = { ...structuredClone(route), language: route.language || s.general.defaultLanguage, model: route.model || s.connections[route.engine].model };
-  let request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
-  const key = await requestHash(request);
+  const made = await this.requestOf(line, route, s), { effective, key } = made;
+  let { request } = made;
   if (!still()) return null;
   const cacheEpoch = this.cache.epoch;
   if (this.readyEpoch !== cacheEpoch || !s.general.cacheEnabled) { this.readyAudio.clear(); this.readyBytes = 0; this.readyEpoch = cacheEpoch; }

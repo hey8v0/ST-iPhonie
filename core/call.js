@@ -6,22 +6,23 @@
 import {callClock, callSummary} from './call-summary.js';
 import {promptText} from './prompt-rules.js';
 import {parseDialogue} from './protocol.js';
-import {messageLine, knowsRule} from './chat.js';
+import {messageLine, knowsRule, clockText, lastTheirs} from './chat.js';
 import {languageName} from './languages.js';
 export {callClock, callSummary};
 
 // perTurn: lines kept from one answer (each is read aloud one after another); a talkative contact may say a lot.
 export const CALL_LIMITS = Object.freeze({lines: 80, perTurn: 10, ring: [15, 60], history: 12});
 
-/** auto: characters call on their own every `every` story replies, at most `dailyMax` a day; ring: seconds before a missed call. */
+/** auto: characters call on their own every `every` story replies, at most `dailyMax` a day; ring: seconds before a missed call;
+ *  effect: a call sounds like a phone (the voice through a receiver's narrow band); off, it is the voice as made. */
 export function defaultCalls() {
-  return {auto: false, every: 12, dailyMax: 1, ring: 30};
+  return {auto: false, every: 12, dailyMax: 1, ring: 30, effect: true};
 }
 const count = (value, min, max, fallback) => { const n = Math.round(Number(value)); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback; };
 export function normalizeCalls(value) {
   const base = defaultCalls();
   if (!value || typeof value !== 'object') return base;
-  return {auto: value.auto === true, every: count(value.every, 1, 100, base.every), dailyMax: count(value.dailyMax, 1, 10, base.dailyMax), ring: count(value.ring, ...CALL_LIMITS.ring, base.ring)};
+  return {auto: value.auto === true, every: count(value.every, 1, 100, base.every), dailyMax: count(value.dailyMax, 1, 10, base.dailyMax), ring: count(value.ring, ...CALL_LIMITS.ring, base.ring), effect: value.effect !== false};
 }
 
 const fill = (template, values) => Object.entries(values).reduce((s, [k, v]) => s.replaceAll(`{{${k}}}`, v), String(template));
@@ -38,7 +39,7 @@ export function callTranscript(lines, user) {
  * picked up), 'reply' (the user said something), 'voicemail' (the user did not answer; the contact leaves a message).
  * contact: {name, persona, card, voice, language}; voiceRules: how this contact's lines are read (engine tags).
  */
-export function buildCallRequest({prompts = {}, preset, mode, contact, lines = [], history = [], story = [], user = '我', userPersona = '', voiceFormat, voiceRules = '', reason = '', lore = '', memory = '', earlier = ''}) {
+export function buildCallRequest({prompts = {}, preset, mode, contact, lines = [], history = [], story = [], user = '我', userPersona = '', voiceFormat, voiceRules = '', reason = '', lore = '', memory = '', earlier = '', time = Date.now()}) {
   const name = contact.name, voiced = !!contact.voice && !!voiceFormat;
   const spoken = languageName(contact.language || 'zh');
   const values = {'用户': user, '对象': name, '语音格式': voiceFormat || '', '可发语音': voiced ? `${name}（${spoken}）` : '（只说中文）'};
@@ -53,7 +54,9 @@ export function buildCallRequest({prompts = {}, preset, mode, contact, lines = [
     '朗读规则': voiced && voiceRules ? voiceRules : ''});
   const turn = promptText(prompts, 'call', 'turn', {...now, '用户': user, '角色': name, '用户刚说': lines.at(-1)?.from === 'me'});
   const said = lines.length ? `【通话内容】\n${callTranscript(lines, user)}\n\n` : '';
-  return [{role: 'system', content: system}, {role: 'user', content: said + turn}];
+  // 现实时间, when turned on (core/chat.js clockText): since the contact's last message in the chat.
+  const clock = clockText(prompts, {now: time, last: lastTheirs(history)});
+  return [{role: 'system', content: system}, {role: 'user', content: (clock ? clock + '\n\n' : '') + said + turn}];
 }
 
 const HANGUP = /^\s*[[【(（]\s*(挂断|挂电话|挂了|结束通话)\s*[\]】)）]\s*$/;

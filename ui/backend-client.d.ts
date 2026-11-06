@@ -1145,6 +1145,8 @@ export interface BackendFacade {
     /** Plays a voice message through the normal player. */
     /** Plays one voice line, or several in a row (a voicemail). */
     speak(line: SpokenLine | SpokenLine[]): Promise<void> | void;
+    /** 重新配音: the line's kept audio is let go and it plays again, made anew. */
+    retakeVoice(line: SpokenLine): Promise<void>;
     /** The voice tag format voice messages use (the active voice preset's format). */
     voiceFormat(): string;
 }

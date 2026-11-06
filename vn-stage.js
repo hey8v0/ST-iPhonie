@@ -163,6 +163,8 @@ const CSS = `
 .vn-log li{display:grid;grid-template-columns:7em 1fr auto;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.08);line-height:1.7}
 .vn-log li b{color:#ff9cbc;text-align:right;font-weight:700;overflow-wrap:anywhere}
 .vn-log li[data-narrate] span{color:rgba(244,242,255,.7)}
+.vn-log li[data-jump]{cursor:pointer;transition:background .15s}
+.vn-log li[data-jump]:hover,.vn-log li[data-jump]:active{background:rgba(255,255,255,.07)}
 .vn-log li button{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.1)}
 .vn-log li button:hover{background:rgba(255,255,255,.2)}
 .vn-title{position:absolute;inset:0;z-index:30;display:grid;place-content:center;justify-items:center;gap:10px;background:#07070d;color:#f4f2ff;text-align:center;transition:opacity .8s}
@@ -805,7 +807,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     if (say && !s.part && !s.user && !skip && look().voice && voice.on() && s.voiced) voice.play(s);
     // 旁白: the story between the lines in the narrator's voice (整篇朗读's).
     if (!say && !s.imageOnly && !skip && look().narrate && look().voice && voice.on()) voice.narrate?.(s);
-    if (!s.imageOnly) log.push({name, text: say ? quoted(s.text) : s.text, step: say && s.voiced && !s.part ? s : null});
+    if (!s.imageOnly) log.push({name, text: say ? quoted(s.text) : s.text, step: say && s.voiced && !s.part ? s : null, s});
     if (log.length > 600) log.shift();
   }
   function nextMessage() {
@@ -829,9 +831,19 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       if (s.kind === 'sound' || s.kind === 'bgm') { try { cue(s, {skipping: skip}); } catch {} continue; }
       ended = false; root.removeAttribute('data-end');
       show(s);
-      seen.push({m: at, pos, s, bg: {url: bgUrl, cg, alone, cgPages, soft: root.hasAttribute('data-soft')}}); if (seen.length > 400) seen.shift();
+      const page = {m: at, pos, s, bg: {url: bgUrl, cg, alone, cgPages, soft: root.hasAttribute('data-soft')}};
+      seen.push(page); if (seen.length > 400) seen.shift();
+      // 记录 knows the page of each line, to go back to it.
+      if (log.at(-1)?.s === s) log.at(-1).page = page;
       return;
     }
+  }
+  /** A page seen before, on the stage again as it was there (its message, background, CG); reading on goes on from it. */
+  function restore(h) {
+    if (h.m !== at && loaded[h.m]) { at = h.m; message = loaded[at]; steps = message.steps; lastId = message.id; }
+    pos = h.pos; ended = false; root.removeAttribute('data-end');
+    if (h.bg) { if (h.bg.url !== bgUrl || h.bg.cg !== cg) clearActors();cg = h.bg.cg;alone = h.bg.alone;cgPages = h.bg.cgPages;setBg(h.bg.url, {cg, soft: h.bg.soft}); }
+    show(h.s, {again: true});
   }
   /** 上一页: the page before again (no voice; going on from there reads on as before). */
   function back() {
@@ -839,11 +851,21 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     setAuto(false); stopSkip();
     if (!typed) finishTyping();
     seen.pop();
-    const h = seen[seen.length - 1];
-    if (h.m !== at && loaded[h.m]) { at = h.m; message = loaded[at]; steps = message.steps; lastId = message.id; }
-    pos = h.pos; ended = false; root.removeAttribute('data-end');
-    if (h.bg) { if (h.bg.url !== bgUrl || h.bg.cg !== cg) clearActors();cg = h.bg.cg;alone = h.bg.alone;cgPages = h.bg.cgPages;setBg(h.bg.url, {cg, soft: h.bg.soft}); }
-    show(h.s, {again: true});
+    restore(seen[seen.length - 1]);
+  }
+  /**
+   * 记录: a line tapped is where reading goes on from (as far back as the pages kept for 上一页). What came after it leaves
+   * 记录 and 上一页, as it comes again; the line's voice plays as when it was first read.
+   */
+  function jump(i) {
+    const e = log[i], k = e?.page ? seen.indexOf(e.page) : -1;
+    if (closed || waiting || k < 0) return;
+    setAuto(false); stopSkip();
+    if (!typed) finishTyping();
+    seen.length = k + 1; log.length = i + 1;
+    closeLog();
+    restore(e.page);
+    if (e.step && look().voice && voice.on()) voice.play(e.step);
   }
   function theEnd() {
     stopSkip();
@@ -903,12 +925,18 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
   // ---------- 记录 ----------
   function openLog() {
     const list = logEl.querySelector('ol');
-    list.innerHTML = log.map((e, i) => `<li${e.name ? '' : ' data-narrate'}><b>${esc(e.name)}</b><span>${esc(e.text)}</span>${e.step && voice.on() ? `<button data-vn="replay" data-i="${i}" aria-label="再听一次"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></button>` : '<i></i>'}</li>`).join('');
+    list.innerHTML = log.map((e, i) => `<li data-i="${i}"${e.name ? '' : ' data-narrate'}${e.page && seen.includes(e.page) ? ' data-jump title="从这句接着看"' : ''}><b>${esc(e.name)}</b><span>${esc(e.text)}</span>${e.step && voice.on() ? `<button data-vn="replay" data-i="${i}" aria-label="再听一次"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></button>` : '<i></i>'}</li>`).join('');
     logEl.hidden = false;
     list.scrollTop = list.scrollHeight;
     setAuto(false); stopSkip();
   }
   function closeLog() { logEl.hidden = true; }
+  // A line tapped (not its replay button, not while picking words to copy) is read again from there.
+  logEl.querySelector('ol').addEventListener('click', e => {
+    const li = e.target.closest('li[data-jump]');
+    if (!li || e.target.closest('button') || win.getSelection?.()?.toString()) return;
+    jump(Number(li.dataset.i));
+  });
 
   // ---------- title ----------
   function dropTitle() {

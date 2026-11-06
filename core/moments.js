@@ -123,3 +123,42 @@ export function storyLines(chat, limit, user, {each = STORY_LIMITS.each, total =
   }
   return out;
 }
+
+/**
+ * Names from the newest activity back, once each: on 朋友圈 who commented, posted and liked; on 论坛 who replied and
+ * posted. posts: newest first (a post's comments are newer than the post itself).
+ */
+export function activityNames(posts) {
+  const out = [];
+  for (const p of posts || []) {
+    const said = [...(p.comments || p.replies || [])].reverse().map(c => c.from);
+    // (A 论坛 post's likes are a count, not names.)
+    for (const name of [...said, p.author, ...(Array.isArray(p.likes) ? p.likes : [])]) if (name && name !== 'me' && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * Who a 朋友圈 or 论坛 request names when there are more people than it takes (each comes with their persona, so the
+ * request stays at `limit`). It used to be the first `limit` of the contacts every time, so in a card with 40 people the
+ * same dozen did all the posting. Now: the ones it must have (`must`: a post's author, whom a reply answers); those in
+ * the story just now (at most half the places); then whoever has been quiet longest (`active`: names from the newest
+ * activity back; never seen first), each group in a random order so the places go round. With no more people than
+ * places, everyone in their own order, as before. random: for tests.
+ */
+export function pickCrowd(all, {limit = MOMENTS_LIMITS.people, must = [], story = [], active = [], random = Math.random} = {}) {
+  if (all.length <= limit) return all;
+  const byName = new Map(all.map(p => [p.name, p])), out = [], taken = new Set();
+  const take = p => { if (p && !taken.has(p.name) && out.length < limit) { taken.add(p.name); out.push(p); } };
+  const shuffle = list => { const a = [...list]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  for (const name of must) take(byName.get(name));
+  const kept = out.length;
+  const text = story.map(s => `${s.name}\n${s.text}`).join('\n');
+  for (const p of shuffle(all.filter(p => !taken.has(p.name) && text.includes(p.name))).slice(0, Math.ceil(limit / 2))) take(p);
+  const last = new Map();
+  active.forEach((name, i) => { if (!last.has(name)) last.set(name, i); });
+  const quiet = p => last.has(p.name) ? last.get(p.name) : Infinity;
+  for (const p of shuffle(all.filter(p => !taken.has(p.name))).sort((a, b) => quiet(b) - quiet(a))) take(p);
+  // The list's order is no ranking: past the ones it must have, mixed, so the first names are not always picked.
+  return [...out.slice(0, kept), ...shuffle(out.slice(kept))];
+}

@@ -3,7 +3,7 @@
 import {currentDm} from './core/chats.js';
 import {buildForumRequest, parseForum, postLines} from './core/forum.js';
 import {buildPeekRequest, parsePeek, peekId, mergePeek} from './core/peek.js';
-import {storyLines} from './core/moments.js';
+import {storyLines, pickCrowd, activityNames} from './core/moments.js';
 import {inSpace, activeChatPreset, cleanTagged} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs, sizeFor, photoPicture} from './core/draw.js';
@@ -20,7 +20,12 @@ export function createAppsHost({context, settings, backend, memory = null}) {
     return [c.description, c.personality && '性格：' + c.personality].filter(Boolean).join('\n')
       .replaceAll('{{char}}', name).replaceAll('{{user}}', userName()).slice(0, 1500);
   }
-  const people = () => backend.crowd().slice(0, PEOPLE).map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
+  /** Everyone who can post here; a forum request names at most PEOPLE of them (pick). */
+  const people = () => backend.crowd().map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
+  /** The forum's posts here, newest first. */
+  const feed = async () => (await backend.apps.list('forum')).filter(p => inSpace(p, backend.here()));
+  /** Who this request names: everyone when they fit, else a turn of them (core/moments.js pickCrowd). */
+  const pick = (everyone, story, posts, must = []) => pickCrowd(everyone, {limit: PEOPLE, must: must.filter(n => n && n !== 'me'), story, active: activityNames(posts.slice(0, 40))});
   const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
     texts: [crowd.map(p => p.name).join('、'), ...story.map(r => `${r.name}: ${r.text}`), ...texts]});
   async function ask(ctx, prompt, preset, use) {
@@ -34,7 +39,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   }
   const base = () => {
     const s = settings(), preset = activeChatPreset(s.chat);
-    return {s, preset, crowd: people(), user: userName()};
+    return {s, preset, everyone: people(), user: userName()};
   };
 
   // ---------- 论坛 ----------
@@ -49,9 +54,9 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   function forumRefresh() {
     return run('forum', async ctx => {
       // The card asked for: the tavern may move to another one while the model writes.
-      const space = backend.cardKey(), save = backend.saveKey(), hotId = backend.hotId(), {preset, crowd, user} = base(), handles = netNames();
-      const recent = (await backend.apps.list('forum')).filter(p => inSpace(p, backend.here())).slice(0, 8), hot = (await backend.apps.get(hotId))?.topics || [];
-      const story = storyLines(ctx.chat, preset, user);
+      const space = backend.cardKey(), save = backend.saveKey(), hotId = backend.hotId(), {preset, everyone, user} = base(), handles = netNames();
+      const posts = await feed(), recent = posts.slice(0, 8), hot = (await backend.apps.get(hotId))?.topics || [];
+      const story = storyLines(ctx.chat, preset, user), crowd = pick(everyone, story, posts);
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, hot, lore: await lore(preset, crowd, story, [...hot, ...recent.map(p => p.title)])});
       const found = parseForum(await ask(ctx, prompt, preset, 'forum'), {user, mode: 'posts', handles});
       await keepNames(found.names, crowd);
@@ -63,10 +68,10 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   /** Replies to the user's new post. */
   function forumReact(postId) {
     return run('forum', async ctx => {
-      const {preset, crowd, user} = base(), handles = netNames();
+      const {preset, everyone, user} = base(), handles = netNames();
       const post = await backend.apps.get(postId);
       if (!post) throw Error('这个帖子已经不在了');
-      const story = storyLines(ctx.chat, preset, user);
+      const story = storyLines(ctx.chat, preset, user), crowd = pick(everyone, story, await feed());
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'react', people: crowd, story, user, userPersona: userPersona(), post, lore: await lore(preset, crowd, story, [postLines(post, user)])});
       const found = parseForum(await ask(ctx, prompt, preset, 'forum'), {user, mode: 'react', handles});
       await keepNames(found.names, crowd);
@@ -77,10 +82,11 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   /** Answers to the user's reply. */
   function forumReply(postId, replyId) {
     return run('forum', async ctx => {
-      const {preset, crowd, user} = base(), handles = netNames();
+      const {preset, everyone, user} = base(), handles = netNames();
       const post = await backend.apps.get(postId), mine = post?.replies.find(r => r.id === replyId);
       if (!post || !mine) throw Error('这条回复已经不在了');
-      const story = storyLines(ctx.chat, preset, user);
+      // The post's author, whom the reply answers and who already spoke under it are in the answer's list.
+      const story = storyLines(ctx.chat, preset, user), crowd = pick(everyone, story, await feed(), [post.author, mine.to, ...post.replies.map(r => r.from)]);
       // Keep the topic in one scan unit: even a shallow scan needs the original question and recent discussion.
       const discussion = postLines(post, user) + `\n本次回复${mine.to ? '（回复 ' + mine.to + '）' : ''}：${mine.text}`;
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'reply', people: crowd, story, user, userPersona: userPersona(), post, reply: mine, lore: await lore(preset, crowd, story, [discussion])});

@@ -431,7 +431,7 @@ export function settingsApp(ctx) {
         </div>
         <details data-group="voice-more"><summary>更多<small class="fold-note">按钮、声波、音量</small></summary><div class="fold-body">
           ${toggle('hideStoryWaves', '隐藏正文点击按钮', s.general.hideStoryWaves === true, '正文不插入声波、图片操作、音效和音乐按钮，已生成的图片仍显示。楼层工具栏也隐藏。可在小手机的「听取」里播放，在绘图和视觉小说 App 继续操作，适合与美化卡一起使用。')}
-          ${s.general.hideStoryWaves !== true ? toggle('storyTools', '楼层工具按钮', s.general.storyTools !== false, '每层回复右边的小手机工具按钮：给这层楼生图、从这层看视觉小说、台词小窗、整条播放。关掉后不显示；长按声波的下载、收藏照常。') : ''}
+          ${s.general.hideStoryWaves !== true ? toggle('storyTools', '楼层工具按钮', s.general.storyTools !== false, '每层回复右边的小手机工具按钮：给这层楼生图、给这层楼配音、从这层看视觉小说、台词小窗、整条播放。关掉后不显示；长按声波的下载、收藏、重新配音照常。') : ''}
           ${toggle('waveformEnabled', '声波动效', s.general.waveformEnabled, '台词旁和手机里的声波随真实音频跳动。系统开启减少动态效果时保持静止。\n\n正文声波的颜色跟随酒馆主题：\n· 虚线小点：这个角色还没配音（斜体色）\n· 淡色：还没生成（正文色）\n· 引号色：已生成，可以播放\n· 引号色加底色：正在播放\n· 下划线色：已经播放过')}
           <div class="field"><div class="meter-label"><span>播放音量</span><output>${Math.round(phone.volume * 100)}%</output></div><input class="slider" type="range" data-field="volume" min="0" max="100" value="${Math.round(phone.volume * 100)}" aria-label="播放音量"></div>
         </div></details>`

@@ -1191,7 +1191,7 @@ export function chatApp(ctx) {
     const shown = m.kind === 'voice' ? (m.translation || m.text) : m.kind === 'dice' ? `骰子 ${m.text} 点` : ['redpacket', 'transfer', 'gift'].includes(m.kind) ? preview(m) : quoteText(m);
     const voice = m.kind === 'voice', open = voice && (voiceText().auto || transcribed.has(m.id));
     const d = sheet('消息', `${voice ? '' : `<p class="help-copy">${esc(shown)}</p>`}
-      ${voice ? `<div class="actions">${btn('transcribe', icon('book') + (open ? '收起文字' : '转文字'), 'primary')}${btn('download', icon('download') + '下载语音', 'secondary')}${canShareFiles(ctx.win) ? btn('share', icon('share') + '分享', 'secondary') : ''}</div>` : ''}
+      ${voice ? `<div class="actions">${btn('transcribe', icon('book') + (open ? '收起文字' : '转文字'), 'primary')}${btn('download', icon('download') + '下载语音', 'secondary')}${ctx.routeFor(m.from)?.voice ? btn('retake', icon('refresh') + '重新配音', 'secondary') : ''}${canShareFiles(ctx.win) ? btn('share', icon('share') + '分享', 'secondary') : ''}</div>` : ''}
       <div class="actions">${quotable(m) ? btn('quote', icon('reply') + '引用', 'secondary') : ''}${copyable ? btn('copy', icon('copy') + '复制', 'secondary') : ''}${EDITABLE_KINDS.includes(m.kind) ? btn('edit', icon('edit') + '编辑', 'secondary') : ''}</div>
       <div class="actions">${canRecall ? btn('recall', icon('undo') + '撤回', 'secondary') : ''}${btn('pick-delete', icon('check') + '多选删除', 'secondary')}${btn('delete', icon('trash') + '删除', 'danger')}</div>
       ${last && live ? `<div class="actions">${btn('reroll', icon('refresh') + '重新回复这一轮', 'secondary')}</div>` : ''}`, {
@@ -1202,6 +1202,8 @@ export function chatApp(ctx) {
         render();
       },
       download: async () => { d.close(); const {blob, name} = await api.audioFile({line: lineOf(m)}); ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, name)); },
+      // 重新配音: this message's audio made anew (and played), the rest of the reply as it was.
+      retake: async () => { d.close(); await api.retakeVoice(lineOf(m)); },
       share: async () => { d.close(); const {blob, name} = await api.audioFile({line: lineOf(m)}); await shareFile(ctx.doc, blob, name); },
       quote: () => { d.close(); quote = {from: m.from, text: quoteText(m).slice(0, 200)}; panel = null; render(); },
       edit: () => { d.close(); editMessage(m); },
@@ -1372,12 +1374,13 @@ export function chatApp(ctx) {
     const draw = () => `<div class="setting-row"><span>角色自己打来${help('角色可以给你打语音电话：接通后用 TA 的音色说话，你打字回。打开这里后，每隔几条正文回复，角色可能会自己打来；不打开时，聊天里角色偶尔也会直接打过来（聊天预设的「打电话」规则）。每句话都要调用一次模型并生成语音。')}</span><input class="switch" type="checkbox" data-field="call-auto" aria-label="角色自己打来" ${o().auto ? 'checked' : ''}></div>
       <div class="field"><span>每几条正文回复可能打来一次</span><input data-field="call-every" type="number" min="1" max="100" value="${o().every}"></div>
       <div class="field"><span>每天最多</span><input data-field="call-dailyMax" type="number" min="1" max="10" value="${o().dailyMax}"></div>
-      <div class="field"><span>响铃多久算未接（秒）</span><input data-field="call-ring" type="number" min="15" max="60" value="${o().ring}"></div>`;
+      <div class="field"><span>响铃多久算未接（秒）</span><input data-field="call-ring" type="number" min="15" max="60" value="${o().ring}"></div>
+      <div class="setting-row"><span class="switch-label">通话声音像听筒${help('打开时，通话里的声音过一遍电话的窄频，像从听筒里传出来；关掉就是原本的声音，和语音缓存里的一样。')}</span><input class="switch" type="checkbox" data-field="call-effect" aria-label="通话声音像听筒" ${o().effect !== false ? 'checked' : ''}></div>`;
     const d = sheet('来电', `<div class="calls-body">${draw()}</div>`, {});
     d.body.addEventListener('change', e => {
       const key = e.target.dataset.field?.replace(/^call-/, '');
       if (!key) return;
-      try { api.saveCalls({[key]: key === 'auto' ? e.target.checked : Number(e.target.value)}); d.body.querySelector('.calls-body').innerHTML = draw(); } catch (error) { ctx.notify(error.message); }
+      try { api.saveCalls({[key]: key === 'auto' || key === 'effect' ? e.target.checked : Number(e.target.value)}); d.body.querySelector('.calls-body').innerHTML = draw(); } catch (error) { ctx.notify(error.message); }
     });
   }
   /** 主动发消息: characters text the user from the story, and (if wanted) now and then on their own. */

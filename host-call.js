@@ -45,12 +45,12 @@ export function createCallHost({context, settings, backend, notice, ringing = ()
     });
     if (changed) emit();
   });
-  /** Reads lines aloud through the phone's earpiece; their marks follow the player. */
+  /** Reads lines aloud through the phone's earpiece (or as made, with 通话声音像听筒 off); their marks follow the player. */
   async function speak(c, lines) {
-    const id = c.id;
+    const id = c.id, effect = settings().calls?.effect === false ? '' : 'phone';
     playing = lines;
     c.speaking = true; emit();
-    try { await backend.player.start(lines.map(l => ({role: c.name, emotion: l.emotion, text: l.text, translation: l.translation, effect: 'phone'})), () => live(id), null, {ahead: true}); } catch { /* the words are on screen */ }
+    try { await backend.player.start(lines.map(l => ({role: c.name, emotion: l.emotion, text: l.text, translation: l.translation, effect})), () => live(id), null, {ahead: true}); } catch { /* the words are on screen */ }
     // Read to the end (not stopped): every line was heard.
     if (playing === lines && /^播放完成/.test(backend.player.snapshot?.().message || '') && live(id)) for (const l of lines) l.heard = 'played';
     if (playing === lines) playing = null;

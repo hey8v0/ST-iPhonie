@@ -1,7 +1,7 @@
 // 朋友圈, tavern side. Posts, reactions and replies are generated separately from the story with the tavern's connected
 // model (generateRaw), like phone chat replies; nothing is written into the story. Pictures go through the drawing
 // queue and only when they are free (NovelAI's free tier); others wait for the user to ask.
-import {buildMomentsRequest, parseMoments, storyLines, MOMENTS_LIMITS} from './core/moments.js';
+import {buildMomentsRequest, parseMoments, storyLines, pickCrowd, activityNames, MOMENTS_LIMITS} from './core/moments.js';
 import {inSpace, activeChatPreset, cleanTagged} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs, photoPicture} from './core/draw.js';
@@ -19,8 +19,16 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
     return [c.description, c.personality && '性格：' + c.personality].filter(Boolean).join('\n')
       .replaceAll('{{char}}', name).replaceAll('{{user}}', userName()).slice(0, 1500);
   }
-  /** Everyone who can post: story roles first, then manual contacts, at most MOMENTS_LIMITS.people. */
-  const people = () => backend.crowd().slice(0, MOMENTS_LIMITS.people).map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
+  /** Everyone who can post: story roles first, then manual contacts. A request names at most MOMENTS_LIMITS.people of them
+   *  (pick). */
+  const people = () => backend.crowd().map(c => ({name: c.name, persona: c.persona, card: c.persona ? '' : card(c.name)}));
+  /** The posts here, newest first. */
+  const here = async () => (await backend.moments.list()).filter(p => inSpace(p, backend.here()));
+  /** Who this request names: everyone when they fit, else a turn of them (core/moments.js pickCrowd). */
+  const pick = (everyone, story, posts, must = []) => {
+    const crowd = pickCrowd(everyone, {limit: MOMENTS_LIMITS.people, must: must.filter(n => n && n !== 'me'), story, active: activityNames(posts.slice(0, 40))});
+    return {crowd, names: crowd.map(p => p.name)};
+  };
   const emit = extra => backend.emit('moments', {busy: !!busy, ...extra});
   /** 世界书 for these people: scanned over their names, the recent story and the posts in question. */
   const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
@@ -42,17 +50,17 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   }
   // Who the user blocked (黑名单) neither posts nor comments: they cannot see the user's 朋友圈, nor the user theirs.
   const base = async () => {
-    const s = settings(), preset = activeChatPreset(s.chat), out = new Set(await backend.blockedNames?.().catch(() => []) || []), crowd = people().filter(p => !out.has(p.name));
-    if (!crowd.length) throw Error(out.size ? '能发朋友圈的人都在黑名单里' : '还没有能发朋友圈的人：先在角色 App 里添加角色，或在聊天里添加联系人');
-    return {s, preset, crowd, user: userName(), names: crowd.map(p => p.name)};
+    const s = settings(), preset = activeChatPreset(s.chat), out = new Set(await backend.blockedNames?.().catch(() => []) || []), everyone = people().filter(p => !out.has(p.name));
+    if (!everyone.length) throw Error(out.size ? '能发朋友圈的人都在黑名单里' : '还没有能发朋友圈的人：先在角色 App 里添加角色，或在聊天里添加联系人');
+    return {s, preset, everyone, user: userName()};
   };
 
   /** New posts from the characters. auto: made by the story counter, not by the user. */
   function refresh({auto = false} = {}) {
     return run('refresh', async ctx => {
-      const space = backend.cardKey(), save = backend.saveKey(), {s, preset, crowd, user, names} = await base();
-      const recent = (await backend.moments.list()).filter(p => inSpace(p, backend.here())).slice(0, 6);
-      const story = storyLines(ctx.chat, preset, user);
+      const space = backend.cardKey(), save = backend.saveKey(), {s, preset, everyone, user} = await base();
+      const feed = await here(), recent = feed.slice(0, 6);
+      const story = storyLines(ctx.chat, preset, user), {crowd, names} = pick(everyone, story, feed);
       const request = buildMomentsRequest({prompts: settings().promptRules, preset, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, images: s.moments.images, memory: await remembered(crowd.map(p => p.name)), lore: await lore(preset, crowd, story, recent.map(p => `${p.author}: ${p.text}`))});
       const found = parseMoments(await ask(ctx, request), {names, user, mode: 'posts'});
       if (!found.posts.length) throw Error('这次没有收到新动态，可以再刷新一次');
@@ -68,10 +76,10 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   /** Friends react to the user's new post. */
   function react(postId) {
     return run('react', async ctx => {
-      const {preset, crowd, user, names} = await base();
+      const {preset, everyone, user} = await base();
       const post = await backend.moments.get(postId);
       if (!post) throw Error('这条动态已经不在了');
-      const story = storyLines(ctx.chat, preset, user);
+      const story = storyLines(ctx.chat, preset, user), {crowd, names} = pick(everyone, story, await here());
       const request = buildMomentsRequest({prompts: settings().promptRules, preset, earlier: memory?.storyMemory() || '', mode: 'react', people: crowd, story, user, userPersona: userPersona(), post, memory: await remembered(crowd.map(p => p.name)), lore: await lore(preset, crowd, story, [post.text])});
       const found = parseMoments(await ask(ctx, request), {names, user, mode: 'react'});
       return backend.momentsMutate(() => backend.moments.react(postId, found));
@@ -80,10 +88,11 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   /** Answers to the user's comment. */
   function reply(postId, commentId) {
     return run('reply', async ctx => {
-      const {preset, crowd, user, names} = await base();
+      const {preset, everyone, user} = await base();
       const post = await backend.moments.get(postId), comment = post?.comments.find(c => c.id === commentId);
       if (!post || !comment) throw Error('这条评论已经不在了');
-      const story = storyLines(ctx.chat, preset, user);
+      // The post's author, whom the comment answers and who already spoke under it are in the answer's list.
+      const story = storyLines(ctx.chat, preset, user), {crowd, names} = pick(everyone, story, await here(), [post.author, comment.to, ...post.comments.map(c => c.from)]);
       const request = buildMomentsRequest({prompts: settings().promptRules, preset, earlier: memory?.storyMemory() || '', mode: 'reply', people: crowd, story, user, userPersona: userPersona(), post, comment, memory: await remembered(crowd.map(p => p.name)), lore: await lore(preset, crowd, story, [post.text, comment.text])});
       const found = parseMoments(await ask(ctx, request), {names, user, mode: 'reply'});
       return backend.momentsMutate(() => backend.moments.react(postId, {comments: found.comments}));

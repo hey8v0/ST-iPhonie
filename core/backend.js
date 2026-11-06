@@ -1817,7 +1817,7 @@ export class TTSBackend {
     }
     /** 来电 options: {auto, every, dailyMax, ring}. */
     saveCalls(patch) {
-        const next = this.getState(), allowed = ['auto', 'every', 'dailyMax', 'ring'];
+        const next = this.getState(), allowed = ['auto', 'every', 'dailyMax', 'ring', 'effect'];
         next.calls = normalizeCalls({ ...next.calls, ...Object.fromEntries(Object.entries(patch || {}).filter(([key]) => allowed.includes(key))) });
         return this.save(next).calls;
     }
@@ -3095,6 +3095,13 @@ export class TTSBackend {
         this.emit('chat', { threadId: id });
         return saved;
     }
+    /** 重新配音 of a voice message: its kept audio is let go (core/player.js retake), then it plays, made anew. */
+    async retakeVoice(line) {
+        const one = { role: line?.role, emotion: line?.emotion || 'calm', text: line?.text, translation: line?.translation || '' };
+        if (!one.role || !one.text) throw Error('这条语音没有内容');
+        await this.player.retake(one);
+        return this.speak(one);
+    }
     /** Plays one voice message through the normal player (cache, favourites and the island all work). */
     speak(line) {
         const lines = (Array.isArray(line) ? line : [line]).filter(l => l?.role && l.text);
@@ -3616,7 +3623,7 @@ export class TTSBackend {
             updateChatMessage: (id, messageId, patch) => this.chatMutate(id, () => this.chats.updateMessage(id, messageId, clone(patch || {}))),
             markThreadRead: id => this.chatMutate(id, () => this.chats.markRead(id)),
             chatShowVersion: (id, index) => this.chatShowVersion(id, index),
-            speak: line => this.speak(clone(line)), voiceFormat: () => this.voiceFormat(),
+            speak: line => this.speak(clone(line)), retakeVoice: line => this.retakeVoice(clone(line)), voiceFormat: () => this.voiceFormat(),
         };
         return Object.freeze({ apiVersion: BACKEND_API_VERSION, defaultPrompt: DEFAULT_PROMPT, defaultFormat: DEFAULT_FORMAT,
             picTagFormat: PIC_TAG_FORMAT, defaultDrawRule: DEFAULT_DRAW_RULE, drawCountMax: DRAW_COUNT_MAX, defaultChatPreset: Object.freeze((({ id, ...rest }) => rest)(defaultChat().presets[0])),
