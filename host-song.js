@@ -31,7 +31,7 @@ export function createSongHost({context, settings, backend, memory = null}) {
     const story = useStory ? storyLines(ctx.chat, preset, user) : [];
     const remembered = who && memory ? await memory.aboutPeople([who.name]).catch(() => '') : '';
     const lore = !useStory || preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: who ? who.persona || who.card : '',
-      texts: [form.about || '', who?.name || '', ...story.map(r => `${r.name}: ${r.text}`)]});
+      texts: story.map(r => `${r.name}: ${r.text}`), always: [form.about || '', who?.name || '']});
     const prompt = buildSongRequest({prompts: s.promptRules, form, owner: who, user, userPersona: userPersona(), story, lore, earlier: useStory ? memory?.storyMemory() || '' : '', memory: remembered, history, before, wish});
     const written = parseSongReply(cleanTagged(String(await backend.generateText(ctx, {prompt, trimNames: false, use: 'song'}) || ''), preset.cleanTags));
     if (!form.instrumental && !written.lyrics) throw Error('模型没有写歌词，可以再试一次');

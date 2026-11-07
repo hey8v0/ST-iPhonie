@@ -4,7 +4,7 @@
 // the private chat with that contact. Nothing is written into the story.
 import {currentDm} from './core/chats.js';
 import {buildCallRequest, parseCallReply, CALL_LIMITS} from './core/call.js';
-import {chatContacts, activeChatPreset, messageLine, cleanTagged} from './core/chat.js';
+import {chatContacts, activeChatPreset, messageLine, scanTurns, cleanTagged} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {storyLines} from './core/moments.js';
 import {modelRules} from './core/state.js';
@@ -149,7 +149,11 @@ export function createCallHost({context, settings, backend, notice, ringing = ()
     const history = thread ? (await backend.chats.get(thread.id)).messages.filter(m => m.kind !== 'system' && m.kind !== 'call').slice(-CALL_LIMITS.history) : [];
     const voiceFormat = backend.voiceFormat(), story = storyLines(ctx.chat || [], preset, user);
     const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: c.contact.persona || c.contact.card || '',
-      texts: [c.name, c.reason, ...story.map(r => `${r.name}: ${r.text}`), ...history.map(m => messageLine(m, user)), ...c.lines.map(l => `${l.from === 'me' ? user : c.name}: ${l.translation || l.text}`)]});
+      // (By turns, the chat before and what was said on the call: the tavern's 扫描深度 covers whole turns.)
+      texts: [...story.map(r => `${r.name}: ${r.text}`), ...scanTurns([...history.map(m => ({me: m.from === 'me', text: messageLine(m, user)})),
+        ...c.lines.map(l => ({me: l.from === 'me', text: `${l.from === 'me' ? user : c.name}: ${l.translation || l.text}`}))])],
+      // (Who is calling and why, however deep the tavern scans.)
+      always: [c.name, c.reason]});
     // 记忆: looked up on the call's first turn (with why the call was made and the last chat) and kept for the call.
     if (c.memory === undefined && memory && thread) {
       const full = await backend.chats.get(thread.id);

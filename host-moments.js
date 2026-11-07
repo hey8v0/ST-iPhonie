@@ -32,7 +32,7 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   const emit = extra => backend.emit('moments', {busy: !!busy, ...extra});
   /** 世界书 for these people: scanned over their names, the recent story and the posts in question. */
   const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
-    texts: [crowd.map(p => p.name).join('、'), ...story.map(r => `${r.name}: ${r.text}`), ...texts]});
+    texts: [...story.map(r => `${r.name}: ${r.text}`), ...texts], always: [crowd.map(p => p.name).join('、')]});
 
   /** One model request at a time; the phone shows it as busy. */
   function run(kind, task) {

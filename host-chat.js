@@ -5,8 +5,8 @@
 import {roleStore, findRoute} from './core/routes.js';
 import {bubbleRequest, splitBubbleAnswer} from './core/bubble-css.js';
 import {currentDm, currentWindow, lastRound, chatWindows, forwardLine, messageWords} from './core/chats.js';
-import {buildChatRequest, parseChatReply, bringText, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace, STICKER_MOODS, contactStatus, letterRequest, letterText} from './core/chat.js';
-import {worldInfoFor, loreOptions} from './host-lore.js';
+import {buildChatRequest, parseChatReply, bringText, activeChatPreset, normalizeChatPreset, messageLine, scanTurns, cleanTagged,chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace, STICKER_MOODS, contactStatus, letterRequest, letterText} from './core/chat.js';
+import {worldInfoFor, loreTry, loreOptions} from './host-lore.js';
 import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer, sizeFor} from './core/draw.js';
 import {storyLines} from './core/moments.js';
 import {forumContext} from './core/forum.js';
@@ -146,9 +146,11 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       }
       // 查手机 × 聊天 (0.9.35): told once, in the next private chat with them.
       const peekKey = thread.type === 'dm' ? ownOf(thread.members[0]) : '', peekedNow = peekKey ? s.chat.peeked?.[peekKey] : null;
-      // 世界书: scanned over who is in the chat, the recent story and the chat itself, as the story's own request would be.
+      // 世界书: scanned over the recent story and the chat itself, as the story's own request would be, and who is in the
+      // chat however deep the tavern scans.
       const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
-        texts: [forum, people.map(p => p.name).join('、'), ...recent.map(r => `${r.name}: ${r.text}`), ...thread.messages.slice(-preset.history).map(m => messageLine(m, user))]});
+        // (By turns: the lines one side sent in a row are one entry, so the tavern's 扫描深度 covers whole turns.)
+        texts: [forum, ...recent.map(r => `${r.name}: ${r.text}`), ...scanTurns(thread.messages.slice(-preset.history).map(m => ({me: m.from === 'me', text: messageLine(m, user)})))], always: [people.map(p => p.name).join('、')]});
       // 记忆: the written-up older chat, and older messages that match the latest ones.
       const query = thread.messages.filter(m => m.kind !== 'system').slice(-6).map(m => messageLine(m, user)).join('\n');
       // 私聊带同群消息: what was said lately in the groups the contact is in too
@@ -805,7 +807,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     const recent = story(preset), history = thread.messages.slice(-30);
     // 世界书 (0.9.37; letters were written without it): scanned over the letter, the chat lately and the story.
     const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: person.persona || person.card || '',
-      texts: [person.name, ...recent.slice(-6).map(r => `${r.name}: ${r.text}`), ...history.slice(-12).map(x => messageLine(x, user)), m.letter.text]});
+      texts: [...recent.slice(-6).map(r => `${r.name}: ${r.text}`), ...scanTurns(history.slice(-12).map(x => ({me: x.from === 'me', text: messageLine(x, user)}))), m.letter.text], always: [person.name]});
     const prompt = letterRequest({prompts: s.promptRules, partner: person.name, persona: person.persona || person.card, user, userPersona: userPersona(), lore, memory: remembered,
       earlier: memory?.storyMemory() || '', story: recent, history, letter: m.letter.text, sentAt: m.at, now});
     return letterText(await backend.generateText(context(), {use: 'chat', prompt, plainText: true, trimNames: false, responseLength: 2000}));
@@ -957,8 +959,24 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     return {me: side === 'them' ? me : got.me || me, them: side === 'me' ? them : got.them || them};
   }
 
+  /**
+   * 试一句 (0.9.38): what the phone's scan takes for a chat, scanned as its next reply would be (who is in it, the recent
+   * story, the chat by turns), with a line of the user's more if one is written; with no chat, that line alone. The
+   * preset given (the one being edited, saved or not) says what is left out. Nothing is asked of a model.
+   */
+  async function loreTest({threadId = '', text = '', preset: edited = null} = {}) {
+    const s = settings(), preset = edited ? normalizeChatPreset({...activeChatPreset(s.chat), ...edited}) : activeChatPreset(s.chat), user = userName();
+    const thread = threadId ? await backend.chats.get(threadId) : null, line = String(text || '').trim();
+    if (threadId && !thread) throw Error('这段聊天已不存在');
+    if (!thread) return loreTry(context, {...loreOptions(preset), persona: userPersona(), texts: [line]});
+    const people = members(thread), lines = thread.messages.slice(-preset.history).map(m => ({me: m.from === 'me', text: messageLine(m, user)}));
+    if (line) lines.push({me: true, text: `${user}：${line}`});
+    return loreTry(context, {...loreOptions(preset), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
+      texts: [...story(preset).map(r => `${r.name}: ${r.text}`), ...scanTurns(lines)], always: [people.map(p => p.name).join('、')]});
+  }
+
   return {
-    bubbleRewrite, drawRoleSticker, clockTick, startClock, remindTick, groupTalk, outfitChanged, peekLater, makeGroup, letterTick,
+    bubbleRewrite, drawRoleSticker, clockTick, startClock, remindTick, groupTalk, outfitChanged, peekLater, makeGroup, letterTick, loreTest,
     reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, phoneAfter, phoneAfterPlan, askFriend,
     reroll: threadId => reply(threadId, {reroll: true}),
     /** 停止回复: the reply being written for this chat is let go. */

@@ -122,7 +122,7 @@ export function presetsApp(ctx) {
       d.body.querySelector('[data-lore-extra-line]').textContent = extra.length ? extra.join('、') : '酒馆里没开的书，挂上就只有手机读，正文读不到';
     };
     d.body.innerHTML = `<div class="setting-row lore-extra"><span class="row-text"><strong>再挂几本只给手机读的</strong><small data-lore-extra-line></small></span>${btn('lore-extra', '挂书', 'chip-button')}</div>
-      <div class="vibe-search">${icon('search')}<input type="search" data-lore-search placeholder="搜索书名、条目标题、关键词" aria-label="搜索世界书"></div>
+      <div class="lore-tools"><div class="vibe-search">${icon('search')}<input type="search" data-lore-search placeholder="搜索书名、条目标题、关键词" aria-label="搜索世界书"></div>${btn('lore-try', '试一句', 'chip-button')}</div>
       <p class="hint" style="padding:6px 2px">列出的是现在开着的世界书（全局、角色卡、聊天、人设绑定的）和里面启用的条目。勾选表示允许读取，仍按常驻、关键词、扫描深度和预算触发；不会强制全文载入。关掉的手机就不读，正文照常用。改完点「保存预设」才生效。</p>
       <div class="lore-list" data-lore-list></div>`;
     paint();
@@ -140,7 +140,43 @@ export function presetsApp(ctx) {
     // A click on the switch inside a summary must not also open or close the book.
     d.body.addEventListener('click', e => { if (e.target.matches('summary .switch')) e.stopPropagation(); }, true);
     d.body.addEventListener('click', e => { if (e.target.closest('[data-action=lore-extra]')) { e.preventDefault(); pickExtraLore(async () => { try { await read(); } catch { /* the list as it was */ } if (d.live) paint(); }); } });
+    d.body.addEventListener('click', e => { if (e.target.closest('[data-action=lore-try]')) { e.preventDefault(); tryLore(); } });
     d.onClose(() => render());
+  }
+  /**
+   * 试一句 (0.9.38): a chat's latest lines (and a line more) scanned as its next reply would be, with what this preset
+   * leaves out even before it is saved: the entries that come in, the ones too many for 世界书最多, and why each other
+   * one does not (those whose keywords are not there at all, folded away).
+   */
+  async function tryLore() {
+    const d = ctx.dialog('试一句', '<p class="hint">正在读取聊天……</p>', {over: true});
+    let threads = [];
+    try { threads = [...await api.listThreads?.() || []].sort((a, b) => (b.last?.at || 0) - (a.last?.at || 0)); } catch { /* a line alone */ }
+    if (!d.live) return;
+    const nameOf = t => t.name || (t.members || []).join('、') || '聊天';
+    d.body.innerHTML = `<div class="lore-try">
+      <div class="field"><span>哪个聊天</span><span class="select"><select data-try-chat aria-label="哪个聊天">${threads.map(t => `<option value="${esc(t.id)}">${esc(nameOf(t))}</option>`).join('')}<option value="">不用聊天，只试这一句</option></select></span></div>
+      <div class="field"><span>再说一句</span><textarea data-try-text rows="2" maxlength="2000" placeholder="可以不写" aria-label="再说一句"></textarea></div>
+      ${btn('lore-try-run', '试一试', 'primary')}
+      <div data-try-out></div></div>`;
+    const out = d.body.querySelector('[data-try-out]');
+    const rows = (list, note) => list.map(x => `<div class="lore-entry"><span class="row-text"><strong>${esc(x.title)}</strong><small>${esc([x.book, note(x)].filter(Boolean).join(' · '))}</small></span></div>`).join('');
+    const run = async () => {
+      const threadId = d.body.querySelector('[data-try-chat]').value, text = d.body.querySelector('[data-try-text]').value.trim();
+      if (!threadId && !text) { out.innerHTML = '<p class="hint">写一句话，或者选一个聊天。</p>'; return; }
+      out.innerHTML = '<p class="hint">正在扫……</p>';
+      try {
+        const r = await api.loreTry({threadId, text, preset: {loreSkipBooks: current.loreSkipBooks, loreSkipEntries: current.loreSkipEntries, loreExtraBooks: current.loreExtraBooks, cleanTags: current.cleanTags, loreMax: current.loreMax, history: current.history}});
+        if (!d.live) return;
+        const quiet = r.others.filter(o => o.why.startsWith('这段话里没有')), missed = r.others.filter(o => !quiet.includes(o));
+        out.innerHTML = `<p class="hint">扫的是最近 ${r.depth} 段 · 酒馆的世界书预算 ${Number(r.budget.tokens).toLocaleString()} token</p>`
+          + groupTitle(`带上 ${r.kept.length} 条 · ${r.kept.reduce((n, x) => n + x.chars, 0).toLocaleString()} 字`) + (rows(r.kept, x => `${x.why} · ${x.chars} 字`) || '<p class="hint">一条也没有。</p>')
+          + (r.over.length ? groupTitle(`放不下 ${r.over.length} 条`) + `<p class="hint">${esc(r.over[0].why)}</p>` + rows(r.over, x => `${x.chars} 字`) : '')
+          + (missed.length ? groupTitle(`没带上 ${missed.length} 条`) + rows(missed, x => x.why) : '')
+          + (quiet.length ? `<details class="lore-quiet"><summary>另外 ${quiet.length} 条：这段话里没有它们的关键词</summary>${rows(quiet, x => x.why)}</details>` : '');
+      } catch (error) { if (d.live) out.innerHTML = `<p class="hint error-copy">${esc(error.message)}</p>`; }
+    };
+    d.body.addEventListener('click', e => { if (e.target.closest('[data-action=lore-try-run]')) { e.preventDefault(); run(); } });
   }
   /** 只给手机读的书 (0.9.37): any book of the tavern's; one the tavern has on is read anyway, so it is shown as such. */
   async function pickExtraLore(done) {

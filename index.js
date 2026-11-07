@@ -491,7 +491,7 @@ function connect(source){
    playFavorite:id=>{check();playbackMessage=null;return api.playFavorite(id);},
   diagnose:()=>{check();return diagnose();},
   tavernAvatars:()=>{check();return tavernAvatars();},
-  loreBooks:async options=>{check();return loreBooks(context,undefined,{extra:Array.isArray(options?.extra)?options.extra:[]});},loreNames:async()=>{check();return loreNames();},
+  loreBooks:async options=>{check();return loreBooks(context,undefined,{extra:Array.isArray(options?.extra)?options.extra:[]});},loreNames:async()=>{check();return loreNames();},loreTry:async input=>{check();return chats.loreTest(input&&typeof input==='object'?input:{});},
   panelFloating:()=>{check();return !!panel?.classList.contains('floating');},
   panelDrag:(phase,sx,sy)=>{check();return panelDrag(phase,sx,sy);},
   panelSize:()=>{check();return panelSize();},

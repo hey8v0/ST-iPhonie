@@ -589,6 +589,23 @@ export function boardResult(g, user = '我') {
   if (g.resigned) return `${nameOf(g.resigned, user)}认输了`;
   return g.winner ? `${nameOf(g.winner, user)}赢了` : '';
 }
+/**
+ * 世界书 by turns (0.9.38): the tavern scans the last few entries it is given for keywords (its 扫描深度, 2 by default) —
+ * in the story, the last two messages. A phone chat or call is many short lines, so the lines one side said in a row go
+ * as one entry: the depth then covers the user's last turn and the one before it, as it does in the story.
+ * lines: [{me, text}] oldest first. Answers the turns' texts, oldest first.
+ */
+export function scanTurns(lines) {
+  const out = [];
+  let side = null;
+  for (const {me, text} of lines) {
+    const words = String(text ?? '').trim();
+    if (!words) continue;
+    if (out.length && side === !!me) out[out.length - 1] += '\n' + words;
+    else { out.push(words); side = !!me; }
+  }
+  return out;
+}
 // ---------- 防复读 (0.9.36) ----------
 // Words people use a lot without meaning much: not taken for someone's habit.
 const COMMON = new Set(['我们', '你们', '他们', '什么', '怎么', '没有', '可以', '就是', '这个', '那个', '知道', '今天', '现在', '一下', '还是', '不是', '已经', '真的', '因为', '所以', '但是', '然后', '如果', '时候', '自己', '一个', '这样', '那样', '觉得', '我也', '你也', '是不', '不过']);

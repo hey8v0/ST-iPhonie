@@ -27,7 +27,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   /** Who this request names: everyone when they fit, else a turn of them (core/moments.js pickCrowd). */
   const pick = (everyone, story, posts, must = []) => pickCrowd(everyone, {limit: PEOPLE, must: must.filter(n => n && n !== 'me'), story, active: activityNames(posts.slice(0, 40))});
   const lore = (preset, crowd, story, texts) => preset.lore === false ? Promise.resolve('') : worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: crowd.map(p => p.persona || p.card).join('\n'),
-    texts: [crowd.map(p => p.name).join('、'), ...story.map(r => `${r.name}: ${r.text}`), ...texts]});
+    texts: [...story.map(r => `${r.name}: ${r.text}`), ...texts], always: [crowd.map(p => p.name).join('、')]});
   async function ask(ctx, prompt, preset, use) {
     return cleanTagged(String(await backend.generateText(ctx, {prompt, trimNames: false, use}) || ''), preset.cleanTags);
   }

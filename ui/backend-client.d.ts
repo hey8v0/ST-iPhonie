@@ -1337,6 +1337,14 @@ export interface BackendAPI extends BackendFacade {
     loreBooks(options?: { extra?: string[] }): Promise<Array<{ name: string; from: string[]; entries: Array<{ id: string; title: string; keys: string[]; constant: boolean; preview: string }> }>>;
     /** Every book the tavern has (for picking ones the phone alone reads). */
     loreNames(): Promise<string[]>;
+    /** 试一句: what the phone's scan takes for a chat (as its next reply would scan it) and a line more, or for a line alone;
+     *  preset: the chat preset being edited (what it leaves out). Each entry not taken says why. */
+    loreTry(input?: { threadId?: string; text?: string; preset?: Partial<ChatPreset> }): Promise<{
+        depth: number; scanned: string[]; budget: { tokens: number; size: number; percent: number; cap: number };
+        kept: Array<{ book: string; title: string; why: string; chars: number }>;
+        over: Array<{ book: string; title: string; why: string; chars: number }>;
+        others: Array<{ book: string; title: string; why: string }>;
+    }>;
     /** On a computer the phone is a floating window beside the story (false when it is full screen). */
     panelFloating(): boolean;
     /** Moves the floating phone by its top bar, in screen coordinates; 'reset' puts it back at the right edge. */
