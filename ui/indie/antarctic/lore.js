@@ -2,6 +2,7 @@
 // its kind, a name, a hint while it is still unknown, a few lines once found, and a picture (the creature's own
 // sprite, the landmark's art, the item's icon). The words are the game's own. Also the little creatures' sprites.
 import {LORE_ART} from './shore.js';
+import {LORE_ART as TOWN_ART} from './town.js';
 import {house} from './assets.js';
 import {iconPixels} from './icons.js';
 
@@ -34,6 +35,15 @@ export const KINDS = ['地点', '地标', '生物', '采集'];
 export const LORE = {
   'place:farm': {kind: '地点', name: '鲸湾郊外', hint: '你的家。', text: '鲸湾城外的一片坡地，背靠长满松树的山崖，面朝大海。坡上有一间带阁楼的小木屋——现在是你的家了。', art: () => house()},
   'place:shore': {kind: '地点', name: '东海岸', hint: '农场东边的小路通向哪里？', text: '农场往东，翻过沙丘就是一大片潮滩。一天两次，海水退到很远的地方，又慢慢涨回来，带走一些东西，也留下一些。', art: () => LORE_ART.wreck()},
+  'place:town': {kind: '地点', name: '鲸湾城', hint: '农场的小路往西走到头。', text: '半月形的港湾，背后是山，面前是海。木头和石头的房子都带着阁楼，街道从中央广场向四面散开。破冰船在码头靠泊，各族的人在广场上来来去去——这是结界里最早的定居点之一。', art: () => TOWN_ART.hall()},
+  plaza: {kind: '地标', name: '中央广场', hint: '鲸湾城的正中间。', text: '一圈石板铺成的广场，中间是一座喷泉。各族群的手工艺品和食物在这里摆摊，每周有小集，每月有一次故事之夜。广场上的字和笑声常常混着好几种语言。', art: TOWN_ART.plaza},
+  library: {kind: '地标', name: '知识库总馆', hint: '广场北面的坡上，最大的那座石头房子。', text: '知识库在鲸湾的馆舍：石墙、尖顶、高高的拱窗。它收藏结界的记忆，向所有居民开放；灰区和海边的新发现，都会被记进这里。', art: TOWN_ART.library},
+  buyer: {kind: '地标', name: '见闻收购行', hint: '广场西边，门上挂着一枚钱币的招牌。', text: '知识库把收购见闻的差事外包给了这家小店：你在外面看见的、捡到的，写进见闻录，拿来这里能换成钱。掌柜沈砚说，最值钱的见闻往往最不起眼。', art: TOWN_ART.buyer},
+  guild: {kind: '地标', name: '向导行会', hint: '广场东边，挂着罗盘招牌和一面旗。', text: '每位新居民都有一段文化适应期，由向导协助。向导行会就在广场东边：橘在这里上班。以后去远处的委托，也会贴在这里。', art: TOWN_ART.guild},
+  hall: {kind: '地标', name: '社区中心', hint: '码头上面，红屋顶的大木屋。', text: '鲸湾的社区中心，门口的公告栏贴着节庆、集市和各种启事。温婆婆在这里管事，谁家的猫丢了都来找她。', art: TOWN_ART.hall},
+  board: {kind: '地标', name: '公告栏', hint: '广场东侧的木板上钉满了纸。', text: '一块钉满纸条的木板：节庆的日子、集市的时间、知识库转录的外界消息、寻猫启事。鲸湾的事，先在这里知道。', art: TOWN_ART.board},
+  pier: {kind: '地标', name: '码头', hint: '从广场往南走到海边。', text: '石砌的码头沿着港湾弯成一道弧，木栈桥伸进海里。缆桩、木箱和酒桶堆在岸边，海鸥站在最高的那个上。', art: TOWN_ART.pier},
+  ship: {kind: '地标', name: '破冰船', hint: '靠在栈桥东侧的大船。', text: '船身刻满符文的破冰船，能穿过迷雾屏障。新移民坐它来，贸易线的物资也由它运进鲸湾分发。船底刻着名字，只有下水时看得见。', art: TOWN_ART.ship},
   whalebone: {kind: '地标', name: '鲸骨拱', hint: '东海岸的沙滩高处，一道白色的拱。', text: '一副巨大的鲸骨半埋在沙里，肋骨弯成一排拱门。孩子们说鲸湾就是因它得名——大人们笑着说不是。', art: () => LORE_ART.whalebone()},
   wreck: {kind: '地标', name: '搁浅的小船', hint: '东海岸，沙滩上有条船。', text: '船身晒成了银灰色，船头还挂着一盏没了玻璃的灯。船舱里积满了沙，不知道它的主人后来去了哪里。', art: () => LORE_ART.wreck()},
   marker: {kind: '地标', name: '旧观测桩', hint: '退潮时，沙洲尽头的小岛上。', text: '一根方石桩，身上一圈圈刻度记着潮水的高低，刻着的符文还微微发着光。是知识库的观测桩——它好像还在工作。', art: () => LORE_ART.marker()},

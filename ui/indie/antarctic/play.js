@@ -17,6 +17,8 @@ import {toolPixels, canPixels} from './tools.js';
 import * as audio from './sound.js';
 import {SHORE} from './shore.js';
 import {LORE, LORE_IDS, KINDS as LORE_KINDS, CRITTERS} from './lore.js';
+import {TOWN} from './town.js';
+import {RESIDENTS, residentOf, placeAt, inTownOn, giftable, heartsOf, HEARTS_MAX} from './people.js';
 
 // the view: 320 × 180 of the world on a 16:9 screen, each pixel shown as a whole number of the screen's; a wider or
 // taller screen sees a little more of the world instead of black bars (fit())
@@ -43,9 +45,9 @@ const q = new URLSearchParams(location.search);
 // ?dev: N (or the pad's Y) skips an hour, and the state is reachable from outside (globalThis.__antarctic), for trying
 // things out; players never have it
 const DEV = q.has('dev');
-if (DEV) globalThis.__antarctic = {get game() { return game; }, get me() { return me; }, get scene() { return scene; }, get view() { return [VW, VH]; }, get prints() { return prints; }, get tide() { return tideNow; }, use: () => use(), facing: () => facing(), audio};
-let started = false, S = null, farm = null, shore = null, game = null, lightVersion = 0, relighting = null, litSeason = -1, scene = 'farm';
-const rooms = {}, ROOMS = ['house', 'attic'], OUTDOOR = ['farm', 'shore'];
+if (DEV) globalThis.__antarctic = {get game() { return game; }, get me() { return me; }, get scene() { return scene; }, get view() { return [VW, VH]; }, get prints() { return prints; }, get tide() { return tideNow; }, use: () => use(), facing: () => facing(), audio, get folk() { return townFolk; }, go: (name, key) => go(name, key), talkTo: id => { const n = townFolk.find(n => n.id === id); if (n) talkTo(n); }};
+let started = false, S = null, farm = null, shore = null, town = null, game = null, lightVersion = 0, relighting = null, litSeason = -1, scene = 'farm';
+const rooms = {}, ROOMS = ['house', 'attic'], OUTDOOR = ['farm', 'shore', 'town'];
 const me = {x: 0, y: 0, dir: 'down', t: 0, moving: false, busy: 0};
 // the farm is prepared and lit in the background (world.worker.js); here we only ask and swap in what comes back
 const worker = new Worker(new URL('./world.worker.js', import.meta.url), {type: 'module'});
@@ -56,7 +58,7 @@ async function prepareSeason(season) {
   const got = await ask('prepare', {season});
   farm = {...got, sun: farm?.sun, lamps: farm?.lamps, px: farm?.px, light: farm?.light, shadow: farm?.shadow, hour: -99, open: null};
   litSeason = season; for (const k of ROOMS) delete rooms[k]; // the rooms show the season too (windows, flowers)
-  shore = null; if (scene === 'shore') await prepareShore();
+  shore = null; town = null; if (scene === 'shore') await prepareShore(); else if (scene === 'town') await prepareTown();
   enter(scene);
 }
 async function prepareShore() {
@@ -64,13 +66,17 @@ async function prepareShore() {
   shore = {...got, hour: -99, open: null, season: litSeason, entry: SHORE.entry};
   shoreSpots();
 }
+async function prepareTown() {
+  const got = await ask('prepare', {map: 'town', season: litSeason});
+  town = {...got, hour: -99, open: null, season: litSeason, entry: TOWN.entry};
+}
 // Light the scene one is in for the hour: the farm in the worker; a room here, a few rows each frame (all at once the
 // first time, behind the fade).
 let roomSteps = null;
 function relight(hour) {
   const target = S;
   const done = () => { if (S === target) { lightVersion++; afterLight(); } };
-  if (target === farm || target === shore) return ask('light', {map: target.map, hour, extra: target === farm ? campfireLamps() : []}).then(got => { Object.assign(target, {px: got.px, light: got.light, shadow: got.shadow, sun: got.sun, lamps: got.lamps, hour}); done(); });
+  if (target === farm || target === shore || target === town) return ask('light', {map: target.map, hour, extra: target === farm ? campfireLamps() : []}).then(got => { Object.assign(target, {px: got.px, light: got.light, shadow: got.shadow, sun: got.sun, lamps: got.lamps, hour}); done(); });
   if (!target.px) { for (const _ of lightRoom(target, hour, litSeason)) { /* at once */ } done(); return Promise.resolve(); }
   return new Promise(resolve => { roomSteps = {it: lightRoom(target, hour, litSeason), done: () => { done(); resolve(); }}; });
 }
@@ -81,15 +87,15 @@ function stepRoomLight() {
 }
 function afterLight() {
   // open water (water all round, 3 px each way) is where glints and the aurora show
-  if ((S === farm || S === shore) && !S.open) { const m = S.mat, water = i => m[i] === 4 || m[i] === 6; S.open = new Uint8Array(W * H); for (let y = 3; y < H - 3; y++) for (let x = 3; x < W - 3; x++) { const i = y * W + x; S.open[i] = water(i) && water(i - 3) && water(i + 3) && water(i - 3 * W) && water(i + 3 * W) && S.owner[i] < 0 ? 1 : 0; } }
+  if ((S === farm || S === shore || S === town) && !S.open) { const m = S.mat, water = i => m[i] === 4 || m[i] === 6; S.open = new Uint8Array(W * H); for (let y = 3; y < H - 3; y++) for (let x = 3; x < W - 3; x++) { const i = y * W + x; S.open[i] = water(i) && water(i - 3) && water(i + 3) && water(i - 3 * W) && water(i + 3 * W) && S.owner[i] < 0 ? 1 : 0; } }
   cache.clear();
 }
 /** Be in a scene at once: the farm, or a room (built for the season the first time). */
 function enter(name) {
   scene = ROOMS.includes(name) || OUTDOOR.includes(name) ? name : 'farm';
-  if (scene === 'shore' && !shore) scene = 'farm';
+  if ((scene === 'shore' && !shore) || (scene === 'town' && !town)) scene = 'farm';
   if (scene === 'farm') { S = farm; W = FARM_W; H = FARM_H; }
-  else if (scene === 'shore') { S = shore; W = S.W; H = S.H; }
+  else if (scene === 'shore' || scene === 'town') { S = scene === 'shore' ? shore : town; W = S.W; H = S.H; }
   else { rooms[scene] ??= room(scene, litSeason); S = rooms[scene]; W = S.W; H = S.H; }
   setFrame(W, H); cache.clear();
 }
@@ -98,14 +104,16 @@ const fadeTo = target => new Promise(resolve => {
   step();
 });
 // where one comes in: the farm's door, or a room's named entry
-const entryOf = (name, key) => name === 'farm' ? (key === 'east' ? [FARM_W - 14, 24 * T + 10, 'left'] : [farm.door[0], farm.door[1] + 8, 'down']) : S.entry[key];
+const entryOf = (name, key) => name === 'farm' ? (key === 'east' ? [FARM_W - 14, 24 * T + 10, 'left'] : key === 'west' ? [14, 24 * T + 10, 'right'] : [farm.door[0], farm.door[1] + 8, 'down']) : S.entry[key];
 /** Walk through to another scene: fade out, go, light it if the hour has moved, fade in. */
 async function go(name, key) {
   if (fade.on) return;
   fade.on = true; audio.play(name === 'house' && key === 'door' || (scene === 'house' && name === 'farm') ? 'door' : ROOMS.includes(name) ? 'step' : null, 'wood'); await fadeTo(1);
   if (name === 'shore' && (!shore || shore.season !== litSeason)) await prepareShore();
+  if (name === 'town' && (!town || town.season !== litSeason)) await prepareTown();
   enter(name); [me.x, me.y, me.dir] = entryOf(name, key); me.t = 0; petPlace(me.x + (me.dir === 'left' ? 12 : -12), me.y + 6);
   if (name === 'shore') beachToday();
+  if (name === 'town') townArrive();
   if (!S.px || Math.abs(G.hourOf(game) - (S.hour ?? -99)) >= .25) await relight(G.hourOf(game));
   store(); await fadeTo(0); fade.on = false;
   if (OUTDOOR.includes(name)) discover('place:' + name);
@@ -187,12 +195,14 @@ async function boot() {
   // where one was; a new game starts in bed in the attic; ?x=&y= starts on the farm at that tile
   const at = q.get('x') ? {scene: 'farm', x: Number(q.get('x')) * T, y: Number(q.get('y')) * T} : game.at || {scene: q.get('in') || 'attic'};
   if (at.scene === 'shore') await prepareShore();
+  if (at.scene === 'town') await prepareTown();
   enter(at.scene);
   if (at.x == null) [me.x, me.y, me.dir] = scene === 'farm' ? entryOf('farm') : S.entry.bed || Object.values(S.entry)[0];
   else { me.x = at.x; me.y = at.y; me.dir = at.dir || 'down'; }
   if (OUTDOOR.includes(scene)) setTimeout(() => discover('place:' + scene), 1500);
   if (!free(me.x, me.y)) for (let r = 1; r < 400; r++) { const a = r * 2.4, x = me.x + Math.cos(a) * r * .6, y = me.y + Math.sin(a) * r * .6; if (free(x, y)) { me.x = x; me.y = y; break; } }
   petPlace(me.x + 12, me.y + 4);
+  if (scene === 'town') townArrive();
   await relight(G.hourOf(game));
   $('#loading').remove();
   started = true; document.body.classList.remove('booting'); hud(); requestAnimationFrame(loop);
@@ -311,8 +321,8 @@ function pad() {
   return null;
 }
 // ── panels with keys and pads: a focus that moves between the controls (or, on the map, the map itself) ─────────
-const activePanel = () => creator.open ? 'creator' : dialog.open ? 'dialog' : shop.open ? 'shop' : chestUi.open ? 'chest' : menu.open ? 'menu' : null;
-const panelEl = name => ({creator: $('#creator'), dialog: $('#ask'), shop: $('#shop'), chest: $('#chestui'), menu: $('#menu')})[name];
+const activePanel = () => creator.open ? 'creator' : dialog.open ? 'dialog' : talk.open ? 'talk' : shop.open ? 'shop' : chestUi.open ? 'chest' : menu.open ? 'menu' : null;
+const panelEl = name => ({creator: $('#creator'), dialog: $('#ask'), talk: $('#talk'), shop: $('#shop'), chest: $('#chestui'), menu: $('#menu')})[name];
 const paneNow = () => $('#menu .tabs .on')?.dataset.pane;
 const nav = {el: null, dir: null, next: 0};
 function navItems() {
@@ -354,7 +364,7 @@ function navActivate() {
 }
 function panelBack() {
   const panel = activePanel();
-  if (panel === 'dialog') dialog.done(false); else if (panel === 'shop') closeShop(); else if (panel === 'chest') closeChest(); else if (panel === 'menu') closeMenu(); else if (panel === 'creator' && creator.editing) closeCreator(false);
+  if (panel === 'dialog') dialog.done(false); else if (panel === 'talk') closeTalk(); else if (panel === 'shop') closeShop(); else if (panel === 'chest') closeChest(); else if (panel === 'menu') closeMenu(); else if (panel === 'creator' && creator.editing) closeCreator(false);
 }
 function padPanel(g, press) {
   using = 'gamepad';
@@ -406,11 +416,13 @@ const front = () => [me.x + (me.dir === 'left' ? -12 : me.dir === 'right' ? 12 :
 const near = (p, r = 17) => { if (!p) return false; const [fx, fy] = front(); return Math.hypot(fx - p[0], (fy - (p[1] - 5)) * 1.4) < r; };
 function use() {
   if (!game || me.busy > 0 || fade.on || menu.open || dialog.open) return;
+  if (talk.open) { talkNext(); return; }
   if (shop.open) return;
   // the pet only when facing it (beside you, it does not take the use from the tile in front)
   if (game.pet && near([pet.x, pet.y + 4], 12)) { petIt(); return; }
   if (scene === 'shore' && (pickBeach() || observe())) return;
   if (scene === 'shore' && near(SHORE.cave, 22)) { caveVisit(); return; }
+  if (scene === 'town' && townUse()) return;
   if (scene !== 'farm') { const p = S.spots.find(p => near([p.x, p.y], p.kind === 'lore' ? 34 : 21)); if (p) useSpot(p); return; }
   if (observeFarm()) return;
   if (near(S.bin)) { const r = G.ship(game); say(r.say, r.done ? 'coin' : null); if (r.done) { audio.play('coin'); burst('harvest', S.bin[0], S.bin[1] - 14); store(); hud(); } return; }
@@ -453,6 +465,9 @@ function useSpot(p) {
   else if (p.kind === 'bed') confirm(G.hourOf(game) < 18 ? '现在就睡觉吗？今天会直接结束。' : '要睡觉吗？', '睡觉', '再等等').then(yes => { if (yes) goToBed('晚安。'); });
   else if (p.kind === 'lore') { const known = game.lore?.[p.id]; discover(p.id); if (known) say(LORE[p.id].text); }
   else if (p.kind === 'scope') say(G.hourOf(game) >= 20 || G.hourOf(game) < 5 ? '从望远镜里看，极光正在天边慢慢流动……' : '白天什么也看不到，晚上再来吧。');
+  else if (p.kind === 'stall') { if (placeAt(residentOf('shuang'), G.hourOf(game), game.day) === 'stall') openShop(true); else say('摊子收了。霜早上九点到下午五点在。'); }
+  else if (DOORS[p.kind]) { discover(p.lore); say(DOORS[p.kind]); }
+  else if (p.kind === 'board') { discover(p.lore); say(`布告栏：${G.dateText(game)}。「向导行会：新移民请来登记。」「港务：破冰船每七天进港一次。」「社区中心：每月 28 日故事之夜，广场见。」`); }
   else say(p.say);
 }
 // a question with two answers, in a small frame (keys: Space / Enter yes, Esc no; pad A / B)
@@ -493,32 +508,225 @@ async function goToBed(text) {
   if (game.withered) say('换季了，' + game.withered + ' 株不合季的作物枯掉了', 'wither');
 }
 
-// ── 中央市集 by post: the mailbox opens an order form for seeds ──────────────────────────────────────────────────
-const shop = {open: false, at: 0, kinds: []};
+// ── lists in a frame: the mail-order shop and 霜's stall (seeds), the 见闻收购行 (pages sold), the 知识库 (things given) ─
+const shop = {open: false, at: 0, rows: [], again: null};
 const price = n => { const el = document.createElement('span'); el.className = 'price'; el.append(iconCanvas('coin'), n); return el; };
-function openShop() {
-  shop.open = true; shop.at = 0; audio.play('open');
-  const season = G.seasonOf(game); shop.kinds = Object.keys(G.CROPS).filter(k => G.inSeason(k, season));
-  $('#shop .sub').textContent = `现在是${G.SEASONS[season]}天，订单写好塞进信箱，当季的种子马上送到。`;
+/**
+ * Rows ({icon, title, small, price, buttons: [[label, fn]]}) under a banner; empty: the words when there are none; again:
+ * how to build the rows anew after one did something (relist keeps the place). keep: built anew, no sound, the row kept.
+ */
+function openList({title, sub, rows, empty = '什么也没有', purse: showPurse = true, again = null}, keep = false) {
+  const was = shop.at; shop.open = true; shop.rows = rows; shop.again = again; shop.at = keep ? Math.max(0, Math.min(was, rows.length - 1)) : 0;
+  if (!keep) audio.play('open');
+  $('#shop .banner').textContent = title; $('#shop .sub').textContent = sub;
   const list = $('#shop .items'); list.innerHTML = '';
-  shop.kinds.forEach((k, i) => {
-    const c = G.CROPS[k], row = document.createElement('div'); row.className = 'item well';
-    const text = document.createElement('div'); text.innerHTML = `<b>${c.seed}</b><small>${c.days.reduce((a, b) => a + b, 0)} 天成熟 · ${c.seasons.map(n => G.SEASONS[n]).join('')} · 出货 ${c.price}</small>`;
-    const b1 = document.createElement('button'), b5 = document.createElement('button');
-    b1.className = b5.className = 'wood'; b1.textContent = '买 1'; b5.textContent = '买 5';
-    row.append(iconCanvas('packet', {crop: k}), text, price(c.cost), b1, b5);
-    for (const [b, n] of [[b1, 1], [b5, 5]]) b.addEventListener('pointerdown', e => { e.preventDefault(); shop.at = i; shopBuy(n); });
-    row.addEventListener('pointerenter', () => { shop.at = i; shopPaint(); });
-    list.append(row);
+  rows.forEach((row, i) => {
+    const el = document.createElement('div'); el.className = 'item well';
+    const text = document.createElement('div'), b = document.createElement('b'), small = document.createElement('small'); b.textContent = row.title; small.textContent = row.small || ''; text.append(b, small);
+    el.append(row.icon || document.createElement('span'), text, row.price != null ? price(row.price) : document.createElement('span'));
+    for (const [label, fn] of row.buttons || []) { const btn = document.createElement('button'); btn.className = 'wood'; btn.textContent = label; btn.addEventListener('pointerdown', e => { e.preventDefault(); shop.at = i; fn(); }); el.append(btn); }
+    el.addEventListener('pointerenter', () => { shop.at = i; shopPaint(); });
+    list.append(el);
   });
-  $('#shop').classList.add('on'); shopPaint(); navFocus($('#shop .items button'));
+  if (!rows.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = empty; list.append(p); }
+  $('#shop .purse').hidden = !showPurse; $('#shop .foot').style.justifyContent = showPurse ? '' : 'flex-end';
+  $('#shop').classList.add('on'); shopPaint(); navFocus(list.children[shop.at]?.querySelector('button') || $('#shop .close'));
 }
-function closeShop() { shop.open = false; $('#shop').classList.remove('on'); audio.play('close'); }
-function shopMove(d) { shop.at = (shop.at + d + shop.kinds.length) % shop.kinds.length; shopPaint(); }
+function closeShop() { shop.open = false; shop.again = null; $('#shop').classList.remove('on'); audio.play('close'); }
 function purse() { for (const el of document.querySelectorAll('.purse')) el.replaceChildren(iconCanvas('coin'), game.money + ' 代币'); }
 function shopPaint() { [...$('#shop .items').children].forEach((r, i) => r.classList.toggle('on', i === shop.at)); purse(); }
-function shopBuy(n = 1) { const k = shop.kinds[shop.at]; if (!k) return; const r = G.buy(game, k, n); say(r.say, r.done ? 'packet' : null, k); if (r.done) { audio.play('coin'); store(); hud(); } shopPaint(); }
+/** The rows built again after one did something (a page sold, a thing given): the same list, the place kept. */
+const relist = () => { if (shop.open && shop.again) openList(shop.again(), true); };
 $('#shop .close').addEventListener('pointerdown', e => { e.preventDefault(); closeShop(); });
+// seeds of the season: by post from the mailbox, or at 霜's stall on the plaza
+function seedRows() {
+  const season = G.seasonOf(game);
+  return Object.keys(G.CROPS).filter(k => G.inSeason(k, season)).map(k => {
+    const c = G.CROPS[k], buy = n => { const r = G.buy(game, k, n); say(r.say, r.done ? 'packet' : null, k); if (r.done) { audio.play('coin'); store(); hud(); } shopPaint(); };
+    return {icon: iconCanvas('packet', {crop: k}), title: c.seed, small: `${c.days.reduce((a, b) => a + b, 0)} 天成熟 · ${c.seasons.map(n => G.SEASONS[n]).join('')} · 出货 ${c.price}`, price: c.cost, buttons: [['买 1', () => buy(1)], ['买 5', () => buy(5)]]};
+  });
+}
+function openShop(stall = false) {
+  const season = G.seasonOf(game);
+  openList({title: stall ? '中央市集 · 霜的旧货摊' : '中央市集 · 邮购', sub: stall ? `霜：「当季的种子在这儿，${G.SEASONS[season]}天的。旧货不卖给新来的。」` : `现在是${G.SEASONS[season]}天，订单写好塞进信箱，当季的种子马上送到。`, rows: seedRows()});
+}
+// 见闻收购行: the pages of the 见闻录 one has and has not sold, each once, at a price by its kind
+function buyerRows() {
+  return LORE_IDS.filter(id => game.lore?.[id] && !game.sold?.[id]).map(id => {
+    const L = LORE[id], cv = document.createElement('canvas'); cv.className = 'loreart'; cv.width = 48; cv.height = 36; drawLoreArt(cv, L.art(), true);
+    return {icon: cv, title: L.name, small: `【${L.kind}】第 ${game.lore[id]} 天记下`, price: G.LORE_PRICES[L.kind], buttons: [['卖', () => { const r = G.sellLore(game, id, L.kind); say(r.say, r.ok ? 'coin' : null); if (r.ok) { audio.play('coin'); store(); hud(); relist(); } }]]};
+  });
+}
+const buyerList = () => ({title: '见闻收购行', sub: `沈砚：「见闻录里记下的，每一条收一次。」已收 ${Object.keys(game.sold || {}).length} 条。`, rows: buyerRows(), empty: '见闻录里没有还没卖的页。去走走看看吧。', again: buyerList});
+function openBuyer() { openList(buyerList()); }
+// 知识库: a crop or a find of each kind, given once, kept in its collection; what the bag has that the museum lacks
+const DONATE_ALL = Object.keys(G.ITEMS).filter(id => ['crop', 'forage'].includes(G.ITEMS[id].type)).length;
+function libraryRows() {
+  const have = new Map(); for (const it of game.inv) if (it && ['crop', 'forage'].includes(G.ITEMS[it.id]?.type) && !game.donated?.[it.id]) have.set(it.id, (have.get(it.id) || 0) + it.n);
+  return [...have].map(([id, n]) => ({icon: itemIcon(id), title: G.ITEMS[id].name, small: `背包里有 ${n}`, buttons: [['捐一个', () => { const r = G.donate(game, id); say(r.say, r.ok ? id : null); if (r.ok) { audio.play(r.reward ? 'coin' : 'lore'); store(); hud(); relist(); } }]]}));
+}
+const libraryList = () => ({title: '知识库总馆 · 鲸湾分馆', sub: `书言：「作物和采集物每种收藏一件，每收满五种有谢礼。」已收藏 ${Object.keys(game.donated || {}).length} / ${DONATE_ALL} 种。`, rows: libraryRows(), empty: '背包里没有馆里还缺的东西。', purse: false, again: libraryList});
+function openLibrary() { openList(libraryList()); }
+
+// ── talking: a frame with who it is, their words a page at a time, and how well one knows them ──────────────────────
+const talk = {open: false, pages: [], at: 0, then: null};
+function openTalk(n, pages, {hearts = 0, then = null} = {}) {
+  if (!pages?.length) { then?.(); return; }
+  talk.open = true; talk.pages = pages; talk.at = 0; talk.then = then; audio.play('open');
+  const r = n.r; $('#talkname').textContent = r.name; $('#talkrole').textContent = `${r.race} · ${r.role}`;
+  heartsInto($('#talkhearts'), hearts); blitTo($('#talkface'), npcFrame(n, 'down', 0));
+  talkPage(); $('#talk').classList.add('on'); navFocus($('#talk .next'));
+}
+function talkPage() { $('#talktext').textContent = talk.pages[talk.at]; $('#talk .next').textContent = talk.at < talk.pages.length - 1 ? '继续' : '好'; $('#talkpage').textContent = talk.pages.length > 1 ? `${talk.at + 1} / ${talk.pages.length}` : ''; }
+function talkNext() { if (talk.at < talk.pages.length - 1) { talk.at++; talkPage(); audio.play('tick'); return; } closeTalk(); }
+function closeTalk() { talk.open = false; $('#talk').classList.remove('on'); audio.play('close'); const then = talk.then; talk.then = null; then?.(); }
+$('#talk').addEventListener('pointerdown', e => { e.preventDefault(); talkNext(); });
+/** Ten hearts, n of them full. */
+function heartsInto(el, n) { el.replaceChildren(); for (let k = 0; k < HEARTS_MAX; k++) { const h = document.createElement(k < n ? 'b' : 'i'); h.textContent = k < n ? '♥' : '♡'; el.append(h); } }
+/** A sprite onto a canvas as it is (dark: its shape only, for someone not met yet). */
+function blitTo(cv, s, dark = false) {
+  cv.width = s.w; cv.height = s.h; const c = cv.getContext('2d'), img = c.createImageData(s.w, s.h), out = new Uint32Array(img.data.buffer);
+  for (let i = 0; i < s.px.length; i++) if (s.px[i]) out[i] = dark ? 0xff3a2e28 : s.px[i];
+  c.putImageData(img, 0, 0);
+}
+
+// ── 鲸湾的居民: each at their place for the hour (people.js), walking between places as the clock moves, looking about
+// while they wait; spoken to or given to with use. Not in the way: one walks through them, they through you. ───────
+const PLACE_NAMES = {guild: '向导行会门口', plazaBench: '广场的长椅', board: '布告栏前', stall: '旧货摊', quaySun: '码头边晒太阳', pier: '栈桥上', pierEnd: '栈桥尽头', buyer: '见闻收购行门口', plaza: '中央广场', library: '知识库门口', hall: '社区中心门口', harbor: '港务室前', school: '学堂门口', fountain: '喷泉边'};
+// the door of each house of business, for when its keeper is not at it; and the page of the 见闻录 it is
+const DOORS = {buyer: '见闻收购行。门关着，牌子上写着：七点到六点。', library: '知识库总馆鲸湾分馆。闭馆了，门上贴着开馆时间：八点到七点。', guild: '向导行会。柜台后面只有一只打瞌睡的雪鸮，橘不在。', hall: '社区中心。门口贴着故事之夜的海报，里面飘出粥的香味。'};
+const PLACE_LORE = {buyer: 'buyer', library: 'library', guild: 'guild', hall: 'hall'};
+// a keeper at their place of business: after the talk, the list
+const SHOPS = {stall: ['shuang', () => openShop(true)], buyer: ['shen', openBuyer], library: ['shu', openLibrary]};
+const townFolk = RESIDENTS.map(r => ({id: r.id, r, who: r.key || personFrom(r.look), x: 0, y: 0, dir: 'down', t: 0, moving: false, on: false, want: undefined, place: null, path: null, goal: null, idle: 2 + Math.random() * 4, glance: null, faceT: 0, faceDir: 'down', frames: new Map()}));
+const NPC_SPEED = 40;
+const npcDir = n => n.moving ? n.dir : n.faceT > 0 ? n.faceDir : n.glance?.dir || n.dir;
+const dirTo = (from, to) => Math.abs(to.x - from.x) > Math.abs(to.y - from.y) ? (to.x < from.x ? 'left' : 'right') : (to.y < from.y ? 'up' : 'down');
+function npcFrame(n, dir = npcDir(n), step = n.moving ? [0, 1, 0, 3][Math.floor(n.t * 8) % 4] : 0) {
+  const key = dir + step;
+  if (!n.frames.has(key)) n.frames.set(key, person(n.who, {view: dir === 'down' ? 'front' : dir === 'up' ? 'back' : 'side', step, flip: dir === 'right'}));
+  return n.frames.get(key);
+}
+/** Everyone put where the hour has them (on coming into the city). */
+function townArrive() {
+  const hour = G.hourOf(game), day = game.day;
+  for (const n of townFolk) {
+    const place = placeAt(n.r, hour, day); n.want = place; n.place = place; n.path = null; n.moving = false; n.on = !!place; n.faceT = 0; n.glance = null;
+    if (place) { const [x, y, dir] = TOWN.places[place]; n.x = x; n.y = y; n.dir = dir; }
+  }
+}
+// walking: the city as 8 px cells someone can stand on, and the shortest way between two of them
+const CELL = 8;
+let townGrid = null;
+function gridOf() {
+  if (townGrid?.for === town) return townGrid;
+  const gw = Math.ceil(town.W / CELL), gh = Math.ceil(town.H / CELL), ok = new Uint8Array(gw * gh);
+  for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) ok[gy * gw + gx] = freeOn(town, gx * CELL + CELL / 2, gy * CELL + CELL / 2) ? 1 : 0;
+  return townGrid = {for: town, gw, gh, ok};
+}
+// the standable cell nearest to one (a place behind a counter, or on the quay's edge, is itself not one)
+function nearestOk(g, x, y) {
+  if (g.ok[y * g.gw + x]) return [x, y];
+  let best = null, d0 = Infinity;
+  for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const X = x + dx, Y = y + dy, d = Math.hypot(dx, dy); if (X < 0 || Y < 0 || X >= g.gw || Y >= g.gh || !g.ok[Y * g.gw + X] || d >= d0) continue; d0 = d; best = [X, Y]; }
+  return best;
+}
+function pathTo(from, to) {
+  const g = gridOf(), cell = (x, y) => [Math.max(0, Math.min(g.gw - 1, Math.floor(x / CELL))), Math.max(0, Math.min(g.gh - 1, Math.floor(y / CELL)))];
+  const own = cell(from[0], from[1]), s = nearestOk(g, own[0], own[1]), e = nearestOk(g, ...cell(to[0], to[1]));
+  if (!s || !e) return null;
+  const [sx, sy] = s, [tx, ty] = e, start = sy * g.gw + sx, goal = ty * g.gw + tx;
+  const prev = new Int32Array(g.gw * g.gh).fill(-1), queue = [start]; prev[start] = start;
+  let found = start === goal;
+  for (let q = 0; q < queue.length && !found; q++) {
+    const i = queue[q], x = i % g.gw, y = (i - x) / g.gw;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= g.gw || ny >= g.gh) continue;
+      const j = ny * g.gw + nx; if (prev[j] >= 0 || !g.ok[j]) continue;
+      prev[j] = i; queue.push(j); if (j === goal) { found = true; break; }
+    }
+  }
+  if (!found) return null;
+  const path = [];
+  for (let i = goal; i !== start; i = prev[i]) path.push([(i % g.gw) * CELL + CELL / 2, Math.floor(i / g.gw) * CELL + CELL / 2]);
+  if (sx !== own[0] || sy !== own[1]) path.push([sx * CELL + CELL / 2, sy * CELL + CELL / 2]); // out from behind the counter first
+  path.reverse(); path.push([to[0], to[1]]);
+  return path;
+}
+function townUpdate(dt) {
+  if (!town || S !== town || fade.on) return;
+  const hour = G.hourOf(game), day = game.day;
+  for (const n of townFolk) {
+    const place = placeAt(n.r, hour, day);
+    if (place !== n.want) { // the hour moved them: to the next place, or home and indoors
+      n.want = place;
+      const goal = place ? TOWN.places[place] : TOWN.places[n.r.home];
+      if (!n.on) { if (!place) continue; const [hx, hy] = TOWN.places[n.r.home]; n.x = hx; n.y = hy; n.on = true; }
+      n.goal = goal; n.place = null; n.path = pathTo([n.x, n.y], goal);
+      if (!n.path) { n.x = goal[0]; n.y = goal[1]; n.path = []; } // no way there (never on this map): just there
+    }
+    if (!talk.open) n.faceT = Math.max(0, n.faceT - dt); // facing you while you talk, and a moment after
+    if (n.path) {
+      if (!n.path.length) { n.moving = false; n.t = 0; n.path = null; if (n.want) { n.place = n.want; n.dir = n.goal[2]; } else n.on = false; continue; }
+      const [tx, ty] = n.path[0], dx = tx - n.x, dy = ty - n.y, len = Math.hypot(dx, dy), stepLen = NPC_SPEED * dt;
+      if (len <= stepLen) { n.x = tx; n.y = ty; n.path.shift(); } else { n.x += dx / len * stepLen; n.y += dy / len * stepLen; }
+      n.dir = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down'); n.moving = true; n.t += dt; n.glance = null;
+      continue;
+    }
+    if (!n.on) continue;
+    // waiting: now and then a look to one side
+    n.idle -= dt;
+    if (n.glance && (n.glance.t -= dt) <= 0) n.glance = null;
+    if (n.idle <= 0) { n.idle = 3 + Math.random() * 6; n.glance = {dir: n.dir === 'down' ? (Math.random() < .5 ? 'left' : 'right') : Math.random() < .5 ? 'down' : n.dir, t: 1 + Math.random() * 1.5}; }
+  }
+}
+/** Use in the city with someone in front: a gift (asked first) when a crop, a find or a material is in hand, else a talk. */
+function townUse() {
+  const n = townFolk.find(n => n.on && near([n.x, n.y + 2], 20));
+  if (!n) return false;
+  n.faceDir = dirTo(n, me); n.faceT = 5; n.glance = null;
+  const it = G.held(game), d = it && G.ITEMS[it.id];
+  if (giftable(d)) confirm(`把${d.name}送给${n.r.name}？`, '送给 TA', '只是聊聊').then(yes => yes ? giveTo(n, it.id) : talkTo(n));
+  else talkTo(n);
+  return true;
+}
+function talkTo(n) {
+  const r = G.talk(game, n.id, {hour: G.hourOf(game), season: G.seasonOf(game)}); if (!r) return;
+  if (PLACE_LORE[n.place]) discover(PLACE_LORE[n.place]);
+  const at = SHOPS[n.place], then = at && at[0] === n.id ? at[1] : null;
+  if (r.story) for (let k = 0; k < 5; k++) effects.push({x: n.x + (Math.random() - .5) * 10, y: n.y - 24, vx: (Math.random() - .5) * 10, vy: -14 - Math.random() * 10, life: 1 + k * .15, heart: true, col: [255, 120, 150]});
+  store(); hud();
+  openTalk(n, r.pages, {hearts: r.hearts, then});
+}
+function giveTo(n, id) {
+  const r = G.giveGift(game, n.id, id);
+  if (!r.pages) { say(r.say); return; }
+  if (r.ok) {
+    audio.play(r.reaction === 'dislike' ? 'thud' : r.reaction === 'love' ? 'lore' : 'pet');
+    if (r.reaction === 'love' || r.reaction === 'like') for (let k = 0; k < (r.reaction === 'love' ? 6 : 3); k++) effects.push({x: n.x + (Math.random() - .5) * 10, y: n.y - 24, vx: (Math.random() - .5) * 10, vy: -16 - Math.random() * 12, life: 1 + k * .15, heart: true, col: [255, 120, 150]});
+    store(); hud();
+  }
+  openTalk(n, r.pages, {hearts: r.hearts ?? G.heartsWith(game, n.id)});
+}
+/** The menu's 居民 page: everyone met (and a shape for everyone not), with their hearts, where they are now, what they liked. */
+function peoplePaint() {
+  const box = $('#peoplelist'); box.innerHTML = '';
+  const hour = G.hourOf(game), day = game.day;
+  for (const n of townFolk) {
+    const r = n.r, st = game.people?.[n.id], met = !!st?.met, row = document.createElement('div'); row.className = 'person well' + (met ? '' : ' unknown');
+    const cv = document.createElement('canvas'); blitTo(cv, npcFrame(n, 'down', 0), !met);
+    const text = document.createElement('div'), name = document.createElement('b'), hearts = document.createElement('span'), s1 = document.createElement('small'), s2 = document.createElement('small');
+    hearts.className = 'hearts';
+    if (met) {
+      name.textContent = r.name; heartsInto(hearts, heartsOf(st.points)); s1.textContent = `${r.race} · ${r.role}`;
+      const place = placeAt(r, hour, day), known = Object.entries(st.known || {}), names = list => list.map(([id]) => G.ITEMS[id]?.name).filter(Boolean);
+      const likes = names(known.filter(([, v]) => v === 'love' || v === 'like')), hates = names(known.filter(([, v]) => v === 'dislike'));
+      s2.textContent = [place ? '现在在' + PLACE_NAMES[place] : inTownOn(r, day) ? '现在不在外面' : '今天不在鲸湾', likes.length ? '喜欢：' + likes.join('、') : '', hates.length ? '不喜欢：' + hates.join('、') : ''].filter(Boolean).join(' · ');
+    } else { name.textContent = '？？？'; s1.textContent = '还没遇见'; s2.textContent = '常在' + PLACE_NAMES[r.schedule[0][2]] + '附近'; }
+    text.append(name, hearts, s1, s2); row.append(cv, text); box.append(row);
+  }
+  $('#peopleinfo').textContent = `认识了 ${Object.values(game.people || {}).filter(p => p.met).length} / ${townFolk.length} 人。面对 TA 按使用聊天，每天第一次聊涨好感；拿着作物、采集物或材料按使用可以送礼，每人每天一件。`;
+}
 
 // ── 捏人: who you are, and who comes along. Each row steps through its choices (◀ ▶, left / right on keys and pads);
 // the preview turns and walks. Opened at the start of a new life, and again from 设置 to change clothes. ─────────
@@ -634,7 +842,7 @@ $('#cdone').addEventListener('pointerdown', e => { e.preventDefault(); closeCrea
 
 // ── the menu: the bag, settings, how to play ───────────────────────────────────────────────────────────────────────
 const menu = {open: false};
-const PANES = ['bag', 'lore', 'craft', 'map', 'settings', 'help'];
+const PANES = ['bag', 'lore', 'people', 'craft', 'map', 'settings', 'help'];
 function openMenu(pane) {
   if (activePanel() || fade.on) return;
   menu.open = true; bag.picked = -1; bagPaint(); craftPaint(); purse(); $('#menu').classList.add('on'); audio.play('open');
@@ -646,6 +854,7 @@ function showPane(name) {
   for (const el of document.querySelectorAll('#menu [data-pane]')) el.classList.toggle('on', el.dataset.pane === name);
   if (name === 'map') requestAnimationFrame(mapPaint);
   if (name === 'lore') lorePaint();
+  if (name === 'people') peoplePaint();
   if (nav.el?.closest('#menu .tabs')) navFocus($('#menu .tabs .on')); // the ring follows the tab
 }
 function menuTab(d) { const now = PANES.indexOf($('#menu .tabs .on').dataset.pane); showPane(PANES[(now + d + PANES.length) % PANES.length]); }
@@ -730,6 +939,7 @@ $('#menuBtn').addEventListener('pointerdown', e => { e.preventDefault(); menu.op
 $('#menu .close').addEventListener('pointerdown', e => { e.preventDefault(); closeMenu(); });
 
 // ── moving ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+const freeOn = (M, x, y) => { for (let j = -3; j < 0; j++) for (let i = -4; i < 4; i++) { const X = Math.round(x + i), Y = Math.round(y + j); if (X < 0 || Y < 0 || X >= M.W || Y >= M.H || M.solid[Y * M.W + X]) return false; } return true; };
 const free = (x, y) => { for (let j = -3; j < 0; j++) for (let i = -4; i < 4; i++) { const X = Math.round(x + i), Y = Math.round(y + j); if (X < 0 || Y < 0 || X >= W || Y >= H || S.solid[Y * W + X] || blocked(Y * W + X)) return false; } return true; };
 let lastSaved = 0;
 function update(dt) {
@@ -756,6 +966,8 @@ function update(dt) {
     else if (scene === 'house' && me.y > S.exitY) go('farm');
     else if (scene === 'farm' && me.dir === 'right' && me.x > FARM_W - 9) go('shore', 'west');
     else if (scene === 'shore' && me.dir === 'left' && me.x < 9) go('farm', 'east');
+    else if (scene === 'farm' && me.dir === 'left' && me.x < 9) go('town', 'east');
+    else if (scene === 'town' && me.dir === 'right' && me.x > W - 9) go('farm', 'west');
   } else me.t = 0;
   const heldType = G.ITEMS[G.held(game)?.id]?.type, groundTool = scene === 'farm' && ['tool', 'seed', 'place'].includes(heldType);
   cursor.still = me.moving ? 0 : cursor.still + dt;
@@ -768,6 +980,7 @@ function update(dt) {
   dropsUpdate(dt);
   if (scene === 'shore') { tideUpdate(dt); crittersUpdate(dt); }
   else if (scene === 'farm') farmCrittersWatch();
+  else if (scene === 'town') townUpdate(dt);
   for (let i = effects.length - 1; i >= 0; i--) if (effects[i].life <= 0) effects.splice(i, 1);
 }
 
@@ -1023,6 +1236,7 @@ function draw(t) {
   if (scene === 'farm') for (const d of game.drops || []) sprites.push({foot: Math.round(d.y), drop: d});
   if (scene === 'shore') for (const o of game.beach?.items || []) if (!underWater(o)) sprites.push({foot: o.y, drop: {id: o.id, x: o.x, y: o.y, z: 0, age: 1, still: true}});
   for (const f of flyers) sprites.push({foot: 1e6, drop: f});
+  if (scene === 'town') for (const n of townFolk) if (n.on && n.x > cx - 24 && n.x < cx + VW + 24 && n.y > cy - 8 && n.y < cy + VH + 40) sprites.push({foot: Math.round(n.y), npc: n});
   if (game.pet) sprites.push({foot: Math.round(pet.y), pet: true});
   if (game.pet && scene === 'farm') { const b = bowlOf(); sprites.push({foot: BOWL[1], plant: b}); }
   sprites.sort((a, b) => a.foot - b.foot);
@@ -1034,6 +1248,7 @@ function draw(t) {
     }
     else if (s.drop) drawDrop(s.drop, cx, cy);
     else if (s.pet) drawActor(petFrame(), pet.x, pet.y, pet.hop > 0 ? Math.round(Math.sin(pet.hop / .35 * Math.PI) * 3) : 0, cx, cy, shadowK);
+    else if (s.npc) drawActor(npcFrame(s.npc), s.npc.x, s.npc.y, 0, cx, cy, shadowK);
     else drawMe(cx, cy, shadowK);
   }
   // where the tool will land: four soft corners, shown only when you stop with a tool for the ground (or point with the mouse)
@@ -1098,7 +1313,7 @@ function tracks() {
   if (k !== 1 && k !== 3) return; // a foot comes down
   if (!S.mat) { audio.play('step', 'wood'); return; } // indoors: floorboards
   const across = me.dir === 'up' || me.dir === 'down', x = Math.round(me.x + (across ? (k === 1 ? -2 : 1) : 0)), y = Math.round(me.y - 1 + (across ? 0 : k === 1 ? -1 : 0)), m = S.mat[y * W + x];
-  audio.play('step', m === 5 ? 'sand' : m === 11 ? 'wet' : m === 10 ? 'wood' : m === 2 || m === 3 ? 'path' : 'grass');
+  audio.play('step', m === 5 ? 'sand' : m === 11 ? 'wet' : m === 10 ? 'wood' : m === 2 || m === 3 || m === 17 ? 'path' : 'grass');
   if (m === 5 || m === 11 || (m === 1 && litSeason === 3)) { prints.push({scene, x, y, across, m, at: performance.now()}); if (prints.length > 180) prints.shift(); }
   if ((m === 2 || m === 5) && litSeason !== 3) for (let n = 0; n < 3; n++) effects.push({x: x + (Math.random() - .5) * 5, y: y - Math.random() * 2, vx: (Math.random() - .5) * 12 + (me.dir === 'left' ? 8 : me.dir === 'right' ? -8 : 0), vy: -5 - Math.random() * 7, life: .3 + Math.random() * .25, col: m === 5 ? [232, 214, 172] : [172, 140, 100], dust: true});
 }
@@ -1573,7 +1788,7 @@ function mapPaint() {
   c.fillStyle = '#2a1a12'; c.beginPath(); c.arc(hx, hy - 9 * dpr + b, 5.5 * dpr, 0, Math.PI * 2); c.fill(); c.beginPath(); c.moveTo(hx - 4 * dpr, hy - 7 * dpr + b); c.lineTo(hx, hy + b); c.lineTo(hx + 4 * dpr, hy - 7 * dpr + b); c.fill();
   c.fillStyle = '#e2404f'; c.beginPath(); c.arc(hx, hy - 9 * dpr + b, 4 * dpr, 0, Math.PI * 2); c.fill(); c.fillStyle = '#ffd2d6'; c.fillRect(hx - 2 * dpr, hy - 11 * dpr + b, 1.5 * dpr, 1.5 * dpr);
   const p = mapView.pick;
-  $('#mapinfo').textContent = p ? `${p.name} · ${KINDS[p.kind]?.label || ''}${MAP.REGION_NAMES[p.region] ? ' · ' + MAP.REGION_NAMES[p.region] : ''}` : '你在这里：鲸湾郊外的农场（沿海环带 · 鲸湾城外）';
+  $('#mapinfo').textContent = p ? `${p.name} · ${KINDS[p.kind]?.label || ''}${MAP.REGION_NAMES[p.region] ? ' · ' + MAP.REGION_NAMES[p.region] : ''}` : scene === 'town' ? '你在这里：鲸湾城（沿海环带）' : '你在这里：鲸湾郊外的农场（沿海环带 · 鲸湾城外）';
 }
 const mapScale = () => { const r = $('#worldmap').getBoundingClientRect(); return mapView.z * Math.min(r.width, r.height) / MAP.SIZE; };
 const clampView = () => { mapView.x = Math.max(0, Math.min(MAP.SIZE, mapView.x)); mapView.y = Math.max(0, Math.min(MAP.SIZE, mapView.y)); };

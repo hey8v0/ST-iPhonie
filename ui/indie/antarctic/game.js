@@ -2,6 +2,8 @@
 // of slots, the first ten in hand), what lies about the farm (weeds, twigs, stones, stumps, young trees, things to
 // forage, things one has made and set down), what each tool does, what can be made. No drawing here; play.js shows it.
 // Saved in the browser as it changes.
+import {residentOf, heartsOf, reactionTo, wordsFor, giftWords, giftable, POINTS} from './people.js';
+
 export const SEASONS = ['春', '夏', '秋', '冬'], WEEK = ['一', '二', '三', '四', '五', '六', '日'], DAYS_PER_SEASON = 28;
 export const DAY_START = 6 * 60, DAY_END = 26 * 60; // 6:00 to 2:00 the next morning
 export const MINUTES_PER_SECOND = 1.4;
@@ -75,18 +77,20 @@ export function newGame(field) {
   for (let tx = field.x0; tx < field.x0 + 6; tx++) for (const [ty, kind] of [[field.y0, 'turnip'], [field.y0 + 1, 'berry']]) if (tiles[tx + ',' + ty]) tiles[tx + ',' + ty].crop = {kind, stage: 1, grow: 0};
   const inv = emptyBag();
   [['hoe', 1], ['can', 1], ['axe', 1], ['pick', 1], ['seed:turnip', 12], ['seed:berry', 6]].forEach(([id, n], i) => { inv[i] = {id, n}; });
-  return {day: 1, minutes: DAY_START, money: 200, shipped: {}, income: 0, tiles, things: null, inv, water: CAN, selected: 0, version: 2};
+  return {day: 1, minutes: DAY_START, money: 200, shipped: {}, income: 0, tiles, things: null, inv, water: CAN, selected: 0, people: {}, sold: {}, donated: {}, version: 3};
 }
 /** A save as read (any version so far) brought up to today's, or null when it is not one. */
 export function upgrade(s) {
   if (!s || typeof s !== 'object' || !Number.isFinite(s.day)) return null;
-  if (s.version === 2) return s;
+  if (s.version === 3) return s;
+  // 0.9.41: the city — how well one knows each resident, what was sold to the 见闻收购行, what the 知识库 was given
+  if (s.version === 2) { Object.assign(s, {people: s.people || {}, sold: s.sold || {}, donated: s.donated || {}, version: 3}); return s; }
   if (s.version === 1) { // the old bag (tools in a fixed row, seeds and harvest counted apart) becomes slots
     const inv = emptyBag(), put = [['hoe', 1], ['can', 1], ['axe', 1], ['pick', 1], ...Object.entries(s.seeds || {}).filter(([, n]) => n).map(([k, n]) => ['seed:' + k, n]), ...Object.entries(s.bag || {}).filter(([, n]) => n)];
     put.forEach(([id, n], i) => { if (i < BAG) inv[i] = {id, n}; });
     const shipped = s.shipped || {};
     Object.assign(s, {inv, selected: 0, things: null, shipped, version: 2}); delete s.seeds; delete s.bag;
-    return s;
+    return upgrade(s);
   }
   return null;
 }
@@ -377,3 +381,61 @@ export function act(s, tx, ty, ctx) {
   return {say: ''};
 }
 export const canSize = CAN;
+
+// ── 鲸湾的居民 (0.9.41): knowing them, talking, giving ──
+/** How one stands with a resident, kept on the save: points (hearts = points / 250), when met, talked, given to, the
+ *  heart stories told, the gifts tried (what they thought). */
+export function personState(s, id) {
+  s.people ??= {};
+  return s.people[id] ??= {points: 0, met: 0, talked: 0, gift: 0, told: {}, known: {}};
+}
+export const heartsWith = (s, id) => heartsOf(s.people?.[id]?.points);
+/** Spoken to: what they say now (people.js wordsFor), the first talk of a day worth points; a heart story told once. */
+export function talk(s, id, {hour = 12, season = 0} = {}) {
+  const r = residentOf(id); if (!r) return null;
+  const st = personState(s, id), first = !st.met, again = st.talked === s.day;
+  const got = wordsFor(r, st, {hour, season, day: s.day});
+  if (first) st.met = s.day;
+  if (!again) { st.talked = s.day; st.points = Math.min(HEARTS_TOP, st.points + POINTS.talk); }
+  if (got.story) st.told[got.story] = true;
+  return {pages: got.pages, story: got.story, first, again, hearts: heartsOf(st.points), name: r.name};
+}
+const HEARTS_TOP = 2500;
+/**
+ * The held item given to a resident (one of the stack): how they take it (love / like / neutral / dislike), the points
+ * for it, their words; once a day each. {ok, reaction, pages, hearts, say}.
+ */
+export function giveGift(s, id, itemId) {
+  const r = residentOf(id), d = ITEMS[itemId];
+  if (!r) return {ok: false, say: '没有这个人'};
+  if (!giftable(d)) return {ok: false, say: `${d?.name || '这个'}送不出去`};
+  const st = personState(s, id);
+  if (st.gift === s.day) return {ok: false, say: giftWords(r, 'again'), pages: [giftWords(r, 'again')], name: r.name};
+  if (!take(s, itemId, 1)) return {ok: false, say: `背包里没有${d.name}`};
+  const reaction = reactionTo(r, itemId);
+  st.gift = s.day; st.met ||= s.day; st.known[itemId] = reaction;
+  st.points = Math.max(0, Math.min(HEARTS_TOP, st.points + POINTS[reaction]));
+  return {ok: true, reaction, pages: [giftWords(r, reaction)], hearts: heartsOf(st.points), name: r.name, say: `送给了${r.name}：${d.name}`};
+}
+/** What the 见闻收购行 pays for a page of the 见闻录, by its kind; sold once each. */
+export const LORE_PRICES = {地点: 120, 地标: 150, 生物: 100, 采集: 60};
+export function sellLore(s, id, kind) {
+  s.sold ??= {};
+  if (s.sold[id]) return {ok: false, say: '这一条已经卖过了'};
+  const price = LORE_PRICES[kind] || 60;
+  s.sold[id] = s.day; s.money += price;
+  return {ok: true, price, say: `见闻收购行收下了这一条，付了 ${price}`};
+}
+/** One of a kind given to the 知识库: kept in its collection (once each); every five kinds a thank-you in money. */
+export const DONATE_REWARDS = {5: 200, 10: 500, 15: 1000, 20: 2000};
+export function donate(s, itemId) {
+  const d = ITEMS[itemId];
+  if (!d || !['crop', 'forage'].includes(d.type)) return {ok: false, say: `${d?.name || '这个'}知识库不收`};
+  s.donated ??= {};
+  if (s.donated[itemId]) return {ok: false, say: `${d.name}馆里已经有了`};
+  if (!take(s, itemId, 1)) return {ok: false, say: `背包里没有${d.name}`};
+  s.donated[itemId] = s.day;
+  const n = Object.keys(s.donated).length, reward = DONATE_REWARDS[n] || 0;
+  if (reward) s.money += reward;
+  return {ok: true, count: n, reward, say: reward ? `知识库收下了${d.name}（第 ${n} 件）——谢礼 ${reward}` : `知识库收下了${d.name}（第 ${n} 件）`};
+}

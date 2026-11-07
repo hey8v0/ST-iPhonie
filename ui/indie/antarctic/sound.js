@@ -99,21 +99,21 @@ function cricket() { const pan = rnd(-.9, .9), f = rnd(4100, 4600); for (let k =
 function gullCry() { const pan = rnd(-.7, .7); for (let k = 0; k < 2; k++) tone({type: 'sawtooth', f: 1450, f2: 880, t: k * .26, dur: .22, gain: .016, filter: ['bandpass', 1600], q: 2, pan, bus: ambBus}); }
 function crackle() { for (let k = 0, n = 1 + Math.floor(Math.random() * 3); k < n; k++) hiss({t: k * rnd(.02, .06), dur: .012, gain: rnd(.04, .09), type: 'highpass', f: 2200, q: .7, attack: .001, bus: ambBus}); }
 /**
- * Each frame, where one is: {scene: farm | shore | house | attic, hour, season (0 春 … 3 冬), fall: 0–1 how near the
+ * Each frame, where one is: {scene: farm | shore | town | house | attic, hour, season (0 春 … 3 冬), fall: 0–1 how near the
  * waterfall is, fire: the hearth burning nearby}.
  */
 export function ambient(w) {
   if (!ctx || ctx.state !== 'running') return;
-  const t = ctx.currentTime, outdoor = w.scene === 'farm' || w.scene === 'shore', day = w.hour >= 5.5 && w.hour < 19.5;
+  const t = ctx.currentTime, outdoor = w.scene === 'farm' || w.scene === 'shore' || w.scene === 'town', day = w.hour >= 5.5 && w.hour < 19.5;
   const wind = bed('wind', 'lowpass', 520, .6), waves = bed('waves', 'lowpass', 720, .5), fall = bed('fall', 'bandpass', 1400, .4), fire = bed('fire', 'lowpass', 900, .7);
   level(wind, outdoor ? (w.season === 3 ? .07 : .022) * (.7 + .3 * Math.sin(t * .23)) : .005);
   const swell = .5 + .5 * Math.sin(t * 2 * Math.PI / 7.5); // a wave breaks every few seconds
-  level(waves, w.scene === 'shore' ? .045 + .12 * swell * swell : w.scene === 'farm' ? .012 : 0, .4);
+  level(waves, w.scene === 'shore' ? .045 + .12 * swell * swell : w.scene === 'town' ? .02 + .03 * swell * swell : w.scene === 'farm' ? .012 : 0, .4);
   level(fall, w.scene === 'farm' ? .17 * (w.fall || 0) : 0, .3);
   level(fire, w.fire ? .03 : 0, .5);
   const due = (name, gap) => { if ((amb.next[name] ??= t + gap * Math.random()) > t) return false; amb.next[name] = t + gap * rnd(.5, 1.5); return true; };
   if (outdoor && day && w.season !== 3 && due('bird', 2.8)) birdCall();
   if (outdoor && !day && (w.season === 0 || w.season === 1) && due('cricket', .8)) cricket();
-  if (w.scene === 'shore' && day && due('gull', 9)) gullCry();
+  if ((w.scene === 'shore' || w.scene === 'town') && day && due('gull', w.scene === 'shore' ? 9 : 20)) gullCry();
   if (w.fire && due('crackle', .32)) crackle();
 }

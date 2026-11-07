@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<title>南极结界 · 鲸湾郊外</title>
+<title>南极结界 · 鲸湾</title>
 <style>
   /* One "pixel" of the interface, so frames and text grow with the screen like the picture does. */
   :root {
@@ -165,6 +165,23 @@
   #loregrid .card.unknown { color: var(--ink2); }
   #loregrid .card.on { box-shadow: inset 0 0 0 calc(var(--px) * .8) var(--red); }
   .toast.lore { background: linear-gradient(180deg, #fff6d8, #f2dca0); }
+  /* who lives in the city, and talking to them */
+  .person { display: grid; grid-template-columns: auto 1fr; gap: calc(var(--px) * 3); align-items: center; padding: calc(var(--px) * 2) calc(var(--px) * 3); margin-bottom: calc(var(--px) * 1.5); }
+  .person canvas { width: calc(var(--px) * 16); image-rendering: pixelated; }
+  .person b { font-size: calc(var(--px) * 4.6); margin-right: calc(var(--px) * 2); }
+  .person small { display: block; font-size: calc(var(--px) * 3.5); color: var(--ink2); }
+  .person.unknown { opacity: .75; }
+  .hearts { color: #e2404f; letter-spacing: calc(var(--px) * .3); font-size: calc(var(--px) * 4); white-space: nowrap; }
+  .hearts i { font-style: normal; opacity: .4; }
+  .item .loreart { width: calc(var(--px) * 20); height: calc(var(--px) * 15); image-rendering: pixelated; }
+  #talk { width: min(calc(var(--px) * 150), 92vw); z-index: 5; top: auto; bottom: calc(var(--px) * 36); transform: translateX(-50%); }
+  #talk.on { animation: rise .18s ease-out; }
+  @keyframes rise { from { transform: translate(-50%, 6%); opacity: 0; } }
+  .who { display: flex; gap: calc(var(--px) * 3); align-items: center; margin-bottom: calc(var(--px) * 2); }
+  .who canvas { width: calc(var(--px) * 20); image-rendering: pixelated; background: #e3c387; border-radius: calc(var(--px) * 1.5); padding: calc(var(--px) * 1.5) calc(var(--px) * 3); box-sizing: content-box; }
+  .who b { font-size: calc(var(--px) * 5); margin-right: calc(var(--px) * 2); } .who small { display: block; color: var(--ink2); font-size: calc(var(--px) * 3.5); }
+  #talktext { margin: 0 0 calc(var(--px) * 2); font-weight: 700; font-size: calc(var(--px) * 4.6); line-height: 1.6; min-height: 2.4em; }
+  #talk .foot { margin-top: 0; }
   /* a question */
   #ask { width: min(calc(var(--px) * 110), 86vw); text-align: center; z-index: 5; }
   #ask p { margin: calc(var(--px) * 2) 0 calc(var(--px) * 4); font-weight: 700; font-size: calc(var(--px) * 4.8); }
@@ -198,9 +215,10 @@
   <div class="foot"><span class="purse well"></span><button class="close wood">关上（Esc）</button></div>
 </div>
 <div id="menu" class="frame panel">
-  <div class="tabs"><button class="wood on" data-pane="bag">背包</button><button class="wood" data-pane="lore">见闻</button><button class="wood" data-pane="craft">制作</button><button class="wood" data-pane="map">地图</button><button class="wood" data-pane="settings">设置</button><button class="wood" data-pane="help">玩法</button></div>
+  <div class="tabs"><button class="wood on" data-pane="bag">背包</button><button class="wood" data-pane="lore">见闻</button><button class="wood" data-pane="people">居民</button><button class="wood" data-pane="craft">制作</button><button class="wood" data-pane="map">地图</button><button class="wood" data-pane="settings">设置</button><button class="wood" data-pane="help">玩法</button></div>
   <div class="pane on" data-pane="bag"><div id="petline"></div><div class="grid inv" id="invgrid"></div><div id="iteminfo" class="info"></div></div>
   <div class="pane" data-pane="lore"><div class="lorehead"><b id="lorecount"></b><span id="lorecats"></span></div><div id="loregrid"></div><div id="loreinfo" class="info"></div></div>
+  <div class="pane" data-pane="people"><div id="peoplelist"></div><div id="peopleinfo" class="info"></div></div>
   <div class="pane" data-pane="craft"><p class="sub">用背包里的材料做东西；做好后拿在手上，对着地面按使用就能放下。</p><div id="recipes"></div></div>
   <div class="pane" data-pane="map">
     <div class="mapbox well"><canvas id="worldmap"></canvas><div class="zoom"><button class="wood" data-z="1">＋</button><button class="wood" data-z="-1">－</button><button class="wood" data-z="home">◎</button></div></div>
@@ -224,6 +242,7 @@
     <div>收获后放进<b>出货箱</b>（手里拿着什么就放什么；拿着工具就把收获和采集物全放进去），第二天早上结算；在<b>信箱</b>邮购当季种子。</div>
     <div><b>清理农场</b>：杂草用什么都能拔（得纤维），树枝和树用斧头（得木头、松果），石头用镐（得石头）。每晚会再长出一些。地上的野菜、浆果、贝壳按使用就能捡。</div>
     <div><b>探索</b>：农场东边的小路通往东海岸。潮水一天涨落两次，退潮时才走得到潮滩、礁石和小岛。靠近生物或地标按使用来观察，会记进菜单里的「见闻」。沙滩和潮滩上每天都有潮水冲上来的东西（贝壳、海玻璃、海带、漂流木，偶尔有海螺），按使用捡起来；潮滩上的要等退潮才露出来。</div>
+    <div><b>鲸湾城</b>：农场西边的路进城。居民各有作息，面对 TA 按使用聊天（每天第一次聊涨好感，好感到一定程度会说心里话）；手里拿着作物、采集物或材料时按使用会问要不要送出去（每人每天一件，喜好各不同，送错了会掉好感）。见闻录里记下的页可以卖给<b>见闻收购行</b>，作物和采集物每种一件可以捐给<b>知识库</b>；霜的旧货摊白天卖当季种子。菜单里的「居民」页记着认识了谁。</div>
     <div><b>制作</b>：菜单里的「制作」页，用木头、石头、纤维做木箱、洒水器、石板路、栅栏、篝火；拿在手上对着地面按使用放下，用镐或斧头收回来。</div>
     <div>走进家门回屋；梯子通到<b>阁楼</b>，在床边按使用睡觉。凌晨两点还没睡会累倒，醒来已经在床上。</div>
   </div>
@@ -244,9 +263,14 @@
   <div class="grid inv" id="chestbag"></div>
   <div class="foot"><span id="chestinfo" class="info"></span><button class="close wood">关上（Esc）</button></div>
 </div>
+<div id="talk" class="frame panel">
+  <div class="who"><canvas id="talkface" width="16" height="28"></canvas><div><b id="talkname"></b><span id="talkhearts" class="hearts"></span><small id="talkrole"></small></div></div>
+  <p id="talktext"></p>
+  <div class="foot"><span id="talkpage" class="sub"></span><button class="wood next">继续</button></div>
+</div>
 <div id="ask" class="frame panel"><p></p><div class="foot"><button class="wood yes"></button><button class="wood no"></button></div></div>
 <div id="fade"></div>
-<div id="loading"><div class="frame">正在准备鲸湾郊外……</div></div>
+<div id="loading"><div class="frame">正在准备鲸湾……</div></div>
 <script type="module" src="./play.js"></script>
 </body>
 </html>

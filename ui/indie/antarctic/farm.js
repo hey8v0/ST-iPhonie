@@ -1,6 +1,7 @@
 // 南极结界 · 鲸湾郊外的农场: the first map. Terrain is painted per pixel from a tile map (16 px); things are objects of
 // their own (assets.js) with normals and 3D shapes; light.js lights it all for the hour: sun from the camera's side
 // (north, over the sea), shadows of the shapes falling away, lamps that light what faces them, bloom, reflections.
+import {TOWN} from './town.js';
 import {sprite} from './slim.js';
 import {pillow, insideDistance, sunAt, shadowSteps, shade} from './light.js';
 import {oak, pine, bush, rock, stump, fencePost, fenceRail, lamp, mailbox, barrel, crate, crop, flowerbed, house, beam, pile, lowPost, lowRail, woodpile, shippingBin, setSeason} from './assets.js';
@@ -53,7 +54,7 @@ const MAP = [
   'gggggggggggpppgggggfffffffffffffffggggggggggggwwwgggggggggg',
   'gggggggggggpppgggggfffffffffffffffgggggggggggwwwggggggggggg',
   'gggggggggggpppggggggggggggggggggggggggggggggwwwgggggggggggg',
-  'gggggggggggpppppppppppppppppppppppppppppppppbbbbbpppppppppppp',
+  'pppppppppppppppppppppppppppppppppppppppppppppbbbbbpppppppppppp',
   'gggggggggggggggggggggggpppgggggggggggggggggggwwwggggggggggg',
   'ggggggggggggggggggggggggpppgggggggggggggggggggwwwgggggggggg',
   'gggggggggggggggggggggggggpppgggggggggggggggggggwwwggggggggg',
@@ -284,9 +285,6 @@ function placeObjects(without = []) {
   for (let y = fy0 + 16; y < fy1; y += 16) { put(post, fx0, y + 1, {block: [8, 16]}); put(post, fx1, y + 1, {block: [8, 16]}); }
   for (let x = fx0; x < fx1; x += 16) { put(rail, x + 8, fy0 - 1, {flat: true, block: [16, 4]}); if (Math.abs(x + 8 - gate) > 16) put(rail, x + 8, fy1 - 1, {flat: true, block: [16, 4]}); }
   put(person('hero'), 25.4 * T, 19.8 * T, {person: 'hero', block: [8, 4]});
-  put(person('fox'), 20.4 * T, 24.9 * T, {person: 'fox', block: [8, 4]});
-  put(person('frost', {view: 'side'}), 46.4 * T, 24.9 * T, {person: 'frost', block: [8, 4]});
-  put(person('water'), 52.8 * T, 14.4 * T, {person: 'water', block: [8, 4]});
   return list.sort((a, b) => a.foot - b.foot);
 }
 // Lamps of the night: the lamp posts, the lantern by the door, light from the windows and the attic.
@@ -336,6 +334,7 @@ function winter(F, N, mat, WD, owner, bare, W, H) {
 export const MAPS = {
   farm: {W, H, terrain: () => terrain(), objects: without => placeObjects(without), fall: [44 * T + 2, 4 * T - 4, 47 * T - 2, 7 * T + 6], river: 4 * T},
   shore: SHORE,
+  town: TOWN,
 };
 export function prepare({map = 'farm', without = [], season = 0} = {}) {
   setSeason(season); seasonPalette(season);
