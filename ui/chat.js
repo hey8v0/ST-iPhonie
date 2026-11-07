@@ -1784,6 +1784,9 @@ export function chatApp(ctx) {
   async function longImage() {
     const rows = [...v.root.querySelectorAll('.msgs > .msg[data-picked]')];
     if (!rows.length) return;
+    // Drawing the picture holds the page for a few seconds on a phone: said first, and the note gets a frame to show.
+    ctx.notify(`正在拼 ${rows.length} 条消息的长图……`);
+    await new Promise(resolve => ctx.win.requestAnimationFrame(() => ctx.win.setTimeout(resolve, 0)));
     const blob = await chatLongImage(ctx.doc, {thread: v.root.querySelector('.chat-thread'), rows, title: chatTitle(thread)});
     selecting = null;
     render();

@@ -187,6 +187,9 @@ export function soundsApp(ctx) {
     if (!['enabled', 'vary', 'tapOnly', 'generate', 'versions', 'pack'].includes(key)) return;
     api.saveSounds({[key]: key === 'versions' ? Number(value) : value});
     if (key === 'enabled' && value) ctx.notify('音效开了：之后的回复里会有氛围音和音效');
+    // A switch that changes nothing else on the page leaves it as it is (0.9.39: drawing the hundreds of names again
+    // for one switch stuttered on phones); 正文音效, ElevenLabs and the pack show or hide their own rows.
+    if (['vary', 'tapOnly', 'versions'].includes(key)) return;
     await render();
   });
   // Finding a sound: the names that do not match are hidden in place (the box keeps its focus).
@@ -218,6 +221,6 @@ export function soundsApp(ctx) {
   const off = api.subscribe?.(event => { if ((event.type === 'sounds' || event.type === 'sound-state') && ctx.visible('sounds')) render(); });
   const dispose = v.dispose;
   v.dispose = () => { off?.(); dispose(); };
-  render().catch(error => ctx.notify(error.message));
+  render().catch(error => ctx.notify(error.message, {error: true}));
   return v;
 }

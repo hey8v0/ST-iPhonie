@@ -55,6 +55,10 @@ export function photoWall({api, win, tile}) {
     where = draft?.where || new Map();
     draft = null;
     for (const el of root.querySelectorAll('[data-piece]')) if (pieces[el.dataset.piece]) pieces[el.dataset.piece].el = el;
+    // A draft the page never drew (the grid was made for a page that turned out the same as before, or a page without
+    // a grid came instead): its pieces have no element and are not on the page (0.9.39: they threw on the second visit).
+    pieces = pieces.filter(piece => piece.el);
+    for (const [id, piece] of where) if (!piece.el) where.delete(id);
     if (win.IntersectionObserver) {
       // Hidden behind another app, everything counts as off the screen, and stays as it is for coming back.
       watcher = new win.IntersectionObserver(entries => { if (scroller.clientHeight) for (const e of entries) { const piece = pieces[e.target.dataset.piece]; if (piece) (e.isIntersecting ? fill : empty)(piece); } }, {root, rootMargin: `${NEAR}px 0px`});

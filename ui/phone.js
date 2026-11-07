@@ -123,8 +123,17 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const move = toastMove;
     move.finished.then(() => { if (toastMove !== move) return; el.hidden = true; move.cancel(); toastMove = null; }, () => {});
   }
-  function notify(text, {error = false, tap = null} = {}) {
+  // A message from the JavaScript engine itself (a slip in the phone's code, never anything the player did): said in
+  // words, with the engine's own line kept in the 日志 App, where a tap on the note goes (0.9.39).
+  const INTERNAL = /^(?:[A-Z]\w*Error: )?(?:Cannot (?:read|set|access|convert|destructure|redefine|assign)|[\w.$[\]'"]+ is not (?:a function|defined|iterable|a constructor|an object)|(?:undefined|null) is not|Unexpected (?:token|end|identifier)|Maximum call stack|Failed to execute|Invalid (?:array length|regular expression)|Illegal invocation|Assignment to constant|The (?:provided|object))/;
+  const internalLike = text => typeof text === 'string' && !/[㐀-鿿]/.test(text) && INTERNAL.test(text.trim());
+  const INTERNAL_NOTE = '小手机这里出了点问题，原话记在「日志」App 里了，点一下去看';
+  function notify(text, {error = false, tap = null, logged = false} = {}) {
     if (disposed) return;
+    if (internalLike(text)) {
+      if (!logged) api.reportDiagnostic?.('小手机界面', {message: text});
+      text = INTERNAL_NOTE; tap = () => open('logs'); error = true;
+    }
     if (error) api.noteError?.(text || '操作未完成');
     const el = $('.toast');
     el.innerHTML = `<span class="toast-text">${esc(text || '操作未完成')}</span>${error ? `<button type="button" class="toast-close" data-toast-close aria-label="关闭提示">${icon('close')}</button>` : ''}`;
@@ -150,7 +159,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const fail = error => {
     api.reportDiagnostic?.('小手机界面', error);
     if (error?.code === 'STORAGE_LOST') { const now = Date.now(); if (now - lostAt < 20000) return; lostAt = now; }
-    notify(error?.message, {error: true});
+    notify(error?.message, {error: true, logged: true});
   };
   /** Something brought up to date behind what the user is doing: its failing goes in the log, not over what they just did (a 画风 that saved fine). */
   const quietly = fn => { try { const result = fn(); result?.catch?.(error => api.reportDiagnostic?.('小手机界面', error)); } catch (error) { api.reportDiagnostic?.('小手机界面', error); } };

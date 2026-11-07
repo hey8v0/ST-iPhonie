@@ -141,7 +141,7 @@ export function rolesApp(ctx) {
             else if (key === 'delete' && await ctx.confirm(`删除组「${entry.group.name}」？`, `里面的 ${entry.styles.length} 个角色和他们的音色设置会一起删掉。只想拆开组，用「解散」。`)) dropRoles(entry.styles);
             return;
           }
-          const role = api.getState().routes.find(r => r.id === id);
+          const role = (api.readState?.() || api.getState()).routes.find(r => r.id === id);
           if (!role) return;
           if (key === 'edit') edit(id);
           else if (key === 'audition') api.audition(role);
@@ -164,7 +164,7 @@ export function rolesApp(ctx) {
   }
   /** Picked roles that are one person (the same name written two ways): the one with a voice stays. */
   async function mergeRoles(ids) {
-    const roles = ids.map(id => api.getState().routes.find(r => r.id === id)).filter(Boolean);
+    const all = (api.readState?.() || api.getState()).routes, roles = ids.map(id => all.find(r => r.id === id)).filter(Boolean);
     if (roles.length < 2) { ctx.notify('至少选两个角色才能合并'); return; }
     const keep = roles.find(r => r.voice) || roles[0], others = roles.filter(r => r !== keep);
     if (!await ctx.confirm(`合并成「${keep.name}」？`, `${others.map(r => r.name).join('、')} 会变成这个角色的别名，以后都用同一个音色。没写的外貌和资料从被合并的人那里补上。`)) return;
@@ -176,7 +176,7 @@ export function rolesApp(ctx) {
   }
   /** 挑音色 for the picked roles that have none, one after another. */
   async function pickVoices(ids) {
-    const roles = ids.map(id => api.getState().routes.find(r => r.id === id)).filter(r => r && !r.voice);
+    const all = (api.readState?.() || api.getState()).routes, roles = ids.map(id => all.find(r => r.id === id)).filter(r => r && !r.voice);
     if (!roles.length) { ctx.notify('选中的角色都有音色了'); return; }
     if (!await ctx.confirm(`给 ${roles.length} 个角色挑音色？`, '每个角色会调用一两次文字模型。')) return;
     let done = 0, failed = '';
@@ -348,7 +348,8 @@ export function rolesApp(ctx) {
 
   function edit(id) {
     if (!current) listScroll = v.root.scrollTop;
-    const saved = api.getState().routes.find(r => r.id === id);
+    // (readState: the settings as they are; getState copies all of them, which on a phone held the editor back.)
+    const saved = (api.readState?.() || api.getState()).routes.find(r => r.id === id);
     if (!saved) { ctx.notify('角色已不存在'); return; }
     current = drafts.get(id) || structuredClone(saved);
     drafts.set(id, current);

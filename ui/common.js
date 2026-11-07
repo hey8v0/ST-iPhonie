@@ -71,7 +71,7 @@ export function createView(ctx, name) {
   root.className = 'view';
   root.dataset.app = name;
   const controller = new ctx.win.AbortController();
-  const failed = error => { try { ctx.api.reportDiagnostic?.('应用 · ' + name, error); } catch {} ctx.notify(error.message, {error: true}); };
+  const failed = error => { try { ctx.api.reportDiagnostic?.('应用 · ' + name, error); } catch {} ctx.notify(error.message, {error: true, logged: true}); };
   let disposed = false, backAt = 0;
   // ---------- motion between drawings of the page ----------
   const motionOn = () => typeof root.animate === 'function' && !ctx.win.matchMedia?.('(prefers-reduced-motion: reduce)').matches && root.isConnected;
@@ -92,13 +92,16 @@ export function createView(ctx, name) {
     // The first drawing of an app comes in with its own entrance. A page with no title (聊天's list) is the same page if it still has rows it had.
     if (!title && ![...root.querySelectorAll(KEYED)].some(el => before.has(keyOf(el)))) return;
     let moved = 0;
-    const fresh = [];
+    const fresh = [], glides = [];
+    // Every row is measured first, then the ones that moved are set going: an animation started between two
+    // measurements made the browser lay the page out again for each row (0.9.39; a page of 300 rows took 80 ms here).
     for (const el of root.querySelectorAll(KEYED)) {
       const was = before.get(keyOf(el));
       if (!was) { fresh.push(el); continue; }
-      const box = el.getBoundingClientRect(), dy = was.top - box.top;
-      if (Math.abs(dy) > 1 && moved++ < 60) el.animate([{transform: `translateY(${dy}px)`}, {transform: 'none'}], {duration: 420, easing: 'cubic-bezier(.2,1.15,.3,1)'});
+      const dy = was.top - el.getBoundingClientRect().top;
+      if (Math.abs(dy) > 1 && moved++ < 60) glides.push([el, dy]);
     }
+    for (const [el, dy] of glides) el.animate([{transform: `translateY(${dy}px)`}, {transform: 'none'}], {duration: 420, easing: 'cubic-bezier(.2,1.15,.3,1)'});
     // Rows that came (a new message, a song added): only a few, not a whole new list.
     if (fresh.length && fresh.length <= 6) fresh.forEach((el, i) => el.animate([{opacity: 0, transform: 'translateY(10px) scale(.98)'}, {opacity: 1, transform: 'none'}], {duration: 320, delay: i * 40, easing: 'cubic-bezier(.2,.9,.25,1)', fill: 'backwards'}));
   }
