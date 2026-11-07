@@ -534,6 +534,8 @@ function messageWordsFor(m, user) {
     case 'letter': return m.letter?.arriveAt > Date.now() && !m.letter?.answered ? `（${who}寄出了一封信，还在路上，对方还没收到）` : `${who}：[信]\n${String(m.letter?.text || '').slice(0, 1500)}\n[信结束]`;
     // 论坛 × 聊天 and 衣柜 × 聊天 (0.9.35): what was shared, as it reads.
     case 'post': return `${who}：[分享帖子] 「${m.post?.title || ''}」${m.post?.author ? `（发帖的人：${nameOf(m.post.author, user)}）` : ''}${m.post?.text ? '\n  ' + m.post.text : ''}${m.post?.note ? '\n  ' + who + '说：' + m.post.note : ''}`;
+    // 绘本 × 聊天 (0.9.40): the book's words go with the card, so the reader can say what they thought.
+    case 'book': return `${who}：[分享绘本] 《${m.book?.title || ''}》${m.book?.subtitle ? ' · ' + m.book.subtitle : ''}（${m.book?.spreads || 0} 个跨页）\n${String(m.book?.text || '').slice(0, 3000)}\n[绘本结束]`;
     case 'outfit': return `${who}：[分享穿搭] ${ownerName(m.outfit?.owner, user)}的一身「${m.outfit?.name || ''}」：${m.outfit?.text || ''}${m.outfit?.note ? '｜' + m.outfit.note : ''}`;
     // 合并转发: the record as it was forwarded, so whoever gets it can read it.
     case 'forward': return `${who}：[转发的聊天记录：${m.title}]\n${(m.items || []).map(i => `  ${i.from}：${i.text}`).join('\n')}\n[聊天记录结束]`.slice(0, 4000);
@@ -656,6 +658,12 @@ function statusPart(prompts, members, statuses) {
   }).filter(Boolean);
   return promptText(prompts, 'status', 'rule', {'现在': lines.join('；')});
 }
+/** 绘本 × 聊天 (0.9.40): the user sent a picture book into this chat just now: they read it and say what they thought. */
+function bookNote(prompts, history, user) {
+  const at = history.findLastIndex(m => m.kind === 'book' && m.from === 'me');
+  if (at < 0 || at < history.length - 4 || !promptOn(prompts, 'book-share')) return '';
+  return promptText(prompts, 'book-share', 'rule', {'用户': user, '书名': history[at].book?.title || ''});
+}
 /** 衣柜 × 聊天 (0.9.35): the user just showed this contact clothes put together for them: they may put them on. */
 function outfitNote(prompts, history, partner, user) {
   const at = history.findLastIndex(m => m.kind === 'outfit' && m.from === 'me');
@@ -762,6 +770,7 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
   const games = [gameNotes(prompts, history, user),
     !group && peeked && promptOn(prompts, 'peek-notice') ? promptText(prompts, 'peek-notice', 'text', {'用户': user, '对象': partner, '看了什么': typeof peeked === 'string' ? peeked : ''}) : '',
     !group ? outfitNote(prompts, history, partner, user) : '',
+    bookNote(prompts, history, user),
     !group && nudge && cue === 'outfit' && outfit ? promptText(prompts, 'wardrobe', 'changed', {'用户': user, '对象': partner, '衣着': outfit}) : '',
     atted.length && last?.from === 'me' ? promptText(prompts, 'group-extra', 'at', {'用户': user, '谁': atted.join('、')}) : '',
     repeats.length ? promptText(prompts, 'variety', 'text', {'复读': repeats.map(r => `${r.name}：${r.words.map(w => `「${w}」`).join('')}`).join('；')}) : ''].filter(Boolean).join('\n');

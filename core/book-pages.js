@@ -51,7 +51,12 @@ export function viewsOf(book, wide) {
   return out;
 }
 // Whether a page of a spread of two pages has its picture (or someone standing) on it.
-const pictured = (s, side) => s.layout === 'pair' || (side === s.side && (SPREADS[s.layout].pictures > 0 || s.layout === 'stage'));
+const pictured = (s, side) => s.layout === 'pair' || (s.layout === 'cast' && peopleOn(s, side).length > 0) || (side === s.side && (SPREADS[s.layout].pictures > 0 || s.layout === 'stage'));
+/** 出场人物 (0.9.40): the people on one page of the people page (their places): the first half on the left, the rest on the right. */
+export function peopleOn(s, side) {
+  const all = (s.cast || []).map((_, i) => i), half = Math.ceil(all.length / 2);
+  return side === 'left' ? all.slice(0, half) : all.slice(half);
+}
 /** A spread's words cut in two at about half their length (two moments, two pages of words): [first, second] by place. */
 function halvesOf(list) {
   const total = list.reduce((n, w) => n + w.text.length, 0);
@@ -70,6 +75,7 @@ export function viewWords(book, view) {
   if (sheet.kind !== 'spread') return [];
   const s = sheet.spread, all = s.words.map((_, i) => i);
   if (view.part === 'all' || view.part === 'tall') return all;
+  if (s.layout === 'cast') return peopleOn(s, view.part);
   if (s.layout === 'pair' || s.layout === 'text') return halvesOf(s.words)[view.part === 'left' ? 0 : 1];
   const pictureSide = view.part === s.side;
   if (s.layout === 'stage') { const said = all.filter(k => standsAndSays(s, k)); return pictureSide ? said : all.filter(k => !said.includes(k)); }
@@ -149,6 +155,10 @@ export function viewMarkup(book, view, {url = () => '', sprite = () => '', draft
         const k = side === 'left' ? 0 : 1;
         return `<figure class="bk-snap">${img(s.pictures[k])}</figure>${block(ks).replace('class="bk-words', 'class="bk-words bk-under')}`;
       }
+      case 'cast': {
+        const head = side === 'left' ? `<h3 class="bk-head bk-people-head">${esc(s.heading || '这本书里的人')}</h3>` : '';
+        return `${head}<div class="bk-people" data-n="${ks.length}">${ks.map(k => { const c = s.cast[k]; return `<figure class="bk-person"><div class="bk-face">${img(c)}</div><figcaption><b>${esc(c.name)}</b>${c.line ? `<span data-k="${k}">${esc(c.line)}</span>` : `<span data-k="${k}" hidden></span>`}</figcaption></figure>`; }).join('')}</div>`;
+      }
       default: return block(ks);
     }
   };
@@ -222,6 +232,21 @@ export const BOOK_CSS = `
 .bk-shadow{position:absolute;left:16%;right:16%;bottom:7.5%;height:5%;border-radius:50%;background:radial-gradient(closest-side,rgba(0,0,0,.16),transparent);pointer-events:none}
 .bk-actor[data-talk] img{animation:bk-talk .4s ease-in-out infinite alternate;transform-origin:50% 100%}
 .bk-over{position:absolute;top:5%;left:9%;right:9%;display:flex;justify-content:center;z-index:3}
+
+/* ---- the people page ---- */
+.bk-people-head{position:absolute;left:12%;right:12%;top:7%;text-align:center}
+.bk-people{position:absolute;left:9%;right:9%;top:16%;bottom:8%;display:grid;grid-template-columns:1fr;align-content:center;justify-items:center;gap:calc(var(--u) * 2.4)}
+.bk-people[data-n="2"],.bk-people[data-n="3"]{grid-template-columns:1fr 1fr}
+.bk-people[data-n="3"] .bk-person:first-child{grid-column:1 / -1}
+.bk-person{display:grid;justify-items:center;gap:calc(var(--u) * 1);margin:0;width:100%;max-width:calc(var(--u) * 34)}
+.bk-people[data-n="1"] .bk-person{max-width:calc(var(--u) * 46)}
+.bk-face{position:relative;width:100%;aspect-ratio:1;overflow:hidden;border-radius:50%}
+.bk-face>.bk-img,.bk-face>.bk-blank{position:absolute;inset:0;-webkit-mask:radial-gradient(closest-side,#000 78%,transparent);mask:radial-gradient(closest-side,#000 78%,transparent)}
+.bk:not([data-dark]) .bk-face{mix-blend-mode:multiply}
+.bk-person figcaption{display:grid;gap:calc(var(--u) * .4);text-align:center;font-size:calc(var(--u) * 2.6);line-height:1.5}
+.bk-person figcaption b{font:700 calc(var(--u) * 3.2)/1.3 var(--bk-title);letter-spacing:.12em;color:var(--bk-accent)}
+.bk-person figcaption [data-reading]{color:var(--bk-accent)}
+.bk[data-theme=ancient] .bk-people-head,.bk[data-theme=ancient] .bk-person figcaption{writing-mode:horizontal-tb;letter-spacing:.06em}
 
 /* ---- two moments ---- */
 .bk-snap{position:absolute;left:14%;right:14%;top:11%;aspect-ratio:1;margin:0;border-radius:calc(var(--u) * .9);overflow:hidden}

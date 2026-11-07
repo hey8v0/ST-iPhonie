@@ -17,12 +17,14 @@ export async function shareToChat(ctx, {title = '发给…', message, what = '�
     + (others.length ? groupTitle('联系人') + `<div class="group">${others.map(c => row('c:' + c.name, avatar(c.name, c.engine, 38), shown(c.name), '')).join('')}</div>` : '')
     + (recent.length || others.length ? '' : '<p class="hint">还没有能发的聊天：先在聊天 App 里加个联系人。</p>'));
   return new Promise(resolve => {
-    let done = false;
+    let done = false, picking = false;
     const finish = value => { if (!done) { done = true; resolve(value); } };
-    d.onClose?.(() => finish(null));
+    // (Shut without a pick: nothing sent. Shutting after a pick must not answer null before the message is in: 0.9.40.)
+    d.onClose?.(() => { if (!picking) finish(null); });
     d.body.addEventListener('click', async e => {
       const key = e.target.closest('[data-share-to]')?.dataset.shareTo;
       if (!key) return;
+      picking = true;
       d.close();
       try {
         const name = key.startsWith('c:') ? key.slice(2) : '';

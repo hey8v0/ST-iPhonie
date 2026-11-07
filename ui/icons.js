@@ -59,6 +59,7 @@ export function glyph(key) {
 const LINES = {
   gift: 'M4 11h16v9H4zM3 7h18v4H3zM12 7v13M12 7C10.5 4 7 3.5 7 6s3 1 5 1m0 0c1.5-3 5-3.5 5-1s-3 1-5 1', wallet: 'M4 7h15a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 7l12-3v3M15 13.5h2', shop: 'M5 8h14l-1.2 12H6.2zM9 10V6a3 3 0 0 1 6 0v4',
   hanger: 'M9.6 6.2a2.4 2.4 0 1 1 2.4 2.4V10M12 10l-8.6 6.1A1.5 1.5 0 0 0 4.3 18.8h15.4a1.5 1.5 0 0 0 .9-2.7z',
+  grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
   back: 'm15 5-7 7 7 7', home: 'm3 11 9-8 9 8M6 9v12h12V9M10 21v-7h4v7', close: 'm6 6 12 12M6 18 18 6', add: 'M12 5v14M5 12h14',
   next: 'm9 5 7 7-7 7', down: 'm6 9 6 6 6-6', up: 'm6 15 6-6 6 6', lock: 'M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5z',
   repeat: 'M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4', repeat1: 'M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4M11 10l1.5-1v6',

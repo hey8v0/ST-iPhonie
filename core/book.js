@@ -10,7 +10,7 @@
 // Pure logic here; ui/book.js asks for the words, the pictures and the voices; core/book-pages.js lays spreads out.
 import {THEME_IDS, BOOK_THEMES, guessTheme} from './book-themes.js';
 
-export const BOOK_LIMIT = {spreads: 60, pictures: 2, words: 16, word: 400, title: 40, heading: 24, sound: 40, fx: 2};
+export const BOOK_LIMIT = {spreads: 60, pictures: 2, words: 16, word: 400, title: 40, heading: 24, sound: 40, fx: 2, who: 4, people: 6, line: 40, readers: 30};
 const text = (v, n) => typeof v === 'string' ? v.trim().slice(0, n) : '';
 // The words a page shows and reads have no emoji: a pictograph shown in colour goes with its skin tone, joiners and
 // keycap; signs written as text (★ ♪ ♥ → ✓) stay.
@@ -33,6 +33,8 @@ export const SPREADS = Object.freeze({
   pair: {label: '两个瞬间', pictures: 2, shape: '方', halves: true, note: '左右两页各一小幅图，像连着的两个瞬间（前和后、对比、你和我），各配一两句'},
   stage: {label: '人物出场', pictures: 0, halves: true, note: '一个人的立绘像剪纸一样站在留白的纸上，可以说一句话（气泡），对页是字；适合人物第一次出场或一句很有分量的话'},
   text: {label: '只有字', pictures: 0, halves: true, note: '只有字，没有图'},
+  // 出场人物 (0.9.40): the book's people, each a small picture alone on white and a line about them, the page after the cover.
+  cast: {label: '出场人物', pictures: 0, shape: '方', halves: true, note: '这本书里的人：每人一小幅图和一句介绍，排在封面后面'},
 });
 export const SPREAD_IDS = Object.freeze(Object.keys(SPREADS));
 /** The weather drawn over a spread (vn-fx.js): only what a story's sky or air does. */
@@ -40,6 +42,30 @@ export const WEATHER = Object.freeze({rain: '雨', storm: '暴风雨', snow: '�
 const SIDES = ['left', 'right'];
 const ids = (list, known, n) => [...new Set((Array.isArray(list) ? list : typeof list === 'string' ? list.split(/[\s,，、+]+/) : []).map(x => String(x || '').trim()).filter(x => Object.hasOwn(known, x)))].slice(0, n);
 
+/** Names as a list (an array, or 「甲、乙」), trimmed, at most n. */
+const namesOf = (v, n = BOOK_LIMIT.who) => [...new Set((Array.isArray(v) ? v : typeof v === 'string' ? v.split(/[\s,，、+]+/) : []).map(x => text(x, 40)).filter(Boolean))].slice(0, n);
+/**
+ * The book's name a model wrote (or an alias of theirs, or the name in another case): '' when it is none of them.
+ * aliases: {alias → name} (the 角色 App's 别名), any case.
+ */
+export function resolveName(value, names = [], aliases = {}) {
+  const x = text(value, 60);
+  if (!x) return '';
+  if (names.includes(x)) return x;
+  const low = x.toLowerCase(), byCase = names.find(n => n.toLowerCase() === low);
+  if (byCase) return byCase;
+  const alias = Object.entries(aliases).find(([a]) => a.toLowerCase() === low);
+  return alias && names.includes(alias[1]) ? alias[1] : '';
+}
+/** The book's people named in a text (a scene written in English, a page's words), by name or alias, any case. */
+export function namesIn(value, names = [], aliases = {}) {
+  const low = String(value || '').toLowerCase(), out = [];
+  for (const n of names) if (n && low.includes(n.toLowerCase()) && !out.includes(n)) out.push(n);
+  for (const [a, n] of Object.entries(aliases)) if (a && names.includes(n) && low.includes(a.toLowerCase()) && !out.includes(n)) out.push(n);
+  return out;
+}
+/** What a person's own picture on the 出场人物 page is drawn from. */
+const personPrompt = (name, emotion = '') => [name, 'solo', emotion, 'standing', 'full body', 'looking at viewer', 'gentle expression'].filter(Boolean).join(', ');
 const pictureOf = p => p && typeof p === 'object' ? (typeof p.id === 'string' && p.id ? {id: p.id.slice(0, 80)} : typeof p.url === 'string' && /^(\/|https?:|data:image\/|blob:|user\/)/.test(p.url) ? {url: p.url.slice(0, 2000)} : null) : null;
 /**
  * A piece of a spread's words: who says it ('' the 旁白), the words, how it is said, whether it is shown in a speech
@@ -64,15 +90,19 @@ const headingOf = v => words(v, 40).replace(/^第\s*[0-9一二三四五六七八
  */
 export function normalizeSpread(s) {
   let layout = Object.hasOwn(SPREADS, s?.layout) ? s.layout : 'page';
-  const pictures = (Array.isArray(s?.pictures) ? s.pictures : []).slice(0, BOOK_LIMIT.pictures).map(p => ({prompt: text(p?.prompt ?? p?.scene, 600), picture: pictureOf(p?.picture), people: p?.people !== false}));
+  // who: the book's people in the picture (their looks go with it when it is drawn); none when it shows nobody.
+  const pictures = (Array.isArray(s?.pictures) ? s.pictures : []).slice(0, BOOK_LIMIT.pictures).map(p => ({prompt: text(p?.prompt ?? p?.scene, 600), picture: pictureOf(p?.picture), people: p?.people !== false, who: p?.people === false ? [] : namesOf(p?.who)}));
   const cast = (Array.isArray(s?.cast) ? s.cast : []).slice(0, 2).map(c => ({name: text(c?.name, 40), emotion: text(c?.emotion, 40)})).filter(c => c.name);
+  // 出场人物: each with a line about them and a picture of their own (drawn alone on white).
+  const people = layout === 'cast' ? (Array.isArray(s?.cast) ? s.cast : []).slice(0, BOOK_LIMIT.people).map(c => { const name = text(c?.name, 40); return {name, emotion: text(c?.emotion, 40), line: words(c?.line, BOOK_LIMIT.line), prompt: text(c?.prompt, 600) || personPrompt(name, text(c?.emotion, 40)), picture: pictureOf(c?.picture), people: true, who: [name]}; }).filter(c => c.name) : [];
   // A 人物出场 spread with nobody to stand on it, a spread planned with pictures that has none: the nearest that fits.
   if (layout === 'stage' && !cast.length) layout = pictures.length ? 'page' : 'text';
+  if (layout === 'cast' && !people.length) layout = 'text';
   if (layout === 'pair' && pictures.length < 2) layout = pictures.length ? 'page' : 'text';
   const sound = {ambience: text(s?.sound?.ambience, BOOK_LIMIT.sound), sfx: text(s?.sound?.sfx, BOOK_LIMIT.sound)};
   return {layout, side: SIDES.includes(s?.side) ? s.side : 'right', space: s?.space === 'top' ? 'top' : 'bottom', tone: s?.tone === 'dark' ? 'dark' : 'light', heading: headingOf(s?.heading),
-    pictures, words: (Array.isArray(s?.words) ? s.words : []).map(wordOf).filter(w => w.text).slice(0, BOOK_LIMIT.words),
-    cast: layout === 'stage' ? cast : [], fx: ids(s?.fx, WEATHER, BOOK_LIMIT.fx), sound};
+    pictures, words: layout === 'cast' ? people.map(c => wordOf({role: '', text: c.line ? `${c.name}，${c.line}` : c.name})) : (Array.isArray(s?.words) ? s.words : []).map(wordOf).filter(w => w.text).slice(0, BOOK_LIMIT.words),
+    cast: layout === 'stage' ? cast : layout === 'cast' ? people : [], fx: ids(s?.fx, WEATHER, BOOK_LIMIT.fx), sound};
 }
 
 /**
@@ -111,9 +141,11 @@ export function normalizeBook(b) {
     title: words(b?.title, BOOK_LIMIT.title) || '无题', subtitle: words(b?.subtitle, 60), author: text(b?.author, 40),
     theme: THEME_IDS.includes(b?.theme) ? b.theme : 'fairy', art: b?.art === 'app' ? 'app' : 'book', mode: b?.mode === 'story' ? 'story' : 'retell',
     source: {chat: text(b?.source?.chat, 200), name: text(b?.source?.name, 80), from: Number(b?.source?.from) || 0, to: Number(b?.source?.to) || 0},
-    cover: {prompt: text(made.cover?.prompt, 600), picture: pictureOf(made.cover?.picture)},
+    cover: {prompt: text(made.cover?.prompt, 600), picture: pictureOf(made.cover?.picture), who: namesOf(made.cover?.who)},
     spreads: (Array.isArray(made.spreads) ? made.spreads : []).slice(0, BOOK_LIMIT.spreads).map(normalizeSpread),
     ending: words(made.ending, 80), at: Number(b?.at) || Date.now(), made: Number(b?.made) || Number(b?.at) || Date.now(),
+    // 读后感 (0.9.40): what the people it was sent to said of it, the latest of each.
+    readers: (Array.isArray(b?.readers) ? b.readers : []).map(r => ({name: text(r?.name, 40), at: Number(r?.at) || 0, text: words(r?.text, 400)})).filter(r => r.name && r.text).slice(-BOOK_LIMIT.readers),
   };
 }
 
@@ -198,7 +230,7 @@ export function storyScript(messages) {
 }
 
 const THEME_LIST = THEME_IDS.map(id => `${id}（${BOOK_THEMES[id].label}）`).join('、');
-const LAYOUT_LIST = Object.entries(SPREADS).filter(([id]) => id !== 'text').map(([id, l]) => `${id}（${l.label}）：${l.note}${l.pictures ? `（${l.pictures} 张${l.shape}图）` : ''}`).join('\n  ');
+const LAYOUT_LIST = Object.entries(SPREADS).filter(([id]) => id !== 'text' && id !== 'cast').map(([id, l]) => `${id}（${l.label}）：${l.note}${l.pictures ? `（${l.pictures} 张${l.shape}图）` : ''}`).join('\n  ');
 const listOf = table => Object.entries(table).map(([id, label]) => `${id}（${label}）`).join('、');
 /**
  * What the text model is asked, to make a part of the story a picture book of about `spreads` spreads. cast: who may
@@ -215,15 +247,16 @@ export function retellPrompt(script, {spreads = 12, cast = [], staged = [], part
 - 版式（layout），跟着故事的起伏安排，不要连着两个跨页用同一种（page 可以多一些）：
   ${LAYOUT_LIST}
   节奏：开头一两个跨页用 quiet 或 page，让读者慢慢进入；中间 page、window、pair、fade、ground 换着用；最紧张、最壮观、最重要的转折用 spread（整本书一到两次）；结尾回到 quiet 或 fade，安静地收住。
-- 图（pictures）：版式要几张就写几张，每张写 scene（英文、逗号分隔的绘图标签：画面里有什么、人物用名字、在做什么、表情、镜头远近和角度、地点、时间、光线、气氛；不写画风，不写构图里的空白，空白会按版式自动加）和 people（画面里画不画人：true / false）。故事里已有的图（脚本里的 [图N]）正好配得上，就写 "picture": N，不用写 scene。
+- 图（pictures）：版式要几张就写几张，每张写 scene（英文、逗号分隔的绘图标签：画面里有什么、人物用名字、在做什么、表情、镜头远近和角度、地点、时间、光线、气氛；不写画风，不写构图里的空白，空白会按版式自动加）、people（画面里画不画人：true / false）和 who（画面里有哪些人物，只写名字、照上面的名单原样写，不翻译不改写，一到四个；没有人物就写 []）。画人物的时候 scene 里也用名单上的名字称呼。故事里已有的图（脚本里的 [图N]）正好配得上，就写 "picture": N，不用写 scene。
 - side：图（stage 是立绘）放在左页还是右页（left / right），字在另一页，跨页之间换着放；window、spread、fade、ground 的 side 是字写在左页还是右页。
 - spread 版式还要写 space 和 tone：画面在哪里留出写字的空白（top：上面是天空或空白；bottom：下面是地面、水面或空白），那片空白是亮的（light：白天的天空、白墙、雪地）还是暗的（dark：夜空、阴影）。
 - stage：人物的立绘像剪纸一样站在留白的纸上（有立绘的只有：${staged.join('、') || '没有人，所以不要用 stage'}），不写 pictures，cast 写一到两个人（name、emotion）；整本书最多两次。
 - heading：故事长、一段新的情节开始时，可以在那个跨页写一个小标题（4 到 10 个字），整本书零到三个；故事不长就不写。
 - fx：这个跨页的天气，零到两个，只能选：${listOf(WEATHER)}；故事里写到下雨、下雪、起雾、花瓣、萤火虫、星空、烟花这些才写。${ambience.length || sfx.length ? `
 - 声音：ambience 这个跨页开始的环境声，换场景时才写，写「停」就停下（只能从这些里选：${ambience.join('、') || '没有'}）；sfx 翻到这里时响一下的音效（只能从这些里选：${sfx.join('、') || '没有'}）。都可以空着。` : ''}
-${first ? `- 给这本绘本起书名 title（2 到 12 个字）和一句副标题 subtitle，判断故事类型 genre（只能选一个：${THEME_LIST}），写封面画面 cover（英文绘图标签，主角要在画面里，构图在上方留出写书名的地方）。` : `- 这是整个故事的第 ${part.index + 1} 部分（共 ${part.of} 部分），接着前面往下做，不要重复，不要写书名。`}${last ? '\n- 写最后一页的一句话 ending（一句收尾的话，可空）。' : ''}
-只输出一个 JSON 对象，不要任何别的文字：{${first ? '"title":"","subtitle":"","genre":"","cover":"",' : ''}${last ? '"ending":"",' : ''}"spreads":[{"layout":"page","side":"right","space":"","tone":"","heading":"","pictures":[{"scene":"","people":true}],"cast":[],"words":[{"role":"","text":"","emotion":"","bubble":false,"at":""}],"fx":[]${ambience.length || sfx.length ? ',"ambience":"","sfx":""' : ''}}]}`;
+${first ? `- 给这本绘本起书名 title（2 到 12 个字）和一句副标题 subtitle，判断故事类型 genre（只能选一个：${THEME_LIST}），写封面画面 cover（英文绘图标签，主角要在画面里，构图在上方留出写书名的地方）和 cover_who（封面上有哪些人物，名字照名单写）。
+- 出场人物页 people：这本书里要紧的人物，一到六个（只能用名单上的名字，主角在前），每人一句介绍（10 到 30 个字，像绘本开头介绍人物那样：是谁、什么性格或口头禅，不剧透）。` : `- 这是整个故事的第 ${part.index + 1} 部分（共 ${part.of} 部分），接着前面往下做，不要重复，不要写书名。`}${last ? '\n- 写最后一页的一句话 ending（一句收尾的话，可空）。' : ''}
+只输出一个 JSON 对象，不要任何别的文字：{${first ? '"title":"","subtitle":"","genre":"","cover":"","cover_who":[],"people":[{"name":"","line":""}],' : ''}${last ? '"ending":"",' : ''}"spreads":[{"layout":"page","side":"right","space":"","tone":"","heading":"","pictures":[{"scene":"","people":true,"who":[]}],"cast":[],"words":[{"role":"","text":"","emotion":"","bubble":false,"at":""}],"fx":[]${ambience.length || sfx.length ? ',"ambience":"","sfx":""' : ''}}]}`;
   const user = `${before ? `前面最后一个跨页讲到：${before}\n\n` : ''}故事脚本：\n${script}`;
   return {system, user};
 }
@@ -250,16 +283,18 @@ export function jsonIn(answer) {
  * 人物出场 spread with someone who has none draws them alone in white space instead). Laid out to the story's pace
  * (paceSpreads).
  */
-export function retoldSpreads(answer, {pictures = [], cast = [], staged = []} = {}) {
+export function retoldSpreads(answer, {pictures = [], cast = [], staged = [], aliases = {}} = {}) {
   const data = typeof answer === 'string' ? jsonIn(answer) : answer || {};
   const names = new Set(cast), standing = new Set(staged), out = [];
+  // Names as the model wrote them, each the book's own (or an alias of it, or another case); the others dropped.
+  const known = list => [...new Set(namesOf(list, 8).map(x => resolveName(x, cast, aliases)).filter(Boolean))].slice(0, BOOK_LIMIT.who);
   const clean = s => words(s, BOOK_LIMIT.word).replace(/^[「“"]|[」”"]$/g, '');
   const raws = Array.isArray(data.spreads) ? data.spreads : Array.isArray(data.pages) ? data.pages : [];
   for (const raw of raws) {
     let layout = Object.hasOwn(SPREADS, raw?.layout) ? raw.layout : 'page';
     const shots = (Array.isArray(raw?.pictures) ? raw.pictures : Array.isArray(raw?.shots) ? raw.shots : []).map(s => {
       const n = Number(s?.picture), url = Number.isInteger(n) && n > 0 ? pictures[n - 1] : '';
-      return {prompt: url ? '' : text(s?.scene ?? s?.prompt, 600), picture: url ? {url} : null, people: s?.people !== false};
+      return {prompt: url ? '' : text(s?.scene ?? s?.prompt, 600), picture: url ? {url} : null, people: s?.people !== false, who: s?.people === false ? [] : known(s?.who)};
     }).filter(s => s.prompt || s.picture);
     let castOn = (Array.isArray(raw?.cast) ? raw.cast : []).map(c => ({name: text(c?.name, 40), emotion: text(c?.emotion, 40)})).filter(c => names.has(c.name));
     // Standing on the paper takes a 立绘: without one, they are drawn alone in white space.
@@ -274,7 +309,14 @@ export function retoldSpreads(answer, {pictures = [], cast = [], staged = []} = 
       sound: {ambience: raw?.ambience ?? raw?.sound?.ambience, sfx: raw?.sfx ?? raw?.sound?.sfx}});
   }
   if (!out.length) throw Error('文字模型没有写出绘本的跨页');
-  return {title: words(data.title, BOOK_LIMIT.title), subtitle: words(data.subtitle, 60), genre: THEME_IDS.includes(data.genre) ? data.genre : '', cover: text(data.cover, 600), ending: words(data.ending, 80), spreads: paceSpreads(out)};
+  // The people page: the book's people the model picked, each with a line (a name it wrote wrongly is dropped).
+  const people = [];
+  for (const raw of Array.isArray(data.people) ? data.people : []) {
+    const name = resolveName(raw?.name, cast, aliases);
+    if (name && !people.some(x => x.name === name)) people.push({name, line: words(raw?.line, BOOK_LIMIT.line)});
+  }
+  return {title: words(data.title, BOOK_LIMIT.title), subtitle: words(data.subtitle, 60), genre: THEME_IDS.includes(data.genre) ? data.genre : '', cover: text(data.cover, 600), coverWho: known(data.cover_who),
+    people: people.slice(0, BOOK_LIMIT.people), ending: words(data.ending, 80), spreads: paceSpreads(out)};
 }
 
 /**
@@ -306,26 +348,52 @@ export function paceSpreads(list) {
     const best = later.sort((a, b) => b.s.words.reduce((n, w) => n + w.text.length, 0) - a.s.words.reduce((n, w) => n + w.text.length, 0))[0];
     if (best) Object.assign(best.s, {layout: 'spread', space: best.s.space === 'bottom' ? 'bottom' : 'top'});
   }
-  // The book opens quietly.
-  if (spreads[0] && ['spread', 'ground'].includes(spreads[0].layout)) spreads[0].layout = 'page';
+  // The book opens quietly (the people page, when there is one, stands before the story).
+  const opening = spreads.find(s => s.layout !== 'cast');
+  if (opening && ['spread', 'ground'].includes(opening.layout)) opening.layout = 'page';
   // The same layout three times running: the middle one framed (or on a page, when it was framed).
   for (let i = 1; i + 1 < spreads.length; i++) {
     const s = spreads[i];
-    if (s.layout !== spreads[i - 1].layout || s.layout !== spreads[i + 1].layout || SPREADS[s.layout].pictures !== 1) continue;
+    if (s.layout === 'cast' || s.layout !== spreads[i - 1].layout || s.layout !== spreads[i + 1].layout || SPREADS[s.layout].pictures !== 1) continue;
     s.layout = s.layout === 'window' ? 'page' : 'window';
   }
   return spreads.map(normalizeSpread);
 }
 
+/**
+ * 出场人物 (0.9.40): the page after the cover with the book's people — each a small picture of their own (drawn alone on
+ * white, their looks from the 角色 App) and a line about them. people: [{name, line}]; nobody: null.
+ */
+export function castSpread(people) {
+  const list = (Array.isArray(people) ? people : []).filter(p => p?.name).slice(0, BOOK_LIMIT.people);
+  return list.length ? normalizeSpread({layout: 'cast', side: 'left', cast: list.map(p => ({name: p.name, line: p.line || '', emotion: p.emotion || '', picture: p.picture || null}))}) : null;
+}
+/** The slots pictures go in on sheet n: a spread's pictures, the people page's people, the cover. */
+export const slotsOf = (book, n) => { const sheet = sheetOf(book, n); return sheet.kind === 'cover' ? [book.cover] : sheet.kind === 'spread' ? (sheet.spread.layout === 'cast' ? sheet.spread.cast : sheet.spread.pictures.slice(0, SPREADS[sheet.spread.layout].pictures)) : []; };
+/**
+ * The book's words for someone to read it (sent into a chat): the title, each spread's words, the last line; at most
+ * `max` characters, cut at a spread.
+ */
+export function bookText(book, max = 2500) {
+  const parts = [`《${book.title}》${book.subtitle ? ' ' + book.subtitle : ''}`];
+  for (const s of book.spreads) {
+    const line = (s.heading ? `【${s.heading}】` : '') + s.words.map(w => w.role ? `${w.role}：「${w.text}」` : w.text).join('');
+    if (!line) continue;
+    if (parts.join('\n').length + line.length > max) { parts.push('（后面还有）'); break; }
+    parts.push(line);
+  }
+  if (book.ending && !parts.at(-1).startsWith('（')) parts.push(book.ending);
+  return parts.join('\n');
+}
 /** All the words of some spreads (to guess the kind of story from). */
 export const wordsOf = spreads => spreads.flatMap(s => s.words.map(w => w.text)).join('\n');
 /**
  * A whole book from its spreads: its cover (drawn from `cover`, else coverPicture), its last line (`ending`), the
  * kind of story (the model's, else guessed from the words).
  */
-export function bookOf({id, title, subtitle = '', author = '', theme = '', art = 'book', mode = 'retell', source = {}, spreads, cover = '', coverPicture = null, ending = ''}) {
+export function bookOf({id, title, subtitle = '', author = '', theme = '', art = 'book', mode = 'retell', source = {}, spreads, cover = '', coverPicture = null, coverWho = [], ending = ''}) {
   return normalizeBook({id, title: title || '无题', subtitle, author, theme: theme || guessTheme(wordsOf(spreads)), art, mode, source, spreads,
-    cover: {prompt: cover, picture: coverPicture}, ending});
+    cover: {prompt: cover, picture: coverPicture, who: coverWho}, ending});
 }
 /** Spreads to ask for: about one for every 420 characters of story, 6 to 16. */
 export const spreadsFor = chars => Math.max(6, Math.min(16, Math.round(chars / 420)));
@@ -356,7 +424,7 @@ export const shapeOf = spread => spread ? SPREADS[spread.layout].shape || '竖' 
  */
 export function composeOf(spread) {
   switch (spread?.layout) {
-    case 'quiet': return 'simple background, white background, full body, centered, negative space';
+    case 'quiet': case 'cast': return 'simple background, white background, full body, centered, negative space';
     case 'pair': return 'simple background, upper body, close-up';
     case 'window': return 'wide shot, cinematic composition';
     case 'spread': return spread.space === 'top' ? 'wide shot, panorama, empty sky, negative space at top, low horizon' : 'wide shot, panorama, negative space at bottom, empty foreground';
@@ -373,6 +441,7 @@ export function missingPictures(book, all = false) {
   const out = [];
   if (!book.cover.picture && (book.cover.prompt || all)) out.push({sheet: 0, k: 0});
   book.spreads.forEach((s, i) => {
+    if (s.layout === 'cast') { s.cast.forEach((c, k) => { if (!c.picture) out.push({sheet: i + 1, k}); }); return; }
     for (let k = 0; k < SPREADS[s.layout].pictures; k++) { const p = s.pictures[k]; if (!p?.picture && (p?.prompt || all)) out.push({sheet: i + 1, k}); }
   });
   return out;

@@ -484,6 +484,8 @@ export function chatApp(ctx) {
       }
       // 论坛 × 聊天 (0.9.35): a forum post as a card; a tap opens it on the forum.
       case 'post': return `<button class="share-card post-card" data-action="post-open" ${mid}><span class="share-kind">${icon('bubble')}论坛帖子</span><strong>${esc(m.post?.title || '（没有标题）')}</strong>${m.post?.text ? `<small>${esc(m.post.text.slice(0, 80))}</small>` : ''}${m.post?.author ? `<em>${esc(m.post.author === 'me' ? '我' : shown(m.post.author))}</em>` : ''}</button>${m.post?.note ? `<span class="chat-bubble share-note">${esc(m.post.note)}</span>` : ''}`;
+      // 绘本 × 聊天 (0.9.40): a picture book as a card (its cover when it was drawn); a tap opens it in the 绘本 App.
+      case 'book': return `<button class="share-card book-card" data-action="book-open" ${mid}>${m.book?.coverId ? `<img data-chat-photo="${esc(m.book.coverId)}"${bubbleURLs.get(m.book.coverId) ? ` src="${esc(bubbleURLs.get(m.book.coverId))}"` : ''} alt="">` : `<span class="book-ico" aria-hidden="true">${icon('book')}</span>`}<span class="share-text"><span class="share-kind">${icon('book')}绘本</span><strong>《${esc(m.book?.title || '')}》</strong>${m.book?.subtitle ? `<small>${esc(m.book.subtitle)}</small>` : ''}<em>${m.book?.spreads || 0} 个跨页</em></span></button>`;
       // 衣柜 × 聊天 (0.9.35): clothes shown, with a picture of one of the pieces when there is one.
       case 'outfit': return `<button class="share-card outfit-card" data-action="outfit-open" ${mid}>${m.outfit?.photoId ? `<img data-chat-photo="${esc(m.outfit.photoId)}"${bubbleURLs.get(m.outfit.photoId) ? ` src="${esc(bubbleURLs.get(m.outfit.photoId))}"` : ''} alt="">` : `<span class="outfit-ico" aria-hidden="true">${icon('hanger')}</span>`}<span class="share-text"><span class="share-kind">${icon('hanger')}穿搭</span><strong>${esc(m.outfit?.name || '')}</strong><small>${esc(String(m.outfit?.text || '').slice(0, 90))}</small></span></button>`;
       case 'call': return `<button class="call-msg${m.state === 'answered' ? '' : ' missed'}" data-action="call-log" ${mid}>${icon('phone', true)}<span>${esc(callSummary(m))}</span></button>`;
@@ -2620,6 +2622,7 @@ export function chatApp(ctx) {
       case 'board-again': { const g = find()?.game; if (g && BOARDS[g.type]) await startBoard(g.type, g.first === 'me' ? g.them : 'me'); break; }
       case 'post-open': { const m = find(); if (m?.post?.id) ctx.openForumPost?.(m.post.id); else if (m) messageMenu(m); break; }
       case 'outfit-open': { const m = find(); if (m) outfitSheet(m); break; }
+      case 'book-open': { const m = find(); if (m?.book?.id) ctx.openBook?.(m.book.id); else if (m) messageMenu(m); break; }
       case 'watch-talk': requestReply(); break;
       case 'quote-off': quote = null; render(); break;
       case 're-edit': {

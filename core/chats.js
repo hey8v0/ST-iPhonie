@@ -37,7 +37,7 @@ export function lastRound(messages) {
   const list = Array.isArray(messages) ? messages : [], at = list.findLastIndex(m => m.from === 'me' && m.kind !== 'system');
   return {after: at >= 0 ? String(list[at].id) : '', round: list.slice(at + 1).filter(m => m.from !== 'me')};
 }
-const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song', 'file', 'forward', 'game', 'post', 'outfit', 'letter'];
+const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song', 'file', 'forward', 'game', 'post', 'outfit', 'book', 'letter'];
 /** 消息回应 (0.9.34): the emoji one can put on a message, one each person (the user's and the contacts'). */
 export const REACTIONS = Object.freeze(['❤️', '😂', '👍', '😮', '😢', '🎉']);
 const EMOJI = /\p{Extended_Pictographic}/u;
@@ -155,6 +155,7 @@ export function messageWords(m) {
     case 'game': return [m.text, ...(m.game?.options || []), ...(m.game?.entries || []).map(e => e.text)].filter(Boolean).join(' ');
     case 'post': return [m.post?.title, m.post?.author, m.post?.text, m.post?.note].filter(Boolean).join(' ');
     case 'outfit': return [m.outfit?.name, m.outfit?.text, m.outfit?.note].filter(Boolean).join(' ');
+    case 'book': return [m.book?.title, m.book?.subtitle].filter(Boolean).join(' ');
     case 'letter': return m.letter?.text || '';
     default: return '';
   }
@@ -197,6 +198,7 @@ export function forwardLine(m) {
     case 'game': return `[${BOARDS[m.game?.type] ? '小游戏' : '群游戏'}] ${m.text || ''}`;
     case 'post': return `[帖子] ${m.post?.title || String(m.post?.text || '').slice(0, 30)}${m.post?.note ? ' ' + m.post.note : ''}`;
     case 'outfit': return `[穿搭] ${m.outfit?.name || ''}${m.outfit?.note ? ' ' + m.outfit.note : ''}`;
+    case 'book': return `[绘本] ${m.book?.title || ''}`;
     case 'letter': return `[信] ${String(m.letter?.text || '').slice(0, 60)}`;
     default: return m?.text || '';
   }
@@ -278,6 +280,13 @@ function cleanMessage(m, id, at) {
     out.outfit = {name: clip(s.name, 40).trim() || '一身衣服', text: clip(s.text, SHARE_LIMITS.text).trim(), owner: clip(s.owner, 80).trim() || 'me', ...(s.photoId ? {photoId: clip(s.photoId, 512)} : {}), ...(String(s.note ?? '').trim() ? {note: clip(s.note, SHARE_LIMITS.note).trim()} : {})};
     if (!out.outfit.text) throw fail('这身衣服还没有描述');
     out.text = out.outfit.name;
+  }
+  // 绘本 × 聊天 (0.9.40): a picture book sent to be read (its words go with it; its id opens it in the 绘本 App while it is there).
+  if (kind === 'book') {
+    const s = m.book && typeof m.book === 'object' ? m.book : {};
+    out.book = {id: clip(s.id, 80).trim(), title: clip(s.title, 40).trim(), subtitle: clip(s.subtitle, 60).trim(), theme: clip(s.theme, 20).trim(), spreads: Math.max(0, Math.min(999, Math.round(Number(s.spreads) || 0))), coverId: clip(s.coverId, 512).trim(), text: clip(s.text, 3000).trim()};
+    if (!out.book.title) throw fail('分享的绘本是空的');
+    out.text = `《${out.book.title}》`;
   }
   // 消息回应: the emoji people put on it.
   if (Array.isArray(m.reactions) && !['system', 'notice', 'pat', 'recall'].includes(kind)) { const reactions = cleanReactions(m.reactions); if (reactions.length) out.reactions = reactions; }

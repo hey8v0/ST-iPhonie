@@ -315,12 +315,29 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     if (posts.length) await backend.momentsMutate(() => backend.moments.add(posts)).then(onPosts).catch(() => {});
     // 重新回复: the new round takes the old one's place (which stays among its versions).
     let saved = !out.length ? latest : round ? await backend.replaceChatRound(threadId, round.after, out) : await backend.chats.append(threadId, out);
+    // 读后感 (0.9.40): a book sent into this chat just now — what each of them said of it is kept on the book.
+    if (out.length) bookRemarks(thread, out).catch(error => backend.reportDiagnostic?.('聊天 · 读后感', error, 'warn'));
     if (cutting) { saved = await backend.chats.update(threadId, {friend: {by: 'them', at: Date.now(), requests: []}}); calling = null; refreshCuts(); }
     if (calling) setTimeout(() => onCall(calling.from, calling.reason), 1200);
     // (a moment after the group's own messages)
     if (whispers.length) setTimeout(() => whisper(whispers).catch(error => backend.reportDiagnostic?.('聊天 · 私聊', error, 'warn')), 900);
     if (making) setTimeout(() => makeGroup(making).catch(error => backend.reportDiagnostic?.('聊天 · 建群', error, 'warn')), 1500);
     return saved;
+  }
+
+  /** The latest book card of the user's among the last few messages, and what each contact then said: onto the book's readers. */
+  async function bookRemarks(thread, out) {
+    const card = thread.messages.slice(-6).findLast(m => m.kind === 'book' && m.from === 'me');
+    if (!card?.book?.id || !backend.library?.getBook) return;
+    const said = new Map();
+    for (const m of out) if (m.kind === 'text' && m.from && m.from !== 'me' && String(m.text || '').trim()) said.set(m.from, [...(said.get(m.from) || []), String(m.text).trim()]);
+    if (!said.size) return;
+    const book = await backend.library.getBook(card.book.id);
+    if (!book) return;
+    const now = Date.now(), readers = (book.readers || []).filter(r => !said.has(r.name));
+    for (const [name, lines] of said) readers.push({name, at: now, text: lines.join(' ').slice(0, 400)});
+    const next = {...book, readers: readers.slice(-30)};
+    if (backend.mutateLibrary) await backend.mutateLibrary('books', 'saveBook', next); else await backend.library.saveBook(next);
   }
 
   // ---------- 0.9.35: groups the contacts start, notes, posts ----------

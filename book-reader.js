@@ -7,7 +7,7 @@
 // when nothing can be read). Over a spread the weather of its story is drawn (vn-fx.js), and its ambience and sound
 // play as it comes in (when 音效 is on). Pictures are found by `picture` (a picture's address, made once each).
 import {BOOK_CSS, viewsOf, viewMarkup, viewWords, fitWords, themeStyle, directionOf} from './core/book-pages.js';
-import {readOf, linesOf, sheetOf, sheetCount} from './core/book.js';
+import {readOf, linesOf, sheetOf, sheetCount, slotsOf} from './core/book.js';
 import {createFx, FX_KINDS} from './vn-fx.js';
 
 const STYLE_ID = 'sttts-book-style';
@@ -112,7 +112,8 @@ export function mountBookReader({doc, root, book, picture, sprite = () => '', re
     if (!waiting.has(k)) waiting.set(k, Promise.resolve(picture(p)).catch(() => '').then(u => { urls.set(k, u || ''); waiting.delete(k); }));
     return waiting.get(k);
   }
-  const picturesOf = n => { const s = sheetOf(book, n); return (s.kind === 'spread' ? s.spread.pictures.map(x => x.picture) : [book.cover.picture]).filter(Boolean); };
+  // (the people page's pictures are its people's: slotsOf)
+  const picturesOf = n => slotsOf(book, n).map(x => x.picture).filter(Boolean);
   const urlOf = p => urls.get(keyOf(p)) || '';
   /** A view as an element: 'pre' (its words to come in when shown), or '' (as it is, nothing coming in). */
   function viewEl(v, cls = 'pre') {

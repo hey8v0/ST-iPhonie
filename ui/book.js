@@ -13,7 +13,9 @@ import {saveFile, zipFiles} from '../download.js';
 import {pictureInputs, sizeFor, activeStyle, withoutPeopleTags} from '../core/draw.js';
 import {pickLook} from '../core/vn.js';
 import {BOOK_THEMES, THEME_IDS, themeOf, guessTheme} from '../core/book-themes.js';
-import {storySpreads, storyScript, retellPrompt, retoldSpreads, paceSpreads, bookOf, spreadsFor, scriptParts, normalizeSpread, readOf, castOf, shapeOf, composeOf, missingPictures, wordsOf, sheetOf, sheetCount, SPREADS, SPREAD_IDS, WEATHER, BOOK_LIMIT} from '../core/book.js';
+import {storySpreads, storyScript, retellPrompt, retoldSpreads, paceSpreads, bookOf, spreadsFor, scriptParts, normalizeSpread, readOf, castOf, shapeOf, composeOf, missingPictures, wordsOf, sheetOf, sheetCount, castSpread, slotsOf, bookText, namesIn, SPREADS, SPREAD_IDS, WEATHER, BOOK_LIMIT} from '../core/book.js';
+import {shareToChat} from './share-to-chat.js';
+import {openPuzzle} from './book-puzzle.js';
 import {viewMarkup, themeStyle, directionOf} from '../core/book-pages.js';
 import {mountBookReader, bookStyles} from '../book-reader.js';
 import {pageJpeg, drawSimple} from './book-render.js';
@@ -54,9 +56,11 @@ export function bookApp(ctx) {
   }
   const firstPicture = b => b.cover.picture || b.spreads.flatMap(s => s.pictures.map(p => p.picture)).find(Boolean) || null;
   /** The pictures sheet n shows (the last page shows the cover's). */
-  const picturesOf = (b, n) => { const s = sheetOf(b, n); return (s.kind === 'spread' ? s.spread.pictures.slice(0, SPREADS[s.spread.layout].pictures).map(p => p.picture) : [b.cover.picture]).filter(Boolean); };
-  /** Picture k of sheet n (the cover's on sheet 0), made when the spread has no place for it yet. */
-  const slotOf = (n, k) => n === 0 ? book.cover : (book.spreads[n - 1].pictures[k] ||= {prompt: '', picture: null, people: true});
+  const picturesOf = (b, n) => slotsOf(b, n).map(p => p.picture).filter(Boolean);
+  /** Picture k of sheet n (the cover's on sheet 0; a person's on the people page), made when the spread has no place for it yet. */
+  const slotOf = (n, k) => n === 0 ? book.cover : book.spreads[n - 1].layout === 'cast' ? book.spreads[n - 1].cast[k] : (book.spreads[n - 1].pictures[k] ||= {prompt: '', picture: null, people: true, who: []});
+  /** The 角色 App's other names for the book's people: {alias → name} (a model may write one of those). */
+  const aliasesOf = names => { const out = {}; for (const r of api.readState?.().routes || api.getState().routes) if (names.includes(r.name)) for (const a of r.aliases || []) if (a && !out[a]) out[a] = r.name; return out; };
 
   // ---------- the 立绘 (the 视觉小说's) ----------
   function loadCast() {
@@ -79,7 +83,7 @@ export function bookApp(ctx) {
     const covers = await Promise.all(books.map(b => picUrl(firstPicture(b))));
     const card = (b, i) => {
       const front = {...b, cover: {prompt: '', picture: covers[i] ? {url: 'cover'} : null}}, lack = missingPictures(b).length;
-      return `<button type="button" class="bk-card" data-book="${esc(b.id)}" aria-label="${esc(b.title)}"><span class="bk-mini">${viewMarkup(front, {sheet: 0, part: 'all'}, {url: () => covers[i]})}</span><span class="bk-badge">${esc(themeOf(b.theme).label)} · ${b.spreads.length} 个跨页${lack ? ` · 差 ${lack} 张图` : ''}</span></button>`;
+      return `<button type="button" class="bk-card" data-book="${esc(b.id)}" aria-label="${esc(b.title)}"><span class="bk-mini">${viewMarkup(front, {sheet: 0, part: 'all'}, {url: () => covers[i]})}</span><span class="bk-badge">${esc(themeOf(b.theme).label)} · ${b.spreads.length} 个跨页${b.readers?.length ? ` · ${b.readers.length} 人读过` : ''}${lack ? ` · 差 ${lack} 张图` : ''}</span></button>`;
     };
     v.draw(heading('绘本', help('把酒馆里的故事做成绘本：一个个摊开的两页（跨页），画面讲故事，每一面只有几句话，读出来的就是印在纸上的。\n\n「绘本（改编）」让文字模型把故事编成跨页，像真的绘本那样有节奏：开头安静，画面越来越大，最紧张的地方是一幅铺满两页的大图，结尾再安静下来。字是讲故事的旁白，偶尔一句说话放进气泡；有立绘的角色偶尔会像剪纸一样站在纸上出场。「原文配图」不改一个字，按段落分成跨页，配上正文的图。\n插图用绘图 App 现在的引擎：「绘本画风」按这本书的风格画（水彩、蜡笔、水墨……），「绘图 App 的画风」用你在绘图 App 里选的画风。\n看书：手机上一页一页翻，铺满两页的大图会慢慢移动，让你看到整幅；点右上角的全屏按钮在酒馆页面看，电脑和平板横着放是摊开的两页。下雨下雪这些天气会飘在画上，朗读时正在读的那句会标出来。') + `<button type="button" class="chip-button" data-action="bk-new">${icon('add')}做一本</button>`, 'Picture Book')
       + `<div class="bk-shelf">${books.map(card).join('')}<button type="button" class="bk-new" data-action="bk-new">${icon('add')}<span>做一本绘本</span></button></div>`);
@@ -105,10 +109,31 @@ export function bookApp(ctx) {
         <div class="field"><span>插图${help('补画用绘图 App 现在的引擎，每张都存进相册。一本书要画的有：封面，和每个跨页的一张图（「两个瞬间」是两张）。NovelAI 用 Opus 画小图不扣点；别的大小或引擎会花额度，开始前会问你。')}</span>${seg('pictures', PICTURES)}</div>
         ${form.pictures === 'draw' ? `<div class="field"><span>画风${help('绘本画风：按这本书的风格画（童话是水彩彩铅、古风是水墨、搞笑是蜡笔卡通……），不用绘图 App 里的画师串。绘图 App 的画风：用你在绘图 App 里选的画风画。')}</span>${seg('art', ARTS)}</div>` : ''}
         ${form.mode === 'retell' ? `<div class="field"><span>篇幅</span>${seg('length', LENGTHS)}</div>` : ''}
+        ${peopleRow(...rangeOf(info))}
         <div class="field"><span>书名（可以不填）</span><input data-bk-field="title" value="${esc(form.title)}" maxlength="40" placeholder="${form.mode === 'retell' ? '让文字模型起' : '用聊天的名字'}"></div></div>
         <div class="actions"><button type="button" class="secondary" data-action="bk-shelf">取消</button><button type="button" class="primary" data-action="bk-start">${icon('paint')}开始做</button></div>`);
   }
 
+  /**
+   * 出场人物 (0.9.40): who speaks in the chosen stretch of the story, and whether the 角色 App has their looks (a picture of
+   * them is drawn from those): a tap opens their page there. Read once for a stretch (the steps of every message).
+   */
+  let peopleSeen = {key: '', names: []};
+  function peopleRow(from, to) {
+    if (form.pictures === 'none') return '';
+    const key = `${from}-${to}`;
+    if (peopleSeen.key !== key) {
+      let names = [];
+      try { names = [...new Set((api.bookSource?.(from, to)?.messages || []).flatMap(m => m.steps.filter(x => x.kind === 'say').map(x => x.role)).filter(Boolean))]; } catch { /* no story open */ }
+      peopleSeen = {key, names};
+    }
+    if (!peopleSeen.names.length) return '';
+    const chip = name => { const looks = !!ctx.routeFor?.(name)?.appearance?.trim(); return `<button type="button" class="chip${looks ? '' : ' warn'}" data-bk-person="${esc(name)}" aria-label="${esc(name)}${looks ? '' : '，没写外貌'}">${esc(name)}${looks ? '' : ' · 没写外貌'}</button>`; };
+    return `<div class="field"><span>出场人物${help('这一段里说过话的人。画他们的时候用角色 App 里写的外貌（有参考图也会带上），没写外貌的画出来就不像：点名字去角色 App 写一句，再回来做。改编时模型会给书里要紧的人一页「这本书里的人」，每人一小幅图和一句介绍。')}</span><div class="bk-people-row">${peopleSeen.names.map(chip).join('')}</div></div>`;
+  }
+
+  /** The messages the form has picked: [from, to]. */
+  const rangeOf = info => form.range === 'pick' ? [Math.min(form.from, form.to), Math.max(form.from, form.to)] : form.range === 'all' ? [0, info.length - 1] : [Math.max(0, info.length - Number(form.range)), info.length - 1];
   // ---------- making ----------
   function progress(title, done, total, note = '', preview = '') {
     if (view !== 'making') return;
@@ -125,14 +150,16 @@ export function bookApp(ctx) {
     if (how === 'draw') return spreads;
     return spreads.map(s => {
       if (s.layout === 'stage' || s.layout === 'text') return s;
+      // The people page: without any pictures the book has none of them either; with the story's own it waits for theirs.
+      if (s.layout === 'cast') return how === 'none' ? null : s;
       const pictures = how === 'story' ? s.pictures.filter(p => p.picture) : [];
       const layout = !pictures.length ? 'text' : pictures.length < SPREADS[s.layout].pictures ? 'page' : s.layout;
       return normalizeSpread({...s, layout, pictures});
-    });
+    }).filter(Boolean);
   }
   async function start() {
     const info = api.bookInfo();
-    const [from, to] = form.range === 'pick' ? [Math.min(form.from, form.to), Math.max(form.from, form.to)] : form.range === 'all' ? [0, info.length - 1] : [Math.max(0, info.length - Number(form.range)), info.length - 1];
+    const [from, to] = rangeOf(info);
     const me = job = {stop: false};
     view = 'making'; book = null;
     try {
@@ -141,8 +168,8 @@ export function bookApp(ctx) {
       if (!source.messages.length) throw Error('这一段里没有故事内容');
       loadCast();
       const speakers = [...new Set(source.messages.flatMap(m => m.steps.filter(s => s.kind === 'say').map(s => s.role)).filter(Boolean))];
-      const standing = speakers.filter(n => sprite(n));
-      let spreads, title = form.title.trim(), subtitle = '', genre = '', cover = '', ending = '';
+      const standing = speakers.filter(n => sprite(n)), aliases = aliasesOf(speakers);
+      let spreads, title = form.title.trim(), subtitle = '', genre = '', cover = '', ending = '', coverWho = [], people = [];
       if (form.mode === 'retell') {
         const {script, pictures} = storyScript(source.messages), parts = scriptParts(script), want = form.length === 'auto' ? spreadsFor(script.length) : Number(form.length);
         // The sounds the 音效 library has (while 音效 is on): the model picks each spread's ambience and sounds from them.
@@ -153,19 +180,22 @@ export function bookApp(ctx) {
           progress('文字模型在编绘本', i, parts.length, parts.length > 1 ? `故事比较长，分成 ${parts.length} 段来编：第 ${i + 1} 段` : '分成跨页、想每一面的画面和排法、写读出来的几句话');
           const last = spreads.at(-1);
           const prompt = retellPrompt(parts[i], {spreads: Math.max(3, Math.round(want * parts[i].length / script.length)), cast: speakers, staged: standing, part: parts.length > 1 ? {index: i, of: parts.length} : null, before: last ? last.words.map(w => w.text).join('').slice(0, 160) : '', sounds});
-          const got = retoldSpreads(await api.bookWrite(prompt.system, prompt.user), {pictures, cast: speakers, staged: standing});
-          if (!i) { title ||= got.title; subtitle = got.subtitle; genre = got.genre; cover = got.cover; }
+          const got = retoldSpreads(await api.bookWrite(prompt.system, prompt.user), {pictures, cast: speakers, staged: standing, aliases});
+          if (!i) { title ||= got.title; subtitle = got.subtitle; genre = got.genre; cover = got.cover; coverWho = got.coverWho; people = got.people; }
           ending = got.ending || ending;
           spreads.push(...got.spreads);
         }
         // Written in parts: paced once more as one book (the pictures across both pages, those standing on the paper).
         if (parts.length > 1) spreads = paceSpreads(spreads);
-      } else spreads = storySpreads(source.messages);
+      } else { spreads = storySpreads(source.messages); people = speakers.map(name => ({name})); }
+      // 出场人物: the page after the cover (改编: the people the model picked, with a line each; 原文: who speaks).
+      const page = castSpread(people);
+      if (page) spreads.unshift(page);
       spreads = picturesFor(spreads, form.pictures);
       const theme = form.theme === 'auto' ? genre || guessTheme(wordsOf(spreads)) : form.theme;
       const drawn = form.pictures === 'draw' && !!cover;
       let made = bookOf({title: title || `${source.title || '我们'}的故事`, subtitle, author: source.user, theme, art: form.art, mode: form.mode, source: {chat: source.chat, name: source.title, from, to}, spreads,
-        cover: drawn ? cover : '', coverPicture: drawn ? null : spreads.flatMap(s => s.pictures.map(p => p.picture)).find(Boolean) || null, ending});
+        cover: drawn ? cover : '', coverWho, coverPicture: drawn ? null : spreads.flatMap(s => s.pictures.map(p => p.picture)).find(Boolean) || null, ending});
       made = await api.saveBook(made);
       book = made;
       // 原文 plans no picture: each spread without one gets one written from its words.
@@ -220,9 +250,14 @@ export function bookApp(ctx) {
     if (!what) { const w = await api.writePrompt((words || book.title).slice(0, 300), names); what = w?.prompt || ''; }
     if (!what) throw Error('没能写出这一张要画什么');
     s.prompt = what;
-    const people = s.people !== false, who = people ? names.filter(x => (what + ' ' + words).includes(x)) : [];
+    // Whose looks go with it (0.9.40): the people the model named for this picture; else the book's people named in
+    // what it shows (by name or alias, any case); else — the old way — those named in the page's words.
+    const people = s.people !== false, aliases = aliasesOf(names);
+    const named = people ? (s.who || []).filter(x => names.includes(x)) : [];
+    const who = !people ? [] : named.length ? named : namesIn(what, names, aliases).length ? namesIn(what, names, aliases) : namesIn(words, names, aliases).slice(0, 2);
+    if (people && !named.length) s.who = who;
     const scene = [people ? what : [withoutPeopleTags(what), 'no humans, scenery'].filter(Boolean).join(', '), composeOf(spread)].filter(Boolean).join(', ');
-    const inputs = pictureInputs(drawSettings(), {prompt: scene, characters: who}, people ? words : '');
+    const inputs = pictureInputs(drawSettings(), {prompt: scene, characters: who}, people && !who.length ? words : '');
     inputs.params = {...inputs.params, ...sizeFor(inputs.params, shapeOf(spread))};
     inputs.negative = [inputs.negative, t.negative, people ? '' : '1girl, 1boy, people, person, character', spread && ['quiet', 'ground'].includes(spread.layout) ? 'frame, border, busy background' : ''].filter(Boolean).join(', ');
     const {names: _n, ...request} = inputs;
@@ -253,25 +288,32 @@ export function bookApp(ctx) {
   // ---------- changes ----------
   async function sheetMenu(n) {
     at = n;
+    // (What readers said comes from the chat while the book is open: the book as it is kept.)
+    try { const fresh = await api.getBook(book.id); if (fresh && !job) book = fresh; } catch { /* as it is here */ }
     const sheet = sheetOf(book, n), s = sheet.spread, lack = missingPictures(book).length, bare = missingPictures(book, true).length - lack;
-    const room = s ? SPREADS[s.layout].pictures : sheet.kind === 'cover' ? 1 : 0, has = picturesOf(book, n).length > 0;
+    const castPage = s?.layout === 'cast';
+    const room = castPage ? s.cast.length : s ? SPREADS[s.layout].pictures : sheet.kind === 'cover' ? 1 : 0, has = picturesOf(book, n).length > 0;
     const key = await menu(ctx, sheet.kind === 'cover' ? '封面' : sheet.kind === 'end' ? '最后一页' : `第 ${n} 个跨页`, [
       sheet.kind === 'cover' && {key: 'title', icon: 'edit', label: '改书名'},
       sheet.kind === 'end' && {key: 'ending', icon: 'edit', label: '改最后一句'},
-      s && {key: 'words', icon: 'edit', label: '改字', note: '印在纸上、读出来的几句话，谁说的，小标题'},
-      s && {key: 'layout', icon: 'sliders', label: '排法', note: SPREADS[s.layout].label},
-      s && (room > 0 || s.layout === 'stage') && s.layout !== 'pair' && {key: 'flip', icon: 'sliders', label: s.layout === 'stage' ? '人物和字换一边' : SPREADS[s.layout].halves ? '图和字换一边' : '字换到另一边'},
+      s && !castPage && {key: 'words', icon: 'edit', label: '改字', note: '印在纸上、读出来的几句话，谁说的，小标题'},
+      castPage && {key: 'people', icon: 'edit', label: '改人物', note: '每个人的一句介绍，去掉谁'},
+      s && !castPage && {key: 'layout', icon: 'sliders', label: '排法', note: SPREADS[s.layout].label},
+      s && !castPage && (room > 0 || s.layout === 'stage') && s.layout !== 'pair' && {key: 'flip', icon: 'sliders', label: s.layout === 'stage' ? '人物和字换一边' : SPREADS[s.layout].halves ? '图和字换一边' : '字换到另一边'},
       s && ['spread', 'fade'].includes(s.layout) && {key: 'space', icon: 'sliders', label: s.space === 'top' ? '字挪到画面下面' : '字挪到画面上面'},
       s && s.layout === 'spread' && {key: 'tone', icon: 'sliders', label: s.tone === 'dark' ? '字改成深色' : '字改成白色', note: s.tone === 'dark' ? '画面亮的时候' : '画面暗的时候'},
-      room > 0 && {key: 'draw', icon: 'paint', label: has ? (s ? '重画这一面的图' : '重画封面') : (s ? '给这一面画图' : '画封面'), note: '可以先改要画什么'},
+      room > 0 && {key: 'draw', icon: 'paint', label: castPage ? '画一个人的图' : has ? (s ? '重画这一面的图' : '重画封面') : (s ? '给这一面画图' : '画封面'), note: castPage ? '按角色 App 里的外貌' : '可以先改要画什么'},
       room > 0 && {key: 'pick', icon: 'image', label: '从相册换图'},
       room > 0 && has && {key: 'unpic', icon: 'trash', label: '去掉图'},
-      s && {key: 'weather', icon: 'star', label: '天气和声音', note: weatherNote(n)},
+      s && !castPage && {key: 'weather', icon: 'star', label: '天气和声音', note: weatherNote(n)},
+      has && sheet.kind !== 'end' && {key: 'puzzle', icon: 'grid', label: '把这一页拼回去', note: '3×3 拼图，拼好了翻页'},
       s && book.spreads.length < BOOK_LIMIT.spreads && {key: 'insert', icon: 'add', label: '在后面加一个跨页'},
       s && book.spreads.length > 1 && {key: 'remove', icon: 'trash', label: '删掉这个跨页'},
       lack ? {key: 'fill', icon: 'paint', label: `补画缺的图（${lack} 张）`, note: '按写好的画面画'} : bare > 0 && {key: 'fill-all', icon: 'paint', label: `给没图的地方都画图（${bare} 张）`, note: '按每一面的字写画面再画'},
       {key: 'theme', icon: 'star', label: '换风格', note: '现在是' + themeOf(book.theme).label},
       {key: 'art', icon: 'paint', label: '画风', note: book.art === 'book' ? '绘本画风（跟着风格画）' : '绘图 App 的画风'},
+      {key: 'share', icon: 'share', label: '发给 TA', note: 'TA 读完会说说感想'},
+      book.readers?.length ? {key: 'readers', icon: 'bubble', label: `读后感（${book.readers.length}）`, note: book.readers.at(-1).name + '：' + book.readers.at(-1).text.slice(0, 30)} : null,
       {key: 'export', icon: 'download', label: '导出', note: '网页绘本、PDF、EPUB、有声书、图片'},
       {key: 'delete', icon: 'trash', label: '删掉这本绘本', note: '画好的图还留在相册里', danger: true},
     ]);
@@ -280,6 +322,10 @@ export function bookApp(ctx) {
       if (key === 'title') await editTitle();
       else if (key === 'ending') await editEnding();
       else if (key === 'words') await editWords(n);
+      else if (key === 'people') await editPeople(n);
+      else if (key === 'puzzle') await puzzle(n);
+      else if (key === 'share') await shareBook();
+      else if (key === 'readers') readersSheet();
       else if (key === 'layout') await changeLayout(n);
       else if (key === 'flip') { s.side = s.side === 'left' ? 'right' : 'left'; await keep(n); }
       else if (key === 'space') { s.space = s.space === 'top' ? 'bottom' : 'top'; await keep(n); }
@@ -297,9 +343,14 @@ export function bookApp(ctx) {
       else if (key === 'delete' && await ctx.confirm(`删掉《${book.title}》？`, '书删了就没了；画好的图还留在相册里。')) { await api.deleteBook(book.id); ctx.notify('删掉了'); await shelf(); }
     } catch (error) { ctx.notify(error.message, {error: true}); }
   }
-  /** Which picture of sheet n (asked on a spread of two moments: the left one or the right one). */
+  /** Which picture of sheet n (asked on a spread of two moments: the left one or the right one; on the people page: whose). */
   async function whichPicture(n, title) {
     const s = sheetOf(book, n).spread;
+    if (s?.layout === 'cast') {
+      if (s.cast.length === 1) return 0;
+      const k = await menu(ctx, title, s.cast.map((c, k) => ({key: String(k), icon: 'image', label: c.name, note: c.picture ? '已有图' : '还没有图'})));
+      return k == null ? null : Number(k);
+    }
     if (!s || SPREADS[s.layout].pictures <= 1) return 0;
     const k = await menu(ctx, title, [0, 1].map(k => ({key: String(k), icon: 'image', label: k ? '右边那张' : '左边那张', note: s.pictures[k]?.picture ? (s.pictures[k].prompt || '已有图').slice(0, 40) : '还没有图'})));
     return k == null ? null : Number(k);
@@ -324,6 +375,37 @@ export function bookApp(ctx) {
   function editEnding() {
     const d = ctx.dialog('改最后一句', `<div class="field"><span>最后一页的一句话（可以不写）</span><textarea data-bk-edit="ending" rows="3" maxlength="80">${esc(book.ending)}</textarea></div><div class="actions"><button type="button" class="primary" data-bk-save>存好</button></div>`);
     return dialogDone(d, async () => { book.ending = d.body.querySelector('[data-bk-edit=ending]').value.trim(); await keep(); });
+  }
+  /** 出场人物: each person's line, and who is left out (their picture stays in 相册). */
+  function editPeople(n) {
+    const s = book.spreads[n - 1];
+    const row = (c, i) => `<div class="bk-row" data-bk-row data-i="${i}"><b class="bk-row-name">${esc(c.name)}</b><button type="button" class="icon-button" data-bk-del aria-label="去掉 ${esc(c.name)}">${icon('close')}</button><input data-k="line" value="${esc(c.line)}" maxlength="${BOOK_LIMIT.line}" placeholder="一句介绍（可以不写）" aria-label="${esc(c.name)}的介绍"></div>`;
+    const d = ctx.dialog('改人物', `<div class="field"><span>小标题</span><input data-bk-head value="${esc(s.heading)}" maxlength="${BOOK_LIMIT.heading}" placeholder="这本书里的人"></div>
+      <div data-bk-rows>${s.cast.map(row).join('')}</div>
+      <div class="actions"><button type="button" class="primary" data-bk-save>存好</button></div>`);
+    d.body.addEventListener('click', e => { const del = e.target.closest('[data-bk-del]'); if (del) del.closest('[data-bk-row]').remove(); });
+    return dialogDone(d, async () => {
+      const people = [...d.body.querySelectorAll('[data-bk-row]')].map(r => ({...s.cast[Number(r.dataset.i)], line: r.querySelector('[data-k=line]').value.trim()}));
+      if (!people.length) { book.spreads.splice(n - 1, 1); await keep(Math.min(n, book.spreads.length)); return; }
+      book.spreads[n - 1] = normalizeSpread({...s, heading: d.body.querySelector('[data-bk-head]').value.trim(), cast: people});
+      await keep(n);
+    });
+  }
+  /** 把这一页拼回去 (0.9.40): the sheet's picture as a 3×3 puzzle; put together, the page turns. */
+  async function puzzle(n) {
+    const url = await picUrl(picturesOf(book, n)[0]);
+    if (!url) { ctx.notify('这一页还没有图'); return; }
+    const last = sheetCount(book) - 1;
+    openPuzzle(ctx, {url, title: n ? `第 ${n} 个跨页` : '封面', onDone: () => { if (n < last) reader?.go(n + 1); }});
+  }
+  /** 发给 TA (0.9.40): the book as a card in a chat (its words go with it); the reader answers with what they thought. */
+  async function shareBook() {
+    const to = await shareToChat(ctx, {title: `把《${book.title}》发给…`, what: '这本绘本', message: {kind: 'book', book: {id: book.id, title: book.title, subtitle: book.subtitle, theme: book.theme, spreads: book.spreads.length, coverId: book.cover.picture?.id || '', text: bookText(book)}}});
+    if (to) api.chatReply?.(to.id)?.catch?.(() => {});
+  }
+  function readersSheet() {
+    const when = at => { const d = Math.max(0, Date.now() - at); return d < 36e5 ? `${Math.max(1, Math.round(d / 6e4))} 分钟前` : d < 864e5 ? `${Math.round(d / 36e5)} 小时前` : `${Math.round(d / 864e5)} 天前`; };
+    ctx.dialog('读后感', `<div class="group">${[...book.readers].reverse().map(r => `<div class="list-row static bk-reader"><span><strong>${esc(r.name)}</strong><small>${esc(when(r.at))}</small><p>${esc(r.text)}</p></span></div>`).join('')}</div>`);
   }
   /** What a spread's weather and sound are now, in words (the menu's note). */
   function weatherNote(n) {
@@ -393,7 +475,7 @@ export function bookApp(ctx) {
   }
   async function changeLayout(n) {
     const s = book.spreads[n - 1];
-    const l = await menu(ctx, '排法', SPREAD_IDS.map(id => ({key: id, icon: id === s.layout ? 'check' : 'sliders', label: SPREADS[id].label, note: SPREADS[id].note})));
+    const l = await menu(ctx, '排法', SPREAD_IDS.filter(id => id !== 'cast').map(id => ({key: id, icon: id === s.layout ? 'check' : 'sliders', label: SPREADS[id].label, note: SPREADS[id].note})));
     if (!l || l === s.layout) return;
     const want = SPREADS[l].pictures, base = s.pictures[0]?.prompt || '', pictures = [...s.pictures];
     while (pictures.length < want) pictures.push({prompt: base ? base + ', close-up' : '', picture: null, people: true});
@@ -413,15 +495,19 @@ export function bookApp(ctx) {
     const s = slotOf(n, k), spread = sheetOf(book, n).spread;
     const d = ctx.dialog(n ? '画这一张' : '画封面', `<div class="field"><span>画什么（英文标签，空着就按${n ? '这一面的字' : '书名'}写）</span><textarea data-bk-prompt rows="4">${esc(s.prompt)}</textarea></div>
       <label class="bk-check"><input type="checkbox" data-bk-people${s.people !== false ? ' checked' : ''}> 画面里画人物</label>
+      ${castOf(book).length ? `<div class="field"><span>画面里有谁${help('选中的人按角色 App 里的外貌（和参考图）画；没选的人不带外貌。')}</span><div class="bk-people-row">${castOf(book).map(x => `<button type="button" class="chip" data-bk-who="${esc(x)}" aria-pressed="${(s.who || []).includes(x)}">${esc(x)}</button>`).join('')}</div></div>` : ''}
       <p class="hint">${book.art === 'book' ? `用「${esc(themeOf(book.theme).label)}」的绘本画风` : '用绘图 App 的画风'}，画成${SHAPES[shapeOf(spread)]}，加上出场人物的外貌，用绘图 App 现在的引擎。</p><div class="actions"><button type="button" class="primary" data-bk-go>${icon('paint')}画</button></div>`);
     return new Promise(resolve => {
       d.onClose(() => resolve());
       d.body.addEventListener('click', async e => {
+        const chip = e.target.closest('[data-bk-who]');
+        if (chip) { chip.setAttribute('aria-pressed', String(chip.getAttribute('aria-pressed') !== 'true')); return; }
         const b = e.target.closest('[data-bk-go]');
         if (!b) return;
         b.disabled = true; b.textContent = '正在画…';
         try {
           slotOf(n, k).people = d.body.querySelector('[data-bk-people]').checked;
+          slotOf(n, k).who = [...d.body.querySelectorAll('[data-bk-who][aria-pressed=true]')].map(x => x.dataset.bkWho).slice(0, BOOK_LIMIT.who);
           await drawShot(n, k, {prompt: d.body.querySelector('[data-bk-prompt]').value.trim()});
           d.close(); await keep(n);
         } catch (error) { b.disabled = false; b.textContent = '再试一次'; ctx.notify(error.message, {error: true}); }
@@ -521,6 +607,8 @@ export function bookApp(ctx) {
   v.on('click', '[data-action=bk-start]', () => start());
   v.on('click', '[data-action=bk-stop]', () => { if (job) job.stop = true; ctx.notify('画完这一张就停'); });
   v.on('click', '[data-book]', el => { at = 0; open(el.dataset.book); });
+  v.on('click', '[data-bk-person]', el => ctx.openPendingRole?.(el.dataset.bkPerson));
+  v.openBook = id => { at = 0; return open(id); };
   v.on('click', '[data-bk-set]', el => { form[el.dataset.bkSet] = el.dataset.value; make(); });
   v.on('click', '[data-bk-theme]', el => { form.theme = el.dataset.bkTheme; make(); });
   v.root.addEventListener('change', e => { const f = e.target.dataset?.bkField; if (f && form) form[f] = f === 'title' ? e.target.value : Math.max(0, Number(e.target.value) || 0); });

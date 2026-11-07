@@ -336,7 +336,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const ctx = {api, doc, win, notify, dialog, confirm, help, lock, open, routeFor, engineOf, previewSide: side => previewSide(side), openPendingRole: name => openPendingRole(name), visible: name => active === name && !locked,
     editEngine: id => withView('engines', v => v.edit?.(id)), showSongDraft: id => { open('music'); withView('music', v => v.showDraft?.(id)); }, showPresetKind: kind => withView('presets', v => v.showKind?.(kind)), openDraw: request => { open('draw'); withView('draw', v => v.load?.(request)); },
     // 0.9.35: a chat (from what another app sent there), a forum post (from a card in a chat).
-    openThread: id => { open('chat'); withView('chat', v => v.openThread?.(id)); }, openForumPost: id => { open('forum'); withView('forum', v => v.openPost?.(id)); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
+    openThread: id => { open('chat'); withView('chat', v => v.openThread?.(id)); }, openForumPost: id => { open('forum'); withView('forum', v => v.openPost?.(id)); }, openBook: id => { open('picbook'); withView('picbook', v => v.openBook?.(id)); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
   installMotion(win, mount, signal);
   // On a computer the phone is a floating window: its top bar moves it.
   const stageBar = $('.stage-bar'), sizeButton = $('[data-system=size]');

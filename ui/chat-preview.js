@@ -24,6 +24,7 @@ export function preview(m) {
     case 'letter': return '[信件]';
     case 'post': return '[帖子] ' + (m.post?.title || m.text || '');
     case 'outfit': return '[穿搭] ' + (m.outfit?.name || '');
+    case 'book': return '[绘本] ' + (m.book?.title || '');
     case 'dice': return '[骰子]';
     case 'call': return `[${callSummary(m)}]`;
     case 'pat': return patText(m);
