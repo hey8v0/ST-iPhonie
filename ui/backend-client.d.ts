@@ -1089,7 +1089,6 @@ export interface BackendFacade {
     wallet(): Wallet;
     /** Buys a decoration once (paid from the wallet; too little left: an error with code 'BROKE'). */
     /** 宠物 (0.9.36): food from the 商城 paid with 零钱 (1–10 at a time); answers the pets as they are after. */
-    buyPetFood(key: string, count?: number): unknown;
     buyDecoration(kind: 'bubble' | 'frame' | 'background', key: string): Wallet;
     saveGift(gift: Partial<ShopGift>): ShopGift;
     deleteGift(id: string): Wallet;

@@ -56,7 +56,7 @@ import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_S
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, drawCast, defaultDraw, normalizeVibeSettings, applyImageConnection, tavernPicture } from './draw.js';
 import { normalizeBubbleSet, normalizeBubbleSets, normalizeBubbleOf, BUBBLE_LIMITS } from './bubble-css.js';
 import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, roleInSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive, normalizeRoleStickers, normalizeBgOf, normalizeStatusOf, normalizePeeked } from './chat.js';
-import { normalizePets, PET_FOODS, PET_LIMITS } from './pets.js';
+import { normalizePets } from './pets.js';
 import { ChatStore, money, currentDm, searchThreads } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
 import { CloudQueue, KeyHashQueue, newRoomCode, validRoom, sha256Hex } from './cloud-queue.js';
@@ -859,19 +859,6 @@ export class TTSBackend {
         this.save(next);
         this.emit('wallet', { balance: this.settings.chat.wallet.balance });
         return this.wallet();
-    }
-    /** 宠物 (0.9.36): food from the 商城, paid with 零钱; it goes into the pets' larder. */
-    buyPetFood(key, count = 1) {
-        const food = PET_FOODS[key], n = Math.max(1, Math.min(10, Math.round(Number(count)) || 1));
-        if (!food) throw Error('商城里没有这种吃的');
-        const have = this.settings.chat.pets.food[key] || 0;
-        if (have + n > PET_LIMITS.food) throw Error(`${food.name}最多存 ${PET_LIMITS.food} 份`);
-        this.walletMove(-food.price * n, { kind: 'shop', note: `宠物零食 · ${food.name} ×${n}` });
-        const next = this.getState();
-        next.chat.pets = normalizePets({ ...next.chat.pets, food: { ...next.chat.pets.food, [key]: (next.chat.pets.food[key] || 0) + n } });
-        this.save(next);
-        this.emit('wallet', {});
-        return clone(this.settings.chat.pets);
     }
     /** Buys a decoration once; it can then be put on in 个性装扮. */
     buyDecoration(kind, key) {
@@ -3705,7 +3692,7 @@ export class TTSBackend {
             previewChatPrompt: preset => this.previewChatPrompt(preset), validateChatPreset: preset => { try { validateChatPreset(normalizeChatPreset(clone(preset))); return ''; } catch (error) { return message(error); } },
             saveChatOptions: patch => this.saveChatOptions(clone(patch)),
             saveBubbleSet: set => this.saveBubbleSet(clone(set)), deleteBubbleSet: id => this.deleteBubbleSet(String(id || '')),
-            wallet: () => this.wallet(), buyDecoration: (kind, key) => this.buyDecoration(kind, key), buyPetFood: (key, count) => this.buyPetFood(String(key || ''), count), saveGift: gift => this.saveGift(gift), deleteGift: id => this.deleteGift(id),
+            wallet: () => this.wallet(), buyDecoration: (kind, key) => this.buyDecoration(kind, key), saveGift: gift => this.saveGift(gift), deleteGift: id => this.deleteGift(id),
             sendPaid: (threadId, message) => this.sendPaid(threadId, message), takeSent: (threadId, messageId, accept) => this.takeSent(threadId, messageId, accept !== false),
             shopCatalog: () => clone({ premium: PREMIUM, kinds: DECOR_KINDS, gifts: shopGifts(this.settings.chat.wallet), ledgerKinds: LEDGER_KINDS }), saveContact: contact => this.saveContact(contact), deleteContact: id => this.deleteContact(id), chatContacts: all => clone(all ? chatContacts(this.seen) : this.contacts()), addRoleContact: name => this.addRoleContact(name),
             searchChatMessages: (query, options) => this.searchChatMessages(String(query ?? ''), clone(options || {})),

@@ -704,7 +704,7 @@ export function knowsRule(names, user, {prompts = {}, group = false} = {}) {
  * outfit: what they have just changed into (cue 'outfit', 衣柜 × 聊天). cue 'group': a group chats on its own (群里自己聊).
  * A 旁观群 (thread.watch) is talked in without the user.
  */
-export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', groups = '', nudge = false, cue = '', pictures = [], time = Date.now(), statuses = {}, peeked = '', posts = [], outfit = '', pats = {}}) {
+export function buildChatRequest({prompts = {}, preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null, forum = '', groups = '', privateChats = '', nudge = false, cue = '', pictures = [], time = Date.now(), statuses = {}, peeked = '', posts = [], outfit = '', pats = {}}) {
   const group = thread.type === 'group', watch = group && thread.watch === true;
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
@@ -732,6 +732,7 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     '没后缀': members.filter(m => !pats[m.name]).map(m => m.name).join('、')});
   // 0.9.35: what else this chat knows and can do, each a block of 系统提示词 of its own.
   const extra = [
+    group && promptOn(prompts, 'knows') ? privateChats : '',
     // 旁观群: the user is not in it, and nobody there knows the user sees it.
     // (told whether the block is on or not: off, it only stops the contacts starting groups)
     watch ? fillPrompt(promptTemplate(prompts, 'watch', 'system'), {'用户': user, '群名': thread.name, '名单': members.map(m => m.name).join('、')}) : '',

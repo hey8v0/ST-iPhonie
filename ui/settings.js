@@ -1,4 +1,4 @@
-import {storyPhoneSheet as openStoryPhone} from './story-phone.js';
+import {storyLinkSheet as openStoryPhone, storyLinkNote} from './story-phone.js';
 import {createView, esc, btn, field, input, select, textArea, toggle, heading, size, languageField, typedLanguages, groupTitle, help, copyText, bindCombos} from './common.js';
 import {buildReport} from '../core/diagnostics.js';
 import {saveFile, zipFiles} from '../download.js';
@@ -387,7 +387,7 @@ export function settingsApp(ctx) {
     if (backup) { await renderBackup(ticket); return; }
     if (restore) { renderRestore(); return; }
     if (storage) { await renderStorage(ticket); return; }
-    const [phone, cache, library] = await Promise.all([api.getPhone(), api.cacheStats(), api.libraryStats().catch(() => null)]);
+    const [phone, cache, library, storyThreads] = await Promise.all([api.getPhone(), api.cacheStats(), api.libraryStats().catch(() => null), api.listThreads()]);
     if (v.disposed || ticket !== epoch) return;
     const s = api.getState(), space = api.phoneSpace?.() || {};
     const wallName = phone.wallpaper.kind === 'builtin' ? (phone.wallpaper.key === 'custom' ? '主题色' : wallpapers[phone.wallpaper.key]?.name) : phone.wallpaper.kind === 'look' ? '主题的壁纸' : '自己的照片';
@@ -409,7 +409,7 @@ export function settingsApp(ctx) {
       + `<div class="group pad"><button class="list-row" data-action="voice-sheet"><span><strong>正文语音</strong><small>${voiceNote(s)}</small></span>${icon('next')}</button>
           <button class="list-row" data-action="draw-sheet"><span><strong>正文出图</strong><small>${drawNote(s)}</small></span>${icon('next')}</button>
           ${s.general.voiceEnabled !== false ? `<button class="list-row" data-action="narration"><span><strong>整篇朗读</strong><small>${narrationNote(s)}</small></span>${icon('next')}</button>` : ''}
-          <button class="list-row" data-action="story-phone"><span><strong>正文联动手机</strong><small>${s.chat.proactive?.on ? '开 · 正文里的消息、照片、转账、来电会真的出现在手机上' + (s.chat.proactive.clock ? '，也按现实时间来找你' : '') : s.chat.proactive?.clock ? '只按现实时间来找你' : '关'}</small></span>${icon('next')}</button>
+          <button class="list-row" data-action="story-phone"><span><strong>正文和手机</strong><small>${storyLinkNote(s, storyThreads)}</small></span>${icon('next')}</button>
           ${toggle('voiceIsland', '台词小窗', s.general.voiceIsland === true, '在酒馆页面上浮一个小窗，列出最新一条回复里的台词，点哪句念哪句（再点暂停），「整条」从头念到尾。正文里的声波点不到时（比如手机上在看视觉小说，立绘盖住了正文）、或者想按自己的节奏一句句听时打开。可以拖到不挡视线的地方；✕ 收起到下一条回复。')}
         </div>
         <details data-group="voice-more"><summary>更多<small class="fold-note">按钮、声波、音量</small></summary><div class="fold-body">

@@ -26,11 +26,11 @@ import {PREMIUM, yuan} from '../core/wallet.js';
 import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
 import {eachThumb, previewBlob} from './thumbs.js';
 import {photoWall} from './photo-wall.js';
-import {storyPhoneSheet} from './story-phone.js';
+import {storyLinkSheet, storyLinkNote} from './story-phone.js';
 import {remindLabel} from '../core/remind.js';
 import {petLayer} from './chat-pets.js';
 import {petStrip} from './pet-sprites.js';
-import {PET_KINDS, PET_FOODS, PET_LIMITS, petNow, petMood, feedPet, playPet, adoptPet} from '../core/pets.js';
+import {PET_KINDS, PET_LIMITS, adoptPet} from '../core/pets.js';
 export {preview};
 
 // Chat app, QQ style: 消息 (conversations, with search, 置顶 and 免打扰), 联系人 (特别关心, friends, groups, profile cards)
@@ -118,23 +118,10 @@ export function chatApp(ctx) {
   }
 
   // ---------- 宠物 (0.9.36): they live in the chats (ui/chat-pets.js) ----------
-  const pets = () => api.getState().chat.pets || {list: [], food: {}, show: true};
-  // 心情 from play is gathered a while and saved at once: each save of the settings draws the chat again.
-  let played = new Map(), playTimer = 0;
-  function queuePlay(id, amount) {
-    played.set(id, Math.min(12, (played.get(id) || 0) + amount));
-    if (!playTimer) playTimer = ctx.win.setTimeout(flushPlay, 30_000);
-  }
-  function flushPlay() {
-    ctx.win.clearTimeout(playTimer); playTimer = 0;
-    if (!played.size) return;
-    const p = pets(), now = Date.now(), list = p.list.map(x => played.has(x.id) ? playPet(x, played.get(x.id), now) : x);
-    played = new Map();
-    try { api.saveChatOptions({pets: {...p, list}}); } catch { /* kept for the next time */ }
-  }
-  const petsLayer = petLayer({win: ctx.win, doc: ctx.doc, pets, onPlay: queuePlay, onCard: id => petCard(id)});
+  const pets = () => api.getState().chat.pets || {list: [], show: true};
+  const petsLayer = petLayer({win: ctx.win, doc: ctx.doc, pets, onCard: id => petCard(id)});
   const baseDispose = v.dispose.bind(v);
-  v.dispose = () => { petsLayer.detach(); flushPlay(); baseDispose(); };
+  v.dispose = () => { petsLayer.detach(); baseDispose(); };
 
   // ---------- The user (我) ----------
   const profile = () => api.readState().chat.profile;
@@ -214,21 +201,10 @@ export function chatApp(ctx) {
    * 带进剧情: 这一次 (pick messages for the next story reply, once) or 一直带着 (the story always knows this chat: its
    * memory and whatever is not written up yet). Both can be on; what is picked goes in word for word as well.
    */
-  function bringSheet() {
-    const waiting = pendingBring(), who = thread.type === 'group' ? `群聊「${thread.name}」` : thread.members[0];
-    const d = sheet('带进剧情', `<div class="group">
-        <div class="setting-row"><span>这一次${help('挑几条消息，原样带进下一次正文，用一次就没了。适合刚聊完、想让正文马上接上的一段。再选一次会替换掉之前选的。')}</span>${btn('bring-pick', '选几条', 'chip-button')}</div>
-        ${toggle('story-keep', '一直带着', thread.story === true, `每次写正文都带上你和${who}的聊天（整理好的记忆，加上还没整理的消息），正文一直记得你们在手机上聊过什么。会多占一些正文的字数，只给重要的聊天打开就好。`)}
-      </div>
-      ${waiting ? `<p class="hint">${waiting.threadId === threadId ? '这段聊天' : `和${esc(waiting.name)}的聊天`}有 ${waiting.count} 条等着带进下一次正文 ${btn('bring-cancel', '取消', 'text-button')}</p>` : ''}`, {
-      'bring-pick': () => { d.close(); selecting = new Set(); pickFor = 'bring'; panel = null; render(); },
-      'bring-cancel': async () => { d.close(); await api.chatCancelBring?.(); ctx.notify('已取消，这次不带聊天进正文'); render(); }
-    });
-    d.body.querySelector('[data-field="story-keep"]')?.addEventListener('change', async e => {
-      const on = e.target.checked;
-      try { await api.updateThread(threadId, {story: on}); ctx.notify(on ? `正文会一直记得和${who}的聊天` : '这段聊天不再一直带进正文'); render(); }
-      catch (error) { e.target.checked = !on; ctx.notify(error.message, {error: true}); }
-    });
+  function bringSheet({over = false, onClose = () => render(), beforePick = () => {}} = {}) {
+    return storyLinkSheet(ctx, {over, onClose, threadId: mode === 'thread' ? threadId : '', onPick: () => {
+      beforePick(); selecting = new Set(); pickFor = 'bring'; panel = null; render();
+    }});
   }
   /** The 带进剧情 count; a choice already waiting is replaced by the new one (only one goes into the story). */
   const pickedLabel = n => { const before = pickFor === 'bring' && pendingBring(); return `已选 ${n} 条${before ? `（会替换之前选的 ${before.count} 条）` : ''}`; };
@@ -729,9 +705,12 @@ export function chatApp(ctx) {
     if (eggSeen.thread !== threadId) { eggSeen = {thread: threadId, ids: new Set(list.map(m => m.id))}; return; }
     const fresh = list.filter(m => !eggSeen.ids.has(m.id));
     for (const m of fresh) eggSeen.ids.add(m.id);
-    // 宠物: someone else's new message brings them over (a red packet or a present, all of them).
-    const theirs = fresh.findLast(m => m.from !== 'me' && !LINE_KINDS.includes(m.kind));
-    if (theirs) ctx.win.setTimeout(() => petsLayer.arrived([...v.root.querySelectorAll('.msg[data-mid]')].find(el => el.dataset.mid === theirs.id), ['redpacket', 'gift', 'transfer'].includes(theirs.kind)), 120);
+    // New messages attract a nearby companion, including the user's own bubbles.
+    const latest = fresh.findLast(m => !LINE_KINDS.includes(m.kind)), shownThread = threadId;
+    if (latest) ctx.win.setTimeout(() => {
+      if (mode !== 'thread' || threadId !== shownThread || v.disposed) return;
+      petsLayer.arrived([...v.root.querySelectorAll('.msg[data-mid]')].find(el => el.dataset.mid === latest.id), ['redpacket', 'gift', 'transfer'].includes(latest.kind), {mine: latest.from === 'me', picture: ['photo', 'sticker'].includes(latest.kind)});
+    }, 120);
     if (!fresh.length || profile().eggs === false) return;
     const egg = fresh.map(m => eggOf(m.kind === 'voice' ? m.translation || m.text : m.kind === 'text' ? m.text : '')).find(Boolean);
     if (egg) { playEgg(v.root.querySelector('.msgs-wrap'), egg, ctx.win); petsLayer.cheer(); }
@@ -951,7 +930,7 @@ export function chatApp(ctx) {
     shownMode = mode;
     v.root.classList.toggle('chat-mode', mode === 'thread');
     v.root.classList.toggle('qq-mode', mode === 'list');
-    if (mode !== 'thread') { petsLayer.detach(); flushPlay(); }
+    if (mode !== 'thread') { petsLayer.detach();  }
     if (mode === 'thread') return renderThread(ticket, again);
     if (mode === 'profile') return renderProfile(ticket);
     if (mode === 'me') return renderMe();
@@ -1587,7 +1566,6 @@ export function chatApp(ctx) {
     let tab = start;
     const d = sheet('商城', '', {
       'shop-tab': b => { tab = b.dataset.tab; draw(); },
-      'food-buy': async b => { const p = api.buyPetFood(b.dataset.food, 1); ctx.notify(`买了一份${PET_FOODS[b.dataset.food].name}，家里有 ${p.food[b.dataset.food]} 份`); draw(); },
       // Two taps to buy: the first one asks, the second one pays.
       'shop-buy': async b => {
         if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '再点一下买下'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = b.dataset.label; } }, 3000); return; }
@@ -1603,11 +1581,6 @@ export function chatApp(ctx) {
         api.deleteGift(b.dataset.id); draw();
       }
     });
-    // 宠物零食 (0.9.36): one at a time, into the larder.
-    function petFood() {
-      const larder = pets().food || {}, likes = new Map(Object.entries(PET_KINDS).map(([k, x]) => [x.likes, x.name]));
-      return `<div class="gift-grid">${Object.entries(PET_FOODS).map(([key, f]) => `<div class="gift-item pet-food-item"><span class="gi-emoji" aria-hidden="true">${f.emoji}</span><strong>${esc(f.name)}</strong><small>¥${esc(yuan(f.price))}${likes.has(key) ? ` · ${esc(likes.get(key))}最爱` : ''}</small><small>家里有 ${larder[key] || 0} 份</small>${btn('food-buy', '买一份', 'chip-button', `data-food="${key}"`)}</div>`).join('')}</div><p class="hint">在「我 → 我的宠物」里点一只宠物喂它。</p>`;
-    }
     function draw() {
       if (!d.live) return;
       const w = api.wallet(), c = api.shopCatalog(), p = profile();
@@ -1617,7 +1590,7 @@ export function chatApp(ctx) {
       }).join('')}</div>`).join('');
       const gifts = `<div class="gift-grid">${c.gifts.map(g => `<div class="gift-item${g.own ? ' own' : ''}"><span class="gi-emoji" aria-hidden="true">${esc(g.emoji)}</span><strong>${esc(g.name)}</strong><small>¥${esc(yuan(g.price))}</small>${g.note ? `<small class="gi-note">${esc(g.note)}</small>` : ''}${g.own ? `<span class="gi-tools">${btn('gift-edit', '改', 'text-button', `data-id="${esc(g.id)}"`)}${btn('gift-delete', '删除', 'text-button', `data-id="${esc(g.id)}"`)}</span>` : ''}</div>`).join('')}</div>
         <div class="actions">${btn('gift-new', icon('add') + '自定义礼物', 'secondary')}</div><p class="hint">送礼物：在私聊里点「+」→「礼物」。</p>`;
-      d.body.innerHTML = `<p class="wallet-line">${icon('wallet')}零钱 ¥${esc(yuan(w.balance))}</p><div class="segmented" style="margin:0 0 10px">${[['decor', '装扮'], ['gifts', '礼物'], ['pets', '宠物零食']].map(([k, l]) => `<button data-action="shop-tab" data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>${tab === 'gifts' ? gifts : tab === 'pets' ? petFood() : decor}`;
+      d.body.innerHTML = `<p class="wallet-line">${icon('wallet')}零钱 ¥${esc(yuan(w.balance))}</p><div class="segmented" style="margin:0 0 10px">${[['decor', '装扮'], ['gifts', '礼物']].map(([k, l]) => `<button data-action="shop-tab" data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>${tab === 'gifts' ? gifts : decor}`;
     }
     draw();
   }
@@ -2008,37 +1981,28 @@ export function chatApp(ctx) {
       try { api.saveCalls({[key]: key === 'auto' || key === 'effect' ? e.target.checked : Number(e.target.value)}); d.body.querySelector('.calls-body').innerHTML = draw(); } catch (error) { ctx.notify(error.message); }
     });
   }
-  // ---------- 宠物 (0.9.36): adopt, look after, feed ----------
-  const MOOD_WORDS = {starving: '饿坏了', hungry: '饿了', sulky: '闹脾气', happy: '很开心', fine: '还不错'};
+  // ---------- Decorative companions: adoption and names ----------
   const petFace = (p, size = 40) => `<span class="pet-face" style="--s:${size}px${petStrip(p.kind) ? `;background-image:url(&quot;${petStrip(p.kind)}&quot;)` : ''}" aria-hidden="true"></span>`;
-  const bars = q => `<span class="pet-bars"><span><small>饱腹</small><i style="--v:${Math.round(q.full)}%" data-low="${q.full < 30}"></i></span><span><small>心情</small><i style="--v:${Math.round(q.mood)}%" data-low="${q.mood < 25}"></i></span></span>`;
-  function petsLine() {
-    const list = pets().list;
-    if (!list.length) return '还没有宠物，领养一只吧';
-    const hungry = list.filter(x => ['hungry', 'starving'].includes(petMood(x))).length;
-    return `${list.map(x => x.name).join('、')}${hungry ? ` · ${hungry} 只饿了` : ''}`;
-  }
+  function petsLine() { return pets().list.map(x => x.name).join('、') || '还没有宠物，领养一只吧'; }
   function petsSheet() {
     const d = sheet('我的宠物', '', {
       'pet-adopt': () => adoptSheet(() => paint(), {over: true}),
-      'pet-card': x => petCard(x.dataset.id, () => paint(), {over: true}),
-      'pet-shop': () => { d.close(); openShop('pets'); }
+      'pet-card': x => petCard(x.dataset.id, () => paint(), {over: true})
     });
     function paint() {
       if (!d.live) return;
-      const p = pets(), now = Date.now(), food = Object.entries(p.food || {}).filter(([, n]) => n);
-      d.body.innerHTML = (p.list.length ? `<div class="group">${p.list.map(x => { const q = petNow(x, now); return `<button type="button" class="list-row pet-row" data-action="pet-card" data-id="${esc(x.id)}">${petFace(x)}<span><strong>${esc(x.name)}</strong><small>${esc(PET_KINDS[x.kind].name)} · ${MOOD_WORDS[petMood(x, now)]}</small>${bars(q)}</span>${icon('next')}</button>`; }).join('')}</div>`
-          : '<p class="hint">领养一只，它就住在聊天里：走来走去，点它会有反应，能拖到气泡上；它会饿，记得喂。</p>')
-        + `<p class="hint pet-larder">零食：${food.length ? food.map(([k, n]) => `${PET_FOODS[k].emoji}${esc(PET_FOODS[k].name)} ×${n}`).join('　') : '还没有，去商城买'}</p>`
-        + `<div class="actions">${p.list.length < PET_LIMITS.pets ? btn('pet-adopt', icon('add') + '领养', 'primary') : ''}${btn('pet-shop', icon('shop') + '买零食', 'secondary')}</div>`
-        + `<div class="group pad">${toggle('pets-show', '在聊天里出现', p.show !== false, '关掉后宠物不在聊天里走动，还是会饿。')}</div>`;
+      const p = pets();
+      d.body.innerHTML = (p.list.length ? `<div class="group">${p.list.map(x => `<button type="button" class="list-row pet-row" data-action="pet-card" data-id="${esc(x.id)}">${petFace(x)}<span><strong>${esc(x.name)}</strong><small>${esc(PET_KINDS[x.kind].name)}</small></span>${icon('next')}</button>`).join('')}</div>`
+        : '<p class="hint">领养一只，让它陪你聊天：走走停停、玩小球，还会跑去看新消息。</p>')
+        + `<div class="actions">${p.list.length < PET_LIMITS.pets ? btn('pet-adopt', icon('add') + '领养', 'primary') : ''}</div>`
+        + `<div class="group pad">${toggle('pets-show', '在聊天里出现', p.show !== false, '点一下、双击或在身上来回摸摸，会有不同反应；也可以拖起来放到气泡上。它们会自己玩、贴贴、一起打盹。关掉后暂时藏起来。')}</div>`;
     }
     paint();
     d.body.addEventListener('change', e => { if (e.target.dataset.field === 'pets-show') { api.saveChatOptions({pets: {...pets(), show: e.target.checked}}); paint(); } });
   }
   function adoptSheet(done = () => {}, {over = false} = {}) {
     let kind = 'cat';
-    const d = sheet('领养', `<div class="pet-kinds" role="group" aria-label="领养哪一种">${Object.entries(PET_KINDS).map(([k, x]) => `<button type="button" class="pet-kind" data-pet-kind="${k}" aria-pressed="${k === kind}">${petFace({kind: k}, 56)}<span>${esc(x.name)}</span><small>爱吃${esc(PET_FOODS[x.likes].name)}</small></button>`).join('')}</div>
+    const d = sheet('领养', `<div class="pet-kinds" role="group" aria-label="领养哪一种">${Object.entries(PET_KINDS).map(([k, x]) => `<button type="button" class="pet-kind" data-pet-kind="${k}" aria-pressed="${k === kind}">${petFace({kind: k}, 56)}<span>${esc(x.name)}</span></button>`).join('')}</div>
       ${field('名字', input('pet-name', '', 'text', `maxlength="${PET_LIMITS.name}" placeholder="比如：团子"`))}<div class="actions">${btn('pet-adopt-go', '带回家', 'primary')}</div>`, {
       'pet-adopt-go': () => {
         const p = pets();
@@ -2057,22 +2021,11 @@ export function chatApp(ctx) {
       for (const y of d.body.querySelectorAll('[data-pet-kind]')) y.setAttribute('aria-pressed', String(y === x));
     });
   }
-  /** One pet: how it is, feeding it (the food it likes most marked), its name, 送养. */
+  /** One companion: its name and adoption. */
   function petCard(id, done = () => {}, {over = false} = {}) {
-    flushPlay();
     const find = () => pets().list.find(x => x.id === id);
     if (!find()) return;
     const d = sheet(find().name, '', {
-      'pet-feed': x => {
-        const p = pets(), pet = find(), key = x.dataset.food;
-        if (!pet || !p.food?.[key]) return;
-        const after = feedPet(pet, key);
-        api.saveChatOptions({pets: {...p, list: p.list.map(y => y.id === id ? after : y), food: {...p.food, [key]: p.food[key] - 1}}});
-        petsLayer.fed(id);
-        ctx.notify(PET_KINDS[pet.kind].likes === key ? `${pet.name}最爱吃这个！` : `${pet.name}吃饱了一点`);
-        paint(); done();
-      },
-      'pet-shop': () => { d.close(); openShop('pets'); },
       'pet-rename': () => {
         const r = sheet('改名字', `${field('名字', input('pet-rename', find()?.name || '', 'text', `maxlength="${PET_LIMITS.name}"`))}<div class="actions">${btn('pet-rename-go', '保存', 'primary')}</div>`, {
           'pet-rename-go': () => { const name = value(r, 'pet-rename'), p = pets(); if (!name) return; api.saveChatOptions({pets: {...p, list: p.list.map(y => y.id === id ? {...y, name} : y)}}); r.close(); paint(); done(); }
@@ -2090,17 +2043,14 @@ export function chatApp(ctx) {
       const pet = find();
       if (!d.live || !pet) return;
       d.overlay.querySelector('.sheet-header h2').textContent = pet.name;
-      const p = pets(), q = petNow(pet), mood = petMood(pet), likes = PET_KINDS[pet.kind].likes, food = Object.entries(p.food || {}).filter(([, n]) => n);
-      const tip = {starving: '饿坏了，走不动了，快喂点吃的', hungry: '肚子在叫，喂点吃的吧', sulky: '没人陪它玩，有点闹脾气：点点它、拖着它玩一会儿', happy: '心情很好', fine: '挺好的，陪它玩会更开心'}[mood];
-      d.body.innerHTML = `<div class="pet-card">${petFace(pet, 80)}<p><strong>${esc(PET_KINDS[pet.kind].name)}</strong> · ${MOOD_WORDS[mood]}</p>${bars(q)}<p class="hint">${tip}</p></div>`
-        + groupTitle('喂食') + (food.length ? `<div class="pet-foods">${food.map(([k, n]) => `<button type="button" class="pet-food" data-action="pet-feed" data-food="${k}"><span aria-hidden="true">${PET_FOODS[k].emoji}</span>${esc(PET_FOODS[k].name)}${k === likes ? ' ❤' : ''}<small>×${n}</small></button>`).join('')}</div>` : `<p class="hint">没有零食了。${esc(pet.name)}最爱吃${esc(PET_FOODS[likes].name)}。</p>`)
-        + `<div class="actions">${btn('pet-shop', icon('shop') + '买零食', 'secondary')}${btn('pet-rename', icon('edit') + '改名字', 'secondary')}${btn('pet-release', '送养', 'danger')}</div>`;
+      d.body.innerHTML = `<div class="pet-card">${petFace(pet, 80)}<p><strong>${esc(PET_KINDS[pet.kind].name)}</strong></p><p class="hint">点点、摸摸，或者拖起来玩。长按可以打开这张卡片。</p></div>`
+        + `<div class="actions">${btn('pet-rename', icon('edit') + '改名字', 'secondary')}${btn('pet-release', '送养', 'danger')}</div>`;
     }
     paint();
   }
   // ---------- 聊天设置 (0.9.36): every switch of how the chats go, in one sheet (「我」 and a chat's 「⋯」 open it) ----------
   let settingsPaint = null;
-  const settingsLine = () => { const c = api.getState().chat; return `自动回复${c.autoReply === true ? '开' : '关'} · 逐条显示${c.pace !== false ? '开' : '关'} · 语音、来电、正文联动手机`; };
+  const settingsLine = () => { const c = api.getState().chat; return `自动回复${c.autoReply === true ? '开' : '关'} · 逐条显示${c.pace !== false ? '开' : '关'} · 语音、来电、正文和手机`; };
   /** 逐条显示回复 on or off (off: what waits to show shows at once). */
   function setPace(on) {
     api.saveChatOptions({pace: on});
@@ -2111,15 +2061,15 @@ export function chatApp(ctx) {
     const d = sheet('聊天设置', '', {
       'cs-voice': () => voiceTextSheet({over: true}),
       'cs-calls': () => callsSheet({over: true}),
-      'cs-phone': () => storyPhoneSheet(ctx, {onClose: () => paint(), over: true}),
+      'cs-phone': () => bringSheet({onClose: () => { paint(); return render(); }, over: true, beforePick: () => d.close()}),
       'cs-pat': () => patSuffixSheet(() => paint(), {over: true}),
       'cs-presets': () => { d.close(); ctx.open('presets'); ctx.showPresetKind?.('chat'); }
     });
     function paint() {
       if (!d.live) return;
-      const s = api.getState(), c = s.chat, o = c.proactive || {}, v = voiceText();
+      const s = api.getState(), c = s.chat, v = voiceText();
       d.body.innerHTML = groupTitle('回复') + `<div class="group pad">${toggle('cs-auto', '自动回复', c.autoReply === true, '打开后，你发完消息停下几秒，对方会自己回，不用点右下角的气泡；连着发好几条也行，你停下来才回。想马上让 TA 回，照样点气泡。每次回复是一次文字模型请求。')}${toggle('cs-pace', '逐条显示回复', c.pace !== false, '对方的消息像真人打字一样一条条出来；关掉就一次全显示。')}</div>`
-        + groupTitle('更多') + `<div class="group">${row('cs-voice', 'book', '语音消息', `${{translation: '显示译文', original: '显示原文', both: '原文和译文'}[v.mode] || '显示译文'}${v.auto ? ' · 自动转文字' : ''}`)}${row('cs-calls', 'phone', '来电', s.calls?.auto ? '角色会自己打来' : '角色不会自己打来')}${row('cs-phone', 'chat', '正文联动手机', o.on ? (o.clock ? '开 · 也按现实时间来找你' : '开') : o.clock ? '按现实时间来找你' : '关')}${row('cs-pat', 'hand', '拍一拍后缀', profile().patSuffix ? `拍了拍你${profile().patSuffix}` : '还没有')}${row('cs-presets', 'edit', '聊天预设', '怎么回消息、朋友圈怎么发、电话里怎么说')}</div>`;
+        + groupTitle('更多') + `<div class="group">${row('cs-voice', 'book', '语音消息', `${{translation: '显示译文', original: '显示原文', both: '原文和译文'}[v.mode] || '显示译文'}${v.auto ? ' · 自动转文字' : ''}`)}${row('cs-calls', 'phone', '来电', s.calls?.auto ? '角色会自己打来' : '角色不会自己打来')}${row('cs-phone', 'chat', '正文和手机', storyLinkNote(s, knownThreads))}${row('cs-pat', 'hand', '拍一拍后缀', profile().patSuffix ? `拍了拍你${profile().patSuffix}` : '还没有')}${row('cs-presets', 'edit', '聊天预设', '怎么回消息、朋友圈怎么发、电话里怎么说')}</div>`;
     }
     paint();
     d.body.addEventListener('change', e => {
@@ -2665,7 +2615,7 @@ export function chatApp(ctx) {
         if (!live) throw Error('在酒馆里打开小手机时才能带进剧情');
         const done = await api.chatBring(threadId, [...selecting]);
         selecting = null;
-        ctx.notify(`下一次正文会带上这 ${count} 条消息${done?.replaced ? `（之前选的 ${done.replaced} 条不带了）` : ''}${count > 60 ? '。选得比较多，模型可能抓不住重点，挑关键的几段效果更好；想让正文一直记得手机里聊过的事，可以打开「预设 → 聊天 → 记忆 → 正文也带上手机里的事」' : ''}`);
+        ctx.notify(`下一次正文会带上这 ${count} 条消息${done?.replaced ? `（之前选的 ${done.replaced} 条不带了）` : ''}${count > 60 ? '。选得比较多，模型可能抓不住重点，挑关键的几段效果更好；想让正文一直记得手机里聊过的事，可以打开「正文和手机 → 这段聊天 → 一直带着」' : ''}`);
         render();
         break;
       }

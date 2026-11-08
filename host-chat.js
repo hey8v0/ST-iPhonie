@@ -159,7 +159,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         try { shared = await sharedGroups(thread.members[0], user); } catch (error) { backend.reportDiagnostic?.('聊天 · 同群消息', error, 'warn'); }
       }
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
-      const request = pics => buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), nudge, cue, time: time || Date.now(), statuses: statusesOf(people), peeked: peekedNow ? peekedNow.what || true : '', posts, outfit, pats: Object.fromEntries(people.map(p => [p.name, suffixOf(p.name)]).filter(([, s]) => s)), music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
+      const privateChats = thread.type === 'group' && promptOn(s.promptRules, 'knows') ? await memberChats(people, preset, query, user) : '';
+      const request = pics => buildChatRequest({prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, privateChats, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), nudge, cue, time: time || Date.now(), statuses: statusesOf(people), peeked: peekedNow ? peekedNow.what || true : '', posts, outfit, pats: Object.fromEntries(people.map(p => [p.name, suffixOf(p.name)]).filter(([, s]) => s)), music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
       const answer = cleanTagged(await answerFor(ctx, request, await pictures(ctx, thread, preset), signal), preset.cleanTags);
       // 停止 while it was being written: what comes late is let go (the tavern's own generation cannot be stopped).
       if (signal.aborted) throw stopped();
@@ -584,6 +585,29 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (t.blocked) { await backend.holdMessages(t.id, list.map(heldOf)).catch(() => {}); continue; }
       if (await arrive(t.id, list)) notice(`${name} 私聊了你`);
     }
+  }
+  /** Private knowledge stays labelled per speaker; it is not part of the group's world-book scan. */
+  async function memberChats(people, preset, query, user) {
+    const threads = await backend.threads(), parts = [];
+    let budget = 12000;
+    for (const person of people) {
+      if (budget < 300) break;
+      const row = currentDm(threads, person.name);
+      if (!row) continue;
+      const dm = await backend.chats.get(row.id);
+      if (!dm) continue;
+      const remembered = memory ? (await memory.contextFor(dm, {query}).catch(() => ({text: ''}))).text : '';
+      const recent = dm.messages.filter(m => m.kind !== 'system').slice(-Math.min(preset.history, 12)).map(m => messageLine(m, user)).filter(Boolean).join('\n');
+      if (!remembered.trim() && !recent.trim()) continue;
+      const heading = `【${person.name}的私聊，仅本人知道】\n这是${person.name}和${user}私下的聊天，只有${person.name}知道，其他人不知道；${person.name}可以提起、暗示或瞒着。其他人不能表现得知道这些细节，除非${person.name}已在群里公开说过。\n`;
+      const cap = Math.min(3600, budget - heading.length - 30), memoryCap = recent ? Math.floor(cap / 2) : cap;
+      if (cap <= 0) break;
+      const summary = remembered.trim().slice(0, memoryCap);
+      const lines = recent.slice(-(cap - summary.length));
+      const part = heading + `${summary ? '整理好的记忆：\n' + summary + '\n' : ''}${lines ? '最近的私聊：\n' + lines : ''}`;
+      parts.push(part); budget -= part.length + 2;
+    }
+    return parts.join('\n\n');
   }
   /** The groups here the contact is in too (the two talked in last): their latest messages, for a private chat's request. */
   async function sharedGroups(name, user) {

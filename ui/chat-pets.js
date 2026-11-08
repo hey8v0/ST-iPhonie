@@ -1,24 +1,5 @@
-// 宠物 in a chat: a layer over the messages (in .msgs-wrap, which the chat keeps when it draws again) where the pets live.
-// 0.9.36: they walk the floor, hop onto bubbles and ride them as the chat scrolls, answer a tap by how they are (happy,
-// hungry, sulky), can be held and dropped, come to a new message (all of them to a red packet or a present), jump at a
-// keyword egg, eat when fed, and sleep at night.
-// 0.9.37, a herd with a day of its own:
-// - Together: on the floor they bump into each other (stop, back off, look round; a sleeper half wakes) and are pushed
-//   apart when one comes down on another's spot. One let go over another's head sits on it (three high at most); the
-//   one below carries it and does not walk off, and taken away from under it, the one on top comes down smoothly (a
-//   sleeper sleeps on). Now and then two play tag and end nose to nose (贴贴).
-// - Thrown: let go while moving fast, it flies, bounces off the sides and the top, lands on a bubble (which gives), a
-//   head or the floor (bouncing on the floor), and is dizzy a moment after landing hard.
-// - A day: awake a few minutes (a few steps and a stop, a look about, its own habit, a stretch), then a nap (tucked up,
-//   z's, breathing like jelly), longer at night; woken by a tap it rubs its eyes. The cat licks its paw, the chick
-//   pecks, the slime bounces, the crab snaps its claws and walks sideways.
-// - Company: while the user types they come and sit by the box and look at it, and jump when it is sent. Scrolling, the
-//   ones on bubbles hold on to the top edge and let go when it stops. Where each was is kept per chat (after a refresh
-//   they are on the same bubble, or the same spot of the floor).
-// Only what moves is moved frame by frame (one requestAnimationFrame loop, stopped when nothing moves); the rest is CSS
-// and Web Animations (z's, breathing, the dizzy stars).
+// Decorative companions share one motion loop; finite gestures use sprite frames and CSS transforms.
 import {PET_SIZE, PET_FRAMES, petStrip} from './pet-sprites.js';
-import {petMood} from '../core/pets.js';
 
 export const PET_PX = PET_SIZE * 2;
 const FRAME = Object.fromEntries(PET_FRAMES.map((f, i) => [f, i]));
@@ -28,27 +9,34 @@ const GRAVITY = 1500, THROW = 450, HARD = 950, BOUNCE = 700;
 // Where a rider's feet go on each kind: the top of its head, from the top of its picture (px; the crab's is between its claws).
 export const PET_HEAD = Object.freeze({cat: 10, chick: 8, slime: 10, crab: 18});
 const STACK = 3;
+export const PET_ACTIONS = Object.freeze(['stretch', 'roll', 'tail', 'scratch', 'yawn', 'look', 'ball']);
 const rand = (a, b) => a + Math.random() * (b - a);
 
 /**
- * pets(): the pets as kept ({list, show}). onPlay(id, amount): played with (心情). onCard(id): held a moment (its card).
+ * pets(): the pets as kept ({list, show}). onCard(id): held a moment (its card).
  * storage: where the spots are kept (localStorage; none: not kept). Answers {attach(wrap, msgs, {key, box}), detach(),
- * arrived(el, big), cheer(), fed(id), typing(on), sent(), entities}.
+ * arrived(el, big), cheer(), typing(on), sent(), entities}.
  */
-export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, storage = (() => { try { return win.localStorage; } catch { return null; } })()}) {
+export function petLayer({win, doc, pets, onCard = () => {}, storage = (() => { try { return win.localStorage; } catch { return null; } })()}) {
   let layer = null, wrap = null, msgs = null, box = null, key = '', raf = 0, last = 0, touched = Date.now(), typingUntil = 0;
-  let zTimer = 0, zel = null, scrolling = 0, saveTimer = 0;
-  const live = new Map(), timers = new Set();
-  const later = (fn, ms) => { const t = win.setTimeout(() => { timers.delete(t); fn(); }, ms); timers.add(t); return t; };
+  let zTimer = 0, zel = null, scrolling = 0, saveTimer = 0, resize = null;
+  const live = new Map(), timers = new Set(), paused = new Set();
+  let geometry = {width: 300, height: 400, top: 0, left: 0}, bubbleBoxes = [];
+  function measure() {
+    if (!wrap) return;
+    const r = wrap.getBoundingClientRect();
+    geometry = {width: wrap.clientWidth, height: wrap.clientHeight, top: r.top, left: r.left};
+    bubbleBoxes = [...(msgs?.querySelectorAll(BUBBLES) || [])].map(el => ({el, r: el.getBoundingClientRect()}));
+  }
+  const later = (fn, ms) => { const t = win.setTimeout(() => { timers.delete(t); if (doc.hidden) paused.add(fn); else fn(); }, ms); timers.add(t); return t; };
   const cancel = t => { if (t) { win.clearTimeout(t); timers.delete(t); } };
   const now = () => win.performance?.now?.() || Date.now();
-  const reduced = () => !!win.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const motion = win.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const reduced = () => !!motion?.matches;
   const night = () => { const h = new Date().getHours(); return h >= 23 || h < 7; };
-  const floor = () => Math.max(0, (wrap?.clientHeight || 0) - PET_PX - 2);
+  const floor = () => Math.max(0, geometry.height - PET_PX - 2);
   const width = () => Math.max(PET_PX, wrap?.clientWidth || 0);
   const pick = list => list[Math.floor(Math.random() * list.length)];
-  const petOf = e => pets().list.find(p => p.id === e.id);
-  const moodOf = e => { const p = petOf(e); return p ? petMood(p) : 'fine'; };
   const onFloor = e => !e.seat && !e.on && !['held', 'hop', 'fall', 'cling'].includes(e.state);
   const riderOf = e => [...live.values()].find(x => x.on === e.id);
   const below = e => e.on ? live.get(e.on) : null;
@@ -97,9 +85,8 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
 
   // ---------- where they can be: the floor, the bubbles on the screen, one another's heads ----------
   function bubbles() {
-    if (!msgs || !wrap) return [];
-    const w = wrap.getBoundingClientRect(), top = w.top + 24, bottom = w.top + floor();
-    return [...msgs.querySelectorAll(BUBBLES)].map(el => ({el, r: el.getBoundingClientRect()})).filter(({r}) => r.width > PET_PX * .8 && r.top > top && r.top < bottom - 8);
+    const top = geometry.top + 24, bottom = geometry.top + floor();
+    return bubbleBoxes.filter(({el, r}) => el.isConnected && r.width > PET_PX * .8 && r.top > top && r.top < bottom - 8);
   }
   /** Sat on a bubble: kept by its message too, so a bubble the chat draws anew is found again. */
   function sitOn(e, el, x) { e.seat = el; e.seatX = x; e.seatMid = el?.closest?.('.msg[data-mid]')?.dataset.mid || ''; }
@@ -109,7 +96,9 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
       if (again) e.seat = again;
     }
     if (!e.seat?.isConnected || !wrap) return null;
-    const r = e.seat.getBoundingClientRect(), w = wrap.getBoundingClientRect(), y = r.top - w.top - PET_PX + 5;
+    const r = bubbleBoxes.find(b => b.el === e.seat)?.r;
+    if (!r) return null;
+    const w = geometry, y = r.top - w.top - PET_PX + 5;
     if (y < -PET_PX / 2 || y > floor() - 4 || !r.width) return null;
     return {x: Math.max(0, Math.min(width() - PET_PX, r.left - w.left + e.seatX)), y};
   }
@@ -130,7 +119,7 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
   function surfaceUnder(e, feetBefore) {
     const feet = e.y + PET_PX, mid = e.x + PET_PX / 2, found = [];
     if (wrap) {
-      const w = wrap.getBoundingClientRect();
+      const w = geometry;
       for (const {el, r} of bubbles()) {
         const left = r.left - w.left, y = r.top - w.top - PET_PX + 5;
         if (mid > left + 4 && mid < left + r.width - 4) found.push({y, seat: el, seatX: e.x - left});
@@ -145,6 +134,7 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
   }
   /** Scrolled: the ones on bubbles ride along; a bubble gone up out of sight, its rider holds on to the top edge. */
   function follow() {
+    measure();
     for (const e of live.values()) {
       if (!e.seat || ['held', 'hop', 'fall'].includes(e.state)) continue;
       const at = seatAt(e);
@@ -162,10 +152,10 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
   }
 
   // ---------- moving: one loop for all ----------
-  function start() { if (!raf && layer) { last = 0; raf = win.requestAnimationFrame(tick); } }
+  function start() { if (!raf && layer && !doc.hidden && !reduced()) { last = 0; raf = win.requestAnimationFrame(tick); } }
   function tick(time) {
     raf = 0;
-    if (!layer) return;
+    if (!layer || doc.hidden || reduced()) return;
     const dt = last ? Math.min(.05, (time - last) / 1000) : .016;
     last = time;
     let moving = false;
@@ -181,18 +171,19 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
           if (p) { e.on = p.id; e.toOn = null; }
           once(e, 'squish'); if (e.seat) bump(e.seat);
           if (e.sleepOn) { e.sleepOn = false; setState(e, 'sleep'); setFrame(e, 'sleep'); keep(); }
+          else if (e.lounge) { e.lounge = false; action(e, 'lounge', 3000); }
           else if (e.watchAt != null) { const x = e.watchAt; e.watchAt = null; setFrame(e, 'stand'); walkTo(e, x); }
           else { setFrame(e, 'stand'); if (!(onFloor(e) && settle(e))) rest(e); }
         } else moving = true;
       } else if (e.state === 'fall') moving = fallStep(e, dt) || moving;
     }
-    if (moving) raf = win.requestAnimationFrame(tick);
+    if (moving && !raf) raf = win.requestAnimationFrame(tick);
   }
   function walkStep(e, dt, time) {
     const chased = e.chase ? live.get(e.chase) : null;
     // (Close enough to touch: nose to nose.)
     if (chased) e.tx = chased.x + (chased.x > e.x ? -1 : 1) * (PET_PX - 12);
-    const speed = (moodOf(e) === 'hungry' ? 18 : 34) * (e.chase ? 2 : e.flee ? 1.7 : e.hurry ? 2.4 : 1), dx = e.tx - e.x;
+    const speed = 34 * (e.chase ? 2 : e.flee ? 1.7 : e.hurry ? 2.4 : 1), dx = e.tx - e.x;
     if (e.kind !== 'crab') e.facing = dx < 0 ? -1 : 1;
     e.walking = true;
     const step = Math.sign(dx) * Math.min(Math.abs(dx), speed * dt), next = e.x + step;
@@ -201,7 +192,7 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
       if (p === e || !onFloor(p) || p.state === 'walk' && p.chase === e.id) continue;
       const toward = Math.sign(p.x - e.x) === Math.sign(step), gap = Math.abs(next - p.x);
       if (toward && gap < PET_PX - 8) {
-        if (chased === p) { nuzzle(e, p); return false; }
+        if (chased === p) { meet(e, p); return false; }
         bumpInto(e, p, Math.sign(step));
         return false;
       }
@@ -253,7 +244,7 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
     cancel(e.next);
     e.next = later(() => { if (e.state !== 'dizzy') return; setFrame(e, 'stand'); setState(e, 'idle'); if (!(onFloor(e) && settle(e))) rest(e); }, 2200);
   }
-  function fall(e, vy = 0) { e.vy = vy; e.vx = e.vx || 0; e.seat = null; e.on = null; e.toOn = null; e.walking = false; setState(e, 'fall'); if (e.frame === 'stand' || e.frame === 'sleep') setFrame(e, 'held'); if (reduced()) fallNow(e); }
+  function fall(e, vy = 0) { stopAction(e); e.vy = vy; e.vx = e.vx || 0; e.seat = null; e.on = null; e.toOn = null; e.walking = false; setState(e, 'fall'); if (e.frame === 'stand' || e.frame === 'sleep') setFrame(e, 'held'); if (reduced()) fallNow(e); }
   /** Without motion: straight down onto what is under it. */
   function fallNow(e) { const feet = e.y + PET_PX; e.y = floor() + 1; const s = surfaceUnder(e, feet) || {y: floor(), floor: true}; e.vy = 0; land(e, s); place(e); }
   /** Taken away from under it: the one on top comes down smoothly (onto whoever is still under, or the floor). */
@@ -299,13 +290,13 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
   }
   /** Two nose to nose: hearts, a little hop each. */
   function nuzzle(a, b) {
+    if (a.playRoll || b.playRoll) { a.playRoll = b.playRoll = false; action(a, 'roll'); action(b, 'roll'); return; }
     for (const [x, y] of [[a, b], [b, a]]) {
       cancel(x.next);
       x.chase = null; x.flee = false; x.walking = false; x.walks = 0;
       x.facing = y.x > x.x ? 1 : -1;
       setState(x, 'idle'); setFrame(x, 'happy'); place(x);
       say(x, '♥', 1500); once(x, 'jump');
-      onPlay(x.id, 2);
       x.next = later(() => { if (x.frame === 'happy') setFrame(x, 'stand'); rest(x); }, 1400);
     }
   }
@@ -334,7 +325,7 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
   }
   function walkTo(e, x) { e.tx = Math.max(4, Math.min(width() - PET_PX - 4, x)); e.seat = null; e.walking = false; setState(e, 'walk'); }
   function hopTo(e, target) {
-    const r = target.el.getBoundingClientRect();
+    const r = target.r;
     sitOn(e, target.el, Math.max(-PET_PX / 3, Math.min(r.width - PET_PX * .66, Math.random() * (r.width - PET_PX))));
     const at = seatAt(e);
     if (!at) { e.seat = null; return false; }
@@ -388,13 +379,11 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
   }
   function decide(e) {
     if (!layer || e.state !== 'idle') return;
-    if (reduced()) return rest(e, rand(6000, 12000));
-    const mood = moodOf(e), floorNow = onFloor(e), carrying = !!riderOf(e);
+    if (reduced() || doc.hidden) return rest(e, rand(6000, 12000));
+    const floorNow = onFloor(e), carrying = !!riderOf(e);
     if (e.watching && Date.now() < typingUntil) return rest(e);
     if (night() && Date.now() - touched > 60_000 && Date.now() > e.napAt - 20_000) return nap(e);
     if (Date.now() >= e.napAt && !['hop', 'fall'].includes(e.state)) return nap(e);
-    if (mood === 'starving') { setFrame(e, 'sad'); if (Math.random() < .4) say(e, '……饿'); return rest(e); }
-    if (mood === 'hungry' && Math.random() < .35) { setFrame(e, 'sad'); say(e, '🍖?'); return rest(e); }
     // A few steps and a stop, two to four times over (the one carrying another stays put).
     if (e.walks > 0 && floorNow && !carrying) { e.walks--; return walkTo(e, e.x + e.dir * rand(30, 110)); }
     const roll = Math.random();
@@ -402,14 +391,71 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
     if (e.seat) { if (roll < .4) return hopDown(e); if (roll < .6 && !carrying) { const b = bubbles().filter(x => x.el !== e.seat); if (b.length && hopTo(e, pick(b))) return; } return roll < .8 ? habit(e) : rest(e); }
     if (carrying) return roll < .4 ? habit(e) : roll < .6 ? lookAbout(e) : rest(e);
     // Tag: one runs after a friend that is up and about, which runs off.
-    const friends = [...live.values()].filter(p => p !== e && onFloor(p) && p.state === 'idle' && !riderOf(p) && !p.watching);
-    if (roll < .08 && friends.length && mood !== 'sulky') return chase(e, pick(friends));
+    const friends = [...live.values()].filter(p => p !== e && onFloor(p) && p.state === 'idle' && !riderOf(p) && !p.watching && Date.now() < p.napAt);
+    if (roll < .08 && friends.length) return chase(e, pick(friends));
+    if (roll < .18 && friends.length) return together(e, pick(friends), pick(['cuddle', 'sleep', 'groom', 'play', 'line']));
     if (roll < .45) { e.dir = Math.random() < .5 ? -1 : 1; e.walks = Math.floor(rand(1, 4)); return walkTo(e, e.x + e.dir * rand(30, 110)); }
-    if (roll < .62 && mood !== 'sulky') { const b = bubbles(); if (b.length && hopTo(e, pick(b))) return; }
+    if (roll < .62) { const b = bubbles(); if (b.length && hopTo(e, pick(b))) return; }
     if (roll < .75) return habit(e);
-    if (roll < .86) return lookAbout(e);
-    if (roll < .9) { setFrame(e, 'yawn'); later(() => { if (e.frame === 'yawn' && e.state === 'idle') setFrame(e, 'stand'); }, 700); }
-    rest(e);
+    return action(e, pick(PET_ACTIONS));
+  }
+  /** Finite actions own a token, so an interrupted timer cannot change a later pose. */
+  function stopAction(e) {
+    e.actionToken = (e.actionToken || 0) + 1;
+    cancel(e.actionTimer); e.ball?.remove(); e.ball = null;
+    delete e.el.dataset.action;
+    e.el.classList.remove('jump', 'squish', 'peck', 'boing');
+  }
+  function action(e, name, duration = 1800) {
+    if (reduced() || doc.hidden) return rest(e);
+    stopAction(e); cancel(e.next); e.walks = 0; e.walking = false; e.chase = null; e.meet = null;
+    setState(e, 'action'); e.el.dataset.action = name;
+    const token = e.actionToken;
+    const sequence = {stretch: ['stretch', 'happy'], roll: ['belly', 'happy'], tail: ['look', 'happy'], scratch: ['scratch', 'blink'],
+      yawn: ['yawn', 'blink'], look: ['look', 'stand'], ball: ['look', 'happy'], belly: ['belly', 'happy'], tilt: ['look', 'happy'],
+      rub: ['rub', 'rub'], flip: ['happy', 'belly'], jump: ['happy', 'happy'], lounge: ['sleep', 'blink'], groom: ['habit1', 'habit2'], cuddle: ['rub', 'happy']}[name] || ['happy'];
+    setFrame(e, sequence[0]);
+    if (name === 'rub' || name === 'cuddle' || name === 'groom') say(e, '♥');
+    if (name === 'ball') {
+      const ball = doc.createElement('span'); ball.className = 'pet-ball'; ball.setAttribute('aria-hidden', 'true');
+      ball.innerHTML = '<svg viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg"><circle cx="6" cy="6" r="5" fill="#ffbd59"/><path d="M2 3L10 9M3 10L9 2" stroke="#fff" stroke-width="2"/></svg>';
+      const x = e.x + PET_PX / 2, dx = Math.max(-x, Math.min(width() - 12 - x, e.facing * 70));
+      ball.style.cssText = `left:${x}px;top:${e.y + PET_PX - 12}px;--roll:${dx}px`;
+      layer.append(ball); e.ball = ball;
+    }
+    let n = 0;
+    const step = () => {
+      if (e.actionToken !== token || e.state !== 'action') return;
+      if (reduced() || ++n * 300 >= duration) { stopAction(e); setFrame(e, 'stand'); return rest(e); }
+      setFrame(e, sequence[n % sequence.length]);
+      e.actionTimer = later(step, 300);
+    };
+    e.actionTimer = later(step, 300);
+  }
+  function together(a, b, kind) {
+    if (kind === 'play') { a.playRoll = b.playRoll = true; return chase(a, b); }
+    if (kind === 'line') {
+      const line = [a, b, ...[...live.values()].filter(p => p !== a && p !== b && onFloor(p) && p.state === 'idle' && !riderOf(p))];
+      const right = width() - PET_PX - 4, spacing = PET_PX + 6;
+      line.sort((x, y) => x.x - y.x).forEach((e, i) => {
+        cancel(e.next); e.hurry = true; e.walks = 0;
+        walkTo(e, Math.max(4, right - (line.length - 1 - i) * spacing));
+      });
+      return;
+    }
+    cancel(a.next); cancel(b.next); a.meet = kind; a.chase = b.id; b.walks = 0;
+    setState(a, 'walk');
+    // A meeting also has a deadline if the other pet is moved by hand.
+    a.next = later(() => { if (a.meet) { a.meet = null; a.chase = null; if (a.state === 'walk') rest(a); } if (b.state === 'idle') rest(b); }, 6000);
+  }
+  function meet(a, b) {
+    const kind = a.meet; a.meet = null;
+    if (!kind) return nuzzle(a, b);
+    for (const [x, y] of [[a, b], [b, a]]) {
+      cancel(x.next); x.chase = null; x.walking = false; x.walks = 0; x.facing = y.x > x.x ? 1 : -1; place(x);
+      if (kind === 'sleep') nap(x);
+      else action(x, kind === 'groom' ? 'groom' : 'cuddle', 2400);
+    }
   }
   function chase(e, p) {
     e.chase = p.id; setFrame(e, 'happy'); say(e, '！', 900);
@@ -427,41 +473,56 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
     ev.preventDefault();
     ev.stopPropagation();
     touched = Date.now();
-    const w = wrap.getBoundingClientRect(), startX = ev.clientX, startY = ev.clientY, offX = ev.clientX - w.left - e.x, offY = ev.clientY - w.top - e.y;
-    let held = false, done = false;
+    measure();
+    const w = geometry, startX = ev.clientX, startY = ev.clientY, offX = ev.clientX - w.left - e.x, offY = ev.clientY - w.top - e.y;
+    let held = false, done = false, stroking = false, turns = 0, direction = 0;
+    const origin = {x: e.x, y: e.y, seat: e.seat, seatX: e.seatX, on: e.on, onDx: e.onDx};
     const trail = [{x: ev.clientX, y: ev.clientY, t: now()}];
     try { e.el.setPointerCapture?.(ev.pointerId); } catch { /* fine without */ }
-    const card = win.setTimeout(() => { if (!held && !done) { done = true; off(); onCard(e.id); } }, 550);
+    const card = later(() => { if (!held && !done) { done = true; off(); onCard(e.id); } }, 550);
     const move = mv => {
       if (done) return;
+      const dx = mv.clientX - trail.at(-1).x, dir = Math.sign(dx);
+      const near = Math.abs(mv.clientX - startX) <= PET_PX * .65 && Math.abs(mv.clientY - startY) <= 10;
+      if (near && Math.abs(dx) >= 3) { if (direction && direction !== dir) turns++; direction = dir; }
+      if (near && turns >= 2) {
+        cancel(card); stroking = true; held = false; stopAction(e);
+        e.x = origin.x; e.y = origin.y; sitOn(e, origin.seat, origin.seatX); e.on = origin.on; e.onDx = origin.onDx;
+        e.el.classList.remove('struggle'); place(e);
+        action(e, 'rub');
+      }
       trail.push({x: mv.clientX, y: mv.clientY, t: now()});
       if (trail.length > 6) trail.shift();
+      if (stroking) return;
       if (!held && Math.hypot(mv.clientX - startX, mv.clientY - startY) < 6) return;
       if (!held) {
-        held = true; win.clearTimeout(card); cancel(e.next);
+        held = true; cancel(card); cancel(e.next); stopAction(e); e.meet = null; e.lounge = false;
         const r = riderOf(e);
         e.seat = null; e.on = null; e.chase = null; e.walking = false;
-        setState(e, 'held'); setFrame(e, 'held'); e.el.classList.add('struggle');
+        setState(e, 'held'); setFrame(e, Math.random() < .5 ? 'held' : 'rub'); e.el.classList.add('struggle');
         if (r) lower(r);
       }
       e.x = Math.max(0, Math.min(width() - PET_PX, mv.clientX - w.left - offX));
       e.y = Math.max(-8, Math.min(floor(), mv.clientY - w.top - offY));
       place(e);
     };
-    const up = () => {
+    const up = event => {
       if (done) return;
       done = true;
-      win.clearTimeout(card);
+      cancel(card);
       off();
+      if (event?.type === 'pointercancel') { e.el.classList.remove('struggle'); if (held) fall(e); return; }
+      if (stroking) return;
       if (!held) return tap(e);
       e.el.classList.remove('struggle');
       // How fast it was going when let go: from the last tenth of a second of the drag.
       const end = trail.at(-1), from = trail.find(p => end.t - p.t <= 100) || trail[0], dt = Math.max(16, end.t - from.t) / 1000;
       const vx = (end.x - from.x) / dt, vy = (end.y - from.y) / dt;
       if (Math.hypot(vx, vy) > THROW && !reduced()) throwIt(e, vx, vy); else fall(e);
-      onPlay(e.id, 3);
     };
-    const off = () => { e.el.removeEventListener('pointermove', move); e.el.removeEventListener('pointerup', up); e.el.removeEventListener('pointercancel', up); };
+    const off = () => { e.gestureOff = null; e.el.removeEventListener('pointermove', move); e.el.removeEventListener('pointerup', up); e.el.removeEventListener('pointercancel', up); };
+    e.gestureOff?.();
+    e.gestureOff = () => { done = true; cancel(card); off(); };
     e.el.addEventListener('pointermove', move);
     e.el.addEventListener('pointerup', up);
     e.el.addEventListener('pointercancel', up);
@@ -473,57 +534,53 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
     e.vx = Math.max(-1600, Math.min(1600, vx));
     say(e, Math.random() < .5 ? '哇——' : '呀！', 1000);
   }
-  /** A tap answers by how the pet is; a sleeper rubs its eyes. */
+  /** Quick repeated taps dodge; a double tap somersaults, and strokes have their own pose. */
   function tap(e) {
     touched = Date.now();
-    const mood = moodOf(e);
-    cancel(e.next);
-    if (e.state === 'sleep') { say(e, night() ? '……zzz？' : '……？'); return wake(e, true); }
-    if (e.state === 'dizzy') { say(e, '晕……'); return; }
-    if (mood === 'starving') { setFrame(e, 'sad'); say(e, '饿……'); return rest(e); }
-    if (mood === 'hungry') { setFrame(e, 'sad'); say(e, '🍖'); onPlay(e.id, 1); return rest(e); }
-    if (mood === 'sulky') { e.facing = -e.facing; place(e); setFrame(e, 'stand'); say(e, '哼'); onPlay(e.id, 1); return rest(e); }
-    setFrame(e, 'happy');
+    if (e.state === 'sleep') { say(e, '……？'); return wake(e, true); }
+    e.taps = now() - (e.lastTap || 0) < 600 ? (e.taps || 0) + 1 : 1;
+    e.lastTap = now();
+    if (reduced() || doc.hidden) { say(e, '♥'); return; }
+    stopAction(e); cancel(e.next);
+    if (e.taps >= 3) {
+      say(e, '慢一点呀');
+      if (e.seat || e.on || riderOf(e)) return dizzy(e);
+      e.flee = true; e.walks = 0;
+      walkTo(e, e.x + (e.x > width() / 2 ? -1 : 1) * 75);
+      return;
+    }
     say(e, pick(['❤', '♪', '✨', '嘿嘿']));
-    once(e, 'jump');
-    onPlay(e.id, 2);
-    later(() => { if (e.frame === 'happy' && e.state === 'idle') setFrame(e, 'stand'); }, 900);
-    rest(e);
+    action(e, e.taps === 2 ? 'flip' : pick(['jump', 'tilt', 'belly']));
   }
 
   // ---------- the chat's own goings-on ----------
   /** A message came (big: a red packet or a present — everyone comes): they go to it, or look. */
-  function arrived(el, big = false) {
-    if (!layer || reduced()) return;
+  function arrived(el, big = false, {mine = false, picture = false} = {}) {
+    if (!layer || reduced() || doc.hidden) return;
+    measure();
     const target = el?.matches?.(BUBBLES) ? el : el?.querySelector?.(BUBBLES);
-    for (const e of live.values()) {
-      if (['held', 'hop', 'fall', 'cling', 'dizzy'].includes(e.state) || moodOf(e) === 'starving' || riderOf(e) || e.watching) continue;
-      if (e.state === 'sleep') { if (!big) continue; wake(e, true); }
-      if (!big && Math.random() > .55) continue;
+    if (!target) return;
+    const at = bubbles().find(b => b.el === target), r = target.getBoundingClientRect(), x = r.left - geometry.left + r.width / 2;
+    const available = [...live.values()].filter(e => !['held', 'hop', 'fall', 'cling', 'dizzy'].includes(e.state) && !riderOf(e) && (big || e.state !== 'sleep')).sort((a, b) => Math.abs(a.x + PET_PX / 2 - x) - Math.abs(b.x + PET_PX / 2 - x));
+    for (const e of big ? available : available.slice(0, 1)) {
+      stopAction(e); cancel(e.next); e.watching = false; e.chase = null; e.meet = null; e.walks = 0;
       say(e, big ? '！！' : '！');
-      const at = target ? bubbles().find(b => b.el === target) : null;
+      if (picture) once(e, 'jump');
+      e.lounge = mine;
       if (at && hopTo(e, at)) continue;
-      if (target && wrap) { const r = target.getBoundingClientRect(), w = wrap.getBoundingClientRect(); walkTo(e, r.left - w.left + r.width / 2 - PET_PX / 2); }
+      e.lounge = false;
+      if (e.seat || e.on) { if (picture) action(e, 'jump'); continue; }
+      walkTo(e, x - PET_PX / 2);
     }
   }
   /** A keyword egg (生日快乐…): they jump. */
   function cheer() {
-    if (!layer) return;
+    if (!layer || reduced() || doc.hidden) return;
     for (const e of live.values()) {
-      if (['held', 'fall', 'cling'].includes(e.state) || moodOf(e) === 'starving') continue;
+      if (['held', 'fall', 'cling'].includes(e.state)) continue;
       if (e.state === 'sleep') continue;
       setFrame(e, 'happy'); say(e, '🎉'); once(e, 'jump');
     }
-  }
-  /** Fed (from its card or the list): it eats, then is glad. */
-  function fed(id) {
-    const e = live.get(id);
-    if (!e || ['held', 'fall', 'hop'].includes(e.state)) return;
-    cancel(e.next);
-    setState(e, 'idle');
-    let n = 0;
-    const chew = () => { setFrame(e, n % 2 ? 'blink' : 'eat'); if (++n < 6) later(chew, 200); else { setFrame(e, 'happy'); say(e, '😋'); later(() => rest(e), 900); } };
-    chew();
   }
   /** The box the user writes in, in the layer's terms. */
   function boxSpan() {
@@ -535,7 +592,7 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
   function faceBox(e) { const b = boxSpan(); if (b) { e.facing = (b.left + b.right) / 2 > e.x ? 1 : -1; place(e); } }
   /** The user is writing: the ones up and about come and sit by the box, looking at it, until a while after the last key. */
   function typing(on = true) {
-    if (!layer) return;
+    if (!layer || doc.hidden) return;
     if (!on) { typingUntil = 0; for (const e of live.values()) if (e.watching) { e.watching = false; if (e.state === 'idle') rest(e); } return; }
     const fresh = Date.now() >= typingUntil;
     typingUntil = Date.now() + 4000;
@@ -545,7 +602,7 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
     const span = boxSpan();
     if (!span) return;
     // (One sitting on a bubble comes down too; one carrying another, or riding one, stays.)
-    const comers = [...live.values()].filter(e => !e.watching && ['idle', 'walk'].includes(e.state) && !riderOf(e) && !e.on && moodOf(e) !== 'starving');
+    const comers = [...live.values()].filter(e => !e.watching && ['idle', 'walk'].includes(e.state) && !riderOf(e) && !e.on);
     // Places along the box, past the ones already standing there (asleep, carrying another).
     const taken = [...live.values()].filter(p => !comers.includes(p) && onFloor(p)).map(p => p.x), spots = [];
     for (let x = span.left + 10; x <= span.right && spots.length < comers.length; x += PET_PX + 6) if (!taken.some(t => Math.abs(t - x) < PET_PX - 6)) spots.push(x);
@@ -559,7 +616,7 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
   }
   /** Sent: the ones watching jump for it. */
   function sent() {
-    if (!layer) return;
+    if (!layer || reduced() || doc.hidden) return;
     for (const e of live.values()) {
       if (!e.watching) continue;
       setFrame(e, 'happy'); say(e, pick(['♪', '✈', '发出去啦']), 1200); once(e, 'jump');
@@ -616,7 +673,7 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
   // ---------- on and off ----------
   function sync() {
     const list = pets().list, ids = new Set(list.map(p => p.id)), saved = spots(), added = [];
-    for (const [id, e] of live) if (!ids.has(id)) { const r = riderOf(e); e.el.remove(); live.delete(id); if (r) lower(r); }
+    for (const [id, e] of live) if (!ids.has(id)) { stopAction(e); cancel(e.next); cancel(e.blink); e.gestureOff?.(); const r = riderOf(e); e.el.remove(); live.delete(id); if (r) lower(r); }
     for (const p of list) if (!live.has(p.id)) { const e = make(p); live.set(p.id, e); layer.append(e.el); restore(e, saved[p.id]); added.push(e); }
     // Riders after the ones they ride on.
     for (const e of added) { const at = saved[e.id]; if (at?.on && live.has(at.on) && !riderOf(live.get(at.on)) && height(live.get(at.on)) < STACK) { e.on = at.on; e.onDx = Number(at.onDx) || 0; } }
@@ -624,7 +681,25 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
     for (const p of list) { const e = live.get(p.id); if (e) e.el.setAttribute('aria-label', p.name); }
   }
   const onScroll = () => follow();
-  const onVisible = () => { if (doc.hidden) { win.cancelAnimationFrame(raf); raf = 0; } else if (layer) for (const e of live.values()) if (MOVING.has(e.state)) start(); };
+  const onVisible = () => {
+    if (!layer) return;
+    layer.toggleAttribute('data-paused', doc.hidden);
+    for (const animation of zel?.getAnimations?.() || []) { if (doc.hidden) animation.pause(); else animation.play(); }
+    if (doc.hidden) { win.cancelAnimationFrame(raf); raf = 0; }
+    else { measure(); const jobs = [...paused]; paused.clear(); jobs.forEach(fn => fn()); for (const e of live.values()) if (MOVING.has(e.state)) start(); }
+  };
+  const onMotion = () => {
+    if (!layer || !reduced()) return;
+    win.cancelAnimationFrame(raf); raf = 0;
+    for (const animation of zel?.getAnimations?.() || []) animation.cancel();
+    for (const e of live.values()) {
+      if (e.state === 'held' || e.state === 'sleep') continue;
+      stopAction(e); cancel(e.next); e.chase = null; e.meet = null; e.walks = 0;
+      if (e.state === 'hop') { e.x = e.tx; e.y = e.ty; }
+      if (e.state === 'fall' || e.state === 'cling') fallNow(e);
+      setFrame(e, 'stand'); rest(e); place(e);
+    }
+  };
   /** wrap: .msgs-wrap; msgs: .msgs; key: the chat (where they were is kept by it); box(): the box the user writes in. */
   function attach(nextWrap, nextMsgs, {key: place = '', box: writer = null} = {}) {
     const p = pets();
@@ -633,6 +708,7 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
     if (layer && wrap === nextWrap && layer.isConnected && key === place) { if (msgs !== nextMsgs) { msgs?.removeEventListener('scroll', onScroll); msgs = nextMsgs; msgs?.addEventListener('scroll', onScroll, {passive: true}); } sync(); follow(); return; }
     detach();
     wrap = nextWrap; msgs = nextMsgs; key = place; box = writer;
+    measure();
     layer = doc.createElement('div');
     layer.className = 'pet-layer';
     zel = doc.createElement('span');
@@ -642,21 +718,32 @@ export function petLayer({win, doc, pets, onPlay = () => {}, onCard = () => {}, 
     wrap.append(layer);
     msgs?.addEventListener('scroll', onScroll, {passive: true});
     doc.addEventListener('visibilitychange', onVisible);
+    motion?.addEventListener?.('change', onMotion);
     sync();
+    onVisible();
+    if (win.ResizeObserver) {
+      resize = new win.ResizeObserver(() => {
+        follow();
+        for (const e of live.values()) if (onFloor(e)) { e.x = Math.min(e.x, width() - PET_PX); e.y = floor(); place(e); carry(e); }
+      });
+      resize.observe(wrap);
+    }
     zLoop();
   }
   function detach() {
-    if (layer && saveTimer) { win.clearTimeout(saveTimer); keepNow(); }
+    if (layer) { win.clearTimeout(saveTimer); keepNow(); }
     for (const t of timers) win.clearTimeout(t);
-    timers.clear();
-    for (const e of live.values()) { cancel(e.next); cancel(e.blink); win.clearTimeout(e.sayTimer); }
+    timers.clear(); paused.clear();
+    resize?.disconnect(); resize = null;
+    for (const e of live.values()) { stopAction(e); e.gestureOff?.(); cancel(e.next); cancel(e.blink); win.clearTimeout(e.sayTimer); }
     live.clear();
     if (raf) win.cancelAnimationFrame(raf);
     raf = 0; zTimer = 0; scrolling = 0; typingUntil = 0;
     msgs?.removeEventListener('scroll', onScroll);
     doc.removeEventListener('visibilitychange', onVisible);
+    motion?.removeEventListener?.('change', onMotion);
     layer?.remove();
     layer = null; wrap = null; msgs = null; zel = null; box = null;
   }
-  return {attach, detach, arrived, cheer, fed, typing, sent, get entities() { return live; }};
+  return {attach, detach, arrived, cheer, typing, sent, get entities() { return live; }};
 }

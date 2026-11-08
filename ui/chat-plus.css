@@ -241,25 +241,16 @@
 @keyframes pet-bump{40%{transform:translateY(2px) scaleY(.97)}}
 @media (prefers-reduced-motion:reduce){.pet-sprite,.pet-body,.pet-stars,.pet-say.show{animation:none!important}.pet-say.show{opacity:1;transform:translate(-50%,0)}}
 /* 宠物 in their sheets */
-.pet-face{display:inline-block;flex:none;width:var(--s);height:var(--s);background-repeat:no-repeat;background-size:calc(var(--s) * 14) var(--s);background-position:0 0;image-rendering:pixelated}
+.pet-face{display:inline-block;flex:none;width:var(--s);height:var(--s);background-repeat:no-repeat;background-size:calc(var(--s) * 16) var(--s);background-position:0 0;image-rendering:pixelated}
 .pet-row .pet-face{margin-right:2px}
 /* A row's own spans grow (flex:1): the face is one frame of the strip, never wider. */
 .list-row>span.pet-face:not(.avatar):not(.plate){flex:none;width:var(--s);min-width:var(--s)}
-.pet-bars{display:grid;gap:3px;margin-top:5px}
-.pet-bars>span{display:grid;grid-template-columns:30px 1fr;align-items:center;gap:6px}
-.pet-bars small{font-size:10.5px;color:var(--ink2)}
-.pet-bars i{display:block;height:6px;border-radius:99px;background:linear-gradient(90deg,var(--accent) var(--v),var(--card2) var(--v))}
-.pet-bars i[data-low=true]{background:linear-gradient(90deg,#f0794f var(--v),var(--card2) var(--v))}
 .pet-kinds{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px}
 .pet-kind{display:grid;justify-items:center;gap:2px;padding:10px 6px;border-radius:16px;background:var(--card);box-shadow:inset 0 0 0 1.5px var(--line)}
 .pet-kind[aria-pressed=true]{box-shadow:inset 0 0 0 2px var(--accent);background:var(--accent-soft)}
 .pet-kind span{font-weight:800;font-size:13.5px}
 .pet-kind small{font-size:11px;color:var(--ink2)}
 .pet-card{display:grid;justify-items:center;gap:6px;text-align:center;margin-bottom:6px}
-.pet-card .pet-bars{width:min(240px,100%)}
-.pet-foods{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px}
-.pet-food{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border-radius:99px;background:var(--card);box-shadow:inset 0 0 0 1.5px var(--line);font-size:13px;font-weight:700;color:var(--ink)}
-.pet-food small{color:var(--ink2)}
 /* 慢递信件: an envelope in the chat, the letter on paper */
 .letter-card{display:grid;grid-template-columns:52px 1fr;align-items:center;gap:10px;width:220px;max-width:100%;padding:10px 12px;border-radius:16px;background:var(--card);box-shadow:inset 0 0 0 1.5px var(--line),0 3px 0 var(--line);text-align:left;color:var(--ink)}
 .lc-env{position:relative;width:52px;height:36px;border-radius:5px;background:#fbf3e4;box-shadow:inset 0 0 0 1.5px #d9c7a6;overflow:hidden}
@@ -288,3 +279,25 @@
 .chat-bubble .at{font-weight:800;color:var(--accent-ink)}
 .msg.me .chat-bubble .at{color:inherit;text-decoration:underline;text-underline-offset:2px}
 .chat-bubble .at-me{padding:0 3px;border-radius:5px;background:rgba(255,190,60,.35)}
+
+/* Finite companion actions share the existing sprite, without layout animation. */
+.pet[data-action=stretch] .pet-sprite{animation:pet-stretch 1.8s ease-in-out}
+.pet[data-action=roll] .pet-sprite,.pet[data-action=flip] .pet-sprite{animation:pet-roll 1.2s ease-in-out;transform-origin:50% 50%}
+.pet[data-action=tail] .pet-sprite{animation:pet-tail .55s ease-in-out 3;transform-origin:50% 60%}
+.pet[data-action=scratch] .pet-sprite{animation:pet-struggle .15s steps(2) 10}
+.pet[data-action=tilt] .pet-sprite,.pet[data-action=look] .pet-sprite{animation:pet-tilt 1.8s ease-in-out}
+.pet[data-action=belly] .pet-sprite{animation:pet-belly 1.8s ease-in-out;transform-origin:50% 55%}
+.pet[data-action=jump] .pet-sprite{animation:pet-jump .6s ease-in-out}
+.pet[data-action=rub] .pet-sprite,.pet[data-action=cuddle] .pet-sprite,.pet[data-action=groom] .pet-sprite{animation:pet-rub .6s ease-in-out 4}
+.pet[data-action=lounge] .pet-sprite{transform:scaleY(.8) scaleX(1.1)}
+.pet-ball{position:absolute;width:12px;height:12px;pointer-events:none;animation:pet-ball 1s ease-out forwards}
+.pet-ball svg{display:block;width:100%;height:100%}
+@keyframes pet-stretch{50%{transform:scaleX(1.3) scaleY(.75) translateY(-2px)}}
+@keyframes pet-roll{50%{transform:translateY(-14px) rotate(180deg)}100%{transform:rotate(360deg)}}
+@keyframes pet-tail{50%{transform:scaleX(-1) rotate(25deg)}}
+@keyframes pet-tilt{35%{transform:rotate(-15deg)}70%{transform:rotate(12deg)}}
+@keyframes pet-belly{25%,75%{transform:rotate(180deg)}}
+@keyframes pet-rub{50%{transform:scaleY(.92) rotate(5deg)}}
+@keyframes pet-ball{to{transform:translateX(var(--roll)) rotate(360deg)}}
+.pet-layer[data-paused] *{animation-play-state:paused!important}
+@media (prefers-reduced-motion:reduce){.pet-layer *{animation:none!important}}

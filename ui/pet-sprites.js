@@ -4,12 +4,12 @@
 // 0.9.37: asleep (legs tucked in), a yawn, dizzy, looking aside, and two frames of each kind's own habit (the cat licks
 // its paw, the chick pecks, the slime bounces — that one is CSS —, the crab snaps its claws).
 export const PET_SIZE = 20;
-export const PET_FRAMES = Object.freeze(['stand', 'blink', 'walk1', 'walk2', 'happy', 'sad', 'held', 'eat', 'sleep', 'yawn', 'dizzy', 'look', 'habit1', 'habit2']);
+export const PET_FRAMES = Object.freeze(['stand', 'blink', 'walk1', 'walk2', 'happy', 'held', 'sleep', 'yawn', 'dizzy', 'look', 'habit1', 'habit2', 'stretch', 'scratch', 'belly', 'rub']);
 
 const mirror = half => half.map(row => row + [...row].reverse().join(''));
-// Eyes, 3 wide and 2 high ('_' keeps what is there); sad ones are mirrored for the right eye.
-const EYES = {open: ['ew_', 'ee_'], closed: ['___', 'kkk'], happy: ['_k_', 'k_k'], sad: ['k__', '_kk'], wide: ['ee_', 'ee_'], dizzy: ['k_k', '_k_'], look: ['_ew', '_ee']};
-const FACE = {stand: 'open', blink: 'closed', walk1: 'open', walk2: 'open', happy: 'happy', sad: 'sad', held: 'wide', eat: 'closed', sleep: 'closed', yawn: 'closed', dizzy: 'dizzy', look: 'look', habit1: 'closed', habit2: 'open'};
+// Eyes are three pixels wide; underscores keep the underlying body colour.
+const EYES = {open: ['ew_', 'ee_'], closed: ['___', 'kkk'], happy: ['_k_', 'k_k'], wide: ['ee_', 'ee_'], dizzy: ['k_k', '_k_'], look: ['_ew', '_ee']};
+const FACE = {stand: 'open', blink: 'closed', walk1: 'open', walk2: 'open', happy: 'happy', held: 'wide', sleep: 'closed', yawn: 'closed', dizzy: 'dizzy', look: 'look', habit1: 'closed', habit2: 'open', stretch: 'closed', scratch: 'happy', belly: 'happy', rub: 'closed'};
 
 export const PET_ART = Object.freeze({
   cat: {
@@ -83,14 +83,16 @@ export function petFrame(kind, frame) {
   for (const [y, cells] of Object.entries(art.extra || {})) for (const [x, ch] of Object.entries(cells)) rows[y][x] = ch;
   for (const [y, row] of Object.entries(art.legs?.[frame] || {})) if (row.length === PET_SIZE) rows[y] = [...row];
   const face = art.face?.[frame] || FACE[frame] || 'open', eye = EYES[face];
-  art.eyes.forEach(([x, y], side) => eye.forEach((line, dy) => [...line].forEach((ch, dx) => {
-    const col = side && face === 'sad' ? x + 2 - dx : x + dx;
+  art.eyes.forEach(([x, y]) => eye.forEach((line, dy) => [...line].forEach((ch, dx) => {
+    const col = x + dx;
     if (ch !== '_') rows[y + dy][col] = ch;
   })));
-  // A tear under a sad eye; an open mouth eating or held up; a yawn opens it wide; a kind's own mouth for a habit.
-  if (face === 'sad') { const [x, y] = art.eyes[0]; rows[y + 2][x] = 'c'; }
+  // Mouth and limb variants remain palette-based, just like the original frames.
   const [mx, my, [m]] = art.mouth;
-  if (frame === 'eat' || frame === 'held') [...m].forEach((ch, dx) => { rows[my][mx + dx] = frame === 'eat' ? 'p' : ch; });
+  if (frame === 'held') [...m].forEach((ch, dx) => { rows[my][mx + dx] = ch; });
+  if (frame === 'stretch') { for (let x = 4; x < 16; x++) rows[18][x] = x % 5 === 0 ? 'k' : 'b'; }
+  if (frame === 'scratch') { rows[12][3] = 'k'; rows[11][4] = 'b'; rows[10][3] = 'k'; }
+  if (frame === 'belly') { for (let y = 13; y < 18; y++) for (let x = 8; x < 12; x++) rows[y][x] = 'l'; }
   if (frame === 'yawn') [['k', 'k'], ['p', 'p'], ['k', 'k']].forEach((line, dy) => { if (rows[my + dy]) line.forEach((ch, dx) => { rows[my + dy][mx + dx] = ch; }); });
   if (art.mouths?.[frame]) [...art.mouths[frame]].forEach((ch, dx) => { rows[my][mx + dx] = ch; });
   return rows.map(r => r.join(''));
