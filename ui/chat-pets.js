@@ -701,13 +701,14 @@ export function petLayer({win, doc, pets, onCard = () => {}, storage = (() => { 
     }
   };
   /** wrap: .msgs-wrap; msgs: .msgs; key: the chat (where they were is kept by it); box(): the box the user writes in. */
-  function attach(nextWrap, nextMsgs, {key: place = '', box: writer = null} = {}) {
+  function attach(nextWrap, nextMsgs, {key: spotKey = '', box: writer = null} = {}) {
+    // (spotKey, not place: a parameter named place hid the place() function from the ResizeObserver below.)
     const p = pets();
     if (!nextWrap || !p.show || !p.list.length) return detach();
     box = writer;
-    if (layer && wrap === nextWrap && layer.isConnected && key === place) { if (msgs !== nextMsgs) { msgs?.removeEventListener('scroll', onScroll); msgs = nextMsgs; msgs?.addEventListener('scroll', onScroll, {passive: true}); } sync(); follow(); return; }
+    if (layer && wrap === nextWrap && layer.isConnected && key === spotKey) { if (msgs !== nextMsgs) { msgs?.removeEventListener('scroll', onScroll); msgs = nextMsgs; msgs?.addEventListener('scroll', onScroll, {passive: true}); } sync(); follow(); return; }
     detach();
-    wrap = nextWrap; msgs = nextMsgs; key = place; box = writer;
+    wrap = nextWrap; msgs = nextMsgs; key = spotKey; box = writer;
     measure();
     layer = doc.createElement('div');
     layer.className = 'pet-layer';

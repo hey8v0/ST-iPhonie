@@ -618,6 +618,8 @@ const COMMON = new Set(['我们', '你们', '他们', '什么', '怎么', '没�
  */
 export function repeatsOf(messages, names) {
   const out = [];
+  // What the user wrote lately, to tell a quote of theirs from any other quote.
+  const mine = messages.filter(m => m.from === 'me').slice(-30).map(m => String(m.kind === 'voice' ? m.translation || m.text : m.text || '')).join('\n');
   for (const name of names) {
     const lines = messages.filter(m => m.from === name && ['text', 'voice'].includes(m.kind)).slice(-12).map(m => String(m.kind === 'voice' ? m.translation || m.text : m.text || '').trim()).filter(Boolean);
     if (lines.length < 4) continue;
@@ -632,7 +634,9 @@ export function repeatsOf(messages, names) {
     // The longest of words that come in the same lines stands for them (「嘿嘿嘿」 over 「嘿嘿」).
     const words = [...seen].filter(([, s]) => s.size >= 3).sort((a, b) => b[1].size - a[1].size || b[0].length - a[0].length).map(([w]) => w);
     const kept = words.filter((w, i) => !words.slice(0, i).some(x => x.includes(w) || w.includes(x))).slice(0, 3);
-    if (kept.length) out.push({name, words: kept});
+    // Quoting the user's own words back (“…”「…」) in two of these lines or more: a habit the memory may have taught.
+    const quoting = lines.filter(line => (line.match(/[“"「『]([^”"」』]{3,40})[”"」』]/gu) || []).some(q => mine.includes(q.slice(1, -1).trim()))).length >= 2;
+    if (kept.length || quoting) out.push({name, words: kept, quoting});
   }
   return out;
 }
@@ -775,7 +779,7 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     bookNote(prompts, history, user),
     !group && nudge && cue === 'outfit' && outfit ? promptText(prompts, 'wardrobe', 'changed', {'用户': user, '对象': partner, '衣着': outfit}) : '',
     atted.length && last?.from === 'me' ? promptText(prompts, 'group-extra', 'at', {'用户': user, '谁': atted.join('、')}) : '',
-    repeats.length ? promptText(prompts, 'variety', 'text', {'复读': repeats.map(r => `${r.name}：${r.words.map(w => `「${w}」`).join('')}`).join('；')}) : ''].filter(Boolean).join('\n');
+    repeats.length ? promptText(prompts, 'variety', 'text', {'复读': repeats.map(r => `${r.name}${r.words.length ? '：' + r.words.map(w => `「${w}」`).join('') : ''}${r.quoting ? `${r.words.length ? '，还' : '老'}用引号重复${user}说过的话（别再引用，用自己的话回）` : ''}`).join('；')}) : ''].filter(Boolean).join('\n');
   const text = (clock ? clock + (moment ? '\n' + moment : '') + '\n\n' : '') + transcript + filesText(history, user) + (games ? games + '\n\n' : '') + turn;
   return [{role: 'system', content: [system, ...extra].join('\n\n')}, {role: 'user', content: pictures.length ? [{type: 'text', text}, ...pictures.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : text}];
 }

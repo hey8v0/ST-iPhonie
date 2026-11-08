@@ -30,7 +30,7 @@ export function memorySheet(ctx, {threadId, title, assistant = false}) {
     const st = api.memoryStatus?.(threadId) || {}, o = options(), m = o.memory, top = roots(book);
     const waiting = thread ? unwritten(thread, book).length : 0, older = Math.max(0, waiting - o.history);
     const layers = [0, 1, 2].map(l => [l, book.nodes.filter(n => Math.min(n.level, 2) === l).length]).filter(([, k]) => k).map(([l, k]) => `${k} ${l === 2 ? '份长期总览' : l === 1 ? '份阶段总结' : '段聊天摘要'}`);
-    const state = !m.enabled ? (assistant ? '记忆关着（助手设置 → 记忆）。' : '记忆关着（预设 → 聊天 → 记忆）。')
+    const state = !m.enabled ? (assistant ? '记忆关着（助手设置 → 记忆）。' : '记忆关着（预设 → 聊天 → 手机聊天）。')
       : `${book.throughAt ? `已经整理到 ${day(book.throughAt)}，` : '还没有整理过，'}最近 ${o.history} 条原样发给模型；` + (older ? `更早的还有 ${older} 条等着整理（攒够 ${m.batch} 条会自动整理）。` : '没有要整理的。');
     const used = st.used;
     d.body.innerHTML = `<p class="hint">${state}${layers.length ? `<br>现在有 ${layers.join('、')}。` : ''}</p>

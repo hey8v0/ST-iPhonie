@@ -210,18 +210,16 @@ export function presetsApp(ctx) {
     d.onClose(() => done());
   }
   /** 记忆 of the phone chats (core/memory.js): the switch and how it is written up and searched. */
+  // (0.9.44) The editor's reading part is four folds, one per thing read: 正文 (recent replies and other plugins' story
+  // memory), 世界书, 手机聊天 (the chat history and its own memory), and 带进正文 (how chat goes the other way).
   function memoryFields(p) {
     const m = p.memory || {}, on = m.enabled !== false;
     const num = (key, label, value, min, max, note) => field(label, input('memory.' + key, value, 'number', `min="${min}" max="${max}" step="1"`), note);
-    return `<details data-group="preset-memory"><summary>记忆 ${help('聊得久了，最近几十条之外的消息模型就看不到了。打开记忆后，更早的消息会自动整理成摘要，摘要多了再合成阶段总结、长期总览（每整理一次调用一次文字模型）；回消息、打电话、查手机和朋友圈都会带上。每段聊天的记忆在右上角菜单 → 记忆 里看和改。')}<small class="fold-note">${on ? '开' : '关'}</small></summary><div class="fold-body">
-      ${toggle('memory.enabled', '记住更早的聊天', on)}
+    return `${toggle('memory.enabled', '记住更早的聊天', on, '聊得久了，「读取聊天记录」之外的消息模型就看不到了。打开后，更早的消息会自动整理成摘要，摘要多了再合成阶段总结、长期总览（每整理一次调用一次文字模型）；回消息、打电话、查手机和朋友圈都会带上。每段聊天的记忆在聊天右上角「⋯ → 记忆」里看和改。')}
       ${on ? num('batch', '每次整理多少条', m.batch ?? 40, 10, 200, '「读取聊天记录」那么多条之外的消息，攒够这么多条整理成一段聊天摘要。')
         + num('stage', '几段摘要合成一份阶段总结', m.stage ?? 5, 2, 20, '')
         + num('epic', '几份总结再合成长期总览', m.epic ?? 4, 2, 20, '长期总览也会继续往上合，记忆再长也不会越带越多。')
-        + num('recall', '每次想起几段旧聊天', m.recall ?? 3, 0, 10, '按最近几句话，从更早的原话里找出最相关的几段一起带上（0 不找）。默认在本地找，不花钱；在「引擎 → 向量模型」里填了 Embedding 接口后按意思找，更准。')
-        + '<p class="hint">想让正文一直记得某段聊天：在那段聊天里点「带进剧情」，在「正文和手机 → 这段聊天」打开「一直带着」。</p>' : ''}
-      ${storyFields(m)}
-    </div></details>`;
+        + num('recall', '每次想起几段旧聊天', m.recall ?? 3, 0, 10, '按最近几句话，从更早的原话里找出最相关的几段一起带上（0 不找）。默认在本地找，不花钱；在「引擎 → 向量模型」里填了 Embedding 接口后按意思找，更准。') : ''}`;
   }
   /**
    * 剧情记忆来源: other plugins' story memory (剧情剪辑台, the tavern's 总结, or any that puts it into the tavern's
@@ -271,14 +269,17 @@ export function presetsApp(ctx) {
       : field('正文显示', select('voiceLayout', p.format===FREE_FORMAT?'free':'paired', [['paired','译文与原文配对'],['free','自由正文 · 只渲染 tts 标签']]), '自由正文保留对白的语言和排版，英语、双语括号都可以。标签内仍写角色、情绪、朗读原文。') + field('台词格式', textArea('format', p.format, 'class="code short" rows="3"'), '配对模式：{译文}、{角色}、{情绪}、{文本} 各保留一次。自由正文模式：<tts>{角色}|{情绪}|{文本}</tts>，前面的正文不限制格式。译文供阅读，原语言供语音生成。默认格式是成对的 <tts></tts>，别的插件要排除语音原文时，排除标签填 <tts></tts>。\n\n这里的格式只管正文；手机里的语音消息和电话固定用默认格式，不跟着改。');
     const marks = p.marks || {inner: [], phone: []}, marked = (marks.inner || []).length + (marks.phone || []).length;
     const folds = chat
-      ? fold('preset-read', '读多少', `正文 ${p.context} 条 · 聊天 ${p.history} 条`,
-          `${field('读取最近的正文', input('context', p.context, 'number', 'min="0" max="100" step="1"'), '回消息时参考最近几条正文，0 表示不看剧情。')}${field('读取聊天记录', input('history', p.history, 'number', 'min="2" max="500" step="1"'), '回消息时带上最近多少条手机聊天。')}
+      ? fold('preset-read', '正文', `最近 ${p.context} 条`,
+          `${field('读取最近的正文', input('context', p.context, 'number', 'min="0" max="100" step="1"'), '回消息、打电话、发朋友圈、论坛和查手机时参考最近几条正文，0 表示不看剧情。')}
           ${field('每条正文最多（字）', input('storyEach', p.storyEach ?? 4000, 'number', 'min="0" step="500"'), '一条正文太长时只取前面这么多字。0 表示不限制。中文大约一个字一个 token。')}${field('正文一共最多（字）', input('storyTotal', p.storyTotal ?? 20000, 'number', 'min="0" step="1000"'), '最近的正文优先，加起来超过这么多字就不再往前读。0 表示不限制。')}
-          ${field('每次刷新朋友圈最多几条', input('posts', p.posts ?? 2, 'number', 'min="1" max="5" step="1"'), '在动态里刷新时，由模型挑 1 到这么多个人发动态。')}`)
+          ${storyFields(p.memory || {})}`, '手机这边知道多少剧情。')
         + fold('preset-lore', '世界书', p.lore === false ? '不带' : loreLine(p),
           `${toggle('lore', '带上世界书', p.lore !== false, '聊天、电话、朋友圈、论坛和查手机按触发条件带上酒馆的世界书：和写正文时一样，常驻的条目，以及在名字、最近的正文和聊天里触发关键词的条目（当前角色卡的世界书、全局和聊天绑定的世界书都算）。人设写在世界书里的话要打开。\n\n条目多的话会多占一些上下文。')}${p.lore !== false ? loreFields(p) + field('世界书最多（字）', input('loreMax', p.loreMax ?? 30000, 'number', 'min="0" step="1000"'), '手机读世界书时最多放这么多字，只放整条。0 表示插件不另外限制，只按酒馆「世界书」设置里的预算（占上下文的百分比）来。手机的每次请求（聊天、朋友圈、论坛、查手机、电话）都按这些条件读取世界书，放得越多越费 token，也越慢。') : ''}`)
-        + memoryFields(p)
-        + fold('preset-bring', '带进剧情', '', `${field('带进剧情的写法', textArea('bring', p.bring, 'class="code" rows="4"'), '选中的聊天消息会按这段文字注入下一次正文，只用一次。需要包含 {{聊天记录}}；也可以用 {{用户}}、{{对象}}。')}${injection(p.injection)}`, '带进剧情的文字插在正文请求的哪里。深度与身份仅在聊天内插入时生效。')
+        + fold('preset-memory', '手机聊天', `最近 ${p.history} 条 · 记忆${p.memory?.enabled !== false ? '开' : '关'}`,
+          `${field('读取聊天记录', input('history', p.history, 'number', 'min="2" max="500" step="1"'), '回消息时带上最近多少条手机聊天，原样给模型看。')}${memoryFields(p)}
+          ${field('每次刷新朋友圈最多几条', input('posts', p.posts ?? 2, 'number', 'min="1" max="5" step="1"'), '在动态里刷新时，由模型挑 1 到这么多个人发动态。')}`, '手机里聊过的话，模型能看到多少、更早的怎么记住。')
+        + fold('preset-bring', '带进正文', '', `${field('带进剧情的写法', textArea('bring', p.bring, 'class="code" rows="4"'), '选中的聊天消息会按这段文字注入下一次正文，只用一次。需要包含 {{聊天记录}}；也可以用 {{用户}}、{{对象}}。')}${injection(p.injection)}
+          <p class="hint">挑哪些消息、哪些聊天一直带着，在「设置 → 正文和手机」里，或者聊天顶上的「带进剧情」。</p>`, '反过来：手机里的聊天怎么写进正文、插在正文请求的哪里。深度与身份仅在聊天内插入时生效。')
       : (draw ? '' : fold('preset-marks', '心声和电话', marked ? `多认 ${marked} 种写法` : '看情绪字段', marksFields(p)))
         + fold('preset-injection', '默认插入设置', positions.find(x => x[0] === p.injection.position)?.[1] || '', injection(p.injection), '深度与身份仅在聊天内插入时生效；条目可以单独覆盖。');
     v.draw(heading(p.id ? '编辑预设' : '新预设', btn('preset-more', icon('more'), 'round-button', 'aria-label="更多"'), draw ? 'Drawing Preset' : chat ? 'Chat Preset' : 'Voice Preset')
