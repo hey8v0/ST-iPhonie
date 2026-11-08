@@ -124,6 +124,8 @@
 .chat-egg span{position:absolute;top:-36px;font-size:var(--s);line-height:1;opacity:0;will-change:transform,opacity;animation:egg-fall 2.1s cubic-bezier(.3,.6,.4,1) var(--d) forwards}
 .chat-egg[data-way=rise] span{top:auto;bottom:-36px;animation-name:egg-rise}
 .chat-egg[data-way=drift] span{animation-name:egg-drift;animation-duration:2.3s}
+.chat-egg[data-effect=fireworks] span{top:25%;animation-name:egg-burst}
+@keyframes egg-burst{0%{opacity:0;transform:translateY(60px) scale(.1)}25%{opacity:1;transform:translateY(0) scale(.5)}65%{opacity:1;transform:translateY(-15px) scale(1.8)}100%{opacity:0;transform:translateY(10px) scale(2.5)}}
 @keyframes egg-fall{0%{opacity:0;transform:translateY(0) rotate(0)}12%{opacity:1}80%{opacity:1}100%{opacity:0;transform:translateY(var(--h)) rotate(var(--r))}}
 @keyframes egg-rise{0%{opacity:0;transform:translateY(0) scale(.6)}15%{opacity:1}75%{opacity:1}100%{opacity:0;transform:translateY(calc(var(--h) * -.85)) scale(1.1)}}
 @keyframes egg-drift{0%{opacity:0;transform:translate(0,0) rotate(0)}20%{opacity:1}80%{opacity:.9}100%{opacity:0;transform:translate(26px,calc(var(--h) * .55)) rotate(var(--r))}}

@@ -1093,13 +1093,14 @@ export class TTSBackend {
      */
     /** signal: the request is let go (停止回复). Kept out of the request log, which keeps copies of the request. */
     async generateText(context, { use = 'other', signal, ...request }) {
-        const answer = await this.requestLog.run('文字模型', {source: this.settings.text.source, model: activeText(this.settings.text).model, ...request}, () => this.generateTextRaw(context, request, signal));
+        const result = await this.requestLog.run('文字模型', {source: this.settings.text.source, model: activeText(this.settings.text).model, ...request}, () => this.generateTextRaw(context, request, signal, use === 'chat'));
+        const answer = typeof result === 'object' && result !== null ? String(result.text || '').trimEnd() + (/^(length|max_tokens|MAX_TOKENS)$/.test(result.meta?.finish || '') ? '（回复达到长度上限，末句可能未写完）' : '') : result;
         this.ledger.text(use, request.prompt, answer);
         return answer;
     }
-    async generateTextRaw(context, request, signal) {
+    async generateTextRaw(context, request, signal, details = false) {
         const text = activeText(this.settings.text);
-        if (text.source === 'custom') return customRequest({ text, key: this.textKeys.get(text.id) || '', prompt: request.prompt, responseLength: request.responseLength, fetch: this.textFetch, signal });
+        if (text.source === 'custom') return customRequest({ text, key: this.textKeys.get(text.id) || '', prompt: request.prompt, responseLength: request.responseLength, fetch: this.textFetch, signal, details });
         if (!context?.generateRaw) throw Error('当前酒馆版本不支持后台生成');
         // The chat-completion request the tavern builds is kept, so an empty answer can be asked again as a stream:
         // "假流式" channels only answer streamed requests, and the tavern's background generation never streams.
@@ -3698,7 +3699,10 @@ export class TTSBackend {
             searchChatMessages: (query, options) => this.searchChatMessages(String(query ?? ''), clone(options || {})),
             listThreads: () => this.threads(), getThread: id => this.chats.get(id), chatUnread: async () => (await this.threads()).reduce((n, t) => n + (t.muted ? 0 : t.unread), 0),
             createThread: value => this.chatMutate(null, () => this.chats.create({ ...clone(value), ...this.spaceTag() })),
-            updateThread: (id, patch) => this.chatMutate(id, () => this.chats.update(id, clone(patch))),
+            updateThread: (id, patch) => this.chatMutate(id, () => {
+                if (patch.manage?.action === 'invite' && patch.manage.names?.some(n => !this.contacts().some(c => c.name === n))) throw Error('只能邀请联系人里的好友');
+                return this.chats.update(id, clone(patch));
+            }),
             deleteThread: id => this.chatMutate(id, async () => { const done = await this.chats.remove(id); this.noteGone('chats', [id]); await this.memoryForget(id).catch(() => {}); return done; }),
             // 记忆: what a chat remembers; a summary can be corrected or deleted (what it covered is used again).
             memoryBook: threadId => this.memoryBook(threadId),

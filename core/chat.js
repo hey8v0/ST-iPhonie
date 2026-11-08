@@ -732,6 +732,7 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     '没后缀': members.filter(m => !pats[m.name]).map(m => m.name).join('、')});
   // 0.9.35: what else this chat knows and can do, each a block of 系统提示词 of its own.
   const extra = [
+    (() => { const quiet = group ? Object.entries(thread.silenced || {}).filter(([n, until]) => thread.members.includes(n) && until > time).map(([n]) => n) : []; return quiet.length ? `群管理：${quiet.join('、')}正在禁言，禁言者不得发言；只有当前名单中的成员可以发言。` : ''; })(),
     group && promptOn(prompts, 'knows') ? privateChats : '',
     // 旁观群: the user is not in it, and nobody there knows the user sees it.
     // (told whether the block is on or not: off, it only stops the contacts starting groups)
@@ -889,15 +890,17 @@ function special(from, content, {names, user, stickers = []}) {
  * Turns the model's reply into chat messages. Lines look like 「名字：内容」; a voice line holds a voice tag
  * in `voiceFormat`. Voice from someone without a voice becomes a text message with the translation.
  */
-export function parseChatReply(reply, {members, user = '我', voiceFormat, voiceNames = [], stickers = []}) {
+export function parseChatReply(reply, {members, user = '我', voiceFormat, voiceNames = [], stickers = [], strictNames = false}) {
   const names = members.map(m => m.name), out = [];
   const body = String(reply || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```[a-z]*\n?|```/g, '');
   for (const raw of body.split(/\r?\n/)) {
+    if (out.length >= 30) break;
     if (!raw.trim()) continue;
     const m = raw.match(NAME_LINE);
     let from = null, content = raw;
     if (m && names.includes(m[1].trim())) { from = m[1].trim(); content = m[2]; }
     else if (m && (m[1].trim() === user || m[1].trim() === '我')) continue;
+    else if (m && strictNames) continue;
     else if (names.length === 1) from = names[0];
     else if (out.length) from = out.at(-1).from;
     if (!from || !content.trim()) continue;
@@ -906,18 +909,24 @@ export function parseChatReply(reply, {members, user = '我', voiceFormat, voice
     if (post && /^\s*[（(]\s*配图\s*[:：]/.test(content)) { const imageTags = postPicture('x' + content.trim()).imageTags; if (imageTags) post.imageTags = imageTags; continue; }
     const feature = special(from, content, {names, user, stickers});
     if (feature?.kind === 'moment-picture') { if (post) post.imageTags = feature.imageTags; continue; }
-    if (feature) { out.push(feature); if (out.length >= 12) break; continue; }
+    if (feature) { out.push(feature); continue; }
     const voice = voiceFormat ? parseDialogue(content, voiceFormat)[0] : null;
     if (voice) {
-      if (voiceNames.includes(from)) out.push({from, kind: 'voice', text: voice.text.trim(), translation: voice.translation.trim(), emotion: voice.emotion});
-      else out.push({from, kind: 'text', text: voice.translation.trim()});
+      if (voiceNames.includes(from)) out.push({from, kind: 'voice', text: wholeChatLine(voice.text.trim()), translation: wholeChatLine(voice.translation.trim()), emotion: voice.emotion});
+      else out.push({from, kind: 'text', text: wholeChatLine(voice.translation.trim())});
       continue;
     }
     const plain = unquote(content.replace(/<[^>]+>/g, ''));
-    if (plain) out.push({from, kind: 'text', text: plain.slice(0, 4000)});
-    if (out.length >= 12) break;
+    if (plain) out.push({from, kind: 'text', text: wholeChatLine(plain)});
   }
   return out;
+}
+
+/** Keep whole sentences at the storage ceiling; visibly mark an overlong unsplit sentence. */
+export function wholeChatLine(text) {
+  if (text.length <= 4000) return text;
+  const part = text.slice(0, 3970), end = Math.max(...['。', '！', '？', '!', '?', '\n'].map(c => part.lastIndexOf(c)));
+  return (end >= 0 ? part.slice(0, end + 1) : part) + '（后续内容过长，已省略）';
 }
 
 /** The text injected into the next story reply when the user brings chat messages into the story. */
@@ -929,8 +938,8 @@ export function bringText(preset, {thread, messages, user = '我'}) {
 
 /** Removes voice/picture tags and markup from a story message, for the chat prompt. Code blocks, styles and scripts
  *  (the HTML 小剧场 some presets write) are not story: they are left out whole instead of becoming a wall of CSS. */
-export function plainStory(textValue) {
-  return String(textValue || '')
+export function plainStory(textValue, tags = []) {
+  return cleanTagged(textValue, ['think', 'thinking', 'phone', 'status', 'statusbar', '状态栏', ...tagList(tags)])
     .replace(/```[\s\S]*?(?:```|$)|<(style|script)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)|<!--[\s\S]*?(?:-->|$)/gi, ' ')
     .replace(/<tts\b[^>]*>[\s\S]*?<\/tts\s*>/gi, '')
     .replace(/<(sfx|ambience)\b[^>]*>[^<>]*<\/\1\s*>/gi, '')

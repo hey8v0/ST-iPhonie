@@ -441,7 +441,7 @@ export interface TheaterLine { role: string; text: string; translation: string; 
 export interface Theater { id: string; kind: 'theater'; form: 'script' | 'card'; title: string; lines?: TheaterLine[]; html?: string; source: 'story' | 'card'; wish: string; at: number; space?: string; save?: string; }
 export interface GeneratorDirection { title: string; text: string; }
 export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; /** when the user last turned down a 好友申请 */ refused?: number; }
-export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 黑名单: what they sent meanwhile (held, never in the chat) and their 好友申请; refused: when the user last turned one down. The list carries count instead of held. */ blocked?: {at: number; held?: {kind: string; text: string; at: number}[]; count?: number; requests: {text: string; at: number}[]; refused?: number}; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
+export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; silenced?: Record<string, number>; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 黑名单: what they sent meanwhile (held, never in the chat) and their 好友申请; refused: when the user last turned one down. The list carries count instead of held. */ blocked?: {at: number; held?: {kind: string; text: string; at: number}[]; count?: number; requests: {text: string; at: number}[]; refused?: number}; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
 /** streak: 聊天火花, days in a row both sides wrote. */
 export interface ChatThreadSummary extends Omit<ChatThread, 'messages'> { count: number; last: ChatMessage | null; streak: number; }
 export type ChatMessageInput = Omit<ChatMessage, 'id' | 'at'>;
@@ -1127,7 +1127,7 @@ export interface BackendFacade {
     chatUnread(): Promise<number>;
     /** watch (0.9.35): a 旁观群 — a group without the user, only looked on. */
     createThread(value: { type: 'dm' | 'group'; members: string[]; name?: string; watch?: boolean }): Promise<ChatThread>;
-    updateThread(id: string, patch: { name?: string; members?: string[]; pinned?: boolean; muted?: boolean }): Promise<ChatThread>;
+    updateThread(id: string, patch: { name?: string; members?: string[]; pinned?: boolean; muted?: boolean; manage?: {action: 'invite' | 'remove' | 'silence'; names: string[]; duration?: number} }): Promise<ChatThread>;
     deleteThread(id: string): Promise<boolean>;
     /** 记忆 of a chat (an empty book when nothing is written up yet). */
     memoryBook(threadId: string): Promise<MemoryBook>;

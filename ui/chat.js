@@ -1,7 +1,7 @@
 import {currentDm, chatWindows, currentWindow, groupKey, EDITABLE_KINDS, lastRound, forwardLine, REACTIONS, CHAIN_MODES, GAME_LIMITS} from '../core/chats.js';
 import {eggOf, playEgg} from './chat-eggs.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
-import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, avatar, avatarPicture, empty, help, copyText, menu} from './common.js';
+import {createView, esc, btn, field, input, textArea, select, toggle, heading, groupTitle, avatar, avatarPicture, empty, help, copyText, menu} from './common.js';
 import {songOf} from '../core/music.js';
 import {icon} from './icons.js';
 import {fly} from './carry.js';
@@ -2091,14 +2091,29 @@ export function chatApp(ctx) {
     d.body.addEventListener('input', e => { if (e.target.dataset.field === 'pat-suffix') d.body.querySelector('[data-pat-preview]').textContent = `凛拍了拍你${e.target.value.trim() || '的小脑袋'}`; });
   }
   /** 群设置 (0.9.36): the group's name, picture, 群公告 and the user's nickname in it. */
+  function groupMembersSheet(base, action) {
+    if (base.watch) return;
+    const names = action === 'invite' ? api.chatContacts().map(c => c.name).filter(n => !base.members.includes(n)) : base.members;
+    const title = {invite: '邀请好友', remove: '移出成员', silence: '禁言'}[action];
+    const d = sheet(title, `<div class="pick-list">${names.map(n => `<label class="setting-row"><span>${esc(shown(n))}</span><input class="switch" type="checkbox" data-member="${esc(n)}" aria-label="选择 ${esc(n)}"></label>`).join('') || '<p class="hint">没有可选的好友</p>'}</div>${action === 'silence' ? field('时长', select('mute-duration', 600000, [[600000, '10 分钟'], [3600000, '1 小时'], [43200000, '12 小时'], [86400000, '1 天'], [0, '解除']])) : ''}<div class="actions">${btn('manage-save', '确定', 'primary')}</div>`, {
+      'manage-save': async () => {
+        const chosen = [...d.body.querySelectorAll('[data-member]:checked')].map(e => e.dataset.member);
+        if (!chosen.length) { ctx.notify('请先选择好友'); return; }
+        if (action === 'remove' && !await ctx.confirm('移出这些成员？', chosen.join('、'))) return;
+        await api.updateThread(base.id, {manage: {action, names: chosen, ...(action === 'silence' ? {duration: Number(value(d, 'mute-duration'))} : {})}});
+        d.close(); await render();
+      }
+    });
+  }
   function groupSettingsSheet() {
     const base = thread, row = (action, glyph, title, sub) => `<button type="button" class="list-row" data-menu="${action}">${icon(glyph)}<span><strong>${title}</strong><small>${esc(sub)}</small></span>${icon('next')}</button>`;
-    const d = ctx.dialog('群设置', `<div class="pick-list">${row('rename', 'edit', '群名', base.name)}${row('group-avatar', 'image', '群头像', '从相册选一张或上传，也可以换回成员拼的头像')}${row('group-notice', 'bell', '群公告', base.notice?.text || '还没有')}${row('group-nick', 'person', '我在本群的昵称', base.nicks?.me || '用你自己的名字')}</div>`);
+    const d = ctx.dialog('群设置', `<div class="pick-list">${row('rename', 'edit', '群名', base.name)}${row('group-avatar', 'image', '群头像', '从相册选一张或上传，也可以换回成员拼的头像')}${row('group-notice', 'bell', '群公告', base.notice?.text || '还没有')}${row('group-nick', 'person', '我在本群的昵称', base.nicks?.me || '用你自己的名字')}${base.watch ? '' : row('invite', 'add', '邀请好友', '从联系人中选择') + row('remove', 'trash', '移出成员', '选择后确认一次') + row('silence', 'mute', '禁言', '选择成员和时长，或解除禁言')}</div>`);
     d.body.addEventListener('click', e => {
       const action = e.target.closest('[data-menu]')?.dataset.menu;
       if (!action) return;
       d.close();
       ctx.win.Promise.resolve().then(async () => {
+        if (['invite', 'remove', 'silence'].includes(action)) groupMembersSheet(base, action);
         if (action === 'rename') {
           const r = ctx.dialog('改群名', `${field('群名', input('rename', base.name, 'text', 'maxlength="40"'))}<div class="actions">${btn('rename-save', '保存', 'primary')}</div>`);
           r.body.addEventListener('click', ev => { if (ev.target.closest('[data-action=rename-save]')) { const name = r.body.querySelector('[data-field=rename]').value; r.close(); api.listThreads().then(list => Promise.all(chatWindows(list, base).map(t => api.updateThread(t.id, {name})))).catch(err => ctx.notify(err.message)); } });

@@ -18,6 +18,32 @@
 import {promptText} from './prompt-rules.js';
 import {messageLine} from './chat.js';
 import {songOf} from './music.js';
+import {findRoute, roleStore} from './routes.js';
+
+/** Existing two-party chats are authoritative; names are resolved in the current card's role view. */
+export function sharedPeekChats(name, snapshots, routes = []) {
+  const canonical = n => findRoute(routes, n)?.name || n;
+  const owner = canonical(name), seen = new Map();
+  snapshots = snapshots.filter(p => !p.ownerKey || p.ownerKey === (roleStore(findRoute(routes, p.name)) || canonical(p.name)));
+  for (const snap of [...snapshots].sort((a, b) => a.at - b.at)) {
+    const who = canonical(snap.name), key = roleStore(findRoute(routes, who)) || who;
+    if (snap.ownerKey && snap.ownerKey !== key) continue;
+    for (const chat of snap.chats || []) {
+      const other = canonical(chat.with);
+      if (chat.withKey && chat.withKey !== (roleStore(findRoute(routes, other)) || other)) continue;
+      if (who !== owner && other !== owner) continue;
+      if (who === owner && !snapshots.some(p => canonical(p.name) === other)) continue;
+      const partner = who === owner ? other : who;
+      if (partner === owner || seen.has(partner)) continue;
+      seen.set(partner, {with: partner, withKey: roleStore(findRoute(routes, partner)) || partner, lines: chat.lines.map(l => ({...l, from: canonical(l.from)}))});
+    }
+  }
+  return [...seen.values()];
+}
+
+export function keepSharedPeek(found, shared) {
+  return {...found, chats: [...shared, ...(found.chats || []).filter(c => !shared.some(s => s.with === c.with))]};
+}
 
 export const PEEK_LIMITS = Object.freeze({chats: 5, lines: 24, searches: 12, notes: 5, photos: 9, cart: 8, calls: 10, events: 6, songs: 10, knows: 10, text: 600});
 
@@ -70,7 +96,7 @@ export function mergePeek(old, found) {
     const at = chats.findIndex(x => x.with === c.with);
     const lines = at >= 0 ? [...chats[at].lines, ...c.lines].slice(-PEEK_LIMITS.lines) : c.lines;
     if (at >= 0) chats.splice(at, 1);
-    chats.unshift({with: c.with, lines});
+    chats.unshift({...c, lines});
   }
   const searches = [...new Set([...(found.searches || []), ...(old.searches || [])])].slice(0, PEEK_LIMITS.searches);
   const notes = [...(found.notes || []), ...(old.notes || []).filter(n => !(found.notes || []).some(x => x.title && x.title === n.title))].slice(0, PEEK_LIMITS.notes);
@@ -163,7 +189,7 @@ function cleanPicture(x) {
 export function cleanPeek(p, at) {
   const name = short(p?.name);
   if (!name) throw Error('不知道是谁的手机');
-  const chats = (Array.isArray(p.chats) ? p.chats : []).slice(0, PEEK_LIMITS.chats).map(c => ({with: short(c?.with),
+  const chats = (Array.isArray(p.chats) ? p.chats : []).slice(0, 200).map(c => ({with: short(c?.with), ...(c?.withKey ? {withKey: clip(c.withKey, 100)} : {}),
     lines: (Array.isArray(c?.lines) ? c.lines : []).slice(0, PEEK_LIMITS.lines).map(l => ({from: short(l?.from), text: clip(l?.text, PEEK_LIMITS.text).trim()})).filter(l => l.from && l.text)})).filter(c => c.with && c.lines.length);
   const list = (value, max, size) => (Array.isArray(value) ? value : []).map(x => clip(x, size).trim()).filter(Boolean).slice(0, max);
   const notes = (Array.isArray(p.notes) ? p.notes : []).slice(0, PEEK_LIMITS.notes).map(n => ({title: clip(n?.title, 40).trim(), text: clip(n?.text, PEEK_LIMITS.text).trim()})).filter(n => n.text);
@@ -175,6 +201,7 @@ export function cleanPeek(p, at) {
   const songs = (Array.isArray(p.songs) ? p.songs : []).slice(0, PEEK_LIMITS.songs).map(s => ({title: clip(s?.title, 120).trim(), artist: clip(s?.artist, 120).trim()})).filter(s => s.title);
   const space = clip(p.space, 300);
   const out = {id: peekId(name, space), kind: 'peek', name, at, chats, searches: list(p.searches, PEEK_LIMITS.searches, 100), notes, photos, cart, calls, events, songs, ...(wall?.text ? {wallpaper: wall} : {}), ...(space ? {space} : {})};
+  if (p.ownerKey) out.ownerKey = clip(p.ownerKey, 100);
   if (!chats.length && !out.searches.length && !notes.length && !out.photos.length && !cart.length && !calls.length && !events.length && !songs.length) throw Error(`没看到${name}手机里的东西，可以再试一次`);
   return out;
 }

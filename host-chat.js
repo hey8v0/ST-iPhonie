@@ -4,12 +4,12 @@
 // into it; that text is injected once, into the next story reply.
 import {roleStore, findRoute} from './core/routes.js';
 import {bubbleRequest, splitBubbleAnswer} from './core/bubble-css.js';
-import {currentDm, currentWindow, lastRound, chatWindows, forwardLine, messageWords} from './core/chats.js';
+import {currentDm, currentWindow, lastRound, chatWindows, forwardLine, messageWords, canGroupSpeak} from './core/chats.js';
 import {buildChatRequest, parseChatReply, bringText, activeChatPreset, normalizeChatPreset, messageLine, scanTurns, cleanTagged,chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace, STICKER_MOODS, contactStatus, letterRequest, letterText} from './core/chat.js';
 import {worldInfoFor, loreTry, loreOptions} from './host-lore.js';
 import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer, sizeFor} from './core/draw.js';
 import {storyLines} from './core/moments.js';
-import {forumContext} from './core/forum.js';
+import {forumContext, screenName} from './core/forum.js';
 import {promptOn, promptText} from './core/prompt-rules.js';
 import {activeText} from './core/llm.js';
 import {requestAssistantText, hasCompletionService, loadCompletionModule} from './host-assistant.js';
@@ -63,12 +63,12 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
   /** The contact's answer; with pictures, through the request that carries them, and in words only if that fails. */
   async function answerFor(ctx, request, pics, signal) {
-    if (!pics.length) return backend.generateText(ctx, {use: 'chat', prompt: request([]), trimNames: false, signal});
+    if (!pics.length) return backend.generateText(ctx, {use: 'chat', prompt: request([]), trimNames: false, responseLength: 4096, signal});
     try { return await ask(ctx, backend, settings(), request(pics), {label: '聊天 · 看图', use: 'chat', signal}); }
     catch (error) {
       if (signal?.aborted) throw error;
       backend.reportDiagnostic?.('聊天 · 看图', error, 'warn');
-      const answer = await backend.generateText(ctx, {use: 'chat', prompt: request([]), trimNames: false, signal});
+      const answer = await backend.generateText(ctx, {use: 'chat', prompt: request([]), trimNames: false, responseLength: 4096, signal});
       blind.add(seeKey(ctx));
       return answer;
     }
@@ -140,7 +140,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
           const list = (await backend.apps.list('forum')).filter(p => inSpace(p, forumSpace));
           if (promptOn(s.promptRules, 'chat-forum')) forum = forumContext(list, user, s.chat.netNames);
           // 转发帖子 (0.9.35): the latest few, by their titles.
-          posts = list.filter(p => p.title).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 6).map(p => ({title: p.title, author: p.author === 'me' ? user : p.author}));
+          posts = list.filter(p => p.title).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 6).map(p => ({title: p.title, author: screenName(s.chat.netNames, user)(p.author)}));
         }
         catch (error) { backend.reportDiagnostic?.('聊天 · 论坛读取', error, 'warn'); }
       }
@@ -168,7 +168,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (peekedNow) { try { backend.saveChatOptions({peeked: {[peekKey]: null}}); } catch { /* told again next time */ } }
       // 「[不发]」 (also as 「名字：[不发]」) is a no, not a message.
       const text = nudge ? answer.split('\n').filter(line => !/\[不发\]/.test(line)).join('\n') : answer;
-      const items = parseChatReply(text, {members: people, user, voiceFormat, voiceNames: people.filter(p => p.voice).map(p => p.name), stickers: stickersFor(people.map(p => p.name))});
+      const items = parseChatReply(text, {members: people, user, voiceFormat, strictNames: thread.type === 'group', voiceNames: people.filter(p => p.voice).map(p => p.name), stickers: stickersFor(people.map(p => p.name))});
       if (!items.length && nudge) return null;
       if (!items.length) throw Error('这次没有收到消息，可以再试一次');
       const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
@@ -196,6 +196,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     const whispers = [];
     let latest = thread;
     for (const item of items) {
+      if (!canGroupSpeak(thread, item.from)) continue;
       // 「[删除好友]」: the contact deletes the user (private chats only; the user finds out on their next message).
       if (item.kind === 'unfriend') { if (thread.type === 'dm') cutting = true; continue; }
       // Answers to a 好友申请 (handled where it was asked), and a 好友申请 between friends: not messages.
@@ -509,11 +510,11 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       cutsLoaded = true;
       const lately = at => at > 0 && Date.now() - at < 2 * 86400000;
       cuts = list.filter(t => t.type === 'dm' && (t.friend || t.blocked || lately(t.befriended))).map(t => ({name: t.members[0], by: t.friend?.by || '', blocked: !!t.blocked, refused: Math.max(t.friend?.refused || 0, t.blocked?.refused || 0), accepted: !t.friend && !t.blocked ? t.befriended : 0, space: t.space || '', save: t.save || ''}));
-      groups = list.filter(t => t.type === 'group').map(t => ({name: t.name, space: t.space || '', save: t.save || ''}));
+      groups = list.filter(t => t.type === 'group');
     }).catch(() => {});
   }
   refreshCuts();
-  backend.subscribe?.(event => { if (event?.type === 'chat' && event.friend) refreshCuts(); });
+  backend.subscribe?.(event => { if (event?.type === 'chat' && (event.friend || !Object.hasOwn(event, 'typing'))) refreshCuts(); });
   /** The story knows who deleted or blocked whom on the phone (a 冷战 shows in the story too), and a 好友申请 just turned down. */
   function friendsPlan() {
     if (!cutsLoaded) refreshCuts();
@@ -537,6 +538,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   const lifeRules = () => ({status: promptOn(settings().promptRules, 'status'), make: promptOn(settings().promptRules, 'watch')});
   /** The group chats of this card (分区), by name, once each. */
   const groupNames = () => { const here = backend.here?.(); return [...new Set(groups.filter(g => inSpace(g, here)).map(g => g.name))]; };
+  // Only groups with someone silenced are named: the story request stays as short as before otherwise.
+  const groupLimits = () => groups.filter(g => inSpace(g, backend.here?.()) && g.members?.some(n => !canGroupSpeak(g, n))).map(g => `群「${g.name}」里${g.members.filter(n => !canGroupSpeak(g, n)).join('、')}正在禁言，正文发到这个群时不要让 TA 说话。`).join('\n');
   /**
    * 正文联动手机 with 回复后单独配音 or 配图 on: the phone part goes in that request (after the reply) instead of the
    * story's own, so the story request stays as it is.
@@ -549,15 +552,16 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   async function phoneAfterPlan() {
     if (!phoneTurn()) return '';
     const list = await backend.chats.list().catch(() => null);
-    if (list) groups = list.filter(t => t.type === 'group').map(t => ({name: t.name, space: t.space || '', save: t.save || ''}));
-    return phoneAfterRule(activeChatPreset(settings().chat), {user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.(), ...lifeRules()});
+    if (list) groups = list.filter(t => t.type === 'group');
+    return phoneAfterRule(activeChatPreset(settings().chat), {user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.(), ...lifeRules()}) + (groupLimits() ? '\n' + groupLimits() : '');
   }
   /** The 正文 rule for the story request while 正文联动手机 is on: who can send what, and how (<phone>). */
   function storyPlan() {
     const s = settings(), friends = friendsPlan();
     if (!s.chat.proactive?.on || phoneAfter() || !phoneTurn()) return friends;
     refreshCuts();
-    const text = storyTextRule(activeChatPreset(s.chat), {user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.(), ...lifeRules()});
+    let text = storyTextRule(activeChatPreset(s.chat), {user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.(), ...lifeRules()}), limits = groupLimits();
+    if (text && limits) text += '\n' + limits;
     return [...(text ? [{key: 'sttts.entry.phone', text, position: 1, depth: 0, role: 0}] : []), ...friends];
   }
   const SENT_KEY = 'sttts.phoneSent', DAY_KEY = 'sttts.phoneDay';

@@ -28,6 +28,18 @@ export function postLines(post, user, max = 30, label = name => who(name, user))
 /** How someone shows on the board: the user's 网名 for 'me', a character's 网名, or the name itself. */
 export const screenName = (handles = {}, user = '我') => name => name === 'me' ? handles.me || user : handles[name] || name;
 
+/** Deterministic geometric avatar; no identity or external image is embedded. */
+export function forumAvatar(handle) {
+  let seed = 2166136261;
+  for (const ch of String(handle)) seed = Math.imul(seed ^ ch.codePointAt(0), 16777619) >>> 0;
+  const hue = seed % 360, shapes = [];
+  for (let y = 0; y < 5; y++) for (let x = 0; x < 3; x++) {
+    if (!((seed >>> ((y * 3 + x) % 30)) & 1)) continue;
+    for (const col of x === 2 ? [2] : [x, 4 - x]) shapes.push(`<rect x="${7 + col * 10}" y="${7 + y * 10}" width="9" height="9" rx="${seed % 4}"/>`);
+  }
+  return 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="hsl(${hue} 40% 90%)"/><g fill="hsl(${hue} 60% 40%)">${shapes.join('')}</g></svg>`);
+}
+
 /** Bounded public feed for phone replies; callers apply the chat's card partition before passing posts. */
 export function forumContext(posts, user = '我', handles = {}) {
   const label = screenName(handles, user);
@@ -43,7 +55,7 @@ export function buildForumRequest({prompts = {}, preset, mode = 'posts', people,
   const rules = preset.entries.filter(e => e.enabled && e.text.trim() && (e.use || []).includes('forum')).map(e => fill(e.text, {'用户': user}));
   const now = {'刷新': mode === 'posts', '回应': mode === 'react'};
   const system = promptText(prompts, 'forum', 'system', {...now, '预设规则': rules.join('\n\n'), '用户': user,
-    '论坛里的角色': people.map(p => `- ${handles[p.name] ? `网名「${handles[p.name]}」，其实是${p.name}` : p.name}：${(p.persona || p.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n'),
+    '论坛里的角色': '【仅供作者分配角色，以下身份映射不是论坛公开信息】\n任何角色只能看到帖子里的网名，不能凭这份映射识别他人或用户；仅当剧情明确写过身份公开，才知道真实身份。不得在回复中泄露映射。\n' + people.map(p => `- ${handles[p.name] ? `网名「${handles[p.name]}」（私有角色资料：${p.name}）` : p.name}：${(p.persona || p.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n') + '\n【私有角色资料结束】',
     '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': story.map(s => `${s.name}：${s.text}`).join('\n'),
     '热搜': mode === 'posts' ? hot.join('\n') : '', '最近的帖子': mode === 'posts' ? recent.map(p => `${label(p.author)}｜${p.title}`).join('\n') : '',
     '我的网名': label('me'), '没网名的人': missing.join('、')});

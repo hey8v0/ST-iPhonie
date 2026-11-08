@@ -107,17 +107,20 @@ export function parseMoments(reply, {names, user = '我', mode = 'posts'}) {
 export const STORY_LIMITS = Object.freeze({each: 4000, total: 20000});
 // limit: how many replies, or a chat preset (its context, storyEach and storyTotal; 0 there is no limit).
 export function storyLines(chat, limit, user, {each = STORY_LIMITS.each, total = STORY_LIMITS.total} = {}) {
+  const tags = typeof limit === 'object' ? limit?.cleanTags : [];
   if (limit && typeof limit === 'object') { const p = limit; limit = p.context; each = p.storyEach ?? each; total = p.storyTotal ?? total; }
   each = each || Infinity; total = total || Infinity;
   const out = [];
+  const lastStory = limit > 0 ? (chat || []).findLastIndex(m => m && !m.is_system && !m.is_user && plainStory(m.mes, tags)) : -1;
   let used = 0;
-  for (let i = (chat?.length || 0) - 1; i >= 0 && out.length < limit; i--) {
+  for (let i = (chat?.length || 0) - 1; i >= 0 && (out.length < limit || i >= lastStory && lastStory >= 0); i--) {
+    if (out.length >= limit && i !== lastStory) continue;
     const m = chat[i];
     if (!m || m.is_system) continue;
-    let said = plainStory(m.mes);
+    let said = plainStory(m.mes, tags);
     if (!said) continue;
     if (said.length > each) said = said.slice(0, each) + '……';
-    if (out.length && used + said.length > total) break;
+    if (out.length && used + said.length > total && i !== lastStory) continue;
     used += said.length;
     out.unshift({name: m.name || (m.is_user ? user : '旁白'), text: said});
   }

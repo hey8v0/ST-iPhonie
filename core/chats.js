@@ -32,6 +32,9 @@ import {connectionLost, lostError, breath} from './idb.js';
 import {cleanBoard, BOARDS} from './board.js';
 
 export const CHAT_STORE_LIMITS = Object.freeze({messages: 1000, text: 4000, members: 20, fileText: 30000, versions: 10, held: 50});
+export const MUTE_DURATIONS = Object.freeze({'600000': '10 分钟', '3600000': '1 小时', '43200000': '12 小时', '86400000': '1 天', '0': '解除'});
+export const cleanSilenced = (value, members) => Object.fromEntries(Object.entries(value && typeof value === 'object' ? value : {}).filter(([n, until]) => members.includes(n) && Number.isFinite(until) && until > 0));
+export const canGroupSpeak = (thread, name, now = Date.now()) => thread.type !== 'group' || name === 'me' || (thread.members.includes(name) && !(thread.silenced?.[name] > now));
 /** A chat's last round: the contacts' messages after the user's last one (after: that message's id, '' at the start). */
 export function lastRound(messages) {
   const list = Array.isArray(messages) ? messages : [], at = list.findLastIndex(m => m.from === 'me' && m.kind !== 'system');
@@ -452,8 +455,35 @@ export class ChatStore {
       done(this.#public(row));
     }));
   }
-  async update(id, {name, members, pinned, muted, friend, blocked, befriended, story, open, label, notice, nicks, post} = {}) {
+  async update(id, {name, members, pinned, muted, friend, blocked, befriended, story, open, label, notice, nicks, post, manage} = {}) {
     return this.#change(id, row => {
+      if (manage) {
+        if (row.type !== 'group' || row.watch) throw fail('旁观群不能管理成员');
+        const chosen = [...new Set((manage.names || []).map(n => clip(n, 40).trim()).filter(Boolean))];
+        const now = this.#now(), notes = [];
+        if (manage.action === 'invite') {
+          const added = chosen.filter(n => n !== 'me' && !row.members.includes(n));
+          if (row.members.length + added.length > CHAT_STORE_LIMITS.members) throw fail('群成员已达到上限');
+          row.members.push(...added);
+          notes.push(...added.map(n => `你邀请 ${n} 加入了群聊`));
+        } else if (manage.action === 'remove') {
+          const removed = chosen.filter(n => row.members.includes(n));
+          if (row.members.length - removed.length < 1) throw fail('群里至少保留一位联系人');
+          row.members = row.members.filter(n => !removed.includes(n));
+          notes.push(...removed.map(n => `${n} 被移出了群聊`));
+          for (const n of removed) { if (row.nicks) delete row.nicks[n]; }
+        } else if (manage.action === 'silence') {
+          if (!Object.hasOwn(MUTE_DURATIONS, manage.duration)) throw fail('请选择禁言时长');
+          row.silenced = {...row.silenced};
+          for (const n of chosen.filter(n => row.members.includes(n))) {
+            if (Number(manage.duration)) row.silenced[n] = now + Number(manage.duration); else delete row.silenced[n];
+            notes.push(Number(manage.duration) ? `${n} 被禁言 ${MUTE_DURATIONS[manage.duration]}` : `${n} 的禁言解除了`);
+          }
+        } else throw fail('群管理操作无效');
+        row.silenced = cleanSilenced(row.silenced, row.members);
+        row.messages.push(...notes.map((text, i) => cleanMessage({from: 'me', kind: 'notice', text}, this.#id(), now + i)));
+        row.updatedAt = now;
+      }
       // 群公告 (null takes it away) and 群昵称 (merged; an empty one taken away), groups only.
       if (notice !== undefined && row.type === 'group') { const n = cleanNotice(notice); if (n) row.notice = n; else delete row.notice; }
       if (nicks !== undefined && row.type === 'group') {
@@ -488,7 +518,7 @@ export class ChatStore {
   async append(id, messages, {read = false} = {}) {
     return this.#change(id, row => {
       const now = this.#now();
-      const added = messages.map((m, i) => cleanMessage(m, this.#id(), now + i));
+      const added = messages.filter(m => m.kind === 'system' || canGroupSpeak(row, m.from, now)).map((m, i) => cleanMessage(m, this.#id(), now + i));
       row.messages.push(...added);
       // Anything coming after the last round ends its versions (it is no longer the last).
       if (added.length) delete row.alts;
@@ -505,7 +535,7 @@ export class ChatStore {
     return this.#change(id, row => {
       const last = lastRound(row.messages);
       if (last.after !== String(after ?? '')) throw fail('这段聊天已经变了，这次重新回复没有写入', 'CHANGED');
-      const now = this.#now(), added = messages.map((m, i) => cleanMessage(m, this.#id(), now + i)), old = new Set(last.round.map(m => m.id));
+      const now = this.#now(), added = messages.filter(m => canGroupSpeak(row, m.from, now)).map((m, i) => cleanMessage(m, this.#id(), now + i)), old = new Set(last.round.map(m => m.id));
       // The versions so far (the one showing as it is now: edited, drawn, some deleted), or the round being replaced.
       const kept = row.alts?.after === last.after ? row.alts.versions.map((list, i) => i === row.alts.shown ? last.round : list) : last.round.length ? [last.round] : [];
       const versions = [...kept, added].slice(-CHAT_STORE_LIMITS.versions);
@@ -643,7 +673,7 @@ export class ChatStore {
       const members = [...new Set((Array.isArray(t.members) ? t.members : []).map(m => clip(m, 40).trim()).filter(Boolean))].slice(0, CHAT_STORE_LIMITS.members);
       if (!members.length) throw fail('备份里有一段聊天没有聊天对象');
       const messages = (Array.isArray(t.messages) ? t.messages : []).slice(-CHAT_STORE_LIMITS.messages).map(m => cleanMessage(m, clip(m?.id || this.#id(), 512), Number.isFinite(m?.at) ? m.at : now));
-      const row = {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true, ...(t.story === true ? {story: true} : {}), ...(Number.isFinite(t.openedAt) ? {openedAt: t.openedAt} : {}), ...(typeof t.label === 'string' && t.label.trim() ? {label: clip(t.label, 40).trim()} : {}), ...(t.type === 'group' && t.windowOf ? {windowOf: clip(t.windowOf, 512)} : {}), ...(t.type === 'group' && t.watch === true ? {watch: true} : {}), ...(t.type === 'group' && cleanNotice(t.notice) ? {notice: cleanNotice(t.notice)} : {}), ...(t.type === 'group' && Object.keys(cleanNicks(t.nicks)).length ? {nicks: cleanNicks(t.nicks)} : {}), ...(t.type !== 'group' && cleanPost(t.post).length ? {post: cleanPost(t.post)} : {}),
+      const row = {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true, ...(t.story === true ? {story: true} : {}), ...(Number.isFinite(t.openedAt) ? {openedAt: t.openedAt} : {}), ...(typeof t.label === 'string' && t.label.trim() ? {label: clip(t.label, 40).trim()} : {}), ...(t.type === 'group' && t.windowOf ? {windowOf: clip(t.windowOf, 512)} : {}), ...(t.type === 'group' ? {silenced: cleanSilenced(t.silenced, members)} : {}), ...(t.type === 'group' && t.watch === true ? {watch: true} : {}), ...(t.type === 'group' && cleanNotice(t.notice) ? {notice: cleanNotice(t.notice)} : {}), ...(t.type === 'group' && Object.keys(cleanNicks(t.nicks)).length ? {nicks: cleanNicks(t.nicks)} : {}), ...(t.type !== 'group' && cleanPost(t.post).length ? {post: cleanPost(t.post)} : {}),
         unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {}), ...(t.save ? {save: clip(t.save, 400)} : {}), ...(t.type !== 'group' && cleanFriend(t.friend) ? {friend: cleanFriend(t.friend)} : {}), ...(t.type !== 'group' && cleanBlocked(t.blocked) ? {blocked: cleanBlocked(t.blocked)} : {}), ...(t.type !== 'group' && Number.isFinite(t.befriended) && t.befriended > 0 ? {befriended: t.befriended} : {})};
       // 重新回复的版本 come along with a backup or a sync, while they still belong to the chat's last round.
       const alts = cleanAlts(t.alts, () => this.#id());

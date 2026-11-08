@@ -4,6 +4,7 @@ import {rowWindow} from './row-window.js';
 import {createView, esc, btn, field, input, textArea, heading, avatar, empty, menu} from './common.js';
 import {icon} from './icons.js';
 import {shareToChat} from './share-to-chat.js';
+import {forumAvatar} from '../core/forum.js';
 
 function ago(at) {
   const s = (Date.now() - at) / 1000;
@@ -23,7 +24,7 @@ export function forumApp(ctx) {
   const net = () => api.readState().chat.netNames || {};
   const nameOf = who => who === 'me' ? net().me || myName() : net()[who] || who;
   const characters = () => new Set((api.chatContacts?.() || []).map(c => c.name));
-  const face = (who, size) => who === 'me' ? avatar(myName(), 'none', size, 'me') : avatar(who, ctx.engineOf(who), size);
+  const face = (who, size) => net()[who] ? `<img class="forum-net-avatar" width="${size}" height="${size}" src="${esc(forumAvatar(nameOf(who)))}" alt="网名头像" style="border-radius:50%;flex-shrink:0">` : who === 'me' ? avatar(myName(), 'none', size, 'me') : avatar(who, ctx.engineOf(who), size);
   const badge = (who, roles) => who === 'me' ? '<span class="forum-tag me">我</span>' : roles.has(who) ? '<span class="forum-tag">角色</span>' : '';
   const busy = () => api.forumBusy?.();
 
@@ -62,7 +63,7 @@ export function forumApp(ctx) {
       + (busy() ? '<p class="moments-busy" role="status">大家正在回复……</p>' : '')
       + `<div class="forum-floors">${p.replies.map((r, i) => `<button type="button" class="forum-floor" data-action="${r.from === 'me' ? 'forum-my-reply' : 'forum-reply'}" data-to="${esc(r.from)}" data-reply="${esc(r.id)}">
           ${face(r.from, 30)}<span class="floor-body"><span class="floor-head"><b>${esc(nameOf(r.from))}</b>${badge(r.from, roles)}${r.from === p.author ? '<span class="forum-tag op">楼主</span>' : ''}<span class="floor-no">${i + 1}楼</span></span>
-          <span class="floor-text">${r.to ? `回复 <b>${esc(nameOf(r.to))}</b>：` : ''}${esc(r.text)}</span></span></button>`).join('') || '<p class="hint">还没有回复。</p>'}</div>`);
+          <span class="floor-text">${r.to ? `回复 <b>${esc(nameOf(r.to))}</b>：` : ''}${esc(r.text)}</span></span>${r.from === 'me' ? '<span aria-label="回复菜单">⋯</span>' : ''}</button>`).join('') || '<p class="hint">还没有回复。</p>'}</div>`);
   }
   async function render() {
     const ticket = ++epoch;
@@ -111,7 +112,7 @@ export function forumApp(ctx) {
   }
   function replyTo(to = '') {
     const named = to && to !== 'me';
-    sheet(named ? `回复 ${to}` : '回复', `${field('回复', textArea('text', '', `rows="3" maxlength="500" placeholder="${named ? '回复 ' + esc(to) : '说点什么…'}"`))}<div class="actions">${btn('send-reply', icon('send') + '发送', 'primary')}</div>`, 'send-reply', async d => {
+    sheet(named ? `回复 ${nameOf(to)}` : '回复', `${field('回复', textArea('text', '', `rows="3" maxlength="500" placeholder="${named ? '回复 ' + esc(nameOf(to)) : '说点什么…'}"`))}<div class="actions">${btn('send-reply', icon('send') + '发送', 'primary')}</div>`, 'send-reply', async d => {
       const text = d.body.querySelector('[data-field=text]').value.trim();
       if (!text) throw Error('写点什么再发送');
       const {reply} = await api.replyForum(open, {text, ...(named ? {to} : {})});
@@ -143,13 +144,19 @@ export function forumApp(ctx) {
       case 'open-post': open = el.dataset.id; await render(); v.root.scrollTop = 0; break;
       case 'forum-like': { const p = post || await api.getForumPost(open); if (p) { await api.likeForum(open, !p.liked); await render(); } break; }
       case 'forum-reply': replyTo(el.dataset.to || ''); break;
-      case 'forum-my-reply': if (await ctx.confirm('删除这条回复？')) { await api.deleteForumReply(open, el.dataset.reply); await render(); } break;
+      case 'forum-my-reply': {
+        const id = open, replyId = el.dataset.reply;
+        const picked = await menu(ctx, '我的回复', [{key: 'retry', icon: 'refresh', label: '重试', note: '让大家再回一次'}, {key: 'delete', icon: 'trash', label: '删除', danger: true}]);
+        if (picked === 'retry' && api.forumReply) background(api.forumReply(id, replyId));
+        if (picked === 'delete' && await ctx.confirm('删除这条回复？')) { await api.deleteForumReply(id, replyId); await render(); }
+        break;
+      }
       // 0.9.35: 转发 to a chat (论坛 × 聊天) and 删除 live under ⋯.
       case 'forum-more': {
         const p = post || await api.getForumPost(open);
         if (!p) break;
         const picked = await menu(ctx, p.title || '帖子', [{key: 'share', icon: 'share', label: '转发', note: '发给联系人或群，TA 读得到帖子'}, {key: 'delete', icon: 'trash', label: '删除', note: '帖子和下面的回复', danger: true}]);
-        if (picked === 'share') await shareToChat(ctx, {title: '转发给…', what: '帖子', message: {kind: 'post', post: {id: p.id, title: p.title || '', author: p.author, text: String(p.text || '').slice(0, 600)}}});
+        if (picked === 'share') await shareToChat(ctx, {title: '转发给…', what: '帖子', message: {kind: 'post', post: {id: p.id, title: p.title || '', author: nameOf(p.author), text: String(p.text || '').slice(0, 600)}}});
         if (picked === 'delete' && await ctx.confirm('删除这个帖子？', '帖子和下面的回复会一起删除。')) { await api.deleteForum(open); open = ''; await render(); }
         break;
       }
