@@ -7,9 +7,10 @@ import {plainStory} from './core/chat.js';
 import {activeText} from './core/llm.js';
 import {requestAssistantText, hasCompletionService, loadCompletionModule} from './host-assistant.js';
 import {pictureUrl} from './host-chat.js';
+import {naiFeatures} from './core/novelai.js';
 
 // onChange (0.9.35, 衣柜 × 聊天): told whose clothes a story reply changed ([{name, text}], roles only), after they are kept.
-export function createWardrobeHost({context, settings, backend, notice = () => {}, ask = requestAssistantText, loadCompletion = loadCompletionModule, picture = pictureUrl, onChange = () => {}}) {
+export function createWardrobeHost({context, settings, backend, notice = () => {}, ask = requestAssistantText, loadCompletion = loadCompletionModule, picture = pictureUrl, onChange = () => {}, cutout = async blob => (await import('./ui/cutout-editor.js')).automaticCutout(blob)}) {
   const userName = () => context()?.name1 || '我';
   /** Whether the text model sees pictures (a tavern connection when the tavern says so; a custom one is tried). */
   async function sees(ctx = context()) {
@@ -144,5 +145,30 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     if (news.length) { try { onChange(news); } catch { /* the phone's own business */ } }
     return changed;
   }
-  return {recognize, suggest, saveOutfit, tryOn, storyPlan, storyReplied, sees, present};
+  const drawingItems = new Set();
+  async function drawItem({id, allowPaid = false} = {}) {
+    if (drawingItems.has(id)) throw Error('这件衣服正在画');
+    if (!backend.drawReady()) throw Error(backend.drawMissing() || '还没有设置绘图引擎');
+    const item = (await backend.wardrobe()).items.find(x => x.id === id);
+    if (!item) throw Error('这件衣服已不在衣柜里');
+    if (!allowPaid && backend.drawQuote?.()?.free === false) throw Object.assign(Error('画衣服需要确认费用'), {code: 'PAID'});
+    drawingItems.add(id);
+    try {
+      const s = settings(), words = `衣服单品，无人物，不要模特、身体或人台。平铺或挂拍，纯色背景。名字：${item.name}；分类：${item.category}；描述：${item.description}`;
+      const tags = tagTextAnswer(await backend.generateText(context(), {use: 'picture', prompt: tagTextRequest(s, words, 'translate'), plainText: true, trimNames: false}));
+      if (!tags.trim()) throw Error('没有写出衣服的绘图提示词');
+      const params = {...s.draw.params, transparent: s.draw.engine === 'nai' && naiFeatures(s.draw.params.model).transparent};
+      const made = await backend.generateImage({prompt: `${tags}, isolated clothing item, flat lay, no humans, no mannequin, ${params.transparent ? 'transparent background' : 'solid background'}`, negative: 'person, human, mannequin, body', characters: [], params, allowPaid, name: `衣柜-${item.name}`, key: `wardrobe-item:${id}`, label: `衣柜 · ${item.name}`});
+      const photo = await backend.library.getPhoto(made.photoId);
+      if (!photo?.blob) throw Error('画好的图片没有保存成功');
+      const blob = await cutout(photo.blob);
+      if (blob?.type !== 'image/png') throw Error('透明图片必须保存为 PNG');
+      const current = (await backend.wardrobe()).items.find(x => x.id === id);
+      if (!current) throw Error('衣服已被移出衣柜，原图留在相册');
+      const kept = await backend.library.addPhoto({name: `衣柜-${item.name}-${Date.now()}.png`, blob});
+      backend.emit('library', {collection: 'photos'});
+      return backend.saveWardrobeItem({...current, photoId: kept.id});
+    } finally { drawingItems.delete(id); }
+  }
+  return {recognize, suggest, saveOutfit, tryOn, drawItem, storyPlan, storyReplied, sees, present};
 }

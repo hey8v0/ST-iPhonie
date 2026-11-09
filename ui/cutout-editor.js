@@ -1,6 +1,18 @@
 import {icon} from './icons.js';
 import {cutBackground, clearEdges, eraseAt, restoreAt, restoreStroke} from '../core/vn.js';
 
+/** Reuse the VN automatic cutout, preserving existing alpha, and always encode PNG. */
+export async function automaticCutout(blob, doc = globalThis.document) {
+  const win = doc.defaultView, url = win.URL.createObjectURL(blob);
+  try {
+    const img = new win.Image();
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = () => reject(Error('衣服图片读不出来')); img.src = url; });
+    const canvas = doc.createElement('canvas');
+    cutoutRenderer(img, canvas)({cut: true, strength: 40, taps: []});
+    return await new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(Error('透明图片保存失败')), 'image/png'));
+  } finally { win.URL.revokeObjectURL(url); }
+}
+
 // Store editing commands rather than full-size pixel buffers. A new edit drops the redo branch.
 export function cutoutHistory(initial = {cut: true, strength: 40, taps: []}) {
   let states = [structuredClone(initial)], index = 0;

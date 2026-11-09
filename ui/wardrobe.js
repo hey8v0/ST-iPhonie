@@ -241,7 +241,7 @@ export function wardrobeApp(ctx) {
       <div class="field"><span>分类</span><div class="wardrobe-cats" role="group" aria-label="分类">${WARDROBE_CATEGORIES.map(c => `<button type="button" class="wardrobe-filter" data-cat="${esc(c)}" aria-pressed="${c === category}">${esc(c)}</button>`).join('')}</div></div>
       ${field('描述', textArea('description', old?.description || '', `rows="4" maxlength="${WARDROBE_LIMITS.description}" placeholder="颜色、款式、材质、图案……"`))}
       <div class="actions">${old?.photoId ? btn('item-recognize', '重新识别', 'secondary') : ''}${btn('item-save', '保存', 'primary')}</div>
-      ${old ? `<div class="actions wardrobe-edit-more">${btn('item-delete', icon('trash') + '拿出衣柜', 'text-button danger-text')}</div>` : ''}</div>`);
+      ${old ? `<div class="actions wardrobe-edit-more">${btn('item-draw', old.photoId ? '重画' : '画出来', 'secondary')}${btn('item-delete', icon('trash') + '拿出衣柜', 'text-button danger-text')}</div>` : ''}</div>`);
     let url = '';
     if (old?.photoId) previewBlob(api, old.photoId).then(small => small || api.getPhoto(old.photoId).then(p => p?.blob || null)).then(blob => {
       const img = d.body.querySelector('.wardrobe-edit-pic img');
@@ -258,6 +258,24 @@ export function wardrobeApp(ctx) {
           await api.saveWardrobeItem({...(old || {owner: forWhom}), name: value('name'), category, description, recognized: !!old?.recognized && description === old.description});
           d.close();
         } else if (action === 'item-recognize') { d.close(); recognizeAll([old.id]); }
+        else if (action === 'item-draw') {
+          const button = e.target.closest('[data-action]');
+          if (button.disabled) return;
+          button.disabled = true; button.textContent = '正在画…';
+          try {
+            let allowPaid = false;
+            for (;;) {
+              try { await api.wardrobeDrawItem({id: old.id, allowPaid}); break; }
+              catch (error) {
+                if (error.code !== 'PAID' || allowPaid) throw error;
+                const ask = api.paidPrompt();
+                if (!await ctx.confirm(ask.title, ask.text)) return;
+                allowPaid = true;
+              }
+            }
+            d.close(); await load(); ctx.notify('画好了，透明图片已放进衣柜');
+          } finally { button.disabled = false; button.textContent = old.photoId ? '重画' : '画出来'; }
+        }
         else if (action === 'item-delete') {
           d.close();
           if (await ctx.confirm(`把「${old.name}」拿出衣柜？`, old.photoId ? '照片还留在相册里。' : '')) { await api.deleteWardrobe([old.id]); picked.delete(old.id); }

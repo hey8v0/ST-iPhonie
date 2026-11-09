@@ -2,7 +2,7 @@
 // 「改一改」 by a sentence, written into the chat), a User 人设 (saved as a tavern persona), 接下来的走向 (one picked
 // steers the next story reply only) and 小剧场 (a script read with the roles' voices, or a card; kept). The work is
 // host-generator.js; the words are the 生成器 blocks of 系统提示词.
-import {createView, esc, btn, heading, help, field, input, textArea, groupTitle, menu, copyText} from './common.js';
+import {createView, esc, btn, heading, help, field, input, textArea, groupTitle, menu, copyText, select, toggle} from './common.js';
 import {icon} from './icons.js';
 import {saveFile} from '../download.js';
 import {OPENING_LENGTHS, PERSONA_LENGTHS, THEATER_LENGTHS} from '../core/generator.js';
@@ -25,6 +25,31 @@ export function generatorApp(ctx) {
   /** What was just written comes into view (it sits under the form). */
   const reveal = selector => v.root.querySelector(selector)?.scrollIntoView?.({block: 'start', behavior: 'smooth'});
   const go = (action, label, kind, style = 'primary') => btn(action, busy === kind ? '正在写…' : label, style, busy ? 'disabled' : '');
+
+  async function presetSettings() {
+    let presets = [], error = '';
+    try { presets = await api.assistantPresets(); } catch (e) { error = e.message; }
+    const sheet = ctx.dialog('生成器设置', '');
+    const selection = () => api.getState().generator || {tavernPreset: '', tavernEntries: {}};
+    const draw = () => {
+      const s = selection(), preset = presets.find(p => p.id === s.tavernPreset);
+      sheet.body.innerHTML = field('酒馆预设', select('gen-preset', s.tavernPreset, [['', '不用酒馆预设'], ...presets.map(p => [p.id, p.name])]))
+        + (error ? `<p class="hint">${esc(error)}</p>` : '')
+        + (preset ? groupTitle('预设条目') + preset.entries.map((e, i) => toggle('gen-entry-' + i, e.title, s.tavernEntries?.[preset.id]?.[e.id] ?? e.enabled)).join('') : '');
+    };
+    sheet.body.addEventListener('change', e => {
+      const key = e.target.dataset.field, next = api.getState(), s = selection();
+      if (key === 'gen-preset') s.tavernPreset = e.target.value;
+      else if (key?.startsWith('gen-entry-')) {
+        const entry = presets.find(p => p.id === s.tavernPreset)?.entries[Number(key.slice(10))];
+        if (!entry) return;
+        s.tavernEntries ||= {}; s.tavernEntries[s.tavernPreset] ||= {};
+        s.tavernEntries[s.tavernPreset][entry.id] = e.target.checked;
+      } else return;
+      next.generator = s; api.save(next); draw();
+    });
+    draw();
+  }
 
   // ---------- pages ----------
   function openingPage() {
@@ -77,7 +102,7 @@ export function generatorApp(ctx) {
   function render() {
     if (v.disposed) return;
     const name = card().name;
-    v.draw(heading('生成器', help(HELP), name ? `Generator · ${name}` : 'Generator')
+    v.draw(heading('生成器', btn('gen-settings', icon('settings'), 'round-button', 'aria-label="生成器设置"') + help(HELP), name ? `Generator · ${name}` : 'Generator')
       + `<div class="segmented gen-tabs" role="group" aria-label="写什么">${TABS.map(([key, label]) => seg('tab', key, label, tab)).join('')}</div>`
       + ({opening: openingPage, persona: personaPage, direction: directionPage, theater: theaterPage})[tab]());
     mountCard();
@@ -148,6 +173,7 @@ export function generatorApp(ctx) {
   v.on('click', '[data-action]', async el => {
     const action = el.dataset.action, value = el.dataset.value;
     switch (action) {
+      case 'gen-settings': await presetSettings(); break;
       case 'tab': tab = value; render(); if (tab === 'theater') await loadTheaters(); break;
       case 'o-mode': o.mode = value; render(); break;
       case 'o-length': o.length = value; render(); break;

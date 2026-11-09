@@ -106,7 +106,7 @@ function substituteData(text, ctx) {
  * Marker entries describe host context slots and produce no rule text. Position/depth/order are metadata for the caller.
  * Unsupported macros remain literal; this does not execute scripts, slash commands, variables, random or custom macros.
  */
-export function buildTavernAssistantMessages(preset, overrides = {}, context = {}) {
+export function buildTavernPresetMessages(preset, overrides = {}, context = {}) {
   const ctx = readContext(context), result = [];
   for (const entry of Array.isArray(preset?.entries) ? preset.entries : []) {
     const enabled = typeof overrides?.[entry.id] === 'boolean' ? overrides[entry.id] : entry.enabled === true;
@@ -117,3 +117,6 @@ export function buildTavernAssistantMessages(preset, overrides = {}, context = {
   }
   return result;
 }
+
+// Keep the assistant contract while sharing the exact same expansion and ordering.
+export const buildTavernAssistantMessages = buildTavernPresetMessages;

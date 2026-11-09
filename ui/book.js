@@ -31,10 +31,13 @@ const LENGTHS = [['auto', '按故事长短'], ['8', '短（8 个跨页）'], ['1
 const SHAPES = {横: '横图', 竖: '竖图', 方: '方图'};
 const keyOf = p => p?.id ? 'id:' + p.id : p?.url ? 'url:' + p.url : '';
 
+import {bedtimeView, bookTabs} from './bedtime.js';
+
 export function bookApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'picbook'), photoUrls = new Map();
   let view = 'shelf', books = [], book = null, at = 0, job = null, form = null, reader = null, cast = null;
   bookStyles(ctx.doc);
+  const bedtime = bedtimeView(ctx, v);
 
   // ---------- pictures ----------
   const absolute = url => /^(https?:|data:|blob:|\/)/.test(url) ? url : '/' + url.replace(/^\.?\//, '');
@@ -77,8 +80,10 @@ export function bookApp(ctx) {
   // ---------- the shelf ----------
   async function shelf() {
     leaveReader();
+    bedtime.leave();
     view = 'shelf'; book = null;
     books = await api.listBooks().catch(() => []);
+    books = books.filter(b => !b.bedtime);
     books.sort((a, b) => (b.at || 0) - (a.at || 0));
     const covers = await Promise.all(books.map(b => picUrl(firstPicture(b))));
     const card = (b, i) => {
@@ -86,7 +91,7 @@ export function bookApp(ctx) {
       return `<button type="button" class="bk-card" data-book="${esc(b.id)}" aria-label="${esc(b.title)}"><span class="bk-mini">${viewMarkup(front, {sheet: 0, part: 'all'}, {url: () => covers[i]})}</span><span class="bk-badge">${esc(themeOf(b.theme).label)} · ${b.spreads.length} 个跨页${b.readers?.length ? ` · ${b.readers.length} 人读过` : ''}${lack ? ` · 差 ${lack} 张图` : ''}</span></button>`;
     };
     v.draw(heading('绘本', help('把酒馆里的故事做成绘本：一个个摊开的两页（跨页），画面讲故事，每一面只有几句话，读出来的就是印在纸上的。\n\n「绘本（改编）」让文字模型把故事编成跨页，像真的绘本那样有节奏：开头安静，画面越来越大，最紧张的地方是一幅铺满两页的大图，结尾再安静下来。字是讲故事的旁白，偶尔一句说话放进气泡；有立绘的角色偶尔会像剪纸一样站在纸上出场。「原文配图」不改一个字，按段落分成跨页，配上正文的图。\n插图用绘图 App 现在的引擎：「绘本画风」按这本书的风格画（水彩、蜡笔、水墨……），「绘图 App 的画风」用你在绘图 App 里选的画风。\n看书：手机上一页一页翻，铺满两页的大图会慢慢移动，让你看到整幅；点右上角的全屏按钮在酒馆页面看，电脑和平板横着放是摊开的两页。下雨下雪这些天气会飘在画上，朗读时正在读的那句会标出来。') + `<button type="button" class="chip-button" data-action="bk-new">${icon('add')}做一本</button>`, 'Picture Book')
-      + `<div class="bk-shelf">${books.map(card).join('')}<button type="button" class="bk-new" data-action="bk-new">${icon('add')}<span>做一本绘本</span></button></div>`);
+      + bookTabs(false) + `<div class="bk-shelf">${books.map(card).join('')}<button type="button" class="bk-new" data-action="bk-new">${icon('add')}<span>做一本绘本</span></button></div>`);
   }
 
   // ---------- 做一本 ----------
@@ -602,6 +607,7 @@ export function bookApp(ctx) {
   }
 
   // ---------- events ----------
+  v.on('click', '[data-action=bk-bedtime]', () => { leaveReader(); view = 'bedtime'; return bedtime.open(); });
   v.on('click', '[data-action=bk-new]', () => { form = null; make(); });
   v.on('click', '[data-action=bk-shelf]', () => shelf());
   v.on('click', '[data-action=bk-start]', () => start());
@@ -615,10 +621,10 @@ export function bookApp(ctx) {
   v.root.addEventListener('input', e => { if (e.target.dataset?.bkField === 'title' && form) form.title = e.target.value; });
   v.root.addEventListener('error', e => { if (e.target?.tagName === 'IMG' && e.target.closest('.bk')) e.target.classList.add('bk-broken'); }, true);
   v.back = () => { if (view === 'shelf') return false; if (view === 'making') { if (job) job.stop = true; return true; } shelf(); return true; };
-  v.leave = () => { if (reader?.reading) reader.setReading(false); };
-  v.refresh = () => { if (view === 'shelf') shelf(); };
+  v.leave = () => { bedtime.leave(); if (reader?.reading) reader.setReading(false); };
+  v.refresh = () => { if (view === 'shelf') shelf(); else if (view === 'bedtime') bedtime.open(); };
   const dispose = v.dispose;
-  v.dispose = () => { leaveReader(); if (job) job.stop = true; for (const u of photoUrls.values()) ctx.win.URL.revokeObjectURL(u); dispose(); };
+  v.dispose = () => { bedtime.dispose(); leaveReader(); if (job) job.stop = true; for (const u of photoUrls.values()) ctx.win.URL.revokeObjectURL(u); dispose(); };
   shelf();
   return v;
 }

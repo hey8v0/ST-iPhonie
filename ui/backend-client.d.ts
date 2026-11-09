@@ -1273,6 +1273,7 @@ export interface BackendAPI extends BackendFacade {
     /** 存成一套: designed freely, split into pieces that go into the 衣柜 first; the same words kept again come back with again. */
     wardrobeSaveOutfit(options: { owner: string; text: string; mode?: 'closet' | 'free'; itemIds?: string[] }): Promise<{ set: WardrobeSet; added: number; again: boolean }>;
     wardrobeTryOn(options: { owner: string; text: string; allowPaid?: boolean }): Promise<string>;
+    wardrobeDrawItem(options: { id: string; allowPaid?: boolean }): Promise<WardrobeItem>;
     /** Who is in the story just now, as 衣柜 owners ('me', 'role:<name>'): they stay in the row of faces when there are many. */
     wardrobePresent?(): string[];
     /** 生成器 (host-generator.js): the card open now, what is being written, and each kind's request. */
@@ -1369,6 +1370,12 @@ export interface BackendAPI extends BackendFacade {
     bookInfo?(): { chat: string; title: string; length: number; user: string };
     bookSource?(from?: number, to?: number): { chat: string; title: string; length: number; user: string; from: number; to: number; messages: Array<{ id: number; user: boolean; name: string; steps: Array<{ kind: 'say' | 'narrate' | 'bg'; text?: string; role?: string; emotion?: string; line?: number; part?: number; url?: string; user?: boolean }> }> };
     bookWrite?(system: string, user: string, options?: { length?: number }): Promise<string>;
+    bedtimeCreate(form: {role: string; kind?: string; minutes?: number | string; wish?: string; sourceId?: string; chapter?: number | string; paragraph?: number | string}): Promise<Book>;
+    bedtimeRoles(): Array<{name: string; persona?: string}>;
+    bedtimeSource(id: string, chapter?: number): Promise<{title: string; chapter: number; chapters: string[]; paragraphs: string[]}>;
+    bedtimeStatus(): {playing: boolean; busy: boolean; id: string; index: number; text: string};
+    bedtimePlay(id: string, options?: {timer?: number; song?: string}): Promise<void>;
+    bedtimeStop(): void;
     bookRead?(lines: BookLine[], onLine?: (index: number) => void): Promise<boolean>;
     /** 绘本: a page's ambience ('ambience', looping until another or 停), a sound ('sfx'), or 'stop' — from the 音效 library while 音效 is on (false: off). */
     bookSound?(kind: 'ambience' | 'sfx' | 'stop', name?: string): Promise<boolean>;

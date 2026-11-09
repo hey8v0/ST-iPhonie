@@ -3218,3 +3218,40 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .reading-folio{position:absolute;left:var(--read-margin);right:var(--read-margin);bottom:12px;display:flex;justify-content:space-between;gap:12px;font-size:10.5px;letter-spacing:.04em;opacity:.45;pointer-events:none}
 .reading-folio span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .reading-stage .reading-content h1,.reading-stage .reading-content h2{text-align:center;text-indent:0;letter-spacing:.08em;margin:.6em 0 1.4em}
+/* Bedtime listening shares the picture-book app, with soft surfaces and quiet space. */
+.bedtime-room{margin-top:16px;color:var(--ink)}
+.bedtime-intro{margin:0 0 26px;color:var(--ink2);font-size:14px;line-height:1.8}
+.bedtime-room .field{margin-bottom:18px}
+.bedtime-room button{transition:transform .25s cubic-bezier(.2,1.5,.4,1)}
+.bedtime-room button:active{transform:scale(.95)}
+.bedtime-stories{margin-top:24px}.bedtime-stories small{display:block;color:var(--ink2);margin-top:5px}
+.bedtime-playing{padding:20px 0 8px;line-height:2;text-align:center}
+.bedtime-dark{position:absolute!important;inset:0!important;z-index:60;padding:0!important;background:#000!important;color:#eee!important;min-height:100%}
+.bedtime-dark::before,.bedtime-dark::after{display:none!important}
+.bedtime-dark>.page-heading,.bedtime-dark>.segmented{display:none}
+.bedtime-dark .bedtime-room{background:#000;color:#eee;margin:0;min-height:100%;display:grid;align-items:center}
+.bedtime-line{border:0;background:none;color:#eee;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:14px/2 inherit;padding:20px 0}
+.bedtime-night{position:absolute;inset:0;z-index:40000;background:#000;display:grid;align-items:center;padding:24px}
+.bedtime-dark .bedtime-playing p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
+.bedtime-dark .bedtime-playing .actions{opacity:.5}.bedtime-dark .text-button{color:#eee}
+/* 0.9.51 · 睡前故事: a night sky with a moon and slow stars, the form on a soft card, the line being read large. */
+.bedtime-sky{position:relative;overflow:hidden;border-radius:26px;padding:26px 20px 22px;color:#eef0ff;background:radial-gradient(1.4px 1.4px at 18% 28%,#fff9,transparent),radial-gradient(1.2px 1.2px at 72% 18%,#fffb,transparent),radial-gradient(1px 1px at 40% 62%,#fff8,transparent),radial-gradient(1.6px 1.6px at 86% 54%,#fff9,transparent),radial-gradient(1px 1px at 28% 82%,#fff7,transparent),radial-gradient(1.2px 1.2px at 60% 86%,#fff8,transparent),linear-gradient(165deg,#1b1f45,#2a2558 58%,#3b2b5a);box-shadow:0 18px 34px -22px #1b1f45}
+.bedtime-sky::after{content:"";position:absolute;inset:0;background:radial-gradient(1.3px 1.3px at 52% 36%,#fff,transparent),radial-gradient(1.1px 1.1px at 10% 58%,#fff,transparent),radial-gradient(1.3px 1.3px at 92% 30%,#fff,transparent);animation:bedtime-twinkle 5s ease-in-out infinite alternate;pointer-events:none}
+@keyframes bedtime-twinkle{from{opacity:.25}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.bedtime-sky::after,.bedtime-moon{animation:none}}
+.bedtime-moon{display:block;width:44px;height:44px;margin:0 0 14px;border-radius:50%;box-shadow:inset -11px -7px 0 0 #f6e9b9,0 0 26px 2px #f6e9b955;animation:bedtime-float 6s ease-in-out infinite alternate}
+@keyframes bedtime-float{from{transform:translateY(0)}to{transform:translateY(-5px)}}
+.bedtime-sky p{position:relative;margin:0;font-size:15px;line-height:1.8;letter-spacing:.05em;opacity:.92}
+.bedtime-form{margin-top:14px;padding:18px 16px 6px;border-radius:24px;background:var(--card);box-shadow:0 12px 26px -20px rgba(20,40,80,.5)}
+.bedtime-h{margin:22px 4px 8px;font-size:13px;font-weight:800;color:var(--ink2);letter-spacing:.06em}
+.bedtime-stories{margin-top:0;border-radius:20px;background:var(--card);overflow:hidden}
+.bedtime-stories .list-row{gap:10px}
+.bedtime-dot{flex:none;width:10px;height:10px;border-radius:50%;box-shadow:inset -3px -2px 0 0 #e8c96a}
+.bedtime-playing.bedtime-sky{display:flex;flex-direction:column;align-items:center;text-align:center;padding:34px 22px 26px;min-height:340px;justify-content:center}
+.bedtime-playing .bedtime-moon{width:64px;height:64px;margin-bottom:22px;box-shadow:inset -15px -10px 0 0 #f6e9b9,0 0 40px 4px #f6e9b966}
+.bedtime-who{position:relative;font-size:11px;letter-spacing:.12em;opacity:.6;margin-bottom:10px}
+.bedtime-playing p{font-family:var(--read-font,serif);font-size:18px;line-height:1.9;min-height:3.8em;transition:opacity .4s}
+.bedtime-controls{position:relative;display:flex;gap:18px;margin-top:22px}
+.bedtime-controls .round-button{width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.12);box-shadow:none;color:#fff}
+.bedtime-controls .round-button:active{transform:scale(.92);background:rgba(255,255,255,.2)}
+.bedtime-controls svg{width:20px;height:20px}

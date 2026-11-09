@@ -9,6 +9,7 @@
 // book) and 原文 (the story as written, a picture and a page of its words to each spread).
 // Pure logic here; ui/book.js asks for the words, the pictures and the voices; core/book-pages.js lays spreads out.
 import {THEME_IDS, BOOK_THEMES, guessTheme} from './book-themes.js';
+import {cleanBedtime} from './bedtime.js';
 
 export const BOOK_LIMIT = {spreads: 60, pictures: 2, words: 16, word: 400, title: 40, heading: 24, sound: 40, fx: 2, who: 4, people: 6, line: 40, readers: 30};
 const text = (v, n) => typeof v === 'string' ? v.trim().slice(0, n) : '';
@@ -138,6 +139,7 @@ export function normalizeBook(b) {
   const made = Array.isArray(b?.spreads) ? {cover: b.cover, spreads: b.spreads, ending: b.ending} : fromPages(Array.isArray(b?.pages) ? b.pages : []);
   return {
     id: text(b?.id, 60) || 'b-' + Date.now().toString(36), version: 3,
+    ...(b?.bedtime ? {bedtime: cleanBedtime(b.bedtime)} : {}),
     title: words(b?.title, BOOK_LIMIT.title) || '无题', subtitle: words(b?.subtitle, 60), author: text(b?.author, 40),
     theme: THEME_IDS.includes(b?.theme) ? b.theme : 'fairy', art: b?.art === 'app' ? 'app' : 'book', mode: b?.mode === 'story' ? 'story' : 'retell',
     source: {chat: text(b?.source?.chat, 200), name: text(b?.source?.name, 80), from: Number(b?.source?.from) || 0, to: Number(b?.source?.to) || 0},

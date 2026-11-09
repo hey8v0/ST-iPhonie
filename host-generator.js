@@ -9,8 +9,9 @@ import {languageName} from './core/languages.js';
 import {modelRules} from './core/state.js';
 import {NARRATOR} from './core/narration.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
+import {tavernAssistantPresets, buildTavernPresetMessages} from './assistant-presets.js';
 
-export function createGeneratorHost({context, settings, backend, notice = () => {}, memory = null, personas = () => import('/scripts/personas.js'), fetcher = (...args) => globalThis.fetch(...args)}) {
+export function createGeneratorHost({context, settings, backend, notice = () => {}, memory = null, presets = tavernAssistantPresets, personas = () => import('/scripts/personas.js'), fetcher = (...args) => globalThis.fetch(...args)}) {
   const userName = () => context()?.name1 || '我';
   const userPersona = () => String(context()?.powerUserSettings?.persona_description || '').slice(0, 3000);
   /** The card open now (not a group): what the requests read of it. */
@@ -58,7 +59,16 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
     backend.emit('generator', {busy: kind});
     return Promise.resolve().then(task).finally(() => { busy = ''; backend.emit('generator', {busy: ''}); });
   }
-  const ask = (ctx, prompt) => backend.generateText(ctx, {use: 'generator', prompt, trimNames: false});
+  const ask = async (ctx, prompt) => {
+    const chosen = settings().generator;
+    if (chosen?.tavernPreset) {
+      const preset = (await presets(ctx)).find(p => p.id === chosen.tavernPreset);
+      if (!preset) throw Error('选中的酒馆预设已不在，请在生成器设置里重新选择');
+      const rules = buildTavernPresetMessages(preset, chosen.tavernEntries?.[preset.id], ctx);
+      prompt = [...rules.map(r => ({role: 'system', content: `【文风参考】\n${r.content}`})), ...prompt];
+    }
+    return backend.generateText(ctx, {use: 'generator', prompt, trimNames: false});
+  };
 
   // ---------- 开场白 ----------
   /** form: {mode 'random' | 'brief', brief, focus, length}; before + wish: 「照这句改一改」. */

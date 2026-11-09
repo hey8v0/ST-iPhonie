@@ -230,7 +230,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
       lyric: at >= 0 ? lyrics[at].text : '', lyricIndex: at, lyrics: lyrics.map(l => ({at: l.at, text: l.text}))};
   }
   return {
-    playList, playFrom, next: () => next(1), prev: () => next(-1), toggle, stop, status, rendered, tap, stage, promptPlan,
+    playList, playFrom, next: () => next(1), prev: () => next(-1), toggle, stop, status, rendered, tap, stage, promptPlan, level,
     /** 顺序播放, 随机播放 or 单曲循环 (kept in the settings). */
     setMode(mode) { backend.saveMusic?.({mode}); emit(); },
     play: t => playList([t], 0),

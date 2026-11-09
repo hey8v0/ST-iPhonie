@@ -1,6 +1,6 @@
 # ST-iPhonie 自带音效包
 
-304 个声音，都来自 [Freesound](https://freesound.org)，许可都是 CC0（公有领域，不用署名，可以随便使用和分发）。这里还是列出原作者，谢谢他们。
+387 个声音，都来自 [Freesound](https://freesound.org)，许可都是 CC0（公有领域，不用署名，可以随便使用和分发）。这里还是列出原作者，谢谢他们。
 
 氛围音截取了约 32 秒，全部转成单声道、统一了响度。
 
@@ -312,3 +312,93 @@
 | 吃东西 | Chewing Crunch Cornflakes Knuspern Schnu | Borgory | https://freesound.org/s/548367/ |
 | 吃东西 | Eating a Toastie.wav | squashy555 | https://freesound.org/s/235905/ |
 | 吃东西 | Crunch | LilMati | https://freesound.org/s/348112/ |
+| 猫咪呼噜 | CAT_01.wav | Kim_Kimovna | https://freesound.org/s/563746/ |
+| 猫咪呼噜 | Cat purring | cubilon | https://freesound.org/s/130968/ |
+| 猫咪呼噜 | Cat Meow and Purr | mcroce | https://freesound.org/s/234333/ |
+| 海浪轻拍 | WATER OCEAN WAVES 01.wav | sengjinn | https://freesound.org/s/174581/ |
+| 海浪轻拍 | soft rain drops.wav | bruno.auzet | https://freesound.org/s/664162/ |
+| 屋檐滴水 | Heavy Rain and gutter.WAV | barkenov | https://freesound.org/s/640651/ |
+| 屋檐滴水 | Rain on roofs | xkeril | https://freesound.org/s/669487/ |
+| 屋檐滴水 | Rhythmic Rainfall: A Symphony of Steady Showers and Dripping Melodies | Leafyshipwreck | https://freesound.org/s/709163/ |
+| 屋檐滴水 | Drops falling under the roof in an old house on the top of the mountain | felix.blume | https://freesound.org/s/260638/ |
+| 夜晚湖边 | FrogsAndCrickets_ExcerptB_JMA_24Bit_48k.wav | greysound | https://freesound.org/s/32655/ |
+| 夜晚湖边 | Cicadas and frogs - Antioquia Suroccidental - Bolombolo Colombia | fenixevendir | https://freesound.org/s/502204/ |
+| 夜晚湖边 | 220802_011 Radawka field Night Crickets Owl Dogs Frogs.wav | MaciekKubera | https://freesound.org/s/687446/ |
+| 夜晚湖边 | Frog and Insect Sounds | Zeppo_Knight | https://freesound.org/s/380021/ |
+| 秋风落叶 | Autumn wind and dry leaves.wav | Stek59 | https://freesound.org/s/457318/ |
+| 秋风落叶 | Autumn wind grabbs the trees.wav | straget | https://freesound.org/s/403764/ |
+| 竹林 | Bamboo Creaking in Wind | Yoyodaman234 | https://freesound.org/s/335891/ |
+| 竹林 | Forêt de Bambou // Bamboo forest | indieground | https://freesound.org/s/404688/ |
+| 草原微风 | Greenfield, birds, suburban sounds in the background | originalmaja | https://freesound.org/s/211082/ |
+| 草原微风 | french meadow on the ground.wav | bruno.auzet | https://freesound.org/s/529670/ |
+| 草原微风 | Meadow prairie atmosphere with insect, subtle gust of wind, grass, cicada, distant bird in Agua Fría falls in Amazon rainforest | felix.blume | https://freesound.org/s/672330/ |
+| 深海 | underwater_ambience_lake_lbj_08232013_1.flac | wjoojoo | https://freesound.org/s/197751/ |
+| 深海 | Underwater Ambience | Fission9 | https://freesound.org/s/504641/ |
+| 深海 | Underwater Ambience | Kinoton | https://freesound.org/s/393819/ |
+| 小船摇桨 | rowing boat from inside.wav | Fenodyrie | https://freesound.org/s/588307/ |
+| 小船摇桨 | Kayaking in calm weather | AugustSandberg | https://freesound.org/s/509323/ |
+| 农场清晨 | chickensMS.wav | leosalom | https://freesound.org/s/234879/ |
+| 农场清晨 | 140809_Neuenburg_Gate_Morning_R.wav | blaukreuz | https://freesound.org/s/240581/ |
+| 图书馆 | Library ambience | morosopher | https://freesound.org/s/173344/ |
+| 钟摆滴答 | clock.wav | cynical | https://freesound.org/s/48413/ |
+| 夜车 | AMB_Int_Auto_Driving_001.wav | conleec | https://freesound.org/s/149429/ |
+| 夜车 | Car interior driving medium speed summer night.wav | Daphne_in_Wonderland | https://freesound.org/s/383475/ |
+| 外婆家厨房 | DinerKitchen.wav | ViaTorci | https://freesound.org/s/66790/ |
+| 外婆家厨房 | Kitchen Ambience | brunoboselli | https://freesound.org/s/512511/ |
+| 猫头鹰 | Owl Hoot | Breviceps | https://freesound.org/s/465697/ |
+| 猫头鹰 | owl.wav | Anthousai | https://freesound.org/s/398734/ |
+| 猫头鹰 | owl_hooting_000102_0145S3 002-070 000-002 068-074.wav | Gerent | https://freesound.org/s/558396/ |
+| 猫头鹰 | owl_hooting_000102_0145S3 002-070 000-002 037-044.wav | Gerent | https://freesound.org/s/558397/ |
+| 狼嚎 | Wolf howl | NaturesTemper | https://freesound.org/s/398430/ |
+| 狼嚎 | Howling wolves | Kingcornz | https://freesound.org/s/378334/ |
+| 青蛙 | Frog.ogg | egomassive | https://freesound.org/s/536759/ |
+| 青蛙 | frog_quak.mp3 | katzlbt | https://freesound.org/s/361117/ |
+| 蜜蜂 | BEE_buzzin_02.wav | Department64 | https://freesound.org/s/103047/ |
+| 鸟扑翅膀 | wing flaps layered.wav | martian | https://freesound.org/s/19295/ |
+| 鸟扑翅膀 | wings.wav | Godowan | https://freesound.org/s/240476/ |
+| 鸟扑翅膀 | wings2.wav | Godowan | https://freesound.org/s/240469/ |
+| 公鸡打鸣 | Rooster chicken calls_2.wav | AGFX | https://freesound.org/s/43382/ |
+| 公鸡打鸣 | Rooster Crow 1 | BenjaminNelan | https://freesound.org/s/435508/ |
+| 公鸡打鸣 | Rooster crow | jsbarrett | https://freesound.org/s/200339/ |
+| 公鸡打鸣 | Rooster_crowing.wav | Lydmakeren | https://freesound.org/s/510906/ |
+| 羊叫 | sheep 3.mp3 | esperar | https://freesound.org/s/171149/ |
+| 羊叫 | Lamb and Mother | swiftoid | https://freesound.org/s/182509/ |
+| 牛铃 | Cowbell_OS_5.aif | timgormly | https://freesound.org/s/159765/ |
+| 牛铃 | Cowbell_OS_4.aif | timgormly | https://freesound.org/s/159766/ |
+| 牛铃 | Cowbell2.wav | Neotone | https://freesound.org/s/75339/ |
+| 海鸥 | sea gulls.wav | Snapper4298 | https://freesound.org/s/166703/ |
+| 海鸥 | Seagulls_short.wav | Lydmakeren | https://freesound.org/s/510917/ |
+| 海鸥 | seagull 2.wav | Snapper4298 | https://freesound.org/s/166707/ |
+| 海鸥 | Seagull single call | steaq | https://freesound.org/s/263786/ |
+| 合上书 | Close book.MP3 | SoundsForHim | https://freesound.org/s/399669/ |
+| 合上书 | Closing book | ondondvo | https://freesound.org/s/195795/ |
+| 合上书 | bkClose.wav | tia666 | https://freesound.org/s/156927/ |
+| 倒茶 | tea.wav | stijn | https://freesound.org/s/22890/ |
+| 倒茶 | Pouring coffee | Maajora | https://freesound.org/s/432775/ |
+| 倒茶 | Pouring a cup of coffee.wav | tlabrant1 | https://freesound.org/s/658711/ |
+| 倒茶 | Pouring Drink Sound Effect by Rea.mp3 | reasanka | https://freesound.org/s/382911/ |
+| 仙子铃铛 | GLEAM-GLOW-SFX-CHIME.wav | newagesoup | https://freesound.org/s/351408/ |
+| 仙子铃铛 | Crystal Twinkle | LaurenPonder | https://freesound.org/s/639429/ |
+| 魔杖 | GLEAM-GLOW-SFX-CHIME.wav | newagesoup | https://freesound.org/s/351408/ |
+| 魔杖 | Magic wand.wav | olver | https://freesound.org/s/417860/ |
+| 竖琴 | Good answer harp glissando.wav | oggraphics | https://freesound.org/s/610703/ |
+| 竖琴 | Flashback Sound.wav | sidequesting | https://freesound.org/s/541546/ |
+| 宝箱 | Treasure Chest Open | steprock | https://freesound.org/s/771164/ |
+| 龙吼 | DRAGON_ROAR.wav | JoelAudio | https://freesound.org/s/85568/ |
+| 龙吼 | Monster Roar 2.wav | quadraslayer | https://freesound.org/s/398908/ |
+| 龙吼 | Dino Hiss Dragon Roar | 999999990 | https://freesound.org/s/320345/ |
+| 巫婆笑 | Witch Laugh | mvVoiceActing | https://freesound.org/s/223851/ |
+| 怪兽低吼 | DRAGON_ROAR.wav | JoelAudio | https://freesound.org/s/85568/ |
+| 怪兽低吼 | Angry Beast.wav | husky70 | https://freesound.org/s/170454/ |
+| 怪兽低吼 | Dino Hiss Dragon Roar | 999999990 | https://freesound.org/s/320345/ |
+| 怪兽低吼 | Monster Roar 2.wav | quadraslayer | https://freesound.org/s/398908/ |
+| 船笛 | ship horn very close | tierrafilm@gmail.com | https://freesound.org/s/420716/ |
+| 船笛 | powerfull horn | trezz77 | https://freesound.org/s/546528/ |
+| 马车 | Paardengetrappel.001(13).wav | kupper | https://freesound.org/s/23500/ |
+| 马车 | 2 horse carriage.wav | leo153 | https://freesound.org/s/497693/ |
+| 马车 | Horse and Carriage.mp3 | maadmacs | https://freesound.org/s/388391/ |
+| 马车 | Horse carriage in Vienna | Urkki69 | https://freesound.org/s/628351/ |
+| 树枝断裂 | Crack of branch 3.wav | deleted_user_2104797 | https://freesound.org/s/164472/ |
+| 树枝断裂 | Necksnap_build.wav | danielrutterfilms | https://freesound.org/s/134025/ |
+| 树枝断裂 | twig snap.wav | mrjingles | https://freesound.org/s/17184/ |
+| 树枝断裂 | Bone Crunch Fast.wav | BrassKnucklesFilms | https://freesound.org/s/192146/ |
