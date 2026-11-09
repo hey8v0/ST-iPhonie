@@ -20,14 +20,15 @@ const LORE_MAX = 30000;
  * cleanTags: tags whose blocks are taken out of the text (a status bar the story asks for, which the phone must not copy).
  * Returns '' when the tavern has no World Info for this (or is older than 1.12.14).
  */
-export async function worldInfoFor(context, {texts = [], always = [], persona = '', characters = '', skipBooks = [], skipEntries = [], extraBooks = [], cleanTags = [], excludeText = '', max: most = LORE_MAX, report = () => {}, load = () => import('/scripts/world-info.js'), main = () => import('/script.js'), random = Math.random} = {}) {
+export async function worldInfoFor(context, {texts = [], always = [], persona = '', characters = '', skipBooks = [], skipEntries = [], extraBooks = [], cleanTags = [], excludeText = '', onlyBooks = null, max: most = LORE_MAX, report = () => {}, load = () => import('/scripts/world-info.js'), main = () => import('/script.js'), random = Math.random} = {}) {
   const note = (kind, error, level = 'error') => { try { report('世界书读取', {kind, message: error?.message || String(error), stack: error?.stack}, level); } catch {} };
   try {
     const ctx = context();
     if (typeof ctx?.getWorldInfoPrompt !== 'function') { note('接口不可用', '当前酒馆没有提供世界书扫描接口，本次未带入世界书', 'warn'); return ''; }
     const scan = scanOf(texts, always);
     const parts = await collect(ctx, {scan, persona, characters, skipBooks, skipEntries, extraBooks, load, size: await promptSize(ctx, main), random, note});
-    return budgeted(parts.filter(p => !excludeText || !excludeText.includes(String(p.content || '').trim()) || !String(p.content || '').trim()), cleanTags, most).filter(p => p.kept).map(p => p.text).join('\n\n');
+    // onlyBooks (照正文原样, 0.9.46): the story's own part already holds what the tavern's books gave; only these are read.
+    return budgeted(parts.filter(p => !onlyBooks || onlyBooks.includes(p.world)).filter(p => !excludeText || !excludeText.includes(String(p.content || '').trim()) || !String(p.content || '').trim()), cleanTags, most).filter(p => p.kept).map(p => p.text).join('\n\n');
   } catch (error) { note('扫描失败，本次未带入世界书', error); return ''; }
 }
 

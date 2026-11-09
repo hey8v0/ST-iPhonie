@@ -154,7 +154,9 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
             if (kept.length && size + line.length > budget) break;
             kept.unshift(fresh[i]); size += line.length;
           }
-          if (o.enabled && kept.length < fresh.length) tidy(thread.id, {force: true}).catch(() => {});
+          // (Not forced: forcing here wrote a summary of whatever few messages there were before every story reply,
+          // so the book filled with 4- and 8-message 摘要 whatever 「每次整理多少条」 said. 0.9.46.)
+          if (o.enabled && kept.length < fresh.length) tidy(thread.id).catch(() => {});
           const recent = kept.length ? `【${user}和${group ? `群聊「${name}」` : name}在手机上${text ? '后来' : ''}的聊天${kept.length < fresh.length ? `（最近 ${kept.length} 条）` : ''}】\n${transcript(kept, user)}` : '';
           if (text || recent) parts.push([text, recent].filter(Boolean).join('\n'));
         }

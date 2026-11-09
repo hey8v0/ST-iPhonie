@@ -5,7 +5,7 @@
 import {roleStore, findRoute} from './core/routes.js';
 import {bubbleRequest, splitBubbleAnswer} from './core/bubble-css.js';
 import {currentDm, currentWindow, lastRound, chatWindows, forwardLine, messageWords, canGroupSpeak} from './core/chats.js';
-import {buildChatRequest, parseChatReply, bringText, activeChatPreset, normalizeChatPreset, messageLine, scanTurns, cleanTagged,chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace, STICKER_MOODS, contactStatus, letterRequest, letterText} from './core/chat.js';
+import {exactBackground, buildChatRequest, parseChatReply, bringText, activeChatPreset, normalizeChatPreset, messageLine, scanTurns, cleanTagged,chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace, STICKER_MOODS, contactStatus, letterRequest, letterText} from './core/chat.js';
 import {worldInfoFor, loreTry, loreOptions} from './host-lore.js';
 import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer, sizeFor} from './core/draw.js';
 import {readStoryLines, readStoryExact} from './story-exact.js';
@@ -154,7 +154,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       const peekKey = thread.type === 'dm' ? ownOf(thread.members[0]) : '', peekedNow = peekKey ? s.chat.peeked?.[peekKey] : null;
       // 世界书: scanned over the recent story and the chat itself, as the story's own request would be, and who is in the
       // chat however deep the tavern scans.
-      const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), excludeText: exact?.available ? exact.messages.map(m => m.content).join('\n\n') : '', report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
+      const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), ...(exact?.available ? {excludeText: exact.messages.map(m => m.content).join('\n\n'), onlyBooks: preset.loreExtraBooks || []} : {}), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
         // (By turns: the lines one side sent in a row are one entry, so the tavern's 扫描深度 covers whole turns.)
         texts: [forum, ...recent.map(r => `${r.name}: ${r.text}`), ...scanTurns(thread.messages.slice(-preset.history).map(m => ({me: m.from === 'me', text: messageLine(m, user)})))], always: [people.map(p => p.name).join('、')]});
       // 记忆: the written-up older chat, and older messages that match the latest ones.
@@ -857,11 +857,11 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     const remembered = memory ? (await memory.contextFor(thread, {query: m.letter.text.slice(0, 200)}).catch(() => ({text: ''}))).text : '';
     const exact = await exactFor(preset), recent = exact?.available ? [] : await story(preset), history = thread.messages.slice(-30);
     // 世界书 (0.9.37; letters were written without it): scanned over the letter, the chat lately and the story.
-    const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), excludeText: exact?.available ? exact.messages.map(m => m.content).join('\n\n') : '', report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: person.persona || person.card || '',
+    const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), ...(exact?.available ? {excludeText: exact.messages.map(m => m.content).join('\n\n'), onlyBooks: preset.loreExtraBooks || []} : {}), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: person.persona || person.card || '',
       texts: [...recent.slice(-6).map(r => `${r.name}: ${r.text}`), ...scanTurns(history.slice(-12).map(x => ({me: x.from === 'me', text: messageLine(x, user)}))), m.letter.text], always: [person.name]});
     const prompt = letterRequest({prompts: s.promptRules, partner: person.name, persona: person.persona || person.card, user, userPersona: userPersona(), lore, memory: remembered,
       earlier: exact?.available ? '' : memory?.storyMemory() || '', story: recent, history, letter: m.letter.text, sentAt: m.at, now});
-    if (exact?.available) prompt.unshift(...exact.messages);
+    if (exact?.available) prompt.unshift(...exactBackground(exact.messages));
     return letterText(await backend.generateText(context(), {use: 'chat', prompt, plainText: true, trimNames: false, responseLength: 2000}));
   }
   // The user's letters are looked for every five minutes (every chat read); letters on their way, every half minute

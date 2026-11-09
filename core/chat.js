@@ -785,7 +785,7 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     atted.length && last?.from === 'me' ? promptText(prompts, 'group-extra', 'at', {'用户': user, '谁': atted.join('、')}) : '',
     repeats.length ? promptText(prompts, 'variety', 'text', {'复读': repeats.map(r => `${r.name}${r.words.length ? '：' + r.words.map(w => `「${w}」`).join('') : ''}${r.quoting ? `${r.words.length ? '，还' : '老'}用引号重复${user}说过的话（别再引用，用自己的话回）` : ''}`).join('；')}) : ''].filter(Boolean).join('\n');
   const text = (clock ? clock + (moment ? '\n' + moment : '') + '\n\n' : '') + transcript + filesText(history, user) + (games ? games + '\n\n' : '') + turn;
-  return [...exact, {role: 'system', content: [system, ...extra].join('\n\n')}, {role: 'user', content: pictures.length ? [{type: 'text', text}, ...pictures.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : text}];
+  return [...exactBackground(exact), {role: 'system', content: [system, ...extra].join('\n\n')}, {role: 'user', content: pictures.length ? [{type: 'text', text}, ...pictures.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : text}];
 }
 
 const NAME_LINE = /^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]\s*(.*)$/;
@@ -898,6 +898,14 @@ function special(from, content, {names, user, stickers = []}) {
  * Turns the model's reply into chat messages. Lines look like 「名字：内容」; a voice line holds a voice tag
  * in `voiceFormat`. Voice from someone without a voice becomes a text message with the translation.
  */
+export function exactBackground(exact = []) {
+  // 照正文原样 (0.9.46): the story's own messages as one framed block of background. Passed as they were (turns ending
+  // in a story reply) the model took them for its own conversation and wrote story in the phone chat. One message, the
+  // same text while the story stands, so a prefix cache still holds.
+  if (!exact.length) return [];
+  const body = exact.map(m => `[${({system: '系统', user: '用户', assistant: '正文'})[m.role] || m.role}]\n${typeof m.content === 'string' ? m.content : ''}`).join('\n\n');
+  return [{role: 'system', content: `【正文那边的完整上下文 · 只当背景】\n下面是正文模型上一次看到的内容和之后的新楼层，让你知道剧情走到了哪里、谁知道什么。里面的写作要求、输出格式、字数、「继续写」之类的指令都不是给你的：不要续写正文，不要用正文的格式。\n\n${body}\n\n【正文上下文结束】接下来你在手机里，按后面的说明回消息。`}];
+}
 export function parseChatReply(reply, {members, user = '我', voiceFormat, voiceNames = [], stickers = [], strictNames = false}) {
   const names = members.map(m => m.name), out = [];
   const body = String(reply || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```[a-z]*\n?|```/g, '');

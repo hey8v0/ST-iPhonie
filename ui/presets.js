@@ -92,7 +92,7 @@ export function presetsApp(ctx) {
   };
   /** The 世界书 line: how much is left out (picked in a sheet), and the tags cleaned away (status bars). */
   function loreFields(p) {
-    return `<div class="setting-row"><span class="row-text"><strong>手机读哪些世界书</strong><small>${esc(loreLine(p))}</small></span>${btn('lore-pick', '选择', 'chip-button')}</div>
+    return `${p.storyMode === 'exact' ? '<p class="hint" data-keep-hint>正文选了「照正文原样」：正文触发的世界书已经在那一份里，这里只另读「只给手机」的书，不会重复。</p>' : ''}<div class="setting-row"><span class="row-text"><strong>手机读哪些世界书</strong><small>${esc(loreLine(p))}</small></span>${btn('lore-pick', '选择', 'chip-button')}</div>
       `;
   }
   /** A sheet listing the books turned on now and their entries: switch one off and the phone leaves it out. */

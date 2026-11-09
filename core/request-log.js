@@ -11,7 +11,7 @@ export class RequestLog {
       let s = String(text).replace(/\bBearer\s+[^\s"',}]+/gi, 'Bearer [已隐藏]').replace(/([?&](?:key|api_key|token|access_token)=)[^&#\s]+/gi, '$1[已隐藏]');
       for (const key of keys) s = s.split(key).join('[已隐藏]').split(encodeURIComponent(key)).join('[已隐藏]');
       const limit = Math.min(MAX_TEXT, remaining); remaining -= Math.min(s.length, limit);
-      return s.length > limit ? s.slice(0, limit) + '\n[内容过长，已截断]' : s;
+      return s.length > limit ? s.slice(0, limit) + `\n[日志只留前 ${limit} 字；实际发出去的是完整的]` : s;
     };
     const seen = new WeakSet();
     const visit = (v, key = '', depth = 0) => {
