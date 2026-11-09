@@ -303,3 +303,56 @@
 @keyframes pet-ball{to{transform:translateX(var(--roll)) rotate(360deg)}}
 .pet-layer[data-paused] *{animation-play-state:paused!important}
 @media (prefers-reduced-motion:reduce){.pet-layer *{animation:none!important}}
+
+/* 0.9.47 · a message's menu like QQ's: a dark card over the bubble, 回应 on top, the actions as icons with a word. */
+.overlay.msg-pop{display:block;padding:0;background:rgba(10,20,40,.14);animation:fade .16s}
+.msg-pop .sheet{position:absolute;width:min(304px,calc(100% - 16px));max-height:none;padding:6px 6px 4px;border-radius:16px;background:#26272d;color:#fff;box-shadow:0 12px 32px rgba(0,0,0,.3),0 0 0 .5px rgba(255,255,255,.06) inset;animation:none}
+.msg-pop .sheet-header,.msg-pop .sheet::before{display:none}
+.msg-pop .sheet-body{padding:0;overflow:visible;line-height:1.3}
+.msg-pop .sheet[data-arrow]:not([data-arrow=""])::after{content:"";position:absolute;left:calc(var(--ax) - 7px);width:14px;height:14px;background:#26272d;transform:rotate(45deg);border-radius:3px;pointer-events:none}
+.msg-pop .sheet[data-arrow=down]::after{bottom:-5px}
+.msg-pop .sheet[data-arrow=up]::after{top:-5px}
+.msg-pop .react-row{gap:0;margin:0 0 4px;padding:0 0 6px;border-bottom:1px solid rgba(255,255,255,.1)}
+.msg-pop .react-row button{height:38px;border-radius:10px;font-size:22px;background:transparent;box-shadow:none}
+.msg-pop .react-row button[aria-pressed=true]{background:rgba(255,255,255,.16);box-shadow:none}
+.react-row .react-more{display:grid;place-items:center;color:var(--ink2)}
+.msg-pop .react-row .react-more{color:rgba(255,255,255,.75)}
+.react-more svg{width:20px;height:20px}
+.mp-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px}
+.mp-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:0;padding:9px 0 7px;border-radius:10px;background:transparent;box-shadow:none;color:var(--ink);font-size:11px;font-weight:700;white-space:nowrap;transition:background .15s,transform .18s cubic-bezier(.3,1.6,.5,1)}
+.mp-item:active{transform:scale(.92);background:var(--card2)}
+.mp-ico{display:grid;place-items:center;height:22px}
+.mp-ico svg{width:21px;height:21px}
+.mp-item.danger{color:var(--danger,#d6455d)}
+.msg-pop .mp-item{color:rgba(255,255,255,.92)}
+.msg-pop .mp-item:active{background:rgba(255,255,255,.12)}
+.msg-pop .mp-item.danger{color:#ff8f9c}
+.mp-label{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+
+/* 0.9.47 · the whole emoji set and the 颜文字: sections that scroll, a bar of categories under them. */
+.ep{display:flex;flex-direction:column;height:248px;margin-top:4px}
+.ep-sheet .ep{height:min(56vh,420px)}
+.ep-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;scroll-behavior:smooth}
+.ep-scroll::-webkit-scrollbar{display:none}
+.ep-sec h4{margin:0;padding:8px 4px 2px;font-size:11px;font-weight:800;letter-spacing:.04em;color:var(--ink2);opacity:.75}
+.ep-grid.emo{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));content-visibility:auto;contain-intrinsic-size:auto 200px}
+.ep-grid.emo button{height:40px;min-height:0;padding:0;border-radius:10px;background:transparent;box-shadow:none;font-size:25px;line-height:1;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;transition:transform .16s cubic-bezier(.3,1.6,.5,1)}
+.ep-grid.emo button:active{transform:scale(1.25);background:var(--card2)}
+.ep-grid.kao{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px 4px}
+.ep-grid.kao button{height:36px;min-height:0;padding:0 4px;border-radius:10px;background:transparent;box-shadow:none;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ep-grid.kao button:active{background:var(--card2)}
+.ep-cats{display:flex;gap:2px;padding:6px 0 0;border-top:1px solid var(--line,rgba(127,127,127,.15));overflow-x:auto;scrollbar-width:none}
+.ep-cats::-webkit-scrollbar{display:none}
+.ep-cats button{flex:1 0 auto;min-width:34px;height:32px;min-height:0;padding:0 6px;border-radius:9px;background:transparent;box-shadow:none;font-size:18px;opacity:.55;filter:grayscale(.6);transition:opacity .2s,filter .2s,background .2s}
+.ep-cats.kao button{font-size:12px;font-weight:800;color:var(--ink2);filter:none}
+.ep-cats button[aria-current=true]{opacity:1;filter:none;background:var(--accent-soft);color:var(--accent-ink)}
+/* 0.9.47 · 论坛 → 网名: a picture beside each name when 「自己设」. */
+.net-row{display:flex;align-items:flex-end;gap:10px}
+.net-row .field{flex:1;min-width:0}
+.net-face{display:flex;flex-direction:column;align-items:center;gap:2px;flex:none;margin-bottom:14px;padding:0;min-height:0;background:transparent;box-shadow:none;color:var(--ink2);font-size:10px;font-weight:800}
+.net-face .avatar,.net-face img{width:36px;height:36px}
+/* 0.9.47 · 全部明细 by month. */
+.ledger-month{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:16px 4px 6px}
+.ledger-month:first-child{margin-top:4px}
+.ledger-month h3{margin:0;font-size:15px;font-weight:900}
+.ledger-month small{font-size:11px;color:var(--ink2)}

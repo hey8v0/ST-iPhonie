@@ -55,7 +55,7 @@ import { makeThumb, makePreview, packPicture } from './thumbnail.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, ucPresets, qualityPresets, upscaleBody, isV5, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, drawCast, defaultDraw, normalizeVibeSettings, applyImageConnection, tavernPicture } from './draw.js';
 import { normalizeBubbleSet, normalizeBubbleSets, normalizeBubbleOf, BUBBLE_LIMITS } from './bubble-css.js';
-import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, roleInSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive, normalizeRoleStickers, normalizeBgOf, normalizeStatusOf, normalizePeeked } from './chat.js';
+import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, roleInSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive, normalizeRoleStickers, normalizeBgOf, normalizeStatusOf, normalizePeeked, normalizeQuickReactions } from './chat.js';
 import { normalizePets } from './pets.js';
 import { ChatStore, money, currentDm, searchThreads } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
@@ -1775,6 +1775,9 @@ export class TTSBackend {
         }
         if (Array.isArray(patch?.starred)) next.chat.starred = patch.starred;
         if (patch?.pace !== undefined) next.chat.pace = patch.pace !== false;
+        // 0.9.47: 常用回应, and how 网名 look on 论坛 (a picture of one's own goes in avatars as 'net:' + 网名).
+        if (Array.isArray(patch?.quickReactions)) next.chat.quickReactions = normalizeQuickReactions(patch.quickReactions);
+        if (patch?.netFace !== undefined) { if (!['initial', 'own', 'role'].includes(patch.netFace)) throw Error('网名头像的样子无效'); next.chat.netFace = patch.netFace; }
         // 主动发消息: {on, every, dailyMax}.
         if (patch?.proactive && typeof patch.proactive === 'object') next.chat.proactive = normalizeProactive({ ...next.chat.proactive, ...patch.proactive });
         if (Array.isArray(patch?.stickers)) next.chat.stickers = normalizeStickers(patch.stickers);

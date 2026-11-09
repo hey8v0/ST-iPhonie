@@ -7,7 +7,7 @@ import {promptText, promptOn, promptTemplate, fillPrompt} from './prompt-rules.j
 import {songOf, listeningNote} from './music.js';
 import {normalizeWallet, defaultWallet, PREMIUM, guessEmoji, yuan} from './wallet.js';
 import {parseDialogue, isPlaceholderRole} from './protocol.js';
-import {money, oneEmoji, CHAIN_MODES} from './chats.js';
+import {money, oneEmoji, CHAIN_MODES, REACTIONS} from './chats.js';
 import {callSummary} from './call.js';
 import {languageName} from './languages.js';
 import {normalizeMemory} from './memory.js';
@@ -84,7 +84,7 @@ export function normalizeVoiceText(v = {}) {
 }
 
 export function defaultChat() {
-  return {presets: [{...structuredClone(DEFAULT_PRESET), memory: normalizeMemory()}], activePreset: 'default', contacts: [], voiceText: {...DEFAULT_VOICE_TEXT}, profile: normalizeProfile(), starred: [], avatars: {}, partition: 'none', pace: true, wallet: defaultWallet(), stickers: [], proactive: normalizeProactive(), remarks: {}, netNames: {}, bubbleSets: [], bubbleOf: {}, roleStickers: {}, bgOf: {}, statusOf: {}, peeked: {}, autoReply: false, patOf: {}, pets: normalizePets()};
+  return {presets: [{...structuredClone(DEFAULT_PRESET), memory: normalizeMemory()}], activePreset: 'default', contacts: [], voiceText: {...DEFAULT_VOICE_TEXT}, profile: normalizeProfile(), starred: [], avatars: {}, partition: 'none', pace: true, wallet: defaultWallet(), stickers: [], proactive: normalizeProactive(), remarks: {}, netNames: {}, bubbleSets: [], bubbleOf: {}, roleStickers: {}, bgOf: {}, statusOf: {}, peeked: {}, autoReply: false, patOf: {}, pets: normalizePets(), quickReactions: [...REACTIONS], netFace: 'initial'};
 }
 
 const text = (value, max) => String(value ?? '').slice(0, max);
@@ -311,7 +311,15 @@ export function normalizeChat(value) {
     // 状态和签名, 查手机 × 聊天 (0.9.35).
     statusOf: normalizeStatusOf(value.statusOf), peeked: normalizePeeked(value.peeked),
     // 0.9.36: 自动回复 (off unless turned on), 拍一拍后缀 of each person by their own key, 宠物.
-    autoReply: value.autoReply === true, patOf: normalizeNames(value.patOf, 20), pets: normalizePets(value.pets)};
+    autoReply: value.autoReply === true, patOf: normalizeNames(value.patOf, 20), pets: normalizePets(value.pets),
+    // 0.9.47: the six 回应 in a message's menu; how 网名 look on 论坛 (initial: the first character, own: a picture
+    // the user set for that 网名 — kept in avatars under 'net:' + 网名 —, role: the person's own picture as before 0.9.43).
+    quickReactions: normalizeQuickReactions(value.quickReactions), netFace: ['initial', 'own', 'role'].includes(value.netFace) ? value.netFace : 'initial'};
+}
+/** The six 回应 offered first: emoji only, each once; the defaults when none are left. */
+export function normalizeQuickReactions(value) {
+  const list = [...new Set((Array.isArray(value) ? value : []).map(oneEmoji).filter(Boolean))].slice(0, 6);
+  return list.length ? list : [...REACTIONS];
 }
 
 // ---------- 状态和签名 (0.9.35) ----------

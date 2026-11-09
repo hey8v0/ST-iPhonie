@@ -1,10 +1,11 @@
 // 论坛: a public board next to 朋友圈. The feed (热搜 on top, then posts), a post with its replies as floors, and the
 // user's own posts and replies. New posts, replies and the 热搜 are generated in the tavern page (host-apps.js).
 import {rowWindow} from './row-window.js';
-import {createView, esc, btn, field, input, textArea, heading, avatar, empty, menu} from './common.js';
+import {createView, esc, btn, field, input, textArea, heading, avatar, avatarPicture, empty, menu} from './common.js';
 import {icon} from './icons.js';
 import {shareToChat} from './share-to-chat.js';
 import {forumAvatar} from '../core/forum.js';
+import {thumbBlob} from './thumbs.js';
 
 function ago(at) {
   const s = (Date.now() - at) / 1000;
@@ -24,7 +25,15 @@ export function forumApp(ctx) {
   const net = () => api.readState().chat.netNames || {};
   const nameOf = who => who === 'me' ? net().me || myName() : net()[who] || who;
   const characters = () => new Set((api.chatContacts?.() || []).map(c => c.name));
-  const face = (who, size) => net()[who] ? `<img class="forum-net-avatar" width="${size}" height="${size}" src="${esc(forumAvatar(nameOf(who)))}" alt="网名头像" style="border-radius:50%;flex-shrink:0">` : who === 'me' ? avatar(myName(), 'none', size, 'me') : avatar(who, ctx.engineOf(who), size);
+  // 网名头像 (0.9.47, 论坛 → ⋯ → 网名): its first character (default), a picture the user set for it, or the person's own.
+  const faceMode = () => api.readState().chat.netFace || 'initial';
+  const own = (who, size) => who === 'me' ? avatar(myName(), 'none', size, 'me') : avatar(who, ctx.engineOf(who), size);
+  const face = (who, size) => {
+    const screen = nameOf(who), mode = faceMode();
+    if (!net()[who] || mode === 'role') return own(who, size);
+    if (mode === 'own' && avatarPicture('net:' + who)) return avatar(screen, 'none', size, 'net:' + who);
+    return `<img class="forum-net-avatar" width="${size}" height="${size}" src="${esc(forumAvatar(screen))}" alt="网名头像" style="border-radius:50%;flex-shrink:0">`;
+  };
   const badge = (who, roles) => who === 'me' ? '<span class="forum-tag me">我</span>' : roles.has(who) ? '<span class="forum-tag">角色</span>' : '';
   const busy = () => api.forumBusy?.();
 
@@ -85,18 +94,53 @@ export function forumApp(ctx) {
     d.body.querySelector('input,textarea')?.focus();
     return d;
   }
-  /** 网名: the user's and the characters' screen names on the board; empty ones are made up on the next refresh. */
+  /** 网名: the user's and the characters' screen names on the board; empty ones are made up on the next refresh. And how they
+   *  look (0.9.47): the first character of the 网名, a picture the user picks for each, or the person's own picture. */
   function netNames() {
-    const names = net(), people = (api.chatContacts?.() || []).map(c => c.name);
-    const d = ctx.dialog('网名', `<p class="help-copy">论坛上大家都用网名，路人和角色只看得到网名，不知道背后是谁。角色的网名空着的话，下次刷新论坛时会按人设起一个，之后一直用它。</p>
-      <div class="group pad">${field('我的网名', input('net-me', names.me || '', 'text', `maxlength="30" placeholder="空着就显示「${esc(myName())}」"`))}
-      ${people.map(n => field(n, input('net-' + n, names[n] || '', 'text', 'maxlength="30" placeholder="空着就让它起一个"'))).join('')}</div>
-      <div class="actions">${btn('net-save', '保存', 'primary')}</div>`);
-    d.body.addEventListener('click', e => {
-      if (!e.target.closest('[data-action=net-save]')) return;
+    const names = net(), people = ['me', ...(api.chatContacts?.() || []).map(c => c.name)];
+    let mode = faceMode();
+    const d = ctx.dialog('网名', '');
+    const paint = () => {
+      const typed = Object.fromEntries([...d.body.querySelectorAll('[data-field^="net-"]')].map(el => [el.dataset.field.slice(4), el.value]));
+      const row = who => {
+        const value = typed[who] ?? names[who] ?? '', label = who === 'me' ? '我的网名' : who;
+        const pic = mode === 'own' ? `<button type="button" class="net-face" data-action="net-face" data-who="${esc(who)}" aria-label="给${esc(label)}换头像">${avatarPicture('net:' + who) ? avatar(value || label, 'none', 36, 'net:' + who) : `<img width="36" height="36" src="${esc(forumAvatar(value || label))}" alt="" style="border-radius:50%">`}<small>换</small></button>` : '';
+        return `<div class="net-row">${pic}${field(label, input('net-' + who, value, 'text', `maxlength="30" placeholder="${who === 'me' ? `空着就显示「${esc(myName())}」` : '空着就让它起一个'}"`))}</div>`;
+      };
+      d.body.innerHTML = `<p class="help-copy">论坛上大家都用网名，路人和角色只看得到网名，不知道背后是谁。角色的网名空着的话，下次刷新论坛时会按人设起一个，之后一直用它。</p>
+        <div class="field"><span>网名头像</span><div class="segmented" style="margin:0">${[['initial', '网名首字'], ['own', '自己设'], ['role', '本人头像']].map(([k, t]) => `<button type="button" data-action="net-mode" data-mode="${k}" aria-pressed="${mode === k}">${t}</button>`).join('')}</div></div>
+        ${mode === 'role' ? '<p class="hint" data-keep-hint>网名照样显示，但头像是本人的，一眼就认得出是谁。</p>' : mode === 'own' ? '<p class="hint" data-keep-hint>点左边的头像换一张；没换的还是网名首字。</p>' : ''}
+        <div class="group pad">${people.map(row).join('')}</div>
+        <div class="actions">${btn('net-save', '保存', 'primary')}</div>`;
+    };
+    paint();
+    d.body.addEventListener('click', async e => {
+      const b = e.target.closest('[data-action]');
+      if (!b) return;
+      if (b.dataset.action === 'net-mode') { mode = b.dataset.mode; api.saveChatOptions({netFace: mode}); paint(); render(); return; }
+      if (b.dataset.action === 'net-face') { const id = await pickPicture(); if (id) { api.saveChatOptions({avatars: {['net:' + b.dataset.who]: {kind: 'photo', photoId: id}}}); ctx.win.setTimeout(paint, 400); } return; }
+      if (b.dataset.action !== 'net-save') return;
       const patch = {};
       for (const el of d.body.querySelectorAll('[data-field^="net-"]')) patch[el.dataset.field.slice(4)] = el.value.trim() || null;
       try { api.saveChatOptions({netNames: patch}); d.close(); ctx.notify('网名已保存'); render(); } catch (error) { ctx.notify(error.message, {error: true}); }
+    });
+  }
+  /** One picture for a 网名: a recent photo of the album, or a new one uploaded (it goes into the album). */
+  function pickPicture() {
+    return new Promise(async resolve => {
+      const rows = (await api.listPhotos()).slice(0, 24), urls = [];
+      let picked = null;
+      const d = ctx.dialog('选一张头像', `<label class="secondary file-button">${icon('import')}上传图片<input type="file" accept="image/*" data-net-file hidden></label>
+        ${rows.length ? `<div class="photo-grid pick-photos">${rows.map(r => `<button type="button" data-net-photo="${esc(r.id)}" aria-label="用 ${esc(r.name)}"><img alt=""></button>`).join('')}</div>` : '<p class="hint">相册里还没有照片。</p>'}`, {over: true});
+      d.onClose(() => { for (const u of urls) ctx.win.URL.revokeObjectURL(u); resolve(picked); });
+      for (const r of rows) thumbBlob(api, r).then(blob => { const img = d.body.querySelector(`[data-net-photo="${r.id}"] img`); if (blob && img && d.live) { const u = ctx.win.URL.createObjectURL(blob); urls.push(u); img.src = u; } }).catch(() => {});
+      d.body.addEventListener('click', e => { const id = e.target.closest('[data-net-photo]')?.dataset.netPhoto; if (id) { picked = id; d.close(); } });
+      d.body.addEventListener('change', e => {
+        const file = e.target.closest('[data-net-file]')?.files?.[0];
+        if (!file) return;
+        if (!/^image\//.test(file.type)) { ctx.notify('请选择图片文件'); return; }
+        api.addPhoto({name: file.name, blob: file}).then(photo => { picked = photo.id; d.close(); }).catch(error => ctx.notify(error.message));
+      });
     });
   }
   function newPost() {

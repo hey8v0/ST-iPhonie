@@ -3110,3 +3110,26 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 
 /* Story reading choices fit the narrow phone frame. */
 .story-modes{display:grid;gap:8px;margin-bottom:18px}.story-mode{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:14px;cursor:pointer}.story-mode:has(input:checked){background:var(--accent-soft)}.story-mode input{flex:0 0 auto;accent-color:var(--accent)}.story-mode span{min-width:0}.story-mode strong,.story-mode small{display:block}.story-mode small{font-size:11px;line-height:1.6;opacity:.65;margin-top:4px}.story-cost{border-left:3px solid var(--accent);padding:10px 12px!important;line-height:1.7}.story-source-detail{margin:8px 0}.story-source-detail .story-source{list-style:none;margin:0;cursor:pointer}.story-source-meta{font-size:11px;opacity:.65;padding:8px;overflow-wrap:anywhere}.story-source-full{white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow:auto;font:inherit;font-size:12px;line-height:1.7;padding:10px;margin:0}.story-source span{min-width:0;overflow-wrap:anywhere}
+
+/* 0.9.47 · 音乐: the same controls in the same places, without the stacked frames and rings — soft fills, one height,
+   a springy press. (The order of the row is the user's choice of 0.9.22; only the look changed.) */
+.music-shelves{gap:6px;padding-bottom:10px}
+.music-shelves button{min-height:34px;padding:0 13px;background:transparent;box-shadow:none;color:var(--ink2);transition:background .25s,color .25s,transform .2s cubic-bezier(.3,1.6,.5,1)}
+.music-shelves button[aria-pressed=true]{background:var(--accent-soft);box-shadow:none;color:var(--accent-ink)}
+.music-shelves button:active{transform:scale(.94)}
+.music-tools{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.music-tools>.primary,.music-tools>.secondary{flex:1 1 0;min-width:0;min-height:44px;padding:0 12px;border-radius:15px;font-size:14px;transition:transform .22s cubic-bezier(.3,1.6,.5,1),box-shadow .2s,background .2s}
+.music-tools>.primary{box-shadow:0 8px 18px -10px color-mix(in srgb,var(--accent-btn) 80%,transparent)}
+.music-tools>.secondary{background:var(--accent-soft);color:var(--accent-ink);box-shadow:none}
+.music-tools>.icon-button{flex:none;width:44px;height:44px;min-height:44px;padding:0;border-radius:50%;background:var(--card);box-shadow:0 4px 14px -8px rgba(20,40,80,.35);transition:transform .22s cubic-bezier(.3,1.6,.5,1)}
+.music-tools>.icon-button svg{width:19px;height:19px}
+.music-tools>:active{transform:scale(.95)}
+.heard-tools>.primary{flex:1.1 1 0}
+.music-caption{margin:0 4px 10px;font-size:11.5px;line-height:1.5;color:var(--ink2);opacity:.75}
+.music-filter{gap:6px;margin-bottom:12px}
+.music-filter input{min-height:40px;border:0;background:var(--card);box-shadow:0 4px 14px -10px rgba(20,40,80,.35);padding:8px 16px;font-size:15px;transition:box-shadow .2s,background .2s}
+.music-filter input:focus{box-shadow:0 0 0 2px var(--accent-soft);outline:none}
+.music-filter .secondary.small{min-height:40px;padding:0 12px;border-radius:999px;background:transparent;box-shadow:none;color:var(--accent-ink)}
+.music-filter .secondary.small:active{background:var(--accent-soft)}
+.music-row .round-button,.music-row .icon-button{background:transparent;box-shadow:none;transition:background .2s,transform .2s cubic-bezier(.3,1.6,.5,1)}
+.music-row .round-button:active,.music-row .icon-button:active{background:var(--accent-soft);transform:scale(.9)}

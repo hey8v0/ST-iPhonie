@@ -464,6 +464,15 @@ export function galleryApp(ctx) {
       }
     }
   });
+  // The 今天 page's photo widget (0.9.47): the album opens on that very photo, with the library behind it.
+  v.edit = async id => {
+    if (!id) return;
+    place = null; tab = 'all';
+    await render();
+    if (v.disposed) return;
+    if (!shown.includes(id)) shown = [...shown, id];
+    openPhoto(id);
+  };
   render().catch(e => ctx.notify(e.message));
   return v;
 }

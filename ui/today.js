@@ -32,7 +32,7 @@ export function todayPage(deps) {
     <div class="today-foot"><button type="button" class="today-edit" data-today="edit">编辑</button></div>`;
   const grid = root.querySelector('.today-grid'), results = root.querySelector('.today-results'), search = root.querySelector('[data-today-search]');
   let list = normalizeWidgets(undefined), editing = false, drag = null, press = null, swallow = 0, ticket = 0, pending = false;
-  const data = {threads: [], notes: [], photo: null, photoKey: ''};
+  const data = {threads: [], notes: [], photo: null, photoKey: '', photoId: ''};
 
   // ---------- What each widget shows ----------
   const now = () => new Date();
@@ -140,7 +140,7 @@ export function todayPage(deps) {
         const blob = pick ? (small && await previewBlob(api, pick)) || (await safe(() => api.getPhoto(pick)))?.blob : null;
         if (mine !== ticket) return;
         if (data.photo) win.URL.revokeObjectURL(data.photo);
-        data.photoKey = key; data.photo = blob ? win.URL.createObjectURL(blob) : null;
+        data.photoKey = key; data.photo = blob ? win.URL.createObjectURL(blob) : null; data.photoId = blob ? pick : '';
       }
       pickedAt = turn;
     }
@@ -259,7 +259,8 @@ export function todayPage(deps) {
     // Buttons inside (a role in 角色) are the phone's to handle.
     if (b) return;
     const app = WIDGETS[tw.dataset.kind]?.app;
-    if (app) open(app, undefined, tw);
+    // The photo widget opens the album on that photo (0.9.47; it used to open the album at its top).
+    if (app) open(app, tw.dataset.kind === 'photo' && data.photoId ? data.photoId : undefined, tw);
     else nudge(win, tw, [{transform: 'scale(1)'}, {transform: 'scale(.96)'}, {transform: 'scale(1)'}], {duration: 260, easing: 'bounce'});
   }, true);
   root.addEventListener('keydown', e => {

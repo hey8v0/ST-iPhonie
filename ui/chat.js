@@ -27,6 +27,8 @@ import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
 import {eachThumb, previewBlob} from './thumbs.js';
 import {photoWall} from './photo-wall.js';
 import {storyLinkSheet, storyLinkNote} from './story-phone.js';
+import {pickerHTML, fillPicker, bindPicker, recentOf, useRecent, pickEmoji} from './emoji-picker.js';
+import {popAt} from './msg-pop.js';
 import {remindLabel} from '../core/remind.js';
 import {petLayer} from './chat-pets.js';
 import {petStrip} from './pet-sprites.js';
@@ -68,8 +70,6 @@ const lineOf = m => ({role: m.from, emotion: m.emotion || 'calm', text: m.text, 
 const WAVE_HEIGHTS = [6, 12, 18, 10, 16, 22, 14, 8, 16, 20, 12, 7, 14, 10];
 // Dice pips on a 3×3 grid, by face.
 const PIPS = {1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8]};
-const EMOJI = ['😀', '😂', '🥹', '😭', '😊', '🥰', '😘', '😳', '🤔', '😴', '😡', '🙄', '😏', '🤗', '🥺', '😱', '👍', '👌', '🙏', '👏', '💪', '❤️', '💔', '✨', '🎉', '🌸', '☕', '🌙', '🍰', '🐱', '🐶', '🌧️'];
-const KAOMOJI = ['(｡•̀ᴗ-)✧', '(╥﹏╥)', '(๑•̀ㅂ•́)و✧', 'ヾ(≧▽≦*)o', '(〃▽〃)', '(｀へ´)', '( ˘ω˘ )zzZ', '(ﾉ>ω<)ﾉ', '(・∀・)', 'Σ(っ °Д °;)っ', '(*/ω＼*)', '(^_−)☆'];
 
 export function chatApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'chat');
@@ -546,7 +546,7 @@ export function chatApp(ctx) {
     const group = thread.type === 'group';
     const tools = [['photo', 'image', '照片'], ['emoji', 'smile', '表情'], ['redpacket', 'packet', '红包'], ...(group ? [] : [['transfer', 'swap', '转账'], ['gift', 'gift', '礼物']]),
       ['file', 'file', '文件'], ['location', 'pin', '位置'], ['song', 'music', '分享歌'], ['write', 'edit', '写首歌'], ['pat', 'hand', '拍一拍'], ['dice', 'dice', '骰子'], ...(group ? [['game', 'games', '群游戏']] : [['play', 'games', '小游戏'], ['letter', 'mail', '写信']])];
-    const tabs = `<div class="emoji-tabs" role="tablist">${[['emoji', '表情'], ['stickers', '表情包']].map(([k, t]) => `<button type="button" role="tab" data-action="panel-${k}" aria-selected="${panel === k}">${t}</button>`).join('')}</div>`;
+    const tabs = `<div class="emoji-tabs" role="tablist">${[['emoji', '表情'], ['kao', '颜文字'], ['stickers', '表情包']].map(([k, t]) => `<button type="button" role="tab" data-action="panel-${k}" aria-selected="${panel === k}">${t}</button>`).join('')}</div>`;
     if (panel === 'stickers') {
       const list = api.getState().chat.stickers || [];
       return `<div class="chat-panel emoji-panel" role="group" aria-label="表情包">${tabs}
@@ -554,9 +554,9 @@ export function chatApp(ctx) {
           : '<p class="hint sticker-empty">还没有表情包。点「管理」，从图片导入，或者粘贴「名字+图片网址」；对方也会从里面挑着发。</p>'}
         <div class="panel-foot">${btn('panel-tools', icon('back') + '更多功能', 'text-button')}${btn('stickers-manage', icon('sliders') + '管理', 'text-button')}</div></div>`;
     }
-    if (panel === 'emoji') return `<div class="chat-panel emoji-panel" role="group" aria-label="表情">${tabs}
-      <div class="emoji-grid">${EMOJI.map(e => `<button data-action="emoji-pick" data-emoji="${e}" aria-label="${e}">${e}</button>`).join('')}</div>
-      <div class="kao-row">${KAOMOJI.map(e => `<button data-action="emoji-pick" data-emoji="${esc(e)}">${esc(e)}</button>`).join('')}</div>
+    // 0.9.47: the whole emoji set and the 颜文字 by category, recent first; a tap types it in (several in a row is fine).
+    if (panel === 'emoji' || panel === 'kao') return `<div class="chat-panel emoji-panel" role="group" aria-label="${panel === 'kao' ? '颜文字' : '表情'}">${tabs}
+      ${pickerHTML(panel, {recent: recentOf(ctx.win.localStorage, panel)})}
       <div class="panel-foot">${btn('panel-tools', icon('back') + '更多功能', 'text-button')}${btn('emoji-del', icon('backspace'), 'round-button', 'aria-label="删除一个字"')}</div></div>`;
     // Pages of 8 (two rows), swiped sideways like WeChat's; the dots show the page and switch it on a tap.
     const pages = [];
@@ -679,6 +679,9 @@ export function chatApp(ctx) {
     </div>`, rowsWanted);
     const msgs = v.root.querySelector('.msgs');
     if (scene) syncMotion(v.root, ctx.win);
+    // The 表情 panel drawn with the page: its categories and the sections not drawn yet (0.9.47).
+    const composer = v.root.querySelector('.composer-wrap');
+    if (composer?.querySelector('.ep')) { bindPicker(composer, ctx.win); fillPicker(composer, ctx.win); }
     const found = target >= 0 ? [...msgs.querySelectorAll('.msg[data-mid]')].find(el => el.dataset.mid === jump) : null;
     if (found) { msgs.scrollTop += found.getBoundingClientRect().top - msgs.getBoundingClientRect().top - msgs.clientHeight / 3; found.classList.remove('msg-found'); void found.offsetWidth; found.classList.add('msg-found'); }
     else if (older) msgs.scrollTop = msgs.scrollHeight - older.fromBottom;
@@ -820,6 +823,7 @@ export function chatApp(ctx) {
     if (panel) {
       wrap.insertAdjacentHTML('beforeend', toolsHTML());
       if (!old) wrap.querySelector('.chat-panel').classList.add('enter');
+      bindPicker(wrap, ctx.win); fillPicker(wrap, ctx.win);
     }
     wrap.querySelector('[data-action=panel]')?.setAttribute('aria-expanded', String(!!panel));
     if (msgs && atBottom) msgs.scrollTop = msgs.scrollHeight;
@@ -1556,9 +1560,33 @@ export function chatApp(ctx) {
     const d = sheet('钱包', `<div class="wallet-card"><small>零钱</small><strong>¥${esc(yuan(w.balance))}</strong><span>领到的红包、收下的转账存进来；发红包、转账、买装扮和礼物从这里出。</span></div>
       <div class="actions">${btn('wallet-shop', icon('shop') + '去商城', 'secondary')}</div>
       ${groupTitle('收到的礼物')}${w.received.length ? `<div class="gift-grid received">${w.received.map(r => `<div class="gift-item"><span class="gi-emoji" aria-hidden="true">${esc(r.emoji)}</span><strong>${esc(r.name)}</strong><small>${esc(r.from)} 送的</small></div>`).join('')}</div>` : '<p class="hint">还没有收到礼物。角色送的礼物，点开收下就会放在这里。</p>'}
-      ${groupTitle('明细')}<div class="group">${w.ledger.map(e => `<div class="setting-row ledger-row"><span><strong>${esc(kinds[e.kind] || e.kind)}${e.who ? ' · ' + esc(e.who) : ''}</strong><small>${esc([e.note, when(e.at)].filter(Boolean).join(' · '))}</small></span><b class="${e.amount > 0 ? 'in' : 'out'}">${e.amount > 0 ? '+' : '−'}¥${esc(yuan(Math.abs(e.amount)))}</b></div>`).join('')}</div>`, {
-      'wallet-shop': () => { d.close(); openShop(); }
+      ${groupTitle('明细')}${w.ledger.length ? `<div class="group">${newest(w.ledger).slice(0, 5).map(e => ledgerRow(e, kinds)).join('')}${w.ledger.length > 5 ? `<button type="button" class="list-row" data-action="wallet-all"><span><strong>全部明细</strong><small>${w.ledger.length} 条，按月分开</small></span>${icon('next')}</button>` : ''}</div>` : '<p class="hint">还没有收支。</p>'}`, {
+      'wallet-shop': () => { d.close(); openShop(); },
+      'wallet-all': () => ledgerSheet(w.ledger, kinds)
     });
+  }
+  // 明细 (0.9.47): the wallet shows the five newest; the whole list is by month, each with what came in and went out,
+  // drawn a few months at a time.
+  const newest = list => list.slice().sort((a, b) => (b.at || 0) - (a.at || 0));
+  const ledgerRow = (e, kinds) => `<div class="setting-row ledger-row"><span><strong>${esc(kinds[e.kind] || e.kind)}${e.who ? ' · ' + esc(e.who) : ''}</strong><small>${esc([e.note, when(e.at)].filter(Boolean).join(' · '))}</small></span><b class="${e.amount > 0 ? 'in' : 'out'}">${e.amount > 0 ? '+' : '−'}¥${esc(yuan(Math.abs(e.amount)))}</b></div>`;
+  function ledgerSheet(ledger, kinds) {
+    const months = [];
+    for (const e of newest(ledger)) {
+      const t = new Date(e.at || 0), key = `${t.getFullYear()}-${t.getMonth()}`;
+      let m = months.at(-1);
+      if (m?.key !== key) months.push(m = {key, title: t.getFullYear() === new Date().getFullYear() ? `${t.getMonth() + 1}月` : `${t.getFullYear()}年${t.getMonth() + 1}月`, list: [], inn: 0, out: 0});
+      m.list.push(e); if (e.amount > 0) m.inn += e.amount; else m.out -= e.amount;
+    }
+    let shown = 0;
+    const d = sheet('全部明细', '', {'ledger-more': () => draw()}, {over: true});
+    function draw() {
+      const next = [];
+      for (let n = 0; shown < months.length && (n < 40 || !next.length); shown++) { next.push(months[shown]); n += months[shown].list.length; }
+      d.body.querySelector('[data-action=ledger-more]')?.remove();
+      d.body.insertAdjacentHTML('beforeend', next.map(m => `<div class="ledger-month"><h3>${esc(m.title)}</h3><small>收入 ¥${esc(yuan(m.inn))} · 支出 ¥${esc(yuan(m.out))}</small></div><div class="group">${m.list.map(e => ledgerRow(e, kinds)).join('')}</div>`).join('')
+        + (shown < months.length ? btn('ledger-more', '看更早的', 'text-button') : ''));
+    }
+    draw();
   }
   /** A decoration as it looks: the same sample the 个性装扮 chips use. */
   const decoSample = (kind, key) => `<span class="deco-sample" aria-hidden="true">${kind === 'frame' ? `<span class="me-av" style="--s:36px"><span class="avatar none" style="--s:36px"></span>${pendant(key)}</span>` : kind === 'background' ? sceneArt(key) : ''}</span>`;
@@ -1781,15 +1809,25 @@ export function chatApp(ctx) {
     const contact = m.from !== 'me', last = contact && thread.messages.at(-1)?.id === m.id;
     const copyable = ['text', 'voice', 'location', 'photo'].includes(m.kind) && quoteText(m);
     const canRecall = !contact && !['redpacket', 'transfer', 'gift'].includes(m.kind);
-    const shown = m.kind === 'voice' ? (m.translation || m.text) : m.kind === 'dice' ? `骰子 ${m.text} 点` : ['redpacket', 'transfer', 'gift'].includes(m.kind) ? preview(m) : quoteText(m);
     const voice = m.kind === 'voice', open = voice && (voiceText().auto || transcribed.has(m.id));
     const mine = m.reactions?.find(r => r.from === 'me')?.emoji || '';
-    const d = sheet('消息', `${thread.watch ? '' : `<div class="react-row" role="group" aria-label="回应">${REACTIONS.map(e => `<button type="button" data-action="react" data-emoji="${e}" aria-pressed="${mine === e}" aria-label="回应 ${e}">${e}</button>`).join('')}</div>`}${voice ? '' : `<p class="help-copy">${esc(shown)}</p>`}
-      ${voice ? `<div class="actions">${btn('transcribe', icon('book') + (open ? '收起文字' : '转文字'), 'primary')}${btn('download', icon('download') + '下载语音', 'secondary')}${ctx.routeFor(m.from)?.voice ? btn('retake', icon('refresh') + '重新配音', 'secondary') : ''}${canShareFiles(ctx.win) ? btn('share', icon('share') + '分享', 'secondary') : ''}</div>` : ''}
-      <div class="actions">${quotable(m) && !thread.watch ? btn('quote', icon('reply') + '引用', 'secondary') : ''}${copyable ? btn('copy', icon('copy') + '复制', 'secondary') : ''}${EDITABLE_KINDS.includes(m.kind) ? btn('edit', icon('edit') + '编辑', 'secondary') : ''}</div>
-      <div class="actions">${canRecall ? btn('recall', icon('undo') + '撤回', 'secondary') : ''}${btn('pick-delete', icon('check') + '多选', 'secondary')}${btn('delete', icon('trash') + '删除', 'danger')}</div>
-      ${last && live && !thread.watch ? `<div class="actions">${btn('reroll', icon('refresh') + '重新回复这一轮', 'secondary')}</div>` : ''}`, {
+    // 0.9.47: like QQ — 回应 in a row (the six from 聊天设置 → 常用回应, then 「＋」 for any emoji), the actions as small
+    // icons with a word under each, in a dark card pointing at the bubble.
+    const quick = api.getState().chat.quickReactions || REACTIONS;
+    const items = [
+      copyable && ['copy', 'copy', '复制'], quotable(m) && !thread.watch && ['quote', 'reply', '引用'],
+      voice && ['transcribe', 'book', open ? '收起文字' : '转文字'], voice && ['download', 'download', '下载'],
+      voice && ctx.routeFor(m.from)?.voice && ['retake', 'refresh', '重新配音'], voice && canShareFiles(ctx.win) && ['share', 'share', '分享'],
+      EDITABLE_KINDS.includes(m.kind) && ['edit', 'edit', '编辑'], ['pick-delete', 'check', '多选'], canRecall && ['recall', 'undo', '撤回'],
+      last && live && !thread.watch && ['reroll', 'refresh', '重新回复'], ['delete', 'trash', '删除', 'danger']].filter(Boolean);
+    const d = sheet('消息', `${thread.watch ? '' : `<div class="react-row" role="group" aria-label="回应">${quick.map(e => `<button type="button" data-action="react" data-emoji="${esc(e)}" aria-pressed="${mine === e}" aria-label="回应 ${esc(e)}">${esc(e)}</button>`).join('')}<button type="button" class="react-more" data-action="react-more" aria-label="更多表情">${icon('add')}</button></div>`}
+      <div class="mp-grid" role="group" aria-label="操作">${items.map(([key, glyph, label, tone]) => `<button type="button" class="mp-item${tone ? ' ' + tone : ''}" data-action="${key}"><span class="mp-ico">${icon(glyph)}</span><span class="mp-label">${label}</span></button>`).join('')}</div>`, {
       react: async b => { d.close(); await api.updateChatMessage(threadId, m.id, {react: {from: 'me', emoji: b.dataset.emoji}}); },
+      'react-more': async () => {
+        d.close();
+        const emoji = await pickEmoji(ctx, {title: '回应'});
+        if (emoji) await api.updateChatMessage(threadId, m.id, {react: {from: 'me', emoji}});
+      },
       transcribe: () => {
         d.close();
         if (open && voiceText().auto) { ctx.notify('语音自动转文字开着，可以在右上角「⋯ → 语音消息」里关掉'); return; }
@@ -1813,6 +1851,9 @@ export function chatApp(ctx) {
       'pick-delete': () => { d.close(); selecting = new Set(LINE_KINDS.includes(m.kind) ? [] : [m.id]); pickFor = 'delete'; panel = null; quote = null; render(); },
       reroll: async () => { d.close(); await reroll(); }
     });
+    // Over the bubble when it is on the page (not when opened from another sheet: a letter, a forwarded record…).
+    const row = [...v.root.querySelectorAll('.msg[data-mid]')].find(el => el.dataset.mid === m.id);
+    popAt(d, row?.querySelector('.m-body > :not(.m-name):not(.m-reacts)') || row?.querySelector('.m-body'), {win: ctx.win, reduced: ctx.win.matchMedia?.('(prefers-reduced-motion: reduce)').matches});
   }
   /** A message's words, the user's or a contact's: what the chat reads from here on. */
   function editMessage(m) {
@@ -2056,6 +2097,29 @@ export function chatApp(ctx) {
     api.saveChatOptions({pace: on});
     if (!on) { ctx.win.clearTimeout(pace.timer); pace.timer = 0; pace.queue = []; pace.hidden.clear(); render(); }
   }
+  /** 常用回应 (0.9.47): the six 回应 a message's menu offers first. Tap one to take it off, 「＋」 for another. */
+  function reactionsSheet(done = () => {}) {
+    const d = sheet('常用回应', '', {
+      'qr-drop': async b => { const list = (api.getState().chat.quickReactions || REACTIONS).filter(e => e !== b.dataset.emoji); api.saveChatOptions({quickReactions: list.length ? list : REACTIONS}); paint(); },
+      'qr-add': async () => {
+        const emoji = await pickEmoji(ctx, {title: '加一个常用回应', over: true});
+        if (!emoji) return;
+        const list = (api.getState().chat.quickReactions || REACTIONS).filter(e => e !== emoji);
+        if (list.length >= 6) { ctx.notify('最多 6 个：先点掉一个'); return; }
+        api.saveChatOptions({quickReactions: [...list, emoji]}); paint();
+      },
+      'qr-reset': () => { api.saveChatOptions({quickReactions: [...REACTIONS]}); paint(); }
+    }, {over: true});
+    function paint() {
+      if (!d.live) return;
+      const list = api.getState().chat.quickReactions || REACTIONS;
+      d.body.innerHTML = `<p class="hint" data-keep-hint>长按消息时最先看到的 6 个回应。点一个去掉，点「＋」从全部表情里挑。</p>
+        <div class="react-row qr-row">${list.map(e => `<button type="button" data-action="qr-drop" data-emoji="${esc(e)}" aria-label="去掉 ${esc(e)}">${esc(e)}</button>`).join('')}${list.length < 6 ? `<button type="button" class="react-more" data-action="qr-add" aria-label="加一个">${icon('add')}</button>` : ''}</div>
+        <div class="actions">${btn('qr-reset', '恢复默认', 'text-button')}</div>`;
+    }
+    paint();
+    d.onClose(() => done());
+  }
   function chatSettingsSheet() {
     const row = (action, glyph, title, sub) => `<button type="button" class="list-row" data-action="${action}">${icon(glyph)}<span><strong>${title}</strong><small>${esc(sub)}</small></span>${icon('next')}</button>`;
     const d = sheet('聊天设置', '', {
@@ -2063,13 +2127,14 @@ export function chatApp(ctx) {
       'cs-calls': () => callsSheet({over: true}),
       'cs-phone': () => bringSheet({onClose: () => { paint(); return render(); }, over: true, beforePick: () => d.close()}),
       'cs-pat': () => patSuffixSheet(() => paint(), {over: true}),
+      'cs-reacts': () => reactionsSheet(() => paint()),
       'cs-presets': () => { d.close(); ctx.open('presets'); ctx.showPresetKind?.('chat'); }
     });
     function paint() {
       if (!d.live) return;
       const s = api.getState(), c = s.chat, v = voiceText();
       d.body.innerHTML = groupTitle('回复') + `<div class="group pad">${toggle('cs-auto', '自动回复', c.autoReply === true, '打开后，你发完消息停下几秒，对方会自己回，不用点右下角的气泡；连着发好几条也行，你停下来才回。想马上让 TA 回，照样点气泡。每次回复是一次文字模型请求。')}${toggle('cs-pace', '逐条显示回复', c.pace !== false, '对方的消息像真人打字一样一条条出来；关掉就一次全显示。')}</div>`
-        + groupTitle('更多') + `<div class="group">${row('cs-voice', 'book', '语音消息', `${{translation: '显示译文', original: '显示原文', both: '原文和译文'}[v.mode] || '显示译文'}${v.auto ? ' · 自动转文字' : ''}`)}${row('cs-calls', 'phone', '来电', s.calls?.auto ? '角色会自己打来' : '角色不会自己打来')}${row('cs-phone', 'chat', '正文和手机', storyLinkNote(s, knownThreads))}${row('cs-pat', 'hand', '拍一拍后缀', profile().patSuffix ? `拍了拍你${profile().patSuffix}` : '还没有')}${row('cs-presets', 'edit', '聊天预设', '怎么回消息、朋友圈怎么发、电话里怎么说')}</div>`;
+        + groupTitle('更多') + `<div class="group">${row('cs-voice', 'book', '语音消息', `${{translation: '显示译文', original: '显示原文', both: '原文和译文'}[v.mode] || '显示译文'}${v.auto ? ' · 自动转文字' : ''}`)}${row('cs-calls', 'phone', '来电', s.calls?.auto ? '角色会自己打来' : '角色不会自己打来')}${row('cs-phone', 'chat', '正文和手机', storyLinkNote(s, knownThreads))}${row('cs-reacts', 'smile', '常用回应', (c.quickReactions || REACTIONS).join(' '))}${row('cs-pat', 'hand', '拍一拍后缀', profile().patSuffix ? `拍了拍你${profile().patSuffix}` : '还没有')}${row('cs-presets', 'edit', '聊天预设', '怎么回消息、朋友圈怎么发、电话里怎么说')}</div>`;
     }
     paint();
     d.body.addEventListener('change', e => {
@@ -2533,7 +2598,8 @@ export function chatApp(ctx) {
         openImageViewer({doc: ctx.doc, src: img.src, alt: m.text, from: img, caption: m.text, actions: [{label: '消息选项', run: () => messageMenu(m)}]});
         break;
       }
-      case 'emoji-pick': insertText(el.dataset.emoji); break;
+      case 'emoji-pick': insertText(el.dataset.emoji); useRecent(ctx.win.localStorage, el.dataset.kind || 'emoji', el.dataset.emoji); break;
+      case 'panel-kao': panel = 'kao'; syncPanel(); break;
       case 'emoji-del': deleteChar(); break;
       case 'tool-photo': panel = null; syncPanel(); await sendPhoto(); break;
       case 'tool-redpacket': panel = null; syncPanel(); sendPacket(); break;

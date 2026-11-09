@@ -169,8 +169,8 @@ export function musicApp(ctx) {
     if (!kinds.some(([k]) => k === kind)) kind = 'song';
     const found = kind === 'song' ? results : groups;
     const list = tab === 'write' ? writer.listHTML() : tab === 'heard'
-      ? (heard.length ? `<div class="actions" style="margin-top:0">${btn('play-heard', icon('play', true) + '全部播放', 'primary')}${btn('play-mixed', icon('shuffle') + '和歌单一起放', 'secondary')}${btn('heard-clear', icon('trash'), 'icon-button', 'aria-label="清空正文点的歌"')}</div>`
-        + `<p class="hint">正文点过的歌都记在这里（最新的在上面，同一首只记一次，最多 200 首）。点 + 加进歌单。</p><div class="group">${heard.map((x, i) => songRow(x, i, 'heard')).join('')}</div>`
+      ? (heard.length ? `<div class="actions music-tools heard-tools" style="margin-top:0">${btn('play-heard', icon('play', true) + '全部播放', 'primary')}${btn('play-mixed', icon('shuffle') + '和歌单一起放', 'secondary')}${btn('heard-clear', icon('trash'), 'icon-button', 'aria-label="清空正文点的歌"')}</div>`
+        + `<p class="music-caption">最新的在上面 · 同一首只记一次 · 最多 200 首 · 点 ＋ 加进歌单</p><div class="group">${heard.map((x, i) => songRow(x, i, 'heard')).join('')}</div>`
         : empty('正文还没有点过歌', '在「设置 → 背景音乐」打开点歌后，剧情每次挑的歌都会记在这里，可以再放、加进歌单。', 'music'))
       : tab === 'library'
       ? `<div class="filter-row music-shelves" role="group" aria-label="歌单">${btn('shelf', `全部 <small>${songs.length}</small>`, '', `data-shelf="" aria-pressed="${!mine}"`)}${lists.map(p => p === mine ? btn('list-menu', `${esc(p.name)} <small>${p.songs.filter(id => byId.has(id)).length}</small>${icon('more')}`, '', `data-shelf="${esc(p.id)}" aria-pressed="true" title="再点一下改名字或删掉"`) : btn('shelf', `${esc(p.name)} <small>${p.songs.filter(id => byId.has(id)).length}</small>`, '', `data-shelf="${esc(p.id)}" aria-pressed="false"`)).join('')}${btn('new-list', icon('add') + (lists.length ? '' : '新建歌单'), '', 'aria-label="新建歌单"')}</div>`

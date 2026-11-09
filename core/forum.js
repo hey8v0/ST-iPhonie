@@ -28,16 +28,16 @@ export function postLines(post, user, max = 30, label = name => who(name, user))
 /** How someone shows on the board: the user's 网名 for 'me', a character's 网名, or the name itself. */
 export const screenName = (handles = {}, user = '我') => name => name === 'me' ? handles.me || user : handles[name] || name;
 
-/** Deterministic geometric avatar; no identity or external image is embedded. */
+/**
+ * A 网名's picture (0.9.47): its first character on a soft colour that the name always gets — no one's own picture, so
+ * no one is known by it. (0.9.43 drew a pattern; the user found those ugly.)
+ */
 export function forumAvatar(handle) {
   let seed = 2166136261;
   for (const ch of String(handle)) seed = Math.imul(seed ^ ch.codePointAt(0), 16777619) >>> 0;
-  const hue = seed % 360, shapes = [];
-  for (let y = 0; y < 5; y++) for (let x = 0; x < 3; x++) {
-    if (!((seed >>> ((y * 3 + x) % 30)) & 1)) continue;
-    for (const col of x === 2 ? [2] : [x, 4 - x]) shapes.push(`<rect x="${7 + col * 10}" y="${7 + y * 10}" width="9" height="9" rx="${seed % 4}"/>`);
-  }
-  return 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="hsl(${hue} 40% 90%)"/><g fill="hsl(${hue} 60% 40%)">${shapes.join('')}</g></svg>`);
+  const hue = seed % 360, first = [...String(handle).trim()][0] || '?';
+  const glyph = first.replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'})[c]);
+  return 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="hsl(${hue} 52% 86%)"/><text x="32" y="33" text-anchor="middle" dominant-baseline="central" font-family="PingFang SC,Hiragino Sans GB,Microsoft YaHei,Noto Sans CJK SC,sans-serif" font-size="28" font-weight="700" fill="hsl(${hue} 42% 30%)">${glyph}</text></svg>`);
 }
 
 /** Bounded public feed for phone replies; callers apply the chat's card partition before passing posts. */
