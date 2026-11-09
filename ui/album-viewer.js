@@ -8,6 +8,7 @@ import {icon} from './icons.js';
 import {esc} from './common.js';
 import {openImageViewer} from '../image-viewer.js';
 import {fly} from './carry.js';
+import {zoomPoint} from './album-zoom.js';
 
 const SLIDE = 100 / 3;
 
@@ -21,7 +22,7 @@ const when = t => { const d = new Date(t), p = n => String(n).padStart(2, '0'); 
  * the photo was tapped (a rect); the picture grows out of it once it has loaded (ui/carry.js). to(id): where that
  * photo is in the grid (a rect), for a swipe down to put it back there.
  */
-export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from = null, to = null, onClose = () => {}}) {
+export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from = null, to = null, onClose = () => {}, onPage = () => {}, onHold = null, preload = false}) {
   const {doc, win} = ctx;
   let list = ids.slice(), at = Math.min(list.length - 1, Math.max(0, index)), closed = false, moving = false, chrome = true, info = false;
   const urls = new Map(), names = new Map(), infos = new Map(), details = new Map();
@@ -94,6 +95,10 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
     for (const img of slots) { img.style.transform = ''; img.style.transition = ''; }
     z = 1; zx = 0; zy = 0; root.removeAttribute('data-zoomed');
     title(); describe(); paintSwitches();
+    onPage(list[at], at);
+    if (preload) for (const i of [at - 2, at + 2]) if (list[i]) ensure(list[i]).then(() => {
+      for (const [id, url] of urls) if (Math.abs(list.indexOf(id) - at) > 2) { win.URL.revokeObjectURL(url); urls.delete(id); }
+    }).catch(() => {});
   }
   // ---------- Details: a swipe up ----------
   /** The details of the photo shown: what the sheet says. */
@@ -148,9 +153,9 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
   }
   /** To scale `next`, keeping the point (x, y) of the stage where it is. loose: a pinch may go below 1 for a moment. */
   function zoomAt(next, x, y, {loose = false, animate = false} = {}) {
-    next = Math.min(5, Math.max(loose ? .6 : 1, next));
     const r = stage.getBoundingClientRect(), cx = x - r.left - box().w / 2, cy = y - r.top - box().h / 2;
-    zx = cx - (cx - zx) * next / z; zy = cy - (cy - zy) * next / z; z = next;
+    const point = zoomPoint({z, x: zx, y: zy}, next, cx, cy, loose);
+    zx = point.x; zy = point.y; z = point.z;
     if (!loose) bound();
     paint(animate);
   }
@@ -320,10 +325,19 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
     finally { if (b.isConnected) b.disabled = false; }
   });
 
+  let holdTimer = 0;
+  if (onHold) {
+    let start;
+    stage.addEventListener('pointerdown', e => { start = [e.clientX, e.clientY]; win.clearTimeout(holdTimer); if (pointers.size <= 1) holdTimer = win.setTimeout(() => onHold(list[at]), 600); });
+    stage.addEventListener('pointermove', e => { if (start && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 10) win.clearTimeout(holdTimer); });
+    for (const name of ['pointerup','pointercancel']) stage.addEventListener(name, () => win.clearTimeout(holdTimer));
+    stage.addEventListener('contextmenu', e => e.preventDefault());
+  }
   function close() {
     if (closed) return;
     closed = true;
     win.clearTimeout(tapTimer); win.clearTimeout(wheelTimer);
+    win.clearTimeout(holdTimer);
     doc.removeEventListener('keydown', onKey, true);
     for (const url of urls.values()) win.URL.revokeObjectURL(url);
     urls.clear();
@@ -332,5 +346,5 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
   }
   fill();
   root.querySelector('[data-av=close]').focus({preventScroll: true});
-  return {close, get index() { return at; }, get id() { return list[at]; }, get open() { return !closed; }, go};
+  return {root, close, get index() { return at; }, get id() { return list[at]; }, get open() { return !closed; }, go};
 }

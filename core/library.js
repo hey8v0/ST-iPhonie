@@ -24,7 +24,7 @@ import {normalizeWidgets} from './widgets.js';
 import {normalizeBook} from './book.js';
 import {cleanTheme} from './theme-colors.js';
 export const LIBRARY_LIMITS = Object.freeze({total:256*1024*1024,photo:12*1024*1024,reference:20*1024*1024,vibe:40*1024*1024});
-export const PHONE_APPS = Object.freeze(['roles','engines','presets','library','gallery','notes','listen','settings','draw','chat','forum','peek','sounds','assistant','music','picbook','games','paint','vn','logs','indie','ledger','wardrobe','generator']);
+export const PHONE_APPS = Object.freeze(['roles','engines','presets','library','gallery','notes','listen','settings','draw','chat','forum','peek','sounds','assistant','music','picbook','games','paint','vn','logs','indie','ledger','wardrobe','generator','bookshelf']);
 export const PHONE_WALLPAPERS = Object.freeze(['sky','silver','midnight','rose','sand','aero','fresh','custom']);
 export const PHONE_SKINS = Object.freeze(['sky','aero','fresh','custom']);
 export const PHONE_GLYPHS = Object.freeze([...new Set(['default',...PHONE_APPS,'wave','book','music','camera','sliders','note','person','microphone','star','headphones'])]);

@@ -3,6 +3,7 @@ import {promptText} from './core/prompt-rules.js';
 import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, ASSISTANT_WANTS_MUSIC, assistantMusicRule, buildAssistantPrompt, normalizeAssistant, assistantHistory, assistantMeta, assistantReasoningFormat, assistantReasoningTimer, assistantThoughts, assistantWantsImage, assistantConfirmsImage, assistantDirectImage, assistantClip, assistantJoin, assistantFirstTitle, assistantTitleText} from './core/assistant.js';
 import {activeText, customRequest, streamText, responseMetadata, failure, replyText} from './core/llm.js';
 import {modelRules} from './core/state.js';
+import {promptPlan, dialogueContract} from './core/protocol.js';
 import {tavernAssistantPresets, buildTavernAssistantMessages} from './assistant-presets.js';
 import {readStoryExact} from './story-exact.js';
 import {activeChatPreset} from './core/chat.js';
@@ -278,6 +279,12 @@ export function createAssistantHost({context, settings, backend, presets = taver
       // The drawing guide (the user's own 绘图预设 and 画风) when pictures are being drawn or talked about.
       const guide = !oldImage && !cardText && backend.drawReady?.() && (drawing || wants || assistantTalksPictures(historyMessages)) ? assistantDrawGuide(s) : '';
       const rules = [...chosen.rules.filter(r => r.content.trim()), {role: 'system', content: promptText(s.promptRules, 'assistant', 'images')}, ...(guide ? [{role: 'system', content: guide}] : []), ...(s.assistant.visuals !== false && !oldImage && !cardText ? [{role: 'system', content: promptText(s.promptRules, 'assistant', 'visuals')}] : [])];
+      // Voice is a reply capability, independent of the selected assistant preset and story reference cleanup.
+      if (!drawing && s.general.voiceEnabled !== false) {
+        const engineRules = modelRules(s), format = backend.voiceFormat();
+        const parts = [...promptPlan(s, engineRules).map(p => p.text), dialogueContract(format), engineRules];
+        rules.push({role: 'system', content: promptText(s.promptRules, 'assistant', 'voice', {'引擎规则': [...new Set(parts.filter(Boolean))].join('\n\n')})});
+      }
       // 放歌: the phone's 音乐 plays what the reply names; the 歌单 is told only when the user talks about music.
       if (!oldImage && !cardText) {
         const said = String(historyMessages.findLast(m => m.role === 'user')?.text || ''), asked = ASSISTANT_WANTS_MUSIC.test(said) || /歌|音乐|曲/.test(said);

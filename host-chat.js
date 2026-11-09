@@ -122,7 +122,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   /** nudge: 主动找你 — the contact may also choose not to text (null then), and no 正在输入 shows meanwhile. */
   /** reroll: 重新回复这一轮 — the last round is asked again as if it were not there, and is replaced only when the new one
    *  came (it stays among the round's versions); one that fails or is stopped changes nothing. */
-  function reply(threadId, {nudge = false, reroll = false, cue = '', time = 0, outfit = ''} = {}) {
+  function reply(threadId, {nudge = false, reroll = false, cue = '', time = 0, outfit = '', reading = ''} = {}) {
     if (busy.has(threadId)) return busy.get(threadId);
     const controller = new AbortController(), signal = controller.signal;
     const job = (async () => {
@@ -167,7 +167,12 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
       const privateChats = thread.type === 'group' && promptOn(s.promptRules, 'knows') ? await memberChats(people, preset, query, user) : '';
       const request = pics => buildChatRequest({exact: exact?.available ? exact.messages : [], prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, privateChats, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), nudge, cue, time: time || Date.now(), statuses: statusesOf(people), peeked: peekedNow ? peekedNow.what || true : '', posts, outfit, pats: Object.fromEntries(people.map(p => [p.name, suffixOf(p.name)]).filter(([, s]) => s)), music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
-      const answer = cleanTagged(await answerFor(ctx, request, await pictures(ctx, thread, preset), signal), preset.cleanTags);
+      const readingRequest = pics => {
+        const messages = request(pics);
+        if (reading) messages.splice(messages.length - 1, 0, {role: 'system', content: String(reading).slice(0, 6000)});
+        return messages;
+      };
+      const answer = cleanTagged(await answerFor(ctx, readingRequest, await pictures(ctx, thread, preset), signal), preset.cleanTags);
       // 停止 while it was being written: what comes late is let go (the tavern's own generation cannot be stopped).
       if (signal.aborted) throw stopped();
       // The peek was told (whatever they made of it): not again.

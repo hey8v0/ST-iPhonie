@@ -47,6 +47,7 @@ import { Providers, buildRequest } from './providers.js';
 import { AudioCache } from './cache.js';
 import { installDrawSettings, sweepRoleRefs } from './backend-draw.js';
 import { installSongs, songFacade } from './backend-song.js';
+import {BookshelfStore} from './bookshelf.js';
 import { SONG_KEYS } from './song-engines.js';
 import { createStorageBudget } from './storage-budget.js';
 import { DialoguePlayer } from './player.js';
@@ -182,6 +183,7 @@ export class TTSBackend {
         // 音效 (core/sounds.js): the sound library and the names the story asked for that it has none of. Its own database: big.
         this.sounds = new AppStore(this.settings.scope, { indexedDB, database: 'st-iphonie-sounds-v1' });
         this.music = new AppStore(this.settings.scope, { indexedDB, database: 'st-iphonie-music-v1' });
+        this.bookshelf = new BookshelfStore(this.settings.scope, {indexedDB});
         // 画画的作品: the phone draws in them; here they are only read and put back (backups, 保存到酒馆).
         this.paintWorks = paintStore({ indexedDB });
         this.ledger = new Ledger({ store: this.apps, device: () => this.#device() });
@@ -248,6 +250,11 @@ export class TTSBackend {
     // ---------- The apps' own rows in a backup and in 保存到酒馆 ----------
     partStore(part) { return part === 'music' ? this.music : part === 'sounds' ? this.sounds : this.apps; }
     async partRows(part) {
+        if (part === 'bookshelf') {
+            const out = [];
+            for (const row of await this.bookshelf.list()) { const file = await this.bookshelf.files.get(row.id); if (file?.blob) out.push({...row, blob: file.blob, cover: file.cover}); }
+            return out;
+        }
         if (part === 'paint') return this.paintWorks.all();
         if (part === 'ledger') await this.ledger.flush();
         if (part === 'ledger' || part === 'peek' || part === 'looks' || part === 'albums' || part === 'wardrobe' || part === 'theater') return this.apps.listFrom(part + ':');
@@ -259,6 +266,16 @@ export class TTSBackend {
      * what the app needs to show them. replace: this part's rows now are only these; merge: makes the list when it is written.
      */
     async putPartRows(part, rows, { replace = false, merge } = {}) {
+        if (part === 'bookshelf') {
+            const clean = rows.filter(r => r?.kind === 'reading' && typeof r.id === 'string' && r.id.startsWith('reading:') && Array.isArray(r.chapters) && typeof r.blob?.arrayBuffer === 'function');
+            for (const row of clean) {
+                const {blob, cover, ...meta} = row;
+                await this.bookshelf.files.put([{id: row.id, kind: 'reading-file', at: row.at, blob, cover}]);
+                await this.bookshelf.meta.put([meta]);
+            }
+            if (replace) for (const row of await this.bookshelf.list()) if (!clean.some(r => r.id === row.id)) await this.bookshelf.remove(row.id);
+            return clean.length;
+        }
         if (part === 'paint') return this.paintWorks.importWorks(rows.filter(row => row && typeof row.id === 'string' && Array.isArray(row.layers)), { replace });
         const kinds = PART_KINDS[part], fileBacked = row => row.kind === 'sound' || row.kind === 'look' || (row.kind === 'song' && row.origin !== 'source');
         const clean = rows.filter(row => row && typeof row.id === 'string' && kinds.includes(row.kind) && (merge || !fileBacked(row) || typeof row.blob?.arrayBuffer === 'function')), ids = new Set(clean.map(row => row.id));
@@ -408,7 +425,7 @@ export class TTSBackend {
         for (const part of ROW_PARTS) {
             if (!want.has(part === 'albums' ? 'photos' : part) || !backup.rows[part]) continue;
             done[part] = await this.putPartRows(part, backup.rows[part], { replace });
-            this.reviveSync(part, backup.rows[part].map(row => String(row?.id)));
+            if (part !== 'bookshelf') this.reviveSync(part, backup.rows[part].map(row => String(row?.id)));
             this.partsChanged(part);
         }
         if (keys) { let count = 0; for (const [engine, key] of Object.entries(keys)) { try { this.setKey(engine, key); count++; } catch { /* an engine this version does not know */ } } done.keys = count; }
@@ -3576,6 +3593,12 @@ export class TTSBackend {
     }
     api() {
         const methods = {
+            listReadingBooks: () => this.bookshelf.list(),
+            getReadingBook: id => this.bookshelf.get(String(id)),
+            readingBookFile: id => this.bookshelf.files.get(String(id)),
+            addReadingBook: (data, blob, cover) => this.bookshelf.add(clone(data), blob, cover),
+            updateReadingBook: (id, patch) => this.bookshelf.update(String(id), clone(patch)),
+            deleteReadingBook: id => this.bookshelf.remove(String(id)),
             reportDiagnostic: (source, detail, level) => this.reportDiagnostic(source, detail, level),
             backupCounts: () => this.backupCounts(), paintChanged: gone => this.paintChanged(clone(gone || [])),
             ledgerDays: (from, to) => this.ledger.days(from, to), clearLedger: async () => { this.noteGone('ledger', await this.ledger.clear()); },
@@ -3745,6 +3768,7 @@ export class TTSBackend {
         this.sounds.close();
         this.stopSongs();
         this.music.close();
+        this.bookshelf.close();
         this.drawQueue.cancelAll();
         // The 账本 writes what is waiting first: it keeps its numbers with the apps.
         this.closing = Promise.all([this.ledger.close().finally(() => this.apps.close()), this.player.close(), this.cache.close(), this.library.close(), Promise.resolve(this.keyStore.flush?.()).then(() => this.keyStore.close?.())]);

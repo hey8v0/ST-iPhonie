@@ -628,6 +628,12 @@ export type BackendEvent =
 
 /** Framework-independent facade. Methods may throw validation/lifecycle errors. */
 export interface BackendFacade {
+    listReadingBooks(): Promise<any[]>;
+    getReadingBook(id: string): Promise<any>;
+    readingBookFile(id: string): Promise<any>;
+    addReadingBook(data: any, blob: Blob, cover?: Blob): Promise<any>;
+    updateReadingBook(id: string, patch: any): Promise<any>;
+    deleteReadingBook(id: string): Promise<void>;
     getRequestLogs(): Array<{id: string; at: number; source: string; level: 'info' | 'warn' | 'error'; state: string; duration?: number; request: unknown; response?: unknown}>;
     clearRequestLogs(): void;
     reportDiagnostic(source: string, detail: Record<string, unknown>, level?: 'info' | 'warn' | 'error'): void;
@@ -1231,7 +1237,7 @@ export interface BackendAPI extends BackendFacade {
     /** A picture the chat asked to open in the drawing app, if any. */
     takeDraw(): (DrawInput & { tag?: string; seed?: number }) | null;
     /** Generates the contacts' next messages with the tavern's connected model and stores them. */
-    chatReply(threadId: string): Promise<ChatThread>;
+    chatReply(threadId: string, options?: {reading?: string}): Promise<ChatThread>;
     /** Draws a contact's photo from its tags (allowPaid: even when it costs Anlas); resolves to the photo id. */
     chatDrawPhoto?(threadId: string, messageId: string, allowPaid?: boolean): Promise<string | null>;
     /** Prepares chat messages to be injected once into the next story reply. */

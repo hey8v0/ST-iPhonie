@@ -1,5 +1,30 @@
 /* ST-iPhonie phone UI - "晴空贴纸" style. Colour tokens first, then shell, shared components, apps. */
 
+/* Imported books: quiet shelves, paper and edge-to-edge reading. */
+.reading-caption{color:var(--ink2);font-size:12px;margin:0 0 24px}
+.reading-local{margin:28px 0 10px;text-align:center;opacity:.7}
+.reading-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px 22px;padding:0 4px}
+.reading-cover{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;width:100%;aspect-ratio:2/3;padding:22px 16px;border:0;border-radius:2px 7px 7px 2px;background:linear-gradient(90deg,#0002,transparent 6%,#fff2 9%,transparent 12%),hsl(var(--book-hue) 28% 76%);color:#283b37;box-shadow:3px 8px 12px #0002;text-align:left;overflow:hidden;transition:transform .3s var(--spring-soft)}
+.reading-cover:active{transform:scale(.96) rotate(-1deg)}
+.reading-cover>span{font-family:serif;font-size:25px;line-height:1.45;writing-mode:vertical-rl;max-height:75%;letter-spacing:3px}.reading-cover small{font-size:10px;letter-spacing:2px}.reading-cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.reading-title{display:flex;align-items:center;margin-top:10px;gap:4px}.reading-title strong{font-size:13px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;flex:1}.reading-title button{border:0;background:none;color:var(--ink2);padding:5px}.reading-title svg{width:20px;height:20px}.reading-tile>small{font-size:10px;color:var(--ink2)}
+.view[data-app=bookshelf][data-reading]{padding:0;overflow:hidden}
+.reading-reader{--paper:#f9f6ef;--print:#33352f;position:absolute;inset:0;display:flex;flex-direction:column;background:var(--paper);color:var(--print);overflow:hidden}
+:root[data-theme=dark] .reading-reader,[data-theme=dark] .reading-reader{--paper:#202322;--print:#c4c7bf}
+.reading-reader[data-paper=white]{--paper:#fff;--print:#292c29}.reading-reader[data-paper=cream]{--paper:#f4ead3;--print:#4c4436}.reading-reader[data-paper=green]{--paper:#dce7d8;--print:#354638}.reading-reader[data-paper=night]{--paper:#202322;--print:#c4c7bf}
+:root[data-theme] .reading-reader[data-paper=white]{--paper:#fff;--print:#292c29}:root[data-theme] .reading-reader[data-paper=cream]{--paper:#f4ead3;--print:#4c4436}:root[data-theme] .reading-reader[data-paper=green]{--paper:#dce7d8;--print:#354638}:root[data-theme] .reading-reader[data-paper=night]{--paper:#202322;--print:#c4c7bf}
+.reading-comic-progress{position:absolute;bottom:84px;left:8%;width:84%;z-index:4;accent-color:#b7bba8}.album-viewer[data-chrome=off] .reading-comic-progress{opacity:0;pointer-events:none}
+.reading-bar{display:flex;align-items:center;gap:12px;padding:8px 12px;height:48px;flex:none;font-size:12px;transition:opacity .25s}
+.reading-bar span{flex:1;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-align:center;opacity:.6}.reading-bar button{border:0;background:none;color:inherit;padding:8px}.reading-bar svg{width:20px;height:20px}
+.reading-page{flex:1;min-height:0;overflow:hidden;margin:10px var(--read-margin) 12px;touch-action:pan-y;outline:none}
+.reading-content{height:100%;column-width:auto;column-count:1;column-gap:0;column-fill:auto;font-size:var(--read-size);font-family:var(--read-font);line-height:var(--read-line);transition:transform .3s ease;overflow-wrap:break-word;user-select:text;-webkit-user-select:text}
+.reading-content p{margin:0 0 1em;text-indent:2em}.reading-content h1,.reading-content h2{font-size:1.25em;margin:0 0 1.2em}.reading-content img{max-width:100%;max-height:100%;object-fit:contain;break-inside:avoid}.reading-bottom{padding:4px 22px 16px;flex:none;transition:opacity .25s}.reading-bottom>small{display:block;text-align:center;font-size:10px;opacity:.6}.reading-bottom>input{width:100%;height:20px;accent-color:#869282}.reading-bottom nav{display:flex;justify-content:space-between}.reading-bottom button{background:none;border:0;color:inherit;padding:10px;font-size:12px}
+.reading-hidden .reading-bar,.reading-hidden .reading-bottom{opacity:0;pointer-events:none}
+.reading-reader[data-mode=scroll] .reading-page{overflow-y:auto}.reading-reader[data-mode=scroll] .reading-content{height:auto;columns:auto;transform:none!important;transition:none}
+.reading-toc{display:flex;flex-direction:column}.reading-toc button{border:0;background:none;color:var(--ink);text-align:left;padding:14px 4px;border-bottom:1px solid var(--line)}.reading-toc [aria-current]{color:var(--accent-ink)}
+.reading-note{position:absolute;right:12px;top:28%;max-width:155px;background:var(--card);color:var(--ink);border:0;border-radius:14px 14px 3px 14px;padding:12px;font-size:12px;box-shadow:0 4px 18px #0002;z-index:5}
+.reading-chat{height:30vh;overflow:auto;display:flex;flex-direction:column;gap:12px}.reading-chat p{align-self:flex-start;max-width:88%;margin:0;padding:10px 13px;background:var(--card2);border-radius:12px;font-size:13px}.reading-chat .reading-mine{align-self:flex-end;background:var(--accent-soft)}.reading-chat small{display:block;opacity:.5;font-size:10px;margin-bottom:4px}.reading-chat blockquote{font-size:11px;opacity:.65;margin:4px 0;padding-left:6px;border-left:2px solid currentColor}.reading-compose{display:flex;gap:10px;margin-top:16px}.reading-compose input{flex:1;min-width:0}.reading-compose button{border:0;border-radius:12px;background:var(--accent-btn);color:var(--on-accent);padding:10px 16px}
+
 /* ---------- Tokens ---------- */
 :root{
   color-scheme:light;
@@ -3133,3 +3158,12 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .music-filter .secondary.small:active{background:var(--accent-soft)}
 .music-row .round-button,.music-row .icon-button{background:transparent;box-shadow:none;transition:background .2s,transform .2s cubic-bezier(.3,1.6,.5,1)}
 .music-row .round-button:active,.music-row .icon-button:active{background:var(--accent-soft);transform:scale(.9)}
+/* 0.9.48 · 一起看: bubbles that hold a quote (a <div>: a <p> cannot), a short quote, a compose row like the chat's. */
+.reading-chat .reading-msg{align-self:flex-start;max-width:86%;padding:9px 12px;border-radius:16px 16px 16px 5px;background:var(--card);box-shadow:0 4px 14px -10px rgba(20,40,80,.4);font-size:13.5px;line-height:1.55}
+.reading-chat .reading-msg.reading-mine{align-self:flex-end;border-radius:16px 16px 5px 16px;background:var(--accent-soft);color:var(--accent-ink)}
+.reading-chat .reading-msg blockquote{margin:2px 0 6px;padding:0 0 0 8px;border-left:2px solid currentColor;opacity:.6;font-size:11.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sheet-body>blockquote{margin:8px 0 0;padding:0 0 0 10px;border-left:2px solid var(--accent-btn);font-size:12px;color:var(--ink2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.reading-compose{display:flex;gap:8px;align-items:center;margin-top:12px}
+.reading-compose input{flex:1;min-width:0;min-height:44px;padding:0 16px;border:0;border-radius:999px;background:var(--card);box-shadow:0 4px 14px -10px rgba(20,40,80,.4);color:var(--ink);font:inherit;font-size:16px}
+.reading-compose input:focus{outline:none;box-shadow:0 0 0 2px var(--accent-soft)}
+.reading-compose .primary{min-height:44px;padding:0 18px}

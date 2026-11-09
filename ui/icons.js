@@ -8,6 +8,7 @@ const gear = (() => {
 })();
 
 const GLYPHS = {
+  bookshelf: '<rect x="9" y="12" width="12" height="39" rx="2"/><rect x="25" y="8" width="12" height="43" rx="2"/><path d="m40 15 9-3 11 36-10 3z" fill="var(--tac)"/><path d="M6 55h54M13 21h4M29 17h4" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
   indie: '<g transform="translate(0 -2)"><path d="M18 24h28c6 0 10 5 11 11l3 15c1 6-5 9-9 5l-9-9H22l-9 9c-4 4-10 1-9-5l3-15c1-6 5-11 11-11z"/><path d="M18 30v12M12 36h12" fill="none" stroke="var(--t2)" stroke-width="4" stroke-linecap="round"/><circle cx="43" cy="32" r="3" fill="var(--tac)"/><circle cx="50" cy="39" r="3" fill="var(--tac)"/><path d="m34 5 2.4 6.6L43 14l-6.6 2.4L34 23l-2.4-6.6L25 14l6.6-2.4z" fill="var(--tac)"/><path d="m16 8 1.2 3.8L21 13l-3.8 1.2L16 18l-1.2-3.8L11 13l3.8-1.2z"/></g>',
   logs: '<rect x="7" y="10" width="50" height="44" rx="7"/><path d="m17 23 8 7-8 7M32 39h14" fill="none" stroke="var(--t2)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="48" cy="19" r="3" fill="var(--tac)"/>',
   assistant: '<path d="M9 12h46v33H32L19 55V45H9z"/><path d="M23 26v5M41 26v5M27 36q5 4 10 0" fill="none" stroke="var(--t2)" stroke-width="3" stroke-linecap="round"/><path d="M48 5l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="var(--tac)"/>',
@@ -57,6 +58,8 @@ export function glyph(key) {
 }
 
 const LINES = {
+  settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2',
+  plus: 'M12 5v14M5 12h14',
   gift: 'M4 11h16v9H4zM3 7h18v4H3zM12 7v13M12 7C10.5 4 7 3.5 7 6s3 1 5 1m0 0c1.5-3 5-3.5 5-1s-3 1-5 1', wallet: 'M4 7h15a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 7l12-3v3M15 13.5h2', shop: 'M5 8h14l-1.2 12H6.2zM9 10V6a3 3 0 0 1 6 0v4',
   hanger: 'M9.6 6.2a2.4 2.4 0 1 1 2.4 2.4V10M12 10l-8.6 6.1A1.5 1.5 0 0 0 4.3 18.8h15.4a1.5 1.5 0 0 0 .9-2.7z',
   grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',

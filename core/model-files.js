@@ -82,7 +82,7 @@ const atMost = most => { let total = 0; return new TransformStream({transform(ch
  * zip, a deflated one is unpacked then, never into more than the zip says it holds. Folders and macOS leftovers are
  * left out; a password, another method or zip64 is an error that says so.
  */
-export async function readZipBlob(zip) {
+export async function readZipBlob(zip, {cache = true} = {}) {
   const at = async (from, n) => new Uint8Array(await zip.slice(from, from + n).arrayBuffer());
   const from = Math.max(0, zip.size - 65557), tail = await at(from, zip.size - from);
   let end = -1;
@@ -109,7 +109,7 @@ export async function readZipBlob(zip) {
       if (typeof DecompressionStream !== 'function') throw Error('这个浏览器解不开压缩过的 zip：用「存储」方式重新压缩，或者直接选歌');
       return new Response(data.stream().pipeThrough(new DecompressionStream('deflate-raw')).pipeThrough(atMost(length))).blob();
     };
-    files.set(path, {size: length, blob: () => made ??= open()});
+    files.set(path, {size: length, blob: () => cache ? made ??= open() : open()});
   }
   return files;
 }

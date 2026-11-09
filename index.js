@@ -455,7 +455,7 @@ function connect(source){
   planLatestPictures:()=>{check();return pictures.planLatest();},planLatestVoice:()=>{check();return pictures.voiceLatest();},
   clearChatPictures:()=>{check();return pictures.clearPictures();},
   takeDraw:()=>{check();const value=pendingDraw;pendingDraw=null;return value;},
-  chatReply:threadId=>{check();return chats.reply(threadId);},chatReroll:threadId=>{check();return chats.reroll(threadId);},bubbleRewrite:options=>{check();return chats.bubbleRewrite(options||{});},drawRoleSticker:options=>{check();return chats.drawRoleSticker(options||{});},chatCancel:threadId=>{check();chats.cancel(threadId);},
+  chatReply:(threadId,options)=>{check();return chats.reply(threadId,{reading:String(options?.reading||'').slice(0,6000)});},chatReroll:threadId=>{check();return chats.reroll(threadId);},bubbleRewrite:options=>{check();return chats.bubbleRewrite(options||{});},drawRoleSticker:options=>{check();return chats.drawRoleSticker(options||{});},chatCancel:threadId=>{check();chats.cancel(threadId);},
   chatDrawPhoto:(threadId,messageId,allowPaid)=>{check();return chats.drawPhoto(threadId,messageId,{allowPaid:allowPaid===true});},
   chatBring:(threadId,ids)=>{check();return chats.bring(threadId,ids);},
   chatPendingBring:()=>{check();return chats.pendingBring();},
