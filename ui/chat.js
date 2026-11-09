@@ -275,7 +275,7 @@ export function chatApp(ctx) {
   async function renderContactsTab(ticket) {
     const [threads] = await Promise.all([api.listThreads(), counts()]);
     if (v.disposed || ticket !== epoch) return;
-    const cut = threads.filter(t => t.type === 'dm' && t.friend?.by === 'me'), away = new Set(cut.map(t => t.members[0]));
+    const cut = threads.filter(t => t.type === 'dm' && t.friend?.by === 'me' && stillHere(t.members[0])), away = new Set(cut.map(t => t.members[0]));
     const contacts = api.chatContacts().filter(c => !away.has(c.name)), stars = starred(), groups = threads.filter(t => t.type === 'group' && currentWindow(threads, t)?.id === t.id);
     const blockedAsks = threads.filter(t => t.type === 'dm' && t.blocked?.requests?.length && t.friend?.by !== 'me');
     const asks = cut.reduce((n, t) => n + (t.friend.requests?.length || t.blocked?.requests?.length ? 1 : 0), 0) + blockedAsks.length;
@@ -325,11 +325,13 @@ export function chatApp(ctx) {
       <div class="actions">${blocked ? btn('unblock', '移出黑名单', 'secondary', `data-id="${esc(dm.id)}"`) : btn('block', '加入黑名单', 'secondary')}${btn('unfriend', '删除好友', 'danger')}</div>`);
     listeningOf(c.name).then(song => { const box = v.root.querySelector('.qq-card'); if (!song || !box || profileOf !== c.name || mode !== 'profile') return; box.insertAdjacentHTML('beforeend', `<button type="button" class="qq-listening" data-action="play-song" data-title="${esc(song.title)}" data-artist="${esc(song.artist)}">${icon('music')}<span>最近在听：${esc(song.title)}${song.artist ? ' - ' + esc(song.artist) : ''}</span></button>`); }).catch(() => {});
   }
+  // 0.9.49: someone deleted in the 角色 App (or a contact removed) is gone from 新的朋友 too; their old chat stays as it was.
+  const stillHere = name => (api.chatContacts?.(true) || []).some(c => c.name === name);
   /** 新的朋友: contacts the user deleted, and 好友申请 from them or from someone blocked; 通过 or 拒绝 (添加 with none). */
   async function renderFriends(ticket) {
     const threads = await api.listThreads();
     if (v.disposed || ticket !== epoch) return;
-    const cut = threads.filter(t => t.type === 'dm' && t.friend?.by === 'me'), blocked = threads.filter(t => t.type === 'dm' && t.blocked?.requests?.length && t.friend?.by !== 'me');
+    const cut = threads.filter(t => t.type === 'dm' && t.friend?.by === 'me' && stillHere(t.members[0])), blocked = threads.filter(t => t.type === 'dm' && t.blocked?.requests?.length && t.friend?.by !== 'me' && stillHere(t.members[0]));
     if (!cut.length && !blocked.length) { mode = 'list'; tab = 'contacts'; return render(); }
     const row = t => {
       const name = t.members[0], asks = [...(t.friend?.requests || []), ...(t.blocked?.requests || [])], last = asks.at(-1), state = t.blocked ? '已拉黑' : '已删除';
@@ -2434,6 +2436,43 @@ export function chatApp(ctx) {
     press = null;
   };
   for (const type of ['pointermove', 'pointerup', 'pointercancel']) v.on(type, '*', cancelPress);
+  // 左滑引用 (0.9.49, like QQ): drag a bubble to the left and it follows with a 引用 arrow coming in; let go past the
+  // mark and the message is quoted under the box. Up and down stays the list's scroll (touch-action: pan-y on bubbles).
+  let swipe = null, swipedAt = 0;
+  // The click a swipe ends with is not a tap (it would play a voice message or open a picture).
+  v.root.addEventListener('click', e => { if (Date.now() - swipedAt < 350 && e.target.closest?.('.msg[data-mid]')) { e.preventDefault(); e.stopPropagation(); } }, true);
+  v.on('pointerdown', '.msg[data-mid] .m-body', (el, e) => {
+    if (selecting || e.button > 0 || thread?.watch) return;
+    swipe = {row: el.closest('.msg'), x: e.clientX, y: e.clientY, dx: 0, on: false};
+  });
+  v.on('pointermove', '*', (el, e) => {
+    if (!swipe) return;
+    const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+    if (!swipe.on) {
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; }
+      if (dx > -10 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
+      swipe.on = true; swipe.row.dataset.swiping = '';
+    }
+    // Follows the finger to 64 px, then only a little more (rubber band).
+    const pull = Math.min(0, dx), shown = pull > -64 ? pull : -64 + (pull + 64) * .25;
+    swipe.dx = pull;
+    swipe.row.style.setProperty('--swipe', `${shown}px`);
+    swipe.row.style.setProperty('--swipe-p', String(Math.min(1, -pull / 52)));
+    swipe.row.toggleAttribute('data-swipe-ready', pull <= -52);
+  });
+  const endSwipe = () => {
+    if (!swipe) return;
+    const {row, dx, on} = swipe;
+    swipe = null;
+    if (!on) return;
+    row.removeAttribute('data-swiping'); row.removeAttribute('data-swipe-ready');
+    row.style.removeProperty('--swipe'); row.style.removeProperty('--swipe-p');
+    pressedAt = swipedAt = Date.now();
+    const m = dx <= -52 && thread?.messages.find(x => x.id === row.dataset.mid);
+    if (m && quotable(m)) { quote = {from: m.from, text: quoteText(m).slice(0, 200)}; panel = null; render(); v.root.querySelector('[data-field=draft]')?.focus({preventScroll: true}); }
+  };
+  v.on('pointerup', '*', endSwipe);
+  v.on('pointercancel', '*', endSwipe);
   v.on('contextmenu', '.msg[data-mid]', (el, e) => {
     if (Date.now() - pressedAt < 1000) { e.preventDefault(); return; }
     if (selecting) return;

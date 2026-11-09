@@ -356,3 +356,9 @@
 .ledger-month:first-child{margin-top:4px}
 .ledger-month h3{margin:0;font-size:15px;font-weight:900}
 .ledger-month small{font-size:11px;color:var(--ink2)}
+/* 0.9.49 · bubbles: a long press is the menu, never a text selection (复制 is in the menu); 左滑引用 like QQ. */
+.msg[data-mid] .m-body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:pan-y;transition:transform .32s cubic-bezier(.25,1.45,.45,1)}
+.msg[data-mid]{position:relative}
+.msg[data-swiping] .m-body{transform:translateX(var(--swipe,0px));transition:none}
+.msg[data-swiping]::after{content:"";position:absolute;right:10px;top:50%;width:30px;height:30px;margin-top:-15px;border-radius:50%;background:var(--accent-soft) no-repeat center/16px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232f6fd6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 14 4 9l5-5'/%3E%3Cpath d='M4 9h10a6 6 0 0 1 6 6v4'/%3E%3C/svg%3E");opacity:var(--swipe-p,0);transform:scale(.7);transition:transform .2s cubic-bezier(.3,1.6,.5,1)}
+.msg[data-swipe-ready]::after{transform:scale(1.08)}

@@ -22,7 +22,7 @@ const when = t => { const d = new Date(t), p = n => String(n).padStart(2, '0'); 
  * the photo was tapped (a rect); the picture grows out of it once it has loaded (ui/carry.js). to(id): where that
  * photo is in the grid (a rect), for a swipe down to put it back there.
  */
-export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from = null, to = null, onClose = () => {}, onPage = () => {}, onHold = null, preload = false}) {
+export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from = null, to = null, onClose = () => {}, onPage = () => {}, onHold = null, preload = false, onPullDown = null}) {
   const {doc, win} = ctx;
   let list = ids.slice(), at = Math.min(list.length - 1, Math.max(0, index)), closed = false, moving = false, chrome = true, info = false;
   const urls = new Map(), names = new Map(), infos = new Map(), details = new Map();
@@ -263,6 +263,8 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
     if (d.lift) {
       const dy = e.clientY - d.y0, fast = Math.abs(dy) / Math.max(1, Date.now() - d.t0) > .5;
       const far = e.type === 'pointerup' && (Math.abs(dy) > 100 || (fast && Math.abs(dy) > 40));
+      // onPullDown (书架's comics, 0.9.49): a swipe down does that instead of putting the page away (it was too easy to leave by mistake).
+      if (far && dy > 0 && !info && onPullDown) { unlift(); onPullDown(list[at]); return; }
       if (far && dy > 0 && !info) return dismiss();
       unlift();
       if (far) setInfo(dy < 0);

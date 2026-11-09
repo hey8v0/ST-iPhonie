@@ -3167,3 +3167,43 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .reading-compose input{flex:1;min-width:0;min-height:44px;padding:0 16px;border:0;border-radius:999px;background:var(--card);box-shadow:0 4px 14px -10px rgba(20,40,80,.4);color:var(--ink);font:inherit;font-size:16px}
 .reading-compose input:focus{outline:none;box-shadow:0 0 0 2px var(--accent-soft)}
 .reading-compose .primary{min-height:44px;padding:0 18px}
+/* 0.9.49 · 书架 like a bookshelf: books standing on wooden planks, their names on the edge below; a 继续读 card. */
+.bs-chips{margin-top:2px}
+.bs-continue{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 18px;padding:12px 14px;border-radius:20px;background:var(--card);box-shadow:0 10px 24px -16px rgba(20,40,80,.5);text-align:left;transition:transform .25s cubic-bezier(.3,1.5,.5,1)}
+.bs-continue:active{transform:scale(.98)}
+.bs-continue>svg{flex:none;width:18px;height:18px;color:var(--ink2)}
+.bs-mini{flex:none;width:44px;height:62px;border-radius:2px 6px 6px 2px;background:hsl(var(--book-hue) 38% 70%) center/cover;box-shadow:inset 3px 0 0 rgba(0,0,0,.14),0 6px 12px -6px rgba(40,25,10,.5)}
+.bs-go{display:flex;flex-direction:column;min-width:0;flex:1}
+.bs-go small{font-size:11px;color:var(--ink2)}
+.bs-go small:first-child{color:var(--accent-ink);font-weight:800;letter-spacing:.06em}
+.bs-go strong{font-size:16px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bs-shelves{padding:4px 0 8px}
+.bs-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:end;padding:0 12px}
+.bs-book{position:relative;aspect-ratio:2/3;padding:0;border-radius:2px 7px 7px 2px;overflow:hidden;background:hsl(var(--book-hue) 34% 74%);box-shadow:inset 4px 0 0 rgba(0,0,0,.12),inset 9px 0 8px -6px rgba(255,255,255,.4),0 10px 14px -8px rgba(40,25,10,.6);transform-origin:50% 100%;transition:transform .28s cubic-bezier(.3,1.5,.5,1)}
+.bs-book:active{transform:translateY(-6px) rotate(-1.5deg)}
+.bs-face{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;padding:12px 9px 10px 13px;background:center/cover no-repeat;color:hsl(var(--book-hue) 40% 20%);text-align:left}
+.bs-face.pic>*{visibility:hidden}
+.bs-title{font-family:var(--read-font,serif);font-size:13px;font-weight:800;line-height:1.35;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.bs-face small{font-size:9.5px;opacity:.7}
+.bs-progress{position:absolute;left:0;bottom:0;height:3px;width:var(--p);background:var(--accent-btn);box-shadow:0 0 6px var(--accent-btn)}
+.bs-plank{height:12px;margin:-1px 4px 0;border-radius:3px;background:linear-gradient(180deg,#e2c29b,#c19466 55%,#a3774d);box-shadow:0 12px 16px -10px rgba(70,40,15,.6),inset 0 1px 0 rgba(255,255,255,.45)}
+[data-theme=dark] .bs-plank{background:linear-gradient(180deg,#7a5a3f,#5a4029 55%,#46311f);box-shadow:0 12px 16px -10px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.15)}
+.bs-labels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:8px 12px 22px}
+.bs-label{display:flex;align-items:flex-start;gap:2px;min-width:0}
+.bs-label>span{display:flex;flex-direction:column;min-width:0;flex:1}
+.bs-label strong{font-size:12px;font-weight:800;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.bs-label small{font-size:10.5px;color:var(--ink2);margin-top:2px}
+.bs-label button{flex:none;width:24px;height:24px;min-height:0;padding:0;margin-top:-3px;border-radius:50%;background:transparent;box-shadow:none;color:var(--ink2)}
+.bs-label button svg{width:16px;height:16px}
+.bs-import{display:flex;flex-direction:column;gap:8px;padding-bottom:6px}
+.bs-import p{margin:0}
+.bs-import strong{font-size:14px;word-break:break-all}
+.bs-bar{height:6px;border-radius:3px;background:var(--card2);overflow:hidden}
+.bs-bar i{display:block;height:100%;border-radius:3px;background:var(--accent-btn);transition:width .35s ease}
+/* Reading full screen: over the whole phone screen like the comics; sheets still come above. */
+.reading-stage{position:absolute;inset:0;z-index:55;animation:fade .2s}
+.reading-stage .reading-bar{padding-top:40px}
+.reading-stage .reading-content{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.reading-picked{background:color-mix(in srgb,var(--accent-btn) 20%,transparent);border-radius:6px;transition:background .2s}
+.reading-bottom nav button{display:inline-flex;align-items:center;gap:4px}
+.reading-bottom nav button svg{width:15px;height:15px}

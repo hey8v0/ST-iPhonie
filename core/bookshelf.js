@@ -91,6 +91,18 @@ export async function bookImports(files) {
   }
   return out;
 }
+/** Book titles in the order people number them (0.9.49): 第2卷 before 第10卷, Vol.9 before Vol.10. */
+const NATURAL = typeof Intl !== 'undefined' ? new Intl.Collator('zh-Hans-CN', {numeric: true, sensitivity: 'base'}) : null;
+export const naturalCompare = (a, b) => NATURAL ? NATURAL.compare(String(a), String(b)) : String(a).localeCompare(String(b));
+/**
+ * The series a book belongs to, from its name (0.9.49): 「黑执事 第3卷」「黑执事 Vol.03」「黑执事_03」 are all 「黑执事」.
+ * '' when the name has no number at its end to take off.
+ */
+export function seriesOf(name) {
+  const base = String(name || '').replace(/\.(epub|txt|zip)$/i, '').trim();
+  const cut = base.replace(/[\s_\-—–·.]*[(（\[【]?\s*(?:第\s*[0-9０-９一二三四五六七八九十百零〇两]+\s*[卷册集话話部巻本期]|(?:vol(?:ume)?|v|#|no)\.?\s*[0-9０-９]+|[0-9０-９]+\s*[卷册集话話部巻]?)\s*[)）\]】]?\s*$/i, '').trim();
+  return cut && cut !== base ? cut.replace(/[\s_\-—–·.]+$/, '') : '';
+}
 export function readingPosition(value = {}, chapters = 1) {
   return {chapter: Math.max(0, Math.min(chapters - 1, Math.trunc(Number(value.chapter) || 0))), fraction: Math.max(0, Math.min(1, Number(value.fraction) || 0))};
 }
@@ -115,7 +127,7 @@ export class BookshelfStore {
   }
   async update(id, patch) {
     return this.meta.change(id, row => {
-      for (const key of ['companion','settings','bookmarks','annotations','turns','nextNote','daily']) if (key in patch) row[key] = structuredClone(patch[key]);
+      for (const key of ['companion','settings','bookmarks','annotations','turns','nextNote','daily','shelf','lastRead','chapters']) if (key in patch) row[key] = structuredClone(patch[key]);
       if (patch.position) row.position = readingPosition(patch.position, row.chapters.length);
     });
   }
