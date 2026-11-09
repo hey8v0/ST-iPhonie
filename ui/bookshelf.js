@@ -75,7 +75,8 @@ export function bookshelfApp(ctx) {
     let name = key.startsWith('c:') ? key.slice(2) : '';
     if (key === 'new') {
       const d = ctx.dialog('新建分类', `${field('分类名', input('shelf-name', seriesOf(b.title) || '', 'text', 'maxlength="20" placeholder="比如：黑执事、轻小说"'))}<div class="actions">${btn('shelf-ok', '好', 'primary')}</div>`);
-      name = await new Promise(resolve => { d.onClose(() => resolve('')); d.body.addEventListener('click', e => { if (e.target.closest('[data-action=shelf-ok]')) { const value = d.body.querySelector('[data-field=shelf-name]').value.trim(); d.close(); resolve(value); } }); });
+      name = await new Promise(resolve => { d.onClose(() => resolve('')); d.body.addEventListener('click', e => { if (e.target.closest('[data-action=shelf-ok]')) { const value = d.body.querySelector('[data-field=shelf-name]').value.trim(); resolve(value); d.close(); } }); });
+      // (resolve first: closing the sheet resolves '' — the name used to be lost that way, 0.9.50)
       if (!name) return;
     }
     await api.updateReadingBook(b.id, {shelf: key === 'none' ? '' : name});
@@ -166,6 +167,7 @@ export function bookshelfApp(ctx) {
     if (book?.id !== id || book.position.chapter !== p.chapter || book.position.fraction !== p.fraction) return;
     book = {...book, ...saved};
     const label = $('[data-reading-count]'); if (label) label.textContent = `${book.chapters[p.chapter]?.title} · ${page + 1}/${pages}`;
+    const folio = $('[data-folio-page]'); if (folio) folio.textContent = book.settings.mode === 'pages' ? `${page + 1} / ${pages}` : `${Math.round(p.fraction * 100)}%`;
     const slider = $('[data-reading-progress]'); if (slider) slider.value = ((p.chapter + p.fraction) / book.chapters.length) * 100;
     showNote();
     if (turn) maybeNote().catch(fail);
@@ -243,7 +245,7 @@ export function bookshelfApp(ctx) {
     book.position = {chapter: index, fraction}; chapter = await reader.chapter(index); if (token !== epoch) return;
     if (book.type === 'comic' && book.settings.mode === 'pages') { stage?.remove(); stage = null; await comic(index); return; }
     const s = book.settings, hidden = stage?.querySelector('.reading-reader')?.classList.contains('reading-hidden');
-    openStage(`<section class="reading-reader${hidden ? ' reading-hidden' : ''}" data-paper="${esc(s.theme)}" data-mode="${esc(s.mode)}" style="--read-size:${s.size}px;--read-line:${s.line};--read-margin:${s.margin}px;--read-font:${s.font}"><header class="reading-bar"><button data-action="shelf" aria-label="返回书架">${icon('back')}</button><span>${esc(book.title)}</span><button data-action="settings" aria-label="阅读设置">${icon('settings')}</button></header><div class="reading-page" tabindex="0"><article class="reading-content">${chapter.html}</article></div><footer class="reading-bottom"><small data-reading-count></small><input aria-label="阅读进度" data-reading-progress type="range" min="0" max="100" step="0.01"><nav><button data-action="toc">${icon('book')}目录</button><button data-action="bookmark">${icon('star')}书签</button><button data-action="chat">${icon('chat')}一起看</button></nav></footer></section>`);
+    openStage(`<section class="reading-reader${hidden ? ' reading-hidden' : ''}" data-paper="${esc(s.theme)}" data-mode="${esc(s.mode)}" style="--read-size:${s.size}px;--read-line:${s.line};--read-margin:${s.margin}px;--read-font:${s.font}"><header class="reading-bar"><button data-action="shelf" aria-label="返回书架">${icon('back')}</button><span>${esc(book.title)}</span><button data-action="settings" aria-label="阅读设置">${icon('settings')}</button></header><div class="reading-page" tabindex="0"><article class="reading-content">${chapter.html}</article></div><div class="reading-folio" aria-hidden="true"><span data-folio-title>${esc(book.chapters[index]?.title || '')}</span><span data-folio-page></span></div><footer class="reading-bottom"><small data-reading-count></small><input aria-label="阅读进度" data-reading-progress type="range" min="0" max="100" step="0.01"><nav><button data-action="toc">${icon('book')}目录</button><button data-action="bookmark">${icon('star')}书签</button><button data-action="chat">${icon('chat')}一起看</button></nav></footer></section>`);
     const pane = $('.reading-page'), content = $('.reading-content');
     for (const img of content.querySelectorAll('[data-book-image]')) { const blob = await reader.image(img.dataset.bookImage); if (token !== epoch) return; if (blob) img.src = url(blob); }
     await new Promise(resolve => win.requestAnimationFrame(resolve)); if (token !== epoch) return;

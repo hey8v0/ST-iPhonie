@@ -3207,3 +3207,14 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .reading-picked{background:color-mix(in srgb,var(--accent-btn) 20%,transparent);border-radius:6px;transition:background .2s}
 .reading-bottom nav button{display:inline-flex;align-items:center;gap:4px}
 .reading-bottom nav button svg{width:15px;height:15px}
+/* 0.9.50 · full-screen reading: the bars float over the page (hidden, the page keeps its place: no gap at the top and
+   bottom, no new layout), a faint paper grain, the chapter and page number small in the margins like a printed book. */
+.reading-stage .reading-reader{background-image:radial-gradient(rgba(120,100,60,.05) .6px,transparent .7px);background-size:4px 4px}
+.reading-stage .reading-bar{position:absolute;top:0;left:0;right:0;z-index:3;height:auto;padding:40px 12px 18px;background:linear-gradient(var(--paper) 62%,transparent);transition:opacity .25s,transform .3s cubic-bezier(.2,.8,.2,1)}
+.reading-stage .reading-bottom{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:26px 22px 18px;background:linear-gradient(transparent,var(--paper) 38%);transition:opacity .25s,transform .3s cubic-bezier(.2,.8,.2,1)}
+.reading-stage .reading-hidden .reading-bar{transform:translateY(-24px)}
+.reading-stage .reading-hidden .reading-bottom{transform:translateY(24px)}
+.reading-stage .reading-page{margin:46px var(--read-margin) 34px}
+.reading-folio{position:absolute;left:var(--read-margin);right:var(--read-margin);bottom:12px;display:flex;justify-content:space-between;gap:12px;font-size:10.5px;letter-spacing:.04em;opacity:.45;pointer-events:none}
+.reading-folio span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reading-stage .reading-content h1,.reading-stage .reading-content h2{text-align:center;text-indent:0;letter-spacing:.08em;margin:.6em 0 1.4em}
