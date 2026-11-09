@@ -199,12 +199,12 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
   const unsubscribe = backend.subscribe?.(event => { if (event.type === 'chat' && !event.typing || event.type === 'memory' && event.reset) refreshStory(); });
 
   /** 更早的剧情: what the picked memory plugins put into the tavern's extension prompts. */
-  function storyMemory() { return storyMemoryText(context()?.extensionPrompts, options().storyKeys); }
+  function storyMemory() { if (activeChatPreset(settings().chat).storyMode === 'off') return ''; return storyMemoryText(context()?.extensionPrompts, options().storyKeys); }
   /** Every extension prompt there is now (not the phone's own), for picking which hold story memory. */
   function storySources() {
     const prompts = context()?.extensionPrompts || {}, picked = new Set(options().storyKeys);
     const found = Object.entries(prompts).filter(([key, p]) => !key.startsWith('sttts.') && typeof p?.value === 'string' && p.value.trim())
-      .map(([key, p]) => ({key, name: STORY_MEMORY[key] || '', chars: p.value.trim().length, preview: p.value.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 90), picked: picked.has(key)}));
+      .map(([key, p]) => ({key, name: STORY_MEMORY[key] || '', chars: p.value.trim().length, text: p.value, position: p.position, depth: p.depth, role: p.role, preview: p.value.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 90), picked: picked.has(key)}));
     // Picked keys that have nothing in them right now are listed too, so they can be unpicked.
     for (const key of picked) if (!found.some(x => x.key === key)) found.push({key, name: STORY_MEMORY[key] || '', chars: 0, preview: '', picked: true});
     return found;

@@ -93,7 +93,7 @@ export function presetsApp(ctx) {
   /** The 世界书 line: how much is left out (picked in a sheet), and the tags cleaned away (status bars). */
   function loreFields(p) {
     return `<div class="setting-row"><span class="row-text"><strong>手机读哪些世界书</strong><small>${esc(loreLine(p))}</small></span>${btn('lore-pick', '选择', 'chip-button')}</div>
-      ${field('清洗标签', input('cleanTags', Array.isArray(p.cleanTags) ? p.cleanTags.join(', ') : String(p.cleanTags ?? ''), 'text', 'placeholder="比如 status, 状态栏" autocomplete="off"'), '写标签名，逗号隔开。世界书里用这些标签包住的内容（比如 <status>…</status>）不给手机，手机回复里要是写了也会去掉。')}`;
+      `;
   }
   /** A sheet listing the books turned on now and their entries: switch one off and the phone leaves it out. */
   async function pickLore() {
@@ -227,9 +227,9 @@ export function presetsApp(ctx) {
    */
   function storyFields(m) {
     const keys = m.storyKeys || [], list = storyList;
-    const rows = list ? (list.length ? list.map(x => `<label class="story-source"><span><b>${esc(x.name || x.key)}</b>${x.name ? `<small class="mono">${esc(x.key)}</small>` : ''}<small>${x.chars ? `${x.chars} 字 · ${esc(x.preview)}${x.chars > 90 ? '…' : ''}` : '现在是空的'}</small></span><input type="checkbox" class="switch" data-story-key="${esc(x.key)}" aria-label="读 ${esc(x.name || x.key)}" ${keys.includes(x.key) ? 'checked' : ''}></label>`).join('')
+    const rows = list ? (list.length ? list.map(x => `<details class="story-source-detail"><summary class="story-source"><span><b>${esc(x.name || x.key)}</b><small>${x.chars || 0} 字 · 点开看全文</small></span><input type="checkbox" class="switch" data-story-key="${esc(x.key)}" aria-label="读 ${esc(x.name || x.key)}" ${keys.includes(x.key) ? 'checked' : ''}></summary><div class="story-source-meta">${esc(x.key)} · ${x.position === 1 ? '聊天内第 ' + (x.depth ?? 0) + ' 层' : x.position === 0 ? '主提示词后' : x.position === 2 ? '主提示词前' : '位置 ' + (x.position ?? '未提供')} · ${['系统', '用户', '助手'][x.role] || '系统'}</div><pre class="story-source-full">${esc(x.text || x.preview || '现在是空的')}</pre></details>`).join('')
       : '<p class="hint">酒馆现在没有注入任何扩展提示词。记忆插件一般在聊过几轮、或者生成过一次后才会有内容。</p>') : '';
-    return `<div class="story-field"><span>剧情记忆来源${help('小手机只看最近几条正文。装了记忆插件（剧情剪辑台、酒馆自带的总结，或者别的把整理好的剧情注入给模型的插件）的话，勾上它注入的那一项，聊天、电话、查手机、朋友圈和论坛就会多带一段「更早的剧情」，记得很久以前的事。\n\n点「读取」列出酒馆现在注入的内容，看开头就知道是哪个插件的。剧情剪辑台和酒馆总结默认就勾着。把记忆写进世界书的插件不用勾，小手机本来就读世界书。')}</span>
+    return `<div class="story-field"><span>剧情记忆来源${help('手机按所选模式读取正文。装了记忆插件（剧情剪辑台、酒馆自带的总结，或者别的把整理好的剧情注入给模型的插件）的话，勾上它注入的那一项，聊天、电话、查手机、朋友圈和论坛就会多带一段「更早的剧情」，记得很久以前的事。\n\n点「读取」列出酒馆现在注入的内容，看开头就知道是哪个插件的。剧情剪辑台和酒馆总结默认就勾着。把记忆写进世界书的插件不用勾，小手机本来就读世界书。')}</span>
       <small class="hint" style="margin:0">${keys.length ? '在读：' + keys.map(k => esc(storyName(k))).join('、') : '没有在读'}</small>
       ${api.storySources ? `<div class="actions" style="margin:6px 0 0">${btn('story-sources', icon('refresh') + (list ? '重新读取' : '读取当前注入的内容'), 'secondary')}</div>` : ''}
       ${list ? `<div class="story-sources">${rows}</div>` : ''}</div>`;
@@ -261,6 +261,42 @@ export function presetsApp(ctx) {
     return (e.injection ? '单独插入位置 · ' : '') + (text ? text.slice(0, 40) : '还是空的');
   }
   const fold = (group, title, note, body, info = '') => `<details data-group="${group}"><summary>${esc(title)}${info ? ' ' + help(info) : ''}${note ? `<small class="fold-note">${esc(note)}</small>` : ''}</summary><div class="fold-body">${body}</div></details>`;
+
+  const storyModes = [['tavern', '跟着酒馆', '隐藏的楼不读，其余从新往旧读到字数上限'], ['exact', '照正文原样', '和正文模型看到的一样，最费 token'], ['recent', '只读最近几条', '自己定条数'], ['off', '不读', '手机不知道剧情']];
+  const modeOf = p => p.storyMode || (Number(p.context) === 0 ? 'off' : 'tavern');
+  const storyModeName = p => storyModes.find(x => x[0] === modeOf(p))?.[1] || '跟着酒馆';
+  let exactInfo = null, exactTicket = 0;
+  function cleanFields(p) {
+    return field('清洗标签', input('cleanTags', Array.isArray(p.cleanTags) ? p.cleanTags.join(', ') : p.cleanTags || '', 'text', 'placeholder="比如 status, 状态栏"'), '写标签名，逗号隔开。正文和手机回复里用这些标签包住的内容会去掉，世界书条目里的也一样。照正文原样时只清洗接上的新楼，已存历史保持原样。');
+  }
+  function readFields(p) {
+    const mode = modeOf(p);
+    const choice = `<div class="story-modes" role="radiogroup" aria-label="怎么读正文"><div class="field"><span>怎么读正文</span></div>${storyModes.map(([id, title, note]) => `<label class="story-mode"><input type="radio" name="story-mode" data-story-mode="${id}" ${mode === id ? 'checked' : ''}><span><strong>${title}</strong><small>${note}</small></span></label>`).join('')}</div>`;
+    if (mode === 'off') return choice + '<p class="hint" data-keep-hint>手机不读取正文剧情。</p>';
+    if (mode === 'exact') return choice + `<p class="hint story-cost" data-keep-hint>每次聊天都会把正文那一整份发过去，可能几万到十几万 token；没有存的时候自动改用「跟着酒馆」。${help('使用最新可见角色回复生成时保存的聊天补全提示词，保留历史的原始顺序，再接上新楼。正文预设中能认出的写作要求默认去掉；未认出的内容保留。文本补全不支持。')}</p>${groupTitle('正文预设')}<button class="list-row" data-action="story-entries"><span><strong>正文预设的条目</strong><small>只列认得出的条目 · 默认全关</small></span>${icon('next')}</button><p class="hint" data-exact-status data-keep-hint>${esc(exactStatus())}</p>${groupTitle('新楼层')}${cleanFields(p)}`;
+    return choice + groupTitle('读取范围') + (mode === 'recent' ? field('最近几条', input('context', p.context || 6, 'number', 'min="1" max="100" step="1"')) : '')
+      + field('每条最多（字）', input('storyEach', p.storyEach ?? 4000, 'number', 'min="0" step="500"'), '超长正文取前面这些字；0 不限制。')
+      + field('一共最多（字）', input('storyTotal', p.storyTotal ?? 20000, 'number', 'min="0" step="1000"'), '从新往旧读到上限；0 不限制。')
+      + groupTitle('内容处理') + cleanFields(p) + groupTitle('更早的剧情') + storyFields(p.memory || {}) + '<p class="hint" data-keep-hint>酒馆正则（仅提示词）会自动照样套用。</p>';
+  }
+  const exactStatus = () => !exactInfo ? '正在读取已保存的提示词……' : exactInfo.available ? '可以用：角色回复生成时存了提示词' : `现在用不了：${exactInfo.reason}，会改用跟着酒馆`;
+  async function loadExactInfo() {
+    const ticket = ++exactTicket, p = current;
+    try { exactInfo = await api.storyExactInfo?.(p) || {available: false, reason: '当前酒馆没有提供已存提示词接口', entries: []}; }
+    catch { exactInfo = {available: false, reason: '已存提示词读取失败', entries: []}; }
+    if (ticket !== exactTicket || current !== p) return;
+    const el = v.root.querySelector('[data-exact-status]'); if (el) el.textContent = exactStatus();
+  }
+  async function storyEntries() {
+    await loadExactInfo();
+    const p = current, info = exactInfo;
+    const d = ctx.dialog('正文预设的条目', info.entries?.length ? `<div class="group story-sources">${info.entries.map(e => `<label class="story-source"><span><b>${esc(e.title)}</b><small>${esc(e.text.slice(0, 90))}</small></span><input type="checkbox" class="switch" data-exact-entry="${esc(e.id)}" ${p.storyEntries?.[info.presetName]?.[e.id] ? 'checked' : ''}></label>`).join('')}</div>` : `<p class="hint">${esc(info.available ? '这份提示词里没有认得出的预设条目。' : exactStatus())}</p>`, {over: true});
+    d.body.addEventListener('change', ev => { const id = ev.target.dataset.exactEntry; if (!id) return; p.storyEntries ||= {}; p.storyEntries[info.presetName] ||= {}; p.storyEntries[info.presetName][id] = ev.target.checked; mark(); });
+  }
+  v.on('change', '[data-story-mode]', el => { if (!current || !el.checked) return; current.storyMode = el.dataset.storyMode; if (current.storyMode === 'recent' && !Number(current.context)) current.context = 6; mark(); render(); if (current.storyMode === 'exact') loadExactInfo(); });
+  v.root.addEventListener('click', ev => { if (ev.target.matches('[data-story-key]')) ev.stopPropagation(); }, true);
+  v.on('click', '[data-action="story-entries"]', () => storyEntries());
+
   function renderEditor() {
     const p = current, o = ops(currentKind), draw = currentKind === 'draw', chat = currentKind === 'chat';
     const used = p.id && p.id === o.active();
@@ -269,10 +305,7 @@ export function presetsApp(ctx) {
       : field('正文显示', select('voiceLayout', p.format===FREE_FORMAT?'free':'paired', [['paired','译文与原文配对'],['free','自由正文 · 只渲染 tts 标签']]), '自由正文保留对白的语言和排版，英语、双语括号都可以。标签内仍写角色、情绪、朗读原文。') + field('台词格式', textArea('format', p.format, 'class="code short" rows="3"'), '配对模式：{译文}、{角色}、{情绪}、{文本} 各保留一次。自由正文模式：<tts>{角色}|{情绪}|{文本}</tts>，前面的正文不限制格式。译文供阅读，原语言供语音生成。默认格式是成对的 <tts></tts>，别的插件要排除语音原文时，排除标签填 <tts></tts>。\n\n这里的格式只管正文；手机里的语音消息和电话固定用默认格式，不跟着改。');
     const marks = p.marks || {inner: [], phone: []}, marked = (marks.inner || []).length + (marks.phone || []).length;
     const folds = chat
-      ? fold('preset-read', '正文', `最近 ${p.context} 条`,
-          `${field('读取最近的正文', input('context', p.context, 'number', 'min="0" max="100" step="1"'), '回消息、打电话、发朋友圈、论坛和查手机时参考最近几条正文，0 表示不看剧情。')}
-          ${field('每条正文最多（字）', input('storyEach', p.storyEach ?? 4000, 'number', 'min="0" step="500"'), '一条正文太长时只取前面这么多字。0 表示不限制。中文大约一个字一个 token。')}${field('正文一共最多（字）', input('storyTotal', p.storyTotal ?? 20000, 'number', 'min="0" step="1000"'), '最近的正文优先，加起来超过这么多字就不再往前读。0 表示不限制。')}
-          ${storyFields(p.memory || {})}`, '手机这边知道多少剧情。')
+      ? fold('preset-read', '正文', storyModeName(p) + (p.memory?.storyKeys?.length && !['exact', 'off'].includes(modeOf(p)) ? ` · 记忆插件 ${p.memory.storyKeys.length} 项` : ''), readFields(p), '手机这边知道多少剧情。')
         + fold('preset-lore', '世界书', p.lore === false ? '不带' : loreLine(p),
           `${toggle('lore', '带上世界书', p.lore !== false, '聊天、电话、朋友圈、论坛和查手机按触发条件带上酒馆的世界书：和写正文时一样，常驻的条目，以及在名字、最近的正文和聊天里触发关键词的条目（当前角色卡的世界书、全局和聊天绑定的世界书都算）。人设写在世界书里的话要打开。\n\n条目多的话会多占一些上下文。')}${p.lore !== false ? loreFields(p) + field('世界书最多（字）', input('loreMax', p.loreMax ?? 30000, 'number', 'min="0" step="1000"'), '手机读世界书时最多放这么多字，只放整条。0 表示插件不另外限制，只按酒馆「世界书」设置里的预算（占上下文的百分比）来。手机的每次请求（聊天、朋友圈、论坛、查手机、电话）都按这些条件读取世界书，放得越多越费 token，也越慢。') : ''}`)
         + fold('preset-memory', '手机聊天', `最近 ${p.history} 条 · 记忆${p.memory?.enabled !== false ? '开' : '关'}`,
@@ -334,6 +367,7 @@ export function presetsApp(ctx) {
     currentKind = k;
     drafts.set(key, current);
     render();
+    if (k === 'chat' && modeOf(current) === 'exact') loadExactInfo();
   }
   v.showKind = k => { current = null; kind = k; render(); };
   v.back = () => { if (!current) return false; current = null; render(); return true; };

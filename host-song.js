@@ -1,7 +1,7 @@
 // 写歌, tavern side: the text model writes the words and the style of a song (it knows the people and the story); singing them is the
 // backend's (core/backend-song.js). Nothing is written into the story. One request at a time; the phone shows it as busy.
 import {buildSongRequest, parseSongReply, normalizeSongForm, SONG_LENGTHS} from './core/song.js';
-import {storyLines} from './core/moments.js';
+import {readStoryLines} from './story-exact.js';
 import {activeChatPreset, cleanTagged, messageLine} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 
@@ -28,7 +28,7 @@ export function createSongHost({context, settings, backend, memory = null}) {
   /** Asks the text model, from what the form says and what the story knows; {title, style, lyrics}. */
   async function compose(ctx, form, {before = null, wish = '', history = []} = {}) {
     const s = settings(), preset = activeChatPreset(s.chat), user = userName(), who = owner(form.who), useStory = form.story !== false;
-    const story = useStory ? storyLines(ctx.chat, preset, user) : [];
+    const story = useStory ? await readStoryLines(ctx.chat, preset, user) : [];
     const remembered = who && memory ? await memory.aboutPeople([who.name]).catch(() => '') : '';
     const lore = !useStory || preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: who ? who.persona || who.card : '',
       texts: story.map(r => `${r.name}: ${r.text}`), always: [form.about || '', who?.name || '']});

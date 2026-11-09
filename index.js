@@ -19,6 +19,7 @@ import { createMomentsHost } from './host-moments.js'; import { createWardrobeHo
 import { loreBooks, loreNames } from './host-lore.js';
 import { createAppsHost } from './host-apps.js';
 import { readAssistantFiles } from './assistant-files.js';
+import {readStoryExact} from './story-exact.js';
 import { createAssistantHost } from './host-assistant.js';
 import { createCallHost } from './host-call.js';
 import { createMemoryHost } from './host-memory.js';
@@ -474,6 +475,7 @@ function connect(source){
   peekLook:(name,keep)=>{check();return appsHost.peekLook(name,{keep:keep===true});},
   memoryTidy:threadId=>{check();return memoryHost.tidy(threadId,{force:true});},
   memoryStatus:threadId=>{check();return memoryHost.status(threadId);},
+  storyExactInfo:async preset=>{check();const r=await readStoryExact(context,{...preset,lore:false});return {available:r.available,reason:r.reason,presetName:r.presetName,entries:r.entries.map(e=>({id:e.id,title:e.title,text:e.text.slice(0,160)}))};},
   storySources:()=>{check();return memoryHost.storySources();},
   peekBusy:()=>{check();return appsHost.busy('peek');},
   peekDraw:(name,index,allowPaid)=>{check();return appsHost.peekDraw(name,index,{allowPaid});},

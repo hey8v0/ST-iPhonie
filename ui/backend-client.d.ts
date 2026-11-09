@@ -328,6 +328,8 @@ export interface SettingsSnapshot { state: Settings; revision: number; }
 /** 聊天预设: how phone contacts reply, how much they see, and how a chat is brought into the story. */
 export interface ChatPreset {
     id: string; name: string;
+    storyMode?: 'tavern' | 'exact' | 'recent' | 'off';
+    storyEntries?: Record<string, Record<string, boolean>>;
     /** Recent story messages the reply prompt includes (0-100). */ context: number;
     /** Recent chat messages the reply prompt includes (2-500). */ history: number;
     /** Characters of one story message, of all of them, of 世界书 a phone request takes (0: no limit of the phone's own). */
@@ -1195,7 +1197,7 @@ export interface BackendAPI extends BackendFacade {
     assistantPresets(): Promise<Array<{ id: string; name: string; entries: Array<{ id: string; title: string; text: string; enabled: boolean; role: MessageRole; marker: boolean; position: number; depth: number; order: number }> }>>;
     assistantReasoningFormat(): {prefix: string; suffix: string};
     assistantDisplay(text: string, role: string, depth: number): string;
-    assistantContext(): { available: boolean; count: number; label: string; reason?: string; last?: { included: number; total: number; tokens: number; budget: number; truncated: boolean } };
+    assistantContext(): Promise<{ available: boolean; count: number; label: string; reason?: string; last?: { included: number; total: number; tokens: number; budget: number; truncated: boolean } }>;
     /** Appends a user message then replies. Omit text to retry a pending user message without duplicating it. */
     assistantReply(threadId: string, text?: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
     assistantReroll(threadId: string, messageId: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
@@ -1326,7 +1328,8 @@ export interface BackendAPI extends BackendFacade {
     assistantMemoryTidy(threadId: string): Promise<number>;
     assistantMemoryStatus(threadId: string): MemoryStatus;
     /** The extension prompts injected now (other plugins'), to pick which hold story memory; name: a known memory plugin. */
-    storySources(): Array<{ key: string; name: string; chars: number; preview: string; picked: boolean }>;
+    storyExactInfo(preset?: object): Promise<{available: boolean; reason: string; presetName?: string; entries: Array<{id: string; title: string; text: string}>}>;
+    storySources(): Array<{ key: string; name: string; chars: number; preview: string; picked: boolean; text?: string; position?: number; depth?: number; role?: number }>;
     peekBusy(): boolean;
     /** Draws one album photo of a character's phone with NovelAI; allowPaid when it would cost Anlas. */
     /** index 'wallpaper' draws the wallpaper. */

@@ -4,6 +4,8 @@ import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, ASSISTANT_WANTS_MUSIC, assistant
 import {activeText, customRequest, streamText, responseMetadata, failure, replyText} from './core/llm.js';
 import {modelRules} from './core/state.js';
 import {tavernAssistantPresets, buildTavernAssistantMessages} from './assistant-presets.js';
+import {readStoryExact} from './story-exact.js';
+import {activeChatPreset} from './core/chat.js';
 import {createAssistantContext} from './assistant-context.js';
 import {assistantBlocks, assistantDrawGuide, pictureInputs} from './core/draw.js';
 import {createAssistantMemoryHost, assistantMemoryThread} from './host-assistant-memory.js';
@@ -141,7 +143,7 @@ export function assistantInputs(settings, prompt, style = {}) {
   return {prompt, negative: style.negative || ''};
 }
 
-export function createAssistantHost({context, settings, backend, presets = tavernAssistantPresets, buildContext, request = requestAssistantText, loadCompletion = loadCompletionModule, regex = null}) {
+export function createAssistantHost({context, settings, backend, presets = tavernAssistantPresets, buildContext, request = requestAssistantText, loadCompletion = loadCompletionModule, regex = null, exact = readStoryExact}) {
   const jobs = new Map(), snapshots = createAssistantContext(context);
   const memory = createAssistantMemoryHost({context, settings, backend, request: (messages, {signal, settings: state}) => {
     const assistant = normalizeAssistant(state.assistant);
@@ -149,7 +151,10 @@ export function createAssistantHost({context, settings, backend, presets = taver
     return request(context(), backend, {...state, assistant: {...assistant, readContext: false}}, messages, {signal, presetName, loadCompletion, details: false});
   }});
   const remember = thread => { memory.after(thread.id); return thread; };
-  const contextBuilder = buildContext || snapshots.build.bind(snapshots);
+  const contextBuilder = buildContext || (async (ctx, options) => {
+    const result = await exact(ctx, activeChatPreset(options.settings.chat), {entries: options.settings.assistant.tavernEntries});
+    return result.available ? result : snapshots.build(ctx, options);
+  });
   let closed = false, lastContext = null;
   const titling = new Map(), unique = (value, i, all) => all.indexOf(value) === i;
   const thoughtsOf = (...values) => values.map(value => String(value || '').trim()).filter(Boolean).filter(unique).join('\n\n');
@@ -188,11 +193,12 @@ export function createAssistantHost({context, settings, backend, presets = taver
   }
   const chatKey = ctx => ctx?.getCurrentChatId?.() ?? ctx?.chatId ?? null;
   const checkOpen = () => { if (closed || backend.closed) throw Error('助手已关闭'); };
-  function contextInfo() {
+  async function contextInfo() {
     const ctx = context(), count = (ctx?.chat || []).filter(m => m && !m.is_system && String(m.mes || '').trim()).length;
+    const saved = buildContext ? null : await exact(ctx, {...activeChatPreset(settings().chat), lore: false}, {entries: settings().assistant?.tavernEntries || {}});
     const available = count > 0;
     const same = lastContext && lastContext.chat === ctx?.chat && lastContext.chatId === chatKey(ctx);
-    return {...(buildContext ? {available, count, label: '正文上下文'} : snapshots.info()),
+    return {...(buildContext ? {available, count, label: '正文上下文'} : saved?.available ? saved.info : snapshots.info()),
       ...(!available ? {reason: '请先在酒馆打开有正文的聊天，或关闭「读取正文上下文」'} : {}),
       ...(same ? {last: {...lastContext.info}} : {})};
   }

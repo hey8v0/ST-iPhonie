@@ -15,10 +15,10 @@ export const MEMORY_LIMITS = Object.freeze({batch: [10, 200], stage: [2, 20], ep
 export function defaultMemory() {
   // story: the memory also goes into the story's own requests (off: it takes room there). storyKeys: the extension
   // prompts other plugins inject that hold the story's long memory, read into the phone's requests (更早的剧情).
-  return {enabled: true, batch: 40, stage: 5, epic: 4, recall: 3, story: false, storyKeys: Object.keys(STORY_MEMORY)};
+  return {enabled: true, batch: 40, stage: 5, epic: 4, recall: 3, story: false, storyKeys: ['bakemono_memory', '1_memory']};
 }
 /** Extension prompts of memory plugins the phone knows by name (any other can be picked by hand). */
-export const STORY_MEMORY = Object.freeze({bakemono_memory: '剧情剪辑台', '1_memory': '酒馆总结'});
+export const STORY_MEMORY = Object.freeze({bakemono_memory: '剧情剪辑台', '1_memory': '酒馆总结', '2_floating_prompt': '作者注释', '3_vectors': '向量存储（聊天）', '4_vectors_data_bank': '向量存储（资料库）', chromadb: '智能上下文', DEPTH_PROMPT: '角色备注'});
 /** The story memory other plugins put into the tavern's extension prompts, for the phone's requests ('' without). */
 export function storyMemoryText(prompts, keys, cap = 4000) {
   const parts = [];

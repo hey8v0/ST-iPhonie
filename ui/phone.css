@@ -3107,3 +3107,6 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .water-tube.picked{transform:translateY(-12px)}
 .water-tube.full{border-color:#51cf66}
 @media (prefers-reduced-motion:reduce){.parking-car,.water-tube{transition:none}.parking-car.bump{animation:none}}
+
+/* Story reading choices fit the narrow phone frame. */
+.story-modes{display:grid;gap:8px;margin-bottom:18px}.story-mode{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:14px;cursor:pointer}.story-mode:has(input:checked){background:var(--accent-soft)}.story-mode input{flex:0 0 auto;accent-color:var(--accent)}.story-mode span{min-width:0}.story-mode strong,.story-mode small{display:block}.story-mode small{font-size:11px;line-height:1.6;opacity:.65;margin-top:4px}.story-cost{border-left:3px solid var(--accent);padding:10px 12px!important;line-height:1.7}.story-source-detail{margin:8px 0}.story-source-detail .story-source{list-style:none;margin:0;cursor:pointer}.story-source-meta{font-size:11px;opacity:.65;padding:8px;overflow-wrap:anywhere}.story-source-full{white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow:auto;font:inherit;font-size:12px;line-height:1.7;padding:10px;margin:0}.story-source span{min-width:0;overflow-wrap:anywhere}

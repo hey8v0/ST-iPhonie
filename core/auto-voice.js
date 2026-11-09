@@ -9,15 +9,17 @@ import {promptText} from './prompt-rules.js';
 export const POOL_LIMIT = 200;
 export const VOICE_GENDERS = Object.freeze({female: '女', male: '男'});
 export const VOICE_AGES = Object.freeze({child: '孩子', young: '少年少女', adult: '成年', old: '老年'});
-const ENGINES = ['fish', 'mini', 'eleven', 'mimo', 'doubao'];
+const ENGINES = ['fish', 'mini', 'eleven', 'mimo', 'doubao', 'custom'];
 const text = (value, max) => String(value ?? '').trim().slice(0, max);
+export const poolKey = v => JSON.stringify([v.engine, v.engine === 'custom' ? (v.model && v.model !== 'custom' ? v.model : 'default') : '', v.voice]);
 
 export function normalizePool(list) {
   const out = [], seen = new Set();
   for (const v of Array.isArray(list) ? list : []) {
     const engine = ENGINES.includes(v?.engine) ? v.engine : '', voice = text(v?.voice, 2000);
-    if (!engine || !voice || seen.has(engine + '\n' + voice)) continue;
-    seen.add(engine + '\n' + voice);
+    const key = poolKey({engine, voice, model: text(v?.model, 120)});
+    if (!engine || !voice || seen.has(key)) continue;
+    seen.add(key);
     out.push({engine, voice, model: text(v.model, 120), name: text(v.name, 60) || voice.slice(0, 24),
       gender: VOICE_GENDERS[v.gender] ? v.gender : '', age: VOICE_AGES[v.age] ? v.age : '', style: text(v.style, 120)});
     if (out.length >= POOL_LIMIT) break;
