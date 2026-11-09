@@ -3599,6 +3599,9 @@ export class TTSBackend {
             addReadingBook: (data, blob, cover) => this.bookshelf.add(clone(data), blob, cover),
             updateReadingBook: (id, patch) => this.bookshelf.update(String(id), clone(patch)),
             deleteReadingBook: id => this.bookshelf.remove(String(id)),
+            // 多选 (0.9.52): the same on several books — a category, or taking them off the shelf for good.
+            updateReadingBooks: (ids, patch) => this.bookshelf.updateMany(Array.isArray(ids) ? ids.map(String) : [], clone(patch || {})),
+            deleteReadingBooks: ids => this.bookshelf.removeMany(Array.isArray(ids) ? ids.map(String) : []),
             reportDiagnostic: (source, detail, level) => this.reportDiagnostic(source, detail, level),
             backupCounts: () => this.backupCounts(), paintChanged: gone => this.paintChanged(clone(gone || [])),
             ledgerDays: (from, to) => this.ledger.days(from, to), clearLedger: async () => { this.noteGone('ledger', await this.ledger.clear()); },

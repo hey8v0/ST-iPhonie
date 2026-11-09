@@ -2,7 +2,10 @@
 import {readZipBlob} from './model-files.js';
 import {AppStore} from './app-store.js';
 
-export const readerDefaults = {size: 19, line: 1.9, margin: 24, font: 'serif', theme: 'auto', mode: 'pages', rtl: false, annotations: true};
+export const readerDefaults = {size: 19, line: 1.9, margin: 24, font: 'serif', theme: 'auto', mode: 'pages', rtl: false, annotations: true, effect: 'page'};
+/** 翻页效果 (0.9.52): 仿真翻页 / 平滑滑动 / 无。 */
+export const READ_EFFECTS = Object.freeze(['page', 'slide', 'none']);
+export const effectOf = value => READ_EFFECTS.includes(value) ? value : 'page';
 const escape = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 export function decodeBook(bytes) {
   try { return new TextDecoder('utf-8', {fatal: true}).decode(bytes).replace(/^\uFEFF/, ''); }
@@ -110,6 +113,98 @@ export function annotationDue(book, {now = Date.now(), random = Math.random()} =
   const day = new Date(now).toLocaleDateString('sv-SE');
   return book.settings?.annotations !== false && !!book.companion && (book.turns || 0) >= (book.nextNote || 6) && (book.daily?.day !== day || book.daily.count < 12) && random < .65;
 }
+
+// ---------- 阅读统计 (0.9.52) ----------
+const DAY = 86400000;
+/** A day as 「2026-11-09」 in this device's zone. */
+export const dayKey = at => {
+  const d = new Date(at), pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+/**
+ * What a book's reading time adds up to: sec (all time), days ({day: sec}, 120 kept), prog (progress added — what the
+ * speed is worked out from). Kept apart from the reading position, which the user can clear without losing the stats.
+ */
+export function normalizeStats(value = {}) {
+  const sec = Math.max(0, Math.round(Number(value?.sec) || 0)), prog = Math.max(0, Number(value?.prog) || 0), days = {};
+  if (value?.days && typeof value.days === 'object') for (const [k, v] of Object.entries(value.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(k) && Number(v) > 0) days[k] = Math.round(Number(v));
+  const keys = Object.keys(days).sort();
+  for (const k of keys.slice(0, Math.max(0, keys.length - 120))) delete days[k];
+  return {sec, prog: Math.min(1e6, prog), days};
+}
+/** The stats after `seconds` more reading and `progress` (0…1 of the book) further on. Negative numbers add nothing. */
+export function addReadingTime(stats, seconds, {now = Date.now(), progress = 0} = {}) {
+  const out = normalizeStats(stats), sec = Math.max(0, Math.round(Number(seconds) || 0));
+  if (sec) { out.sec += sec; const day = dayKey(now); out.days[day] = (out.days[day] || 0) + sec; }
+  if (progress > 0) out.prog = Math.min(1e6, out.prog + Math.min(1, progress));
+  return normalizeStats(out);
+}
+export const todaySeconds = (stats, now = Date.now()) => normalizeStats(stats).days[dayKey(now)] || 0;
+/** The last seven days, oldest first: [{day, sec}] — for the little bar chart. */
+export function weekSeconds(stats, now = Date.now()) {
+  const s = normalizeStats(stats), out = [];
+  for (let i = 6; i >= 0; i--) { const key = dayKey(now - i * DAY); out.push({day: key, sec: s.days[key] || 0}); }
+  return out;
+}
+/** How much longer this book takes at the speed so far (seconds), or null when it is too early to tell or finished. */
+export function readingLeft(book, stats) {
+  const s = normalizeStats(stats), chapters = Math.max(1, book?.chapters?.length || 1);
+  const done = Math.min(1, Math.max(0, ((Number(book?.position?.chapter) || 0) + (Number(book?.position?.fraction) || 0)) / chapters));
+  if (s.sec < 20 || s.prog <= 0.0005 || done >= .999) return null;
+  const left = (1 - done) / (s.prog / s.sec);
+  return Number.isFinite(left) && left > 0 ? Math.round(Math.min(left, 1e7)) : null;
+}
+/** 「1 小时 20 分」／「18 分钟」／「不到 1 分钟」. */
+export function span(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  if (!s) return '';
+  if (s < 60) return '不到 1 分钟';
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} 分钟`;
+  const h = Math.floor(m / 60), rest = m % 60;
+  return rest ? `${h} 小时 ${rest} 分` : `${h} 小时`;
+}
+
+// ---------- 书摘和批注 (0.9.52) ----------
+export const HIGHLIGHT_MAX = 500, ANNOTATION_MAX = 500;
+const cleanText = (value, most) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, most);
+/**
+ * A 书摘: {id, chapter, para, text, at}. The paragraph is the nth block of the chapter (`data-para`), so it stays on
+ * the right lines when the page is laid out again; the first words are kept to find it again if the book changed.
+ */
+export function normalizeHighlights(list) {
+  const out = [], seen = new Set();
+  for (const h of Array.isArray(list) ? list : []) {
+    const text = cleanText(h?.text, 600), chapter = Math.trunc(Number(h?.chapter)), para = Math.trunc(Number(h?.para));
+    if (!text || !Number.isFinite(chapter) || !Number.isFinite(para) || chapter < 0 || para < 0) continue;
+    const key = `${chapter}:${para}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({id: String(h?.id || `h:${chapter}:${para}`), chapter, para, text, at: Number(h?.at) || Date.now()});
+  }
+  return out.slice(-HIGHLIGHT_MAX);
+}
+/** Adds a 书摘, or takes it off again when that paragraph is already picked — what the long-press menu does. */
+export function toggleHighlight(list, {chapter, para, text, at = Date.now()}) {
+  const rows = normalizeHighlights(list), body = cleanText(text, 600);
+  const at0 = rows.findIndex(h => h.chapter === Number(chapter) && h.para === Number(para));
+  if (at0 >= 0) { const copy = rows.slice(); copy.splice(at0, 1); return copy; }
+  if (!body) return rows;
+  return normalizeHighlights([...rows, {chapter, para, text: body, at}]);
+}
+export const highlighted = (list, chapter, para) => normalizeHighlights(list).some(h => h.chapter === Number(chapter) && h.para === Number(para));
+
+/** A note in the page: {id, chapter, para, text, who, at}. `para` is where it is tucked in (after that paragraph). */
+export function normalizeAnnotations(list) {
+  const out = [];
+  for (const n of Array.isArray(list) ? list : []) {
+    const text = cleanText(n?.text, 200), chapter = Math.trunc(Number(n?.chapter));
+    if (!text || !Number.isFinite(chapter) || chapter < 0) continue;
+    const para = Math.max(0, Math.trunc(Number(n?.para)) || 0);
+    out.push({id: String(n?.id || crypto.randomUUID()), chapter, para, text, who: cleanText(n?.who, 40), at: Number(n?.at) || Date.now()});
+  }
+  return out.slice(-ANNOTATION_MAX);
+}
 export class BookshelfStore {
   constructor(scope, options = {}) {
     this.meta = new AppStore(scope, {...options, database: 'st-iphonie-bookshelf-v1'});
@@ -127,10 +222,25 @@ export class BookshelfStore {
   }
   async update(id, patch) {
     return this.meta.change(id, row => {
-      for (const key of ['companion','settings','bookmarks','annotations','turns','nextNote','daily','shelf','lastRead','chapters']) if (key in patch) row[key] = structuredClone(patch[key]);
+      for (const key of ['companion','settings','bookmarks','annotations','turns','nextNote','daily','shelf','lastRead','chapters','stats','highlights']) if (key in patch) row[key] = structuredClone(patch[key]);
       if (patch.position) row.position = readingPosition(patch.position, row.chapters.length);
+      if ('stats' in patch) row.stats = normalizeStats(row.stats);
+      if ('highlights' in patch) row.highlights = normalizeHighlights(row.highlights);
+      if ('annotations' in patch) row.annotations = normalizeAnnotations(row.annotations);
     });
   }
+  /** 多选 (0.9.52): the same change on several books at once (a category, say). */
+  async updateMany(ids, patch) {
+    const out = [];
+    for (const id of ids || []) out.push(await this.update(String(id), patch).catch(error => ({error})));
+    return out.filter(x => x && !x.error);
+  }
   async remove(id) { await this.meta.remove(id); await this.files.remove(id); }
+  /** 多选删除: the books and their files go; one failing does not stop the rest. */
+  async removeMany(ids) {
+    let gone = 0;
+    for (const id of ids || []) { try { await this.remove(String(id)); gone++; } catch { /* keep going */ } }
+    return gone;
+  }
   close() { this.meta.close(); this.files.close(); }
 }

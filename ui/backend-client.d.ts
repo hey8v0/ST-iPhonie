@@ -634,6 +634,8 @@ export interface BackendFacade {
     addReadingBook(data: any, blob: Blob, cover?: Blob): Promise<any>;
     updateReadingBook(id: string, patch: any): Promise<any>;
     deleteReadingBook(id: string): Promise<void>;
+    updateReadingBooks(ids: string[], patch: any): Promise<any[]>;
+    deleteReadingBooks(ids: string[]): Promise<number>;
     getRequestLogs(): Array<{id: string; at: number; source: string; level: 'info' | 'warn' | 'error'; state: string; duration?: number; request: unknown; response?: unknown}>;
     clearRequestLogs(): void;
     reportDiagnostic(source: string, detail: Record<string, unknown>, level?: 'info' | 'warn' | 'error'): void;

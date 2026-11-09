@@ -1,13 +1,7 @@
 /* ST-iPhonie phone UI - "晴空贴纸" style. Colour tokens first, then shell, shared components, apps. */
 
-/* Imported books: quiet shelves, paper and edge-to-edge reading. */
-.reading-caption{color:var(--ink2);font-size:12px;margin:0 0 24px}
-.reading-local{margin:28px 0 10px;text-align:center;opacity:.7}
-.reading-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px 22px;padding:0 4px}
-.reading-cover{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;width:100%;aspect-ratio:2/3;padding:22px 16px;border:0;border-radius:2px 7px 7px 2px;background:linear-gradient(90deg,#0002,transparent 6%,#fff2 9%,transparent 12%),hsl(var(--book-hue) 28% 76%);color:#283b37;box-shadow:3px 8px 12px #0002;text-align:left;overflow:hidden;transition:transform .3s var(--spring-soft)}
-.reading-cover:active{transform:scale(.96) rotate(-1deg)}
-.reading-cover>span{font-family:serif;font-size:25px;line-height:1.45;writing-mode:vertical-rl;max-height:75%;letter-spacing:3px}.reading-cover small{font-size:10px;letter-spacing:2px}.reading-cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-.reading-title{display:flex;align-items:center;margin-top:10px;gap:4px}.reading-title strong{font-size:13px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;flex:1}.reading-title button{border:0;background:none;color:var(--ink2);padding:5px}.reading-title svg{width:20px;height:20px}.reading-tile>small{font-size:10px;color:var(--ink2)}
+/* Imported books: paper and edge-to-edge reading (the shelf itself is drawn further down, 0.9.52). */
+
 .view[data-app=bookshelf][data-reading]{padding:0;overflow:hidden}
 .reading-reader{--paper:#f9f6ef;--print:#33352f;position:absolute;inset:0;display:flex;flex-direction:column;background:var(--paper);color:var(--print);overflow:hidden}
 :root[data-theme=dark] .reading-reader,[data-theme=dark] .reading-reader{--paper:#202322;--print:#c4c7bf}
@@ -3167,28 +3161,45 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .reading-compose input{flex:1;min-width:0;min-height:44px;padding:0 16px;border:0;border-radius:999px;background:var(--card);box-shadow:0 4px 14px -10px rgba(20,40,80,.4);color:var(--ink);font:inherit;font-size:16px}
 .reading-compose input:focus{outline:none;box-shadow:0 0 0 2px var(--accent-soft)}
 .reading-compose .primary{min-height:44px;padding:0 18px}
-/* 0.9.49 · 书架 like a bookshelf: books standing on wooden planks, their names on the edge below; a 继续读 card. */
-.bs-chips{margin-top:2px}
-.bs-continue{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 18px;padding:12px 14px;border-radius:20px;background:var(--card);box-shadow:0 10px 24px -16px rgba(20,40,80,.5);text-align:left;transition:transform .25s cubic-bezier(.3,1.5,.5,1)}
-.bs-continue:active{transform:scale(.98)}
+/* 0.9.52 · 书架: a wooden shelf — back board, side rails, a plank under each row, the books standing on it with the
+   names written under them; each book is a little taller or thicker than its neighbours, always the same way. */
+.bs-chips{margin:2px 0 14px}
+.bs-chips button{min-height:32px}
+.bs-continue{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 6px;padding:12px 14px;border-radius:20px;background:var(--card);box-shadow:0 12px 26px -18px rgba(20,40,80,.55),inset 0 0 0 1px color-mix(in srgb,var(--accent-btn) 10%,transparent);text-align:left;transition:transform .26s cubic-bezier(.3,1.5,.5,1)}
+.bs-continue:active{transform:scale(.985)}
 .bs-continue>svg{flex:none;width:18px;height:18px;color:var(--ink2)}
 .bs-mini{flex:none;width:44px;height:62px;border-radius:2px 6px 6px 2px;background:hsl(var(--book-hue) 38% 70%) center/cover;box-shadow:inset 3px 0 0 rgba(0,0,0,.14),0 6px 12px -6px rgba(40,25,10,.5)}
 .bs-go{display:flex;flex-direction:column;min-width:0;flex:1}
 .bs-go small{font-size:11px;color:var(--ink2)}
 .bs-go small:first-child{color:var(--accent-ink);font-weight:800;letter-spacing:.06em}
 .bs-go strong{font-size:16px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bs-shelves{padding:4px 0 8px}
-.bs-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:end;padding:0 12px}
-.bs-book{position:relative;aspect-ratio:2/3;padding:0;border-radius:2px 7px 7px 2px;overflow:hidden;background:hsl(var(--book-hue) 34% 74%);box-shadow:inset 4px 0 0 rgba(0,0,0,.12),inset 9px 0 8px -6px rgba(255,255,255,.4),0 10px 14px -8px rgba(40,25,10,.6);transform-origin:50% 100%;transition:transform .28s cubic-bezier(.3,1.5,.5,1)}
-.bs-book:active{transform:translateY(-6px) rotate(-1.5deg)}
-.bs-face{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;padding:12px 9px 10px 13px;background:center/cover no-repeat;color:hsl(var(--book-hue) 40% 20%);text-align:left}
+.bs-today{margin:0 4px 16px;font-size:11.5px;color:var(--ink2);letter-spacing:.03em}
+.bs-shelves{padding:6px 0 10px}
+.bs-shelf{position:relative;margin:0 0 20px;padding:16px 0 0;border-radius:16px 16px 6px 6px;overflow:hidden;background:
+  linear-gradient(90deg,rgba(0,0,0,.14),transparent 8%,transparent 92%,rgba(0,0,0,.14)),
+  repeating-linear-gradient(177deg,rgba(110,70,35,.06) 0 2px,transparent 2px 8px),
+  linear-gradient(180deg,#cbab84,#b58e63 62%,#a37c53)}
+[data-theme=dark] .bs-shelf{position:relative;margin:0 0 20px;padding:16px 0 0;border-radius:16px 16px 6px 6px;overflow:hidden;background:
+  linear-gradient(90deg,rgba(0,0,0,.4),transparent 8%,transparent 92%,rgba(0,0,0,.4)),
+  repeating-linear-gradient(177deg,rgba(0,0,0,.16) 0 2px,transparent 2px 8px),
+  linear-gradient(180deg,#5b4330,#4a3527 62%,#3c2b1f)}
+.bs-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:end;padding:0 14px;min-height:186px}
+.bs-book{position:relative;height:calc(168px + var(--tall,0) * 9px);width:calc(100% - var(--thick,0) * 3px);margin:0 auto;padding:0;border-radius:2px 7px 7px 2px;overflow:hidden;background:hsl(var(--book-hue) 34% 74%);
+  box-shadow:inset 5px 0 0 rgba(0,0,0,.13),inset 10px 0 9px -7px rgba(255,255,255,.55),inset -1px 0 0 rgba(255,255,255,.35),0 12px 14px -8px rgba(40,25,10,.55);
+  transform-origin:50% 100%;transition:transform .3s cubic-bezier(.3,1.5,.5,1),box-shadow .25s}
+.bs-book::after{content:"";position:absolute;inset:auto 0 0 0;height:6px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.18))}
+.bs-book:active{transform:translateY(-7px) rotate(-1.2deg)}
+.bs-book.picked{transform:translateY(-7px);box-shadow:inset 5px 0 0 rgba(0,0,0,.13),inset 10px 0 9px -7px rgba(255,255,255,.55),0 0 0 3px var(--accent-btn),0 14px 16px -8px rgba(40,25,10,.55)}
+.bs-face{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;padding:12px 9px 12px 14px;background:center/cover no-repeat;color:hsl(var(--book-hue) 40% 20%);text-align:left}
 .bs-face.pic>*{visibility:hidden}
-.bs-title{font-family:var(--read-font,serif);font-size:13px;font-weight:800;line-height:1.35;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.bs-title{font-family:var(--read-font,serif);font-size:13px;font-weight:800;line-height:1.35;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 1px 0 rgba(255,255,255,.25)}
 .bs-face small{font-size:9.5px;opacity:.7}
-.bs-progress{position:absolute;left:0;bottom:0;height:3px;width:var(--p);background:var(--accent-btn);box-shadow:0 0 6px var(--accent-btn)}
-.bs-plank{height:12px;margin:-1px 4px 0;border-radius:3px;background:linear-gradient(180deg,#e2c29b,#c19466 55%,#a3774d);box-shadow:0 12px 16px -10px rgba(70,40,15,.6),inset 0 1px 0 rgba(255,255,255,.45)}
-[data-theme=dark] .bs-plank{background:linear-gradient(180deg,#7a5a3f,#5a4029 55%,#46311f);box-shadow:0 12px 16px -10px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.15)}
-.bs-labels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:8px 12px 22px}
+.bs-progress{position:absolute;left:0;bottom:0;height:3px;width:var(--p);background:var(--accent-btn);box-shadow:0 0 6px var(--accent-btn);z-index:1}
+.bs-tick{position:absolute;top:7px;right:7px;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.9);box-shadow:0 2px 6px rgba(0,0,0,.25);z-index:2}
+.bs-book.picked .bs-tick{background:var(--accent-btn) no-repeat center/13px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 13 4 4L19 7'/%3E%3C/svg%3E")}
+.bs-plank{height:13px;margin:0 6px;border-radius:2px 2px 5px 5px;background:linear-gradient(180deg,#efd7b4,#c79a63 48%,#9c7047);box-shadow:0 14px 18px -10px rgba(70,40,15,.65),inset 0 1px 0 rgba(255,255,255,.6),inset 0 -2px 3px rgba(0,0,0,.18)}
+[data-theme=dark] .bs-plank{background:linear-gradient(180deg,#8a6446,#5e4530 48%,#3f2e20);box-shadow:0 14px 18px -12px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.12)}
+.bs-labels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:9px 14px 4px}
 .bs-label{display:flex;align-items:flex-start;gap:2px;min-width:0}
 .bs-label>span{display:flex;flex-direction:column;min-width:0;flex:1}
 .bs-label strong{font-size:12px;font-weight:800;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -3200,6 +3211,28 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .bs-import strong{font-size:14px;word-break:break-all}
 .bs-bar{height:6px;border-radius:3px;background:var(--card2);overflow:hidden}
 .bs-bar i{display:block;height:100%;border-radius:3px;background:var(--accent-btn);transition:width .35s ease}
+/* 多选 (0.9.52): a bar at the bottom of the shelf with what can be done with what is picked. */
+.bs-pickbar{position:sticky;bottom:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px -16px -10px;padding:12px 16px 16px;background:linear-gradient(transparent,var(--bg) 34%);backdrop-filter:blur(6px)}
+.bs-pickbar span{font-size:12.5px;font-weight:800;color:var(--ink2)}
+.bs-pickbar>div{display:flex;gap:8px}
+.bs-pickbar .chip-button[disabled]{opacity:.4}
+/* 阅读统计: seven little bars, the tallest a full height. */
+.bs-stat-line{margin:0 0 10px}
+.bs-chart{display:flex;align-items:flex-end;gap:8px;height:96px;margin:6px 0 14px;padding:10px 12px;border-radius:16px;background:var(--card2)}
+.bs-bar-w{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:5px;height:100%}
+.bs-bar-w i{display:block;width:100%;max-width:18px;height:var(--h);min-height:3px;border-radius:5px 5px 2px 2px;background:linear-gradient(var(--accent-btn),color-mix(in srgb,var(--accent-btn) 55%,transparent));transition:height .4s cubic-bezier(.3,1.2,.4,1)}
+.bs-bar-w small{font-size:10px;color:var(--ink2)}
+/* 目录 / 书签 / 书摘 in one sheet. */
+.bs-tabs{margin:0 0 12px}
+.bs-row-link{display:flex;justify-content:space-between;align-items:center;width:100%;padding:12px 14px;border-radius:14px;background:var(--card);margin-bottom:8px;text-align:left}
+.bs-row-link small{color:var(--ink2);font-size:11.5px}
+.bs-pick{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding:12px 12px 12px 14px;border-radius:16px;background:var(--card)}
+.bs-pick-go{flex:1;min-width:0;text-align:left;background:none;box-shadow:none;padding:0;min-height:0}
+.bs-pick-go strong{font-size:11.5px;color:var(--ink2);font-weight:800}
+.bs-pick-go p{margin:4px 0 0;font-family:var(--read-font,serif);font-size:13.5px;line-height:1.7;color:var(--ink)}
+.bs-pick-acts{display:flex;flex-direction:column;gap:6px}
+.bs-pick-acts .round-button{width:32px;height:32px;min-height:0;background:var(--card2);box-shadow:none;color:var(--ink2)}
+.bs-pick-acts svg{width:15px;height:15px}
 /* Reading full screen: over the whole phone screen like the comics; sheets still come above. */
 .reading-stage{position:absolute;inset:0;z-index:55;animation:fade .2s}
 .reading-stage .reading-bar{padding-top:40px}
@@ -3210,11 +3243,11 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 /* 0.9.50 · full-screen reading: the bars float over the page (hidden, the page keeps its place: no gap at the top and
    bottom, no new layout), a faint paper grain, the chapter and page number small in the margins like a printed book. */
 .reading-stage .reading-reader{background-image:radial-gradient(rgba(120,100,60,.05) .6px,transparent .7px);background-size:4px 4px}
-.reading-stage .reading-bar{position:absolute;top:0;left:0;right:0;z-index:3;height:auto;padding:40px 12px 18px;background:linear-gradient(var(--paper) 62%,transparent);transition:opacity .25s,transform .3s cubic-bezier(.2,.8,.2,1)}
-.reading-stage .reading-bottom{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:26px 22px 18px;background:linear-gradient(transparent,var(--paper) 38%);transition:opacity .25s,transform .3s cubic-bezier(.2,.8,.2,1)}
+.reading-stage .reading-bar{position:absolute;top:0;left:0;right:0;z-index:3;height:auto;padding:40px 12px 20px;background:linear-gradient(var(--paper) 88%,color-mix(in srgb,var(--paper) 74%,transparent) 96%,transparent);transition:opacity .25s,transform .3s cubic-bezier(.2,.8,.2,1)}
+.reading-stage .reading-bottom{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:30px 22px 18px;background:linear-gradient(transparent,color-mix(in srgb,var(--paper) 72%,transparent) 12%,var(--paper) 42%);transition:opacity .25s,transform .3s cubic-bezier(.2,.8,.2,1)}
 .reading-stage .reading-hidden .reading-bar{transform:translateY(-24px)}
 .reading-stage .reading-hidden .reading-bottom{transform:translateY(24px)}
-.reading-stage .reading-page{margin:46px var(--read-margin) 34px}
+.reading-stage .reading-page{margin:92px var(--read-margin) 92px}
 .reading-folio{position:absolute;left:var(--read-margin);right:var(--read-margin);bottom:12px;display:flex;justify-content:space-between;gap:12px;font-size:10.5px;letter-spacing:.04em;opacity:.45;pointer-events:none}
 .reading-folio span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .reading-stage .reading-content h1,.reading-stage .reading-content h2{text-align:center;text-indent:0;letter-spacing:.08em;margin:.6em 0 1.4em}
@@ -3255,3 +3288,20 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .bedtime-controls .round-button{width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.12);box-shadow:none;color:#fff}
 .bedtime-controls .round-button:active{transform:scale(.92);background:rgba(255,255,255,.2)}
 .bedtime-controls svg{width:20px;height:20px}
+/* 0.9.52 · reading: a held paragraph, 书摘 underlines, the character's note tucked between paragraphs, page turns. */
+/* 书摘: a soft line under the words (per line, never a block over them). */
+.reading-mark{text-decoration:underline;text-decoration-line:underline;text-decoration-color:color-mix(in srgb,var(--accent-btn) 38%,transparent);text-decoration-thickness:2px;text-underline-offset:5px;text-decoration-skip-ink:none}
+.reading-page{position:relative;perspective:1400px}
+.reading-page.turn-next::after,.reading-page.turn-prev::after{content:"";position:absolute;top:0;bottom:0;width:58%;pointer-events:none;z-index:2;
+  background:linear-gradient(90deg,rgba(0,0,0,0),rgba(60,40,20,.10) 55%,rgba(60,40,20,.20));animation:turn-sheet .42s cubic-bezier(.36,.6,.4,1) forwards}
+.reading-page.turn-prev::after{transform:scaleX(-1);right:auto;left:0}
+@keyframes turn-sheet{from{opacity:.25;transform:translateX(0)}to{opacity:0;transform:translateX(76%)}}
+@media (prefers-reduced-motion:reduce){.reading-page.turn-next::after,.reading-page.turn-prev::after{animation:none;content:none}}
+.reading-reader[data-effect=page] .reading-content{transition:transform .3s cubic-bezier(.3,.9,.3,1)}
+/* The character's note: a slip of paper between two paragraphs, so the words move down and nothing is covered. */
+.reading-note-inline{position:relative;margin:2px 0 1.1em 6px;padding:10px 12px 9px;max-width:88%;border-radius:4px 12px 12px 12px;transform:rotate(-.7deg);
+  background:linear-gradient(170deg,#fdf6e3,#f6ecd2);color:#4a3f2e;box-shadow:0 5px 14px -8px rgba(70,50,20,.6),inset 0 0 0 1px rgba(150,120,70,.18);cursor:pointer}
+.reading-note-inline::before{content:"";position:absolute;top:-6px;left:14px;width:36px;height:13px;border-radius:2px;transform:rotate(-4deg);background:rgba(226,214,180,.75);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.reading-note-inline small{display:block;font-size:9.5px;letter-spacing:.1em;opacity:.55;margin-bottom:3px}
+.reading-note-inline p{margin:0;font-family:"Kaiti SC","STKaiti","KaiTi","楷体","PingFang SC",serif;font-size:14px;line-height:1.65;text-indent:0}
+.reading-reader[data-paper=night] .reading-note-inline,[data-theme=dark] .reading-note-inline{background:linear-gradient(170deg,#3c3a30,#33312a);color:#e8e2cf;box-shadow:0 5px 14px -8px #000a,inset 0 0 0 1px rgba(255,255,255,.08)}
