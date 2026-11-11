@@ -1,6 +1,8 @@
+import {acceptFishCallback} from './core/fish-oauth-flow.js';
 const params = new URLSearchParams(location.search);
 history.replaceState(null, '', location.pathname);
-if (window.opener) {
-  window.opener.postMessage({type: 'st-iphonie-fish-oauth', code: params.get('code'), state: params.get('state'), iss: params.get('iss'), error: params.get('error')}, location.origin);
-  document.getElementById('message').textContent = '登录结果已送回酒馆，可以关闭此页。';
-} else document.getElementById('message').textContent = '请返回酒馆，从 Fish 引擎的菜单重新连接账户。';
+try {
+  const result = acceptFishCallback(params, localStorage);
+  try { window.opener?.postMessage(result, location.origin); } catch { /* shared mailbox works without an opener */ }
+  document.getElementById('message').textContent = result.error ? 'Fish 未授权此次连接，请返回原来的酒馆页面。' : '已收到 Fish 授权，请切回原来的酒馆标签页完成连接，不需要重新登录。';
+} catch (error) { document.getElementById('message').textContent = error.message; }

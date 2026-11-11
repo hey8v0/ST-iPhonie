@@ -1,6 +1,7 @@
 // Fish's web-plan OAuth/MCP connection. Credentials stay in this browser, outside settings/backups.
 // Official protocol: https://docs.fish.audio/overview/mcp (2026-11-11).
 import {joinAudio} from './audio-join.js';
+import {fishLoginKeys, FISH_LOGIN_TTL} from './fish-oauth-flow.js';
 const API = 'https://api.fish.audio', RESOURCE = API + '/mcp';
 const random = () => { const b = crypto.getRandomValues(new Uint8Array(32)); return base64(b); };
 const base64 = b => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -73,6 +74,7 @@ export class FishMcp {
     const win = this.win, popup = win.open('about:blank', 'st-iphonie-fish', 'popup,width=560,height=720');
     if (!popup) throw Error('请允许弹出窗口，再连接 Fish 订阅账户');
     const epoch = ++this.epoch, state = random(), verifier = random(), redirect = new URL('../fish-oauth.html', import.meta.url).href;
+    const keys = fishLoginKeys(state), storage = this.storage();
     let cleanup = () => {};
     try {
       const client = await this.json(API + '/oauth/register', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({client_name: 'ST-iPhonie', redirect_uris: [redirect], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code']})});
@@ -80,17 +82,25 @@ export class FishMcp {
       const challenge = base64(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
       const target = new URL('https://fish.audio/oauth/authorize');
       target.search = new URLSearchParams({client_id: client.client_id, redirect_uri: redirect, response_type: 'code', scope: 'mcp', state, code_challenge: challenge, code_challenge_method: 'S256', resource: RESOURCE});
+      storage.setItem(keys.pending, JSON.stringify({state, at: Date.now()}));
       const code = await new Promise((resolve, reject) => {
-        const listener = e => {
-          if (e.origin !== new URL(redirect).origin || e.source !== popup || e.data?.type !== 'st-iphonie-fish-oauth' || e.data.state !== state) return;
-          if (e.data.iss && e.data.iss !== API) return;
-          if (e.data.error || !e.data.code) reject(Error('Fish 登录未授权，请重试')); else resolve(e.data.code);
+        const accept = data => {
+          if (data?.type !== 'st-iphonie-fish-oauth' || data.state !== state) return;
+          if (data.iss && data.iss !== API) { reject(Error('Fish 登录来源不符')); return; }
+          if (data.error || !data.code) reject(Error('Fish 登录未授权，请重试')); else resolve(data.code);
         };
-        const timer = win.setTimeout(() => reject(Error('Fish 登录已超时，请重试')), 300000);
-        const closed = win.setInterval(() => { if (popup.closed) reject(Error('Fish 登录窗口已关闭')); }, 1000);
+        const listener = e => {
+          if (e.origin !== new URL(redirect).origin || e.source !== popup) return;
+          accept(e.data);
+        };
+        const read = () => { try { accept(JSON.parse(storage.getItem(keys.result) || 'null')); } catch { /* message channel remains available */ } };
+        const onStorage = e => { if (e.key === keys.result) read(); };
+        const timer = win.setTimeout(() => reject(Error('Fish 登录已超时，请重试')), FISH_LOGIN_TTL);
+        // COOP can mark the old WindowProxy closed even while the login tab is alive.
+        const poll = win.setInterval(read, 500);
         this.cancelLogin = () => reject(Error('Fish 登录已取消'));
-        cleanup = () => { win.removeEventListener('message', listener); win.clearTimeout(timer); win.clearInterval(closed); this.cancelLogin = null; };
-        win.addEventListener('message', listener); popup.location.href = target.href;
+        cleanup = () => { win.removeEventListener('message', listener); win.removeEventListener('storage', onStorage); win.removeEventListener('focus', read); win.clearTimeout(timer); win.clearInterval(poll); this.cancelLogin = null; };
+        win.addEventListener('message', listener); win.addEventListener('storage', onStorage); win.addEventListener('focus', read); popup.location.href = target.href;
       });
       cleanup();
       const token = await this.token({grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: client.client_id, code_verifier: verifier, resource: RESOURCE});
@@ -99,7 +109,7 @@ export class FishMcp {
       this.save({...token, client_id: client.client_id, expires_at: Date.now() + Number(token.expires_in || 3600) * 1000});
       this.ready = null; this.session = ''; this.tools = null;
       return this.status();
-    } finally { cleanup(); popup.close(); }
+    } finally { cleanup(); storage.removeItem(keys.pending); storage.removeItem(keys.result); try { popup.close(); } catch { /* detached login tab */ } }
   }
   async access() {
     const c = this.credentials();
