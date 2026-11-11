@@ -705,6 +705,7 @@ export interface BackendFacade {
     fishSubscriptionStatus(): {connected: boolean};
     fishSubscriptionConnect(): Promise<{connected: boolean}>;
     fishSubscriptionResume(): Promise<{connected: boolean}>;
+    fishSubscriptionCompleteManual(text: string): Promise<{connected: boolean}>;
     fishSubscriptionTrace(): {at: number, ev: string, msg: string}[];
     fishSubscriptionDisconnect(): void;
     fishSubscriptionBalance(): Promise<string>;

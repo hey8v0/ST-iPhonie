@@ -1,7 +1,7 @@
 // Fish's web-plan OAuth/MCP connection. Credentials stay in this browser, outside settings/backups.
 // Official protocol: https://docs.fish.audio/overview/mcp (2026-11-11).
 import {joinAudio} from './audio-join.js';
-import {fishLoginKeys, FISH_LOGIN_TTL, fishTrace, fishTraceOf, fishCredentialKey} from './fish-oauth-flow.js';
+import {fishLoginKeys, FISH_LOGIN_TTL, fishTrace, fishTraceOf, fishCredentialKey, acceptFishCallback, parseFishManualInput} from './fish-oauth-flow.js';
 const API = 'https://api.fish.audio', RESOURCE = API + '/mcp';
 const random = () => { const b = crypto.getRandomValues(new Uint8Array(32)); return base64(b); };
 const base64 = b => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -93,7 +93,7 @@ export class FishMcp {
   /** 0.9.56: a login whose answer came after the tavern had stopped waiting is finished here — next time the engine page
    *  opens, or when the user asks. Only what this device kept for fifteen minutes is used; the code is taken once. */
   async resume(now = Date.now()) {
-    if (this.cancelLogin) return this.status();
+    if (this.status().connected) return this.status();
     const s = this.storage(); if (!s || typeof s.key !== 'function') return this.status();
     this.sweepStale(now);
     const keys = [];
@@ -103,6 +103,7 @@ export class FishMcp {
       if (!pending?.state || !pending.verifier || !pending.clientId || !pending.redirect) continue;
       let result = null; try { result = JSON.parse(s.getItem(key.replace('pending.', 'result.')) || 'null'); } catch { result = null; }
       if (!result?.code || result.state !== pending.state) continue;
+      if (this.cancelLogin) { try { this.cancelLogin(); } catch {} }
       fishTrace(s, 'resume', pending.state.slice(0, 6));
       try {
         const token = await this.token({grant_type: 'authorization_code', code: result.code, redirect_uri: pending.redirect, client_id: pending.clientId, code_verifier: pending.verifier, resource: RESOURCE});
@@ -116,8 +117,20 @@ export class FishMcp {
     if (keys.length) fishTrace(this.storage(), 'resume-waiting', `${keys.length} 条待办`);
     return this.status();
   }
+  /** 0.9.59: finish a login from a pasted callback token ("fish1....") or callback URL when the mobile browser opened
+   *  the callback in a separate browser app or isolated container. */
+  async completeManual(input, now = Date.now()) {
+    const s = this.storage(); if (!s) throw Error('当前浏览器无法读取本地存储');
+    const params = parseFishManualInput(input);
+    const result = acceptFishCallback(params, s, now);
+    fishTrace(s, 'manual-paste', result.state.slice(0, 6));
+    if (this.cancelLogin) { try { this.cancelLogin(); } catch {} }
+    const status = await this.resume(now);
+    if (!status.connected) throw Error(`没有找到标识为 ${result.state.slice(0, 6)} 的待办登录记录，请先在当前酒馆点一次「连接订阅账户」再粘贴`);
+    return status;
+  }
   async connect() {
-    if (this.cancelLogin) throw Error('Fish 登录窗口已打开，请先完成登录');
+    if (this.cancelLogin) { try { this.cancelLogin(); } catch {} }
     this.sweepStale();
     const traceStore = this.storage();
     fishTrace(traceStore, 'connect-start');
@@ -147,7 +160,10 @@ export class FishMcp {
           if (e.origin !== new URL(redirect).origin || e.source !== popup) return;
           accept(e.data);
         };
-        const read = () => { try { accept(JSON.parse(storage.getItem(keys.result) || 'null')); } catch { /* message channel remains available */ } };
+        const read = () => {
+          if (this.status().connected) { resolve('__already_exchanged__'); return; }
+          try { accept(JSON.parse(storage.getItem(keys.result) || 'null')); } catch { /* message channel remains available */ }
+        };
         const onStorage = e => { if (e.key === keys.result) read(); };
         const timer = win.setTimeout(() => reject(Error('Fish 登录已超时，请重试')), FISH_LOGIN_TTL);
         // COOP can mark the old WindowProxy closed even while the login tab is alive.
@@ -157,6 +173,10 @@ export class FishMcp {
         win.addEventListener('message', listener); win.addEventListener('storage', onStorage); win.addEventListener('focus', read); popup.location.href = target.href;
       });
       cleanup();
+      if (code === '__already_exchanged__' || this.status().connected) {
+        this.ready = null; this.session = ''; this.tools = null;
+        return this.status();
+      }
       let token;
       try { token = await this.token({grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: client.client_id, code_verifier: verifier, resource: RESOURCE}); }
       catch (error) { fishTrace(storage, 'token-fail', error.message); throw error; }
@@ -167,6 +187,7 @@ export class FishMcp {
       this.ready = null; this.session = ''; this.tools = null;
       return this.status();
     } catch (error) {
+      if (this.status().connected) return this.status();
       // Keep the pending record: a callback that comes after the deadline is finished by resume() next time the page opens.
       throw error;
     } finally { cleanup(); if (this.credentials()?.access_token) { storage.removeItem(keys.pending); storage.removeItem(keys.result); } try { popup.close(); } catch { /* detached login tab */ } }

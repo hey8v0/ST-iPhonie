@@ -17,6 +17,33 @@ export const fishCredentialKey = scope => 'sttts.fishOAuth.' + (scope || '');
 export function readFishPending(storage, state) {
   try { const keys = fishLoginKeys(state); return JSON.parse(storage.getItem(keys.pending) || 'null'); } catch { return null; }
 }
+/** 0.9.59: when a mobile browser opens the callback in another browser app or isolated storage container, a short
+ *  base64url token ("fish1." + JSON({state, code, iss})) lets the user copy & paste the callback back into the tavern. */
+export function packFishCallback(result) {
+  if (!result?.state || !result?.code) return '';
+  const raw = JSON.stringify({state: result.state, code: result.code, ...(result.iss ? {iss: result.iss} : {})});
+  return 'fish1.' + btoa(unescape(encodeURIComponent(raw))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+export function parseFishManualInput(input) {
+  const text = String(input || '').trim();
+  if (!text) throw Error('请先粘贴回调页上的授权码或回调网址');
+  if (text.startsWith('fish1.')) {
+    try {
+      const b64 = text.slice(6).replace(/-/g, '+').replace(/_/g, '/');
+      const obj = JSON.parse(decodeURIComponent(escape(atob(b64))));
+      const params = new URLSearchParams();
+      if (obj?.state) params.set('state', String(obj.state));
+      if (obj?.code) params.set('code', String(obj.code));
+      if (obj?.iss) params.set('iss', String(obj.iss));
+      return params;
+    } catch { throw Error('授权码格式不对，请在回调页点「复制本次授权码」后再粘贴'); }
+  }
+  const qIndex = text.indexOf('?');
+  const query = qIndex >= 0 ? text.slice(qIndex + 1) : text;
+  const params = new URLSearchParams(query.replace(/^[?#]+/, ''));
+  if (!params.get('state') || !params.get('code')) throw Error('没有识别到 state 和 code，请复制完整的授权码或回调网址');
+  return params;
+}
 /**
  * 0.9.58: the callback page finishes the login itself. A phone freezes a background tab while the user logs in, so the
  * tavern often never reads the mailbox; the tab that comes back is the callback, and it has everything the exchange

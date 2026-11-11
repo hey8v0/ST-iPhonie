@@ -635,10 +635,22 @@ export function enginesApp(ctx) {
   const fishWake = () => {
     if (v.disposed || engine !== 'fish') return;
     const connected = !!api.fishSubscriptionStatus?.().connected;
+    if (!connected) {
+      api.fishSubscriptionResume?.().then(status => {
+        if (status?.connected && !v.disposed && engine === 'fish') {
+          fishConnected = true;
+          api.saveConnection('fish', {model: 'drama-3'});
+          drafts.delete('fish');
+          render();
+          ctx.notify('Fish 订阅账户已连接');
+        }
+      }).catch(() => {});
+      return;
+    }
     if (fishConnected === null) { fishConnected = connected; return; }
     if (connected === fishConnected) return;
     fishConnected = connected;
-    if (connected) { drafts.delete('fish'); render(); ctx.notify('Fish 订阅账户已连接'); }
+    if (connected) { api.saveConnection('fish', {model: 'drama-3'}); drafts.delete('fish'); render(); ctx.notify('Fish 订阅账户已连接'); }
   };
   ctx.doc.addEventListener('visibilitychange', () => { if (!ctx.doc.hidden) fishWake(); });
   ctx.win.addEventListener('focus', fishWake);
@@ -807,9 +819,24 @@ export function enginesApp(ctx) {
       case 'fish-subscription': await api.fishSubscriptionConnect(); api.saveConnection('fish', {model: 'drama-3'}); drafts.delete('fish'); edit('fish'); ctx.notify('Fish 订阅账户已连接；角色若单独指定了模型，也需选择 drama-3'); break;
       case 'fish-diagnose': {
         const steps = api.fishSubscriptionTrace?.() || [], pad = n => String(n).padStart(2, '0');
-        ctx.dialog('Fish 连接诊断', `<p class="help-copy">版本 ${esc(api.getState()?.plugin?.version || '')} · ${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>
-          <div class="group pad"><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;line-height:1.65;margin:0">${steps.map(s => { const d = new Date(s.at); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}  ${esc(s.ev)}${s.msg ? '  ' + esc(s.msg) : ''}`; }).join('\n') || '—'}</pre></div>
-          <p class="hint">callback-ok / tavern-read / token-ok 都在，说明登录走完了；停在 callback-error 看后面的原因；只有 callback 没有 tavern-read，说明酒馆这一页没收到（把酒馆页面重新打开一次再试）。</p>`);
+        const d = ctx.dialog('Fish 连接诊断', `<p class="help-copy">${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>
+          <div class="group pad"><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;line-height:1.65;margin:0">${steps.map(s => { const t = new Date(s.at); return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}  ${esc(s.ev)}${s.msg ? '  ' + esc(s.msg) : ''}`; }).join('\n') || '—'}</pre></div>
+          <div class="group pad">${field('手动粘贴授权码', input('fish-manual-code', '', 'text', 'autocomplete="off" spellcheck="false" placeholder="在回调页点「复制本次授权码」后粘贴到这里"'), '如果手机登录跳到了别的浏览器容器导致没有自动连上，把回调页上的 fish1.... 授权码（或回调网址）粘贴进来点下方按钮即可。')}</div>
+          <div class="actions">${btn('fish-manual-go', '用授权码完成连接', 'primary')}</div>
+          <p class="hint">callback-token-ok / token-ok 代表登录已完成；只有 pending-written 没有 callback，说明回调页落在了别的浏览器容器或用了旧缓存，直接用上方粘贴授权码即可连上。</p>`);
+        d.body.addEventListener('click', async e => {
+          const b = e.target.closest('[data-action=fish-manual-go]');
+          if (!b) return;
+          const val = d.body.querySelector('[data-field=fish-manual-code]')?.value || '';
+          try {
+            await api.fishSubscriptionCompleteManual(val);
+            api.saveConnection('fish', {model: 'drama-3'});
+            drafts.delete('fish');
+            d.close();
+            edit('fish');
+            ctx.notify('Fish 订阅账户已连接');
+          } catch (error) { ctx.notify(error.message, {error: true}); }
+        });
         break;
       }
       case 'fish-credits': ctx.dialog('Fish 订阅积分', `<p class="help-copy" style="white-space:pre-wrap">${esc(await api.fishSubscriptionBalance())}</p>`); break;
