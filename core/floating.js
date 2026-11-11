@@ -85,6 +85,11 @@ export class FloatingPlayer {
     this.glyph = this.root.querySelector('svg.wave');
     this.bars = [...this.root.querySelectorAll('.wave rect')];
     this.canvas = this.root.querySelector('canvas.waves');
+    // Keep the wave surface transparent even when a host theme has a more
+    // specific !important canvas rule, or the browser kept an older stylesheet.
+    // Inline important survives both; cloneNode also keeps it on worker fallback.
+    this.canvas.style.setProperty('background', 'transparent', 'important');
+    this.canvas.style.setProperty('color-scheme', 'only light', 'important');
     this.hit = this.root.querySelector('.hit');
     this.hint = this.root.querySelector('.hint');
     this.squash = this.root.querySelector('.squash');
