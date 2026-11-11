@@ -484,26 +484,31 @@ export const activeChatPreset = chat => chat.presets.find(p => p.id === chat.act
  * (no key) are shared by every card.
  */
 export const inSpace = (item, space) => {
+  if (space?.pending) return false;
   if (!space?.key) return true;
   if (!space.card) return !item?.space || item.space === space.key;
   // 按聊天: what was made in this tavern chat; what has no chat of its own (from before) stays with the first one of its card.
   if (item?.save === space.key || item?.space === space.key) return true;
   return !item?.save && !!space.first && (!item?.space || item.space === space.card);
 };
+// Never shorten an identity: two different long values must not become the same phone. Existing records stay untouched.
+export const validChatSave = value => typeof value === 'string' && value.length > 0 && value.length <= 80;
 /**
  * The space to filter by: the open card's with partition 'card'; with 'chat' (one phone per tavern chat, so a new chat
  * of the same card starts from nothing) that chat's, key `card#chat`, card its card, first whether it holds the card's
- * older things. null: everything (partition off, or no card open).
+ * older things. null: partition off. pending: the host has not supplied a usable identity; nothing is shared then.
  */
 export function activeSpace(settings, space) {
   const how = settings.chat?.partition;
-  if (!space?.key || (how !== 'card' && how !== 'chat')) return null;
-  if (how === 'card' || !space.save) return space;
+  if (how !== 'card' && how !== 'chat') return null;
+  if (!space?.key || space.pending || (how === 'chat' && !validChatSave(space.save))) return {...space, key: '', pending: true};
+  if (how === 'card') return space;
   return {...space, key: `${space.key}#${space.save}`, card: space.key, first: settings.chat.firstSaves?.[space.key] === space.save};
 }
 /** Whether a role belongs to the space: by being tagged there (see tagRoles). */
-export const roleInSpace = (r, space) => Array.isArray(r.cards) && (r.cards.includes(space.key) || (!!space.first && r.cards.includes(space.card)));
+export const roleInSpace = (r, space) => !space?.pending && Array.isArray(r.cards) && (r.cards.includes(space.key) || (!!space.first && r.cards.includes(space.card)));
 export function chatContacts(settings, space = null) {
+  if (space?.pending) return [];
   // A card's contacts: its own character(s), the roles that have spoken (or been named) in its story, roles added to
   // it, and contacts added under it. A role no story has met yet is in none until one does: it used to be in every
   // card, so that roles made before cards were kept (most of them) made every card's phone look the same. A role

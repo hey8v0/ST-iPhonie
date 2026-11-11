@@ -37,13 +37,41 @@ export function enginesApp(ctx) {
   // Voice balances shown on the ElevenLabs and Fish cards: engine -> {value, error, loading}.
   const balances = new Map(), PRICED = ['eleven', 'fish'];
   const number = n => Number(n).toLocaleString('zh-CN');
+  let fishCredits = {}, fishCreditLoad = 0, fishCreditRefreshQueued = false;
+  const fishCreditText = () => fishCredits.loading ? '读取中…' : fishCredits.error ? '读取失败' : fishCredits.value?.remaining != null ? number(fishCredits.value.remaining) : fishCredits.value ? '未返回数值' : '—';
+  const fishCreditNote = () => fishCredits.error || (fishCredits.value?.remaining === null ? '服务返回了积分明细，但没有可识别的剩余数值；可在右上角「查看订阅积分」查看明细。' : '这里是 Fish 网页订阅积分，不是 API 美元余额；配音后自动更新。');
+  function paintFishCredits() {
+    if (v.disposed || !api.fishSubscriptionStatus?.().connected) return;
+    for (const node of v.root.querySelectorAll('[data-fish-credit-balance]')) node.textContent = fishCreditText();
+    for (const node of v.root.querySelectorAll('[data-fish-credit-note]')) { node.textContent = fishCreditNote(); node.classList.toggle('error-copy', !!fishCredits.error); }
+  }
+  function clearFishCredits() { fishCreditLoad++; fishCredits = {}; fishCreditRefreshQueued = false; }
+  async function loadFishCredits(refresh = false) {
+    if (v.disposed || !api.fishSubscriptionStatus?.().connected) return;
+    if (fishCredits.loading) { if (refresh) fishCreditRefreshQueued = true; return; }
+    if (!refresh && fishCredits.loaded && Date.now() - fishCredits.loaded < 60000) return;
+    const ticket = ++fishCreditLoad;
+    fishCredits = {...fishCredits, loading: true}; paintFishCredits();
+    try {
+      if (!api.fishSubscriptionCredits) throw Error('积分读取功能未加载，请更新完整插件并刷新酒馆页面');
+      const value = await api.fishSubscriptionCredits(refresh);
+      if (ticket !== fishCreditLoad || v.disposed || !api.fishSubscriptionStatus?.().connected) return;
+      fishCredits = {value, loading: false, error: '', loaded: Date.now()};
+    } catch (error) {
+      if (ticket !== fishCreditLoad || v.disposed || !api.fishSubscriptionStatus?.().connected) return;
+      fishCredits = {loading: false, error: error.message, loaded: Date.now()};
+    }
+    // Update only the balance nodes: a slow response must not erase a key or parameter being typed.
+    paintFishCredits();
+    if (fishCreditRefreshQueued) { fishCreditRefreshQueued = false; return loadFishCredits(true); }
+  }
   const balanceText = id => {
     const b = balances.get(id)?.value;
     if (!b) return '—';
     return b.kind === 'characters' ? number(b.left) : '$' + b.credit.toFixed(2);
   };
   async function loadBalance(id, refresh = false) {
-    if (id === 'fish' && api.fishSubscriptionStatus?.().connected) return;
+    if (id === 'fish' && api.fishSubscriptionStatus?.().connected) return loadFishCredits(refresh);
     if (!PRICED.includes(id) || !api.keyStatus(id)) return;
     const entry = balances.get(id) || {};
     balances.set(id, {...entry, loading: true});
@@ -82,7 +110,7 @@ export function enginesApp(ctx) {
       : id === 'custom'
         ? [['API', (st.connections.custom.params.url || '').replace(/^https?:\/\//, '').split('/')[0] || '未填写'], ['VOICES', (st.connections.custom.params.voices || []).length + ' 个']]
       : id === 'fish' && api.fishSubscriptionStatus?.().connected
-        ? [['MODEL', 'drama-3'], ['BALANCE', '订阅积分']]
+        ? [['MODEL', st.connections.fish.model], ['剩余积分', fishCreditText()]]
       : PRICED.includes(id) && saved
         ? [['MODEL', st.connections[id].model], [id === 'eleven' ? 'CREDITS' : 'BALANCE', balanceText(id)]]
         : [['MODEL', st.connections[id].model], ['ROLES', st.routes.filter(r => r.engine === id && r.voice).length + ' 个角色']];
@@ -95,7 +123,7 @@ export function enginesApp(ctx) {
       <span class="card-top"><span class="card-name">${name}</span><span class="card-kind">${IMAGE.includes(id) ? 'IMAGE' : song(id) ? 'MUSIC' : llm ? 'TEXT' : vector ? 'VECTOR' : 'VOICE'}${icon('nfc')}</span></span>
       <span class="card-chip"></span>
       <span class="card-number${number.startsWith('•') || comfy || ownApi ? '' : ' none'}${comfy || ownApi ? ' address' : ''}">${number}</span>
-      <span class="card-bottom">${fields.map(([k, value]) => `<span><span class="k">${k}</span><span class="v">${esc(value)}</span></span>`).join('')}<span class="card-brand">ST-iPhonie</span></span></${tag}>`;
+      <span class="card-bottom">${fields.map(([k, value]) => `<span><span class="k">${k}</span><span class="v"${id === 'fish' && k === '剩余积分' ? ' data-fish-credit-balance' : ''}>${esc(value)}</span></span>`).join('')}<span class="card-brand">ST-iPhonie</span></span></${tag}>`;
   }
 
   const relayNoSubscription = () => !subscription && subscriptionStatus === 404 && !!api.getState().draw.relay.url;
@@ -403,7 +431,7 @@ export function enginesApp(ctx) {
     return {r, switched};
   }
   function balanceGroup() {
-    if (engine === 'fish' && api.fishSubscriptionStatus?.().connected) return `<div class="group pad"><p>当前使用 Fish 网页订阅积分。余额在右上角菜单的「查看订阅积分」中查看。</p><p class="hint">订阅配音使用 Drama 3 和角色音色，其他 API 参数不传入；连接失效时会提示，不会改用 API 余额。</p></div>`;
+    if (engine === 'fish' && api.fishSubscriptionStatus?.().connected) return `<p class="hint${fishCredits.error ? ' error-copy' : ''}" data-fish-credit-note>${esc(fishCreditNote())}</p>`;
     if (!PRICED.includes(engine)) return '';
     const saved = api.keyStatus(engine), entry = balances.get(engine) || {}, b = entry.value;
     const state = !saved ? '填写密钥后可以查看' : entry.loading && !b ? '读取中' : entry.error && !b ? '读取失败' : '';
@@ -622,40 +650,40 @@ export function enginesApp(ctx) {
     v.root.scrollTop = 0;
     // Fish: which models web pages may call now (drama-3 moves there once Fish adds it); drawn again when that changed.
     if (id === 'fish') api.fishCatalog?.().then(changed => { if (changed && engine === 'fish') render(); }).catch(() => {});
-    if (id === 'fish') fishConnected = !!api.fishSubscriptionStatus?.().connected;
-    // 0.9.56: a Fish login that answered after the tavern stopped waiting is finished right here, without asking again.
+    if (id === 'fish') { fishConnected = !!api.fishSubscriptionStatus?.().connected; if (fishConnected) loadFishCredits(); }
     if (id === 'fish' && !api.fishSubscriptionStatus?.().connected) api.fishSubscriptionResume?.().then(status => {
-      if (status?.connected && engine === 'fish') { drafts.delete('fish'); render(); ctx.notify('Fish 订阅账户已连接（补上了刚才那次登录）'); }
+      if (status?.connected && !v.disposed && engine === 'fish') fishLinked('Fish 订阅账户已连接（补上了刚才那次登录）');
     }).catch(() => {});
   }
   v.edit = edit;
-  // 0.9.58: the callback page finishes the Fish login itself. Coming back to the phone (or the page becoming visible) is
-  // all it takes for the engine page to notice the new credentials — no waiting on the other tab, which a phone freezes.
-  let fishConnected = null;
-  const fishWake = () => {
-    if (v.disposed || engine !== 'fish') return;
+  // A returned callback or a resumed tab may supply credentials. Balance reads never count as a successful login.
+  let fishConnected = null, fishWaking = false;
+  function fishLinked(note = 'Fish 订阅账户已连接') {
+    if (v.disposed) return;
+    fishConnected = true;
+    api.saveConnection('fish', {model: 'drama-3'}); drafts.delete('fish'); clearFishCredits();
+    if (engine === 'fish' || engine === null) render();
+    loadFishCredits(true); ctx.notify(note);
+  }
+  const fishWake = async () => {
+    if (v.disposed || engine !== 'fish' || fishWaking) return;
     const connected = !!api.fishSubscriptionStatus?.().connected;
-    if (!connected) {
-      api.fishSubscriptionResume?.().then(status => {
-        if (status?.connected && !v.disposed && engine === 'fish') {
-          fishConnected = true;
-          api.saveConnection('fish', {model: 'drama-3'});
-          drafts.delete('fish');
-          render();
-          ctx.notify('Fish 订阅账户已连接');
-        }
-      }).catch(() => {});
+    if (connected) {
+      if (fishConnected === false) fishLinked();
+      else { fishConnected = true; loadFishCredits(); }
       return;
     }
-    if (fishConnected === null) { fishConnected = connected; return; }
-    if (connected === fishConnected) return;
-    fishConnected = connected;
-    if (connected) { api.saveConnection('fish', {model: 'drama-3'}); drafts.delete('fish'); render(); ctx.notify('Fish 订阅账户已连接'); }
+    if (fishConnected) { fishConnected = false; clearFishCredits(); render(); }
+    fishWaking = true;
+    try { const status = await api.fishSubscriptionResume?.(); if (status?.connected && !v.disposed && engine === 'fish') fishLinked(); }
+    catch { /* a refused exchange is recorded by the backend */ }
+    finally { fishWaking = false; }
   };
-  ctx.doc.addEventListener('visibilitychange', () => { if (!ctx.doc.hidden) fishWake(); });
+  const fishVisible = () => { if (!ctx.doc.hidden) fishWake(); };
+  ctx.doc.addEventListener('visibilitychange', fishVisible);
   ctx.win.addEventListener('focus', fishWake);
   const enginesDispose = v.dispose;
-  v.dispose = (...args) => { ctx.win.removeEventListener('focus', fishWake); enginesDispose?.(...args); };
+  v.dispose = (...args) => { clearFishCredits(); ctx.doc.removeEventListener('visibilitychange', fishVisible); ctx.win.removeEventListener('focus', fishWake); enginesDispose?.(...args); };
   // The card in front of its pocket lifts out and becomes the card on top of its page, and goes back in (ui/carry.js).
   function lift(from) {
     const to = v.root.querySelector('.detail-card');
@@ -816,31 +844,37 @@ export function enginesApp(ctx) {
   v.on('click', '[data-action]', el => act(el.dataset.action, el));
   async function act(action, el) {
     switch (action) {
-      case 'fish-subscription': await api.fishSubscriptionConnect(); api.saveConnection('fish', {model: 'drama-3'}); drafts.delete('fish'); edit('fish'); ctx.notify('Fish 订阅账户已连接；角色若单独指定了模型，也需选择 drama-3'); break;
+      case 'fish-subscription': await api.fishSubscriptionConnect(); fishLinked('Fish 订阅账户已连接；角色若单独指定了模型，也需选择 drama-3'); break;
       case 'fish-diagnose': {
         const steps = api.fishSubscriptionTrace?.() || [], pad = n => String(n).padStart(2, '0');
-        const d = ctx.dialog('Fish 连接诊断', `<p class="help-copy">${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>
-          <div class="group pad"><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;line-height:1.65;margin:0">${steps.map(s => { const t = new Date(s.at); return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}  ${esc(s.ev)}${s.msg ? '  ' + esc(s.msg) : ''}`; }).join('\n') || '—'}</pre></div>
+        const labels = {'connect-start': '开始连接', 'pending-written': '已保存登录待办', 'callback-ok': '回调收到授权', 'callback-weak': '回调未找到完整待办', 'callback-error': '回调失败', 'callback-denied': '未获授权', 'callback-token-ok': '回调已存登录凭据', 'callback-token-fail': '回调交换失败', 'tavern-read': '酒馆读到授权', 'token-ok': '已存登录凭据', 'token-fail': '凭据交换失败', resume: '继续之前的登录', 'resume-waiting': '仍在等待授权结果', 'manual-paste': '收到手动授权码', 'mcp-error': '订阅接口失败'};
+        const d = ctx.dialog('Fish 连接诊断', `<p class="help-copy">连接模块 0.9.60 · ${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>`
+          + `<p class="hint">已保存登录凭据不代表订阅接口已通过验证；接口失败时下面会写明步骤和服务说明。授权码只贴回自己的酒馆，不要发送给别人。</p>`
+          + `
+          <div class="group pad"><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;line-height:1.65;margin:0">${steps.map(s => { const t = new Date(s.at); return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}  ${esc(labels[s.ev] || '连接步骤')}${s.msg ? '  ' + esc(s.msg) : ''}`; }).join('\n') || '—'}</pre></div>
           <div class="group pad">${field('手动粘贴授权码', input('fish-manual-code', '', 'text', 'autocomplete="off" spellcheck="false" placeholder="在回调页点「复制本次授权码」后粘贴到这里"'), '如果手机登录跳到了别的浏览器容器导致没有自动连上，把回调页上的 fish1.... 授权码（或回调网址）粘贴进来点下方按钮即可。')}</div>
           <div class="actions">${btn('fish-manual-go', '用授权码完成连接', 'primary')}</div>
-          <p class="hint">callback-token-ok / token-ok 代表登录已完成；只有 pending-written 没有 callback，说明回调页落在了别的浏览器容器或用了旧缓存，直接用上方粘贴授权码即可连上。</p>`);
+          <p class="hint">只有登录待办、没有回调记录时，可能是页面缓存或两个浏览器的存储不互通。可在十五分钟内用同一次授权码手动完成；过期、授权被拒或接口权限问题仍需按具体原因处理。</p>`);
         d.body.addEventListener('click', async e => {
           const b = e.target.closest('[data-action=fish-manual-go]');
-          if (!b) return;
-          const val = d.body.querySelector('[data-field=fish-manual-code]')?.value || '';
+          if (!b || b.disabled) return;
+          const box = d.body.querySelector('[data-field=fish-manual-code]'), val = box?.value || '';
+          b.disabled = true;
           try {
             await api.fishSubscriptionCompleteManual(val);
-            api.saveConnection('fish', {model: 'drama-3'});
-            drafts.delete('fish');
-            d.close();
-            edit('fish');
-            ctx.notify('Fish 订阅账户已连接');
+            if (box) box.value = '';
+            d.close(); fishLinked();
           } catch (error) { ctx.notify(error.message, {error: true}); }
+          finally { if (b.isConnected) b.disabled = false; }
         });
         break;
       }
-      case 'fish-credits': ctx.dialog('Fish 订阅积分', `<p class="help-copy" style="white-space:pre-wrap">${esc(await api.fishSubscriptionBalance())}</p>`); break;
-      case 'fish-disconnect': api.fishSubscriptionDisconnect(); render(); break;
+      case 'fish-credits': {
+        await loadFishCredits(true);
+        if (!v.disposed && api.fishSubscriptionStatus?.().connected) ctx.dialog('Fish 订阅积分', `<p class="help-copy" data-keep-hint>${esc(fishCredits.error || (fishCredits.value?.remaining != null ? `剩余 ${number(fishCredits.value.remaining)} 积分` : '服务未返回可识别的剩余数值'))}</p><p class="help-copy" style="white-space:pre-wrap">${esc(fishCredits.value?.detail || '')}</p>`);
+        break;
+      }
+      case 'fish-disconnect': api.fishSubscriptionDisconnect(); fishConnected = false; clearFishCredits(); render(); loadBalance('fish', true); break;
       case 'engine-more': await engineMore(el); break;
       case 'image-connections': await imageConnectionMenu(); break;
       case 'custom-sets': await customSetMenu(); break;
@@ -1077,8 +1111,8 @@ export function enginesApp(ctx) {
   render();
   v.onBalance = event => {
     if (!event.stale || !PRICED.includes(event.engine)) return;
-    if (engine === event.engine || (engine === null && balances.has(event.engine))) loadBalance(event.engine, true);
-    else balances.delete(event.engine);
+    if (engine === event.engine || (engine === null && (balances.has(event.engine) || event.engine === 'fish' && api.fishSubscriptionStatus?.().connected))) loadBalance(event.engine, true);
+    else { balances.delete(event.engine); if (event.engine === 'fish') clearFishCredits(); }
   };
   return v;
 }

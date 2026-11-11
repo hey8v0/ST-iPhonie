@@ -57,7 +57,7 @@ export async function exchangeFishCode({code, verifier, clientId, redirect, scop
   if (!r.ok) throw Error(`Fish 连接失败（${r.status}），请重新连接订阅账户`);
   const token = await r.json();
   if (!token?.access_token) throw Error('Fish 没有返回有效登录凭据');
-  return {...token, client_id: clientId, expires_at: now + Number(token.expires_in || 3600) * 1000, ...(scope ? {scope} : {})};
+  return {...token, client_id: clientId, expires_at: now + Number(token.expires_in || 3600) * 1000};
 }
 /** 0.9.57: what happened in a login, step by step, so a screen with no console can still say why it stopped. */
 export const FISH_TRACE_KEY = 'sttts.fishLogin.trace';
@@ -75,7 +75,7 @@ export const fishLoginKeys = state => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(state || '')) throw Error('Fish 登录校验信息无效，请回酒馆重新连接');
   return {pending: 'sttts.fishLogin.pending.' + state, result: 'sttts.fishLogin.result.' + state};
 };
-export function acceptFishCallback(params, storage, now = Date.now()) {
+export function acceptFishCallback(params, storage, now = Date.now(), {publish = true} = {}) {
   const state = params.get('state'), keys = fishLoginKeys(state);
   const iss = params.get('iss'), code = params.get('code'), error = params.get('error');
   if (iss && iss !== FISH_ISSUER) throw Error('Fish 登录来源不符，本次连接未保存');
@@ -91,6 +91,116 @@ export function acceptFishCallback(params, storage, now = Date.now()) {
     else if (at - now > FISH_CLOCK_SLACK) weak = true;
   } else weak = true;
   const result = {type: 'st-iphonie-fish-oauth', state, iss, code, error, ...(weak ? {weak: true} : {})};
-  storage.setItem(keys.result, JSON.stringify(result));
+  // The callback validates without publishing when it can exchange: a consumable
+  // code must not reach a second exchanger before the first one has finished.
+  if (publish) storage.setItem(keys.result, JSON.stringify(result));
   return result;
+}
+
+const pageOwners = new WeakMap(), exchanges = new WeakMap();
+const loginId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+const epochKey = scope => 'sttts.fishLogin.epoch.' + (scope || '');
+export function fishLoginEpoch(storage, scope) { try { return storage.getItem(epochKey(scope)) || ''; } catch { return ''; } }
+export function fishLoginOwner(win = globalThis) {
+  if (!pageOwners.has(win)) pageOwners.set(win, loginId());
+  return pageOwners.get(win);
+}
+export function fishLoginLocks(win = globalThis) { try { return win.navigator?.locks; } catch { return null; } }
+export function fishCredentials(storage, scope) {
+  try {
+    const value = JSON.parse(storage.getItem(fishCredentialKey(scope)) || 'null');
+    return value && (value.login_epoch || '') === fishLoginEpoch(storage, scope) ? value : null;
+  } catch { return null; }
+}
+export function fishLoginCompleted(storage, scope, state) {
+  const value = fishCredentials(storage, scope);
+  return !!value?.access_token && value.login_state === state;
+}
+/** A duplicate callback after its pending record was cleared: identify the receipt
+ *  by the unguessable state kept with credentials, never by just any stored token. */
+export function fishCompletedScope(storage, state) {
+  try {
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (!key?.startsWith('sttts.fishOAuth.')) continue;
+      const scope = key.slice('sttts.fishOAuth.'.length);
+      if (fishLoginCompleted(storage, scope, state)) return scope;
+    }
+  } catch { /* unavailable storage has no completed login */ }
+  return null;
+}
+export function dropFishPending(storage, scope) {
+  const keys = [];
+  for (let i = 0; i < (storage?.length || 0); i++) {
+    const key = storage.key(i);
+    if (key?.startsWith('sttts.fishLogin.pending.')) keys.push(key);
+  }
+  for (const key of keys) {
+    let pending; try { pending = JSON.parse(storage.getItem(key) || 'null'); } catch { continue; }
+    if (!pending || (pending.scope || '') !== (scope || '')) continue;
+    storage.removeItem(key); storage.removeItem(key.replace('pending.', 'result.'));
+  }
+}
+export function cancelFishLogins(storage, scope) {
+  // The durable epoch also rejects a callback that was already awaiting /token
+  // in another tab. An obsolete credential write cannot revive this login.
+  storage?.setItem(epochKey(scope), loginId());
+  dropFishPending(storage, scope);
+}
+const cancelled = () => Object.assign(Error('Fish 登录已取消，请重新连接'), {code: 'fish-login-cancelled'});
+const noOwner = () => Error('这个浏览器不支持跨标签完成登录，请回到发起授权的酒馆页面；原页已关闭时请重新连接');
+export function canFinishFishLogin(pending, {locks, owner, side = 'host'} = {}) {
+  if (typeof locks?.request === 'function') return true;
+  // No localStorage check-and-set masquerading as an atomic lock. Without Web
+  // Locks only the original live host page may consume its explicit host record;
+  // callbacks just hand the code back. Reloaded/legacy unowned records fail closed.
+  return side === 'host' && pending?.consumer === 'host' && !!owner && pending.host === owner;
+}
+/** The only persisted-code exchanger, shared by connect/resume/manual/callback.
+ *  Web Locks serialize different documents; the map coalesces callers in one
+ *  document. A failed/interrupted exchange is not blindly retried with the same code. */
+export function completeFishLogin({storage, state, scope = '', result, fetcher, locks, owner, side = 'host', valid = () => true, now = Date.now()}) {
+  fishLoginKeys(state);
+  let tasks = exchanges.get(storage);
+  if (!tasks) exchanges.set(storage, tasks = new Map());
+  const taskKey = `${scope}\n${state}`, existing = tasks.get(taskKey);
+  if (existing) return existing;
+  const run = async () => {
+    if (!valid()) throw cancelled();
+    if (fishLoginCompleted(storage, scope, state)) return {connected: true};
+    const pending = readFishPending(storage, state);
+    if (!pending || pending.state !== state) throw cancelled();
+    if ((pending.scope || '') !== scope) throw Error('这次 Fish 登录属于另一个设置空间，请回到发起登录的空间');
+    if (!Number.isFinite(Number(pending.at)) || now - Number(pending.at) > FISH_LOGIN_TTL) throw Error('这次 Fish 登录已过期，请重新连接');
+    const epoch = pending.epoch ?? fishLoginEpoch(storage, scope);
+    if (epoch !== fishLoginEpoch(storage, scope)) throw cancelled();
+    if (!canFinishFishLogin(pending, {locks, owner, side})) throw noOwner();
+    if (pending.phase === 'exchanging' || pending.phase === 'failed') throw Error(pending.failure || '上次 Fish 授权交换被中断，请重新连接');
+    let reply = result;
+    if (!reply) { try { reply = JSON.parse(storage.getItem(fishLoginKeys(state).result) || 'null'); } catch { reply = null; } }
+    if (reply?.state !== state || !reply.code || reply.error) throw Error('没有收到这次 Fish 登录的有效授权码');
+    if (reply.iss && reply.iss !== FISH_ISSUER) throw Error('Fish 登录来源不符，本次连接未保存');
+    if (!pending.verifier || !pending.clientId || !pending.redirect) throw Error('这次 Fish 登录缺少待办信息，请重新连接');
+    const keys = fishLoginKeys(state), working = {...pending, epoch, phase: 'exchanging'};
+    storage.setItem(keys.pending, JSON.stringify(working));
+    try {
+      const credentials = await exchangeFishCode({code: reply.code, verifier: pending.verifier, clientId: pending.clientId, redirect: pending.redirect, scope, fetcher});
+      const current = readFishPending(storage, state);
+      if (!valid() || !current || current.state !== state || (current.scope || '') !== scope || (current.epoch ?? epoch) !== epoch || fishLoginEpoch(storage, scope) !== epoch) throw cancelled();
+      storage.setItem(fishCredentialKey(scope), JSON.stringify({...credentials, login_state: state, login_epoch: epoch}));
+      storage.removeItem(keys.pending); storage.removeItem(keys.result);
+      fishTrace(storage, 'token-ok', state.slice(0, 6));
+      return {connected: true};
+    } catch (error) {
+      // Only amend our still-live pending record; cancellation/supersession may
+      // already have removed it, and another login's records are never touched.
+      const current = readFishPending(storage, state);
+      if (current && fishLoginEpoch(storage, scope) === epoch) storage.setItem(keys.pending, JSON.stringify({...current, phase: 'failed', failure: error.message}));
+      throw error;
+    }
+  };
+  const task = Promise.resolve().then(() => typeof locks?.request === 'function'
+    ? locks.request('sttts.fishLogin.' + state, run) : run()).finally(() => { if (tasks.get(taskKey) === task) tasks.delete(taskKey); });
+  tasks.set(taskKey, task);
+  return task;
 }

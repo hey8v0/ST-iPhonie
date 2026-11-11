@@ -1,5 +1,5 @@
 // Bounded, session-only diagnostics. Never persist keys or binary payloads in a log or backup.
-const SECRET = /authorization|cookie|password|secret|api[-_]?key|access[-_]?token|csrf|^key$|^token$/i;
+const SECRET = /authorization|cookie|password|secret|api[-_]?key|(?:access|refresh|id)[-_]?token|code[-_]?verifier|csrf|^key$|^token$/i;
 const MAX_TEXT = 100000, MAX_TOTAL = 4000000;
 export class RequestLog {
   constructor({change = () => {}, secrets = () => []} = {}) { this.rows = []; this.total = 0; this.change = change; this.secrets = secrets; }

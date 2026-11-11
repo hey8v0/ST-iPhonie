@@ -1,5 +1,5 @@
-/* ST-iPhonie floating entry. Plain DOM, every rule scoped under #sttts-floating so tavern themes cannot reach in
-   and dock scripts can clone it. Two forms (core/floating.js). On a computer or tablet the round ball: docked, it
+/* ST-iPhonie floating entry. Plain DOM so dock scripts can clone it; every rule is scoped under #sttts-floating
+   to keep its styles local. Two forms (core/floating.js). On a computer or tablet the round ball: docked, it
    tucks behind the screen edge; the first tap brings it out, the second opens the phone. On a phone a small bar on the
    screen edge: a tap turns it into a block, a tap on the block opens the phone. Idle: sky gradient. While a line is
    made, plays or waits paused: its voice engine's colour, the two colours fading over. */
@@ -56,6 +56,9 @@
 /* The phone's bar (data-form=bar). Only the bar's strip at the screen edge (.hit) or the block itself takes touches, so the
    chat beside it still scrolls. Where the browser cannot play it (data-gpu, below), the script shapes it every frame. */
 #sttts-floating .waves,#sttts-floating .hit,#sttts-floating .hint,#sttts-floating .shine,#sttts-floating .pill,#sttts-floating .lift{display:none}
+/* A transparent bitmap can still get an opaque CSS background from a host theme's canvas rule.
+   Keep both wave layouts (inside .float and beside it) transparent, including background images. */
+#sttts-floating canvas.waves{background:transparent!important}
 #sttts-floating .shape,#sttts-floating .squash{display:contents}
 #sttts-floating .float[data-form=bar]{position:absolute;left:0;top:0;width:56px;height:56px;pointer-events:none}
 #sttts-floating .float[data-form=bar] .orb{position:absolute;inset:0;width:100%;height:100%;display:block;border:0;overflow:hidden;transition:color .5s ease;pointer-events:auto;will-change:transform}

@@ -39,6 +39,15 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   // busy: the reply being written for a chat (one at a time); stops: what lets it go (停止回复).
   const busy = new Map(), stops = new Map();
   const stopped = () => Object.assign(new Error('已停止回复'), {name: 'AbortError'});
+  // Capture when an action is requested, not when a queued action finally runs. Never mix a previous story with this phone.
+  const chatId = () => { const ctx = context(); return ctx?.getCurrentChatId?.() ?? ctx?.chatId ?? null; };
+  function chatGuard(story = false) {
+    const valid = backend.spaceGuard?.() || (() => !backend.closed), id = chatId();
+    const bound = story || ['card', 'chat'].includes(settings().chat?.partition);
+    return () => valid() && !backend.here?.()?.pending && (!bound || chatId() === id);
+  }
+  const requireChat = valid => { if (!valid()) throw stopped(); };
+  backend.subscribe?.(event => { if (event?.type === 'partition' || (event?.type === 'space' && ['card', 'chat'].includes(settings().chat?.partition))) for (const stop of stops.values()) stop.abort(); });
   // 看图. A tavern connection sees when the tavern says so (its 发送内联图片, and a model it knows takes pictures); a
   // custom connection is tried. A model that failed with pictures and answered without them is not sent any again
   // until the page is reloaded.
@@ -124,11 +133,13 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    *  came (it stays among the round's versions); one that fails or is stopped changes nothing. */
   function reply(threadId, {nudge = false, reroll = false, cue = '', time = 0, outfit = '', reading = ''} = {}) {
     if (busy.has(threadId)) return busy.get(threadId);
-    const controller = new AbortController(), signal = controller.signal;
+    const controller = new AbortController(), signal = controller.signal, valid = chatGuard();
     const job = (async () => {
+      requireChat(valid);
       const ctx = context();
-      const thread = await backend.chats.get(threadId);
-      if (!thread) throw Error('这段聊天已不存在');
+      const thread = await (backend.getChatThread ? backend.getChatThread(threadId) : backend.chats.get(threadId));
+      requireChat(valid);
+      if (!thread || !inSpace(thread, backend.here?.())) throw Error('这段聊天不在当前手机分区');
       const last = reroll ? lastRound(thread.messages) : null;
       if (last) { const old = new Set(last.round.map(m => m.id)); thread.messages = thread.messages.filter(m => !old.has(m.id)); }
       if (thread.friend?.by === 'me') throw Error(`你已经删除了${thread.members[0]}，在「联系人 → 新的朋友」里加回来才能聊天`);
@@ -172,8 +183,12 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         if (reading) messages.splice(messages.length - 1, 0, {role: 'system', content: String(reading).slice(0, 6000)});
         return messages;
       };
-      const answer = cleanTagged(await answerFor(ctx, readingRequest, await pictures(ctx, thread, preset), signal), preset.cleanTags);
-      // 停止 while it was being written: what comes late is let go (the tavern's own generation cannot be stopped).
+      const pics = await pictures(ctx, thread, preset);
+      requireChat(valid);
+      if (signal.aborted) throw stopped();
+      const answer = cleanTagged(await answerFor(ctx, readingRequest, pics, signal), preset.cleanTags);
+      // 停止 or a different tavern chat: what comes late is let go (the tavern's own generation cannot be stopped).
+      requireChat(valid);
       if (signal.aborted) throw stopped();
       // The peek was told (whatever they made of it): not again.
       if (peekedNow) { try { backend.saveChatOptions({peeked: {[peekKey]: null}}); } catch { /* told again next time */ } }
@@ -183,7 +198,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (!items.length && nudge) return null;
       if (!items.length) throw Error('这次没有收到消息，可以再试一次');
       const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
-      const saved = await backend.chatMutate(threadId, () => settle(threadId, items, last, {board: !nudge}));
+      requireChat(valid);
+      const saved = await backend.chatMutate(threadId, () => settle(threadId, items, last, {board: !nudge, valid}));
+      requireChat(valid);
       memory?.after(threadId);
       // The new photos with tags are drawn when the free tier covers them; the others wait for 画出来.
       for (const m of saved?.messages || []) if (!before.has(m.id) && m.kind === 'photo' && !m.photoId && (m.imageTags || backend.drawReady?.())) drawPhoto(threadId, m.id).catch(() => {});
@@ -201,12 +218,15 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    * Stores a reply. A claim takes (or returns) the user's latest red packet or transfer that is still waiting,
    * and leaves a notice where it happened.
    */
-  async function settle(threadId, items, round = null, {board = false} = {}) {
+  async function settle(threadId, items, round = null, {board = false, valid = chatGuard()} = {}) {
+    requireChat(valid);
     const thread = await backend.chats.get(threadId), taken = new Set(), out = [], posts = [];
+    requireChat(valid);
     let calling = null, cutting = false, making = null, undone = false, worn = false;
     const whispers = [];
     let latest = thread;
     for (const item of items) {
+      requireChat(valid);
       if (!canGroupSpeak(thread, item.from)) continue;
       // 「[删除好友]」: the contact deletes the user (private chats only; the user finds out on their next message).
       if (item.kind === 'unfriend') { if (thread.type === 'dm') cutting = true; continue; }
@@ -318,6 +338,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       const gift = target.kind === 'gift';
       out.push({from: item.from, kind: 'notice', target: 'me', text: {opened: '领取了{对方}的红包', accepted: gift ? '收下了{对方}的礼物' : '收下了{对方}的转账', returned: gift ? '退还了{对方}的礼物' : '退还了{对方}的转账'}[state]});
     }
+    requireChat(valid);
     // 小游戏对战: still their turn after a reply that was asked for (no cell of theirs fitted, or they named none): a move
     // made for them, so the game goes on.
     if (board && thread.type === 'dm') {
@@ -325,16 +346,19 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       if (card && card.game.turn === card.game.them) { const at = fallbackMove(card.game, card.game.them); if (at >= 0) latest = await backend.chats.updateMessage(threadId, card.id, {game: {moves: [...card.game.moves, {by: card.game.them, at}]}}); }
     }
     // Their pictures are drawn the way 朋友圈's own are (onPosts).
-    if (posts.length) await backend.momentsMutate(() => backend.moments.add(posts)).then(onPosts).catch(() => {});
+    requireChat(valid);
+    if (posts.length) await backend.momentsMutate(() => backend.moments.add(posts)).then(rows => { if (valid()) onPosts(rows); }).catch(() => {});
     // 重新回复: the new round takes the old one's place (which stays among its versions).
+    requireChat(valid);
     let saved = !out.length ? latest : round ? await backend.replaceChatRound(threadId, round.after, out) : await backend.chats.append(threadId, out);
+    requireChat(valid);
     // 读后感 (0.9.40): a book sent into this chat just now — what each of them said of it is kept on the book.
     if (out.length) bookRemarks(thread, out).catch(error => backend.reportDiagnostic?.('聊天 · 读后感', error, 'warn'));
     if (cutting) { saved = await backend.chats.update(threadId, {friend: {by: 'them', at: Date.now(), requests: []}}); calling = null; refreshCuts(); }
-    if (calling) setTimeout(() => onCall(calling.from, calling.reason), 1200);
-    // (a moment after the group's own messages)
-    if (whispers.length) setTimeout(() => whisper(whispers).catch(error => backend.reportDiagnostic?.('聊天 · 私聊', error, 'warn')), 900);
-    if (making) setTimeout(() => makeGroup(making).catch(error => backend.reportDiagnostic?.('聊天 · 建群', error, 'warn')), 1500);
+    if (calling) setTimeout(() => { if (valid()) onCall(calling.from, calling.reason); }, 1200);
+    // (a moment after the group's own messages; only in the visit that requested them)
+    if (whispers.length) setTimeout(() => { if (valid()) whisper(whispers, valid).catch(error => backend.reportDiagnostic?.('聊天 · 私聊', error, 'warn')); }, 900);
+    if (making) setTimeout(() => { if (valid()) makeGroup(making, valid).catch(error => backend.reportDiagnostic?.('聊天 · 建群', error, 'warn')); }, 1500);
     return saved;
   }
 
@@ -359,19 +383,23 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    * 「[建群] 群名｜成员」: the group a contact starts — with the user when the user is named, else a 旁观群 (the user not
    * in it). Only contacts here; not one of a name already here; at most two a day. Their first words are asked for at once.
    */
-  async function makeGroup(item) {
+  async function makeGroup(item, valid = chatGuard()) {
+    requireChat(valid);
     const user = userName(), known = new Set(backend.contacts().map(c => c.name)), named = item.members.map(n => n.replace(/^@/, '').trim());
     const withUser = named.some(n => n === user || n === '我' || n === '你');
     const members = [...new Set([item.from, ...named.filter(n => known.has(n) && n !== user)])].slice(0, 20);
     if (members.length < 2 || !known.has(item.from)) return null;
     if ((await backend.threads()).some(t => t.type === 'group' && t.name === item.name)) return null;
+    requireChat(valid);
     const day = new Date().toDateString();
     let made = {day, n: 0};
     try { const saved = JSON.parse(storage?.getItem(MADE_KEY) || 'null'); if (saved?.day === day) made = saved; } catch { /* none kept */ }
     if (made.n >= 2) return null;
     try { storage?.setItem(MADE_KEY, JSON.stringify({day, n: made.n + 1})); } catch { /* counted for this visit */ }
     const t = await backend.chatMutate(null, () => backend.chats.create({type: 'group', name: item.name, members, watch: !withUser, ...backend.spaceTag()}));
+    requireChat(valid);
     await backend.chatMutate(t.id, () => backend.chats.append(t.id, [{from: item.from, kind: 'notice', target: 'me', text: withUser ? '拉{对方}进了群聊' : '创建了群聊'}], {read: true}));
+    requireChat(valid);
     refreshCuts();
     notice(withUser ? `${item.from} 拉你进了群「${t.name}」` : `${item.from} 建了一个群「${t.name}」（你不在群里，但看得到）`);
     await reply(t.id).catch(() => null);
@@ -585,20 +613,23 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     return false;
   }
   /** The private chat with `name` here (this card, with 分区), made when there is none yet. */
-  async function dmWith(name) {
+  async function dmWith(name, valid = chatGuard()) {
+    requireChat(valid);
     const here = currentDm(await backend.threads(), name);
+    requireChat(valid);
     return here || backend.chatMutate(null, () => backend.chats.create({type: 'dm', members: [name], ...backend.spaceTag()}));
   }
   /** What someone in a group said to the user alone (「[私聊]」): into their private chat, unread, with a note. */
-  async function whisper(items) {
+  async function whisper(items, valid = chatGuard()) {
     const byName = new Map();
     for (const item of items) byName.set(item.from, [...(byName.get(item.from) || []), {from: item.from, kind: 'text', text: item.text}]);
     for (const [name, list] of byName) {
-      const t = await dmWith(name);
+      const t = await dmWith(name, valid);
+      requireChat(valid);
       // one who has deleted the user does not write to them; one the user blocked is held
       if (t.friend?.by === 'them') continue;
       if (t.blocked) { await backend.holdMessages(t.id, list.map(heldOf)).catch(() => {}); continue; }
-      if (await arrive(t.id, list)) notice(`${name} 私聊了你`);
+      if (await arrive(t.id, list, null, valid) && valid()) notice(`${name} 私聊了你`);
     }
   }
   /** Private knowledge stays labelled per speaker; it is not part of the group's world-book scan. */
@@ -634,10 +665,13 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     return parts.join('\n\n');
   }
   /** Messages that came to the phone: kept unread, said on the island, and photos drawn when that costs nothing. */
-  async function arrive(threadId, items, from = null) {
+  async function arrive(threadId, items, from = null, valid = chatGuard()) {
+    requireChat(valid);
     const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
+    requireChat(valid);
     if (from) items = items.map(item => ({...item, story: from.story, storyVer: from.ver}));
-    const saved = await backend.chatMutate(threadId, () => settle(threadId, items));
+    const saved = await backend.chatMutate(threadId, () => settle(threadId, items, null, {valid}));
+    requireChat(valid);
     const fresh = (saved?.messages || []).filter(m => !before.has(m.id) && m.from !== 'me');
     for (const m of fresh) if (m.kind === 'photo' && !m.photoId && (m.imageTags || backend.drawReady?.())) drawPhoto(threadId, m.id).catch(() => {});
     const last = fresh.at(-1);
@@ -667,9 +701,10 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   /** A story reply finished: what it sent to the phone (<phone>) arrives, once per version of the reply; when it is
    * the phone's turn and nothing came, someone is asked whether they would text first (one phone request). */
   async function storyReplied(id) {
-    const o = settings().chat.proactive || {};
+    const valid = chatGuard(true), o = settings().chat.proactive || {};
     if (!o.on) { quiet = 0; return; }
     const sent = await deliver(id);
+    if (!valid()) return;
     if (sent) { quiet = 0; return; }
     if (!(o.every > 0) || ++quiet < o.every) return;
     quiet = 0;
@@ -680,21 +715,25 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    * photos, money, calls, 朋友圈…) to each sender's chat, <phone group="…"> to that group. Returns how many arrived.
    */
   function deliver(id) {
-    const task = deliveryQueue.then(() => deliverOne(id));
+    const visit = chatGuard(true), ctx = context(), index = Number.isInteger(Number(id)) ? Number(id) : (ctx?.chat?.length || 0) - 1;
+    const message = ctx?.chat?.[index], raw = message?.mes, swipe = message?.swipe_id;
+    const valid = () => visit() && context()?.chat?.[index] === message && message?.mes === raw && message?.swipe_id === swipe;
+    const task = deliveryQueue.then(() => valid() ? deliverOne(index, valid) : 0);
     deliveryQueue = task.catch(() => {});
     return task;
   }
-  async function deliverOne(id) {
+  async function deliverOne(index, valid) {
     const ctx = context(), s = settings();
-    if (!s.chat.proactive?.on) return 0;
-    const index = Number.isInteger(Number(id)) ? Number(id) : (ctx?.chat?.length || 0) - 1, m = ctx?.chat?.[index];
+    if (!valid() || !s.chat.proactive?.on) return 0;
+    const m = ctx?.chat?.[index];
     let sent = 0;
     if (m && !m.is_user && !m.is_system && typeof m.mes === 'string') {
       const parts = phoneParts(m.mes), blocks = parts.filter(p => !p.group).map(p => p.text), grouped = parts.filter(p => p.group);
       const story = [ctx.getCurrentChatId?.() || ctx.chatId || '', index].join('|'), ver = hash(parts.map(p => p.group + '|' + p.text).join('\n'));
       const key = story + '|' + ver, from = {story, ver};
       // Rolled again (重 roll, a new swipe): what the earlier version sent goes; this one sends its own.
-      const gone = await withdraw(story, ver).catch(() => 0);
+      const gone = await withdraw(story, ver, valid).catch(() => 0);
+      if (!valid()) return 0;
       if (gone && !parts.length) notice(`重新生成了这条回复，之前发到手机上的 ${gone} 条消息撤回了`);
       if (parts.length && phoneTurn() && !sentBefore(key)) {
         const contacts = backend.contacts(), people = contacts.map(c => ({name: c.name, voice: false}));
@@ -704,20 +743,24 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         // A group's part goes to the group (the window in use), from its members.
         if (grouped.length) {
           const threads = await backend.threads();
+          if (!valid()) return sent;
           for (const part of grouped) {
+            if (!valid()) return sent;
             const first = threads.find(t => t.type === 'group' && t.name === part.group), thread = first && currentWindow(threads, first);
             if (!thread) continue;
             const members = new Set(thread.members.filter(n => known.has(n)));
             const items = parseChatReply(kept(part.text, members), {members: [...members].map(name => ({name, voice: false})), user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor([...members])}).filter(onPhone);
-            try { const n = items.length ? await arrive(thread.id, items, from) : 0; if (n) { sent += n; notice(`群「${thread.name}」有 ${n} 条新消息`); } } catch { /* not worth interrupting the story */ }
+            try { const n = items.length ? await arrive(thread.id, items, from, valid) : 0; if (n) { sent += n; notice(`群「${thread.name}」有 ${n} 条新消息`); } } catch { /* not worth interrupting the story */ }
           }
         }
         const items = blocks.flatMap(b => parseChatReply(kept(b), {members: people, user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor(people.map(p => p.name))})).filter(onPhone);
         const byName = new Map();
         for (const item of items) if (contacts.some(c => c.name === item.from)) byName.set(item.from, [...(byName.get(item.from) || []), item]);
         for (const [name, list] of byName) {
+          if (!valid()) return sent;
           try {
-            const thread = await dmWith(name);
+            const thread = await dmWith(name, valid);
+            requireChat(valid);
             // Blocked by the user: a 好友申请 waits for an answer; anything else is held (拦截记录), without a word.
             if (thread.blocked) {
               const asks = list.filter(i => i.kind === 'request'), rest = list.filter(i => i.kind !== 'request').map(heldOf).filter(h => h.text);
@@ -734,7 +777,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
             }
             // They had deleted the user and text again: they added the user back.
             if (thread.friend?.by === 'them') { await backend.chats.update(thread.id, {friend: null}); await backend.chats.append(thread.id, [{from: 'me', kind: 'system', text: `${name}重新添加了你为好友`}]); refreshCuts(); }
-            const n = await arrive(thread.id, list, from); if (n) { sent += n; notice(`${name} 给你发来 ${n} 条消息`); }
+            const n = await arrive(thread.id, list, from, valid); if (n && valid()) { sent += n; notice(`${name} 给你发来 ${n} 条消息`); }
           } catch { /* a failed delivery is not worth interrupting the story */ }
         }
       }
@@ -746,10 +789,12 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    * A story reply rolled again: the messages its earlier versions sent to the phone are taken out, unless the user has
    * answered after them (then the talk stays as it went). Returns how many went.
    */
-  async function withdraw(story, ver) {
+  async function withdraw(story, ver, valid = chatGuard()) {
     let gone = 0;
     for (const t of await backend.threads()) {
+      requireChat(valid);
       const list = (await backend.chats.get(t.id))?.messages || [], old = list.filter(m => m.story === story && m.storyVer !== ver);
+      requireChat(valid);
       if (!old.length) continue;
       const after = list.slice(list.indexOf(old.at(-1)) + 1);
       if (after.some(m => m.from === 'me' && m.kind !== 'system')) continue;
@@ -762,22 +807,25 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   /** On the phone's turn with nothing sent: someone is asked whether they would text first now (they may say no). cue:
    *  the real-time moment (按现实时间主动找你) — then it answers whether someone texted. */
   function nudge(options = {}) {
-    const task = deliveryQueue.then(() => nudgeOne(options));
+    const valid = chatGuard(true), task = deliveryQueue.then(() => valid() ? nudgeOne(options, valid) : false);
     deliveryQueue = task.catch(() => {}); return task;
   }
-  async function nudgeOne({cue = '', time = 0, name: wanted = '', outfit = ''} = {}) {
+  async function nudgeOne({cue = '', time = 0, name: wanted = '', outfit = ''} = {}, valid = chatGuard()) {
     const limit = settings().chat.proactive?.dailyMax;
     if (limit > 0 && today().n >= limit) return false;
     const ctx = context();
     // The card's own character first, else someone from the 角色 App (or the one asked for: 查手机, 衣柜).
     // Not someone who is not friends with the user right now (either way).
     const apart = new Set((await backend.threads()).filter(t => t.type === 'dm' && (t.friend || t.blocked)).map(t => t.members[0]));
+    if (!valid()) return false;
     const roles = backend.contacts().filter(c => c.source === 'role' && !apart.has(c.name)), now = ctx?.name2;
     const name = wanted ? (backend.contacts().some(c => c.name === wanted) && !apart.has(wanted) ? wanted : '') : roles.find(c => c.name === now)?.name || roles[Math.floor(Math.random() * roles.length)]?.name;
     if (!name) return false;
     try {
-      const thread = await dmWith(name), before = new Set((await backend.chats.get(thread.id))?.messages.map(x => x.id) || []);
+      const thread = await dmWith(name, valid), before = new Set((await backend.chats.get(thread.id))?.messages.map(x => x.id) || []);
+      requireChat(valid);
       const saved = await reply(thread.id, {nudge: true, cue, time, outfit});
+      requireChat(valid);
       const fresh = (saved?.messages || []).filter(x => !before.has(x.id) && x.from !== 'me');
       // Only messages sent count toward the day; 「[不发]」 does not.
       if (!fresh.length) return false;
@@ -827,14 +875,16 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
   /** 群里自己聊: a group talks a round on its own (they may keep quiet: [不发]); counted for the day when it did. */
   function groupTalk(t, time = Date.now()) {
-    const task = deliveryQueue.then(() => groupTalkOne(t, time));
+    const valid = chatGuard(), task = deliveryQueue.then(() => valid() ? groupTalkOne(t, time, valid) : false);
     deliveryQueue = task.catch(() => {}); return task;
   }
-  async function groupTalkOne(t, time) {
+  async function groupTalkOne(t, time, valid) {
     const limit = settings().chat.proactive?.dailyMax;
     if (limit > 0 && today().n >= limit) return false;
     const before = new Set((await backend.chats.get(t.id))?.messages.map(x => x.id) || []);
+    if (!valid()) return false;
     const saved = await reply(t.id, {nudge: true, cue: 'group', time}).catch(() => null);
+    if (!valid()) return false;
     const fresh = (saved?.messages || []).filter(x => !before.has(x.id) && x.from !== 'me');
     if (!fresh.length) return false;
     counted();

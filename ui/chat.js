@@ -72,7 +72,11 @@ const WAVE_HEIGHTS = [6, 12, 18, 10, 16, 22, 14, 8, 16, 20, 12, 7, 14, 10];
 const PIPS = {1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8]};
 
 export function chatApp(ctx) {
+  const dialogs = new Set(), dialog = ctx.dialog;
+  ctx = {...ctx, dialog: (...args) => { const d = dialog(...args); dialogs.add(d); d.onClose(() => dialogs.delete(d)); return d; }};
   const {api} = ctx, v = createView(ctx, 'chat');
+  const spaceKey = () => { const s = api.phoneSpace?.(); return s?.on ? JSON.stringify([api.readState().chat.partition, s.key, s.save || '', !!s.pending]) : ''; };
+  let viewedSpace = spaceKey(), spaceTurn = 0;
   // 备注: what the user calls a contact, shown in the chat app only (the models keep using the real name).
   const remarks = () => api.readState().chat.remarks || {};
   /** What a person's avatar and 备注 are kept under: their name, or a key of their own when another card has someone of that name. */
@@ -146,8 +150,9 @@ export function chatApp(ctx) {
     return `<div class="qq-page" data-page="${tab}">${html}</div><nav class="qq-tabs" aria-label="聊天">${tabs.map(([k, l, g]) => `<button type="button" data-action="tab" data-tab="${k}" aria-pressed="${tab === k}"><span class="qq-tab-ico">${icon(g)}${k === 'msgs' && unreadTotal ? `<b class="badge">${unreadTotal > 99 ? '99+' : unreadTotal}</b>` : k === 'moments' && freshMoments && tab !== 'moments' ? '<b class="qq-dot-new" aria-label="有新动态"></b>' : ''}</span><span>${l}</span></button>`).join('')}</nav>`;
   }
   async function counts() {
-    unreadTotal = await api.chatUnread().catch(() => 0);
-    freshMoments = momentsNew(await api.listMoments().catch(() => []), momentsSeen(ctx.win));
+    const ticket = epoch, unread = await api.chatUnread().catch(() => 0);
+    const fresh = momentsNew(await api.listMoments().catch(() => []), momentsSeen(ctx.win));
+    if (!v.disposed && ticket === epoch) { unreadTotal = unread; freshMoments = fresh; }
   }
 
   const engine = name => ctx.engineOf(name);
@@ -930,7 +935,10 @@ export function chatApp(ctx) {
   // Leaving a list (消息 or 联系人) for a chat, a profile or a form remembers where it was; coming back to the same tab puts it there again.
   let shownMode = 'list', left = null;
   function render(again = false) {
+    if (v.disposed) return;
+    syncSpace();
     const ticket = ++epoch;
+    if (api.phoneSpace?.().pending) { v.root.classList.remove('chat-mode', 'qq-mode'); return v.draw(empty('正在等待酒馆聊天', '聊天标识尚未就绪，暂不显示其他聊天的内容。加载完成后会自动跟随；若仍未恢复，请重新打开这段酒馆聊天。', 'chat')); }
     if (shownMode === 'list' && mode !== 'list') left = {tab, top: v.root.scrollTop};
     const back = shownMode !== 'list' && mode === 'list' && left?.tab === tab ? left.top : null;
     shownMode = mode;
@@ -956,11 +964,11 @@ export function chatApp(ctx) {
   async function post(messages) {
     stick = true;
     failed.delete(threadId);
-    const asked = asks;
-    await api.appendChat(threadId, messages, {read: true});
+    const asked = asks, id = threadId, turn = spaceTurn;
+    await api.appendChat(id, messages, {read: true});
     // 自动回复: the user's own words (not a letter, which takes its time) set the clock going — unless a reply was asked
-    // for by hand while they were being kept.
-    if (asked === asks && messages.some(m => m.from === 'me' && !['system', 'letter'].includes(m.kind)) && !thread?.watch) scheduleAuto(threadId);
+    // for by hand while they were being kept, or the tavern switched to another phone meanwhile.
+    if (turn === spaceTurn && asked === asks && messages.some(m => m.from === 'me' && !['system', 'letter'].includes(m.kind)) && !thread?.watch) scheduleAuto(id);
   }
   // ---------- 自动回复 (0.9.36, off unless turned on in 聊天设置) ----------
   // A few seconds after the user's last message — and no typing since — the other side answers by itself. Asking for a
@@ -2275,9 +2283,10 @@ export function chatApp(ctx) {
   /** A group's own picture goes with its last window. */
   function forgetGroupAvatar(t) { if (api.getState().chat.avatars?.['g:' + groupKey(t)]) api.saveChatOptions({avatars: {['g:' + groupKey(t)]: null}}); }
   async function openDm(name) {
-    const existing = currentDm(await api.listThreads(), name);
+    const turn = spaceTurn, existing = currentDm(await api.listThreads(), name);
+    if (v.disposed || turn !== spaceTurn) return;
     const t = existing || await api.createThread({type: 'dm', members: [name]});
-    open(t.id);
+    if (!v.disposed && turn === spaceTurn) open(t.id);
   }
   function threadMenu() {
     const group = thread.type === 'group';
@@ -2797,6 +2806,23 @@ export function chatApp(ctx) {
     if (tab !== 'msgs') { tab = 'msgs'; render(); return true; }
     return false;
   };
+  // A space event is not an ordinary redraw: close the previous phone synchronously and invalidate every pending drawing.
+  function syncSpace() {
+    const key = spaceKey();
+    if (viewedSpace === key) return false;
+    viewedSpace = key; spaceTurn++; epoch++; hitTurn++;
+    ctx.win.clearTimeout(hitTimer); ctx.win.clearTimeout(pace.timer); ctx.win.clearTimeout(autoTimer);
+    autoFor = null; pace.thread = null; pace.queue = []; pace.hidden.clear(); pace.timer = 0;
+    mode = 'list'; tab = 'msgs'; threadId = thread = null; selecting = quote = panel = contactDraft = null;
+    search = ''; searching = false; hits = jump = null; knownThreads = []; unreadTotal = freshMoments = 0;
+    drawn.thread = null; older = unreadMark = null; unseen = 0; left = null; rowCache.clear(); petsLayer.detach(); moments.dispose(); moments.only('');
+    v.root.classList.remove('chat-mode'); v.draw('');
+    for (const d of [...dialogs]) d.close();
+    return true;
+  }
+  const stopSpace = api.subscribe?.(event => {
+    if (!v.disposed && ['space', 'partition', 'settings'].includes(event.type) && syncSpace()) Promise.resolve(render()).catch(error => ctx.notify(error.message));
+  });
   v.refresh = () => render();
   v.onAvatars = () => render();
   v.openThread = open;
@@ -2817,7 +2843,7 @@ export function chatApp(ctx) {
   /** 动态, from the tavern page's 动态小窗. */
   v.showMoments = () => { mode = 'list'; tab = 'moments'; threadId = null; search = ''; moments.only(''); v.root.scrollTop = 0; render(); };
   const dispose = v.dispose;
-  v.dispose = () => { ctx.win.clearTimeout(pace.timer); moments.dispose(); for (const url of new Set([...photoURLs.values(), ...bubbleURLs.values()])) if (url) ctx.win.URL.revokeObjectURL(url); photoURLs.clear(); bubbleURLs.clear(); dispose(); };
+  v.dispose = () => { stopSpace?.(); ctx.win.clearTimeout(hitTimer); ctx.win.clearTimeout(autoTimer); ctx.win.clearTimeout(pace.timer); moments.dispose(); for (const url of new Set([...photoURLs.values(), ...bubbleURLs.values()])) if (url) ctx.win.URL.revokeObjectURL(url); photoURLs.clear(); bubbleURLs.clear(); dispose(); };
   render();
   return v;
 }

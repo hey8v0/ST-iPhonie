@@ -709,6 +709,8 @@ export interface BackendFacade {
     fishSubscriptionTrace(): {at: number, ev: string, msg: string}[];
     fishSubscriptionDisconnect(): void;
     fishSubscriptionBalance(): Promise<string>;
+    /** Subscription credits, not developer API dollars; null means the service returned no recognizable balance. */
+    fishSubscriptionCredits(refresh?: boolean): Promise<{remaining: number | null; detail: string; checkedAt: number}>;
     /** The last 4 characters of the saved key ('' when none is saved), to tell which key is in use. */
     keyHint(engine: KeyEngine): string;
     /** Several keys (Fish): how many, which one is in use (1-based) and how many were refused while this page is open. */
@@ -1087,7 +1089,7 @@ export interface BackendFacade {
     deleteForum(id: string): Promise<boolean>;
     clearForum(): Promise<number>;
     /** 分区: the character card open in the tavern ({key, name, members}) and whether 分区 is on. */
-    phoneSpace(): { key: string; name: string; members: string[]; on: boolean };
+    phoneSpace(): { key: string; name: string; members: string[]; save?: string; on: boolean; pending?: boolean };
     /** The roles as the card open now sees them: of those sharing a name, only its own. */
     rolesHere(): Route[];
     /** 查手机 snapshots, newest first; one per character. */
