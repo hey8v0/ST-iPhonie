@@ -72,14 +72,44 @@ export class FishMcp {
   /** What an abandoned login left in the mailbox (the tab was reloaded before its finally) is dropped here. */
   sweepStale(now = Date.now()) {
     const s = this.storage(); if (!s || typeof s.key !== 'function') return;
-    const drop = [];
-    for (let i = 0; i < (Number(s.length) || 0); i++) {
-      const key = s.key(i);
-      if (typeof key !== 'string' || !key.startsWith('sttts.fishLogin.')) continue;
-      if (key.startsWith('sttts.fishLogin.result.')) { drop.push(key); continue; }
-      try { const at = Number(JSON.parse(s.getItem(key) || 'null')?.at); if (!Number.isFinite(at) || now - at > FISH_LOGIN_TTL) drop.push(key); } catch { drop.push(key); }
+    const keys = [];
+    for (let i = 0; i < (Number(s.length) || 0); i++) { const k = s.key(i); if (typeof k === 'string' && k.startsWith('sttts.fishLogin.')) keys.push(k); }
+    const drop = new Set();
+    for (const key of keys) {
+      if (!key.startsWith('sttts.fishLogin.pending.')) continue;
+      let at = NaN;
+      try { at = Number(JSON.parse(s.getItem(key) || 'null')?.at); } catch { at = NaN; }
+      if (!Number.isFinite(at) || now - at > FISH_LOGIN_TTL) { drop.add(key); drop.add(key.replace('pending.', 'result.')); }
+    }
+    for (const key of keys) {
+      if (!key.startsWith('sttts.fishLogin.result.')) continue;
+      const pending = key.replace('result.', 'pending.');
+      if (!keys.includes(pending)) drop.add(key);
     }
     for (const key of drop) { try { s.removeItem(key); } catch { /* storage may be read-only */ } }
+  }
+  /** 0.9.56: a login whose answer came after the tavern had stopped waiting is finished here — next time the engine page
+   *  opens, or when the user asks. Only what this device kept for fifteen minutes is used; the code is taken once. */
+  async resume(now = Date.now()) {
+    if (this.cancelLogin) return this.status();
+    const s = this.storage(); if (!s || typeof s.key !== 'function') return this.status();
+    this.sweepStale(now);
+    const keys = [];
+    for (let i = 0; i < (Number(s.length) || 0); i++) { const k = s.key(i); if (typeof k === 'string' && k.startsWith('sttts.fishLogin.pending.')) keys.push(k); }
+    for (const key of keys) {
+      let pending = null; try { pending = JSON.parse(s.getItem(key) || 'null'); } catch { pending = null; }
+      if (!pending?.state || !pending.verifier || !pending.clientId || !pending.redirect) continue;
+      let result = null; try { result = JSON.parse(s.getItem(key.replace('pending.', 'result.')) || 'null'); } catch { result = null; }
+      if (!result?.code || result.state !== pending.state) continue;
+      try {
+        const token = await this.token({grant_type: 'authorization_code', code: result.code, redirect_uri: pending.redirect, client_id: pending.clientId, code_verifier: pending.verifier, resource: RESOURCE});
+        if (!token.access_token) throw Error('Fish 没有返回有效登录凭据');
+        this.save({...token, client_id: pending.clientId, expires_at: Date.now() + Number(token.expires_in || 3600) * 1000});
+        this.ready = null; this.session = ''; this.tools = null;
+      } finally { try { s.removeItem(key); s.removeItem(key.replace('pending.', 'result.')); } catch { /* nothing to tidy */ } }
+      if (this.status().connected) return this.status();
+    }
+    return this.status();
   }
   async connect() {
     if (this.cancelLogin) throw Error('Fish 登录窗口已打开，请先完成登录');
@@ -95,7 +125,9 @@ export class FishMcp {
       const challenge = base64(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
       const target = new URL('https://fish.audio/oauth/authorize');
       target.search = new URLSearchParams({client_id: client.client_id, redirect_uri: redirect, response_type: 'code', scope: 'mcp', state, code_challenge: challenge, code_challenge_method: 'S256', resource: RESOURCE});
-      storage.setItem(keys.pending, JSON.stringify({state, at: Date.now()}));
+      // The verifier goes with the pending record so a late callback can still be finished by a page that was
+      // reloaded meanwhile (0.9.56): it lives on this device for fifteen minutes and never leaves it.
+      storage.setItem(keys.pending, JSON.stringify({state, at: Date.now(), verifier, clientId: client.client_id, redirect}));
       const code = await new Promise((resolve, reject) => {
         const accept = data => {
           if (data?.type !== 'st-iphonie-fish-oauth' || data.state !== state) return;
@@ -122,7 +154,10 @@ export class FishMcp {
       this.save({...token, client_id: client.client_id, expires_at: Date.now() + Number(token.expires_in || 3600) * 1000});
       this.ready = null; this.session = ''; this.tools = null;
       return this.status();
-    } finally { cleanup(); storage.removeItem(keys.pending); storage.removeItem(keys.result); try { popup.close(); } catch { /* detached login tab */ } }
+    } catch (error) {
+      // Keep the pending record: a callback that comes after the deadline is finished by resume() next time the page opens.
+      throw error;
+    } finally { cleanup(); if (this.credentials()?.access_token) { storage.removeItem(keys.pending); storage.removeItem(keys.result); } try { popup.close(); } catch { /* detached login tab */ } }
   }
   async access() {
     const c = this.credentials();

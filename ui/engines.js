@@ -622,6 +622,10 @@ export function enginesApp(ctx) {
     v.root.scrollTop = 0;
     // Fish: which models web pages may call now (drama-3 moves there once Fish adds it); drawn again when that changed.
     if (id === 'fish') api.fishCatalog?.().then(changed => { if (changed && engine === 'fish') render(); }).catch(() => {});
+    // 0.9.56: a Fish login that answered after the tavern stopped waiting is finished right here, without asking again.
+    if (id === 'fish' && !api.fishSubscriptionStatus?.().connected) api.fishSubscriptionResume?.().then(status => {
+      if (status?.connected && engine === 'fish') { drafts.delete('fish'); render(); ctx.notify('Fish 订阅账户已连接（补上了刚才那次登录）'); }
+    }).catch(() => {});
   }
   v.edit = edit;
   // The card in front of its pocket lifts out and becomes the card on top of its page, and goes back in (ui/carry.js).
