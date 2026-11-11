@@ -27,7 +27,7 @@ export function cleanBedtime(value) {
   const steps = value.steps.slice(0, 2000).filter(s => ['say', 'ambience', 'sfx'].includes(s.kind)).map(s => s.kind === 'say'
     ? {kind: 'say', role, text: String(s.text || '').slice(0, 16000), translation: String(s.translation || '').slice(0, 16000), emotion: String(s.emotion || 'calm').slice(0, 100)}
     : {kind: s.kind, name: String(s.name || '').slice(0, 40), stop: !!s.stop, strength: '轻'});
-  return {role, kind: BEDTIME_TYPES.includes(value.kind) ? value.kind : BEDTIME_TYPES[0], minutes: [3, 8, 15].includes(Number(value.minutes)) ? Number(value.minutes) : 3,
+  return {role, roleId: String(value.roleId || '').slice(0, 100), kind: BEDTIME_TYPES.includes(value.kind) ? value.kind : BEDTIME_TYPES[0], minutes: [3, 8, 15].includes(Number(value.minutes)) ? Number(value.minutes) : 3,
     sourceId: String(value.sourceId || '').slice(0, 100), chapter: Number(value.chapter) || 0, paragraph: Number(value.paragraph) || 0, steps};
 }
 

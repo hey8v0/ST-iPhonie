@@ -100,7 +100,8 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
   let cache = {pending: [], owners: [], loaded: false};
   function refresh() {
     Promise.resolve().then(() => backend.wardrobe()).then(w => {
-      const owners = [...new Set([...w.items, ...w.sets, ...w.wears].map(d => d.owner))];
+      const known = new Set(['me', ...settings().routes.map(r => ownerKey(r.name))]);
+      const owners = [...new Set([...w.items, ...w.sets, ...w.wears].map(d => d.owner))].filter(o => known.has(o));
       cache = {pending: w.wears.filter(x => x.pending), owners, loaded: true};
     }).catch(() => {});
   }

@@ -647,14 +647,15 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   // How often the phone reaches out, whoever does it (the story writing <phone>, or someone asked by nudge): with
   // `every` set, the phone has one turn in that many story replies — the story may send then, else someone is asked;
   // at most dailyMax times a day (0: no limit). Out of turn the story is not told it can use the phone at all.
-  let quiet = 0;
+  let quiet = 0, sessionDay = null, deliveryQueue = Promise.resolve();
   function today() {
     let day = {day: new Date().toDateString(), n: 0};
-    try { const saved = JSON.parse(localStorage.getItem(DAY_KEY) || 'null'); if (saved?.day === day.day) day = saved; } catch { /* this session only */ }
+    try { const saved = JSON.parse(localStorage.getItem(DAY_KEY) || 'null'); if (saved?.day === day.day) day = saved; } catch { if (sessionDay?.day === day.day) day = sessionDay; }
     return day;
   }
   function counted() {
     const day = today(); day.n++;
+    sessionDay = day;
     try { localStorage.setItem(DAY_KEY, JSON.stringify(day)); } catch { /* counted for this session */ }
   }
   /** Whether the next story reply may reach out on the phone. */
@@ -669,7 +670,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     const o = settings().chat.proactive || {};
     if (!o.on) { quiet = 0; return; }
     const sent = await deliver(id);
-    if (sent) { quiet = 0; counted(); return; }
+    if (sent) { quiet = 0; return; }
     if (!(o.every > 0) || ++quiet < o.every) return;
     quiet = 0;
     if (!(o.dailyMax > 0 && today().n >= o.dailyMax)) await nudge();
@@ -678,7 +679,12 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    * What a story reply sent to the phone (<phone>) arrives, once per version of the reply: private messages (and
    * photos, money, calls, 朋友圈…) to each sender's chat, <phone group="…"> to that group. Returns how many arrived.
    */
-  async function deliver(id) {
+  function deliver(id) {
+    const task = deliveryQueue.then(() => deliverOne(id));
+    deliveryQueue = task.catch(() => {});
+    return task;
+  }
+  async function deliverOne(id) {
     const ctx = context(), s = settings();
     if (!s.chat.proactive?.on) return 0;
     const index = Number.isInteger(Number(id)) ? Number(id) : (ctx?.chat?.length || 0) - 1, m = ctx?.chat?.[index];
@@ -690,7 +696,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       // Rolled again (重 roll, a new swipe): what the earlier version sent goes; this one sends its own.
       const gone = await withdraw(story, ver).catch(() => 0);
       if (gone && !parts.length) notice(`重新生成了这条回复，之前发到手机上的 ${gone} 条消息撤回了`);
-      if (parts.length && !sentBefore(key)) {
+      if (parts.length && phoneTurn() && !sentBefore(key)) {
         const contacts = backend.contacts(), people = contacts.map(c => ({name: c.name, voice: false}));
         // A line from someone who is not in the phone (a passer-by, the user) is left out, not given to the one before.
         const known = new Set(contacts.map(c => c.name)), named = line => line.match(/^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]/)?.[1]?.trim();
@@ -733,6 +739,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         }
       }
     }
+    if (sent) counted();
     return sent;
   }
   /**
@@ -754,7 +761,13 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
   /** On the phone's turn with nothing sent: someone is asked whether they would text first now (they may say no). cue:
    *  the real-time moment (按现实时间主动找你) — then it answers whether someone texted. */
-  async function nudge({cue = '', time = 0, name: wanted = '', outfit = ''} = {}) {
+  function nudge(options = {}) {
+    const task = deliveryQueue.then(() => nudgeOne(options));
+    deliveryQueue = task.catch(() => {}); return task;
+  }
+  async function nudgeOne({cue = '', time = 0, name: wanted = '', outfit = ''} = {}) {
+    const limit = settings().chat.proactive?.dailyMax;
+    if (limit > 0 && today().n >= limit) return false;
     const ctx = context();
     // The card's own character first, else someone from the 角色 App (or the one asked for: 查手机, 衣柜).
     // Not someone who is not friends with the user right now (either way).
@@ -813,7 +826,13 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     return cue;
   }
   /** 群里自己聊: a group talks a round on its own (they may keep quiet: [不发]); counted for the day when it did. */
-  async function groupTalk(t, time = Date.now()) {
+  function groupTalk(t, time = Date.now()) {
+    const task = deliveryQueue.then(() => groupTalkOne(t, time));
+    deliveryQueue = task.catch(() => {}); return task;
+  }
+  async function groupTalkOne(t, time) {
+    const limit = settings().chat.proactive?.dailyMax;
+    if (limit > 0 && today().n >= limit) return false;
     const before = new Set((await backend.chats.get(t.id))?.messages.map(x => x.id) || []);
     const saved = await reply(t.id, {nudge: true, cue: 'group', time}).catch(() => null);
     const fresh = (saved?.messages || []).filter(x => !before.has(x.id) && x.from !== 'me');

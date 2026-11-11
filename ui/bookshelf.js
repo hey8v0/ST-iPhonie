@@ -47,7 +47,7 @@ export function bookshelfApp(ctx) {
   function shelvesHTML(list) {
     const rows = [];
     for (let i = 0; i < list.length; i += 3) rows.push(list.slice(i, i + 3));
-    return rows.map(r => `<div class="bs-shelf"><div class="bs-row">${r.map(coverHTML).join('')}</div><div class="bs-plank" aria-hidden="true"></div><div class="bs-labels">${r.map(labelHTML).join('')}</div></div>`).join('');
+    return rows.map((r, i) => `<div class="bs-shelf" style="--grain-x:${(i * 137) % 311}px;--grain-y:${(i * 83) % 197}px;--grain-angle:${174 + i % 7}deg"><div class="bs-row">${r.map(coverHTML).join('')}</div><div class="bs-plank" aria-hidden="true"></div><div class="bs-labels">${r.map(labelHTML).join('')}</div></div>`).join('');
   }
   const categories = () => [...new Set(books.map(b => b.shelf).filter(Boolean))].sort(naturalCompare);
   function inView() {
@@ -475,7 +475,11 @@ export function bookshelfApp(ctx) {
     if (!picking) return open(el.dataset.read).catch(fail);
     const id = el.dataset.read;
     if (mark.has(id)) mark.delete(id); else mark.add(id);
-    shelf().catch(fail);
+    el.classList.toggle('picked', mark.has(id));
+    el.setAttribute('aria-pressed', String(mark.has(id)));
+    const bar = v.root.querySelector('.bs-pickbar');
+    bar.querySelector('span').textContent = mark.size ? `选了 ${mark.size} 本` : '点书选择';
+    for (const button of bar.querySelectorAll('button')) button.disabled = !mark.size;
   });
   v.on('click', '[data-more]', el => more(el.dataset.more).catch(fail));
   v.on('click', '[data-shelf]', el => { filter = el.dataset.shelf; shelf().catch(fail); });

@@ -29,6 +29,7 @@ import { DRAWN_SOURCES, FAVORITES, ALBUM_LIMITS, albumName, albumsInOrder } from
 import { paintStore } from './paint-store.js';
 import { Ledger } from './ledger.js';
 import { cleanItem, cleanSet, cleanWear, WARDROBE_LIMITS } from './wardrobe.js';
+import { FishMcp } from './fish-mcp.js';
 import { cleanTheater, GENERATOR_LIMITS } from './generator.js';
 import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, LEDGER_KINDS, premiumOf, decorKey, cents, yuan, shopGifts, normalizeGift, validateGift } from './wallet.js';
 import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, GPT_MAX_REFS, gptBase, gptSize, gptPrompt, gptGenerate, comfyUrl, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, comfyClips, comfyProgress, defaultWorkflow, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS } from './image-engines.js';
@@ -226,6 +227,7 @@ export class TTSBackend {
             prepared: audio => { this.prepared = audio; this.emit('audio-ready', this.audioInfo(audio)); },
             voiced: (engine, text) => this.ledger.voice(engine, text),
         });
+        this.providers.fishMcp = new FishMcp({scope: this.settings.scope, fetcher: this.providers.fetcher});
     }
     async initialize() {
         this.assertOpen();
@@ -2989,7 +2991,7 @@ export class TTSBackend {
     /** The 衣柜 here (this card's, with 分区): its clothes and outfits, newest first, and what each one wears; one owner's only. */
     async wardrobe(owner = '') {
         this.assertOpen();
-        const here = this.here(), rows = (await this.apps.listFrom('wardrobe:')).filter(d => inSpace(d, here) && (!owner || d.owner === owner));
+        const here = this.here(), rows = (await this.apps.listFrom('wardrobe:')).filter(d => (d.kind !== 'wardrobe-wear' || inSpace(d, here)) && (!owner || d.owner === owner));
         const newest = (a, b) => b.at - a.at;
         return { items: rows.filter(d => d.kind === 'wardrobe-item').sort(newest), sets: rows.filter(d => d.kind === 'wardrobe-set').sort(newest), wears: rows.filter(d => d.kind === 'wardrobe-wear') };
     }
@@ -3647,6 +3649,7 @@ export class TTSBackend {
             validateConnection: (engine, connection) => { try { modelCheck(engine, connection.model); return TTSParameters.validate(engine, connection); } catch (error) { return message(error); } },
             voices: (engine, connection, query) => { engineCheck(engine); return this.providers.voices(engine, connection || this.settings.connections[engine], query); },
             previewRequest: (engine, connection, route, line) => { const request = buildRequest(engine, connection || this.settings.connections[engine], route, line, this.providers.references); if (request.body.provider?.options?.['fish-audio']?.references) for (const ref of request.body.provider.options['fish-audio'].references) ref.audio = '[本地参考音频]'; if (request.body.audio?.voice?.startsWith?.('data:')) request.body.audio.voice = '[本地克隆样本：' + route.voice + ']'; return request; },
+            fishSubscriptionStatus: () => this.providers.fishMcp.status(), fishSubscriptionConnect: () => this.providers.fishMcp.connect(), fishSubscriptionDisconnect: () => this.providers.fishMcp.disconnect(), fishSubscriptionBalance: () => this.providers.fishMcp.balance(),
             status: () => this.player.snapshot(), subscribe: listener => this.subscribe(listener), levels: () => this.player.sink.levels(),
             pendingRole: () => this.player.pending, stop: () => this.player.stop(), toggle: () => this.player.toggle(), resume: () => this.player.continuePending(),
             customSetList: () => this.customSetList(), saveCustomSet: patch => this.saveCustomSet(clone(patch || {})), selectCustomSet: id => this.selectCustomSet(String(id)), deleteCustomSet: id => this.deleteCustomSet(String(id)),

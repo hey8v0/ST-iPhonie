@@ -7,15 +7,22 @@ import {createSoundHost} from './host-sounds.js';
 import {createMusicHost} from './host-music.js';
 
 export function createBedtimeHost({context, settings, backend, doc = globalThis.document, soundFactory = createSoundHost, musicFactory = createMusicHost}) {
-  let busy = false, sound = null, music = null, level = 1, voiceVolume = 1, closed = false;
+  let busy = false, sound = null, music = null, level = 1, voiceVolume = 1, closed = false, playbackRole = null;
   const lowSettings = () => ({...settings(), sounds: {...settings().sounds, enabled: true, generate: false, ambienceVolume: .12 * level, sfxVolume: .25 * level}, music: {...settings().music, volume: .12 * level, mode: 'one'}});
   const emit = status => backend.emit('bedtime', status);
   const player = createBedtimePlayer({
-    read: line => backend.speak(line), cue: step => sound?.cue(step),
+    read: line => backend.player.start([{...line, role: playbackRole.name}], () => !closed, {...settings(), routes: [playbackRole]}), cue: step => sound?.cue(step),
     gain: value => { level = value; backend.player.sink.setVolume?.(voiceVolume * value); sound?.refresh(); music?.level?.(); },
     stopAudio: () => { backend.player.stop(); sound?.close(); sound = null; music?.close(); music = null; }, onChange: emit,
   });
-  const roles = () => backend.contacts().filter(r => r.source === 'role' && r.name !== '旁白' && settings().routes.some(v => v.name === r.name && v.voice));
+  const roles = () => settings().routes.filter(r => r.name !== '旁白' && r.voice);
+  function narrator(book) {
+    const all = backend.settings?.routes || settings().routes;
+    const matches = all.filter(r => book.bedtime.roleId ? r.id === book.bedtime.roleId : r.name === book.bedtime.role);
+    if (matches.length > 1) throw Error('有多个同名讲述者，请在角色 App 确认原故事的讲述者');
+    if (!matches[0]?.voice) throw Error('讲述者的声音已移除，请先在角色 App 选好声音');
+    return matches[0];
+  }
   async function source(id, chapter = 0) {
     const row = await backend.bookshelf.get(id), file = await backend.bookshelf.files.get(id);
     if (!row || !file?.blob || row.type === 'comic') throw Error('请选择书架里的文字书');
@@ -49,16 +56,17 @@ export function createBedtimeHost({context, settings, backend, doc = globalThis.
         const got = await ask(''); steps = got.steps;
         title = got.text.match(/<title>([^<]+)<\/title>/)?.[1] || `${role.name}的睡前故事`;
       }
-      const book = await backend.library.saveBook({id: 'b-' + crypto.randomUUID(), title, author: role.name, spreads: [], bedtime: {role: role.name, kind: form.kind, minutes: form.minutes, steps, ...position}});
+      const book = await backend.library.saveBook({id: 'b-' + crypto.randomUUID(), title, author: role.name, spreads: [], bedtime: {role: role.name, roleId: role.id, kind: form.kind, minutes: form.minutes, steps, ...position}});
       backend.emit('library', {collection: 'books'}); return book;
     } finally { busy = false; emit({busy: false}); }
   }
   async function play(id, {timer = 0, song = ''} = {}) {
     const book = await backend.library.getBook(id);
     if (!book?.bedtime?.steps.length) throw Error('这个故事没有可播放的台词');
-    if (!roles().some(r => r.name === book.bedtime.role)) throw Error('讲述者的声音已移除，请先在角色 App 选好声音');
+    const role = narrator(book);
     if (!player.status().playing) voiceVolume = backend.player.sink.getVolume?.() ?? 1;
     player.stop();
+    playbackRole = role;
     return player.play(book, timer, async alive => {
       if (closed || !alive()) return;
       sound = soundFactory({context, settings: lowSettings, backend, doc});
@@ -71,5 +79,17 @@ export function createBedtimeHost({context, settings, backend, doc = globalThis.
       }
     });
   }
-  return {create, roles, source, play, stop: player.stop, status: () => ({...player.status(), busy}), close() { closed = true; player.stop(); }};
+  async function audio(id) {
+    const book = await backend.library.getBook(id);
+    if (!book?.bedtime?.steps.length) throw Error('这个故事没有可下载的台词');
+    const role = narrator(book), s = {...settings(), routes: [role]}, clips = [];
+    for (const step of book.bedtime.steps) {
+      if (step.kind !== 'say') continue;
+      const made = await backend.player.make({...step, role: role.name}, role, s, new AbortController().signal);
+      if (!made?.blob) throw Error('故事声音未能完整导出，请重试');
+      clips.push(made.blob);
+    }
+    return clips;
+  }
+  return {create, roles, source, play, audio, stop: player.stop, status: () => ({...player.status(), busy}), close() { closed = true; player.stop(); }};
 }

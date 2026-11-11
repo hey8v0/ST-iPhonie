@@ -43,6 +43,7 @@ export function enginesApp(ctx) {
     return b.kind === 'characters' ? number(b.left) : '$' + b.credit.toFixed(2);
   };
   async function loadBalance(id, refresh = false) {
+    if (id === 'fish' && api.fishSubscriptionStatus?.().connected) return;
     if (!PRICED.includes(id) || !api.keyStatus(id)) return;
     const entry = balances.get(id) || {};
     balances.set(id, {...entry, loading: true});
@@ -80,6 +81,8 @@ export function enginesApp(ctx) {
       ? [['TIER', subscription ? TIERS[subscription.tier] || '未知' : '—'], ['ANLAS', subscription ? String(subscription.anlas) : '—']]
       : id === 'custom'
         ? [['API', (st.connections.custom.params.url || '').replace(/^https?:\/\//, '').split('/')[0] || '未填写'], ['VOICES', (st.connections.custom.params.voices || []).length + ' 个']]
+      : id === 'fish' && api.fishSubscriptionStatus?.().connected
+        ? [['MODEL', 'drama-3'], ['BALANCE', '订阅积分']]
       : PRICED.includes(id) && saved
         ? [['MODEL', st.connections[id].model], [id === 'eleven' ? 'CREDITS' : 'BALANCE', balanceText(id)]]
         : [['MODEL', st.connections[id].model], ['ROLES', st.routes.filter(r => r.engine === id && r.voice).length + ' 个角色']];
@@ -87,7 +90,7 @@ export function enginesApp(ctx) {
     const attrs = tag === 'button' ? `data-action="engine" data-engine="${id}" aria-label="${name}，${front ? '点一下打开' : '点一下抽到最前面'}"` : `data-engine="${id}"`;
     const dots = comfy ? '' : `•••• •••• •••• ${api.keyHint?.(id) || '••••'}`;
     const ownApi = id === 'custom' ? (st.connections.custom.params.url || '').replace(/^https?:\/\//, '') : '';
-    const number = id === 'custom' ? (ownApi || '还没填接口地址 · 点卡片去填写') : vector ? (em.enabled ? (saved ? dots : '未绑定密钥 · 本地接口可以不填') : '没开 · 记忆用本地检索') : comfy ? d.comfy.url.replace(/^https?:\/\//, '') : llm ? (custom ? (saved ? dots : '未绑定密钥 · 点卡片去填写') : '用酒馆当前连接的模型') : saved ? dots : '未绑定密钥 · 点卡片去填写';
+    const number = id === 'fish' && api.fishSubscriptionStatus?.().connected ? '已连接 Fish 账户 · 订阅积分' : id === 'custom' ? (ownApi || '还没填接口地址 · 点卡片去填写') : vector ? (em.enabled ? (saved ? dots : '未绑定密钥 · 本地接口可以不填') : '没开 · 记忆用本地检索') : comfy ? d.comfy.url.replace(/^https?:\/\//, '') : llm ? (custom ? (saved ? dots : '未绑定密钥 · 点卡片去填写') : '用酒馆当前连接的模型') : saved ? dots : '未绑定密钥 · 点卡片去填写';
     return `<${tag} class="bank-card${tag === 'div' ? ' detail-card' : ''}" ${attrs}>${spark()}
       <span class="card-top"><span class="card-name">${name}</span><span class="card-kind">${IMAGE.includes(id) ? 'IMAGE' : song(id) ? 'MUSIC' : llm ? 'TEXT' : vector ? 'VECTOR' : 'VOICE'}${icon('nfc')}</span></span>
       <span class="card-chip"></span>
@@ -400,6 +403,7 @@ export function enginesApp(ctx) {
     return {r, switched};
   }
   function balanceGroup() {
+    if (engine === 'fish' && api.fishSubscriptionStatus?.().connected) return `<div class="group pad"><p>当前使用 Fish 网页订阅积分。余额在右上角菜单的「查看订阅积分」中查看。</p><p class="hint">订阅配音使用 Drama 3 和角色音色，其他 API 参数不传入；连接失效时会提示，不会改用 API 余额。</p></div>`;
     if (!PRICED.includes(engine)) return '';
     const saved = api.keyStatus(engine), entry = balances.get(engine) || {}, b = entry.value;
     const state = !saved ? '填写密钥后可以查看' : entry.loading && !b ? '读取中' : entry.error && !b ? '读取失败' : '';
@@ -716,6 +720,9 @@ export function enginesApp(ctx) {
       voice && !['custom','doubao'].includes(engine) && {key: 'read-voices', icon: 'refresh', label: '测试连接', note: '读一次音色列表，看密钥能不能用'},
       engine === 'fish' && api.getState().connections.fish.relay && saved && {key: 'test-fish-relay', icon: 'refresh', label: '测试中转', note: '看中转转发了哪些接口，格式不对会自动切换'},
       engine === 'fish' && {key: 'references', icon: 'wave', label: '管理参考音频'},
+      engine === 'fish' && {key: 'fish-subscription', icon: 'swap', label: api.fishSubscriptionStatus?.().connected ? '重新连接订阅账户' : '连接订阅账户', note: '在 Fish 官方页面登录；Drama 3 使用网页订阅积分'},
+      engine === 'fish' && api.fishSubscriptionStatus?.().connected && {key: 'fish-credits', icon: 'wallet', label: '查看订阅积分'},
+      engine === 'fish' && api.fishSubscriptionStatus?.().connected && {key: 'fish-disconnect', icon: 'close', label: '断开订阅账户', note: '恢复使用原来的 API 连接'},
       voice && {key: 'request-preview', icon: 'eye', label: '请求预览', note: '看看发给服务的请求长什么样'},
       engine === 'llm' && textDraft.presets.length > 1 && {key: 'text-delete', icon: 'trash', label: `删除「${textPreset().name}」这套接口`, danger: true},
       saved && {key: 'clear-key', icon: 'trash', label: engine === 'custom' || engine === 'llm' ? '清除这套接口的密钥' : voice ? '清除全部密钥' : '清除密钥', danger: true}]);
@@ -776,6 +783,9 @@ export function enginesApp(ctx) {
   v.on('click', '[data-action]', el => act(el.dataset.action, el));
   async function act(action, el) {
     switch (action) {
+      case 'fish-subscription': await api.fishSubscriptionConnect(); api.saveConnection('fish', {model: 'drama-3'}); drafts.delete('fish'); edit('fish'); ctx.notify('Fish 订阅账户已连接；角色若单独指定了模型，也需选择 drama-3'); break;
+      case 'fish-credits': ctx.dialog('Fish 订阅积分', `<p class="help-copy" style="white-space:pre-wrap">${esc(await api.fishSubscriptionBalance())}</p>`); break;
+      case 'fish-disconnect': api.fishSubscriptionDisconnect(); render(); break;
       case 'engine-more': await engineMore(el); break;
       case 'image-connections': await imageConnectionMenu(); break;
       case 'custom-sets': await customSetMenu(); break;

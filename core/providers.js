@@ -180,6 +180,7 @@ export class Providers{
   * we sent, that field is dropped and the request is sent once more; the model is remembered so later lines skip it.
   */
  async synthesize(request,signal){
+  if(request.engine==='fish'&&this.fishMcp?.status().connected){const blob=await this.fishMcp.speak(request,signal);this.onSpend?.('fish');return blob;}
   if(request.engine==='custom')return this.speakCustom(request,signal);
   const model=request.body?.model_id,body={...request.body};
   for(const field of this.refused.get(model)||[])delete body[field];

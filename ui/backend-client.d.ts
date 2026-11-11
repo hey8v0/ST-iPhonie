@@ -702,6 +702,10 @@ export interface BackendFacade {
     /** ElevenLabs or Fish balance; null without a key. Cached for a minute unless `refresh`. */
     voiceBalance(engine: 'eleven' | 'fish', refresh?: boolean): Promise<VoiceBalance | null>;
     keyStatus(engine: KeyEngine): boolean;
+    fishSubscriptionStatus(): {connected: boolean};
+    fishSubscriptionConnect(): Promise<{connected: boolean}>;
+    fishSubscriptionDisconnect(): void;
+    fishSubscriptionBalance(): Promise<string>;
     /** The last 4 characters of the saved key ('' when none is saved), to tell which key is in use. */
     keyHint(engine: KeyEngine): string;
     /** Several keys (Fish): how many, which one is in use (1-based) and how many were refused while this page is open. */
@@ -1378,6 +1382,7 @@ export interface BackendAPI extends BackendFacade {
     bedtimeStatus(): {playing: boolean; busy: boolean; id: string; index: number; text: string};
     bedtimePlay(id: string, options?: {timer?: number; song?: string}): Promise<void>;
     bedtimeStop(): void;
+    bedtimeAudio(id: string): Promise<Blob[]>;
     bookRead?(lines: BookLine[], onLine?: (index: number) => void): Promise<boolean>;
     /** 绘本: a page's ambience ('ambience', looping until another or 停), a sound ('sfx'), or 'stop' — from the 音效 library while 音效 is on (false: off). */
     bookSound?(kind: 'ambience' | 'sfx' | 'stop', name?: string): Promise<boolean>;
