@@ -9,9 +9,11 @@ import {languageName} from './core/languages.js';
 import {modelRules} from './core/state.js';
 import {NARRATOR} from './core/narration.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {tavernAssistantPresets, buildTavernPresetMessages} from './assistant-presets.js';
+import {tavernAssistantPresets} from './assistant-presets.js';
+import {generatorPresetMessages} from './generator-presets.js';
+import {requestAssistantText, hasCompletionService} from './host-assistant.js';
 
-export function createGeneratorHost({context, settings, backend, notice = () => {}, memory = null, presets = tavernAssistantPresets, personas = () => import('/scripts/personas.js'), fetcher = (...args) => globalThis.fetch(...args)}) {
+export function createGeneratorHost({context, settings, backend, notice = () => {}, memory = null, presets = tavernAssistantPresets, presetRequest = requestAssistantText, personas = () => import('/scripts/personas.js'), fetcher = (...args) => globalThis.fetch(...args)}) {
   const userName = () => context()?.name1 || '我';
   const userPersona = () => String(context()?.powerUserSettings?.persona_description || '').slice(0, 3000);
   /** The card open now (not a group): what the requests read of it. */
@@ -60,12 +62,12 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
     return Promise.resolve().then(task).finally(() => { busy = ''; backend.emit('generator', {busy: ''}); });
   }
   const ask = async (ctx, prompt) => {
-    const chosen = settings().generator;
+    const state = structuredClone(settings()), chosen = state.generator;
     if (chosen?.tavernPreset) {
       const preset = (await presets(ctx)).find(p => p.id === chosen.tavernPreset);
       if (!preset) throw Error('选中的酒馆预设已不在，请在生成器设置里重新选择');
-      const rules = buildTavernPresetMessages(preset, chosen.tavernEntries?.[preset.id], ctx);
-      prompt = [...rules.map(r => ({role: 'system', content: `【文风参考】\n${r.content}`})), ...prompt];
+      prompt = generatorPresetMessages(preset, chosen.tavernEntries?.[preset.id], ctx, prompt);
+      if (hasCompletionService(ctx)) return presetRequest(ctx, backend, state, prompt, {presetName: preset.name || preset.id.replace(/^openai:/, ''), label: '生成器', use: 'generator'});
     }
     return backend.generateText(ctx, {use: 'generator', prompt, trimNames: false});
   };
