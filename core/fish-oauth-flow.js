@@ -9,6 +9,18 @@ export const FISH_LOGIN_TTL = 15 * 60 * 1000;
 /** How far the callback's clock may run behind the tavern's before the record is only doubted, not refused. */
 export const FISH_CLOCK_SLACK = 2 * 60 * 1000;
 export const FISH_ISSUER = 'https://api.fish.audio';
+/** 0.9.57: what happened in a login, step by step, so a screen with no console can still say why it stopped. */
+export const FISH_TRACE_KEY = 'sttts.fishLogin.trace';
+export function fishTrace(storage, ev, msg = '') {
+  try {
+    const list = JSON.parse(storage.getItem(FISH_TRACE_KEY) || '[]');
+    list.push({at: Date.now(), ev: String(ev).slice(0, 24), msg: String(msg ?? '').slice(0, 160)});
+    storage.setItem(FISH_TRACE_KEY, JSON.stringify(list.slice(-24)));
+  } catch { /* nothing to record into */ }
+}
+export function fishTraceOf(storage) {
+  try { const list = JSON.parse(storage.getItem(FISH_TRACE_KEY) || '[]'); return Array.isArray(list) ? list : []; } catch { return []; }
+}
 export const fishLoginKeys = state => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(state || '')) throw Error('Fish 登录校验信息无效，请回酒馆重新连接');
   return {pending: 'sttts.fishLogin.pending.' + state, result: 'sttts.fishLogin.result.' + state};

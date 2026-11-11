@@ -1,7 +1,7 @@
 // Fish's web-plan OAuth/MCP connection. Credentials stay in this browser, outside settings/backups.
 // Official protocol: https://docs.fish.audio/overview/mcp (2026-11-11).
 import {joinAudio} from './audio-join.js';
-import {fishLoginKeys, FISH_LOGIN_TTL} from './fish-oauth-flow.js';
+import {fishLoginKeys, FISH_LOGIN_TTL, fishTrace, fishTraceOf} from './fish-oauth-flow.js';
 const API = 'https://api.fish.audio', RESOURCE = API + '/mcp';
 const random = () => { const b = crypto.getRandomValues(new Uint8Array(32)); return base64(b); };
 const base64 = b => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -69,6 +69,8 @@ export class FishMcp {
   async token(body) {
     return this.json(API + '/oauth/token', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams(body)});
   }
+  /** 0.9.57: the last few steps of a login, for the 「连接诊断」 sheet (null when storage cannot be read). */
+  trace() { const s = this.storage(); return s ? fishTraceOf(s) : []; }
   /** What an abandoned login left in the mailbox (the tab was reloaded before its finally) is dropped here. */
   sweepStale(now = Date.now()) {
     const s = this.storage(); if (!s || typeof s.key !== 'function') return;
@@ -101,19 +103,24 @@ export class FishMcp {
       if (!pending?.state || !pending.verifier || !pending.clientId || !pending.redirect) continue;
       let result = null; try { result = JSON.parse(s.getItem(key.replace('pending.', 'result.')) || 'null'); } catch { result = null; }
       if (!result?.code || result.state !== pending.state) continue;
+      fishTrace(s, 'resume', pending.state.slice(0, 6));
       try {
         const token = await this.token({grant_type: 'authorization_code', code: result.code, redirect_uri: pending.redirect, client_id: pending.clientId, code_verifier: pending.verifier, resource: RESOURCE});
         if (!token.access_token) throw Error('Fish 没有返回有效登录凭据');
         this.save({...token, client_id: pending.clientId, expires_at: Date.now() + Number(token.expires_in || 3600) * 1000});
         this.ready = null; this.session = ''; this.tools = null;
+        fishTrace(s, 'token-ok');
       } finally { try { s.removeItem(key); s.removeItem(key.replace('pending.', 'result.')); } catch { /* nothing to tidy */ } }
       if (this.status().connected) return this.status();
     }
+    if (keys.length) fishTrace(this.storage(), 'resume-waiting', `${keys.length} 条待办`);
     return this.status();
   }
   async connect() {
     if (this.cancelLogin) throw Error('Fish 登录窗口已打开，请先完成登录');
     this.sweepStale();
+    const traceStore = this.storage();
+    fishTrace(traceStore, 'connect-start');
     const win = this.win, popup = win.open('about:blank', 'st-iphonie-fish', 'popup,width=560,height=720');
     if (!popup) throw Error('请允许弹出窗口，再连接 Fish 订阅账户');
     const epoch = ++this.epoch, state = random(), verifier = random(), redirect = new URL('../fish-oauth.html', import.meta.url).href;
@@ -128,10 +135,12 @@ export class FishMcp {
       // The verifier goes with the pending record so a late callback can still be finished by a page that was
       // reloaded meanwhile (0.9.56): it lives on this device for fifteen minutes and never leaves it.
       storage.setItem(keys.pending, JSON.stringify({state, at: Date.now(), verifier, clientId: client.client_id, redirect}));
+      fishTrace(storage, 'pending-written', state.slice(0, 6));
       const code = await new Promise((resolve, reject) => {
         const accept = data => {
           if (data?.type !== 'st-iphonie-fish-oauth' || data.state !== state) return;
           if (data.iss && data.iss !== API) { reject(Error('Fish 登录来源不符')); return; }
+          fishTrace(storage, 'tavern-read', state.slice(0, 6));
           if (data.error || !data.code) reject(Error('Fish 登录未授权，请重试')); else resolve(data.code);
         };
         const listener = e => {
@@ -148,10 +157,13 @@ export class FishMcp {
         win.addEventListener('message', listener); win.addEventListener('storage', onStorage); win.addEventListener('focus', read); popup.location.href = target.href;
       });
       cleanup();
-      const token = await this.token({grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: client.client_id, code_verifier: verifier, resource: RESOURCE});
+      let token;
+      try { token = await this.token({grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: client.client_id, code_verifier: verifier, resource: RESOURCE}); }
+      catch (error) { fishTrace(storage, 'token-fail', error.message); throw error; }
       if (epoch !== this.epoch) throw Error('Fish 连接已取消');
       if (!token.access_token) throw Error('Fish 没有返回有效登录凭据');
       this.save({...token, client_id: client.client_id, expires_at: Date.now() + Number(token.expires_in || 3600) * 1000});
+      fishTrace(storage, 'token-ok');
       this.ready = null; this.session = ''; this.tools = null;
       return this.status();
     } catch (error) {

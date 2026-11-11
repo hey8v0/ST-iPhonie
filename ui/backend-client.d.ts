@@ -705,6 +705,7 @@ export interface BackendFacade {
     fishSubscriptionStatus(): {connected: boolean};
     fishSubscriptionConnect(): Promise<{connected: boolean}>;
     fishSubscriptionResume(): Promise<{connected: boolean}>;
+    fishSubscriptionTrace(): {at: number, ev: string, msg: string}[];
     fishSubscriptionDisconnect(): void;
     fishSubscriptionBalance(): Promise<string>;
     /** The last 4 characters of the saved key ('' when none is saved), to tell which key is in use. */

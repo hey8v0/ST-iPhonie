@@ -726,6 +726,7 @@ export function enginesApp(ctx) {
       engine === 'fish' && {key: 'references', icon: 'wave', label: '管理参考音频'},
       engine === 'fish' && {key: 'fish-subscription', icon: 'swap', label: api.fishSubscriptionStatus?.().connected ? '重新连接订阅账户' : '连接订阅账户', note: '在 Fish 官方页面登录；Drama 3 使用网页订阅积分'},
       engine === 'fish' && api.fishSubscriptionStatus?.().connected && {key: 'fish-credits', icon: 'wallet', label: '查看订阅积分'},
+      engine === 'fish' && {key: 'fish-diagnose', icon: 'info', label: '连接诊断', note: '登录卡住时，看它走到哪一步' },
       engine === 'fish' && api.fishSubscriptionStatus?.().connected && {key: 'fish-disconnect', icon: 'close', label: '断开订阅账户', note: '恢复使用原来的 API 连接'},
       voice && {key: 'request-preview', icon: 'eye', label: '请求预览', note: '看看发给服务的请求长什么样'},
       engine === 'llm' && textDraft.presets.length > 1 && {key: 'text-delete', icon: 'trash', label: `删除「${textPreset().name}」这套接口`, danger: true},
@@ -788,6 +789,13 @@ export function enginesApp(ctx) {
   async function act(action, el) {
     switch (action) {
       case 'fish-subscription': await api.fishSubscriptionConnect(); api.saveConnection('fish', {model: 'drama-3'}); drafts.delete('fish'); edit('fish'); ctx.notify('Fish 订阅账户已连接；角色若单独指定了模型，也需选择 drama-3'); break;
+      case 'fish-diagnose': {
+        const steps = api.fishSubscriptionTrace?.() || [], pad = n => String(n).padStart(2, '0');
+        ctx.dialog('Fish 连接诊断', `<p class="help-copy">版本 ${esc(api.getState()?.plugin?.version || '')} · ${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>
+          <div class="group pad"><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;line-height:1.65;margin:0">${steps.map(s => { const d = new Date(s.at); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}  ${esc(s.ev)}${s.msg ? '  ' + esc(s.msg) : ''}`; }).join('\n') || '—'}</pre></div>
+          <p class="hint">callback-ok / tavern-read / token-ok 都在，说明登录走完了；停在 callback-error 看后面的原因；只有 callback 没有 tavern-read，说明酒馆这一页没收到（把酒馆页面重新打开一次再试）。</p>`);
+        break;
+      }
       case 'fish-credits': ctx.dialog('Fish 订阅积分', `<p class="help-copy" style="white-space:pre-wrap">${esc(await api.fishSubscriptionBalance())}</p>`); break;
       case 'fish-disconnect': api.fishSubscriptionDisconnect(); render(); break;
       case 'engine-more': await engineMore(el); break;
