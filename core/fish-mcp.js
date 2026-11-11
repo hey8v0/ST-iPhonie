@@ -69,8 +69,21 @@ export class FishMcp {
   async token(body) {
     return this.json(API + '/oauth/token', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams(body)});
   }
+  /** What an abandoned login left in the mailbox (the tab was reloaded before its finally) is dropped here. */
+  sweepStale(now = Date.now()) {
+    const s = this.storage(); if (!s || typeof s.key !== 'function') return;
+    const drop = [];
+    for (let i = 0; i < (Number(s.length) || 0); i++) {
+      const key = s.key(i);
+      if (typeof key !== 'string' || !key.startsWith('sttts.fishLogin.')) continue;
+      if (key.startsWith('sttts.fishLogin.result.')) { drop.push(key); continue; }
+      try { const at = Number(JSON.parse(s.getItem(key) || 'null')?.at); if (!Number.isFinite(at) || now - at > FISH_LOGIN_TTL) drop.push(key); } catch { drop.push(key); }
+    }
+    for (const key of drop) { try { s.removeItem(key); } catch { /* storage may be read-only */ } }
+  }
   async connect() {
     if (this.cancelLogin) throw Error('Fish 登录窗口已打开，请先完成登录');
+    this.sweepStale();
     const win = this.win, popup = win.open('about:blank', 'st-iphonie-fish', 'popup,width=560,height=720');
     if (!popup) throw Error('请允许弹出窗口，再连接 Fish 订阅账户');
     const epoch = ++this.epoch, state = random(), verifier = random(), redirect = new URL('../fish-oauth.html', import.meta.url).href;
