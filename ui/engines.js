@@ -622,12 +622,28 @@ export function enginesApp(ctx) {
     v.root.scrollTop = 0;
     // Fish: which models web pages may call now (drama-3 moves there once Fish adds it); drawn again when that changed.
     if (id === 'fish') api.fishCatalog?.().then(changed => { if (changed && engine === 'fish') render(); }).catch(() => {});
+    if (id === 'fish') fishConnected = !!api.fishSubscriptionStatus?.().connected;
     // 0.9.56: a Fish login that answered after the tavern stopped waiting is finished right here, without asking again.
     if (id === 'fish' && !api.fishSubscriptionStatus?.().connected) api.fishSubscriptionResume?.().then(status => {
       if (status?.connected && engine === 'fish') { drafts.delete('fish'); render(); ctx.notify('Fish 订阅账户已连接（补上了刚才那次登录）'); }
     }).catch(() => {});
   }
   v.edit = edit;
+  // 0.9.58: the callback page finishes the Fish login itself. Coming back to the phone (or the page becoming visible) is
+  // all it takes for the engine page to notice the new credentials — no waiting on the other tab, which a phone freezes.
+  let fishConnected = null;
+  const fishWake = () => {
+    if (v.disposed || engine !== 'fish') return;
+    const connected = !!api.fishSubscriptionStatus?.().connected;
+    if (fishConnected === null) { fishConnected = connected; return; }
+    if (connected === fishConnected) return;
+    fishConnected = connected;
+    if (connected) { drafts.delete('fish'); render(); ctx.notify('Fish 订阅账户已连接'); }
+  };
+  ctx.doc.addEventListener('visibilitychange', () => { if (!ctx.doc.hidden) fishWake(); });
+  ctx.win.addEventListener('focus', fishWake);
+  const enginesDispose = v.dispose;
+  v.dispose = (...args) => { ctx.win.removeEventListener('focus', fishWake); enginesDispose?.(...args); };
   // The card in front of its pocket lifts out and becomes the card on top of its page, and goes back in (ui/carry.js).
   function lift(from) {
     const to = v.root.querySelector('.detail-card');

@@ -9,6 +9,29 @@ export const FISH_LOGIN_TTL = 15 * 60 * 1000;
 /** How far the callback's clock may run behind the tavern's before the record is only doubted, not refused. */
 export const FISH_CLOCK_SLACK = 2 * 60 * 1000;
 export const FISH_ISSUER = 'https://api.fish.audio';
+export const FISH_TOKEN_URL = 'https://api.fish.audio/oauth/token';
+export const FISH_RESOURCE = 'https://api.fish.audio/mcp';
+/** Where a login's credentials live (one place per settings space, so the phone and the callback page agree). */
+export const fishCredentialKey = scope => 'sttts.fishOAuth.' + (scope || '');
+/** The pending record a callback belongs to, or null. */
+export function readFishPending(storage, state) {
+  try { const keys = fishLoginKeys(state); return JSON.parse(storage.getItem(keys.pending) || 'null'); } catch { return null; }
+}
+/**
+ * 0.9.58: the callback page finishes the login itself. A phone freezes a background tab while the user logs in, so the
+ * tavern often never reads the mailbox; the tab that comes back is the callback, and it has everything the exchange
+ * needs (the pending record keeps the verifier). The credentials land where the tavern keeps them, so the phone only has
+ * to look again.
+ */
+export async function exchangeFishCode({code, verifier, clientId, redirect, scope, fetcher = globalThis.fetch?.bind(globalThis), now = Date.now()}) {
+  const r = await fetcher(FISH_TOKEN_URL, {method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(30000),
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: new URLSearchParams({grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: clientId, code_verifier: verifier, resource: FISH_RESOURCE})});
+  if (!r.ok) throw Error(`Fish 连接失败（${r.status}），请重新连接订阅账户`);
+  const token = await r.json();
+  if (!token?.access_token) throw Error('Fish 没有返回有效登录凭据');
+  return {...token, client_id: clientId, expires_at: now + Number(token.expires_in || 3600) * 1000, ...(scope ? {scope} : {})};
+}
 /** 0.9.57: what happened in a login, step by step, so a screen with no console can still say why it stopped. */
 export const FISH_TRACE_KEY = 'sttts.fishLogin.trace';
 export function fishTrace(storage, ev, msg = '') {

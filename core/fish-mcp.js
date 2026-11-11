@@ -1,7 +1,7 @@
 // Fish's web-plan OAuth/MCP connection. Credentials stay in this browser, outside settings/backups.
 // Official protocol: https://docs.fish.audio/overview/mcp (2026-11-11).
 import {joinAudio} from './audio-join.js';
-import {fishLoginKeys, FISH_LOGIN_TTL, fishTrace, fishTraceOf} from './fish-oauth-flow.js';
+import {fishLoginKeys, FISH_LOGIN_TTL, fishTrace, fishTraceOf, fishCredentialKey} from './fish-oauth-flow.js';
 const API = 'https://api.fish.audio', RESOURCE = API + '/mcp';
 const random = () => { const b = crypto.getRandomValues(new Uint8Array(32)); return base64(b); };
 const base64 = b => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -54,7 +54,7 @@ export function audioLinks(result) {
 }
 export class FishMcp {
   constructor({scope = '', win = globalThis, fetcher = globalThis.fetch?.bind(globalThis), storage = () => win.localStorage} = {}) {
-    this.win = win; this.fetcher = fetcher; this.storage = storage; this.key = 'sttts.fishOAuth.' + scope;
+    this.win = win; this.fetcher = fetcher; this.storage = storage; this.scope = scope; this.key = fishCredentialKey(scope);
     this.session = ''; this.sequence = 0; this.epoch = 0; this.ready = null; this.refreshing = null; this.tools = null;
   }
   credentials() { try { return JSON.parse(this.storage()?.getItem(this.key) || 'null'); } catch { return null; } }
@@ -134,7 +134,7 @@ export class FishMcp {
       target.search = new URLSearchParams({client_id: client.client_id, redirect_uri: redirect, response_type: 'code', scope: 'mcp', state, code_challenge: challenge, code_challenge_method: 'S256', resource: RESOURCE});
       // The verifier goes with the pending record so a late callback can still be finished by a page that was
       // reloaded meanwhile (0.9.56): it lives on this device for fifteen minutes and never leaves it.
-      storage.setItem(keys.pending, JSON.stringify({state, at: Date.now(), verifier, clientId: client.client_id, redirect}));
+      storage.setItem(keys.pending, JSON.stringify({state, at: Date.now(), verifier, clientId: client.client_id, redirect, scope: this.scope}));
       fishTrace(storage, 'pending-written', state.slice(0, 6));
       const code = await new Promise((resolve, reject) => {
         const accept = data => {
