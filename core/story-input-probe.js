@@ -38,6 +38,6 @@ export function storyInputProbe(win, {paused = () => false} = {}) {
   watchFrames();
   return {watchFrames,snapshot(){
     watchFrames();const d=win.document;
-    return {version:'0.9.71',width:win.innerWidth,clientWidth:d.documentElement.clientWidth,visualWidth:Math.round(win.visualViewport?.width||0),scale:win.visualViewport?.scale||1,touchPoints:win.navigator?.maxTouchPoints||0,touchStart:'ontouchstart' in win,frames:realms.size-1,events:rows.map(row=>({...row}))};
+    return {version:'0.9.73',width:win.innerWidth,clientWidth:d.documentElement.clientWidth,visualWidth:Math.round(win.visualViewport?.width||0),scale:win.visualViewport?.scale||1,touchPoints:win.navigator?.maxTouchPoints||0,touchStart:'ontouchstart' in win,frames:realms.size-1,events:rows.map(row=>({...row}))};
   },dispose(){disposed=true;win.document.removeEventListener('load',loaded,true);for(const v of realms.values())v.stop();realms.clear();for(const timer of timers)win.clearTimeout(timer);timers.clear();rows.length=0;}};
 }

@@ -15,6 +15,7 @@ export function buildReport(f) {
   const copies = f.plugin?.copies || [];
   add('插件', [
     item('info', '版本', f.plugin?.version || '读不到'),
+    ...(f.plugin?.runtime?[item(f.plugin.version&&f.plugin.version!==f.plugin.runtime?'warn':'info','实际运行版本',f.plugin.runtime+(f.plugin.version&&f.plugin.version!==f.plugin.runtime?'；与已安装版本不同，请刷新酒馆后再检查':''))]:[]),
     copies.length > 1
       ? item('error', `装了 ${copies.length} 份插件`, `同时加载了：${copies.join('、')}。只留一份，把其余的文件夹删掉后刷新页面。`)
       : f.plugin?.oldCopy

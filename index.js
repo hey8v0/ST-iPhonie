@@ -41,6 +41,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null;
 import { createSongHost } from './host-song.js';
+const RUNTIME_VERSION='0.9.73';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,inputProbe=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -249,7 +250,7 @@ async function diagnose(){const ctx=context(),s=settings,json=url=>fetch(url,{ca
  let reply=null;for(let i=ctx.chat.length-1;i>=0&&!reply;i--){const m=ctx.chat[i];if(!m||m.is_user||m.is_system)continue;const raw=m.mes||'',lines=parsed(raw).lines,element=document.querySelector(`#chat .mes[mesid="${i}"]`),ours=element?element.querySelectorAll(`[data-sttts-line][data-sttts-token="${marker}"]`).length:0,all=element?element.querySelectorAll('[data-sttts-line]').length:0;
   reply={id:i,name:m.name||'',lines:lines.length,tags:/<tts\b/i.test(raw),problems:dialogueProblems(raw,lines),inChat:!!element,waves:ours,stale:all-ours,iframes:element?element.querySelectorAll('iframe').length:0,covered:coverSeen?.id===i?coverSeen.what:'',streaming:i===liveId()};}
  const where={in_chat:'聊天中',in_prompt:'系统提示后',before_prompt:'系统提示前'};
- return {at:Date.now(),plugin:{version:manifest?.version||'',copies:[...globalThis.__stIphonieCopies],oldCopy:!!globalThis.__stTtsPanelBridge},tavern:{version:version?.pkgVersion||'',mode:legacy?'legacy':'hook'},
+ return {at:Date.now(),plugin:{version:manifest?.version||'',runtime:RUNTIME_VERSION,copies:[...globalThis.__stIphonieCopies],oldCopy:!!globalThis.__stTtsPanelBridge},tavern:{version:version?.pkgVersion||'',mode:legacy?'legacy':'hook'},
   browser:{secure:globalThis.isSecureContext!==false,audio:!!globalThis.AudioContext,indexedDB:!!globalThis.indexedDB,probe:await probeStorage().catch(()=>null),storage:storage?.quota?{usage:storage.usage,quota:storage.quota}:null,localStorage:localStorageSize(),keys:backend?.keyStore?.fallback?'localStorage':'indexedDB',agent:browserName()},extensions:thirdParty(),
   voice:{enabled:voiceOn(),wavesHidden:settings.general.hideStoryWaves===true,preset:preset?.name||'',format:preset?.format||'',injection:preset?.injection?`${where[preset.injection.position]||preset.injection.position}${preset.injection.position==='in_chat'?' · 深度 '+preset.injection.depth:''}`:'',roles:s.routes.map(r=>({name:r.name,voice:voiced(r)}))},
   input:inputProbe?.snapshot(),keys,draw:{engine:s.draw?.engine||'nai',enabled:!!s.draw?.enabled,comfy:s.draw?.engine==='comfy'?{url:s.draw.comfy.url,model:s.draw.comfy.model,workflow:!!s.draw.comfy.workflow}:null},reply,errors:recent.slice()};}
@@ -340,7 +341,11 @@ const BACK_SPARE=6,OVER='.sttts-vn,.sttts-viewer,.sttts-ask,[data-sttts-owned=ga
 let guards=0,unwinding=false;
 // A touch screen. Some Android browsers and app web views do not say (pointer: coarse): any touch point counts too.
 const touchBack=()=>!!(globalThis.matchMedia?.('(pointer: coarse)').matches||globalThis.matchMedia?.('(any-pointer: coarse)').matches||globalThis.navigator?.maxTouchPoints>0||'ontouchstart' in globalThis);
-const oursOpen=()=>!!panel?.open||!!document.querySelector(OVER);
+// Live class collections stay current without querying the whole chat on every
+// pointerdown/up, touchend, click and dblclick. A long TTS chat made those repeated
+// full-page selector scans slow enough to interfere with other gesture handlers.
+const overlayLayers=['sttts-vn','sttts-viewer','sttts-ask','sttts-game'].map(name=>document.getElementsByClassName?.(name)||[]);
+const oursOpen=()=>!!panel?.open||overlayLayers.some(list=>list.length>0);
 function armBack(force=false){if(unwinding||!(force||oursOpen())||!touchBack())return;try{while(guards<BACK_SPARE){history.pushState({...(history.state&&typeof history.state==='object'?history.state:{}),stttsPhone:marker},'');guards++;}}catch{}}
 function unarmBack(){const n=guards;guards=0;if(n&&history.state?.stttsPhone===marker){unwinding=true;try{history.go(-n);}catch{unwinding=false;}}}
 // Something of ours opened or closed: lay the entries (an opening comes from a touch), or take them away when all is closed.
@@ -371,8 +376,9 @@ globalThis.addEventListener?.('popstate',()=>{
 const OPENERS='.sttts-pic,.sttts-pic-zoom,[data-sttts-pic-action],[data-sttts-action],[data-sttts-tools],.sttts-context-menu,#sttts-open,#sttts-wand-entry,#sttts-floating,[data-sttts-owned]';
 let preArmed=0;
 const touched=e=>{
- if(e?.type==='pointerdown'&&!oursOpen()&&e.target?.closest?.(OPENERS)&&!guards){armBack(true);clearTimeout(preArmed);preArmed=setTimeout(()=>{if(!oursOpen())unarmBack();},1500);return;}
- if(guards<BACK_SPARE){armBack();setTimeout(armBack,0);}
+ const opened=oursOpen();
+ if(e?.type==='pointerdown'&&!opened&&!guards&&e.target?.closest?.(OPENERS)){armBack(true);clearTimeout(preArmed);preArmed=setTimeout(()=>{if(!oursOpen())unarmBack();},1500);return;}
+ if(opened&&guards<BACK_SPARE){armBack();setTimeout(armBack,0);}
 };
 // touchend too: on a touch screen it is the lifting of the finger that counts as the user's own touch for the browser.
 function listenTouches(win){for(const type of ['pointerdown','pointerup','touchend','click','dblclick','keydown'])win.addEventListener?.(type,touched,false);}
@@ -391,7 +397,7 @@ async function gameSaveOf(name){if(!backend)return null;if(backend.settings?.syn
 function openGame(name){
  if(!GAMES.has(name))throw Error('没有这个游戏');
  closeGame();if(panel?.open)panel.close();
- const el=document.createElement('div');el.dataset.stttsOwned='game';el.style.cssText='position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;z-index:32010;overflow:hidden;background:#0c0b12;';
+ const el=document.createElement('div');el.dataset.stttsOwned='game';el.className='sttts-game';el.style.cssText='position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;z-index:32010;overflow:hidden;background:#0c0b12;';
  const f=document.createElement('iframe');f.src=new URL(`ui/indie/${name}/play.html`,base).href;f.allow='fullscreen; gamepad';f.allowFullscreen=true;f.style.cssText='border:0;width:100%;height:100%;display:block;';
  const answer=reply=>f.contentWindow?.postMessage(reply,location.origin);
  const message=e=>{if(e.source!==f.contentWindow)return;const d=e.data;
