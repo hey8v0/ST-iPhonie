@@ -30,6 +30,7 @@ import { paintStore } from './paint-store.js';
 import { Ledger } from './ledger.js';
 import { cleanItem, cleanSet, cleanWear, WARDROBE_LIMITS } from './wardrobe.js';
 import { FishMcp } from './fish-mcp.js';
+import {fishTavernProxy} from './fish-transport.js';
 import { cleanTheater, GENERATOR_LIMITS } from './generator.js';
 import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, LEDGER_KINDS, premiumOf, decorKey, cents, yuan, shopGifts, normalizeGift, validateGift } from './wallet.js';
 import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, GPT_MAX_REFS, gptBase, gptSize, gptPrompt, gptGenerate, comfyUrl, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, comfyClips, comfyProgress, defaultWorkflow, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS } from './image-engines.js';
@@ -151,6 +152,7 @@ export class TTSBackend {
         this.persist = persist;
         this.notify = notify;
         this.providers = providers;
+        this.providers.elevenConnection = () => this.settings.connections.eleven;
         // 自己的接口 that does not let web pages ask it: asked through the tavern's own proxy, with the tavern's login.
         if (!this.providers.proxy) this.providers.proxy = (url, init, signal) => this.proxyFetch('/proxy/' + encodeURIComponent(url), { ...init, credentials: 'same-origin', redirect: 'error', signal });
         // Voice balances (ElevenLabs, Fish) read for the engine cards; a new audio marks them out of date.
@@ -228,7 +230,7 @@ export class TTSBackend {
             prepared: audio => { this.prepared = audio; this.emit('audio-ready', this.audioInfo(audio)); },
             voiced: (engine, text) => this.ledger.voice(engine, text),
         });
-        this.providers.fishMcp = new FishMcp({scope: this.settings.scope, fetcher: this.providers.fetcher});
+        this.providers.fishMcp = new FishMcp({scope: this.settings.scope, fetcher: this.providers.fetcher, notice: this.notify, proxy: fishTavernProxy({fetcher: imageFetch, headers: tavernHeaders})});
     }
     async initialize() {
         this.assertOpen();
@@ -666,7 +668,7 @@ export class TTSBackend {
         if (!patch || typeof patch !== 'object' || Array.isArray(patch) || ('params' in patch && (!patch.params || typeof patch.params !== 'object' || Array.isArray(patch.params)))) throw Error('引擎设置格式无效');
         patch = clone(patch);
         // Fish relay: an address checked like the NovelAI one ('' = straight to Fish). A new address: the balance is read again.
-        if (engine === 'fish' && 'relay' in patch) { patch.relay = relayUrl(patch.relay, undefined, FISH_PATHS); if (patch.relay !== this.settings.connections.fish.relay) this.balances.delete('fish'); }
+        if (['fish','eleven'].includes(engine) && 'relay' in patch) { patch.relay = relayUrl(patch.relay, undefined, engine === 'fish' ? FISH_PATHS : /\/(?:v[12]\/(?:text-to-speech(?:\/[^/]+)?|voices(?:\/[^/]+)?|user\/subscription|sound-generation)|v[12])$/i); if (patch.relay !== this.settings.connections[engine].relay) this.balances.delete(engine); }
         else delete patch.relay;
         if (engine === 'fish' && 'relayApi' in patch) { if (!['fish', 'openai'].includes(patch.relayApi)) throw Error('中转接口格式无效'); this.balances.delete('fish'); }
         else if (engine !== 'fish') delete patch.relayApi;

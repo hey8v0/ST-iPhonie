@@ -6,13 +6,14 @@ import {promptText} from './prompt-rules.js';
 import {parseDialogue} from './protocol.js';
 import {NARRATOR} from './narration.js';
 
-export const OPENING_LENGTHS = Object.freeze([['short', '简短', '约 150–250 字'], ['medium', '适中', '约 350–600 字'], ['long', '详细', '约 700–1000 字']]);
-export const PERSONA_LENGTHS = Object.freeze([['short', '简短', '约 150 字'], ['medium', '适中', '约 300 字'], ['long', '详细', '约 600 字']]);
-export const THEATER_LENGTHS = Object.freeze([['short', '短', '十来句'], ['medium', '中', '二十句左右'], ['long', '长', '三四十句']]);
-export const GENERATOR_LIMITS = Object.freeze({brief: 500, focus: 200, wish: 500, opening: 8000, persona: 4000, name: 40, directions: 6, title: 40, direction: 300, theaters: 200, lines: 80, line: 600, html: 150000});
+const FREE_LENGTHS = [['free', '不限定', '按用户指令完整写完，不额外限制篇幅'], ['custom', '自定字数', '按用户要求的篇幅']];
+export const OPENING_LENGTHS = Object.freeze([['short', '简短', '约 150–250 字'], ['medium', '适中', '约 350–600 字'], ['long', '详细', '约 700–1000 字'], ...FREE_LENGTHS]);
+export const PERSONA_LENGTHS = Object.freeze([['short', '简短', '约 150 字'], ['medium', '适中', '约 300 字'], ['long', '详细', '约 600 字'], ...FREE_LENGTHS]);
+export const THEATER_LENGTHS = Object.freeze([['short', '短', '十来句'], ['medium', '中', '二十句左右'], ['long', '长', '三四十句'], ...FREE_LENGTHS]);
+export const GENERATOR_LIMITS = Object.freeze({brief: Infinity, focus: Infinity, wish: Infinity, opening: Infinity, persona: Infinity, name: 40, directions: 6, title: 40, direction: 300, theaters: 200, lines: Infinity, line: Infinity, html: Infinity});
 const L = GENERATOR_LIMITS;
 
-const lengthOf = (list, key) => (list.find(x => x[0] === key) || list[1])[2];
+const lengthOf = (list, key) => /^\d+$/.test(String(key)) && Number(key) > 0 ? `约 ${key} 字` : (list.find(x => x[0] === key) || list[1])[2];
 const unthink = text => String(text ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
 const unfence = text => String(text ?? '').replace(/^\s*```[\w-]*[ \t]*\n?/, '').replace(/\n?```\s*$/, '').trim();
 const oneLine = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -44,7 +45,7 @@ export function castText(cast = [], {card = null, named = false} = {}) {
 /** brief: the situation asked for ('' = 随机); before + wish: 「照这句改一改」 of a version. */
 export function openingRequest({prompts = {}, card = null, user = '我', persona = '', lore = '', cast = [], brief = '', focus = '', length = 'medium', before = '', wish = ''}) {
   const values = {'用户': user, '角色卡': cardText(card, user), '人物': castText(cast, {card}), '已有开场白': greetings(card, user), '用户设定': String(persona || '').trim(), '世界书': String(lore || '').trim(),
-    '情境': oneLine(brief, L.brief), '出场人物': oneLine(focus, L.focus), '篇幅': lengthOf(OPENING_LENGTHS, length), '原来的开场白': block(before, L.opening), '想怎么改': oneLine(wish, L.wish)};
+    '情境': block(brief, L.brief), '出场人物': block(focus, L.focus), '篇幅': lengthOf(OPENING_LENGTHS, length), '原来的开场白': block(before, L.opening), '想怎么改': block(wish, L.wish)};
   return [{role: 'system', content: promptText(prompts, 'opening', 'system', values)}, {role: 'user', content: promptText(prompts, 'opening', 'ask', values)}];
 }
 /** An opening as the model wrote it: its paragraphs, without a fence or a wrapping tag. */
@@ -56,7 +57,7 @@ export const cleanOpening = text => block(unfence(unthink(text)).replace(/^<(ope
  * the one in use, for who {{用户}} is when the new person is someone of theirs.
  */
 export function personaRequest({prompts = {}, card = null, user = '我', persona = '', cast = [], lore = '', wish = '', length = 'medium'}) {
-  const values = {'用户': user, '用户设定': String(persona || '').trim(), '角色卡': cardText(card, user), '人物': castText(cast, {card, named: true}), '世界书': String(lore || '').trim(), '想要': oneLine(wish, L.wish), '篇幅': lengthOf(PERSONA_LENGTHS, length)};
+  const values = {'用户': user, '用户设定': String(persona || '').trim(), '角色卡': cardText(card, user), '人物': castText(cast, {card, named: true}), '世界书': String(lore || '').trim(), '想要': block(wish, L.wish), '篇幅': lengthOf(PERSONA_LENGTHS, length)};
   return [{role: 'system', content: promptText(prompts, 'persona', 'system', values)}, {role: 'user', content: promptText(prompts, 'persona', 'ask', values)}];
 }
 /** The name a card-shaped 人设 carries: its <名字_CharacterCard> tag, else its 姓名 / 名字 line. */
@@ -79,7 +80,7 @@ export function parsePersona(text) {
 // ---------- 接下来的走向 ----------
 export function directionsRequest({prompts = {}, card = null, user = '我', persona = '', lore = '', cast = [], earlier = '', story = [], count = 4, wish = ''}) {
   const values = {'用户': user, '角色卡': cardText(card, user), '人物': castText(cast, {card}), '用户设定': String(persona || '').trim(), '世界书': String(lore || '').trim(), '更早的剧情': String(earlier || '').trim(),
-    '最近的剧情': storyText(story), '几个': count, '想要': oneLine(wish, L.wish)};
+    '最近的剧情': storyText(story), '几个': count, '想要': block(wish, L.wish)};
   return [{role: 'system', content: promptText(prompts, 'direction', 'system', values)}, {role: 'user', content: promptText(prompts, 'direction', 'ask', values)}];
 }
 /** [{title, text}] from lines like 「标题｜会发生什么」 (numbered or bulleted too); at most six. */
@@ -104,13 +105,13 @@ export const directionText = (prompts, d, user = '我') => promptText(prompts, '
  * voiced: [{name, language}] of them with a voice (a script writes their lines as the story's voice lines).
  */
 export function theaterRequest({prompts = {}, form = {}, card = null, user = '我', persona = '', lore = '', earlier = '', story = [], cast = [], voiced = [], voiceFormat = '', voiceRules = ''}) {
-  const fromStory = form.source !== 'card', script = form.kind !== 'card';
+  const fromStory = form.source !== 'card', custom = form.kind === 'custom', script = !custom && form.kind !== 'card';
   const values = {'用户': user, '角色卡': cardText(card, user), '用户设定': String(persona || '').trim(), '世界书': String(lore || '').trim(),
-    '更早的剧情': fromStory ? String(earlier || '').trim() : '', '最近的剧情': fromStory ? storyText(story) : '', '来自剧情': fromStory, '剧本': script, '卡片': !script,
+    '更早的剧情': fromStory ? String(earlier || '').trim() : '', '最近的剧情': fromStory ? storyText(story) : '', '来自剧情': fromStory, '剧本': script, '卡片': !custom && !script,
     '人物': cast.map(c => `- ${c.name}：${block(c.persona, 1200).replace(/\n+/g, ' ') || '（按角色卡和剧情里的表现来）'}`).join('\n'), '名单': [...new Set([...cast.map(c => c.name), user, NARRATOR])].join('、'),
     '语音': script && voiced.length > 0, '语音名单': voiced.map(v => v.name).join('、'), '语音格式': voiceFormat, '语音语言': voiced.map(v => `${v.name}说${v.language}`).join('，'),
-    '朗读规则': script && voiced.length ? String(voiceRules || '').trim() : '', '篇幅': lengthOf(THEATER_LENGTHS, form.length), '想看什么': oneLine(form.wish, L.wish), '出场人物': oneLine(form.focus, L.focus)};
-  return [{role: 'system', content: promptText(prompts, 'theater', 'system', values)}, {role: 'user', content: promptText(prompts, 'theater', 'ask', values)}];
+    '朗读规则': script && voiced.length ? String(voiceRules || '').trim() : '', '篇幅': lengthOf(THEATER_LENGTHS, form.length), '想看什么': block(form.wish, L.wish), '出场人物': block(form.focus, L.focus)};
+  return [{role: 'system', content: promptText(prompts, 'theater', custom ? 'custom' : 'system', values)}, {role: 'user', content: promptText(prompts, 'theater', 'ask', values)}];
 }
 const line = (role, text, translation = text, emotion = 'calm') => ({role, text: String(text).slice(0, L.line), translation: String(translation || text).slice(0, L.line), emotion: String(emotion || 'calm').slice(0, 40)});
 /**
@@ -131,6 +132,12 @@ function narrationWords(said, voiceFormat) {
  * story's voice lines, the others as plain words), {title, html} for a card.
  */
 export function parseTheater(text, {kind = 'script', voiceFormat = '', voiced = []} = {}) {
+  if (kind === 'custom') {
+    const body = unthink(text).replace(/^\s*<title>([^<]*)<\/title>\s*/i, '').trim();
+    if (!body) throw Error('模型没有返回小剧场内容');
+    const title = oneLine(String(text).match(/^\s*<title>([^<]*)<\/title>/i)?.[1] || body.replace(/<[^>]*>/g, '').replace(/[#`*]/g, '').split('\n')[0], L.title);
+    return {title: title || '自定义小剧场', body};
+  }
   const body = unthink(text), title = oneLine(body.match(/<title>([\s\S]*?)<\/title>/i)?.[1] ?? '', L.title), rest = body.replace(/<title>[\s\S]*?<\/title>/i, '').trim();
   if (kind === 'card') {
     const html = (rest.match(/```html?[ \t]*\n([\s\S]*?)```/i)?.[1] ?? rest.match(/<(?:!doctype|html|body|div|section|article|main|style)\b[\s\S]*$/i)?.[0] ?? '').trim();
@@ -163,12 +170,13 @@ export function parseTheater(text, {kind = 'script', voiceFormat = '', voiced = 
 }
 /** A 小剧场 kept: a script (its lines) or a card (its HTML), what it came from and the wish it was written for. */
 export function cleanTheater(doc, now = Date.now()) {
-  const form = doc?.form === 'card' ? 'card' : 'script';
+  const form = ['card', 'custom'].includes(doc?.form) ? doc.form : 'script';
   const lines = form === 'script' ? (Array.isArray(doc?.lines) ? doc.lines : []).slice(0, L.lines).filter(l => l && typeof l.text === 'string' && l.text.trim() && typeof l.role === 'string' && l.role.trim())
     .map(l => ({...line(l.role.trim().slice(0, 40), l.text, l.translation, l.emotion), ...(l.narration ? {narration: true} : {})})) : [];
   const html = form === 'card' ? String(doc?.html || '').slice(0, L.html) : '';
-  if (form === 'script' ? !lines.length : !html.trim()) throw Error('这段小剧场是空的');
+  const body = form === 'custom' ? String(doc?.body || '').trim() : '';
+  if (form === 'script' ? !lines.length : form === 'custom' ? !body : !html.trim()) throw Error('这段小剧场是空的');
   const id = /^theater:[\w-]{4,80}$/.test(doc?.id || '') ? doc.id : 'theater:' + uuid();
-  return {id, kind: 'theater', form, title: oneLine(doc?.title, L.title) || '小剧场', ...(form === 'script' ? {lines} : {html}), source: doc?.source === 'card' ? 'card' : 'story',
-    wish: oneLine(doc?.wish, L.wish), at: time(doc?.at, now), ...space(doc)};
+  return {id, kind: 'theater', form, title: oneLine(doc?.title, L.title) || '小剧场', ...(form === 'script' ? {lines} : form === 'custom' ? {body} : {html}), source: doc?.source === 'card' ? 'card' : 'story',
+    wish: block(doc?.wish, L.wish), at: time(doc?.at, now), ...space(doc)};
 }

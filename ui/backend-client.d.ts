@@ -440,7 +440,7 @@ export interface WardrobeSet { id: string; kind: 'wardrobe-set'; owner: string; 
 export interface WardrobeWear { id: string; kind: 'wardrobe-wear'; owner: string; text: string; from: 'phone' | 'story'; pending: boolean; at: number; }
 /** 小剧场 (core/generator.js): a script's line (旁白 lines are narration) or a card's HTML. */
 export interface TheaterLine { role: string; text: string; translation: string; emotion: string; narration?: boolean; }
-export interface Theater { id: string; kind: 'theater'; form: 'script' | 'card'; title: string; lines?: TheaterLine[]; html?: string; source: 'story' | 'card'; wish: string; at: number; space?: string; save?: string; }
+export interface Theater { id: string; kind: 'theater'; form: 'script' | 'card' | 'custom'; title: string; lines?: TheaterLine[]; html?: string; body?: string; source: 'story' | 'card'; wish: string; at: number; space?: string; save?: string; }
 export interface GeneratorDirection { title: string; text: string; }
 export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; /** when the user last turned down a 好友申请 */ refused?: number; }
 export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; silenced?: Record<string, number>; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 黑名单: what they sent meanwhile (held, never in the chat) and their 好友申请; refused: when the user last turned one down. The list carries count instead of held. */ blocked?: {at: number; held?: {kind: string; text: string; at: number}[]; count?: number; requests: {text: string; at: number}[]; refused?: number}; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
@@ -1298,7 +1298,7 @@ export interface BackendAPI extends BackendFacade {
     generatorDirections(form: { wish?: string }): Promise<GeneratorDirection[]>;
     generatorSteer(direction: GeneratorDirection | null): GeneratorDirection | null;
     generatorSteering(): GeneratorDirection | null;
-    generatorTheater(form: { kind?: 'script' | 'card'; source?: 'story' | 'card'; length?: string; wish?: string; focus?: string }): Promise<Theater>;
+    generatorTheater(form: { kind?: 'script' | 'card' | 'custom'; source?: 'story' | 'card'; length?: string; wish?: string; focus?: string }): Promise<Theater>;
     generatorPlay(id: string): Promise<unknown>;
     /** Friends react to the user's post. */
     momentsReact(id: string): Promise<MomentPost>;

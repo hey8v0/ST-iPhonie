@@ -45,3 +45,13 @@
 .gen-theater-main small{margin:0;color:var(--ink2)}
 .gen-theater-main[aria-pressed=true] strong{color:var(--accent-ink)}
 .gen-theaters .round-button{flex:none;width:34px;height:34px;box-shadow:none;background:transparent;color:var(--ink2)}
+.gen-seg{flex-wrap:wrap}
+.gen-seg:has([data-action$="-length"]){border-radius:22px}
+.gen-seg [data-action$="-length"]{flex:1 0 28%;padding:6px 8px}
+.gen-template-tools{display:flex;justify-content:flex-end;margin:8px 0}
+.gen-template-preview{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-line;color:var(--ink2);font-size:12px;line-height:1.5}
+.gen-template-list strong{font-size:14px}
+.gen-template-list .sw-body{min-width:0}
+.gen-template-list .style-group-body[data-closed]{display:none}
+.gen-template-list .style-group-inner{padding-left:18px}
+.gen-card-frame{max-height:none}

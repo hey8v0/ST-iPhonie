@@ -189,7 +189,7 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
   /** form: {kind 'script' | 'card', source 'story' | 'card', length, wish, focus}. Kept; answers what was kept. */
   function theater(form = {}) {
     return run('theater', async () => {
-      const ctx = context(), c = card(ctx), s = settings(), preset = activeChatPreset(s.chat), user = userName(), fromStory = form.source !== 'card', script = form.kind !== 'card';
+      const ctx = context(), c = card(ctx), s = settings(), preset = activeChatPreset(s.chat), user = userName(), fromStory = form.source !== 'card', kind = ['card', 'custom'].includes(form.kind) ? form.kind : 'script', script = kind === 'script';
       const story = fromStory ? await readStoryLines(ctx?.chat || [], preset, user) : [];
       if (!c && !story.length) throw Error('先在酒馆里打开一张角色卡');
       const cast = castOf(c, ctx);
@@ -197,8 +197,8 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
       const lw = await lore(c, [...castPersonas(cast), ...story.map(r => `${r.name}: ${r.text}`)], [form.wish, form.focus, ...castNames(cast)]);
       const voiceFormat = backend.voiceFormat();
       const prompt = theaterRequest({prompts: s.promptRules, form, card: c, user, persona: userPersona(), lore: lw, earlier: fromStory ? memory?.storyMemory?.() || '' : '', story, cast, voiced, voiceFormat, voiceRules: voiced.length ? modelRules(s, voiced.map(v => v.name)) : ''});
-      const got = parseTheater(await ask(ctx, prompt), {kind: script ? 'script' : 'card', voiceFormat, voiced: voiced.map(v => v.name)});
-      return backend.saveTheater({...got, form: script ? 'script' : 'card', source: fromStory ? 'story' : 'card', wish: String(form.wish || '')});
+      const got = parseTheater(await ask(ctx, prompt), {kind, voiceFormat, voiced: voiced.map(v => v.name)});
+      return backend.saveTheater({...got, form: kind, source: fromStory ? 'story' : 'card', wish: String(form.wish || '')});
     });
   }
   /** A script read aloud: the roles with their voices; the 旁白 lines only while 整篇朗读 is on. */

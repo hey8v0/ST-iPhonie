@@ -96,6 +96,8 @@ function unavailable(key,f,c){const p=c.params,k=f.key;
 }
 /** Fish Audio's address, or the relay (中转) the user set: every Fish request (speech, voices, balance) goes there. */
 export const FISH_API='https://api.fish.audio';
+export const ELEVEN_API='https://api.elevenlabs.io';
+export const elevenBase=c=>typeof c?.relay==='string' && c.relay ? c.relay.replace(/\/+$/,'').replace(/\/v[12]$/i,'') : ELEVEN_API;
 // Which models Fish's compat endpoint (the one web pages may call) serves. GET /compat/v1/models is read once a page
 // (Providers.fishCatalog); until then, the list as checked on 2026-10-14. A model not there (drama-3 so far) goes to
 // Fish's own /v1/tts, which answers no CORS preflight: through a relay, or through the tavern's proxy (enableCorsProxy).
@@ -125,7 +127,7 @@ export const fishBase=c=>typeof c?.relay==='string'&&(proxyAddress(c.relay)||/^h
 export const fishOpenAI=c=>!!(c?.relay&&c.relayApi==='openai');
 /** The speech address of an OpenAI-form relay. Its address is often written up to /v1 (as OpenAI services are): not twice. */
 export const openaiSpeech=base=>String(base).replace(/\/v1$/i,'')+'/v1/audio/speech';
-function normalize(key,c){if(key==='fish'){c.relay=typeof c.relay==='string'?c.relay.trim().replace(/\/+$/,''):'';c.relayApi=c.relayApi==='openai'?'openai':'fish';}for(const f of catalogs[key].groups.flatMap(g=>g.fields)){if(f.type==='select'){const opts=allowed(key,f,c);if(!opts.some(([v])=>v===c.params[f.key]))c.params[f.key]=opts.find(([v])=>v===f.value)?.[0]??opts[0]?.[0];}}if(key==='mini'&&c.params['voice_setting.latex_read'])c.params.language_boost='Chinese';}
+function normalize(key,c){if(key==='eleven')c.relay=typeof c.relay==='string'?c.relay.trim().replace(/\/+$/,''):'';if(key==='fish'){c.relay=typeof c.relay==='string'?c.relay.trim().replace(/\/+$/,''):'';c.relayApi=c.relayApi==='openai'?'openai':'fish';}for(const f of catalogs[key].groups.flatMap(g=>g.fields)){if(f.type==='select'){const opts=allowed(key,f,c);if(!opts.some(([v])=>v===c.params[f.key]))c.params[f.key]=opts.find(([v])=>v===f.value)?.[0]??opts[0]?.[0];}}if(key==='mini'&&c.params['voice_setting.latex_read'])c.params.language_boost='Chinese';}
 function activeParameters(key,c){const out={};for(const f of catalogs[key].groups.flatMap(g=>g.fields)){if(unavailable(key,f,c))continue;const v=c.params[f.key];if(v===''||v===undefined||Array.isArray(v)&&!v.length)continue;out[f.key]=structuredClone(v);}return out;}
 function setPath(target,key,value){const parts=key.split('.');let node=target;for(const part of parts.slice(0,-1))node=node[part]??=( {} );node[parts.at(-1)]=value;}
 // ElevenLabs defaults are left out of requests: a model may reject a field it does not know even when it holds the default
@@ -141,7 +143,7 @@ function requestPreview(key,c,voice='角色音色 ID',text='雨还没停。再�
   return {url:'https://api.xiaomimimo.com/v1/chat/completions',body:{model,messages:[...(style?[{role:'user',content:style}]:[]),{role:'assistant',content:text}],audio}};}
  if(key==='mini'){body.model=model;body.text=text;body.voice_setting??={};body.voice_setting.voice_id=body.timbre_weights?.length?'':voice;return {url:'https://'+(c.region==='cn'?'api.minimaxi.com':c.region==='uw'?'api-uw.minimax.io':'api.minimax.io')+'/v1/t2a_v2',body};}
  if(model.startsWith('eleven_v3')&&typeof body.voice_settings?.stability==='number')body.voice_settings.stability=[0,.5,1].reduce((a,b)=>Math.abs(b-body.voice_settings.stability)<Math.abs(a-body.voice_settings.stability)?b:a);
- body.model_id=model;body.text=text;return {url:'https://api.elevenlabs.io/v1/text-to-speech/'+encodeURIComponent(voice),query,body};
+ body.model_id=model;body.text=text;return {url:elevenBase(c)+'/v1/text-to-speech/'+encodeURIComponent(voice),query,body};
 }
 function validate(key,c){for(const f of catalogs[key].groups.flatMap(g=>g.fields)){if(unavailable(key,f,c))continue;const v=c.params[f.key];if(f.type==='number'&&v!==''){if(!Number.isFinite(v)||f.min!==undefined&&v<f.min||f.max!==undefined&&v>f.max||f.step===1&&!Number.isInteger(v))return f.label+'数值无效';}if(f.type==='rows'){if(v.length>f.max)return f.label+'条目过多';for(const row of v)for(const col of f.columns){const x=row[col.key];if(!col.optional&&col.type!=='boolean'&&(x===undefined||String(x).trim()===''))return f.label+'：请填写'+col.label;if(col.type==='number'&&(!Number.isFinite(x)||x<col.min||x>col.max||!Number.isInteger(x)))return f.label+'：'+col.label+'数值无效';}}if(['previous_request_ids','next_request_ids'].includes(f.key)&&String(v).split('\n').filter(x=>x.trim()).length>3)return f.label+'最多三个';}return '';}
 // Official tag vocabularies (2026-09-30). Fish S1 and MiniMax take a fixed list; Fish S2 and Eleven v3/v4 read
@@ -189,4 +191,4 @@ function emotionTag(key,model,emotion,text){let word=String(emotion||'').trim();
  if(key==='fish'&&fishS1(model)){const w=word.toLowerCase();return FISH_S1_EMOTIONS.includes(w)||FISH_S1_TONES.includes(w)?`(${w}) ${text}`:text;}
  if(key==='fish'||key==='eleven'&&elevenTagged(model))return /^[a-z][a-z ,'-]{1,40}$/i.test(word)?`[${word.toLowerCase()}] ${text}`:text;
  return text;}
-export const TTSParameters={fishBase,fishOpenAI,fishNative,openaiSpeech,catalogs,defaults,allowed,unavailable,normalize,activeParameters,requestPreview,validate,tags,tagNote,miniEmotion,emotionTag,vocab:{FISH_DRAMA_PAIRS,FISH_DRAMA_SOUNDS,FISH_S1_EMOTIONS,FISH_S2_TONES,FISH_S2_SOUNDS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS,MIMO_VOICES},mimoMode};
+export const TTSParameters={elevenBase,fishBase,fishOpenAI,fishNative,openaiSpeech,catalogs,defaults,allowed,unavailable,normalize,activeParameters,requestPreview,validate,tags,tagNote,miniEmotion,emotionTag,vocab:{FISH_DRAMA_PAIRS,FISH_DRAMA_SOUNDS,FISH_S1_EMOTIONS,FISH_S2_TONES,FISH_S2_SOUNDS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS,MIMO_VOICES},mimoMode};

@@ -302,7 +302,7 @@ export class Providers{
   const weight=Number(influence);
   const body={text:String(text||'').slice(0,450),model_id:String(model||'eleven_text_to_sound_v3'),prompt_influence:Number.isFinite(weight)?Math.min(1,Math.max(0,weight)):.3,...(seconds?{duration_seconds:Math.min(30,Math.max(.5,Number(seconds)))}:{}),...(loop?{loop:true}:{})};
   if(!body.text.trim())throw Error('音效描述是空的');
-  const url='https://api.elevenlabs.io/v1/sound-generation?output_format='+encodeURIComponent(String(format||'mp3_44100_128')),send=()=>this.fetch(url,{method:'POST',headers:{...this.headers('eleven'),'Content-Type':'application/json'},body:JSON.stringify(body)},signal);
+  const url=P.elevenBase(this.elevenConnection?.() || {})+'/v1/sound-generation?output_format='+encodeURIComponent(String(format||'mp3_44100_128')),send=()=>this.fetch(url,{method:'POST',headers:{...this.headers('eleven'),'Content-Type':'application/json'},body:JSON.stringify(body)},signal);
   let response=await send();const count=this.keyPool('eleven')?.count||0;
   for(let tried=1;!response.ok&&count>1&&tried<count&&KEY_SWITCH.has(response.status);tried++){if(!this.nextKey('eleven'))break;await response.body?.cancel?.().catch(()=>{});response=await send();}
   if(!response.ok)throw await httpError('eleven',response,'音效生成失败',[this.currentKey('eleven')]);
@@ -333,7 +333,7 @@ export class Providers{
   if(engine==='fish'&&P.fishOpenAI(c))throw Error('这个中转（OpenAI 格式）没有音色列表：在角色的「音色」里直接填 Fish 的音色 ID（fish.audio 网站上音色页面地址里那串字母数字）');
   if(engine==='mimo'){const mode=P.mimoMode(c.model),q=search.trim().toLowerCase();const all=mode==='preset'?P.vocab.MIMO_VOICES.map(([id,name])=>({id,name})):mode==='clone'?c.params.samples.filter(x=>String(x.name).trim()).map(x=>({id:String(x.name).trim(),name:String(x.name).trim()+' · 克隆样本'})):[];
    return {voices:q?all.filter(v=>v.name.toLowerCase().includes(q)):all,more:false,token:'',note:mode==='design'?'音色设计模型没有音色列表：在「音色」一栏写音色描述':mode==='clone'?'克隆样本在 MiMo 引擎里上传':'MiMo 内置音色'};}
-  const headers=this.headers(engine);let url,init={headers};if(engine==='fish'){url=new URL(P.fishBase(c)+'/model');url.searchParams.set('page_size','50');url.searchParams.set('page_number',String(page+1));if(search)url.searchParams.set('title',search);}else if(engine==='mini'){url=miniBase(c)+'/v1/get_voice';init={method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({voice_type:'all'})};}else{url=new URL('https://api.elevenlabs.io/v2/voices');url.searchParams.set('page_size','100');if(search)url.searchParams.set('search',search);if(token)url.searchParams.set('next_page_token',token);}
+  const headers=this.headers(engine);let url,init={headers};if(engine==='fish'){url=new URL(P.fishBase(c)+'/model');url.searchParams.set('page_size','50');url.searchParams.set('page_number',String(page+1));if(search)url.searchParams.set('title',search);}else if(engine==='mini'){url=miniBase(c)+'/v1/get_voice';init={method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({voice_type:'all'})};}else{url=new URL(P.elevenBase(c)+'/v2/voices');url.searchParams.set('page_size','100');if(search)url.searchParams.set('search',search);if(token)url.searchParams.set('next_page_token',token);}
  const response=await this.fetch(String(url),init);if(!response.ok)throw await httpError(engine,response,'音色读取失败',[this.currentKey(engine)],viaRelay(engine,String(url)));const data=await response.json();if(engine==='mini')checkMini(data);const source=engine==='fish'?data.items:engine==='mini'?[...(data.system_voice||[]),...(data.voice_cloning||[]),...(data.voice_generation||[])]:data.voices;if(!Array.isArray(source))throw Error('音色列表格式不符');return {voices:source.map(v=>({id:v._id||v.voice_id,name:v.title||v.voice_name||v.name||v.voice_id,info:Providers.voiceInfo(engine,v),likes:Number(v.like_count)||0})).filter(v=>typeof v.id==='string'),more:engine==='fish'?source.length===50:!!data.has_more,token:data.next_page_token||'',note:engine==='fish'?'已读取公开音色；此结果不能确认密钥有效':'音色列表已读取'};}
  /**
   * What is left on the account. ElevenLabs: {kind:'characters', used, limit, left, resetAt, tier, status} from
@@ -343,7 +343,7 @@ export class Providers{
   if(!['eleven','fish'].includes(engine))throw Error('这家引擎没有提供余额查询');
   const headers=this.headers(engine),key=this.currentKey(engine);
   if(engine==='eleven'){
-   const response=await this.fetch('https://api.elevenlabs.io/v1/user/subscription',{headers});
+   const response=await this.fetch(P.elevenBase(c)+'/v1/user/subscription',{headers});
    if(!response.ok)throw await httpError(engine,response,'额度读取失败',[key]);
    const d=await response.json(),used=Number(d.character_count)||0,limit=Number(d.character_limit)||0;
    return {engine,kind:'characters',used,limit,left:Math.max(0,limit-used),resetAt:Number(d.next_character_count_reset_unix)>0?Number(d.next_character_count_reset_unix)*1000:null,tier:String(d.tier||''),status:String(d.status||'')};
