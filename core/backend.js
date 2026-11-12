@@ -31,6 +31,7 @@ import { Ledger } from './ledger.js';
 import { cleanItem, cleanSet, cleanWear, WARDROBE_LIMITS } from './wardrobe.js';
 import { FishMcp } from './fish-mcp.js';
 import {fishTavernProxy} from './fish-transport.js';
+import {fishAudioProxy} from './fish-audio.js';
 import { cleanTheater, GENERATOR_LIMITS } from './generator.js';
 import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, LEDGER_KINDS, premiumOf, decorKey, cents, yuan, shopGifts, normalizeGift, validateGift } from './wallet.js';
 import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, GPT_MAX_REFS, gptBase, gptSize, gptPrompt, gptGenerate, comfyUrl, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, comfyClips, comfyProgress, defaultWorkflow, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS } from './image-engines.js';
@@ -230,7 +231,7 @@ export class TTSBackend {
             prepared: audio => { this.prepared = audio; this.emit('audio-ready', this.audioInfo(audio)); },
             voiced: (engine, text) => this.ledger.voice(engine, text),
         });
-        this.providers.fishMcp = new FishMcp({scope: this.settings.scope, fetcher: this.providers.fetcher, notice: this.notify, proxy: fishTavernProxy({fetcher: imageFetch, headers: tavernHeaders})});
+        this.providers.fishMcp = new FishMcp({scope: this.settings.scope, fetcher: this.providers.fetcher, notice: this.notify, proxy: fishTavernProxy({fetcher: imageFetch, headers: tavernHeaders}), audioProxy: fishAudioProxy({fetcher: this.requestLog.fetch(imageFetch, 'Fish 音频取回'), headers: tavernHeaders})});
     }
     async initialize() {
         this.assertOpen();

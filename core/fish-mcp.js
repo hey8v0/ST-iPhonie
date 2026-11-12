@@ -4,8 +4,11 @@ import {joinAudio} from './audio-join.js';
 import {fishCreditBalance, fishMcpHttpError, fishOAuthHttpError, fishSafeText} from './fish-mcp-results.js';
 import {fishExternalHost, fishLoginRedirect, openFishExternal} from './fish-transport.js';
 import {FishTtMcp} from './fish-tt-mcp.js';
+import {fishAudioDownload} from './fish-audio.js';
+import {sha256Hex} from './hash.js';
 import {fishLoginKeys, FISH_LOGIN_TTL, fishTrace, fishTraceOf, fishCredentialKey, acceptFishCallback, parseFishManualInput, readFishPending, fishCredentials, fishLoginCompleted, fishLoginEpoch, fishLoginOwner, fishLoginLocks, cancelFishLogins, dropFishPending, canFinishFishLogin, completeFishLogin} from './fish-oauth-flow.js';
 const API = 'https://api.fish.audio', RESOURCE = API + '/mcp';
+const speechOwner = c => c?.client_id && c?.login_state ? [c.client_id,c.login_state,c.login_epoch] : [c?.access_token];
 // Named popups are shared by clients in one host window, not by just one FishMcp instance.
 const popupOwners = new WeakMap();
 const random = () => { const b = crypto.getRandomValues(new Uint8Array(32)); return base64(b); };
@@ -58,10 +61,12 @@ export function audioLinks(result) {
   return [...new Set(links)];
 }
 export class FishMcp {
-  constructor({scope = '', win = globalThis, fetcher = globalThis.fetch?.bind(globalThis), storage = () => win.localStorage, proxy = null, notice = () => {}} = {}) {
+  constructor({scope = '', win = globalThis, fetcher = globalThis.fetch?.bind(globalThis), storage = () => win.localStorage, proxy = null, audioProxy = null, notice = () => {}} = {}) {
     this.win = win; this.fetcher = fetcher; this.storage = storage; this.scope = scope || ''; this.key = fishCredentialKey(scope);
     this.proxy = proxy; this.notice = notice; this.viaProxy = false;
     this.native = new FishTtMcp({win, storage, scope});
+    this.downloadAudio = fishAudioDownload({fetcher, proxy:audioProxy, win});
+    this.downloadsKey = 'sttts.fishDownloads.' + scope; this.downloads = null; this.downloadJobs = new Map();
     this.loginOwner = fishLoginOwner(win); this.loginLocks = fishLoginLocks(win);
     this.session = ''; this.sequence = 0; this.epoch = 0; this.ready = null; this.refreshing = null; this.tools = null;
   }
@@ -312,15 +317,56 @@ export class FishMcp {
     if (model !== 'drama-3') throw Error('订阅积分配音请将 Fish 模型设为 drama-3');
     const tool = this.tools.find(t => t.name === 'text_to_speech');
     const args = speechArguments(tool?.inputSchema, {text: body.input || body.text, voice: body.voice || body.reference_id, model});
-    const result = await this.call('text_to_speech', args, signal), links = audioLinks(result);
-    this.invalidateCredits();
-    if (!links.length) throw Error('Fish 已返回，但没有识别出音频下载链接；请到 Fish 网页查看记录，不要反复生成');
-    const blobs = [];
-    for (const url of links) {
-      const r = await this.fetcher(url, {signal, credentials: 'omit', referrerPolicy: 'no-referrer'});
-      if (!r.ok) throw Error('Fish 已生成声音，但下载失败；请到 Fish 网页查看记录');
-      const blob = await r.blob(); if (!blob.size || /json|html/.test(blob.type)) throw Error('Fish 返回的音频格式不正确'); blobs.push(blob);
+    const c = this.credentials() || {}, epoch = this.epoch;
+    const owner = speechOwner(c);
+    const key = await sha256Hex(JSON.stringify([owner,args]));
+    if (this.downloadJobs.has(key)) return this.downloadJobs.get(key);
+    const task = this.speechDownload(key, args, signal, () => epoch === this.epoch && this.status().connected && JSON.stringify(speechOwner(this.credentials())) === JSON.stringify(owner));
+    this.downloadJobs.set(key, task);
+    try { return await task; } finally { if (this.downloadJobs.get(key) === task) this.downloadJobs.delete(key); }
+  }
+  pendingDownloads() {
+    if (!this.downloads) {
+      let rows; try { rows = JSON.parse(this.storage()?.getItem(this.downloadsKey) || '[]'); } catch { rows = []; }
+      this.downloads = new Map((Array.isArray(rows) ? rows : []).filter(r => typeof r?.key === 'string' && /^[a-f0-9]{64}$/.test(r.key) && Array.isArray(r.links) && r.links.length && r.links.every(u => { try { const url = new URL(u); return url.protocol === 'https:' && !url.username && !url.password; } catch { return false; } })).map(r => [r.key,r]));
     }
-    return blobs.length === 1 ? blobs[0] : joinAudio(blobs, this.win);
+    return this.downloads;
+  }
+  keepDownloads() {
+    try { this.storage()?.setItem(this.downloadsKey, JSON.stringify([...this.pendingDownloads().values()])); }
+    catch { this.notice('已生成音频的下载进度暂时无法保存；请保留当前页面并先取回音频，不要重新生成'); }
+  }
+  async speechDownload(key, args, signal, valid) {
+    let saved = this.pendingDownloads().get(key);
+    if (!saved) {
+      if (this.pendingDownloads().size >= 100) throw Error('已有较多待取回的 Fish 音频，本次没有重新生成；请先取回已有音频');
+      if (signal?.aborted || !valid()) throw Error('Fish 请求已取消或账户已切换');
+      if (fishExternalHost(this.win)) {
+        // A readable HEAD response (including 404) checks browser CORS without
+        // generating any speech or fetching somebody else's task audio.
+        try {
+          const probe = await this.fetcher('https://platform.r2.fish.audio/tasks/', {method:'HEAD',signal:signal || AbortSignal.timeout(15000),credentials:'omit',referrerPolicy:'no-referrer'});
+          if (!probe || probe.type === 'opaque' || probe.status === 0) throw Error('unreadable');
+        } catch (error) {
+          if (signal?.aborted || error.name === 'AbortError') throw error;
+          throw Error('TT 的 Fish 登录已连接，但浏览器音频下载检查未通过，当前 TT 没有可用的 Fish CDN 下载转发；本次未请求配音生成。请先补齐 TT 下载通道，不要重复授权');
+        }
+      }
+      const result = await this.call('text_to_speech', args, signal), links = audioLinks(result);
+      this.invalidateCredits();
+      if (!links.length) throw Error('Fish 已返回，但没有识别出音频下载链接；请到 Fish 网页查看记录，不要反复生成');
+      saved = {key,links}; this.pendingDownloads().set(key,saved); this.keepDownloads();
+    }
+    const blobs = [];
+    for (const url of saved.links) {
+      if (signal?.aborted || !valid()) throw Error('Fish 已生成声音，下载已取消；音频链接已保留');
+      const r = await this.downloadAudio(url, signal);
+      if (!r.ok) throw Error('Fish 已生成声音，但音频下载失败；音频链接已保留');
+      const blob = await r.blob(), head = await blob.slice(0,100).text();
+      if (!blob.size || (blob.type && !/^(?:audio\/|application\/(?:octet-stream|ogg)|binary\/octet-stream)/i.test(blob.type)) || /^\s*(?:<!doctype|<html|<body|\{|\[)/i.test(head)) throw Error('Fish 已生成声音，但返回的音频格式不正确；链接已保留'); blobs.push(blob);
+    }
+    const audio = blobs.length === 1 ? blobs[0] : await joinAudio(blobs, this.win);
+    if (signal?.aborted || !valid()) throw Error('Fish 已生成声音，下载已取消；音频链接已保留');
+    this.pendingDownloads().delete(key); this.keepDownloads(); return audio;
   }
 }
