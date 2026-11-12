@@ -1,8 +1,8 @@
 // Fish's web-plan OAuth/MCP connection. Credentials stay in this browser, outside settings/backups.
 // Official protocol: https://docs.fish.audio/overview/mcp (2026-11-11).
 import {joinAudio} from './audio-join.js';
-import {fishCreditBalance, fishMcpHttpError, fishSafeText} from './fish-mcp-results.js';
-import {fishExternalHost, openFishExternal} from './fish-transport.js';
+import {fishCreditBalance, fishMcpHttpError, fishOAuthHttpError, fishSafeText} from './fish-mcp-results.js';
+import {fishExternalHost, fishLoginRedirect, openFishExternal} from './fish-transport.js';
 import {fishLoginKeys, FISH_LOGIN_TTL, fishTrace, fishTraceOf, fishCredentialKey, acceptFishCallback, parseFishManualInput, readFishPending, fishCredentials, fishLoginCompleted, fishLoginEpoch, fishLoginOwner, fishLoginLocks, cancelFishLogins, dropFishPending, canFinishFishLogin, completeFishLogin} from './fish-oauth-flow.js';
 const API = 'https://api.fish.audio', RESOURCE = API + '/mcp';
 // Named popups are shared by clients in one host window, not by just one FishMcp instance.
@@ -70,7 +70,10 @@ export class FishMcp {
   loginReady() { this.ready = null; this.session = ''; this.tools = null; this.invalidateCredits(); return this.status(); }
   async json(url, init) {
     const r = await this.fetcher(url, {credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(30000), ...init});
-    if (!r.ok) throw Error(`Fish 连接失败（${r.status}），请重新连接订阅账户`);
+    if (!r.ok) {
+      const fields = init?.body instanceof URLSearchParams ? Object.fromEntries(init.body) : {};
+      throw await fishOAuthHttpError(r, {step: url.endsWith('/oauth/register') ? '注册授权客户端' : '刷新登录', secrets: [fields.refresh_token, fields.code, fields.code_verifier]});
+    }
     return r.json();
   }
   async token(body) {
@@ -142,7 +145,7 @@ export class FishMcp {
     this.sweepStale();
     dropFishPending(storage, this.scope);
     fishTrace(storage, 'connect-start');
-    const epoch = ++this.epoch, state = random(), verifier = random(), redirect = new URL('../fish-oauth.html', import.meta.url).href;
+    const epoch = ++this.epoch, state = random(), verifier = random(), redirect = fishLoginRedirect(win, new URL('../fish-oauth.html', import.meta.url).href);
     const keys = fishLoginKeys(state), attempt = {state, epoch, cancelled: false};
     this.login = attempt;
     let popup, cleanup = () => {}, rejectWait;
@@ -192,7 +195,7 @@ export class FishMcp {
         cleanup = () => { win.removeEventListener('message', listener); win.removeEventListener('storage', onStorage); win.removeEventListener('focus', read); win.clearTimeout(timer); win.clearInterval(poll); };
         win.addEventListener('message', listener); win.addEventListener('storage', onStorage); win.addEventListener('focus', read);
         if (external) {
-          this.notice('已在系统浏览器打开 Fish。授权后若回调页打不开，请复制地址栏完整网址，回 TT「连接诊断」粘贴完成连接。');
+          this.notice('已在系统浏览器打开 Fish。授权后回环页面通常无法打开；这是手动回传方式，请复制地址栏完整网址，回 TT「连接诊断」粘贴完成连接。');
           Promise.resolve(openFishExternal(win, target.href)).catch(reject);
         } else popup.location.href = target.href;
       });

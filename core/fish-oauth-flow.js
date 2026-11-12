@@ -1,3 +1,4 @@
+import {fishOAuthHttpError} from './fish-mcp-results.js';
 // The callback may lose window.opener (mobile browsers / cross-origin isolation).
 // A short-lived, state-bound mailbox on the tavern origin also carries the result.
 //
@@ -54,7 +55,7 @@ export async function exchangeFishCode({code, verifier, clientId, redirect, scop
   const r = await fetcher(FISH_TOKEN_URL, {method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(30000),
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
     body: new URLSearchParams({grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: clientId, code_verifier: verifier, resource: FISH_RESOURCE})});
-  if (!r.ok) throw Error(`Fish 连接失败（${r.status}），请重新连接订阅账户`);
+  if (!r.ok) throw await fishOAuthHttpError(r, {step: '交换授权码', secrets: [code, verifier]});
   const token = await r.json();
   if (!token?.access_token) throw Error('Fish 没有返回有效登录凭据');
   return {...token, client_id: clientId, expires_at: now + Number(token.expires_in || 3600) * 1000};

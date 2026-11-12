@@ -11,6 +11,12 @@ export function fishCreditBalance(result) {
   for (const text of texts) { try { values.push(JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ''))); } catch { /* plain text is checked by its label below */ } }
   const read = (value, depth = 0) => {
     if (!value || typeof value !== 'object' || Array.isArray(value) || depth > 4) return null;
+    // Fish get_credit_balance returns the plan package and extra package separately.
+    // api_credit_usd in the same object is a different wallet, never subscription credits.
+    if (Object.hasOwn(value, 'package_balance')) {
+      const base = number(value.package_balance), extra = Object.hasOwn(value, 'package_extra_balance') ? number(value.package_extra_balance) : 0;
+      return base !== null && extra !== null && Number.isFinite(base + extra) ? base + extra : null;
+    }
     for (const key of ['remaining_credits', 'remainingCredits', 'credits_remaining', 'available_credits', 'availableCredits', 'credit_balance', 'creditBalance', 'credits', 'balance']) {
       const n = number(value[key]); if (n !== null) return n;
     }
@@ -72,4 +78,17 @@ export async function fishMcpHttpError(response, {method, tool, secrets = []} = 
     : status >= 500 ? 'Fish 服务暂时出错，请稍后再试' : '服务没有接受这次请求';
   const step = fishMcpStep(method, tool);
   return Object.assign(Error(`Fish ${step}失败（${status}）：${reason}${said ? `。服务说明：${said}` : ''}。没有自动重试，也不会改用 API 余额。`), {status, code, step, detail: said});
+}
+
+/** OAuth failures happen before MCP, and are not all expired logins. */
+export async function fishOAuthHttpError(response, {step = '连接账户', secrets = []} = {}) {
+  const error = await fishMcpHttpError(response, {secrets});
+  const why = /invalid_redirect_uri|https required|redirect.uri/i.test(error.code + ' ' + error.detail)
+    ? 'Fish 不接受当前回调地址；重复登录或发送验证码不能解决'
+    : error.status === 429 ? '请求过于频繁，请稍后再试'
+    : /invalid_grant/i.test(error.code + ' ' + error.detail) ? '本次授权码无效、已用过或已过期，请发起一次新的授权'
+    : '服务未接受本次请求';
+  error.step = step;
+  error.message = `Fish ${step}失败（${error.status}）：${why}${error.detail ? '。服务说明：' + error.detail : ''}`;
+  return error;
 }

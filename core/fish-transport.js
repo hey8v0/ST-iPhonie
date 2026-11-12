@@ -1,5 +1,11 @@
 import {tavernLogin, noTavernProxy, unauthorizedBack} from './proxy-url.js';
 export const fishExternalHost = win => !!(win?.__TAURITAVERN__ || win?.__TAURI_RUNNING__ || win?.__TAURI__?.core?.invoke || win?.__TAURI_INTERNALS__);
+// Native WebView origins (tauri:// and http://tauri.localhost) are rejected by
+// Fish DCR. No listener is installed at this loopback address: after authorizing,
+// the user pastes the full address back, and only the pending PKCE owner exchanges it.
+export function fishLoginRedirect(win, original) {
+  return fishExternalHost(win) ? 'http://127.0.0.1:14535/st-iphonie/fish-oauth' : original;
+}
 export async function openFishExternal(win, target) {
   const url = new URL(target);
   if (url.origin !== 'https://fish.audio' || url.pathname !== '/oauth/authorize') throw Error('Fish 授权网址无效');

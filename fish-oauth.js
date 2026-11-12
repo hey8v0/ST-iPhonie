@@ -20,7 +20,7 @@ function showManual(result) {
 
 async function finish() {
   const meta = document.getElementById('meta');
-  if (meta) meta.textContent = `ST-iPhonie 0.9.63 · ${location.origin}`;
+  if (meta) meta.textContent = `ST-iPhonie 0.9.64 · ${location.origin}`;
   const message = text => { document.getElementById('message').textContent = text; };
   let result;
   try { result = acceptFishCallback(params, localStorage, Date.now(), {publish: false}); }
