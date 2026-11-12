@@ -34,7 +34,7 @@ export function promptRulesSheet(ctx) {
   function edit(id) {
     const block = PROMPT_BLOCKS.find(b => b.id === id), saved = ctx.api.getState().promptRules?.[id];
     const d = ctx.dialog(block.title + ' · 系统提示词', `<div class="group pad"><p class="hint">${esc(block.note)}</p>`
-      + (block.optional ? toggle('rule-enabled', '启用', promptOn(saved ? {[id]: saved} : {}, id)) : '')
+      + (id === 'now' ? '<p class="hint">同步开关在「设置 → 正文 → 正文和手机 → 现实时间同步」，这里修改规则文字。</p>' : block.optional ? toggle('rule-enabled', '启用', promptOn(saved ? {[id]: saved} : {}, id)) : '')
       + block.parts.map(p => {
         const text = saved?.parts?.[p.key] ?? p.text, rows = Math.min(14, Math.max(3, Math.ceil(text.length / 24) + text.split('\n').length));
         return field(p.label, textArea('part-' + p.key, text, `rows="${rows}" spellcheck="false"`));
@@ -42,7 +42,7 @@ export function promptRulesSheet(ctx) {
       + `<p class="hint">{{名字}} 由插件填进去；{{#名字}}…{{/名字}} 有内容时才保留，{{^名字}}…{{/名字}} 没有时才保留。</p><p class="hint">${esc(block.fills)}</p></div>`
       + `<div class="actions"><button class="secondary" data-rule-back>返回</button><button class="secondary" data-rule-reset>恢复默认</button><button class="primary" data-rule-save>保存</button></div>`);
     d.body.querySelector('[data-rule-back]').onclick = list;
-    d.body.querySelector('[data-rule-reset]').onclick = () => { ctx.api.savePromptRule(id, null); edit(id); };
+    d.body.querySelector('[data-rule-reset]').onclick = () => { ctx.api.savePromptRule(id, id==='now'?{enabled:promptOn(ctx.api.getState().promptRules,'now')}:null); edit(id); };
     d.body.querySelector('[data-rule-save]').onclick = () => {
       // Only parts that differ from the shipped text are kept, so the others follow later updates.
       const parts = {};
@@ -51,7 +51,7 @@ export function promptRulesSheet(ctx) {
         if (text !== p.text) parts[p.key] = text;
       }
       const enabled = d.body.querySelector('[data-field=rule-enabled]');
-      try { ctx.api.savePromptRule(id, {...(enabled ? {enabled: enabled.checked} : {}), parts}); ctx.notify('已保存'); list(); }
+      try { ctx.api.savePromptRule(id, {...(id==='now'?{enabled:promptOn(ctx.api.getState().promptRules,'now')}:enabled ? {enabled: enabled.checked} : {}), parts}); ctx.notify('已保存'); list(); }
       catch (error) { ctx.notify(error.message, {error: true}); }
     };
   }

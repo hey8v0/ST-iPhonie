@@ -7,6 +7,7 @@ import {icon} from './icons.js';
 import {REFERENCE_SIZES, NAI_MODELS} from '../core/novelai.js';
 import {normalizeMaskLook, MASK_PATTERNS} from '../core/draw.js';
 import {pngText} from '../core/png-text.js';
+import {pngStealth} from '../core/png-stealth.js';
 
 export {pngText};
 
@@ -313,10 +314,14 @@ const MODEL_WORDS = [[/V5/i, /curated/i, 'nai-diffusion-5-curated'], [/V5/i, nul
  * Character positions come back as the 5×5 grid cell nearest their centre (-1 when they had none), and for V5, which
  * places people anywhere, also as the centre itself.
  */
-export async function readNovelAI(buffer) {
-  const text = await pngText(buffer);
+export async function readNovelAI(buffer, options) {
+  let text = await pngText(buffer);
   let c = null;
-  try { c = JSON.parse(text.Comment || 'null'); } catch { return null; }
+  try { c = typeof text.Comment==='object'?text.Comment:JSON.parse(text.Comment || 'null'); } catch { /* try alpha metadata */ }
+  if(!c||typeof c!=='object'){
+    const hidden=await pngStealth(buffer,options);
+    if(hidden){text={...text,...hidden};try{c=typeof text.Comment==='object'?text.Comment:JSON.parse(text.Comment||'null');}catch{return null;}}
+  }
   if (!c || typeof c !== 'object') return null;
   const v4 = c.v4_prompt?.caption, v4n = c.v4_negative_prompt?.caption, coords = c.v4_prompt?.use_coords;
   const cell = ({x, y} = {}) => coords && Number.isFinite(x) && Number.isFinite(y) ? Math.min(4, Math.max(0, Math.round((y - .1) / .2))) * 5 + Math.min(4, Math.max(0, Math.round((x - .1) / .2))) : -1;

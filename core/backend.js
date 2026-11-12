@@ -2913,9 +2913,41 @@ export class TTSBackend {
     /** 收藏 and the 相簿 one made, in order: [{id, name, photos, at, order}]. */
     async listAlbums() { this.assertOpen(); return albumsInOrder(await this.apps.listFrom('albums:')); }
     async favoritePhotoIds() { this.assertOpen(); return (await this.apps.get(FAVORITES))?.photos || []; }
+    /** Keep album edits and protected cleanup in one order, including other tabs when Web Locks is available. */
+    #keepPhotoChange(work) {
+        const run=()=>globalThis.navigator?.locks?.request
+            ? globalThis.navigator.locks.request('st-iphonie-photo-keep:'+this.settings.scope,work) : work();
+        const job=(this.photoKeepJob||Promise.resolve()).then(run);
+        this.photoKeepJob=job.catch(()=>{});
+        return job;
+    }
+    /** Confirmed candidate ids only; recheck favourites and user albums before each batch. */
+    async unkeptPhotos() {
+        this.assertOpen();
+        const [photos,albums,phone]=await Promise.all([this.library.listPhotos(),this.listAlbums(),this.getPhone()]);
+        const chat=this.settings.chat||{},shown=a=>a?.kind==='photo'?a.photoId:null;
+        const keep=new Set([...albums.flatMap(a=>a.photos||[]),shown(phone.wallpaper),...Object.values(phone.icons||{}).map(shown),...Object.values(chat.avatars||{}).map(shown),chat.profile?.backgroundPhoto].filter(Boolean));
+        const rows=photos.filter(p=>!keep.has(p.id));
+        return {photos:rows.map(({id,name,size})=>({id,name,size})),count:rows.length,bytes:rows.reduce((n,p)=>n+(p.size||0),0),kept:photos.length-rows.length};
+    }
+    async deleteUnkeptPhotos(ids) {
+        this.assertOpen();
+        return this.#keepPhotoChange(async()=>{
+        const requested=new Set((Array.isArray(ids)?ids:[]).map(String));
+        if(!requested.size)return {count:0,bytes:0,kept:0};
+        let count=0,bytes=0;const initial=await this.unkeptPhotos(),pending=initial.photos.filter(p=>requested.has(p.id));
+        for(let i=0;i<pending.length;i+=16){
+            const safe=new Set((await this.unkeptPhotos()).photos.map(p=>p.id)),batch=pending.slice(i,i+16).filter(p=>safe.has(p.id));
+            if(!batch.length)continue;
+            await this.deletePhotos(batch.map(p=>p.id));count+=batch.length;bytes+=batch.reduce((n,p)=>n+(p.size||0),0);
+        }
+        return {count,bytes,kept:requested.size-count};
+        });
+    }
     /** Gives these photos the heart, or takes it away. */
     async favoritePhotos(ids, on = true) {
         this.assertOpen();
+        return this.#keepPhotoChange(async()=>{
         const list = [...new Set((ids || []).map(String))], now = Date.now();
         const out = new Set(list), edit = row => { const inside = new Set(row.photos); row.photos = on ? [...list.filter(id => !inside.has(id)), ...row.photos] : row.photos.filter(id => !out.has(id)); row.updatedAt = now; };
         await this.appsMutate('albums', () => this.apps.change(FAVORITES, edit).catch(async error => {
@@ -2925,6 +2957,7 @@ export class TTSBackend {
             await this.apps.put([row]);
         }));
         return true;
+        });
     }
     /** Makes a 相簿 ({name}) or renames one ({id, name}). */
     async saveAlbum({ id = '', name = '' } = {}) {
@@ -2949,6 +2982,7 @@ export class TTSBackend {
     /** Puts photos into a 相簿, on top; {added: how many were not in it yet}. */
     async addToAlbum(id, ids) {
         this.assertOpen();
+        return this.#keepPhotoChange(async()=>{
         let added = 0;
         await this.appsMutate('albums', () => this.apps.change(id, row => {
             const inside = new Set(row.photos), fresh = [...new Set((ids || []).map(String))].filter(x => !inside.has(x));
@@ -2957,6 +2991,7 @@ export class TTSBackend {
             row.updatedAt = Date.now();
         }));
         return { added };
+        });
     }
     /** Takes photos out of a 相簿 (they stay in the album). */
     async removeFromAlbum(id, ids) {
@@ -3692,6 +3727,7 @@ export class TTSBackend {
             listBooks: () => this.library.listBooks(), getBook: id => this.library.getBook(id), saveBook: value => this.mutateLibrary('books', 'saveBook', clone(value)), deleteBook: id => this.mutateLibrary('books', 'deleteBook', id),
             getPhone: () => this.getPhone(), savePhone: patch => this.savePhone(patch), libraryStats: () => this.library.stats(), storageBudget: () => this.budget.read(),
             listAlbums: () => this.listAlbums(), favoritePhotoIds: () => this.favoritePhotoIds(), favoritePhotos: (ids, on) => this.favoritePhotos([...(ids || [])], on !== false), saveAlbum: value => this.saveAlbum(clone(value || {})), deleteAlbum: id => this.deleteAlbum(String(id)), addToAlbum: (id, ids) => this.addToAlbum(String(id), [...(ids || [])]), removeFromAlbum: (id, ids) => this.removeFromAlbum(String(id), [...(ids || [])]), arrangeAlbums: ids => this.arrangeAlbums([...(ids || [])]),
+            unkeptPhotos: () => this.unkeptPhotos(), deleteUnkeptPhotos: ids => this.deleteUnkeptPhotos([...(Array.isArray(ids)?ids:[])]),
             listLooks: () => this.listLooks(), getLook: id => this.apps.get(String(id)), saveLook: look => this.saveLook(look), renameLook: (id, patch) => this.renameLook(String(id), clone(patch || {})), deleteLook: id => this.deleteLook(String(id)), lookFiles: id => this.lookFiles(String(id)),
             generatedPhotos: () => this.generatedPhotos().then(({ count, bytes, sources }) => ({ count, bytes, sources: Object.fromEntries(Object.entries(sources).map(([k, { ids, ...rest }]) => [k, rest])) })), deleteGeneratedPhotos: sources => this.deleteGeneratedPhotos(sources),
             saveMoments: patch => this.saveMoments(clone(patch)), saveForum: patch => this.saveForum(clone(patch)), saveCalls: patch => this.saveCalls(clone(patch)),

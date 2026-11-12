@@ -902,6 +902,8 @@ export interface BackendFacade {
     /** 压缩旧图: the album's PNGs not made smaller yet, saved more than `days` days ago (0: all), without the wallpaper, icons,
      *  avatars and chat background. */
     packablePhotos(days?: number): Promise<{photos: {id: string; name: string; size: number}[]; count: number; bytes: number}>;
+    unkeptPhotos(): Promise<{photos: {id: string; name: string; size: number}[]; count: number; bytes: number; kept: number}>;
+    deleteUnkeptPhotos(ids: string[]): Promise<{count: number; bytes: number; kept: number}>;
     /** Keeps these photos as WebP (JPEG) at full size; the originals are gone. Bytes are of the ones made smaller. */
     packPhotos(ids: string[]): Promise<{count: number; skipped: number; before: number; after: number}>;
     deletePhoto(id: string): Promise<boolean>;

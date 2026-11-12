@@ -195,7 +195,9 @@ export class LocalLibrary {
      const after=new Map(ledger);
      for(const [op,name,x] of ops){if(op==='put')after.set(key(name,x.id),x._bytes);else after.delete(key(name,x));}
      let total=0;for(const n of after.values())total+=n;
-     if(total>limit)throw fail(`本地资料已达到 ${sizeText(limit)} 上限（这个浏览器给小手机的空间），请删除不需要的内容后再保存`,'LIBRARY_FULL');
+     let before=0;for(const n of ledger.values())before+=n;
+     // A lowered browser quota must still let a deletion or compression free space.
+     if(total>limit&&total>=before)throw fail(`本地资料已达到 ${sizeText(limit)} 上限（这个浏览器给小手机的空间），请删除不需要的内容后再保存`,'LIBRARY_FULL');
      // 'meta' follows every picture and recording; a photo saved again or deleted loses its smaller pictures
      const meta=tx.objectStore('meta'),thumbs=tx.objectStore('thumbs'),previews=tx.objectStore('previews');
      for(const [op,name,x] of ops){

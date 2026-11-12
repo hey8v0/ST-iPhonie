@@ -9,6 +9,8 @@ import {wallpapers, skins, customWallpaper} from './wallpapers.js';
 import {glyph} from './icons.js';
 import {cleanTheme, deriveTheme, wheelHue, THEME_PRESETS} from '../core/theme-colors.js';
 import {themeEditor} from './theme-editor.js';
+import {photoCleanup} from './photo-cleanup.js';
+import {menu} from './common.js';
 
 const MARKS = {ok: '✓', warn: '!', error: '✕', info: '·'};
 // the 大游戏 whose saves a backup can hold, by the game's id
@@ -372,7 +374,7 @@ export function settingsApp(ctx) {
       + groupTitle('清理')
       + `<div class="group">
           <div class="setting-row"><span class="row-text"><strong>语音缓存</strong><small>收藏和其他资料会保留</small></span>${btn('clear-cache', icon('trash') + '清理', 'chip-button')}</div>
-          <div class="setting-row"><span class="row-text"><strong>相册里的绘图</strong><small>绘图 App、正文、查手机、朋友圈画出来的图</small></span>${btn('clear-drawn', icon('trash') + '清除', 'chip-button', drawn?.count ? '' : 'disabled')}</div>
+          <div class="setting-row"><span class="row-text"><strong>相册照片</strong><small>清理未收藏、未归入相簿的散图，或管理绘图副本</small></span>${btn('clear-drawn', icon('trash') + '清理', 'chip-button', library?.photos ? '' : 'disabled')}</div>
           <div class="setting-row"><span class="row-text"><strong>压缩相册里的旧图</strong><small>${pack?.count ? `${pack.count} 张 PNG 可以压；` : ''}画出来的 PNG 压成看起来一样的 WebP，一般省下九成</small></span>${btn('pack-old', '压缩', 'chip-button', pack?.count ? '' : 'disabled')}</div>
           ${chatPictures ? `<div class="setting-row"><span class="row-text"><strong>当前聊天的正文图片</strong><small>存在酒馆里，出图标签还在，可以再画</small></span>${btn('clear-chat-pictures', icon('trash') + '清除', 'chip-button', chatPictures.count ? '' : 'disabled')}</div>` : ''}
           ${st?.available ? `<div class="setting-row"><span class="row-text"><strong>酒馆里存的那份</strong><small>只删酒馆里存的，这台设备上的不动</small></span>${btn('sync-clear', icon('trash') + '删除', 'chip-button', st.busy ? 'disabled' : '')}</div>` : ''}
@@ -594,9 +596,12 @@ export function settingsApp(ctx) {
           ctx.notify(r.count ? `压缩了 ${r.count} 张，从 ${size(r.before)} 变成 ${size(r.after)}` : '都已经是小图了');
         }
         break;
-      case 'clear-drawn':
-        await clearDrawn();
+      case 'clear-drawn': {
+        const key=await menu(ctx,'清理相册照片',[{key:'unkept',icon:'trash',label:'清理未收藏的散图',note:'保留收藏和自建相簿内的图片，先查看数量与空间'},{key:'drawn',icon:'image',label:'按来源清除绘图副本',note:'原有清除功能，包含收藏或相簿内的绘图',danger:true}]);
+        if(key==='unkept')await photoCleanup(ctx,render);
+        else if(key==='drawn')await clearDrawn();
         break;
+      }
       case 'pack-old':
         await packOld();
         break;

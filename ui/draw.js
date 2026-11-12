@@ -844,7 +844,7 @@ export function drawApp(ctx) {
   /** 读图: what a picture holds; the sheet says what to take from it, or what else to do with it. */
   async function readPicture(file) {
     const buffer = await file.arrayBuffer();
-    const found = await readNovelAI(buffer).catch(() => null), carried = await embeddedVibeFile(buffer).catch(() => null);
+    const found = await readNovelAI(buffer), carried = await embeddedVibeFile(buffer).catch(() => null);
     pictureSheet({ctx, file, found, carried: !!carried, locks: state().locks,
       take: choice => takePicture(file, found, choice),
       use: async kind => {
