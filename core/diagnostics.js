@@ -86,11 +86,17 @@ export function buildReport(f) {
         r.iframes ? `这条消息里有 ${r.iframes} 个内嵌页面（前端卡或酒馆助手的界面），声波可能被放进去了，里面的点击传不到插件。` : '刷新页面试试；还不行就把这份报告发出来。'));
       else items.push(item('ok', `正文里画出了 ${r.waves} 个声波`));
       if (r.stale) items.push(item('warn', `${r.stale} 个声波是刷新前画的`, '点一下会重新画好；经常出现的话，可能有插件缓存了旧的消息。'));
-      if (r.covered) items.push(item('error', '当前可见声波被覆盖',
-        `刚刚检查到一枚当前可见的声波，盖在上面的是 ${r.covered}，这个位置的点击会落在它上面。这里只说明实际命中结果，不直接判断来源；可能是酒馆界面、主题或其他插件。`));
+      if (r.covered) items.push(item('warn', '上次检测到声波遮挡',
+        `上次检查时，一枚可见声波上方命中了 ${r.covered}。这是当时该位置的记录，不代表声波始终无法点击；打开其他面板也会出现，不能单凭它判断兼容故障。`));
     }
     add('最近一条回复', items);
   }
+  const input=f.input;
+  if(input) add('最近正文交互',[
+    item('info','诊断版本',input.version||'未标记'),
+    item('info','手机视口',`布局 ${input.width} / 页面 ${input.clientWidth} / 可见 ${input.visualWidth}，缩放 ${input.scale}；触点 ${input.touchPoints}，touchstart ${input.touchStart?'有':'无'}，正文 iframe ${input.frames}`),
+    ...(input.events?.length?input.events.map(e=>item('info',`${e.type} · ${e.realm} · ${time(e.at)}`,`目标 ${e.target}；楼层 ${e.message??'无'} / 节点 ${e.node}；事件间隔 ${e.inputGap??'—'}ms / 处理间隔 ${e.gap??'—'}ms / 排队 ${e.delay??'—'}ms；${e.bubbled?'已传播到页面末端':'未传播到页面末端'}，${e.prevented?'默认行为已阻止':'默认行为未阻止'}，${e.connected?'随后节点仍在':'随后节点已替换'}，${e.menu?'检测到生图操作菜单':'未检测到生图操作菜单'}`)):[item('info','尚未记录正文触摸','先回到正文复现一次，再打开自检复制报告。记录只保留最近8次的元素类型与时间，不包含正文、输入内容或密钥。')])
+  ]);
 
   if (f.errors?.length) add('最近的提示', f.errors.slice(-10).map(e => item(e.kind === 'error' ? 'warn' : 'info', time(e.at), e.message)));
 
