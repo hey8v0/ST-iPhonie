@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Fish 账户连接 · ST-iPhonie</title>
+<style>
+:root{color-scheme:light dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1c3047;background:#f0f5fc;font-size:16px;line-height:1.65}*{box-sizing:border-box}body{margin:0;padding:48px 18px}main{max-width:480px;margin:auto;padding:30px 26px;background:#fff;border:1px solid #dbe6f4;border-radius:26px;box-shadow:0 18px 65px #294d7510}.brand{margin:0 0 22px;color:#526a85;font-size:12px;letter-spacing:.12em}.mark{display:block;width:44px;height:44px;margin-bottom:18px;border-radius:15px;background:#e6f2ff;color:#2563aa;text-align:center;font-size:27px;line-height:44px}h1{margin:0 0 8px;font-size:25px;line-height:1.4;letter-spacing:-.02em}p{margin:0 0 20px}#message{color:#526a85}button{width:100%;padding:14px 16px;border:0;border-radius:15px;background:#2563aa;color:#fff;font:inherit;font-weight:650;cursor:pointer}button:focus-visible,textarea:focus-visible{outline:3px solid #74b8fa;outline-offset:3px}textarea{display:block;resize:none;width:100%;min-height:112px;margin:0 0 14px;padding:13px;border:1px solid #dbe6f4;border-radius:13px;background:#f5f8fc;color:inherit;font:12px/1.65 ui-monospace,monospace;word-break:break-all}ol{margin:22px 0 0;padding-left:22px;color:#526a85;font-size:14px}li+li{margin-top:10px}#copy-status{margin:10px 0 0;font-size:13px;color:#2563aa;min-height:22px}details{margin-top:24px;padding-top:18px;border-top:1px solid #e3ebf5;font-size:12px;color:#6b7f96}summary{cursor:pointer}details p{margin:10px 0 0}.version{margin:20px 0 0;text-align:center;font-size:11px;color:#6b7f96}[hidden]{display:none!important}@media(prefers-color-scheme:dark){:root{color:#e5edf8;background:#101a28}main{background:#182538;border-color:#2b405b}.brand,#message,ol,details,.version{color:#afbdd0}.mark{background:#253d58;color:#8fc7ff}textarea{background:#101e2f;border-color:#354d69}button{background:#7ebaff;color:#102238}#copy-status{color:#9bcdff}details{border-color:#2b405b}}@media(max-width:380px){body{padding:24px 14px}main{padding:24px 20px}h1{font-size:23px}}
+</style>
+<body>
+<main>
+  <p class="brand">ST-iPhonie · FISH AUDIO</p>
+  <span class="mark" aria-hidden="true">↩</span>
+  <h1 id="heading">正在接收授权结果…</h1>
+  <p id="message">请稍等。</p>
+  <section id="manual" hidden aria-label="完成连接">
+    <textarea id="code" readonly aria-label="本次授权码" autocomplete="off" spellcheck="false"></textarea>
+    <button id="copy" type="button">复制本次授权码</button>
+    <p id="copy-status" role="status" aria-live="polite"></p>
+    <ol><li>点击上方按钮，复制本次授权码。</li><li>回到 TT 酒馆的小手机，打开「Fish → ⋯ → 连接诊断」。</li><li>粘贴授权码，点击「用授权码完成连接」。</li></ol>
+  </section>
+  <details><summary>说明</summary><p>这个页面只显示授权结果，连接由发起授权的酒馆完成。请在 15 分钟内粘贴，授权码只贴回自己的酒馆。复制完成前请勿刷新此页。</p></details>
+</main>
+<p class="version">ST-iPhonie 0.9.70</p>
+<noscript>请开启浏览器的 JavaScript，才能显示本次授权码。</noscript>
+<script type="module" src="./fish-return.js"></script>
+</body></html>
