@@ -2,7 +2,7 @@
 // and place its id on the home screen below (a reserved slot is replaced by the id).
 //   colors: [tile top, tile bottom / glyph shade, glyph accent]
 export const APPS = {
-  bookshelf: {name: '书架', eyebrow: '书架', colors: ['#e8d6af', '#96724a', '#f8ecce']},
+  bookshelf: {name: '书架', eyebrow: 'Bookshelf', colors: ['#e8d6af', '#96724a', '#f8ecce']},
   logs: {name: '日志', eyebrow: 'Logs', colors: ['#b9d9ed', '#557c9e', '#a7f3cb']},
   roles: {name: '角色', eyebrow: 'Character', colors: ['#9ad8ff', '#4a9af0', '#ff9dbb']},
   engines: {name: '引擎', eyebrow: 'Wallet', colors: ['#cdb6ff', '#8a6cf2', '#fff09a']},

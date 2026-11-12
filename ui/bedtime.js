@@ -18,7 +18,7 @@ export function bedtimeView(ctx, v) {
     const now = status();
     now.busy ||= creating;
     swipes?.dispose(); swipes = null;
-    v.draw(heading('睡前故事', '', '晚安') + bookTabs(true)
+    v.draw(heading('睡前故事', '', 'Bedtime Stories') + bookTabs(true)
       + `<section class="bedtime-room">${hidden || now.playing ? '' : `<div class="bedtime-sky" aria-hidden="true"><span class="bedtime-moon"></span><p>把夜晚留给一个温柔的声音</p></div><div class="bedtime-form">
       ${field('讲故事的人', select('bt-role', form.role, [['', '选择有声音的角色'], ...roles.map(r => [r.name, r.name])]))}
       ${field('听什么', select('bt-sourceId', form.sourceId, [['', '讲一个新的'], ...books.map(b => [b.id, `从书架选一本 · ${b.title}`])]))}

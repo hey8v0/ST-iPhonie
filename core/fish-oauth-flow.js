@@ -1,4 +1,5 @@
 import {fishOAuthHttpError} from './fish-mcp-results.js';
+export {packFishCallback} from '../docs/fish-return-code.js';
 // The callback may lose window.opener (mobile browsers / cross-origin isolation).
 // A short-lived, state-bound mailbox on the tavern origin also carries the result.
 //
@@ -20,11 +21,6 @@ export function readFishPending(storage, state) {
 }
 /** 0.9.59: when a mobile browser opens the callback in another browser app or isolated storage container, a short
  *  base64url token ("fish1." + JSON({state, code, iss})) lets the user copy & paste the callback back into the tavern. */
-export function packFishCallback(result) {
-  if (!result?.state || !result?.code) return '';
-  const raw = JSON.stringify({state: result.state, code: result.code, ...(result.iss ? {iss: result.iss} : {})});
-  return 'fish1.' + btoa(unescape(encodeURIComponent(raw))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
 export function parseFishManualInput(input) {
   const text = String(input || '').trim();
   if (!text) throw Error('请先粘贴回调页上的授权码或回调网址');

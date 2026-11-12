@@ -1,4 +1,5 @@
 import {tavernLogin, noTavernProxy, unauthorizedBack} from './proxy-url.js';
+import {FISH_RETURN_URL} from '../docs/fish-return-code.js';
 // Connection capability only: no credentials, task links or request text.
 export function fishRoutePreference(storage, scope = '') {
   const key = 'sttts.fishRoutes.' + scope;
@@ -7,10 +8,10 @@ export function fishRoutePreference(storage, scope = '') {
 }
 export const fishExternalHost = win => !!(win?.__TAURITAVERN__ || win?.__TAURI_RUNNING__ || win?.__TAURI__?.core?.invoke || win?.__TAURI_INTERNALS__);
 // Native WebView origins (tauri:// and http://tauri.localhost) are rejected by
-// Fish DCR. No listener is installed at this loopback address: after authorizing,
-// the user pastes the full address back, and only the pending PKCE owner exchanges it.
+// Fish DCR. The hosted page only displays a copyable code; the original pending
+// PKCE owner in the tavern still performs the exchange.
 export function fishLoginRedirect(win, original) {
-  return fishExternalHost(win) ? 'http://127.0.0.1:14535/st-iphonie/fish-oauth' : original;
+  return fishExternalHost(win) ? FISH_RETURN_URL : original;
 }
 export async function openFishExternal(win, target) {
   const url = new URL(target);

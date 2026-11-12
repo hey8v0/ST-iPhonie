@@ -202,7 +202,7 @@ export class FishMcp {
         cleanup = () => { win.removeEventListener('message', listener); win.removeEventListener('storage', onStorage); win.removeEventListener('focus', read); win.clearTimeout(timer); win.clearInterval(poll); };
         win.addEventListener('message', listener); win.addEventListener('storage', onStorage); win.addEventListener('focus', read);
         if (external) {
-          this.notice('已在系统浏览器打开 Fish。授权后回环页面通常无法打开；这是手动回传方式，请复制地址栏完整网址，回 TT「连接诊断」粘贴完成连接。');
+          this.notice('已在系统浏览器打开 Fish。授权后会显示返回页，请点「复制本次授权码」，回 TT 的 Fish 页面打开「连接诊断」粘贴；已连接时从「管理连接」进入。');
           Promise.resolve(openFishExternal(win, target.href)).catch(reject);
         } else popup.location.href = target.href;
       });

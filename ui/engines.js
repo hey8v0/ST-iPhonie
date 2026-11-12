@@ -40,7 +40,7 @@ export function enginesApp(ctx) {
   const number = n => Number(n).toLocaleString('zh-CN');
   let fishCredits = {}, fishCreditLoad = 0, fishCreditRefreshQueued = false;
   const fishCreditText = () => fishCredits.loading ? '读取中…' : fishCredits.error ? '读取失败' : fishCredits.value?.remaining != null ? number(fishCredits.value.remaining) : fishCredits.value ? '未返回数值' : '—';
-  const fishCreditNote = () => fishCredits.error || (fishCredits.value?.remaining === null ? '服务返回了积分明细，但没有可识别的剩余数值；可在右上角「查看订阅积分」查看明细。' : '这里是 Fish 网页订阅积分，不是 API 美元余额；配音后自动更新。');
+  const fishCreditNote = () => fishCredits.error || (fishCredits.value?.remaining === null ? '服务返回了积分明细，但没有可识别的剩余数值，可尝试刷新积分。' : '这里是 Fish 网页订阅积分，不是 API 美元余额；配音后自动更新。');
   function paintFishCredits() {
     if (v.disposed || !api.fishSubscriptionStatus?.().connected) return;
     for (const node of v.root.querySelectorAll('[data-fish-credit-balance]')) node.textContent = fishCreditText();
@@ -98,7 +98,7 @@ export function enginesApp(ctx) {
   function card(id, tag = 'button') {
     // the settings once per card (each read is a copy of all of them)
     const st = api.getState();
-    const comfy = id === 'comfy', saved = comfy ? !!st.draw.comfy.url : api.keyStatus(id), nai = id === 'nai', llm = id === 'llm', vector = id === 'embed', d = st.draw;
+    const comfy = id === 'comfy', saved = comfy ? !!st.draw.comfy.url : api.keyStatus(id), nai = id === 'nai', llm = id === 'llm', vector = id === 'embed', d = st.draw, fishSubscribed = id === 'fish' && !!api.fishSubscriptionStatus?.().connected;
     const em = vector ? (engine === 'embed' && embedDraft ? embedDraft : st.embed) : null;
     const name = nameOf(id), t = llm ? (engine === 'llm' && textDraft ? textDraft : st.text) : null, custom = t?.source === 'custom';
     const fields = song(id) ? [['MODEL', id === 'lyria' ? st.music.sing.lyriaModel : id === 'replicate' ? st.music.sing.replicateModel : 'StepAudio 3'], ['USE', '写歌']]
@@ -112,8 +112,8 @@ export function enginesApp(ctx) {
       ? [['TIER', subscription ? TIERS[subscription.tier] || '未知' : '—'], ['ANLAS', subscription ? String(subscription.anlas) : '—']]
       : id === 'custom'
         ? [['API', (st.connections.custom.params.url || '').replace(/^https?:\/\//, '').split('/')[0] || '未填写'], ['VOICES', (st.connections.custom.params.voices || []).length + ' 个']]
-      : id === 'fish' && api.fishSubscriptionStatus?.().connected
-        ? [['MODEL', st.connections.fish.model], ['剩余积分', fishCreditText()]]
+      : fishSubscribed
+        ? [['MODEL', st.connections.fish.model], ['BALANCE', fishCreditText()]]
       : PRICED.includes(id) && saved
         ? [['MODEL', st.connections[id].model], [id === 'eleven' ? 'CREDITS' : 'BALANCE', balanceText(id)]]
         : [['MODEL', st.connections[id].model], ['ROLES', st.routes.filter(r => r.engine === id && r.voice).length + ' 个角色']];
@@ -121,12 +121,12 @@ export function enginesApp(ctx) {
     const attrs = tag === 'button' ? `data-action="engine" data-engine="${id}" aria-label="${name}，${front ? '点一下打开' : '点一下抽到最前面'}"` : `data-engine="${id}"`;
     const dots = comfy ? '' : `•••• •••• •••• ${api.keyHint?.(id) || '••••'}`;
     const ownApi = id === 'custom' ? (st.connections.custom.params.url || '').replace(/^https?:\/\//, '') : '';
-    const number = id === 'fish' && api.fishSubscriptionStatus?.().connected ? '已连接 Fish 账户 · 订阅积分' : id === 'custom' ? (ownApi || '还没填接口地址 · 点卡片去填写') : vector ? (em.enabled ? (saved ? dots : '未绑定密钥 · 本地接口可以不填') : '没开 · 记忆用本地检索') : comfy ? d.comfy.url.replace(/^https?:\/\//, '') : llm ? (custom ? (saved ? dots : '未绑定密钥 · 点卡片去填写') : '用酒馆当前连接的模型') : saved ? dots : '未绑定密钥 · 点卡片去填写';
+    const number = fishSubscribed ? '已连接 Fish 账户 · 订阅积分' : id === 'custom' ? (ownApi || '还没填接口地址 · 点卡片去填写') : vector ? (em.enabled ? (saved ? dots : '未绑定密钥 · 本地接口可以不填') : '没开 · 记忆用本地检索') : comfy ? d.comfy.url.replace(/^https?:\/\//, '') : llm ? (custom ? (saved ? dots : '未绑定密钥 · 点卡片去填写') : '用酒馆当前连接的模型') : saved ? dots : '未绑定密钥 · 点卡片去填写';
     return `<${tag} class="bank-card${tag === 'div' ? ' detail-card' : ''}" ${attrs}>${spark()}
       <span class="card-top"><span class="card-name">${name}</span><span class="card-kind">${IMAGE.includes(id) ? 'IMAGE' : song(id) ? 'MUSIC' : llm ? 'TEXT' : vector ? 'VECTOR' : 'VOICE'}${icon('nfc')}</span></span>
       <span class="card-chip"></span>
       <span class="card-number${number.startsWith('•') || comfy || ownApi ? '' : ' none'}${comfy || ownApi ? ' address' : ''}">${number}</span>
-      <span class="card-bottom">${fields.map(([k, value]) => `<span><span class="k">${k}</span><span class="v"${id === 'fish' && k === '剩余积分' ? ' data-fish-credit-balance' : ''}>${esc(value)}</span></span>`).join('')}<span class="card-brand">ST-iPhonie</span></span></${tag}>`;
+      <span class="card-bottom">${fields.map(([k, value]) => `<span><span class="k">${k}</span><span class="v"${fishSubscribed && k === 'BALANCE' ? ' data-fish-credit-balance' : ''}>${esc(value)}</span></span>`).join('')}<span class="card-brand">ST-iPhonie</span></span></${tag}>`;
   }
 
   const relayNoSubscription = () => !subscription && subscriptionStatus === 404 && !!api.getState().draw.relay.url;
@@ -789,10 +789,6 @@ export function enginesApp(ctx) {
       voice && !['custom','doubao'].includes(engine) && {key: 'read-voices', icon: 'refresh', label: '测试连接', note: '读一次音色列表，看密钥能不能用'},
       engine === 'fish' && api.getState().connections.fish.relay && saved && {key: 'test-fish-relay', icon: 'refresh', label: '测试中转', note: '看中转转发了哪些接口，格式不对会自动切换'},
       engine === 'fish' && {key: 'references', icon: 'wave', label: '管理参考音频'},
-      engine === 'fish' && {key: 'fish-subscription', icon: 'swap', label: api.fishSubscriptionStatus?.().connected ? '重新连接订阅账户' : '连接订阅账户', note: '在 Fish 官方页面登录；Drama 3 使用网页订阅积分'},
-      engine === 'fish' && api.fishSubscriptionStatus?.().connected && {key: 'fish-credits', icon: 'wallet', label: '查看订阅积分'},
-      engine === 'fish' && {key: 'fish-diagnose', icon: 'info', label: '连接诊断', note: '登录卡住时，看它走到哪一步' },
-      engine === 'fish' && api.fishSubscriptionStatus?.().connected && {key: 'fish-disconnect', icon: 'close', label: '断开订阅账户', note: '恢复使用原来的 API 连接'},
       voice && {key: 'request-preview', icon: 'eye', label: '请求预览', note: '看看发给服务的请求长什么样'},
       engine === 'llm' && textDraft.presets.length > 1 && {key: 'text-delete', icon: 'trash', label: `删除「${textPreset().name}」这套接口`, danger: true},
       saved && {key: 'clear-key', icon: 'trash', label: engine === 'custom' || engine === 'llm' ? '清除这套接口的密钥' : voice ? '清除全部密钥' : '清除密钥', danger: true}]);
@@ -863,11 +859,11 @@ export function enginesApp(ctx) {
       case 'fish-diagnose': {
         const steps = api.fishSubscriptionTrace?.() || [], pad = n => String(n).padStart(2, '0');
         const labels = {'connect-start': '开始连接', 'pending-written': '已保存登录待办', 'callback-ok': '回调收到授权', 'callback-weak': '回调未找到完整待办', 'callback-error': '回调失败', 'callback-denied': '未获授权', 'callback-token-ok': '回调已存登录凭据', 'callback-token-fail': '回调交换失败', 'tavern-read': '酒馆读到授权', 'token-ok': '已存登录凭据', 'token-fail': '授权流程失败', resume: '继续之前的登录', 'resume-waiting': '仍在等待授权结果', 'manual-paste': '收到手动授权码', 'mcp-error': '订阅接口失败'};
-        const d = ctx.dialog('Fish 连接诊断', `<p class="help-copy">连接模块 0.9.69 · ${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>`
+        const d = ctx.dialog('Fish 连接诊断', `<p class="help-copy">连接模块 0.9.70 · ${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>`
           + `<p class="hint">已保存登录凭据不代表订阅接口已通过验证；接口失败时下面会写明步骤和服务说明。授权码只贴回自己的酒馆，不要发送给别人。</p>`
           + `
           <div class="group pad"><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;line-height:1.65;margin:0">${steps.map(s => { const t = new Date(s.at); return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}  ${esc(labels[s.ev] || '连接步骤')}${s.msg ? '  ' + esc(s.msg) : ''}`; }).join('\n') || '—'}</pre></div>
-          <div class="group pad">${field('手动粘贴授权码或回调网址', input('fish-manual-code', '', 'text', 'autocomplete="off" spellcheck="false" placeholder="粘贴 fish1.... 授权码或完整回调网址"'), 'TT：授权后 127.0.0.1 回环页面无法打开是预期情况，复制地址栏完整网址（保留 code 和 state）到这里完成连接。普通浏览器也可粘贴回调页的 fish1.... 授权码。')}</div>
+          <div class="group pad">${field('手动粘贴授权码或回调网址', input('fish-manual-code', '', 'text', 'autocomplete="off" spellcheck="false" placeholder="粘贴 fish1.... 授权码或完整回调网址"'), 'TT：在浏览器的授权返回页点「复制本次授权码」，粘贴到这里完成连接。旧版本的完整回调网址（包括 code 和 state）也能粘贴，已有登录无需重新授权。')}</div>
           <div class="actions">${btn('fish-manual-go', '用授权码完成连接', 'primary')}</div>
           <p class="hint">只有登录待办、没有回调记录时，可能是页面缓存或两个浏览器的存储不互通。可在十五分钟内用同一次授权码手动完成；过期、授权被拒或接口权限问题仍需按具体原因处理。</p>`);
         d.body.addEventListener('click', async e => {
