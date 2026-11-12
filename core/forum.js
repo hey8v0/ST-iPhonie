@@ -13,6 +13,11 @@ import {promptText} from './prompt-rules.js';
 import {isPlaceholderRole} from './protocol.js';
 
 export const FORUM_LIMITS = Object.freeze({posts: 200, replies: 80, perRefresh: 5, hot: 8, title: 60, text: 2000, reply: 500});
+export const defaultForum = () => ({auto:false,every:8,dailyMax:4});
+export function normalizeForum(value={}) {
+  const count=(v,min,max,base)=>Number.isFinite(v)?Math.max(min,Math.min(max,Math.round(v))):base;
+  return {auto:value?.auto===true,every:count(value?.every,1,100,8),dailyMax:count(value?.dailyMax,1,30,4)};
+}
 
 const fill = (template, values) => String(template).replace(/\{\{(.+?)\}\}/g, (m, key) => values[key.trim()] ?? m);
 const who = (name, user) => name === 'me' ? user : name;
@@ -118,7 +123,7 @@ export function cleanPost(p, id, at, newId) {
   if (!author) throw Error('帖子缺少作者');
   if (!text) throw Error('帖子内容为空');
   const replies = (Array.isArray(p.replies) ? p.replies : []).slice(-FORUM_LIMITS.replies).map((r, i) => cleanReply(r, r?.id || newId(), Number.isFinite(r?.at) ? r.at : at + i + 1));
-  return {id, kind: 'forum', author, title, text, at, source: ['auto', 'me'].includes(p.source) ? p.source : 'auto',
+  return {id, kind: 'forum', author, title, text, at, source: ['auto', 'me'].includes(p.source) ? p.source : 'auto', ...(typeof p.autoBatch==='string'&&p.autoBatch?{autoBatch:clip(p.autoBatch,80)}:{}),
     likes: Math.max(0, Math.round(Number(p.likes) || 0)), liked: p.liked === true, heat: Math.max(0, Math.round(Number(p.heat) || 0)), replies, ...(p.space ? {space: clip(p.space, 300)} : {}), ...(p.save ? {save: clip(p.save, 400)} : {})};
 }
 export function cleanReply(r, id, at) {

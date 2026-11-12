@@ -12,7 +12,7 @@ import {pictureInputs, sizeFor, photoPicture} from './core/draw.js';
 
 const PEOPLE = 12;
 
-export function createAppsHost({context, settings, backend, memory = null}) {
+export function createAppsHost({context, settings, backend, memory = null, notice = () => {}}) {
   const busy = {forum: null, peek: null};
   const userName = () => context()?.name1 || '我';
   const userPersona = () => String(context()?.powerUserSettings?.persona_description || '').slice(0, 1500);
@@ -53,18 +53,22 @@ export function createAppsHost({context, settings, backend, memory = null}) {
     if (Object.keys(fresh).length) try { backend.saveChatOptions({netNames: fresh}); } catch { /* made up again next time */ }
   }
   /** New posts and the 热搜. */
-  function forumRefresh() {
+  function forumRefresh({auto=false}={}) {
     return run('forum', async ctx => {
+      backend.assertSpaceReady();const valid=auto?backend.spaceGuard():()=>true;
       // The card asked for: the tavern may move to another one while the model writes.
       const space = backend.cardKey(), save = backend.saveKey(), hotId = backend.hotId(), {preset, everyone, user} = base(), handles = netNames();
       const posts = await feed(), recent = posts.slice(0, 8), hot = (await backend.apps.get(hotId))?.topics || [];
       const story = await readStoryLines(ctx.chat, preset, user), crowd = pick(everyone, story, posts);
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, hot, lore: await lore(preset, crowd, story, [...hot, ...recent.map(p => p.title)])});
       const found = parseForum(await ask(ctx, prompt, preset, 'forum'), {user, mode: 'posts', handles});
+      if(!valid())throw Error('酒馆聊天已切换，这次论坛刷新没有写入');
       await keepNames(found.names, crowd);
+      if(!valid())throw Error('酒馆聊天已切换，这次论坛刷新没有写入');
       if (!found.posts.length) throw Error('这次没有刷出新帖子，可以再刷新一次');
       if (found.hot.length) await backend.setForumHot(found.hot, hotId);
-      return backend.addForumPosts(found.posts, {space, save});
+      if(!valid())throw Error('酒馆聊天已切换，这次论坛刷新没有写入');
+      return backend.addForumPosts(found.posts, {space, save,source:'auto',autoBatch:auto?crypto.randomUUID():''});
     });
   }
   /** Replies to the user's new post. */
@@ -153,5 +157,24 @@ export function createAppsHost({context, settings, backend, memory = null}) {
     }
   }
 
-  return {forumRefresh, forumReact, forumReply, peekLook, peekDraw, busy: app => !!busy[app]};
+  let autoChecking=false;
+  const counters=new Map();
+  async function storyReplied(id) {
+    const opts=settings().forum||{};
+    if(!opts.auto){counters.clear();return;}
+    const ctx=context(),message=ctx?.chat?.[id];
+    if(!Number.isInteger(id)||!message||message.is_user||message.is_system||!String(message.mes||'').trim()||backend.here()?.pending)return;
+    const key=JSON.stringify([backend.cardKey(),backend.saveKey()]),count=counters.get(key)||{since:0,seen:new Set()};
+    counters.set(key,count);if(counters.size>50)counters.delete(counters.keys().next().value);
+    if(count.seen.has(message))return;count.seen.add(message);if(count.seen.size>200)count.seen.delete(count.seen.values().next().value);
+    count.since++;if(count.since<opts.every||busy.forum||autoChecking)return;
+    autoChecking=true;const valid=backend.spaceGuard();
+    try{
+      if(await backend.forumAutoToday()>=opts.dailyMax||!valid()||busy.forum)return;
+      count.since=0;const posts=await forumRefresh({auto:true});
+      if(posts?.length&&valid())notice('论坛有了 '+posts.length+' 个新帖子');
+    }catch(error){backend.reportDiagnostic?.('论坛自动刷新',error.message||String(error),'warn');}
+    finally{autoChecking=false;}
+  }
+  return {forumRefresh, forumReact, forumReply, storyReplied, peekLook, peekDraw, busy: app => !!busy[app]};
 }

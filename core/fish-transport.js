@@ -1,4 +1,10 @@
 import {tavernLogin, noTavernProxy, unauthorizedBack} from './proxy-url.js';
+// Connection capability only: no credentials, task links or request text.
+export function fishRoutePreference(storage, scope = '') {
+  const key = 'sttts.fishRoutes.' + scope;
+  const read = () => { try { const v=JSON.parse(storage()?.getItem(key)||'{}'); return v && typeof v==='object' && !Array.isArray(v) ? v : {}; } catch { return {}; } };
+  return {get:kind=>read()[kind] === 'proxy', remember:kind=>{try { storage()?.setItem(key,JSON.stringify({...read(),[kind]:'proxy'})); } catch { /* session still uses the selected route */ }}};
+}
 export const fishExternalHost = win => !!(win?.__TAURITAVERN__ || win?.__TAURI_RUNNING__ || win?.__TAURI__?.core?.invoke || win?.__TAURI_INTERNALS__);
 // Native WebView origins (tauri:// and http://tauri.localhost) are rejected by
 // Fish DCR. No listener is installed at this loopback address: after authorizing,

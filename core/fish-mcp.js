@@ -2,7 +2,7 @@
 // Official protocol: https://docs.fish.audio/overview/mcp (2026-11-11).
 import {joinAudio} from './audio-join.js';
 import {fishCreditBalance, fishMcpHttpError, fishOAuthHttpError, fishSafeText} from './fish-mcp-results.js';
-import {fishExternalHost, fishLoginRedirect, openFishExternal} from './fish-transport.js';
+import {fishExternalHost, fishLoginRedirect, openFishExternal, fishRoutePreference} from './fish-transport.js';
 import {FishTtMcp} from './fish-tt-mcp.js';
 import {fishAudioDownload} from './fish-audio.js';
 import {sha256Hex} from './hash.js';
@@ -63,9 +63,9 @@ export function audioLinks(result) {
 export class FishMcp {
   constructor({scope = '', win = globalThis, fetcher = globalThis.fetch?.bind(globalThis), storage = () => win.localStorage, proxy = null, audioProxy = null, notice = () => {}} = {}) {
     this.win = win; this.fetcher = fetcher; this.storage = storage; this.scope = scope || ''; this.key = fishCredentialKey(scope);
-    this.proxy = proxy; this.notice = notice; this.viaProxy = false;
+    this.proxy = proxy; this.notice = notice; this.routes=fishRoutePreference(storage,scope); this.viaProxy=!!proxy && !fishExternalHost(win) && this.routes.get('mcp');
     this.native = new FishTtMcp({win, storage, scope});
-    this.downloadAudio = fishAudioDownload({fetcher, proxy:audioProxy, win});
+    this.downloadAudio = fishAudioDownload({fetcher, proxy:audioProxy, win, storage, scope, notice});
     this.downloadsKey = 'sttts.fishDownloads.' + scope; this.downloads = null; this.downloadJobs = new Map();
     this.loginOwner = fishLoginOwner(win); this.loginLocks = fishLoginLocks(win);
     this.session = ''; this.sequence = 0; this.epoch = 0; this.ready = null; this.refreshing = null; this.tools = null;
@@ -278,6 +278,7 @@ export class FishMcp {
       await this.rpc('notifications/initialized', {}, undefined, true);
       this.tools = []; let cursor;
       do { const page = await this.rpc('tools/list', cursor ? {cursor} : {}); this.tools.push(...(page.tools || [])); cursor = page.nextCursor; } while (cursor);
+      if (this.viaProxy) this.routes.remember('mcp');
     })().catch(e => { this.ready = null; throw e; });
     return this.ready;
   }
@@ -341,17 +342,8 @@ export class FishMcp {
     if (!saved) {
       if (this.pendingDownloads().size >= 100) throw Error('已有较多待取回的 Fish 音频，本次没有重新生成；请先取回已有音频');
       if (signal?.aborted || !valid()) throw Error('Fish 请求已取消或账户已切换');
-      if (fishExternalHost(this.win)) {
-        // A readable HEAD response (including 404) checks browser CORS without
-        // generating any speech or fetching somebody else's task audio.
-        try {
-          const probe = await this.fetcher('https://platform.r2.fish.audio/tasks/', {method:'HEAD',signal:signal || AbortSignal.timeout(15000),credentials:'omit',referrerPolicy:'no-referrer'});
-          if (!probe || probe.type === 'opaque' || probe.status === 0) throw Error('unreadable');
-        } catch (error) {
-          if (signal?.aborted || error.name === 'AbortError') throw error;
-          throw Error('TT 的 Fish 登录已连接，但浏览器音频下载检查未通过，当前 TT 没有可用的 Fish CDN 下载转发；本次未请求配音生成。请先补齐 TT 下载通道，不要重复授权');
-        }
-      }
+      await this.downloadAudio.prepare?.(signal);
+      if (signal?.aborted || !valid()) throw Error('Fish 请求已取消或账户已切换');
       const result = await this.call('text_to_speech', args, signal), links = audioLinks(result);
       this.invalidateCredits();
       if (!links.length) throw Error('Fish 已返回，但没有识别出音频下载链接；请到 Fish 网页查看记录，不要反复生成');
@@ -364,6 +356,7 @@ export class FishMcp {
       if (!r.ok) throw Error('Fish 已生成声音，但音频下载失败；音频链接已保留');
       const blob = await r.blob(), head = await blob.slice(0,100).text();
       if (!blob.size || (blob.type && !/^(?:audio\/|application\/(?:octet-stream|ogg)|binary\/octet-stream)/i.test(blob.type)) || /^\s*(?:<!doctype|<html|<body|\{|\[)/i.test(head)) throw Error('Fish 已生成声音，但返回的音频格式不正确；链接已保留'); blobs.push(blob);
+      this.downloadAudio.confirm?.(r);
     }
     const audio = blobs.length === 1 ? blobs[0] : await joinAudio(blobs, this.win);
     if (signal?.aborted || !valid()) throw Error('Fish 已生成声音，下载已取消；音频链接已保留');

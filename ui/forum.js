@@ -1,7 +1,7 @@
 // 论坛: a public board next to 朋友圈. The feed (热搜 on top, then posts), a post with its replies as floors, and the
 // user's own posts and replies. New posts, replies and the 热搜 are generated in the tavern page (host-apps.js).
 import {rowWindow} from './row-window.js';
-import {createView, esc, btn, field, input, textArea, heading, avatar, avatarPicture, empty, menu} from './common.js';
+import {createView, esc, btn, field, input, textArea, toggle, heading, avatar, avatarPicture, empty, menu} from './common.js';
 import {icon} from './icons.js';
 import {shareToChat} from './share-to-chat.js';
 import {forumAvatar} from '../core/forum.js';
@@ -167,10 +167,16 @@ export function forumApp(ctx) {
   async function options() {
     const picked = await menu(ctx, '论坛', [
       {key: 'net-names', icon: 'edit', label: '网名', note: '你和角色在论坛上用的名字'},
+      {key: 'auto-forum', icon: 'refresh', label: '自动刷新', note: '按正文回复间隔生成新帖子，与朋友圈一样可设置每日上限'},
       {key: 'edit-prompt', icon: 'edit', label: '帖子怎么写', note: '聊天预设里勾了「论坛」的规则（默认是「论坛口吻」）'},
       {key: 'clear-forum', icon: 'trash', label: '清空论坛', note: '所有帖子、回复和热搜', danger: true}]);
     if (picked === 'edit-prompt') { ctx.open('presets'); ctx.showPresetKind?.('chat'); }
     if (picked === 'net-names') netNames();
+    if (picked === 'auto-forum') {
+      const o=api.getState().forum||{auto:false,every:8,dailyMax:4};
+      const d=ctx.dialog('论坛自动刷新',`<div class="group pad">${toggle('forum-auto','自动刷新论坛',o.auto,'打开后，每隔几条正文回复生成一次新帖子和热搜，会调用文字模型并消耗额度。')}${field('每几条正文回复刷新一次',input('forum-every',o.every,'number','min="1" max="100" step="1"'))}${field('每天最多自动刷新几次',input('forum-dailyMax',o.dailyMax,'number','min="1" max="30" step="1"'))}</div>`);
+      d.body.addEventListener('change',e=>{const el=e.target.closest('[data-field]');if(!el?.dataset.field.startsWith('forum-'))return;try{api.saveForum({[el.dataset.field.slice(6)]:el.type==='checkbox'?el.checked:Number(el.value)});}catch(error){ctx.notify(error.message,{error:true});}});
+    }
     if (picked === 'clear-forum' && await ctx.confirm('清空论坛？', '所有帖子、回复和热搜都会删除。')) { await api.clearForum(); open = ''; await render(); ctx.notify('论坛已清空'); }
   }
 

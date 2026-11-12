@@ -176,6 +176,7 @@ export interface Settings {
     draw: DrawSettings;
     chat: ChatSettings;
     moments: MomentsSettings;
+    forum: {auto: boolean; every: number; dailyMax: number};
     calls: CallsSettings;
     assistant: AssistantSettings;
     sounds: SoundSettings;
@@ -381,7 +382,7 @@ export interface MomentsSettings { auto: boolean; every: number; dailyMax: numbe
 export interface ChatProfile { name: string; status: 'online' | 'qme' | 'busy' | 'away' | 'hidden'; statusText: string; signature: string; bubble: 'default' | 'candy' | 'mint' | 'night' | 'ink'; frame: 'none' | 'star' | 'cat' | 'flower' | 'halo'; background: 'none' | 'clouds' | 'stars' | 'grid' | 'sakura'; backgroundPhoto: string; }
 /** 论坛: a post by a character, a stranger (any screen name) or the user ('me'); heat is how many have looked. */
 export interface ForumReply { id: string; from: string; to?: string; text: string; at: number; }
-export interface ForumPost { id: string; kind: 'forum'; author: string; title: string; text: string; at: number; source: 'auto' | 'me'; likes: number; liked: boolean; heat: number; replies: ForumReply[]; }
+export interface ForumPost { id: string; kind: 'forum'; author: string; title: string; text: string; at: number; source: 'auto' | 'me'; autoBatch?: string; likes: number; liked: boolean; heat: number; replies: ForumReply[]; }
 /** 查手机: a character's phone as the model made it up. */
 export interface PeekSnapshot { id: string; kind: 'peek'; name: string; at: number; chats: Array<{ with: string; lines: Array<{ from: string; text: string }> }>; searches: string[]; notes: Array<{ title: string; text: string }>; photos: PeekPicture[]; cart: Array<{ name: string; price: number; note: string }>; calls?: Array<{ with: string; dir: 'in' | 'out' | 'missed'; long: string }>; events?: Array<{ when: string; what: string }>; songs?: Array<{ title: string; artist: string }>; wallpaper?: PeekPicture; }
 export interface PeekPicture { text: string; tags: string; photoId?: string; state?: 'waiting' | 'done' | 'failed'; note?: string; }
@@ -1065,6 +1066,7 @@ export interface BackendFacade {
     /** draw.reason: why a relay gave no answer at all; draw.via 'proxy': only the tavern's /proxy/ reaches it, and drawing goes that way. */
     naiProbe(): Promise<{ relay: boolean; draw: { ok: boolean; status: number; reason?: string; via?: 'proxy' }; subscription: { ok: true; tier: number } | { ok: false; status: number; message: string } }>;
     saveMoments(patch: Partial<Pick<MomentsSettings, 'auto' | 'every' | 'dailyMax' | 'images' | 'replyToMe'>>): MomentsSettings;
+    saveForum(patch: Partial<{auto: boolean; every: number; dailyMax: number}>): {auto: boolean; every: number; dailyMax: number};
     /** Newest first. */
     listMoments(): Promise<MomentPost[]>;
     getMoment(id: string): Promise<MomentPost | null>;

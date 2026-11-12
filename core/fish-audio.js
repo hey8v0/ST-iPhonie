@@ -1,5 +1,6 @@
-import {fishExternalHost} from './fish-transport.js';
+import {fishExternalHost, fishRoutePreference} from './fish-transport.js';
 import {noTavernProxy, tavernLogin} from './proxy-url.js';
+import {fishTtAudio} from './fish-tt-audio.js';
 // Only the official task CDN may be fetched by the server-side fallback. The
 // audio GET carries neither Fish OAuth nor API credentials.
 export function fishTaskAudio(value) {
@@ -14,8 +15,19 @@ export function fishAudioProxy({fetcher, headers = () => ({}), page = globalThis
     return fetcher('/proxy/' + encodeURIComponent(url), {method:'GET',signal,credentials:'same-origin',redirect:'error',headers:safe});
   };
 }
-export function fishAudioDownload({fetcher, proxy, win = globalThis}) {
-  return async (url, signal) => {
+export function fishAudioDownload({fetcher, proxy, win = globalThis, storage = () => win.localStorage, scope = '', notice}) {
+  const native=fishExternalHost(win)?fishTtAudio({win,allowed:fishTaskAudio,notice}):null;
+  const preference=fishRoutePreference(storage,scope);
+  const proxied=new WeakSet();
+  let viaProxy=!!proxy && !fishExternalHost(win) && preference.get('audio');
+  const download=async (url, signal) => {
+    if(native && fishTaskAudio(url))return native.download(url,signal);
+    if (viaProxy && fishTaskAudio(url)) {
+      const r=await proxy(url,signal);
+      if (!r.ok) throw Error(`Fish 已生成声音，但已选酒馆下载通道失败（${r.status}）；音频链接已保留，不会重新生成`);
+      proxied.add(r);
+      return r;
+    }
     let direct;
     try {
       direct = await fetcher(url, {method:'GET', signal, credentials:'omit', referrerPolicy:'no-referrer'});
@@ -32,6 +44,10 @@ export function fishAudioDownload({fetcher, proxy, win = globalThis}) {
       if (noTavernProxy(text)) throw Error('Fish 已生成声音，但当前酒馆没有音频下载转发；请到 Fish 下载，不要重新生成');
       throw Error(`Fish 已生成声音，但酒馆下载转发失败（${r.status}）；音频链接已保留，不要重新生成`);
     }
+    proxied.add(r);
     return r;
   };
+  download.confirm=response=>{if(proxied.has(response)){viaProxy=true;preference.remember('audio');}};
+  download.prepare=signal=>native?.prepare(signal);
+  return download;
 }
