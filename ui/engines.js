@@ -2,6 +2,7 @@ import {SONG_KEYS, SING_NAMES, LYRIA_MODELS, REPLICATE_MODELS} from '../core/son
 import {createView, esc, engines, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, menu} from './common.js';
 
 const TIERS = {0: '未订阅', 1: 'Tablet', 2: 'Scroll', 3: 'Opus'};
+import {fishAccount, fishAccountFacts} from './fish-account.js';
 import {icon, spark} from './icons.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {fly} from './carry.js';
@@ -44,6 +45,8 @@ export function enginesApp(ctx) {
     if (v.disposed || !api.fishSubscriptionStatus?.().connected) return;
     for (const node of v.root.querySelectorAll('[data-fish-credit-balance]')) node.textContent = fishCreditText();
     for (const node of v.root.querySelectorAll('[data-fish-credit-note]')) { node.textContent = fishCreditNote(); node.classList.toggle('error-copy', !!fishCredits.error); }
+    for (const node of v.root.querySelectorAll('[data-fish-account-facts]')) node.innerHTML = fishAccountFacts(fishCredits.value);
+    for (const node of v.root.querySelectorAll('[data-action=fish-refresh]')) node.disabled = !!fishCredits.loading;
   }
   function clearFishCredits() { fishCreditLoad++; fishCredits = {}; fishCreditRefreshQueued = false; }
   async function loadFishCredits(refresh = false) {
@@ -431,7 +434,7 @@ export function enginesApp(ctx) {
     return {r, switched};
   }
   function balanceGroup() {
-    if (engine === 'fish' && api.fishSubscriptionStatus?.().connected) return `<p class="hint${fishCredits.error ? ' error-copy' : ''}" data-fish-credit-note>${esc(fishCreditNote())}</p>`;
+    if (engine === 'fish' && api.fishSubscriptionStatus?.().connected) return '';
     if (!PRICED.includes(engine)) return '';
     const saved = api.keyStatus(engine), entry = balances.get(engine) || {}, b = entry.value;
     const state = !saved ? '填写密钥后可以查看' : entry.loading && !b ? '读取中' : entry.error && !b ? '读取失败' : '';
@@ -461,12 +464,14 @@ export function enginesApp(ctx) {
     const unsupported = schema.models.filter(m => !m.supported).map(m => m.id + '：' + m.reason).join('\n');
     v.draw(heading(engines[engine], moreButton(), 'Engine Card')
       + card(engine, 'div')
-      + groupTitle('连接')
-      + (engine === 'fish' && api.fishSubscriptionStatus?.().transport === 'tt-mcp' ? '<p class="hint">订阅积分通过 TT 内置 MCP 使用。小手机会创建专用连接，短期访问凭据保存在 TT 的本地 MCP 配置中，可能随 TT 数据备份保存；刷新凭据时更新，断开时清理。已有登录可直接刷新积分，无需重新授权。</p>' : '')
+      + (engine === 'fish' ? fishAccount(api.fishSubscriptionStatus?.(), fishCredits) : '')
+      + groupTitle(engine === 'fish' ? '配音设置' : '连接')
       + `<div class="group pad">
           ${engine === 'custom' ? customSetRow() + customAddressRow() : ''}
+          ${engine === 'fish' && api.fishSubscriptionStatus?.().connected ? '<details data-group="fish-api"><summary>API 备用连接<small class="fold-note">当前使用订阅积分</small></summary><div class="fold-body">' : ''}
           ${keyRows(engine)}
           ${engine === 'custom' ? customKeyField(saved) : field(saved ? '再加一个密钥' : 'API Key', textArea('key', '', `rows="1" class="code key-paste" autocomplete="off" spellcheck="false" placeholder="${saved ? '粘贴新的密钥' : '粘贴密钥，多个就每行一个'}"`), '粘贴完点一下别处就保存了。可以保存多个账号的密钥，新加的排在后面，不用的可以单独删掉。先用排在前面的；某个密钥被拒（401、403）、额度用完（402）或请求太频繁（429）时，自动换下一个重试，这次打开页面里不再用它。想手动换，点那个密钥的「用这个」：马上改用它，并把它排到第一个，以后打开也先用它。\n\n密钥只保存在当前浏览器和酒馆地址，按账户分别保存。')}
+          ${engine === 'fish' && api.fishSubscriptionStatus?.().connected ? '</div></details>' : ''}
           ${schema.models.length > 1 ? field('默认模型', select('model', c.model, schema.models.map(m => [m.id, m.id, !m.supported])), unsupported || [schema.modelNote, '角色没有单独指定模型时使用这里的模型。'].filter(Boolean).join('\n\n')) : ''}
           ${engine === 'mini' ? field('服务区域', select('region', c.region, [['cn', '国内'], ['global', '国际'], ['uw', '国际 · 低延迟入口']])) : ''}
         </div>`
@@ -479,6 +484,7 @@ export function enginesApp(ctx) {
       + (tags.length || schema.sounds?.length ? `<details data-group="tags"><summary>情绪与语气标签</summary><div><div class="tags">${tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>${engine === 'mini' && c.model.startsWith('speech-2.8') ? '<div class="tags">' + ['laughs', 'chuckle', 'coughs', 'clear-throat', 'groans', 'breath', 'pant', 'inhale', 'exhale', 'gasps', 'sniffs', 'sighs', 'snorts', 'burps', 'lip-smacking', 'humming', 'hissing', 'emm', 'sneezes'].map(x => `<span class="tag">(${x})</span>`).join('') + '</div>' : ''}${schema.sounds?.length ? '<div class="tags">' + schema.sounds.map(x => `<span class="tag">(${esc(x)})</span>`).join('') + '</div>' : ''}<a href="${esc(schema.source)}" target="_blank" rel="noopener noreferrer">查看官方文档</a></div></details>` : '')
       + (engine === 'custom' ? `<div class="actions">${btn('custom-test', icon('play', true) + '试一试', 'secondary')}</div><p class="hint" data-custom-test style="white-space:pre-line"></p>` : '')
       + `<div class="savebar"><span class="save-state" data-save-state>${dirty ? '未保存' : '已保存'}</span>${btn('save-connection', '保存配置', 'primary')}</div>`);
+    paintFishCredits();
   }
 
   const FOLDER_KEY = 'sttts.voiceFolder';
@@ -847,11 +853,17 @@ export function enginesApp(ctx) {
   v.on('click', '[data-action]', el => act(el.dataset.action, el));
   async function act(action, el) {
     switch (action) {
+      case 'fish-refresh': await loadFishCredits(true); break;
+      case 'fish-account-menu': {
+        const key = await menu(ctx, '订阅连接', [{key:'fish-subscription',icon:'swap',label:'重新授权 / 切换团队'}, {key:'fish-diagnose',icon:'info',label:'连接诊断'}, {key:'fish-disconnect',icon:'close',label:'断开订阅账户',danger:true}]);
+        if (key) await act(key, el);
+        break;
+      }
       case 'fish-subscription': await api.fishSubscriptionConnect(); fishLinked('Fish 订阅账户已连接；角色若单独指定了模型，也需选择 drama-3'); break;
       case 'fish-diagnose': {
         const steps = api.fishSubscriptionTrace?.() || [], pad = n => String(n).padStart(2, '0');
         const labels = {'connect-start': '开始连接', 'pending-written': '已保存登录待办', 'callback-ok': '回调收到授权', 'callback-weak': '回调未找到完整待办', 'callback-error': '回调失败', 'callback-denied': '未获授权', 'callback-token-ok': '回调已存登录凭据', 'callback-token-fail': '回调交换失败', 'tavern-read': '酒馆读到授权', 'token-ok': '已存登录凭据', 'token-fail': '授权流程失败', resume: '继续之前的登录', 'resume-waiting': '仍在等待授权结果', 'manual-paste': '收到手动授权码', 'mcp-error': '订阅接口失败'};
-        const d = ctx.dialog('Fish 连接诊断', `<p class="help-copy">连接模块 0.9.65 · ${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>`
+        const d = ctx.dialog('Fish 连接诊断', `<p class="help-copy">连接模块 0.9.66 · ${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>`
           + `<p class="hint">已保存登录凭据不代表订阅接口已通过验证；接口失败时下面会写明步骤和服务说明。授权码只贴回自己的酒馆，不要发送给别人。</p>`
           + `
           <div class="group pad"><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;line-height:1.65;margin:0">${steps.map(s => { const t = new Date(s.at); return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}  ${esc(labels[s.ev] || '连接步骤')}${s.msg ? '  ' + esc(s.msg) : ''}`; }).join('\n') || '—'}</pre></div>
@@ -874,7 +886,7 @@ export function enginesApp(ctx) {
       }
       case 'fish-credits': {
         await loadFishCredits(true);
-        if (!v.disposed && api.fishSubscriptionStatus?.().connected) ctx.dialog('Fish 订阅积分', `<p class="help-copy" data-keep-hint>${esc(fishCredits.error || (fishCredits.value?.remaining != null ? `剩余 ${number(fishCredits.value.remaining)} 积分` : '服务未返回可识别的剩余数值'))}</p><p class="help-copy" style="white-space:pre-wrap">${esc(fishCredits.value?.detail || '')}</p>`);
+        if (!v.disposed && api.fishSubscriptionStatus?.().connected) ctx.dialog('Fish 订阅积分', `<p class="help-copy" data-keep-hint>${esc(fishCredits.error || (fishCredits.value?.remaining != null ? `剩余 ${number(fishCredits.value.remaining)} 积分` : '服务未返回可识别的剩余数值'))}</p>${fishAccountFacts(fishCredits.value)}<details><summary>原始返回</summary><p class="help-copy" style="white-space:pre-wrap">${esc(fishCredits.value?.detail || '')}</p></details>`);
         break;
       }
       case 'fish-disconnect': {

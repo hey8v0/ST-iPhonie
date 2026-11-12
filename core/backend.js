@@ -3354,19 +3354,9 @@ export class TTSBackend {
             posts++;
         }
         if (posts) this.emit('moments', {});
-        // Photos in the phone chats: a drawn one can be drawn again; one of the album goes back to its words.
-        for (const summary of await this.chats.list()) {
-            await this.chatMutate(summary.id, async () => {
-                const thread = await this.chats.get(summary.id);
-                const hit = (thread?.messages || []).filter(m => m.kind === 'photo' && [m.photoId, ...(m.imageVersions || [])].some(id => gone.has(id)));
-                for (const m of hit) {
-                    const imageVersions = [...new Set([...(m.imageVersions || []), m.photoId].filter(id => id && !gone.has(id)))];
-                    const photoId = gone.has(m.photoId) ? imageVersions.at(-1) || '' : m.photoId;
-                    await this.chats.updateMessage(thread.id, m.id, {photoId, imageVersions, imageState: photoId ? 'done' : 'failed', imageNote: photoId ? '' : '图片已清理'});
-                }
-                if (hit.length) this.emit('chat', { threadId: thread.id });
-            });
-        }
+        // Account-wide reference maintenance, not a user edit in the current chat.
+        // Only threads referencing deleted photos are changed, including reply versions.
+        for (const threadId of await this.chats.forgetPhotos([...gone])) this.emit('chat', {threadId});
         const snaps = (await this.apps.list('peek')).filter(doc => [...(doc.photos || []), doc.wallpaper].some(p => p && gone.has(p.photoId)));
         const strip = p => { if (!p || !gone.has(p.photoId)) return p; const { photoId, state, note, ...rest } = p; return rest; };
         if (snaps.length) await this.appsMutate('peek', () => this.apps.put(snaps.map(doc => ({ ...doc, photos: (doc.photos || []).map(strip), ...(doc.wallpaper ? { wallpaper: strip(doc.wallpaper) } : {}) }))));

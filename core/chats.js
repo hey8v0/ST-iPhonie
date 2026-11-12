@@ -566,6 +566,29 @@ export class ChatStore {
    * Changes one message: {state, openedBy} for a red packet or transfer, {text, translation} to edit its words, or
    * {recall: true} to withdraw it (the message keeps its place and sender and loses its content).
    */
+  /** Global photo deletion repairs references across this account, independently
+   * of the currently displayed chat partition. Never creates/deletes messages. */
+  async forgetPhotos(ids) {
+    const gone = new Set(ids); if (!gone.size) return [];
+    return this.#tx('readwrite', (store, done) => {
+      const changed = [], req = store.index('scope').openCursor(this.#scope);
+      req.onsuccess = () => {
+        const cursor = req.result; if (!cursor) { done(changed); return; }
+        const row = cursor.value; let touched = false;
+        for (const messages of [row.messages, ...(row.alts?.versions || [])]) for (const m of messages || []) {
+          if (m.kind !== 'photo' || ![m.photoId, ...(m.imageVersions || [])].some(id => gone.has(id))) continue;
+          const imageVersions = [...new Set([...(m.imageVersions || []), m.photoId].filter(id => id && !gone.has(id)))];
+          const photoId = gone.has(m.photoId) ? imageVersions.at(-1) || '' : m.photoId;
+          Object.assign(m, {imageVersions, imageState: photoId ? 'done' : 'failed', updatedAt: Math.max(this.#now(), (m.updatedAt || m.at || 0) + 1)});
+          if (photoId) { m.photoId = photoId; delete m.imageNote; }
+          else { delete m.photoId; m.imageNote = '图片已清理'; }
+          touched = true;
+        }
+        if (touched) { cursor.update(row); changed.push(row.id); }
+        cursor.continue();
+      };
+    });
+  }
   async updateMessage(id, messageId, patch = {}) {
     return this.#change(id, row => {
       const m = row.messages.find(x => x.id === messageId);

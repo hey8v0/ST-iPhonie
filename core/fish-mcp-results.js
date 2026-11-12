@@ -38,7 +38,17 @@ export function fishCreditBalance(result) {
     if (match) { remaining = number(match[1]); break; }
   }
   const detail = texts.join('\n') || (result?.structuredContent ? JSON.stringify(result.structuredContent) : '服务没有返回积分明细');
-  return {remaining, detail: detail.slice(0, 12000)};
+  const accountOf = (value, depth = 0) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || depth > 4) return null;
+    if (Object.hasOwn(value, 'package_balance')) {
+      const label = v => typeof v === 'string' ? v.slice(0, 120) : '';
+      return {package: number(value.package_balance), extra: number(value.package_extra_balance), team: label(value.team_name), plan: label(value.plan), cycleEndsAt: label(value.package_cycle_ends_at), textLimit: number(value.tts_max_text_bytes_per_call)};
+    }
+    for (const key of ['data', 'result', 'account', 'subscription']) { const found = accountOf(value[key], depth + 1); if (found) return found; }
+    return null;
+  };
+  const account = values.map(v => accountOf(v)).find(Boolean);
+  return {remaining, detail: detail.slice(0, 12000), ...(account ? {account} : {})};
 }
 
 export function fishSafeText(value, secrets = []) {

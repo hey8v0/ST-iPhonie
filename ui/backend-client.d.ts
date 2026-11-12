@@ -710,7 +710,7 @@ export interface BackendFacade {
     fishSubscriptionDisconnect(): Promise<void>;
     fishSubscriptionBalance(): Promise<string>;
     /** Subscription credits, not developer API dollars; null means the service returned no recognizable balance. */
-    fishSubscriptionCredits(refresh?: boolean): Promise<{remaining: number | null; detail: string; checkedAt: number}>;
+    fishSubscriptionCredits(refresh?: boolean): Promise<{remaining: number | null; detail: string; checkedAt: number; account?: {package: number | null; extra: number | null; team: string; plan: string; cycleEndsAt: string; textLimit: number | null}}>;
     /** The last 4 characters of the saved key ('' when none is saved), to tell which key is in use. */
     keyHint(engine: KeyEngine): string;
     /** Several keys (Fish): how many, which one is in use (1-based) and how many were refused while this page is open. */
