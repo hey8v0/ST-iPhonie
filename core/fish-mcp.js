@@ -3,6 +3,7 @@
 import {joinAudio} from './audio-join.js';
 import {fishCreditBalance, fishMcpHttpError, fishOAuthHttpError, fishSafeText} from './fish-mcp-results.js';
 import {fishExternalHost, fishLoginRedirect, openFishExternal} from './fish-transport.js';
+import {FishTtMcp} from './fish-tt-mcp.js';
 import {fishLoginKeys, FISH_LOGIN_TTL, fishTrace, fishTraceOf, fishCredentialKey, acceptFishCallback, parseFishManualInput, readFishPending, fishCredentials, fishLoginCompleted, fishLoginEpoch, fishLoginOwner, fishLoginLocks, cancelFishLogins, dropFishPending, canFinishFishLogin, completeFishLogin} from './fish-oauth-flow.js';
 const API = 'https://api.fish.audio', RESOURCE = API + '/mcp';
 // Named popups are shared by clients in one host window, not by just one FishMcp instance.
@@ -60,13 +61,14 @@ export class FishMcp {
   constructor({scope = '', win = globalThis, fetcher = globalThis.fetch?.bind(globalThis), storage = () => win.localStorage, proxy = null, notice = () => {}} = {}) {
     this.win = win; this.fetcher = fetcher; this.storage = storage; this.scope = scope || ''; this.key = fishCredentialKey(scope);
     this.proxy = proxy; this.notice = notice; this.viaProxy = false;
+    this.native = new FishTtMcp({win, storage, scope});
     this.loginOwner = fishLoginOwner(win); this.loginLocks = fishLoginLocks(win);
     this.session = ''; this.sequence = 0; this.epoch = 0; this.ready = null; this.refreshing = null; this.tools = null;
   }
   credentials() { try { return fishCredentials(this.storage(), this.scope); } catch { return null; } }
-  status() { return {connected: !!this.credentials()?.access_token}; }
+  status() { return {connected: !!this.credentials()?.access_token, ...(fishExternalHost(this.win) ? {transport: 'tt-mcp'} : {})}; }
   save(value) { const s = this.storage(); s.setItem(this.key, JSON.stringify({...value, login_epoch: value.login_epoch ?? fishLoginEpoch(s, this.scope)})); }
-  disconnect() { this.epoch++; this.cancelLogin?.(); const s = this.storage(); cancelFishLogins(s, this.scope); s?.removeItem(this.key); this.session = ''; this.ready = null; this.tools = null; this.invalidateCredits(); }
+  disconnect() { this.epoch++; this.cancelLogin?.(); const s = this.storage(); cancelFishLogins(s, this.scope); s?.removeItem(this.key); this.session = ''; this.ready = null; this.tools = null; this.invalidateCredits(); return this.native.disconnect(); }
   loginReady() { this.ready = null; this.session = ''; this.tools = null; this.invalidateCredits(); return this.status(); }
   async json(url, init) {
     const r = await this.fetcher(url, {credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(30000), ...init});
@@ -259,6 +261,12 @@ export class FishMcp {
     return mcpResult(await r.text(), id);
   }
   async initialize() {
+    if (fishExternalHost(this.win)) {
+      const token = await this.access(), epoch = this.epoch;
+      try { this.tools = await this.native.discover(token, () => epoch === this.epoch && this.credentials()?.access_token === token); }
+      catch (error) { throw Error(fishSafeText(error.message || String(error), [token, this.credentials()?.refresh_token])); }
+      return;
+    }
     if (!this.ready) this.ready = (async () => {
       const hello = await this.rpc('initialize', {protocolVersion: '2025-03-26', capabilities: {}, clientInfo: {name: 'ST-iPhonie', version: '1.0'}});
       this.protocol = hello.protocolVersion;
@@ -268,7 +276,17 @@ export class FishMcp {
     })().catch(e => { this.ready = null; throw e; });
     return this.ready;
   }
-  async call(name, args = {}, signal) { await this.initialize(); return this.rpc('tools/call', {name, arguments: args}, signal); }
+  async call(name, args = {}, signal) {
+    if (fishExternalHost(this.win)) {
+      const token = await this.access(), epoch = this.epoch;
+      try { return await this.native.call(name, args, token, () => epoch === this.epoch && this.credentials()?.access_token === token, signal); }
+      catch (error) {
+        const message = fishSafeText(error.message || String(error), [token, this.credentials()?.refresh_token]);
+        fishTrace(this.storage(), 'mcp-error', 'TT 原生 MCP：' + message); throw Error(message);
+      }
+    }
+    await this.initialize(); return this.rpc('tools/call', {name, arguments: args}, signal);
+  }
   async balance() { return (await this.credits()).detail; }
   invalidateCredits() { this.creditCache = null; }
   /** Reading credits is free. Coalesce concurrent card/menu reads, cache briefly, and never reuse another login's balance. */

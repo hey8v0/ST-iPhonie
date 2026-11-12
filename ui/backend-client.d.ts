@@ -702,12 +702,12 @@ export interface BackendFacade {
     /** ElevenLabs or Fish balance; null without a key. Cached for a minute unless `refresh`. */
     voiceBalance(engine: 'eleven' | 'fish', refresh?: boolean): Promise<VoiceBalance | null>;
     keyStatus(engine: KeyEngine): boolean;
-    fishSubscriptionStatus(): {connected: boolean};
+    fishSubscriptionStatus(): {connected: boolean; transport?: 'tt-mcp'};
     fishSubscriptionConnect(): Promise<{connected: boolean}>;
     fishSubscriptionResume(): Promise<{connected: boolean}>;
     fishSubscriptionCompleteManual(text: string): Promise<{connected: boolean}>;
     fishSubscriptionTrace(): {at: number, ev: string, msg: string}[];
-    fishSubscriptionDisconnect(): void;
+    fishSubscriptionDisconnect(): Promise<void>;
     fishSubscriptionBalance(): Promise<string>;
     /** Subscription credits, not developer API dollars; null means the service returned no recognizable balance. */
     fishSubscriptionCredits(refresh?: boolean): Promise<{remaining: number | null; detail: string; checkedAt: number}>;

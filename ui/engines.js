@@ -462,6 +462,7 @@ export function enginesApp(ctx) {
     v.draw(heading(engines[engine], moreButton(), 'Engine Card')
       + card(engine, 'div')
       + groupTitle('连接')
+      + (engine === 'fish' && api.fishSubscriptionStatus?.().transport === 'tt-mcp' ? '<p class="hint">订阅积分通过 TT 内置 MCP 使用。小手机会创建专用连接，短期访问凭据保存在 TT 的本地 MCP 配置中，可能随 TT 数据备份保存；刷新凭据时更新，断开时清理。已有登录可直接刷新积分，无需重新授权。</p>' : '')
       + `<div class="group pad">
           ${engine === 'custom' ? customSetRow() + customAddressRow() : ''}
           ${keyRows(engine)}
@@ -850,7 +851,7 @@ export function enginesApp(ctx) {
       case 'fish-diagnose': {
         const steps = api.fishSubscriptionTrace?.() || [], pad = n => String(n).padStart(2, '0');
         const labels = {'connect-start': '开始连接', 'pending-written': '已保存登录待办', 'callback-ok': '回调收到授权', 'callback-weak': '回调未找到完整待办', 'callback-error': '回调失败', 'callback-denied': '未获授权', 'callback-token-ok': '回调已存登录凭据', 'callback-token-fail': '回调交换失败', 'tavern-read': '酒馆读到授权', 'token-ok': '已存登录凭据', 'token-fail': '授权流程失败', resume: '继续之前的登录', 'resume-waiting': '仍在等待授权结果', 'manual-paste': '收到手动授权码', 'mcp-error': '订阅接口失败'};
-        const d = ctx.dialog('Fish 连接诊断', `<p class="help-copy">连接模块 0.9.64 · ${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>`
+        const d = ctx.dialog('Fish 连接诊断', `<p class="help-copy">连接模块 0.9.65 · ${steps.length ? '最近的步骤（新的在下面）' : '还没有记录：先点一次「连接订阅账户」再回来'}</p>`
           + `<p class="hint">已保存登录凭据不代表订阅接口已通过验证；接口失败时下面会写明步骤和服务说明。授权码只贴回自己的酒馆，不要发送给别人。</p>`
           + `
           <div class="group pad"><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;line-height:1.65;margin:0">${steps.map(s => { const t = new Date(s.at); return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}  ${esc(labels[s.ev] || '连接步骤')}${s.msg ? '  ' + esc(s.msg) : ''}`; }).join('\n') || '—'}</pre></div>
@@ -876,7 +877,11 @@ export function enginesApp(ctx) {
         if (!v.disposed && api.fishSubscriptionStatus?.().connected) ctx.dialog('Fish 订阅积分', `<p class="help-copy" data-keep-hint>${esc(fishCredits.error || (fishCredits.value?.remaining != null ? `剩余 ${number(fishCredits.value.remaining)} 积分` : '服务未返回可识别的剩余数值'))}</p><p class="help-copy" style="white-space:pre-wrap">${esc(fishCredits.value?.detail || '')}</p>`);
         break;
       }
-      case 'fish-disconnect': api.fishSubscriptionDisconnect(); fishConnected = false; clearFishCredits(); render(); loadBalance('fish', true); break;
+      case 'fish-disconnect': {
+        try { await api.fishSubscriptionDisconnect(); }
+        finally { fishConnected = false; clearFishCredits(); render(); loadBalance('fish', true); }
+        break;
+      }
       case 'engine-more': await engineMore(el); break;
       case 'image-connections': await imageConnectionMenu(); break;
       case 'custom-sets': await customSetMenu(); break;
