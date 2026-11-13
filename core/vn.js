@@ -1,7 +1,8 @@
 // 视觉小说: the story read as a galgame. Its settings, the story cut into pages (core of the stage in vn-stage.js),
 // the 立绘 (with their 表情 and 动作) and the requests that draw them, and the cut-out that takes the plain background
 // off a drawn 立绘.
-import {skippedRanges, narrationPieces, NARRATION_SKIP, NARRATION_BODY, cleanSkip} from './narration.js';
+import {narrationPieces} from './narration.js';
+import {storyScope, NARRATION_SKIP, NARRATION_BODY, cleanSkip} from './story-scope.js';
 import {normalizeModels, normalizeMoveFiles} from './model-files.js';
 import {visualEmotion, visualEffects, matchesVisualWord, visualWordEmotion, visualWordHits, doneBy} from './visual-emotion.js';
 import {activeStyle, sizeFor, tavernPicture} from './draw.js';
@@ -283,10 +284,8 @@ export function pages(value, max = PAGE) {
  * The parts not read aloud by 整篇朗读 (thinking, status bars, code, the phone's tags) are not shown either.
  */
 export function storySteps(raw, lines = [], {pics = [], sounds = [], bgm = [], skip = NARRATION_SKIP, body = NARRATION_BODY, max = PAGE} = {}) {
-  const source = String(raw ?? ''), cut = skippedRanges(source, skip, body);
-  let masked = source;
-  for (const [a, b] of cut) masked = masked.slice(0, a) + masked.slice(a, b).replace(/[^\n]/g, ' ') + masked.slice(b);
-  const hidden = (a, b) => cut.some(([s, e]) => a < e && b > s);
+  const {text: source, masked, contains} = storyScope(raw, {skip, body});
+  const hidden = (a, b) => !contains(a, b);
   const out = [];
   const prose = (a, b) => { if (b > a) for (const piece of narrationPieces(masked.slice(a, b))) for (const page of pages(piece, max)) out.push({kind: 'narrate', text: page}); };
   const point = (list, kind) => list.filter(p => Number.isFinite(p?.start) && (kind !== 'bg' || p.url)).map(p => ({point: kind, p, start: p.start, end: p.start}));

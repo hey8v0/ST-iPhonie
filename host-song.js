@@ -28,7 +28,7 @@ export function createSongHost({context, settings, backend, memory = null}) {
   /** Asks the text model, from what the form says and what the story knows; {title, style, lyrics}. */
   async function compose(ctx, form, {before = null, wish = '', history = []} = {}) {
     const s = settings(), preset = activeChatPreset(s.chat), user = userName(), who = owner(form.who), useStory = form.story !== false;
-    const story = useStory ? await readStoryLines(ctx.chat, preset, user) : [];
+    const story = useStory ? await readStoryLines(ctx.chat, preset, user, settings().narration) : [];
     const remembered = who && memory ? await memory.aboutPeople([who.name]).catch(() => '') : '';
     const lore = !useStory || preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: who ? who.persona || who.card : '',
       texts: story.map(r => `${r.name}: ${r.text}`), always: [form.about || '', who?.name || '']});

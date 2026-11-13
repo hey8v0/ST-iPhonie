@@ -1,3 +1,4 @@
+import {storyScope, mapStory} from './core/story-scope.js';
 // In-chat pictures: fills the placeholders left by <img>…</img> tags, generates them with NovelAI,
 // uploads the result to the tavern's image folder and remembers it on the message (message.extra.sttts_pics),
 // so every device that opens the chat sees the same picture.
@@ -176,7 +177,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const preset = activeChatPreset(settings().chat);
     if (preset.lore === false) return '';
     return worldInfoFor(context, {...loreOptions(preset), report: (...args) => backend.reportDiagnostic?.(...args), persona: String(context()?.powerUserSettings?.persona_description || '').slice(0, 1500),
-      texts: [...prior.map(m => `${m.name}: ${m.text}`), plainStory(withoutPictures(source))]});
+      texts: [...prior.map(m => `${m.name}: ${m.text}`), plainStory(withoutPictures(source), [], settings().narration)]});
   }
   /** The picture planner's request for one reply, with the story's 世界书 and the card's 名单. */
   async function pictureRequest(id, source) {
@@ -189,17 +190,20 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     for (let i = id - 1; i >= 0 && out.length < limit; i--) {
       const m = chat[i];
       if (!m || m.is_system) continue;
-      const text = plainStory(withoutPictures(m.mes));
+      const text = plainStory(withoutPictures(m.mes), [], settings().narration);
       if (text) out.unshift({name: m.name || (m.is_user ? '我' : '角色'), text: text.slice(0, 600)});
     }
     return out;
   }
   /** The pictures of a reply asked for on their own: put in, asked once more when none came out. {text, count} */
-  async function planOnce(id, source) {
+  async function planOnce(id, source, valid = () => true) {
     let last = {text: source, count: 0};
     for (let round = 0; round < 2 && !last.count; round++) {
-      const reply = await backend.generateText(context(), {use: 'picture', prompt: await pictureRequest(id, source), trimNames: false, responseLength: planLength(settings(), activeDrawPreset().count)});
-      last = insertPlanned(source, reply);
+      const prompt = await pictureRequest(id, source);
+      if (!valid()) throw new DOMException('回复已变化，已取消旧的配图任务', 'AbortError');
+      const reply = await backend.generateText(context(), {use: 'picture', prompt, trimNames: false, responseLength: planLength(settings(), activeDrawPreset().count)});
+      if (!valid()) throw new DOMException('回复已变化，旧结果未写入', 'AbortError');
+      last = insertPlanned(source, reply, settings().narration);
       if (!last.count) backend.reportDiagnostic?.('正文出图', {message: round ? '又试了一次，还是没有挑出画面' : '没有挑出画面，再试一次', reply: String(reply ?? '').slice(0, 2000)}, 'warn');
     }
     return last;
@@ -216,9 +220,10 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     planning.add(id);
     notice('正在给这条回复挑画面……');
     try {
-      const source = force ? withoutPictures(message.mes) : message.mes;
-      const {text, count} = await planOnce(id, source);
-      if (context().chat[id] !== message) return false;
+      const raw = message.mes, swipe = message.swipe_id;
+      const source = force ? withoutPictures(raw) : raw;
+      const {text, count} = await planOnce(id, source, () => context().chat[id] === message && message.mes === raw && message.swipe_id === swipe);
+      if (context().chat[id] !== message || message.mes !== raw || message.swipe_id !== swipe) return false;
       if (!count) throw Error('这次没有挑出画面（试了两次），可以点这层楼右边的小手机工具按钮「给这层楼生图」再试；模型具体回了什么可以在小手机的「日志」App 里看');
       message.mes = text;
       if (Array.isArray(message.swipes)) message.swipes[message.swipe_id ?? 0] = text;
@@ -234,6 +239,8 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
    */
   async function planReply(id, {voiced: wantVoice, pictured: wantPictures, force = false, phoned = false}) {
     const ctx = context(), s = settings(), message = ctx.chat[id];
+    const raw = message?.mes, swipe = message?.swipe_id, chat = ctx.getCurrentChatId?.() ?? ctx.chatId;
+    const valid = () => context().chat[id] === message && message.mes === raw && message.swipe_id === swipe && (context().getCurrentChatId?.() ?? context().chatId) === chat;
     if (!message || message.is_user || message.is_system || planning.has(id) || (!wantVoice && !wantPictures)) return {voiced: 0, pictured: 0};
     planning.add(id);
     notice(wantVoice && wantPictures ? '正在给这条回复配音、挑画面……' : wantVoice ? '正在给这条回复配音……' : '正在给这条回复挑画面……');
@@ -242,22 +249,23 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const preset = s.draw.presets.find(p => p.id === s.draw.activePreset) || s.draw.presets[0];
       const pictures = wantPictures ? await pictureRequest(id, source) : null;
       const asked = wantVoice && wantPictures ? combinedRequest({rules: voice.rules(), format, pictures})
-        : wantVoice ? voicePlanRequest({rules: voice.rules(), format, message: source, before: before(id)}) : pictures;
+        : wantVoice ? voicePlanRequest({rules: voice.rules(), format, message: source, before: before(id), scope: s.narration}) : pictures;
       // 正文联动手机: what happens on the phone is asked for at the end of the same request (【手机】).
       const phoneRule = phoned && phone?.wanted() ? await phone.rule() : '';
       const prompt = withPhone(asked, phoneRule);
       const length = (wantVoice ? Math.min(3000, 400 + source.length * 2) : 0) + (wantPictures ? planLength(s, preset.count) : 0) + (phoneRule ? 500 : 0);
+      if (!valid()) return {voiced: 0, pictured: 0};
       const answer = await backend.generateText(ctx, {use: 'picture', prompt, trimNames: false, responseLength: Math.min(10000, length)});
-      if (context().chat[id] !== message) return {voiced: 0, pictured: 0};
+      if (!valid()) return {voiced: 0, pictured: 0};
       const {rest: reply, phone: sent} = phoneRule ? phoneSection(answer) : {rest: answer, phone: ''};
       let text = source, pictured = 0, voiced = 0;
-      if (wantPictures) ({text, count: pictured} = insertPlanned(text, reply));
-      if (wantVoice) ({text, count: voiced} = insertVoiced(text, reply, format));
+      if (wantPictures) ({text, count: pictured} = insertPlanned(text, reply, s.narration));
+      if (wantVoice) ({text, count: voiced} = insertVoiced(text, reply, format, s.narration));
       // No pictures came out with the rest: they are asked for on their own (once more at most).
       if (wantPictures && !pictured) {
         backend.reportDiagnostic?.('正文出图', {message: '和配音一起请求时没有挑出画面，单独再请求一次', reply: String(reply ?? '').slice(0, 2000)}, 'warn');
-        ({text, count: pictured} = await planOnce(id, text));
-        if (context().chat[id] !== message) return {voiced: 0, pictured: 0};
+        ({text, count: pictured} = await planOnce(id, text, valid));
+        if (!valid()) return {voiced: 0, pictured: 0};
       }
       // The phone part is kept at the end of the reply like the story's own <phone> (shown as a note), then delivered.
       if (sent) {
@@ -302,18 +310,27 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
    * Called after a new reply is rendered. 'separate' mode plans its pictures first; then new characters' looks are
    * saved and, when automatic drawing is on and free, all its pictures are queued.
    */
+  const afterReplies = new WeakMap();
+  function prepareReply(id, {retry = false} = {}) {
+    const ctx = context(), message = ctx.chat[id], s = settings(), chat = ctx.getCurrentChatId?.() ?? ctx.chatId;
+    if (!message || message.is_user || message.is_system) return Promise.resolve();
+    const old = afterReplies.get(message);
+    if (old?.running || old && !retry && old.raw === message.mes && old.swipe === message.swipe_id) return old.promise;
+    const task = {raw: message.mes, swipe: message.swipe_id, running: true};
+    afterReplies.set(message, task);
+    task.promise = Promise.resolve().then(async () => {
+      if (context().chat[id] !== message || message.mes !== task.raw || message.swipe_id !== task.swipe || (context().getCurrentChatId?.() ?? context().chatId) !== chat) return;
+      const wantVoice = !!voice?.wanted() && !voice.has(storyScope(message.mes, s.narration).masked);
+      const wantPictures = s.draw.enabled && s.draw.mode === 'separate' && !parsePictures(message.mes).length;
+      if (!storyScope(message.mes, s.narration).masked.replace(/<[^>]+>/g, '').trim()) return;
+      if (wantVoice || wantPictures) await planReply(id, {voiced: wantVoice, pictured: wantPictures, phoned: true});
+    }).finally(() => { task.running = false; task.raw = message.mes; });
+    return task.promise;
+  }
   async function autoPictures(id) {
-    const s = settings();
-    let message = context().chat[id];
-    if (!message || message.is_user || message.is_system) return;
-    const wantVoice = !!voice?.wanted() && !voice.has(message.mes);
-    const wantPictures = s.draw.enabled && s.draw.mode === 'separate' && !parsePictures(message.mes).length;
-    if (wantVoice || wantPictures) {
-      let done;
-      try { done = await planReply(id, {voiced: wantVoice, pictured: wantPictures, phoned: true}); } catch (error) { notice(error.message); return; }
-      if (wantPictures && !done.pictured) return;
-      message = context().chat[id];
-    }
+    const s = settings(), ctx = context(), message = ctx.chat[id], chat = ctx.getCurrentChatId?.() ?? ctx.chatId, swipe = message?.swipe_id;
+    await prepareReply(id);
+    if (!message || message.is_user || message.is_system || context().chat[id] !== message || message.swipe_id !== swipe || (context().getCurrentChatId?.() ?? context().chatId) !== chat) return;
     if (!s.draw.enabled) return;
     registerAppearances(message);
     if (!s.draw.auto) return;
@@ -633,13 +650,16 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   }
   /** A reply from a character (给这层楼配音): voice its lines again with 回复后单独配音's request, replacing the ones there. */
   async function voiceMessage(id) {
+    const current = context().chat[id], task = current && afterReplies.get(current);
+    if (task?.running) { try { await task.promise; } catch {} if (context().chat[id] !== current) throw Error('楼层内容已变化，请重新选择'); }
     const m = context().chat[id];
     if (!m || m.is_user || m.is_system) throw Error('这层楼不是角色的回复');
     if (!voice) throw Error('配音没有开');
     const was = m.mes;
-    if (voice.has(m.mes)) m.mes = voice.strip(m.mes);
-    // The lines go back as they were when nothing new could be put in.
-    try { const {voiced} = await planReply(id, {voiced: true, pictured: false}); return voiced; } catch (error) { if (context().chat[id] === m) m.mes = was; throw error; }
+    if (voice.has(m.mes)) m.mes = mapStory(m.mes, settings().narration, text => voice.strip(text));
+    const stripped = m.mes, swipe = m.swipe_id;
+    // Restore only our own unchanged draft, never overwrite a user's newer edit.
+    try { const {voiced} = await planReply(id, {voiced: true, pictured: false}); return voiced; } catch (error) { if (context().chat[id] === m && m.mes === stripped && m.swipe_id === swipe) m.mes = was; throw error; }
   }
   /** The newest reply from a character: voice its lines again (设置 → 正文 → 正文语音 → 给最新回复配音). */
   async function voiceLatest() {
@@ -663,5 +683,5 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const permission = await allowed(true); if (!permission) return;
     for (const tag of tags) { if (context().chat[id] !== message) break; await generate(id, tag, {permission}); }
   }
-  return {drawFor, tagText, drawMessage, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, voiceMessage, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
+  return {drawFor, tagText, drawMessage, prepareReply, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, voiceMessage, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
 }

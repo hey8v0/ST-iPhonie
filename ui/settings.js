@@ -126,8 +126,8 @@ export function settingsApp(ctx) {
           ${field('语速', select('nar-rate', n.rate, NARRATION_RATES.map(r => [r, r === 1 ? '正常' : r + ' 倍'])))}
           <div class="actions">${btn('nar-try', icon('play', true) + '试听', 'secondary')}</div>` : '<p class="hint">这个浏览器不能系统朗读，换成「配音引擎」，或者换个浏览器。</p>')
         : `<p class="hint">${role?.voice ? `用角色 App 里「旁白」的音色。` : '还没有「旁白」这个角色的音色：选好之前，叙述会跳过，只读台词。'}</p><div class="actions">${btn('nar-role', icon('wave') + (role ? '设置旁白的音色' : '新建「旁白」角色'), 'secondary')}</div>`}
-        ${field('正文标签', input('nar-body', (n.body || []).join('、'), 'text', 'placeholder="content、正文"'), '回复用这些标签包着正文时（比如预设要求把正文写在 <content>…</content> 里），只读标签里面的，前后的状态栏、摘要、小剧场都不读。写标签名，用顿号或逗号隔开；回复里没有这些标签时照常读整条。清空就总是读整条。和视觉小说共用。')}
-        ${field('不读的内容', textArea('nar-skip', n.skip.join('、'), 'rows="3" placeholder="小剧场、状态栏"'), '写标签名，用顿号或逗号隔开：写「小剧场」，就会跳过 <小剧场>…</小剧场> 里的全部内容（里面的台词也不读）。代码块、注释、思考，以及小手机自己的出图、音效、音乐、手机消息标签，总是跳过。')}</div>`;
+        ${field('正文标签', input('nar-body', (n.body || []).join('、'), 'text', 'placeholder="content、正文"'), '回复用这些标签包着正文时（比如预设要求把正文写在 <content>…</content> 里），只读标签里面的，前后的状态栏、摘要、小剧场都不读。写标签名，用顿号或逗号隔开；回复里没有这些标签时照常读整条。清空就总是读整条。和视觉小说、单独配音、单独配图及小手机读取的剧情共用，不受整篇朗读开关影响。')}
+        ${field('排除的内容', textArea('nar-skip', n.skip.join('、'), 'rows="3" placeholder="小剧场、状态栏"'), '写标签名，用顿号或逗号隔开：写「小剧场」，就会跳过 <小剧场>…</小剧场> 里的全部内容（里面的台词也不读）。代码块、注释、思考，以及小手机自己的出图、音效、音乐、手机消息标签，总是跳过。')}</div>`;
     };
     paint();
     // System voices can arrive a moment later.

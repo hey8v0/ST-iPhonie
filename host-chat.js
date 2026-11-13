@@ -99,7 +99,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       .replaceAll('{{char}}', name).replaceAll('{{user}}', userName()).slice(0, 2000);
   }
   // The same recent story as the other apps (core/moments.js storyLines), as much as the chat preset says.
-  const story = async preset => await readStoryLines(context()?.chat || [], preset, userName());
+  const story = async preset => await readStoryLines(context()?.chat || [], preset, userName(), settings().narration);
   async function exactFor(preset) {
     const result = preset.storyMode === 'exact' ? await exactReader(context, preset) : null;
     if (result && !result.available) backend.reportDiagnostic?.('正文读取', {message: result.reason + '，已改用跟着酒馆'}, 'warn');

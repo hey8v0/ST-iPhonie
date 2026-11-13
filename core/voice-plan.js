@@ -1,3 +1,4 @@
+import {storyScope} from './story-scope.js';
 // 回复后单独配音: the story model writes the reply without any voice rule; afterwards the plugin asks the model once
 // more, with the voice preset's rules, to voice the lines already in it. The answer is one row per spoken line, the
 // line as the reply has it and the same line in the preset's 台词格式; the plugin puts each in place of its line.
@@ -21,8 +22,8 @@ const voiceSystem = (rules, format) => [String(rules || '').trim(), voicePlanRul
 const story = (message, before) => (before.length ? `【前情】\n${before.map(m => `${m.name}：${m.text}`).join('\n')}\n\n` : '') + `【这段正文】\n${String(message).trim()}`;
 
 /** The request for voicing a reply: rules = the voice preset's prompt for the speakers (promptPlan), joined. */
-export function voicePlanRequest({rules, format, message, before = []}) {
-  return [{role: 'system', content: voiceSystem(rules, format)}, {role: 'user', content: `${story(message, before)}\n\n（只输出台词行。）`}];
+export function voicePlanRequest({rules, format, message, before = [], scope = {}}) {
+  return [{role: 'system', content: voiceSystem(rules, format)}, {role: 'user', content: `${story(storyScope(message, scope).masked, before)}\n\n（只输出台词行。）`}];
 }
 
 /** Voice and pictures in one request: the picture planner's request (planRequest) with the voicing put in front. */
@@ -50,8 +51,8 @@ export function voicedRows(reply, format) {
  * Lines are looked for in order, each after the one before; one not found after it is looked for from the start,
  * outside the places already taken. Returns {text, count}.
  */
-export function insertVoiced(message, reply, format) {
-  const source = String(message), taken = [], spans = [];
+export function insertVoiced(message, reply, format, scope = {}) {
+  const source = String(message), taken = [], spans = [], {contains} = storyScope(message, scope);
   const free = (a, b) => !taken.some(([x, y]) => a < y && b > x);
   const find = (said, from) => {
     for (const text of [said, said.replace(/[。！？!?…~～，,、]+$/, '')]) {
@@ -61,7 +62,7 @@ export function insertVoiced(message, reply, format) {
         if (OPEN.includes(source[a - 1] || '\0') && CLOSE.includes(source[b] || '\0')) { a--; b++; }
         else if (OPEN.includes(source[a - 1] || '\0') && CLOSE.includes(source[b + 1] || '\0') && /[。！？!?…~～，,]/.test(source[b])) { a--; b += 2; }
         if (format===FREE_FORMAT) { const tail=/^\s*[（(][^()（）\n]{1,2000}[）)]/.exec(source.slice(b)); if(tail)b+=tail[0].length; }
-        if (free(a, b)) return [a, b];
+        if (contains(a, b) && free(a, b)) return [a, b];
       }
     }
     return null;

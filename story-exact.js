@@ -13,8 +13,8 @@ export function createStoryRegex(load = () => import('/scripts/extensions/regex/
   };
 }
 export const storyRegex = createStoryRegex();
-export async function readStoryLines(chat, preset, user) {
-  return storyLines(chat, preset, user, {regex: await storyRegex()});
+export async function readStoryLines(chat, preset, user, scope = {}) {
+  return storyLines(chat, preset, user, {regex: await storyRegex(), scope});
 }
 const textOf = value => typeof value === 'string' ? value : Array.isArray(value)
   ? value.filter(p => p?.type === 'text' && typeof p.text === 'string').map(p => p.text).join('\n') : '';

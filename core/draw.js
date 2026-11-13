@@ -1,3 +1,4 @@
+import {storyScope} from './story-scope.js';
 // Drawing settings, the LLM-facing drawing preset, and <img>…</img> picture blocks in chat text.
 //
 // Two kinds of preset live here:
@@ -605,75 +606,22 @@ export function drawPromptPlan(settings, preset, only = null) {
 // ---------- Planning pictures after the reply ('separate' mode) ----------
 const TTS_BLOCK = /<tts\b[^>]*>[\s\S]*?<\/tts\s*>/gi;
 const IMG_BLOCK = /<img\b[^<>]*>[^<]*<\/img\s*>|<img\b[^<>]*\/?>/gi;
-const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'source', 'wbr', 'area', 'col', 'embed', 'track', 'tts']);
-/**
- * Parts of a reply a picture must not be put inside: every tag that spans several lines (a status bar, <details>, a
- * preset's own blocks), code fences and HTML comments, as [start, end, name]. Tags left open are not counted.
- */
-/** Blocks that hold something about the story, not the story: pictures never go in them, their lines are not offered. */
-const NOT_STORY = /^(?:bakemono|summary\w*|details|think\w*|reasoning|analysis|status\w*|statusbar|state\w*|memory|abstract|options?|choices?|branch\w*|table\w*|update\w*|var\w*|摘要|总结|状态\w*|选项|小剧场)$/i;
-export function blockRanges(source) {
-  const text = String(source), ranges = [], stack = [];
-  for (const m of text.matchAll(/```[\s\S]*?(?:```|$)|<!--[\s\S]*?(?:-->|$)/g)) if (m[0].includes('\n')) ranges.push([m.index, m.index + m[0].length, m[0].startsWith('<') ? '!--' : '```']);
-  const hidden = at => ranges.some(([a, b]) => at >= a && at < b);
-  for (const m of text.matchAll(/<(\/?)([A-Za-z一-鿿][\w一-鿿:-]*)\b[^<>]*?(\/?)>/g)) {
-    if (hidden(m.index)) continue;
-    const [, closing, raw, self] = m, name = raw.toLowerCase();
-    if (self || (!closing && VOID_TAGS.has(name))) continue;
-    if (!closing) { stack.push({name, start: m.index}); continue; }
-    const at = stack.map(x => x.name).lastIndexOf(name);
-    if (at < 0) continue;
-    const open = stack[at];
-    stack.length = at;
-    const end = m.index + m[0].length;
-    if (text.slice(open.start, end).includes('\n')) ranges.push([open.start, end, name]);
-  }
-  return ranges;
-}
+export {blockRanges} from './story-scope.js';
 /**
  * Story paragraphs of a reply with their end offsets; picture blocks and voice originals are left out. A paragraph
  * inside a block (a status bar at the end of the reply, a <details>) ends where that block closes, so a picture put
  * "after" it never lands inside the block and breaks it. The block most of the story sits in (a preset's <content>
  * wrapper) is the story itself: pictures go inside it as usual.
  */
-export function paragraphs(message) {
-  const source = String(message), out = [];
-  const hidden = [...source.matchAll(IMG_BLOCK)].map(m => [m.index, m.index + m[0].length]);
-  const ranges = blockRanges(source);
-  const around = pos => ranges.filter(([a, b]) => pos > a && pos <= b).sort((x, y) => (x[1] - x[0]) - (y[1] - y[0]));
-  let at = 0;
-  for (const line of source.split('\n')) {
-    const start = at, end = at + line.length;
-    at = end + 1;
-    if (hidden.some(([a, b]) => start >= a && end <= b)) continue;
-    const plain = line.replace(IMG_BLOCK, '').replace(TTS_BLOCK, '').replace(/<[^>]+>/g, '').trim();
-    if (plain) out.push({text: plain.slice(0, 1200), end, blocks: around(end)});
+export function paragraphs(message, scope = {}) {
+  const {masked} = storyScope(message, scope), out = [];
+  let offset = 0;
+  for (const line of masked.split('\n')) {
+    const text = line.replace(TTS_BLOCK, '').replace(/<[^>]+>/g, '').trim();
+    if (text) out.push({text: text.slice(0, 1200), end: offset + line.trimEnd().length});
+    offset += line.length + 1;
   }
-  // The story's own block: the innermost block holding the most story text (none when most of it is outside blocks).
-  // Code fences, comments and blocks that are about the story rather than the story (a memory plugin's <bakemono>
-  // summary, <details>, status bars, thinking, choices) never are; nor is any block when a fair share of the text
-  // is outside blocks (a long summary at the end must not outweigh a short reply).
-  const weight = new Map();
-  for (const p of out) {
-    // Text in a block about the story counts for no side.
-    if (p.blocks.some(r => NOT_STORY.test(r[2]))) continue;
-    const key = p.blocks.find(r => r[2] !== '```' && r[2] !== '!--') || null;
-    weight.set(key, (weight.get(key) || 0) + p.text.length);
-  }
-  let main = null, best = -1;
-  for (const [key, w] of weight) if (w > best) { best = w; main = key; }
-  if (main && (weight.get(null) || 0) >= best / 3) main = null;
-  const mainChain = main ? ranges.filter(([a, b]) => a <= main[0] && b >= main[1]) : [];
-  for (const p of out) {
-    // Climb out of every block that is not the story's own (or one around it).
-    const outer = p.blocks.filter(r => !mainChain.includes(r));
-    if (outer.length) { p.end = Math.max(p.end, ...outer.map(r => r[1])); p.aside = true; }
-    delete p.blocks;
-  }
-  // Lines in other blocks (status bars and the like) are not the story: they are not offered as places for pictures,
-  // so a picture with no usable 位置 also goes after the last story paragraph. Kept only when there is nothing else.
-  const story = out.filter(p => !p.aside);
-  return (story.length ? story : out).map(({aside, ...p}) => p);
+  return out;
 }
 /** Chat-style request asking for the picture blocks of one reply. before: [{name, text}] earlier messages. */
 export function planRequest(settings, {message, before = [], preset, only = null, lore = ''} = {}) {
@@ -682,7 +630,7 @@ export function planRequest(settings, {message, before = [], preset, only = null
   const system = entries.map(e => fill(e.text)).join('\n\n') + '\n\n' + tail;
   // 世界书: the entries the tavern would turn on for this story (the phone's choice of books), for era, places and looks.
   const ask = promptText(settings.promptRules, 'draw-story', 'planAsk', {'世界书': lore.trim(), '前情': before.map(m => `${m.name}：${m.text}`).join('\n'),
-    '正文': paragraphs(message).map((x, i) => `[P${i + 1}] ${x.text}`).join('\n'), '出图数量': countOf(p)});
+    '正文': paragraphs(message, settings.narration).map((x, i) => `[P${i + 1}] ${x.text}`).join('\n'), '出图数量': countOf(p)});
   return [{role: 'system', content: system}, {role: 'user', content: ask}];
 }
 /** 「从剧情生成」 in the drawing app: a request of its own (no story preset, no chain of thought), worded for the engine. */
@@ -798,8 +746,9 @@ export function cleanSuggestion(text) {
   return (tagged.length ? tagged : lines).join(', ').replace(/\s*,\s*/g, ', ').replace(/(, )+$/, '').trim();
 }
 /** Puts planned blocks into the reply after their paragraphs. Blocks without a usable 位置 go after the last one. */
-export function insertPlanned(message, reply) {
-  const source = String(message), paras = paragraphs(source), blocks = [];
+export function insertPlanned(message, reply, scope = {}) {
+  const source = String(message), paras = paragraphs(source, scope), blocks = [];
+  if (!paras.length) return {text: source, count: 0};
   // A model that thinks out loud may write sample blocks in its thinking: only the answer counts.
   const answer = String(reply ?? '').replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
   const bodies = [...answer.matchAll(/<img\b[^<>]*>([^<]*)<\/img\s*>/gi)].map(m => m[1]);

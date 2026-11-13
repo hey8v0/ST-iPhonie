@@ -1,3 +1,4 @@
+import {TextTasks} from './text-tasks.js';
 import {withProxyHeaders, noTavernProxy} from './proxy-url.js';
 import { ownBlob } from './compat.js';
 import { normalizeNarration, NARRATOR } from './narration.js';
@@ -1116,7 +1117,7 @@ export class TTSBackend {
      */
     /** signal: the request is let go (停止回复). Kept out of the request log, which keeps copies of the request. */
     async generateText(context, { use = 'other', signal, ...request }) {
-        const result = await this.requestLog.run('文字模型', {source: this.settings.text.source, model: activeText(this.settings.text).model, ...request}, () => this.generateTextRaw(context, request, signal, use === 'chat'));
+        const result = await this.requestLog.run('文字模型', {source: this.settings.text.source, model: activeText(this.settings.text).model, ...request}, () => this.generateTextRaw(context, {...request, background: ['moments','forum'].includes(use)}, signal, use === 'chat'));
         const answer = typeof result === 'object' && result !== null ? String(result.text || '').trimEnd() + (/^(length|max_tokens|MAX_TOKENS)$/.test(result.meta?.finish || '') ? '（回复达到长度上限，末句可能未写完）' : '') : result;
         this.ledger.text(use, request.prompt, answer);
         return answer;
@@ -1125,10 +1126,16 @@ export class TTSBackend {
         const text = activeText(this.settings.text);
         if (text.source === 'custom') return customRequest({ text, key: this.textKeys.get(text.id) || '', prompt: request.prompt, responseLength: request.responseLength, fetch: this.textFetch, signal, details });
         if (!context?.generateRaw) throw Error('当前酒馆版本不支持后台生成');
+        const valid = this.spaceGuard(), visit = this.space;
+        return (this.textTasks ||= new TextTasks()).run(() => this.generateTavernText(context, request), {signal, background: request.background === true, valid: () => !this.closed && this.space === visit && valid()});
+    }
+    async generateTavernText(context, request) {
         // The chat-completion request the tavern builds is kept, so an empty answer can be asked again as a stream:
         // "假流式" channels only answer streamed requests, and the tavern's background generation never streams.
         // A length the task asks for replaces the tavern's own for that request: the tavern's, when longer, is kept.
         const own = context?.mainApi === 'openai' ? context.chatCompletionSettings?.openai_max_tokens : 0;
+        const {background, ...localRequest} = request;
+        request = localRequest;
         const outgoing=tavernTextRequest(request.responseLength ? {...request, responseLength: answerRoom(request.responseLength, own)} : request);
         const source = context.eventSource, event = context.eventTypes?.CHAT_COMPLETION_SETTINGS_READY, last = JSON.stringify(asMessages(outgoing.prompt).at(-1)?.content ?? '');
         let payload = null;
@@ -3824,7 +3831,7 @@ export class TTSBackend {
     }
     async close() {
         if (this.closing) return this.closing;
-        this.closed = true; this.prepared = null; this.listeners.clear(); this.providers.clear();
+        this.closed = true; this.textTasks?.close(); this.prepared = null; this.listeners.clear(); this.providers.clear();
         this.chats.close();
         clearTimeout(this.syncTimer);
         clearTimeout(this.anlasTimer);

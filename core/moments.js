@@ -106,13 +106,13 @@ export function parseMoments(reply, {names, user = '我', mode = 'posts'}) {
 // long reply stopped mid-sentence), and the newest come first until `total` is used up.
 export const STORY_LIMITS = Object.freeze({each: 4000, total: 20000});
 // limit: how many replies, or a chat preset (its context, storyEach and storyTotal; 0 there is no limit).
-export function storyLines(chat, limit, user, {each = STORY_LIMITS.each, total = STORY_LIMITS.total, regex = text => text} = {}) {
+export function storyLines(chat, limit, user, {each = STORY_LIMITS.each, total = STORY_LIMITS.total, regex = text => text, scope = {}} = {}) {
   const tags = typeof limit === 'object' ? limit?.cleanTags : [];
   const bounded = limit && typeof limit === 'object' && !['recent', 'off'].includes(limit.storyMode) && (limit.storyMode || Number(limit.context) !== 0);
   if (limit && typeof limit === 'object') { const p = limit; limit = (p.storyMode || (Number(p.context) === 0 ? 'off' : 'tavern')) === 'off' ? 0 : p.storyMode === 'recent' ? p.context : Infinity; each = p.storyEach ?? each; total = p.storyTotal ?? total; }
   each = each || Infinity; total = total || Infinity;
   const out = [];
-  const lastStory = !bounded && limit > 0 ? (chat || []).findLastIndex(m => m && !m.is_system && !m.is_user && plainStory(m.mes, tags)) : -1;
+  const lastStory = !bounded && limit > 0 ? (chat || []).findLastIndex(m => m && !m.is_system && !m.is_user && plainStory(m.mes, tags, scope)) : -1;
   let used = 0, depth = 0;
   for (let i = (chat?.length || 0) - 1; i >= 0 && (out.length < limit || i >= lastStory && lastStory >= 0); i--) {
     if (out.length >= limit && i !== lastStory) { if (chat[i] && !chat[i].is_system) depth++; continue; }
@@ -121,7 +121,7 @@ export function storyLines(chat, limit, user, {each = STORY_LIMITS.each, total =
     let processed = m.mes;
     try { processed = regex(String(m.mes || ''), {user: !!m.is_user, depth}); } catch { /* unavailable host regex: keep the original */ }
     depth++;
-    let said = plainStory(processed, tags);
+    let said = plainStory(processed, tags, scope);
     if (!said) continue;
     if (bounded) {
       const room = total - used;

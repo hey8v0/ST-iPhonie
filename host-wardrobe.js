@@ -31,7 +31,7 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     return backend.saveWardrobeItem({...item, name: got.name || item.name, category: got.category || item.category, description: got.description, recognized: true});
   }
   /** What the story is at now, briefly (the last two replies), so an outfit fits the scene. */
-  const scene = ctx => (ctx?.chat || []).filter(m => !m.is_user && !m.is_system && typeof m.mes === 'string').slice(-2).map(m => plainStory(m.mes)).join(' ').slice(-600);
+  const scene = ctx => (ctx?.chat || []).filter(m => !m.is_user && !m.is_system && typeof m.mes === 'string').slice(-2).map(m => plainStory(m.mes, [], settings().narration)).join(' ').slice(-600);
   /** An outfit put together for someone: from the 衣柜 (the pieces picked, else all with words) or designed from a wish. */
   async function suggest({owner, mode = 'closet', wish = '', itemIds = []} = {}) {
     const ctx = context(), {items, wears} = await backend.wardrobe(owner);

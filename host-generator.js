@@ -154,7 +154,7 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
   // ---------- 接下来的走向 ----------
   function directions(form = {}) {
     return run('direction', async () => {
-      const ctx = context(), c = card(ctx), s = settings(), preset = activeChatPreset(s.chat), user = userName(), story = await readStoryLines(ctx?.chat || [], preset, user);
+      const ctx = context(), c = card(ctx), s = settings(), preset = activeChatPreset(s.chat), user = userName(), story = await readStoryLines(ctx?.chat || [], preset, user, settings().narration);
       if (!story.length) throw Error('正文还没开始：先写几轮再来想走向');
       const cast = castOf(c, ctx), lw = await lore(c, [...castPersonas(cast), ...story.map(r => `${r.name}: ${r.text}`)], [form.wish, ...castNames(cast)]);
       const list = parseDirections(await ask(ctx, directionsRequest({prompts: s.promptRules, card: c, user, persona: userPersona(), lore: lw, cast, earlier: memory?.storyMemory?.() || '', story, count: 4, wish: form.wish || ''})));
@@ -190,7 +190,7 @@ export function createGeneratorHost({context, settings, backend, notice = () => 
   function theater(form = {}) {
     return run('theater', async () => {
       const ctx = context(), c = card(ctx), s = settings(), preset = activeChatPreset(s.chat), user = userName(), fromStory = form.source !== 'card', kind = ['card', 'custom'].includes(form.kind) ? form.kind : 'script', script = kind === 'script';
-      const story = fromStory ? await readStoryLines(ctx?.chat || [], preset, user) : [];
+      const story = fromStory ? await readStoryLines(ctx?.chat || [], preset, user, settings().narration) : [];
       if (!c && !story.length) throw Error('先在酒馆里打开一张角色卡');
       const cast = castOf(c, ctx);
       const voiced = script ? s.routes.filter(r => r.voice && r.name !== NARRATOR && (r.name === user || cast.some(x => x.name === r.name))).map(r => ({name: r.name, language: languageName(r.language || s.general.defaultLanguage || 'zh')})) : [];

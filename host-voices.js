@@ -18,7 +18,7 @@ export function createVoiceHost({context, settings, backend, saidBy = () => []})
     const story = [];
     for (const m of (ctx?.chat || []).slice(-40)) {
       if (m?.is_system) continue;
-      for (const part of plainStory(String(m?.mes || '')).split(/\n+/)) if (part.includes(name)) story.push(`${m.name || ''}：${part.trim().slice(0, 200)}`);
+      for (const part of plainStory(String(m?.mes || ''), [], settings().narration).split(/\n+/)) if (part.includes(name)) story.push(`${m.name || ''}：${part.trim().slice(0, 200)}`);
     }
     return voiceProfile({name, card: card ? [card.description, card.personality].filter(Boolean).join('\n') : '', said: saidBy(name), story});
   }

@@ -92,13 +92,6 @@ export function buildReport(f) {
     }
     add('最近一条回复', items);
   }
-  const input=f.input;
-  if(input) add('最近正文交互',[
-    item('info','诊断版本',input.version||'未标记'),
-    item('info','手机视口',`布局 ${input.width} / 页面 ${input.clientWidth} / 可见 ${input.visualWidth}，缩放 ${input.scale}；触点 ${input.touchPoints}，touchstart ${input.touchStart?'有':'无'}，正文 iframe ${input.frames}`),
-    ...(input.events?.length?input.events.map(e=>item('info',`${e.type} · ${e.realm} · ${time(e.at)}`,`目标 ${e.target}；楼层 ${e.message??'无'} / 节点 ${e.node}；事件间隔 ${e.inputGap??'—'}ms / 处理间隔 ${e.gap??'—'}ms / 排队 ${e.delay??'—'}ms；${e.bubbled?'已传播到页面末端':'未传播到页面末端'}，${e.prevented?'默认行为已阻止':'默认行为未阻止'}，${e.connected?'随后节点仍在':'随后节点已替换'}，${e.menu?'检测到生图操作菜单':'未检测到生图操作菜单'}`)):[item('info','尚未记录正文触摸','先回到正文复现一次，再打开自检复制报告。记录只保留最近8次的元素类型与时间，不包含正文、输入内容或密钥。')])
-  ]);
-
   if (f.errors?.length) add('最近的提示', f.errors.slice(-10).map(e => item(e.kind === 'error' ? 'warn' : 'info', time(e.at), e.message)));
 
   const counts = {ok: 0, warn: 0, error: 0, info: 0};

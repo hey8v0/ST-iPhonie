@@ -11,14 +11,12 @@ import {money, oneEmoji, CHAIN_MODES, REACTIONS} from './chats.js';
 import {callSummary} from './call.js';
 import {languageName} from './languages.js';
 import {normalizeMemory} from './memory.js';
-import {OTHER_PICTURES, NARRATOR} from './narration.js';
+import {NARRATOR} from './narration.js';
+import {storyText, NARRATION_SKIP} from './story-scope.js';
 import {normalizeBubbleSets, normalizeBubbleOf} from './bubble-css.js';
 import {BOARDS, boardText, cellName} from './board.js';
 import {ownerName} from './wardrobe.js';
 import {normalizePets} from './pets.js';
-
-/** Another plugin's picture prompt kept in a reply (柏宝绘's <bbi_image>): not story, left out whole. */
-const OTHER_PICTURE_BLOCKS = new RegExp(`<(${OTHER_PICTURES.join('|')})\\b[^>]*>[\\s\\S]*?(?:<\\/\\1\\s*>|$)`, 'gi');
 
 const PERIODS = [[5, '凌晨'], [8, '早上'], [11, '上午'], [13, '中午'], [17, '下午'], [19, '傍晚'], [24, '晚上']];
 /** How long `ms` is, said the way people say it: 40 分钟, 3 个小时, 2 天, 3 个月. */
@@ -967,14 +965,9 @@ export function bringText(preset, {thread, messages, user = '我'}) {
 
 /** Removes voice/picture tags and markup from a story message, for the chat prompt. Code blocks, styles and scripts
  *  (the HTML 小剧场 some presets write) are not story: they are left out whole instead of becoming a wall of CSS. */
-export function plainStory(textValue, tags = []) {
-  return cleanTagged(textValue, ['think', 'thinking', 'phone', 'status', 'statusbar', '状态栏', ...tagList(tags)])
-    .replace(/```[\s\S]*?(?:```|$)|<(style|script)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)|<!--[\s\S]*?(?:-->|$)/gi, ' ')
+export function plainStory(textValue, tags = [], scope = {}) {
+  return storyText(textValue, {...scope, skip: [...(scope.skip ?? NARRATION_SKIP), ...tagList(tags)]})
     .replace(/<tts\b[^>]*>[\s\S]*?<\/tts\s*>/gi, '')
-    .replace(/<(sfx|ambience)\b[^>]*>[^<>]*<\/\1\s*>/gi, '')
-    .replace(/<img\b[^>]*>[^<]*<\/img\s*>|<img\b[^>]*>/gi, '')
-    .replace(OTHER_PICTURE_BLOCKS, ' ')
     .replace(/<[^>]+>/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/\s+/g, ' ').trim();
 }

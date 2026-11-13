@@ -59,7 +59,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
       // The card asked for: the tavern may move to another one while the model writes.
       const space = backend.cardKey(), save = backend.saveKey(), hotId = backend.hotId(), {preset, everyone, user} = base(), handles = netNames();
       const posts = await feed(), recent = posts.slice(0, 8), hot = (await backend.apps.get(hotId))?.topics || [];
-      const story = await readStoryLines(ctx.chat, preset, user), crowd = pick(everyone, story, posts);
+      const story = await readStoryLines(ctx.chat, preset, user, settings().narration), crowd = pick(everyone, story, posts);
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, hot, lore: await lore(preset, crowd, story, [...hot, ...recent.map(p => p.title)])});
       const found = parseForum(await ask(ctx, prompt, preset, 'forum'), {user, mode: 'posts', handles});
       if(!valid())throw Error('酒馆聊天已切换，这次论坛刷新没有写入');
@@ -77,7 +77,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
       const {preset, everyone, user} = base(), handles = netNames();
       const post = await backend.apps.get(postId);
       if (!post) throw Error('这个帖子已经不在了');
-      const story = await readStoryLines(ctx.chat, preset, user), crowd = pick(everyone, story, await feed());
+      const story = await readStoryLines(ctx.chat, preset, user, settings().narration), crowd = pick(everyone, story, await feed());
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'react', people: crowd, story, user, userPersona: userPersona(), post, lore: await lore(preset, crowd, story, [postLines(post, user)])});
       const found = parseForum(await ask(ctx, prompt, preset, 'forum'), {user, mode: 'react', handles});
       await keepNames(found.names, crowd);
@@ -92,7 +92,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
       const post = await backend.apps.get(postId), mine = post?.replies.find(r => r.id === replyId);
       if (!post || !mine) throw Error('这条回复已经不在了');
       // The post's author, whom the reply answers and who already spoke under it are in the answer's list.
-      const story = await readStoryLines(ctx.chat, preset, user), crowd = pick(everyone, story, await feed(), [post.author, mine.to, ...post.replies.map(r => r.from)]);
+      const story = await readStoryLines(ctx.chat, preset, user, settings().narration), crowd = pick(everyone, story, await feed(), [post.author, mine.to, ...post.replies.map(r => r.from)]);
       // Keep the topic in one scan unit: even a shallow scan needs the original question and recent discussion.
       const discussion = postLines(post, user) + `\n本次回复${mine.to ? '（回复 ' + mine.to + '）' : ''}：${mine.text}`;
       const prompt = buildForumRequest({prompts: settings().promptRules, preset, handles, earlier: memory?.storyMemory() || '', mode: 'reply', people: crowd, story, user, userPersona: userPersona(), post, reply: mine, lore: await lore(preset, crowd, story, [discussion])});
@@ -112,7 +112,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
       const person = {name, persona: contact.persona, card: contact.persona ? '' : card(name)};
       const thread = currentDm(await backend.threads(), name);
       const history = thread ? (await backend.chats.get(thread.id)).messages.filter(m => m.kind !== 'system').slice(-20) : [];
-      const story = await readStoryLines(ctx.chat, preset, user);
+      const story = await readStoryLines(ctx.chat, preset, user, settings().narration);
       const remembered = memory ? await memory.aboutPeople([name]).catch(() => '') : '';
       let before = keep ? (await backend.apps.get(peekId(name, key))) || (key ? await backend.apps.get(peekId(name)) : null) : null;
       const routes = backend.seen?.routes || settings().routes;
