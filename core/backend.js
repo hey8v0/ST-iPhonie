@@ -3215,9 +3215,9 @@ export class TTSBackend {
         return saved;
     }
     /** A 好友申请 from a contact the user deleted or blocked (kept until the user answers it). */
-    async friendRequest(threadId, texts) {
+    async friendRequest(threadId, texts, receipt = '') {
         this.assertOpen();
-        const saved = await this.chats.addRequest(threadId, texts);
+        const saved = await this.chats.addRequest(threadId, texts, receipt);
         this.emit('chat', { threadId, friend: true, request: true });
         return saved;
     }
@@ -3243,9 +3243,9 @@ export class TTSBackend {
         return saved;
     }
     /** What a blocked contact sends: into the 拦截记录 only. */
-    async holdMessages(threadId, items) {
+    async holdMessages(threadId, items, receipt = '') {
         this.assertOpen();
-        const saved = await this.chats.hold(threadId, items);
+        const saved = await this.chats.hold(threadId, items, receipt);
         this.emit('chat', { threadId, held: true });
         return saved;
     }

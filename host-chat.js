@@ -16,6 +16,7 @@ import {requestAssistantText, hasCompletionService, loadCompletionModule} from '
 import {remindAt, remindLabel} from './core/remind.js';
 import {BOARDS, parseCell, fallbackMove, moveWords, cellsOf} from './core/board.js';
 import {ownerKey} from './core/wardrobe.js';
+import {sha256Hex} from './core/hash.js';
 
 /** 看图: the user's latest photos (at most this many, in the chat window) go along to a model that sees. */
 export const CHAT_PICTURES = 3;
@@ -35,7 +36,7 @@ export const BRING_NOTE = /^\d+ 条消息会带进下一次正文$/;
 let clockTimer = null;
 /** Words worth a message of their own (a move's 「吧」 or 「～」 left after the cell is not). */
 const worth = s => String(s || '').replace(/[吧啦呀哦嗯呢了啊～~！!。.,，…\s]/g, '').length >= 2;
-export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}, onPosts = () => {},storage = globalThis.localStorage, loadCompletion = loadCompletionModule, picture = pictureUrl, ask = requestAssistantText, random = Math.random, exactReader = readStoryExact}) {
+export function createChatHost({context, settings, backend, notice = () => {}, memory = null, onCall = () => {}, onPosts = () => {},storage = globalThis.localStorage, loadCompletion = loadCompletionModule, picture = pictureUrl, ask = requestAssistantText, random = Math.random, exactReader = readStoryExact}) {
   // busy: the reply being written for a chat (one at a time); stops: what lets it go (停止回复).
   const busy = new Map(), stops = new Map();
   const stopped = () => Object.assign(new Error('已停止回复'), {name: 'AbortError'});
@@ -214,14 +215,29 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     return job;
   }
 
+  /** Margin notes have their own request: no fabricated user message, private chat or phone side effects. */
+  async function readingNote({companion, reading, blob = null} = {}) {
+    const valid = chatGuard(true), ctx = context(), person = members({members: [String(companion || '')]})[0];
+    if (!backend.contacts().some(c => c.name === person.name)) throw Error('这个角色不在当前手机分区');
+    requireChat(valid);
+    const pics = blob && await sees(ctx) ? [{id: 'page', url: await picture(blob)}] : [];
+    requireChat(valid);
+    const request = images => [{role: 'system', content: `你是${person.name}。${person.persona || person.card || ''}\n只写一句当前页的页边批注，不超过四十字，不写用户提问、姓名前缀或手机操作标签。\n${String(reading || '').slice(0, 6000)}`},
+      {role: 'user', content: images.length ? [{type: 'text', text: '为眼前这一页留一句批注。'}, ...images.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : '为眼前这一页留一句批注。'}];
+    const answer = await answerFor(ctx, request, pics, new AbortController().signal);
+    requireChat(valid);
+    return String(answer || '').replace(new RegExp('^' + person.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[：:]\\s*'), '').trim().slice(0, 120);
+  }
+
   /**
    * Stores a reply. A claim takes (or returns) the user's latest red packet or transfer that is still waiting,
    * and leaves a notice where it happened.
    */
-  async function settle(threadId, items, round = null, {board = false, valid = chatGuard()} = {}) {
+  async function settle(threadId, items, round = null, {board = false, valid = chatGuard(), receipt = '', committed = () => {}} = {}) {
     requireChat(valid);
     const thread = await backend.chats.get(threadId), taken = new Set(), out = [], posts = [];
     requireChat(valid);
+    if (receipt && thread.phoneReceipts?.includes(receipt)) return thread;
     let calling = null, cutting = false, making = null, undone = false, worn = false;
     const whispers = [];
     let latest = thread;
@@ -233,7 +249,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       // Answers to a 好友申请 (handled where it was asked), and a 好友申请 between friends: not messages.
       if (item.kind === 'befriend' || item.kind === 'refuse' || item.kind === 'request') continue;
       // 「[朋友圈] …」: posted to 朋友圈 while chatting, not a chat message.
-      if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, ...(item.imageTags ? {imageTags: item.imageTags} : {}), source: 'chat', space: thread?.space || backend.cardKey(), ...(thread?.save || backend.saveKey() ? {save: thread?.save || backend.saveKey()} : {})}); continue; }
+      if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, ...(item.imageTags ? {imageTags: item.imageTags} : {}), source: 'chat', ...(receipt ? {phoneReceipt: receipt} : {}), space: thread?.space || backend.cardKey(), ...(thread?.save || backend.saveKey() ? {save: thread?.save || backend.saveKey()} : {})}); continue; }
       // 「[私聊] …」 in a group: said to the user alone — it goes to that one's private chat (in a private chat it is just
       // a message).
       if (item.kind === 'dm') { if (thread.type === 'group') whispers.push(item); else out.push({from: item.from, kind: 'text', text: item.text}); continue; }
@@ -347,14 +363,15 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     }
     // Their pictures are drawn the way 朋友圈's own are (onPosts).
     requireChat(valid);
-    if (posts.length) await backend.momentsMutate(() => backend.moments.add(posts)).then(rows => { if (valid()) onPosts(rows); }).catch(() => {});
+    if (posts.length) await backend.momentsMutate(() => backend.moments.add(posts)).then(rows => { if (receipt) committed(); if (valid()) onPosts(rows); }).catch(error => { if (receipt) throw error; });
     // 重新回复: the new round takes the old one's place (which stays among its versions).
     requireChat(valid);
-    let saved = !out.length ? latest : round ? await backend.replaceChatRound(threadId, round.after, out) : await backend.chats.append(threadId, out);
+    let saved = receipt ? cutting ? await backend.chats.update(threadId, {friend: {by: 'them', at: Date.now(), requests: []}, receipt}) : await backend.chats.append(threadId, out, {receipt}) : !out.length ? latest : round ? await backend.replaceChatRound(threadId, round.after, out) : await backend.chats.append(threadId, out);
+    if (receipt) committed();
     requireChat(valid);
     // 读后感 (0.9.40): a book sent into this chat just now — what each of them said of it is kept on the book.
     if (out.length) bookRemarks(thread, out).catch(error => backend.reportDiagnostic?.('聊天 · 读后感', error, 'warn'));
-    if (cutting) { saved = await backend.chats.update(threadId, {friend: {by: 'them', at: Date.now(), requests: []}}); calling = null; refreshCuts(); }
+    if (cutting) { if (!receipt) saved = await backend.chats.update(threadId, {friend: {by: 'them', at: Date.now(), requests: []}}); calling = null; refreshCuts(); }
     if (calling) setTimeout(() => { if (valid()) onCall(calling.from, calling.reason); }, 1200);
     // (a moment after the group's own messages; only in the visit that requested them)
     if (whispers.length) setTimeout(() => { if (valid()) whisper(whispers, valid).catch(error => backend.reportDiagnostic?.('聊天 · 私聊', error, 'warn')); }, 900);
@@ -606,12 +623,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   const SENT_KEY = 'sttts.phoneSent', DAY_KEY = 'sttts.phoneDay';
   const hash = text => { let h = 0; for (const c of String(text)) h = (h * 31 + c.codePointAt(0)) | 0; return (h >>> 0).toString(36); };
   function sentBefore(key) {
-    let list = [];
-    try { list = JSON.parse(localStorage.getItem(SENT_KEY) || '[]'); } catch { /* none kept */ }
-    if (list.includes(key)) return true;
-    try { localStorage.setItem(SENT_KEY, JSON.stringify([...list, key].slice(-300))); } catch { /* this session only */ }
-    return false;
+    try { const list = JSON.parse(localStorage.getItem(SENT_KEY) || '[]'); return Array.isArray(list) && list.includes(key); } catch { return false; }
   }
+  const phoneLog = message => backend.reportDiagnostic?.('正文手机接收', {message}, 'warn');
   /** The private chat with `name` here (this card, with 分区), made when there is none yet. */
   async function dmWith(name, valid = chatGuard()) {
     requireChat(valid);
@@ -665,32 +679,34 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     return parts.join('\n\n');
   }
   /** Messages that came to the phone: kept unread, said on the island, and photos drawn when that costs nothing. */
-  async function arrive(threadId, items, from = null, valid = chatGuard()) {
+  async function arrive(threadId, items, from = null, valid = chatGuard(), receipt = '', committed = () => {}) {
     requireChat(valid);
     const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
     requireChat(valid);
     if (from) items = items.map(item => ({...item, story: from.story, storyVer: from.ver}));
-    const saved = await backend.chatMutate(threadId, () => settle(threadId, items, null, {valid}));
+    const saved = await backend.chatMutate(threadId, () => settle(threadId, items, null, {valid, receipt, committed}));
     requireChat(valid);
     const fresh = (saved?.messages || []).filter(m => !before.has(m.id) && m.from !== 'me');
     for (const m of fresh) if (m.kind === 'photo' && !m.photoId && (m.imageTags || backend.drawReady?.())) drawPhoto(threadId, m.id).catch(() => {});
     const last = fresh.at(-1);
-    if (last) backend.emit('chat', {threadId, incoming: {from: last.from, text: last.text || '', kind: last.kind, count: fresh.length}});
+    if (last && !receipt) backend.emit('chat', {threadId, incoming: {from: last.from, text: last.text || '', kind: last.kind, count: fresh.length}});
     return fresh.length;
   }
   // How often the phone reaches out, whoever does it (the story writing <phone>, or someone asked by nudge): with
   // `every` set, the phone has one turn in that many story replies — the story may send then, else someone is asked;
   // at most dailyMax times a day (0: no limit). Out of turn the story is not told it can use the phone at all.
-  let quiet = 0, sessionDay = null, deliveryQueue = Promise.resolve();
+  let quiet = 0, sessionDay = null, dayVolatile = false, deliveryQueue = Promise.resolve();
   function today() {
     let day = {day: new Date().toDateString(), n: 0};
     try { const saved = JSON.parse(localStorage.getItem(DAY_KEY) || 'null'); if (saved?.day === day.day) day = saved; } catch { if (sessionDay?.day === day.day) day = sessionDay; }
+    if (dayVolatile && sessionDay?.day === day.day && sessionDay.n >= day.n) day = sessionDay;
     return day;
   }
-  function counted() {
-    const day = today(); day.n++;
+  function counted(key = '', already = false) {
+    const day = today(); if (key && day.keys?.includes(key)) return; if (!already) day.n++;
+    if (key) day.keys = [...(day.keys || []), key].slice(-300);
     sessionDay = day;
-    try { localStorage.setItem(DAY_KEY, JSON.stringify(day)); } catch { /* counted for this session */ }
+    try { localStorage.setItem(DAY_KEY, JSON.stringify(day)); dayVolatile = false; } catch { dayVolatile = true; /* counted for this session */ }
   }
   /** Whether the next story reply may reach out on the phone. */
   function phoneTurn() {
@@ -706,8 +722,11 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     const sent = await deliver(id);
     if (!valid()) return;
     if (sent) { quiet = 0; return; }
+    const tagged = phoneParts(context()?.chat?.[Number(id)]?.mes || '').length > 0;
     if (!(o.every > 0) || ++quiet < o.every) return;
     quiet = 0;
+    // Premature tags still advance the cadence; failed/unknown tagged deliveries do not trigger another model call.
+    if (tagged) return;
     if (!(o.dailyMax > 0 && today().n >= o.dailyMax)) await nudge();
   }
   /**
@@ -716,74 +735,90 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    */
   function deliver(id) {
     const visit = chatGuard(true), ctx = context(), index = Number.isInteger(Number(id)) ? Number(id) : (ctx?.chat?.length || 0) - 1;
-    const message = ctx?.chat?.[index], raw = message?.mes, swipe = message?.swipe_id;
-    const valid = () => visit() && context()?.chat?.[index] === message && message?.mes === raw && message?.swipe_id === swipe;
-    const task = deliveryQueue.then(() => valid() ? deliverOne(index, valid) : 0);
-    deliveryQueue = task.catch(() => {});
+    const message = ctx?.chat?.[index], signature = JSON.stringify(phoneParts(message?.mes || '')), swipe = message?.swipe_id;
+    const valid = () => {
+      const now = context()?.chat?.[index];
+      return visit() && now && !now.is_user && !now.is_system && now.swipe_id === swipe &&
+        (now === message || !!message?.send_date && now.send_date === message.send_date && now.name === message.name) && JSON.stringify(phoneParts(now.mes || '')) === signature;
+    };
+    const task = deliveryQueue.then(async () => {
+      if (!valid()) { if (signature !== '[]') phoneLog('回复、分支或聊天已变化，未投递旧消息'); return 0; }
+      let failed = false, result = 0;
+      try { result = await deliverOne(index, valid, () => { failed = true; }); }
+      catch (error) { if (error?.name === 'AbortError' || !valid()) throw error; failed = true; phoneLog('接收暂时失败，稍后补收：' + error.message); }
+      if (failed && valid()) { await new Promise(resolve => setTimeout(resolve, 150)); if (valid()) result = await deliverOne(index, valid); }
+      return result;
+    });
+    deliveryQueue = task.catch(error => phoneLog('接收失败，可重试：' + error.message));
     return task;
   }
-  async function deliverOne(index, valid) {
-    const ctx = context(), s = settings();
-    if (!valid() || !s.chat.proactive?.on) return 0;
-    const m = ctx?.chat?.[index];
-    let sent = 0;
-    if (m && !m.is_user && !m.is_system && typeof m.mes === 'string') {
-      const parts = phoneParts(m.mes), blocks = parts.filter(p => !p.group).map(p => p.text), grouped = parts.filter(p => p.group);
-      const story = [ctx.getCurrentChatId?.() || ctx.chatId || '', index].join('|'), ver = hash(parts.map(p => p.group + '|' + p.text).join('\n'));
-      const key = story + '|' + ver, from = {story, ver};
-      // Rolled again (重 roll, a new swipe): what the earlier version sent goes; this one sends its own.
-      const gone = await withdraw(story, ver, valid).catch(() => 0);
-      if (!valid()) return 0;
-      if (gone && !parts.length) notice(`重新生成了这条回复，之前发到手机上的 ${gone} 条消息撤回了`);
-      if (parts.length && phoneTurn() && !sentBefore(key)) {
-        const contacts = backend.contacts(), people = contacts.map(c => ({name: c.name, voice: false}));
-        // A line from someone who is not in the phone (a passer-by, the user) is left out, not given to the one before.
-        const known = new Set(contacts.map(c => c.name)), named = line => line.match(/^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]/)?.[1]?.trim();
-        const kept = (b, only = known) => b.split(/\r?\n/).filter(line => { const who = named(line); return !who || only.has(who); }).join('\n');
-        // A group's part goes to the group (the window in use), from its members.
-        if (grouped.length) {
-          const threads = await backend.threads();
-          if (!valid()) return sent;
-          for (const part of grouped) {
-            if (!valid()) return sent;
-            const first = threads.find(t => t.type === 'group' && t.name === part.group), thread = first && currentWindow(threads, first);
-            if (!thread) continue;
-            const members = new Set(thread.members.filter(n => known.has(n)));
-            const items = parseChatReply(kept(part.text, members), {members: [...members].map(name => ({name, voice: false})), user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor([...members])}).filter(onPhone);
-            try { const n = items.length ? await arrive(thread.id, items, from, valid) : 0; if (n) { sent += n; notice(`群「${thread.name}」有 ${n} 条新消息`); } } catch { /* not worth interrupting the story */ }
+  async function deliverOne(index, valid, failed = () => {}) {
+    const ctx = context(), s = settings(), m = ctx?.chat?.[index];
+    if (!valid() || !s.chat.proactive?.on || !m || m.is_user || m.is_system) return 0;
+    const parts = phoneParts(m.mes), story = [ctx.getCurrentChatId?.() || ctx.chatId || '', index].join('|');
+    const ver = hash(parts.map(p => p.group + '|' + p.text).join('\n')), key = story + '|' + ver, from = {story, ver};
+    const gone = await withdraw(story, ver, valid);
+    if (!valid()) return 0;
+    if (gone && !parts.length) notice(`重新生成了这条回复，之前发到手机上的 ${gone} 条消息撤回了`);
+    if (!parts.length) return 0;
+    const legacy = sentBefore(key);
+    // Once something in this round was committed, retries finish its remaining parts without taking a second turn.
+    const threads = await backend.threads(); requireChat(valid);
+    const prefix = 'phone:' + await sha256Hex(JSON.stringify([backend.cardKey?.() || '', backend.saveKey?.() || '', story, parts])) + '|'; requireChat(valid);
+    const resumed = today().keys?.includes(prefix) || threads.some(t => t.phoneReceipts?.some(k => k.startsWith(prefix)));
+    if (!resumed && !phoneTurn()) { phoneLog('本轮未轮到手机消息，或已达到每日上限'); return 0; }
+    const contacts = backend.contacts(), known = new Set(contacts.map(c => c.name));
+    let sent = 0, handled = 0; const arrivals = new Map();
+    for (const [partIndex, part] of parts.entries()) {
+      requireChat(valid);
+      const first = part.group && threads.find(t => t.type === 'group' && t.name === part.group);
+      const group = first && currentWindow(threads, first);
+      if (part.group && !group) { phoneLog('找不到对应群聊：' + part.group); continue; }
+      const only = group ? new Set(group.members.filter(n => known.has(n))) : known;
+      const kept = part.text.split(/\r?\n/).filter(line => {
+        const who = line.match(/^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]/)?.[1]?.trim();
+        if (who && !only.has(who)) { phoneLog('未接收未识别或不在群内的联系人：' + who); return false; } return true;
+      }).join('\n');
+      const items = parseChatReply(kept, {members: [...only].map(name => ({name, voice: false})), user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor([...only])}).filter(onPhone);
+      if (!items.length) { phoneLog('手机标签中没有可识别的消息'); continue; }
+      const occurrences = new Map();
+      for (const item of items) {
+        requireChat(valid);
+        if (!only.has(item.from)) continue;
+        const token = await sha256Hex(JSON.stringify(item)), occurrence = occurrences.get(token) || 0; occurrences.set(token, occurrence + 1);
+        let receipt = prefix + partIndex + ':' + token + ':' + occurrence, requestText = item.text || `我是${item.from}`;
+        let threadId = '';
+        try {
+          const target = group || await dmWith(item.from, valid); requireChat(valid);
+          threadId = target.id; const thread = await backend.chats.get(threadId); requireChat(valid);
+          if (thread.friend?.by === 'me' && !thread.blocked) {
+            const asks = items.filter(i => i.from === item.from && i.kind === 'request').map(i => i.text).filter(Boolean);
+            const words = asks.length ? asks : items.filter(i => i.from === item.from && ['text', 'voice'].includes(i.kind)).map(i => i.translation || i.text).filter(Boolean);
+            if (!words.length) continue; requestText = words.join(' '); receipt = prefix + partIndex + ':friend:' + await sha256Hex(item.from);
           }
-        }
-        const items = blocks.flatMap(b => parseChatReply(kept(b), {members: people, user: userName(), voiceFormat: '', voiceNames: [], stickers: stickersFor(people.map(p => p.name))})).filter(onPhone);
-        const byName = new Map();
-        for (const item of items) if (contacts.some(c => c.name === item.from)) byName.set(item.from, [...(byName.get(item.from) || []), item]);
-        for (const [name, list] of byName) {
-          if (!valid()) return sent;
-          try {
-            const thread = await dmWith(name, valid);
-            requireChat(valid);
-            // Blocked by the user: a 好友申请 waits for an answer; anything else is held (拦截记录), without a word.
-            if (thread.blocked) {
-              const asks = list.filter(i => i.kind === 'request'), rest = list.filter(i => i.kind !== 'request').map(heldOf).filter(h => h.text);
-              if (asks.length) { const said = asks.map(i => i.text).filter(Boolean).join(' ') || `我是${name}`; await backend.friendRequest(thread.id, said); sent += 1; notice(`${name} 请求添加你为好友：${said.slice(0, 40)}`); }
-              if (rest.length) await backend.holdMessages(thread.id, rest).catch(() => {});
-              continue;
-            }
-            // Deleted by the user: what they send waits as 好友申请 (its 验证消息, when they wrote one).
-            if (thread.friend?.by === 'me') {
-              const asked = list.filter(i => i.kind === 'request').map(i => i.text).filter(Boolean);
-              const texts = asked.length ? asked : list.filter(i => ['text', 'voice'].includes(i.kind)).map(i => i.translation || i.text).filter(Boolean);
-              if (texts.length) { await backend.friendRequest(thread.id, texts.join(' ')); sent += 1; notice(`${name} 请求添加你为好友：${texts.join(' ').slice(0, 40)}`); }
-              continue;
-            }
-            // They had deleted the user and text again: they added the user back.
-            if (thread.friend?.by === 'them') { await backend.chats.update(thread.id, {friend: null}); await backend.chats.append(thread.id, [{from: 'me', kind: 'system', text: `${name}重新添加了你为好友`}]); refreshCuts(); }
-            const n = await arrive(thread.id, list, from, valid); if (n && valid()) { sent += n; notice(`${name} 给你发来 ${n} 条消息`); }
-          } catch { /* a failed delivery is not worth interrupting the story */ }
-        }
+          if (thread.phoneReceipts?.includes(receipt)) { handled++; if (!thread.blocked || item.kind === 'request') counted(prefix); continue; }
+          if (legacy && thread.messages.filter(m => m.story === story && m.storyVer === ver && m.from === item.from && m.kind === item.kind && m.text === (item.text || '') && (!item.amount || m.amount === item.amount)).length > occurrence) { await backend.chats.append(thread.id, [], {receipt}); counted(prefix, true); handled++; continue; }
+          if (group && item.kind === 'call' || !thread.blocked && !thread.friend && ['request','befriend','refuse'].includes(item.kind)) continue;
+          if (!canGroupSpeak(thread, item.from)) { phoneLog('群内禁言，未接收：' + item.from); continue; }
+          if (thread.blocked) {
+            if (item.kind === 'request') await backend.friendRequest(thread.id, item.text || `我是${item.from}`, receipt);
+            else await backend.holdMessages(thread.id, [heldOf(item)], receipt);
+          } else if (thread.friend?.by === 'me') {
+            const text = item.translation || item.text;
+            if (['request', 'text', 'voice'].includes(item.kind) && text) await backend.friendRequest(thread.id, requestText, receipt);
+            else continue;
+          } else {
+            if (thread.friend?.by === 'them') { await backend.chats.update(thread.id, {friend: null}); await backend.chats.append(thread.id, [{from: 'me', kind: 'system', text: `${item.from}重新添加了你为好友`}]); refreshCuts(); }
+            await arrive(thread.id, [item], from, valid, receipt, () => counted(prefix));
+          }
+          // The receipt is stored in the same IDB mutation as the message, including intercepted messages and calls.
+          const saved = await backend.chats.get(thread.id);
+          if (saved?.phoneReceipts?.includes(receipt)) { handled++; if (!thread.blocked || item.kind === 'request') counted(prefix); if (thread.blocked && item.kind === 'request' || thread.friend?.by === 'me') notice(`${item.from} 请求添加你为好友：${requestText.slice(0, 40)}`); else if (!thread.blocked) { sent++; const old = arrivals.get(thread.id) || {name: group ? `群「${group.name}」` : item.from, n: 0, fresh: []}; old.n++; const before = new Set(thread.messages.map(m => m.id)); old.fresh.push(...saved.messages.filter(m => !before.has(m.id) && m.from !== 'me')); arrivals.set(thread.id, old); } }
+        } catch (error) { if (error?.name !== 'AbortError') failed(); const saved = threadId && await backend.chats.get(threadId).catch(() => null); if (saved?.phoneReceipts?.includes(receipt)) { handled++; if (!saved.blocked || item.kind === 'request') counted(prefix); } phoneLog(error?.name === 'AbortError' ? '聊天或手机消息已变化，停止接收；已保存的不会重复' : '有消息未保存，可重试：' + error.message); }
       }
     }
-    if (sent) counted();
-    return sent;
+    if (sent && valid()) for (const [threadId, {name, n, fresh}] of arrivals) { notice(`${name} 给你发来 ${n} 条消息`); const last = fresh.at(-1); if (last) backend.emit('chat', {threadId, incoming: {from: last.from, text: last.text || '', kind: last.kind, count: fresh.length}}); }
+    return handled;
   }
   /**
    * A story reply rolled again: the messages its earlier versions sent to the phone are taken out, unless the user has
@@ -1103,7 +1138,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
 
   return {
     bubbleRewrite, drawRoleSticker, clockTick, startClock, remindTick, groupTalk, outfitChanged, peekLater, makeGroup, letterTick, loreTest,
-    reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, phoneAfter, phoneAfterPlan, askFriend,
+    readingNote, reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, phoneAfter, phoneAfterPlan, askFriend,
     reroll: threadId => reply(threadId, {reroll: true}),
     /** 停止回复: the reply being written for this chat is let go. */
     cancel: threadId => { stops.get(threadId)?.abort(); },

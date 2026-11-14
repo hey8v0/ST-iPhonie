@@ -19,7 +19,7 @@ const IDLE = 120000;   // not reading any more after two minutes without a touch
 export function bookshelfApp(ctx) {
   const {api, win, doc} = ctx, v = createView(ctx, 'bookshelf');
   let books = [], book = null, reader = null, chapter = null, page = 0, pages = 1, epoch = 0, album = null, busy = false, noteBusy = false, resize = null;
-  let stage = null, filter = ALL, importing = null;
+  let stage = null, filter = ALL, importing = null, lastPosition = null;
   let picking = null, mark = new Set();              // 多选
   let session = null, activeAt = 0;                  // reading time (0.9.52)
   const urls = new Set(), covers = new Map();
@@ -31,7 +31,7 @@ export function bookshelfApp(ctx) {
   function leave() {
     const stats = book ? flushRead() : null;
     if (stats && book) api.updateReadingBook(book.id, {stats}).catch(() => {});
-    epoch++; resize?.disconnect(); resize = null;
+    lastPosition = null; epoch++; resize?.disconnect(); resize = null;
     const a = album; album = null; a?.close();
     stage?.remove(); stage = null;
     reader = null; chapter = null; clearURLs();
@@ -78,7 +78,7 @@ export function bookshelfApp(ctx) {
     const key = await menu(ctx, '和谁一起看', [{key: '-', label: '自己看'}, ...contacts.map(c => ({key: c.name, label: c.name}))]);
     if (!key) return;
     const result = await api.updateReadingBook(target.id, {companion: key === '-' ? '' : key});
-    if (book?.id === target.id) book = result; else await shelf();
+    if (book?.id === target.id) book = {...book, companion: result.companion}; else await shelf();
   }
   /** Asks for a category name (an existing one, a new one, or none) — returns {shelf} or null when the user backs out. */
   async function askShelf(current = '') {
@@ -189,7 +189,8 @@ export function bookshelfApp(ctx) {
       + (s.mode === 'pages' && book.type !== 'comic' ? field('翻页效果', select('effect', effect, [['page', '仿真翻页'], ['slide', '平滑滑动'], ['none', '直接翻页']])) : '')
       + (book.type === 'comic' ? toggle('rtl', '从右往左翻', s.rtl) : field('字号', input('size', s.size, 'range', 'min="14" max="30" step="1"')) + field('行距', input('line', s.line, 'range', 'min="1.3" max="2.6" step="0.1"')) + field('页边距', input('margin', s.margin, 'range', 'min="12" max="40" step="2"')) + field('字体', select('font', s.font, [['serif', '衬线'], ['sans-serif', '无衬线']])))
       + field('纸张', select('theme', s.theme, [['auto', '跟随手机'], ['white', '白纸'], ['cream', '米黄'], ['green', '护眼绿'], ['night', '夜间']]))
-      + toggle('annotations', '页边批注', s.annotations));
+      + toggle('annotations', '页边批注', s.annotations) + `<div class="actions">${btn('companion', '和谁一起看 · ' + esc(book.companion || '自己看'), 'text-button')}</div>`);
+    d.body.addEventListener('click', async e => { if (!e.target.closest('[data-action=companion]')) return; await pickCompanion(book); const b = d.body.querySelector('[data-action=companion]'); if (b) b.textContent = '和谁一起看 · ' + (book.companion || '自己看'); });
     d.body.addEventListener('change', async e => {
       const key = e.target.dataset.field; if (!key) return;
       const value = e.target.type === 'checkbox' ? e.target.checked : ['size', 'line', 'margin'].includes(key) ? Number(e.target.value) : e.target.value;
@@ -250,6 +251,8 @@ export function bookshelfApp(ctx) {
     if (!book) return;
     activeAt = Date.now();
     const id = book.id, p = {...book.position, fraction};
+    const position = `${id}|${p.chapter}|${Math.round(p.fraction * 10000)}`;
+    turn = turn && lastPosition !== null && lastPosition !== position; lastPosition = position;
     book.position = p; if (turn) book.turns = (book.turns || 0) + 1;
     const stats = turn ? flushRead() : null;
     const saved = await api.updateReadingBook(id, {position: p, turns: book.turns, lastRead: Date.now(), ...(stats ? {stats} : {})});
@@ -279,7 +282,7 @@ export function bookshelfApp(ctx) {
     if (!book.companion) { await pickCompanion(book); if (!book.companion) return; }
     const target = book, view = visible(); if (quote) view.text = quote.slice(0, 2200);
     const blob = book.type === 'comic' && chapter?.images[0] ? await reader.image(chapter.images[0]) : null;
-    return readingSend(api, target, view, text, {blob, annotation});
+    return readingSend(api, target, view, text, {blob, annotation, quote});
   }
   async function maybeNote() {
     if (busy || noteBusy || !annotationDue(book)) return;
@@ -287,16 +290,16 @@ export function bookshelfApp(ctx) {
     const target = book, view = visible(), source = reader, image = chapter?.images[0], day = new Date().toLocaleDateString('sv-SE');
     try {
       const reserved = await api.updateReadingBook(target.id, {nextNote: (target.turns || 0) + 6 + Math.floor(Math.random() * 5), daily: {day, count: (target.daily?.day === day ? target.daily.count : 0) + 1}});
-      if (book?.id !== target.id) return;
+      if (book?.id !== target.id || book.companion !== target.companion) return;
       book = {...book, nextNote: reserved.nextNote, daily: reserved.daily};
       const blob = target.type === 'comic' && image ? await source.image(image) : null;
-      if (book?.id !== target.id) return;
-      const result = await readingSend(api, target, view, '这一页你有什么感想？', {blob, annotation: true}), text = result?.messages.filter(m => m.from === target.companion && m.kind === 'text').at(-1)?.text;
+      if (book?.id !== target.id || book.companion !== target.companion) return;
+      const text = await readingSend(api, target, view, '', {blob, annotation: true});
       if (text) {
         const current = await api.getReadingBook(target.id); if (!current) return;
         const note = {chapter: view.chapter, para: view.para, text: text.slice(0, 120), who: target.companion, at: Date.now()};
         const saved = await api.updateReadingBook(target.id, {annotations: normalizeAnnotations([...(current.annotations || []), note])});
-        if (book?.id === target.id) { book = saved; showNotes(); }
+        if (book?.id === target.id && book.companion === target.companion) { book = {...book, annotations: saved.annotations}; showNotes(); }
       }
     } finally { noteBusy = false; }
   }
@@ -305,9 +308,11 @@ export function bookshelfApp(ctx) {
     const target = book, d = ctx.dialog('和' + target.companion + '一起看', `<div class="reading-chat"></div>${quote ? `<blockquote>${esc(quote.slice(0, 200))}</blockquote>` : ''}<form class="reading-compose"><input type="text" aria-label="聊聊这一页" placeholder="聊聊这一页…" maxlength="3000" enterkeyhint="send"><button type="submit" class="primary">发送</button></form>`, {over: true});
     const list = d.body.querySelector('.reading-chat'), box = d.body.querySelector('input'), form = d.body.querySelector('form');
     const draw = t => { list.innerHTML = (t?.messages || []).filter(m => ['text', 'voice', 'photo'].includes(m.kind)).slice(-20).map(m => `<div class="reading-msg${m.from === 'me' ? ' reading-mine' : ''}"><small>${esc(m.from === 'me' ? '我' : m.from)}</small>${m.quote ? `<blockquote>${esc(m.quote.text)}</blockquote>` : ''}<span>${esc(m.text || '图片')}</span></div>`).join(''); list.scrollTop = list.scrollHeight; };
-    const t = currentDm(await api.listThreads(), target.companion); if (t) draw(await api.getThread(t.id));
-    form.onsubmit = async e => { e.preventDefault(); if (busy || !box.value.trim()) return; busy = true; const value = box.value; box.value = ''; form.querySelector('button').disabled = true; try { draw(await send(value, quote)); quote = ''; } catch (error) { box.value = value; fail(error); } finally { busy = false; form.querySelector('button').disabled = false; } };
+    let submitted = false;
+    form.onsubmit = async e => { e.preventDefault(); if (busy || !d.live || book?.id !== target.id || book.companion !== target.companion) return; submitted = true; busy = true; const value = box.value.trim() || '这一页你有什么感想？'; box.value = ''; form.querySelector('button').disabled = true; try { draw(await send(value, quote)); quote = ''; } catch (error) { box.value = value; fail(error); } finally { busy = false; form.querySelector('button').disabled = false; } };
     if (quote) box.value = '这段你怎么看？';
+    const t = currentDm(await api.listThreads(), target.companion);
+    const initial = t ? await api.getThread(t.id) : null; if (d.live && !submitted) draw(initial);
   }
   async function bookmark() {
     const p = {...book.position}, marks = book.bookmarks || [], found = marks.findIndex(m => m.chapter === p.chapter && Math.abs(m.fraction - p.fraction) < .01);

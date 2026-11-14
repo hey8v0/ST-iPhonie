@@ -134,6 +134,7 @@ function rebase(part, before, incoming, current) {
     for (const key of new Set([...Object.keys(previous), ...Object.keys(row)])) {
       if (JSON.stringify(row[key]) === JSON.stringify(previous[key])) continue;
       if ((part === 'chats' && key === 'messages') || (part === 'moments' && key === 'comments') || (part === 'forum' && key === 'replies')) merged[key] = rebase('', previous[key] || [], merged[key] || [], row[key] || []).sort((a, b) => a.at - b.at);
+      else if (part === 'chats' && key === 'phoneReceipts') merged[key] = [...new Set([...(merged[key] || []), ...(row[key] || [])])].slice(-500);
       else if (Object.hasOwn(row, key)) merged[key] = row[key];
       else delete merged[key];
     }
@@ -151,7 +152,7 @@ export function mergePart(part, local, remote, gone = {}) {
     if (!here) { out.push(theirs); continue; }
     if (part === 'chats') {
       const base = newer(here, theirs, t => t.updatedAt);
-      out.push({...base, messages: mergeMessages(here.messages, theirs.messages), unread: Math.max(here.unread || 0, theirs.unread || 0)});
+      out.push({...base, ...((here.phoneReceipts || theirs.phoneReceipts) ? {phoneReceipts: [...new Set([...(here.phoneReceipts || []), ...(theirs.phoneReceipts || [])])].slice(-500)} : {}), messages: mergeMessages(here.messages, theirs.messages), unread: Math.max(here.unread || 0, theirs.unread || 0)});
     } else if (part === 'moments') {
       out.push({...here, ...theirs, likes: [...new Set([...(here.likes || []), ...(theirs.likes || [])])], comments: union(here.comments, theirs.comments).sort((a, b) => a.at - b.at), photoId: theirs.photoId || here.photoId});
     } else if (wholePart(part)) out.push(newerWhole(here, theirs));

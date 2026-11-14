@@ -2,6 +2,10 @@
 // user set up here (the engine, the 画风, the looks of the people named), through the same queue as the story's pictures. Once
 // published this cannot change: new things are added, old ones stay as they are. How to use it is in 使用说明.md.
 import {activeStyle} from './core/draw.js';
+import {publicVoice} from './core/public-voice.js';
+
+const voiceClients = new WeakMap();
+export function closePublicApi(api) { voiceClients.get(api)?.close(); voiceClients.delete(api); }
 
 /** A list of names, as an array or written with commas. */
 const namesOf = value => (Array.isArray(value) ? value : String(value ?? '').split(/[,，、]/)).map(x => String(x ?? '').trim()).filter(Boolean);
@@ -12,10 +16,16 @@ const nameOf = value => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0,
  * dialog). storage: where a card's suggestion is remembered as asked.
  */
 export function publicApi({pictures, backend, open = () => {}, ask = async () => false, storage = globalThis.localStorage}) {
-  return Object.freeze({
+  let voice = null, api;
+  const client = () => { if (!voice) { voice = publicVoice(backend, ask); voiceClients.set(api, voice); } return voice; };
+  api = Object.freeze({
     // 2 (0.9.34): open and suggestContacts were added; what 1 had is as it was.
     // 3 (0.9.35): suggestRoles was added, and both take {debug} (ask again each time: for a card's author trying it).
-    apiVersion: 3,
+    apiVersion: 4,
+    /** Configured voice availability, without credentials or persona. No network request. */
+    voiceStatus(role) { return client().status(role); },
+    /** {role,text,emotion?,from?,signal?} -> {blob,role,engine,fromCache}. Never starts playback. */
+    synthesize(request) { return client().synthesize(request); },
     /** Opens the phone, at an app when one is named: 'chat', 'wardrobe', 'generator', 'music', 'draw' … */
     open(app = '') { open(String(app || '').slice(0, 40)); },
     /**
@@ -71,6 +81,7 @@ export function publicApi({pictures, backend, open = () => {}, ask = async () =>
       return pictures.drawFor({prompt: r.prompt, negative: r.negative, characters: namesOf(r.characters), size: r.size, seed: r.seed, ask: r.ask !== false, signal: r.signal, from: r.from});
     },
   });
+  return api;
 }
 
 /** /iphonie-draw: the picture's address comes out, for the next command. ctx: the tavern's context; api(): the interface, null while the plugin is off. */

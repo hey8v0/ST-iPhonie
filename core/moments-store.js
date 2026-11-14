@@ -20,6 +20,7 @@ function cleanPost(p, id, at) {
   if (!author) throw fail('动态缺少发布人');
   if (!said && !p?.photoId) throw fail('动态内容为空');
   const out = {id, author, text: said, at, source: ['manual', 'auto', 'me', 'chat'].includes(p.source) ? p.source : 'manual', likes: [], comments: []};
+  if (p.phoneReceipt) out.phoneReceipt = clip(p.phoneReceipt, 600);
   if (p.photoId) out.photoId = clip(p.photoId, 512);
   if (p.imageTags) out.imageTags = clip(p.imageTags, 600);
   if (versionList(p.imageVersions).length) out.imageVersions = versionList(p.imageVersions);
@@ -106,10 +107,11 @@ export class MomentStore {
     const rows = posts.map((p, i) => ({scope: this.#scope, ...cleanPost(p, this.#id(), now + i),
       comments: (p.comments || []).slice(0, MOMENTS_LIMITS.comments).map((c, k) => cleanComment(c, this.#id(), now + i + k + 1))}));
     return this.#tx('readwrite', (store, done) => this.#all(store, existing => {
-      for (const row of rows) store.put(row);
-      const all = [...existing, ...rows].sort((a, b) => b.at - a.at);
+      const fresh = rows.filter(row => !row.phoneReceipt || !existing.some(p => p.phoneReceipt === row.phoneReceipt));
+      for (const row of fresh) store.put(row);
+      const all = [...existing, ...fresh].sort((a, b) => b.at - a.at);
       for (const old of all.slice(MOMENTS_LIMITS.posts)) store.delete([this.#scope, old.id]);
-      done(rows.map(row => this.#public(row)));
+      done(fresh.map(row => this.#public(row)));
     }));
   }
   async like(id, who, on = true) {

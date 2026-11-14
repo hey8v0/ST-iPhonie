@@ -1252,6 +1252,7 @@ export interface BackendAPI extends BackendFacade {
     /** A picture the chat asked to open in the drawing app, if any. */
     takeDraw(): (DrawInput & { tag?: string; seed?: number }) | null;
     /** Generates the contacts' next messages with the tavern's connected model and stores them. */
+    readingNote(options: {companion: string; reading: string; blob?: Blob | null}): Promise<string>;
     chatReply(threadId: string, options?: {reading?: string}): Promise<ChatThread>;
     /** Draws a contact's photo from its tags (allowPaid: even when it costs Anlas); resolves to the photo id. */
     chatDrawPhoto?(threadId: string, messageId: string, allowPaid?: boolean): Promise<string | null>;

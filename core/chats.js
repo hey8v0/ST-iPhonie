@@ -211,6 +211,8 @@ export function money(value) {
   const n = Math.round(Number(String(value ?? '').replace(/[¥￥,，\s元]/g, '')) * 100) / 100;
   return Number.isFinite(n) && n >= 0.01 && n <= 200000 ? n.toFixed(2) : null;
 }
+const received = (row, key) => !!key && (row.phoneReceipts || []).includes(key);
+const receive = (row, key) => { if (key) row.phoneReceipts = [...(row.phoneReceipts || []), String(key).slice(0, 600)].slice(-500); };
 const fail = (message, code = 'INVALID') => Object.assign(new Error(message), {code});
 const clip = (value, max) => String(value ?? '').slice(0, max);
 
@@ -300,6 +302,7 @@ function cleanMessage(m, id, at) {
     out.lines = spoken(m.lines, 80, true);
     out.voicemail = spoken(m.voicemail, 4, false);
   }
+  if (m.readingPage && kind === 'photo') out.readingPage = clip(m.readingPage, 300);
   if (m.quote?.text && ['text', 'voice'].includes(kind)) out.quote = {from: clip(m.quote.from, 40), text: clip(m.quote.text, 200)};
   // Sent by a story reply (正文联动手机): which reply (chat|message) and which version of it.
   if (typeof m.story === 'string' && m.story) { out.story = clip(m.story, 300); out.storyVer = clip(m.storyVer, 40); }
@@ -455,8 +458,10 @@ export class ChatStore {
       done(this.#public(row));
     }));
   }
-  async update(id, {name, members, pinned, muted, friend, blocked, befriended, story, open, label, notice, nicks, post, manage} = {}) {
+  async update(id, {name, members, pinned, muted, friend, blocked, befriended, story, open, label, notice, nicks, post, manage, receipt = ''} = {}) {
     return this.#change(id, row => {
+      if (received(row, receipt)) return;
+      receive(row, receipt);
       if (manage) {
         if (row.type !== 'group' || row.watch) throw fail('旁观群不能管理成员');
         const chosen = [...new Set((manage.names || []).map(n => clip(n, 40).trim()).filter(Boolean))];
@@ -515,9 +520,11 @@ export class ChatStore {
     });
   }
   /** Adds messages. Replies count as unread unless `read` is set (the chat is open on screen). */
-  async append(id, messages, {read = false} = {}) {
+  async append(id, messages, {read = false, receipt = ''} = {}) {
     return this.#change(id, row => {
       const now = this.#now();
+      if (received(row, receipt)) return;
+      receive(row, receipt);
       const added = messages.filter(m => m.kind === 'system' || canGroupSpeak(row, m.from, now)).map((m, i) => cleanMessage(m, this.#id(), now + i));
       row.messages.push(...added);
       // Anything coming after the last round ends its versions (it is no longer the last).
@@ -649,8 +656,10 @@ export class ChatStore {
     });
   }
   /** A 好友申请 from a contact the user deleted or blocked: kept with the chat until the user answers it. */
-  async addRequest(id, texts) {
+  async addRequest(id, texts, receipt = '') {
     return this.#change(id, row => {
+      if (received(row, receipt)) return;
+      receive(row, receipt);
       const now = this.#now(), list = (Array.isArray(texts) ? texts : [texts]).map(t => clip(t, 300).trim()).filter(Boolean), add = old => [...old, ...list.map((text, i) => ({text, at: now + i}))];
       if (row.blocked) row.blocked = cleanBlocked({...row.blocked, requests: add(row.blocked.requests)});
       else if (row.friend?.by === 'me') row.friend = cleanFriend({...row.friend, requests: add(row.friend.requests)});
@@ -659,8 +668,10 @@ export class ChatStore {
     });
   }
   /** What a blocked contact sends: kept as 拦截记录 (not in the chat, not unread). */
-  async hold(id, items) {
+  async hold(id, items, receipt = '') {
     return this.#change(id, row => {
+      if (received(row, receipt)) return;
+      receive(row, receipt);
       if (!row.blocked) throw fail('TA 不在黑名单里');
       const now = this.#now(), list = (Array.isArray(items) ? items : [items]).filter(Boolean).map((h, i) => ({kind: h.kind || 'text', text: h.text, at: now + i}));
       row.blocked = cleanBlocked({...row.blocked, held: [...row.blocked.held, ...list]});
@@ -698,6 +709,7 @@ export class ChatStore {
       const messages = (Array.isArray(t.messages) ? t.messages : []).slice(-CHAT_STORE_LIMITS.messages).map(m => cleanMessage(m, clip(m?.id || this.#id(), 512), Number.isFinite(m?.at) ? m.at : now));
       const row = {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true, ...(t.story === true ? {story: true} : {}), ...(Number.isFinite(t.openedAt) ? {openedAt: t.openedAt} : {}), ...(typeof t.label === 'string' && t.label.trim() ? {label: clip(t.label, 40).trim()} : {}), ...(t.type === 'group' && t.windowOf ? {windowOf: clip(t.windowOf, 512)} : {}), ...(t.type === 'group' ? {silenced: cleanSilenced(t.silenced, members)} : {}), ...(t.type === 'group' && t.watch === true ? {watch: true} : {}), ...(t.type === 'group' && cleanNotice(t.notice) ? {notice: cleanNotice(t.notice)} : {}), ...(t.type === 'group' && Object.keys(cleanNicks(t.nicks)).length ? {nicks: cleanNicks(t.nicks)} : {}), ...(t.type !== 'group' && cleanPost(t.post).length ? {post: cleanPost(t.post)} : {}),
         unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {}), ...(t.save ? {save: clip(t.save, 400)} : {}), ...(t.type !== 'group' && cleanFriend(t.friend) ? {friend: cleanFriend(t.friend)} : {}), ...(t.type !== 'group' && cleanBlocked(t.blocked) ? {blocked: cleanBlocked(t.blocked)} : {}), ...(t.type !== 'group' && Number.isFinite(t.befriended) && t.befriended > 0 ? {befriended: t.befriended} : {})};
+      if (Array.isArray(t.phoneReceipts)) row.phoneReceipts = [...new Set(t.phoneReceipts.filter(k => typeof k === 'string' && k).map(k => clip(k, 600)))].slice(-500);
       // 重新回复的版本 come along with a backup or a sync, while they still belong to the chat's last round.
       const alts = cleanAlts(t.alts, () => this.#id());
       if (alts && lastRound(messages).after === alts.after) row.alts = alts;
