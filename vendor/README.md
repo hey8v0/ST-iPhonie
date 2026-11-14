@@ -14,3 +14,7 @@
 Live2D 官方的运行核心不在这里：Cubism 3 / 4 的 `live2dcubismcore.min.js` 在用到时从 Live2D 官网（cubism.live2d.com）读，按 [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html)；Cubism 2 的 `live2d.min.js` 官方已不再提供，从 jsDelivr 读固定版本，并校验文件哈希。
 
 重新打包：见开发仓库的 `scripts/vendor/build.mjs`（Cubism 3/4 的遮罩缓冲按模型的遮罩数开够，超过 36 个遮罩的模型才画得对）。
+
+## 电子书与 ZIP 的备用解压
+
+`fflate.js` 为 [fflate](https://github.com/101arrowz/fflate) 0.8.2 的原始浏览器 ES 模块，MIT 授权（全文在 LICENSES.txt）。只有原生解压缺失或失败时按需加载，不请求 CDN；一次只解压正在打开的文件成员，输出受 ZIP 声明长度限制。

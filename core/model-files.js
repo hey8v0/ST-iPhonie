@@ -1,3 +1,5 @@
+export {crc32} from './archive-io.js';
+import {archiveBuffer, inflateEntry, crc32} from './archive-io.js';
 // 模型 for the 视觉小说: a character can stand on the stage as a VRM model (one .vrm file, VRM 0.x or 1.0) or a Live2D
 // model (Cubism 2, 3 or 4: a folder of files, uploaded as a .zip or picked as a folder and packed into one). The file
 // is kept in the tavern (user/files), so every device sees it, like the 立绘. This file reads what a model is (which
@@ -24,26 +26,8 @@ export function cleanPath(path) {
   }
   return out.join('/');
 }
-async function inflate(data) {
-  const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-/** As inflate, stopping as soon as it is more than the zip said (a small file can unpack into gigabytes). */
-async function inflateAtMost(data, most) {
-  const reader = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader(), parts = [];
-  let total = 0;
-  for (;;) {
-    const {done, value} = await reader.read();
-    if (done) break;
-    total += value.length;
-    if (total > most) { await reader.cancel().catch(() => {}); throw Error('压缩包里的文件比它说的大'); }
-    parts.push(value);
-  }
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const part of parts) { out.set(part, at); at += part.length; }
-  return out;
-}
+async function inflate(data) { return new Uint8Array(await archiveBuffer(await inflateEntry(new Blob([data])))); }
+async function inflateAtMost(data, most) { return new Uint8Array(await archiveBuffer(await inflateEntry(new Blob([data]), most, true))); }
 /**
  * The files of a zip: Map(path → {size, bytes(): Promise<Uint8Array>}), folders and macOS leftovers left out. Stored and
  * deflated entries are read; anything else (an encrypted zip, zip64, another method) is an error that says so.
@@ -74,16 +58,14 @@ export function readZip(input, {exact = false} = {}) {
   }
   return files;
 }
-/** A stream that fails once more than `most` bytes went through (a deflated file that unpacks into more than it said). */
-const atMost = most => { let total = 0; return new TransformStream({transform(chunk, out) { total += chunk.length; if (total > most) throw Error('压缩包里的文件比它说的大'); out.enqueue(chunk); }}); };
 /**
  * readZip for a zip that is a picked file, never read whole (a pack of songs can be bigger than a phone holds in
  * memory): Map(path → {size, blob(): Promise<Blob>}), each file got only when asked — a stored one is a slice of the
  * zip, a deflated one is unpacked then, never into more than the zip says it holds. Folders and macOS leftovers are
  * left out; a password, another method or zip64 is an error that says so.
  */
-export async function readZipBlob(zip, {cache = true} = {}) {
-  const at = async (from, n) => new Uint8Array(await zip.slice(from, from + n).arrayBuffer());
+export async function readZipBlob(zip, {cache = true, verify = false} = {}) {
+  const at = async (from, n) => new Uint8Array(await archiveBuffer(zip.slice(from, from + n)));
   const from = Math.max(0, zip.size - 65557), tail = await at(from, zip.size - from);
   let end = -1;
   for (let i = tail.length - 22; i >= 0; i--) if (u32(tail, i) === 0x06054b50) { end = i; break; }
@@ -94,7 +76,7 @@ export async function readZipBlob(zip, {cache = true} = {}) {
   let p = 0;
   for (let n = 0; n < count; n++) {
     if (u32(b, p) !== 0x02014b50) throw Error('压缩包的目录坏了');
-    const flags = u16(b, p + 8), method = u16(b, p + 10), packed = u32(b, p + 20), length = u32(b, p + 24);
+    const flags = u16(b, p + 8), method = u16(b, p + 10), packed = u32(b, p + 20), length = u32(b, p + 24), checksum = u32(b, p + 16);
     const nameLen = u16(b, p + 28), local = u32(b, p + 42), name = zipName(b.subarray(p + 46, p + 46 + nameLen), (flags & 0x800) !== 0), path = cleanPath(name);
     p += 46 + nameLen + u16(b, p + 30) + u16(b, p + 32);
     if (!path || /[/\\]$/.test(name) || /(^|\/)(__MACOSX|\.DS_Store)(\/|$)/.test(path) || /(^|\/)\._/.test(path)) continue;
@@ -105,20 +87,17 @@ export async function readZipBlob(zip, {cache = true} = {}) {
       const h = await at(local, 30);
       if (u32(h, 0) !== 0x04034b50) throw Error('压缩包坏了');
       const data = zip.slice(local + 30 + u16(h, 26) + u16(h, 28), local + 30 + u16(h, 26) + u16(h, 28) + packed);
-      if (method === 0) return data;
-      if (typeof DecompressionStream !== 'function') throw Error('这个浏览器解不开压缩过的 zip：用「存储」方式重新压缩，或者直接选歌');
-      return new Response(data.stream().pipeThrough(new DecompressionStream('deflate-raw')).pipeThrough(atMost(length))).blob();
+      if (method === 0) {
+        if (!verify) return data;
+        const bytes = await archiveBuffer(data);
+        if (bytes.byteLength !== length || crc32(new Uint8Array(bytes)) !== checksum) throw Error('文件校验失败，可能已损坏');
+        return new Blob([bytes]);
+      }
+      return inflateEntry(data, length, true, verify ? checksum : undefined);
     };
-    files.set(path, {size: length, blob: () => cache ? made ??= open() : open()});
+    files.set(path, {size: length, blob: () => { const load = () => open().catch(error => { made = null; throw new Error(`读取压缩包内文件「${path}」失败：${error.message}`, {cause: error}); }); return cache ? made ??= load() : load(); }});
   }
   return files;
-}
-let CRC = null;
-export function crc32(b) {
-  CRC ??= Array.from({length: 256}, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ c >>> 1 : c >>> 1; return c >>> 0; });
-  let c = 0xffffffff;
-  for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ c >>> 8;
-  return (c ^ 0xffffffff) >>> 0;
 }
 /** Files ([{path, bytes}]) packed into one zip, stored as they are (a picked folder becomes one file to keep). */
 export function writeZip(list) {

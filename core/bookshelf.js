@@ -1,3 +1,4 @@
+import {archiveBuffer} from './archive-io.js';
 // Local EPUB/TXT reading. Archive entries are opened on demand, never retained by the ZIP directory.
 import {readZipBlob} from './model-files.js';
 import {AppStore} from './app-store.js';
@@ -55,14 +56,23 @@ export function sanitizeBook(html, path, Parser = globalThis.DOMParser) {
   const clean = walk(doc.body), plain = new Parser().parseFromString(clean, 'text/html').body.textContent.trim();
   return {html: clean, text: plain, images};
 }
+export function bookReadError(name, step, error) {
+  if (error.bookName) return error;
+  const detail = /Invalid type|ArrayBuffer/i.test(error.message || '') ? '浏览器读取文件时遇到数据兼容问题' : error.message || '文件格式不完整或无法读取';
+  return Object.assign(new Error(`「${name || '电子书'}」${step}失败：${detail}`, {cause: error}), {bookName: name});
+}
+const bookStep = async (name, step, run) => { try {return await run();} catch (error) {throw bookReadError(name, step, error);} };
 export async function openBook(blob, name, Parser = globalThis.DOMParser) {
+  return bookStep(name, '打开电子书', () => openBookData(blob, name, Parser));
+}
+async function openBookData(blob, name, Parser) {
   if (/\.txt$/i.test(name)) {
-    const chapters = txtChapters(decodeBook(await blob.arrayBuffer()));
+    const chapters = txtChapters(decodeBook(await archiveBuffer(blob)));
     return {title: name.replace(/\.txt$/i, ''), author: '', type: 'novel', chapters: chapters.map(c => ({title: c.title})),
       chapter: async i => ({html: chapters[i].text.split('\n').map(t => `<p>${escape(t) || '<br>'}</p>`).join(''), text: chapters[i].text, images: []}), image: async () => null};
   }
-  const files = await readZipBlob(blob, {cache: false});
-  const read = async path => { const f = files.get(path); if (!f || f.size > 16 * 1024 * 1024) throw Error('电子书章节缺失或过大'); return (await f.blob()).text(); };
+  const files = await readZipBlob(blob, {cache: false, verify: true});
+  const read = path => bookStep(name, `读取书内文件「${path}」`, async () => { const f = files.get(path); if (!f || f.size > 16 * 1024 * 1024) throw Error('电子书章节缺失或过大'); return new TextDecoder().decode(await archiveBuffer(await f.blob())); });
   const container = xml(await read('META-INF/container.xml'), Parser), opfPath = nodes(container, 'rootfile')[0]?.getAttribute('full-path');
   const opf = xml(await read(opfPath), Parser), manifest = new Map(nodes(opf, 'item').map(n => [n.getAttribute('id'), {path: bookPath(opfPath, n.getAttribute('href')), properties: n.getAttribute('properties') || '', mime: n.getAttribute('media-type')} ]));
   const chapters = nodes(opf, 'itemref').filter(n => n.getAttribute('linear') !== 'no').map(n => manifest.get(n.getAttribute('idref'))).filter(Boolean).map((n, i) => ({...n, title: `第 ${i + 1} 节`}));
@@ -77,20 +87,20 @@ export async function openBook(blob, name, Parser = globalThis.DOMParser) {
     toc = nodes(xml(await read(ncx.path), Parser), 'navPoint').map(n => ({title: nodes(n, 'text')[0]?.textContent.trim(), path: bookPath(ncx.path, nodes(n, 'content')[0]?.getAttribute('src'))}));
   }
   for (const c of chapters) c.title = toc.find(t => t.path === c.path)?.title || c.title;
-  const chapter = async i => sanitizeBook(await read(chapters[i].path), chapters[i].path, Parser);
+  const chapter = i => bookStep(name, `读取章节「${chapters[i]?.title || i + 1}」`, async () => sanitizeBook(await read(chapters[i].path), chapters[i].path, Parser));
   const sample = await Promise.all(chapters.slice(0, 5).map((_, i) => chapter(i)));
   const fixed = nodes(opf, 'meta').some(n => n.getAttribute('property') === 'rendition:layout' && n.textContent.trim() === 'pre-paginated');
   const comic = fixed || sample.every(c => c.images.length > 0 && c.text.length < 100);
   const coverId = nodes(opf, 'meta').find(n => n.getAttribute('name') === 'cover')?.getAttribute('content');
   const cover = manifest.get(coverId)?.path || [...manifest.values()].find(n => n.properties.split(/\s+/).includes('cover-image'))?.path || (comic ? sample[0].images[0] : '');
-  const image = async path => raster(path) && files.has(path) ? new Blob([await files.get(path).blob()], {type: /\.png$/i.test(path) ? 'image/png' : /\.webp$/i.test(path) ? 'image/webp' : /\.gif$/i.test(path) ? 'image/gif' : /\.avif$/i.test(path) ? 'image/avif' : 'image/jpeg'}) : null;
+  const image = path => bookStep(name, `读取图片「${path}」`, async () => raster(path) && files.has(path) ? new Blob([await archiveBuffer(await files.get(path).blob())], {type: /\.png$/i.test(path) ? 'image/png' : /\.webp$/i.test(path) ? 'image/webp' : /\.gif$/i.test(path) ? 'image/gif' : /\.avif$/i.test(path) ? 'image/avif' : 'image/jpeg'}) : null);
   return {title: nodes(opf, 'title')[0]?.textContent.trim() || name.replace(/\.epub$/i, ''), author: nodes(opf, 'creator').map(n => n.textContent.trim()).join('、'), type: comic ? 'comic' : 'novel', chapters, cover, chapter, image};
 }
 export async function bookImports(files) {
   const out = [];
   for (const file of files) {
     if (/\.(epub|txt)$/i.test(file.name)) out.push({name: file.name, open: async () => file});
-    else if (/\.zip$/i.test(file.name)) for (const [name, item] of await readZipBlob(file, {cache: false})) if (/\.(epub|txt)$/i.test(name)) out.push({name: name.split('/').pop(), open: item.blob});
+    else if (/\.zip$/i.test(file.name)) for (const [name, item] of await bookStep(file.name, '读取书籍压缩包', () => readZipBlob(file, {cache: false, verify: true}))) if (/\.(epub|txt)$/i.test(name)) out.push({name: name.split('/').pop(), open: item.blob});
   }
   return out;
 }
