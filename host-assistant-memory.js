@@ -1,6 +1,7 @@
 // Assistant memory uses the same summaries/search as phone chats, with its own account-scoped conversation keys.
 // The backend checks conversation and memory revisions in the same transaction as every saved book/vector.
 import {normalizeAssistant, assistantHistory} from './core/assistant.js';
+import {promptOn} from './core/prompt-rules.js';
 import {nextBatch, nextMerge, addNode, buildMemoryRequest, parseMemory, memoryText, chunks, recall, recallText, textKey, roots, emptyBook} from './core/memory.js';
 
 const abort = () => Object.assign(Error('助手记忆整理已取消'), {name: 'AbortError'});
@@ -141,11 +142,12 @@ export function createAssistantMemoryHost({context, settings, backend, request})
     const book = reroll ? emptyBook(thread.id) : await backend.assistantMemoryBook(thread.id);
     let found = [];
     if (config.recall && String(query).trim()) {
-      const pieces = chunks(assistantMemoryThread(thread), {window: history, user: user()});
+      const pieces = chunks(assistantMemoryThread(thread), {window: history, user: user(), timestamps: promptOn(settings().promptRules, 'now')});
       if (pieces.length) found = recall(pieces, query, {limit: config.recall, vectors: await vectors(thread, pieces, query, {signal, cache: !reroll})});
     }
     await current(thread, signal);
-    const text = [memoryText(book, {who: '这段助手会话'}), recallText(found, {who: '这段助手会话中'})].filter(Boolean).join('\n\n');
+    const timestamps = promptOn(settings().promptRules, 'now');
+    const text = [memoryText(book, {who: '这段助手会话', timestamps}), recallText(found, {who: '这段助手会话中', messages: assistantMemoryThread(thread).messages, user: user(), timestamps})].filter(Boolean).join('\n\n');
     const used = {at: Date.now(), nodes: roots(book).length, recalled: found.map(piece => ({from: piece.from, to: piece.to, score: piece.score, text: piece.text.slice(0, 300)})), vector: found.some(piece => piece.semantic !== null)};
     note(thread.id, {used});
     return {text, used};

@@ -662,7 +662,8 @@ export function letterRequest({prompts = {}, partner, persona = '', user = '我'
   const system = promptText(prompts, 'letter', 'system', {'用户': user, '对象': partner, '对象资料': String(persona || '').trim() || '（没有资料，按剧情里的表现来）',
     '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': story.map(s => `${s.name}：${s.text}`).join('\n'),
     '记忆': memory.trim(), '聊天记录': history.filter(m => m.kind !== 'letter').map(m => messageLine(m, user)).filter(Boolean).slice(-20).join('\n')});
-  return [{role: 'system', content: system}, {role: 'user', content: promptText(prompts, 'letter', 'ask', {'用户': user, '对象': partner, '来信': letter, '寄出': dateText(sentAt), '收到': dateText(now)})}];
+  const timestamps = promptOn(prompts, 'now');
+  return [{role: 'system', content: system}, {role: 'user', content: promptText(prompts, 'letter', 'ask', {'用户': user, '对象': partner, '来信': letter, '寄出': timestamps ? dateText(sentAt) : '此前', '收到': timestamps ? dateText(now) : '随后'})}];
 }
 /** A letter as the model wrote it: the words, without fences or a heading of its own. */
 export const letterText = answer => String(answer ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```[a-z]*\n?|```/g, '').replace(/^\s*(?:【?回信】?|回信[:：])\s*\n/, '').trim().slice(0, 3000);

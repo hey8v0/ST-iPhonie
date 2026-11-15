@@ -5,6 +5,7 @@
 import {currentDm} from './core/chats.js';
 import {nextBatch, nextMerge, addNode, buildMemoryRequest, parseMemory, memoryText, chunks, recall, recallText, textKey, transcript, roots, storyMemoryText, unwritten, STORY_MEMORY} from './core/memory.js';
 import {activeChatPreset} from './core/chat.js';
+import {promptOn} from './core/prompt-rules.js';
 
 // How many requests one go may make: after a reply only a little (a long backlog is caught up over several replies),
 // when the user asks for it more.
@@ -15,6 +16,8 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
   let storyText = '', storyTimer = 0, storyRun = 0, storyError = '', storyDone = Promise.resolve(), storyFor = null, closed = false;
   // Which card the story memory is for (the open character, or the group).
   const cardKey = () => { const ctx = context(); return ctx ? `${ctx.groupId || ''}|${ctx.name2 || ''}` : ''; };
+  const timeOn = () => promptOn(settings().promptRules, 'now');
+  const storyKey = () => JSON.stringify([cardKey(), timeOn()]);
   const userName = () => context()?.name1 || '我';
   const options = () => activeChatPreset(settings().chat).memory;
   const windowSize = () => activeChatPreset(settings().chat).history;
@@ -92,14 +95,15 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
     const o = options();
     if (!o.enabled || !thread) return {text: '', used: null};
     const name = who(thread), book = await backend.memoryBook(thread.id);
-    const kept = memoryText(book, {who: thread.type === 'group' ? `群聊「${name}」` : `和${name}`, ...(cap ? {cap} : {})});
     let found = [];
     const limit = recallCount ?? o.recall;
     if (limit && String(query).trim()) {
-      const pieces = chunks(thread, {window: windowSize(), user: userName()});
+      const pieces = chunks(thread, {window: windowSize(), user: userName(), timestamps: timeOn()});
       if (pieces.length) found = recall(pieces, query, {limit, vectors: await vectors(thread.id, pieces, query)});
     }
-    const text = [kept, recallText(found, {who: thread.type === 'group' ? '群里' : `和${name}`})].filter(Boolean).join('\n\n');
+    const timestamps = timeOn();
+    const kept = memoryText(book, {who: thread.type === 'group' ? `群聊「${name}」` : `和${name}`, timestamps, ...(cap ? {cap} : {})});
+    const text = [kept, recallText(found, {who: thread.type === 'group' ? '群里' : `和${name}`, messages: thread.messages, user: userName(), timestamps})].filter(Boolean).join('\n\n');
     const used = {at: Date.now(), nodes: roots(book).length, recalled: found.map(p => ({from: p.from, to: p.to, score: p.score, text: p.text.slice(0, 300)})), vector: found.some(p => p.semantic !== null)};
     if (record) note(thread.id, {used});
     return {text, used};
@@ -126,9 +130,11 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
   // asks, since the story's prompt is put together without waiting.
   function refreshStory(delay = 300) {
     clearTimeout(storyTimer);
-    storyFor = cardKey();
+    const key = storyKey(), timestamps = timeOn();
+    if (storyFor !== key) storyText = '';
+    storyFor = key;
     // Only the latest run writes: an older one still reading (for the card open before) would put back its answer.
-    const run = ++storyRun, put = text => { if (run === storyRun) storyText = text; };
+    const run = ++storyRun, put = text => { if (!closed && run === storyRun && key === storyKey()) storyText = text; };
     let finish;
     storyDone = new Promise(resolve => { finish = resolve; });
     storyTimer = setTimeout(async () => {
@@ -150,20 +156,20 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
           const fresh = unwritten(thread, o.enabled ? await backend.memoryBook(thread.id) : null).filter(m => m.kind !== 'system');
           const kept = [];
           for (let i = fresh.length - 1, size = 0; i >= 0; i--) {
-            const line = transcript([fresh[i]], user);
+            const line = transcript([fresh[i]], user, {timestamps});
             if (kept.length && size + line.length > budget) break;
             kept.unshift(fresh[i]); size += line.length;
           }
           // (Not forced: forcing here wrote a summary of whatever few messages there were before every story reply,
           // so the book filled with 4- and 8-message 摘要 whatever 「每次整理多少条」 said. 0.9.46.)
           if (o.enabled && kept.length < fresh.length) tidy(thread.id).catch(() => {});
-          const recent = kept.length ? `【${user}和${group ? `群聊「${name}」` : name}在手机上${text ? '后来' : ''}的聊天${kept.length < fresh.length ? `（最近 ${kept.length} 条）` : ''}】\n${transcript(kept, user)}` : '';
+          const recent = kept.length ? `【${user}和${group ? `群聊「${name}」` : name}在手机上${text ? '后来' : ''}的聊天${kept.length < fresh.length ? `（最近 ${kept.length} 条）` : ''}】\n${transcript(kept, user, {timestamps})}` : '';
           if (text || recent) parts.push([text, recent].filter(Boolean).join('\n'));
         }
         put(parts.length ? `【小手机】（${user}和角色们在手机上聊过的事，角色都记得；剧情里自然提起就好，不用复述）\n${parts.join('\n\n')}` : '');
         if (run === storyRun) storyError = '';
       } catch (error) { put(''); if (run === storyRun) storyError = error.message; }
-      finish();
+      finally { finish(); }
     }, delay);
   }
   /** The characters of the card open now (the character, or the group's members). */
@@ -187,18 +193,21 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
   /** Waits (a little) for the story memory being worked out, so a story request right after changing cards has it. */
   function storyReady(limit = 1500) {
     // Worked out for another card (the card changed and the tavern has not said so yet): again, now.
-    if (storyFor !== cardKey()) refreshStory(0);
+    if (storyFor !== storyKey()) refreshStory(0);
     return Promise.race([storyDone, new Promise(r => setTimeout(r, limit))]);
   }
   /** Prompt entries for inject(): the phone memory for the story, placed like 带进剧情. */
   function storyPlan() {
-    if (!storyText) return [];
+    if (!storyText || storyFor !== storyKey()) return [];
     const i = activeChatPreset(settings().chat).injection, inChat = i.position === 'in_chat';
     return [{key: 'sttts.entry.memory', text: storyText, position: {in_chat: 1, in_prompt: 0, before_prompt: 2}[i.position], depth: inChat ? i.depth : 0, role: inChat ? {system: 0, user: 1, assistant: 2}[i.role] : 0}];
   }
   // The phone's chats change: worked out again (the tavern side calls refreshStory once the phone's data is open, and
   // when the open card or the settings change).
-  const unsubscribe = backend.subscribe?.(event => { if (event.type === 'chat' && !event.typing || event.type === 'memory' && event.reset) refreshStory(); });
+  const unsubscribe = backend.subscribe?.(event => {
+    if (event.type === 'settings') { if (storyFor !== storyKey()) refreshStory(0); }
+    else if (event.type === 'chat' && !event.typing || event.type === 'memory' && event.reset) refreshStory();
+  });
 
   /** 更早的剧情: what the picked memory plugins put into the tavern's extension prompts. */
   function storyMemory() { if (activeChatPreset(settings().chat).storyMode === 'off') return ''; return storyMemoryText(context()?.extensionPrompts, options().storyKeys); }

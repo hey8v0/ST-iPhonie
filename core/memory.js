@@ -8,7 +8,7 @@
 // exact words of a long-gone moment can come back. Searching is local (BM25 over Chinese two-character pieces, as in
 // 剧情剪辑台) and, with a 向量模型 set up, mixed with embedding similarity.
 // No DOM, storage or network here: the plans, the prompts, the parsers, the search and the texts sent to the model.
-import {promptText} from './prompt-rules.js';
+import {promptText, promptOn} from './prompt-rules.js';
 import {messageLine} from './chat.js';
 
 export const MEMORY_LIMITS = Object.freeze({batch: [10, 200], stage: [2, 20], epic: [2, 20], recall: [0, 10], text: 6000, nodes: 600, chunk: 8, cap: 8000});
@@ -139,12 +139,13 @@ export function day(at) { const d = new Date(at); return `${d.getMonth() + 1}月
 export function span(from, to) { const a = day(from), b = day(to); return a === b ? a : `${a}–${b}`; }
 const clock = at => { const d = new Date(at); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 /** Messages as lines, with the date written where a new day starts and the time on each line. */
-export function transcript(messages, user) {
+export function transcript(messages, user, {timestamps = true} = {}) {
   let last = '';
   const out = [];
   for (const m of messages) {
     const line = messageLine(m, user);
     if (!line) continue;
+    if (!timestamps) { out.push(line); continue; }
     const today = day(m.at);
     if (today !== last) { out.push(`【${today}】`); last = today; }
     out.push(`${clock(m.at)} ${line}`);
@@ -158,13 +159,14 @@ export function transcript(messages, user) {
  */
 export function buildMemoryRequest({prompts = {}, level, messages = [], nodes = [], user = '我', who = '', group = false}) {
   const where = group ? `群聊「${who}」` : `${user}和${who}的手机聊天`;
+  const timestamps = promptOn(prompts, 'now');
   if (level === 0) {
     return [{role: 'system', content: promptText(prompts, 'memory', 'system', {'摘要': true, '哪里': where})},
-      {role: 'user', content: `聊天记录：\n${transcript(messages, user)}`}];
+      {role: 'user', content: `聊天记录：\n${transcript(messages, user, {timestamps})}`}];
   }
   const system = promptText(prompts, 'memory', 'system', {'哪里': where, '下一层': levelName(level - 1), '这一层': levelName(level), '字数': level === 1 ? '300 到 700 字' : '400 到 900 字'});
   return [{role: 'system', content: system},
-    {role: 'user', content: nodes.map(n => `【${levelName(n.level)} · ${span(n.from, n.to)}】\n${n.text}`).join('\n\n')}];
+    {role: 'user', content: nodes.map(n => `【${levelName(n.level)}${timestamps ? ' · ' + span(n.from, n.to) : ''}】\n${n.text}`).join('\n\n')}];
 }
 /** The written text: think blocks, code fences and a stray heading line dropped. */
 export function parseMemory(reply) {
@@ -175,7 +177,7 @@ export function parseMemory(reply) {
 }
 
 /** What goes into a request: the roots, oldest first, under a heading. Too long: the newest low-level ones wait out. */
-export function memoryText(book, {who = '', cap = MEMORY_LIMITS.cap} = {}) {
+export function memoryText(book, {who = '', cap = MEMORY_LIMITS.cap, timestamps = true} = {}) {
   const list = roots(book);
   if (!list.length) return '';
   const keep = new Set();
@@ -185,7 +187,7 @@ export function memoryText(book, {who = '', cap = MEMORY_LIMITS.cap} = {}) {
     if (used + cost > cap && keep.size) continue;
     keep.add(n.id); used += cost;
   }
-  return `【${who}的长期记忆】（更早的聊天整理成的，按时间排；最近的聊天记录另外附上）\n` + list.filter(n => keep.has(n.id)).map(n => `- ${levelName(n.level)}（${span(n.from, n.to)}）：${n.text}`).join('\n');
+  return `【${who}的长期记忆】（更早的聊天整理成的，按时间排；最近的聊天记录另外附上）\n` + list.filter(n => keep.has(n.id)).map(n => `- ${levelName(n.level)}${timestamps ? '（' + span(n.from, n.to) + '）' : ''}：${n.text}`).join('\n');
 }
 
 // ---------- 想起来的旧聊天: local search (BM25) and embedding similarity ----------
@@ -227,10 +229,10 @@ export function textKey(text) { let h = 2166136261; for (const c of String(text)
  * Pieces of the older chat to search: every `chunk` messages before the ones always sent (window), oldest first.
  * {id, from, to, text (lines with dates), messages: ids}.
  */
-export function chunks(thread, {window = 30, size = MEMORY_LIMITS.chunk, user = '我'} = {}) {
+export function chunks(thread, {window = 30, size = MEMORY_LIMITS.chunk, user = '我', timestamps = true} = {}) {
   const list = said(thread), older = list.slice(0, Math.max(0, list.length - window)), out = [];
   for (let i = 0; i < older.length; i += size) {
-    const part = older.slice(i, i + size), text = transcript(part, user);
+    const part = older.slice(i, i + size), text = transcript(part, user, {timestamps});
     if (text.trim()) out.push({id: part[0].id, from: part[0].at, to: part.at(-1).at, text, messages: part.map(m => m.id)});
   }
   return out;
@@ -251,6 +253,8 @@ export function recall(pieces, query, {limit = 3, vectors = null} = {}) {
   return scored.filter(p => p.semantic !== null ? p.score >= .45 : p.matched.length >= 2 && p.score >= .35)
     .sort((a, b) => b.score - a.score || b.from - a.from).slice(0, limit).sort((a, b) => a.from - b.from);
 }
-export function recallText(found, {who = ''} = {}) {
-  return found.length ? `【想起来的旧聊天】（和现在聊的有关的${who}更早的原话，只作参考）\n` + found.map(p => p.text).join('\n……\n') : '';
+export function recallText(found, {who = '', messages = null, user = '我', timestamps = true} = {}) {
+  // Re-render selected messages at the request boundary; never strip date-like words from actual message content.
+  const text = p => messages ? transcript(messages.filter(m => p.messages.includes(m.id)), user, {timestamps}) : p.text;
+  return found.length ? `【想起来的旧聊天】（和现在聊的有关的${who}更早的原话，只作参考）\n` + found.map(text).join('\n……\n') : '';
 }
