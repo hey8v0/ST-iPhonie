@@ -245,25 +245,26 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     pendingAnswers.delete(id); pendingAnswers.set(id, entry);
     while (pendingAnswers.size > 8) pendingAnswers.delete(pendingAnswers.keys().next().value);
   }
-  function reusable(id, wantVoice, wantPictures) {
+  function reusable(id, wantVoice, wantPictures, revoice) {
     const e = pendingAnswers.get(id);
-    if (!e || Date.now() > e.until || e.key !== scopeKey() || wantVoice && !e.wantVoice || wantPictures && !e.wantPictures) return null;
+    if (!e || (!!e.revoice !== revoice && e.writtenBody === undefined) || Date.now() > e.until || e.key !== scopeKey() || wantVoice && !e.wantVoice || wantPictures && !e.wantPictures) return null;
     const current = e.revision.current();
     return current && (e.revision.target() || e.writtenBody !== undefined && replyBody(current.mes, e.scope) === e.writtenBody) ? e : null;
   }
-  async function planReply(id, {voiced: wantVoice, pictured: wantPictures, force = false, phoned = false}) {
+  async function planReply(id, {voiced: wantVoice, pictured: wantPictures, force = false, phoned = false, revoice = false}) {
     const ctx = context(), s = settings(), original = ctx.chat[id];
     if (!original || original.is_user || original.is_system || (!wantVoice && !wantPictures)) return {voiced: 0, pictured: 0};
     if (planning.has(id)) throw Error('这条回复正在处理，请稍后再试');
     planning.add(id);
     notice(wantVoice && wantPictures ? '正在给这条回复配音、挑画面……' : wantVoice ? '正在给这条回复配音……' : '正在给这条回复挑画面……');
-    let entry = reusable(id, wantVoice, wantPictures);
+    let entry = reusable(id, wantVoice, wantPictures, revoice);
+    const voiceSource = (source, scope) => revoice && voice?.has(source) ? mapStory(source, scope, text => voice.strip(text)) : source;
     const skip = () => { stage(id, '未写入：正文、聊天或分支已变化', {}, 'warn'); return {voiced: 0, pictured: 0, skipped: true}; };
     try {
       if (!entry) {
         const scope = structuredClone(s.narration), format = voice?.format(), key = scopeKey();
         const revision = replyRevision(context, id, scope, () => backend.closed ? null : backend.space);
-        const source = force && wantPictures ? withoutPictures(original.mes) : original.mes;
+        const source = voiceSource(force && wantPictures ? withoutPictures(original.mes) : original.mes, scope);
         const preset = s.draw.presets.find(p => p.id === s.draw.activePreset) || s.draw.presets[0];
         const pictures = wantPictures ? await pictureRequest(id, source) : null;
         const asked = wantVoice && wantPictures ? combinedRequest({rules: voice.rules(), format, pictures})
@@ -273,7 +274,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
         const length = (wantVoice ? Math.min(3000, 400 + source.length * 2) : 0) + (wantPictures ? planLength(s, preset.count) : 0) + (phoneRule ? 500 : 0);
         if (!revision?.target()) return skip();
         const answer = await backend.generateText(ctx, {use: 'picture', prompt, trimNames: false, responseLength: Math.min(10000, length)});
-        entry = {revision, scope, format, answer, phoneRule, key, wantVoice, wantPictures, force, until: Date.now() + 5 * 60000};
+        entry = {revision, scope, format, answer, phoneRule, key, wantVoice, wantPictures, force, revoice, until: Date.now() + 5 * 60000};
         if (String(answer).length <= 512000) rememberAnswer(id, entry);
         stage(id, '模型已返回，等待匹配与写入');
       } else stage(id, '复用已返回结果，不重复请求模型');
@@ -283,7 +284,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       if (!valid() && !alreadyWritten) return skip();
       const {rest: reply, phone: sent} = entry.phoneRule ? phoneSection(entry.answer) : {rest: entry.answer, phone: ''};
       const assemble = source => {
-        let text = force && wantPictures ? withoutPictures(source) : source, voiced = 0, pictured = 0;
+        let text = voiceSource(force && wantPictures ? withoutPictures(source) : source, entry.scope), voiced = 0, pictured = 0;
         if (wantPictures) ({text, count: pictured} = insertPlanned(text, reply, entry.scope));
         if (wantVoice) ({text, count: voiced} = insertVoiced(text, reply, entry.format, entry.scope));
         if (wantPictures && !pictured && entry.extraReply) ({text, count: pictured} = insertPlanned(text, entry.extraReply, entry.scope));
@@ -704,11 +705,9 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const m = context().chat[id];
     if (!m || m.is_user || m.is_system) throw Error('这层楼不是角色的回复');
     if (!voice) throw Error('配音没有开');
-    const was = m.mes;
-    if (voice.has(m.mes)) m.mes = mapStory(m.mes, settings().narration, text => voice.strip(text));
-    const stripped = m.mes, swipe = m.swipe_id;
-    // Restore only our own unchanged draft, never overwrite a user's newer edit.
-    try { const {voiced} = await planReply(id, {voiced: true, pictured: false}); return voiced; } catch (error) { if (context().chat[id] === m && m.mes === stripped && m.swipe_id === swipe) m.mes = was; throw error; }
+    // Strip only the working text; the live reply stays intact until a valid answer is committed.
+    const {voiced} = await planReply(id, {voiced: true, pictured: false, revoice: !!voice.has(m.mes)});
+    return voiced;
   }
   /** The newest reply from a character: voice its lines again (设置 → 正文 → 正文语音 → 给最新回复配音). */
   async function voiceLatest() {

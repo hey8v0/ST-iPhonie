@@ -5,6 +5,13 @@
 import {sha256Hex as hashHex} from './hash.js';
 
 const POLL_MS = 2000, RENEW_MS = 20000;
+async function queueJson(response, signal) {
+  try { return await response.json(); }
+  catch {
+    if (signal?.aborted) throw stop();
+    throw Error('云端队列返回的不是有效 JSON，请检查队列地址和服务状态');
+  }
+}
 const stop = () => Object.assign(Error('已取消'), {cancelled: true});
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
   if (signal?.aborted) { reject(stop()); return; }
@@ -37,7 +44,7 @@ export class CloudQueue {
       throw Error('连不上云端队列，请检查地址和网络');
     }
     if (!response.ok) throw Error(`云端队列出错（${response.status}）`);
-    return response.json();
+    return queueJson(response, signal);
   }
   /** Current state of the room: {length, busy, holder, cooldown}. */
   status(signal) { return this.call({op: 'status'}, signal); }
@@ -104,7 +111,7 @@ export class KeyHashQueue {
       throw Error('连不上云端队列，请检查地址和网络');
     }
     if (!response.ok) throw Error(`云端队列出错（${response.status}）`);
-    return response.json();
+    return queueJson(response, signal);
   }
   async hash() {
     const hash = await this.keyHash();

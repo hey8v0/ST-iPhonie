@@ -475,7 +475,7 @@ class DrawSettings {
         this.novelai.relay = this.settings.draw.relay.url;
         const draw = await this.novelai.probe();
         let subscription;
-        try { const s = await this.naiSubscription(true); subscription = { ok: true, tier: s.tier }; }
+        try { const s = await this.naiSubscription(true); subscription = s ? { ok: true, tier: s.tier } : { ok: false, status: 0, message: '检查期间连接已改变，请重新检查订阅' }; }
         catch (error) { subscription = { ok: false, status: error.status || 0, message: error.message }; }
         return { relay: !!this.settings.draw.relay.url, draw, subscription };
     }

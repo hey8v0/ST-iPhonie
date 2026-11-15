@@ -200,6 +200,7 @@ export function audioType(bytes, said = '') {
   if (b.length >= 4 && ascii(0, 4) === 'fLaC') return 'audio/flac';
   if (b.length >= 3 && (ascii(0, 3) === 'ID3' || b[0] === 0xff && (b[1] & 0xe0) === 0xe0)) return 'audio/mpeg';
   if (b.length >= 8 && ascii(4, 4) === 'ftyp') return 'audio/mp4';
+  if (audioKind(b) === 'webm') return 'audio/webm';
   return /^audio\//i.test(said) ? said.split(';')[0] : 'audio/wav';
 }
 const fromBase64 = bytesOf;

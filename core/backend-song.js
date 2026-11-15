@@ -59,7 +59,7 @@ class Songs {
     /** Drafts go; the songs made from them stay in the 歌单. */
     async deleteSongDrafts(ids) {
         this.assertOpen();
-        for (const id of ids) { this.songJobs().get(id)?.control.abort(); await this.music.remove(id); }
+        for (const id of ids) { this.cancelSing(id); await this.music.remove(id); }
         this.noteGone('music', ids);
         this.emit('music', { draft: ids[0] || '' });
         return true;
@@ -69,7 +69,7 @@ class Songs {
         const job = this.songJobs().get(id);
         job?.control.abort();
         // On one's own ComfyUI a song given up on stops taking the computer's time.
-        if (job?.engine === 'comfy' && job.task) { const c = this.settings.draw.comfy; stopComfySong({ fetch: this.songFetch, url: c.url, transport: c.loraTransport, task: job.task }).catch(() => {}); }
+        if (job?.engine === 'comfy' && job.task) { const c = job.connection || this.settings.draw.comfy; stopComfySong({ fetch: this.songFetch, url: c.url, transport: c.loraTransport, task: job.task }).catch(() => {}); }
         return true;
     }
     /**
@@ -103,11 +103,13 @@ class Songs {
             await this.music.change(id, d => { d.state = 'singing'; d.job = { engine, model, task, at: Date.now() }; delete d.note; });
             this.emit('music', { draft: id });
             const c = this.settings.draw.comfy, s = this.settings.music.sing, own = s.comfyOwn && s.comfyWorkflow;
+            job.connection = {url: c.url, loraTransport: c.loraTransport};
+            if (control.signal.aborted) throw Object.assign(Error('已取消'), {name: 'AbortError'});
             const request = { title: draft.title, style: draft.style, lyrics: draft.lyrics, instrumental: draft.instrumental, language: draft.language, seconds: songLength(draft), model,
                 url: engine === 'lyria' ? this.settings.music.sing.lyriaUrl : engine === 'comfy' ? c.url : engine === 'mini' ? miniBase(this.settings.connections.mini) : '', transport: c.loraTransport, ...(engine === 'comfy' && own ? { workflow: s.comfyWorkflow, map: s.comfyMap } : {}) };
             const result = await singSong(engine, request, { fetch: this.songFetch, key: this.songKey(engine), signal: control.signal, task,
                 onStep: (done, of) => this.emit('music', { draft: id, step: [done, of] }),
-                onTask: (taskId, used) => { job.task = taskId; this.music.change(id, d => { if (d.job) { d.job.task = taskId; if (used) d.job.model = used; } }).catch(() => {}); } });
+                onTask: (taskId, used) => { job.task = taskId; if (control.signal.aborted) { this.cancelSing(id); return; } this.music.change(id, d => { if (d.job) { d.job.task = taskId; if (used) d.job.model = used; } }).catch(() => {}); } });
             // A second tab of this tavern goes back to the same job: whoever gets here first keeps the song.
             if (!await this.music.change(id, d => { if (!d.job) throw Error('taken'); delete d.job; }).then(() => true, () => false)) { this.emit('music', { draft: id }); return null; }
             const songId = await this.keepSong(id, { ...draft, lyrics: draft.lyrics || result.words || '' }, result.blob, result.lyric, {finish: true});

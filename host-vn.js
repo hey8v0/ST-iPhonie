@@ -149,13 +149,14 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     const tavern = avatars();
     // Avatars picked in the phone (an album photo; 只显示文字: none) come before the tavern's.
     const mine = {}, made = [];
+    let alive = true, ownStage;
     try {
       for (const [key, a] of Object.entries(backend.getState?.().chat?.avatars || {})) {
         if (a?.kind === 'text') mine[key] = '';
-        else if (a?.kind === 'photo' && a.photoId) backend.library?.getPhoto?.(a.photoId).then(p => { if (p?.blob && !stage?.closed) { const u = URL.createObjectURL(p.blob); made.push(u); mine[key] = u; } }).catch(() => {});
+        else if (a?.kind === 'photo' && a.photoId) backend.library?.getPhoto?.(a.photoId).then(p => { if (p?.blob && alive && stage === ownStage && !ownStage?.closed) { const u = URL.createObjectURL(p.blob); made.push(u); mine[key] = u; } }).catch(() => {});
       }
     } catch {}
-    stage = openVnStage({
+    stage = ownStage = openVnStage({
       doc, title: title(), subtitle: start > 0 ? `从第 ${start} 楼开始` : '从头开始', backdrop: backdrop(start), scene: chatBackground(),
       look: vn,
       source: {next: () => { while (cursor < chat().length) { const id = cursor++, steps = stepsOf(id); if (steps?.length) return {id, steps}; } return null; }},
@@ -181,7 +182,8 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       send,
       save: patch => { try { backend.saveVn(patch); } catch (error) { notice(error.message); } },
       onClose: id => {
-        stage = null;
+        alive = false;
+        if (stage === ownStage) stage = null;
         for (const u of made) URL.revokeObjectURL(u);
         // Back in the chat where the story was left.
         if (id != null) doc.querySelector(`#chat .mes[mesid="${id}"]`)?.scrollIntoView?.({block: 'center'});

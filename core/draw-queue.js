@@ -91,7 +91,8 @@ export class DrawQueue {
       while (this.jobs.length) {
         const job = this.jobs[0];
         const run = () => this.run(job);
-        await (this.locks?.request ? this.locks.request('st-iphonie-novelai', run) : run());
+        try { await (this.locks?.request ? this.locks.request('st-iphonie-novelai', {signal: job.controller.signal}, run) : run()); }
+        catch (error) { job.settled = true; job.reject(job.controller.signal.aborted ? cancelled() : error); }
         const index = this.jobs.indexOf(job);
         if (index >= 0) this.jobs.splice(index, 1);
         this.changed();
@@ -102,6 +103,7 @@ export class DrawQueue {
     const signal = job.controller.signal;
     try {
       for (let attempt = 0; ; attempt++) {
+        if (signal.aborted) throw cancelled();
         const readyAt = this.storage.get() + this.gap();
         if (readyAt > this.now()) {
           job.state = 'spacing'; job.until = readyAt; this.changed();
@@ -110,7 +112,9 @@ export class DrawQueue {
         const lease = await this.turn(job, signal);
         job.state = 'running'; job.attempt = attempt; job.until = 0; job.cloud = null; this.changed();
         try {
+          if (signal.aborted) throw cancelled();
           const result = await job.task(signal);
+          if (signal.aborted) throw cancelled();
           this.storage.set(this.now());
           lease?.release('done');
           job.settled = true;

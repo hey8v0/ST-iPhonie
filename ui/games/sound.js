@@ -7,7 +7,7 @@ const NOTE = n => 440 * 2 ** ((n - 69) / 12);
 
 export function gameSounds(win) {
   const Ctx = win.AudioContext || win.webkitAudioContext;
-  let audio = null, on = true;
+  let audio = null, on = true, gestureUnlocked = false;
   try { on = win.localStorage.getItem(KEY) !== 'off'; } catch { /* on */ }
   const ready = () => {
     if (!Ctx || !on) return null;
@@ -54,9 +54,19 @@ export function gameSounds(win) {
     lose: a => notes(a, [67, 63, 60, 55], {type: 'triangle', gap: .12, len: .22, level: .09}),
   };
   return {
+    unlock() {
+      const a = ready();
+      if (!a || gestureUnlocked && a.state === 'running') return;
+      try {
+        const silent = a.createBufferSource();
+        silent.buffer = a.createBuffer(1, 1, 22050); silent.connect(a.destination);
+        silent.onended = () => silent.disconnect(); silent.start();
+        gestureUnlocked = true;
+      } catch { /* resume alone is enough on browsers without a buffer source */ }
+    },
     play(name, options) { const a = ready(); if (a && SOUNDS[name]) { try { SOUNDS[name](a, options); } catch { /* a sound is never worth an error */ } } },
     get on() { return on; },
     set on(value) { on = !!value; try { win.localStorage.setItem(KEY, on ? 'on' : 'off'); } catch { /* this visit only */ } if (!on) audio?.suspend?.().catch(() => {}); },
-    close() { audio?.close?.().catch(() => {}); audio = null; },
+    close() { audio?.close?.().catch(() => {}); audio = null; gestureUnlocked = false; },
   };
 }

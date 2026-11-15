@@ -16,15 +16,27 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
   const on = () => opts().enabled === true;
   let ctx = null, sfxOut = null, ambienceOut = null, rows = [], closed = false, told = false, voicing = null, preview = null;
   // The ambience playing: {name, src, gain, dots, timer}; wanted: the one asked for (it may wait for the browser to allow sound).
-  let ambience = {name: ''}, wanted = '', ambienceTicket = 0;
+  let ambience = {name: ''}, wanted = '', ambienceTicket = 0, playEpoch = 0;
   const buffers = new Map(), last = new Map(), plans = new Map(), fired = new Map(), fresh = new Set(), making = new Map();
 
   // ---------- The library ----------
   let loading = null;
   // Read only while 音效 is on: someone who never turns it on never loads the shipped pack's list.
-  function reload() { if (!on()) { rows = []; loading = null; return Promise.resolve(rows); } loading = backend.listSounds().then(list => { if (!closed) rows = list; return rows; }).catch(() => rows); return loading; }
+  let libraryTicket = 0;
+  function reload() {
+    const ticket = ++libraryTicket;
+    if (!on() || closed) { rows = []; buffers.clear(); loading = null; return Promise.resolve(rows); }
+    loading = backend.listSounds().then(list => {
+      if (!closed && ticket === libraryTicket) {
+        rows = list;
+        for (const id of buffers.keys()) if (!rows.some(r => r.id === id)) buffers.delete(id);
+      }
+      return rows;
+    }).catch(() => rows);
+    return loading;
+  }
   const unsubscribe = backend.subscribe?.(event => {
-    if (event.type === 'sounds' && !event.missing) { for (const id of buffers.keys()) if (!rows.some(r => r.id === id)) buffers.delete(id); reload(); }
+    if (event.type === 'sounds' && !event.missing) reload();
     // Settings: the volumes, and the shipped pack turned on or off (or some of it taken out).
     if (event.type === 'settings') { refresh(); reload(); }
   });
@@ -60,23 +72,24 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
   }
   function buffer(row) {
     if (!buffers.has(row.id)) {
+      const decoder = ctx;
       const job = backend.soundBlob(row.id).then(async blob => {
         if (!blob) throw Error('这个声音已经不在了');
-        return ctx.decodeAudioData(await blob.arrayBuffer());
+        return decoder.decodeAudioData(await blob.arrayBuffer());
       });
-      job.catch(() => buffers.delete(row.id));
+      job.catch(() => { if (buffers.get(row.id) === job) buffers.delete(row.id); });
       buffers.set(row.id, job);
       while (buffers.size > KEEP_BUFFERS) buffers.delete(buffers.keys().next().value);
     }
     return buffers.get(row.id);
   }
   /** Plays one sound once (a little different each time); resolves to its source node, or null. */
-  async function shot(row, {strength = '', pan = 0, gain = 1, out = sfxOut} = {}) {
+  async function shot(row, {strength = '', pan = 0, gain = 1, out = sfxOut, valid = () => true} = {}) {
     if (!row || !running()) return null;
     heard();
     let data;
     try { data = await buffer(row); } catch { return null; }
-    if (closed || !running()) return null;
+    if (closed || !running() || !valid()) return null;
     const v = variation({strength, vary: opts().vary !== false, random});
     const src = ctx.createBufferSource(), level = ctx.createGain();
     src.buffer = data; src.playbackRate.value = v.rate; level.gain.value = v.gain * gain;
@@ -115,7 +128,8 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     pass(Math.min(offset, Math.max(0, data.duration - 3 * fade)), false);
     return {stop() { stopped = true; clearTimer(timer); for (const src of live) { try { src.stop(); } catch {} } live.clear(); }};
   }
-  function stopAmbience(seconds = FADE) {
+  function stopAmbience(seconds = FADE, invalidate = true) {
+    if (invalidate) ++ambienceTicket;
     const old = ambience;
     ambience = {name: ''};
     if (old.timer) clearTimer(old.timer);
@@ -128,17 +142,20 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
   }
   /** Changes the ambience: '' stops it; the same one goes on as it is. describe: what ElevenLabs makes when it is missing. */
   async function setAmbience(name, {describe = ''} = {}) {
+    if (closed || !on()) return;
     wanted = name;
     if (!name) { stopAmbience(); return; }
     if (name === ambience.name) return;
     if (!running()) { if (!told) { told = true; notice('点一下页面任意位置，就能放出氛围音和音效（浏览器要先点一下才允许出声）'); } return; }
     const ticket = ++ambienceTicket;
+    const valid = () => !closed && on() && ticket === ambienceTicket && wanted === name;
     if (loading) await loading;
+    if (!valid()) return;
     let list = findSounds(rows, name, 'ambience');
     if (!list.length) {
-      if (!describe || !canMake()) { stopAmbience(); missing('ambience', name, describe); return; }
+      if (!describe || !canMake()) { wanted = ''; stopAmbience(); missing('ambience', name, describe); return; }
       const row = await make('ambience', name, describe);
-      if (!row || ticket !== ambienceTicket || wanted !== name) return;
+      if (!row || !valid()) return;
       list = [row];
     } else more('ambience', name, describe, list);
     const beds = list.filter(r => r.layer !== 'dot'), dots = list.filter(r => r.layer === 'dot');
@@ -147,7 +164,7 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     if (bed) {
       let data;
       try { data = await buffer(bed); } catch { data = null; }
-      if (ticket !== ambienceTicket || closed || !running()) return;
+      if (!valid() || !running()) return;
       if (data) {
         last.set('a:' + name, bed.id);
         gain = ctx.createGain(); gain.gain.value = 0; gain.connect(ambienceOut);
@@ -156,8 +173,8 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
         ramp(gain.gain, 1, FADE);
       }
     }
-    if (ticket !== ambienceTicket) return;
-    stopAmbience();
+    if (!valid()) return;
+    stopAmbience(FADE, false);
     ambience = {name, src, gain, dots, timer: 0};
     wanted = name;
     if (dots.length) dot(ambience);
@@ -169,7 +186,7 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     current.timer = setTimer(() => {
       if (ambience !== current || closed) return;
       const row = pickSound(current.dots, {last: last.get('d:' + current.name), random});
-      if (row) { last.set('d:' + current.name, row.id); shot(row, {pan: (random() - 0.5) * 1.2, gain: 0.5 + random() * 0.4, out: ambienceOut}); }
+      if (row) { last.set('d:' + current.name, row.id); shot(row, {pan: (random() - 0.5) * 1.2, gain: 0.5 + random() * 0.4, out: ambienceOut, valid: () => on() && ambience === current}); }
       dot(current);
     }, wait);
   }
@@ -199,21 +216,23 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
   // ---------- One sound of a reply ----------
   async function cue(tag) {
     if (!on() || closed) return;
+    const epoch = playEpoch, valid = () => !closed && on() && epoch === playEpoch;
     if (tag.kind === 'ambience') return setAmbience(tag.stop ? '' : tag.name, {describe: tag.describe});
     if (!running()) { if (!told) { told = true; notice('点一下页面任意位置，就能放出氛围音和音效（浏览器要先点一下才允许出声）'); } return; }
     if (loading) await loading;
+    if (!valid()) return;
     let list = findSounds(rows, tag.name, 'sfx');
     if (!list.length) {
       if (!tag.describe || !canMake()) { missing('sfx', tag.name, tag.describe); return; }
       const asked = now(), row = await make('sfx', tag.name, tag.describe);
       // Made too late to belong to the moment: kept for next time.
-      if (!row || now() - asked > LATE) return;
+      if (!row || !valid() || now() - asked > LATE) return;
       list = [row];
     } else more('sfx', tag.name, tag.describe, list);
     const row = pickSound(list, {strength: tag.strength, last: last.get('s:' + tag.name), random});
     if (!row) return;
     last.set('s:' + tag.name, row.id);
-    await shot(row, {strength: tag.strength});
+    await shot(row, {strength: tag.strength, valid});
   }
   /** Whether this sound of this reply already played lately (a reply read, then voiced: not twice). */
   function once(id, raw, tag, within = Infinity) {
@@ -297,6 +316,7 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
   // ---------- The chat, the settings, a tap ----------
   /** Another chat: the sounds of the old one stop, and the latest ambience of this one starts (when there is one). */
   function chatChanged() {
+    ++playEpoch; wanted = ''; stopAmbience(1);
     cancelAll(); fresh.clear(); voicing = null;
     const chat = context()?.chat || [];
     const name = on() && byItself() ? latestAmbience(chat.slice(-30).filter(m => m && !m.is_user && !m.is_system).map(m => String(m.mes ?? ''))) : '';
@@ -306,7 +326,7 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
   function messageChanged(id) { if (id === undefined) cancelAll(); else cancel(Number(id)); }
   function refresh() {
     volumes();
-    if (!on()) { cancelAll(); fresh.clear(); wanted = ''; if (ambience.name) stopAmbience(1); }
+    if (!on()) { ++playEpoch; cancelAll(); fresh.clear(); wanted = ''; stopAmbience(1); }
   }
   /** A tap on a sound's chip in the chat: plays it again; an ambience's chip starts it, or stops it while it plays. */
   async function tap(id, index) {
@@ -326,19 +346,26 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
   /** 试听 in the 音效 App: one sound as it is, once (again: stops it). */
   async function listen(soundId) {
     if (preview) { const p = preview; preview = null; try { p.stop(); } catch {} if (p.soundId === soundId) return false; }
-    preview = {soundId, stop() {}};
-    audio();
-    try { await (ctx.state === 'running' ? null : ctx.resume()); } catch {}
-    if (!running()) { preview = null; throw Error('浏览器还不让出声：点一下页面再试'); }
-    if (loading) await loading;
-    const row = rows.find(r => r.id === soundId) || (await backend.listSounds()).find(r => r.id === soundId);
-    if (!row) { preview = null; throw Error('这个声音已经不在了'); }
-    const src = await shot(row, {out: row.type === 'ambience' ? ambienceOut : sfxOut, strength: row.strength});
-    if (!src) { preview = null; throw Error('这个声音放不出来（文件可能坏了，或者浏览器不支持这种格式）'); }
-    const mine = {soundId, stop: () => { try { src.stop(); } catch {} }};
+    const mine = {soundId, stop() {}};
     preview = mine;
-    src.addEventListener?.('ended', () => { if (preview === mine) preview = null; });
-    return true;
+    const valid = () => !closed && preview === mine;
+    try {
+      const c = audio();
+      try { if (c?.state !== 'running') await c?.resume(); } catch {}
+      if (!valid()) return false;
+      if (!running()) throw Error('浏览器还不让出声：点一下页面再试');
+      if (loading) await loading;
+      if (!valid()) return false;
+      const row = rows.find(r => r.id === soundId) || (await backend.listSounds()).find(r => r.id === soundId);
+      if (!valid()) return false;
+      if (!row) throw Error('这个声音已经不在了');
+      const src = await shot(row, {out: row.type === 'ambience' ? ambienceOut : sfxOut, strength: row.strength, valid});
+      if (!valid()) return false;
+      if (!src) throw Error('这个声音放不出来（文件可能坏了，或者浏览器不支持这种格式）');
+      mine.stop = () => { try { src.stop(); } catch {} };
+      src.addEventListener?.('ended', () => { if (preview === mine) preview = null; });
+      return true;
+    } catch (error) { if (!valid()) return false; preview = null; throw error; }
   }
   /** 「ElevenLabs 做一个声音」 (0.9.37): a take not kept yet, heard as a library sound is (the same key again: stops it). */
   async function listenTake(key, blob) {
@@ -380,9 +407,10 @@ export function createSoundHost({context, settings, backend, notice = () => {}, 
     return soundPromptPlan(soundRule({names: soundNames(rows), generate: canMake(), now: ambience.name || wanted || ''}));
   }
   function close() {
-    closed = true; cancelAll(); unsubscribe?.();
+    closed = true; ++playEpoch; ++libraryTicket; wanted = ''; buffers.clear(); cancelAll(); unsubscribe?.();
     stopAmbience(0.05);
     try { preview?.stop(); } catch {}
+    preview = null;
     const c = ctx; ctx = null;
     setTimer(() => { try { c?.close(); } catch {} }, 200);
   }

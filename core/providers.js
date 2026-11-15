@@ -240,7 +240,7 @@ export class Providers{
    return proxyAddress(target)?passed(r):r;};
   // 换模型: only when this voice's model is not the one loaded last.
   const loaded=(request.before||[]).join('\n');
-  if(loaded&&this.customLoaded!==loaded){this.customLoaded='';for(const step of request.before){const {url:target,init:get}=customInit({...request,url:step,method:'GET',body:undefined});const r=await send(target,get).catch(e=>{throw Error('换模型失败：'+e.message);});
+  if(loaded&&this.customLoaded!==loaded){this.customLoaded='';for(const step of request.before){const {url:target,init:get}=customInit({...request,url:step,method:'GET',body:undefined},key,{id});const r=await send(target,get).catch(e=>{throw Error('换模型失败：'+e.message);});
    if(!r.ok){const said=(await r.text().catch(()=>'')).replace(/\s+/g,' ').slice(0,160);throw Error('换模型失败（HTTP '+r.status+'）'+(said?'：'+said:'')+'：检查音色里模型的路径');}await r.body?.cancel?.().catch(()=>{});}this.customLoaded=loaded;}
   let answered=false;
   try{

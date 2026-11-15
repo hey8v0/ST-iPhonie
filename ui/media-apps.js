@@ -16,14 +16,15 @@ const dateLabel = time => { const d = new Date(time); return Number.isNaN(d.getT
 
 export function libraryApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'library');
-  let tab = 'favorites', role = '', epoch = 0, swipe = null, preview = null, playing = '';
+  let tab = 'favorites', role = '', epoch = 0, swipe = null, preview = null, playing = '', previewTicket = 0;
   const favoriteRow = r => swipeRow(r.id, `<div class="audio-row" data-engine="${esc(r.engine)}"><span class="disc play">${icon('play', true)}</span><div><p>“${esc(r.translation || r.text)}”</p><small>${esc(r.role)} · ${engines[r.engine] || r.engine} · ${size(r.size)} · ${dateLabel(r.createdAt)}</small></div></div>`,
     [{key: 'download', label: '下载', icon: 'download'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}], {label: r.translation || r.text});
   const cachedRow = r => { const line = r.metadata?.line || {}; return swipeRow(r.key, `<div class="audio-row${playing === r.key ? ' playing' : ''}" data-engine="${esc(r.metadata?.route?.engine || 'none')}"><span class="disc">${icon('wave')}</span><div><p>${esc(line.translation ? '“' + line.translation + '”' : '早期缓存的音频')}</p><small>${esc(line.role || '未知角色')} · ${size(r.bytes)}</small></div></div>`,
     [{key: 'download', label: '下载', icon: 'download'}, {key: 'favorite', label: '收藏', icon: 'heart'}, {key: 'delete', label: '清理', icon: 'trash', danger: true}], {label: line.translation || ''}); };
   // Thousands of lines are nothing unusual here: the cache keeps every line ever heard.
   const list = rowWindow({win: ctx.win, id: r => r.id ?? r.key, row: r => r.id ? favoriteRow(r) : cachedRow(r)});
-  const stopPreview = () => { if (preview) { preview.pause(); ctx.win.URL.revokeObjectURL(preview.src); } preview = null; playing = ''; v.root.querySelectorAll('.audio-row.playing').forEach(r => r.classList.remove('playing')); };
+  const stopPreview = () => { ++previewTicket; if (preview) { preview.pause(); ctx.win.URL.revokeObjectURL(preview.src); } preview = null; playing = ''; v.root.querySelectorAll('.audio-row.playing').forEach(r => r.classList.remove('playing')); };
+  v.leave = stopPreview;
   const dispose = v.dispose;
   v.dispose = () => { stopPreview(); swipe?.dispose(); list.stop(); dispose(); };
   /** A cached line heard here (tap again to stop). */
@@ -31,12 +32,17 @@ export function libraryApp(ctx) {
     const was = playing;
     stopPreview();
     if (was === key) return;
-    const {blob} = await api.audioFile({key});
-    preview = new ctx.win.Audio(ctx.win.URL.createObjectURL(blob));
+    const ticket = previewTicket;
     playing = key;
+    let blob;
+    try { ({blob} = await api.audioFile({key})); }
+    catch (error) { if (ticket !== previewTicket || v.disposed) return; stopPreview(); throw error; }
+    if (ticket !== previewTicket || v.disposed) return;
+    const mine = new ctx.win.Audio(ctx.win.URL.createObjectURL(blob));
+    preview = mine;
     v.root.querySelector(`.sw-row[data-swipe="${CSS.escape(key)}"] .audio-row`)?.classList.add('playing');
-    preview.addEventListener('ended', stopPreview);
-    await preview.play();
+    mine.addEventListener('ended', () => { if (preview === mine) stopPreview(); });
+    try { await mine.play(); } catch (error) { if (preview !== mine) return; stopPreview(); throw error; }
   }
   async function render() {
     const ticket = ++epoch;

@@ -3,6 +3,7 @@ import {redactSecrets} from './secrets.js';
 // old chat by meaning and not only by shared words. Optional: without it, 记忆 searches locally (core/memory.js).
 // Called from the browser like 文字模型; its key lives with the other keys (engine 'embed') and never in settings.
 import {apiBase} from './llm.js';
+import {withTimeout} from './request-timeout.js';
 
 export const EMBED_LIMITS = Object.freeze({batch: 32, timeout: 60000, text: 2000});
 export function defaultEmbed() { return {enabled: false, url: '', model: ''}; }
@@ -14,8 +15,9 @@ export function normalizeEmbed(value) {
 export const embedReady = e => !!(e?.enabled && e.url && e.model);
 
 function failure(status, raw, key) {
+  if (/CORS proxy is disabled/i.test(raw)) return Error('酒馆的跨域代理未开启：在 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆');
   let detail = '';
-  try { const json = JSON.parse(raw); detail = json?.error?.message || json?.message || ''; } catch { detail = String(raw || ''); }
+  try { const json = JSON.parse(raw); detail = json?.error?.message || json?.message || json?.detail || ''; } catch { detail = String(raw || ''); }
   detail = redactSecrets(detail, [key]).slice(0, 300);
   const reason = {401: '密钥无效或已过期', 403: '这个密钥没有权限', 404: '地址或模型名不对（这个模型要能做 embeddings）', 413: '内容太长', 429: '请求太频繁或额度用完了'}[status] || (status >= 500 ? '服务暂时出错了' : `请求失败（${status}）`);
   return Error(`向量模型：${reason}${detail ? '（' + detail + '）' : ''}`);
@@ -24,17 +26,18 @@ function failure(status, raw, key) {
 /** Vectors for the texts, in order. fetch is passed in (tests). Texts go `batch` at a time. */
 export async function embedTexts({embed, key, texts, fetch: send = globalThis.fetch}) {
   if (!embed?.model) throw Error('请先在「引擎 → 向量模型」里填写模型名');
-  const base = apiBase(embed.url), out = [];
+  const base = apiBase(String(embed.url || '').trim().replace(/\/+$/, '').replace(/\/embeddings$/i, '')), out = [];
   for (let i = 0; i < texts.length; i += EMBED_LIMITS.batch) {
     const input = texts.slice(i, i + EMBED_LIMITS.batch).map(t => String(t).slice(0, EMBED_LIMITS.text) || ' ');
-    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), EMBED_LIMITS.timeout);
-    let response;
+    let response, raw;
     try {
-      response = await send(base + '/embeddings', {method: 'POST', signal: controller.signal, headers: {'Content-Type': 'application/json', ...(key ? {Authorization: 'Bearer ' + key} : {})}, body: JSON.stringify({model: embed.model, input})});
+      await withTimeout(async signal => {
+        response = await send(base + '/embeddings', {method: 'POST', signal, headers: {'Content-Type': 'application/json', ...(key ? {Authorization: 'Bearer ' + key} : {})}, body: JSON.stringify({model: embed.model, input})});
+        raw = await response.text();
+      }, EMBED_LIMITS.timeout);
     } catch (error) {
-      throw Error(error?.name === 'AbortError' ? '向量模型：等太久了，接口没有回应' : '向量模型：连不上这个接口。可能是地址写错了，或者这个接口不允许网页直接访问（CORS）');
-    } finally { clearTimeout(timer); }
-    const raw = await response.text();
+      throw Error(['AbortError', 'TimeoutError'].includes(error?.name) ? '向量模型：等太久了，接口没有回应' : '向量模型：连不上这个接口。可能是地址写错了，或者这个接口不允许网页直接访问（CORS）');
+    }
     if (!response.ok) throw failure(response.status, raw, key);
     let json;
     try { json = JSON.parse(raw); } catch { throw Error('向量模型：接口返回的不是 JSON，地址可能填错了'); }

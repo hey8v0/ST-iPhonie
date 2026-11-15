@@ -1061,7 +1061,8 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     clockTimer = {first: timers.setTimeout(() => { look(); remind(); }, first), every: timers.setInterval(look, every), remind: timers.setInterval(remind, 30_000)};
     // (Where timers can keep a process alive, as in Node, these do not.)
     clockTimer.first?.unref?.(); clockTimer.every?.unref?.(); clockTimer.remind?.unref?.();
-    return () => { timers.clearTimeout(clockTimer.first); timers.clearInterval(clockTimer.every); timers.clearInterval(clockTimer.remind); clockTimer = null; };
+    const own = clockTimer;
+    return () => { timers.clearTimeout(own.first); timers.clearInterval(own.every); timers.clearInterval(own.remind); if (clockTimer === own) clockTimer = null; };
   }
 
   /**

@@ -670,7 +670,9 @@ export class TTSBackend {
         let next = this.getState();
         const gone = new Set([...(ids || [])].map(String)), refs = next.routes.filter(r => gone.has(r.id)).map(r => r.ref);
         for (const id of gone) next = removeRoute(next, id);
+        const names = new Set(this.settings.routes.filter(r => gone.has(r.id)).map(r => r.name));
         const saved = this.save(next);
+        if (names.has(this.player.pending) || this.player.queue.some(line => names.has(line.role))) this.player.stop('角色配音已删除');
         sweepRoleRefs(this, refs);
         return saved;
     }
@@ -2013,7 +2015,10 @@ export class TTSBackend {
             if (!response.ok) throw Object.assign(Error(`HTTP ${response.status}`), { status: response.status });
             // Asked for a link and given the song itself: no need to download it here.
             if (as === 'link' && isAudio(response.headers?.get?.('content-type'))) { response.body?.cancel?.().catch?.(() => {}); return AUDIO; }
-            return as === 'text' ? response.text() : response.json();
+            const raw = await response.text();
+            if (as === 'text') return raw;
+            if (as === 'link' && /^https?:\/\/\S+$/i.test(raw.trim())) return raw.trim();
+            try { return JSON.parse(raw); } catch { throw Error('音源返回的不是有效 JSON 或歌曲链接，请检查音源地址'); }
         };
         // A server plugin on the tavern itself: with the tavern's login and checks; there is no proxy to try then.
         if (onTavern(url)) {
@@ -2022,15 +2027,16 @@ export class TTSBackend {
             if (response.status === 404) throw Error('酒馆里没有这个地址：服务端插件装好了吗？（config.yaml 里 enableServerPlugins 要是 true，装完要完全重启酒馆）');
             return read(response).catch(error => { throw Error(`酒馆里的音源回答 ${error.message}`); });
         }
-        try { return await read(await this.musicTransport(url, { credentials: 'omit' })); }
-        catch (error) {
-            if (error?.status) throw Error(`音源回答 ${error.message}`);
+        let direct;
+        try { direct = await this.musicTransport(url, { credentials: 'omit' }); }
+        catch {
             const proxied = await this.musicTransport('/proxy/' + encodeURIComponent(url), { credentials: 'same-origin' }).catch(() => null);
             if (!proxied) throw Error('连不上这个音源：网址不对，或者它不让网页直接读取，酒馆代理也连不上');
             if (noTavernProxy(await proxied.clone().text().catch(() => ''))) throw Error('连不上这个音源：它不让网页直接读取，这个酒馆没有转发功能（TauriTavern 这类 App 酒馆现在没有）');
             if (!proxied.ok) { const said = await proxied.text().catch(() => ''); throw Error(/CORS proxy is disabled/i.test(said) ? '这个音源不让网页直接读取：可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆' : `音源回答 HTTP ${proxied.status}`); }
             return read(proxied);
         }
+        return read(direct);
     }
     musicSource(id) {
         // A draft can be tried without changing saved sources or notifying other views.
@@ -2216,7 +2222,7 @@ export class TTSBackend {
     async goPrivate(url, init = {}) {
         let response = null;
         try { response = await this.assetFetch(url, { ...init, credentials: 'omit' }); }
-        catch { response = await this.assetFetch('/proxy/' + encodeURIComponent(url), { ...init, credentials: 'same-origin' }).catch(() => null); }
+        catch { response = await this.assetFetch('/proxy/' + encodeURIComponent(url), { ...init, credentials: 'same-origin', headers: {...this.tavernHeaders(), ...init.headers} }).catch(() => null); }
         if (!response) throw Error('连不上 Go Music：地址不对，或者后端没有开着');
         let json = null;
         try { json = await response.json(); } catch { /* not JSON */ }
@@ -3688,7 +3694,7 @@ export class TTSBackend {
         route.name = route.name.trim();
         temporary.routes = temporary.routes.filter(row => row.name !== route.name); temporary.routes.push(route);
         const revision = this.revision;
-        const text = ({ zh: '雨还没停，再坐一会儿吧。', en: 'The rain has not stopped. Stay a little longer.', ja: '雨はまだ止んでいません。もう少しここにいましょう。', ko: '비가 아직 그치지 않았어요.' })[languageCode(route.language || temporary.general.defaultLanguage)] || 'Hello.';
+        const text = ({ zh: '雨还没停，再坐一会儿吧。', en: 'The rain has not stopped. Stay a little longer.', ja: '雨はまだ止んでいません。もう少しここにいましょう。', ko: '비가 아직 그치지 않았어요.' })[languageCode(route.language || temporary.general.defaultLanguage).split('-')[0]] || '雨还没停，再坐一会儿吧。';
         this.player.start([{ role: route.name, emotion: 'calm', text, translation: '' }], () => !this.closed && revision === this.revision, temporary);
     }
     async clearCache() {

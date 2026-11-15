@@ -86,6 +86,7 @@ export function gamesApp(ctx) {
     el.hidden = false;
   }
 
+  v.root.addEventListener('pointerdown', () => sounds.unlock(), {signal: keys.signal});
   v.on('click', '[data-game]', el => open(el.dataset.game));
   v.on('click', '[data-action=game-restart]', () => restart());
   v.on('click', '[data-action=game-sound]', el => { sounds.on = !sounds.on; el.textContent = sounds.on ? '🔊' : '🔇'; el.setAttribute('aria-pressed', String(sounds.on)); if (sounds.on) sounds.play('tap'); });
@@ -93,6 +94,7 @@ export function gamesApp(ctx) {
   // Keys while the game is on screen (not while typing somewhere).
   ctx.doc.addEventListener('keydown', e => {
     if (!play || paused || v.disposed || ctx.visible?.('games') === false || e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+    sounds.unlock();
     if (!v.root.querySelector('[data-game-over]')?.hidden) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); v.root.querySelector('[data-game-over] button')?.click(); } return; }
     if (play.key?.(e)) e.preventDefault();
   }, {signal: keys.signal});

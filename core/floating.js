@@ -209,7 +209,9 @@ export class FloatingPlayer {
   arm(delay = 3200) {
     clearTimeout(this.timer);
     if (this.mode === 'rest' && !this.hidden) this.timer = setTimeout(() => {
-      if (this.mode !== 'rest' || this.hidden || this.drag || this.orb.matches(':focus-visible')) return;
+      let focused;
+      try { focused = this.orb.matches(':focus-visible'); } catch { focused = this.orb.ownerDocument?.activeElement === this.orb; }
+      if (this.mode !== 'rest' || this.hidden || this.drag || focused) return;
       this.setMode('docked');
       if (this.barForm) this.tip('bar');
     }, delay);
@@ -727,6 +729,7 @@ export class FloatingPlayer {
       this.ripples.length = 0;
       return;
     }
+    if (!glowing && !this.ripples.length && !this.ctx && !this.painted && this.worker === undefined) return;
     const ctx = this.ctx ??= this.canvas.getContext?.('2d') || null;
     if (!ctx) return;
     const drawing = paintWaves(ctx, st, this.ripples, now);
@@ -757,6 +760,7 @@ export class FloatingPlayer {
     canvas.height = Math.round(WAVES_H * this.dpr);
     this.canvas.replaceWith(canvas);
     this.canvas = this.parts.waves = canvas;
+    this.ctx = null; this.painted = false;
     this.drop('waves');
     this.placeWaves(this.side === 'right', this.target().y);
   }

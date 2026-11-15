@@ -17,7 +17,12 @@ export const lostError = cause => Object.assign(new Error(`${LOST_MESSAGE}。重
 export const breath = () => new Promise(resolve => setTimeout(resolve, 150));
 
 const STORES = {'st-tts-library-v1': '资料库（相册、收藏、备忘录）', 'st-tts-audio-v1': '语音缓存', 'st-iphonie-chats-v1': '聊天记录', 'st-iphonie-moments-v1': '朋友圈', 'st-iphonie-apps-v1': '论坛、查手机、账本', 'st-iphonie-memory-v1': '记忆', 'st-iphonie-sounds-v1': '音效', 'st-iphonie-music-v1': '音乐和写的歌'};
-const within = (work, ms = 4000) => Promise.race([work, new Promise((_, reject) => setTimeout(() => reject(Object.assign(Error('一直没有回应'), {name: 'Timeout'})), ms))]);
+const within = async (work, ms = 4000, onLate = () => {}) => {
+  let timer, expired = false;
+  const watched = Promise.resolve(work).then(value => { if (expired) onLate(value); return value; });
+  try { return await Promise.race([watched, new Promise((_, reject) => { timer = setTimeout(() => { expired = true; reject(Object.assign(Error('一直没有回应'), {name: 'Timeout'})); }, ms); })]); }
+  finally { clearTimeout(timer); }
+};
 const done = request => new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
 /** Opens a store as it is, or null when there is none. It is never made here: an empty one under that name would stay without its tables. */
 function existing(factory, name) {
@@ -54,7 +59,7 @@ export async function probeStorage(factory = globalThis.indexedDB) {
   for (const [name, label] of Object.entries(STORES)) {
     let error = '';
     try {
-      const db = await within(existing(factory, name));
+      const db = await within(existing(factory, name), 4000, db => db?.close());
       if (db) {
         try {
           const table = db.objectStoreNames[0];

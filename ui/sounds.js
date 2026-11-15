@@ -87,7 +87,7 @@ export function soundsApp(ctx) {
       if (list.length <= ids.length) close(); else { d.close(); await render(); openName(type, name); }
     };
     const swipe = mountSwipeList(d.body.querySelector('[data-version-list]'), {ctx,
-      onTap: async id => { const on = await api.soundListen?.(id); if (on === undefined) ctx.notify('在酒馆里打开小手机才能试听'); },
+      onTap: async id => { try { const on = await api.soundListen?.(id); if (on === undefined) ctx.notify('在酒馆里打开小手机才能试听'); } catch (error) { ctx.notify(error.message || '这个声音暂时放不出来'); } },
       onAction: (key, id) => { if (key === 'delete') drop([id]).catch(error => ctx.notify(error.message, {error: true})); },
       bulk: [{key: 'delete', label: '去掉', icon: 'trash', danger: true}], onBulk: (key, ids) => drop(ids)});
     d.onClose(() => swipe.dispose());
