@@ -36,7 +36,7 @@ export function park(n, random = rand) {
       cars.push({...car, color: COLORS[cars.length % COLORS.length]});
     }
     // Not too easy: most cars start blocked.
-    if (cars.length >= want * .8 && clearable(cars, size) && cars.filter((_, i) => free(cars, i, size)).length <= Math.max(2, cars.length / 3)) return {size, cars: shuffle(cars)};
+    if (cars.length >= want * .8 && clearable(cars, size) && cars.filter((_, i) => free(cars, i, size)).length <= Math.max(2, cars.length / 3)) return {size, cars: shuffle(cars, random)};
   }
   return park(Math.max(0, n - 1), random);
 }
@@ -84,7 +84,7 @@ export default {
     }
     el.addEventListener('click', e => { const b = e.target.closest('[data-car]'); if (b) drive(Number(b.dataset.car)); });
     function restart() { timers.forEach(t => win.clearTimeout(t)); n = 0; score = 0; bumps = 0; lot = park(0); api.score(0); draw(); }
-    if (saved?.lot?.cars?.length) { n = Number(saved.n) || 0; lot = saved.lot; score = Number(saved.score) || 0; bumps = 0; api.score(score); draw(); } else restart();
+    if (saved?.lot?.cars?.length) { n = Number(saved.n) || 0; lot = saved.lot; score = Number(saved.score) || 0; bumps = 0; if (lot.cars.every(c => c.gone)) { n++; score = n; lot = park(n); } api.score(score); draw(); } else restart();
     return {restart, resume() {}, state: () => ({n, lot, score}), dispose() { timers.forEach(t => win.clearTimeout(t)); el.remove(); }};
   },
 };

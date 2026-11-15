@@ -104,4 +104,4 @@ export function loop(win, step) {
 /** A whole number 0 ≤ n < max. */
 export const rand = max => Math.floor(Math.random() * max);
 /** The list in a random order (a new list). */
-export function shuffle(list) { const out = [...list]; for (let i = out.length - 1; i > 0; i--) { const j = rand(i + 1); [out[i], out[j]] = [out[j], out[i]]; } return out; }
+export function shuffle(list, random = rand) { const out = [...list]; for (let i = out.length - 1; i > 0; i--) { const j = random(i + 1); [out[i], out[j]] = [out[j], out[i]]; } return out; }

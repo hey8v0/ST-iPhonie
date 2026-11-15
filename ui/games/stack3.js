@@ -26,7 +26,8 @@ export function intoBar(bar, face) {
  */
 export function deal(level, random = Math.random) {
   const L = LEVELS[Math.min(level, LEVELS.length - 1)], count = L.kinds * L.sets * 3;
-  const faces = shuffle(FACES).slice(0, L.kinds), pool = shuffle(faces.flatMap(f => Array(L.sets * 3).fill(f)));
+  const pick = max => Math.floor(random() * max);
+  const faces = shuffle(FACES, pick).slice(0, L.kinds), pool = shuffle(faces.flatMap(f => Array(L.sets * 3).fill(f)), pick);
   const places = [];
   for (let layer = 0; layer < L.layers; layer++) {
     const off = layer % 2 ? .5 : 0, w = L.w - (off ? 1 : 0), h = L.h - (off ? 1 : 0);
@@ -57,7 +58,7 @@ export default {
     }
     function take(face, from) {
       const r = intoBar(bar, face);
-      history.push({from, bar}); bar = r.bar;
+      history.push({from, bar, score}); bar = r.bar;
       if (r.cleared) { score += 3; api.score(score); api.sound?.('match'); } else api.sound?.('place');
       if (!tiles.some(t => !t.gone) && !aside.length && !bar.length) {
         level++;
@@ -76,7 +77,7 @@ export default {
         const k = tool.dataset.tool;
         used[k] = true;
         if (k === 'out') { aside.push(...bar.slice(0, 3)); bar = bar.slice(3); history = []; }
-        else if (k === 'undo') { const h = history.pop(); bar = h.bar; if (h.from.tile != null) tiles[h.from.tile].gone = false; else aside.push(h.from.aside); }
+        else if (k === 'undo') { const h = history.pop(); bar = h.bar; score = h.score; api.score(score); if (h.from.tile != null) tiles[h.from.tile].gone = false; else aside.push(h.from.aside); }
         else { const left = tiles.filter(t => !t.gone), faces = shuffle(left.map(t => t.face)); left.forEach((t, i) => { t.face = faces[i]; }); history = []; }
         api.sound?.('slide'); draw();
       }

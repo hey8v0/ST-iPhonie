@@ -14,7 +14,7 @@ import {promptOn, promptText} from './core/prompt-rules.js';
 import {activeText} from './core/llm.js';
 import {requestAssistantText, hasCompletionService, loadCompletionModule} from './host-assistant.js';
 import {remindAt, remindLabel} from './core/remind.js';
-import {BOARDS, parseCell, fallbackMove, moveWords, cellsOf} from './core/board.js';
+import {BOARDS, BOARD_TYPES, parseCell, fallbackMove, moveWords, cellsOf} from './core/board.js';
 import {ownerKey} from './core/wardrobe.js';
 import {sha256Hex} from './core/hash.js';
 
@@ -299,7 +299,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
       }
       // 小游戏对战: a move on the open board (when it is theirs to make), taking back their own last move, or giving up.
       if (item.kind === 'move' || item.kind === 'undo' || (item.kind === 'chain' && item.give && thread.type === 'dm')) {
-        const card = latest.messages.findLast(m => m.kind === 'game' && BOARDS[m.game?.type] && m.game.open && m.game.them === item.from);
+        const card = latest.messages.findLast(m => m.kind === 'game' && BOARD_TYPES.includes(m.game?.type) && m.game.open && m.game.them === item.from);
         if (!card) { if (item.kind === 'move' && worth(moveWords(item.cell).rest)) out.push({from: item.from, kind: 'text', text: moveWords(item.cell).rest}); continue; }
         const g = card.game;
         if (item.kind === 'chain') { latest = await backend.chats.updateMessage(threadId, card.id, {game: {resigned: item.from}}); continue; }
@@ -362,7 +362,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     // 小游戏对战: still their turn after a reply that was asked for (no cell of theirs fitted, or they named none): a move
     // made for them, so the game goes on.
     if (board && thread.type === 'dm') {
-      const card = latest.messages.findLast(m => m.kind === 'game' && BOARDS[m.game?.type] && m.game.open);
+      const card = latest.messages.findLast(m => m.kind === 'game' && BOARD_TYPES.includes(m.game?.type) && m.game.open);
       if (card && card.game.turn === card.game.them) { const at = fallbackMove(card.game, card.game.them); if (at >= 0) latest = await backend.chats.updateMessage(threadId, card.id, {game: {moves: [...card.game.moves, {by: card.game.them, at}]}}); }
     }
     // Their pictures are drawn the way 朋友圈's own are (onPosts).

@@ -69,7 +69,7 @@ function lineThrough(cells, size, win, at) {
  * — winner: 'me', the contact's name, 'draw' or ''; resigned: who gave up ('').
  */
 export function cleanBoard(g, fail = message => Error(message)) {
-  const type = String(g?.type || ''), board = BOARDS[type];
+  const type = String(g?.type || ''), board = BOARD_TYPES.includes(type) ? BOARDS[type] : null;
   if (!board) throw fail('不认识的棋');
   const them = String(g.them ?? '').slice(0, 40).trim();
   if (!them || them === 'me') throw fail('不知道和谁下');

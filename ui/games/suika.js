@@ -93,7 +93,7 @@ export default {
     else restart();
     return {
       restart, state: () => over ? null : {fruits: fruits.map(f => ({x: f.x, y: f.y, kind: f.kind})), next, score},
-      pause() { tick.stop(); }, resume() { if (!over) tick.start(); },
+      pause() { if (over || !tick.running) return false; tick.stop(); }, resume() { if (!over) tick.start(); },
       key(e) { if (e.key === 'ArrowLeft') aim = Math.max(SIZE[next] * k, aim - 14); else if (e.key === 'ArrowRight') aim = Math.min(w - SIZE[next] * k, aim + 14); else if (e.key === ' ' || e.key === 'ArrowDown') drop(); else return false; return true; },
       dispose() { tick.stop(); c.remove(); },
     };

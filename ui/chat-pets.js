@@ -537,6 +537,8 @@ export function petLayer({win, doc, pets, onCard = () => {}, storage = (() => { 
   /** Quick repeated taps dodge; a double tap somersaults, and strokes have their own pose. */
   function tap(e) {
     touched = Date.now();
+    if (MOVING.has(e.state)) { say(e, '呀！', 900); return; }
+    if (e.state === 'cling') { fall(e); return; }
     if (e.state === 'sleep') { say(e, '……？'); return wake(e, true); }
     e.taps = now() - (e.lastTap || 0) < 600 ? (e.taps || 0) + 1 : 1;
     e.lastTap = now();

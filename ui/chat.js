@@ -12,7 +12,7 @@ import {editTags} from '../host-ask.js';
 import {saveFile, downloadAction, shareFile, canShareFiles} from '../download.js';
 import {momentsPanel, momentsNew, momentsSeen} from './moments.js';
 import {PROFILE_STATUS, BUBBLES, FRAMES, BACKGROUNDS, parseStickers, STICKER_MOODS, ROLE_STICKER_LIMIT, stickerName, contactStatus, statusText} from '../core/chat.js';
-import {BOARDS, cellsOf, cellName} from '../core/board.js';
+import {BOARDS, BOARD_TYPES, cellsOf, cellName} from '../core/board.js';
 import {NARRATOR} from '../core/narration.js';
 import {wornSet} from '../core/bubble-css.js';
 import {syncBubbleCss, bubbleSetsSheet, bubblePreview} from './chat-bubbles.js';
@@ -1201,7 +1201,7 @@ export function chatApp(ctx) {
   function gameHTML(m) {
     const g = m.game, mid = `data-mid="${esc(m.id)}"`, name = n => n === 'me' ? myName() : shown(n);
     // 小游戏对战 (0.9.35): the board; the user's cells can be tapped on the user's turn.
-    if (BOARDS[g.type]) {
+    if (BOARD_TYPES.includes(g.type)) {
       const size = BOARDS[g.type].size, cells = cellsOf(g), last = g.moves.at(-1)?.at, line = new Set(g.line || []), mark = who => who === g.first ? 'x' : 'o';
       const mine = g.open && g.turn === 'me' && !typing();
       const state = g.winner === 'draw' ? '平局' : g.resigned ? `${g.resigned === 'me' ? '你' : name(g.resigned)}认输了` : g.winner ? (g.winner === 'me' ? '你赢了 🎉' : `${name(g.winner)}赢了`) : g.turn === 'me' ? '轮到你了' : `${name(g.them)}在想……`;
@@ -2710,7 +2710,7 @@ export function chatApp(ctx) {
         break;
       }
       case 'board-resign': { const m = find(); if (m?.game?.open && await ctx.confirm('认输？', '这一盘算你输。')) { await api.updateChatMessage(threadId, m.id, {game: {resigned: 'me'}}); requestReply(); } break; }
-      case 'board-again': { const g = find()?.game; if (g && BOARDS[g.type]) await startBoard(g.type, g.first === 'me' ? g.them : 'me'); break; }
+      case 'board-again': { const g = find()?.game; if (g && BOARD_TYPES.includes(g.type)) await startBoard(g.type, g.first === 'me' ? g.them : 'me'); break; }
       case 'post-open': { const m = find(); if (m?.post?.id) ctx.openForumPost?.(m.post.id); else if (m) messageMenu(m); break; }
       case 'outfit-open': { const m = find(); if (m) outfitSheet(m); break; }
       case 'book-open': { const m = find(); if (m?.book?.id) ctx.openBook?.(m.book.id); else if (m) messageMenu(m); break; }

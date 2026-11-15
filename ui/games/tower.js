@@ -50,7 +50,7 @@ export default {
       const below = tower.at(-1), level = tower.length, got = land(below, moving.left, moving.width);
       if (!got) {
         falling.push({left: moving.left, width: moving.width, y: yOf(level), vy: 0, vx: dir * 2, color: hue(level)});
-        over = true; api.sound?.('lose');
+        over = true;
         api.over({score: tower.length - 1, text: `叠了 ${tower.length - 1} 层`});
         return;
       }
@@ -71,6 +71,6 @@ export default {
       falling = []; over = false; view = 0; combo = 0; api.score(0); tick.start();
     }
     restart();
-    return {restart, pause() { tick.stop(); }, resume() { if (!over) tick.start(); }, key(e) { if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowDown') { drop(); return true; } return false; }, dispose() { tick.stop(); c.remove(); }};
+    return {restart, pause() { if (over || !tick.running) return false; tick.stop(); }, resume() { if (!over) tick.start(); }, key(e) { if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowDown') { drop(); return true; } return false; }, dispose() { tick.stop(); c.remove(); }};
   },
 };

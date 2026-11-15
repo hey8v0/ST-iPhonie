@@ -35,7 +35,7 @@ export default {
         if (k >= 1) {
           jump = null; me.y = 0;
           const where = landing(me.x, plats[at + 1]);
-          if (where === 'off') { over = true; me.fall = 0; api.sound?.('lose'); api.over({score, text: `跳了 ${score} 分`}); }
+          if (where === 'off') { over = true; me.fall = 0; api.over({score, text: `跳了 ${score} 分`}); }
           else {
             at++; streak = where === 'center' ? streak + 1 : 0;
             const add = where === 'center' ? 2 * streak : 1;
@@ -84,6 +84,6 @@ export default {
       api.score(0); tick.start();
     }
     restart();
-    return {restart, pause() { tick.stop(); }, resume() { if (!over) tick.start(); }, key(e) { if (e.key === ' ' && !e.repeat) { press(); return true; } return e.key === ' '; }, keyup(e) { if (e.key === ' ') release(); }, dispose() { tick.stop(); c.remove(); }};
+    return {restart, pause() { if (over || !tick.running) return false; tick.stop(); }, resume() { if (!over) tick.start(); }, key(e) { if (e.key === ' ' && !e.repeat) { press(); return true; } return e.key === ' '; }, keyup(e) { if (e.key === ' ') release(); }, dispose() { tick.stop(); c.remove(); }};
   },
 };

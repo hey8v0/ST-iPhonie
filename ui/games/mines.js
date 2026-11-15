@@ -72,10 +72,10 @@ export default {
     }
     function flag(x, y) { if (over || !grid || grid[y][x].open) return; grid[y][x].flag = !grid[y][x].flag; api.sound?.('flag'); draw(); }
     const cellOf = e => { const b = e.target.closest('.mine'); return b ? [Number(b.dataset.x), Number(b.dataset.y)] : null; };
-    el.addEventListener('pointerdown', e => { const at = cellOf(e); if (!at || e.button > 0) return; press = {at, timer: win.setTimeout(() => { press.long = true; flag(...at); }, 420)}; });
+    el.addEventListener('pointerdown', e => { const at = cellOf(e); if (!at) return; if (press) win.clearTimeout(press.timer); if (e.button > 0) { press = null; return; } press = {at, timer: win.setTimeout(() => { press.long = true; flag(...at); }, 420)}; });
     for (const t of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(t, () => { if (press) win.clearTimeout(press.timer); });
     el.addEventListener('click', e => { const at = cellOf(e); if (!at) return; if (press?.long) { press = null; return; } press = null; open(...at); });
-    el.addEventListener('contextmenu', e => { const at = cellOf(e); if (!at) return; e.preventDefault(); flag(...at); });
+    el.addEventListener('contextmenu', e => { const at = cellOf(e); if (!at) return; e.preventDefault(); if (press) { win.clearTimeout(press.timer); if (!press.long) { press.long = true; flag(...at); } } else flag(...at); });
     host.addEventListener('click', e => { const b = e.target.closest('[data-mines=flag]'); if (!b) return; flagging = !flagging; b.setAttribute('aria-pressed', String(flagging)); });
     function restart() { win.clearInterval(clock); grid = null; started = 0; over = false; api.score(0); draw(); }
     // The game left off: its time goes on from where it was.

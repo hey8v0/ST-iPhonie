@@ -55,6 +55,7 @@ export default {
     }
     function fall() { if (!fits(board, piece.cells, piece.x, piece.y + 1)) return false; piece.y++; return true; }
     function settle() {
+      if (piece.cells.some(([, y]) => piece.y + y < 0)) { over = true; tick.stop(); draw(); api.over({score, text: `消了 ${lines} 行`}); return; }
       for (const [x, y] of piece.cells) if (piece.y + y >= 0) board[piece.y + y][piece.x + x] = piece.kind;
       const done = clearRows(board);
       board = done.board;

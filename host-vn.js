@@ -159,7 +159,15 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     stage = ownStage = openVnStage({
       doc, title: title(), subtitle: start > 0 ? `从第 ${start} 楼开始` : '从头开始', backdrop: backdrop(start), scene: chatBackground(),
       look: vn,
-      source: {next: () => { while (cursor < chat().length) { const id = cursor++, steps = stepsOf(id); if (steps?.length) return {id, steps}; } return null; }},
+      source: {next: () => {
+        while (cursor < chat().length) {
+          const id = cursor, ctx = context(), message = chat()[id];
+          if (id === chat().length - 1 && !message?.is_user && !message?.is_system && (ctx?.streamingProcessor && !ctx.streamingProcessor.isFinished || ctx?.is_generating === true || ctx?.isGenerating === true)) return null;
+          cursor++;
+          const steps = stepsOf(id); if (steps?.length) return {id, steps};
+        }
+        return null;
+      }},
       voice: {play: s => play(s.id, s.line), narrate: s => narrate(s.text), stop, on: voiceOn, enable: () => backend.updateGeneral({voiceEnabled: true}), mouth},
       models: {
         has: name => !!currentModel(vn().cast?.[castKey(name)]),
@@ -369,7 +377,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     /** A reply was drawn: the stage goes on with it. */
     rendered() { clearTimeout(endTimer); stage?.more(); },
     /** The tavern stopped writing: if nothing new came, the box comes back. */
-    ended() { clearTimeout(endTimer); endTimer = setTimeout(() => stage?.failed(), 800); },
+    ended() { clearTimeout(endTimer); stage?.more(); endTimer = setTimeout(() => { stage?.more(); stage?.failed(); }, 800); },
     close() { clearTimeout(endTimer); stage?.close(); stage = null; },
     dispose() { this.close(); },
     state: () => stage?.state() || null,

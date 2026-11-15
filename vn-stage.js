@@ -546,10 +546,11 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     play();
   }
   /** What the speaker's mouth does now: the voice's, the text's while it is typed (no voice coming), else shut. */
+  const voicedNow = s => !!(s?.voiced && !s.user && look().voice && voice.on());
   function mouthNow(now) {
     if (step?.kind !== 'say' || step.user) return null;
     if (phase === 'playing') return voice.mouth?.() || null;
-    if (!typed && typedChar && !(step.voiced && look().voice && voice.on())) return typedMouth(typedChar, (now - typedFrom) / 1000);
+    if (!typed && typedChar && !voicedNow(step)) return typedMouth(typedChar, (now - typedFrom) / 1000);
     return null;
   }
   /** The models on the stage move while it is open (and the page is seen). */
@@ -804,7 +805,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     if (!(say && s.part) || again) voice.stop();
     type(say ? quoted(s.text) : s.text);
     if (again) return;
-    if (say && !s.part && !s.user && !skip && look().voice && voice.on() && s.voiced) voice.play(s);
+    if (say && !s.part && !skip && voicedNow(s)) voice.play(s);
     // 旁白: the story between the lines in the narrator's voice (整篇朗读's).
     if (!say && !s.imageOnly && !skip && look().narrate && look().voice && voice.on()) voice.narrate?.(s);
     if (!s.imageOnly) log.push({name, text: say ? quoted(s.text) : s.text, step: say && s.voiced && !s.part ? s : null, s});
@@ -851,7 +852,9 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     setAuto(false); stopSkip();
     if (!typed) finishTyping();
     seen.pop();
-    restore(seen[seen.length - 1]);
+    const page = seen.at(-1), i = log.findLastIndex(e => e.page && (e.page.m < page.m || e.page.m === page.m && e.page.pos <= page.pos));
+    log.length = i + 1;
+    restore(page);
   }
   /**
    * 记录: a line tapped is where reading goes on from (as far back as the pages kept for 上一页). What came after it leaves
@@ -902,7 +905,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
       if (!auto || closed) return;
       if (busyVoice()) { autoTimer = win.setTimeout(wait, 250); return; }
       const s = look(), base = VN_WAITS[s.wait] ?? 1.2, len = (textEl.dataset.full || '').length;
-      autoTimer = win.setTimeout(() => { if (auto && typed && !closed) next(); }, (base + (step?.voiced && look().voice ? 0 : Math.min(4, len * 0.035))) * 1000);
+      autoTimer = win.setTimeout(() => { if (!auto || !typed || closed) return; if (busyVoice()) { wait(); return; } next(); }, (base + (voicedNow(step) ? 0 : Math.min(4, len * 0.035))) * 1000);
     };
     wait();
   }
@@ -989,8 +992,11 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     if (e.target.closest('.vn-input, .vn-log')) return;
     advance();
   });
+  let wheelAt = -Infinity;
   root.addEventListener('wheel', e => {
-    if (!logEl.hidden) { const list = logEl.querySelector('ol'); if (e.deltaY > 0 && list.scrollTop + list.clientHeight >= list.scrollHeight - 2) closeLog(); return; }
+    if (!logEl.hidden) { const list = logEl.querySelector('ol'); if (e.deltaY > 0 && list.scrollTop + list.clientHeight >= list.scrollHeight - 2) { closeLog(); wheelAt = e.timeStamp; } return; }
+    if (!e.deltaY || e.timeStamp - wheelAt < 350) return;
+    wheelAt = e.timeStamp;
     if (e.deltaY < 0) openLog(); else if (e.deltaY > 0) advance();
   }, {passive: true});
   const onKey = e => {
@@ -998,7 +1004,8 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     const typing = e.target.closest?.('textarea, input');
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (!more.hidden) setMore(false); else if (!logEl.hidden) closeLog(); else if (hidden) setHidden(false); else if (typing) input.blur(); else close(); return; }
     if (typing) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendText(); } e.stopPropagation(); return; }
-    if (e.key === 'Control' && !e.repeat) { startSkip(); e.preventDefault(); return; }
+    if (!logEl.hidden && (e.ctrlKey || e.metaKey || e.key === 'Control' || e.key === 'Meta')) { e.stopPropagation(); return; }
+    if (e.key === 'Control' && !e.repeat && logEl.hidden) { startSkip(); e.preventDefault(); return; }
     const k = e.key.toLowerCase();
     if (k === 'arrowleft' || k === 'backspace') { e.preventDefault(); if (logEl.hidden) back(); }
     else if (['enter', ' ', 'arrowright', 'arrowdown', 'pagedown'].includes(k)) { e.preventDefault(); if (!logEl.hidden && k !== 'arrowdown') closeLog(); else if (logEl.hidden) advance(); }
@@ -1044,7 +1051,7 @@ export function openVnStage({doc = document, source, look, voice, face, sprite, 
     get closed() { return closed; },
     close,
     /** The player's phase: the small wave on the box, and 自动 waits for a line's voice to end. */
-    status(value) { phase = value || 'idle'; root.dataset.voice = phase; talk(); if (auto && typed && !busyVoice()) planAuto(); },
+    status(value) { phase = value || 'idle'; root.dataset.voice = phase; talk(); if (auto && typed) planAuto(); },
     /** New messages arrived (a reply was written): the story goes on from where it ended. */
     more() { if (closed) return; const was = waiting; waiting = false; if (ended || was) { ended = false; root.removeAttribute('data-end'); next(); } },
     /** The reply could not be written (stopped or failed): back to the box. */

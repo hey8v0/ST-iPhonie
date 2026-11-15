@@ -29,7 +29,7 @@
 // post (0.9.36, private chats): letters on their way to the user — [{id, from, text, sentAt, arriveAt}], put in the chat
 // as a letter when they arrive.
 import {connectionLost, lostError, breath} from './idb.js';
-import {cleanBoard, BOARDS} from './board.js';
+import {cleanBoard, BOARDS, BOARD_TYPES} from './board.js';
 
 export const CHAT_STORE_LIMITS = Object.freeze({messages: 1000, text: 4000, members: 20, fileText: 30000, versions: 10, held: 50});
 export const MUTE_DURATIONS = Object.freeze({'600000': '10 分钟', '3600000': '1 小时', '43200000': '12 小时', '86400000': '1 天', '0': '解除'});
@@ -67,7 +67,7 @@ export const GAME_LIMITS = Object.freeze({options: 6, option: 30, question: 80, 
 export const CHAIN_MODES = Object.freeze({idiom: '成语接龙', story: '故事接龙'});
 export function cleanGame(g) {
   const type = String(g?.type || '');
-  if (BOARDS[type]) return cleanBoard(g, fail);
+  if (BOARD_TYPES.includes(type)) return cleanBoard(g, fail);
   if (type === 'vote') {
     const options = (Array.isArray(g.options) ? g.options : []).map(o => clip(o, GAME_LIMITS.option).replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, GAME_LIMITS.options);
     const question = clip(g.question, GAME_LIMITS.question).replace(/\s+/g, ' ').trim();
@@ -94,7 +94,7 @@ export function cleanGame(g) {
 export function gameTitle(g) {
   if (g.type === 'vote') return `投票：${g.question}`;
   if (g.type === 'truth') return `真心话大冒险：转到了${g.target === 'me' ? '你' : g.target}`;
-  if (BOARDS[g.type]) return `${BOARDS[g.type].name}：${g.winner === 'draw' ? '平局' : g.winner === 'me' ? '你赢了' : g.winner ? `${g.winner}赢了` : g.turn === 'me' ? '轮到你' : `轮到${g.them}`}`;
+  if (BOARD_TYPES.includes(g.type)) return `${BOARDS[g.type].name}：${g.winner === 'draw' ? '平局' : g.winner === 'me' ? '你赢了' : g.winner ? `${g.winner}赢了` : g.turn === 'me' ? '轮到你' : `轮到${g.them}`}`;
   return `${CHAIN_MODES[g.mode]}：${g.entries[0]?.text || ''}`;
 }
 /** 合并转发 (0.9.33): at most this many messages in one record, each this long. */
@@ -198,7 +198,7 @@ export function forwardLine(m) {
     case 'dice': return `[骰子] ${m.text} 点`;
     case 'call': return '[语音通话]';
     case 'forward': return `[聊天记录] ${m.title || ''}`;
-    case 'game': return `[${BOARDS[m.game?.type] ? '小游戏' : '群游戏'}] ${m.text || ''}`;
+    case 'game': return `[${BOARD_TYPES.includes(m.game?.type) ? '小游戏' : '群游戏'}] ${m.text || ''}`;
     case 'post': return `[帖子] ${m.post?.title || String(m.post?.text || '').slice(0, 30)}${m.post?.note ? ' ' + m.post.note : ''}`;
     case 'outfit': return `[穿搭] ${m.outfit?.name || ''}${m.outfit?.note ? ' ' + m.outfit.note : ''}`;
     case 'book': return `[绘本] ${m.book?.title || ''}`;
