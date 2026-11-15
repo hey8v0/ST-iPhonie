@@ -484,7 +484,7 @@ export function assistantApp(ctx) {
       const composer = previous.querySelector('.assistant-composer'), nextComposer = incoming.querySelector('.assistant-composer');
       const tray = composer.querySelector('[data-attachment-tray]'), nextTray = nextComposer.querySelector('[data-attachment-tray]');
       if (tray.innerHTML !== nextTray.innerHTML) tray.replaceChildren(...nextTray.childNodes);
-      composer.querySelector('[data-action=attach]').disabled = nextComposer.querySelector('[data-action=attach]').disabled;
+      for (const action of ['attach', 'album-pick']) composer.querySelector(`[data-action=${action}]`).disabled = nextComposer.querySelector(`[data-action=${action}]`).disabled;
       const box = composer.querySelector('textarea'); if (box.value !== draft()) box.value = draft();
       const button = composer.querySelector('.assistant-send'), nextButton = nextComposer.querySelector('.assistant-send');
       if (button.outerHTML === nextButton.outerHTML) button.disabled = nextButton.disabled;

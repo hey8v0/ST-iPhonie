@@ -303,12 +303,13 @@ const DEFAULT_PRESET = {id: 'default', name: '默认出图规则', rev: PRESET_R
  * Vibe Transfer in the drawing app: on or off for every picture (whatever the 画风), what is in use (a group, or one
  * vibe), and the groups: [{id, name, items: [{vibe, strength}]}]. The vibes themselves live in the local library.
  */
+export const VIBE_GROUP_LIMIT = 50;
 export const defaultVibe = () => ({enabled: false, use: {kind: '', id: ''}, groups: []});
 export function normalizeVibeSettings(value) {
   const v = value && typeof value === 'object' ? value : {};
   const groups = (Array.isArray(v.groups) ? v.groups : []).slice(0, 200).map(g => ({
     id: /^[\w-]{1,64}$/.test(String(g?.id || '')) ? String(g.id) : crypto.randomUUID(), name: text(g?.name, 40).trim() || 'Vibe 组',
-    items: (Array.isArray(g?.items) ? g.items : []).filter(i => /^[0-9a-f]{64}$/.test(String(i?.vibe || ''))).filter((i, n, all) => all.findIndex(x => x.vibe === i.vibe) === n).slice(0, 50).map(i => ({vibe: i.vibe, strength: vibeStrength(i.strength), ...(i.enabled === false ? {enabled: false} : {})}))
+    items: (Array.isArray(g?.items) ? g.items : []).filter(i => /^[0-9a-f]{64}$/.test(String(i?.vibe || ''))).filter((i, n, all) => all.findIndex(x => x.vibe === i.vibe) === n).slice(0, VIBE_GROUP_LIMIT).map(i => ({vibe: i.vibe, strength: vibeStrength(i.strength), ...(i.enabled === false ? {enabled: false} : {})}))
   }));
   const kind = ['group', 'vibe'].includes(v.use?.kind) ? v.use.kind : '', id = typeof v.use?.id === 'string' ? v.use.id : '';
   const use = kind === 'group' && groups.some(g => g.id === id) || kind === 'vibe' && /^[0-9a-f]{64}$/.test(id) ? {kind, id} : {kind: '', id: ''};

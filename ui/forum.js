@@ -87,9 +87,9 @@ export function forumApp(ctx) {
   function sheet(title, html, action, run) {
     const d = ctx.dialog(title, html);
     d.body.addEventListener('click', e => {
-      if (!e.target.closest(`[data-action="${action}"]`)) return;
-      e.preventDefault();
-      Promise.resolve().then(() => run(d)).catch(error => ctx.notify(error.message, {error: true}));
+      const b = e.target.closest(`[data-action="${action}"]`); if (!b || b.disabled) return;
+      e.preventDefault(); b.disabled = true;
+      Promise.resolve().then(() => run(d)).catch(error => ctx.notify(error.message, {error: true})).finally(() => { if (d.live) b.disabled = false; });
     });
     d.body.querySelector('input,textarea')?.focus();
     return d;
@@ -192,7 +192,7 @@ export function forumApp(ctx) {
       case 'forum-options': options(); break;
       case 'net-names': netNames(); break;
       case 'open-post': open = el.dataset.id; await render(); v.root.scrollTop = 0; break;
-      case 'forum-like': { const p = post || await api.getForumPost(open); if (p) { await api.likeForum(open, !p.liked); await render(); } break; }
+      case 'forum-like': { const p = await api.getForumPost(open); if (p) { await api.likeForum(open, !p.liked); await render(); } break; }
       case 'forum-reply': replyTo(el.dataset.to || ''); break;
       case 'forum-my-reply': {
         const id = open, replyId = el.dataset.reply;

@@ -115,7 +115,7 @@ export function normalizeMusic(value) {
     volume: Number.isFinite(Number(value.volume)) ? Math.min(1, Math.max(0, Number(value.volume))) : base.volume,
     duck: value.duck !== false, share: value.share !== false,
     mode: PLAY_MODES.includes(value.mode) ? value.mode : base.mode, taste: value.taste !== false,
-    sources: sources.map(s => seen.has(s.id) ? {...s, id: s.id + '-' + seen.size} : s).filter(s => seen.add(s.id)),
+    sources: sources.map(s => { let id = s.id, n = 1; while (seen.has(id) || id !== s.id && sources.some(x => x.id === id)) id = s.id.slice(0, 60) + '-' + n++; seen.add(id); return id === s.id ? s : {...s, id}; }),
     writing: normalizeSongForm(value.writing), sing: normalizeSing(value.sing)
   };
 }
@@ -320,7 +320,7 @@ export function listeningNote(track, user = '我', prompts = {}) {
 }
 
 // ---------- Matching ----------
-const loose = value => String(value ?? '').toLowerCase().normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '').replace(/(?:feat|ft)\..*$/i, '');
+const loose = value => String(value ?? '').toLowerCase().normalize('NFKC').replace(/(?:^|\s+|[(（\[]\s*)(?:feat|ft)\..*$/i, '').replace(/[\s\p{P}\p{S}]/gu, '');
 /** How well a song matches what was asked (0 none … 3 title and artist). */
 export function matchScore(song, want) {
   const t = loose(song.title), w = loose(want.title);

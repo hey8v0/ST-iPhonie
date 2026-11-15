@@ -25,6 +25,7 @@ const when = t => { const d = new Date(t), p = n => String(n).padStart(2, '0'); 
 export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from = null, to = null, onClose = () => {}, onPage = () => {}, onHold = null, preload = false, onPullDown = null}) {
   const {doc, win} = ctx;
   let list = ids.slice(), at = Math.min(list.length - 1, Math.max(0, index)), closed = false, moving = false, chrome = true, info = false;
+  const failed = new Set();
   const urls = new Map(), names = new Map(), infos = new Map(), details = new Map();
   const actionButton = i => { const a = actions[i]; return `<button type="button" data-av-action="${i}" data-album="${esc(a.key || '')}"${a.danger ? ' class="album-danger"' : ''}>${icon(a.icon || 'star')}<span>${esc(a.label)}</span></button>`; };
   const onBar = actions.map((_, i) => i).filter(i => !actions[i].more), behind = actions.map((_, i) => i).filter(i => actions[i].more);
@@ -61,7 +62,8 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
   async function ensure(id) {
     if (urls.has(id)) return urls.get(id);
     const photo = await load(id);
-    if (closed || !photo) return null;
+    if (closed) return null;
+    if (!photo || Object.prototype.toString.call(photo.blob) !== '[object Blob]') throw Error('这张照片读不出来，可能已经删除，请返回相册重试');
     if (urls.has(id)) return urls.get(id);
     const url = win.URL.createObjectURL(photo.blob);
     urls.set(id, url); names.set(id, photo.name || ''); if (photo.info?.length) infos.set(id, photo.info);
@@ -87,7 +89,7 @@ export function openAlbum({ctx, host, ids, index = 0, load, actions = [], from =
       if (ready) { img.src = ready; img.hidden = false; img.alt = names.get(id) || ''; }
       else {
         img.hidden = true;
-        ensure(id).then(url => { if (url && img.dataset.id === id) { img.src = url; img.hidden = false; img.alt = names.get(id) || ''; if (id === list[at]) { title(); grown(img); describe(); } } }).catch(() => {});
+        ensure(id).then(url => { if (url && img.dataset.id === id) { img.src = url; img.hidden = false; img.alt = names.get(id) || ''; if (id === list[at]) { title(); grown(img); describe(); } } }).catch(error => { if (!closed && id === list[at] && img.dataset.id === id && !failed.has(id)) { failed.add(id); ctx.notify(error.message || '这张照片暂时读不出来', {error: true}); } });
       }
     });
     for (const [id, url] of urls) if (Math.abs(list.indexOf(id) - at) > 2) { win.URL.revokeObjectURL(url); urls.delete(id); }

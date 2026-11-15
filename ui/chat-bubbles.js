@@ -56,13 +56,14 @@ export function bubbleSetsSheet(ctx, api, {look, changed = () => {}}) {
     const box = e.target.closest('[data-bubble-file]'), file = box?.files?.[0];
     if (!file) return;
     box.value = '';
+    let added = 0;
     try {
       const got = readBubbleFile(await file.text(), file.name.replace(/\.[^.]+$/, '').replace(/^气泡-/, ''));
       if (!got.length) { ctx.notify('这个文件里没有气泡：要是小手机导出的 .json，或者带 <me> 和 <them> 的文字', {error: true}); return; }
-      for (const s of got) api.saveBubbleSet({name: s.name, me: s.me, them: s.them});
-      redraw();
-      ctx.notify(`导入了 ${got.length} 套气泡`);
-    } catch (error) { ctx.notify(error.message, {error: true}); }
+      for (const s of got) { api.saveBubbleSet({name: s.name, me: s.me, them: s.them}); added++; }
+      ctx.notify(`导入了 ${added} 套气泡`);
+    } catch (error) { ctx.notify(added ? `导入了 ${added} 套，其余没导入：${error.message}` : error.message, {error: true}); }
+    finally { if (added) { redraw(); changed(); } }
   });
   d.body.addEventListener('click', async e => {
     const b = e.target.closest('[data-action]');

@@ -832,7 +832,7 @@ export function chatApp(ctx) {
     if (panel) {
       wrap.insertAdjacentHTML('beforeend', toolsHTML());
       if (!old) wrap.querySelector('.chat-panel').classList.add('enter');
-      bindPicker(wrap, ctx.win); fillPicker(wrap, ctx.win);
+      bindPicker(wrap, ctx.win); fillPicker(wrap, ctx.win); paintStickers(wrap);
     }
     wrap.querySelector('[data-action=panel]')?.setAttribute('aria-expanded', String(!!panel));
     if (msgs && atBottom) msgs.scrollTop = msgs.scrollHeight;
@@ -2407,7 +2407,7 @@ export function chatApp(ctx) {
       const start = box.querySelector('.range-bar[data-edge=start]'), end = box.querySelector('.range-bar[data-edge=end]');
       if (first && start) first.before(start);
       if (last && end) last.after(end);
-      const label = v.root.querySelector('.bring-bar span');
+      const label = v.root.querySelector('.bring-bar span, .select-head > span:first-child');
       if (label) label.textContent = pickedLabel(picked.size);
     }
     // Near the top or bottom edge the list scrolls on its own, so a long stretch can be taken in one drag.
@@ -2509,7 +2509,7 @@ export function chatApp(ctx) {
     if (action === 'open' && el.dataset.conv && Date.now() - convPressedAt < 700) return;
     // The click that ends a long-press only closes the press, it does not play or open anything.
     if (Date.now() - pressedAt < 700 && el.closest('.msg')) return;
-    if (selecting && ['message', 'voice', 'photo', 'packet', 'transfer', 'gift', 'react-chip', 'peek', 'forward-open', 'game-vote', 'game-end', 'game-choice', 'game-again', 'game-chain'].includes(action)) return;
+    if (selecting && el.closest('.msg[data-mid]') && !['bring', 'pick-up', 'pick-down'].includes(action)) return;
     const find = () => thread.messages.find(x => x.id === el.dataset.mid);
     switch (action) {
       case 'tab': {

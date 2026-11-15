@@ -63,7 +63,8 @@ export function comfyNodePanel({ctx, api, rerender}) {
   /** Asks ComfyUI what the workflow's nodes are, once per address and workflow; the list works without it, more plainly. */
   async function load(fresh = false) {
     // Changing a value asks nothing new: only another address or other kinds of node do.
-    const mark = state().url + '|' + [...new Set(list().map(n => n.type))].sort().join();
+    let types; try { types = list().map(n => n.type); } catch { return; }
+    const mark = state().url + '|' + [...new Set(types)].sort().join();
     if (!fresh && asked === mark) return;
     asked = mark;
     controller?.abort(); controller = new AbortController();

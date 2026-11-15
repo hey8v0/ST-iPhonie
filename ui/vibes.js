@@ -3,6 +3,7 @@
 import {esc, btn, field, input, toggle, help, groupTitle, menu} from './common.js';
 import {icon} from './icons.js';
 import {saveFile} from '../download.js';
+import {VIBE_GROUP_LIMIT} from '../core/draw.js';
 import {vibeKey, vibeMode} from '../core/vibes.js';
 import {pickPicture, pictureData} from './draw-images.js';
 
@@ -169,6 +170,7 @@ export function vibePanel({ctx, api, root, rerender}) {
           const gid = d.body.querySelector('[data-field=vibe-group]').value, all = structuredClone(state().groups), g = all.find(x => x.id === gid);
           if (!g) return;
           if (g.items.some(i => i.vibe === id)) { ctx.notify('已经在这个组里了'); return; }
+          if (g.items.length >= VIBE_GROUP_LIMIT) { ctx.notify(`一个组最多 ${VIBE_GROUP_LIMIT} 个 Vibe`, {error: true}); return; }
           g.items.push({vibe: id, strength: Number(d.body.querySelector('[data-field=vibe-strength]').value)});
           api.saveDraw({vibe: {groups: all}}); d.close(); rerender(); ctx.notify(`已加入「${g.name}」`);
         }
@@ -213,7 +215,7 @@ export function vibePanel({ctx, api, root, rerender}) {
       if (!b) return;
       try {
         if (b.dataset.itemRemove !== undefined) { draft.items.splice(Number(b.dataset.itemRemove), 1); paint(); return; }
-        if (b.dataset.itemAdd) { const s = vibes().find(x => x.id === b.dataset.itemAdd); draft.items.push({vibe: b.dataset.itemAdd, strength: s?.strength ?? 0.6}); paint(); return; }
+        if (b.dataset.itemAdd) { if (draft.items.length >= VIBE_GROUP_LIMIT) { ctx.notify(`一个组最多 ${VIBE_GROUP_LIMIT} 个 Vibe`, {error: true}); return; } const s = vibes().find(x => x.id === b.dataset.itemAdd); draft.items.push({vibe: b.dataset.itemAdd, strength: s?.strength ?? 0.6}); paint(); return; }
         switch (b.dataset.action) {
           case 'group-save': commit(); d.close(); rerender(); ctx.notify('组已保存'); break;
           case 'group-use': commit(); api.saveDraw({vibe: {enabled: true, use: {kind: 'group', id: gid}}}); d.close(); rerender(); ctx.notify(`正在用「${draft.name}」`); break;

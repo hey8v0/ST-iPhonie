@@ -17,7 +17,7 @@ const baseName = file => soundName(String(file?.name || '').replace(/\.[^.]+$/, 
 
 export function soundsApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'sounds');
-  let rows = [], missing = [], pack = null, epoch = 0, uploadFor = null, query = '';
+  let rows = [], missing = [], pack = null, epoch = 0, uploadFor = null, query = '', pickingMissing = false;
   const state = () => api.getState().sounds;
   const live = () => { try { return api.soundState?.() || null; } catch { return null; } };
   const elevenKey = () => !!api.keyStatus?.('eleven');
@@ -30,7 +30,7 @@ export function soundsApp(ctx) {
   function nameRow([name, list]) {
     const sources = [...new Set(list.map(r => SOUND_SOURCES[r.source]))].join(' · ');
     const layers = list[0].type === 'ambience' ? ` · 底子 ${list.filter(r => r.layer !== 'dot').length} · 点缀 ${list.filter(r => r.layer === 'dot').length}` : '';
-    return `<button class="list-row" data-action="open-name" data-type="${esc(list[0].type)}" data-name="${esc(name)}"><span><strong>${esc(name)}</strong><small>${list.length} 个版本${layers} · ${esc(sources)}</small></span>${icon('next')}</button>`;
+    return `<button class="list-row" data-action="open-name" data-type="${esc(list[0].type)}" data-name="${esc(name)}"${query && !name.includes(query) ? ' hidden' : ''}><span><strong>${esc(name)}</strong><small>${list.length} 个版本${layers} · ${esc(sources)}</small></span>${icon('next')}</button>`;
   }
   async function render() {
     const ticket = ++epoch;
@@ -57,10 +57,11 @@ export function soundsApp(ctx) {
         ${pack.hidden ? `<div class="list-row static"><span><strong>拿掉了 ${pack.hidden} 个自带声音</strong><small>拿掉的只是不用了，随时能找回</small></span>${btn('pack-restore', '找回', 'secondary small')}</div>` : ''}</div>` : '')
       + (missing.length ? groupTitle('缺的声音', `<small>${missing.length}</small>`) + `<div class="group">${missing.map(m => `<div class="list-row static sound-missing"><span><strong>${esc(m.name)}</strong><small>${KIND_NAMES[m.type]} · 想用过 ${m.count} 次${m.describe ? ' · ' + esc(m.describe) : ''}</small></span><span class="row-actions">${btn('missing-upload', icon('import'), 'icon-button', `data-type="${esc(m.type)}" data-name="${esc(m.name)}" aria-label="上传「${esc(m.name)}」"`)}${key ? btn('missing-make', icon('star'), 'icon-button', `data-type="${esc(m.type)}" data-name="${esc(m.name)}" data-describe="${esc(m.describe)}" aria-label="让 ElevenLabs 做「${esc(m.name)}」"`) : ''}${btn('missing-dismiss', icon('close'), 'icon-button', `data-type="${esc(m.type)}" data-name="${esc(m.name)}" aria-label="不要「${esc(m.name)}」"`)}</span></div>`).join('')}</div>` : '')
       + `<div class="actions">${`<label class="primary file-button">${icon('add')}添加声音<input type="file" data-sound-file multiple accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac,.opus,.webm" aria-label="选择声音文件"></label>`}${key ? btn('make-new', icon('star') + 'ElevenLabs 做一个', 'secondary') : ''}</div>`
-      + (rows.length > 12 ? `<input class="search sound-search" data-sound-search type="search" placeholder="找声音（按名字）" value="${esc(query)}" aria-label="找声音">` : '')
+      + (rows.length > 12 || query ? `<input class="search sound-search" data-sound-search data-param="sound-search" type="search" placeholder="找声音（按名字）" value="${esc(query)}" aria-label="找声音">` : '')
       + (rows.length
         ? ['ambience', 'sfx'].map(type => { const list = names(type); return list.length ? groupTitle(KIND_NAMES[type], `<small>${list.length}</small>`) + `<div class="group">${list.map(nameRow).join('')}</div>` : ''; }).join('')
         : empty('声音库还是空的', '添加自己的声音文件（雨声、敲门声……起好名字），或者打开 ElevenLabs 生成。名字就是剧情里写的名字，同一个名字可以放好几个版本。', 'music')));
+    filterNames();
   }
 
   // ---------- One name: its versions ----------
@@ -112,6 +113,7 @@ export function soundsApp(ctx) {
       const el = e.target;
       (async () => {
         if (el.matches('[data-version-file]')) { const files = [...el.files]; el.value = ''; if (files.length) { d.close(); addFiles(files, {name, type, layer: list[0].layer}); } return; }
+        if (!['kind', 'strength'].includes(el.dataset.field)) return;
         if (el.dataset.field === 'kind') await api.updateSound(el.dataset.id, kindPatch(el.value));
         if (el.dataset.field === 'strength') await api.updateSound(el.dataset.id, {strength: el.value});
         const rest = rows.filter(r => r.id !== el.dataset.id);
@@ -193,13 +195,14 @@ export function soundsApp(ctx) {
     await render();
   });
   // Finding a sound: the names that do not match are hidden in place (the box keeps its focus).
-  v.on('input', '[data-sound-search]', el => {
-    query = el.value.trim();
+  function filterNames() {
     for (const row of v.root.querySelectorAll('[data-action=open-name]')) row.hidden = !!query && !row.dataset.name.includes(query);
     for (const group of v.root.querySelectorAll('.group')) if (group.querySelector('[data-action=open-name]')) { const shown = !!group.querySelector('[data-action=open-name]:not([hidden])'); group.hidden = !shown; if (group.previousElementSibling?.classList.contains('group-title')) group.previousElementSibling.hidden = !shown; }
-  });
+  }
+  v.on('input', '[data-sound-search]', el => { query = el.value.trim(); filterNames(); });
   v.on('input', '[data-volume]', el => { const out = el.closest('.field')?.querySelector('output'); if (out) out.textContent = el.value + '%'; });
   v.on('change', '[data-volume]', el => { api.saveSounds({[el.dataset.volume]: Number(el.value) / 100}); });
+  v.on('click', '[data-sound-file]', () => { if (!pickingMissing) uploadFor = null; });
   v.on('change', '[data-sound-file]', el => { const files = [...el.files]; el.value = ''; if (!files.length) return; const preset = uploadFor; uploadFor = null; addFiles(files, preset); });
   v.on('click', '[data-action]', async el => {
     switch (el.dataset.action) {
@@ -212,7 +215,8 @@ export function soundsApp(ctx) {
       case 'missing-dismiss': await api.dismissMissing(el.dataset.type, el.dataset.name); await render(); break;
       case 'missing-upload': {
         uploadFor = {name: el.dataset.name, type: el.dataset.type, layer: el.dataset.type === 'ambience' ? 'bed' : ''};
-        v.root.querySelector('[data-sound-file]')?.click();
+        pickingMissing = true;
+        try { v.root.querySelector('[data-sound-file]')?.click(); } finally { pickingMissing = false; }
         break;
       }
     }

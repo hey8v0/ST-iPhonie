@@ -2958,7 +2958,7 @@ export class TTSBackend {
         const here = this.here();
         if (here?.pending) return 0;
         if (!here) return clearAll();
-        const mine = (await list()).filter(x => here.card ? inSpace(x, here) : x.space === here.key);
+        const mine = (await list()).filter(x => here.card ? x.save === here.key || x.space === here.key || (here.first && !x.save && x.space === here.card) : x.space === here.key);
         for (const x of mine) await remove(x.id);
         return mine.length;
     }
@@ -3042,7 +3042,7 @@ export class TTSBackend {
         this.assertOpen();
         return this.#keepPhotoChange(async()=>{
         const list = [...new Set((ids || []).map(String))], now = Date.now();
-        const out = new Set(list), edit = row => { const inside = new Set(row.photos); row.photos = on ? [...list.filter(id => !inside.has(id)), ...row.photos] : row.photos.filter(id => !out.has(id)); row.updatedAt = now; };
+        const out = new Set(list), edit = row => { const have = Array.isArray(row.photos) ? row.photos : [], inside = new Set(have); row.photos = on ? [...list.filter(id => !inside.has(id)), ...have] : have.filter(id => !out.has(id)); row.updatedAt = now; };
         await this.appsMutate('albums', () => this.apps.change(FAVORITES, edit).catch(async error => {
             if (error?.code !== 'MISSING') throw error;
             const row = { id: FAVORITES, kind: 'album', name: '收藏', at: now, updatedAt: now, photos: [] };
@@ -3060,7 +3060,7 @@ export class TTSBackend {
         if (title === '收藏' || all.some(row => row.name === title && row.id !== id)) throw Error(`已经有叫「${title}」的相簿了`);
         if (id === FAVORITES) throw Error('收藏不能改名');
         if (id) return this.appsMutate('albums', () => this.apps.change(id, row => { row.name = title; row.updatedAt = Date.now(); }));
-        if (all.length > ALBUM_LIMITS.albums) throw Error(`最多建 ${ALBUM_LIMITS.albums} 个相簿`);
+        if (all.filter(row => row.id !== FAVORITES).length >= ALBUM_LIMITS.albums) throw Error(`最多建 ${ALBUM_LIMITS.albums} 个相簿`);
         const now = Date.now(), row = { id: 'albums:' + now.toString(36) + Math.random().toString(36).slice(2, 8), kind: 'album', name: title, at: now, updatedAt: now, order: Math.max(0, ...all.map(a => a.order || 0)) + 1, photos: [] };
         await this.appsMutate('albums', () => this.apps.put([row]));
         return row;
@@ -3078,9 +3078,9 @@ export class TTSBackend {
         return this.#keepPhotoChange(async()=>{
         let added = 0;
         await this.appsMutate('albums', () => this.apps.change(id, row => {
-            const inside = new Set(row.photos), fresh = [...new Set((ids || []).map(String))].filter(x => !inside.has(x));
+            const have = Array.isArray(row.photos) ? row.photos : [], inside = new Set(have), fresh = [...new Set((ids || []).map(String))].filter(x => !inside.has(x));
             added = fresh.length;
-            row.photos = [...fresh, ...row.photos];
+            row.photos = [...fresh, ...have];
             row.updatedAt = Date.now();
         }));
         return { added };
@@ -3090,7 +3090,7 @@ export class TTSBackend {
     async removeFromAlbum(id, ids) {
         this.assertOpen();
         const gone = new Set((ids || []).map(String));
-        await this.appsMutate('albums', () => this.apps.change(id, row => { row.photos = row.photos.filter(x => !gone.has(x)); row.updatedAt = Date.now(); }));
+        await this.appsMutate('albums', () => this.apps.change(id, row => { row.photos = (Array.isArray(row.photos) ? row.photos : []).filter(x => !gone.has(x)); row.updatedAt = Date.now(); }));
         return true;
     }
     /** The 相簿 one made, in this order (收藏 stays first). */
@@ -3866,7 +3866,7 @@ export class TTSBackend {
             likeForum: (id, on = true) => this.appsMutate('forum', () => this.apps.change(id, post => { if (post.liked === !!on) return; post.liked = !!on; post.likes = Math.max(0, post.likes + (on ? 1 : -1)); })),
             deleteForumReply: (id, replyId) => { this.noteGone('forum', [`${id}/${replyId}`]); return this.appsMutate('forum', () => this.apps.change(id, post => { post.replies = post.replies.filter(r => r.id !== replyId); })); },
             deleteForum: id => { this.noteGone('forum', [id]); return this.appsMutate('forum', () => this.apps.remove(id)); },
-            clearForum: () => this.appsMutate('forum', () => this.dropping('forum', () => this.partRows('forum'), async () => { const n = await this.clearHere(() => this.apps.list('forum'), id => this.apps.remove(id), () => this.apps.clear('forum')); await this.apps.remove(this.hotId()); return n; })),
+            clearForum: () => this.appsMutate('forum', () => this.dropping('forum', () => this.partRows('forum'), async () => { const here = this.here(), hot = this.hotId(); if (here?.pending) return 0; const n = await this.clearHere(() => this.apps.list('forum'), id => this.apps.remove(id), () => this.apps.clear('forum')); if (here) await this.apps.remove(hot); else await this.apps.clear('forum-hot'); return n; })),
             // 查手机: the open card's snapshot of a person, else the shared one from before 分区.
             listPeeks: async () => { const here = this.here(); return (await this.apps.list('peek')).filter(p => inSpace(p, here)); },
             getPeek: async name => (await this.apps.get(peekId(name, this.spaceKey()))) || (this.spaceKey() ? this.apps.get(peekId(name)) : null),

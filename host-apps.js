@@ -13,7 +13,7 @@ import {pictureInputs, sizeFor, photoPicture} from './core/draw.js';
 const PEOPLE = 12;
 
 export function createAppsHost({context, settings, backend, memory = null, notice = () => {}}) {
-  const busy = {forum: null, peek: null};
+  const busy = {forum: null, peek: null}, pending = new Map();
   const userName = () => context()?.name1 || '我';
   const userPersona = () => String(context()?.powerUserSettings?.persona_description || '').slice(0, 1500);
   function card(name) {
@@ -34,10 +34,16 @@ export function createAppsHost({context, settings, backend, memory = null, notic
     return cleanTagged(String(await backend.generateText(ctx, {prompt, trimNames: false, use}) || ''), preset.cleanTags);
   }
   /** One request per app at a time; the phone shows it as busy. */
-  function run(app, task) {
-    if (busy[app]) return busy[app];
-    busy[app] = (async () => { backend.emit(app, {busy: true}); return task(context()); })().finally(() => { busy[app] = null; backend.emit(app, {busy: false}); });
-    return busy[app];
+  function run(app, key, task) {
+    if (pending.has(key)) return pending.get(key);
+    const previous = busy[app], ctx = context(), valid = backend.spaceGuard?.() || (() => true);
+    const result = (previous ? previous.catch(() => {}) : Promise.resolve()).then(() => {
+      if (!valid()) throw Error('酒馆聊天已切换，请回原聊天重试');
+      return task(ctx);
+    });
+    const next = result.finally(() => { pending.delete(key); if (busy[app] === next) busy[app] = null; backend.emit(app, {busy: !!busy[app]}); });
+    pending.set(key, next); busy[app] = next; backend.emit(app, {busy: true});
+    return next;
   }
   const base = () => {
     const s = settings(), preset = activeChatPreset(s.chat);
@@ -54,7 +60,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
   }
   /** New posts and the 热搜. */
   function forumRefresh({auto=false}={}) {
-    return run('forum', async ctx => {
+    return run('forum', 'forum:refresh', async ctx => {
       backend.assertSpaceReady();const valid=auto?backend.spaceGuard():()=>true;
       // The card asked for: the tavern may move to another one while the model writes.
       const space = backend.cardKey(), save = backend.saveKey(), hotId = backend.hotId(), {preset, everyone, user} = base(), handles = netNames();
@@ -73,7 +79,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
   }
   /** Replies to the user's new post. */
   function forumReact(postId) {
-    return run('forum', async ctx => {
+    return run('forum', `forum:react:${postId}`, async ctx => {
       const {preset, everyone, user} = base(), handles = netNames();
       const post = await backend.apps.get(postId);
       if (!post) throw Error('这个帖子已经不在了');
@@ -87,7 +93,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
   }
   /** Answers to the user's reply. */
   function forumReply(postId, replyId) {
-    return run('forum', async ctx => {
+    return run('forum', `forum:reply:${postId}:${replyId}`, async ctx => {
       const {preset, everyone, user} = base(), handles = netNames();
       const post = await backend.apps.get(postId), mine = post?.replies.find(r => r.id === replyId);
       if (!post || !mine) throw Error('这条回复已经不在了');
@@ -106,7 +112,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
   // ---------- 查手机 ----------
   /** Looks into a character's phone: a new snapshot, or (keep) what is new since last time put onto the old one. */
   function peekLook(name, {keep = false} = {}) {
-    return run('peek', async ctx => {
+    return run('peek', `peek:${name}:${keep}`, async ctx => {
       const key = backend.spaceKey(), {preset, user} = base(), contact = backend.contacts().find(c => c.name === name);
       if (!contact) throw Error(`联系人里没有「${name}」`);
       const person = {name, persona: contact.persona, card: contact.persona ? '' : card(name)};

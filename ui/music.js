@@ -57,7 +57,7 @@ const skippedText = r => r.skipped.slice(0, 40).map(s => `「${s.name}」${s.why
 
 export function musicApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'music');
-  let mode = 'main', tab = 'library', songs = [], results = [], searchErrors = [], searchNote = '', query = '', searching = false, epoch = 0, editing = null, showLyrics = false, test = null, sourceTest = 0;
+  let mode = 'main', tab = 'library', songs = [], results = [], searchErrors = [], searchNote = '', query = '', searching = false, searchTicket = 0, epoch = 0, editing = null, showLyrics = false, test = null, sourceTest = 0;
   // 正文点的歌; what the search looks for (单曲 / 专辑 / 歌手), the albums or artists found, the page, whether there is
   // more; an album or artist opened: {g, songs, page, more, loading, error}
   let heard = [], kind = 'song', groups = [], page = 0, more = false, group = null;
@@ -165,7 +165,7 @@ export function musicApp(ctx) {
     const mine = lists.find(p => p.id === shelf) || null;
     if (!mine) shelf = '';
     shown = mine ? mine.songs.map(id => byId.get(id)).filter(Boolean) : songs;
-    const kinds = [['song', '单曲'], ...Object.entries(GROUP_KINDS).filter(([k]) => sources.some(x => x[k + 'Search']))];
+    const kinds = [['song', '单曲'], ...Object.entries(GROUP_KINDS).filter(([k]) => sources.some(x => isGoMusic(x) ? k !== 'artist' && !!x.base : x[k + 'Search']))];
     if (!kinds.some(([k]) => k === kind)) kind = 'song';
     const found = kind === 'song' ? results : groups;
     const list = tab === 'write' ? writer.listHTML() : tab === 'heard'
@@ -438,20 +438,23 @@ export function musicApp(ctx) {
 
   /** Searches (songs, albums or artists); more: the next page added under the ones found. */
   async function search(next = false) {
+    const mine = ++searchTicket, wantedKind = kind;
     if (!next) { query = v.root.querySelector('[data-music-query]')?.value.trim() || ''; page = 0; results = []; groups = []; more = false; searchNote = ''; }
-    if (!query) return;
-    searching = true; searchErrors = []; render();
+    searchErrors = [];
+    if (!query) { searching = false; render(); return; }
+    searching = true; render();
     try {
       // what was found already, so a source whose address does not say how to turn pages can be tried page by page
       const seen = next ? (kind === 'song' ? results : groups).map(x => x.source + '|' + x.id) : [];
-      const found = await api.searchMusic(query, '', {kind, page, seen});
-      if (kind === 'song') results = [...results, ...found.songs]; else groups = [...groups, ...found.groups];
-      more = !!found.more; searchErrors = found.errors;
+      const found = await api.searchMusic(query, '', {kind: wantedKind, page, seen});
+      if (v.disposed || mine !== searchTicket || wantedKind !== kind) return;
+      if (wantedKind === 'song') results = [...results, ...(found.songs || [])]; else groups = [...groups, ...(found.groups || [])];
+      more = !!found.more; searchErrors = found.errors || [];
       searchNote = found.unpaged?.length ? `${found.unpaged.map(n => `「${n}」`).join('、')}只给了第一页：搜索地址没写怎么翻页，插件试了几种常见的翻页写法也没取到更多。在音源设置里给搜索地址加上 {{offset}}（或 {{page}}）和 {{limit}}，就能接着翻。` : '';
       if (!(kind === 'song' ? results : groups).length && !searchErrors.length) searchErrors = [{source: '搜索', message: '没有搜到'}];
     }
-    catch (error) { searchErrors = [{source: '搜索', message: error.message}]; more = false; }
-    finally { searching = false; if (!v.disposed) render(); }
+    catch (error) { if (mine === searchTicket && !v.disposed) { searchErrors = [{source: '搜索', message: error.message}]; more = false; } }
+    finally { if (mine === searchTicket) { searching = false; if (!v.disposed) render(); } }
   }
   const asTrack = s => s.origin || s.id && !s.source ? s : {title: s.title, artist: s.artist, origin: 'source', source: s.source, songId: s.id};
   const play = (list, i, which = '') => api.musicPlayList(list.map(asTrack), i, which).catch(e => ctx.notify(e.message, {error: true}));
@@ -592,7 +595,7 @@ export function musicApp(ctx) {
     if (el.dataset.action.startsWith('write-')) return writer.click(el);
     switch (el.dataset.action) {
       case 'tab': tab = el.dataset.tab; picked = null; addedNote = null; render(); break;
-      case 'kind': kind = el.dataset.kind; results = []; groups = []; more = false; searchErrors = []; searchNote = ''; if (query) search(); else render(); break;
+      case 'kind': searchTicket++; searching = false; kind = el.dataset.kind; results = []; groups = []; more = false; searchErrors = []; searchNote = ''; if (query) search(); else render(); break;
       case 'more-results': page++; search(true); break;
       case 'open-group': group = {g: groups[i], songs: [], page: 0, more: false, loading: false, error: ''}; mode = 'group'; loadGroup(); break;
       case 'group-more': group.page++; loadGroup(); break;

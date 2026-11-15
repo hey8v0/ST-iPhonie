@@ -11,6 +11,7 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   // 记忆: what each of them talked about with the user in private (written-up layers only).
   const remembered = names => memory ? memory.aboutPeople(names).catch(() => '') : Promise.resolve('');
   let busy = null, since = 0;
+  const pending = new Map();
 
   const userName = () => context()?.name1 || '我';
   const userPersona = () => String(context()?.powerUserSettings?.persona_description || '').slice(0, 1500);
@@ -37,13 +38,15 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
 
   /** One model request at a time; the phone shows it as busy. */
   function run(kind, task) {
-    if (busy) return busy;
-    busy = (async () => {
-      emit({kind});
-      const ctx = context();
+    if (pending.has(kind)) return pending.get(kind);
+    const previous = busy, ctx = context(), valid = backend.spaceGuard?.() || (() => true), label = kind.split(':')[0];
+    const result = (previous ? previous.catch(() => {}) : Promise.resolve()).then(() => {
+      if (!valid()) throw Error('酒馆聊天已切换，请回原聊天重试');
       return task(ctx);
-    })().finally(() => { busy = null; emit({kind}); });
-    return busy;
+    });
+    const next = result.finally(() => { pending.delete(kind); if (busy === next) busy = null; emit({kind: label}); });
+    pending.set(kind, next); busy = next; emit({kind: label});
+    return next;
   }
   async function ask(ctx, request) {
     const text = await backend.generateText(ctx, {use: 'moments', prompt: request, trimNames: false});
@@ -76,7 +79,7 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   }
   /** Friends react to the user's new post. */
   function react(postId) {
-    return run('react', async ctx => {
+    return run(`react:${postId}`, async ctx => {
       const {preset, everyone, user} = await base();
       const post = await backend.moments.get(postId);
       if (!post) throw Error('这条动态已经不在了');
@@ -88,7 +91,7 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
   }
   /** Answers to the user's comment. */
   function reply(postId, commentId) {
-    return run('reply', async ctx => {
+    return run(`reply:${postId}:${commentId}`, async ctx => {
       const {preset, everyone, user} = await base();
       const post = await backend.moments.get(postId), comment = post?.comments.find(c => c.id === commentId);
       if (!post || !comment) throw Error('这条评论已经不在了');

@@ -64,7 +64,7 @@ export function buildForumRequest({prompts = {}, preset, mode = 'posts', people,
     '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': story.map(s => `${s.name}：${s.text}`).join('\n'),
     '热搜': mode === 'posts' ? hot.join('\n') : '', '最近的帖子': mode === 'posts' ? recent.map(p => `${label(p.author)}｜${p.title}`).join('\n') : '',
     '我的网名': label('me'), '没网名的人': missing.join('、')});
-  const ask = promptText(prompts, 'forum', 'ask', {...now, '用户': user, '帖子数': preset.posts + 1, '我的网名': label('me'),
+  const ask = promptText(prompts, 'forum', 'ask', {...now, '用户': user, '帖子数': Math.min(preset.posts + 1, FORUM_LIMITS.perRefresh), '我的网名': label('me'),
     '帖子': mode === 'posts' ? '' : postLines(post, user, 30, label), '回复': mode === 'reply' ? reply.text : '', '回复谁': mode === 'reply' && reply.to ? label(reply.to) : ''});
   return [{role: 'system', content: system}, {role: 'user', content: ask}];
 }

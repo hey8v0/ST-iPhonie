@@ -83,6 +83,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
       .sort((a, b) => b.n - a.n || (a.s.source === t.source) - (b.s.source === t.source)).map(x => x.s);
   }
   async function start(t) {
+    if (!t || typeof t !== 'object') throw Error('没有可以放的歌');
     const mine = ++ticket, el = element();
     if (!el) throw Error('这个浏览器不能放音乐');
     track = t; lyrics = parseLyrics(t.lyric || ''); set('loading', '正在找这首歌……');
@@ -122,7 +123,9 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
   /** Plays a list from one of its songs (the 歌单, search results); a single song is a list of one. which: the kind of
    *  list ('library', 'heard', 'mixed'), for the music to go on with after a song the story picks. */
   function playList(list, at = 0, which = '') {
-    queue = (Array.isArray(list) ? list : [list]).slice(0, MUSIC_LIMITS.songs).map(t => ({...t}));
+    const next = (Array.isArray(list) ? list : [list]).filter(t => t && typeof t === 'object').slice(0, MUSIC_LIMITS.songs).map(t => ({...t}));
+    if (!next.length) return Promise.reject(Error('没有可以放的歌'));
+    queue = next;
     index = Math.min(Math.max(0, at), queue.length - 1);
     shuffled = [index];
     if (which) from = which;

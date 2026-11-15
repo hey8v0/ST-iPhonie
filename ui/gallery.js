@@ -163,7 +163,8 @@ export function galleryApp(ctx) {
     const d = ctx.dialog(title, `${field('名字', input('album-name', value, 'text', 'maxlength="30" autocomplete="off" placeholder="比如：喜欢的立绘"'))}<div class="actions"><button type="button" class="primary" data-action="go">好</button></div>`, {over});
     const box = d.body.querySelector('[data-field=album-name]');
     const submit = async b => {
-      if (b) b.disabled = true;
+      if (!b || b.disabled) return;
+      b.disabled = true;
       try { await go(box.value); d.close(); } catch (error) { ctx.notify(error.message, {error: true}); if (b) b.disabled = false; }
     };
     d.body.addEventListener('click', e => { const b = e.target.closest('[data-action=go]'); if (b && !b.disabled) submit(b); });
@@ -310,7 +311,7 @@ export function galleryApp(ctx) {
           ctx.notify(r.updated && !r.added ? '这张图已经是 Vibe 了' : '已存成 Vibe，在绘图的 Vibe 页里');
         }},
         {key: 'delete', icon: 'trash', label: '删除', danger: true, run: async x => {
-          if (!await ctx.confirm('删除这张照片？', '使用它的壁纸和图标会恢复默认。')) return;
+          if (!await ctx.confirm('删除这张照片？', '用它当的壁纸、图标、头像和聊天背景会恢复默认；朋友圈配图和查手机照片变回「没画」，想要可以再画。')) return;
           await api.deletePhoto(x); changed = true; ctx.notify('已删除');
           return 'removed';
         }}

@@ -124,7 +124,7 @@ export function sfxMakeSheet(ctx, {type = 'sfx', name = '', describe = '', onClo
     if (!n) throw Error('给声音起个名字（剧情里写的就是这个名字）');
     button.disabled = true;
     try {
-      await api.keepSoundTake({name: n, type: value('type'), describe: english, blob: take.blob});
+      await api.keepSoundTake({name: n, type: value('type'), describe: take.text || english, blob: take.blob});
       take.kept = true; paintTakes();
       ctx.notify(`「${n}」多了一个版本`);
     } finally { if (button.isConnected) button.disabled = false; }

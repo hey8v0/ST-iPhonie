@@ -26,8 +26,8 @@ export function comfyPlans(ctx, render) {
   const armed = new Set();
   function twice(b, text) {
     if (armed.has(b.dataset.action)) { armed.delete(b.dataset.action); return true; }
-    armed.add(b.dataset.action); b.dataset.label = b.textContent; b.textContent = text;
-    setTimeout(() => { armed.delete(b.dataset.action); if (b.isConnected) b.textContent = b.dataset.label; }, 3000);
+    armed.add(b.dataset.action); b.dataset.label = b.innerHTML; b.textContent = text;
+    setTimeout(() => { armed.delete(b.dataset.action); if (b.isConnected) b.innerHTML = b.dataset.label; }, 3000);
     return false;
   }
   function manage() {

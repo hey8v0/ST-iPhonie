@@ -51,7 +51,10 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
     const size = sizes.get(p.photoId), url = shown.get(p.photoId);
     if (p.photoId) return `<button type="button" class="moment-photo" data-action="view-photo" data-id="${esc(p.id)}"${size ? ` style="${size}"` : ''} aria-label="查看配图"><img data-photo="${esc(p.photoId)}"${url ? ` src="${esc(url)}"` : ''} alt="${esc(nameOf(p.author))} 的配图"></button>`;
     if (!p.imageTags) return p.imageRemoved ? '<p class="moment-note">配图已经从相册删掉了</p>' : '';
-    if (p.imageState === 'waiting') return '<p class="moment-note">配图正在画……</p>';
+    if (p.imageState === 'waiting') {
+      if (api.drawQueue?.().some(j => j.key === `moments:${p.id}`)) return '<p class="moment-note">配图正在画……</p>';
+      return `<button type="button" class="moment-note" data-action="draw-image" data-id="${esc(p.id)}">上次配图没有完成 · 点一下重试</button>`;
+    }
     // Without a drawing engine set up there is nothing to retry; once it is the note turns into a button again.
     if (p.imageState === 'failed' && /密钥/.test(p.imageNote || '') && !api.drawReady()) return `<p class="moment-note">${esc(p.imageNote)}，这张配图没有画</p>`;
     if (p.imageState === 'failed') return `<button type="button" class="moment-note" data-action="draw-image" data-id="${esc(p.id)}">${esc(p.imageNote || '配图没画出来')} · 点一下重画</button>`;
@@ -111,9 +114,9 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
     const d = ctx.dialog(title, html);
     d.body.addEventListener('click', e => {
       const b = e.target.closest('[data-action]');
-      if (!b || !handlers[b.dataset.action]) return;
-      e.preventDefault();
-      ctx.win.Promise.resolve().then(() => handlers[b.dataset.action](b)).catch(error => ctx.notify(error.message, {error: true}));
+      if (!b || b.disabled || !handlers[b.dataset.action]) return;
+      e.preventDefault(); b.disabled = true;
+      ctx.win.Promise.resolve().then(() => handlers[b.dataset.action](b)).catch(error => ctx.notify(error.message, {error: true})).finally(() => { if (d.live) b.disabled = false; });
     });
     return d;
   }

@@ -17,6 +17,7 @@ const UNPLAYABLE = /^(?:ape|wma|dsf|dff|tta|wv|amr|ac3|dts|mid|midi)$/;
  *  'archive' (.rar, .7z) or '' (anything else: pictures, text, playlists). */
 export function fileKind(name, type = '') {
   const ext = extOf(name);
+  if (/^(?:m3u8?|pls|cue|xspf|wpl)$/.test(ext) || /(?:mpegurl|scpls)/i.test(type)) return '';
   if (ext === 'lrc') return 'lyric';
   if (ext === 'zip' || /^application\/(?:x-)?zip/i.test(type)) return 'zip';
   if (LOCKED.test(ext)) return 'locked';
