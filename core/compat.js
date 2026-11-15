@@ -10,6 +10,7 @@ export function installCompat(g = globalThis) {
   define(g.Object, 'hasOwn', (object, key) => Object.prototype.hasOwnProperty.call(Object(object), key));
   const Signal = g.AbortSignal, Controller = g.AbortController;
   if (Signal && Controller) {
+    define(Signal.prototype, 'throwIfAborted', function () { if (this.aborted) throw this.reason ?? new (g.DOMException || DOMException)('signal aborted', 'AbortError'); });
     define(Signal, 'timeout', ms => { const c = new Controller(); setTimeout(() => c.abort(new DOMException('signal timed out', 'TimeoutError')), ms); return c.signal; });
     define(Signal, 'any', signals => {
       const c = new Controller(), done = c.signal;

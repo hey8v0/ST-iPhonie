@@ -47,7 +47,7 @@ let canvasBlur = null;
 /** Whether this browser's canvas blurs by itself. */
 function blursItself(doc) {
   if (canvasBlur !== null) return canvasBlur;
-  try { const g = doc.createElement('canvas').getContext('2d'); g.filter = 'blur(2px)'; canvasBlur = g.filter === 'blur(2px)'; } catch { canvasBlur = false; }
+  try { const g = doc.createElement('canvas').getContext('2d'); canvasBlur = !!g && 'filter' in g && (g.filter = 'blur(2px)', g.filter === 'blur(2px)'); } catch { canvasBlur = false; }
   return canvasBlur;
 }
 /**

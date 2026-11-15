@@ -90,10 +90,10 @@ class Songs {
         return this.runSong(draft, { engine, model });
     }
     /** What a song goes with once it has come: a song row, its lyrics, a place in its draft. */
-    async keepSong(id, draft, blob, lyric = '') {
+    async keepSong(id, draft, blob, lyric = '', {finish = false} = {}) {
         const n = draft.songs.length, seconds = lyric || draft.instrumental ? 0 : await playLength(blob) || songLength(draft);
         const { ids } = await this.storeSongs([{ title: (draft.title || '没有名字的歌') + (n ? ` · 第 ${n + 1} 版` : ''), artist: draft.who || '自己写的', blob, lyric: lyric || (draft.instrumental ? '' : estimateLrc(draft.lyrics, seconds)) }]);
-        await this.music.change(id, d => { d.songs = [...(d.songs || []), ...ids].slice(-SONG_LIMITS.versions); d.updatedAt = Date.now(); delete d.state; delete d.job; delete d.note; });
+        await this.music.change(id, d => { d.songs = [...(d.songs || []), ...ids].slice(-SONG_LIMITS.versions); d.updatedAt = Date.now(); if (finish) { delete d.state; delete d.job; delete d.note; } });
         return ids[0];
     }
     async runSong(draft, { engine, model, task = '' }) {
@@ -110,7 +110,7 @@ class Songs {
                 onTask: (taskId, used) => { job.task = taskId; this.music.change(id, d => { if (d.job) { d.job.task = taskId; if (used) d.job.model = used; } }).catch(() => {}); } });
             // A second tab of this tavern goes back to the same job: whoever gets here first keeps the song.
             if (!await this.music.change(id, d => { if (!d.job) throw Error('taken'); delete d.job; }).then(() => true, () => false)) { this.emit('music', { draft: id }); return null; }
-            const songId = await this.keepSong(id, { ...draft, lyrics: draft.lyrics || result.words || '' }, result.blob, result.lyric);
+            const songId = await this.keepSong(id, { ...draft, lyrics: draft.lyrics || result.words || '' }, result.blob, result.lyric, {finish: true});
             this.ledger.song(engine);
             this.emit('music', { draft: id });
             this.notify(`「${draft.title || '写的歌'}」做好了，在歌单里`);

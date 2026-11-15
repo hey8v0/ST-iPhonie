@@ -381,11 +381,22 @@ export class TTSBackend {
      * same id are overwritten and the rest kept. Settings are taken whole from the backup; keys, the account scope and
      * the floating ball's place stay. Everything is checked before anything is written.
      */
-    async importBackup(file, { parts = [], replace = false, password = '' } = {}) {
+    async importBackup(file, options = {}) {
+        this.assertOpen();
+        if (this.backupRestoring) throw Error('备份还在恢复，请稍等');
+        let finish;
+        const running = this.syncState.running;
+        this.backupRestoring = new Promise(resolve => { finish = resolve; });
+        clearTimeout(this.syncTimer);
+        try { if (running) await running.catch(() => {}); return await this.restoreBackup(file, options); }
+        finally { this.backupRestoring = null; finish(); this.scheduleSync(); }
+    }
+    async restoreBackup(file, { parts = [], replace = false, password = '' } = {}) {
         this.assertOpen();
         const want = new Set(parts.filter(part => BACKUP_PARTS[part])), done = {};
         if (!want.size) throw Error('请至少选一项要恢复的内容');
         const backup = await readBackup(file, { wanted: fieldsOf([...want]) });
+        if (want.has('moments') && backup.moments) this.moments.checkImport(backup.moments);
         // Keys first: a wrong password stops the restore before anything else changes.
         let keys = null;
         if (want.has('keys') && backup.keys) keys = await openKeys(backup.keys, password);
@@ -411,7 +422,10 @@ export class TTSBackend {
         for (const part of want) for (const store of PART_STORES[part]) if (backup.library[store]) rows[store] = backup.library[store];
         // One transaction for the library: photos land before the phone's look that uses them, references before the
         // settings that point at them.
-        if (Object.keys(rows).length) Object.assign(done, await this.library.importRows(rows, { replace }));
+        if (Object.keys(rows).length) {
+            Object.assign(done, await this.library.importRows(rows, { replace }));
+            for (const [part, values] of Object.entries(rows)) if (Object.hasOwn(SYNC_PARTS, part)) this.reviveSync(part, values.map(row => String(row.id)));
+        }
         if (settings) { this.save(settings); done.settings = true; await this.loadReferences(); }
         else if (moved && Object.entries(moved).some(([a, b]) => a !== b)) { this.saveVn({ cast: moveCastFiles(this.settings.vn.cast, moved), moves: moveCastFiles(this.settings.vn.moves, moved) }); const next = this.getState(); next.draw.styles = moveCastFiles(next.draw.styles, moved); next.routes = moveCastFiles(next.routes, moved); this.save(next); }
         if (want.has('vibes') && backup.library.vibes) {
@@ -425,8 +439,8 @@ export class TTSBackend {
             this.emit('draw', { vibes: true });
             done.vibeGroups = this.settings.draw.vibe.groups.length;
         }
-        if (want.has('chats') && backup.chats) { done.chats = await this.chats.importThreads(backup.chats, { replace }); this.emit('chat', { threadId: '' }); }
-        if (want.has('moments') && backup.moments) { done.moments = await this.moments.importPosts(backup.moments, { replace }); this.emit('moments', {}); }
+        if (want.has('chats') && backup.chats) { done.chats = await this.chats.importThreads(backup.chats, { replace }); this.reviveSync('chats', backup.chats.map(row => String(row.id))); this.emit('chat', { threadId: '' }); }
+        if (want.has('moments') && backup.moments) { done.moments = await this.moments.importPosts(backup.moments, { replace }); this.reviveSync('moments', backup.moments.map(row => String(row.id))); this.emit('moments', {}); }
         if (want.has('memories') && backup.memories) done.memories = await this.importChatMemories(backup.memories, {replace, restoring: true});
         if (want.has('assistant') && backup.assistant) done.assistant = await this.importAssistantThreads(backup.assistant, {replace, restoring: true});
         for (const part of ROW_PARTS) {
@@ -536,8 +550,8 @@ export class TTSBackend {
         }
         return this.save(next);
     }
-    saveRoute(value) {
-        const next = this.getState();
+    saveRoute(value, {mergeIds = []} = {}) {
+        let next = this.getState();
         if (!value || typeof value.name !== 'string' || !value.name.trim() || isPlaceholderRole(value.name)) throw Error('请填写实际角色名');
         const id = value.id || crypto.randomUUID(), index = next.routes.findIndex(route => route.id === id);
         const route = normalizeRoute({ ...(index >= 0 ? next.routes[index] : { engine: 'fish', voice: '', model: '', language: '' }), ...clone(value), id, name: value.name.trim() });
@@ -555,10 +569,18 @@ export class TTSBackend {
             route.cards = [this.cardKey(), ...(this.saveKey() ? [this.saveKey()] : [])];
             if (value.group === undefined) this.#joinCard(next, route, this.cardKey(), this.space.name);
         }
-        this.#shareName(next, route, index < 0 || next.routes[index].name !== route.name);
-        if (index >= 0) next.routes[index] = route; else next.routes.push(route);
+        const named = index < 0 || next.routes[index].name !== route.name;
+        if (!Array.isArray(mergeIds)) throw Error('合并的角色无效');
+        const merging = [...new Set(mergeIds.map(String))].map(key => next.routes.find(r => r.id === key));
+        if (merging.some(r => !r || r.id === id || !(route.aliases || []).includes(r.name))) throw Error('角色资料已变化，请重新确认合并');
+        for (const r of merging) next = removeRoute(next, r.id);
+        this.#shareName(next, route, named);
+        const keptIndex = next.routes.findIndex(r => r.id === id);
+        if (keptIndex >= 0) next.routes[keptIndex] = route; else next.routes.push(route);
         next.selected = id;
         this.save(next);
+        if (merging.some(r => this.player.pending === r.name || this.player.queue.some(line => line.role === r.name))) this.player.stop('角色配音已合并');
+        if (merging.length) sweepRoleRefs(this, merging.map(r => r.ref));
         return clone(this.settings.routes.find(row => row.id === id));
     }
     /**
@@ -963,12 +985,14 @@ export class TTSBackend {
     setSyncFiles(files) { this.syncFiles = files; }
     #syncMemory(value) {
         const key = 'st-iphonie-sync:' + this.settings.scope;
+        if (value !== undefined) this.syncMemoryLocal = {key, value: clone(value), dirty: true};
+        if (value === undefined && this.syncMemoryLocal?.key === key && this.syncMemoryLocal.dirty) return clone(this.syncMemoryLocal.value);
         try {
             const storage = this.syncStorage();
-            if (value === undefined) return JSON.parse(storage?.getItem(key) || 'null') || {};
-            storage?.setItem(key, JSON.stringify(value));
+            if (value === undefined) { const read = JSON.parse(storage?.getItem(key) || 'null') || {}; this.syncMemoryLocal = {key, value: read, dirty: false}; return read; }
+            if (storage) { storage.setItem(key, JSON.stringify(value)); this.syncMemoryLocal.dirty = false; }
         } catch { /* private window: this device starts from the tavern's copy again next time */ }
-        return {};
+        return this.syncMemoryLocal?.key === key ? clone(this.syncMemoryLocal.value) : {};
     }
     #device() {
         try {
@@ -982,13 +1006,19 @@ export class TTSBackend {
     noteGone(part, keys, after = 0) {
         const list = [...new Set((keys || []).map(String).filter(Boolean))];
         if (!list.length) return;
-        const memory = this.#syncMemory(), now = Math.max(Date.now(), after + 1);
-        this.#syncMemory({ ...memory, gone: joinGone([memory.gone, { [part]: Object.fromEntries(list.map(key => [key, now])) }], now) });
+        const memory = this.#syncMemory(), parent = key => key.split('/')[0];
+        const now = Math.max(Date.now(), after + 1, ...list.map(key => Math.max(memory.revived?.[part]?.[parent(key)] || 0, memory.observedRevived?.[part]?.[parent(key)] || 0, memory.restores?.[part]?.[parent(key)] || 0) + 1));
+        const restores = clone(memory.restores || {});
+        for (const key of list) if (restores[part]) delete restores[part][key];
+        this.#syncMemory({ ...memory, restores, gone: joinGone([memory.gone, { [part]: Object.fromEntries(list.map(key => [key, now])) }], now) });
     }
     reviveSync(part, ids) {
-        const memory = this.#syncMemory(), keys = new Set(ids), gone = {...memory.gone, [part]: {...memory.gone?.[part]}};
-        for (const key of Object.keys(gone[part])) if (keys.has(key) || [...keys].some(id => key.startsWith(id + '/'))) delete gone[part][key];
-        this.#syncMemory({...memory, gone});
+        const memory = this.#syncMemory(), restores = clone(memory.restores || {});
+        for (const id of new Set(ids.map(String))) {
+            const times = Object.entries(memory.gone?.[part] || {}).filter(([key]) => key === id || key.startsWith(id + '/')).map(([, at]) => at + 1);
+            (restores[part] ||= {})[id] = Math.max(Date.now(), (memory.revived?.[part]?.[id] || 0) + 1, (restores[part]?.[id] || 0) + 1, ...times);
+        }
+        this.#syncMemory({...memory, restores});
     }
     /** Runs a deletion of a part's items and remembers which went. */
     async dropping(part, list, task) {
@@ -1010,6 +1040,7 @@ export class TTSBackend {
     }
     /** Syncs soon (changes come in bursts: a chat reply is several writes). */
     scheduleSync(delay = 4000) {
+        if (this.backupRestoring) return;
         if (!this.settings.sync.enabled || !this.syncFiles || this.closed) return;
         clearTimeout(this.syncTimer);
         this.syncState.pending = true;
@@ -1031,6 +1062,7 @@ export class TTSBackend {
     /** One sync with the tavern: takes what changed there, writes what changed here. */
     async syncNow({ deviceName = '' } = {}) {
         this.assertOpen();
+        if (this.backupRestoring) { await this.backupRestoring; return this.syncNow({deviceName}); }
         if (!this.syncFiles) throw Error('在酒馆里打开小手机时才能保存到酒馆');
         if (this.syncState.busy) return this.syncState.running;
         clearTimeout(this.syncTimer);
@@ -1059,9 +1091,12 @@ export class TTSBackend {
         this.emit('sync', this.syncStatus());
         this.syncState.running = (async () => {
             try {
-                const result = await runSync({ stores, files: this.syncFiles, memory: this.#syncMemory(), readGone: () => this.#syncMemory().gone, device: this.#device(), deviceName: deviceName || this.syncDeviceName || '' });
+                const result = await runSync({ stores, files: this.syncFiles, memory: this.#syncMemory(), readGone: () => this.#syncMemory().gone, readRestores: () => this.#syncMemory().restores,
+                    onRevived: (revived, gone, observedRevived) => { const current = this.#syncMemory(); this.#syncMemory({...current, revived: joinGone([current.revived, revived]), gone: joinGone([current.gone, gone]), observedRevived}); },
+                    onPartApplied: (part, versions) => { const current = this.#syncMemory(); this.#syncMemory({...current, revived: joinGone([current.revived, {[part]: versions}])}); },
+                    device: this.#device(), deviceName: deviceName || this.syncDeviceName || '' });
                 // Deletions made while it ran are kept too.
-                this.#syncMemory({ ...result.memory, gone: joinGone([result.memory.gone, this.#syncMemory().gone]) });
+                this.#syncMemory({ ...result.memory, gone: joinGone([result.memory.gone, this.#syncMemory().gone]), revived: joinGone([result.memory.revived, this.#syncMemory().revived]) });
                 const preferences = [...result.pulled, ...result.merged].includes('photos') ? await this.getPhone() : null;
                 this.syncState = { ...this.syncState, error: '', lastAt: Date.now(), remote: result.remote, lastResult: { pulled: result.pulled, pushed: result.pushed, merged: result.merged } };
                 // Only these refresh notifications came from syncing. User writes during network waits stay dirty.
@@ -1876,6 +1911,7 @@ export class TTSBackend {
         if (at < 0 && list.length >= BUBBLE_LIMITS.sets) throw Error(`最多存 ${BUBBLE_LIMITS.sets} 套气泡`);
         const kept = normalizeBubbleSet({ ...(at >= 0 ? list[at] : {}), ...set, ...(at >= 0 ? {} : { id: set.id }) });
         next.chat.bubbleSets = normalizeBubbleSets(at >= 0 ? list.map((s, i) => i === at ? kept : s) : [...list, kept]);
+        if (next.chat.bubbleSets.length !== list.length + (at < 0 ? 1 : 0)) throw Error('气泡太多太长了：删掉几套再存');
         if (!next.chat.bubbleSets.some(s => s.id === kept.id)) throw Error('气泡太多太长了：删掉几套再存');
         return clone(this.save(next).chat.bubbleSets.find(s => s.id === kept.id));
     }
@@ -3686,7 +3722,7 @@ export class TTSBackend {
                 this.save(next);
             },
             ...songFacade(this), getState: () => this.getState(), readState: () => { this.assertOpen(); return this.settings; }, getSnapshot: () => this.getSnapshot(), save: (next, revision) => this.save(next, revision),
-            updateGeneral: patch => this.updateGeneral(patch), saveNarration: patch => this.saveNarration(patch), saveVn: patch => this.saveVn(patch), vnCast: () => this.vnCast(), vnSpriteRequest: (name, options) => clone(spriteRequest(this.seen, String(name || ''), clone(options || {}))), saveRoute: route => this.saveRoute(route), saveVoicePool: list => this.saveVoicePool(clone(list)), deleteRoute: id => this.deleteRoute(id),
+            updateGeneral: patch => this.updateGeneral(patch), saveNarration: patch => this.saveNarration(patch), saveVn: patch => this.saveVn(patch), vnCast: () => this.vnCast(), vnSpriteRequest: (name, options) => clone(spriteRequest(this.seen, String(name || ''), clone(options || {}))), saveRoute: (route, options) => this.saveRoute(route, clone(options || {})), saveVoicePool: list => this.saveVoicePool(clone(list)), deleteRoute: id => this.deleteRoute(id),
             switchRouteEngine, cleanAliases, validRoleName: name => typeof name === 'string' && !!name.trim() && !isPlaceholderRole(name),
             saveConnection: (engine, patch) => this.saveConnection(engine, patch),
             savePreset: preset => this.savePreset(preset), deletePreset: id => this.deletePreset(id), selectPreset: id => this.selectPreset(id),

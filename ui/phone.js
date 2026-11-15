@@ -312,9 +312,9 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     head.addEventListener('pointerup', end);
     head.addEventListener('pointercancel', end);
   }
-  function confirm(title, text = '') {
+  function confirm(title, text = '', options = {}) {
     return new Promise(resolve => {
-      const d = dialog(title, `<p class="help-copy" data-keep-hint>${esc(text)}</p><div class="actions"><button type="button" class="secondary" data-action="cancel">取消</button><button type="button" class="primary" data-action="confirm">确认</button></div>`);
+      const d = dialog(title, `<p class="help-copy" data-keep-hint>${esc(text)}</p><div class="actions"><button type="button" class="secondary" data-action="cancel">取消</button><button type="button" class="primary" data-action="confirm">确认</button></div>`, options);
       d.onClose(value => resolve(value === true));
       d.body.addEventListener('click', e => {
         const action = e.target.closest('button')?.dataset.action;

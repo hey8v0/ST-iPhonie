@@ -41,7 +41,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null;
 import { createSongHost } from './host-song.js';
-const RUNTIME_VERSION='0.9.77';
+const RUNTIME_VERSION='0.9.78';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -347,7 +347,13 @@ function watchPanelLayout(on){const w=globalThis.window,method=on?'addEventListe
  document[method]('visibilitychange',restorePanelLayout);for(const type of ['resize','scroll'])panelViewport?.[method]?.(type,queuePanelLayout);
  if(!on){cancelAnimationFrame(panelLayoutRaf);panelLayoutRaf=0;for(const id of panelLayoutTimers)clearTimeout(id);panelLayoutTimers=[];panelViewport=null;}}
 // The phone's dialog and frame: made on the first opening, or a moment before it when the entry is brought out.
-function createPanel(){panel=document.createElement('dialog');panel.id='sttts-panel';panel.setAttribute('aria-label','ST-iPhonie');frame=document.createElement('iframe');frame.title='ST-iPhonie';frame.src=new URL('ui/index.html',base).href;
+function createPanel(){panel=document.createElement('dialog');
+ // A modeless panel (as on browsers with native dialog), also on older WebViews without HTMLDialogElement.
+ if(typeof panel.show!=='function'){
+  const d=panel;Object.defineProperty(d,'open',{get:()=>d.hasAttribute('open')});
+  d.show=()=>{d.setAttribute('open','');};d.close=()=>{if(!d.open)return;d.removeAttribute('open');d.dispatchEvent(new window.Event('close'));};
+ }
+ panel.id='sttts-panel';panel.setAttribute('aria-label','ST-iPhonie');panel.setAttribute('role','dialog');frame=document.createElement('iframe');frame.title='ST-iPhonie';frame.src=new URL('ui/index.html',base).href;
  // Made ahead and still closed: the phone is told it is not on screen yet, so opening it comes in the usual way.
  frame.addEventListener('load',()=>{try{listenTouches(frame.contentWindow);}catch{}if(!panel?.open)try{frame.contentWindow?.stTtsPanelVisibility?.(false);}catch{}});
  panel.append(frame);panel.addEventListener('close',()=>{setTimeout(syncBack,0);floating?.cover(false);frame?.contentWindow?.stTtsPanelVisibility?.(false);if(panelExpanded){panelExpanded=false;placePanel();}callIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();});panel.addEventListener('cancel',()=>{if(['playing','generating'].includes(player.phase))player.toggle();});document.body.append(panel);}

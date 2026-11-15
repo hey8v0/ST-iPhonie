@@ -417,13 +417,15 @@ export function rolesApp(ctx) {
         // An 别名 that is another role's name: that role was this one all along, so it can be merged in.
         const aliases = api.cleanAliases(current.aliases, current.name);
         const twins = api.getState().routes.filter(x => x.id !== current.id && aliases.includes(x.name));
+        const mergeIds = [];
         if (twins.length && await ctx.confirm(`把「${twins.map(x => x.name).join('」「')}」合并进来？`, `${twins.length > 1 ? '这些名字' : '这个名字'}现在是单独的角色。合并后删掉${twins.length > 1 ? '它们' : '它'}，以后都用「${current.name.trim()}」的音色。`)) {
           // Its cards too (分区); a role that is everyone's stays so.
           if (current.cards?.length) current.cards = twins.some(x => !x.cards?.length) ? [] : [...new Set([...current.cards, ...twins.flatMap(x => x.cards)])];
-          for (const x of twins) { api.deleteRoute(x.id); drafts.delete(x.id); }
+          mergeIds.push(...twins.map(x => x.id));
         }
         const previous = current.id || 'new', wasNew = !current.id;
-        current = api.saveRoute(current);
+        current = api.saveRoute(current, {mergeIds});
+        for (const id of mergeIds) drafts.delete(id);
         if (tried?.id === previous) tried.id = current.id;
         drafts.delete(previous);
         drafts.set(current.id, current);

@@ -130,7 +130,9 @@ export function normalizeBubbleSets(list) {
   let total = 0;
   for (const raw of Array.isArray(list) ? list : []) {
     const set = normalizeBubbleSet(raw);
-    if (seen.has(set.id) || (total += set.me.length + set.them.length) > BUBBLE_LIMITS.all) continue;
+    const size = set.me.length + set.them.length;
+    if (seen.has(set.id) || total + size > BUBBLE_LIMITS.all) continue;
+    total += size;
     seen.add(set.id); out.push(set);
     if (out.length >= BUBBLE_LIMITS.sets) break;
   }
@@ -145,6 +147,38 @@ export function normalizeBubbleOf(value) {
 export const wornSet = bubble => /^custom:(bset-[a-z0-9]{4,40})$/.exec(String(bubble || ''))?.[1] || '';
 
 // ---------- reading CSS ----------
+// Read comments and strings together. CSS bad-strings terminate at a newline, whereas our structural reader keeps
+// reading to the quote: accepting them would let browser error recovery escape the generated selector. Reject the
+// whole side when its token boundaries are ambiguous; the user's editable source is kept unchanged.
+function readCss(text) {
+  let out = '', quote = '';
+  // Braces are recovered by items() and always re-emitted by us, so stray outer braces can still be ignored.
+  const stack = [], pairs = {')': '(', ']': '['};
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '\0') return null;
+    if (quote) {
+      if (/[\r\n\f]/.test(c)) return null;
+      out += c;
+      if (c === '\\') {
+        if (i + 1 >= text.length || /[\r\n\f\0]/.test(text[i + 1])) return null;
+        out += text[++i];
+      } else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      if (end < 0) return null;
+      out += ' '; i = end + 1; continue;
+    }
+    if (c === '\\') return null; // escapes outside strings are not part of the bubble CSS contract
+    if (c === '"' || c === "'") quote = c;
+    else if ('(['.includes(c)) stack.push(c);
+    else if (pairs[c] && stack.pop() !== pairs[c]) return null;
+    out += c;
+  }
+  return quote || stack.length ? null : out;
+}
 /** Splits at `sep` where it is outside (), [] and strings. */
 function splitTop(text, sep) {
   const out = [];
@@ -197,8 +231,8 @@ function fetchesNothing(value) {
   let read = 0;
   for (const m of value.matchAll(URL_CALL)) { read++; if (!PICTURE.test(String(m[1] ?? m[2] ?? m[3] ?? '').trim())) return false; }
   if (read !== calls) return false;
-  const bare = value.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
-  return !/\\|image-set\s*\(|(?:^|[^-\w])src\s*\(|expression\s*\(|javascript:|vbscript:/i.test(bare);
+  const bare = value.replace(/"(?:[^"\\\r\n\f]|\\[^\r\n\f])*"|'(?:[^'\\\r\n\f]|\\[^\r\n\f])*'/g, '');
+  return !/["'\\]|image-set\s*\(|(?:^|[^-\w])src\s*\(|expression\s*\(|javascript:|vbscript:/i.test(bare);
 }
 /** The declarations of a rule that can stay, with the set's @keyframes names in its animations. */
 function declarations(list, names, dropped) {
@@ -255,7 +289,8 @@ function walk(list, out, {scope, names, dropped, parent = '', depth = 0}) {
  * the box). scope: the selector of those bubbles; id: what the set's @keyframes names begin with.
  */
 export function scopeBubbleCss(text, {scope, id}) {
-  const source = css(text).replace(/\/\*[\s\S]*?(?:\*\/|$)/g, ' '), names = new Map(), dropped = new Set(), out = [];
+  const source = readCss(css(text)), names = new Map(), dropped = new Set(), out = [];
+  if (source === null) return {css: '', dropped: ['不安全或未闭合的 CSS 字符串、注释或括号']};
   for (const m of source.matchAll(/@(?:-webkit-)?keyframes\s+(-?[_a-zA-Z][-\w]*)/g)) names.set(m[1], `${id}-${m[1]}`);
   walk(items(source), out, {scope, names, dropped});
   return {css: (out.length ? `${scope}{position:relative}` : '') + out.join('\n'), dropped: [...dropped]};

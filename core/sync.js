@@ -23,7 +23,7 @@
 // manifest, so a merge does not bring it back from a copy that still has it.
 import {sha256Hex} from './hash.js';
 
-export const SYNC_FORMAT = 2;
+export const SYNC_FORMAT = 3;
 export const SYNC_PARTS = Object.freeze({chats: '聊天记录', moments: '朋友圈', notes: '备忘录', photos: '相册', memories: '聊天记忆', assistant: '助手会话与记忆', forum: '论坛', peek: '查手机', books: '绘本', vibes: 'Vibe', favorites: '收藏的语音', references: '参考音频', music: '音乐', sounds: '音效', paint: '画画的作品', ledger: '账本', looks: '我的主题', albums: '相册的分类', games: '大游戏存档', wardrobe: '衣柜', theater: '小剧场'});
 export const MANIFEST = 'st-iphonie-sync.json';
 export const partFile = part => `st-iphonie-${part}.json`;
@@ -87,17 +87,18 @@ export function joinGone(lists, now = Date.now()) {
   return out;
 }
 /** A part's items without what was deleted. */
-export function prune(part, items, gone = {}) {
+export function prune(part, items, gone = {}, revived = {}) {
   const has = key => Object.hasOwn(gone, key);
+  const restoredKey = key => Math.max(revived[key] || 0, revived[key.split('/')[0]] || 0) > (gone[key] || 0);
   // Only an explicit backup restore can supersede an assistant deletion. Ordinary edits cannot revive old copies.
-  const restored = x => part === 'assistant' && Number.isFinite(x.restoredAt) && x.restoredAt > gone[String(x.id)];
+  const restored = x => restoredKey(String(x.id)) || (part === 'assistant' && Number.isFinite(x.restoredAt) && x.restoredAt > gone[String(x.id)]);
   // Here an id can come again (the same person's phone looked at again, today's 账本 after clearing it): what was made
   // after it was deleted is a new one, and only an older copy stays deleted.
   const remade = x => REMADE.has(part) && rowTime(x) > gone[String(x.id)];
   return items.filter(x => !has(String(x.id)) || restored(x) || remade(x)).map(x =>
-    part === 'chats' && Array.isArray(x.messages) && x.messages.some(m => has(`${x.id}/${m.id}`)) ? {...x, messages: x.messages.filter(m => !has(`${x.id}/${m.id}`))}
-    : part === 'moments' && Array.isArray(x.comments) && x.comments.some(c => has(`${x.id}/${c.id}`)) ? {...x, comments: x.comments.filter(c => !has(`${x.id}/${c.id}`))}
-    : part === 'forum' && Array.isArray(x.replies) && x.replies.some(r => has(`${x.id}/${r.id}`)) ? {...x, replies: x.replies.filter(r => !has(`${x.id}/${r.id}`))}
+    part === 'chats' && Array.isArray(x.messages) && x.messages.some(m => has(`${x.id}/${m.id}`)) ? {...x, messages: x.messages.filter(m => !has(`${x.id}/${m.id}`) || restoredKey(`${x.id}/${m.id}`))}
+    : part === 'moments' && Array.isArray(x.comments) && x.comments.some(c => has(`${x.id}/${c.id}`)) ? {...x, comments: x.comments.filter(c => !has(`${x.id}/${c.id}`) || restoredKey(`${x.id}/${c.id}`))}
+    : part === 'forum' && Array.isArray(x.replies) && x.replies.some(r => has(`${x.id}/${r.id}`)) ? {...x, replies: x.replies.filter(r => !has(`${x.id}/${r.id}`) || restoredKey(`${x.id}/${r.id}`))}
     : x);
 }
 const newer = (a, b, time) => (time(b) || 0) > (time(a) || 0) ? b : a;
@@ -143,8 +144,8 @@ function rebase(part, before, incoming, current) {
   return [...result.values()];
 }
 /** Both sides changed a part: joins them item by item; what either side deleted stays deleted. */
-export function mergePart(part, local, remote, gone = {}) {
-  local = prune(part, local, gone); remote = prune(part, remote, gone);
+export function mergePart(part, local, remote, gone = {}, revived = {}) {
+  local = prune(part, local, gone, revived); remote = prune(part, remote, gone, revived);
   const mine = new Map(local.map(x => [x.id, x])), out = [];
   for (const theirs of remote) {
     const here = mine.get(theirs.id);
@@ -154,7 +155,10 @@ export function mergePart(part, local, remote, gone = {}) {
       const base = newer(here, theirs, t => t.updatedAt);
       out.push({...base, ...((here.phoneReceipts || theirs.phoneReceipts) ? {phoneReceipts: [...new Set([...(here.phoneReceipts || []), ...(theirs.phoneReceipts || [])])].slice(-500)} : {}), messages: mergeMessages(here.messages, theirs.messages), unread: Math.max(here.unread || 0, theirs.unread || 0)});
     } else if (part === 'moments') {
-      out.push({...here, ...theirs, likes: [...new Set([...(here.likes || []), ...(theirs.likes || [])])], comments: union(here.comments, theirs.comments).sort((a, b) => a.at - b.at), photoId: theirs.photoId || here.photoId});
+      const image = (theirs.imageUpdatedAt || 0) > (here.imageUpdatedAt || 0) ? theirs : (here.imageUpdatedAt || 0) > (theirs.imageUpdatedAt || 0) ? here : null;
+      const row = {...here, ...theirs, likes: [...new Set([...(here.likes || []), ...(theirs.likes || [])])], comments: union(here.comments, theirs.comments).sort((a, b) => a.at - b.at), photoId: theirs.photoId || here.photoId};
+      if (image) for (const key of ['photoId','imageVersions','imageRemoved','imageState','imageNote','imageTags','imageUpdatedAt']) { if (Object.hasOwn(image, key)) row[key] = image[key]; else delete row[key]; }
+      out.push(row);
     } else if (wholePart(part)) out.push(newerWhole(here, theirs));
     else if (part === 'notes') out.push(newer(here, theirs, n => n.updatedAt));
     // a photo made smaller (压缩旧图) on one side is smaller on both; otherwise this side's copy is the same picture
@@ -174,7 +178,7 @@ export function mergePart(part, local, remote, gone = {}) {
  * files: {read(name, {blob}) → text | Blob | null, write(name, text | Blob), remove(name)}; memory: {hashes, savedAt}.
  * Returns {memory, pulled:[parts], pushed:[parts], merged:[parts], savedAt, remote}.
  */
-export async function runSync({stores, files, memory = {}, readGone = () => memory.gone, device = '', deviceName = '', now = () => Date.now(), parts = Object.keys(SYNC_PARTS)}) {
+export async function runSync({stores, files, memory = {}, readGone = () => memory.gone, readRestores = () => memory.restores, onRevived = () => {}, onPartApplied = () => {}, device = '', deviceName = '', now = () => Date.now(), parts = Object.keys(SYNC_PARTS)}) {
   const blobOf = (part, row) => stores.fileBlob ? stores.fileBlob(part, row) : stores.photoBlob(row);
   const hashes = {...(memory.hashes || {})}, pulled = [], pushed = [], merged = [];
   let gone = joinGone([memory.gone], now());
@@ -187,19 +191,49 @@ export async function runSync({stores, files, memory = {}, readGone = () => memo
   }
   const remoteParts = manifest?.parts || {}, next = {};
   gone = joinGone([gone, manifest?.gone], now());
+  // Restores are explicit operations, not ordinary row edits. Rebase their local tokens above the remote deletion
+  // clocks on the next sync, including a remote deletion this device had not seen when the backup was imported.
+  const localRevived = joinGone([memory.revived], now()), remoteRevived = joinGone([manifest?.revived], now());
+  const localGone = joinGone([readGone()], now());
+  gone = joinGone([gone, localGone], now());
+  const appliedRestores = structuredClone(Object.fromEntries(Object.entries(readRestores() || {}).filter(([part]) => parts.includes(part))));
+  for (const [part, keys] of Object.entries(appliedRestores)) {
+    if (!Object.hasOwn(SYNC_PARTS, part)) continue;
+    for (const [id, token] of Object.entries(keys)) {
+      if (!Number.isFinite(token)) continue;
+      const deletions = Object.entries(gone[part] || {}).filter(([key]) => key === id || key.startsWith(id + '/'));
+      const at = Math.max(now(), token, (remoteRevived[part]?.[id] || 0) + 1, ...deletions.map(([, n]) => n + 1));
+      (localRevived[part] ||= {})[id] = at;
+      // A child deleted locally AFTER the restore must still be deleted after the clock rebase.
+      for (const [key, deleted] of Object.entries(localGone[part] || {})) if (key.startsWith(id + '/') && deleted > token) (gone[part] ||= {})[key] = Math.max(deleted, at + 1);
+    }
+  }
+  const revived = joinGone([localRevived, remoteRevived], now());
+  onRevived(localRevived, gone, revived);
   for (const part of parts) {
     gone = joinGone([gone, readGone()], now());
     let items = await stores.read(part);
     let text = JSON.stringify(canonical(part, items)), hash = await hashText(text);
     const remoteHash = remoteParts[part]?.hash, base = hashes[part];
-    let result = prune(part, items, gone[part]), changedHere = false, fromRemote = false;
-    if (remoteHash && remoteHash !== base && remoteHash !== hash) {
+    let result = prune(part, items, gone[part], revived[part]), changedHere = false, fromRemote = false;
+    const remoteRestored = Object.entries(remoteRevived[part] || {}).some(([id, at]) => at > (localRevived[part]?.[id] || 0));
+    if (remoteHash && remoteHash !== hash && (remoteHash !== base || remoteRestored)) {
       const body = await files.read(partFile(part));
       if (body === null) throw Error(`酒馆里少了 ${partFile(part)}，这次先不同步`);
       const theirs = JSON.parse(body);
       changedHere = base !== undefined ? hash !== base : items.length > 0;
+      if (Object.entries(localRevived[part] || {}).some(([id, at]) => at > (remoteRevived[part]?.[id] || 0))) changedHere = true;
       fromRemote = true;
-      result = changedHere ? mergePart(part, items, theirs, gone[part]) : prune(part, theirs, gone[part]);
+      result = changedHere ? mergePart(part, items, theirs, gone[part], revived[part]) : prune(part, theirs, gone[part], revived[part]);
+      // A newly restored snapshot wins over the older revision as a whole. Once both devices have that version,
+      // ordinary chat/comment merging resumes; stale edits cannot replace restored fields on their first pull.
+      const rows = new Map(result.map(row => [String(row.id), row]));
+      for (const [side, own, other] of [[items, localRevived, remoteRevived], [theirs, remoteRevived, localRevived]])
+        for (const row of side) if ((own[part]?.[row.id] || 0) > (other[part]?.[row.id] || 0)) {
+          const [kept] = prune(part, [row], gone[part], revived[part]);
+          if (kept) rows.set(String(row.id), kept);
+        }
+      result = [...rows.values()];
       if (part === 'photos') {
         const have = new Map(items.map(r => [r.id, r]));
         result = await Promise.all(result.map(async row => {
@@ -207,7 +241,7 @@ export async function runSync({stores, files, memory = {}, readGone = () => memo
           if (mine && packedAt(mine) >= packedAt(row)) return mine;
           // theirs is new here, or was made smaller there: its picture (what was drawn with stays from here)
           const blob = await files.read(photoFile(row), {blob: true});
-          return blob ? {...mine, ...row, blob} : mine || null;
+          return blob ? {...mine, ...row, blob: blob.slice(0, blob.size, EXT[row.type] ? row.type : blob.type)} : mine || null;
         }));
         result = result.filter(row => row?.blob);
       } else if (FILES[part]) {
@@ -228,13 +262,16 @@ export async function runSync({stores, files, memory = {}, readGone = () => memo
       await stores.write(part, result, {replace: true, merge: current => {
         gone = joinGone([gone, readGone()], now());
         if (JSON.stringify(canonical(part, current)) !== text) changedHere = true;
-        return prune(part, rebase(part, before, result, current), gone[part]);
+        return prune(part, rebase(part, before, result, current), gone[part], revived[part]);
       }});
       if (fromRemote) (changedHere ? merged : pulled).push(part);
       items = await stores.read(part);
       text = JSON.stringify(canonical(part, items));
       hash = await hashText(text);
     }
+    // Remember applied versions per part, even if a later part/network write fails. Merely seeing the manifest must
+    // not mark all its restores as applied to rows that have not been read yet.
+    onPartApplied(part, revived[part] || {});
     if (hash !== remoteHash) {
       const fileOf = FILES[part];
       if (fileOf) {
@@ -250,14 +287,19 @@ export async function runSync({stores, files, memory = {}, readGone = () => memo
     next[part] = {hash, count: items.length};
     hashes[part] = hash;
   }
-  const told = Object.entries(gone).some(([part, keys]) => Object.keys(keys).some(key => !manifest?.gone?.[part]?.[key]));
+  const told = Object.entries(gone).some(([part, keys]) => Object.entries(keys).some(([key, at]) => at > (manifest?.gone?.[part]?.[key] || 0)))
+    || Object.entries(revived).some(([part, keys]) => Object.entries(keys).some(([key, at]) => at > (manifest?.revived?.[part]?.[key] || 0)));
   let remote = manifest ? {savedAt: manifest.savedAt, deviceName: manifest.deviceName || '', device: manifest.device || ''} : null;
   if (pushed.length || !manifest || told || manifest.format !== SYNC_FORMAT) {
     remote = {savedAt: now(), deviceName, device};
-    await files.write(MANIFEST, JSON.stringify({app: 'ST-iPhonie', kind: 'sync', format: SYNC_FORMAT, ...remote, parts: {...remoteParts, ...next}, gone}));
+    await files.write(MANIFEST, JSON.stringify({app: 'ST-iPhonie', kind: 'sync', format: SYNC_FORMAT, ...remote, parts: {...remoteParts, ...next}, gone, revived}));
   }
   // The tavern's copy is now what this device holds.
-  return {memory: {hashes, savedAt: remote.savedAt, gone}, pulled, pushed, merged, savedAt: remote.savedAt, remote};
+  const restores = {};
+  for (const [part, keys] of Object.entries(readRestores() || {})) for (const [id, at] of Object.entries(keys))
+    if (at !== appliedRestores[part]?.[id]) (restores[part] ||= {})[id] = at;
+  const appliedRevived = joinGone([localRevived, Object.fromEntries(parts.map(part => [part, revived[part]]))], now());
+  return {memory: {hashes, savedAt: remote.savedAt, gone, revived: appliedRevived, restores}, pulled, pushed, merged, savedAt: remote.savedAt, remote};
 }
 
 /**

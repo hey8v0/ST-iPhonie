@@ -61,7 +61,7 @@ export function bookApp(ctx) {
   /** The pictures sheet n shows (the last page shows the cover's). */
   const picturesOf = (b, n) => slotsOf(b, n).map(p => p.picture).filter(Boolean);
   /** Picture k of sheet n (the cover's on sheet 0; a person's on the people page), made when the spread has no place for it yet. */
-  const slotOf = (n, k) => n === 0 ? book.cover : book.spreads[n - 1].layout === 'cast' ? book.spreads[n - 1].cast[k] : (book.spreads[n - 1].pictures[k] ||= {prompt: '', picture: null, people: true, who: []});
+  const slotOf = (n, k, owner = book) => n === 0 ? owner.cover : owner.spreads[n - 1].layout === 'cast' ? owner.spreads[n - 1].cast[k] : (owner.spreads[n - 1].pictures[k] ||= {prompt: '', picture: null, people: true, who: []});
   /** The 角色 App's other names for the book's people: {alias → name} (a model may write one of those). */
   const aliasesOf = names => { const out = {}; for (const r of api.readState?.().routes || api.getState().routes) if (names.includes(r.name)) for (const a of r.aliases || []) if (a && !out[a]) out[a] = r.name; return out; };
 
@@ -214,45 +214,47 @@ export function bookApp(ctx) {
   }
   /** Draws every picture still to be drawn (asking once when it costs). Each one is kept as it comes. */
   async function drawMissing(me = {stop: false}, {all = false} = {}) {
-    const todo = missingPictures(book, all);
+    const targetId = book.id, todo = missingPictures(book, all);
     if (!todo.length) return 0;
     if (!api.drawReady?.()) { ctx.notify('绘图 App 还没设置好引擎，图先空着，设置好后在书里点「⋯ → 补画缺的图」', {error: true}); return 0; }
     const quote = api.drawQuote?.(api.getState().draw.params);
     if (quote && quote.free === false && !await ctx.confirm(`要画 ${todo.length} 张图`, '按现在绘图 App 的设置，每张都会花点数或额度。继续画吗？')) return 0;
     let done = 0, failed = 0, last = '', why = '';
     for (const item of todo) {
-      if (me.stop) break;
+      if (me.stop || book?.id !== targetId) break;
       if (view === 'making') progress('画插图', done, todo.length, `第 ${done + failed + 1} 张，共 ${todo.length} 张${item.sheet ? '' : '（封面）'}${failed ? `；${failed} 张没画成` : ''}`, last);
       try {
-        const pic = await drawShot(item.sheet, item.k);
+        const pic = await drawShot(item.sheet, item.k, {owner: await api.getBook(targetId)});
         done++;
-        book = await api.saveBook(book);
         last = await picUrl(pic);
-        reader?.changed(book, item.sheet);
       } catch (error) { failed++; why = error.message; if (error.code === 'PAID') break; }
     }
     if (failed) ctx.notify(`有 ${failed} 张图没画成${why ? `（${why}）` : ''}，之后可以在书里点「⋯ → 补画缺的图」再试`, {error: true});
     return done;
   }
   /** The settings pictures are drawn with: 绘本画风 puts the book's own way of drawing in place of the 画风's artists. */
-  function drawSettings() {
+  function drawSettings(owner = book) {
     const state = api.getState();
-    if (book.art !== 'book') return state;
-    const s = structuredClone(state), style = activeStyle(s.draw), t = themeOf(book.theme);
+    if (owner.art !== 'book') return state;
+    const s = structuredClone(state), style = activeStyle(s.draw), t = themeOf(owner.theme);
     if (style) { style.artist = ''; style.positive = t.art; }
     return s;
   }
-  const safeTitle = () => book.title.replace(/[\\/:*?"<>|]/g, '').slice(0, 30) || '绘本';
+  const safeTitle = (owner = book) => owner.title.replace(/[\\/:*?"<>|]/g, '').slice(0, 30) || '绘本';
   /**
    * Draws picture k of sheet n (the cover: sheet 0): what it shows (its prompt, else one written from the spread's
    * words), in the book's way, with the people in it, composed for where it goes (alone on white, room left for the
    * words …), in the shape of its place.
    */
-  async function drawShot(n, k, {prompt} = {}) {
-    const spread = sheetOf(book, n).spread || null, t = themeOf(book.theme), names = castOf(book), s = slotOf(n, k);
-    const words = readOf(book, n).map(l => l.text).join(' ');
+  async function drawShot(n, k, {prompt, owner = book} = {}) {
+    if (!owner) throw Error('原绘本已关闭');
+    const target = structuredClone(owner), before = await api.getBook(target.id);
+    if (!before) throw Error('原绘本已经删掉了');
+    const place = b => JSON.stringify(n ? b.spreads[n - 1] : b.cover), expected = place(before);
+    const spread = sheetOf(target, n).spread || null, t = themeOf(target.theme), names = castOf(target), s = slotOf(n, k, target);
+    const words = readOf(target, n).map(l => l.text).join(' ');
     let what = prompt ?? s.prompt;
-    if (!what) { const w = await api.writePrompt((words || book.title).slice(0, 300), names); what = w?.prompt || ''; }
+    if (!what) { const w = await api.writePrompt((words || target.title).slice(0, 300), names); what = w?.prompt || ''; }
     if (!what) throw Error('没能写出这一张要画什么');
     s.prompt = what;
     // Whose looks go with it (0.9.40): the people the model named for this picture; else the book's people named in
@@ -262,12 +264,17 @@ export function bookApp(ctx) {
     const who = !people ? [] : named.length ? named : namesIn(what, names, aliases).length ? namesIn(what, names, aliases) : namesIn(words, names, aliases).slice(0, 2);
     if (people && !named.length) s.who = who;
     const scene = [people ? what : [withoutPeopleTags(what), 'no humans, scenery'].filter(Boolean).join(', '), composeOf(spread)].filter(Boolean).join(', ');
-    const inputs = pictureInputs(drawSettings(), {prompt: scene, characters: who}, people && !who.length ? words : '');
+    const inputs = pictureInputs(drawSettings(target), {prompt: scene, characters: who}, people && !who.length ? words : '');
     inputs.params = {...inputs.params, ...sizeFor(inputs.params, shapeOf(spread))};
     inputs.negative = [inputs.negative, t.negative, people ? '' : '1girl, 1boy, people, person, character', spread && ['quiet', 'ground'].includes(spread.layout) ? 'frame, border, busy background' : ''].filter(Boolean).join(', ');
     const {names: _n, ...request} = inputs;
-    const result = await api.generateImage({...request, allowPaid: true, name: '绘本-' + safeTitle(), key: `book:${book.id}:${n}:${k}`, label: `绘本 · ${book.title} · ${n ? `第 ${n} 个跨页` : '封面'}`});
+    const result = await api.generateImage({...request, allowPaid: true, name: '绘本-' + safeTitle(target), key: `book:${target.id}:${n}:${k}`, label: `绘本 · ${target.title} · ${n ? `第 ${n} 个跨页` : '封面'}`});
     s.picture = {id: result.photoId};
+    const latest = await api.getBook(target.id);
+    if (!latest || place(latest) !== expected) throw Error('绘本已改动，生成的图已保存在相册');
+    Object.assign(slotOf(n, k, latest), s);
+    const saved = await api.saveBook(latest);
+    if (book?.id === target.id) { book = saved; reader?.changed(book, n); }
     return s.picture;
   }
 
@@ -360,7 +367,7 @@ export function bookApp(ctx) {
     const k = await menu(ctx, title, [0, 1].map(k => ({key: String(k), icon: 'image', label: k ? '右边那张' : '左边那张', note: s.pictures[k]?.picture ? (s.pictures[k].prompt || '已有图').slice(0, 40) : '还没有图'})));
     return k == null ? null : Number(k);
   }
-  async function drawWithNote(all = false) { ctx.notify('开始画，画好一张放一张'); const n = await drawMissing(job = {stop: false}, {all}); job = null; await reader?.refresh(book); if (n) ctx.notify(`画好了 ${n} 张`); }
+  async function drawWithNote(all = false) { const targetId = book.id, me = {stop: false}; ctx.notify('开始画，画好一张放一张'); const n = await drawMissing(job = me, {all}); if (job === me) job = null; if (book?.id === targetId) await reader?.refresh(book); if (n) ctx.notify(`画好了 ${n} 张`); }
   function pickBlob() {
     return new Promise(resolve => import('./draw-images.js').then(m => m.pickPicture(ctx, api, '给这一面选一张图')).then(resolve, () => resolve(null)));
   }
@@ -497,7 +504,7 @@ export function bookApp(ctx) {
     else if (reshaped) ctx.notify(`这个排法要${SHAPES[SPREADS[l].shape]}，原来的图会被裁掉一些，可以点「重画这一面的图」`);
   }
   function redraw(n, k) {
-    const s = slotOf(n, k), spread = sheetOf(book, n).spread;
+    const owner = book, s = slotOf(n, k, owner), spread = sheetOf(owner, n).spread;
     const d = ctx.dialog(n ? '画这一张' : '画封面', `<div class="field"><span>画什么（英文标签，空着就按${n ? '这一面的字' : '书名'}写）</span><textarea data-bk-prompt rows="4">${esc(s.prompt)}</textarea></div>
       <label class="bk-check"><input type="checkbox" data-bk-people${s.people !== false ? ' checked' : ''}> 画面里画人物</label>
       ${castOf(book).length ? `<div class="field"><span>画面里有谁${help('选中的人按角色 App 里的外貌（和参考图）画；没选的人不带外貌。')}</span><div class="bk-people-row">${castOf(book).map(x => `<button type="button" class="chip" data-bk-who="${esc(x)}" aria-pressed="${(s.who || []).includes(x)}">${esc(x)}</button>`).join('')}</div></div>` : ''}
@@ -511,10 +518,10 @@ export function bookApp(ctx) {
         if (!b) return;
         b.disabled = true; b.textContent = '正在画…';
         try {
-          slotOf(n, k).people = d.body.querySelector('[data-bk-people]').checked;
-          slotOf(n, k).who = [...d.body.querySelectorAll('[data-bk-who][aria-pressed=true]')].map(x => x.dataset.bkWho).slice(0, BOOK_LIMIT.who);
-          await drawShot(n, k, {prompt: d.body.querySelector('[data-bk-prompt]').value.trim()});
-          d.close(); await keep(n);
+          slotOf(n, k, owner).people = d.body.querySelector('[data-bk-people]').checked;
+          slotOf(n, k, owner).who = [...d.body.querySelectorAll('[data-bk-who][aria-pressed=true]')].map(x => x.dataset.bkWho).slice(0, BOOK_LIMIT.who);
+          await drawShot(n, k, {owner, prompt: d.body.querySelector('[data-bk-prompt]').value.trim()});
+          d.close(); if (book?.id === owner.id) await reader?.refresh(book);
         } catch (error) { b.disabled = false; b.textContent = '再试一次'; ctx.notify(error.message, {error: true}); }
       });
     });

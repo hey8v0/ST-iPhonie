@@ -172,7 +172,7 @@ export async function modelPreview(ctx, api, name, model) {
     if (mv && actor) {
       if (mv.dataset.moveMotion) actor.act({id: 'motion', motion: mv.dataset.moveMotion});
       else if (mv.hasAttribute('data-move-add')) addMoveFile();
-      else if (mv.hasAttribute('data-move-drop')) { const id = mv.closest('[data-file]').dataset.file; ctx.confirm('删掉这个动作文件？', '酒馆里的文件也会删掉，所有 VRM 角色都不再用它。').then(ok => ok && api.vnMoveFile(null, {id, remove: true}).then(paintMoves)).catch(error => ctx.notify(error.message, {error: true})); }
+      else if (mv.hasAttribute('data-move-drop')) { const id = mv.closest('[data-file]').dataset.file; ctx.confirm('删掉这个动作文件？', '酒馆里的文件也会删掉，所有 VRM 角色都不再用它。', {over: true}).then(ok => ok && d.live && api.vnMoveFile(null, {id, remove: true}).then(paintMoves)).catch(error => ctx.notify(error.message, {error: true})); }
       else actor.act(mv.dataset.path ? {id: mv.dataset.move, path: mv.dataset.path} : {id: mv.dataset.move})?.catch?.(error => ctx.notify(error.message, {error: true}));
       return;
     }

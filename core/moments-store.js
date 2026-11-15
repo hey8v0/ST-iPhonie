@@ -15,13 +15,15 @@ function cleanComment(c, id, at) {
   if (!from || !said) throw fail('评论内容为空');
   return {id, from, ...(person(c.to) ? {to: person(c.to)} : {}), text: said, at};
 }
-function cleanPost(p, id, at) {
+function cleanPost(p, id, at, {stored = false} = {}) {
   const author = person(p?.author), said = clip(p?.text, MOMENTS_LIMITS.text).trim();
   if (!author) throw fail('动态缺少发布人');
-  if (!said && !p?.photoId) throw fail('动态内容为空');
+  if (!said && !p?.photoId && !stored) throw fail('动态内容为空');
   const out = {id, author, text: said, at, source: ['manual', 'auto', 'me', 'chat'].includes(p.source) ? p.source : 'manual', likes: [], comments: []};
   if (p.phoneReceipt) out.phoneReceipt = clip(p.phoneReceipt, 600);
   if (p.photoId) out.photoId = clip(p.photoId, 512);
+  if (p.imageRemoved || (stored && !said && !p.photoId)) out.imageRemoved = true;
+  if (Number.isFinite(p.imageUpdatedAt)) out.imageUpdatedAt = p.imageUpdatedAt;
   if (p.imageTags) out.imageTags = clip(p.imageTags, 600);
   if (versionList(p.imageVersions).length) out.imageVersions = versionList(p.imageVersions);
   if (['waiting', 'done', 'failed'].includes(p.imageState)) out.imageState = p.imageState;
@@ -138,7 +140,11 @@ export class MomentStore {
   /** The picture of a post: {photoId, imageState, imageNote, imageTags, imageVersions}. */
   async setImage(id, {photoId, imageState, imageNote, imageTags, imageVersions} = {}) {
     return this.#change(id, row => {
-      if (photoId !== undefined) { if (photoId) row.photoId = clip(photoId, 512); else delete row.photoId; }
+      if (photoId !== undefined) {
+        row.imageUpdatedAt = Math.max(this.#now(), (row.imageUpdatedAt || 0) + 1);
+        if (photoId) { row.photoId = clip(photoId, 512); delete row.imageRemoved; }
+        else { delete row.photoId; row.imageRemoved = true; }
+      }
       if (imageTags !== undefined && String(imageTags).trim()) row.imageTags = clip(String(imageTags).trim(), 600);
       if (imageVersions !== undefined) { const list = versionList(imageVersions); if (list.length) row.imageVersions = list; else delete row.imageVersions; }
       if (imageState !== undefined) row.imageState = imageState;
@@ -155,15 +161,21 @@ export class MomentStore {
 
   /** Every post, for a backup. */
   async exportPosts() { return this.list(); }
-  /** Puts backup posts back with their ids, checked like new ones, in one transaction. replace: other posts go. */
-  async importPosts(posts, {replace = false, merge} = {}) {
+  /** Validates before a multi-store restore writes its first part. No transaction or storage changes. */
+  checkImport(posts) { this.#preparePosts(posts); }
+  #preparePosts(posts) {
     if (!Array.isArray(posts)) throw fail('备份里的朋友圈无效');
-    const now = this.#now(), prepare = values => values.slice(0, MOMENTS_LIMITS.posts).map(p => {
+    const now = this.#now();
+    return posts.slice(0, MOMENTS_LIMITS.posts).map(p => {
       if (!p || typeof p !== 'object' || !p.id) throw fail('备份里的朋友圈无效');
       const at = Number.isFinite(p.at) ? p.at : now;
-      return {scope: this.#scope, ...cleanPost(p, clip(p.id, 512), at),
+      return {scope: this.#scope, ...cleanPost(p, clip(p.id, 512), at, {stored: true}),
         comments: (Array.isArray(p.comments) ? p.comments : []).slice(-MOMENTS_LIMITS.comments).map(c => cleanComment(c, clip(c?.id || this.#id(), 512), Number.isFinite(c?.at) ? c.at : at))};
     });
+  }
+  /** Puts backup posts back with their ids, checked like new ones, in one transaction. replace: other posts go. */
+  async importPosts(posts, {replace = false, merge} = {}) {
+    const prepare = values => this.#preparePosts(values);
     const rows = prepare(posts);
     return this.#tx('readwrite', (store, done, abort) => {
       const write = incoming => { for (const row of incoming) store.put(row); done(incoming.length); };

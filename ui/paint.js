@@ -82,9 +82,18 @@ export function paintApp(ctx) {
   async function openWork(id) {
     const w = await store.get(id);
     if (!w) { ctx.notify('这幅作品已经不在了'); return renderGallery(); }
-    const layers = await Promise.all((w.layers || []).map(async l => ({...l, image: l.blob ? await ctx.win.createImageBitmap(l.blob).catch(() => null) : null})));
+    const layers = [];
+    try {
+      // Decode one at a time on memory-constrained phones. A failed layer must never become an editable blank.
+      for (const l of w.layers || []) layers.push({...l, image: l.blob ? await ctx.win.createImageBitmap(l.blob) : null});
+    } catch {
+      for (const l of layers) l.image?.close?.();
+      ctx.notify('有图层没能打开，原作品已保留。请稍后重试。', {error: true});
+      return;
+    }
     work = {id: w.id, name: w.name, createdAt: w.createdAt || w.updatedAt};
     openEditor(createPicture(ctx.doc, {width: w.width, height: w.height, background: w.background, showBackground: w.showBackground !== false, layers: layers.length ? layers : null, active: w.active, groups: w.groups || []}));
+    for (const l of layers) l.image?.close?.();
     savedAt = pic.changed;
   }
   async function workMenu(id) {
@@ -100,7 +109,10 @@ export function paintApp(ctx) {
   }
 
   // ---------- 保存 ----------
-  const blobOf = canvas => new Promise(resolve => canvas.toBlob ? canvas.toBlob(b => resolve(b), 'image/png') : resolve(null));
+  const blobOf = canvas => new Promise((resolve, reject) => {
+    if (!canvas.toBlob) { reject(Error('这个浏览器做不出图片')); return; }
+    canvas.toBlob(b => b ? resolve(b) : reject(Error('图片编码失败，原作品已保留')), 'image/png');
+  });
   /** Keeps the work as it is (layers and a small picture for the list); once at a time, only when it changed. */
   function save() {
     if (!pic || !work || savedAt === pic.changed || pic.float) return saving || Promise.resolve();

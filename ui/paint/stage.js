@@ -407,7 +407,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
 
   canvas.addEventListener('pointerdown', e => {
     const s = local(e);
-    pointers.set(e.pointerId, {x: s.x, y: s.y, type: e.pointerType});
+    pointers.set(e.pointerId, {x: s.x, y: s.y, sx: s.x, sy: s.y, type: e.pointerType});
     try { canvas.setPointerCapture(e.pointerId); } catch { /* a pointer no longer tracked */ }
     if (e.pointerType === 'pen') penSeen = true;
     if (e.pointerType === 'touch') {
@@ -430,7 +430,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     const p = pointers.get(e.pointerId);
     if (!p) return;
     const s = local(e);
-    if (taps && p.type === 'touch') taps.moved = Math.max(taps.moved, Math.hypot(s.x - p.x, s.y - p.y));
+    if (taps && p.type === 'touch') taps.moved = Math.max(taps.moved, Math.hypot(s.x - p.sx, s.y - p.sy));
     p.x = s.x; p.y = s.y;
     if (gesture && p.type === 'touch') { moveGesture(); return; }
     if (panning) { view = {...panning.view, x: panning.view.x + s.x - panning.x, y: panning.view.y + s.y - panning.y}; later(); return; }

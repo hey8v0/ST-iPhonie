@@ -991,7 +991,7 @@ export function enginesApp(ctx) {
       case 'save-connection': {
         // A key typed in the box is kept too: people expect the big button to save everything on the page.
         const typed = v.root.querySelector('[data-field=key]')?.value || '';
-        if (typed.trim()) { api.setKey(engine, typed); balances.delete(engine); }
+        if (typed.trim()) { api.addKeys(engine, typed); balances.delete(engine); }
         api.saveConnection(engine, draft()); dirty = false; render(); ctx.notify(typed.trim() ? '密钥和引擎配置都已保存' : '引擎配置已保存');
         if (typed.trim()) loadBalance(engine, true);
         break;

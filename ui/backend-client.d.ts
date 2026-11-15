@@ -670,7 +670,7 @@ export interface BackendFacade {
     vnCast(): Array<{ name: string; appearance: string; sprite: string; seed: number; alts: VnGroup['alts']; mix: boolean; looks: Record<string, VnGroup>; actions: VnAction[]; outfits: VnOutfit[]; models: VnModel[]; useModel: string; /** The one in use. */ model: VnModel | null }>;
     /** The drawing request for a character's 立绘; appearance / rule: changed for this one picture. */
     vnSpriteRequest(name: string, options?: { appearance?: string; rule?: string; extra?: string; seed?: number }): { prompt: string; negative: string; characters: Array<{ prompt: string; negative: string; position: number }>; params: Record<string, unknown> };
-    saveRoute(route: RouteInput): Route;
+    saveRoute(route: RouteInput, options?: {mergeIds?: string[]}): Route;
     /** 候选音色池: the voices 自动挑音色 picks from first. */
     saveVoicePool(list: VoicePoolEntry[]): VoicePoolEntry[];
     /** 自动挑音色 for one character again (in the tavern): resolves to the saved route, marked autoVoice. */
