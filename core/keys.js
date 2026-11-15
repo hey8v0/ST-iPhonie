@@ -45,36 +45,60 @@ const KEY_DB='st-iphonie-keys',KEY_STORE='keys';
  * A key that could not be written still works until the page is closed; onError says so.
  */
 export class KeyStore{
- constructor(scope,{indexedDB=globalThis.indexedDB,storage=()=>globalThis.localStorage,onError=()=>{}}={}){this.scope=String(scope);this.factory=indexedDB;this.legacy=new LocalKeyStore(scope,storage);this.onError=onError;this.keys=new Map();this.touched=new Set();this.db=null;this.opening=null;this.writing=Promise.resolve();this.fallback=false;}
+ constructor(scope,{indexedDB=globalThis.indexedDB,storage=()=>globalThis.localStorage,onError=()=>{}}={}){this.scope=String(scope);this.factory=indexedDB;this.legacy=new LocalKeyStore(scope,storage);this.onError=onError;this.keys=new Map();this.failures=new Map();this.touched=new Set();this.db=null;this.opening=null;this.writing=Promise.resolve();this.fallback=false;}
  open(){return this.opening??=this.#open();}
  async #open(){
   // A database of this name without the store (made by something else opening it first) is upgraded once to add it.
   const connect=version=>new Promise((resolve,reject)=>{const req=version?this.factory.open(KEY_DB,version):this.factory.open(KEY_DB);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains(KEY_STORE))req.result.createObjectStore(KEY_STORE,{keyPath:'id'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);req.onblocked=()=>reject(Error('blocked'));});
   try{this.db=await connect(0);if(!this.db.objectStoreNames.contains(KEY_STORE)){const next=this.db.version+1;this.db.close();this.db=await connect(next);}}
-  catch{this.fallback=true;try{for(const [engine,key] of this.legacy.load())if(!this.touched.has(engine))this.keys.set(engine,key);}catch{}return this;}
+  catch(error){return this.#fallback(error);}
   this.#watch(this.db);
-  const rows=await this.#run('readonly',store=>store.getAll()).catch(()=>[]);
-  // A key saved before this finished (save() does not wait) is newer than what is stored.
+  let rows;
+  try { rows = await this.#run('readonly',store=>store.getAll()); }
+  catch(error) { return this.#fallback(error); }
   for(const row of rows||[])if(row?.scope===this.scope&&engines.includes(row.engine)&&!this.touched.has(row.engine)){try{const key=validateKey(row.engine,row.key);if(key)this.keys.set(row.engine,key);}catch{}}
-  // Keys of older versions: moved over, then taken out of localStorage (which frees a little of its room too).
-  let old=new Map();try{old=this.legacy.load();}catch{}
-  const moving=[...old].filter(([engine])=>!this.keys.has(engine)&&!this.touched.has(engine));
-  for(const [engine,key] of moving)this.keys.set(engine,key);
-  if(old.size){try{await this.#run('readwrite',store=>{for(const [engine,key] of moving)store.put({id:this.scope+':'+engine,scope:this.scope,engine,key});});for(const engine of old.keys())this.legacy.drop(engine);}catch{/* kept in localStorage; tried again next time */}}
+  let old=new Map(), pending=new Map();
+  try { old=this.legacy.load(); pending=this.#pending(); }
+  catch(error) { this.onError(error.message); }
+  const moving=new Map([...old].filter(([engine])=>!this.keys.has(engine)&&!this.touched.has(engine)));
+  // Explicit fallback writes (including a cleared key) are newer than the database copy.
+  for(const [engine,key] of pending)if(!this.touched.has(engine))moving.set(engine,key);
+  for(const [engine,key] of moving)if(key)this.keys.set(engine,key);else this.keys.delete(engine);
+  if(old.size||pending.size){try{
+    await this.#run('readwrite',store=>{for(const [engine,key] of moving){const id=this.scope+':'+engine;if(key)store.put({id,scope:this.scope,engine,key});else store.delete(id);}});
+    for(const engine of old.keys())this.legacy.drop(engine);
+    for(const [engine,key] of pending)this.#dropPending(engine,key);
+  }catch(error){this.onError('密钥还保留在备用存储里，下次打开会再尝试恢复。'+storageFailure(error));}}
+
+  return this;
+ }
+ #pending(){const out=new Map(),storage=this.legacy.storage();for(const engine of engines){const raw=storage.getItem(this.legacy.prefix+'pending:'+engine);if(raw!==null){const value=JSON.parse(raw);if(typeof value!=='string')throw Error('备用密钥记录损坏，请重新填写密钥');out.set(engine,validateKey(engine,value));}}return out;}
+ #keepPending(engine,key){try{this.legacy.storage().setItem(this.legacy.prefix+'pending:'+engine,JSON.stringify(key));}catch(error){throw Error(storageFailure(error));}}
+ #dropPending(engine,key){try{const storage=this.legacy.storage(),name=this.legacy.prefix+'pending:'+engine;if(storage.getItem(name)===JSON.stringify(key))storage.removeItem(name);}catch{}}
+ #fallback(error){
+  this.fallback=true;
+  this.onError('密钥数据库暂时读不到，正在使用备用存储；数据库里的密钥没有被清空。'+String(error?.message||''));
+  try{const old=this.legacy.load(),pending=this.#pending();for(const [engine,key] of new Map([...old,...pending]))if(!this.touched.has(engine)){if(key)this.keys.set(engine,key);else this.keys.delete(engine);}}
+  catch(error){this.onError(error.message);}
   return this;
  }
  load(){return new Map(this.keys);}
  save(engine,value){
-  if(this.fallback){const key=this.legacy.save(engine,value);if(key)this.keys.set(engine,key);else this.keys.delete(engine);return key;}
+  if(this.fallback){const key=validateKey(engine,value);this.#keepPending(engine,key);this.touched.add(engine);if(key)this.keys.set(engine,key);else this.keys.delete(engine);return key;}
   const key=validateKey(engine,value);if(key)this.keys.set(engine,key);else this.keys.delete(engine);
   this.touched.add(engine);
   const id=this.scope+':'+engine;
   // An old copy left in localStorage (a move that failed) is dropped too, so a cleared key cannot come back.
-  this.writing=this.writing.then(()=>this.open()).then(()=>this.fallback?this.legacy.save(engine,key):this.#run('readwrite',store=>key?store.put({id,scope:this.scope,engine,key}):store.delete(id))).then(()=>{if(!this.fallback)this.legacy.drop(engine);}).catch(error=>{this.onError('密钥这次能用，但没有存进浏览器，刷新以后要重新填。'+storageFailure(error));});
+  this.writing=this.writing.then(()=>this.open()).then(async()=>{
+    if(this.fallback){this.#keepPending(engine,key);this.failures.delete(engine);return;}
+    let pending;try{pending=this.#pending().get(engine);}catch{/* The primary database does not depend on localStorage being readable. */}
+    await this.#run('readwrite',store=>key?store.put({id,scope:this.scope,engine,key}):store.delete(id));
+    this.legacy.drop(engine);if(pending!==undefined)this.#dropPending(engine,pending);this.failures.delete(engine);
+  }).catch(error=>{this.failures.set(engine,error);this.onError('密钥这次能用，但没有存进浏览器，刷新以后要重新填。'+storageFailure(error));});
   return key;
  }
  /** Resolves when every save so far has been written. */
- flush(){return this.writing;}
+ async flush({strict=false,engines:wanted=engines}={}){await this.writing;if(strict){const engine=wanted.find(name=>this.failures.has(name));if(engine)throw Error(`密钥没有存上（${engine}）：`+storageFailure(this.failures.get(engine)));}}
  close(){this.db?.close();this.db=null;}
  #watch(db){db.onversionchange=()=>{db.close();if(this.db===db)this.db=null;};db.onclose=()=>{if(this.db===db)this.db=null;};}
  // A dropped connection (iPhone Safari after the page sat in the background) is reopened once; nothing was written.

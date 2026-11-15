@@ -139,7 +139,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
     if (!photo) throw Error(wall ? '没有壁纸，「再看一次」后就有了' : '这张照片已经不在了');
     if (!photo.tags) throw Error((wall ? '壁纸' : '这张照片') + '没有画图用的描述，「再看一次」后就有了');
     if (!backend.drawReady()) throw Error(backend.drawMissing() + '，相册只能看文字');
-    const set = patch => backend.appsMutate('peek', () => backend.apps.change(id, doc => { const target = pick(doc); Object.assign(target, patch); for (const k of Object.keys(patch)) if (patch[k] === '') delete target[k]; }));
+    const set = patch => backend.appsMutate('peek', () => backend.apps.change(id, doc => { const target = pick(doc); if (doc.at !== snap.at || !target || target.tags !== photo.tags || target.text !== photo.text) throw Error('查手机的内容已经更新，这次画好的图保留在相册里'); Object.assign(target, patch); for (const k of Object.keys(patch)) if (patch[k] === '') delete target[k]; }));
     // The saved looks of who the photo shows: the people its description names, else the owner (a selfie).
     const names = [...settings().routes.map(r => r.name), userName()], picture = photoPicture(settings(), {text: photo.text, tags: photo.tags, owner: name, names});
     try {
@@ -152,7 +152,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
       await set({photoId: result.photoId, state: 'done', note: ''});
       return result.photoId;
     } catch (error) {
-      await set({state: 'failed', note: error.code === 'PAID' ? backend.paidPrompt().note : error.message.slice(0, 200)});
+      await set({state: 'failed', note: error.code === 'PAID' ? backend.paidPrompt().note : error.message.slice(0, 200)}).catch(() => {});
       throw error;
     }
   }

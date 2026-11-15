@@ -1104,7 +1104,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     let made;
     try { made = await backend.generateImage({...input, allowPaid, name: `表情包-${name}-${feel[0]}`, key: `sticker:${name}:${feel[0]}:${Date.now()}`, label: `表情包 · ${name}`}); }
     catch (error) { if (error?.code === 'PAID') throw paid(); throw error; }
-    const key = roleStore(findRoute(backend.seen?.routes || s.routes, name)) || name, list = s.chat.roleStickers?.[key] || [];
+    const key = roleStore(findRoute(backend.seen?.routes || s.routes, name)) || name, list = settings().chat.roleStickers?.[key] || [];
     backend.saveChatOptions({roleStickers: {[key]: [...list.filter(x => x.name !== feel[0]), {name: feel[0], photoId: made.photoId}]}});
     return {name: feel[0], photoId: made.photoId};
   }

@@ -1,3 +1,4 @@
+import {redactSecrets} from './secrets.js';
 // 向量模型: an OpenAI-compatible Embeddings API (POST {base}/embeddings) that turns text into vectors, so 记忆 can find
 // old chat by meaning and not only by shared words. Optional: without it, 记忆 searches locally (core/memory.js).
 // Called from the browser like 文字模型; its key lives with the other keys (engine 'embed') and never in settings.
@@ -14,9 +15,8 @@ export const embedReady = e => !!(e?.enabled && e.url && e.model);
 
 function failure(status, raw, key) {
   let detail = '';
-  try { const json = JSON.parse(raw); detail = json?.error?.message || json?.message || ''; } catch { detail = String(raw || '').slice(0, 200); }
-  detail = String(detail).slice(0, 300);
-  if (key) detail = detail.split(key).join('••••');
+  try { const json = JSON.parse(raw); detail = json?.error?.message || json?.message || ''; } catch { detail = String(raw || ''); }
+  detail = redactSecrets(detail, [key]).slice(0, 300);
   const reason = {401: '密钥无效或已过期', 403: '这个密钥没有权限', 404: '地址或模型名不对（这个模型要能做 embeddings）', 413: '内容太长', 429: '请求太频繁或额度用完了'}[status] || (status >= 500 ? '服务暂时出错了' : `请求失败（${status}）`);
   return Error(`向量模型：${reason}${detail ? '（' + detail + '）' : ''}`);
 }

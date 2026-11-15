@@ -530,6 +530,7 @@ export class ChatStore {
       // Anything coming after the last round ends its versions (it is no longer the last).
       if (added.length) delete row.alts;
       if (!read) row.unread += added.filter(m => m.from !== 'me' && !['system', 'notice', 'recall'].includes(m.kind)).length;
+      else row.readMessages = [...new Set([...(row.readMessages || []), ...added.map(m => m.id)])].slice(-CHAT_STORE_LIMITS.messages);
       row.updatedAt = now;
     });
   }
@@ -549,6 +550,7 @@ export class ChatStore {
       row.messages = [...row.messages.filter(m => !old.has(m.id)), ...added];
       if (versions.length > 1) row.alts = structuredClone({after: last.after, versions, shown: versions.length - 1}); else delete row.alts;
       if (!read) row.unread += added.filter(m => m.from !== 'me' && !['system', 'notice', 'recall'].includes(m.kind)).length;
+      else row.readMessages = [...new Set([...(row.readMessages || []), ...added.map(m => m.id)])].slice(-CHAT_STORE_LIMITS.messages);
       row.updatedAt = now;
     });
   }
@@ -686,7 +688,7 @@ export class ChatStore {
     });
   }
   async markRead(id) {
-    return this.#change(id, row => { row.unread = 0; });
+    return this.#change(id, row => { row.unread = 0; row.readMessages = row.messages.map(m => m.id); });
   }
   async remove(id) {
     return this.#tx('readwrite', (store, done, abort, after) => { store.delete([this.#scope, String(id)]); after(list => list.delete(String(id))); done(true); });
@@ -700,21 +702,27 @@ export class ChatStore {
     return rows.map(row => this.#public(row));
   }
   /** Puts backup threads back with their ids, checked like new ones, in one transaction. replace: other threads go. */
-  async importThreads(threads, {replace = false, merge} = {}) {
+  checkImport(threads) { this.#prepareThreads(threads); }
+  #prepareThreads(threads) {
     if (!Array.isArray(threads)) throw fail('备份里的聊天记录无效');
-    const now = this.#now(), prepare = values => values.map(t => {
+    const now = this.#now();
+    return threads.map(t => {
       if (!t || typeof t !== 'object' || !t.id) throw fail('备份里的聊天记录无效');
       const members = [...new Set((Array.isArray(t.members) ? t.members : []).map(m => clip(m, 40).trim()).filter(Boolean))].slice(0, CHAT_STORE_LIMITS.members);
       if (!members.length) throw fail('备份里有一段聊天没有聊天对象');
       const messages = (Array.isArray(t.messages) ? t.messages : []).slice(-CHAT_STORE_LIMITS.messages).map(m => cleanMessage(m, clip(m?.id || this.#id(), 512), Number.isFinite(m?.at) ? m.at : now));
       const row = {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true, ...(t.story === true ? {story: true} : {}), ...(Number.isFinite(t.openedAt) ? {openedAt: t.openedAt} : {}), ...(typeof t.label === 'string' && t.label.trim() ? {label: clip(t.label, 40).trim()} : {}), ...(t.type === 'group' && t.windowOf ? {windowOf: clip(t.windowOf, 512)} : {}), ...(t.type === 'group' ? {silenced: cleanSilenced(t.silenced, members)} : {}), ...(t.type === 'group' && t.watch === true ? {watch: true} : {}), ...(t.type === 'group' && cleanNotice(t.notice) ? {notice: cleanNotice(t.notice)} : {}), ...(t.type === 'group' && Object.keys(cleanNicks(t.nicks)).length ? {nicks: cleanNicks(t.nicks)} : {}), ...(t.type !== 'group' && cleanPost(t.post).length ? {post: cleanPost(t.post)} : {}),
         unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {}), ...(t.save ? {save: clip(t.save, 400)} : {}), ...(t.type !== 'group' && cleanFriend(t.friend) ? {friend: cleanFriend(t.friend)} : {}), ...(t.type !== 'group' && cleanBlocked(t.blocked) ? {blocked: cleanBlocked(t.blocked)} : {}), ...(t.type !== 'group' && Number.isFinite(t.befriended) && t.befriended > 0 ? {befriended: t.befriended} : {})};
+      if (Array.isArray(t.readMessages)) row.readMessages = messages.filter(m => t.readMessages.includes(m.id)).map(m => m.id);
       if (Array.isArray(t.phoneReceipts)) row.phoneReceipts = [...new Set(t.phoneReceipts.filter(k => typeof k === 'string' && k).map(k => clip(k, 600)))].slice(-500);
       // 重新回复的版本 come along with a backup or a sync, while they still belong to the chat's last round.
       const alts = cleanAlts(t.alts, () => this.#id());
       if (alts && lastRound(messages).after === alts.after) row.alts = alts;
       return row;
     });
+  }
+  async importThreads(threads, {replace = false, merge} = {}) {
+    const prepare = values => this.#prepareThreads(values);
     const rows = prepare(threads);
     return this.#tx('readwrite', (store, done, abort) => {
       const write = incoming => { for (const row of incoming) store.put(row); done(incoming.length); };

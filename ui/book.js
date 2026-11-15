@@ -381,8 +381,9 @@ export function bookApp(ctx) {
     });
   }
   function editTitle() {
+    const target = book;
     const d = ctx.dialog('改书名', `<div class="field"><span>书名</span><input data-bk-edit="title" value="${esc(book.title)}" maxlength="40"></div><div class="field"><span>副标题</span><input data-bk-edit="subtitle" value="${esc(book.subtitle)}" maxlength="60"></div><div class="actions"><button type="button" class="primary" data-bk-save>存好</button></div>`);
-    return dialogDone(d, async () => { book.title = d.body.querySelector('[data-bk-edit=title]').value.trim() || book.title; book.subtitle = d.body.querySelector('[data-bk-edit=subtitle]').value.trim(); await keep(); });
+    return dialogDone(d, async () => { const saved = await api.saveBook({...target, title: d.body.querySelector('[data-bk-edit=title]').value.trim() || target.title, subtitle: d.body.querySelector('[data-bk-edit=subtitle]').value.trim()}, {fields: ['title', 'subtitle']}); if (book?.id === target.id) { book = saved; await reader?.refresh(book, at); } });
   }
   function editEnding() {
     const d = ctx.dialog('改最后一句', `<div class="field"><span>最后一页的一句话（可以不写）</span><textarea data-bk-edit="ending" rows="3" maxlength="80">${esc(book.ending)}</textarea></div><div class="actions"><button type="button" class="primary" data-bk-save>存好</button></div>`);

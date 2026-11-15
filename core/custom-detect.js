@@ -1,3 +1,4 @@
+import {credentialField} from './secrets.js';
 // 自动识别 for 自己的接口: there are too many speech services to write each into the plugin, but almost all of them say
 // what they take. A FastAPI service publishes /openapi.json, a Gradio app /gradio_api/info; a service known by its paths
 // gets its one-click format; anything else can be told by a curl command from its docs. What cannot be read is also
@@ -285,6 +286,21 @@ export function fromCurl(source) {
   // A query says the same things a body does.
   const query = Object.fromEntries(target.searchParams);
   if (getForm && body) { Object.assign(query, body); body = null; }
+  let conflicting = false;
+  const extract = value => {
+    if (Array.isArray(value)) { value.forEach(extract); return; }
+    if (!value || typeof value !== 'object') return;
+    for (const [name, v] of Object.entries(value)) {
+      if (credentialField(name) && typeof v === 'string' && !/\{\{/.test(v)) {
+        const secret = v.replace(/^Bearer\s+/i, '').trim();
+        if (standIn(secret)) wanted = true;
+        else if (secret) { if (key && key !== secret) conflicting = true; else key = secret; }
+        value[name] = /^Bearer\s+/i.test(v) ? 'Bearer {{key}}' : '{{key}}';
+      } else extract(v);
+    }
+  };
+  extract(query); extract(body);
+  if (conflicting) return {error: '命令里有几种不同的密钥，不能自动合成一套；请分别配置，勿把密钥留在地址或请求体里'};
   const mappedQuery = slottedObject(query), mappedBody = body && slottedObject(body);
   const mapped = {...mappedQuery, ...(mappedBody || {})}, has = slot => JSON.stringify(mapped).includes(`{{${slot}}}`);
   if (!has('text')) {

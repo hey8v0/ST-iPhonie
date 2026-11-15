@@ -80,7 +80,12 @@ export function enginesApp(ctx) {
     balances.set(id, {...entry, loading: true});
     try { balances.set(id, {value: await api.voiceBalance(id, refresh), error: '', loading: false}); }
     catch (error) { balances.set(id, {value: entry.value || null, error: error.message, loading: false}); }
-    if (!v.disposed && (engine === null || engine === id)) render();
+    if (!v.disposed && engine === null) render();
+    else if (!v.disposed && engine === id) {
+      const group = v.root.querySelector('[data-voice-balance-group]');
+      if (group) group.outerHTML = balanceGroup();
+      for (const node of v.root.querySelectorAll('[data-voice-balance]')) node.textContent = balanceText(id);
+    }
   }
   const draft = () => drafts.get(engine);
   const changed = () => { dirty = true; const e = v.root.querySelector('[data-save-state]'); if (e) e.textContent = '未保存'; };
@@ -126,7 +131,7 @@ export function enginesApp(ctx) {
       <span class="card-top"><span class="card-name">${name}</span><span class="card-kind">${IMAGE.includes(id) ? 'IMAGE' : song(id) ? 'MUSIC' : llm ? 'TEXT' : vector ? 'VECTOR' : 'VOICE'}${icon('nfc')}</span></span>
       <span class="card-chip"></span>
       <span class="card-number${number.startsWith('•') || comfy || ownApi ? '' : ' none'}${comfy || ownApi ? ' address' : ''}">${number}</span>
-      <span class="card-bottom">${fields.map(([k, value]) => `<span><span class="k">${k}</span><span class="v"${fishSubscribed && k === 'BALANCE' ? ' data-fish-credit-balance' : ''}>${esc(value)}</span></span>`).join('')}<span class="card-brand">ST-iPhonie</span></span></${tag}>`;
+      <span class="card-bottom">${fields.map(([k, value]) => `<span><span class="k">${k}</span><span class="v"${fishSubscribed && k === 'BALANCE' ? ' data-fish-credit-balance' : PRICED.includes(id) && ['CREDITS', 'BALANCE'].includes(k) ? ' data-voice-balance' : ''}>${esc(value)}</span></span>`).join('')}<span class="card-brand">ST-iPhonie</span></span></${tag}>`;
   }
 
   const relayNoSubscription = () => !subscription && subscriptionStatus === 404 && !!api.getState().draw.relay.url;
@@ -197,13 +202,13 @@ export function enginesApp(ctx) {
     const host = url => url.replace(/^https?:\/\//, '').split('/')[0];
     const d = ctx.dialog('几套接口', `<div class="pick-list" data-set-list>${list.map(p => swipeRow(p.id, `<div class="list-row">${icon(p.current ? 'check' : 'next')}<span><strong>${esc(p.name)}</strong><small>${esc([p.url ? host(p.url) : '还没填地址', p.voices ? p.voices + ' 个音色' : '', p.configured ? (p.tail === '••••' ? '有密钥' : '•••• ' + p.tail) : '没填密钥'].filter(Boolean).join(' · '))}</small></span></div>`,
       [{key: 'rename', label: '改名', icon: 'edit'}, ...(list.length > 1 ? [{key: 'delete', label: '删除', icon: 'trash', danger: true}] : [])], {label: p.name})).join('')}</div>`, {add: '新建一套接口'});
-    const keep = () => { if (dirty) { try { api.saveConnection('custom', draft()); } catch { /* the page still says what is wrong */ } } };
+    const keep = () => { try { if (dirty) api.saveConnection('custom', draft()); return true; } catch (error) { ctx.notify(error.message, {error: true}); return false; } };
     const fresh = note => { drafts.delete('custom'); customAddress = null; customFound = null; customNote = ''; dirty = false; render(); ctx.notify(note); };
     const swipe = mountSwipeList(d.body.querySelector('[data-set-list]'), {ctx,
       onTap: id => {
         d.close();
         if (id === list.find(p => p.current)?.id) return;
-        keep();
+        if (!keep()) return;
         try { api.selectCustomSet(id); fresh(`改用「${list.find(p => p.id === id)?.name}」`); } catch (error) { ctx.notify(error.message, {error: true}); }
       },
       onAction: async (key, id) => {
@@ -219,14 +224,14 @@ export function enginesApp(ctx) {
           d.close();
           const pinned = api.getState().routes.filter(r => r.engine === 'custom' && r.model === p.id).length;
           if (!await ctx.confirm('删除这套接口？', `「${p.name}」的地址、音色和密钥会一起删掉，其他几套保留。${pinned ? `固定用它的 ${pinned} 个角色改用正在用的那套。` : ''}`)) return;
-          keep();
+          if (!keep()) return;
           try { api.deleteCustomSet(p.id); fresh('已删除这套接口'); } catch (error) { ctx.notify(error.message, {error: true}); }
         }
       }});
     d.onClose(() => swipe.dispose());
     d.overlay.addEventListener('click', e => {
       if (!e.target.closest('[data-sheet-add]')) return;
-      d.close(); keep();
+      if (!keep()) return; d.close();
       try { api.saveCustomSet({}); fresh('新建了一套：填服务地址，或者在「常见的服务」里选'); } catch (error) { ctx.notify(error.message, {error: true}); }
     });
   }
@@ -428,9 +433,11 @@ export function enginesApp(ctx) {
   }
   /** Checks the relay and, when it speaks the other form, switches to it. Returns the form it switched to ('' if none). */
   async function detectFish() {
+    const c = drafts.get('fish'), relay = api.getState().connections.fish.relay;
     const r = await api.fishProbe();
     let switched = '';
-    if (r.relay && r.detected && r.detected !== r.api) { api.saveConnection('fish', {relayApi: r.detected}); draft().relayApi = r.detected; switched = r.detected; balances.delete('fish'); }
+    if (v.disposed || api.getState().connections.fish.relay !== relay) return {r, switched};
+    if (r.relay && r.detected && r.detected !== r.api) { api.saveConnection('fish', {relayApi: r.detected}); if (c && drafts.get('fish') === c) c.relayApi = r.detected; switched = r.detected; balances.delete('fish'); }
     return {r, switched};
   }
   function balanceGroup() {
@@ -451,8 +458,8 @@ export function enginesApp(ctx) {
       rows = `<div class="setting-row"><span>API 余额</span><strong>$${b.credit.toFixed(2)}</strong></div>
         <div class="setting-row"><span>免费额度</span><small>${b.free ? '还有' : '没有或已用完'}</small></div>`;
     } else rows = `<div class="setting-row"><span>额度</span><small>${state || '—'}</small></div>`;
-    return groupTitle('额度', help(engine === 'eleven' ? '每生成一句新语音后自动重新读取。ElevenLabs 按字符扣积分，v3/v4 等模型的倍率以官网为准。' : '每生成一句新语音后自动重新读取。金额是 Fish Audio 后台的 API 余额。') + btn('refresh-balance', icon('refresh') + '刷新', 'chip-button', saved ? '' : 'disabled'))
-      + `<div class="group${b?.kind === 'characters' ? ' pad' : ''}">${rows}</div>${entry.error ? `<p class="error-copy hint">${esc(entry.error)}</p>` : ''}`;
+    return '<section data-voice-balance-group>' + groupTitle('额度', help(engine === 'eleven' ? '每生成一句新语音后自动重新读取。ElevenLabs 按字符扣积分，v3/v4 等模型的倍率以官网为准。' : '每生成一句新语音后自动重新读取。金额是 Fish Audio 后台的 API 余额。') + btn('refresh-balance', icon('refresh') + '刷新', 'chip-button', saved ? '' : 'disabled'))
+      + `<div class="group${b?.kind === 'characters' ? ' pad' : ''}">${rows}</div>${entry.error ? `<p class="error-copy hint">${esc(entry.error)}</p>` : ''}` + '</section>';
   }
 
   function renderDetail() {
@@ -544,15 +551,19 @@ export function enginesApp(ctx) {
     try { api.saveConnection('custom', c); dirty = false; } catch (error) { changed(); dirty = true; ctx.notify(error.message, {error: true}); }
   }
   async function customDetect(address) {
+    const target = draft(), set = api.customSetList().find(p => p.current)?.id;
+    const current = () => !v.disposed && engine === 'custom' && draft() === target && api.customSetList().find(p => p.current)?.id === set;
     const typed = String(address ?? '').trim();
     if (/^curl(\.exe)?\s/i.test(typed)) return customFromCurl(typed);
     if (!typed) {
       const scan = await api.customScan();
+      if (!current()) return;
       if (scan.length === 1) return customDetect(scan[0]);
       customFound = {scan}; render();
       return;
     }
     const r = await api.customDetect(typed);
+    if (!current()) return;
     customFound = r;
     if (r.base) customAddress = r.base;
     if (r.ok && r.found?.params) { keepCustom(r.found.params); customNote = ''; }
@@ -796,6 +807,7 @@ export function enginesApp(ctx) {
   }
   const readValue = (el, f) => f.type === 'boolean' ? el.checked : f.type === 'number' ? (el.value === '' ? '' : Number(el.value)) : f.type === 'select' ? f.options.find(([key]) => String(key) === el.value)?.[0] : el.value;
   async function updateParam(el, redraw) {
+    const origin = engine, customSet = origin === 'custom' ? api.customSetList().find(p => p.current)?.id : '';
     const c = draft(), schema = api.engineSchema(engine, c), f = schema.groups.flatMap(g => g.fields).find(x => x.key === el.dataset.param);
     if (!f) return;
     if (el.dataset.row !== undefined) {
@@ -808,16 +820,16 @@ export function enginesApp(ctx) {
         const label = el.nextElementSibling;
         if (label) label.textContent = '正在存……';
         try {
-          const id = await api.reference(file, {wav: engine === 'mimo' || engine === 'custom'});
-          if (!c.params[f.key].includes(row)) return;
+          const id = await api.reference(file, {wav: origin === 'mimo' || origin === 'custom'});
+          if (drafts.get(origin) !== c || !c.params[f.key].includes(row)) { ctx.notify('参考音频已存好；设置已变化，请在参考音频中重新选择'); return; }
           row[col.key] = id;
           // A clone sample is named after its file when it has no name yet; the list is saved right away when every
           // row is complete, so the audio is not lost if 保存配置 is forgotten.
           const named = f.columns.some(x => x.key === 'name');
           if (named && !String(row.name || '').trim()) row.name = file.name.replace(/\.[^.]+$/, '').trim().slice(0, 40) || '样本';
           let saved = false;
-          try { api.saveConnection(engine, {params: {[f.key]: structuredClone(c.params[f.key])}}); saved = true; } catch {}
-          if (draft() === c) { dirty = JSON.stringify(c) !== JSON.stringify(api.getState().connections[engine]); render(); }
+          try { if (origin === 'custom' && api.customSetList().find(p => p.current)?.id !== customSet) throw Error('接口已切换'); api.saveConnection(origin, {params: {[f.key]: structuredClone(c.params[f.key])}}); saved = true; } catch {}
+          if (engine === origin && draft() === c) { dirty = JSON.stringify(c) !== JSON.stringify(api.getState().connections[origin]); render(); }
           ctx.notify(!saved ? '音频已存进浏览器，把这一行填完整后点「保存配置」' : named ? `样本「${row.name}」已保存，角色的音色填「${row.name}」` : '参考音频已保存');
         } finally { if (el.isConnected) el.disabled = false; }
         return;

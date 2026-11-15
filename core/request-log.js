@@ -1,3 +1,4 @@
+import {redactSecrets} from './secrets.js';
 // Bounded, session-only diagnostics. Never persist keys or binary payloads in a log or backup.
 const SECRET = /authorization|cookie|password|secret|api[-_]?key|(?:access|refresh|id)[-_]?token|code[-_]?verifier|csrf|^key$|^token$/i;
 const MAX_TEXT = 100000, MAX_TOTAL = 4000000;
@@ -8,8 +9,7 @@ export class RequestLog {
     const keys = [...new Set(secrets.filter(x => typeof x === 'string' && x.length >= 4))];
     let remaining = 300000, nodes = 3000;
     const scrub = text => {
-      let s = String(text).replace(/\bBearer\s+[^\s"',}]+/gi, 'Bearer [已隐藏]').replace(/([?&](?:key|api_key|token|access_token)=)[^&#\s]+/gi, '$1[已隐藏]');
-      for (const key of keys) s = s.split(key).join('[已隐藏]').split(encodeURIComponent(key)).join('[已隐藏]');
+      const s = redactSecrets(text, keys);
       const limit = Math.min(MAX_TEXT, remaining); remaining -= Math.min(s.length, limit);
       return s.length > limit ? s.slice(0, limit) + `\n[日志只留前 ${limit} 字；实际发出去的是完整的]` : s;
     };

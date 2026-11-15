@@ -60,11 +60,15 @@ const rowTime = row => Number.isFinite(row.updatedAt) ? row.updatedAt : Number.i
 const newerWhole = (a, b) => rowTime(b) > rowTime(a) || (rowTime(b) === rowTime(a) && stableText(b) > stableText(a)) ? b : a;
 /** The JSON that is compared and written for a part: items in id order, the album without its pictures. */
 export function canonical(part, items) {
-  if (part === 'photos') return byId(items.map(({id, name, type, size, createdAt, updatedAt, packed}) => ({id, name, type, size, createdAt, updatedAt, ...(packed ? {packed} : {})})));
+  if (part === 'photos') return byId(items.map(({id, name, type, size, createdAt, updatedAt, packed, info}) => ({id, name, type, size, createdAt, updatedAt, ...(packed ? {packed} : {}), ...(info ? {info} : {})})));
   if (wholePart(part)) return byId(items).map(stableValue);
   // The files are apart; a work's list has its small picture in its file too.
   if (part in FILES) return byId(items.map(({blob, thumb, layers, ...row}) => row));
   return byId(items);
+}
+function readPart(text, part) {
+  try { const rows = JSON.parse(text); if (!Array.isArray(rows)) throw Error(); return rows; }
+  catch { throw Error(`酒馆里的 ${partFile(part)} 内容损坏，这次未完成同步；请先备份本机资料，再检查酒馆中的这份文件；不要反复重试`); }
 }
 export async function hashText(text) { return sha256Hex(text); }
 
@@ -153,7 +157,10 @@ export function mergePart(part, local, remote, gone = {}, revived = {}) {
     if (!here) { out.push(theirs); continue; }
     if (part === 'chats') {
       const base = newer(here, theirs, t => t.updatedAt);
-      out.push({...base, ...((here.phoneReceipts || theirs.phoneReceipts) ? {phoneReceipts: [...new Set([...(here.phoneReceipts || []), ...(theirs.phoneReceipts || [])])].slice(-500)} : {}), messages: mergeMessages(here.messages, theirs.messages), unread: Math.max(here.unread || 0, theirs.unread || 0)});
+      const messages = mergeMessages(here.messages, theirs.messages);
+      const incoming = row => (row.messages || []).filter(m => m.from !== 'me' && !['system', 'notice', 'recall'].includes(m.kind));
+      const read = new Set([here, theirs].flatMap(row => [...(row.readMessages || []), ...incoming(row).slice(0, Math.max(0, incoming(row).length - (row.unread || 0))).map(m => m.id)]));
+      out.push({...base, ...((here.phoneReceipts || theirs.phoneReceipts) ? {phoneReceipts: [...new Set([...(here.phoneReceipts || []), ...(theirs.phoneReceipts || [])])].slice(-500)} : {}), messages, readMessages: messages.filter(m => read.has(m.id)).map(m => m.id), unread: incoming({messages}).filter(m => !read.has(m.id)).length});
     } else if (part === 'moments') {
       const image = (theirs.imageUpdatedAt || 0) > (here.imageUpdatedAt || 0) ? theirs : (here.imageUpdatedAt || 0) > (theirs.imageUpdatedAt || 0) ? here : null;
       const row = {...here, ...theirs, likes: [...new Set([...(here.likes || []), ...(theirs.likes || [])])], comments: union(here.comments, theirs.comments).sort((a, b) => a.at - b.at), photoId: theirs.photoId || here.photoId};
@@ -220,7 +227,7 @@ export async function runSync({stores, files, memory = {}, readGone = () => memo
     if (remoteHash && remoteHash !== hash && (remoteHash !== base || remoteRestored)) {
       const body = await files.read(partFile(part));
       if (body === null) throw Error(`酒馆里少了 ${partFile(part)}，这次先不同步`);
-      const theirs = JSON.parse(body);
+      const theirs = readPart(body, part);
       changedHere = base !== undefined ? hash !== base : items.length > 0;
       if (Object.entries(localRevived[part] || {}).some(([id, at]) => at > (remoteRevived[part]?.[id] || 0))) changedHere = true;
       fromRemote = true;
@@ -273,15 +280,16 @@ export async function runSync({stores, files, memory = {}, readGone = () => memo
     // not mark all its restores as applied to rows that have not been read yet.
     onPartApplied(part, revived[part] || {});
     if (hash !== remoteHash) {
-      const fileOf = FILES[part];
+      const fileOf = FILES[part], obsolete = [];
       if (fileOf) {
         // The files first: a list in the tavern never names one that is not there.
-        const theirs = new Set((remoteHash ? JSON.parse(await files.read(partFile(part)) || '[]') : []).map(fileOf).filter(Boolean));
+        const theirs = new Set((remoteHash ? readPart(await files.read(partFile(part)) || '[]', part) : []).map(fileOf).filter(Boolean));
         const mine = new Set(items.map(fileOf).filter(Boolean));
         for (const row of items) { const name = fileOf(row); if (name && !theirs.has(name)) await files.write(name, await blobOf(part, row)); }
-        for (const name of theirs) if (!mine.has(name)) await files.remove(name).catch(() => {});
+        for (const name of theirs) if (!mine.has(name)) obsolete.push(name);
       }
       await files.write(partFile(part), text);
+      for (const name of obsolete) await files.remove(name).catch(() => {});
       pushed.push(part);
     }
     next[part] = {hash, count: items.length};
@@ -311,9 +319,10 @@ export async function removeSync(files) {
   if (raw === null) return 0;
   let parts = [];
   const own = [];
-  try { parts = Object.keys(JSON.parse(raw)?.parts || {}); } catch { /* a broken manifest: the known parts below */ }
+  try { parts = Object.keys(JSON.parse(raw)?.parts || {}); } catch { /* Known lists below still identify this app's files. */ }
   for (const [part, fileOf] of Object.entries(FILES)) {
-    try { own.push(...(JSON.parse(await files.read(partFile(part)) || '[]') || []).map(fileOf).filter(Boolean)); } catch { /* no list */ }
+    const text = await files.read(partFile(part));
+    if (text !== null) own.push(...readPart(text, part).map(fileOf).filter(Boolean));
   }
   // Removing a file that is not there counts as removed.
   const names = [...own, ...[...new Set([...Object.keys(SYNC_PARTS), ...parts])].map(partFile), MANIFEST];

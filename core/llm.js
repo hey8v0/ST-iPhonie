@@ -1,3 +1,4 @@
+import {redactSecrets} from './secrets.js';
 // 文字模型: which model writes the phone's text (chat replies, 朋友圈, calls, picture plans). 'tavern' uses the model the
 // tavern is connected to (generateRaw), as before; 'custom' calls an OpenAI-compatible Chat Completions API directly
 // from the browser with its own address, key and model. The story itself always stays on the tavern's model.
@@ -124,7 +125,7 @@ export async function streamText(response, info = {}) {
     if (!data || data === '[DONE]') return;
     let json; try { json = JSON.parse(data); } catch { return; }
     const message = json?.error?.message || (typeof json?.error === 'string' ? json.error : '');
-    if (message) throw Error(String(message).slice(0, 300));
+    if (message) throw Error(redactSecrets(message, [info.key]).slice(0, 300));
     info.alive?.();
     const choice = json?.choices?.[0];
     if (choice?.delta?.reasoning_content || choice?.delta?.reasoning || json?.candidates?.[0]?.content?.parts?.some?.(p => p?.thought)) info.thought = true;
@@ -152,9 +153,8 @@ export async function streamText(response, info = {}) {
 export function failure(status, body, key = '') {
   if (status === 403 && /CORS proxy is disabled/i.test(typeof body === 'string' ? body : JSON.stringify(body))) return Error('酒馆的跨域代理未开启：在 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆');
   let detail = '';
-  try { const json = typeof body === 'string' ? JSON.parse(body) : body; detail = json?.error?.message || json?.message || json?.detail || ''; } catch { detail = String(body || '').slice(0, 200); }
-  detail = String(detail).slice(0, 300);
-  if (key) detail = detail.split(key).join('••••');
+  try { const json = typeof body === 'string' ? JSON.parse(body) : body; detail = json?.error?.message || json?.message || json?.detail || ''; } catch { detail = String(body || ''); }
+  detail = redactSecrets(detail, [key]).slice(0, 300);
   const reason = {401: '密钥无效或已过期', 403: '这个密钥没有权限', 404: '地址或模型名不对', 408: '接口超时了', 413: '请求内容太长', 429: '请求太频繁或额度用完了', 500: '接口服务出错了', 502: '接口服务暂时不可用', 503: '接口服务暂时不可用'}[status] || `接口返回错误 ${status}`;
   return Error(`文字模型：${reason}${detail ? '（' + detail + '）' : ''}`);
 }
@@ -242,7 +242,7 @@ export async function customRequest({text, key, prompt, responseLength, fetch: s
     if (reply) return finish(reply);
   } else {
     const info = details ? {onChunk: json => responseMetadata(json, meta), onProgress: content => onProgress?.(content, meta)} : {};
-    const reply = await first.read(alive => streamText(first.response, Object.assign(info, {alive})));
+    const reply = await first.read(alive => streamText(first.response, Object.assign(info, {alive, key})));
     if (info.finish) meta.finish = info.finish;
     if (reply.trim()) return finish(reply);
     if (info.thought) throw thoughtOnly(info.finish);

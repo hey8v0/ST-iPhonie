@@ -189,7 +189,7 @@ export class LocalLibrary {
    const sizes=tx.objectStore('sizes');
    const apply=()=>{
     try{
-     const put=(name,row)=>{const stored={...row,scope:this.#scope};stored._bytes=bytes(stored);rows[name].set(stored.id,stored);ops.push(['put',name,stored]);};
+     const put=(name,row)=>{const old=rows[name].get(row.id),samePhoto=name==='photos'&&old&&old.updatedAt===row.updatedAt&&old.size===row.size&&old.type===row.type&&JSON.stringify(old.packed)===JSON.stringify(row.packed);const stored={...row,scope:this.#scope};stored._bytes=bytes(stored);rows[name].set(stored.id,stored);ops.push(['put',name,stored,!samePhoto]);};
      const remove=(name,id)=>{const existed=rows[name].delete(id);if(existed)ops.push(['delete',name,id]);return existed;};
      result=change({rows,put,remove});
      const after=new Map(ledger);
@@ -200,8 +200,8 @@ export class LocalLibrary {
      if(total>limit&&total>=before)throw fail(`本地资料已达到 ${sizeText(limit)} 上限（这个浏览器给小手机的空间），请删除不需要的内容后再保存`,'LIBRARY_FULL');
      // 'meta' follows every picture and recording; a photo saved again or deleted loses its smaller pictures
      const meta=tx.objectStore('meta'),thumbs=tx.objectStore('thumbs'),previews=tx.objectStore('previews');
-     for(const [op,name,x] of ops){
-      if(op==='put'){tx.objectStore(name).put(x);sizes.put({scope:this.#scope,store:name,id:x.id,bytes:x._bytes});if(MEDIA.includes(name))meta.put(metaRow(this.#scope,name,x));if(name==='photos'){thumbs.delete([this.#scope,x.id]);previews.delete([this.#scope,x.id]);}}
+     for(const [op,name,x,invalidate] of ops){
+      if(op==='put'){tx.objectStore(name).put(x);sizes.put({scope:this.#scope,store:name,id:x.id,bytes:x._bytes});if(MEDIA.includes(name))meta.put(metaRow(this.#scope,name,x));if(name==='photos'&&invalidate){thumbs.delete([this.#scope,x.id]);previews.delete([this.#scope,x.id]);}}
       else{tx.objectStore(name).delete([this.#scope,x]);sizes.delete([this.#scope,name,x]);if(MEDIA.includes(name))meta.delete([this.#scope,name,x]);if(name==='photos'){thumbs.delete([this.#scope,x]);previews.delete([this.#scope,x]);}}
      }
     }catch(e){ownError=friendly(e);tx.abort();}
@@ -248,9 +248,10 @@ export class LocalLibrary {
  /** 绘本 (core/book.js): the books on the shelf, newest first; one; kept (made or changed); thrown away (its drawn pictures stay in 相册). */
  async listBooks(){return (await this.#list('books')).map(row=>normalizeBook(row.book));}
  async getBook(id){const row=await this.#read('books',identifier(id));return row?.book?normalizeBook(row.book):null;}
- async saveBook(input){
+ async saveBook(input,{fields:patchFields}={}){
   if(!input||typeof input!=='object')throw fail('绘本格式无效');const book=normalizeBook(input);identifier(book.id);
-  return this.#mutate(({rows,put})=>{const now=this.#time(),row={id:book.id,book:{...book,at:now},createdAt:rows.books.get(book.id)?.createdAt??now,updatedAt:now};put('books',row);return structuredClone(row.book);},{books:[book.id]});
+  if(patchFields&&(!Array.isArray(patchFields)||patchFields.some(key=>!['title','subtitle'].includes(key))))throw fail('绘本修改字段无效');
+  return this.#mutate(({rows,put})=>{const old=rows.books.get(book.id);if(patchFields&&!old)throw fail('这本绘本已经不在了');const next=patchFields?normalizeBook({...old.book,...Object.fromEntries(patchFields.map(key=>[key,book[key]]))}):book;const now=this.#time(),row={id:book.id,book:{...next,at:now},createdAt:rows.books.get(book.id)?.createdAt??now,updatedAt:now};put('books',row);return structuredClone(row.book);},{books:[book.id]});
  }
  async deleteBook(id){return this.#remove('books',id);}
  async listPhotos(){return this.#list('photos',true);}
@@ -395,11 +396,12 @@ export class LocalLibrary {
  /** Puts backup rows back with their ids and dates, checked like new ones, in one transaction (all or nothing).
   *  replace: the given stores are emptied first. A phone appearance pointing at a photo that is not there falls back
   *  to the default. Returns how many rows each store received. */
+ checkImport(data){for(const [name,list] of Object.entries(data||{})){if(!STORES.includes(name)||!Array.isArray(list))throw fail('备份内容无效：'+name);for(const row of list)this.#backupRow(name,row);}}
  async importRows(data,{replace=false,merge}={}){
   const clean={};for(const [name,list] of Object.entries(data||{})){if(!STORES.includes(name))throw fail('备份里有未知的资料类型：'+name);if(!Array.isArray(list))throw fail('备份内容无效：'+name);clean[name]=list.map(row=>this.#backupRow(name,row));}
   return this.#mutate(({rows,put,remove})=>{
    const counts={};
-   for(const [name,incoming] of Object.entries(clean)){if(name==='phone')continue;const list=replace&&merge?merge([...rows[name].values()].map(row=>publicRow(row)),name).map(row=>this.#backupRow(name,row)):incoming;if(replace)for(const id of [...rows[name].keys()])remove(name,id);for(const row of list)put(name,row);counts[name]=list.length;}
+   for(const [name,incoming] of Object.entries(clean)){if(name==='phone')continue;const list=replace&&merge?merge([...rows[name].values()].map(row=>publicRow(row)),name).map(row=>this.#backupRow(name,row)):incoming;const ids=new Set(list.map(row=>row.id));if(replace)for(const id of [...rows[name].keys()])if(!ids.has(id))remove(name,id);for(const row of list){put(name,row);}counts[name]=list.length;}
    const phone=clean.phone?.at(-1)||(replace&&clean.photos&&rows.phone.get('preferences'));
    if(phone){const next={...publicRow(phone)};delete next.id;if(next.wallpaper.kind==='photo'&&!rows.photos.has(next.wallpaper.photoId))next.wallpaper=defaults().wallpaper;next.icons={...next.icons};for(const [app,icon] of Object.entries(next.icons))if(icon.kind==='photo'&&!rows.photos.has(icon.photoId))delete next.icons[app];put('phone',{...next,id:'preferences'});if(clean.phone)counts.phone=1;}
    return counts;

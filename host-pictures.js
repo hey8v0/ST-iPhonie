@@ -559,10 +559,11 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       if (!before || at < 0) throw Error('没在正文里找到这张图的提示词');
       // In prompt="…" a double quote would end it; tags never need angle brackets.
       const safe = tag.spec ? value.replace(/<\/?img\b/gi, '') : value.replace(/[<>]/g, '').replace(/"/g, /=\s*'/.test(segment.slice(0, at).slice(-12)) ? '"' : "'");
-      message.mes = message.mes.slice(0, tag.start) + segment.slice(0, at) + safe + segment.slice(at + before.length) + message.mes.slice(tag.end);
-      if (Array.isArray(message.swipes) && Number.isInteger(message.swipe_id) && message.swipes[message.swipe_id] != null) message.swipes[message.swipe_id] = message.mes;
-      fresh = parsePictures(message.mes).find(t => t.index === tag.index);
+      const proposed = message.mes.slice(0, tag.start) + segment.slice(0, at) + safe + segment.slice(at + before.length) + message.mes.slice(tag.end);
+      fresh = parsePictures(proposed).find(t => t.index === tag.index);
       if (!fresh) throw Error('改完认不出这张图了，检查一下格式');
+      message.mes = proposed;
+      if (Array.isArray(message.swipes) && Number.isInteger(message.swipe_id) && message.swipes[message.swipe_id] != null) message.swipes[message.swipe_id] = proposed;
       const record = stored(message, tag.hash);
       if (record && fresh.hash !== tag.hash) { message.extra.sttts_pics[fresh.hash] = record; delete message.extra.sttts_pics[tag.hash]; }
       await context().saveChat();

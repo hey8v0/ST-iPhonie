@@ -543,11 +543,13 @@ export function settingsApp(ctx) {
       case 'photo-off': { const p = await api.getPhone(); appearance.wallpaper = {kind: 'builtin', key: p.skin || 'sky'}; await api.savePhone({wallpaper: appearance.wallpaper}); await render(); ctx.notify('已换回主题壁纸'); break; }
       case 'photo-delete': {
         if (!await ctx.confirm('删除这张照片？', '照片会从相册删除，壁纸换回主题壁纸。')) break;
-        await api.deletePhoto(appearance.wallpaper.photoId);
+        const target = appearance, removedPhoto = target.wallpaper.photoId;
+        await api.deletePhoto(removedPhoto);
+        if (appearance !== target) break;
         const p = await api.getPhone();
         if (p.wallpaper.kind !== 'builtin' || p.wallpaper.key !== (p.skin || 'sky')) await api.savePhone({wallpaper: {kind: 'builtin', key: p.skin || 'sky'}});
         const now = await api.getPhone();
-        appearance = appearanceOf(now);
+        if (appearance) { appearance.wallpaper = appearanceOf(now).wallpaper; for (const [app, icon] of Object.entries(appearance.icons)) if (icon?.kind === 'photo' && icon.photoId === removedPhoto) delete appearance.icons[app]; }
         await render();
         ctx.notify('照片已删除');
         break;

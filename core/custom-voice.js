@@ -165,12 +165,12 @@ export function referenceFile(audio) { const bytes = bytesOf(audio); return new 
  * line is being sent again).
  */
 export function customInit(request, key = '', {audio = '', uploaded = '', id = crypto.randomUUID()} = {}) {
-  const headers = {}, stamp = text => text.replace(ID_SLOT, id);
+  const headers = {}, stamp = text => text.replace(ID_SLOT, id).replace(KEY_SLOT, key);
   for (const line of request.headers.split('\n')) {
     const m = line.match(/^\s*([!#$%&'*+.^_`|~0-9A-Za-z-]+)\s*:\s*(.*)$/);
     if (m) headers[m[1]] = stamp(m[2].replace(KEY_SLOT, key)).trim();
   }
-  if (key && !/\{\{\s*key\s*\}\}/.test(request.headers) && !Object.keys(headers).some(h => h.toLowerCase() === 'authorization')) headers.Authorization = 'Bearer ' + key;
+  if (key && !/\{\{\s*key\s*\}\}/.test([request.headers, request.url, JSON.stringify(request.body)].join('\n')) && !Object.keys(headers).some(h => h.toLowerCase() === 'authorization')) headers.Authorization = 'Bearer ' + key;
   const init = {method: request.method, headers};
   if (request.method === 'POST' && request.body !== undefined) {
     const named = Object.keys(headers).find(h => h.toLowerCase() === 'content-type');

@@ -166,7 +166,7 @@ export class MomentStore {
   #preparePosts(posts) {
     if (!Array.isArray(posts)) throw fail('备份里的朋友圈无效');
     const now = this.#now();
-    return posts.slice(0, MOMENTS_LIMITS.posts).map(p => {
+    return [...posts].sort((a,b)=>(Number(b?.at)||0)-(Number(a?.at)||0)||String(a?.id).localeCompare(String(b?.id))).slice(0, MOMENTS_LIMITS.posts).map(p => {
       if (!p || typeof p !== 'object' || !p.id) throw fail('备份里的朋友圈无效');
       const at = Number.isFinite(p.at) ? p.at : now;
       return {scope: this.#scope, ...cleanPost(p, clip(p.id, 512), at, {stored: true}),

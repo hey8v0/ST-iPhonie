@@ -40,7 +40,7 @@ const SYMMETRY = [['', '关闭', '只画一处'], ['v', '左右对称', '沿竖�
 
 export function paintApp(ctx) {
   const v = createView(ctx, 'paint'), store = paintStore(ctx.win), keys = new ctx.win.AbortController();
-  let mode = 'gallery', pic = null, work = null, stage = null, saving = null, saveTimer = 0, savedAt = 0, full = false, thumbs = [];
+  let mode = 'gallery', pic = null, work = null, stage = null, saving = null, saveTimer = 0, savedAt = 0, full = false, thumbs = [], adjustment = null;
   const dropThumbs = () => { for (const url of thumbs) ctx.win.URL.revokeObjectURL(url); thumbs = []; };
   // The tools: which brush each of 画画 and 橡皮 uses, at what size and opacity; the colour and the ones used before.
   const tools = (() => { try { return JSON.parse(ctx.win.localStorage.getItem(TOOLS_KEY) || 'null') || {}; } catch { return {}; } })();
@@ -102,7 +102,7 @@ export function paintApp(ctx) {
     const pickd = await menu(ctx, w.name, [{key: 'rename', icon: 'edit', label: '重命名'}, {key: 'album', icon: 'image', label: '存到相册'}, {key: 'delete', icon: 'trash', label: '删除', danger: true}]);
     if (pickd === 'rename') {
       const d = ctx.dialog('作品名字', `<div class="field"><input data-field="work-name" maxlength="40" value="${esc(w.name)}"></div><div class="actions">${btn('work-name-save', '保存', 'primary')}</div>`);
-      d.body.addEventListener('click', async e => { if (!e.target.closest('[data-action=work-name-save]')) return; const name = d.body.querySelector('[data-field=work-name]').value.trim() || w.name; d.close(); await store.rename(id, name); renderGallery(); });
+      d.body.addEventListener('click', async e => { if (!e.target.closest('[data-action=work-name-save]')) return; const name = d.body.querySelector('[data-field=work-name]').value.trim() || w.name; d.close(); await store.rename(id, name); ctx.api.paintChanged?.(); renderGallery(); });
     }
     if (pickd === 'album') { const full = await store.get(id); const layers = await Promise.all(full.layers.map(async l => ({...l, image: l.blob ? await ctx.win.createImageBitmap(l.blob) : null}))); await toAlbum(createPicture(ctx.doc, {...full, layers}), full.name); }
     if (pickd === 'delete' && await ctx.confirm('删除这幅作品？', '删掉就找不回来了（存到相册的那份还在）。')) { await store.remove(id); ctx.api.paintChanged?.([id]); renderGallery(); }
@@ -116,17 +116,26 @@ export function paintApp(ctx) {
   /** Keeps the work as it is (layers and a small picture for the list); once at a time, only when it changed. */
   function save() {
     if (!pic || !work || savedAt === pic.changed || pic.float) return saving || Promise.resolve();
-    const p = pic, at = p.changed, w = work;
-    saving = (saving || Promise.resolve()).then(async () => {
-      const groups = (p.groups || []).map(g=>({...g}));
-      const layers = await Promise.all(p.layers.map(async l => ({...layerInfo(l), blob: await blobOf(l.canvas)})));
-      const flat = flatten(p), s = Math.min(1, 360 / Math.max(p.width, p.height)), t = ctx.doc.createElement('canvas');
+    const p = pic, w = work;
+    const task = (saving || Promise.resolve()).then(async () => {
+      const at = p.changed;
+      if (pic === p && savedAt === at) return;
+      // Freeze all layer pixels before the first encoder yields. Adjustment previews are not committed pixels.
+      const snapshot = {...p, layers: p.layers.map(l => {
+        const canvas = ctx.doc.createElement('canvas'); canvas.width = p.width; canvas.height = p.height;
+        const source = adjustment?.pic === p && adjustment.a.layer === l ? adjustment.a.copy : l.canvas;
+        canvas.getContext('2d')?.drawImage(source, 0, 0);
+        return {...l, canvas};
+      }), groups: (p.groups || []).map(g=>({...g}))};
+      const flat = flatten(snapshot), s = Math.min(1, 360 / Math.max(p.width, p.height)), t = ctx.doc.createElement('canvas');
       t.width = Math.round(p.width * s); t.height = Math.round(p.height * s);
       t.getContext('2d')?.drawImage(flat, 0, 0, t.width, t.height);
-      await store.put({id: w.id, name: w.name, width: p.width, height: p.height, background: p.background, showBackground: p.showBackground, active: p.active, createdAt: w.createdAt, updatedAt: Date.now(), thumb: await blobOf(t), layers, groups});
+      const layers = await Promise.all(snapshot.layers.map(async l => ({...layerInfo(l), blob: await blobOf(l.canvas)})));
+      await store.put({id: w.id, name: w.name, width: p.width, height: p.height, background: snapshot.background, showBackground: snapshot.showBackground, active: snapshot.active, createdAt: w.createdAt, updatedAt: Date.now(), thumb: await blobOf(t), layers, groups: snapshot.groups});
       ctx.api.paintChanged?.();
       if (pic === p) savedAt = at;
-    }).catch(error => ctx.notify('作品没存上：' + error.message, {error: true})).finally(() => { saving = null; });
+    }).catch(error => ctx.notify('作品没存上：' + error.message, {error: true})).finally(() => { if (saving === task) saving = null; });
+    saving = task;
     return saving;
   }
   const saveSoon = () => { ctx.win.clearTimeout(saveTimer); saveTimer = ctx.win.setTimeout(save, 1500); };
@@ -414,6 +423,7 @@ export function paintApp(ctx) {
   function adjustSheet() {
     const a = beginAdjust(pic);
     if (!a) { ctx.notify(pic.float ? '先放下正在变形的东西' : '这个图层锁定了'); return; }
+    adjustment = {pic, a};
     const values = {hue: 0, saturation: 100, brightness: 100, blur: 0};
     const rows = [['hue', '色相', -180, 180, '°'], ['saturation', '饱和度', 0, 200, '%'], ['brightness', '亮度', 0, 200, '%'], ['blur', '模糊', 0, 40, 'px']];
     // Small, so the picture above it shows what the sliders do.
@@ -436,7 +446,7 @@ export function paintApp(ctx) {
       }
       if (e.target.closest('[data-action=adjust-apply]')) { if (frame) { ctx.win.cancelAnimationFrame(frame); show(); } kept = endAdjust(pic, a, true); d.close(); stage.render(); syncSide(); saveSoon(); ctx.notify('调整好了，可以撤销'); }
     });
-    d.onClose(() => { if (frame) ctx.win.cancelAnimationFrame(frame); if (!kept) { endAdjust(pic, a, false); stage.render(); } });
+    d.onClose(() => { const owner = adjustment?.pic; adjustment = null; if (frame) ctx.win.cancelAnimationFrame(frame); if (!kept && owner) { endAdjust(owner, a, false); stage?.render(); } });
   }
   // ---------- 对称辅助 ----------
   async function symmetryMenu() {

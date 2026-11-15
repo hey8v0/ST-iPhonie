@@ -20,7 +20,7 @@ export function assistantPreviewDocument(html, {auto = false, theme = {}, dark =
   const themeCSS = Object.entries(theme).filter(([key, value]) => /^--[a-zA-Z0-9-]+$/.test(key) && /^[#(),.%\w\s-]+$/.test(value)).map(([key, value]) => `${key}:${value}`).join(';');
   const themeSync = `<script>addEventListener('message',event=>{if(event.source!==parent||event.data?.type!=='assistant-theme')return;const root=document.documentElement;root.style.colorScheme=event.data.dark?'dark':'light';for(const [key,value] of Object.entries(event.data.theme||{})){if(/^--SmartTheme[A-Za-z]+Color$/.test(key)&&typeof value==='string'&&/^[#(),.%\\w\\s-]+$/.test(value))root.style.setProperty(key,value);}});</script>`;
   const sizing = auto ? `<script>(()=>{let queued=false,last=0;const send=()=>{queued=false;const body=document.body,box=body.getBoundingClientRect(),style=getComputedStyle(body),range=document.createRange();range.selectNodeContents(body);const content=range.getBoundingClientRect();const height=Math.max(24,Math.ceil(Math.max(box.bottom,content.bottom)+Math.max(0,parseFloat(style.marginBottom)||0)));if(height!==last){last=height;parent.postMessage({type:'assistant-html-size',height},'*');}};const schedule=()=>{if(!queued){queued=true;requestAnimationFrame(send);}};new ResizeObserver(schedule).observe(document.body);new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true,attributes:true,characterData:true});addEventListener('load',schedule,true);addEventListener('resize',schedule);document.fonts?.ready.then(schedule);schedule();})();</script>` : '';
-  // A widget hands the user's choice back to the chat (iphonie.send); the phone takes it only after a tap in this frame.
+  // A widget proposes a message with iphonie.send; the parent page asks before sending it.
   const bridge = `<script>window.iphonie=Object.freeze({send:text=>parent.postMessage({type:'assistant-send',text:String(text||'').slice(0,500)},'*')});</script>`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${esc(policy)}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{--ink:var(--SmartThemeBodyColor,#25314b);--muted:var(--SmartThemeEmColor,#65718a);--accent:var(--SmartThemeQuoteColor,#7dadd6);--accent-ink:var(--SmartThemeUnderlineColor,#2d6392);--line:var(--SmartThemeBorderColor,#dce5ef);--card:var(--SmartThemeBlurTintColor,#fff)}${auto ? "html,body{height:auto!important;min-height:0!important}" : ""}html{color-scheme:${dark ? 'dark' : 'light'};background:var(--SmartThemeChatTintColor,#fff);${themeCSS}}body{display:flow-root;background:var(--SmartThemeChatTintColor,#fff);margin:${auto ? 0 : 12}px;color:var(--SmartThemeBodyColor,#25314b);font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}img,video,canvas,svg{max-width:100%}button,input,textarea,select{font:inherit}pre{white-space:pre-wrap}p{margin:.65em 0}p:first-child{margin-top:0}p:last-child{margin-bottom:0}h1,h2,h3,h4,h5,h6{line-height:1.4;margin:.9em 0 .45em}ul,ol{padding-left:1.5em;margin:.6em 0}li{margin:.25em 0}blockquote{margin:.6em 0;padding-left:1em;border-left:2px solid var(--SmartThemeQuoteColor,#7dadd6)}table{border-collapse:collapse;max-width:100%}td,th{padding:4px 8px;border:1px solid var(--SmartThemeBorderColor,#dce5ef)}</style>${bridge}</head><body>${themeSync}${String(html)}${sizing}</body></html>`;
 }
@@ -542,15 +542,21 @@ export function assistantApp(ctx) {
     current.replaceWith(fresh);
     if (bottom) list.scrollTop = list.scrollHeight;
   }
-  let lastWidgetSend = 0;
+  let lastWidgetSend = 0, widgetPrompt = false;
   const resizePreview = event => {
-    // iphonie.send from a widget: only from a frame of this app the user has tapped into (it has the focus), not
-    // more than once a second and a half, and only into the conversation on screen.
+    // A focused iframe can run timers indefinitely. Each proposed send needs approval in the parent UI.
     if (event.data?.type === 'assistant-send' && typeof event.data.text === 'string') {
       const frame = [...v.root.querySelectorAll('.assistant-preview')].find(f => f.contentWindow === event.source);
       const text = event.data.text.trim().slice(0, 500), now = Date.now();
-      if (!frame || !text || ctx.doc.activeElement !== frame || now - lastWidgetSend < 1500 || mode !== 'chat') return;
-      lastWidgetSend = now; sendNow(text); return;
+      if (!frame || !text || widgetPrompt || ctx.doc.activeElement !== frame || now - lastWidgetSend < 1500 || mode !== 'chat' || busy(threadId)) return;
+      if (draft().trim() || attachments().length) { ctx.notify('先发送或清空输入框里的草稿和附件，再使用小部件发送'); return; }
+      const id = threadId; widgetPrompt = true; lastWidgetSend = now;
+      (async () => {
+        if (!await ctx.confirm('发送小部件的这条消息？', text)) return;
+        if (v.disposed || threadId !== id || mode !== 'chat' || !frame.isConnected || draft().trim() || attachments().length) return;
+        await sendNow(text);
+      })().catch(error => ctx.notify(error.message, {error: true})).finally(() => { widgetPrompt = false; });
+      return;
     }
     if (event.data?.type !== 'assistant-html-size' || !Number.isFinite(event.data.height)) return;
     for (const frame of v.root.querySelectorAll('.assistant-auto-preview')) if (event.source === frame.contentWindow) {

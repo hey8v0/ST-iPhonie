@@ -360,7 +360,12 @@ export class TTSBackend {
             const paths = castFiles([this.settings.vn.cast, this.settings.vn.moves, this.settings.draw.styles.map(s => s.cover || null), this.settings.routes.map(r => r.ref || null)]);
             if (paths.length && !this.syncFiles?.readPath) throw Error('要在酒馆里打开小手机，才能把视觉小说的立绘和模型放进备份（不要的话把这一项关掉）');
             vnFiles = [];
-            for (const path of paths) { const blob = await this.syncFiles.readPath(path).catch(() => null); if (blob) vnFiles.push({ path, blob }); }
+            for (const path of paths) {
+                let blob;
+                try { blob = await this.syncFiles.readPath(path); } catch (error) { throw Error(`备份没有完成：读不到文件 ${path}（${message(error)}）`); }
+                if (!blob) throw Error(`备份没有完成：文件 ${path} 已不在酒馆里，请补回文件，或取消备份立绘和模型`);
+                vnFiles.push({ path, blob });
+            }
         }
         const rows = {};
         for (const part of want) if (ROW_PARTS.includes(part)) rows[part] = await this.partRows(part);
@@ -403,7 +408,18 @@ export class TTSBackend {
         let settings = null;
         if (want.has('settings') && backup.settings) {
             settings = normalizeSettings({ ...backup.settings, scope: this.settings.scope, floating: this.settings.floating });
-            validateSettings(settings);
+            settings = this.prepareSettings(settings);
+        }
+        // Validate selected payloads before writing files or replacing library rows.
+        if (want.has('chats') && backup.chats) this.chats.checkImport(backup.chats);
+        const libraryRows = {};
+        for (const part of want) for (const store of PART_STORES[part]) if (backup.library[store]) libraryRows[store] = backup.library[store];
+        this.library.checkImport(libraryRows);
+        if (want.has('memories') && backup.memories) normalizeMemoryBooks(backup.memories);
+        if (want.has('assistant') && backup.assistant) normalizeAssistantThreads(backup.assistant);
+        if (keys) for (const [engine, key] of Object.entries(keys)) {
+            keyCheck(engine); if (!String(key).trim()) throw Error('备份里有空密钥：' + engine); validateKey(engine, key);
+            if (engine === 'nai' || engine === 'gpt') this.assertImageIdle();
         }
         // The 视觉小说's files the tavern lacks (another tavern, or deleted since the backup) go back in first; where
         // one lands elsewhere, the settings are pointed there.
@@ -449,7 +465,7 @@ export class TTSBackend {
             if (part !== 'bookshelf') this.reviveSync(part, backup.rows[part].map(row => String(row?.id)));
             this.partsChanged(part);
         }
-        if (keys) { let count = 0; for (const [engine, key] of Object.entries(keys)) { try { this.setKey(engine, key); count++; } catch { /* an engine this version does not know */ } } done.keys = count; }
+        if (keys) { let count = 0; for (const [engine, key] of Object.entries(keys)) { this.setKey(engine, key); count++; } await this.keyStore.flush?.({strict: true, engines: Object.keys(keys)}); done.keys = count; }
         for (const collection of ['favorites', 'photos', 'notes', 'books']) if (collection in done) this.emit('library', { collection });
         if ('phone' in done || 'photos' in done) this.emit('phone', { preferences: await this.getPhone() });
         return done;
@@ -458,7 +474,7 @@ export class TTSBackend {
     emit(type, data = {}) {
         if (this.closed) return;
         const event = { type, revision: this.revision, ...clone(data) };
-        if (!this.syncApplying && (type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || type === 'looks' || type === 'albums' || type === 'games' || type === 'wardrobe' || type === 'theater' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
+        if (!this.syncApplying && ((type === 'draw' && data.vibes) || type === 'references' || type === 'chat' || type === 'moments' || ((type === 'forum' || type === 'peek') && !('busy' in data)) || (type === 'sounds' && !data.missing) || (type === 'music' && !data.settings) || type === 'looks' || type === 'albums' || type === 'games' || type === 'wardrobe' || type === 'theater' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && SYNC_PARTS[data.collection]))) this.scheduleSync();
         for (const listener of this.listeners) { try { listener(clone(event)); } catch { /* One view cannot stop the other subscribers. */ } }
     }
     subscribe(listener) {
@@ -482,9 +498,8 @@ export class TTSBackend {
         return JSON.parse(this.stateJson);
     }
     getSnapshot() { return { state: this.getState(), revision: this.revision }; }
-    save(next, expectedRevision) {
+    prepareSettings(next) {
         this.assertOpen();
-        if (expectedRevision !== undefined && expectedRevision !== this.revision) throw Error('配置已在别处修改，请重新读取后保存');
         let copy;
         try {
             if (!next || typeof next !== 'object' || !Array.isArray(next.routes) || !Array.isArray(next.presets)) throw Error('设置缺少角色或预设列表');
@@ -502,6 +517,13 @@ export class TTSBackend {
         } catch (error) { throw Error(message(error)); }
         const imageChanged = JSON.stringify([copy.draw.connections, copy.draw.engine]) !== JSON.stringify([this.settings.draw.connections, this.settings.draw.engine]);
         if (imageChanged) this.assertImageIdle();
+        return copy;
+    }
+    save(next, expectedRevision) {
+        this.assertOpen();
+        if (expectedRevision !== undefined && expectedRevision !== this.revision) throw Error('配置已在别处修改，请重新读取后保存');
+        const copy = this.prepareSettings(next);
+        const imageChanged = JSON.stringify([copy.draw.connections, copy.draw.engine]) !== JSON.stringify([this.settings.draw.connections, this.settings.draw.engine]);
         // The host callback completes before the service acknowledges a new settings revision.
         this.persist(clone(copy));
         this.settings = copy;
@@ -742,7 +764,7 @@ export class TTSBackend {
         // 自己的接口: a stored list (from a backup) replaces every set's key; a plain key is the key of the set in use.
         if (engine === 'custom') { this.storeCustomKeys(String(key).includes('\t') ? parseTextKeys(key) : new Map(this.providers.customKeys).set(this.customActive(), validateKey('custom', key))); return; }
         if (engine === 'llm') { if (String(key).includes('\t')) this.storeTextKeys(parseTextKeys(key)); else this.setTextKey(this.settings.text.active, key); return; }
-        if (engine === 'embed') { const value = String(key).replace(/[\u200b-\u200d\ufeff]/g, '').replace(/^\s*Bearer\s+/i, '').trim(); this.keyStore.save('embed', value); this.embedKey = value; this.emit('keys', { engine, configured: true }); return; }
+        if (engine === 'embed') { this.embedKey = this.keyStore.save('embed', key); this.emit('keys', { engine, configured: true }); return; }
         if (engine === 'nai' || engine === 'gpt') {
             this.assertImageIdle();
             const map = String(key).includes('\t') ? parseTextKeys(key) : new Map(this.imageKeys[engine]).set(this.settings.draw.connections[engine].active, validateKey(engine, key));
@@ -1100,16 +1122,20 @@ export class TTSBackend {
                 const preferences = [...result.pulled, ...result.merged].includes('photos') ? await this.getPhone() : null;
                 this.syncState = { ...this.syncState, error: '', lastAt: Date.now(), remote: result.remote, lastResult: { pulled: result.pulled, pushed: result.pushed, merged: result.merged } };
                 // Only these refresh notifications came from syncing. User writes during network waits stay dirty.
-                this.syncApplying = true;
                 for (const part of [...result.pulled, ...result.merged]) {
-                    if (part === 'chats') this.emit('chat', { threadId: '' });
-                    else if (part === 'moments') this.emit('moments', {});
-                    else if (part === 'memories') this.emit('memory', {threadId: '', reset: true});
-                    else if (part === 'assistant') this.emit('assistant', {threadId: '', restored: true});
-                    else if (part === 'vibes') { await this.loadVibes(); this.emit('draw', { vibes: true }); }
-                    else if (part === 'references') await this.loadReferences();
-                    else if (PART_KINDS[part] || part === 'paint') this.partsChanged(part);
-                    else this.emit('library', { collection: part });
+                    if (part === 'vibes') await this.loadVibes();
+                    if (part === 'references') await this.loadReferences();
+                    this.syncApplying = true;
+                    try {
+                        if (part === 'chats') this.emit('chat', { threadId: '' });
+                        else if (part === 'moments') this.emit('moments', {});
+                        else if (part === 'memories') this.emit('memory', {threadId: '', reset: true});
+                        else if (part === 'assistant') this.emit('assistant', {threadId: '', restored: true});
+                        else if (part === 'vibes') this.emit('draw', { vibes: true });
+                        else if (part === 'references') {}
+                        else if (PART_KINDS[part] || part === 'paint') this.partsChanged(part);
+                        else this.emit('library', { collection: part });
+                    } finally { this.syncApplying = false; }
                 }
                 if (preferences) this.emit('phone', { preferences });
                 return clone(result);
@@ -1386,6 +1412,13 @@ export class TTSBackend {
         if (!row) throw Error('这个 Vibe 已经不在了');
         try { return JSON.parse(await row.blob.text()); } catch { throw Error('这个 Vibe 的数据坏了，请删掉重新导入'); }
     }
+    async changeVibe(id, change) {
+        this.vibeChanges ||= new Map();
+        const prior = this.vibeChanges.get(id) || Promise.resolve();
+        const task = prior.catch(() => {}).then(async () => this.storeVibe(await change(await this.vibeDoc(id))));
+        this.vibeChanges.set(id, task);
+        try { return await task; } finally { if (this.vibeChanges.get(id) === task) this.vibeChanges.delete(id); }
+    }
     /** Swappable in tests (no canvas there). */
     shrinkVibeImage(base64) { return smallVibeImage(base64); }
     async storeVibe(doc) {
@@ -1396,6 +1429,7 @@ export class TTSBackend {
         const summary = vibeSummary(doc);
         await this.library.saveVibe({ id: doc.id, name: doc.name, meta: summary, blob: new Blob([JSON.stringify(doc)], { type: 'application/json' }) });
         this.vibes.set(doc.id, summary);
+        this.emit('draw', { vibes: true });
         return summary;
     }
     /**
@@ -1452,7 +1486,7 @@ export class TTSBackend {
             if (!doc.image) continue;
             const small = await this.shrinkVibeImage(doc.image);
             if (small === doc.image) continue;
-            await this.storeVibe({ ...doc, image: small });
+            await this.changeVibe(row.id, latest => ({...latest, image: latest.image === doc.image ? small : latest.image}));
             count++;
         }
         const total = list => list.reduce((n, row) => n + (row.size || 0), 0);
@@ -1494,15 +1528,16 @@ export class TTSBackend {
     }
     /** Renames a vibe, sets its own strength (used when it is used alone, and as the default when added to a group) or its 提取信息量. */
     async updateVibe(id, patch = {}) {
-        const doc = await this.vibeDoc(id);
-        if ('name' in patch) { const name = String(patch.name || '').trim().slice(0, 80); if (!name) throw Error('请填写 Vibe 名字'); doc.name = name; }
-        if ('strength' in patch) doc.importInfo.strength = vibeStrength(patch.strength, doc.importInfo.strength);
-        if ('ie' in patch && vibeExtracted(patch.ie) !== doc.importInfo.information_extracted) {
-            // Without its picture a vibe has only the encodings it came with.
-            if (!doc.image) throw Error('这个 Vibe 没有原图，不能改提取信息量');
-            doc.importInfo.information_extracted = vibeExtracted(patch.ie); doc.importInfo.picked = true;
-        }
-        const summary = await this.storeVibe(doc);
+        const summary = await this.changeVibe(id, async doc => {
+            if ('name' in patch) { const name = String(patch.name || '').trim().slice(0, 80); if (!name) throw Error('请填写 Vibe 名字'); doc.name = name; }
+            if ('strength' in patch) doc.importInfo.strength = vibeStrength(patch.strength, doc.importInfo.strength);
+            if ('ie' in patch && vibeExtracted(patch.ie) !== doc.importInfo.information_extracted) {
+                // Without its picture a vibe has only the encodings it came with.
+                if (!doc.image) throw Error('这个 Vibe 没有原图，不能改提取信息量');
+                doc.importInfo.information_extracted = vibeExtracted(patch.ie); doc.importInfo.picked = true;
+            }
+            return doc;
+        });
         this.emit('draw', { vibes: true });
         return clone(summary);
     }
@@ -1594,8 +1629,8 @@ export class TTSBackend {
                 this.novelai.relay = this.settings.draw.relay.url;
                 encoding = await this.novelai.encodeVibe(doc.image, model, doc.importInfo.information_extracted, signal);
                 this.spentAnlas();
-                doc = await withEncoding(doc, key, doc.importInfo.information_extracted, encoding);
-                await this.storeVibe(doc);
+                const ie = doc.importInfo.information_extracted;
+                await this.changeVibe(u.id, latest => withEncoding(latest, key, ie, encoding));
                 if (this.subscription) this.subscription.checkedAt = 0;
                 this.emit('draw', { vibes: true });
             }
@@ -2683,14 +2718,22 @@ export class TTSBackend {
         this.emit('assistant', { threadId: saved.id, persisted: true });
         return saved;
     }
-    async mutateAssistantThread(id, mutate, {history = true} = {}) {
+    async mutateAssistantThread(id, mutate, {history = true, changedMessage = ''} = {}) {
         this.assertOpen();
         const saved = await this.apps.changeRelated(assistantId(id), [bookId(id), 'vec:' + id], (thread, docs) => {
-            assertAssistantThread(thread); mutate(thread);
+            assertAssistantThread(thread);
+            const before = history ? clone(thread.messages) : [];
+            mutate(thread);
             if (history) {
                 thread.revision = (thread.revision || 0) + 1;
-                thread.memoryRevision = (thread.memoryRevision || 0) + 1;
-                docs.set(bookId(id), null); docs.set('vec:' + id, null);
+                const old = docs.get(bookId(id)), revision = thread.memoryRevision || 0;
+                const time = m => m.variants?.[0]?.at ?? m.at;
+                const changed = before.filter(m => { const now = thread.messages.find(n => n.id === m.id); return !now || JSON.stringify([m.role, m.text, m.attachments]) !== JSON.stringify([now.role, now.text, now.attachments]); }).map(time);
+                thread.memoryRevision = revision + 1;
+                const left = thread.messages.map(m => ({id: m.id, at: time(m), from: m.role === 'user' ? 'me' : '助手', kind: 'text', text: m.text || '【附件】'}));
+                const onlyLast = changedMessage && before.at(-1)?.id === changedMessage;
+                docs.set(bookId(id), onlyLast && old?.memoryRevision === revision ? {...pruneBook(old, changed, left), memoryRevision: thread.memoryRevision} : null);
+                docs.set('vec:' + id, null);
             }
             thread.at = thread.updatedAt = Math.max(Date.now(), Number(thread.updatedAt || thread.at) + 1);
             return thread;
@@ -2749,7 +2792,7 @@ export class TTSBackend {
             if (result.meta) message.meta = result.meta; else delete message.meta;
             const shown = message.selected || 0;
             if (Array.isArray(message.variants) && message.variants[shown]) message.variants[shown] = { text: result.text, at: message.at, ...(result.meta ? { meta: result.meta } : {}) };
-        });
+        }, {changedMessage: messageId});
     }
     /** A title the model wrote: put on only while the conversation still has the one it started with (not renamed). */
     async autoTitleAssistantThread(id, title, expectedTitle) {
@@ -2772,7 +2815,7 @@ export class TTSBackend {
             if (message?.role !== 'assistant' || !Array.isArray(variants) || !Number.isInteger(selected) || !variants[selected]) throw Error('这个回复版本已经不在了');
             message.selected = selected;
             message.text = variants[selected].text; message.meta = variants[selected].meta; message.at = variants[selected].at;
-        });
+        }, {changedMessage: messageId});
     }
     async addAssistantVariant(id, messageId, value, expectedRevision) {
         const result = assistantMessage({...value, role: 'assistant'});
@@ -2785,7 +2828,7 @@ export class TTSBackend {
             variants.push({text: result.text, at: result.at, meta: result.meta});
             message.variants = variants; message.selected = variants.length - 1;
             message.text = result.text; message.meta = result.meta; message.at = result.at;
-        });
+        }, {changedMessage: messageId});
     }
     async clearAssistantThread(id) {
         return this.mutateAssistantThread(id, thread => {
@@ -3501,6 +3544,7 @@ export class TTSBackend {
         const audio = await this.base64(file);
         this.assertOpen();
         this.providers.references.set(record.id, audio);
+        this.emit('references', {});
         return record.id;
     }
     async deleteReference(id) {
@@ -3767,7 +3811,7 @@ export class TTSBackend {
             listPhotos: () => this.library.listPhotos(), addPhoto: value => this.mutateLibrary('photos', 'addPhoto', value),
             getPhoto: id => this.library.getPhoto(id), photoThumb: id => this.photoThumb(id), photoThumbs: ids => this.library.getThumbs([...(ids || [])].map(String)), photoPreview: id => this.photoPreview(id), packablePhotos: days => this.packablePhotos(days), packPhotos: ids => this.packPhotos([...(ids || [])].map(String)), deletePhoto: id => this.deletePhotos([id]).then(n => n > 0), deletePhotos: ids => this.deletePhotos(ids),
             listNotes: () => this.library.listNotes(), saveNote: value => this.mutateLibrary('notes', 'saveNote', value), deleteNote: id => this.mutateLibrary('notes', 'deleteNote', id),
-            listBooks: () => this.library.listBooks(), getBook: id => this.library.getBook(id), saveBook: value => this.mutateLibrary('books', 'saveBook', clone(value)), deleteBook: id => this.mutateLibrary('books', 'deleteBook', id),
+            listBooks: () => this.library.listBooks(), getBook: id => this.library.getBook(id), saveBook: (value, options) => this.mutateLibrary('books', 'saveBook', clone(value), clone(options || {})), deleteBook: id => this.mutateLibrary('books', 'deleteBook', id),
             getPhone: () => this.getPhone(), savePhone: patch => this.savePhone(patch), libraryStats: () => this.library.stats(), storageBudget: () => this.budget.read(),
             listAlbums: () => this.listAlbums(), favoritePhotoIds: () => this.favoritePhotoIds(), favoritePhotos: (ids, on) => this.favoritePhotos([...(ids || [])], on !== false), saveAlbum: value => this.saveAlbum(clone(value || {})), deleteAlbum: id => this.deleteAlbum(String(id)), addToAlbum: (id, ids) => this.addToAlbum(String(id), [...(ids || [])]), removeFromAlbum: (id, ids) => this.removeFromAlbum(String(id), [...(ids || [])]), arrangeAlbums: ids => this.arrangeAlbums([...(ids || [])]),
             unkeptPhotos: () => this.unkeptPhotos(), deleteUnkeptPhotos: ids => this.deleteUnkeptPhotos([...(Array.isArray(ids)?ids:[])]),

@@ -108,7 +108,7 @@ export function libraryApp(ctx) {
 }
 
 export function notesApp(ctx) {
-  const {api} = ctx, v = createView(ctx, 'notes'), drafts = new Map();
+  const {api} = ctx, v = createView(ctx, 'notes'), drafts = new Map(), bases = new Map();
   let current = null, epoch = 0;
   const color = id => NOTE_COLORS[hash(id || 'new') % NOTE_COLORS.length];
   // 备忘录 × 聊天 (0.9.35): a note a contact wrote down for the user, reminded at its time.
@@ -142,7 +142,10 @@ export function notesApp(ctx) {
       case 'edit-note': {
         const rows = await api.listNotes(), saved = rows.find(r => r.id === el.dataset.id);
         if (!saved) return;
-        current = drafts.get(saved.id) || saved;
+        const draft = drafts.get(saved.id), base = bases.get(saved.id);
+        current = {...saved};
+        if (draft && base) for (const key of ['title', 'text']) if (draft[key] !== base[key]) current[key] = draft[key];
+        bases.set(saved.id, structuredClone(saved));
         drafts.set(saved.id, current);
         await render();
         break;
@@ -152,7 +155,7 @@ export function notesApp(ctx) {
           // Only what the user edits goes back: a saved note also carries its dates, which saveNote does not take.
           const target = current, saved = await api.saveNote({...(target.id ? {id: target.id} : {}), title: target.title, text: target.text});
           drafts.delete(target.id || 'new');
-          drafts.set(saved.id, saved);
+          bases.delete(saved.id);
           if (current === target) { current = saved; await render(); v.root.querySelector('[data-save-state]').textContent = '已保存'; }
           ctx.notify('备忘录已保存');
         });

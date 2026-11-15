@@ -58,7 +58,7 @@ export function paintStore(win) {
       t.objectStore('works').put(entry);
       t.objectStore('layers').put({id: work.id, layers});
     }),
-    rename: (id, name) => tx(['works'], 'readwrite', t => { const s = t.objectStore('works'), r = s.get(id); r.onsuccess = () => { if (r.result) s.put({...r.result, name}); }; }),
+    rename: (id, name) => tx(['works'], 'readwrite', t => { const s = t.objectStore('works'), r = s.get(id); r.onsuccess = () => { if (r.result) s.put({...r.result, name, updatedAt: Math.max(Date.now(), (r.result.updatedAt || 0) + 1)}); }; }),
     remove: id => tx(['works', 'layers'], 'readwrite', t => { t.objectStore('works').delete(id); t.objectStore('layers').delete(id); }),
     close: async () => { if (opening) (await opening.catch(() => null))?.close(); opening = null; },
   };

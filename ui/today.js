@@ -304,16 +304,16 @@ export function todayPage(deps) {
   function drop() {
     const d = drag;
     drag = null;
-    if (!d?.live) return;
+    if (!d?.live) { if (pending) { pending = false; render(); } return; }
     swallow = Date.now();
     const el = d.el, from = el.style.transform;
     el.style.transform = '';
     el.classList.remove('tw-lifted');
     nudge(win, el, [{transform: from}, {transform: 'none'}], {duration: 320, easing: 'soft'});
     const order = [...grid.querySelectorAll('.tw')].map(t => t.dataset.id);
-    const next = order.map(id => list.find(w => w.id === id)).filter(Boolean);
+    const next = [...order.map(id => list.find(w => w.id === id)).filter(Boolean), ...list.filter(w => !order.includes(w.id))];
     if (next.map(w => w.id).join() !== list.map(w => w.id).join()) { list = next; save(); }
-    if (pending) { pending = false; paint(); }
+    if (pending) { pending = false; render(); }
   }
   const signal = deps.signal;
   win.addEventListener('pointermove', e => {
