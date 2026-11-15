@@ -78,7 +78,7 @@ export function unarchive(plist) {
 }
 
 // ---------- tips ----------
-/** A mask (white with paint as alpha) from an image: by `rule` 'alpha', 'dark' (black is paint) or 'light' (white is paint). */
+/** A mask (white with paint as alpha) from an image: by `rule` 'alpha', 'dark' (alpha where transparent, else black is paint), 'dark-only' (black is paint) or 'light' (white is paint). */
 export function maskOf(doc, img, rule, size = TIP) {
   const s = Math.min(1, size / Math.max(img.width, img.height)), w = Math.max(1, Math.round(img.width * s)), h = Math.max(1, Math.round(img.height * s));
   const c = doc.createElement('canvas'); c.width = w; c.height = h;
@@ -90,7 +90,7 @@ export function maskOf(doc, img, rule, size = TIP) {
   for (let i = 0; i < px.length; i += 4) {
     const lum = (px[i] * .299 + px[i + 1] * .587 + px[i + 2] * .114) / 255;
     // A picture with transparency: its alpha (with how light it is, for white-is-paint pictures); else its greys.
-    const a = rule === 'light' ? lum * (clear ? px[i + 3] / 255 : 1) : clear && rule !== 'dark-only' ? px[i + 3] / 255 : 1 - lum;
+    const a = rule === 'alpha' ? px[i + 3] / 255 : rule === 'light' ? lum * (clear ? px[i + 3] / 255 : 1) : clear && rule !== 'dark-only' ? px[i + 3] / 255 : 1 - lum;
     px[i + 3] = Math.round(a * 255); px[i] = px[i + 1] = px[i + 2] = 255;
   }
   g.putImageData(data, 0, 0);

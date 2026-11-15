@@ -34,7 +34,7 @@ export function refPanel({ctx, api, rerender, shown}) {
       <div class="ref-main"><p class="ref-title"><b>${repaint() ? (base.focus ? '聚焦重绘' : '局部重绘') : '图生图'}</b><small>${base.width}×${base.height}</small></p>
         ${slider('strength', '强度', base.strength, .01, repaint() ? 1 : .99, .01, repaint() ? '涂出来的地方重画得多彻底：1 是全部重画；低一些保留原来那块的样子，只改一点（V4 及以后）。' : '越高越不像原图：0.3 左右小修，0.7 左右重画但保留构图。')}
         ${repaint() ? '' : slider('noise', '噪声', base.noise, 0, .99, .01, '给原图加噪点，让细节多一些变化。一般 0 到 0.1。')}
-        ${repaint() ? `<div class="setting-row"><span>盖回原图${help('开着时，没涂的地方一个像素都不变；关掉让 AI 整张微调，接缝更自然，但别处也可能有细微变化。')}</span><input class="switch" type="checkbox" data-ref-overlay aria-label="盖回原图" ${base.overlay === false ? '' : 'checked'}></div>` : ''}
+        ${repaint() && !base.focus ? `<div class="setting-row"><span>盖回原图${help('开着时，没涂的地方一个像素都不变；关掉让 AI 整张微调，接缝更自然，但别处也可能有细微变化。')}</span><input class="switch" type="checkbox" data-ref-overlay aria-label="盖回原图" ${base.overlay === false ? '' : 'checked'}></div>` : ''}
         <div class="actions ref-actions">${btn('ref-mask', icon('paint') + (repaint() ? '改涂的地方' : '涂出要重画的地方'), 'secondary small')}${btn('ref-pad', icon('expand') + '扩图 · 裁剪', 'secondary small')}${repaint() ? btn('ref-unmask', '不涂了', 'text-button') : ''}${btn('ref-base-clear', icon('trash'), 'text-button', 'aria-label="去掉底图"')}</div></div></div>`;
   }
   function refsHTML() {

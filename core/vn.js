@@ -188,8 +188,8 @@ export function pickLook(entry, {emotion = '', context = '', after = '', name = 
   const act = actionFor(drawn, {emotion, context, after, name, names});
   if (act) { tell({kind: 'action', label: act.action.label, word: act.word, where: act.where}); return fromGroup(looks[act.action.id]?.sprite ? looks[act.action.id] : entry.looks[act.action.id], last, random); }
   const feeling=expressionOf(emotion);
-  for(const a of entry.actions||[])if(a.kind==='expression'&&a.words.some(w=>matchesVisualWord(emotion,w)||(feeling&&visualWordEmotion(w)===feeling))){tell({kind:'expression',label:a.label,word:emotion});return looks[a.id]?.sprite?fromGroup(looks[a.id],last,random):(set.sprite?fromGroup(set,last,random):'');}
-  const e = expressionOf(emotion);
+  for(const a of entry.actions||[])if(a.kind==='expression'&&looks[a.id]?.sprite&&a.words.some(w=>matchesVisualWord(emotion,w)||(feeling&&visualWordEmotion(w)===feeling))){tell({kind:'expression',label:a.label,word:emotion});return fromGroup(looks[a.id],last,random);}
+  const e = feeling;
   if (e && looks[e]?.sprite) { tell({kind: 'expression', label: EXPRESSIONS.find(x => x.id === e)?.label || e, word: emotion}); return fromGroup(looks[e], last, random); }
   tell({kind: 'usual', label: '', word: emotion});
   return set.sprite ? fromGroup(set, last, random) : '';

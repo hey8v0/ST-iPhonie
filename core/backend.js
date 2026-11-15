@@ -1335,7 +1335,7 @@ export class TTSBackend {
     textModels(draft) { const text = activeText(this.textWith(draft)); return listModels({ text, key: this.textKeys.get(text.id) || '' }); }
 
     // ---------- Drawing ----------
-    assertImageIdle() { this.assertOpen(); if (this.drawQueue.pending) throw Error('还有图片正在生成或排队，请等完成或取消队列后再换生图引擎或账号连接'); }
+    assertImageIdle(action = '换生图引擎或账号连接') { this.assertOpen(); if (this.drawQueue.pending) throw Error(`还有图片正在生成或排队，请等完成或取消队列后再${action}`); }
     activateImageKeys() {
         this.novelai.setKey(this.imageKeys.nai.get(this.settings.draw.connections.nai.active) || '');
         this.novelai.relay = this.settings.draw.relay.url;
@@ -1549,6 +1549,7 @@ export class TTSBackend {
     async deleteVibes(ids) {
         this.assertOpen();
         const gone = new Set([...(ids || [])].map(String).filter(id => this.vibes.has(id)));
+        if (gone.size) this.assertImageIdle('删除 Vibe');
         for (const id of gone) { await this.library.deleteVibe(id); this.vibes.delete(id); }
         this.noteGone('vibes', [...gone]);
         const next = this.getState(), v = next.draw.vibe;

@@ -15,6 +15,7 @@ const letter = blend => BLENDS.find(b => b[0] === blend)?.[2] || 'N';
 
 /** Opens the panel. changed(): the picture changed (redraw, save). color(): the colour in use, for 填充. */
 export function layersPanel({ctx, pic, changed, color}) {
+  if (pic.float) { ctx.notify('请先完成或取消当前变形，再调整图层'); return null; }
   const d = ctx.dialog('图层', '');
   let panel = null, swiped = '', renaming = '', groupOptions = '', groupRename = '';const selected=new Set();
   const picker=bindPopupSelect(d.body,(id,value)=>{setLayer(pic,id,{blend:value});done();});

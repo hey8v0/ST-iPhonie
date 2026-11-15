@@ -79,21 +79,26 @@ export function paintApp(ctx) {
       save();
     });
   }
+  async function loadLayers(w) {
+    if (!w) throw Error('这幅作品已经不在了');
+    const layers = [];
+    try {
+      for (const layer of w.layers || []) layers.push({...layer, image: layer.blob ? await ctx.win.createImageBitmap(layer.blob) : null});
+      return layers;
+    } catch {
+      for (const layer of layers) layer.image?.close?.();
+      throw Error('有图层没能打开，原作品已保留。请稍后重试。');
+    }
+  }
   async function openWork(id) {
     const w = await store.get(id);
     if (!w) { ctx.notify('这幅作品已经不在了'); return renderGallery(); }
-    const layers = [];
-    try {
-      // Decode one at a time on memory-constrained phones. A failed layer must never become an editable blank.
-      for (const l of w.layers || []) layers.push({...l, image: l.blob ? await ctx.win.createImageBitmap(l.blob) : null});
-    } catch {
-      for (const l of layers) l.image?.close?.();
-      ctx.notify('有图层没能打开，原作品已保留。请稍后重试。', {error: true});
-      return;
-    }
+    let layers;
+    try { layers = await loadLayers(w); }
+    catch (error) { ctx.notify(error.message, {error: true}); return; }
     work = {id: w.id, name: w.name, createdAt: w.createdAt || w.updatedAt};
-    openEditor(createPicture(ctx.doc, {width: w.width, height: w.height, background: w.background, showBackground: w.showBackground !== false, layers: layers.length ? layers : null, active: w.active, groups: w.groups || []}));
-    for (const l of layers) l.image?.close?.();
+    try { openEditor(createPicture(ctx.doc, {width: w.width, height: w.height, background: w.background, showBackground: w.showBackground !== false, layers: layers.length ? layers : null, active: w.active, groups: w.groups || []})); }
+    finally { for (const l of layers) l.image?.close?.(); }
     savedAt = pic.changed;
   }
   async function workMenu(id) {
@@ -104,7 +109,14 @@ export function paintApp(ctx) {
       const d = ctx.dialog('作品名字', `<div class="field"><input data-field="work-name" maxlength="40" value="${esc(w.name)}"></div><div class="actions">${btn('work-name-save', '保存', 'primary')}</div>`);
       d.body.addEventListener('click', async e => { if (!e.target.closest('[data-action=work-name-save]')) return; const name = d.body.querySelector('[data-field=work-name]').value.trim() || w.name; d.close(); await store.rename(id, name); ctx.api.paintChanged?.(); renderGallery(); });
     }
-    if (pickd === 'album') { const full = await store.get(id); const layers = await Promise.all(full.layers.map(async l => ({...l, image: l.blob ? await ctx.win.createImageBitmap(l.blob) : null}))); await toAlbum(createPicture(ctx.doc, {...full, layers}), full.name); }
+    if (pickd === 'album') {
+      const full = await store.get(id); let layers;
+      try {
+        layers = await loadLayers(full);
+        await toAlbum(createPicture(ctx.doc, {...full, layers: layers.length ? layers : null}), full.name);
+      } catch (error) { ctx.notify(error.message, {error: true}); }
+      finally { for (const layer of layers || []) layer.image?.close?.(); }
+    }
     if (pickd === 'delete' && await ctx.confirm('删除这幅作品？', '删掉就找不回来了（存到相册的那份还在）。')) { await store.remove(id); ctx.api.paintChanged?.([id]); renderGallery(); }
   }
 
@@ -149,6 +161,7 @@ export function paintApp(ctx) {
   // ---------- 画布 ----------
   function openEditor(p) {
     closeEditor();
+    if (tools.kind === 'transform' && !p.float) { tools.kind = 'brush'; keepTools(); }
     pic = p; mode = 'edit'; v.root.dataset.mode = 'edit';
     v.draw(`<div class="paint-edit">
       <div class="paint-top">
@@ -220,7 +233,7 @@ export function paintApp(ctx) {
     if (undo(pic)) { stage.render(); syncSide(); saveSoon(); }
   }
   function doRedo() { if (pic && !stage?.busy && !pic.float && redo(pic)) { stage.render(); syncSide(); saveSoon(); } }
-  async function leaveEditor() { if (pic?.float) commitTransform(pic); setFull(false); closeEditor(); await save(); pic = null; work = null; renderGallery(); }
+  async function leaveEditor() { if (pic?.float) commitTransform(pic); if (tools.kind === 'transform') { tools.kind = 'brush'; keepTools(); } setFull(false); closeEditor(); await save(); pic = null; work = null; renderGallery(); }
   // ---------- 全屏 ----------
   function canFull() { let float = false; try { float = !!ctx.api.panelFloating?.(); } catch { /* outside the tavern */ } return float || !ctx.win.matchMedia?.(PHONE_SCREEN).matches; }
   /** The picture fills the whole window (the tavern's too), without the phone around it; again to go back. */
@@ -341,6 +354,11 @@ export function paintApp(ctx) {
     const mask = tipMask(ctx.doc, brush);
     if (mask.ready) draw(); else mask.onready = draw;
   }
+  function keepBrushes(list) {
+    if (saveUserBrushes(ctx.win, list)) return true;
+    ctx.notify('这个浏览器存不下笔刷了，请先释放存储空间再试；本次调整还没有保存', {error: true});
+    return false;
+  }
   function brushSheet(kind) {
     const d = ctx.dialog(kind === 'eraser' ? '橡皮用的笔刷' : kind === 'smudge' ? '涂抹用的笔刷' : '笔刷库', '');
     // Groups down the left, the chosen group's brushes on the right, as on Procreate. 柳叶笔 fills, so it cannot smudge.
@@ -366,7 +384,7 @@ export function paintApp(ctx) {
       if (group) ctx.win.Promise.resolve(ctx.confirm(`删除「${group}」这组笔刷？`, '画好的画不受影响。')).then(ok => {
         if (!ok) return brushSheet(kind);
         const gone = new Set(userBrushes(ctx.win).filter(b => b.group === group).map(b => b.id));
-        saveUserBrushes(ctx.win, userBrushes(ctx.win).filter(b => !gone.has(b.id)));
+        if (!keepBrushes(userBrushes(ctx.win).filter(b => !gone.has(b.id)))) return brushSheet(kind);
         for (const t of [tools.brush, tools.eraser, tools.smudge]) if (gone.has(t.id)) t.id = 'round';
         keepTools(); brushSheet(kind);
       });
@@ -385,9 +403,9 @@ export function paintApp(ctx) {
     });
   }
   /** 笔刷工作室: every setting of a brush, with a stroke to try it on; built-in ones can go back to how they were. */
-  function studio(id, kind) {
+  function studio(id, kind, draft = null) {
     const base = brushOf(id), built = BRUSHES.find(b => b.id === id);
-    let b = {taper: 0, ...base};
+    let b = {taper: 0, ...base, ...draft};
     const d = ctx.dialog(`调整「${base.name}」`, `<canvas class="paint-studio-preview" width="300" height="70" data-studio-preview></canvas>
       <div class="field"><span>名字</span><input data-studio="name" maxlength="30" value="${esc(b.name)}"></div>
       ${FIELDS.filter(([k]) => !base.lasso || k === 'opacity').map(([k, label, min, max, step]) => `<div class="field"><div class="meter-label"><span>${label}</span><output data-out="${k}">${k === 'size' ? Math.round(b[k]) : Math.round(b[k] * 100) + '%'}</output></div><input class="slider" type="range" data-studio="${k}" min="${min}" max="${max}" step="${step}" value="${b[k]}"></div>`).join('')}
@@ -406,9 +424,12 @@ export function paintApp(ctx) {
     d.body.addEventListener('click', async e => {
       const a = e.target.closest('[data-action]')?.dataset.action;
       const others = userBrushes(ctx.win).filter(x => x.id !== id);
-      if (a === 'studio-save') { saveUserBrushes(ctx.win, [...others, cleanBrush(b)]); d.close(); ctx.notify('笔刷已保存'); brushSheet(kind); }
-      if (a === 'studio-reset') { saveUserBrushes(ctx.win, others); d.close(); ctx.notify('已恢复默认'); brushSheet(kind); }
-      if (a === 'studio-delete' && await ctx.confirm('删除这个笔刷？', '画好的画不受影响。')) { saveUserBrushes(ctx.win, others); for (const t of [tools.brush, tools.eraser, tools.smudge]) if (t.id === id) t.id = 'round'; keepTools(); brushSheet(kind); }
+      if (a === 'studio-save') { if (!keepBrushes([...others, cleanBrush(b)])) return; d.close(); ctx.notify('笔刷已保存'); brushSheet(kind); }
+      if (a === 'studio-reset') { if (!keepBrushes(others)) return; d.close(); ctx.notify('已恢复默认'); brushSheet(kind); }
+      if (a === 'studio-delete') {
+        if (!await ctx.confirm('删除这个笔刷？', '画好的画不受影响。') || !keepBrushes(others)) { studio(id, kind, b); return; }
+        d.close(); for (const t of [tools.brush, tools.eraser, tools.smudge]) if (t.id === id) t.id = 'round'; keepTools(); brushSheet(kind);
+      }
     });
   }
 
@@ -578,7 +599,7 @@ export function paintApp(ctx) {
   });
   // Keys while drawing on a computer: undo and redo, the tools, the size, space to move the picture.
   ctx.doc.addEventListener('keydown', e => {
-    if (mode !== 'edit' || !stage || ctx.visible?.('paint') === false || e.target.closest?.('input, textarea, select, [contenteditable], .sheet')) return;
+    if (mode !== 'edit' || !stage || ctx.visible?.('paint') === false || ctx.doc.querySelector('.overlay:not(.overlay-out) .sheet') || e.target.closest?.('input, textarea, select, [contenteditable], .sheet')) return;
     const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
     if (mod && k === 'z') { e.preventDefault(); if (e.shiftKey) doRedo(); else doUndo(); return; }
     if (mod && k === 'y') { e.preventDefault(); doRedo(); return; }

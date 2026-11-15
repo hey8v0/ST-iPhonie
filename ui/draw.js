@@ -371,7 +371,7 @@ export function drawApp(ctx) {
     else if (key === 'negative') { negative = el.value; meters(); words.typed(el); }
     else if (key === 'char') { characters[Number(el.dataset.index)].prompt = el.value; grow(el); meters(); words.typed(el); }
     else if (key === 'char-neg') { characters[Number(el.dataset.index)].negative = el.value; words.typed(el); }
-    else if (key === 'seed') seed = el.value === '' ? -1 : Math.max(-1, Math.floor(Number(el.value) || -1));
+    else if (key === 'seed') { const n = Number(el.value); seed = el.value === '' || !Number.isFinite(n) ? -1 : Math.max(-1, Math.floor(n)); }
   });
   v.root.addEventListener('focusout', event => { if (event.target.matches?.('[data-field]')) words.left(); });
   v.on('input', '[data-param]', el => { el.previousElementSibling.querySelector('output').textContent = el.dataset.param === 'scale' ? Number(el.value).toFixed(1) : el.dataset.param === 'cfgRescale' ? Number(el.value).toFixed(2) : el.value; });
@@ -707,6 +707,7 @@ export function drawApp(ctx) {
     let most = null;
     if (naiFeatures(shown?.params?.model || state().params.model).maxEnhance) { try { most = maxEnhanceSize(picture.width, picture.height); } catch { /* too long and thin: only the plain sizes */ } }
     const sizes = [...plain, ...(most ? [['max', most.width, most.height]] : [])];
+    if (!sizes.length) { ctx.notify('这张图已经超过增强能处理的大小，无法再放大（普通增强最多约 2048×1536）', {error: true}); return; }
     let size = plain[0] || sizes[0], magnitude = 3, strength = MAGNITUDES[2][0], noise = MAGNITUDES[2][1], apart = false;
     const d = ctx.dialog('增强', '');
     const draw = () => {

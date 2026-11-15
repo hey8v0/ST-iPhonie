@@ -361,7 +361,7 @@ const ROLE_PARAM = {denoise: 'denoise', steps: 'steps', scale: 'scale', sampler:
  * A workflow with %prompt% in it is taken as it is: whoever put that there has decided.
  */
 export function mapWorkflow(text, {prompt} = {}) {
-  const graph = graphOf(text);
+  const graph = graphOf(typeof text === 'string' ? text : structuredClone(text));
   if (/%prompt%/.test(JSON.stringify(graph))) return {workflow: typeof text === 'string' ? text : JSON.stringify(graph), params: {}, mapped: [], needsPrompt: false};
   const {roles, loader} = findRoles(graph), params = {}, mapped = [];
   if (prompt) roles.prompt = [prompt];

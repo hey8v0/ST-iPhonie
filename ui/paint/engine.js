@@ -219,8 +219,8 @@ function restore(pic, step, which) {
   }
   if (step.kind === 'order') { const order = step[which]; pic.layers.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)); }
 }
-export function undo(pic) { const step = pic.history.pop(); if (!step) return false; restore(pic, step, 'before'); pic.future.push(step); pic.changed++; return true; }
-export function redo(pic) { const step = pic.future.pop(); if (!step) return false; restore(pic, step, 'after'); pic.history.push(step); pic.changed++; return true; }
+export function undo(pic) { if (pic.float) return false; const step = pic.history.pop(); if (!step) return false; restore(pic, step, 'before'); pic.future.push(step); pic.changed++; return true; }
+export function redo(pic) { if (pic.float) return false; const step = pic.future.pop(); if (!step) return false; restore(pic, step, 'after'); pic.history.push(step); pic.changed++; return true; }
 
 // ---------- layers ----------
 function insertLayer(pic, at, props = {}) {
@@ -308,10 +308,13 @@ export function groupLayers(pic,ids,name='新建组') {
   keepStack(pic,before);return id;
 }
 export function setLayerGroup(pic,id,patch) {
-  const group=pic.groups.find(g=>g.id===id);if(!group)return false;const before=stackState(pic);
-  if(typeof patch.name==='string'&&patch.name.trim())group.name=patch.name.trim().slice(0,40);
-  for(const k of ['visible','collapsed'])if(typeof patch[k]==='boolean')group[k]=patch[k];
-  if(Object.keys(patch).every(k=>k==='collapsed'))pic.changed++;else keepStack(pic,before);return true;
+  const group=pic.groups.find(g=>g.id===id);if(!group)return false;
+  const next={...group};
+  if(typeof patch.name==='string'&&patch.name.trim())next.name=patch.name.trim().slice(0,40);
+  for(const k of ['visible','collapsed'])if(typeof patch[k]==='boolean')next[k]=patch[k];
+  const keys=['name','visible','collapsed'].filter(k=>next[k]!==group[k]);if(!keys.length)return false;
+  const before=stackState(pic);Object.assign(group,next);
+  if(keys.every(k=>k==='collapsed'))pic.changed++;else keepStack(pic,before);return true;
 }
 export function ungroupLayers(pic,id) {
   if(!pic.groups.some(g=>g.id===id))return false;const before=stackState(pic);

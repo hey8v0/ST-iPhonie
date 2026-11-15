@@ -250,7 +250,11 @@ export function bookApp(ctx) {
     if (!owner) throw Error('原绘本已关闭');
     const target = structuredClone(owner), before = await api.getBook(target.id);
     if (!before) throw Error('原绘本已经删掉了');
-    const place = b => JSON.stringify(n ? b.spreads[n - 1] : b.cover), expected = place(before);
+    const place = b => {
+      const spread = n ? b.spreads[n - 1] : null, kind = !n ? 'cover' : spread?.layout === 'cast' ? 'cast' : 'picture';
+      const slot = !n ? b.cover : kind === 'cast' ? spread?.cast[k] : spread?.pictures[k];
+      return JSON.stringify({kind, slot: slot || null});
+    }, expected = place(before);
     const spread = sheetOf(target, n).spread || null, t = themeOf(target.theme), names = castOf(target), s = slotOf(n, k, target);
     const words = readOf(target, n).map(l => l.text).join(' ');
     let what = prompt ?? s.prompt;
