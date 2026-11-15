@@ -48,6 +48,11 @@ export function promptText(overrides, id, part, values = {}) {
   return fillPrompt(promptTemplate(overrides, id, part), values);
 }
 
+/** Literal slots only: one pass, preserving whitespace and replacement metacharacters. */
+export function fillSlots(template, values = {}) {
+  return String(template ?? '').replace(/\{\{([^{}]+?)\}\}/g, (mark, key) => Object.hasOwn(values, key.trim()) ? String(values[key.trim()] ?? '') : mark);
+}
+
 const has = v => Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== false && v !== '' && v !== 0;
 const SECTION = /\{\{([#^])\s*([^{}#^/]+?)\s*\}\}([\s\S]*?)\{\{\/\s*\2\s*\}\}/;
 const MARK = '\u0003';

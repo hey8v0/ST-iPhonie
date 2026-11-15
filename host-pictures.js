@@ -559,7 +559,8 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const segment = message.mes.slice(tag.start, tag.end), at = segment.indexOf(before);
       if (!before || at < 0) throw Error('没在正文里找到这张图的提示词');
       // In prompt="…" a double quote would end it; tags never need angle brackets.
-      const safe = tag.spec ? value.replace(/<\/?img\b/gi, '') : value.replace(/[<>]/g, '').replace(/"/g, /=\s*'/.test(segment.slice(0, at).slice(-12)) ? '"' : "'");
+      const delimiter = /\bprompt\s*=\s*(["'“])/i.exec(segment.slice(0, at))?.[1];
+      const safe = tag.spec ? value.replace(/<\/?img\b/gi, '') : value.replace(/[<>]/g, '').replace(delimiter === "'" ? /'/g : delimiter === '“' ? /”/g : /"/g, delimiter === "'" ? '’' : "'");
       const proposed = message.mes.slice(0, tag.start) + segment.slice(0, at) + safe + segment.slice(at + before.length) + message.mes.slice(tag.end);
       fresh = parsePictures(proposed).find(t => t.index === tag.index);
       if (!fresh) throw Error('改完认不出这张图了，检查一下格式');

@@ -691,7 +691,8 @@ function outfitNote(prompts, history, partner, user) {
   return promptText(prompts, 'wardrobe', 'chat', {'用户': user, '对象': partner, '名字': m.outfit.name});
 }
 
-const fill = (template, values) => Object.entries(values).reduce((s, [k, v]) => s.replaceAll(`{{${k}}}`, v), template);
+import {fillSlots} from './prompt-rules.js';
+const fill = fillSlots;
 
 /** The words of the files still in the chat window: the latest three, at most 30000 characters together. */
 export const CHAT_FILES = Object.freeze({count: 3, chars: 30000});
@@ -763,7 +764,7 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     !watch && promptOn(prompts, 'memo') ? promptText(prompts, 'memo', 'rule', {'用户': user}) : '',
     !watch && posts.length && promptOn(prompts, 'forum-share') ? promptText(prompts, 'forum-share', 'rule', {'用户': user, '帖子': posts.slice(0, 8).map(p => `「${p.title}」${p.author ? `（${p.author}）` : ''}`).join('、')}) : '',
     // 0.9.36: a group's 群公告 and 群昵称, and how to change them or @ someone.
-    group ? promptText(prompts, 'group-extra', 'rule', {'用户': user, '群公告': thread.notice?.text || '', '群昵称': Object.entries(thread.nicks || {}).map(([who, nick]) => `${nameOf(who, user)}在群里叫「${nick}」`).join('，')}) : ''].filter(Boolean);
+    group ? promptText(prompts, 'group-extra', 'rule', {'用户': user, '旁观': watch, '群公告': thread.notice?.text || '', '群昵称': Object.entries(thread.nicks || {}).map(([who, nick]) => `${nameOf(who, user)}在群里叫「${nick}」`).join('，')}) : ''].filter(Boolean);
   // pictures: [{id, url}] — photos sent along for a model that sees; the record numbers them [图片1], [图片2]… in order.
   const seen = new Map(pictures.map((p, i) => [p.id, i + 1]));
   const history = thread.messages.filter(m => m.kind !== 'system').slice(-preset.history).map(m => seen.has(m.id) ? {...m, seen: seen.get(m.id)} : m);

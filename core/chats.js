@@ -406,7 +406,7 @@ export class ChatStore {
     return structuredClone({pinned: false, muted: false, ...rest, ...(blocked ? {blocked: {at: blocked.at, requests: blocked.requests, count: blocked.held.length, ...refusedOf(blocked.refused)}} : {}), count: messages.length, last: messages.filter(m => m.kind !== 'system').at(-1) || null, streak: this.#streak(messages)});
   }
   #streak(messages) {
-    const day = at => { const d = new Date(at); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+    const day = at => { const d = new Date(at); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()); };
     const mine = new Set(), theirs = new Set();
     for (const m of messages) if (!['system', 'notice', 'recall'].includes(m.kind)) (m.from === 'me' ? mine : theirs).add(day(m.at));
     const both = [...mine].filter(d => theirs.has(d)).sort((a, b) => b - a);
@@ -519,6 +519,17 @@ export class ChatStore {
       if (name !== undefined || members !== undefined) row.updatedAt = this.#now();
     });
   }
+  /** Keep a generated letter and its answered marker in the same transaction; a full mailbox leaves both alone. */
+  async queueLetterReply(id, messageId, letter) {
+    return this.#change(id, row => {
+      const original = row.messages.find(m => m.id === messageId && m.from === 'me' && m.kind === 'letter');
+      if (!original || original.letter.answered || (row.post || []).length >= LETTER_LIMITS.post) return;
+      const post = cleanPost([...(row.post || []), letter]);
+      if (!post.some(l => l.id === letter.id)) throw fail('回信没有保存，请稍后重试');
+      row.post = post; original.letter.answered = true;
+      original.updatedAt = row.updatedAt = this.#now();
+    });
+  }
   /** Adds messages. Replies count as unread unless `read` is set (the chat is open on screen). */
   async append(id, messages, {read = false, receipt = ''} = {}) {
     return this.#change(id, row => {
@@ -528,7 +539,7 @@ export class ChatStore {
       const added = messages.filter(m => m.kind === 'system' || canGroupSpeak(row, m.from, now)).map((m, i) => cleanMessage(m, this.#id(), now + i));
       row.messages.push(...added);
       // Anything coming after the last round ends its versions (it is no longer the last).
-      if (added.length) delete row.alts;
+      if (added.some(m => m.kind !== 'system')) delete row.alts;
       if (!read) row.unread += added.filter(m => m.from !== 'me' && !['system', 'notice', 'recall'].includes(m.kind)).length;
       else row.readMessages = [...new Set([...(row.readMessages || []), ...added.map(m => m.id)])].slice(-CHAT_STORE_LIMITS.messages);
       row.updatedAt = now;

@@ -4,7 +4,7 @@
 const DIGIT = {零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9};
 /** 「十二」「二十三」「两」「8」 as a number; NaN when it is none. */
 export function chineseNumber(text) {
-  const s = String(text ?? '').trim();
+  const s = String(text ?? '').trim().replace(/^[零〇]+(?=.)/, '');
   if (/^\d+$/.test(s)) return Number(s);
   if (!s || !/^[零〇一二两三四五六七八九十]+$/.test(s)) return NaN;
   const at = s.indexOf('十');
@@ -17,7 +17,7 @@ const WEEK = '日天一二三四五六';
 const PARTS = [[/凌晨/, 'dawn'], [/早上|早晨|清早|明早|今早|一早/, 'morning'], [/上午/, 'am'], [/中午/, 'noon'], [/下午/, 'pm'], [/傍晚/, 'dusk'], [/晚上|今晚|明晚|夜里|晚/, 'night']];
 // The hour a day word alone means, and how an hour reads with it (下午 3 点 is 15:00, 晚上 8 点 20:00, 凌晨 2 点 2:00).
 const DEFAULT_HOUR = {dawn: 6, morning: 8, am: 10, noon: 12, pm: 15, dusk: 18, night: 20, '': 9};
-const withPart = (h, part) => (['pm', 'dusk', 'night'].includes(part) && h < 12) ? h + 12 : part === 'noon' && h < 11 ? h + 12 : h;
+const withPart = (h, part) => ['dusk', 'night'].includes(part) && (h === 12 || h === 0) ? 24 : part === 'dawn' && h === 12 ? 0 : (['pm', 'dusk', 'night'].includes(part) && h < 12) ? h + 12 : part === 'noon' && h < 11 ? h + 12 : h;
 const HOUR = 3_600_000, DAY = 86_400_000;
 
 /**
@@ -29,16 +29,26 @@ export function remindAt(words, now = Date.now()) {
   const s = String(words ?? '').replace(/\s+/g, '').replace(/：/g, ':');
   if (!s) return 0;
   // 「30 分钟后」「半小时后」「两个小时以后」「3 天后」「一个半小时后」
+  let relativeDay = null;
   let m = s.match(new RegExp(`(${NUM})个半小时(?:以?后|之后)`));
   if (m) { const n = chineseNumber(m[1]); return n > 0 && n <= 100 ? Math.round(now + (n + .5) * HOUR) : 0; }
   m = s.match(new RegExp(`(${NUM}|半)个?(分钟|小时|钟头|天)(?:以?后|之后)`));
   if (m) {
     const n = m[1] === '半' ? .5 : chineseNumber(m[1]), unit = {分钟: 60_000, 小时: HOUR, 钟头: HOUR, 天: DAY}[m[2]];
-    return n > 0 && n <= 1000 ? Math.round(now + n * unit) : 0;
+    if (!(n > 0 && n <= 1000)) return 0;
+    if (m[2] === '天' && /[点时:]|凌晨|早|上午|中午|下午|傍晚|晚上/.test(s)) relativeDay = n;
+    else return Math.round(now + n * unit);
   }
   if (/^(?:等会儿?|待会儿?|一会儿?)/.test(s) && !/[点时:]/.test(s)) return now + 30 * 60_000;
   const base = new Date(now);
-  let day = null;
+  let day = relativeDay;
+  const date = s.match(/(?:(\d{4})[-/年])?(\d{1,2})[-/月](\d{1,2})[日号]?/);
+  if (date) {
+    const year = date[1] ? Number(date[1]) : base.getFullYear(), month = Number(date[2]) - 1, dayOfMonth = Number(date[3]);
+    base.setFullYear(year, month, dayOfMonth);
+    if (base.getFullYear() !== year || base.getMonth() !== month || base.getDate() !== dayOfMonth) return 0;
+    day = 0;
+  }
   if (/大后天/.test(s)) day = 3; else if (/后天/.test(s)) day = 2; else if (/明天|明早|明晚|明日/.test(s)) day = 1; else if (/今天|今晚|今早|今日/.test(s)) day = 0;
   // 「周五」 (the next one, today included) 「下周一」 (in the week after this one, weeks from Monday) 「星期天」
   m = s.match(new RegExp(`(下下|下)?(?:周|星期|礼拜)([${WEEK}])`));
@@ -60,10 +70,14 @@ export function remindAt(words, now = Date.now()) {
   hour = Number.isNaN(hour) ? DEFAULT_HOUR[part] : withPart(hour, part);
   if (!(hour >= 0 && hour <= 24 && minute >= 0 && minute < 60)) return 0;
   const at = new Date(base.getFullYear(), base.getMonth(), base.getDate() + (day || 0), hour, minute, 0, 0).getTime();
+  if (date && !date[1] && at <= now) {
+    const next = new Date(at); next.setFullYear(next.getFullYear() + 1);
+    return next.getMonth() === base.getMonth() ? next.getTime() : 0;
+  }
   if (day !== null || at > now) return at;
   // No day said, and that time is gone today: 「8 点」 at 15:00 is 20:00; else it is tomorrow's.
   if (bare && hour < 12 && at + 12 * HOUR > now) return at + 12 * HOUR;
-  return at + DAY;
+  const tomorrow = new Date(at); tomorrow.setDate(tomorrow.getDate() + 1); return tomorrow.getTime();
 }
 
 /** A reminder's time as the phone shows it: 今天 20:00, 明天 08:00, 11月8日 09:30. */

@@ -25,7 +25,8 @@ export function normalizeCalls(value) {
   return {auto: value.auto === true, every: count(value.every, 1, 100, base.every), dailyMax: count(value.dailyMax, 1, 10, base.dailyMax), ring: count(value.ring, ...CALL_LIMITS.ring, base.ring), effect: value.effect !== false};
 }
 
-const fill = (template, values) => Object.entries(values).reduce((s, [k, v]) => s.replaceAll(`{{${k}}}`, v), String(template));
+import {fillSlots} from './prompt-rules.js';
+const fill = fillSlots;
 const who = (from, user) => from === 'me' ? user : from;
 
 /** How the call reads in a transcript (the prompt of the next turn, or the chat history). */
@@ -70,7 +71,7 @@ export function parseCallReply(reply, {name, user = '我', voiceFormat, voiced =
   let hangup = false;
   for (let raw of body.split(/\r?\n/)) {
     if (!raw.trim()) continue;
-    if (HANGUP.test(raw) || /[[【]\s*挂断\s*[\]】]/.test(raw)) { hangup = true; raw = raw.replace(/[[【]\s*(挂断|挂电话|挂了|结束通话)\s*[\]】]/g, ''); if (!raw.trim()) continue; }
+    if (HANGUP.test(raw) || /[[【(（]\s*(挂断|挂电话|挂了|结束通话)\s*[\]】)）]/.test(raw)) { hangup = true; raw = raw.replace(/[[【(（]\s*(挂断|挂电话|挂了|结束通话)\s*[\]】)）]/g, ''); if (!raw.trim()) continue; }
     const named = raw.match(/^\s*(?:\*\*)?([^:：\n]{1,40}?)(?:\*\*)?\s*[:：]\s*(.*)$/);
     let content = raw;
     if (named && named[1].trim() === name) content = named[2];

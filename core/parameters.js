@@ -178,7 +178,22 @@ function tagNote(key,model){if(key==='doubao')return '合成 2.0：台词的情�
  return fishS1(model)?'圆括号固定标签：情绪放句首，如 (sad)；语气和声音可以放在句中，如 (whispering)、(laughing)。台词的情绪会自动写成句首标签。':'方括号里写英文：句首一个主情绪，如 [sad]、[slightly nervous]、[warm and teasing]；句中可以插语气和声音，如 [whispering]、[emphasis]（紧贴要加重的词）、[laughing]、[break]。一句叠加不超过三个。台词的情绪会自动放在开头。';
 }
 /** The MiniMax emotion for a line's 情绪, or '' to let the model choose (unknown words, or not supported by the model). */
-function miniEmotion(model,emotion){const word=String(emotion||'').trim().toLowerCase();if(!word)return '';const found=Object.entries(MINI_EMOTION_WORDS).find(([,words])=>words.some(w=>word===w||word.includes(w)))?.[0]||'';return tags('mini',model).includes(found)?found:'';}
+function namedEmotion(value){
+ const word=String(value||'').trim().toLowerCase(), entries=Object.entries(MINI_EMOTION_WORDS);
+ if(!word)return '';
+ if(/\b(?:unhappy|unhappiness)\b|(?:不|没|没有|并不)(?:太|很|怎么|那么)?(?:开心|高兴|快乐|愉快)/.test(word))return 'sad';
+ const exact=entries.find(([,words])=>words.includes(word));if(exact)return exact[0];
+ for(const [id,words] of entries)for(const term of words){
+  let at=-1;while((at=word.indexOf(term,at+1))>=0){
+   if(/[a-z]/.test(term)&&(/[a-z]/.test(word[at-1]||'')||/[a-z]/.test(word[at+term.length]||'')))continue;
+   const before=word.slice(0,at);
+   if(/\b(?:not|never|no|without)\s+(?:(?:very|really|so)\s+)*$/.test(before)||/(?:不|没|没有|并非|不是|别)(?:太|很|那么)?$/.test(before))continue;
+   return id;
+  }
+ }
+ return '';
+}
+function miniEmotion(model,emotion){const found=namedEmotion(emotion);return tags('mini',model).includes(found)?found:'';}
 /** Puts a line's 情绪 at the start of the text as the model's own tag, when the model reads tags and the text has none there. */
 const ENGLISH={fearful:'scared',whisper:'whispering',fluent:''};
 function emotionTag(key,model,emotion,text){let word=String(emotion||'').trim();if(key==='custom'||key==='doubao'||!word||/^\s*[[(]/.test(text))return text;
@@ -187,7 +202,7 @@ function emotionTag(key,model,emotion,text){let word=String(emotion||'').trim();
  // MiMo reads Chinese style words best: the 情绪 goes in as written.
  if(key==='mimo')return /^\s*[（]/.test(text)||word.length>20||/[()（）[\]]/.test(word)?text:`(${word})${text}`;
  // A Chinese 情绪 becomes the nearest English word, which both engines read best.
- if(!/^[a-z]/i.test(word)){const found=Object.entries(MINI_EMOTION_WORDS).find(([,words])=>words.some(w=>word.includes(w)))?.[0];word=found?ENGLISH[found]??found:'';if(!word)return text;}
+ if(!/^[a-z]/i.test(word)){const found=namedEmotion(word);word=found?ENGLISH[found]??found:'';if(!word)return text;}
  if(key==='fish'&&fishS1(model)){const w=word.toLowerCase();return FISH_S1_EMOTIONS.includes(w)||FISH_S1_TONES.includes(w)?`(${w}) ${text}`:text;}
  if(key==='fish'||key==='eleven'&&elevenTagged(model))return /^[a-z][a-z ,'-]{1,40}$/i.test(word)?`[${word.toLowerCase()}] ${text}`:text;
  return text;}

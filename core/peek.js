@@ -66,14 +66,14 @@ export function buildPeekRequest({prompts = {}, preset, person, story = [], user
   const system = promptText(prompts, 'peek', 'system', {'预设规则': rules.join('\n\n'), '用户': user, '主人': name,
     '主人资料': (person.persona || person.card || '').trim() || '（没有资料，按剧情里的表现来）',
     '世界书': lore.trim(), '用户设定': userPersona.trim(), '更早的剧情': earlier.trim(), '最近的剧情': said.map(s => `${s.name}：${s.text}`).join('\n'),
-    '记忆': memory.trim(), '上次': before ? peekSummary(before) : '', '聊天记录': history.map(m => messageLine(m, user)).filter(Boolean).join('\n'), '出图': images});
+    '记忆': memory.trim(), '上次': before ? peekSummary(before, user) : '', '聊天记录': history.map(m => messageLine(m, user)).filter(Boolean).join('\n'), '出图': images});
   const ask = promptText(prompts, 'peek', 'ask', {'用户': user, '主人': name, '上次': !!before});
   return [{role: 'system', content: system}, {role: 'user', content: ask}];
 }
 /** The phone as last seen, short, for 接着上次看. */
-export function peekSummary(p) {
+export function peekSummary(p, user = '我') {
   const out = [];
-  for (const c of p.chats || []) out.push(`【聊天】${c.with}（最近几句）\n${c.lines.slice(-6).map(l => `${l.from}：${l.text}`).join('\n')}`);
+  for (const c of p.chats || []) out.push(`【聊天】${c.with}（最近几句）\n${c.lines.slice(-6).map(l => `${l.from === 'me' ? user : l.from}：${l.text}`).join('\n')}`);
   if (p.searches?.length) out.push(`【搜索】${p.searches.join('；')}`);
   for (const n of p.notes || []) out.push(`【备忘录】${n.title}｜${n.text.slice(0, 120)}`);
   if (p.photos?.length) out.push(`【相册】${p.photos.map(x => x.text).join('；')}`);

@@ -23,7 +23,7 @@ export const showFile = (ctx, m) => ctx.dialog(m.name, `<pre class="chat-file-te
 export async function filesToMessages(api, files) {
   const list = [...files], out = [], notes = [];
   const docs = list.filter(f => !PICTURE.test(f.type));
-  const read = docs.length ? await api.assistantReadFiles(docs) : [];
+  const read = docs.length ? await api.assistantReadFiles(docs, {chat: true}) : [];
   for (const file of list) {
     if (PICTURE.test(file.type)) { const photo = await api.addPhoto({name: file.name, blob: file}); out.push({from: 'me', kind: 'photo', photoId: photo.id, text: ''}); continue; }
     const item = read[docs.indexOf(file)];

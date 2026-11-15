@@ -35,7 +35,7 @@ export function createMessageIsland({doc = document, load, phoneOpen, openChat, 
   el.hidden = true;
   el.setAttribute('role', 'dialog');
   doc.body.append(el);
-  let threadId = null, thread = null, typed = '', busy = false, typingNow = false, place = null, drawnFor = '', listHTML = '', ticket = 0;
+  let threadId = null, thread = null, typed = '', sendError = '', busy = false, typingNow = false, place = null, drawnFor = '', listHTML = '', ticket = 0;
   try { place = JSON.parse(win.localStorage.getItem(KEY) || 'null'); } catch { /* the top middle */ }
 
   function where() {
@@ -59,7 +59,7 @@ export function createMessageIsland({doc = document, load, phoneOpen, openChat, 
     listHTML = '';
     const input = el.querySelector('[data-mi-input]');
     input.value = typed;
-    input.addEventListener('input', () => { typed = input.value; sendButton(); });
+    input.addEventListener('input', () => { typed = input.value; sendError = ''; sendButton(); });
   }
   function sendButton() {
     const b = el.querySelector('.ci-send');
@@ -73,7 +73,7 @@ export function createMessageIsland({doc = document, load, phoneOpen, openChat, 
   function draw() {
     if (!thread) return;
     build();
-    el.querySelector('[data-mi-status]').textContent = typingNow ? '正在输入…' : '新消息 · 双击打开小手机';
+    el.querySelector('[data-mi-status]').textContent = sendError || (typingNow ? '正在输入…' : '新消息 · 双击打开小手机');
     const box = el.querySelector('[data-mi-lines]');
     const html = thread.messages.filter(m => messageText(m)).slice(-12).map(m => m.from === 'me'
       ? `<p class="me">${esc(messageText(m))}</p>`
@@ -94,12 +94,12 @@ export function createMessageIsland({doc = document, load, phoneOpen, openChat, 
     draw();
   }
   function hide() {
-    el.hidden = true; threadId = null; thread = null; drawnFor = ''; typed = ''; typingNow = false;
+    el.hidden = true; threadId = null; thread = null; drawnFor = ''; typed = ''; sendError = ''; typingNow = false;
   }
   /** A message came in: the card for that chat (another chat's message takes its place). */
   async function show(id) {
     if (phoneOpen()) return;
-    if (threadId !== id) { threadId = id; thread = null; drawnFor = ''; typed = ''; typingNow = false; }
+    if (threadId !== id) { threadId = id; thread = null; drawnFor = ''; typed = ''; sendError = ''; typingNow = false; }
     await reload();
     if (!thread || phoneOpen()) return;
     if (el.hidden) {
@@ -145,12 +145,13 @@ export function createMessageIsland({doc = document, load, phoneOpen, openChat, 
     e.preventDefault();
     if (!threadId || busy) return;
     const id = threadId, input = el.querySelector('[data-mi-input]'), words = input?.value.trim();
-    busy = true; sendButton();
+    const raw = input?.value || '';
+    busy = true; sendError = ''; sendButton();
     try {
-      if (words) { input.value = ''; typed = ''; await send(id, words); }
+      if (words) { await send(id, words); if (threadId === id && typed === raw) { input.value = ''; typed = ''; } }
       else if (!typingNow) await ask(id);
       await read(id);
-    } catch { /* the phone shows what went wrong when it is opened */ }
+    } catch (error) { if (threadId === id) sendError = '没发出去：' + (error.message || '请重试'); }
     finally { busy = false; sendButton(); reload(); }
   });
   el.addEventListener('keydown', e => { if (e.target.closest('input')) e.stopPropagation(); });

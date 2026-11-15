@@ -4,7 +4,7 @@
 // into it; that text is injected once, into the next story reply.
 import {roleStore, findRoute} from './core/routes.js';
 import {bubbleRequest, splitBubbleAnswer} from './core/bubble-css.js';
-import {currentDm, currentWindow, lastRound, chatWindows, forwardLine, messageWords, canGroupSpeak} from './core/chats.js';
+import {currentDm, currentWindow, lastRound, chatWindows, LETTER_LIMITS, forwardLine, messageWords, canGroupSpeak} from './core/chats.js';
 import {exactBackground, buildChatRequest, parseChatReply, bringText, activeChatPreset, normalizeChatPreset, messageLine, scanTurns, cleanTagged,chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace, STICKER_MOODS, contactStatus, letterRequest, letterText} from './core/chat.js';
 import {worldInfoFor, loreTry, loreOptions} from './host-lore.js';
 import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer, sizeFor} from './core/draw.js';
@@ -128,6 +128,19 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
   /** Where the forum of a chat is (分区). */
   const forumSpaceOf = thread => { const s = settings(); return s.chat.partition === 'card' ? {key: thread.space || backend.cardKey()} : s.chat.partition === 'chat' ? backend.here() : null; };
 
+  async function forumFor(thread, s, user) {
+    let forum = '', posts = [];
+    const watch = thread.type === 'group' && thread.watch === true;
+    if (promptOn(s.promptRules, 'chat-forum') || (!watch && promptOn(s.promptRules, 'forum-share'))) {
+      try {
+        const list = (await backend.apps.list('forum')).filter(p => inSpace(p, forumSpaceOf(thread)));
+        if (promptOn(s.promptRules, 'chat-forum')) forum = forumContext(list, user, s.chat.netNames);
+        posts = list.filter(p => p.title).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 6).map(p => ({title: p.title, author: screenName(s.chat.netNames, user)(p.author)}));
+      } catch (error) { backend.reportDiagnostic?.('聊天 · 论坛读取', error, 'warn'); }
+    }
+    return {forum, posts};
+  }
+
   /** Asks the model for the contact's next messages and stores them. One request per chat at a time. */
   /** nudge: 主动找你 — the contact may also choose not to text (null then), and no 正在输入 shows meanwhile. */
   /** reroll: 重新回复这一轮 — the last round is asked again as if it were not there, and is replaced only when the new one
@@ -152,16 +165,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
       if (!nudge) backend.emit('chat', {threadId, typing: true});
       const exact = await exactFor(preset);
       const recent = exact?.available ? [] : await story(preset), forumSpace = forumSpaceOf(thread), watch = thread.type === 'group' && thread.watch === true;
-      let forum = '', posts = [];
-      if (promptOn(s.promptRules, 'chat-forum') || (!watch && promptOn(s.promptRules, 'forum-share'))) {
-        try {
-          const list = (await backend.apps.list('forum')).filter(p => inSpace(p, forumSpace));
-          if (promptOn(s.promptRules, 'chat-forum')) forum = forumContext(list, user, s.chat.netNames);
-          // 转发帖子 (0.9.35): the latest few, by their titles.
-          posts = list.filter(p => p.title).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 6).map(p => ({title: p.title, author: screenName(s.chat.netNames, user)(p.author)}));
-        }
-        catch (error) { backend.reportDiagnostic?.('聊天 · 论坛读取', error, 'warn'); }
-      }
+      const {forum, posts} = await forumFor(thread, s, user);
       // 查手机 × 聊天 (0.9.35): told once, in the next private chat with them.
       const peekKey = thread.type === 'dm' ? ownOf(thread.members[0]) : '', peekedNow = peekKey ? s.chat.peeked?.[peekKey] : null;
       // 世界书: scanned over the recent story and the chat itself, as the story's own request would be, and who is in the
@@ -381,7 +385,9 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
 
   /** The latest book card of the user's among the last few messages, and what each contact then said: onto the book's readers. */
   async function bookRemarks(thread, out) {
-    const card = thread.messages.slice(-6).findLast(m => m.kind === 'book' && m.from === 'me');
+    if (!promptOn(settings().promptRules, 'book-share')) return;
+    const card = thread.messages.findLast(m => m.from === 'me' && m.kind !== 'system');
+    if (card?.kind !== 'book') return;
     if (!card?.book?.id || !backend.library?.getBook) return;
     const said = new Map();
     for (const m of out) if (m.kind === 'text' && m.from && m.from !== 'me' && String(m.text || '').trim()) said.set(m.from, [...(said.get(m.from) || []), String(m.text).trim()]);
@@ -539,7 +545,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
       backend.emit('chat', {threadId, typing: true});
       const exact = await exactFor(preset), recent = exact?.available ? [] : await story(preset);
       const remembered = memory ? (await memory.contextFor(thread, {query: said}).catch(() => ({text: ''}))).text : '';
-      const prompt = buildChatRequest({exact: exact?.available ? exact.messages : [], prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat: '', memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), asking: said});
+      const prompt = buildChatRequest({exact: exact?.available ? exact.messages : [], prompts: settings().promptRules, preset, thread, members: people.map(p => ({...p, voice: false})), story: recent, user, userPersona: userPersona(), voiceFormat: '', memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), asking: said});
       const reply = cleanTagged(await backend.generateText(ctx, {use: 'chat', prompt, trimNames: false}), preset.cleanTags);
       const items = parseChatReply(reply, {members: people.map(p => ({...p, voice: false})), user, voiceFormat: '', voiceNames: [], stickers: stickersFor(people.map(p => p.name))});
       const yes = items.findIndex(i => i.kind === 'befriend'), no = items.find(i => i.kind === 'refuse');
@@ -643,6 +649,11 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
       // one who has deleted the user does not write to them; one the user blocked is held
       if (t.friend?.by === 'them') continue;
       if (t.blocked) { await backend.holdMessages(t.id, list.map(heldOf)).catch(() => {}); continue; }
+      if (t.friend?.by === 'me') {
+        const text = list.map(i => i.text).filter(Boolean).join(' ');
+        if (text) { await backend.friendRequest(t.id, text); if (valid()) notice(`${name} 请求添加你为好友：${text.slice(0, 40)}`); }
+        continue;
+      }
       if (await arrive(t.id, list, null, valid) && valid()) notice(`${name} 私聊了你`);
     }
   }
@@ -793,7 +804,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
           threadId = target.id; const thread = await backend.chats.get(threadId); requireChat(valid);
           if (thread.friend?.by === 'me' && !thread.blocked) {
             const asks = items.filter(i => i.from === item.from && i.kind === 'request').map(i => i.text).filter(Boolean);
-            const words = asks.length ? asks : items.filter(i => i.from === item.from && ['text', 'voice'].includes(i.kind)).map(i => i.translation || i.text).filter(Boolean);
+            const words = asks.length ? asks : items.filter(i => i.from === item.from && ['text', 'voice', 'quote'].includes(i.kind)).map(i => i.translation || i.text).filter(Boolean);
             if (!words.length) continue; requestText = words.join(' '); receipt = prefix + partIndex + ':friend:' + await sha256Hex(item.from);
           }
           if (thread.phoneReceipts?.includes(receipt)) { handled++; if (!thread.blocked || item.kind === 'request') counted(prefix); continue; }
@@ -805,7 +816,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
             else await backend.holdMessages(thread.id, [heldOf(item)], receipt);
           } else if (thread.friend?.by === 'me') {
             const text = item.translation || item.text;
-            if (['request', 'text', 'voice'].includes(item.kind) && text) await backend.friendRequest(thread.id, requestText, receipt);
+            if (['request', 'text', 'voice', 'quote'].includes(item.kind) && text) await backend.friendRequest(thread.id, requestText, receipt);
             else continue;
           } else {
             if (thread.friend?.by === 'them') { await backend.chats.update(thread.id, {friend: null}); await backend.chats.append(thread.id, [{from: 'me', kind: 'system', text: `${item.from}重新添加了你为好友`}]); refreshCuts(); }
@@ -989,15 +1000,15 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
         for (const m of thread.messages.filter(x => x.kind === 'letter' && x.from === 'me' && !x.letter.answered && x.letter.arriveAt <= now)) {
           if (thread.friend || thread.blocked) { await backend.chatMutate(t.id, () => backend.chats.updateMessage(t.id, m.id, {letter: {answered: true}})); continue; }
           if (now - (letterFailed.get(m.id) || 0) < 20 * 60_000) continue;
+          if ((await backend.chats.get(t.id))?.post?.length >= LETTER_LIMITS.post) continue;
           let text = '';
           try { text = await writeLetter(thread, m, now); } catch (error) { backend.reportDiagnostic?.('聊天 · 回信', error, 'warn'); }
           if (!text) { letterFailed.set(m.id, now); continue; }
           const away = Math.round(Math.max(6 * 3600_000, Math.min(48 * 3600_000, (m.letter.arriveAt - m.at) / 2)));
           await backend.chatMutate(t.id, async () => {
-            await backend.chats.updateMessage(t.id, m.id, {letter: {answered: true}});
-            const fresh = await backend.chats.get(t.id);
-            await backend.chats.update(t.id, {post: [...(fresh.post || []), {id: `l-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`, from: partner, text, sentAt: now, arriveAt: now + away}]});
-            await backend.chats.append(t.id, [{from: partner, kind: 'notice', target: 'me', text: '收到了{对方}的信'}], {read: true});
+            const letter = {id: `l-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`, from: partner, text, sentAt: now, arriveAt: now + away};
+            const fresh = await backend.chats.queueLetterReply(t.id, m.id, letter);
+            if (fresh.post?.some(l => l.id === letter.id)) await backend.chats.append(t.id, [{from: partner, kind: 'notice', target: 'me', text: '收到了{对方}的信'}], {read: true});
           });
         }
         // Letters to the user that are due: into the chat, unread, said on the phone and in the tavern.
@@ -1079,7 +1090,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
 
   /** What the story sends to the phone is messages: a 回应, a vote, a line of 接龙, a move, a note, a post or putting on
    *  clothes belong to a chat being answered. */
-  const onPhone = item => !['react', 'vote', 'chain', 'move', 'undo', 'wear', 'memo', 'share-post', 'quote', 'board', 'rename', 'nick'].includes(item.kind);
+  const onPhone = item => !['react', 'vote', 'chain', 'move', 'undo', 'wear', 'memo', 'share-post', 'board', 'rename', 'nick'].includes(item.kind);
   /** The stickers these people may send: the user's collection, and each one's own (角色专属表情包, only they send those). */
   function stickersFor(names) {
     const s = settings(), routes = backend.seen?.routes || s.routes, own = s.chat.roleStickers || {};
@@ -1133,8 +1144,9 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     if (!thread) return loreTry(context, {...loreOptions(preset), persona: userPersona(), texts: [line]});
     const people = members(thread), lines = thread.messages.slice(-preset.history).map(m => ({me: m.from === 'me', text: messageLine(m, user)}));
     if (line) lines.push({me: true, text: `${user}：${line}`});
+    const {forum} = await forumFor(thread, s, user);
     return loreTry(context, {...loreOptions(preset), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
-      texts: [...(await story(preset)).map(r => `${r.name}: ${r.text}`), ...scanTurns(lines)], always: [people.map(p => p.name).join('、')]});
+      texts: [forum, ...(await story(preset)).map(r => `${r.name}: ${r.text}`), ...scanTurns(lines)], always: [people.map(p => p.name).join('、')]});
   }
 
   return {

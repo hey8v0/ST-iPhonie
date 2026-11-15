@@ -133,7 +133,7 @@ export function blockRanges(source) {
   const text = String(source), ranges = [], stack = [];
   for (const m of text.matchAll(/```[\s\S]*?(?:```|$)|<!--[\s\S]*?(?:-->|$)/g)) if (m[0].includes('\n')) ranges.push([m.index, m.index + m[0].length, m[0].startsWith('<') ? '!--' : '```']);
   const hidden = at => ranges.some(([a, b]) => at >= a && at < b);
-  for (const m of text.matchAll(/<(\/?)([A-Za-z一-鿿][\w一-鿿:-]*)\b[^<>]*?(\/?)>/g)) {
+  for (const m of text.matchAll(/<(\/?)([A-Za-z一-鿿][\w一-鿿:-]*)(?![\w一-鿿:-])[^<>]*?(\/?)>/g)) {
     if (hidden(m.index)) continue;
     const [, closing, raw, self] = m, name = raw.toLowerCase();
     if (self || (!closing && VOID_TAGS.has(name))) continue;

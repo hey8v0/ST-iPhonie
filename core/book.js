@@ -178,7 +178,8 @@ export function sentences(value, size = 160) {
     let cut = at(['。', '！', '？', '…', '；', '!', '?', ';']);
     if (cut < size / 3) cut = Math.max(cut, at(['，', '、', ',', ' ']));
     let end = cut >= size / 3 ? cut + 1 : size;
-    while (end < rest.length && /[」』”’）)】]/.test(rest[end])) end++;
+    while (end < rest.length && end < size && /[」』”’）)】]/.test(rest[end])) end++;
+    if (/[\uD800-\uDBFF]/.test(rest[end - 1]) && /[\uDC00-\uDFFF]/.test(rest[end] || '')) end--;
     out.push(rest.slice(0, end).trim());
     rest = rest.slice(end).trim();
   }
@@ -197,6 +198,7 @@ export function storySpreads(messages, {size = 180} = {}) {
   let lines = [], picture = null, count = 0, sound = {ambience: '', sfx: ''};
   const flush = () => {
     if (!lines.length) return;
+    if (spreads.length >= BOOK_LIMIT.spreads) throw Error(`原文超过绘本的 ${BOOK_LIMIT.spreads} 个跨页上限，请减少选取的回复范围`);
     spreads.push(normalizeSpread({layout: 'page', side: spreads.length % 2 ? 'left' : 'right', pictures: [{prompt: '', picture, people: true}], words: lines, sound}));
     lines = []; picture = null; count = 0; sound = {ambience: '', sfx: ''};
   };
@@ -208,12 +210,13 @@ export function storySpreads(messages, {size = 180} = {}) {
     if (s.kind !== 'say' && s.kind !== 'narrate') continue;
     const whole = storyWords(s.text);
     if (!whole) continue;
-    for (const t of s.kind === 'narrate' ? sentences(whole, size) : [whole]) {
-      if (count && count + t.length > size) flush();
+    let piece = 0;
+    for (const t of sentences(whole, Math.min(size, BOOK_LIMIT.word))) {
+      if (count && count + t.length > size || lines.length >= BOOK_LIMIT.words) flush();
       const prev = lines.at(-1);
-      if (s.kind === 'say' && s.part && prev?.from?.line === s.line && prev.from.id === m.id) prev.text += t;
-      else lines.push(s.kind === 'say' ? {role: s.role || '', text: t, emotion: s.emotion || '', ...(s.user ? {} : Number.isInteger(s.line) ? {from: {id: m.id, line: s.line}} : {})} : {role: '', text: t, emotion: ''});
-      count += t.length;
+      if (s.kind === 'say' && s.part && prev?.from?.line === s.line && prev.from.id === m.id && prev.text.length + t.length <= BOOK_LIMIT.word) prev.text += t;
+      else lines.push(s.kind === 'say' ? {role: s.role || '', text: t, emotion: s.emotion || '', ...(s.user || piece > 0 ? {} : Number.isInteger(s.line) ? {from: {id: m.id, line: s.line}} : {})} : {role: '', text: t, emotion: ''});
+      count += t.length; piece++;
     }
   }
   flush();

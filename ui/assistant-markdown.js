@@ -30,7 +30,7 @@ export function assistantHTMLMarkdown(html, doc) {
   const untouched = new Set(['SCRIPT','STYLE','PRE','CODE','TEXTAREA','SVG','MATH']);
   const inline = new Set(['P','SPAN','A','BUTTON','LABEL','LI','TD','TH','SUMMARY','STRONG','EM','B','I','S','H1','H2','H3','H4','H5','H6']);
   function visit(parent) {
-    if (untouched.has(parent.nodeName)) return;
+    if (untouched.has(parent.nodeName.toUpperCase()) || parent.namespaceURI && parent.namespaceURI !== 'http://www.w3.org/1999/xhtml') return;
     for (const child of [...parent.childNodes]) {
       if (child.nodeType === 1) visit(child);
       else if (child.nodeType === 3 && child.textContent.trim()) {

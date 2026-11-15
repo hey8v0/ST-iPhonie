@@ -91,7 +91,7 @@ async function collect(ctx, {scan, persona, characters, skipBooks = [], skipEntr
       if (on.has(name)) continue;
       try { books.push({name, data: await ctx.loadWorldInfo?.(name)}); } catch (error) { note(`读不到只给手机的「${name}」`, error, 'warn'); }
     }
-    parts.push(...scanEntries(books, {text: scan.join('\n'), persona, characters, skipEntries, subst, random, defaults: scanDefaults(wi)}).map(e => ({...e, own: true})));
+    parts.push(...scanEntries(books, {text: scan.join('\n'), persona, characters, skipEntries, subst, random, defaults: scanDefaults(wi)}).sort((a, b) => b.order - a.order).map(e => ({...e, own: true})));
   }
   return parts;
 }

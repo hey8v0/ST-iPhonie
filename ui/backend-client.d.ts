@@ -1224,7 +1224,7 @@ export interface BackendAPI extends BackendFacade {
     assistantReroll(threadId: string, messageId: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
     /** 重新绘制 a reply's picture from the same 出图块; its words stay (a new version of the reply). */
     assistantRedraw(threadId: string, messageId: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
-    assistantReadFiles(files: File[]): Promise<AssistantAttachment[]>;
+    assistantReadFiles(files: File[], options?: {chat?: boolean}): Promise<AssistantAttachment[]>;
     assistantProgress(threadId: string): {id: string; threadId: string; rerollId: string; startedAt: number; phase: 'waiting' | 'thinking' | 'responding' | 'prompting' | 'drawing'; text: string; meta: Partial<AssistantMeta>} | null;
     assistantBusy(threadId: string): boolean;
     assistantCancel(threadId: string): void;

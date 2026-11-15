@@ -1,15 +1,17 @@
 import {ASSISTANT_LIMITS, assistantAttachments} from './core/assistant.js';
+import {CHAT_STORE_LIMITS} from './core/chats.js';
 
 export const ASSISTANT_FILE_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown,.json,.csv,.tsv,.xml,.html,.css,.js,.ts,.py,.yaml,.yml,.log,.pdf,.docx,.doc';
 const textExtension = /\.(?:txt|md|markdown|json|csv|tsv|xml|html?|css|[cm]?js|tsx?|jsx|py|ya?ml|log|ini|toml|sql|sh|bat|c|cpp|h|java|rs|go)$/i;
-const limitText = value => {
+const limitText = (value, {max = ASSISTANT_LIMITS.text, truncate = false} = {}) => {
   if (!value.trim()) throw Error('文件里没有可提取的文字；扫描 PDF 请先做文字识别');
-  if (value.length > ASSISTANT_LIMITS.text) throw Error('文件文字超过 100000 字符，请拆分后附加');
+  if (truncate) return value.slice(0, max);
+  if (value.length > max) throw Error('文件文字超过 100000 字符，请拆分后附加');
   return value;
 };
 
 /** Read just document.xml, with bounds both before and during decompression. No links/macros are executed. */
-export async function docxText(buffer, Parser = globalThis.DOMParser) {
+export async function docxText(buffer, Parser = globalThis.DOMParser, policy) {
   const bytes = new Uint8Array(buffer), view = new DataView(buffer);
   let end = -1;
   for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) if (view.getUint32(i, true) === 0x06054b50) { end = i; break; }
@@ -43,12 +45,12 @@ export async function docxText(buffer, Parser = globalThis.DOMParser) {
     const doc = new Parser().parseFromString(xml, 'application/xml');
     if (doc.querySelector('parsererror')) throw Error('Word 正文格式无效');
     const ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-    return limitText([...doc.getElementsByTagNameNS(ns, 'p')].map(p => [...p.getElementsByTagNameNS(ns, 't')].map(t => t.textContent).join('')).join('\n'));
+    return limitText([...doc.getElementsByTagNameNS(ns, 'p')].map(p => [...p.getElementsByTagNameNS(ns, 't')].map(t => t.textContent).join('')).join('\n'), policy);
   }
   throw Error('Word 文件缺少正文');
 }
 
-export async function pdfText(buffer, load = () => import('/lib/pdf.min.mjs')) {
+export async function pdfText(buffer, load = () => import('/lib/pdf.min.mjs'), policy) {
   const pdfjs = await load();
   if (pdfjs.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc = '/lib/pdf.worker.min.mjs';
   const task = pdfjs.getDocument({data: new Uint8Array(buffer), isEvalSupported: false});
@@ -60,13 +62,16 @@ export async function pdfText(buffer, load = () => import('/lib/pdf.min.mjs')) {
       const page = await pdf.getPage(i), content = await page.getTextContent();
       result += content.items.map(item => item.str + (item.hasEOL ? '\n' : ' ')).join('') + '\n';
       page.cleanup();
+      if (policy?.truncate && result.length >= policy.max) break;
       if (result.length > ASSISTANT_LIMITS.text) throw Error('PDF 文字超过 100000 字符，请拆分后附加');
     }
-    return limitText(result.trim());
+    return limitText(result.trim(), policy);
   } finally { await task.destroy(); }
 }
 
-export async function readAssistantFiles(files, {pdf = pdfText, docx = docxText, office = async file => (await import('/scripts/utils.js')).extractTextFromOffice(file)} = {}) {
+export async function readAssistantFiles(files, {chat = false, pdf, docx, office = async file => (await import('/scripts/utils.js')).extractTextFromOffice(file)} = {}) {
+  const policy = chat ? {max: CHAT_STORE_LIMITS.fileText + 1, truncate: true} : undefined;
+  const readPdf = pdf || (buffer => pdfText(buffer, undefined, policy)), readDocx = docx || (buffer => docxText(buffer, undefined, policy));
   const list = [...files];
   if (!list.length || list.length > ASSISTANT_LIMITS.attachments) throw Error('一次请选择 1–8 个文件');
   if (list.some(f => f.size > ASSISTANT_LIMITS.fileBytes) || list.reduce((n, f) => n + f.size, 0) > ASSISTANT_LIMITS.totalBytes) throw Error('单个附件最多 10 MB，合计最多 20 MB');
@@ -77,8 +82,8 @@ export async function readAssistantFiles(files, {pdf = pdfText, docx = docxText,
       const bytes = new Uint8Array(await file.arrayBuffer()); let binary = '';
       for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
       item.kind = 'image'; item.data = `data:${file.type};base64,${btoa(binary)}`;
-    } else if (/\.pdf$/i.test(file.name)) item.text = await pdf(await file.arrayBuffer());
-    else if (/\.docx$/i.test(file.name)) item.text = await docx(await file.arrayBuffer());
+    } else if (/\.pdf$/i.test(file.name)) item.text = await readPdf(await file.arrayBuffer());
+    else if (/\.docx$/i.test(file.name)) item.text = await readDocx(await file.arrayBuffer());
     else if (/\.doc$/i.test(file.name)) {
       try { item.text = await office(file); }
       catch { throw Error('旧版 .doc 需要酒馆的 Office 服务插件；也可以另存为 .docx 后附加'); }
@@ -88,8 +93,8 @@ export async function readAssistantFiles(files, {pdf = pdfText, docx = docxText,
       item.text = new TextDecoder(encoding, {fatal: true}).decode(bytes);
       if (item.text.includes('\0')) throw Error('这个文件不像文本文件，请另存为 UTF-8 文本');
     } else throw Error(`暂不支持这个附件类型：${file.name}`);
-    if (item.kind === 'text') item.text = limitText(item.text);
+    if (item.kind === 'text') item.text = limitText(item.text, policy);
     result.push(item);
   }
-  return assistantAttachments(result);
+  return chat ? result : assistantAttachments(result);
 }

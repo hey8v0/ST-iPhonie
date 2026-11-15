@@ -661,14 +661,14 @@ export function assistantApp(ctx) {
     const label = writing ? '发送消息' : '让助手回复';
     return btn('send', icon(writing ? 'send' : 'bubble'), 'assistant-send', `aria-label="${label}" title="${label}" ${ready ? '' : 'disabled'}`);
   }
-  async function send(retry = false) {
+  async function send(retry = false, payload = null) {
     if (busy(threadId) || fileReads.has(threadId)) return;
-    const files = retry ? [] : attachments();
-    const text = retry ? '' : draft().trim();
+    const files = retry ? [] : payload ? payload.files : attachments();
+    const text = retry ? '' : payload ? String(payload.text).trim() : draft().trim();
     if (!text && !files.length && (!threadId || thread?.messages.at(-1)?.role !== 'user')) return;
     // Lock before the first await: double Enter cannot create/send two conversations.
     const originalId = threadId, selected = selectionEpoch, job = {cancelled: false, kind: text || files.length ? 'save' : 'reply'}; pending.set(originalId, job);
-    if (!retry) { saveDraft('', originalId); fileDrafts.delete(originalId); }
+    if (!retry && !payload) { saveDraft('', originalId); fileDrafts.delete(originalId); }
     drawChat();
     let id = originalId;
     try {
@@ -689,11 +689,12 @@ export function assistantApp(ctx) {
     } catch (error) {
       if (error?.name !== 'AbortError') errors.set(id, error.message || '回复没有完成，请重试。');
       // If generation failed before saving the user message, put the unsent text back.
-      if (!job.saved) {
+      if (!job.saved && !payload) {
         if (text && !draft(id)) saveDraft(text, id);
         if (files.length) fileDrafts.set(id, [...files, ...attachments(id)]);
       }
     } finally { for (const key of [originalId, id]) if (pending.get(key) === job) pending.delete(key); if (!v.disposed) await render(); }
+    return job.saved ? id : '';
   }
   /** Plays the reply's songs from one of them (through the phone's 音乐, which finds each by name). */
   function playSongs(message, from = 0) {
@@ -710,8 +711,8 @@ export function assistantApp(ctx) {
   /** A tap on a 智能界面 button: sends that text and asks for the reply at once. */
   async function sendNow(text) {
     if (!text || busy(threadId) || fileReads.has(threadId)) return;
-    saveDraft(text); await send();
-    if (!errors.get(threadId) && thread?.messages.at(-1)?.role === 'user') await send(true);
+    const id = await send(false, {text, files: []});
+    if (id && threadId === id && !errors.get(id) && thread?.messages.at(-1)?.role === 'user') await send(true);
   }
   async function drawBlock(block) {
     if (!block || busy(threadId)) return;
@@ -783,7 +784,7 @@ export function assistantApp(ctx) {
     saveDraft(el.value); resizeComposer(); const button = v.root.querySelector('[data-action=send]'); if (button) { const template = ctx.doc.createElement('template'); template.innerHTML = sendButton(); button.replaceWith(template.content.firstElementChild); }
   });
   v.on('keydown', '[data-assistant-draft]', (el, event) => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); return send(); }
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); return send(); }
   });
   v.on('input', '[data-preset-name]', el => { const p = settings?.presets.find(p => p.id === settings.activePreset); if (p) p.name = el.value; });
   v.on('input', '[data-entry-title]', el => { const entry = settings?.presets.find(p => p.id === settings.activePreset)?.entries.find(e => e.id === el.dataset.entryTitle); if (entry) entry.title = el.value; });

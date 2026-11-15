@@ -41,7 +41,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null, stopChatClock = null;
 import { createSongHost } from './host-song.js';
-const RUNTIME_VERSION='0.9.80';
+const RUNTIME_VERSION='0.9.81';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -466,7 +466,7 @@ function connect(source){
   assistantReply:(id,text,options)=>{check();return assistantHost.reply(id,text,options);},
   assistantReroll:(id,mid,options)=>{check();return assistantHost.reroll(id,mid,options);},
   assistantRedraw:(id,mid,options)=>{check();return assistantHost.redraw(id,mid,options);},
-  assistantReadFiles:files=>{check();return readAssistantFiles(files);},
+  assistantReadFiles:(files,options)=>{check();return readAssistantFiles(files,{chat:options?.chat===true});},
   editAssistantMessage:(id,mid,text,expectedText)=>{check();assistantHost.cancel(id);return api.editAssistantMessage(id,mid,text,expectedText);},
   deleteAssistantMessage:(id,mid)=>{check();assistantHost.cancel(id);return api.deleteAssistantMessage(id,mid);},
   selectAssistantVariant:(id,mid,selected)=>{check();assistantHost.cancel(id);return api.selectAssistantVariant(id,mid,selected);},

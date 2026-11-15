@@ -489,7 +489,7 @@ export function vnApp(ctx) {
   }
   v.on('click', '[data-action=vn-skip-add]', addSkip);
   v.on('click', '[data-skip-del]', el => save({skip: (state().skip || []).filter(t => t !== el.dataset.skipDel)}));
-  v.root.addEventListener('keydown', e => { if (e.target.dataset?.field === 'vn-skip-new' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); addSkip(); } });
+  v.root.addEventListener('keydown', e => { if (e.target.dataset?.field === 'vn-skip-new' && e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); addSkip(); } });
   v.on('click', '[data-vn-set]', el => {
     const k = el.dataset.vnSet, raw = el.dataset.value;
     save(k === 'box' ? {box: raw, ...(raw === 'phone' ? {palette: phonePalette(ctx.win, v.root)} : {})} : {[k]: k === 'font' ? raw : Number(raw)});

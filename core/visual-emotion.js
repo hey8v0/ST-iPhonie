@@ -1,5 +1,8 @@
 // Local visual interpretation only. Never rewrites the emotion or text sent to a speech engine.
 const RULES = [
+  ['angry', /冷笑|嘲笑|讥笑|狞笑|嗤笑/gi],
+  ['sad', /苦笑|惨笑/gi],
+  ['nervous', /干笑|假笑|赔笑|讪笑/gi],
   ['happy', /tears? of joy|crying (?:with|for) joy|喜极而泣|笑出眼泪/gi],
   ['happy', /\b(?:happy|joy(?:ful)?|cheer(?:ful|ing)?|laugh(?:ing|s)?|smil(?:e|ing)|giggl(?:e|ing)|delight(?:ed|ful)?|playful|teas(?:e|ing)|proud|smug|excited|sing(?:ing)?)\b|开心|高兴|愉快|雀跃|得意|欢喜|俏皮|调侃|笑/gi],
   ['angry', /\b(?:angry|annoy(?:ed|ing)?|furious|rage|irritat(?:ed|ing)|mad|shout(?:ing)?|yell(?:ing)?)\b|生气|愤怒|愤|恼|不满|烦躁|不耐烦|怒|吼|凶/gi],
