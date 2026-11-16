@@ -277,7 +277,7 @@ export function bookApp(ctx) {
     const latest = await api.getBook(target.id);
     if (!latest || place(latest) !== expected) throw Error('绘本已改动，生成的图已保存在相册');
     Object.assign(slotOf(n, k, latest), s);
-    const saved = await api.saveBook(latest);
+    const saved = await api.saveBook(latest, {preserveReaders: true});
     if (book?.id === target.id) { book = saved; reader?.changed(book, n); }
     return s.picture;
   }
@@ -299,7 +299,7 @@ export function bookApp(ctx) {
     try { if (reader?.reading) reader.setReading(false); await api.bookStage(book.id, n); }
     catch (error) { ctx.notify(error.message, {error: true}); }
   }
-  async function keep(n = at) { book = await api.saveBook(book); await reader?.refresh(book, n); }
+  async function keep(n = at) { book = await api.saveBook(book, {preserveReaders: true}); await reader?.refresh(book, n); }
 
   // ---------- changes ----------
   async function sheetMenu(n) {

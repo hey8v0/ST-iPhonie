@@ -954,7 +954,7 @@ export interface BackendFacade {
     /** 绘本 (core/book.js): the shelf, newest first; one book; keep one (made or changed); throw one away (its drawn pictures stay in 相册). */
     listBooks(): Promise<Book[]>;
     getBook(id: string): Promise<Book | null>;
-    saveBook(book: Book, options?: {fields: ('title' | 'subtitle')[]}): Promise<Book>;
+    saveBook(book: Book, options?: {fields?: ('title' | 'subtitle')[]; preserveReaders?: boolean}): Promise<Book>;
     deleteBook(id: string): Promise<boolean>;
     getPhone(): Promise<PhonePreferences>;
     savePhone(patch: PhonePatch): Promise<PhonePreferences>;

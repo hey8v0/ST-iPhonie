@@ -253,6 +253,7 @@ export function settingsApp(ctx) {
    */
   async function packOld() {
     let plan = await api.packablePhotos(30), part = 0, sure = false, packing = false;
+    if (v.disposed) return;
     const sync = api.syncStatus?.()?.enabled;
     const d = ctx.dialog('压缩相册里的旧图', `<p class="help-copy" data-keep-hint>压缩后原图就没有了，想留原图请先打包下载。</p>
       <p class="help-copy">画出来的图多是 PNG，一张一两 MB，大的更多。压成同样大小的 WebP，看起来基本一样，一般只剩十分之一。图里带的 NovelAI 参数会去掉（点开照片看到的「参数」还在）。设成壁纸、图标、头像和聊天背景的图，还有会动的图，不会压缩。${sync ? '开着「保存到酒馆」，酒馆里那份也会换成压缩后的。' : ''}</p>
@@ -305,12 +306,13 @@ export function settingsApp(ctx) {
           for (let i = 0; i < ids.length && d.live; i += 4) {
             show(`正在压缩 ${i + 1}–${Math.min(i + 4, ids.length)} / ${ids.length}……`);
             const r = await api.packPhotos(ids.slice(i, i + 4));
+            if (!d.live || v.disposed) return;
             for (const k of Object.keys(total)) total[k] += r[k];
           }
           ctx.notify(total.count ? `压缩了 ${total.count} 张，从 ${size(total.before)} 变成 ${size(total.after)}${total.skipped ? `；${total.skipped} 张压了也省不了多少，保持原样` : ''}` : '这些图压了也省不了多少，都保持原样');
-        } catch (error) { ctx.notify(error.message, {error: true}); }
+        } catch (error) { if (!d.live || v.disposed) return; ctx.notify(error.message, {error: true}); }
         d.close();
-        await render();
+        await afterSheet();
       }
     });
   }
@@ -367,8 +369,8 @@ export function settingsApp(ctx) {
   /** 存储空间: the voice cache switch, what this device holds, the clearing, and the copy in the tavern. */
   async function renderStorage(ticket) {
     const [cache, library, drawn, budget, pack, kept] = await Promise.all([api.cacheStats(), api.libraryStats().catch(() => null), api.generatedPhotos().catch(() => null), api.storageBudget().catch(() => null), api.packablePhotos?.(0).catch(() => null), api.listLooks?.().catch(() => null)]);
-    const chatPictures = api.chatPictureStats?.() || null, st = api.syncStatus?.();
     if (v.disposed || ticket !== epoch) return;
+    const chatPictures = api.chatPictureStats?.() || null, st = api.syncStatus?.();
     const s = api.getState();
     v.draw(heading('存储空间', '', 'Storage')
       + `<div class="group">${toggle('cacheEnabled', '保存语音缓存', s.general.cacheEnabled, '已生成的音频用于重播。清缓存不会删除收藏、相册、备忘录或参考音频。')}
@@ -384,6 +386,7 @@ export function settingsApp(ctx) {
   }
 
   async function render() {
+    if (v.disposed) return;
     const ticket = ++epoch;
     if (subPage) { subPage.render(); return; }
     if (appearance) { renderAppearance(); return; }

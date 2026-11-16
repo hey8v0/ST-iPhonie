@@ -248,10 +248,11 @@ export class LocalLibrary {
  /** 绘本 (core/book.js): the books on the shelf, newest first; one; kept (made or changed); thrown away (its drawn pictures stay in 相册). */
  async listBooks(){return (await this.#list('books')).map(row=>normalizeBook(row.book));}
  async getBook(id){const row=await this.#read('books',identifier(id));return row?.book?normalizeBook(row.book):null;}
- async saveBook(input,{fields:patchFields}={}){
+ /** Content editors can preserve the latest reader notes in this transaction; full saves keep replacement semantics. */
+ async saveBook(input,{fields:patchFields,preserveReaders=false}={}){
   if(!input||typeof input!=='object')throw fail('绘本格式无效');const book=normalizeBook(input);identifier(book.id);
   if(patchFields&&(!Array.isArray(patchFields)||patchFields.some(key=>!['title','subtitle'].includes(key))))throw fail('绘本修改字段无效');
-  return this.#mutate(({rows,put})=>{const old=rows.books.get(book.id);if(patchFields&&!old)throw fail('这本绘本已经不在了');const next=patchFields?normalizeBook({...old.book,...Object.fromEntries(patchFields.map(key=>[key,book[key]]))}):book;const now=this.#time(),row={id:book.id,book:{...next,at:now},createdAt:rows.books.get(book.id)?.createdAt??now,updatedAt:now};put('books',row);return structuredClone(row.book);},{books:[book.id]});
+  return this.#mutate(({rows,put})=>{const old=rows.books.get(book.id);if((patchFields||preserveReaders)&&!old)throw fail('这本绘本已经不在了');const next=patchFields?normalizeBook({...old.book,...Object.fromEntries(patchFields.map(key=>[key,book[key]]))}):book;if(preserveReaders)next.readers=structuredClone(old.book.readers||[]);const now=this.#time(),row={id:book.id,book:{...next,at:now},createdAt:rows.books.get(book.id)?.createdAt??now,updatedAt:now};put('books',row);return structuredClone(row.book);},{books:[book.id]});
  }
  async deleteBook(id){return this.#remove('books',id);}
  async listPhotos(){return this.#list('photos',true);}
