@@ -1,3 +1,4 @@
+/* Mixing fallbacks follow their original rule under @supports not, preserving cascade and shorthand order. */
 /* ST-iPhonie skins. Loaded after phone.css. The default skin ("sky", 晴空贴纸) is phone.css itself.
    To add a skin: a token block for day and night plus component rules here, a wallpaper and a picker entry of the
    same key in wallpapers.js, and the key in PHONE_SKINS / PHONE_WALLPAPERS (core/library.js).
@@ -40,6 +41,7 @@
   border:1px solid color-mix(in srgb,var(--gel) 75%,#000);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.85),0 4px 12px -4px color-mix(in srgb,var(--gel) 80%,transparent);
   text-shadow:0 -1px 0 color-mix(in srgb,var(--gel) 60%,#000)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=aero] .primary,:root[data-skin=aero] .segmented button[aria-pressed=true],:root[data-skin=aero] .engine-tab[aria-pressed=true],:root[data-skin=aero] .play-round{--gel:var(--e-btn,var(--accent-btn));background:linear-gradient(180deg,#fff 0%,var(--gel) 46%,var(--gel) 50%,var(--gel) 100%);border:1px solid var(--gel);box-shadow:inset 0 1px 0 rgba(255,255,255,.85),0 4px 12px -4px rgba(0,0,0,.18);text-shadow:0-1px 0 var(--gel)}}
 :root[data-skin=aero] .primary:active:not(:disabled){transform:translateY(1px);box-shadow:inset 0 2px 6px rgba(0,0,0,.2)}
 :root[data-skin=aero] .secondary,:root[data-skin=aero] .danger{background:var(--aero-gloss),var(--card);border:1px solid var(--aero-edge);box-shadow:inset 0 1px 0 var(--aero-edge),0 3px 10px -4px rgba(0,100,150,.4)}
 :root[data-skin=aero] .secondary:active:not(:disabled),:root[data-skin=aero] .danger:active:not(:disabled){transform:translateY(1px);box-shadow:inset 0 2px 6px rgba(0,0,0,.15)}
@@ -48,10 +50,12 @@
 :root[data-skin=aero] .switch:checked{background:linear-gradient(180deg,#8fe9ff,#16a6e0 55%,#39c1f2)}
 :root[data-skin=aero] .switch:after{background:radial-gradient(circle at 50% 30%,#fff,#dff4fb 70%);border:1px solid #9ccfe0}
 :root[data-skin=aero] .icon-tile{border-radius:16px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.6),0 1px 0 rgba(255,255,255,.7),0 8px 16px -6px color-mix(in srgb,var(--t2) 80%,#000)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=aero] .icon-tile{border-radius:16px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.6),0 1px 0 rgba(255,255,255,.7),0 8px 16px -6px var(--t2)}}
 :root[data-skin=aero] .icon-tile:after{inset:2px 2px 48% 2px;border-radius:14px 14px 50% 50%/14px 14px 26% 26%;background:linear-gradient(rgba(255,255,255,.75),rgba(255,255,255,.08))}
 :root[data-skin=aero] .phone-dock{background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.2) 50%,rgba(255,255,255,.35));box-shadow:inset 0 1px 0 #fff,inset 0 0 0 1px rgba(255,255,255,.7),0 10px 24px -10px rgba(0,80,130,.5)}
 :root[data-skin=aero] .widget,:root[data-skin=aero] .control-tile{background:var(--aero-gloss);border:1px solid var(--aero-edge);box-shadow:inset 0 1px 0 var(--aero-edge),0 10px 24px -12px rgba(0,80,130,.55)}
 :root[data-skin=aero] .chip-button,:root[data-skin=aero] .chip{box-shadow:inset 0 1px 0 rgba(255,255,255,.7),inset 0 0 0 1px color-mix(in srgb,var(--e-btn,var(--accent-btn)) 30%,transparent)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=aero] .chip-button,:root[data-skin=aero] .chip{box-shadow:inset 0 1px 0 rgba(255,255,255,.7),inset 0 0 0 1px rgba(0,0,0,.18)}}
 :root[data-skin=aero] .field input,:root[data-skin=aero] .field textarea,:root[data-skin=aero] .select select,:root[data-skin=aero] input.search{box-shadow:inset 0 1px 3px rgba(0,70,110,.18)}
 
 /* =====================================================================
@@ -103,18 +107,23 @@
 :root[data-skin=fresh] .device{background:linear-gradient(135deg,#fbf9f2,#e3ddcc 34%,#f6f2e7 56%,#d7d0bd 80%,#f1ece0);box-shadow:0 0 0 1px #c9c1ab,0 24px 50px -22px rgba(70,70,50,.45)}
 :root[data-skin=fresh][data-theme=dark] .device{background:linear-gradient(135deg,#3a342d,#1c1915 36%,#2d2822 60%,#141210);box-shadow:0 0 0 1px #3d372f,0 24px 50px -20px #000}
 :root[data-skin=fresh] .app-window{background:radial-gradient(80% 36% at 100% 0,color-mix(in srgb,var(--accent) 16%,transparent) 0,transparent 70%),radial-gradient(70% 30% at 0 100%,color-mix(in srgb,var(--pink) 14%,transparent) 0,transparent 70%),var(--bg)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .app-window{background:radial-gradient(80% 36%at 100%0,var(--accent-soft)0,transparent 70%),radial-gradient(70% 30%at 0 100%,var(--accent-soft)0,transparent 70%),var(--bg)}}
 :root[data-skin=fresh] .view:before{top:4px;right:6px;width:118px;height:102px;background:var(--leaf) no-repeat right top/118px 102px;-webkit-mask-image:none;mask-image:none;opacity:.75}
 :root[data-skin=fresh] .eyebrow{font-family:Georgia,"Times New Roman",var(--serif);font-style:italic;font-weight:400;font-size:13px;letter-spacing:.06em;text-transform:none;color:var(--ink2)}
 :root[data-skin=fresh] .page-heading h1{font-family:var(--serif);font-weight:700;letter-spacing:.12em}
 :root[data-skin=fresh] .page-heading h1 span{background:none;padding:0;text-decoration:underline wavy color-mix(in srgb,var(--accent) 70%,transparent) 1.5px;text-underline-offset:9px}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .page-heading h1 span{background:none;padding:0;text-decoration:underline wavy var(--accent) 1.5px;text-underline-offset:9px}}
 :root[data-skin=fresh] .page-heading h1 .spark{color:var(--pink);width:13px;height:13px}
 :root[data-skin=fresh] .group-title{font-family:var(--serif);font-weight:700;letter-spacing:.14em}
 :root[data-skin=fresh] .group,:root[data-skin=fresh] details:not(:where(.assistant-actions,.assistant-add-menu)),:root[data-skin=fresh] .code-preview{border-radius:16px;box-shadow:inset 0 0 0 1px var(--line),var(--shadow)}
 :root[data-skin=fresh] .primary,:root[data-skin=fresh] .secondary,:root[data-skin=fresh] .danger{font-weight:700;letter-spacing:.06em}
 :root[data-skin=fresh] .primary{box-shadow:0 8px 16px -10px color-mix(in srgb,var(--e-btn,var(--accent-btn)) 90%,#000)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .primary{box-shadow:0 8px 16px -10px var(--e-btn,var(--accent-btn))}}
 :root[data-skin=fresh] .primary:active:not(:disabled){transform:scale(.97);box-shadow:none}
 :root[data-skin=fresh] .secondary{background:transparent;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink,var(--accent-ink)) 45%,transparent)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .secondary{background:transparent;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}}
 :root[data-skin=fresh] .danger{background:transparent;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--danger) 45%,transparent)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .danger{background:transparent;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}}
 :root[data-skin=fresh] .secondary:active:not(:disabled),:root[data-skin=fresh] .danger:active:not(:disabled){transform:scale(.97);box-shadow:inset 0 0 0 1px var(--line)}
 :root[data-skin=fresh] .round-button{box-shadow:inset 0 0 0 1px var(--line),0 6px 14px -10px rgba(60,70,50,.6)}
 :root[data-skin=fresh] .segmented{background:var(--card2);box-shadow:none}
@@ -134,6 +143,7 @@
   color:color-mix(in srgb,var(--t2) 55%,var(--ink));
   box-shadow:0 0 0 1px color-mix(in srgb,var(--ink) 18%,transparent),0 7px 12px -8px rgba(70,70,50,.55);
   outline:1.2px dashed color-mix(in srgb,var(--t2) 38%,transparent);outline-offset:-5px}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .screen:not([data-icon-style=glass]):not([data-icon-style=mono]) .icon-tile{--paper:#fbf7ee;--ink:#4b5a50;--wash:42%;--dab:22%;border-radius:12px;background:var(--paper);color:var(--ink);box-shadow:0 0 0 1px rgba(0,0,0,.18),0 7px 12px -8px rgba(70,70,50,.55);outline:1.2px dashed var(--t2);outline-offset:-5px}}
 :root[data-skin=fresh][data-theme=dark] .screen:not([data-icon-style=glass]):not([data-icon-style=mono]) .icon-tile{
   /* At night a wash on dark paper reads as a glow, not watercolour: plain dark paper, and the app's own colour
      goes to the picture and the dashed stamp frame instead. */
@@ -141,6 +151,7 @@
   background:var(--paper);color:color-mix(in srgb,var(--t1) 70%,var(--ink));
   outline:1.5px dashed color-mix(in srgb,var(--t1) 60%,transparent);
   box-shadow:0 0 0 1px rgba(255,255,255,.07),0 7px 12px -8px rgba(0,0,0,.8)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh][data-theme=dark] .screen:not([data-icon-style=glass]):not([data-icon-style=mono]) .icon-tile{--paper:#262d29;--ink:#e6e0cf;background:var(--paper);color:var(--ink);outline:1.5px dashed var(--t1);box-shadow:0 0 0 1px rgba(255,255,255,.07),0 7px 12px -8px rgba(0,0,0,.8)}}
 /* Inside the picture: details in paper colour, accents in a dusty version of the app's accent. */
 :root[data-skin=fresh] .screen:not([data-icon-style=glass]):not([data-icon-style=mono]) .icon-tile{--fresh-accent:var(--tac)}
 @supports (color:color-mix(in srgb,red,blue)){:root[data-skin=fresh] .screen:not([data-icon-style=glass]):not([data-icon-style=mono]) .icon-tile{--fresh-accent:color-mix(in srgb,var(--tac) 55%,#c9a79c)}}
@@ -156,11 +167,13 @@
     repeating-linear-gradient(0deg,transparent 0 23px,color-mix(in srgb,var(--e-ink) 7%,transparent) 23px 24px),
     linear-gradient(150deg,color-mix(in srgb,var(--e) 34%,#fbf7ee),color-mix(in srgb,var(--e) 58%,#efe7d6));
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 16%,transparent),0 -6px 16px -10px rgba(60,60,40,.35),0 12px 22px -14px rgba(60,60,40,.55)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .bank-card{color:var(--e-ink);border-radius:18px;background:radial-gradient(circle at 84% 74%,transparent 0 27px,var(--e-ink) 27px 28.5px,transparent 29px 33px,var(--e-ink) 33px 34px,transparent 34.5px),repeating-linear-gradient(0deg,transparent 0 23px,var(--e-ink) 23px 24px),linear-gradient(150deg,#fbf7ee,var(--e));box-shadow:inset 0 0 0 1px rgba(0,0,0,.18),0-6px 16px -10px rgba(60,60,40,.35),0 12px 22px -14px rgba(60,60,40,.55)}}
 :root[data-skin=fresh][data-theme=dark] .bank-card{
   background:radial-gradient(circle at 84% 74%,transparent 0 27px,color-mix(in srgb,var(--e-ink) 20%,transparent) 27px 28.5px,transparent 29px 33px,color-mix(in srgb,var(--e-ink) 12%,transparent) 33px 34px,transparent 34.5px),
     repeating-linear-gradient(0deg,transparent 0 23px,color-mix(in srgb,var(--e-ink) 6%,transparent) 23px 24px),
     linear-gradient(150deg,color-mix(in srgb,var(--e) 46%,#262d29),color-mix(in srgb,var(--e) 30%,#1d2320));
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 18%,transparent),0 -6px 16px -10px rgba(0,0,0,.6),0 12px 22px -14px rgba(0,0,0,.8)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh][data-theme=dark] .bank-card{background:radial-gradient(circle at 84% 74%,transparent 0 27px,var(--e-ink) 27px 28.5px,transparent 29px 33px,var(--e-ink) 33px 34px,transparent 34.5px),repeating-linear-gradient(0deg,transparent 0 23px,var(--e-ink) 23px 24px),linear-gradient(150deg,#262d29,#1d2320);box-shadow:inset 0 0 0 1px rgba(0,0,0,.18),0-6px 16px -10px rgba(0,0,0,.6),0 12px 22px -14px rgba(0,0,0,.8)}}
 :root[data-skin=fresh] .bank-card .spark{display:none}
 /* 开演 on 文艺小清新: paper and ink like the engine cards, not a bright gradient. */
 :root[data-skin=fresh] .vn-hero{--e:#f0a070;--e-ink:#94512f;color:var(--e-ink);border-radius:18px;
@@ -168,28 +181,34 @@
     repeating-linear-gradient(0deg,transparent 0 23px,color-mix(in srgb,var(--e-ink) 7%,transparent) 23px 24px),
     linear-gradient(150deg,color-mix(in srgb,var(--e) 30%,#fbf7ee),color-mix(in srgb,var(--e) 52%,#efe7d6));
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 16%,transparent),0 -6px 16px -10px rgba(60,60,40,.35),0 12px 22px -14px rgba(60,60,40,.55)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .vn-hero{--e:#f0a070;--e-ink:#94512f;color:var(--e-ink);border-radius:18px;background:radial-gradient(circle at 86% 22%,transparent 0 27px,var(--e-ink) 27px 28.5px,transparent 29px 33px,var(--e-ink) 33px 34px,transparent 34.5px),repeating-linear-gradient(0deg,transparent 0 23px,var(--e-ink) 23px 24px),linear-gradient(150deg,#fbf7ee,var(--e));box-shadow:inset 0 0 0 1px rgba(0,0,0,.18),0-6px 16px -10px rgba(60,60,40,.35),0 12px 22px -14px rgba(60,60,40,.55)}}
 :root[data-skin=fresh][data-theme=dark] .vn-hero{--e-ink:#f0b48c;
   background:radial-gradient(circle at 86% 22%,transparent 0 27px,color-mix(in srgb,var(--e-ink) 20%,transparent) 27px 28.5px,transparent 29px 33px,color-mix(in srgb,var(--e-ink) 12%,transparent) 33px 34px,transparent 34.5px),
     repeating-linear-gradient(0deg,transparent 0 23px,color-mix(in srgb,var(--e-ink) 6%,transparent) 23px 24px),
     linear-gradient(150deg,color-mix(in srgb,var(--e) 30%,#262d29),color-mix(in srgb,var(--e) 16%,#1d2320));
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 18%,transparent),0 -6px 16px -10px rgba(0,0,0,.6),0 12px 22px -14px rgba(0,0,0,.8)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh][data-theme=dark] .vn-hero{--e-ink:#f0b48c;background:radial-gradient(circle at 86% 22%,transparent 0 27px,var(--e-ink) 27px 28.5px,transparent 29px 33px,var(--e-ink) 33px 34px,transparent 34.5px),repeating-linear-gradient(0deg,transparent 0 23px,var(--e-ink) 23px 24px),linear-gradient(150deg,#262d29,#1d2320);box-shadow:inset 0 0 0 1px rgba(0,0,0,.18),0-6px 16px -10px rgba(0,0,0,.6),0 12px 22px -14px rgba(0,0,0,.8)}}
 :root[data-skin=fresh] .vn-hero-title{font-family:var(--serif);text-shadow:none}
 :root[data-skin=fresh] .vn-hero p{text-shadow:none;font-weight:500;color:inherit}
 :root[data-skin=fresh] .vn-hero .hint{color:inherit;opacity:.8}
 :root[data-skin=fresh] .vn-hero .actions button.primary{background:var(--e-ink);color:#fbf7ee;border:0;box-shadow:0 8px 16px -10px color-mix(in srgb,var(--e-ink) 90%,#000)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .vn-hero .actions button.primary{background:var(--e-ink);color:#fbf7ee;border:0;box-shadow:0 8px 16px -10px var(--e-ink)}}
 :root[data-skin=fresh][data-theme=dark] .vn-hero .actions button.primary{color:#1d2320}
 :root[data-skin=fresh] .vn-hero .actions button.secondary{background:transparent;color:var(--e-ink);border:0;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 45%,transparent)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .vn-hero .actions button.secondary{background:transparent;color:var(--e-ink);border:0;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}}
 :root[data-skin=fresh] .card-name{font-family:var(--serif);font-weight:700;letter-spacing:.04em}
 :root[data-skin=fresh] .card-chip{filter:saturate(.6)}
 :root[data-skin=fresh] .app-label{font-family:var(--serif);font-weight:700;letter-spacing:.06em}
 :root[data-skin=fresh] .phone-dock{background:rgba(255,253,246,.5);box-shadow:inset 0 0 0 1px rgba(255,255,255,.75),0 10px 24px -14px rgba(60,70,50,.5)}
 :root[data-skin=fresh][data-theme=dark] .phone-dock{background:rgba(30,36,32,.5);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
 :root[data-skin=fresh] .widget,:root[data-skin=fresh] .control-tile{border-radius:20px;background:color-mix(in srgb,var(--card) 80%,transparent);box-shadow:inset 0 0 0 1px rgba(255,255,255,.6),0 10px 24px -14px rgba(60,70,50,.55)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .widget,:root[data-skin=fresh] .control-tile{border-radius:20px;background:var(--card);box-shadow:inset 0 0 0 1px rgba(255,255,255,.6),0 10px 24px -14px rgba(60,70,50,.55)}}
 :root[data-skin=fresh] .home-clock{font-family:var(--serif);font-weight:500;letter-spacing:.02em}
 :root[data-skin=fresh] .home-date{font-family:var(--serif);letter-spacing:.2em}
 :root[data-skin=fresh] .msgs{background-image:none}
 :root[data-skin=fresh] .chat-bubble{border-radius:18px 18px 18px 6px;box-shadow:inset 0 0 0 1px var(--line),0 4px 10px -8px rgba(60,70,50,.5)}
 :root[data-skin=fresh] .msg.me .chat-bubble{border-radius:18px 18px 6px 18px;box-shadow:0 6px 12px -9px color-mix(in srgb,var(--accent-btn) 90%,#000)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .msg.me .chat-bubble{border-radius:18px 18px 6px 18px;box-shadow:0 6px 12px -9px var(--accent-btn)}}
 :root[data-skin=fresh] .composer .send{box-shadow:none}
 :root[data-skin=fresh] .th-title strong{font-family:var(--serif);letter-spacing:.06em}
 :root[data-skin=fresh] .tool-ico{border-radius:16px}
@@ -211,15 +230,18 @@
 .theme-presets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 6px;padding-block:14px}
 .theme-preset{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:0;font-size:12px;font-weight:700;color:var(--ink)}
 .theme-preset i{position:relative;display:block;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--a) 0 50%,var(--b) 50%);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 14%,transparent);transition:transform .25s var(--spring,ease)}
+@supports not (color:color-mix(in srgb,#000,#fff)){.theme-preset i{position:relative;display:block;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--a)0 50%,var(--b) 50%);box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);transition:transform .25s var(--spring,ease)}}
 .theme-preset:active i{transform:scale(.9)}
 .theme-preset[aria-pressed=true] i{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--accent-btn)}
 .theme-row{display:flex;align-items:center;gap:12px;min-height:44px}
 .theme-row>span{flex:none;width:58px;font-size:13px;font-weight:700}
 .theme-row>b{flex:1;min-width:0;font-size:13px;font-weight:700}
 .theme-range{flex:1;min-width:0;height:16px;margin:0;border-radius:999px;background:var(--track);-webkit-appearance:none;appearance:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 12%,transparent);touch-action:pan-y}
+@supports not (color:color-mix(in srgb,#000,#fff)){.theme-range{flex:1;min-width:0;height:16px;margin:0;border-radius:999px;background:var(--track);-webkit-appearance:none;appearance:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);touch-action:pan-y}}
 .theme-range::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:var(--thumb,#fff);box-shadow:0 0 0 3px #fff,0 2px 8px rgba(0,0,0,.35)}
 .theme-range::-moz-range-thumb{width:24px;height:24px;border:0;border-radius:50%;background:var(--thumb,#fff);box-shadow:0 0 0 3px #fff,0 2px 8px rgba(0,0,0,.35)}
 .theme-swatch{position:relative;flex:none;display:block;width:34px;height:34px;border-radius:50%;background:var(--c);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 18%,transparent);overflow:hidden;cursor:pointer}
+@supports not (color:color-mix(in srgb,#000,#fff)){.theme-swatch{position:relative;flex:none;display:block;width:34px;height:34px;border-radius:50%;background:var(--c);box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);overflow:hidden;cursor:pointer}}
 .theme-swatch input{position:absolute;inset:-6px;width:calc(100% + 12px);height:calc(100% + 12px);padding:0;border:0;opacity:0;cursor:pointer}
 .theme-each summary{font-weight:800}
 .theme-each .segmented{margin:12px 0 4px}
@@ -258,19 +280,28 @@
 .look-worn svg{width:18px;height:18px}
 /* 引擎 card pockets: glass in Aero, an airmail envelope in 文艺小清新. */
 :root[data-skin=aero] .card-pocket{background:var(--aero-gloss),color-mix(in srgb,var(--e-soft) 40%,var(--card));border:1px solid var(--aero-edge);box-shadow:inset 0 1px 0 var(--aero-edge),var(--shadow)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=aero] .card-pocket{background:var(--aero-gloss),var(--e-soft);border:1px solid var(--aero-edge);box-shadow:inset 0 1px 0 var(--aero-edge),var(--shadow)}}
 :root[data-skin=aero] .pocket-icon{background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0) 52%),var(--e-btn);box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 6px 14px -8px var(--e)}
 :root[data-skin=aero] .pocket-lip{background:linear-gradient(180deg,rgba(255,255,255,.82),rgba(255,255,255,.55) 45%,rgba(255,255,255,.7)),color-mix(in srgb,var(--e-soft) 50%,transparent);-webkit-backdrop-filter:blur(8px) saturate(1.4);backdrop-filter:blur(8px) saturate(1.4);box-shadow:inset 0 1px 0 #fff,inset 0 -8px 14px -10px rgba(0,110,160,.35),0 -10px 18px -12px rgba(0,90,140,.45)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=aero] .pocket-lip{background:linear-gradient(180deg,rgba(255,255,255,.82),rgba(255,255,255,.55) 45%,rgba(255,255,255,.7)),var(--e-soft);-webkit-backdrop-filter:blur(8px) saturate(1.4);backdrop-filter:blur(8px) saturate(1.4);box-shadow:inset 0 1px 0#fff,inset 0-8px 14px -10px rgba(0,110,160,.35),0-10px 18px -12px rgba(0,90,140,.45)}}
 :root[data-skin=aero][data-theme=dark] .pocket-lip{background:linear-gradient(180deg,rgba(140,225,255,.22),rgba(140,225,255,.08)),color-mix(in srgb,var(--e-soft) 60%,#04202f);box-shadow:inset 0 1px 0 rgba(140,225,255,.35),0 -10px 18px -12px #000}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=aero][data-theme=dark] .pocket-lip{background:linear-gradient(180deg,rgba(140,225,255,.22),rgba(140,225,255,.08)),var(--e-soft);box-shadow:inset 0 1px 0 rgba(140,225,255,.35),0-10px 18px -12px #000}}
 :root[data-skin=aero] .pocket-lip:before{border-top:1px solid rgba(255,255,255,.9);top:9px}
 :root[data-skin=fresh] .card-pocket{border-radius:18px;background:color-mix(in srgb,var(--e) 10%,#fbf7ee);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--e-ink) 14%,transparent),0 12px 22px -16px rgba(60,60,40,.5)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .card-pocket{border-radius:18px;background:#fbf7ee;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18),0 12px 22px -16px rgba(60,60,40,.5)}}
 :root[data-skin=fresh][data-theme=dark] .card-pocket{background:color-mix(in srgb,var(--e) 10%,#20261f)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh][data-theme=dark] .card-pocket{background:#20261f}}
 :root[data-skin=fresh] .pocket-title b{font-family:var(--serif);font-weight:700;letter-spacing:.06em}
 :root[data-skin=fresh] .pocket-icon{border-radius:8px;rotate:-3deg;background:color-mix(in srgb,var(--e) 30%,#fbf7ee);color:var(--e-ink);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--e-ink) 35%,transparent)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .pocket-icon{border-radius:8px;rotate:-3deg;background:#fbf7ee;color:var(--e-ink);box-shadow:inset 0 0 0 1.5px rgba(0,0,0,.18)}}
 :root[data-skin=fresh] .pocket-lip{border-radius:0 0 18px 18px;-webkit-mask:none;mask:none;
   background:repeating-linear-gradient(-45deg,#c96b6b 0 9px,#fbf7ee 9px 14px,#6b8fc9 14px 23px,#fbf7ee 23px 28px) top/100% 6px no-repeat,linear-gradient(180deg,#fbf7ee,#f1e9d8);
   box-shadow:0 -8px 14px -12px rgba(60,60,40,.5),inset 0 0 0 1px rgba(90,80,50,.12)}
 :root[data-skin=fresh][data-theme=dark] .pocket-lip{background:repeating-linear-gradient(-45deg,#9a5656 0 9px,#2a302a 9px 14px,#56709a 14px 23px,#2a302a 23px 28px) top/100% 6px no-repeat,linear-gradient(180deg,#2a302a,#222820)}
 :root[data-skin=fresh] .pocket-lip:before{left:50%;right:auto;top:18px;width:46px;height:20px;margin-left:-23px;border:1.5px solid color-mix(in srgb,var(--e-ink) 40%,transparent);border-radius:50%;-webkit-mask:none;mask:none;opacity:.55}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh] .pocket-lip:before{left:50%;right:auto;top:18px;width:46px;height:20px;margin-left:-23px;border:1.5px solid var(--e-ink);border-radius:50%;-webkit-mask:none;mask:none;opacity:.55}}
 
 :root[data-skin=fresh][data-theme=dark] .pocket-icon{background:color-mix(in srgb,var(--e) 26%,#262d29);color:var(--e-ink);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--e-ink) 30%,transparent)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh][data-theme=dark] .pocket-icon{background:#262d29;color:var(--e-ink);box-shadow:inset 0 0 0 1.5px rgba(0,0,0,.18)}}
 :root[data-skin=fresh][data-theme=dark] .pocket-count{background:color-mix(in srgb,var(--e) 18%,#262d29)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-skin=fresh][data-theme=dark] .pocket-count{background:#262d29}}

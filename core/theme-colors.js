@@ -50,6 +50,12 @@ export function fromOklch({l, c, h}) {
   }
   return toHex(linearOf({l: light, c, h}).map(v => fromLinear(clamp(v))));
 }
+/** An sRGB mix for themes already stored as six-digit hex; does not require CSS color-mix support. */
+export function mixThemeColor(a, b, weight = .5) {
+  if (!isThemeColor(a) || !isThemeColor(b)) throw Error('主题颜色无效');
+  const t = clamp(Number.isFinite(weight) ? weight : .5), right = toRgb(b);
+  return toHex(toRgb(a).map((value, i) => value * t + right[i] * (1 - t)));
+}
 const luminance = hex => { const [r, g, b] = toRgb(hex).map(toLinear); return .2126 * r + .7152 * g + .0722 * b; };
 export const contrast = (a, b) => { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
 

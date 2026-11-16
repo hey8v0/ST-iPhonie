@@ -1,7 +1,9 @@
+/* Mixing fallbacks follow their original rule under @supports not, preserving cascade and shorthand order. */
 /* 氛围底 (ui/aura.js): a base colour, four soft patches (--a1…--a4) drifting slowly, and a faint grain on top.
    Each palette has a day look and a night look (:root[data-theme=dark]). */
 .aura{position:absolute;inset:0;overflow:hidden;background:var(--a0);isolation:isolate;contain:paint}
 .aura i{position:absolute;width:var(--s,90%);aspect-ratio:1;border-radius:50%;background:radial-gradient(closest-side,var(--c) 0,color-mix(in srgb,var(--c) 55%,transparent) 45%,transparent 100%);opacity:.9;will-change:transform;animation:aura-drift var(--t,28s) ease-in-out infinite alternate}
+@supports not (color:color-mix(in srgb,#000,#fff)){.aura i{position:absolute;width:var(--s,90%);aspect-ratio:1;border-radius:50%;background:radial-gradient(closest-side,var(--c)0,var(--c) 45%,transparent 100%);opacity:.9;will-change:transform;animation:aura-drift var(--t,28s) ease-in-out infinite alternate}}
 .aura i:nth-child(1){--c:var(--a1);--s:95%;left:-30%;top:-25%;--t:31s}
 .aura i:nth-child(2){--c:var(--a2);--s:80%;right:-28%;top:-10%;left:auto;--t:37s;animation-delay:-9s}
 .aura i:nth-child(3){--c:var(--a3);--s:85%;left:-10%;bottom:-35%;top:auto;--t:41s;animation-delay:-17s}
@@ -10,6 +12,7 @@
 @keyframes aura-drift{0%{transform:translate(0,0) scale(1)}50%{transform:translate(7%,5%) scale(1.08)}100%{transform:translate(-6%,8%) scale(.96)}}
 /* the shop's: a slow sheen passes over them */
 .aura[data-rich]:before{content:"";position:absolute;inset:-20% -60%;z-index:1;pointer-events:none;background:linear-gradient(105deg,transparent 38%,color-mix(in srgb,var(--sheen,#fff) 30%,transparent) 50%,transparent 62%);animation:aura-sheen 14s ease-in-out infinite;mix-blend-mode:soft-light}
+@supports not (color:color-mix(in srgb,#000,#fff)){.aura[data-rich]:before{content:"";position:absolute;inset:-20% -60%;z-index:1;pointer-events:none;background:linear-gradient(105deg,transparent 38%,var(--sheen,#fff) 50%,transparent 62%);animation:aura-sheen 14s ease-in-out infinite;mix-blend-mode:soft-light}}
 @keyframes aura-sheen{0%,20%{transform:translateX(-35%)}70%,100%{transform:translateX(35%)}}
 /* 流星雨: stars twinkle (scattered, not in rows) */
 .aura[data-aura=meteor] i:nth-child(4){background:radial-gradient(1.4px 1.4px at 12% 18%,#fff,transparent),radial-gradient(1px 1px at 37% 9%,#fff,transparent),radial-gradient(1.6px 1.6px at 63% 27%,#fff,transparent),radial-gradient(1px 1px at 82% 14%,#fff,transparent),radial-gradient(1.2px 1.2px at 24% 46%,#fff,transparent),radial-gradient(1px 1px at 71% 52%,#fff,transparent),radial-gradient(1.4px 1.4px at 48% 68%,#fff,transparent),radial-gradient(1px 1px at 88% 77%,#fff,transparent),radial-gradient(1.2px 1.2px at 15% 83%,#fff,transparent);width:auto;aspect-ratio:auto;inset:0;border-radius:0;--t:7s;animation:aura-twinkle 7s ease-in-out infinite alternate;opacity:var(--stars,.9)}
@@ -18,6 +21,7 @@
 
 /* palettes — day */
 .aura[data-aura=theme]{--a0:var(--accent);--a1:color-mix(in srgb,var(--pink) 85%,#fff);--a2:color-mix(in srgb,var(--accent) 60%,#fff);--a3:var(--pink);--a4:color-mix(in srgb,var(--accent) 70%,#7c5cff)}
+@supports not (color:color-mix(in srgb,#000,#fff)){.aura[data-aura=theme]{--a0:var(--accent);--a1:var(--pink);--a2:var(--accent);--a3:var(--pink);--a4:var(--accent)}}
 .aura[data-aura=sky]{--a0:#d4eaff;--a1:#8fcbff;--a2:#c7b9ff;--a3:#f4fbff;--a4:#97e2ea}
 .aura[data-aura=dusk]{--a0:#ffdcc9;--a1:#ff98ae;--a2:#ffbd7c;--a3:#caa6ff;--a4:#ffe9b5}
 .aura[data-aura=blush]{--a0:#ffe5ee;--a1:#ffa6c9;--a2:#ffd2b3;--a3:#f2dbff;--a4:#fff6fa}
@@ -31,6 +35,7 @@
 .aura[data-aura=garden]{--a0:#e6f4dc;--a1:#a6dc8f;--a2:#ffb6cf;--a3:#fff1a8;--a4:#c8b6ff}
 /* palettes — night: the same moods, deep */
 :root[data-theme=dark] .aura[data-aura=theme]{--a0:color-mix(in srgb,var(--accent) 40%,#0b1020);--a1:color-mix(in srgb,var(--pink) 55%,#140a22);--a2:color-mix(in srgb,var(--accent) 55%,#0b1020);--a3:color-mix(in srgb,var(--pink) 40%,#0b1020);--a4:color-mix(in srgb,var(--accent) 45%,#2a1660)}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-theme=dark] .aura[data-aura=theme]{--a0:var(--accent);--a1:var(--pink);--a2:var(--accent);--a3:var(--pink);--a4:var(--accent)}}
 :root[data-theme=dark] .aura[data-aura=sky]{--a0:#0f1f3d;--a1:#2a5fa8;--a2:#4b3f9e;--a3:#163a6b;--a4:#1d6f82}
 :root[data-theme=dark] .aura[data-aura=dusk]{--a0:#26142a;--a1:#8a2f5a;--a2:#9a5426;--a3:#4b2f86;--a4:#5c3a1e}
 :root[data-theme=dark] .aura[data-aura=blush]{--a0:#26131e;--a1:#7d2c55;--a2:#7a4a3c;--a3:#4f2a6b;--a4:#3a1a2c}
@@ -64,7 +69,9 @@
 .chat-thread[data-bubble=sakura] .msg.me .chat-bubble,.deco[data-bubble=sakura] .deco-sample{background:var(--pp) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.6' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 .6 0 0 0 0 .3 0 0 0 0 .4 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)'/%3E%3C/svg%3E");color:var(--pi);border:1px solid var(--pe);box-shadow:2px 3px 0 var(--ps),0 6px 14px -8px #b0436a55}
 /* 果冻: full and glossy, in the theme's colour */
 .chat-thread[data-bubble=jelly] .msg.me .chat-bubble,.deco[data-bubble=jelly] .deco-sample{background:radial-gradient(120% 70% at 30% 0%,#ffffffb3 0,#ffffff00 46%),linear-gradient(160deg,color-mix(in srgb,var(--accent) 70%,#fff),var(--accent));color:#fff;text-shadow:0 1px 0 #0002;box-shadow:inset 0 -3px 6px #0000001f,inset 0 2px 1px #ffffff80,0 6px 14px -6px color-mix(in srgb,var(--accent) 70%,transparent)}
+@supports not (color:color-mix(in srgb,#000,#fff)){.chat-thread[data-bubble=jelly] .msg.me .chat-bubble,.deco[data-bubble=jelly] .deco-sample{background:radial-gradient(120% 70%at 30% 0%,#ffffff44 0,#ffffff00 46%),linear-gradient(160deg,var(--accent-btn),var(--accent-btn));color:#fff;text-shadow:0 1px 0#0002;box-shadow:inset 0-3px 6px #0000001f,inset 0 2px 1px #ffffff80,0 6px 14px -6px rgba(0,0,0,.18);color:var(--on-accent)}}
 :root[data-theme=dark] .chat-thread[data-bubble=jelly] .msg.me .chat-bubble,:root[data-theme=dark] .deco[data-bubble=jelly] .deco-sample{background:radial-gradient(120% 70% at 30% 0%,#ffffff55 0,#ffffff00 46%),linear-gradient(160deg,var(--accent),color-mix(in srgb,var(--accent) 60%,#000))}
+@supports not (color:color-mix(in srgb,#000,#fff)){:root[data-theme=dark] .chat-thread[data-bubble=jelly] .msg.me .chat-bubble,:root[data-theme=dark] .deco[data-bubble=jelly] .deco-sample{background:radial-gradient(120% 70%at 30% 0%,#ffffff44 0,#ffffff00 46%),linear-gradient(160deg,var(--accent-btn),var(--accent-btn));color:var(--on-accent)}}
 /* 磨砂 and 冰晶 (shop): glass. A milky fill, not a blur of what is behind: every bubble blurring the drifting field
    under it was worked out again on every frame, and a phone got hot and slow in a chat. */
 .chat-thread[data-bubble=frost] .msg.me .chat-bubble,.deco[data-bubble=frost] .deco-sample,.chat-thread[data-bubble=glass] .msg.me .chat-bubble,.deco[data-bubble=glass] .deco-sample{--gb:#ffffffc7;--gi:var(--ink);--ge:#ffffffd9;background:var(--gb);color:var(--gi);border:1px solid var(--ge);box-shadow:inset 0 1px 0 #fff9,0 6px 16px -10px #2a3a5a66}

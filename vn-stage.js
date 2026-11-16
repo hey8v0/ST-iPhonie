@@ -342,6 +342,15 @@ const CSS = `
  .vn-log li{grid-template-columns:4.5em 1fr auto;gap:8px}
 }
 @media (prefers-reduced-motion:reduce){.sttts-vn *{animation:none!important;transition-duration:.01s!important}}
+
+/* Older browsers: isolate the translucent background from its fully opaque text. */
+@supports not (color:color-mix(in srgb,#000,#fff)){
+ .sttts-vn[data-box=tavern]{--vn-box:var(--SmartThemeBlurTintColor,#1b1b22);--vn-box2:var(--SmartThemeChatTintColor,var(--SmartThemeBlurTintColor,#24242c))}
+ .sttts-vn[data-box=phone]{--vn-box:var(--vn-p-box);--vn-box2:var(--vn-p-box2);--vn-glow:var(--vn-p-plate)}
+ .sttts-vn[data-box=tavern] .vn-box,.sttts-vn[data-box=phone] .vn-box{background:none}
+ .sttts-vn[data-box=tavern] .vn-box::before,.sttts-vn[data-box=phone] .vn-box::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;background:linear-gradient(180deg,var(--vn-box),var(--vn-box2));opacity:var(--vn-op);pointer-events:none}
+ .vn-cutin i{background:var(--vn-plate)}
+}
 `;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const SPOTS = {1: [50], 2: [30, 70], 3: [19, 50, 81]}, NARROW = {1: [50], 2: [27, 73], 3: [16, 50, 84]};

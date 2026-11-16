@@ -1,3 +1,4 @@
+import {mixThemeColor} from '../core/theme-colors.js';
 // Built-in wallpapers. Keys come from the backend's phoneCatalog.wallpapers.
 //   clock: stroke (white outlined clock) | glow (light clock with a glow)
 //   night: variant used when the phone runs in dark mode
@@ -63,7 +64,7 @@ export function customWallpaper(theme, dark) {
   }
   const t = theme.day;
   return {name: '主题色', ink: t.ink, clock: 'stroke', stroke: t['accent-btn'], shadow: t['accent-ink'], halo: '#fff', motion: 'clouds',
-    background: `${clouds},radial-gradient(40% 25% at 85% 12%,#ffffff55 0,#fff0 70%),linear-gradient(180deg,${t.accent} 0%,color-mix(in srgb,${t.accent} 55%,#fff) 36%,${t['accent-soft']} 62%,${t.bg} 100%)`};
+    background: `${clouds},radial-gradient(40% 25% at 85% 12%,#ffffff55 0,#fff0 70%),linear-gradient(180deg,${t.accent} 0%,${mixThemeColor(t.accent, '#ffffff', .55)} 36%,${t['accent-soft']} 62%,${t.bg} 100%)`};
 }
 
 // Returns the look to apply for a builtin key, honouring the dark variant.

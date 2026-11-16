@@ -1,3 +1,4 @@
+/* Mixing fallbacks follow their original rule under @supports not, preserving cascade and shorthand order. */
 /* 账本 (ui/ledger.js): the numbers wear the ink, the marks one colour; the day being read is the dark one. */
 .ledger-period{margin-bottom:12px}
 .ledger-month{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 2px 12px}
@@ -17,6 +18,7 @@ button.ledger-tile:active{transform:scale(.97)}
 .ledger-plot{display:grid;grid-template-columns:repeat(var(--days),minmax(0,1fr));align-items:end;height:112px;border-bottom:1px solid var(--line);touch-action:pan-y;user-select:none;-webkit-user-select:none}
 .ledger-col{display:flex;align-items:flex-end;justify-content:center;height:100%;min-width:0;padding:0 1px}
 .ledger-col i{display:block;width:100%;max-width:18px;border-radius:3px 3px 0 0;background:color-mix(in srgb,var(--accent-btn) 45%,var(--card));pointer-events:none;transition:background .12s}
+@supports not (color:color-mix(in srgb,#000,#fff)){.ledger-col i{display:block;width:100%;max-width:18px;border-radius:3px 3px 0 0;background:var(--accent-soft);pointer-events:none;transition:background .12s;background:var(--accent-btn);opacity:.45}}
 .ledger-col[data-on] i{background:var(--accent-btn)}
 .ledger-col:focus-visible{outline:2px solid var(--accent);outline-offset:-1px}
 .ledger-axis{display:grid;grid-template-columns:repeat(var(--days),minmax(0,1fr));margin-top:4px;font-size:10.5px;font-weight:700;color:var(--ink2);font-variant-numeric:tabular-nums}
@@ -31,7 +33,10 @@ button.ledger-tile:active{transform:scale(.97)}
 .ledger-row-top{display:flex;justify-content:space-between;gap:12px;font-size:14px;font-weight:700}
 .ledger-row-top b{flex:none;font-weight:800;font-variant-numeric:tabular-nums}
 .ledger-bar{display:block;height:5px;margin-top:6px;border-radius:3px;background:color-mix(in srgb,var(--accent-btn) 14%,var(--card));overflow:hidden}
+@supports not (color:color-mix(in srgb,#000,#fff)){.ledger-bar{display:block;height:5px;margin-top:6px;border-radius:3px;background:var(--accent-soft);overflow:hidden}}
 .ledger-bar b{display:block;height:100%;border-radius:3px;background:var(--accent-btn)}
 .ledger-row small{display:block;margin-top:5px;font-size:12px}
 .ledger-actions{justify-content:center;margin-top:6px}
 @media (forced-colors:active){.ledger-col i,.ledger-bar b{background:Highlight}.ledger-tile[aria-pressed=true]{outline:2px solid Highlight}}
+
+@supports not (color:color-mix(in srgb,#000,#fff)){.ledger-col[data-on] i{opacity:1}}

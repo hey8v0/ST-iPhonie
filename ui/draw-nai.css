@@ -1,3 +1,4 @@
+/* Mixing fallbacks follow their original rule under @supports not, preserving cascade and shorthand order. */
 /* The drawing app's NovelAI tools: the 参考图 tab (ui/draw-refs.js), the tools under the picture and 导演工具 (ui/draw.js),
    and the brush for 局部重绘 (ui/draw-images.js). */
 /* 用这张图继续: one line under the picture, a grid of tiles when opened */
@@ -94,9 +95,9 @@
 .char-body .word-mark{flex:1 1 0;align-self:flex-start}
 .word-mark-layer{position:absolute;inset:0;z-index:1;box-sizing:border-box;border:0 solid transparent;overflow:hidden;white-space:pre-wrap;overflow-wrap:break-word;color:transparent;pointer-events:none;user-select:none}
 .word-mark-layer span{border-radius:3px}
-.w-up.w1{background:color-mix(in srgb,#ff9f43 22%,transparent)}.w-up.w2{background:color-mix(in srgb,#ff9f43 36%,transparent)}.w-up.w3{background:color-mix(in srgb,#ff9f43 50%,transparent)}
-.w-down.w1{background:color-mix(in srgb,#4c9cf0 20%,transparent)}.w-down.w2{background:color-mix(in srgb,#4c9cf0 32%,transparent)}.w-down.w3{background:color-mix(in srgb,#4c9cf0 46%,transparent)}
-.w-neg{background:color-mix(in srgb,#e8505c 34%,transparent)}.w-rand{background:color-mix(in srgb,#a070e0 26%,transparent)}.w-chunk{background:color-mix(in srgb,#30b8a8 28%,transparent)}
+.w-up.w1{background:rgba(255,159,67,0.22)}.w-up.w2{background:rgba(255,159,67,0.36)}.w-up.w3{background:rgba(255,159,67,0.5)}
+.w-down.w1{background:rgba(76,156,240,0.2)}.w-down.w2{background:rgba(76,156,240,0.32)}.w-down.w3{background:rgba(76,156,240,0.46)}
+.w-neg{background:rgba(232,80,92,0.34)}.w-rand{background:rgba(160,112,224,0.26)}.w-chunk{background:rgba(48,184,168,0.28)}
 /* 随机提示词 */
 .random-card .row-heading{gap:6px}
 .random-card .row-heading strong{white-space:nowrap}
@@ -105,6 +106,7 @@
 .random-words b{color:var(--ink);font-weight:700}
 /* 站位画布的辅助线 */
 .pos-line{position:absolute;background:color-mix(in srgb,var(--ink) 30%,transparent);pointer-events:none}
+@supports not (color:color-mix(in srgb,#000,#fff)){.pos-line{position:absolute;background:rgba(128,128,128,0.3);pointer-events:none}}
 .pos-line.v{top:0;bottom:0;width:1px}.pos-line.h{left:0;right:0;height:1px}
 .pos-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 10px}
 .pos-tools-all{justify-content:flex-end;margin-top:4px}
@@ -191,7 +193,9 @@
 .custom-report p{margin:0}
 .custom-report .hint{margin-top:4px;white-space:pre-line}
 .custom-report.good{background:color-mix(in srgb,var(--accent) 12%,var(--card2))}
+@supports not (color:color-mix(in srgb,#000,#fff)){.custom-report.good{background:var(--accent-soft)}}
 .custom-report.bad{background:color-mix(in srgb,var(--danger) 10%,var(--card2))}
+@supports not (color:color-mix(in srgb,#000,#fff)){.custom-report.bad{background:var(--danger-soft)}}
 .custom-report .grid-choices,.custom-report .actions{margin-top:8px}
 .custom-now{margin:-4px 0 12px}
 .custom-services{margin-bottom:6px}
@@ -202,6 +206,7 @@
 .style-picker .style-list .sw-actions{bottom:6px}
 .style-picker .style-list .sw-main,.style-picker .style-list .sw-open .sw-main{border-radius:16px;background:var(--card)}
 .style-picker .style-list .sw-chosen .sw-main{background:color-mix(in srgb,var(--accent) 16%,var(--card))}
+@supports not (color:color-mix(in srgb,#000,#fff)){.style-picker .style-list .sw-chosen .sw-main{background:var(--accent-soft)}}
 .style-picker .style-group-inner .sw-row{margin-left:22px}
 .style-picker .style-group-inner .sw-body{padding-left:0}
 .style-picker .style-group-inner .sw-body::before{display:none}
@@ -217,7 +222,9 @@ button.style-cover:active{transform:scale(.94)}
 .style-on .style-row strong,.style-on .style-row small,.style-on .style-row small.style-params,.style-on .sw-more{color:var(--on-accent)}
 .style-on .style-row small{opacity:.8}
 .style-on .style-cover{background:color-mix(in srgb,var(--on-accent) 16%,transparent);color:var(--on-accent);box-shadow:none}
+@supports not (color:color-mix(in srgb,#000,#fff)){.style-on .style-cover{background:rgba(128,128,128,0.16);color:var(--on-accent);box-shadow:none}}
 .style-on .sw-check{border-color:color-mix(in srgb,var(--on-accent) 70%,transparent)}
+@supports not (color:color-mix(in srgb,#000,#fff)){.style-on .sw-check{border-color:var(--on-accent)}}
 .chip-cover{flex:none;width:20px;height:20px;border-radius:50%;object-fit:cover;object-position:50% 18%}
 /* 效果图的弹窗 */
 .cover-big{margin-bottom:12px;border-radius:16px;overflow:hidden;background:var(--card2)}
