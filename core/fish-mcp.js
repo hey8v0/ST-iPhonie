@@ -320,11 +320,13 @@ export class FishMcp {
     const args = speechArguments(tool?.inputSchema, {text: body.input || body.text, voice: body.voice || body.reference_id, model});
     const c = this.credentials() || {}, epoch = this.epoch;
     const owner = speechOwner(c);
-    const key = await sha256Hex(JSON.stringify([owner,args]));
-    if (this.downloadJobs.has(key)) return this.downloadJobs.get(key);
-    const task = this.speechDownload(key, args, signal, () => epoch === this.epoch && this.status().connected && JSON.stringify(speechOwner(this.credentials())) === JSON.stringify(owner));
-    this.downloadJobs.set(key, task);
-    try { return await task; } finally { if (this.downloadJobs.get(key) === task) this.downloadJobs.delete(key); }
+    // Coalesce before awaiting the hash: a delayed second digest may otherwise outlive a fast first download.
+    // The plain identity is only an in-flight RAM key; persisted download records still use the SHA-256 digest.
+    const identity = JSON.stringify([owner,args]);
+    if (this.downloadJobs.has(identity)) return this.downloadJobs.get(identity);
+    const task = sha256Hex(identity).then(key => this.speechDownload(key, args, signal, () => epoch === this.epoch && this.status().connected && JSON.stringify(speechOwner(this.credentials())) === JSON.stringify(owner)));
+    this.downloadJobs.set(identity, task);
+    try { return await task; } finally { if (this.downloadJobs.get(identity) === task) this.downloadJobs.delete(identity); }
   }
   pendingDownloads() {
     if (!this.downloads) {

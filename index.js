@@ -41,7 +41,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null, stopChatClock = null;
 import { createSongHost } from './host-song.js';
-const RUNTIME_VERSION='0.9.89';
+const RUNTIME_VERSION='0.9.90';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -430,6 +430,18 @@ const GAMES=new Set(['antarctic','blocks']);
 function closeGame(){if(!gameOverlay)return;gameOverlay.stop();gameOverlay.el.remove();gameOverlay=null;}
 // the phone's copy of a game's save: with 保存到酒馆 on, what the other devices saved is fetched first (a few seconds at most)
 async function gameSaveOf(name){if(!backend)return null;if(backend.settings?.sync?.enabled)await Promise.race([backend.syncNow().catch(()=>{}),new Promise(resolve=>setTimeout(resolve,6000))]);return backend.gameSave?.(name).catch(()=>null)??null;}
+async function saveGameFromFrame(name, request) {
+ try {
+  if (!backend) throw Error('小手机没有连接');
+  const saved = await backend.putGameSave(name, request.data, request.savedAt);
+  if (saved !== true) throw Error('小手机已有较新的存档，本次没有覆盖');
+  return {type: 'st-iphonie-game:saved', id: request.id};
+ } catch (error) {
+  const message = error?.message || '保存失败，请重试';
+  notice('游戏存档没有交给小手机：' + message + '。游戏本机存档不受这次转存影响。');
+  return {type: 'st-iphonie-game:save-failed', id: request.id, error: message};
+ }
+}
 function openGame(name){
  if(!GAMES.has(name))throw Error('没有这个游戏');
  closeGame();if(panel?.open)panel.close();
@@ -439,7 +451,7 @@ function openGame(name){
  const message=e=>{if(e.source!==f.contentWindow)return;const d=e.data;
   if(d?.type==='st-iphonie-game:close')closeGame();
   else if(d?.type==='st-iphonie-game:load')gameSaveOf(name).then(save=>answer({type:'st-iphonie-game:loaded',id:d.id,save}));
-  else if(d?.type==='st-iphonie-game:save')Promise.resolve(backend?.putGameSave(name,d.data,d.savedAt)).catch(()=>false).then(()=>answer({type:'st-iphonie-game:saved',id:d.id}));};
+  else if(d?.type==='st-iphonie-game:save')saveGameFromFrame(name,d).then(answer);};
  window.addEventListener('message',message);f.addEventListener('load',()=>f.contentWindow?.focus());
  el.append(f);document.body.append(el);
  gameOverlay={el,stop:()=>window.removeEventListener('message',message)};return true;}

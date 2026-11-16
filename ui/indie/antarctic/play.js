@@ -125,8 +125,8 @@ const tavern = {asked: 0, waiting: new Map(), sent: 0, timer: 0};
 addEventListener('message', e => {
   if (e.source !== parent || e.origin !== location.origin) return;
   const d = e.data, done = tavern.waiting.get(d?.id);
-  if (!done || (d.type !== 'st-iphonie-game:loaded' && d.type !== 'st-iphonie-game:saved')) return;
-  tavern.waiting.delete(d.id); done(d.type === 'st-iphonie-game:loaded' ? d.save || null : true);
+  if (!done || (d.type !== 'st-iphonie-game:loaded' && d.type !== 'st-iphonie-game:saved' && d.type !== 'st-iphonie-game:save-failed')) return;
+  tavern.waiting.delete(d.id); done(d.type === 'st-iphonie-game:loaded' ? d.save || null : d.type === 'st-iphonie-game:saved');
 });
 /** A word to the phone, and its answer (null when there is none in time, or outside the tavern). */
 function tavernAsk(message, wait) {

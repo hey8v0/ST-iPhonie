@@ -629,7 +629,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
   const SENT_KEY = 'sttts.phoneSent', DAY_KEY = 'sttts.phoneDay';
   const hash = text => { let h = 0; for (const c of String(text)) h = (h * 31 + c.codePointAt(0)) | 0; return (h >>> 0).toString(36); };
   function sentBefore(key) {
-    try { const list = JSON.parse(localStorage.getItem(SENT_KEY) || '[]'); return Array.isArray(list) && list.includes(key); } catch { return false; }
+    try { const list = JSON.parse(storage?.getItem(SENT_KEY) || '[]'); return Array.isArray(list) && list.includes(key); } catch { return false; }
   }
   const phoneLog = message => backend.reportDiagnostic?.('正文手机接收', {message}, 'warn');
   /** The private chat with `name` here (this card, with 分区), made when there is none yet. */
@@ -709,7 +709,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
   let quiet = 0, sessionDay = null, dayVolatile = false, deliveryQueue = Promise.resolve();
   function today() {
     let day = {day: new Date().toDateString(), n: 0};
-    try { const saved = JSON.parse(localStorage.getItem(DAY_KEY) || 'null'); if (saved?.day === day.day) day = saved; } catch { if (sessionDay?.day === day.day) day = sessionDay; }
+    try { const saved = JSON.parse(storage?.getItem(DAY_KEY) || 'null'); if (saved?.day === day.day) day = saved; } catch { if (sessionDay?.day === day.day) day = sessionDay; }
     if (dayVolatile && sessionDay?.day === day.day && sessionDay.n >= day.n) day = sessionDay;
     return day;
   }
@@ -717,7 +717,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     const day = today(); if (key && day.keys?.includes(key)) return; if (!already) day.n++;
     if (key) day.keys = [...(day.keys || []), key].slice(-300);
     sessionDay = day;
-    try { localStorage.setItem(DAY_KEY, JSON.stringify(day)); dayVolatile = false; } catch { dayVolatile = true; /* counted for this session */ }
+    try { storage.setItem(DAY_KEY, JSON.stringify(day)); dayVolatile = false; } catch { dayVolatile = true; /* counted for this session */ }
   }
   /** Whether the next story reply may reach out on the phone. */
   function phoneTurn() {
@@ -865,7 +865,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     const apart = new Set((await backend.threads()).filter(t => t.type === 'dm' && (t.friend || t.blocked)).map(t => t.members[0]));
     if (!valid()) return false;
     const roles = backend.contacts().filter(c => c.source === 'role' && !apart.has(c.name)), now = ctx?.name2;
-    const name = wanted ? (backend.contacts().some(c => c.name === wanted) && !apart.has(wanted) ? wanted : '') : roles.find(c => c.name === now)?.name || roles[Math.floor(Math.random() * roles.length)]?.name;
+    const name = wanted ? (backend.contacts().some(c => c.name === wanted) && !apart.has(wanted) ? wanted : '') : roles.find(c => c.name === now)?.name || roles[Math.floor(random() * roles.length)]?.name;
     if (!name) return false;
     try {
       const thread = await dmWith(name, valid), before = new Set((await backend.chats.get(thread.id))?.messages.map(x => x.id) || []);
@@ -1006,7 +1006,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
           if (!text) { letterFailed.set(m.id, now); continue; }
           const away = Math.round(Math.max(6 * 3600_000, Math.min(48 * 3600_000, (m.letter.arriveAt - m.at) / 2)));
           await backend.chatMutate(t.id, async () => {
-            const letter = {id: `l-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`, from: partner, text, sentAt: now, arriveAt: now + away};
+            const letter = {id: `l-${now.toString(36)}-${random().toString(36).slice(2, 6)}`, from: partner, text, sentAt: now, arriveAt: now + away};
             const fresh = await backend.chats.queueLetterReply(t.id, m.id, letter);
             if (fresh.post?.some(l => l.id === letter.id)) await backend.chats.append(t.id, [{from: partner, kind: 'notice', target: 'me', text: '收到了{对方}的信'}], {read: true});
           });

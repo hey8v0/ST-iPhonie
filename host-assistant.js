@@ -149,7 +149,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
   const memory = createAssistantMemoryHost({context, settings, backend, request: (messages, {signal, settings: state}) => {
     const assistant = normalizeAssistant(state.assistant);
     const presetName = assistant.source === 'tavern' && assistant.tavernPreset.startsWith('openai:') ? assistant.tavernPreset.slice(7) : '';
-    return request(context(), backend, {...state, assistant: {...assistant, readContext: false}}, messages, {signal, presetName, loadCompletion, details: false});
+    return request(context(), backend, {...state, assistant: {...assistant, readContext: false}}, messages, {signal, presetName, loadCompletion, details: false, use: 'memory', label: '助手记忆整理'});
   }});
   const remember = thread => { memory.after(thread.id); return thread; };
   const contextBuilder = buildContext || (async (ctx, options) => {

@@ -245,7 +245,7 @@ export const BOOK_CSS = `
 .bk:not([data-dark]) .bk-face{mix-blend-mode:multiply}
 .bk-person figcaption{display:grid;gap:calc(var(--u) * .4);text-align:center;font-size:calc(var(--u) * 2.6);line-height:1.5}
 .bk-person figcaption b{font:700 calc(var(--u) * 3.2)/1.3 var(--bk-title);letter-spacing:.12em;color:var(--bk-accent)}
-.bk-person figcaption [data-reading]{color:var(--bk-accent)}
+.bk-person figcaption [data-k].now{color:var(--bk-accent);text-decoration:underline;text-underline-offset:.2em}
 .bk[data-theme=ancient] .bk-people-head,.bk[data-theme=ancient] .bk-person figcaption{writing-mode:horizontal-tb;letter-spacing:.06em}
 
 /* ---- two moments ---- */

@@ -12,8 +12,8 @@ import {promptOn} from './core/prompt-rules.js';
 const AUTO_STEPS = 2, MANUAL_STEPS = 12;
 
 export function createMemoryHost({context, settings, backend, notice = () => {}}) {
-  const busy = new Map(), status = new Map();
-  let storyText = '', storyTimer = 0, storyRun = 0, storyError = '', storyDone = Promise.resolve(), storyFor = null, closed = false;
+  const busy = new Map(), status = new Map(), vectorRuns = new Map();
+  let storyText = '', storyTimer = 0, storyRun = 0, storyError = '', storyDone = Promise.resolve(), storyFor = null, storyFinish = null, closed = false;
   // Which card the story memory is for (the open character, or the group).
   const cardKey = () => { const ctx = context(); return ctx ? `${ctx.groupId || ''}|${ctx.name2 || ''}` : ''; };
   const timeOn = () => promptOn(settings().promptRules, 'now');
@@ -66,7 +66,9 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
 
   /** Vectors of the pieces and of the query, when a 向量模型 is set up; null otherwise (or when it fails: local only). */
   async function vectors(threadId, pieces, query) {
-    if (!backend.embedReady()) return null;
+    const run = (vectorRuns.get(threadId) || 0) + 1; vectorRuns.set(threadId, run);
+    const current = () => !closed && vectorRuns.get(threadId) === run;
+    if (!backend.embedReady()) { if (status.get(threadId)?.vectorError) note(threadId, {vectorError: ''}); return null; }
     try {
       const model = settings().embed.model + '@' + settings().embed.url;
       const saved = await backend.memoryVectors(threadId), items = saved?.model === model ? {...saved.items} : {};
@@ -80,9 +82,10 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
         await backend.memorySaveVectors(threadId, {model, items});
       }
       const [q] = await backend.embed([query]);
+      if (current() && status.get(threadId)?.vectorError) note(threadId, {vectorError: ''});
       return new Map([...Object.entries(items), ['query', q]]);
     } catch (error) {
-      note(threadId, {vectorError: error.message});
+      if (current()) note(threadId, {vectorError: error.message});
       return null;
     }
   }
@@ -129,7 +132,8 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
   // 正文: the phone chats with the people of the open card (their memory and the last messages), ready before inject()
   // asks, since the story's prompt is put together without waiting.
   function refreshStory(delay = 300) {
-    clearTimeout(storyTimer);
+    if (closed) return;
+    clearTimeout(storyTimer); storyFinish?.();
     const key = storyKey(), timestamps = timeOn();
     if (storyFor !== key) storyText = '';
     storyFor = key;
@@ -137,7 +141,9 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
     const run = ++storyRun, put = text => { if (!closed && run === storyRun && key === storyKey()) storyText = text; };
     let finish;
     storyDone = new Promise(resolve => { finish = resolve; });
+    storyFinish = finish;
     storyTimer = setTimeout(async () => {
+      storyTimer = 0;
       try {
         const o = options(), ctx = context();
         if (!ctx) { put(''); return; }
@@ -169,8 +175,9 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
         put(parts.length ? `【小手机】（${user}和角色们在手机上聊过的事，角色都记得；剧情里自然提起就好，不用复述）\n${parts.join('\n\n')}` : '');
         if (run === storyRun) storyError = '';
       } catch (error) { put(''); if (run === storyRun) storyError = error.message; }
-      finally { finish(); }
+      finally { finish(); if (storyFinish === finish) storyFinish = null; }
     }, delay);
+    storyTimer.unref?.();
   }
   /** The characters of the card open now (the character, or the group's members). */
   function cardNames(ctx) {
@@ -191,14 +198,23 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
     try { backend.saveChatPreset({...preset, memory: {...preset.memory, story: false}}); } catch { /* tried again next time */ }
   }
   /** Waits (a little) for the story memory being worked out, so a story request right after changing cards has it. */
-  function storyReady(limit = 1500) {
-    // Worked out for another card (the card changed and the tavern has not said so yet): again, now.
+  async function storyReady(limit = 1500) {
+    if (closed) return;
+    // Replacing a scheduled run settles its old waiters; they follow the current run within the same deadline.
     if (storyFor !== storyKey()) refreshStory(0);
-    return Promise.race([storyDone, new Promise(r => setTimeout(r, limit))]);
+    let timer;
+    const timeout = new Promise(resolve => { timer = setTimeout(() => resolve(false), limit); timer.unref?.(); });
+    try {
+      while (!closed) {
+        const run = storyRun, pending = storyDone;
+        if (!await Promise.race([pending.then(() => true), timeout])) return;
+        if (run === storyRun) return;
+      }
+    } finally { clearTimeout(timer); }
   }
   /** Prompt entries for inject(): the phone memory for the story, placed like 带进剧情. */
   function storyPlan() {
-    if (!storyText || storyFor !== storyKey()) return [];
+    if (closed || !storyText || storyFor !== storyKey()) return [];
     const i = activeChatPreset(settings().chat).injection, inChat = i.position === 'in_chat';
     return [{key: 'sttts.entry.memory', text: storyText, position: {in_chat: 1, in_prompt: 0, before_prompt: 2}[i.position], depth: inChat ? i.depth : 0, role: inChat ? {system: 0, user: 1, assistant: 2}[i.role] : 0}];
   }
@@ -225,6 +241,6 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
     storyMemory, storySources,
     tidy, after, contextFor, aboutPeople, storyPlan, storyReady, refreshStory,
     status: threadId => ({...status.get(threadId), busy: busy.has(threadId), ...(storyError ? {storyError} : {})}),
-    close() { closed = true; clearTimeout(storyTimer); unsubscribe?.(); }
+    close() { closed = true; ++storyRun; clearTimeout(storyTimer); storyFinish?.(); storyFinish = null; unsubscribe?.(); }
   };
 }

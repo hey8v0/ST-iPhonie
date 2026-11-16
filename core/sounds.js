@@ -255,7 +255,7 @@ export const PACK_FORMAT = 'st-iphonie-sounds';
 export function readPack(value) {
   const data = typeof value === 'string' ? JSON.parse(value) : value;
   if (!data || data.format !== PACK_FORMAT || !Array.isArray(data.sounds)) throw Error('这不是 ST-iPhonie 的音效包');
-  const sounds = data.sounds.map(s => ({...soundRow(s), mime: /^audio\/[\w.+-]+$/.test(s?.mime) ? s.mime : 'audio/mpeg', data: typeof s?.data === 'string' ? s.data : ''}))
+  const sounds = data.sounds.filter(s => s && typeof s === 'object' && !Array.isArray(s)).map(s => ({...soundRow(s), mime: /^audio\/[\w.+-]+$/.test(s?.mime) ? s.mime : 'audio/mpeg', data: typeof s?.data === 'string' ? s.data : ''}))
     .filter(s => s.name && s.data);
   if (!sounds.length) throw Error('音效包里没有能用的声音');
   return {name: String(data.name ?? '').slice(0, 60), sounds};
