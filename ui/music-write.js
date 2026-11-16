@@ -21,7 +21,7 @@ export function writePanel(ctx, {v, go}) {
   const stateOf = d => JSON.stringify([d?.state || '', d?.note || '', d?.songs || []]);
 
   // ---------- The songs written ----------
-  async function load() { drafts = await api.listSongDrafts().catch(() => []); }
+  async function load(current = () => !v.disposed) { const rows = await api.listSongDrafts().catch(() => []); if (current()) drafts = rows; }
   const noteOf = d => d.state === 'singing' ? '正在唱……' : d.note ? '没做成' : d.songs.length ? (d.songs.length > 1 ? `做好了 ${d.songs.length} 版` : '做好了') : '还没唱';
   const draftRow = d => swipeRow(d.id, `<div class="list-row"><span><strong>${esc(d.title || '没有名字的歌')}</strong><small>${esc([d.who, noteOf(d)].filter(Boolean).join(' · '))}</small></span>${icon('next')}</div>`,
     [{key: 'delete', label: '删除', icon: 'trash', danger: true}], {label: d.title});

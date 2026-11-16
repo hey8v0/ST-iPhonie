@@ -151,17 +151,23 @@ export function musicApp(ctx) {
   const heardTracks = () => heard.map(heardTrack);
 
   async function render() {
-    const ticket = ++epoch;
+    if (v.disposed) return;
+    const ticket = ++epoch, current = () => !v.disposed && ticket === epoch;
     if (mode === 'settings') return renderSettings();
     if (mode === 'source') return renderSource();
     if (mode === 'group') return renderGroup();
     if (mode === 'write-form') return writer.renderForm();
     if (mode === 'draft') return writer.renderDraft();
-    songs = await api.listSongs().catch(() => []);
-    if (tab === 'write') await writer.load();
-    lists = await api.listPlaylists?.().catch(() => []) || [];
-    if (tab === 'heard') heard = await api.listHeard?.().catch(() => []) || [];
-    if (v.disposed || ticket !== epoch) return;
+    // A read may outlive this page or be superseded by another render. Do not start the next read or publish stale rows.
+    const nextSongs = await api.listSongs().catch(() => []);
+    if (!current()) return;
+    if (tab === 'write') await writer.load(current);
+    if (!current()) return;
+    const nextLists = await api.listPlaylists?.().catch(() => []) || [];
+    if (!current()) return;
+    const nextHeard = tab === 'heard' ? await api.listHeard?.().catch(() => []) || [] : heard;
+    if (!current()) return;
+    songs = nextSongs; lists = nextLists; heard = nextHeard;
     const s = state(), sources = s.sources.filter(x => x.enabled), byId = new Map(songs.map(x => [x.id, x]));
     const mine = lists.find(p => p.id === shelf) || null;
     if (!mine) shelf = '';

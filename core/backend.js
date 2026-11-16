@@ -1415,12 +1415,21 @@ export class TTSBackend {
         if (!row) throw Error('这个 Vibe 已经不在了');
         try { return JSON.parse(await row.blob.text()); } catch { throw Error('这个 Vibe 的数据坏了，请删掉重新导入'); }
     }
-    async changeVibe(id, change) {
+    async changeVibe(id, change, {allowNew = false} = {}) {
         this.vibeChanges ||= new Map();
         const prior = this.vibeChanges.get(id) || Promise.resolve();
-        const task = prior.catch(() => {}).then(async () => this.storeVibe(await change(await this.vibeDoc(id))));
+        const task = prior.catch(() => {}).then(async () => this.storeVibe(await change(allowNew && !this.vibes.has(id) ? null : await this.vibeDoc(id))));
         this.vibeChanges.set(id, task);
         try { return await task; } finally { if (this.vibeChanges.get(id) === task) this.vibeChanges.delete(id); }
+    }
+    /** Import and editing share one queue per Vibe, including its first creation. */
+    async mergeImportedVibe(doc) {
+        let added = false;
+        await this.changeVibe(doc.id, latest => {
+            added = !latest;
+            return latest ? mergeVibe(latest, doc) : doc;
+        }, {allowNew: true});
+        return added;
     }
     /** Swappable in tests (no canvas there). */
     shrinkVibeImage(base64) { return smallVibeImage(base64); }
@@ -1451,10 +1460,7 @@ export class TTSBackend {
                 const carried = picture ? await embeddedVibeFile(await file.arrayBuffer()).catch(() => null) : null;
                 const found = picture && !carried ? { vibes: [await imageVibe(name, await this.base64(file), '', this.settings.draw.params.model)], groups: [] } : await readVibeFile(name, carried || await file.text());
                 for (const doc of found.vibes) {
-                    if (this.vibes.has(doc.id)) {
-                        await this.storeVibe(mergeVibe(await this.vibeDoc(doc.id), doc)); result.updated++;
-                    }
-                    else { await this.storeVibe(doc); result.added++; }
+                    if (await this.mergeImportedVibe(doc)) result.added++; else result.updated++;
                 }
                 groups.push(...found.groups);
             } catch (error) { result.errors.push({ name, message: error.message }); }
@@ -1509,7 +1515,7 @@ export class TTSBackend {
         if (!vibeKey(model)) model = 'nai-diffusion-4-5-full';
         for (const [i, v] of (list || []).entries()) {
             const doc = await encodingVibe(`${name} ${i + 1}`, v.encoding, model, v.ie, v.strength);
-            await this.storeVibe(this.vibes.has(doc.id) ? mergeVibe(await this.vibeDoc(doc.id), doc) : doc);
+            await this.mergeImportedVibe(doc);
             items.push({ vibe: doc.id, strength: vibeStrength(v.strength) });
         }
         if (!items.length) return null;
