@@ -188,7 +188,7 @@ export function viewMarkup(book, view, {url = () => '', sprite = () => '', draft
 
 /** The pages' stylesheet. Everything is inside .bk; a view is sized by what holds it. */
 export const BOOK_CSS = `
-.bk{container:bk/size;--u:min(1cqh,1.3333cqw);position:absolute;inset:0;overflow:hidden;box-sizing:border-box;background:var(--bk-paper);background-image:${NOISE};color:var(--bk-ink);font-family:var(--bk-font);font-size:16px;line-height:1.6;-webkit-user-select:none;user-select:none;text-align:left;letter-spacing:0;word-break:normal;overflow-wrap:anywhere;line-break:strict}
+.bk{container:bk/size;--u:min(1vh,1.3333vw);--cq:1vmin;--cqw:1vw;position:absolute;inset:0;overflow:hidden;box-sizing:border-box;background:var(--bk-paper);background-image:${NOISE};color:var(--bk-ink);font-family:var(--bk-font);font-size:16px;line-height:1.6;-webkit-user-select:none;user-select:none;text-align:left;letter-spacing:0;word-break:normal;overflow-wrap:anywhere;line-break:strict}
 .bk *,.bk *::before,.bk *::after{box-sizing:border-box}
 :where(.bk) :where(h1,h2,h3,p,figure){margin:0;padding:0;font:inherit;color:inherit}
 .bk img.bk-broken{visibility:hidden}
@@ -251,8 +251,8 @@ export const BOOK_CSS = `
 /* ---- two moments ---- */
 .bk-snap{position:absolute;left:14%;right:14%;top:11%;aspect-ratio:1;margin:0;border-radius:calc(var(--u) * .9);overflow:hidden}
 .bk-snap>.bk-img,.bk-snap>.bk-blank{position:relative;width:100%;height:100%}
-.bk-half>.bk-words.bk-under{top:calc(15% + 72cqw);transform:none}
-.bk[data-theme=ancient] .bk-half>.bk-words.bk-under{writing-mode:horizontal-tb;top:calc(15% + 72cqw);bottom:auto;letter-spacing:.06em;line-height:1.85;text-align:center}
+.bk-half>.bk-words.bk-under{top:calc(15% + calc(var(--cqw) * 72));transform:none}
+.bk[data-theme=ancient] .bk-half>.bk-words.bk-under{writing-mode:horizontal-tb;top:calc(15% + calc(var(--cqw) * 72));bottom:auto;letter-spacing:.06em;line-height:1.85;text-align:center}
 
 /* ---- across both pages: a frame, a picture to the edges, a picture fading into the paper, a foreground ---- */
 .bk-frame{position:absolute;left:7%;right:7%;top:7%;height:62%;overflow:hidden;background:var(--bk-soft);box-shadow:0 0 0 calc(var(--u) * .3) color-mix(in srgb,var(--bk-ink) 72%,transparent),0 0 0 calc(var(--u) * 1.4) var(--bk-paper),0 0 0 calc(var(--u) * 1.65) color-mix(in srgb,var(--bk-ink) 30%,transparent)}
@@ -296,31 +296,31 @@ export const BOOK_CSS = `
 /* ---- the cover and the last page ---- */
 .bk-cover-art{position:absolute;inset:0;background:radial-gradient(circle at 30% 25%,var(--bk-soft),transparent 55%),radial-gradient(circle at 75% 80%,color-mix(in srgb,var(--bk-accent) 30%,transparent),transparent 55%),var(--bk-paper)}
 .bk-cover-words{position:absolute;left:6%;right:6%;top:8%;text-align:center;z-index:3}
-.bk-booktitle{font:900 13cqmin/1.15 var(--bk-title);color:#fff;letter-spacing:.04em;text-shadow:.8cqmin 0 0 var(--bk-accent),-.8cqmin 0 0 var(--bk-accent),0 .8cqmin 0 var(--bk-accent),0 -.8cqmin 0 var(--bk-accent),.6cqmin .6cqmin 0 var(--bk-accent),-.6cqmin -.6cqmin 0 var(--bk-accent),.6cqmin -.6cqmin 0 var(--bk-accent),-.6cqmin .6cqmin 0 var(--bk-accent),0 2cqmin 3cqmin rgba(0,0,0,.35)}
+.bk-booktitle{font:900 calc(var(--cq) * 13)/1.15 var(--bk-title);color:#fff;letter-spacing:.04em;text-shadow:calc(var(--cq) * .8) 0 0 var(--bk-accent),calc(var(--cq) * -.8) 0 0 var(--bk-accent),0 calc(var(--cq) * .8) 0 var(--bk-accent),0 calc(var(--cq) * -.8) 0 var(--bk-accent),calc(var(--cq) * .6) calc(var(--cq) * .6) 0 var(--bk-accent),calc(var(--cq) * -.6) calc(var(--cq) * -.6) 0 var(--bk-accent),calc(var(--cq) * .6) calc(var(--cq) * -.6) 0 var(--bk-accent),calc(var(--cq) * -.6) calc(var(--cq) * .6) 0 var(--bk-accent),0 calc(var(--cq) * 2) calc(var(--cq) * 3) rgba(0,0,0,.35)}
 .bk-booktitle span{display:inline-block}
 .bk:is([data-theme=fairy],[data-theme=comedy],[data-theme=school],[data-theme=adventure]) .bk-booktitle span:nth-child(odd){--rot:-5deg;transform:rotate(-5deg)}
 .bk:is([data-theme=fairy],[data-theme=comedy],[data-theme=school],[data-theme=adventure]) .bk-booktitle span:nth-child(even){--rot:4deg;transform:rotate(4deg)}
-.bk[data-theme=comedy] .bk-booktitle{color:#ffe14d;text-shadow:.9cqmin 0 0 #222,-.9cqmin 0 0 #222,0 .9cqmin 0 #222,0 -.9cqmin 0 #222,.7cqmin .7cqmin 0 #222,-.7cqmin -.7cqmin 0 #222,.7cqmin -.7cqmin 0 #222,-.7cqmin .7cqmin 0 #222,2cqmin 2cqmin 0 #ff5d8f}
-.bk[data-theme=romance] .bk-booktitle{font-weight:400;color:#fff;text-shadow:0 0 1cqmin #ff9dbb,0 0 3cqmin #ff6a9a,0 0 6cqmin rgba(255,106,154,.7)}
-.bk[data-theme=fantasy] .bk-booktitle{color:#ffe7a3;text-shadow:0 .5cqmin 0 #6b4518,0 -.3cqmin 0 #6b4518,.4cqmin 0 0 #6b4518,-.4cqmin 0 0 #6b4518,0 0 4cqmin rgba(255,210,120,.8)}
-.bk[data-theme=fantasy] .bk-cover-words::before,.bk[data-theme=fantasy] .bk-cover-words::after{content:'❦';display:block;color:#ffe7a3;font-size:6cqmin;text-shadow:0 0 2cqmin rgba(0,0,0,.5)}
-.bk[data-theme=ancient] .bk-cover-words{left:auto;right:8%;top:7%;padding:3cqmin 2cqmin;background:#f6efe0;border:.5cqmin solid #2b2420;outline:.3cqmin solid #2b2420;outline-offset:.8cqmin;box-shadow:0 2cqmin 4cqmin rgba(0,0,0,.3)}
-.bk[data-theme=ancient] .bk-booktitle{writing-mode:vertical-rl;font-weight:400;font-size:10cqmin;color:#1d1814;text-shadow:none;letter-spacing:.12em}
-.bk[data-theme=ancient] .bk-subtitle{writing-mode:vertical-rl;font-size:3.6cqmin;margin:0;padding:1.6cqmin .8cqmin;color:#3b2f26;background:rgba(246,239,224,.9);text-shadow:none;position:absolute;right:calc(100% + 2cqmin);top:4cqmin;box-shadow:0 1cqmin 2.4cqmin rgba(0,0,0,.25)}
-.bk[data-theme=mystery] .bk-booktitle{color:#f3ecdc;font-weight:700;letter-spacing:.2em;text-shadow:0 .6cqmin 0 #000;border-top:.5cqmin solid var(--bk-accent);border-bottom:.5cqmin solid var(--bk-accent);padding:.15em 0}
-.bk[data-theme=horror] .bk-booktitle{color:#e9d6c3;text-shadow:0 .5cqmin 0 #4a0808,0 1.5cqmin 1.2cqmin #a62626,0 3.5cqmin 2.5cqmin rgba(166,38,38,.75)}
-.bk[data-theme=scifi] .bk-booktitle{font-weight:300;letter-spacing:.24em;color:#eafcff;text-shadow:0 0 1cqmin #3fd0ff,0 0 3cqmin #3fd0ff,0 0 7cqmin #ff5fd2}
-.bk[data-theme=school] .bk-booktitle{color:var(--bk-ink);text-shadow:.5cqmin .5cqmin 0 #fff,-.5cqmin -.5cqmin 0 #fff,.5cqmin -.5cqmin 0 #fff,-.5cqmin .5cqmin 0 #fff;background:linear-gradient(transparent 58%,color-mix(in srgb,var(--bk-accent) 85%,transparent) 58% 92%,transparent 92%);display:inline;-webkit-box-decoration-break:clone;box-decoration-break:clone}
-.bk-subtitle{margin-top:2cqmin;font:500 4.4cqmin/1.5 var(--bk-font);color:#fff;text-shadow:0 .3cqmin 1.2cqmin rgba(0,0,0,.7)}
+.bk[data-theme=comedy] .bk-booktitle{color:#ffe14d;text-shadow:calc(var(--cq) * .9) 0 0 #222,calc(var(--cq) * -.9) 0 0 #222,0 calc(var(--cq) * .9) 0 #222,0 calc(var(--cq) * -.9) 0 #222,calc(var(--cq) * .7) calc(var(--cq) * .7) 0 #222,calc(var(--cq) * -.7) calc(var(--cq) * -.7) 0 #222,calc(var(--cq) * .7) calc(var(--cq) * -.7) 0 #222,calc(var(--cq) * -.7) calc(var(--cq) * .7) 0 #222,calc(var(--cq) * 2) calc(var(--cq) * 2) 0 #ff5d8f}
+.bk[data-theme=romance] .bk-booktitle{font-weight:400;color:#fff;text-shadow:0 0 calc(var(--cq) * 1) #ff9dbb,0 0 calc(var(--cq) * 3) #ff6a9a,0 0 calc(var(--cq) * 6) rgba(255,106,154,.7)}
+.bk[data-theme=fantasy] .bk-booktitle{color:#ffe7a3;text-shadow:0 calc(var(--cq) * .5) 0 #6b4518,0 calc(var(--cq) * -.3) 0 #6b4518,calc(var(--cq) * .4) 0 0 #6b4518,calc(var(--cq) * -.4) 0 0 #6b4518,0 0 calc(var(--cq) * 4) rgba(255,210,120,.8)}
+.bk[data-theme=fantasy] .bk-cover-words::before,.bk[data-theme=fantasy] .bk-cover-words::after{content:'❦';display:block;color:#ffe7a3;font-size:calc(var(--cq) * 6);text-shadow:0 0 calc(var(--cq) * 2) rgba(0,0,0,.5)}
+.bk[data-theme=ancient] .bk-cover-words{left:auto;right:8%;top:7%;padding:calc(var(--cq) * 3) calc(var(--cq) * 2);background:#f6efe0;border:calc(var(--cq) * .5) solid #2b2420;outline:calc(var(--cq) * .3) solid #2b2420;outline-offset:calc(var(--cq) * .8);box-shadow:0 calc(var(--cq) * 2) calc(var(--cq) * 4) rgba(0,0,0,.3)}
+.bk[data-theme=ancient] .bk-booktitle{writing-mode:vertical-rl;font-weight:400;font-size:calc(var(--cq) * 10);color:#1d1814;text-shadow:none;letter-spacing:.12em}
+.bk[data-theme=ancient] .bk-subtitle{writing-mode:vertical-rl;font-size:calc(var(--cq) * 3.6);margin:0;padding:calc(var(--cq) * 1.6) calc(var(--cq) * .8);color:#3b2f26;background:rgba(246,239,224,.9);text-shadow:none;position:absolute;right:calc(100% + calc(var(--cq) * 2));top:calc(var(--cq) * 4);box-shadow:0 calc(var(--cq) * 1) calc(var(--cq) * 2.4) rgba(0,0,0,.25)}
+.bk[data-theme=mystery] .bk-booktitle{color:#f3ecdc;font-weight:700;letter-spacing:.2em;text-shadow:0 calc(var(--cq) * .6) 0 #000;border-top:calc(var(--cq) * .5) solid var(--bk-accent);border-bottom:calc(var(--cq) * .5) solid var(--bk-accent);padding:.15em 0}
+.bk[data-theme=horror] .bk-booktitle{color:#e9d6c3;text-shadow:0 calc(var(--cq) * .5) 0 #4a0808,0 calc(var(--cq) * 1.5) calc(var(--cq) * 1.2) #a62626,0 calc(var(--cq) * 3.5) calc(var(--cq) * 2.5) rgba(166,38,38,.75)}
+.bk[data-theme=scifi] .bk-booktitle{font-weight:300;letter-spacing:.24em;color:#eafcff;text-shadow:0 0 calc(var(--cq) * 1) #3fd0ff,0 0 calc(var(--cq) * 3) #3fd0ff,0 0 calc(var(--cq) * 7) #ff5fd2}
+.bk[data-theme=school] .bk-booktitle{color:var(--bk-ink);text-shadow:calc(var(--cq) * .5) calc(var(--cq) * .5) 0 #fff,calc(var(--cq) * -.5) calc(var(--cq) * -.5) 0 #fff,calc(var(--cq) * .5) calc(var(--cq) * -.5) 0 #fff,calc(var(--cq) * -.5) calc(var(--cq) * .5) 0 #fff;background:linear-gradient(transparent 58%,color-mix(in srgb,var(--bk-accent) 85%,transparent) 58% 92%,transparent 92%);display:inline;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.bk-subtitle{margin-top:calc(var(--cq) * 2);font:500 calc(var(--cq) * 4.4)/1.5 var(--bk-font);color:#fff;text-shadow:0 calc(var(--cq) * .3) calc(var(--cq) * 1.2) rgba(0,0,0,.7)}
 .bk-cover-art~.bk-cover-words .bk-subtitle{color:var(--bk-ink);text-shadow:none}
-.bk-imprint{position:absolute;left:0;right:0;bottom:4%;display:flex;flex-direction:column;align-items:center;gap:.8cqmin;z-index:3;color:#fff;text-shadow:0 .3cqmin 1cqmin rgba(0,0,0,.7);font-size:3.2cqmin}
-.bk-imprint b{padding:.25em 1.1em;border-radius:99px;background:var(--bk-accent);color:#fff;text-shadow:none;letter-spacing:.2em;font-size:3cqmin}
+.bk-imprint{position:absolute;left:0;right:0;bottom:4%;display:flex;flex-direction:column;align-items:center;gap:calc(var(--cq) * .8);z-index:3;color:#fff;text-shadow:0 calc(var(--cq) * .3) calc(var(--cq) * 1) rgba(0,0,0,.7);font-size:calc(var(--cq) * 3.2)}
+.bk-imprint b{padding:.25em 1.1em;border-radius:99px;background:var(--bk-accent);color:#fff;text-shadow:none;letter-spacing:.2em;font-size:calc(var(--cq) * 3)}
 .bk-cover-art~.bk-imprint{color:var(--bk-ink);text-shadow:none}
-.bk-seal{position:absolute;left:6%;bottom:6%;width:11cqmin;height:11cqmin;display:grid;place-items:center;border:.7cqmin solid #b02a2a;border-radius:1.2cqmin;color:#b02a2a;font:700 7cqmin/1 var(--bk-title);font-style:normal;transform:rotate(-8deg);opacity:.85;mix-blend-mode:multiply;z-index:4;background:rgba(176,42,42,.06)}
-.bk-end{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4cqmin;padding:10%;text-align:center}
-.bk-end-pic{width:44cqmin;height:44cqmin;border-radius:50%;overflow:hidden;border:1.4cqmin solid #fff;box-shadow:0 2cqmin 5cqmin -1cqmin rgba(0,0,0,.4)}
-.bk-fin{font:900 18cqmin/1 var(--bk-title);color:var(--bk-accent);letter-spacing:.1em;text-shadow:0 1cqmin 0 color-mix(in srgb,var(--bk-accent) 35%,transparent)}
-.bk[data-theme=scifi] .bk-fin,.bk[data-theme=mystery] .bk-fin{font-size:12cqmin;font-family:var(--bk-font);letter-spacing:.3em;font-weight:300}
+.bk-seal{position:absolute;left:6%;bottom:6%;width:calc(var(--cq) * 11);height:calc(var(--cq) * 11);display:grid;place-items:center;border:calc(var(--cq) * .7) solid #b02a2a;border-radius:calc(var(--cq) * 1.2);color:#b02a2a;font:700 calc(var(--cq) * 7)/1 var(--bk-title);font-style:normal;transform:rotate(-8deg);opacity:.85;mix-blend-mode:multiply;z-index:4;background:rgba(176,42,42,.06)}
+.bk-end{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:calc(var(--cq) * 4);padding:10%;text-align:center}
+.bk-end-pic{width:calc(var(--cq) * 44);height:calc(var(--cq) * 44);border-radius:50%;overflow:hidden;border:calc(var(--cq) * 1.4) solid #fff;box-shadow:0 calc(var(--cq) * 2) calc(var(--cq) * 5) calc(var(--cq) * -1) rgba(0,0,0,.4)}
+.bk-fin{font:900 calc(var(--cq) * 18)/1 var(--bk-title);color:var(--bk-accent);letter-spacing:.1em;text-shadow:0 calc(var(--cq) * 1) 0 color-mix(in srgb,var(--bk-accent) 35%,transparent)}
+.bk[data-theme=scifi] .bk-fin,.bk[data-theme=mystery] .bk-fin{font-size:calc(var(--cq) * 12);font-family:var(--bk-font);letter-spacing:.3em;font-weight:300}
 .bk-ending{max-width:76%;font-size:calc(var(--u) * 3.2);line-height:1.8;text-align:center}
 
 /* ---- coming in when shown (class pre: about to be shown; on: shown) ---- */
@@ -340,6 +340,7 @@ export const BOOK_CSS = `
 @keyframes bk-stamp{from{opacity:0;transform:scale(1.6)}}
 @keyframes bk-rise{from{opacity:0;transform:translateY(1em)}}
 @keyframes bk-pop{from{opacity:0;transform:translateY(.4em) scale(.6)}}
+@supports (width:1cqw){.bk{--u:min(1cqh,1.3333cqw);--cq:1cqmin;--cqw:1cqw}}
 @media (prefers-reduced-motion:reduce){.bk *{animation:none !important}}
 `;
 
@@ -349,6 +350,17 @@ export const BOOK_CSS = `
  * page — not below 55% of its size. Needs nothing but the document (the web page export carries it as it is).
  */
 export function fitWords(view) {
+  const win = view?.ownerDocument?.defaultView;
+  if (!win?.CSS?.supports?.('width', '1cqw')) {
+    const pages = view?.matches?.('.bk') ? [view] : view?.querySelectorAll?.('.bk') || [];
+    for (const page of pages) {
+      const {width, height} = page.getBoundingClientRect();
+      if (!(width > 0 && height > 0)) continue;
+      page.style.setProperty('--u', Math.min(height / 100, width / 75) + 'px');
+      page.style.setProperty('--cq', Math.min(width, height) / 100 + 'px');
+      page.style.setProperty('--cqw', width / 100 + 'px');
+    }
+  }
   for (const box of view?.querySelectorAll?.('.bk-words') || []) {
     box.style.fontSize = '';
     const page = box.closest('.bk-half') || box.closest('.bk'), zone = box.closest('.bk-zone');

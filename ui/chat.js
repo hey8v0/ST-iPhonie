@@ -364,7 +364,7 @@ export function chatApp(ctx) {
     // 自定义气泡: one more tile, the set worn (or how many there are) under it.
     const worn = key === 'bubble' ? bubbleSets().find(s => s.id === wornSet(value)) : null, custom = key !== 'bubble' ? ''
       : `<button type="button" class="deco custom-deco" data-action="me-custom" aria-pressed="${!!worn}"><span class="deco-sample" aria-hidden="true">${icon('edit')}</span><span>自定义</span><small class="deco-note">${worn ? esc(worn.name) : bubbleSets().length ? `${bubbleSets().length} 套` : '自己写 CSS'}</small></button>`;
-    return `<div class="deco-row">${[...Object.entries(list).map(([k, l]) => [k, l, null]), ...Object.entries(PREMIUM[key] || {}).map(([k, [l, price]]) => [k, l, price])].map(([k, l, price]) => { const owned = price === null || w.owned.includes(key + ':' + k); return `<button type="button" class="deco${price === null ? '' : ' premium'}" data-action="${owned ? 'me-set' : 'me-buy'}" data-key="${key}" data-value="${k}" data-name="${esc(l)}" data-price="${price ?? 0}" data-${key}="${k}" aria-pressed="${value === k}"><span class="deco-sample" aria-hidden="true">${key === 'frame' ? `<span class="me-av" style="--s:36px"><span class="avatar none" style="--s:36px"></span>${pendant(k)}</span>` : key === 'background' ? sceneArt(k) : ''}</span><span>${l}</span>${price === null ? '' : `<small class="deco-price">${owned ? '已拥有' : '¥' + price}</small>`}</button>`; }).join('')}${custom}</div>`;
+    return `<div class="deco-row">${[...Object.entries(list).map(([k, l]) => [k, l, null]), ...Object.entries(PREMIUM[key] || {}).map(([k, [l, price]]) => [k, l, price])].map(([k, l, price]) => { const owned = price === null || w.owned.includes(key + ':' + k); return `<button type="button" class="deco${price === null ? '' : ' premium'}" data-action="${owned ? 'me-set' : 'me-buy'}" data-key="${key}" data-value="${k}" data-name="${esc(l)}" data-price="${price ?? 0}" data-${key}="${k}" aria-pressed="${value === k}"><span class="deco-sample" aria-hidden="true">${key === 'frame' ? `<span class="me-av" data-frame="${esc(k)}" style="--s:36px"><span class="avatar none" style="--s:36px"></span>${pendant(k)}</span>` : key === 'background' ? sceneArt(k) : ''}</span><span>${l}</span>${price === null ? '' : `<small class="deco-price">${owned ? '已拥有' : '¥' + price}</small>`}</button>`; }).join('')}${custom}</div>`;
   }
   const bubbleSets = () => api.getState().chat.bubbleSets || [];
   /** What the previews of 自定义气泡 look like: this chat's background and avatars. */
@@ -439,7 +439,7 @@ export function chatApp(ctx) {
         : `<button class="chat-photo described" data-action="message" ${mid}><span class="ph-art">${icon('image')}</span><span class="ph-cap">${esc(m.text)}</span></button>${photoNote(m)}`;
       case 'file': return fileBody(m, mid);
       // A sticker: the picture without a bubble; its name when the picture cannot be loaded.
-      case 'sticker': return `<button class="chat-sticker" data-action="sticker" ${mid} aria-label="表情包：${esc(m.text)}" data-name="[${esc(m.text)}]">${m.photoId ? `<img data-sticker-photo="${esc(m.photoId)}"${photoURLs.get(m.photoId) ? ` src="${esc(photoURLs.get(m.photoId))}"` : ''} alt="${esc(m.text)}" draggable="false">` : m.url ? `<img src="${esc(m.url)}" alt="${esc(m.text)}" loading="lazy" referrerpolicy="no-referrer" draggable="false">` : ''}</button>`;
+      case 'sticker': return `<button class="chat-sticker${!m.photoId && !m.url ? ' broken' : ''}" data-action="sticker" ${mid} aria-label="表情包：${esc(m.text)}" data-name="[${esc(m.text)}]">${m.photoId ? `<img data-sticker-photo="${esc(m.photoId)}"${photoURLs.get(m.photoId) ? ` src="${esc(photoURLs.get(m.photoId))}"` : ''} alt="${esc(m.text)}" draggable="false">` : m.url ? `<img src="${esc(m.url)}" alt="${esc(m.text)}" loading="lazy" referrerpolicy="no-referrer" draggable="false">` : ''}</button>`;
       // 合并转发: the record as a card, its first lines on it; a tap opens all of it.
       case 'forward': return `<button class="fwd-card" data-action="forward-open" ${mid}><strong>${esc(m.title)}</strong><span class="fwd-lines">${(m.items || []).slice(0, 4).map(i => `<span>${esc(i.from)}：${esc(i.text)}</span>`).join('')}</span><small>聊天记录 · ${(m.items || []).length} 条</small></button>`;
       case 'redpacket': {
@@ -1194,29 +1194,29 @@ export function chatApp(ctx) {
       const size = BOARDS[g.type].size, cells = cellsOf(g), last = g.moves.at(-1)?.at, line = new Set(g.line || []), mark = who => who === g.first ? 'x' : 'o';
       const mine = g.open && g.turn === 'me' && !typing();
       const state = g.winner === 'draw' ? '平局' : g.resigned ? `${g.resigned === 'me' ? '你' : name(g.resigned)}认输了` : g.winner ? (g.winner === 'me' ? '你赢了 🎉' : `${name(g.winner)}赢了`) : g.turn === 'me' ? '轮到你了' : `${name(g.them)}在想……`;
-      return `<div class="game-card game-board" data-board="${esc(g.type)}"><span class="game-kind">${g.type === 'ttt' ? '⭕ 井字棋' : '⚫ 五子棋'}</span>`
+      return `<div class="cg-card game-board" data-board="${esc(g.type)}"><span class="game-kind">${g.type === 'ttt' ? '⭕ 井字棋' : '⚫ 五子棋'}</span>`
         + `<div class="board-grid" style="--n:${size}" role="group" aria-label="${BOARDS[g.type].name}的棋盘">${cells.map((who, i) => `<button type="button" class="board-cell" data-action="board-cell" ${mid} data-at="${i}"${who ? ` data-mark="${mark(who)}"` : ''}${i === last ? ' data-last' : ''}${line.has(i) ? ' data-win' : ''} aria-label="${cellName(i, size)}${who ? ' ' + esc(who === 'me' ? '你的' : name(who) + '的') : ''}"${mine && !who ? '' : ' disabled'}></button>`).join('')}</div>`
-        + `<span class="game-foot"><span>${esc(state)}</span>${g.open ? btn('board-resign', '认输', 'text-button', mid) : btn('board-again', '再来一局', 'text-button', mid)}</span></div>`;
+        + `<span class="cg-foot"><span>${esc(state)}</span>${g.open ? btn('board-resign', '认输', 'text-button', mid) : btn('board-again', '再来一局', 'text-button', mid)}</span></div>`;
     }
     if (g.type === 'vote') {
       const total = g.votes.length, mine = g.votes.find(x => x.from === 'me')?.option;
-      return `<div class="game-card game-vote"><span class="game-kind">📊 投票</span><strong class="game-title">${esc(g.question)}</strong><div class="vote-opts">${g.options.map((o, i) => {
+      return `<div class="cg-card game-vote"><span class="game-kind">📊 投票</span><strong class="cg-title">${esc(g.question)}</strong><div class="vote-opts">${g.options.map((o, i) => {
         const who = g.votes.filter(x => x.option === i), pct = total ? Math.round(who.length / total * 100) : 0;
         return `<button type="button" class="vote-opt" data-action="game-vote" ${mid} data-i="${i}" aria-pressed="${mine === i}"${g.open ? '' : ' disabled'} title="${esc(who.map(x => name(x.from) + (x.why ? '：' + x.why : '')).join('\n'))}"><i style="width:${pct}%"></i><span>${esc(o)}</span><small>${who.length} 票</small>${who.length ? `<em>${esc(who.map(x => name(x.from)).join('、'))}</em>` : ''}</button>`;
-      }).join('')}</div><span class="game-foot">${total} 人投了${g.open ? '' : ' · 投票结束了'}${g.open ? btn('game-end', '结束投票', 'text-button', mid) : ''}</span></div>`;
+      }).join('')}</div><span class="cg-foot">${total} 人投了${g.open ? '' : ' · 投票结束了'}${g.open ? btn('game-end', '结束投票', 'text-button', mid) : ''}</span></div>`;
     }
     if (g.type === 'truth') {
       // Just started (by its time, so the very first drawing of it already turns): the wheel turns once.
       const turning = m.from === 'me' && Date.now() - (m.at || 0) < 1500, pool = g.pool.slice(0, 10);
-      return `<div class="game-card game-truth${turning ? ' spinning' : ''}"><span class="game-kind">🎲 真心话大冒险</span><span class="truth-wheel" aria-hidden="true" style="--n:${pool.length}">${pool.map((n, i) => `<i style="--i:${i}"${n === g.target ? ' class="hit"' : ''}>${esc(name(n).slice(0, 1))}</i>`).join('')}</span>`
-        + `<strong class="game-title">转到了 ${esc(g.target === 'me' ? '你' : name(g.target))}${g.choice ? `：${g.choice}` : ''}</strong>`
+      return `<div class="cg-card game-truth${turning ? ' spinning' : ''}"><span class="game-kind">🎲 真心话大冒险</span><span class="truth-wheel" aria-hidden="true" style="--n:${pool.length}">${pool.map((n, i) => `<i style="--i:${i}"${n === g.target ? ' class="hit"' : ''}>${esc(name(n).slice(0, 1))}</i>`).join('')}</span>`
+        + `<strong class="cg-title">转到了 ${esc(g.target === 'me' ? '你' : name(g.target))}${g.choice ? `：${g.choice}` : ''}</strong>`
         + (g.target === 'me' && !g.choice ? `<span class="game-acts">${btn('game-choice', '真心话', 'chip-button', `${mid} data-choice="真心话"`)}${btn('game-choice', '大冒险', 'chip-button', `${mid} data-choice="大冒险"`)}</span>` : '')
-        + `<span class="game-foot">${btn('game-again', '再转一次', 'text-button', mid)}</span></div>`;
+        + `<span class="cg-foot">${btn('game-again', '再转一次', 'text-button', mid)}</span></div>`;
     }
     const shownEntries = g.entries.slice(-10), cut = g.entries.length - shownEntries.length;
-    return `<div class="game-card game-chain"><span class="game-kind">🔗 ${CHAIN_MODES[g.mode]}</span>${cut ? `<small class="chain-more">前面还有 ${cut} 句</small>` : ''}<ol class="chain-list">${shownEntries.map(e => `<li><b>${esc(name(e.from))}</b><span>${esc(e.text)}</span></li>`).join('')}</ol>`
-      + (g.loser ? `<span class="game-foot">${esc(g.loser === 'me' ? '你' : name(g.loser))}认输了</span>` : '')
-      + (g.open ? `<span class="game-acts">${btn('game-chain', '接一句', 'chip-button', mid)}${btn('game-end', '结束', 'text-button', mid)}</span>` : g.loser ? '' : '<span class="game-foot">接龙结束了</span>') + '</div>';
+    return `<div class="cg-card game-chain"><span class="game-kind">🔗 ${CHAIN_MODES[g.mode]}</span>${cut ? `<small class="chain-more">前面还有 ${cut} 句</small>` : ''}<ol class="chain-list">${shownEntries.map(e => `<li><b>${esc(name(e.from))}</b><span>${esc(e.text)}</span></li>`).join('')}</ol>`
+      + (g.loser ? `<span class="cg-foot">${esc(g.loser === 'me' ? '你' : name(g.loser))}认输了</span>` : '')
+      + (g.open ? `<span class="game-acts">${btn('game-chain', '接一句', 'chip-button', mid)}${btn('game-end', '结束', 'text-button', mid)}</span>` : g.loser ? '' : '<span class="cg-foot">接龙结束了</span>') + '</div>';
   }
   /** 群游戏 from the + panel: which one. A card goes into the group and the group is asked to play (when it can answer). */
   function gameSheet() {
@@ -1600,7 +1600,7 @@ export function chatApp(ctx) {
     draw();
   }
   /** A decoration as it looks: the same sample the 个性装扮 chips use. */
-  const decoSample = (kind, key) => `<span class="deco-sample" aria-hidden="true">${kind === 'frame' ? `<span class="me-av" style="--s:36px"><span class="avatar none" style="--s:36px"></span>${pendant(key)}</span>` : kind === 'background' ? sceneArt(key) : ''}</span>`;
+  const decoSample = (kind, key) => `<span class="deco-sample" aria-hidden="true">${kind === 'frame' ? `<span class="me-av" data-frame="${esc(key)}" style="--s:36px"><span class="avatar none" style="--s:36px"></span>${pendant(key)}</span>` : kind === 'background' ? sceneArt(key) : ''}</span>`;
   function openShop(start = 'decor') {
     let tab = start;
     const d = sheet('商城', '', {

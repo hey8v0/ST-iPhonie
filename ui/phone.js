@@ -413,7 +413,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       home.hidden = true;
       screen.dataset.opening = 'true';
       win.clearTimeout(openTimer);
-      openTimer = win.setTimeout(() => delete screen.dataset.opening, 260);
+      openTimer = win.setTimeout(() => delete screen.dataset.opening, 600);
     }
     syncInert();
     $('.app-nav [data-system=back]').focus({preventScroll: true});

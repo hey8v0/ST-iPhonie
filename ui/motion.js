@@ -81,8 +81,16 @@ export function installMotion(win, mount, signal) {
   }, {signal});
   mount.addEventListener('pointerdown', e => {
     if (reduced.matches || e.button > 0) return;
-    const target = e.target.closest(RIPPLE);
+    let target = e.target.closest(RIPPLE);
     if (!target || target.disabled || !mount.contains(target)) return;
+    if (target.matches('.qq-tabs button')) {
+      const icon = target.querySelector('.qq-tab-ico');
+      if (icon) {
+        let ink = icon.querySelector('.qq-tab-ink');
+        if (!ink) { ink = win.document.createElement('span'); ink.className = 'qq-tab-ink'; icon.append(ink); }
+        target = ink;
+      }
+    }
     const box = target.getBoundingClientRect(), size = Math.max(box.width, box.height) * 2.2;
     const wave = win.document.createElement('span');
     wave.className = 'ripple';

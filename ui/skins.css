@@ -142,8 +142,10 @@
   outline:1.5px dashed color-mix(in srgb,var(--t1) 60%,transparent);
   box-shadow:0 0 0 1px rgba(255,255,255,.07),0 7px 12px -8px rgba(0,0,0,.8)}
 /* Inside the picture: details in paper colour, accents in a dusty version of the app's accent. */
+:root[data-skin=fresh] .screen:not([data-icon-style=glass]):not([data-icon-style=mono]) .icon-tile{--fresh-accent:var(--tac)}
+@supports (color:color-mix(in srgb,red,blue)){:root[data-skin=fresh] .screen:not([data-icon-style=glass]):not([data-icon-style=mono]) .icon-tile{--fresh-accent:color-mix(in srgb,var(--tac) 55%,#c9a79c)}}
 :root[data-skin=fresh] .screen:not([data-icon-style=glass]):not([data-icon-style=mono]) .icon-tile .glyph{
-  width:38px;height:38px;--t2:var(--paper);--tac:color-mix(in srgb,var(--tac) 55%,#c9a79c)}
+  width:38px;height:38px;--t2:var(--paper);--tac:var(--fresh-accent)}
 /* Stamps are never stuck on quite straight. */
 :root[data-skin=fresh] .apps-grid .app-icon:nth-child(3n+1) .icon-tile{rotate:-2deg}
 :root[data-skin=fresh] .apps-grid .app-icon:nth-child(3n+2) .icon-tile{rotate:1.5deg}

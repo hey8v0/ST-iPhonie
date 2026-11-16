@@ -105,7 +105,7 @@ button[aria-pressed=true] small,.primary small{color:inherit;opacity:.85}
 .device{position:relative;flex:1;min-height:0;aspect-ratio:390/844;max-width:100%;border-radius:52px;padding:9px;background:linear-gradient(135deg,#f7f8fb,#b9bec8 30%,#eef0f4 52%,#9ea4ae 78%,#e3e6eb);box-shadow:0 0 0 1px #8c929c,0 24px 50px -20px rgba(20,40,80,.45)}
 :root[data-theme=dark] .device{background:linear-gradient(135deg,#3a3f4a,#15181f 35%,#2c313b 60%,#101217);box-shadow:0 0 0 1px #3b4150,0 24px 50px -20px #000}
 .power-key{position:absolute;right:-4px;top:22%;width:4px;height:62px;border-radius:0 4px 4px 0;background:#a4a9b1}
-.screen{position:relative;height:100%;border-radius:43px;overflow:hidden;isolation:isolate;background:var(--bg)}
+.screen{position:relative;contain:layout;height:100%;border-radius:43px;overflow:hidden;isolation:isolate;background:var(--bg)}
 .wallpaper{position:absolute;inset:0;z-index:-1;background:var(--wall);background-size:var(--wall-size,cover);background-position:var(--wall-pos,center);transition:opacity .25s}
 .wallpaper .spark{position:absolute;color:#fff}
 .screen[data-view=app] .wallpaper{opacity:0}
@@ -377,7 +377,7 @@ details>div{padding-bottom:10px}
 .tool-fold>summary small{flex:1;min-width:0;margin-left:4px;font-weight:600;color:var(--ink2);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-fold[open]>summary small{visibility:hidden}
 /* 世界书 picker: a book per fold, its entries as switch rows; switched-off ones are dimmed. */
-.lore-list{display:grid;gap:8px;max-height:min(58dvh,520px);overflow-y:auto;overscroll-behavior:contain;padding:2px}
+.lore-list{display:grid;gap:8px;max-height:min(58vh,520px);max-height:min(58dvh,520px);overflow-y:auto;overscroll-behavior:contain;padding:2px}
 .lore-book{margin:0;padding:0 12px}
 .lore-book>summary{min-height:52px;padding:10px 0;gap:10px}
 .lore-book>summary:after{order:-1;margin:0 2px 0 0}
@@ -418,7 +418,7 @@ details>div{padding-bottom:10px}
 /* ---------- Sheets, toast, lock ---------- */
 .overlay,.overlay-out{position:absolute;inset:0;z-index:60;display:flex;align-items:flex-end;padding:10px 10px 22px;background:rgba(10,20,40,.36);animation:fade .2s}
 .overlay-out,.overlay-out .sheet{animation:none;pointer-events:none}
-.overlay[data-over]{background:rgba(10,20,40,.22)}
+.overlay[data-over],.overlay-out[data-over]{background:rgba(10,20,40,.22)}
 .overlay.top{align-items:flex-start;padding-top:52px;background:rgba(20,40,80,.3);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
 @keyframes fade{from{opacity:0}}
 .sheet{width:100%;max-height:84%;display:flex;flex-direction:column;background:var(--bg);border-radius:28px;box-shadow:0 10px 40px rgba(0,0,0,.25);animation:sheet-in .32s var(--spring-soft)}
@@ -627,7 +627,7 @@ details>div{padding-bottom:10px}
 .photo-piece:empty{padding-top:calc(var(--rows)*(100% - 2*var(--gap))*4/9 + (var(--rows) - 1)*var(--gap))}
 .photo-grid button{padding:0;aspect-ratio:3/4;overflow:hidden;border-radius:14px;background:var(--card2);box-shadow:var(--shadow)}
 .photo-grid img{width:100%;height:100%;object-fit:cover;display:block}
-.photo-full{display:block;width:100%;max-height:52dvh;object-fit:contain;border-radius:20px;background:var(--card);box-shadow:var(--shadow)}
+.photo-full{display:block;width:100%;max-height:52vh;max-height:52dvh;object-fit:contain;border-radius:20px;background:var(--card);box-shadow:var(--shadow)}
 .notes-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:6px 2px}
 .note-card{position:relative;display:flex;flex-direction:column;gap:6px;min-height:148px;padding:16px 14px;text-align:left;color:#3a2e10;background:var(--nc);border-radius:6px 6px 22px 6px;box-shadow:0 10px 18px -12px rgba(0,0,0,.4);transform:rotate(var(--r))}
 .note-card:before{content:"";position:absolute;top:-8px;left:50%;width:48px;height:16px;transform:translateX(-50%) rotate(-3deg);background:rgba(255,255,255,.65);border-radius:3px}
@@ -717,7 +717,7 @@ details>div{padding-bottom:10px}
 .chip.warn{background:var(--danger-soft);color:var(--danger)}
 .chip svg{width:13px;height:13px}
 .canvas-card{display:flex;gap:10px;justify-content:center;padding:12px;background:var(--card);border-radius:22px;box-shadow:var(--shadow)}
-.canvas-main{position:relative;flex:0 1 auto;height:min(44dvh,360px);max-width:calc(100% - 68px);border-radius:14px;overflow:hidden;background:var(--card2)}
+.canvas-main{position:relative;flex:0 1 auto;height:min(44vh,360px);height:min(44dvh,360px);max-width:calc(100% - 68px);border-radius:14px;overflow:hidden;background:var(--card2)}
 .canvas-card .canvas-main:only-child{max-width:100%}
 .canvas-main img{display:block;width:100%;height:100%;object-fit:contain}
 .canvas-main.empty{display:grid;place-items:center;text-align:center;font-size:13px;font-weight:800;color:var(--ink2);background:radial-gradient(var(--dot) 1.5px,transparent 1.9px) 0 0/12px 12px,var(--card2)}
@@ -725,7 +725,7 @@ details>div{padding-bottom:10px}
 .canvas-busy:after{content:"";position:absolute;left:0;bottom:0;height:4px;width:40%;background:var(--e);border-radius:4px;animation:busy 1.2s ease-in-out infinite alternate}
 @keyframes busy{from{transform:translateX(0)}to{transform:translateX(150%)}}
 /* The earlier pictures: as tall as the canvas, scrolling inside (padding leaves room for the chosen one's ring). */
-.canvas-side{width:58px;max-height:min(44dvh,360px);box-sizing:border-box;padding:3px;display:flex;flex-direction:column;gap:6px;flex-shrink:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+.canvas-side{width:58px;max-height:min(44vh,360px);max-height:min(44dvh,360px);box-sizing:border-box;padding:3px;display:flex;flex-direction:column;gap:6px;flex-shrink:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
 .canvas-side::-webkit-scrollbar{display:none}
 .thumb{width:52px;flex-shrink:0;aspect-ratio:2/3;border-radius:8px;overflow:hidden;padding:0;background:var(--card2);box-shadow:0 0 0 2px var(--line)}
 .thumb[aria-pressed=true]{box-shadow:0 0 0 3px var(--e)}
@@ -838,7 +838,7 @@ details>div{padding-bottom:10px}
 .msg-found{position:relative;isolation:isolate}
 .msg-found:before{content:"";position:absolute;inset:-5px -8px;z-index:-1;border-radius:16px;background:var(--accent-soft);pointer-events:none;animation:msg-found 2.4s ease-out forwards}
 @keyframes msg-found{0%,45%{opacity:1}100%{opacity:0}}
-@media (prefers-reduced-motion:reduce){.msg-found:before{animation-duration:.01s;animation-delay:2s}}
+@media (prefers-reduced-motion:reduce){.msg-found:before{display:none}}
 .conv-top{display:flex;align-items:center;gap:6px}
 .conv-top strong{font-size:16px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conv-time{margin-left:auto;font-size:12px;color:var(--ink2);flex-shrink:0}
@@ -931,7 +931,7 @@ details>div{padding-bottom:10px}
 .tool-dots button{width:18px;height:14px;padding:0;border:0;background:transparent;display:grid;place-items:center;cursor:pointer}
 .tool-dots button::after{content:"";width:6px;height:6px;border-radius:50%;background:var(--line);transition:background .2s,width .2s}
 .tool-dots button[aria-current=true]::after{width:14px;border-radius:3px;background:var(--accent)}
-.tool{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--ink2);min-width:0}
+.tool{overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--ink2);min-width:0}
 .tool-ico{width:56px;height:56px;border-radius:18px;display:grid;place-items:center;background:var(--card2);color:var(--accent-ink);box-shadow:inset 0 0 0 1.5px var(--line);transition:transform .12s}
 .tool-ico svg{width:26px;height:26px}
 .tool:active .tool-ico{transform:scale(.92)}
@@ -1040,7 +1040,7 @@ details>div{padding-bottom:10px}
 .list-row:active,.conv:active,.deco:active,.control-tile:active,.voice-msg:active,.call-msg:active{transform:scale(.97);transition-duration:.08s}
 .widget:active{transform:scale(.975);transition-duration:.08s}
 .chat-bubble:active{transform:scale(.98);transition-duration:.08s}
-.qq-tabs button .qq-tab-ico{transition:transform .38s cubic-bezier(.3,1.7,.45,1),background .2s}
+.qq-tabs button .qq-tab-ico{position:relative;overflow:visible;transition:transform .38s cubic-bezier(.3,1.7,.45,1),background .2s}
 .qq-tabs button:active .qq-tab-ico{transform:scale(.86);transition-duration:.08s}
 .cc-toggle .bubble{transition:transform .38s cubic-bezier(.3,1.7,.45,1),background .2s,color .2s}
 .cc-toggle:active .bubble{transform:scale(.88);transition-duration:.08s}
@@ -1198,6 +1198,7 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .qq-tabs button[aria-pressed=true]{color:var(--accent-ink)}
 .qq-tab-ico{position:relative;display:grid;place-items:center;width:34px;height:30px;border-radius:12px;transition:transform .2s,background .2s}
 .qq-tabs button[aria-pressed=true] .qq-tab-ico{background:var(--accent-soft);transform:translateY(-1px) scale(1.06)}
+.qq-tab-ink{position:absolute;inset:0;overflow:hidden;border-radius:inherit;pointer-events:none}
 .qq-tab-ico .icon{width:22px;height:22px}
 .qq-tab-ico .badge{position:absolute;z-index:1;top:-6px;left:22px;min-width:18px;height:18px;padding:0 5px;font-size:10px}
 .qq-dot-new{position:absolute;top:0;right:2px;width:9px;height:9px;border-radius:50%;background:var(--danger);box-shadow:0 0 0 2px var(--card)}
@@ -1217,7 +1218,7 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .qq-search .icon{width:18px;height:18px;flex:none}
 .qq-list .conv.pinned{background:color-mix(in srgb,var(--accent-soft) 55%,transparent)}
 .at-me{margin-right:2px;font-style:normal;font-weight:800;color:var(--danger)}
-.spark{margin-left:3px;font-size:11px;font-weight:900;color:#ff7a3c}
+.conv .spark{margin-left:3px;font-size:11px;font-weight:900;color:#ff7a3c}
 .badge.muted{background:var(--ink2);opacity:.7}
 .mute-ico{display:inline-grid;flex:none;color:var(--ink2);opacity:.75}
 .mute-ico .icon{width:14px;height:14px}
@@ -1326,7 +1327,7 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .call-av.ringing:after{animation-delay:1s}
 @keyframes call-ring{from{transform:scale(1);opacity:.9}to{transform:scale(1.75);opacity:0}}
 .call-screen[data-state=talking]{padding-top:56px}
-.call-lines{flex:1;width:100%;min-height:0;margin:14px 0 8px;overflow:auto;scrollbar-width:none;display:flex;flex-direction:column;gap:8px;mask-image:linear-gradient(transparent,#000 22%)}
+.call-lines{flex:1;width:100%;min-height:0;margin:14px 0 8px;overflow:auto;scrollbar-width:none;display:flex;flex-direction:column;gap:8px;-webkit-mask-image:linear-gradient(transparent,#000 22%);mask-image:linear-gradient(transparent,#000 22%)}
 .call-lines::-webkit-scrollbar{display:none}
 .call-lines>:first-child{margin-top:auto}
 .cl{align-self:flex-start;max-width:88%;margin:0;padding:9px 13px;border-radius:18px 18px 18px 6px;background:color-mix(in srgb,var(--card) 72%,transparent);color:var(--ink);font-size:15px;line-height:1.5;box-shadow:0 6px 16px -10px #0005;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);animation:cl-in .32s cubic-bezier(.2,.9,.3,1.2)}
@@ -1387,6 +1388,7 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .th-head{container-type:inline-size}
 .th-head .th-title{min-width:4.5em}
 .th-head [data-action=bring][data-on]{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent-ink);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 45%,transparent)}
+@supports not (container-type:inline-size){@media (max-width:359px){.th-head .bring-label{display:none}.th-head [data-action=bring]{padding-inline:10px}}}
 @container (max-width:340px){.th-head .bring-label{display:none}.th-head [data-action=bring]{padding-inline:10px}}
 
 /* Avatars with a picture (album photo, or the tavern's character card and persona) */
@@ -1394,7 +1396,7 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 /* The picture fills the circle exactly (tavern thumbnails are 2:3 portraits): cropped a little above the middle, where faces usually are. */
 .avatar.pic img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 22%;display:block}
 .file-button{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
-.pick-photos [aria-pressed=true]{outline:3px solid var(--accent-btn);outline-offset:2px}
+
 
 /* On a computer the stage bar moves the floating phone */
 .stage-bar[data-draggable]{cursor:grab;-webkit-user-select:none;user-select:none;touch-action:none;margin-bottom:6px;border-radius:14px;background:rgba(18,22,38,.62);box-shadow:0 6px 18px -8px #0008}
@@ -2128,8 +2130,9 @@ button.gift-item[data-short]{opacity:.55}
 .sticker-empty{padding:14px 4px}
 .chat-sticker{display:block;padding:0;background:none;box-shadow:none;border-radius:10px}
 .chat-sticker img{display:block;max-width:120px;max-height:120px;min-width:40px;min-height:40px;object-fit:contain;border-radius:10px}
-.chat-sticker.broken img,.chat-sticker:not(:has(img)) img{display:none}
-.chat-sticker.broken::after,.chat-sticker:not(:has(img))::after{content:attr(data-name);display:block;padding:9px 13px;border-radius:16px;background:var(--card);color:var(--ink2);font-size:14px}
+.chat-sticker.broken img{display:none}
+.chat-sticker.broken::after{content:attr(data-name);display:block;padding:9px 13px;border-radius:16px;background:var(--card);color:var(--ink2);font-size:14px}
+.chat-sticker:not(:has(img))::after{content:attr(data-name);display:block;padding:9px 13px;border-radius:16px;background:var(--card);color:var(--ink2);font-size:14px}
 .sticker-manage{display:grid;gap:2px;max-height:260px;overflow-y:auto}
 .sticker-row{display:flex;align-items:center;gap:10px;padding:6px 0}
 .sticker-row+.sticker-row{border-top:1px solid var(--line)}
@@ -2297,7 +2300,8 @@ button.gift-item[data-short]{opacity:.55}
 .tw-preview{container-type:inline-size;padding:18px 14px;margin:10px 0 12px;border-radius:22px;background:var(--wall);background-size:var(--wall-size,cover);background-position:var(--wall-pos,center);touch-action:pan-y}
 .tw-preview .tw{cursor:default}
 .tw-preview[data-size=s] .today-grid{justify-items:center}
-.tw-preview[data-size=s] .tw{grid-column:1 / -1;width:calc((100cqw - 14px) / 2)}
+.tw-preview[data-size=s] .tw{grid-column:1 / -1;width:150px}
+@supports (width:1cqw){.tw-preview[data-size=s] .tw{width:calc((100cqw - 14px) / 2)}}
 .tw-sizes{display:flex;justify-content:center;gap:8px;margin:0 0 6px}
 .tw-sizes button{padding:6px 18px;border-radius:999px;font-weight:800;background:var(--card2);color:var(--ink2)}
 .tw-sizes [aria-checked=true]{background:var(--accent-btn);color:var(--on-accent)}
@@ -2403,6 +2407,7 @@ button.gift-item[data-short]{opacity:.55}
 .aui-chip:active{transform:scale(.96)}
 .aui-chip:hover{background:var(--accent-soft)}
 .aui-pick input{position:absolute;opacity:0;pointer-events:none}
+.aui-pick.on{background:var(--accent-btn);border-color:var(--accent-btn);color:var(--on-accent)}
 .aui-pick:has(input:checked){background:var(--accent-btn);border-color:var(--accent-btn);color:var(--on-accent)}
 .aui-pick:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
 .aui-cards-wrap{padding-right:0}
@@ -2499,7 +2504,7 @@ button.aui-card:active{transform:scale(.98)}
 .music-main svg{width:24px;height:24px}
 .music-main:active{transform:translateY(2px);box-shadow:0 2px 0 color-mix(in srgb,var(--accent-btn) 65%,#000)}
 .music-lyric-line{border:0;background:transparent;color:var(--accent-ink);font:inherit;font-weight:700;font-size:14px;text-align:center;padding:4px;cursor:pointer;min-height:1.5em}
-.music-lyrics{max-height:180px;overflow-y:auto;text-align:center;scroll-behavior:smooth;mask-image:linear-gradient(transparent,#000 20%,#000 80%,transparent)}
+.music-lyrics{max-height:180px;overflow-y:auto;text-align:center;scroll-behavior:smooth;-webkit-mask-image:linear-gradient(transparent,#000 20%,#000 80%,transparent);mask-image:linear-gradient(transparent,#000 20%,#000 80%,transparent)}
 .music-lyrics p{margin:6px 0;font-size:13px;color:var(--ink2);transition:color .3s,transform .3s}
 .music-lyrics p.now{color:var(--ink);font-weight:800;transform:scale(1.06)}
 .music-message{margin:0;text-align:center}
@@ -2806,8 +2811,8 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 :root[data-paint-full] .screen{border-radius:0}
 /* 全屏: sheets open as small windows by their button (ui/paint.js popover), the picture still in sight. */
 :root[data-paint-full] .overlay.pop{display:block;padding:0;background:transparent;animation:none}
-:root[data-paint-full] .overlay.pop .sheet{position:absolute;border-radius:20px;box-shadow:0 14px 40px rgba(0,0,0,.28),0 0 0 1px color-mix(in srgb,var(--ink) 10%,transparent);animation:pop-in .18s ease-out;transform-origin:50% 0}
-@keyframes pop-in{from{opacity:0;transform:scale(.96) translateY(-6px)}}
+:root[data-paint-full] .overlay.pop .sheet{position:absolute;border-radius:20px;box-shadow:0 14px 40px rgba(0,0,0,.28),0 0 0 1px color-mix(in srgb,var(--ink) 10%,transparent);animation:paint-pop-in .18s ease-out;transform-origin:50% 0}
+@keyframes paint-pop-in{from{opacity:0;transform:scale(.96) translateY(-6px)}}
 .paint-top [data-action=paint-actions][aria-pressed=true]{color:var(--accent-ink);background:var(--accent-soft)}
 
 /* 视觉小说 (ui/vn.js) */
@@ -2945,7 +2950,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 @container (max-width:272px){.sw-bar-act span{display:none}}
 .sw-bar.many .sw-bar-act{flex-direction:column;justify-content:center;gap:1px;min-width:42px;padding:2px 6px;font-size:10.5px;line-height:1.15}
 @container (max-width:350px){.sw-bar.many .sw-count i{display:none}}
-@container (max-width:304px){.sw-bar.many{gap:4px}.sw-bar.many button{padding:0 7px}.sw-bar.many .sw-bar-act{min-width:0;padding:0 9px}.sw-bar.many .sw-bar-act span{display:none}}
+@container (max-width:304px){.sw-bar.many>*+*{margin-left:-2px}.sw-bar.many button{padding:0 7px}.sw-bar.many .sw-bar-act{min-width:0;padding:0 9px}.sw-bar.many .sw-bar-act span{display:none}}
 .sw-hint{margin:-6px 4px 14px}
 /* With a mouse: a ⋯ on the row under the pointer opens its actions (a touch screen swipes instead). */
 .sw-more{all:unset;display:none;flex:none;box-sizing:border-box;width:34px;height:34px;margin-left:6px;border-radius:12px;place-items:center;font-size:18px;font-weight:900;line-height:1;color:var(--ink2);cursor:pointer;opacity:0;transform:scale(.8);transition:opacity .18s,transform .25s cubic-bezier(.2,1.4,.4,1),background .15s}
@@ -2978,7 +2983,9 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .note-fold>p{margin-top:2px}
 .note-fold[hidden]{display:none}
 /* A bottom sheet closes by pulling it down, tapping outside or Esc: its × is kept for keyboards and screen readers only. */
-.overlay:not(.top):not(.pop) .sheet-header [data-sheet-close]:not(:focus-visible),.overlay-out .sheet-header [data-sheet-close]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);border:0}
+.overlay-out .sheet-header [data-sheet-close]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);border:0}
+.overlay:not(.top):not(.pop) .sheet-header [data-sheet-close]:not(:focus-visible){position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);border:0}
+@supports not selector(:focus-visible){.overlay:not(.top):not(.pop) .sheet-header [data-sheet-close]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);border:0}}
 .overlay:not(.top):not(.pop) .sheet-header{min-height:44px}
 .sound-version .disc{width:38px;height:38px;background:var(--accent-soft);color:var(--accent-ink)}
 /* 「＋」 in a sheet's title bar: the list below grows there. */

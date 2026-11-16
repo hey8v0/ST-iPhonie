@@ -33,7 +33,7 @@
 .bk-reading{position:absolute;inset:0}
 
 /* changing a spread */
-.bk-rows{display:grid;gap:8px;margin-bottom:8px}
+.bk-rows,[data-bk-rows]{display:grid;gap:8px;margin-bottom:8px}
 .bk-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px 8px;align-items:center;padding:8px;border-radius:14px;background:var(--card2)}
 .bk-row select{max-width:150px;min-height:38px;padding:6px 10px;border-radius:12px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);font-size:15px}
 .bk-row textarea{grid-column:1/-1;min-width:0;resize:vertical}
@@ -51,7 +51,7 @@
 .bk-row input[data-k=line]{grid-column:1/-1;min-width:0}
 .bk-reader p{margin:4px 0 0;font-size:13px;line-height:1.5;color:var(--ink);white-space:pre-wrap}
 .bk-puzzle{display:grid;grid-template-columns:repeat(var(--side,3),1fr);gap:3px;aspect-ratio:1;width:100%;max-width:340px;margin:6px auto 0;padding:4px;border-radius:16px;background:var(--card2)}
-.bk-piece{all:unset;box-sizing:border-box;display:block;aspect-ratio:1;border-radius:6px;background-repeat:no-repeat;cursor:pointer;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .15s,transform .15s}
+.bk-piece{all:unset;touch-action:none;box-sizing:border-box;display:block;aspect-ratio:1;border-radius:6px;background-repeat:no-repeat;cursor:pointer;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .15s,transform .15s}
 .bk-piece.picked{outline-color:var(--accent);transform:scale(.94)}
 .bk-piece:focus-visible{outline-color:var(--accent)}
 .bk-puzzle.solved{gap:0;padding:0;background:transparent}

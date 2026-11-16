@@ -90,11 +90,11 @@
 @keyframes recall-go{0%,55%{opacity:1;transform:none;max-height:40px}100%{opacity:0;transform:scale(.6);max-height:0;padding-block:0;margin:0}}
 
 /* ---------- 群游戏 ---------- */
-.game-card{display:grid;gap:8px;width:236px;max-width:100%;padding:10px 12px;border-radius:18px;background:var(--card);box-shadow:inset 0 0 0 1.5px var(--line),0 3px 0 var(--line);color:var(--ink);text-align:left}
+.cg-card{display:grid;gap:8px;width:236px;max-width:100%;padding:10px 12px;border-radius:18px;background:var(--card);box-shadow:inset 0 0 0 1.5px var(--line),0 3px 0 var(--line);color:var(--ink);text-align:left}
 .game-kind{font-size:11.5px;font-weight:800;color:var(--ink2)}
-.game-title{font-size:15px;line-height:1.4;overflow-wrap:anywhere}
-.game-foot{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:22px;font-size:11.5px;font-weight:700;color:var(--ink2)}
-.game-foot .text-button,.game-acts .text-button{min-height:26px;padding:2px 4px;font-size:12.5px}
+.cg-title{font-size:15px;line-height:1.4;overflow-wrap:anywhere}
+.cg-foot{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:22px;font-size:11.5px;font-weight:700;color:var(--ink2)}
+.cg-foot .text-button,.game-acts .text-button{min-height:26px;padding:2px 4px;font-size:12.5px}
 .game-acts{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .vote-opts{display:grid;gap:6px}
 .vote-opt{position:relative;display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 8px;min-height:38px;padding:6px 10px;border-radius:12px;overflow:hidden;background:var(--card2);text-align:left;font-size:13.5px;color:var(--ink)}
@@ -108,7 +108,7 @@
 .truth-wheel i{position:absolute;left:50%;top:50%;width:24px;height:24px;margin:-12px;display:grid;place-items:center;border-radius:50%;background:#fff;font-style:normal;font-size:11px;font-weight:800;color:#445;transform:rotate(calc(360deg / var(--n) * var(--i))) translateY(-34px) rotate(calc(-360deg / var(--n) * var(--i)))}
 .truth-wheel i.hit{background:var(--accent-btn);color:var(--on-accent)}
 .game-truth.spinning .truth-wheel{animation:wheel-turn 1.4s cubic-bezier(.15,.75,.2,1)}
-.game-truth.spinning .game-title{animation:wheel-say 1.6s ease both}
+.game-truth.spinning .cg-title{animation:wheel-say 1.6s ease both}
 @keyframes wheel-turn{from{transform:rotate(-1080deg)}}
 @keyframes wheel-say{0%,80%{opacity:0;transform:translateY(4px)}}
 .chain-list{display:grid;gap:4px;margin:0;padding:0;list-style:none}
@@ -129,7 +129,7 @@
 @keyframes egg-fall{0%{opacity:0;transform:translateY(0) rotate(0)}12%{opacity:1}80%{opacity:1}100%{opacity:0;transform:translateY(var(--h)) rotate(var(--r))}}
 @keyframes egg-rise{0%{opacity:0;transform:translateY(0) scale(.6)}15%{opacity:1}75%{opacity:1}100%{opacity:0;transform:translateY(calc(var(--h) * -.85)) scale(1.1)}}
 @keyframes egg-drift{0%{opacity:0;transform:translate(0,0) rotate(0)}20%{opacity:1}80%{opacity:.9}100%{opacity:0;transform:translate(26px,calc(var(--h) * .55)) rotate(var(--r))}}
-@media (prefers-reduced-motion:reduce){.chat-egg{display:none}.recall-ghost{display:none}.game-truth.spinning .truth-wheel,.game-truth.spinning .game-title{animation:none}}
+@media (prefers-reduced-motion:reduce){.chat-egg{display:none}.recall-ghost{display:none}.game-truth.spinning .truth-wheel,.game-truth.spinning .cg-title{animation:none}}
 
 /* ---------- 聊天装扮, 表情包从图片导入 ---------- */
 .deco-sample.look-same{display:grid;place-items:center;background:var(--card2);color:var(--ink2);box-shadow:inset 0 0 0 1.5px var(--line)}

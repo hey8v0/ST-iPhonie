@@ -3,7 +3,7 @@
 
 const CSS = `
 .sttts-ask{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;box-sizing:border-box;z-index:41000;display:grid;place-items:center;padding:16px;background:rgba(8,10,20,.55);font:14px/1.5 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#eef0f8}
-.sttts-ask-card{width:min(560px,100%);max-height:calc(100dvh - 32px);display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:18px;background:#1d2030;box-shadow:0 18px 50px rgba(0,0,0,.45);overflow:auto}
+.sttts-ask-card{box-sizing:border-box;width:min(560px,100%);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:18px;background:#1d2030;box-shadow:0 18px 50px rgba(0,0,0,.45);overflow:auto}
 .sttts-ask-head{display:flex;align-items:center;gap:8px}
 .sttts-ask-card h2{margin:0;font-size:16px;font-weight:700;color:#fff}
 .sttts-ask-card p{margin:0;font-size:12.5px;opacity:.72}

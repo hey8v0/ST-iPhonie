@@ -752,6 +752,9 @@ export function assistantApp(ctx) {
     try { const added = await api.assistantReadFiles(files); if (!v.disposed) fileDrafts.set(id, assistantAttachments([...attachments(id), ...added])); }
     finally { fileReads.delete(id); if (!v.disposed && mode === 'chat') drawChat(); }
   }
+  v.on('change', '.aui-pick input[type=radio]', el => {
+    for (const label of el.closest('.aui-field')?.querySelectorAll('.aui-pick') || []) label.classList.toggle('on', !!label.querySelector('input')?.checked);
+  });
   v.on('change', '[data-assistant-files]', el => { const id = threadId, files = [...el.files]; el.value = ''; return addFiles(files, id); });
   // 粘贴 a picture (a screenshot) or files: they become attachments. Words on the clipboard paste as words.
   v.on('paste', '[data-assistant-draft]', (el, event) => {

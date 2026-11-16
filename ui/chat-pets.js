@@ -3,7 +3,7 @@ import {PET_SIZE, PET_FRAMES, petStrip} from './pet-sprites.js';
 
 export const PET_PX = PET_SIZE * 2;
 const FRAME = Object.fromEntries(PET_FRAMES.map((f, i) => [f, i]));
-const BUBBLES = '.msg .chat-bubble, .msg .share-card, .msg .letter-card, .msg .game-card, .msg .fwd-card, .msg .song-card, .msg .packet, .msg .gift-card, .msg .loc-card, .msg .voice-msg';
+const BUBBLES = '.msg .chat-bubble, .msg .share-card, .msg .letter-card, .msg .cg-card, .msg .fwd-card, .msg .song-card, .msg .packet, .msg .gift-card, .msg .loc-card, .msg .voice-msg';
 const MOVING = new Set(['walk', 'hop', 'fall']);
 const GRAVITY = 1500, THROW = 450, HARD = 950, BOUNCE = 700;
 // Where a rider's feet go on each kind: the top of its head, from the top of its picture (px; the crab's is between its claws).
