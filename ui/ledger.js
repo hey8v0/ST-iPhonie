@@ -56,9 +56,16 @@ export function ledgerApp(ctx) {
       <details class="ledger-table"><summary>每天的数字</summary><div>${values.map((x, i) => [i, x]).filter(([, x]) => x).reverse().map(([i, x]) => `<div class="ledger-table-row"><span>${esc(dayName(key(i + 1)))}</span><b>${esc(said(x, metric))}</b></div>`).join('')}</div></details>`;
   }
   async function render() {
+    if (v.disposed) return;
     const ticket = ++turn, thisDay = today();
     const from = period === 'today' ? thisDay : `${year}-${pad(month + 1)}-01`, to = period === 'today' ? thisDay : `${year}-${pad(month + 1)}-${pad(monthDays(year, month))}`;
-    const days = await api.ledgerDays(from, to);
+    let days;
+    try { days = await api.ledgerDays(from, to); }
+    catch (error) {
+      // Leaving or reopening the retained app invalidates both results and errors from the old read.
+      if (!v.disposed && ticket === turn) ctx.notify(error.message, {error: true});
+      return;
+    }
     if (v.disposed || ticket !== turn) return;
     const all = totalOf(days), top = headline(all), any = days.length > 0;
     v.draw(heading('账本', help('记的是小手机自己发出去的请求：聊天、朋友圈、论坛、电话、记忆整理这些调用文字模型的次数，配音的字数（放过的语音不重复算），出图的张数。\n正文的回复是酒馆发的，不算在内。\ntoken 是按字数估的，Anlas 是画完读余额算的差（走中转读不到余额时不记）。实际花了多少，以各家的账单为准。\n开着「保存到酒馆」时，几台设备的用量加在一起。只记数字，不记内容。'), 'Ledger')
@@ -98,6 +105,7 @@ export function ledgerApp(ctx) {
     }
   });
   v.refresh = render;
+  v.leave = () => { turn++; };
   render().catch(error => { if (!v.disposed) ctx.notify(error.message, {error: true}); });
   return v;
 }
