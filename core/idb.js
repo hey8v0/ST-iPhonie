@@ -16,7 +16,7 @@ export const lostError = cause => Object.assign(new Error(`${LOST_MESSAGE}。重
 /** A moment before reconnecting: WebKit's storage process may be starting again. */
 export const breath = () => new Promise(resolve => setTimeout(resolve, 150));
 
-const STORES = {'st-tts-library-v1': '资料库（相册、收藏、备忘录）', 'st-tts-audio-v1': '语音缓存', 'st-iphonie-chats-v1': '聊天记录', 'st-iphonie-moments-v1': '朋友圈', 'st-iphonie-apps-v1': '论坛、查手机、账本', 'st-iphonie-memory-v1': '记忆', 'st-iphonie-sounds-v1': '音效', 'st-iphonie-music-v1': '音乐和写的歌'};
+const STORES = {'st-tts-library-v1': '资料库（相册、收藏、备忘录）', 'st-tts-audio-v1': '语音缓存', 'st-iphonie-chats-v1': '聊天记录', 'st-iphonie-moments-v1': '朋友圈', 'st-iphonie-apps-v1': '论坛、查手机、账本', 'st-iphonie-memory-v1': '记忆', 'st-iphonie-sounds-v1': '音效', 'st-iphonie-music-v1': '音乐和写的歌', 'st-iphonie-paint': '画画的作品'};
 const within = async (work, ms = 4000, onLate = () => {}) => {
   let timer, expired = false;
   const watched = Promise.resolve(work).then(value => { if (expired) onLate(value); return value; });

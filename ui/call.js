@@ -1,6 +1,7 @@
 // 来电: the full-screen call layer over the phone. It only draws what the tavern side reports (host-call.js) and sends
 // the user's taps and words back: answer, decline, hang up, say something, ask again. While it rings, a ringtone is
 // made with WebAudio (no sound files) and the phone vibrates where the browser allows it.
+import {callClock} from '../core/call-summary.js';
 import {esc, avatar} from './common.js';
 import {icon} from './icons.js';
 import {motionLayer} from './wallpapers.js';
@@ -10,7 +11,7 @@ import {bloom, islandIn, nudge} from './carry.js';
 // each call like the home screen's moving wallpaper, instead of a repeating pattern.
 const CALL_SCENES = {sky: ['clouds', 'stars'], aero: ['bubbles', 'aurora'], fresh: ['petals', 'fireflies']};
 
-const clock = seconds => { const s = Math.max(0, Math.floor(seconds)), pad = n => String(n).padStart(2, '0'); return s >= 3600 ? `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}` : `${pad(Math.floor(s / 60))}:${pad(s % 60)}`; };
+const clock = seconds => callClock(seconds, Math.floor);
 const ENDED = {answered: '通话结束', missed: '未接听', declined: '已拒绝', cancelled: '已取消'};
 
 /** A ring made of short tones: incoming rings brightly, an outgoing call hears a slow ring-back. */
@@ -135,7 +136,7 @@ export function callScreen(ctx, host) {
   const engine = name => ctx.engineOf?.(name) || 'none';
   function status(c) {
     if (c.state === 'ringing') return c.dir === 'in' ? '邀请你语音通话…' : '正在呼叫…';
-    if (c.state === 'ended') return (ENDED[c.ended?.state] || '通话结束') + (c.ended?.duration ? ' ' + clock(c.ended.duration) : '');
+    if (c.state === 'ended') return (ENDED[c.ended?.state] || '通话结束') + (c.ended?.duration ? ' ' + callClock(c.ended.duration) : '');
     return clock((Date.now() - c.answeredAt) / 1000);
   }
   function note(c) {

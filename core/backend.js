@@ -47,6 +47,7 @@ import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialog
 import { normalizeMarks, withMarks } from './voice-fx.js';
 import { TTSParameters, FISH_API, tauriTavern } from './parameters.js';
 import { KeyStore, keyTail, validateKey, parseTextKeys, joinTextKeys } from './keys.js';
+const hintTail = key => key ? keyTail(key) || '••••' : '';
 import { Providers, buildRequest } from './providers.js';
 import { AudioCache } from './cache.js';
 import { installDrawSettings, sweepRoleRefs } from './backend-draw.js';
@@ -821,7 +822,7 @@ export class TTSBackend {
     /** The saved keys of a voice engine as the phone shows them: last characters, in use, refused this time. Never the keys. */
     keyList(engine) {
         engineCheck(engine);
-        if (engine === 'custom') { const key = this.providers.customKeys.get(this.customActive()); return key ? [{ tail: keyTail(key) || '••••', current: true, refused: false }] : []; }
+        if (engine === 'custom') { const key = this.providers.customKeys.get(this.customActive()); return key ? [{ tail: hintTail(key), current: true, refused: false }] : []; }
         return this.providers.keyList(engine);
     }
     /** 自己的接口: the set in use. */
@@ -830,7 +831,7 @@ export class TTSBackend {
     /** 自己的接口's sets as the card lists them: name, address, voices, key (its last characters), the one in use. */
     customSetList() {
         const sets = this.settings.connections.custom.configs;
-        return sets.presets.map(p => { const key = this.providers.customKeys.get(p.id); return { id: p.id, name: p.name, current: p.id === sets.active, url: String(p.params.url || ''), service: String(p.params.service || ''), voices: (p.params.voices || []).length, configured: !!key, tail: key ? keyTail(key) || '••••' : '' }; });
+        return sets.presets.map(p => { const key = this.providers.customKeys.get(p.id); return { id: p.id, name: p.name, current: p.id === sets.active, url: String(p.params.url || ''), service: String(p.params.service || ''), voices: (p.params.voices || []).length, configured: !!key, tail: hintTail(key) }; });
     }
     /** A set renamed ({id, name}), or with no id a new one, empty and in use from now on. */
     saveCustomSet({ id, name } = {}) {
@@ -884,7 +885,7 @@ export class TTSBackend {
     }
     clearTextKey(id) { const map = new Map(this.textKeys); map.delete(id); this.storeTextKeys(map); }
     /** The last characters of a preset's key ('••••' for a key too short to show any), '' without one. */
-    textKeyHint(id) { const key = this.textKeys.get(id); return key ? keyTail(key) || '••••' : ''; }
+    textKeyHint(id) { const key = this.textKeys.get(id); return hintTail(key); }
     storeTextKeys(map) { this.keyStore.save('llm', joinTextKeys(map)); this.textKeys = map; this.emit('keys', { engine: 'llm', configured: map.has(this.settings.text.active) }); }
     clearKey(engine) {
         keyCheck(engine);
@@ -910,7 +911,7 @@ export class TTSBackend {
         return clone(value);
     }
     /** The last 4 characters of the saved key ('' without one), so the user can tell which key is in use. */
-    keyHint(engine) { keyCheck(engine); if (engine === 'custom') { const key = this.providers.customKeys.get(this.customActive()); return key ? keyTail(key) || '••••' : ''; } if (SONG_KEYS.includes(engine)) return keyTail(this.songKeys[engine]) || (this.songKeys[engine] ? '••••' : ''); if (engine === 'nai' || engine === 'gpt') return keyTail(this.imageKeys[engine].get(this.settings.draw.connections[engine].active)); if (engine === 'llm') return this.textKeyHint(this.settings.text.active); if (engine === 'embed') return this.embedKey ? keyTail(this.embedKey) || '••••' : ''; return keyTail(this.providers.currentKey(engine)); }
+    keyHint(engine) { keyCheck(engine); if (engine === 'custom') { const key = this.providers.customKeys.get(this.customActive()); return hintTail(key); } if (SONG_KEYS.includes(engine)) return hintTail(this.songKeys[engine]); if (engine === 'nai' || engine === 'gpt') return hintTail(this.imageKeys[engine].get(this.settings.draw.connections[engine].active)); if (engine === 'llm') return this.textKeyHint(this.settings.text.active); if (engine === 'embed') return hintTail(this.embedKey); return hintTail(this.providers.currentKey(engine)); }
     /** For a voice engine with keys: how many, which one is in use (1-based) and how many were refused while this page is open. */
     keyPool(engine) { engineCheck(engine); return this.providers.keyPool(engine); }
     keyStatus(engine) { keyCheck(engine); return SONG_KEYS.includes(engine) ? !!this.songKeys[engine] : engine === 'nai' ? this.novelai.configured : engine === 'gpt' ? !!this.gptKey : engine === 'llm' ? this.textKeys.has(this.settings.text.active) : engine === 'embed' ? !!this.embedKey : engine === 'custom' ? this.providers.customKeys.has(this.customActive()) : this.providers.keys.has(engine); }
@@ -1364,7 +1365,7 @@ export class TTSBackend {
     imageConnectionList(engine) {
         if (!['nai', 'gpt'].includes(engine)) throw Error('生图引擎无效');
         const group = this.settings.draw.connections[engine];
-        return group.presets.map(p => ({...clone(p), current: p.id === group.active, configured: this.imageKeys[engine].has(p.id), tail: keyTail(this.imageKeys[engine].get(p.id))}));
+        return group.presets.map(p => ({...clone(p), current: p.id === group.active, configured: this.imageKeys[engine].has(p.id), tail: hintTail(this.imageKeys[engine].get(p.id))}));
     }
     /** Missing id creates and selects an empty connection; a blank key keeps its saved key. */
     saveImageConnection(engine, patch = {}) {

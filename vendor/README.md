@@ -11,7 +11,7 @@
 
 各自的授权全文见 `LICENSES.txt`。
 
-Live2D 官方的运行核心不在这里：Cubism 3 / 4 的 `live2dcubismcore.min.js` 在用到时从 Live2D 官网（cubism.live2d.com）读，按 [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html)；Cubism 2 的 `live2d.min.js` 官方已不再提供，从 jsDelivr 读固定版本，并校验文件哈希。
+Live2D 官方的运行核心不在这里：Cubism 3 / 4 使用官方固定的 [Cubism 5.2 托管路径](https://cubism.live2d.com/sdk-web/core/05/live2dcubismcore.min.js)，用到时才从 Live2D 官网（cubism.live2d.com）读取，并用 SHA-384 SRI 校验通过后执行；校验失败会停止，不退回未校验地址。固定路径来自[官方托管列表](https://www.live2d.com/en/sdk/download/web/)，维护时应同时核对文件内容与 SRI；本仓库不打包运行核心。运行核心适用 [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html)；Cubism 2 的 `live2d.min.js` 官方已不再提供，从 jsDelivr 读固定版本，并校验文件哈希。
 
 重新打包：见开发仓库的 `scripts/vendor/build.mjs`（Cubism 3/4 的遮罩缓冲按模型的遮罩数开够，超过 36 个遮罩的模型才画得对）。
 

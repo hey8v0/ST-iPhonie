@@ -8,7 +8,9 @@ import {visualEmotion} from './core/visual-emotion.js';
 import {moveById, samplePose, VRM_REST} from './core/model-moves.js';
 
 const VENDOR = new URL('./vendor/', import.meta.url);
-const C4_CORE = 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js';
+// Official Cubism 5.2 hosting path; fixed SDK family and verified bytes (vendor/README.md).
+const C4_CORE = 'https://cubism.live2d.com/sdk-web/core/05/live2dcubismcore.min.js';
+const C4_SRI = 'sha384-MeKqhuhBpq1ZqqshjOzqDOQJ/00BuDVdnNeYgPKul9hmgROzmT17WkmUeFJ9Jlrb';
 const C2_CORE = 'gh/dylanNew/live2d@fd9fd400845e9a00bb194fdac0b6635c753a1e8a/webgl/Live2D/lib/live2d.min.js';
 const C2_HOSTS = ['https://cdn.jsdelivr.net/', 'https://fastly.jsdelivr.net/', 'https://gcore.jsdelivr.net/', 'https://testingcf.jsdelivr.net/'];
 const C2_SRI = 'sha384-LWrKEMeBVbWko3WFDXTIBDN5SpFKepeYUI2JE6It+qbq+F+2NvN2QDO2J8H+8Y+O';
@@ -34,10 +36,11 @@ export function modelBytes(path) {
 export const forgetModelBytes = path => files.delete(String(path || '').replace(/^\/?/, '/'));
 
 const scripts = new Map();
-function script(src, integrity = '') {
+function script(src, integrity) {
+  if (!integrity) return Promise.reject(Error('运行库缺少完整性校验'));
   if (!scripts.has(src)) scripts.set(src, new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = src; s.async = true;
+    s.src = src; s.async = true; s.referrerPolicy = 'no-referrer';
     if (integrity) { s.integrity = integrity; s.crossOrigin = 'anonymous'; }
     s.onload = resolve;
     s.onerror = () => { scripts.delete(src); s.remove(); reject(Error('load')); };
@@ -45,7 +48,7 @@ function script(src, integrity = '') {
   }));
   return scripts.get(src);
 }
-/** Live2D's own runtime (not ours to hand out): Cubism 3/4's from Live2D's site, Cubism 2's from jsDelivr, checked. */
+/** Official hosted Cubism 5.2 core for 3/4 models; Cubism 2 uses pinned jsDelivr mirrors. Both require SRI. */
 async function cubism(version) {
   if (version === '2') {
     if (globalThis.Live2D) return;
@@ -53,8 +56,8 @@ async function cubism(version) {
     throw Error('没能读到 Cubism 2 的运行核心（从 jsDelivr），检查一下网络再试');
   }
   if (globalThis.Live2DCubismCore) return;
-  try { await script(C4_CORE); } catch {}
-  if (!globalThis.Live2DCubismCore) throw Error('没能从 Live2D 官网读到 Cubism 运行核心，检查一下能不能打开 cubism.live2d.com');
+  try { await script(C4_CORE, C4_SRI); } catch {}
+  if (!globalThis.Live2DCubismCore) throw Error('没能读取或校验 Live2D 运行核心，请检查 cubism.live2d.com 的连接并更新小手机后重试');
 }
 
 // ---------- the actor ----------

@@ -169,7 +169,7 @@ class Songs {
     /** What ComfyUI made lately that came out as sound: [{id, label, graph}]. */
     async songRecentRuns() {
         this.assertOpen();
-        const c = this.settings.draw.comfy, runs = await comfyRecent({ fetch: this.imageFetch, url: c.url, transport: c.loraTransport });
+        const c = this.settings.draw.comfy, runs = await comfyRecent({ fetch: this.songFetch, url: c.url, transport: c.loraTransport });
         return runs.filter(run => audioOutput(run.graph)).map(run => { const words = describeSongWorkflow(run.graph).fields[0]?.text; return { id: run.id, label: words || run.id.slice(0, 8), graph: JSON.stringify(run.graph) }; });
     }
     /** The page is going: nothing more is asked, and what is being sung stays marked so it can be picked up. */

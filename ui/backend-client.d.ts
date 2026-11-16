@@ -222,7 +222,8 @@ export interface AssistantMessage extends AssistantVariant { id: string; role: '
 export interface AssistantThread { id: string; kind: 'assistant'; title: string; titleEdited?: boolean; revision?: number; memoryRevision?: number; restoredAt?: number; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
 export interface AssistantThreadSummary extends Omit<AssistantThread, 'messages'> { messageCount: number; preview: string; /** With a search: the words around where it was found. */ match?: string; }
 /** 画风预设: artist and fixed tags sent to NovelAI. */
-export interface DrawStyle { id: string; name: string; artist: string; positive: string; negative: string; /** The 画风 group it is in. */ group?: string; }
+export type DrawStyleParams = Pick<DrawParams, 'model' | 'steps' | 'scale' | 'sampler' | 'schedule' | 'cfgRescale' | 'variety' | 'effort' | 'mode' | 'quality' | 'ucPreset' | 'smea' | 'decrisper'>;
+export interface DrawStyle { id: string; name: string; artist: string; positive: string; negative: string; params?: DrawStyleParams; cover?: {thumb: string; full: string}; /** The 画风 group it is in. */ group?: string; }
 /** A group in the 角色 App; card: the tavern card whose new roles go in it. */
 export interface RoleGroup { id: string; name: string; open: boolean; card?: string; }
 /** A 画风 group in the drawing app: shown open (its styles under it) or closed. */
@@ -280,11 +281,11 @@ export interface ImageConnectionInfo extends ImageConnection { current: boolean;
 /** url: '' for OpenAI, else a relay ending at /v1. ask: confirm every (paid) picture; off also lets new replies draw. style: its own 画风 ('' = NovelAI's). */
 export interface GptImageSettings { url: string; model: string; quality: 'auto' | 'low' | 'medium' | 'high'; orientation: 'portrait' | 'landscape' | 'square'; ask: boolean; style: string; }
 /** Reached through the tavern's ComfyUI proxy. workflow: API-format JSON with "%prompt%" and the other placeholders ('' = the default one). */
-export interface ComfyWorkflow { id: string; name: string; workflow: string; sourceWorkflow?: string; disabledLoras: string[]; model: string; vae: string; sampler: string; scheduler: string; steps: number; scale: number; width: number; height: number; clipSkip: number; }
+export interface ComfyWorkflow { id: string; name: string; workflow: string; sourceWorkflow?: string; disabledLoras: string[]; loader: 'checkpoint' | 'unet' | 'gguf'; clip: string; clipType: string; denoise: number; disabledNodes?: string[]; output?: string; model: string; vae: string; sampler: string; scheduler: string; steps: number; scale: number; width: number; height: number; clipSkip: number; }
 /** The ComfyUI scheme in use as the drawing app shows it. auto: where a new LoRA goes ('' when the user chooses among sources);
  *  controls: the parameters its workflow takes; missing: what stops a picture; restorable: its imported workflow can be put back. */
 export interface ComfyLoraInfo { error?: string; nodes: Array<{id: string; name: string; strength_model: number; strength_clip?: number; modelOnly: boolean; reason?: string}>; sources: Array<{id: string; name: string; modelOnly: boolean}>;
-    disabled: string[]; auto: string; builtIn: boolean; restorable: boolean; controls: string[]; missing: string; }
+    disabled: string[]; auto: string; builtIn: boolean; restorable: boolean; controls: string[]; fills: string[]; modelKind: '' | 'checkpoint' | 'unet' | 'gguf'; missing: string; }
 export interface ComfyNodeField { key: string; label: string; kind: 'text' | 'number' | 'bool' | 'combo' | 'link' | 'other'; value?: unknown; role?: string; follow?: string; absent?: boolean; options?: unknown[]; upload?: boolean; long?: boolean; min?: number; max?: number; step?: number | string; from?: {id: string; title: string}; }
 export interface ComfyNode { id: string; type: string; title: string; fills: string[]; off: boolean; canOff: boolean; isOutput: boolean; output: boolean; unknown: boolean; fields: ComfyNodeField[]; }
 export interface ComfySettings extends Omit<ComfyWorkflow, 'id' | 'name'> { url: string; loraTransport: 'tavern' | 'direct'; style: string; activeWorkflow: string; workflows: ComfyWorkflow[]; }
@@ -294,7 +295,7 @@ export interface VibeSettings { enabled: boolean; use: { kind: '' | 'group' | 'v
 export interface VibeSummary { id: string; name: string; thumb: string; strength: number; ie: number; image: boolean; keys: string[]; ready?: string[]; ies?: Record<string, number[]>; }
 /** The vibes a picture would use: encode = how many need encoding first (2 Anlas each), over = left out by the free-tier guard. */
 export interface VibePlan { on: boolean; model: boolean; used: Array<{ id: string; name: string; strength: number; encode: boolean }>; skipped: Array<{ name: string; why: 'missing' | 'model' | 'no-encoding' }>; over: number; encode: number; extra: number; }
-export interface DrawSettingsPatch { chunks?: PromptChunk[]; stream?: boolean; autoDownload?: boolean; locks?: string[]; grid?: DrawGrid; positionGrid?: Partial<DrawPositionGrid>; maskLook?: Partial<DrawMaskLook>; enabled?: boolean; auto?: boolean; guard?: boolean; fold?: boolean; queue?: Partial<DrawQueueSettings>; params?: Partial<DrawParams>; activeStyle?: string; activePreset?: string; relay?: Partial<{ url: string; assumeOpus: boolean }>; vibe?: Partial<VibeSettings>; engine?: DrawEngine; gpt?: Partial<GptImageSettings>; comfy?: Partial<ComfySettings>; }
+export interface DrawSettingsPatch { mode?: 'separate' | 'inline'; strip?: boolean; chunks?: PromptChunk[]; stream?: boolean; autoDownload?: boolean; locks?: string[]; grid?: DrawGrid; positionGrid?: Partial<DrawPositionGrid>; maskLook?: Partial<DrawMaskLook>; enabled?: boolean; auto?: boolean; guard?: boolean; fold?: boolean; queue?: Partial<DrawQueueSettings>; params?: Partial<DrawParams>; activeStyle?: string; activePreset?: string; relay?: Partial<{ url: string; assumeOpus: boolean }>; vibe?: Partial<VibeSettings>; engine?: DrawEngine; gpt?: Partial<GptImageSettings>; comfy?: Partial<ComfySettings>; }
 /** gap: seconds between two NovelAI requests (0-60). retries: how often an "account busy" (429) is retried (0-10). */
 export interface DrawQueueSettings { gap: number; retries: number; cloud: CloudQueueSettings; }
 /** Shared queue service (cloud-queue/worker.js) that everyone using one NovelAI account joins with the same room code. */
@@ -323,7 +324,7 @@ export interface DrawInput { prompt: string; negative?: string; characters?: Dra
     /** NovelAI V4.5: 角色参考 (fitted pictures). */
     refs?: Array<{ image: string; kind: 'character' | 'style' | 'both'; strength: number; fidelity: number }>; }
 /** seed is -1 for GPT (it takes none); params are what the engine used (GPT has no steps). */
-export interface DrawResult { photoId: string; seed: number; params: DrawParams; prompt: string; engine: DrawEngine; }
+export interface DrawResult { blob: Blob; info: Array<[string, string | number]>; photoId: string; seed: number; params: DrawParams; prompt: string; engine: DrawEngine; }
 export interface SettingsSnapshot { state: Settings; revision: number; }
 
 /** 聊天预设: how phone contacts reply, how much they see, and how a chat is brought into the story. */
@@ -370,7 +371,7 @@ export interface SpokenLine { role: string; text: string; emotion?: string; tran
 /** A call as the phone draws it. `since`/`answeredAt` are ms timestamps; `ended` is set once it is over. */
 export interface CallState { id: number; name: string; dir: 'in' | 'out'; state: 'ringing' | 'talking' | 'ended'; since: number; answeredAt: number; lines: CallLine[]; thinking: boolean; speaking: boolean; voiced: boolean; error: string; auto: boolean;
     ended: { state: 'answered' | 'missed' | 'declined' | 'cancelled'; by: string; duration: number } | null; }
-export interface CallsSettings { auto: boolean; every: number; dailyMax: number; ring: number; }
+export interface CallsSettings { effect: boolean; auto: boolean; every: number; dailyMax: number; ring: number; }
 /** 音效: volumes 0..1; vary: each playing a little different; generate: missing sounds made by ElevenLabs, at most `versions` of a name. */
 export interface SoundSettings { enabled: boolean; ambienceVolume: number; sfxVolume: number; vary: boolean; generate: boolean; versions: number; /** 自带音效包 in use */ pack: boolean; /** shipped sounds taken out */ packHidden: string[]; /** 「ElevenLabs 做一个声音」 as last used (0.9.37) */ make: { model: 'v3' | 'v2'; loop: boolean; seconds: number; influence: number; rewrite: boolean; count: number; format: 'mp3' | 'mp3hq' | 'wav' }; }
 /** A sound in the library (no audio): an ambience is a 底子 (bed, loops) or a 点缀 (dot, now and then). */
@@ -403,14 +404,28 @@ export interface Wallet { balance: number; ledger: Array<{ id: string; at: numbe
 export interface ShopGift { id: string; name: string; emoji: string; price: number; note: string; /** true for a gift the user added */ own?: boolean; }
 export type AvatarChoice = { kind: 'photo'; photoId: string } | { kind: 'text' };
 export interface ChatContact { name: string; source: 'role' | 'manual'; id?: string; voice: boolean; engine: Engine | 'none'; language: string; persona: string; }
-export type ChatKind = 'text' | 'voice' | 'photo' | 'system' | 'redpacket' | 'transfer' | 'location' | 'pat' | 'dice' | 'notice' | 'recall' | 'call' | 'gift' | 'sticker' | 'song' | 'file' | 'forward';
+export type ChatKind = 'text' | 'voice' | 'photo' | 'sticker' | 'system' | 'redpacket' | 'transfer' | 'location' | 'pat' | 'dice' | 'notice' | 'recall' | 'call' | 'gift' | 'song' | 'file' | 'forward' | 'game' | 'post' | 'outfit' | 'book' | 'letter';
 /** 自定义气泡 (0.9.33): two CSS texts written against .bubble; worn as profile.bubble 'custom:<id>'. */
 export interface BubbleSet { id: string; name: string; me: string; them: string; at: number; }
 /** 合并转发: one line of a forwarded record. */
 export interface ForwardItem { from: string; text: string; }
-export interface CallLine { from: 'me' | string; text: string; translation: string; emotion: string; }
+export interface CallLine { heard?: 'pending' | 'generating' | 'playing' | 'played'; from: 'me' | string; text: string; translation: string; emotion: string; }
 /** notice: `text` says what `from` did, with {对方} standing for `target`. recall: a withdrawn message (no content). */
-export interface ChatMessage { id: string; from: 'me' | string; kind: ChatKind; text: string; /** kind 'forward' (合并转发) */ title?: string; items?: ForwardItem[]; translation?: string; emotion?: string; photoId?: string; amount?: string; /** kind 'gift': what it is (price 0 when a character sends it) */ gift?: { name: string; emoji: string; price: number }; state?: 'sent' | 'opened' | 'accepted' | 'returned' | 'answered' | 'missed' | 'declined' | 'cancelled'; openedBy?: string; detail?: string; target?: string; quote?: { from: string; text: string }; at: number;
+export type ChatGame =
+    | {type: 'vote'; question: string; options: string[]; votes: Array<{from: string; option: number; why: string}>; open: boolean}
+    | {type: 'truth'; pool: string[]; target: string; choice: '' | '真心话' | '大冒险'}
+    | {type: 'chain'; mode: 'idiom' | 'story'; entries: Array<{from: string; text: string}>; open: boolean; loser: string}
+    | {type: 'ttt' | 'gomoku'; them: string; first: string; moves: Array<{by: string; at: number}>; resigned: string; turn: string; winner: string; line: number[]; open: boolean};
+export interface ChatMessage {
+    updatedAt?: number; url?: string; name?: string; size?: number; fileText?: string; suffix?: string; said?: string;
+    song?: {title: string; artist: string; draft?: string};
+    game?: ChatGame;
+    post?: {id: string; title: string; author: string; text: string; note?: string};
+    outfit?: {name: string; text: string; owner: string; photoId?: string; note?: string};
+    book?: {id: string; title: string; subtitle: string; theme: string; spreads: number; coverId: string; text: string};
+    letter?: {text: string; arriveAt: number; opened: boolean; answered: boolean};
+    reactions?: Array<{from: string; emoji: string}>; readingPage?: string; story?: string; storyVer?: string;
+ id: string; from: 'me' | string; kind: ChatKind; text: string; /** kind 'forward' (合并转发) */ title?: string; items?: ForwardItem[]; translation?: string; emotion?: string; photoId?: string; amount?: string; /** kind 'gift': what it is (price 0 when a character sends it) */ gift?: { name: string; emoji: string; price: number }; state?: 'sent' | 'opened' | 'accepted' | 'returned' | 'answered' | 'missed' | 'declined' | 'cancelled'; openedBy?: string; detail?: string; target?: string; quote?: { from: string; text: string }; at: number;
     imageTags?: string; imageVersions?: string[]; imageState?: 'waiting' | 'done' | 'failed'; imageNote?: string;
     /** call: who called (from), how it ended, how long it lasted, what was said and a missed call's voice message. */
     dir?: 'in' | 'out'; duration?: number; lines?: CallLine[]; voicemail?: Omit<CallLine, 'from'>[]; }
@@ -444,9 +459,13 @@ export interface TheaterLine { role: string; text: string; translation: string; 
 export interface Theater { id: string; kind: 'theater'; form: 'script' | 'card' | 'custom'; title: string; lines?: TheaterLine[]; html?: string; body?: string; source: 'story' | 'card'; wish: string; at: number; space?: string; save?: string; }
 export interface GeneratorDirection { title: string; text: string; }
 export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; /** when the user last turned down a 好友申请 */ refused?: number; }
-export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; silenced?: Record<string, number>; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 黑名单: what they sent meanwhile (held, never in the chat) and their 好友申请; refused: when the user last turned one down. The list carries count instead of held. */ blocked?: {at: number; held?: {kind: string; text: string; at: number}[]; count?: number; requests: {text: string; at: number}[]; refused?: number}; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
+export interface ChatThread {
+    space?: string; save?: string; story?: boolean; openedAt?: number; label?: string; windowOf?: string; watch?: boolean;
+    notice?: {text: string; by: string; at: number}; nicks?: Record<string, string>;
+    post?: Array<{id: string; from: string; text: string; sentAt: number; arriveAt: number}>;
+ id: string; type: 'dm' | 'group'; name: string; members: string[]; silenced?: Record<string, number>; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 黑名单: what they sent meanwhile (held, never in the chat) and their 好友申请; refused: when the user last turned one down. The list carries count instead of held. */ blocked?: {at: number; held?: {kind: string; text: string; at: number}[]; count?: number; requests: {text: string; at: number}[]; refused?: number}; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
 /** streak: 聊天火花, days in a row both sides wrote. */
-export interface ChatThreadSummary extends Omit<ChatThread, 'messages'> { count: number; last: ChatMessage | null; streak: number; }
+export interface ChatThreadSummary extends Omit<ChatThread, 'messages' | 'alts'> { count: number; last: ChatMessage | null; streak: number; }
 export type ChatMessageInput = Omit<ChatMessage, 'id' | 'at'>;
 export interface PromptPlanEntry {
     key: string;
@@ -616,6 +635,7 @@ export interface CachedAudio { key: string; at: number; bytes: number; metadata:
 export interface CacheStats { count: number; bytes: number; /** The most it keeps before the oldest go. */ limit: number; available: boolean; }
 export interface VoicePoolEntry { engine: 'fish' | 'mini' | 'eleven' | 'mimo' | 'doubao' | 'custom'; voice: string; model: string; name: string; gender: 'female' | 'male' | ''; age: 'child' | 'young' | 'adult' | 'old' | ''; style: string; }
 export interface LibraryStats { bytes: number; limit: number; notes: number; photos: number; favorites: number; references: number; vibes: number; /** Bytes by kind: notes, photos, favorites, references, vibes, phone. */ sizes: Record<string, number>; }
+export type GeneratedPhotoSource = 'draw' | 'chat' | 'peek' | 'moments' | 'chatapp' | 'assistant' | 'book' | 'wardrobe' | 'plugin';
 export type LibraryCollection = 'favorites' | 'cache' | 'photos' | 'notes' | 'books';
 
 export type BackendEvent =
@@ -787,7 +807,7 @@ export interface BackendFacade {
     /** Puts a picture into ComfyUI's input folder; answers the name to put in the node. */
     comfyUploadPicture(file: File): Promise<string>;
     /** after: a new style (a copy) goes right below this one, in its group. */
-    saveStyle(style: Omit<DrawStyle, 'id'> & { id?: string; after?: string }): DrawStyle;
+    saveStyle(style: Omit<DrawStyle, 'id' | 'params'> & { id?: string; after?: string; params?: Partial<DrawStyleParams> }): DrawStyle;
     deleteStyle(id: string): DrawSettings;
     /** Several at once; at least one has to stay. */
     deleteStyles(ids: string[]): DrawSettings;
@@ -887,7 +907,7 @@ export interface BackendFacade {
     /** The parts a backup can hold, key -> label. */
     backupParts(): Record<'settings' | 'vnFiles' | 'chats' | 'memories' | 'assistant' | 'moments' | 'forum' | 'peek' | 'notes' | 'photos' | 'favorites' | 'vibes' | 'books' | 'music' | 'sounds' | 'paint' | 'ledger' | 'keys', string>;
     /** What the backup page shows of the parts that are not simply counted. */
-    backupCounts(): Promise<{forum: number; peek: number; ledger: number; playlists: number; songs: number; musicBytes: number; sounds: number; soundBytes: number; works: number; workBytes: number}>;
+    backupCounts(): Promise<{wardrobe: number; theater: number; games: Array<{game: string; day: number}>; looks: number; lookBytes: number; forum: number; peek: number; ledger: number; playlists: number; songs: number; musicBytes: number; sounds: number; soundBytes: number; works: number; workBytes: number}>;
     /** 账本: one row a day between two days ('YYYY-MM-DD'), the oldest first. */
     ledgerDays(from?: string, to?: string): Promise<{day: string; text?: Record<string, {calls: number; input: number; output: number}>; voice?: Record<string, {lines: number; chars: number}>; image?: Record<string, number>; anlas?: number; embed?: {calls: number; chars: number}; sfx?: number}[]>;
     clearLedger(): Promise<void>;
@@ -899,7 +919,7 @@ export interface BackendFacade {
     /** What a backup file holds; rejects when it is not an ST-iPhonie backup. */
     inspectBackup(file: Blob): Promise<{ version: string; createdAt: number; summary: { settings: { roles: number; presets: number } | null; chats: number | null; memories: number | null; assistant: number | null; moments: number | null; notes: number | null; photos: number | null; favorites: number | null; vibes: { vibes: number; groups: number } | null; keys: number | null } }>;
     /** Restores the chosen parts; replace empties those kinds of data first. Returns how many of each came back. */
-    importBackup(file: Blob, options: { parts: string[]; replace?: boolean; password?: string }): Promise<{ settings?: boolean; chats?: number; memories?: number; assistant?: number; moments?: number; notes?: number; photos?: number; favorites?: number; vibes?: number; vibeGroups?: number; references?: number; phone?: number; keys?: number }>;
+    importBackup(file: Blob, options: { parts: string[]; replace?: boolean; password?: string }): Promise<{ settings?: boolean; vnFiles?: number; books?: number; bookshelf?: number; forum?: number; peek?: number; music?: number; sounds?: number; paint?: number; games?: number; ledger?: number; looks?: number; albums?: number; wardrobe?: number; theater?: number; chats?: number; memories?: number; assistant?: number; moments?: number; notes?: number; photos?: number; favorites?: number; vibes?: number; vibeGroups?: number; references?: number; phone?: number; keys?: number }>;
     /** The audio of a favorite, a cached line, or a line with its speaker's current voice, named for saving.
      *  Rejects when that line has not been generated yet. */
     audioFile(ref: { favorite: string } | { key: string } | { line: { role: string; text: string; emotion?: string; translation?: string } }): Promise<{ blob: Blob; name: string }>;
@@ -959,10 +979,10 @@ export interface BackendFacade {
     storageBudget(): Promise<{ quota: number; library: number; voice: number; persisted: boolean }>;
     /** Album photos made by drawing (the workbench and in-text pictures). */
     /** The photos the phone drew, by where: 绘图 App (draw), 正文图片 (chat), 查手机 (peek), 朋友圈 (moments). */
-    generatedPhotos(): Promise<{ count: number; bytes: number; sources: Record<'draw' | 'chat' | 'peek' | 'moments' | 'chatapp' | 'assistant', { label: string; count: number; bytes: number }> }>;
+    generatedPhotos(): Promise<{ count: number; bytes: number; sources: Record<GeneratedPhotoSource, { label: string; count: number; bytes: number }> }>;
     /** Deletes those photos from the album; returns how many were deleted. Imported photos stay. */
     /** Deletes the drawn photos of those sources (all when none); what showed them goes back to «not drawn». */
-    deleteGeneratedPhotos(sources?: Array<'draw' | 'chat' | 'peek' | 'moments' | 'chatapp' | 'assistant'>): Promise<number>;
+    deleteGeneratedPhotos(sources?: GeneratedPhotoSource[]): Promise<number>;
     saveChatPreset(preset: Partial<ChatPreset> & { name: string }): ChatPreset;
     /** Independent assistant settings; no conversation or model context is saved here. */
     saveAssistant(patch: Partial<AssistantSettings>): AssistantSettings;
@@ -987,9 +1007,9 @@ export interface BackendFacade {
     saveSounds(patch: Partial<SoundSettings>): SoundSettings;
     saveMusic(patch: Partial<MusicSettings>): MusicSettings;
     /** Searches the enabled music sources (or one): songs (kind 'song', the default), or albums / artists (groups); page 0, 1, … (more: a full page came). */
-    searchMusic(query: string, sourceId?: string | Partial<MusicSource>, options?: { kind?: 'song' | 'album' | 'artist' | 'playlist'; page?: number }): Promise<{ songs?: MusicFound[]; groups?: MusicGroup[]; errors: { source: string; message: string }[]; more: boolean }>;
+    searchMusic(query: string, sourceId?: string | Partial<MusicSource>, options?: { kind?: 'song' | 'album' | 'artist' | 'playlist'; page?: number; seen?: string[] }): Promise<{ songs?: MusicFound[]; groups?: MusicGroup[]; errors: { source: string; message: string }[]; more: boolean; unpaged?: string[] }>;
     /** The songs of an album, artist or playlist a search found: a page of `limit` (at most 200), from `offset`. */
-    groupSongs(sourceId: string, kind: 'album' | 'artist' | 'playlist', id: string, page?: number, options?: { limit?: number; offset?: number }): Promise<{ songs: MusicFound[]; more: boolean }>;
+    groupSongs(sourceId: string, kind: 'album' | 'artist' | 'playlist', id: string, page?: number, options?: { limit?: number; offset?: number; seen?: string[] }): Promise<{ songs: MusicFound[]; more: boolean; unpaged?: boolean }>;
     /** 正文点的歌, newest first. */
     listHeard(): Promise<MusicHeard[]>;
     forgetHeard(ids: string[]): Promise<boolean>;
@@ -1221,7 +1241,20 @@ export interface BackendFacade {
 
 export interface LatestMessage { id: number; lines: ParsedDialogueLine[]; }
 /** Installed-panel API: facade plus actions that access the current SillyTavern chat. */
-export interface BackendAPI extends BackendFacade {
+export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
+    /** The installed bridge supplies its own version; the raw backend facade takes (parts, version, options). */
+    exportBackup(parts: string[], options?: {password?: string}): Promise<{blob: Blob; name: string}>;
+    chatReroll(threadId: string): Promise<ChatThread>;
+    chatCancel(threadId: string): void;
+    callReplay(index: number): Promise<void>;
+    soundState(): {ambience: string; waiting: string; running: boolean; making: string[]};
+    soundListen(id: string): Promise<boolean>;
+    soundTakeListen(key: string, blob: Blob): Promise<boolean>;
+    soundPrompt(input: {text: string; mode?: 'english' | 'apply'; hint?: string}): Promise<string>;
+    soundStopAmbience(): void;
+    takeThread(): string | null;
+    takeApp(): string | null;
+
     /** Closes the settings panel; it does not dispose the backend or stop audio. */
     close(): void;
     /** id is -1 when there is no readable assistant dialogue. */
@@ -1239,8 +1272,8 @@ export interface BackendAPI extends BackendFacade {
     assistantDisplay(text: string, role: string, depth: number): string;
     assistantContext(): Promise<{ available: boolean; count: number; label: string; reason?: string; last?: { included: number; total: number; tokens: number; budget: number; truncated: boolean } }>;
     /** Appends a user message then replies. Omit text to retry a pending user message without duplicating it. */
-    assistantReply(threadId: string, text?: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
-    assistantReroll(threadId: string, messageId: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
+    assistantReply(threadId: string, text?: string, options?: {allowPaid?: boolean; continueFrom?: string}): Promise<AssistantThread>;
+    assistantReroll(threadId: string, messageId: string, options?: {allowPaid?: boolean; continueFrom?: string}): Promise<AssistantThread>;
     /** 重新绘制 a reply's picture from the same 出图块; its words stay (a new version of the reply). */
     assistantRedraw(threadId: string, messageId: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
     assistantReadFiles(files: File[], options?: {chat?: boolean}): Promise<AssistantAttachment[]>;
@@ -1276,9 +1309,9 @@ export interface BackendAPI extends BackendFacade {
     /** Draws a contact's photo from its tags (allowPaid: even when it costs Anlas); resolves to the photo id. */
     chatDrawPhoto?(threadId: string, messageId: string, allowPaid?: boolean): Promise<string | null>;
     /** Prepares chat messages to be injected once into the next story reply. */
-    chatBring(threadId: string, messageIds: string[]): Promise<{ threadId: string; name: string; count: number; text: string }>;
+    chatBring(threadId: string, messageIds: string[]): Promise<{ threadId: string; name: string; count: number; text: string; ids: string[]; replaced: number }>;
     chatPendingBring(): { threadId: string; name: string; count: number } | null;
-    chatCancelBring(): void;
+    chatCancelBring(): Promise<void>;
     /** True while a reply for this chat is being generated. */
     chatTyping(threadId: string): boolean;
     /** 发送好友申请 to a contact who deleted the user: the contact decides (one model request). */
@@ -1400,7 +1433,7 @@ export interface BackendAPI extends BackendFacade {
     /** 画画 全屏: the floating phone fills the whole window (true), or goes back; returns whether it is opened up. */
     panelFull(on: boolean): boolean;
     /** 视觉小说: opens the stage over the tavern page, from the latest reply, the first message or a message id. */
-    vnStart(from: 'latest' | 'first' | number): boolean;
+    vnStart(from: 'latest' | 'first' | number): Promise<boolean>;
     /** 绘本 (host-book.js): the open chat; its story from `from` to `to` as steps (core/vn.js storySteps, whole lines); the text model's answer; a page read aloud (resolves when read; false: nothing on it can be read); a page's sound by line for an export (null: not keepable); whether the 旁白 can be read / kept. */
     bookInfo?(): { chat: string; title: string; length: number; user: string };
     bookSource?(from?: number, to?: number): { chat: string; title: string; length: number; user: string; from: number; to: number; messages: Array<{ id: number; user: boolean; name: string; steps: Array<{ kind: 'say' | 'narrate' | 'bg'; text?: string; role?: string; emotion?: string; line?: number; part?: number; url?: string; user?: boolean }> }> };
@@ -1459,9 +1492,16 @@ export interface DiagnosticFacts {
 }
 export interface PanelHostBridge { connect(source: Window): BackendAPI; }
 
+export interface PhoneController {
+    ready: Promise<void>; readonly active: PhoneApp | null; readonly locked: boolean;
+    open(name: PhoneApp, roleId?: string, from?: Element | null): void;
+    home(immediate?: boolean): void; back(): void; lock(): void; unlock(): void; dispose(): void;
+    views: Map<string, unknown>; loadApps(): Promise<unknown[]>;
+}
 declare global {
     interface Window {
         __stIphoniePanelBridge?: PanelHostBridge;
+        stTtsPhone?: PhoneController;
         /** Legacy callbacks remain supported; new views should use subscribe(). */
         stTtsUpdate?: (state: PlaybackSnapshot) => void;
         stTtsOpenRole?: (routeId: string) => void;
