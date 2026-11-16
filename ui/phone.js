@@ -15,6 +15,7 @@ import {bindNativeSelects} from './popup-select.js';
 import {grow, launch, nudge, within, visible, islandIn, moving} from './carry.js';
 import {todayPage} from './today.js';
 import {thumbBlob} from './thumbs.js';
+import {inertController} from './inert.js';
 
 // App factories, keyed by the ids in apps.js.
 // The apps: each one's module loads when the app is first opened, or in an idle moment after the phone is up
@@ -69,6 +70,7 @@ export function batteryState(b) {
 
 export function createPhoneApp({window: win, api, mount = win.document.getElementById('root')}) {
   const doc = win.document;
+  const inert = inertController(mount);
   const controller = new win.AbortController(), signal = controller.signal;
   const views = new Map(), assets = new Map();
   let wallURL = '';
@@ -177,10 +179,10 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (toastTap && e.target.closest('.toast')) { const go = toastTap; hideToast(); run(go); }
   });
   function syncInert() {
-    home.inert = !!active || locked || !!sheet;
-    frame.inert = !active || locked || !!sheet;
-    for (const s of ['.statusbar', '.pull-tab', '.island', '.home-indicator']) $(s).inert = locked || !!sheet;
-    lockscreen.inert = !locked || !!sheet;
+    inert.set(home, !!active || locked || !!sheet);
+    inert.set(frame, !active || locked || !!sheet);
+    for (const s of ['.statusbar', '.pull-tab', '.island', '.home-indicator']) inert.set($(s), locked || !!sheet);
+    inert.set(lockscreen, !locked || !!sheet);
     syncStill();
   }
   // The wallpaper stands still under a sheet and while 今天 is in (phone.css). Marked on the screen rather than found
@@ -203,7 +205,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (!over) sheet?.close(null);
     const focus = doc.activeElement, overlay = doc.createElement('div');
     overlay.className = 'overlay' + (top ? ' top' : '');
-    if (under) under.overlay.inert = true;
+    if (under) inert.set(under.overlay, true);
     if (over) overlay.dataset.over = '';
     overlay.innerHTML = `<section class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><header class="sheet-header"><h2>${esc(title)}</h2>${add ? `<button type="button" class="sheet-add" data-sheet-add aria-label="${esc(add)}">${icon('add')}</button>` : ''}<button class="nav-button" data-sheet-close aria-label="关闭">${icon('close')}</button></header><div class="sheet-body">${html}</div></section>`;
     screen.append(overlay);
@@ -219,7 +221,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
         live = false;
         leave(overlay, from);
         if (sheet === result) sheet = under?.live ? under : null;
-        if (under?.live && sheet === under) under.overlay.inert = false;
+        if (under?.live && sheet === under) inert.set(under.overlay, false);
         syncInert();
         for (const callback of callbacks) callback(value);
         if (focus?.isConnected && !focus.closest('[inert]')) focus.focus({preventScroll: true});
@@ -263,9 +265,9 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const panel = overlay.querySelector('.sheet');
     // Only a plain bottom sheet: the control center has its own way out, a pop-over in 画画 sits where it was put.
     if (motion.matches || overlay.className !== 'overlay' || typeof panel?.animate !== 'function') { overlay.remove(); return; }
-    overlay.inert = true;
+    inert.set(overlay, true);
     overlay.classList.replace('overlay', 'overlay-out');
-    const gone = () => overlay.remove(), h = panel.offsetHeight || 400;
+    const gone = () => { inert.set(overlay, false); overlay.remove(); }, h = panel.offsetHeight || 400;
     overlay.animate([{opacity: 1}, {opacity: 0}], {duration: 240, easing: 'ease-in', fill: 'forwards'});
     panel.animate([{transform: `translateY(${from}px)`}, {transform: `translateY(${Math.max(140, h * .55)}px)`}], {duration: 240, easing: 'cubic-bezier(.45,0,.8,.55)', fill: 'forwards'}).finished.then(gone, gone);
     win.setTimeout(gone, 500);
@@ -389,6 +391,12 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       return;
     }
     wanted = null;
+    // Build before leaving the current app: a failed factory must not strand navigation half-open.
+    let v = views.get(name);
+    if (!v) {
+      try { v = FACTORIES[name](ctx); content.append(v.root); views.set(name, v); }
+      catch (error) { fail(error); return; }
+    } else run(() => v.refresh());
     closeSheets();
     if (sidePreview) previewSide(null);
     unlock();
@@ -396,9 +404,6 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const was = stopCarry();
     if (active && active !== name) views.get(active)?.leave?.();
     active = name;
-    let v = views.get(name);
-    if (!v) { v = FACTORIES[name](ctx); views.set(name, v); content.append(v.root); }
-    else run(() => v.refresh());
     for (const [id, view] of views) view.root.hidden = id !== name;
     frame.hidden = false;
     screen.dataset.view = 'app';
@@ -673,8 +678,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     applyThemeMode();
     const dark = isDark();
     const key = JSON.stringify([phone.wallpaper, phone.icons, phone.iconStyle, phone.monoHue, phone.skin, phone.skin === 'custom' || phone.wallpaper.key === 'custom' ? phone.customTheme : null, dark, phone.look?.at]);
-    if (key === appearanceKey) return;
     const ticket = ++appearanceEpoch;
+    if (key === appearanceKey) return;
     // The wallpaper is the photo itself; an icon, a few dozen pixels wide, the photo's small picture (ui/thumbs.js).
     const iconIds = [...new Set(Object.values(phone.icons).filter(x => x?.kind === 'photo').map(x => x.photoId))];
     const [wall, ...pictures] = await Promise.all([phone.wallpaper.kind === 'photo' ? api.getPhoto(phone.wallpaper.photoId).then(r => r?.blob) : null, ...iconIds.map(id => thumbBlob(api, {id}))]);
@@ -682,10 +687,13 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const lookIds = [...new Set([phone.wallpaper, ...Object.values(phone.icons)].filter(x => x?.kind === 'look').map(x => x.id))];
     const lookFiles = new Map(await Promise.all(lookIds.map(async id => [id, await api.lookFiles?.(id).catch(() => null)])));
     if (disposed || ticket !== appearanceEpoch) return;
+    const clear = new Set((await Promise.all(iconIds.map(async (id, i) => pictures[i] && await seeThrough(pictures[i]) ? id : null))).filter(Boolean));
+    // Decode first, then publish all URLs together. No shared resources change across an await.
+    if (disposed || ticket !== appearanceEpoch) return;
     for (const url of [...assets.values(), wallURL]) if (url) win.URL.revokeObjectURL(url);
     assets.clear();
+    clearIcons = clear;
     iconIds.forEach((id, i) => { if (pictures[i]) assets.set(id, win.URL.createObjectURL(pictures[i])); });
-    clearIcons = new Set((await Promise.all(iconIds.map(async (id, i) => pictures[i] && await seeThrough(pictures[i]) ? id : null))).filter(Boolean));
     for (const [app, one] of Object.entries(phone.icons)) {
       const file = one?.kind === 'look' ? lookFiles.get(one.id)?.icons[app] : null;
       if (!file?.blob) continue;
@@ -991,8 +999,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   mount.addEventListener('click', event => {
     const b = event.target.closest('button');
     if (!b || b.disabled) return;
-    if (b.dataset.app) { open(b.dataset.app, undefined, b.closest('.island-card') || b.querySelector('.icon-tile') || b); closeCard({now: true}); return; }
-    if (b.dataset.openRole) { open('roles', b.dataset.openRole); return; }
+    if (b.dataset.app) { run(() => open(b.dataset.app, undefined, b.closest('.island-card') || b.querySelector('.icon-tile') || b)); closeCard({now: true}); return; }
+    if (b.dataset.openRole) { run(() => open('roles', b.dataset.openRole)); return; }
     if (b.hasAttribute('data-slot')) { notify('这个位置留给以后的新 App'); return; }
     if (!b.dataset.system) return;
     run(() => {
@@ -1183,6 +1191,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     unsubscribe();
     controller.abort();
     closeSheets();
+    inert.dispose();
     for (const v of views.values()) v.dispose();
     calls.dispose();
     for (const url of avatarURLs.values()) if (url) win.URL.revokeObjectURL(url);
@@ -1227,6 +1236,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const pending = api.pendingRole();
     if (pending) openPendingRole(pending);
     else if (takeDraw()) { /* opened from a chat picture */ }
+    else if (takeThread()) { /* opened from a message card */ }
     else if (takeApp()) { /* opened from the music island */ }
     else if (p.lockOnOpen) lock();
   }).catch(error => {

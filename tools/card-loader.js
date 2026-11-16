@@ -58,22 +58,52 @@ const CARD = {
   const list = value => (Array.isArray(value) ? value : []).filter(x => x && String(x.name || '').trim());
   step('开始');
 
-  // 小手机和页面一起启动，等它几秒。
+  // A slow start is not the same as a disabled extension.
   let phone = null;
-  for (let i = 0; i < 24 && !(phone = top.stIphonie); i++) await new Promise(r => setTimeout(r, 500));
+  for (let i = 0; i < 60 && !(phone = top.stIphonie); i++) await new Promise(r => setTimeout(r, 500));
 
   if (!phone) {
     step('没找到小手机');
-    const asked = 'sttts.loader.asked:' + who;
-    if (!CARD.debug) { try { if (top.localStorage.getItem(asked)) return; top.localStorage.setItem(asked, '1'); } catch { /* 这次照问 */ } }
-    // 装了但没启用：只提醒，不替玩家去改扩展设置。
-    const there = await fetch('/scripts/extensions/third-party/ST-iPhonie/manifest.json', {cache: 'no-store'}).then(r => r.ok).catch(() => false);
-    if (there) { say('小手机（ST-iPhonie）装了但没有启用：在酒馆的「扩展」面板里把它打开。'); return; }
+    // Discover every installed third-party folder, including manually renamed ZIP installs.
+    // If discovery cannot be trusted, leave installation to the extension panel rather than risk a duplicate.
+    let there = !!top.__stIphonieCopies?.size;
+    if (!there) {
+      try {
+        const response = await fetch('/api/extensions/discover', {cache: 'no-store', headers: ctx.getRequestHeaders()});
+        if (!response.ok) throw Error('discover');
+        const all = await response.json();
+        if (!Array.isArray(all)) throw Error('discover');
+        const folders = [...new Set(all.map(row => typeof row === 'string' ? row : row?.name).filter(name => typeof name === 'string' && /^third-party\/[^/\\?#]+$/.test(name) && !['.', '..'].includes(name.split('/')[1])))];
+        let unknown = false;
+        for (let at = 0; at < folders.length && !there; at += 4) {
+          const results = await Promise.all(folders.slice(at, at + 4).map(async name => {
+            try {
+              const r = await fetch('/scripts/extensions/' + name.split('/').map(encodeURIComponent).join('/') + '/manifest.json', {cache: 'no-store'});
+              if (!r.ok) throw Error('manifest');
+              const manifest = await r.json();
+              return manifest?.display_name === 'ST-iPhonie';
+            } catch { unknown = true; return false; }
+          }));
+          there = results.some(Boolean);
+        }
+        if (!there && unknown) throw Error('manifest');
+      } catch {
+        if (top.stIphonie) phone = top.stIphonie;
+        else { say('没能确认小手机是否已安装，请先在酒馆的「扩展」面板查看，避免重复安装。'); return; }
+      }
+    }
+    // It may have finished starting while discovery was in flight.
+    phone = top.stIphonie || phone;
+    if (!phone) {
+      if (there) { say('小手机（ST-iPhonie）已安装，但还没启动起来：请检查扩展开关、酒馆版本或页面里的启动提示。'); return; }
+      const asked = 'sttts.loader.asked:' + who;
+      if (!CARD.debug) { try { if (top.localStorage.getItem(asked)) return; top.localStorage.setItem(asked, '1'); } catch { /* 这次照问 */ } }
     if (!await ask(`${who}要用小手机`, '还没有装小手机（ST-iPhonie）。现在装吗？会用酒馆自己的「安装扩展」从 GitHub 下载，装好后刷新一下页面就能用，以后跟着酒馆的扩展更新。')) { step('玩家没装'); return; }
     const r = await fetch('/api/extensions/install', {method: 'POST', headers: ctx.getRequestHeaders(), body: JSON.stringify({url: REPO, global: false})});
     if (!r.ok) { say('小手机没装上：' + (await r.text()).slice(0, 200)); return; }
     if (await ask('小手机装好了', '刷新页面以后就能用。现在刷新吗？')) top.location.reload();
     return;
+    }
   }
 
   step(`找到了小手机（接口第 ${phone.apiVersion} 版）`);

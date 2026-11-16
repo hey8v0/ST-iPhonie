@@ -117,7 +117,7 @@ export function generatorApp(ctx) {
   // ---------- a card: the assistant's sandbox (no network, no way into the phone) ----------
   function theme() {
     const style = win.getComputedStyle(v.root), color = name => style.getPropertyValue(name).trim();
-    return {theme: {'--SmartThemeBodyColor': color('--ink') || '#25314b', '--SmartThemeEmColor': color('--ink2') || '#65718a', '--SmartThemeQuoteColor': color('--accent') || '#7dadd6', '--SmartThemeUnderlineColor': color('--accent-ink') || '#2d6392'}, dark: ctx.doc.documentElement.dataset.theme === 'dark'};
+    return {theme: {'--SmartThemeBodyColor': color('--ink') || '#25314b', '--SmartThemeEmColor': color('--ink2') || '#65718a', '--SmartThemeQuoteColor': color('--accent') || '#7dadd6', '--SmartThemeUnderlineColor': color('--accent-ink') || '#2d6392', '--SmartThemeBorderColor': color('--line') || '#dce5ef', '--SmartThemeBlurTintColor': color('--card') || '#ffffff', '--SmartThemeChatTintColor': color('--card') || '#ffffff'}, dark: ctx.doc.documentElement.dataset.theme === 'dark'};
   }
   function mountCard() {
     const slot = v.root.querySelector('.gen-card-slot'), piece = slot && theaters.find(x => x.id === slot.dataset.card);
@@ -137,6 +137,13 @@ export function generatorApp(ctx) {
     for (const frame of v.root.querySelectorAll('.gen-card-frame')) if (frame.contentWindow === event.source) frame.style.height = `${Math.max(60, Math.min(20000, Math.ceil(event.data.height)))}px`;
   };
   win.addEventListener('message', sized);
+  // Keep the sandbox document (and its state) alive when the phone changes theme.
+  const themeObserver = new win.MutationObserver(() => {
+    if (v.disposed) return;
+    const update = {type: 'assistant-theme', ...theme()};
+    for (const frame of v.root.querySelectorAll('.gen-card-frame')) frame.contentWindow?.postMessage(update, '*');
+  });
+  themeObserver.observe(ctx.doc.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-skin']});
 
   async function loadTheaters() {
     const ticket = ++turn, list = await api.theaters();
@@ -238,7 +245,7 @@ export function generatorApp(ctx) {
   v.onTheater = () => loadTheaters().catch(() => {});
   v.refresh = () => { steering = quietly(() => api.generatorSteering(), null); return loadTheaters(); };
   const dispose = v.dispose;
-  v.dispose = () => { win.removeEventListener('message', sized); dispose(); };
+  v.dispose = () => { themeObserver.disconnect(); win.removeEventListener('message', sized); dispose(); };
   busy = quietly(() => api.generatorBusy(), '');
   steering = quietly(() => api.generatorSteering(), null);
   render();

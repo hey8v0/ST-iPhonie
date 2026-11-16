@@ -2,7 +2,7 @@
 export type Engine = 'fish' | 'mini' | 'eleven' | 'mimo' | 'doubao' | 'custom';
 /** Keys cover the voice engines and NovelAI. */
 /** llm: the key of the phone's own text model (an OpenAI-compatible API). */
-export type KeyEngine = Engine | 'nai' | 'llm' | 'embed' | 'gpt';
+export type KeyEngine = Engine | 'nai' | 'llm' | 'embed' | 'gpt' | 'stepfun' | 'lyria' | 'replicate';
 /** What the drawing App and every picture use: NovelAI, a GPT image model, or the user's ComfyUI. */
 export type DrawEngine = 'nai' | 'gpt' | 'comfy';
 export type Theme = 'system' | 'light' | 'dark';
@@ -543,14 +543,17 @@ export interface VoiceList {
     note: string;
 }
 
-export type PhoneApp = 'roles' | 'engines' | 'presets' | 'library' | 'gallery' | 'notes' | 'listen' | 'settings' | 'draw' | 'chat';
-export type BuiltinWallpaper = 'sky' | 'silver' | 'midnight' | 'rose' | 'sand' | 'aero';
+export type PhoneApp = 'roles' | 'engines' | 'presets' | 'library' | 'gallery' | 'notes' | 'listen' | 'settings' | 'draw' | 'chat' | 'forum' | 'peek' | 'sounds' | 'assistant' | 'music' | 'picbook' | 'games' | 'paint' | 'vn' | 'logs' | 'indie' | 'ledger' | 'wardrobe' | 'generator' | 'bookshelf';
+export type BuiltinWallpaper = 'sky' | 'silver' | 'midnight' | 'rose' | 'sand' | 'aero' | 'fresh' | 'custom';
 /** Look of the whole phone: colours, cards, buttons and icons. Each skin also has a matching wallpaper of the same key. */
-export type PhoneSkin = 'sky' | 'aero';
+export type PhoneSkin = 'sky' | 'aero' | 'fresh' | 'custom';
 export type PhoneGlyph = 'default' | PhoneApp | 'wave' | 'book' | 'music' | 'camera' | 'sliders' | 'note' | 'person' | 'microphone' | 'star' | 'headphones';
-export type Wallpaper = { kind: 'builtin'; key: BuiltinWallpaper } | { kind: 'photo'; photoId: string };
-export type AppIcon = { kind: 'glyph'; key: PhoneGlyph } | { kind: 'photo'; photoId: string };
+export type Wallpaper = { kind: 'builtin'; key: BuiltinWallpaper } | { kind: 'photo'; photoId: string } | { kind: 'look'; id: string };
+export type AppIcon = { kind: 'glyph'; key: PhoneGlyph } | { kind: 'photo'; photoId: string } | { kind: 'look'; id: string };
+export type PhoneWidgetKind = 'calendar' | 'clock' | 'playing' | 'chat' | 'cast' | 'photo' | 'notes' | 'battery' | 'wallet';
+export interface PhoneWidget { id: string; kind: PhoneWidgetKind; size: 's' | 'm' | 'l'; }
 export interface PhonePreferences {
+    widgets: PhoneWidget[];
     wallpaper: Wallpaper;
     icons: Partial<Record<PhoneApp, AppIcon>>;
     iconStyle: 'color' | 'glass' | 'mono';
@@ -613,19 +616,35 @@ export interface CachedAudio { key: string; at: number; bytes: number; metadata:
 export interface CacheStats { count: number; bytes: number; /** The most it keeps before the oldest go. */ limit: number; available: boolean; }
 export interface VoicePoolEntry { engine: 'fish' | 'mini' | 'eleven' | 'mimo' | 'doubao' | 'custom'; voice: string; model: string; name: string; gender: 'female' | 'male' | ''; age: 'child' | 'young' | 'adult' | 'old' | ''; style: string; }
 export interface LibraryStats { bytes: number; limit: number; notes: number; photos: number; favorites: number; references: number; vibes: number; /** Bytes by kind: notes, photos, favorites, references, vibes, phone. */ sizes: Record<string, number>; }
-export type LibraryCollection = 'favorites' | 'cache' | 'photos' | 'notes';
+export type LibraryCollection = 'favorites' | 'cache' | 'photos' | 'notes' | 'books';
 
 export type BackendEvent =
     | ({ type: 'playback'; revision: number } & PlaybackSnapshot)
     | ({ type: 'audio-ready'; revision: number } & ReadyAudio)
     | { type: 'settings'; revision: number; state: Settings }
-    | { type: 'assistant'; revision: number; threadId?: string; settings?: boolean; deleted?: boolean; busy?: boolean; error?: string }
-    | { type: 'keys'; revision: number; engine: Engine; configured: boolean }
+    | { type: 'assistant'; revision: number; threadId?: string; settings?: boolean; deleted?: boolean; busy?: boolean; error?: string; progress?: boolean; restored?: boolean; persisted?: boolean; memoryReset?: boolean }
+    | { type: 'keys'; revision: number; engine: KeyEngine; configured: boolean }
     | { type: 'library'; revision: number; collection: LibraryCollection }
     | { type: 'phone'; revision: number; preferences: PhonePreferences }
     | { type: 'draw'; revision: number; phase?: 'generating' | 'done' | 'error' | 'cancelled'; message?: string; subscription?: NovelAISubscription; queue?: DrawJob[]; /** Why the cloud queue could not be used, when it could not. */ cloud?: string }
     /** A chat changed; typing is set while a reply is being generated. threadId is null when a chat was created. */
-    | { type: 'chat'; revision: number; threadId: string | null; typing?: boolean; bring?: boolean };
+    | { type: 'chat'; revision: number; threadId: string | null; typing?: boolean; bring?: boolean; friend?: boolean; request?: boolean; held?: boolean; incoming?: {from: string; text: string; kind: string; count: number} }
+    | { type: 'albums' | 'looks' | 'logs' | 'paint' | 'ledger' | 'wardrobe' | 'theater' | 'partition' | 'references'; revision: number }
+    | { type: 'forum' | 'peek'; revision: number; busy?: boolean }
+    | { type: 'sounds'; revision: number; busy?: boolean; missing?: boolean }
+    | { type: 'moments'; revision: number; busy?: boolean; drawn?: boolean; kind?: string }
+    | { type: 'music'; revision: number; library?: boolean; heard?: boolean; logins?: boolean; settings?: boolean; status?: boolean; draft?: string; step?: [number, number] }
+    | { type: 'wallet'; revision: number; balance?: number }
+    | { type: 'call'; revision: number; call: CallState | null }
+    | ({ type: 'sync'; revision: number } & SyncStatus)
+    | { type: 'balance'; revision: number; engine: KeyEngine; balance?: VoiceBalance; stale?: boolean; switched?: boolean }
+    | { type: 'memory'; revision: number; threadId: string; persisted?: boolean; reset?: boolean }
+    | { type: 'assistant-memory'; revision: number; threadId: string }
+    | { type: 'peeked'; revision: number; name: string }
+    | { type: 'space'; revision: number; space: ReturnType<BackendAPI['phoneSpace']> }
+    | { type: 'games'; revision: number; game: string }
+    | { type: 'generator'; revision: number; busy?: string; steer?: GeneratorDirection | null }
+    | ({ type: 'bedtime'; revision: number } & Partial<ReturnType<BackendAPI['bedtimeStatus']>>);
 
 /** Framework-independent facade. Methods may throw validation/lifecycle errors. */
 export interface BackendFacade {
@@ -1446,8 +1465,11 @@ declare global {
         /** Legacy callbacks remain supported; new views should use subscribe(). */
         stTtsUpdate?: (state: PlaybackSnapshot) => void;
         stTtsOpenRole?: (routeId: string) => void;
-        stTtsPanelVisibility?: (visible: boolean) => void;
+        stTtsPanelVisibility?: (visible: boolean, options?: {preserveView?: boolean}) => void;
         stTtsOpenDraw?: () => void;
+        stTtsOpenApp?: (name?: PhoneApp | 'chat:moments') => void;
+        stTtsOpenThread?: () => void;
+        stTtsBack?: () => boolean;
     }
 }
 /** Connect only from the installed plugin's settings iframe. Defaults to its window. */
