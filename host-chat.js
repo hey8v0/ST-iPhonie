@@ -759,6 +759,9 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
       catch (error) { if (error?.name === 'AbortError' || !valid()) throw error; failed = true; phoneLog('接收暂时失败，稍后补收：' + error.message); }
       if (failed && valid()) { await new Promise(resolve => setTimeout(resolve, 150)); if (valid()) result = await deliverOne(index, valid); }
       return result;
+    }).catch(error => {
+      if (error?.name === 'AbortError' || !valid()) { phoneLog('回复、分支或聊天已变化，未继续投递旧消息'); return 0; }
+      throw error;
     });
     deliveryQueue = task.catch(error => phoneLog('接收失败，可重试：' + error.message));
     return task;
@@ -837,9 +840,9 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
    */
   async function withdraw(story, ver, valid = chatGuard()) {
     let gone = 0;
-    for (const t of await backend.threads()) {
+    for (const t of await backend.storyThreads(story)) {
       requireChat(valid);
-      const list = (await backend.chats.get(t.id))?.messages || [], old = list.filter(m => m.story === story && m.storyVer !== ver);
+      const list = t.messages || [], old = list.filter(m => m.story === story && m.storyVer !== ver);
       requireChat(valid);
       if (!old.length) continue;
       const after = list.slice(list.indexOf(old.at(-1)) + 1);

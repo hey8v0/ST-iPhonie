@@ -2943,6 +2943,8 @@ export class TTSBackend {
     async blockedNames() { return (await this.threads()).filter(t => t.type === 'dm' && t.blocked).map(t => t.members[0]); }
     /** Phone chats of the card open now. A late read never supplies another visit's list. */
     async threads() { const here = this.here(), valid = this.spaceGuard(); const list = await this.chats.list(); return valid() ? list.filter(t => inSpace(t, here)) : []; }
+    /** Full chats linked to one story reply, with the same partition/visit guard as the list. */
+    async storyThreads(story) { const here = this.here(), valid = this.spaceGuard(); const list = await this.chats.forStory(story); return valid() ? list.filter(t => inSpace(t, here)) : []; }
     /** Direct ids (an open chat or a notification) obey the same filter as the list. */
     async getChatThread(id) {
         const here = this.here(), valid = this.spaceGuard(), thread = await this.chats.get(id);

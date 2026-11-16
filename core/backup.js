@@ -3,7 +3,7 @@
 // password they cannot be read. The file is assembled in pieces and read back in pieces: a string cannot pass about 512 MB,
 // which a large album or a music library does.
 
-import {normalizeMemoryBooks, normalizeAssistantThreads} from './data-transfer.js';
+import {normalizeMemoryBooks, normalizeAssistantThreads, memoryRows, assistantRows} from './data-transfer.js';
 
 export const BACKUP_FORMAT = 2;
 /** The parts a backup can hold, in the order they are shown. settings brings the reference audio and the phone's look. */
@@ -105,6 +105,17 @@ export function withBlobs(value) {
   return value;
 }
 
+/** Array members become Blobs individually: no aggregate JSON string or spread of every row as arguments. */
+async function arrayJSON(rows) {
+  const parts = ['[']; let first = true;
+  for (const row of rows) {
+    const json = await rowJSON(row); // JSON arrays represent missing/undefined members as null.
+    parts.push(first ? '' : ',', new Blob([json === undefined ? 'null' : json])); first = false;
+  }
+  parts.push(']');
+  return new Blob(parts);
+}
+
 /**
  * Builds the backup file.
  * data: {version, settings?: object, library?: {store: rows[]}, chats?: threads[], memories?: books[],
@@ -116,20 +127,16 @@ export async function writeBackup({version = '', settings = null, library = {}, 
   const pieces = [JSON.stringify({app: 'ST-iPhonie', kind: 'backup', format: BACKUP_FORMAT, version, createdAt: Date.now()}).slice(0, -1), ',"data":{'];
   const fields = [];
   if (settings) fields.push(['settings', JSON.stringify(settings)]);
-  if (chats) fields.push(['chats', JSON.stringify(chats)]);
-  if (memories !== null) fields.push(['memories', JSON.stringify(normalizeMemoryBooks(memories))]);
-  if (assistant !== null) fields.push(['assistant', JSON.stringify(normalizeAssistantThreads(assistant))]);
-  if (moments) fields.push(['moments', JSON.stringify(moments)]);
+  if (chats) fields.push(['chats', await arrayJSON(chats)]);
+  if (memories !== null) fields.push(['memories', await arrayJSON(memoryRows(memories))]);
+  if (assistant !== null) fields.push(['assistant', await arrayJSON(assistantRows(assistant))]);
+  if (moments) fields.push(['moments', await arrayJSON(moments)]);
   if (keys) fields.push(['keys', JSON.stringify(keys)]);
   if (vibeGroups) fields.push(['vibeGroups', JSON.stringify(vibeGroups)]);
   for (const [store, rows] of [...Object.entries(library), ...(vnFiles ? [['vnFiles', vnFiles]] : []), ...Object.entries(more)]) {
-    const parts = ['['];
-    // Each as a Blob at once: the browser may keep those on disk, where a heap full of strings would stop a phone.
-    for (let i = 0; i < rows.length; i++) parts.push(i ? ',' : '', new Blob([await rowJSON(rows[i])]));
-    parts.push(']');
-    fields.push([store, parts]);
+    fields.push([store, await arrayJSON(rows)]);
   }
-  fields.forEach(([name, value], i) => pieces.push(i ? ',' : '', JSON.stringify(name), ':', ...[value].flat()));
+  fields.forEach(([name, value], i) => pieces.push(i ? ',' : '', JSON.stringify(name), ':', value));
   pieces.push('}}');
   return new Blob(pieces, {type: 'application/json'});
 }

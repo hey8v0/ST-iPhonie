@@ -320,6 +320,19 @@ function cleanAlts(a, makeId) {
   return {after: clip(a.after, 512), versions, shown: Math.max(0, Math.min(versions.length - 1, Math.round(Number(a.shown)) || 0))};
 }
 
+// Private lookup keys: one-time backfill on schema upgrade, then maintained with every thread write.
+// JSON tuple keys keep accounts and arbitrary photo/story IDs distinct without delimiter assumptions.
+function indexedThread(row) {
+  const photos = new Set(), stories = new Set();
+  for (const list of [row.messages, ...(Array.isArray(row.alts?.versions) ? row.alts.versions : [])]) for (const m of Array.isArray(list) ? list : []) {
+    if (m?.kind === 'photo') for (const id of [m.photoId, ...(Array.isArray(m.imageVersions) ? m.imageVersions : [])]) if (typeof id === 'string' && id) photos.add(id);
+  }
+  for (const m of Array.isArray(row.messages) ? row.messages : []) if (typeof m?.story === 'string' && m.story) stories.add(m.story);
+  row._photoRefs = [...photos].map(id => JSON.stringify([row.scope, id]));
+  row._storyRefs = [...stories].map(id => JSON.stringify([row.scope, id]));
+  return row;
+}
+
 // Where the pages of a browser see that one of them wrote (a page with no storage of its own: only itself).
 const pageStorage = () => { try { return globalThis.localStorage || null; } catch { return null; } };
 const REVISIONS = new Map();
@@ -352,12 +365,20 @@ export class ChatStore {
     if (this.#db) return this.#db;
     if (!this.#factory?.open) throw fail('浏览器不支持本地保存聊天记录，请检查存储权限', 'STORAGE_UNAVAILABLE');
     this.#opening ||= new Promise((resolve, reject) => {
-      const req = this.#factory.open('st-iphonie-chats-v1', 1);
-      req.onupgradeneeded = () => { const store = req.result.createObjectStore('threads', {keyPath: ['scope', 'id']}); store.createIndex('scope', 'scope'); };
+      let abandoned = false;
+      const req = this.#factory.open('st-iphonie-chats-v1', 2);
+      req.onupgradeneeded = () => {
+        const store = req.result.objectStoreNames.contains('threads') ? req.transaction.objectStore('threads') : req.result.createObjectStore('threads', {keyPath: ['scope', 'id']});
+        if (!store.indexNames.contains('scope')) store.createIndex('scope', 'scope');
+        if (!store.indexNames.contains('photo-refs')) store.createIndex('photo-refs', '_photoRefs', {multiEntry: true});
+        if (!store.indexNames.contains('story-refs')) store.createIndex('story-refs', '_storyRefs', {multiEntry: true});
+        const cursor = store.openCursor();
+        cursor.onsuccess = () => { const row = cursor.result; if (row) { row.update(indexedThread(row.value)); row.continue(); } };
+      };
       req.onerror = () => reject(fail('无法打开聊天记录，请检查浏览器的存储权限', 'STORAGE_UNAVAILABLE'));
-      req.onblocked = () => reject(fail('另一个页面占用了聊天记录，请关闭旧页面后重试', 'STORAGE_BLOCKED'));
+      req.onblocked = () => { abandoned = true; reject(fail('另一个页面占用了聊天记录，请关闭旧页面后重试', 'STORAGE_BLOCKED')); };
       req.onsuccess = () => {
-        if (this.#closed) { req.result.close(); reject(fail('聊天记录已关闭', 'CLOSED')); return; }
+        if (abandoned || this.#closed) { req.result.close(); reject(fail('聊天记录已关闭', 'CLOSED')); return; }
         this.#db = req.result;
         const db = this.#db;
         db.onversionchange = () => { db.close(); this.#summaries = null; if (this.#db === db) this.#db = null; };
@@ -397,11 +418,11 @@ export class ChatStore {
   }
   #public(row) {
     if (!row) return null;
-    const {scope, ...rest} = row;
+    const {scope, _photoRefs, _storyRefs, ...rest} = row;
     return structuredClone({pinned: false, muted: false, ...rest});
   }
   #summary(row) {
-    const {scope, messages, alts, blocked, ...rest} = row;
+    const {scope, _photoRefs, _storyRefs, messages, alts, blocked, ...rest} = row;
     // A blocked chat's 拦截记录 stays out of the list: only how much there is.
     return structuredClone({pinned: false, muted: false, ...rest, ...(blocked ? {blocked: {at: blocked.at, requests: blocked.requests, count: blocked.held.length, ...refusedOf(blocked.refused)}} : {}), count: messages.length, last: messages.filter(m => m.kind !== 'system').at(-1) || null, streak: this.#streak(messages)});
   }
@@ -445,7 +466,7 @@ export class ChatStore {
     if (type === 'group' && list.length < 2) throw fail('群聊至少要选两个人');
     // Later than the one before, even in the same millisecond: the window started last is the one in use (openedLast).
     const now = this.#madeAt = Math.max(this.#now(), this.#madeAt + 1), row = {scope: this.#scope, id: this.#id(), type: type === 'group' ? 'group' : 'dm', name: clip(name, 40).trim() || (type === 'group' ? list.join('、').slice(0, 40) : list[0]), members: type === 'group' ? list : [list[0]], unread: 0, createdAt: now, updatedAt: now, messages: [], ...(space ? {space: clip(space, 300)} : {}), ...(save ? {save: clip(save, 400)} : {}), ...(type === 'group' && windowOf ? {windowOf: clip(windowOf, 512)} : {}), ...(type === 'group' && watch === true ? {watch: true} : {})};
-    await this.#tx('readwrite', (store, done, abort, after) => { store.put(row); after(list => list.set(row.id, this.#summary(row))); done(); });
+    await this.#tx('readwrite', (store, done, abort, after) => { store.put(indexedThread(row)); after(list => list.set(row.id, this.#summary(row))); done(); });
     return this.#public(row);
   }
   async #change(id, change) {
@@ -453,7 +474,7 @@ export class ChatStore {
       if (!row) { abort(fail('这段聊天已不存在', 'MISSING')); return; }
       try { change(row); } catch (error) { abort(error); return; }
       if (row.messages.length > CHAT_STORE_LIMITS.messages) row.messages = row.messages.slice(-CHAT_STORE_LIMITS.messages);
-      store.put(row);
+      store.put(indexedThread(row));
       after(list => list.set(row.id, this.#summary(row)));
       done(this.#public(row));
     }));
@@ -590,25 +611,45 @@ export class ChatStore {
    * of the currently displayed chat partition. Never creates/deletes messages. */
   async forgetPhotos(ids) {
     const gone = new Set(ids); if (!gone.size) return [];
-    return this.#tx('readwrite', (store, done) => {
-      const changed = [], req = store.index('scope').openCursor(this.#scope);
-      req.onsuccess = () => {
-        const cursor = req.result; if (!cursor) { done(changed); return; }
-        const row = cursor.value; let touched = false;
-        for (const messages of [row.messages, ...(row.alts?.versions || [])]) for (const m of messages || []) {
-          if (m.kind !== 'photo' || ![m.photoId, ...(m.imageVersions || [])].some(id => gone.has(id))) continue;
-          const imageVersions = [...new Set([...(m.imageVersions || []), m.photoId].filter(id => id && !gone.has(id)))];
-          const photoId = gone.has(m.photoId) ? imageVersions.at(-1) || '' : m.photoId;
-          Object.assign(m, {imageVersions, imageState: photoId ? 'done' : 'failed', updatedAt: Math.max(this.#now(), (m.updatedAt || m.at || 0) + 1)});
-          if (photoId) { m.photoId = photoId; delete m.imageNote; }
-          else { delete m.photoId; m.imageNote = '图片已清理'; }
-          touched = true;
+    return this.#tx('readwrite', (store, done, abort, after) => {
+      const keys = new Map(), changed = [], summaries = new Map(); let scans = gone.size;
+      after(list => { for (const [id, summary] of summaries) list.set(id, summary); });
+      const read = () => {
+        let pending = keys.size; if (!pending) { done(changed); return; }
+        for (const key of keys.values()) {
+          const req = store.get(key);
+          req.onsuccess = () => {
+            const row = req.result; let touched = false;
+            if (row) {
+              for (const messages of [row.messages, ...(Array.isArray(row.alts?.versions) ? row.alts.versions : [])]) for (const m of messages || []) {
+                if (m.kind !== 'photo' || ![m.photoId, ...(m.imageVersions || [])].some(id => gone.has(id))) continue;
+                const imageVersions = [...new Set([...(m.imageVersions || []), m.photoId].filter(id => id && !gone.has(id)))];
+                const photoId = gone.has(m.photoId) ? imageVersions.at(-1) || '' : m.photoId;
+                Object.assign(m, {imageVersions, imageState: photoId ? 'done' : 'failed', updatedAt: Math.max(this.#now(), (m.updatedAt || m.at || 0) + 1)});
+                if (photoId) { m.photoId = photoId; delete m.imageNote; }
+                else { delete m.photoId; m.imageNote = '图片已清理'; }
+                touched = true;
+              }
+              if (touched) { store.put(indexedThread(row)); changed.push(row.id); summaries.set(row.id, this.#summary(row)); }
+            }
+            if (!--pending) done(changed);
+          };
         }
-        if (touched) { cursor.update(row); changed.push(row.id); }
-        cursor.continue();
       };
+      for (const id of gone) {
+        const req = store.index('photo-refs').getAllKeys(JSON.stringify([this.#scope, id]));
+        req.onsuccess = () => { for (const key of req.result) keys.set(JSON.stringify(key), key); if (!--scans) read(); };
+      }
     });
   }
+  /** Only full threads containing messages from this story reply, scoped to this account. */
+  async forStory(story) {
+    return this.#tx('readonly', (store, done) => {
+      const req = store.index('story-refs').getAll(JSON.stringify([this.#scope, story]));
+      req.onsuccess = () => done(req.result.map(row => this.#public(row)));
+    });
+  }
+
   async updateMessage(id, messageId, patch = {}) {
     return this.#change(id, row => {
       const m = row.messages.find(x => x.id === messageId);
@@ -736,7 +777,7 @@ export class ChatStore {
     const prepare = values => this.#prepareThreads(values);
     const rows = prepare(threads);
     return this.#tx('readwrite', (store, done, abort) => {
-      const write = incoming => { for (const row of incoming) store.put(row); done(incoming.length); };
+      const write = incoming => { for (const row of incoming) store.put(indexedThread(row)); done(incoming.length); };
       if (!replace) { write(rows); return; }
       const req = store.index('scope').getAll(this.#scope);
       req.onsuccess = () => {

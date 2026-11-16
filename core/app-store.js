@@ -12,12 +12,17 @@ export class AppStore {
     if (this.#db) return this.#db;
     if (!this.#factory?.open) throw fail('浏览器不支持本地保存，请检查存储权限', 'STORAGE_UNAVAILABLE');
     this.#opening ||= new Promise((resolve, reject) => {
-      const req = this.#factory.open(this.#name, 1);
-      req.onupgradeneeded = () => { const store = req.result.createObjectStore('docs', {keyPath: ['scope', 'id']}); store.createIndex('scope', 'scope'); };
+      let abandoned = false;
+      const req = this.#factory.open(this.#name, 2);
+      req.onupgradeneeded = () => {
+        const store = req.result.objectStoreNames.contains('docs') ? req.transaction.objectStore('docs') : req.result.createObjectStore('docs', {keyPath: ['scope', 'id']});
+        if (!store.indexNames.contains('scope')) store.createIndex('scope', 'scope');
+        if (!store.indexNames.contains('scope-kind')) store.createIndex('scope-kind', ['scope', 'kind']);
+      };
       req.onerror = () => reject(fail('无法打开本地数据，请检查浏览器的存储权限', 'STORAGE_UNAVAILABLE'));
-      req.onblocked = () => reject(fail('另一个页面占用了本地数据，请关闭旧页面后重试', 'STORAGE_BLOCKED'));
+      req.onblocked = () => { abandoned = true; reject(fail('另一个页面占用了本地数据，请关闭旧页面后重试', 'STORAGE_BLOCKED')); };
       req.onsuccess = () => {
-        if (this.#closed) { req.result.close(); reject(fail('已关闭', 'CLOSED')); return; }
+        if (abandoned || this.#closed) { req.result.close(); reject(fail('已关闭', 'CLOSED')); return; }
         this.#db = req.result;
         const db = this.#db;
         db.onversionchange = () => { db.close(); if (this.#db === db) this.#db = null; };
@@ -51,8 +56,11 @@ export class AppStore {
 
   /** Documents of one kind, newest first. */
   async list(kind) {
-    const rows = await this.#tx('readonly', (store, done) => this.#all(store, done));
-    return rows.filter(r => !kind || r.kind === kind).sort((a, b) => b.at - a.at).map(r => this.#public(r));
+    const rows = await this.#tx('readonly', (store, done) => {
+      if (!kind) { this.#all(store, done); return; }
+      const req = store.index('scope-kind').getAll([this.#scope, kind]); req.onsuccess = () => done(req.result);
+    });
+    return rows.sort((a, b) => b.at - a.at).map(r => this.#public(r));
   }
   /** Documents whose ids begin with this, the newest first, without reading the others (助手's memory can be big). */
   async listFrom(prefix) {

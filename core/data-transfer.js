@@ -58,7 +58,17 @@ export function normalizeMemoryBook(value) {
   return {id: bookId(threadId), kind: 'memory', threadId, name, at, through, throughAt, nodes};
 }
 
-export function normalizeMemoryBooks(rows) { return unique(list(rows, '记忆列表').map(normalizeMemoryBook), '记忆列表'); }
+function* checkedRows(rows, field, normalize) {
+  const seen = new Set(); let index = 0;
+  for (const value of list(rows, field)) {
+    const row = normalize(value, index++);
+    if (seen.has(row.id)) fail(field, '包含重复 ID');
+    seen.add(row.id); yield row;
+  }
+}
+/** Validated portable rows, one at a time; backup writers need not keep a second full normalized array. */
+export function memoryRows(rows) { return checkedRows(rows, '记忆列表', normalizeMemoryBook); }
+export function normalizeMemoryBooks(rows) { return [...memoryRows(rows)]; }
 
 function metadata(value, field) {
   const meta = object(value, field);
@@ -113,8 +123,8 @@ function message(value, index) {
 
 /** Full assistant conversations with their matching book. Vectors are deliberately rebuilt on each device.
  * Local revision/memoryRevision values are checked, then stripped; an importer assigns fresh local generations. */
-export function normalizeAssistantThreads(rows) {
-  return unique(list(rows, '助手会话列表').map((value, index) => {
+export function assistantRows(rows) {
+  return checkedRows(rows, '助手会话列表', (value, index) => {
     const row = object(value, `助手会话[${index}]`), field = `助手会话[${index}]`;
     try { assertAssistantThread(row); } catch { fail(field); }
     const id = string(row.id, field + '.id', 200, {id: true});
@@ -131,5 +141,6 @@ export function normalizeAssistantThreads(rows) {
       if (memory.threadId !== id || generation(row.memory, field + '.memory') !== memoryRevision) fail(field + '.memory', '不属于当前会话版本');
     }
     return {id, kind: 'assistant', title, createdAt, updatedAt, at, ...(restoredAt !== undefined ? {restoredAt} : {}), ...(titleEdited !== undefined ? {titleEdited} : {}), messages, memory};
-  }), '助手会话列表');
+  });
 }
+export function normalizeAssistantThreads(rows) { return [...assistantRows(rows)]; }
