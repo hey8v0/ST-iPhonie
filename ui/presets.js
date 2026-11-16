@@ -319,7 +319,7 @@ export function presetsApp(ctx) {
       + `<div class="group pad">${field('名称', input('name', p.name))}${basics}</div>${folds}
         ${groupTitle(draw ? '出图规则' : chat ? '规则' : '提示词条目', btn('add-entry', icon('add') + '条目', 'chip-button'))}
         <div class="group entry-list">${p.entries.map((e, i) => `<div class="setting-row entry-row${e.enabled ? '' : ' off'}"><button type="button" class="entry-open" data-action="open-entry" data-index="${i}"><span class="row-text"><strong>${esc(e.title || '未命名条目')}</strong><small>${esc(ruleNote(e, draw, chat))}</small></span></button><input class="switch" type="checkbox" data-entry-on="${i}" aria-label="启用「${esc(e.title || '未命名条目')}」" ${e.enabled ? 'checked' : ''}></div>`).join('') || '<p class="hint">还没有规则，点右上角「条目」加一条。</p>'}</div>
-        <div class="savebar"><span class="save-state" data-save-state>${dirty.has(draftKey()) ? '未保存' : '草稿'}</span>${p.id && !used ? btn('use-preset', '使用', 'secondary') : ''}${btn('save-preset', '保存预设', 'primary')}</div>`);
+        <div class="savebar"><span class="save-state" data-save-state>${dirty.has(draftKey()) ? '未保存' : p.id ? '已保存' : '草稿'}</span>${p.id && !used ? btn('use-preset', '使用', 'secondary') : ''}${btn('save-preset', '保存预设', 'primary')}</div>`);
   }
   /** One rule in a sheet: name, where it goes, the text; moving and deleting at the bottom. */
   function openEntry(i) {
@@ -340,7 +340,7 @@ export function presetsApp(ctx) {
       const el = ev.target;
       if (el.matches('[data-use]')) setUse(el);
       else if (el.matches('[data-engine-use]')) setEngines(el);
-      else if (el.matches('[data-field]') && (el.type === 'checkbox' || el.tagName === 'SELECT')) { update(el, false); if (el.dataset.field === 'customInjection') { next = i; d.close(); } }
+      else if (el.matches('[data-field]') && (el.type === 'checkbox' || el.tagName === 'SELECT')) { update(el, false); if (['customInjection', 'position'].includes(el.dataset.field)) { next = i; d.close(); } }
     });
     d.body.addEventListener('click', async ev => {
       const action = ev.target.closest('[data-action]')?.dataset.action;

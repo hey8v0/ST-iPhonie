@@ -11,11 +11,16 @@ export function installCompat(g = globalThis) {
   const Signal = g.AbortSignal, Controller = g.AbortController;
   if (Signal && Controller) {
     define(Signal.prototype, 'throwIfAborted', function () { if (this.aborted) throw this.reason ?? new (g.DOMException || DOMException)('signal aborted', 'AbortError'); });
-    define(Signal, 'timeout', ms => { const c = new Controller(); setTimeout(() => c.abort(new DOMException('signal timed out', 'TimeoutError')), ms); return c.signal; });
+    const abort = (c, reason) => {
+      // Old WebKit ignores abort(reason); install it before dispatching the synchronous abort event.
+      if (c.signal.reason === undefined) try { Object.defineProperty(c.signal, 'reason', {value: reason, configurable: true}); } catch {}
+      c.abort(reason);
+    };
+    define(Signal, 'timeout', ms => { const c = new Controller(); setTimeout(() => abort(c, new (g.DOMException || DOMException)('signal timed out', 'TimeoutError')), ms); return c.signal; });
     define(Signal, 'any', signals => {
       const c = new Controller(), done = c.signal;
-      for (const s of signals) if (s.aborted) { c.abort(s.reason); return done; }
-      for (const s of signals) s.addEventListener('abort', () => c.abort(s.reason), { once: true, signal: done });
+      for (const s of signals) if (s.aborted) { abort(c, s.reason); return done; }
+      for (const s of signals) s.addEventListener('abort', () => abort(c, s.reason), { once: true, signal: done });
       return done;
     });
   }

@@ -134,7 +134,7 @@ async function throughSvg(doc, {root, width, height}) {
 
 // ---------- by hand ----------
 const solid = c => !!c && c !== 'transparent' && !/rgba\([^)]*,\s*0\)$/.test(c);
-const light = c => { const n = String(c).match(/[\d.]+/g)?.map(Number) || []; return n.length >= 3 && n[0] * .299 + n[1] * .587 + n[2] * .114 > 232; };
+const light = c => { const hex = String(c).trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i); const value = hex && (hex[1].length === 3 ? hex[1].replace(/./g, x => x + x) : hex[1]); const n = value ? [0, 2, 4].map(i => parseInt(value.slice(i, i + 2), 16)) : String(c).match(/[\d.]+/g)?.map(Number) || []; return n.length >= 3 && n[0] * .299 + n[1] * .587 + n[2] * .114 > 232; };
 function rounded(g, x, y, w, h, r) { r = Math.max(0, Math.min(r, w / 2, h / 2)); g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
 function lines(g, text, width) {
   const out = [];
@@ -177,7 +177,7 @@ async function drawPlain(win, {root, width, height}) {
       g.fill();
       // A border as it is; a pale bubble on a pale ground gets a fine line, or it would not be seen.
       if (edge) { g.lineWidth = edge; g.strokeStyle = s.borderTopColor; g.stroke(); }
-      else if (light(g.fillStyle) && light(ground)) { g.lineWidth = 1; g.strokeStyle = 'rgba(30,50,90,.16)'; g.stroke(); }
+      else if (light(solid(s.backgroundColor) ? s.backgroundColor : 'rgba(255,255,255,.92)') && light(ground)) { g.lineWidth = 1; g.strokeStyle = 'rgba(30,50,90,.16)'; g.stroke(); }
       const padX = parseFloat(s.paddingLeft) || 12, padY = parseFloat(s.paddingTop) || 8, size = parseFloat(s.fontSize) || 15, lh = parseFloat(s.lineHeight) || size * 1.5;
       g.fillStyle = s.color || '#222'; g.font = `${s.fontWeight} ${size}px ${s.fontFamily}`; g.textBaseline = 'middle';
       lines(g, (el.innerText || el.textContent || '').trim(), Math.max(20, r.w - padX * 2 - edge * 2) + 1).forEach((line, i) => g.fillText(line, r.x + padX + edge, r.y + padY + edge + lh * (i + .5)));

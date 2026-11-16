@@ -5,6 +5,7 @@
 // the user's own music sources (songs, albums, artists; more pages), and 设置: 背景音乐 (off / tap / auto), its rule,
 // the volume and the sources. Playing happens in the tavern page (host-music.js), so it goes on while the phone is put
 // away.
+import {heardTrack} from '../core/music.js';
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, empty, help} from './common.js';
 import {icon} from './icons.js';
 import {writePanel} from './music-write.js';
@@ -147,7 +148,7 @@ export function musicApp(ctx) {
   /** Draws the rows of the 歌单 again (the filter, more of them, ticks), keeping the rest of the page as it is. */
   const redrawRows = () => { const box = v.root.querySelector('[data-music-list]'); if (box) box.innerHTML = libraryRows(); };
   /** The songs of the 正文点的歌 list as the player takes them (found on a source already, or to be looked up by name). */
-  const heardTracks = () => heard.map(s => ({title: s.title, artist: s.artist, ...(s.source && s.songId ? {origin: 'source', source: s.source, songId: s.songId} : {})}));
+  const heardTracks = () => heard.map(heardTrack);
 
   async function render() {
     const ticket = ++epoch;

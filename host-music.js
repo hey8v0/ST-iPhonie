@@ -3,7 +3,7 @@
 // 说台词时调小 is on). What the user plays themselves is told to the phone chats (一起听) and shown on the island; the
 // story is never told what plays (it wrote the music into the story), only which songs played lately, so as not to
 // pick them again.
-import {parseBgm, bgmRule, musicPromptPlan, parseLyrics, lyricAt, matchScore, songKey, MUSIC_LIMITS} from './core/music.js';
+import {parseBgm, bgmRule, musicPromptPlan, parseLyrics, lyricAt, matchScore, songKey, MUSIC_LIMITS, heardTrack} from './core/music.js';
 
 const RECENT_KEY = 'sttts.bgmRecent', PLAYED_KEY = 'sttts.bgmPlayed', DUCK = 0.3;
 const label = t => t ? (t.artist ? `${t.title} - ${t.artist}` : t.title) : '';
@@ -146,7 +146,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
       const k = songKey(s);
       if (seen.has(k)) continue;
       seen.add(k);
-      out.push(s.kind === 'heard' ? {title: s.title, artist: s.artist, rowId: s.id, ...(s.lyric ? {lyric: s.lyric} : {}), ...(s.source && s.songId ? {origin: 'source', source: s.source, songId: s.songId} : {})} : s);
+      out.push(s.kind === 'heard' ? heardTrack(s) : s);
     }
     return out;
   }

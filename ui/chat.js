@@ -1,3 +1,4 @@
+import {objectURLs} from './object-urls.js';
 import {eraseBefore} from '../core/text-edit.js';
 import {currentDm, chatWindows, currentWindow, groupKey, EDITABLE_KINDS, lastRound, forwardLine, REACTIONS, CHAIN_MODES, GAME_LIMITS} from '../core/chats.js';
 import {eggOf, playEgg} from './chat-eggs.js';
@@ -109,7 +110,7 @@ export function chatApp(ctx) {
   // chat was scrolled up; unreadMark: where the unread ones began when the chat was opened ({id, count, show}).
   const failed = new Map();
   let unseen = 0, tailId = null, unreadMark = null;
-  const photoURLs = new Map(), bubbleURLs = new Map(), photoSizes = new Map(), recalled = new Map(), transcribed = new Set();
+  const photoURLs = objectURLs(ctx.win), bubbleURLs = objectURLs(ctx.win), photoSizes = new Map(), recalled = new Map(), transcribed = new Set();
   // peeked: contacts' recalls the user has peeked at (here only: they are never told).
   const peeked = new Set();
   let press = null, pressedAt = 0;
@@ -903,20 +904,8 @@ export function chatApp(ctx) {
   }
   // Album photos sent in the chat; each picture is read once and kept while the app is open. A bubble shows the photo's
   // middle-sized picture once one was made (ui/thumbs.js); the viewer, downloads and the chat background the photo itself.
-  async function photoURL(id) {
-    if (!photoURLs.has(id)) {
-      const photo = await api.getPhoto(id);
-      photoURLs.set(id, photo ? ctx.win.URL.createObjectURL(photo.blob) : '');
-    }
-    return photoURLs.get(id);
-  }
-  async function bubbleURL(id) {
-    if (!bubbleURLs.has(id)) {
-      const blob = await previewBlob(api, id);
-      bubbleURLs.set(id, blob ? ctx.win.URL.createObjectURL(blob) : await photoURL(id));
-    }
-    return bubbleURLs.get(id);
-  }
+  const photoURL = id => photoURLs.load(id, async () => (await api.getPhoto(id))?.blob);
+  const bubbleURL = id => bubbleURLs.load(id, async () => (await previewBlob(api, id)) || await photoURL(id));
   /** Stickers that are photos of the album: the picture itself (a GIF keeps moving), wherever they are drawn. */
   function paintStickers(root = v.root) {
     for (const img of root.querySelectorAll('img[data-sticker-photo]:not([src])')) photoURL(img.dataset.stickerPhoto).then(url => { if (url && img.isConnected) img.src = url; }).catch(() => {});
@@ -2855,7 +2844,7 @@ export function chatApp(ctx) {
   /** 动态, from the tavern page's 动态小窗. */
   v.showMoments = () => { mode = 'list'; tab = 'moments'; threadId = null; search = ''; moments.only(''); v.root.scrollTop = 0; render(); };
   const dispose = v.dispose;
-  v.dispose = () => { stopSpace?.(); ctx.win.clearTimeout(hitTimer); ctx.win.clearTimeout(autoTimer); ctx.win.clearTimeout(pace.timer); moments.dispose(); for (const url of new Set([...photoURLs.values(), ...bubbleURLs.values()])) if (url) ctx.win.URL.revokeObjectURL(url); photoURLs.clear(); bubbleURLs.clear(); dispose(); };
+  v.dispose = () => { stopSpace?.(); ctx.win.clearTimeout(hitTimer); ctx.win.clearTimeout(autoTimer); ctx.win.clearTimeout(pace.timer); moments.dispose(); photoURLs.dispose(); bubbleURLs.dispose(); dispose(); };
   render();
   return v;
 }

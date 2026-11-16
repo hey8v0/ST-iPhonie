@@ -58,6 +58,7 @@ export function glyph(key) {
 }
 
 const LINES = {
+  games: 'M7 8h10a5 5 0 0 1 5 5v1a3 3 0 0 1-5.4 1.8L15 14H9l-1.6 1.8A3 3 0 0 1 2 14v-1a5 5 0 0 1 5-5zM7 10v4M5 12h4M15.5 11h.01M18 13h.01',
   settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2',
   plus: 'M12 5v14M5 12h14',
   gift: 'M4 11h16v9H4zM3 7h18v4H3zM12 7v13M12 7C10.5 4 7 3.5 7 6s3 1 5 1m0 0c1.5-3 5-3.5 5-1s-3 1-5 1', wallet: 'M4 7h15a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 7l12-3v3M15 13.5h2', shop: 'M5 8h14l-1.2 12H6.2zM9 10V6a3 3 0 0 1 6 0v4',

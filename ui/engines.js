@@ -742,7 +742,7 @@ export function enginesApp(ctx) {
       api.saveMusic({sing: {[key]: el.value.trim()}}); later(render); ctx.notify('保存好了');
       return;
     }
-    if (el.dataset.field === 'image-name' || /^custom-/.test(el.dataset.field)) return;
+    if (['image-name', 'voice-folder'].includes(el.dataset.field) || /^custom-/.test(el.dataset.field)) return;
     if (engine === 'embed') {
       const key = el.dataset.field.replace(/^embed-/, '');
       if (!['enabled', 'url', 'model'].includes(key)) return;
@@ -763,7 +763,7 @@ export function enginesApp(ctx) {
     if (el.dataset.field === 'comfy-url') { api.saveDraw({comfy: {url: el.value}}); later(render); ctx.notify('ComfyUI 地址已保存'); return; }
     if (el.dataset.field === 'guard') { api.saveDraw({guard: el.checked}); return; }
     if (el.dataset.field === 'relayOpus') { api.saveDraw({relay: {assumeOpus: el.checked}}); return; }
-    if (el.dataset.field === 'relay') { if (engine === 'nai') saveImageField({url: el.value}, el.value.trim() ? '中转地址已保存' : '已改回直连 NovelAI'); else saveFishRelay(el.value); return; }
+    if (el.dataset.field === 'relay') { if (engine === 'nai') saveImageField({url: el.value}, el.value.trim() ? '中转地址已保存' : '已改回直连 NovelAI'); else return saveFishRelay(el.value); return; }
     if (el.dataset.field === 'eleven-relay') { api.saveConnection('eleven', {relay: el.value}); draft().relay = api.getState().connections.eleven.relay; balances.delete('eleven'); render(); ctx.notify(draft().relay ? 'ElevenLabs 接口地址已保存' : '已改回 ElevenLabs 官方接口'); return; }
     if (el.dataset.field === 'relayApi') { api.saveConnection('fish', {relayApi: el.value}); draft().relayApi = el.value; balances.delete('fish'); render(); return; }
     draft()[el.dataset.field] = el.value; changed(); render();

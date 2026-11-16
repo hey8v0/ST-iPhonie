@@ -15,8 +15,10 @@ async function queueJson(response, signal) {
 const stop = () => Object.assign(Error('已取消'), {cancelled: true});
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
   if (signal?.aborted) { reject(stop()); return; }
-  const timer = setTimeout(resolve, ms);
-  signal?.addEventListener('abort', () => { clearTimeout(timer); reject(stop()); }, {once: true});
+  const onAbort = () => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); reject(stop()); };
+  const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+  timer.unref?.();
+  signal?.addEventListener('abort', onAbort, {once: true});
 });
 
 /** A room code friends can share: 24 letters and digits. */
@@ -68,6 +70,7 @@ export class CloudQueue {
       throw error;
     }
     const timer = setInterval(() => this.call({op: 'renew', ticket}).catch(() => {}), this.renew);
+    timer.unref?.();
     let done = false;
     return {
       ticket,

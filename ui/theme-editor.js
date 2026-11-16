@@ -167,7 +167,7 @@ export function themeEditor({ctx, v}) {
     /** Done with it: what is waiting is kept, and the 日夜 setting says again which side shows. */
     leave() {
       left = true;
-      if (frame) ctx.win.cancelAnimationFrame(frame);
+      if (frame) { ctx.win.cancelAnimationFrame(frame); frame = 0; }
       if (saving) flush();
       ctx.previewSide?.(null);
     }

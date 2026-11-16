@@ -1,6 +1,7 @@
 // 查手机: pick a contact and pick up their phone — a phone of their own (ui/peek-phone.js) with a lock screen, a home
 // screen and their chats with other people, album, notes, searches and shopping cart, made up by the model (host-apps.js)
 // from who they are and what they know. One snapshot per contact; looking again replaces it.
+import {objectURLs} from './object-urls.js';
 import {createView, esc, btn, heading, avatar, empty, help} from './common.js';
 import {icon} from './icons.js';
 import {openImageViewer} from '../image-viewer.js';
@@ -43,13 +44,8 @@ export function peekApp(ctx) {
       + (s ? `<div class="actions">${btn('peek-forget', icon('trash') + '忘掉看到的', 'text-button')}</div>` : ''));
     if (s && pickUp && !working) { pickUp = false; pick(s); }
   }
-  const urls = new Map();
-  async function urlFor(id) {
-    if (urls.has(id)) return urls.get(id);
-    const photo = await api.getPhoto(id), url = photo ? ctx.win.URL.createObjectURL(photo.blob) : '';
-    urls.set(id, url);
-    return url;
-  }
+  const urls = objectURLs(ctx.win);
+  const urlFor = id => urls.load(id, async () => (await api.getPhoto(id))?.blob);
   async function render() {
     const ticket = ++epoch;
     await (who ? renderPerson(ticket) : renderList(ticket));
@@ -94,7 +90,7 @@ export function peekApp(ctx) {
   };
   v.refresh = () => render();
   const dispose = v.dispose;
-  v.dispose = () => { dispose.call(v); device?.close(); device = null; for (const url of urls.values()) if (url) ctx.win.URL.revokeObjectURL(url); };
+  v.dispose = () => { dispose.call(v); device?.close(); device = null; urls.dispose(); };
   v.on('click', '[data-action]', async el => {
     switch (el.dataset.action) {
       case 'peek-open': {

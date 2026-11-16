@@ -38,10 +38,10 @@ export const groupTitle = (title, extra = '') => `<div class="group-title"><span
  * The 「⋯」 of a page: what is not used every time, as a sheet of rows. items: [{key, icon, label, note, danger}] (falsy
  * ones are left out). Resolves to the key tapped, or null when the sheet is closed.
  */
-export function menu(ctx, title, items) {
+export function menu(ctx, title, items, options) {
   return new Promise(resolve => {
     let picked = null;
-    const d = ctx.dialog(title, `<div class="pick-list">${items.filter(Boolean).map(x => `<button type="button" class="list-row${x.danger ? ' danger-row' : ''}" data-menu="${esc(x.key)}">${icon(x.icon || 'next')}<span><strong>${esc(x.label)}</strong>${x.note ? `<small>${esc(x.note)}</small>` : ''}</span></button>`).join('')}</div>`);
+    const d = ctx.dialog(title, `<div class="pick-list">${items.filter(Boolean).map(x => `<button type="button" class="list-row${x.danger ? ' danger-row' : ''}" data-menu="${esc(x.key)}">${icon(x.icon || 'next')}<span><strong>${esc(x.label)}</strong>${x.note ? `<small>${esc(x.note)}</small>` : ''}</span></button>`).join('')}</div>`, options);
     d.onClose(() => resolve(picked));
     d.body.addEventListener('click', e => { const key = e.target.closest('[data-menu]')?.dataset.menu; if (key) { picked = key; d.close(key); } });
   });

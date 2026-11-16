@@ -65,9 +65,9 @@ export function bindNativeSelects(doc) {
   doc.addEventListener('click', event => {
     const frame = event.target.closest?.('.select');const box = frame?.querySelector(':scope > select');
     if (!box || box.disabled || box.multiple) return;
-    event.preventDefault();if (menu.anchor() === box) return menu.close();
+    event.preventDefault();if (menu.anchor() === frame) return menu.close();
     const options = [...box.options].map(o => [o.value, o.textContent, o.disabled || o.parentElement?.disabled]);
-    menu.open(box, {options, value: box.value, label: box.getAttribute('aria-label'), pick: value => {
+    menu.open(frame, {options, value: box.value, label: box.getAttribute('aria-label'), pick: value => {
       if (box.value === String(value)) return;
       box.value = String(value);
       box.dispatchEvent(new doc.defaultView.Event('input', {bubbles: true}));

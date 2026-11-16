@@ -156,8 +156,8 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
     settle(p.row, 0);
     if (open === p.row) open = null;
   };
-  list.addEventListener('pointerup', release);
-  list.addEventListener('pointercancel', release);
+  doc.addEventListener('pointerup', release, true);
+  doc.addEventListener('pointercancel', release, true);
 
   // ---------- taps ----------
   list.addEventListener('click', e => {
@@ -193,6 +193,6 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
   return {
     close, done,
     get chosen() { return chosen ? [...chosen] : null; },
-    dispose() { win.clearTimeout(press?.timer); if (press?.mode === 'drag') press.session.cancel(); press = null; watch.disconnect(); doc.removeEventListener('pointerdown', outside, true); bar.remove(); },
+    dispose() { win.clearTimeout(press?.timer); if (press?.mode === 'drag') press.session.cancel(); press = null; watch.disconnect(); doc.removeEventListener('pointerup', release, true); doc.removeEventListener('pointercancel', release, true); doc.removeEventListener('pointerdown', outside, true); bar.remove(); },
   };
 }

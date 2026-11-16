@@ -31,7 +31,10 @@ export async function docxText(buffer, Parser = globalThis.DOMParser, policy) {
     if (method === 0) xml = new TextDecoder().decode(bytes.subarray(start, start + size));
     else if (method === 8) {
       if (typeof DecompressionStream !== 'function') throw Error('浏览器暂不支持解压 Word，请升级浏览器或另存为 TXT');
-      const reader = new Blob([bytes.subarray(start, start + size)]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+      let stream;
+      try { stream = new DecompressionStream('deflate-raw'); }
+      catch { throw Error('浏览器暂不支持解压 Word，请升级浏览器或另存为 TXT'); }
+      const reader = new Blob([bytes.subarray(start, start + size)]).stream().pipeThrough(stream).getReader();
       const decoder = new TextDecoder(); let total = 0; xml = '';
       try {
         for (;;) { const {done, value} = await reader.read(); if (done) break; total += value.length;
@@ -90,7 +93,8 @@ export async function readAssistantFiles(files, {chat = false, pdf, docx, office
     } else if (textExtension.test(file.name) || /^text\//.test(file.type)) {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const encoding = bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le' : bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : 'utf-8';
-      item.text = new TextDecoder(encoding, {fatal: true}).decode(bytes);
+      try { item.text = new TextDecoder(encoding, {fatal: true}).decode(bytes); }
+      catch { throw Error(`文件编码无法识别，请用记事本另存为 UTF-8 后再附加：${file.name}`); }
       if (item.text.includes('\0')) throw Error('这个文件不像文本文件，请另存为 UTF-8 文本');
     } else throw Error(`暂不支持这个附件类型：${file.name}`);
     if (item.kind === 'text') item.text = limitText(item.text, policy);

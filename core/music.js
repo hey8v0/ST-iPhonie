@@ -5,6 +5,8 @@
 // A source is two web addresses the user fills in: one that searches ({{query}}) and one that gives a playable link for
 // a song id ({{id}}), plus where in their JSON answers the list, the id, the title, the artist and the link are (dotted
 // paths such as data.list or data.url). A lyrics address is optional.
+export const heardTrack = s => ({title: s.title, artist: s.artist, rowId: s.id, ...(s.lyric ? {lyric: s.lyric} : {}), ...(s.source && s.songId ? {origin: 'source', source: s.source, songId: s.songId} : {})});
+
 import {promptText} from './prompt-rules.js';
 import {normalizeSongForm, normalizeSing} from './song.js';
 import {GO_MUSIC, GO_PLATFORMS, goBase, isGoMusic} from './go-music.js';

@@ -174,7 +174,7 @@ export function vnApp(ctx) {
           l.sprite && {key: 'view', icon: 'image', label: '看大图', note: l.count > 1 ? `这组 ${l.count} 张，左右滑着看，可以下载` : '可以下载'},
           {key: 'draw', icon: 'paint', label: l.sprite ? '再画一张' : '画这张', note: l.id ? (set.seed >= 0 ? '用平常那张的种子，加上「' + (l.tags || l.label) + '」' : '加上「' + (l.tags || l.label) + '」') : '外貌和立绘要求可以先改'},
           {key: 'upload', icon: 'import', label: l.sprite ? '再上传一张' : '上传图片', note: '用自己的图，白底、纯色底或透明 PNG 都行'},
-          l.count > 1 && {key: 'group', icon: 'gallery', label: `这组图（${l.count} 张）`, note: l.mix ? '正在轮换随机出' : '选用哪一张，或者轮换随机出'},
+          l.count > 1 && {key: 'group', icon: 'album', label: `这组图（${l.count} 张）`, note: l.mix ? '正在轮换随机出' : '选用哪一张，或者轮换随机出'},
           l.action && {key: 'edit', icon: 'edit', label: l.action?.kind==='expression'?'改这个表情':'改这个动作', note: '名字、怎么画、什么时候用'},
           l.sprite && {key: 'remove', icon: 'trash', label: '去掉这张', note: l.count > 1 ? '换成这组的下一张' : '', danger: true},
           l.action && {key: 'delete', icon: 'trash', label: l.action?.kind==='expression'?'删掉这个表情':'删掉这个动作', note: '每套形象里的对应图片都会删掉', danger: true}]);
@@ -229,10 +229,10 @@ export function vnApp(ctx) {
       if (!b) return;
       const u = b.dataset.pic, g = now(), first = g?.sprite === u;
       try {
-        const key = await menu(ctx, `${name} · ${l.label}`, [{key: 'view', icon: 'image', label: '看大图', note: '可以下载'}, !first && {key: 'use', icon: 'check', label: '用这张', note: g?.mix ? '轮换时也会出现其他几张' : ''}, {key: 'drop', icon: 'trash', label: '去掉这张', danger: true}]);
-        if (key === 'view') { viewSprites(name, l, u, () => groupSheet(name, l)); return; }
+        const key = await menu(ctx, `${name} · ${l.label}`, [{key: 'view', icon: 'image', label: '看大图', note: '可以下载'}, !first && {key: 'use', icon: 'check', label: '用这张', note: g?.mix ? '轮换时也会出现其他几张' : ''}, {key: 'drop', icon: 'trash', label: '去掉这张', danger: true}], {over: true});
+        if (key === 'view') { viewSprites(name, l, u, () => { if (d.live) paint(); }); return; }
         else if (key === 'use') await api.vnSprite(name, null, {look: l.id, outfit: l.outfit, use: u});
-        else if (key === 'drop' && await ctx.confirm('去掉这张？', '酒馆里的图片文件也会删掉。')) await api.vnSprite(name, null, {look: l.id, outfit: l.outfit, drop: u});
+        else if (key === 'drop' && await ctx.confirm('去掉这张？', '酒馆里的图片文件也会删掉。', {over: true})) await api.vnSprite(name, null, {look: l.id, outfit: l.outfit, drop: u});
       } catch (error) { ctx.notify(error.message, {error: true}); }
       if (d.live) paint();
     });

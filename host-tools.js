@@ -52,7 +52,7 @@ export function createStoryTools({doc = document, hidden, entry = () => true, me
  function key(event) {
   if (!menu) return;
   if (event.key === 'Escape') { const previous = anchor; close(); previous?.focus(); event.preventDefault(); }
-  else if (['ArrowDown', 'ArrowUp'].includes(event.key)) { const items = [...menu.querySelectorAll('button')], i = items.indexOf(doc.activeElement); items[(i + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus(); event.preventDefault(); }
+  else if (['ArrowDown', 'ArrowUp'].includes(event.key)) { const items = [...menu.querySelectorAll('button')], i = items.indexOf(doc.activeElement); items[i < 0 ? (event.key === 'ArrowDown' ? 0 : items.length - 1) : (i + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus(); event.preventDefault(); }
  }
  const listeners = [['click', click], ['pointerdown', down], ['pointermove', move], ['pointerup', cancel], ['pointercancel', cancel], ['contextmenu', context], ['keydown', key]];
  for (const [type, fn] of listeners) doc.addEventListener(type, fn, true);

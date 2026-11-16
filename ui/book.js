@@ -568,8 +568,8 @@ export function bookApp(ctx) {
       {key: 'html-voice', icon: 'play', label: '网页绘本（带朗读）', note: '一个 .html 文件，手机电脑都能打开，翻页、自动朗读；没生成过的台词会现在生成'},
       {key: 'html', icon: 'book', label: '网页绘本（不带声音）', note: '文件小一些'},
       {key: 'pdf', icon: 'download', label: 'PDF', note: '封面、每个跨页（两页并排）、最后一页，和书里一样，适合打印和发给别人'},
-      {key: 'epub', icon: 'notes', label: 'EPUB 电子书', note: '固定版式的绘本，在阅读软件里一面一面翻'},
-      {key: 'audio', icon: 'listen', label: '有声书（一个声音文件）', note: '整本书读出来，WAV'},
+      {key: 'epub', icon: 'file', label: 'EPUB 电子书', note: '固定版式的绘本，在阅读软件里一面一面翻'},
+      {key: 'audio', icon: 'volume', label: '有声书（一个声音文件）', note: '整本书读出来，WAV'},
       {key: 'images', icon: 'image', label: '每一面的图片', note: '打包成 .zip'},
     ]);
     if (!kind) return;

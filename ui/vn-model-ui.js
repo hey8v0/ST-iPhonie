@@ -24,22 +24,43 @@ export function modelCard(c) {
 function pick(ctx, folder) {
   return new Promise((resolve, reject) => {
     const input = ctx.doc.createElement('input');
-    input.type = 'file';
-    if (folder) input.webkitdirectory = true; else input.accept = '.vrm,.zip,application/zip';
-    input.addEventListener('change', async () => {
+    let done = false, reading = false, timer = 0;
+    const cleanup = () => {
+      ctx.win.clearTimeout(timer);
+      ctx.win.removeEventListener('focus', returned);
+      ctx.doc.removeEventListener('visibilitychange', visible);
+      input.remove();
+    };
+    const finish = (value, error) => {
+      if (done) return;
+      done = true; cleanup();
+      if (error) reject(error); else resolve(value);
+    };
+    const read = async () => {
+      if (done || reading) return;
+      reading = true;
       try {
         const list = [...(input.files || [])];
-        if (!list.length) return resolve(null);
-        if (!folder) return resolve(list[0]);
+        if (!list.length) return finish(null);
+        if (!folder) return finish(list[0]);
         const total = list.reduce((n, f) => n + f.size, 0);
         if (total > LIMIT) throw Error('这个文件夹太大了（超过 300 MB），请只选模型自己的文件夹');
         const files = await Promise.all(list.map(async f => ({path: f.webkitRelativePath || f.name, bytes: new Uint8Array(await f.arrayBuffer())})));
         const zip = writeZip(files), root = (list[0].webkitRelativePath || '').split('/')[0] || 'live2d';
-        resolve(new File([zip], root + '.zip', {type: 'application/zip'}));
-      } catch (error) { reject(error); }
-    });
-    input.addEventListener('cancel', () => resolve(null));
-    input.click();
+        finish(new File([zip], root + '.zip', {type: 'application/zip'}));
+      } catch (error) { finish(null, error); }
+    };
+    // Safari before cancel events: returning from the picker still settles the waiting page.
+    const returned = () => { if (!done && !reading) { ctx.win.clearTimeout(timer); timer = ctx.win.setTimeout(read, 400); } };
+    const visible = () => { if (!ctx.doc.hidden) returned(); };
+    input.type = 'file'; input.hidden = true;
+    if (folder) input.webkitdirectory = true; else input.accept = '.vrm,.zip,application/zip';
+    input.addEventListener('change', read);
+    input.addEventListener('cancel', () => finish(null));
+    ctx.win.addEventListener('focus', returned);
+    ctx.doc.addEventListener('visibilitychange', visible);
+    ctx.doc.body.append(input);
+    try { input.click(); } catch (error) { finish(null, error); }
   });
 }
 const folderPick = ctx => 'webkitdirectory' in ctx.doc.createElement('input') && !ctx.win.matchMedia?.('(pointer: coarse)').matches;

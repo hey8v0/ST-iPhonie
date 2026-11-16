@@ -98,6 +98,6 @@ export function ledgerApp(ctx) {
     }
   });
   v.refresh = render;
-  render();
+  render().catch(error => { if (!v.disposed) ctx.notify(error.message, {error: true}); });
   return v;
 }
