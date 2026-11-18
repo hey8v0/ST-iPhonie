@@ -233,7 +233,20 @@ export class BookshelfStore {
   async update(id, patch) {
     return this.meta.change(id, row => {
       for (const key of ['companion','settings','bookmarks','annotations','turns','nextNote','daily','shelf','lastRead','chapters','stats','highlights']) if (key in patch) row[key] = structuredClone(patch[key]);
-      if (patch.illustration?.photoId) row.illustrations = [...(row.illustrations || []), structuredClone(patch.illustration)];
+      if (patch.illustration?.photoId) {
+        const {version, ...pic} = structuredClone(patch.illustration);
+        const images = row.illustrations ||= [];
+        const previous = images.find(item => (item.id || item.photoId) === (pic.id || pic.photoId));
+        const versions = previous?.versions || (previous ? [{photoId:previous.photoId}] : []);
+        if (!versions.some(v => v.photoId === pic.photoId)) versions.push({...version, photoId:pic.photoId});
+        if (previous) Object.assign(previous,pic,{versions});
+        else images.push({...pic,versions});
+      }
+      if (patch.pickIllustration) {
+        const {id,photoId} = patch.pickIllustration;
+        const pic = row.illustrations?.find(item => (item.id || item.photoId) === id);
+        if (pic?.versions?.some(v => v.photoId === photoId)) pic.photoId = photoId;
+      }
       if (patch.position) row.position = readingPosition(patch.position, row.chapters.length);
       if ('stats' in patch) row.stats = normalizeStats(row.stats);
       if ('highlights' in patch) row.highlights = normalizeHighlights(row.highlights);

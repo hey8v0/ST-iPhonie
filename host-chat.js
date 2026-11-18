@@ -694,7 +694,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     requireChat(valid);
     const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
     requireChat(valid);
-    if (from) items = items.map(item => ({...item, story: from.story, storyVer: from.ver}));
+    if (from) items = items.map(item => ({...item, story: from.story, storyVer: from.ver, ...(receipt && item.kind==='text' ? {storyReceipt:receipt} : {})}));
     const saved = await backend.chatMutate(threadId, () => settle(threadId, items, null, {valid, receipt, committed}));
     requireChat(valid);
     const fresh = (saved?.messages || []).filter(m => !before.has(m.id) && m.from !== 'me');
@@ -744,7 +744,13 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
    * What a story reply sent to the phone (<phone>) arrives, once per version of the reply: private messages (and
    * photos, money, calls, 朋友圈…) to each sender's chat, <phone group="…"> to that group. Returns how many arrived.
    */
-  function deliver(id) {
+  function restoreLatestPhoneText() {
+    const messages=context()?.chat || [];
+    const index=messages.findLastIndex(m=>m && !m.is_user && !m.is_system && phoneParts(m.mes).length);
+    if (index<0) throw Error('当前聊天没有带手机消息的回复');
+    return deliver(index,true);
+  }
+  function deliver(id,restoreText=false) {
     const visit = chatGuard(true), ctx = context(), index = Number.isInteger(Number(id)) ? Number(id) : (ctx?.chat?.length || 0) - 1;
     const message = ctx?.chat?.[index], signature = JSON.stringify(phoneParts(message?.mes || '')), swipe = message?.swipe_id;
     const valid = () => {
@@ -755,9 +761,9 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     const task = deliveryQueue.then(async () => {
       if (!valid()) { if (signature !== '[]') phoneLog('回复、分支或聊天已变化，未投递旧消息'); return 0; }
       let failed = false, result = 0;
-      try { result = await deliverOne(index, valid, () => { failed = true; }); }
-      catch (error) { if (error?.name === 'AbortError' || !valid()) throw error; failed = true; phoneLog('接收暂时失败，稍后补收：' + error.message); }
-      if (failed && valid()) { await new Promise(resolve => setTimeout(resolve, 150)); if (valid()) result = await deliverOne(index, valid); }
+      try { result = await deliverOne(index, valid, () => { failed = true; },restoreText); }
+      catch (error) { if (restoreText || error?.name === 'AbortError' || !valid()) throw error; failed = true; phoneLog('接收暂时失败，稍后补收：' + error.message); }
+      if (failed && valid()) { await new Promise(resolve => setTimeout(resolve, 150)); if (valid()) result = await deliverOne(index, valid,undefined,restoreText); }
       return result;
     }).catch(error => {
       if (error?.name === 'AbortError' || !valid()) { phoneLog('回复、分支或聊天已变化，未继续投递旧消息'); return 0; }
@@ -766,23 +772,34 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     deliveryQueue = task.catch(error => phoneLog('接收失败，可重试：' + error.message));
     return task;
   }
-  async function deliverOne(index, valid, failed = () => {}) {
+  async function deliverOne(index, valid, failed = () => {},restoreText=false) {
     const ctx = context(), s = settings(), m = ctx?.chat?.[index];
     if (!valid() || !s.chat.proactive?.on || !m || m.is_user || m.is_system) return 0;
-    const parts = phoneParts(m.mes), story = [ctx.getCurrentChatId?.() || ctx.chatId || '', index].join('|');
-    const ver = hash(parts.map(p => p.group + '|' + p.text).join('\n')), key = story + '|' + ver, from = {story, ver};
-    const gone = await withdraw(story, ver, valid);
-    if (!valid()) return 0;
-    if (gone && !parts.length) notice(`重新生成了这条回复，之前发到手机上的 ${gone} 条消息撤回了`);
-    if (!parts.length) return 0;
-    const legacy = sentBefore(key);
-    // Once something in this round was committed, retries finish its remaining parts without taking a second turn.
+    const rawParts = phoneParts(m.mes), story = [ctx.getCurrentChatId?.() || ctx.chatId || '', index].join('|');
+    // Formatting a line can leave the same message indented on a later pass.
+    const normalized = rawParts.map(p => ({...p,text:p.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).join('\n')}));
+    const threadsForStory = await backend.storyThreads(story); requireChat(valid);
+    if (!normalized.length) {
+      if (restoreText) return 0;
+      const gone = await withdraw(story,'',valid,threadsForStory);
+      if (gone) notice(`重新生成了这条回复，之前发到手机上的 ${gone} 条消息撤回了`);
+      return 0;
+    }
     const threads = await backend.threads(); requireChat(valid);
-    const prefix = 'phone:' + await sha256Hex(JSON.stringify([backend.cardKey?.() || '', backend.saveKey?.() || '', story, parts])) + '|'; requireChat(valid);
-    const resumed = today().keys?.includes(prefix) || threads.some(t => t.phoneReceipts?.some(k => k.startsWith(prefix)));
-    if (!resumed && !phoneTurn()) { phoneLog('本轮未轮到手机消息，或已达到每日上限'); return 0; }
+    const receiptPrefix = async parts => 'phone:' + await sha256Hex(JSON.stringify([backend.cardKey?.() || '',backend.saveKey?.() || '',story,parts])) + '|';
+    const hasReceipts = prefix => today().keys?.includes(prefix) || threads.some(t=>t.phoneReceipts?.some(k=>k.startsWith(prefix)));
+    let parts = normalized, prefix = await receiptPrefix(parts);
+    if (JSON.stringify(rawParts)!==JSON.stringify(normalized) && !hasReceipts(prefix)) {
+      const oldPrefix = await receiptPrefix(rawParts);
+      if (hasReceipts(oldPrefix)) { parts=rawParts; prefix=oldPrefix; }
+    }
+    requireChat(valid);
+    const ver = hash(parts.map(p => p.group + '|' + p.text).join('\n')), key = story + '|' + ver, from = {story, ver};
+    const legacy = sentBefore(key);
+    const resumed = hasReceipts(prefix);
+    if (!restoreText && !resumed && !phoneTurn()) { phoneLog('本轮未轮到手机消息，或已达到每日上限'); return 0; }
     const contacts = backend.contacts(), known = new Set(contacts.map(c => c.name));
-    let sent = 0, handled = 0; const arrivals = new Map();
+    let sent = 0, handled = 0, restored = 0, incomplete = false; const arrivals = new Map();
     for (const [partIndex, part] of parts.entries()) {
       requireChat(valid);
       const first = part.group && threads.find(t => t.type === 'group' && t.name === part.group);
@@ -798,11 +815,20 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
       const occurrences = new Map();
       for (const item of items) {
         requireChat(valid);
-        if (!only.has(item.from)) continue;
+        if (!only.has(item.from) || (restoreText && item.kind!=='text')) continue;
         const token = await sha256Hex(JSON.stringify(item)), occurrence = occurrences.get(token) || 0; occurrences.set(token, occurrence + 1);
         let receipt = prefix + partIndex + ':' + token + ':' + occurrence, requestText = item.text || `我是${item.from}`;
         let threadId = '';
         try {
+          if (restoreText) {
+            const current = group || currentDm(threads, item.from);
+            const target = current && chatWindows(threads, current).find(t => t.phoneReceipts?.includes(receipt));
+            if (target) {
+              const saved=await backend.chatMutate(target.id,()=>backend.chats.restoreStoryText(target.id,{...item,story,storyVer:ver},receipt,occurrence));
+              if (saved) restored++;
+            }
+            continue;
+          }
           const target = group || await dmWith(item.from, valid); requireChat(valid);
           threadId = target.id; const thread = await backend.chats.get(threadId); requireChat(valid);
           if (thread.friend?.by === 'me' && !thread.blocked) {
@@ -810,7 +836,14 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
             const words = asks.length ? asks : items.filter(i => i.from === item.from && ['text', 'voice', 'quote'].includes(i.kind)).map(i => i.translation || i.text).filter(Boolean);
             if (!words.length) continue; requestText = words.join(' '); receipt = prefix + partIndex + ':friend:' + await sha256Hex(item.from);
           }
-          if (thread.phoneReceipts?.includes(receipt)) { handled++; if (!thread.blocked || item.kind === 'request') counted(prefix); continue; }
+          if (thread.phoneReceipts?.includes(receipt)) {
+            handled++;
+            if (!thread.blocked || item.kind === 'request') counted(prefix);
+            // Old versions could retain the receipt after removing its text. Keep the visible version until recovery.
+            if (item.kind === 'text' && !thread.blocked && !thread.friend &&
+                !thread.messages.some(m => m.story === story && m.kind === 'text' && m.from === item.from && m.text === item.text)) incomplete = true;
+            continue;
+          }
           if (legacy && thread.messages.filter(m => m.story === story && m.storyVer === ver && m.from === item.from && m.kind === item.kind && m.text === (item.text || '') && (!item.amount || m.amount === item.amount)).length > occurrence) { await backend.chats.append(thread.id, [], {receipt}); counted(prefix, true); handled++; continue; }
           if (group && item.kind === 'call' || !thread.blocked && !thread.friend && ['request','befriend','refuse'].includes(item.kind)) continue;
           if (!canGroupSpeak(thread, item.from)) { phoneLog('群内禁言，未接收：' + item.from); continue; }
@@ -827,9 +860,23 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
           }
           // The receipt is stored in the same IDB mutation as the message, including intercepted messages and calls.
           const saved = await backend.chats.get(thread.id);
-          if (saved?.phoneReceipts?.includes(receipt)) { handled++; if (!thread.blocked || item.kind === 'request') counted(prefix); if (thread.blocked && item.kind === 'request' || thread.friend?.by === 'me') notice(`${item.from} 请求添加你为好友：${requestText.slice(0, 40)}`); else if (!thread.blocked) { sent++; const old = arrivals.get(thread.id) || {name: group ? `群「${group.name}」` : item.from, n: 0, fresh: []}; old.n++; const before = new Set(thread.messages.map(m => m.id)); old.fresh.push(...saved.messages.filter(m => !before.has(m.id) && m.from !== 'me')); arrivals.set(thread.id, old); } }
-        } catch (error) { if (error?.name !== 'AbortError') failed(); const saved = threadId && await backend.chats.get(threadId).catch(() => null); if (saved?.phoneReceipts?.includes(receipt)) { handled++; if (!saved.blocked || item.kind === 'request') counted(prefix); } phoneLog(error?.name === 'AbortError' ? '聊天或手机消息已变化，停止接收；已保存的不会重复' : '有消息未保存，可重试：' + error.message); }
+          if (saved?.phoneReceipts?.includes(receipt)) { handled++; if (!thread.blocked || item.kind === 'request') counted(prefix); if (thread.blocked && item.kind === 'request' || thread.friend?.by === 'me') notice(`${item.from} 请求添加你为好友：${requestText.slice(0, 40)}`); else if (!thread.blocked) {
+              const before = new Set(thread.messages.map(m => m.id));
+              const fresh = saved.messages.filter(m => !before.has(m.id) && m.from !== 'me' && m.kind !== 'system');
+              if (fresh.length) {
+                sent += fresh.length;
+                const old = arrivals.get(thread.id) || {name:group ? `群「${group.name}」` : item.from,n:0,fresh:[]};
+                old.n += fresh.length; old.fresh.push(...fresh); arrivals.set(thread.id,old);
+              }
+            }
+          }
+        } catch (error) { if (restoreText) throw error; incomplete = true; if (error?.name !== 'AbortError') failed(); const saved = threadId && await backend.chats.get(threadId).catch(() => null); if (saved?.phoneReceipts?.includes(receipt)) { handled++; if (!saved.blocked || item.kind === 'request') counted(prefix); } phoneLog(error?.name === 'AbortError' ? '聊天或手机消息已变化，停止接收；已保存的不会重复' : '有消息未保存，可重试：' + error.message); }
       }
+    }
+    if (restoreText) return restored;
+    // Keep the visible version until its replacement has been accepted and saved.
+    if (handled && !incomplete && valid() && threadsForStory.some(t=>t.messages?.some(m=>m.story===story && m.storyVer!==ver))) {
+      await withdraw(story,ver,valid);
     }
     if (sent && valid()) for (const [threadId, {name, n, fresh}] of arrivals) { notice(`${name} 给你发来 ${n} 条消息`); const last = fresh.at(-1); if (last) backend.emit('chat', {threadId, incoming: {from: last.from, text: last.text || '', kind: last.kind, count: fresh.length}}); }
     return handled;
@@ -838,16 +885,16 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
    * A story reply rolled again: the messages its earlier versions sent to the phone are taken out, unless the user has
    * answered after them (then the talk stays as it went). Returns how many went.
    */
-  async function withdraw(story, ver, valid = chatGuard()) {
+  async function withdraw(story, ver, valid = chatGuard(), threads) {
     let gone = 0;
-    for (const t of await backend.storyThreads(story)) {
+    for (const t of threads || await backend.storyThreads(story)) {
       requireChat(valid);
       const list = t.messages || [], old = list.filter(m => m.story === story && m.storyVer !== ver);
       requireChat(valid);
       if (!old.length) continue;
       const after = list.slice(list.indexOf(old.at(-1)) + 1);
       if (after.some(m => m.from === 'me' && m.kind !== 'system')) continue;
-      await backend.chatMutate(t.id, () => backend.chats.removeMessages(t.id, old.map(m => m.id)));
+      await backend.chatMutate(t.id, () => backend.chats.removeMessages(t.id, old.map(m => m.id),{withdrawn:true}));
       gone += old.length;
       backend.emit('chat', {threadId: t.id});
     }
@@ -1154,7 +1201,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
 
   return {
     bubbleRewrite, drawRoleSticker, clockTick, startClock, remindTick, groupTalk, outfitChanged, peekLater, makeGroup, letterTick, loreTest,
-    readingNote, reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, phoneAfter, phoneAfterPlan, askFriend,
+    readingNote, reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, restoreLatestPhoneText, phoneAfter, phoneAfterPlan, askFriend,
     reroll: threadId => reply(threadId, {reroll: true}),
     /** 停止回复: the reply being written for this chat is let go. */
     cancel: threadId => { stops.get(threadId)?.abort(); },

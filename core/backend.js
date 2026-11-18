@@ -3030,7 +3030,7 @@ export class TTSBackend {
     /** Confirmed candidate ids only; recheck favourites and user albums before each batch. */
     async appPhotoIds() {
         const [wardrobe, books] = await Promise.all([this.apps.listFrom('wardrobe:'),this.bookshelf.list()]);
-        return new Set([...wardrobe.map(row => row.photoId),...books.flatMap(book => (book.illustrations || []).map(pic => pic.photoId))].filter(Boolean));
+        return new Set([...wardrobe.map(row => row.photoId),...books.flatMap(book => (book.illustrations || []).flatMap(pic => [pic.photoId, ...(pic.versions || []).map(version => version.photoId)]))].filter(Boolean));
     }
     async unkeptPhotos() {
         this.assertOpen();

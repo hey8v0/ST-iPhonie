@@ -306,6 +306,7 @@ function cleanMessage(m, id, at) {
   if (m.quote?.text && ['text', 'voice'].includes(kind)) out.quote = {from: clip(m.quote.from, 40), text: clip(m.quote.text, 200)};
   // Sent by a story reply (正文联动手机): which reply (chat|message) and which version of it.
   if (typeof m.story === 'string' && m.story) { out.story = clip(m.story, 300); out.storyVer = clip(m.storyVer, 40); }
+  if (out.story && out.kind === 'text' && typeof m.storyReceipt === 'string' && m.storyReceipt.startsWith('phone:')) out.storyReceipt = clip(m.storyReceipt,600);
   const textless = ['photo', 'system', 'redpacket', 'transfer', 'pat', 'dice', 'recall', 'call', 'gift', 'file'];
   if (!textless.includes(kind) && !out.text.trim()) throw fail('消息内容为空');
   return out;
@@ -551,6 +552,19 @@ export class ChatStore {
       original.updatedAt = row.updatedAt = this.#now();
     });
   }
+  /** Explicit recovery of previously delivered story text. The receipt and missing copy are checked together. */
+  async restoreStoryText(id, message, receipt, occurrence) {
+    let added = false;
+    await this.#change(id, row => {
+      if (!received(row,receipt) || row.blocked || row.friend || !canGroupSpeak(row,message.from)) return;
+      const copies = row.messages.filter(m => m.story===message.story && m.kind==='text' && m.from===message.from && m.text===message.text);
+      if (copies.some(m => m.storyReceipt===receipt) || copies.length>occurrence) return;
+      const now=this.#now();
+      row.messages.push(cleanMessage({...message,storyReceipt:receipt},this.#id(),now));
+      row.unread++; row.updatedAt=now; added=true;
+    });
+    return added;
+  }
   /** Adds messages. Replies count as unread unless `read` is set (the chat is open on screen). */
   async append(id, messages, {read = false, receipt = ''} = {}) {
     return this.#change(id, row => {
@@ -731,9 +745,14 @@ export class ChatStore {
       row.blocked = cleanBlocked({...row.blocked, held: [...row.blocked.held, ...list]});
     });
   }
-  async removeMessages(id, ids) {
+  async removeMessages(id, ids, {withdrawn = false} = {}) {
     const drop = new Set(ids);
     return this.#change(id, row => {
+      if (withdrawn && row.phoneReceipts) {
+        // A swipe may return to this text. Side-effect receipts (money, calls, etc.) must survive a withdrawal.
+        const retract = new Set(row.messages.filter(m => drop.has(m.id) && m.kind === 'text').map(m => m.storyReceipt).filter(Boolean));
+        row.phoneReceipts = row.phoneReceipts.filter(key => !retract.has(key));
+      }
       row.messages = row.messages.filter(m => !drop.has(m.id));
       // The user's message the last round answered is gone: so are the round's other versions.
       if (row.alts && lastRound(row.messages).after !== row.alts.after) delete row.alts;

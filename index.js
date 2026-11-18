@@ -43,7 +43,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null, stopChatClock = null;
 import { createSongHost } from './host-song.js';
-const RUNTIME_VERSION='0.9.99';
+const RUNTIME_VERSION='1.0.0';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -90,7 +90,7 @@ function tagSpeakers(messages){if(!active||backend?.here()?.pending)return;const
 /** A chat was opened: close the old scope at once. Some hosts publish CHAT_CHANGED before metadata is ready. */
 let spaceRetry=0,spaceTurn=0;
 function refreshSpace(){if(!active||!backend)return;clearTimeout(spaceRetry);const turn=++spaceTurn;
- const follow=(attempt=0)=>{if(!active||!backend||turn!==spaceTurn)return;try{backend.setSpace(openSpace());if(!backend.here()?.pending){memoryHost?.refreshStory();tagSpeakers((context()?.chat||[]).slice(-200));return;}}catch{backend.setSpace({key:'',name:'',members:[]});}
+ const follow=(attempt=0)=>{if(!active||!backend||turn!==spaceTurn)return;try{backend.setSpace(openSpace());if(!backend.here()?.pending){for(const id of [...awaitingStoryReplies.keys()]) processReceivedStoryReply(id);memoryHost?.refreshStory();tagSpeakers((context()?.chat||[]).slice(-200));return;}}catch{backend.setSpace({key:'',name:'',members:[]});}
   // Bounded retries only; later host render/receive events can also finish loading the identity. Never invent a fallback key.
   if(attempt<20)spaceRetry=setTimeout(()=>follow(attempt+1),100);};follow();}
 function spaceChanged(){chatIdentity?.change();chatIdentityHost?.change();refreshSpace();}
@@ -172,7 +172,7 @@ function openVoiceWindow(id){if(!voiceOn())throw Error('请先打开正文语音
 
 function messageLines(snap){return withMarks(snap.raw,parsed(snap.raw).lines,settings.presets.find(p=>p.id===settings.activePreset)?.marks);}
 // Social refresh reads the completed reply, including separately inserted voice and picture tags.
-const receivedReplies = new WeakSet();
+const receivedReplies = new WeakMap();
 const awaitingStoryReplies = new Map();
 const storyGeneration = {running:false,stopped:false};
 function startStoryGeneration(type, options, dryRun) { if(!dryRun&&type!=='quiet'&&type!=='impersonate'){storyGeneration.running=true;storyGeneration.stopped=false;} }
@@ -180,7 +180,7 @@ function finishStoryGeneration(stopped=false) {
  storyGeneration.running=false;
  if(stopped)storyGeneration.stopped=true;
  if(storyGeneration.stopped){awaitingStoryReplies.clear();return;}
- for(const id of [...awaitingStoryReplies.keys()]){const message=context()?.chat?.[id];if(message&&takeStoryReply(id,message))afterStoryReply(id);}
+ for(const id of [...awaitingStoryReplies.keys()]) processReceivedStoryReply(id);
 }
 function markStoryReply(id) {
  const ctx=context(), message=ctx?.chat?.[id];if(!message||!storyReply(message))return;
@@ -191,14 +191,43 @@ function takeStoryReply(id,message) {
  const old=awaitingStoryReplies.get(Number(id));awaitingStoryReplies.delete(Number(id));const ctx=context();
  return !!old&&old.chat===(ctx.getCurrentChatId?.()??ctx.chatId)&&message.swipe_id===old.swipe&&(message===old.message||!!old.date&&message.send_date===old.date&&message.name===old.name);
 }
+// A render can come from reopening, scrolling, editing, or a brand-new reply.
+function processReceivedStoryReply(id) {
+ const message=context()?.chat?.[id];
+ if(storyGeneration.running || storyGeneration.stopped || backend?.here?.()?.pending || !message || !takeStoryReply(id,message)) return;
+ return afterStoryReply(id);
+}
+function receiveStoryReply(id) {
+ if (storyGeneration.stopped) return;
+ markStoryReply(id);
+ return processReceivedStoryReply(id);
+}
 async function afterStoryReply(id) {
- const owner=backend, host=pictures, ctx=context(), message=ctx?.chat?.[id], chat=ctx?.getCurrentChatId?.()??ctx?.chatId;
- if(!message||!storyReply(message)||receivedReplies.has(message))return;
- receivedReplies.add(message);
- const same=()=>active&&backend===owner&&pictures===host&&(context().chat[id]===message||!!message.send_date&&context().chat[id]?.send_date===message.send_date&&context().chat[id]?.name===message.name)&&(context().getCurrentChatId?.()??context().chatId)===chat;
- try { if (!await settledReply(context,id,settings.narration)) {receivedReplies.delete(message);if(context()?.chat?.[id]===message)markStoryReply(id);return;} if(!same())return; await host?.prepareReply(id); } catch(error) { if(error?.name!=='AbortError')notice(error.message); }
- if(!active||backend!==owner||pictures!==host||(context().chat[id]!==message&&!(message.send_date&&context().chat[id]?.send_date===message.send_date&&context().chat[id]?.name===message.name))||(context().getCurrentChatId?.()??context().chatId)!==chat)return;
+ const owner=backend, host=pictures, ctx=context(), message=ctx?.chat?.[id];
+ if(!message || !storyReply(message) || message.is_system) return;
+ const chat=ctx.getCurrentChatId?.()??ctx.chatId, swipe=message.swipe_id, date=message.send_date, name=message.name;
+ const last=receivedReplies.get(message);
+ if(last && last.chat===chat && last.swipe===swipe) return;
+ const entry={chat,swipe};
+ receivedReplies.set(message,entry);
+ const same=()=>{
+   const now=context(), current=now?.chat?.[id];
+   return active && backend===owner && pictures===host && current && current.swipe_id===swipe &&
+     (now.getCurrentChatId?.()??now.chatId)===chat && (current===message || !!date && current.send_date===date && current.name===name);
+ };
+ try {
+   if(!await settledReply(context,id,settings.narration)) {
+     if(receivedReplies.get(message)===entry) receivedReplies.delete(message);
+     if(same()) markStoryReply(id);
+     return;
+   }
+   if(!same()) return;
+   await host?.prepareReply(id);
+ } catch(error) { if(error?.name!=='AbortError') notice(error.message); }
+ if(!same()) return;
+ receivedReplies.set(context().chat[id],entry);
  await chats?.storyReplied(id).catch(error=>owner.reportDiagnostic?.('正文手机接收',error,'warn'));
+ if(!same()) return;
  host?.autoPictures(id).catch(e=>notice(e.message));momentsHost?.storyReplied();appsHost?.storyReplied(id).catch(()=>{});
 }
 function latestMessage(){const chat=context().chat;for(let id=chat.length-1;id>=0;id--){const snap=currentMessage(id);if(snap&&parsed(snap.raw).lines.length)return snap;}return null;}
@@ -519,6 +548,7 @@ function connect(source){
   soundListen:id=>{check();return soundHost.listen(String(id||''));},soundTakeListen:(key,blob)=>{check();return soundHost.listenTake(String(key||''),blob);},soundPrompt:input=>{check();return soundHost.prompt({text:String(input?.text||''),mode:input?.mode==='apply'?'apply':'english',hint:String(input?.hint||'')});},
   soundStopAmbience:()=>{check();soundHost.stopAmbience();},
   chatPictureStats:()=>{check();return pictures.pictureStats();},
+  restoreLatestPhoneText:()=>{check();return chats.restoreLatestPhoneText();},
   planLatestPictures:()=>{check();return pictures.planLatest();},planLatestVoice:()=>{check();return pictures.voiceLatest();},
   clearChatPictures:()=>{check();return pictures.clearPictures();},
   takeDraw:()=>{check();const value=pendingDraw;pendingDraw=null;return value;},
@@ -611,10 +641,10 @@ async function enableInternal(){if(active)return;const ctx=context();// generate
  hooked=true;}
  const subscribe=(name,fn)=>{if(!name)return;ctx.eventSource.on(name,fn);listeners.push([ctx.eventSource,name,fn]);};subscribe(ctx.eventTypes.GENERATION_STARTED,startStoryGeneration);subscribe(ctx.eventTypes.GENERATION_ENDED,()=>finishStoryGeneration());subscribe(ctx.eventTypes.GENERATION_STOPPED,()=>finishStoryGeneration(true));for(const event of ['MESSAGE_RECEIVED','CHARACTER_MESSAGE_RENDERED'])subscribe(ctx.eventTypes[event],pendingSpace);subscribe(ctx.eventTypes.GENERATION_AFTER_COMMANDS,async(type,options,dryRun)=>{try{await memoryHost?.storyReady();}catch{}inject(type,options,dryRun);});
  // Each new story reply counts toward automatic 朋友圈 posts (off unless the user turns it on).
- subscribe(ctx.eventTypes.MESSAGE_RECEIVED,id=>{if(!vnHost?.showing)soundHost?.received(id??(context()?.chat||[]).length-1);tagSpeakers((context()?.chat||[]).slice(-1));prepareReply(id??(context()?.chat||[]).length-1,voiceAhead((context()?.chat||[]).slice(-1)));markStoryReply(id??(context()?.chat||[]).length-1);callHost?.storyReplied();wardrobeHost?.storyReplied(id??(context()?.chat||[]).length-1).catch(()=>{});});subscribe(ctx.eventTypes.CHAT_CHANGED,spaceChanged);spaceChanged();subscribe(ctx.eventTypes.CHAT_CHANGED,()=>soundHost?.chatChanged());soundHost.chatChanged();for(const event of ['MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_DELETED'])subscribe(ctx.eventTypes[event],id=>soundHost?.messageChanged(event==='MESSAGE_DELETED'?undefined:id));
+ subscribe(ctx.eventTypes.MESSAGE_RECEIVED,id=>{if(!vnHost?.showing)soundHost?.received(id??(context()?.chat||[]).length-1);tagSpeakers((context()?.chat||[]).slice(-1));prepareReply(id??(context()?.chat||[]).length-1,voiceAhead((context()?.chat||[]).slice(-1)));receiveStoryReply(id??(context()?.chat||[]).length-1);callHost?.storyReplied();wardrobeHost?.storyReplied(id??(context()?.chat||[]).length-1).catch(()=>{});});subscribe(ctx.eventTypes.CHAT_CHANGED,spaceChanged);spaceChanged();subscribe(ctx.eventTypes.CHAT_CHANGED,()=>soundHost?.chatChanged());soundHost.chatChanged();for(const event of ['MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_DELETED'])subscribe(ctx.eventTypes[event],id=>soundHost?.messageChanged(event==='MESSAGE_DELETED'?undefined:id));
  // A message changed: what plays from a reply whose lines changed stops (the player's own check would at the next line);
  // an edit that left them (another plugin writing into the reply) and what plays from elsewhere (a call, a favourite) go on.
- for(const event of ['CHAT_CHANGED','MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_DELETED'])subscribe(ctx.eventTypes[event],()=>{storyTools?.close();if(event==='CHAT_CHANGED'||player.phase!=='idle'&&!player.valid?.())player.stop('消息已变化');if(preparing&&(event==='CHAT_CHANGED'||(preparing.snap?!unchanged(preparing.snap):event!=='MESSAGE_EDITED')))preparing.abort();scheduleRender();});for(const event of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_RECEIVED'])subscribe(ctx.eventTypes[event],scheduleRender);subscribe(ctx.eventTypes.CHAT_CHANGED,()=>vnHost?.close());for(const event of ['GENERATION_STOPPED','GENERATION_ENDED'])subscribe(ctx.eventTypes[event],()=>vnHost?.ended());subscribe(ctx.eventTypes.CHARACTER_MESSAGE_RENDERED,id=>{const staged=!!vnHost?.showing;vnHost?.rendered(id);if(!staged){soundHost?.rendered(id);musicHost?.rendered(id);}const m=context()?.chat?.[Number(id)];if(!storyGeneration.running&&m&&takeStoryReply(Number(id),m)){afterStoryReply(Number(id));}else if(!storyGeneration.running&&!storyGeneration.stopped&&m&&!receivedReplies.has(m))settledReply(context,Number(id),settings.narration).then(ready=>{if(ready)pictures?.autoPictures(Number(id)).catch(e=>notice(e.message));}).catch(e=>notice(e.message));});
+ for(const event of ['CHAT_CHANGED','MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_DELETED'])subscribe(ctx.eventTypes[event],()=>{storyTools?.close();if(event==='CHAT_CHANGED'||player.phase!=='idle'&&!player.valid?.())player.stop('消息已变化');if(preparing&&(event==='CHAT_CHANGED'||(preparing.snap?!unchanged(preparing.snap):event!=='MESSAGE_EDITED')))preparing.abort();scheduleRender();});for(const event of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_RECEIVED'])subscribe(ctx.eventTypes[event],scheduleRender);subscribe(ctx.eventTypes.CHAT_CHANGED,()=>vnHost?.close());for(const event of ['GENERATION_STOPPED','GENERATION_ENDED'])subscribe(ctx.eventTypes[event],()=>vnHost?.ended());subscribe(ctx.eventTypes.CHARACTER_MESSAGE_RENDERED,id=>{const staged=!!vnHost?.showing;vnHost?.rendered(id);if(!staged){soundHost?.rendered(id);musicHost?.rendered(id);}processReceivedStoryReply(Number(id));});
  // Which line of the reply a wave plays (-1: not one of this page's waves).
  const waveIndex=button=>{const owner=button.closest('[data-sttts-token]');return owner?.dataset.stttsToken===marker?Number(owner.dataset.stttsLine):-1;};
  storyTools=createStoryTools({hidden:()=>settings.general.hideStoryWaves===true,entry:()=>settings.general.storyTools!==false,message:currentMessage,valid:unchanged,notice,narration:()=>settings.narration,

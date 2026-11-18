@@ -378,8 +378,13 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   }
   async function autoPictures(id) {
     const s = settings(), ctx = context(), message = ctx.chat[id], chat = ctx.getCurrentChatId?.() ?? ctx.chatId, swipe = message?.swipe_id;
+    if (!message || message.is_user || message.is_system) return;
+    const current = () => {
+      const now = context();
+      return now.chat[id] === message && message.swipe_id === swipe && (now.getCurrentChatId?.() ?? now.chatId) === chat;
+    };
     await prepareReply(id);
-    if (!message || message.is_user || message.is_system || context().chat[id] !== message || message.swipe_id !== swipe || (context().getCurrentChatId?.() ?? context().chatId) !== chat) return;
+    if (!current()) return;
     if (!s.draw.enabled) return;
     registerAppearances(message);
     if (!s.draw.auto) return;
@@ -387,7 +392,9 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     if (!tags.length) return;
     const permission = await allowed(false);
     if (!permission) { backend.reportDiagnostic?.('正文出图', {message:'自动出图未执行，当前设置无法确认免费额度',engine:s.draw.engine,relay:!!s.draw.relay.url}, 'warn');scheduleRender(); return; }
-    await Promise.all(tags.map(tag => generate(id, tag, {permission})));
+    if (!current() || !settings().draw.enabled || !settings().draw.auto) return;
+    const remaining = new Set(parsePictures(message.mes).map(tag => tag.hash));
+    await Promise.all(tags.filter(tag => remaining.has(tag.hash) && !stored(message,tag.hash)).map(tag => generate(id, tag, {permission})));
   }
 
   /** What the queue says about a job, for the placeholder. */

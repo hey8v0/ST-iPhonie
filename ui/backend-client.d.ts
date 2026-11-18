@@ -1303,6 +1303,8 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     planLatestPictures(): Promise<boolean>;
     /** 回复后单独配音: voices the newest reply again; how many lines were voiced. */
     planLatestVoice?(): Promise<number>;
+    /** Restore missing plain text with a delivery receipt from the latest tagged reply in this chat. */
+    restoreLatestPhoneText?(): Promise<number>;
     /** Deletes every picture of the open chat from the tavern; their tags show "点击生成" again. */
     clearChatPictures(): Promise<{ count: number; failed: number }>;
     /** A picture the chat asked to open in the drawing app, if any. */

@@ -1,0 +1,39 @@
+/* The symbol is decorative. Only the label takes the remaining space. */
+.field.catalog-input { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px }
+.field.catalog-input input { width:100%; min-width:0; margin:0 }
+.catalog-input button { width:auto; min-height:40px; margin:0; padding-inline:12px }
+.catalog-input [data-action=reset] { grid-column:1/-1; justify-self:start }
+.catalog-results .catalog-row { display:grid; grid-template-columns:24px minmax(0,1fr) auto; align-items:center; gap:10px; padding:9px 2px; min-height:45px; width:100%; border:0; border-radius:0; background:transparent; color:var(--ink); text-align:left; font:inherit }
+.catalog-row + .catalog-row { border-top:1px solid var(--line) }
+.catalog-row .catalog-symbol { display:grid; place-items:center; width:24px; color:var(--accent) }
+.catalog-row svg { width:19px; height:19px }
+.catalog-label { display:grid; gap:2px; min-width:0; overflow-wrap:anywhere; line-height:1.35 }
+.catalog-label small { color:var(--ink2); font-size:12px }
+.catalog-row[aria-pressed=true] { color:var(--accent) }
+
+:where(button:enabled):active { filter:brightness(.89) }
+button:focus-visible { outline:2px solid var(--accent,currentColor); outline-offset:2px }
+button[aria-busy=true] { cursor:progress }
+button[aria-busy=true]::after { content:""; display:inline-block; box-sizing:border-box; width:.92em; height:.92em; vertical-align:middle; margin-inline-start:5px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:phone-wait .75s linear infinite }
+@keyframes phone-wait { to { transform:rotate(360deg) } }
+
+.reading-stage .reading-page { margin:max(12px,env(safe-area-inset-top)) var(--read-margin) calc(26px + env(safe-area-inset-bottom)) }
+.reading-stage .reading-bar { padding:max(8px,env(safe-area-inset-top)) 12px 8px }
+.reading-stage .reading-bottom { padding:12px 15px max(6px,env(safe-area-inset-bottom)) }
+.reading-folio { bottom:calc(6px + env(safe-area-inset-bottom)) }
+.reading-reader:not(.reading-hidden) .reading-folio { visibility:hidden }
+.reading-hidden :is(.reading-bar,.reading-bottom) { visibility:hidden }
+.reading-stage .reading-bar button,.reading-stage .reading-bottom button { min-height:40px; min-width:40px }
+.reading-leaf,.reading-leaf-front,.reading-leaf-back { position:absolute; inset:0; overflow:hidden; pointer-events:none }
+.reading-leaf { z-index:2; filter:drop-shadow(1px 1px 4px #0004) }
+.reading-leaf-front,.reading-leaf-back { background-color:var(--paper); will-change:clip-path }
+.reading-leaf-back { box-shadow:inset 0 0 20px #0001 }
+.reading-art { display:block; break-inside:avoid; text-indent:0 }
+.reading-art [hidden] { display:none }
+.reading-art-image { display:block; width:100%; border:0; padding:0; background:transparent; color:inherit; touch-action:manipulation }
+.reading-content .reading-art-image img { display:block; max-width:100%; max-height:68dvh; width:auto; margin:4px auto }
+.reading-art.folded .reading-art-image img { display:none }
+.reading-art.folded .reading-art-image::after { content:"展开插图"; font-size:13px; opacity:.8 }
+.reading-art-status { display:flex; align-items:center; gap:8px; padding:7px 10px; margin-block:4px; border-inline-start:2px solid currentColor; font:13px/1.4 system-ui; color:inherit; background:color-mix(in srgb,currentColor 7%,transparent) }
+.reading-art-status button { font:inherit; color:inherit; background:transparent; border:0; text-decoration:underline }
+@media (prefers-reduced-motion:reduce) { button[aria-busy=true]::after { animation:none } }

@@ -142,7 +142,8 @@ export function createView(ctx, name) {
     async busy(el, task) {
       if (el.disabled) return;
       el.disabled = true;
-      try { return await task(); } finally { if (el.isConnected) el.disabled = false; }
+      el.setAttribute('aria-busy','true');
+      try { return await task(); } finally { el.disabled = false; el.removeAttribute('aria-busy'); }
     }
   };
   view.on('click', '[data-help]', el => ctx.help(el.dataset.help));
