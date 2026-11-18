@@ -362,7 +362,7 @@ export function bookshelfApp(ctx) {
     book = await api.updateReadingBook(book.id, {bookmarks: found < 0 ? [...marks, p].slice(-200) : marks.filter((_, i) => i !== found)}); ctx.notify(found < 0 ? '已加书签' : '已移除书签');
   }
   function enableSelection(pane) {
-    let bar, selected;
+    let bar, selected, settling;
     function refresh() {
       const sel = win.getSelection();
       const h = selectedRange(sel,blocks);
@@ -371,7 +371,7 @@ export function bookshelfApp(ctx) {
       if (!bar) {
         bar = doc.createElement('div'); bar.className = 'reading-tools';
         for (const [action,glyph,label] of [['mark','star','划线或取消划线'],['draw','paint','为选中文字生图'],['send','chat','发给 TA'],['copy','copy','复制']]) {
-          bar.insertAdjacentHTML('beforeend',btn('para-'+action,icon(glyph),'round-button',`aria-label="${label}" title="${label}"`));
+          bar.insertAdjacentHTML('beforeend',btn('para-'+action,icon(glyph),'reading-tool',`aria-label="${label}" title="${label}"`));
         }
         stage.append(bar);
         bar.onpointerdown = e => e.preventDefault();
@@ -392,11 +392,12 @@ export function bookshelfApp(ctx) {
       const rect = [...(sel.getRangeAt(0).getClientRects?.() || [])].at(-1) || pane.getBoundingClientRect();
       const host = stage.getBoundingClientRect();
       bar.style.left = Math.max(4,Math.min(host.width-bar.offsetWidth-4,rect.right-host.left-bar.offsetWidth/2))+'px';
-      bar.style.top = Math.max(4,Math.min(host.height-bar.offsetHeight-4,rect.bottom-host.top+12))+'px';
+      bar.style.top = Math.max(4,Math.min(host.height-bar.offsetHeight-4,rect.bottom-host.top+24))+'px';
     }
-    doc.addEventListener('selectionchange',refresh);
+    function moved() { if(!bar) { refresh();return; } bar.style.visibility='hidden'; win.clearTimeout(settling); settling=win.setTimeout(()=>{refresh();if(bar) bar.style.visibility='';},100); }
+    doc.addEventListener('selectionchange',moved);
     pane.addEventListener('scroll',refresh);
-    detachSelection = () => { doc.removeEventListener('selectionchange',refresh); pane.removeEventListener('scroll',refresh); bar?.remove(); detachSelection = () => {}; };
+    detachSelection = () => { win.clearTimeout(settling);doc.removeEventListener('selectionchange',moved); pane.removeEventListener('scroll',refresh); bar?.remove(); detachSelection = () => {}; };
   }
   function paintMarks() {
     if (!content) return;

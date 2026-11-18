@@ -19,7 +19,7 @@ import {editTags} from './host-ask.js';
 import {downloadAction} from './download.js';
 import {plainStory, activeChatPreset} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {voicePlanRequest, combinedRequest, insertVoiced} from './core/voice-plan.js';
+import {voicePlanRequest, combinedRequest, voicedRows, insertVoiced} from './core/voice-plan.js';
 import {withPhone, phoneSection} from './core/chat.js';
 import {TIER_NAMES, NAI_MODEL_NAMES} from './core/novelai.js';
 
@@ -297,9 +297,11 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
         if (!valid()) return skip();
         current = entry.revision.target(); result = assemble(current.mes);
       }
+      const candidates=wantVoice ? voicedRows(reply,entry.format).length : 0;
+      const quoted=wantVoice ? (storyScope(current.mes,entry.scope).masked.match(/[“「『"][^”」』"\n]+[”」』"]/g) || []).length : 0;
       if (!result.voiced && !result.pictured && !sent) {
         pendingAnswers.delete(id);
-        stage(id, '模型已返回，但未匹配到正文台词或画面', {voiced: 0, pictured: 0}, 'warn');
+        stage(id, wantVoice ? (candidates ? '未匹配到正文台词：配音行有效，但在选定正文范围内找不到原句' : '模型返回中没有符合当前预设的配音行') : '未匹配到正文画面', {quoted,candidates,voiced: 0, pictured: 0}, 'warn');
         throw Error(wantVoice ? '模型已返回，但这次没有匹配上正文台词，可用「给这层楼配音」重试；具体原因见日志' : '这次没有挑出画面，可以用「给这层楼生图」重试');
       }
       // Re-read the whole current reply: ignored panels belong to other tools and are never replaced by our snapshot.
@@ -321,7 +323,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
         throw Error('配音结果已保留，但正文没保存成功；用「给这层楼配音」可重试补写：' + error.message);
       }
       pendingAnswers.delete(id);
-      stage(id, '已写入并保存正文', {voiced, pictured});
+      stage(id, '已写入并保存正文', {quoted,candidates,voiced, pictured});
       const now = entry.revision.current();
       if (now) {
         redrawMessage(id, now); scheduleRender();
@@ -354,7 +356,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
    * saved and, when automatic drawing is on and free, all its pictures are queued.
    */
   const afterReplies = new WeakMap(), replyTasks = new Map();
-  function prepareReply(id, {retry = false} = {}) {
+  function prepareReply(id, {retry = false, canDraw = () => true} = {}) {
     const ctx = context(), message = ctx.chat[id], s = settings(), chat = ctx.getCurrentChatId?.() ?? ctx.chatId;
     if (!message || message.is_user || message.is_system) return Promise.resolve();
     const sibling = replyTasks.get(id);
@@ -367,7 +369,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     task.promise = Promise.resolve().then(async () => {
       if (context().chat[id] !== message || message.mes !== task.raw || message.swipe_id !== task.swipe || (context().getCurrentChatId?.() ?? context().chatId) !== chat) return;
       const wantVoice = !!voice?.wanted() && !voice.has(storyScope(message.mes, s.narration).masked);
-      const wantPictures = s.draw.enabled && s.draw.mode === 'separate' && !parsePictures(message.mes).length;
+      const wantPictures = canDraw() && s.draw.enabled && s.draw.mode === 'separate' && !parsePictures(message.mes).length;
       if (!storyScope(message.mes, s.narration).masked.replace(/<[^>]+>/g, '').trim()) return;
       const result = wantVoice || wantPictures ? await planReply(id, {voiced: wantVoice, pictured: wantPictures, phoned: true}) : {written: true};
       task.state = result.written ? 'written' : 'skipped';
@@ -376,14 +378,15 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     }).catch(error => { task.state = 'failed'; throw error; }).finally(() => { task.running = false; });
     return task.promise;
   }
-  async function autoPictures(id) {
+  async function autoPictures(id, canDraw = () => true) {
+    if (!canDraw()) return;
     const s = settings(), ctx = context(), message = ctx.chat[id], chat = ctx.getCurrentChatId?.() ?? ctx.chatId, swipe = message?.swipe_id;
     if (!message || message.is_user || message.is_system) return;
     const current = () => {
       const now = context();
       return now.chat[id] === message && message.swipe_id === swipe && (now.getCurrentChatId?.() ?? now.chatId) === chat;
     };
-    await prepareReply(id);
+    await prepareReply(id,{canDraw});
     if (!current()) return;
     if (!s.draw.enabled) return;
     registerAppearances(message);
@@ -392,7 +395,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     if (!tags.length) return;
     const permission = await allowed(false);
     if (!permission) { backend.reportDiagnostic?.('正文出图', {message:'自动出图未执行，当前设置无法确认免费额度',engine:s.draw.engine,relay:!!s.draw.relay.url}, 'warn');scheduleRender(); return; }
-    if (!current() || !settings().draw.enabled || !settings().draw.auto) return;
+    if (!canDraw() || !current() || !settings().draw.enabled || !settings().draw.auto) return;
     const remaining = new Set(parsePictures(message.mes).map(tag => tag.hash));
     await Promise.all(tags.filter(tag => remaining.has(tag.hash) && !stored(message,tag.hash)).map(tag => generate(id, tag, {permission})));
   }

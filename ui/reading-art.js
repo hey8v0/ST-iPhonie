@@ -30,6 +30,8 @@ export function readingArt(ctx, current, reflow) {
   async function view(bookId,row,button) {
     const ticket=++opening;
     viewer?.close();
+    const book=await api.getReadingBook(bookId);
+    row=book?.illustrations?.find(r=>artId(r)===artId(row)) || row;
     const list=(await Promise.all(versionsOf(row).map(async version => {
       const photo=await api.getPhoto(version.photoId);
       return photo?.blob ? {...version,photo} : null;

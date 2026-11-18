@@ -43,7 +43,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null, stopChatClock = null;
 import { createSongHost } from './host-song.js';
-const RUNTIME_VERSION='1.0.0';
+const RUNTIME_VERSION='1.0.1';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -93,7 +93,7 @@ function refreshSpace(){if(!active||!backend)return;clearTimeout(spaceRetry);con
  const follow=(attempt=0)=>{if(!active||!backend||turn!==spaceTurn)return;try{backend.setSpace(openSpace());if(!backend.here()?.pending){for(const id of [...awaitingStoryReplies.keys()]) processReceivedStoryReply(id);memoryHost?.refreshStory();tagSpeakers((context()?.chat||[]).slice(-200));return;}}catch{backend.setSpace({key:'',name:'',members:[]});}
   // Bounded retries only; later host render/receive events can also finish loading the identity. Never invent a fallback key.
   if(attempt<20)spaceRetry=setTimeout(()=>follow(attempt+1),100);};follow();}
-function spaceChanged(){chatIdentity?.change();chatIdentityHost?.change();refreshSpace();}
+function spaceChanged(){storyGeneration.drawTurn=null;chatIdentity?.change();chatIdentityHost?.change();refreshSpace();}
 function pendingSpace(){if(backend?.here()?.pending)refreshSpace();}
 function tavernAvatars(){const ctx=context(),thumb=(type,file)=>typeof ctx?.getThumbnailUrl==='function'?ctx.getThumbnailUrl(type,file):`/thumbnail?type=${type}&file=${encodeURIComponent(file)}`,characters={};
  for(const c of ctx?.characters||[])if(c?.name&&c.avatar&&c.avatar!=='none'&&!characters[c.name])characters[c.name]=thumb('avatar',c.avatar);
@@ -175,7 +175,9 @@ function messageLines(snap){return withMarks(snap.raw,parsed(snap.raw).lines,set
 const receivedReplies = new WeakMap();
 const awaitingStoryReplies = new Map();
 const storyGeneration = {running:false,stopped:false};
-function startStoryGeneration(type, options, dryRun) { if(!dryRun&&type!=='quiet'&&type!=='impersonate'){storyGeneration.running=true;storyGeneration.stopped=false;} }
+function startStoryGeneration(type, options, dryRun) { if(!dryRun&&type!=='quiet'&&type!=='impersonate'){const ctx=context(), chat=ctx.chat || [], last=chat.at(-1);
+ storyGeneration.drawTurn={chat:ctx.getCurrentChatId?.()??ctx.chatId,length:chat.length,lastText:last?.mes,lastSwipe:last?.swipe_id,type,enabled:!!settings.draw?.enabled};
+ storyGeneration.running=true;storyGeneration.stopped=false;} }
 function finishStoryGeneration(stopped=false) {
  storyGeneration.running=false;
  if(stopped)storyGeneration.stopped=true;
@@ -206,6 +208,11 @@ async function afterStoryReply(id) {
  const owner=backend, host=pictures, ctx=context(), message=ctx?.chat?.[id];
  if(!message || !storyReply(message) || message.is_system) return;
  const chat=ctx.getCurrentChatId?.()??ctx.chatId, swipe=message.swipe_id, date=message.send_date, name=message.name;
+ const turn=storyGeneration.drawTurn;
+ const eligible=turn && !turn.claimed && chat===turn.chat && id>0 && id===ctx.chat.length-1 &&
+   (id>=turn.length || (id===turn.length-1 && ['swipe','regenerate','continue'].includes(turn.type) && (swipe!==turn.lastSwipe || message.mes!==turn.lastText)));
+ if(eligible) turn.claimed=true;
+ const canDraw=()=>!!eligible && same() && storyGeneration.drawTurn===turn && !storyGeneration.stopped && turn.enabled && settings.draw?.enabled;
  const last=receivedReplies.get(message);
  if(last && last.chat===chat && last.swipe===swipe) return;
  const entry={chat,swipe};
@@ -218,17 +225,17 @@ async function afterStoryReply(id) {
  try {
    if(!await settledReply(context,id,settings.narration)) {
      if(receivedReplies.get(message)===entry) receivedReplies.delete(message);
-     if(same()) markStoryReply(id);
+     if(same()) { if(eligible) turn.claimed=false; markStoryReply(id); }
      return;
    }
    if(!same()) return;
-   await host?.prepareReply(id);
+   await host?.prepareReply(id,{canDraw});
  } catch(error) { if(error?.name!=='AbortError') notice(error.message); }
  if(!same()) return;
  receivedReplies.set(context().chat[id],entry);
  await chats?.storyReplied(id).catch(error=>owner.reportDiagnostic?.('正文手机接收',error,'warn'));
  if(!same()) return;
- host?.autoPictures(id).catch(e=>notice(e.message));momentsHost?.storyReplied();appsHost?.storyReplied(id).catch(()=>{});
+ if(canDraw()) host?.autoPictures(id,canDraw).catch(e=>notice(e.message));momentsHost?.storyReplied();appsHost?.storyReplied(id).catch(()=>{});
 }
 function latestMessage(){const chat=context().chat;for(let id=chat.length-1;id>=0;id--){const snap=currentMessage(id);if(snap&&parsed(snap.raw).lines.length)return snap;}return null;}
 function selectedDialogue(){if(selectedMessage&&!unchanged(selectedMessage))selectedMessage=null;return selectedMessage||latestMessage();}
@@ -238,7 +245,7 @@ function currentDialogue(){const snap=selectedDialogue();if(snap?(!dialogueMessa
 const dialogueChoices=new Map();
 function listDialogueReplies(){dialogueChoices.clear();const rows=[];for(let id=context().chat.length-1;id>=0;id--){const snap=currentMessage(id);if(!snap)continue;const lines=parsed(snap.raw).lines;if(!lines.length)continue;const token=crypto.randomUUID();dialogueChoices.set(token,snap);rows.push({id,token,name:String(snap.message.name||lines[0].role||''),count:lines.length,preview:lines[0].translation.slice(0,80)});}return rows;}
 function selectDialogue(id,token){const snap=dialogueChoices.get(token);if(!snap||snap.id!==id||!unchanged(snap)||!parsed(snap.raw).lines.length){dialogueChoices.clear();throw Error('楼层内容已变化，请重新展开选择');}const previous=selectedDialogue();selectedMessage=snap;dialogueChoices.clear();if(!previous||previous.id!==snap.id||!unchanged(previous)){playbackMessage=null;player.stop('等待播放');}return currentDialogue();}
-async function playMessage(id,index){let snap=currentMessage(id);if(snap&&index===undefined&&voicePlan.wanted()&&!messageLines(snap).length){try{await pictures.prepareReply(id,{retry:true});}catch(error){notice(error.message);return;}const now=currentMessage(id);if(!now||(now.message!==snap.message&&!(snap.message.send_date&&now.message.send_date===snap.message.send_date&&now.message.name===snap.message.name))||now.chat!==snap.chat||now.swipe!==snap.swipe)return;snap=now;if(!messageLines(snap).length){notice('这条回复还没有配上音，请用「给这层楼配音」重试');return;}}if(!snap)return;const current=player.queue[player.index];if(index!==undefined&&!player.boundary&&playbackMessage&&unchanged(playbackMessage)&&playbackMessage.id===id&&current?.uiIndex===index&&['playing','generating','paused'].includes(player.phase)){selectedMessage=snap;player.toggle();return;}const lines=messageLines(snap).map((line,uiIndex)=>({...line,uiIndex}));if(index!==undefined&&!lines[index]){healed.delete(id);redrawMessage(id,snap.message);scheduleRender();notice('这句台词和消息内容对不上了，已经重新画好，请再点一次');return;}selectedMessage=snap;playbackMessage=snap;
+async function playMessage(id,index){let snap=currentMessage(id);if(snap&&index===undefined&&voicePlan.wanted()&&!messageLines(snap).length){try{await pictures.prepareReply(id,{retry:true,canDraw:()=>false});}catch(error){notice(error.message);return;}const now=currentMessage(id);if(!now||(now.message!==snap.message&&!(snap.message.send_date&&now.message.send_date===snap.message.send_date&&now.message.name===snap.message.name))||now.chat!==snap.chat||now.swipe!==snap.swipe)return;snap=now;if(!messageLines(snap).length){notice('这条回复还没有配上音，请用「给这层楼配音」重试');return;}}if(!snap)return;const current=player.queue[player.index];if(index!==undefined&&!player.boundary&&playbackMessage&&unchanged(playbackMessage)&&playbackMessage.id===id&&current?.uiIndex===index&&['playing','generating','paused'].includes(player.phase)){selectedMessage=snap;player.toggle();return;}const lines=messageLines(snap).map((line,uiIndex)=>({...line,uiIndex}));if(index!==undefined&&!lines[index]){healed.delete(id);redrawMessage(id,snap.message);scheduleRender();notice('这句台词和消息内容对不上了，已经重新画好，请再点一次');return;}selectedMessage=snap;playbackMessage=snap;
  // 整篇朗读: the whole reply, the story between the lines read by the 旁白 (core/narration.js); one line is still just that line.
  if(index===undefined&&settings.narration?.enabled){const queue=readingPlan(snap.raw,lines,settings.narration.skip,settings.narration.body).map(x=>x.narration!==undefined?{role:NARRATOR,narration:true,emotion:'calm',text:x.narration,translation:x.narration}:lines[x.line]);if(settings.narration.voice!=='role')speech?.prime();player.start(queue,()=>unchanged(snap),null,{ahead:true});return;}
  player.start(index===undefined?lines:[lines[index]],()=>unchanged(snap),null,{ahead:index===undefined});}
@@ -657,6 +664,6 @@ async function enableInternal(){if(active)return;const ctx=context();// generate
  dialogue:openVoiceWindow,draw:id=>pictures.drawMessage(id),drawSelection:selected=>pictures.drawSelection(selected),vn:id=>vnHost.open(id),playing:id=>playbackMessage?.id===id&&['playing','generating','paused','waiting'].includes(player.phase),stop:()=>player.stop(),play:id=>{if(!voiceOn())throw Error('请先打开正文语音');if(!messageLines(currentMessage(id)).length)throw Error('这层楼还没有配音台词');return playMessage(id);}}});
  document.addEventListener('click',click,true);document.addEventListener('keydown',keyUnlock,true);mountEntry();mountWand();syncFloating();observer=new MutationObserver(chatChanged);const chat=document.querySelector('#chat');if(chat)observer.observe(chat,{childList:true,subtree:true});inject();rerender();}
 export function enable(){if(enabling)return enabling;enabling=enableInternal().finally(()=>{enabling=null;});return enabling;}
-export async function disable(){if(enabling)await enabling;stopDiagnostics?.();stopDiagnostics=null;if(!active)return;active=false;chatIdentity?.close();chatIdentity=null;chatIdentityHost?.close();chatIdentityHost=null;storyGeneration.running=false;storyGeneration.stopped=false;awaitingStoryReplies.clear();storyWork?.dispose();storyWork=null;clearTimeout(spaceRetry);spaceTurn++;bedtimeHost?.close();bedtimeHost=null;bookHost?.close();bookHost=null;stopChatClock?.();stopChatClock=null;msgIsland?.dispose();msgIsland=null;callIsland?.dispose();callIsland=null;closeGame();renderEpoch++;cancelAnimationFrame(lineRaf);lineMedia?.removeEventListener('change',animateLines);document.removeEventListener('visibilitychange',animateLines);voiceWindowMessage=voiceWindowTail=null;playbackMessage=selectedMessage=dialogueMessage=null;dialogueRevision++;dialogueChoices.clear();healed.clear();player.stop();clearPrompts();for(const [source,event,fn] of listeners)source.removeListener(event,fn);listeners.length=0;observer?.disconnect();clearTimeout(renderTimer);renderTimer=0;document.removeEventListener('click',click,true);document.removeEventListener('keydown',keyUnlock,true);document.removeEventListener('visibilitychange',flushSync);watchPanelLayout(false);document.querySelector('#sttts-extension-entry')?.remove();document.querySelector('#sttts-wand-entry')?.remove();floating?.destroy();floating=null;document.querySelectorAll('[data-sttts-owned="toolbar"]').forEach(el=>el.remove());panel?.remove();panel=frame=null;delete globalThis.__stIphoniePanelBridge;storyTools?.dispose();storyTools=null;vnHost?.dispose();vnHost=null;pictures=null;closePublicApi(globalThis.stIphonie);delete globalThis.stIphonie;chats=null;momentsHost=null;wardrobeHost=null;generatorHost=null;appsHost=null;assistantHost?.close();assistantHost=null;songHost=null;musicHost?.close();musicHost=null;musicIsland?.dispose();musicIsland=null;voiceIsland?.dispose();voiceIsland=null;momentsWatch?.dispose();momentsWatch=null;noteIsland?.dispose();noteIsland=null;callHost?.dispose();callHost=null;memoryHost?.close();memoryHost=null;voiceHost=null;soundHost?.close();soundHost=null;pendingDraw=null;await backend.close();rerender();}
+export async function disable(){if(enabling)await enabling;stopDiagnostics?.();stopDiagnostics=null;if(!active)return;active=false;chatIdentity?.close();chatIdentity=null;chatIdentityHost?.close();chatIdentityHost=null;storyGeneration.running=false;storyGeneration.stopped=false;storyGeneration.drawTurn=null;awaitingStoryReplies.clear();storyWork?.dispose();storyWork=null;clearTimeout(spaceRetry);spaceTurn++;bedtimeHost?.close();bedtimeHost=null;bookHost?.close();bookHost=null;stopChatClock?.();stopChatClock=null;msgIsland?.dispose();msgIsland=null;callIsland?.dispose();callIsland=null;closeGame();renderEpoch++;cancelAnimationFrame(lineRaf);lineMedia?.removeEventListener('change',animateLines);document.removeEventListener('visibilitychange',animateLines);voiceWindowMessage=voiceWindowTail=null;playbackMessage=selectedMessage=dialogueMessage=null;dialogueRevision++;dialogueChoices.clear();healed.clear();player.stop();clearPrompts();for(const [source,event,fn] of listeners)source.removeListener(event,fn);listeners.length=0;observer?.disconnect();clearTimeout(renderTimer);renderTimer=0;document.removeEventListener('click',click,true);document.removeEventListener('keydown',keyUnlock,true);document.removeEventListener('visibilitychange',flushSync);watchPanelLayout(false);document.querySelector('#sttts-extension-entry')?.remove();document.querySelector('#sttts-wand-entry')?.remove();floating?.destroy();floating=null;document.querySelectorAll('[data-sttts-owned="toolbar"]').forEach(el=>el.remove());panel?.remove();panel=frame=null;delete globalThis.__stIphoniePanelBridge;storyTools?.dispose();storyTools=null;vnHost?.dispose();vnHost=null;pictures=null;closePublicApi(globalThis.stIphonie);delete globalThis.stIphonie;chats=null;momentsHost=null;wardrobeHost=null;generatorHost=null;appsHost=null;assistantHost?.close();assistantHost=null;songHost=null;musicHost?.close();musicHost=null;musicIsland?.dispose();musicIsland=null;voiceIsland?.dispose();voiceIsland=null;momentsWatch?.dispose();momentsWatch=null;noteIsland?.dispose();noteIsland=null;callHost?.dispose();callHost=null;memoryHost?.close();memoryHost=null;voiceHost=null;soundHost?.close();soundHost=null;pendingDraw=null;await backend.close();rerender();}
 export const dispose=disable;
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>enable().catch(e=>notice(e.message)),{once:true});else enable().catch(e=>notice(e.message));

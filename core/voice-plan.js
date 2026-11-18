@@ -65,7 +65,15 @@ export function insertVoiced(message, reply, format, scope = {}) {
         if (contains(a, b) && free(a, b)) return [a, b];
       }
     }
-    return null;
+    // Only accept a unique whitespace-normalized quotation inside the configured story range.
+    let match=null;
+    for (const q of source.matchAll(/[“「『"]([^”」』"\n]+)[”」』"]/g)) {
+      const a=q.index,b=a+q[0].length;
+      if(q[1].replace(/\s+/g,'')!==said.replace(/\s+/g,'') || !contains(a,b) || !free(a,b)) continue;
+      if(match || format===FREE_FORMAT) return null;
+      match=[a,b];
+    }
+    return match;
   };
   let cursor = 0;
   for (const [said, voiced] of voicedRows(reply, format)) {

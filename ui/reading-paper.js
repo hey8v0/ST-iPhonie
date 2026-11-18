@@ -45,8 +45,8 @@ export function paperTurn(win, pane, article, page, step) {
     });
     back.style.clipPath = polygon(folded);
     // The crease carries the highlight with it; the exposed reverse grows darker toward its free edge.
-    const crease = (step > 0 ? k : width+k) - ny*height/2;
-    back.style.backgroundImage = `linear-gradient(${step>0?90:270}deg,transparent ${crease-52}px,#0002 ${crease-18}px,#fff7 ${crease-3}px,#0003 ${crease}px)`;
+    const crease = k + Math.max(0,-nx*width) + Math.max(0,-ny*height);
+    back.style.backgroundImage = `linear-gradient(${Math.atan2(nx,-ny)*180/Math.PI}deg,transparent ${crease-14}px,#0002 ${crease}px,transparent ${crease+1}px)`;
   }
   function remove() { win.cancelAnimationFrame(frame); sheet.remove(); done?.(); done = null; }
   move(0);
