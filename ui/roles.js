@@ -3,7 +3,8 @@ import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {layerSort} from './layer-sort.js';
 import {layerTree} from '../core/layers.js';
 import {lookTest} from '../core/draw.js';
-import {voiceFromLink, customSetOf} from '../core/custom-voice.js';
+import {openCustomCatalog} from './custom-catalog.js';
+import {voiceFromLink, customSetOf, customParams, customSlots} from '../core/custom-voice.js';
 import {pickPicture} from './draw-images.js';
 import {VOICE_GENDERS, VOICE_AGES, poolLine, poolKey, readPoolFile, poolFile, guessVoice} from '../core/auto-voice.js';
 import {saveFile} from '../download.js';
@@ -25,7 +26,12 @@ export function rolesApp(ctx) {
   // The 音色收藏夹's names by voice: read once per drawing of the list (each read of the settings copies all of them, and
   // asking once per role made the list slower with every role).
   const poolNames = () => new Map(favorites().map(f => [poolKey(f), f.name]));
-  const voiceLabel = (voice, pool = poolNames(), route = current) => { const name = (route ? pool.get(favoriteKey(route.engine, voice, route.model)) : '') || voiceNames.get(voice) || voice; return name.length > 16 ? name.slice(0, 15) + '…' : name; };
+  const voiceLabel = (voice, pool = poolNames(), route = current) => {
+    const key = route && favoriteKey(route.engine, voice, route.model);
+    const selected = route?.voiceChoice;
+    const name = pool.get(key) || voiceNames.get(key) || (selected?.key === key && selected.name) || voice;
+    return name.length > 16 ? name.slice(0, 15) + '…' : name;
+  };
   // 音色收藏夹 (stored as voicePool: 自动挑音色 picks from it first): voices kept with a name and a note of the user's own.
   const favorites = () => api.getState().voicePool || [];
   const favoriteModel = (engine, model = '') => engine === 'custom' ? customSetOf(api.readState().connections.custom, model) : model;
@@ -272,7 +278,7 @@ export function rolesApp(ctx) {
       d.close(); ctx.notify(fresh ? '已收藏' : '已保存'); done();
     });
   }
-  function addToPool(r) { favoriteForm({engine: r.engine, voice: r.voice, model: favoriteModel(r.engine, r.model), name: voiceNames.get(r.voice) || r.name + ' 的音色'}, {done: render}); }
+  function addToPool(r) { favoriteForm({engine: r.engine, voice: r.voice, model: favoriteModel(r.engine, r.model), name: voiceNames.get(favoriteKey(r.engine, r.voice, r.model)) || r.name + ' 的音色'}, {done: render}); }
   /** 从收藏夹选: the kept voices of this engine; one tapped goes into the role being edited. */
   function pickFavorite() {
     const target = current, list = favorites().filter(f => f.engine === target.engine);
@@ -284,7 +290,7 @@ export function rolesApp(ctx) {
       target.voice = f.voice;
       if (f.model) target.model = f.model;
       target.autoVoice = false;
-      voiceNames.set(f.voice, f.name);
+      voiceNames.set(poolKey(f), f.name);
       d.close();
       if (current === target) { render(); changed(); }
     });
@@ -379,6 +385,7 @@ export function rolesApp(ctx) {
   v.on('input', '[data-field]', el => {
     if (!current) return;
     current[el.dataset.field] = el.value;
+    if (el.dataset.field === 'customModel') current.customModelSet=customSetOf(api.readState().connections.custom,current.model);
     if (el.dataset.field === 'voice') current.autoVoice = false;
     changed();
     if (el.dataset.field === 'name') { const n = v.root.querySelector('[data-id-name]'); if (n) n.textContent = el.value || '新角色'; }
@@ -394,7 +401,7 @@ export function rolesApp(ctx) {
     const n = v.root.querySelector('[data-id-voice]'); if (n) n.textContent = id;
     ctx.notify('取了音色页网址的最后一段：' + id);
   });
-  v.on('change', 'select[data-field]', el => { current[el.dataset.field] = el.value; changed(); if (el.dataset.field === 'model' && current.engine === 'mimo') render(); });
+  v.on('change', 'select[data-field]', el => { current[el.dataset.field] = el.value; changed(); if (el.dataset.field === 'model' && ['mimo','custom'].includes(current.engine)) render(); });
   // A 参考图 whose files are gone (another tavern, a backup without them) shows as none.
   v.root.addEventListener('error', e => { if (e.target.matches?.('.role-ref img')) e.target.remove(); }, true);
   v.on('click', '[data-action]', async el => {
@@ -445,6 +452,12 @@ export function rolesApp(ctx) {
           render();
         }
         break;
+      case 'pick-custom-model': {
+        const target=current, c=api.readState().connections.custom,set=customSetOf(c,target.model);
+        openCustomCatalog(ctx,{...c,model:set},'model',()=>!v.disposed && current===target && target.engine==='custom' && customSetOf(api.readState().connections.custom,target.model)===set,
+          id=>{target.customModel=id;target.customModelSet=set;render();changed();});
+        break;
+      }
       case 'pick-voice': pickVoice(); break;
       case 'voice-pool': poolSheet(); break;
       case 'pool-add': addToPool(current); break;
@@ -464,7 +477,12 @@ export function rolesApp(ctx) {
 
   /** 自己的接口's sets, when the role is on it. */
   const customSets = r => r.engine === 'custom' ? api.customSetList?.() || [] : [];
-  function modelTitle(r) { return r.engine !== 'custom' ? '模型和台词语言' : customSets(r).length > 1 ? '用哪一套和台词语言' : '台词语言'; }
+  function modelTitle(r) {
+    if(r.engine!=='custom') return '模型和台词语言';
+    const c=api.readState().connections.custom;
+    if(customSlots(customParams(c,customSetOf(c,r.model)) || {}).has('model')) return '接口、模型和台词语言';
+    return customSets(r).length>1?'用哪一套和台词语言':'台词语言';
+  }
   function modelNote(r) {
     if (r.engine !== 'custom') return r.model || '跟随引擎';
     const sets = customSets(r);
@@ -474,9 +492,13 @@ export function rolesApp(ctx) {
   function modelField(r, c, schema) {
     if (r.engine !== 'custom') return field('模型', select('model', r.model || '', [['', '跟随引擎 · ' + c.model], ...schema.models.map(m => [m.id, m.id, !m.supported])]));
     const sets = customSets(r);
-    if (sets.length < 2) return '';
+    const set=customSetOf(c,r.model),params=customParams(c,set) || {};
+    const override=(!r.customModelSet || r.customModelSet===set) ? r.customModel || '' : '';
+    const model=customSlots(params).has('model') ? field('角色模型',input('customModel',override,'text','placeholder="'+esc('跟随接口 · '+(params.cloudModel || '未设置'))+'"')+
+      btn('pick-custom-model','选择模型','text-button'),'留空跟随这套接口的默认模型。') : '';
+    if (sets.length < 2) return model;
     return field('用哪一套接口', select('model', sets.some(s => s.id === r.model) ? r.model : '', [['', '跟随引擎 · ' + (sets.find(s => s.current)?.name || '')], ...sets.map(s => [s.id, s.name])]),
-      '引擎里「自己的接口」存了好几套时，选这个角色用哪一套：音色从那一套里选，台词也发给那一套。「跟随引擎」就是那边正在用的那套。');
+      '引擎里「自己的接口」存了好几套时，选这个角色用哪一套：音色从那一套里选，台词也发给那一套。「跟随引擎」就是那边正在用的那套。') + model;
   }
   /** 参考图: a picture GPT draws this person from. Kept at once (not with 保存), so only a role already saved has one. */
   function refField(r) {
@@ -519,6 +541,9 @@ export function rolesApp(ctx) {
 
   function pickVoice() {
     const target = current, engine = target.engine, saved = api.getState().connections[engine], connection = {...saved, model: target.model || saved.model};
+    const set = engine === 'custom' && customSetOf(connection, connection.model);
+    const isCurrent = () => current === target && target.engine === engine &&
+      (!set || customSetOf(api.readState().connections.custom, target.model) === set);
     let page = 0, token = '', search = '', epoch = 0;
     const found = new Map();
     const favButton = id => { const on = isFavorite(engine, id); return `<button type="button" class="fav-toggle" data-fav="${esc(id)}" aria-pressed="${on}" aria-label="${on ? '取消收藏' : '收藏'}">${icon('heart', on)}</button>`; };
@@ -530,23 +555,32 @@ export function rolesApp(ctx) {
       if (!more) list.innerHTML = '<p class="hint">正在读取…</p>';
       try {
         const result = await api.voices(engine, connection, {search, page, token});
-        if (!dialog.live || ticket !== epoch) return;
+        if (!dialog.live || ticket !== epoch || !isCurrent()) return;
+        if(more && result.error){
+          const retry=list.querySelector('[data-more]');
+          if(retry)retry.disabled=false;
+          ctx.notify(result.error,{error:true});
+          return;
+        }
         const rows = engine === 'mini' && search ? result.voices.filter(x => x.name.toLowerCase().includes(search.toLowerCase()) || x.id.includes(search)) : result.voices;
-        for (const r of rows) voiceNames.set(r.id, r.name);
+        if (!more) found.clear();
+        const fresh=rows.filter(row=>!found.has(row.id));
+        for (const r of rows) voiceNames.set(favoriteKey(engine, r.id, target.model), r.name);
         for (const r of rows) found.set(r.id, r);
-        const html = rows.map(r => `<div class="list-row voice-choice"><button type="button" class="voice-choice-pick" data-voice="${esc(r.id)}"><span class="disc">${icon('wave')}</span><span><strong>${esc(r.name)}</strong><small class="mono">${esc(r.id)}</small></span></button>${favButton(r.id)}</div>`).join('');
-        if (!more) list.innerHTML = html || '<p class="hint">没有找到音色，可以直接填写音色 ID。</p>';
+        const html = fresh.map(r => `<div class="list-row voice-choice"><button type="button" class="voice-choice-pick" data-voice="${esc(r.id)}"><span class="disc">${icon('wave')}</span><span><strong>${esc(r.name)}</strong><small class="mono">${esc([r.id,r.info].filter(Boolean).join(' · '))}</small></span></button>${favButton(r.id)}</div>`).join('');
+        if (!more) list.innerHTML = html || '<p class="hint">'+esc(result.note || '没有找到音色，可以直接填写音色 ID。')+'</p>';
         else { list.querySelector('[data-more]')?.remove(); list.insertAdjacentHTML('beforeend', html); }
+        if (engine==='custom' && rows.length && result.error) list.insertAdjacentHTML('beforeend','<p class="hint">'+esc(result.note)+'</p>');
         if (result.more) list.insertAdjacentHTML('beforeend', '<button class="text-button" data-more>加载更多</button>');
         token = result.token;
         page++;
       } catch (error) {
-        if (dialog.live && ticket === epoch) { list.innerHTML = ''; const p = ctx.doc.createElement('p'); p.className = 'error-copy'; p.textContent = error.message; list.append(p); }
+        if (dialog.live && isCurrent() && ticket === epoch) { list.innerHTML = ''; const p = ctx.doc.createElement('p'); p.className = 'error-copy'; p.textContent = error.message; list.append(p); }
       }
     };
     dialog.body.addEventListener('click', e => {
       const b = e.target.closest('button');
-      if (!b) return;
+      if (!b || !isCurrent()) return;
       if (b.dataset.fav) {
         // ♡: kept (or let go) right away, named as the list names it; gender and age guessed from that name.
         const id = b.dataset.fav, list = [...favorites()], at = list.findIndex(f => poolKey(f) === favoriteKey(engine, id, target.model));
@@ -560,6 +594,7 @@ export function rolesApp(ctx) {
       }
       if (b.dataset.voice) {
         target.voice = b.dataset.voice;
+        target.voiceChoice = {key: favoriteKey(engine, target.voice, target.model), name: found.get(target.voice)?.name || target.voice};
         target.autoVoice = false;
         dialog.close();
         if (current === target) { render(); changed(); }

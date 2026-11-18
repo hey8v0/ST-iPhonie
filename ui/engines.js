@@ -6,7 +6,8 @@ import {fishAccount, fishAccountFacts} from './fish-account.js';
 import {icon, spark} from './icons.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {fly} from './carry.js';
-import {CUSTOM_TEMPLATES, voicesFromFolder, shortLanguage, customHint, customSlots, voiceFromLink} from '../core/custom-voice.js';
+import {openCustomCatalog} from './custom-catalog.js';
+import {catalogDefaults, officialSpeechService, CUSTOM_TEMPLATES, voicesFromFolder, shortLanguage, customHint, customSlots, voiceFromLink} from '../core/custom-voice.js';
 import {cleanAddress, fromCurl} from '../core/custom-detect.js';
 
 export function enginesApp(ctx) {
@@ -479,6 +480,8 @@ export function enginesApp(ctx) {
           ${keyRows(engine)}
           ${engine === 'custom' ? customKeyField(saved) : field(saved ? '再加一个密钥' : 'API Key', textArea('key', '', `rows="1" class="code key-paste" autocomplete="off" spellcheck="false" placeholder="${saved ? '粘贴新的密钥' : '粘贴密钥，多个就每行一个'}"`), '粘贴完点一下别处就保存了。可以保存多个账号的密钥，新加的排在后面，不用的可以单独删掉。先用排在前面的；某个密钥被拒（401、403）、额度用完（402）或请求太频繁（429）时，自动换下一个重试，这次打开页面里不再用它。想手动换，点那个密钥的「用这个」：马上改用它，并把它排到第一个，以后打开也先用它。\n\n密钥只保存在当前浏览器和酒馆地址，按账户分别保存。')}
           ${engine === 'fish' && api.fishSubscriptionStatus?.().connected ? '</div></details>' : ''}
+          ${engine==='custom' && c.params.url ? (customSlots(c.params).has('model') ? field('默认模型',
+            '<input data-param="cloudModel" aria-label="默认模型" value="'+esc(c.params.cloudModel || '')+'" placeholder="填写模型 ID">'+btn('custom-models','选择模型','text-button')) : '') + btn('custom-voices','浏览音色','secondary small') : ''}
           ${schema.models.length > 1 ? field('默认模型', select('model', c.model, schema.models.map(m => [m.id, m.id, !m.supported])), unsupported || [schema.modelNote, '角色没有单独指定模型时使用这里的模型。'].filter(Boolean).join('\n\n')) : ''}
           ${engine === 'mini' ? field('服务区域', select('region', c.region, [['cn', '国内'], ['global', '国际'], ['uw', '国际 · 低延迟入口']])) : ''}
         </div>`
@@ -511,7 +514,7 @@ export function enginesApp(ctx) {
     return pairs.length;
   }
   // ---------- 自己的接口: where the service is, and what it is ----------
-  let customAddress = null, customFound = null, customNote = '';
+  let customAddress = null, customFound = null, customNote = '', detectionEpoch=0;
   const customBaseOf = p => { const m = String(p.url || '').replace(/^\/proxy\//, '').match(/^https?:\/\/[^/?#]+/i); return m ? m[0] : ''; };
   function customAddressRow() {
     const c = draft(), address = customAddress ?? customBaseOf(c.params);
@@ -526,7 +529,7 @@ export function enginesApp(ctx) {
     // What is left to do, in order.
     const slots = customSlots(r.found.params), steps = [];
     if (r.found.needsKey && !api.keyStatus('custom')) steps.push('它要密钥：粘贴到上面的「密钥」里');
-    steps.push(r.found.voices ? `服务列出了 ${r.found.voices} 个音色，角色 App 里能直接选` : slots.has('ref_audio') || slots.has('ref_audio_base64') ? '在下面的「音色」里上传参考音频' : slots.has('ref_text') ? '在下面的「音色」里填参考音频' : '它没有列出音色：在下面的「音色」里添加，音色 ID 填服务里的（粘贴音色页的网址也行）');
+    steps.push(r.found.voices ? `服务列出了 ${r.found.voices} 个音色，角色 App 里能直接选` : r.found.params.listUrl ? '点「浏览音色」查看可用音色，也可以在角色里选' : slots.has('ref_audio') || slots.has('ref_audio_base64') ? '在下面的「音色」里上传参考音频' : slots.has('ref_text') ? '在下面的「音色」里填参考音频' : '它没有列出音色：在下面的「音色」里添加，音色 ID 填服务里的（粘贴音色页的网址也行）');
     steps.push('点「试一试」，再到角色 App 把角色的引擎换成「自己的接口」');
     return notes + `<div class="custom-report good"><p>✓ 认出来了：${esc(r.found.name.replace(/（\/[^）]*）$/, ''))}${r.via === 'proxy' ? '（走酒馆转发）' : ''}</p><ol class="custom-steps">${steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>${r.found.unknown?.length ? `<p class="hint">这几项没认出来，到高级设置的请求体里补：${esc(r.found.unknown.join('、'))}</p>` : ''}</div>`;
   }
@@ -541,18 +544,19 @@ export function enginesApp(ctx) {
     const shown = col => col.key === 'name' || (col.key === 'voice' ? used.has('voice') || !upload : col.key === 'ref_file' ? upload : used.has(col.key));
     const voices = by('voices'), rows = voices.fields[0];
     const columns = rows.columns.filter(shown).map(col => col.key === 'voice' ? {...col, label: used.has('ref_text') ? '参考音频路径（在跑服务的电脑上）' : '音色 ID（空着就用名字）'} : col);
-    return [{...voices, fields: [{...rows, columns}]}, {...by('api'), title: '高级设置'}];
+    return [{...voices, fields: [{...rows, columns}]}, {...by('api'), title: '高级设置', fields:[...by('api').fields,...by('catalog').fields.filter(f=>f.key!=='cloudModel')]}];
   }
   /** Settings found or picked: kept right away, so nothing is lost by not pressing 保存. */
   function keepCustom(params, voices = []) {
     const c = draft();
-    c.params = {...c.params, ...params};
+    c.params = {...c.params, ...(params.url ? catalogDefaults : {}), ...params};
     if (voices.length && !(c.params.voices || []).length) c.params.voices = voices;
     try { api.saveConnection('custom', c); dirty = false; } catch (error) { changed(); dirty = true; ctx.notify(error.message, {error: true}); }
   }
   async function customDetect(address) {
+    const ticket=++detectionEpoch;
     const target = draft(), set = api.customSetList().find(p => p.current)?.id;
-    const current = () => !v.disposed && engine === 'custom' && draft() === target && api.customSetList().find(p => p.current)?.id === set;
+    const current = () => ticket===detectionEpoch && !v.disposed && engine === 'custom' && draft() === target && api.customSetList().find(p => p.current)?.id === set;
     const typed = String(address ?? '').trim();
     if (/^curl(\.exe)?\s/i.test(typed)) return customFromCurl(typed);
     if (!typed) {
@@ -582,10 +586,10 @@ export function enginesApp(ctx) {
   }
   /** Settings picked by hand or read from a command: the voices the service lists, when it lists some. */
   async function findVoices() {
-    const params = draft()?.params;
+    const params = draft()?.params, set=api.customSetList().find(p=>p.current)?.id;
     if (!params || params.listUrl) return;
     const list = await api.customFindVoices?.(params).catch(() => null);
-    if (!list || engine !== 'custom' || draft()?.params.url !== params.url) return;
+    if (!list || v.disposed || engine !== 'custom' || draft()?.params !== params || api.customSetList().find(p=>p.current)?.id!==set) return;
     keepCustom({listUrl: list.listUrl, listPath: ''});
     render();
     ctx.notify(`服务列出了 ${list.count} 个音色，角色 App 里能直接选`);
@@ -1052,14 +1056,24 @@ export function enginesApp(ctx) {
         v.root.querySelector('[data-voice-folder]')?.click();
         break;
       }
+      case 'custom-models':
+      case 'custom-voices': {
+        const c=draft(), set=api.customSetList().find(p=>p.current)?.id;
+        const current=()=>!v.disposed && engine==='custom' && draft()===c && api.customSetList().find(p=>p.current)?.id===set;
+        const models=el.dataset.action==='custom-models';
+        openCustomCatalog(ctx,c,models?'model':'voice',current,models?id=>{c.params.cloudModel=id;changed();render();}:null);
+        break;
+      }
       case 'custom-detect': await v.busy(el, async () => { el.textContent = '正在看…'; try { await customDetect(v.root.querySelector('[data-field=custom-base]')?.value); } finally { el.textContent = '自动识别'; } }); break;
       case 'custom-try': customAddress = el.dataset.address; await v.busy(el, () => customDetect(el.dataset.address)); break;
       case 'custom-service': {
+        ++detectionEpoch;
         const t = CUSTOM_TEMPLATES.find(x => x.id === el.dataset.template);
         if (!t) break;
         const typed = cleanAddress(v.root.querySelector('[data-field=custom-base]')?.value);
         // An address of its own stays, a default fills in; one that has a fixed address does not care.
-        const base = t.fixed || typed.base || (t.port ? `http://127.0.0.1:${t.port}` : '');
+        const known=typed.base && officialSpeechService(typed.base);
+        const base = t.fixed || (known && t.origin ? t.origin : typed.base) || t.origin || (t.port ? `http://127.0.0.1:${t.port}` : '');
         customNote = t.note; customFound = null; customAddress = base || null;
         if (t.detect) { await v.busy(el, () => customDetect(base)); if (customFound) { customNote = t.note; render(); } break; }
         if (!base) { render(); ctx.notify('先填服务的地址，比如 ' + t.example, {error: true}); break; }

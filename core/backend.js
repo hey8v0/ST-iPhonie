@@ -41,7 +41,7 @@ import {keepOneOutput, switchNodesOff} from './comfy-graph.js';
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases, rolesSeen, ownKeyFor, roleStore } from './routes.js';
 import { cleanAddress, reachService, explainReach, detectService, scanTargets, findVoiceList, voiceIsName, API_PROBES } from './custom-detect.js';
-import { CUSTOM_DEFAULT, CUSTOM_SETS_MAX } from './custom-voice.js';
+import { CUSTOM_DEFAULT, CUSTOM_SETS_MAX, officialSpeechService } from './custom-voice.js';
 import { arrangeRows } from './layers.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
 import { normalizeMarks, withMarks } from './voice-fx.js';
@@ -3660,6 +3660,8 @@ export class TTSBackend {
     }
     /** 自动识别: which service answers there, and the settings for it (nothing is saved here). */
     async customDetect(address) {
+        const service = officialSpeechService(cleanAddress(address).base);
+        if (service) return {ok:true, base:service.origin, notes:[], found:{id:service.id,name:service.name,needsKey:true,params:service.fill(service.origin)}};
         const reach = await this.customReach(address);
         if (!reach.ok) return reach;
         const found = await detectService(reach.base, this.customAsk(reach));

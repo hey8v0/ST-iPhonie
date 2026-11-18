@@ -14,21 +14,39 @@ import {audioKind} from './audio-bytes.js';
 
 const tidy = o => JSON.stringify(o, null, 2);
 /** A format with what it does not say cleared, so nothing of the one used before is left behind. */
-const format = (service, base, more) => ({service, method: 'POST', answer: 'audio', path: '', headers: '', before: '', body: '', bodyType: 'json', pcmRate: 24000, langMap: '', listUrl: '', listPath: '', url: base, ...more});
+export const catalogDefaults = {cloudModel:'', modelChoices:'', modelUrl:'', modelCatalog:'', voiceCatalog:''};
+const format = (service, base, more) => ({...catalogDefaults, service, method: 'POST', answer: 'audio', path: '', headers: '', before: '', body: '', bodyType: 'json', pcmRate: 24000, langMap: '', listUrl: '', listPath: '', url: base, ...more});
 /**
  * One-click formats of services people run: only the user's own address goes in. Which paths a service has tells them
  * apart (core/custom-detect.js): paths, when it publishes them; probe, a path that answers in a way only it does.
  * detect: there is nothing to fill by hand, the address has to be read (a Gradio app's inputs differ by version).
  */
 export const CUSTOM_TEMPLATES = Object.freeze([
+  {id:'heygen', short:'HeyGen', name:'HeyGen Voice', origin:'https://api.heygen.com', hosts:['platform.heygen.com','api.heygen.com'],
+    note:'填写 HeyGen API Key，可以从公共音色库选择音色。', fill:base=>format('HeyGen Voice',base+'/v3/models/audio/tts',{
+      headers:'X-Api-Key: {{key}}', body:tidy({model:'{{model}}',voice_id:'{{voice}}',text:'{{text}}'}),
+      cloudModel:'heygen-voice-1-turbo-free',modelChoices:'heygen-voice-1-turbo-free\nheygen-voice-1-turbo\nheygen-voice-1',
+      listUrl:base+'/v3/models/audio/voices?type=public&limit=50', listPath:'data',
+      voiceCatalog:tidy({id:'voice_id',name:'name',language:'language',search:'query',cursor:'token',next:'next_token',filter:{status:'ACTIVE'}})})},
+  {id:'eleven-cloud',short:'ElevenLabs',name:'ElevenLabs',origin:'https://api.elevenlabs.io',hosts:['api.elevenlabs.io'],
+    note:'填写 ElevenLabs API Key，读取有文字转语音能力的模型和账户音色。',fill:base=>format('ElevenLabs',base+'/v1/text-to-speech/{{voice}}',{
+      headers:'xi-api-key: {{key}}',body:tidy({model_id:'{{model}}',text:'{{text}}'}),cloudModel:'eleven_multilingual_v2',
+      modelUrl:base+'/v1/models',modelCatalog:tidy({id:'model_id',name:'name',filter:{can_do_text_to_speech:true}}),
+      listUrl:base+'/v2/voices?page_size=100',listPath:'voices',
+      voiceCatalog:tidy({id:'voice_id',name:'name',language:'labels.language',search:'search',cursor:'next_page_token',next:'next_page_token'})})},
+  {id:'fish-cloud',short:'Fish Audio 云端',name:'Fish Audio 云端 API',origin:'https://api.fish.audio',hosts:['api.fish.audio'],
+    note:'使用 Fish API Key。选择兼容接口列出的语音模型。',fill:base=>format('Fish Audio 云端 API',base+'/compat/v1/audio/speech',{
+      body:tidy({model:'{{model}}',input:'{{text}}',voice:'{{voice}}',response_format:'mp3'}),cloudModel:'fish-audio/s2.1-pro',
+      modelUrl:base+'/compat/v1/models',modelCatalog:tidy({path:'data',id:'id'}),
+      listUrl:base+'/model?page_size=50',listPath:'items',voiceCatalog:tidy({id:'_id',name:'title',language:'languages',search:'title',page:'page_number',pageSize:50})})},
   {id: 'gpt-sovits', name: 'GPT-SoVITS（api_v2）', short: 'GPT-SoVITS', port: 9880, example: 'http://127.0.0.1:9880', paths: ['/set_gpt_weights'],
     note: '在 GPT-SoVITS 文件夹里运行 api_v2.py（默认端口 9880）。音色的「参考音频」填参考音频在那台电脑上的路径，再填参考文本和参考语言。它不带跨域许可，要开酒馆转发。',
     fill: base => format('GPT-SoVITS（api_v2）', base + '/tts', {before: `${base}/set_gpt_weights?weights_path={{model1}}\n${base}/set_sovits_weights?weights_path={{model2}}`,
       body: tidy({text: '{{text}}', text_lang: '{{lang}}', ref_audio_path: '{{voice}}', prompt_text: '{{ref_text}}', prompt_lang: '{{ref_lang}}', text_split_method: 'cut5', media_type: 'wav', streaming_mode: false})})},
   // The format many speech relays speak (OpenAI's /v1/audio/speech): the voice is a name the service knows.
-  {id: 'openai', name: 'OpenAI 格式（/v1/audio/speech）', short: 'OpenAI 格式', example: 'https://你的服务地址', paths: ['/v1/audio/speech', '/audio/speech'],
-    note: '很多语音中转站和公益站用这个格式：音色是站上角色的名字。填站给的地址（/v1 前面那部分），密钥填在上面。站能列出角色的话，再填「音色列表地址」。请求体里的 model 按站的说明改。',
-    fill: base => format('OpenAI 格式', base + '/v1/audio/speech', {body: tidy({model: 'tts-1', input: '{{text}}', voice: '{{voice}}'})})},
+  {id: 'openai', name: 'OpenAI 格式（/v1/audio/speech）', short: 'OpenAI 格式', origin:'https://api.openai.com',hosts:['api.openai.com'], example: 'https://你的服务地址', paths: ['/v1/audio/speech', '/audio/speech'],
+    note: '很多语音中转站和公益站用这个格式：音色是站上角色的名字。填站给的地址（/v1 前面那部分），密钥填在上面。站能列出角色的话，再填「音色列表地址」。默认模型按站的说明填写。',
+    fill: base => format('OpenAI 格式', base + '/v1/audio/speech', {cloudModel:'tts-1', modelUrl:base+'/v1/models', modelCatalog:tidy({path:'data',id:'id',speechOnly:true}), body: tidy({model: '{{model}}', input: '{{text}}', voice: '{{voice}}'})})},
   {id: 'gpt-sovits-v1', name: 'GPT-SoVITS（旧版 api.py）', short: 'GPT-SoVITS 旧版', port: 9880, example: 'http://127.0.0.1:9880', paths: ['/change_refer'],
     note: '运行 api.py 时用这个；新的 api_v2.py 用上面那个。音色的「参考音频」填那台电脑上的路径，再填参考文本和参考语言。',
     fill: base => format('GPT-SoVITS（旧版 api.py）', base + '/', {before: `${base}/set_model?gpt_model_path={{model1}}&sovits_model_path={{model2}}`,
@@ -89,7 +107,7 @@ export const CUSTOM_TEMPLATES = Object.freeze([
     fill: base => format('硅基流动', base + '/v1/audio/speech', {body: tidy({model: 'FunAudioLLM/CosyVoice2-0.5B', input: '{{text}}', voice: '{{voice}}', response_format: 'mp3', stream: false}), listUrl: base + '/v1/audio/voice/list'})},
 ]);
 
-const SLOT = /\{\{\s*(text|lang|emotion|voice|ref_text|ref_lang|model1|model2)\s*\}\}/g;
+const SLOT = /\{\{\s*(text|lang|emotion|voice|ref_text|ref_lang|model|model1|model2)\s*\}\}/g;
 const KEY_SLOT = /\{\{\s*key\s*\}\}/g, ID_SLOT = /\{\{\s*id\s*\}\}/g;
 const FILE_SLOT = /\{\{\s*ref_audio\s*\}\}/g, BASE64_SLOT = /\{\{\s*ref_audio_base64\s*\}\}/g, REF_SLOT = /\{\{\s*ref_audio(?:_base64)?\s*\}\}/, ONLY_FILE = /^\s*\{\{\s*ref_audio\s*\}\}\s*$/;
 /** Which slots these settings use: what they do not use is not asked for. */
@@ -112,7 +130,9 @@ export function shortLanguage(value) {
 export function customValues(c, route, line) {
   const name = String(route.voice || '').trim(), row = (c.params.voices || []).find(r => String(r.name || '').trim() === name);
   const code = shortLanguage(route.language) || 'zh', lang = ownLanguage(c.params.langMap, code);
-  return {text: String(line.text || ''), lang, emotion: String(line.emotion || ''), voice: row ? String(row.voice || '').trim() || name : name,
+  const usesRoleModel = !route.customModelSet || route.customModelSet === customSetOf(c, route.model);
+  const model = String((usesRoleModel && route.customModel) || c.params.cloudModel || '').trim();
+  return {model, text: String(line.text || ''), lang, emotion: String(line.emotion || ''), voice: row ? String(row.voice || '').trim() || name : name,
     ref_text: row ? String(row.ref_text || '') : '', ref_lang: row && shortLanguage(row.ref_lang) ? ownLanguage(c.params.langMap, shortLanguage(row.ref_lang)) : lang,
     model1: row ? String(row.model1 || '').trim() : '', model2: row ? String(row.model2 || '').trim() : ''};
 }
@@ -125,6 +145,8 @@ export function buildCustomRequest(c, route, line) {
   if (!proxyAddress(url) && !/^https?:\/\/[^\s/]+/i.test(url)) throw Error('自己的接口：先在引擎 App 里填好接口地址（http:// 或 https:// 开头）');
   const values = customValues(c, route, line), method = p.method === 'GET' ? 'GET' : 'POST', template = url + (method === 'POST' ? p.body : '');
   if (/\{\{\s*voice\s*\}\}/.test(template) && !values.voice) throw Error('请先选择角色音色');
+  if (customSlots(p).has('model') && !values.model) throw Error('请先填写接口默认模型，或给角色选择模型');
+  if (/[\r\n{}]/.test(values.model)) throw Error('模型 ID 不能包含换行或花括号');
   // A reference audio uploaded here goes in when it is sent; its id tells a line said with another one from this.
   let refFile = '';
   if (REF_SLOT.test(template)) {
@@ -140,7 +162,7 @@ export function buildCustomRequest(c, route, line) {
   // 换模型: the addresses that load this voice's model (a line whose model slot is empty is left out).
   const before = String(p.before || '').split('\n').map(l => l.trim()).filter(l => proxyAddress(l) || /^https?:\/\//i.test(l))
     .filter(l => [...l.matchAll(SLOT)].every(([, key]) => !/^model/.test(key) || values[key])).map(l => fill(l, values, encodeURIComponent));
-  return {engine: 'custom', url: fill(url, values, encodeURIComponent), method, ...(body !== undefined ? {body} : {}), headers: String(p.headers || ''), before,
+  return {engine: 'custom', url: fill(url, values, encodeURIComponent), method, ...(body !== undefined ? {body} : {}), headers: String(p.headers || '').replace(/\{\{\s*model\s*\}\}/g,()=>values.model), before,
     answer: ['url', 'base64', 'gradio'].includes(p.answer) ? p.answer : 'audio', path: String(p.path || '').trim(), format: 'auto',
     ...(['form', 'multipart'].includes(p.bodyType) ? {bodyType: p.bodyType} : {}), ...(refFile ? {refFile} : {}), ...(Number(p.pcmRate) && Number(p.pcmRate) !== 24000 ? {pcmRate: Number(p.pcmRate)} : {})};
 }
@@ -351,6 +373,38 @@ export async function readCustomAnswer(response, request, {read, load, wave}) {
 // 自己的接口 keeps several sets ({id, name, params}): a GPT-SoVITS here, a 公益站 there. The one in use is also
 // connection.params, which is what the card and older pages change (it wins when they differ). A role may name its own
 // set (route.model; '' follows the one in use). Each set has its own key, by id (core/backend.js).
+export function officialSpeechService(address) {
+  let host;
+  try { host=new URL(address).hostname; } catch { return null; }
+  return CUSTOM_TEMPLATES.find(template=>template.hosts?.includes(host)) || null;
+}
+
+export function catalogOptions(raw) {
+  if (!String(raw || '').trim()) return {};
+  try {
+    const value=JSON.parse(raw);
+    if (value && typeof value==='object' && !Array.isArray(value)) return value;
+  } catch { /* use the same field-specific message for malformed JSON */ }
+  throw Error('目录字段映射需要填写 JSON 对象');
+}
+
+export function catalogPage(json, path, options, query) {
+  const source=pick(json,path || options.path);
+  if (!Array.isArray(source) && (options.id || ((path || options.path) && (!source || typeof source !== 'object')))) throw Error('目录列表路径没有指向数组，请检查字段映射');
+  const rows=Array.isArray(source)?source:[];
+  const matches=row=>Object.entries(options.filter || {}).every(([key,value])=>pick(row,key)===value);
+  const mapped=options.id ? rows.filter(matches).map(row=>{
+    const id=pick(row,options.id), name=options.name && pick(row,options.name);
+    const language=options.language && pick(row,options.language);
+    return {id:typeof id==='string'||typeof id==='number'?String(id):'',name:String(name || id || ''),
+      info:Array.isArray(language)?language.join(' / '):String(language || '')};
+  }).filter(row=>row.id && (!options.speechOnly || /tts|speech|voice|kokoro|sovits|cosy|fish|moss/i.test(row.id))) : readVoiceList(json,path || options.path);
+  const token=options.next ? String(pick(json,options.next) ?? '') : '';
+  const more=options.cursor ? !!token && token!==query.token && json?.has_more!==false
+    : !!options.page && rows.length>=Number(options.pageSize || 50);
+  return {voices:mapped,more,token};
+}
+
 export const CUSTOM_DEFAULT = 'default', CUSTOM_SETS_MAX = 20;
 const SET_ID = /^[\w-]{1,64}$/;
 const setName = (params, i) => String(params?.service || '').trim().slice(0, 40) || `接口 ${i + 1}`;

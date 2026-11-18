@@ -65,6 +65,9 @@ export interface NarrationSettings {
     body: string[];
 }
 export interface Route {
+    customModel?: string;
+    customModelSet?: string;
+    voiceChoice?: {key: string; name: string};
     id?: string;
     name: string;
     engine: Engine;
@@ -554,9 +557,10 @@ export interface EngineSchema {
 export type VoiceBalance =
     | { engine: 'eleven'; kind: 'characters'; used: number; limit: number; left: number; resetAt: number | null; tier: string; status: string }
     | { engine: 'fish'; kind: 'credit'; credit: number; free: boolean };
-export interface VoiceQuery { search?: string; page?: number; token?: string; }
+export interface VoiceQuery { kind?: 'voice' | 'model'; search?: string; page?: number; token?: string; }
 export interface VoiceList {
-    voices: Array<{ id: string; name: string }>;
+    error?: string;
+    voices: Array<{ id: string; name: string; info?: string }>;
     more: boolean;
     token: string;
     note: string;

@@ -1,9 +1,10 @@
 import {credentialField} from './secrets.js';
+import {TTSParameters} from './parameters.js';
 // 自动识别 for 自己的接口: there are too many speech services to write each into the plugin, but almost all of them say
 // what they take. A FastAPI service publishes /openapi.json, a Gradio app /gradio_api/info; a service known by its paths
 // gets its one-click format; anything else can be told by a curl command from its docs. What cannot be read is also
 // told apart here: a service that is not running, one that lets no web page ask it, an address that means this device.
-import {CUSTOM_TEMPLATES, readVoiceList} from './custom-voice.js';
+import {CUSTOM_TEMPLATES, readVoiceList, officialSpeechService} from './custom-voice.js';
 import {reachService} from './proxy-url.js';
 export {reachService};
 
@@ -309,11 +310,32 @@ export function fromCurl(source) {
     found.holder[found.key] = '{{text}}';
   }
   const flat = Object.entries(mappedQuery).map(([k, v]) => `${encodeURIComponent(k)}=${/^\{\{\s*\w+\s*\}\}$/.test(String(v)) ? v : encodeURIComponent(v)}`).join('&');
-  const address = target.origin + target.pathname + (flat ? '?' + flat : '');
+  const service=officialSpeechService(target.href);
+  const relay = target.pathname.match(/^(.*)\/v1\/audio\/speech\/?$/i);
+  const defaults = service ? service.fill(service.origin) : relay
+    ? CUSTOM_TEMPLATES.find(template => template.id === 'openai').fill(target.origin + relay[1]) : {};
+  let pathname=target.pathname;
+  if (service?.id==='eleven-cloud') pathname=pathname.replace(/(\/v1\/text-to-speech\/)\w[\w-]*/, '$1{{voice}}');
+  let cloudModel=defaults.cloudModel || '';
+  if (service?.id === 'fish-cloud' && pathname.replace(/\/$/, '') === '/v1/tts') {
+    const catalog = TTSParameters.catalogs.fish;
+    const index = kept.findIndex(line => /^model\s*:/i.test(line));
+    cloudModel = index < 0 ? catalog.model : kept[index].slice(kept[index].indexOf(':') + 1).trim();
+    if (cloudModel.includes('{{')) cloudModel = catalog.model;
+    if (index < 0) kept.push('model: {{model}}');
+    else kept[index] = 'model: {{model}}';
+    Object.assign(defaults, {modelUrl: '', modelCatalog: '', modelChoices: catalog.models.join('\n')});
+  }
+  if (mappedBody) for (const field of ['model','model_id']) {
+    if (typeof mappedBody[field]==='string' && mappedBody[field] && !mappedBody[field].includes('{{')) {
+      cloudModel=mappedBody[field]; mappedBody[field]='{{model}}'; break;
+    }
+  }
+  const address = target.origin + pathname + (flat ? '?' + flat : '');
   const notes = [];
   if (key) notes.push('命令里的密钥存好了');
   else if (wanted) notes.push('命令里的密钥只是个占位，在上面「密钥」里粘贴自己的');
-  return {params: {service: '粘贴的 curl 命令', url: address, method: method === 'GET' || (!method && !mappedBody) ? 'GET' : 'POST', body: mappedBody ? JSON.stringify(mappedBody, null, 2) : '', bodyType, headers: kept.join('\n'), answer: 'audio', path: '', before: '', pcmRate: 24000, langMap: '', listUrl: '', listPath: ''}, key, notes};
+  return {params: {...defaults,cloudModel,service: defaults.service || '粘贴的 curl 命令', url: address, method: method === 'GET' || (!method && !mappedBody) ? 'GET' : 'POST', body: mappedBody ? JSON.stringify(mappedBody, null, 2) : '', bodyType, headers: kept.join('\n'), answer: 'audio', path: '', before: '', pcmRate: 24000, langMap: '', listUrl: defaults.listUrl || '', listPath: defaults.listPath || ''}, key, notes};
 }
 
 // ---------- telling which service it is ----------
@@ -388,7 +410,7 @@ export async function detectService(base, ask) {
     if (ids.includes('kokoro')) return known('kokoro');
     const model = ids.find(id => MODEL_WORD.test(id)) || '';
     const t = template('openai'), params = t.fill(base);
-    if (model) params.body = params.body.replace('tts-1', model);
+    if (model) params.cloudModel = model;
     if (voices?.ok && voices.data) params.listUrl = base + '/v1/audio/voices';
     else if (others?.ok && others.data) params.listUrl = base + '/v1/voices';
     return finish({id: 'openai', name: t.name, params}, extra);

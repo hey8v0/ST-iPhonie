@@ -4,7 +4,7 @@ import { validateKey, MULTI_KEY, keyTail, parseTextKeys } from './keys.js';
 import { languageCode } from './languages.js';
 import { TTSParameters as P, CUSTOM_NO_PROXY, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, FISH_TAURI_NOTE, FISH_PROXY_PAGE, DOUBAO_PROXY_NOTE, DOUBAO_DIRECT_NOTE, DOUBAO_RELAY_NOTE, DOUBAO_PROXY_PAGE, tauriTavern, setFishCompat } from './parameters.js';
 import { speakable } from './voice-fx.js';
-import { buildCustomRequest, customInit, readCustomAnswer, customVoices, readVoiceList, gradioRoot, referenceFile, serviceSaid, usesId, customSetOf, customParams, CUSTOM_DEFAULT } from './custom-voice.js';
+import { buildCustomRequest, customInit, readCustomAnswer, customVoices, catalogOptions, catalogPage, gradioRoot, referenceFile, serviceSaid, usesId, customSetOf, customParams, CUSTOM_DEFAULT } from './custom-voice.js';
 import { unpacked, audioKind } from './audio-bytes.js';
 const names={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'小米 MiMo',doubao:'豆包语音',custom:'自己的接口'};
 export const miniBase=c=>'https://'+(c.region==='cn'?'api.minimaxi.com':c.region==='uw'?'api-uw.minimax.io':'api.minimax.io');
@@ -250,7 +250,9 @@ export class Providers{
    for(const wait of this.retryWaits||[5000,10000,20000,40000]){if(response.status!==504||!usesId(request))break;await response.body?.cancel?.().catch(()=>{});await pause(wait,signal);response=await send(url);}
    if(response.status===504&&usesId(request)){await response.body?.cancel?.().catch(()=>{});throw Error('自己的接口那边排队太久：等了好几分钟还没做好，这句先跳过。过一会儿再播，会用同一个编号去要，不用重做');}
    answered=true;
-   const blob=await readCustomAnswer(response,request,{read:limitedBytes,load:link=>send(link,{method:'GET',headers:asked}),wave:wavePCM});
+   // A signed download URL can point at a separate media host. Service credentials belong to the API origin.
+   const load = link => send(link, {method: 'GET', headers: originOf(link) === originOf(url) ? asked : {}});
+   const blob=await readCustomAnswer(response,request,{read:limitedBytes,load,wave:wavePCM});
    this.unsettled.delete(which);return blob;
   }catch(error){
    if(request.answer==='gradio')this.gradioFiles?.clear();
@@ -279,17 +281,42 @@ export class Providers{
   this.gradioFiles.set(slot,path);return path;
  }
  /** 自己的接口's voices: the ones added by hand, and (音色列表地址) the ones the service lists. */
- async customVoiceList(c,search=''){
-  // The set of the connection asked with (a role's own, by model, else the one in use).
-  const set=customSetOf(c,c?.model);c={params:{...P.defaults('custom'),...customParams(c,set)}};
-  const own=customVoices(c),q=search.trim().toLowerCase();let listed=[],note='';
-  const url=String(c.params.listUrl||'').trim();
-  if(proxyAddress(url)||/^https?:\/\//i.test(url)){const {url:target,init}=customInit({url,method:'GET',headers:String(c.params.headers||'')},this.customKey(set));
-   let r=await fetchWithPolicy(this.fetcher,target,init).catch(()=>null);if(!r&&this.proxy){r=await this.tavern(target,init).catch(()=>null);if(r&&noTavernProxy(await r.clone().text().catch(()=>'')))r=null;}
-   if(!r)note='音色列表地址连不上';else if(!r.ok)note='音色列表地址回答 HTTP '+r.status;else{try{listed=readVoiceList(await r.json(),String(c.params.listPath||'').trim());}catch{note='音色列表回的不是 JSON';}}
-   listed=listed.filter(v=>!own.some(o=>o.id===v.id));}
-  const all=[...own,...listed];
-  return {voices:q?all.filter(v=>v.name.toLowerCase().includes(q)||v.id.toLowerCase().includes(q)):all,more:false,token:'',note:note||(all.length?(listed.length?`自己添加的 ${own.length} 个，服务列出的 ${listed.length} 个`:'自己的接口里添加的音色'):'还没有音色：在引擎 App 的「自己的接口」里添加，或者填音色列表地址')};
+ async customVoiceList(connection,search='',page=0,token='',kind='voice'){
+  const models=kind==='model',set=customSetOf(connection,connection?.model);
+  const params={...P.defaults('custom'),...customParams(connection,set)};
+  const local=models ? String(params.modelChoices||'').split(/[,\s]+/).filter(Boolean).map(id=>({id,name:id}))
+    : customVoices({params});
+  const address=models?params.modelUrl:params.listUrl;
+  let result={voices:[],more:false,token:''},note='',failed=false,remoteSearch=false;
+  if(address){
+    try {
+      const options=catalogOptions(models?params.modelCatalog:params.voiceCatalog);
+      const query=new URLSearchParams();
+      if(options.search && search){query.set(options.search,search);remoteSearch=true;}
+      if(options.cursor && token)query.set(options.cursor,token);
+      if(options.page)query.set(options.page,String(page+1));
+      const suffix=query.size?(address.includes('?')?'&':'?')+query:'';
+      const headers=String(params.headers||'').split('\n').filter(line=>!/\{\{\s*model\s*\}\}/.test(line)).join('\n');
+      const {url,init}=customInit({url:address+suffix,method:'GET',headers},this.customKey(set));
+      let response=await fetchWithPolicy(this.fetcher,url,init).catch(()=>null);
+      if(!response && this.proxy){
+        response=await this.tavern(url,init).catch(()=>null);
+        if(response && noTavernProxy(await response.clone().text().catch(()=>'')))response=null;
+      }
+      if(!response)throw Error((models?'模型':'音色')+'列表地址连不上');
+      if(!response.ok)throw Error([401,403].includes(response.status)?'目录访问被拒绝，请检查密钥和读取权限（HTTP '+response.status+'）':'读取目录失败（HTTP '+response.status+'）');
+      let json;
+      try {json=await response.json();} catch {throw Error('目录返回的内容不是 JSON');}
+      result=catalogPage(json,models?'':params.listPath,options,{token});
+    } catch(error){note=error.message;failed=true;}
+  }else if(!local.length){note=models?'服务没有配置模型目录，可以手填模型 ID':'还没有音色：可以手填音色 ID，或在自己的接口里配置音色列表地址';}
+  const all=new Map();
+  const q=search.trim().toLowerCase();
+  const matches=row=>!q || [row.id,row.name,row.info].join(' ').toLowerCase().includes(q);
+  for(const row of page?[]:local)if(matches(row))all.set(row.id,row);
+  for(const row of result.voices)if((remoteSearch || matches(row)) && !all.has(row.id))all.set(row.id,row);
+  const voices=[...all.values()];
+  return {...result,voices,...(failed?{error:note}:{}),note:note||(!voices.length?'没有找到匹配项':models?'':`自己添加的 ${local.length} 个，服务列出的 ${result.voices.length} 个`)};
  }
  /** ElevenLabs 音效 (text to sound effects): an English description to an MP3. seconds 0: ElevenLabs picks; loop: an ambience that loops seamlessly. */
  async soundEffect(options,signal=new AbortController().signal){return (await this.soundEffectTake(options,signal)).blob;}
@@ -327,9 +354,9 @@ export class Providers{
   return this.catalogRead=fetchWithPolicy(this.fetcher,FISH_API+'/compat/v1/models',{}).then(async r=>{if(!r.ok)throw Error('HTTP '+r.status);const json=await r.json();return setFishCompat((json?.data||[]).map(m=>m?.id).filter(id=>typeof id==='string'));}).catch(()=>{this.catalogRead=null;return false;});}
  /** What a voice list says about a voice besides its name (description, tags, gender and age, languages), for picking one. */
  static voiceInfo(engine,v){const list=x=>Array.isArray(x)?x.filter(y=>typeof y==='string'):[];const parts=engine==='fish'?[v.description,list(v.tags).join(' '),list(v.languages).join('/')]:engine==='mini'?[Array.isArray(v.description)?list(v.description).join('；'):v.description]:[Object.values(v.labels&&typeof v.labels==='object'?v.labels:{}).filter(x=>typeof x==='string').join(' '),v.description];return parts.filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim().replace(/\s+/g,' ')).join(' · ').slice(0,240);}
- async voices(engine,c,{search='',page=0,token=''}={}){
+ async voices(engine,c,{search='',page=0,token='',kind='voice'}={}){
   if(engine==='doubao'){const q=search.trim().toLowerCase(),saved=(c.params.voices||[]).filter(v=>v.id?.trim()).map(v=>({id:v.id.trim(),name:v.name.trim()||v.id.trim()})),all=[...saved,...(c.model==='seed-tts-2.0'?DOUBAO_VOICES:[])].filter((v,i,rows)=>rows.findIndex(x=>x.id===v.id)===i);return {voices:all.filter(v=>!q||(v.id+' '+v.name).toLowerCase().includes(q)),more:false,token:'',note:'本地音色列表；可直接粘贴控制台的音色 ID，这里不校验密钥或音色授权'};}
-  if(engine==='custom')return this.customVoiceList(c,search);
+  if(engine==='custom')return this.customVoiceList(c,search,page,token,kind);
   if(engine==='fish'&&P.fishOpenAI(c))throw Error('这个中转（OpenAI 格式）没有音色列表：在角色的「音色」里直接填 Fish 的音色 ID（fish.audio 网站上音色页面地址里那串字母数字）');
   if(engine==='mimo'){const mode=P.mimoMode(c.model),q=search.trim().toLowerCase();const all=mode==='preset'?P.vocab.MIMO_VOICES.map(([id,name])=>({id,name})):mode==='clone'?c.params.samples.filter(x=>String(x.name).trim()).map(x=>({id:String(x.name).trim(),name:String(x.name).trim()+' · 克隆样本'})):[];
    return {voices:q?all.filter(v=>v.name.toLowerCase().includes(q)):all,more:false,token:'',note:mode==='design'?'音色设计模型没有音色列表：在「音色」一栏写音色描述':mode==='clone'?'克隆样本在 MiMo 引擎里上传':'MiMo 内置音色'};}
