@@ -273,7 +273,7 @@ export function wardrobeApp(ctx) {
                 allowPaid = true;
               }
             }
-            d.close(); await load(); ctx.notify('画好了，透明图片已放进衣柜');
+            d.close(); await load(); ctx.notify('画好了，图片已放进衣柜');
           } finally { button.disabled = false; button.textContent = old.photoId ? '重画' : '画出来'; }
         }
         else if (action === 'item-delete') {
@@ -337,7 +337,7 @@ export function wardrobeApp(ctx) {
     saving = true;
     render();
     try {
-      const got = await api.wardrobeSaveOutfit({owner: forWhom, text, mode: d.mode, itemIds: d.mode === 'closet' ? mine().filter(x => picked.has(x.id)).map(x => x.id) : []});
+      const got = await api.wardrobeSaveOutfit({owner: forWhom, text, photoId: d.photoId, mode: d.mode, itemIds: d.mode === 'closet' ? mine().filter(x => picked.has(x.id)).map(x => x.id) : []});
       ctx.notify(got.again ? '这套存过了，在下面「存过的搭配」里' : got.added ? `存好了，拆成 ${got.added} 件放进了衣柜` : '存好了，在下面「存过的搭配」里');
     } finally { saving = false; render(); }
   }
@@ -399,7 +399,7 @@ export function wardrobeApp(ctx) {
       case 'set-load': {
         const s = all.sets.find(x => x.id === el.dataset.id);
         if (!s) break;
-        d.result = s.description; d.photoId = '';
+        d.result = s.description; d.photoId = s.photoId || '';
         render();
         v.root.querySelector('[data-field=result]')?.scrollIntoView?.({block: 'center', behavior: 'smooth'});
         break;

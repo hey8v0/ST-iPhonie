@@ -3346,7 +3346,8 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 /* Reading full screen: over the whole phone screen like the comics; sheets still come above. */
 .reading-stage{position:absolute;inset:0;z-index:55;animation:fade .2s}
 .reading-stage .reading-bar{padding-top:40px}
-.reading-stage .reading-content{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.reading-stage .reading-content{-webkit-user-select:text;user-select:text}
+.reading-tools{position:absolute;display:flex;gap:3px;padding:3px;border-radius:2em;background:var(--surface,#fff);box-shadow:0 2px 10px #0003;z-index:5}.reading-tools button{touch-action:manipulation}.reading-note-inline summary{cursor:pointer}
 .reading-picked{background:color-mix(in srgb,var(--accent-btn) 20%,transparent);border-radius:6px;transition:background .2s}
 @supports not (color:color-mix(in srgb,#000,#fff)){.reading-picked{background:var(--accent-soft);border-radius:6px;transition:background .2s}}
 .reading-bottom nav button{display:inline-flex;align-items:center;gap:4px}

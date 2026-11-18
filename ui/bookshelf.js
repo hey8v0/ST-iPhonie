@@ -7,11 +7,12 @@ import {createView, esc, heading, btn, empty, menu, field, select, input, toggle
 import {icon} from './icons.js';
 import {openBook, bookImports, readerDefaults, annotationDue, naturalCompare, seriesOf, effectOf,
   normalizeStats, addReadingTime, todaySeconds, weekSeconds, readingLeft, span,
-  normalizeHighlights, toggleHighlight, highlighted, normalizeAnnotations} from '../core/bookshelf.js';
+  normalizeHighlights, toggleHighlight, normalizeAnnotations} from '../core/bookshelf.js';
 import {readingSend} from '../core/reading-chat.js';
 import {currentDm} from '../core/chats.js';
 import {openAlbum} from './album-viewer.js';
-import {popAt} from './msg-pop.js';
+import {selectedRange, underline, point, offsetAt} from './reading-range.js';
+import {pictureInputs} from '../core/draw.js';
 
 const ALL = '', RECENT = '\u0001recent', LOOSE = '\u0001loose';
 const IDLE = 120000;   // not reading any more after two minutes without a touch (0.9.52)
@@ -28,13 +29,16 @@ export function bookshelfApp(ctx) {
   const fail = error => ctx.notify(error.message, {error: true});
   const progress = b => Math.round(((b.position?.chapter || 0) + (b.position?.fraction || 0)) / Math.max(1, b.chapters.length) * 100);
   const $ = sel => (stage || v.root).querySelector(sel);
+  let detachSelection = () => {}, noteTimer;
+  const drawing = new Set();
   function leave() {
+    detachSelection(); win.clearTimeout(noteTimer);
     const stats = book ? flushRead() : null;
     if (stats && book) api.updateReadingBook(book.id, {stats}).catch(() => {});
     lastPosition = null; epoch++; resize?.disconnect(); resize = null;
     const a = album; album = null; a?.close();
     stage?.remove(); stage = null;
-    reader = null; chapter = null; clearURLs();
+    reader = null; chapter = null; content = null; blocks = []; clearURLs();
   }
 
   // ---------- the shelf ----------
@@ -189,7 +193,7 @@ export function bookshelfApp(ctx) {
       + (s.mode === 'pages' && book.type !== 'comic' ? field('翻页效果', select('effect', effect, [['page', '仿真翻页'], ['slide', '平滑滑动'], ['none', '直接翻页']])) : '')
       + (book.type === 'comic' ? toggle('rtl', '从右往左翻', s.rtl) : field('字号', input('size', s.size, 'range', 'min="14" max="30" step="1"')) + field('行距', input('line', s.line, 'range', 'min="1.3" max="2.6" step="0.1"')) + field('页边距', input('margin', s.margin, 'range', 'min="12" max="40" step="2"')) + field('字体', select('font', s.font, [['serif', '衬线'], ['sans-serif', '无衬线']])))
       + field('纸张', select('theme', s.theme, [['auto', '跟随手机'], ['white', '白纸'], ['cream', '米黄'], ['green', '护眼绿'], ['night', '夜间']]))
-      + toggle('annotations', '页边批注', s.annotations) + `<div class="actions">${btn('companion', '和谁一起看 · ' + esc(book.companion || '自己看'), 'text-button')}</div>`);
+      + toggle('annotations', '显示页边批注', s.annotations) + toggle('occasionalNotes','一起看时偶尔留评',s.occasionalNotes === true) + `<div class="actions">${btn('companion', '和谁一起看 · ' + esc(book.companion || '自己看'), 'text-button')}</div>`);
     d.body.addEventListener('click', async e => { if (!e.target.closest('[data-action=companion]')) return; await pickCompanion(book); const b = d.body.querySelector('[data-action=companion]'); if (b) b.textContent = '和谁一起看 · ' + (book.companion || '自己看'); });
     d.body.addEventListener('change', async e => {
       const key = e.target.dataset.field; if (!key) return;
@@ -205,8 +209,9 @@ export function bookshelfApp(ctx) {
     const paint = () => {
       if (!d.live) return;
       const marks = book.bookmarks || [], picks = normalizeHighlights(book.highlights);
-      const tabs = `<div class="segmented bs-tabs">${[['toc', `目录`], ['marks', `书签${marks.length ? ` ${marks.length}` : ''}`], ['picks', `书摘${picks.length ? ` ${picks.length}` : ''}`]].map(([k, t]) => `<button type="button" data-btab="${k}" aria-pressed="${tab === k}">${t}</button>`).join('')}</div>`;
+      const tabs = `<div class="segmented bs-tabs">${[['toc', `目录`], ['marks', `书签${marks.length ? ` ${marks.length}` : ''}`], ['picks', `书摘${picks.length ? ` ${picks.length}` : ''}`], ['notes','本章批注']].map(([k, t]) => `<button type="button" data-btab="${k}" aria-pressed="${tab === k}">${t}</button>`).join('')}</div>`;
       const body = tab === 'marks' ? (marks.length ? marks.map((m, i) => `<button class="bs-row-link" data-mark="${i}"><strong>${esc(book.chapters[m.chapter]?.title || '')}</strong><small>${Math.round((m.fraction || 0) * 100)}%</small></button>`).join('') : '<p class="hint">还没有书签。看的时候点下面中间的「书签」。</p>')
+        : tab === 'notes' ? (normalizeAnnotations(book.annotations).filter(n => n.chapter === book.position.chapter).map(n => `<div class="bs-pick"><strong>${esc(n.who)}</strong><p>${esc(n.text)}</p></div>`).join('') || '<p class="hint">本章还没有批注。</p>')
         : tab === 'picks' ? (picks.length ? picks.map(h => `<div class="bs-pick"><button type="button" class="bs-pick-go" data-pick="${esc(h.id)}"><strong>${esc(book.chapters[h.chapter]?.title || '')}</strong><p>${esc(h.text)}</p></button><div class="bs-pick-acts">${btn('pick-send', icon('chat'), 'round-button', `data-id="${esc(h.id)}" aria-label="发给 TA"`)}${btn('pick-del', icon('trash'), 'round-button', `data-id="${esc(h.id)}" aria-label="删掉这段书摘"`)}</div></div>`).join('') : '<p class="hint">长按一段文字，选「划线」就收进这里。</p>')
           : `<div class="reading-toc">${book.bookmarks.length ? '' : ''}${book.chapters.map((c, i) => `<button data-chapter="${i}" ${i === book.position.chapter ? 'aria-current="true"' : ''}>${esc(c.title)}</button>`).join('')}</div>`;
       d.body.innerHTML = tabs + body;
@@ -216,7 +221,18 @@ export function bookshelfApp(ctx) {
     d.body.addEventListener('click', async e => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.btab) { tab = b.dataset.btab; paint(); return; }
-      if (b.dataset.pick) { const h = normalizeHighlights(book.highlights).find(x => x.id === b.dataset.pick); d.close(); if (h) showChapter(h.chapter, 0).then(() => content?.querySelector(`[data-para="${h.para}"]`)?.scrollIntoView?.({block: 'center'})).catch(fail); return; }
+      if (b.dataset.pick) { const h = normalizeHighlights(book.highlights).find(x => x.id === b.dataset.pick); d.close(); if (h) showChapter(h.chapter, 0).then(() => {
+        const block = blocks[h.para], pane = $('.reading-page'); if (!block || !pane) return;
+        const pos = point(block,h.start || 0), r = doc.createRange();
+        if (pos) { r.setStart(...pos); r.collapse(true); }
+        const rect = (pos && r.getBoundingClientRect?.()) || block.getBoundingClientRect(), view = pane.getBoundingClientRect();
+        if (book.settings.mode === 'pages') {
+          page = Math.max(0,Math.min(pages-1,page + Math.floor((rect.left-view.left)/Math.max(1,pane.clientWidth))));
+          content.style.transform = `translateX(${-page*pane.clientWidth}px)`;
+          return savePosition(page/Math.max(1,pages-1));
+        }
+        pane.scrollTop += rect.top-view.top;
+      }).catch(fail); return; }
       if (b.dataset.action === 'pick-del') { await api.updateReadingBook(book.id, {highlights: normalizeHighlights(book.highlights).filter(x => x.id !== b.dataset.id)}); book = await api.getReadingBook(book.id); paint(); return; }
       if (b.dataset.action === 'pick-send') { const h = normalizeHighlights(book.highlights).find(x => x.id === b.dataset.id); d.close(); if (h) chatPanel(h.text); return; }
       const m = b.dataset.mark !== undefined ? book.bookmarks[Number(b.dataset.mark)] : b.dataset.chapter !== undefined ? {chapter: Number(b.dataset.chapter), fraction: 0} : null;
@@ -228,24 +244,37 @@ export function bookshelfApp(ctx) {
   /** The paragraph in the middle of the page being read (what a note is about, and where a held paragraph was). */
   function visiblePara() {
     const pane = $('.reading-page'); if (!pane) return 0;
-    const top = pane.getBoundingClientRect().top + 6;
-    for (const [i, el] of (blocks.length ? blocks : [...(content?.children || [])]).entries()) if (el.getBoundingClientRect().bottom > top) return i;
+    const view = pane.getBoundingClientRect();
+    for (const [i, el] of (blocks.length ? blocks : [...(content?.children || [])]).entries()) if ([...el.getClientRects()].some(r => r.bottom > view.top && r.top < view.bottom && r.left < view.right && r.right > view.left)) return i;
     return 0;
   }
   let content = null, blocks = [];   // blocks: the paragraphs by their data-para, before any note is put in
   function visible() {
     const pane = $('.reading-page'), text = [];
+    let anchor;
     if (pane && content && book.type !== 'comic') {
       const r = pane.getBoundingClientRect(), walker = doc.createTreeWalker(content, 4), range = doc.createRange();
       for (let node = walker.nextNode(), used = 0; node && used < 2200; node = walker.nextNode()) {
-        const len = node.textContent.length;
-        const coord = i => { range.setStart(node, i); range.setEnd(node, Math.min(len, i + 1)); const b = range.getBoundingClientRect(); return book.settings.mode === 'scroll' ? b.top : b.left; };
-        const low = book.settings.mode === 'scroll' ? r.top : r.left, high = book.settings.mode === 'scroll' ? r.bottom : r.right;
-        const search = target => { let a = 0, b = len; while (a < b) { const mid = (a + b) >> 1; if (coord(mid) < target) a = mid + 1; else b = mid; } return a; };
-        if (len && typeof range.getBoundingClientRect === 'function') { const bit = node.textContent.slice(search(low), search(high)); text.push(bit); used += bit.length; }
+        if (node.parentElement.closest('[data-reading-extra]') || !range.getClientRects) continue;
+        const len = node.length;
+        range.selectNodeContents(node);
+        const inside = b => b.bottom > r.top && b.top < r.bottom && b.left < r.right && b.right > r.left;
+        const rects = [...range.getClientRects()];
+        if (!rects.some(inside)) continue;
+        let start = 0, end = len;
+        if (!rects.every(inside)) {
+          // Column order is monotonic even though line beginnings inside a column move left again.
+          const before = b => book.settings.mode === 'scroll' ? b.bottom <= r.top : b.right <= r.left;
+          const after = b => book.settings.mode === 'scroll' ? b.top >= r.bottom : b.left >= r.right;
+          const first = predicate => { let a=0,b=len; while (a<b) { const m=(a+b)>>1; range.setStart(node,m); range.setEnd(node,m+1); if (predicate(range.getBoundingClientRect())) b=m; else a=m+1; } return a; };
+          start = first(b => !before(b)); end = first(after);
+        }
+        const bit = node.data.slice(start,end);
+        if (bit.trim() && !anchor) { const para = blocks.findIndex(el => el.contains(node)); if (para >= 0) anchor = {para,offset:offsetAt(blocks[para],node,start)}; }
+        text.push(bit); used += bit.length;
       }
     }
-    return {chapter: book.position.chapter, para: visiblePara(), page: page + 1, text: text.join('\n').trim().slice(0, 2200)};
+    return {chapter: book.position.chapter, para: visiblePara(), ...anchor, page: page + 1, text: text.join('\n').trim().slice(0, 2200)};
   }
   async function savePosition(fraction, turn = false) {
     if (!book) return;
@@ -261,7 +290,12 @@ export function bookshelfApp(ctx) {
     const label = $('[data-reading-count]'); if (label) label.textContent = `${book.chapters[p.chapter]?.title || ''} · ${page + 1}/${pages}`;
     const slider = $('[data-reading-progress]'); if (slider) slider.value = ((p.chapter + p.fraction) / book.chapters.length) * 100;
     const folio = $('[data-folio-page]'); if (folio) folio.textContent = book.settings.mode === 'pages' ? `${page + 1} / ${pages}` : `${Math.round(p.fraction * 100)}%`;
-    if (turn) { showNotes(); maybeNote().catch(fail); }
+    if (turn) {
+      win.clearTimeout(noteTimer);
+      if (book.settings.occasionalNotes && book.companion) noteTimer = win.setTimeout(() => {
+        if (position === lastPosition && !doc.hidden && stage?.isConnected !== false && !doc.querySelector('.sheet') && stillReading()) maybeNote().catch(fail);
+      }, 60000);
+    }
   }
   /** The character's notes, tucked in after the paragraph each one is about: the words make room, nothing is covered. */
   function showNotes() {
@@ -270,12 +304,15 @@ export function bookshelfApp(ctx) {
     if (book.settings.annotations === false) return;
     const notes = normalizeAnnotations(book.annotations).filter(n => n.chapter === book.position.chapter);
     for (const n of notes) {
-      const el = doc.createElement('aside');
+      if (!n.para && !Number.isInteger(n.offset)) continue;
+      const el = doc.createElement('details');
+      el.dataset.readingExtra = '';
       el.className = 'reading-note-inline';
-      el.innerHTML = `<small>${esc(n.who || book.companion || '')}</small><p>${esc(n.text)}</p>`;
-      el.addEventListener('click', () => chatPanel());
-      const target = blocks[Math.min(n.para, Math.max(0, blocks.length - 1))];
-      if (target) target.after(el); else content.append(el);
+      el.innerHTML = `<summary>${esc(n.who || book.companion || '读书')}的批注</summary><p>${esc(n.text)}</p>`;
+      el.addEventListener('click', e => e.stopPropagation());
+      const target = blocks[n.para];
+      const p = target && Number.isInteger(n.offset) && point(target,n.offset);
+      if (p) { const r = doc.createRange(); r.setStart(...p); r.collapse(true); r.insertNode(el); } else if (target) target.after(el);
     }
   }
   async function send(text, quote = '', annotation = false) {
@@ -285,7 +322,7 @@ export function bookshelfApp(ctx) {
     return readingSend(api, target, view, text, {blob, annotation, quote});
   }
   async function maybeNote() {
-    if (busy || noteBusy || !annotationDue(book)) return;
+    if (busy || noteBusy || !book?.settings.occasionalNotes || !annotationDue(book) || Date.now() - (book.annotations?.at(-1)?.at || 0) < 600000) return;
     noteBusy = true;
     const target = book, view = visible(), source = reader, image = chapter?.images[0], day = new Date().toLocaleDateString('sv-SE');
     try {
@@ -297,7 +334,7 @@ export function bookshelfApp(ctx) {
       const text = await readingSend(api, target, view, '', {blob, annotation: true});
       if (text) {
         const current = await api.getReadingBook(target.id); if (!current) return;
-        const note = {chapter: view.chapter, para: view.para, text: text.slice(0, 120), who: target.companion, at: Date.now()};
+        const note = {chapter: view.chapter, para: view.para, offset:view.offset, text: text.slice(0, 120), who: target.companion, at: Date.now()};
         const saved = await api.updateReadingBook(target.id, {annotations: normalizeAnnotations([...(current.annotations || []), note])});
         if (book?.id === target.id && book.companion === target.companion) { book = {...book, annotations: saved.annotations}; showNotes(); }
       }
@@ -318,34 +355,66 @@ export function bookshelfApp(ctx) {
     const p = {...book.position}, marks = book.bookmarks || [], found = marks.findIndex(m => m.chapter === p.chapter && Math.abs(m.fraction - p.fraction) < .01);
     book = await api.updateReadingBook(book.id, {bookmarks: found < 0 ? [...marks, p].slice(-200) : marks.filter((_, i) => i !== found)}); ctx.notify(found < 0 ? '已加书签' : '已移除书签');
   }
-  /** A paragraph held for half a second: it lights up and our own little menu opens (发给 TA, 划线, 复制) — not the system's. */
-  function paragraphMenu(el, index) {
-    const text = el.textContent.trim();
-    if (!text) return;
-    const marked = highlighted(book.highlights, book.position.chapter, index);
-    el.classList.add('reading-picked');
-    const d = ctx.dialog('这一段', `<div class="mp-grid">${[['para-send', 'chat', '发给 TA'], ['para-mark', 'star', marked ? '取消划线' : '划线'], ['para-copy', 'copy', '复制']].map(([k, g, l]) => `<button type="button" class="mp-item" data-action="${k}"><span class="mp-ico">${icon(g)}</span><span class="mp-label">${l}</span></button>`).join('')}</div>`);
-    d.overlay.querySelector('.mp-grid').style.gridTemplateColumns = 'repeat(3,minmax(0,1fr))';
-    popAt(d, el, {win, reduced: win.matchMedia?.('(prefers-reduced-motion: reduce)').matches});
-    d.onClose(() => el.classList.remove('reading-picked'));
-    d.body.addEventListener('click', async e => {
-      const k = e.target.closest('[data-action]')?.dataset.action;
-      if (k === 'para-send') { d.close(); chatPanel(text); }
-      if (k === 'para-mark') {
-        d.close();
-        const list = toggleHighlight(book.highlights, {chapter: book.position.chapter, para: index, text});
-        book = await api.updateReadingBook(book.id, {highlights: list});
-        paintMarks(); ctx.notify(list.length > normalizeHighlights(book.highlights).length || list.some(h => h.para === index) ? '收进书摘了' : '取消划线了');
-      }
-      if (k === 'para-copy') { d.close(); try { await win.navigator.clipboard.writeText(text); ctx.notify('已复制'); } catch { ctx.notify('这个浏览器不让复制', {error: true}); } }
-    });
+  async function illustrate(h) {
+    const id = book.id, key = [id,h.chapter,h.para,h.start,h.endPara,h.end].join(':');
+    if (drawing.has(key)) return;
+    drawing.add(key);
+    try {
+      const settings = api.getState(), paid = api.drawQuote()?.free === false;
+      if (paid && !await ctx.confirm('为这段书摘生图？','这次生成会使用绘图额度。')) return;
+      const cast = settings.routes.map(r => r.name).filter(name => name && h.text.includes(name));
+      const suggestion = await api.writePrompt(h.text,cast);
+      const input = pictureInputs(settings,{prompt:suggestion.prompt,characters:suggestion.people?.length ? suggestion.people : cast},h.text);
+      const result = await api.generateImage({...input,key,allowPaid:paid,name:'书摘插图'});
+      const saved = await api.updateReadingBook(id,{illustration:{chapter:h.chapter,para:h.endPara,offset:h.end,photoId:result.photoId}});
+      if (book?.id === id) { book.illustrations = saved.illustrations; if (book.position.chapter === h.chapter) await showChapter(h.chapter,book.position.fraction); }
+    } finally { drawing.delete(key); }
   }
-  /** The picked paragraphs get a soft underline under their words. */
+  function enableSelection(pane) {
+    let bar, selected;
+    function refresh() {
+      const sel = win.getSelection();
+      const h = selectedRange(sel,blocks);
+      if (!h) { bar?.remove(); bar = null; return; }
+      selected = {...h,chapter:book.position.chapter};
+      if (!bar) {
+        bar = doc.createElement('div'); bar.className = 'reading-tools';
+        for (const [action,glyph,label] of [['mark','star','划线或取消划线'],['draw','paint','为选中文字生图'],['send','chat','发给 TA'],['copy','copy','复制']]) {
+          bar.insertAdjacentHTML('beforeend',btn('para-'+action,icon(glyph),'round-button',`aria-label="${label}" title="${label}"`));
+        }
+        stage.append(bar);
+        bar.onpointerdown = e => e.preventDefault();
+        bar.onclick = async e => {
+          const action = e.target.closest('button')?.dataset.action, h = selected, target = book.id;
+          if (!action) return;
+          sel.removeAllRanges(); bar?.remove(); bar = null;
+          try {
+            if (action === 'para-mark') {
+              const list = toggleHighlight(book.highlights,h), saved = await api.updateReadingBook(target,{highlights:list});
+              if (book?.id === target) { book.highlights = saved.highlights; paintMarks(); }
+            } else if (action === 'para-draw') await illustrate(h);
+            else if (action === 'para-send') await chatPanel(h.text);
+            else await win.navigator.clipboard.writeText(h.text);
+          } catch (error) { fail(error); }
+        };
+      }
+      const rect = [...(sel.getRangeAt(0).getClientRects?.() || [])].at(-1) || pane.getBoundingClientRect();
+      const host = stage.getBoundingClientRect();
+      bar.style.left = Math.max(4,Math.min(host.width-bar.offsetWidth-4,rect.right-host.left-bar.offsetWidth/2))+'px';
+      bar.style.top = Math.max(4,Math.min(host.height-bar.offsetHeight-4,rect.bottom-host.top+12))+'px';
+    }
+    doc.addEventListener('selectionchange',refresh);
+    pane.addEventListener('scroll',refresh);
+    detachSelection = () => { doc.removeEventListener('selectionchange',refresh); pane.removeEventListener('scroll',refresh); bar?.remove(); detachSelection = () => {}; };
+  }
   function paintMarks() {
     if (!content) return;
-    const picks = normalizeHighlights(book.highlights).filter(h => h.chapter === book.position.chapter);
+    for (const mark of content.querySelectorAll('[data-underline]')) mark.replaceWith(...mark.childNodes);
     for (const el of blocks) el.classList.remove('reading-mark');
-    for (const h of picks) blocks[h.para]?.classList.add('reading-mark');
+    for (const h of normalizeHighlights(book.highlights).filter(h => h.chapter === book.position.chapter)) {
+      if (h.start === undefined) blocks[h.para]?.classList.add('reading-mark');
+      else for (let i=h.para;i<=h.endPara && i<blocks.length;i++) underline(blocks[i],i===h.para?h.start:0,i===h.endPara?h.end:Infinity);
+    }
   }
   const STAGE_ACTIONS = {shelf: () => shelf().catch(fail), settings: () => settings(), toc: () => contents(), bookmark: () => bookmark().catch(fail), chat: () => chatPanel()};
   function openStage(html) {
@@ -369,9 +438,10 @@ export function bookshelfApp(ctx) {
   }
   async function showChapter(index, fraction = 0, didTurn = false) {
     if (!reader || index < 0 || index >= book.chapters.length) return;
+    detachSelection(); win.clearTimeout(noteTimer);
     const token = ++epoch, a = album; album = null; a?.close(); resize?.disconnect(); clearURLs();
     book.position = {chapter: index, fraction}; chapter = await reader.chapter(index); if (token !== epoch) return;
-    if (book.type === 'comic' && book.settings.mode === 'pages') { stage?.remove(); stage = null; await comic(index); return; }
+    if (book.type === 'comic' && book.settings.mode === 'pages') { stage?.remove(); stage = null; content = null; blocks = []; await comic(index); return; }
     const s = book.settings, hidden = stage?.querySelector('.reading-reader')?.classList.contains('reading-hidden');
     openStage(`<section class="reading-reader${hidden ? ' reading-hidden' : ''}" data-paper="${esc(s.theme)}" data-mode="${esc(s.mode)}" data-effect="${esc(effectOf(s.effect))}" style="--read-size:${s.size}px;--read-line:${s.line};--read-margin:${s.margin}px;--read-font:${s.font}"><header class="reading-bar"><button data-action="shelf" aria-label="返回书架">${icon('back')}</button><span>${esc(book.title)}</span><button data-action="settings" aria-label="阅读设置">${icon('settings')}</button></header><div class="reading-page" tabindex="0"><article class="reading-content">${chapter.html}</article></div><div class="reading-folio" aria-hidden="true"><span data-folio-title>${esc(book.chapters[index]?.title || '')}</span><span data-folio-page></span></div><footer class="reading-bottom"><small data-reading-count></small><input aria-label="阅读进度" data-reading-progress type="range" min="0" max="100" step="0.01"><nav><button data-action="toc">${icon('book')}目录</button><button data-action="bookmark">${icon('star')}书签</button><button data-action="chat">${icon('chat')}一起看</button></nav></footer></section>`);
     const pane = $('.reading-page'); content = $('.reading-content');
@@ -379,21 +449,23 @@ export function bookshelfApp(ctx) {
     blocks = [...content.children];
     blocks.forEach((el, i) => { el.dataset.para = String(i); });
     for (const img of content.querySelectorAll('[data-book-image]')) { const blob = await reader.image(img.dataset.bookImage); if (token !== epoch) return; if (blob) img.src = url(blob); }
+    for (const illustration of (book.illustrations || []).filter(x => x.chapter === index)) {
+      const p = blocks[illustration.para] && point(blocks[illustration.para],illustration.offset);
+      if (!p) continue;
+      const photo = await api.getPhoto(illustration.photoId); if (token !== epoch) return;
+      if (photo?.blob) { const img = doc.createElement('img'); img.alt='书摘插图'; img.dataset.readingExtra=''; img.src=url(photo.blob); const r=doc.createRange(); r.setStart(...p); r.collapse(true); r.insertNode(img); await img.decode?.().catch(() => {}); if (token !== epoch) return; }
+    }
+    paintMarks(); showNotes();
     await new Promise(resolve => win.requestAnimationFrame(resolve)); if (token !== epoch) return;
     const layout = () => { if (token !== epoch) return; const f = book.position.fraction; content.style.width = pane.clientWidth + 'px'; pages = s.mode === 'pages' ? Math.max(1, Math.round(content.scrollWidth / Math.max(1, pane.clientWidth))) : 1; page = Math.round(f * (pages - 1)); if (s.mode === 'pages') content.style.transform = `translateX(${-page * pane.clientWidth}px)`; else pane.scrollTop = f * Math.max(0, pane.scrollHeight - pane.clientHeight); savePosition(f, didTurn).catch(fail); didTurn = false; };
     layout(); if (win.ResizeObserver) { resize = new win.ResizeObserver(layout); resize.observe(pane); }
-    paintMarks(); showNotes();
-    let start = null, swiped = false, hold = null, drag = 0;
-    const paraAt = el => el.closest('.reading-content > *');
+    enableSelection(pane);
+    let start = null, swiped = false, drag = 0;
     pane.addEventListener('pointerdown', e => {
-      activeAt = Date.now();
-      start = {x: e.clientX, y: e.clientY}; swiped = false; drag = 0;
-      win.clearTimeout(hold?.timer);
-      const para = paraAt(e.target);
-      hold = para && s.mode === 'pages' ? {timer: win.setTimeout(() => { const box = para; hold = null; swiped = true; paragraphMenu(box, Number(box.dataset.para)); }, 520)} : null;
+      activeAt = Date.now(); start = {x:e.clientX,y:e.clientY}; swiped = false; drag = 0;
     });
     pane.addEventListener('pointermove', e => {
-      if (hold && start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) { win.clearTimeout(hold.timer); hold = null; }
+      if (e.pointerType === 'mouse' || !win.getSelection()?.isCollapsed) return;
       // 手指拖着时页跟着手走 (0.9.52), only where a page can turn and the finger goes sideways.
       if (!start || swiped || s.mode !== 'pages' || effectOf(s.effect) === 'none') return;
       const dx = e.clientX - start.x, dy = e.clientY - start.y;
@@ -404,24 +476,23 @@ export function bookshelfApp(ctx) {
       content.style.transform = `translateX(${-page * pane.clientWidth + at}px)`;
     });
     const endDrag = e => {
-      if (hold) { win.clearTimeout(hold.timer); hold = null; }
+      if (!win.getSelection()?.isCollapsed || e.type === 'pointercancel') { start=null; if (drag) content.style.transform=`translateX(${-page*pane.clientWidth}px)`; drag=0; return; }
       if (!start) return; const dx = e.clientX - start.x, dy = e.clientY - start.y; start = null;
       content.style.transition = '';
       if (drag) { const kept = drag; drag = 0; content.style.transform = `translateX(${-page * pane.clientWidth}px)`; if (Math.abs(kept) > 40) { swiped = true; turn(kept < 0 ? 1 : -1).catch(fail); } return; }
       if (s.mode === 'pages' && Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) { swiped = true; turn(dx < 0 ? 1 : -1).catch(fail); }
       else if (s.mode === 'scroll' && Math.abs(dy) > 65) { swiped = true; if (dy < 0 && pane.scrollTop >= pane.scrollHeight - pane.clientHeight - 2) turn(1).catch(fail); else if (dy > 0 && pane.scrollTop <= 1) turn(-1).catch(fail); }
-      else if (dy < -65 && Math.abs(dy) > Math.abs(dx)) { swiped = true; chatPanel(); }
     };
     pane.addEventListener('pointerup', endDrag);
     pane.addEventListener('pointercancel', endDrag);
-    pane.addEventListener('contextmenu', e => e.preventDefault());
     pane.addEventListener('click', e => {
       activeAt = Date.now();
-      if (swiped) return;
+      if (swiped || !win.getSelection()?.isCollapsed || e.target.closest('[data-reading-extra]')) return;
       const r = pane.getBoundingClientRect(), x = e.clientX - r.left;
       if (s.mode === 'pages' && (x < r.width * .22 || x > r.width * .78)) turn(x < r.width * .22 ? -1 : 1);
       else $('.reading-reader').classList.toggle('reading-hidden');
     });
+    pane.addEventListener('toggle', e => { if (e.target.matches('.reading-note-inline')) layout(); }, true);
     pane.addEventListener('keyup', e => { if (e.key === 'ArrowRight') turn(1); if (e.key === 'ArrowLeft') turn(-1); });
     let timer = 0;
     pane.addEventListener('scroll', () => { activeAt = Date.now(); if (s.mode !== 'scroll') return; win.clearTimeout(timer); timer = win.setTimeout(() => { if (token !== epoch) return; savePosition(pane.scrollTop / Math.max(1, pane.scrollHeight - pane.clientHeight), true).catch(fail); }, 180); });
@@ -433,7 +504,7 @@ export function bookshelfApp(ctx) {
     const owner = book.id, ids = book.chapters.map((_, i) => String(i)); if (book.settings.rtl) ids.reverse();
     album = openAlbum({ctx, host: v.root.closest('.screen') || v.root, ids, index: ids.indexOf(String(index)), preload: true,
       load: async id => { const c = await reader.chapter(Number(id)), blob = await reader.image(c.images[0]); return blob ? {blob, name: book.chapters[Number(id)].title} : null; },
-      onPage: id => { const n = Number(id); activeAt = Date.now(); book.position = {chapter: n, fraction: 0}; page = n; pages = book.chapters.length; reader.chapter(n).then(c => { if (book?.id !== owner) return; chapter = c; savePosition(0, true).catch(fail); }); },
+      onPage: id => { const n = Number(id); activeAt = Date.now(); book.position = {chapter: n, fraction: 0}; page = n; pages = book.chapters.length; reader.chapter(n).then(c => { if (book?.id !== owner || book.position.chapter !== n) return; chapter = c; savePosition(0, true).catch(fail); }); },
       onPullDown: () => contents(),
       onHold: () => chatPanel('这一页漫画'), onClose: () => { if (album) { album = null; if (book?.settings.mode === 'scroll') showChapter(book.position.chapter, book.position.fraction).catch(fail); else shelf().catch(fail); } },
       actions: [{key: 'toc', icon: 'book', label: '目录', run: contents}, {key: 'bookmark', icon: 'star', label: '书签', run: bookmark}, {key: 'chat', icon: 'chat', label: '一起看', run: () => chatPanel()}, {key: 'settings', icon: 'settings', label: '设置', run: settings}]});

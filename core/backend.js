@@ -1724,7 +1724,7 @@ export class TTSBackend {
     }
     /** Generates one image and keeps it in the album. Requests wait in the NovelAI queue (see draw-queue.js).
      *  key identifies the job in the queue (the same key joins the job already waiting); label is shown in the line. */
-    generateImage({ prompt, negative = '', characters = [], params, allowPaid = false, name = '', key, label = '', base = null, refs = [], roleRefs = [], preview = false } = {}) {
+    generateImage({ prompt, negative = '', characters = [], params, allowPaid = false, name = '', key, label = '', base = null, refs = [], roleRefs = [], preview = false } = {}, preparePhoto) {
         this.assertOpen();
         if (!String(prompt || '').trim()) return Promise.reject(Error('请先写提示词'));
         const engine = this.settings.draw.engine;
@@ -1746,6 +1746,8 @@ export class TTSBackend {
                 this.emit('draw', { phase: 'generating' });
                 const own = picture.roleRefs.length ? await this.roleReferences(picture.roleRefs, picture.characters) : null;
                 const made = await this.drawWithEngine(engine, { ...picture, ...(own ? { refs: own.refs, characters: own.characters, roles: true } : {}), signal });
+                this.assertOpen();
+                if (preparePhoto) made.blob = await preparePhoto(made.blob);
                 this.assertOpen();
                 const ext = made.blob.type === 'image/jpeg' ? 'jpg' : made.blob.type === 'image/webp' ? 'webp' : 'png';
                 const info = this.pictureInfo(engine, made, picture);
@@ -1783,6 +1785,8 @@ export class TTSBackend {
                 delete p.straight_alpha; delete p.tag_hint_transparent_background;
                 blob = await send();
             }
+            this.assertOpen();
+            if (preparePhoto) blob = await preparePhoto(blob);
             this.assertOpen();
             const info = this.pictureInfo('nai', { params: request.params, seed: request.seed, prompt: request.body.input }, { negative, characters });
             if (request.body.action !== 'generate') info.push(['方式', request.body.action === 'infill' ? `局部重绘 · 强度 ${request.body.parameters.strength}` : `图生图 · 强度 ${request.body.parameters.strength} · 噪声 ${request.body.parameters.noise}`]);
@@ -3024,11 +3028,16 @@ export class TTSBackend {
         return job;
     }
     /** Confirmed candidate ids only; recheck favourites and user albums before each batch. */
+    async appPhotoIds() {
+        const [wardrobe, books] = await Promise.all([this.apps.listFrom('wardrobe:'),this.bookshelf.list()]);
+        return new Set([...wardrobe.map(row => row.photoId),...books.flatMap(book => (book.illustrations || []).map(pic => pic.photoId))].filter(Boolean));
+    }
     async unkeptPhotos() {
         this.assertOpen();
         const [photos,albums,phone]=await Promise.all([this.library.listPhotos(),this.listAlbums(),this.getPhone()]);
         const chat=this.settings.chat||{},shown=a=>a?.kind==='photo'?a.photoId:null;
         const keep=new Set([...albums.flatMap(a=>a.photos||[]),shown(phone.wallpaper),...Object.values(phone.icons||{}).map(shown),...Object.values(chat.avatars||{}).map(shown),chat.profile?.backgroundPhoto].filter(Boolean));
+        for (const id of await this.appPhotoIds()) keep.add(id);
         const rows=photos.filter(p=>!keep.has(p.id));
         return {photos:rows.map(({id,name,size})=>({id,name,size})),count:rows.length,bytes:rows.reduce((n,p)=>n+(p.size||0),0),kept:photos.length-rows.length};
     }
@@ -3396,9 +3405,10 @@ export class TTSBackend {
      * {count, bytes, ids, sources: {draw|chat|peek|moments: {label, count, bytes, ids}}}. Imported photos are not here.
      */
     async generatedPhotos() {
+        const kept = await this.appPhotoIds();
         const rows = await this.library.listPhotos(), sources = {}, all = [];
         for (const [key, label, pattern] of DRAWN_SOURCES) {
-            const mine = rows.filter(row => pattern.test(row.name || ''));
+            const mine = rows.filter(row => !kept.has(row.id) && pattern.test(row.name || ''));
             sources[key] = { label, count: mine.length, bytes: mine.reduce((n, row) => n + (row.size || 0), 0), ids: mine.map(row => row.id) };
             all.push(...mine);
         }

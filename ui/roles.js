@@ -3,7 +3,7 @@ import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {layerSort} from './layer-sort.js';
 import {layerTree} from '../core/layers.js';
 import {lookTest} from '../core/draw.js';
-import {openCustomCatalog} from './custom-catalog.js';
+import {openCustomCatalog, modelPicker} from './custom-catalog.js';
 import {voiceFromLink, customSetOf, customParams, customSlots} from '../core/custom-voice.js';
 import {pickPicture} from './draw-images.js';
 import {VOICE_GENDERS, VOICE_AGES, poolLine, poolKey, readPoolFile, poolFile, guessVoice} from '../core/auto-voice.js';
@@ -455,7 +455,7 @@ export function rolesApp(ctx) {
       case 'pick-custom-model': {
         const target=current, c=api.readState().connections.custom,set=customSetOf(c,target.model);
         openCustomCatalog(ctx,{...c,model:set},'model',()=>!v.disposed && current===target && target.engine==='custom' && customSetOf(api.readState().connections.custom,target.model)===set,
-          id=>{target.customModel=id;target.customModelSet=set;render();changed();});
+          id=>{target.customModel=id;target.customModelSet=set;render();changed();},target.customModel,true);
         break;
       }
       case 'pick-voice': pickVoice(); break;
@@ -494,8 +494,7 @@ export function rolesApp(ctx) {
     const sets = customSets(r);
     const set=customSetOf(c,r.model),params=customParams(c,set) || {};
     const override=(!r.customModelSet || r.customModelSet===set) ? r.customModel || '' : '';
-    const model=customSlots(params).has('model') ? field('角色模型',input('customModel',override,'text','placeholder="'+esc('跟随接口 · '+(params.cloudModel || '未设置'))+'"')+
-      btn('pick-custom-model','选择模型','text-button'),'留空跟随这套接口的默认模型。') : '';
+    const model=customSlots(params).has('model') ? modelPicker('pick-custom-model','角色模型',override || '跟随接口 · '+(params.cloudModel || '未设置')) : '';
     if (sets.length < 2) return model;
     return field('用哪一套接口', select('model', sets.some(s => s.id === r.model) ? r.model : '', [['', '跟随引擎 · ' + (sets.find(s => s.current)?.name || '')], ...sets.map(s => [s.id, s.name])]),
       '引擎里「自己的接口」存了好几套时，选这个角色用哪一套：音色从那一套里选，台词也发给那一套。「跟随引擎」就是那边正在用的那套。') + model;

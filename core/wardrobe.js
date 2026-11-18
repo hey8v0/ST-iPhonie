@@ -35,7 +35,7 @@ export function cleanSet(doc, now = Date.now()) {
   if (!description) throw Error('这套衣服还没有描述');
   const id = /^wardrobe:set:[\w-]{4,80}$/.test(doc?.id) ? doc.id : 'wardrobe:set:' + (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
   const items = [...new Set((Array.isArray(doc?.items) ? doc.items : []).filter(x => /^wardrobe:item:/.test(x)))].slice(0, 30);
-  return {id, kind: 'wardrobe-set', owner: who, name: clip(doc?.name, WARDROBE_LIMITS.name) || '一套搭配', description, items, at: time(doc?.at, now), updatedAt: time(doc?.updatedAt, now), ...space(doc)};
+  return {id, kind: 'wardrobe-set', owner: who, name: clip(doc?.name, WARDROBE_LIMITS.name) || '一套搭配', description, items, ...(doc?.photoId ? {photoId: clip(doc.photoId, 200)} : {}), at: time(doc?.at, now), updatedAt: time(doc?.updatedAt, now), ...space(doc)};
 }
 /**
  * What someone wears now: put on from the phone (pending until the next story reply has it) or changed by the story. One

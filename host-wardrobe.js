@@ -48,11 +48,11 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
    * they go into the 衣柜 as words (one already there, the same name and words, is used again); from the 衣柜, the pieces
    * picked. The same words kept again are not kept twice: {again: true}. Answers {set, added}.
    */
-  async function saveOutfit({owner, text, mode = 'closet', itemIds = []} = {}) {
+  async function saveOutfit({owner, text, mode = 'closet', itemIds = [], photoId = ''} = {}) {
     const words = cleanOutfit(text);
     if (!words) throw Error('先搭一套');
     const {items, sets} = await backend.wardrobe(owner), same = sets.find(s => s.description === words.slice(0, WARDROBE_LIMITS.wear));
-    if (same) return {set: same, added: 0, again: true};
+    if (same) return {set: photoId && same.photoId !== photoId ? await backend.saveWardrobeSet({...same, photoId}) : same, added: 0, again: true};
     let ids = itemIds.filter(id => items.some(x => x.id === id)), added = 0;
     if (mode === 'free') {
       const pieces = parseSplit(await backend.generateText(context(), {use: 'wardrobe', prompt: splitRequest(words, settings().promptRules), plainText: true, trimNames: false}));
@@ -65,7 +65,7 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
         added++;
       }
     }
-    const set = await backend.saveWardrobeSet({owner, name: `搭配 ${sets.length + 1}`, description: words, items: [...new Set(ids)]});
+    const set = await backend.saveWardrobeSet({owner, name: `搭配 ${sets.length + 1}`, description: words, photoId, items: [...new Set(ids)]});
     return {set, added, again: false};
   }
   /**
@@ -150,25 +150,25 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
   async function drawItem({id, allowPaid = false} = {}) {
     if (drawingItems.has(id)) throw Error('这件衣服正在画');
     if (!backend.drawReady()) throw Error(backend.drawMissing() || '还没有设置绘图引擎');
-    const item = (await backend.wardrobe()).items.find(x => x.id === id);
-    if (!item) throw Error('这件衣服已不在衣柜里');
-    if (!allowPaid && backend.drawQuote?.()?.free === false) throw Object.assign(Error('画衣服需要确认费用'), {code: 'PAID'});
     drawingItems.add(id);
     try {
+      const item = (await backend.wardrobe()).items.find(x => x.id === id);
+      if (!item) throw Error('这件衣服已不在衣柜里');
+      if (!allowPaid && backend.drawQuote?.()?.free === false) throw Object.assign(Error('画衣服需要确认费用'), {code: 'PAID'});
       const s = settings(), words = `衣服单品，无人物，不要模特、身体或人台。平铺或挂拍，纯色背景。名字：${item.name}；分类：${item.category}；描述：${item.description}`;
       const tags = tagTextAnswer(await backend.generateText(context(), {use: 'picture', prompt: tagTextRequest(s, words, 'translate'), plainText: true, trimNames: false}));
       if (!tags.trim()) throw Error('没有写出衣服的绘图提示词');
       const params = {...s.draw.params, transparent: s.draw.engine === 'nai' && naiFeatures(s.draw.params.model).transparent};
-      const made = await backend.generateImage({prompt: `${tags}, isolated clothing item, flat lay, no humans, no mannequin, ${params.transparent ? 'transparent background' : 'solid background'}`, negative: 'person, human, mannequin, body', characters: [], params, allowPaid, name: `衣柜-${item.name}`, key: `wardrobe-item:${id}`, label: `衣柜 · ${item.name}`});
-      const photo = await backend.library.getPhoto(made.photoId);
-      if (!photo?.blob) throw Error('画好的图片没有保存成功');
-      const blob = await cutout(photo.blob);
-      if (blob?.type !== 'image/png') throw Error('透明图片必须保存为 PNG');
+      const made = await backend.generateImage({prompt: `${tags}, isolated clothing item, flat lay, no humans, no mannequin, ${params.transparent ? 'transparent background' : 'solid background'}`, negative: 'person, human, mannequin, body', characters: [], params, allowPaid, name: `衣柜-${item.name}`, key: `wardrobe-item:${id}`, label: `衣柜 · ${item.name}`}, async raw => {
+        try {
+          const png = await cutout(raw);
+          if (png?.type !== 'image/png') throw Error('无法保存透明图片');
+          return png;
+        } catch { notice('抠图失败，已保留原图'); return raw; }
+      });
       const current = (await backend.wardrobe()).items.find(x => x.id === id);
-      if (!current) throw Error('衣服已被移出衣柜，原图留在相册');
-      const kept = await backend.library.addPhoto({name: `衣柜-${item.name}-${Date.now()}.png`, blob});
-      backend.emit('library', {collection: 'photos'});
-      return backend.saveWardrobeItem({...current, photoId: kept.id});
+      if (!current) throw Error('衣服已被移出衣柜，图片留在相册');
+      return backend.saveWardrobeItem({...current, photoId: made.photoId});
     } finally { drawingItems.delete(id); }
   }
   return {recognize, suggest, saveOutfit, tryOn, drawItem, storyPlan, storyReplied, sees, present};

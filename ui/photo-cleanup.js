@@ -4,7 +4,7 @@ import {icon} from './icons.js';
 export async function photoCleanup(ctx,done=()=>{}) {
   const plan=await ctx.api.unkeptPhotos();
   if(!plan.count){ctx.notify('没有可清理的照片，收藏和相簿中的图片都已保留');return;}
-  const d=ctx.dialog('清理未收藏的散图',`<p class="hint" data-keep-hint>只删除未收藏、也未加入任何自建相簿的照片。收藏、相簿中的图，以及正在用作壁纸、图标、头像和聊天背景的图都会保留。</p><div class="group pad"><p><strong>${plan.count} 张 · 约 ${size(plan.bytes)}</strong></p><small class="hint">另有 ${plan.kept} 张受保护。自动按来源显示的分类不属于自建相簿；自己导入的散图也会计入。</small></div><details><summary>查看将删除的照片</summary><p class="help-copy">${plan.photos.slice(0,30).map(p=>esc(p.name)).join('<br>')}${plan.count>30?`<br>…共 ${plan.count} 张`:''}</p></details><div class="actions">${btn('cleanup-go',icon('trash')+`清理 ${plan.count} 张`,'danger')}</div>`);
+  const d=ctx.dialog('清理未收藏的散图',`<p class="hint" data-keep-hint>只删除未收藏、也未加入任何自建相簿的照片。收藏、相簿中的图，以及正在用作壁纸、图标、头像和聊天背景的图都会保留。衣柜正在用的照片和书摘插图也会保留。</p><div class="group pad"><p><strong>${plan.count} 张 · 约 ${size(plan.bytes)}</strong></p><small class="hint">另有 ${plan.kept} 张受保护。自动按来源显示的分类不属于自建相簿；自己导入的散图也会计入。</small></div><details><summary>查看将删除的照片</summary><p class="help-copy">${plan.photos.slice(0,30).map(p=>esc(p.name)).join('<br>')}${plan.count>30?`<br>…共 ${plan.count} 张`:''}</p></details><div class="actions">${btn('cleanup-go',icon('trash')+`清理 ${plan.count} 张`,'danger')}</div>`);
   d.body.addEventListener('click',async e=>{
     const button=e.target.closest('[data-action=cleanup-go]');if(!button||button.disabled)return;
     button.disabled=true;

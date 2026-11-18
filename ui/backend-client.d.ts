@@ -455,7 +455,7 @@ export interface MusicPlaylist { id: string; kind: 'playlist'; at: number; name:
 export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; mode: 'order' | 'shuffle' | 'one'; from: string; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
 export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; from?: string };
 export interface WardrobeItem { id: string; kind: 'wardrobe-item'; owner: string; name: string; category: string; description: string; photoId?: string; recognized: boolean; at: number; updatedAt: number; }
-export interface WardrobeSet { id: string; kind: 'wardrobe-set'; owner: string; name: string; description: string; items: string[]; at: number; updatedAt: number; }
+export interface WardrobeSet { id: string; kind: 'wardrobe-set'; photoId?: string; owner: string; name: string; description: string; items: string[]; at: number; updatedAt: number; }
 export interface WardrobeWear { id: string; kind: 'wardrobe-wear'; owner: string; text: string; from: 'phone' | 'story'; pending: boolean; at: number; }
 /** 小剧场 (core/generator.js): a script's line (旁白 lines are narration) or a card's HTML. */
 export interface TheaterLine { role: string; text: string; translation: string; emotion: string; narration?: boolean; }
@@ -1343,7 +1343,7 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     wardrobeRecognize(itemId: string): Promise<WardrobeItem>;
     wardrobeSuggest(options: { owner: string; mode?: 'closet' | 'free'; wish?: string; itemIds?: string[] }): Promise<string>;
     /** 存成一套: designed freely, split into pieces that go into the 衣柜 first; the same words kept again come back with again. */
-    wardrobeSaveOutfit(options: { owner: string; text: string; mode?: 'closet' | 'free'; itemIds?: string[] }): Promise<{ set: WardrobeSet; added: number; again: boolean }>;
+    wardrobeSaveOutfit(options: { photoId?: string; owner: string; text: string; mode?: 'closet' | 'free'; itemIds?: string[] }): Promise<{ set: WardrobeSet; added: number; again: boolean }>;
     wardrobeTryOn(options: { owner: string; text: string; allowPaid?: boolean }): Promise<string>;
     wardrobeDrawItem(options: { id: string; allowPaid?: boolean }): Promise<WardrobeItem>;
     /** Who is in the story just now, as 衣柜 owners ('me', 'role:<name>'): they stay in the row of faces when there are many. */

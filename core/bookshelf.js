@@ -185,22 +185,22 @@ const cleanText = (value, most) => String(value ?? '').replace(/\s+/g, ' ').trim
 export function normalizeHighlights(list) {
   const out = [], seen = new Set();
   for (const h of Array.isArray(list) ? list : []) {
-    const text = cleanText(h?.text, 600), chapter = Math.trunc(Number(h?.chapter)), para = Math.trunc(Number(h?.para));
+    const text = typeof h?.text === 'string' && Number.isInteger(h.start) ? h.text : cleanText(h?.text, 600), chapter = Math.trunc(Number(h?.chapter)), para = Math.trunc(Number(h?.para));
     if (!text || !Number.isFinite(chapter) || !Number.isFinite(para) || chapter < 0 || para < 0) continue;
-    const key = `${chapter}:${para}`;
+    const ranged = Number.isInteger(h.start) && Number.isInteger(h.end) && Number.isInteger(h.endPara);
+    const key = [chapter, para, ...(ranged ? [h.start,h.endPara,h.end] : [])].join(':');
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({id: String(h?.id || `h:${chapter}:${para}`), chapter, para, text, at: Number(h?.at) || Date.now()});
+    out.push({id: String(h?.id || `h:${key}`), chapter, para, ...(ranged ? {start:h.start,end:h.end,endPara:h.endPara} : {}), text, at: Number(h?.at) || Date.now()});
   }
   return out.slice(-HIGHLIGHT_MAX);
 }
 /** Adds a 书摘, or takes it off again when that paragraph is already picked — what the long-press menu does. */
-export function toggleHighlight(list, {chapter, para, text, at = Date.now()}) {
-  const rows = normalizeHighlights(list), body = cleanText(text, 600);
-  const at0 = rows.findIndex(h => h.chapter === Number(chapter) && h.para === Number(para));
-  if (at0 >= 0) { const copy = rows.slice(); copy.splice(at0, 1); return copy; }
-  if (!body) return rows;
-  return normalizeHighlights([...rows, {chapter, para, text: body, at}]);
+export function toggleHighlight(list, selection) {
+  const rows = normalizeHighlights(list), [entry] = normalizeHighlights([selection]);
+  if (!entry) return rows;
+  const found = rows.find(h => h.chapter === entry.chapter && h.para === entry.para && h.start === entry.start && h.endPara === entry.endPara && h.end === entry.end);
+  return found ? rows.filter(h => h !== found) : normalizeHighlights([...rows, entry]);
 }
 export const highlighted = (list, chapter, para) => normalizeHighlights(list).some(h => h.chapter === Number(chapter) && h.para === Number(para));
 
@@ -211,7 +211,7 @@ export function normalizeAnnotations(list) {
     const text = cleanText(n?.text, 200), chapter = Math.trunc(Number(n?.chapter));
     if (!text || !Number.isFinite(chapter) || chapter < 0) continue;
     const para = Math.max(0, Math.trunc(Number(n?.para)) || 0);
-    out.push({id: String(n?.id || crypto.randomUUID()), chapter, para, text, who: cleanText(n?.who, 40), at: Number(n?.at) || Date.now()});
+    out.push({id: String(n?.id || crypto.randomUUID()), chapter, para, ...(Number.isInteger(n.offset) ? {offset:n.offset} : {}), text, who: cleanText(n?.who, 40), at: Number(n?.at) || Date.now()});
   }
   return out.slice(-ANNOTATION_MAX);
 }
@@ -233,6 +233,7 @@ export class BookshelfStore {
   async update(id, patch) {
     return this.meta.change(id, row => {
       for (const key of ['companion','settings','bookmarks','annotations','turns','nextNote','daily','shelf','lastRead','chapters','stats','highlights']) if (key in patch) row[key] = structuredClone(patch[key]);
+      if (patch.illustration?.photoId) row.illustrations = [...(row.illustrations || []), structuredClone(patch.illustration)];
       if (patch.position) row.position = readingPosition(patch.position, row.chapters.length);
       if ('stats' in patch) row.stats = normalizeStats(row.stats);
       if ('highlights' in patch) row.highlights = normalizeHighlights(row.highlights);
