@@ -228,7 +228,7 @@ export function peekPhone(ctx, {host, snap, canDraw, draw, photo, view, play = (
       case 'thread': go('thread', index); break;
       case 'photo': go('photo', index); break;
       case 'note': go('note', index); break;
-      case 'zoom': { const img = el.querySelector('img'); if (img?.src) view(img); break; }
+      case 'zoom': { const img = el.querySelector('img'); if (img?.src) {const p=album()[item];view(img,p?.key);} break; }
       case 'draw': await draw([el.dataset.key === 'wallpaper' ? 'wallpaper' : Number(el.dataset.key)]); break;
       case 'draw-all': await draw(album().filter(p => p.tags && !p.photoId && p.state !== 'waiting').map(p => p.key)); break;
       case 'song': { const song = snap.songs?.[index]; if (song) play(song); break; }

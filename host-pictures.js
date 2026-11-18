@@ -145,9 +145,9 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   /** Queues one picture. Redrawing adds a version; the earlier versions stay. */
   async function generate(id, tag, {interactive = false, permission = null} = {}) {
     const ctx = context(), message = ctx.chat[id], key = jobKey(id, tag);
-    if (!message || jobs.get(key)?.state === 'generating') return;
+    if (!message || jobs.get(key)?.state === 'generating' || selectionJobs.has(message)) return;
     permission ??= await allowed(interactive);
-    if (!permission) return;
+    if (!permission || selectionJobs.has(message)) return;
     jobs.set(key, {state: 'generating', engine: settings().draw.engine});
     scheduleRender();
     try {
@@ -170,7 +170,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     scheduleRender();
   }
 
-  const planning = new Set();
+  const planning = new Set(), selectionJobs = new WeakSet();
   /** Who the rules may name: the open card's people and who speaks now (core/draw.js drawCast). */
   const castNow = () => backend.drawCast?.(speakers()) ?? null;
   /** 世界书 for planning pictures: what the tavern would turn on for this story, through the phone's choice of books. */
@@ -637,6 +637,47 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     await ctx.saveChat();
     return {id, url};
   }
+  /** One selected scene, inserted only after its original paragraph and only in its original reply version. */
+  async function drawSelection({snap, text, end, context: nearby = ''}) {
+    const ctx=context(), message=ctx.chat[snap.id], chat=ctx.getCurrentChatId?.()??ctx.chatId;
+    const guard=backend.spaceGuard?.() || (()=>true);
+    const valid=()=>guard() && chat===snap.chat && (context().getCurrentChatId?.()??context().chatId)===chat && context().chat[snap.id]===message && message===snap.message && message?.mes===snap.raw && message?.swipe_id===snap.swipe;
+    if(!valid() || !text?.trim() || !Number.isInteger(end) || end<0 || end>snap.raw.length)throw Error('正文已经变化，请重新选择文字');
+    if(selectionJobs.has(message))throw Error('正在为这条回复的选段生图');
+    const old=parsePictures(snap.raw);
+    if(afterReplies.get(message)?.running || planning.has(snap.id) || old.some(t=>jobs.get(jobKey(snap.id,t))?.state==='generating'))throw Error('这条回复正在处理，请稍后再试');
+    selectionJobs.add(message);
+    try {
+      const permission=await allowed(true);if(!permission)return;
+      if(!valid())throw Error('正文已经变化，请重新选择文字');
+      notice('正在为选中文字构思画面……');
+      const prompt=writeRequest(settings(),{idea:'只为下面选中的文字画一张图，不画选段以外的事件。\n【选中文字】\n'+text+'\n【仅供识别人名和场景的上下文】\n'+nearby,only:castNow()});
+      const reply=await backend.generateText(ctx,{use:'picture',prompt,plainText:true,trimNames:false,responseLength:promptLength(settings())});
+      if(!valid())throw Error('正文已经变化，旧的选段任务已停止');
+      const suggested=readSuggestion(settings(),reply);if(!suggested.prompt)throw Error('没有写出可用的绘图提示词');
+      const line=value=>value.replace(/[<>\r\n]/g,' ').trim();
+      const block=['<img>','场景：'+line(suggested.prompt),...suggested.people.map(name=>'角色：'+line(name).replace(/[|｜]/g,' ')),'</img>'].join('\n');
+      const addition='\n\n'+block+'\n', raw=snap.raw.slice(0,end)+addition+snap.raw.slice(end), tags=parsePictures(raw), tag=tags.find(t=>t.start===end+2);
+      if(!tag)throw Error('这次提示词无法作为正文图片保存');
+      const inputs=pictureInputs(settings(),tag,raw);
+      const result=await backend.generateImage({...inputs,allowPaid:permission==='paid',name:'chat',key:'selection:'+snap.id+':'+end,label:'选段生图 · '+text.slice(0,24)});
+      if(!valid()){notice('正文已变化，生成的图片已保留在相册，没有插入旧位置');return;}
+      const url=await upload(result.blob,'st-iphonie-'+Date.now());
+      if(!valid()){notice('正文已变化，生成的图片已保留在相册，没有插入旧位置');return;}
+      const previous=structuredClone(message.extra?.sttts_pics||{}),pics={...previous};
+      for(const t of old)delete pics[t.hash];
+      for(const t of old){const next=tags.find(n=>n.start===t.start+(t.start>=end?addition.length:0));if(next && previous[t.hash])pics[next.hash]=previous[t.hash];}
+      pics[tag.hash]={versions:[{url,photoId:result.photoId,seed:result.seed,width:result.params.width,height:result.params.height,model:result.params.model,prompt:tag.prompt,characters:inputs.names,at:Date.now()}],index:0};
+      message.mes=raw;message.extra??={};message.extra.sttts_pics=pics;
+      if(Array.isArray(message.swipes))message.swipes[message.swipe_id??0]=raw;
+      try{await context().saveChat();}catch(error){
+        if(context().chat[snap.id]===message && message.mes===raw){message.mes=snap.raw;message.extra.sttts_pics=previous;if(Array.isArray(message.swipes))message.swipes[snap.swipe??0]=snap.raw;}
+        throw Error('图片已保留在相册，但正文保存失败：'+error.message);
+      }
+      if(context().chat[snap.id]===message)redrawMessage(snap.id,message);
+      scheduleRender();
+    } finally {selectionJobs.delete(message);}
+  }
   async function suggestPrompt() {
     // The same text model as everything else in the phone (引擎 → 文字模型): the tavern's model without its story
     // preset, or the custom API. The tavern's quiet generation would carry the whole story preset, and with it a
@@ -734,5 +775,5 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const permission = await allowed(true); if (!permission) return;
     for (const tag of tags) { if (context().chat[id] !== message) break; await generate(id, tag, {permission}); }
   }
-  return {drawFor, tagText, drawMessage, prepareReply, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, voiceMessage, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
+  return {drawFor, tagText, drawSelection, drawMessage, prepareReply, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, voiceMessage, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
 }

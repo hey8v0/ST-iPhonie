@@ -1,3 +1,5 @@
+import {editTags} from '../host-ask.js';
+import {downloadAction} from '../download.js';
 // 查手机: pick a contact and pick up their phone — a phone of their own (ui/peek-phone.js) with a lock screen, a home
 // screen and their chats with other people, album, notes, searches and shopping cart, made up by the model (host-apps.js)
 // from who they are and what they know. One snapshot per contact; looking again replaces it.
@@ -52,17 +54,40 @@ export function peekApp(ctx) {
   }
   /** Draws album photos (index 'wallpaper': the wallpaper) one after another (the drawing queue spaces them); asks
    *  first when one would cost Anlas. */
-  async function draw(indexes) {
+  async function draw(indexes, options = {}, owner = who) {
     for (const index of indexes) {
-      try { await api.peekDraw(who, index, false); }
+      if(v.disposed || who!==owner)return;
+      try { await api.peekDraw(owner, index, false, options); }
       catch (error) {
         if (error.code !== 'PAID' && !/扣 Anlas|花钱/.test(error.message)) { ctx.notify(error.message, {error: true}); continue; }
         const ask = api.paidPrompt();
-        if (await ctx.confirm(ask.title, ask.text)) await api.peekDraw(who, index, true).catch(e => ctx.notify(e.message, {error: true}));
+        if (await ctx.confirm(ask.title, ask.text) && !v.disposed && who===owner) await api.peekDraw(owner, index, true, options).catch(e => ctx.notify(e.message, {error: true}));
         else break;
       }
     }
     await render();
+  }
+  async function viewPhoto(img, key) {
+    const name=who,current=()=>api.getPeek(name).then(s=>({snap:s,picture:key==='wallpaper'?s?.wallpaper:s?.photos?.[key]}));
+    const {snap,picture}=await current();if(!picture || v.disposed)return;
+    const ids=[...new Set([...(picture.imageVersions||[]),picture.photoId].filter(Boolean))],versions=[];
+    for(const id of ids){const photo=await api.getPhoto(id);if(photo?.blob)versions.push({id,photo,src:await urlFor(id)});}
+    if(!versions.length || v.disposed || who!==name || !img.isConnected)return;
+    const expected={id:snap.id,at:snap.at,text:picture.text,tags:picture.tags};
+    let viewer;
+    const redraw=async edit=>{
+      const now=await current();if(v.disposed || who!==name || now.snap?.at!==snap.at || now.picture?.text!==picture.text || now.picture?.tags!==picture.tags)throw Error('手机内容已变化，请重新打开图片');
+      let prompt;
+      if(edit){prompt=await editTags({doc:ctx.doc,text:now.picture.tags,ask:(text,mode,wish)=>api.tagText?api.tagText(text,mode,wish):Promise.reject(Error('请在酒馆中使用')),about:'改这张照片的提示词再画，之前的版本保留。'});if(!prompt?.trim())return false;}
+      const fresh=await current();if(v.disposed || who!==name || fresh.snap?.at!==snap.at || fresh.picture?.tags!==picture.tags || fresh.picture?.photoId!==now.picture.photoId)throw Error('手机内容已变化，请重新打开图片');
+      viewer?.close();await draw([key],{prompt,expected},name);return true;
+    };
+    const safe=fn=>async()=>{try{return await fn();}catch(error){ctx.notify(error.message,{error:true});return false;}};
+    let picking=Promise.resolve();
+    viewer=openImageViewer({doc:ctx.doc,from:img,caption:picture.text,
+      gallery:{items:versions.map(x=>({src:x.src,alt:picture.text,info:x.photo.info})),index:Math.max(0,versions.findIndex(x=>x.id===picture.photoId)),
+        onIndex:i=>{picking=picking.then(()=>api.peekDraw(name,key,false,{version:versions[i].id,expected})).catch(error=>ctx.notify(error.message,{error:true}));}},
+      actions:[downloadAction(ctx.doc,i=>({source:versions[i].photo.blob,name:versions[i].photo.name}),ctx.notify),...(picture.tags && api.peekDraw?[{label:'重画',run:safe(async()=>{await picking;return redraw(false);})},{label:'改提示词再画',run:safe(async()=>{await picking;return redraw(true);})}]:[])]});
   }
   /** Picks up the phone: the owner's own phone over the whole screen. */
   function pick(s) {
@@ -72,7 +97,7 @@ export function peekApp(ctx) {
     const seen = new Set(), name = who;
     let unlocked = false;
     device = peekPhone(ctx, {host, snap: s, canDraw: () => api.drawReady(), draw, photo: urlFor,
-      view: img => openImageViewer({doc: ctx.doc, src: img.src, alt: img.alt, from: img}),
+      view: (img,key)=>viewPhoto(img,key).catch(error=>ctx.notify(error.message,{error:true})),
       play: song => { ctx.notify(`正在找「${song.title}」……`); api.musicPlay?.({...song, from: 'share'}).catch(error => ctx.notify(error.message, {error: true})); },
       see: part => { if (part === 'home') unlocked = true; else { unlocked = true; seen.add(part); } },
       close: () => { device = null; if (unlocked) { try { api.markPeeked?.(name, [...seen].slice(0, 6).join('、')); } catch { /* not worth a word */ } } if (!v.disposed) render().catch(() => {}); }});

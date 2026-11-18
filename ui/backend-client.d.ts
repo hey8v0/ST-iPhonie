@@ -386,7 +386,7 @@ export interface ForumReply { id: string; from: string; to?: string; text: strin
 export interface ForumPost { id: string; kind: 'forum'; author: string; title: string; text: string; at: number; source: 'auto' | 'me'; autoBatch?: string; likes: number; liked: boolean; heat: number; replies: ForumReply[]; }
 /** 查手机: a character's phone as the model made it up. */
 export interface PeekSnapshot { id: string; kind: 'peek'; name: string; at: number; chats: Array<{ with: string; lines: Array<{ from: string; text: string }> }>; searches: string[]; notes: Array<{ title: string; text: string }>; photos: PeekPicture[]; cart: Array<{ name: string; price: number; note: string }>; calls?: Array<{ with: string; dir: 'in' | 'out' | 'missed'; long: string }>; events?: Array<{ when: string; what: string }>; songs?: Array<{ title: string; artist: string }>; wallpaper?: PeekPicture; }
-export interface PeekPicture { text: string; tags: string; photoId?: string; state?: 'waiting' | 'done' | 'failed'; note?: string; }
+export interface PeekPicture { text: string; tags: string; photoId?: string; imageVersions?: string[]; state?: 'waiting' | 'done' | 'failed'; note?: string; }
 export interface MomentComment { id: string; from: string; to?: string; text: string; at: number; }
 /** author and comment names are 'me' for the user. */
 export interface MomentPost { id: string; author: string; text: string; at: number; source: 'manual' | 'auto' | 'me'; photoId?: string; imageTags?: string; imageVersions?: string[]; imageState?: 'waiting' | 'done' | 'failed'; imageNote?: string; likes: string[]; comments: MomentComment[]; }
@@ -1408,7 +1408,7 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     peekBusy(): boolean;
     /** Draws one album photo of a character's phone with NovelAI; allowPaid when it would cost Anlas. */
     /** index 'wallpaper' draws the wallpaper. */
-    peekDraw(name: string, index: number | 'wallpaper', allowPaid?: boolean): Promise<string>;
+    peekDraw(name: string, index: number | 'wallpaper', allowPaid?: boolean, options?: { prompt?: string; version?: string; expected?: { id: string; at: number; text: string; tags: string } }): Promise<string>;
     /** The World Info books turned on now (global, character, chat, persona) with their entries that are on, for picking
      *  what the phone leaves out. Entry ids are "book#uid". */
     /** extra: books the phone alone reads (listed with from 只给手机 when the tavern has them off). */

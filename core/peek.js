@@ -179,8 +179,10 @@ export function parsePeek(reply, {name, user = '我'} = {}) {
 export const peekId = (name, space = '') => 'peek:' + (space ? space + ':' : '') + name;
 /** A picture as it is stored: its description, (when it can be drawn) its tags, the drawn picture and how drawing went. */
 function cleanPicture(x) {
-  const photo = {text: clip(x.text, 200).trim(), tags: clip(x.tags, 600).trim()};
+  const photo = {text: clip(x.text, 200).trim(), tags: clip(x.tags, 6000).trim()};
   if (x.photoId) photo.photoId = clip(x.photoId, 512);
+  const versions=[...new Set([...(Array.isArray(x.imageVersions)?x.imageVersions:[]),x.photoId].filter(v=>typeof v==='string' && v.trim()).map(v=>clip(v,512)))].slice(-100);
+  if(versions.length)photo.imageVersions=versions;
   if (['waiting', 'done', 'failed'].includes(x.state)) photo.state = x.state;
   if (x.note) photo.note = clip(x.note, 200);
   return photo;

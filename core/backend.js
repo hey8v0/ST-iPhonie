@@ -3504,8 +3504,16 @@ export class TTSBackend {
         // Account-wide reference maintenance, not a user edit in the current chat.
         // Only threads referencing deleted photos are changed, including reply versions.
         for (const threadId of await this.chats.forgetPhotos([...gone])) this.emit('chat', {threadId});
-        const snaps = (await this.apps.list('peek')).filter(doc => [...(doc.photos || []), doc.wallpaper].some(p => p && gone.has(p.photoId)));
-        const strip = p => { if (!p || !gone.has(p.photoId)) return p; const { photoId, state, note, ...rest } = p; return rest; };
+        const versionsOf = picture => [...new Set([...(picture?.imageVersions || []), picture?.photoId].filter(Boolean))];
+        const referencesGone = picture => versionsOf(picture).some(id => gone.has(id));
+        const snaps = (await this.apps.list('peek')).filter(doc => [...(doc.photos || []), doc.wallpaper].some(referencesGone));
+        const strip = picture => {
+            if (!referencesGone(picture)) return picture;
+            const {photoId, imageVersions, state, note, ...rest} = picture;
+            const kept = versionsOf(picture).filter(id => !gone.has(id));
+            const current = gone.has(photoId) ? kept.at(-1) : photoId;
+            return {...rest, ...(kept.length ? {imageVersions: kept} : {}), ...(current ? {photoId: current, state: 'done'} : {})};
+        };
         if (snaps.length) await this.appsMutate('peek', () => this.apps.put(snaps.map(doc => ({ ...doc, photos: (doc.photos || []).map(strip), ...(doc.wallpaper ? { wallpaper: strip(doc.wallpaper) } : {}) }))));
         const next = this.getState(), avatars = { ...next.chat.avatars };
         let changed = false;

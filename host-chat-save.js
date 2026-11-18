@@ -1,5 +1,6 @@
 // Host-side identity IO. Only local tavern routes are used; chat bodies are cancelled after their first header.
-const HEADER_LIMIT = 1024 * 1024, LIST_LIMIT = 4 * 1024 * 1024;
+// The first object also contains other extensions' saved chat metadata. It can be much larger than the ownership fields.
+const HEADER_LIMIT = 16 * 1024 * 1024, LIST_LIMIT = 4 * 1024 * 1024;
 const invalid = () => Error('无法完整读取聊天归属，原手机资料没有改动，请重新打开聊天重试');
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const selected = meta => Object.fromEntries(['stIphonieSave','stIphonieSaveOwner','integrity','main_chat'].filter(k => Object.hasOwn(meta,k)).map(k => [k,meta[k]]));
@@ -10,33 +11,56 @@ export async function chatHeader(response, {limit = HEADER_LIMIT} = {}) {
   const reader = response.body?.getReader?.();
   if (!reader) throw invalid();
   const decoder = new TextDecoder('utf-8', {fatal:true}), encoder = new TextEncoder();
-  let used=0, prefix='', array=false, started=false, depth=0, quoted=false, escaped=false, text='';
+  let used = 0, array = false, started = false, depth = 0, quoted = false, escaped = false;
+  const pieces = [], marks = /["\\{}]/g;
+  const account = text => {
+    used += encoder.encode(text).length;
+    if (used > limit) throw Error('聊天的存档头太大，无法核对手机资料归属，原资料没有改动');
+  };
   try {
     while (true) {
       const {value,done}=await reader.read();
       if(done)throw invalid();
       // A host may deliver a large chunk containing the entire file. Decode only bounded slices until the header ends.
-      for(let offset=0;offset<value.byteLength;offset+=4096){
-      const chunk=decoder.decode(value.subarray(offset,offset+4096),{stream:true});
-      for(const char of chunk){
-        used += encoder.encode(char).length;
-        if(used>limit)throw Error('聊天归属标记太大，暂未切换手机资料');
-        if(!started){
-          if(/\s/.test(char))continue;
-          if(!prefix&&char==='['){prefix='[';array=true;continue;}
-          if(prefix==='['&&char===']')return null;
-          if(char!=='{')throw invalid();
-          started=true;depth=1;text='{';continue;
+      for (let offset = 0; offset < value.byteLength; offset += 4096) {
+        const chunk = decoder.decode(value.subarray(offset, offset + 4096), {stream: true});
+        let at = 0;
+        if (!started) {
+          for (; at < chunk.length; at++) {
+            const char = chunk[at];
+            if (/\s/.test(char)) continue;
+            if (!array && char === '[') { array = true; continue; }
+            if (array && char === ']') { account(chunk.slice(0, at + 1)); return null; }
+            if (char !== '{') throw invalid();
+            started = true;
+            break;
+          }
+          account(chunk.slice(0, at));
+          if (!started) continue;
         }
-        text+=char;
-        if(quoted){if(escaped)escaped=false;else if(char==='\\')escaped=true;else if(char==='"')quoted=false;continue;}
-        if(char==='"')quoted=true;else if(char==='{')depth++;else if(char==='}'&&!--depth){
-          const header=JSON.parse(text);
-          if(!array){if(Object.keys(header).length===0)return null;throw invalid();}
-          if(!object(header.chat_metadata))throw invalid();
-          return selected(header.chat_metadata);
+        const start = at;
+        if (escaped && at < chunk.length) { at++; escaped = false; }
+        marks.lastIndex = at;
+        for (let match; (match = marks.exec(chunk));) {
+          const char = match[0];
+          if (quoted && char === '\\') {
+            if (marks.lastIndex === chunk.length) escaped = true;
+            else marks.lastIndex++;
+          } else if (char === '"') quoted = !quoted;
+          else if (!quoted && char === '{') depth++;
+          else if (!quoted && char === '}' && !--depth) {
+            const tail = chunk.slice(start, marks.lastIndex);
+            account(tail);
+            pieces.push(tail);
+            const header = JSON.parse(pieces.join(''));
+            if (!array) { if (!Object.keys(header).length) return null; throw invalid(); }
+            if (!object(header.chat_metadata)) throw invalid();
+            return selected(header.chat_metadata);
+          }
         }
-      }
+        const remainder = chunk.slice(start);
+        account(remainder);
+        if (remainder) pieces.push(remainder);
       }
     }
   } finally { try { await reader.cancel(); } catch {} reader.releaseLock(); }
@@ -93,9 +117,9 @@ export function chatSaveHost({doc=document,fetcher=(...args)=>globalThis.fetch(.
   }
   return {
     readHeader:(card,filename,ctx)=>header(card,filename,ctx,controller.signal),
-    async readPeers(card,ctx){
+    async readPeers(card,ctx,currentChat){
       const visit=controller.signal,batch=new AbortController(),signal=batch.signal,abort=()=>batch.abort();check(visit);visit.addEventListener('abort',abort,{once:true});
-      try{const names=await namesFor(card,ctx,signal);
+      try{const names=(await namesFor(card,ctx,signal)).filter(name=>name!==currentChat);
       const out=[];let cursor=0;
       await Promise.all(Array.from({length:Math.min(4,names.length)},async()=>{while(cursor<names.length){const name=names[cursor++];check(signal);const meta=await header(card,name,ctx,signal);if(meta!==null)out.push({chat:name,meta});}}));
       check(signal);return out;

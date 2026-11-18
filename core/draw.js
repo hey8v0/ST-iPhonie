@@ -705,7 +705,7 @@ export function readSuggestion(settings, text) {
     const m = line.trim().match(/^(?:人物|角色)\s*[:：]\s*(.*)$/);
     if (!m) return true;
     for (const name of m[1].split(/[,，、;；\s]+/).map(x => x.trim()).filter(Boolean)) {
-      const role = drawable(settings).find(r => sameName(r.name, name));
+      const role = roleNamed(drawable(settings), name);
       if (role && !people.includes(role.name)) people.push(role.name);
     }
     return false;
@@ -938,7 +938,54 @@ export function peopleCount(prompt) {
 }
 const drawable = settings => settings.routes.filter(r => r.appearance?.trim() && !isPlaceholderRole(r.name));
 /** The role a name in a picture means: by its name, else by one of its 别名 (roles merged keep their old names that way). */
-const roleNamed = (roles, name) => roles.find(r => sameName(r.name, name)) || roles.find(r => r.aliases?.some(a => sameName(a, name)));
+const roleNamed = (roles, name) => {
+  const exact = roles.find(r => sameExact(r.name, name)); if (exact) return exact;
+  const aliases = roles.filter(r => r.aliases?.some(a => sameExact(a, name)));
+  if (aliases.length) return aliases.length === 1 ? aliases[0] : undefined;
+  const hits = roles.filter(r => sameName(r.name, name) || r.aliases?.some(a => sameName(a, name)));
+  return hits.length === 1 ? hits[0] : undefined;
+};
+/** Caption names resolve once, before counting and adding looks. Ambiguous short names are never guessed. */
+export function photoNames(text, names = [], roles = []) {
+  const key = name => String(name || '').normalize('NFKC').toLowerCase().trim();
+  const fullNames = new Map(), aliases = new Map(), shortNames = new Map();
+  function add(index, name, canonical) {
+    const normalized = key(name);
+    if (!normalized || normalized === '我') return;
+    if (!index.has(normalized)) index.set(normalized, new Set());
+    index.get(normalized).add(canonical);
+  }
+  for (const name of new Set(names.filter(Boolean))) {
+    add(fullNames, name, name);
+    const role = roleNamed(roles, name);
+    for (const alias of role?.aliases || []) add(aliases, alias, name);
+    if (/^[\u3400-\u9fff]{3,12}$/.test(name)) {
+      for (let size = 2; size < name.length; size++) add(shortNames, name.slice(-size), name);
+    }
+    for (const part of name.split(/[·・•‧．.\s]+/)) if (part.length >= 2) add(shortNames, part, name);
+  }
+  const caption = key(text), hits = [];
+  for (const word of new Set([...fullNames.keys(), ...aliases.keys(), ...shortNames.keys()])) {
+    const candidates = fullNames.get(word) || aliases.get(word) || shortNames.get(word);
+    if (candidates.size !== 1) continue;
+    const [name] = candidates;
+    for (let at = caption.indexOf(word); at >= 0; at = caption.indexOf(word, at + word.length)) {
+      const stop = at + word.length;
+      if (/^[a-z0-9]/.test(word) && /[a-z0-9]/.test(caption[at - 1] || '')) continue;
+      if (/[a-z0-9]$/.test(word) && /[a-z0-9]/.test(caption[stop] || '')) continue;
+      hits.push({name, at, stop});
+    }
+  }
+  hits.sort((a, b) => a.at - b.at || b.stop - a.stop);
+  const found = new Set();
+  let lastEnd = 0;
+  for (const hit of hits) {
+    if (hit.at < lastEnd) continue;
+    found.add(hit.name);
+    lastEnd = hit.stop;
+  }
+  return [...found];
+}
 /** 角色参考图 of the people in a picture, in their order (null for one with none), for GPT; nothing when nobody has one. */
 const withRefs = roles => { const refs = roles.map(r => r?.ref?.full ? {name: r.name, path: r.ref.full} : null); return refs.some(Boolean) ? {roleRefs: refs} : {}; };
 /**
@@ -962,15 +1009,15 @@ export function pictureRoles(settings, tag, text = '') {
  * model added anyway (1boy, selfie, solo, portrait…) go, and no humans keeps the picture to what was described.
  * names: everyone who could be in it.
  */
-export function photoTags({text = '', tags = '', owner = '', names = []}) {
+export function photoTags({text = '', tags = '', owner = '', names = [], roles = []}) {
   const said = String(text || '').trim(), list = String(tags || '').split(',').map(t => t.trim()).filter(Boolean);
   if (!said || !list.length) return String(tags || '');
   // The caption names the subject. A stray selfie tag must not replace that person with the sender.
-  const other = names.some(n => n && n !== '我' && !sameName(n, owner) && said.includes(n));
+  const mentioned = photoNames(said, names, roles), other = mentioned.some(n => !sameExact(n, owner));
   if (other && !/自拍|合照|合影|我们|我和|和我|selfie/i.test(said)) return list.filter(t => !/\bselfie\b/i.test(t)).join(', ');
   const people = /自拍|合照|合影|对镜|镜子|样子|模样|造型|我和|和我|我们|自己|本人|[他她]|人|男|女|孩|宝宝|朋友|同学|闺蜜|兄弟|姐|妹|哥|弟|爸|妈|手|脸|腿|脚|身|穿|selfie|\b(?:me|him|her|us|people|person|man|woman|boy|girl)\b/i;
   const thing = /猫|狗|宠物|鸟|鱼|兔|仓鼠|花|草|树|叶|风景|景色|天空|云|夕阳|日落|日出|月亮|星|海|山|河|湖|雨|雪|街|路|楼|房间|窗|饭|菜|吃的|甜点|蛋糕|奶茶|咖啡|饮料|早餐|午餐|晚餐|夜宵|零食|水果|面|书|电脑|屏幕|游戏|礼物|桌|床|车|cat|dog|food|view|sky/i;
-  if (!thing.test(said) || people.test(said) || [owner, ...names].some(n => n && n !== '我' && said.includes(n))) return String(tags || '');
+  if (!thing.test(said) || people.test(said) || photoNames(said, [owner, ...names], roles).length) return String(tags || '');
   const person = /^(?:\d+\+?\s*(?:girls?|boys?|others?)|solo|selfie|portrait|upper body|cowboy shot|full body|looking at viewer|smile|smiling|holding phone|v|peace sign)$/i;
   const kept = list.filter(t => !person.test(t.replace(/[()\[\]{}]/g, '').replace(/:[\d.]+$/, '').trim()));
   if (!kept.some(t => /^no humans$/i.test(t))) kept.unshift('no humans');
@@ -985,13 +1032,19 @@ const LOOK_TAGS = /\b(?:hair|eyes|bangs|ponytail|twintails|braids?|ahoge|sideloc
  * the photo leave its tags; people counted when the model did not, from the looks themselves. settings: for the looks.
  */
 export function photoPicture(settings, {text = '', tags = '', owner = '', names = []}) {
-  const drawn = photoTags({text, tags, owner, names}), cast = photoCast({text, tags: drawn, owner, names}), roles = drawable(settings);
+  const caption = {text, tags, owner, names, roles: settings.routes};
+  const drawn = photoTags(caption), cast = photoCast({...caption, tags: drawn}), roles = drawable(settings);
   const looks = cast.map(n => roleNamed(roles, n)?.appearance || '').filter(Boolean);
-  if (!looks.length) return {prompt: drawn, characters: cast};
-  let list = drawn.split(',').map(t => t.trim()).filter(t => t && !LOOK_TAGS.test(t));
-  if (!/\b\d+\+?\s*(?:girl|boy|other)s?\b/i.test(drawn)) {
-    const count = word => looks.filter(l => new RegExp(`\\b(?:1\\s*)?${word}\\b`, 'i').test(l)).length, said = (n, word) => n ? [`${n}${word}${n > 1 ? 's' : ''}`] : [];
-    list = [...said(count('girl'), 'girl'), ...said(count('boy'), 'boy'), ...list.filter(t => !/^(?:girls?|boys?)$/i.test(t))];
+  const count = peopleCount(drawn);
+  if (!looks.length && cast.length < 2) return {prompt: drawn, characters: cast};
+  let list = sceneTags(drawn, cast.length).split(',').map(t => t.trim()).filter(t => t && (!looks.length || !LOOK_TAGS.test(t)));
+  if (cast.length > 1) list = list.filter(t => !/^(?:solo|no humans)$/i.test(t));
+  if ((!count && looks.length) || (cast.length > 1 && count !== cast.length)) {
+    list = list.filter(t => !/^(?:\d+\+?\s*)?(?:girl|boy|other)s?$/i.test(t));
+    const girls = looks.filter(l => /\b(?:1\s*)?girl\b/i.test(l)).length;
+    const boys = looks.filter(l => /\b(?:1\s*)?boy\b/i.test(l)).length;
+    const countTag = (n, word) => n > 0 ? [`${n}${word}${n > 1 ? 's' : ''}`] : [];
+    list = [...countTag(girls, 'girl'), ...countTag(boys, 'boy'), ...countTag(cast.length - girls - boys, 'other'), ...list];
   }
   return {prompt: sceneTags(list.join(', '), cast.length), characters: cast};
 }
@@ -1001,15 +1054,15 @@ export function photoPicture(settings, {text = '', tags = '', owner = '', names 
  * show no person (a view, a meal); the people its description names (registered roles, the user); the owner too when
  * it is a selfie or a photo together, or when nobody else is named. names: everyone who could be in it.
  */
-export function photoCast({text = '', tags = '', owner = '', names = []}) {
+export function photoCast({text = '', tags = '', owner = '', names = [], roles = []}) {
   const said = String(text);
+  const group = /合照|合影|group photo/i.test(said);
   // A model does not always count people: 「girl, smile, cafe」 shows someone just as 「1girl」 does.
-  if (/\bno humans\b/i.test(tags) || !(PERSON_TAGS.test(tags) || /自拍|合照|合影/.test(said))) return [];
-  const others = [...new Set(names)].filter(n => n && n !== '我' && n !== owner && !sameName(n, owner))
-    .map(n => [n, said.indexOf(n)]).filter(([, at]) => at >= 0).sort((a, b) => a[1] - b[1]).map(([n]) => n);
-  const self = !others.length || (owner && said.includes(owner)) || /自拍|合照|合影|我们|我和|和我|selfie/i.test(said);
-  const cast = [...(self && owner ? [owner] : []), ...others], n = peopleCount(tags);
-  return n ? cast.slice(0, n) : cast;
+  if (!group && (/\bno humans\b/i.test(tags) || !(PERSON_TAGS.test(tags) || /自拍/.test(said)))) return [];
+  const mentioned = photoNames(said, [owner, ...names], roles);
+  const others = mentioned.filter(n => n !== owner && !sameExact(n, owner));
+  const self = !others.length || mentioned.includes(owner) || /手机主人|自拍|我们|我和|和我|selfie/i.test(said) || (group && others.length === 1);
+  return [...new Set([...(self && owner ? [owner] : []), ...others])];
 }
 
 /** 站位 A1–E5 (column A–E left to right, row 1–5 top to bottom) as NovelAI's 5×5 grid index; -1 when not given. */

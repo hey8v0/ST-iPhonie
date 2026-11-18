@@ -49,7 +49,7 @@ export function createChatSaveIdentity({context, card, readHeader, readPeers = a
     return commit(s, s.token);
   }
   async function adoptLegacy(s) {
-    const peers = await readPeers(s.card, s.ctx);
+    const peers = await readPeers(s.card, s.ctx, s.id);
     if (!current(s)) return '';
     if (!Array.isArray(peers) || peers.some(p => !p || typeof p.chat !== 'string' || !p.meta || typeof p.meta !== 'object')) throw Error('酒馆返回的聊天归属不完整，原手机资料没有改动');
     const aliases = peers.filter(p => p.chat !== s.id && p.meta.stIphonieSave === s.token);
