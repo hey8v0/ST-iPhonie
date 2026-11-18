@@ -2967,7 +2967,7 @@ export class TTSBackend {
         const here = this.here();
         if (here?.pending) return 0;
         if (!here) return clearAll();
-        const mine = (await list()).filter(x => here.card ? x.save === here.key || x.space === here.key || (here.first && !x.save && x.space === here.card) : x.space === here.key);
+        const mine = (await list()).filter(x => here.card ? inSpace(x, here) : x.space === here.key);
         for (const x of mine) await remove(x.id);
         return mine.length;
     }

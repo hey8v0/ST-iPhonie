@@ -485,9 +485,10 @@ export const inSpace = (item, space) => {
   if (space?.pending) return false;
   if (!space?.key) return true;
   if (!space.card) return !item?.space || item.space === space.key;
-  // 按聊天: what was made in this tavern chat; what has no chat of its own (from before) stays with the first one of its card.
-  if (item?.save === space.key || item?.space === space.key) return true;
-  return !item?.save && !!space.first && (!item?.space || item.space === space.card);
+  // 按聊天: a saved chat identity takes precedence over legacy card and app scope fields.
+  if (item?.save) return item.save === space.key;
+  // Only this card's legacy rows can follow its first chat. Untagged rows have no proven owner.
+  return item?.space === space.key || (!!space.first && item?.space === space.card);
 };
 // Never shorten an identity: two different long values must not become the same phone. Existing records stay untouched.
 export const validChatSave = value => typeof value === 'string' && value.length > 0 && value.length <= 80;

@@ -281,6 +281,6 @@
 #chat .mes_buttons button.sttts-tools-entry>svg{display:block!important;width:20px!important;height:20px!important;min-width:20px;pointer-events:none}
 
 /* Selected story text: one SVG action, clear of the native selection handles. */
-.sttts-selection-draw{position:fixed;z-index:2147482999;width:40px;height:40px;border:1px solid var(--SmartThemeBorderColor,#738096);border-radius:12px;background:var(--SmartThemeBlurTintColor,#242837);color:var(--SmartThemeBodyColor,#fff);box-shadow:0 3px 12px #0004;display:grid;place-items:center;padding:8px;cursor:pointer;touch-action:manipulation}
+.sttts-selection-draw{position:fixed;z-index:2147482999;box-sizing:border-box;width:40px;height:40px;border:1px solid var(--SmartThemeBorderColor,#738096);border-radius:12px;background:var(--SmartThemeBlurTintColor,#242837);color:var(--SmartThemeBodyColor,#fff);box-shadow:0 3px 12px #0004;display:grid;place-items:center;padding:7px;cursor:pointer;touch-action:manipulation}
 .sttts-selection-draw svg{display:block;width:24px;height:24px;pointer-events:none}
 .sttts-selection-draw:focus-visible{outline:2px solid currentColor;outline-offset:3px}

@@ -43,26 +43,66 @@ export function selectedStoryTarget(doc, snap, range, scope = {}) {
   return {snap,text,end:insertion,context:nearby.slice(0,4000)};
 }
 
+function drawButtonPosition(range, win) {
+  const viewport=win.visualViewport;
+  const left=viewport?.offsetLeft ?? 0, top=viewport?.offsetTop ?? 0;
+  const right=left+(viewport?.width ?? win.innerWidth), bottom=top+(viewport?.height ?? win.innerHeight);
+  const size=40, margin=8, handleGap=24;
+  if (right-left<size+2*margin || bottom-top<size+2*margin) return null;
+  const rects=Array.from(range.getClientRects?.() ?? []);
+  if (!rects.length) rects.push(range.getBoundingClientRect?.());
+  const visible=rects.filter(rect=>rect && rect.width>0 && rect.height>0
+    && rect.right>left && rect.left<right && rect.bottom>top && rect.top<bottom);
+  const last=visible.at(-1);
+  if (!last) return null;
+  const x=Math.max(left+margin,Math.min(last.right-size/2,right-size-margin));
+  const below=last.bottom+handleGap;
+  if (below+size<=bottom-margin) return {x,y:below};
+
+  const y=Math.max(top+margin,Math.min((last.top+last.bottom-size)/2,bottom-size-margin));
+  // When the last line is near the keyboard or window edge, keep the button out of the selected text.
+  const clearSide=side=>visible.every(rect=>rect.bottom<=y || rect.top>=y+size
+    || rect.right<=side || rect.left>=side+size);
+  for (const side of [last.right+handleGap,last.left-margin-size]) {
+    if (side>=left+margin && side+size<=right-margin && clearSide(side)) return {x:side,y};
+  }
+  const above=Math.min(...visible.map(rect=>rect.top))-handleGap-size;
+  return above>=top+margin ? {x,y:above} : null;
+}
+
 export function createSelectionDraw({doc,hidden,message,valid,scope=()=>({}),draw,notice}) {
-  const win=doc.defaultView;let target=null,button=null,timer=null,working=false;
-  function hide(){button?.remove();button=null;target=null;}
+  const win=doc.defaultView, viewport=win.visualViewport;
+  const requestFrame=win.requestAnimationFrame?.bind(win) ?? (callback=>win.setTimeout(callback,16));
+  const cancelFrame=win.cancelAnimationFrame?.bind(win) ?? win.clearTimeout.bind(win);
+  let target=null,button=null,frame=null,working=false,matchedRange=null;
+  function hide(){button?.remove();button=null;target=null;matchedRange=null;}
   function capture(){
+    frame=null;
     if(working || hidden() || typeof draw!=='function') {hide();return;}
     const selection=doc.getSelection();if(!selection?.rangeCount || selection.isCollapsed){hide();return;}
-    const range=selection.getRangeAt(0),node=range.startContainer.nodeType===1?range.startContainer:range.startContainer.parentElement;
-    const mes=node?.closest('#chat .mes[mesid]'),snap=mes && message(Number(mes.getAttribute('mesid')));
-    const next=selectedStoryTarget(doc,snap,range,scope());if(!next || !valid(next.snap)){hide();return;}
-    target=next;
+    const range=selection.getRangeAt(0);
+    const sameRange=matchedRange && range.startContainer===matchedRange.startContainer
+      && range.endContainer===matchedRange.endContainer && range.startOffset===matchedRange.startOffset
+      && range.endOffset===matchedRange.endOffset;
+    if (!sameRange || !valid(target.snap)) {
+      const node=range.startContainer.nodeType===1?range.startContainer:range.startContainer.parentElement;
+      const mes=node?.closest('#chat .mes[mesid]'),snap=mes && message(Number(mes.getAttribute('mesid')));
+      const next=selectedStoryTarget(doc,snap,range,scope());if(!next || !valid(next.snap)){hide();return;}
+      target=next;
+      matchedRange={startContainer:range.startContainer,endContainer:range.endContainer,
+        startOffset:range.startOffset,endOffset:range.endOffset};
+    }
+    const position=drawButtonPosition(range,win);
+    if (!position) {button?.remove();button=null;return;}
     if(!button){
       button=doc.createElement('button');button.type='button';button.className='sttts-selection-draw';button.setAttribute('aria-label','为选中文字生图');button.innerHTML=icon('paint');
       button.addEventListener('pointerdown',e=>e.preventDefault());
       button.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();activate();});doc.body.append(button);
     }
-    const rect=range.getBoundingClientRect?.() || mes.getBoundingClientRect(),size=40;
-    button.style.left=Math.max(8,Math.min(rect.right+8,win.innerWidth-size-8))+'px';
-    button.style.top=Math.max(8,Math.min(rect.bottom+10,win.innerHeight-size-8))+'px';
+    button.style.left=position.x+'px';
+    button.style.top=position.y+'px';
   }
-  function schedule(){win.clearTimeout(timer);timer=win.setTimeout(capture,180);}
+  function schedule(){if(frame===null)frame=requestFrame(capture);}
   async function activate(selected=target){
     if(!selected || working)return;
     working=true;hide();
@@ -70,7 +110,13 @@ export function createSelectionDraw({doc,hidden,message,valid,scope=()=>({}),dra
     catch(error){notice(error.message);}
     finally{working=false;}
   }
-  doc.addEventListener('selectionchange',schedule);doc.addEventListener('pointerup',schedule);win.addEventListener('scroll',schedule,true);win.addEventListener('resize',schedule);
+  const listeners=[[doc,'selectionchange'],[doc,'pointerup'],[doc,'touchend'],[win,'scroll',true],[win,'resize'],
+    [viewport,'scroll'],[viewport,'resize']];
+  for (const [source,event,capture] of listeners) source?.addEventListener(event,schedule,capture);
   return {refresh(){if(target && (hidden()||!valid(target.snap)))hide();},forMessage(id){return target?.snap.id===id?target:null;},activate,
-    dispose(){win.clearTimeout(timer);hide();doc.removeEventListener('selectionchange',schedule);doc.removeEventListener('pointerup',schedule);win.removeEventListener('scroll',schedule,true);win.removeEventListener('resize',schedule);}};
+    dispose(){
+      if (frame!==null) cancelFrame(frame);
+      hide();
+      for (const [source,event,capture] of listeners) source?.removeEventListener(event,schedule,capture);
+    }};
 }
