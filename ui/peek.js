@@ -1,3 +1,4 @@
+import {replacePicture} from './replace-picture.js';
 import {editTags} from '../host-ask.js';
 import {downloadAction} from '../download.js';
 // 查手机: pick a contact and pick up their phone — a phone of their own (ui/peek-phone.js) with a lock screen, a home
@@ -87,7 +88,7 @@ export function peekApp(ctx) {
     viewer=openImageViewer({doc:ctx.doc,from:img,caption:picture.text,
       gallery:{items:versions.map(x=>({src:x.src,alt:picture.text,info:x.photo.info})),index:Math.max(0,versions.findIndex(x=>x.id===picture.photoId)),
         onIndex:i=>{picking=picking.then(()=>api.peekDraw(name,key,false,{version:versions[i].id,expected})).catch(error=>ctx.notify(error.message,{error:true}));}},
-      actions:[downloadAction(ctx.doc,i=>({source:versions[i].photo.blob,name:versions[i].photo.name}),ctx.notify),...(picture.tags && api.peekDraw?[{label:'重画',run:safe(async()=>{await picking;return redraw(false);})},{label:'改提示词再画',run:safe(async()=>{await picking;return redraw(true);})}]:[])]});
+      actions:[downloadAction(ctx.doc,i=>({source:versions[i].photo.blob,name:versions[i].photo.name}),ctx.notify),...(picture.tags && api.peekDraw?[{label:'重画',run:safe(async()=>{await picking;return redraw(false);})},{label:'改提示词再画',run:safe(async()=>{await picking;return redraw(true);})}]:[]),replacePicture(ctx,api,()=>viewer.close(),async replacement=>{await picking;await api.peekDraw(name,key,false,{replacement,expected});await render();})]});
   }
   /** Picks up the phone: the owner's own phone over the whole screen. */
   function pick(s) {

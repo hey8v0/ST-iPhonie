@@ -29,9 +29,10 @@ export interface VnSettings {
     /** 不演的标签: tag names whose content the stage leaves out. */
     skip: string[];
     cast: Record<string, VnCastEntry>;
+    globalActions?: VnAction[];
     moves: VnMoveFile[];
 }
-export interface VnAction { id: string; label: string; tags: string; words: string[]; }
+export interface VnAction { kind?: 'expression'; id: string; label: string; tags: string; words: string[]; }
 /** One picture in use and the others of its group (mix: they take turns at random). */
 export interface VnGroup { sprite: string; at: number; alts: Array<{ sprite: string; at: number; seed?: number }>; mix: boolean; }
 /** A set of 立绘: the usual one (with its seed) and the 表情 / 动作 pictures by id. */
@@ -51,7 +52,7 @@ export interface BookWord extends BookLine { bubble: boolean; at: 'left' | 'righ
 export interface BookSpread { layout: 'quiet' | 'page' | 'window' | 'spread' | 'fade' | 'ground' | 'pair' | 'stage' | 'text' | 'cast'; side: 'left' | 'right'; space: 'top' | 'bottom'; tone: 'light' | 'dark'; heading: string; pictures: Array<{ prompt: string; picture: BookPicture; people: boolean; who: string[] }>; words: BookWord[]; cast: Array<{ name: string; emotion: string; line?: string; prompt?: string; picture?: BookPicture; people?: boolean; who?: string[] }>; fx: string[]; sound: { ambience: string; sfx: string } }
 export interface Book { id: string; version: 3; title: string; subtitle: string; author: string; theme: string; art: 'book' | 'app'; mode: 'story' | 'retell'; source: { chat: string; name: string; from: number; to: number }; cover: { prompt: string; picture: BookPicture; who: string[] }; spreads: BookSpread[]; ending: string; at: number; made: number; /** 读后感 (0.9.40): what each person it was sent to said of it, the latest each. */ readers: Array<{ name: string; at: number; text: string }> }
 export interface VnModel { /** Live2D: the model's own motions ('group:index') and their words. */ acts?: Record<string, string[]>; id: string; kind: 'vrm' | 'live2d'; version: string; path: string; file: string; size: number; title: string; frame: 'half' | 'full' | 'face'; zoom: number; lift: number; map: Record<string, { expression: string; motion: string }>; /** Live2D 表情 kept on (its look); absent: guessed. */ keep?: string[]; at: number; }
-export interface VnCastEntry extends VnSet { actions: VnAction[]; outfits: VnOutfit[]; /** Up to 8, to switch between. */ models?: VnModel[]; /** The one in use ('' = the 立绘). */ useModel?: string; }
+export interface VnCastEntry extends VnSet { hiddenActions?: string[]; actions: VnAction[]; outfits: VnOutfit[]; /** Up to 8, to switch between. */ models?: VnModel[]; /** The one in use ('' = the 立绘). */ useModel?: string; }
 /** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
 export interface NarrationSettings {
     enabled: boolean;
@@ -1119,7 +1120,7 @@ export interface BackendFacade {
     postMoment(post: { text: string; photoId?: string }): Promise<MomentPost>;
     likeMoment(id: string, on?: boolean): Promise<MomentPost>;
     /** One of the pictures drawn for a post (its photoId or imageVersions) becomes the one shown. */
-    momentsPickImage(id: string, photoId: string): Promise<unknown>;
+    momentsPickImage(id: string, photoId: string, replace?: boolean): Promise<unknown>;
     commentMoment(id: string, comment: { text: string; to?: string }): Promise<{ post: MomentPost; comment: MomentComment }>;
     deleteMoment(id: string): Promise<boolean>;
     deleteMomentComment(id: string, commentId: string): Promise<MomentPost>;
@@ -1414,7 +1415,7 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     peekBusy(): boolean;
     /** Draws one album photo of a character's phone with NovelAI; allowPaid when it would cost Anlas. */
     /** index 'wallpaper' draws the wallpaper. */
-    peekDraw(name: string, index: number | 'wallpaper', allowPaid?: boolean, options?: { prompt?: string; version?: string; expected?: { id: string; at: number; text: string; tags: string } }): Promise<string>;
+    peekDraw(name: string, index: number | 'wallpaper', allowPaid?: boolean, options?: { prompt?: string; version?: string; replacement?: string; expected?: { id: string; at: number; text: string; tags: string } }): Promise<string>;
     /** The World Info books turned on now (global, character, chat, persona) with their entries that are on, for picking
      *  what the phone leaves out. Entry ids are "book#uid". */
     /** extra: books the phone alone reads (listed with from 只给手机 when the tavern has them off). */

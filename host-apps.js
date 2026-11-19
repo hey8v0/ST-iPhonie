@@ -139,7 +139,7 @@ export function createAppsHost({context, settings, backend, memory = null, notic
   /** Draws one photo of a character's album (index 'wallpaper': their wallpaper, upright). Without allowPaid, only when
    *  the free tier covers it. */
   const drawing = new Map();
-  async function peekDraw(name, index, {allowPaid = false, prompt, version, expected} = {}) {
+  async function peekDraw(name, index, {allowPaid = false, prompt, version, replacement, expected} = {}) {
     const valid=backend.spaceGuard?.() || (()=>true),space=backend.spaceKey();
     const snap=(await backend.apps.get(peekId(name,space))) || (space ? await backend.apps.get(peekId(name)) : null),id=snap?.id;
     const wall=index==='wallpaper',pick=doc=>wall?doc.wallpaper:doc.photos?.[index],photo=snap && structuredClone(pick(snap));
@@ -152,6 +152,10 @@ export function createAppsHost({context, settings, backend, memory = null, notic
       Object.assign(target,patch);
     }));
     const versions=[...new Set([...(photo.imageVersions||[]),photo.photoId].filter(Boolean))];
+    if(replacement!==undefined){
+      if(drawing.has(key) || !await backend.library.getPhoto(replacement)) throw Error('图片不可用或正在重画');
+      await set({photoId:replacement,imageVersions:[...new Set([...versions,replacement])].slice(-100),state:'done'});return replacement;
+    }
     if(version!==undefined){
       if(drawing.has(key))throw Error('正在重画，请稍后再选版本');
       if(!versions.includes(version))throw Error('这版图片已经不在了');

@@ -1,3 +1,4 @@
+import {replacePicture} from './replace-picture.js';
 import {pictureInputs} from '../core/draw.js';
 import {openImageViewer} from '../image-viewer.js';
 import {downloadAction} from '../download.js';
@@ -63,7 +64,10 @@ export function readingArt(ctx, current, reflow) {
         api.updateReadingBook(bookId,{pickIllustration:{id:artId(row),photoId:id}}).then(saved=>broadcast(bookId,saved.illustrations),notify);
       }},
       actions:[heart,downloadAction(doc,i=>({source:list[i].photo.blob,name:list[i].photo.name || '书摘插图'}),ctx.notify),
-        {label:'重画',run:i=>redo(i,false)},{label:'改提示词再画',run:i=>redo(i,true)}]});
+        {label:'重画',run:i=>redo(i,false)},{label:'改提示词再画',run:i=>redo(i,true)},replacePicture(ctx,api,()=>viewer.close(),async photoId=>{
+          const saved=await api.updateReadingBook(bookId,{illustration:{...row,id:artId(row),photoId,version:{photoId}}});
+          broadcast(bookId,saved.illustrations);
+        })]});
   }
   function mount(bookId,row) {
     const id=artId(row), {blocks}=current(), p=blocks[row.para] && point(blocks[row.para],row.offset);

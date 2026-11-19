@@ -1,3 +1,4 @@
+import {replacePicture} from './replace-picture.js';
 import {objectURLs} from './object-urls.js';
 import {eraseBefore} from '../core/text-edit.js';
 import {currentDm, chatWindows, currentWindow, groupKey, EDITABLE_KINDS, lastRound, forwardLine, REACTIONS, CHAIN_MODES, GAME_LIMITS} from '../core/chats.js';
@@ -893,7 +894,12 @@ export function chatApp(ctx) {
           {label: '在绘图中打开', run: safe(async i => { const m = await current(); if (m) ctx.openDraw({...request(m), seed: Number(versions[i].photo.info?.find(row => row[0] === '种子')?.[1])}); })}
         ] : []),
         {label: '删除这版', danger: true, run: safe(async i => { if (!await ctx.confirm('删除这版图片？')) return false; await api.deletePhoto(versions[i].photoId); })},
-        {label: '消息选项', run: safe(() => messageMenu(message))}]});
+        {label: '消息选项', run: safe(() => messageMenu(message))},
+        replacePicture(ctx,api,()=>viewer.close(),async photoId=>{
+          const m=await current();
+          if(!m || threadId!==id) throw Error('会话已变化');
+          await api.updateChatMessage(id,mid,{photoId,imageState:'done',imageVersions:[...new Set([...(m.imageVersions||[]),m.photoId,photoId].filter(Boolean))]});
+        })]});
   }
 
   /** A picker's photos as small pictures (ui/thumbs.js), let go when the picker closes. */

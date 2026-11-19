@@ -43,7 +43,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null, stopChatClock = null;
 import { createSongHost } from './host-song.js';
-const RUNTIME_VERSION='1.0.1';
+const RUNTIME_VERSION='1.0.2';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -179,9 +179,15 @@ function startStoryGeneration(type, options, dryRun) { if(!dryRun&&type!=='quiet
  storyGeneration.drawTurn={chat:ctx.getCurrentChatId?.()??ctx.chatId,length:chat.length,lastText:last?.mes,lastSwipe:last?.swipe_id,type,enabled:!!settings.draw?.enabled};
  storyGeneration.running=true;storyGeneration.stopped=false;} }
 function finishStoryGeneration(stopped=false) {
+ const wasRunning=storyGeneration.running;
  storyGeneration.running=false;
  if(stopped)storyGeneration.stopped=true;
  if(storyGeneration.stopped){awaitingStoryReplies.clear();return;}
+ // Streaming hosts may finish a genuine new reply without emitting MESSAGE_RECEIVED.
+ const turn=storyGeneration.drawTurn, ctx=context(), id=(ctx.chat?.length || 0)-1, last=ctx.chat?.[id];
+ if(wasRunning && turn && !turn.claimed && turn.chat===(ctx.getCurrentChatId?.()??ctx.chatId) && id>0 && last && !last.is_user && !last.is_system &&
+    (id>=turn.length || (id===turn.length-1 && ['swipe','regenerate','continue'].includes(turn.type) &&
+      (last.swipe_id!==turn.lastSwipe || last.mes!==turn.lastText)))) markStoryReply(id);
  for(const id of [...awaitingStoryReplies.keys()]) processReceivedStoryReply(id);
 }
 function markStoryReply(id) {

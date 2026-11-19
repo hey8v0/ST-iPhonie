@@ -1,3 +1,4 @@
+import {replacePicture} from './replace-picture.js';
 // 动态 (朋友圈) in the chat app: the characters' posts, likes and comments, and the user's own posts and comments.
 // New posts, reactions and replies are generated in the tavern page (host-moments.js); this panel only shows them and
 // sends what the user does. It draws into the chat app's view, inside the frame the chat app gives it (tabs and all).
@@ -251,7 +252,7 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
           {label: '改提示词再画', run: safe(rewrite)},
           ...(ctx.openDraw ? [{label: '在绘图中打开', run: safe(inDraw)}] : []),
           {label: '删除这版', danger: true, run: safe(async i => { if (!await ctx.confirm('删除这版配图？', versions.length > 1 ? '这条动态换成别的一版。' : '这条动态就没有配图了，之后可以再画。')) return false; await api.deletePhoto(versions[i].photoId); await render(); })}
-        ] : [])].filter(Boolean)});
+        ] : []),replacePicture(ctx,api,()=>viewer.close(),async photoId=>{await api.momentsPickImage(post.id,photoId,true);await render();})].filter(Boolean)});
   }
   return {
     render, click,

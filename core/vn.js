@@ -36,7 +36,7 @@ export const EXPRESSIONS = Object.freeze([
 /** The 表情 a 情绪 names; in a longer note (「强忍着眼泪，却努力笑着」) the one named first. */
 export const expressionOf = visualEmotion;
 
-export const defaultVn = () => ({speed: 2, wait: 1, voice: true, narrate: false, font: 'm', box: 'night', opacity: 0.86, effects: true, rule: SPRITE_RULE, palette: null, skip: [], cast: {}, moves: []});
+export const defaultVn = () => ({speed: 2, wait: 1, voice: true, narrate: false, font: 'm', box: 'night', opacity: 0.86, effects: true, rule: SPRITE_RULE, palette: null, skip: [], cast: {}, moves: [], globalActions: []});
 const pick = (value, list, fallback) => list.includes(value) ? value : fallback;
 const text = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const COLOR = /^(#[0-9a-f]{3,8}|(rgb|hsl)a?\([\d\s.,%/+-]+\))$/i;
@@ -81,32 +81,39 @@ function normalizeGroup(g) {
 function normalizeSet(c, ids) {
   const looks = {};
   for (const [id, look] of Object.entries(c?.looks && typeof c.looks === 'object' ? c.looks : {})) {
-    const g = ids.has(id) && normalizeGroup(look);
+    const g = (ids.has(id) || /^a-[\w-]{1,38}$/.test(id)) && normalizeGroup(look);
     if (g) looks[id] = g;
   }
   const base = normalizeGroup(c), seed = Number(c?.seed);
   return {sprite: base?.sprite || '', at: base?.at || 0, alts: base?.alts || [], mix: !!base?.mix,
     ...(base && Number.isInteger(seed) && seed >= 0 ? {seed} : {}), looks};
 }
-function normalizeCast(value) {
+function cleanActions(items) {
+  return (Array.isArray(items) ? items : []).slice(0, LIMIT.actions).map(a => ({id: text(a?.id, 40), label: text(a?.label, LIMIT.label), tags: text(a?.tags, LIMIT.tags), words: words(a?.words,a?.kind==='expression'?80:LIMIT.label), ...(a?.kind==='expression'?{kind:'expression'}:{})})).filter(a => /^a-[\w-]+$/.test(a.id) && a.label);
+}
+export function actorActions(vn,entry) {
+  return [...(entry?.actions || []), ...(vn.globalActions || []).filter(a=>!entry?.hiddenActions?.includes(a.id))];
+}
+function normalizeCast(value,globals) {
   const cast = {};
   for (const [name, c] of Object.entries(value && typeof value === 'object' ? value : {}).slice(0, LIMIT.cast)) {
     const key = String(name).trim().slice(0, LIMIT.name);
     if (!key || !c || typeof c !== 'object') continue;
-    const actions = (Array.isArray(c.actions) ? c.actions : []).slice(0, LIMIT.actions).map(a => ({id: text(a?.id, 40), label: text(a?.label, LIMIT.label), tags: text(a?.tags, LIMIT.tags), words: words(a?.words,a?.kind==='expression'?80:LIMIT.label), ...(a?.kind==='expression'?{kind:'expression'}:{})})).filter(a => /^a-[\w-]+$/.test(a.id) && a.label);
+    const actions = cleanActions(c.actions);
+    const hiddenActions = Array.isArray(c.hiddenActions) ? c.hiddenActions.filter(id => globals.some(a => a.id===id)) : [];
     const ids = new Set([...EXPRESSIONS.map(e => e.id), ...actions.map(a => a.id)]);
     const outfits = (Array.isArray(c.outfits) ? c.outfits : []).slice(0, LIMIT.outfits)
       .map(o => ({id: text(o?.id, 40), label: text(o?.label, LIMIT.label), appearance: text(o?.appearance, LIMIT.appearance), ...normalizeSet(o, ids)}))
       .filter(o => /^o-[\w-]+$/.test(o.id) && o.label);
     const set = normalizeSet(c, ids), {models, useModel} = normalizeModels(c);
-    if (!set.sprite && !Object.keys(set.looks).length && !actions.length && !outfits.length && !models.length) continue;
-    cast[key] = {...set, actions, outfits, ...(models.length ? {models, useModel} : {})};
+    if (!set.sprite && !Object.keys(set.looks).length && !actions.length && !hiddenActions.length && !outfits.length && !models.length) continue;
+    cast[key] = {...set, actions, outfits, ...(hiddenActions.length ? {hiddenActions} : {}), ...(models.length ? {models, useModel} : {})};
   }
   return cast;
 }
 export function normalizeVn(value) {
   const base = defaultVn(), v = value && typeof value === 'object' ? value : {};
-  const opacity = Number(v.opacity);
+  const opacity = Number(v.opacity), globals=cleanActions(v.globalActions);
   return {
     speed: pick(Number(v.speed), [0, 1, 2, 3, 4], base.speed),
     wait: pick(Number(v.wait), [0, 1, 2, 3], base.wait),
@@ -122,7 +129,7 @@ export function normalizeVn(value) {
     skip: cleanSkip(v.skip),
     // 模型的动作文件 (.vrma) the user added, for every VRM character.
     moves: normalizeMoveFiles(v.moves),
-    cast: normalizeCast(v.cast),
+    globalActions:globals, cast: normalizeCast(v.cast,globals),
   };
 }
 

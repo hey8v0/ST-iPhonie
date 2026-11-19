@@ -1,3 +1,4 @@
+import {actorActions} from './core/vn.js';
 // 视觉小说 on the tavern page: the stage (vn-stage.js), opened from a message's 小手机工具 menu or the phone's 视觉小说
 // app, fed with the chat's messages one by one, and the 立绘 kept as files in the tavern's images
 // (settings.vn.cast), so every device sees them. A character can have a VRM or Live2D model instead (vn-model.js), kept
@@ -183,7 +184,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
       cue: (s, {skipping}) => { if (s.kind === 'bgm') music(s.id, s.index); else sound(s.id, s.index, {skipping}); },
       face: (name, user) => { const key = user ? 'me' : name; if (Object.hasOwn(mine, key)) return mine[key]; return user ? tavern.me : tavern.characters?.[name] || avatars().characters?.[name] || ''; },
       sprite: (name, how) => {
-        const why = {}, cast = vn().cast || {}, url = pickLook(cast[castKey(name)], {...how, name, names: [...new Set([...(how.names || []), ...Object.keys(cast).map(storeName)])], outfit: wear()[name] || '', why});
+        const why = {}, cast = vn().cast || {}, url = pickLook({...cast[castKey(name)],actions:actorActions(vn(),cast[castKey(name)])}, {...how, name, names: [...new Set([...(how.names || []), ...Object.keys(cast).map(storeName)])], outfit: wear()[name] || '', why});
         if (cast[castKey(name)]) picks.set(name, {...why, line: String(how.line || '').slice(0, 40)});
         return url;
       },
@@ -319,7 +320,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     const extra = [];
     if (model.kind === 'vrm') for (const m of vn().moves || []) extra.push({id: m.id, label: m.label, words: m.words});
     else for (const [motion, words] of Object.entries(model.acts || {})) extra.push({id: 'motion:' + motion, label: motion, words});
-    for (const a of entry.actions || []) {
+    for (const a of actorActions(vn(),entry)) {
       if (a.kind === 'expression') continue;
       const same = MOVES.find(m => m.label === a.label || (a.words || []).some(w => m.words.includes(w)));
       if (same) extra.push({id: same.id, label: same.label, words: a.words});
@@ -369,7 +370,7 @@ export function createVnHost({context, settings, backend, linesOf, voiced, play,
     bookSprite(name, emotion = '') {
       const cast = vn().cast || {};
       const own = cast[castKey(name)];
-      return own ? pickLook(own, {emotion, name, names: Object.keys(cast).map(storeName), outfit: wear()[name] || '', random: () => 0}) : '';
+      return own ? pickLook({...own,actions:actorActions(vn(),own)}, {emotion, name, names: Object.keys(cast).map(storeName), outfit: wear()[name] || '', random: () => 0}) : '';
     },
     get showing() { return !!stage; },
     status(phase) { stage?.status(phase); },

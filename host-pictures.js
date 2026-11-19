@@ -1,3 +1,4 @@
+import {replacePicture,storyPickerContext} from './ui/replace-picture.js';
 import {replyBody, replyRevision} from './core/reply-revision.js';
 import {storyScope, mapStory} from './core/story-scope.js';
 // In-chat pictures: fills the placeholders left by <img>…</img> tags, generates them with NovelAI,
@@ -92,7 +93,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const base64 = await backend.base64(blob);
     const response = await fetch('/api/images/upload', {
       method: 'POST', headers: ctx.getRequestHeaders(),
-      body: JSON.stringify({image: base64, format: 'png', ch_name: folder, filename: String(name).replace(/\./g, '_')})
+      body: JSON.stringify({image: base64, format: ({'image/jpeg':'jpg','image/webp':'webp'})[blob.type] || 'png', ch_name: folder, filename: String(name).replace(/\./g, '_')})
     });
     if (!response.ok) throw Error('图片已生成，但上传到酒馆失败（' + response.status + '）');
     return tavernPicture((await response.json()).path);
@@ -515,10 +516,11 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       scheduleRender();
     }
     if (action === 'zoom' && pic) {
+      let viewer; const swipe=message.swipe_id;
       const list = versionsOf(stored(message, tag.hash));
       // Paging in the viewer also changes which version the chat shows.
       const pick = i => { if (i !== shown(message, tag.hash)?.index) { keep(message, tag.hash, list, i); saveSoon(); scheduleRender(); } };
-      Promise.all([viewerCode(), Promise.resolve(backend.favoritePhotoIds?.()).catch(() => null)]).then(([{openImageViewer}, ids]) => (hearts = new Set(ids || []), openImageViewer({doc: document, from: source?.querySelector?.('img') || source,
+      Promise.all([viewerCode(), Promise.resolve(backend.favoritePhotoIds?.()).catch(() => null)]).then(([{openImageViewer}, ids]) => (hearts = new Set(ids || []), viewer=openImageViewer({doc: document, from: source?.querySelector?.('img') || source,
         gallery: {items: list.map(v => ({src: v.url, alt: tag.prompt, info: pictureInfo(v, tag)})), index: pic.index, onIndex: pick},
         actions: [
           {label: i => list[i].photoId && hearts.has(list[i].photoId) ? '♥ 已收藏' : '♡ 收藏', run: i => toggleHeart(message, tag, list, i).then(() => false, error => { notice(error.message); return false; })},
@@ -527,7 +529,26 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
           {label: '改提示词再画', run: () => rewrite(id, tag).then(ok => ok ? undefined : false, error => { notice(error.message); return false; })},
           {label: '在绘图中打开', run: () => act('open', id, message, tag)},
           {label: '收起', run: () => act('fold', id, message, tag)},
-          {label: '删除这版', danger: true, run: i => { pick(i); return remove(id, tag).then(done => done ? undefined : false, error => { notice(error.message); return false; }); }}
+          {label: '删除这版', danger: true, run: i => { pick(i); return remove(id, tag).then(done => done ? undefined : false, error => { notice(error.message); return false; }); }},
+          {label:'替换图片',run:()=>replacePicture(storyPickerContext(document,notice),backend.api(),()=>viewer.close(),async photoId=>{
+            const photo=await backend.library.getPhoto(photoId);
+            if(!photo?.blob) throw Error('图片已不存在');
+            const url=await upload(photo.blob,'st-iphonie-'+Date.now());
+            if(context().chat[id]!==message || message.swipe_id!==swipe || !parsePictures(message.mes).some(t=>t.hash===tag.hash)) {
+              await removeFile(url).catch(()=>{});
+              throw Error('正文已变化，请重新打开插图');
+            }
+            const versions=[...versionsOf(stored(message,tag.hash)),{url,photoId,at:Date.now(),prompt:tag.prompt}];
+            const previous=stored(message,tag.hash);
+            keep(message,tag.hash,versions,versions.length-1);
+            const changed=stored(message,tag.hash);
+            try { await context().saveChat(); }
+            catch(error) {
+              if(stored(message,tag.hash)===changed) message.extra.sttts_pics[tag.hash]=previous;
+              throw error;
+            }
+            scheduleRender();
+          }).run()}
         ]}))).catch(error => notice(error.message));
     }
     if (action === 'delete') remove(id, tag).catch(error => notice(error.message));
