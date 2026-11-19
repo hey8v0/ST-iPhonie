@@ -1,11 +1,11 @@
-import {pickPicture} from './draw-images.js';
+import {pickReplacement} from './replacement-album.js';
 
 // Return an album ID so reusing a photo never edits the original asset.
 export function replacePicture(ctx,api,close,apply) {
   return {label:'替换图片',async run() {
     close?.();
     try {
-      const selected=await pickPicture(ctx,api,'替换图片',{returnId:true});
+      const selected=await pickReplacement(ctx,api);
       if(!selected) return false;
       const id=typeof selected==='string' ? selected : (await api.addPhoto({name:selected.name || '替换图片',blob:selected})).id;
       await apply(id);
@@ -18,13 +18,24 @@ export function replacePicture(ctx,api,close,apply) {
 // The story viewer lives in the tavern document, outside the phone's dialog stack.
 export function storyPickerContext(doc,notify) {
   return {doc,win:doc.defaultView,notify,dialog(title,html) {
-    const el=doc.createElement('dialog'), heading=doc.createElement('h3'), body=doc.createElement('div'), cancel=doc.createElement('button');
-    el.style.cssText='max-width:min(92vw,440px);max-height:80vh;overflow:auto;padding:16px';
-    heading.textContent=title;cancel.textContent='取消';body.innerHTML=html;
-    const grid=body.querySelector('.photo-grid');
-    if(grid){grid.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:4px';for(const img of grid.querySelectorAll('img'))img.style.cssText='width:100%;aspect-ratio:1;object-fit:cover';}
-    el.append(heading,body,cancel);doc.body.append(el);el.showModal();
-    cancel.onclick=()=>el.close();el.addEventListener('close',()=>el.remove(),{once:true});
+    if (!doc.querySelector('link[data-stip-replacement]')) {
+      const css = doc.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = new URL('./replacement.css', import.meta.url).href;
+      css.dataset.stipReplacement = '';
+      doc.head.append(css);
+    }
+    const el = doc.createElement('dialog');
+    el.className = 'stip-replace-dialog';
+    el.setAttribute('aria-label', title);
+    el.innerHTML = '<header><strong></strong><button type="button" aria-label="关闭">×</button></header><div></div>';
+    el.querySelector('strong').textContent = title;
+    const body = el.lastElementChild;
+    body.innerHTML = html;
+    doc.body.append(el);
+    el.showModal();
+    el.querySelector('header button').onclick = () => el.close();
+    el.addEventListener('close', () => el.remove(), {once:true});
     return {body,close:()=>el.close(),onClose:fn=>el.addEventListener('close',fn,{once:true})};
   }};
 }

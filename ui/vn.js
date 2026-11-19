@@ -303,19 +303,25 @@ export function vnApp(ctx) {
     const expression=kind==='expression', noun=expression?'表情':'动作';
     return new Promise(resolve => {
       const d = ctx.dialog((action?(state().globalActions?.some(a=>a.id===action.id)?'改全局':'改'):'加一个')+noun, `<div class="group pad">
-        ${action ? '' : '<label class="field"><span>应用范围</span><select data-field="a-scope"><option value="one">仅这个角色</option><option value="all">所有角色（含以后添加的角色）</option></select></label>'}<div class="field"><span>名字</span><input data-field="a-label" maxlength="12" value="${esc(action?.label || '')}" placeholder="${expression?'比如 紧张':'比如 抱臂'}"></div>
+        ${action ? '' : '<div class="field"><span>应用范围</span><div class="segmented" role="group" aria-label="应用范围"><button type="button" data-scope="one" aria-pressed="true">仅当前角色</button><button type="button" data-scope="all" aria-pressed="false">所有角色</button></div><small class="hint" data-global-note hidden>以后添加的角色也会使用</small></div>'}<div class="field"><span>名字</span><input data-field="a-label" maxlength="12" value="${esc(action?.label || '')}" placeholder="${expression?'比如 紧张':'比如 抱臂'}"></div>
         <div class="field"><span>怎么画${help('写给绘图模型的英文 tag，比如 crossed arms、hand on own chin、waving、pointing at viewer。')}</span><input data-field="a-tags" value="${esc(action?.tags || '')}" placeholder="${expression?'nervous expression':'crossed arms'}"></div>
         <div class="field"><span>什么时候用${help(expression?'只匹配台词的情绪；中英文同义词自动对应。多个词用顿号、逗号或分号隔开（全角半角都行），英文短语里的空格会保留。':'台词前后紧挨着的叙述（或台词的情绪）里出现这些词，就换成这张。中文词中间隔一两个字也算：写「抱臂」，「抱着手臂」「抱起双臂」都能对上。叙述里离这个词最近的名字是别人时不算。多个词用顿号、逗号、分号或空格隔开（全角半角都行）。')}</span><input data-field="a-words" value="${esc((action?.words || []).join('、'))}" placeholder="${expression?'紧张、nervous、uneasy':'抱臂、双臂交叉'}"></div></div>
         <div class="actions"><button type="button" class="primary" data-action="a-save">${icon('check')}保存</button></div>`);
       d.onClose(() => resolve());
       d.body.addEventListener('click', e => {
+        const scope = e.target.closest('[data-scope]');
+        if (scope) {
+          for (const button of d.body.querySelectorAll('[data-scope]')) button.setAttribute('aria-pressed', String(button === scope));
+          d.body.querySelector('[data-global-note]').hidden = scope.dataset.scope !== 'all';
+          return;
+        }
         if (!e.target.closest('[data-action=a-save]')) return;
         const val = k => d.body.querySelector(`[data-field=${k}]`).value.trim();
         const label = val('a-label'), tags = val('a-tags'), words = val('a-words').split(expression?/[,，、;；\n]+/:/[,，、;；\s]+/).map(w=>w.trim()).filter(Boolean);
         if (!label) { ctx.notify('写个名字', {error: true}); return; }
         if (!words.length) words.push(label);
         try {
-          const s=state(),global=action ? s.globalActions?.some(a=>a.id===action.id) : val('a-scope')==='all';
+          const s=state(),global=action ? s.globalActions?.some(a=>a.id===action.id) : d.body.querySelector('[data-scope="all"]').getAttribute('aria-pressed') === 'true';
           const update=list=>{
             if(!action && list.length>=24) throw Error('这个范围最多可添加 24 项');
             return action ? list.map(a=>a.id===action.id?{...a,label,tags,words}:a) : [...list,{id:'a-'+crypto.randomUUID(),label,tags,words,...(expression?{kind:'expression'}:{})}];
