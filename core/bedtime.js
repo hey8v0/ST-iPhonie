@@ -4,13 +4,13 @@ import {parseSounds} from './sounds.js';
 import {promptText} from './prompt-rules.js';
 
 export const BEDTIME_TYPES = ['睡前故事', '童话', '哄睡', '自己说想听什么'];
-export function bedtimeRequest({settings, role, kind, minutes, wish = '', format, rules, sounds, original = ''}) {
+export function bedtimeRequest({settings, role, kind, minutes, wish = '', format, rules, sounds, reference = '', original = ''}) {
   const voice = [...new Set([...promptPlan(settings, rules).map(p => p.text), dialogueContract(format), rules].filter(Boolean))].join('\n\n');
   const fill = {'讲述者': role.name, '人物设定': role.persona || '', '故事类型': BEDTIME_TYPES.includes(kind) ? kind : BEDTIME_TYPES[0],
     '分钟': String([3, 8, 15].includes(Number(minutes)) ? Number(minutes) : 3), '心愿': wish, '台词格式': format,
     '朗读规则': voice, '氛围音': sounds.ambience.join('、'), '音效': sounds.sfx.join('、'), '原文': original};
   return [{role: 'system', content: promptText(settings.promptRules, 'bedtime', 'system', fill)},
-    {role: 'system', content: voice}, {role: 'user', content: promptText(settings.promptRules, 'bedtime', original ? 'annotate' : 'create', fill)}];
+    {role: 'system', content: voice}, ...(!original && reference ? [{role:'system', content:reference}] : []), {role: 'user', content: promptText(settings.promptRules, 'bedtime', original ? 'annotate' : 'create', fill)}];
 }
 export function parseBedtime(text, {format, role, sounds, original = ''}) {
   const lines = parseDialogue(text, format).filter(l => l.role === role && l.text.trim());

@@ -19,6 +19,18 @@ const checkSignal = signal => { if (signal?.aborted) throw cancelled(); };
 export const loadCompletionModule = () => import('/scripts/openai.js');
 export const hasCompletionService = ctx => ctx.mainApi === 'openai' && ctx.ChatCompletionService?.presetToGeneratePayload && ctx.ChatCompletionService?.sendRequest;
 
+// Only assistant prompt and generation options may override the live tavern connection.
+const assistantPresetOptions = new Set(`
+  temperature frequency_penalty presence_penalty top_p top_k top_a min_p repetition_penalty seed n
+  openai_max_context openai_max_tokens max_context_unlocked bias_preset_selected
+  prompts prompt_order names_behavior send_if_empty impersonation_prompt new_chat_prompt
+  new_group_chat_prompt new_example_chat_prompt continue_nudge_prompt wi_format scenario_format
+  personality_format group_nudge_prompt assistant_prefill assistant_impersonation use_sysprompt
+  squash_system_messages continue_prefill continue_postfix custom_prompt_post_processing
+  media_inlining inline_image_quality show_thoughts reasoning_effort verbosity tool_reasoning_mode
+  function_calling tool_call_recurse_limit enable_web_search
+`.trim().split(/\s+/));
+
 /** Capture before awaiting: the saved preset and live connection can change while reference material is prepared. */
 async function completionSnapshot(ctx, presetName, load = loadCompletionModule) {
   const current = structuredClone(ctx.chatCompletionSettings || {});
@@ -29,7 +41,7 @@ async function completionSnapshot(ctx, presetName, load = loadCompletionModule) 
   const settings = {...current};
   for (const [key, value] of Object.entries(selected)) {
     const field = mapping[key]?.[1];
-    if (field && value !== undefined) settings[field] = structuredClone(value);
+    if (assistantPresetOptions.has(key) && field && value !== undefined) settings[field] = structuredClone(value);
   }
   // Convert the complete effective settings back to preset keys so presetToGeneratePayload cannot reread changed
   // sampling/connection fields from its live oai_settings fallback. The same settings determine reference budget.

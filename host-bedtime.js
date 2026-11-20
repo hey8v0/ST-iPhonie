@@ -1,12 +1,14 @@
 // Lives on the tavern page, like music: phone navigation does not own the queue.
 import {bedtimeRequest, parseBedtime, createBedtimePlayer} from './core/bedtime.js';
+import {worldInfoFor, loreOptions} from './host-lore.js';
+import {activeChatPreset, plainStory} from './core/chat.js';
 import {modelRules} from './core/state.js';
 import {soundNames} from './core/sounds.js';
 import {openBook as openReadingBook} from './core/bookshelf.js';
 import {createSoundHost} from './host-sounds.js';
 import {createMusicHost} from './host-music.js';
 
-export function createBedtimeHost({context, settings, backend, doc = globalThis.document, soundFactory = createSoundHost, musicFactory = createMusicHost}) {
+export function createBedtimeHost({context, settings, backend, doc = globalThis.document, lore = worldInfoFor, soundFactory = createSoundHost, musicFactory = createMusicHost}) {
   let busy = false, sound = null, music = null, level = 1, voiceVolume = 1, closed = false, playbackRole = null;
   const lowSettings = () => ({...settings(), sounds: {...settings().sounds, enabled: true, generate: false, ambienceVolume: .12 * level, sfxVolume: .25 * level}, music: {...settings().music, volume: .12 * level, mode: 'one'}});
   const emit = status => backend.emit('bedtime', status);
@@ -37,10 +39,16 @@ export function createBedtimeHost({context, settings, backend, doc = globalThis.
     busy = true; emit({busy: true});
     try {
       const s = structuredClone(settings()), sounds = soundNames(await backend.listSounds()), format = backend.voiceFormat(), rules = modelRules(s);
-      const request = original => bedtimeRequest({settings: s, role, kind: form.kind, minutes: form.minutes, wish: String(form.wish || '').slice(0, 500), format, rules, sounds, original});
+      const ctx = context(), preset = activeChatPreset(s.chat);
+      const recent = !form.sourceId && form.recent ? (ctx.chat || []).filter(m => m && !m.is_system && !m.extra?.isHidden)
+        .slice(-6).map(m => plainStory(m.mes, preset.cleanTags, s.narration).slice(-1200)).filter(Boolean) : [];
+      const world = !form.sourceId && form.world !== false ? await lore(() => ctx, {...loreOptions(preset), texts: recent,
+        always: [role.name, form.kind, form.wish], characters: role.persona || ''}) : '';
+      const reference = [world && '【世界书】\n' + world, recent.length && '【近期剧情】\n' + recent.join('\n')].filter(Boolean).join('\n\n');
+      const request = original => bedtimeRequest({settings: s, role, kind: form.kind, minutes: form.minutes, wish: String(form.wish || '').slice(0, 500), format, rules, sounds, original, reference});
       let steps = [], title = '', position = {};
       const ask = async original => {
-        const text = await backend.generateText(context(), {use: 'book', prompt: request(original), trimNames: false, responseLength: original ? 8192 : Number(form.minutes) === 15 ? 16000 : 8192});
+        const text = await backend.generateText(ctx, {use: 'book', prompt: request(original), trimNames: false, responseLength: original ? 8192 : Number(form.minutes) === 15 ? 16000 : 8192});
         if (closed) throw Error('睡前故事已关闭');
         return {text, steps: parseBedtime(text, {format, role: role.name, sounds, original})};
       };
@@ -60,24 +68,33 @@ export function createBedtimeHost({context, settings, backend, doc = globalThis.
       backend.emit('library', {collection: 'books'}); return book;
     } finally { busy = false; emit({busy: false}); }
   }
-  async function play(id, {timer = 0, song = ''} = {}) {
+  let mix = {song: '', effects: true}, mixRevision = 0;
+  async function adjust(options) {
+    const turn = ++mixRevision;
+    mix = {...mix, ...options};
+    if (!player.status().playing) return;
+    if (!mix.effects) { sound?.close(); sound = null; }
+    if ('song' in options) { music?.close(); music = null; }
+    if (mix.effects && !sound) {
+      const own = sound = soundFactory({context, settings: lowSettings, backend, doc});
+      await own.unlock();
+      if (own === sound) await own.reload();
+    }
+    if (turn !== mixRevision || !player.status().playing || music || !mix.song) return;
+    const track = (await backend.listSongs()).find(s => s.id === mix.song);
+    if (track && turn === mixRevision && player.status().playing) {
+      music = musicFactory({context, settings: lowSettings, backend, doc});
+      await music.play({...track, bg: true});
+    }
+  }
+  async function play(id, {timer = 0, song = '', effects = true} = {}) {
     const book = await backend.library.getBook(id);
     if (!book?.bedtime?.steps.length) throw Error('这个故事没有可播放的台词');
     const role = narrator(book);
     if (!player.status().playing) voiceVolume = backend.player.sink.getVolume?.() ?? 1;
     player.stop();
     playbackRole = role;
-    return player.play(book, timer, async alive => {
-      if (closed || !alive()) return;
-      sound = soundFactory({context, settings: lowSettings, backend, doc});
-      const own = sound;
-      await own.unlock(); await own.reload();
-      if (!alive()) return;
-      if (song) {
-        const track = (await backend.listSongs()).find(s => s.id === song);
-        if (track && alive()) { music = musicFactory({context, settings: lowSettings, backend, doc}); await music.play({...track, bg: true}); }
-      }
-    });
+    return player.play(book, timer, () => adjust({song, effects}));
   }
   async function audio(id) {
     const book = await backend.library.getBook(id);
@@ -91,5 +108,5 @@ export function createBedtimeHost({context, settings, backend, doc = globalThis.
     }
     return clips;
   }
-  return {create, roles, source, play, audio, stop: player.stop, status: () => ({...player.status(), busy}), close() { closed = true; player.stop(); }};
+  return {create, roles, source, play, adjust, audio, stop: player.stop, status: () => ({...player.status(), busy}), close() { closed = true; player.stop(); }};
 }

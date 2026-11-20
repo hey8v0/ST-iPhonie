@@ -1445,11 +1445,12 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     bookInfo?(): { chat: string; title: string; length: number; user: string };
     bookSource?(from?: number, to?: number): { chat: string; title: string; length: number; user: string; from: number; to: number; messages: Array<{ id: number; user: boolean; name: string; steps: Array<{ kind: 'say' | 'narrate' | 'bg'; text?: string; role?: string; emotion?: string; line?: number; part?: number; url?: string; user?: boolean }> }> };
     bookWrite?(system: string, user: string, options?: { length?: number }): Promise<string>;
-    bedtimeCreate(form: {role: string; kind?: string; minutes?: number | string; wish?: string; sourceId?: string; chapter?: number | string; paragraph?: number | string}): Promise<Book>;
+    bedtimeCreate(form: {role: string; world?: boolean; recent?: boolean; kind?: string; minutes?: number | string; wish?: string; sourceId?: string; chapter?: number | string; paragraph?: number | string}): Promise<Book>;
     bedtimeRoles(): Array<{name: string; persona?: string}>;
     bedtimeSource(id: string, chapter?: number): Promise<{title: string; chapter: number; chapters: string[]; paragraphs: string[]}>;
     bedtimeStatus(): {playing: boolean; busy: boolean; id: string; index: number; text: string};
-    bedtimePlay(id: string, options?: {timer?: number; song?: string}): Promise<void>;
+    bedtimeMix(options: {effects?: boolean; song?: string}): Promise<void>;
+    bedtimePlay(id: string, options?: {timer?: number; song?: string; effects?: boolean}): Promise<void>;
     bedtimeStop(): void;
     bedtimeAudio(id: string): Promise<Blob[]>;
     bookRead?(lines: BookLine[], onLine?: (index: number) => void): Promise<boolean>;

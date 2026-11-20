@@ -43,7 +43,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null, stopChatClock = null;
 import { createSongHost } from './host-song.js';
-const RUNTIME_VERSION='1.0.3';
+const RUNTIME_VERSION='1.0.4';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -613,7 +613,7 @@ function connect(source){
   exportBackup:async(parts,options)=>{check();const manifest=await fetch(new URL('manifest.json',base)).then(r=>r.ok?r.json():null).catch(()=>null);return api.exportBackup(parts,manifest?.version||'',options);},
   vnStart:from=>{check();return vnHost.open(from);},
   // 绘本 (host-book.js): the open chat, its story, the text model, reading a page, a page's sound for an export.
-  bedtimeCreate:form=>{check();return bedtimeHost.create(form||{});},bedtimeSource:(id,chapter)=>{check();return bedtimeHost.source(id,chapter);},bedtimeRoles:()=>{check();return bedtimeHost.roles();},bedtimeStatus:()=>{check();return bedtimeHost.status();},bedtimePlay:(id,options)=>{check();return bedtimeHost.play(id,options);},bedtimeStop:()=>{check();return bedtimeHost.stop();},bedtimeAudio:id=>{check();return bedtimeHost.audio(id);},
+  bedtimeCreate:form=>{check();return bedtimeHost.create(form||{});},bedtimeSource:(id,chapter)=>{check();return bedtimeHost.source(id,chapter);},bedtimeRoles:()=>{check();return bedtimeHost.roles();},bedtimeStatus:()=>{check();return bedtimeHost.status();},bedtimePlay:(id,options)=>{check();return bedtimeHost.play(id,options);},bedtimeMix:options=>{check();return bedtimeHost.adjust(options);},bedtimeStop:()=>{check();return bedtimeHost.stop();},bedtimeAudio:id=>{check();return bedtimeHost.audio(id);},
   bookInfo:()=>{check();return bookHost.info();},bookSource:(from,to)=>{check();return bookHost.source(Number(from)||0,to==null?Infinity:Number(to));},bookWrite:(system,user,options)=>{check();return bookHost.write(system,user,options||{});},
   bookRead:(lines,onLine)=>{check();playbackMessage=null;return bookHost.read(Array.isArray(lines)?structuredClone(lines):[],{onLine:typeof onLine==='function'?onLine:null});},bookSound:(kind,name)=>{check();return bookHost.sound(String(kind||''),String(name||''));},bookSounds:()=>{check();return bookHost.soundList();},bookAudio:lines=>{check();return bookHost.audio(Array.isArray(lines)?structuredClone(lines):[]);},bookNarration:()=>{check();return bookHost.narration();},bookStage:(id,at)=>{check();return bookHost.open(String(id||''),Number(at)||0);},
   gameStart:name=>{check();return openGame(String(name));},
