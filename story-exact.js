@@ -30,7 +30,7 @@ export function createStoryExact({load = () => import('/scripts/itemized-prompts
     catch { return unavailable('当前酒馆读不到已保存的正文提示词'); }
     const chat = ctx.chat || [];
     const saved = (Array.isArray(source) ? source : []).filter(p => Number.isInteger(Number(p?.mesId)) && Number(p.mesId) >= 0
-      && chat[Number(p.mesId)] && !chat[Number(p.mesId)].is_system && !chat[Number(p.mesId)].is_user && p.rawPrompt)
+      && chat[Number(p.mesId)] && !chat[Number(p.mesId)].is_system && !chat[Number(p.mesId)].extra?.isHidden && !chat[Number(p.mesId)].is_user && p.rawPrompt)
       .sort((a, b) => Number(b.mesId) - Number(a.mesId))[0];
     if (!saved) return unavailable('当前聊天没有为可见的角色回复保存提示词');
     if (saved.main_api !== 'openai' || !Array.isArray(saved.rawPrompt)) return unavailable('这份正文使用文本补全，暂时只支持聊天补全的已存提示词');
@@ -57,7 +57,7 @@ export function createStoryExact({load = () => import('/scripts/itemized-prompts
       return [{...m, content}];
     });
     const applyRegex = await regex();
-    const visible = chat.slice(Number(saved.mesId)).filter(m => m && !m.is_system), added = [];
+    const visible = chat.slice(Number(saved.mesId)).filter(m => m && !m.is_system && !m.extra?.isHidden), added = [];
     for (const [i, m] of visible.entries()) {
       let content = String(m.mes || '');
       try { content = applyRegex(content, {user: !!m.is_user, depth: visible.length - 1 - i}); } catch { /* retain readable content */ }

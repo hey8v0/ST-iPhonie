@@ -458,6 +458,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
   }
   return {
     drawBlock,
+    storyContext: contextBuilder,
     memoryTidy: (id, options) => { checkOpen(); return memory.tidy(id, options); },
     memoryStatus: id => memory.status(id),
     memoryCancel: id => memory.cancel(id),

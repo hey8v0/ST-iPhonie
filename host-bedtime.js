@@ -1,22 +1,30 @@
-// Lives on the tavern page, like music: phone navigation does not own the queue.
+// The host owns audio resources; the reading view stops them on exit.
 import {bedtimeRequest, parseBedtime, createBedtimePlayer} from './core/bedtime.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {activeChatPreset, plainStory} from './core/chat.js';
+import {activeChatPreset} from './core/chat.js';
 import {modelRules} from './core/state.js';
 import {soundNames} from './core/sounds.js';
 import {openBook as openReadingBook} from './core/bookshelf.js';
 import {createSoundHost} from './host-sounds.js';
 import {createMusicHost} from './host-music.js';
 
-export function createBedtimeHost({context, settings, backend, doc = globalThis.document, lore = worldInfoFor, soundFactory = createSoundHost, musicFactory = createMusicHost}) {
+export function createBedtimeHost({context, settings, backend, doc = globalThis.document, lore = worldInfoFor, storyContext, soundFactory = createSoundHost, musicFactory = createMusicHost}) {
+  let playTurn = 0, revealed = -1;
   let busy = false, sound = null, music = null, level = 1, voiceVolume = 1, closed = false, playbackRole = null;
   const lowSettings = () => ({...settings(), sounds: {...settings().sounds, enabled: true, generate: false, ambienceVolume: .12 * level, sfxVolume: .25 * level}, music: {...settings().music, volume: .12 * level, mode: 'one'}});
-  const emit = status => backend.emit('bedtime', status);
+  const emit = status => backend.emit('bedtime', {...status, index: revealed});
   const player = createBedtimePlayer({
-    read: line => backend.player.start([{...line, role: playbackRole.name}], () => !closed, {...settings(), routes: [playbackRole]}), cue: step => sound?.cue(step),
+    read: async line => {
+      await backend.player.start([{...line, role: playbackRole.name}], () => !closed, {...settings(), routes: [playbackRole]}, {
+        onStart() { const now = player.status(); revealed = now.index; emit(now); },
+      });
+      if (backend.player.phase === 'error') throw Error(backend.player.message || '故事播放失败');
+    },
+    cue: step => sound?.cue(step),
     gain: value => { level = value; backend.player.sink.setVolume?.(voiceVolume * value); sound?.refresh(); music?.level?.(); },
     stopAudio: () => { backend.player.stop(); sound?.close(); sound = null; music?.close(); music = null; }, onChange: emit,
   });
+  function stop() { playTurn++; if (player.status().playing) player.stop(); }
   const roles = () => settings().routes.filter(r => r.name !== '旁白' && r.voice);
   function narrator(book) {
     const all = backend.settings?.routes || settings().routes;
@@ -40,11 +48,20 @@ export function createBedtimeHost({context, settings, backend, doc = globalThis.
     try {
       const s = structuredClone(settings()), sounds = soundNames(await backend.listSounds()), format = backend.voiceFormat(), rules = modelRules(s);
       const ctx = context(), preset = activeChatPreset(s.chat);
-      const recent = !form.sourceId && form.recent ? (ctx.chat || []).filter(m => m && !m.is_system && !m.extra?.isHidden)
-        .slice(-6).map(m => plainStory(m.mes, preset.cleanTags, s.narration).slice(-1200)).filter(Boolean) : [];
-      const world = !form.sourceId && form.world !== false ? await lore(() => ctx, {...loreOptions(preset), texts: recent,
-        always: [role.name, form.kind, form.wish], characters: role.persona || ''}) : '';
-      const reference = [world && '【世界书】\n' + world, recent.length && '【近期剧情】\n' + recent.join('\n')].filter(Boolean).join('\n\n');
+      const chat = ctx.chat, chatId = ctx.getCurrentChatId?.();
+      let reference = '';
+      if (!form.sourceId && form.plot === 'story') {
+        if (ctx.streamingProcessor && !ctx.streamingProcessor.isFinished) throw Error('请等正文生成结束再开始故事');
+        const snapshot = await storyContext(ctx, {settings:s});
+        reference = snapshot.messages.map(m => typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? m.content.filter(p=>p.type==='text').map(p=>p.text).join(' ') : '')).filter(Boolean).join('\n\n');
+        if (!reference.trim()) throw Error('没有可用的正文文字，请先生成一条正文或选择独立故事');
+        reference = '【正文参考资料，仅参考人物、记忆和情节】\n' + reference;
+      } else if (!form.sourceId && form.world !== false) {
+        const world = await lore(() => ctx, {...loreOptions(preset), texts:[], extraBooks:[...new Set([...(preset.loreExtraBooks || []), ...(form.extraBooks || [])])], skipBooks:form.skipBooks || [], skipEntries:form.skipEntries || [], strictFilter:true,
+          always: [role.name, form.kind, form.wish], characters: role.persona || ''});
+        if (world) reference = '【世界书】\n' + world;
+      }
+      if (context().chat !== chat || context().getCurrentChatId?.() !== chatId) throw Error('聊天已切换，请重新开始');
       const request = original => bedtimeRequest({settings: s, role, kind: form.kind, minutes: form.minutes, wish: String(form.wish || '').slice(0, 500), format, rules, sounds, original, reference});
       let steps = [], title = '', position = {};
       const ask = async original => {
@@ -88,12 +105,14 @@ export function createBedtimeHost({context, settings, backend, doc = globalThis.
     }
   }
   async function play(id, {timer = 0, song = '', effects = true} = {}) {
+    const turn = ++playTurn;
     const book = await backend.library.getBook(id);
+    if (closed || turn !== playTurn) return;
     if (!book?.bedtime?.steps.length) throw Error('这个故事没有可播放的台词');
     const role = narrator(book);
     if (!player.status().playing) voiceVolume = backend.player.sink.getVolume?.() ?? 1;
     player.stop();
-    playbackRole = role;
+    revealed = -1; playbackRole = role;
     return player.play(book, timer, () => adjust({song, effects}));
   }
   async function audio(id) {
@@ -108,5 +127,5 @@ export function createBedtimeHost({context, settings, backend, doc = globalThis.
     }
     return clips;
   }
-  return {create, roles, source, play, adjust, audio, stop: player.stop, status: () => ({...player.status(), busy}), close() { closed = true; player.stop(); }};
+  return {create, roles, source, play, adjust, audio, stop, status: () => ({...player.status(), index:revealed, busy}), close() { closed = true; stop(); }};
 }

@@ -20,13 +20,13 @@ const LORE_MAX = 30000;
  * cleanTags: tags whose blocks are taken out of the text (a status bar the story asks for, which the phone must not copy).
  * Returns '' when the tavern has no World Info for this (or is older than 1.12.14).
  */
-export async function worldInfoFor(context, {texts = [], always = [], persona = '', characters = '', skipBooks = [], skipEntries = [], extraBooks = [], cleanTags = [], excludeText = '', onlyBooks = null, max: most = LORE_MAX, report = () => {}, load = () => import('/scripts/world-info.js'), main = () => import('/script.js'), random = Math.random} = {}) {
+export async function worldInfoFor(context, {strictFilter = false, texts = [], always = [], persona = '', characters = '', skipBooks = [], skipEntries = [], extraBooks = [], cleanTags = [], excludeText = '', onlyBooks = null, max: most = LORE_MAX, report = () => {}, load = () => import('/scripts/world-info.js'), main = () => import('/script.js'), random = Math.random} = {}) {
   const note = (kind, error, level = 'error') => { try { report('世界书读取', {kind, message: error?.message || String(error), stack: error?.stack}, level); } catch {} };
   try {
     const ctx = context();
     if (typeof ctx?.getWorldInfoPrompt !== 'function') { note('接口不可用', '当前酒馆没有提供世界书扫描接口，本次未带入世界书', 'warn'); return ''; }
     const scan = scanOf(texts, always);
-    const parts = await collect(ctx, {scan, persona, characters, skipBooks, skipEntries, extraBooks, load, size: await promptSize(ctx, main), random, note});
+    const parts = await collect(ctx, {strictFilter, scan, persona, characters, skipBooks, skipEntries, extraBooks, load, size: await promptSize(ctx, main), random, note});
     // onlyBooks (照正文原样, 0.9.46): the story's own part already holds what the tavern's books gave; only these are read.
     return budgeted(parts.filter(p => !onlyBooks || onlyBooks.includes(p.world)).filter(p => !excludeText || !excludeText.includes(String(p.content || '').trim()) || !String(p.content || '').trim()), cleanTags, most).filter(p => p.kept).map(p => p.text).join('\n\n');
   } catch (error) { note('扫描失败，本次未带入世界书', error); return ''; }
@@ -67,7 +67,7 @@ const scanData = (persona, characters) => ({trigger: 'normal', personaDescriptio
  * out, the tavern's joined blocks were taken and the budget could cut one in the middle); where it cannot be loaded,
  * what the tavern would put in is used ({content} without world or uid).
  */
-async function collect(ctx, {scan, persona, characters, skipBooks = [], skipEntries = [], extraBooks = [], load, size, random = Math.random, note = () => {}}) {
+async function collect(ctx, {strictFilter, scan, persona, characters, skipBooks = [], skipEntries = [], extraBooks = [], load, size, random = Math.random, note = () => {}}) {
   const max = size || Number(ctx.maxContext) || 8192, subst = text => typeof ctx.substituteParams === 'function' ? ctx.substituteParams(text) : text;
   const global = scanData(persona, characters);
   let parts = null, wi = null;
@@ -78,6 +78,7 @@ async function collect(ctx, {scan, persona, characters, skipBooks = [], skipEntr
     parts = [...(r?.allActivatedEntries || [])].filter(e => !skipBooks.includes(e?.world) && !skipEntries.includes(entryId(e?.world, e?.uid)))
       .map(e => ({world: e?.world, uid: e?.uid, content: subst(String(e?.content || ''))}));
   } catch (error) { if (skipBooks.length || skipEntries.length) note('条目筛选不可用，回退到酒馆已触发内容', error, 'warn'); parts = null; }
+  if (!parts && strictFilter && (skipBooks.length || skipEntries.length)) parts = [];
   if (!parts) {
     const r = await ctx.getWorldInfoPrompt(scan, max, true, global);
     parts = [r?.worldInfoBefore, r?.worldInfoAfter, ...(r?.anBefore || []), ...(r?.anAfter || []),
@@ -277,7 +278,7 @@ export async function loreNames(load = () => import('/scripts/world-info.js')) {
  * the ones the phone alone reads (extra: from 只给手机), each with its entries that are not switched off: what the
  * phone could read, for picking what it leaves out.
  */
-export async function loreBooks(context, load = () => import('/scripts/world-info.js'), {extra = []} = {}) {
+export async function loreBooks(context, load = () => import('/scripts/world-info.js'), {extra = [], full = false} = {}) {
   const ctx = context();
   let wi = null;
   try { wi = await load(); } catch { /* without the module only the character, chat and persona books are known */ }
@@ -290,7 +291,7 @@ export async function loreBooks(context, load = () => import('/scripts/world-inf
     const entries = Object.values(data?.entries || {}).filter(e => e && !e.disable)
       .sort((a, b) => (a.displayIndex ?? a.uid) - (b.displayIndex ?? b.uid))
       .map(e => { const keys = (Array.isArray(e.key) ? e.key : []).map(String).filter(Boolean).slice(0, 8);
-        return {id: entryId(name, e.uid), title: String(e.comment || '').trim() || keys.join('、') || '（没有标题）', keys, constant: !!e.constant, preview: String(e.content || '').replace(/\s+/g, ' ').trim().slice(0, 80)}; });
+        return {id: entryId(name, e.uid), title: String(e.comment || '').trim() || keys.join('、') || '（没有标题）', keys, constant: !!e.constant, ...(full ? {content:String(e.content || '')} : {}), preview: String(e.content || '').replace(/\s+/g, ' ').trim().slice(0, 80)}; });
     books.push({name, from: where, entries});
   }
   return books;

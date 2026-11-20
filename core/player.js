@@ -108,7 +108,7 @@ export class BrowserAudio {
  }
  getVolume() { return this.volume; }
  /** effect: 'phone' | 'inner' | '' (core/voice-fx.js), put between the line and the volume. */
- async play(blob, signal = new AbortController().signal, { effect = '' } = {}) {
+ async play(blob, signal = new AbortController().signal, { effect = '', onStart } = {}) {
   signal.throwIfAborted();
   const ctx = this.context;
   if (!ctx || ctx.state !== 'running') throw Error('请再点一次播放，允许浏览器开启声音');
@@ -154,7 +154,8 @@ export class BrowserAudio {
     this.finish = finish;
     source.onended = () => finish();
     signal.addEventListener('abort', abort, { once: true });
-    if (signal.aborted) abort(); else source.start();
+    if (signal.aborted) abort();
+    else { source.start(); onStart?.(); }
    } catch (error) { finish(error); }
   });
  }
@@ -299,10 +300,11 @@ export class DialoguePlayer {
   this.emit('idle', message);
  }
  /** ahead: while a line plays, the next one is already being made (a call: no pause between its sentences). */
- start(lines, valid = () => true, settingsOverride = null, {ahead = false, stepwise = false} = {}) {
+ start(lines, valid = () => true, settingsOverride = null, {ahead = false, stepwise = false, onStart} = {}) {
   this.stop();
   this.settingsOverride = settingsOverride;
   this.lookahead = ahead;
+  this.onLineStart = onStart;
   this.stepwise = stepwise;
   if (!lines.length) return;
   this.valid = valid;
@@ -507,7 +509,7 @@ export class DialoguePlayer {
     if (this.lookahead) this.ahead = this.makeAhead(this.index + 1, signal);
     if (!await this.waitForResume(epoch)) return;
     this.emit('playing', '正在播放 · ' + line.role + (fromCache ? ' · 缓存' : ''));
-    await this.sink.play(blob, signal, { effect: lineEffect(line) });
+    await this.sink.play(blob, signal, { effect: lineEffect(line), onStart: this.onLineStart });
     if (!this.canContinue(epoch)) return;
     this.played.add(key);
     if (!await this.finishedLine(epoch)) return;

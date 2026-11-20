@@ -31,7 +31,7 @@ export function cleanBedtime(value) {
     sourceId: String(value.sourceId || '').slice(0, 100), chapter: Number(value.chapter) || 0, paragraph: Number(value.paragraph) || 0, steps};
 }
 
-/** A host-owned queue: leaving a phone view never cancels playback. Timers are injectable. */
+/** The host owns the playback queue and the reading view can stop it. Timers are injectable. */
 export function createBedtimePlayer({read, cue, stopAudio, gain, onChange = () => {}, setTimer = setTimeout, clearTimer = clearTimeout, now = Date.now}) {
   let epoch = 0, timer = null, fadeTimer = null, status = {playing: false, index: -1, text: '', id: ''};
   const emit = patch => { status = {...status, ...patch}; onChange({...status}); };

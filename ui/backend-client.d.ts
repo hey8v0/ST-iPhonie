@@ -1419,7 +1419,7 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     /** The World Info books turned on now (global, character, chat, persona) with their entries that are on, for picking
      *  what the phone leaves out. Entry ids are "book#uid". */
     /** extra: books the phone alone reads (listed with from 只给手机 when the tavern has them off). */
-    loreBooks(options?: { extra?: string[] }): Promise<Array<{ name: string; from: string[]; entries: Array<{ id: string; title: string; keys: string[]; constant: boolean; preview: string }> }>>;
+    loreBooks(options?: { full?: boolean; extra?: string[] }): Promise<Array<{ name: string; from: string[]; entries: Array<{ id: string; title: string; keys: string[]; constant: boolean; content?: string; preview: string }> }>>;
     /** Every book the tavern has (for picking ones the phone alone reads). */
     loreNames(): Promise<string[]>;
     /** 试一句: what the phone's scan takes for a chat (as its next reply would scan it) and a line more, or for a line alone;
@@ -1445,7 +1445,7 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     bookInfo?(): { chat: string; title: string; length: number; user: string };
     bookSource?(from?: number, to?: number): { chat: string; title: string; length: number; user: string; from: number; to: number; messages: Array<{ id: number; user: boolean; name: string; steps: Array<{ kind: 'say' | 'narrate' | 'bg'; text?: string; role?: string; emotion?: string; line?: number; part?: number; url?: string; user?: boolean }> }> };
     bookWrite?(system: string, user: string, options?: { length?: number }): Promise<string>;
-    bedtimeCreate(form: {role: string; world?: boolean; recent?: boolean; kind?: string; minutes?: number | string; wish?: string; sourceId?: string; chapter?: number | string; paragraph?: number | string}): Promise<Book>;
+    bedtimeCreate(form: {role: string; world?: boolean; plot?: 'story'|'independent'; extraBooks?: string[]; skipBooks?: string[]; skipEntries?: string[]; kind?: string; minutes?: number | string; wish?: string; sourceId?: string; chapter?: number | string; paragraph?: number | string}): Promise<Book>;
     bedtimeRoles(): Array<{name: string; persona?: string}>;
     bedtimeSource(id: string, chapter?: number): Promise<{title: string; chapter: number; chapters: string[]; paragraphs: string[]}>;
     bedtimeStatus(): {playing: boolean; busy: boolean; id: string; index: number; text: string};

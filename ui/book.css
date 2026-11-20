@@ -59,7 +59,7 @@
 .bk-puzzle-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;font-size:13px;font-weight:700;color:var(--ink2)}
 
 /* Bedtime story library and reading stage */
-.bt-cover,.bt-recent,.bt-option,.bt-controls{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.bt-cover,.bt-recent,.bt-option{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .bt-cover h2{font-size:22px;margin:0}.bt-cover .bedtime-moon{margin:0}
 .bt-cover::before,.bt-player::before{content:"";position:absolute;right:10%;top:8%;width:42px;height:1px;background:linear-gradient(90deg,transparent,#eadbb8);pointer-events:none;animation:bt-meteor 22s linear infinite;opacity:0}
 @keyframes bt-meteor{0%,87%,94%,100%{opacity:0}88%{opacity:.6;transform:rotate(145deg)}93%{transform:translate(-100px,65px) rotate(145deg)}}
@@ -67,13 +67,22 @@
 .bedtime-form summary,.bt-player summary{padding:10px 0;cursor:pointer;font-weight:650}
 .bt-recent{margin:18px 0 6px}.bt-recent h3{margin:0;font-size:16px}
 .bt-player.bedtime-sky{display:flex;flex-direction:column;height:100%;min-height:0;box-sizing:border-box;padding:20px 16px;color:#f5f1ff}
-.bt-player header,.bt-controls,.bt-follow{position:relative;z-index:1}.bt-player h2{margin:.25em 0;font-size:1.3em}
+.bt-player header{position:relative;z-index:1}.bt-player h2{margin:.25em 0;font-size:1.3em}
 .bt-transcript{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;position:relative;z-index:1;padding:12px 3px}
 .bt-transcript p{font-family:var(--read-font,serif);font-size:17px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere;color:#d7d3e1;margin:0 0 1em}
 .bt-transcript .current{color:#fff3ca}
-.bt-controls{justify-content:flex-start;margin-top:10px}.bt-controls .round-button{color:inherit;background:#ffffff18;width:44px;height:44px}
-.bt-controls details{margin-left:auto}.bt-controls details[open]{background:var(--card);color:var(--ink);border-radius:14px;padding:8px 12px}
-.bt-player.bt-dim{background:#10121b;color:#bdc2d2;box-shadow:none}.bt-dim .bt-transcript p{color:#a7aabd}.bt-dim .bt-transcript .current{color:#dbd7ce}
-.bt-dim .bt-controls>:not([data-action=bt-hide]),.bt-dim header{display:none}.bt-dim::before,.bt-dim::after{opacity:0;animation:none}
-.bt-follow{align-self:center;color:inherit}.bt-player [hidden]{display:none}
 @media(prefers-reduced-motion:reduce){.bt-cover::before,.bt-player::before{animation:none}}
+
+.bt-dream.bedtime-sky{padding:0;border-radius:0;background-color:#191832}
+.view:has(.bt-dream){padding:0;overflow:hidden}
+.bt-dream header{position:absolute;top:40%;width:100%;text-align:center;transition:opacity .8s;pointer-events:none}
+.bt-dream.started header{opacity:0}
+.bt-dream .bt-transcript{padding:0 8%;overflow-anchor:none;scrollbar-width:none;line-height:1.9}
+.bt-dream .bt-transcript::before,.bt-dream .bt-transcript::after{content:"";display:block;height:48%}
+.bt-dream .bt-transcript p{opacity:.48;filter:blur(.55px);margin:1.6em 0;min-height:0;transition:opacity .65s,filter .65s}
+.bt-dream .bt-transcript p:is(.current,.recalled){opacity:1;filter:none;color:#fbefd5}
+.bt-lore-entry{border-top:1px solid var(--line)}
+.bt-lore-entry>summary{display:flex;align-items:center;gap:10px;min-height:44px;cursor:pointer}
+.bt-lore-entry .row-text{flex:1;min-width:0}
+.bt-entry-text{margin:.25em 0 1em;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
+@media(prefers-reduced-motion:reduce){.bt-dream header,.bt-dream .bt-transcript p{transition:none}}
