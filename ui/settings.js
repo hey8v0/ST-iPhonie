@@ -21,7 +21,7 @@ const IMAGE_TYPES = 'image/png,image/jpeg,image/webp,image/avif,image/gif';
 export function settingsApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'settings');
   const narrationNote = s => !s.narration.enabled ? '关 · 只读台词' : s.narration.voice === 'role' ? '开 · 旁白用「旁白」角色的配音' : '开 · 旁白用系统朗读';
-  const voiceNote = s => s.general.voiceEnabled === false ? '关' : s.general.voiceMode === 'separate' ? '开 · 回复后单独配音' : '开 · 正文里顺手写';
+  const voiceNote = s => s.general.voiceEnabled === false ? '关' : s.general.voiceMode === 'manual' ? '开 · 手动给楼层配音' : s.general.voiceMode === 'separate' ? '开 · 回复后单独配音' : '开 · 正文里顺手写';
   const drawNote = s => !s.draw.enabled ? '关' : s.draw.auto ? '开 · 新回复自动画' : '开 · 点了才画';
   /** The page again after a sheet closes. When the phone itself goes, its sheets close before its apps stop: then a
    *  failed read is nobody's business; otherwise it is said. */
@@ -56,11 +56,11 @@ export function settingsApp(ctx) {
       const s = api.getState(), g = s.general, on = g.voiceEnabled !== false;
       d.body.innerHTML = `<div class="group pad">${toggle('voiceEnabled', '正文语音', on, '关掉后，聊天请求里不再加入语音规则，模型只写普通对白；正文里已有的语音标签只显示中文译文，不显示声波；手机聊天里的联系人也只发文字。打开后恢复。')}
         ${on ? `${languageField('defaultLanguage', g.defaultLanguage, false, typedLanguages(s))}
-          <div class="field"><span>配音方式${help('正文里顺手写：把配音规则加进正文请求，模型写故事时顺手把台词写成配音格式。只要一次请求，但规则较长，有时会影响正文，或者和破限、文风预设打架、漏写格式。\n\n回复后单独配音：正文模型只管写故事，不带任何配音规则；回复写完后，插件用同一个模型再单独请求一次，把正文里的台词配上音（声波稍等一会儿才出来）。格式更稳，不挤占正文，每条回复多一次请求。\n\n正文出图也选了「回复后单独配图」的话，配音和配图合成一次请求，不会多发两次。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配音']].map(([k, l]) => `<button type="button" data-action="voice-mode" data-value="${k}" aria-pressed="${(g.voiceMode || 'inline') === k}">${l}</button>`).join('')}</div>${g.voiceMode === 'separate' && api.planLatestVoice ? `<div class="actions" style="margin:6px 0 0">${btn('voice-latest', icon('wave') + '给最新回复配音', 'text-button')}</div>` : ''}</div>
-          ${toggle('pregenerate', '提前生成语音', g.pregenerate === true, '打开后，每条新回复写完，插件就在后台按顺序把里面的台词都生成好、存进缓存，不会自己播放；点声波时直接就能听，不用再等。\n\n会多花语音额度：没去听的回复、重 roll 掉的那一版也会生成。要开着「存储空间」里的「保存语音缓存」。\n\n不开也没关系：点「整条播放」时，播这一句的同时就在做下一句，句子之间不用等。')}
+          <div class="field"><span>配音方式${help('正文里顺手写：把配音规则加进正文请求，模型写故事时顺手把台词写成配音格式。只要一次请求，但规则较长，有时会影响正文，或者和破限、文风预设打架、漏写格式。\n\n回复后单独配音：正文模型只管写故事，不带任何配音规则；回复写完后，插件用同一个模型再单独请求一次，把正文里的台词配上音（声波稍等一会儿才出来）。格式更稳，不挤占正文，每条回复多一次请求。\n\n正文出图也选了「回复后单独配图」的话，配音和配图合成一次请求，不会多发两次。\n\n手动给楼层配音：选好要保留的回复后，在该楼层的小手机工具里点「给这层楼配音」。')}</span><div class="segmented voice-modes">${[['inline', '正文里顺手写'], ['separate', '回复后单独配音'], ['manual', '手动给楼层配音']].map(([k, l]) => `<button type="button" data-action="voice-mode" data-value="${k}" aria-pressed="${(g.voiceMode || 'inline') === k}">${l}</button>`).join('')}</div>${g.voiceMode === 'manual' ? '<small class="hint">选好回复后，点该楼层的小手机工具 → 给这层楼配音。刷回复时不会调用配音。</small>' : ''}${g.voiceMode === 'separate' && api.planLatestVoice ? `<div class="actions" style="margin:6px 0 0">${btn('voice-latest', icon('wave') + '给最新回复配音', 'text-button')}</div>` : ''}</div>
+          ${toggle('pregenerate', '提前生成语音', g.pregenerate === true, g.voiceMode === 'manual' ? '手动给这层楼配音后，提前生成并缓存台词音频。关闭时，点声波才生成音频。' : '打开后，每条新回复写完，插件就在后台按顺序把里面的台词都生成好、存进缓存，不会自己播放；点声波时直接就能听，不用再等。\n\n会多花语音额度：没去听的回复、重 roll 掉的那一版也会生成。要开着「存储空间」里的「保存语音缓存」。\n\n不开也没关系：点「整条播放」时，播这一句的同时就在做下一句，句子之间不用等。')}
           ${toggle('autoVoice', '自动挑音色', g.autoVoice === true, '大世界卡里角色多，可以打开这个：新角色第一次说话时，文字模型按 TA 在正文里的样子（角色卡、说过的话、剧情里的描写）挑一个音色填上，标「自动挑的」，不满意在角色 App 里换或重新挑。\n\n先从角色 App 的「音色收藏夹」里挑（标好男女、年龄的更容易挑中）；收藏夹里没有对得上的，再去引擎的音色库里搜（Fish 用公开音色库，MiniMax 用系统音色，ElevenLabs 用你账号里的音色）。挑一次会调用一两次文字模型。')}` : ''}</div>
         <div class="group pad">${toggle('stripVoice', '发给模型时去掉旧配音标签', g.stripVoice !== false, '不改变酒馆里的正文显示；只是之后每次请求模型时，旧回复里的每句台词只留中文译文，标签和原文不发，省上下文，也不用自己写正则。旧回复全部去掉：留着的那条会被模型当成模板照着学，情绪和句式越写越固定；格式靠每次注入的语音规则就够了。出图块在「正文出图」里另有同样的开关。')}
-          ${on && g.stripVoice !== false ? toggle('voiceExample', '保留最近一条做示范', g.voiceExample === true, '最新一条带台词的回复不去掉，原样发给模型当格式示范。模型老是忘了写配音标签时再打开；打开后它容易照着这条学，越写越像。') : ''}</div>`;
+          ${on && g.voiceMode !== 'manual' && g.stripVoice !== false ? toggle('voiceExample', '保留最近一条做示范', g.voiceExample === true, '最新一条带台词的回复不去掉，原样发给模型当格式示范。模型老是忘了写配音标签时再打开；打开后它容易照着这条学，越写越像。') : ''}</div>`;
     };
     paint();
     d.onClose(afterSheet);
@@ -76,7 +76,7 @@ export function settingsApp(ctx) {
       paint();
     });
     sheetClicks(d, async (action, el) => {
-      if (action === 'voice-mode') { api.updateGeneral({voiceMode: el.dataset.value}); paint(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配音' : '以后模型写正文时顺手写配音'); }
+      if (action === 'voice-mode') { api.updateGeneral({voiceMode: el.dataset.value}); paint(); ctx.notify(el.dataset.value === 'manual' ? '已切换为手动给楼层配音' : el.dataset.value === 'separate' ? '以后回复写完再单独配音' : '以后模型写正文时顺手写配音'); }
       if (action === 'voice-latest') await v.busy(el, async () => { const n = await api.planLatestVoice(); ctx.notify(n ? `配好了 ${n} 句台词` : '这条回复里没有找到台词'); });
     });
   }

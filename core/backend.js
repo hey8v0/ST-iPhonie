@@ -564,7 +564,7 @@ export class TTSBackend {
         }
         // 配音方式: the story model writes the voice tags itself ('inline'), or they are added after the reply ('separate').
         if ('voiceMode' in patch) {
-            if (!['inline', 'separate'].includes(patch.voiceMode)) throw Error('配音方式无效');
+            if (!['inline', 'separate', 'manual'].includes(patch.voiceMode)) throw Error('配音方式无效');
             next.general.voiceMode = patch.voiceMode;
         }
         if ('defaultLanguage' in patch) {

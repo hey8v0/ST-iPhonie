@@ -131,19 +131,32 @@ export function bookshelfApp(ctx) {
         row.append(volume);
         used += size + 1;
       }
-      // On a partly filled ledge the last book can lean against its neighbour.
-      // Leave the triangular space its binding occupies, with its bottom corner on the shelf.
       for (const volume of volumes) volume.classList.remove('resting');
       for (const rail of fragment.querySelectorAll('.bs-rail')) {
-        const items = [...rail.children], room = available - items.reduce((n,b)=>n+Number(b.dataset.width)+1,0);
-        if (items.length < 2 || room < 4) continue;
-        const seed = hue(items[0].dataset.spine);
-        const right = (seed & 1) === 1;
-        const resting = items[(right ? 0 : 1) + (seed >>> 1) % (items.length - 1)], gap = Math.min(room, 7 + seed % 10);
-        resting.style.setProperty('--lean-start', (right ? 0 : gap)+'px');
-        resting.style.setProperty('--lean-end', (right ? gap : 0)+'px');
-        resting.style.setProperty('--lean-angle', (right ? 1 : -1)*Math.atan(gap / (parseFloat(resting.style.getPropertyValue('--height')) || 145))*180/Math.PI+'deg');
-        resting.classList.add('resting');
+        const items = [...rail.children];
+        if (items.length < 2) continue;
+        const thickness = book => parseFloat(book.style.getPropertyValue('--thickness'));
+        const height = book => parseFloat(book.style.getPropertyValue('--height'));
+        const inset = book => (Number(book.dataset.width) - thickness(book)) / 2;
+        const slim = items.filter(book => thickness(book) <= .22 * height(book));
+        if (!slim.length) continue;
+        const seed = hue(items.map(book => book.dataset.spine).join('|'));
+        const thinnest = Math.min(...slim.map(thickness));
+        const choices = slim.filter(book => thickness(book) <= thinnest + 3);
+        const book = choices[(seed >>> 1) % choices.length], index = items.indexOf(book);
+        const right = index === 0 || (index < items.length - 1 && (seed & 1) === 1);
+        const support = items[index + (right ? 1 : -1)];
+        const occupied = items.reduce((sum, item) => sum + Number(item.dataset.width), items.length - 1);
+        const space = Math.max(0, Math.min(available - occupied, 6 + seed % 8));
+        const distance = 1 + inset(book) + inset(support) + space;
+        // The first contact is either our top corner or the neighbour's top corner.
+        const angle = Math.max(Math.asin(distance / height(book)), Math.atan(distance / height(support)));
+        if (angle < .018) continue;
+        book.style.setProperty('--lean-start', (right ? 0 : space) + 'px');
+        book.style.setProperty('--lean-end', (right ? space : 0) + 'px');
+        book.style.setProperty('--lean-pivot', right ? 'right' : 'left');
+        book.style.setProperty('--lean-angle', (right ? angle : -angle) + 'rad');
+        book.classList.add('resting');
       }
       rack.replaceChildren(fragment);
       rack.append(caption);

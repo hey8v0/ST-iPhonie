@@ -67,7 +67,6 @@
   box-shadow: none;
   overflow: visible;
 }
-.bs-rail .resting { margin-inline-start: 12px; }
 .bs-rail .bs-spine[aria-pressed=true] { z-index: 2; }
 .bs-spine[aria-pressed=true]::after { content: ''; position: absolute; inset: 100% 0 auto; height: 9px; }
 .bs-volume {
@@ -82,7 +81,6 @@
   transition: transform 380ms cubic-bezier(.23,.87,.24,1.08), filter 290ms;
   filter: drop-shadow(1px 0 1px #140d0b40);
 }
-.resting[aria-pressed=false] .bs-volume { transform: translateX(-50%) rotate(-5deg); }
 .bs-spine[aria-pressed=true] .bs-volume {
   --exposure: 1;
   transform: translate(calc(-50% - var(--recede) * 5px),8px) scale(1.055);
@@ -150,7 +148,7 @@
 .bs-options-link svg { width:17px; height:17px; }
 
 .bs-rail .resting{margin-inline:var(--lean-start,0px) var(--lean-end,0px)}
-.resting[aria-pressed=false] .bs-volume{transform:translateX(-50%) rotate(var(--lean-angle,-4deg))}
+.resting[aria-pressed=false] .bs-volume{transform-origin:var(--lean-pivot) bottom;transform:translateX(-50%) rotate(var(--lean-angle))}
 .bs-ribbon{position:absolute;right:18px;top:54px;width:13px;height:24px;background:#b9514f;clip-path:polygon(0 0,100% 0,100% 100%,50% 76%,0 100%);z-index:3;pointer-events:none}
 .album-viewer[data-info] .reading-comic-progress{visibility:hidden}
 

@@ -776,12 +776,19 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   /** A reply from a character (给这层楼配音): voice its lines again with 回复后单独配音's request, replacing the ones there. */
   async function voiceMessage(id) {
     const current = context().chat[id], task = current && afterReplies.get(current);
-    if (task?.running) { try { const done = await task.promise; if (done?.voiced) return done.voiced; } catch {} if (context().chat[id] !== current) throw Error('楼层内容已变化，请重新选择'); }
+    if (task?.running) {
+      const selected = replyRevision(context, id, settings().narration, () => backend.closed ? null : backend.space);
+      const done = await task.promise.catch(() => null);
+      const now = selected?.current();
+      if (!now || (!selected.target() && !(done?.written && task.revision.current() === now && task.raw === now.mes))) throw Error('楼层内容已变化，请重新选择');
+      if (done?.voiced) return done.voiced;
+    }
     const m = context().chat[id];
     if (!m || m.is_user || m.is_system) throw Error('这层楼不是角色的回复');
     if (!voice) throw Error('配音没有开');
     // Strip only the working text; the live reply stays intact until a valid answer is committed.
-    const {voiced} = await planReply(id, {voiced: true, pictured: false, revoice: !!voice.has(m.mes)});
+    const {voiced, skipped} = await planReply(id, {voiced: true, pictured: false, revoice: !!voice.has(m.mes)});
+    if (skipped) throw Error('楼层内容已变化，请重新选择');
     return voiced;
   }
   /** The newest reply from a character: voice its lines again (设置 → 正文 → 正文语音 → 给最新回复配音). */

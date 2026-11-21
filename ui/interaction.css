@@ -44,3 +44,10 @@ button[aria-busy=true]::after { content:""; display:inline-block; box-sizing:bor
 .reading-tool:active { background:color-mix(in srgb,currentColor 12%,transparent) }
 
 .chat-send-preview{display:block;margin:0 auto 14px;max-width:100%;max-height:32dvh;object-fit:contain;border-radius:12px}
+
+[data-conversations] .sw-main { background:transparent; box-shadow:none }
+[data-conversations] .sw-row + .sw-row { border-top:0 }
+[data-conversations] .sw-row + .sw-row .conv::before { content:""; position:absolute; inset:0 14px auto 76px; height:1px; background:var(--line) }
+[data-conversations] .sw-actions { clip-path:inset(0 0 0 calc(100% - var(--sw-p,0) * 100%)) }
+.segmented.voice-modes { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin:0 }
+.segmented.voice-modes button { white-space:normal; min-width:0; min-height:44px; text-wrap:balance; line-height:1.25 }

@@ -137,7 +137,7 @@ export interface GeneralSettings {
     autoVoice?: boolean;
     /** 台词小窗: the latest reply's lines in a pill on the tavern page, to hear one by one (off by default). */
     voiceIsland?: boolean;
-    voiceMode?: 'inline' | 'separate';
+    voiceMode?: 'inline' | 'separate' | 'manual';
 }
 export interface Injection {
     position: InjectionPosition;
