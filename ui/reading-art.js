@@ -15,12 +15,12 @@ export function readingArt(ctx, current, reflow) {
   if (!sessions.has(api)) sessions.set(api,{tasks:new Map(),listeners:new Set()});
   const {tasks,listeners} = sessions.get(api);
   const mounts = new Map(), urls = new Map();
-  let generation = 0, viewer, tap, opening = 0;
+  let generation = 0, viewer, opening = 0;
   const notify = error => ctx.notify(error.message,{error:true});
   const broadcast = (bookId,rows) => { for (const fn of listeners) fn(bookId,rows); };
 
   function clear() {
-    generation++; opening++; win.clearTimeout(tap); viewer?.close(); viewer=null;
+    generation++; opening++; viewer?.close(); viewer=null;
     for (const u of urls.values()) win.URL.revokeObjectURL(u);
     urls.clear(); mounts.clear();
   }
@@ -84,13 +84,11 @@ export function readingArt(ctx, current, reflow) {
     button.onclick=e=>{
       e.stopPropagation();const now=Date.now();
       if (e.detail===0 || now-last<330) {
-        win.clearTimeout(tap);last=0;view(bookId,item.row,button).catch(notify);return;
+        last=0;view(bookId,item.row,button).catch(notify);return;
       }
-      last=now;win.clearTimeout(tap);tap=win.setTimeout(()=>{
-        frame.classList.toggle('folded');button.setAttribute('aria-expanded',String(!frame.classList.contains('folded')));reflow();
-      },330);
+      last=now;
     };
-    button.setAttribute('aria-expanded','true');button.setAttribute('aria-label','书摘插图，点一下收起或展开，双击查看大图');
+    button.setAttribute('aria-label','书摘插图，双击查看大图');
     return item;
   }
   function paint(bookId,rows) {

@@ -1,5 +1,5 @@
 /** Public API returned by the installed ST-iPhonie panel bridge (backend API 1.0.0 plus drawing). */
-type ReadingSources = {persona: boolean; lore: boolean; story: boolean; history: boolean};
+type ReadingSources = {userPersona?: boolean; persona: boolean; lore: boolean; story: boolean; history: boolean};
 
 export type Engine = 'fish' | 'mini' | 'eleven' | 'mimo' | 'doubao' | 'custom';
 /** Keys cover the voice engines and NovelAI. */
@@ -1313,6 +1313,8 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     /** A picture the chat asked to open in the drawing app, if any. */
     takeDraw(): (DrawInput & { tag?: string; seed?: number }) | null;
     /** Generates the contacts' next messages with the tavern's connected model and stores them. */
+    summarizeReading(prompt:Array<{role:string;content:string}>): Promise<string>;
+    readingReply(options: {sources: ReadingSources; companion:string; reading:string; memoryText?:string; messages:Array<{from:string;text:string;photoId?:string}>; blob?:Blob|null}): Promise<string>;
     readingNote(options: {sources?: ReadingSources; companion: string; reading: string; blob?: Blob | null}): Promise<string>;
     chatReply(threadId: string, options?: {reading?: string; sources?: ReadingSources; pageKey?: string}): Promise<ChatThread>;
     /** Draws a contact's photo from its tags (allowPaid: even when it costs Anlas); resolves to the photo id. */

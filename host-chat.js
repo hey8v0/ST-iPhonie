@@ -254,6 +254,42 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     return job;
   }
 
+  async function readingReply({companion, sources = {}, reading, messages = [], blob, memoryText}) {
+    const valid = chatGuard(true), ctx = context();
+    if (!backend.contacts().some(c=>c.name===companion)) throw Error('共读角色不在当前手机分区');
+    const person = members({members:[companion]}, sources.persona !== false)[0];
+    const dm = sources.history && currentDm(await backend.threads(), companion);
+    const refs = await bookReferences(sources, person, reading, dm ? await backend.chats.get(dm.id) : null);
+    const user = userName(), profile = sources.userPersona !== false && userPersona();
+    const prompt = [{role:'system', content:[`你是${companion}，正在和${user}一起读这本书。自然回应对方刚才的话。`, person.persona || person.card, profile && '共读者'+user+'的人设：'+profile, refs, String(memoryText || '').slice(0,12000), reading].filter(Boolean).join('\n\n')},
+      ...messages.map(m=>({role:m.from==='me'?'user':'assistant',content:String(m.text)}))];
+    if (!prompt.length || prompt.at(-1).role !== 'user') throw Error('先写下想和 TA 说的话');
+    requireChat(valid);
+    let withImages=false;
+    async function appendImage(turn,image){
+      const url=await picture(image);
+      requireChat(valid);
+      if(typeof turn.content==='string')turn.content=[{type:'text',text:turn.content}];
+      turn.content.push({type:'image_url',image_url:{url}});
+      withImages=true;
+    }
+    let start=messages.length;
+    while(start>0 && messages[start-1].from==='me')start--;
+    for(let i=start;i<messages.length;i++){
+      if(!messages[i].photoId)continue;
+      const photo=await backend.library.getPhoto(messages[i].photoId);
+      if(!photo?.blob)throw Error('找不到消息里的图片，请重新添加附件');
+      await appendImage(prompt[i+1],photo.blob);
+    }
+    if(blob)await appendImage(prompt.at(-1),blob);
+    const result=withImages
+      ? await ask(ctx,backend,settings(),prompt,{label:'共读 · 看图',use:'chat'})
+      : await backend.generateText(ctx,{use:'chat',prompt,trimNames:false,responseLength:4096});
+    requireChat(valid);
+    if (!String(result || '').trim()) throw Error('没有收到回复，可以重试');
+    return String(result).trim();
+  }
+
   /** Margin notes have their own request: no fabricated user message, private chat or phone side effects. */
   async function readingNote({companion, reading, blob = null, sources = {persona: true}} = {}) {
     const valid = chatGuard(true), ctx = context(), person = members({members: [String(companion || '')]}, sources.persona !== false)[0];
@@ -265,7 +301,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     const pics = blob && await sees(ctx) ? [{id: 'page', url: await picture(blob)}] : [];
     requireChat(valid);
     const persona = person.persona || person.card;
-    const request = images => [{role: 'system', content: [`你是${person.name}。`, persona && '角色人设\n' + persona, refs,
+    const request = images => [{role: 'system', content: [`你是${person.name}。`, persona && '角色人设\n' + persona, '共读者：'+userName(), sources.userPersona !== false && userPersona(), refs,
       '只写一句当前页的页边批注，不超过四十字，不写用户提问、姓名前缀或手机操作标签。', String(reading || '').slice(0, 6000)].filter(Boolean).join('\n\n')},
       {role: 'user', content: images.length ? [{type: 'text', text: '为眼前这一页留一句批注。'}, ...images.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : '为眼前这一页留一句批注。'}];
     const answer = await answerFor(ctx, request, pics, new AbortController().signal);
@@ -1241,7 +1277,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
 
   return {
     bubbleRewrite, drawRoleSticker, clockTick, startClock, remindTick, groupTalk, outfitChanged, peekLater, makeGroup, letterTick, loreTest,
-    readingNote, reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, restoreLatestPhoneText, phoneAfter, phoneAfterPlan, askFriend,
+    readingReply, readingNote, reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, restoreLatestPhoneText, phoneAfter, phoneAfterPlan, askFriend,
     reroll: threadId => reply(threadId, {reroll: true}),
     /** 停止回复: the reply being written for this chat is let go. */
     cancel: threadId => { stops.get(threadId)?.abort(); },

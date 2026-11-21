@@ -8,8 +8,9 @@ import {icon} from './icons.js';
 import {openBook, bookImports, bookFileAccept, readerDefaults, annotationDue, naturalCompare, seriesOf, effectOf,
   normalizeStats, addReadingTime, todaySeconds, weekSeconds, readingLeft, span,
   normalizeHighlights, toggleHighlight, normalizeAnnotations} from '../core/bookshelf.js';
-import {readingSend, readingSources} from '../core/reading-chat.js';
-import {currentDm} from '../core/chats.js';
+import {readingSend, readingSources, readingContext} from '../core/reading-chat.js';
+import {swipeRow, mountSwipeList} from './swipe-list.js';
+import {openReadingThreads} from './reading-threads.js';
 import {openAlbum} from './album-viewer.js';
 import {selectedRange, underline, point, offsetAt} from './reading-range.js';
 import {readingArt} from './reading-art.js';
@@ -20,7 +21,7 @@ const IDLE = 120000;   // not reading any more after two minutes without a touch
 
 export function bookshelfApp(ctx) {
   const {api, win, doc} = ctx, v = createView(ctx, 'bookshelf');
-  let books = [], book = null, reader = null, chapter = null, page = 0, pages = 1, epoch = 0, album = null, busy = false, noteBusy = false, resize = null;
+  let books = [], book = null, reader = null, chapter = null, page = 0, pages = 1, epoch = 0, album = null, noteBusy = false, resize = null;
   let shelfLayout = null, coverObserver = null, pulledId;
   let stage = null, filter = ALL, importing = null, lastPosition = null;
   let preferenceWrites = Promise.resolve();
@@ -133,7 +134,17 @@ export function bookshelfApp(ctx) {
       // On a partly filled ledge the last book can lean against its neighbour.
       // Leave the triangular space its binding occupies, with its bottom corner on the shelf.
       for (const volume of volumes) volume.classList.remove('resting');
-      if (row?.children.length > 1 && available - used >= 14) row.lastElementChild.classList.add('resting');
+      for (const rail of fragment.querySelectorAll('.bs-rail')) {
+        const items = [...rail.children], room = available - items.reduce((n,b)=>n+Number(b.dataset.width)+1,0);
+        if (items.length < 2 || room < 4) continue;
+        const seed = hue(items[0].dataset.spine);
+        const right = (seed & 1) === 1;
+        const resting = items[(right ? 0 : 1) + (seed >>> 1) % (items.length - 1)], gap = Math.min(room, 7 + seed % 10);
+        resting.style.setProperty('--lean-start', (right ? 0 : gap)+'px');
+        resting.style.setProperty('--lean-end', (right ? gap : 0)+'px');
+        resting.style.setProperty('--lean-angle', (right ? 1 : -1)*Math.atan(gap / (parseFloat(resting.style.getPropertyValue('--height')) || 145))*180/Math.PI+'deg');
+        resting.classList.add('resting');
+      }
       rack.replaceChildren(fragment);
       rack.append(caption);
       caption.hidden = true;
@@ -197,7 +208,7 @@ export function bookshelfApp(ctx) {
     const b=books.find(row=>row.id===id);
     if (!b)return;
     const d=ctx.dialog('书籍信息',`<div class="bs-dossier"><div data-detail-cover></div><h2>${esc(b.title)}</h2><small>${esc(b.author || (b.type==='comic'?'漫画':'小说'))} · ${b.lastRead?'已读 '+progress(b)+'%':'未开始'}</small></div>`
-      +btn('book-options',icon('settings')+' 共读与阅读设置','bs-options-link')
+      +btn('book-options',icon('sliders')+' 共读与阅读设置','bs-options-link')
       +btn('detail-start',b.lastRead?'继续阅读':'开始阅读','primary'));
     d.body.querySelector('[data-action=book-options]').onclick=()=>bookOptions(b.id, 'together', {over:true});
     const paintCover=src=>{const img=doc.createElement('img');img.alt='';img.src=src;d.body.querySelector('[data-detail-cover]').replaceChildren(img);};
@@ -227,11 +238,11 @@ export function bookshelfApp(ctx) {
     const cats = categories(), last = books.filter(b => b.lastRead).sort((a, b) => b.lastRead - a.lastRead)[0];
     if (filter !== ALL && filter !== RECENT && filter !== LOOSE && !cats.includes(filter)) filter = ALL;
     if (picking === 'pick' && mark.size) { mark = new Set([...mark].filter(id => books.some(b => b.id === id))); if (!mark.size) picking = null; }
-    const chips = books.length ? `<div class="filter-row bs-chips" role="group" aria-label="分类">${[[ALL, `全部 <small>${books.length}</small>`], ...(last ? [[RECENT, '最近在读']] : []), ...cats.map(c => [c, `${esc(c)} <small>${books.filter(b => b.shelf === c).length}</small>`]), ...(cats.length && books.some(b => !b.shelf) ? [[LOOSE, '未分类']] : [])].map(([k, label]) => `<button type="button" data-shelf="${esc(k)}" aria-pressed="${filter === k}">${label}</button>`).join('')}</div>` : '';
+    const chips = books.length ? `<div class="filter-row bs-chips" role="group" aria-label="分类">${cats.length ? btn('manage-categories',icon('layers')+' 分类','text-button','aria-label="管理分类"') : ''}${[[ALL, `全部 <small>${books.length}</small>`], ...(last ? [[RECENT, '最近在读']] : []), ...cats.map(c => [c, `${esc(c)} <small>${books.filter(b => b.shelf === c).length}</small>`]), ...(cats.length && books.some(b => !b.shelf) ? [[LOOSE, '未分类']] : [])].map(([k, label]) => `<button type="button" data-shelf="${esc(k)}" aria-pressed="${filter === k}">${label}</button>`).join('')}</div>` : '';
     const today = last ? todaySeconds(last.stats) : 0;
     const left = last ? readingLeft(last, last.stats) : null;
     const going = last && filter === ALL && !picking ? `<button type="button" class="bs-continue" data-read="${esc(last.id)}"><span class="bs-mini" style="--book-hue:${hue(last.title)}" data-cover="${esc(last.id)}"><b>${esc(last.title)}</b></span><span class="bs-go"><small>继续读</small><strong>${esc(last.title)}</strong><small>${esc(last.chapters[last.position?.chapter || 0]?.title || '')} · ${progress(last)}%${left ? ` · 还剩约 ${span(left)}` : ''}</small></span>${icon('next')}</button>${today ? `<p class="bs-today">今天在这本书上读了 ${span(today)}</p>` : ''}` : '';
-    const head = heading('书架', picking ? btn('pick-done', '完成', 'text-button') : (books.length ? btn('pick-start', icon('check') + '多选', 'text-button') + btn('shelf-options', icon('settings'), 'text-button', 'aria-label="书架设置"') + btn('import', icon('add') + '导入', 'text-button') : btn('import', icon('add') + '导入', 'text-button')), 'Bookshelf');
+    const head = heading('书架', picking ? btn('pick-done', '完成', 'text-button') : (books.length ? btn('pick-start', icon('check') + '多选', 'text-button') + btn('import', icon('add') + '导入', 'text-button') : btn('import', icon('add') + '导入', 'text-button')), 'Bookshelf');
     v.draw(head + (books.length ? going + chips + `<div class="bs-shelves">${browsingShelf(inView())}</div>` : empty('书架还是空的', '支持 EPUB、TXT、Markdown、CBZ，也可以导入图片 ZIP 或打包好的多本书。', 'book'))
       + (picking ? `<div class="bs-pickbar"><span>${mark.size ? `选了 ${mark.size} 本` : '点书选择'}</span><div>${btn('pick-shelf', icon('layers') + '放进分类', 'chip-button', mark.size ? '' : 'disabled')}${btn('pick-delete', icon('trash') + '删除', 'chip-button danger', mark.size ? '' : 'disabled')}</div></div>` : ''));
     arrangeRack();
@@ -286,7 +297,7 @@ export function bookshelfApp(ctx) {
   /** Asks for a category name (an existing one, a new one, or none) — returns {shelf} or null when the user backs out. */
   async function askShelf(current = '') {
     const cats = categories();
-    const key = await menu(ctx, '放进分类', [...cats.map(c => ({key: 'c:' + c, label: c, note: c === current ? '现在在这里' : ''})), {key: 'new', label: '新建分类', icon: 'add'}, ...(current ? [{key: 'none', label: '不分类', icon: 'close'}] : [])]);
+    const key = await menu(ctx, '放进分类', [...cats.map(c => ({key: 'c:' + c, label: c, note: c === current ? '现在在这里' : ''})), {key: 'new', label: '新建分类', icon: 'add'}, {key: 'none', label: '移出分类', icon: 'close'}]);
     if (!key) return null;
     if (key === 'none') return {shelf: ''};
     if (!key.startsWith('c:')) {
@@ -301,6 +312,25 @@ export function bookshelfApp(ctx) {
     return {shelf: key.slice(2)};
   }
   /** 多选 → 放进分类: the same category for every picked book. */
+  function manageCategories(){
+    const d=ctx.dialog('管理分类', categories().map(name=>swipeRow(name,'<strong>'+esc(name)+'</strong>',[{key:'rename',label:'改名',icon:'edit'},{key:'remove',label:'解散',icon:'trash',danger:true}],{label:name})).join(''));
+    d.body.classList.add('bs-category-manager');
+    const control=mountSwipeList(d.body,{ctx,onAction:async(action,name)=>{
+      const ids=books.filter(b=>b.shelf===name).map(b=>b.id);
+      d.close();
+      if(action==='remove'){
+        if(!await ctx.confirm('解散「'+name+'」？','这 '+ids.length+' 本书将移到未分类。')) return;
+        await api.updateReadingBooks(ids,{shelf:''});
+      } else {
+        const form=ctx.dialog('分类改名',field('分类名',input('rename',name,'text','maxlength="20"'))+btn('save-name','保存','primary'));
+        const next=await new Promise(resolve=>{form.onClose(()=>resolve('')); form.body.querySelector('button[data-action=save-name]').onclick=()=>{const value=form.body.querySelector('input').value.trim();if(!value)return;resolve(value);form.close();};});
+        if(!next || next===name)return;
+        if(categories().includes(next)){ctx.notify('这个分类名已经存在');return;}
+        await api.updateReadingBooks(ids,{shelf:next}); if(filter===name)filter=next;
+      }
+      await shelf();
+    }}); d.onClose(()=>control.dispose());
+  }
   async function shelfPicked() {
     const ids = [...mark]; if (!ids.length) return;
     const answer = await askShelf(ids.length === 1 ? (books.find(b => b.id === ids[0])?.shelf || '') : '');
@@ -401,6 +431,7 @@ export function bookshelfApp(ctx) {
       const group = (title, rows) => `<section class="bs-options-group"><h3>${title}</h3>${rows}</section>`;
       const together = () => field('和谁一起看', select('mate', mate, [['','自己看'],...names.map(n=>[n,n])]))
         + group('聊书和批注时参考', toggle('withPersona','角色人设',refs.persona,'优先使用联系人设，留空时读取同名酒馆角色卡的描述和性格。')
+          + toggle('withUserPersona','我的酒馆人设',refs.userPersona,'参考当前酒馆用户的名字与人设描述。关闭时只使用名字。')
           + toggle('withLore','世界书',refs.lore,'扫描本页和角色名，沿用聊天预设的书目、条目筛选和预算。')
           + toggle('withStory','酒馆剧情',refs.story,'读取当前酒馆聊天的可见正文，按聊天预设的字数范围截取。')
           + toggle('withHistory','最近私聊',refs.history,'读取你和这位角色的手机私聊，条数跟随聊天预设。'))
@@ -445,6 +476,7 @@ export function bookshelfApp(ctx) {
     d.onClose(() => preferenceWrites.then(() => {
       if (!v.disposed && refreshReader && reader && book?.id === id) return showChapter(book.position.chapter,book.position.fraction);
     }).catch(fail));
+    return d;
   }
   const settings = () => book && bookOptions(book.id,'reading');
   /** 目录、书签和书摘 in one sheet with three tabs (0.9.52). */
@@ -459,8 +491,12 @@ export function bookshelfApp(ctx) {
         : tab === 'notes' ? (normalizeAnnotations(book.annotations).filter(n => n.chapter === book.position.chapter).map(n => `<div class="bs-pick"><strong>${esc(n.who)}</strong><p>${esc(n.text)}</p></div>`).join('') || '<p class="hint">本章还没有批注。</p>')
         : tab === 'picks' ? (picks.length ? picks.map(h => `<div class="bs-pick"><button type="button" class="bs-pick-go" data-pick="${esc(h.id)}"><strong>${esc(book.chapters[h.chapter]?.title || '')}</strong><p>${esc(h.text)}</p></button><div class="bs-pick-acts">${btn('pick-send', icon('chat'), 'round-button', `data-id="${esc(h.id)}" aria-label="发给 TA"`)}${btn('pick-del', icon('trash'), 'round-button', `data-id="${esc(h.id)}" aria-label="删掉这段书摘"`)}</div></div>`).join('') : '<p class="hint">长按一段文字，选「划线」就收进这里。</p>')
           : `<div class="reading-toc">${book.bookmarks.length ? '' : ''}${book.chapters.map((c, i) => `<button data-chapter="${i}" ${i === book.position.chapter ? 'aria-current="true"' : ''}>${esc(c.title)}</button>`).join('')}</div>`;
-      d.body.innerHTML = tabs + body;
-      d.body.querySelector('[aria-current=true]')?.scrollIntoView?.({block: 'center'});
+      d.body.innerHTML = tabs + (tab === 'toc' ? '<label class="qq-search bs-chapter-search">'+icon('search')+'<input type="search" data-find-chapter aria-label="查找章节" placeholder="搜索章节名或序号"></label>' : '') + '<div class="bs-directory-list">'+body+'</div>';
+      const search=d.body.querySelector('[data-find-chapter]');
+      if(search) search.oninput=()=>{ const q=search.value.trim().toLowerCase();
+        for(const item of d.body.querySelectorAll('[data-chapter]')) item.hidden=!!q && !item.textContent.toLowerCase().includes(q) && String(Number(item.dataset.chapter)+1)!==q;
+      };
+      const current=d.body.querySelector('[aria-current=true]'), list=d.body.querySelector('.bs-directory-list'); if(current && list) list.scrollTop=current.offsetTop-list.clientHeight/2;
     };
     paint();
     d.body.addEventListener('click', async e => {
@@ -527,7 +563,7 @@ export function bookshelfApp(ctx) {
     const id = book.id, p = {...book.position, fraction};
     const position = `${id}|${p.chapter}|${Math.round(p.fraction * 10000)}`;
     turn = turn && lastPosition !== null && lastPosition !== position; lastPosition = position;
-    book.position = p; if (turn) book.turns = (book.turns || 0) + 1;
+    book.position = p; paintRibbon(); if (turn) book.turns = (book.turns || 0) + 1;
     const stats = turn ? flushRead() : null;
     const saved = await api.updateReadingBook(id, {position: p, turns: book.turns, lastRead: Date.now(), ...(stats ? {stats} : {})});
     if (book?.id !== id || book.position.chapter !== p.chapter || book.position.fraction !== p.fraction) return;
@@ -560,14 +596,8 @@ export function bookshelfApp(ctx) {
       if (p) { const r = doc.createRange(); r.setStart(...p); r.collapse(true); r.insertNode(el); } else if (target) target.after(el);
     }
   }
-  async function send(text, quote = '', annotation = false) {
-    if (!book.companion) { await pickCompanion(book); if (!book.companion) return; }
-    const target = book, view = visible(); if (quote) view.text = quote.slice(0, 2200);
-    const blob = book.type === 'comic' && chapter?.images[0] ? await reader.image(chapter.images[0]) : null;
-    return readingSend(api, target, view, text, {blob, annotation, quote});
-  }
   async function maybeNote() {
-    if (busy || noteBusy || !book?.settings.occasionalNotes || !annotationDue(book) || Date.now() - (book.annotations?.at(-1)?.at || 0) < 600000) return;
+    if (noteBusy || !book?.settings.occasionalNotes || !annotationDue(book) || Date.now() - (book.annotations?.at(-1)?.at || 0) < 600000) return;
     noteBusy = true;
     const target = book, view = visible(), source = reader, image = chapter?.images[0], day = new Date().toLocaleDateString('sv-SE');
     const companion = target.companion, sources = readingSources(target.settings);
@@ -591,18 +621,27 @@ export function bookshelfApp(ctx) {
   }
   async function chatPanel(quote = '') {
     if (!book?.companion) { await pickCompanion(book); if (!book?.companion) return; }
-    const target = book, d = ctx.dialog('和' + target.companion + '一起看', `<div class="reading-chat"></div>${quote ? `<blockquote>${esc(quote.slice(0, 200))}</blockquote>` : ''}<form class="reading-compose"><input type="text" aria-label="聊聊这一页" placeholder="聊聊这一页…" maxlength="3000" enterkeyhint="send"><button type="submit" class="primary">发送</button></form>`, {over: true});
-    const list = d.body.querySelector('.reading-chat'), box = d.body.querySelector('input'), form = d.body.querySelector('form');
-    const draw = t => { list.innerHTML = (t?.messages || []).filter(m => ['text', 'voice', 'photo'].includes(m.kind)).slice(-20).map(m => `<div class="reading-msg${m.from === 'me' ? ' reading-mine' : ''}"><small>${esc(m.from === 'me' ? '我' : m.from)}</small>${m.quote ? `<blockquote>${esc(m.quote.text)}</blockquote>` : ''}<span>${esc(m.text || '图片')}</span></div>`).join(''); list.scrollTop = list.scrollHeight; };
-    let submitted = false;
-    form.onsubmit = async e => { e.preventDefault(); if (busy || !d.live || book?.id !== target.id || book.companion !== target.companion) return; submitted = true; busy = true; const value = box.value.trim() || '这一页你有什么感想？'; box.value = ''; const sendButton=form.querySelector('button'), label=sendButton.textContent; sendButton.disabled=true; sendButton.textContent='回复中…'; try { draw(await send(value, quote)); quote = ''; } catch (error) { box.value = value; fail(error); } finally { busy=false; sendButton.disabled=false; sendButton.textContent=label; } };
-    if (quote) box.value = '这段你怎么看？';
-    const t = currentDm(await api.listThreads(), target.companion);
-    const initial = t ? await api.getThread(t.id) : null; if (d.live && !submitted) draw(initial);
+    const target=book, source=reader, companion=target.companion;
+    const contact=api.chatContacts().find(c=>c.name===companion);
+    const key='readingThreads:'+JSON.stringify([contact?.id || '',companion]);
+    await openReadingThreads(ctx,{book:target,key,companion,quote,visible,openSettings:()=>bookOptions(target.id,'together',{over:true}), async respond(messages,view,memoryText){
+      const blob=target.type==='comic' ? await source.image((await source.chapter(view.chapter)).images[0]) : null;
+      if(target.type==='comic' && !blob) throw Error('未读到这页漫画，可以重试');
+      return api.readingReply({companion,sources:readingSources(target.settings),messages,blob,memoryText,
+        reading:readingContext(target,view,api.readState().promptRules)});
+    }});
+  }
+  function paintRibbon() {
+    const root = album?.root || stage;
+    if (!root || !book) return;
+    const marked = book.bookmarks?.some(m=>m.chapter===book.position.chapter && Math.abs(m.fraction-book.position.fraction)<.01);
+    let ribbon = root.querySelector('.bs-ribbon');
+    if (!marked) { ribbon?.remove(); return; }
+    if (!ribbon) { ribbon=doc.createElement('span'); ribbon.className='bs-ribbon'; ribbon.setAttribute('aria-label','本页已加书签'); root.append(ribbon); }
   }
   async function bookmark() {
     const p = {...book.position}, marks = book.bookmarks || [], found = marks.findIndex(m => m.chapter === p.chapter && Math.abs(m.fraction - p.fraction) < .01);
-    book = await api.updateReadingBook(book.id, {bookmarks: found < 0 ? [...marks, p].slice(-200) : marks.filter((_, i) => i !== found)}); ctx.notify(found < 0 ? '已加书签' : '已移除书签');
+    book = await api.updateReadingBook(book.id, {bookmarks: found < 0 ? [...marks, p].slice(-200) : marks.filter((_, i) => i !== found)}); paintRibbon(); ctx.notify(found < 0 ? '已加书签' : '已移除书签');
   }
   function enableSelection(pane) {
     let bar, selected, settling;
@@ -698,7 +737,7 @@ export function bookshelfApp(ctx) {
     book.position = {chapter: index, fraction}; const nextChapter = await reader.chapter(index); if (token !== epoch) return; chapter = nextChapter;
     if (book.type === 'comic' && book.settings.mode === 'pages') { stage?.remove(); stage = null; content = null; blocks = []; await comic(index); return; }
     const s = book.settings, hidden = stage?.querySelector('.reading-reader')?.classList.contains('reading-hidden') ?? true;
-    openStage(`<section class="reading-reader${hidden ? ' reading-hidden' : ''}" data-paper="${esc(s.theme)}" data-mode="${esc(s.mode)}" data-effect="${esc(effectOf(s.effect))}" style="--read-size:${s.size}px;--read-line:${s.line};--read-margin:${s.margin}px;--read-font:${s.font}"><header class="reading-bar"><button data-action="shelf" aria-label="返回书架">${icon('back')}</button><span>${esc(book.title)}</span><button data-action="settings" aria-label="阅读设置">${icon('settings')}</button></header><div class="reading-page" tabindex="0"><article class="reading-content">${chapter.html}</article></div><div class="reading-folio" aria-hidden="true"><span data-folio-title>${esc(book.chapters[index]?.title || '')}</span><span data-folio-page></span></div><footer class="reading-bottom"><small data-reading-count></small><input aria-label="阅读进度" data-reading-progress type="range" min="0" max="100" step="0.01"><nav><button data-action="toc">${icon('book')}目录</button><button data-action="bookmark">${icon('star')}书签</button><button data-action="chat">${icon('chat')}一起看</button></nav></footer></section>`);
+    openStage(`<section class="reading-reader${hidden ? ' reading-hidden' : ''}" data-paper="${esc(s.theme)}" data-mode="${esc(s.mode)}" data-effect="${esc(effectOf(s.effect))}" style="--read-size:${s.size}px;--read-line:${s.line};--read-margin:${s.margin}px;--read-font:${s.font}"><header class="reading-bar"><button data-action="shelf" aria-label="返回书架">${icon('back')}</button><span>${esc(book.title)}</span><button data-action="settings" aria-label="阅读设置">${icon('sliders')}</button></header><div class="reading-page" tabindex="0"><article class="reading-content">${chapter.html}</article></div><div class="reading-folio" aria-hidden="true"><span data-folio-title>${esc(book.chapters[index]?.title || '')}</span><span data-folio-page></span></div><footer class="reading-bottom"><small data-reading-count></small><input aria-label="阅读进度" data-reading-progress type="range" min="0" max="100" step="0.01"><nav><button data-action="toc">${icon('book')}目录</button><button data-action="bookmark">${icon('star')}书签</button><button data-action="chat">${icon('chat')}一起看</button></nav></footer></section>`);
     const pane = $('.reading-page'); content = $('.reading-content');
     // Each block gets its number: 书摘 and notes remember where they sit by it (0.9.52).
     blocks = [...content.children];
@@ -722,6 +761,7 @@ export function bookshelfApp(ctx) {
     };
     refreshLayout = layout; layout();
     if (win.ResizeObserver) { resize = new win.ResizeObserver(layout); resize.observe(pane); }
+    paintRibbon();
     enableSelection(pane);
     let start = null, swiped = false, drag = 0;
     pane.addEventListener('pointerdown', e => {
@@ -775,12 +815,12 @@ export function bookshelfApp(ctx) {
     const owner = book.id, ids = book.chapters.map((_, i) => String(i)); if (book.settings.rtl) ids.reverse();
     album = openAlbum({ctx, host: v.root.closest('.screen') || v.root, ids, index: ids.indexOf(String(index)), preload: true,
       load: async id => { const c = await reader.chapter(Number(id)), blob = await reader.image(c.images[0]); return blob ? {blob, name: book.chapters[Number(id)].title} : null; },
-      onPage: id => { const n = Number(id); activeAt = Date.now(); book.position = {chapter: n, fraction: 0}; page = n; pages = book.chapters.length; reader.chapter(n).then(c => { if (book?.id !== owner || book.position.chapter !== n) return; chapter = c; savePosition(0, true).catch(fail); }); },
-      onPullDown: () => contents(),
+      onPage: id => { const n = Number(id); activeAt = Date.now(); book.position = {chapter: n, fraction: 0}; page = n; pages = book.chapters.length; paintRibbon(); const range=album?.root.querySelector('.reading-comic-progress'); if(range) range.value=String(n); reader.chapter(n).then(c => { if (book?.id !== owner || book.position.chapter !== n) return; chapter = c; savePosition(0, true).catch(fail); }); },
+      onPullDown: () => bookmark().catch(fail),
       onHold: () => chatPanel('这一页漫画'), onClose: () => { if (album) { album = null; if (book?.settings.mode === 'scroll') showChapter(book.position.chapter, book.position.fraction).catch(fail); else shelf().catch(fail); } },
-      actions: [{key: 'toc', icon: 'book', label: '目录', run: contents}, {key: 'bookmark', icon: 'star', label: '书签', run: bookmark}, {key: 'chat', icon: 'chat', label: '一起看', run: () => chatPanel()}, {key: 'settings', icon: 'settings', label: '设置', run: settings}]});
+      actions: [{key: 'toc', icon: 'book', label: '目录', run: contents}, {key: 'bookmark', icon: 'star', label: '书签', run: bookmark}, {key: 'chat', icon: 'chat', label: '一起看', run: () => chatPanel()}, {key: 'settings', icon: 'sliders', label: '设置', run: settings}]});
     album.root.setAttribute('aria-label', book.title); album.root.querySelector('[data-av=close]').setAttribute('aria-label', '返回书架');
-    const slider = doc.createElement('input'); slider.type = 'range'; slider.min = '0'; slider.max = String(book.chapters.length - 1); slider.value = String(index); slider.setAttribute('aria-label', '漫画进度'); slider.className = 'reading-comic-progress'; slider.onchange = () => showChapter(Number(slider.value)).catch(fail); album.root.querySelector('.album-bar').before(slider); showNotes();
+    const slider = doc.createElement('input'); slider.type = 'range'; slider.min = '0'; slider.max = String(book.chapters.length - 1); slider.value = String(index); slider.setAttribute('aria-label', '漫画进度'); slider.className = 'reading-comic-progress'; slider.onchange = () => showChapter(Number(slider.value)).catch(fail); album.root.querySelector('.album-bar').before(slider); paintRibbon(); showNotes();
   }
   async function turn(step) {
     if (!book || !content || turning) return;
@@ -857,7 +897,7 @@ export function bookshelfApp(ctx) {
   });
   v.on('click', '[data-more]', el => more(el.dataset.more).catch(fail));
   v.on('click', '[data-shelf]', el => { filter = el.dataset.shelf; shelf().catch(fail); });
-  v.on('click', '[data-action]', el => ({import: importFiles, 'shelf-options': () => bookOptions(pulledId && books.some(b=>b.id===pulledId) ? pulledId : inView()[0]?.id || books[0]?.id, 'together', {library:true}), 'pick-start': () => { picking = 'pick'; mark.clear(); shelf().catch(fail); }, 'pick-done': () => { picking = null; mark.clear(); shelf().catch(fail); }, 'pick-shelf': shelfPicked, 'pick-delete': deletePicked, shelf: () => shelf().catch(fail)})[el.dataset.action]?.());
+  v.on('click', '[data-action]', el => ({import: importFiles, 'manage-categories':manageCategories, 'pick-start': () => { picking = 'pick'; mark.clear(); shelf().catch(fail); }, 'pick-done': () => { picking = null; mark.clear(); shelf().catch(fail); }, 'pick-shelf': shelfPicked, 'pick-delete': deletePicked, shelf: () => shelf().catch(fail)})[el.dataset.action]?.());
   v.back = () => { if (!book && filter!==ALL && !picking) { filter=ALL; shelf().catch(fail); return true; } if (!book) return false; shelf().catch(fail); return true; }; v.refresh = () => { if (!book) shelf().catch(fail); }; v.edit = id => open(id).catch(fail);
   const dispose = v.dispose; v.dispose = () => { leave(); art.dispose(); dispose(); };
   v.leave = () => { leave(); book = null; };

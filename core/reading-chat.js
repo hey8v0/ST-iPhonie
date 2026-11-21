@@ -2,7 +2,7 @@ import {promptText} from './prompt-rules.js';
 import {currentDm} from './chats.js';
 
 export function readingSources(settings = {}) {
-  return {persona: settings.withPersona !== false, lore: settings.withLore === true,
+  return {userPersona:settings.withUserPersona !== false, persona: settings.withPersona !== false, lore: settings.withLore === true,
     story: settings.withStory === true, history: settings.withHistory === true};
 }
 
