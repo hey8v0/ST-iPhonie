@@ -1,7 +1,13 @@
 import {archiveBuffer} from './archive-io.js';
-// Local EPUB/TXT reading. Archive entries are opened on demand, never retained by the ZIP directory.
+// Local book reading. Archive entries are opened on demand, never retained by the ZIP directory.
 import {readZipBlob} from './model-files.js';
 import {AppStore} from './app-store.js';
+
+const bookExtensions = ['.epub', '.txt', '.md', '.markdown', '.cbz'];
+export const bookFileAccept = [...bookExtensions, '.zip'].join(',');
+const fileExtension = name => /\.[^.\/]+$/.exec(name.toLowerCase())?.[0] || '';
+const bookTitle = name => name.slice(0, name.length - fileExtension(name).length);
+const visibleEntry = path => path.split('/').every(part => part && !part.startsWith('.') && part !== '__MACOSX');
 
 export const readerDefaults = {size: 19, line: 1.9, margin: 24, font: 'serif', theme: 'auto', mode: 'pages', rtl: false, annotations: true, effect: 'page'};
 /** 翻页效果 (0.9.52): 仿真翻页 / 平滑滑动 / 无。 */
@@ -65,13 +71,58 @@ const bookStep = async (name, step, run) => { try {return await run();} catch (e
 export async function openBook(blob, name, Parser = globalThis.DOMParser) {
   return bookStep(name, '打开电子书', () => openBookData(blob, name, Parser));
 }
+async function openMarkdown(blob, name, Parser) {
+  // Reuse the bundled local Markdown renderer. Links and raw markup remain inert.
+  const {assistantMarkdown} = await import('../ui/assistant-markdown.js');
+  const source = decodeBook(await archiveBuffer(blob));
+  const body = new Parser().parseFromString(assistantMarkdown(source), 'text/html').body;
+  const chapters = [];
+  let current, length = 0;
+  for (const node of body.children) {
+    const heading = /^H[12]$/.test(node.tagName);
+    if (!current || heading || length >= 16000) {
+      current = {title: heading ? node.textContent : current?.title || '正文', blocks: []};
+      chapters.push(current);
+      length = 0;
+    }
+    current.blocks.push(node);
+    length += node.textContent.length;
+  }
+  if (!chapters.length) throw Error('Markdown 文件没有可阅读的正文');
+  return {
+    title: body.querySelector('h1')?.textContent.trim() || bookTitle(name), author: '', type: 'novel',
+    estimatedPages: Math.max(1, Math.ceil(body.textContent.length / 500)), chapters: chapters.map(c => ({title: c.title})),
+    chapter: async i => ({html: chapters[i].blocks.map(n => n.outerHTML).join(''), text: chapters[i].blocks.map(n => n.textContent).join('\n'), images: []}),
+    image: async () => null
+  };
+}
+function archivedImage(files, name, path) {
+  return bookStep(name, `读取书内图片「${path}」`, async () => {
+    if (!raster(path) || !files.has(path)) return null;
+    const blob = await files.get(path).blob();
+    const type = fileExtension(path).slice(1).replace(/^jpg$/, 'jpeg');
+    return blob.slice(0, blob.size, 'image/' + type);
+  });
+}
 async function openBookData(blob, name, Parser) {
-  if (/\.txt$/i.test(name)) {
+  const ext = fileExtension(name);
+  if (ext === '.md' || ext === '.markdown') return openMarkdown(blob, name, Parser);
+  if (ext === '.txt') {
     const chapters = txtChapters(decodeBook(await archiveBuffer(blob)));
     return {title: name.replace(/\.txt$/i, ''), author: '', type: 'novel', estimatedPages: Math.max(1, Math.ceil(chapters.reduce((sum,c) => sum + c.text.length, 0) / 500)), chapters: chapters.map(c => ({title: c.title})),
       chapter: async i => ({html: chapters[i].text.split('\n').map(t => `<p>${escape(t) || '<br>'}</p>`).join(''), text: chapters[i].text, images: []}), image: async () => null};
   }
   const files = await readZipBlob(blob, {cache: false, verify: true});
+  const image = path => archivedImage(files, name, path);
+  if (ext === '.cbz' || ext === '.zip') {
+    const pages = [...files.keys()].filter(path => visibleEntry(path) && raster(path)).sort(naturalCompare);
+    if (!pages.length) throw Error('漫画压缩包里没有支持的图片');
+    return {
+      title: bookTitle(name), author: '', type: 'comic', cover: pages[0], image, estimatedPages: pages.length,
+      chapters: pages.map((path, i) => ({title: path.split('/').pop(), source: i, image: path})),
+      chapter: async i => ({html: `<img data-book-image="${escape(pages[i])}" alt="漫画页">`, text: '', images: [pages[i]]})
+    };
+  }
   const read = path => bookStep(name, `读取书内文件「${path}」`, async () => { const f = files.get(path); if (!f || f.size > 16 * 1024 * 1024) throw Error('电子书章节缺失或过大'); return new TextDecoder().decode(await archiveBuffer(await f.blob())); });
   const container = xml(await read('META-INF/container.xml'), Parser), opfPath = nodes(container, 'rootfile')[0]?.getAttribute('full-path');
   const opf = xml(await read(opfPath), Parser), manifest = new Map(nodes(opf, 'item').map(n => [n.getAttribute('id'), {path: bookPath(opfPath, n.getAttribute('href')), properties: n.getAttribute('properties') || '', mime: n.getAttribute('media-type')} ]));
@@ -93,7 +144,6 @@ async function openBookData(blob, name, Parser) {
   const comic = fixed || sample.every(c => c.images.length > 0 && c.text.length < 100);
   const coverId = nodes(opf, 'meta').find(n => n.getAttribute('name') === 'cover')?.getAttribute('content');
   const cover = manifest.get(coverId)?.path || [...manifest.values()].find(n => n.properties.split(/\s+/).includes('cover-image'))?.path || (comic ? sample[0].images[0] : '');
-  const image = path => bookStep(name, `读取图片「${path}」`, async () => raster(path) && files.has(path) ? new Blob([await archiveBuffer(await files.get(path).blob())], {type: /\.png$/i.test(path) ? 'image/png' : /\.webp$/i.test(path) ? 'image/webp' : /\.gif$/i.test(path) ? 'image/gif' : /\.avif$/i.test(path) ? 'image/avif' : 'image/jpeg'}) : null);
   // Project the sampled visible text onto uncompressed spine documents only (exclude images, fonts and audio).
   const spineBytes = chapters.reduce((sum,c) => sum + (files.get(c.path)?.size || 0), 0);
   const sampleBytes = chapters.slice(0,sample.length).reduce((sum,c) => sum + (files.get(c.path)?.size || 0), 0);
@@ -105,8 +155,18 @@ async function openBookData(blob, name, Parser) {
 export async function bookImports(files) {
   const out = [];
   for (const file of files) {
-    if (/\.(epub|txt)$/i.test(file.name)) out.push({name: file.name, open: async () => file});
-    else if (/\.zip$/i.test(file.name)) for (const [name, item] of await bookStep(file.name, '读取书籍压缩包', () => readZipBlob(file, {cache: false, verify: true}))) if (/\.(epub|txt)$/i.test(name)) out.push({name: name.split('/').pop(), open: item.blob});
+    const direct = {name: file.name, open: async () => file};
+    if (bookExtensions.includes(fileExtension(file.name))) out.push(direct);
+    else if (fileExtension(file.name) === '.zip') {
+      let entries;
+      try { entries = await bookStep(file.name, '读取书籍压缩包', () => readZipBlob(file, {cache: false, verify: true})); }
+      catch (error) { out.push({name: file.name, open: async () => { throw error; }}); continue; }
+      const paths = [...entries.keys()].filter(visibleEntry);
+      const books = paths.filter(path => bookExtensions.includes(fileExtension(path)));
+      if (books.length) {
+        for (const path of books) out.push({name: path.split('/').pop(), open: entries.get(path).blob});
+      } else if (paths.some(raster)) out.push(direct);
+    }
   }
   return out;
 }
@@ -118,7 +178,9 @@ export const naturalCompare = (a, b) => NATURAL ? NATURAL.compare(String(a), Str
  * '' when the name has no number at its end to take off.
  */
 export function seriesOf(name) {
-  const base = String(name || '').replace(/\.(epub|txt|zip)$/i, '').trim();
+  const value = String(name || '').trim();
+  const ext = fileExtension(value);
+  const base = ext === '.zip' || bookExtensions.includes(ext) ? bookTitle(value).trim() : value;
   const cut = base.replace(/[\s_\-—–·.]*[(（\[【]?\s*(?:第\s*[0-9０-９一二三四五六七八九十百零〇两]+\s*[卷册集话話部巻本期]|(?:vol(?:ume)?|v|#|no)\.?\s*[0-9０-９]+|[0-9０-９]+\s*[卷册集话話部巻]?)\s*[)）\]】]?\s*$/i, '').trim();
   return cut && cut !== base ? cut.replace(/[\s_\-—–·.]+$/, '') : '';
 }
@@ -239,6 +301,7 @@ export class BookshelfStore {
   async update(id, patch) {
     return this.meta.change(id, row => {
       for (const key of ['estimatedPages','companion','settings','bookmarks','annotations','turns','nextNote','daily','shelf','lastRead','chapters','stats','highlights']) if (key in patch) row[key] = structuredClone(patch[key]);
+      if (patch.settingsPatch) row.settings = {...row.settings, ...structuredClone(patch.settingsPatch)};
       if (patch.illustration?.photoId) {
         const {version, ...pic} = structuredClone(patch.illustration);
         const images = row.illustrations ||= [];

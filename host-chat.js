@@ -106,12 +106,12 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     if (result && !result.available) backend.reportDiagnostic?.('正文读取', {message: result.reason + '，已改用跟着酒馆'}, 'warn');
     return result;
   }
-  function members(thread) {
+  function members(thread, withPersona = true) {
     // This card's contact first; a member the card's story has not met is still who they are (voice and all).
     const s = settings(), contacts = backend.contacts(), all = chatContacts(s);
     return thread.members.map(name => {
       const c = contacts.find(x => x.name === name) || all.find(x => x.name === name);
-      return {name, persona: c?.persona || '', card: c?.persona ? '' : card(name), voice: !!c?.voice, language: c?.language || s.general.defaultLanguage};
+      return {name, persona: withPersona && c?.persona || '', card: withPersona && !c?.persona ? card(name) : '', voice: !!c?.voice, language: c?.language || s.general.defaultLanguage};
     });
   }
 
@@ -141,13 +141,30 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     return {forum, posts};
   }
 
+  async function bookReferences(sources, person, reading, thread) {
+    const s = settings(), preset = activeChatPreset(s.chat), user = userName();
+    const history = sources.history === true ? (thread?.messages || []).filter(m => m.kind !== 'system').slice(-preset.history) : [];
+    const persona = sources.persona === false ? '' : person.persona || person.card;
+    // An exact saved prompt may already contain lore and character cards. Read visible story text independently.
+    const recent = sources.story === true ? await readStoryLines((context()?.chat || []).filter(m => !m?.extra?.isHidden),
+      {...preset, storyMode: 'tavern'}, user, s.narration) : [];
+    const storyText = recent.map(r => r.name + '：' + r.text).join('\n');
+    const transcript = history.map(m => messageLine(m, user)).filter(Boolean).join('\n');
+    const lore = sources.lore === true ? await worldInfoFor(context, {...loreOptions(preset), strictFilter: true,
+      characters: persona, texts: [storyText, transcript, reading], always: [person.name],
+      report: (...args) => backend.reportDiagnostic?.(...args)}) : '';
+    return [lore && '参考世界书\n' + lore, storyText && '酒馆剧情\n' + storyText,
+      transcript && '最近私聊\n' + transcript].filter(Boolean).join('\n\n');
+  }
+
   /** Asks the model for the contact's next messages and stores them. One request per chat at a time. */
   /** nudge: 主动找你 — the contact may also choose not to text (null then), and no 正在输入 shows meanwhile. */
   /** reroll: 重新回复这一轮 — the last round is asked again as if it were not there, and is replaced only when the new one
    *  came (it stays among the round's versions); one that fails or is stopped changes nothing. */
-  function reply(threadId, {nudge = false, reroll = false, cue = '', time = 0, outfit = '', reading = ''} = {}) {
+  function reply(threadId, {nudge = false, reroll = false, cue = '', time = 0, outfit = '', reading = '', sources, pageKey} = {}) {
     if (busy.has(threadId)) return busy.get(threadId);
-    const controller = new AbortController(), signal = controller.signal, valid = chatGuard();
+    const scoped = sources != null;
+    const controller = new AbortController(), signal = controller.signal, valid = chatGuard(scoped || !!reading);
     const job = (async () => {
       requireChat(valid);
       const ctx = context();
@@ -159,39 +176,57 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
       if (thread.friend?.by === 'me') throw Error(`你已经删除了${thread.members[0]}，在「联系人 → 新的朋友」里加回来才能聊天`);
       if (thread.friend?.by === 'them') throw Error(`${thread.members[0]}已经把你删了，先发送好友申请`);
       if (thread.blocked) throw Error(`你已把${thread.members[0]}拉黑了，移出黑名单才能聊天`);
-      const s = settings(), preset = activeChatPreset(s.chat), people = members(thread), voiceFormat = backend.voiceFormat(), user = userName();
+      const s = settings(), preset = activeChatPreset(s.chat), people = members(thread, !scoped || sources.persona !== false), voiceFormat = backend.voiceFormat(), user = userName();
       // Voice switched off: nobody sends voice messages.
       if (s.general.voiceEnabled === false) for (const p of people) p.voice = false;
       if (!nudge) backend.emit('chat', {threadId, typing: true});
-      const exact = await exactFor(preset);
-      const recent = exact?.available ? [] : await story(preset), forumSpace = forumSpaceOf(thread), watch = thread.type === 'group' && thread.watch === true;
-      const {forum, posts} = await forumFor(thread, s, user);
-      // 查手机 × 聊天 (0.9.35): told once, in the next private chat with them.
-      const peekKey = thread.type === 'dm' ? ownOf(thread.members[0]) : '', peekedNow = peekKey ? s.chat.peeked?.[peekKey] : null;
-      // 世界书: scanned over the recent story and the chat itself, as the story's own request would be, and who is in the
-      // chat however deep the tavern scans.
-      const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), ...(exact?.available ? {excludeText: exact.messages.map(m => m.content).join('\n\n'), onlyBooks: preset.loreExtraBooks || []} : {}), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
-        // (By turns: the lines one side sent in a row are one entry, so the tavern's 扫描深度 covers whole turns.)
-        texts: [forum, ...recent.map(r => `${r.name}: ${r.text}`), ...scanTurns(thread.messages.slice(-preset.history).map(m => ({me: m.from === 'me', text: messageLine(m, user)})))], always: [people.map(p => p.name).join('、')]});
-      // 记忆: the written-up older chat, and older messages that match the latest ones.
-      const query = thread.messages.filter(m => m.kind !== 'system').slice(-6).map(m => messageLine(m, user)).join('\n');
-      // 私聊带同群消息: what was said lately in the groups the contact is in too
-      let shared = '';
-      if (thread.type === 'dm' && promptOn(s.promptRules, 'chat-groups')) {
-        try { shared = await sharedGroups(thread.members[0], user); } catch (error) { backend.reportDiagnostic?.('聊天 · 同群消息', error, 'warn'); }
+      const peekKey = !scoped && thread.type === 'dm' ? ownOf(thread.members[0]) : '', peekedNow = peekKey ? s.chat.peeked?.[peekKey] : null;
+      let answer;
+      if (scoped) {
+        const last = thread.messages.findLast(m => m.from === 'me' && m.kind === 'text');
+        const photo = pageKey && thread.messages.findLast(m => m.from === 'me' && m.kind === 'photo' && m.readingPage === pageKey);
+        const turn = [photo, last].filter(Boolean);
+        const refs = await bookReferences(sources, people[0], reading, {...thread, messages: thread.messages.filter(m => !turn.includes(m))});
+        const pics = await pictures(ctx, {...thread, messages: turn}, preset);
+        const request = images => {
+          const messages = buildChatRequest({prompts: s.promptRules, preset, thread: {...thread, messages: turn},
+            members: people, voiceFormat, user, pictures: images});
+          messages.splice(-1, 0, {role:'system', content: [refs, reading].filter(Boolean).join('\n\n')});
+          return messages;
+        };
+        requireChat(valid);
+        if (signal.aborted) throw stopped();
+        answer = cleanTagged(await answerFor(ctx, request, pics, signal), preset.cleanTags);
+      } else {
+        const exact = await exactFor(preset);
+        const recent = exact?.available ? [] : await story(preset), forumSpace = forumSpaceOf(thread), watch = thread.type === 'group' && thread.watch === true;
+        const {forum, posts} = await forumFor(thread, s, user);
+        // 查手机 × 聊天 (0.9.35): told once, in the next private chat with them.
+        // 世界书: scanned over the recent story and the chat itself, as the story's own request would be, and who is in the
+        // chat however deep the tavern scans.
+        const lore = preset.lore === false ? '' : await worldInfoFor(context, {...loreOptions(preset), ...(exact?.available ? {excludeText: exact.messages.map(m => m.content).join('\n\n'), onlyBooks: preset.loreExtraBooks || []} : {}), report: (...args) => backend.reportDiagnostic?.(...args), persona: userPersona(), characters: people.map(p => p.persona || p.card).join('\n'),
+          // (By turns: the lines one side sent in a row are one entry, so the tavern's 扫描深度 covers whole turns.)
+          texts: [forum, ...recent.map(r => `${r.name}: ${r.text}`), ...scanTurns(thread.messages.slice(-preset.history).map(m => ({me: m.from === 'me', text: messageLine(m, user)})))], always: [people.map(p => p.name).join('、')]});
+        // 记忆: the written-up older chat, and older messages that match the latest ones.
+        const query = thread.messages.filter(m => m.kind !== 'system').slice(-6).map(m => messageLine(m, user)).join('\n');
+        // 私聊带同群消息: what was said lately in the groups the contact is in too
+        let shared = '';
+        if (thread.type === 'dm' && promptOn(s.promptRules, 'chat-groups')) {
+          try { shared = await sharedGroups(thread.members[0], user); } catch (error) { backend.reportDiagnostic?.('聊天 · 同群消息', error, 'warn'); }
+        }
+        const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
+        const privateChats = thread.type === 'group' && promptOn(s.promptRules, 'knows') ? await memberChats(people, preset, query, user) : '';
+        const request = pics => buildChatRequest({exact: exact?.available ? exact.messages : [], prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, privateChats, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), nudge, cue, time: time || Date.now(), statuses: statusesOf(people), peeked: peekedNow ? peekedNow.what || true : '', posts, outfit, pats: Object.fromEntries(people.map(p => [p.name, suffixOf(p.name)]).filter(([, s]) => s)), music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
+        const readingRequest = pics => {
+          const messages = request(pics);
+          if (reading) messages.splice(messages.length - 1, 0, {role: 'system', content: String(reading).slice(0, 6000)});
+          return messages;
+        };
+        const pics = await pictures(ctx, thread, preset);
+        requireChat(valid);
+        if (signal.aborted) throw stopped();
+        answer = cleanTagged(await answerFor(ctx, readingRequest, pics, signal), preset.cleanTags);
       }
-      const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
-      const privateChats = thread.type === 'group' && promptOn(s.promptRules, 'knows') ? await memberChats(people, preset, query, user) : '';
-      const request = pics => buildChatRequest({exact: exact?.available ? exact.messages : [], prompts: settings().promptRules, preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, forum, privateChats, groups: shared, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: stickersFor(people.map(p => p.name)), nudge, cue, time: time || Date.now(), statuses: statusesOf(people), peeked: peekedNow ? peekedNow.what || true : '', posts, outfit, pats: Object.fromEntries(people.map(p => [p.name, suffixOf(p.name)]).filter(([, s]) => s)), music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}, pictures: pics});
-      const readingRequest = pics => {
-        const messages = request(pics);
-        if (reading) messages.splice(messages.length - 1, 0, {role: 'system', content: String(reading).slice(0, 6000)});
-        return messages;
-      };
-      const pics = await pictures(ctx, thread, preset);
-      requireChat(valid);
-      if (signal.aborted) throw stopped();
-      const answer = cleanTagged(await answerFor(ctx, readingRequest, pics, signal), preset.cleanTags);
       // 停止 or a different tavern chat: what comes late is let go (the tavern's own generation cannot be stopped).
       requireChat(valid);
       if (signal.aborted) throw stopped();
@@ -220,13 +255,18 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
   }
 
   /** Margin notes have their own request: no fabricated user message, private chat or phone side effects. */
-  async function readingNote({companion, reading, blob = null} = {}) {
-    const valid = chatGuard(true), ctx = context(), person = members({members: [String(companion || '')]})[0];
+  async function readingNote({companion, reading, blob = null, sources = {persona: true}} = {}) {
+    const valid = chatGuard(true), ctx = context(), person = members({members: [String(companion || '')]}, sources.persona !== false)[0];
     if (!backend.contacts().some(c => c.name === person.name)) throw Error('这个角色不在当前手机分区');
+    requireChat(valid);
+    const dm = sources.history === true && currentDm(await backend.threads(), person.name);
+    const refs = await bookReferences(sources, person, reading, dm ? await backend.chats.get(dm.id) : null);
     requireChat(valid);
     const pics = blob && await sees(ctx) ? [{id: 'page', url: await picture(blob)}] : [];
     requireChat(valid);
-    const request = images => [{role: 'system', content: `你是${person.name}。${person.persona || person.card || ''}\n只写一句当前页的页边批注，不超过四十字，不写用户提问、姓名前缀或手机操作标签。\n${String(reading || '').slice(0, 6000)}`},
+    const persona = person.persona || person.card;
+    const request = images => [{role: 'system', content: [`你是${person.name}。`, persona && '角色人设\n' + persona, refs,
+      '只写一句当前页的页边批注，不超过四十字，不写用户提问、姓名前缀或手机操作标签。', String(reading || '').slice(0, 6000)].filter(Boolean).join('\n\n')},
       {role: 'user', content: images.length ? [{type: 'text', text: '为眼前这一页留一句批注。'}, ...images.map(p => ({type: 'image_url', image_url: {url: p.url}}))] : '为眼前这一页留一句批注。'}];
     const answer = await answerFor(ctx, request, pics, new AbortController().signal);
     requireChat(valid);
