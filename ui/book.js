@@ -632,7 +632,7 @@ export function bookApp(ctx) {
   v.root.addEventListener('change', e => { const f = e.target.dataset?.bkField; if (f && form) form[f] = f === 'title' ? e.target.value : Math.max(0, Number(e.target.value) || 0); });
   v.root.addEventListener('input', e => { if (e.target.dataset?.bkField === 'title' && form) form.title = e.target.value; });
   v.root.addEventListener('error', e => { if (e.target?.tagName === 'IMG' && e.target.closest('.bk')) e.target.classList.add('bk-broken'); }, true);
-  v.back = () => { if (view === 'shelf') return false; if (view === 'making') { if (job) job.stop = true; return true; } shelf(); return true; };
+  v.back = () => { if (view === 'bedtime' && bedtime.back()) return true; if (view === 'shelf') return false; if (view === 'making') { if (job) job.stop = true; return true; } shelf(); return true; };
   v.leave = () => { bedtime.leave(); if (reader?.reading) reader.setReading(false); };
   v.refresh = () => { if (view === 'shelf') shelf(); else if (view === 'bedtime') bedtime.open(); };
   const dispose = v.dispose;
