@@ -12,18 +12,18 @@ export function bedtimeView(ctx, v) {
   const {api} = ctx;
   let active = false, books = [], saved = [], songs = [], roles = [], source = null, ticket = 0, creating = false, swipes = null;
   const actions = [{key: 'download', label: '下载', icon: 'download'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}];
-  const form = {role: '', kind: '睡前故事', minutes: '3', wish: '', sourceId: '', chapter: '0', paragraph: '0', song: '', effects: true, world: true, plot: 'independent', skipEntries: [], skipBooks: [], extraBooks: []};
+  const form = {role: '', kind: '睡前故事', minutes: '3', wish: '', sourceId: '', chapter: '0', paragraph: '0', song: '', effects: true, world: true, plot: 'independent', skipEntries: [], skipBooks: [], removedBooks: [], extraBooks: []};
   const status = () => api.bedtimeStatus?.() || {playing: false};
   let library = false, narrator = '', search = '', playingId = '', currentLine = -1;
   try { const prefs = JSON.parse(ctx.win.localStorage.getItem('stiphonie.bedtime.preferences') || '{}');
     for (const key of ['world','effects']) if (typeof prefs[key] === 'boolean') form[key] = prefs[key];
     form.plot = prefs.plot === 'story' ? 'story' : 'independent';
-    for (const key of ['skipBooks','skipEntries','extraBooks']) if (Array.isArray(prefs[key])) form[key]=prefs[key].filter(x=>typeof x==='string');
+    for (const key of ['skipBooks','skipEntries','removedBooks','extraBooks']) if (Array.isArray(prefs[key])) form[key]=prefs[key].filter(x=>typeof x==='string');
     if (typeof prefs.song === 'string') form.song = prefs.song;
   } catch {}
   function remember() {
-    const {world,plot,skipBooks,skipEntries,extraBooks,effects,song} = form;
-    try { ctx.win.localStorage.setItem('stiphonie.bedtime.preferences', JSON.stringify({world,plot,skipBooks,skipEntries,extraBooks,effects,song})); } catch {}
+    const {world,plot,skipBooks,skipEntries,removedBooks,extraBooks,effects,song} = form;
+    try { ctx.win.localStorage.setItem('stiphonie.bedtime.preferences', JSON.stringify({world,plot,skipBooks,skipEntries,removedBooks,extraBooks,effects,song})); } catch {}
   }
   const lore = bedtimeLore(ctx, form, remember, label => {
     const el = v.root.querySelector('[data-bt-count]');

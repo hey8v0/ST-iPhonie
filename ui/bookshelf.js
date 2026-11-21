@@ -49,15 +49,120 @@ export function bookshelfApp(ctx) {
 
   // ---------- the shelf ----------
   const hue = id => { let h = 0; for (const c of String(id)) h = (h * 31 + c.codePointAt(0)) % 360; return h; };
-  // Books differ a little in height and thickness, but always the same way for the same book: a shelf of one size looks fake.
-  const shape = b => { let h = 0; for (const c of String(b.id)) h = (h * 17 + c.codePointAt(0)) % 100; return {'--tall': String(h % 3), '--thick': String(h % 4)}; };
-  const styleOf = b => Object.entries(shape(b)).map(([k, x]) => `${k}:${x}`).join(';');
+  function styleOf(book) {
+    const pages = book.type === 'comic' && book.chapters[0]?.image ? book.chapters.length : book.estimatedPages;
+    const depth = pages ? Math.min(12, 1 + Math.sqrt(pages) * .43) : 4;
+    // A stable trim size for each edition; volume affects the page block, not cover height.
+    const format = hue(book.title) % 5;
+    return `--page-depth:${depth.toFixed(2)}px;--trim:${82 + format * 3}%`;
+  }
   const coverHTML = b => `<button type="button" class="bs-book${b.type === 'comic' ? ' comic' : ''}${mark.has(b.id) ? ' picked' : ''}" data-read="${esc(b.id)}" style="--book-hue:${hue(b.title)};${styleOf(b)}" aria-label="${picking ? '选择' : '打开'}《${esc(b.title)}》"${picking ? ` aria-pressed="${mark.has(b.id)}"` : ''}><span class="bs-face"><span class="bs-title">${esc(b.title)}</span><small>${esc(b.author || (b.type === 'comic' ? '漫画' : '小说'))}</small></span>${progress(b) ? `<i class="bs-progress" style="--p:${progress(b)}%"></i>` : ''}${picking ? '<span class="bs-tick" aria-hidden="true"></span>' : ''}</button>`;
-  const labelHTML = b => `<div class="bs-label"><span><strong>${esc(b.title)}</strong><small>${progress(b) ? `读到 ${progress(b)}%` : '还没开始'}${b.companion ? ' · 和' + esc(b.companion) : ''}</small></span>${picking ? '' : `<button type="button" data-more="${esc(b.id)}" aria-label="《${esc(b.title)}》的菜单">${icon('more')}</button>`}</div>`;
+  function shelfTitle(book) {
+    if (filter !== book.shelf || !filter || !book.title.startsWith(filter)) return book.title;
+    const volume = book.title.slice(filter.length).match(/^\s*[-–—·:：]\s*((?:卷|巻|話|话|第|vol\.)\s*\d.*)$/i);
+    return volume ? volume[1] : book.title;
+  }
+  const labelHTML = b => `<div class="bs-label"><span><strong title="${esc(b.title)}">${esc(shelfTitle(b))}</strong><small>${progress(b) ? `读到 ${progress(b)}%` : '还没开始'}${b.companion ? ' · 和' + esc(b.companion) : ''}</small></span>${picking ? '' : `<button type="button" data-more="${esc(b.id)}" aria-label="《${esc(b.title)}》的菜单">${icon('more')}</button>`}</div>`;
   function shelvesHTML(list) {
     const rows = [];
     for (let i = 0; i < list.length; i += 3) rows.push(list.slice(i, i + 3));
     return rows.map((r, i) => `<div class="bs-shelf" style="--grain-x:${(i * 137) % 311}px;--grain-y:${(i * 83) % 197}px;--grain-angle:${174 + i % 7}deg"><div class="bs-row">${r.map(coverHTML).join('')}</div><div class="bs-plank" aria-hidden="true"></div><div class="bs-labels">${r.map(labelHTML).join('')}</div></div>`).join('');
+  }
+  const pulled = new Map();
+  function rail(list) {
+    const selected = list.find(b => b.id === pulled.get(list[0].id)) || list.reduce((a,b) => (b.lastRead || 0) > (a.lastRead || 0) ? b : a);
+    const spines = list.map((b,i) => {
+      const label = shelfTitle(b), h = hue(b.title);
+      return `<button type="button" class="bs-spine" data-spine="${esc(b.id)}" aria-label="${esc(b.title)}" aria-pressed="${b===selected}" style="${styleOf(b)};--cloth:hsl(${h} 23% 33%);--height:${128+h%17}px">
+        <span class="bs-binding"><span class="bs-paper-top"></span><span class="bs-paper-edge"></span><span class="bs-binding-side"><small>${i+1}</small><b>${esc(label)}</b></span><span class="bs-jacket" data-cover="${esc(b.id)}"><b>${esc(b.title)}</b></span></span></button>`;
+    }).join('');
+    return `<section class="bs-rail-group"><div class="bs-rail" data-group-key="${esc(list[0].id)}">${spines}</div><div class="bs-plank"></div><div class="bs-caption"><button type="button" data-read="${esc(selected.id)}">${esc(selected.title)}</button><button type="button" data-more="${esc(selected.id)}" aria-label="书籍菜单">${icon('more')}</button></div></section>`;
+  }
+  function browsingShelf(list) {
+    if (picking) return shelvesHTML(list);
+    const groups = new Map();
+    for (const b of list) {
+      const group = b.shelf || seriesOf(b.title) || '未分类';
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push(b);
+    }
+    return [...groups].map(([group,rows]) => {
+      const collection = filter === ALL && rows.length>1 && rows.every(b=>b.shelf===group);
+      const count = collection ? `<button type="button" class="text-button" data-shelf="${esc(group)}">全部 ${rows.length} 本 ›</button>` : `<small>${rows.length} 本</small>`;
+      const title = `<h3 class="bs-group-name">${esc(group)}${count}</h3>`;
+      if (rows.length === 1) return title + shelvesHTML(rows);
+      const recent=rows.reduce((a,b)=>(a.lastRead || 0)>(b.lastRead || 0)?a:b);
+      const offset=collection && recent.lastRead ? Math.max(0,Math.min(rows.length-6,rows.indexOf(recent)-2)) : 0;
+      const visible=collection ? rows.slice(offset,offset+6) : rows;
+      const rails = [];
+      for (let i=0;i<visible.length;i+=6) rails.push(rail(visible.slice(i,i+6)));
+      return title + rails.join('');
+    }).join('');
+  }
+  function pull(el) {
+    const row = el.closest('.bs-rail'), id = el.dataset.spine;
+    pulled.set(row.dataset.groupKey,id);
+    for (const spine of row.children) spine.setAttribute('aria-pressed',String(spine===el));
+    const caption = row.parentElement.querySelector('.bs-caption');
+    const link = caption.querySelector('[data-read]');
+    link.dataset.read=id; link.textContent=el.getAttribute('aria-label');
+    caption.querySelector('[data-more]').dataset.more=id;
+  }
+  v.on('click','[data-spine]', el => {
+    if(el.getAttribute('aria-pressed')==='true') return details(el.dataset.spine);
+    pull(el);
+  });
+  let swipe = null, ignoreClickUntil = 0;
+  v.root.addEventListener('pointerdown', e => {
+    const row=e.target.closest('.bs-rail');
+    swipe=row ? {row,x:e.clientX,y:e.clientY}:null;
+  });
+  v.root.addEventListener('pointercancel',()=>{swipe=null;});
+  v.root.addEventListener('pointerup',e=>{
+    if (!swipe) return;
+    const {row,x,y}=swipe; swipe=null;
+    const dx=e.clientX-x;
+    if(Math.abs(dx)<28 || Math.abs(dx)<Math.abs(e.clientY-y)*1.4)return;
+    const current=row.querySelector('[aria-pressed=true]');
+    const next=dx<0?current.nextElementSibling:current.previousElementSibling;
+    if(next)pull(next);
+    ignoreClickUntil=Date.now()+250;
+  });
+  v.root.addEventListener('click',e=>{
+    if(Date.now()<ignoreClickUntil && e.target.closest('.bs-rail')){e.preventDefault();e.stopImmediatePropagation();}
+  },true);
+  async function details(id) {
+    const b=books.find(row=>row.id===id);
+    if (!b)return;
+    const contacts=api.chatContacts?.() || [];
+    const names=[...new Set([b.companion,...contacts.map(c=>c.name)].filter(Boolean))];
+    const settings={...readerDefaults,...b.settings};
+    const choices=[...new Set([14,16,18,20,24,settings.size])].sort((a,b)=>a-b);
+    const d=ctx.dialog('书籍信息',`<div class="bs-dossier"><div data-detail-cover></div><h2>${esc(b.title)}</h2><small>${esc(b.author || (b.type==='comic'?'漫画':'小说'))} · ${b.lastRead?'已读 '+progress(b)+'%':'未开始'}</small></div>`
+      +field('和谁一起看',select('detail-mate',b.companion||'',[['','自己看'],...names.map(n=>[n,n])]))
+      +(b.type==='comic'?field('阅读方式',select('detail-mode',settings.mode,[['pages','翻页'],['scroll','滚动']])):field('字号',select('detail-size',String(settings.size),choices.map(n=>[String(n),n+' px']))))
+      +btn('detail-start',b.lastRead?'继续阅读':'开始阅读','primary'));
+    const paintCover=src=>{const img=doc.createElement('img');img.alt='';img.src=src;d.body.querySelector('[data-detail-cover]').replaceChildren(img);};
+    if(covers.has(id)) paintCover(covers.get(id));
+    else api.readingBookFile(id).then(f=>{if(d.live && !v.disposed && f?.cover){const src=url(f.cover);covers.set(id,src);paintCover(src);}}).catch(fail);
+    const start=d.body.querySelector('[data-action=detail-start]');
+    start.onclick=async()=>{
+      if(start.disabled)return;
+      start.disabled=true;
+      try {
+        const mate=d.body.querySelector('[data-field=detail-mate]').value;
+        const size=d.body.querySelector('[data-field=detail-size]'), mode=d.body.querySelector('[data-field=detail-mode]');
+        const patch={};
+        if(mate!==(b.companion || ''))patch.companion=mate;
+        if((size && Number(size.value)!==settings.size) || (mode && mode.value!==settings.mode)){
+          const current=await api.getReadingBook(id);
+          patch.settings={...readerDefaults,...current.settings,...(size?{size:Number(size.value)}:{mode:mode.value})};
+        }
+        if(Object.keys(patch).length)await api.updateReadingBook(id,patch);
+        if(!d.live)return;
+        d.close();await open(id);
+      } catch(error){fail(error);} finally{start.disabled=false;}
+    };
   }
   const categories = () => [...new Set(books.map(b => b.shelf).filter(Boolean))].sort(naturalCompare);
   function inView() {
@@ -67,20 +172,30 @@ export function bookshelfApp(ctx) {
   }
   async function shelf() {
     leave(); book = null;
-    books = await api.listReadingBooks(); if (v.disposed) return;
+    const token=epoch, loaded=await api.listReadingBooks();
+    if (v.disposed || token!==epoch)return;
+    books=loaded;
     const cats = categories(), last = books.filter(b => b.lastRead).sort((a, b) => b.lastRead - a.lastRead)[0];
     if (filter !== ALL && filter !== RECENT && filter !== LOOSE && !cats.includes(filter)) filter = ALL;
     if (picking === 'pick' && mark.size) { mark = new Set([...mark].filter(id => books.some(b => b.id === id))); if (!mark.size) picking = null; }
     const chips = books.length ? `<div class="filter-row bs-chips" role="group" aria-label="分类">${[[ALL, `全部 <small>${books.length}</small>`], ...(last ? [[RECENT, '最近在读']] : []), ...cats.map(c => [c, `${esc(c)} <small>${books.filter(b => b.shelf === c).length}</small>`]), ...(cats.length && books.some(b => !b.shelf) ? [[LOOSE, '未分类']] : [])].map(([k, label]) => `<button type="button" data-shelf="${esc(k)}" aria-pressed="${filter === k}">${label}</button>`).join('')}</div>` : '';
     const today = last ? todaySeconds(last.stats) : 0;
     const left = last ? readingLeft(last, last.stats) : null;
-    const going = last && filter === ALL && !picking ? `<button type="button" class="bs-continue" data-read="${esc(last.id)}"><span class="bs-mini" style="--book-hue:${hue(last.title)}" data-cover="${esc(last.id)}"></span><span class="bs-go"><small>继续读</small><strong>${esc(last.title)}</strong><small>${esc(last.chapters[last.position?.chapter || 0]?.title || '')} · ${progress(last)}%${left ? ` · 还剩约 ${span(left)}` : ''}</small></span>${icon('next')}</button>${today ? `<p class="bs-today">今天在这本书上读了 ${span(today)}</p>` : ''}` : '';
+    const going = last && filter === ALL && !picking ? `<button type="button" class="bs-continue" data-read="${esc(last.id)}"><span class="bs-mini" style="--book-hue:${hue(last.title)}" data-cover="${esc(last.id)}"><b>${esc(last.title)}</b></span><span class="bs-go"><small>继续读</small><strong>${esc(last.title)}</strong><small>${esc(last.chapters[last.position?.chapter || 0]?.title || '')} · ${progress(last)}%${left ? ` · 还剩约 ${span(left)}` : ''}</small></span>${icon('next')}</button>${today ? `<p class="bs-today">今天在这本书上读了 ${span(today)}</p>` : ''}` : '';
     const head = heading('书架', picking ? btn('pick-done', '完成', 'text-button') : (books.length ? btn('pick-start', icon('check') + '多选', 'text-button') + btn('import', icon('add') + '导入', 'text-button') : btn('import', icon('add') + '导入', 'text-button')), 'Bookshelf');
-    v.draw(head + (books.length ? going + chips + `<div class="bs-shelves">${shelvesHTML(inView())}</div>` : empty('书架还是空的', '导入 EPUB 漫画、小说或 TXT，一次可以选很多本，也可以选一个装着书的 ZIP。', 'book'))
+    v.draw(head + (books.length ? going + chips + `<div class="bs-shelves">${browsingShelf(inView())}</div>` : empty('书架还是空的', '导入 EPUB 漫画、小说或 TXT，一次可以选很多本，也可以选一个装着书的 ZIP。', 'book'))
       + (picking ? `<div class="bs-pickbar"><span>${mark.size ? `选了 ${mark.size} 本` : '点书选择'}</span><div>${btn('pick-shelf', icon('layers') + '放进分类', 'chip-button', mark.size ? '' : 'disabled')}${btn('pick-delete', icon('trash') + '删除', 'chip-button danger', mark.size ? '' : 'disabled')}</div></div>` : ''));
-    for (const b of inView()) {
-      if (!covers.has(b.id)) { const f = await api.readingBookFile(b.id).catch(() => null); if (!f?.cover) continue; covers.set(b.id, url(f.cover)); }
-      for (const el of v.root.querySelectorAll(`[data-read="${CSS.escape(b.id)}"] .bs-face, [data-cover="${CSS.escape(b.id)}"]`)) { el.style.backgroundImage = `url("${covers.get(b.id)}")`; el.classList.add('pic'); }
+    const needed = new Set([...v.root.querySelectorAll('[data-cover],.bs-book[data-read]')].map(el=>el.dataset.cover || el.dataset.read));
+    for (const b of books.filter(row=>needed.has(row.id))) {
+      if (!covers.has(b.id)) { const f = await api.readingBookFile(b.id).catch(() => null); if(token!==epoch || v.disposed)return; if (!f?.cover) continue; covers.set(b.id, url(f.cover)); }
+      for (const el of v.root.querySelectorAll(`[data-read="${CSS.escape(b.id)}"] .bs-face, [data-cover="${CSS.escape(b.id)}"]`)) { const cover = doc.createElement('img');
+        cover.alt = '';
+        cover.onload = () => {
+          const book = el.closest('.bs-book');
+          if (book && cover.naturalHeight) book.style.aspectRatio = String(Math.max(.58, Math.min(.84, cover.naturalWidth / cover.naturalHeight)));
+        };
+        cover.src = covers.get(b.id);
+        el.replaceChildren(cover); el.classList.add('pic'); }
     }
   }
   async function pickCompanion(target) {
@@ -169,7 +284,7 @@ export function bookshelfApp(ctx) {
       state.now = item.name; paint();
       try {
         const blob = await item.open(), b = await openBook(blob, item.name, win.DOMParser), s = seriesOf(item.name);
-        await api.addReadingBook({name: item.name, title: b.title, author: b.author, type: b.type, chapters: b.chapters.map(c => ({title: c.title})), ...(s && series.get(s) > 1 ? {shelf: s} : {})}, blob, b.cover ? await b.image(b.cover) : null);
+        await api.addReadingBook({name: item.name, title: b.title, author: b.author, type: b.type, estimatedPages: b.estimatedPages, chapters: b.chapters.map(c => ({title: c.title})), ...(s && series.get(s) > 1 ? {shelf: s} : {})}, blob, b.cover ? await b.image(b.cover) : null);
       } catch (e) { state.errors.push(item.name + '：' + e.message); }
       state.done++; paint();
       await new Promise(resolve => win.setTimeout(resolve, 0));
@@ -593,12 +708,17 @@ export function bookshelfApp(ctx) {
     book.highlights = normalizeHighlights(book.highlights); book.annotations = normalizeAnnotations(book.annotations);
     const f = await api.readingBookFile(id); if (token !== epoch) return; if (!f?.blob) throw Error('原书文件不在这台设备上，请重新导入');
     const opened = await openBook(f.blob, book.name, win.DOMParser); if (token !== epoch) return; reader = opened;
+    if (!book.estimatedPages && reader.estimatedPages) {
+      await api.updateReadingBook(book.id, {estimatedPages: reader.estimatedPages});
+      if (token !== epoch) return;
+      book.estimatedPages = reader.estimatedPages;
+    }
     if (book.type === 'comic' && !book.chapters[0]?.image) { const pos = book.position; const rows = await comicPages(token); if (!rows) return; book.chapters = rows; book.position = pos?.chapter < rows.length ? pos : {chapter: 0, fraction: 0}; }
     if (book.type === 'comic' && book.chapters[0]?.image) { const base = reader.chapter, rows = book.chapters; reader.chapter = async i => { const c = await base(rows[i].source); return {...c, images: [rows[i].image], html: `<img data-book-image="${esc(rows[i].image)}" alt="漫画页">`}; }; }
     await showChapter(book.position.chapter, book.position.fraction);
   }
   v.on('click', '[data-read]', el => {
-    if (!picking) return v.busy(el, () => open(el.dataset.read)).catch(fail);
+    if (!picking) return details(el.dataset.read);
     const id = el.dataset.read;
     if (mark.has(id)) mark.delete(id); else mark.add(id);
     el.classList.toggle('picked', mark.has(id));
@@ -610,7 +730,7 @@ export function bookshelfApp(ctx) {
   v.on('click', '[data-more]', el => more(el.dataset.more).catch(fail));
   v.on('click', '[data-shelf]', el => { filter = el.dataset.shelf; shelf().catch(fail); });
   v.on('click', '[data-action]', el => ({import: importFiles, 'pick-start': () => { picking = 'pick'; mark.clear(); shelf().catch(fail); }, 'pick-done': () => { picking = null; mark.clear(); shelf().catch(fail); }, 'pick-shelf': shelfPicked, 'pick-delete': deletePicked, shelf: () => shelf().catch(fail)})[el.dataset.action]?.());
-  v.back = () => { if (!book) return false; shelf().catch(fail); return true; }; v.refresh = () => { if (!book) shelf().catch(fail); }; v.edit = id => open(id).catch(fail);
+  v.back = () => { if (!book && filter!==ALL && !picking) { filter=ALL; shelf().catch(fail); return true; } if (!book) return false; shelf().catch(fail); return true; }; v.refresh = () => { if (!book) shelf().catch(fail); }; v.edit = id => open(id).catch(fail);
   const dispose = v.dispose; v.dispose = () => { leave(); art.dispose(); dispose(); };
   v.leave = () => { leave(); book = null; };
   shelf().catch(fail);

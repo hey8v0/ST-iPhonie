@@ -68,7 +68,7 @@ export async function openBook(blob, name, Parser = globalThis.DOMParser) {
 async function openBookData(blob, name, Parser) {
   if (/\.txt$/i.test(name)) {
     const chapters = txtChapters(decodeBook(await archiveBuffer(blob)));
-    return {title: name.replace(/\.txt$/i, ''), author: '', type: 'novel', chapters: chapters.map(c => ({title: c.title})),
+    return {title: name.replace(/\.txt$/i, ''), author: '', type: 'novel', estimatedPages: Math.max(1, Math.ceil(chapters.reduce((sum,c) => sum + c.text.length, 0) / 500)), chapters: chapters.map(c => ({title: c.title})),
       chapter: async i => ({html: chapters[i].text.split('\n').map(t => `<p>${escape(t) || '<br>'}</p>`).join(''), text: chapters[i].text, images: []}), image: async () => null};
   }
   const files = await readZipBlob(blob, {cache: false, verify: true});
@@ -94,7 +94,13 @@ async function openBookData(blob, name, Parser) {
   const coverId = nodes(opf, 'meta').find(n => n.getAttribute('name') === 'cover')?.getAttribute('content');
   const cover = manifest.get(coverId)?.path || [...manifest.values()].find(n => n.properties.split(/\s+/).includes('cover-image'))?.path || (comic ? sample[0].images[0] : '');
   const image = path => bookStep(name, `读取图片「${path}」`, async () => raster(path) && files.has(path) ? new Blob([await archiveBuffer(await files.get(path).blob())], {type: /\.png$/i.test(path) ? 'image/png' : /\.webp$/i.test(path) ? 'image/webp' : /\.gif$/i.test(path) ? 'image/gif' : /\.avif$/i.test(path) ? 'image/avif' : 'image/jpeg'}) : null);
-  return {title: nodes(opf, 'title')[0]?.textContent.trim() || name.replace(/\.epub$/i, ''), author: nodes(opf, 'creator').map(n => n.textContent.trim()).join('、'), type: comic ? 'comic' : 'novel', chapters, cover, chapter, image};
+  // Project the sampled visible text onto uncompressed spine documents only (exclude images, fonts and audio).
+  const spineBytes = chapters.reduce((sum,c) => sum + (files.get(c.path)?.size || 0), 0);
+  const sampleBytes = chapters.slice(0,sample.length).reduce((sum,c) => sum + (files.get(c.path)?.size || 0), 0);
+  const letters = sample.reduce((sum,c) => sum + c.text.length, 0);
+  const estimatedPages = comic ? Math.round(chapters.length * sample.reduce((sum,c) => sum + c.images.length, 0) / sample.length)
+    : Math.ceil(spineBytes * (letters ? letters / Math.max(1,sampleBytes) : .22) / 500);
+  return {title: nodes(opf, 'title')[0]?.textContent.trim() || name.replace(/\.epub$/i, ''), author: nodes(opf, 'creator').map(n => n.textContent.trim()).join('、'), type: comic ? 'comic' : 'novel', estimatedPages: Math.max(1,estimatedPages), chapters, cover, chapter, image};
 }
 export async function bookImports(files) {
   const out = [];
@@ -232,7 +238,7 @@ export class BookshelfStore {
   }
   async update(id, patch) {
     return this.meta.change(id, row => {
-      for (const key of ['companion','settings','bookmarks','annotations','turns','nextNote','daily','shelf','lastRead','chapters','stats','highlights']) if (key in patch) row[key] = structuredClone(patch[key]);
+      for (const key of ['estimatedPages','companion','settings','bookmarks','annotations','turns','nextNote','daily','shelf','lastRead','chapters','stats','highlights']) if (key in patch) row[key] = structuredClone(patch[key]);
       if (patch.illustration?.photoId) {
         const {version, ...pic} = structuredClone(patch.illustration);
         const images = row.illustrations ||= [];

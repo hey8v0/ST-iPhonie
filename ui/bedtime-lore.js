@@ -1,3 +1,4 @@
+import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {btn, esc} from './common.js';
 
 export function bedtimeLore(ctx, form, remember, onCount) {
@@ -5,7 +6,7 @@ export function bedtimeLore(ctx, form, remember, onCount) {
   function read(full) {
     const chat = ctx.api.getState().chat;
     const preset = chat.presets.find(p => p.id === chat.activePreset);
-    return ctx.api.loreBooks({full, extra:[...new Set([...(preset?.loreExtraBooks || []), ...form.extraBooks])]});
+    return ctx.api.loreBooks({full, extra:[...new Set([...(preset?.loreExtraBooks || []), ...form.extraBooks])]}).then(books => books.filter(book => !form.removedBooks.includes(book.name)));
   }
   const selected = book => form.skipBooks.includes(book.name) ? 0 : book.entries.filter(e => !form.skipEntries.includes(e.id)).length;
   function count(books) {
@@ -72,7 +73,7 @@ export function bedtimeLore(ctx, form, remember, onCount) {
           if (query && !entries && !bookHit) return '';
           const key = 'book:' + book.name;
           return `<details class="lore-book" data-book-index="${i}" data-key="${esc(key)}" ${query || savedPosition?.opened.has(key) ? 'open' : ''}>
-            <summary><span class="row-text"><strong>${esc(book.name)}</strong><small data-bt-total></small></span>${toggle('skipBooks',book.name,book.name)}</summary>
+            <summary>${swipeRow(book.name, `<span class="bt-book-head"><span class="row-text"><strong>${esc(book.name)}</strong><small data-bt-total></small></span>${toggle('skipBooks',book.name,book.name)}</span>`, [{key:'remove', label:'删除', icon:'trash', danger:true}], {label:book.name})}</summary>
             <div>${entries || '<p class="hint">这本书没有启用的条目</p>'}</div></details>`;
         }).join('');
         list.innerHTML = rows || `<p class="hint">${query ? '没有找到相关条目' : '还没有选世界书'}</p>`;
@@ -88,6 +89,15 @@ export function bedtimeLore(ctx, form, remember, onCount) {
           for (const input of group.querySelectorAll('[data-bt-skip=skipEntries]')) input.disabled = form.skipBooks.includes(book.name);
         }
       }
+      const swipes = mountSwipeList(list, {ctx, onAction:(_key, name) => {
+        form.removedBooks = [...new Set([...form.removedBooks, name])];
+        form.skipBooks = [...new Set([...form.skipBooks, name])];
+        form.extraBooks = form.extraBooks.filter(book => book !== name);
+        remember();
+        books = books.filter(book => book.name !== name);
+        count(books); paint(); ctx.notify('已从睡前故事移除《' + name + '》');
+      }});
+      d.onClose(() => swipes.dispose());
       search.oninput = paint;
       list.onchange = e => {
         const input = e.target, key = input.dataset.btSkip;
@@ -105,6 +115,8 @@ export function bedtimeLore(ctx, form, remember, onCount) {
           if (!names.length) { ctx.notify('可用的世界书已全部列出'); return; }
           const name = await pickBook(names);
           if (!name || !d.live) return;
+          form.removedBooks = form.removedBooks.filter(book => book !== name);
+          form.skipBooks = form.skipBooks.filter(book => book !== name);
           form.extraBooks = [...new Set([...form.extraBooks,name])]; remember();
           books = await read(true);
           if (d.live) { search.value = ''; count(books); paint(); }

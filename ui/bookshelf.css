@@ -1,0 +1,51 @@
+/* Keep themed details frames clear of the controls inside them. */
+:root[data-skin] .bedtime-room details[data-bt-settings]{padding:4px 14px 12px}
+:root[data-skin] .bt-lore-list .bt-lore-entry{border-radius:0;box-shadow:none;background:transparent;padding:0 8px}
+.bt-lore-list .lore-book>summary>.sw-row{flex:1;min-width:0}
+.bt-book-head{display:flex;align-items:center;gap:10px;min-height:48px;padding-inline:4px 24px}
+.bt-book-head .row-text{flex:1;min-width:0;overflow-wrap:anywhere}
+.bt-lore-list .bt-book-head small{display:block}
+
+/* Books stand directly on the ledge; the phone skin shows through behind them. */
+.bs-shelves{--ledge-top:#edcda5;--ledge-edge:#ab8257}
+[data-skin=fresh] .bs-shelves{--ledge-top:#dfcba6;--ledge-edge:#ae9371}
+[data-skin=aero] .bs-shelves{--ledge-top:#c9edf1;--ledge-edge:#78aab7}
+[data-theme=dark] .bs-shelves{--ledge-top:#9b7960;--ledge-edge:#644a3c}
+[data-skin=aero][data-theme=dark] .bs-shelves{--ledge-top:#6eafbb;--ledge-edge:#305965}
+.bs-shelves .bs-shelf{background:transparent;box-shadow:none;margin:0 0 16px;padding:2px 0 0;border-radius:0;overflow:visible}
+.bs-shelves .bs-shelf::before{display:none}
+.bs-shelves .bs-plank{height:6px;margin:0 2px;border-radius:1px 1px 3px 3px;background:linear-gradient(var(--ledge-top),var(--ledge-top) 35%,var(--ledge-edge));box-shadow:0 4px 5px -2px #050b103d,inset 0 1px #ffffff55}
+.bs-shelves .bs-row,.bs-shelves .bs-labels{padding-inline:9px;gap:14px}
+.bs-shelves .bs-labels{padding-top:9px}
+.bs-shelves .bs-book{padding:0;border:0;border-radius:1px 2px 2px 1px;transform:perspective(650px) rotateY(-4deg);box-shadow:1px 0 #c4c0b2,2px 0 #ece8dd,3px 1px #aaa594,4px 4px 5px #1119}
+.bs-shelves .bs-book:active,.bs-shelves .bs-book.picked{transform:translateY(-4px)}
+.bs-shelves .bs-book.picked{outline:2px solid var(--accent-btn);outline-offset:2px}
+.bs-shelves .bs-face.pic,.bs-continue .bs-mini.pic{padding:0;background:var(--card2)}
+.bs-shelves .bs-face.pic img,.bs-mini.pic img{visibility:visible;display:block;width:100%;height:100%;object-fit:contain}
+.bs-shelves .bs-face::after{background:linear-gradient(90deg,#0005,transparent 3%,#fff3 4%,transparent 7%)}
+.bs-mini{overflow:hidden}.bs-mini b{display:block;padding:5px;font:600 9px/1.4 serif;color:#272c31}
+:root[data-skin=aero] .bedtime-room details[data-bt-settings]{box-sizing:border-box;padding:8px 16px 16px}
+:root[data-skin=aero] .bt-lore-list .bt-lore-entry{padding:2px 12px;box-shadow:none}
+
+/* The fore-edge sits outside the complete front cover and rests on the ledge. */
+.bs-shelves .bs-book{width:min(var(--trim),calc(100% - var(--page-depth) - 3px));overflow:visible;border-radius:0;box-shadow:0 3px 5px #16140f55;transform:none}
+.bs-shelves .bs-book::after{inset:1px auto 0 100%;width:var(--page-depth);height:auto;border-right:1px solid #898276;background:linear-gradient(90deg,#0002,transparent 35%,#0002),repeating-linear-gradient(90deg,#efe9dc 0 1px,#d6cebd 1px 2px);transform-origin:left bottom;transform:skewY(-8deg);pointer-events:none}
+.bs-shelves .bs-book .bs-face::after{inset:0 auto 0 0;width:4%;background:linear-gradient(90deg,#16120e33,transparent)}
+.bs-shelves .bs-book:active,.bs-shelves .bs-book.picked{transform:translateY(-4px)}
+
+.bs-group-name,.bs-caption{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.bs-group-name{font-size:16px;margin:12px 3px 4px}.bs-group-name small{font-size:12px;color:var(--ink2)}
+.bs-rail{display:flex;align-items:end;justify-content:flex-start;padding:32px 8px 6px;gap:2px;perspective:780px;touch-action:pan-y}
+.bs-rail .bs-spine{position:relative;flex:1 1 0;max-width:48px;height:var(--height);min-width:0;background:none;border:0;box-shadow:none;padding:0;transition:flex-grow .48s cubic-bezier(.2,.82,.24,1),max-width .48s}
+.bs-rail .bs-spine[aria-pressed=true]{flex-grow:3.8;max-width:110px;z-index:1}
+.bs-binding{position:absolute;bottom:0;left:50%;width:clamp(56px,21vw,86px);height:100%;--d:clamp(9px,calc(var(--page-depth)*2),22px);transform-style:preserve-3d;transform:translateX(-50%) rotateX(-9deg) rotateY(76deg);transition:transform .48s cubic-bezier(.25,.65,.22,1);pointer-events:none}
+.bs-spine[aria-pressed=true] .bs-binding{transform:translateX(-50%) translateY(-13px) rotateX(-5deg) rotateY(12deg);transition-timing-function:cubic-bezier(.2,.98,.27,1.12)}
+.bs-jacket,.bs-binding-side,.bs-paper-top,.bs-paper-edge{display:flex;position:absolute;box-sizing:border-box}
+.bs-jacket{inset:0;align-items:center;justify-content:center;background:var(--cloth);color:#f7ead4;transform:translateZ(calc(var(--d)/2));box-shadow:inset 2px 0 #0003}
+.bs-jacket b{padding:6px;overflow:hidden;font:600 13px/1.5 serif}.bs-jacket img{width:100%;height:100%;object-fit:contain;object-position:center}
+.bs-binding-side{top:0;height:100%;left:calc(var(--d)/-2);width:var(--d);transform:rotateY(-90deg);background:linear-gradient(90deg,#0003,#fff2 24%,transparent 60%,#0003),var(--cloth);color:#fff0d6;align-items:center;justify-content:space-evenly;flex-direction:column;font:600 11px/1.15 serif}.bs-binding-side b{writing-mode:vertical-rl;overflow:hidden;white-space:nowrap;max-height:78%;text-overflow:ellipsis}.bs-binding-side small{font:9px Georgia,serif}
+.bs-paper-top{width:100%;height:var(--d);top:calc(var(--d)/-2);transform:rotateX(90deg);background:repeating-linear-gradient(#f3eddd 0 2px,#cfc7b8 2px 3px)}
+.bs-paper-edge{right:calc(var(--d)/-2);height:100%;width:var(--d);transform:rotateY(90deg);background:repeating-linear-gradient(90deg,#f1ebdf 0 2px,#cbc3b1 2px 3px)}
+.bs-caption{padding:4px 4px 12px}.bs-caption button{min-height:40px;color:var(--ink);background:transparent;border:0;box-shadow:none}.bs-caption [data-read]{text-align:start;font-weight:700}.bs-caption [data-more]{width:40px;flex:none}
+.bs-dossier{text-align:center;margin:4px 0 16px}.bs-dossier img{display:block;max-width:90%;max-height:23dvh;object-fit:contain;margin:auto;box-shadow:2px 2px #b3ad9d,3px 4px 8px #0003}.bs-dossier h2{font:600 20px/1.4 serif;overflow-wrap:anywhere;margin:12px 0 4px}.bs-dossier small{color:var(--ink2)}.sheet-body:has(.bs-dossier) .primary{width:100%;margin:8px 0}
+@media(prefers-reduced-motion:reduce){.bs-rail .bs-spine,.bs-binding{transition:none}}
