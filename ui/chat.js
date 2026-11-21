@@ -28,7 +28,7 @@ import {chatScene, sceneArt, sceneDark, syncMotion} from './chat-scenes.js';
 import {PREMIUM, yuan} from '../core/wallet.js';
 import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
 import {eachThumb, previewBlob} from './thumbs.js';
-import {photoWall} from './photo-wall.js';
+import {pickReplacement} from './replacement-album.js';
 import {storyLinkSheet, storyLinkNote} from './story-phone.js';
 import {pickerHTML, fillPicker, bindPicker, recentOf, useRecent, pickEmoji} from './emoji-picker.js';
 import {popAt} from './msg-pop.js';
@@ -227,7 +227,14 @@ export function chatApp(ctx) {
     const spark = t.type === 'dm' && t.streak >= 3 ? `<span class="spark" title="聊天火花：连续 ${t.streak} 天">🔥${t.streak}</span>` : '';
     // A chat with words typed and not sent shows them, as phones do.
     const typed = draftOf(t.id).trim(), pvLine = typed ? `<em class="draft-mark">[草稿]</em>${esc(typed)}` : `${atMe}${esc(who + preview(last, you))}`;
-    return `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? `<span class="tag-s">${t.watch ? '旁观' : '群'}</span>` : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${t.type !== 'group' && t.blocked ? '<span class="tag-s tag-blocked">已拉黑</span>' : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${pvLine}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
+    const row = `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? `<span class="tag-s">${t.watch ? '旁观' : '群'}</span>` : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${t.type !== 'group' && t.blocked ? '<span class="tag-s tag-blocked">已拉黑</span>' : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${pvLine}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
+    const actions = [
+      {key:'pin', label:t.pinned?'取消置顶':'置顶', icon:'pin'},
+      {key:'mute', label:t.muted?'取消免打扰':'免打扰', icon:'mute'},
+      ...(t.unread?[{key:'read', label:'标为已读', icon:'check'}]:[]),
+      {key:'delete', label:'删除聊天', icon:'trash', danger:true}
+    ];
+    return swipeRow(t.id,row,actions,{label:t.name});
   }
   /** The messages found, under what the list found by name. */
   function hitsHTML({hits: list, total}) {
@@ -272,9 +279,11 @@ export function chatApp(ctx) {
       <label class="qq-search">${icon('search')}<input data-field="chat-search" type="search" value="${esc(search)}" placeholder="搜索聊天和联系人" aria-label="搜索" autocomplete="off"></label>`
       + (bring ? `<div class="banner bring-banner">${icon('book')}<span>和${esc(bring.name)}的 ${bring.count} 条消息会带进下一次正文</span>${btn('cancel-bring', '取消', 'chip-button')}</div>` : '')
       + (live ? '' : '<div class="banner">' + icon('alert') + '<span>在酒馆里打开小手机时，联系人才会回复。</span></div>')
-      + (rows.length ? `<div class="conv-list qq-list">${rows.map(t => convRow(t, me)).join('')}</div>` : q ? '' : empty('还没有聊天', '点右上角的加号，和角色私聊，或者拉一个群。联系人来自角色 App，也可以手动添加。', 'chat'))
+      + (rows.length ? `<div class="conv-list qq-list" data-conversations>${rows.map(t => convRow(t, me)).join('')}</div>` : q ? '' : empty('还没有聊天', '点右上角的加号，和角色私聊，或者拉一个群。联系人来自角色 App，也可以手动添加。', 'chat'))
       + (people.length ? groupTitle('联系人') + `<div class="group">${people.map(c => `<button class="list-row" data-action="dm-open" data-name="${esc(c.name)}">${avatar(c.name, c.engine, 40)}<span><strong>${esc(shown(c.name))}</strong><small>发消息</small></span>${icon('next')}</button>`).join('')}</div>` : '')
       + (q ? `<div data-chat-hits>${known ? hitsHTML(hits.found) : ''}</div>` : '')));
+    const list=v.root.querySelector('[data-conversations]');
+    if(list)conversationSwipe=mountSwipeList(list,{ctx,leftOnly:true,onAction:(action,id)=>changeConversation(action,id).catch(error=>ctx.notify(error.message))});
     if (q) findHits(q);
     else { hitTurn++; ctx.win.clearTimeout(hitTimer); }
     if (searching) { const box = v.root.querySelector('[data-field=chat-search]'); box?.focus({preventScroll: true}); box?.setSelectionRange?.(box.value.length, box.value.length); }
@@ -930,10 +939,12 @@ export function chatApp(ctx) {
   }
 
   // Leaving a list (消息 or 联系人) for a chat, a profile or a form remembers where it was; coming back to the same tab puts it there again.
+  let conversationSwipe = null;
   let shownMode = 'list', left = null;
   function render(again = false) {
     if (v.disposed) return;
     syncSpace();
+    conversationSwipe?.dispose();conversationSwipe=null;
     const ticket = ++epoch;
     if (api.phoneSpace?.().pending) { v.root.classList.remove('chat-mode', 'qq-mode'); return v.draw(empty('正在等待酒馆聊天', '聊天标识尚未就绪，暂不显示其他聊天的内容。加载完成后会自动跟随；若仍未恢复，请重新打开这段酒馆聊天。', 'chat')); }
     if (shownMode === 'list' && mode !== 'list') left = {tab, top: v.root.scrollTop};
@@ -1049,38 +1060,29 @@ export function chatApp(ctx) {
   };
 
   async function sendPhoto() {
-    const rows = await api.listPhotos();
-    let chosen = null;
-    const pieces = photoWall({api, win: ctx.win, tile: (r, url) => `<button data-action="pick-photo" data-id="${esc(r.id)}" aria-pressed="${chosen === r.id}" aria-label="选择 ${esc(r.name)}"><img decoding="async" data-photo="${esc(r.id)}" alt="${esc(r.name)}"${url ? ` src="${esc(url)}"` : ''}></button>`});
-    const d = sheet('发送照片', `${pieces.html([{rows}], ' pick-photos')}
-      ${rows.length ? '' : '<p class="help-copy">相册里还没有照片，可以直接从本地选一张。</p>'}
-      <div class="actions"><label class="secondary file-button">${icon('import')}从本地选<input type="file" data-chat-file accept="image/png,image/jpeg,image/webp,image/avif,image/gif" aria-label="从本地选照片"></label></div>
-      ${field('照片说明', input('caption', '', 'text', 'maxlength="200" placeholder="比如：下班路上的晚霞"'), '现在的模型看不到图片本身，只看得到这句说明，写清楚照片里有什么，对方才好接话。\n\n想让对方直接看图：用能识图的模型（比如 Gemini、Claude、GPT-4o 这类），并在酒馆的「AI 回复配置」里打开「发送内联媒体」；用小手机自己的文字连接时，只要模型能识图就行。')}
-      <div class="actions">${btn('photo-send', icon('send') + '发送', 'primary', 'disabled')}</div>`, {
-      'pick-photo': b => {
-        chosen = b.dataset.id;
-        for (const x of d.body.querySelectorAll('[data-action=pick-photo]')) x.setAttribute('aria-pressed', String(x === b));
-        d.body.querySelector('[data-action=photo-send]').disabled = false;
-      },
-      'photo-send': async () => {
-        if (!chosen) return;
-        const caption = value(d, 'caption');
-        d.close();
-        await post([{from: 'me', kind: 'photo', photoId: chosen, text: caption}]);
+    const id=threadId, space=spaceTurn;
+    const current=()=>!v.disposed && mode==='thread' && threadId===id && spaceTurn===space;
+    const selected=await pickReplacement(ctx,api,{title:'发送照片',accept:'image/png,image/jpeg,image/webp,image/avif,image/gif'});
+    if(!selected || !current())return;
+    const photo=typeof selected==='string'?await api.getPhoto(selected):selected;
+    if(!photo || !current())return;
+    const blob=photo.blob || photo;
+    const url=ctx.win.URL.createObjectURL(blob);
+    const d=sheet('发送照片','<img class="chat-send-preview" alt="选好的照片" src="'+esc(url)+'">'
+      +field('照片说明',input('caption','','text','maxlength="200" placeholder="给这张照片配句话…"'))
+      +'<div class="actions">'+btn('photo-send',icon('send')+'发送','primary')+'</div>',{
+      'photo-send':async b=>{
+        if(b.disabled || !current())return;
+        b.disabled=true;
+        try{
+          const caption=value(d,'caption');
+          const photoId=typeof selected==='string'?selected:(await api.addPhoto({name:selected.name,blob})).id;
+          if(!current())return;
+          await post([{from:'me',kind:'photo',photoId,text:caption}]);d.close();
+        }finally{b.disabled=false;}
       }
     });
-    pieces.mount(d.body);
-    d.onClose(() => pieces.stop());
-    api.chatSeesPictures?.().then(yes => { const box = d.body.querySelector('[data-field=caption]'), info = box?.closest('.field')?.querySelector('.info'); if (!yes || !box) return; box.placeholder = '可以不写，对方看得到照片'; info?.setAttribute('data-help', '现在的模型能看图，对方会直接看到这张照片；说明可以不写，写了就当作你配的话。'); }).catch(() => {});
-    d.body.addEventListener('change', e => {
-      const file = e.target.closest('[data-chat-file]')?.files?.[0];
-      if (!file) return;
-      api.addPhoto({name: file.name, blob: file}).then(async photo => {
-        const caption = value(d, 'caption');
-        d.close();
-        await post([{from: 'me', kind: 'photo', photoId: photo.id, text: caption}]);
-      }).catch(error => ctx.notify(error.message));
-    });
+    d.onClose(()=>ctx.win.URL.revokeObjectURL(url));
   }
   function sendPacket() {
     const d = sheet('发红包', `<div class="packet-sheet">${field('金额', input('amount', '6.66', 'text', 'inputmode="decimal" maxlength="9"'))}${field('祝福语', input('blessing', '', 'text', `maxlength="40" placeholder="${BLESSING}"`))}</div>
@@ -2239,27 +2241,18 @@ export function chatApp(ctx) {
       'call-back': async () => { d.close(); await api.callDial(name); }
     });
   }
-  /** 置顶 / 免打扰 / 标为已读 / 删除, from a long press (or right click) on a conversation. */
-  async function convMenu(id) {
-    const t = (await api.listThreads()).find(x => x.id === id);
-    if (!t) return;
-    const d = ctx.dialog(t.name, `<div class="pick-list">
-      <button class="list-row" data-menu="pin">${icon('pin')}<span><strong>${t.pinned ? '取消置顶' : '置顶'}</strong></span></button>
-      <button class="list-row" data-menu="mute">${icon('mute')}<span><strong>${t.muted ? '取消免打扰' : '消息免打扰'}</strong><small>免打扰的聊天不算进桌面上的未读数</small></span></button>
-      ${t.unread ? `<button class="list-row" data-menu="read">${icon('check')}<span><strong>标为已读</strong></span></button>` : ''}
-      <button class="list-row" data-menu="delete">${icon('trash')}<span><strong>删除聊天</strong></span></button></div>`);
-    d.body.addEventListener('click', e => {
-      const action = e.target.closest('[data-menu]')?.dataset.menu;
-      if (!action) return;
-      d.close();
-      ctx.win.Promise.resolve().then(async () => {
-        if (action === 'pin') await api.updateThread(id, {pinned: !t.pinned});
-        if (action === 'mute') await api.updateThread(id, {muted: !t.muted});
-        if (action === 'read') await api.markThreadRead(id);
-        if (action === 'delete' && await ctx.confirm('删除这段聊天？', '聊天记录会一起删除，联系人不受影响。')) { await api.deleteThread(id); if (t.type === 'group' && !currentWindow(await api.listThreads(), t)) forgetGroupAvatar(t); }
-        render();
-      }).catch(error => ctx.notify(error.message));
-    });
+  async function changeConversation(action,id){
+    const t=(await api.listThreads()).find(row=>row.id===id);
+    if(!t)return;
+    if(action==='pin')await api.updateThread(id,{pinned:!t.pinned});
+    if(action==='mute')await api.updateThread(id,{muted:!t.muted});
+    if(action==='read')await api.markThreadRead(id);
+    if(action==='delete'){
+      if(!await ctx.confirm('删除这段聊天？','聊天记录会一起删除，联系人不受影响。'))return;
+      await api.deleteThread(id);
+      if(t.type==='group' && !currentWindow(await api.listThreads(),t))forgetGroupAvatar(t);
+    }
+    await render();
   }
   function plusMenu() {
     const d = ctx.dialog('发起', `<div class="pick-list">
@@ -2365,18 +2358,6 @@ export function chatApp(ctx) {
     const key = el.dataset.field.slice(3);
     try { api.saveChatOptions({profile: {[key]: el.type === 'checkbox' ? el.checked : el.value}}); render(); } catch (error) { ctx.notify(error.message, {error: true}); }
   });
-  // Long-press (or right-click) a conversation for 置顶 and 免打扰.
-  let convPress = null, convPressedAt = 0;
-  v.on('pointerdown', '.conv[data-conv]', (el, e) => {
-    if (e.button > 0) return;
-    ctx.win.clearTimeout(convPress?.timer);
-    convPress = {x: e.clientX, y: e.clientY, timer: ctx.win.setTimeout(() => { convPress = null; convPressedAt = Date.now(); convMenu(el.dataset.conv); }, 480)};
-  });
-  for (const type of ['pointermove', 'pointerup', 'pointercancel']) v.on(type, '.conv[data-conv]', (el, e) => {
-    if (!convPress || (e.type === 'pointermove' && Math.hypot(e.clientX - convPress.x, e.clientY - convPress.y) < 10)) return;
-    ctx.win.clearTimeout(convPress.timer); convPress = null;
-  });
-  v.on('contextmenu', '.conv[data-conv]', (el, e) => { e.preventDefault(); if (Date.now() - convPressedAt > 1000) convMenu(el.dataset.conv); });
   v.on('keydown', '[data-field=draft]', (el, e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); return send(); } });
   // Typing closes the + panel, like a phone keyboard replacing it.
   v.on('focusin', '[data-field=draft]', () => { if (panel) { panel = null; syncPanel(); } });
@@ -2501,7 +2482,6 @@ export function chatApp(ctx) {
     const action = el.dataset.action;
     if (mode === 'list' && tab === 'moments' && await moments.click(el)) return;
     // The click that ends a long-press on a conversation only opened its menu.
-    if (action === 'open' && el.dataset.conv && Date.now() - convPressedAt < 700) return;
     // The click that ends a long-press only closes the press, it does not play or open anything.
     if (Date.now() - pressedAt < 700 && el.closest('.msg')) return;
     if (selecting && el.closest('.msg[data-mid]') && !['bring', 'pick-up', 'pick-down'].includes(action)) return;
@@ -2850,7 +2830,7 @@ export function chatApp(ctx) {
   /** 动态, from the tavern page's 动态小窗. */
   v.showMoments = () => { mode = 'list'; tab = 'moments'; threadId = null; search = ''; moments.only(''); v.root.scrollTop = 0; render(); };
   const dispose = v.dispose;
-  v.dispose = () => { stopSpace?.(); ctx.win.clearTimeout(hitTimer); ctx.win.clearTimeout(autoTimer); ctx.win.clearTimeout(pace.timer); moments.dispose(); photoURLs.dispose(); bubbleURLs.dispose(); dispose(); };
+  v.dispose = () => { conversationSwipe?.dispose(); stopSpace?.(); ctx.win.clearTimeout(hitTimer); ctx.win.clearTimeout(autoTimer); ctx.win.clearTimeout(pace.timer); moments.dispose(); photoURLs.dispose(); bubbleURLs.dispose(); dispose(); };
   render();
   return v;
 }

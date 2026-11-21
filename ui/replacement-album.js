@@ -4,7 +4,7 @@ import {icon} from './icons.js';
 import {photoWall} from './photo-wall.js';
 import {eachThumb} from './thumbs.js';
 
-export async function pickReplacement(ctx, api) {
+export async function pickReplacement(ctx, api, {title = '替换图片', over = false, accept = 'image/png,image/jpeg,image/webp'} = {}) {
   const [photos, albums] = await Promise.all([api.listPhotos(), api.listAlbums()]);
   const rows = byNewest(photos);
   const byId = new Map(rows.map(row => [row.id, row]));
@@ -17,11 +17,11 @@ export async function pickReplacement(ctx, api) {
   const groups = folders.concat(sources);
   const wall = photoWall({api, win:ctx.win, tile: (row, url) =>
     `<button type="button" data-id="${esc(row.id)}" data-pick-photo="${esc(row.id)}" aria-label="选择 ${esc(row.name)}"><img alt="" data-photo="${esc(row.id)}"${url ? ` src="${esc(url)}"` : ''}></button>`});
-  const d = ctx.dialog('替换图片', `<div class="stip-picker">
+  const d = ctx.dialog(title, `<div class="stip-picker">
     <div class="stip-picker-head"><div role="group" aria-label="浏览方式"><button type="button" data-tab="library">图库</button><button type="button" data-tab="albums">相簿</button></div>
-    <button type="button" data-device>${icon('image')}从设备选择</button><input hidden type="file" accept="image/png,image/jpeg,image/webp"></div>
+    <button type="button" data-device>${icon('image')}从设备选择</button><input hidden type="file" accept="${esc(accept)}"></div>
     <div class="stip-picker-back" hidden><button type="button">‹ 返回相簿</button><strong></strong></div>
-    <div class="stip-picker-scroll" tabindex="0"></div></div>`);
+    <div class="stip-picker-scroll" tabindex="0"></div></div>`, {over});
   const root = d.body.querySelector('.stip-picker');
   const scroll = root.querySelector('.stip-picker-scroll');
   const back = root.querySelector('.stip-picker-back');

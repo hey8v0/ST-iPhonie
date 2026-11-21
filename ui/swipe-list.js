@@ -35,7 +35,7 @@ export function swipeRow(id, inner, actions = [], {className = '', label = ''} =
  * ids(): every row's id, for a list that does not have all its rows on the page (row-window.js).
  * Returns {close(), done(), get chosen()}.
  */
-export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bulk = [], onBulk = () => {}, hint = '', mouseHint = '', sort = null, ids: everyId = null} = {}) {
+export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bulk = [], onBulk = () => {}, hint = '', mouseHint = '', sort = null, ids: everyId = null, leftOnly = false} = {}) {
   const win = ctx.win, doc = ctx.doc;
   let open = null, press = null, chosen = null, suppress = 0;
   const rows = () => [...list.querySelectorAll('.sw-row[data-swipe]')];
@@ -127,7 +127,7 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
     const canPick = bulk.length > 0 && p.start === 0;
     let x = raw;
     if (raw < -w) x = -w - rubber(-w - raw, 40);
-    else if (raw > 0) x = canPick ? rubber(raw, 110) : rubber(raw, 24);
+    else if (raw > 0) x = canPick ? rubber(raw, 110) : leftOnly ? 0 : rubber(raw, 24);
     if (!w && raw < 0) x = -rubber(-raw, 24);
     p.x2 = x;
     p.main.style.transform = `translateX(${x}px)`;
@@ -178,7 +178,7 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
   // A mouse: the right button opens a row's actions.
   // A finger held on a row of a list that can be put in order lifts it: the long press's menu does not come.
   list.addEventListener('contextmenu', e => {
-    if (sort && press) { e.preventDefault(); return; }
+    if ((sort && press) || (leftOnly && e.pointerType === 'touch')) { e.preventDefault(); return; }
     const row = e.target.closest('.sw-row'); if (!row || !row.querySelector('.sw-act')) return; e.preventDefault(); if (open === row) close(); else openRow(row);
   });
   list.addEventListener('keydown', e => {

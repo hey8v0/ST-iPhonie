@@ -66,7 +66,15 @@ const HANGUP = /^\s*[[【(（]\s*(挂断|挂电话|挂了|结束通话)\s*[\]】
  * is what the user reads) and whether the contact hangs up. Lines with the voice tag keep the original language.
  */
 export function parseCallReply(reply, {name, user = '我', voiceFormat, voiced = false}) {
-  const body = String(reply || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```[a-z]*\n?|```/g, '');
+  const rawReply = String(reply ?? '').trim();
+  // A gateway can return an error document with a successful HTTP status.
+  if (/^(?:<!doctype html|<html[\s>])/i.test(rawReply))throw Error('通话接口返回了网页，未收到台词');
+  if(rawReply.startsWith('{')){
+    let packet;
+    try { packet=JSON.parse(rawReply); } catch { /* ordinary speech may contain braces */ }
+    if(packet?.error || Array.isArray(packet?.choices))throw Error('通话接口返回了未解析的响应，未收到台词');
+  }
+  const body = rawReply.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/<think(?:ing)?>[\s\S]*$/i, '').replace(/```[a-z]*\n?|```/g, '');
   const out = [];
   let hangup = false;
   for (let raw of body.split(/\r?\n/)) {

@@ -273,13 +273,13 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
       turn.content.push({type:'image_url',image_url:{url}});
       withImages=true;
     }
-    let start=messages.length;
-    while(start>0 && messages[start-1].from==='me')start--;
-    for(let i=start;i<messages.length;i++){
+    // Only the newest attachment in the pending user turn goes to the vision model.
+    for(let i=messages.length-1;i>=0 && messages[i].from==='me';i--){
       if(!messages[i].photoId)continue;
       const photo=await backend.library.getPhoto(messages[i].photoId);
       if(!photo?.blob)throw Error('找不到消息里的图片，请重新添加附件');
       await appendImage(prompt[i+1],photo.blob);
+      break;
     }
     if(blob)await appendImage(prompt.at(-1),blob);
     const result=withImages

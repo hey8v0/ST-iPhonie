@@ -2,7 +2,7 @@ import {popAt} from './msg-pop.js';
 import {readingMemory} from './reading-memory.js';
 import {esc, avatar, copyText, btn, menu, toggle} from './common.js';
 import {mountSwipeList, swipeRow} from './swipe-list.js';
-import {pickPicture} from './draw-images.js';
+import {pickReplacement} from './replacement-album.js';
 import {objectURLs} from './object-urls.js';
 import {icon} from './icons.js';
 
@@ -15,6 +15,15 @@ export async function openReadingThreads(ctx,{book,key,companion,quote,visible,r
   const saved=await ctx.api.getReadingBook(book.id);
   if(!saved)return;
   let state=structuredClone(saved.settings?.[key] || {rooms:[room()]});
+  function keepLatestPhoto(messages){
+    let seen=false;
+    for(let i=messages.length-1;i>=0;i--){
+      if(!messages[i].photoId)continue;
+      if(seen)delete messages[i].photoId;
+      seen=true;
+    }
+  }
+  for(const window of state.rooms)keepLatestPhoto(window.messages);
   let active=state.rooms.find(r=>r.id===state.active) || state.rooms[0];
   const d=ctx.dialog('一起看','',{over:true});
   const photos=objectURLs(ctx.win);
@@ -80,13 +89,19 @@ export async function openReadingThreads(ctx,{book,key,companion,quote,visible,r
     const pane=ctx.dialog('共读窗口','<div class="pick-list" data-reading-rooms>'+rows.join('')+'</div>',{over:true,add:'新建共读窗口'});
     const select=selected=>{pane.close();change(()=>{if(active!==selected)draft='';active=selected;});};
     pane.overlay.querySelector('[data-sheet-add]').onclick=()=>{pane.close();change(()=>{active=room();state.rooms.push(active);draft='';});};
+    async function remove(ids){
+      const title=ids.length===1?'删除这个共读窗口？':'删除选中的 '+ids.length+' 个共读窗口？';
+      if(!await ctx.confirm(title,'选中窗口里的消息和记忆会一起移除。',{over:true}))return;
+      pane.close();
+      await change(()=>{
+        state.rooms=state.rooms.filter(r=>!ids.includes(r.id));
+        if(!state.rooms.length)state.rooms.push(room());
+        if(ids.includes(active.id)){active=state.rooms[0];draft='';}
+      });
+    }
     const control=mountSwipeList(pane.body.querySelector('[data-reading-rooms]'),{ctx,
-      onTap:id=>select(state.rooms.find(r=>r.id===id)),
-      onAction:async(_,id)=>{
-        if(!await ctx.confirm('删除这个共读窗口？','窗口里的消息和共读记忆会一起移除。',{over:true}))return;
-        pane.close();change(()=>{state.rooms=state.rooms.filter(r=>r.id!==id);if(!state.rooms.length)state.rooms.push(room());
-          if(active.id===id){active=state.rooms[0];draft='';}});
-      }
+      onTap:id=>select(state.rooms.find(r=>r.id===id)),onAction:(_,id)=>remove([id]),
+      bulk:[{key:'delete',label:'删除',icon:'trash',danger:true}],onBulk:(_,ids)=>remove(ids)
     });
     pane.onClose(()=>control.dispose());
   }
@@ -120,12 +135,13 @@ export async function openReadingThreads(ctx,{book,key,companion,quote,visible,r
   }
   async function attach(){
     const view=visible();
-    const image=await pickPicture(ctx,ctx.api,'添加图片附件',{over:true,returnId:true});
+    const image=await pickReplacement(ctx,ctx.api,{title:'添加图片附件',over:true});
     if(!image || !d.live)return;
     await change(async()=>{
       const photo=typeof image==='string'?await ctx.api.getPhoto(image):await ctx.api.addPhoto({name:image.name,blob:image});
       if(!photo)throw Error('找不到这张图片');
       active.messages.push({id:crypto.randomUUID(),at:Date.now(),from:'me',text:'[图片] '+(photo.name || '图片附件'),photoId:photo.id,view});
+      keepLatestPhoto(active.messages);
     });
   }
   let press, timeout, popup;

@@ -191,7 +191,7 @@ export function callScreen(ctx, host) {
     if (lines.innerHTML !== html) { lines.innerHTML = html; lines.scrollTop = lines.scrollHeight; }
     const error = layer.querySelector('[data-call-error]');
     error.hidden = !c.error;
-    if (c.error) error.innerHTML = `<span>${esc(c.error)}</span><button data-call="retry">再说一次</button>`;
+    if (c.error) error.innerHTML = `<span>${esc(c.error)}</span><button data-call="retry">重试本轮</button>`;
     sendButton();
   }
   // Same as the chat app: a paper plane while there is text (it only says it), a bubble when the box is empty (the

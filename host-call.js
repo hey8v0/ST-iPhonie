@@ -139,8 +139,8 @@ export function createCallHost({context, settings, backend, notice, ringing = ()
   }
   /** Asks again after a failed turn. */
   function retry() {
-    if (!call || call.state !== 'talking' || call.thinking) return Promise.resolve();
-    return turn(call.lines.some(l => l.from !== 'me') || call.lines.length ? 'reply' : call.dir === 'in' ? 'incoming' : 'outgoing');
+    if (!call || call.state !== 'talking' || call.thinking || !call.failedMode) return Promise.resolve();
+    return turn(call.failedMode);
   }
 
   async function ask(mode, c) {
@@ -168,7 +168,7 @@ export function createCallHost({context, settings, backend, notice, ringing = ()
   /** One turn of the contact: generate, show, read aloud; hangs up afterwards when the contact wanted to. */
   async function turn(mode) {
     const c = call, id = c.id;
-    c.thinking = true; c.error = '';
+    c.thinking = true; c.error = ''; c.failedMode = null;
     emit();
     let found;
     try {
@@ -176,7 +176,7 @@ export function createCallHost({context, settings, backend, notice, ringing = ()
       if (!found.lines.length && !found.hangup) throw Error(`没听清${c.name}说什么`);
     } catch (error) {
       if (!live(id)) return;
-      c.thinking = false; c.error = (error.message || '这次没有回应') + '，可以点「再说一次」';
+      c.thinking = false; c.failedMode = mode; c.error = error.message || '这次没有收到通话回复';
       emit();
       return;
     }
