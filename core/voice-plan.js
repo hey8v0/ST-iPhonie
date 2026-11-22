@@ -1,4 +1,4 @@
-import {storyScope} from './story-scope.js';
+import {storyScope, storyText} from './story-scope.js';
 // 回复后单独配音: the story model writes the reply without any voice rule; afterwards the plugin asks the model once
 // more, with the voice preset's rules, to voice the lines already in it. The answer is one row per spoken line, the
 // line as the reply has it and the same line in the preset's 台词格式; the plugin puts each in place of its line.
@@ -21,9 +21,18 @@ export function voicePlanRule(format) {
 const voiceSystem = (rules, format) => [String(rules || '').trim(), voicePlanRule(format)].filter(Boolean).join('\n\n');
 const story = (message, before) => (before.length ? `【前情】\n${before.map(m => `${m.name}：${m.text}`).join('\n')}\n\n` : '') + `【这段正文】\n${String(message).trim()}`;
 
+// Validate the same scoped text that is offered to the model, after any old voice tags were removed.
+export function voicePlanBody(message, scope) {
+  const text = storyText(message, scope).trim();
+  const length = text.replace(/<[^>]+>/g, '').replace(/&(?:nbsp|#160|#xa0);/gi, ' ').replace(/[\u200b\ufeff]/g, '').trim().length;
+  return {text, length};
+}
+export const emptyVoiceBody = '正文范围内没有可配音的文字，请检查「正文标签」与「排除的内容」是否把台词排除了。';
+
 /** The request for voicing a reply: rules = the voice preset's prompt for the speakers (promptPlan), joined. */
-export function voicePlanRequest({rules, format, message, before = [], scope = {}}) {
-  return [{role: 'system', content: voiceSystem(rules, format)}, {role: 'user', content: `${story(storyScope(message, scope).masked, before)}\n\n（只输出台词行。）`}];
+export function voicePlanRequest({rules, format, message, before = [], scope = {}, body = voicePlanBody(message, scope)}) {
+  if (!body.length) throw Error(emptyVoiceBody);
+  return [{role: 'system', content: voiceSystem(rules, format)}, {role: 'user', content: `${story(body.text, before)}\n\n（只输出台词行。）`}];
 }
 
 /** Voice and pictures in one request: the picture planner's request (planRequest) with the voicing put in front. */

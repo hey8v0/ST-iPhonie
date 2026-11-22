@@ -68,13 +68,22 @@ export async function openReadingThreads(ctx,{book,key,companion,quote,visible,r
     finally{writing.delete(lock);paint();if(hadFocus && d.live)d.body.querySelector('form input')?.focus();}
   }
   async function generate(reroll){
-    const messages=reroll?active.messages.slice(0,-1):active.messages.slice();
+    let end = active.messages.length;
+    if (reroll) {
+      const previous = active.messages[--end];
+      while (end > 0 && previous.turn && active.messages[end-1].turn === previous.turn) end--;
+    }
+    const messages = active.messages.slice(0,end);
     const last=messages.at(-1);
     if(last?.from!=='me')return;
     const context=active.remember===false ? {recent:messages.slice(-24),text:''} : await readingMemory(ctx.api,active,messages,companion);
     const text=await respond(context.recent,last.view,context.text);
-    if(reroll)active.messages.pop();
-    active.messages.push({id:crypto.randomUUID(),at:Date.now(),from:'ta',text});
+    const turn = crypto.randomUUID();
+    const bubbles = text.split('\n').map(line => line.trim()).filter(Boolean);
+    if (!bubbles.length) throw Error('没有收到可显示的共读消息，可以重试');
+    active.messages.splice(end,active.messages.length-end,...bubbles.map(line => ({
+      id:crypto.randomUUID(), at:Date.now(), from:'ta', turn, text:line,
+    })));
   }
   d.body.addEventListener('submit',e=>{e.preventDefault();change(async()=>{
     if(draft.trim()){active.messages.push({id:crypto.randomUUID(),at:Date.now(),from:'me',text:draft.trim(),view:visible()});draft='';}

@@ -260,34 +260,37 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     const person = members({members:[companion]}, sources.persona !== false)[0];
     const dm = sources.history && currentDm(await backend.threads(), companion);
     const refs = await bookReferences(sources, person, reading, dm ? await backend.chats.get(dm.id) : null);
-    const user = userName(), profile = sources.userPersona !== false && userPersona();
-    const prompt = [{role:'system', content:[`你是${companion}，正在和${user}一起读这本书。自然回应对方刚才的话。`, person.persona || person.card, profile && '共读者'+user+'的人设：'+profile, refs, String(memoryText || '').slice(0,12000), reading].filter(Boolean).join('\n\n')},
-      ...messages.map(m=>({role:m.from==='me'?'user':'assistant',content:String(m.text)}))];
-    if (!prompt.length || prompt.at(-1).role !== 'user') throw Error('先写下想和 TA 说的话');
-    requireChat(valid);
-    let withImages=false;
-    async function appendImage(turn,image){
-      const url=await picture(image);
-      requireChat(valid);
-      if(typeof turn.content==='string')turn.content=[{type:'text',text:turn.content}];
-      turn.content.push({type:'image_url',image_url:{url}});
-      withImages=true;
-    }
-    // Only the newest attachment in the pending user turn goes to the vision model.
-    for(let i=messages.length-1;i>=0 && messages[i].from==='me';i--){
-      if(!messages[i].photoId)continue;
-      const photo=await backend.library.getPhoto(messages[i].photoId);
-      if(!photo?.blob)throw Error('找不到消息里的图片，请重新添加附件');
-      await appendImage(prompt[i+1],photo.blob);
+    const user = userName(), preset = activeChatPreset(settings().chat);
+    if (messages.at(-1)?.from !== 'me') throw Error('先写下想和 TA 说的话');
+    const thread = {type:'dm', name:companion, members:[companion], messages:messages.map((m,i) => ({
+      id:String(i), at:m.at, from:m.from === 'me' ? 'me' : companion, kind:m.photoId ? 'photo' : 'text', text:String(m.text || ''),
+    }))};
+    const images = [];
+    // Only the newest attachment in this user turn and the current comic page are visible.
+    for (let i=messages.length-1; i>=0 && messages[i].from==='me'; i--) {
+      if (!messages[i].photoId) continue;
+      const photo = await backend.library.getPhoto(messages[i].photoId);
+      if (!photo?.blob) throw Error('找不到消息里的图片，请重新添加附件');
+      images.push({id:String(i), url:await picture(photo.blob)});
       break;
     }
-    if(blob)await appendImage(prompt.at(-1),blob);
+    if (blob) images.push({id:'page', url:await picture(blob)});
+    requireChat(valid);
+    const withImages = images.length > 0;
+    const people = [{...person, voice:false}];
+    const prompt = buildChatRequest({prompts:settings().promptRules, preset, thread, members:people,
+      user, userPersona:sources.userPersona === false ? '' : userPersona(), pictures:images,
+      memory:String(memoryText || '').slice(0,12000), voiceFormat:''});
+    prompt.splice(-1,0,{role:'system',content:[refs, reading, blob && '最后一张附图是当前漫画页。',
+      '在共读窗口按手机私聊预设发文字消息，一条消息一行。用直接发给对方的话讨论书页，省略动作旁白。'].filter(Boolean).join('\n\n')});
     const result=withImages
       ? await ask(ctx,backend,settings(),prompt,{label:'共读 · 看图',use:'chat'})
       : await backend.generateText(ctx,{use:'chat',prompt,trimNames:false,responseLength:4096});
     requireChat(valid);
-    if (!String(result || '').trim()) throw Error('没有收到回复，可以重试');
-    return String(result).trim();
+    const items = parseChatReply(cleanTagged(result, preset.cleanTags), {members:people, user, voiceFormat:''});
+    const texts = items.filter(item => item.kind === 'text').map(item => item.text);
+    if (!texts.length) throw Error('没有收到可显示的共读消息，可以重试');
+    return texts.join('\n');
   }
 
   /** Margin notes have their own request: no fabricated user message, private chat or phone side effects. */

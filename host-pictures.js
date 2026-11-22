@@ -1,7 +1,7 @@
 import {storyDrawSource} from './core/draw.js';
 import {replacePicture,storyPickerContext} from './ui/replace-picture.js';
 import {replyBody, replyRevision} from './core/reply-revision.js';
-import {storyScope, mapStory} from './core/story-scope.js';
+import {storyScope, mapStory, cleanBody, cleanSkip, NARRATION_BODY, NARRATION_SKIP} from './core/story-scope.js';
 // In-chat pictures: fills the placeholders left by <img>…</img> tags, generates them with NovelAI,
 // uploads the result to the tavern's image folder and remembers it on the message (message.extra.sttts_pics),
 // so every device that opens the chat sees the same picture.
@@ -21,7 +21,7 @@ import {editTags} from './host-ask.js';
 import {downloadAction} from './download.js';
 import {plainStory, activeChatPreset} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {voicePlanRequest, combinedRequest, voicedRows, insertVoiced} from './core/voice-plan.js';
+import {voicePlanBody, emptyVoiceBody, voicePlanRequest, combinedRequest, voicedRows, insertVoiced} from './core/voice-plan.js';
 import {withPhone, phoneSection} from './core/chat.js';
 import {TIER_NAMES, NAI_MODEL_NAMES} from './core/novelai.js';
 
@@ -267,10 +267,24 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
         const scope = structuredClone(s.narration), format = voice?.format(), key = scopeKey();
         const revision = replyRevision(context, id, scope, () => backend.closed ? null : backend.space);
         const source = voiceSource(force && wantPictures ? withoutPictures(original.mes) : original.mes, scope);
+        const body = wantVoice ? voicePlanBody(source, scope) : null;
+        if (body) {
+          const rawLength = String(original.mes ?? '').length;
+          const reason = !rawLength ? '楼层原文为空' : revoice && body.length === 0 && source !== original.mes
+            ? '清除旧配音标签后，正文范围内没有可配音的文字' : emptyVoiceBody;
+          stage(id, body.length ? '已检查配音正文' : reason, {
+            rawLength, filteredLength: body.length, revoice,
+            bodyTags: cleanBody(scope?.body ?? NARRATION_BODY), skipRules: cleanSkip(scope?.skip ?? NARRATION_SKIP),
+          }, body.length ? 'info' : 'warn');
+          if (!body.length) {
+            if (phoned) return {voiced: 0, pictured: 0, skipped: true, reason};
+            throw Error(reason);
+          }
+        }
         const preset = s.draw.presets.find(p => p.id === s.draw.activePreset) || s.draw.presets[0];
         const pictures = wantPictures ? await pictureRequest(id, source) : null;
         const asked = wantVoice && wantPictures ? combinedRequest({rules: voice.rules(), format, pictures})
-          : wantVoice ? voicePlanRequest({rules: voice.rules(), format, message: source, before: before(id), scope}) : pictures;
+          : wantVoice ? voicePlanRequest({rules: voice.rules(), format, body, before: before(id)}) : pictures;
         const phoneRule = phoned && phone?.wanted() ? await phone.rule() : '';
         const prompt = withPhone(asked, phoneRule);
         const length = (wantVoice ? Math.min(3000, 400 + source.length * 2) : 0) + (wantPictures ? planLength(s, preset.count) : 0) + (phoneRule ? 500 : 0);
@@ -372,7 +386,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       if (context().chat[id] !== message || message.mes !== task.raw || message.swipe_id !== task.swipe || (context().getCurrentChatId?.() ?? context().chatId) !== chat) return;
       const wantVoice = !!voice?.wanted() && !voice.has(storyScope(message.mes, s.narration).masked);
       const wantPictures = canDraw() && s.draw.enabled && s.draw.mode === 'separate' && !parsePictures(message.mes).length;
-      if (!storyScope(message.mes, s.narration).masked.replace(/<[^>]+>/g, '').trim()) return;
+      if (!wantVoice && !storyScope(message.mes, s.narration).masked.replace(/<[^>]+>/g, '').trim()) return;
       const result = wantVoice || wantPictures ? await planReply(id, {voiced: wantVoice, pictured: wantPictures, phoned: true}) : {written: true};
       task.state = result.written ? 'written' : 'skipped';
       if (result.written) { const now = context().chat[id]; task.raw = now?.mes; if(now) afterReplies.set(now,task); }

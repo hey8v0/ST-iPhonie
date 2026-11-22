@@ -8,7 +8,7 @@ export function readingSources(settings = {}) {
 
 // Only the visible excerpt crosses into chat. Never pass the book reader, archive, or later chapters.
 export function readingContext(book, {chapter = 0, page = 1, text = '', annotation = false} = {}, prompts = {}) {
-  return promptText(prompts, 'reading-together', 'rule', {'书名': String(book.title).slice(0, 100), '章节': String(book.chapters[chapter]?.title || '').slice(0, 100), '页码': page, '当前页': String(text).slice(0, 2200), '批注': annotation ? '这次只说一句简短的吐槽或感想，不超过四十字。' : '自然地回应对方，像坐在身边一起看书。'});
+  return promptText(prompts, 'reading-together', 'rule', {'书名': String(book.title).slice(0, 100), '章节': String(book.chapters[chapter]?.title || '').slice(0, 100), '页码': page, '当前页': String(text).slice(0, 2200), '批注': annotation ? '这次只说一句简短的吐槽或感想，不超过四十字。' : '像在手机私聊里一样回应对方对这一页说的话。'});
 }
 export async function readingSend(api, book, visible, text, {blob = null, annotation = false, quote = ''} = {}) {
   if (!book.companion) throw Error('先选一个一起看书的人');
