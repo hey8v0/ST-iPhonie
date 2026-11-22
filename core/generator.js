@@ -122,7 +122,7 @@ function narrationWords(said, voiceFormat) {
   const found = voiceFormat ? parseDialogue(said, voiceFormat) : [];
   let outside = '', at = 0;
   for (const v of found) { outside += said.slice(at, v.start) + ' '; at = v.end; }
-  outside = (outside + said.slice(at)).replace(/<tts\b[^>]*>[\s\S]*?<\/tts\s*>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+  outside = (outside + said.slice(at)).replace(/<(?:i-tts|tts)(?=[\s/>])[^>]*>[\s\S]*?<\/(?:i-tts|tts)\s*>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
     .replace(/^[「“"『](.*)[」”"』]$/s, '$1').replace(/^[（(](.*)[)）]$/, '$1').trim();
   // The words outside the tag when there are any (「她转过身。<tts>…</tts>」), else what the tag shows.
   return oneLine(/[\p{L}\p{N}]/u.test(outside) ? outside : found.map(v => v.translation.trim() || v.text.trim()).join(' '), L.line);

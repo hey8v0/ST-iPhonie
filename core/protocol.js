@@ -4,6 +4,12 @@ export const isPlaceholderRole=name=>/^\{\{?\s*(?:角色|角色名|role|speaker|
 export const DEFAULT_FORMAT = '“{译文}”<tts>{角色}|{情绪}|{文本}</tts>';
 // Free prose stays byte-for-byte as written; only this tag becomes an audio control.
 export const FREE_FORMAT='<tts>{角色}|{情绪}|{文本}</tts>';
+export const isFreeFormat = format => format === FREE_FORMAT || format === shortVoiceFormat(FREE_FORMAT);
+export function shortVoiceFormat(format) { return format.replaceAll('<tts>', '<i-tts>').replaceAll('</tts>', '</i-tts>'); }
+export function builtinVoiceFormat(format, short) {
+  for (const base of [DEFAULT_FORMAT, FREE_FORMAT]) if (format === base || format === shortVoiceFormat(base)) return short ? shortVoiceFormat(base) : base;
+  return format;
+}
 export const FREE_PROMPT='正常续写正文与叙事，不改变角色人设和文风。正文中的对白按角色卡和用户要求自由显示，可用英文、中文、双语、括号或美化格式，不强制写中文译文。每段真正说出口的台词后紧接 {{格式}}，标签内填实际角色、简短情绪和同一句完整的朗读原文；朗读语言遵循 {{语言}}。不把旁白、动作和未说出口的心理活动放进配音标签，不输出规则解释或代码块。';
 export const FREE_CONTRACT_PROMPT='【自由正文配音】正文显示与配音标签分开：保留正文原来的语言、引号、翻译括号与排版，不为插件强制改成中文。每段发言之后附一个 {{格式}}，角色、情绪和朗读原文完整填写，内容与对应的发言一致。换说话者另起标签。台词外的叙述继续照常输出，不写进 tts 标签。不要在朗读原文里重复显示用的译文。';
 // Earlier default; replies written with it keep their waves.
@@ -13,7 +19,7 @@ export function knownFormats(settings){const p=settings.presets.find(p=>p.id===s
 const fields=['译文','角色','情绪','文本'];
 export const escapeHTML=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function decodeText(s){return s.replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);/gi,m=>{const names={'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&apos;':"'"};if(names[m.toLowerCase()])return names[m.toLowerCase()];const hex=m[2].toLowerCase()==='x',n=parseInt(m.slice(hex?3:2,-1),hex?16:10);return n>0&&n<=0x10ffff?String.fromCodePoint(n):m;});}
-export function compileFormat(format){if(typeof format!=='string'||format.length>2000)throw Error('台词格式无效');const required=format===FREE_FORMAT?fields.filter(f=>f!=='译文'):fields;const tokens=[...format.matchAll(/\{(译文|角色|情绪|文本)\}/g)];if(tokens.length!==required.length||required.some(f=>tokens.filter(t=>t[1]===f).length!==1))throw Error('台词格式需各保留一次 {译文}、{角色}、{情绪}、{文本}');const literals=[],names=[];let at=0;for(const t of tokens){literals.push(format.slice(at,t.index));names.push(t[1]);at=t.index+t[0].length;}literals.push(format.slice(at));if(literals.some(x=>!x.length))throw Error('台词格式的字段之间、开头和结尾需要固定分隔文字');return {literals,names};}
+export function compileFormat(format){if(typeof format!=='string'||format.length>2000)throw Error('台词格式无效');const required=isFreeFormat(format)?fields.filter(f=>f!=='译文'):fields;const tokens=[...format.matchAll(/\{(译文|角色|情绪|文本)\}/g)];if(tokens.length!==required.length||required.some(f=>tokens.filter(t=>t[1]===f).length!==1))throw Error('台词格式需各保留一次 {译文}、{角色}、{情绪}、{文本}');const literals=[],names=[];let at=0;for(const t of tokens){literals.push(format.slice(at,t.index));names.push(t[1]);at=t.index+t[0].length;}literals.push(format.slice(at));if(literals.some(x=>!x.length))throw Error('台词格式的字段之间、开头和结尾需要固定分隔文字');return {literals,names};}
 /** Code blocks and inline code: voice tags inside them are examples, not lines. */
 function codeSpans(message){return [...message.matchAll(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`/g)].map(m=>[m.index,m.index+m[0].length]);}
 /** The “{译文}”<tts>{角色}|{情绪}|{文本}</tts> shape, whose common slips can still be read. */
@@ -70,7 +76,25 @@ function freeLines(message) {
  }
  return out;
 }
-export function parseDialogue(message,format=DEFAULT_FORMAT){const {literals,names}=compileFormat(format);message=String(message);if(message.length>500000)return [];if(format===FREE_FORMAT)return freeLines(message);
+export function parseDialogue(message,format=DEFAULT_FORMAT){
+ const original=String(message), builtin=builtinVoiceFormat(format,false);
+ if (original.length>500000) return [];
+ if ((builtin===DEFAULT_FORMAT || builtin===FREE_FORMAT) && /<\/?i-tts(?=[\s>])/i.test(original)) {
+   // Reuse the repairs for quotes, inner speech and free prose. Return offsets in the original message.
+   const offsets=[];
+   const normalized=original.replace(/<(\/?)i-tts(?=[\s>])/gi,(tag,slash,at)=>{
+     offsets.push(at+1+slash.length-2*offsets.length);
+     return '<'+slash+'tts';
+   });
+   const restore=pos=>{
+     let low=0,high=offsets.length;
+     while(low<high){const mid=(low+high)>>>1;if(offsets[mid]<pos)low=mid+1;else high=mid;}
+     return pos+2*low;
+   };
+   return parseDialogue(normalized,builtin).map(line=>({...line,start:restore(line.start),end:restore(line.end),...(line.displayStart===undefined?{}:{displayStart:restore(line.displayStart)})}));
+ }
+ format=builtin;
+const {literals,names}=compileFormat(format);message=String(message);if(message.length>500000)return [];if(isFreeFormat(format))return freeLines(message);
 // A straight quote right outside a curly one ("“你好”"<tts>…) counts as a second curly quote. Same length, so positions hold.
 if(literals[0]==='“')message=message.replace(/"(?=“)/g,'“').replace(/”"/g,'””');
 const family=tagFamily(format);if(family)message=repaired(message);
@@ -78,12 +102,12 @@ const excluded=codeSpans(message),found=exactLines(message,literals,names,exclud
 return (family?[...found,...looseLines(message,found,excluded)].sort((a,b)=>a.start-b.start):found).map(mendLine);}
 /** Voice tags in a reply that were not read as lines (lines: what was read), each with why, for the hint under the
  *  reply and the self-check. */
-export function dialogueProblems(message,lines=[]){const text=String(message);if(!/<tts\b/i.test(text)||text.length>500000)return [];const fixed=repaired(text.replace(/"(?=“)/g,'“').replace(/”"/g,'””')),excluded=codeSpans(fixed),problems=[];
-for(const m of fixed.matchAll(/<tts\b[^>]*>/g)){const at=m.index;if(lines.some(l=>at>=l.start&&at<l.end)||excluded.some(([a,b])=>at>=a&&at<b))continue;
-const close=fixed.indexOf('</tts>',at),next=fixed.indexOf('<tts',at+4),open=close<0||(next>=0&&next<close);
+export function dialogueProblems(message,lines=[]){const text=String(message);if(!/<(?:i-tts|tts)(?=[\s/>])/i.test(text)||text.length>500000)return [];const fixed=repaired(text.replace(/"(?=“)/g,'“').replace(/”"/g,'””')),excluded=codeSpans(fixed),problems=[];
+for(const m of fixed.matchAll(/<(?:i-tts|tts)(?=[\s/>])[^>]*>/gi)){const at=m.index;if(lines.some(l=>at>=l.start&&at<l.end)||excluded.some(([a,b])=>at>=a&&at<b))continue;
+const tag=m[0].match(/^<([\w-]+)/)[1],close=fixed.indexOf('</'+tag+'>',at),next=fixed.indexOf('<'+tag,at+m[0].length),open=close<0||(next>=0&&next<close);
 const inner=open?'':fixed.slice(at+m[0].length,close),parts=inner.split('|'),role=decodeText(open?fixed.slice(at+m[0].length).split(/[|<\n]/)[0]:parts[0]).trim();
-let reason;if(open)reason='标签没有闭合，少了 </tts>';else if(m[0]!=='<tts>')reason='标签写法不对，应该是 <tts>角色|情绪|原文</tts>';else if(parts.length<2)reason='缺少分隔符 |，应该写成 角色|情绪|原文';else if(parts.length>3)reason=`分成了 ${parts.length} 段，应该是 角色|情绪|原文 三段`;else if(!role)reason='没有写角色名';else if(isPlaceholderRole(role))reason=`角色名还是占位符 ${role}`;else if(!parts.at(-1).trim())reason='没有写原文';else reason='格式没认出来';
-problems.push({at,role:role.slice(0,40),reason,snippet:text.slice(at,Math.min(open?at+80:close+6,at+120))});}return problems;}
+let reason;if(open)reason='标签没有闭合，少了 </'+tag+'>';else if(m[0]!=='<'+tag+'>')reason='标签写法不对，应该是 <'+tag+'>角色|情绪|原文</'+tag+'>';else if(parts.length<2)reason='缺少分隔符 |，应该写成 角色|情绪|原文';else if(parts.length>3)reason=`分成了 ${parts.length} 段，应该是 角色|情绪|原文 三段`;else if(!role)reason='没有写角色名';else if(isPlaceholderRole(role))reason=`角色名还是占位符 ${role}`;else if(!parts.at(-1).trim())reason='没有写原文';else reason='格式没认出来';
+problems.push({at,role:role.slice(0,40),reason,snippet:text.slice(at,Math.min(open?at+80:close+tag.length+3,at+120))});}return problems;}
 export function renderDialogue(message,format,marker,inner=[]){const lines=parseDialogue(message,format);let out='',at=0;lines.forEach((line,index)=>{out+=message.slice(at,line.start);out+=`<span class="sttts-utterance" data-sttts-line="${index}" data-sttts-token="${marker}"${inner[index]?' data-sttts-inner':''}><span class="sttts-translation" data-sttts-translation>${line.tagOnly?'':inner[index]?escapeHTML(line.translation):'“'+escapeHTML(line.translation)+'”'}</span> <button type="button" class="sttts-play" data-sttts-action="line" data-sttts-state="ungenerated" aria-label="生成并朗读 ${escapeHTML(line.role)} 的台词"><span data-sttts-wave aria-hidden="true"><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i><i data-sttts-bar></i></span></button></span>`;at=line.end;});return out+message.slice(at);}
 /** Voice switched off: each tagged line shows only its Chinese translation, without the tag or the wave button. */
 export function plainDialogue(message,format){const lines=parseDialogue(message,format);let out='',at=0;for(const line of lines){out+=message.slice(at,line.start)+(line.tagOnly?'':'“'+escapeHTML(line.translation)+'”');at=line.end;}return out+message.slice(at);}

@@ -206,7 +206,7 @@ export function soundPromptPlan(text) {
 }
 
 // ---------- When each sound plays without voice: as fast as the reply is read ----------
-const readable = text => String(text ?? '').replace(TAG, '').replace(/<tts\b[^>]*>[\s\S]*?<\/tts\s*>/gi, '').replace(/<[^>]+>/g, '').replace(/\s+/g, '').length;
+const readable = text => String(text ?? '').replace(TAG, '').replace(/<(?:i-tts|tts)(?=[\s/>])[^>]*>[\s\S]*?<\/(?:i-tts|tts)\s*>/gi, '').replace(/<[^>]+>/g, '').replace(/\s+/g, '').length;
 /**
  * Seconds from one sound to the next (the first from the reply's start): the characters read in between at
  * perSecond, at least `least` apart and at most `most`.

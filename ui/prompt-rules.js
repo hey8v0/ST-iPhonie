@@ -1,5 +1,6 @@
 // 系统提示词: what the plugin itself tells the model, one block per kind of request, each part editable.
 import {popupSelect, bindPopupSelect} from './popup-select.js';
+import {pictureTemplate} from '../core/output-tags.js';
 import {PROMPT_BLOCKS, promptOn} from '../core/prompt-rules.js';
 import {esc, field, textArea, toggle} from './common.js';
 import {icon} from './icons.js';
@@ -7,6 +8,9 @@ import {icon} from './icons.js';
 export function promptRulesSheet(ctx) {
   let group = '全部', query = '';
   const groups = ['全部', ...new Set(PROMPT_BLOCKS.map(b => b.group))];
+  const shippedText = (block, part) => block === 'draw-story'
+    ? pictureTemplate({general: ctx.api.getState().general}, part.text, part.key)
+    : part.text;
   const status = (b, saved) => {
     if(b.id==='now')return saved?.parts&&Object.keys(saved.parts).length?'规则已修改':'默认规则';
     const on = promptOn(saved ? {[b.id]: saved} : {}, b.id);
@@ -16,7 +20,7 @@ export function promptRulesSheet(ctx) {
     const d = ctx.dialog('系统提示词', `<input class="search" type="search" data-rules-search aria-label="搜索系统提示词" placeholder="搜索…" value="${esc(query)}"><div class="prompt-rule-filter">${popupSelect('rule-group', group, groups.map(g => [g, g]), '分类')}</div><div data-rule-list></div>`);
     const paint = () => {
       const overrides = ctx.api.getState().promptRules || {}, q = query.toLowerCase();
-      const rows = PROMPT_BLOCKS.filter(b => (group === '全部' || b.group === group) && [b.title, b.note, ...b.parts.map(p => overrides[b.id]?.parts?.[p.key] ?? p.text)].join('\n').toLowerCase().includes(q)).map(b =>
+      const rows = PROMPT_BLOCKS.filter(b => (group === '全部' || b.group === group) && [b.title, b.note, ...b.parts.map(p => overrides[b.id]?.parts?.[p.key] ?? shippedText(b.id, p))].join('\n').toLowerCase().includes(q)).map(b =>
         `<button class="list-row" data-rule-id="${esc(b.id)}"><span><strong>${esc(b.title)}</strong><small>${esc(b.group)} · ${status(b, overrides[b.id])} · ${esc(b.id==='now'?'日期、时间与主动消息的规则文字':b.note)}</small></span>${icon('next')}</button>`);
       const legacy = overrides.legacy || [];
       if (legacy.length && group === '全部' && !q) rows.push(`<button class="list-row" data-rule-legacy><span><strong>旧版逐句修改（${legacy.length} 条）</strong><small>0.8.22 以前按句改过的提示词，已经不再生效，可以照着改进上面的块里</small></span>${icon('next')}</button>`);
@@ -37,7 +41,7 @@ export function promptRulesSheet(ctx) {
     const d = ctx.dialog(block.title + ' · 系统提示词', `<div class="group pad"><p class="hint">${esc(block.note)}</p>`
       + (id === 'now' ? '<p class="hint">同步开关在「设置 → 正文 → 正文和手机 → 现实时间同步」，这里修改规则文字。</p>' : block.optional ? toggle('rule-enabled', '启用', promptOn(saved ? {[id]: saved} : {}, id)) : '')
       + block.parts.map(p => {
-        const text = saved?.parts?.[p.key] ?? p.text, rows = Math.min(14, Math.max(3, Math.ceil(text.length / 24) + text.split('\n').length));
+        const text = saved?.parts?.[p.key] ?? shippedText(id, p), rows = Math.min(14, Math.max(3, Math.ceil(text.length / 24) + text.split('\n').length));
         return field(p.label, textArea('part-' + p.key, text, `rows="${rows}" spellcheck="false"`));
       }).join('')
       + `<p class="hint">{{名字}} 由插件填进去；{{#名字}}…{{/名字}} 有内容时才保留，{{^名字}}…{{/名字}} 没有时才保留。</p><p class="hint">${esc(block.fills)}</p></div>`
@@ -49,7 +53,7 @@ export function promptRulesSheet(ctx) {
       const parts = {};
       for (const p of block.parts) {
         const text = d.body.querySelector(`[data-field="part-${p.key}"]`).value;
-        if (text !== p.text) parts[p.key] = text;
+        if (text !== shippedText(id, p)) parts[p.key] = text;
       }
       const enabled = d.body.querySelector('[data-field=rule-enabled]');
       try { ctx.api.savePromptRule(id, {...(id==='now'?{enabled:promptOn(ctx.api.getState().promptRules,'now')}:enabled ? {enabled: enabled.checked} : {}), parts}); ctx.notify('已保存'); list(); }

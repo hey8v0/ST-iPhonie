@@ -1,3 +1,4 @@
+import {storyDrawSource} from './core/draw.js';
 import {replacePicture,storyPickerContext} from './ui/replace-picture.js';
 import {replyBody, replyRevision} from './core/reply-revision.js';
 import {storyScope, mapStory} from './core/story-scope.js';
@@ -144,20 +145,20 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   }
 
   /** Queues one picture. Redrawing adds a version; the earlier versions stay. */
-  async function generate(id, tag, {interactive = false, permission = null} = {}) {
-    const ctx = context(), message = ctx.chat[id], key = jobKey(id, tag);
+  async function generate(id, tag, {interactive = false, permission = null, valid = null} = {}) {
+    const ctx = context(), message = ctx.chat[id], key = jobKey(id, tag), swipe = message?.swipe_id;
     if (!message || jobs.get(key)?.state === 'generating' || selectionJobs.has(message)) return;
-    permission ??= await allowed(interactive);
-    if (!permission || selectionJobs.has(message)) return;
+    permission ??= await allowed(interactive, pictureInputs(settings(), tag, message.mes).params);
+    if (!permission || selectionJobs.has(message) || jobs.get(key)?.state === 'generating' || context().chat[id] !== message || message.swipe_id !== swipe || (valid && !valid())) return;
     jobs.set(key, {state: 'generating', engine: settings().draw.engine});
     scheduleRender();
     try {
       const inputs = pictureInputs(settings(), tag, message.mes);
-      const result = await backend.generateImage({...inputs, allowPaid: permission === 'paid', name: 'chat', key, label: '正文图片 · ' + tag.prompt.slice(0, 24)});
+      const result = await backend.generateImage({...inputs, allowPaid: permission === 'paid', valid, name: 'chat', key, label: '正文图片 · ' + tag.prompt.slice(0, 24)});
       const url = await upload(result.blob, 'st-iphonie-' + Date.now());
       // Only store the picture when the same message is still there with this tag.
       const now = context().chat[id];
-      if (now === message && parsePictures(now.mes).some(t => t.hash === tag.hash)) {
+      if (now === message && now.swipe_id === swipe && parsePictures(now.mes).some(t => t.hash === tag.hash)) {
         const list = versionsOf(stored(now, tag.hash));
         list.push({url, photoId: result.photoId, seed: result.seed, width: result.params.width, height: result.params.height, model: result.params.model, steps: result.params.steps, prompt: tag.prompt, characters: inputs.names, at: Date.now()});
         keep(now, tag.hash, list, list.length - 1);
@@ -283,7 +284,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       let current = entry.revision.current();
       const alreadyWritten = current && entry.writtenBody !== undefined && replyBody(current.mes, entry.scope) === entry.writtenBody;
       if (!valid() && !alreadyWritten) return skip();
-      const {rest: reply, phone: sent} = entry.phoneRule ? phoneSection(entry.answer) : {rest: entry.answer, phone: ''};
+      const {rest: reply, phone: sent} = entry.phoneRule ? phoneSection(entry.answer,s.general?.shortTags) : {rest: entry.answer, phone: ''};
       const assemble = source => {
         let text = voiceSource(force && wantPictures ? withoutPictures(source) : source, entry.scope), voiced = 0, pictured = 0;
         if (wantPictures) ({text, count: pictured} = insertPlanned(text, reply, entry.scope));
@@ -394,11 +395,28 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     if (!s.draw.auto) return;
     const tags = parsePictures(message.mes).filter(tag => !stored(message, tag.hash));
     if (!tags.length) return;
-    const permission = await allowed(false);
-    if (!permission) { backend.reportDiagnostic?.('正文出图', {message:'自动出图未执行，当前设置无法确认免费额度',engine:s.draw.engine,relay:!!s.draw.relay.url}, 'warn');scheduleRender(); return; }
-    if (!canDraw() || !current() || !settings().draw.enabled || !settings().draw.auto) return;
-    const remaining = new Set(parsePictures(message.mes).map(tag => tag.hash));
-    await Promise.all(tags.filter(tag => remaining.has(tag.hash) && !stored(message,tag.hash)).map(tag => generate(id, tag, {permission})));
+    const source = storyDrawSource(s.draw);
+    const authorized = () => !!source && settings().draw.storyPaidSource === source && storyDrawSource(settings().draw) === source;
+    const valid = () => current() && canDraw() && settings().draw.enabled && settings().draw.auto && storyDrawSource(settings().draw) === source;
+    // Subscription lookup can be asynchronous. Recheck the exact branch and connection before queueing.
+    if (!backend.drawReady()) return;
+    if (!valid()) return;
+    for (const tag of tags) {
+      if (!valid()) break;
+      if (s.draw.engine === 'nai') try { await backend.naiSubscription(); } catch { /* A relay may omit subscription details. */ }
+      if (!valid() || stored(message,tag.hash)) continue;
+      const params = pictureInputs(settings(),tag,message.mes).params;
+      const quote = backend.drawQuote(params);
+      const isFree = quote.free === true && !quote.paid;
+      if (!isFree && !authorized()) continue;
+      const stillWanted = () => {
+        if (!valid() || !parsePictures(message.mes).some(t => t.hash === tag.hash)) return false;
+        if (!isFree) return authorized();
+        const currentQuote = backend.drawQuote(params);
+        return currentQuote.free === true && !currentQuote.paid;
+      };
+      await generate(id,tag,{permission:isFree?'free':'paid', valid:stillWanted});
+    }
   }
 
   /** What the queue says about a job, for the placeholder. */
@@ -419,13 +437,17 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   }
 
   function frame(inner) { return `<span class="sttts-pic-frame">${inner}</span>`; }
+  const paidButtons = new WeakMap();
   function fill(el, id, message, tag) {
     const record = stored(message, tag.hash), pic = shown(message, tag.hash), key = jobKey(id, tag), job = jobs.get(key);
     const s = settings(), folded = folds.get(id + ':' + tag.hash) ?? s.draw.fold;
     const state = job?.state || (pic ? 'done' : record?.removed ? 'removed' : 'idle');
     const waiting = state === 'generating' ? queueText(key) : '';
-    const reason = state === 'idle' ? (!s.draw.enabled ? '正文出图没有开启' : !backend.drawReady() ? backend.drawMissing() : !s.draw.auto ? '自动出图已关闭' : s.draw.engine === 'gpt' && s.draw.gpt.ask ? 'GPT 生图每张都要花钱，点了才画' : '这张图没有自动生成') : '';
-    const signature = JSON.stringify([state, pic?.url, pic?.count, folded, waiting, job?.message, reason]);
+    const quote = state === 'idle' && s.draw.auto && backend.drawReady() ? backend.drawQuote?.(pictureInputs(s,tag,message.mes).params) : null;
+    const reason = state === 'idle' ? (!s.draw.enabled ? '正文出图没有开启' : !backend.drawReady() ? backend.drawMissing() : !s.draw.auto ? '自动出图已关闭' : s.draw.engine === 'gpt' ? 'GPT 生图每张都要花钱' : quote?.free === false || quote?.paid ? '这张图预计会扣点' : quote?.free === null ? '当前连接无法确认免费额度' : '这张图没有自动生成') : '';
+    const paidSource = state === 'idle' && s.draw.enabled && s.draw.auto && backend.drawReady() &&
+      (s.draw.engine === 'gpt' || quote?.free === false || quote?.free === null) ? storyDrawSource(s.draw) : '';
+    const signature = JSON.stringify([paidSource, state, pic?.url, pic?.count, folded, waiting, job?.message, reason]);
     if (el.dataset.stttsRendered === signature) return;
     el.dataset.stttsRendered = signature;
     el.dataset.state = state;
@@ -444,7 +466,8 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     } else if (state === 'error') {
       el.innerHTML = frame(`<span class="sttts-pic-wait">${esc(job.message)}<br><button type="button" data-sttts-pic-action="draw">重试</button></span>`);
     } else {
-      el.innerHTML = frame(`<span class="sttts-pic-wait">${esc(reason)}<br><button type="button" data-sttts-pic-action="draw">点击生成</button></span>`);
+      el.innerHTML = frame(`<span class="sttts-pic-wait">${esc(reason)}<br><button type="button" data-sttts-pic-action="draw">${paidSource ? '同意可能扣点并生成' : '点击生成'}</button></span>`);
+      if (paidSource) paidButtons.set(el.querySelector('button'), paidSource);
     }
   }
 
@@ -506,7 +529,15 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   }
   function act(action, id, message, tag, source = null) {
     const pic = shown(message, tag.hash);
-    if (action === 'draw' || action === 'redo') generate(id, tag, {interactive: true});
+    if (action === 'draw' || action === 'redo') {
+      const paidSource = paidButtons.get(source);
+      if (paidSource && paidSource === storyDrawSource(settings().draw)) {
+        const swipe = message.swipe_id;
+        const valid = () => context().chat[id] === message && message.swipe_id === swipe && backend.drawReady() &&
+          storyDrawSource(settings().draw) === paidSource && parsePictures(message.mes).some(t => t.hash === tag.hash);
+        generate(id, tag, {permission: 'paid', valid});
+      } else generate(id, tag, {interactive: true});
+    }
     if (action === 'cancel') backend.drawQueue?.cancel?.(jobKey(id, tag));
     if (action === 'open') openDraw({...pictureInputs(settings(), tag, message.mes), tag: tag.prompt, seed: pic?.seed});
     if (action === 'fold' || action === 'unfold') { folds.set(id + ':' + tag.hash, action === 'fold'); scheduleRender(); }
@@ -593,7 +624,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       if (!before || at < 0) throw Error('没在正文里找到这张图的提示词');
       // In prompt="…" a double quote would end it; tags never need angle brackets.
       const delimiter = /\bprompt\s*=\s*(["'“])/i.exec(segment.slice(0, at))?.[1];
-      const safe = tag.spec ? value.replace(/<\/?img\b/gi, '') : value.replace(/[<>]/g, '').replace(delimiter === "'" ? /'/g : delimiter === '“' ? /”/g : /"/g, delimiter === "'" ? '’' : "'");
+      const safe = tag.spec ? value.replace(/<\/?(?:i-img|img)(?=[\s/>])/gi, '') : value.replace(/[<>]/g, '').replace(delimiter === "'" ? /'/g : delimiter === '“' ? /”/g : /"/g, delimiter === "'" ? '’' : "'");
       const proposed = message.mes.slice(0, tag.start) + segment.slice(0, at) + safe + segment.slice(at + before.length) + message.mes.slice(tag.end);
       fresh = parsePictures(proposed).find(t => t.index === tag.index);
       if (!fresh) throw Error('改完认不出这张图了，检查一下格式');
@@ -687,7 +718,8 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       if(!valid())throw Error('正文已经变化，旧的选段任务已停止');
       const suggested=readSuggestion(settings(),reply);if(!suggested.prompt)throw Error('没有写出可用的绘图提示词');
       const line=value=>value.replace(/[<>\r\n]/g,' ').trim();
-      const block=['<img>','场景：'+line(suggested.prompt),...suggested.people.map(name=>'角色：'+line(name).replace(/[|｜]/g,' ')),'</img>'].join('\n');
+      const imageTag=settings().general?.shortTags?'i-img':'img';
+      const block=['<'+imageTag+'>','场景：'+line(suggested.prompt),...suggested.people.map(name=>'角色：'+line(name).replace(/[|｜]/g,' ')),'</'+imageTag+'>'].join('\n');
       const addition='\n\n'+block+'\n', raw=snap.raw.slice(0,end)+addition+snap.raw.slice(end), tags=parsePictures(raw), tag=tags.find(t=>t.start===end+2);
       if(!tag)throw Error('这次提示词无法作为正文图片保存');
       const inputs=pictureInputs(settings(),tag,raw);

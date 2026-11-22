@@ -1,3 +1,4 @@
+import {storyDrawSource} from '../core/draw.js';
 import {KEY_ENGINES} from '../core/keys.js';
 import {storyLinkSheet as openStoryPhone, storyLinkNote} from './story-phone.js';
 import {createView, esc, btn, field, input, select, textArea, toggle, heading, size, languageField, typedLanguages, groupTitle, help, copyText, bindCombos} from './common.js';
@@ -92,7 +93,8 @@ export function settingsApp(ctx) {
       const w = api.getState().draw, on = !!w.enabled, rules = w.presets.find(p => p.id === w.activePreset) || w.presets[0];
       d.body.innerHTML = `<div class="group pad">${toggle('drawEnabled', '正文出图', on, '开启后，绘图预设会加进聊天请求（或者回复写完再单独配图），让模型写出图块，插件照着画。用哪个引擎、什么画风在绘图 App 里选；免费档守卫在绘图 App 的「参数」里。')}
         ${on ? `<div class="field"><span>配图方式${help('单独配图：正文模型只管写故事；回复写完后，插件用同一个模型再单独请求一次，读这条回复、挑画面、写出图块，再把图插到对应的段落后面。出图规则不会挤占正文，张数和格式更稳，每条回复多一次请求。正文语音也选了「回复后单独配音」的话，配音和配图合成一次请求。\n\n正文里顺手写：把出图规则加进正文请求，模型写故事时顺手写出图块。只要一次请求，但规则较长，偶尔会影响正文或漏写。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配图']].map(([k, l]) => `<button type="button" data-action="draw-mode" data-value="${k}" aria-pressed="${w.mode === k}">${l}</button>`).join('')}</div>${api.planLatestPictures ? `<div class="actions" style="margin:6px 0 0">${btn('draw-latest', icon('image') + '给最新回复配图', 'text-button')}</div>` : ''}</div>
-          ${toggle('drawAuto', '新回复自动出图', w.auto, '只自动画不花钱的：NovelAI 免费档内的图、ComfyUI 的图；GPT 生图在绘图 App 里关掉「每张先问」后也会自动画。其余的正文里会显示“点击生成”。')}
+          ${toggle('drawAuto', '新回复自动出图', w.auto, '正文写好后开始生成配图。可能扣点的图片按下方的授权设置处理。')}
+          ${w.auto && storyDrawSource(w) ? toggle('storyPaid', '允许自动扣点出图', w.storyPaidSource === storyDrawSource(w), '仅限当前绘图连接的正文配图，包括中转无法确认免费额度的图片。每张图都可能计费。') : ''}
           <button class="list-row" data-action="draw-rules"><span><strong>编辑出图规则</strong><small>每条回复出 ${rules?.count ?? 1} 张图</small></span>${icon('next')}</button>` : ''}</div>
         <div class="group pad">${toggle('drawFold', '正文图片默认收起', w.fold, '收起后正文里只留一个小缩略图，点开再看，手机上不占地方。每张图也可以单独收起或展开。')}
           ${toggle('drawStrip', '发给模型时去掉旧出图块', w.strip, '出图块留在聊天记录里（图片靠它显示），但之后每次请求模型时会把它们去掉，省下上下文。正文出图关着时也照样去掉。')}</div>`;
@@ -100,7 +102,17 @@ export function settingsApp(ctx) {
     paint();
     d.onClose(afterSheet);
     const KEYS = {drawEnabled: 'enabled', drawAuto: 'auto', drawFold: 'fold', drawStrip: 'strip'};
-    d.body.addEventListener('change', e => {
+    d.body.addEventListener('change', async e => {
+      if (e.target.dataset.field === 'storyPaid') {
+        const source = storyDrawSource(api.getState().draw), box = e.target, enable = box.checked;
+        box.disabled = true;
+        try {
+          if (enable && !await ctx.confirm('允许正文配图自动扣点？','每张正文配图都可能按当前服务的价格扣点。中转无法确认额度时也会生成。',{over:true})) return;
+          if (d.live && source === storyDrawSource(api.getState().draw)) api.saveDraw({storyPaidSource:enable ? source : ''});
+        } catch (error) { ctx.notify(error.message, {error:true}); }
+        finally { paint(); }
+        return;
+      }
       const key = KEYS[e.target.dataset.field];
       if (!key) return;
       try { api.saveDraw({[key]: e.target.checked}); } catch (error) { ctx.notify(error.message, {error: true}); }
@@ -419,7 +431,8 @@ export function settingsApp(ctx) {
           <button class="list-row" data-action="story-phone"><span><strong>正文和手机</strong><small>${storyLinkNote(s, storyThreads)}</small></span>${icon('next')}</button>
           ${toggle('voiceIsland', '台词小窗', s.general.voiceIsland === true, '在酒馆页面上浮一个小窗，列出最新一条回复里的台词，点哪句念哪句（再点暂停），「整条」从头念到尾。正文里的声波点不到时（比如手机上在看视觉小说，立绘盖住了正文）、或者想按自己的节奏一句句听时打开。可以拖到不挡视线的地方；✕ 收起到下一条回复。')}
         </div>
-        <details data-group="voice-more"><summary>更多<small class="fold-note">按钮、声波、音量</small></summary><div class="fold-body">
+        <details data-group="voice-more"><summary>更多<small class="fold-note">输出标签、按钮、声波</small></summary><div class="fold-body">
+          ${toggle('shortTags', '使用小手机短标签', s.general.shortTags === true, '新输出使用 i-img、i-tts 和 iphonie。关闭可沿用 img、tts 和 phone。已有楼层始终兼容，自定义格式按预设输出。')}
           ${toggle('hideStoryWaves', '隐藏正文点击按钮', s.general.hideStoryWaves === true, '正文不插入声波、图片操作、音效和音乐按钮，已生成的图片仍显示。楼层工具栏也隐藏。可在小手机的「听取」里播放，在绘图和视觉小说 App 继续操作，适合与美化卡一起使用。')}
           ${s.general.hideStoryWaves !== true ? toggle('storyTools', '楼层工具按钮', s.general.storyTools !== false, '每层回复右边的小手机工具按钮：给这层楼生图、给这层楼配音、从这层看视觉小说、台词小窗、整条播放。关掉后不显示；长按声波的下载、收藏、重新配音照常。') : ''}
           ${toggle('waveformEnabled', '声波动效', s.general.waveformEnabled, '台词旁和手机里的声波随真实音频跳动。系统开启减少动态效果时保持静止。\n\n正文声波的颜色跟随酒馆主题：\n· 虚线小点：这个角色还没配音（斜体色）\n· 淡色：还没生成（正文色）\n· 引号色：已生成，可以播放\n· 引号色加底色：正在播放\n· 下划线色：已经播放过')}
@@ -466,7 +479,7 @@ export function settingsApp(ctx) {
       return;
     }
     // (正文语音's and 正文出图's switches are in their sheets.)
-    if (['hideStoryWaves', 'storyTools', 'voiceIsland', 'floatingEnabled', 'waveformEnabled', 'cacheEnabled', 'wallpaperMotion'].includes(key)) api.updateGeneral({[key]: el.checked});
+    if (['shortTags', 'hideStoryWaves', 'storyTools', 'voiceIsland', 'floatingEnabled', 'waveformEnabled', 'cacheEnabled', 'wallpaperMotion'].includes(key)) api.updateGeneral({[key]: el.checked});
     else if (key === 'volume') await api.setVolume(Number(el.value) / 100);
     else if (key === 'lockOnOpen') await api.savePhone({lockOnOpen: el.checked});
     else if (key === 'partition') { api.saveChatOptions({partition: el.value}); ctx.notify({card: '已按角色卡分开', chat: '已按聊天分开：开新聊天就是一部新手机'}[el.value] || '已关闭分区，所有内容一起显示'); }

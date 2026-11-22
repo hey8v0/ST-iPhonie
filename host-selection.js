@@ -14,7 +14,7 @@ export function selectedStoryTarget(doc, snap, range, scope = {}) {
   if (!body || !body.contains(end) || Number(body.closest('.mes').getAttribute('mesid'))!==snap.id) return null;
   if (start.closest('button,input,textarea,[contenteditable=true],[data-sttts-pic]') || end.closest('button,input,textarea,[contenteditable=true],[data-sttts-pic]')) return null;
   const text=range.toString().trim();if(!text || text.length>12000) return null;
-  const masked=storyScope(snap.raw,scope).masked.replace(/<tts\b[^>]*>[\s\S]*?<\/tts\s*>/gi, tag=>tag.replace(/[^\r\n]/g,' '));
+  const masked=storyScope(snap.raw,scope).masked.replace(/<(?:i-tts|tts)(?=[\s/>])[^>]*>[\s\S]*?<\/(?:i-tts|tts)\s*>/gi, tag=>tag.replace(/[^\r\n]/g,' '));
   const needle=compact(doc,text);
   if (!needle) return null;
   let offset=0, normalized='';

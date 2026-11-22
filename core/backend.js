@@ -43,7 +43,7 @@ import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, c
 import { cleanAddress, reachService, explainReach, detectService, scanTargets, findVoiceList, voiceIsName, API_PROBES } from './custom-detect.js';
 import { CUSTOM_DEFAULT, CUSTOM_SETS_MAX, officialSpeechService } from './custom-voice.js';
 import { arrangeRows } from './layers.js';
-import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
+import { DEFAULT_PROMPT, DEFAULT_FORMAT, builtinVoiceFormat, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
 import { normalizeMarks, withMarks } from './voice-fx.js';
 import { TTSParameters, FISH_API, tauriTavern } from './parameters.js';
 import { KeyStore, keyTail, validateKey, parseTextKeys, joinTextKeys } from './keys.js';
@@ -563,6 +563,11 @@ export class TTSBackend {
             if (typeof patch[key] !== 'boolean') throw Error('开关设置无效'); next.general[key] = patch[key];
         }
         // 配音方式: the story model writes the voice tags itself ('inline'), or they are added after the reply ('separate').
+        if ('shortTags' in patch) {
+            if (typeof patch.shortTags !== 'boolean') throw Error('标签格式无效');
+            next.general.shortTags = patch.shortTags;
+            for (const preset of next.presets) preset.format = builtinVoiceFormat(preset.format, patch.shortTags);
+        }
         if ('voiceMode' in patch) {
             if (!['inline', 'separate', 'manual'].includes(patch.voiceMode)) throw Error('配音方式无效');
             next.general.voiceMode = patch.voiceMode;
@@ -1724,7 +1729,7 @@ export class TTSBackend {
     }
     /** Generates one image and keeps it in the album. Requests wait in the NovelAI queue (see draw-queue.js).
      *  key identifies the job in the queue (the same key joins the job already waiting); label is shown in the line. */
-    generateImage({ prompt, negative = '', characters = [], params, allowPaid = false, name = '', key, label = '', base = null, refs = [], roleRefs = [], preview = false } = {}, preparePhoto) {
+    generateImage({ prompt, negative = '', characters = [], params, allowPaid = false, name = '', key, label = '', valid = null, base = null, refs = [], roleRefs = [], preview = false } = {}, preparePhoto) {
         this.assertOpen();
         if (!String(prompt || '').trim()) return Promise.reject(Error('请先写提示词'));
         const engine = this.settings.draw.engine;
@@ -1743,8 +1748,10 @@ export class TTSBackend {
             const picture = {prompt, negative, characters: clone(characters), quote, comfy, refs: gptRefs, roleRefs: engine === 'gpt' && !gptRefs.length && Array.isArray(roleRefs) ? clone(roleRefs) : []};
             const job = this.drawQueue.add({ key, label: label || String(prompt).slice(0, 40), task: async signal => {
                 this.assertOpen();
+                if (valid && !valid()) throw Object.assign(Error('正文配图已取消'), {cancelled:true});
                 this.emit('draw', { phase: 'generating' });
                 const own = picture.roleRefs.length ? await this.roleReferences(picture.roleRefs, picture.characters) : null;
+                if (valid && !valid()) throw Object.assign(Error('正文配图已取消'), {cancelled:true});
                 const made = await this.drawWithEngine(engine, { ...picture, ...(own ? { refs: own.refs, characters: own.characters, roles: true } : {}), signal });
                 this.assertOpen();
                 if (preparePhoto) made.blob = await preparePhoto(made.blob);
@@ -1771,11 +1778,15 @@ export class TTSBackend {
         const stream = preview && this.settings.draw.stream;
         const job = this.drawQueue.add({ key, label: label || String(prompt).slice(0, 40), task: async signal => {
             this.assertOpen();
+            if (valid && !valid()) throw Object.assign(Error('正文配图已取消'), {cancelled:true});
             this.emit('draw', { phase: 'generating' });
             // References and 局部重绘 go without vibes, as in NovelAI's own app.
             if (quote.vibes.used.length && !request.refs && request.body.action !== 'infill') Object.assign(request.body.parameters, await this.vibeFields(quote.vibes.used, request.params.model, signal));
             this.novelai.relay = this.settings.draw.relay.url;
-            const send = () => stream ? this.novelai.generateStream(request.body, signal, frame => this.emit('draw', { steps: frame.steps > 1 ? `${Math.min(frame.step + 1, frame.steps)}/${frame.steps} 步` : '', preview: frame.image })) : this.novelai.generate(request.body, signal);
+            const send = () => {
+                if (valid && !valid()) throw Object.assign(Error('正文配图已取消'), {cancelled:true});
+                return stream ? this.novelai.generateStream(request.body, signal, frame => this.emit('draw', { steps: frame.steps > 1 ? `${Math.min(frame.step + 1, frame.steps)}/${frame.steps} 步` : '', preview: frame.image })) : this.novelai.generate(request.body, signal);
+            };
             let blob;
             try { blob = await send(); }
             catch (error) {
@@ -1845,7 +1856,7 @@ export class TTSBackend {
     // ---------- Chat ----------
     // Voice messages and calls on the phone are read by the plugin and shown as bubbles, never as text: they keep the built-in
     // format, whatever the 配音预设 asks of the story (a format made for a beautified card has no place in a chat bubble).
-    voiceFormat() { return DEFAULT_FORMAT; }
+    voiceFormat() { return builtinVoiceFormat(DEFAULT_FORMAT,this.settings.general.shortTags); }
     saveChatPreset(value) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('聊天预设格式无效');
         const next = this.getState(), preset = validateChatPreset(normalizeChatPreset({ ...clone(value), id: value.id || crypto.randomUUID() }));
@@ -2242,6 +2253,12 @@ export class TTSBackend {
         return json;
     }
     /** Which platforms the backend holds a login for: {qq: true, …} (the Cookies stay with the backend). */
+    async goMusicQrSources(sourceId) {
+        this.assertOpen();
+        const data = goData(await this.goPrivate(goUrl(this.goSource(sourceId).base, 'system/qr_login/sources')));
+        if (!Array.isArray(data)) throw Error('音源没有返回扫码方式');
+        return data.map(row => typeof row === 'string' ? row : row?.source).filter(key => typeof key === 'string');
+    }
     async goMusicLogins(sourceId) {
         this.assertOpen();
         return goLogins(await this.goPrivate(goUrl(this.goSource(sourceId).base, 'system/cookies')));
@@ -2260,7 +2277,8 @@ export class TTSBackend {
     async goMusicQr(sourceId, way) {
         this.assertOpen();
         const s = this.goSource(sourceId);
-        if (!GO_LOGINS.some(l => l.qr.includes(way))) throw Error('这个平台不能扫码登录');
+        const supported = way === 'soda' ? (await this.goMusicQrSources(sourceId).catch(() => [])).includes(way) : GO_LOGINS.some(l => l.qr.includes(way));
+        if (!supported) throw Error('这个平台不能扫码登录');
         return goQrSession(goData(await this.goPrivate(goUrl(s.base, `system/qr_login/${way}`), { method: 'POST' })));
     }
     /** Where a 扫码登录 is ({status, message}); on success the backend has kept the login itself. */
@@ -3870,7 +3888,7 @@ export class TTSBackend {
             },
             assistantMemoryRemove: (id, nodeId) => this.assistantMemoryRevise(id, book => removeNode(book, nodeId)),
             assistantMemoryForget: id => this.assistantMemoryForget(id),
-            goMusicLogins: id => this.goMusicLogins(clone(id)), goMusicSetCookie: (id, platform, cookie) => this.goMusicSetCookie(clone(id), String(platform), String(cookie ?? '')), goMusicQr: (id, way) => this.goMusicQr(clone(id), String(way)), goMusicQrCheck: (id, way, key) => this.goMusicQrCheck(clone(id), String(way), String(key)), goMusicAccountLists: (id, platform) => this.goMusicAccountLists(clone(id), String(platform)), goMusicDiscover: (id, options) => this.goMusicDiscover(clone(id), clone(options || {})),
+            goMusicQrSources: id => this.goMusicQrSources(clone(id)), goMusicLogins: id => this.goMusicLogins(clone(id)), goMusicSetCookie: (id, platform, cookie) => this.goMusicSetCookie(clone(id), String(platform), String(cookie ?? '')), goMusicQr: (id, way) => this.goMusicQr(clone(id), String(way)), goMusicQrCheck: (id, way, key) => this.goMusicQrCheck(clone(id), String(way), String(key)), goMusicAccountLists: (id, platform) => this.goMusicAccountLists(clone(id), String(platform)), goMusicDiscover: (id, options) => this.goMusicDiscover(clone(id), clone(options || {})),
             saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId, options) => this.searchMusic(query, clone(sourceId), clone(options || {})), groupSongs: (sourceId, kind, id, page, options) => this.groupSongs(sourceId, kind, String(id), Number(page) || 0, clone(options || {})),
             listHeard: () => this.listHeard(), forgetHeard: ids => this.forgetHeard([...(ids || [])]), clearHeard: () => this.clearHeard(), musicLink: (sourceId, songId, hint) => this.musicLink(clone(sourceId), songId, clone(hint || {})), musicLyric: (sourceId, songId, hint) => this.musicLyric(sourceId, songId, clone(hint || {})),
             listSongs: () => this.listSongs(), songBlob: id => this.songBlob(id), addSongs: list => this.addSongs(list), updateSong: (id, patch) => this.updateSong(id, clone(patch || {})), deleteSongs: ids => this.deleteSongs([...(ids || [])]),
@@ -3936,10 +3954,11 @@ export class TTSBackend {
             chatShowVersion: (id, index) => this.chatShowVersion(id, index),
             speak: line => this.speak(clone(line)), retakeVoice: line => this.retakeVoice(clone(line)), voiceFormat: () => this.voiceFormat(),
         };
-        return Object.freeze({ apiVersion: BACKEND_API_VERSION, defaultPrompt: DEFAULT_PROMPT, defaultFormat: DEFAULT_FORMAT,
-            picTagFormat: PIC_TAG_FORMAT, defaultDrawRule: DEFAULT_DRAW_RULE, drawCountMax: DRAW_COUNT_MAX, defaultChatPreset: Object.freeze((({ id, ...rest }) => rest)(defaultChat().presets[0])),
+        const settings = () => this.settings;
+        return Object.freeze({ apiVersion: BACKEND_API_VERSION, defaultPrompt: DEFAULT_PROMPT, get defaultFormat() { return builtinVoiceFormat(DEFAULT_FORMAT,settings().general.shortTags); },
+            get picTagFormat() { return settings().general.shortTags ? PIC_TAG_FORMAT.replaceAll('img>', 'i-img>') : PIC_TAG_FORMAT; }, defaultDrawRule: DEFAULT_DRAW_RULE, drawCountMax: DRAW_COUNT_MAX, defaultChatPreset: Object.freeze((({ id, ...rest }) => rest)(defaultChat().presets[0])),
             // The shipped presets of each kind, without ids: for 恢复默认 in the preset app.
-            defaultVoicePreset: Object.freeze((({ id, ...rest }) => rest)(freshState().presets[0])), defaultDrawPreset: Object.freeze((({ id, ...rest }) => rest)(defaultDraw().presets[0])),
+            get defaultVoicePreset() { const {id, ...preset} = freshState().presets[0]; preset.format = this.defaultFormat; return Object.freeze(preset); }, defaultDrawPreset: Object.freeze((({ id, ...rest }) => rest)(defaultDraw().presets[0])),
             drawCatalog: Object.freeze({ models: NAI_MODELS, modelNames: NAI_MODEL_NAMES, samplers: NAI_SAMPLERS, schedules: NAI_SCHEDULES, engines: DRAW_ENGINES, engineNames: DRAW_ENGINE_NAMES, gptModels: GPT_IMAGE_MODELS, gptQualities: GPT_QUALITIES, comfyWorkflow: DEFAULT_COMFY_WORKFLOW }),
             phoneCatalog: Object.freeze({ apps: PHONE_APPS, wallpapers: PHONE_WALLPAPERS, glyphs: PHONE_GLYPHS, skins: PHONE_SKINS }),
             ...Object.fromEntries(Object.entries(methods).map(([name, fn]) => [name, (...args) => { if(name==='reportDiagnostic'&&this.closed)return; this.assertOpen(); const failed = error => { if (!['reportDiagnostic','getRequestLogs','clearRequestLogs'].includes(name)) this.reportDiagnostic('小手机操作', {operation: name, message: error?.message || String(error), stack: error?.stack}, error?.name === 'AbortError'||error?.operation==='subscription' ? 'warn' : 'error'); throw error; }; try { const result = fn(...args); return result?.catch ? result.catch(failed) : result; } catch (error) { return failed(error); } }])),

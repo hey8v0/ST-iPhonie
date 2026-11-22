@@ -11,7 +11,7 @@ import {icon} from './icons.js';
 import {writePanel} from './music-write.js';
 import {BGM_MODES, BGM_MODE_NAMES, DEFAULT_BGM_RULE, SELF_HOSTED, PLAY_MODES, PLAY_MODE_NAMES, GROUP_KINDS, MUSIC_LIMITS, normalizeSource, bestMatch} from '../core/music.js';
 import {sortPicked, lots, readPicked, lrcText} from '../core/music-files.js';
-import {isGoMusic, GO_PLATFORMS, GO_LOGINS, GO_QR_NAMES, GO_ACCOUNT_LISTS} from '../core/go-music.js';
+import {isGoMusic, GO_PLATFORMS, GO_LOGINS, goLoginMethods, GO_QR_NAMES, GO_ACCOUNT_LISTS} from '../core/go-music.js';
 import {qrMatrix, qrSvg} from '../core/qr.js';
 import {saveFile} from '../download.js';
 
@@ -312,7 +312,10 @@ export function musicApp(ctx) {
   async function loadLogins() {
     const draft = goDraft(), mine = goLogin = {base: draft.base, loading: !!draft.base, logins: {}, error: ''};
     if (!draft.base) return;
-    try { mine.logins = await api.goMusicLogins(draft); } catch (error) { mine.error = error.message; }
+    const [status, ways] = await Promise.allSettled([api.goMusicLogins(draft), api.goMusicQrSources?.(draft)]);
+    if (status.status === 'fulfilled') mine.logins = status.value;
+    else mine.error = status.reason.message;
+    if (ways.status === 'fulfilled') mine.ways = ways.value;
     mine.loading = false;
     if (goLogin === mine && !v.disposed && mode === 'source') renderSource();
   }
@@ -322,7 +325,7 @@ export function musicApp(ctx) {
     const d = editing.draft, saved = editing.index >= 0;
     if (d.base && goLogin?.base !== d.base) loadLogins();
     const L = goLogin?.base === d.base ? goLogin : null, logins = L?.logins || {};
-    const loginRow = l => `<div class="list-row go-login"><span><strong>${esc(l.name)}</strong><small>${!d.base ? '先填地址' : L?.loading ? '正在看……' : logins[l.id] ? '已登录' : '没登录'}</small></span>`
+    const loginRow = l => `<div class="list-row go-login"><span><strong>${esc(l.name)}</strong><small>${!d.base ? '先填地址' : L?.loading ? '正在看……' : logins[l.id] ? '已登录' : l.id === 'soda' && !l.qr.length ? (Array.isArray(L?.ways) ? '此音源仅支持 Cookie 登录' : '可使用 Cookie 登录') : '没登录'}</small></span>`
       + (d.base ? `<span class="go-tools">${l.qr.length ? btn('go-qr', '扫码', 'secondary small', `data-login="${l.id}"`) : ''}${btn('go-cookie', '贴 Cookie', 'secondary small', `data-login="${l.id}"`)}${logins[l.id] ? btn('go-logout', '退出', 'text-button small', `data-login="${l.id}"`) : ''}</span>` : '') + '</div>';
     const accountRows = GO_ACCOUNT_LISTS.filter(p => logins[p]).map(p => {
       const a = goAccount[p];
@@ -336,7 +339,7 @@ export function musicApp(ctx) {
       + `<div class="actions">${btn('test-source', icon('search') + '用「晴天」试一试', 'secondary')}</div>`
       + (test ? `<div class="group pad music-test">${test.error ? `<p class="hint">${esc(test.error)}</p>` : `<p class="hint">搜到 ${test.songs.length} 首${test.link ? '，第一首也能放' : ''}：</p>${test.songs.slice(0, 5).map(s => `<p class="music-test-row">${esc(label(s))} · ${esc(s.sourceName || '')}</p>`).join('')}${test.linkError ? `<p class="hint">放第一首时：${esc(test.linkError)}</p>` : ''}`}</div>` : '')
       + groupTitle('登录', help('会员歌、账号里的歌单要登录。「扫码」用那个平台的 App 扫；在手机上看时，点「存成图片」，再在 App 的扫一扫里从相册选它。「贴 Cookie」贴从网页版复制的整段 Cookie。登录都交给你自己的后端保存，小手机不存、也不显示。'))
-      + `<div class="group">${GO_LOGINS.map(loginRow).join('')}</div>`
+      + `<div class="group">${goLoginMethods(L?.ways).map(loginRow).join('')}</div>`
       + (L?.error ? `<p class="hint">${esc(L.error)}</p>` : '')
       + (!saved ? '<p class="hint">保存以后，登录了的账号里的歌单能在这里导进小手机。</p>' : accountRows ? groupTitle('账号里的歌单') + `<div class="group">${accountRows}</div>` : '')
       + (saved ? `<div class="actions">${btn('delete-source', icon('trash') + '删除这个音源', 'text-button danger-text')}</div>` : '')
@@ -691,7 +694,7 @@ export function musicApp(ctx) {
         break;
       }
       case 'go-qr': {
-        const login = GO_LOGINS.find(l => l.id === el.dataset.login);
+        const login = goLoginMethods(goLogin?.ways).find(l => l.id === el.dataset.login);
         const way = login && (login.qr.length > 1 ? await pickWay(login) : login.qr[0]);
         if (way) qrLogin(login, way);
         break;

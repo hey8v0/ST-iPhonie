@@ -54,8 +54,8 @@ export function skippedRanges(raw, skip = NARRATION_SKIP, body = NARRATION_BODY)
   add(/<!--[\s\S]*?(?:-->|$)/g);
   add(/```[\s\S]*?(?:```|$)/g);
   // The phone's own tags, with what is inside (a picture's prompt, a sound's name, phone messages).
-  add(/<img\b[^<>]*>[^<]*<\/img\s*>|<img\b[^<>]*\/?>/gi);
-  for (const tag of ['sfx', 'ambience', 'bgm', 'phone', 'outfit']) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, 'gi'));
+  add(/<(?:i-img|img)(?=[\s/>])[^<>]*>[^<]*<\/(?:i-img|img)\s*>|<(?:i-img|img)(?=[\s/>])[^<>]*\/?>/gi);
+  for (const tag of ['sfx', 'ambience', 'bgm', 'phone', 'iphonie', 'outfit']) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, 'gi'));
   // Pictures other plugins keep in the reply as their prompt, shown in its place as the picture (柏宝绘's <bbi_image>).
   for (const tag of OTHER_PICTURES) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?(?:<\\/${tag}\\s*>|$)`, 'gi'));
   // Status panels written as [HUD_START]…[HUD_END] (any NAME_START / NAME_END pair).
@@ -122,7 +122,7 @@ export function storyScope(raw, {skip = NARRATION_SKIP, body = NARRATION_BODY} =
   return {text, masked, ranges, contains: (a, b) => !ranges.some(([s, e]) => a < e && b > s)};
 }
 
-const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'source', 'wbr', 'area', 'col', 'embed', 'track', 'tts']);
+const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'source', 'wbr', 'area', 'col', 'embed', 'track', 'tts', 'i-tts', 'i-img']);
 /**
  * Parts of a reply a picture must not be put inside: every tag that spans several lines (a status bar, <details>, a
  * preset's own blocks), code fences and HTML comments, as [start, end, name]. Tags left open are not counted.

@@ -17,7 +17,11 @@ export const GO_LOGINS = Object.freeze([
   {id: 'bilibili', name: 'B 站', qr: ['bilibili']},
   {id: 'soda', name: '汽水音乐', qr: []}
 ]);
-export const GO_QR_NAMES = Object.freeze({netease: '用网易云音乐扫', qq: '用 QQ 扫', qq_wx: '用微信扫', kugou: '用酷狗音乐扫', bilibili: '用哔哩哔哩扫'});
+export function goLoginMethods(ways) {
+  if (!Array.isArray(ways)) return GO_LOGINS;
+  return GO_LOGINS.map(row => ({...row, qr:(row.id === 'soda' ? ['soda'] : row.qr).filter(key => ways.includes(key))}));
+}
+export const GO_QR_NAMES = Object.freeze({soda:'按音源提示扫描', netease: '用网易云音乐扫', qq: '用 QQ 扫', qq_wx: '用微信扫', kugou: '用酷狗音乐扫', bilibili: '用哔哩哔哩扫'});
 /** The platforms whose own playlists (我喜欢, made, kept) the backend reads once logged in. */
 export const GO_ACCOUNT_LISTS = Object.freeze(['qq', 'netease', 'kugou']);
 export const GO_LIMITS = Object.freeze({songs: 1000, lists: 200});

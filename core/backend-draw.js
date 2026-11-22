@@ -1,3 +1,4 @@
+import {storyDrawSource} from './draw.js';
 // The drawing settings of the backend (core/backend.js): ComfyUI workflows and their LoRAs, 绘图 settings, 画风
 // (with the NovelAI parameters each one keeps), 绘图预设, the prompt preview, the NovelAI subscription and what a
 // picture costs. Methods of TTSBackend, kept in a file of their own (installDrawSettings puts them on its prototype).
@@ -233,6 +234,10 @@ class DrawSettings {
         if ('positionGrid' in patch) draw.positionGrid = normalizePositionGrid(clone(patch.positionGrid));
         if ('maskLook' in patch) draw.maskLook = normalizeMaskLook({ ...draw.maskLook, ...clone(patch.maskLook) });
         for (const key of ['enabled', 'auto', 'guard', 'fold', 'strip', 'stream', 'autoDownload']) if (key in patch) { if (typeof patch[key] !== 'boolean') throw Error('开关设置无效'); draw[key] = patch[key]; }
+        if ('storyPaidSource' in patch) {
+            if (patch.storyPaidSource !== '' && patch.storyPaidSource !== storyDrawSource(draw)) throw Error('绘图连接已变化，请重新确认');
+            draw.storyPaidSource = patch.storyPaidSource;
+        }
         if ('mode' in patch) { if (!['separate', 'inline'].includes(patch.mode)) throw Error('配图方式无效'); draw.mode = patch.mode; }
         if ('vibe' in patch) draw.vibe = normalizeVibeSettings({ ...draw.vibe, ...clone(patch.vibe || {}) });
         if ('relay' in patch) {

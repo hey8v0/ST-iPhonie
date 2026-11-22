@@ -60,7 +60,7 @@ export const avatar = (name, engine = 'none', size = 48, key = name) => {
 };
 
 /** Rows that keep who they are when a page is drawn again: they glide to their new places (FLIP), new ones fade in. */
-const KEYED = '.sw-row[data-swipe],.conv[data-conv],.list-row[data-id],.list-row[data-name],.moment[data-id],.forum-card[data-id],[data-flip]';
+const KEYED = '.sw-row[data-swipe],.conv[data-conv]:not(.sw-row .conv),.list-row[data-id],.list-row[data-name],.moment[data-id],.forum-card[data-id],[data-flip]';
 const keyOf = el => el.dataset.swipe || el.dataset.conv || el.dataset.flip || (el.dataset.id ? el.className.split(' ')[0] + ':' + el.dataset.id : 'name:' + el.dataset.name);
 const titleOf = root => root.querySelector('.page-heading h1')?.textContent || '';
 /** A tap on something that goes back (the phone's back, a 返回 of the app's own) makes the next page come from the left. */

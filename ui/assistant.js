@@ -274,7 +274,7 @@ function streamingParts(text) {
   let body = String(text || ''), pending = '';
   const fences = body.match(/```/g)?.length || 0;
   if (fences % 2) { const at = body.lastIndexOf('```'); if (/^```\s*ui\b/i.test(body.slice(at))) { pending = 'ui'; body = body.slice(0, at); } else if (/^```\s*html?\b/i.test(body.slice(at))) { pending = 'widget'; body = body.slice(0, at); } }
-  const open = body.search(/<img\b(?![^>]*\bsrc\s*=)[^>]*>(?![\s\S]*<\/img\s*>)/i);
+  const open = body.search(/<(?:i-img|img)(?=[\s/>])(?![^>]*\bsrc\s*=)[^>]*>(?![\s\S]*<\/(?:i-img|img)\s*>)/i);
   if (!pending && open >= 0) { pending = 'picture'; body = body.slice(0, open); }
   return {parts: assistantParts(body), pending};
 }

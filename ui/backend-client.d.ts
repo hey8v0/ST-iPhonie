@@ -116,6 +116,7 @@ export interface Connection {
 }
 export type ConnectionPatch = Partial<Connection>;
 export interface GeneralSettings {
+    shortTags?: boolean;
     defaultLanguage: string;
     /** Voice lines in the story and voice messages in the phone chat. Off: no voice rules are sent, tagged lines show only their translation. */
     voiceEnabled: boolean;
@@ -246,6 +247,7 @@ export interface DrawPositionGrid { type: 'none' | 'thirds' | 'golden' | 'grid';
 /** How 局部重绘's paint looks while painting. */
 export interface DrawMaskLook { color: string; opacity: number; border: boolean; pattern: 'solid' | 'stripes' | 'dots' | 'crosshatch' | 'grid' | 'checker' | 'hearts'; }
 export interface DrawSettings {
+    storyPaidSource?: string;
     /** 提示词片段, and their 分类 (groups as 画风 has them). */
     chunks: PromptChunk[]; chunkGroups: DrawStyleGroup[];
     /** 边画边看 in the drawing app. */
@@ -301,7 +303,7 @@ export interface VibeSettings { enabled: boolean; use: { kind: '' | 'group' | 'v
 export interface VibeSummary { id: string; name: string; thumb: string; strength: number; ie: number; image: boolean; keys: string[]; ready?: string[]; ies?: Record<string, number[]>; }
 /** The vibes a picture would use: encode = how many need encoding first (2 Anlas each), over = left out by the free-tier guard. */
 export interface VibePlan { on: boolean; model: boolean; used: Array<{ id: string; name: string; strength: number; encode: boolean }>; skipped: Array<{ name: string; why: 'missing' | 'model' | 'no-encoding' }>; over: number; encode: number; extra: number; }
-export interface DrawSettingsPatch { mode?: 'separate' | 'inline'; strip?: boolean; chunks?: PromptChunk[]; stream?: boolean; autoDownload?: boolean; locks?: string[]; grid?: DrawGrid; positionGrid?: Partial<DrawPositionGrid>; maskLook?: Partial<DrawMaskLook>; enabled?: boolean; auto?: boolean; guard?: boolean; fold?: boolean; queue?: Partial<DrawQueueSettings>; params?: Partial<DrawParams>; activeStyle?: string; activePreset?: string; relay?: Partial<{ url: string; assumeOpus: boolean }>; vibe?: Partial<VibeSettings>; engine?: DrawEngine; gpt?: Partial<GptImageSettings>; comfy?: Partial<ComfySettings>; }
+export interface DrawSettingsPatch { storyPaidSource?: string; mode?: 'separate' | 'inline'; strip?: boolean; chunks?: PromptChunk[]; stream?: boolean; autoDownload?: boolean; locks?: string[]; grid?: DrawGrid; positionGrid?: Partial<DrawPositionGrid>; maskLook?: Partial<DrawMaskLook>; enabled?: boolean; auto?: boolean; guard?: boolean; fold?: boolean; queue?: Partial<DrawQueueSettings>; params?: Partial<DrawParams>; activeStyle?: string; activePreset?: string; relay?: Partial<{ url: string; assumeOpus: boolean }>; vibe?: Partial<VibeSettings>; engine?: DrawEngine; gpt?: Partial<GptImageSettings>; comfy?: Partial<ComfySettings>; }
 /** gap: seconds between two NovelAI requests (0-60). retries: how often an "account busy" (429) is retried (0-10). */
 export interface DrawQueueSettings { gap: number; retries: number; cloud: CloudQueueSettings; }
 /** Shared queue service (cloud-queue/worker.js) that everyone using one NovelAI account joins with the same room code. */
@@ -1024,6 +1026,7 @@ export interface BackendFacade {
     musicLink(sourceId: string | Partial<MusicSource>, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
     musicLyric(sourceId: string, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
     /** Go Music (the user's go-music-api): which platforms it holds a login for — never the Cookies themselves. */
+    goMusicQrSources(sourceId: string | Partial<MusicSource>): Promise<string[]>;
     goMusicLogins(sourceId: string | Partial<MusicSource>): Promise<Record<string, boolean>>;
     /** A pasted Cookie sent on to the backend ('' logs that platform out there); the phone keeps nothing. */
     goMusicSetCookie(sourceId: string | Partial<MusicSource>, platform: string, cookie: string): Promise<Record<string, boolean>>;

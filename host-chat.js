@@ -661,7 +661,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     const blocked = list.filter(c => c.blocked).map(c => c.name), mine = list.filter(c => c.by === 'me' && !c.blocked).map(c => c.name), theirs = list.filter(c => c.by === 'them').map(c => c.name);
     const refused = list.filter(c => c.refused && Date.now() - c.refused < 2 * 86400000).map(c => c.name), accepted = list.filter(c => c.accepted).map(c => c.name);
     // How to ask, said only when the story can send to the phone at all (正文联动手机).
-    const how = settings().chat.proactive?.on ? `（<phone> 里单独一行写「名字：[好友申请] 验证消息」）` : '', they = names => names.length > 1 ? 'TA 们' : 'TA';
+    const how = settings().chat.proactive?.on ? `（<${settings().general?.shortTags?'iphonie':'phone'}> 里单独一行写「名字：[好友申请] 验证消息」）` : '', they = names => names.length > 1 ? 'TA 们' : 'TA';
     const text = ['【手机上的好友关系】',
       mine.length ? `${user}在手机上把${mine.join('、')}删了好友：${they(mine)}发的消息${user}收不到，只能发好友申请${how}。` : '',
       blocked.length ? `${user}在手机上把${blocked.join('、')}拉黑了：${they(blocked)}发的消息、打的电话${user}都收不到（${they(blocked)}自己知道被拉黑了），只能发好友申请${how}。` : '',
@@ -698,7 +698,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     const s = settings(), friends = friendsPlan();
     if (!s.chat.proactive?.on || phoneAfter() || !phoneTurn()) return friends;
     refreshCuts();
-    let text = storyTextRule(activeChatPreset(s.chat), {user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.(), ...lifeRules()}), limits = groupLimits();
+    let text = storyTextRule(activeChatPreset(s.chat), {shortTags:s.general?.shortTags, user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.(), ...lifeRules()}), limits = groupLimits();
     if (text && limits) text += '\n' + limits;
     return [...(text ? [{key: 'sttts.entry.phone', text, position: 1, depth: 0, role: 0}] : []), ...friends];
   }

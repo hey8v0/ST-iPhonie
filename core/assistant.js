@@ -264,7 +264,7 @@ export function assistantWantsImage(messages) {
     const raw = messages[i].text.trim();
     if (/(?:先|暂时)(?:别|不要|不)(?:急着|直接)?(?:画|生图|生成|出图)|只(?:想)?(?:讨论|聊|要提示词)/u.test(raw)) return false;
     const earlier = messages.slice(0, i).slice(-6);
-    const imageContext = earlier.some(m => m.meta?.image || /生图|画一|绘图|构图|提示词|出图块|<img\b|生成.{0,4}(?:图片|图像)|帮我画/i.test(m.text || ''));
+    const imageContext = earlier.some(m => m.meta?.image || /生图|画一|绘图|构图|提示词|出图块|<(?:i-img|img)(?=[\s/>])|生成.{0,4}(?:图片|图像)|帮我画/i.test(m.text || ''));
     if (imageContext && CONFIRM_DRAW.test(raw)) return true;
     if (/^(?:不要|别|不用|先不|暂时不)(?:再|帮我|给我|直接)?(?:画|生图|生成|绘制|出图)|^(?:算了|先聊聊|取消生图)/u.test(raw)) return false;
     if (/(?:能不能|可以|会|怎么|如何).{0,8}(?:生图|画图|生成图片)[？?]?$/u.test(raw) || CAN_IT.test(raw)) continue;

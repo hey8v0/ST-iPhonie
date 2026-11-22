@@ -43,7 +43,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null, stopChatClock = null;
 import { createSongHost } from './host-song.js';
-const RUNTIME_VERSION='1.0.7';
+const RUNTIME_VERSION='1.0.12';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -133,7 +133,7 @@ const voicePlan={wanted:()=>voiceOn()&&settings.general.voiceMode==='separate',h
 // become waves (or plain lines when voice is off).
 const soundsOn=()=>settings?.sounds?.enabled===true;
 // marks: the lines become marks now and waves after the card's regex and Markdown (waveMarks); lastRoles: their speakers.
-let lastRoles=[],lastInner=[];const phoneNote=text=>String(text).replace(/<phone\b([^>]*)>([\s\S]*?)<\/phone\s*>/gi,(m,attrs,inside)=>{const group=attrs.match(/group\s*=\s*["'“”「『]?([^"'“”」』>]+)/)?.[1]?.trim();const who=[...new Set(inside.split(/\n/).map(l=>l.match(/^\s*\**\s*[[【]?([^\]】:：\n]{1,40}?)[\]】]?\s*[:：]/)?.[1]?.trim()).filter(Boolean))];return !who.length?'':group?`<span class="sttts-phone-note">📱 群「${escapeHTML(group)}」里 ${escapeHTML(who.join('、'))} 说了话</span>`:`<span class="sttts-phone-note">📱 ${escapeHTML(who.join('、'))} 给你发了消息</span>`;});function transform(text,marks=false,id){const hidden=settings?.general?.hideStoryWaves===true;const out=renderBgm(renderSounds(renderPictures(phoneNote(withoutOutfits(text)),marker,{passive:hidden,pictures:context()?.chat?.[id]?.extra?.sttts_pics||{}}),marker,!hidden&&soundsOn()),marker,!hidden&&settings?.music?.bgm&&settings.music.bgm!=='off');const p=parsed(out);lastRoles=p.lines.map(l=>l.role);
+let lastRoles=[],lastInner=[];const phoneNote=text=>String(text).replace(/<(iphonie|phone)(?=[\s/>])([^>]*)>([\s\S]*?)<\/\1\s*>/gi,(m,tag,attrs,inside)=>{const group=attrs.match(/group\s*=\s*["'“”「『]?([^"'“”」』>]+)/)?.[1]?.trim();const who=[...new Set(inside.split(/\n/).map(l=>l.match(/^\s*\**\s*[[【]?([^\]】:：\n]{1,40}?)[\]】]?\s*[:：]/)?.[1]?.trim()).filter(Boolean))];return !who.length?'':group?`<span class="sttts-phone-note">📱 群「${escapeHTML(group)}」里 ${escapeHTML(who.join('、'))} 说了话</span>`:`<span class="sttts-phone-note">📱 ${escapeHTML(who.join('、'))} 给你发了消息</span>`;});function transform(text,marks=false,id){const hidden=settings?.general?.hideStoryWaves===true;const out=renderBgm(renderSounds(renderPictures(phoneNote(withoutOutfits(text)),marker,{passive:hidden,pictures:context()?.chat?.[id]?.extra?.sttts_pics||{}}),marker,!hidden&&soundsOn()),marker,!hidden&&settings?.music?.bgm&&settings.music.bgm!=='off');const p=parsed(out);lastRoles=p.lines.map(l=>l.role);
  // 心声 (its emotion says so, or the preset's marks wrap it) is shown in the story's italics, not as a quoted line.
  lastInner=withMarks(out,p.lines,settings.presets.find(x=>x.id===settings.activePreset)?.marks).map(l=>lineEffect(l)==='inner');
  return p.lines.length?(storyWavesOn()?(marks?markDialogue(out,p.format,lastInner):renderDialogue(out,p.format,marker,lastInner)):plainDialogue(out,p.format)):out;}
@@ -313,7 +313,7 @@ async function decorate(only=null){if(!active)return;legacyFormat();pictures?.de
 await Promise.all(jobs);if(epoch===renderEpoch&&active){animateLines();lookForCover();}}
 // A reply whose voice tags could not all be read gets a small note under it: which ones and why. Drawn again only when
 // the problems change, so it never keeps the chat redrawing.
-function lint(element,raw,lines){const box=element.querySelector('.mes_text');if(!box)return;const old=box.querySelector(':scope>[data-sttts-owned="lint"]');const problems=storyWavesOn()&&Number(element.getAttribute('mesid'))!==liveId()&&!box.querySelector('textarea')?remembered(String(raw),'problems',()=>dialogueProblems(raw,lines)):[];const key=problems.length?JSON.stringify(problems.map(p=>[p.at,p.reason])):'';if((old?.dataset.key||'')===key)return;old?.remove();if(!key)return;const note=document.createElement('details');note.className='sttts-lint';note.dataset.stttsOwned='lint';note.dataset.key=key;note.innerHTML=`<summary>有 ${problems.length} 句台词格式不对，没有声波</summary><ul>${problems.map(p=>`<li><b>${escapeHTML(p.role||'未写角色')}</b>：${escapeHTML(p.reason)}<code>${escapeHTML(p.snippet)}</code></li>`).join('')}</ul><p>可以重新生成这条回复，或者编辑成 “译文”&lt;tts&gt;角色|情绪|原文&lt;/tts&gt;。</p>`;box.append(note);}
+function lint(element,raw,lines){const box=element.querySelector('.mes_text');if(!box)return;const old=box.querySelector(':scope>[data-sttts-owned="lint"]');const problems=storyWavesOn()&&Number(element.getAttribute('mesid'))!==liveId()&&!box.querySelector('textarea')?remembered(String(raw),'problems',()=>dialogueProblems(raw,lines)):[];const key=problems.length?JSON.stringify(problems.map(p=>[p.at,p.reason])):'';if((old?.dataset.key||'')===key)return;old?.remove();if(!key)return;const note=document.createElement('details');note.className='sttts-lint';note.dataset.stttsOwned='lint';note.dataset.key=key;note.innerHTML=`<summary>有 ${problems.length} 句台词格式不对，没有声波</summary><ul>${problems.map(p=>`<li><b>${escapeHTML(p.role||'未写角色')}</b>：${escapeHTML(p.reason)}<code>${escapeHTML(p.snippet)}</code></li>`).join('')}</ul><p>可以重新生成这条回复，或者编辑成 “译文”${escapeHTML(backend.voiceFormat().replace('{译文}','译文').replace(/^“译文”/,'').replace('{角色}','角色').replace('{情绪}','情绪').replace('{文本}','原文'))}。</p>`;box.append(note);}
 /** How much of localStorage (≈5 MB per address, shared by the tavern and every extension) is used; null when it cannot be read. */
 function localStorageSize(){try{let bytes=0;for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);bytes+=(k.length+(localStorage.getItem(k)||'').length)*2;}return {bytes,items:localStorage.length};}catch{return null;}}
 /** Facts for the self-check (core/diagnostics.js makes the report). Keys are only asked whether they work, never read. */
@@ -324,7 +324,7 @@ async function diagnose(){const ctx=context(),s=settings,json=url=>fetch(url,{ca
   if(k.set&&engine!=='mini'&&engine!=='gpt'&&engine!=='doubao'){try{if(engine==='nai'){const sub=await backend.naiSubscription();k.detail=sub?`${TIER_NAMES[sub.tier]||'订阅'}${sub.active?'':'（未激活）'}${sub.anlas!==undefined?' · Anlas '+sub.anlas:''}`:'';}else{const b=await backend.voiceBalance(engine);k.detail=b?.kind==='characters'?`剩余 ${b.left} / ${b.limit} 字符`:b?.kind==='credit'?`余额 ${b.credit}`:'';}k.check='ok';}catch(e){k.check='error';k.detail=e.message;}}
   if(k.set||k.needed)keys[engine]=k;}
  let reply=null;for(let i=ctx.chat.length-1;i>=0&&!reply;i--){const m=ctx.chat[i];if(!m||m.is_user||m.is_system)continue;const raw=m.mes||'',lines=parsed(raw).lines,element=document.querySelector(`#chat .mes[mesid="${i}"]`),ours=element?element.querySelectorAll(`[data-sttts-line][data-sttts-token="${marker}"]`).length:0,all=element?element.querySelectorAll('[data-sttts-line]').length:0;
-  reply={id:i,name:m.name||'',lines:lines.length,tags:/<tts\b/i.test(raw),problems:dialogueProblems(raw,lines),inChat:!!element,waves:ours,stale:all-ours,iframes:element?element.querySelectorAll('iframe').length:0,covered:coverSeen?.id===i?coverSeen.what:'',streaming:i===liveId()};}
+  reply={id:i,name:m.name||'',lines:lines.length,tags:/<(?:i-tts|tts)(?=[\s/>])/i.test(raw),problems:dialogueProblems(raw,lines),inChat:!!element,waves:ours,stale:all-ours,iframes:element?element.querySelectorAll('iframe').length:0,covered:coverSeen?.id===i?coverSeen.what:'',streaming:i===liveId()};}
  const where={in_chat:'聊天中',in_prompt:'系统提示后',before_prompt:'系统提示前'};
  return {at:Date.now(),plugin:{version:manifest?.version||'',runtime:RUNTIME_VERSION,copies:[...globalThis.__stIphonieCopies],oldCopy:!!globalThis.__stTtsPanelBridge},tavern:{version:version?.pkgVersion||'',mode:legacy?'legacy':'hook'},
   browser:{secure:globalThis.isSecureContext!==false,audio:!!globalThis.AudioContext,indexedDB:!!globalThis.indexedDB,probe:await probeStorage().catch(()=>null),storage:storage?.quota?{usage:storage.usage,quota:storage.quota}:null,localStorage:localStorageSize(),keys:backend?.keyStore?.fallback?'localStorage':'indexedDB',agent:browserName()},extensions:thirdParty(),
@@ -506,6 +506,9 @@ function connect(source){
  const owner=backend,api=owner.api();
  const check=()=>{if(!active||backend!==owner||owner.closed||source!==frame?.contentWindow)throw Error('设置页面已失效，请重新打开');};
  return Object.freeze({...api,
+  get defaultFormat(){return api.defaultFormat;},
+  get defaultVoicePreset(){return api.defaultVoicePreset;},
+  get picTagFormat(){return api.picTagFormat;},
   save:(next,revision)=>{check();return api.save({...next,floating:settings.floating},revision);},
   close:()=>{check();panel?.close();},
   latest:()=>{check();const snap=latestMessage();return {id:snap?.id??-1,lines:snap?parsed(snap.raw).lines:[]};},

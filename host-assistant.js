@@ -127,7 +127,7 @@ async function requestAssistantTextRaw(ctx, backend, settings, messages, {preset
 
 /** Whether the conversation is about pictures (the drawing guide is sent then, not with every message). */
 export function assistantTalksPictures(messages) {
-  return (messages || []).slice(-6).some(m => m.meta?.image || /<img\b|画|图|插画|提示词|tag|构图|画风|生图|prompt|外貌|立绘|头像|壁纸|出图/i.test(String(m.text || '')));
+  return (messages || []).slice(-6).some(m => m.meta?.image || /<(?:i-img|img)(?=[\s/>])|画|图|插画|提示词|tag|构图|画风|生图|prompt|外貌|立绘|头像|壁纸|出图/i.test(String(m.text || '')));
 }
 /**
  * The model's answer to 「画吧」: an 出图块 with words around it (or, from older habits, JSON with prompt/before/after).
@@ -151,7 +151,7 @@ export function assistantPicture(text, style = {}) {
 /** What goes to the drawing engine: an 出图块 exactly as in the story (画风, each person's saved look, 站位, size); an
  *  older plain prompt as it was. */
 export function assistantInputs(settings, prompt, style = {}) {
-  const [tag] = /<img\b/i.test(prompt) ? assistantBlocks(prompt) : [];
+  const [tag] = /<(?:i-img|img)(?=[\s/>])/i.test(prompt) ? assistantBlocks(prompt) : [];
   if (tag) { const {names, ...input} = pictureInputs(settings, tag, ''); return {...input, negative: [input.negative, tag.negative].filter(Boolean).join(', ')}; }
   return {prompt, negative: style.negative || ''};
 }

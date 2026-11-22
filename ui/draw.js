@@ -229,7 +229,7 @@ export function drawApp(ctx) {
         ${field('质量标签', select('quality', p.quality, qualityPresets(p.model).map(q => [q.id, q.name])), '官方的质量词，接在提示词后面：\n\n' + qualityPresets(p.model).filter(q => q.words).map(q => `${q.name}：${q.words}`).join('\n') + '\n\n带 no text，想让图里出现文字时先关掉。画风里已经写了质量词就不用再开。')}
         ${medium ? '' : field('负面预设', select('ucPreset', p.ucPreset, ucPresets(p.model).map(u => [u.id, u.name])), '官方的负面词，放在你写的负面前面。选了预设且模型不是 Curated 时，官方还会加上 nsfw，除非提示词里写了 nsfw。画风里已经写了负面就不用再开。')}
       </div>
-      <div class="group">${toggle('guard', '免费档守卫', guard, '开启时步数不超过 28、尺寸不超过 1024×1024，不会发出扣 Anlas 的请求。关闭后，会扣点的生成每次都先问你。')}${toggle('stream', '边画边看', !!d.stream, '在绘图 App 里生成时，一边画一边显示中间的样子和步数。正文里的图不受影响。中转不支持时会自动改回普通方式。')}${toggle('autoDownload', '画好自动下载', !!d.autoDownload, '在绘图 App 里每画好一张就下载一份原图。正文里的图不受影响。手机浏览器不让网页自己下载时，会弹一下「点这里保存」。')}</div>`;
+      <div class="group">${toggle('guard', '免费档守卫', guard, '开启时限制步数和画幅。V5 额度、参考图和 Vibe 等仍可能产生费用。正文配图的扣点授权在「设置 → 正文 → 正文出图」。')}${toggle('stream', '边画边看', !!d.stream, '在绘图 App 里生成时，一边画一边显示中间的样子和步数。正文里的图不受影响。中转不支持时会自动改回普通方式。')}${toggle('autoDownload', '画好自动下载', !!d.autoDownload, '在绘图 App 里每画好一张就下载一份原图。正文里的图不受影响。手机浏览器不让网页自己下载时，会弹一下「点这里保存」。')}</div>`;
   }
 
   /**

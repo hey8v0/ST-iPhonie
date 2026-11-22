@@ -2,7 +2,7 @@ import {createView, esc, btn, field, input, select, textArea, toggle, heading, h
 import {icon, glyph} from './icons.js';
 import {APPS} from './apps.js';
 import {MARK_CHOICES} from '../core/voice-fx.js';
-import {CONTRACT_PROMPT, READING_PROMPT, DEFAULT_PROMPT, DEFAULT_FORMAT, FREE_FORMAT, FREE_PROMPT, FREE_CONTRACT_PROMPT} from '../core/protocol.js';
+import {CONTRACT_PROMPT, READING_PROMPT, DEFAULT_PROMPT, DEFAULT_FORMAT, FREE_FORMAT, builtinVoiceFormat, isFreeFormat, FREE_PROMPT, FREE_CONTRACT_PROMPT} from '../core/protocol.js';
 import {saveFile} from '../download.js';
 import {promptRulesSheet} from './prompt-rules.js';
 // The voice preset's rule entries that can go back to what ships.
@@ -301,8 +301,8 @@ export function presetsApp(ctx) {
     const p = current, o = ops(currentKind), draw = currentKind === 'draw', chat = currentKind === 'chat';
     const used = p.id && p.id === o.active();
     const basics = chat ? ''
-      : draw ? field('每条回复出图数量', input('count', p.count ?? 1, 'number', `min="1" max="${api.drawCountMax}" step="1"`), '每条回复固定出这么多张图。规则里写 {{出图数量}} 会换成这个数字；插件还会在规则最后加一段硬性要求，让张数更稳定。张数越多，出图越久。\n\n规则里写 {{出图格式}} 会换成下面这段（回复后单独配图时，还会多一行「位置」）；{{角色列表}} 会换成已登记的角色和他们的固定外貌。别的插件要排除出图内容时，排除标签填 <img></img>。\n\n' + api.picTagFormat)
-      : field('正文显示', select('voiceLayout', p.format===FREE_FORMAT?'free':'paired', [['paired','译文与原文配对'],['free','自由正文 · 只渲染 tts 标签']]), '自由正文保留对白的语言和排版，英语、双语括号都可以。标签内仍写角色、情绪、朗读原文。') + field('台词格式', textArea('format', p.format, 'class="code short" rows="3"'), '配对模式：{译文}、{角色}、{情绪}、{文本} 各保留一次。自由正文模式：<tts>{角色}|{情绪}|{文本}</tts>，前面的正文不限制格式。译文供阅读，原语言供语音生成。默认格式是成对的 <tts></tts>，别的插件要排除语音原文时，排除标签填 <tts></tts>。\n\n这里的格式只管正文；手机里的语音消息和电话固定用默认格式，不跟着改。');
+      : draw ? field('每条回复出图数量', input('count', p.count ?? 1, 'number', `min="1" max="${api.drawCountMax}" step="1"`), '每条回复固定出这么多张图。规则里写 {{出图数量}} 会换成这个数字；插件还会在规则最后加一段硬性要求，让张数更稳定。张数越多，出图越久。\n\n规则里写 {{出图格式}} 会换成下面这段（回复后单独配图时，还会多一行「位置」）；{{角色列表}} 会换成已登记的角色和他们的固定外貌。别的插件要排除出图内容时，请同时排除 i-img 和旧 img 出图块。\n\n' + api.picTagFormat)
+      : field('正文显示', select('voiceLayout', isFreeFormat(p.format)?'free':'paired', [['paired','译文与原文配对'],['free','自由正文 · 只渲染 tts 标签']]), '自由正文保留对白的语言和排版，英语、双语括号都可以。标签内仍写角色、情绪、朗读原文。') + field('台词格式', textArea('format', p.format, 'class="code short" rows="3"'), '配对模式：{译文}、{角色}、{情绪}、{文本} 各保留一次。自由正文模式只约定标签内的角色、情绪和文本，前面的正文不限制格式。译文供阅读，原语言供语音生成。其他插件可以同时排除 i-tts 和旧 tts 标签。\n\n这里的格式只管正文；手机里的语音消息和电话固定用默认格式，不跟着改。');
     const marks = p.marks || {inner: [], phone: []}, marked = (marks.inner || []).length + (marks.phone || []).length;
     const folds = chat
       ? fold('preset-read', '正文', storyModeName(p) + (p.memory?.storyKeys?.length && !['exact', 'off'].includes(modeOf(p)) ? ` · 记忆插件 ${p.memory.storyKeys.length} 项` : ''), readFields(p), '手机这边知道多少剧情。')
@@ -350,7 +350,7 @@ export function presetsApp(ctx) {
         [current.entries[i], current.entries[to]] = [current.entries[to], current.entries[i]];
         mark(); next = to; d.close();
       } else if (action === 'entry-default') {
-        current.entries[i] = {...current.entries[i], text: current.format===FREE_FORMAT&&e.id==='contract'?FREE_CONTRACT_PROMPT:RULE_DEFAULTS[e.id]};
+        current.entries[i] = {...current.entries[i], text: isFreeFormat(current.format)&&e.id==='contract'?FREE_CONTRACT_PROMPT:RULE_DEFAULTS[e.id]};
         d.body.querySelector('[data-field=text]').value = current.entries[i].text;
         mark(); ctx.notify('这一条换回默认了，记得保存');
       } else if (action === 'delete-entry') {
@@ -376,7 +376,7 @@ export function presetsApp(ctx) {
   function update(el, redraw) {
     const key = el.dataset.field, index = el.closest('[data-entry]')?.dataset.entry;
     if(key==='voiceLayout') {
-      const free=el.value==='free';current.format=free?FREE_FORMAT:DEFAULT_FORMAT;
+      const free=el.value==='free';current.format=builtinVoiceFormat(free?FREE_FORMAT:DEFAULT_FORMAT, api.getState().general.shortTags);
       const pairs=[[DEFAULT_PROMPT,FREE_PROMPT],[CONTRACT_PROMPT,FREE_CONTRACT_PROMPT]];
       for(const entry of current.entries)for(const [paired,open] of pairs)if(entry.text===(free?paired:open))entry.text=free?open:paired;
       mark();render();return;

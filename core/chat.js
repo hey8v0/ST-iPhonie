@@ -378,12 +378,12 @@ export function normalizePeeked(value, now = Date.now()) {
 export function normalizeProactive(value = {}) {
   return {on: value?.on === true, every: count(value?.every, 0, 100, 0), dailyMax: count(value?.dailyMax, 0, 99, 3), clock: value?.clock === true};
 }
-export const PHONE_TAG = /<phone\b([^>]*)>([\s\S]*?)<\/phone\s*>/gi;
+export const PHONE_TAG = /<(iphonie|phone)(?=[\s/>])([^>]*)>([\s\S]*?)<\/\1\s*>/gi;
 /**
  * What a story reply sent to the phone: [{group, text}] for each <phone>…</phone> (group: the group chat's name of
  * <phone group="群名">, '' for private messages).
  */
-export const phoneParts = text => [...String(text ?? '').matchAll(PHONE_TAG)].map(m => ({group: (m[1].match(/group\s*=\s*["'“”「『]?([^"'“”」』>]+)/)?.[1] || '').trim(), text: m[2].trim()})).filter(p => p.text);
+export const phoneParts = text => [...String(text ?? '').matchAll(PHONE_TAG)].map(m => ({group: (m[2].match(/group\s*=\s*["'“”「『]?([^"'“”」』>]+)/)?.[1] || '').trim(), text: m[3].trim()})).filter(p => p.text);
 /** The inside of each <phone>…</phone>. */
 export const phoneBlocks = text => phoneParts(text).map(p => p.text);
 /**
@@ -391,12 +391,13 @@ export const phoneBlocks = text => phoneParts(text).map(p => p.text);
  * can be drawn), 位置, money, presents, songs, a call (the phone rings), 朋友圈, group messages.
  * after: for the request made after the reply (回复后单独), which reads the finished story; else for the story itself.
  */
-export function phoneFormat({user = '我', names = [], groups = [], images = false, after = false, status = false, make = false} = {}) {
+export function phoneFormat({user = '我', names = [], groups = [], images = false, after = false, status = false, make = false, shortTags = false} = {}) {
+  const phone = shortTags ? 'iphonie' : 'phone';
   const list = names.join('、');
   return [after ? '【手机上的事】' : '【发到手机上的事】',
     after ? `读这段正文：里面写到有人用手机联系${user}（发消息、发照片、转账、发红包、送礼物、分享歌曲、打电话），或者有人发了朋友圈，就把这些事在${user}的手机上真的发出来，内容和正文写的对得上；剧情里有人这时自然会给${user}发消息的，也可以发。`
-      : `剧情里有人这时会用手机联系${user}（发消息、发照片、转账、打电话……），或者正文里写到了这样的事，就在正文写完的地方另起一行写 <phone></phone>（预设要求写在正文后面的状态栏、选项这些照常写在它后面，不要省略），把这些事在${user}的手机上真的发出来，内容和正文写的对得上。`,
-    `${after ? '' : '<phone></phone> 里'}一件事一行：`,
+      : `剧情里有人这时会用手机联系${user}（发消息、发照片、转账、打电话……），或者正文里写到了这样的事，就在正文写完的地方另起一行写 <${phone}></${phone}>（预设要求写在正文后面的状态栏、选项这些照常写在它后面，不要省略），把这些事在${user}的手机上真的发出来，内容和正文写的对得上。`,
+    `${after ? '' : `<${phone}></${phone}> 里`}一件事一行：`,
     '- 消息：「名字：消息」，可以连着发几条',
     `- 照片：「名字：[图片] 一句话描述照片里拍到的画面${images ? '｜画这张照片用的英文 danbooru tag（只写照片里真有的：拍的是猫就写 cat，画面里没有人就写 no humans、不写 1girl 1boy；只有拍到自己时才写 1girl 或 1boy 和 selfie；再写构图、光线）' : ''}」`,
     '- 位置：「名字：[位置] 地点」',
@@ -408,11 +409,11 @@ export function phoneFormat({user = '我', names = [], groups = [], images = fal
     // 0.9.35: what someone is doing shows on the phone; a few of them may start a group (the user in it only when named).
     status ? '- 改在线状态或个性签名：「名字：[状态] 忙碌｜在做什么」「名字：[签名] 新签名」（在做的事、心情变了才改）' : '',
     make ? `- 拉群：「名字：[建群] 群名｜成员1、成员2」（拉${user}就把${user}写进成员；不写就是只有他们几个的群）` : '',
-    `私聊是一对一的：${after ? '' : '<phone></phone> 里'}每个人的每一条都是他单独发给${user}的，只有他和${user}看得到，发到他和${user}的私聊窗口里。所以：`,
+    `私聊是一对一的：${after ? '' : `<${phone}></${phone}> 里`}每个人的每一条都是他单独发给${user}的，只有他和${user}看得到，发到他和${user}的私聊窗口里。所以：`,
     `- 每条都是对${user}说的（「你」就是${user}），不对别人说话、不喊别人的名字让对方接话；想说别人的事，就当着${user}的面说起他。`,
     `- 几个人都发消息时，各发各的：彼此看不到对方发了什么，不回应、不引用、不接着别人私聊里的话，也不知道别人给${user}发过消息（正文里当面说过、${user}告诉过他的除外）。`,
     `- 消息内容只能是他这时会知道的事：没在场的人不知道刚才当面发生了什么。`,
-    groups.length ? (after ? `几个人在一起聊、互相能看到的，只能发在群里：另起一段，第一行写「群：群名」，下面一样一行一件事；群名只能是：${groups.join('、')}。` : `几个人在一起聊、互相能看到的，只能发在群里：另写一段 <phone group="群名"></phone>；群名只能是：${groups.join('、')}。`) : '',
+    groups.length ? (after ? `几个人在一起聊、互相能看到的，只能发在群里：另起一段，第一行写「群：群名」，下面一样一行一件事；群名只能是：${groups.join('、')}。` : `几个人在一起聊、互相能看到的，只能发在群里：另写一段 <${phone} group="群名"></${phone}>；群名只能是：${groups.join('、')}。`) : '',
     `名字只能是：${list}。不要替${user}发，不写语音标签。这些只出现在${user}的手机上，不写进正文的叙述里。${after ? '正文里没有这样的事、也没人要发消息，就只写「无」。' : '没有这样的事就不写。'}`].filter(Boolean).join('\n');
 }
 const storyRules = (preset, user, list) => (preset?.entries || []).filter(e => e.enabled && e.text?.trim() && (e.use || []).includes('story')).map(e => fill(e.text, {'用户': user, '联系人': list, '对象': list}));
@@ -420,10 +421,10 @@ const storyRules = (preset, user, list) => (preset?.entries || []).filter(e => e
  * The rule for the story request: the chat preset's 正文 rules ({{用户}}, {{联系人}}), and how to write what happens
  * on the phone. '' when there is no rule or no one to send them.
  */
-export function storyTextRule(preset, {user = '我', names = [], groups = [], images = false, status = false, make = false} = {}) {
+export function storyTextRule(preset, {user = '我', names = [], groups = [], images = false, status = false, make = false, shortTags = false} = {}) {
   const used = storyRules(preset, user, names.join('、'));
   if (!used.length || !names.length) return '';
-  return [...used, phoneFormat({user, names, groups, images, status, make})].join('\n\n');
+  return [...used, phoneFormat({user, names, groups, images, status, make, shortTags})].join('\n\n');
 }
 /** The same for the request made after the reply (回复后单独配音/配图): it reads the story and writes the phone part. */
 export function phoneAfterRule(preset, {user = '我', names = [], groups = [], images = false, status = false, make = false} = {}) {
@@ -439,14 +440,15 @@ export function withPhone(prompt, rule) {
     {...user, content: `${user.content}\n（最后别忘了「【手机】」那一段。）`}, ...rest];
 }
 /** An answer split: what comes before 「【手机】」, and the phone part as <phone> blocks ('' when there is none). */
-export function phoneSection(reply) {
+export function phoneSection(reply, shortTags = false) {
+  const tag = shortTags ? 'iphonie' : 'phone';
   const text = String(reply ?? ''), at = text.search(/^[ \t]*[【\[]手机[】\]][ \t]*/m);
   if (at < 0) return {rest: text, phone: ''};
   const tail = text.slice(at).replace(/^[ \t]*[【\[]手机[】\]][ \t]*/, ''), end = tail.search(/^[ \t]*【(?!手机)[^】\n]{1,10}】[ \t]*$/m);
   const body = (end < 0 ? tail : tail.slice(0, end)).trim(), rest = text.slice(0, at) + (end < 0 ? '' : tail.slice(end));
   if (!body || /^无[。.]?$/.test(body)) return {rest, phone: ''};
   // 「群：群名」 starts a group's part.
-  const blocks = [], add = (group, lines) => { const t = lines.join('\n').trim(); if (t) blocks.push(group ? `<phone group="${group.replace(/["<>]/g, '')}">\n${t}\n</phone>` : `<phone>\n${t}\n</phone>`); };
+  const blocks = [], add = (group, lines) => { const t = lines.join('\n').trim(); if (t) blocks.push(group ? `<${tag} group="${group.replace(/["<>]/g, '')}">\n${t}\n</${tag}>` : `<${tag}>\n${t}\n</${tag}>`); };
   let group = '', lines = [];
   for (const line of body.split(/\r?\n/)) {
     const g = line.match(/^\s*(?:群聊?|群名)\s*[:：]\s*(.+?)\s*$/);
@@ -970,7 +972,7 @@ export function bringText(preset, {thread, messages, user = '我'}) {
  *  (the HTML 小剧场 some presets write) are not story: they are left out whole instead of becoming a wall of CSS. */
 export function plainStory(textValue, tags = [], scope = {}) {
   return storyText(textValue, {...scope, skip: [...(scope.skip ?? NARRATION_SKIP), ...tagList(tags)]})
-    .replace(/<tts\b[^>]*>[\s\S]*?<\/tts\s*>/gi, '')
+    .replace(/<(?:i-tts|tts)(?=[\s/>])[^>]*>[\s\S]*?<\/(?:i-tts|tts)\s*>/gi, '')
     .replace(/<[^>]+>/g, '')
     .replace(/\s+/g, ' ').trim();
 }

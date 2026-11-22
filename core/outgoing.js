@@ -15,7 +15,7 @@ export const storyReply = m => storyMessage(m) && !m.is_user;
 /** A reply with each voiced line turned back into its translation: “你好”<tts>A|calm|Hello</tts> → “你好”. */
 export function withoutVoice(message, formats) {
   const text = String(message);
-  if (!/<tts\b/i.test(text) && !formats.some(f => !/<tts\b/i.test(f))) return text;
+  if (!/<(?:i-tts|tts)(?=[\s/>])/i.test(text) && !formats.some(f => !/<(?:i-tts|tts)(?=[\s/>])/i.test(f))) return text;
   for (const format of formats) {
     let lines;
     try { lines = parseDialogue(text, format); } catch { continue; }
@@ -41,7 +41,7 @@ export function outgoingChat(chat, {pictures = true, voice = true, keepLatest = 
     const m = chat[i];
     if (typeof m?.mes !== 'string') continue;
     let mes = m.mes;
-    if (pictures && /<img\b/i.test(mes)) mes = withoutPictures(mes);
+    if (pictures && /<(?:i-img|img)(?=[\s/>])/i.test(mes)) mes = withoutPictures(mes);
     if (sounds && /<(?:sfx|ambience)\b/i.test(mes)) mes = withoutSounds(mes);
     if (voice && formats.length && i !== keep) mes = withoutVoice(mes, formats);
     if (mes !== m.mes) chat[i] = {...m, mes};
