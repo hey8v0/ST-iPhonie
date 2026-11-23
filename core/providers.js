@@ -1,3 +1,5 @@
+import {parseVoiceModels, mergeVoiceModels, voiceModelId, voiceTransport} from './model-catalog.js';
+import {elevenTurboSpeech} from './eleven-dialogue.js';
 import {buildDoubaoRequest,doubaoAudio,DOUBAO_VOICES} from './doubao.js';
 import {proxyAddress, noTavernProxy, tavernLogin} from './proxy-url.js';
 import { validateKey, MULTI_KEY, keyTail, parseTextKeys } from './keys.js';
@@ -16,7 +18,7 @@ function checkedConnection(engine,connection,route,line,references){
  if(!object(line)||typeof line.text!=='string'||!line.text.trim())throw Error('朗读文本不能为空');
  if(!references||typeof references.get!=='function')throw Error('参考音频数据无效，请重新选择文件');
  const model=route.model||connection.model;
- if(typeof model!=='string'||!P.catalogs[engine].models.includes(model))throw Error('请选择当前引擎支持的模型');
+ if(typeof model!=='string'||!voiceModelId(engine, model))throw Error('请选择当前引擎支持的模型');
  let c;try{c=structuredClone(connection);}catch{throw Error('引擎设置格式无效，请重新保存引擎设置');}
  c.model=model;c.params={...P.defaults(engine),...c.params};
  for(const field of P.catalogs[engine].groups.flatMap(group=>group.fields)){
@@ -68,8 +70,9 @@ export function buildRequest(engine,connection,route,line,references=new Map()){
   request.url=P.openaiSpeech(P.fishBase(c));
   request.body={model:c.model,input:request.body.input,voice:request.body.voice,response_format:request.body.response_format,...(Number.isFinite(speed)&&speed!==1?{speed}:{})};
  }
+ const transport=voiceTransport(engine,c.model);
  const url=new URL(request.url,globalThis.location?.href);for(const [k,v] of Object.entries(request.query||{}))url.searchParams.set(k,String(v));
- return {engine,url:url.href,body:request.body,...(official?{official}:{}),...extra,format:engine==='mimo'?'wav':engine==='fish'?c.params.format:engine==='mini'?c.params['audio_setting.format']:c.params.output_format,sampleRate:engine==='mimo'?24000:engine==='fish'?c.params.sample_rate:engine==='mini'?c.params['audio_setting.sample_rate']:Number(c.params.output_format.split('_')[1]),channels:engine==='mini'?c.params['audio_setting.channel']:1};
+ return {engine,transport,url:url.href,body:request.body,voice:route.voice,...(official?{official}:{}),...extra,format:engine==='mimo'?'wav':engine==='fish'?c.params.format:engine==='mini'?c.params['audio_setting.format']:c.params.output_format,sampleRate:engine==='mimo'?24000:engine==='fish'?c.params.sample_rate:engine==='mini'?c.params['audio_setting.sample_rate']:Number(c.params.output_format.split('_')[1]),channels:engine==='mini'?c.params['audio_setting.channel']:1};
 }
 export function hexBytes(hex){if(typeof hex!=='string'||!hex.length||hex.length%2||!/^[\da-f]+$/i.test(hex))throw Error('返回的音频数据无效');return Uint8Array.from(hex.match(/../g),x=>parseInt(x,16));}
 export function wavePCM(bytes,rate=24000,channels=1){if(bytes.length%2||!Number.isFinite(rate)||rate<8000||rate>192000||![1,2].includes(channels))throw Error('PCM 音频参数无效');const out=new Uint8Array(44+bytes.length),v=new DataView(out.buffer),ascii=(p,s)=>[...s].forEach((x,i)=>v.setUint8(p+i,x.charCodeAt(0)));ascii(0,'RIFF');v.setUint32(4,36+bytes.length,true);ascii(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,channels,true);v.setUint32(24,rate,true);v.setUint32(28,rate*channels*2,true);v.setUint16(32,channels*2,true);v.setUint16(34,16,true);ascii(36,'data');v.setUint32(40,bytes.length,true);out.set(bytes,44);return out;}
@@ -153,7 +156,7 @@ export class Providers{
   // 自己的接口: the {{id}} of lines that got no answer (sent again with it), the services only the tavern's proxy reaches.
   this.unsettled=new Map();this.customVia=new Set();this.page=globalThis.location;
   // 自己的接口's keys, one per set (the backend keeps them).
-  this.customKeys=new Map();}
+  this.customKeys=new Map();this.modelCache=new Map();}
  setKey(engine,key){key=validateKey(engine,key);
   // 自己的接口: one key a set (lines of "<set id><tab><key>"); a plain key is the first set's, as one saved before sets.
   if(engine==='custom'){this.customKeys=key.includes('	')?parseTextKeys(key):key?new Map([[CUSTOM_DEFAULT,key]]):new Map();return;}
@@ -182,6 +185,11 @@ export class Providers{
  async synthesize(request,signal){
   if(request.engine==='fish'&&this.fishMcp?.status().connected){const blob=await this.fishMcp.speak(request,signal);this.onSpend?.('fish');return blob;}
   if(request.engine==='custom')return this.speakCustom(request,signal);
+  if(request.engine==='eleven' && request.transport==='eleven-dialogue-ws'){
+   const blob=await elevenTurboSpeech(request,this.currentKey('eleven'),signal);
+   try{this.onSpend?.('eleven');}catch{}
+   return blob;
+  }
   const model=request.body?.model_id,body={...request.body};
   for(const field of this.refused.get(model)||[])delete body[field];
   let response=await this.post(request,body,signal);
@@ -349,6 +357,35 @@ export class Providers{
   // Fish's own answer, said as such further on).
   if(r.ok&&!/json/i.test(r.headers?.get('content-type')||'')&&audioKind(new Uint8Array(await r.clone().arrayBuffer().catch(()=>new ArrayBuffer(0))).subarray(0,64))==='text')throw none;
   return r;}
+ /** Shared discovery entry: official catalog when it exists, otherwise verified presets.
+  * In-memory caching avoids repeated requests; failure never destroys the last useful list. */
+ async voiceModels(engine, connection = {}, refresh = false) {
+  if(!['fish','mini','eleven','mimo','doubao'].includes(engine)) throw Error('引擎不支持模型发现');
+  const fallback=P.catalogs[engine].models;
+  const saved=connection.model||'';
+  const cached=this.modelCache.get(engine);
+  if(!refresh && cached && Date.now()-cached.at<30*60*1000)
+    return {...cached, models:mergeVoiceModels(engine,fallback,cached.models,saved)};
+  if(engine!=='fish' && engine!=='eleven')
+    return {models:mergeVoiceModels(engine,fallback,[],saved),source:'preset',note:'服务暂无已适配的模型目录接口，可手动填写新模型 ID'};
+  try {
+   const base=engine==='eleven'?P.elevenBase(connection):P.fishBase(connection);
+   if(engine==='fish' && P.fishOpenAI(connection))
+     throw Error('OpenAI 格式中转不提供 Fish 官方模型目录');
+   const url=base+(engine==='eleven'?'/v1/models':'/compat/v1/models');
+   const headers=engine==='eleven'?this.headers('eleven'):{};
+   const response=await this.fetch(url,{headers});
+   if(!response.ok)throw Error('HTTP '+response.status);
+   const models=parseVoiceModels(engine,await response.json());
+   if(!models.length)throw Error('未返回可识别的语音模型');
+   const entry={models,source:'official',at:Date.now(),note:''};
+   this.modelCache.set(engine,entry);
+   return {...entry,models:mergeVoiceModels(engine,fallback,models,saved)};
+  } catch(error) {
+   const previous=cached?.models||[];
+   return {models:mergeVoiceModels(engine,fallback,previous,saved),source:cached?'cache':'preset',note:'模型目录读取失败：'+error.message};
+  }
+ }
  /** The models Fish's compat endpoint serves (no key needed), read once a page and again after half an hour; true when what goes where changed. */
  fishCatalog(){const now=Date.now();if(this.catalogRead&&now-this.catalogAt<30*60*1000)return this.catalogRead;this.catalogAt=now;
   return this.catalogRead=fetchWithPolicy(this.fetcher,FISH_API+'/compat/v1/models',{}).then(async r=>{if(!r.ok)throw Error('HTTP '+r.status);const json=await r.json();return setFishCompat((json?.data||[]).map(m=>m?.id).filter(id=>typeof id==='string'));}).catch(()=>{this.catalogRead=null;return false;});}
@@ -398,5 +435,5 @@ export class Providers{
   const voices=detected==='openai'?{status:0,ok:false}:await status(base+'/model?page_size=1',{headers});
   return {relay,base,openaiUrl:P.openaiSpeech(base),api:P.fishOpenAI(c)?'openai':'fish',detected,speech:detected==='openai'?openai:compat,compat,openai,voices};
  }
- clear(){this.keys.clear();this.references.clear();this.refused.clear();this.pools.clear();}
+ clear(){this.keys.clear();this.references.clear();this.refused.clear();this.pools.clear();this.modelCache.clear();}
 }
