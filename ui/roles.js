@@ -490,7 +490,7 @@ export function rolesApp(ctx) {
   }
   /** The model; for 自己的接口 with several sets, which one this role uses ('' follows the one in use). */
   function modelField(r, c, schema) {
-    if (r.engine !== 'custom') return field('模型', select('model', r.model || '', [['', '跟随引擎 · ' + c.model], ...schema.models.map(m => [m.id, m.id, !m.supported])]));
+    if (r.engine !== 'custom') return field('模型', `${input('model',r.model||'','text',`list="sttts-role-models" autocomplete="off" placeholder="跟随引擎 · ${esc(c.model)}"`)}<datalist id="sttts-role-models">${schema.models.map(m=>`<option value="${esc(m.id)}">`).join('')}</datalist>`, '留空跟随引擎。可以输入新模型 ID，服务端不支持的模型仍会返回错误。');
     const sets = customSets(r);
     const set=customSetOf(c,r.model),params=customParams(c,set) || {};
     const override=(!r.customModelSet || r.customModelSet===set) ? r.customModel || '' : '';
