@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {parseVoiceModels,mergeVoiceModels,voiceTransport,voiceModelId} from '../core/model-catalog.js';
 import {turboUrl,turboFrames,elevenTurboSpeech} from '../core/eleven-dialogue.js';
+import {voiceModelChoices, voiceModelControl, FOLLOW_MODEL} from '../ui/voice-model-picker.js';
 
 test('ElevenLabs directory selects only text-to-speech models',()=>{
  const data=[
@@ -73,4 +74,26 @@ test('Turbo cancellation stops an active socket',async()=>{
  queueMicrotask(()=>controller.abort());
  await assert.rejects(p,{name:'AbortError'});
  assert.equal(instance.closed,true);
+});
+
+test('model picker shows all models even when current field contains v4',()=>{
+ const rows=voiceModelChoices([
+  {id:'eleven_v4'},{id:'eleven_v3'},{id:'eleven_v4_turbo'},
+  {id:'eleven_multilingual_v2'}
+ ],'eleven_v4');
+ assert.deepEqual(rows.map(x=>x.key),[
+  'eleven_v4','eleven_v3','eleven_v4_turbo','eleven_multilingual_v2'
+ ]);
+ assert.equal(rows[0].icon,'check');
+ const html=voiceModelControl('eleven_v4',{refresh:true});
+ assert.match(html,/data-action="choose-voice-model"/);
+ assert.doesNotMatch(html,/<datalist|\\blist="/);
+});
+test('per-role picker includes follow engine, all models and custom selection',()=>{
+ const rows=voiceModelChoices([{id:'eleven_v3'},{id:'eleven_v4_turbo'}],
+   'eleven_custom_model','跟随引擎 · eleven_v4');
+ assert.equal(rows[0].key,FOLLOW_MODEL);
+ assert.deepEqual(rows.slice(1).map(x=>x.key),[
+  'eleven_v3','eleven_v4_turbo','eleven_custom_model'
+ ]);
 });
