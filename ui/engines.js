@@ -7,6 +7,7 @@ import {icon, spark} from './icons.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {fly} from './carry.js';
 import {openCustomCatalog, modelPicker} from './custom-catalog.js';
+import {voiceModelControl, chooseVoiceModel} from './voice-model-picker.js';
 import {catalogDefaults, officialSpeechService, CUSTOM_TEMPLATES, voicesFromFolder, shortLanguage, customHint, customSlots, voiceFromLink} from '../core/custom-voice.js';
 import {cleanAddress, fromCurl} from '../core/custom-detect.js';
 
@@ -482,7 +483,7 @@ export function enginesApp(ctx) {
           ${engine === 'custom' ? customKeyField(saved) : field(saved ? '再加一个密钥' : 'API Key', textArea('key', '', `rows="1" class="code key-paste" autocomplete="off" spellcheck="false" placeholder="${saved ? '粘贴新的密钥' : '粘贴密钥，多个就每行一个'}"`), '粘贴完点一下别处就保存了。可以保存多个账号的密钥，新加的排在后面，不用的可以单独删掉。先用排在前面的；某个密钥被拒（401、403）、额度用完（402）或请求太频繁（429）时，自动换下一个重试，这次打开页面里不再用它。想手动换，点那个密钥的「用这个」：马上改用它，并把它排到第一个，以后打开也先用它。\n\n密钥只保存在当前浏览器和酒馆地址，按账户分别保存。')}
           ${engine === 'fish' && api.fishSubscriptionStatus?.().connected ? '</div></details>' : ''}
           ${engine==='custom' && c.params.url ? (customSlots(c.params).has('model') ? modelPicker('custom-models','默认模型',c.params.cloudModel || '选择模型') : '') + btn('custom-voices','浏览音色','secondary small') : ''}
-          ${schema.models.length > 1 ? field('默认模型', `<div class="music-selfhost">${input('model',c.model,'text',`list="sttts-voice-models" autocomplete="off" spellcheck="false"`)}${btn('voice-model-refresh',icon('refresh')+'读取','secondary small')}</div><datalist id="sttts-voice-models">${schema.models.map(m=>`<option value="${esc(m.id)}">`).join('')}</datalist>`, [schema.modelNote,voiceDirectories.get(engine)?.note,'可直接输入模型 ID；新模型若需要不同的 API 协议，还须更新插件适配。角色没有单独指定模型时使用这里的模型。'].filter(Boolean).join('\n\n')) : ''}
+          ${schema.models.length > 1 ? field('默认模型', voiceModelControl(c.model, {refresh:true}), [schema.modelNote,voiceDirectories.get(engine)?.note,'手动填写模型 ID，或点箭头查看全部模型。新模型若需要不同的 API 协议，还须更新插件适配。角色没有单独指定模型时使用这里的模型。'].filter(Boolean).join('\n\n')) : ''}
           ${engine === 'mini' ? field('服务区域', select('region', c.region, [['cn', '国内'], ['global', '国际'], ['uw', '国际 · 低延迟入口']])) : ''}
         </div>`
       + (fish ? `<details data-group="fish-relay"><summary>中转<small class="fold-note">${fish.relay ? esc(fish.relay.replace(/^https?:\/\//, '')) : '直连 Fish Audio'}</small></summary><div class="fold-body">${fishRelay()}</div></details>` : '')
@@ -684,10 +685,8 @@ export function enginesApp(ctx) {
       const value=await api.voiceModels(id,api.getState().connections[id],refresh);
       voiceDirectories.set(id,value);
       if(v.disposed||engine!==id)return;
-      // Schema reads the provider cache, so a refresh updates the picker without changing the user's draft.
-      const options=v.root.querySelector('#sttts-voice-models');
-      if(options){const seen=new Set();options.innerHTML=value.models.filter(m=>!seen.has(m.id)&&seen.add(m.id)).map(m=>`<option value="${esc(m.id)}">`).join('');}
-      const note=v.root.querySelector('[data-voice-model-note]');if(note)note.textContent=value.note||'模型目录已更新';
+      // Keep the current draft and typed model untouched. The picker reads
+      // the full directory whenever it is opened; no native datalist filtering.
     }catch(error){if(refresh)ctx.notify('读取模型失败：'+error.message,{error:true});}
   }
   v.edit = edit;
@@ -877,6 +876,19 @@ export function enginesApp(ctx) {
   v.on('click', '[data-action]', el => act(el.dataset.action, el));
   async function act(action, el) {
     switch (action) {
+      case 'choose-voice-model': {
+        const id = engine, connection = draft();
+        if (!id || !connection) break;
+        const rows = await api.voiceModels(id, api.getState().connections[id], false);
+        if (v.disposed || engine !== id || draft() !== connection) break;
+        voiceDirectories.set(id, rows);
+        const picked = await chooseVoiceModel(ctx, rows.models, connection.model);
+        if (picked === null || v.disposed || engine !== id || draft() !== connection) break;
+        connection.model = picked;
+        changed();
+        render();
+        break;
+      }
       case 'voice-model-refresh': await v.busy(el,()=>refreshVoiceModels(engine,true)); break;
       case 'fish-refresh': await loadFishCredits(true); break;
       case 'fish-account-menu': {
