@@ -27,7 +27,7 @@ const mini={model:'speech-2.8-hd',models:['speech-2.8-hd','speech-2.8-turbo','sp
  group('mix','混合音色',[rows('timbre_weights','音色权重',[t('voice_id','音色 ID'),n('weight','权重',50,1,100,1)],4,'官网标为旧版字段；设置混合音色时，voice_id 留空。最多四个音色。')])
 ]};
 const formats=['mp3_44100_128','alaw_8000','mp3_22050_32','mp3_24000_48','mp3_44100_192','mp3_44100_32','mp3_44100_64','mp3_44100_96','opus_48000_128','opus_48000_192','opus_48000_32','opus_48000_64','opus_48000_96','pcm_16000','pcm_22050','pcm_24000','pcm_32000','pcm_44100','pcm_48000','pcm_8000','ulaw_8000','wav_16000','wav_22050','wav_24000','wav_32000','wav_44100','wav_48000','wav_8000'];
-const eleven={model:'eleven_v4',models:['eleven_v4','eleven_v3','eleven_multilingual_v2','eleven_flash_v2_5','eleven_flash_v2','eleven_turbo_v2_5','eleven_turbo_v2','eleven_v3_conversational'],source:'https://elevenlabs.io/docs/api-reference/text-to-speech/convert',groups:[
+const eleven={model:'eleven_v4',models:['eleven_v4','eleven_v4_turbo','eleven_v3','eleven_multilingual_v2','eleven_flash_v2_5','eleven_flash_v2','eleven_turbo_v2_5','eleven_turbo_v2','eleven_v3_conversational'],source:'https://elevenlabs.io/docs/api-reference/text-to-speech/convert',groups:[
  group('common','常用设置',[n('voice_settings.stability','稳定性',.5,0,1,.05,'数值越低越有表现力，越高越平稳。eleven_v3 只接受 0（有创意）、0.5（自然）、1（稳定）三档，其他数值发送时取最近的一档。'),n('voice_settings.speed','语速',1,.7,1.2,.05,'官网产品页建议 0.7–1.2；通用 REST 结构未给范围，官方技能另列 0.25–4。当前按产品页范围提供。v3 产品页标为不支持。'),n('voice_settings.similarity_boost','音色相似度',.75,0,1,.05),n('voice_settings.style','风格强度',0,0,1,.05),b('voice_settings.use_speaker_boost','增强原声特征',true)]),
  group('audio','音频输出',[s('output_format','音频格式','mp3_44100_128',formats,'MP3 192 kbps 需要 Creator 或更高；PCM/WAV 44.1 kHz 需要 Pro 或更高，仍以账户可用能力为准。')]),
  group('language','语言与文字',[t('language_code','语言代码','留空跟随角色语言。使用 ISO 639-1 代码，如 zh、en、ja；Multilingual v2 不支持。'),s('apply_text_normalization','文字规范化','auto',[['auto','自动'],['on','开启'],['off','关闭']]),b('apply_language_text_normalization','日语读法规范化',false,'当前仅日语；会增加生成延迟。')]),
@@ -92,7 +92,7 @@ function unavailable(key,f,c){const p=c.params,k=f.key;
   if(k.startsWith('voice_modify.')&&!(p.stream?p['audio_setting.format']==='mp3':['mp3','wav','flac'].includes(p['audio_setting.format'])))return '音效支持非流式 MP3/WAV/FLAC，或流式 MP3。';
  }
  if(key==='eleven'){
-  if(k.startsWith('voice_settings.')&&!['voice_settings.stability','voice_settings.similarity_boost'].includes(k)&&c.model==='eleven_v4')return 'v4 只支持稳定性和音色相似度，风格、语速和 SSML 不起作用。';
+  if(k.startsWith('voice_settings.')&&!['voice_settings.stability','voice_settings.similarity_boost'].includes(k)&&['eleven_v4','eleven_v4_turbo'].includes(c.model))return 'v4 只支持稳定性和音色相似度，风格、语速和 SSML 不起作用。';
   if(k.startsWith('voice_settings.')&&k!=='voice_settings.stability'&&c.model.startsWith('eleven_v3'))return '按 v3 产品页与专用参数结构，此项不作为已支持参数发送。';
   if(['voice_settings.style','voice_settings.use_speaker_boost'].includes(k)&&c.model.includes('flash'))return 'Flash 专用声音结构未列此项，需账户能力核验。';
   if(k==='language_code'&&c.model==='eleven_multilingual_v2')return 'Multilingual v2 不支持强制语言代码。';
@@ -180,7 +180,7 @@ function tagNote(key,model){if(key==='doubao')return '合成 2.0：台词的情�
  if(key==='custom')return '台词的情绪不会写进台词里，要用就在请求体里写 {{emotion}}（比如接口有情绪参数时）。';
  if(key==='mimo')return '台词的情绪会自动写成句首的圆括号标签，如 (开心)，中文最准；原文里还可以在任意位置插方括号的细节标签，如 [轻笑]、[叹气]。'+(mimoMode(model)==='design'?'音色设计模型：角色的「音色」一栏写音色描述。':mimoMode(model)==='clone'?'声音克隆模型：角色的「音色」一栏写克隆样本的名字。':'');
  if(key==='mini')return '台词里的情绪会自动对应到下面这几个（中文也行）；对应不上时由模型自己判断。'+(model.startsWith('speech-2.8')?'原文里还能插下面这些圆括号语气声。':'');
- if(key==='eleven')return elevenTagged(model)?'原文里用方括号英文标签控制语气，如 [whispers]、[sarcastic]；台词的情绪会自动放在开头。'+(model==='eleven_v4'?'v4 只用稳定性和音色相似度两项设置。':''):'这个模型不读语气标签，情绪靠措辞和标点表达。';
+ if(key==='eleven')return elevenTagged(model)?'原文里用方括号英文标签控制语气，如 [whispers]、[sarcastic]；台词的情绪会自动放在开头。'+(['eleven_v4','eleven_v4_turbo'].includes(model)?'v4 系列仅使用稳定性和音色相似度两项设置。':''):'这个模型不读语气标签，情绪靠措辞和标点表达。';
  if(key==='fish'&&fishDrama(model))return '像给配音演员说戏：台词的情绪会自动放在开头的方括号里，可以写一整句，中文英文都行，如 [强忍着眼泪，却努力笑着]、[defensive, slightly uneasy tone]。原文里在发生的位置插声音和停顿，如 [sigh]、[pause]；只想改几个词就用成对标签包住，如 <whisper>Go on without me.</whisper>。';
  return fishS1(model)?'圆括号固定标签：情绪放句首，如 (sad)；语气和声音可以放在句中，如 (whispering)、(laughing)。台词的情绪会自动写成句首标签。':'方括号里写英文：句首一个主情绪，如 [sad]、[slightly nervous]、[warm and teasing]；句中可以插语气和声音，如 [whispering]、[emphasis]（紧贴要加重的词）、[laughing]、[break]。一句叠加不超过三个。台词的情绪会自动放在开头。';
 }
