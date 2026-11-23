@@ -4,6 +4,7 @@ import {layerSort} from './layer-sort.js';
 import {layerTree} from '../core/layers.js';
 import {lookTest} from '../core/draw.js';
 import {openCustomCatalog, modelPicker} from './custom-catalog.js';
+import {voiceModelControl, chooseVoiceModel} from './voice-model-picker.js';
 import {voiceFromLink, customSetOf, customParams, customSlots} from '../core/custom-voice.js';
 import {pickPicture} from './draw-images.js';
 import {VOICE_GENDERS, VOICE_AGES, poolLine, poolKey, readPoolFile, poolFile, guessVoice} from '../core/auto-voice.js';
@@ -406,6 +407,18 @@ export function rolesApp(ctx) {
   v.root.addEventListener('error', e => { if (e.target.matches?.('.role-ref img')) e.target.remove(); }, true);
   v.on('click', '[data-action]', async el => {
     switch (el.dataset.action) {
+      case 'choose-voice-model': {
+        if (!current || current.engine === 'custom') break;
+        const target = current, engine = target.engine, connection = api.getState().connections[engine];
+        const result = await api.voiceModels(engine, connection, false);
+        if (v.disposed || current !== target || target.engine !== engine) break;
+        const picked = await chooseVoiceModel(ctx, result.models, target.model || '', '跟随引擎 · ' + connection.model);
+        if (picked === null || v.disposed || current !== target || target.engine !== engine) break;
+        target.model = picked;
+        changed();
+        render();
+        break;
+      }
       case 'add-role': create(); break;
       case 'role-filter': filter = filter === el.dataset.key ? '' : el.dataset.key; swipe?.done(); for (const b of v.root.querySelectorAll('[data-action=role-filter]')) b.setAttribute('aria-pressed', String(b.dataset.key === filter)); paintRows(); break;
       case 'role-try': await tryLook(el); break;
@@ -490,7 +503,7 @@ export function rolesApp(ctx) {
   }
   /** The model; for 自己的接口 with several sets, which one this role uses ('' follows the one in use). */
   function modelField(r, c, schema) {
-    if (r.engine !== 'custom') return field('模型', `${input('model',r.model||'','text',`list="sttts-role-models" autocomplete="off" placeholder="跟随引擎 · ${esc(c.model)}"`)}<datalist id="sttts-role-models">${schema.models.map(m=>`<option value="${esc(m.id)}">`).join('')}</datalist>`, '留空跟随引擎。可以输入新模型 ID，服务端不支持的模型仍会返回错误。');
+    if (r.engine !== 'custom') return field('模型', voiceModelControl(r.model || '', {follow:c.model}), '留空跟随引擎，点箭头浏览全部模型；也可以手动填写新模型 ID。');
     const sets = customSets(r);
     const set=customSetOf(c,r.model),params=customParams(c,set) || {};
     const override=(!r.customModelSet || r.customModelSet===set) ? r.customModel || '' : '';
