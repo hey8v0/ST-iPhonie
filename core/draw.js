@@ -688,6 +688,15 @@ export function writeRequest(settings, {idea = '', cast = [], only = null} = {})
   const system = promptText(settings.promptRules, 'draw-prompt', 'write', {'GPT': gpt, '人物规则': peopleRules(settings, cast, only), '描述句规则': sentenceRule(settings), '长度': gpt ? '' : lengthLine(settings)});
   return [{role: 'system', content: system}, {role: 'user', content: promptText(settings.promptRules, 'draw-prompt', 'writeAsk', {'想画的': String(idea).trim()})}];
 }
+/** Makes fresh English tags from a stored description; unrelated to the viewer's 看中文. */
+export function descriptionTagsRequest(settings, description, {instructions = '', batch = false} = {}) {
+  const system = promptText(settings.promptRules, 'draw-prompt', 'describeTags', {'GPT': settings.draw?.engine === 'gpt'});
+  const format = batch
+    ? '逐件转换，按输入序号分别返回。只输出 JSON 数组，每项形如 {"item":1,"tags":"navy wool coat, brass buttons"}。'
+    : '只输出一行英文标签，不加标题、解释、中文译文或代码块。';
+  return [{role: 'system', content: [system, instructions, format].filter(Boolean).join('\n')}, {role: 'user', content: String(description ?? '').trim()}];
+}
+
 /**
  * 改提示词再画: the prompt in Chinese to read ('translate'), or rewritten the way the user asked in their own words
  * ('revise', wish: what they said; with no wish, the Chinese they wrote in it is made tags).
@@ -701,6 +710,13 @@ export function tagTextRequest(settings, text, mode = 'translate', wish = '') {
 /** The answer of tagTextRequest: without thinking, a code fence around it or 「翻译：」 in front. */
 export const tagTextAnswer = reply => String(reply ?? '').replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '').trim()
   .replace(/^```[\w-]*\n([\s\S]*?)\n```$/, '$1').replace(/^(?:翻译|中文|改好的(?:内容)?)\s*[:：]\s*\n?/, '').trim();
+export const hasEnglishTags = tags => typeof tags === 'string' && /[a-z]/i.test(tags) && !/\p{Script=Han}/u.test(tags);
+
+export function englishTagsAnswer(reply) {
+  const tags = tagTextAnswer(reply).replace(/^(?:英文(?:标签|提示词)|(?:english\s+)?(?:tags|prompt))\s*[:：]\s*/i, '').replace(/\s+/g, ' ').trim();
+  return hasEnglishTags(tags) ? tags : '';
+}
+
 /**
  * A 帮我写 / 从剧情生成 reply: the prompt line and the registered people its 人物 line names (as registered), so the
  * drawing app can add them with their looks.

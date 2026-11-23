@@ -2,7 +2,7 @@
 // 试穿图 drawn (paid only when the phone asked), what was put on told to the next story reply once, and the story's
 // hidden <outfit> lines followed (who wears what now), with no request of their own.
 import {recognizeRequest, parseRecognition, recognizeBatchRequest, parseRecognitionBatch, WARDROBE_RECOGNITION_MAX, suggestRequest, cleanOutfit, splitRequest, parseSplit, wearText, outfitRule, parseOutfits, ownerKey, ownerName, sameWardrobeDrawing, WARDROBE_DRAW_MAX, WARDROBE_LIMITS} from './core/wardrobe.js';
-import {genderOf, pictureInputs, photoPicture, tagTextRequest, tagTextAnswer} from './core/draw.js';
+import {genderOf, pictureInputs, photoPicture, descriptionTagsRequest, englishTagsAnswer, hasEnglishTags, tagTextAnswer} from './core/draw.js';
 import {findRoute} from './core/routes.js';
 import {plainStory} from './core/chat.js';
 import {activeText} from './core/llm.js';
@@ -113,10 +113,12 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     const current = backend.seen || settings(), role = findRoute(current.routes, name);
     const fixed = !!(role?.appearance?.trim() || role?.ref);
     const words = fixed ? outfit : `${name}，${outfit}`;
-    const prompt = tagTextRequest(current, words, 'translate');
-    if (fixed) prompt[0].content += '\n本次只转换当前衣着的可见细节，保留配色、版型、材质和五金。角色外貌会另外注入，请勿生成角色名、原作名、发型、肤色、体貌、姿势或人数标签。';
-    const tags = tagTextAnswer(await backend.generateText(context(), {use:'picture', prompt, plainText:true, trimNames:false, responseLength:Math.min(6000, 1500 + words.length * 3)})).replace(/\s+/g, ' ').trim();
-    if (!tags) throw Error('没把这套衣服写成画图用的 tag，再试一次');
+    const instructions = fixed
+      ? '本次只转换当前衣着的可见细节。角色外貌会另外注入，请勿生成角色名、原作名、发型、肤色、体貌、姿势或人数标签。'
+      : '画面里是一位人物穿着这套衣服，保留衣着描述的细节。已有作品中的人物可用英文角色识别标签。';
+    const prompt = descriptionTagsRequest(current, words, {instructions});
+    const tags = englishTagsAnswer(await backend.generateText(context(), {use:'picture', prompt, plainText:true, trimNames:false, responseLength:Math.min(6000, 1500 + words.length * 3)}));
+    if (!tags) throw Error('文字模型没有返回试穿图的英文绘图标签，再试一次');
     const picture = fixed
       ? {spec:{tags:[genderOf(role.appearance) ? '1' + genderOf(role.appearance) : '', 'solo', 'full body'].filter(Boolean).join(', '), cast:[{name:role.name, tags}]}}
       : photoPicture(current, {text:words, tags, owner:name, names:[...current.routes.map(r => r.name), userName()]});
@@ -195,13 +197,12 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
       if (!item) throw Error('这件衣服已不在衣柜里');
       if (!allowPaid && backend.drawQuote?.()?.free === false) throw Object.assign(Error('画衣服需要确认费用'), {code: 'PAID'});
       const s = settings(), nai = s.draw.engine === 'nai';
-      let tags = nai ? item.naiTags : '';
+      let tags = nai && hasEnglishTags(item.naiTags) ? item.naiTags : '';
       if (!tags) {
         const words = `衣服单品，无人物，不要模特、身体或人台。平铺或挂拍，纯色背景。名字：${item.name}；分类：${item.category}；描述：${item.description}`;
-        const prompt = tagTextRequest(s, words, 'translate');
-        prompt[0].content += '\n只画这一件衣物。按描述保留具体的色调、材质、版型、接缝、纹理和扣件，不加其他衣物或人体。';
-        tags = tagTextAnswer(await backend.generateText(context(), {use:'picture', prompt, plainText:true, trimNames:false, responseLength:2000})).slice(0, 3000);
-        if (!tags) throw Error('没有写出衣服的绘图提示词');
+        const prompt = descriptionTagsRequest(s, words, {instructions: '只画这一件衣物。保留接缝、包边、扣件和可见内里，不加其他衣物或人体。'});
+        tags = englishTagsAnswer(await backend.generateText(context(), {use:'picture', prompt, plainText:true, trimNames:false, responseLength:2000})).slice(0, 3000);
+        if (!tags) throw Error('文字模型没有返回衣物的英文绘图标签，再试一次');
         if (nai && !await backend.updateWardrobeDrawing(item, {naiTags:tags})) throw Error('单品已修改或移除，请刷新后再试');
       }
       const saved = await paintItem(item, tags, s, allowPaid);
@@ -234,7 +235,7 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
       const {items} = await backend.wardrobe();
       const batch = keys.map(id => items.find(item => item.id === id));
       if (batch.some(item => !item?.description || item.photoId)) throw Error('请选择有描述且还没有图片的单品');
-      const missing = batch.filter(item => !item.naiTags);
+      const missing = batch.filter(item => !hasEnglishTags(item.naiTags));
       let error = '';
       if (missing.length) {
         let tags;
@@ -253,7 +254,7 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
           error ||= '已跳过出图期间修改过的单品。';
           continue;
         }
-        if (!current.naiTags) continue;
+        if (!hasEnglishTags(current.naiTags)) continue;
         try {
           if (await paintItem(current, current.naiTags, s, allowPaid)) count++;
           else error ||= '已跳过出图期间修改过的单品，生成的图片留在相册。';
@@ -263,8 +264,10 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     } finally { for (const id of keys) drawingItems.delete(id); }
   }
   async function translateDrawingBatch(missing, s) {
-    const prompt = tagTextRequest(s, JSON.stringify(missing.map(({name, category, description}, i) => ({item:i + 1, name, category, description}))), 'translate');
-    prompt[0].content += '\n逐件转换为独立的 NovelAI 英文服装 tags，保留颜色、版型、材质、接缝、纹理和扣件。只输出 JSON 数组，每项形如 {"item":1,"tags":"navy wool coat, brass buttons"}，item 对应输入序号。不要合并衣物、添加人物或编造单品。';
+    const descriptions = missing.map(({name, category, description}, i) => ({item:i + 1, name, category, description}));
+    const prompt = descriptionTagsRequest(s, JSON.stringify(descriptions), {
+      batch: true, instructions: '每组标签只描述对应的单件衣物。保留接缝、包边、扣件和可见内里，不合并单品、不添加人物。'
+    });
     const raw = tagTextAnswer(await backend.generateText(context(), {use:'picture', prompt, plainText:true, trimNames:false, responseLength:4500}));
     let rows = [];
     try { rows = JSON.parse(raw.slice(raw.indexOf('['), raw.lastIndexOf(']') + 1)); }
@@ -272,7 +275,7 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     const tags = new Map();
     for (const row of Array.isArray(rows) ? rows : []) {
       if (!Number.isInteger(row?.item) || row.item < 1 || row.item > missing.length) continue;
-      tags.set(row.item, tags.has(row.item) ? '' : typeof row.tags === 'string' ? row.tags.trim().slice(0, 3000) : '');
+      tags.set(row.item, tags.has(row.item) || typeof row.tags !== 'string' ? '' : englishTagsAnswer(row.tags).slice(0, 3000));
     }
     return tags;
   }

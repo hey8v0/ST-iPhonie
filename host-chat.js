@@ -7,7 +7,7 @@ import {bubbleRequest, splitBubbleAnswer} from './core/bubble-css.js';
 import {currentDm, currentWindow, lastRound, chatWindows, LETTER_LIMITS, forwardLine, messageWords, canGroupSpeak} from './core/chats.js';
 import {exactBackground, buildChatRequest, parseChatReply, bringText, activeChatPreset, normalizeChatPreset, messageLine, scanTurns, cleanTagged,chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace, STICKER_MOODS, contactStatus, letterRequest, letterText} from './core/chat.js';
 import {worldInfoFor, loreTry, loreOptions} from './host-lore.js';
-import {pictureInputs, photoPicture, tagTextRequest, tagTextAnswer, sizeFor} from './core/draw.js';
+import {pictureInputs, photoPicture, descriptionTagsRequest, englishTagsAnswer, hasEnglishTags, sizeFor} from './core/draw.js';
 import {readStoryLines, readStoryExact} from './story-exact.js';
 import {forumContext, screenName} from './core/forum.js';
 import {promptOn, promptText} from './core/prompt-rules.js';
@@ -575,14 +575,15 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     const set = patch => backend.chatMutate(threadId, () => backend.chats.updateMessage(threadId, messageId, patch));
     if (!backend.drawReady()) { await set({imageState: 'failed', imageNote: backend.drawMissing()}); return null; }
     try {
-      // The model wrote only the description (no 「｜英文 tag」, common with a long one): its words become the tags
-      // once, kept with the photo.
-      if (!m.imageTags) {
+      // A description or a previously stored Chinese reply needs English tags before the draw.
+      if (!hasEnglishTags(m.imageTags)) {
         // Drawn on its own (not asked for) only when it costs nothing: no words spent turning it into tags otherwise.
         if (!allowPaid && backend.drawQuote?.()?.free === false) throw Object.assign(Error('要花钱'), {code: 'PAID'});
         await set({imageState: 'waiting', imageNote: ''});
-        const tags = tagTextAnswer(await backend.generateText(context(), {use: 'picture', prompt: tagTextRequest(settings(), m.text, 'translate'), plainText: true, trimNames: false, responseLength: Math.min(6000, 1500 + m.text.length * 3)})).replace(/\s+/g, ' ').trim().slice(0, 6000);
-        if (!tags) throw Error('没把照片的描述写成画图用的 tag，再点一次试试');
+        const words = m.imageTags || m.text;
+        const prompt = descriptionTagsRequest(settings(), words);
+        const tags = englishTagsAnswer(await backend.generateText(context(), {use: 'picture', prompt, plainText: true, trimNames: false, responseLength: Math.min(6000, 1500 + words.length * 3)})).slice(0, 6000);
+        if (!tags) throw Error('文字模型没有返回英文绘图标签，再点一次试试');
         m.imageTags = tags;
         await set({imageTags: tags});
       }
@@ -1237,7 +1238,11 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     if (!allowPaid && backend.drawQuote?.()?.free === false) throw paid();
     const s = settings(), feel = STICKER_MOODS.find(m => m[0] === mood) || [String(mood || '').slice(0, 20), ''], words = String(wish || '').trim();
     if (!feel[0]) throw Error('选一个表情');
-    if (words && !styleTags.has(words)) styleTags.set(words, tagTextAnswer(await backend.generateText(context(), {use: 'picture', prompt: tagTextRequest(s, words, 'translate'), plainText: true, trimNames: false, responseLength: 1500})).replace(/\s+/g, ' ').trim());
+    if (words && !styleTags.has(words)) {
+      const tags = englishTagsAnswer(await backend.generateText(context(), {use: 'picture', prompt: descriptionTagsRequest(s, words), plainText: true, trimNames: false, responseLength: 1500}));
+      if (!tags) throw Error('文字模型没有返回表情包的英文绘图标签，再试一次');
+      styleTags.set(words, tags);
+    }
     const tags = ['solo', 'chibi', 'sticker', 'upper body', 'simple background', 'white background', feel[1], styleTags.get(words) || ''].filter(Boolean).join(', ');
     const input = pictureInputs(s, photoPicture(s, {text: `${name}的表情包：${feel[0]}`, tags, owner: name, names: [name]}), '');
     const side = sizeFor(s.draw.params, 'square');

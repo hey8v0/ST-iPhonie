@@ -8,7 +8,7 @@ import {eachThumb, previewBlob} from './thumbs.js';
 import {pickReplacement} from './replacement-album.js';
 import {openAlbum} from './album-viewer.js';
 import {openImageViewer} from '../image-viewer.js';
-import {genderOf} from '../core/draw.js';
+import {genderOf, hasEnglishTags} from '../core/draw.js';
 import {SHARED_OWNER, WARDROBE_RECOGNITION_BATCH, WARDROBE_RECOGNITION_MAX, WARDROBE_DRAW_MAX, WARDROBE_CATEGORIES, WARDROBE_LIMITS, ownerKey, ownerName} from '../core/wardrobe.js';
 import {shareToChat} from './share-to-chat.js';
 
@@ -196,7 +196,7 @@ export function wardrobeApp(ctx) {
     const pic = x.photoId ? pictureButton(x, busy) : `<button type="button" class="wardrobe-pic" data-action="item-card-photo" data-id="${id}" aria-label="${picked.size ? '选择' : '查看'} ${name}"${picked.size ? ` aria-pressed="${picked.has(x.id)}"` : ''}><span class="wardrobe-words">${esc(x.description)}</span><span class="wardrobe-check" aria-hidden="true">${icon('check')}</span></button>`;
     return `<div class="wardrobe-item" data-flip="wardrobe:${id}" data-item="${id}" data-selected="${picked.has(x.id)}">${pic}
       <button type="button" class="wardrobe-name" data-action="item-edit" data-id="${id}">${name}</button>
-      ${x.naiTags && !x.photoId ? '<span class="wardrobe-todo">已存绘图标签</span>' : x.description || busy ? '' : '<span class="wardrobe-todo">待写描述</span>'}</div>`;
+      ${hasEnglishTags(x.naiTags) && !x.photoId ? '<span class="wardrobe-todo">已存绘图标签</span>' : x.description || busy ? '' : '<span class="wardrobe-todo">待写描述</span>'}</div>`;
   }
   function closet(list) {
     if (!list.length) return empty('衣柜还是空的', '点右上角的 ＋ 放进第一件衣服', 'hanger');
@@ -374,7 +374,7 @@ export function wardrobeApp(ctx) {
       ${field('年龄段',input('age',old?.age || '','text','maxlength="24" placeholder="不限，例如：儿童"'))}</div>
       ${field('描述', textArea('description', old?.description || '', `rows="4" maxlength="${WARDROBE_LIMITS.description}" placeholder="颜色、款式、材质、图案……"`))}
       <div class="actions">${hasPhoto && (api.wardrobeInspect || old && api.wardrobeRecognize) ? btn('item-recognize', old?.description ? '重新识别' : '识别衣物', 'secondary') : ''}${btn('item-save', '保存', 'primary')}</div>
-      ${old ? `<div class="wardrobe-todo wardrobe-tags" data-nai-tags${old.naiTags ? '' : ' hidden'}>已存绘图标签 · NovelAI 可直接使用</div><div class="actions wardrobe-edit-more">${btn('item-draw', old.photoId ? '重画' : '画出来', 'secondary')}${btn('item-delete', icon('trash') + '拿出衣柜', 'text-button danger-text')}</div>` : ''}</div>`, {over:sharedCatalog});
+      ${old ? `<div class="wardrobe-todo wardrobe-tags" data-nai-tags${hasEnglishTags(old.naiTags) ? '' : ' hidden'}>已存绘图标签 · NovelAI 可直接使用</div><div class="actions wardrobe-edit-more">${btn('item-draw', old.photoId ? '重画' : '画出来', 'secondary')}${btn('item-delete', icon('trash') + '拿出衣柜', 'text-button danger-text')}</div>` : ''}</div>`, {over:sharedCatalog});
     d.body.querySelector('[data-field=shared]').onchange=e=>{d.body.querySelector('[data-sharing]').hidden=!e.target.checked;};
     let url = '', fullURL = '', viewer;
     if (hasPhoto) (file ? Promise.resolve(file) : previewBlob(api, photoId).then(small => small || api.getPhoto(photoId).then(p => p?.blob || null))).then(blob => {
@@ -463,7 +463,7 @@ export function wardrobeApp(ctx) {
             try {
               await changed();
               const hint = d.body.querySelector('[data-nai-tags]');
-              if (d.live && hint) hint.hidden = !all.items.find(item => item.id === old.id)?.naiTags;
+              if (d.live && hint) hint.hidden = !hasEnglishTags(all.items.find(item => item.id === old.id)?.naiTags);
             } catch { /* Keep the original drawing error. */ }
             throw error;
           } finally { button.disabled = false; button.textContent = old.photoId ? '重画' : '画出来'; }
@@ -658,7 +658,7 @@ export function wardrobeApp(ctx) {
         if (!ids.length || ids.length > WARDROBE_DRAW_MAX) throw Error(`请选择 1 到 ${WARDROBE_DRAW_MAX} 件有描述、还没有图片的单品`);
         const skipped = picked.size - ids.length;
         const allowPaid = api.drawQuote().free === false;
-        const tagged = all.items.filter(item => ids.includes(item.id) && item.naiTags).length;
+        const tagged = all.items.filter(item => ids.includes(item.id) && hasEnglishTags(item.naiTags)).length;
         const detail = [tagged === ids.length ? '已选单品都已存绘图标签，将直接用 NovelAI 出图。' : '只用一次文字模型转换缺少标签的单品，再用 NovelAI 逐件出图。'];
         if (tagged && tagged < ids.length) detail.push(`${tagged} 件会沿用已存的绘图标签。`);
         if (skipped) detail.push(`${skipped} 件已有图片或缺少描述的单品会跳过。`);
