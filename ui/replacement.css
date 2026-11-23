@@ -35,3 +35,10 @@ dialog.stip-replace-dialog {
 @media(prefers-color-scheme:dark) {
   .stip-replace-dialog[open] {background:#232835; color:#edf1fa; --ink:#edf1fa; --line:#363d4c; --card:#454d60}
 }
+
+.stip-picker .photo-piece button[aria-pressed]{position:relative;touch-action:pan-y}
+.stip-picker .photo-piece button[aria-pressed=true] img{opacity:.76}
+.stip-picker .photo-piece button[aria-pressed=true]::after{content:'✓';position:absolute;right:5px;top:5px;display:grid;place-items:center;width:23px;height:23px;border-radius:50%;background:var(--accent-btn);color:var(--on-accent);font-size:14px;font-weight:800}
+.stip-picker .stip-picker-selection{flex:none;margin-top:0}
+.stip-picker .stip-picker-selection .primary{width:100%;padding:9px 14px;border-radius:24px;background:var(--accent-btn);color:var(--on-accent);font-weight:800;min-height:40px}
+.stip-picker .stip-picker-selection .primary:disabled{opacity:.55}

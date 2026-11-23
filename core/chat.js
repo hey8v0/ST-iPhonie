@@ -543,7 +543,7 @@ function messageWordsFor(m, user) {
     // 群游戏: the card as it is now.
     case 'game': return gameLine(m, user);
     case 'system': return '';
-    case 'voice': return `${who}：${quote}[语音] ${m.translation || m.text}`;
+    case 'voice': return `${who}：${quote}[语音]${m.voiceDuration ? `（${m.voiceDuration} 秒）` : ''} ${m.translation || m.text || (m.recording ? '（没有转写文字）' : '')}`;
     case 'photo': return `${who}：[图片${m.seen ? m.seen : ''}]${m.text ? ' ' + m.text : ''}`;
     case 'file': return `${who}：[文件 ${m.name}]${m.text ? ' ' + m.text : ''}`;
     case 'sticker': return `${who}：[表情包] ${m.text}`;

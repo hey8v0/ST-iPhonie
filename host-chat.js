@@ -650,7 +650,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     Promise.resolve().then(() => backend.chats.list()).then(list => {
       cutsLoaded = true;
       const lately = at => at > 0 && Date.now() - at < 2 * 86400000;
-      cuts = list.filter(t => t.type === 'dm' && (t.friend || t.blocked || lately(t.befriended))).map(t => ({name: t.members[0], by: t.friend?.by || '', blocked: !!t.blocked, refused: Math.max(t.friend?.refused || 0, t.blocked?.refused || 0), accepted: !t.friend && !t.blocked ? t.befriended : 0, space: t.space || '', save: t.save || ''}));
+      cuts = list.filter(t => t.type === 'dm' && (t.friend || t.blocked || lately(t.befriended))).map(t => ({name: t.members[0], by: t.friend?.by || '', blocked: !!t.blocked, refused: Math.max(t.friend?.refused || 0, t.blocked?.refused || 0), reason: (t.blocked?.refused || 0) >= (t.friend?.refused || 0) ? t.blocked?.reason : t.friend?.reason, accepted: !t.friend && !t.blocked ? t.befriended : 0, space: t.space || '', save: t.save || ''}));
       groups = list.filter(t => t.type === 'group');
     }).catch(() => {});
   }
@@ -662,13 +662,13 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     const here = backend.here?.(), user = userName(), list = cuts.filter(c => inSpace(c, here));
     if (!list.length) return [];
     const blocked = list.filter(c => c.blocked).map(c => c.name), mine = list.filter(c => c.by === 'me' && !c.blocked).map(c => c.name), theirs = list.filter(c => c.by === 'them').map(c => c.name);
-    const refused = list.filter(c => c.refused && Date.now() - c.refused < 2 * 86400000).map(c => c.name), accepted = list.filter(c => c.accepted).map(c => c.name);
+    const refused = list.filter(c => c.refused && Date.now() - c.refused < 2 * 86400000), accepted = list.filter(c => c.accepted).map(c => c.name);
     // How to ask, said only when the story can send to the phone at all (正文联动手机).
     const how = settings().chat.proactive?.on ? `（<${settings().general?.shortTags?'iphonie':'phone'}> 里单独一行写「名字：[好友申请] 验证消息」）` : '', they = names => names.length > 1 ? 'TA 们' : 'TA';
     const text = ['【手机上的好友关系】',
       mine.length ? `${user}在手机上把${mine.join('、')}删了好友：${they(mine)}发的消息${user}收不到，只能发好友申请${how}。` : '',
       blocked.length ? `${user}在手机上把${blocked.join('、')}拉黑了：${they(blocked)}发的消息、打的电话${user}都收不到（${they(blocked)}自己知道被拉黑了），只能发好友申请${how}。` : '',
-      refused.length ? `${refused.join('、')}发来的好友申请刚被${user}拒绝了。` : '',
+      ...refused.map(c => `${c.name}发来的好友申请刚被${user}拒绝了。${c.reason ? '只有该申请人看到的拒绝留言（聊天原话）：' + JSON.stringify(c.reason.replace(/[<>]/g, ch => ch === '<' ? '＜' : '＞')) + '。' : ''}`),
       accepted.length ? `${user}刚在手机上把${accepted.join('、')}加回了好友（通过了好友申请），现在又能互发消息了。` : '',
       theirs.length ? `${theirs.join('、')}在手机上把${user}删了好友：${user}发的消息会被拒收。` : ''].filter(Boolean).join(' ');
     return [{key: 'sttts.entry.friends', text, position: 1, depth: 2, role: 0}];

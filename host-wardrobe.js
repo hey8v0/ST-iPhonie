@@ -18,17 +18,25 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     if (!hasCompletionService(ctx)) return false;
     try { return !!(await loadCompletion()).isImageInliningSupported?.(); } catch { return false; }
   }
-  /** A piece's photo recognized: its name, category and description put on it. An error about this one piece has code ITEM. */
+  const itemError = message => Object.assign(Error(message), {code: 'ITEM'});
+  /** Describe a staged or saved photo without writing to the wardrobe. */
+  async function inspect({photoId, blob} = {}) {
+    const ctx = context();
+    if (!await sees(ctx)) throw Error('现在的文字模型看不了图片：换一个能看图的模型，或者自己写描述');
+    const photo = blob || (photoId && (await backend.library.getPhoto(photoId))?.blob);
+    if (!photo) throw itemError('这张照片已经不在相册里了');
+    const current = settings();
+    const got = parseRecognition(await ask(ctx, backend, current, recognizeRequest(await picture(photo), current.promptRules), {label: '衣柜 · 识别', use: 'wardrobe'}));
+    if (!got.description) throw itemError('模型没说出这件衣服是什么样的：再试一次，或者自己写描述');
+    return got;
+  }
   async function recognize(itemId) {
-    const ctx = context(), item = (await backend.wardrobe()).items.find(x => x.id === itemId);
-    const one = message => Object.assign(Error(message), {code: 'ITEM'});
-    if (!item?.photoId) throw one('这件衣服没有照片');
-    if (!await sees(ctx)) throw Error('现在的文字模型看不了图片：换一个能看图的（小手机「引擎 → 文字模型」里的自定义接口，或在酒馆里开了发送内联图片的），或者自己写描述');
-    const row = await backend.library.getPhoto(item.photoId);
-    if (!row?.blob) throw one('这张照片已经不在相册里了');
-    const got = parseRecognition(await ask(ctx, backend, settings(), recognizeRequest(await picture(row.blob), settings().promptRules), {label: '衣柜 · 识别', use: 'wardrobe'}));
-    if (!got.description) throw one('模型没说出这件衣服是什么样的：再试一次，或者自己写描述');
-    return backend.saveWardrobeItem({...item, name: got.name || item.name, category: got.category || item.category, description: got.description, recognized: true});
+    const item = (await backend.wardrobe()).items.find(x => x.id === itemId);
+    if (!item?.photoId) throw itemError('这件衣服没有照片');
+    const got = await inspect({photoId: item.photoId});
+    const latest = (await backend.wardrobe()).items.find(x => x.id === itemId);
+    if (!latest || latest.updatedAt !== item.updatedAt || latest.photoId !== item.photoId) throw itemError('识别时衣物已编辑或移除，结果没有写入');
+    return backend.saveWardrobeItem({...latest, name: got.name || latest.name, category: got.category || latest.category, description: got.description, recognized: true});
   }
   /** What the story is at now, briefly (the last two replies), so an outfit fits the scene. */
   const scene = ctx => (ctx?.chat || []).filter(m => !m.is_user && !m.is_system && typeof m.mes === 'string').slice(-2).map(m => plainStory(m.mes, [], settings().narration)).join(' ').slice(-600);
@@ -171,5 +179,5 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
       return backend.saveWardrobeItem({...current, photoId: made.photoId});
     } finally { drawingItems.delete(id); }
   }
-  return {recognize, suggest, saveOutfit, tryOn, drawItem, storyPlan, storyReplied, sees, present};
+  return {inspect, recognize, suggest, saveOutfit, tryOn, drawItem, storyPlan, storyReplied, sees, present};
 }

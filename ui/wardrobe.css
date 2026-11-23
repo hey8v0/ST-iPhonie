@@ -30,18 +30,15 @@
 .wardrobe-filter[aria-pressed=true]{background:var(--accent-btn);color:var(--on-accent)}
 .wardrobe-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 8px;margin:0 0 14px}
 .wardrobe-item{position:relative;display:grid;align-content:start;gap:4px;min-width:0;cursor:pointer;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-.wardrobe-pic{position:relative;display:block;aspect-ratio:3/4;overflow:hidden;border-radius:14px;background:var(--card2);box-shadow:var(--shadow);transition:transform .24s cubic-bezier(.3,1.4,.5,1)}
+.wardrobe-pic{border:0;padding:0;width:100%;position:relative;display:block;aspect-ratio:3/4;overflow:hidden;border-radius:14px;background:var(--card2);box-shadow:var(--shadow);transition:transform .24s cubic-bezier(.3,1.4,.5,1)}
 .wardrobe-pic img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;-webkit-user-drag:none}
 .wardrobe-words{display:-webkit-box;-webkit-line-clamp:7;-webkit-box-orient:vertical;overflow:hidden;padding:10px 9px;font-size:11px;line-height:1.45;color:var(--ink2)}
-.wardrobe-item[aria-pressed=true] .wardrobe-pic{transform:scale(.9)}
-.wardrobe-check{position:absolute;top:6px;left:6px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;border:2px solid #fff;background:rgba(0,0,0,.25);box-shadow:0 1px 4px rgba(0,0,0,.35);color:#fff;opacity:0;transition:opacity .15s,background .15s}
+.wardrobe-item[data-selected=true] .wardrobe-pic{transform:scale(.9)}
+.wardrobe-check{position:absolute;top:4px;left:4px;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:2px solid #fff;background:rgba(0,0,0,.25);box-shadow:0 1px 4px rgba(0,0,0,.35);color:#fff;transition:background .15s}
 .wardrobe-check svg{width:12px;height:12px;stroke-width:3.4;opacity:0}
-.wardrobe-grid[data-picking] .wardrobe-check{opacity:1}
-.wardrobe-item[aria-pressed=true] .wardrobe-check{opacity:1;background:var(--accent-btn)}
-.wardrobe-item[aria-pressed=true] .wardrobe-check svg{opacity:1}
-.wardrobe-more{position:absolute;top:3px;right:3px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#fff;background:rgba(20,24,36,.32);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
-.wardrobe-more svg{width:16px;height:16px}
-.wardrobe-name{padding:0 2px;font-size:12px;font-weight:800;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wardrobe-item[data-selected=true] .wardrobe-check{opacity:1;background:var(--accent-btn)}
+.wardrobe-item[data-selected=true] .wardrobe-check svg{opacity:1}
+.wardrobe-name{background:transparent;text-align:start;padding:3px 2px;font-size:12px;font-weight:800;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wardrobe-todo{margin-top:-3px;padding:0 2px;font-size:11px;font-weight:700;color:var(--accent-ink)}
 .wardrobe-scan{position:absolute;left:0;right:0;bottom:0;padding:18px 6px 7px;font-size:11px;font-weight:800;color:#fff;text-align:center;background:linear-gradient(transparent,rgba(0,0,0,.55));animation:wardrobe-scan 1.2s ease-in-out infinite alternate}
 @keyframes wardrobe-scan{from{opacity:.5}}
@@ -70,17 +67,18 @@
 .wardrobe-catalog-item small{font-size:11px;color:var(--ink2)}
 .wardrobe-catalog-item[hidden],.group[data-section=prefs][hidden]{display:none}
 
-button.wardrobe-catalog-item{text-align:start;background:transparent;padding:0;color:var(--ink)}
+.wardrobe-catalog-label{display:grid;gap:4px;overflow-wrap:anywhere;text-align:start;background:transparent;padding:0;color:var(--ink)}
 .wardrobe-edit .setting-row[hidden],.sheet-add[hidden]{display:none}
 
 .wardrobe-library-entry{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .wardrobe-library-entry>.secondary{flex:1}
 .wardrobe-refine{margin-bottom:12px}
 .wardrobe-refine>summary{padding:8px 0;color:var(--ink2);cursor:pointer;font-weight:700}
-button.wardrobe-catalog-item.text-only{padding:12px 10px;gap:7px;border-radius:14px;background:var(--card);box-shadow:var(--shadow)}
+.wardrobe-catalog-item.text-only .wardrobe-catalog-label{padding:12px 10px;gap:7px;border-radius:14px;background:var(--card);box-shadow:var(--shadow)}
 .catalog-description{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:var(--ink2);font-size:12px;line-height:1.45}
 
 .wardrobe-library-entry>.secondary{display:flex;align-items:center;justify-content:flex-start;gap:8px;min-width:0;padding-inline:14px}
 .wardrobe-library-status{display:inline-flex;align-items:center;gap:3px;margin-inline-start:auto;padding:3px 7px;border-radius:999px;background:var(--card2);color:var(--ink2);font-size:11px;white-space:nowrap}
 .wardrobe-library-entry[data-enabled=true] .wardrobe-library-status{background:var(--accent-btn);color:var(--on-accent)}
 .wardrobe-library-status svg{width:13px;height:13px}
+.wardrobe-full-description{line-height:1.6;overflow-wrap:anywhere;white-space:pre-wrap}

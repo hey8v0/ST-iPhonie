@@ -5,11 +5,9 @@
 import {createView, esc, btn, heading, help, empty, avatar, groupTitle, menu, field, select, input, textArea} from './common.js';
 import {icon} from './icons.js';
 import {eachThumb, previewBlob} from './thumbs.js';
-import {photoWall} from './photo-wall.js';
-import {slideSelect} from './photo-select.js';
+import {pickReplacement} from './replacement-album.js';
 import {openAlbum} from './album-viewer.js';
 import {genderOf} from '../core/draw.js';
-import {byNewest} from '../core/albums.js';
 import {SHARED_OWNER, WARDROBE_CATEGORIES, WARDROBE_LIMITS, ownerKey, ownerName} from '../core/wardrobe.js';
 import {shareToChat} from './share-to-chat.js';
 
@@ -22,7 +20,7 @@ const ROW = 6;
 const RECENT_KEY = 'sttts-wardrobe-recent';
 const extOf = blob => /png/.test(blob?.type || '') ? 'png' : /webp/.test(blob?.type || '') ? 'webp' : 'jpg';
 const fileSafe = name => String(name || '').replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 20) || '我';
-const HELP = '衣柜是你和这张卡的角色（角色 App 里的）的，点上面的头像换人。\n放进照片后，能看图的文字模型会认出名字、分类和描述；认不出来时点「⋯」自己写。\n点衣服选中：「穿上」让下一次正文写进这身衣着（只这一次，之后跟着剧情走）；「去搭配」用选中的衣服搭一套，什么都没选就从整个衣柜挑。\n正文里有人换了衣服，「正在穿」会跟着变。\n试穿图用绘图引擎画，要花钱时先问你。\n放进来的照片在相册的「衣柜」里，试穿图在「衣柜试穿」里。';
+const HELP = '衣柜是你和这张卡的角色（角色 App 里的）的，点上面的头像换人。\n放进照片后，能看图的文字模型会认出名字、分类和描述；认不出来时点「⋯」自己写。\n点图片看大图，点名称查看单品，点勾选圆钮选择衣服：「穿上」让下一次正文写进这身衣着（只这一次，之后跟着剧情走）；「去搭配」用选中的衣服搭一套，什么都没选就从整个衣柜挑。\n正文里有人换了衣服，「正在穿」会跟着变。\n试穿图用绘图引擎画，要花钱时先问你。\n放进来的照片在相册的「衣柜」里，试穿图在「衣柜试穿」里。';
 
 export function wardrobeApp(ctx) {
   const {api, win} = ctx, v = createView(ctx, 'wardrobe'), urls = new Map(), drafts = new Map(), recognizing = new Set();
@@ -104,10 +102,15 @@ export function wardrobeApp(ctx) {
     const pref = sharedPrefs(), cut = pref.on && (pref.cut || defaultCut());
     return all.items.filter(x => x.owner === owner || (pref.on && x.shared && matchesBorrow(x, pref, cut)));
   }
-  const catalogTile = x => `<button type="button" class="wardrobe-catalog-item${x.photoId ? '' : ' text-only'}" data-catalog-id="${esc(x.id)}">
-    ${x.photoId ? `<span class="wardrobe-pic"><img loading="lazy" data-photo="${esc(x.photoId)}" alt=""${urls.has(x.photoId) ? ` src="${esc(urls.get(x.photoId))}"` : ''}></span>` : ''}
-    <strong>${esc(x.name)}</strong>${!x.photoId && x.description ? `<span class="catalog-description">${esc(x.description)}</span>` : ''}
-    <small>${esc([x.category, x.cut || '未标款式'].filter(Boolean).join(' · '))}</small></button>`;
+  function pictureButton(x, busy = false) {
+    const url = urls.get(x.photoId);
+    return `<button type="button" class="wardrobe-pic" data-action="item-photo" data-id="${esc(x.id)}" aria-label="放大 ${esc(x.name)}">
+      <img loading="lazy" decoding="async" draggable="false" data-photo="${esc(x.photoId)}" alt=""${url ? ` src="${esc(url)}"` : ''}>${busy ? '<span class="wardrobe-scan">正在识别…</span>' : ''}</button>`;
+  }
+  const catalogTile = x => `<div class="wardrobe-catalog-item${x.photoId ? '' : ' text-only'}">
+    ${x.photoId ? pictureButton(x) : ''}
+    <button type="button" class="wardrobe-catalog-label" data-catalog-id="${esc(x.id)}"><strong>${esc(x.name)}</strong>${!x.photoId && x.description ? `<span class="catalog-description">${esc(x.description)}</span>` : ''}
+    <small>${esc([x.category, x.cut || '未标款式'].filter(Boolean).join(' · '))}</small></button></div>`;
   let catalogOpen = false, ownerScroll = 0, catalogCut = '', catalogAge = '', catalogCategory = '';
   function catalogPage() {
     const items = all.items.filter(x => x.shared);
@@ -126,7 +129,7 @@ export function wardrobeApp(ctx) {
       + btn('catalog-add', icon('add'), 'round-button', 'aria-label="新建通用衣物"');
     const tabs = ['', '女装', '男装', '中性'].map(cut => seg('catalog-cut', cut, cut || '全部', catalogCut)).join('');
     const options = values => [['','全部'], ...[...new Set(values)].filter(Boolean).sort().map(value => [value,value])];
-    v.draw(heading('通用衣柜', tools)
+    v.draw(heading('通用衣柜', tools, `Shared Wardrobe · ${items.length} 件`)
       + `<div class="segmented wardrobe-tabs" role="group" aria-label="衣物款式">${tabs}</div>
         <details class="wardrobe-refine" data-group="catalog-filters" ${catalogAge || catalogCategory ? 'open' : ''}><summary>筛选${catalogAge || catalogCategory ? ' · ' + esc([catalogCategory,catalogAge].filter(Boolean).join(' · ')) : ''}</summary>
         ${field('分类', select('catalog-category', catalogCategory, options(items.map(x => x.category || UNSORTED))))}
@@ -187,12 +190,12 @@ export function wardrobeApp(ctx) {
     return `<div class="wardrobe-wear${wear.pending ? ' pending' : ''}"><div><small>正在穿 · ${state}</small><p>${esc(wear.text)}</p></div>${btn('wear-off', '脱下', 'text-button')}</div>`;
   }
   function tile(x) {
-    const url = x.photoId ? urls.get(x.photoId) : '', busy = recognizing.has(x.id);
-    const pic = x.photoId ? `<img data-photo="${esc(x.photoId)}" alt="" draggable="false" decoding="async"${url ? ` src="${esc(url)}"` : ''}>` : `<span class="wardrobe-words">${esc(x.description)}</span>`;
-    return `<div class="wardrobe-item" data-flip="wardrobe:${esc(x.id)}" data-item="${esc(x.id)}" role="button" tabindex="0" aria-pressed="${picked.has(x.id)}" aria-label="${esc(x.name)}">`
-      + `<span class="wardrobe-pic">${pic}${busy ? '<span class="wardrobe-scan">正在识别…</span>' : ''}</span><span class="wardrobe-check" aria-hidden="true">${icon('check')}</span>`
-      + `<button type="button" class="wardrobe-more" data-action="item-edit" data-id="${esc(x.id)}" aria-label="编辑 ${esc(x.name)}">${icon('more')}</button>`
-      + `<span class="wardrobe-name">${esc(x.name)}</span>${x.description || busy ? '' : '<span class="wardrobe-todo">待写描述</span>'}</div>`;
+    const busy = recognizing.has(x.id), id = esc(x.id), name = esc(x.name);
+    const pic = x.photoId ? pictureButton(x, busy) : `<button type="button" class="wardrobe-pic" data-action="item-edit" data-id="${id}" aria-label="查看 ${name}"><span class="wardrobe-words">${esc(x.description)}</span></button>`;
+    return `<div class="wardrobe-item" data-flip="wardrobe:${id}" data-item="${id}" data-selected="${picked.has(x.id)}">${pic}
+      <button type="button" class="wardrobe-check" data-action="item-pick" data-id="${id}" aria-label="选择 ${name}" aria-pressed="${picked.has(x.id)}">${icon('check')}</button>
+      <button type="button" class="wardrobe-name" data-action="item-edit" data-id="${id}">${name}</button>
+      ${x.description || busy ? '' : '<span class="wardrobe-todo">待写描述</span>'}</div>`;
   }
   function closet(list) {
     if (!list.length) return empty('衣柜还是空的', '点右上角的 ＋ 放进第一件衣服', 'hanger');
@@ -256,7 +259,11 @@ export function wardrobeApp(ctx) {
   function syncPicks() {
     const grid = v.root.querySelector('.wardrobe-grid');
     if (!grid) return;
-    for (const el of grid.querySelectorAll('[data-item]')) el.setAttribute('aria-pressed', String(picked.has(el.dataset.item)));
+    for (const el of grid.querySelectorAll('[data-item]')) {
+      const selected = String(picked.has(el.dataset.item));
+      el.dataset.selected = selected;
+      el.querySelector('[data-action=item-pick]').setAttribute('aria-pressed', selected);
+    }
     grid.toggleAttribute('data-picking', picked.size > 0);
     const old = v.root.querySelector('.wardrobe-bar');
     if (!picked.size) { old?.remove(); return; }
@@ -265,16 +272,19 @@ export function wardrobeApp(ctx) {
   }
 
   // ---------- putting clothes in ----------
-  function addSheet() {
-    const d = ctx.dialog(`放进${who()}的衣柜`, `<div class="pick-list wardrobe-add">
-      <label class="list-row file-button">${icon('image')}<span><strong>拍照或选图片</strong><small>可以多选，放进来会自动认出是什么</small></span><input type="file" accept="${PHOTO_TYPES}" multiple data-add-files aria-label="拍照或选图片"></label>
+  function addSheet(sharedCatalog = false) {
+    const d = ctx.dialog(sharedCatalog ? '添加通用衣物' : `放进${who()}的衣柜`, `<div class="pick-list wardrobe-add">
+      <label class="list-row file-button">${icon('image')}<span><strong>拍照或选图片</strong>${sharedCatalog ? '' : '<small>可以多选，放进来会自动认出是什么</small>'}</span><input type="file" accept="${PHOTO_TYPES}" ${sharedCatalog ? '' : 'multiple'} data-add-files aria-label="拍照或选图片"></label>
       <button type="button" class="list-row" data-add="album">${icon('album')}<span><strong>从相册选</strong></span></button>
       <button type="button" class="list-row" data-add="words">${icon('edit')}<span><strong>只写文字</strong></span></button></div>`);
-    d.body.addEventListener('change', e => { const files = [...(e.target.closest('[data-add-files]')?.files || [])]; if (files.length) { d.close(); addFiles(files).catch(error => ctx.notify(error.message, {error: true})); } });
+    d.body.addEventListener('change', e => { const files = [...(e.target.closest('[data-add-files]')?.files || [])]; if (!files.length) return;
+      d.close();
+      if (sharedCatalog) editItem(null, {sharedCatalog, changed:load, file:files[0]});
+      else addFiles(files).catch(error => ctx.notify(error.message, {error: true})); });
     d.body.addEventListener('click', e => {
       const how = e.target.closest('[data-add]')?.dataset.add;
-      if (how === 'album') { d.close(); pickFromAlbum().catch(error => ctx.notify(error.message, {error: true})); }
-      if (how === 'words') { d.close(); editItem(null); }
+      if (how === 'album') { d.close(); pickFromAlbum(sharedCatalog).catch(error => ctx.notify(error.message, {error: true})); }
+      if (how === 'words') { d.close(); editItem(null, {sharedCatalog, changed:load}); }
     });
   }
   async function addFiles(files) {
@@ -286,32 +296,19 @@ export function wardrobeApp(ctx) {
     }
     if (ids.length) recognizeAll(ids);
   }
-  /** 从相册选: photos already there, picked as in the album (a tap, or held and moved); the photo is not copied. */
-  async function pickFromAlbum() {
-    const forWhom = owner, inside = new Set(all.items.filter(x => x.owner === forWhom && x.photoId).map(x => x.photoId));
-    const list = byNewest(await api.listPhotos()).filter(r => !inside.has(r.id)), chosen = new Set();
-    if (!list.length) { ctx.notify('相册里没有能放进来的照片'); return; }
-    const pieces = photoWall({api, win, tile: (r, url) => `<button type="button" data-id="${esc(r.id)}" aria-pressed="${chosen.has(r.id)}" aria-label="选择 ${esc(r.name)}"><img decoding="async" draggable="false" data-photo="${esc(r.id)}" alt="${esc(r.name)}"${url ? ` src="${esc(url)}"` : ''}></button>`});
-    const idle = '点照片来选择，或者按住一滑';
-    const d = ctx.dialog('从相册选', `${pieces.html([{rows: list}], ' selecting album-pick')}<div class="actions album-pick-go"><button type="button" class="primary" data-action="go" disabled>${idle}</button></div>`);
-    pieces.mount(d.body);
-    d.onClose(() => pieces.stop());
-    const go = d.body.querySelector('[data-action=go]');
-    const show = () => { for (const b of d.body.querySelectorAll('.photo-grid [data-id]')) b.setAttribute('aria-pressed', String(chosen.has(b.dataset.id))); go.disabled = !chosen.size; go.textContent = chosen.size ? `放进衣柜 ${chosen.size} 件` : idle; };
-    const sliding = slideSelect({ctx, root: d.body, scroller: d.body, order: () => list.map(r => r.id), picked: id => chosen.has(id), pick: (id, on) => { if (on) chosen.add(id); else chosen.delete(id); }, choosing: () => true, changed: show, covered: () => go.offsetHeight + 12});
-    d.body.addEventListener('click', async e => {
-      const b = e.target.closest('[data-id]');
-      if (b && !sliding.justEnded()) { if (chosen.has(b.dataset.id)) chosen.delete(b.dataset.id); else chosen.add(b.dataset.id); show(); return; }
-      if (!e.target.closest('[data-action=go]') || !chosen.size) return;
-      if (chosen.size > AT_ONCE) { ctx.notify(`一次最多放 ${AT_ONCE} 件`); return; }
-      go.disabled = true;
-      try {
-        const ids = [];
-        for (const id of list.map(r => r.id).filter(id => chosen.has(id))) ids.push((await api.saveWardrobeItem({owner: forWhom, photoId: id})).id);
-        d.close();
-        recognizeAll(ids);
-      } catch (error) { go.disabled = false; ctx.notify(error.message, {error: true}); }
-    });
+  /** A photo already in the album keeps its existing file, whatever view it was picked from. */
+  async function pickFromAlbum(sharedCatalog = false) {
+    const forWhom = sharedCatalog ? SHARED_OWNER : owner;
+    const exclude = new Set(all.items.filter(x => x.owner === forWhom && x.photoId).map(x => x.photoId));
+    const selection = await pickReplacement(ctx, api, {title:'从相册选', device:false, exclude, multiple:sharedCatalog ? 0 : AT_ONCE});
+    if (!selection || v.disposed || catalogOpen !== sharedCatalog || (!sharedCatalog && owner !== forWhom)) return;
+    if (sharedCatalog) {
+      editItem(null, {sharedCatalog, photoId:selection});
+      return;
+    }
+    const ids = [];
+    for (const photoId of selection) ids.push((await api.saveWardrobeItem({owner:forWhom, photoId})).id);
+    if (ids.length) await recognizeAll(ids);
   }
   /** One after another; a failure that is about one photo goes on to the next, any other stops (it would fail them all). */
   async function recognizeAll(ids) {
@@ -331,14 +328,19 @@ export function wardrobeApp(ctx) {
     else ctx.notify(ids.length > 1 ? `认好了 ${ids.length} 件` : '认好了');
   }
   /** 「⋯」 of a piece (null: one written by hand): its name, category and words, 重新识别, 拿出衣柜. */
-  function editItem(id, {sharedCatalog = false, changed} = {}) {
+  function editItem(id, {sharedCatalog = false, changed = load, file, photoId = ''} = {}) {
     const old = id ? all.items.find(x => x.id === id) : null;
     if (id && !old) return;
-    if (old && old.owner!==owner && !(sharedCatalog && old.owner===SHARED_OWNER)) { ctx.notify(old.owner === SHARED_OWNER ? '这件衣物可在通用衣柜里编辑' : '来自'+who(old.owner)+'的通用衣物，请在原衣柜编辑'); return; }
+    if (old && old.owner !== owner && !(sharedCatalog && old.owner === SHARED_OWNER)) {
+      ctx.dialog(old.name, `<p>来自${esc(who(old.owner))}</p><p class="wardrobe-full-description">${esc(old.description || '暂无描述')}</p>`);
+      return;
+    }
     const forWhom = old?.owner || (sharedCatalog ? SHARED_OWNER : owner);
+    photoId ||= old?.photoId || '';
+    const hasPhoto = !!(photoId || file);
     const inLibrary = forWhom === SHARED_OWNER, sharing = inLibrary || old?.shared;
-    let category = old?.category || '';
-    const d = ctx.dialog(old ? old.name : inLibrary ? '新建通用衣物' : '写一件衣服', `<div class="wardrobe-edit">${old?.photoId ? '<div class="wardrobe-edit-pic"><img alt=""></div>' : ''}
+    let category = old?.category || '', recognizedDescription = old?.recognized ? old.description : null;
+    const d = ctx.dialog(old ? old.name : inLibrary ? '新建通用衣物' : '写一件衣服', `<div class="wardrobe-edit">${hasPhoto ? '<div class="wardrobe-edit-pic"><img alt="衣物照片"></div>' : ''}
       ${field('名字', input('name', old?.name || '', 'text', `maxlength="${WARDROBE_LIMITS.name}" placeholder="比如：白色亚麻衬衫"`))}
       <div class="field"><span>分类</span><div class="wardrobe-cats" role="group" aria-label="分类">${WARDROBE_CATEGORIES.map(c => `<button type="button" class="wardrobe-filter" data-cat="${esc(c)}" aria-pressed="${c === category}">${esc(c)}</button>`).join('')}</div></div>
       <label class="setting-row" ${inLibrary ? 'hidden' : ''}>放入通用衣柜<input type="checkbox" class="switch" data-field="shared" ${sharing?'checked':''}></label>
@@ -347,11 +349,11 @@ export function wardrobeApp(ctx) {
       ${field('风格标签',input('collections',(old?.collections || []).join('、'),'text','placeholder="例如：古风、冬装"'),'同一风格填同一个名字。多个分组用顿号隔开，例如「古风、冬装」。')}
       ${field('年龄段',input('age',old?.age || '','text','maxlength="24" placeholder="不限，例如：儿童"'))}</div>
       ${field('描述', textArea('description', old?.description || '', `rows="4" maxlength="${WARDROBE_LIMITS.description}" placeholder="颜色、款式、材质、图案……"`))}
-      <div class="actions">${old?.photoId ? btn('item-recognize', '重新识别', 'secondary') : ''}${btn('item-save', '保存', 'primary')}</div>
+      <div class="actions">${hasPhoto && (api.wardrobeInspect || old && api.wardrobeRecognize) ? btn('item-recognize', old?.description ? '重新识别' : '识别衣物', 'secondary') : ''}${btn('item-save', '保存', 'primary')}</div>
       ${old ? `<div class="actions wardrobe-edit-more">${btn('item-draw', old.photoId ? '重画' : '画出来', 'secondary')}${btn('item-delete', icon('trash') + '拿出衣柜', 'text-button danger-text')}</div>` : ''}</div>`, {over:sharedCatalog});
     d.body.querySelector('[data-field=shared]').onchange=e=>{d.body.querySelector('[data-sharing]').hidden=!e.target.checked;};
     let url = '';
-    if (old?.photoId) previewBlob(api, old.photoId).then(small => small || api.getPhoto(old.photoId).then(p => p?.blob || null)).then(blob => {
+    if (hasPhoto) (file ? Promise.resolve(file) : previewBlob(api, photoId).then(small => small || api.getPhoto(photoId).then(p => p?.blob || null))).then(blob => {
       const img = d.body.querySelector('.wardrobe-edit-pic img');
       if (blob && img && d.live) { url = win.URL.createObjectURL(blob); img.src = url; }
     }).catch(() => {});
@@ -367,10 +369,40 @@ export function wardrobeApp(ctx) {
           save.disabled = true;
           if (inLibrary && !old && !value('cut')) throw Error('请选择这件衣物的款式：男装、女装或中性');
           const description = value('description').trim();
-          await api.saveWardrobeItem({...(old || {owner: forWhom}), name: value('name'), category, description, shared:d.body.querySelector('[data-field=shared]').checked,cut:value('cut'),age:value('age'),collections:value('collections').split(/[,，、]/), recognized: !!old?.recognized && description === old.description});
+          if (!description && !hasPhoto) throw Error('写一下这件衣服是什么样的');
+          if (!photoId && file) {
+            const photo = await api.addPhoto({name: `衣柜-通用-${Date.now()}.${extOf(file)}`, blob: file});
+            photoId = photo.id;
+          }
+          await api.saveWardrobeItem({...(old || {owner: forWhom}), ...(photoId ? {photoId} : {}), name: value('name'), category, description, shared:d.body.querySelector('[data-field=shared]').checked,cut:value('cut'),age:value('age'),collections:value('collections').split(/[,，、]/), recognized: recognizedDescription !== null && description === recognizedDescription});
           d.close(); await changed?.();
-        } else if (action === 'item-recognize') { d.close(); recognizeAll([old.id]); }
-        else if (action === 'item-draw') {
+        } else if (action === 'item-recognize') {
+          const button = e.target.closest('[data-action]'), save = d.body.querySelector('[data-action=item-save]');
+          if (button.disabled || save.disabled) return;
+          if (!api.wardrobeInspect) {
+            if (await ctx.confirm('重新识别衣物？', '识别结果会覆盖这件衣物的描述。', {over:true})) { d.close(); await recognizeAll([old.id]); }
+            return;
+          }
+          const description = d.body.querySelector('[data-field=description]'), name = d.body.querySelector('[data-field=name]');
+          const before = {description: description.value, name: name.value, category};
+          button.disabled = save.disabled = true;
+          const label = button.textContent;
+          button.textContent = '正在识别…';
+          try {
+            const got = await api.wardrobeInspect(file ? {blob:file} : {photoId});
+            if (!d.live) return;
+            if (description.value !== before.description || name.value !== before.name || category !== before.category) {
+              ctx.notify('识别期间已编辑衣物。再点一次识别可更新描述。');
+              return;
+            }
+            description.value = recognizedDescription = got.description;
+            if (!name.value.trim()) name.value = got.name || '';
+            if (!category && got.category) {
+              category = got.category;
+              for (const b of d.body.querySelectorAll('[data-cat]')) b.setAttribute('aria-pressed', String(b.dataset.cat === category));
+            }
+          } finally { button.disabled = save.disabled = false; button.textContent = label; }
+        } else if (action === 'item-draw') {
           const button = e.target.closest('[data-action]');
           if (button.disabled) return;
           button.disabled = true; button.textContent = '正在画…';
@@ -492,13 +524,10 @@ export function wardrobeApp(ctx) {
   v.on('click', '[data-catalog-id]', el => {
     const item = all.items.find(x => x.id === el.dataset.catalogId);
     if (!item) return;
-    if (item.owner === SHARED_OWNER || item.owner === owner) editItem(item.id, {sharedCatalog:true, changed:load});
-    else ctx.dialog(item.name, `<small>来自${esc(who(item.owner))}的衣柜 · ${esc(item.cut || '未标款式')}</small><p>${esc(item.description || '暂无描述')}</p>`);
+    editItem(item.id, {sharedCatalog:true});
   });
   v.on('click', '[data-owner]', el => switchTo(el.dataset.owner));
   v.on('click', '[data-filter]', el => { filter = el.dataset.filter; render(); });
-  v.on('click', '[data-item]', (el, e) => { if (!e.target.closest('[data-action]')) toggle(el.dataset.item); });
-  v.on('keydown', '[data-item]', (el, e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); toggle(el.dataset.item); } });
   v.root.addEventListener('input', e => {
     const key = e.target.dataset?.field;
     if (key === 'wish') draft().wish = e.target.value;
@@ -514,6 +543,12 @@ export function wardrobeApp(ctx) {
       case 'tab': tab = el.dataset.value; render(); break;
       case 'mode': d.mode = el.dataset.value; render(); break;
       case 'item-edit': editItem(el.dataset.id); break;
+      case 'item-pick': toggle(el.dataset.id); break;
+      case 'item-photo': {
+        const item = all.items.find(x => x.id === el.dataset.id);
+        if (item?.photoId) openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: [item.photoId], from: el.getBoundingClientRect(), load: id => api.getPhoto(id), onClose: () => el.focus({preventScroll:true})});
+        break;
+      }
       case 'pick-clear': picked = new Set(); syncPicks(); break;
       case 'pick-wear': await wearPicked(); break;
       case 'pick-outfit': tab = 'outfit'; d.mode = 'closet'; render(); v.root.scrollTop = 0; break;
@@ -531,7 +566,7 @@ export function wardrobeApp(ctx) {
       case 'shared-settings': sharedSettings(); break;
       case 'catalog-cut': catalogCut = el.dataset.value; render(); break;
       case 'catalog-reset': catalogAge = catalogCut = catalogCategory = ''; render(); break;
-      case 'catalog-add': editItem(null, {sharedCatalog:true, changed:load}); break;
+      case 'catalog-add': addSheet(true); break;
       case 'owners-all': ownersSheet(); break;
       case 'outfit-draw': await v.busy(el, tryOn); break;
       case 'tryon-open': if (d.photoId) openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: [d.photoId], from: el.getBoundingClientRect(), load: id => api.getPhoto(id)}); break;

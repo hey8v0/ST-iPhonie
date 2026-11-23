@@ -7,7 +7,7 @@ import {promptText} from './prompt-rules.js';
 
 export const SHARED_OWNER = 'shared';
 export const WARDROBE_CATEGORIES = Object.freeze(['上衣', '下装', '外套', '连衣裙', '鞋', '配饰', '整套']);
-export const WARDROBE_LIMITS = Object.freeze({items: 600, sets: 200, name: 40, description: 300, wear: 600, wish: 300, pool: 60, pieces: 12});
+export const WARDROBE_LIMITS = Object.freeze({items: 600, sets: 200, name: 40, description: 1000, summary: 180, wear: 600, wish: 300, pool: 60, pieces: 12});
 export const WARDROBE_KINDS = Object.freeze(['wardrobe-item', 'wardrobe-set', 'wardrobe-wear']);
 /** Whose 衣柜: the user's own ('me') or a role's, by its name. */
 export const ownerKey = name => name ? 'role:' + String(name).slice(0, 40) : 'me';
@@ -71,7 +71,7 @@ export function parseRecognition(text) {
  * the scene of the story now, so it fits; the last one, not to repeat it. Answers 35–80 characters of plain words.
  */
 export function suggestRequest({wearer, mode = 'closet', wish = '', pool = [], last = '', scene = '', prompts = {}}) {
-  const values = {'穿的人': wearer, '从衣柜选': mode === 'closet', '衣物': pool.slice(0, WARDROBE_LIMITS.pool).map(x => `- ${x.name}：${x.description}`).join('\n'),
+  const values = {'穿的人': wearer, '从衣柜选': mode === 'closet', '衣物': pool.slice(0, WARDROBE_LIMITS.pool).map(x => `- ${x.name}：${clip(x.description, WARDROBE_LIMITS.summary)}`).join('\n'),
     '偏好': clip(wish, WARDROBE_LIMITS.wish), '场景': clip(scene, 600), '上一套': clip(last, 200)};
   return [{role: 'system', content: promptText(prompts, 'wardrobe', 'suggest', values)}, {role: 'user', content: promptText(prompts, 'wardrobe', 'suggestAsk', values)}];
 }

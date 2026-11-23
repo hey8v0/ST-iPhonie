@@ -3433,8 +3433,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 /* Align the information card with the selected layer and keep long prompts scrollable. */
 .style-fold{display:inline-flex;align-items:center;gap:8px;flex:none;min-height:44px;background:transparent;color:inherit;padding:0}
 .overlay.style-detail .sheet{box-sizing:border-box;display:flex;flex-direction:column;min-height:0;max-height:calc(100% - 32px);padding:0;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 16px 40px -15px rgba(18,32,56,.42)}
-.overlay.style-detail.msg-pop .sheet{width:min(344px,calc(100% - 20px));max-height:min(78%,580px)}
-.overlay.style-detail .sheet::before,.overlay.style-detail.msg-pop .sheet[data-arrow]::after{display:none}
+.overlay.style-detail .sheet::before{display:none}
 .overlay.style-detail .sheet-header{flex:none;min-width:0;display:flex;align-items:center;gap:10px;min-height:52px;padding:7px 10px 7px 15px;background:var(--card2) radial-gradient(circle,var(--line) 1px,transparent 1.3px) right top / 9px 9px;border-bottom:1px solid var(--line)}
 .style-detail-icon{flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:10px;background:var(--accent-btn);color:var(--on-accent)}
 .style-detail-icon svg{width:18px;height:18px}
@@ -3452,5 +3451,21 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .style-pack-count{margin:15px 0;font-size:14px;color:var(--ink2)}
 .style-info-footer{flex:none;display:flex;gap:7px;align-items:center;background:var(--card);border-top:1px solid var(--line);padding:10px 12px 15px}
 .style-info-footer>button{flex:1;min-width:0;min-height:42px;padding:6px;font-size:14px;line-height:1.25}
-.style-info-footer>.style-share{flex:0 0 42px;display:grid;place-items:center}
 .style-share svg{width:18px;height:18px}
+
+.chat-record{display:grid;gap:12px}
+.chat-record [data-record-status]{margin:0;color:var(--ink2);min-height:1.4em}
+.chat-record [data-record-preview]:not([hidden]){display:grid;gap:12px}
+.chat-record audio{display:block;width:100%;min-width:0}
+.chat-record-settings{padding:10px 12px;border-radius:14px;background:var(--card2)}
+.chat-record-settings summary{cursor:pointer;font-weight:700;color:var(--ink)}
+.chat-record-settings[open] summary{margin-bottom:12px}
+.friend-row .round-button{width:34px;height:34px;flex:0 0 34px}
+
+.sheet-header .style-list-info{margin-inline-start:auto;margin-inline-end:10px}
+.sheet-header .style-list-info + .sheet-add{margin-inline-start:0}
+.style-controls-help p{margin:0;line-height:1.55}
+.style-controls-help p + p{margin-top:12px}
+.chat-record-settings [data-model-status]{font-size:13px;color:var(--ink2)}
+.chat-record-settings [data-model-status]:empty{display:none}
+.chat-record-settings .actions{justify-content:flex-start}

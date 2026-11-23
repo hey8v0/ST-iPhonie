@@ -3376,23 +3376,8 @@ export class TTSBackend {
      * A 好友申请 answered (from someone the user deleted or blocked). Accepted: friends again and out of the 黑名单, the
      * 申请 put in the chat; turned down: the 申请 go, and the story is told (refused) while they stay apart.
      */
-    async answerFriendRequest(threadId, accept) {
-        this.assertOpen();
-        const thread = await this.chats.get(threadId);
-        const cut = thread?.friend?.by === 'me', blocked = !!thread?.blocked;
-        if (!thread || (!cut && !blocked)) throw Error('TA 已经是你的好友了');
-        const name = thread.members[0], requests = [...(cut ? thread.friend.requests : []), ...(thread.blocked?.requests || [])].sort((a, b) => a.at - b.at);
-        if (accept) {
-            await this.chats.append(threadId, [{ from: 'me', kind: 'system', text: `你通过了${name}的好友申请，现在可以开始聊天了` }, ...requests.map(r => ({ from: name, kind: 'text', text: r.text }))], { read: true });
-            const saved = await this.chats.update(threadId, { friend: null, blocked: null, befriended: Date.now() });
-            this.emit('chat', { threadId, friend: true });
-            return saved;
-        }
-        const now = Date.now();
-        await this.chats.update(threadId, { ...(cut ? { friend: { ...thread.friend, requests: [], refused: now } } : {}), ...(blocked ? { blocked: { ...thread.blocked, requests: [], refused: now } } : {}) });
-        const saved = await this.chats.append(threadId, [{ from: 'me', kind: 'system', text: `你拒绝了${name}的好友申请` }], { read: true });
-        this.emit('chat', { threadId, friend: true });
-        return saved;
+    async answerFriendRequest(threadId, accept, options) {
+        return this.chatMutate(threadId, () => this.chats.answerFriendRequest(threadId, accept, options));
     }
     /** The user's messages to someone who deleted them: sent, then refused with the usual note. */
     async appendChat(id, messages, options) {
@@ -3948,7 +3933,14 @@ export class TTSBackend {
             embedTest: async draft => { const [v] = await this.embed(['测试一下向量模型'], clone(draft || {})); return v.length; },
             appendChat: (id, messages, options) => { this.assertOpen(); return this.appendChat(id, clone(messages), clone(options || {})); },
             wardrobe: owner => this.wardrobe(String(owner || '')), saveWardrobeItem: item => this.saveWardrobeItem(clone(item)), saveWardrobeSet: set => this.saveWardrobeSet(clone(set)), deleteWardrobe: ids => this.deleteWardrobe([...(ids || [])]), setWardrobeWear: wear => this.setWardrobeWear(clone(wear || {})), clearWardrobeWear: owner => this.clearWardrobeWear(String(owner || '')), theaters: () => this.theaters(), saveTheater: doc => this.saveTheater(clone(doc)), deleteTheater: ids => this.deleteTheater([...(ids || [])]),
-            unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId), blockContact: name => this.blockContact(name), blockedNames: () => this.blockedNames(), unblockContact: threadId => this.unblockContact(threadId), answerFriendRequest: (threadId, accept) => this.answerFriendRequest(threadId, accept),
+            unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId), blockContact: name => this.blockContact(name), blockedNames: () => this.blockedNames(), unblockContact: threadId => this.unblockContact(threadId), answerFriendRequest: (threadId, accept, options) => this.answerFriendRequest(threadId, accept, clone(options || {})),
+            sendChatRecording: (id, value) => this.chatMutate(id, () => this.chats.saveRecording(id, { ...value, blob: ownBlob(value?.blob) })),
+            getChatRecording: async (id, recordingId) => {
+                const valid = this.spaceGuard();
+                if (!await this.getChatThread(id) || !valid()) return null;
+                const blob = await this.chats.getRecording(id, recordingId);
+                return valid() ? blob : null;
+            },
             deleteChatMessages: (id, ids) => this.chatMutate(id, async () => { const before = await this.chats.get(id); const thread = await this.chats.removeMessages(id, clone(ids)); this.noteGone('chats', (ids || []).map(m => `${id}/${m}`)); await this.memoryAfterDelete(id, before, thread).catch(() => {}); return thread; }),
             updateChatMessage: (id, messageId, patch) => this.chatMutate(id, () => this.chats.updateMessage(id, messageId, clone(patch || {}))),
             markThreadRead: id => this.chatMutate(id, () => this.chats.markRead(id)),

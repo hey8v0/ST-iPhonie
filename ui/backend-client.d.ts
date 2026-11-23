@@ -426,6 +426,8 @@ export type ChatGame =
     | {type: 'chain'; mode: 'idiom' | 'story'; entries: Array<{from: string; text: string}>; open: boolean; loser: string}
     | {type: 'ttt' | 'gomoku'; them: string; first: string; moves: Array<{by: string; at: number}>; resigned: string; turn: string; winner: string; line: number[]; open: boolean};
 export interface ChatMessage {
+    recording?: {id: string; duration: number};
+    voiceDuration?: number;
     updatedAt?: number; url?: string; name?: string; size?: number; fileText?: string; suffix?: string; said?: string;
     song?: {title: string; artist: string; draft?: string};
     game?: ChatGame;
@@ -467,12 +469,12 @@ export interface WardrobeWear { id: string; kind: 'wardrobe-wear'; owner: string
 export interface TheaterLine { role: string; text: string; translation: string; emotion: string; narration?: boolean; }
 export interface Theater { id: string; kind: 'theater'; form: 'script' | 'card' | 'custom'; title: string; lines?: TheaterLine[]; html?: string; body?: string; source: 'story' | 'card'; wish: string; at: number; space?: string; save?: string; }
 export interface GeneratorDirection { title: string; text: string; }
-export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; /** when the user last turned down a 好友申请 */ refused?: number; }
+export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; /** when the user last turned down a 好友申请 */ refused?: number; reason?: string; }
 export interface ChatThread {
     space?: string; save?: string; story?: boolean; openedAt?: number; label?: string; windowOf?: string; watch?: boolean;
     notice?: {text: string; by: string; at: number}; nicks?: Record<string, string>;
     post?: Array<{id: string; from: string; text: string; sentAt: number; arriveAt: number}>;
- id: string; type: 'dm' | 'group'; name: string; members: string[]; silenced?: Record<string, number>; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 黑名单: what they sent meanwhile (held, never in the chat) and their 好友申请; refused: when the user last turned one down. The list carries count instead of held. */ blocked?: {at: number; held?: {kind: string; text: string; at: number}[]; count?: number; requests: {text: string; at: number}[]; refused?: number}; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
+ id: string; type: 'dm' | 'group'; name: string; members: string[]; silenced?: Record<string, number>; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; /** 黑名单: what they sent meanwhile (held, never in the chat) and their 好友申请; refused: when the user last turned one down. The list carries count instead of held. */ blocked?: {at: number; held?: {kind: string; text: string; at: number}[]; count?: number; requests: {text: string; at: number}[]; refused?: number; reason?: string}; /** 重新回复的版本 of the last round: what the user's message it answers is, each version's messages, which one shows. */ alts?: {after: string; versions: ChatMessage[][]; shown: number}; }
 /** streak: 聊天火花, days in a row both sides wrote. */
 export interface ChatThreadSummary extends Omit<ChatThread, 'messages' | 'alts'> { count: number; last: ChatMessage | null; streak: number; }
 export type ChatMessageInput = Omit<ChatMessage, 'id' | 'at'>;
@@ -1238,7 +1240,9 @@ export interface BackendFacade {
     saveTheater(doc: Partial<Theater>): Promise<Theater>;
     deleteTheater(ids: string[]): Promise<boolean>;
     /** A 好友申请 from someone deleted or blocked: accepted (friends again) or turned down. */
-    answerFriendRequest(threadId: string, accept: boolean): Promise<ChatThread>;
+    sendChatRecording(threadId: string, value: {id: string; duration: number; text: string; blob: Blob; quote?: ChatMessage['quote']}): Promise<ChatThread>;
+    getChatRecording(threadId: string, recordingId: string): Promise<Blob | null>;
+    answerFriendRequest(threadId: string, accept: boolean, options?: {reason?: string; expected?: {at: number; text: string; count: number}}): Promise<ChatThread>;
     deleteChatMessages(id: string, ids: string[]): Promise<ChatThread>;
     /** {state, openedBy} for a red packet or transfer, or {recall: true} to withdraw a message. */
     updateChatMessage(id: string, messageId: string, patch: { text?: string; translation?: string; state?: string; openedBy?: string; recall?: boolean; photoId?: string; imageTags?: string; imageVersions?: string[] }): Promise<ChatThread>;
@@ -1353,6 +1357,7 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     /** New 朋友圈 posts from the characters (one model request). */
     momentsRefresh(): Promise<MomentPost[]>;
     /** 衣柜 (tavern side): a piece's photo recognized by a model that sees; an outfit put together; a 试穿图 drawn (code 'PAID' with prompt until allowPaid). */
+    wardrobeInspect?(options: {photoId?: string; blob?: Blob}): Promise<Pick<WardrobeItem, 'name' | 'category' | 'description'>>;
     wardrobeRecognize(itemId: string): Promise<WardrobeItem>;
     wardrobeSuggest(options: { owner: string; mode?: 'closet' | 'free'; wish?: string; itemIds?: string[] }): Promise<string>;
     /** 存成一套: designed freely, split into pieces that go into the 衣柜 first; the same words kept again come back with again. */

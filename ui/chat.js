@@ -1,7 +1,7 @@
 import {replacePicture} from './replace-picture.js';
 import {objectURLs} from './object-urls.js';
 import {eraseBefore} from '../core/text-edit.js';
-import {currentDm, chatWindows, currentWindow, groupKey, EDITABLE_KINDS, lastRound, forwardLine, REACTIONS, CHAIN_MODES, GAME_LIMITS} from '../core/chats.js';
+import {currentDm, chatWindows, currentWindow, groupKey, EDITABLE_KINDS, lastRound, forwardLine, FRIEND_REASON_LIMIT, RECORDING_LIMITS, recordingFormat, REACTIONS, CHAIN_MODES, GAME_LIMITS} from '../core/chats.js';
 import {eggOf, playEgg} from './chat-eggs.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {createView, esc, btn, field, input, textArea, select, toggle, heading, groupTitle, avatar, avatarPicture, empty, help, copyText, menu} from './common.js';
@@ -26,6 +26,7 @@ import {memorySheet} from './chat-memory.js';
 import {pictureInputs, photoTags, photoPicture} from '../core/draw.js';
 import {chatScene, sceneArt, sceneDark, syncMotion} from './chat-scenes.js';
 import {PREMIUM, yuan} from '../core/wallet.js';
+import {recordChatMessage} from './chat-recording.js';
 import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
 import {eachThumb, previewBlob} from './thumbs.js';
 import {pickReplacement} from './replacement-album.js';
@@ -68,7 +69,7 @@ function timeLabel(m, prev) {
 // Messages drawn as a centred line instead of a bubble.
 const LINE_KINDS = ['system', 'pat', 'notice', 'recall'];
 const quotable = m => ['text', 'voice', 'photo', 'location'].includes(m.kind);
-const quoteText = m => m.kind === 'voice' ? m.translation || m.text : m.kind === 'photo' ? '[图片]' + (m.text ? ' ' + m.text : '') : m.kind === 'sticker' ? '[表情包] ' + m.text : m.kind === 'location' ? '[位置] ' + m.text : m.text;
+const quoteText = m => m.kind === 'voice' ? m.translation || m.text || '[语音]' : m.kind === 'photo' ? '[图片]' + (m.text ? ' ' + m.text : '') : m.kind === 'sticker' ? '[表情包] ' + m.text : m.kind === 'location' ? '[位置] ' + m.text : m.text;
 const lineOf = m => ({role: m.from, emotion: m.emotion || 'calm', text: m.text, translation: m.translation || ''});
 const WAVE_HEIGHTS = [6, 12, 18, 10, 16, 22, 14, 8, 16, 20, 12, 7, 14, 10];
 // Dice pips on a 3×3 grid, by face.
@@ -118,6 +119,7 @@ export function chatApp(ctx) {
   const voiceText = () => api.readState().chat.voiceText || {mode: 'translation', auto: false};
   /** 转文字 for a voice message: the translation, the original line, or both (original first). */
   function transcriptHTML(m) {
+    if (m.recording || m.voiceDuration) return `<span class="v-text">${esc(m.text || '没有转写文字')}</span>`;
     // The engine's own marks ([sigh], <whisper>…</whisper>, (laughing), <#0.5#>) are for the voice, not for reading.
     const mode = voiceText().mode, original = String(m.text || '').replace(/\[[^\]]*\]|<[^>]*>|\((?:[a-z][a-z\s'-]*)\)/gi, '').replace(/\s{2,}/g, ' ').trim(), translation = m.translation || '';
     if (mode === 'original' || !translation) return `<span class="v-text">${esc(original)}</span>`;
@@ -295,12 +297,12 @@ export function chatApp(ctx) {
     if (v.disposed || ticket !== epoch) return;
     const cut = threads.filter(t => t.type === 'dm' && t.friend?.by === 'me' && stillHere(t.members[0])), away = new Set(cut.map(t => t.members[0]));
     const contacts = api.chatContacts().filter(c => !away.has(c.name)), stars = starred(), groups = threads.filter(t => t.type === 'group' && currentWindow(threads, t)?.id === t.id);
-    const blockedAsks = threads.filter(t => t.type === 'dm' && t.blocked?.requests?.length && t.friend?.by !== 'me');
-    const asks = cut.reduce((n, t) => n + (t.friend.requests?.length || t.blocked?.requests?.length ? 1 : 0), 0) + blockedAsks.length;
+    const blockedAsks = threads.filter(t => t.type === 'dm' && friendApplicationVisible(t) && t.friend?.by !== 'me' && stillHere(t.members[0]));
+    const asks = cut.reduce((n, t) => n + (t.friend.requests?.length || t.blocked?.requests?.length ? 1 : 0), 0) + blockedAsks.filter(t => t.blocked.requests?.length).length;
     const row = c => `<button class="list-row" data-action="profile" data-name="${esc(c.name)}">${avatar(c.name, c.engine, 42)}<span><strong>${esc(shown(c.name))}</strong><small>${contactLine(c, threads)}</small></span>${stars.includes(c.name) ? '<span class="star-mark" aria-label="特别关心">★</span>' : icon('next')}</button>`;
     const special = contacts.filter(c => stars.includes(c.name));
     v.draw(frame(heading('联系人', btn('contact-add', icon('add'), 'round-button', 'aria-label="添加联系人"'), 'Contacts')
-      + (cut.length || blockedAsks.length ? `<div class="group"><button class="list-row" data-action="new-friends"><i class="friend-ico" aria-hidden="true">${icon('person')}</i><span><strong>新的朋友</strong><small>${asks ? `${asks} 个好友申请` : `删掉的好友（${cut.length}）可以在这里加回来`}</small></span>${asks ? `<b class="badge friend-badge">${asks}</b>` : icon('next')}</button></div>` : '')
+      + (cut.length || blockedAsks.length ? `<div class="group"><button class="list-row" data-action="new-friends"><i class="friend-ico" aria-hidden="true">${icon('person')}</i><span><strong>新的朋友</strong><small>${asks ? `${asks} 个好友申请` : cut.length ? `删掉的好友（${cut.length}）可以在这里加回来` : '查看申请处理记录'}</small></span>${asks ? `<b class="badge friend-badge">${asks}</b>` : icon('next')}</button></div>` : '')
       + (special.length ? groupTitle('特别关心') + `<div class="group">${special.map(row).join('')}</div>` : '')
       + groupTitle(`好友 · ${contacts.length}`, help('角色 App 里的角色会自动出现在这里。开了「按角色卡分开」时，只有这张卡的角色、在这张卡的剧情里说过话或被提到的角色，以及在这张卡里加的联系人；别的角色点右上角的「＋」加进来。剧情之外的人（同学、店员、网友……）也在「＋」里手动添加，写上人设就能聊。'))
       + (contacts.length ? `<div class="group">${contacts.map(row).join('')}</div>` : '<p class="hint">还没有好友。</p>')
@@ -345,21 +347,26 @@ export function chatApp(ctx) {
   }
   // 0.9.49: someone deleted in the 角色 App (or a contact removed) is gone from 新的朋友 too; their old chat stays as it was.
   const stillHere = name => (api.chatContacts?.(true) || []).some(c => c.name === name);
-  /** 新的朋友: contacts the user deleted, and 好友申请 from them or from someone blocked; 通过 or 拒绝 (添加 with none). */
+  const friendRows = new Map();
+  const recentRefusal = t => [t.friend, t.blocked].filter(x => x?.refused && Date.now() - x.refused < 2 * 86400000).sort((a, b) => b.refused - a.refused)[0];
+  const friendApplicationVisible = t => !!(t.blocked?.requests?.length || t.blocked && recentRefusal(t));
+  /** 新的朋友: contacts the user deleted, and 好友申请 from them or from someone blocked. */
   async function renderFriends(ticket) {
     const threads = await api.listThreads();
     if (v.disposed || ticket !== epoch) return;
-    const cut = threads.filter(t => t.type === 'dm' && t.friend?.by === 'me' && stillHere(t.members[0])), blocked = threads.filter(t => t.type === 'dm' && t.blocked?.requests?.length && t.friend?.by !== 'me' && stillHere(t.members[0]));
+    const cut = threads.filter(t => t.type === 'dm' && t.friend?.by === 'me' && stillHere(t.members[0])), blocked = threads.filter(t => t.type === 'dm' && friendApplicationVisible(t) && t.friend?.by !== 'me' && stillHere(t.members[0]));
     if (!cut.length && !blocked.length) { mode = 'list'; tab = 'contacts'; return render(); }
+    friendRows.clear();
     const row = t => {
-      const name = t.members[0], asks = [...(t.friend?.requests || []), ...(t.blocked?.requests || [])], last = asks.at(-1), state = t.blocked ? '已拉黑' : '已删除';
+      const name = t.members[0], asks = [...(t.friend?.by === 'me' ? t.friend.requests || [] : []), ...(t.blocked?.requests || [])].sort((a, b) => a.at - b.at);
+      const last = asks.at(-1), refusal = recentRefusal(t), state = t.blocked ? '已拉黑' : '已删除';
+      friendRows.set(t.id, {name, expected:last && {...last, count:asks.length}});
       const tools = asks.length ? btn('friend-no', '拒绝', 'chip-button', `data-id="${esc(t.id)}" aria-label="拒绝 ${esc(name)} 的好友申请"`) + btn('friend-yes', '通过', 'chip-button', `data-id="${esc(t.id)}" aria-label="通过 ${esc(name)} 的好友申请"`)
-        : btn('refriend', '添加', 'chip-button', `data-id="${esc(t.id)}" aria-label="把 ${esc(name)} 加回好友"`);
+        : t.friend?.by === 'me' && !t.blocked ? btn('refriend', '添加', 'chip-button', `data-id="${esc(t.id)}" aria-label="把 ${esc(name)} 加回好友"`) : '';
       // The 验证消息 on a line of its own under the row: next to two buttons it had room for a word or two.
-      return `<div class="list-row friend-row">${avatar(name, engine(name), 42)}<span><strong>${esc(shown(name))}</strong><small>${state} · ${asks.length > 1 ? `${asks.length} 条好友申请` : asks.length ? '好友申请' : '还没有发来申请'}</small></span>${tools}${last ? `<p class="friend-ask">「${esc(last.text)}」</p>` : ''}</div>`;
+      return `<div class="list-row friend-row">${avatar(name, engine(name), 42)}<span><strong>${esc(shown(name))}</strong><small>${state} · ${asks.length > 1 ? `${asks.length} 条好友申请` : asks.length ? '好友申请' : refusal ? '申请已拒绝' : '还没有发来申请'}</small></span>${tools}${t.friend?.by === 'me' && !asks.length ? btn('friend-more', icon('more'), 'round-button', `data-id="${esc(t.id)}" aria-label="${esc(name)}的更多操作"`) : ''}${last ? `<p class="friend-ask">「${esc(last.text)}」</p>` : refusal?.reason ? `<p class="friend-ask">拒绝留言：${esc(refusal.reason)}</p>` : ''}</div>`;
     };
-    v.draw(heading('新的朋友', '', 'New Friends')
-      + `<p class="hint">删掉的好友和拉黑的人发来的好友申请在这里。「通过」就加回来（也移出黑名单），申请里的话会放进聊天；「拒绝」了 TA 会知道。删掉的好友没发申请也能直接「添加」。</p>`
+    v.draw(heading('新的朋友', help('这里可以处理好友申请，或者把删掉的好友加回来。要从列表彻底移除角色，可在该条目的更多菜单进入角色管理。'), 'New Friends')
       + `<div class="group">${[...cut, ...blocked].map(row).join('')}</div>`);
   }
   /** 最近在听: the last song this contact shared in your private chat. */
@@ -443,7 +450,7 @@ export function chatApp(ctx) {
   function bodyHTML(m) {
     const mid = `data-mid="${esc(m.id)}"`;
     switch (m.kind) {
-      case 'voice': return `<button class="voice-msg" data-action="voice" ${mid} data-state="ungenerated" aria-label="播放 ${esc(m.from)} 的语音"><span class="v-ico">${icon('play', true)}</span><span class="v-wave">${WAVE_HEIGHTS.map(h => `<i style="height:${h}px"></i>`).join('')}</span><span class="v-sec">${seconds(m)}″</span></button>${voiceText().auto || transcribed.has(m.id) ? transcriptHTML(m) : ''}`;
+      case 'voice': return `<button class="voice-msg" data-action="voice" ${mid} data-state="${m.voiceDuration ? 'ready' : 'ungenerated'}" aria-label="${m.voiceDuration ? '查看仿语音文字' : `播放 ${esc(m.from)} 的语音`}"><span class="v-ico">${icon(m.voiceDuration ? 'book' : 'play', true)}</span><span class="v-wave">${WAVE_HEIGHTS.map(h => `<i style="height:${h}px"></i>`).join('')}</span><span class="v-sec">${seconds(m)}″</span></button>${voiceText().auto || transcribed.has(m.id) ? transcriptHTML(m) : ''}`;
       case 'photo': return m.photoId
         ? `<button class="chat-photo" data-action="photo" ${mid}${photoSizes.has(m.photoId) ? ` style="${photoSizes.get(m.photoId)}"` : ''} aria-label="查看照片"><img data-chat-photo="${esc(m.photoId)}"${bubbleURLs.get(m.photoId) ? ` src="${esc(bubbleURLs.get(m.photoId))}"` : ''} alt="${esc(m.text || '照片')}"></button>`
         : `<button class="chat-photo described" data-action="message" ${mid}><span class="ph-art">${icon('image')}</span><span class="ph-cap">${esc(m.text)}</span></button>${photoNote(m)}`;
@@ -564,7 +571,7 @@ export function chatApp(ctx) {
   }
   function toolsHTML() {
     const group = thread.type === 'group';
-    const tools = [['photo', 'image', '照片'], ['emoji', 'smile', '表情'], ['redpacket', 'packet', '红包'], ...(group ? [] : [['transfer', 'swap', '转账'], ['gift', 'gift', '礼物']]),
+    const tools = [['photo', 'image', '照片'], ['recording', 'mic', '语音'], ['emoji', 'smile', '表情'], ['redpacket', 'packet', '红包'], ...(group ? [] : [['transfer', 'swap', '转账'], ['gift', 'gift', '礼物']]),
       ['file', 'file', '文件'], ['location', 'pin', '位置'], ['song', 'music', '分享歌'], ['write', 'edit', '写首歌'], ['pat', 'hand', '拍一拍'], ['dice', 'dice', '骰子'], ...(group ? [['game', 'games', '群游戏']] : [['play', 'games', '小游戏'], ['letter', 'mail', '写信']])];
     const tabs = `<div class="emoji-tabs" role="tablist">${[['emoji', '表情'], ['kao', '颜文字'], ['stickers', '表情包']].map(([k, t]) => `<button type="button" role="tab" data-action="panel-${k}" aria-selected="${panel === k}">${t}</button>`).join('')}</div>`;
     if (panel === 'stickers') {
@@ -848,11 +855,113 @@ export function chatApp(ctx) {
     wrap.querySelector('[data-action=panel]')?.setAttribute('aria-expanded', String(!!panel));
     if (msgs && atBottom) msgs.scrollTop = msgs.scrollHeight;
   }
+  let playingRecording = null, playTurn = 0, recordingSheet = null;
+  function stopRecordingPlayback() {
+    playTurn++;
+    const playing = playingRecording;
+    if (!playing) return;
+    playingRecording = null;
+    playing.audio.pause();
+    ctx.win.URL.revokeObjectURL(playing.url);
+    refreshRecording(playing.mid);
+  }
+  function refreshRecording(mid) {
+    for (const el of v.root.querySelectorAll('.voice-msg[data-mid]')) if (el.dataset.mid === mid) paintRecording(el);
+  }
+  function paintRecording(el) {
+    const on = playingRecording?.mid === el.dataset.mid;
+    el.dataset.state = on ? 'playing' : 'ready';
+    el.querySelector('.v-ico').innerHTML = icon(on ? 'pause' : 'play', true);
+  }
+  async function recordedFile(id, message) {
+    const blob = await api.getChatRecording?.(id, message.recording.id);
+    if (!blob) throw Error('这段语音的原录音不在当前设备上');
+    return {blob, name:'录音-' + message.recording.id + '.' + recordingFormat(blob.type)};
+  }
+  async function playRecording(message) {
+    const repeated = playingRecording?.mid === message.id;
+    stopRecordingPlayback();
+    if (repeated) return;
+    const ticket = playTurn, id = threadId;
+    const {blob} = await recordedFile(id, message);
+    if (ticket !== playTurn || id !== threadId || v.disposed) return;
+    api.stop?.();
+    const url = ctx.win.URL.createObjectURL(blob), audio = new ctx.win.Audio(url);
+    playingRecording = {mid:message.id, audio, url};
+    audio.onended = () => { if (playingRecording?.audio === audio) stopRecordingPlayback(); };
+    audio.onerror = () => {
+      if (playingRecording?.audio !== audio) return;
+      stopRecordingPlayback();
+      ctx.notify('这段录音无法播放', {error:true});
+    };
+    refreshRecording(message.id);
+    try { await audio.play(); }
+    catch (error) {
+      if (playingRecording?.audio !== audio) return;
+      stopRecordingPlayback();
+      if (error.name !== 'NotAllowedError') throw error;
+      const player = ctx.dialog('播放语音', '<div class="chat-record"><audio controls aria-label="播放原录音"></audio></div>');
+      const source = ctx.win.URL.createObjectURL(blob), control = player.body.querySelector('audio');
+      control.src = source;
+      player.onClose(() => { control.pause(); ctx.win.URL.revokeObjectURL(source); });
+    }
+  }
+  async function openVoiceOptions() {
+    const id = threadId, turn = spaceTurn, quoted = quote;
+    const current = () => mode === 'thread' && threadId === id && spaceTurn === turn && !v.disposed;
+    panel = null;
+    syncPanel();
+    const choice = await menu(ctx, '发语音', [
+      api.sendChatRecording && {key:'record', icon:'mic', label:'录音', note:'录下原声，可转写成文字'},
+      {key:'written', icon:'edit', label:'仿语音', note:'填写说了什么和说了几秒'}
+    ]);
+    if (!current() || !choice) return;
+    const sent = () => {
+      if (!current()) return;
+      if (quote === quoted) quote = null;
+      petsLayer.sent();
+    };
+    if (choice === 'written') {
+      const d = sheet('发仿语音', `${field('说了什么', textArea('voice-text', '', 'rows="4" maxlength="4000" placeholder="输入要说的话"'))}
+        ${field('说了几秒', input('voice-seconds', '', 'number', `min="1" max="${RECORDING_LIMITS.seconds}" step="1" inputmode="numeric" placeholder="例如 8"`))}
+        <div class="actions">${btn('send-written-voice', '发送', 'primary')}</div>`, {
+        'send-written-voice': async button => {
+          if (button.disabled || !d.live) return;
+          if (!current()) { d.close(); return; }
+          const text = value(d, 'voice-text'), voiceDuration = Number(value(d, 'voice-seconds'));
+          if (!text) throw Error('先写下说了什么');
+          if (!Number.isInteger(voiceDuration) || voiceDuration < 1 || voiceDuration > RECORDING_LIMITS.seconds) throw Error('请填写 1 到 60 秒的整数');
+          button.disabled = true;
+          try {
+            await post([{from:'me', kind:'voice', text, voiceDuration, ...(quoted ? {quote:quoted} : {})}], {onSaved:sent});
+            d.close();
+            if (current()) render();
+          } finally { button.disabled = false; }
+        }
+      });
+      return;
+    }
+    stopRecordingPlayback();
+    api.stop?.();
+    const d = recordChatMessage(ctx, {send: async value => {
+      if (!current()) throw Error('聊天已切换，请重新打开录音');
+      await post([{from:'me', kind:'voice'}], {
+        save: target => api.sendChatRecording(target, {...value, quote:quoted}),
+        onSaved: sent
+      });
+      if (current()) render();
+    }});
+    if (!d) return;
+    recordingSheet = d;
+    d.onClose(() => { if (recordingSheet === d) recordingSheet = null; });
+  }
   async function paintVoices() {
     const status = api.status();
     for (const el of v.root.querySelectorAll('.voice-msg[data-mid]')) {
       const m = thread?.messages.find(x => x.id === el.dataset.mid);
       if (!m) continue;
+      if (m.voiceDuration) continue;
+      if (m.recording) { paintRecording(el); continue; }
       const on = ['playing', 'paused', 'generating'].includes(status.phase) && status.line?.text === m.text && status.line?.role === m.from;
       const state = on ? (status.phase === 'generating' ? 'generating' : 'playing') : await api.lineState(lineOf(m));
       if (!el.isConnected) continue;
@@ -963,17 +1072,18 @@ export function chatApp(ctx) {
   }
   /** at: a message to show in it (from a search), not the latest. */
   function open(id, at = null) {
+    if (id !== threadId) { recordingSheet?.close(); stopRecordingPlayback(); }
     threadId = id; mode = 'thread'; selecting = null; stick = !at; jump = at; panel = null; quote = null; drawn.thread = null;
     return render();
   }
 
   // ---------- Sending ----------
   /** Puts the user's messages in the chat. Nothing goes to the model until the user asks for a reply. */
-  async function post(messages, {onSaved = () => {}} = {}) {
+  async function post(messages, {onSaved = () => {}, save = (id, items) => api.appendChat(id, items, {read:true})} = {}) {
     stick = true;
     failed.delete(threadId);
     const asked = asks, id = threadId, turn = spaceTurn;
-    await api.appendChat(id, messages, {read: true});
+    await save(id, messages);
     onSaved();
     // 自动回复: the user's own words (not a letter, which takes its time) set the clock going — unless a reply was asked
     // for by hand while they were being kept, or the tavern switched to another phone meanwhile.
@@ -1828,15 +1938,16 @@ export function chatApp(ctx) {
     const contact = m.from !== 'me', last = contact && thread.messages.at(-1)?.id === m.id;
     const copyable = ['text', 'voice', 'location', 'photo'].includes(m.kind) && quoteText(m);
     const canRecall = !contact && !['redpacket', 'transfer', 'gift'].includes(m.kind);
-    const voice = m.kind === 'voice', open = voice && (voiceText().auto || transcribed.has(m.id));
+    const id = threadId, voice = m.kind === 'voice', hasAudio = voice && !m.voiceDuration, open = voice && (voiceText().auto || transcribed.has(m.id));
     const mine = m.reactions?.find(r => r.from === 'me')?.emoji || '';
     // 0.9.47: like QQ — 回应 in a row (the six from 聊天设置 → 常用回应, then 「＋」 for any emoji), the actions as small
     // icons with a word under each, in a dark card pointing at the bubble.
+    const audioFile = () => m.recording ? recordedFile(id, m) : api.audioFile({line:lineOf(m)});
     const quick = api.getState().chat.quickReactions || REACTIONS;
     const items = [
       copyable && ['copy', 'copy', '复制'], quotable(m) && !thread.watch && ['quote', 'reply', '引用'],
-      voice && ['transcribe', 'book', open ? '收起文字' : '转文字'], voice && ['download', 'download', '下载'],
-      voice && ctx.routeFor(m.from)?.voice && ['retake', 'refresh', '重新配音'], voice && canShareFiles(ctx.win) && ['share', 'share', '分享'],
+      voice && ['transcribe', 'book', open ? '收起文字' : '转文字'], hasAudio && ['download', 'download', '下载'],
+      hasAudio && !m.recording && ctx.routeFor(m.from)?.voice && ['retake', 'refresh', '重新配音'], hasAudio && canShareFiles(ctx.win) && ['share', 'share', '分享'],
       EDITABLE_KINDS.includes(m.kind) && ['edit', 'edit', '编辑'], ['pick-delete', 'check', '多选'], canRecall && ['recall', 'undo', '撤回'],
       last && live && !thread.watch && ['reroll', 'refresh', '重新回复'], ['delete', 'trash', '删除', 'danger']].filter(Boolean);
     const d = sheet('消息', `${thread.watch ? '' : `<div class="react-row" role="group" aria-label="回应">${quick.map(e => `<button type="button" data-action="react" data-emoji="${esc(e)}" aria-pressed="${mine === e}" aria-label="回应 ${esc(e)}">${esc(e)}</button>`).join('')}<button type="button" class="react-more" data-action="react-more" aria-label="更多表情">${icon('add')}</button></div>`}
@@ -1853,10 +1964,10 @@ export function chatApp(ctx) {
         if (open) transcribed.delete(m.id); else transcribed.add(m.id);
         render();
       },
-      download: async () => { d.close(); const {blob, name} = await api.audioFile({line: lineOf(m)}); ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, name)); },
+      download: async () => { d.close(); const {blob, name} = await audioFile(); ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, name)); },
       // 重新配音: this message's audio made anew (and played), the rest of the reply as it was.
       retake: async () => { d.close(); await api.retakeVoice(lineOf(m)); },
-      share: async () => { d.close(); const {blob, name} = await api.audioFile({line: lineOf(m)}); await shareFile(ctx.doc, blob, name); },
+      share: async () => { d.close(); const {blob, name} = await audioFile(); await shareFile(ctx.doc, blob, name); },
       quote: () => { d.close(); quote = {from: m.from, text: quoteText(m).slice(0, 200)}; panel = null; render(); },
       edit: () => { d.close(); editMessage(m); },
       copy: async () => { d.close(); ctx.notify(await copyText(ctx.win, m.kind === 'voice' ? m.text : quoteText(m)) ? '已复制' : '这个浏览器不让复制，可以长按文字手动复制'); },
@@ -1877,13 +1988,13 @@ export function chatApp(ctx) {
   /** A message's words, the user's or a contact's: what the chat reads from here on. */
   function editMessage(m) {
     const voice = m.kind === 'voice', photo = m.kind === 'photo';
-    const d = sheet(photo ? '编辑图片说明' : '编辑消息', `${field(voice ? '说的话' : photo ? '图片说明' : '内容', textArea('edit-text', m.text, `rows="${voice ? 3 : 6}" maxlength="4000"`))}
-      ${voice ? field('译文', textArea('edit-translation', m.translation || '', 'rows="3" maxlength="4000"'), '改了说的话，下次播放会重新配音。') : ''}
+    const d = sheet(photo ? '编辑图片说明' : m.recording ? '编辑转写' : '编辑消息', `${field(m.recording ? '转写文字' : voice ? '说的话' : photo ? '图片说明' : '内容', textArea('edit-text', m.text, `rows="${voice ? 3 : 6}" maxlength="4000"`))}
+      ${voice && !m.recording && !m.voiceDuration ? field('译文', textArea('edit-translation', m.translation || '', 'rows="3" maxlength="4000"'), '改了说的话，下次播放会重新配音。') : ''}
       <div class="actions">${btn('edit-save', '保存', 'primary')}</div>`, {
       'edit-save': async () => {
         const text = value(d, 'edit-text');
-        if (!text && !photo) { ctx.notify('消息不能是空的'); return; }
-        await api.updateChatMessage(threadId, m.id, {text, ...(voice ? {translation: value(d, 'edit-translation')} : {})});
+        if (!text && !photo && !m.recording) { ctx.notify('消息不能是空的'); return; }
+        await api.updateChatMessage(threadId, m.id, {text, ...(voice && !m.voiceDuration ? {translation: value(d, 'edit-translation')} : {})});
         d.close();
         ctx.notify('改好了');
       }
@@ -2534,7 +2645,7 @@ export function chatApp(ctx) {
       case 'play-song': api.musicPlay?.({title: el.dataset.title, artist: el.dataset.artist, from: 'share'}).catch(error => ctx.notify(error.message, {error: true})); break;
       case 'unfriend': {
         const name = profileOf;
-        if (!await ctx.confirm(`删除好友「${name}」？`, `和 TA 的聊天会从消息列表收起来（记录还在），TA 也不在好友列表里了。之后 TA 给你发的消息会变成好友申请，在「联系人 → 新的朋友」里随时可以加回来。`)) break;
+        if (!await ctx.confirm(`删除好友「${name}」？`, `和 TA 的聊天会从消息列表收起来（记录还在），TA 也不在好友列表里了。之后 TA 给你发的消息会变成好友申请，可在「新的朋友」加回。要彻底移除角色，请到角色 App。`)) break;
         try { await api.unfriend(name); ctx.notify(`已删除好友 ${name}`); mode = 'list'; tab = 'contacts'; render(); }
         catch (error) { ctx.notify(error.message, {error: true}); }
         break;
@@ -2570,10 +2681,46 @@ export function chatApp(ctx) {
         ctx.dialog(`拦截记录 · ${shown(thread?.members[0] || '')}`, list.length ? `<ol class="held-list">${list.slice().reverse().map(h => `<li><time>${esc(stamp(h.at))}</time><span>${esc(h.text)}</span></li>`).join('')}</ol><p class="hint">拉黑期间 TA 发来的，没有送进聊天。移出黑名单后这些记录会清掉。</p>` : '<p class="hint">还没有拦截到什么。</p>');
         break;
       }
+      case 'friend-more': {
+        const turn = spaceTurn, name = friendRows.get(el.dataset.id)?.name;
+        if (!name) break;
+        const route = ctx.routeFor(name);
+        if (await menu(ctx, name, [{key:'manage', icon:'person', label:route ? '前往角色管理' : '管理联系人'}]) !== 'manage' || turn !== spaceTurn) break;
+        if (route) ctx.open('roles', route.id);
+        else {
+          const contact = api.getState().chat.contacts.find(c => c.name === name);
+          if (!contact) { ctx.open('roles'); break; }
+          contactDraft = {...contact};
+          mode = 'contact-edit';
+          render();
+        }
+        break;
+      }
       case 'friend-yes': case 'friend-no': {
-        const yes = action === 'friend-yes';
-        try { const t = await api.answerFriendRequest(el.dataset.id, yes); ctx.notify(yes ? `已通过 ${t.members[0]} 的好友申请` : `已拒绝 ${t.members[0]} 的好友申请`); if (yes) open(t.id); else render(); }
-        catch (error) { ctx.notify(error.message, {error: true}); }
+        const id = el.dataset.id, entry = friendRows.get(id);
+        if (!entry?.expected) break;
+        if (action === 'friend-yes') {
+          const t = await api.answerFriendRequest(id, true, {expected:entry.expected});
+          ctx.notify(`已通过 ${t.members[0]} 的好友申请`);
+          open(t.id);
+          break;
+        }
+        const turn = spaceTurn;
+        const d = ctx.dialog('拒绝好友申请', `${field('拒绝留言（选填）', textArea('reason', '', `rows="3" maxlength="${FRIEND_REASON_LIMIT}" placeholder="写一句话给 ${esc(shown(entry.name))}"`))}
+          <div class="actions">${btn('cancel', '取消', 'secondary')}${btn('confirm', '确认拒绝', 'primary')}</div>`);
+        d.body.addEventListener('click', async e => {
+          const button = e.target.closest('[data-action]');
+          if (button?.dataset.action === 'cancel') { d.close(); return; }
+          if (button?.dataset.action !== 'confirm' || button.disabled) return;
+          if (turn !== spaceTurn) { d.close(); return; }
+          button.disabled = true;
+          try {
+            await api.answerFriendRequest(id, false, {reason:d.body.querySelector('[data-field=reason]').value, expected:entry.expected});
+            d.close();
+            ctx.notify(`已拒绝 ${entry.name} 的好友申请`);
+            if (turn === spaceTurn && mode === 'friends') await render();
+          } catch (error) { ctx.notify(error.message, {error: true}); button.disabled = false; }
+        });
         break;
       }
       case 'refriend': {
@@ -2619,6 +2766,7 @@ export function chatApp(ctx) {
       case 'jump-unread': { const id = unreadMark?.id; if (unreadMark) unreadMark.show = false; jump = id || null; render(); break; }
       case 'panel': panel = panel ? null : 'tools'; syncPanel(); break;
       case 'panel-tools': panel = 'tools'; syncPanel(); break;
+      case 'tool-recording': await openVoiceOptions(); break;
       case 'tool-emoji': case 'panel-emoji': panel = 'emoji'; syncPanel(); break;
       case 'panel-stickers': panel = 'stickers'; syncPanel(); break;
       case 'sticker-send': {
@@ -2712,6 +2860,14 @@ export function chatApp(ctx) {
       case 'voice': {
         const m = find();
         if (!m) break;
+        if (m.voiceDuration) {
+          if (voiceText().auto) break;
+          if (transcribed.has(m.id)) transcribed.delete(m.id); else transcribed.add(m.id);
+          render();
+          break;
+        }
+        if (m.recording) { await playRecording(m); break; }
+        stopRecordingPlayback();
         if (!ctx.routeFor(m.from)?.voice) { ctx.notify(`${m.from} 还没有配音`); break; }
         if (el.dataset.state === 'playing') { api.stop(); break; }
         await api.speak(lineOf(m));
@@ -2784,6 +2940,7 @@ export function chatApp(ctx) {
     if (mode === 'thread' && panel) { panel = null; syncPanel(); return true; }
     if (mode === 'thread' && selecting) { selecting = null; render(); return true; }
     if (mode !== 'list') {
+      stopRecordingPlayback();
       // From a chat: its picture flies back down into its row.
       const was = mode === 'thread' ? threadId : null, from = was ? v.root.querySelector('.th-head')?.firstElementChild?.getBoundingClientRect() : null;
       mode = 'list'; threadId = null; selecting = null; quote = null; contactDraft = null;
@@ -2798,6 +2955,8 @@ export function chatApp(ctx) {
     const key = spaceKey();
     if (viewedSpace === key) return false;
     viewedSpace = key; spaceTurn++; epoch++; hitTurn++;
+    recordingSheet?.close();
+    stopRecordingPlayback();
     ctx.win.clearTimeout(hitTimer); ctx.win.clearTimeout(pace.timer); ctx.win.clearTimeout(autoTimer);
     autoFor = null; pace.thread = null; pace.queue = []; pace.hidden.clear(); pace.timer = 0;
     mode = 'list'; tab = 'msgs'; threadId = thread = null; selecting = quote = panel = contactDraft = null;
@@ -2810,6 +2969,7 @@ export function chatApp(ctx) {
   const stopSpace = api.subscribe?.(event => {
     if (!v.disposed && ['space', 'partition', 'settings'].includes(event.type) && syncSpace()) Promise.resolve(render()).catch(error => ctx.notify(error.message));
   });
+  v.leave = () => { recordingSheet?.close(); stopRecordingPlayback(); };
   v.refresh = () => render();
   v.onAvatars = () => render();
   v.openThread = open;
@@ -2830,7 +2990,7 @@ export function chatApp(ctx) {
   /** 动态, from the tavern page's 动态小窗. */
   v.showMoments = () => { mode = 'list'; tab = 'moments'; threadId = null; search = ''; moments.only(''); v.root.scrollTop = 0; render(); };
   const dispose = v.dispose;
-  v.dispose = () => { conversationSwipe?.dispose(); stopSpace?.(); ctx.win.clearTimeout(hitTimer); ctx.win.clearTimeout(autoTimer); ctx.win.clearTimeout(pace.timer); moments.dispose(); photoURLs.dispose(); bubbleURLs.dispose(); dispose(); };
+  v.dispose = () => { recordingSheet?.close(); stopRecordingPlayback(); conversationSwipe?.dispose(); stopSpace?.(); ctx.win.clearTimeout(hitTimer); ctx.win.clearTimeout(autoTimer); ctx.win.clearTimeout(pace.timer); moments.dispose(); photoURLs.dispose(); bubbleURLs.dispose(); dispose(); };
   render();
   return v;
 }

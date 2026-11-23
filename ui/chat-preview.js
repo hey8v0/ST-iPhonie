@@ -7,7 +7,7 @@ export const you = who => who === 'me' ? '你' : who;
 export const patText = (m, name = you) => `${name(m.from)} 拍了拍 ${name(m.target)}${m.suffix || ''}`;
 export const noticeText = (m, name = you) => name(m.from) + String(m.text).replaceAll('{对方}', () => name(m.target));
 /** How long a voice message lasts, from its words (about five a second). */
-export const seconds = m => Math.max(1, Math.min(60, Math.round((m.text || '').length / 5)));
+export const seconds = m => m.recording?.duration || m.voiceDuration || Math.max(1, Math.min(60, Math.round((m.text || '').length / 5)));
 export function preview(m, name = you) {
   if (!m) return '还没有消息';
   switch (m.kind) {

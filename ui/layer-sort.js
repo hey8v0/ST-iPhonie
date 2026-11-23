@@ -42,7 +42,10 @@ export function layerSort({ctx, list, tree, commit, paint, groupName, scroller =
     if (!entry) return;
     entry.group.open = !entry.group.open;
     commit(next);
-    rowOf('g:' + gid)?.querySelector('.style-group-row')?.setAttribute('aria-expanded', String(entry.group.open));
+    const row = rowOf('g:' + gid);
+    for (const control of row?.querySelectorAll('.style-group-row, [data-group-fold]') || []) {
+      control.setAttribute('aria-expanded', String(entry.group.open));
+    }
     bodyOf(gid)?.toggleAttribute('data-closed', !entry.group.open);
   }
   /** 改名 in the row itself: Enter or leaving the box keeps it, Esc does not. */

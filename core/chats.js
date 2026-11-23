@@ -131,18 +131,23 @@ const STATES = {redpacket: ['sent', 'opened'], transfer: ['sent', 'accepted', 'r
 /** The messages that can be edited: their words; a photo keeps its picture. */
 export const EDITABLE_KINDS = Object.freeze(['text', 'voice', 'photo']);
 const requestsOf = list => (Array.isArray(list) ? list : []).filter(r => r && String(r.text || '').trim()).slice(-10).map(r => ({text: clip(r.text, 300).trim(), at: Number.isFinite(r.at) ? r.at : 0}));
-const refusedOf = v => Number.isFinite(v) && v > 0 ? {refused: v} : {};
+export const FRIEND_REASON_LIMIT = 200;
+export const RECORDING_LIMITS = Object.freeze({seconds: 60, bytes: 2 * 1024 * 1024});
+const RECORDING_FORMATS = new Map([['audio/webm', 'webm'], ['audio/mp4', 'm4a'], ['audio/ogg', 'ogg'], ['audio/wav', 'wav']]);
+export const recordingFormat = type => RECORDING_FORMATS.get(String(type || '').split(';')[0].toLowerCase()) || '';
+const refusedOf = ({refused, reason}) => Number.isFinite(refused) && refused > 0
+  ? {refused, ...(String(reason || '').trim() ? {reason: clip(reason, FRIEND_REASON_LIMIT).trim()} : {})} : {};
 /** A private chat's 删好友 state, checked; null when there is none. */
 export function cleanFriend(f) {
   if (!f || typeof f !== 'object' || !['me', 'them'].includes(f.by)) return null;
-  return {by: f.by, at: Number.isFinite(f.at) ? f.at : 0, requests: requestsOf(f.requests), ...refusedOf(f.refused)};
+  return {by: f.by, at: Number.isFinite(f.at) ? f.at : 0, requests: requestsOf(f.requests), ...refusedOf(f)};
 }
 /** A private chat's 黑名单 state, checked; null when there is none. */
 export function cleanBlocked(b) {
   if (!b || typeof b !== 'object') return null;
   const held = (Array.isArray(b.held) ? b.held : []).filter(h => h && String(h.text || '').trim()).slice(-CHAT_STORE_LIMITS.held)
     .map(h => ({kind: clip(h.kind, 20).trim() || 'text', text: clip(h.text, 500).trim(), at: Number.isFinite(h.at) ? h.at : 0}));
-  return {at: Number.isFinite(b.at) ? b.at : 0, held, requests: requestsOf(b.requests), ...refusedOf(b.refused)};
+  return {at: Number.isFinite(b.at) ? b.at : 0, held, requests: requestsOf(b.requests), ...refusedOf(b)};
 }
 /** The words a search looks through in a message. */
 export function messageWords(m) {
@@ -223,7 +228,16 @@ function cleanMessage(m, id, at) {
   if (!from) throw fail('消息缺少发送人');
   const out = {id, from, kind, text: clip(m.text, CHAT_STORE_LIMITS.text), at};
   if (Number.isFinite(m.updatedAt) && m.updatedAt > 0) out.updatedAt = m.updatedAt;
-  if (kind === 'voice') { out.translation = clip(m.translation, CHAT_STORE_LIMITS.text); out.emotion = clip(m.emotion, 100); }
+  if (kind === 'voice') {
+    out.translation = clip(m.translation, CHAT_STORE_LIMITS.text);
+    out.emotion = clip(m.emotion, 100);
+    if (from === 'me' && /^[\w-]{1,80}$/.test(m.recording?.id || '')) {
+      out.recording = {id:m.recording.id, duration:Math.min(RECORDING_LIMITS.seconds, Math.max(1, Math.ceil(Number(m.recording.duration) || 1)))};
+    } else if (from === 'me' && m.voiceDuration !== undefined) {
+      if (!Number.isInteger(m.voiceDuration) || m.voiceDuration < 1 || m.voiceDuration > RECORDING_LIMITS.seconds) throw fail('请填写 1 到 60 秒的整数');
+      out.voiceDuration = m.voiceDuration;
+    }
+  }
   if (kind === 'photo' && m.photoId) out.photoId = clip(m.photoId, 512);
   if (kind === 'photo' && m.imageTags) out.imageTags = clip(m.imageTags, 6000);
   if (kind === 'photo' && Array.isArray(m.imageVersions)) out.imageVersions = [...new Set(m.imageVersions.filter(x => typeof x === 'string' && x).map(x => clip(x, 512)))].slice(-100);
@@ -308,7 +322,7 @@ function cleanMessage(m, id, at) {
   if (typeof m.story === 'string' && m.story) { out.story = clip(m.story, 300); out.storyVer = clip(m.storyVer, 40); }
   if (out.story && out.kind === 'text' && typeof m.storyReceipt === 'string' && m.storyReceipt.startsWith('phone:')) out.storyReceipt = clip(m.storyReceipt,600);
   const textless = ['photo', 'system', 'redpacket', 'transfer', 'pat', 'dice', 'recall', 'call', 'gift', 'file'];
-  if (!textless.includes(kind) && !out.text.trim()) throw fail('消息内容为空');
+  if (!out.recording && !textless.includes(kind) && !out.text.trim()) throw fail('消息内容为空');
   return out;
 }
 /** A chat's 重新回复 versions, checked (a message that does not hold is left out); null when fewer than two are left. */
@@ -367,12 +381,14 @@ export class ChatStore {
     if (!this.#factory?.open) throw fail('浏览器不支持本地保存聊天记录，请检查存储权限', 'STORAGE_UNAVAILABLE');
     this.#opening ||= new Promise((resolve, reject) => {
       let abandoned = false;
-      const req = this.#factory.open('st-iphonie-chats-v1', 2);
-      req.onupgradeneeded = () => {
+      const req = this.#factory.open('st-iphonie-chats-v1', 3);
+      req.onupgradeneeded = event => {
         const store = req.result.objectStoreNames.contains('threads') ? req.transaction.objectStore('threads') : req.result.createObjectStore('threads', {keyPath: ['scope', 'id']});
         if (!store.indexNames.contains('scope')) store.createIndex('scope', 'scope');
         if (!store.indexNames.contains('photo-refs')) store.createIndex('photo-refs', '_photoRefs', {multiEntry: true});
         if (!store.indexNames.contains('story-refs')) store.createIndex('story-refs', '_storyRefs', {multiEntry: true});
+        if (!req.result.objectStoreNames.contains('recordings')) req.result.createObjectStore('recordings', {keyPath:['scope', 'thread', 'id']});
+        if (event.oldVersion >= 2) return;
         const cursor = store.openCursor();
         cursor.onsuccess = () => { const row = cursor.result; if (row) { row.update(indexedThread(row.value)); row.continue(); } };
       };
@@ -389,27 +405,27 @@ export class ChatStore {
     }).finally(() => { this.#opening = null; });
     return this.#opening;
   }
-  #tx(mode, work) {
-    const job = this.#run(mode, work);
+  #tx(mode, work, recordings = false) {
+    const job = this.#run(mode, work, recordings);
     if (mode === 'readwrite') { this.#writing.add(job); const over = () => this.#writing.delete(job); job.then(over, over); }
     return job;
   }
   // A dropped connection (iPhone Safari after the page sat in the background) is reopened once; nothing was written.
-  async #run(mode, work, again = true) {
+  async #run(mode, work, recordings, again = true) {
     const db = await this.#open();
     try {
       return await new Promise((resolve, reject) => {
         let result, own, tx, change = null;
-        try { tx = db.transaction('threads', mode); } catch (error) { reject(this.#closed ? fail('聊天记录已关闭', 'CLOSED') : lostError(error)); return; }
+        try { tx = db.transaction(recordings ? ['threads', 'recordings'] : 'threads', mode); } catch (error) { reject(this.#closed ? fail('聊天记录已关闭', 'CLOSED') : lostError(error)); return; }
         const store = tx.objectStore('threads');
         tx.oncomplete = () => { if (mode === 'readwrite') this.#wrote(change); resolve(result); };
         tx.onabort = () => reject(own || (connectionLost(tx.error) ? lostError(tx.error) : fail(tx.error?.name === 'QuotaExceededError' ? '设备存储空间不足，聊天没有保存' : '聊天记录没有保存，请重试', 'STORAGE')));
-        work(store, value => { result = value; }, error => { own = error; tx.abort(); }, fn => { change = fn; });
+        work(store, value => { result = value; }, error => { own = error; tx.abort(); }, fn => { change = fn; }, recordings ? tx.objectStore('recordings') : null);
       });
     } catch (error) {
       if (error?.code !== 'STORAGE_LOST' || this.#closed) throw error;
       if (this.#db === db) { try { db.close(); } catch {} this.#db = null; }
-      if (again) { await breath(); return this.#run(mode, work, false); }
+      if (again) { await breath(); return this.#run(mode, work, recordings, false); }
       throw error;
     }
   }
@@ -425,7 +441,7 @@ export class ChatStore {
   #summary(row) {
     const {scope, _photoRefs, _storyRefs, messages, alts, blocked, ...rest} = row;
     // A blocked chat's 拦截记录 stays out of the list: only how much there is.
-    return structuredClone({pinned: false, muted: false, ...rest, ...(blocked ? {blocked: {at: blocked.at, requests: blocked.requests, count: blocked.held.length, ...refusedOf(blocked.refused)}} : {}), count: messages.length, last: messages.filter(m => m.kind !== 'system').at(-1) || null, streak: this.#streak(messages)});
+    return structuredClone({pinned: false, muted: false, ...rest, ...(blocked ? {blocked: {at: blocked.at, requests: blocked.requests, count: blocked.held.length, ...refusedOf(blocked)}} : {}), count: messages.length, last: messages.filter(m => m.kind !== 'system').at(-1) || null, streak: this.#streak(messages)});
   }
   #streak(messages) {
     const day = at => { const d = new Date(at); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()); };
@@ -471,14 +487,26 @@ export class ChatStore {
     return this.#public(row);
   }
   async #change(id, change) {
-    return this.#tx('readwrite', (store, done, abort, after) => this.#get(store, id, row => {
+    return this.#tx('readwrite', (store, done, abort, after, recordings) => this.#get(store, id, row => {
       if (!row) { abort(fail('这段聊天已不存在', 'MISSING')); return; }
-      try { change(row); } catch (error) { abort(error); return; }
+      const before = this.#recordingIds(row);
+      try { change(row, recordings); } catch (error) { abort(error); return; }
       if (row.messages.length > CHAT_STORE_LIMITS.messages) row.messages = row.messages.slice(-CHAT_STORE_LIMITS.messages);
+      if (before.size) {
+        const kept = this.#recordingIds(row);
+        for (const recording of before) if (!kept.has(recording)) recordings.delete([this.#scope, row.id, recording]);
+      }
       store.put(indexedThread(row));
       after(list => list.set(row.id, this.#summary(row)));
       done(this.#public(row));
-    }));
+    }), true);
+  }
+  #recordingIds(row) {
+    const ids = new Set();
+    for (const messages of [row.messages, ...(row.alts?.versions || [])]) {
+      for (const message of messages) if (message.recording) ids.add(message.recording.id);
+    }
+    return ids;
   }
   async update(id, {name, members, pinned, muted, friend, blocked, befriended, story, open, label, notice, nicks, post, manage, receipt = ''} = {}) {
     return this.#change(id, row => {
@@ -565,20 +593,63 @@ export class ChatStore {
     });
     return added;
   }
+  async saveRecording(threadId, {id, duration, text = '', quote, blob} = {}) {
+    if (!/^[\w-]{1,80}$/.test(id || '') || !blob?.size || blob.size > RECORDING_LIMITS.bytes || !recordingFormat(blob.type)) throw fail('录音为空、过大或格式不受支持');
+    return this.#change(threadId, (row, recordings) => {
+      const receipt = 'recording:' + id;
+      if (received(row, receipt) || this.#recordingIds(row).has(id)) return;
+      if (row.blocked || row.friend || row.watch || !canGroupSpeak(row, 'me', this.#now())) throw fail('这段聊天现在不能发送语音');
+      this.#append(row, [{from:'me', kind:'voice', text, quote, recording:{id, duration}}], {read:true, receipt});
+      recordings.put({scope:this.#scope, thread:row.id, id, blob});
+    });
+  }
+  async getRecording(threadId, id) {
+    return this.#tx('readonly', (store, done, abort, after, recordings) => this.#get(store, threadId, row => {
+      if (!row || !this.#recordingIds(row).has(id)) { done(null); return; }
+      const request = recordings.get([this.#scope, row.id, id]);
+      request.onsuccess = () => done(request.result?.blob || null);
+    }), true);
+  }
+  /** Answer the displayed application and save its record together. */
+  async answerFriendRequest(id, accept, {reason = '', expected} = {}) {
+    return this.#change(id, row => {
+      const cut = row.friend?.by === 'me', blocked = row.blocked;
+      if (row.type !== 'dm' || (!cut && !blocked)) throw fail('TA 已经是你的好友了');
+      const requests = [...(cut ? row.friend.requests : []), ...(blocked?.requests || [])].sort((a, b) => a.at - b.at);
+      const last = requests.at(-1);
+      if (!last || (expected && (last.at !== expected.at || last.text !== expected.text || requests.length !== expected.count))) throw fail('好友申请已更新，请刷新后重试');
+      const now = this.#now(), name = row.members[0];
+      const note = clip(reason, FRIEND_REASON_LIMIT).trim();
+      const messages = accept
+        ? [{from:'me', kind:'system', text:`你通过了${name}的好友申请，现在可以开始聊天了`}, ...requests.map(r => ({from:name, kind:'text', text:r.text}))]
+        : [{from:'me', kind:'system', text:`你拒绝了${name}的好友申请${note ? '。拒绝理由：' + note : ''}`}];
+      this.#append(row, messages, {read:true});
+      if (accept) {
+        delete row.friend;
+        delete row.blocked;
+        row.befriended = now;
+      } else {
+        if (cut) row.friend = cleanFriend({...row.friend, requests:[], refused:now, reason:note});
+        if (blocked) row.blocked = cleanBlocked({...blocked, requests:[], refused:now, reason:note});
+      }
+    });
+  }
   /** Adds messages. Replies count as unread unless `read` is set (the chat is open on screen). */
   async append(id, messages, {read = false, receipt = ''} = {}) {
-    return this.#change(id, row => {
-      const now = this.#now();
-      if (received(row, receipt)) return;
-      receive(row, receipt);
-      const added = messages.filter(m => m.kind === 'system' || canGroupSpeak(row, m.from, now)).map((m, i) => cleanMessage(m, this.#id(), now + i));
-      row.messages.push(...added);
-      // Anything coming after the last round ends its versions (it is no longer the last).
-      if (added.some(m => m.kind !== 'system')) delete row.alts;
-      if (!read) row.unread += added.filter(m => m.from !== 'me' && !['system', 'notice', 'recall'].includes(m.kind)).length;
-      else row.readMessages = [...new Set([...(row.readMessages || []), ...added.map(m => m.id)])].slice(-CHAT_STORE_LIMITS.messages);
-      row.updatedAt = now;
-    });
+    return this.#change(id, row => this.#append(row, messages, {read, receipt}));
+  }
+  #append(row, messages, {read = false, receipt = ''} = {}) {
+    const now = this.#now();
+    if (received(row, receipt)) return;
+    receive(row, receipt);
+    const added = messages.filter(m => m.kind === 'system' || canGroupSpeak(row, m.from, now)).map((m, i) => cleanMessage(m, this.#id(), now + i));
+    row.messages.push(...added);
+    // Anything coming after the last round ends its versions (it is no longer the last).
+    if (added.some(m => m.kind !== 'system')) delete row.alts;
+    if (!read) row.unread += added.filter(m => m.from !== 'me' && !['system', 'notice', 'recall'].includes(m.kind)).length;
+    else row.readMessages = [...new Set([...(row.readMessages || []), ...added.map(m => m.id)])].slice(-CHAT_STORE_LIMITS.messages);
+    row.updatedAt = now;
+    return added;
   }
   /**
    * 重新回复 came back: the chat's last round (the contacts' messages after the user's last one) gives way to these
@@ -701,7 +772,7 @@ export class ChatStore {
       if ('text' in patch) {
         if (!EDITABLE_KINDS.includes(m.kind)) throw fail('这条消息不能编辑');
         const text = clip(patch.text, CHAT_STORE_LIMITS.text).trim();
-        if (!text && m.kind !== 'photo') throw fail('消息不能是空的');
+        if (!text && m.kind !== 'photo' && !m.recording) throw fail('消息不能是空的');
         m.text = text;
         if (m.kind === 'voice' && 'translation' in patch) m.translation = clip(patch.translation, CHAT_STORE_LIMITS.text).trim();
         return;
@@ -762,7 +833,12 @@ export class ChatStore {
     return this.#change(id, row => { row.unread = 0; row.readMessages = row.messages.map(m => m.id); });
   }
   async remove(id) {
-    return this.#tx('readwrite', (store, done, abort, after) => { store.delete([this.#scope, String(id)]); after(list => list.delete(String(id))); done(true); });
+    return this.#tx('readwrite', (store, done, abort, after, recordings) => this.#get(store, id, row => {
+      if (row) for (const recording of this.#recordingIds(row)) recordings.delete([this.#scope, row.id, recording]);
+      store.delete([this.#scope, String(id)]);
+      after(list => list.delete(String(id)));
+      done(true);
+    }), true);
   }
   async unread() {
     return (await this.list()).reduce((n, t) => n + (t.muted ? 0 : t.unread), 0);
@@ -795,18 +871,33 @@ export class ChatStore {
   async importThreads(threads, {replace = false, merge} = {}) {
     const prepare = values => this.#prepareThreads(values);
     const rows = prepare(threads);
-    return this.#tx('readwrite', (store, done, abort) => {
-      const write = incoming => { for (const row of incoming) store.put(indexedThread(row)); done(incoming.length); };
-      if (!replace) { write(rows); return; }
+    return this.#tx('readwrite', (store, done, abort, after, recordings) => {
+      const discardLost = (old, next) => {
+        const kept = next ? this.#recordingIds(next) : new Set();
+        for (const recording of this.#recordingIds(old)) if (!kept.has(recording)) recordings.delete([this.#scope, old.id, recording]);
+      };
+      if (!replace) {
+        for (const row of rows) this.#get(store, row.id, old => {
+          if (old) discardLost(old, row);
+          store.put(indexedThread(row));
+        });
+        done(rows.length);
+        return;
+      }
       const req = store.index('scope').getAll(this.#scope);
       req.onsuccess = () => {
         try {
           const incoming = merge ? prepare(merge(req.result.map(row => this.#public(row)))) : rows;
-          for (const row of req.result) store.delete([this.#scope, row.id]);
-          write(incoming);
+          const next = new Map(incoming.map(row => [row.id, row]));
+          for (const row of req.result) {
+            discardLost(row, next.get(row.id));
+            if (!next.has(row.id)) store.delete([this.#scope, row.id]);
+          }
+          for (const row of next.values()) store.put(indexedThread(row));
+          done(next.size);
         } catch (error) { abort(error); }
       };
-    });
+    }, true);
   }
   close() { this.#closed = true; this.#summaries = null; this.#db?.close(); this.#db = null; }
 }
