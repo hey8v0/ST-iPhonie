@@ -7,12 +7,14 @@ import {icon, spark} from './icons.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {fly} from './carry.js';
 import {openCustomCatalog, modelPicker} from './custom-catalog.js';
+import {voiceModelControl, chooseVoiceModel} from './voice-model-picker.js';
 import {catalogDefaults, officialSpeechService, CUSTOM_TEMPLATES, voicesFromFolder, shortLanguage, customHint, customSlots, voiceFromLink} from '../core/custom-voice.js';
 import {cleanAddress, fromCurl} from '../core/custom-detect.js';
 
 export function enginesApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'engines'), drafts = new Map();
   let engine = null, dirty = false, subscription = null, subscriptionError = '', subscriptionStatus = 0, textDraft = null, models = [], subscriptionLoad = 0;
+  const voiceDirectories=new Map();
   // ComfyUI: what the last connection check found ({models, samplers, schedulers} or {error}), and the tavern's workflows.
   let comfyInfo = null, comfyRequest = 0;
   let gptList = [], gptStatus = '', gptRequest = 0;
@@ -481,7 +483,7 @@ export function enginesApp(ctx) {
           ${engine === 'custom' ? customKeyField(saved) : field(saved ? '再加一个密钥' : 'API Key', textArea('key', '', `rows="1" class="code key-paste" autocomplete="off" spellcheck="false" placeholder="${saved ? '粘贴新的密钥' : '粘贴密钥，多个就每行一个'}"`), '粘贴完点一下别处就保存了。可以保存多个账号的密钥，新加的排在后面，不用的可以单独删掉。先用排在前面的；某个密钥被拒（401、403）、额度用完（402）或请求太频繁（429）时，自动换下一个重试，这次打开页面里不再用它。想手动换，点那个密钥的「用这个」：马上改用它，并把它排到第一个，以后打开也先用它。\n\n密钥只保存在当前浏览器和酒馆地址，按账户分别保存。')}
           ${engine === 'fish' && api.fishSubscriptionStatus?.().connected ? '</div></details>' : ''}
           ${engine==='custom' && c.params.url ? (customSlots(c.params).has('model') ? modelPicker('custom-models','默认模型',c.params.cloudModel || '选择模型') : '') + btn('custom-voices','浏览音色','secondary small') : ''}
-          ${schema.models.length > 1 ? field('默认模型', select('model', c.model, schema.models.map(m => [m.id, m.id, !m.supported])), unsupported || [schema.modelNote, '角色没有单独指定模型时使用这里的模型。'].filter(Boolean).join('\n\n')) : ''}
+          ${schema.models.length > 1 ? field('默认模型', voiceModelControl(c.model, {refresh:true}), [schema.modelNote,voiceDirectories.get(engine)?.note,'手动填写模型 ID，或点箭头查看全部模型。新模型若需要不同的 API 协议，还须更新插件适配。角色没有单独指定模型时使用这里的模型。'].filter(Boolean).join('\n\n')) : ''}
           ${engine === 'mini' ? field('服务区域', select('region', c.region, [['cn', '国内'], ['global', '国际'], ['uw', '国际 · 低延迟入口']])) : ''}
         </div>`
       + (fish ? `<details data-group="fish-relay"><summary>中转<small class="fold-note">${fish.relay ? esc(fish.relay.replace(/^https?:\/\//, '')) : '直连 Fish Audio'}</small></summary><div class="fold-body">${fishRelay()}</div></details>` : '')
@@ -672,10 +674,20 @@ export function enginesApp(ctx) {
     v.root.scrollTop = 0;
     // Fish: which models web pages may call now (drama-3 moves there once Fish adds it); drawn again when that changed.
     if (id === 'fish') api.fishCatalog?.().then(changed => { if (changed && engine === 'fish') render(); }).catch(() => {});
+    if (['fish','eleven','mini','mimo','doubao'].includes(id)) refreshVoiceModels(id, false);
     if (id === 'fish') { fishConnected = !!api.fishSubscriptionStatus?.().connected; if (fishConnected) loadFishCredits(); }
     if (id === 'fish' && !api.fishSubscriptionStatus?.().connected) api.fishSubscriptionResume?.().then(status => {
       if (status?.connected && !v.disposed && engine === 'fish') fishLinked('Fish 订阅账户已连接（补上了刚才那次登录）');
     }).catch(() => {});
+  }
+  async function refreshVoiceModels(id,refresh){
+    try {
+      const value=await api.voiceModels(id,api.getState().connections[id],refresh);
+      voiceDirectories.set(id,value);
+      if(v.disposed||engine!==id)return;
+      // Keep the current draft and typed model untouched. The picker reads
+      // the full directory whenever it is opened; no native datalist filtering.
+    }catch(error){if(refresh)ctx.notify('读取模型失败：'+error.message,{error:true});}
   }
   v.edit = edit;
   // A returned callback or a resumed tab may supply credentials. Balance reads never count as a successful login.
@@ -769,7 +781,7 @@ export function enginesApp(ctx) {
     if (el.dataset.field === 'relay') { if (engine === 'nai') saveImageField({url: el.value}, el.value.trim() ? '中转地址已保存' : '已改回直连 NovelAI'); else return saveFishRelay(el.value); return; }
     if (el.dataset.field === 'eleven-relay') { api.saveConnection('eleven', {relay: el.value}); draft().relay = api.getState().connections.eleven.relay; balances.delete('eleven'); render(); ctx.notify(draft().relay ? 'ElevenLabs 接口地址已保存' : '已改回 ElevenLabs 官方接口'); return; }
     if (el.dataset.field === 'relayApi') { api.saveConnection('fish', {relayApi: el.value}); draft().relayApi = el.value; balances.delete('fish'); render(); return; }
-    draft()[el.dataset.field] = el.value; changed(); render();
+    draft()[el.dataset.field] = el.value; changed(); if(el.dataset.field==='model' && v.root.querySelector('[data-field=model]')?.tagName==='INPUT')return; render();
   });
   /** A key is saved when its box is left (several, one per line, on a voice engine). */
   function saveTypedKey(el) {
@@ -864,6 +876,20 @@ export function enginesApp(ctx) {
   v.on('click', '[data-action]', el => act(el.dataset.action, el));
   async function act(action, el) {
     switch (action) {
+      case 'choose-voice-model': {
+        const id = engine, connection = draft();
+        if (!id || !connection) break;
+        const rows = await api.voiceModels(id, api.getState().connections[id], false);
+        if (v.disposed || engine !== id || draft() !== connection) break;
+        voiceDirectories.set(id, rows);
+        const picked = await chooseVoiceModel(ctx, rows.models, connection.model);
+        if (picked === null || v.disposed || engine !== id || draft() !== connection) break;
+        connection.model = picked;
+        changed();
+        render();
+        break;
+      }
+      case 'voice-model-refresh': await v.busy(el,()=>refreshVoiceModels(engine,true)); break;
       case 'fish-refresh': await loadFishCredits(true); break;
       case 'fish-account-menu': {
         const key = await menu(ctx, '订阅连接', [{key:'fish-subscription',icon:'swap',label:'重新授权 / 切换团队'}, {key:'fish-diagnose',icon:'info',label:'连接诊断'}, {key:'fish-disconnect',icon:'close',label:'断开订阅账户',danger:true}]);

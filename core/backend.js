@@ -1,3 +1,4 @@
+import {mergeVoiceModels, voiceModelId} from './model-catalog.js';
 import {TextTasks} from './text-tasks.js';
 import {withProxyHeaders, noTavernProxy} from './proxy-url.js';
 import { ownBlob } from './compat.js';
@@ -132,7 +133,7 @@ const engineCheck = engine => { if (!ENGINES.includes(engine)) throw Error('引�
 const keyCheck = engine => { if (engine !== 'nai' && engine !== 'llm' && engine !== 'gpt' && engine !== 'embed' && !SONG_KEYS.includes(engine)) engineCheck(engine); };
 // 自己的接口: a role's model names one of its sets; one that is gone (deleted on another device) is not refused,
 // its lines go to the set in use.
-const modelCheck = (engine, model) => { engineCheck(engine); if (engine === 'custom' ? model && !/^[\w-]{1,64}$/.test(model) : model && !TTSParameters.catalogs[engine].models.includes(model)) throw Error('请选择列表中的模型'); };
+const modelCheck = (engine, model) => { engineCheck(engine); if (engine === 'custom' ? model && !/^[\w-]{1,64}$/.test(model) : model && !voiceModelId(engine, model)) throw Error('请选择列表中的模型'); };
 const message = error => error instanceof TypeError ? '设置格式无效，请检查字段和条目' : error.message;
 
 /** Framework-independent operations. Host callbacks own SillyTavern persistence and rendering. */
@@ -3611,7 +3612,7 @@ export class TTSBackend {
         engineCheck(engine); modelCheck(engine, connection.model);
         const current = clone(connection); TTSParameters.normalize(engine, current);
         const catalog = clone(TTSParameters.catalogs[engine]);
-        catalog.models = catalog.models.map(id => ({ id, supported: true, reason: '' }));
+        catalog.models = engine === 'custom' ? catalog.models.map(id => ({id, supported:true, reason:''})) : mergeVoiceModels(engine, catalog.models, this.providers.modelCache?.get(engine)?.models || [], current.model);
         // Models only on Fish's own /v1/tts: without a relay they go through the tavern's proxy, which must be on.
         const native = engine === 'fish' && TTSParameters.fishBase(current) === FISH_API ? catalog.models.filter(m => TTSParameters.fishNative({ ...current, model: m.id })).map(m => m.id) : [];
         catalog.modelNote = native.length && tauriTavern() ? `${native.join('、')} 现在只在 Fish 自己的接口上，网页不能直接调用。TauriTavern 现在还没有酒馆的转发功能，要在下面的「中转」里填一个 Fish 格式的中转才能用这个模型；TauriTavern 以后加上转发，或者 Fish 把它放进网页能用的接口，就不用中转了。` : native.length ? `${native.join('、')} 现在只在 Fish 自己的接口上，网页不能直接调用，要借酒馆转发：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆（用中转的不用改）。Fish 把它放进网页能用的接口以后会自动直连。` : '';
@@ -3839,7 +3840,7 @@ export class TTSBackend {
             comfyNodeSpecs: options => this.comfyNodeSpecs(options), comfyNodeList: () => this.comfyNodeList(), editComfyNodes: change => this.editComfyNodes(clone(change || {})), prepareComfyImport: source => this.prepareComfyImport(source),
             comfySavedWorkflows: () => this.comfySavedWorkflows(), comfySavedWorkflow: name => this.comfySavedWorkflow(name), comfyRecentRuns: () => this.comfyRecentRuns(), comfyUploadPicture: file => this.comfyUploadPicture(file),
             saveDrawPreset: preset => this.saveDrawPreset(preset), deleteDrawPreset: id => this.deleteDrawPreset(id), previewDrawPrompt: preset => this.previewDrawPrompt(preset),
-            naiSubscription: refresh => this.naiSubscription(refresh), naiProbe: () => this.naiProbe(), fishCatalog: () => this.providers.fishCatalog(), fishProbe: () => { this.assertOpen(); keyCheck('fish'); return this.providers.probeFish(clone(this.settings.connections.fish)); },
+            naiSubscription: refresh => this.naiSubscription(refresh), naiProbe: () => this.naiProbe(), voiceModels: (engine, connection, refresh) => this.providers.voiceModels(engine, connection || this.settings.connections[engine], refresh), fishCatalog: () => this.providers.fishCatalog(), fishProbe: () => { this.assertOpen(); keyCheck('fish'); return this.providers.probeFish(clone(this.settings.connections.fish)); },
             listVibes: () => this.listVibes(), compactVibes: () => this.compactVibes(), importVibes: files => this.importVibes(files), updateVibe: (id, patch) => this.updateVibe(id, clone(patch || {})), deleteVibe: id => this.deleteVibe(id), deleteVibes: ids => this.deleteVibes([...(ids || [])]), exportVibes: target => this.exportVibes(clone(target || {})), embedVibes: (target, picture, name) => this.embedVibes(clone(target || {}), picture, name), importPictureVibes: (list, options) => this.importPictureVibes(clone(list || []), clone(options || {})), vibePlan: model => clone(this.vibePlan(model || this.settings.draw.params.model)), drawQuote: (params, extra) => this.drawQuote(params, extra), naiTool: input => this.naiTool(clone(input || {})),
             generateImage: input => this.generateImage(input).then(({ blob, ...result }) => result),
             drawQueue: () => this.drawQueue.list(), cancelDraw: key => this.drawQueue.cancel(key), cancelAllDraws: () => this.drawQueue.cancelAll(),
