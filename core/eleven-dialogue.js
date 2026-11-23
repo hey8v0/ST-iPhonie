@@ -30,6 +30,17 @@ export function turboFrames(request,key) {
   }
   return [first,{inputs:[{text,voice_id:voice,new_turn:true}]},{close_socket:true}];
 }
+function wavPcm(chunks,bytes,rate) {
+ const out=new Uint8Array(44+bytes),v=new DataView(out.buffer);
+ const put=(at,t)=>[...t].forEach((c,i)=>v.setUint8(at+i,c.charCodeAt(0)));
+ put(0,'RIFF');v.setUint32(4,bytes+36,true);put(8,'WAVEfmt ');
+ v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+ v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);
+ v.setUint16(32,2,true);v.setUint16(34,16,true);
+ put(36,'data');v.setUint32(40,bytes,true);
+ let at=44;for(const chunk of chunks){out.set(chunk,at);at+=chunk.length;}
+ return out;
+}
 export async function elevenTurboSpeech(request,key,signal,{WebSocketImpl=globalThis.WebSocket,timeout=120000}={}) {
  if(typeof WebSocketImpl!=='function')throw Error('当前浏览器不支持 WebSocket，无法使用 Eleven v4 Turbo');
  if(signal?.aborted)throw new DOMException('已停止','AbortError');
@@ -64,7 +75,12 @@ export async function elevenTurboSpeech(request,key,signal,{WebSocketImpl=global
    }
    if(data.is_final){
     if(!size){finish(Error('Eleven v4 Turbo 没有返回声音'));return;}
-    finish(null,new Blob(chunks,{type:request.format?.startsWith('pcm_')?'audio/wav':request.format?.startsWith('opus_')?'audio/ogg':'audio/mpeg'}));
+    const format=String(request.format||'mp3_44100_128');
+    if(format.startsWith('pcm_')){
+     const rate=Number(format.split('_')[1]);
+     if(!Number.isFinite(rate)||rate<8000||rate>96000||size%2){finish(Error('Eleven v4 Turbo 返回的 PCM 数据无效'));return;}
+     finish(null,new Blob([wavPcm(chunks,size,rate)],{type:'audio/wav'}));
+    }else finish(null,new Blob(chunks,{type:format.startsWith('wav_')?'audio/wav':format.startsWith('opus_')?'audio/ogg':'audio/mpeg'}));
    }
   };
  });
