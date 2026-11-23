@@ -3,6 +3,7 @@ import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {layerSort} from './layer-sort.js';
 import {layerTree} from '../core/layers.js';
 import {lookTest} from '../core/draw.js';
+import {roleSpeechSpeed} from '../core/parameters.js';
 import {openCustomCatalog, modelPicker} from './custom-catalog.js';
 import {voiceModelControl, chooseVoiceModel} from './voice-model-picker.js';
 import {voiceFromLink, customSetOf, customParams, customSlots} from '../core/custom-voice.js';
@@ -202,6 +203,47 @@ export function rolesApp(ctx) {
     return `<div class="group"><button class="list-row" data-action="voice-pool"><span><strong>音色收藏夹</strong><small>${pool.length ? `${pool.length} 个音色 · 角色页填音色时可以直接选` : '还是空的：在「从列表选」里点 ♡，或在收藏夹里手动添加'}</small></span>${icon('next')}</button></div>`;
   }
 
+  const speedFor = (route, connection = api.getState().connections[route.engine]) => roleSpeechSpeed(route, connection, {
+    fishSubscription: route.engine === 'fish' && api.fishSubscriptionStatus?.()?.connected === true
+  });
+  const speedLabel = speed => !speed ? '当前不可调' : speed.value === undefined ? '跟随引擎' : `${speed.value.toFixed(2)}×`;
+
+  function editSpeed() {
+    const route = current, engine = route.engine, speed = speedFor(route);
+    if (!speed) {
+      const reason = engine === 'fish' ? '当前 Fish 网页订阅通道不提供原生语速。' : '当前引擎或模型不提供可单独调整的合成语速。';
+      ctx.dialog('角色语速', `<p class="hint">${esc(reason)}</p>`);
+      return;
+    }
+    let custom = speed.value !== undefined;
+    const button = (value, label) => `<button type="button" data-speed-mode="${value}" aria-pressed="${custom === value}">${label}</button>`;
+    const d = ctx.dialog('角色语速', `<div class="segmented" role="group" aria-label="语速设置">${button(false, '跟随引擎')}${button(true, '自定义')}</div>
+      <p class="hint" data-speed-inherited${custom ? ' hidden' : ''}>引擎语速 ${speed.inherited.toFixed(2)}×</p>
+      <div data-speed-value${custom ? '' : ' hidden'}>${field('语速倍率', input('role-speed', speed.value ?? speed.inherited, 'number', `min="${speed.min}" max="${speed.max}" step="0.01" inputmode="decimal" required`))}</div>
+      <div class="actions">${btn('apply-speed', '应用', 'primary')}</div>`);
+    d.body.addEventListener('click', e => {
+      const mode = e.target.closest('[data-speed-mode]');
+      if (mode) {
+        custom = mode.dataset.speedMode === 'true';
+        for (const chip of d.body.querySelectorAll('[data-speed-mode]')) chip.setAttribute('aria-pressed', String(chip === mode));
+        d.body.querySelector('[data-speed-value]').hidden = !custom;
+        d.body.querySelector('[data-speed-inherited]').hidden = custom;
+        return;
+      }
+      if (!e.target.closest('[data-action=apply-speed]')) return;
+      if (v.disposed || current !== route || route.engine !== engine) { d.close(); return; }
+      const value = d.body.querySelector('[data-field=role-speed]');
+      if (custom && !value.reportValidity()) return;
+      route.bindings ||= {};
+      const binding = route.bindings[engine] ||= {voice:route.voice, model:route.model || ''};
+      if (custom) binding.speed = value.valueAsNumber;
+      else delete binding.speed;
+      d.close();
+      v.root.querySelector('[data-role-speed-label]').textContent = speedLabel(speedFor(route));
+      changed();
+    });
+  }
+
   function renderEditor() {
     listDrawn = '';
     swipe?.dispose(); swipe = null;
@@ -222,7 +264,7 @@ export function rolesApp(ctx) {
         <div class="group pad">${field('角色名称', input('name', r.name, 'text', 'placeholder="与台词里的说话者一致"'))}
           ${field('别名', input('aliases', Array.isArray(r.aliases) ? r.aliases.join('、') : r.aliases || '', 'text', 'placeholder="正文里的其他叫法，用逗号隔开"'), '正文里有时写全名、有时只写名或姓，比如「夏尔」和「夏尔·凡多姆海恩」：把其他叫法填在这里，都用这个角色的音色，不会再多出一个角色。全名里带「·」的会自动认出来。')}
           ${api.getState().roleGroups.length ? field('分组', select('group', r.group || '', [['', '不分组'], ...api.getState().roleGroups.map(g => [g.id, g.name])])) : ''}</div>
-        ${groupTitle('引擎', help('每个角色在各家引擎里各自记住一套音色和模型，切过去再切回来不会丢。'))}
+        ${groupTitle('引擎', help('每个角色按引擎记住音色、模型和自定义语速，切过去再切回来会恢复。'))}
         <div class="engine-tabs">${Object.entries(engines).map(([k, label]) => {
           const bound = k === r.engine ? r.voice : r.bindings?.[k]?.voice;
           return `<button class="engine-tab" data-action="route-engine" data-engine="${k}" aria-pressed="${r.engine === k}" title="${esc(label + '：' + (bound ? voiceLabel(bound) : '未选音色'))}">${label}<small>${esc(bound ? voiceLabel(bound) : '未选音色')}</small></button>`;
@@ -234,6 +276,7 @@ export function rolesApp(ctx) {
           ${mimo === 'design'
             ? field('音色描述', textArea('voice', r.voice, 'rows="3" placeholder="例如：二十岁出头的女生，声音清亮，带点慵懒，说话慢悠悠的"'), '用一到四句话描述：性别年龄、音色质感、情绪语气、语速节奏。不要写混响、回声这类后期效果，也不要写“普通”“正常”这种模糊的词。')
             : field(mimo === 'clone' ? '克隆样本' : r.engine === 'custom' ? '音色' : '音色 ID', input('voice', r.voice, 'text', `placeholder="${mimo === 'clone' ? '填克隆样本的名字，或从列表选择' : r.engine === 'custom' ? '音色的名字或者音色 ID，或从列表选择' : '粘贴音色 ID 或从列表选择'}" autocomplete="off"`), r.engine === 'custom' ? '「自己的接口」里添加过的音色写它的名字；没添加的，直接填服务认的音色 ID 就行（比如公益站音色页网址的最后一段，粘贴整个网址也可以）。服务列出了音色的，「从列表选」里都有。' : '')}
+          <button type="button" class="setting-row" data-action="role-speed" aria-haspopup="dialog" style="width:100%;border-top:1px solid var(--line)"><span>语速</span><span style="color:var(--ink2)"><small data-role-speed-label>${speedLabel(speedFor(r, c))}</small>${icon('next')}</span></button>
         </div>
         <details data-group="role-model"><summary>${modelTitle(r)}<small class="fold-note">${esc([modelNote(r), r.language ? languageName(r.language) : '跟随默认'].filter(Boolean).join(' · '))}</small></summary><div class="fold-body">
           ${modelField(r, c, schema)}
@@ -388,6 +431,7 @@ export function rolesApp(ctx) {
     current[el.dataset.field] = el.value;
     if (el.dataset.field === 'customModel') current.customModelSet=customSetOf(api.readState().connections.custom,current.model);
     if (el.dataset.field === 'voice') current.autoVoice = false;
+    if (el.dataset.field === 'model') v.root.querySelector('[data-role-speed-label]').textContent = speedLabel(speedFor(current));
     changed();
     if (el.dataset.field === 'name') { const n = v.root.querySelector('[data-id-name]'); if (n) n.textContent = el.value || '新角色'; }
     if (el.dataset.field === 'voice') { const n = v.root.querySelector('[data-id-voice]'); if (n) n.textContent = el.value ? voiceLabel(el.value) : '未选择'; }
@@ -413,6 +457,7 @@ export function rolesApp(ctx) {
   v.root.addEventListener('error', e => { if (e.target.matches?.('.role-ref img')) e.target.remove(); }, true);
   v.on('click', '[data-action]', async el => {
     switch (el.dataset.action) {
+      case 'role-speed': editSpeed(); break;
       case 'choose-voice-model': {
         if (!current || current.engine === 'custom') break;
         const target = current, engine = target.engine, connection = api.getState().connections[engine];

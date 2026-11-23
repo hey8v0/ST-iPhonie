@@ -101,6 +101,20 @@ function unavailable(key,f,c){const p=c.params,k=f.key;
  }
  return '';
 }
+const SPEED_PARAMS = {fish: 'prosody.speed', mini: 'voice_setting.speed', eleven: 'voice_settings.speed', doubao: 'speech_rate'};
+
+/** Role speed is an absolute rate, with the provider's own range and model restrictions. */
+export function roleSpeechSpeed(route, connection, {fishSubscription = false} = {}) {
+ const {engine} = route, key = SPEED_PARAMS[engine];
+ if (!key || !connection || (engine === 'fish' && fishSubscription)) return null;
+ const field = catalogs[engine].groups.flatMap(group => group.fields).find(field => field.key === key);
+ if (unavailable(engine, field, {...connection, model: route.model || connection.model})) return null;
+ const toRate = value => engine === 'doubao' ? (100 + value) / 100 : value;
+ const min = toRate(field.min), max = toRate(field.max), configured = route.bindings?.[engine]?.speed;
+ const value = Number.isFinite(configured) ? Math.max(min, Math.min(max, configured)) : undefined;
+ return {key, min, max, inherited: toRate(connection.params?.[key] ?? field.value), value};
+}
+
 /** Fish Audio's address, or the relay (中转) the user set: every Fish request (speech, voices, balance) goes there. */
 export const FISH_API='https://api.fish.audio';
 export const ELEVEN_API='https://api.elevenlabs.io';

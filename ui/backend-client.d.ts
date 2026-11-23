@@ -11,7 +11,7 @@ export type Theme = 'system' | 'light' | 'dark';
 export type InjectionPosition = 'in_chat' | 'in_prompt' | 'before_prompt';
 export type MessageRole = 'system' | 'user' | 'assistant';
 
-export interface VoiceBinding { voice: string; model: string; }
+export interface VoiceBinding { voice: string; model: string; /** Absolute synthesis speed. Omitted to follow the engine. */ speed?: number; }
 /** 视觉小说 (core/vn.js). speed: index of VN_SPEEDS (4 = at once); wait: index of VN_WAITS; cast: each character's 立绘 (a tavern image path). */
 export interface VnSettings {
     speed: number;

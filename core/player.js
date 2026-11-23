@@ -265,7 +265,7 @@ export class DialoguePlayer {
  async lineKey(line) {
   const s = this.settings(), route = findRoute(s.routes, line.role);
   if (!route) return null;
-  return requestHash(buildRequest(route.engine, s.connections[route.engine], { ...route, language: route.language || s.general.defaultLanguage }, line, this.providers.references));
+  return (await this.requestOf(line, route, s)).key;
  }
  async lineState(line) {
   try {
@@ -337,14 +337,18 @@ export class DialoguePlayer {
    const parts = depth < 4 && tooLong(error) ? halves(line.text) : null;
    if (!parts) throw error;
    const audio = [];
-   for (const text of parts) { const part = { ...line, text }; audio.push(await this.say(engine, connection, route, part, buildRequest(engine, connection, route, part, this.providers.references), signal, depth + 1)); }
+   for (const text of parts) { const part = { ...line, text }; audio.push(await this.say(engine, connection, route, part, this.buildVoiceRequest(engine, connection, route, part), signal, depth + 1)); }
    return joinAudio(audio);
   }
+ }
+ buildVoiceRequest(engine, connection, route, line) {
+  const fishSubscription = engine === 'fish' && this.providers.fishMcp?.status().connected;
+  return buildRequest(engine, connection, route, line, this.providers.references, {fishSubscription});
  }
  /** What a line asks its engine with its speaker's voice settings now, and the cache key of that (make() and retake()). */
  async requestOf(line, route, s) {
   const effective = { ...structuredClone(route), language: route.language || s.general.defaultLanguage, model: route.model || s.connections[route.engine].model };
-  const request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
+  const request = this.buildVoiceRequest(route.engine, s.connections[route.engine], effective, line);
   return { effective, request, key: await requestHash(request) };
  }
  /**
@@ -383,7 +387,7 @@ export class DialoguePlayer {
      if (route.engine === 'fish' && TTSParameters.fishNative({ ...s.connections.fish, model: effective.model })) {
       await this.providers.fishCatalog?.();
       if (!still()) return null;
-      request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
+      request = this.buildVoiceRequest(route.engine, s.connections[route.engine], effective, line);
      }
      const audio = await this.say(route.engine, s.connections[route.engine], effective, line, request, signal);
      // Made anew, not from the cache: what the 账本 counts.

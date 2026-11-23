@@ -4,14 +4,14 @@ import {buildDoubaoRequest,doubaoAudio,DOUBAO_VOICES} from './doubao.js';
 import {proxyAddress, noTavernProxy, tavernLogin} from './proxy-url.js';
 import { validateKey, MULTI_KEY, keyTail, parseTextKeys } from './keys.js';
 import { languageCode } from './languages.js';
-import { TTSParameters as P, CUSTOM_NO_PROXY, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, FISH_TAURI_NOTE, FISH_PROXY_PAGE, DOUBAO_PROXY_NOTE, DOUBAO_DIRECT_NOTE, DOUBAO_RELAY_NOTE, DOUBAO_PROXY_PAGE, tauriTavern, setFishCompat } from './parameters.js';
+import { TTSParameters as P, CUSTOM_NO_PROXY, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, FISH_TAURI_NOTE, FISH_PROXY_PAGE, DOUBAO_PROXY_NOTE, DOUBAO_DIRECT_NOTE, DOUBAO_RELAY_NOTE, DOUBAO_PROXY_PAGE, tauriTavern, setFishCompat, roleSpeechSpeed } from './parameters.js';
 import { speakable } from './voice-fx.js';
 import { buildCustomRequest, customInit, readCustomAnswer, customVoices, catalogOptions, catalogPage, gradioRoot, referenceFile, serviceSaid, usesId, customSetOf, customParams, CUSTOM_DEFAULT } from './custom-voice.js';
 import { unpacked, audioKind } from './audio-bytes.js';
 const names={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'小米 MiMo',doubao:'豆包语音',custom:'自己的接口'};
 export const miniBase=c=>'https://'+(c.region==='cn'?'api.minimaxi.com':c.region==='uw'?'api-uw.minimax.io':'api.minimax.io');
 const object=value=>Object.prototype.toString.call(value)==='[object Object]';
-function checkedConnection(engine,connection,route,line,references){
+function checkedConnection(engine,connection,route,line,references,options){
  if(!Object.hasOwn(P.catalogs,engine))throw Error('引擎无效');
  if(!object(connection)||!object(connection.params))throw Error('引擎设置格式无效，请重新保存引擎设置');
  if(!object(route)||route.voice!==undefined&&typeof route.voice!=='string'||route.model!==undefined&&typeof route.model!=='string'||route.language!==undefined&&typeof route.language!=='string')throw Error('角色配音设置无效');
@@ -21,6 +21,10 @@ function checkedConnection(engine,connection,route,line,references){
  if(typeof model!=='string'||!voiceModelId(engine, model))throw Error('请选择当前引擎支持的模型');
  let c;try{c=structuredClone(connection);}catch{throw Error('引擎设置格式无效，请重新保存引擎设置');}
  c.model=model;c.params={...P.defaults(engine),...c.params};
+ if (Number.isFinite(route.bindings?.[engine]?.speed)) {
+  const speed = roleSpeechSpeed({...route, engine, model}, c, options);
+  if (speed) c.params[speed.key] = engine === 'doubao' ? Math.round((speed.value - 1) * 100) : speed.value;
+ }
  for(const field of P.catalogs[engine].groups.flatMap(group=>group.fields)){
   const value=c.params[field.key],invalid=()=>{throw Error(field.label+'格式无效，请检查此项设置');};
   if(field.type==='rows'){
@@ -37,12 +41,12 @@ function checkedConnection(engine,connection,route,line,references){
  }
  return c;
 }
-export function buildRequest(engine,connection,route,line,references=new Map()){line=speakable(line);// 心声/电话 are played, not read: off the emotion before the engine sees it.
+export function buildRequest(engine,connection,route,line,references=new Map(),options={}){line=speakable(line);// 心声/电话 are played, not read: off the emotion before the engine sees it.
  // 自己的接口: the user's templates (core/custom-voice.js).
  // One of several sets: the role's own, else the one in use. A set other than the first says which (its key is its own),
  // so a request of the first set is what it always was and its saved audio is still found.
  if(engine==='custom'){if(!object(connection)||!object(connection.params))throw Error('引擎设置格式无效，请重新保存引擎设置');const set=customSetOf(connection,route?.model),request=buildCustomRequest({...connection,params:{...P.defaults('custom'),...customParams(connection,set)}},route,line);return set===CUSTOM_DEFAULT?request:{...request,config:set};}
- const c=checkedConnection(engine,connection,route,line,references);
+ const c=checkedConnection(engine,connection,route,line,references,options);
  if(engine==='doubao'){P.normalize(engine,c);const error=P.validate(engine,c);if(error)throw Error(error);return buildDoubaoRequest(c,route,line);}
  // MiMo's preset model knows only its own voices. A 音色 that names a clone sample is drawn with the clone model;
  // any other name is explained here instead of MiMo's English "Unknown voice".

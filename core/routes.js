@@ -1,5 +1,27 @@
 const engines=['fish','mini','eleven','mimo','doubao','custom'];
-export function normalizeRoute(value){const route=structuredClone(value);if(route.aliases!==undefined){const list=cleanAliases(route.aliases,route.name);if(list.length)route.aliases=list;else delete route.aliases;}route.bindings=Object.fromEntries(engines.filter(e=>value.bindings?.[e]).map(e=>[e,{voice:String(value.bindings[e].voice||''),model:String(value.bindings[e].model||'')}]));if(engines.includes(route.engine)){route.voice=String(route.voice??route.bindings[route.engine]?.voice??'');route.model=String(route.model??route.bindings[route.engine]?.model??'');route.bindings[route.engine]={voice:route.voice,model:route.model};}return route;}
+export function normalizeRoute(value) {
+ const route = structuredClone(value);
+ if (route.aliases !== undefined) {
+  const list = cleanAliases(route.aliases, route.name);
+  if (list.length) route.aliases = list;
+  else delete route.aliases;
+ }
+ route.bindings = {};
+ for (const engine of engines) {
+  const binding = value.bindings?.[engine];
+  if (!binding) continue;
+  const {speed} = binding;
+  route.bindings[engine] = {voice: String(binding.voice || ''), model: String(binding.model || ''),
+   ...(Number.isFinite(speed) && speed >= 0.5 && speed <= 2 ? {speed: Math.round(speed * 100) / 100} : {})};
+ }
+ if (engines.includes(route.engine)) {
+  const binding = route.bindings[route.engine];
+  route.voice = String(route.voice ?? binding?.voice ?? '');
+  route.model = String(route.model ?? binding?.model ?? '');
+  route.bindings[route.engine] = {...binding, voice: route.voice, model: route.model};
+ }
+ return route;
+}
 export function switchRouteEngine(value,engine){if(!engines.includes(engine))throw Error('引擎无效');const route=normalizeRoute(value);if(engine===route.engine)return route;route.engine=engine;route.voice=route.bindings[engine]?.voice||'';route.model=route.bindings[engine]?.model||'';return route;}
 export function removeRoute(settings,id){const next=structuredClone(settings),index=next.routes.findIndex(r=>r.id===id);if(index<0)return next;next.routes.splice(index,1);if(next.selected===id)next.selected=next.routes[Math.min(index,next.routes.length-1)]?.id||'';return next;}
 // ---------- 别名 ----------
