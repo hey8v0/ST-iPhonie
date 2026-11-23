@@ -22,6 +22,7 @@
 .wardrobe-wear.pending small{color:var(--accent-ink)}
 .wardrobe-wear p{margin:3px 0 0;font-size:13px;line-height:1.5;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .wardrobe-wear .text-button{flex:none;min-height:32px;padding:4px 8px;font-size:13px}
+.wardrobe-shared-entry{margin-bottom:12px}
 .wardrobe-tabs,.wardrobe-mode{margin-bottom:12px}
 .wardrobe-filters{display:flex;gap:6px;overflow-x:auto;margin:0 -16px 10px;padding:0 16px;scrollbar-width:none}
 .wardrobe-filters::-webkit-scrollbar{display:none}

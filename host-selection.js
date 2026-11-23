@@ -1,5 +1,5 @@
 import {paragraphs} from './core/draw.js';
-import {blockRanges, NARRATION_BODY, storyScope} from './core/story-scope.js';
+import {blockRanges, cleanSkip, NARRATION_SKIP, NARRATION_BODY, storyScope} from './core/story-scope.js';
 import {icon} from './ui/icons.js';
 
 // Match rendered words to the original story, without guessing through a regex replacement.
@@ -7,6 +7,28 @@ const compact = (doc, text) => {
   const box=doc.createElement('textarea');box.innerHTML=String(text).replace(/<[^>]*>/g,'');
   return box.value.replace(/[\s*_~`]+/g,'');
 };
+// Manual selections can also belong to an expanded extra outside the narration scope.
+function foldedTarget(doc, snap, panel, text, scope) {
+  if (!panel.open || panel.parentElement?.closest('details:not([open])')) return null;
+  const skip=cleanSkip(scope.skip ?? NARRATION_SKIP).filter(tag=>!['details','小剧场','theater'].includes(tag));
+  const masked=storyScope(snap.raw,{body:[],skip}).masked;
+  const needle=compact(doc,text);
+  if (!needle) return null;
+  const title=compact(doc,panel.querySelector(':scope > summary')?.textContent || '');
+  const stack=[], matches=[];
+  for (const tag of masked.matchAll(/<(\/?)(details)(?=[\s>])[^<>]*>/gi)) {
+    if (!tag[1]) { stack.push(tag.index+tag[0].length); continue; }
+    const start=stack.pop();
+    if (start===undefined) continue;
+    const raw=snap.raw.slice(start,tag.index);
+    const heading=raw.match(/^\s*<summary\b[^>]*>([\s\S]*?)<\/summary\s*>/i)?.[1];
+    if (title && heading && compact(doc,heading)!==title) continue;
+    const content=masked.slice(start,tag.index).replace(/<(?:i-tts|tts)\b[^>]*>[\s\S]*?<\/(?:i-tts|tts)\s*>/gi,' ');
+    if (compact(doc,content).includes(needle)) matches.push(tag.index);
+  }
+  return matches.length===1 ? {snap,text,end:matches[0],context:''} : null;
+}
+
 export function selectedStoryTarget(doc, snap, range, scope = {}) {
   if (!snap || !range || range.collapsed) return null;
   const element=node=>node?.nodeType===1?node:node?.parentElement;
@@ -14,6 +36,12 @@ export function selectedStoryTarget(doc, snap, range, scope = {}) {
   if (!body || !body.contains(end) || Number(body.closest('.mes').getAttribute('mesid'))!==snap.id) return null;
   if (start.closest('button,input,textarea,[contenteditable=true],[data-sttts-pic]') || end.closest('button,input,textarea,[contenteditable=true],[data-sttts-pic]')) return null;
   const text=range.toString().trim();if(!text || text.length>12000) return null;
+  const panel=start.closest('details');
+  if (panel!==end.closest('details')) return null;
+  if (panel) {
+    if (start.closest('summary') || end.closest('summary')) return null;
+    return foldedTarget(doc,snap,panel,text,scope);
+  }
   const masked=storyScope(snap.raw,scope).masked.replace(/<(?:i-tts|tts)(?=[\s/>])[^>]*>[\s\S]*?<\/(?:i-tts|tts)\s*>/gi, tag=>tag.replace(/[^\r\n]/g,' '));
   const needle=compact(doc,text);
   if (!needle) return null;

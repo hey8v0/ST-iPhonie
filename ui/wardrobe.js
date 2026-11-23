@@ -2,7 +2,7 @@
 // what it is (name, category, words); a tap picks pieces: 穿上 tells the next story reply once, 去搭配 has the model put
 // an outfit together from them (or design one from a wish), kept as 存过的搭配 and drawn as a 试穿图. When the story
 // changes someone's clothes, 正在穿 follows (host-wardrobe.js). The documents are core/wardrobe.js; photos stay in the album.
-import {createView, esc, btn, heading, help, empty, avatar, groupTitle, menu, field, input, textArea} from './common.js';
+import {createView, esc, btn, heading, help, empty, avatar, groupTitle, menu, field, select, input, textArea} from './common.js';
 import {icon} from './icons.js';
 import {eachThumb, previewBlob} from './thumbs.js';
 import {photoWall} from './photo-wall.js';
@@ -94,12 +94,12 @@ export function wardrobeApp(ctx) {
   function sharedSheet(){
     const card=cardKey(),key=prefKey(card), pref=sharedPrefs(), items=all.items.filter(x=>x.shared);
     const groups=[...new Set(items.flatMap(x=>x.collections || []))].sort();
-    const options=(labels,value)=>['',...labels].map(k=>`<option value="${esc(k)}" ${k===value?'selected':''}>${esc(k || '全部')}</option>`).join('');
+    const choices=labels=>[['','全部'],...labels.map(k=>[k,k])];
     const d=ctx.dialog('通用衣柜',`<div class="group pad"><label class="setting-row">为${esc(who())}启用通用衣柜<input class="switch" type="checkbox" data-shared-on ${pref.on?'checked':''}></label>
-      ${field('款式',`<select data-cut>${options(['男装','女装','中性'],pref.cut)}</select>`)}
-      ${field('年龄段',`<select data-age>${options([...new Set(items.map(x=>x.age).filter(Boolean))],pref.age)}</select>`)}
-      <div class="field"><span>合集 · 可多选</span><div class="wardrobe-cats">${groups.map(g=>`<button class="wardrobe-filter" data-group="${esc(g)}" aria-pressed="${!!pref.groups?.includes(g)}">${esc(g)}</button>`).join('')}</div></div>
-      <p class="hint">编辑衣物时可放入通用衣柜。不选合集时使用全部合集。</p>${btn('apply','保存','primary')}</div>`);
+      ${field('款式',select('cut',pref.cut || '',choices(['男装','女装','中性']),'data-cut'))}
+      ${field('年龄段',select('age',pref.age || '',choices([...new Set(items.map(x=>x.age).filter(Boolean))]),'data-age'))}
+      <div class="field"><span>这张卡可用的衣物合集</span><div class="wardrobe-cats" ${groups.length ? '' : 'hidden'}>${groups.map(g=>`<button class="wardrobe-filter" data-group="${esc(g)}" aria-pressed="${!!pref.groups?.includes(g)}">${esc(g)}</button>`).join('')}</div></div>
+      <p class="hint">${groups.length ? '可多选。选「古风」这样的合集后，这张卡只借用所选合集里的衣物。留空可使用所有共享衣物。' : '还没有合集。编辑一件衣物，打开「放入通用衣柜」，填一个名字（如「古风」）。用同一名字的衣物会归在一起。'}</p>${btn('apply','保存','primary')}</div>`);
     d.body.onclick=e=>{
       const g=e.target.closest('[data-group]');
       if(g){g.setAttribute('aria-pressed',String(g.getAttribute('aria-pressed')!=='true'));return;}
@@ -159,7 +159,7 @@ export function wardrobeApp(ctx) {
     if (!list.some(o => o.key === owner)) { owner = 'me'; picked = new Set(); }
     const items = mine(), sets = all.sets.filter(x => x.owner === owner), wear = all.wears.find(w => w.owner === owner), hadBar = !!v.root.querySelector('.wardrobe-bar');
     v.draw(heading('衣柜', help(HELP) + btn('add', icon('add'), 'round-button', `aria-label="往${esc(who())}的衣柜里放衣服"`), `Wardrobe · ${items.length} 件`)
-      + ownersRow(list) + btn('shared-closet',icon('group')+' 通用衣柜','secondary') + (wear ? wearCard(wear) : '')
+      + ownersRow(list) + btn('shared-closet',icon('group')+' 通用衣柜','secondary wardrobe-shared-entry') + (wear ? wearCard(wear) : '')
       + `<div class="segmented wardrobe-tabs" role="group" aria-label="衣柜或搭配">${seg('tab', 'closet', '衣柜', tab)}${seg('tab', 'outfit', '搭配', tab)}</div>`
       + (tab === 'closet' ? closet(items) + (picked.size ? bar() : '') : outfit(items, sets)));
     // The bar stays where it was when the page is drawn again (it came in once).
@@ -272,8 +272,8 @@ export function wardrobeApp(ctx) {
       <div class="field"><span>分类</span><div class="wardrobe-cats" role="group" aria-label="分类">${WARDROBE_CATEGORIES.map(c => `<button type="button" class="wardrobe-filter" data-cat="${esc(c)}" aria-pressed="${c === category}">${esc(c)}</button>`).join('')}</div></div>
       <label class="setting-row">放入通用衣柜<input type="checkbox" class="switch" data-field="shared" ${old?.shared?'checked':''}></label>
       <div data-sharing ${old?.shared?'':'hidden'}>
-      ${field('款式',`<select data-field="cut">${['','男装','女装','中性'].map(k=>`<option value="${k}" ${old?.cut===k?'selected':''}>${k || '不限'}</option>`).join('')}</select>`)}
-      ${field('合集',input('collections',(old?.collections || []).join('、'),'text','placeholder="例如：古风江湖、冬装"'))}
+      ${field('款式',select('cut',old?.cut || '',[['','不限'],['男装','男装'],['女装','女装'],['中性','中性']]))}
+      ${field('衣物合集',input('collections',(old?.collections || []).join('、'),'text','placeholder="例如：古风、冬装"'),'填已有名字可加入合集，填新名字会创建合集。多个名字用顿号隔开。')}
       ${field('年龄段',input('age',old?.age || '','text','maxlength="24" placeholder="不限，例如：儿童"'))}</div>
       ${field('描述', textArea('description', old?.description || '', `rows="4" maxlength="${WARDROBE_LIMITS.description}" placeholder="颜色、款式、材质、图案……"`))}
       <div class="actions">${old?.photoId ? btn('item-recognize', '重新识别', 'secondary') : ''}${btn('item-save', '保存', 'primary')}</div>
