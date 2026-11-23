@@ -1,0 +1,29 @@
+name: Voice model compatibility
+on:
+  pull_request:
+    paths:
+      - 'core/model-catalog.js'
+      - 'core/eleven-dialogue.js'
+      - 'core/providers.js'
+      - 'core/backend.js'
+      - 'core/parameters.js'
+      - 'ui/engines.js'
+      - 'ui/roles.js'
+      - 'tests/voice-model-discovery.test.js'
+      - '.github/workflows/voice-model-test.yml'
+  workflow_dispatch:
+jobs:
+  voice-models:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check modified module syntax
+        run: |
+          for file in core/model-catalog.js core/eleven-dialogue.js core/providers.js core/backend.js core/parameters.js ui/engines.js ui/roles.js; do
+            node --check "$file"
+          done
+      - name: Run voice-model compatibility tests
+        run: node --test tests/voice-model-discovery.test.js
