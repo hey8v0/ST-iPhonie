@@ -34,8 +34,8 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
   const scene = ctx => (ctx?.chat || []).filter(m => !m.is_user && !m.is_system && typeof m.mes === 'string').slice(-2).map(m => plainStory(m.mes, [], settings().narration)).join(' ').slice(-600);
   /** An outfit put together for someone: from the 衣柜 (the pieces picked, else all with words) or designed from a wish. */
   async function suggest({owner, mode = 'closet', wish = '', itemIds = []} = {}) {
-    const ctx = context(), {items, wears} = await backend.wardrobe(owner);
-    const pool = items.filter(x => x.description && (!itemIds.length || itemIds.includes(x.id)));
+    const ctx = context(), {items, wears} = await backend.wardrobe();
+    const pool = items.filter(x => (x.owner===owner || x.shared && itemIds.includes(x.id)) && x.description && (!itemIds.length || itemIds.includes(x.id)));
     if (mode === 'closet' && !pool.length) throw Error('衣柜里还没有写了描述的衣服：先放几件进来，或者换成「自由设计」');
     if (mode !== 'closet' && !String(wish).trim()) throw Error('先写下想要什么样的');
     const prompt = suggestRequest({prompts: settings().promptRules, wearer: ownerName(owner, userName()), mode, wish, pool, last: wears.find(w => w.owner === owner)?.text || '', scene: scene(ctx)});
@@ -51,9 +51,9 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
   async function saveOutfit({owner, text, mode = 'closet', itemIds = [], photoId = ''} = {}) {
     const words = cleanOutfit(text);
     if (!words) throw Error('先搭一套');
-    const {items, sets} = await backend.wardrobe(owner), same = sets.find(s => s.description === words.slice(0, WARDROBE_LIMITS.wear));
+    const {items, sets} = await backend.wardrobe(), same = sets.find(s => s.owner===owner && s.description === words.slice(0, WARDROBE_LIMITS.wear));
     if (same) return {set: photoId && same.photoId !== photoId ? await backend.saveWardrobeSet({...same, photoId}) : same, added: 0, again: true};
-    let ids = itemIds.filter(id => items.some(x => x.id === id)), added = 0;
+    let ids = itemIds.filter(id => items.some(x => x.id === id && (x.owner===owner || x.shared))), added = 0;
     if (mode === 'free') {
       const pieces = parseSplit(await backend.generateText(context(), {use: 'wardrobe', prompt: splitRequest(words, settings().promptRules), plainText: true, trimNames: false}));
       if (!pieces.length) throw Error('模型没把这套拆成单件衣服，再试一次');

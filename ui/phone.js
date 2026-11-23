@@ -1061,7 +1061,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     }
   }, {signal});
   doc.addEventListener('pointerdown', () => delete doc.documentElement.dataset.keyboard, {signal});
-  doc.addEventListener('visibilitychange', () => { if (doc.hidden && active) views.get(active)?.leave?.(); else if (active && !locked && panelVisible) run(() => views.get(active)?.resume?.()); animate(); }, {signal});
+  doc.addEventListener('visibilitychange', () => { if (doc.hidden && active) { const view=views.get(active); (view?.suspend || view?.leave)?.call(view); } else if (active && !locked && panelVisible) run(() => views.get(active)?.resume?.()); animate(); }, {signal});
   media.addEventListener('change', theme, {signal});
   motion.addEventListener('change', animate, {signal});
 

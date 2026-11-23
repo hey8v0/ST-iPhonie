@@ -1,10 +1,10 @@
 import {createSelectionDraw} from './host-selection.js';
 // Compact menus on the tavern page; colors inherit the active tavern theme.
 // entry: whether the 楼层工具 button is shown on each reply (hidden() takes it away too, with the voice menu).
-export function createStoryTools({doc = document, hidden, entry = () => true, message, valid, wave, actions, notice, narration = () => ({})}) {
+export function createStoryTools({doc = document, hidden, selectionEnabled = () => true, entry = () => true, message, valid, wave, actions, notice, narration = () => ({})}) {
  let menu = null, anchor = null, hold = null, suppress = null;
  const win = doc.defaultView;
- const selection=createSelectionDraw({doc,hidden,message,valid,scope:narration,draw:actions.drawSelection,notice});
+ const selection=createSelectionDraw({doc,hidden:()=>hidden() || !selectionEnabled(),message,valid,scope:narration,draw:actions.drawSelection,notice});
  function close() { menu?.remove(); menu = null; anchor = null; }
  function cancel() { if (hold) win.clearTimeout(hold.timer); hold = null; }
  function show(button, rows) {
@@ -41,7 +41,7 @@ export function createStoryTools({doc = document, hidden, entry = () => true, me
   if (anchor === button) return close();
   const snap = scope(button); if (!snap || hidden()) return;
   // 给这层楼配音 (while 正文语音 is on): any reply's lines voiced again, not only the newest one's.
-  const selected = selection.forMessage(snap.id);
+  const selected = selectionEnabled() && selection.forMessage(snap.id);
   show(button, [...(selected ? [['给选中文字生图', () => selection.activate(selected)]] : []), ['给这层楼生图', checked(snap, () => actions.draw(snap.id))], ...(actions.canVoice?.() ? [['给这层楼配音', checked(snap, () => actions.voice(snap.id))]] : []), ['从这层看视觉小说', checked(snap, () => actions.vn(snap.id))], ['台词小窗', checked(snap, () => actions.dialogue(snap.id))], actions.playing?.(snap.id) ? ['停止播放', () => actions.stop()] : ['整条播放', checked(snap, () => actions.play(snap.id))]]);
  }
  function down(event) {

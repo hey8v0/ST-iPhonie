@@ -96,12 +96,13 @@ export function settingsApp(ctx) {
           ${toggle('drawAuto', '新回复自动出图', w.auto, '正文写好后开始生成配图。可能扣点的图片按下方的授权设置处理。')}
           ${w.auto && storyDrawSource(w) ? toggle('storyPaid', '允许自动扣点出图', w.storyPaidSource === storyDrawSource(w), '仅限当前绘图连接的正文配图，包括中转无法确认免费额度的图片。每张图都可能计费。') : ''}
           <button class="list-row" data-action="draw-rules"><span><strong>编辑出图规则</strong><small>每条回复出 ${rules?.count ?? 1} 张图</small></span>${icon('next')}</button>` : ''}</div>
-        <div class="group pad">${toggle('drawFold', '正文图片默认收起', w.fold, '收起后正文里只留一个小缩略图，点开再看，手机上不占地方。每张图也可以单独收起或展开。')}
+        <div class="group pad">${toggle('selectionDraw', '划选文字生图', w.selectionDraw !== false, '在酒馆正文和书架的文字选择菜单中显示生图入口。')}
+          ${toggle('drawFold', '正文图片默认收起', w.fold, '收起后正文里只留一个小缩略图，点开再看，手机上不占地方。每张图也可以单独收起或展开。')}
           ${toggle('drawStrip', '发给模型时去掉旧出图块', w.strip, '出图块留在聊天记录里（图片靠它显示），但之后每次请求模型时会把它们去掉，省下上下文。正文出图关着时也照样去掉。')}</div>`;
     };
     paint();
     d.onClose(afterSheet);
-    const KEYS = {drawEnabled: 'enabled', drawAuto: 'auto', drawFold: 'fold', drawStrip: 'strip'};
+    const KEYS = {selectionDraw:'selectionDraw', drawEnabled: 'enabled', drawAuto: 'auto', drawFold: 'fold', drawStrip: 'strip'};
     d.body.addEventListener('change', async e => {
       if (e.target.dataset.field === 'storyPaid') {
         const source = storyDrawSource(api.getState().draw), box = e.target, enable = box.checked;

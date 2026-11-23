@@ -247,6 +247,7 @@ export interface DrawPositionGrid { type: 'none' | 'thirds' | 'golden' | 'grid';
 /** How 局部重绘's paint looks while painting. */
 export interface DrawMaskLook { color: string; opacity: number; border: boolean; pattern: 'solid' | 'stripes' | 'dots' | 'crosshatch' | 'grid' | 'checker' | 'hearts'; }
 export interface DrawSettings {
+    selectionDraw?: boolean;
     storyPaidSource?: string;
     /** 提示词片段, and their 分类 (groups as 画风 has them). */
     chunks: PromptChunk[]; chunkGroups: DrawStyleGroup[];
@@ -303,7 +304,7 @@ export interface VibeSettings { enabled: boolean; use: { kind: '' | 'group' | 'v
 export interface VibeSummary { id: string; name: string; thumb: string; strength: number; ie: number; image: boolean; keys: string[]; ready?: string[]; ies?: Record<string, number[]>; }
 /** The vibes a picture would use: encode = how many need encoding first (2 Anlas each), over = left out by the free-tier guard. */
 export interface VibePlan { on: boolean; model: boolean; used: Array<{ id: string; name: string; strength: number; encode: boolean }>; skipped: Array<{ name: string; why: 'missing' | 'model' | 'no-encoding' }>; over: number; encode: number; extra: number; }
-export interface DrawSettingsPatch { storyPaidSource?: string; mode?: 'separate' | 'inline'; strip?: boolean; chunks?: PromptChunk[]; stream?: boolean; autoDownload?: boolean; locks?: string[]; grid?: DrawGrid; positionGrid?: Partial<DrawPositionGrid>; maskLook?: Partial<DrawMaskLook>; enabled?: boolean; auto?: boolean; guard?: boolean; fold?: boolean; queue?: Partial<DrawQueueSettings>; params?: Partial<DrawParams>; activeStyle?: string; activePreset?: string; relay?: Partial<{ url: string; assumeOpus: boolean }>; vibe?: Partial<VibeSettings>; engine?: DrawEngine; gpt?: Partial<GptImageSettings>; comfy?: Partial<ComfySettings>; }
+export interface DrawSettingsPatch { selectionDraw?: boolean; storyPaidSource?: string; mode?: 'separate' | 'inline'; strip?: boolean; chunks?: PromptChunk[]; stream?: boolean; autoDownload?: boolean; locks?: string[]; grid?: DrawGrid; positionGrid?: Partial<DrawPositionGrid>; maskLook?: Partial<DrawMaskLook>; enabled?: boolean; auto?: boolean; guard?: boolean; fold?: boolean; queue?: Partial<DrawQueueSettings>; params?: Partial<DrawParams>; activeStyle?: string; activePreset?: string; relay?: Partial<{ url: string; assumeOpus: boolean }>; vibe?: Partial<VibeSettings>; engine?: DrawEngine; gpt?: Partial<GptImageSettings>; comfy?: Partial<ComfySettings>; }
 /** gap: seconds between two NovelAI requests (0-60). retries: how often an "account busy" (429) is retried (0-10). */
 export interface DrawQueueSettings { gap: number; retries: number; cloud: CloudQueueSettings; }
 /** Shared queue service (cloud-queue/worker.js) that everyone using one NovelAI account joins with the same room code. */
@@ -459,7 +460,7 @@ export interface MusicPlaylist { id: string; kind: 'playlist'; at: number; name:
 /** What plays now (the tavern page's player). */
 export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; mode: 'order' | 'shuffle' | 'one'; from: string; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
 export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; from?: string };
-export interface WardrobeItem { id: string; kind: 'wardrobe-item'; owner: string; name: string; category: string; description: string; photoId?: string; recognized: boolean; at: number; updatedAt: number; }
+export interface WardrobeItem { shared?: boolean; collections?: string[]; cut?: string; age?: string; id: string; kind: 'wardrobe-item'; owner: string; name: string; category: string; description: string; photoId?: string; recognized: boolean; at: number; updatedAt: number; }
 export interface WardrobeSet { id: string; kind: 'wardrobe-set'; photoId?: string; owner: string; name: string; description: string; items: string[]; at: number; updatedAt: number; }
 export interface WardrobeWear { id: string; kind: 'wardrobe-wear'; owner: string; text: string; from: 'phone' | 'story'; pending: boolean; at: number; }
 /** 小剧场 (core/generator.js): a script's line (旁白 lines are narration) or a card's HTML. */
@@ -1224,6 +1225,7 @@ export interface BackendFacade {
     /** The contacts blocked here: left out of 朋友圈 both ways. */
     blockedNames(): Promise<string[]>;
     /** 衣柜 here (this card's, with 分区): clothes and outfits, newest first, and what each owner wears ('me' or 'role:名字'). */
+    wardrobeCardKey?(): string;
     wardrobe(owner?: string): Promise<{ items: WardrobeItem[]; sets: WardrobeSet[]; wears: WardrobeWear[] }>;
     saveWardrobeItem(item: Partial<WardrobeItem> & { owner: string }): Promise<WardrobeItem>;
     saveWardrobeSet(set: Partial<WardrobeSet> & { owner: string; description: string }): Promise<WardrobeSet>;

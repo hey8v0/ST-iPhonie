@@ -26,6 +26,8 @@ export function cleanItem(doc, now = Date.now()) {
   const id = /^wardrobe:item:[\w-]{4,80}$/.test(doc?.id) ? doc.id : 'wardrobe:item:' + (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
   return {id, kind: 'wardrobe-item', owner: who, name: clip(doc?.name, WARDROBE_LIMITS.name) || (description ? description.slice(0, 12) : '衣物'),
     category: WARDROBE_CATEGORIES.includes(doc?.category) ? doc.category : '', description, ...(photoId ? {photoId} : {}),
+    ...(doc.shared ? {shared:true, collections: [...new Set((Array.isArray(doc.collections)?doc.collections:[]).map(x=>clip(x,32)).filter(Boolean))].slice(0,12),
+      cut:['男装','女装','中性'].includes(doc.cut)?doc.cut:'', age:clip(doc.age,24)} : {}),
     recognized: doc?.recognized === true, at: time(doc?.at, now), updatedAt: time(doc?.updatedAt, now), ...space(doc)};
 }
 /** An outfit kept (存成一套): its words (as long as what is worn), and the pieces it was made of when there were any. */

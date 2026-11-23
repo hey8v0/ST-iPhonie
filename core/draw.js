@@ -362,7 +362,7 @@ export function defaultDraw() {
   return {enabled: false, auto: true, guard: true, fold: false, mode: 'separate', strip: true, engine: 'nai', gpt: defaultGpt(), comfy: defaultComfy(),
     connections: {nai: normalizeImageConnections('nai'), gpt: normalizeImageConnections('gpt')},
     queue: {gap: 3, retries: 4, cloud: {enabled: false, kind: 'room', url: '', room: ''}}, relay: {url: '', assumeOpus: false}, vibe: defaultVibe(), params: defaultDrawParams(),
-    chunks: [], chunkGroups: [], stream: false, autoDownload: false, locks: [], grid: normalizeGrid(), positionGrid: normalizePositionGrid(), maskLook: normalizeMaskLook(), styles: [structuredClone(DEFAULT_STYLE)], styleGroups: [], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
+    chunks: [], chunkGroups: [], selectionDraw: true, stream: false, autoDownload: false, locks: [], grid: normalizeGrid(), positionGrid: normalizePositionGrid(), maskLook: normalizeMaskLook(), styles: [structuredClone(DEFAULT_STYLE)], styleGroups: [], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
 }
 
 /** 画风 groups made tidy, in place. */
@@ -427,6 +427,7 @@ export function normalizeDraw(value) {
   const d = {...base, ...structuredClone(value)};
   d.enabled = !!d.enabled;
   d.auto = d.auto !== false;
+  d.selectionDraw = d.selectionDraw !== false;
   d.guard = d.guard !== false;
   d.fold = !!d.fold;
   d.strip = d.strip !== false;

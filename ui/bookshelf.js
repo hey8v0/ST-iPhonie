@@ -666,6 +666,7 @@ export function bookshelfApp(ctx) {
       if (!bar) {
         bar = doc.createElement('div'); bar.className = 'reading-tools';
         for (const [action,glyph,label] of [['mark','star','划线或取消划线'],['draw','paint','为选中文字生图'],['send','chat','发给 TA'],['copy','copy','复制']]) {
+          if (action==='draw' && api.getState().draw.selectionDraw===false) continue;
           bar.insertAdjacentHTML('beforeend',btn('para-'+action,icon(glyph),'reading-tool',`aria-label="${label}" title="${label}"`));
         }
         stage.append(bar);
@@ -913,6 +914,12 @@ export function bookshelfApp(ctx) {
   v.on('click', '[data-action]', el => ({import: importFiles, 'manage-categories':manageCategories, 'pick-start': () => { picking = 'pick'; mark.clear(); shelf().catch(fail); }, 'pick-done': () => { picking = null; mark.clear(); shelf().catch(fail); }, 'pick-shelf': shelfPicked, 'pick-delete': deletePicked, shelf: () => shelf().catch(fail)})[el.dataset.action]?.());
   v.back = () => { if (!book && filter!==ALL && !picking) { filter=ALL; shelf().catch(fail); return true; } if (!book) return false; shelf().catch(fail); return true; }; v.refresh = () => { if (!book) shelf().catch(fail); }; v.edit = id => open(id).catch(fail);
   const dispose = v.dispose; v.dispose = () => { leave(); art.dispose(); dispose(); };
+  // A temporary system overlay hides the document without navigating away.
+  v.suspend = () => {
+    const stats=flushRead(); session=null;
+    if(book && stats)api.updateReadingBook(book.id,{stats}).catch(fail);
+  };
+  v.resume = () => { if(reader && book && !session){activeAt=Date.now();session={at:activeAt,overall:overall()};} };
   v.leave = () => { leave(); book = null; };
   shelf().catch(fail);
   return v;

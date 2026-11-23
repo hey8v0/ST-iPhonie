@@ -26,6 +26,7 @@ export async function openReadingThreads(ctx,{book,key,companion,quote,visible,r
   for(const window of state.rooms)keepLatestPhoto(window.messages);
   let active=state.rooms.find(r=>r.id===state.active) || state.rooms[0];
   const d=ctx.dialog('一起看','',{over:true});
+  d.overlay.classList.add('reading-chat-overlay');
   const photos=objectURLs(ctx.win);
   d.onClose(()=>photos.dispose());
   let draft=quote?'「'+quote+'」\n':'';
@@ -36,13 +37,22 @@ export async function openReadingThreads(ctx,{book,key,companion,quote,visible,r
     d.body.classList.add('bs-chat-room');
     const name=active.messages[0]?.text || '新会话';
     const glyph=(key,label,image)=>btn(key,icon(image),'round-button','aria-label="'+label+'" title="'+label+'"');
-    d.body.innerHTML='<header class="bs-chat-head">'+avatar(companion,'none',38)+'<div class="bs-chat-name"><strong>'+esc(companion)+'</strong><small>'+esc(name)+'</small></div>'+glyph('options','更多','more')+'</header>'
-      +'<div class="reading-chat" role="log">'+active.messages.map((m,i)=>{
-        const mine=m.from==='me';
-        return '<div class="msg'+(mine?' me':'')+'">'+avatar(mine?'我':companion,'none',32,mine?'me':companion)+'<div class="m-body"><button type="button" class="chat-bubble" data-msg="'+i+'" aria-haspopup="dialog">'+(m.photoId?'<img class="bs-chat-photo" data-chat-photo="'+esc(m.photoId)+'" alt="'+esc(m.text)+'">':esc(m.text))+'</button></div></div>';
-      }).join('')+'</div><form class="composer" data-reading-compose>'+btn('attach',icon('add'),'round-button plus','aria-label="添加图片附件"')+'<input class="field-in" aria-label="共读消息" placeholder="聊聊这一页…" maxlength="3000" enterkeyhint="send" autocomplete="off"><button class="round-button send" type="submit"></button></form>';
+    if (!d.body.querySelector('form')) d.body.innerHTML='<header class="bs-chat-head">'+avatar(companion,'none',38)+'<div class="bs-chat-name"><strong>'+esc(companion)+'</strong><small>'+esc(name)+'</small></div>'+glyph('options','更多','more')+'</header>'
+      +'<div class="reading-chat" role="log"></div><form class="composer" data-reading-compose>'+btn('attach',icon('add'),'round-button plus','aria-label="添加图片附件"')+'<input class="field-in" aria-label="共读消息" placeholder="聊聊这一页…" maxlength="3000" enterkeyhint="send" autocomplete="off"><button class="round-button send" type="submit"></button></form>';
+    d.body.querySelector('.bs-chat-name small').textContent=name;
+    const log=d.body.querySelector('.reading-chat');
+    const keys=active.messages.map(m=>JSON.stringify([m.id,m.from,m.photoId,m.text]));
+    let same=0;
+    while(same<keys.length && log.children[same]?.dataset.rowKey===keys[same]) same++;
+    while(log.children.length>same)log.lastElementChild.remove();
+    active.messages.slice(same).forEach((m,offset)=>{
+      const i=same+offset;
+      const mine=m.from==='me';
+      log.insertAdjacentHTML('beforeend','<div class="msg'+(mine?' me':'')+'">'+avatar(mine?'我':companion,'none',32,mine?'me':companion)+'<div class="m-body"><button type="button" class="chat-bubble" data-msg="'+i+'" aria-haspopup="dialog">'+(m.photoId?'<img class="bs-chat-photo" data-chat-photo="'+esc(m.photoId)+'" alt="'+esc(m.text)+'">':esc(m.text))+'</button></div></div>');
+      log.lastElementChild.dataset.rowKey=keys[i];
+    });
     const input=d.body.querySelector('form input'), submit=d.body.querySelector('form [type=submit]');
-    for(const img of d.body.querySelectorAll('[data-chat-photo]')){
+    for(const img of d.body.querySelectorAll('[data-chat-photo]:not([src])')){
       const id=img.dataset.chatPhoto;
       photos.load(id,async()=>(await ctx.api.getPhoto(id))?.blob).then(url=>{if(url && img.isConnected)img.src=url;}).catch(()=>{});
     }
@@ -51,7 +61,8 @@ export async function openReadingThreads(ctx,{book,key,companion,quote,visible,r
       submit.innerHTML=icon(writingText?'send':'bubble');submit.setAttribute('aria-label',label);submit.title=label;
       submit.classList.toggle('ask',!writingText);submit.disabled=locked || (!writingText && last?.from!=='me');}
     input.oninput=()=>{draft=input.value;label();};label();
-    if(locked)for(const el of d.body.querySelectorAll('select, input, button'))el.disabled=true;
+    for(const el of d.body.querySelectorAll('button:not([type=submit])'))el.disabled=locked;
+    input.readOnly=locked;
     const list=d.body.querySelector('.reading-chat');list.scrollTop=list.scrollHeight;
   }
   async function change(action){
