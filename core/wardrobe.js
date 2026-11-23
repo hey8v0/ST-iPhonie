@@ -5,12 +5,13 @@
 
 import {promptText} from './prompt-rules.js';
 
+export const SHARED_OWNER = 'shared';
 export const WARDROBE_CATEGORIES = Object.freeze(['上衣', '下装', '外套', '连衣裙', '鞋', '配饰', '整套']);
 export const WARDROBE_LIMITS = Object.freeze({items: 600, sets: 200, name: 40, description: 300, wear: 600, wish: 300, pool: 60, pieces: 12});
 export const WARDROBE_KINDS = Object.freeze(['wardrobe-item', 'wardrobe-set', 'wardrobe-wear']);
 /** Whose 衣柜: the user's own ('me') or a role's, by its name. */
 export const ownerKey = name => name ? 'role:' + String(name).slice(0, 40) : 'me';
-export const ownerName = (key, user = '我') => key === 'me' ? user : String(key || '').replace(/^role:/, '');
+export const ownerName = (key, user = '我') => key === SHARED_OWNER ? '通用衣柜' : key === 'me' ? user : String(key || '').replace(/^role:/, '');
 
 const clip = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const time = (value, fallback) => Number.isFinite(value) && value > 0 ? value : fallback;
@@ -19,14 +20,14 @@ const space = doc => ({...(doc?.space ? {space: String(doc.space).slice(0, 300)}
 
 /** A piece of clothing: from a photo (photoId, recognized or written by hand) or only words. */
 export function cleanItem(doc, now = Date.now()) {
-  const who = owner(doc?.owner);
+  const who = doc?.owner === SHARED_OWNER ? SHARED_OWNER : owner(doc?.owner);
   if (!who) throw Error('这件衣服不知道是谁的');
   const description = clip(doc?.description, WARDROBE_LIMITS.description), photoId = clip(doc?.photoId, 200);
   if (!photoId && !description) throw Error('写一下这件衣服是什么样的');
   const id = /^wardrobe:item:[\w-]{4,80}$/.test(doc?.id) ? doc.id : 'wardrobe:item:' + (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
   return {id, kind: 'wardrobe-item', owner: who, name: clip(doc?.name, WARDROBE_LIMITS.name) || (description ? description.slice(0, 12) : '衣物'),
     category: WARDROBE_CATEGORIES.includes(doc?.category) ? doc.category : '', description, ...(photoId ? {photoId} : {}),
-    ...(doc.shared ? {shared:true, collections: [...new Set((Array.isArray(doc.collections)?doc.collections:[]).map(x=>clip(x,32)).filter(Boolean))].slice(0,12),
+    ...(doc.shared || who === SHARED_OWNER ? {shared:true, collections: [...new Set((Array.isArray(doc.collections)?doc.collections:[]).map(x=>clip(x,32)).filter(Boolean))].slice(0,12),
       cut:['男装','女装','中性'].includes(doc.cut)?doc.cut:'', age:clip(doc.age,24)} : {}),
     recognized: doc?.recognized === true, at: time(doc?.at, now), updatedAt: time(doc?.updatedAt, now), ...space(doc)};
 }

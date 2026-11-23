@@ -35,7 +35,7 @@ export function swipeRow(id, inner, actions = [], {className = '', label = ''} =
  * ids(): every row's id, for a list that does not have all its rows on the page (row-window.js).
  * Returns {close(), done(), get chosen()}.
  */
-export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bulk = [], onBulk = () => {}, hint = '', mouseHint = '', sort = null, ids: everyId = null, leftOnly = false} = {}) {
+export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bulk = [], onBulk = () => {}, hint = '', mouseHint = '', sort = null, ids: everyId = null, leftOnly = false, deliberatePick = false} = {}) {
   const win = ctx.win, doc = ctx.doc;
   let open = null, press = null, chosen = null, suppress = 0;
   const rows = () => [...list.querySelectorAll('.sw-row[data-swipe]')];
@@ -95,8 +95,9 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
   list.addEventListener('pointerdown', e => {
     const main = e.target.closest('.sw-main');
     if (!main || e.button > 0 || press || e.target.closest('.sw-more, input, textarea, select, [contenteditable]')) return;
+    if (deliberatePick) suppress = 0;
     const row = main.closest('.sw-row');
-    const p = press = {id: e.pointerId, x: e.clientX, y: e.clientY, row, main, mode: '', start: open === row ? -room(row) : 0, at: Date.now(), vx: 0, last: {x: e.clientX, t: e.timeStamp || Date.now()}, crossed: false};
+    const p = press = {id: e.pointerId, x: e.clientX, y: e.clientY, row, main, target: e.target, mode: '', start: open === row ? -room(row) : 0, at: Date.now(), vx: 0, last: {x: e.clientX, t: e.timeStamp || Date.now()}, crossed: false};
     // Held still: the row lifts to be moved (not while rows are being picked, nor from an open row).
     if (sort && !chosen && open !== row) p.timer = win.setTimeout(() => {
       if (press !== p || p.mode) return;
@@ -120,7 +121,7 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
         p.row.classList.add('sw-drag');
         p.main.style.transition = 'none';
         try { p.main.setPointerCapture(e.pointerId); } catch { /* fine */ }
-      } else if (Math.abs(dy) > 8) { win.clearTimeout(p.timer); press = null; return; }
+      } else if (Math.abs(dy) > 8) { win.clearTimeout(p.timer); if (deliberatePick) suppress = Date.now(); press = null; return; }
       else return;
     }
     const w = room(p.row), raw = p.start + dx;
@@ -151,7 +152,18 @@ export function mountSwipeList(list, {ctx, onAction = () => {}, onTap = null, bu
     suppress = Date.now();
     const w = room(p.row), x = p.x2 ?? 0, fresh = (e.timeStamp || Date.now()) - p.last.t < 90, v = fresh ? p.vx : 0;
     if (e.type === 'pointercancel') return settle(p.row, open === p.row ? -w : 0);
-    if (bulk.length && p.start === 0 && (x > PICK || (v > .5 && x > 16))) { settle(p.row, 0); return pick(p.row.dataset.swipe); }
+    // For sortable drawing styles require deliberate net travel. A fast wobble on a tap must not enter selection.
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
+    const pickGesture = deliberatePick ? dx >= PICK && dx > Math.abs(dy) * 1.4 : x > PICK || (v > .5 && x > 16);
+    if (bulk.length && p.start === 0 && pickGesture) { settle(p.row, 0); return pick(p.row.dataset.swipe); }
+    if (deliberatePick && !p.start && Math.abs(dx) < 26 && Math.abs(dy) < 12) {
+      settle(p.row, 0);
+      suppress = 0;
+      const target = p.target.closest('button, [data-style-inspect]') || p.main;
+      target.click();
+      suppress = Date.now();
+      return;
+    }
     if (w && (v < -.35 || (v <= .35 && x < -w / 2))) return openRow(p.row);
     settle(p.row, 0);
     if (open === p.row) open = null;

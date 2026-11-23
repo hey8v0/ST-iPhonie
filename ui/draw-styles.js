@@ -1,6 +1,8 @@
+import {stylePack, readStylePack} from '../core/style-pack.js';
+import {saveFile, shareFile, canShareFiles} from '../download.js';
 // 画风 in the drawing app: the list and the editor. The list works the way Procreate's layers do, and looks it: rows are
 // cards with the 效果图 on the left (the same tile when there is none yet, so they line up), and the one in use is a colour
-// of its own. A tap on the tile shows the 效果图 big (and pages through the others) or adds one. A tap uses a 画风; a
+// of its own. A tap on the tile shows the 效果图 big (and pages through the others) or adds one. A tap opens its information; a
 // tap on a group opens or shuts it. Held still, a row lifts and follows the finger while the others make room: a 画风
 // goes between others, into an open group or out of one, or onto a shut group's row (into it); a group moves with all
 // its 画风. Swiped left a row shows 改 / 复制 / 删除 (a group: 改名 / 解散 / 删除); swiped right rows are picked, to put
@@ -8,8 +10,9 @@
 // one by its name or 画师串, and while it is used the list is flat and does not move.
 // Each 画风 keeps its NovelAI parameters (core/draw.js STYLE_PARAM_KEYS): shown in its row and its editor, and put back
 // when it is picked.
+import {popAt} from './msg-pop.js';
 import {swipeRow, mountSwipeList} from './swipe-list.js';
-import {esc, btn, field, input, textArea} from './common.js';
+import {esc, btn, help, field, input, textArea} from './common.js';
 import {icon} from './icons.js';
 import {layerSort} from './layer-sort.js';
 import {styleTree, styleOfWords, styleSample} from '../core/draw.js';
@@ -44,13 +47,13 @@ export function styleSheets({ctx, state, styleId, style, render, shownPicture = 
 
   function pickStyle() {
     const all = () => state().styles;
-    const d = ctx.dialog('画风', `<div class="style-picker"><div class="picker-search" hidden><input type="search" data-style-search aria-label="搜索画风、画师串" placeholder="搜索画风、画师串…" autocomplete="off"></div><div class="style-list" data-style-list></div></div>`, {add: '新建画风'});
+    const d = ctx.dialog('画风', `<div class="style-picker"><div class="picker-search" hidden><input type="search" data-style-search aria-label="搜索画风、画师串" placeholder="搜索画风、画师串…" autocomplete="off"></div><div class="style-list" data-style-list></div><div class="actions">${btn('import-pack',icon('download')+' 导入画风包','secondary')}${help('点名称看信息，点缩略图看效果图，点组左侧收起或展开。长按一行可直接拖动排序、移入或移出分组。左滑管理，右滑多选；用鼠标时可右键管理或按 Ctrl / ⌘ 点击多选。')}</div><input hidden type="file" accept=".json,application/json" data-pack-file></div>`, {add: '新建画风'});
     const list = d.body.querySelector('[data-style-list]'), search = d.body.querySelector('[data-style-search]');
     let query = '';
     const styleActions = () => [{key: 'edit', label: '改', icon: 'edit'}, {key: 'copy', label: '复制', icon: 'copy'}, ...(all().length > 1 ? [{key: 'delete', label: '删除', icon: 'trash', danger: true}] : [])];
     const groupActions = [{key: 'rename', label: '改名', icon: 'edit'}, {key: 'ungroup', label: '解散', icon: 'layers'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}];
-    const styleRow = (s, using) => swipeRow(s.id, `<div class="list-row style-row" aria-current="${s.id === using}">${coverTile(s)}<span><strong>${esc(s.name)}</strong><small class="mono picker-preview">${esc(s.artist || '没有画师串')}</small>${s.params ? `<small class="style-params">${esc(line(s.params))}</small>` : ''}</span></div>`, styleActions(), {label: s.name, ...(s.id === using ? {className: 'style-on'} : {})});
-    const groupRows = (g, styles, using) => swipeRow('g:' + g.id, `<div class="list-row style-group-row" aria-expanded="${g.open}"><span class="style-group-chevron">${icon('chevron')}</span><span class="style-group-art">${icon('layers')}</span><span><strong data-group-name>${esc(g.name)}</strong><small>${styles.length} 个画风${styles.some(s => s.id === using) ? ' · 在用的在里面' : ''}</small></span></div>`, groupActions, {className: 'style-group', label: g.name})
+    const styleRow = (s, using) => swipeRow(s.id, `<div class="list-row style-row" aria-current="${s.id === using}">${coverTile(s)}<span tabindex="0" role="button" data-style-inspect><strong>${esc(s.name)}</strong><small class="mono picker-preview">${esc(s.artist || '没有画师串')}</small>${s.params ? `<small class="style-params">${esc(line(s.params))}</small>` : ''}</span></div>`, styleActions(), {label: s.name, ...(s.id === using ? {className: 'style-on'} : {})});
+    const groupRows = (g, styles, using) => swipeRow('g:' + g.id, `<div class="list-row style-group-row" aria-expanded="${g.open}"><button type="button" class="style-fold" data-group-fold="${esc(g.id)}" aria-label="展开或收起${esc(g.name)}" aria-expanded="${g.open}"><span class="style-group-chevron">${icon('chevron')}</span><span class="style-group-art">${icon('layers')}</span></button><span tabindex="0" role="button" data-style-inspect><strong data-group-name>${esc(g.name)}</strong><small>${styles.length} 个画风${styles.some(s => s.id === using) ? ' · 在用的在里面' : ''}</small></span></div>`, groupActions, {className: 'style-group', label: g.name})
       + `<div class="style-group-body" data-group-body="${esc(g.id)}"${g.open ? '' : ' data-closed'}><div class="style-group-inner">${styles.map(s => styleRow(s, using)).join('')}</div></div>`;
     function paint() {
       const using = styleId(), draw = state();
@@ -70,41 +73,107 @@ export function styleSheets({ctx, state, styleId, style, render, shownPicture = 
     // The one in use in sight, in a long list.
     const on = list.querySelector('.style-on'), box = list.closest('.sheet-body');
     if (on && box && !on.closest('[data-closed]')) { const top = on.getBoundingClientRect().top - box.getBoundingClientRect().top; if (top > box.clientHeight * .7) box.scrollTop += top - box.clientHeight / 3; }
-    const swipe = mountSwipeList(list, {ctx,
-      hint: '点一下用这个画风，点左边的图看效果图；按住可以拖动排序；左滑：改、复制、删除；右滑：多选、建组；点组：展开或收起',
-      mouseHint: '点一下用这个画风，点左边的图看效果图；按住可以拖动排序；⋯ 或右键：改、复制、删除；Ctrl / ⌘ 点：多选、建组；点组：展开或收起',
-      sort: {start: (row, point) => query ? null : lift(row, point)},
-      onTap: id => {
-        if (id.startsWith('g:')) return toggle(id.slice(2));
-        api.saveDraw({activeStyle: id}); d.close(); render();
-      },
-      onAction: async (key, id) => {
-        try {
-          if (id.startsWith('g:')) {
-            const gid = id.slice(2), entry = groupOf(gid);
-            if (!entry) return;
-            if (key === 'rename') rename(gid);
-            else if (key === 'ungroup') arrange(tree().flatMap(e => e.group?.id === gid ? e.styles.map(s => ({style: s})) : [e]));
-            else if (key === 'delete') {
-              if (entry.styles.length >= all().length) throw Error('至少要留一个画风');
-              if (!await ctx.confirm(`删除组「${entry.group.name}」？`, `里面的 ${entry.styles.length} 个画风会一起删掉。只想拆开组，用「解散」。`)) return;
-              api.deleteStyles(entry.styles); render(); again();
-            }
-            return;
+    async function rowAction(key, id) {
+      try {
+        if (id.startsWith('g:')) {
+          const gid = id.slice(2), entry = groupOf(gid);
+          if (!entry) return;
+          if (key === 'rename') rename(gid);
+          else if (key === 'ungroup') arrange(tree().flatMap(e => e.group?.id === gid ? e.styles.map(s => ({style: s})) : [e]));
+          else if (key === 'delete') {
+            if (entry.styles.length >= all().length) throw Error('至少要留一个画风');
+            if (!await ctx.confirm(`删除组「${entry.group.name}」？`, `里面的 ${entry.styles.length} 个画风会一起删掉。只想拆开组，用「解散」。`)) return;
+            api.deleteStyles(entry.styles); render(); again();
           }
-          const target = all().find(x => x.id === id);
-          if (!target) return;
-          if (key === 'edit') { swipe.dispose(); d.close(); editStyle(target); }
-          else if (key === 'copy') {
-            const before = places();
-            api.saveStyle({name: (target.name + ' 副本').slice(0, 40), artist: target.artist, positive: target.positive, negative: target.negative, params: target.params, cover: target.cover, after: target.id});
-            flip(paint, before);
-            ctx.notify('复制好了');
-          } else if (key === 'delete' && await ctx.confirm(`删除画风「${target.name}」？`, '其他画风保留。')) { api.deleteStyle(id); render(); again(); }
-        } catch (error) { ctx.notify(error.message, {error: true}); }
+          return;
+        }
+        const target = all().find(x => x.id === id);
+        if (!target) return;
+        if (key === 'edit') { swipe.dispose(); d.close(); editStyle(target); }
+        else if (key === 'copy') {
+          const before = places();
+          api.saveStyle({name: (target.name + ' 副本').slice(0, 40), artist: target.artist, positive: target.positive, negative: target.negative, params: target.params, cover: target.cover, after: target.id});
+          flip(paint, before);
+          ctx.notify('复制好了');
+        } else if (key === 'delete' && await ctx.confirm(`删除画风「${target.name}」？`, '其他画风保留。')) { api.deleteStyle(id); render(); again(); }
+      } catch (error) { ctx.notify(error.message, {error: true}); }
+    }
+    function info(pack, {id, anchor, importing = false} = {}) {
+      const single = !pack.grouped && pack.styles.length === 1, item = pack.styles[0];
+      const prompts = single ? [['画师串',item.artist],['正向提示词',item.positive],['负向提示词',item.negative]] : [];
+      const binding = item?.params;
+      const params = single && binding ? [api.drawCatalog?.modelNames?.[binding.model] || binding.model,
+        `${binding.steps} 步`, `CFG ${binding.scale}`, binding.sampler] : [];
+      const summary = single ? `<dl class="style-facts">${prompts.filter(([,value]) => value).map(([label,value]) =>
+        `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`).join('')}
+        <div><dt>绑定参数</dt><dd class="style-binding">${params.length ? params.map(value => `<span>${esc(value)}</span>`).join('') : '未绑定'}</dd></div></dl>`
+        : `<p class="style-pack-count">${pack.styles.length} 个画风 · ${pack.styles.filter(s => s.params).length} 个已绑定参数</p>`
+          + (importing ? pack.styles.map(s => `<div class="setting-row">${esc(s.name)}</div>`).join('') : '');
+      const actions = importing ? btn('confirm-import', '导入为新画风', 'primary') : [
+        id ? btn('apply-style', '使用画风', 'primary') : '',
+        btn('export-pack', '导出画风包', id ? 'secondary' : 'primary'),
+        canShareFiles(ctx.win) ? btn('share-pack', icon('share'), 'secondary style-share', 'aria-label="分享画风包" title="分享画风包"') : ''
+      ].join('');
+      const pane = ctx.dialog(importing ? '导入「' + pack.name + '」' : pack.name,
+        `<div class="style-info-fields" tabindex="0">${summary}</div><div class="style-info-footer">${actions}</div>`, {over: true});
+      pane.overlay.classList.add('style-detail');
+      pane.overlay.querySelector('.sheet-header h2')?.insertAdjacentHTML('beforebegin',
+        `<span class="style-detail-icon" aria-hidden="true">${icon(single ? 'paint' : 'layers')}</span>`);
+      if (anchor) {
+        pane.overlay.classList.add('style-info-pop');
+        popAt(pane, anchor, {win: ctx.win, reduced: ctx.win.matchMedia?.('(prefers-reduced-motion: reduce)').matches});
+      }
+      pane.body.onclick = async e => {
+        const action = e.target.closest('[data-action]')?.dataset.action;
+        try {
+          if (action === 'apply-style') {
+            api.saveDraw({activeStyle: id});
+            pane.close(); d.close(); render();
+          } else if (action === 'confirm-import') {
+            const count = api.importStylePack(pack);
+            pane.close(); paint(); render();
+            ctx.notify('已导入 ' + count + ' 个画风');
+          } else if (action === 'share-pack' || action === 'export-pack') {
+            const blob = new Blob([JSON.stringify(pack, null, 2)], {type:'application/json'});
+            await (action === 'share-pack' ? shareFile : saveFile)(ctx.doc, blob, pack.name + '.iphonie.json');
+          }
+        } catch (error) { ctx.notify(error.message, {error:true}); }
+      };
+    }
+    const chooser = d.body.querySelector('[data-pack-file]');
+    d.body.querySelector('[data-action=import-pack]').onclick = () => chooser.click();
+    chooser.onchange = async () => {
+      const file = chooser.files?.[0];
+      chooser.value = '';
+      if (!file) return;
+      try {
+        if (file.size > 16*1024*1024) throw Error('画风包超过 16 MB，请分组导入');
+        const pack = readStylePack(JSON.parse(await file.text()));
+        if (d.live !== false) info(pack, {importing:true});
+      } catch (error) { ctx.notify(error instanceof SyntaxError ? '文件不是有效的 JSON 画风包' : error.message, {error:true}); }
+    };
+    const swipe = mountSwipeList(list, {ctx,
+      deliberatePick: true,
+      sort: {start: (row, point) => query ? null : lift(row, point)},
+      onTap: (id, event) => {
+        if (id.startsWith('g:')) {
+          const group = groupOf(id.slice(2));
+          if (group?.styles.length) info(stylePack(group.group.name, all().filter(s => group.styles.includes(s.id)), true), {anchor:event.target.closest('.sw-row')});
+          else ctx.notify('这个分组还没有画风');
+          return;
+        }
+        const item = all().find(s => s.id === id);
+        if (item) info(stylePack(item.name, [item]), {id, anchor: event.target.closest('.sw-row')});
       },
-      bulk: [{key: 'group', label: '建组', icon: 'layers'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}],
+      onAction: rowAction,
+      bulk: [{key:'export',label:'打包',icon:'download'}, {key: 'group', label: '建组', icon: 'layers'}, {key: 'delete', label: '删除', icon: 'trash', danger: true}],
       onBulk: async (key, ids) => {
+        if(key==='export'){
+          const picked = new Set(stylesOf(ids));
+          const items = all().filter(s => picked.has(s.id));
+          if (items.length) info(stylePack('所选画风', items, true));
+          return;
+        }
         if (key === 'group') return makeGroup(ids);
         if (key !== 'delete') return;
         const styles = stylesOf(ids);
@@ -112,9 +181,21 @@ export function styleSheets({ctx, state, styleId, style, render, shownPicture = 
         if (!await ctx.confirm(`删除这 ${styles.length} 个画风？`, '其他画风保留。')) return;
         api.deleteStyles(styles); render(); again();
       }});
+    list.addEventListener('keydown', e => {
+      if (e.target.matches('[data-style-inspect]') && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault(); e.target.click();
+      }
+    });
     search.addEventListener('input', () => { query = norm(search.value).trim(); swipe.done(); paint(); });
     // The tile: the picture big, or adding one. A tap that was for something else (a swipe, picking rows) stops before here.
     list.addEventListener('click', e => {
+      if (e.defaultPrevented) return;
+      const fold = e.target.closest('[data-group-fold]');
+      if (fold) {
+        toggle(fold.dataset.groupFold);
+        fold.setAttribute('aria-expanded', fold.closest('.style-group-row').getAttribute('aria-expanded'));
+        return;
+      }
       const tile = e.target.closest('[data-style-cover]'), target = tile && all().find(x => x.id === tile.dataset.styleCover);
       if (!target) return;
       if (target.cover && tile.querySelector('img')) showCovers(target, tile);

@@ -817,6 +817,7 @@ export interface BackendFacade {
     /** Puts a picture into ComfyUI's input folder; answers the name to put in the node. */
     comfyUploadPicture(file: File): Promise<string>;
     /** after: a new style (a copy) goes right below this one, in its group. */
+    importStylePack(data: unknown): number;
     saveStyle(style: Omit<DrawStyle, 'id' | 'params'> & { id?: string; after?: string; params?: Partial<DrawStyleParams> }): DrawStyle;
     deleteStyle(id: string): DrawSettings;
     /** Several at once; at least one has to stay. */

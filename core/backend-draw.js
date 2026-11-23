@@ -1,3 +1,4 @@
+import {readStylePack} from './style-pack.js';
 import {storyDrawSource} from './draw.js';
 // The drawing settings of the backend (core/backend.js): ComfyUI workflows and their LoRAs, 绘图 settings, 画风
 // (with the NovelAI parameters each one keeps), 绘图预设, the prompt preview, the NovelAI subscription and what a
@@ -288,6 +289,14 @@ class DrawSettings {
         }
         this.save(next);
         return clone(this.settings.draw);
+    }
+    importStylePack(data) {
+        const pack = readStylePack(data), next = this.getState();
+        const group = pack.grouped ? crypto.randomUUID() : '';
+        if (group) next.draw.styleGroups.push({id: group, name: pack.name, open: true});
+        for (const style of pack.styles) next.draw.styles.push({...style, id: crypto.randomUUID(), ...(group ? {group} : {})});
+        this.save(next);
+        return pack.styles.length;
     }
     saveStyle(value) {
         if (!value || typeof value !== 'object' || !String(value.name || '').trim()) throw Error('请填写画风名称');
