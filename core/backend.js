@@ -30,7 +30,7 @@ import { lookPictures, lookThumb } from './looks.js';
 import { DRAWN_SOURCES, FAVORITES, ALBUM_LIMITS, albumName, albumsInOrder } from './albums.js';
 import { paintStore } from './paint-store.js';
 import { Ledger } from './ledger.js';
-import { cleanItem, cleanSet, cleanWear, WARDROBE_LIMITS } from './wardrobe.js';
+import { cleanItem, cleanSet, cleanWear, sameWardrobeDrawing, WARDROBE_LIMITS } from './wardrobe.js';
 import { FishMcp } from './fish-mcp.js';
 import {fishTavernProxy} from './fish-transport.js';
 import {fishAudioProxy} from './fish-audio.js';
@@ -3189,16 +3189,46 @@ export class TTSBackend {
     async saveWardrobeItem(item) {
         this.assertOpen();
         const old = item?.id ? await this.apps.get(item.id) : null;
-        const doc = cleanItem({ ...(old || this.spaceTag()), ...item, ...(old ? { at: old.at, space: old.space, save: old.save } : {}), updatedAt: Date.now() });
-        if (!old && (await this.wardrobe(doc.owner)).items.length >= WARDROBE_LIMITS.items) throw Error(`一个人的衣柜最多放 ${WARDROBE_LIMITS.items} 件`);
+        if (old) return this.appsMutate('wardrobe', () => this.apps.change(old.id, row => {
+            if (row.kind !== 'wardrobe-item') throw Error('这件单品已经不在衣柜里');
+            const doc = cleanItem({...row, ...item, id:row.id, at:row.at, space:row.space, save:row.save, updatedAt:Date.now()});
+            if (!sameWardrobeDrawing(doc, row)) delete row.naiTags;
+            if (!doc.photoId) delete row.photoId;
+            if (!doc.shared) for (const key of ['shared', 'collections', 'cut', 'age']) delete row[key];
+            Object.assign(row, doc);
+        }));
+        const doc = cleanItem({...this.spaceTag(), ...item, updatedAt:Date.now()});
+        if ((await this.wardrobe(doc.owner)).items.length >= WARDROBE_LIMITS.items) throw Error(`一个人的衣柜最多放 ${WARDROBE_LIMITS.items} 件`);
         return (await this.appsMutate('wardrobe', () => this.apps.put([doc])))[0];
+    }
+    /** Save only the drawing fields, against the clothing description that was sent to the model. */
+    async updateWardrobeDrawing(item, {naiTags, photoId}) {
+        this.assertOpen();
+        try {
+            return await this.appsMutate('wardrobe', () => this.apps.change(item.id, row => {
+                if (row.kind !== 'wardrobe-item' || !sameWardrobeDrawing(item, row) || (photoId && row.photoId !== item.photoId)) {
+                    throw Object.assign(Error('单品在出图期间已修改'), {code:'WARDROBE_CHANGED'});
+                }
+                if (naiTags) row.naiTags = naiTags.trim().slice(0, 3000);
+                if (photoId) row.photoId = photoId;
+                row.updatedAt = Date.now();
+            }));
+        } catch (error) {
+            if (error.code === 'MISSING' || error.code === 'WARDROBE_CHANGED') return null;
+            throw error;
+        }
     }
     /** An outfit kept (存成一套). */
     async saveWardrobeSet(set) {
         this.assertOpen();
-        const old = set?.id ? await this.apps.get(set.id) : null;
-        const doc = cleanSet({ ...(old || this.spaceTag()), ...set, ...(old ? { at: old.at, space: old.space, save: old.save } : {}), updatedAt: Date.now() });
-        if (!old && (await this.wardrobe(doc.owner)).sets.length >= WARDROBE_LIMITS.sets) throw Error(`一个人最多存 ${WARDROBE_LIMITS.sets} 套`);
+        if (set?.id) return this.appsMutate('wardrobe', () => this.apps.change(set.id, row => {
+            if (row.kind !== 'wardrobe-set') throw Error('这套搭配已经不在了');
+            const saved = cleanSet({...row, ...set, id:row.id, owner:row.owner, at:row.at, space:row.space, save:row.save, updatedAt:Date.now()});
+            Object.assign(row, saved);
+            if (!saved.photoId) delete row.photoId;
+        }));
+        const doc = cleanSet({...this.spaceTag(), ...set, updatedAt:Date.now()});
+        if ((await this.wardrobe(doc.owner)).sets.length >= WARDROBE_LIMITS.sets) throw Error(`一个人最多存 ${WARDROBE_LIMITS.sets} 套`);
         return (await this.appsMutate('wardrobe', () => this.apps.put([doc])))[0];
     }
     /** Clothes or outfits taken out (their photos stay in the album). */
@@ -3206,8 +3236,11 @@ export class TTSBackend {
         this.assertOpen();
         const list = [...new Set((ids || []).map(String).filter(id => /^wardrobe:(?:item|set):/.test(id)))];
         if (!list.length) return false;
-        await this.appsMutate('wardrobe', () => this.apps.removeMany(list));
-        this.noteGone('wardrobe', list);
+        await this.appsMutate('wardrobe', async () => {
+            const rows = await Promise.all(list.map(id => this.apps.get(id)));
+            await this.apps.removeMany(list);
+            this.noteGone('wardrobe', list, Math.max(0, ...rows.map(row => row?.updatedAt || 0)));
+        });
         return true;
     }
     /** What someone wears now: put on from the phone (told to the next story reply, once) or changed by the story. One a

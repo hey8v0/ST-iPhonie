@@ -1,5 +1,6 @@
 import {RECORDING_LIMITS, recordingFormat} from '../core/chats.js';
 import {btn, field, input, select, textArea} from './common.js';
+import {browserSpeech, transcribeInBrowser} from './browser-transcription.js';
 
 const preferences = new WeakMap();
 const types = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'];
@@ -62,14 +63,14 @@ export function recordChatMessage(ctx, {send, dialog = ctx.dialog} = {}) {
     ctx.notify('当前页面无法录音，请用支持麦克风的浏览器打开 HTTPS 或本机地址。', {error:true});
     return null;
   }
-  const saved = preferences.get(api) || {};
+  const saved = preferences.get(api) || {}, localSpeech = !!browserSpeech(win);
   const d = dialog('发语音', `<div class="chat-record">
     <p data-record-status role="status">录音最长 ${RECORDING_LIMITS.seconds} 秒</p>
     <div class="actions">${btn('record', '开始录音', 'primary')}</div>
     <div data-record-preview hidden>
       <audio controls preload="metadata" aria-label="试听原录音"></audio>
       ${field('转写文字（选填）', textArea('text', '', 'rows="3" maxlength="4000" placeholder="可先转写，也可以自己填写给角色看的内容"'))}
-      <div class="actions">${btn('transcribe', '转写', 'secondary')}${btn('send', '发送', 'primary')}</div>
+      <div class="actions">${localSpeech ? btn('browser-transcribe', '浏览器转写', 'secondary') : ''}${btn('transcribe', localSpeech ? '服务转写' : '转写', 'secondary')}${btn('send', '发送', 'primary')}</div>
     </div>
     <details class="chat-record-settings"><summary>转写服务</summary>
         ${field('转写接口地址', input('endpoint', saved.endpoint || '', 'url', 'placeholder="https://…/v1 或完整转写地址"'))}
@@ -82,7 +83,7 @@ export function recordChatMessage(ctx, {send, dialog = ctx.dialog} = {}) {
   const find = selector => d.body.querySelector(selector);
   const status = find('[data-record-status]'), preview = find('[data-record-preview]'), player = find('audio');
   const recordButton = find('[data-action=record]'), text = find('[data-field=text]');
-  const convert = find('[data-action=transcribe]'), submit = find('[data-action=send]');
+  const convert = find('[data-action=transcribe]'), browser = find('[data-action=browser-transcribe]'), submit = find('[data-action=send]');
   const controller = new win.AbortController();
   let stream, recorder, timer, clip, duration, url, id, phase = 'idle';
   const value = key => find(`[data-field=${key}]`).value.trim();
@@ -92,9 +93,9 @@ export function recordChatMessage(ctx, {send, dialog = ctx.dialog} = {}) {
     modelResults.hidden = true;
     modelStatus.textContent = '';
   });
-  async function withRequest(operation) {
+  async function withRequest(operation, timeout = 45000) {
     const request = new win.AbortController();
-    const timer = win.setTimeout(() => request.abort(), 45000);
+    const timer = win.setTimeout(() => request.abort(), timeout);
     const cancel = () => request.abort();
     controller.signal.addEventListener('abort', cancel, {once:true});
     try { return await operation(request.signal); }
@@ -207,26 +208,29 @@ export function recordChatMessage(ctx, {send, dialog = ctx.dialog} = {}) {
     const action = event.target.closest('button')?.dataset.action;
     if (action === 'models') { await pullModels(event.target.closest('button')); return; }
     if (action === 'record' && ['idle', 'ready', 'recording'].includes(phase)) { await record(); return; }
-    if (!['send', 'transcribe'].includes(action) || phase !== 'ready') return;
+    if (!['send', 'transcribe', 'browser-transcribe'].includes(action) || phase !== 'ready') return;
     if (action === 'transcribe' && (!find('[data-field=endpoint]').value.trim() || !find('[data-field=model]').value.trim())) {
       find('.chat-record-settings').open = true;
       status.textContent = '请先填写语音转写地址和模型名。';
       return;
     }
-    if (action === 'transcribe' && text.value.trim() && !await ctx.confirm('重新转写这段录音？', '新结果会替换当前的转写文字。', {over:true})) return;
+    if (action !== 'send' && text.value.trim() && !await ctx.confirm('重新转写这段录音？', '新结果会替换当前的转写文字。', {over:true})) return;
     if (phase !== 'ready' || !d.live) return;
     phase = 'busy';
     recordButton.disabled = convert.disabled = submit.disabled = text.readOnly = true;
+    if (browser) browser.disabled = true;
     try {
       if (action === 'send') {
         await send({id, blob:clip, duration, text:text.value.trim()});
         d.close();
       } else {
         const connection = config();
-        preferences.set(api, connection);
-        status.textContent = '正在转写…';
+        if (action === 'transcribe') preferences.set(api, connection);
+        status.textContent = action === 'browser-transcribe' ? '浏览器正在转写，首次可能需要下载语言包…' : '正在转写…';
         try {
-          text.value = await withRequest(signal => transcribeRecording(win.fetch.bind(win), connection, clip, signal));
+          text.value = await withRequest(signal => action === 'browser-transcribe'
+            ? transcribeInBrowser(win, clip, signal, ctx.doc.documentElement.lang || 'zh-CN')
+            : transcribeRecording(win.fetch.bind(win), connection, clip, signal), action === 'browser-transcribe' ? 180000 : undefined);
           status.textContent = '转写好了，可以修改后发送。';
         } catch (error) {
           if (error.name === 'AbortError' && !controller.signal.aborted) throw Error('转写超时，录音仍在，可以重试。');
@@ -237,6 +241,7 @@ export function recordChatMessage(ctx, {send, dialog = ctx.dialog} = {}) {
     finally {
       phase = 'ready';
       recordButton.disabled = convert.disabled = submit.disabled = text.readOnly = false;
+      if (browser) browser.disabled = false;
     }
   });
   return d;

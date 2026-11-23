@@ -392,7 +392,13 @@ export function rolesApp(ctx) {
     if (el.dataset.field === 'name') { const n = v.root.querySelector('[data-id-name]'); if (n) n.textContent = el.value || '新角色'; }
     if (el.dataset.field === 'voice') { const n = v.root.querySelector('[data-id-voice]'); if (n) n.textContent = el.value ? voiceLabel(el.value) : '未选择'; }
   });
-  // A MiMo model change turns the 音色 field into a description or a clone sample name.
+  // Committing a typed MiMo model switches the voice field to match its mode.
+  v.on('change', 'input[data-field=model]', el => {
+    if (current?.engine !== 'mimo') return;
+    current.model = el.value;
+    changed();
+    render();
+  });
   // 自己的接口: a voice's page pasted as the voice: its ID is the address's last part.
   v.on('change', 'input[data-field=voice]', el => {
     if (current?.engine !== 'custom') return;

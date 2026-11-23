@@ -462,7 +462,7 @@ export interface MusicPlaylist { id: string; kind: 'playlist'; at: number; name:
 /** What plays now (the tavern page's player). */
 export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; mode: 'order' | 'shuffle' | 'one'; from: string; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
 export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; from?: string };
-export interface WardrobeItem { shared?: boolean; collections?: string[]; cut?: string; age?: string; id: string; kind: 'wardrobe-item'; owner: string; name: string; category: string; description: string; photoId?: string; recognized: boolean; at: number; updatedAt: number; }
+export interface WardrobeItem { shared?: boolean; collections?: string[]; cut?: string; age?: string; id: string; kind: 'wardrobe-item'; owner: string; name: string; category: string; description: string; photoId?: string; naiTags?: string; recognized: boolean; at: number; updatedAt: number; }
 export interface WardrobeSet { id: string; kind: 'wardrobe-set'; photoId?: string; owner: string; name: string; description: string; items: string[]; at: number; updatedAt: number; }
 export interface WardrobeWear { id: string; kind: 'wardrobe-wear'; owner: string; text: string; from: 'phone' | 'story'; pending: boolean; at: number; }
 /** 小剧场 (core/generator.js): a script's line (旁白 lines are narration) or a card's HTML. */
@@ -1117,6 +1117,10 @@ export interface BackendFacade {
     /** Checks NovelAI or the relay: the drawing route (an empty request, nothing drawn, no Anlas) and the subscription. */
     /** Checks the Fish relay (or Fish itself): the speech path and the voice list; status 0 = no answer (address, CORS, HTTPS). */
     fishCatalog(): Promise<boolean>;
+    voiceModels(engine: Exclude<Engine, 'custom'>, connection?: ConnectionPatch, refresh?: boolean): Promise<{
+        models: Array<{ id: string; name: string; supported: boolean; reason: string }>;
+        source: 'official' | 'cache' | 'preset'; note: string; at?: number;
+    }>;
     fishProbe(): Promise<{ relay: boolean; base: string; openaiUrl: string; api: 'fish' | 'openai'; detected: '' | 'fish' | 'openai'; speech: { status: number; ok: boolean }; compat: { status: number; ok: boolean }; openai: { status: number; ok: boolean }; voices: { status: number; ok: boolean } }>;
     /** draw.reason: why a relay gave no answer at all; draw.via 'proxy': only the tavern's /proxy/ reaches it, and drawing goes that way. */
     naiProbe(): Promise<{ relay: boolean; draw: { ok: boolean; status: number; reason?: string; via?: 'proxy' }; subscription: { ok: true; tier: number } | { ok: false; status: number; message: string } }>;
@@ -1231,7 +1235,7 @@ export interface BackendFacade {
     wardrobeCardKey?(): string;
     wardrobe(owner?: string): Promise<{ items: WardrobeItem[]; sets: WardrobeSet[]; wears: WardrobeWear[] }>;
     saveWardrobeItem(item: Partial<WardrobeItem> & { owner: string }): Promise<WardrobeItem>;
-    saveWardrobeSet(set: Partial<WardrobeSet> & { owner: string; description: string }): Promise<WardrobeSet>;
+    saveWardrobeSet(set: Partial<WardrobeSet> & ({id: string} | {owner: string; description: string})): Promise<WardrobeSet>;
     deleteWardrobe(ids: string[]): Promise<boolean>;
     /** 穿上 (from: 'phone', told to the next story reply once) or what the story changed (from: 'story'). */
     setWardrobeWear(wear: { owner: string; text: string; from?: 'phone' | 'story' }): Promise<WardrobeWear>;
@@ -1358,11 +1362,13 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     momentsRefresh(): Promise<MomentPost[]>;
     /** 衣柜 (tavern side): a piece's photo recognized by a model that sees; an outfit put together; a 试穿图 drawn (code 'PAID' with prompt until allowPaid). */
     wardrobeInspect?(options: {photoId?: string; blob?: Blob}): Promise<Pick<WardrobeItem, 'name' | 'category' | 'description'>>;
-    wardrobeRecognize(itemId: string): Promise<WardrobeItem>;
+    wardrobeRecognizeBatch?(ids: string[]): Promise<string[]>;
+    wardrobeRecognize(itemId: string, options?: {onlyEmpty?: boolean}): Promise<WardrobeItem>;
     wardrobeSuggest(options: { owner: string; mode?: 'closet' | 'free'; wish?: string; itemIds?: string[] }): Promise<string>;
     /** 存成一套: designed freely, split into pieces that go into the 衣柜 first; the same words kept again come back with again. */
     wardrobeSaveOutfit(options: { photoId?: string; owner: string; text: string; mode?: 'closet' | 'free'; itemIds?: string[] }): Promise<{ set: WardrobeSet; added: number; again: boolean }>;
     wardrobeTryOn(options: { owner: string; text: string; allowPaid?: boolean }): Promise<string>;
+    wardrobeDrawItems?(options: {ids: string[]; allowPaid?: boolean}): Promise<{count: number; error: string}>;
     wardrobeDrawItem(options: { id: string; allowPaid?: boolean }): Promise<WardrobeItem>;
     /** Who is in the story just now, as 衣柜 owners ('me', 'role:<name>'): they stay in the row of faces when there are many. */
     wardrobePresent?(): string[];

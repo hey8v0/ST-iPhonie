@@ -1,6 +1,7 @@
 // TT's explicit testCall ABI drives its native RMCP transport. Never fall back
 // after a call: outcome_unknown may already have charged the user's credits.
-const ENDPOINT = 'https://api.fish.audio/mcp', VERSION = '2025-03-26';
+// TT negotiates either the modern discover lifecycle or a legacy initialize.
+const ENDPOINT = 'https://api.fish.audio/mcp', PROTOCOL_PREFERENCE = 'auto';
 const allowed = new Set(['get_credit_balance', 'text_to_speech']);
 const queues = new WeakMap();
 export function ttFishResult(value) {
@@ -32,7 +33,7 @@ export class FishTtMcp {
   async api() {
     await this.win.__TAURITAVERN__?.ready;
     const api = this.win.__TAURITAVERN__?.api?.mcp;
-    if (!['list','create','update','setState','discover','remove'].every(k => typeof api?.servers?.[k] === 'function') || typeof api?.tools?.testCall !== 'function') throw Error('此 TT 版本没有小手机需要的原生 MCP 接口，请更新 TT；无需重复登录 Fish');
+    if (!['list','create','update','setState','discover','remove'].every(k => typeof api?.servers?.[k] === 'function') || typeof api?.tools?.testCall !== 'function') throw Error('此 TT 版本缺少 Fish 订阅所需的原生 MCP 接口，请更新 TT 至 2.3.0 或以上。更新后可继续使用现有 Fish 登录');
     return api;
   }
   record() {
@@ -51,7 +52,7 @@ export class FishTtMcp {
     check(); let record = this.record(), row = record && await this.owned(api, record); const created = !row; check();
     if (!row) {
       const name = 'ST-iPhonie · Fish 订阅 · ' + crypto.randomUUID().slice(0, 8);
-      row = await api.servers.create({displayName: name, endpoint: ENDPOINT, headers: {Authorization: 'Bearer ' + token}, protocolVersion: VERSION});
+      row = await api.servers.create({displayName: name, endpoint: ENDPOINT, headers: {Authorization: 'Bearer ' + token}, protocolVersion: PROTOCOL_PREFERENCE});
       record = {id: row.id, name};
       try {
         const storage = this.storage(); if (!storage) throw Error('无法保存 TT MCP 连接标识');
@@ -60,8 +61,8 @@ export class FishTtMcp {
       this.catalog = null; check();
     }
     // Only our own registration is updated. Refresh tokens never leave the browser.
-    if (row.headers?.Authorization !== 'Bearer ' + token || row.protocolVersion !== VERSION) {
-      row = await api.servers.update({registrationId: row.id, displayName: record.name, endpoint: ENDPOINT, headers: {...row.headers, Authorization: 'Bearer ' + token}, protocolVersion: VERSION});
+    if (row.headers?.Authorization !== 'Bearer ' + token || row.protocolVersion !== PROTOCOL_PREFERENCE) {
+      row = await api.servers.update({registrationId: row.id, displayName: record.name, endpoint: ENDPOINT, headers: {...row.headers, Authorization: 'Bearer ' + token}, protocolVersion: PROTOCOL_PREFERENCE});
       this.catalog = null; check();
     }
     if (row.state !== 'active') {
@@ -110,7 +111,7 @@ export class FishTtMcp {
         // Try removal even if pause/update failed. If removal fails, a successful
         // empty-header update at least removes the credential from this record.
         try { await api.servers.setState({registrationId: row.id, state: 'paused'}); } catch { /* remove below */ }
-        try { await api.servers.update({registrationId: row.id, displayName: record.name, endpoint: ENDPOINT, headers: {}, protocolVersion: VERSION}); } catch { /* remove below */ }
+        try { await api.servers.update({registrationId: row.id, displayName: record.name, endpoint: ENDPOINT, headers: {}, protocolVersion: row.protocolVersion || PROTOCOL_PREFERENCE}); } catch { /* remove below */ }
         try { await api.servers.remove(row.id); }
         catch { throw Error('Fish 登录已断开，但 TT 专用 MCP 连接未完全清理；请在 TT MCP 管理器删除「' + record.name + '」'); }
       }

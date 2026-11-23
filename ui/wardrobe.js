@@ -9,7 +9,7 @@ import {pickReplacement} from './replacement-album.js';
 import {openAlbum} from './album-viewer.js';
 import {openImageViewer} from '../image-viewer.js';
 import {genderOf} from '../core/draw.js';
-import {SHARED_OWNER, WARDROBE_CATEGORIES, WARDROBE_LIMITS, ownerKey, ownerName} from '../core/wardrobe.js';
+import {SHARED_OWNER, WARDROBE_RECOGNITION_BATCH, WARDROBE_RECOGNITION_MAX, WARDROBE_DRAW_MAX, WARDROBE_CATEGORIES, WARDROBE_LIMITS, ownerKey, ownerName} from '../core/wardrobe.js';
 import {shareToChat} from './share-to-chat.js';
 
 const PHOTO_TYPES = 'image/png,image/jpeg,image/webp';
@@ -19,6 +19,7 @@ const AT_ONCE = 30;
 /** Faces in the row while there are many (0.9.33), with 「全部 N」 after them; up to one more, everyone is shown. */
 const ROW = 6;
 const RECENT_KEY = 'sttts-wardrobe-recent';
+const BATCH_KEY = 'sttts-wardrobe-recognition-batch';
 const extOf = blob => /png/.test(blob?.type || '') ? 'png' : /webp/.test(blob?.type || '') ? 'webp' : 'jpg';
 const fileSafe = name => String(name || '').replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 20) || '我';
 const HELP = '衣柜是你和这张卡的角色（角色 App 里的）的，点上面的头像换人。\n放进照片后，能看图的文字模型会认出名字、分类和描述；也可以在单品详情里自己写。\n点图片或名称查看单品，点详情里的图片看大图。长按缩略图进入多选，再点缩略图勾选：「穿上」让下一次正文写进这身衣着（只这一次，之后跟着剧情走）；「去搭配」用选中的衣服搭一套，什么都没选就从整个衣柜挑。\n正文里有人换了衣服，「正在穿」会跟着变。\n试穿图用绘图引擎画，要花钱时先问你。\n放进来的照片在相册的「衣柜」里，试穿图在「衣柜试穿」里。';
@@ -78,7 +79,7 @@ export function wardrobeApp(ctx) {
     noteRecent(key);
     render();
   }
-  const draft = (key = owner) => { if (!drafts.has(key)) drafts.set(key, {mode: 'closet', wish: '', result: '', photoId: ''}); return drafts.get(key); };
+  const draft = (key = owner) => { if (!drafts.has(key)) drafts.set(key, {mode: 'closet', wish: '', result: '', photoId: '', setId: ''}); return drafts.get(key); };
   const cardKey=()=>api.wardrobeCardKey?.() || '';
   const prefKey=(card)=> 'sttts-closet:'+JSON.stringify([card,owner]);
   const groupsKey=(card)=> 'sttts-closet-groups:'+JSON.stringify(card);
@@ -195,7 +196,7 @@ export function wardrobeApp(ctx) {
     const pic = x.photoId ? pictureButton(x, busy) : `<button type="button" class="wardrobe-pic" data-action="item-card-photo" data-id="${id}" aria-label="${picked.size ? '选择' : '查看'} ${name}"${picked.size ? ` aria-pressed="${picked.has(x.id)}"` : ''}><span class="wardrobe-words">${esc(x.description)}</span><span class="wardrobe-check" aria-hidden="true">${icon('check')}</span></button>`;
     return `<div class="wardrobe-item" data-flip="wardrobe:${id}" data-item="${id}" data-selected="${picked.has(x.id)}">${pic}
       <button type="button" class="wardrobe-name" data-action="item-edit" data-id="${id}">${name}</button>
-      ${x.description || busy ? '' : '<span class="wardrobe-todo">待写描述</span>'}</div>`;
+      ${x.naiTags && !x.photoId ? '<span class="wardrobe-todo">已存绘图标签</span>' : x.description || busy ? '' : '<span class="wardrobe-todo">待写描述</span>'}</div>`;
   }
   function closet(list) {
     if (!list.length) return empty('衣柜还是空的', '点右上角的 ＋ 放进第一件衣服', 'hanger');
@@ -208,7 +209,7 @@ export function wardrobeApp(ctx) {
       + `<div class="wardrobe-grid"${picked.size ? ' data-picking' : ''}>${shown.map(tile).join('')}</div>`;
   }
   const act = (key, name, label, style = '') => `<button type="button" class="select-act${style}" data-action="${key}">${icon(name)}<span>${label}</span></button>`;
-  const bar = () => `<div class="select-bar wardrobe-bar" role="toolbar" aria-label="选中的衣服"><div class="select-head"><span data-picked-count>已选 ${picked.size} 件</span>${btn('pick-clear', '清空', 'text-button')}</div><div class="select-acts">${catalogOpen ? '' : act('pick-wear', 'hanger', '穿上') + act('pick-outfit', 'wand', '去搭配')}${act('pick-delete', 'trash', '拿出衣柜', ' select-danger')}</div></div>`;
+  const bar = () => `<div class="select-bar wardrobe-bar" role="toolbar" aria-label="选中的衣服"><div class="select-head"><span data-picked-count>已选 ${picked.size} 件</span>${btn('pick-clear', '清空', 'text-button')}</div><div class="select-acts">${catalogOpen ? '' : act('pick-wear', 'hanger', '穿上') + act('pick-outfit', 'wand', '去搭配')}${api.wardrobeDrawItems ? act('pick-draw', 'paint', '批量出图') : ''}${act('pick-delete', 'trash', '拿出衣柜', ' select-danger')}</div></div>`;
   function outfit(list, sets) {
     const d = draft(), described = list.filter(x => x.description).length, chosen = list.filter(x => picked.has(x.id)).length, none = d.result.trim() ? '' : 'disabled';
     const source = d.mode !== 'closet' ? '' : `<p class="hint wardrobe-source">${chosen ? `用选中的 ${chosen} 件` : described ? `从衣柜的 ${described} 件里挑` : '衣柜里还没有写了描述的衣服'}</p>`;
@@ -218,7 +219,7 @@ export function wardrobeApp(ctx) {
       + `<div class="actions">${btn('suggest', suggesting ? '搭配中…' : '搭一套', 'primary', suggesting ? 'disabled' : '')}</div>`
       + field(`给${who()}的搭配`, textArea('result', d.result, `rows="4" maxlength="${WARDROBE_LIMITS.wear}" placeholder="搭好的在这里，也可以自己写"`))
       + `<div class="actions wardrobe-result-acts">${btn('outfit-wear', '穿上这套', 'primary', none)}${btn('outfit-save', saving ? '存进衣柜…' : '存成一套', 'secondary', saving ? 'disabled' : none)}${btn('outfit-draw', drawing ? '在画…' : '试穿图', 'secondary', drawing ? 'disabled' : none)}</div>${tryOn}`
-      + (sets.length ? groupTitle('存过的搭配') + `<div class="group wardrobe-sets">${sets.map(s => `<div class="list-row wardrobe-set" data-id="${esc(s.id)}"><button type="button" class="wardrobe-set-main" data-action="set-load" data-id="${esc(s.id)}"><strong>${esc(s.name)}</strong><small>${esc(s.description)}</small></button><button type="button" class="round-button" data-action="set-more" data-id="${esc(s.id)}" aria-label="${esc(s.name)} 的更多操作">${icon('more')}</button></div>`).join('')}</div>` : '');
+      + (sets.length ? groupTitle('存过的搭配') + `<div class="group wardrobe-sets">${sets.map(s => `<div class="list-row wardrobe-set" data-id="${esc(s.id)}">${s.photoId ? `<button type="button" class="wardrobe-set-photo" data-action="set-photo" data-id="${esc(s.id)}" aria-label="看 ${esc(s.name)} 的试穿图"><img data-photo="${esc(s.photoId)}" alt=""${urls.get(s.photoId) ? ` src="${esc(urls.get(s.photoId))}"` : '' }></button>` : ''}<button type="button" class="wardrobe-set-main" data-action="set-load" data-id="${esc(s.id)}"><strong>${esc(s.name)}</strong><small>${esc(s.description)}</small></button><button type="button" class="round-button" data-action="set-more" data-id="${esc(s.id)}" aria-label="${esc(s.name)} 的更多操作">${icon('more')}</button></div>`).join('')}</div>` : '');
   }
   function render() {
     if (v.disposed) return;
@@ -249,6 +250,8 @@ export function wardrobeApp(ctx) {
     }, alive).catch(() => {});
   }
   async function load() {
+    win.clearTimeout(soon);
+    soon = 0;
     const ticket = ++turn, got = await api.wardrobe();
     if (v.disposed || ticket !== turn) return;
     all = got;
@@ -280,59 +283,76 @@ export function wardrobeApp(ctx) {
 
   // ---------- putting clothes in ----------
   function addSheet(sharedCatalog = false) {
+    let stored = null;
+    try { stored = win.localStorage.getItem(BATCH_KEY); } catch {}
+    const value = stored === null ? WARDROBE_RECOGNITION_BATCH : Number(stored);
+    const initial = Number.isInteger(value) && value >= 0 && value <= WARDROBE_RECOGNITION_MAX ? value : WARDROBE_RECOGNITION_BATCH;
+    const choices = [['0', '导入后先不识别'], ...Array.from({length:WARDROBE_RECOGNITION_MAX}, (_, i) => [String(i + 1), `${i + 1} 张／批`])];
     const d = ctx.dialog(sharedCatalog ? '添加通用衣物' : `放进${who()}的衣柜`, `<div class="pick-list wardrobe-add">
-      <label class="list-row file-button">${icon('image')}<span><strong>拍照或选图片</strong>${sharedCatalog ? '' : '<small>可以多选，放进来会自动认出是什么</small>'}</span><input type="file" accept="${PHOTO_TYPES}" ${sharedCatalog ? '' : 'multiple'} data-add-files aria-label="拍照或选图片"></label>
+      <label class="list-row file-button">${icon('image')}<span><strong>拍照或选图片</strong><small>可以多选</small></span><input type="file" accept="${PHOTO_TYPES}" multiple data-add-files aria-label="拍照或选图片"></label>
       <button type="button" class="list-row" data-add="album">${icon('album')}<span><strong>从相册选</strong></span></button>
-      <button type="button" class="list-row" data-add="words">${icon('edit')}<span><strong>只写文字</strong></span></button></div>`);
-    d.body.addEventListener('change', e => { const files = [...(e.target.closest('[data-add-files]')?.files || [])]; if (!files.length) return;
+      <button type="button" class="list-row" data-add="words">${icon('edit')}<span><strong>只写文字</strong></span></button></div>
+      ${field('识图批次大小', select('recognition-batch',initial,choices), '每批只发一次请求，没识别出来的衣物可到详情手动处理。')}`);
+    const size = d.body.querySelector('[data-field=recognition-batch]');
+    size.addEventListener('change', () => { try { win.localStorage.setItem(BATCH_KEY, size.value); } catch {} });
+    d.body.addEventListener('change', e => {
+      const files = [...(e.target.closest('[data-add-files]')?.files || [])];
+      if (!files.length) return;
       d.close();
-      if (sharedCatalog) editItem(null, {sharedCatalog, changed:load, file:files[0]});
-      else addFiles(files).catch(error => ctx.notify(error.message, {error: true})); });
+      addFiles(files, sharedCatalog, Number(size.value)).catch(error => ctx.notify(error.message, {error:true}));
+    });
     d.body.addEventListener('click', e => {
       const how = e.target.closest('[data-add]')?.dataset.add;
-      if (how === 'album') { d.close(); pickFromAlbum(sharedCatalog).catch(error => ctx.notify(error.message, {error: true})); }
+      if (how === 'album') { d.close(); pickFromAlbum(sharedCatalog, Number(size.value)).catch(error => ctx.notify(error.message, {error:true})); }
       if (how === 'words') { d.close(); editItem(null, {sharedCatalog, changed:load}); }
     });
   }
-  async function addFiles(files) {
-    const forWhom = owner, name = fileSafe(who(forWhom)), ids = [];
+
+  async function addFiles(files, sharedCatalog, batchSize) {
+    const forWhom = sharedCatalog ? SHARED_OWNER : owner, name = fileSafe(who(forWhom)), ids = [];
     if (files.length > AT_ONCE) ctx.notify(`一次最多放 ${AT_ONCE} 件，先放前 ${AT_ONCE} 件`);
-    for (const [i, file] of files.slice(0, AT_ONCE).entries()) {
-      const photo = await api.addPhoto({name: `衣柜-${name}-${Date.now()}${i ? '-' + i : ''}.${extOf(file)}`, blob: file});
-      ids.push((await api.saveWardrobeItem({owner: forWhom, photoId: photo.id})).id);
-    }
-    if (ids.length) recognizeAll(ids);
+    try {
+      for (const [i, file] of files.slice(0, AT_ONCE).entries()) {
+        const photo = await api.addPhoto({name: `衣柜-${name}-${Date.now()}${i ? '-' + i : ''}.${extOf(file)}`, blob: file});
+        ids.push((await api.saveWardrobeItem({owner:forWhom, photoId:photo.id})).id);
+      }
+    } finally { if (ids.length && batchSize) await recognizeAll(ids, {batchSize}); }
   }
   /** A photo already in the album keeps its existing file, whatever view it was picked from. */
-  async function pickFromAlbum(sharedCatalog = false) {
+  async function pickFromAlbum(sharedCatalog, batchSize) {
     const forWhom = sharedCatalog ? SHARED_OWNER : owner;
     const exclude = new Set(all.items.filter(x => x.owner === forWhom && x.photoId).map(x => x.photoId));
-    const selection = await pickReplacement(ctx, api, {title:'从相册选', device:false, exclude, multiple:sharedCatalog ? 0 : AT_ONCE});
+    const selection = await pickReplacement(ctx, api, {title:'从相册选', device:false, exclude, multiple:AT_ONCE});
     if (!selection || v.disposed || catalogOpen !== sharedCatalog || (!sharedCatalog && owner !== forWhom)) return;
-    if (sharedCatalog) {
-      editItem(null, {sharedCatalog, photoId:selection});
+    const ids = [];
+    try {
+      for (const photoId of selection) ids.push((await api.saveWardrobeItem({owner:forWhom, photoId})).id);
+    } finally { if (ids.length && batchSize) await recognizeAll(ids, {batchSize}); }
+  }
+  /** Each planned group makes at most one request, even when it comes back incomplete. */
+  async function recognizeAll(ids, {onlyEmpty = true, batchSize = 1} = {}) {
+    if (batchSize > 1 && ids.length > 1 && !api.wardrobeRecognizeBatch) {
+      ctx.notify('这个版本不支持批量识别，衣物已导入。可在详情手动识别。');
       return;
     }
-    const ids = [];
-    for (const photoId of selection) ids.push((await api.saveWardrobeItem({owner:forWhom, photoId})).id);
-    if (ids.length) await recognizeAll(ids);
-  }
-  /** One after another; a failure that is about one photo goes on to the next, any other stops (it would fail them all). */
-  async function recognizeAll(ids) {
     for (const id of ids) recognizing.add(id);
     render();
-    let failed = '';
-    for (const [i, id] of ids.entries()) {
-      try { await api.wardrobeRecognize(id); }
-      catch (error) {
-        failed = failed || error.message;
-        if (error.code !== 'ITEM') { for (const rest of ids.slice(i)) recognizing.delete(rest); break; }
+    let failed = '', count = 0;
+    try {
+      for (let i = 0; i < ids.length; i += batchSize) {
+        const group = ids.slice(i, i + batchSize);
+        if (group.length > 1) count += (await api.wardrobeRecognizeBatch(group)).length;
+        else { await api.wardrobeRecognize(group[0], {onlyEmpty}); count++; }
+        for (const id of group) recognizing.delete(id);
       }
-      recognizing.delete(id);
+    } catch (error) { failed = error.message; }
+    finally {
+      for (const id of ids) recognizing.delete(id);
+      win.clearTimeout(soon);
+      await load();
     }
-    render();
-    if (failed) ctx.notify(failed, {error: true});
-    else ctx.notify(ids.length > 1 ? `认好了 ${ids.length} 件` : '认好了');
+    if (count < ids.length) ctx.notify(`已识别 ${count}／${ids.length} 件，其余已保留，可在单品详情手动处理。${failed ? ' ' + failed : ''}`, {error:!!failed});
+    else ctx.notify(count > 1 ? `认好了 ${count} 件` : '认好了');
   }
   /** 「⋯」 of a piece (null: one written by hand): its name, category and words, 重新识别, 拿出衣柜. */
   function editItem(id, {sharedCatalog = false, changed = load, file, photoId = ''} = {}) {
@@ -354,7 +374,7 @@ export function wardrobeApp(ctx) {
       ${field('年龄段',input('age',old?.age || '','text','maxlength="24" placeholder="不限，例如：儿童"'))}</div>
       ${field('描述', textArea('description', old?.description || '', `rows="4" maxlength="${WARDROBE_LIMITS.description}" placeholder="颜色、款式、材质、图案……"`))}
       <div class="actions">${hasPhoto && (api.wardrobeInspect || old && api.wardrobeRecognize) ? btn('item-recognize', old?.description ? '重新识别' : '识别衣物', 'secondary') : ''}${btn('item-save', '保存', 'primary')}</div>
-      ${old ? `<div class="actions wardrobe-edit-more">${btn('item-draw', old.photoId ? '重画' : '画出来', 'secondary')}${btn('item-delete', icon('trash') + '拿出衣柜', 'text-button danger-text')}</div>` : ''}</div>`, {over:sharedCatalog});
+      ${old ? `<div class="wardrobe-todo wardrobe-tags" data-nai-tags${old.naiTags ? '' : ' hidden'}>已存绘图标签 · NovelAI 可直接使用</div><div class="actions wardrobe-edit-more">${btn('item-draw', old.photoId ? '重画' : '画出来', 'secondary')}${btn('item-delete', icon('trash') + '拿出衣柜', 'text-button danger-text')}</div>` : ''}</div>`, {over:sharedCatalog});
     d.body.querySelector('[data-field=shared]').onchange=e=>{d.body.querySelector('[data-sharing]').hidden=!e.target.checked;};
     let url = '', fullURL = '', viewer;
     if (hasPhoto) (file ? Promise.resolve(file) : previewBlob(api, photoId).then(small => small || api.getPhoto(photoId).then(p => p?.blob || null))).then(blob => {
@@ -401,7 +421,7 @@ export function wardrobeApp(ctx) {
           const button = e.target.closest('[data-action]'), save = d.body.querySelector('[data-action=item-save]');
           if (button.disabled || save.disabled) return;
           if (!api.wardrobeInspect) {
-            if (await ctx.confirm('重新识别衣物？', '识别结果会覆盖这件衣物的描述。', {over:true})) { d.close(); await recognizeAll([old.id]); }
+            if (await ctx.confirm('重新识别衣物？', '识别结果会覆盖这件衣物的描述。', {over:true})) { d.close(); await recognizeAll([old.id], {onlyEmpty:false}); }
             return;
           }
           const description = d.body.querySelector('[data-field=description]'), name = d.body.querySelector('[data-field=name]');
@@ -439,6 +459,13 @@ export function wardrobeApp(ctx) {
               }
             }
             d.close(); await (changed ? changed() : load()); ctx.notify('画好了，图片已放进衣柜');
+          } catch (error) {
+            try {
+              await changed();
+              const hint = d.body.querySelector('[data-nai-tags]');
+              if (d.live && hint) hint.hidden = !all.items.find(item => item.id === old.id)?.naiTags;
+            } catch { /* Keep the original drawing error. */ }
+            throw error;
           } finally { button.disabled = false; button.textContent = old.photoId ? '重画' : '画出来'; }
         }
         else if (action === 'item-delete') {
@@ -469,7 +496,7 @@ export function wardrobeApp(ctx) {
     const forWhom = owner, d = draft(forWhom);
     suggesting = true;
     render();
-    try { d.result = await api.wardrobeSuggest({owner: forWhom, mode: d.mode, wish: d.wish, itemIds: d.mode === 'closet' ? mine().filter(x => !picked.size || picked.has(x.id)).map(x => x.id) : []}); d.photoId = ''; }
+    try { d.result = await api.wardrobeSuggest({owner: forWhom, mode: d.mode, wish: d.wish, itemIds: d.mode === 'closet' ? mine().filter(x => !picked.size || picked.has(x.id)).map(x => x.id) : []}); d.photoId = d.setId = ''; }
     finally { suggesting = false; render(); }
   }
   /** 试穿图: a picture that costs money is drawn only after a yes. */
@@ -482,7 +509,17 @@ export function wardrobeApp(ctx) {
       for (;;) {
         drawing = true;
         render();
-        try { d.photoId = await api.wardrobeTryOn({owner: forWhom, text, allowPaid}); break; }
+        try {
+          const photoId = await api.wardrobeTryOn({owner: forWhom, text, allowPaid});
+          if (d.result.trim() === text) {
+            d.photoId = photoId;
+            if (d.setId) {
+              try { await api.saveWardrobeSet({id:d.setId, photoId}); }
+              catch (error) { if (error.code !== 'MISSING') throw error; }
+            }
+          }
+          break;
+        }
         catch (error) {
           if (error.code !== 'PAID' || allowPaid) throw error;
           drawing = false;
@@ -506,6 +543,8 @@ export function wardrobeApp(ctx) {
     render();
     try {
       const got = await api.wardrobeSaveOutfit({owner: forWhom, text, photoId: d.photoId, mode: d.mode, itemIds: d.mode === 'closet' ? mine().filter(x => picked.has(x.id)).map(x => x.id) : []});
+      if (d.result.trim() === text) { d.setId = got.set.id; d.photoId ||= got.set.photoId || ''; }
+      await load();
       ctx.notify(got.again ? '这套存过了，在下面「存过的搭配」里' : got.added ? `存好了，拆成 ${got.added} 件放进了衣柜` : '存好了，在下面「存过的搭配」里');
     } finally { saving = false; render(); }
   }
@@ -514,17 +553,22 @@ export function wardrobeApp(ctx) {
     if (key === 'wear') { await api.setWardrobeWear({owner: s.owner, text: s.description}); ctx.notify(`${who(s.owner)}穿上了，下一次正文会写进去`); }
     // 衣柜 × 聊天 (0.9.35): the set as a card in a chat, with a picture of one of its pieces when there is one.
     if (key === 'send') {
-      const photoId = s.items.map(id => all.items.find(x => x.id === id)?.photoId).find(Boolean) || '';
+      const photoId = s.photoId || s.items.map(id => all.items.find(x => x.id === id)?.photoId).find(Boolean) || '';
       await shareToChat(ctx, {title: `把「${s.name}」发给…`, what: '这身', message: {kind: 'outfit', outfit: {name: s.name, text: s.description, owner: s.owner, ...(photoId ? {photoId} : {})}}});
     }
     if (key === 'rename') {
       const d = ctx.dialog('改名', `${field('名字', input('name', s.name, 'text', `maxlength="${WARDROBE_LIMITS.name}"`))}<div class="actions">${btn('rename-save', '保存', 'primary')}</div>`);
       d.body.addEventListener('click', async e => {
         if (!e.target.closest('[data-action=rename-save]')) return;
-        try { await api.saveWardrobeSet({...s, name: d.body.querySelector('[data-field=name]').value}); d.close(); } catch (error) { ctx.notify(error.message, {error: true}); }
+        try { await api.saveWardrobeSet({id:s.id, name: d.body.querySelector('[data-field=name]').value}); d.close(); } catch (error) { ctx.notify(error.message, {error: true}); }
       });
     }
-    if (key === 'delete' && await ctx.confirm(`删除「${s.name}」？`, '')) await api.deleteWardrobe([s.id]);
+    if (key === 'delete' && await ctx.confirm(`删除「${s.name}」？`, '试穿图和单品会留在原处。')) {
+      await api.deleteWardrobe([s.id]);
+      const current = draft(s.owner);
+      if (current.setId === s.id) current.setId = '';
+      await load();
+    }
   }
 
   // ---------- taps ----------
@@ -586,7 +630,9 @@ export function wardrobeApp(ctx) {
     const key = e.target.dataset?.field;
     if (key === 'wish') draft().wish = e.target.value;
     if (key !== 'result') return;
-    draft().result = e.target.value;
+    const current = draft();
+    if (current.result.trim() !== e.target.value.trim()) { current.setId = ''; current.photoId = ''; v.root.querySelector('.wardrobe-tryon')?.remove(); }
+    current.result = e.target.value;
     const none = !e.target.value.trim();
     for (const action of ['outfit-wear', 'outfit-save', 'outfit-draw']) { const b = v.root.querySelector(`[data-action=${action}]`); if (b && !(action === 'outfit-draw' && drawing) && !(action === 'outfit-save' && saving)) b.disabled = none; }
   });
@@ -605,6 +651,24 @@ export function wardrobeApp(ctx) {
       case 'pick-clear': picked = new Set(); syncPicks(); break;
       case 'pick-wear': await wearPicked(); break;
       case 'pick-outfit': tab = 'outfit'; d.mode = 'closet'; render(); v.root.scrollTop = 0; break;
+      case 'pick-draw': await v.busy(el, async () => {
+        if (api.getState().draw.engine !== 'nai') throw Error('请先在绘图里切换到 NovelAI');
+        if (!api.drawReady()) throw Error(api.drawMissing());
+        const ids = all.items.filter(item => picked.has(item.id) && item.description && !item.photoId).map(item => item.id);
+        if (!ids.length || ids.length > WARDROBE_DRAW_MAX) throw Error(`请选择 1 到 ${WARDROBE_DRAW_MAX} 件有描述、还没有图片的单品`);
+        const skipped = picked.size - ids.length;
+        const allowPaid = api.drawQuote().free === false;
+        const tagged = all.items.filter(item => ids.includes(item.id) && item.naiTags).length;
+        const detail = [tagged === ids.length ? '已选单品都已存绘图标签，将直接用 NovelAI 出图。' : '只用一次文字模型转换缺少标签的单品，再用 NovelAI 逐件出图。'];
+        if (tagged && tagged < ids.length) detail.push(`${tagged} 件会沿用已存的绘图标签。`);
+        if (skipped) detail.push(`${skipped} 件已有图片或缺少描述的单品会跳过。`);
+        if (allowPaid) detail.push('当前设置下，每张图会扣 Anlas。');
+        if (!await ctx.confirm(`给 ${ids.length} 件单品出图？`, detail.join('\n'))) return;
+        ctx.notify('正在批量出图，完成的图片会自动放进衣柜');
+        const result = await api.wardrobeDrawItems({ids, allowPaid});
+        await load();
+        ctx.notify(`已画 ${result.count}／${ids.length} 件。${result.error}`, {error:!!result.error});
+      }); break;
       case 'pick-delete':
         {
           const ids = [...picked], shared = all.items.some(item => item.shared && picked.has(item.id));
@@ -627,10 +691,15 @@ export function wardrobeApp(ctx) {
       case 'owners-all': ownersSheet(); break;
       case 'outfit-draw': await v.busy(el, tryOn); break;
       case 'tryon-open': if (d.photoId) openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: [d.photoId], from: el.getBoundingClientRect(), load: id => api.getPhoto(id)}); break;
+      case 'set-photo': {
+        const set = all.sets.find(x => x.id === el.dataset.id);
+        if (set?.photoId) openAlbum({ctx, host:v.root.closest('.screen') || ctx.doc.body, ids:[set.photoId], from:el.getBoundingClientRect(), load:id => api.getPhoto(id)});
+        break;
+      }
       case 'set-load': {
         const s = all.sets.find(x => x.id === el.dataset.id);
         if (!s) break;
-        d.result = s.description; d.photoId = s.photoId || '';
+        d.result = s.description; d.photoId = s.photoId || ''; d.setId = s.id;
         render();
         v.root.querySelector('[data-field=result]')?.scrollIntoView?.({block: 'center', behavior: 'smooth'});
         break;
