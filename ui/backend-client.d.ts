@@ -330,6 +330,8 @@ export interface DrawInput { prompt: string; negative?: string; characters?: Dra
     base?: { image: string; width: number; height: number; strength: number; noise?: number; mask?: string; /** 局部重绘: put the untouched parts back as they were. */ overlay?: boolean; /** 增强. */ enhance?: boolean; /** 增强 at 最大 (V5): the picture as it is, doubled by NovelAI. */ upscaled?: boolean } | null;
     /** 边画边看 when it is switched on: the steps and the picture on its way come as 'draw' events. */
     preview?: boolean;
+    /** Preview before keeping: returns the blob and an empty photoId, without writing to the album. */
+    temporary?: boolean;
     /** NovelAI V4.5: 角色参考 (fitted pictures). */
     refs?: Array<{ image: string; kind: 'character' | 'style' | 'both'; strength: number; fidelity: number }>; }
 /** seed is -1 for GPT (it takes none); params are what the engine used (GPT has no steps). */
@@ -1313,7 +1315,9 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     /** people: registered names the model put in the picture (the drawing app adds them with their looks). */
     suggestPrompt(): Promise<{ prompt: string; people: string[]; /** NovelAI: tokens the line holds, and the room it had */ tokens?: number; budget?: number }>;
     /** 帮我写: a prompt line for a picture the user describes in a few words; cast: names of the people in it. */
-    writePrompt(idea: string, cast?: string[]): Promise<{ prompt: string; people: string[]; /** NovelAI: tokens the line holds, and the room it had */ tokens?: number; budget?: number }>;
+    /** The active tavern user's persona description for a self portrait. */
+    chatDrawPersona(): string;
+    writePrompt(idea: string, cast?: string[], options?: { explicitCast?: boolean; describedLook?: string }): Promise<{ prompt: string; people: string[]; /** NovelAI: tokens the line holds, and the room it had */ tokens?: number; budget?: number }>;
     /** Pictures stored in the open tavern chat. */
     chatPictureStats(): { count: number };
     /** Plans the pictures of the newest character reply again and queues them. */

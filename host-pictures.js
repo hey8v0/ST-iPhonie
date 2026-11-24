@@ -796,9 +796,9 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     return {...result, tokens: used, budget: left};
   }
   /** 帮我写: a prompt line for what the user describes (a few words, Chinese is fine). */
-  async function writePrompt(idea, cast = []) {
+  async function writePrompt(idea, cast = [], {explicitCast = false, describedLook = ''} = {}) {
     if (!String(idea || '').trim()) throw Error('先说说想画什么');
-    const names = (Array.isArray(cast) ? cast : []).map(String).slice(0, 8), prompt = writeRequest(settings(), {idea, cast: names, only: castNow()});
+    const names = (Array.isArray(cast) ? cast : []).map(String).slice(0, 8), prompt = writeRequest(settings(), {idea, cast: names, only: explicitCast ? [] : castNow(), explicitCast, describedLook: String(describedLook || '').trim().slice(0, 1500)});
     const reply = await backend.generateText(context(), {use: 'picture', prompt, plainText: true, trimNames: false, responseLength: promptLength(settings())});
     const result = readSuggestion(settings(), reply);
     if (!result.prompt) throw Error('模型没有写出提示词，再试一次');

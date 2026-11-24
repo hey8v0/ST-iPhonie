@@ -43,7 +43,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null, stopChatClock = null;
 import { createSongHost } from './host-song.js';
-const RUNTIME_VERSION='1.0.21';
+const RUNTIME_VERSION='1.0.22';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -558,7 +558,8 @@ function connect(source){
   recentMessages:limit=>{check();return pictures.recentMessages(Math.min(60,Math.max(1,Number(limit)||8)));},
   insertImage:(id,photoId)=>{check();return pictures.insertImage(id,photoId);},
   suggestPrompt:()=>{check();return pictures.suggestPrompt();},
-  writePrompt:(idea,cast)=>{check();return pictures.writePrompt(idea,cast);},
+  writePrompt:(idea,cast,options)=>{check();return pictures.writePrompt(idea,cast,options);},
+  chatDrawPersona:()=>{check();return String(context()?.powerUserSettings?.persona_description||'').trim().slice(0,1500);},
   autoPickVoice:name=>{check();return voiceHost.pick(String(name||''),{force:true});},
   soundState:()=>{check();return soundHost.state();},
   soundListen:id=>{check();return soundHost.listen(String(id||''));},soundTakeListen:(key,blob)=>{check();return soundHost.listenTake(String(key||''),blob);},soundPrompt:input=>{check();return soundHost.prompt({text:String(input?.text||''),mode:input?.mode==='apply'?'apply':'english',hint:String(input?.hint||'')});},

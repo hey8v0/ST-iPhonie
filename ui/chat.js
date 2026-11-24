@@ -27,6 +27,7 @@ import {pictureInputs, photoTags, photoPicture} from '../core/draw.js';
 import {chatScene, sceneArt, sceneDark, syncMotion} from './chat-scenes.js';
 import {PREMIUM, yuan} from '../core/wallet.js';
 import {recordChatMessage} from './chat-recording.js';
+import {chatPictureSheet} from './chat-draw.js';
 import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
 import {eachThumb, previewBlob} from './thumbs.js';
 import {pickReplacement} from './replacement-album.js';
@@ -572,7 +573,7 @@ export function chatApp(ctx) {
   function toolsHTML() {
     const group = thread.type === 'group';
     const tools = [['photo', 'image', '照片'], ['recording', 'mic', '语音'], ['emoji', 'smile', '表情'], ['redpacket', 'packet', '红包'], ...(group ? [] : [['transfer', 'swap', '转账'], ['gift', 'gift', '礼物']]),
-      ['file', 'file', '文件'], ['location', 'pin', '位置'], ['song', 'music', '分享歌'], ['write', 'edit', '写首歌'], ['pat', 'hand', '拍一拍'], ['dice', 'dice', '骰子'], ...(group ? [['game', 'games', '群游戏']] : [['play', 'games', '小游戏'], ['letter', 'mail', '写信']])];
+      ['file', 'file', '文件'], ['location', 'pin', '位置'], ['song', 'music', '分享歌'], ['write', 'edit', '写首歌'], ['pat', 'hand', '拍一拍'], ['dice', 'dice', '骰子'], ...(group ? [['game', 'games', '群游戏']] : [['play', 'games', '小游戏'], ['letter', 'mail', '写信']]), ['draw', 'wand', '生成配图']];
     const tabs = `<div class="emoji-tabs" role="tablist">${[['emoji', '表情'], ['kao', '颜文字'], ['stickers', '表情包']].map(([k, t]) => `<button type="button" role="tab" data-action="panel-${k}" aria-selected="${panel === k}">${t}</button>`).join('')}</div>`;
     if (panel === 'stickers') {
       const list = api.getState().chat.stickers || [];
@@ -2785,6 +2786,16 @@ export function chatApp(ctx) {
       case 'panel-kao': panel = 'kao'; syncPanel(); break;
       case 'emoji-del': deleteChar(); break;
       case 'tool-photo': panel = null; syncPanel(); await sendPhoto(); break;
+      case 'tool-draw': {
+        panel = null; syncPanel();
+        const id = threadId, space = spaceTurn;
+        chatPictureSheet(ctx, {
+          name: myName(),
+          current: () => !v.disposed && mode === 'thread' && threadId === id && spaceTurn === space && !thread?.watch && !thread?.blocked,
+          send: (photoId, text) => post([{from: 'me', kind: 'photo', photoId, text}]),
+        });
+        break;
+      }
       case 'tool-redpacket': panel = null; syncPanel(); sendPacket(); break;
       case 'tool-transfer': panel = null; syncPanel(); sendTransfer(); break;
       case 'tool-gift': panel = null; syncPanel(); sendGift(); break;

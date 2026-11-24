@@ -1728,9 +1728,9 @@ export class TTSBackend {
         const p = this.settings.draw.params;
         return this.novelai.suggestTags({ model: p.model, prompt: word, mode: p.mode, signal });
     }
-    /** Generates one image and keeps it in the album. Requests wait in the NovelAI queue (see draw-queue.js).
+    /** Generates one image. Unless temporary, it is kept in the album. Requests wait in the drawing queue.
      *  key identifies the job in the queue (the same key joins the job already waiting); label is shown in the line. */
-    generateImage({ prompt, negative = '', characters = [], params, allowPaid = false, name = '', key, label = '', valid = null, base = null, refs = [], roleRefs = [], preview = false } = {}, preparePhoto) {
+    generateImage({ prompt, negative = '', characters = [], params, allowPaid = false, name = '', key, label = '', valid = null, base = null, refs = [], roleRefs = [], preview = false, temporary = false } = {}, preparePhoto) {
         this.assertOpen();
         if (!String(prompt || '').trim()) return Promise.reject(Error('请先写提示词'));
         const engine = this.settings.draw.engine;
@@ -1761,12 +1761,14 @@ export class TTSBackend {
                 const info = this.pictureInfo(engine, made, picture);
                 if (made.dropped) info.push(['参考图', '没带：中转不支持改图接口（/images/edits）']);
                 else if (made.refs) info.push(['参考图', made.faces?.length ? made.faces.join('、') : `${made.refs} 张`]);
-                const photo = await this.library.addPhoto({ name: (name || DRAW_ENGINE_NAMES[engine]) + '-' + (made.seed >= 0 ? made.seed : Date.now()) + '.' + ext, blob: made.blob, info });
+                const photo = temporary ? null : await this.library.addPhoto({ name: (name || DRAW_ENGINE_NAMES[engine]) + '-' + (made.seed >= 0 ? made.seed : Date.now()) + '.' + ext, blob: made.blob, info });
                 this.ledger.image(engine);
-                this.#thumbSoon(photo.id);
-                this.emit('library', { collection: 'photos' });
+                if (photo) {
+                    this.#thumbSoon(photo.id);
+                    this.emit('library', { collection: 'photos' });
+                }
                 this.emit('draw', { phase: 'done' });
-                return { photoId: photo.id, seed: made.seed, params: made.params, prompt: made.prompt, engine, blob: made.blob, info };
+                return { photoId: photo?.id || '', seed: made.seed, params: made.params, prompt: made.prompt, engine, blob: made.blob, info };
             } });
             job.catch(error => { this.emit('draw', { phase: error.cancelled ? 'cancelled' : 'error', message: error.message }); });
             return job;
@@ -1803,15 +1805,17 @@ export class TTSBackend {
             const info = this.pictureInfo('nai', { params: request.params, seed: request.seed, prompt: request.body.input }, { negative, characters });
             if (request.body.action !== 'generate') info.push(['方式', request.body.action === 'infill' ? `局部重绘 · 强度 ${request.body.parameters.strength}` : `图生图 · 强度 ${request.body.parameters.strength} · 噪声 ${request.body.parameters.noise}`]);
             if (request.refs) info.push(['角色参考', `${request.refs} 张`]);
-            const photo = await this.library.addPhoto({ name: (name || 'NovelAI') + '-' + request.seed + (blob.type === 'image/webp' ? '.webp' : blob.type === 'image/jpeg' ? '.jpg' : '.png'), blob, info });
+            const photo = temporary ? null : await this.library.addPhoto({ name: (name || 'NovelAI') + '-' + request.seed + (blob.type === 'image/webp' ? '.webp' : blob.type === 'image/jpeg' ? '.jpg' : '.png'), blob, info });
             this.ledger.image('nai');
             if (quote.free === false) this.spentAnlas();
-            this.#thumbSoon(photo.id);
-            this.emit('library', { collection: 'photos' });
+            if (photo) {
+                this.#thumbSoon(photo.id);
+                this.emit('library', { collection: 'photos' });
+            }
             this.emit('draw', { phase: 'done' });
             // Paid images change the Anlas balance and V5 images use up the allowance: read the subscription again next time.
             if (this.subscription && (quote.free === false || isV5(request.params.model))) this.subscription.checkedAt = 0;
-            return { photoId: photo.id, seed: request.seed, params: request.params, prompt: request.body.input, engine: 'nai', blob, info };
+            return { photoId: photo?.id || '', seed: request.seed, params: request.params, prompt: request.body.input, engine: 'nai', blob, info };
         } });
         job.catch(error => { this.emit('draw', { phase: error.cancelled ? 'cancelled' : 'error', message: error.message }); });
         return job;
@@ -3860,7 +3864,7 @@ export class TTSBackend {
             saveDrawPreset: preset => this.saveDrawPreset(preset), deleteDrawPreset: id => this.deleteDrawPreset(id), previewDrawPrompt: preset => this.previewDrawPrompt(preset),
             naiSubscription: refresh => this.naiSubscription(refresh), naiProbe: () => this.naiProbe(), voiceModels: (engine, connection, refresh) => this.providers.voiceModels(engine, connection || this.settings.connections[engine], refresh), fishCatalog: () => this.providers.fishCatalog(), fishProbe: () => { this.assertOpen(); keyCheck('fish'); return this.providers.probeFish(clone(this.settings.connections.fish)); },
             listVibes: () => this.listVibes(), compactVibes: () => this.compactVibes(), importVibes: files => this.importVibes(files), updateVibe: (id, patch) => this.updateVibe(id, clone(patch || {})), deleteVibe: id => this.deleteVibe(id), deleteVibes: ids => this.deleteVibes([...(ids || [])]), exportVibes: target => this.exportVibes(clone(target || {})), embedVibes: (target, picture, name) => this.embedVibes(clone(target || {}), picture, name), importPictureVibes: (list, options) => this.importPictureVibes(clone(list || []), clone(options || {})), vibePlan: model => clone(this.vibePlan(model || this.settings.draw.params.model)), drawQuote: (params, extra) => this.drawQuote(params, extra), naiTool: input => this.naiTool(clone(input || {})),
-            generateImage: input => this.generateImage(input).then(({ blob, ...result }) => result),
+            generateImage: input => this.generateImage(input).then(({ blob, ...result }) => input?.temporary ? { ...result, blob } : result),
             drawQueue: () => this.drawQueue.list(), cancelDraw: key => this.drawQueue.cancel(key), cancelAllDraws: () => this.drawQueue.cancelAll(),
             cloudQueueError: () => this.drawQueue.remoteError, testCloudQueue: value => this.testCloudQueue(value), newRoomCode: () => newRoomCode(),
             reference: (file, options) => this.reference(file, clone(options || {})), listReferences: () => this.library.listReferences(), deleteReference: id => this.deleteReference(id),
