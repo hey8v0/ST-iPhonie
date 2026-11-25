@@ -7,7 +7,7 @@
 // them, its heading, its layout, its pictures, its weather and sound, spreads added or taken out) and the book (its
 // kind, how it is drawn, its title, its last line); and exports: a web page that reads itself (.html), PDF, EPUB, the
 // reading as one sound file, and the pages as pictures.
-import {createView, esc, heading, menu, help} from './common.js';
+import {createView, esc, heading, menu, help, field, btn, select, avatar} from './common.js';
 import {icon} from './icons.js';
 import {saveFile, zipFiles} from '../download.js';
 import {pictureInputs, sizeFor, activeStyle, withoutPeopleTags} from '../core/draw.js';
@@ -23,7 +23,6 @@ import {pdfFromJpegs, epubOf} from '../core/book-export.js';
 import {bookHtml} from '../core/book-html.js';
 import {decodeMono, joinClips, encodeWav} from '../core/audio-join.js';
 
-const RANGES = [['20', '近 20 条'], ['50', '近 50 条'], ['all', '整个聊天'], ['pick', '自己选']];
 const MODES = [['retell', '绘本（改编）'], ['story', '原文配图']];
 const PICTURES = [['draw', '正文的图＋补画'], ['story', '只用正文的图'], ['none', '不要插图']];
 const ARTS = [['book', '绘本画风'], ['app', '绘图 App 的画风']];
@@ -32,10 +31,32 @@ const SHAPES = {横: '横图', 竖: '竖图', 方: '方图'};
 const keyOf = p => p?.id ? 'id:' + p.id : p?.url ? 'url:' + p.url : '';
 
 import {bedtimeView, bookTabs} from './bedtime.js';
+import {bedtimeLore} from './bedtime-lore.js';
+import {pagedPicker} from './paged-picker.js';
+import {BOOK_SOURCES, BOOK_TEXT_LIMIT, bookForm, bookRange, rangeMarkup, pickBookRange, readBookSource, bookSpeakers, bookReferenceMarkup} from './book-setup.js';
 
 export function bookApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'picbook'), photoUrls = new Map();
   let view = 'shelf', books = [], book = null, at = 0, job = null, form = null, reader = null, cast = null;
+  let theaters = [], lore = null;
+  const infoOf = () => { try { return api.bookInfo?.() || null; } catch { return null; } };
+  const routes = () => api.readState?.().routes || api.getState().routes;
+  const roleNames = () => [...new Set([...routes().map(role => role.name), ...(infoOf()?.roles || [])])].filter(Boolean);
+  function messagesOf(info) {
+    if (!info?.length) return [];
+    try {
+      return api.bookMessages?.() || (api.bookSource?.(0, info.length - 1)?.messages || []).map(message => ({
+        id:message.id, name:message.name, preview:message.steps.map(step => step.text || '').join(' ').slice(0, 78),
+      }));
+    } catch { return []; }
+  }
+  function newForm(info, theater = '') {
+    form = bookForm(info, theater);
+    lore = bedtimeLore(ctx, form, () => {}, label => {
+      const el = v.root.querySelector('[data-bk-lore-count]');
+      if (el) el.textContent = label;
+    }, {addTitle:'添加到绘本'});
+  }
   bookStyles(ctx.doc);
   const bedtime = bedtimeView(ctx, v);
 
@@ -86,36 +107,55 @@ export function bookApp(ctx) {
     books = books.filter(b => !b.bedtime);
     books.sort((a, b) => (b.at || 0) - (a.at || 0));
     const covers = await Promise.all(books.map(b => picUrl(firstPicture(b))));
+    if (view !== 'shelf' || v.disposed) return;
     const card = (b, i) => {
       const front = {...b, cover: {prompt: '', picture: covers[i] ? {url: 'cover'} : null}}, lack = missingPictures(b).length;
       return `<button type="button" class="bk-card" data-book="${esc(b.id)}" aria-label="${esc(b.title)}"><span class="bk-mini">${viewMarkup(front, {sheet: 0, part: 'all'}, {url: () => covers[i]})}</span><span class="bk-badge">${esc(themeOf(b.theme).label)} · ${b.spreads.length} 个跨页${b.readers?.length ? ` · ${b.readers.length} 人读过` : ''}${lack ? ` · 差 ${lack} 张图` : ''}</span></button>`;
     };
-    v.draw(heading('绘本', help('把酒馆里的故事做成绘本：一个个摊开的两页（跨页），画面讲故事，每一面只有几句话，读出来的就是印在纸上的。\n\n「绘本（改编）」让文字模型把故事编成跨页，像真的绘本那样有节奏：开头安静，画面越来越大，最紧张的地方是一幅铺满两页的大图，结尾再安静下来。字是讲故事的旁白，偶尔一句说话放进气泡；有立绘的角色偶尔会像剪纸一样站在纸上出场。「原文配图」不改一个字，按段落分成跨页，配上正文的图。\n插图用绘图 App 现在的引擎：「绘本画风」按这本书的风格画（水彩、蜡笔、水墨……），「绘图 App 的画风」用你在绘图 App 里选的画风。\n看书：手机上一页一页翻，铺满两页的大图会慢慢移动，让你看到整幅；点右上角的全屏按钮在酒馆页面看，电脑和平板横着放是摊开的两页。下雨下雪这些天气会飘在画上，朗读时正在读的那句会标出来。') + `<button type="button" class="chip-button" data-action="bk-new">${icon('add')}做一本</button>`, 'Picture Book')
-      + bookTabs(false) + `<div class="bk-shelf">${books.map(card).join('')}<button type="button" class="bk-new" data-action="bk-new">${icon('add')}<span>做一本绘本</span></button></div>`);
+    v.draw(heading('绘本', help('把酒馆里的故事做成绘本：一个个摊开的两页（跨页），画面讲故事，每一面只有几句话，读出来的就是印在纸上的。\n\n「绘本（改编）」让文字模型把故事编成跨页，像真的绘本那样有节奏：开头安静，画面越来越大，最紧张的地方是一幅铺满两页的大图，结尾再安静下来。字是讲故事的旁白，偶尔一句说话放进气泡；有立绘的角色偶尔会像剪纸一样站在纸上出场。「原文配图」不改一个字，按段落分成跨页，配上正文的图。\n插图用绘图 App 现在的引擎：「绘本画风」按这本书的风格画（水彩、蜡笔、水墨……），「绘图 App 的画风」用你在绘图 App 里选的画风。\n看书：手机上一页一页翻，铺满两页的大图会慢慢移动，让你看到整幅；点右上角的全屏按钮在酒馆页面看，电脑和平板横着放是摊开的两页。下雨下雪这些天气会飘在画上，朗读时正在读的那句会标出来。') + (books.length ? btn('bk-new', icon('add') + '做一本', 'chip-button') : ''), 'Picture Book')
+      + bookTabs(false) + `<div class="bk-shelf">${books.length ? books.map(card).join('') : btn('bk-new', icon('add') + '<span>做一本绘本</span>', 'bk-new')}</div>`);
   }
 
   // ---------- 做一本 ----------
   function make() {
-    let info;
-    try { info = api.bookInfo?.(); } catch (error) { ctx.notify(error.message, {error: true}); return; }
-    if (!info) { ctx.notify('要在酒馆里打开小手机才能做绘本', {error: true}); return; }
+    const info = infoOf();
+    if (!form) newForm(info);
+    if (form.chat !== (info?.chat ?? '')) {
+      form.chat = info?.chat ?? '';
+      form.range = info?.length > 20 ? '20' : 'all';
+      form.before = null;
+      if (!info?.length && form.kind === 'chat') form.kind = 'paste';
+      lore.reset();
+    }
+    if (view === 'make') form.refsOpen = v.root.querySelector('.bk-references')?.open ?? form.refsOpen;
     leaveReader();
     view = 'make';
-    form ??= {range: info.length > 50 ? '50' : 'all', from: Math.max(0, info.length - 50), to: info.length - 1, mode: 'retell', theme: 'auto', pictures: 'draw', art: 'book', length: 'auto', title: ''};
-    form.to = Math.min(form.to, info.length - 1);
+    const rows = messagesOf(info), range = bookRange(info || {length:0}, form);
+    const sourceFields = form.kind === 'chat'
+      ? field(info?.title || '当前剧情', '<button type="button" class="bk-range-preview" data-action="bk-range">' + rangeMarkup(rows, ...range) + '</button>')
+      : form.kind === 'theater'
+        ? field('小剧场', select('bk-theater', form.theater, [['','选择一段小剧场'], ...theaters.map(row => [row.id,row.title])]))
+        : field('故事正文', '<textarea rows="7" data-bk-field="text" maxlength="' + BOOK_TEXT_LIMIT + '" placeholder="粘贴要做成绘本的文字">' + esc(form.text) + '</textarea>');
+    const earlier = form.kind === 'chat' ? rows.filter(row => row.id < range[0]) : rows;
+    const beforeAvailable = form.before && earlier.some(row => row.id >= form.before[0] && row.id <= form.before[1]);
+    if (!beforeAvailable) form.before = null;
+    else if (form.kind === 'chat') form.before = [form.before[0], Math.min(form.before[1], range[0] - 1)];
+    let source;
+    try { source = readBookSource(form, info, api, theaters, ctx.doc); } catch { /* The form shows the relevant source controls. */ }
     const seg = (key, list) => `<div class="segmented">${list.map(([k, l]) => `<button type="button" data-bk-set="${key}" data-value="${k}" aria-pressed="${form[key] === k}">${l}</button>`).join('')}</div>`;
     v.draw(heading('做一本绘本', '', 'New Book')
-      + `<p class="hint">从「${esc(info.title || '当前聊天')}」里取故事（共 ${info.length} 条消息）。</p>`
-      + `<div class="group pad"><div class="field"><span>哪一段故事</span>${seg('range', RANGES)}</div>
-        ${form.range === 'pick' ? `<div class="bk-range"><label>从第 <input type="number" min="0" max="${info.length - 1}" value="${form.from}" data-bk-field="from"> 条</label><label>到第 <input type="number" min="0" max="${info.length - 1}" value="${form.to}" data-bk-field="to"> 条</label></div>` : ''}
+      + `<div class="group pad bk-setup">
+        <div class="field"><span>故事来源</span>${seg('kind', BOOK_SOURCES)}</div>
+        ${sourceFields}
+        ${bookReferenceMarkup(form, earlier, roleNames(), lore.label())}
         <div class="field"><span>怎么做${help('绘本（改编）：文字模型把故事编成一个个跨页，每一面一到三句旁白，会用文字模型的额度。原文配图：不改一个字，按段落分成跨页，每个跨页配一张图。')}</span>${seg('mode', MODES)}</div>
         <div class="field"><span>风格</span></div>
         <div class="bk-themes"><button type="button" class="bk-theme" data-bk-theme="auto" aria-pressed="${form.theme === 'auto'}" style="--bk-paper:var(--card);--bk-ink:var(--ink);--bk-accent:var(--accent);--bk-title:inherit"><b>自动</b><i></i></button>${THEME_IDS.map(id => `<button type="button" class="bk-theme" data-bk-theme="${id}" data-theme="${id}" aria-pressed="${form.theme === id}" style="${themeStyle(id)}"><b>${esc(BOOK_THEMES[id].label)}</b><i></i></button>`).join('')}</div>
         <div class="field"><span>插图${help('补画用绘图 App 现在的引擎，每张都存进相册。一本书要画的有：封面，和每个跨页的一张图（「两个瞬间」是两张）。NovelAI 用 Opus 画小图不扣点；别的大小或引擎会花额度，开始前会问你。')}</span>${seg('pictures', PICTURES)}</div>
         ${form.pictures === 'draw' ? `<div class="field"><span>画风${help('绘本画风：按这本书的风格画（童话是水彩彩铅、古风是水墨、搞笑是蜡笔卡通……），不用绘图 App 里的画师串。绘图 App 的画风：用你在绘图 App 里选的画风画。')}</span>${seg('art', ARTS)}</div>` : ''}
         ${form.mode === 'retell' ? `<div class="field"><span>篇幅</span>${seg('length', LENGTHS)}</div>` : ''}
-        ${peopleRow(...rangeOf(info))}
-        <div class="field"><span>书名（可以不填）</span><input data-bk-field="title" value="${esc(form.title)}" maxlength="40" placeholder="${form.mode === 'retell' ? '让文字模型起' : '用聊天的名字'}"></div></div>
+        ${peopleRow([...new Set([...bookSpeakers(source), ...form.names])])}
+        <div class="field"><span>书名（可以不填）</span><input data-bk-field="title" value="${esc(form.title)}" maxlength="40" placeholder="${esc(source?.title || (form.mode === 'retell' ? '让文字模型起' : '可以稍后改名'))}"></div></div>
         <div class="actions"><button type="button" class="secondary" data-action="bk-shelf">取消</button><button type="button" class="primary" data-action="bk-start">${icon('paint')}开始做</button></div>`);
   }
 
@@ -123,22 +163,57 @@ export function bookApp(ctx) {
    * 出场人物 (0.9.40): who speaks in the chosen stretch of the story, and whether the 角色 App has their looks (a picture of
    * them is drawn from those): a tap opens their page there. Read once for a stretch (the steps of every message).
    */
-  let peopleSeen = {key: '', names: []};
-  function peopleRow(from, to) {
-    if (form.pictures === 'none') return '';
-    const key = `${from}-${to}`;
-    if (peopleSeen.key !== key) {
-      let names = [];
-      try { names = [...new Set((api.bookSource?.(from, to)?.messages || []).flatMap(m => m.steps.filter(x => x.kind === 'say').map(x => x.role)).filter(Boolean))]; } catch { /* no story open */ }
-      peopleSeen = {key, names};
-    }
-    if (!peopleSeen.names.length) return '';
-    const chip = name => { const looks = !!ctx.routeFor?.(name)?.appearance?.trim(); return `<button type="button" class="chip${looks ? '' : ' warn'}" data-bk-person="${esc(name)}" aria-label="${esc(name)}${looks ? '' : '，没写外貌'}">${esc(name)}${looks ? '' : ' · 没写外貌'}</button>`; };
-    return `<div class="field"><span>出场人物${help('这一段里说过话的人。画他们的时候用角色 App 里写的外貌（有参考图也会带上），没写外貌的画出来就不像：点名字去角色 App 写一句，再回来做。改编时模型会给书里要紧的人一页「这本书里的人」，每人一小幅图和一句介绍。')}</span><div class="bk-people-row">${peopleSeen.names.map(chip).join('')}</div></div>`;
+  function peopleRow(names) {
+    if (form.pictures === 'none' || !names.length) return '';
+    const chip = name => {
+      const looks = !!ctx.routeFor?.(name)?.appearance?.trim();
+      return '<button type="button" class="chip' + (looks ? '' : ' warn') + '" data-bk-person="' + esc(name) + '">' + esc(name) + (looks ? '' : ' · 没写外貌') + '</button>';
+    };
+    return '<div class="field"><span>出场人物</span><div class="bk-people-row">' + names.map(chip).join('') + '</div></div>';
   }
-
-  /** The messages the form has picked: [from, to]. */
-  const rangeOf = info => form.range === 'pick' ? [Math.min(form.from, form.to), Math.max(form.from, form.to)] : form.range === 'all' ? [0, info.length - 1] : [Math.max(0, info.length - Number(form.range)), info.length - 1];
+  async function pickRange(main) {
+    const info = infoOf(), range = bookRange(info || {length:0}, form);
+    const rows = messagesOf(info).filter(row => main || form.kind !== 'chat' || row.id < range[0]);
+    const initial = main ? range : form.before || [Math.max(0, (rows.at(-1)?.id || 0) - 5), rows.at(-1)?.id ?? 0];
+    const chosen = await pickBookRange(ctx, rows, initial, main);
+    if (!chosen || info?.chat !== infoOf()?.chat) return;
+    if (main) Object.assign(form, chosen);
+    else form.before = [chosen.from,chosen.to];
+    make();
+  }
+  function chooseRoles() {
+    const names = roleNames(), routesByName = new Map(routes().map(role => [role.name, role]));
+    const selected = new Set(form.names.filter(name => names.includes(name)));
+    const d = ctx.dialog('参考角色设定', '<div data-bk-role-picker></div><div class="actions">'
+      + btn('bk-people-ok', '', 'primary') + '</div>');
+    const label = () => '确认人物' + (selected.size ? ' · 已选 ' + selected.size + ' 位' : '');
+    const confirm = d.body.querySelector('[data-action=bk-people-ok]');
+    confirm.textContent = label();
+    pagedPicker(d.body.querySelector('[data-bk-role-picker]'), {
+      items:names, id:name => name, text:name => [name, ...(routesByName.get(name)?.aliases || [])].join(' '),
+      selected:selected.values().next().value, pageSize:6, placeholder:'搜索角色…',
+      render(name) {
+        const role = routesByName.get(name), active = selected.has(name);
+        return `<button type="button" class="list-row" data-bk-pick-role="${esc(name)}" aria-pressed="${active}">
+          ${avatar(name, ctx.engineOf(name), 36, role?.ownKey || name)}<span><strong>${esc(name)}</strong></span>${icon('check')}
+        </button>`;
+      },
+    });
+    d.body.addEventListener('click', event => {
+      const row = event.target.closest('[data-bk-pick-role]');
+      if (!row) return;
+      const name = row.dataset.bkPickRole, active = selected.has(name);
+      if (active) selected.delete(name);
+      else if (selected.size < 12) selected.add(name);
+      else { ctx.notify('最多可选 12 位角色'); return; }
+      row.setAttribute('aria-pressed', String(!active));
+      confirm.textContent = label();
+    });
+    confirm.onclick = () => {
+      form.names = names.filter(name => selected.has(name));
+      d.close(); make();
+    };
+  }
   // ---------- making ----------
   function progress(title, done, total, note = '', preview = '') {
     if (view !== 'making') return;
@@ -163,20 +238,26 @@ export function bookApp(ctx) {
     }).filter(Boolean);
   }
   async function start() {
-    const info = api.bookInfo();
-    const [from, to] = rangeOf(info);
-    const me = job = {stop: false};
+    if (job) return;
+    const info = infoOf();
+    const me = job = {stop:false};
     view = 'making'; book = null;
     try {
-      progress('读故事', 0, 1, `第 ${from} 到第 ${to} 条`);
-      const source = api.bookSource(from, to);
-      if (!source.messages.length) throw Error('这一段里没有故事内容');
+      progress('读故事', 0, 1);
+      const source = readBookSource(form, info, api, theaters, ctx.doc);
+      const {script, pictures} = storyScript(source.messages);
+      if (!script.trim()) throw Error('这一段里没有故事内容');
+      const needsReferences = form.before || form.world || form.persona || form.names.length;
+      if (needsReferences && !api.bookReferences) throw Error('请在酒馆中打开绘本，读取参考资料');
+      const references = needsReferences ? await api.bookReferences({chat:form.chat, range:form.before, names:form.names, persona:form.persona, world:form.world,
+          skipBooks:[...form.skipBooks,...form.removedBooks], skipEntries:form.skipEntries, extraBooks:form.extraBooks, script}) : '';
+      if (me.stop) throw Error('停下了');
       loadCast();
-      const speakers = [...new Set(source.messages.flatMap(m => m.steps.filter(s => s.kind === 'say').map(s => s.role)).filter(Boolean))];
+      const speakers = [...new Set([...bookSpeakers(source), ...form.names, ...(form.persona && source.user ? [source.user] : [])])];
       const standing = speakers.filter(n => sprite(n)), aliases = aliasesOf(speakers);
-      let spreads, title = form.title.trim(), subtitle = '', genre = '', cover = '', ending = '', coverWho = [], people = [];
+      let spreads, title = form.title.trim() || (source.kind === 'theater' ? source.title : ''), subtitle = '', genre = '', cover = '', ending = '', coverWho = [], people = [];
       if (form.mode === 'retell') {
-        const {script, pictures} = storyScript(source.messages), parts = scriptParts(script), want = form.length === 'auto' ? spreadsFor(script.length) : Number(form.length);
+        const parts = scriptParts(script), want = form.length === 'auto' ? spreadsFor(script.length) : Number(form.length);
         // The sounds the 音效 library has (while 音效 is on): the model picks each spread's ambience and sounds from them.
         const sounds = await api.bookSounds?.().catch(() => null) || null;
         spreads = [];
@@ -184,7 +265,7 @@ export function bookApp(ctx) {
           if (me.stop) throw Error('停下了');
           progress('文字模型在编绘本', i, parts.length, parts.length > 1 ? `故事比较长，分成 ${parts.length} 段来编：第 ${i + 1} 段` : '分成跨页、想每一面的画面和排法、写读出来的几句话');
           const last = spreads.at(-1);
-          const prompt = retellPrompt(parts[i], {spreads: Math.max(3, Math.round(want * parts[i].length / script.length)), cast: speakers, staged: standing, part: parts.length > 1 ? {index: i, of: parts.length} : null, before: last ? last.words.map(w => w.text).join('').slice(0, 160) : '', sounds});
+          const prompt = retellPrompt(parts[i], {spreads: Math.max(3, Math.round(want * parts[i].length / script.length)), cast: speakers, staged: standing, part: parts.length > 1 ? {index: i, of: parts.length} : null, before: last ? last.words.map(w => w.text).join('').slice(0, 160) : '', sounds, references});
           const got = retoldSpreads(await api.bookWrite(prompt.system, prompt.user), {pictures, cast: speakers, staged: standing, aliases});
           if (!i) { title ||= got.title; subtitle = got.subtitle; genre = got.genre; cover = got.cover; coverWho = got.coverWho; people = got.people; }
           ending = got.ending || ending;
@@ -199,17 +280,42 @@ export function bookApp(ctx) {
       spreads = picturesFor(spreads, form.pictures);
       const theme = form.theme === 'auto' ? genre || guessTheme(wordsOf(spreads)) : form.theme;
       const drawn = form.pictures === 'draw' && !!cover;
-      let made = bookOf({title: title || `${source.title || '我们'}的故事`, subtitle, author: source.user, theme, art: form.art, mode: form.mode, source: {chat: source.chat, name: source.title, from, to}, spreads,
-        cover: drawn ? cover : '', coverWho, coverPicture: drawn ? null : spreads.flatMap(s => s.pictures.map(p => p.picture)).find(Boolean) || null, ending});
-      made = await api.saveBook(made);
-      book = made;
-      // 原文 plans no picture: each spread without one gets one written from its words.
-      if (form.pictures === 'draw') await drawMissing(me, {all: form.mode === 'story'});
-      if (job === me) { job = null; at = 0; await open(book.id); ctx.notify(`《${book.title}》做好了`); }
+      if (me.stop) throw Error('停下了');
+      book = await api.saveBook(bookOf({title:title || (source.title ? source.title + '的故事' : '无题'), subtitle, author:source.user, theme, art:form.art, mode:form.mode,
+        source:{kind:source.kind, chat:source.chat, name:source.title, from:source.from, to:source.to, people:[...form.names, ...(form.persona && source.user ? [source.user] : [])],
+          ...(form.mode === 'story' && form.pictures === 'draw' && references ? {references} : {})},
+        spreads, cover:drawn ? cover : '', coverWho, coverPicture:drawn ? null : spreads.flatMap(s => s.pictures.map(p => p.picture)).find(Boolean) || null, ending}));
+      if (job === me) {
+        job = null; at = 0;
+        if (form.pictures === 'draw' && missingPictures(book, book.mode === 'story').length) return reviewDraft();
+        await open(book.id); ctx.notify('《' + book.title + '》做好了');
+      }
     } catch (error) {
       if (job === me) job = null;
       if (book) { ctx.notify(`停在这里了：${error.message}（做好的部分已存好）`, {error: !me.stop}); await open(book.id); }
       else { ctx.notify(error.message, {error: true}); make(); }
+    }
+  }
+  function reviewDraft() {
+    view = 'review';
+    const todo = missingPictures(book, book.mode === 'story');
+    v.draw(heading(book.title, '', '绘本草稿') + '<div class="actions bk-draft-actions">'
+      + btn('bk-preview-draft','打开绘本','secondary')
+      + btn('bk-draw-draft','开始画 ' + todo.length + ' 张','primary',todo.length ? '' : 'disabled')
+      + '</div><div class="group">'
+      + book.spreads.map((spread, index) => '<button type="button" class="list-row bk-draft-row" data-action="bk-preview-draft" data-sheet="' + (index + 1) + '"><span><strong>'
+        + esc(spread.heading || (spread.layout === 'cast' ? '出场人物' : '第 ' + (index + 1) + ' 个跨页'))
+        + '</strong><small>' + esc(spread.words.map(word => word.text).join(' ').slice(0, 96)) + '</small></span>' + icon('next') + '</button>').join('') + '</div>');
+  }
+  async function drawDraft() {
+    if (view !== 'review' || job) return;
+    const id = book.id, me = job = {stop:false};
+    view = 'making';
+    progress('准备画插图', 0, missingPictures(book, book.mode === 'story').length);
+    try { await drawMissing(me, {all:book.mode === 'story'}); }
+    finally {
+      if (job === me) job = null;
+      if (book?.id === id) await open(id, 0);
     }
   }
   /** Draws every picture still to be drawn (asking once when it costs). Each one is kept as it comes. */
@@ -257,15 +363,21 @@ export function bookApp(ctx) {
     }, expected = place(before);
     const spread = sheetOf(target, n).spread || null, t = themeOf(target.theme), names = castOf(target), s = slotOf(n, k, target);
     const words = readOf(target, n).map(l => l.text).join(' ');
-    let what = prompt ?? s.prompt;
-    if (!what) { const w = await api.writePrompt((words || target.title).slice(0, 300), names); what = w?.prompt || ''; }
+    let what = prompt ?? s.prompt, peopleFromPrompt = [];
+    if (!what) {
+      const excerpt = (words || target.title).slice(0, 400), refs = target.source?.references;
+      const idea = refs ? '只为这一页正文配图，参考资料只用于识别已有的人物和环境。\n【本页正文】\n' + excerpt + '\n【参考资料】\n' + refs : excerpt;
+      const w = await api.writePrompt(idea, names);
+      what = w?.prompt || '';
+      peopleFromPrompt = (w?.people || []).filter(name => names.includes(name));
+    }
     if (!what) throw Error('没能写出这一张要画什么');
     s.prompt = what;
     // Whose looks go with it (0.9.40): the people the model named for this picture; else the book's people named in
     // what it shows (by name or alias, any case); else — the old way — those named in the page's words.
     const people = s.people !== false, aliases = aliasesOf(names);
     const named = people ? (s.who || []).filter(x => names.includes(x)) : [];
-    const who = !people ? [] : named.length ? named : namesIn(what, names, aliases).length ? namesIn(what, names, aliases) : namesIn(words, names, aliases).slice(0, 2);
+    const who = !people ? [] : named.length ? named : peopleFromPrompt.length ? peopleFromPrompt : namesIn(what, names, aliases).length ? namesIn(what, names, aliases) : namesIn(words, names, aliases).slice(0, 2);
     if (people && !named.length) s.who = who;
     const scene = [people ? what : [withoutPeopleTags(what), 'no humans, scenery'].filter(Boolean).join(', '), composeOf(spread)].filter(Boolean).join(', ');
     const inputs = pictureInputs(drawSettings(target), {prompt: scene, characters: who}, people && !who.length ? words : '');
@@ -620,17 +732,52 @@ export function bookApp(ctx) {
 
   // ---------- events ----------
   v.on('click', '[data-action=bk-bedtime]', () => { leaveReader(); view = 'bedtime'; return bedtime.open(); });
-  v.on('click', '[data-action=bk-new]', () => { form = null; make(); });
+  v.on('click', '[data-action=bk-new]', () => { newForm(infoOf()); make(); });
+  v.makeFromTheater = async id => {
+    if (job) { ctx.notify('请先等当前绘本制作结束'); return; }
+    theaters = await api.theaters();
+    const piece = theaters.find(row => row.id === id);
+    if (!piece) { ctx.notify('这段小剧场已经不在了', {error:true}); return; }
+    newForm(infoOf(), id);
+    form.title = piece.title;
+    make();
+  };
+  v.on('click', '[data-action=bk-range]', () => pickRange(true));
+  v.on('click', '[data-action=bk-before]', () => pickRange(false));
+  v.on('click', '[data-action=bk-before-clear]', () => { form.before = null; make(); });
+  v.on('click', '[data-action=bk-roles]', chooseRoles);
+  v.on('click', '[data-action=bk-world]', () => lore.open());
+  v.on('click', '[data-action=bk-preview-draft]', el => open(book.id, Number(el.dataset.sheet) || 0));
+  v.on('click', '[data-action=bk-draw-draft]', drawDraft);
   v.on('click', '[data-action=bk-shelf]', () => shelf());
   v.on('click', '[data-action=bk-start]', () => start());
   v.on('click', '[data-action=bk-stop]', () => { if (job) job.stop = true; ctx.notify('画完这一张就停'); });
   v.on('click', '[data-book]', el => { at = 0; open(el.dataset.book); });
   v.on('click', '[data-bk-person]', el => ctx.openPendingRole?.(el.dataset.bkPerson));
   v.openBook = id => { at = 0; return open(id); };
-  v.on('click', '[data-bk-set]', el => { form[el.dataset.bkSet] = el.dataset.value; make(); });
+  v.on('click', '[data-bk-set]', async el => {
+    const key = el.dataset.bkSet, value = el.dataset.value;
+    if (key === 'kind' && value === 'theater') theaters = await api.theaters();
+    if (key === 'kind' && !form.title.trim() && value === 'theater') form.title = theaters.find(row => row.id === form.theater)?.title || '';
+    form[key] = value;
+    make();
+  });
   v.on('click', '[data-bk-theme]', el => { form.theme = el.dataset.bkTheme; make(); });
-  v.root.addEventListener('change', e => { const f = e.target.dataset?.bkField; if (f && form) form[f] = f === 'title' ? e.target.value : Math.max(0, Number(e.target.value) || 0); });
-  v.root.addEventListener('input', e => { if (e.target.dataset?.bkField === 'title' && form) form.title = e.target.value; });
+  v.on('change', '[data-bk-ref]', el => {
+    form[el.dataset.bkRef] = el.checked;
+    make();
+    if (form.world) lore.summary();
+  });
+  v.on('change', '[data-field=bk-theater]', el => {
+    const previous = theaters.find(row => row.id === form.theater)?.title;
+    form.theater = el.value;
+    if (!form.title.trim() || form.title === previous) form.title = theaters.find(row => row.id === form.theater)?.title || '';
+    make();
+  });
+  v.root.addEventListener('input', e => {
+    const field = e.target.dataset?.bkField;
+    if (form && ['title','text'].includes(field)) form[field] = e.target.value;
+  });
   v.root.addEventListener('error', e => { if (e.target?.tagName === 'IMG' && e.target.closest('.bk')) e.target.classList.add('bk-broken'); }, true);
   v.back = () => { if (view === 'bedtime' && bedtime.back()) return true; if (view === 'shelf') return false; if (view === 'making') { if (job) job.stop = true; return true; } shelf(); return true; };
   v.leave = () => { bedtime.leave(); if (reader?.reading) reader.setReading(false); };

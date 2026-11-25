@@ -8,6 +8,7 @@
 .bk-mini::before{content:'';position:absolute;left:0;top:0;bottom:0;width:9px;z-index:10;background:linear-gradient(90deg,rgba(0,0,0,.28),rgba(255,255,255,.18) 60%,transparent);pointer-events:none}
 .bk-badge{display:block;margin-top:7px;font-size:11.5px;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bk-new{display:grid;place-items:center;align-content:center;gap:6px;aspect-ratio:3/4;border-radius:14px;border:2px dashed var(--line);background:var(--card);color:var(--ink2);font:inherit;font-weight:800;cursor:pointer}
+.bk-new:only-child{grid-column:1/-1;aspect-ratio:auto;min-height:156px}
 .bk-new .icon{width:30px;height:30px;color:var(--accent-ink)}
 
 /* making a book */
@@ -18,8 +19,20 @@
 .bk-theme[data-theme=scifi] b{text-shadow:0 0 6px var(--bk-accent)}
 .bk-theme i{width:30px;height:5px;border-radius:3px;background:linear-gradient(90deg,var(--bk-accent),var(--bk-soft))}
 .bk-theme[aria-pressed=true]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-.bk-range{display:flex;gap:10px;flex-wrap:wrap;margin:-4px 0 12px}
-.bk-range input{width:76px}
+.bk-range-preview{display:grid;justify-items:start;gap:5px;text-align:start;border-radius:14px;padding:11px 13px;background:var(--card2);color:var(--ink);font:inherit}
+button.bk-range-preview{width:100%;border:1px solid var(--line);cursor:pointer}
+.bk-range-preview strong{font-size:13px}
+.bk-range-preview small{font-size:12px;color:var(--ink2);overflow-wrap:anywhere}
+.bk-references{border-block:1px solid var(--line);margin:4px 0 16px}
+.bk-references summary{padding:12px 0;color:var(--accent-ink);font-size:13px;font-weight:700;cursor:pointer}
+.bk-reference-fields{display:grid;gap:6px;padding:0 0 10px}
+.bk-reference-fields>.text-button{justify-self:start}
+[data-bk-role-picker] .picker-search{background:var(--bg)}
+[data-bk-pick-role][aria-pressed="false"]>.icon{visibility:hidden}
+[data-bk-pick-role][aria-pressed="true"]>.icon{color:var(--accent-ink)}
+.bk-setup textarea{min-height:112px}
+.bk-draft-actions{margin:0 0 14px}
+.bk-draft-row>span{min-width:0;overflow-wrap:anywhere}
 .bk-progress{display:grid;gap:10px;padding:14px;border-radius:18px;background:var(--card2)}
 .bk-progress b{font-size:14px}
 .bk-progress small{color:var(--ink2);font-size:12px;line-height:1.5}

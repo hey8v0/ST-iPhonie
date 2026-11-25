@@ -26,7 +26,7 @@ export function clearRows(board) {
 }
 
 export default {
-  id: 'tetris', name: '俄罗斯方块', icon: '🧱', colors: ['#a9c8ff', '#5b6ef0'], note: '消掉整行', live: true,
+  id: 'tetris', name: '俄罗斯方块', icon: 'blocks', art: '🧱', accent: '#5b6ef0', accentLight: '#a9c8ff', note: '消掉整行', live: true,
   how: '左右滑或 ←→ 移动，点一下或 ↑ 转，↓ 加速，往下一划（或空格）直接落下。',
   make({doc, win, host, api, saved}) {
     // The board, the pad under it and nothing to scroll: the cells as big as the room left on the screen allows.

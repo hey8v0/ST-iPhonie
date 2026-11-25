@@ -180,7 +180,7 @@ export function refPanel({ctx, api, rerender, shown}) {
           return true;
         }
         case 'ref-pad': padSheet(); return true;
-        case 'ref-add': if (gpt()) await addGptRefs(await pickPicture(ctx, api, '选参考图', {multiple: true})); else await addRef(await pickPicture(ctx, api, '选一张参考图')); return true;
+        case 'ref-add': if (gpt()) await addGptRefs(await pickPicture(ctx, api, '选参考图', {multiple: GPT_MAX_REFS - gptRefs.length})); else await addRef(await pickPicture(ctx, api, '选一张参考图')); return true;
         case 'ref-add-shown': if (gpt()) await addGptRefs(await shownBlob()); else await addRef(await shownBlob()); return true;
         case 'ref-remove': (gpt() ? gptRefs : refs).splice(i, 1); rerender(); return true;
         case 'ref-up': if (i > 0 && gptRefs[i]) { [gptRefs[i - 1], gptRefs[i]] = [gptRefs[i], gptRefs[i - 1]]; rerender(); } return true;

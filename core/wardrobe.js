@@ -10,12 +10,32 @@ export const WARDROBE_CATEGORIES = Object.freeze(['上衣', '下装', '外套', 
 export const WARDROBE_LIMITS = Object.freeze({items: 600, sets: 200, name: 40, description: 1000, summary: 180, wear: 600, wish: 300, pool: 60, pieces: 12});
 export const WARDROBE_DRAW_MAX = 8;
 export const sameWardrobeDrawing = (a, b) => a.name === b.name && a.category === b.category && a.description === b.description;
-export const WARDROBE_KINDS = Object.freeze(['wardrobe-item', 'wardrobe-set', 'wardrobe-wear']);
+export const WARDROBE_KINDS = Object.freeze(['wardrobe-item', 'wardrobe-set', 'wardrobe-wear', 'wardrobe-categories', 'wardrobe-candidates', 'wardrobe-story']);
 /** Whose 衣柜: the user's own ('me') or a role's, by its name. */
 export const ownerKey = name => name ? 'role:' + String(name).slice(0, 40) : 'me';
 export const ownerName = (key, user = '我') => key === SHARED_OWNER ? '通用衣柜' : key === 'me' ? user : String(key || '').replace(/^role:/, '');
 
 const clip = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+export const categoryName = value => {
+  const name = clip(value, 40);
+  return name === '未分类' ? '' : name;
+};
+export const CATEGORY_DOC = 'wardrobe:categories';
+export const wardrobeCategories = (items, saved) => [...new Set([
+  ...(saved || WARDROBE_CATEGORIES), ...items.map(item => item.category),
+].map(categoryName).filter(Boolean))];
+export const styleTags = items => [...new Set(items.flatMap(item => item.collections || []))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+export const validClothingTags = value => typeof value === 'string' && /[a-z]/i.test(value) && !/\p{Script=Han}/u.test(value);
+const itemId = /^wardrobe:item:[\w-]{4,80}$/;
+const setId = /^wardrobe:set:[\w-]{4,80}$/;
+export const wardrobeRefs = (values, pattern = itemId) => [...new Set((Array.isArray(values) ? values : []).filter(id => typeof id === 'string' && pattern.test(id)))];
+export const candidateRefs = values => wardrobeRefs(values, /^wardrobe:(?:item|set):[\w-]{4,80}$/);
+export const clothing = values => (Array.isArray(values) ? values : []).slice(0, 30).flatMap(piece => {
+  const description = clip(piece?.description, WARDROBE_LIMITS.description);
+  if (!description) return [];
+  return [{name: clip(piece.name, WARDROBE_LIMITS.name) || description.slice(0, 12), category: categoryName(piece.category), description,
+    ...(validClothingTags(piece.tags) ? {tags: clip(piece.tags, 3000)} : {}), ...(itemId.test(piece.itemId) ? {itemId: piece.itemId} : {})}];
+});
 const time = (value, fallback) => Number.isFinite(value) && value > 0 ? value : fallback;
 const owner = value => /^(?:me|role:.{1,40})$/.test(String(value || '')) ? String(value) : '';
 const space = doc => ({...(doc?.space ? {space: String(doc.space).slice(0, 300)} : {}), ...(doc?.save ? {save: String(doc.save).slice(0, 400)} : {})});
@@ -28,9 +48,10 @@ export function cleanItem(doc, now = Date.now()) {
   if (!photoId && !description) throw Error('写一下这件衣服是什么样的');
   const id = /^wardrobe:item:[\w-]{4,80}$/.test(doc?.id) ? doc.id : 'wardrobe:item:' + (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
   return {id, kind: 'wardrobe-item', owner: who, name: clip(doc?.name, WARDROBE_LIMITS.name) || (description ? description.slice(0, 12) : '衣物'),
-    category: WARDROBE_CATEGORIES.includes(doc?.category) ? doc.category : '', description, ...(photoId ? {photoId} : {}),
-    ...(doc.shared || who === SHARED_OWNER ? {shared:true, collections: [...new Set((Array.isArray(doc.collections)?doc.collections:[]).map(x=>clip(x,32)).filter(Boolean))].slice(0,12),
-      cut:['男装','女装','中性'].includes(doc.cut)?doc.cut:'', age:clip(doc.age,24)} : {}),
+    category: categoryName(doc?.category), description, ...(photoId ? {photoId} : {}), ...(validClothingTags(doc?.naiTags) ? {naiTags: clip(doc.naiTags, 3000)} : {}),
+    ...(doc.shared || who === SHARED_OWNER ? {shared:true} : {}),
+    collections: [...new Set((Array.isArray(doc.collections)?doc.collections:[]).map(x=>clip(x,32)).filter(Boolean))].slice(0,12),
+    cut:['男装','女装','中性'].includes(doc.cut)?doc.cut:'', age:clip(doc.age,24),
     recognized: doc?.recognized === true, at: time(doc?.at, now), updatedAt: time(doc?.updatedAt, now), ...space(doc)};
 }
 /** An outfit kept (存成一套): its words (as long as what is worn), and the pieces it was made of when there were any. */
@@ -40,7 +61,7 @@ export function cleanSet(doc, now = Date.now()) {
   if (!description) throw Error('这套衣服还没有描述');
   const id = /^wardrobe:set:[\w-]{4,80}$/.test(doc?.id) ? doc.id : 'wardrobe:set:' + (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
   const items = [...new Set((Array.isArray(doc?.items) ? doc.items : []).filter(x => /^wardrobe:item:/.test(x)))].slice(0, 30);
-  return {id, kind: 'wardrobe-set', owner: who, name: clip(doc?.name, WARDROBE_LIMITS.name) || '一套搭配', description, items, ...(doc?.photoId ? {photoId: clip(doc.photoId, 200)} : {}), at: time(doc?.at, now), updatedAt: time(doc?.updatedAt, now), ...space(doc)};
+  return {id, kind: 'wardrobe-set', owner: who, name: clip(doc?.name, WARDROBE_LIMITS.name) || '一套搭配', description, items, ...(Number.isFinite(doc.recordedAt) && doc.recordedAt > 0 ? {recordedAt:doc.recordedAt} : {}), ...(validClothingTags(doc?.tags) ? {tags: clip(doc.tags, 6000)} : {}), ...(doc?.photoId ? {photoId: clip(doc.photoId, 200)} : {}), at: time(doc?.at, now), updatedAt: time(doc?.updatedAt, now), ...space(doc)};
 }
 /**
  * What someone wears now: put on from the phone (pending until the next story reply has it) or changed by the story. One
@@ -51,23 +72,27 @@ export function cleanWear(doc, now = Date.now()) {
   if (!who || !text) return null;
   const kept = doc?.key === undefined && /^wardrobe:wear:.{2,260}$/.test(doc?.id || ''), key = String(doc?.key || '').slice(0, 160);
   return {id: kept ? doc.id : 'wardrobe:wear:' + who + (key ? '@' + key : ''), kind: 'wardrobe-wear', owner: who, text, from: doc?.from === 'story' ? 'story' : 'phone',
-    pending: doc?.pending === true, at: time(doc?.at, now), ...space(doc)};
+    pending: doc?.pending === true, at: time(doc?.at, now), updatedAt: time(doc?.updatedAt, now),
+    ...(wardrobeRefs(doc.items).length ? {items: wardrobeRefs(doc.items)} : {}),
+    ...(setId.test(doc.setId) ? {setId: doc.setId} : {}),
+    ...(clothing(doc.pieces).length ? {pieces: clothing(doc.pieces)} : {}),
+    ...(clip(doc.layering, 240) ? {layering: clip(doc.layering, 240)} : {}), ...space(doc)};
 }
 
 // ---------- the model (the words are the 衣柜 block of 系统提示词, core/prompt-rule-defaults.js) ----------
 /** Recognizing a photo of clothes: only what is seen, as JSON. */
-export function recognizeRequest(image, prompts = {}) {
-  return [{role: 'system', content: promptText(prompts, 'wardrobe', 'recognize', {'分类': WARDROBE_CATEGORIES.join('|')})},
+export function recognizeRequest(image, prompts = {}, categories = WARDROBE_CATEGORIES) {
+  return [{role: 'system', content: promptText(prompts, 'wardrobe', 'recognize', {'分类': categories.join('|') || '留空'})},
     {role: 'user', content: [{type: 'text', text: '识别这张衣服的照片。'}, {type: 'image_url', image_url: {url: image}}]}];
 }
 export const WARDROBE_RECOGNITION_BATCH = 4;
 export const WARDROBE_RECOGNITION_MAX = 8;
-export function recognizeBatchRequest(images, prompts = {}) {
-  const system = promptText(prompts, 'wardrobe', 'recognize', {'分类': WARDROBE_CATEGORIES.join('|')});
+export function recognizeBatchRequest(images, prompts = {}, categories = WARDROBE_CATEGORIES) {
+  const system = promptText(prompts, 'wardrobe', 'recognize', {'分类': categories.join('|') || '留空'});
   return [{role:'system', content:system + '\n这次有多张独立照片，每张各识别一件衣物。只返回 JSON 数组，每项包含 photo（照片序号，从 1 开始）、name、category、cut、description。不要合并照片或交换序号。'},
     {role:'user', content:images.flatMap((url, i) => [{type:'text', text:`照片 ${i + 1}`}, {type:'image_url', image_url:{url}}])}];
 }
-export function parseRecognitionBatch(text, count) {
+export function parseRecognitionBatch(text, count, categories = WARDROBE_CATEGORIES) {
   const raw = String(text ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
   let rows;
   try { rows = JSON.parse(raw.slice(raw.indexOf('['), raw.lastIndexOf(']') + 1)); } catch { return new Map(); }
@@ -76,45 +101,47 @@ export function parseRecognitionBatch(text, count) {
     const n = row?.photo;
     if (!Number.isInteger(n) || n < 1 || n > count) continue;
     if (results.has(n - 1)) duplicate.add(n - 1);
-    else if (typeof row.description === 'string' && row.description.trim()) results.set(n - 1, parseRecognition(JSON.stringify(row)));
+    else if (typeof row.description === 'string' && row.description.trim()) results.set(n - 1, parseRecognition(JSON.stringify(row), categories));
   }
   for (const n of duplicate) results.delete(n);
   return results;
 }
 
 /** {name, category, description} from what the model answered (a fenced or loose JSON, or plain words as the description). */
-export function parseRecognition(text) {
+export function parseRecognition(text, categories = WARDROBE_CATEGORIES) {
   const raw = String(text ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
   let obj = null;
   for (const candidate of [raw.replace(/^```(?:json)?\s*|\s*```$/g, ''), raw.match(/\{[\s\S]*\}/)?.[0]]) { try { obj = JSON.parse(candidate); break; } catch { /* next */ } }
   const description = clip(obj?.description ?? (obj ? '' : raw), WARDROBE_LIMITS.description);
   const cut = ['男装', '女装', '中性'].includes(obj?.cut) ? obj.cut : '';
-  return {...(cut ? {cut} : {}), name: clip(obj?.name, WARDROBE_LIMITS.name), category: WARDROBE_CATEGORIES.includes(String(obj?.category || '').trim()) ? String(obj.category).trim() : '', description};
+  return {...(cut ? {cut} : {}), name: clip(obj?.name, WARDROBE_LIMITS.name), category: categories.includes(categoryName(obj?.category)) ? categoryName(obj.category) : "", description};
 }
 /**
  * Putting an outfit together: from the 衣柜 (the pieces picked, else all of them) or designed from the user's wish;
  * the scene of the story now, so it fits; the last one, not to repeat it. Answers a detailed paragraph of plain words.
  */
-export function suggestRequest({wearer, mode = 'closet', wish = '', pool = [], last = '', scene = '', prompts = {}}) {
-  const values = {'穿的人': wearer, '从衣柜选': mode === 'closet', '衣物': pool.slice(0, WARDROBE_LIMITS.pool).map(x => `- ${x.name}：${clip(x.description, WARDROBE_LIMITS.summary)}`).join('\n'),
+export function suggestRequest({wearer, mode = 'closet', wish = '', pool = [], last = '', scene = '', prompts = {}, identify = false}) {
+  const values = {'穿的人': wearer, '从衣柜选': mode === 'closet', '衣物': pool.slice(0, WARDROBE_LIMITS.pool).map((x, index) => `${identify ? (index + 1) + '.' : '-'} ${x.name}：${clip(x.description, WARDROBE_LIMITS.summary)}`).join('\n'),
     '偏好': clip(wish, WARDROBE_LIMITS.wish), '场景': clip(scene, 600), '上一套': clip(last, 200)};
-  return [{role: 'system', content: promptText(prompts, 'wardrobe', 'suggest', values)}, {role: 'user', content: promptText(prompts, 'wardrobe', 'suggestAsk', values)}];
+  const system = promptText(prompts, 'wardrobe', 'suggest', values);
+  const format = identify ? '\n只输出 JSON 对象。text 是完整的搭配描述，items 是实际穿上的衣物编号数组。未选中的衣物请勿列入。' : '\n只输出搭配描述。';
+  return [{role: 'system', content: system + format}, {role: 'user', content: promptText(prompts, 'wardrobe', 'suggestAsk', values)}];
 }
 /**
  * 存成一套 of an outfit designed freely (0.9.33): split into the pieces it is made of, so they go into the 衣柜 too. The
  * words are the 衣柜 block's 拆成单件.
  */
-export function splitRequest(text, prompts = {}) {
-  return [{role: 'system', content: promptText(prompts, 'wardrobe', 'split', {'分类': WARDROBE_CATEGORIES.join('|')})}, {role: 'user', content: '这套穿着：' + clip(text, WARDROBE_LIMITS.wear)}];
+export function splitRequest(text, prompts = {}, categories = WARDROBE_CATEGORIES) {
+  return [{role: 'system', content: promptText(prompts, 'wardrobe', 'split', {'分类': categories.join('|') || '留空'})}, {role: 'user', content: '这套穿着：' + clip(text, WARDROBE_LIMITS.wear)}];
 }
 /** [{name, category, description}] from what the model answered: a JSON list (fenced, loose, or as {items}); at most 12. */
-export function parseSplit(text) {
+export function parseSplit(text, categories = WARDROBE_CATEGORIES) {
   const raw = String(text ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
   let list = [];
   for (const candidate of [raw.replace(/^```(?:json)?\s*|\s*```$/g, ''), raw.match(/\[[\s\S]*\]/)?.[0], raw.match(/\{[\s\S]*\}/)?.[0]]) {
     try { const got = JSON.parse(candidate); list = Array.isArray(got) ? got : Array.isArray(got?.items) ? got.items : []; if (list.length) break; } catch { /* next */ }
   }
-  return list.filter(x => x && typeof x === 'object').map(x => ({name: clip(x.name, WARDROBE_LIMITS.name), category: WARDROBE_CATEGORIES.includes(String(x.category || '').trim()) ? String(x.category).trim() : '',
+  return list.filter(x => x && typeof x === 'object').map(x => ({name: clip(x.name, WARDROBE_LIMITS.name), category: categories.includes(categoryName(x.category)) ? categoryName(x.category) : '',
     description: clip(x.description, WARDROBE_LIMITS.description)})).filter(x => x.description).slice(0, WARDROBE_LIMITS.pieces);
 }
 /** An outfit as the model answered it: plain words, one paragraph. */
@@ -131,9 +158,55 @@ export function parseOutfits(text) {
   const by = new Map();
   for (const m of String(text ?? '').matchAll(TAG)) {
     const name = m[1].match(/name\s*=\s*["'“”「『]?([^"'“”」』>]+)/)?.[1]?.trim(), words = clip(m[2].replace(/<[^>]+>/g, ''), WARDROBE_LIMITS.wear);
-    if (name && words) by.set(name, words);
+    if (name && words && !m[2].trimStart().startsWith('{')) by.set(name, words);
   }
   return [...by].map(([name, words]) => ({name, text: words}));
 }
 /** A reply as shown and read: the <outfit> lines left out (and the line they stood on). */
 export const withoutOutfits = text => String(text ?? '').replace(/\n?[ \t]*<outfit\b[^>]*>[\s\S]*?<\/outfit\s*>[ \t]*/gi, '');
+
+export const detailedOutfitRule = (names, prompts = {}) => names.length ? promptText(prompts, 'wardrobe', 'detail', {'名单': names.join('、')}) : '';
+/** The optional story reply describes clothes that changed. */
+export function detailedOutfits(text) {
+  const rows = new Map();
+  for (const match of String(text ?? '').matchAll(TAG)) {
+    const name = match[1].match(/\bname\s*=\s*["']([^"']+)["']/i)?.[1]?.trim();
+    if (!name) continue;
+    try {
+      const record = JSON.parse(match[2]);
+      if (!Array.isArray(record?.pieces) || record.pieces.some(piece => !clip(piece?.description, WARDROBE_LIMITS.description))) continue;
+      const pieces = clothing(record.pieces.map(({itemId, ...piece}) => piece));
+      const remove = (Array.isArray(record.remove) ? record.remove : []).map(value => clip(value, 40)).filter(Boolean);
+      if (!record.replace && !pieces.length && !remove.length) continue;
+      rows.set(name, {name, pieces, remove, replace: record.replace === true, layering: clip(record.layering, 240)});
+    } catch { /* A plain-text or incomplete record is handled by the legacy reader. */ }
+  }
+  return [...rows.values()];
+}
+export function wearTags(wear) {
+  const pieces = wear?.pieces || [];
+  if (!pieces.length || pieces.some(piece => !validClothingTags(piece.tags))) return '';
+  return [...new Set(pieces.flatMap(piece => piece.tags.split(',')).map(tag => tag.trim()).filter(Boolean))].join(', ');
+}
+
+export function applyDetailedOutfit(previous, update) {
+  const old = previous?.pieces || [];
+  const removable = new Set(update.remove.flatMap(name => {
+    const named = old.filter(piece => piece.name === name);
+    const matched = named.length ? named : old.filter(piece => piece.category === name);
+    return matched.length === 1 ? matched : [];
+  }));
+  const pieces = update.replace ? [] : old.filter(piece => !removable.has(piece));
+  if (!update.replace && !update.pieces.length && !removable.size) return null;
+  for (const piece of update.pieces) {
+    const same = old.filter(x => x.name === piece.name && x.description === piece.description);
+    const existing = pieces.findIndex(x => x.name === piece.name && x.category === piece.category);
+    const next = same.length === 1 ? {...same[0], ...piece} : piece;
+    if (existing >= 0) pieces[existing] = next;
+    else pieces.push(next);
+  }
+  const layering = update.layering || '';
+  const oldText = !old.length && !update.replace ? previous?.text || '' : '';
+  const text = [oldText, ...pieces.map(piece => piece.description), layering].filter(Boolean).join('；');
+  return {text, pieces, items: pieces.flatMap(piece => piece.itemId || []), layering};
+}

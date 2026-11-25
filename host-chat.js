@@ -1082,13 +1082,13 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
         if (now - n.remind.at > 12 * 3600_000) continue;
         said++;
         const from = n.remind.from || '';
-        notice(`⏰ ${from ? from + '提醒你：' : ''}${n.title || n.text.slice(0, 40)}`);
+        notice(`${from ? from + '提醒你' : '备忘录提醒'}：${n.title || n.text.slice(0, 40)}`);
         // In the chat with whoever wrote it down (not someone the user is not friends with now).
         if (from && backend.contacts().some(c => c.name === from)) {
           const t = await dmWith(from).catch(() => null);
           if (t && !t.blocked && !t.friend) {
             await backend.chatMutate(t.id, () => backend.chats.append(t.id, [{from, kind: 'notice', target: 'me', text: `提醒{对方}：${n.title}`}]));
-            backend.emit('chat', {threadId: t.id, incoming: {from, text: `⏰ ${n.title}`, kind: 'notice', count: 1}});
+            backend.emit('chat', {threadId: t.id, incoming: {from, text: `提醒：${n.title}`, kind: 'notice', count: 1}});
           }
         }
       }
@@ -1149,7 +1149,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
             await backend.chats.append(t.id, due.map(l => ({from: l.from, kind: 'letter', letter: {text: l.text, arriveAt: l.arriveAt}})));
             return due.length;
           });
-          if (arrived) { came += arrived; notice(`✉️ 收到${partner}的来信`); backend.emit('chat', {threadId: t.id, incoming: {from: partner, text: '寄来一封信', kind: 'letter', count: arrived}}); }
+          if (arrived) { came += arrived; notice(`收到${partner}的来信`); backend.emit('chat', {threadId: t.id, incoming: {from: partner, text: '寄来一封信', kind: 'letter', count: arrived}}); }
         }
       }
       if (scan) lastScan = now;
@@ -1232,24 +1232,34 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
    * only drawn with allowPaid (the phone asks first); before that not even the words for its tags are spent.
    */
   const styleTags = new Map();
-  async function drawRoleSticker({name, mood, wish = '', allowPaid = false} = {}) {
+  async function drawRoleSticker({name, mood, wish = '', allowPaid = false, preview = false} = {}) {
     if (!backend.drawReady()) throw Error(backend.drawMissing() || '还没有设置绘图引擎');
     const paid = () => Object.assign(Error(backend.paidPrompt().note), {code: 'PAID', prompt: backend.paidPrompt()});
     if (!allowPaid && backend.drawQuote?.()?.free === false) throw paid();
     const s = settings(), feel = STICKER_MOODS.find(m => m[0] === mood) || [String(mood || '').slice(0, 20), ''], words = String(wish || '').trim();
     if (!feel[0]) throw Error('选一个表情');
-    if (words && !styleTags.has(words)) {
-      const tags = englishTagsAnswer(await backend.generateText(context(), {use: 'picture', prompt: descriptionTagsRequest(s, words), plainText: true, trimNames: false, responseLength: 1500}));
-      if (!tags) throw Error('文字模型没有返回表情包的英文绘图标签，再试一次');
-      styleTags.set(words, tags);
+    let style = '';
+    if (words) {
+      const prompt = descriptionTagsRequest(s, words), key = JSON.stringify(prompt);
+      if (!styleTags.has(key)) {
+        const pending = Promise.resolve(backend.generateText(context(), {use:'picture', prompt, plainText:true, trimNames:false, responseLength:1500})).then(answer => {
+          const tags = englishTagsAnswer(answer);
+          if (!tags) throw Error('文字模型没有返回表情包的英文绘图标签，再试一次');
+          return tags;
+        });
+        styleTags.set(key, pending);
+        pending.catch(() => { if (styleTags.get(key) === pending) styleTags.delete(key); });
+      }
+      style = await styleTags.get(key);
     }
-    const tags = ['solo', 'chibi', 'sticker', 'upper body', 'simple background', 'white background', feel[1], styleTags.get(words) || ''].filter(Boolean).join(', ');
+    const tags = ['solo', s.draw.engine === 'nai' ? '4::chibi only::' : 'chibi', 'sticker', 'upper body', 'simple background', 'white background', feel[1], style].filter(Boolean).join(', ');
     const input = pictureInputs(s, photoPicture(s, {text: `${name}的表情包：${feel[0]}`, tags, owner: name, names: [name]}), '');
     const side = sizeFor(s.draw.params, 'square');
     input.params = {...input.params, width: side.width, height: side.height};
     let made;
     try { made = await backend.generateImage({...input, allowPaid, name: `表情包-${name}-${feel[0]}`, key: `sticker:${name}:${feel[0]}:${Date.now()}`, label: `表情包 · ${name}`}); }
     catch (error) { if (error?.code === 'PAID') throw paid(); throw error; }
+    if (preview) return {name:feel[0], photoId:made.photoId};
     const key = roleStore(findRoute(backend.seen?.routes || s.routes, name)) || name, list = settings().chat.roleStickers?.[key] || [];
     backend.saveChatOptions({roleStickers: {[key]: [...list.filter(x => x.name !== feel[0]), {name: feel[0], photoId: made.photoId}]}});
     return {name: feel[0], photoId: made.photoId};

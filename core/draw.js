@@ -765,6 +765,39 @@ export function fillUpRequest(prompt, {prompts = {}, line, people = [], used, le
     {role: 'user', content: promptText(prompts, 'draw-prompt', 'fillUp', {'已用': used, '还差': left - used, '标签数': tags, '句数': sentences, '人物': people.length > 0})}];
 }
 /** The prompt line out of a reply: thinking blocks, tags, code fences and labels taken out. */
+export function selectionRequest(settings, {text, nearby = '', only = null} = {}) {
+  const names = settings.routes.filter(r => (r.appearance?.trim() || r.ref?.full) && !isPlaceholderRole(r.name) && (!only || only.includes(r.name))).map(r => r.name);
+  return [
+    {role:'system', content:promptText(settings.promptRules, 'draw-prompt', 'selection', {'角色名单':names.join('、') || '无'})},
+    {role:'user', content:promptText(settings.promptRules, 'draw-prompt', 'selectionAsk', {'选段':text, '前情':nearby})},
+  ];
+}
+
+/** Keep the scene and each character's fields together when it is inserted or drawn again. */
+export function selectionBlock(settings, answer) {
+  const raw = tagTextAnswer(answer);
+  const spec = parseBlock(raw);
+  const legacy = spec?.tags ? null : readSuggestion(settings, raw);
+  const scene = spec?.tags || legacy?.prompt;
+  if (!scene || !/[a-z]/i.test(scene)) throw Error('没有写出可用的绘图提示词');
+  const cast = spec?.tags ? spec.cast : (legacy?.people || []).map(name => ({name}));
+  const count = peopleCount(scene), noPeople = /(?:^|,)\s*no humans\s*(?:,|$)/i.test(scene);
+  for (const c of cast) c.name = roleNamed(settings.routes, c.name)?.name || c.name;
+  const unique = new Set(cast.map(c => c.name.normalize('NFKC').trim().toLowerCase()));
+  const positions = new Set(cast.map(c => c.position));
+  if (noPeople && (cast.length || count) || count > 1 && count !== cast.length || count === 1 && cast.length > 1 ||
+      unique.size !== cast.length || cast.length > 1 && (positions.size !== cast.length || cast.some(c => !c.position || !c.tags))) {
+    throw Error('人物还没写全或站位有重复。请重试选段生图，或调整「预设 → 系统提示词 → 绘图 → 选段生图」');
+  }
+  const line = value => String(value || '').replace(/[<>\r\n]/g, ' ').trim();
+  const column = value => line(value).replace(/[|｜]/g, ' ');
+  const tag = settings.general?.shortTags ? 'i-img' : 'img';
+  return ['<' + tag + '>', spec?.size && '画幅：' + line(spec.size), '场景：' + line(scene),
+    spec?.nl && '描述：' + line(spec.nl),
+    ...cast.map(c => '角色：' + [c.name, c.tags, c.nl, c.negative, c.position].map(column).join('｜')),
+    '</' + tag + '>'].filter(Boolean).join('\n');
+}
+
 export function cleanSuggestion(text) {
   const lines = String(text || '')
     .replace(/<(think|thinking|reasoning|thought|analysis)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')

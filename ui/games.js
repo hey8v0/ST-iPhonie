@@ -3,6 +3,7 @@
 // on-screen pad on a phone. Leaving the app pauses a game that runs by itself; coming back, a tap goes on.
 // Best scores are kept in this browser (ui/games/kit.js store).
 import {createView, esc, heading} from './common.js';
+import {icon} from './icons.js';
 import {store} from './games/kit.js';
 import {gameSounds} from './games/sound.js';
 import g2048 from './games/g2048.js';
@@ -32,13 +33,13 @@ export function gamesApp(ctx) {
     v.draw(heading('小游戏', '', 'Arcade')
       + `<div class="game-list">${GAMES.map(g => {
         const b = best.best(g.id);
-        return `<button type="button" class="game-card" data-game="${g.id}" style="--g1:${g.colors[0]};--g2:${g.colors[1]}"><span class="game-icon" aria-hidden="true">${g.icon}</span><strong>${esc(g.name)}</strong><small>${b ? `${g.lower ? '最好' : '最高'} ${esc(scoreText(g, b))}` : esc(g.note)}</small></button>`;
+        return `<button type="button" class="game-card" data-game="${g.id}" style="--game-accent:${g.accent};--game-accent-light:${g.accentLight}"><span class="game-icon" aria-hidden="true">${icon(g.icon)}<span class="game-art">${esc(g.art)}</span></span><strong>${esc(g.name)}</strong><small>${b ? `${g.lower ? '最好' : '最高'} ${esc(scoreText(g, b))}` : esc(g.note)}</small></button>`;
       }).join('')}</div>`
-      + '<p class="hint game-foot">离线就能玩，最高分记在这个浏览器里。</p>');
+      + '<p class="hint game-foot">最高分记在这个浏览器里。</p>');
   }
   function bar() {
     const b = best.best(game.id);
-    return `<div class="game-bar"><div class="game-score"><small>${game.unit === '秒' ? '用时' : game.unit === '步' ? '步数' : '分数'}</small><b data-game-score>0</b></div><div class="game-score"><small>${game.lower ? '最好' : '最高'}</small><b data-game-best>${b ? esc(scoreText(game, b)) : '—'}</b></div><button type="button" class="chip-button game-sound" data-action="game-sound" aria-pressed="${sounds.on}" aria-label="音效">${sounds.on ? '🔊' : '🔇'}</button><button type="button" class="chip-button" data-action="game-restart">重新开始</button></div>`;
+    return `<div class="game-bar"><div class="game-score"><small>${game.unit === '秒' ? '用时' : game.unit === '步' ? '步数' : '分数'}</small><b data-game-score>0</b></div><div class="game-score"><small>${game.lower ? '最好' : '最高'}</small><b data-game-best>${b ? esc(scoreText(game, b)) : '—'}</b></div><button type="button" class="chip-button game-sound" data-action="game-sound" aria-pressed="${sounds.on}" aria-label="音效">${icon(sounds.on ? 'volume' : 'volumeOff')}</button><button type="button" class="chip-button" data-action="game-restart">重新开始</button></div>`;
   }
   /** The game as it is now is kept (or forgotten when it is over), to go on with next time. */
   function persist() { if (game && play?.state) best.keep(game.id, play.state()); }
@@ -89,7 +90,7 @@ export function gamesApp(ctx) {
   v.root.addEventListener('pointerdown', () => sounds.unlock(), {signal: keys.signal});
   v.on('click', '[data-game]', el => open(el.dataset.game));
   v.on('click', '[data-action=game-restart]', () => restart());
-  v.on('click', '[data-action=game-sound]', el => { sounds.on = !sounds.on; el.textContent = sounds.on ? '🔊' : '🔇'; el.setAttribute('aria-pressed', String(sounds.on)); if (sounds.on) sounds.play('tap'); });
+  v.on('click', '[data-action=game-sound]', el => { sounds.on = !sounds.on; el.innerHTML = icon(sounds.on ? 'volume' : 'volumeOff'); el.setAttribute('aria-pressed', String(sounds.on)); if (sounds.on) sounds.play('tap'); });
   v.on('click', '[data-action=game-go-on]', () => { v.root.querySelector('[data-game-over]').hidden = true; paused = false; play?.resume?.(); });
   // Keys while the game is on screen (not while typing somewhere).
   ctx.doc.addEventListener('keydown', e => {

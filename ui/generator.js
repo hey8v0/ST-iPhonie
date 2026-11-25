@@ -108,7 +108,7 @@ export function generatorApp(ctx) {
   function render() {
     if (v.disposed) return;
     const name = card().name;
-    v.draw(heading('生成器', btn('gen-settings', icon('settings'), 'round-button', 'aria-label="生成器设置"') + help(HELP), name ? `Generator · ${name}` : 'Generator')
+    v.draw(heading('生成器', help(HELP) + btn('gen-settings', icon('sliders'), 'round-button', 'aria-label="生成器设置"'), name ? `Generator · ${name}` : 'Generator')
       + `<div class="segmented gen-tabs" role="group" aria-label="写什么">${TABS.map(([key, label]) => seg('tab', key, label, tab)).join('')}</div>`
       + ({opening: openingPage, persona: personaPage, direction: directionPage, theater: theaterPage})[tab]());
     mountCard();
@@ -166,7 +166,8 @@ export function generatorApp(ctx) {
   async function more(x) {
     const free = x.form === 'custom';
     const words = free ? x.body : x.form === 'card' ? x.html : x.lines.map(l => l.narration ? `（${l.translation || l.text}）` : `${l.role}：${l.translation || l.text}`).join('\n');
-    const key = await menu(ctx, x.title, [{key: 'copy', icon: 'copy', label: free ? '复制原文' : x.form === 'card' ? '复制网页代码' : '复制剧本'}, (free || x.form === 'card') && {key: 'download', icon: 'download', label: '下载成网页'}, {key: 'delete', icon: 'trash', label: '删除', danger: true}]);
+    const key = await menu(ctx, x.title, [ctx.makeBookFromTheater && {key:'book', icon:'book', label:'做成绘本'}, {key: 'copy', icon: 'copy', label: free ? '复制原文' : x.form === 'card' ? '复制网页代码' : '复制剧本'}, (free || x.form === 'card') && {key: 'download', icon: 'download', label: '下载成网页'}, {key: 'delete', icon: 'trash', label: '删除', danger: true}]);
+    if (key === 'book') ctx.makeBookFromTheater(x.id);
     if (key === 'copy') { await copyText(win, words); ctx.notify('复制了'); }
     if (key === 'download') {
       const {assistantPreviewDocument} = await import('./assistant.js');

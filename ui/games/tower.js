@@ -10,7 +10,7 @@ export function land(below, x, width, snap = 4) {
 }
 
 export default {
-  id: 'tower', name: '叠叠高', icon: '🏗️', colors: ['#ffd6e7', '#e8599a'], note: '叠得越高越好', live: true,
+  id: 'tower', name: '叠叠高', icon: 'tower', art: '🏗️', accent: '#e8599a', accentLight: '#ffd6e7', note: '叠得越高越好', live: true,
   how: '方块左右来回滑，点一下（或空格）放下。超出下面那块的部分会掉下去，正好对齐就不会变窄。没叠上就结束了。',
   make({doc, win, host, api, saved}) {
     const w = Math.min(340, Math.max(240, host.clientWidth || 300)), h = Math.round(w * 1.35), bh = 22, base = w * .55;

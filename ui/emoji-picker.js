@@ -3,6 +3,7 @@
 // frames, so opening the panel stays quick with nearly two thousand emoji.
 import {EMOJI_GROUPS} from './emoji-data.js';
 import {KAOMOJI_GROUPS} from './kaomoji-data.js';
+import {icon} from './icons.js';
 
 const KEYS = {emoji: 'st-iphonie-recent-emoji', kao: 'st-iphonie-recent-kaomoji'};
 const RECENT_MAX = {emoji: 24, kao: 16};
@@ -30,7 +31,7 @@ const cells = (kind, items, action) => items.map(e => `<button type="button" dat
 export function pickerHTML(kind, {recent = [], action = 'emoji-pick', eager = 2} = {}) {
   const groups = groupsOf(kind), all = [...(recent.length ? [{key: 'recent', name: '最近使用', items: recent}] : []), ...groups];
   const sections = all.map((g, i) => `<section class="ep-sec" data-sec="${g.key}"><h4>${html(g.name)}</h4><div class="ep-grid ${kind === 'kao' ? 'kao' : 'emo'}"${i < eager ? '' : ` data-fill="${g.key}" style="min-height:${Math.ceil(g.items.length / (kind === 'kao' ? 3 : 8)) * (kind === 'kao' ? 38 : 40)}px"`}>${i < eager ? cells(kind, g.items, action) : ''}</div></section>`).join('');
-  const bar = all.map((g, i) => `<button type="button" data-action="ep-cat" data-sec="${g.key}" aria-label="${html(g.name)}" aria-current="${i === 0}">${kind === 'kao' ? html(g.name) : g.key === 'recent' ? '🕘' : html(g.items[0])}</button>`).join('');
+  const bar = all.map((g, i) => `<button type="button" data-action="ep-cat" data-sec="${g.key}" aria-label="${html(g.name)}" aria-current="${i === 0}">${kind === 'kao' ? html(g.name) : g.key === 'recent' ? icon('clock') : html(g.items[0])}</button>`).join('');
   return `<div class="ep" data-kind="${kind}" data-action-name="${action}"><div class="ep-scroll">${sections}</div><nav class="ep-cats ${kind === 'kao' ? 'kao' : 'emo'}" aria-label="分类">${bar}</nav></div>`;
 }
 /** Fills the sections not drawn yet, one per idle frame (all at once where there are no frames, as in tests). */

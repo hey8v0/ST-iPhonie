@@ -661,6 +661,7 @@ details>div{padding-bottom:10px}
 .note-card small{font-size:12.5px;color:inherit;opacity:.8;line-height:1.55;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 /* 备忘录 × 聊天 (0.9.35): when a contact's note is reminded */
 .note-remind{display:inline-flex;align-items:center;gap:4px;align-self:flex-start;margin-top:auto;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.55);font-size:11.5px;font-style:normal;font-weight:800;color:#3a2e10}
+.note-remind>.icon{width:14px;height:14px}
 .note-remind.done{opacity:.6}
 .note-remind+.note-paper{margin-top:10px}
 .note-paper{padding:14px 18px;border-radius:8px 8px 26px 8px;color:#3a2e10;background:var(--nc,#fff4b0);background-image:repeating-linear-gradient(transparent 0 29px,rgba(0,0,0,.08) 29px 30px);box-shadow:var(--shadow)}
@@ -1257,7 +1258,8 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 .qq-list .conv.pinned{background:color-mix(in srgb,var(--accent-soft) 55%,transparent)}
 @supports not (color:color-mix(in srgb,#000,#fff)){.qq-list .conv.pinned{background:var(--accent-soft)}}
 .at-me{margin-right:2px;font-style:normal;font-weight:800;color:var(--danger)}
-.conv .spark{margin-left:3px;font-size:11px;font-weight:900;color:#ff7a3c}
+.conv .spark{display:inline-flex;align-items:center;gap:2px;margin-left:3px;font-size:11px;font-weight:900;color:var(--accent-ink)}
+.conv .spark .icon{width:13px;height:13px}
 .badge.muted{background:var(--ink2);opacity:.7}
 .mute-ico{display:inline-grid;flex:none;color:var(--ink2);opacity:.75}
 .mute-ico .icon{width:14px;height:14px}
@@ -2682,10 +2684,27 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .window-open>.icon{width:18px;height:18px;color:var(--ink2);flex:none}
 /* 游戏 (ui/games.js, ui/games/*) */
 .game-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.game-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:112px;padding:14px;border-radius:22px;text-align:left;color:#fff;background:linear-gradient(150deg,var(--g1),var(--g2));box-shadow:0 10px 22px -12px var(--g2),inset 0 0 0 1px rgba(255,255,255,.25)}
-.game-card strong{font-size:16px;font-weight:900;text-shadow:0 1px 2px rgba(0,0,0,.18)}
-.game-card small{font-size:12px;font-weight:700;color:rgba(255,255,255,.92)}
-.game-icon{display:grid;place-items:center;min-width:42px;height:42px;padding:0 6px;margin-bottom:auto;border-radius:14px;background:rgba(255,255,255,.3);font-size:24px;font-weight:900;line-height:1}
+.game-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:112px;padding:14px;border:1px solid var(--line);border-radius:22px;text-align:left;color:var(--ink);background:var(--card);box-shadow:var(--shadow)}
+.game-card strong{font-size:16px;font-weight:900;overflow-wrap:anywhere}
+.game-card small{font-size:12px;font-weight:700;color:var(--ink2);overflow-wrap:anywhere}
+.game-icon{display:grid;place-items:center;width:42px;height:42px;margin-bottom:auto;border-radius:14px;background:var(--card2);color:var(--ink)}
+@supports(color:color-mix(in srgb,#000,#fff)){.game-icon{background:color-mix(in srgb,var(--game-accent) var(--game-tint,18%),var(--card2))}}
+:root[data-theme=dark] .game-icon{--game-tint:25%}
+.game-icon .icon{width:24px;height:24px}
+.game-art{display:none}
+:root:is([data-skin=sky],[data-skin=aero]) .game-card{
+  border:0;color:#fff;background:linear-gradient(150deg,var(--game-accent-light),var(--game-accent));
+  box-shadow:0 10px 22px -12px var(--game-accent),inset 0 0 0 1px rgba(255,255,255,.25);
+}
+:root:is([data-skin=sky],[data-skin=aero]) .game-card strong{text-shadow:0 1px 2px rgba(0,0,0,.18)}
+:root:is([data-skin=sky],[data-skin=aero]) .game-card small{color:rgba(255,255,255,.92)}
+:root:is([data-skin=sky],[data-skin=aero]) .game-icon{
+  min-width:42px;width:auto;padding:0 6px;background:rgba(255,255,255,.3);
+  color:inherit;font-size:24px;font-weight:900;line-height:1;
+}
+:root:is([data-skin=sky],[data-skin=aero]) .game-icon .icon{display:none}
+:root:is([data-skin=sky],[data-skin=aero]) .game-art{display:block}
+@media(prefers-reduced-motion:no-preference){:root:not(:is([data-skin=sky],[data-skin=aero])) .game-card{transition:transform .18s cubic-bezier(.2,.7,.3,1)}}
 .game-card:active{transform:scale(.97)}
 .game-foot{text-align:center;margin-top:16px}
 .game-page{position:relative;display:flex;flex-direction:column;align-items:center;padding-top:6px}
@@ -2694,13 +2713,16 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .game-score{display:flex;flex-direction:column;flex:1 1 0;min-width:0;max-width:110px;padding:6px 10px;border-radius:14px;background:var(--card);box-shadow:var(--shadow)}
 .game-score small{font-size:10.5px;font-weight:800;color:var(--ink2);letter-spacing:.06em}
 .game-score b{font-size:18px;font-weight:900;color:var(--ink);font-variant-numeric:tabular-nums}
-.game-bar .chip-button{margin-left:auto;flex:none;padding:0 12px}
+.game-bar .chip-button{margin-left:auto;flex:none;min-height:44px;padding:0 12px}
 .game-host{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
-.game-bar .game-sound{min-width:34px;padding:0 6px;font-size:15px}
+.game-bar .game-sound{width:44px;min-width:44px;padding:0;display:grid;place-items:center}
+.game-bar .game-sound .icon{width:18px;height:18px}
 .game-bar .game-sound+.chip-button{margin-left:0}
 .game-canvas{display:block;border-radius:16px;box-shadow:var(--shadow)}
 .game-how{text-align:center;margin-top:14px}
 .game-status{margin:0;font-size:13px;font-weight:800;color:var(--ink2);text-align:center}
+.mines-tools .chip-button{min-height:44px}
+.mines-tools .icon{width:16px;height:16px}
 .game-over{position:absolute;inset:0;z-index:3;display:grid;place-items:center;padding:20px;border-radius:24px;background:color-mix(in srgb,var(--bg) 62%,transparent);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
 @supports not (color:color-mix(in srgb,#000,#fff)){.game-over{position:absolute;inset:0;z-index:3;display:grid;place-items:center;padding:20px;border-radius:24px;background:var(--bg);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}}
 .game-over[hidden]{display:none}

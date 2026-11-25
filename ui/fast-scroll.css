@@ -1,0 +1,45 @@
+:where(.screen,.stip-replace-dialog) *{scrollbar-width:none!important}
+:where(.screen,.stip-replace-dialog) *::-webkit-scrollbar{display:none}
+:where(.screen) .sheet{position:relative}
+[data-fast-scrolling]{scroll-behavior:auto!important}
+
+.fast-scroll{position:absolute;z-index:74;pointer-events:none;visibility:hidden;transition:visibility 0s .19s}
+.fast-scroll[hidden]{display:none}
+.fast-scroll[data-visible]{visibility:visible;transition-delay:0s}
+.fast-scroll::before{
+  content:"";position:absolute;inset:0;opacity:0;transition:opacity .12s ease-out;
+  -webkit-backdrop-filter:blur(1.25px);backdrop-filter:blur(1.25px)
+}
+.fast-scroll.dragging::before{opacity:1}
+.fast-scroll>button{
+  position:absolute;top:var(--fast-scroll-top,6px);right:0;
+  display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;background:none;
+  color:var(--accent-ink,var(--ink,#24304b));font:inherit;opacity:1;cursor:grab;touch-action:none;
+  -webkit-user-select:none;user-select:none;
+}
+.fast-scroll[data-visible]>button{pointer-events:auto}
+.fast-scroll>button>span{
+  display:grid;place-items:center;width:32px;height:40px;border:1px solid var(--line,#dee5ef);
+  border-radius:13px;background:var(--card,#fff);box-shadow:0 3px 10px rgba(15,26,53,.15);
+  opacity:0;transform:translateX(5px) scale(.96);
+  transition:opacity .16s ease,transform .19s cubic-bezier(.4,0,.8,1)
+}
+.fast-scroll[data-visible]>button>span{
+  opacity:1;transform:none;
+  transition:opacity .14s ease-out,transform .18s cubic-bezier(.18,.72,.24,1)
+}
+.fast-scroll>button svg{display:block;width:19px;height:19px}
+.fast-scroll.dragging>button{cursor:grabbing}
+.fast-scroll-label{
+  position:absolute;right:49px;top:calc(var(--fast-scroll-top,6px) + 22px);opacity:0;transform:translate(4px,-50%);
+  max-width:calc(100% - 58px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  padding:7px 10px;border-radius:10px;background:var(--card,#fff);color:var(--ink,#24304b);
+  border:1px solid var(--line,#dee5ef);font:700 13px/1.4 system-ui,sans-serif;
+  transition:opacity .12s ease-out,transform .16s cubic-bezier(.18,.72,.24,1)
+}
+.fast-scroll.dragging .fast-scroll-label{opacity:1;transform:translateY(-50%)}
+@media(prefers-reduced-motion:reduce){
+  .fast-scroll,.fast-scroll::before,.fast-scroll>button>span,.fast-scroll[data-visible]>button>span,.fast-scroll-label{transition:none}
+  .fast-scroll>button>span{transform:none}
+  .fast-scroll-label{transform:translateY(-50%)}
+}

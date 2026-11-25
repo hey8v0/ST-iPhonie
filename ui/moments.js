@@ -5,7 +5,8 @@ import {replacePicture} from './replace-picture.js';
 import {rowWindow} from './row-window.js';
 import {esc, btn, empty, avatar, field, textArea, input, toggle, help} from './common.js';
 import {icon} from './icons.js';
-import {eachThumb, previewBlob} from './thumbs.js';
+import {previewBlob} from './thumbs.js';
+import {pickReplacement} from './replacement-album.js';
 import {openImageViewer} from '../image-viewer.js';
 import {viewerHeart} from './photo-heart.js';
 import {downloadAction, shareAction} from '../download.js';
@@ -128,13 +129,16 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
   }
   const replyOn = () => api.getState().moments.replyToMe !== false;
 
-  async function newPost() {
-    const photos = await api.listPhotos();
+  function newPost() {
     let chosen = '';
     const d = sheet('发动态', `${field('这一刻的想法', textArea('text', '', 'rows="4" maxlength="2000" placeholder="写点什么…"'))}
-      ${photos.length ? `<p class="help-copy">配一张相册里的照片（可选）</p><div class="photo-grid pick-photos">${photos.slice(0, 24).map(r => `<button data-action="pick" data-id="${esc(r.id)}" aria-pressed="false" aria-label="选择 ${esc(r.name)}"><img data-photo="${esc(r.id)}" alt="${esc(r.name)}"></button>`).join('')}</div>` : ''}
+      <div data-moment-attach></div>
       <div class="actions">${btn('send-post', icon('send') + '发表', 'primary')}</div>`, {
-      pick: b => { chosen = chosen === b.dataset.id ? '' : b.dataset.id; for (const x of d.body.querySelectorAll('[data-action=pick]')) x.setAttribute('aria-pressed', String(x.dataset.id === chosen)); },
+      'pick-photo': async () => {
+        const id = await pickReplacement(ctx, api, {title:'选择动态配图', device:false, over:true, selected:chosen});
+        if (id) { chosen = id; showPhoto(); }
+      },
+      'remove-photo': () => { chosen = ''; showPhoto(); },
       'send-post': async () => {
         const text = d.body.querySelector('[data-field=text]').value.trim();
         if (!text && !chosen) throw Error('写点什么，或者选一张照片');
@@ -144,10 +148,15 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
         else render();
       }
     });
-    // the album's photos as small pictures, let go when the sheet closes
-    const imgs = new Map([...d.body.querySelectorAll('img[data-photo]')].map(img => [img.dataset.photo, img])), local = [];
-    d.onClose(() => { for (const url of local) ctx.win.URL.revokeObjectURL(url); });
-    eachThumb(api, photos.filter(r => imgs.has(r.id)), (id, blob) => { const url = ctx.win.URL.createObjectURL(blob); local.push(url); imgs.get(id).src = url; }, () => d.live).catch(() => {});
+    function showPhoto() {
+      const box = d.body.querySelector('[data-moment-attach]'), id = chosen;
+      box.innerHTML = `${id ? '<div class="moment-photo"><img alt="已选的配图"></div>' : ''}
+        <div class="actions">${btn('pick-photo', icon('image') + (id ? '换一张' : '选择配图'), 'secondary small')}${id ? btn('remove-photo', '移除配图', 'text-button small') : ''}</div>`;
+      if (id) listURL(id).then(url => {
+        if (url && d.live && id === chosen) box.querySelector('img').src = url;
+      }).catch(() => {});
+    }
+    showPhoto();
   }
   function commentOn(id, to = '') {
     const reply = to && to !== 'me';

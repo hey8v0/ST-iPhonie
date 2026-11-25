@@ -44,7 +44,7 @@ function addTile(board) {
 }
 
 export default {
-  id: '2048', name: '2048', icon: '2048', colors: ['#ffd27a', '#f08a3c'], note: '合出 2048',
+  id: '2048', name: '2048', icon: 'grid', art: '2048', accent: '#f08a3c', accentLight: '#ffd27a', note: '合出 2048',
   how: '滑动（或方向键）让方块一起移动，相同的数字撞在一起合成一个。',
   make({doc, host, api, saved}) {
     let board, score, won, fresh = null;

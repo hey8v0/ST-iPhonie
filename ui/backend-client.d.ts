@@ -52,7 +52,7 @@ export interface BookWord extends BookLine { bubble: boolean; at: 'left' | 'righ
 /** A spread (two pages seen together): its layout; side: the page its picture (or 立绘) is on, or for one across both pages the page its words are on; space / tone: where a picture across both pages leaves room for the words and whether that room is light or dark; heading; pictures; words; cast: who stands on it as their 立绘 (人物出场); fx: the weather drawn over it; sound: its ambience and sound (音效 library names). */
 /** who (0.9.40): the book's people in the picture (their looks go with it). A 'cast' spread (出场人物, the page after the cover) keeps its people in cast, each with a line and a picture of their own. */
 export interface BookSpread { layout: 'quiet' | 'page' | 'window' | 'spread' | 'fade' | 'ground' | 'pair' | 'stage' | 'text' | 'cast'; side: 'left' | 'right'; space: 'top' | 'bottom'; tone: 'light' | 'dark'; heading: string; pictures: Array<{ prompt: string; picture: BookPicture; people: boolean; who: string[] }>; words: BookWord[]; cast: Array<{ name: string; emotion: string; line?: string; prompt?: string; picture?: BookPicture; people?: boolean; who?: string[] }>; fx: string[]; sound: { ambience: string; sfx: string } }
-export interface Book { id: string; version: 3; title: string; subtitle: string; author: string; theme: string; art: 'book' | 'app'; mode: 'story' | 'retell'; source: { chat: string; name: string; from: number; to: number }; cover: { prompt: string; picture: BookPicture; who: string[] }; spreads: BookSpread[]; ending: string; at: number; made: number; /** 读后感 (0.9.40): what each person it was sent to said of it, the latest each. */ readers: Array<{ name: string; at: number; text: string }> }
+export interface Book { id: string; version: 3; title: string; subtitle: string; author: string; theme: string; art: 'book' | 'app'; mode: 'story' | 'retell'; source: { chat: string; name: string; from: number; to: number; kind?: 'theater' | 'paste'; people?: string[]; references?: string }; cover: { prompt: string; picture: BookPicture; who: string[] }; spreads: BookSpread[]; ending: string; at: number; made: number; /** 读后感 (0.9.40): what each person it was sent to said of it, the latest each. */ readers: Array<{ name: string; at: number; text: string }> }
 export interface VnModel { /** Live2D: the model's own motions ('group:index') and their words. */ acts?: Record<string, string[]>; id: string; kind: 'vrm' | 'live2d'; version: string; path: string; file: string; size: number; title: string; frame: 'half' | 'full' | 'face'; zoom: number; lift: number; map: Record<string, { expression: string; motion: string }>; /** Live2D 表情 kept on (its look); absent: guessed. */ keep?: string[]; at: number; }
 export interface VnCastEntry extends VnSet { hiddenActions?: string[]; actions: VnAction[]; outfits: VnOutfit[]; /** Up to 8, to switch between. */ models?: VnModel[]; /** The one in use ('' = the 立绘). */ useModel?: string; }
 /** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
@@ -465,8 +465,10 @@ export interface MusicPlaylist { id: string; kind: 'playlist'; at: number; name:
 export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; mode: 'order' | 'shuffle' | 'one'; from: string; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
 export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; from?: string };
 export interface WardrobeItem { shared?: boolean; collections?: string[]; cut?: string; age?: string; id: string; kind: 'wardrobe-item'; owner: string; name: string; category: string; description: string; photoId?: string; naiTags?: string; recognized: boolean; at: number; updatedAt: number; }
-export interface WardrobeSet { id: string; kind: 'wardrobe-set'; photoId?: string; owner: string; name: string; description: string; items: string[]; at: number; updatedAt: number; }
-export interface WardrobeWear { id: string; kind: 'wardrobe-wear'; owner: string; text: string; from: 'phone' | 'story'; pending: boolean; at: number; }
+export interface WardrobeSet { id: string; kind: 'wardrobe-set'; photoId?: string; tags?: string; recordedAt?: number; owner: string; name: string; description: string; items: string[]; at: number; updatedAt: number; }
+export interface WardrobePiece { name: string; category: string; description: string; tags?: string; itemId?: string; }
+export interface WardrobePackPreview { added: number; duplicate: number; conflicts: number; names: string[]; revision: string; }
+export interface WardrobeWear { id: string; kind: 'wardrobe-wear'; owner: string; text: string; from: 'phone' | 'story'; pending: boolean; at: number; items?: string[]; setId?: string; pieces?: WardrobePiece[]; layering?: string; }
 /** 小剧场 (core/generator.js): a script's line (旁白 lines are narration) or a card's HTML. */
 export interface TheaterLine { role: string; text: string; translation: string; emotion: string; narration?: boolean; }
 export interface Theater { id: string; kind: 'theater'; form: 'script' | 'card' | 'custom'; title: string; lines?: TheaterLine[]; html?: string; body?: string; source: 'story' | 'card'; wish: string; at: number; space?: string; save?: string; }
@@ -1192,7 +1194,7 @@ export interface BackendFacade {
     /** 让模型改 (tavern side): the two texts rewritten to a wish; the side not asked for comes back as it was. */
     bubbleRewrite?(options: { me: string; them: string; wish: string; side?: '' | 'me' | 'them' }): Promise<{ me: string; them: string }>;
     /** 角色专属表情包 (tavern side): one mood drawn for a role and kept as theirs; code 'PAID' until allowPaid. */
-    drawRoleSticker?(options: { name: string; mood: string; wish?: string; allowPaid?: boolean }): Promise<{ name: string; photoId: string }>;
+    drawRoleSticker?(options: { name: string; mood: string; wish?: string; allowPaid?: boolean; preview?: boolean }): Promise<{ name: string; photoId: string }>;
     saveContact(contact: Partial<Contact> & { name: string }): Contact;
     deleteContact(id: string): ChatSettings;
     /** Story roles (角色 App) first, then manual contacts. */
@@ -1235,12 +1237,17 @@ export interface BackendFacade {
     blockedNames(): Promise<string[]>;
     /** 衣柜 here (this card's, with 分区): clothes and outfits, newest first, and what each owner wears ('me' or 'role:名字'). */
     wardrobeCardKey?(): string;
-    wardrobe(owner?: string): Promise<{ items: WardrobeItem[]; sets: WardrobeSet[]; wears: WardrobeWear[] }>;
+    wardrobe(owner?: string): Promise<{ items: WardrobeItem[]; sets: WardrobeSet[]; wears: WardrobeWear[]; categories: string[]; candidates: {owner:string; refs:string[]}[] }>;
+    exportWardrobePack(ids?: string[]): Promise<Blob>;
+    previewWardrobePack(file: Blob): Promise<WardrobePackPreview>;
+    importWardrobePack(file: Blob, options?: {overwrite?: boolean; expected?: WardrobePackPreview}): Promise<{added:number; replaced:number}>;
+    editWardrobeCategory(options: {old?:string; name?:string; remove?:boolean; deleteItems?:boolean; expectedCount?:number}): Promise<string[]>;
+    setWardrobeCandidate(owner: string, id: string, on: boolean): Promise<void>;
     saveWardrobeItem(item: Partial<WardrobeItem> & { owner: string }): Promise<WardrobeItem>;
     saveWardrobeSet(set: Partial<WardrobeSet> & ({id: string} | {owner: string; description: string})): Promise<WardrobeSet>;
     deleteWardrobe(ids: string[]): Promise<boolean>;
     /** 穿上 (from: 'phone', told to the next story reply once) or what the story changed (from: 'story'). */
-    setWardrobeWear(wear: { owner: string; text: string; from?: 'phone' | 'story' }): Promise<WardrobeWear>;
+    setWardrobeWear(wear: { owner: string; text?: string; from?: 'phone' | 'story'; items?: string[]; setId?: string; pieces?: WardrobePiece[]; layering?: string; remove?: string }): Promise<WardrobeWear | null>;
     clearWardrobeWear(owner: string): Promise<boolean>;
     theaters(): Promise<Theater[]>;
     saveTheater(doc: Partial<Theater>): Promise<Theater>;
@@ -1368,14 +1375,16 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     wardrobeInspect?(options: {photoId?: string; blob?: Blob}): Promise<Pick<WardrobeItem, 'name' | 'category' | 'description'>>;
     wardrobeRecognizeBatch?(ids: string[]): Promise<string[]>;
     wardrobeRecognize(itemId: string, options?: {onlyEmpty?: boolean}): Promise<WardrobeItem>;
-    wardrobeSuggest(options: { owner: string; mode?: 'closet' | 'free'; wish?: string; itemIds?: string[] }): Promise<string>;
+    wardrobeSuggest(options: { owner: string; mode?: 'closet' | 'free'; wish?: string; itemIds?: string[]; includeItems?: false }): Promise<string>;
+    wardrobeSuggest(options: { owner: string; mode?: 'closet' | 'free'; wish?: string; itemIds?: string[]; includeItems: true }): Promise<{text:string; items:string[]}>;
     /** 存成一套: designed freely, split into pieces that go into the 衣柜 first; the same words kept again come back with again. */
-    wardrobeSaveOutfit(options: { photoId?: string; owner: string; text: string; mode?: 'closet' | 'free'; itemIds?: string[] }): Promise<{ set: WardrobeSet; added: number; again: boolean }>;
-    wardrobeTryOn(options: { owner: string; text: string; allowPaid?: boolean }): Promise<string>;
+    wardrobeSaveOutfit(options: { photoId?: string; owner: string; text: string; mode?: 'closet' | 'free'; itemIds?: string[]; pieces?: WardrobePiece[]; tags?: string; recordedAt?: number }): Promise<{ set: WardrobeSet; added: number; again: boolean }>;
+    wardrobeTryOn(options: { owner: string; text: string; tags?: string; allowPaid?: boolean }): Promise<string>;
     wardrobeDrawItems?(options: {ids: string[]; allowPaid?: boolean}): Promise<{count: number; error: string}>;
     wardrobeDrawItem(options: { id: string; allowPaid?: boolean }): Promise<WardrobeItem>;
     /** Who is in the story just now, as 衣柜 owners ('me', 'role:<name>'): they stay in the row of faces when there are many. */
     wardrobePresent?(): string[];
+    wardrobeStorySettings?(enabled?: boolean): Promise<{available:boolean; enabled:boolean}>;
     /** 生成器 (host-generator.js): the card open now, what is being written, and each kind's request. */
     generatorCard(): { name: string; group: boolean; messages: number; greetingOnly: boolean };
     generatorBusy(): string;
@@ -1467,8 +1476,10 @@ export interface BackendAPI extends Omit<BackendFacade, 'exportBackup'> {
     /** 视觉小说: opens the stage over the tavern page, from the latest reply, the first message or a message id. */
     vnStart(from: 'latest' | 'first' | number): Promise<boolean>;
     /** 绘本 (host-book.js): the open chat; its story from `from` to `to` as steps (core/vn.js storySteps, whole lines); the text model's answer; a page read aloud (resolves when read; false: nothing on it can be read); a page's sound by line for an export (null: not keepable); whether the 旁白 can be read / kept. */
-    bookInfo?(): { chat: string; title: string; length: number; user: string };
+    bookInfo?(): { chat: string; title: string; length: number; user: string; roles?: string[] };
     bookSource?(from?: number, to?: number): { chat: string; title: string; length: number; user: string; from: number; to: number; messages: Array<{ id: number; user: boolean; name: string; steps: Array<{ kind: 'say' | 'narrate' | 'bg'; text?: string; role?: string; emotion?: string; line?: number; part?: number; url?: string; user?: boolean }> }> };
+    bookMessages?(): Array<{id:number; name:string; preview:string}>;
+    bookReferences?(options: {chat?:string; range?:[number,number] | null; names?:string[]; persona?:boolean; world?:boolean; skipBooks?:string[]; skipEntries?:string[]; extraBooks?:string[]; script?:string}): Promise<string>;
     bookWrite?(system: string, user: string, options?: { length?: number }): Promise<string>;
     bedtimeCreate(form: {role: string; world?: boolean; plot?: 'story'|'independent'; extraBooks?: string[]; skipBooks?: string[]; skipEntries?: string[]; kind?: string; minutes?: number | string; wish?: string; sourceId?: string; chapter?: number | string; paragraph?: number | string}): Promise<Book>;
     bedtimeRoles(): Array<{name: string; persona?: string}>;

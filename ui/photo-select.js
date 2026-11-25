@@ -64,21 +64,23 @@ export function slideSelect({ctx, root, tiles = '.photo-grid [data-id]', scrolle
     win.clearTimeout(p.timer);
     press = null;
   });
-  const lift = e => {
+  function stop() {
     const p = press;
-    if (!p || e.pointerId !== p.pointerId) return;
+    if (!p) return;
     press = null;
     win.clearTimeout(p.timer);
     if (!p.mode) return;
     win.cancelAnimationFrame(p.frame);
     endedAt = Date.now();
     try { root.releasePointerCapture?.(p.pointerId); } catch { /* already let go */ }
-  };
+  }
+  const lift = e => { if (press?.pointerId === e.pointerId) stop(); };
   root.addEventListener('pointerup', lift);
   root.addEventListener('pointercancel', lift);
+  root.addEventListener('lostpointercapture', lift);
   // While a finger picks, the page must not scroll under it.
   root.addEventListener('touchmove', e => { if (press?.mode && e.cancelable) e.preventDefault(); }, {passive: false});
   // A finger held would bring the browser's own menu for the picture.
   root.addEventListener('contextmenu', e => { if (press) e.preventDefault(); });
-  return {get active() { return !!press?.mode; }, justEnded: () => Date.now() - endedAt < 350};
+  return {get active() { return !!press?.mode; }, justEnded: () => Date.now() - endedAt < 350, stop};
 }

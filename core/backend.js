@@ -30,7 +30,8 @@ import { lookPictures, lookThumb } from './looks.js';
 import { DRAWN_SOURCES, FAVORITES, ALBUM_LIMITS, albumName, albumsInOrder } from './albums.js';
 import { paintStore } from './paint-store.js';
 import { Ledger } from './ledger.js';
-import { cleanItem, cleanSet, cleanWear, sameWardrobeDrawing, WARDROBE_LIMITS } from './wardrobe.js';
+import {writeWardrobePack, readWardrobePack, compareWardrobePack} from './wardrobe-pack.js';
+import { cleanItem, cleanSet, cleanWear, sameWardrobeDrawing, WARDROBE_LIMITS, WARDROBE_KINDS, CATEGORY_DOC, categoryName, wardrobeCategories, candidateRefs } from './wardrobe.js';
 import { FishMcp } from './fish-mcp.js';
 import {fishTavernProxy} from './fish-transport.js';
 import {fishAudioProxy} from './fish-audio.js';
@@ -119,7 +120,7 @@ const firstCard = route => (Array.isArray(route.cards) ? route.cards.find(k => !
 const clone = value => structuredClone(value);
 // a 歌单 the user made was deleted meanwhile (in another tab, say)
 // Which documents of the apps' stores make up a part of a backup and of 保存到酒馆 (画画的作品 has a store of its own).
-const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], wardrobe: ['wardrobe-item', 'wardrobe-set', 'wardrobe-wear'], theater: ['theater'], looks: ['look'], albums: ['album'], music: ['song', 'playlist', 'heard', 'draft'], sounds: ['sound'], games: ['gamesave'] });
+const PART_KINDS = Object.freeze({ forum: ['forum', 'forum-hot'], peek: ['peek'], ledger: ['ledger'], wardrobe: WARDROBE_KINDS, theater: ['theater'], looks: ['look'], albums: ['album'], music: ['song', 'playlist', 'heard', 'draft'], sounds: ['sound'], games: ['gamesave'] });
 // the 大游戏 whose saves the phone keeps (方块世界's worlds are too big to carry; they stay in the browser)
 const GAME_SAVES = Object.freeze(['antarctic']);
 // The tavern takes 500 MB a request, and a file goes as base64.
@@ -3185,9 +3186,103 @@ export class TTSBackend {
     /** The 衣柜 here (this card's, with 分区): its clothes and outfits, newest first, and what each one wears; one owner's only. */
     async wardrobe(owner = '') {
         this.assertOpen();
-        const here = this.here(), rows = (await this.apps.listFrom('wardrobe:')).filter(d => (d.kind !== 'wardrobe-wear' || inSpace(d, here)) && (!owner || d.owner === owner));
+        const here = this.here(), rows = await this.apps.listFrom('wardrobe:');
+        const visible = rows.filter(d => (!owner || d.owner === owner) && (d.kind !== 'wardrobe-wear' || inSpace(d, here)));
         const newest = (a, b) => b.at - a.at;
-        return { items: rows.filter(d => d.kind === 'wardrobe-item').sort(newest), sets: rows.filter(d => d.kind === 'wardrobe-set').sort(newest), wears: rows.filter(d => d.kind === 'wardrobe-wear') };
+        return { items: visible.filter(d => d.kind === 'wardrobe-item').sort(newest), sets: visible.filter(d => d.kind === 'wardrobe-set').sort(newest),
+            wears: visible.filter(d => d.kind === 'wardrobe-wear'), candidates: visible.filter(d => d.kind === 'wardrobe-candidates'),
+            categories: wardrobeCategories(rows.filter(d => d.kind === 'wardrobe-item'), rows.find(d => d.id === CATEGORY_DOC)?.names) };
+    }
+    async exportWardrobePack(ids) {
+        const picks = Array.isArray(ids) ? new Set(ids) : null;
+        const {items} = await this.wardrobe();
+        return writeWardrobePack(items.filter(item => !picks || picks.has(item.id)), id => this.library.getPhoto(id));
+    }
+    async previewWardrobePack(file) {
+        const {items} = await this.wardrobe();
+        const {summary, plans, revision} = await compareWardrobePack(await readWardrobePack(file), items, id => this.library.getPhoto(id));
+        return {...summary, revision, names:plans.filter(row => row.action === 'conflicts').map(row => row.item.name)};
+    }
+    async importWardrobePack(file, {overwrite = false, expected} = {}) {
+        const {items} = await this.wardrobe();
+        const {summary, plans, revision} = await compareWardrobePack(await readWardrobePack(file), items, id => this.library.getPhoto(id));
+        if (expected && expected.revision !== revision) throw Error('衣柜内容已变化，请重新预览');
+        const selected = plans.filter(plan => plan.action === 'added' || overwrite && plan.action === 'conflicts');
+        if (!selected.length) return {added:0, replaced:0};
+        const photos = [], docs = [], ids = new Set(items.map(item => item.id));
+        try {
+            for (const plan of selected) {
+                const {item, photo, prior, action} = plan, now = Date.now();
+                const created = photo ? await this.library.addPhoto({name:'衣柜-' + item.name, blob:photo}) : null;
+                if (created) photos.push(created.id);
+                const id = action === 'conflicts' || !ids.has(item.id) ? item.id : undefined;
+                const old = action === 'conflicts' ? prior : null;
+                docs.push(cleanItem({...item, id, owner:old?.owner || item.owner, space:old?.space, save:old?.save, at:old?.at || now, updatedAt:now, photoId:created?.id}));
+            }
+            await this.appsMutate('wardrobe', () => this.apps.transformKinds(['wardrobe-item'], rows => {
+                const live = new Map(rows.map(row => [row.id, row]));
+                for (const plan of selected) {
+                    const row = live.get(plan.item.id);
+                    if (JSON.stringify(row) !== JSON.stringify(plan.prior)) throw Error('衣柜内容已变化，请重新预览');
+                }
+                if (rows.filter(row => row.owner === 'shared').length + docs.filter(row => row.owner === 'shared' && !live.has(row.id)).length > WARDROBE_LIMITS.items) throw Error('通用衣柜的存储数量已满');
+                for (const doc of docs) {
+                    if (live.has(doc.id) && !selected.some(row => row.action === 'conflicts' && row.item.id === doc.id)) throw Error('衣物编号发生冲突，请重试');
+                    live.set(doc.id, doc);
+                }
+                return [...live.values()];
+            }));
+        } catch (error) {
+            await Promise.allSettled(photos.map(id => this.library.deletePhoto(id)));
+            throw error;
+        }
+        if (photos.length) {
+            for (const id of photos) this.#thumbSoon(id);
+            this.emit('library', {collection:'photos'});
+        }
+        return {added:selected.filter(row => row.action === 'added').length, replaced:overwrite ? summary.conflicts : 0};
+    }
+    async wardrobeStory(key, value) {
+        const id = 'wardrobe:story:' + String(key || '').slice(0, 800);
+        if (!key) return false;
+        if (value === undefined) return (await this.apps.get(id))?.enabled === true;
+        const now = Date.now(), enabled = value === true;
+        await this.appsMutate('wardrobe', () => this.apps.put([{id, kind:'wardrobe-story', enabled, at:now, updatedAt:now}]));
+        return enabled;
+    }
+    async editWardrobeCategory({old = '', name = '', remove = false, deleteItems = false, expectedCount} = {}) {
+        const before = categoryName(old), after = categoryName(name);
+        if ((!remove && !after) || (remove && !before)) throw Error('请填写有效的分类名称');
+        let gone = [];
+        await this.appsMutate('wardrobe', () => this.apps.transformKinds(['wardrobe-item','wardrobe-categories'], rows => {
+            const items = rows.filter(row => row.kind === 'wardrobe-item'), saved = rows.find(row => row.id === CATEGORY_DOC);
+            const names = wardrobeCategories(items, saved?.names);
+            if (before && !names.includes(before)) throw Error('这个分类已不存在');
+            if (!remove && before !== after && names.includes(after)) throw Error('已有同名分类');
+            if (remove && after && (!names.includes(after) || before === after)) throw Error('请选择其他分类');
+            const affected = before ? items.filter(item => item.category === before) : [];
+            if (deleteItems && (!remove || affected.length !== expectedCount)) throw Error('分类下的衣物已变化，请重新确认');
+            gone = deleteItems ? affected : [];
+            const next = names.filter(value => value !== before);
+            if (!remove && after) next.push(after);
+            const now = Date.now();
+            return [{id:CATEGORY_DOC, kind:'wardrobe-categories', names:next, at:saved?.at || now, updatedAt:now},
+                ...items.filter(row => !gone.includes(row)).map(row => before && row.category === before ? {...row, category:after, updatedAt:now} : row)];
+        }));
+        if (gone.length) this.noteGone('wardrobe', gone.map(row => row.id), Math.max(...gone.map(row => row.updatedAt || 0)));
+        return (await this.wardrobe()).categories;
+    }
+    async setWardrobeCandidate(owner, id, on) {
+        const key = String(owner || ''), [ref] = candidateRefs([id]);
+        if (!/^(?:me|role:.{1,40})$/.test(key) || !ref) throw Error('请选择衣物和角色');
+        await this.appsMutate('wardrobe', () => this.apps.transformKinds(['wardrobe-item', 'wardrobe-set', 'wardrobe-candidates'], rows => {
+            const item = rows.find(row => row.id === ref);
+            if (on && (!item || item.owner !== key && !(item.kind === 'wardrobe-item' && item.shared))) throw Error('这个角色无法使用该衣物');
+            const docId = 'wardrobe:candidates:' + key, prior = rows.find(row => row.id === docId), now = Date.now();
+            const refs = new Set(candidateRefs(prior?.refs));
+            if (on) refs.add(ref); else refs.delete(ref);
+            return [...rows.filter(row => row.id !== docId), {id:docId, kind:'wardrobe-candidates', owner:key, refs:[...refs], at:prior?.at || now, updatedAt:now}];
+        }));
     }
     /** A piece of clothing, new or changed (kept where it was made: its card, with 分区). */
     async saveWardrobeItem(item) {
@@ -3196,9 +3291,9 @@ export class TTSBackend {
         if (old) return this.appsMutate('wardrobe', () => this.apps.change(old.id, row => {
             if (row.kind !== 'wardrobe-item') throw Error('这件单品已经不在衣柜里');
             const doc = cleanItem({...row, ...item, id:row.id, at:row.at, space:row.space, save:row.save, updatedAt:Date.now()});
-            if (!sameWardrobeDrawing(doc, row)) delete row.naiTags;
+            if (!sameWardrobeDrawing(doc, row)) { if (!item.naiTags || item.naiTags === row.naiTags) delete doc.naiTags; delete row.naiTags; }
             if (!doc.photoId) delete row.photoId;
-            if (!doc.shared) for (const key of ['shared', 'collections', 'cut', 'age']) delete row[key];
+            if (!doc.shared) delete row.shared;
             Object.assign(row, doc);
         }));
         const doc = cleanItem({...this.spaceTag(), ...item, updatedAt:Date.now()});
@@ -3249,14 +3344,30 @@ export class TTSBackend {
     }
     /** What someone wears now: put on from the phone (told to the next story reply, once) or changed by the story. One a
      *  person here: what they wore before (here, also from another card while 分区 is off) is taken off. */
-    async setWardrobeWear({ owner, text, from = 'phone' }) {
+    async setWardrobeWear({ owner, text, items, setId, pieces, layering, from = 'phone', remove }) {
         this.assertOpen();
-        const doc = cleanWear({ owner, text, from, pending: from !== 'story', ...this.spaceTag(), key: this.spaceKey() });
-        if (!doc) throw Error('先写一下穿什么');
-        const before = (await this.wardrobe(doc.owner)).wears.map(w => w.id).filter(id => id !== doc.id);
-        const [saved] = await this.appsMutate('wardrobe', async () => { if (before.length) await this.apps.removeMany(before); return this.apps.put([doc]); });
-        if (before.length) this.noteGone('wardrobe', before);
-        return saved;
+        const here = this.here(), tag = this.spaceTag(), key = this.spaceKey();
+        let saved, gone = [];
+        await this.appsMutate('wardrobe', () => this.apps.transformKinds(['wardrobe-wear'], rows => {
+            const previous = rows.filter(row => row.owner === owner && inSpace(row, here)).sort((a,b) => b.at-a.at);
+            if (remove) {
+                const current = previous[0];
+                if (!current?.items?.includes(remove)) { saved = current; return rows; }
+                items = current.items.filter(id => id !== remove);
+                pieces = (current.pieces || []).filter(piece => piece.itemId !== remove);
+                text = pieces.map(piece => piece.description).join('；');
+                setId = undefined;
+                layering = '';
+            }
+            saved = cleanWear({owner, text, items, setId, pieces, layering, from, pending:from !== 'story', ...tag, key});
+            if (!saved && !remove && !/^(?:me|role:.{1,40})$/.test(owner)) throw Error('先选一个角色');
+            if (!saved && !remove && from !== 'story') throw Error('先写一下穿什么');
+            gone = previous.filter(row => row.id !== saved?.id);
+            const oldIds = new Set(previous.map(row => row.id));
+            return [...rows.filter(row => !oldIds.has(row.id)), ...(saved ? [saved] : [])];
+        }));
+        if (gone.length) this.noteGone('wardrobe', gone.map(row => row.id), Math.max(...gone.map(row => row.updatedAt || 0)));
+        return saved || null;
     }
     /** 脱下: no longer told anything about. */
     async clearWardrobeWear(owner) {
@@ -3271,8 +3382,12 @@ export class TTSBackend {
      *  the told copy is the newer one when two devices meet). */
     async takeWardrobeWear() {
         this.assertOpen();
-        const pending = (await this.wardrobe()).wears.filter(w => w.pending);
-        if (pending.length) await this.appsMutate('wardrobe', () => this.apps.put(pending.map(w => ({ ...w, pending: false, updatedAt: Date.now() }))));
+        const here = this.here();
+        let pending = [];
+        await this.appsMutate('wardrobe', () => this.apps.transformKinds(['wardrobe-wear'], rows => {
+            pending = rows.filter(row => row.pending && inSpace(row, here));
+            return rows.map(row => pending.includes(row) ? {...row, pending:false, updatedAt:Date.now()} : row);
+        }));
         return pending;
     }
     // ---------- 小剧场 (core/generator.js) ----------
@@ -3969,7 +4084,7 @@ export class TTSBackend {
             gptModels: () => this.gptModels(),
             embedTest: async draft => { const [v] = await this.embed(['测试一下向量模型'], clone(draft || {})); return v.length; },
             appendChat: (id, messages, options) => { this.assertOpen(); return this.appendChat(id, clone(messages), clone(options || {})); },
-            wardrobe: owner => this.wardrobe(String(owner || '')), saveWardrobeItem: item => this.saveWardrobeItem(clone(item)), saveWardrobeSet: set => this.saveWardrobeSet(clone(set)), deleteWardrobe: ids => this.deleteWardrobe([...(ids || [])]), setWardrobeWear: wear => this.setWardrobeWear(clone(wear || {})), clearWardrobeWear: owner => this.clearWardrobeWear(String(owner || '')), theaters: () => this.theaters(), saveTheater: doc => this.saveTheater(clone(doc)), deleteTheater: ids => this.deleteTheater([...(ids || [])]),
+            wardrobe: owner => this.wardrobe(String(owner || '')), exportWardrobePack: ids => this.exportWardrobePack(ids), previewWardrobePack: file => this.previewWardrobePack(file), importWardrobePack: (file, options) => this.importWardrobePack(file, clone(options || {})), editWardrobeCategory: options => this.editWardrobeCategory(clone(options || {})), setWardrobeCandidate: (owner, id, on) => this.setWardrobeCandidate(owner, id, on), saveWardrobeItem: item => this.saveWardrobeItem(clone(item)), saveWardrobeSet: set => this.saveWardrobeSet(clone(set)), deleteWardrobe: ids => this.deleteWardrobe([...(ids || [])]), setWardrobeWear: wear => this.setWardrobeWear(clone(wear || {})), clearWardrobeWear: owner => this.clearWardrobeWear(String(owner || '')), theaters: () => this.theaters(), saveTheater: doc => this.saveTheater(clone(doc)), deleteTheater: ids => this.deleteTheater([...(ids || [])]),
             unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId), blockContact: name => this.blockContact(name), blockedNames: () => this.blockedNames(), unblockContact: threadId => this.unblockContact(threadId), answerFriendRequest: (threadId, accept, options) => this.answerFriendRequest(threadId, accept, clone(options || {})),
             sendChatRecording: (id, value) => this.chatMutate(id, () => this.chats.saveRecording(id, { ...value, blob: ownBlob(value?.blob) })),
             getChatRecording: async (id, recordingId) => {

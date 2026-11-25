@@ -47,7 +47,7 @@ export function bestMove(b, who) {
 }
 
 export default {
-  id: 'gomoku', name: '五子棋', icon: '⚫', colors: ['#f3d9a4', '#b9844a'], note: '和手机下一盘', unit: '步', lower: true,
+  id: 'gomoku', name: '五子棋', icon: 'board', art: '⚫', accent: '#b9844a', accentLight: '#f3d9a4', note: '和手机下一盘', unit: '步', lower: true,
   how: '你执黑先下，点交叉点落子；先连成五个的赢。最好成绩是用最少的步数赢。',
   make({doc, win, host, api, saved}) {
     const size = Math.min(340, Math.max(240, host.clientWidth || 300)), gap = size / N;

@@ -15,7 +15,7 @@ import {storyScope, mapStory, cleanBody, cleanSkip, NARRATION_BODY, NARRATION_SK
 // When the last version is deleted the record becomes {removed: true, versions: []}, so it is not drawn again
 // automatically. Older records ({url, seed, …}) read as a single version.
 import {storyReply} from './core/outgoing.js';
-import {tavernPicture, sizeFor, parsePictures, pictureInputs, planRequest, planLength, tagTextRequest, tagTextAnswer, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
+import {tavernPicture, sizeFor, parsePictures, pictureInputs, planRequest, planLength, tagTextRequest, tagTextAnswer, insertPlanned, withoutPictures, sameExact, suggestRequest, writeRequest, promptLength, readSuggestion, selectionRequest, selectionBlock, budgetNumbers, fillUpRequest, sameName, sentenceCount} from './core/draw.js';
 import {tokenBudget, loadCounter, countField, tagCost, estimateTokens} from './core/tokens.js';
 import {editTags} from './host-ask.js';
 import {downloadAction} from './download.js';
@@ -727,13 +727,10 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const permission=await allowed(true);if(!permission)return;
       if(!valid())throw Error('正文已经变化，请重新选择文字');
       notice('正在为选中文字构思画面……');
-      const prompt=writeRequest(settings(),{idea:'只为下面选中的文字画一张图，不画选段以外的事件。\n【选中文字】\n'+text+'\n【仅供识别人名和场景的上下文】\n'+nearby,only:castNow()});
-      const reply=await backend.generateText(ctx,{use:'picture',prompt,plainText:true,trimNames:false,responseLength:promptLength(settings())});
+      const state=settings(), prompt=selectionRequest(state,{text,nearby,only:castNow()});
+      const reply=await backend.generateText(ctx,{use:'picture',prompt,plainText:true,trimNames:false,responseLength:promptLength(state)});
       if(!valid())throw Error('正文已经变化，旧的选段任务已停止');
-      const suggested=readSuggestion(settings(),reply);if(!suggested.prompt)throw Error('没有写出可用的绘图提示词');
-      const line=value=>value.replace(/[<>\r\n]/g,' ').trim();
-      const imageTag=settings().general?.shortTags?'i-img':'img';
-      const block=['<'+imageTag+'>','场景：'+line(suggested.prompt),...suggested.people.map(name=>'角色：'+line(name).replace(/[|｜]/g,' ')),'</'+imageTag+'>'].join('\n');
+      const block=selectionBlock(state,reply);
       const addition='\n\n'+block+'\n', raw=snap.raw.slice(0,end)+addition+snap.raw.slice(end), tags=parsePictures(raw), tag=tags.find(t=>t.start===end+2);
       if(!tag)throw Error('这次提示词无法作为正文图片保存');
       const inputs=pictureInputs(settings(),tag,raw);

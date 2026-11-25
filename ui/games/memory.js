@@ -5,7 +5,7 @@ const FACES = ['🍓', '🐱', '🌙', '🎀', '🍰', '🌸', '🎧', '⭐', '�
 const PAIRS = 8;
 
 export default {
-  id: 'memory', name: '记忆翻牌', icon: '🃏', colors: ['#ffc4dc', '#e8679a'], note: '找出一对对', unit: '步', lower: true,
+  id: 'memory', name: '记忆翻牌', icon: 'copy', art: '🃏', accent: '#e8679a', accentLight: '#ffc4dc', note: '找出一对对', unit: '步', lower: true,
   how: '每次翻两张，一样的就留着；用最少的步数把牌全翻开。',
   make({doc, win, host, api, saved}) {
     const el = doc.createElement('div');

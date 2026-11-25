@@ -9,6 +9,7 @@ import {photoWall} from './photo-wall.js';
 import {nudge} from './carry.js';
 import {canCopyPicture, copyPicture} from './draw-images.js';
 import {slideSelect} from './photo-select.js';
+import {pickReplacement} from './replacement-album.js';
 import {saveFile, shareFile, shareFiles, canShareFiles, zipFiles, plainImage} from '../download.js';
 import {FAVORITES, byNewest, photoDays, photoSources, albumsInOrder} from '../core/albums.js';
 
@@ -192,26 +193,16 @@ export function galleryApp(ctx) {
       } catch (error) { ctx.notify(error.message, {error: true}); }
     });
   }
-  /** 添加照片: the album's photos not in it yet, picked as anywhere else: a tap, or held and moved. */
-  function addPhotos(album) {
-    const inside = new Set(album.photos), list = rows.filter(r => !inside.has(r.id)), picked = new Set();
-    if (!list.length) { ctx.notify(rows.length ? '所有照片都在里面了' : '相册里还没有照片'); return; }
-    const pieces = photoWall({api, win, tile: (r, url) => `<button type="button" data-id="${esc(r.id)}" aria-pressed="${picked.has(r.id)}" aria-label="选择 ${esc(r.name)}"><img decoding="async" draggable="false" data-photo="${esc(r.id)}" alt="${esc(r.name)}"${url ? ` src="${esc(url)}"` : ''}></button>`});
-    const d = ctx.dialog(`放进「${album.name}」`, `${pieces.html([{rows: list}], ' selecting album-pick')}<div class="actions album-pick-go"><button type="button" class="primary" data-action="go" disabled>点照片来选择，或者按住一滑</button></div>`);
-    pieces.mount(d.body);
-    d.onClose(() => pieces.stop());
-    const tiles = () => d.body.querySelectorAll('.photo-grid [data-id]'), go = d.body.querySelector('[data-action=go]');
-    const show = () => { for (const b of tiles()) b.setAttribute('aria-pressed', String(picked.has(b.dataset.id))); go.disabled = !picked.size; go.textContent = picked.size ? `放进去 ${picked.size} 张` : '点照片来选择，或者按住一滑'; };
-    const sliding = slideSelect({ctx, root: d.body, scroller: d.body, order: () => list.map(r => r.id), picked: id => picked.has(id), pick: (id, on) => { if (on) picked.add(id); else picked.delete(id); }, choosing: () => true, changed: show, covered: () => go.offsetHeight + 12});
-    d.body.addEventListener('click', async e => {
-      const b = e.target.closest('[data-id]');
-      if (b && !sliding.justEnded()) { const id = b.dataset.id; if (picked.has(id)) picked.delete(id); else picked.add(id); show(); return; }
-      if (e.target.closest('[data-action=go]') && picked.size) {
-        go.disabled = true;
-        try { await api.addToAlbum(album.id, [...picked]); d.close(); ctx.notify(`放进去了 ${picked.size} 张`); await render(); }
-        catch (error) { go.disabled = false; ctx.notify(error.message, {error: true}); }
-      }
+  async function addPhotos(album) {
+    const inside = new Set(album.photos);
+    if (!rows.some(r => !inside.has(r.id))) { ctx.notify(rows.length ? '所有照片都在里面了' : '相册里还没有照片'); return; }
+    const picked = await pickReplacement(ctx, api, {
+      title: `放进「${album.name}」`, exclude: inside, multiple: Infinity, device: false, confirmLabel: '放进去',
+      onConfirm: ids => api.addToAlbum(album.id, ids)
     });
+    if (!picked) return;
+    ctx.notify(`放进去了 ${picked.length} 张`);
+    await render();
   }
   /**
    * 导出到手机: a whole 相簿 or what was picked. On a phone 存到手机相册 is the system's share sheet (保存图片), a few at a time;
@@ -405,13 +396,13 @@ export function galleryApp(ctx) {
       case 'album-new':
         nameSheet('新建相簿', '', async name => { const made = await api.saveAlbum({name}); place = {kind: 'album', id: made.id}; await render(); v.root.scrollTop = 0; });
         break;
-      case 'album-add': { const album = albumNow(); if (album) addPhotos(album); break; }
+      case 'album-add': { const album = albumNow(); if (album) await addPhotos(album); break; }
       case 'album-export': { const list = here(); if (list.length) exportSheet(list, albumNow()?.name || sourceNow()?.label || '相册'); break; }
       case 'album-menu': {
         const album = albumNow(), favs = album?.id === FAVORITES;
         if (!album) break;
         const key = await menu(ctx, album.name, [{key: 'add', icon: 'add', label: '添加照片'}, ...(here().length ? [{key: 'export', icon: 'download', label: '导出到手机'}] : []), ...(favs ? [] : [{key: 'rename', icon: 'edit', label: '改名'}, {key: 'delete', icon: 'trash', label: '删除相簿', note: '里面的照片还在图库里', danger: true}])]);
-        if (key === 'add') addPhotos(album);
+        if (key === 'add') await addPhotos(album);
         else if (key === 'export') exportSheet(here(), album.name);
         else if (key === 'rename') nameSheet('改名', album.name, async name => { await api.saveAlbum({id: album.id, name}); await render(); });
         else if (key === 'delete' && await ctx.confirm(`删除相簿「${album.name}」？`, '里面的照片还在图库里。')) { await api.deleteAlbum(album.id); place = null; tab = 'albums'; await render(); ctx.notify('相簿删了，照片还在'); }

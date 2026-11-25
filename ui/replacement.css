@@ -10,7 +10,7 @@ dialog.stip-replace-dialog {
 @media(max-width:600px) {
   dialog.stip-replace-dialog {margin:auto auto max(6px,env(safe-area-inset-bottom)); width:calc(100% - 16px); max-width:none}
 }
-.stip-picker {display:flex; flex-direction:column; gap:10px; min-width:0; height:min(65dvh,600px); color:var(--ink,#24304b)}
+.stip-picker {display:flex; flex-direction:column; gap:10px; min-width:0; height:min(65vh,600px); height:min(65dvh,600px); color:var(--ink,#24304b)}
 .stip-picker button {box-sizing:border-box; margin:0; border:0; background:transparent; box-shadow:none; color:inherit; font:inherit; text-shadow:none; cursor:pointer}
 .stip-picker button:active {opacity:.72}
 .stip-picker svg {display:inline-block; flex:none; width:18px; height:18px}
@@ -21,7 +21,7 @@ dialog.stip-replace-dialog {
 .stip-picker button[data-device] {display:flex; align-items:center; gap:5px; background:var(--card,#fff)}
 .stip-picker [hidden] {display:none!important}
 .stip-picker-back {justify-content:flex-start}
-.stip-picker-scroll {flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin}
+.stip-picker-scroll {flex:1; min-height:0; overflow:auto; overscroll-behavior:contain}
 .stip-picker-scroll h3 {margin:12px 0 8px; font:600 14px/1.4 system-ui,sans-serif; color:inherit}
 .stip-picker .photo-piece {display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; margin:0 0 5px; padding:0}
 .stip-picker .photo-piece:empty {padding-top:calc(var(--rows)*(100% - 10px)*4/9 + (var(--rows) - 1)*5px)}
@@ -42,3 +42,5 @@ dialog.stip-replace-dialog {
 .stip-picker .stip-picker-selection{flex:none;margin-top:0}
 .stip-picker .stip-picker-selection .primary{width:100%;padding:9px 14px;border-radius:24px;background:var(--accent-btn);color:var(--on-accent);font-weight:800;min-height:40px}
 .stip-picker .stip-picker-selection .primary:disabled{opacity:.55}
+.stip-picker-options{flex:none;display:flex;flex-wrap:wrap;justify-content:center;gap:6px}
+.stip-picker-options button{min-height:44px;padding:6px 10px;font-size:13px;font-weight:700;color:var(--accent-ink,var(--ink))}

@@ -2,6 +2,7 @@
 // Flag with a long press (or 插旗 mode, or a right click); tapping a number whose mines are all flagged opens the rest
 // around it. The best is the fewest seconds.
 import {rand} from './kit.js';
+import {icon} from '../icons.js';
 
 const N = 10, MINES = 15;
 const around = (x, y) => [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]].map(([dx, dy]) => [x + dx, y + dy]).filter(([a, b]) => a >= 0 && b >= 0 && a < N && b < N);
@@ -32,14 +33,14 @@ export function openAt(grid, x, y) {
 }
 
 export default {
-  id: 'mines', name: '扫雷', icon: '💣', colors: ['#c9d3e3', '#6a7b99'], note: `${N}×${N}，${MINES} 个雷`, unit: '秒', lower: true,
+  id: 'mines', name: '扫雷', icon: 'bomb', art: '💣', accent: '#6a7b99', accentLight: '#c9d3e3', note: `${N}×${N}，${MINES} 个雷`, unit: '秒', lower: true,
   how: '点开格子；长按（电脑上右键）或打开「插旗」再点是插旗。数字旁的旗插够了，点数字能一次翻开周围。',
   make({doc, win, host, api, saved}) {
     const el = doc.createElement('div');
     el.className = 'mines';
     el.style.setProperty('--n', N);
     host.append(el);
-    host.insertAdjacentHTML('beforeend', '<div class="actions mines-tools"><button type="button" class="chip-button" data-mines="flag" aria-pressed="false">🚩 插旗</button><span class="game-status" data-mines-left></span></div>');
+    host.insertAdjacentHTML('beforeend', '<div class="actions mines-tools"><button type="button" class="chip-button" data-mines="flag" aria-pressed="false">' + icon('flag') + '插旗</button><span class="game-status" data-mines-left></span></div>');
     let grid, started, over, flagging = false, clock = 0, press = null;
     const seconds = () => started ? Math.max(1, Math.round((Date.now() - started) / 1000)) : 0;
     function draw() {

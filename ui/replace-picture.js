@@ -1,4 +1,5 @@
 import {pickReplacement} from './replacement-album.js';
+import {installFastScroll} from './fast-scroll.js';
 
 // Return an album ID so reusing a photo never edits the original asset.
 export function replacePicture(ctx,api,close,apply) {
@@ -19,11 +20,13 @@ export function replacePicture(ctx,api,close,apply) {
 export function storyPickerContext(doc,notify) {
   return {doc,win:doc.defaultView,notify,dialog(title,html) {
     if (!doc.querySelector('link[data-stip-replacement]')) {
-      const css = doc.createElement('link');
-      css.rel = 'stylesheet';
-      css.href = new URL('./replacement.css', import.meta.url).href;
-      css.dataset.stipReplacement = '';
-      doc.head.append(css);
+      for (const file of ['replacement.css', 'fast-scroll.css']) {
+        const css = doc.createElement('link');
+        css.rel = 'stylesheet';
+        css.href = new URL(file, import.meta.url).href;
+        css.dataset.stipReplacement = '';
+        doc.head.append(css);
+      }
     }
     const el = doc.createElement('dialog');
     el.className = 'stip-replace-dialog';
@@ -34,8 +37,10 @@ export function storyPickerContext(doc,notify) {
     body.innerHTML = html;
     doc.body.append(el);
     el.showModal();
+    const controller = new doc.defaultView.AbortController();
+    installFastScroll(doc.defaultView, el, controller.signal);
     el.querySelector('header button').onclick = () => el.close();
-    el.addEventListener('close', () => el.remove(), {once:true});
+    el.addEventListener('close', () => { controller.abort(); el.remove(); }, {once:true});
     return {body,close:()=>el.close(),onClose:fn=>el.addEventListener('close',fn,{once:true})};
   }};
 }

@@ -42,7 +42,7 @@ export function park(n, random = rand) {
 }
 
 export default {
-  id: 'parking', name: '挪车', icon: '🚗', colors: ['#ffe08a', '#f0a020'], note: '把车都开出去', unit: '',
+  id: 'parking', name: '挪车', icon: 'car', art: '🚗', accent: '#f0a020', accentLight: '#ffe08a', note: '把车都开出去', unit: '',
   // The score: lots cleared.
   how: '每辆车只能朝车头的方向开。点一下，前面没有车挡着就开走了；挡着就撞一下。把停车场清空进下一关。',
   make({doc, win, host, api, saved}) {

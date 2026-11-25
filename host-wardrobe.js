@@ -1,7 +1,7 @@
 // 衣柜, tavern side (core/wardrobe.js): a photo of clothes recognized by a model that sees, an outfit put together, a
 // 试穿图 drawn (paid only when the phone asked), what was put on told to the next story reply once, and the story's
 // hidden <outfit> lines followed (who wears what now), with no request of their own.
-import {recognizeRequest, parseRecognition, recognizeBatchRequest, parseRecognitionBatch, WARDROBE_RECOGNITION_MAX, suggestRequest, cleanOutfit, splitRequest, parseSplit, wearText, outfitRule, parseOutfits, ownerKey, ownerName, sameWardrobeDrawing, WARDROBE_DRAW_MAX, WARDROBE_LIMITS} from './core/wardrobe.js';
+import {recognizeRequest, parseRecognition, recognizeBatchRequest, parseRecognitionBatch, WARDROBE_RECOGNITION_MAX, suggestRequest, cleanOutfit, splitRequest, parseSplit, wearText, outfitRule, parseOutfits, ownerKey, ownerName, sameWardrobeDrawing, WARDROBE_DRAW_MAX, WARDROBE_LIMITS, detailedOutfitRule, detailedOutfits, applyDetailedOutfit, clothing} from './core/wardrobe.js';
 import {genderOf, pictureInputs, photoPicture, descriptionTagsRequest, englishTagsAnswer, hasEnglishTags, tagTextAnswer} from './core/draw.js';
 import {findRoute} from './core/routes.js';
 import {plainStory} from './core/chat.js';
@@ -21,13 +21,15 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
   }
   const itemError = message => Object.assign(Error(message), {code: 'ITEM'});
   /** Describe a staged or saved photo without writing to the wardrobe. */
+  async function categories() { return (await backend.wardrobe()).categories; }
   async function inspect({photoId, blob} = {}) {
     const ctx = context();
     if (!await sees(ctx)) throw Error('现在的文字模型看不了图片：换一个能看图的模型，或者自己写描述');
     const photo = blob || (photoId && (await backend.library.getPhoto(photoId))?.blob);
     if (!photo) throw itemError('这张照片已经不在相册里了');
     const current = settings();
-    const got = parseRecognition(await ask(ctx, backend, current, recognizeRequest(await picture(photo), current.promptRules), {label: '衣柜 · 识别', use: 'wardrobe'}));
+    const choices = await categories();
+    const got = parseRecognition(await ask(ctx, backend, current, recognizeRequest(await picture(photo), current.promptRules, choices), {label: '衣柜 · 识别', use: 'wardrobe'}), choices);
     if (!got.description) throw itemError('模型没说出这件衣服是什么样的：再试一次，或者自己写描述');
     return got;
   }
@@ -54,7 +56,8 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
       if (row?.blob) inputs.push({item, image:await picture(row.blob)});
     }
     if (!inputs.length) return [];
-    const result = parseRecognitionBatch(await ask(ctx, backend, current, recognizeBatchRequest(inputs.map(x => x.image), current.promptRules), {label:'衣柜 · 批量识别', use:'wardrobe'}), inputs.length);
+    const choices = await categories();
+    const result = parseRecognitionBatch(await ask(ctx, backend, current, recognizeBatchRequest(inputs.map(x => x.image), current.promptRules, choices), {label:'衣柜 · 批量识别', use:'wardrobe'}), inputs.length, choices);
     const done = [];
     for (const [index, got] of result) {
       try { done.push((await saveRecognition(inputs[index].item, got)).id); }
@@ -65,46 +68,72 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
   /** What the story is at now, briefly (the last two replies), so an outfit fits the scene. */
   const scene = ctx => (ctx?.chat || []).filter(m => !m.is_user && !m.is_system && typeof m.mes === 'string').slice(-2).map(m => plainStory(m.mes, [], settings().narration)).join(' ').slice(-600);
   /** An outfit put together for someone: from the 衣柜 (the pieces picked, else all with words) or designed from a wish. */
-  async function suggest({owner, mode = 'closet', wish = '', itemIds = []} = {}) {
+  async function suggest({owner, mode = 'closet', wish = '', itemIds = [], includeItems = false} = {}) {
     const ctx = context(), {items, wears} = await backend.wardrobe();
     const pool = items.filter(x => (x.owner===owner || x.shared && itemIds.includes(x.id)) && x.description && (!itemIds.length || itemIds.includes(x.id)));
     if (mode === 'closet' && !pool.length) throw Error('衣柜里还没有写了描述的衣服：先放几件进来，或者换成「自由设计」');
     if (mode !== 'closet' && !String(wish).trim()) throw Error('先写下想要什么样的');
-    const prompt = suggestRequest({prompts: settings().promptRules, wearer: ownerName(owner, userName()), mode, wish, pool, last: wears.find(w => w.owner === owner)?.text || '', scene: scene(ctx)});
-    const text = cleanOutfit(await backend.generateText(ctx, {use: 'wardrobe', prompt, plainText: true, trimNames: false, responseLength: 1400}));
+    const identify = includeItems && mode === 'closet';
+    const prompt = suggestRequest({prompts: settings().promptRules, wearer: ownerName(owner, userName()), mode, wish, pool,
+      last: wears.find(w => w.owner === owner)?.text || '', scene: scene(ctx), identify});
+    const raw = await backend.generateText(ctx, {use:'wardrobe', prompt, plainText:true, trimNames:false, responseLength:identify ? 1700 : 1400});
+    let text = cleanOutfit(raw), usedItems = [];
+    if (identify) {
+      const answer = String(raw ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+      if (answer.includes('{')) {
+        try {
+          const outfit = JSON.parse(answer.slice(answer.indexOf('{'), answer.lastIndexOf('}') + 1));
+          text = cleanOutfit(typeof outfit?.text === 'string' ? outfit.text : '');
+          usedItems = [...new Set(Array.isArray(outfit?.items) ? outfit.items : [])].flatMap(index =>
+            Number.isInteger(index) && index >= 1 && index <= WARDROBE_LIMITS.pool && pool[index - 1] ? [pool[index - 1].id] : []);
+        } catch { /* Some custom presets reply in plain prose. */ }
+      }
+    }
     if (!text) throw Error('模型没搭出来，再试一次');
-    return text;
+    return includeItems ? {text, items:usedItems} : text;
   }
   /**
    * 存成一套 (0.9.33): kept with the pieces it is made of. Designed freely, it is split into pieces first (one request), and
    * they go into the 衣柜 as words (one already there, the same name and words, is used again); from the 衣柜, the pieces
    * picked. The same words kept again are not kept twice: {again: true}. Answers {set, added}.
    */
-  async function saveOutfit({owner, text, mode = 'closet', itemIds = [], photoId = ''} = {}) {
+  async function saveOutfit({owner, text, mode = 'closet', itemIds = [], photoId = '', pieces: recorded, tags, recordedAt} = {}) {
     const words = cleanOutfit(text);
     if (!words) throw Error('先搭一套');
-    const {items, sets} = await backend.wardrobe(), same = sets.find(s => s.owner===owner && s.description === words.slice(0, WARDROBE_LIMITS.wear));
-    if (same) return {set: photoId && same.photoId !== photoId ? await backend.saveWardrobeSet({id:same.id, photoId}) : same, added: 0, again: true};
+    const {items, sets} = await backend.wardrobe(), same = sets.find(s => s.owner === owner && (recordedAt ? s.recordedAt === recordedAt : s.description === words.slice(0, WARDROBE_LIMITS.wear)));
+    if (same) {
+      const changes = {...(photoId && same.photoId !== photoId ? {photoId} : {}), ...(tags && !same.tags ? {tags} : {})};
+      return {set: Object.keys(changes).length ? await backend.saveWardrobeSet({id:same.id, ...changes}) : same, added:0, again:true};
+    }
     let ids = itemIds.filter(id => items.some(x => x.id === id && (x.owner===owner || x.shared))), added = 0;
-    if (mode === 'free') {
-      const pieces = parseSplit(await backend.generateText(context(), {use: 'wardrobe', prompt: splitRequest(words, settings().promptRules), plainText: true, trimNames: false, responseLength: 4500}));
-      if (!pieces.length) throw Error('模型没把这套拆成单件衣服，再试一次');
+    if (mode === 'free' || Array.isArray(recorded)) {
+      let pieces;
+      if (Array.isArray(recorded)) pieces = clothing(recorded);
+      else {
+        const choices = await categories();
+        pieces = parseSplit(await backend.generateText(context(), {use:'wardrobe', prompt:splitRequest(words, settings().promptRules, choices),
+          plainText:true, trimNames:false, responseLength:4500}), choices);
+      }
+      if (!pieces.length && mode === 'free') throw Error('模型没把这套拆成单件衣服，再试一次');
       ids = [];
       for (const piece of pieces) {
-        const kept = items.find(x => (x.owner === owner || x.shared) && x.name === piece.name && x.description === piece.description);
+        const kept = piece.itemId ? items.find(x => x.id === piece.itemId && (x.owner === owner || x.shared))
+          : items.find(x => (x.owner === owner || !Array.isArray(recorded) && x.shared) && x.name === piece.name && x.description === piece.description);
         if (kept) { ids.push(kept.id); continue; }
-        ids.push((await backend.saveWardrobeItem({owner, ...piece})).id);
+        const {name, category, description, tags} = piece;
+        ids.push((await backend.saveWardrobeItem({owner, name, category, description, naiTags:tags})).id);
         added++;
       }
     }
-    const set = await backend.saveWardrobeSet({owner, name: `搭配 ${sets.length + 1}`, description: words, photoId, items: [...new Set(ids)]});
+    const set = await backend.saveWardrobeSet({owner, name: `搭配 ${sets.length + 1}`, description: words, photoId, items: [...new Set(ids)], tags, recordedAt});
     return {set, added, again: false};
   }
   /**
    * 试穿图: someone drawn wearing it, with their saved look (角色 App). A picture that costs money is only drawn when
    * allowPaid (the phone asks first): before that not even the words for its tags are spent. The picture goes to the album.
    */
-  async function tryOn({owner, text, allowPaid = false} = {}) {
+  let lastTryOnTags;
+  async function tryOn({owner, text, tags: savedTags, allowPaid = false} = {}) {
     if (!backend.drawReady()) throw Error(backend.drawMissing() || '还没有设置绘图引擎');
     const name = ownerName(owner, userName()), outfit = String(text || '').trim();
     if (!outfit) throw Error('先搭一套');
@@ -116,9 +145,14 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     const instructions = fixed
       ? '本次只转换当前衣着的可见细节。角色外貌会另外注入，请勿生成角色名、原作名、发型、肤色、体貌、姿势或人数标签。'
       : '画面里是一位人物穿着这套衣服，保留衣着描述的细节。已有作品中的人物可用英文角色识别标签。';
-    const prompt = descriptionTagsRequest(current, words, {instructions});
-    const tags = englishTagsAnswer(await backend.generateText(context(), {use:'picture', prompt, plainText:true, trimNames:false, responseLength:Math.min(6000, 1500 + words.length * 3)}));
-    if (!tags) throw Error('文字模型没有返回试穿图的英文绘图标签，再试一次');
+    const tagKey = JSON.stringify([owner, words, instructions]);
+    let tags = englishTagsAnswer(savedTags) || (lastTryOnTags?.key === tagKey ? lastTryOnTags.tags : '');
+    if (!tags) {
+      const prompt = descriptionTagsRequest(current, words, {instructions});
+      tags = englishTagsAnswer(await backend.generateText(context(), {use:'picture', prompt, plainText:true, trimNames:false, responseLength:Math.min(6000, 1500 + words.length * 3)}));
+      if (!tags) throw Error('文字模型没有返回试穿图的英文绘图标签，再试一次');
+      lastTryOnTags = {key:tagKey, tags};
+    }
     const picture = fixed
       ? {spec:{tags:[genderOf(role.appearance) ? '1' + genderOf(role.appearance) : '', 'solo', 'full body'].filter(Boolean).join(', '), cast:[{name:role.name, tags}]}}
       : photoPicture(current, {text:words, tags, owner:name, names:[...current.routes.map(r => r.name), userName()]});
@@ -136,6 +170,18 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     if (!text) return [];
     const user = userName(), names = [...new Set(settings().routes.map(r => r.name).filter(n => n && n !== user))];
     return [...(text.includes(user) ? ['me'] : []), ...names.filter(n => text.includes(n)).map(ownerKey)];
+  }
+  const storyKey = () => {
+    const ctx = context(), chat = ctx?.getCurrentChatId?.() ?? ctx?.chatId;
+    return chat ? JSON.stringify([ctx?.groupId ?? ctx?.characters?.[ctx?.characterId]?.avatar ?? ctx?.name2 ?? '', chat]) : '';
+  };
+  let story = {key:'', enabled:false};
+  async function storySettings(enabled) {
+    const key = storyKey();
+    if (!key || !backend.wardrobeStory) return {available:false, enabled:false};
+    const on = await backend.wardrobeStory(key, enabled);
+    if (key === storyKey()) story = {key, enabled:on};
+    return {available:key === storyKey(), enabled:on};
   }
   // What inject() needs at once (it cannot wait): the outfits put on and not yet told, and who has a 衣柜 here.
   let cache = {pending: [], owners: [], loaded: false};
@@ -163,7 +209,9 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
         backend.takeWardrobeWear().then(() => notice(`${used.map(w => ownerName(w.owner, user)).join('、')}的衣着带进这次正文了`)).catch(() => {});
       }
     }
-    const rule = outfitRule(cache.owners.map(o => ownerName(o, user)), settings().promptRules);
+    const detail = story.enabled && story.key === storyKey() && !['quiet', 'impersonate'].includes(type);
+    const names = detail ? [...new Set([user, ...settings().routes.map(r => r.name)])] : cache.owners.map(o => ownerName(o, user));
+    const rule = (detail ? detailedOutfitRule : outfitRule)(names, settings().promptRules);
     if (rule) out.push({key: 'sttts.entry.outfit', text: rule, position: 1, depth: 1, role: 0});
     return out;
   }
@@ -171,17 +219,28 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
   async function storyReplied(id) {
     const ctx = context(), index = Number.isInteger(Number(id)) ? Number(id) : (ctx?.chat?.length || 0) - 1, m = ctx?.chat?.[index];
     if (!m || m.is_user || m.is_system || typeof m.mes !== 'string') return 0;
-    const found = parseOutfits(m.mes);
+    const key = storyKey();
+    if (key !== story.key) await storySettings();
+    const detail = story.enabled && story.key === key;
+    const detailed = detail ? detailedOutfits(m.mes) : [];
+    const found = [...parseOutfits(m.mes).filter(w => !detailed.some(x => x.name === w.name)), ...detailed];
     if (!found.length) return 0;
     const user = userName(), roles = new Set(settings().routes.map(r => r.name)), news = [];
     let changed = 0;
-    for (const {name, text} of found) {
+    for (const record of found) {
+      const {name} = record;
       const owner = name === user ? 'me' : roles.has(name) ? ownerKey(name) : '';
       if (!owner) continue;
       try {
-        const before = owner === 'me' ? '' : (await backend.wardrobe(owner)).wears[0]?.text || '';
-        await backend.setWardrobeWear({owner, text, from: 'story'}); changed++;
-        if (owner !== 'me' && before.trim() !== text.trim()) news.push({name, text});
+        const before = (await backend.wardrobe(owner)).wears[0];
+        const current = context()?.chat?.[index];
+        if (current?.mes !== m.mes || current?.swipe_id !== m.swipe_id || key !== storyKey()) break;
+        const next = record.pieces ? applyDetailedOutfit(before, record) : {
+          ...(before?.text === record.text ? before : {}), text:record.text,
+        };
+        if (!next) continue;
+        await backend.setWardrobeWear({...next, owner, from: 'story'}); changed++;
+        if (owner !== 'me' && (before?.text || '').trim() !== next.text.trim()) news.push({name, text:next.text});
       } catch { /* not worth interrupting the story */ }
     }
     if (news.length) { try { onChange(news); } catch { /* the phone's own business */ } }
@@ -279,5 +338,5 @@ export function createWardrobeHost({context, settings, backend, notice = () => {
     }
     return tags;
   }
-  return {inspect, recognize, recognizeBatch, suggest, saveOutfit, tryOn, drawItem, drawItems, storyPlan, storyReplied, sees, present};
+  return {inspect, recognize, recognizeBatch, suggest, saveOutfit, tryOn, drawItem, drawItems, storySettings, storyPlan, storyReplied, sees, present};
 }

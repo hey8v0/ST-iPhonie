@@ -19,7 +19,7 @@ export function stepSnake(snake, dir, food, n = N) {
 }
 
 export default {
-  id: 'snake', name: '贪吃蛇', icon: '🐍', colors: ['#9be7a6', '#2f9e5b'], note: '越吃越长', live: true,
+  id: 'snake', name: '贪吃蛇', icon: 'snake', art: '🐍', accent: '#2f9e5b', accentLight: '#9be7a6', note: '越吃越长', live: true,
   how: '滑动、方向键或下面的按钮转向；从一边出去会从另一边回来，咬到自己才结束。',
   make({doc, win, host, api, saved}) {
     const view = host.closest('.view'), room = view ? view.clientHeight - (host.getBoundingClientRect().top - view.getBoundingClientRect().top) - 190 : 340;

@@ -29,7 +29,7 @@ import {PREMIUM, yuan} from '../core/wallet.js';
 import {recordChatMessage} from './chat-recording.js';
 import {chatPictureSheet} from './chat-draw.js';
 import {fileTool, fileBody, showFile, filesToMessages} from './chat-files.js';
-import {eachThumb, previewBlob} from './thumbs.js';
+import {previewBlob} from './thumbs.js';
 import {pickReplacement} from './replacement-album.js';
 import {storyLinkSheet, storyLinkNote} from './story-phone.js';
 import {pickerHTML, fillPicker, bindPicker, recentOf, useRecent, pickEmoji} from './emoji-picker.js';
@@ -227,7 +227,7 @@ export function chatApp(ctx) {
     const who = line || !last ? '' : last.from === 'me' ? '我：' : t.type === 'group' ? shown(last.from) + '：' : '';
     const atMe = t.type === 'group' && t.unread && last && last.from !== 'me' && myNamesIn(t).some(name => String(last.text || '').includes('@' + name)) ? '<em class="at-me">[有人@我]</em>' : '';
     const badge = t.unread ? `<span class="badge${t.muted ? ' muted' : ''}">${t.unread > 99 ? '99+' : t.unread}</span>` : '';
-    const spark = t.type === 'dm' && t.streak >= 3 ? `<span class="spark" title="聊天火花：连续 ${t.streak} 天">🔥${t.streak}</span>` : '';
+    const spark = t.type === 'dm' && t.streak >= 3 ? `<span class="spark" title="聊天火花：连续 ${t.streak} 天">${icon('flame')}${t.streak}</span>` : '';
     // A chat with words typed and not sent shows them, as phones do.
     const typed = draftOf(t.id).trim(), pvLine = typed ? `<em class="draft-mark">[草稿]</em>${esc(typed)}` : `${atMe}${esc(who + preview(last, you))}`;
     const row = `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? `<span class="tag-s">${t.watch ? '旁观' : '群'}</span>` : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${t.type !== 'group' && t.blocked ? '<span class="tag-s tag-blocked">已拉黑</span>' : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${pvLine}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
@@ -1021,12 +1021,6 @@ export function chatApp(ctx) {
         })]});
   }
 
-  /** A picker's photos as small pictures (ui/thumbs.js), let go when the picker closes. */
-  function pickerThumbs(d, rows) {
-    const urls = [], imgs = new Map([...d.body.querySelectorAll('img[data-chat-photo]')].map(img => [img.dataset.chatPhoto, img]));
-    d.onClose(() => { for (const url of urls) ctx.win.URL.revokeObjectURL(url); });
-    eachThumb(api, rows.filter(r => imgs.has(r.id)), (id, blob) => { const url = ctx.win.URL.createObjectURL(blob); urls.push(url); imgs.get(id).src = url; }, () => d.live).catch(() => {});
-  }
   // Album photos sent in the chat; each picture is read once and kept while the app is open. A bubble shows the photo's
   // middle-sized picture once one was made (ui/thumbs.js); the viewer, downloads and the chat background the photo itself.
   const photoURL = id => photoURLs.load(id, async () => (await api.getPhoto(id))?.blob);
@@ -1312,14 +1306,14 @@ export function chatApp(ctx) {
     if (BOARD_TYPES.includes(g.type)) {
       const size = BOARDS[g.type].size, cells = cellsOf(g), last = g.moves.at(-1)?.at, line = new Set(g.line || []), mark = who => who === g.first ? 'x' : 'o';
       const mine = g.open && g.turn === 'me' && !typing();
-      const state = g.winner === 'draw' ? '平局' : g.resigned ? `${g.resigned === 'me' ? '你' : name(g.resigned)}认输了` : g.winner ? (g.winner === 'me' ? '你赢了 🎉' : `${name(g.winner)}赢了`) : g.turn === 'me' ? '轮到你了' : `${name(g.them)}在想……`;
-      return `<div class="cg-card game-board" data-board="${esc(g.type)}"><span class="game-kind">${g.type === 'ttt' ? '⭕ 井字棋' : '⚫ 五子棋'}</span>`
+      const state = g.winner === 'draw' ? '平局' : g.resigned ? `${g.resigned === 'me' ? '你' : name(g.resigned)}认输了` : g.winner ? (g.winner === 'me' ? '你赢了' : `${name(g.winner)}赢了`) : g.turn === 'me' ? '轮到你了' : `${name(g.them)}在想……`;
+      return `<div class="cg-card game-board" data-board="${esc(g.type)}"><span class="game-kind">${icon(g.type === 'ttt' ? 'grid' : 'board')}${BOARDS[g.type].name}</span>`
         + `<div class="board-grid" style="--n:${size}" role="group" aria-label="${BOARDS[g.type].name}的棋盘">${cells.map((who, i) => `<button type="button" class="board-cell" data-action="board-cell" ${mid} data-at="${i}"${who ? ` data-mark="${mark(who)}"` : ''}${i === last ? ' data-last' : ''}${line.has(i) ? ' data-win' : ''} aria-label="${cellName(i, size)}${who ? ' ' + esc(who === 'me' ? '你的' : name(who) + '的') : ''}"${mine && !who ? '' : ' disabled'}></button>`).join('')}</div>`
         + `<span class="cg-foot"><span>${esc(state)}</span>${g.open ? btn('board-resign', '认输', 'text-button', mid) : btn('board-again', '再来一局', 'text-button', mid)}</span></div>`;
     }
     if (g.type === 'vote') {
       const total = g.votes.length, mine = g.votes.find(x => x.from === 'me')?.option;
-      return `<div class="cg-card game-vote"><span class="game-kind">📊 投票</span><strong class="cg-title">${esc(g.question)}</strong><div class="vote-opts">${g.options.map((o, i) => {
+      return `<div class="cg-card game-vote"><span class="game-kind">${icon('vote')}投票</span><strong class="cg-title">${esc(g.question)}</strong><div class="vote-opts">${g.options.map((o, i) => {
         const who = g.votes.filter(x => x.option === i), pct = total ? Math.round(who.length / total * 100) : 0;
         return `<button type="button" class="vote-opt" data-action="game-vote" ${mid} data-i="${i}" aria-pressed="${mine === i}"${g.open ? '' : ' disabled'} title="${esc(who.map(x => name(x.from) + (x.why ? '：' + x.why : '')).join('\n'))}"><i style="width:${pct}%"></i><span>${esc(o)}</span><small>${who.length} 票</small>${who.length ? `<em>${esc(who.map(x => name(x.from)).join('、'))}</em>` : ''}</button>`;
       }).join('')}</div><span class="cg-foot">${total} 人投了${g.open ? '' : ' · 投票结束了'}${g.open ? btn('game-end', '结束投票', 'text-button', mid) : ''}</span></div>`;
@@ -1327,22 +1321,22 @@ export function chatApp(ctx) {
     if (g.type === 'truth') {
       // Just started (by its time, so the very first drawing of it already turns): the wheel turns once.
       const turning = m.from === 'me' && Date.now() - (m.at || 0) < 1500, pool = g.pool.slice(0, 10);
-      return `<div class="cg-card game-truth${turning ? ' spinning' : ''}"><span class="game-kind">🎲 真心话大冒险</span><span class="truth-wheel" aria-hidden="true" style="--n:${pool.length}">${pool.map((n, i) => `<i style="--i:${i}"${n === g.target ? ' class="hit"' : ''}>${esc(name(n).slice(0, 1))}</i>`).join('')}</span>`
+      return `<div class="cg-card game-truth${turning ? ' spinning' : ''}"><span class="game-kind">${icon('dice')}真心话大冒险</span><span class="truth-wheel" aria-hidden="true" style="--n:${pool.length}">${pool.map((n, i) => `<i style="--i:${i}"${n === g.target ? ' class="hit"' : ''}>${esc(name(n).slice(0, 1))}</i>`).join('')}</span>`
         + `<strong class="cg-title">转到了 ${esc(g.target === 'me' ? '你' : name(g.target))}${g.choice ? `：${g.choice}` : ''}</strong>`
         + (g.target === 'me' && !g.choice ? `<span class="game-acts">${btn('game-choice', '真心话', 'chip-button', `${mid} data-choice="真心话"`)}${btn('game-choice', '大冒险', 'chip-button', `${mid} data-choice="大冒险"`)}</span>` : '')
         + `<span class="cg-foot">${btn('game-again', '再转一次', 'text-button', mid)}</span></div>`;
     }
     const shownEntries = g.entries.slice(-10), cut = g.entries.length - shownEntries.length;
-    return `<div class="cg-card game-chain"><span class="game-kind">🔗 ${CHAIN_MODES[g.mode]}</span>${cut ? `<small class="chain-more">前面还有 ${cut} 句</small>` : ''}<ol class="chain-list">${shownEntries.map(e => `<li><b>${esc(name(e.from))}</b><span>${esc(e.text)}</span></li>`).join('')}</ol>`
+    return `<div class="cg-card game-chain"><span class="game-kind">${icon('chain')}${CHAIN_MODES[g.mode]}</span>${cut ? `<small class="chain-more">前面还有 ${cut} 句</small>` : ''}<ol class="chain-list">${shownEntries.map(e => `<li><b>${esc(name(e.from))}</b><span>${esc(e.text)}</span></li>`).join('')}</ol>`
       + (g.loser ? `<span class="cg-foot">${esc(g.loser === 'me' ? '你' : name(g.loser))}认输了</span>` : '')
       + (g.open ? `<span class="game-acts">${btn('game-chain', '接一句', 'chip-button', mid)}${btn('game-end', '结束', 'text-button', mid)}</span>` : g.loser ? '' : '<span class="cg-foot">接龙结束了</span>') + '</div>';
   }
   /** 群游戏 from the + panel: which one. A card goes into the group and the group is asked to play (when it can answer). */
   function gameSheet() {
     const d = sheet('群游戏', `<div class="pick-list game-pick">
-      <button type="button" class="list-row" data-action="g-vote"><span class="game-ico" aria-hidden="true">📊</span><span><strong>投票</strong><small>一个问题，几个选项</small></span></button>
-      <button type="button" class="list-row" data-action="g-truth"><span class="game-ico" aria-hidden="true">🎲</span><span><strong>真心话大冒险</strong><small>转盘抽一个人，也可能是你</small></span></button>
-      <button type="button" class="list-row" data-action="g-chain"><span class="game-ico" aria-hidden="true">🔗</span><span><strong>接龙</strong><small>成语接龙或故事接龙</small></span></button></div>`, {
+      <button type="button" class="list-row" data-action="g-vote">${icon('vote')}<span><strong>投票</strong><small>一个问题，几个选项</small></span></button>
+      <button type="button" class="list-row" data-action="g-truth">${icon('dice')}<span><strong>真心话大冒险</strong><small>转盘抽一个人，也可能是你</small></span></button>
+      <button type="button" class="list-row" data-action="g-chain">${icon('chain')}<span><strong>接龙</strong><small>成语接龙或故事接龙</small></span></button></div>`, {
       'g-vote': () => { d.close(); voteSheet(); },
       'g-truth': async () => { d.close(); await spin(); },
       'g-chain': () => { d.close(); chainSheet(); }
@@ -1422,8 +1416,8 @@ export function chatApp(ctx) {
     let first = 'me';
     const d = sheet('小游戏', `<div class="segmented" role="group" aria-label="谁先下">${[['me', '我先'], ['them', `${shown(them)}先`]].map(([k, t]) => `<button type="button" data-play-first="${k}" aria-pressed="${k === first}">${esc(t)}</button>`).join('')}</div>
       <div class="pick-list game-pick">
-      <button type="button" class="list-row" data-action="p-ttt"><span class="game-ico" aria-hidden="true">⭕</span><span><strong>井字棋</strong><small>三个连成一线就赢</small></span></button>
-      <button type="button" class="list-row" data-action="p-gomoku"><span class="game-ico" aria-hidden="true">⚫</span><span><strong>五子棋</strong><small>九路棋盘，五个连成一线就赢</small></span></button></div>`, {
+      <button type="button" class="list-row" data-action="p-ttt">${icon('grid')}<span><strong>井字棋</strong><small>三个连成一线就赢</small></span></button>
+      <button type="button" class="list-row" data-action="p-gomoku">${icon('board')}<span><strong>五子棋</strong><small>九路棋盘，五个连成一线就赢</small></span></button></div>`, {
       'p-ttt': async () => { d.close(); await startBoard('ttt', first === 'me' ? 'me' : them); },
       'p-gomoku': async () => { d.close(); await startBoard('gomoku', first === 'me' ? 'me' : them); }
     });
@@ -1522,16 +1516,11 @@ export function chatApp(ctx) {
     });
   }
   async function pickPersonPhoto(name) {
-    const rows = await api.listPhotos();
-    if (!rows.length) throw Error('相册里还没有照片，先在相册里导入一张');
-    const d = ctx.dialog(`选一张和${shown(name)}聊天的背景`, `<div class="photo-grid pick-photos">${rows.slice(0, 30).map(r => `<button data-bg-photo="${esc(r.id)}" aria-label="用 ${esc(r.name)} 当背景"><img data-chat-photo="${esc(r.id)}" alt="${esc(r.name)}"></button>`).join('')}</div>`);
-    pickerThumbs(d, rows);
-    d.body.addEventListener('click', e => {
-      const id = e.target.closest('[data-bg-photo]')?.dataset.bgPhoto;
-      if (!id) return;
-      d.close();
-      try { api.saveChatOptions({bgOf: {[ownKey(name)]: 'photo:' + id}}); render(); personLookSheet(name); } catch (error) { ctx.notify(error.message, {error: true}); }
-    });
+    const id = await pickReplacement(ctx, api, {title:`选一张和${shown(name)}聊天的背景`, device:false});
+    if (!id) return;
+    api.saveChatOptions({bgOf: {[ownKey(name)]: 'photo:' + id}});
+    render();
+    personLookSheet(name);
   }
 
   // ---------- 表情包 ----------
@@ -1801,31 +1790,67 @@ export function chatApp(ctx) {
     });
   }
   /** 画一套: the moods picked (the first six they do not have yet), how they should look; one picture after another. */
-  async function drawStickers(name) {
+  async function drawStickers(name, draft = null) {
     if (api.drawReady && !api.drawReady()) { ctx.notify(api.drawMissing?.() || '还没有设置绘图引擎', {error: true}); return; }
     if (!api.drawRoleSticker) { ctx.notify('在酒馆里打开小手机时才能画', {error: true}); return; }
-    const have = new Set(ownStickers(name).map(s => s.name)), chosen = new Set(STICKER_MOODS.map(m => m[0]).filter(m => !have.has(m)).slice(0, 6));
+    const have = new Set(ownStickers(name).map(s => s.name)), chosen = new Set(draft?.list || STICKER_MOODS.map(m => m[0]).filter(m => !have.has(m)).slice(0, 6));
     const d = ctx.dialog(`给${shown(name)}画表情包`, `<div class="deco-row rs-moods">${STICKER_MOODS.map(([m]) => `<button type="button" class="status-chip" data-mood="${esc(m)}" aria-pressed="${chosen.has(m)}">${esc(m)}${have.has(m) ? '<small>已有</small>' : ''}</button>`).join('')}</div>
-      ${field('画成什么样（选填）', input('rs-wish', '', 'text', 'maxlength="100" placeholder="比如：Q版、简笔画、厚涂"'))}
-      <p class="hint">按角色 App 里${esc(shown(name))}的外貌，用绘图引擎一张一张画。</p><div class="actions">${btn('rs-go', `开始画 ${chosen.size} 张`, 'primary', chosen.size ? '' : 'disabled')}</div>`);
+      ${field('画成什么样（选填）', input('rs-wish', draft?.wish || '', 'text', 'maxlength="100" placeholder="比如：Q版、简笔画、厚涂"'))}
+      <p class="hint">按角色 App 里${esc(shown(name))}的外貌，用绘图引擎一张一张画。</p><div class="actions">${btn('rs-preview', '先试画一张', 'secondary', chosen.size ? '' : 'disabled')}${btn('rs-go', `开始画 ${chosen.size} 张`, 'primary', chosen.size ? '' : 'disabled')}</div>`);
     const go = d.body.querySelector('[data-action=rs-go]');
+    const preview = d.body.querySelector('[data-action=rs-preview]');
     d.body.addEventListener('click', e => {
       const mood = e.target.closest('[data-mood]');
       if (mood) {
         if (chosen.has(mood.dataset.mood)) chosen.delete(mood.dataset.mood); else chosen.add(mood.dataset.mood);
         mood.setAttribute('aria-pressed', String(chosen.has(mood.dataset.mood)));
-        go.disabled = !chosen.size; go.textContent = `开始画 ${chosen.size} 张`;
+        go.disabled = preview.disabled = !chosen.size; go.textContent = `开始画 ${chosen.size} 张`;
         return;
       }
-      if (!e.target.closest('[data-action=rs-go]') || !chosen.size) return;
+      const action = e.target.closest('[data-action]')?.dataset.action;
+      if (!['rs-preview','rs-go'].includes(action) || !chosen.size) return;
       // The sheet goes (a question about money would take its place anyway); how far it is shows on top.
       const wish = d.body.querySelector('[data-field=rs-wish]').value.trim(), list = [...chosen];
       d.close();
-      drawBatch(name, list, wish).catch(error => ctx.notify(error.message, {error: true}));
+      if (action === 'rs-preview') previewSticker(name, list, wish).catch(error => {
+        ctx.notify(error.message, {error:true});
+        drawStickers(name, {list,wish});
+      });
+      else drawBatch(name, list, wish);
+    });
+  }
+  async function previewSticker(name, list, wish) {
+    const [mood, ...rest] = list;
+    const options = {name, mood, wish, preview:true};
+    let sample;
+    ctx.notify('在试画「' + mood + '」…');
+    try { sample = await api.drawRoleSticker(options); }
+    catch (error) {
+      if (error.code !== 'PAID') throw error;
+      const ask = api.paidPrompt();
+      if (!await ctx.confirm(ask.title, ask.text + '\n这次先画 1 张。')) return drawStickers(name, {list,wish});
+      sample = await api.drawRoleSticker({...options, allowPaid:true});
+    }
+    const url = await bubbleURL(sample.photoId);
+    const d = ctx.dialog('试画 · ' + sample.name, (url ? '<img class="rs-preview-image" src="' + esc(url) + '" alt="' + esc(sample.name) + '">' : '')
+      + '<div class="actions">'
+      + btn('rs-edit','返回调整','secondary')
+      + btn('rs-keep','仅保存试画','secondary')
+      + (rest.length ? btn('rs-rest','继续画剩余 ' + rest.length + ' 张','primary') : '')
+      + '</div>');
+    d.body.addEventListener('click', event => {
+      const action = event.target.closest('[data-action]')?.dataset.action;
+      if (!['rs-edit','rs-keep','rs-rest'].includes(action)) return;
+      d.close();
+      if (action === 'rs-edit') return drawStickers(name, {list,wish});
+      const kept = ownStickers(name).filter(item => item.name !== sample.name);
+      keepStickers(name, [...kept, sample]);
+      if (action === 'rs-rest') return drawBatch(name, rest, wish, 1);
+      roleStickersSheet(name);
     });
   }
   /** One picture after another; one that costs money only after a yes (asked once for them all). */
-  async function drawBatch(name, list, wish) {
+  async function drawBatch(name, list, wish, kept = 0) {
     let allowPaid = false, done = 0;
     try {
       for (const m of list) {
@@ -1835,31 +1860,23 @@ export function chatApp(ctx) {
           catch (error) {
             if (error.code !== 'PAID' || allowPaid) throw error;
             const ask = api.paidPrompt();
-            if (!await ctx.confirm(ask.title, `${ask.text}\n这次画 ${list.length} 张。`)) { if (done) roleStickersSheet(name); return; }
+            if (!await ctx.confirm(ask.title, `${ask.text}\n这次画 ${list.length} 张。`)) { if (done || kept) roleStickersSheet(name); return; }
             allowPaid = true;
           }
         }
         done++;
       }
-      ctx.notify(`画好了 ${done} 张，${shown(name)}聊天时会自己发`);
+      ctx.notify(`画好了 ${done + kept} 张，${shown(name)}聊天时会自己发`);
       roleStickersSheet(name);
     } catch (error) {
       ctx.notify(done ? `画好了 ${done} 张，后面的没画成：${error.message}` : error.message, {error: true});
-      if (done) roleStickersSheet(name);
+      if (done || kept) roleStickersSheet(name);
     }
   }
   /** 从相册加: a photo of the album as one of theirs, with a name the model writes. */
   async function stickerFromAlbum(name) {
-    const rows = await api.listPhotos();
-    if (!rows.length) throw Error('相册里还没有照片，先在相册里导入一张');
-    const d = ctx.dialog(`选一张当${shown(name)}的表情包`, `<div class="photo-grid pick-photos">${rows.slice(0, 60).map(r => `<button data-sticker-photo="${esc(r.id)}" aria-label="用 ${esc(r.name)}"><img data-chat-photo="${esc(r.id)}" alt="${esc(r.name)}"></button>`).join('')}</div>`);
-    pickerThumbs(d, rows);
-    d.body.addEventListener('click', e => {
-      const id = e.target.closest('[data-sticker-photo]')?.dataset.stickerPhoto;
-      if (!id) return;
-      d.close();
-      nameSticker(name, id, '').catch(error => ctx.notify(error.message, {error: true}));
-    });
+    const id = await pickReplacement(ctx, api, {title:`选一张当${shown(name)}的表情包`, device:false});
+    if (id) await nameSticker(name, id, '');
   }
   /** Its name: what the model writes to send it (short; one of the same name is replaced). */
   async function nameSticker(name, photoId, old) {
@@ -2117,26 +2134,22 @@ export function chatApp(ctx) {
   }
   /** Picks an avatar for the user ('me') or a contact: an album photo, a new picture, the tavern's avatar, or text. */
   async function avatarSheet(key, {title = '', reset = '用酒馆的头像'} = {}) {
-    const rows = (await api.listPhotos()).slice(0, 30), who = key === 'me' ? '我' : key, store = ownKey(key), chosen = api.getState().chat.avatars?.[store];
-    const d = ctx.dialog(title || `${who}的头像`, `<p class="help-copy">点一张照片，或者上传一张新的。</p>
-      <label class="secondary file-button">${icon('import')}上传图片<input type="file" accept="image/*" data-avatar-file hidden></label>
-      ${rows.length ? `<div class="photo-grid pick-photos">${rows.map(r => `<button data-avatar-photo="${esc(r.id)}" aria-label="用 ${esc(r.name)} 当头像"${chosen?.photoId === r.id ? ' aria-pressed="true"' : ''}><img data-chat-photo="${esc(r.id)}" alt=""></button>`).join('')}</div>` : '<p class="hint">相册里还没有照片。</p>'}
-      <div class="actions">${btn('avatar-tavern', reset, 'secondary')}${btn('avatar-text', '只显示文字', 'text-button')}</div>`);
-    pickerThumbs(d, rows);
-    const choose = value => { d.close(); api.saveChatOptions({avatars: {[store]: value}}); ctx.notify('头像已换好'); };
-    d.body.addEventListener('click', e => {
-      const photo = e.target.closest('[data-avatar-photo]')?.dataset.avatarPhoto;
-      if (photo) return choose({kind: 'photo', photoId: photo});
-      const action = e.target.closest('[data-action]')?.dataset.action;
-      if (action === 'avatar-tavern') choose(null);
-      if (action === 'avatar-text') choose({kind: 'text'});
+    const who = key === 'me' ? '我' : key, store = ownKey(key);
+    const selected = await pickReplacement(ctx, api, {
+      title: title || `${who}的头像`, accept: 'image/*', selected: api.getState().chat.avatars?.[store]?.photoId,
+      actions: [{value:'tavern', label:reset}, {value:'text', label:'只显示文字'}]
     });
-    d.body.addEventListener('change', e => {
-      const file = e.target.closest('[data-avatar-file]')?.files?.[0];
-      if (!file) return;
-      if (!/^image\//.test(file.type)) { ctx.notify('请选择图片文件'); return; }
-      api.addPhoto({name: file.name, blob: file}).then(photo => choose({kind: 'photo', photoId: photo.id})).catch(error => ctx.notify(error.message));
-    });
+    if (!selected) return;
+    let value;
+    if (typeof selected === 'string') value = {kind:'photo', photoId:selected};
+    else if (selected.action) value = selected.action === 'text' ? {kind:'text'} : null;
+    else {
+      if (!/^image\//.test(selected.type)) { ctx.notify('请选择图片文件'); return; }
+      const photo = await api.addPhoto({name:selected.name, blob:selected});
+      value = {kind:'photo', photoId:photo.id};
+    }
+    api.saveChatOptions({avatars: {[store]:value}});
+    ctx.notify('头像已换好');
   }
   /** 来电 options: characters calling by themselves (off by default), and how long a call rings. */
   function callsSheet(options = {}) {
@@ -2380,17 +2393,10 @@ export function chatApp(ctx) {
     });
   }
   async function pickBackground() {
-    const rows = await api.listPhotos();
-    if (!rows.length) throw Error('相册里还没有照片，先在相册里导入一张');
-    const d = ctx.dialog('选一张聊天背景', `<div class="photo-grid pick-photos">${rows.slice(0, 30).map(r => `<button data-bg-photo="${esc(r.id)}" aria-label="用 ${esc(r.name)} 当背景"><img data-chat-photo="${esc(r.id)}" alt="${esc(r.name)}"></button>`).join('')}</div>`);
-    pickerThumbs(d, rows);
-    d.body.addEventListener('click', e => {
-      const id = e.target.closest('[data-bg-photo]')?.dataset.bgPhoto;
-      if (!id) return;
-      d.close();
-      api.saveChatOptions({profile: {backgroundPhoto: id}});
-      render();
-    });
+    const id = await pickReplacement(ctx, api, {title:'选一张聊天背景', device:false});
+    if (!id) return;
+    api.saveChatOptions({profile: {backgroundPhoto: id}});
+    render();
   }
   /** A group's own picture goes with its last window. */
   function forgetGroupAvatar(t) { if (api.getState().chat.avatars?.['g:' + groupKey(t)]) api.saveChatOptions({avatars: {['g:' + groupKey(t)]: null}}); }

@@ -44,7 +44,7 @@ export function step(fruits, {w, h, k = 1, dt = 1}) {
 }
 
 export default {
-  id: 'suika', name: '合成大西瓜', icon: '🍉', colors: ['#c3f0a8', '#40a845'], note: '两个一样的合成大的', live: true,
+  id: 'suika', name: '合成大西瓜', icon: 'melon', art: '🍉', accent: '#40a845', accentLight: '#c3f0a8', note: '两个一样的合成大的', live: true,
   how: '左右拖动选位置，松手（或点一下）把水果扔下去；两个一样的碰在一起变成更大的，一直合成到西瓜。水果堆过红线就输了。',
   make({doc, win, host, api, saved}) {
     const w = Math.min(340, Math.max(240, host.clientWidth || 300)), h = Math.round(w * 1.35), k = w / 320, line = 70 * k;

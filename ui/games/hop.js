@@ -11,7 +11,7 @@ export function landing(x, p) {
 export const reach = ms => Math.min(1500, ms) * .26;
 
 export default {
-  id: 'hop', name: '跳一跳', icon: '🐰', colors: ['#d0bfff', '#7048e8'], note: '按住蓄力跳', live: true,
+  id: 'hop', name: '跳一跳', icon: 'paw', art: '🐰', accent: '#7048e8', accentLight: '#d0bfff', note: '按住蓄力跳', live: true,
   how: '按住屏幕（或空格）蓄力，松开就跳；按得越久跳得越远。跳到台子中间分更多，连续跳中多加分。',
   make({doc, win, host, api}) {
     const w = Math.min(340, Math.max(240, host.clientWidth || 300)), h = Math.round(w * 1.1), ground = h * .68;

@@ -49,7 +49,7 @@ export function fill(n) {
 }
 
 export default {
-  id: 'water', name: '倒水排序', icon: '🧪', colors: ['#b5e9ff', '#3aa0e6'], note: '一管一种颜色', unit: '',
+  id: 'water', name: '倒水排序', icon: 'vial', art: '🧪', accent: '#3aa0e6', accentLight: '#b5e9ff', note: '一管一种颜色', unit: '',
   how: '点一管，再点另一管，把上面的颜色倒过去：只能倒在同样的颜色上，或者倒进空管。每管只剩一种颜色就过关，「撤销」能退一步。',
   make({doc, host, api, saved}) {
     const el = doc.createElement('div');

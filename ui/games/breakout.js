@@ -10,7 +10,7 @@ export function bounce(hit, speed) {
 }
 
 export default {
-  id: 'breakout', name: '打砖块', icon: '🏓', colors: ['#ffd0a8', '#f0703c'], note: '三个球', live: true,
+  id: 'breakout', name: '打砖块', icon: 'breakout', art: '🏓', accent: '#f0703c', accentLight: '#ffd0a8', note: '三个球', live: true,
   how: '按住屏幕左右拖（或 ←→）移动挡板，点一下发球；接住球，把砖块全打掉。',
   make({doc, win, host, api, saved}) {
     const w = Math.min(340, Math.max(240, host.clientWidth || 300)), h = Math.round(w * 1.25);

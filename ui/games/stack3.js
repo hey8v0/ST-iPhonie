@@ -39,7 +39,7 @@ export function deal(level, random = Math.random) {
 }
 
 export default {
-  id: 'stack3', name: '三消叠叠乐', icon: '🐑', colors: ['#c8f2b4', '#5cb85c'], note: '三个一样就消', unit: '',
+  id: 'stack3', name: '三消叠叠乐', icon: 'layers', art: '🐑', accent: '#5cb85c', accentLight: '#c8f2b4', note: '三个一样就消', unit: '',
   how: '点没被压住的牌，放进下面的槽里；三张一样的就消掉。槽满 7 张就输了。移出、撤销、洗牌每关各能用一次。',
   make({doc, win, host, api, saved}) {
     const el = doc.createElement('div');

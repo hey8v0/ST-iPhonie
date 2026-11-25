@@ -525,7 +525,7 @@ export function enginesApp(ctx) {
   function customReport(r) {
     const notes = (r.notes || []).map(n => `<p class="hint">${esc(n)}</p>`).join('');
     if (r.scan) return notes + `<div class="custom-report"><p>${r.scan.length ? '这些地址上有服务，点一个：' : '常见的端口上都没找到服务：先把服务开起来，再点一次。不在这台电脑上的话，直接填它的地址。'}</p>${r.scan.length ? `<div class="grid-choices">${r.scan.map(a => `<button type="button" data-action="custom-try" data-address="${esc(a)}">${esc(a.replace(/^https?:\/\//, ''))}</button>`).join('')}</div>` : ''}</div>`;
-    if (!r.ok) return notes + `<div class="custom-report bad"><p>✗ ${esc(r.message)}</p>${r.hint ? `<p class="hint">👉 ${esc(r.hint)}</p>` : ''}${r.address ? `<div class="actions">${btn('custom-try', '试试 ' + esc(r.address.replace(/^https?:\/\//, '')), 'secondary small', `data-address="${esc(r.address)}"`)}</div>` : ''}</div>`;
+    if (!r.ok) return notes + `<div class="custom-report bad"><p>✗ ${esc(r.message)}</p>${r.hint ? `<p class="hint">${esc(r.hint)}</p>` : ''}${r.address ? `<div class="actions">${btn('custom-try', '试试 ' + esc(r.address.replace(/^https?:\/\//, '')), 'secondary small', `data-address="${esc(r.address)}"`)}</div>` : ''}</div>`;
     if (!r.found?.params) return notes + `<div class="custom-report"><p>服务连上了，${esc(r.found?.note || '但认不出是什么')}。在下面「常见的服务」里选一个，或者把它接口说明里的 curl 命令粘贴到上面这一栏。</p></div>`;
     // What is left to do, in order.
     const slots = customSlots(r.found.params), steps = [];
@@ -1120,7 +1120,7 @@ export function enginesApp(ctx) {
             const lost = /连不上|无法连接/.test(error.message) && draft().params.url ? await api.customReach(draft().params.url).catch(() => null) : null;
             if (lost && !lost.ok && lost.base) { customFound = lost; render(); if (out()) out().textContent = ''; return; }
             const hint = customHint(error.message);
-            if (out()) out().textContent = '✗ ' + error.message + (hint ? '\n👉 ' + hint : '');
+            if (out()) out().textContent = '✗ ' + error.message + (hint ? '\n' + hint : '');
           }
         });
         break;

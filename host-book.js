@@ -6,6 +6,9 @@ import {NARRATOR} from './core/narration.js';
 import {parseSounds, soundNames} from './core/sounds.js';
 import {findRoute} from './core/routes.js';
 import {storyMessage} from './core/outgoing.js';
+import {storyScript} from './core/book.js';
+import {activeChatPreset, plainStory} from './core/chat.js';
+import {worldInfoFor, loreOptions} from './host-lore.js';
 
 /**
  * steps(id): a message as the stage's steps (host-vn.js bookSteps); lines(id): the voice lines of a story reply as the
@@ -13,14 +16,17 @@ import {storyMessage} from './core/outgoing.js';
  * active(): the plugin is on. sprite(name, emotion): a character's 立绘 for a feeling (the 视觉小说's); closePanel():
  * puts the phone away; sounds(): the sound host (host-sounds.js), for a page's ambience and sound.
  */
-export function createBookHost({context, settings, backend, steps, lines, voiced, speech, active = () => true, sprite = () => '', closePanel = () => {}, sounds = () => null, doc = globalThis.document}) {
+export function createBookHost({context, settings, backend, steps, lines, voiced, speech, active = () => true, sprite = () => '', closePanel = () => {}, sounds = () => null, doc = globalThis.document, lore = worldInfoFor}) {
   const chat = () => context()?.chat || [];
   /** The open chat: {chat, title, length, user}. */
   function info() {
     const ctx = context();
     if (!ctx?.chat) throw Error('先在酒馆里打开一个聊天');
     const title = ctx.groupId ? ctx.groups?.find(g => String(g.id) === String(ctx.groupId))?.name || '群聊' : ctx.name2 || '';
-    return {chat: String(ctx.getCurrentChatId?.() ?? ctx.chatId ?? ''), title, length: ctx.chat.length, user: ctx.name1 || '你'};
+    const group = ctx.groupId ? ctx.groups?.find(g => String(g.id) === String(ctx.groupId)) : null;
+    const cards = group ? (ctx.characters || []).filter(card => group.members?.includes(card.avatar)) : [ctx.characters?.[ctx.characterId]];
+    return {chat:String(ctx.getCurrentChatId?.() ?? ctx.chatId ?? ''), title, length:ctx.chat.length, user:ctx.name1 || '你',
+      roles:cards.map(card => card?.name).filter(Boolean)};
   }
   /** The story from message `from` to `to` (both kept): [{id, user, name, steps}] (messages not in the story left out). */
   function source(from = 0, to = Infinity) {
@@ -34,6 +40,38 @@ export function createBookHost({context, settings, backend, steps, lines, voiced
       if (s?.length) out.push({id, user: !!m.is_user, name: String(m.name || ''), steps: s.filter(x => ['say', 'narrate', 'bg', 'sound'].includes(x.kind)).map(x => x.kind === 'sound' ? {kind: 'sound', sound: tags[x.index] ? {kind: tags[x.index].kind, name: tags[x.index].name, stop: !!tags[x.index].stop} : null} : {...x}).filter(x => x.kind !== 'sound' || x.sound)});
     }
     return {...info(), from: Math.max(0, from), to: end, messages: out};
+  }
+  function messages() {
+    const scope = settings().narration;
+    return chat().flatMap((m, id) => {
+      if (!storyMessage(m)) return [];
+      const preview = plainStory(m.mes || '', [], scope).slice(0, 78);
+      return preview ? [{id, name:String(m.name || ''), preview}] : [];
+    });
+  }
+  async function references({chat: expected, range, names = [], persona = false, world = false, skipBooks = [], skipEntries = [], extraBooks = [], script = ''} = {}) {
+    const ctx = context(), current = () => String(context()?.getCurrentChatId?.() ?? context()?.chatId ?? '');
+    if (expected !== undefined && current() !== expected) throw Error('酒馆剧情已切换，请重新选择参考资料');
+    const state = settings(), people = [], user = String(ctx?.name1 || '你');
+    for (const name of [...new Set(names)].slice(0, 12)) {
+      if (typeof name !== 'string' || !name || name.length > 40) continue;
+      const role = findRoute(state.routes, name), card = ctx?.characters?.find(row => row?.name === name);
+      const desc = role?.persona || [card?.description || card?.data?.description, card?.personality || card?.data?.personality].filter(Boolean).join('\n');
+      const details = [desc && desc.slice(0, 500), role?.appearance && '外貌：' + role.appearance.slice(0, 220)].filter(Boolean).join('\n');
+      if (details) people.push(name + '：' + details.replaceAll('{{char}}', name).replaceAll('{{user}}', user));
+    }
+    const profile = persona ? String(ctx?.powerUserSettings?.persona_description || '').slice(0, 1400) : '';
+    const before = Array.isArray(range) && range.length === 2 && range.every(Number.isInteger) && range[0] >= 0 && range[1] >= range[0]
+      ? storyScript(source(Math.max(range[0], range[1] - 19), range[1]).messages).script.slice(-3500) : '';
+    const preset = activeChatPreset(state.chat);
+    const options = loreOptions(preset);
+    const entryText = world ? await lore(context, {...options, strictFilter:true, max:3800,
+      texts:[before], always:[String(script).slice(0, 10000), ...names], characters:people.join('\n'), persona:profile,
+      skipBooks:[...new Set([...(options.skipBooks || []), ...skipBooks])],
+      skipEntries:[...new Set([...(options.skipEntries || []), ...skipEntries])], extraBooks:[...new Set([...(preset.loreExtraBooks || []), ...extraBooks])]}) : '';
+    if (current() !== (expected ?? String(ctx?.getCurrentChatId?.() ?? ctx?.chatId ?? '')) || ctx?.chat !== context()?.chat) throw Error('酒馆剧情已切换，请重新选择参考资料');
+    return [people.length && '【角色设定】\n' + people.join('\n\n').slice(0, 3400), profile && '【User 人设 · ' + user + '】\n' + profile,
+      before && '【前情】\n' + before.slice(-3100), entryText && '【世界书】\n' + entryText].filter(Boolean).join('\n\n');
   }
   /** The text model's answer to a system and a user prompt (the 绘本 written from the story). */
   async function write(system, user, {length = 8192} = {}) {
@@ -139,5 +177,5 @@ export function createBookHost({context, settings, backend, steps, lines, voiced
       onClose: () => { stage = null; backend.player.stop(); setTimeout(() => made.forEach(u => URL.revokeObjectURL(u)), 600); }});
     return true;
   }
-  return {info, source, write, read, audio, narration, open, sound, soundList, stop: () => backend.player.stop(), close: () => stage?.close(), get showing() { return !!stage; }};
+  return {info, source, messages, references, write, read, audio, narration, open, sound, soundList, stop: () => backend.player.stop(), close: () => stage?.close(), get showing() { return !!stage; }};
 }

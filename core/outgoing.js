@@ -3,6 +3,7 @@
 import {parseDialogue} from './protocol.js';
 import {withoutPictures} from './draw.js';
 import {withoutSounds} from './sounds.js';
+import {withoutOutfits} from './wardrobe.js';
 
 /**
  * A message of the story: also one hidden from the model (/hide, or a summary plugin hiding old floors marks it
@@ -32,8 +33,8 @@ export function withoutVoice(message, formats) {
  * pictures: drop picture blocks. voice: drop voice tags; keepLatest leaves the newest reply that has voice lines
  * as it is, so the model still sees one example of the format. sounds: drop 音效 tags (the rule says how to write them).
  */
-export function outgoingChat(chat, {pictures = true, voice = true, keepLatest = true, formats = [], sounds = true} = {}) {
-  if (!Array.isArray(chat) || (!pictures && !sounds && !(voice && formats.length))) return chat;
+export function outgoingChat(chat, {pictures = true, voice = true, keepLatest = true, formats = [], sounds = true, outfits = true} = {}) {
+  if (!Array.isArray(chat) || (!pictures && !sounds && !outfits && !(voice && formats.length))) return chat;
   const voiced = m => !m?.is_user && typeof m?.mes === 'string' && withoutVoice(m.mes, formats) !== m.mes;
   let keep = -1;
   if (voice && keepLatest) for (let i = chat.length - 1; i >= 0; i--) if (voiced(chat[i])) { keep = i; break; }
@@ -42,6 +43,7 @@ export function outgoingChat(chat, {pictures = true, voice = true, keepLatest = 
     if (typeof m?.mes !== 'string') continue;
     let mes = m.mes;
     if (pictures && /<(?:i-img|img)(?=[\s/>])/i.test(mes)) mes = withoutPictures(mes);
+    if (outfits && /<outfit\b/i.test(mes)) mes = withoutOutfits(mes);
     if (sounds && /<(?:sfx|ambience)\b/i.test(mes)) mes = withoutSounds(mes);
     if (voice && formats.length && i !== keep) mes = withoutVoice(mes, formats);
     if (mes !== m.mes) chat[i] = {...m, mes};

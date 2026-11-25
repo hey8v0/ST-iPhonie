@@ -129,7 +129,7 @@ export function vibePanel({ctx, api, root, rerender}) {
   }
   /** Pictures from the album or the device, each a new vibe. */
   async function fromPhotos() {
-    const picked = await pickPicture(ctx, api, '选图当 Vibe', {multiple: true});
+    const picked = await pickPicture(ctx, api, '选图当 Vibe', {multiple: Infinity});
     if (picked?.length) report(await api.importVibes(picked.map((blob, i) => blob.name ? blob : new ctx.win.File([blob], `图片 ${i + 1}.png`, {type: blob.type || 'image/png'}))));
   }
   /** Where a 提取信息量 stands: encoded already (free), or to be encoded at first use. */

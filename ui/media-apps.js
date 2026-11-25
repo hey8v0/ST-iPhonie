@@ -119,7 +119,7 @@ export function notesApp(ctx) {
   const color = id => NOTE_COLORS[hash(id || 'new') % NOTE_COLORS.length];
   // 备忘录 × 聊天 (0.9.35): a note a contact wrote down for the user, reminded at its time.
   // On a card only when (it is narrow); on the note itself who wrote it down too.
-  const remindHTML = (n, full = false) => n.remind ? `<em class="note-remind${n.remind.done ? ' done' : ''}">⏰ ${n.remind.done && !full ? '已提醒' : esc(remindLabel(n.remind.at))}${full && n.remind.from ? ' · ' + esc(n.remind.from) + '提醒' : ''}${full && n.remind.done ? ' · 已提醒' : ''}</em>` : '';
+  const remindHTML = (n, full = false) => n.remind ? `<em class="note-remind${n.remind.done ? ' done' : ''}">${icon('clock')}${n.remind.done && !full ? '已提醒' : esc(remindLabel(n.remind.at))}${full && n.remind.from ? ' · ' + esc(n.remind.from) + '提醒' : ''}${full && n.remind.done ? ' · 已提醒' : ''}</em>` : '';
   async function render() {
     const ticket = ++epoch;
     if (current) {

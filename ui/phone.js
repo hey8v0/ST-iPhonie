@@ -11,6 +11,7 @@ import {deriveTheme, paintTheme, wheelHue, DEFAULT_THEME_SOURCE} from '../core/t
 import {momentsNew, momentsSeen} from './moments-seen.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
+import {installFastScroll} from './fast-scroll.js';
 import {bindNativeSelects} from './popup-select.js';
 import {grow, launch, nudge, within, visible, islandIn, moving} from './carry.js';
 import {todayPage} from './today.js';
@@ -110,6 +111,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     </div>`;
   const $ = s => mount.querySelector(s);
   const screen = $('.screen'), home = $('.home'), frame = $('.app-frame'), content = $('.app-content'), lockscreen = $('.lockscreen');
+  const hideFastScroll = installFastScroll(win, screen, signal);
 
   /** A short note out of the island (it grows out of it and goes back in). Errors stay longer (20 s), can be closed
    *  with ×, and can be selected to copy. */
@@ -201,6 +203,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
    * place of the one on top.
    */
   function dialog(title, html, {top = false, add = '', over = false} = {}) {
+    hideFastScroll();
     const under = (over ? sheet : sheet?.under) || null;
     if (!over) sheet?.close(null);
     const focus = doc.activeElement, overlay = doc.createElement('div');
@@ -219,6 +222,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       close(value = null, {from = 0} = {}) {
         if (!live) return;
         live = false;
+        hideFastScroll();
         leave(overlay, from);
         if (sheet === result) sheet = under?.live ? under : null;
         if (under?.live && sheet === under) inert.set(under.overlay, false);
@@ -339,7 +343,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const ctx = {api, doc, win, notify, dialog, confirm, help, lock, open, routeFor, engineOf, previewSide: side => previewSide(side), openPendingRole: name => openPendingRole(name), visible: name => active === name && !locked,
     editEngine: id => withView('engines', v => v.edit?.(id)), showSongDraft: id => { open('music'); withView('music', v => v.showDraft?.(id)); }, showPresetKind: kind => withView('presets', v => v.showKind?.(kind)), openDraw: request => { open('draw'); withView('draw', v => v.load?.(request)); },
     // 0.9.35: a chat (from what another app sent there), a forum post (from a card in a chat).
-    openThread: id => { open('chat'); withView('chat', v => v.openThread?.(id)); }, openForumPost: id => { open('forum'); withView('forum', v => v.openPost?.(id)); }, openBook: id => { open('picbook'); withView('picbook', v => v.openBook?.(id)); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
+    openThread: id => { open('chat'); withView('chat', v => v.openThread?.(id)); }, openForumPost: id => { open('forum'); withView('forum', v => v.openPost?.(id)); }, openBook: id => { open('picbook'); withView('picbook', v => v.openBook?.(id)); }, makeBookFromTheater: id => { open('picbook'); withView('picbook', v => v.makeFromTheater?.(id)); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
   installMotion(win, mount, signal);
   // On a computer the phone is a floating window: its top bar moves it.
   const stageBar = $('.stage-bar'), sizeButton = $('[data-system=size]');
@@ -397,6 +401,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       try { v = FACTORIES[name](ctx); content.append(v.root); views.set(name, v); }
       catch (error) { fail(error); return; }
     } else run(() => v.refresh());
+    hideFastScroll();
     closeSheets();
     if (sidePreview) previewSide(null);
     unlock();
@@ -426,6 +431,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     v.onPlayback?.(playback);
   }
   function showHome(immediate = false) {
+    hideFastScroll();
     closeSheets();
     if (sidePreview) previewSide(null);
     if (locked) return;
@@ -479,6 +485,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     homeTimer = win.setTimeout(() => delete screen.dataset.homeIn, 800);
   }
   function back() {
+    hideFastScroll();
     // The page an app draws next comes in from the left (ui/common.js).
     screen.dataset.navBack = String(Date.now());
     if (sheet) { sheet.close(null); return; }
@@ -487,6 +494,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     showHome();
   }
   function lock() {
+    hideFastScroll();
     closeSheets();
     if (active) views.get(active)?.leave?.();
     locked = true;

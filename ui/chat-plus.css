@@ -67,6 +67,7 @@
 .role-sticker span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .role-sticker img{width:66px;height:66px;object-fit:contain;border-radius:14px;background:var(--card2)}
 .role-sticker img:not([src]){visibility:hidden}
+.rs-preview-image{display:block;width:min(100%,270px);margin:0 auto 10px;aspect-ratio:1;object-fit:contain;border-radius:18px;background:var(--card2)}
 .rs-moods{margin-bottom:12px}
 .rs-moods .status-chip small{margin-left:3px;font-size:10px;font-weight:700;opacity:.65}
 .chat-sticker img[data-chat-photo]:not([src]){visibility:hidden}
@@ -94,7 +95,8 @@
 
 /* ---------- 群游戏 ---------- */
 .cg-card{display:grid;gap:8px;width:236px;max-width:100%;padding:10px 12px;border-radius:18px;background:var(--card);box-shadow:inset 0 0 0 1.5px var(--line),0 3px 0 var(--line);color:var(--ink);text-align:left}
-.game-kind{font-size:11.5px;font-weight:800;color:var(--ink2)}
+.game-kind{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:800;color:var(--ink2)}
+.game-kind .icon{width:15px;height:15px;color:var(--accent-ink)}
 .cg-title{font-size:15px;line-height:1.4;overflow-wrap:anywhere}
 .cg-foot{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:22px;font-size:11.5px;font-weight:700;color:var(--ink2)}
 .cg-foot .text-button,.game-acts .text-button{min-height:26px;padding:2px 4px;font-size:12.5px}
@@ -120,7 +122,7 @@
 .chain-list b{flex:none;max-width:5em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--ink2)}
 .chain-list span{min-width:0;overflow-wrap:anywhere}
 .chain-more{font-size:11px;color:var(--ink2)}
-.game-pick .game-ico{display:grid;place-items:center;width:34px;font-size:22px}
+.game-pick .list-row>.icon{width:24px;height:24px;margin:0 5px;color:var(--accent-ink)}
 .vote-inputs{display:grid;gap:6px}
 
 /* ---------- 关键词彩蛋 ---------- */
@@ -350,6 +352,7 @@
 .ep-cats::-webkit-scrollbar{display:none}
 .ep-cats button{flex:1 0 auto;min-width:34px;height:32px;min-height:0;padding:0 6px;border-radius:9px;background:transparent;box-shadow:none;font-size:18px;opacity:.55;filter:grayscale(.6);transition:opacity .2s,filter .2s,background .2s}
 .ep-cats.kao button{font-size:12px;font-weight:800;color:var(--ink2);filter:none}
+.ep-cats .icon{width:16px;height:16px;vertical-align:middle}
 .ep-cats button[aria-current=true]{opacity:1;filter:none;background:var(--accent-soft);color:var(--accent-ink)}
 /* 0.9.47 · 论坛 → 网名: a picture beside each name when 「自己设」. */
 .net-row{display:flex;align-items:flex-end;gap:10px}

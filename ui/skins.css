@@ -212,7 +212,8 @@
 :root[data-skin=fresh] .composer .send{box-shadow:none}
 :root[data-skin=fresh] .th-title strong{font-family:var(--serif);letter-spacing:.06em}
 :root[data-skin=fresh] .tool-ico{border-radius:16px}
-:root[data-skin=fresh] .tool-ico:not([data-tool=redpacket]):not([data-tool=transfer]){background:var(--card);box-shadow:inset 0 0 0 1px var(--line)}
+:root[data-skin=fresh] .tool-ico:not([data-tool=redpacket]):not([data-tool=transfer]):not([data-tool=song]){background:var(--card);box-shadow:inset 0 0 0 1px var(--line)}
+:root[data-skin=fresh] .tool-ico[data-tool=song]{background:#d9507b}
 
 /* ---------- Skin picker (settings) ---------- */
 .skin-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:12px 0 6px}

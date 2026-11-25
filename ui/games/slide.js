@@ -23,7 +23,7 @@ export function shuffled(count = 200, random = rand) {
 }
 
 export default {
-  id: 'slide', name: '数字华容道', icon: '🧩', colors: ['#b8ecff', '#3aa6d6'], note: '1 到 15 排好', unit: '步', lower: true,
+  id: 'slide', name: '数字华容道', icon: 'puzzle', art: '🧩', accent: '#3aa6d6', accentLight: '#b8ecff', note: '1 到 15 排好', unit: '步', lower: true,
   how: '点空格旁边的数字（或滑动、方向键）把它推进空格，排成 1 到 15。',
   make({doc, host, api, saved}) {
     const el = doc.createElement('div');

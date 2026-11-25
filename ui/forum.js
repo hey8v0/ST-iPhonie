@@ -5,7 +5,7 @@ import {createView, esc, btn, field, input, textArea, toggle, heading, avatar, a
 import {icon} from './icons.js';
 import {shareToChat} from './share-to-chat.js';
 import {forumAvatar} from '../core/forum.js';
-import {thumbBlob} from './thumbs.js';
+import {pickReplacement} from './replacement-album.js';
 
 function ago(at) {
   const s = (Date.now() - at) / 1000;
@@ -125,23 +125,11 @@ export function forumApp(ctx) {
       try { api.saveChatOptions({netNames: patch}); d.close(); ctx.notify('网名已保存'); render(); } catch (error) { ctx.notify(error.message, {error: true}); }
     });
   }
-  /** One picture for a 网名: a recent photo of the album, or a new one uploaded (it goes into the album). */
-  function pickPicture() {
-    return new Promise(async resolve => {
-      const rows = (await api.listPhotos()).slice(0, 24), urls = [];
-      let picked = null;
-      const d = ctx.dialog('选一张头像', `<label class="secondary file-button">${icon('import')}上传图片<input type="file" accept="image/*" data-net-file hidden></label>
-        ${rows.length ? `<div class="photo-grid pick-photos">${rows.map(r => `<button type="button" data-net-photo="${esc(r.id)}" aria-label="用 ${esc(r.name)}"><img alt=""></button>`).join('')}</div>` : '<p class="hint">相册里还没有照片。</p>'}`, {over: true});
-      d.onClose(() => { for (const u of urls) ctx.win.URL.revokeObjectURL(u); resolve(picked); });
-      for (const r of rows) thumbBlob(api, r).then(blob => { const img = d.body.querySelector(`[data-net-photo="${r.id}"] img`); if (blob && img && d.live) { const u = ctx.win.URL.createObjectURL(blob); urls.push(u); img.src = u; } }).catch(() => {});
-      d.body.addEventListener('click', e => { const id = e.target.closest('[data-net-photo]')?.dataset.netPhoto; if (id) { picked = id; d.close(); } });
-      d.body.addEventListener('change', e => {
-        const file = e.target.closest('[data-net-file]')?.files?.[0];
-        if (!file) return;
-        if (!/^image\//.test(file.type)) { ctx.notify('请选择图片文件'); return; }
-        api.addPhoto({name: file.name, blob: file}).then(photo => { picked = photo.id; d.close(); }).catch(error => ctx.notify(error.message));
-      });
-    });
+  async function pickPicture() {
+    const selected = await pickReplacement(ctx, api, {title:'选一张头像', accept:'image/*', over:true});
+    if (!selected || typeof selected === 'string') return selected;
+    if (!/^image\//.test(selected.type)) { ctx.notify('请选择图片文件'); return null; }
+    return (await api.addPhoto({name:selected.name, blob:selected})).id;
   }
   function newPost() {
     const d = sheet('发帖', `<p class="hint forum-as">以「${esc(nameOf('me'))}」发帖 ${btn('net-names', '改网名', 'text-button')}</p>${field('标题', input('title', '', 'text', 'maxlength="60" placeholder="一句话说清楚想聊什么"'))}${field('正文', textArea('text', '', 'rows="5" maxlength="2000" placeholder="写点什么…"'))}

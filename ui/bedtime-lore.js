@@ -1,7 +1,7 @@
 import {swipeRow, mountSwipeList} from './swipe-list.js';
 import {btn, esc} from './common.js';
 
-export function bedtimeLore(ctx, form, remember, onCount) {
+export function bedtimeLore(ctx, form, remember, onCount, {addTitle = '添加到睡前故事'} = {}) {
   let countLabel = '', version = 0, loading = false;
   function read(full) {
     const chat = ctx.api.getState().chat;
@@ -22,7 +22,7 @@ export function bedtimeLore(ctx, form, remember, onCount) {
     finally { if (turn === version) loading = false; }
   }
   function pickBook(names) {
-    const d = ctx.dialog('添加到睡前故事', `<input class="search" type="search" placeholder="搜索书名" aria-label="搜索可添加的世界书">
+    const d = ctx.dialog(addTitle, `<input class="search" type="search" placeholder="搜索书名" aria-label="搜索可添加的世界书">
       <div class="pick-list bt-lore-list"></div>`, {over:true});
     d.body.classList.add('bt-lore-sheet');
     const search = d.body.querySelector('input'), list = d.body.querySelector('.pick-list');
