@@ -16,6 +16,7 @@ import { DEFAULT_FORMAT, parseDialogue, renderDialogue, plainDialogue, promptPla
 import { FloatingPlayer } from './core/floating.js';
 import { renderPictures, drawPromptPlan, tavernPicture } from './core/draw.js';
 import { outgoingChat, storyReply } from './core/outgoing.js';
+import {renderPhoneNotes} from './core/phone-tags.js';
 import { createPictureHost } from './host-pictures.js';
 import {publicApi, closePublicApi, registerDrawCommand} from './host-public.js';
 import { createChatHost } from './host-chat.js';
@@ -43,7 +44,7 @@ import { createBookHost } from './host-book.js';
 import { createBedtimeHost } from './host-bedtime.js';
 let bedtimeHost = null, stopChatClock = null;
 import { createSongHost } from './host-song.js';
-const RUNTIME_VERSION='1.0.23';
+const RUNTIME_VERSION='1.0.24';
 const base=new URL('.',import.meta.url),marker=globalThis.crypto?.randomUUID?.()||'unavailable';
 let stopDiagnostics=null,storyWork=null;
 let active=false,hooked=false,settings,player,panel,frame,observer,renderTimer,floating,lineRaf,lineMedia,playbackMessage,selectedMessage,backend,enabling;
@@ -133,7 +134,9 @@ const voicePlan={wanted:()=>voiceOn()&&settings.general.voiceMode==='separate',h
 // become waves (or plain lines when voice is off).
 const soundsOn=()=>settings?.sounds?.enabled===true;
 // marks: the lines become marks now and waves after the card's regex and Markdown (waveMarks); lastRoles: their speakers.
-let lastRoles=[],lastInner=[];const phoneNote=text=>String(text).replace(/<(iphonie|phone)(?=[\s/>])([^>]*)>([\s\S]*?)<\/\1\s*>/gi,(m,tag,attrs,inside)=>{const group=attrs.match(/group\s*=\s*["'“”「『]?([^"'“”」』>]+)/)?.[1]?.trim();const who=[...new Set(inside.split(/\n/).map(l=>l.match(/^\s*\**\s*[[【]?([^\]】:：\n]{1,40}?)[\]】]?\s*[:：]/)?.[1]?.trim()).filter(Boolean))];return !who.length?'':group?`<span class="sttts-phone-note">📱 群「${escapeHTML(group)}」里 ${escapeHTML(who.join('、'))} 说了话</span>`:`<span class="sttts-phone-note">📱 ${escapeHTML(who.join('、'))} 给你发了消息</span>`;});function transform(text,marks=false,id){const hidden=settings?.general?.hideStoryWaves===true;const out=renderBgm(renderSounds(renderPictures(phoneNote(withoutOutfits(text)),marker,{passive:hidden,pictures:context()?.chat?.[id]?.extra?.sttts_pics||{}}),marker,!hidden&&soundsOn()),marker,!hidden&&settings?.music?.bgm&&settings.music.bgm!=='off');const p=parsed(out);lastRoles=p.lines.map(l=>l.role);
+let lastRoles=[],lastInner=[];
+const phoneNote = text => renderPhoneNotes(text, context()?.powerUserSettings?.reasoning);
+function transform(text,marks=false,id){const hidden=settings?.general?.hideStoryWaves===true;const out=renderBgm(renderSounds(renderPictures(phoneNote(withoutOutfits(text)),marker,{passive:hidden,pictures:context()?.chat?.[id]?.extra?.sttts_pics||{}}),marker,!hidden&&soundsOn()),marker,!hidden&&settings?.music?.bgm&&settings.music.bgm!=='off');const p=parsed(out);lastRoles=p.lines.map(l=>l.role);
  // 心声 (its emotion says so, or the preset's marks wrap it) is shown in the story's italics, not as a quoted line.
  lastInner=withMarks(out,p.lines,settings.presets.find(x=>x.id===settings.activePreset)?.marks).map(l=>lineEffect(l)==='inner');
  return p.lines.length?(storyWavesOn()?(marks?markDialogue(out,p.format,lastInner):renderDialogue(out,p.format,marker,lastInner)):plainDialogue(out,p.format)):out;}

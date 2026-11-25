@@ -1,8 +1,11 @@
 import {icon} from './icons.js';
 
 const IDLE = 1000, SIDES = 6, HANDLE = 44;
+const MIN_VIEW_HEIGHT = 144, MIN_SCROLL_RANGE = 480, MIN_SCROLL_SCREENS = 1.5;
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 const overflow = value => value === 'auto' || value === 'scroll' || value === 'overlay';
+const longEnough = (height, distance) =>
+  height >= MIN_VIEW_HEIGHT && distance >= Math.max(MIN_SCROLL_RANGE, height * MIN_SCROLL_SCREENS);
 
 /** One handle follows the long scroll area that was just scrolled, including nested lists and sheets. */
 export function installFastScroll(win, root, signal) {
@@ -42,7 +45,7 @@ export function installFastScroll(win, root, signal) {
     frame = 0;
     if (!active || !root.contains(active) || active.closest('[hidden],[inert],.overlay-out')) return hide();
     const height = active.clientHeight, max = range(active);
-    if (height < 144 || max < height * .75) return hide();
+    if (!longEnough(height, max)) return hide();
     const boundary = active.closest('.sheet') || root;
     if (layer.parentElement !== boundary) boundary.append(layer);
     const rootBox = boundary.getBoundingClientRect(), box = active.getBoundingClientRect();
@@ -92,8 +95,8 @@ export function installFastScroll(win, root, signal) {
     const el = event.target;
     if (!(el instanceof win.HTMLElement) || el === root || (drag && el !== active)) return;
     if (el !== active) {
-      if (el.matches('textarea,input,select') || el.isContentEditable || el.clientHeight < 144
-        || range(el) < el.clientHeight * .75 || !overflow(win.getComputedStyle(el).overflowY)) return;
+      if (el.matches('textarea,input,select') || el.isContentEditable
+        || !longEnough(el.clientHeight, range(el)) || !overflow(win.getComputedStyle(el).overflowY)) return;
       active = el;
     }
     schedule();

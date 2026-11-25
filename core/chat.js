@@ -13,6 +13,7 @@ import {languageName} from './languages.js';
 import {normalizeMemory} from './memory.js';
 import {NARRATOR} from './narration.js';
 import {storyText, NARRATION_SKIP} from './story-scope.js';
+import {phoneTagSpans} from './phone-tags.js';
 import {normalizeBubbleSets, normalizeBubbleOf} from './bubble-css.js';
 import {BOARDS, BOARD_TYPES, boardText, cellName} from './board.js';
 import {ownerName} from './wardrobe.js';
@@ -378,12 +379,11 @@ export function normalizePeeked(value, now = Date.now()) {
 export function normalizeProactive(value = {}) {
   return {on: value?.on === true, every: count(value?.every, 0, 100, 0), dailyMax: count(value?.dailyMax, 0, 99, 3), clock: value?.clock === true};
 }
-export const PHONE_TAG = /<(iphonie|phone)(?=[\s/>])([^>]*)>([\s\S]*?)<\/\1\s*>/gi;
 /**
  * What a story reply sent to the phone: [{group, text}] for each <phone>…</phone> (group: the group chat's name of
  * <phone group="群名">, '' for private messages).
  */
-export const phoneParts = text => [...String(text ?? '').matchAll(PHONE_TAG)].map(m => ({group: (m[2].match(/group\s*=\s*["'“”「『]?([^"'“”」』>]+)/)?.[1] || '').trim(), text: m[3].trim()})).filter(p => p.text);
+export const phoneParts = (text, reasoning) => phoneTagSpans(String(text ?? ''), reasoning).filter(p => p.text).map(({group, text}) => ({group, text}));
 /** The inside of each <phone>…</phone>. */
 export const phoneBlocks = text => phoneParts(text).map(p => p.text);
 /**

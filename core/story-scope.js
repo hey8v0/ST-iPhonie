@@ -1,4 +1,6 @@
 // Shared narrative extraction. Offsets always refer to the unchanged original reply.
+import {phoneTagSpans} from './phone-tags.js';
+
 /** Tags read past by default: the usual places for 小剧场, status bars and folded extras. */
 export const NARRATION_SKIP = Object.freeze(['小剧场', '状态栏', 'theater', 'status', 'statusbar', 'details']);
 /** Tags a preset wraps the story in: when a reply has one, only what is inside it is read. */
@@ -55,14 +57,22 @@ export function skippedRanges(raw, skip = NARRATION_SKIP, body = NARRATION_BODY)
   add(/```[\s\S]*?(?:```|$)/g);
   // The phone's own tags, with what is inside (a picture's prompt, a sound's name, phone messages).
   add(/<(?:i-img|img)(?=[\s/>])[^<>]*>[^<]*<\/(?:i-img|img)\s*>|<(?:i-img|img)(?=[\s/>])[^<>]*\/?>/gi);
-  for (const tag of ['sfx', 'ambience', 'bgm', 'phone', 'iphonie', 'outfit']) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, 'gi'));
+  for (const tag of ['sfx', 'ambience', 'bgm', 'outfit']) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, 'gi'));
+  const phone = phoneTagSpans(text);
+  let nextPhone = 0;
+  if (phone.length) finds.push(from => {
+    while (phone[nextPhone]?.start < from) nextPhone++;
+    const span = phone[nextPhone];
+    return span ? [span.start, span.end] : null;
+  });
   // Pictures other plugins keep in the reply as their prompt, shown in its place as the picture (柏宝绘's <bbi_image>).
   for (const tag of OTHER_PICTURES) add(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?(?:<\\/${tag}\\s*>|$)`, 'gi'));
   // Status panels written as [HUD_START]…[HUD_END] (any NAME_START / NAME_END pair).
   add(/\[([A-Za-z][\w-]*)_START\][\s\S]*?(?:\[\1_END\]|$)/g);
   // Thinking and the listed tags: to their end, or to the end of the reply when it was never closed; 「开头…结尾」
   // from its opening words to its closing ones.
-  for (const tag of ['think', 'thinking', 'reasoning', 'analysis', 'style', 'script', ...new Set([...text.matchAll(/<([\w一-鿿:-]+)(?=[\s>/])/g)].map(m=>m[1]).filter(name=>/^(?:bakemono|summary\w*|memory|abstract|options?|choices?|branch\w*|table\w*|update\w*|var\w*|state\w*|status\w*|摘要|总结|选项)$/i.test(name))), ...cleanSkip(skip)]) {
+  for (const tag of ['think', 'thinking', 'reasoning', 'thought', 'analysis', 'style', 'script', ...new Set([...text.matchAll(/<([\w一-鿿:-]+)(?=[\s>/])/g)].map(m=>m[1]).filter(name=>/^(?:bakemono|summary\w*|memory|abstract|options?|choices?|branch\w*|table\w*|update\w*|var\w*|state\w*|status\w*|摘要|总结|选项)$/i.test(name))), ...cleanSkip(skip)]) {
+    if (/^(?:phone|iphonie)$/i.test(tag)) continue;
     const marker = /^<!--(.*?)-->$/.exec(tag);
     if (marker) {
       const name = escapeRe(marker[1]), open = new RegExp(`<!--\\s*${name}\\s*-->`, 'gi'), close = new RegExp(`<!--\\s*(?:/\\s*${name}|${name}\\s*(?:结束|END)|(?:结束|END)\\s*${name})\\s*-->`, 'gi'), nextOpen=new RegExp(open.source,'gi');

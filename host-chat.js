@@ -805,6 +805,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     if (!o.on || (o.dailyMax > 0 && today().n >= o.dailyMax)) return false;
     return !(o.every > 0) || quiet >= o.every - 1;
   }
+  const messagePhoneParts = (ctx, message) => phoneParts(message?.mes, ctx?.powerUserSettings?.reasoning);
   /** A story reply finished: what it sent to the phone (<phone>) arrives, once per version of the reply; when it is
    * the phone's turn and nothing came, someone is asked whether they would text first (one phone request). */
   async function storyReplied(id) {
@@ -813,7 +814,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
     const sent = await deliver(id);
     if (!valid()) return;
     if (sent) { quiet = 0; return; }
-    const tagged = phoneParts(context()?.chat?.[Number(id)]?.mes || '').length > 0;
+    const ctx = context(), tagged = messagePhoneParts(ctx, ctx?.chat?.[Number(id)]).length > 0;
     if (!(o.every > 0) || ++quiet < o.every) return;
     quiet = 0;
     // Premature tags still advance the cadence; failed/unknown tagged deliveries do not trigger another model call.
@@ -825,18 +826,18 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
    * photos, money, calls, 朋友圈…) to each sender's chat, <phone group="…"> to that group. Returns how many arrived.
    */
   function restoreLatestPhoneText() {
-    const messages=context()?.chat || [];
-    const index=messages.findLastIndex(m=>m && !m.is_user && !m.is_system && phoneParts(m.mes).length);
+    const ctx = context(), messages = ctx?.chat || [];
+    const index=messages.findLastIndex(m=>m && !m.is_user && !m.is_system && messagePhoneParts(ctx, m).length);
     if (index<0) throw Error('当前聊天没有带手机消息的回复');
     return deliver(index,true);
   }
   function deliver(id,restoreText=false) {
     const visit = chatGuard(true), ctx = context(), index = Number.isInteger(Number(id)) ? Number(id) : (ctx?.chat?.length || 0) - 1;
-    const message = ctx?.chat?.[index], signature = JSON.stringify(phoneParts(message?.mes || '')), swipe = message?.swipe_id;
+    const message = ctx?.chat?.[index], signature = JSON.stringify(messagePhoneParts(ctx, message)), swipe = message?.swipe_id;
     const valid = () => {
-      const now = context()?.chat?.[index];
+      const current = context(), now = current?.chat?.[index];
       return visit() && now && !now.is_user && !now.is_system && now.swipe_id === swipe &&
-        (now === message || !!message?.send_date && now.send_date === message.send_date && now.name === message.name) && JSON.stringify(phoneParts(now.mes || '')) === signature;
+        (now === message || !!message?.send_date && now.send_date === message.send_date && now.name === message.name) && JSON.stringify(messagePhoneParts(current, now)) === signature;
     };
     const task = deliveryQueue.then(async () => {
       if (!valid()) { if (signature !== '[]') phoneLog('回复、分支或聊天已变化，未投递旧消息'); return 0; }
@@ -855,7 +856,7 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
   async function deliverOne(index, valid, failed = () => {},restoreText=false) {
     const ctx = context(), s = settings(), m = ctx?.chat?.[index];
     if (!valid() || !s.chat.proactive?.on || !m || m.is_user || m.is_system) return 0;
-    const rawParts = phoneParts(m.mes), story = [ctx.getCurrentChatId?.() || ctx.chatId || '', index].join('|');
+    const rawParts = messagePhoneParts(ctx, m), story = [ctx.getCurrentChatId?.() || ctx.chatId || '', index].join('|');
     // Formatting a line can leave the same message indented on a later pass.
     const normalized = rawParts.map(p => ({...p,text:p.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).join('\n')}));
     const threadsForStory = await backend.storyThreads(story); requireChat(valid);
