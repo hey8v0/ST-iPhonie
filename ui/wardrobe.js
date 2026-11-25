@@ -698,7 +698,7 @@ export function wardrobeApp(ctx) {
   async function setAction(s, key) {
     if (key === 'wear') await wearSet(s);
     if (key === 'off') { await api.clearWardrobeWear(s.owner); await load(); }
-    if (key === 'candidate') await changeCandidate(s.owner, s.id, !candidate);
+    if (key === 'candidate') await changeCandidate(s.owner, s.id, !refsFor(s.owner).includes(s.id));
     // 衣柜 × 聊天 (0.9.35): the set as a card in a chat, with a picture of one of its pieces when there is one.
     if (key === 'send') {
       const photoId = s.photoId || s.items.map(id => all.items.find(x => x.id === id)?.photoId).find(Boolean) || '';
