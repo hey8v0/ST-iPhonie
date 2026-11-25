@@ -31,18 +31,20 @@ export function refPanel({ctx, api, rerender, shown}) {
   const baseTools = () => ctx.paintBase ? `<div class="actions ref-base-tools">${btn('ref-paint-base', icon('paint') + '画布', 'secondary')}${btn('ref-pose', icon('person') + '3D 摆姿', 'secondary')}</div>` : '';
   function baseHTML() {
     if (!base) return `<div class="ref-empty"><div class="actions">${btn('ref-base-pick', icon('import') + '选一张', 'secondary')}${shown() ? btn('ref-base-shown', icon('image') + '用上面这张', 'secondary') : ''}</div></div>` + baseTools();
-    return `<div class="ref-card"><div class="ref-thumb" style="aspect-ratio:${base.width}/${base.height}"><img src="${esc(base.preview)}" alt="底图">${base.mask ? `<span class="ref-mask" style="background:${esc(look().color)};-webkit-mask-image:url(data:image/png;base64,${base.mask});mask-image:url(data:image/png;base64,${base.mask})" aria-hidden="true"></span>` : ''}${base.focus ? `<span class="ref-focus" style="left:${base.focus.x / base.width * 100}%;top:${base.focus.y / base.height * 100}%;width:${base.focus.w / base.width * 100}%;height:${base.focus.h / base.height * 100}%" aria-hidden="true"></span>` : ''}</div>
-      <div class="ref-main"><p class="ref-title"><b>${repaint() ? (base.focus ? '聚焦重绘' : '局部重绘') : '图生图'}</b><small>${base.width}×${base.height}</small></p>
+    return `<div class="ref-card ref-base-card"><div class="ref-card-head"><div class="ref-thumb" style="aspect-ratio:${base.width}/${base.height};width:${Math.min(56, 80 * base.width / base.height)}px"><img src="${esc(base.preview)}" alt="底图">${base.mask ? `<span class="ref-mask" style="background:${esc(look().color)};-webkit-mask-image:url(data:image/png;base64,${base.mask});mask-image:url(data:image/png;base64,${base.mask})" aria-hidden="true"></span>` : ''}${base.focus ? `<span class="ref-focus" style="left:${base.focus.x / base.width * 100}%;top:${base.focus.y / base.height * 100}%;width:${base.focus.w / base.width * 100}%;height:${base.focus.h / base.height * 100}%" aria-hidden="true"></span>` : ''}</div>
+      <p class="ref-title"><b>${repaint() ? (base.focus ? '聚焦重绘' : '局部重绘') : '图生图'}</b><small>${base.width}×${base.height}</small></p>
+      ${btn('ref-base-clear', icon('trash'), 'ref-remove', 'aria-label="去掉底图"')}</div>
+      <div class="ref-main">
         ${slider('strength', '强度', base.strength, .01, repaint() ? 1 : .99, .01, repaint() ? '涂出来的地方重画得多彻底：1 是全部重画；低一些保留原来那块的样子，只改一点（V4 及以后）。' : '越高越不像原图：0.3 左右小修，0.7 左右重画但保留构图。')}
         ${repaint() ? '' : slider('noise', '噪声', base.noise, 0, .99, .01, '给原图加噪点，让细节多一些变化。一般 0 到 0.1。')}
         ${repaint() && !base.focus ? `<div class="setting-row"><span>盖回原图${help('开着时，没涂的地方一个像素都不变；关掉让 AI 整张微调，接缝更自然，但别处也可能有细微变化。')}</span><input class="switch" type="checkbox" data-ref-overlay aria-label="盖回原图" ${base.overlay === false ? '' : 'checked'}></div>` : ''}
-        <div class="actions ref-actions">${btn('ref-mask', icon('paint') + (repaint() ? '改涂的地方' : '涂出要重画的地方'), 'secondary small')}${btn('ref-pad', icon('expand') + '扩图 · 裁剪', 'secondary small')}${repaint() ? btn('ref-unmask', '不涂了', 'text-button') : ''}${btn('ref-base-clear', icon('trash'), 'text-button', 'aria-label="去掉底图"')}</div></div></div>` + baseTools();
+        <div class="actions ref-actions">${btn('ref-mask', icon('paint') + (repaint() ? '改涂的地方' : '涂出要重画的地方'), 'secondary small')}${btn('ref-pad', icon('expand') + '扩图 · 裁剪', 'secondary small')}${repaint() ? btn('ref-unmask', '不涂了', 'text-button') : ''}</div></div></div>` + baseTools();
   }
   function refsHTML() {
     if (!takesReference(model())) return `<p class="hint ref-note" data-keep-hint>${icon('alert')}参考图支持 V4.5 和 V5，可在「参数」里切换模型。</p>`;
     const v5 = isV5(model()), kinds = v5 ? [...KINDS, ['outfit', '服装']] : KINDS;
     return (refs.length ? refs.map((r, i) => `<div class="ref-card ref-director${r.enabled === false ? ' off' : ''}">
-      <div class="ref-director-head"><div class="ref-thumb"><img src="${esc(r.preview)}" alt=""></div>
+      <div class="ref-card-head"><div class="ref-thumb"><img src="${esc(r.preview)}" alt=""></div>
         <div class="ref-director-caption"><b>参考图 ${i + 1}</b><label><span>本次启用</span><input class="switch" type="checkbox" data-ref-on data-index="${i}" aria-label="本次启用参考图 ${i + 1}"${r.enabled === false ? '' : ' checked'}></label></div>
         ${btn('ref-remove', icon('trash'), 'ref-remove', `data-index="${i}" aria-label="移除参考图 ${i + 1}"`)}
       </div>
