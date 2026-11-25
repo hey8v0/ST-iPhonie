@@ -2192,11 +2192,11 @@ button.gift-item[data-short]{opacity:.55}
 .chat-sticker.broken img{display:none}
 .chat-sticker.broken::after{content:attr(data-name);display:block;padding:9px 13px;border-radius:16px;background:var(--card);color:var(--ink2);font-size:14px}
 .chat-sticker:not(:has(img))::after{content:attr(data-name);display:block;padding:9px 13px;border-radius:16px;background:var(--card);color:var(--ink2);font-size:14px}
-.sticker-manage{display:grid;gap:2px;max-height:260px;overflow-y:auto}
-.sticker-row{display:flex;align-items:center;gap:10px;padding:6px 0}
-.sticker-row+.sticker-row{border-top:1px solid var(--line)}
+.sticker-manage{max-height:260px;overflow-y:auto;border-radius:12px}
+.sticker-row{display:flex;align-items:center;gap:10px;padding:6px 8px}
 .sticker-row img{width:44px;height:44px;flex-shrink:0;object-fit:contain;border-radius:8px;background:var(--card2)}
 .sticker-row>span{flex:1;min-width:0;display:grid}
+.sticker-row strong{overflow-wrap:anywhere}
 .sticker-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink2);font-size:11px}
 .sound-search{margin:6px 0 2px}
 

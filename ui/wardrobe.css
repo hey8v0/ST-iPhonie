@@ -52,7 +52,6 @@
 .wardrobe-tryon{display:block;width:118px;aspect-ratio:3/4;overflow:hidden;margin:6px 0 4px;border-radius:14px;background:var(--card2);box-shadow:var(--shadow)}
 .wardrobe-tryon img{width:100%;height:100%;object-fit:cover;display:block}
 .wardrobe-sets .list-row{gap:6px;min-height:58px;padding:8px 0}
-.wardrobe-sets .list-row+.list-row{border-top:1px solid var(--line)}
 .wardrobe-set-main{flex:1;min-width:0;display:grid;gap:2px;text-align:left}
 .wardrobe-set-main strong{font-size:14px}
 .wardrobe-set-main small{margin:0;color:var(--ink2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}

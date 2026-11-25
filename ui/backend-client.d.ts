@@ -1241,7 +1241,7 @@ export interface BackendFacade {
     exportWardrobePack(ids?: string[]): Promise<Blob>;
     previewWardrobePack(file: Blob): Promise<WardrobePackPreview>;
     importWardrobePack(file: Blob, options?: {overwrite?: boolean; expected?: WardrobePackPreview}): Promise<{added:number; replaced:number}>;
-    editWardrobeCategory(options: {old?:string; name?:string; remove?:boolean; deleteItems?:boolean; expectedCount?:number}): Promise<string[]>;
+    editWardrobeCategory(options: {old?:string; name?:string; remove?:boolean; deleteItems?:boolean; expectedCount?:number; order?:string[]}): Promise<string[]>;
     setWardrobeCandidate(owner: string, id: string, on: boolean): Promise<void>;
     saveWardrobeItem(item: Partial<WardrobeItem> & { owner: string }): Promise<WardrobeItem>;
     saveWardrobeSet(set: Partial<WardrobeSet> & ({id: string} | {owner: string; description: string})): Promise<WardrobeSet>;

@@ -19,12 +19,12 @@ const rubber = (over, room = 90) => room * (1 - Math.exp(-over / room));
 const width = n => n * (BUTTON + GAP) + GAP;
 
 /** actions: [{key, label, icon, danger}] shown from left to right behind the row. */
-export function swipeRow(id, inner, actions = [], {className = '', label = ''} = {}) {
+export function swipeRow(id, inner, actions = [], {className = '', label = '', more = true} = {}) {
   const n = actions.length;
   return `<div class="sw-row${className ? ' ' + className : ''}" data-swipe="${esc(id)}" style="--sw-w:${width(n)}px">`
     + `<div class="sw-actions">${actions.map((a, i) => `<button type="button" class="sw-act${a.danger ? ' sw-danger' : ''}" data-sw-act="${esc(a.key)}" style="--i:${n - 1 - i}" tabindex="-1" aria-label="${esc(a.label)}${label ? ' ' + esc(label) : ''}">${icon(a.icon || 'star')}<span>${esc(a.label)}</span></button>`).join('')}</div>`
     + `<div class="sw-main"><span class="sw-check" aria-hidden="true">${icon('check')}</span><div class="sw-body">${inner}</div>`
-    + (n ? `<button type="button" class="sw-more" data-sw-more aria-label="更多操作${label ? ' ' + esc(label) : ''}" aria-expanded="false">⋯</button>` : '') + `</div></div>`;
+    + (n && more ? `<button type="button" class="sw-more" data-sw-more aria-label="更多操作${label ? ' ' + esc(label) : ''}" aria-expanded="false">⋯</button>` : '') + `</div></div>`;
 }
 
 /**

@@ -140,8 +140,9 @@
 /* ---------- 聊天装扮, 表情包从图片导入 ---------- */
 .deco-sample.look-same{display:grid;place-items:center;background:var(--card2);color:var(--ink2);box-shadow:inset 0 0 0 1.5px var(--line)}
 .deco-sample.look-same svg{width:18px;height:18px}
-.sticker-files{margin-top:-4px}
-.sticker-files .file-button{display:inline-flex;align-items:center;gap:6px}
+.sticker-import-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+.sticker-import-actions>*{min-width:0;padding-inline:10px;white-space:normal}
+.sticker-import-actions .file-button{grid-column:1/-1}
 .sticker-names{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:12px 8px;margin-bottom:6px}
 .sticker-name{display:grid;justify-items:center;gap:5px}
 .sticker-name img{width:68px;height:68px;object-fit:contain;border-radius:12px;background:var(--card2)}

@@ -12,6 +12,7 @@ import {genderOf, hasEnglishTags} from '../core/draw.js';
 import {SHARED_OWNER, WARDROBE_RECOGNITION_BATCH, WARDROBE_RECOGNITION_MAX, WARDROBE_DRAW_MAX, WARDROBE_CATEGORIES, WARDROBE_LIMITS, ownerKey, ownerName, styleTags, wearTags} from '../core/wardrobe.js';
 import {shareToChat} from './share-to-chat.js';
 import {nameCategory, wardrobeSettings, sharedWardrobeMenu} from './wardrobe-manage.js';
+import {mountSwipeList, swipeRow} from './swipe-list.js';
 
 const PHOTO_TYPES = 'image/png,image/jpeg,image/webp';
 const UNSORTED = '未分类';
@@ -27,6 +28,7 @@ const HELP = '衣柜是你和这张卡的角色（角色 App 里的）的，点�
 
 export function wardrobeApp(ctx) {
   const {api, win} = ctx, v = createView(ctx, 'wardrobe'), urls = new Map(), drafts = new Map(), recognizing = new Set();
+  let setSwipes = [];
   // owner: whose 衣柜 is open ('me' or 'role:<name>'); tab: 衣柜 or 搭配; picked: the pieces tapped (this owner's).
   let owner = 'me', tab = 'closet', filter = '', picked = new Set(), all = {items: [], sets: [], wears: [], categories:[...WARDROBE_CATEGORIES], candidates:[]}, turn = 0, soon = 0, suggesting = false, drawing = false, saving = false;
   const me = () => api.userName?.() || '我';
@@ -233,7 +235,12 @@ export function wardrobeApp(ctx) {
   }
   const act = (key, name, label, style = '') => `<button type="button" class="select-act${style}" data-action="${key}">${icon(name)}<span>${label}</span></button>`;
   const bar = () => `<div class="select-bar wardrobe-bar" role="toolbar" aria-label="选中的衣服"><div class="select-head"><span data-picked-count>已选 ${picked.size} 件</span>${btn('pick-clear', '清空', 'text-button')}</div><div class="select-acts">${catalogOpen ? act('pick-wear', 'hanger', '穿上') : act('pick-wear', 'hanger', '穿上') + act('pick-outfit', 'wand', '去搭配')}${api.wardrobeDrawItems ? act('pick-draw', 'paint', '批量出图') : ''}${act('pick-delete', 'trash', '拿出衣柜', ' select-danger')}</div></div>`;
-  const setRow = s => `<div class="list-row wardrobe-set" data-id="${esc(s.id)}">${s.photoId ? `<button type="button" class="wardrobe-set-photo" data-action="set-photo" data-id="${esc(s.id)}" aria-label="看 ${esc(s.name)} 的试穿图"><img data-photo="${esc(s.photoId)}" alt=""${urls.get(s.photoId) ? ` src="${esc(urls.get(s.photoId))}"` : '' }></button>` : ''}<button type="button" class="wardrobe-set-main" data-action="set-load" data-id="${esc(s.id)}"><strong>${esc(s.name)}</strong>${badge(s.id)}<small>${esc(s.description)}</small></button><button type="button" class="round-button" data-action="set-more" data-id="${esc(s.id)}" aria-label="${esc(s.name)} 的更多操作">${icon('more')}</button></div>`;
+  const setActions = [{key:'rename', icon:'edit', label:'改名'}, {key:'delete', icon:'trash', label:'删除', danger:true}];
+  const setRow = s => swipeRow(s.id, `<div class="list-row wardrobe-set" data-id="${esc(s.id)}">
+    ${s.photoId ? `<button type="button" class="wardrobe-set-photo" data-action="set-photo" data-id="${esc(s.id)}" aria-label="看 ${esc(s.name)} 的试穿图"><img data-photo="${esc(s.photoId)}" alt=""${urls.get(s.photoId) ? ` src="${esc(urls.get(s.photoId))}"` : '' }></button>` : ''}
+    <button type="button" class="wardrobe-set-main" data-action="set-load" data-id="${esc(s.id)}"><strong>${esc(s.name)}</strong>${badge(s.id)}<small>${esc(s.description)}</small></button>
+    <button type="button" class="round-button" data-action="set-more" data-id="${esc(s.id)}" aria-label="${esc(s.name)} 的更多操作">${icon('more')}</button>
+  </div>`, setActions, {label:s.name, more:false});
   function candidates() {
     const refs = new Set(refsFor()), valid = validRefs(owner);
     const items = all.items.filter(x => refs.has(x.id) && valid.has(x.id));
@@ -257,6 +264,7 @@ export function wardrobeApp(ctx) {
   }
   function render() {
     if (v.disposed) return;
+    clearSetSwipes();
     if (catalogOpen) return catalogPage();
     const list = owners();
     if (!list.some(o => o.key === owner)) { owner = 'me'; picked = new Set(); }
@@ -270,9 +278,18 @@ export function wardrobeApp(ctx) {
       + ownersRow(list) + libraryEntry + (wear ? wearCard(wear) : '')
       + `<div class="segmented wardrobe-tabs" role="group" aria-label="衣柜或搭配">${seg('tab', 'closet', '衣柜', tab)}${seg('tab', 'outfit', '搭配', tab)}</div>`
       + (tab === 'closet' ? closet(items) + (picked.size ? bar() : '') : outfit(items, sets)));
+    setSwipes = [...v.root.querySelectorAll('.wardrobe-sets')].map(list => mountSwipeList(list, {ctx, leftOnly:true,
+      onAction:(action, id) => {
+        const set = all.sets.find(s => s.id === id);
+        if (set) setAction(set, action).catch(error => ctx.notify(error.message, {error:true}));
+      }}));
     // The bar stays where it was when the page is drawn again (it came in once).
     if (hadBar) v.root.querySelector('.wardrobe-bar')?.style.setProperty('animation', 'none');
     thumbs();
+  }
+  function clearSetSwipes() {
+    for (const swipe of setSwipes) swipe.dispose();
+    setSwipes = [];
   }
   /** The small pictures not shown yet, as they come. */
   function thumbs(root = v.root, alive = () => !v.disposed) {
@@ -674,8 +691,11 @@ export function wardrobeApp(ctx) {
     const key = await menu(ctx, s.name, [
       {key:worn ? 'off' : 'wear', icon:'hanger', label:worn ? '脱下' : '穿上'},
       {key:'candidate', icon:candidate ? 'minus' : 'add', label:candidate ? '从备选移除' : '加入备选'},
-      {key:'send', icon:'share', label:'发给…'}, {key:'rename', icon:'edit', label:'改名'}, {key:'delete', icon:'trash', label:'删除', danger:true},
+      {key:'send', icon:'share', label:'发给…'}, ...setActions,
     ]);
+    await setAction(s, key);
+  }
+  async function setAction(s, key) {
     if (key === 'wear') await wearSet(s);
     if (key === 'off') { await api.clearWardrobeWear(s.owner); await load(); }
     if (key === 'candidate') await changeCandidate(s.owner, s.id, !candidate);
@@ -783,7 +803,7 @@ export function wardrobeApp(ctx) {
           {key:'settings', icon:'sliders', label:'衣柜设置'},
         ]);
         if (key === 'add') addSheet();
-        if (key === 'settings') await wardrobeSettings(ctx, {...all, categories:categoryNames()});
+        if (key === 'settings') await wardrobeSettings(ctx);
         break;
       }
       case 'tab': tab = el.dataset.value; render(); break;
@@ -872,9 +892,9 @@ export function wardrobeApp(ctx) {
   // Changes from anywhere (a photo recognized, the story changing clothes, a sync) come as one redraw.
   v.onWardrobe = () => { win.clearTimeout(soon); soon = win.setTimeout(() => load().catch(() => {}), 60); };
   v.refresh = () => load();
-  v.leave = () => { cancelHold(); pressedClick = ''; };
+  v.leave = () => { cancelHold(); pressedClick = ''; for (const swipe of setSwipes) swipe.close(); };
   const dispose = v.dispose;
-  v.dispose = () => { cancelHold(); win.clearTimeout(suppressTimer); win.clearTimeout(soon); for (const url of urls.values()) win.URL.revokeObjectURL(url); urls.clear(); dispose(); };
+  v.dispose = () => { clearSetSwipes(); cancelHold(); win.clearTimeout(suppressTimer); win.clearTimeout(soon); for (const url of urls.values()) win.URL.revokeObjectURL(url); urls.clear(); dispose(); };
   load().catch(error => ctx.notify(error.message, {error: true}));
   return v;
 }

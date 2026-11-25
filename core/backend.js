@@ -3250,23 +3250,31 @@ export class TTSBackend {
         await this.appsMutate('wardrobe', () => this.apps.put([{id, kind:'wardrobe-story', enabled, at:now, updatedAt:now}]));
         return enabled;
     }
-    async editWardrobeCategory({old = '', name = '', remove = false, deleteItems = false, expectedCount} = {}) {
+    async editWardrobeCategory({old = '', name = '', remove = false, deleteItems = false, expectedCount, order} = {}) {
         const before = categoryName(old), after = categoryName(name);
-        if ((!remove && !after) || (remove && !before)) throw Error('请填写有效的分类名称');
+        const sorting = Array.isArray(order);
+        if (!sorting && (remove ? !before : !after)) throw Error('请填写有效的分类名称');
         let gone = [];
         await this.appsMutate('wardrobe', () => this.apps.transformKinds(['wardrobe-item','wardrobe-categories'], rows => {
             const items = rows.filter(row => row.kind === 'wardrobe-item'), saved = rows.find(row => row.id === CATEGORY_DOC);
             const names = wardrobeCategories(items, saved?.names);
+            const now = Date.now();
+            const categoryDoc = names => ({id:CATEGORY_DOC, kind:'wardrobe-categories', names, at:saved?.at || now, updatedAt:now});
+            if (sorting) {
+                const requested = new Set(order);
+                if (order.length !== names.length || requested.size !== names.length || names.some(name => !requested.has(name))) {
+                    throw Error('分类已变化，请重新打开管理分类');
+                }
+                return [categoryDoc(order), ...items];
+            }
             if (before && !names.includes(before)) throw Error('这个分类已不存在');
             if (!remove && before !== after && names.includes(after)) throw Error('已有同名分类');
             if (remove && after && (!names.includes(after) || before === after)) throw Error('请选择其他分类');
             const affected = before ? items.filter(item => item.category === before) : [];
             if (deleteItems && (!remove || affected.length !== expectedCount)) throw Error('分类下的衣物已变化，请重新确认');
             gone = deleteItems ? affected : [];
-            const next = names.filter(value => value !== before);
-            if (!remove && after) next.push(after);
-            const now = Date.now();
-            return [{id:CATEGORY_DOC, kind:'wardrobe-categories', names:next, at:saved?.at || now, updatedAt:now},
+            const next = remove ? names.filter(value => value !== before) : before ? names.map(value => value === before ? after : value) : [...names, after];
+            return [categoryDoc(next),
                 ...items.filter(row => !gone.includes(row)).map(row => before && row.category === before ? {...row, category:after, updatedAt:now} : row)];
         }));
         if (gone.length) this.noteGone('wardrobe', gone.map(row => row.id), Math.max(...gone.map(row => row.updatedAt || 0)));

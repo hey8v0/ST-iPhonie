@@ -1529,14 +1529,31 @@ export function chatApp(ctx) {
   /** Import (「名字URL, 名字URL」), look through, remove; the same text copies them out to share. */
   function manageStickers() {
     const list = () => api.getState().chat.stickers || [];
-    const rows = () => list().length ? `<div class="sticker-manage">${list().slice().reverse().map(s => `<div class="sticker-row">${stickerImg(s)}<span><strong>${esc(s.name)}</strong><small>${esc(s.url || '从图片导入的，在相册「表情包」里')}</small></span>${btn('sticker-remove', icon('trash'), 'text-button', `data-name="${esc(s.name)}" aria-label="删除 ${esc(s.name)}"`)}</div>`).join('')}</div>` : '<p class="hint">还没有表情包。</p>';
+    const removeAction = {key:'delete', icon:'trash', label:'删除', danger:true};
+    const rows = () => list().slice().reverse().map(s => swipeRow(s.name,
+      `<div class="sticker-row">${stickerImg(s)}<span><strong>${esc(s.name)}</strong><small>${esc(s.url || '从图片导入的，在相册「表情包」里')}</small></span></div>`,
+      [removeAction], {label:s.name})).join('') || '<p class="hint">还没有表情包。</p>';
     const d = ctx.dialog('表情包', `<p class="help-copy">粘贴「名字+图片网址」，一个一行或用逗号隔开，比如：<br><code>开心https://…/a.gif, 委屈https://…/b.png</code><br>名字中间别有空格；同名的会换成新的。对方也会按名字从里面挑着发。</p>
       ${field('导入', textArea('sticker-text', '', 'rows="4" placeholder="开心https://example.com/happy.gif, 生气https://example.com/angry.png"'))}
-      <div class="actions">${btn('sticker-import', icon('import') + '导入', 'primary')}${btn('sticker-copy', icon('copy') + '复制全部', 'secondary')}</div>
-      <div class="actions sticker-files"><label class="secondary file-button">${icon('image')}<span>从图片导入</span><input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple data-sticker-files hidden></label></div>
-      ${groupTitle('已有', `<small data-sticker-count>${list().length}</small>`)}<div data-sticker-list>${rows()}</div>
+      <div class="actions sticker-import-actions">${btn('sticker-import', icon('import') + '导入', 'primary')}${btn('sticker-copy', icon('copy') + '复制全部', 'secondary')}
+        <label class="secondary file-button">${icon('image')}<span>从图片导入</span><input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple data-sticker-files hidden></label></div>
+      ${groupTitle('已有', `<small data-sticker-count>${list().length}</small>`)}<div class="sticker-manage" data-sticker-list>${rows()}</div>
       <div class="actions">${btn('sticker-clear', icon('trash') + '清空表情包', 'danger')}</div>`);
-    const redraw = () => { d.body.querySelector('[data-sticker-list]').innerHTML = rows(); d.body.querySelector('[data-sticker-count]').textContent = list().length; paintStickers(d.body); if (panel === 'stickers') syncPanel(); };
+    const stickerList = d.body.querySelector('[data-sticker-list]');
+    const redraw = () => { stickerList.innerHTML = rows(); d.body.querySelector('[data-sticker-count]').textContent = list().length; paintStickers(d.body); if (panel === 'stickers') syncPanel(); };
+    const remove = names => {
+      const chosen = new Set(names);
+      api.saveChatOptions({stickers: list().filter(s => !chosen.has(s.name))});
+      redraw();
+    };
+    const swipe = mountSwipeList(stickerList, {ctx, bulk:[removeAction],
+      onAction:(_key, name) => {
+        try { remove([name]); } catch (error) { ctx.notify(error.message, {error:true}); }
+      },
+      onBulk:async (_key, names) => {
+        if (await ctx.confirm(`删除 ${names.length} 个表情包？`, '聊天里发过的还在。', {over:true})) remove(names);
+      }});
+    d.onClose(() => swipe.dispose());
     paintStickers(d.body);
     // 从图片导入: into the album (相簿「表情包」), each named after its file; then one page to name them all.
     d.body.addEventListener('change', e => {
@@ -1582,9 +1599,9 @@ export function chatApp(ctx) {
             ctx.notify(web.length < list().length ? `已复制 ${web.length} 个（从图片导入的在相册里，没有网址）` : '已复制，可以发给别人导入');
             break;
           }
-          case 'sticker-remove': api.saveChatOptions({stickers: list().filter(s => s.name !== b.dataset.name)}); redraw(); break;
           case 'sticker-clear':
-            if (!list().length || !await ctx.confirm('清空表情包？', `${list().length} 个表情包都会删除（聊天里发过的还在）。`)) break;
+            if (!list().length || !await ctx.confirm('清空表情包？', `${list().length} 个表情包都会删除（聊天里发过的还在）。`, {over:true})) break;
+            swipe.done();
             api.saveChatOptions({stickers: []}); redraw(); break;
         }
       })().catch(error => ctx.notify(error.message, {error: true}));

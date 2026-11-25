@@ -1,5 +1,7 @@
 import {esc, field, input, menu, select, toggle} from './common.js';
 import {icon} from './icons.js';
+import {layerSort} from './layer-sort.js';
+import {mountSwipeList, swipeRow} from './swipe-list.js';
 import {saveFile} from '../download.js';
 
 function form(ctx, title, fields, action, submit, options) {
@@ -29,30 +31,67 @@ export function nameCategory(ctx, old = '', options) {
   }, options);
 }
 
-export async function manageCategories(ctx, {categories, items}) {
-  const name = await menu(ctx, '管理分类', [
-    {key:'new', icon:'add', label:'新建分类'},
-    ...categories.map((name, index) => ({key:String(index), icon:'layers', label:name,
-      note:items.filter(item => item.category === name).length + ' 件'})),
-  ]);
-  if (name === null) return;
-  if (name === 'new') return nameCategory(ctx);
-  const old = categories[Number(name)], count = items.filter(item => item.category === old).length;
-  const action = await menu(ctx, old, [
-    {key:'rename', icon:'edit', label:'改名'}, {key:'remove', icon:'trash', label:'删除分类', danger:true},
-  ]);
-  if (action === 'rename') return nameCategory(ctx, old);
-  if (action !== 'remove') return;
+function removeCategory(ctx, old, categories, count) {
   const choices = [['','移到未分类'], ...categories.filter(name => name !== old).map(name => ['category:' + name,'移到「' + name + '」']), ['delete','同时删除衣物']];
   const fields = count ? '<p class="hint">此分类有 ' + count + ' 件衣物</p>' + field('衣物处理', select('target', '', choices)) : '';
   return form(ctx, '删除「' + old + '」', fields, '删除分类', async get => {
     const target = get('target') || '', deleteItems = target === 'delete';
     if (deleteItems && !await ctx.confirm('同时移除 ' + count + ' 件衣物？', '这些衣物会从衣柜移除，图片仍保留在相册。', {over:true})) return;
     return ctx.api.editWardrobeCategory({old, name:target.startsWith('category:') ? target.slice('category:'.length) : '', remove:true, deleteItems, expectedCount:count});
-  });
+  }, {over:true});
 }
 
-export async function wardrobeSettings(ctx, state) {
+async function manageCategories(ctx, parent) {
+  let {categories, items} = await ctx.api.wardrobe();
+  if (!parent.live) return;
+  const d = ctx.dialog('管理分类', '<div class="style-list"></div>', {add:'新建分类', over:true});
+  const list = d.body.querySelector('.style-list'), prefix = 'category:';
+  const actions = [{key:'rename', icon:'edit', label:'改名'}, {key:'remove', icon:'trash', label:'删除', danger:true}];
+  let working = false;
+
+  function paint() {
+    const counts = new Map();
+    for (const {category} of items) counts.set(category, (counts.get(category) || 0) + 1);
+    list.innerHTML = categories.map(name => swipeRow(prefix + name,
+      `<div class="list-row">${icon('layers')}<span><strong>${esc(name)}</strong><small>${counts.get(name) || 0} 件</small></span></div>`,
+      actions, {label:name})).join('') || '<p class="hint">点右上角的 + 新建分类。</p>';
+  }
+
+  async function run(change) {
+    if (working || !d.live) return;
+    working = true;
+    try { await change(); }
+    catch (error) { if (d.live) ctx.notify(error.message, {error:true}); }
+    finally { working = false; }
+  }
+
+  const edit = change => run(async () => {
+    if (!await change()) return;
+    ({categories, items} = await ctx.api.wardrobe());
+    if (d.live) paint();
+  });
+  const sort = layerSort({ctx, list, paint, tree:() => categories.map(name => ({style:prefix + name})), commit:next => {
+    const previous = categories;
+    categories = next.map(row => row.style.slice(prefix.length));
+    run(async () => {
+      try { await ctx.api.editWardrobeCategory({order:categories}); }
+      catch (error) { categories = previous; if (d.live) paint(); throw error; }
+    });
+  }});
+  paint();
+  const swipe = mountSwipeList(list, {ctx, leftOnly:true,
+    hint:'左滑改名或删除，长按拖动排序。', mouseHint:'点行尾「⋯」改名或删除，按住拖动排序。',
+    sort:{start:(row, point) => working ? null : sort.lift(row, point)},
+    onAction:(action, id) => edit(() => {
+      const name = id.slice(prefix.length);
+      return action === 'rename' ? nameCategory(ctx, name, {over:true})
+        : removeCategory(ctx, name, categories, items.filter(item => item.category === name).length);
+    })});
+  d.overlay.querySelector('[data-sheet-add]').addEventListener('click', () => edit(() => nameCategory(ctx, '', {over:true})));
+  d.onClose(() => swipe.dispose());
+}
+
+export async function wardrobeSettings(ctx) {
   const story = await ctx.api.wardrobeStorySettings?.().catch(() => null);
   const d = ctx.dialog('衣柜设置', '<div class="group pad">'
     + toggle('detail-outfit','记录详细穿搭',story?.enabled,'跟随这段剧情。实际换装时记下详细描述和绘图标签。')
@@ -73,9 +112,10 @@ export async function wardrobeSettings(ctx, state) {
       ctx.notify(error.message, {error:true});
     }
   });
-  d.body.querySelector('[data-action=categories]').addEventListener('click', () => {
-    d.close();
-    manageCategories(ctx, state).catch(error => ctx.notify(error.message, {error:true}));
+  const button = d.body.querySelector('[data-action=categories]');
+  button.addEventListener('click', () => {
+    button.disabled = true;
+    manageCategories(ctx, d).catch(error => ctx.notify(error.message, {error:true})).finally(() => { button.disabled = false; });
   });
 }
 
