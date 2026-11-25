@@ -6,7 +6,7 @@ import {storyDrawSource} from './draw.js';
 import { DRAW_ENGINES, GPT_MAX_REFS, gptTakesRefs, normalizeGpt, gptBase, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, defaultWorkflow, COMFY_PARAM_KEYS, applyComfyWorkflow, comfyParams, comfySpecs, comfySavedList, comfySavedRead, comfyRecent, comfyUpload } from './image-engines.js';
 import { readPictureWorkflow, parseWorkflow, uiToApi, uiNodeTypes, mapWorkflow, promptCandidates, promptWords, describeNodes, setNodeValues, switchNodesOff, findProblems, nodeTypes, modelKindOf } from './comfy-graph.js';
 import { activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource } from './comfy-loras.js';
-import { relayUrl, guardParams, isFree, isV5, normalizeDrawParams, takesReference, REFERENCE_ANLAS } from './novelai.js';
+import { relayUrl, guardParams, isFree, isV5, normalizeDrawParams, activeReferences, takesReference, MAX_REFERENCES, REFERENCE_ANLAS } from './novelai.js';
 import { PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, normalizeVibeSettings, normalizeChunks, tidyChunkGroups, normalizeLocks, normalizePositionGrid, normalizeMaskLook, styleParams } from './draw.js';
 import { activeChatPreset } from './chat.js';
 import { VIBE_ANLAS } from './vibes.js';
@@ -509,7 +509,9 @@ class DrawSettings {
         // Vibes: encoding one (first use) and every vibe past four cost Anlas, so such a picture is not free.
         const sized = extra?.size?.width > 0 && extra?.size?.height > 0 ? { ...effective, width: extra.size.width, height: extra.size.height } : effective;
         const vibes = this.vibePlan(effective.model), vibeAnlas = (vibes.encode + vibes.extra) * VIBE_ANLAS, free = isFree(sized, subscription);
-        const refs = takesReference(effective.model) ? Math.max(0, Number(extra?.refs) || 0) : 0, referenceAnlas = refs * REFERENCE_ANLAS, base = !!extra?.base;
+        const refs = Array.isArray(extra?.refs) ? activeReferences(effective, extra.refs, extra.mask).length
+            : takesReference(effective.model, {mask: extra?.mask}) ? Math.min(MAX_REFERENCES, Math.max(0, Math.floor(Number(extra?.refs) || 0))) : 0;
+        const referenceAnlas = refs * REFERENCE_ANLAS, base = !!extra?.base;
         // With references or a mask no vibe is sent, so the vibes cost nothing then. 负面强度 other than 100% (参数网格) costs more.
         const vibeCost = refs || extra?.mask ? 0 : vibeAnlas, uncond = requested.uncondScale !== undefined && requested.uncondScale !== 1, paid = !!(vibeCost || referenceAnlas || uncond);
         return { params: effective, clamped: JSON.stringify(effective) !== JSON.stringify(requested), free: paid && free !== false ? false : free, guard: this.settings.draw.guard,

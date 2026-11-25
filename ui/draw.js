@@ -10,13 +10,15 @@ import {styleSheets, watchCovers} from './draw-styles.js';
 import {tokenBudget, loadCounter, countPicture, countField, tagCost} from '../core/tokens.js';
 import {refPanel} from './draw-refs.js';
 import {pictureData, readNovelAI, fitBase, scaledPicture, enhanceSizes, composeFocused, composeGrid, canCopyPicture, copyPicture} from './draw-images.js';
-import {DIRECTOR_TOOLS, DIRECTOR_WORDS, EMOTIONS, upscaleBy, UPSCALE_MAX, naiFeatures, samplersFor, schedulesFor, qualityPresets, ucPresets, finalWords, NAI_SAMPLER_NAMES, maxEnhanceSize, usageImages, usageRefillPerDay} from '../core/novelai.js';
+import {DIRECTOR_TOOLS, DIRECTOR_WORDS, EMOTIONS, upscaleBy, UPSCALE_MAX, naiFeatures, referenceTitle, samplersFor, schedulesFor, qualityPresets, ucPresets, finalWords, NAI_SAMPLER_NAMES, maxEnhanceSize, usageImages, usageRefillPerDay} from '../core/novelai.js';
 import {LOCKS, unlockedParams, POSITION_GRIDS} from '../core/draw.js';
 import {embeddedVibeFile} from '../core/vibes.js';
 import {randomPicture} from '../core/nai-random.js';
 import {wordHelper, chunkSheet, markedBox} from './draw-words.js';
 import {pictureSheet, cleanBrackets} from './draw-import.js';
 import {gridPanel} from './draw-grid.js';
+import {drawWorkspace} from './draw-workspace.js';
+import {pixelSheet} from './draw-pixels.js';
 
 const SIZES = [['portrait', '竖图', 832, 1216], ['landscape', '横图', 1216, 832], ['square', '方图', 1024, 1024], ['tall', '大竖图', 1024, 1536]];
 /** The rest of NovelAI's sizes (small, large, wallpaper). */
@@ -24,8 +26,9 @@ const MORE_SIZES = [['wide', '大横图', 1536, 1024], ['large', '大方图', 14
 const ALL_SIZES = [...SIZES, ...MORE_SIZES];
 /** Enhance's strength and noise for each magnitude, as NovelAI's app has them. */
 const MAGNITUDES = [[.2, 0], [.4, 0], [.5, 0], [.6, 0], [.7, .1]];
-/** Pictures kept in the column beside the canvas (this visit of the app; all of them are also in the album). */
+/** Recent pictures in the workspace, in addition to pictures pinned for comparison. */
 const MAX_RESULTS = 30;
+const MAX_PINS = 4;
 const TIERS = {0: '未订阅', 1: 'Tablet', 2: 'Scroll', 3: 'Opus'};
 const POSITION = i => i < 0 ? '自动' : 'ABCDE'[i % 5] + (Math.floor(i / 5) + 1);
 /** A character's place as a cell of the 5×5 grid, whichever way it was set. */
@@ -42,6 +45,8 @@ const guideHTML = g => { const [across, down] = guideLines(g); return across.map
 export function drawApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'draw'), urls = new Map();
   let tab = 'prompt', idea = '', prompt = '', negative = '', characters = [], seed = -1, results = [], current = -1, newest = false, busy = false, subscription = null, epoch = 0;
+  const workspace = drawWorkspace(ctx.win, api.getState().scope), pinned = new Set();
+  let workspaceReady = false, workspaceTouched = false, workspaceTimer = 0, workspaceDirty = false;
   /** 随机提示词: while it is there it is drawn instead of what is written; what is written stays. */
   let randomText = '', randomChars = null;
   /** How many pictures one 生成 makes (one request each, one after another). */
@@ -92,11 +97,65 @@ export function drawApp(ctx) {
   const urlFor = async id => {
     if (urls.has(id)) return urls.get(id);
     const photo = await api.getPhoto(id);
-    if (!photo) return '';
+    if (!photo || v.disposed) return '';
+    if (urls.has(id)) return urls.get(id);
     const url = ctx.win.URL.createObjectURL(photo.blob);
     urls.set(id, url);
     return url;
   };
+  function saveWorkspace() {
+    ctx.win.clearTimeout(workspaceTimer);
+    if (!workspaceReady || !workspaceDirty) return;
+    workspaceDirty = false;
+    workspace.write({tab, idea, prompt, negative, characters, seed, count, randomText, randomChars,
+      results: results.map(({blob, actual, info, ...result}) => result), current: results[current]?.photoId, pinned: [...pinned], refs: refs.snapshot()
+    }).catch(() => {});
+  }
+  function rememberWorkspace() {
+    workspaceTouched = true;
+    workspaceDirty = true;
+    if (!workspaceReady) return;
+    ctx.win.clearTimeout(workspaceTimer);
+    workspaceTimer = ctx.win.setTimeout(saveWorkspace, 250);
+  }
+  const workspaceLoaded = workspace.read().then(async saved => {
+    if (!saved || workspaceTouched || v.disposed) return;
+    const found = (await Promise.all(saved.results.map(async r => await api.getPhoto(r.photoId).catch(() => null) ? r : null))).filter(Boolean);
+    if (workspaceTouched || v.disposed) return;
+    ({tab, idea, prompt, negative, characters, seed, count, randomText, randomChars} = saved);
+    results = found;
+    current = found.length ? Math.max(0, found.findIndex(r => r.photoId === saved.current)) : -1;
+    for (const id of saved.pinned) if (found.some(r => r.photoId === id)) pinned.add(id);
+    refs.restore(saved.refs);
+  }).catch(() => {}).finally(() => {
+    if (v.disposed) return;
+    workspaceReady = true;
+    render();
+  });
+  function addResults(...added) {
+    const keep = results.filter(r => pinned.has(r.photoId));
+    const removed = new Set(added.map(r => r.photoId));
+    const next = [...added, ...results.filter(r => !removed.has(r.photoId))].slice(0, MAX_RESULTS);
+    const now = new Set(next.map(r => r.photoId));
+    results = [...next, ...keep.filter(r => !now.has(r.photoId))];
+    current = 0;
+    newest = true;
+    rememberWorkspace();
+    saveWorkspace();
+  }
+  async function comparePictures() {
+    const pictures = await Promise.all([...pinned].map(async id => ({id, src: await urlFor(id), result: results.find(r => r.photoId === id)})));
+    const available = pictures.filter(p => p.src && p.result);
+    if (available.length < 2) { ctx.notify('至少固定两张还在相册里的图'); return; }
+    const d = ctx.dialog('对比固定图片', `<div class="draw-comparison">${available.map(({id, src, result}, i) => `<button type="button" data-compare="${esc(id)}" class="draw-compare-picture"><img src="${esc(src)}" alt=""><b>图 ${i + 1}</b><small>${esc([result.params.model, result.seed >= 0 ? '种子 ' + result.seed : ''].filter(Boolean).join(' · '))}</small></button>`).join('')}</div>`);
+    d.body.addEventListener('click', event => {
+      const id = event.target.closest('[data-compare]')?.dataset.compare;
+      if (!id) return;
+      current = results.findIndex(r => r.photoId === id);
+      d.close();
+      render();
+    });
+  }
 
   function quote() {
     const d = state();
@@ -114,6 +173,7 @@ export function drawApp(ctx) {
   }
 
   async function render() {
+    if (workspaceReady) rememberWorkspace();
     const ticket = ++epoch, d = state(), e = d.engine, q = quote(), p = q.params, keyed = api.drawReady();
     // ComfyUI: the scheme in use, which parameters its workflow takes, and its LoRAs.
     let comfy = null;
@@ -137,7 +197,7 @@ export function drawApp(ctx) {
         <div class="field idea-field"><span>想画什么${help('用中文说一句就行，比如「下雨天两个人在便利店门口共撑一把伞」，也可以写很多要求（框会跟着变高），点「帮我写」，模型会补成完整的英文提示词填到上面（会换掉上面原来的）。可以直接写人名：作品里的角色模型会写成它认得的 tag；角色 App 里登记了外貌的人，模型只写名字，插件会把他们加进「角色」并带上外貌。用 NovelAI 时会按 token 上限尽量写满。')}</span>${textArea('idea', idea, 'class="idea-box" rows="2" maxlength="1000" placeholder="例如：下雨天两个人共撑一把伞。可以写很多要求：动作、表情、衣服、天气、镜头……"')}<div class="actions" style="margin:6px 0 0">${btn('write-prompt', icon('wand') + '帮我写', 'secondary')}${btn('suggest', icon('book') + '从剧情生成', 'secondary')}${e === 'nai' ? btn('open-chunks', icon('layers') + '片段', 'secondary') + btn('random-prompt', icon('dice') + '随机', 'secondary') : ''}</div></div>
 </div>
         ${e === 'gpt' ? '' : `<details data-group="draw-negative" ${negative.trim() ? 'open' : ''}><summary>这张图额外的负面<small class="fold-note">${negative.trim() ? '' : '没有'}</small></summary><div class="fold-body">${box(textArea('negative', negative, 'rows="2" aria-label="这张图额外的负面" placeholder="可以留空，会和固定负面合在一起"'))}<div class="token-meter" data-token-meter="negative" hidden></div></div></details>`}`;
-    const free = e === 'nai' && naiFeatures(d.params.model).freePosition, charsOn = e === 'nai';
+    const charsOn = e === 'nai', support = charsOn ? naiFeatures(d.params.model) : null, free = support?.freePosition;
     if (tab === 'chars') body = (characters.length ? characters.map((c, i) => {
       const cell = cellOf(c), at = centerOf(c);
       const others = characters.map((o, j) => { const dot = centerOf(o); return dot ? `<i class="pos-dot${j === i ? ' on' : ''}" style="left:${(dot.x * 100).toFixed(1)}%;top:${(dot.y * 100).toFixed(1)}%">${j + 1}</i>` : ''; }).join('');
@@ -148,6 +208,9 @@ export function drawApp(ctx) {
         ${e === 'comfy' ? '' : `<details class="tool-fold char-pos" data-group="char-pos-${i}"><summary>位置<span class="chip">${placed}</span></summary><div class="char-pos-body">${free ? `<div class="pos-free" data-pos-pad data-index="${i}" style="aspect-ratio:${p.width}/${p.height}" role="group" aria-label="在画面里点一下放这个人">${guideHTML(d.positionGrid)}${others}</div>` : `<div class="pos-grid" aria-label="画面位置">${Array.from({length: 25}, (_, k) => `<button data-action="position" data-index="${i}" data-position="${k}" aria-pressed="${cell === k}" aria-label="位置 ${POSITION(k)}"></button>`).join('')}</div>`}<div class="pos-tools">${btn('position', '让模型自己决定位置', 'text-button', `data-index="${i}" data-position="-1" aria-pressed="${!at}"`)}</div></div></details>`}</div>`;
     }).join('') : empty('还没有加入角色', e === 'gpt' ? '每个角色的外貌和在画面里的位置，会写进给 GPT 的描述里。' : e === 'comfy' ? 'ComfyUI 没有分角色的提示词：每个人的外貌接在提示词后面，位置不起作用。' : 'V4 / 4.5 可以给每个角色单独写外貌，并指定在画面里的大致位置。', 'person'))
       + `<div class="token-meter" data-token-meter="positive" hidden></div><div class="actions">${btn('add-char', icon('add') + '从角色里添加', 'secondary')}${btn('add-custom', icon('add') + '手动添加', 'secondary')}</div>${free && characters.length ? `<div class="pos-tools pos-tools-all">${guideControl(d.positionGrid)}</div>` : ''}`;
+    if (tab === 'chars' && support?.characters && characters.filter(c => c.enabled !== false && c.prompt.trim()).length > support.characters) {
+      body = `<p class="hint ref-note" data-keep-hint>${icon('alert')}当前模型每张最多使用 ${support.characters} 个角色提示，会按列表顺序取用。</p>` + body;
+    }
     if (tab === 'params' && e === 'gpt') body = gptParams(d.gpt);
     // The lists are read as soon as the page is looked at; they can be typed in when ComfyUI does not answer.
     if (tab === 'params' && e === 'comfy') { body = comfyParams(d.comfy, comfy); if (!comfyInfo && !comfyReading) { comfyReading = true; readComfy().finally(() => { comfyReading = false; }); } }
@@ -178,9 +241,10 @@ export function drawApp(ctx) {
       + queueCard()
       + `<div class="draw-meta">${btn('pick-style', (style().cover ? `<img class="chip-cover" src="${esc(style().cover.thumb)}" alt="" draggable="false">` : icon('layers')) + esc(style().name) + icon('down'), 'chip-button')}${costChip(q)}${e === 'nai' ? `<label class="chip-button file-button read-png" title="从 NovelAI 画的 PNG 读回提示词、角色和参数">${icon('import')}读图<input type="file" data-read-png accept="image/png,image/jpeg,image/webp" aria-label="从 NovelAI 的图读参数" hidden></label>` : ''}</div>
         <div class="canvas-card"><div class="canvas-main${main ? '' : ' empty'}" style="aspect-ratio:${p.width}/${p.height}">${main ? `<button type="button" class="canvas-zoom" data-action="zoom" aria-label="放大查看"><img src="${esc(main)}" alt="生成的图片"></button><button type="button" class="canvas-heart" data-action="heart" aria-pressed="${hearts.has(shown?.photoId)}" aria-label="${hearts.has(shown?.photoId) ? '取消收藏' : '收藏'}">${icon('heart', hearts.has(shown?.photoId))}</button>` : `<span>${comfy && !(comfy.controls.includes('width') && comfy.controls.includes('height')) ? '尺寸由工作流决定' : `${p.width} × ${p.height}`}<br>还没有图</span>`}${busy ? `<span class="canvas-busy">${esc(engineName(e))} 正在画……</span>` : ''}</div>
-          ${results.length ? `<div class="canvas-side" data-keep-scroll="results">${thumbs.map((url, i) => `<button class="thumb" data-action="thumb" data-index="${i}" aria-pressed="${i === current}" aria-label="第 ${i + 1} 张"${hearts.has(results[i].photoId) ? ' data-fav' : ''}>${url ? `<img src="${esc(url)}" alt="">` : ''}</button>`).join('')}</div>` : ''}</div>
+          ${results.length ? `<div class="canvas-side" data-keep-scroll="results">${thumbs.map((url, i) => `<button class="thumb" data-action="thumb" data-index="${i}" aria-pressed="${i === current}" aria-label="第 ${i + 1} 张${pinned.has(results[i].photoId) ? '，已固定' : ''}"${pinned.has(results[i].photoId) ? ' data-pinned' : ''}${hearts.has(results[i].photoId) ? ' data-fav' : ''}>${url ? `<img src="${esc(url)}" alt="">` : ''}</button>`).join('')}</div>` : ''}</div>
         ${shown ? `<p class="hint canvas-meta">${[shown.tool ? (shown.prompt || '') : shown.params.model, `${shown.params.width}×${shown.params.height}`, shown.params.steps ? shown.params.steps + ' 步' : '', shown.seed >= 0 ? '种子 ' + shown.seed : ''].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
-        ${shown && e === 'nai' && keyed ? toolsHTML() : ''}
+        ${shown && main ? `<div class="draw-result-actions">${btn('pin-result', icon('tack') + (pinned.has(shown.photoId) ? '已固定' : '固定这张'), 'chip-button', `aria-pressed="${pinned.has(shown.photoId)}"`)}${pinned.size >= 2 ? btn('compare-results', icon('layers') + `对比 ${pinned.size} 张`, 'chip-button') : ''}</div>` : ''}
+        ${shown && e === 'nai' ? toolsHTML(keyed) : ''}
         <div class="segmented draw-tabs">${tabs.map(([k, l]) => `<button data-action="tab" data-tab="${k}" aria-pressed="${k === tab}">${l}</button>`).join('')}</div>
         ${body}
         <div class="savebar"><div class="draw-count" role="group" aria-label="一次画几张">${[1, 2, 3, 4].map(k => `<button type="button" data-action="count" data-count="${k}" aria-pressed="${k === count}" aria-label="一次画 ${k} 张">${k}</button>`).join('')}<small>张</small></div>${btn('generate', busy ? '正在画……' : (q.free === false ? icon('alert') : icon('paint')) + (count > 1 ? `画 ${count} 张` : '生成') + (q.free === false ? (e === 'gpt' ? '（要花钱）' : '（会扣 Anlas）') : ''), 'primary', busy || !keyed || comfy?.missing ? 'disabled' : '')}</div>`);
@@ -323,8 +387,10 @@ export function drawApp(ctx) {
   }
 
   // Loads a picture request sent from the chat ("在绘图中打开").
-  v.load = request => {
+  v.load = async request => {
     if (!request) return;
+    await workspaceLoaded;
+    if (v.disposed) return;
     prompt = request.tag || request.prompt || '';
     randomText = ''; randomChars = null;
     seed = Number.isInteger(request.seed) ? request.seed : -1;
@@ -362,7 +428,10 @@ export function drawApp(ctx) {
   const dispose = v.dispose;
   let viewer = null;
   v.back = () => { if (viewer?.open) { viewer.close(); return true; } return false; };
-  v.dispose = () => { epoch++; viewer?.close(); comfyRequest++; plans.dispose(); loras.dispose(); nodes.dispose(); words.dispose(); if (previewUrl) ctx.win.URL.revokeObjectURL(previewUrl); for (const url of urls.values()) ctx.win.URL.revokeObjectURL(url); urls.clear(); dispose(); };
+  v.leave = saveWorkspace;
+  ctx.win.addEventListener('pagehide', saveWorkspace);
+  v.dispose = () => { saveWorkspace(); ctx.win.removeEventListener('pagehide', saveWorkspace); workspace.close(); epoch++; viewer?.close(); comfyRequest++; plans.dispose(); loras.dispose(); nodes.dispose(); words.dispose(); if (previewUrl) ctx.win.URL.revokeObjectURL(previewUrl); for (const url of urls.values()) ctx.win.URL.revokeObjectURL(url); urls.clear(); dispose(); };
+  for (const type of ['click', 'input', 'change']) v.root.addEventListener(type, rememberWorkspace, true);
 
   v.on('input', '[data-field]', el => {
     const key = el.dataset.field;
@@ -438,7 +507,7 @@ export function drawApp(ctx) {
   v.on('input', '[data-ref-slider]', el => refs.slide(el));
   v.on('input', '[data-ref-label]', el => refs.label(el));
   v.on('change', '[data-ref-overlay]', el => refs.overlay(el));
-  v.on('change', '[data-ref-on]', el => refs.switched(el));
+  v.on('change', '[data-ref-on], [data-ref-same-outfit]', el => refs.switched(el));
   v.on('change', '[data-ref-zip]', async el => { const file = el.files?.[0]; el.value = ''; if (file) await refs.zip(file); });
   v.on('change', '[data-ref-slider]', () => render());
   v.on('change', '[data-read-png]', async el => { const file = el.files?.[0]; el.value = ''; if (file) await readPicture(file); });
@@ -477,6 +546,16 @@ export function drawApp(ctx) {
       case 'random-use': prompt = randomText; if (randomChars) characters = randomChars; randomText = ''; randomChars = null; render(); break;
       case 'random-clear': randomText = ''; randomChars = null; render(); break;
       case 'thumb': current = index; render(); break;
+      case 'pin-result': {
+        const id = results[current]?.photoId;
+        if (!id) break;
+        if (pinned.has(id)) pinned.delete(id);
+        else if (pinned.size < MAX_PINS) pinned.add(id);
+        else { ctx.notify(`最多固定 ${MAX_PINS} 张，先取消固定一张`); break; }
+        render();
+        break;
+      }
+      case 'compare-results': await comparePictures(); break;
       case 'heart': {
         const id = results[current]?.photoId;
         if (!id) break;
@@ -558,7 +637,7 @@ export function drawApp(ctx) {
     if (q.free !== false) return null;
     if (eng() === 'gpt') { const ask = api.paidPrompt(); return await ctx.confirm(ask.title + (n > 1 ? `（${n} 张）` : ''), ask.text); }
     const notes = (q.vibeAnlas ? `其中 Vibe 约 ${q.vibeAnlas} Anlas（${[q.vibes.encode && `${q.vibes.encode} 个第一次用要编码`, q.vibes.extra && `超过 4 个多了 ${q.vibes.extra} 个`].filter(Boolean).join('，')}）。` : '')
-      + (q.referenceAnlas ? `角色参考每张多扣 ${q.referenceAnlas} Anlas。` : '');
+      + (q.referenceAnlas ? `${q.v5 ? '精准参考' : '角色参考'}每张多扣 ${q.referenceAnlas} Anlas。` : '');
     return await ctx.confirm(n > 1 ? `这 ${n} 张图会扣 Anlas` : '这张图会扣 Anlas', `按当前参数和订阅，${n > 1 ? `每张都` : '这次生成'}要消耗 Anlas${subscription ? `（现有 ${subscription.anlas}）` : ''}。${notes}实际扣多少以 NovelAI 结算为准。`);
   }
   /** V5's free allowance: how much is left and how fast it comes back, as NovelAI's own app says it. */
@@ -581,12 +660,9 @@ export function drawApp(ctx) {
       await api.deletePhoto(made.photoId);
       result = {...made, photoId: photo.id, params: {...made.params, width: focus.width, height: focus.height}};
     }
-    result.request = {prompt: request.prompt, negative: request.negative, characters: request.characters};
+    result.request = made.actual || {prompt: request.prompt, negative: request.negative, characters: request.characters};
     result.source = source;
-    results.unshift(result);
-    results = results.slice(0, MAX_RESULTS);
-    current = 0;
-    newest = true;
+    addResults(result);
     if (state().autoDownload) resultFile(result).then(({source: blob, name}) => saveFile(ctx.doc, blob, name)).catch(() => {});
     return result;
   }
@@ -657,8 +733,7 @@ export function drawApp(ctx) {
         if (sheet) {
           const info = [['引擎', 'NovelAI'], ['网格', `${plan.columns}×${plan.rows}`], ...(plan.axisX ? [['X 轴', plan.axisX]] : []), ...(plan.axisY ? [['Y 轴', plan.axisY]] : []), ['画于', new Date().toLocaleString('zh-CN', {hour12: false})]];
           const photo = await api.addPhoto({name: `NovelAI-网格-${Date.now()}.jpg`, blob: sheet.blob, info});
-          results.unshift({photoId: photo.id, seed: -1, params: {width: sheet.width, height: sheet.height}, prompt: `参数网格 ${plan.columns}×${plan.rows}`, engine: 'nai', tool: 'grid'});
-          results = results.slice(0, MAX_RESULTS); current = 0; newest = true;
+          addResults({photoId: photo.id, seed: -1, params: {width: sheet.width, height: sheet.height}, prompt: `参数网格 ${plan.columns}×${plan.rows}`, engine: 'nai', tool: 'grid'});
         }
       } catch (error) { ctx.notify('拼网格图失败：' + error.message, {error: true}); }
     }
@@ -746,12 +821,12 @@ export function drawApp(ctx) {
 
   // ---------- NovelAI's tools on the shown picture ----------
   /** [action, icon, name, what it does, costs Anlas] */
-  const PICTURE_TOOLS = [['tool-base', 'image', '当底图', '图生图 · 局部重绘', false], ['tool-ref', 'person', '当参考', '角色参考 · V4.5', false], ['tool-vibe', 'layers', '当 Vibe', '学它的画风', false], ['tool-variation', 'layers', '变体', '照着再画几张', false],
-    ['tool-enhance', 'star', '增强', '放大后补细节', true], ['tool-upscale', 'expand', '放大', '2 倍', true], ['tool-director', 'wand', '导演工具', '去背景 · 线稿 · 换表情…', true],
+  const PICTURE_TOOLS = [['tool-base', 'image', '当底图', '图生图 · 局部重绘', false], ['tool-ref', 'person', '当参考', '', false], ['tool-vibe', 'layers', '当 Vibe', '学它的画风', false], ['tool-variation', 'layers', '变体', '照着再画几张', false],
+    ['tool-enhance', 'star', '增强', '放大后补细节', true], ['tool-upscale', 'expand', '放大', '2 倍', true], ['tool-director', 'wand', '导演工具', '去背景 · 线稿 · 像素对齐…', false],
     ['tool-settings', 'edit', '用它的设置', '提示词和参数', false], ['tool-seed', 'dice', '用它的种子', '接着微调', false], ['tool-cover', 'image', '当效果图', '放到它的画风上', false]];
   /** One line under the picture; opened, a grid of what can be done with it. */
-  const toolsHTML = () => `<div class="pic-tools${toolsOpen ? ' open' : ''}"><button type="button" class="pic-tools-toggle" data-action="tools-toggle" aria-expanded="${toolsOpen}">${icon('wand')}<span><b>用这张图继续</b><small>${toolsOpen ? '收起' : '底图 · 参考 · Vibe · 变体 · 增强 · 放大 · 导演工具 · 设置'}</small></span>${icon('down')}</button>`
-    + (toolsOpen ? `<div class="pic-tools-grid" role="group" aria-label="用这张图">${PICTURE_TOOLS.map(([action, glyph, name, what, paid]) => `<button type="button" class="pic-tool" data-action="${action}"${paid && busy ? ' disabled' : ''}><span class="pic-tool-ico">${icon(glyph)}</span><b>${name}</b><small>${what}</small>${paid ? '<em>扣 Anlas</em>' : ''}</button>`).join('')}</div>` : '') + '</div>';
+  const toolsHTML = keyed => `<div class="pic-tools${toolsOpen ? ' open' : ''}"><button type="button" class="pic-tools-toggle" data-action="tools-toggle" aria-expanded="${toolsOpen}">${icon('wand')}<span><b>用这张图继续</b><small>${toolsOpen ? '收起' : '底图 · 参考 · Vibe · 变体 · 增强 · 放大 · 导演工具 · 设置'}</small></span>${icon('down')}</button>`
+    + (toolsOpen ? `<div class="pic-tools-grid" role="group" aria-label="用这张图">${PICTURE_TOOLS.map(([action, glyph, name, what, paid]) => `<button type="button" class="pic-tool" data-action="${action}"${(paid && busy) || (!keyed && (paid || action === 'tool-variation' || action === 'tool-vibe')) ? ' disabled' : ''}><span class="pic-tool-ico">${icon(glyph)}</span><b>${name}</b><small>${what || referenceTitle(state().params.model)}</small>${paid ? '<em>扣 Anlas</em>' : ''}</button>`).join('')}</div>` : '') + '</div>';
   const shownBlob = async () => { const r = results[current]; const photo = r && await api.getPhoto(r.photoId); if (!photo?.blob) throw Error('这张图已经不在相册里了'); return photo.blob; };
   /** A tool's picture joins the column like a drawing. */
   async function runTool(input) {
@@ -759,7 +834,7 @@ export function drawApp(ctx) {
     try {
       const {more = [], ...result} = await api.naiTool({...input, name: 'NovelAI'});
       // 去背景 answers with several versions: all of them join the column, to pick from.
-      results.unshift(result, ...more); results = results.slice(0, MAX_RESULTS); current = 0; newest = true;
+      addResults(result, ...more);
       refreshSubscription(true);
     } catch (error) { if (!error.cancelled) ctx.notify(error.message, {error: true}); }
     busy = false; render();
@@ -768,7 +843,7 @@ export function drawApp(ctx) {
     try {
       switch (el.dataset.action) {
         case 'tool-base': await refs.useAsBase(await shownBlob()); tab = 'refs'; render(); ctx.notify('已放进「参考图」当底图'); return true;
-        case 'tool-ref': await refs.useAsRef(await shownBlob()); tab = 'refs'; render(); ctx.notify('已放进「参考图」当角色参考'); return true;
+        case 'tool-ref': await refs.useAsRef(await shownBlob()); tab = 'refs'; render(); ctx.notify('已放进「参考图」当' + referenceTitle(state().params.model)); return true;
         case 'tool-vibe': await pictureAsVibe(await shownBlob(), `画的图-${results[current]?.seed >= 0 ? results[current].seed : Date.now()}.png`); return true;
         case 'tool-upscale': {
           const picture = await pictureData(ctx.win, await shownBlob()), k = upscaleBy(picture.width, picture.height);
@@ -803,17 +878,18 @@ export function drawApp(ctx) {
   }
   /** 导演工具: pick a tool (and, for 上色 / 换表情, words, a mood and how much to clean up), then run it on the shown picture. */
   function directorSheet() {
-    let tool = 'bg-removal';
+    let tool = api.drawReady() ? 'bg-removal' : 'pixel-snap';
     const d = ctx.dialog('导演工具', '');
     const draw = () => {
       const words = DIRECTOR_WORDS.includes(tool);
-      d.body.innerHTML = `<div class="director-tools" role="group" aria-label="选一个工具">${Object.entries(DIRECTOR_TOOLS).map(([k, l]) => `<button type="button" data-tool="${k}" aria-pressed="${k === tool}">${l}</button>`).join('')}</div>
+      d.body.innerHTML = `<div class="director-tools" role="group" aria-label="选一个工具">${Object.entries({...DIRECTOR_TOOLS, 'pixel-snap': '像素对齐'}).map(([k, l]) => `<button type="button" data-tool="${k}" aria-pressed="${k === tool}"${k !== 'pixel-snap' && !api.drawReady() ? ' disabled' : ''}>${l}</button>`).join('')}</div>
+        ${tool === 'pixel-snap' ? `<p class="hint" data-keep-hint>把放大过的像素画还原到像素格，可以先预览。这个工具在本机运行。</p><div class="actions">${btn('director-run', icon('sliders') + '预览像素对齐', 'primary')}</div>` : `
         <p class="hint">${{'bg-removal': '把人物留下，背景变透明。会给好几个版本，都放进右边的小图，挑一张。', lineart: '变成干净的线稿。', sketch: '变成铅笔素描。', colorize: '给线稿或黑白图上色，可以写想要的颜色。', emotion: '换一个表情，其余尽量不动。正脸、平静表情的图效果最好。', declutter: '去掉画面里的文字、水印和杂物。', 'declutter-keep-bubbles': '去掉杂物和文字，留下对话气泡。'}[tool]}</p>
         ${tool === 'emotion' ? `<div class="field"><span>换成</span><div class="emotion-chips">${EMOTIONS.map(([k, l]) => `<button type="button" data-mood="${k}" aria-pressed="${k === (d.mood || 'happy')}">${l}</button>`).join('')}</div></div>` : ''}
         ${words ? `<div class="field"><span>${tool === 'colorize' ? '想要的颜色（可以不写）' : '补充说明（可以不写）'}</span><input data-director="prompt" value="${esc(d.words || '')}" placeholder="${tool === 'colorize' ? '例如：silver hair, blue eyes, red dress' : '例如：blushing, looking away'}"></div>
           <div class="field"><div class="meter-label"><span>${tool === 'emotion' ? '减弱程度' : '去瑕疵'}${help(tool === 'emotion' ? '0 是表情最明显，越大越轻微。' : '越大噪点和过冲的颜色越少，给已经有颜色的图上色时有用。')}</span><output>${d.defry || 0}</output></div><input class="slider" type="range" data-director="defry" min="0" max="5" step="1" value="${d.defry || 0}" aria-label="${tool === 'emotion' ? '减弱程度' : '去瑕疵'}"></div>` : ''}
         <p class="hint" data-keep-hint>${icon('alert')}导演工具会扣 Anlas，实际扣多少以 NovelAI 结算为准。结果另存一张，原图还在。</p>
-        <div class="actions">${btn('director-run', icon('wand') + DIRECTOR_TOOLS[tool], 'primary')}</div>`;
+        <div class="actions">${btn('director-run', icon('wand') + DIRECTOR_TOOLS[tool], 'primary', busy ? 'disabled' : '')}</div>`}`;
     };
     d.mood = 'happy'; d.words = ''; d.defry = 0;
     draw();
@@ -824,9 +900,16 @@ export function drawApp(ctx) {
       if (mood) { d.mood = mood; draw(); return; }
       if (!e.target.closest('[data-action=director-run]')) return;
       try {
-        const picture = await pictureData(ctx.win, await shownBlob());
+        const blob = await shownBlob();
         d.close();
-        await runTool({tool, ...picture, prompt: d.words, mood: d.mood, defry: d.defry});
+        if (tool === 'pixel-snap') {
+          await pixelSheet(ctx, blob, async (picture, width, height) => {
+            const photo = await api.addPhoto({name: '像素对齐.png', blob: picture, info: [['工具', '像素对齐'], ['尺寸', `${width}×${height}`]]});
+            addResults({photoId: photo.id, seed: -1, params: {width, height}, prompt: '像素对齐', engine: 'nai', tool});
+            render();
+            ctx.notify('已存到相册');
+          });
+        } else await runTool({tool, ...await pictureData(ctx.win, blob), prompt: d.words, mood: d.mood, defry: d.defry});
       } catch (error) { ctx.notify(error.message, {error: true}); }
     });
   }
@@ -850,7 +933,7 @@ export function drawApp(ctx) {
       take: choice => takePicture(file, found, choice),
       use: async kind => {
         if (kind === 'base') { await refs.useAsBase(file); tab = 'refs'; render(); ctx.notify('已放进「参考图」当底图'); }
-        else if (kind === 'ref') { await refs.useAsRef(file); tab = 'refs'; render(); ctx.notify('已放进「参考图」当角色参考'); }
+        else if (kind === 'ref') { await refs.useAsRef(file); tab = 'refs'; render(); ctx.notify('已放进「参考图」当' + referenceTitle(state().params.model)); }
         else await pictureAsVibe(file, file.name || 'Vibe.png');
       }});
   }
@@ -875,8 +958,7 @@ export function drawApp(ctx) {
       ['种子', Number.isInteger(read) ? read : ''], ['提示词', found.prompt], ['负面', found.negative], ['角色', chars.map(c => c.prompt).join(' | ')]].filter(([, v]) => v !== undefined && v !== null && String(v).trim());
     try {
       const photo = await api.addPhoto({name: file.name || 'NovelAI.png', blob: file, info});
-      results.unshift({photoId: photo.id, seed: Number.isInteger(read) ? read : -1, params: {...state().params, ...allParams}, prompt: found.prompt, engine: 'nai', request: {prompt: found.prompt, negative: found.negative, characters: chars}});
-      results = results.slice(0, MAX_RESULTS); current = 0; newest = true;
+      addResults({photoId: photo.id, seed: Number.isInteger(read) ? read : -1, params: {...state().params, ...allParams}, prompt: found.prompt, engine: 'nai', request: {prompt: found.prompt, negative: found.negative, characters: chars}});
     } catch (error) { ctx.notify(error.message, {error: true}); }
     tab = 'prompt';
     render();

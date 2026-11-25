@@ -40,8 +40,8 @@ export const NAI_MAX_PIXELS = 3145728;
 /** Who can do what, as NovelAI's own app has it. */
 export function naiFeatures(model) {
   const m = String(model || ''), v5 = isV5(m), v45 = /^nai-diffusion-4-5/.test(m), v4 = /^nai-diffusion-4(?!-5)/.test(m), v3 = /^nai-diffusion-(furry-)?3/.test(m), captions = v5 || v45 || v4;
-  return {v5, v45, v4, v3, captions, characters: v5 ? 22 : captions ? 6 : 0, freePosition: v5, positionOne: v5, schedule: !v5, variety: !v5, varietySigma: v45 ? 58 : 19, smea: v3, decrisper: v3,
-    mode: captions, transparent: v5, reference: v45, effort: m === 'nai-diffusion-5-full', inpaintStrength: captions, enhanceWords: v5 || v45, autoText: v5, legacyUc: v4, maxEnhance: v5};
+  return {v5, v45, v4, v3, captions, characters: v5 ? 32 : captions ? 6 : 0, freePosition: v5, positionOne: v5, schedule: !v5, variety: !v5, varietySigma: v45 ? 58 : 19, smea: v3, decrisper: v3,
+    mode: captions, transparent: v5, reference: takesReference(m), effort: m === 'nai-diffusion-5-full', inpaintStrength: captions, enhanceWords: v5 || v45, autoText: v5, legacyUc: v4, maxEnhance: v5};
 }
 export const samplersFor = model => naiFeatures(model).v3 ? NAI_SAMPLERS : NAI_SAMPLERS.slice(0, 6);
 /** The noise schedules a sampler takes on a model; none on V5 (always karras) and for DDIM and DPM Fast. */
@@ -161,14 +161,26 @@ export const gridCenter = index => ({x: +(.1 + (index % 5) * .2).toFixed(1), y: 
  * Builds the generate-image request body.
  * prompt/negative are final strings; characters: [{prompt, negative, position}] where position is a grid index or -1 (let the model place it).
  */
-/** 角色参考 (NovelAI's Precise Reference, Director reference): V4.5 only — V5 and the older models take none. */
-export const takesReference = model => /^nai-diffusion-4-5/.test(model);
+/** V5 supports precise references in text-to-image and img2img, including Full Medium. */
+export const takesReference = (model, {mask} = {}) => /^nai-diffusion-4-5/.test(model)
+  || /^(?:nai-diffusion-5-full(?:-medium)?|nai-diffusion-5-curated)$/.test(model) && !mask;
+export const referenceTitle = model => isV5(model) ? '精准参考' : '角色参考';
 /** As many as NovelAI's app allows at once. */
 export const MAX_REFERENCES = 16;
 /** Anlas a character reference adds to each picture (never in the Opus free tier). */
 export const REFERENCE_ANLAS = 5;
 /** What a reference passes on: the character, the style, or both (NovelAI's own words go in the request). */
-export const REFERENCE_KINDS = Object.freeze({character: 'character', style: 'style', both: 'character&style'});
+export const REFERENCE_KINDS = Object.freeze({character: 'character', style: 'style', both: 'character&style', outfit: 'costume'});
+export function referenceCaption(ref, v5) {
+  if (v5 && ref.kind === 'both' && !ref.sameOutfit) return 'character&style_anyoutfit';
+  if (v5 && ref.kind === 'character' && ref.sameOutfit) return 'character_mainoutfit';
+  return Object.hasOwn(REFERENCE_KINDS, ref.kind) ? REFERENCE_KINDS[ref.kind] : REFERENCE_KINDS.character;
+}
+export function activeReferences(params, refs, mask) {
+  if (!takesReference(params.model, {mask})) return [];
+  const v5 = isV5(params.model);
+  return (refs || []).filter(r => typeof r?.image === 'string' && r.image && r.enabled !== false && (v5 || r.kind !== 'outfit')).slice(0, MAX_REFERENCES);
+}
 /** The sizes a reference picture is fitted into (padded with black), by its shape. */
 export const REFERENCE_SIZES = Object.freeze([[1024, 1536], [1536, 1024], [1472, 1472]]);
 /** The model that repaints part of a picture (局部重绘). */
@@ -203,12 +215,23 @@ const clampTo = (value, min, max, fallback) => { const n = Number(value); return
 // ---------- the words, as NovelAI's own app puts them together ----------
 const TEXT_MARK = /(?:^|\s|[,.:[\]{}、。])text:(?!:)/i;
 /** The parts of a prompt split by | (base | character | …); a | inside ||a|b|| belongs to the choice. At most six, as in its app. */
-export function splitPromptMix(prompt) {
-  const open = '\u{103B9}', close = '\u{12137}';
-  const parts = String(prompt).split('||').map((part, i) => i % 2 ? part.split('|').join(open) : part).join(close).split('|');
-  const out = parts.slice(0, 5);
-  if (parts.length > 5) out.push(parts.slice(5).join('|'));
-  return out.map(part => part.replaceAll(open, '|').replaceAll(close, '||'));
+export function splitPromptMix(prompt, limit = 6) {
+  const text = String(prompt), parts = [];
+  let start = 0;
+  for (const token of text.matchAll(/"(?:[^"\\]|\\.)*"|“[^”]*”|\|\|[^\r\n]*?\|\||\|\||\|/g)) {
+    if (token[0] !== '|') continue;
+    if (parts.length >= limit - 1) break;
+    parts.push(text.slice(start, token.index));
+    start = token.index + 1;
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+function rollPrompt(prompt, random) {
+  return prompt.replace(/\|\|([^\r\n]*?)\|\|/g, (mark, body) => {
+    const choices = body.split('|').map(choice => choice.trim());
+    return choices.length > 1 ? choices[Math.floor(random() * choices.length)] : mark;
+  });
 }
 /** 提示词片段: !macro:Name! stands for the words saved under that name; a chunk may name other chunks. */
 export function expandChunks(text, chunks = [], seen = new Set()) {
@@ -273,32 +296,44 @@ export function withAutoText(prompt, characters = []) {
   return parts.join('|');
 }
 /** What goes out as the prompt and the negative, after the settings have had their say (also for counting tokens). */
-export function finalWords({prompt = '', negative = '', characters = [], params = {}, chunks = []} = {}) {
+export function finalWords({prompt = '', negative = '', characters = [], params = {}, chunks = [], random} = {}) {
   const p = normalizeDrawParams(params), f = naiFeatures(p.model), medium = p.effort === 'medium';
-  const chars = characters.filter(c => c.enabled !== false && String(c.prompt || '').trim()).map(c => ({...c, prompt: expandChunks(c.prompt, chunks), negative: medium ? '' : expandChunks(c.negative || '', chunks)}));
-  let text = withQuality(expandChunks(prompt, chunks), p.model, p.quality, p.transparent);
-  const uc = medium ? withUcPreset(p.model, 'heavy', text, '') : withUcPreset(p.model, p.ucPreset, text, expandChunks(negative, chunks));
+  const expand = value => expandChunks(value, chunks);
+  const resolve = value => random ? rollPrompt(value, random) : value;
+  let chars = characters.filter(c => c.enabled !== false && String(c.prompt || '').trim()).map(c => ({...c, prompt: expand(c.prompt), negative: medium ? '' : expand(c.negative || '')}));
+  let scene = expand(prompt);
+  if (f.captions && !chars.length) {
+    const parts = splitPromptMix(scene, Infinity);
+    if (parts.length > 1) {
+      scene = parts.shift().trim();
+      chars = parts.map(part => part.trim()).filter(Boolean).slice(0, f.characters).map(prompt => ({prompt, negative: '', position: -1}));
+    }
+  }
+  chars = chars.map(c => ({...c, prompt: resolve(c.prompt), negative: resolve(c.negative)})).filter(c => c.prompt.trim()).slice(0, f.captions ? f.characters : Infinity);
+  const actual = {prompt: resolve(scene), negative: medium ? '' : resolve(expand(negative)), characters: chars};
+  let text = withQuality(actual.prompt, p.model, p.quality, p.transparent);
+  const uc = withUcPreset(p.model, medium ? 'heavy' : p.ucPreset, text, actual.negative);
   text = withMode(text, p.mode);
   if (f.autoText) text = withAutoText(text, chars);
   // Models without character prompts take everyone's negative in the one they have.
   const theirs = f.captions ? '' : chars.map(c => String(c.negative || '').trim()).filter(Boolean).join(', ');
-  return {prompt: text, negative: theirs ? [uc, theirs].filter(Boolean).join(', ') : uc, characters: chars};
+  return {prompt: text, negative: theirs ? [uc, theirs].filter(Boolean).join(', ') : uc, characters: chars, actual};
 }
 
 /**
  * vibes: [{encoding, strength}] already encoded for this model; ignored by models without vibes (V5, V3).
  * base: {image (base64 PNG at width×height), width, height, strength, noise, mask?} — 图生图, or 局部重绘 with a mask
  * (white where it is drawn again); the picture is then drawn at the base's size. refs: [{image (fitted, base64), kind,
- * strength, fidelity}] — 角色参考, V4.5 only; with them no vibe is sent (NovelAI's own app does the same: both at once
+ * strength, fidelity, sameOutfit}] — 角色参考 / 精准参考; with them no vibe is sent (NovelAI's own app does the same: both at once
  * come back broken). The result says whether references went (refs) so the vibes are left out.
  */
-export function buildImageRequest({prompt, negative = '', characters = [], params, vibes = [], base = null, refs = [], chunks = [], normalizeVibes = true}) {
+export function buildImageRequest({prompt, negative = '', characters = [], params, vibes = [], base = null, refs = [], chunks = [], normalizeVibes = true, random = Math.random}) {
   const p = normalizeDrawParams(params), f = naiFeatures(p.model), medium = p.effort === 'medium';
   if (base?.image) { p.width = base.width; p.height = base.height; }
   const action = base?.image ? (base.mask ? 'infill' : 'img2img') : 'generate';
   if (p.sampler === 'ddim_v3' && !medium && [3, 9, 27, 36, 37].includes(p.steps)) throw Error(`DDIM 用 ${p.steps} 步会出错（NovelAI 的已知问题），请换一个步数`);
   const seed = p.seed >= 0 ? p.seed : Math.floor(Math.random() * 4294967295);
-  const words = finalWords({prompt, negative, characters, params: p, chunks}), chars = words.characters;
+  const words = finalWords({prompt, negative, characters, params: p, chunks, random}), chars = words.characters;
   let input = words.prompt;
   // 增强 asks for less of what an enlarged picture tends to look like, before a Text: part as ever.
   if (base?.enhance && !base.upscaled && f.enhanceWords && !input.includes('upscaled, blurry')) { const mark = input.match(TEXT_MARK), add = ', -2::upscaled, blurry::,'; input = mark ? input.slice(0, mark.index) + add + input.slice(mark.index) : input + add; }
@@ -338,13 +373,13 @@ export function buildImageRequest({prompt, negative = '', characters = [], param
     input = [input, extra].filter(Boolean).join(', ');
     Object.assign(parameters, {sm, sm_dyn: sm && p.smea === 'dyn'});
   }
-  const director = f.reference ? (refs || []).filter(r => r?.image) : [];
+  const director = activeReferences(p, refs, action === 'infill');
   if (director.length) Object.assign(parameters, {
     director_reference_images: director.map(r => r.image),
-    director_reference_descriptions: director.map(r => ({caption: {base_caption: REFERENCE_KINDS[r.kind] || REFERENCE_KINDS.character, char_captions: []}, legacy_uc: false})),
-    director_reference_strength_values: director.map(r => clampTo(r.strength, -1, 1, .6)),
+    director_reference_descriptions: director.map(r => ({caption: {base_caption: referenceCaption(r, f.v5), char_captions: []}, legacy_uc: false})),
+    director_reference_strength_values: director.map(r => f.v5 ? clampTo(r.strength, 0, 5, 1) : clampTo(r.strength, -1, 1, .6)),
     // 保真度 as NovelAI's app shows it is the other way round from what it is sent as.
-    director_reference_secondary_strength_values: director.map(r => +(1 - clampTo(r.fidelity, -1, 1, .5)).toFixed(3)),
+    director_reference_secondary_strength_values: director.map(r => f.v5 ? 0 : +(1 - clampTo(r.fidelity, -1, 1, .5)).toFixed(3)),
     director_reference_information_extracted: director.map(() => 1)
   });
   // 局部重绘 takes no vibes: NovelAI's app does not send them with a mask.
@@ -360,7 +395,7 @@ export function buildImageRequest({prompt, negative = '', characters = [], param
   // What the official app sends with 透明背景 on (V5): the picture comes back with straight alpha.
   if (p.transparent) Object.assign(parameters, {straight_alpha: true, tag_hint_transparent_background: true});
   const model = medium ? 'nai-diffusion-5-full-medium' : p.model;
-  return {body: {input, model: action === 'infill' ? inpaintModel(model) : model, action, parameters}, seed, params: {...p, steps, sampler}, refs: director.length};
+  return {body: {input, model: action === 'infill' ? inpaintModel(model) : model, action, parameters}, seed, params: {...p, steps, sampler}, refs: director.length, actual: words.actual};
 }
 
 /** A picture's kind from its first bytes. */

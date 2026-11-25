@@ -3,6 +3,7 @@
 // opacity on the side with undo and redo, the picture in the middle (ui/paint/stage.js does the touching).
 // Works are kept as they change (ui/paint/store.js); 存到相册 puts a flat copy in the album.
 import {createView, esc, btn, help, menu, empty} from './common.js';
+import {icon} from './icons.js';
 import {saveFile} from '../download.js';
 import {allBrushes, userBrushes, saveUserBrushes, cleanBrush, BRUSHES, FIELDS, tipMask, coloredTip} from './paint/brushes.js';
 import {importBrushFile} from './paint/brush-import.js';
@@ -12,6 +13,7 @@ import {layersPanel} from './paint/layers-panel.js';
 import {createStage} from './paint/stage.js';
 import {paintStore} from './paint/store.js';
 import {hsvToRgb, rgbToHsv, rgbToHex, hexToRgb, colorWheel} from './paint/color.js';
+import {loadImage} from './draw-images.js';
 
 const SIZES = [['portrait', '竖向', 1200, 1600], ['square', '方形', 1500, 1500], ['landscape', '横向', 1600, 1200], ['phone', '手机壁纸', 1080, 1920]];
 const TOOLS_KEY = 'st-iphonie-paint-tools';
@@ -41,17 +43,19 @@ const SYMMETRY = [['', '关闭', '只画一处'], ['v', '左右对称', '沿竖�
 export function paintApp(ctx) {
   const v = createView(ctx, 'paint'), store = paintStore(ctx.win), keys = new ctx.win.AbortController();
   let mode = 'gallery', pic = null, work = null, stage = null, saving = null, saveTimer = 0, savedAt = 0, full = false, thumbs = [], adjustment = null;
+  let sendBase = null, sendingBase = false, clonePoint = null;
   const dropThumbs = () => { for (const url of thumbs) ctx.win.URL.revokeObjectURL(url); thumbs = []; };
   // The tools: which brush each of 画画 and 橡皮 uses, at what size and opacity; the colour and the ones used before.
   const tools = (() => { try { return JSON.parse(ctx.win.localStorage.getItem(TOOLS_KEY) || 'null') || {}; } catch { return {}; } })();
   tools.kind ||= 'brush'; tools.color ||= '#2b2b3a'; tools.recent ||= [];
   tools.brush ||= {id: 'ink', size: 10, opacity: 1}; tools.eraser ||= {id: 'round', size: 40, opacity: 1}; tools.smudge ||= {id: 'soft', size: 40, opacity: .6};
+  tools.clone ||= {id: 'soft', size: 32, opacity: 1};
   tools.shape ||= 'rect'; tools.fill ||= {threshold: .12, sample: 'layer'};
   let hsv = rgbToHsv(hexToRgb(tools.color) || [0, 0, 0]);
   const keepTools = () => { try { ctx.win.localStorage.setItem(TOOLS_KEY, JSON.stringify(tools)); } catch { /* this visit only */ } };
   const brushOf = id => allBrushes(ctx.win).find(b => b.id === id) || BRUSHES[1];
   // The size and opacity on the side: the brush's, the smudge's or the eraser's (the others use the brush's).
-  const current = () => tools[['eraser', 'smudge'].includes(tools.kind) ? tools.kind : 'brush'];
+  const current = () => tools[['eraser', 'smudge', 'clone'].includes(tools.kind) ? tools.kind : 'brush'];
   const kindOf = k => ['eraser', 'smudge'].includes(k) ? k : 'brush';
 
   // ---------- 作品 ----------
@@ -159,13 +163,40 @@ export function paintApp(ctx) {
   }
 
   // ---------- 画布 ----------
+  v.paintBase = async ({base, pose, width, height}, done) => {
+    const layers = [];
+    for (const [blob, name] of [[base, '绘图底图'], [pose, '3D 姿势']]) {
+      if (blob) layers.push({image: await loadImage(ctx.win, blob), name, locked: name === '绘图底图'});
+    }
+    await save();
+    if (v.disposed || !ctx.visible('paint')) return;
+    work = null;
+    sendBase = done;
+    openEditor(createPicture(ctx.doc, {width, height, showBackground: !layers.length, layers: [...layers, {name: '手绘'}]}));
+  };
+  async function endBase(use) {
+    if (!sendBase || sendingBase) return;
+    sendingBase = true;
+    try {
+      if (use && pic.float) commitTransform(pic);
+      const blob = use ? await blobOf(flatten(pic)) : null, done = sendBase;
+      sendBase = null;
+      setFull(false);
+      closeEditor();
+      pic = null;
+      renderGallery();
+      await done(blob);
+    } catch (error) { ctx.notify(error.message, {error: true}); }
+    finally { sendingBase = false; }
+  }
   function openEditor(p) {
     closeEditor();
+    clonePoint = null;
     if (tools.kind === 'transform' && !p.float) { tools.kind = 'brush'; keepTools(); }
     pic = p; mode = 'edit'; v.root.dataset.mode = 'edit';
     v.draw(`<div class="paint-edit">
       <div class="paint-top">
-        ${btn('paint-gallery', '作品', 'paint-text')}${btn('paint-actions', I.more, 'paint-tool', 'aria-label="更多：选区、变形、全屏……"')}
+        ${sendBase ? btn('paint-gallery', icon('back'), 'paint-tool', 'aria-label="返回绘图"') : btn('paint-gallery', '作品', 'paint-text')}${btn('paint-actions', I.more, 'paint-tool', 'aria-label="更多：选区、变形、全屏……"')}
         <span class="grow"></span>
         ${btn('tool-brush', I.brush, 'paint-tool', 'aria-label="画笔（再点一下选笔刷）"')}${btn('tool-smudge', I.smudge, 'paint-tool', 'aria-label="涂抹（再点一下选笔刷）"')}${btn('tool-eraser', I.eraser, 'paint-tool', 'aria-label="橡皮（再点一下选笔刷）"')}${btn('paint-layers', I.layers, 'paint-tool', 'aria-label="图层"')}
         <button type="button" class="paint-swatch" data-action="paint-color" aria-label="颜色（拖到画上就是油漆桶）"></button>
@@ -180,10 +211,12 @@ export function paintApp(ctx) {
         </div>
       </div>
       <div class="paint-bar" data-paint-bar hidden></div>
+      ${sendBase ? `<div class="paint-base-footer">${btn('paint-send-base', icon('check') + '用作绘图底图', 'primary')}</div>` : ''}
     </div>`);
     stage = createStage({doc: ctx.doc, win: ctx.win, host: v.root.querySelector('[data-paint-stage]'), pic,
-      tool: () => ({kind: tools.kind, brush: brushOf(current().id), size: current().size, opacity: current().opacity, color: tools.color, shape: tools.shape}),
+      tool: () => ({kind: tools.kind, brush: brushOf(current().id), size: current().size, opacity: current().opacity, color: tools.color, shape: tools.shape, clone: clonePoint}),
       picked: color => setColor(color, {keep: false}),
+      clonePicked: point => { if (point.x >= 0 && point.y >= 0 && point.x < pic.width && point.y < pic.height) { clonePoint = point; syncBar(); } },
       stroked: ({quiet = false} = {}) => { if (!quiet) saveSoon(); syncSide(); },
       filled: at => fillAt(at),
       selected: points => { if (!setSelection(pic, points)) ctx.notify('框小了一点，没选上'); stage.render(); syncBar(); },
@@ -200,7 +233,7 @@ export function paintApp(ctx) {
   function syncTools() {
     for (const k of ['brush', 'smudge', 'eraser', 'pick']) v.root.querySelector(`[data-action=tool-${k}]`)?.setAttribute('aria-pressed', String(tools.kind === k));
     // 选区 and 变形 live in ⋯: it shows when one of them is in use.
-    v.root.querySelector('[data-action=paint-actions]')?.setAttribute('aria-pressed', String(['select', 'transform'].includes(tools.kind)));
+    v.root.querySelector('[data-action=paint-actions]')?.setAttribute('aria-pressed', String(['select', 'transform', 'clone'].includes(tools.kind)));
     const pickBtn = v.root.querySelector('.paint-pick');
     if (pickBtn) pickBtn.style.background = tools.color;
     syncBar();
@@ -209,7 +242,7 @@ export function paintApp(ctx) {
     syncSide();
   }
   function syncSide() {
-    const t = current(), off = !['brush', 'eraser', 'smudge'].includes(tools.kind), lasso = !off && tools.kind !== 'smudge' && !!brushOf(t.id).lasso;
+    const t = current(), off = !['brush', 'eraser', 'smudge', 'clone'].includes(tools.kind), lasso = !off && tools.kind !== 'smudge' && !!brushOf(t.id).lasso;
     for (const el of v.root.querySelectorAll('.paint-vslider')) {
       const size = el.dataset.paint === 'size';
       el.style.setProperty('--v', String(size ? toSlider(t.size) / 1000 : t.opacity));
@@ -273,6 +306,12 @@ export function paintApp(ctx) {
     }
     if (tools.kind === 'transform' && pic?.float) {
       bar.innerHTML = btn('tf-flip-x', '水平翻转', 'chip-button') + btn('tf-flip-y', '垂直翻转', 'chip-button') + btn('tf-reset', '复原', 'chip-button') + btn('tf-cancel', '取消', 'chip-button') + btn('tf-done', '完成', 'primary');
+      bar.hidden = false; return;
+    }
+    if (tools.kind === 'clone') {
+      bar.innerHTML = clonePoint ? btn('clone-pick', '重选取样点', 'chip-button') : '<small>先点一下要复制的位置</small>';
+      bar.innerHTML += btn('sel-done', '完成', 'chip-button');
+      if (sel) bar.innerHTML += btn('sel-none', '取消选择', 'chip-button');
       bar.hidden = false; return;
     }
     // A selection made earlier still holds the strokes in it: the way out stays in sight with any tool.
@@ -486,21 +525,23 @@ export function paintApp(ctx) {
       {key: 'transform', icon: 'swap', label: tools.kind === 'transform' ? '放下（完成变形）' : '变形', note: '移动、缩放、旋转、翻转选区里的东西或整个图层'},
       canFull() && {key: 'full', icon: 'float', label: full ? '退出全屏' : '全屏', note: full ? '回到小手机里' : '画布铺满整个窗口'},
       {key: 'adjust', icon: 'sliders', label: '调整', note: '当前图层的色相、饱和度、亮度和模糊'},
+      {key: 'clone', icon: 'copy', label: '仿制图章', note: '先点取样位置，再把那一块画到别处'},
       {key: 'symmetry', icon: 'swap', label: '对称辅助', note: SYMMETRY.find(([k]) => k === (pic.symmetry?.kind || ''))[1] + '：画一笔，对称的地方也画上'},
       {key: 'album', icon: 'image', label: '存到相册', note: '把所有图层合成一张放进相册'},
       {key: 'download', icon: 'download', label: '下载 PNG'},
       {key: 'fit', icon: 'next', label: '适应屏幕', note: '回到整张画都看得见的样子'},
       {key: 'flip', icon: 'swap', label: stage.flipped ? '翻转回来' : '左右翻转画面', note: '只是换个方向看，检查画歪了没有；画本身不变'},
-      {key: 'rename', icon: 'edit', label: '重命名'}]);
+      work && {key: 'rename', icon: 'edit', label: '重命名'}]);
     popover(v.root.querySelector('[data-action=paint-actions]'));
     const a = await asked;
     try {
       if (a === 'select') useTool(tools.kind === 'select' ? 'brush' : 'select');
       if (a === 'transform') { if (tools.kind === 'transform') { commitTransform(pic); saveSoon(); useTool('brush'); } else useTool('transform'); }
       if (a === 'full') setFull(!full);
-      if (a === 'album') await toAlbum(pic, work.name);
-      if (a === 'download') { const blob = await blobOf(flatten(pic)); if (blob) ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, work.name)); }
+      if (a === 'album') await toAlbum(pic, work?.name || '绘图底图');
+      if (a === 'download') { const blob = await blobOf(flatten(pic)); if (blob) ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, work?.name || '绘图底图')); }
       if (a === 'adjust') adjustSheet();
+      if (a === 'clone') useTool('clone');
       if (a === 'symmetry') await symmetryMenu();
       if (a === 'fit') stage.fit();
       if (a === 'flip') { stage.flip(); ctx.notify(stage.flipped ? '画面左右翻转了（画本身没变）' : '翻转回来了'); }
@@ -516,7 +557,9 @@ export function paintApp(ctx) {
     switch (el.dataset.action) {
       case 'paint-new': newSheet(); break;
       case 'work-more': await workMenu(el.dataset.id); break;
-      case 'paint-gallery': await leaveEditor(); break;
+      case 'paint-gallery': if (sendBase) await endBase(false); else await leaveEditor(); break;
+      case 'paint-send-base': await endBase(true); break;
+      case 'clone-pick': clonePoint = null; syncBar(); break;
       case 'paint-actions': await actions(); break;
       case 'tool-brush': case 'tool-smudge': case 'tool-eraser': {
         const kind = el.dataset.action.slice(5);
@@ -619,6 +662,7 @@ export function paintApp(ctx) {
     if (full) setFull(false);
     else if (pic?.float) { cancelTransform(pic); useTool('brush'); }
     else if (pic?.selection) { setSelection(pic, null); stage.render(); syncBar(); }
+    else if (sendBase) endBase(false);
     else leaveEditor();
     return true;
   };

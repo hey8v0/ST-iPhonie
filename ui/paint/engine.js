@@ -92,7 +92,7 @@ function pixelStep(pic, layer, box, before) { return {kind: 'pixels', layer: lay
  * Starts a stroke: brush, size (px), color ('#rrggbb'), erase, or smudge (the brush's tip pushes the layer's paint;
  * its opacity is how hard). The first point stamps at once. False on a locked layer or while something is lifted.
  */
-export function beginStroke(pic, {brush, size, color, erase = false, smudge = false}, point) {
+export function beginStroke(pic, {brush, size, color, erase = false, smudge = false, clone = null}, point) {
   const layer = activeLayer(pic);
   if (layer.locked || pic.float || !layer.g) return false;
   if (smudge) {
@@ -102,7 +102,11 @@ export function beginStroke(pic, {brush, size, color, erase = false, smudge = fa
   } else {
     pic.buffer.g?.clearRect(0, 0, pic.width, pic.height);
     // A tapering brush keeps its stamps: the end narrows only once it is known where the stroke ends.
-    pic.stroke = {brush, size, erase, layer, tip: coloredTip(pic.doc, brush, erase ? '#000000' : color), last: point, carry: 0, box: null, dist: 0, stamps: brush.taper ? [] : null};
+    const source = clone && {
+      x: clone.x - point.x, y: clone.y - point.y, image: flatten(pic),
+      patch: canvasOf(pic.doc, Math.ceil(size), Math.ceil(size)), mask: tipMask(pic.doc, brush).canvas
+    };
+    pic.stroke = {brush, size, erase, layer, source, tip: source ? null : coloredTip(pic.doc, brush, erase ? '#000000' : color), last: point, carry: 0, box: null, dist: 0, stamps: !source && brush.taper ? [] : null};
     pic.buffer.g?.save(); if (pic.buffer.g) clipSelection(pic.buffer.g, pic);
   }
   stamp(pic, point);
@@ -141,6 +145,17 @@ export function mirrored(pic, x, y) {
   return [];
 }
 const grow = (s, cx, cy, size) => { const r = size / 2 + 2, box = [Math.floor(cx - r), Math.floor(cy - r), Math.ceil(cx + r), Math.ceil(cy + r)]; s.box = s.box ? [Math.min(s.box[0], box[0]), Math.min(s.box[1], box[1]), Math.max(s.box[2], box[2]), Math.max(s.box[3], box[3])] : box; };
+function cloneStamp(g, source, x, y, size, alpha) {
+  const {patch, mask, image} = source, width = patch.canvas.width;
+  if (!g || !patch.g) return;
+  patch.g.clearRect(0, 0, width, width);
+  patch.g.globalCompositeOperation = 'source-over';
+  patch.g.drawImage(image, x + source.x - size / 2, y + source.y - size / 2, size, size, 0, 0, width, width);
+  patch.g.globalCompositeOperation = 'destination-in';
+  patch.g.drawImage(mask, 0, 0, width, width);
+  g.globalAlpha = clamp(alpha, 0, 1);
+  g.drawImage(patch.canvas, x - size / 2, y - size / 2, size, size);
+}
 function stamp(pic, {x, y, p}) {
   const s = pic.stroke, {size: full, alpha} = stampOf(s.brush, s.size, p), g = pic.buffer.g;
   const size = s.stamps ? full * taperAt(s.brush, s.size, s.dist) : full;
@@ -148,6 +163,11 @@ function stamp(pic, {x, y, p}) {
     smudgeStamp(pic, x, y, size, s.brush.opacity * (alpha / Math.max(.01, s.brush.flow)));
     const r = size / 2 + 2, box = [Math.floor(x - r), Math.floor(y - r), Math.ceil(x + r), Math.ceil(y + r)];
     s.box = s.box ? [Math.min(s.box[0], box[0]), Math.min(s.box[1], box[1]), Math.max(s.box[2], box[2]), Math.max(s.box[3], box[3])] : box;
+    return;
+  }
+  if (s.source) {
+    cloneStamp(g, s.source, x, y, size, alpha);
+    grow(s, x, y, size);
     return;
   }
   const jitter = s.brush.jitter * size;

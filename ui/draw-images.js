@@ -36,15 +36,25 @@ export async function fitBase(win, blob, area = 1024 * 1024) {
   return {image: base64Of(canvas), width, height, preview: canvas.toDataURL('image/jpeg', .8)};
 }
 
-/** 角色参考: the picture fitted whole into the reference size nearest its shape, the rest black. {image, preview}. */
-export async function fitReference(win, blob) {
+// V5 reference canvas sizes are symmetric about 1024×1024, in 64 px steps within each width's range.
+const v5PortraitRefs = [[256,4096,3328], [320,3264,2752], [384,2688,2368], [448,2304,2112], [512,2048,1856],
+  [576,1792,1664], [640,1600,1536], [704,1472,1408], [768,1344,1280], [832,1216,1216], [896,1152,1152], [960,1088,1088]]
+  .flatMap(([width, max, min]) => Array.from({length: (max - min) / 64 + 1}, (_, i) => [width, max - 64 * i]));
+const v5ReferenceSizes = [...v5PortraitRefs, [1024, 1024], ...v5PortraitRefs.map(([w, h]) => [h, w]).reverse()];
+
+/** V4.5 fits the entire image on a black canvas. V5 center-crops to its nearest aspect ratio and preserves alpha. */
+export async function fitReference(win, blob, {v5 = false} = {}) {
   const img = await loadImage(win, blob), ratio = img.naturalWidth / img.naturalHeight;
-  const [width, height] = REFERENCE_SIZES.reduce((best, s) => Math.abs(Math.log(s[0] / s[1] / ratio)) < Math.abs(Math.log(best[0] / best[1] / ratio)) ? s : best);
-  const canvas = canvasOf(win.document, width, height), g = canvas.getContext('2d'), k = Math.min(width / img.naturalWidth, height / img.naturalHeight);
-  g.fillStyle = '#000'; g.fillRect(0, 0, width, height);
+  const sizes = v5 ? v5ReferenceSizes : REFERENCE_SIZES, distance = ([w, h]) => Math.abs(Math.log(w / h / ratio));
+  const [width, height] = sizes.reduce((best, size) => distance(size) < distance(best) ? size : best);
+  const canvas = canvasOf(win.document, width, height), g = canvas.getContext('2d');
+  const sx = width / img.naturalWidth, sy = height / img.naturalHeight, k = v5 ? Math.max(sx, sy) : Math.min(sx, sy);
+  if (!v5) { g.fillStyle = '#000'; g.fillRect(0, 0, width, height); }
+  else g.imageSmoothingQuality = 'high';
   const w = img.naturalWidth * k, h = img.naturalHeight * k;
   g.drawImage(img, (width - w) / 2, (height - h) / 2, w, h);
-  const thumb = canvasOf(win.document, 160, Math.round(160 * img.naturalHeight / img.naturalWidth));
+  const scale = 160 / Math.max(img.naturalWidth, img.naturalHeight);
+  const thumb = canvasOf(win.document, Math.max(1, Math.round(img.naturalWidth * scale)), Math.max(1, Math.round(img.naturalHeight * scale)));
   thumb.getContext('2d').drawImage(img, 0, 0, thumb.width, thumb.height);
   return {image: base64Of(canvas), preview: thumb.toDataURL('image/jpeg', .8)};
 }

@@ -51,6 +51,38 @@
 .ref-title small{color:var(--ink2);font-size:12px}
 .ref-kinds{margin:0 0 4px}
 .ref-kinds button{font-size:11.5px;padding:6px 2px;white-space:nowrap}
+.ref-director{grid-template-columns:minmax(0,1fr);gap:12px;padding:12px}
+.ref-director-head{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:10px;align-items:center}
+.ref-director-head .ref-thumb{width:48px;aspect-ratio:1;border-radius:10px}
+.ref-director-caption{display:grid;gap:3px;justify-items:start;text-align:left}
+.ref-director-caption label{display:flex;align-items:center;gap:6px;color:var(--ink2);font-size:12px}
+.ref-director-caption .switch{scale:.8;transform-origin:left center;margin:0}
+.ref-remove{display:grid;place-items:center;width:36px;height:36px;padding:0;border:0;border-radius:12px;background:var(--card);color:var(--ink2)}
+.ref-remove .icon{width:18px;height:18px}
+.ref-remove:hover{color:var(--danger);background:var(--danger-soft)}
+.ref-director .ref-main{gap:8px}
+.ref-director .ref-kinds{margin:0}
+.ref-director .ref-kinds button{min-width:0;padding:7px 2px}
+.ref-kinds-v5{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr)}
+.ref-kinds:not(.ref-kinds-v5) button[data-kind=both]{flex:1.35}
+.ref-director .meter-label output{font-variant-numeric:tabular-nums}
+.ref-director .meter-label span{display:inline-flex;align-items:center;gap:4px}
+.ref-outfit{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;font-weight:600}
+.ref-outfit .switch{flex-shrink:0;margin:0}
+.ref-zip{display:grid;gap:6px;margin-top:4px}
+.ref-zip-label{display:flex;align-items:center;gap:5px;color:var(--ink2);font-size:12px}
+.ref-zip-actions{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}
+.ref-zip-actions>*{min-width:0;justify-content:center;text-align:center}
+.ref-zip-actions .icon{flex-shrink:0}
+.ref-base-tools{margin:0;gap:8px}
+.draw-result-actions{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.draw-result-actions [aria-pressed=true]{box-shadow:inset 0 0 0 1px var(--accent)}
+.thumb[data-pinned]{position:relative}
+.thumb[data-pinned]::before{content:"";position:absolute;top:3px;left:3px;width:7px;height:7px;border-radius:50%;background:var(--accent);border:1px solid var(--card);z-index:1}
+.draw-comparison{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.draw-compare-picture{display:grid;align-content:start;gap:4px;min-width:0;padding:7px;border:1px solid var(--line);border-radius:14px;background:var(--card2);color:var(--ink);text-align:left}
+.draw-compare-picture img{width:100%;aspect-ratio:1;object-fit:contain;border-radius:8px;background:var(--card)}
+.draw-compare-picture small{color:var(--ink2);overflow-wrap:anywhere}
 .ref-actions{margin:2px 0 0;justify-content:flex-start;flex-wrap:wrap;gap:6px}
 .ref-actions .secondary{flex:1 1 100%;justify-content:center}
 .ref-actions .text-button{white-space:nowrap}
@@ -61,6 +93,27 @@
 .director-tools button,.emotion-chips button{padding:8px 13px;border-radius:999px;background:var(--card2);border:1.5px solid var(--line);font-size:14px;font-weight:600;color:var(--ink)}
 .emotion-chips button{padding:6px 11px;font-size:13px}
 .director-tools button[aria-pressed=true],.emotion-chips button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink)}
+.director-tools button:disabled{opacity:.45}
+.draw-pixel-preview{display:grid;place-items:center;min-height:110px;padding:10px;border-radius:14px;background:var(--card2)}
+.draw-pixel-preview canvas{width:100%;height:220px;object-fit:contain;image-rendering:pixelated}
+.paint-base-footer{display:flex;justify-content:center;padding:8px 12px 12px;background:var(--card)}
+.paint-base-footer .primary{min-height:40px;width:min(100%,280px)}
+.draw-pose-preview{flex:none;display:grid;place-items:center;margin:0 18px;padding:6px;border:1px solid var(--line);border-radius:16px;background:var(--card2)}
+.draw-pose-preview canvas{display:block;width:auto;height:auto;max-width:100%;max-height:clamp(76px,22vh,220px);max-height:clamp(76px,22dvh,220px);background-position:center;background-size:100% 100%;border-radius:8px;touch-action:none;cursor:grab}
+.draw-pose-preview canvas:active{cursor:grabbing}
+.draw-pose-files{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:4px}
+.draw-pose-files .secondary{min-height:36px;padding:6px 12px}
+[data-pose-note]{margin:5px 0}
+.draw-pose-switch{margin:8px 0}
+.draw-pose-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px}
+.draw-pose-controls[hidden]{display:none}
+.draw-pose-wide.field{grid-column:1/-1;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:12px;margin:8px 0}
+.draw-pose-wide .select select{min-height:38px;padding-block:5px}
+.draw-pose-controls .field{margin:0}
+.draw-pose-controls .field>span:first-child{justify-content:space-between}
+.draw-pose-controls output,.draw-pixel-preview+label output{font-variant-numeric:tabular-nums;color:var(--ink2)}
+.draw-pose-footer{flex:none;display:flex;padding:8px 18px 14px;border-top:1px solid var(--line)}
+.draw-pose-footer button{flex:1}
 /* 局部重绘的笔刷 */
 .mask-editor{position:absolute;inset:0;z-index:60;display:flex;flex-direction:column;background:#0d0f14;color:#fff;animation:sheet-in .2s ease-out}
 .mask-editor header,.mask-editor footer{display:flex;align-items:center;gap:10px;padding:12px 14px}

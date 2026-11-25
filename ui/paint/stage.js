@@ -35,7 +35,7 @@ export function fitView(pic, w, h) {
  * lassoed(points, {erase}): a 柳叶笔 outline to fill (or empty).
  * undo(), redo(), locked(): a stroke on a locked layer.
  */
-export function createStage({doc, win, host, pic, tool, picked, stroked, filled = () => {}, selected = () => {}, lassoed = () => {}, undo, redo, locked = () => {}}) {
+export function createStage({doc, win, host, pic, tool, picked, stroked, clonePicked = () => {}, filled = () => {}, selected = () => {}, lassoed = () => {}, undo, redo, locked = () => {}}) {
   const canvas = doc.createElement('canvas');
   canvas.className = 'paint-view';
   canvas.style.touchAction = 'none';
@@ -257,6 +257,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   function startDrawing(e) {
     const t = tool(), at = point(e);
     if (t.kind === 'pick') { drawing = {id: e.pointerId, pick: true}; pick(at); return; }
+    if (t.kind === 'clone' && !t.clone) { drawing = {id: e.pointerId, done: true}; clonePicked(at); return; }
     if (t.kind === 'fill') { drawing = {id: e.pointerId, done: true}; filled(at); return; }
     if (t.kind === 'select') { outline = {id: e.pointerId, shape: t.shape, start: at, points: [[at.x, at.y]]}; drawing = {id: e.pointerId, outline: true}; return; }
     if (t.brush?.lasso && (t.kind === 'brush' || t.kind === 'eraser')) {
@@ -264,11 +265,11 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
       drawing = {id: e.pointerId, outline: true, at: Date.now(), start: at, moved: 0}; return;
     }
     if (t.kind === 'transform') { startMoving(e, at); return; }
-    const brush = {...t.brush, opacity: t.brush.opacity * t.opacity}, params = {brush, size: t.size, color: t.color, erase: t.kind === 'eraser', smudge: t.kind === 'smudge'};
+    const brush = {...t.brush, opacity: t.brush.opacity * t.opacity}, params = {brush, size: t.size, color: t.color, erase: t.kind === 'eraser', smudge: t.kind === 'smudge', clone: t.kind === 'clone' ? t.clone : null};
     drawing = {id: e.pointerId, start: at, smooth: at, raw: at, moved: 0, at: Date.now(), streamline: brush.streamline, params, pts: [at], was: t.color};
     if (!beginStroke(pic, params, at)) { drawing = null; locked(); return; }
     // Held still: the eyedropper instead.
-    drawing.hold = win.setTimeout(() => { if (drawing && !drawing.pick && drawing.moved < 6) { endStroke(pic, {cancel: true}); drawing.pick = true; pick(drawing.raw); later(); } }, HOLD);
+    if (!params.clone) drawing.hold = win.setTimeout(() => { if (drawing && !drawing.pick && drawing.moved < 6) { endStroke(pic, {cancel: true}); drawing.pick = true; pick(drawing.raw); later(); } }, HOLD);
     later();
   }
   function moveDrawing(e) {
@@ -294,7 +295,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     }
     // Held still after drawing a while: 速创形状 in a moment (not while 涂抹).
     const d = drawing;
-    if (!d.params.smudge && d.moved > 14 && (!d.stillAt || Math.hypot(d.raw.sx - d.stillAt.sx, d.raw.sy - d.stillAt.sy) > 3)) {
+    if (!d.params.smudge && !d.params.clone && d.moved > 14 && (!d.stillAt || Math.hypot(d.raw.sx - d.stillAt.sx, d.raw.sy - d.stillAt.sy) > 3)) {
       d.stillAt = d.raw; win.clearTimeout(d.shapeTimer); d.shapeTimer = win.setTimeout(() => snapShape(d), SHAPE_HOLD);
     }
     drawing.predicted = (e.getPredictedEvents?.() || []).slice(0, 3).map(point);
