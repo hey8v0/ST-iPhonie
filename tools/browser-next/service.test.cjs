@@ -23,6 +23,8 @@ test('isolated desktop lifecycle over real loopback HTTP and WebSocket',async t=
   for(const port of [6089,5929]) assert(await require(service).portFree(port),'QA needs unused port '+port);
   for(const dir of ['profile','viewer/core/util','viewer/app']) fs.mkdirSync(path.join(base,dir),{recursive:true});
   for(const n of ['passwd','viewer/vnc.html','viewer/core/rfb.js','viewer/core/util/browser.js','viewer/app/ui.js','testfont',sandboxProfile]) write(n,'fixture');
+  write('viewer/vnc.html','<script type="module">import UI from "./app/ui.js";</script>');
+  write('viewer/core/util/browser.js','supportsWebCodecsH264Decode = await _checkWebCodecsH264DecodeSupport();');
   t.after(async()=>{await cli('stop').catch(()=>{});fs.rmSync(home,{recursive:true,force:true});});
   const waitCode=async code=>{
     for(let i=0;i<100;i++){if((await status()).code===code) return;await delay(120);}

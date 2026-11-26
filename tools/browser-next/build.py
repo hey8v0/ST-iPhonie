@@ -8,13 +8,17 @@ import tarfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-output, compat = map(Path, sys.argv[1:3])
+output = Path(sys.argv[1])
 safe = f"safe.directory={root.as_posix()}"
 
 def git(*args):
     return subprocess.check_output(["git", "-c", safe, *args], cwd=root)
 
 base = "7ed20a6cf8ba69d51103e730f98b5a50bd27db79"
+compat_digests = {
+    "ui/browser.js": "30460926708365b0fb2385c024498e620addb69b5fbec51e4396b021c8bf7dda",
+    "ui/termux-connection.js": "a0b0d4c62f17c559e4d3dcbe9d151e56e5f7f47b324f920f581b0bad6be168d4",
+}
 def normalized(data):
     return data.replace(b"\r\n", b"\n")
 
@@ -31,12 +35,10 @@ for rel in sorted(names):
         continue
     content = normalized((root / rel).read_bytes())
     prior = normalized(git("show", base + ":" + rel)) if rel in base_names else None
-    compat_file = compat / "preview" / Path(rel).name
-    is_compat_ui = rel in {"ui/browser.js", "ui/termux-connection.js"} and compat_file.is_file()
-    alternate = normalized(compat_file.read_bytes()) if is_compat_ui else prior
-    if is_compat_ui and prior is not None:
+    alternate = compat_digests.get(rel, digest(prior))
+    if rel in compat_digests and prior is not None:
         new["formal/" + rel] = prior
-    rows.append("\t".join([rel, digest(prior), digest(alternate), digest(content)]))
+    rows.append("\t".join([rel, digest(prior), alternate, digest(content)]))
     applied.append(rel + "\t" + digest(content))
     new["overlay/" + rel] = content
 

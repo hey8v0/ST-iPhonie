@@ -6,7 +6,7 @@ backup="$base/browser-next-backup"
 src="$(cd "$(dirname "$0")" && pwd)"
 [[ -x "$PREFIX/bin/bash" ]] || { echo '请在安卓 Termux 中运行。'; exit 1; }
 digest() {
-  if [[ -f "$1" ]]; then sha256sum "$1" | cut -d' ' -f1; else printf 'missing\n'; fi
+  if [[ -f "$1" ]]; then sed 's/\r$//' "$1" | sha256sum | cut -d' ' -f1; else printf 'missing\n'; fi
 }
 replace() {
   local source="$1" dest="$2" temp
