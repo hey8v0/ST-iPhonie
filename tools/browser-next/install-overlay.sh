@@ -24,12 +24,12 @@ if [[ "${1:-}" == restore ]]; then
   [[ -f "$backup/location" ]] || { echo '未找到测试版安装记录。'; exit 1; }
   app="$(cat "$backup/location")"
   [[ "$app" == "$HOME"/* && -f "$app/manifest.json" ]] || exit 1
-  while IFS=$'\t' read -r rel prior applied; do
+  while IFS=$'\t' read -r rel prior applied previous; do
     verify_path "$app" "$rel" || exit 1
     current="$(digest "$app/$rel")"
-    [[ "$current" == "$applied" || "$current" == "$prior" ]] || { echo "文件有新的改动，保留当前文件：$rel"; exit 1; }
+    [[ "$current" == "$applied" || "$current" == "$prior" || "$current" == "${previous:-}" ]] || { echo "文件有新的改动，保留当前文件：$rel"; exit 1; }
   done < "$backup/restore.tsv"
-  while IFS=$'\t' read -r rel prior applied; do
+  while IFS=$'\t' read -r rel prior applied previous; do
     if [[ "$prior" == missing ]]; then
       if [[ -f "$app/$rel" ]]; then rm -- "$app/$rel"; fi
     else replace "$backup/original/$rel" "$app/$rel"; fi
@@ -70,39 +70,54 @@ else
 fi
 app="$(realpath "$app")"
 [[ "$app" == "$HOME"/* && -f "$app/manifest.json" ]] || exit 1
+declare -A installed=() original=() older=() updated=()
+if [[ -f "$backup/location" ]]; then
+  while IFS=$'\t' read -r rel prior applied previous; do
+    installed["$rel"]="$applied"
+    original["$rel"]="$prior"
+    older["$rel"]="${previous:-}"
+  done < "$backup/restore.tsv"
+fi
 while IFS=$'\t' read -r rel official alternate applied; do
   verify_path "$app" "$rel" || exit 1
   [[ "$(digest "$src/overlay/$rel")" == "$applied" ]] || { echo "安装包文件校验失败：$rel"; exit 1; }
   current="$(digest "$app/$rel")"
-  [[ "$current" == "$official" || "$current" == "$alternate" || "$current" == "$applied" ]] || {
+  [[ "$current" == "$official" || "$current" == "$alternate" || "$current" == "$applied" ||
+     "$current" == "${installed[$rel]-}" || "$current" == "${older[$rel]-}" ]] || {
     echo "发现未识别的版本或自定义改动：$rel。已保留现有文件。"; exit 1;
   }
+  updated["$rel"]="$applied"
 done < "$src/overlay.tsv"
-if [[ ! -f "$backup/location" ]]; then
-  mkdir -p "$backup/original"
-  : > "$backup/restore.tsv"
-  while IFS=$'\t' read -r rel official alternate applied; do
-    saved="$(digest "$app/$rel")"
+for rel in "${!installed[@]}"; do
+  [[ -n "${updated[$rel]-}" ]] || { echo '此安装包早于当前版本，请使用最新测试包。'; exit 1; }
+done
+mkdir -p "$backup/original"
+replace "$src/install-overlay.sh" "$base/restore-browser-next.sh"
+restore_plan="$(mktemp "$backup/restore.XXXXXX")"
+while IFS=$'\t' read -r rel official alternate applied; do
+  current="$(digest "$app/$rel")"
+  saved="${original[$rel]-}"
+  if [[ -z "$saved" ]]; then
+    saved="$current"
     if [[ "$saved" == "$alternate" && "$alternate" != "$official" ]]; then
       saved="$official"
       if [[ "$official" != missing ]]; then replace "$src/formal/$rel" "$backup/original/$rel"; fi
     elif [[ "$saved" != missing ]]; then
       replace "$app/$rel" "$backup/original/$rel"
     fi
-    printf '%s\t%s\t%s\n' "$rel" "$saved" "$applied" >> "$backup/restore.tsv"
-  done < "$src/overlay.tsv"
-  printf '%s\n' "$app" > "$backup/location"
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$rel" "$saved" "$applied" "$current" >> "$restore_plan"
+done < "$src/overlay.tsv"
+mv -f "$restore_plan" "$backup/restore.tsv"
+if [[ ! -f "$backup/location" ]]; then
   if [[ -L "$PREFIX/bin/iphonie-browser" ]]; then
     readlink "$PREFIX/bin/iphonie-browser" > "$backup/launcher"
   fi
-else
-  cmp -s "$src/applied.tsv" "$backup/expected.tsv" || { echo '已有其他测试版，请先执行 iphonie-browser restore-release。'; exit 1; }
+  printf '%s\n' "$app" > "$backup/location"
 fi
-cp "$src/applied.tsv" "$backup/expected.tsv"
 while IFS=$'\t' read -r rel official alternate applied; do
   replace "$src/overlay/$rel" "$app/$rel"
 done < "$src/overlay.tsv"
-replace "$src/install-overlay.sh" "$base/restore-browser-next.sh"
 # Locate a real SillyTavern root. Search runs as an optional server plugin.
 tavern="$app"
 while [[ "$tavern" == "$HOME"/* && ! -f "$tavern/src/plugin-loader.js" ]]; do tavern="$(dirname "$tavern")"; done

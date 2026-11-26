@@ -25,15 +25,23 @@ cat > "$tmp/bin/node" <<'NODE'
 NODE
 touch "$tmp/bin/getprop" "$tmp/bin/pkg"
 chmod +x "$tmp/bin/"*
-printf 'y\n' | bash "$source_root/ST-iPhonie-Browser-Next.sh"
+if [[ "${2:-}" == upgrade ]]; then
+  git -c safe.directory="$(cygpath -m "$source_root" 2>/dev/null || printf %s "$source_root")" -C "$source_root" show 783caa4:ST-iPhonie-Browser-Next.sh > "$tmp/previous.sh"
+  printf 'y\n' | bash "$tmp/previous.sh"
+  bash "$source_root/ST-iPhonie-Browser-Next.sh"
+else
+  printf 'y\n' | bash "$source_root/ST-iPhonie-Browser-Next.sh"
+fi
+test -f "$app/ui/browser-keyboard.js"
 test -f "$tavern/plugins/iphonie-web/index.mjs"
 test -f "$app/ui/web-share.js"
 test -f "$app/termux/viewer-controls.js"
 grep -Fq storyNaiRef "$app/ui/settings.js"
-bash "$source_root/ST-iPhonie-Browser-Next.sh"
+if [[ "${2:-}" != upgrade ]]; then bash "$source_root/ST-iPhonie-Browser-Next.sh"; fi
 bash "$PREFIX/bin/iphonie-browser" restore-release
 test ! -f "$app/ui/web-share.js"
 test ! -f "$app/ui/termux-connection.js"
+test ! -f "$app/ui/browser-keyboard.js"
 cmp "$tmp/formal-browser.js" "$app/ui/browser.js" ||
   cmp <(sed 's/\r$//' "$tmp/formal-browser.js") "$app/ui/browser.js"
 test ! -f "$tavern/plugins/iphonie-web/index.mjs"

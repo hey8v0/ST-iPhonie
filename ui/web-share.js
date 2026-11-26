@@ -1,14 +1,15 @@
 import {btn, esc, field} from './common.js';
-import {normalizeWebPage} from '../core/web-share.js';
+import {normalizeWebPage, publicLink} from '../core/web-share.js';
 
-export async function shareWebPage(ctx, {url='', command}={}) {
+export async function shareWebPage(ctx, {url='', command, onShared}={}) {
   const {api,doc,win}=ctx;
   const threads=(await api.listThreads()).filter(t=>!t.watch && !t.blocked && !t.friend);
   if(!threads.length){ctx.notify('先在聊天里打开一个会话');return;}
   const pick='<select name="thread" aria-label="分享对象">'+threads.map(t=>'<option value="'+esc(t.id)+'">'+esc(t.name || t.members.join('、'))+'</option>').join('')+'</select>';
+  const shareURL=normalizeWebPage({url})?.url || '';
   const inputs=[['title','标题',140],['summary','简介或摘要',400],['text','要分享的正文',1800],['selection','选中文字',600],['captions','实际获取的视频字幕',1000],['note','附言',300]];
   const d=ctx.dialog('分享网页', '<form class="web-share-form">'+field('分享对象',pick)
-    +field('网页网址','<input name="url" type="url" required maxlength="2000" value="'+esc(url)+'">')
+    +field('网页网址','<input name="url" type="url" required maxlength="2000" value="'+esc(shareURL)+'">')
     +btn('read-public','读取公开网页','secondary')
     +inputs.map(([key,label,max])=>field(label,'<textarea name="'+key+'" maxlength="'+max+'"></textarea>')).join('')
     +(command?btn('selected','读取 Firefox 选中文字','secondary')+btn('screenshot','添加当前画面','secondary'):'')
@@ -54,6 +55,11 @@ export async function shareWebPage(ctx, {url='', command}={}) {
     e.preventDefault();if(sending)return;
     const page=normalizeWebPage(Object.fromEntries(new win.FormData(form)));
     if(!page){ctx.notify('请输入有效的网页网址',{error:true});return;}
+    if(page.url!==publicLink(form.elements.url.value)){
+      form.elements.url.value=page.url;
+      ctx.notify('已移除网址里的凭据参数，请检查后发送。');
+      return;
+    }
     const cover=form.elements.cover.files[0], target=form.elements.thread.value;
     if(cover && (!['image/png','image/jpeg','image/webp'].includes(cover.type) || cover.size>4000000)){ctx.notify('请选择 4 MB 以内的 PNG、JPG 或 WebP 图片');return;}
     const button=form.querySelector('[type=submit]');
@@ -63,6 +69,7 @@ export async function shareWebPage(ctx, {url='', command}={}) {
       if(cover){page.coverId=(await api.addPhoto({name:'分享网页封面',blob:cover})).id;added.push(page.coverId);}
       if(image){page.screenshotId=(await api.addPhoto({name:'分享网页截图',blob:await (await win.fetch(image)).blob()})).id;added.push(page.screenshotId);}
       await api.appendChat(target,[{from:'me',kind:'web',page}],{read:true});
+      onShared?.(page);
       d.close();ctx.openThread(target);
     }catch(error){if(added.length)await api.deletePhotos?.(added).catch(()=>{});ctx.notify(error.message,{error:true});}
     finally{sending=false;button.disabled=false;}

@@ -49,7 +49,7 @@ function createBridge({directory, health, stop, token, viewerEvent=()=>{}}) {
     }
     if (pathname === '/viewer-mobile.css') {
       res.setHeader('Content-Type','text/css; charset=utf-8');
-      return res.end('.iphonie-embedded #noVNC_control_bar_anchor{visibility:hidden}.iphonie-embedded #noVNC_container{max-width:1280px;max-height:1280px;margin:auto}');
+      return res.end('.iphonie-embedded:not(.iphonie-show-native) #noVNC_control_bar_anchor{visibility:hidden}.iphonie-embedded #noVNC_container{max-width:1280px;max-height:1280px;margin:auto}');
     }
     if(pathname==='/core/util/browser.js'){
       try{const js=patch.compatibility(fs.readFileSync(path.join(directory,'core/util/browser.js'),'utf8'));res.setHeader('Content-Type','text/javascript; charset=utf-8');return res.end(js);}catch{return res.writeHead(503).end('Viewer compatibility mismatch');}

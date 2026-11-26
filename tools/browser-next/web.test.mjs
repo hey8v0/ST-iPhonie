@@ -24,6 +24,7 @@ test('external text has distinct fields and ambiguous model output never grants 
   assert.match(model,/"screenshot":"附图1"/);
   assert.doesNotMatch(messageLine({kind:'web',from:'me',page},'User'),/"screenshot":/);
   assert.equal(normalizeWebPage({url:'javascript:alert(1)'}),null);
+  assert.equal(normalizeWebPage({url:'https://example.com/watch?v=42&access_token=private#id_token=private'}).url,'https://example.com/watch?v=42');
   assert.equal(parseWebChoice('{"id":1,"url":"https://fake.test"}','id'),null);
   assert.equal(parseWebChoice('Some prose {"query":"food"}','query'),null);
   assert.equal(searchQuery('private@example.com'),'');

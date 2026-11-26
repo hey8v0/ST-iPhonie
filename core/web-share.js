@@ -9,9 +9,14 @@ export function publicLink(value) {
 }
 
 export function normalizeWebPage(value = {}) {
-  const url=publicLink(value?.url);
-  if(!url) return null;
-  return {url, title:field(value.title,140), site:new URL(url).hostname,
+  const link=publicLink(value?.url);
+  if(!link) return null;
+  const url=new URL(link);
+  const credentials=/^(?:access[-_]?token|refresh[-_]?token|id[-_]?token|token|api[-_]?key|key|session(?:id)?|sid|password|passwd|auth|credential|signature|sig|code|authorization|x-amz-.+)$/i;
+  for(const name of [...url.searchParams.keys()])if(credentials.test(name))url.searchParams.delete(name);
+  // Fragments can contain OAuth tokens. Preserve ordinary in-page anchors.
+  if(url.hash.includes('=') && [...new URLSearchParams(url.hash.slice(1)).keys()].some(name=>credentials.test(name)))url.hash='';
+  return {url:url.href, title:field(value.title,140), site:url.hostname,
     summary:field(value.summary,400), text:field(value.text,1800),
     selection:field(value.selection,600), captions:field(value.captions,1000),
     note:field(value.note,300), coverId:field(value.coverId,512), screenshotId:field(value.screenshotId,512),

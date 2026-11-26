@@ -60,7 +60,7 @@ function vncLogFlags(log) {
 async function daemon() {
   const token = crypto.randomBytes(32).toString('hex');
   const owner = crypto.randomUUID();
-  let state = {service:'iphonie-firefox-v2',controls:true,build:path.basename(__dirname),state:'starting',code:'environment'};
+  let state = {service:'iphonie-firefox-v2',controls:true,localKeyboard:true,build:path.basename(__dirname),state:'starting',code:'environment'};
   let stopping = false, recentErrors = '', failedChild = '';
   let vncSecurity={blacklistSeen:false,authenticationFailureSeen:false};
   const children = new Set();

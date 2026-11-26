@@ -2878,7 +2878,7 @@ export function chatApp(ctx) {
         const page=find()?.page;
         if(!page?.url) break;
         const d=ctx.dialog(page.title || page.site,`<div class="pick-list"><p>${esc(page.url)}</p>${btn('inside','在小手机打开','list-row')}${btn('copy-url','复制链接','list-row')}<a class="list-row" href="${esc(page.url)}" target="_blank" rel="noopener noreferrer">外部打开</a></div>`);
-        d.body.querySelector('[data-action=inside]').onclick=()=>{d.close();ctx.openBrowser(page.url);};
+        d.body.querySelector('[data-action=inside]').onclick=()=>{d.close();ctx.openBrowser(page.url,page.title);};
         d.body.querySelector('[data-action=copy-url]').onclick=async()=>ctx.notify(await copyText(ctx.win,page.url)?'已复制':'请长按网址复制');
         break;
       }
