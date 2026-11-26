@@ -248,6 +248,7 @@ export interface DrawPositionGrid { type: 'none' | 'thirds' | 'golden' | 'grid';
 export interface DrawMaskLook { color: string; opacity: number; border: boolean; pattern: 'solid' | 'stripes' | 'dots' | 'crosshatch' | 'grid' | 'checker' | 'hearts'; }
 export interface DrawSettings {
     selectionDraw?: boolean;
+    storyNaiRef?: boolean;
     storyPaidSource?: string;
     /** 提示词片段, and their 分类 (groups as 画风 has them). */
     chunks: PromptChunk[]; chunkGroups: DrawStyleGroup[];
@@ -304,7 +305,7 @@ export interface VibeSettings { enabled: boolean; use: { kind: '' | 'group' | 'v
 export interface VibeSummary { id: string; name: string; thumb: string; strength: number; ie: number; image: boolean; keys: string[]; ready?: string[]; ies?: Record<string, number[]>; }
 /** The vibes a picture would use: encode = how many need encoding first (2 Anlas each), over = left out by the free-tier guard. */
 export interface VibePlan { on: boolean; model: boolean; used: Array<{ id: string; name: string; strength: number; encode: boolean }>; skipped: Array<{ name: string; why: 'missing' | 'model' | 'no-encoding' }>; over: number; encode: number; extra: number; }
-export interface DrawSettingsPatch { selectionDraw?: boolean; storyPaidSource?: string; mode?: 'separate' | 'inline'; strip?: boolean; chunks?: PromptChunk[]; stream?: boolean; autoDownload?: boolean; locks?: string[]; grid?: DrawGrid; positionGrid?: Partial<DrawPositionGrid>; maskLook?: Partial<DrawMaskLook>; enabled?: boolean; auto?: boolean; guard?: boolean; fold?: boolean; queue?: Partial<DrawQueueSettings>; params?: Partial<DrawParams>; activeStyle?: string; activePreset?: string; relay?: Partial<{ url: string; assumeOpus: boolean }>; vibe?: Partial<VibeSettings>; engine?: DrawEngine; gpt?: Partial<GptImageSettings>; comfy?: Partial<ComfySettings>; }
+export interface DrawSettingsPatch { storyNaiRef?: boolean; selectionDraw?: boolean; storyPaidSource?: string; mode?: 'separate' | 'inline'; strip?: boolean; chunks?: PromptChunk[]; stream?: boolean; autoDownload?: boolean; locks?: string[]; grid?: DrawGrid; positionGrid?: Partial<DrawPositionGrid>; maskLook?: Partial<DrawMaskLook>; enabled?: boolean; auto?: boolean; guard?: boolean; fold?: boolean; queue?: Partial<DrawQueueSettings>; params?: Partial<DrawParams>; activeStyle?: string; activePreset?: string; relay?: Partial<{ url: string; assumeOpus: boolean }>; vibe?: Partial<VibeSettings>; engine?: DrawEngine; gpt?: Partial<GptImageSettings>; comfy?: Partial<ComfySettings>; }
 /** gap: seconds between two NovelAI requests (0-60). retries: how often an "account busy" (429) is retried (0-10). */
 export interface DrawQueueSettings { gap: number; retries: number; cloud: CloudQueueSettings; }
 /** Shared queue service (cloud-queue/worker.js) that everyone using one NovelAI account joins with the same room code. */
@@ -415,7 +416,7 @@ export interface Wallet { balance: number; ledger: Array<{ id: string; at: numbe
 export interface ShopGift { id: string; name: string; emoji: string; price: number; note: string; /** true for a gift the user added */ own?: boolean; }
 export type AvatarChoice = { kind: 'photo'; photoId: string } | { kind: 'text' };
 export interface ChatContact { name: string; source: 'role' | 'manual'; id?: string; voice: boolean; engine: Engine | 'none'; language: string; persona: string; }
-export type ChatKind = 'text' | 'voice' | 'photo' | 'sticker' | 'system' | 'redpacket' | 'transfer' | 'location' | 'pat' | 'dice' | 'notice' | 'recall' | 'call' | 'gift' | 'song' | 'file' | 'forward' | 'game' | 'post' | 'outfit' | 'book' | 'letter';
+export type ChatKind = 'text' | 'voice' | 'photo' | 'sticker' | 'system' | 'redpacket' | 'transfer' | 'location' | 'pat' | 'dice' | 'notice' | 'recall' | 'call' | 'gift' | 'song' | 'file' | 'forward' | 'game' | 'post' | 'outfit' | 'book' | 'letter' | 'web';
 /** 自定义气泡 (0.9.33): two CSS texts written against .bubble; worn as profile.bubble 'custom:<id>'. */
 export interface BubbleSet { id: string; name: string; me: string; them: string; at: number; }
 /** 合并转发: one line of a forwarded record. */
@@ -438,7 +439,7 @@ export interface ChatMessage {
     book?: {id: string; title: string; subtitle: string; theme: string; spreads: number; coverId: string; text: string};
     letter?: {text: string; arriveAt: number; opened: boolean; answered: boolean};
     reactions?: Array<{from: string; emoji: string}>; readingPage?: string; story?: string; storyVer?: string;
- id: string; from: 'me' | string; kind: ChatKind; text: string; /** kind 'forward' (合并转发) */ title?: string; items?: ForwardItem[]; translation?: string; emotion?: string; photoId?: string; amount?: string; /** kind 'gift': what it is (price 0 when a character sends it) */ gift?: { name: string; emoji: string; price: number }; state?: 'sent' | 'opened' | 'accepted' | 'returned' | 'answered' | 'missed' | 'declined' | 'cancelled'; openedBy?: string; detail?: string; target?: string; quote?: { from: string; text: string }; at: number;
+ id: string; from: 'me' | string; kind: ChatKind; text: string; page?: {url:string;title?:string;site?:string;summary?:string;text?:string;selection?:string;captions?:string;note?:string;coverId?:string;screenshotId?:string;source?:'user'|'search'}; /** kind 'forward' (合并转发) */ title?: string; items?: ForwardItem[]; translation?: string; emotion?: string; photoId?: string; amount?: string; /** kind 'gift': what it is (price 0 when a character sends it) */ gift?: { name: string; emoji: string; price: number }; state?: 'sent' | 'opened' | 'accepted' | 'returned' | 'answered' | 'missed' | 'declined' | 'cancelled'; openedBy?: string; detail?: string; target?: string; quote?: { from: string; text: string }; at: number;
     imageTags?: string; imageVersions?: string[]; imageState?: 'waiting' | 'done' | 'failed'; imageNote?: string;
     /** call: who called (from), how it ended, how long it lasted, what was said and a missed call's voice message. */
     dir?: 'in' | 'out'; duration?: number; lines?: CallLine[]; voicemail?: Omit<CallLine, 'from'>[]; }
@@ -1204,6 +1205,8 @@ export interface BackendFacade {
     addRoleContact(name: string): ChatContact[];
     /** Messages holding these words, the newest first, with the words around each find. */
     searchChatMessages(query: string, options?: {limit?: number; around?: number; tail?: number}): Promise<{hits: {thread: string; id: string; from: string; at: number; before: string; hit: string; after: string}[]; total: number}>;
+    webProvider(): Promise<boolean>;
+    readWebPage(url: string): Promise<{title:string;summary:string;text:string}>;
     listThreads(): Promise<ChatThreadSummary[]>;
     getThread(id: string): Promise<ChatThread | null>;
     /** 重新回复的版本: another version of the chat's last round shows (the one showing is kept among them). */

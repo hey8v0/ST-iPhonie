@@ -786,7 +786,13 @@ export function buildChatRequest({prompts = {}, preset, thread, members, story =
     '刚开始': now && !history.length ? (group ? '群里有人' : partner) : '',
     '轮到回复': now && last?.from === 'me' ? (group ? '群里的成员' : partner) : '',
     '接着说': now && last && last.from !== 'me' ? (group ? '群里' : partner) : ''});
-  const transcript = history.length ? `【${group ? thread.name + '（群聊）' : '和' + partner}的聊天记录】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}\n\n` : '';
+  let fullWebCards = 0;
+  const trimmedHistory=[...history].reverse().map(m=>{
+    if(m.kind!=='web' || !m.page || ++fullWebCards<=2)return m;
+    const {url,title,site,source,note}=m.page;
+    return {...m,page:{url,title,site,source,note}};
+  }).reverse();
+  const transcript = history.length ? `【${group ? thread.name + '（群聊）' : '和' + partner}的聊天记录】\n${trimmedHistory.map(m => messageLine(m, user)).filter(Boolean).join('\n')}\n\n` : '';
   // 现实时间, when turned on: ahead of the record, the way a phone shows the time above the messages.
   const clock = clockText(prompts, {now: time, last: lastTheirs(thread.messages)});
   // 按现实时间主动找你: what the moment is (早上, 睡前, 很久没聊), under the time.

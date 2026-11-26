@@ -131,7 +131,7 @@ const CALL_STATES = ['answered', 'missed', 'declined', 'cancelled'];
 const spoken = (list, max, withFrom) => (Array.isArray(list) ? list : []).slice(-max).filter(l => l && String(l.text || l.translation || '').trim()).map(l => ({...(withFrom ? {from: clip(l.from, 40).trim() || 'me'} : {}), text: clip(l.text || l.translation, 1000), translation: clip(l.translation || l.text, 1000), emotion: clip(l.emotion || 'calm', 100)}));
 const STATES = {redpacket: ['sent', 'opened'], transfer: ['sent', 'accepted', 'returned'], gift: ['sent', 'accepted', 'returned']};
 /** The messages that can be edited: their words; a photo keeps its picture. */
-export const EDITABLE_KINDS = Object.freeze(['text', 'voice', 'photo']);
+export const EDITABLE_KINDS = Object.freeze(['text', 'voice', 'photo', 'web']);
 const requestsOf = list => (Array.isArray(list) ? list : []).filter(r => r && String(r.text || '').trim()).slice(-10).map(r => ({text: clip(r.text, 300).trim(), at: Number.isFinite(r.at) ? r.at : 0}));
 export const FRIEND_REASON_LIMIT = 200;
 export const RECORDING_LIMITS = Object.freeze({seconds: 60, bytes: 2 * 1024 * 1024});
@@ -782,6 +782,11 @@ export class ChatStore {
       if ('text' in patch) {
         if (!EDITABLE_KINDS.includes(m.kind)) throw fail('这条消息不能编辑');
         const text = clip(patch.text, CHAT_STORE_LIMITS.text).trim();
+        if (m.kind==='web') {
+          m.page.note=text.slice(0,300);
+          m.text=m.page.note || m.page.title || m.page.site;
+          return;
+        }
         if (!text && m.kind !== 'photo' && !m.recording) throw fail('消息不能是空的');
         m.text = text;
         if (m.kind === 'voice' && 'translation' in patch) m.translation = clip(patch.translation, CHAT_STORE_LIMITS.text).trim();

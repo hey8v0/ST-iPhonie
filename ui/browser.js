@@ -275,7 +275,7 @@ export function browserApp(ctx) {
       case 'reload': if(termuxControls) disconnectTermux.command('reload'); else render(); break;
       case 'start': if(termuxControls) disconnectTermux.command('home'); else open(null); break;
       case 'more-browser': {
-        const remoteItems = [['keyboard','键盘'],['paste','粘贴或输入中文'],['tabs','下一个标签页'],['newTab','新建标签页'],['closeTab','关闭标签页'],['responsive','移动视口 / 退出响应式模式'],['zoomIn','放大'],['zoomOut','缩小'],['zoomReset','恢复网页缩放'],['fit','适应画面'],['remote','匹配屏幕'],['firefoxFull','Firefox 全屏'],['escape','退出视频全屏'],['reconnect','重新连接']];
+        const remoteItems = [['keyboard','键盘'],['paste','粘贴或输入中文'],['tabs','下一个标签页'],['newTab','新建标签页'],['closeTab','关闭标签页'],['responsive','移动版 / 桌面版（Firefox 响应式模式）'],['zoomIn','放大'],['zoomOut','缩小'],['zoomReset','恢复网页缩放'],['fit','适应画面'],['remote','匹配屏幕'],['firefoxFull','Firefox 全屏'],['escape','退出视频全屏'],['reconnect','重新连接']];
         const canShare=termuxControls || history[index]?.url && history[index].url!==TERMUX_VIEW;
         const items = [...(termuxControls?remoteItems:[]),...(canShare?[['share','分享网页']]:[]),['web-search','Char 真实搜索设置']];
         const d=ctx.dialog('浏览器操作', '<div class="pick-list">'+items.map(([key,name])=>btn(key,name,'list-row')).join('')+'</div>');

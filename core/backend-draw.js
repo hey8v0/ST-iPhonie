@@ -234,7 +234,7 @@ class DrawSettings {
         if ('grid' in patch) draw.grid = normalizeGrid(clone(patch.grid));
         if ('positionGrid' in patch) draw.positionGrid = normalizePositionGrid(clone(patch.positionGrid));
         if ('maskLook' in patch) draw.maskLook = normalizeMaskLook({ ...draw.maskLook, ...clone(patch.maskLook) });
-        for (const key of ['enabled', 'auto', 'guard', 'fold', 'strip', 'stream', 'autoDownload', 'selectionDraw']) if (key in patch) { if (typeof patch[key] !== 'boolean') throw Error('开关设置无效'); draw[key] = patch[key]; }
+        for (const key of ['enabled', 'auto', 'guard', 'fold', 'strip', 'stream', 'autoDownload', 'selectionDraw', 'storyNaiRef']) if (key in patch) { if (typeof patch[key] !== 'boolean') throw Error('开关设置无效'); draw[key] = patch[key]; }
         if ('storyPaidSource' in patch) {
             if (patch.storyPaidSource !== '' && patch.storyPaidSource !== storyDrawSource(draw)) throw Error('绘图连接已变化，请重新确认');
             draw.storyPaidSource = patch.storyPaidSource;
@@ -384,6 +384,24 @@ class DrawSettings {
         delete route.ref;
         this.save(next);
         sweepRoleRefs(this, [old]);
+    }
+    /** Fit the saved portrait once per model family for story generation. */
+    async storyReferenceImage(path, model) {
+        if (!ROLE_REF_FILE.test(path) || !this.syncFiles?.readPath) return null;
+        const v5 = isV5(model), key = JSON.stringify([path, v5]);
+        const cache = this.storyRefImages ??= new Map();
+        if (cache.has(key)) return cache.get(key);
+        const loading = (async () => {
+            const blob = await this.syncFiles.readPath(path);
+            if (!blob?.size) return null;
+            const {fitReference} = await import('../ui/draw-images.js');
+            return (await fitReference(window, blob, {v5})).image;
+        })().catch(() => null);
+        cache.set(key, loading);
+        if (cache.size > 4) cache.delete(cache.keys().next().value);
+        const image = await loading;
+        if (!image && cache.get(key) === loading) cache.delete(key);
+        return image;
     }
     /**
      * The 角色参考图 of the people in a GPT picture (roleRefs, in the characters' order, from pictureInputs), read from the

@@ -1,3 +1,4 @@
+import {REFERENCE_ANLAS} from '../core/novelai.js';
 import {storyDrawSource} from '../core/draw.js';
 import {KEY_ENGINES} from '../core/keys.js';
 import {storyLinkSheet as openStoryPhone, storyLinkNote} from './story-phone.js';
@@ -94,6 +95,7 @@ export function settingsApp(ctx) {
       d.body.innerHTML = `<div class="group pad">${toggle('drawEnabled', '正文出图', on, '开启后，绘图预设会加进聊天请求（或者回复写完再单独配图），让模型写出图块，插件照着画。用哪个引擎、什么画风在绘图 App 里选；免费档守卫在绘图 App 的「参数」里。')}
         ${on ? `<div class="field"><span>配图方式${help('单独配图：正文模型只管写故事；回复写完后，插件用同一个模型再单独请求一次，读这条回复、挑画面、写出图块，再把图插到对应的段落后面。出图规则不会挤占正文，张数和格式更稳，每条回复多一次请求。正文语音也选了「回复后单独配音」的话，配音和配图合成一次请求。\n\n正文里顺手写：把出图规则加进正文请求，模型写故事时顺手写出图块。只要一次请求，但规则较长，偶尔会影响正文或漏写。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配图']].map(([k, l]) => `<button type="button" data-action="draw-mode" data-value="${k}" aria-pressed="${w.mode === k}">${l}</button>`).join('')}</div>${api.planLatestPictures ? `<div class="actions" style="margin:6px 0 0">${btn('draw-latest', icon('image') + '给最新回复配图', 'text-button')}</div>` : ''}</div>
           ${toggle('drawAuto', '新回复自动出图', w.auto, '正文写好后开始生成配图。可能扣点的图片按下方的授权设置处理。')}
+          ${w.engine === 'nai' ? toggle('storyNaiRef', '使用 NovelAI 角色参考图', w.storyNaiRef, `从角色 App 取出镜角色的参考图，每张配图最多带一张，额外 ${REFERENCE_ANLAS} Anlas。自动生成沿用当前连接的扣点授权。`) : ''}
           ${w.auto && storyDrawSource(w) ? toggle('storyPaid', '允许自动扣点出图', w.storyPaidSource === storyDrawSource(w), '仅限当前绘图连接的正文配图，包括中转无法确认免费额度的图片。每张图都可能计费。') : ''}
           <button class="list-row" data-action="draw-rules"><span><strong>编辑出图规则</strong><small>每条回复出 ${rules?.count ?? 1} 张图</small></span>${icon('next')}</button>` : ''}</div>
         <div class="group pad">${toggle('selectionDraw', '划选文字生图', w.selectionDraw !== false, '在酒馆正文和书架的文字选择菜单中显示生图入口。')}
@@ -102,7 +104,7 @@ export function settingsApp(ctx) {
     };
     paint();
     d.onClose(afterSheet);
-    const KEYS = {selectionDraw:'selectionDraw', drawEnabled: 'enabled', drawAuto: 'auto', drawFold: 'fold', drawStrip: 'strip'};
+    const KEYS = {storyNaiRef:'storyNaiRef', selectionDraw:'selectionDraw', drawEnabled: 'enabled', drawAuto: 'auto', drawFold: 'fold', drawStrip: 'strip'};
     d.body.addEventListener('change', async e => {
       if (e.target.dataset.field === 'storyPaid') {
         const source = storyDrawSource(api.getState().draw), box = e.target, enable = box.checked;

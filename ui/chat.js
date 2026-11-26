@@ -2028,13 +2028,13 @@ export function chatApp(ctx) {
   }
   /** A message's words, the user's or a contact's: what the chat reads from here on. */
   function editMessage(m) {
-    const voice = m.kind === 'voice', photo = m.kind === 'photo';
-    const d = sheet(photo ? '编辑图片说明' : m.recording ? '编辑转写' : '编辑消息', `${field(m.recording ? '转写文字' : voice ? '说的话' : photo ? '图片说明' : '内容', textArea('edit-text', m.text, `rows="${voice ? 3 : 6}" maxlength="4000"`))}
+    const voice = m.kind === 'voice', photo = m.kind === 'photo', web=m.kind==='web';
+    const d = sheet(web?'编辑网页附言':photo ? '编辑图片说明' : m.recording ? '编辑转写' : '编辑消息', `${field(m.recording ? '转写文字' : voice ? '说的话' : photo ? '图片说明' : '内容', textArea('edit-text', web?m.page?.note || '':m.text, `rows="${voice ? 3 : 6}" maxlength="4000"`))}
       ${voice && !m.recording && !m.voiceDuration ? field('译文', textArea('edit-translation', m.translation || '', 'rows="3" maxlength="4000"'), '改了说的话，下次播放会重新配音。') : ''}
       <div class="actions">${btn('edit-save', '保存', 'primary')}</div>`, {
       'edit-save': async () => {
         const text = value(d, 'edit-text');
-        if (!text && !photo && !m.recording) { ctx.notify('消息不能是空的'); return; }
+        if (!text && !photo && !web && !m.recording) { ctx.notify('消息不能是空的'); return; }
         await api.updateChatMessage(threadId, m.id, {text, ...(voice && !m.voiceDuration ? {translation: value(d, 'edit-translation')} : {})});
         d.close();
         ctx.notify('改好了');

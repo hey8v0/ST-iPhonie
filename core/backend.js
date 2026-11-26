@@ -60,7 +60,7 @@ import { createStorageBudget } from './storage-budget.js';
 import { DialoguePlayer } from './player.js';
 import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS } from './library.js';
 import { makeThumb, makePreview, packPicture } from './thumbnail.js';
-import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, ucPresets, qualityPresets, upscaleBody, isV5, referenceTitle, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
+import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, ucPresets, qualityPresets, upscaleBody, isV5, referenceTitle, activeReferences, augmentBody, upscaleBy, UPSCALE_MAX, DIRECTOR_TOOLS } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, drawCast, defaultDraw, normalizeVibeSettings, applyImageConnection, tavernPicture } from './draw.js';
 import { normalizeBubbleSet, normalizeBubbleSets, normalizeBubbleOf, BUBBLE_LIMITS } from './bubble-css.js';
 import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, validChatSave, roleInSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive, normalizeRoleStickers, normalizeBgOf, normalizeStatusOf, normalizePeeked, normalizeQuickReactions } from './chat.js';
@@ -1796,7 +1796,7 @@ export class TTSBackend {
             catch (error) {
                 // 透明背景's flags are not in NovelAI's public documents: refused, the picture is asked for once more without them.
                 const p = request.body.parameters;
-                if (!p.straight_alpha || ![400, 422, 500].includes(error?.status)) throw error;
+                if (!p.straight_alpha || !(valid ? [400, 422] : [400, 422, 500]).includes(error?.status)) throw error;
                 delete p.straight_alpha; delete p.tag_hint_transparent_background;
                 blob = await send();
             }
@@ -1805,7 +1805,7 @@ export class TTSBackend {
             this.assertOpen();
             const info = this.pictureInfo('nai', { params: request.params, seed: request.seed, prompt: request.body.input }, request.actual);
             if (request.body.action !== 'generate') info.push(['方式', request.body.action === 'infill' ? `局部重绘 · 强度 ${request.body.parameters.strength}` : `图生图 · 强度 ${request.body.parameters.strength} · 噪声 ${request.body.parameters.noise}`]);
-            if (request.refs) info.push([referenceTitle(request.params.model), `${request.refs} 张`]);
+            if (request.refs) info.push([referenceTitle(request.params.model), activeReferences(request.params, refs, extra.mask).map(r => r.label).filter(Boolean).join('、') || `${request.refs} 张`]);
             const photo = temporary ? null : await this.library.addPhoto({ name: (name || 'NovelAI') + '-' + request.seed + (blob.type === 'image/webp' ? '.webp' : blob.type === 'image/jpeg' ? '.jpg' : '.png'), blob, info });
             this.ledger.image('nai');
             if (quote.free === false) this.spentAnlas();

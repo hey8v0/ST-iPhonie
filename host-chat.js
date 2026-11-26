@@ -248,9 +248,9 @@ export function createChatHost({context, settings, backend, notice = () => {}, m
       // 「[不发]」 (also as 「名字：[不发]」) is a no, not a message.
       const text = nudge ? answer.split('\n').filter(line => !/\[不发\]/.test(line)).join('\n') : answer;
       const items = parseChatReply(text, {members: people, user, voiceFormat, strictNames: thread.type === 'group', voiceNames: people.filter(p => p.voice).map(p => p.name), stickers: stickersFor(people.map(p => p.name))});
+      if(webCard && people.length === 1) items.push({kind:'web',from:people[0].name,page:webCard});
       if (!items.length && nudge) return null;
       if (!items.length) throw Error('这次没有收到消息，可以再试一次');
-      if(webCard && people.length === 1) items.push({kind:'web',from:people[0].name,page:webCard});
       const before = new Set((await backend.chats.get(threadId))?.messages.map(m => m.id) || []);
       requireChat(valid);
       const saved = await backend.chatMutate(threadId, () => settle(threadId, items, last, {board: !nudge, valid}));

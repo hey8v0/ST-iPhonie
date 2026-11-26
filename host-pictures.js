@@ -1,4 +1,4 @@
-import {storyDrawSource} from './core/draw.js';
+import {storyDrawSource, storyRefCandidates} from './core/draw.js';
 import {replacePicture,storyPickerContext} from './ui/replace-picture.js';
 import {replyBody, replyRevision} from './core/reply-revision.js';
 import {storyScope, mapStory, cleanBody, cleanSkip, NARRATION_BODY, NARRATION_SKIP} from './core/story-scope.js';
@@ -23,7 +23,7 @@ import {plainStory, activeChatPreset} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {voicePlanBody, emptyVoiceBody, voicePlanRequest, combinedRequest, voicedRows, insertVoiced} from './core/voice-plan.js';
 import {withPhone, phoneSection} from './core/chat.js';
-import {TIER_NAMES, NAI_MODEL_NAMES} from './core/novelai.js';
+import {TIER_NAMES, NAI_MODEL_NAMES, isV5, takesReference} from './core/novelai.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? record.versions : record.url ? [{...record}] : [];
@@ -107,16 +107,17 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   }
 
   /** Asks before spending Anlas (or paying for a GPT picture). Returns 'free', 'paid' or false (declined, or no key). params: the picture's, when they are its own; who: the other plugin asking. */
-  async function allowed(interactive, params, who = '') {
+  async function allowed(interactive, params, who = '', refs = [], batchNote = '') {
     if (!backend.drawReady()) { if (interactive) notice(backend.drawMissing() + '，请在小手机的引擎卡包里填写'); return false; }
     const engine = settings().draw.engine;
     // Through a relay counted as Opus, a subscription it does not pass on is expected, not worth a notice.
     if (engine === 'nai') try { await backend.naiSubscription(); } catch (error) { const relay = settings().draw.relay; if (!relay.url&&interactive)notice(error.message);else backend.reportDiagnostic?.('绘图订阅查询',{message:error.message,drawStillAvailable:true},'warn'); }
-    const quote = backend.drawQuote(params);
+    const quote = backend.drawQuote(params, {refs});
     if (quote.free === true) return 'free';
     if (!interactive) return false;
     const why = (who ? `「${who}」想用小手机画一张图。\n` : '') + (engine === 'gpt' ? 'GPT 生图每张都要花钱（按 OpenAI 或中转的价格）。' : quote.free === null ? '暂时读不到 NovelAI 订阅信息，无法确认是否免费。' : '按当前参数和订阅，这张图会扣 Anlas。');
-    return globalThis.confirm(why + '\n确定要生成吗？') ? 'paid' : false;
+    const note = batchNote || (quote.referenceAnlas ? `参考图额外 +${quote.referenceAnlas} Anlas。` : '');
+    return globalThis.confirm([why, note, '确定要生成吗？'].filter(Boolean).join('\n')) ? 'paid' : false;
   }
 
   /**
@@ -144,27 +145,65 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     } finally { signal?.removeEventListener('abort', stop); }
   }
 
+  const referencePlans = new WeakMap(), preparingImages = new Set();
+  const noReferences = {refs: [], name: ''};
+  function storyReferences(message, tag, inputs) {
+    const model = inputs.params?.model;
+    const candidates = takesReference(model) ? storyRefCandidates(settings(), tag, inputs) : [];
+    let entries = referencePlans.get(message);
+    if (!candidates.length) { entries?.delete(tag.hash); return noReferences; }
+    if (!entries) referencePlans.set(message, entries = new Map());
+    const key = JSON.stringify([model, candidates]);
+    const previous = entries.get(tag.hash);
+    if (previous?.key === key && (!previous.retryAt || previous.retryAt > Date.now())) return previous;
+    const plan = {key, refs: [], name: '', pending: true};
+    entries.set(tag.hash, plan);
+    plan.ready = (async () => {
+      for (const candidate of candidates) {
+        const image = await backend.storyReferenceImage(candidate.path, model);
+        if (!image) continue;
+        plan.refs = [{image, label: candidate.name, kind: 'character', sameOutfit: false, fidelity: .5, strength: isV5(model) ? 1 : .6}];
+        plan.name = candidate.name;
+        break;
+      }
+      plan.pending = false;
+      if (!plan.name) plan.retryAt = Date.now() + 60000;
+      scheduleRender();
+    })();
+    return plan;
+  }
+
   /** Queues one picture. Redrawing adds a version; the earlier versions stay. */
-  async function generate(id, tag, {interactive = false, permission = null, valid = null} = {}) {
+  async function generate(id, tag, {interactive = false, permission = null, valid = null, prepared = null} = {}) {
     const ctx = context(), message = ctx.chat[id], key = jobKey(id, tag), swipe = message?.swipe_id;
-    if (!message || jobs.get(key)?.state === 'generating' || selectionJobs.has(message)) return;
-    permission ??= await allowed(interactive, pictureInputs(settings(), tag, message.mes).params);
-    if (!permission || selectionJobs.has(message) || jobs.get(key)?.state === 'generating' || context().chat[id] !== message || message.swipe_id !== swipe || (valid && !valid())) return;
+    if (!message || preparingImages.has(key) || jobs.get(key)?.state === 'generating' || selectionJobs.has(message)) return;
+    const source = storyDrawSource(settings().draw);
+    const inputs = prepared?.inputs ?? pictureInputs(settings(), tag, message.mes), plan = prepared?.plan ?? storyReferences(message, tag, inputs);
+    const current = () => context().chat[id] === message && message.swipe_id === swipe && storyDrawSource(settings().draw) === source &&
+      (!plan.refs.length || settings().draw.storyNaiRef === true) && (!valid || valid()) &&
+      (permission !== 'free' || backend.drawQuote(inputs.params, {refs:plan.refs}).free === true);
+    preparingImages.add(key);
+    try {
+      await plan.ready;
+      if (!current()) return;
+      permission ??= await allowed(interactive, inputs.params, '', plan.refs);
+      if (!permission || !current() || selectionJobs.has(message)) return;
+    } finally { preparingImages.delete(key); }
     jobs.set(key, {state: 'generating', engine: settings().draw.engine});
     scheduleRender();
     try {
-      const inputs = pictureInputs(settings(), tag, message.mes);
-      const result = await backend.generateImage({...inputs, allowPaid: permission === 'paid', valid, name: 'chat', key, label: '正文图片 · ' + tag.prompt.slice(0, 24)});
+      const result = await backend.generateImage({...inputs, refs: plan.refs, allowPaid: permission === 'paid', valid: current, name: 'chat', key, label: '正文图片 · ' + tag.prompt.slice(0, 24)});
       const url = await upload(result.blob, 'st-iphonie-' + Date.now());
       // Only store the picture when the same message is still there with this tag.
       const now = context().chat[id];
       if (now === message && now.swipe_id === swipe && parsePictures(now.mes).some(t => t.hash === tag.hash)) {
         const list = versionsOf(stored(now, tag.hash));
-        list.push({url, photoId: result.photoId, seed: result.seed, width: result.params.width, height: result.params.height, model: result.params.model, steps: result.params.steps, prompt: tag.prompt, characters: inputs.names, at: Date.now()});
+        list.push({url, photoId: result.photoId, seed: result.seed, width: result.params.width, height: result.params.height, model: result.params.model, steps: result.params.steps, prompt: tag.prompt, characters: inputs.names, referenceRole: plan.name, at: Date.now()});
         keep(now, tag.hash, list, list.length - 1);
         await context().saveChat();
         if (settings().general.hideStoryWaves) redrawMessage(id, now);
       }
+      referencePlans.get(message)?.delete(tag.hash);
       jobs.delete(key);
     } catch (error) {
       if (error.cancelled) jobs.delete(key); else { jobs.set(key, {state: 'error', message: error.message}); if (settings().general.hideStoryWaves) notice(error.message); }
@@ -418,18 +457,22 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     for (const tag of tags) {
       if (!valid()) break;
       if (s.draw.engine === 'nai') try { await backend.naiSubscription(); } catch { /* A relay may omit subscription details. */ }
-      if (!valid() || stored(message,tag.hash)) continue;
-      const params = pictureInputs(settings(),tag,message.mes).params;
-      const quote = backend.drawQuote(params);
+      if (!valid() || stored(message,tag.hash) || jobs.has(jobKey(id,tag))) continue;
+      const inputs = pictureInputs(settings(),tag,message.mes), params = inputs.params;
+      const plan = storyReferences(message, tag, inputs);
+      await plan.ready;
+      if (!valid()) break;
+      if (jobs.has(jobKey(id,tag)) || stored(message,tag.hash)) continue;
+      const quote = backend.drawQuote(params, {refs:plan.refs});
       const isFree = quote.free === true && !quote.paid;
       if (!isFree && !authorized()) continue;
       const stillWanted = () => {
         if (!valid() || !parsePictures(message.mes).some(t => t.hash === tag.hash)) return false;
         if (!isFree) return authorized();
-        const currentQuote = backend.drawQuote(params);
+        const currentQuote = backend.drawQuote(params, {refs:plan.refs});
         return currentQuote.free === true && !currentQuote.paid;
       };
-      await generate(id,tag,{permission:isFree?'free':'paid', valid:stillWanted});
+      await generate(id,tag,{permission:isFree?'free':'paid', valid:stillWanted, prepared:{inputs, plan}});
     }
   }
 
@@ -457,11 +500,14 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const s = settings(), folded = folds.get(id + ':' + tag.hash) ?? s.draw.fold;
     const state = job?.state || (pic ? 'done' : record?.removed ? 'removed' : 'idle');
     const waiting = state === 'generating' ? queueText(key) : '';
-    const quote = state === 'idle' && s.draw.auto && backend.drawReady() ? backend.drawQuote?.(pictureInputs(s,tag,message.mes).params) : null;
+    const inputs = state === 'idle' && s.draw.enabled && backend.drawReady() ? pictureInputs(s,tag,message.mes) : null;
+    const plan = inputs ? storyReferences(message, tag, inputs) : noReferences;
+    const quote = inputs && !plan.pending ? backend.drawQuote?.(inputs.params, {refs:plan.refs}) : null;
     const reason = state === 'idle' ? (!s.draw.enabled ? '正文出图没有开启' : !backend.drawReady() ? backend.drawMissing() : !s.draw.auto ? '自动出图已关闭' : s.draw.engine === 'gpt' ? 'GPT 生图每张都要花钱' : quote?.free === false || quote?.paid ? '这张图预计会扣点' : quote?.free === null ? '当前连接无法确认免费额度' : '这张图没有自动生成') : '';
     const paidSource = state === 'idle' && s.draw.enabled && s.draw.auto && backend.drawReady() &&
       (s.draw.engine === 'gpt' || quote?.free === false || quote?.free === null) ? storyDrawSource(s.draw) : '';
-    const signature = JSON.stringify([paidSource, state, pic?.url, pic?.count, folded, waiting, job?.message, reason]);
+    const refNote = plan.pending ? '正在读取角色参考图' : quote?.referenceAnlas ? `${plan.name} · 参考图额外 +${quote.referenceAnlas} Anlas` : '';
+    const signature = JSON.stringify([refNote, paidSource, state, pic?.url, pic?.count, folded, waiting, job?.message, reason]);
     if (el.dataset.stttsRendered === signature) return;
     el.dataset.stttsRendered = signature;
     el.dataset.state = state;
@@ -480,8 +526,8 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     } else if (state === 'error') {
       el.innerHTML = frame(`<span class="sttts-pic-wait">${esc(job.message)}<br><button type="button" data-sttts-pic-action="draw">重试</button></span>`);
     } else {
-      el.innerHTML = frame(`<span class="sttts-pic-wait">${esc(reason)}<br><button type="button" data-sttts-pic-action="draw">${paidSource ? '同意可能扣点并生成' : '点击生成'}</button></span>`);
-      if (paidSource) paidButtons.set(el.querySelector('button'), paidSource);
+      el.innerHTML = frame(`<span class="sttts-pic-wait">${esc([reason, refNote].filter(Boolean).join(' · '))}<br><button type="button" data-sttts-pic-action="draw">${paidSource ? '同意可能扣点并生成' : '点击生成'}</button></span>`);
+      if (paidSource) paidButtons.set(el.querySelector('button'), {source: paidSource, plan});
     }
   }
 
@@ -544,8 +590,9 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   function act(action, id, message, tag, source = null) {
     const pic = shown(message, tag.hash);
     if (action === 'draw' || action === 'redo') {
-      const paidSource = paidButtons.get(source);
-      if (paidSource && paidSource === storyDrawSource(settings().draw)) {
+      const approval = paidButtons.get(source), paidSource = approval?.source;
+      if (paidSource && paidSource === storyDrawSource(settings().draw) &&
+          approval.plan === storyReferences(message, tag, pictureInputs(settings(), tag, message.mes))) {
         const swipe = message.swipe_id;
         const valid = () => context().chat[id] === message && message.swipe_id === swipe && backend.drawReady() &&
           storyDrawSource(settings().draw) === paidSource && parsePictures(message.mes).some(t => t.hash === tag.hash);
@@ -603,6 +650,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     return [
       ['模型', NAI_MODEL_NAMES?.[v.model] || v.model],
       ['尺寸', v.width && v.height ? `${v.width} × ${v.height}` : ''],
+      ...(v.referenceRole ? [['参考角色', v.referenceRole]] : []),
       ['步数', v.steps],
       ['种子', v.seed],
       ['角色', v.characters ? (v.characters.length ? v.characters.join('、') : '没有补角色外貌') : ''],
@@ -724,7 +772,10 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     if(afterReplies.get(message)?.running || planning.has(snap.id) || old.some(t=>jobs.get(jobKey(snap.id,t))?.state==='generating'))throw Error('这条回复正在处理，请稍后再试');
     selectionJobs.add(message);
     try {
-      const permission=await allowed(true);if(!permission)return;
+      const source = storyDrawSource(settings().draw);
+      const withStoryRef = settings().draw.engine === 'nai' && settings().draw.storyNaiRef;
+      let permission = withStoryRef ? null : await allowed(true);
+      if (!withStoryRef && !permission) return;
       if(!valid())throw Error('正文已经变化，请重新选择文字');
       notice('正在为选中文字构思画面……');
       const state=settings(), prompt=selectionRequest(state,{text,nearby,only:castNow()});
@@ -734,14 +785,20 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const addition='\n\n'+block+'\n', raw=snap.raw.slice(0,end)+addition+snap.raw.slice(end), tags=parsePictures(raw), tag=tags.find(t=>t.start===end+2);
       if(!tag)throw Error('这次提示词无法作为正文图片保存');
       const inputs=pictureInputs(settings(),tag,raw);
-      const result=await backend.generateImage({...inputs,allowPaid:permission==='paid',name:'chat',key:'selection:'+snap.id+':'+end,label:'选段生图 · '+text.slice(0,24)});
+      const plan=storyReferences(message, tag, inputs);
+      await plan.ready;
+      const current=()=>valid() && storyDrawSource(settings().draw)===source && (!plan.key || settings().draw.storyNaiRef);
+      if (!current()) return;
+      permission ??= await allowed(true, inputs.params, '', plan.refs);
+      if (!permission || !current()) return;
+      const result=await backend.generateImage({...inputs,refs:plan.refs,valid:current,allowPaid:permission==='paid',name:'chat',key:'selection:'+snap.id+':'+end,label:'选段生图 · '+text.slice(0,24)});
       if(!valid()){notice('正文已变化，生成的图片已保留在相册，没有插入旧位置');return;}
       const url=await upload(result.blob,'st-iphonie-'+Date.now());
       if(!valid()){notice('正文已变化，生成的图片已保留在相册，没有插入旧位置');return;}
       const previous=structuredClone(message.extra?.sttts_pics||{}),pics={...previous};
       for(const t of old)delete pics[t.hash];
       for(const t of old){const next=tags.find(n=>n.start===t.start+(t.start>=end?addition.length:0));if(next && previous[t.hash])pics[next.hash]=previous[t.hash];}
-      pics[tag.hash]={versions:[{url,photoId:result.photoId,seed:result.seed,width:result.params.width,height:result.params.height,model:result.params.model,prompt:tag.prompt,characters:inputs.names,at:Date.now()}],index:0};
+      pics[tag.hash]={versions:[{url,photoId:result.photoId,seed:result.seed,width:result.params.width,height:result.params.height,model:result.params.model,prompt:tag.prompt,characters:inputs.names,referenceRole:plan.name,at:Date.now()}],index:0};
       message.mes=raw;message.extra??={};message.extra.sttts_pics=pics;
       if(Array.isArray(message.swipes))message.swipes[message.swipe_id??0]=raw;
       try{await context().saveChat();}catch(error){
@@ -853,8 +910,27 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     if (context().chat[id] !== message) return;
     const tags = parsePictures(message.mes).filter(tag => !shown(message, tag.hash));
     if (!tags.length) { notice('这层楼的图片已经生成'); return; }
-    const permission = await allowed(true); if (!permission) return;
-    for (const tag of tags) { if (context().chat[id] !== message) break; await generate(id, tag, {permission}); }
+    const draw = settings().draw, source = storyDrawSource(draw), useRef = !!draw.storyNaiRef;
+    const swipe = message.swipe_id, raw = message.mes;
+    const valid = () => context().chat[id] === message && message.mes === raw && message.swipe_id === swipe &&
+      storyDrawSource(settings().draw) === source && !!settings().draw.storyNaiRef === useRef;
+    const shots = [];
+    for (const tag of tags) {
+      const inputs = pictureInputs(settings(), tag, raw), plan = storyReferences(message, tag, inputs);
+      await plan.ready;
+      if (!valid()) return;
+      shots.push({tag, inputs, plan});
+    }
+    if (draw.engine === 'nai') try { await backend.naiSubscription(); } catch { /* unknown cost also needs consent */ }
+    if (!valid()) return;
+    const quotes = shots.map(({inputs, plan}) => backend.drawQuote(inputs.params, {refs:plan.refs}));
+    const paid = quotes.filter(q => q.free !== true || q.paid).length;
+    const refCost = quotes.reduce((total, q) => total + (q.referenceAnlas || 0), 0);
+    if (paid && !globalThis.confirm(`共生成 ${shots.length} 张，其中 ${paid} 张可能扣费。${refCost ? '参考图合计额外 +' + refCost + ' Anlas。' : ''}确定生成吗？`)) return;
+    for (const [i, {tag}] of shots.entries()) {
+      if (!valid()) break;
+      await generate(id, tag, {permission:quotes[i].free === true && !quotes[i].paid ? 'free' : 'paid', valid, prepared:shots[i]});
+    }
   }
   return {drawFor, tagText, drawSelection, drawMessage, prepareReply, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, voiceMessage, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
 }

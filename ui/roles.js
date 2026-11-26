@@ -568,7 +568,7 @@ export function rolesApp(ctx) {
     const mine = tried && tried.id === (r.id || 'new');
     const tools = r.id ? `<div class="actions">${btn('role-ref-pick', r.ref ? '换一张' : '从相册选', 'secondary small')}${mine ? btn('role-ref-tried', '用试画这张', 'secondary small') : ''}${r.ref ? btn('role-ref-clear', '去掉', 'text-button small') : ''}</div>` : '<p class="hint">先保存角色，再放参考图。</p>';
     return field('参考图', `<div class="role-ref">${r.ref ? `<img src="${esc(r.ref.thumb)}" alt="${esc(r.name || '角色')}的参考图">` : ''}${tools}</div>`,
-      'GPT 画到这个人时，会照着这张图画脸、发型、身材和平常的衣服；画风、动作和场景还是按提示词。正文配图、聊天照片、朋友圈、查手机和绘本都会带上，没放图的人和以前一样。\n\n每多带一张图，GPT 画这张的费用就多一点。中转要支持改图接口（/images/edits），不支持时这张先不带参考图照常画；GPT 的地址是酒馆转发（/proxy/ 开头）或者模型是 dall-e-3 时也带不了。NovelAI 和 ComfyUI 不用这张图。\n\n图存在酒馆里：同一个酒馆的每台设备都能用，删掉相册里的原图它也还在。');
+      'GPT 画到这个人时，会照着这张图画脸、发型、身材和平常的衣服；画风、动作和场景还是按提示词。正文配图、聊天照片、朋友圈、查手机和绘本都会带上，没放图的人和以前一样。\n\n每多带一张图，GPT 画这张的费用就多一点。中转要支持改图接口（/images/edits），不支持时这张先不带参考图照常画；GPT 的地址是酒馆转发（/proxy/ 开头）或者模型是 dall-e-3 时也带不了。NovelAI 正文配图也可以用这张图。在「设置 → 正文 → 正文出图」开启「使用 NovelAI 角色参考图」，穿搭按剧情画。\n\n图存在酒馆里：同一个酒馆的每台设备都能用，删掉相册里的原图它也还在。');
   }
   async function putRef(el, blob) {
     const id = current?.id;

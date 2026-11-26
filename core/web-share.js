@@ -34,12 +34,13 @@ export function parseWebChoice(text, fieldName) {
 }
 
 export function searchQuery(value) {
-  return field(value,160).replace(/[\u0000-\u001f\u007f]/g,' ').replace(/\s+/g,' ');
+  const query=field(value,160).replace(/[\u0000-\u001f\u007f]/g,' ').replace(/\s+/g,' ');
+  return /https?:|@|\b(?:api[_ -]?key|bearer|password)\b|[a-z\d_-]{32,}|\d{7,}/i.test(query) ? '' : query;
 }
 
 export function providerResults(value) {
   return (Array.isArray(value)?value:[]).slice(0,5)
     .map(item=>normalizeWebPage({url:item?.url,title:item?.title,summary:item?.description,source:'search'}))
-    .filter(Boolean).map((item,i)=>({...item,id:i+1}));
+    .filter(item=>item && !/^(?:localhost|\[|\d+\.\d+\.\d+\.\d+$)|\.(?:local|internal|localhost|lan)$/i.test(item.site)).map((item,i)=>({...item,id:i+1}));
 }
 

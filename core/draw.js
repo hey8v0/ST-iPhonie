@@ -25,6 +25,7 @@ import {tidyGroups, layerTree} from './layers.js';
 import {DRAW_ENGINES, DRAW_ENGINE_NAMES, defaultGpt, normalizeGpt, defaultComfy, normalizeComfy} from './image-engines.js';
 import {escapeHTML, isPlaceholderRole} from './protocol.js';
 
+const primaryRoleRule = draw => draw?.engine === 'nai' && draw.storyNaiRef ? '\n多人配图可在出图块里写一行「主角：名字」，名字取自本张图的角色行。' : '';
 const BLOCK = ['<img>', '画幅：竖 / 横 / 方', '场景：英文 tag', '角色：名字｜这一刻的 tag｜不要出现的 tag｜站位（画面里每个人单独一行，每一行都以「角色：」开头）', '新外貌：名字｜固定外貌 tag（只在名单外的新角色第一次出现时写）', '</img>'];
 export const PIC_TAG_FORMAT = BLOCK.join('\n');
 export const PLAN_TAG_FORMAT = [BLOCK[0], '位置：P几（这张图放在哪一段后面）', ...BLOCK.slice(1)].join('\n');
@@ -362,7 +363,7 @@ export function defaultDraw() {
   return {enabled: false, auto: true, guard: true, fold: false, mode: 'separate', strip: true, engine: 'nai', gpt: defaultGpt(), comfy: defaultComfy(),
     connections: {nai: normalizeImageConnections('nai'), gpt: normalizeImageConnections('gpt')},
     queue: {gap: 3, retries: 4, cloud: {enabled: false, kind: 'room', url: '', room: ''}}, relay: {url: '', assumeOpus: false}, vibe: defaultVibe(), params: defaultDrawParams(),
-    chunks: [], chunkGroups: [], selectionDraw: true, stream: false, autoDownload: false, locks: [], grid: normalizeGrid(), positionGrid: normalizePositionGrid(), maskLook: normalizeMaskLook(), styles: [structuredClone(DEFAULT_STYLE)], styleGroups: [], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
+    chunks: [], chunkGroups: [], storyNaiRef: false, selectionDraw: true, stream: false, autoDownload: false, locks: [], grid: normalizeGrid(), positionGrid: normalizePositionGrid(), maskLook: normalizeMaskLook(), styles: [structuredClone(DEFAULT_STYLE)], styleGroups: [], activeStyle: 'default', presets: [structuredClone(DEFAULT_PRESET)], activePreset: 'default'};
 }
 
 /** 画风 groups made tidy, in place. */
@@ -428,6 +429,7 @@ export function normalizeDraw(value) {
   d.enabled = !!d.enabled;
   d.auto = d.auto !== false;
   d.selectionDraw = d.selectionDraw !== false;
+  d.storyNaiRef = d.storyNaiRef === true;
   d.guard = d.guard !== false;
   d.fold = !!d.fold;
   d.strip = d.strip !== false;
@@ -603,7 +605,7 @@ export function drawPromptPlan(settings, preset, only = null) {
     const i = e.injection || p.injection;
     return {
       key: 'sttts.entry.draw.' + String(index).padStart(4, '0'),
-      text: fill(e.text) + (index === entries.length - 1 ? '\n\n' + tail : ''),
+      text: fill(e.text) + (index === entries.length - 1 ? '\n\n' + tail + primaryRoleRule(draw) : ''),
       position: {in_chat: 1, in_prompt: 0, before_prompt: 2}[i.position],
       depth: i.position === 'in_chat' ? Number(i.depth) : 0,
       role: i.position === 'in_chat' ? {system: 0, user: 1, assistant: 2}[i.role] : 0
@@ -635,7 +637,7 @@ export function paragraphs(message, scope = {}) {
 export function planRequest(settings, {message, before = [], preset, only = null, lore = ''} = {}) {
   const p = activePreset(settings.draw, preset);
   const {entries, fill, tail} = ruleText(settings, p, pictureTemplate(settings, promptTemplate(settings.promptRules, 'draw-story', 'planFormat'), 'planFormat'), planContract, only);
-  const system = entries.map(e => fill(e.text)).join('\n\n') + '\n\n' + tail;
+  const system = entries.map(e => fill(e.text)).join('\n\n') + '\n\n' + tail + primaryRoleRule(settings.draw);
   // 世界书: the entries the tavern would turn on for this story (the phone's choice of books), for era, places and looks.
   const ask = promptText(settings.promptRules, 'draw-story', 'planAsk', {'世界书': lore.trim(), '前情': before.map(m => `${m.name}：${m.text}`).join('\n'),
     '正文': paragraphs(message, settings.narration).map((x, i) => `[P${i + 1}] ${x.text}`).join('\n'), '出图数量': countOf(p)});
@@ -793,7 +795,7 @@ export function selectionBlock(settings, answer) {
   const column = value => line(value).replace(/[|｜]/g, ' ');
   const tag = settings.general?.shortTags ? 'i-img' : 'img';
   return ['<' + tag + '>', spec?.size && '画幅：' + line(spec.size), '场景：' + line(scene),
-    spec?.nl && '描述：' + line(spec.nl),
+    spec?.nl && '描述：' + line(spec.nl), spec?.primary && '主角：' + line(spec.primary),
     ...cast.map(c => '角色：' + [c.name, c.tags, c.nl, c.negative, c.position].map(column).join('｜')),
     '</' + tag + '>'].filter(Boolean).join('\n');
 }
@@ -851,7 +853,7 @@ export function hashText(value) {
   return h.toString(36);
 }
 
-const FIELDS = {画幅: 'size', 尺寸: 'size', 场景: 'tags', 基础: 'tags', 描述: 'nl', 角色: 'cast', 人物: 'cast', 新外貌: 'register', 登记: 'register', 位置: 'at'};
+const FIELDS = {画幅: 'size', 尺寸: 'size', 场景: 'tags', 基础: 'tags', 描述: 'nl', 角色: 'cast', 人物: 'cast', 主角: 'primary', 新外貌: 'register', 登记: 'register', 位置: 'at'};
 const split = value => value.split(/[|｜]/).map(x => x.trim());
 /** Reads a block body; null when it has none of the field lines (an older one-line tag). */
 export function parseBlock(body) {
@@ -1048,6 +1050,16 @@ export function photoNames(text, names = [], roles = []) {
   }
   return [...found];
 }
+/** Named people in this shot, with its explicit lead first. An object-only shot uses no portrait. */
+export function storyRefCandidates(settings, tag, inputs) {
+  if (!settings.draw.storyNaiRef || settings.draw.engine !== 'nai' || /(?:^|,)\s*no humans\s*(?:,|$)/i.test(tag.prompt)) return [];
+  const names = tag.characters?.length ? tag.characters : peopleCount(tag.prompt) ? inputs.names : [];
+  const primary = tag.spec?.primary;
+  const ordered = primary ? [...names.filter(n => sameName(n, primary)), ...names.filter(n => !sameName(n, primary))] : names;
+  return ordered.map(name => roleNamed(settings.routes, name)).filter(r => r?.ref?.full && !isPlaceholderRole(r.name))
+    .map(r => ({name: r.name, path: r.ref.full}));
+}
+
 /** 角色参考图 of the people in a picture, in their order (null for one with none), for GPT; nothing when nobody has one. */
 const withRefs = roles => { const refs = roles.map(r => r?.ref?.full ? {name: r.name, path: r.ref.full} : null); return refs.some(Boolean) ? {roleRefs: refs} : {}; };
 /**

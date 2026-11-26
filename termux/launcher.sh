@@ -15,6 +15,13 @@ if ! node -e "process.exit(typeof fetch === 'function' && typeof AbortSignal.tim
   exit 1
 fi
 case "${1:-start}" in
+restore-release)
+  helper="$base/restore-browser-next.sh"
+  [[ -f "$helper" ]] || { echo '当前没有测试版安装记录。'; exit 1; }
+  node "$src/service.cjs" stop
+  bash "$helper" restore
+  ;;
+
 restore-ui)
   backup="$base/preview-backup"
   [[ -f "$backup/location" ]] || { echo '当前没有试玩界面备份。'; exit 0; }
