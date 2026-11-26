@@ -348,6 +348,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       withView('paint', v => run(() => v.paintBase(picture, async blob => { open('draw'); if (blob) await done(blob); })));
     },
     // 0.9.35: a chat (from what another app sent there), a forum post (from a card in a chat).
+    openBrowser: url => { open('browser'); withView('browser', v => v.openURL?.(url)); },
     openThread: id => { open('chat'); withView('chat', v => v.openThread?.(id)); }, openForumPost: id => { open('forum'); withView('forum', v => v.openPost?.(id)); }, openBook: id => { open('picbook'); withView('picbook', v => v.openBook?.(id)); }, makeBookFromTheater: id => { open('picbook'); withView('picbook', v => v.makeFromTheater?.(id)); }, momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
   installMotion(win, mount, signal);
   // On a computer the phone is a floating window: its top bar moves it.

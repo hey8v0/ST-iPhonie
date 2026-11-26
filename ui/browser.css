@@ -44,3 +44,9 @@
 @keyframes browser-progress{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
 @keyframes browser-enter{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.browser-progress i,.browser-page,.browser-content iframe{animation:none}.browser-icon,.browser-external,.browser-address-field{transition:none}}
+
+.web-share-form{display:grid;gap:10px;min-width:0}
+.web-share-form img{width:min(100%,260px);height:auto;border-radius:14px}
+.web-share-form textarea{min-height:52px;resize:vertical}
+.web-share-form select,.web-share-form input{min-width:0;max-width:100%}
+[data-app=browser][data-remote] .browser-actions button{min-width:min(44px,14cqw)}

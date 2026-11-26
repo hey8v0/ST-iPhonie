@@ -40,7 +40,9 @@ export function lastRound(messages) {
   const list = Array.isArray(messages) ? messages : [], at = list.findLastIndex(m => m.from === 'me' && m.kind !== 'system');
   return {after: at >= 0 ? String(list[at].id) : '', round: list.slice(at + 1).filter(m => m.from !== 'me')};
 }
-const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song', 'file', 'forward', 'game', 'post', 'outfit', 'book', 'letter'];
+import {normalizeWebPage} from './web-share.js';
+
+const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song', 'file', 'forward', 'game', 'post', 'outfit', 'book', 'letter', 'web'];
 /** 消息回应 (0.9.34): the emoji one can put on a message, one each person (the user's and the contacts'). */
 export const REACTIONS = Object.freeze(['❤️', '😂', '👍', '😮', '😢', '🎉']);
 const EMOJI = /\p{Extended_Pictographic}/u;
@@ -163,6 +165,7 @@ export function messageWords(m) {
     case 'game': return [m.text, ...(m.game?.options || []), ...(m.game?.entries || []).map(e => e.text)].filter(Boolean).join(' ');
     case 'post': return [m.post?.title, m.post?.author, m.post?.text, m.post?.note].filter(Boolean).join(' ');
     case 'outfit': return [m.outfit?.name, m.outfit?.text, m.outfit?.note].filter(Boolean).join(' ');
+    case 'web': return [m.page?.title, m.page?.site, m.page?.note, m.page?.summary].filter(Boolean).join(' ');
     case 'book': return [m.book?.title, m.book?.subtitle].filter(Boolean).join(' ');
     case 'letter': return m.letter?.text || '';
     default: return '';
@@ -206,6 +209,7 @@ export function forwardLine(m) {
     case 'game': return `[${BOARD_TYPES.includes(m.game?.type) ? '小游戏' : '群游戏'}] ${m.text || ''}`;
     case 'post': return `[帖子] ${m.post?.title || String(m.post?.text || '').slice(0, 30)}${m.post?.note ? ' ' + m.post.note : ''}`;
     case 'outfit': return `[穿搭] ${m.outfit?.name || ''}${m.outfit?.note ? ' ' + m.outfit.note : ''}`;
+    case 'web': return `[网页] ${m.page?.title || m.page?.site || ''}`;
     case 'book': return `[绘本] ${m.book?.title || ''}`;
     case 'letter': return `[信] ${String(m.letter?.text || '').slice(0, 60)}`;
     default: return m?.text || '';
@@ -301,6 +305,11 @@ function cleanMessage(m, id, at) {
     out.text = out.outfit.name;
   }
   // 绘本 × 聊天 (0.9.40): a picture book sent to be read (its words go with it; its id opens it in the 绘本 App while it is there).
+  if (kind === 'web') {
+    out.page = normalizeWebPage(m.page);
+    if (!out.page) throw fail('网页网址无效');
+    out.text = out.page.note || out.page.title || out.page.site;
+  }
   if (kind === 'book') {
     const s = m.book && typeof m.book === 'object' ? m.book : {};
     out.book = {id: clip(s.id, 80).trim(), title: clip(s.title, 40).trim(), subtitle: clip(s.subtitle, 60).trim(), theme: clip(s.theme, 20).trim(), spreads: Math.max(0, Math.min(999, Math.round(Number(s.spreads) || 0))), coverId: clip(s.coverId, 512).trim(), text: clip(s.text, 3000).trim()};
@@ -340,6 +349,7 @@ function cleanAlts(a, makeId) {
 function indexedThread(row) {
   const photos = new Set(), stories = new Set();
   for (const list of [row.messages, ...(Array.isArray(row.alts?.versions) ? row.alts.versions : [])]) for (const m of Array.isArray(list) ? list : []) {
+    if (m?.kind === 'web') for (const id of [m.page?.coverId,m.page?.screenshotId]) if(id) photos.add(id);
     if (m?.kind === 'photo') for (const id of [m.photoId, ...(Array.isArray(m.imageVersions) ? m.imageVersions : [])]) if (typeof id === 'string' && id) photos.add(id);
   }
   for (const m of Array.isArray(row.messages) ? row.messages : []) if (typeof m?.story === 'string' && m.story) stories.add(m.story);

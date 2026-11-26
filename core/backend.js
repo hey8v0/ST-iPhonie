@@ -131,7 +131,7 @@ const assistantTransferRows = docs => normalizeAssistantThreads(docs.filter(row 
 })));
 const engineCheck = engine => { if (!ENGINES.includes(engine)) throw Error('引擎无效'); };
 // Keys cover the voice engines, NovelAI for drawing, and llm (the phone's own text model).
-const keyCheck = engine => { if (engine !== 'nai' && engine !== 'llm' && engine !== 'gpt' && engine !== 'embed' && !SONG_KEYS.includes(engine)) engineCheck(engine); };
+const keyCheck = engine => { if (engine !== 'nai' && engine !== 'llm' && engine !== 'gpt' && engine !== 'embed' && engine !== 'brave' && !SONG_KEYS.includes(engine)) engineCheck(engine); };
 // 自己的接口: a role's model names one of its sets; one that is gone (deleted on another device) is not refused,
 // its lines go to the set in use.
 const modelCheck = (engine, model) => { engineCheck(engine); if (engine === 'custom' ? model && !/^[\w-]{1,64}$/.test(model) : model && !voiceModelId(engine, model)) throw Error('请选择列表中的模型'); };
@@ -1905,6 +1905,7 @@ export class TTSBackend {
             next.chat.profile = normalizeProfile({ ...next.chat.profile, ...patch.profile });
         }
         if (Array.isArray(patch?.starred)) next.chat.starred = patch.starred;
+        if (patch?.webSearch !== undefined) next.chat.webSearch = patch.webSearch === true;
         if (patch?.pace !== undefined) next.chat.pace = patch.pace !== false;
         // 0.9.47: 常用回应, and how 网名 look on 论坛 (a picture of one's own goes in avatars as 'net:' + 网名).
         if (Array.isArray(patch?.quickReactions)) next.chat.quickReactions = normalizeQuickReactions(patch.quickReactions);
@@ -3540,6 +3541,18 @@ export class TTSBackend {
         return this.chatMutate(threadId, () => this.chats.answerFriendRequest(threadId, accept, options));
     }
     /** The user's messages to someone who deleted them: sent, then refused with the usual note. */
+    async webRequest(action, body, signal) {
+        if (!['status','search','page'].includes(action)) throw Error('网页服务操作无效');
+        const timeout = AbortSignal.timeout(11000);
+        const requestSignal = signal ? AbortSignal.any([signal,timeout]) : timeout;
+        const res = await this.assetFetch('/api/plugins/iphonie-web/' + action, {
+            method:body ? 'POST' : 'GET', credentials:'same-origin', redirect:'error',
+            headers:{...this.tavernHeaders(), ...(body ? {'Content-Type':'application/json'} : {})},
+            ...(body ? {body:JSON.stringify(body)} : {}),signal:requestSignal
+        });
+        if (!res.ok) throw Error(res.status===404 ? '酒馆网页服务尚未启用' : '网站或搜索服务暂不可用');
+        return res.json();
+    }
     async appendChat(id, messages, options) {
         return this.chatMutate(id, async thread => {
             thread ||= await this.chats.get(id);
@@ -4091,6 +4104,10 @@ export class TTSBackend {
             saveEmbed: patch => this.saveEmbed(clone(patch)), embedReady: () => this.embedReady(), embedModels: draft => this.embedModels(clone(draft || {})),
             gptModels: () => this.gptModels(),
             embedTest: async draft => { const [v] = await this.embed(['测试一下向量模型'], clone(draft || {})); return v.length; },
+            webProvider: async () => {
+                try {const response=await this.webRequest('status');return response?.ready===true;} catch {return false;}
+            },
+            readWebPage: url => this.webRequest('page', {url:String(url).slice(0,2000)}),
             appendChat: (id, messages, options) => { this.assertOpen(); return this.appendChat(id, clone(messages), clone(options || {})); },
             wardrobe: owner => this.wardrobe(String(owner || '')), exportWardrobePack: ids => this.exportWardrobePack(ids), previewWardrobePack: file => this.previewWardrobePack(file), importWardrobePack: (file, options) => this.importWardrobePack(file, clone(options || {})), editWardrobeCategory: options => this.editWardrobeCategory(clone(options || {})), setWardrobeCandidate: (owner, id, on) => this.setWardrobeCandidate(owner, id, on), saveWardrobeItem: item => this.saveWardrobeItem(clone(item)), saveWardrobeSet: set => this.saveWardrobeSet(clone(set)), deleteWardrobe: ids => this.deleteWardrobe([...(ids || [])]), setWardrobeWear: wear => this.setWardrobeWear(clone(wear || {})), clearWardrobeWear: owner => this.clearWardrobeWear(String(owner || '')), theaters: () => this.theaters(), saveTheater: doc => this.saveTheater(clone(doc)), deleteTheater: ids => this.deleteTheater([...(ids || [])]),
             unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId), blockContact: name => this.blockContact(name), blockedNames: () => this.blockedNames(), unblockContact: threadId => this.unblockContact(threadId), answerFriendRequest: (threadId, accept, options) => this.answerFriendRequest(threadId, accept, clone(options || {})),

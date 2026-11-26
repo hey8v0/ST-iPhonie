@@ -1,3 +1,4 @@
+import {shareWebPage, webSearchSettings} from './web-share.js';
 import {connectTermux, TERMUX_VIEW} from './termux-connection.js';
 import {btn, createView, esc} from './common.js';
 import {icon} from './icons.js';
@@ -73,6 +74,7 @@ export function browserApp(ctx) {
     recent = JSON.parse(win.localStorage.getItem(storageKey) || '[]').filter(url => typeof url === 'string' && webAddress(url)).slice(0, MAX_RECENT);
   } catch { /* browsing still works without local storage */ }
   const history = [null];
+  let termuxControls = false;
   let disconnectTermux;
   let index = 0, timer, frame, layers, full = false, landscape = false, generation = 0;
   view.draw(`<div class="browser-toolbar">
@@ -81,6 +83,7 @@ export function browserApp(ctx) {
       ${btn('back', icon('back'), 'browser-icon', 'aria-label="后退一个地址" title="后退一个地址"')}
       ${btn('forward', icon('next'), 'browser-icon', 'aria-label="前进一个地址" title="前进一个地址"')}
       ${btn('reload', icon('refresh'), 'browser-icon', 'aria-label="重新打开此地址" title="重新打开此地址"')}
+      ${btn('more-browser', '•••', 'browser-icon', 'aria-label="浏览器操作" hidden')}
       ${btn('start', icon('home'), 'browser-icon', 'aria-label="浏览器首页" title="浏览器首页"')}
       ${btn('rotate', icon('refresh'), 'browser-icon browser-rotate', 'aria-label="切换横屏" title="切换横屏" hidden')}
       ${btn('full', icon('expand'), 'browser-icon', 'aria-label="全屏" title="全屏" hidden')}
@@ -170,6 +173,7 @@ export function browserApp(ctx) {
   function render() {
     disconnectTermux?.();
     disconnectTermux = null;
+    termuxControls=false;root.removeAttribute('data-remote');control('more-browser').hidden=false;address.placeholder='输入网址或搜索词';
     layers?.dispose();
     layers = null;
     win.clearTimeout(timer);
@@ -188,7 +192,15 @@ export function browserApp(ctx) {
     if (entry?.url) external.href = entry.url;
     else external.removeAttribute('href');
     if (localAndroid && entry?.url === TERMUX_VIEW) {
-      disconnectTermux = connectTermux(ctx, content, note);
+      disconnectTermux = connectTermux(ctx, content, note, (state,supported)=>{
+        termuxControls=supported && state==='connected';
+        root.toggleAttribute('data-remote',termuxControls);
+        control('more-browser').hidden=false;
+        if(termuxControls){
+          control('back').disabled=false;control('forward').disabled=false;
+          address.value='';address.placeholder='搜索或输入网址';
+        }
+      });
     } else if (entry) openFrame(mobileAddress(entry.url));
     else {
       if (full) setFull(false);
@@ -212,6 +224,12 @@ export function browserApp(ctx) {
     saveRecent();
     render();
   }
+  async function shareCurrent() {
+    const entry=history[index];
+    const command=termuxControls?disconnectTermux?.command:undefined;
+    const current=command?await command('url'):null;
+    await shareWebPage(ctx,{url:command?current?.text:entry?.url,command});
+  }
   function open(entry) {
     if (entry?.url && !entry.query) {
       recent = [entry.url, ...recent.filter(url => url !== entry.url)].slice(0, MAX_RECENT);
@@ -232,6 +250,7 @@ export function browserApp(ctx) {
     const entry = browserTarget(address.value, tavernHome);
     if (!entry) { if (address.value.trim()) ctx.notify('请输入有效的 HTTP 或 HTTPS 网址', {error: true}); return; }
     address.blur();
+    if(termuxControls){disconnectTermux.command('open',entry.url);return;}
     open(entry);
   });
   view.on('click', '[data-recent]', el => {
@@ -251,10 +270,32 @@ export function browserApp(ctx) {
       case 'termux':
         if (localAndroid) open({url: TERMUX_VIEW, query: '本机 Firefox'});
         break;
-      case 'back': back(); break;
-      case 'forward': if (index < history.length - 1) { index++; render(); } break;
-      case 'reload': render(); break;
-      case 'start': open(null); break;
+      case 'back': if(termuxControls) disconnectTermux.command('back'); else back(); break;
+      case 'forward': if(termuxControls){disconnectTermux.command('forward');break;} if (index < history.length - 1) { index++; render(); } break;
+      case 'reload': if(termuxControls) disconnectTermux.command('reload'); else render(); break;
+      case 'start': if(termuxControls) disconnectTermux.command('home'); else open(null); break;
+      case 'more-browser': {
+        const remoteItems = [['keyboard','键盘'],['paste','粘贴或输入中文'],['tabs','下一个标签页'],['newTab','新建标签页'],['closeTab','关闭标签页'],['responsive','移动视口 / 退出响应式模式'],['zoomIn','放大'],['zoomOut','缩小'],['zoomReset','恢复网页缩放'],['fit','适应画面'],['remote','匹配屏幕'],['firefoxFull','Firefox 全屏'],['escape','退出视频全屏'],['reconnect','重新连接']];
+        const canShare=termuxControls || history[index]?.url && history[index].url!==TERMUX_VIEW;
+        const items = [...(termuxControls?remoteItems:[]),...(canShare?[['share','分享网页']]:[]),['web-search','Char 真实搜索设置']];
+        const d=ctx.dialog('浏览器操作', '<div class="pick-list">'+items.map(([key,name])=>btn(key,name,'list-row')).join('')+'</div>');
+        d.body.addEventListener('click', async e=>{
+          const key=e.target.closest('[data-action]')?.dataset.action;
+          if(!key)return;
+          d.close();
+          if(key==='web-search'){await webSearchSettings(ctx);return;}
+          if(key==='share'){await shareCurrent();return;}
+          if(key==='reconnect'){render();return;}
+          if(key==='paste'){
+            const input=ctx.dialog('输入文字','<textarea aria-label="发送到 Firefox 的文字" maxlength="8000"></textarea>'+btn('paste-now','输入到 Firefox','primary'));
+            input.body.querySelector('button').onclick=()=>{disconnectTermux?.command('paste',input.body.querySelector('textarea').value);input.close();};
+            return;
+          }
+          if(key==='fit'||key==='remote')disconnectTermux.command('mode',key==='remote'?'remote':'scale');
+          else disconnectTermux.command(key);
+        });
+        break;
+      }
       case 'full': return toggleFull();
       case 'rotate':
         landscape = !landscape;
@@ -263,6 +304,12 @@ export function browserApp(ctx) {
         break;
     }
   });
+  view.openURL = url => {
+    const entry=browserTarget(url,tavernHome);
+    if(!entry?.url || entry.query)return;
+    if(termuxControls)disconnectTermux.command('open',entry.url);
+    else open(entry);
+  };
   view.back = back;
   view.leave = () => { generation++; if (full) setFull(false); };
   const dispose = view.dispose;
