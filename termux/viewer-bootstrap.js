@@ -37,6 +37,7 @@
     try{connect.apply(this,args);}catch{report('ui-failure');return;}
     const rfb=UI.rfb;
     if(!rfb){report('ui-failure');return;}
+    window.iphonieControl(rfb, UI);
     active=rfb;deadline('connection-timeout',18000);
     rfb.addEventListener('credentialsrequired',()=>{if(active===rfb){clear();report('password');}});
     rfb.addEventListener('connect',()=>{if(active===rfb){report('authenticated');deadline('frame-timeout',15000);}});

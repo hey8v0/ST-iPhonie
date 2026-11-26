@@ -10,17 +10,19 @@ const reasons = {dependency:'Firefox 或运行库无法加载，请在 Termux �
   bridge:'本机连接未收到 VNC 握手。',font:'未找到可读字体。',environmentError:'启动环境不完整，请重新安装。',
   screen:'正在建立虚拟屏幕。',window:'正在等待 Firefox 窗口。',handshake:'正在验证本机连接。',software:'正在用软件渲染重试。'};
 
-export function connectTermux(ctx, content, note) {
+export function connectTermux(ctx, content, note, onState=()=>{}) {
   const {win,doc}=ctx;
   let active=true, sequence=0, deadline, poll, frame, state, code, detail;
   let seen=false;
   try {seen=win.localStorage.getItem('stip-termux-installed')==='1';} catch {}
+  let controls=false, commandId=0, recoveryUsed=false;
+  const pending = new Map();
   let request, trace=[], healthSnapshot;
   const clear=()=>{win.clearTimeout(deadline); win.clearTimeout(poll);};
   const button=(id,label)=>btn(id,label,'browser-recent');
   const tools=()=>button('retry','重新连接')+button('guide','启动教程')+button('copy','复制启动命令')+button('export','导出诊断');
   function show(next, explanation='') {
-    state=next;detail=explanation;
+    state=next;detail=explanation;onState(next,controls);
     note(labels[next]);
     if(next==='connected' || next==='password' || (next==='connecting' && frame)) return;
     frame=null;
@@ -32,11 +34,16 @@ export function connectTermux(ctx, content, note) {
     frame.title='本机 Firefox';frame.referrerPolicy='no-referrer';
     frame.setAttribute('sandbox','allow-scripts allow-forms allow-same-origin');
     frame.allowFullscreen=true;
-    frame.src=TERMUX_VIEW+'&iphonie=compat2';content.replaceChildren(frame);
+    frame.src=TERMUX_VIEW.replace('resize=scale', controls?'resize=remote':'resize=scale')+'&iphonie='+(controls?'next':'compat2');content.replaceChildren(frame);
     show('connecting');timeout(25000,()=>show('interrupted','画面连接超时，请重新连接。'));
   }
   function message(event) {
-    if(!frame || event.origin!==origin || event.source!==frame.contentWindow || event.data?.type!=='iphonie-vnc') return;
+    if(!frame || event.origin!==origin || event.source!==frame.contentWindow) return;
+    if (event.data?.type==='iphonie-browser-result') {
+      pending.get(event.data.id)?.(event.data);
+      return;
+    }
+    if(event.data?.type!=='iphonie-vnc') return;
     if(Array.isArray(event.data.trace)) trace=event.data.trace.slice(-40).filter(x=>typeof x?.stage==='string' && /^[a-z-]{1,40}$/.test(x.stage) && Number.isFinite(x.at)).map(x=>({stage:x.stage,at:x.at}));
     switch(event.data.state){
       case 'password': win.clearTimeout(deadline);show('password');break;
@@ -65,7 +72,7 @@ export function connectTermux(ctx, content, note) {
         if(!res.ok || h.service!=='iphonie-firefox-v2') {show('environment','本机端口运行了其他程序或旧版本，请查看启动教程。');return;}
         healthSnapshot={state:h.state,code:h.code,build:h.build,healthCheck:h.healthCheck,vncSecurity:h.vncSecurity};seen=true;try{win.localStorage.setItem('stip-termux-installed','1');}catch{}
         code=Object.hasOwn(reasons,h.code)?h.code:undefined;
-        if(h.state==='ready'){viewer();return;}
+        if(h.state==='ready'){controls=h.controls===true;viewer();return;}
         if(h.state==='starting' && Date.now()<end){
           show('starting',reasons[code]);poll=win.setTimeout(check,1200);return;
         }
@@ -78,7 +85,7 @@ export function connectTermux(ctx, content, note) {
   }
   async function click(e){
     const action=e.target.closest('button')?.dataset.action;
-    if(action==='retry'){connect();return;}
+    if(action==='retry'){recoveryUsed=false;connect();return;}
     if(action==='guide'){
       content.innerHTML='<section class="browser-page"><h2>启动教程</h2><p>未安装时，先更新小手机插件，在 Termux 粘贴安装命令。以后只需输入 iphonie-browser。服务会在后台运行，可继续使用同一终端启动酒馆。</p><code>'+esc(install)+'</code>'+button('install-copy','复制安装命令')+tools()+'</section>';return;
     }
@@ -94,8 +101,21 @@ export function connectTermux(ctx, content, note) {
       win.setTimeout(()=>URL.revokeObjectURL(url),1500);
     }
   }
-  function resume(){if(doc.visibilityState==='visible' && (state==='interrupted'||state==='stopped')) connect();}
+  function resume(){
+    if(doc.visibilityState==='visible' && !recoveryUsed && ['interrupted','stopped'].includes(state)){
+      recoveryUsed=true;
+      connect();
+    }
+  }
   win.addEventListener('message',message);content.addEventListener('click',click);doc.addEventListener('visibilitychange',resume);
   connect();
-  return ()=>{active=false;clear();request?.abort();win.removeEventListener('message',message);content.removeEventListener('click',click);doc.removeEventListener('visibilitychange',resume);};
+  const dispose=()=>{active=false;clear();request?.abort();win.removeEventListener('message',message);content.removeEventListener('click',click);doc.removeEventListener('visibilitychange',resume); for(const done of pending.values()) done({});};
+  dispose.command=(action,value)=>new Promise(resolve=>{
+    if(!controls || state!=='connected' || !frame?.contentWindow){resolve({});return;}
+    const id=++commandId;
+    const timer=win.setTimeout(()=>{pending.delete(id);resolve({});},1800);
+    pending.set(id,result=>{win.clearTimeout(timer);pending.delete(id);resolve(result);});
+    frame.contentWindow.postMessage({type:'iphonie-browser-control',id,action,value},origin);
+  });
+  return dispose;
 }

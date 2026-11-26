@@ -60,7 +60,7 @@ function vncLogFlags(log) {
 async function daemon() {
   const token = crypto.randomBytes(32).toString('hex');
   const owner = crypto.randomUUID();
-  let state = {service:'iphonie-firefox-v2',build:path.basename(__dirname),state:'starting',code:'environment'};
+  let state = {service:'iphonie-firefox-v2',controls:true,build:path.basename(__dirname),state:'starting',code:'environment'};
   let stopping = false, recentErrors = '', failedChild = '';
   let vncSecurity={blacklistSeen:false,authenticationFailureSeen:false};
   const children = new Set();
@@ -164,10 +164,12 @@ async function daemon() {
         const fontDirs=['misc','TTF','Type1','75dpi','100dpi'].map(n=>path.join(fontRoot,n))
           .filter(dir=>fs.existsSync(path.join(dir,'fonts.dir')));
         const fonts=fontDirs.length ? ['-fp',fontDirs.join(',')+',built-ins'] : [];
-        child('Xvnc',[env.DISPLAY,...fonts,'-localhost','-nolisten','tcp','-auth',env.XAUTHORITY,'-geometry','600x900','-depth','24','-rfbport','5929','-SecurityTypes','VncAuth','-PasswordFile',file('passwd')],env,'display');
+        child('Xvnc',[env.DISPLAY,...fonts,'-localhost','-nolisten','tcp','-auth',env.XAUTHORITY,'-geometry','420x760','-depth','24','-rfbport','5929','-SecurityTypes','VncAuth','-PasswordFile',file('passwd')],env,'display');
         await until(async()=>Boolean(await run('xdpyinfo',[],env)),'display',10000);
         step('starting','window');
-        child('firefox',['--no-remote','--profile',file('profile'),'--width','600','--height','900','about:home'],env,'firefox');
+        write('window-manager.xml','<openbox_config xmlns="http://openbox.org/3.4/rc"><applications><application class="firefox" type="normal"><decor>no</decor><maximized>yes</maximized></application></applications></openbox_config>');
+        child('openbox',['--config-file',file('window-manager.xml')],env,'display');
+        child('firefox',['--no-remote','--profile',file('profile'),'--width','420','--height','760','about:home'],env,'firefox');
         await until(async()=>/\d/.test(await run('xdotool',['search','--onlyvisible','--class','firefox'],env)),'firefox',35000);
         // Binding an already occupied local port does not open a TCP client.
         // Check that Xvnc has bound its port, without making a VNC connection.

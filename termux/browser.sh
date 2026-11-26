@@ -5,7 +5,7 @@ command -v getprop >/dev/null && command -v pkg >/dev/null || { echo '请在安�
 base="$HOME/.local/share/st-iphonie-browser"
 src="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$base/releases" "$base/profile"
-files=(launcher.sh prepare.sh service.cjs bridge.cjs viewer-state.js viewer-bootstrap.js viewer-patch.cjs)
+files=(launcher.sh prepare.sh service.cjs bridge.cjs viewer-state.js viewer-bootstrap.js viewer-patch.cjs viewer-controls.js)
 version="$(cd "$src" && sha256sum "${files[@]}" | sha256sum | cut -d' ' -f1)"
 release="$base/releases/$version"
 tmp="$(mktemp -d "$base/releases/install.XXXXXX")"

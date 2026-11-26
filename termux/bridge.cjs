@@ -43,9 +43,13 @@ function createBridge({directory, health, stop, token, viewerEvent=()=>{}}) {
       res.setHeader('Content-Type','text/html; charset=utf-8');
       try{return res.end(patch.html(html));}catch{return res.writeHead(503).end('Viewer version mismatch');}
     }
-    if (['/viewer-state.js','/viewer-bootstrap.js'].includes(pathname)) {
+    if (['/viewer-state.js','/viewer-bootstrap.js','/viewer-controls.js'].includes(pathname)) {
       res.setHeader('Content-Type','text/javascript');
       return res.end(fs.readFileSync(path.join(__dirname, pathname.slice(1))));
+    }
+    if (pathname === '/viewer-mobile.css') {
+      res.setHeader('Content-Type','text/css; charset=utf-8');
+      return res.end('.iphonie-embedded #noVNC_control_bar_anchor{visibility:hidden}.iphonie-embedded #noVNC_container{max-width:1280px;max-height:1280px;margin:auto}');
     }
     if(pathname==='/core/util/browser.js'){
       try{const js=patch.compatibility(fs.readFileSync(path.join(directory,'core/util/browser.js'),'utf8'));res.setHeader('Content-Type','text/javascript; charset=utf-8');return res.end(js);}catch{return res.writeHead(503).end('Viewer compatibility mismatch');}

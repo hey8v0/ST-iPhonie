@@ -9,7 +9,7 @@ function html(source){
   let count=0;
   const output=source.replace(module,block=>{
     if(!block.includes('import UI from "./app/ui.js";'))return block;
-    count++;return '<script defer src="/viewer-state.js"></script><script defer src="/viewer-bootstrap.js"></script>';
+    count++;return '<script defer src="/viewer-state.js"></script><link rel="stylesheet" href="/viewer-mobile.css"><script defer src="/viewer-controls.js"></script><script defer src="/viewer-bootstrap.js"></script>';
   });
   if(count!==1)throw Error('unexpected noVNC HTML version');
   return output;

@@ -14,7 +14,7 @@ approve() {
   [[ "$answer" == [yY] ]] || { echo '已取消，可以稍后再次启动。'; exit 1; }
 }
 echo '正在检查运行环境…'
-packages=(x11-repo firefox libicu tigervnc xorg-xauth xorg-xdpyinfo xdotool fontconfig fontconfig-utils pulseaudio git)
+packages=(x11-repo firefox libicu tigervnc openbox xorg-xauth xorg-xdpyinfo xdotool fontconfig fontconfig-utils pulseaudio git)
 missing=()
 for p in "${packages[@]}"; do present "$p" || missing+=("$p"); done
 if (( ${#missing[@]} )); then
@@ -26,7 +26,7 @@ if [[ "$1" == repair ]]; then
   approve '将重新安装 Firefox 与 libicu，以修复库缺失或版本不匹配。'
   apt-get install --no-remove --reinstall -y firefox libicu >>"$log"
 fi
-for cmd in firefox Xvnc xauth xdpyinfo xdotool fc-match git node npm vncpasswd; do
+for cmd in firefox Xvnc openbox xauth xdpyinfo xdotool fc-match git node npm vncpasswd; do
   command -v "$cmd" >/dev/null || { echo "缺少命令：$cmd。请运行 iphonie-browser diagnose。" | tee -a "$log"; exit 1; }
 done
 font="$(fc-match -f '%{file}' sans-serif)"
