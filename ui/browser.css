@@ -1,0 +1,46 @@
+.view[data-app=browser]{display:flex;flex-direction:column;padding:0 0 16px;overflow:hidden}
+.browser-toolbar{container-type:inline-size;flex:none;display:grid;gap:5px;padding:8px 12px 5px;background:var(--bg)}
+.view[data-app=browser][data-start] .browser-toolbar{padding-bottom:10px}
+.view[data-app=browser][data-start] .browser-actions:not(:has(:enabled)){display:none}
+.browser-address{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:6px}
+.browser-address-field{display:flex;align-items:center;gap:8px;min-width:0;padding:0 12px;border:1px solid var(--line);border-radius:16px;background:var(--card2);color:var(--ink2);transition:border-color .18s,background .18s}
+.browser-address-field:focus-within{border-color:var(--accent-ink);background:var(--card)}
+.browser-address-field .icon{flex:none;width:18px;height:18px}
+.browser-address input{width:100%;min-width:0;min-height:44px;padding:0;border:0;background:none;outline:none;color:var(--ink);font-size:16px}
+.browser-actions{display:flex;align-items:center;gap:3px}
+.browser-icon,.browser-external{display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;border:0;border-radius:14px;background:transparent;color:var(--accent-ink);transition:background .16s,transform .16s}
+.browser-icon .icon,.browser-external .icon{width:18px;height:18px;flex:none}
+.browser-icon:disabled{color:var(--ink2);opacity:.5}
+.browser-go{background:var(--accent-soft)}
+.browser-icon:not(:disabled):hover,.browser-external:hover{background:var(--card2)}
+.browser-icon:not(:disabled):active,.browser-external:active{transform:scale(.94)}
+.browser-external{gap:4px;margin-inline-start:auto;padding:0 4px;font-size:12px;font-weight:700;white-space:nowrap;text-decoration:none}
+@container (max-width: 310px){.browser-external span{display:none}}
+.browser-progress{position:relative;height:2px;flex:none;overflow:hidden;background:var(--line)}
+.browser-progress i{display:block;width:40%;height:100%;background:var(--accent-btn);animation:browser-progress 1.15s ease-in-out infinite}
+.browser-content{display:flex;flex:1;min-height:0;overflow:auto;border-top:1px solid var(--line)}
+.browser-content iframe{display:block;flex:1;width:100%;min-width:0;min-height:0;border:0;background:white;animation:browser-enter .24s ease-out}
+.browser-page{box-sizing:border-box;width:100%;max-width:560px;margin-inline:auto;padding:18px 16px;animation:browser-enter .24s ease-out}
+.view[data-app=browser][data-start] .browser-content{border-top:0}
+.browser-page h2{margin:0 0 6px;color:var(--ink2);font-size:14px}
+.browser-page .sw-row{border-bottom:1px solid var(--line)}
+.browser-page .sw-main{background:var(--bg)}
+.browser-page .sw-chosen .sw-main{background:var(--accent-soft)}
+.browser-recent{display:flex;align-items:center;gap:10px;width:100%;min-height:46px;padding:0 4px;color:var(--ink);text-align:start}
+.browser-recent .icon{width:16px;height:16px;flex:none;color:var(--ink2)}
+.browser-recent>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.browser-status{flex:none;padding:4px 12px;text-align:center;color:var(--ink2);font-size:12px}
+.view[data-app=browser][data-full]{padding:0;background:var(--bg)}
+.view[data-app=browser][data-full] .browser-address,.view[data-app=browser][data-full] .browser-actions button:not([data-action=full],[data-action=rotate]){display:none}
+.view[data-app=browser][data-full] .browser-toolbar{padding:0 max(8px,env(safe-area-inset-right)) 0 max(8px,env(safe-area-inset-left))}
+:root[data-browser-full] .stage{padding:0}
+:root[data-browser-full] :is(.stage-bar,.power-key,.statusbar,.pull-tab,.island,.home-indicator,.app-nav){display:none!important}
+:root[data-browser-full] .device{width:100%;max-width:none;flex:1;aspect-ratio:auto;border-radius:0;padding:0;background:none!important;box-shadow:none!important}
+:root[data-browser-full] .screen{border-radius:0}
+@media (orientation:portrait){
+  .view[data-app=browser][data-landscape] .browser-content{position:relative;container-type:size;overflow:hidden}
+  .view[data-app=browser][data-landscape] iframe{position:absolute;top:50%;left:50%;width:100cqh;height:100cqw;transform:translate(-50%,-50%) rotate(90deg);animation:none}
+}
+@keyframes browser-progress{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
+@keyframes browser-enter{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.browser-progress i,.browser-page,.browser-content iframe{animation:none}.browser-icon,.browser-external,.browser-address-field{transition:none}}

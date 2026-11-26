@@ -22,6 +22,7 @@ import {inertController} from './inert.js';
 // The apps: each one's module loads when the app is first opened, or in an idle moment after the phone is up
 // (preloadApps), so opening the phone loads only its shell (about 20 modules, not 125).
 const LOADERS = {
+  browser: () => import('./browser.js').then(m => m.browserApp),
   bookshelf: () => import('./bookshelf.js').then(m => m.bookshelfApp),
   roles: () => import('./roles.js').then(m => m.rolesApp), engines: () => import('./engines.js').then(m => m.enginesApp),
   presets: () => import('./presets.js').then(m => m.presetsApp), library: () => import('./media-apps.js').then(m => m.libraryApp),
