@@ -1,3 +1,4 @@
+import {connectTermux, TERMUX_VIEW} from './termux-connection.js';
 import {btn, createView, esc} from './common.js';
 import {icon} from './icons.js';
 import {mountSwipeList, swipeRow} from './swipe-list.js';
@@ -27,7 +28,6 @@ export function browserTarget(value, tavernHome) {
 }
 
 const MAX_RECENT = 30;
-const TERMUX_VIEW = 'http://127.0.0.1:6089/vnc.html?autoconnect=1&resize=scale';
 const REMOVE = {key: 'delete', label: '删除', icon: 'trash', danger: true};
 
 function currentTavernHome(win) {
@@ -73,7 +73,7 @@ export function browserApp(ctx) {
     recent = JSON.parse(win.localStorage.getItem(storageKey) || '[]').filter(url => typeof url === 'string' && webAddress(url)).slice(0, MAX_RECENT);
   } catch { /* browsing still works without local storage */ }
   const history = [null];
-  let renderNumber = 0;
+  let disconnectTermux;
   let index = 0, timer, frame, layers, full = false, landscape = false, generation = 0;
   view.draw(`<div class="browser-toolbar">
     <form class="browser-address"><label class="browser-address-field">${icon('search')}<input type="text" inputmode="url" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="网址或搜索词" placeholder="输入网址或搜索词"></label><button type="submit" class="browser-icon browser-go" aria-label="前往">${icon('next')}</button></form>
@@ -168,7 +168,8 @@ export function browserApp(ctx) {
     content.replaceChildren(next);
   }
   function render() {
-    const thisRender = ++renderNumber;
+    disconnectTermux?.();
+    disconnectTermux = null;
     layers?.dispose();
     layers = null;
     win.clearTimeout(timer);
@@ -187,21 +188,7 @@ export function browserApp(ctx) {
     if (entry?.url) external.href = entry.url;
     else external.removeAttribute('href');
     if (localAndroid && entry?.url === TERMUX_VIEW) {
-      content.replaceChildren();
-      note('正在连接本机 Firefox…');
-      const probe = new win.Image();
-      let pending = true;
-      const finish = available => {
-        if (!pending || thisRender !== renderNumber || !root.isConnected) return;
-        pending = false;
-        win.clearTimeout(timer);
-        if (available) openFrame(TERMUX_VIEW);
-        else note('未连到本机服务。请在 Termux 启动 browser.sh，再点刷新。');
-      };
-      probe.onload = () => finish(true);
-      probe.onerror = () => finish(false);
-      timer = win.setTimeout(() => finish(false), 4000);
-      probe.src = new URL('/app/images/icons/novnc-ios-40.png?t=' + Date.now(), TERMUX_VIEW).href;
+      disconnectTermux = connectTermux(ctx, content, note);
     } else if (entry) openFrame(mobileAddress(entry.url));
     else {
       if (full) setFull(false);
@@ -280,6 +267,7 @@ export function browserApp(ctx) {
   view.leave = () => { generation++; if (full) setFull(false); };
   const dispose = view.dispose;
   view.dispose = () => {
+    disconnectTermux?.();
     view.leave();
     doc.removeEventListener('fullscreenchange', fullscreenChanged);
     layers?.dispose();
