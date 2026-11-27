@@ -5,6 +5,7 @@ const {spawn, spawnSync} = require('node:child_process');
 const {filename, origin, secrets, manifest, manifestName, extensionId} = require('./config.cjs');
 const {version:build} = require('./extension/manifest.json');
 const {version} = require('./extension/protocol.js');
+const frontend = require('./frontend.cjs');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const nativeWrapper = filename('native-host');
@@ -101,6 +102,15 @@ async function install() {
   secrets();
   if (!(await admin('status'))?.ipcReady) fs.rmSync(filename('native-invoked'), {force:true});
   const current = filename('current');
+  const prior = fs.lstatSync(current,{throwIfNoEntry:false});
+  if (prior?.isSymbolicLink()) {
+    const target = fs.readlinkSync(current);
+    if (path.dirname(target) === filename('bundles') &&
+        /^0\.1\./.test(JSON.parse(fs.readFileSync(path.join(target,'extension/manifest.json'),'utf8')).version) &&
+        !fs.existsSync(filename('phase1-bundle'))) {
+      atomic(filename('phase1-bundle'),target);
+    }
+  }
   const next = filename('current.' + crypto.randomUUID());
   fs.symlinkSync(__dirname, next);
   try {fs.renameSync(next, current);}
@@ -110,14 +120,27 @@ async function install() {
   atomic(manifest, manifestBody);
   if (!oldLink) fs.symlinkSync(launcher, bin);
   await start();
-  console.log('【小手机 · Firefox 控制实验 ' + build + '】');
-  console.log('在 Termux Firefox 的 about:debugging#/runtime/this-firefox 中临时加载：');
-  console.log(path.join(current,'iPhonie-Browser-Bridge.xpi'));
-  console.log('在 Termux 执行 iphonie-bridge panel，打开独立验证面板。');
+  console.log('【小手机浏览器 Phase 2 · ' + build + '】');
+  console.log('开发测试 XPI：' + path.join(current,'iPhonie-Browser-Bridge.xpi'));
+  console.log('已取得 Mozilla 签名时，运行 iphonie-bridge signed-addon "/签名文件路径"。');
+  console.log('更新插件后，在小手机浏览器首次连接时使用 iphonie-bridge pair 配对。');
 }
 
 async function rollback() {
+  frontend.restore();
   await stop();
+  const previous = filename('phase1-bundle');
+  if (fs.existsSync(previous)) {
+    const target = fs.readFileSync(previous,'utf8');
+    if (path.dirname(target) === filename('bundles') && fs.existsSync(path.join(target,'cli.cjs'))) {
+      const link=filename('restore-current.'+crypto.randomUUID());
+      fs.symlinkSync(target,link);
+      try {fs.renameSync(link,filename('current'));}
+      finally {fs.rmSync(link,{force:true});}
+      console.log('Phase 1 控制服务已恢复到可启动状态。若要使用 Phase 1，重新加载之前的扩展。');
+      return;
+    }
+  }
   if (marked(manifest, manifestBody)) fs.unlinkSync(manifest);
   fs.rmSync(filename('native-invoked'), {force:true});
   fs.rmSync(filename('auth.json'), {force:true});
@@ -128,9 +151,31 @@ async function main() {
   process.umask(0o077);
   switch (process.argv[2] || 'start') {
     case 'install': await install(); break;
+    case 'plugin':
+      frontend.activate(process.argv[3],process.argv[4]);
+      console.log('Phase 2 前端已启用，请刷新酒馆。');
+      break;
+    case 'restore-plugin': frontend.restore();console.log('已恢复原插件版本，请刷新酒馆。');break;
+    case 'pair': await start();console.log(secrets().panel);break;
+    case 'signed-addon': {
+      const source=process.argv[3];
+      if (!source || !/\.xpi$/i.test(source)) throw new Error('请提供 Mozilla 签名的 .xpi 文件。');
+      const xpi=filename('signed-addon.xpi');
+      const data = fs.readFileSync(source);
+      if (data.length > 2*1024*1024 || !data.includes(Buffer.from('META-INF/')))
+        throw new Error('此文件没有 Mozilla 签名包应有的目录。请使用从 AMO 下载的签名 XPI。');
+      atomic(xpi,data);
+      console.log('请在 Termux Firefox 的 about:addons 齿轮菜单选择「从文件安装附加组件」。Firefox 会校验签名。');
+      console.log(xpi);
+      break;
+    }
     case 'start':
+      {
+        const graphics=spawnSync('iphonie-browser',[],{stdio:'inherit',timeout:120000});
+        if (graphics.status !== 0) throw new Error('本机浏览器启动失败。请查看上方提示或运行 iphonie-browser diagnose。');
+      }
       await start();
-      console.log('控制服务已就绪。运行 iphonie-bridge panel 打开验证面板。');
+      console.log('控制服务已就绪。回到小手机浏览器继续使用。');
       break;
     case 'panel': {
       await start();

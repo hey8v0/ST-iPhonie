@@ -13,7 +13,7 @@ import unittest
 from zipfile import ZipFile
 
 SOURCE = Path(__file__).resolve().parent
-INSTALLER = SOURCE / "ST-iPhonie-Browser-Bridge-POC.sh"
+INSTALLER = SOURCE / "ST-iPhonie-Browser-Phase2.sh"
 
 
 class Installer(unittest.TestCase):
