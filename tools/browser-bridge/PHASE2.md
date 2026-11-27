@@ -1,6 +1,6 @@
 # 小手机浏览器 Phase 2 测试版
 
-这次测试包的本机控制服务版本为 `0.2.3`，Mozilla 签名的 Firefox 扩展版本为 `0.2.2`，控制协议为 `v3`。安装包内的 `bundle-release.json` 记录配套前端提交、支持的服务和扩展版本、扩展 ID 与签名文件 SHA-256。Xvnc、Firefox Profile、noVNC 1.6.0 和画面密码沿用原来的 `iphonie-browser`。
+这次测试包的本机控制服务版本为 `0.2.4`，Mozilla 签名的 Firefox 扩展版本为 `0.2.2`，控制协议为 `v3`。安装包内的 `bundle-release.json` 记录配套前端提交、支持的服务和扩展版本、扩展 ID 与签名文件 SHA-256。Xvnc、Firefox Profile、noVNC 1.6.0 和画面密码沿用原来的 `iphonie-browser`。
 
 [产品定稿](../../docs/browser/product-spec.txt) · [界面与交互规范](../../AGENTS.md) · [视觉规格模板](../../docs/browser/visual-spec-template.txt)
 
@@ -18,12 +18,21 @@ curl -fL https://raw.githubusercontent.com/hey8v0/ST-iPhonie/browser-phase2/tool
 bash "$HOME/iphonie-phase2.sh" --plugin "/你的插件目录/ST-TTS"
 ```
 
+0.2.3 已装好签名版的手机更新后，刷新酒馆并直接连接浏览器，沿用签名扩展 0.2.2。下面步骤适用于仍需安装或迁移扩展的手机。
+
 1. 刷新酒馆，打开「小手机 → 浏览器 → 更多 → 维修与更新」。已有配对沿用，提示时输入画面密码。
 2. 点「安装签名扩展」，再在 Firefox 的权限提示中点「添加」。扩展会持久安装在 Firefox 当前 Profile，可在附加组件管理页停用或移除。
 3. 点「回到浏览」。如果提示重启，点「打开重启页」，再点 Firefox 的「正常重启 / Restart normally」。重启后回到小手机；如果还留在维修页，再点一次「回到浏览」。
 4. 以后用 `iphonie-bridge` 启动。安装中断时重跑同一包。回退用 `iphonie-bridge rollback`，然后刷新酒馆。回退恢复这次更新之前的前端与本机服务，扩展仍由 Firefox 管理。
 
 维修画面独立监听本机回环 `6092`，沿用配对及 VNC 密码。它通过私有 X11 会话恢复 Firefox 工具栏。无法确认原窗口状态时，在同一个 Firefox Profile 中打开正常窗口并保留原窗口的标签页。维修过程中也可用「外部打开画面」进入原 noVNC。如果 Firefox 或 Xvnc 本身已经退出，用平时的启动命令恢复画面。
+
+## 0.2.4 维修与降级浏览
+
+- 画面和扩展控制通道正常时，即使独立维修服务暂未就绪，仍可导航、刷新和管理标签页。Firefox 原生工具栏继续可见。维修能力恢复后，从浏览器更多菜单点「重试隐藏 Firefox 工具栏」。
+- 维修画面通过已认证的 RFB 会话请求 1024×768 的桌面尺寸，等待新画面后才开放安装按钮。竖屏和横屏都等比显示整个桌面。返回浏览后由正常浏览视图重新协商手机尺寸。
+- 自动窗口操作优先使用 Firefox 的进程和窗口 PID，再在验证过的私有 Xvnc 上根据窗口类查找。Firefox 重启后若自身环境缺少显示设置，维修模块会用已验证的 Xvnc 的显示地址、授权文件和临时目录。若自动打开失败，重试按钮会提示确认当前 Firefox 地址栏，再通过已连接的画面发送固定页面所需的按键。
+- 维修或正常浏览均可导出诊断。查看维修 HTTP、会话标记、Firefox/Profile、显示授权、窗口 PID 或 class、窗口管理器、激活、全屏检测、导航发送、退出结果及 RFB 尺寸事件。诊断仅记录状态，不含路径、网址、配对码或密码。
 
 ## Firefox 持久安装
 

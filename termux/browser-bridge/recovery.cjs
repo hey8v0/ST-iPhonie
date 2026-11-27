@@ -2,6 +2,7 @@ const fs=require('node:fs');
 const http=require('node:http');
 const {execFile}=require('node:child_process');
 const path=require('node:path');
+const {pathToFileURL}=require('node:url');
 const {repairOrigin,filename,secrets,equal}=require('./config.cjs');
 const {firefoxRepair}=require('./firefox-repair.cjs');
 const {serveGraphics,attachGraphics}=require('./graphics.cjs');
@@ -20,7 +21,17 @@ function updateState() {
 
 function createRecovery({panel,native,driver,serve=serveGraphics,onStop=()=>{},readUpdate=updateState,resume=async()=>true,
   signedStatus=()=>null,onInstall=()=>{}}) {
-  let busy=false, maintenance=false;
+  let busy=false, maintenance=false, lastExit=null, windowCheck, checkedAt=0;
+  async function inspectWindow() {
+    if (!windowCheck || Date.now()-checkedAt>1800) {
+      checkedAt=Date.now();
+      windowCheck=Promise.resolve().then(async()=>{
+        if (driver.status) return driver.status();
+        return {ready:Boolean(await driver.locate())};
+      }).catch(()=>({ready:false,x11:'probe-failed'}));
+    }
+    return windowCheck;
+  }
   return http.createServer(async (req,res)=>{
     const json=(code,value)=>{
       res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});
@@ -31,7 +42,7 @@ function createRecovery({panel,native,driver,serve=serveGraphics,onStop=()=>{},r
     res.setHeader('X-Content-Type-Options','nosniff');
     if (req.headers.host!==host) return res.writeHead(403).end();
     if (serve(req,res,origin)) return;
-    const admin=req.url==='/admin/status' || req.url==='/admin/stop' || req.url==='/admin/restore';
+    const admin=['/admin/status','/admin/health','/admin/stop','/admin/restore'].includes(req.url);
     const token=req.headers.authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];
     if (req.method!=='POST' ||
       (admin ? req.headers.origin || req.headers['sec-fetch-site'] || !equal(token,native) :
@@ -39,20 +50,28 @@ function createRecovery({panel,native,driver,serve=serveGraphics,onStop=()=>{},r
     if (req.url==='/admin/stop') {
       res.once('finish',onStop);return json(200,{ok:true});
     }
+    if (req.url==='/admin/health') return json(200,{service:'iphonie-firefox-recovery',revision,build,http:'available'});
+    if (req.url==='/repair-link') {
+      if (!maintenance || incomplete(readUpdate()) || !signed.checkedPackage())
+        return json(409,{ok:false,reason:'update-incomplete'});
+      onInstall();
+      return json(200,{ok:true,url:pathToFileURL(addon).href});
+    }
     if (req.url==='/repair-done') {
       if (busy) return json(409,{ok:false,reason:'busy'});
-      if (incomplete(readUpdate())) return json(409,{ok:false,reason:'update-incomplete'});
+      const fail=(code,reason)=>{lastExit=reason;return json(code,{ok:false,reason});};
+      if (incomplete(readUpdate())) return fail(409,'update-incomplete');
       busy=true;
       try {
         const result=await resume();
-        if (result==='extension') return json(409,{ok:false,reason:'extension-update'});
-        if (result==='restart') return json(409,{ok:false,reason:'extension-restart'});
-        if (result==='frontend') return json(409,{ok:false,reason:'frontend-version'});
-        if (!result) return json(503,{ok:false,reason:'control-start'});
-        await driver.finish?.().catch(()=>{});
+        if (result==='extension') return fail(409,'extension-update');
+        if (result==='restart') return fail(409,'extension-restart');
+        if (result==='frontend') return fail(409,'frontend-version');
+        if (!result) return fail(503,'control-start');
+        lastExit=await Promise.resolve().then(()=>driver.finish?.()).catch(()=> 'activation-failed') || 'complete';
         maintenance=false;return json(200,{ok:true});
-      } catch {return json(503,{ok:false,reason:'control-start'});}
-      finally {busy=false;}
+      } catch {return fail(503,'control-start');}
+      finally {busy=false;checkedAt=0;}
     }
     if (['/repair-open','/repair-restore','/repair-addon','/repair-restart','/admin/restore'].includes(req.url)) {
       if (busy) return json(409,{ok:false,reason:'busy'});
@@ -73,12 +92,12 @@ function createRecovery({panel,native,driver,serve=serveGraphics,onStop=()=>{},r
         return json(200,await driver.restore());
       }
       catch {return json(503,{ok:false,reason:'window-recovery'});}
-      finally {busy=false;}
+      finally {busy=false;checkedAt=0;}
     }
     if (req.url!=='/status' && req.url!=='/admin/status') return res.writeHead(404).end();
     const update=readUpdate();
-    const ready=Boolean(await driver.locate().catch(()=>null));
-    json(200,{service:'iphonie-firefox-recovery',revision,build,ready,maintenance,busy,update,
+    const diagnostics={http:'available',...await inspectWindow(),maintenance,exit:lastExit};
+    json(200,{service:'iphonie-firefox-recovery',revision,build,ready:diagnostics.ready,maintenance,busy,update,diagnostics,
       signed:signedStatus(),addon:admin ? undefined : !incomplete(update) && signed.checkedPackage()});
   }).on('clientError',(_error,socket)=>socket.destroy());
 }

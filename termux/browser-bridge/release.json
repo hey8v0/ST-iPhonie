@@ -1,9 +1,9 @@
 {
-  "service": "0.2.3",
+  "service": "0.2.4",
   "protocol": 3,
   "extension": "0.2.2",
   "extensionId": "browser-bridge@st-iphonie.local",
-  "compatibleServices": ["0.2.2", "0.2.3"],
+  "compatibleServices": ["0.2.2", "0.2.3", "0.2.4"],
   "compatibleExtensions": ["0.2.2"],
   "signedSha256": "497102cfab8e7dcd895173a5b13beb5933841782cff45b7eb98f3efb1bec3870"
 }

@@ -5,7 +5,7 @@ const os=require('node:os');
 const path=require('node:path');
 const http=require('node:http');
 const {once}=require('node:events');
-const {firefoxRepair,findSessions}=require('../../termux/browser-bridge/firefox-repair.cjs');
+const {discover,firefoxRepair,findSessions}=require('../../termux/browser-bridge/firefox-repair.cjs');
 const {createRecovery}=require('../../termux/browser-bridge/recovery.cjs');
 const {repairOrigin}=require('../../termux/browser-bridge/config.cjs');
 
@@ -22,13 +22,16 @@ function desktop(xprop=true) {
     }
     assert.equal(bin,'xdotool');
     switch(args[0]) {
+      case 'getdisplaygeometry':return '1024 768';
       case 'search':
-        assert.deepEqual(args.slice(1,5),['--onlyvisible','--all','--pid','71']);
+        assert.deepEqual(args.slice(1),['--onlyvisible','--pid','71']);
         return owned.join('\n');
       case 'getactivewindow':return active;
+      case 'getwindowfocus':return active;
       case 'windowactivate':
         if (active!=='99') active=args.at(-1);
         return '';
+      case 'windowraise':case 'windowfocus': return '';
       case 'key':
         assert(owned.includes(active));
         keys.push(...args.slice(2));
@@ -63,7 +66,50 @@ test('detects only Firefox processes using the managed profile, session marker a
   const [{runtime,...managed}]=findSessions(source,proc);
   assert.equal(findSessions(source,proc).length,1);
   assert.match(runtime,/^[a-f0-9]{64}$/);
-  assert.deepEqual(managed,{...session,auth:path.join(source,'Xauthority')});
+  assert.equal(managed.pid,session.pid);
+  assert.equal(managed.display,session.display);
+  assert.equal(managed.auth,path.join(source,'Xauthority'));
+
+  // Gecko's re-exec can differ from the original command line and env.
+  const display=path.join(proc,'76');
+  fs.mkdirSync(display);
+  const auth=path.join(source,'Xauthority');
+  fs.writeFileSync(path.join(display,'cmdline'),['/prefix/Xvnc',':29','-localhost','-rfbport','5929','-auth',auth].join('\0'));
+  fs.writeFileSync(path.join(display,'environ'),['TMPDIR='+root,'IPHONIE_SESSION='+owner].join('\0'));
+  const restarted=path.join(proc,'71');
+  fs.writeFileSync(path.join(restarted,'cmdline'),['/prefix/firefox','-profile='+path.join(source,'profile')].join('\0'));
+  fs.writeFileSync(path.join(restarted,'environ'),'HOME='+root);
+  const report=discover(source,proc);
+  assert.equal(report.info.privateSession,'verified-via-xvnc');
+  assert.equal(report.info.authority,'from-xvnc');
+  assert.equal(report.info.display,'from-xvnc');
+  assert.equal(report.sessions.length,1);
+  assert.equal(report.sessions[0].tmp,root);
+  assert.notEqual(report.sessions[0].runtime,runtime);
+});
+
+test('private X11 class fallback ignores foreign window PIDs and diagnoses authorization failures',async()=>{
+  const managed={...session,privateDisplay:true};
+  let rejected=false;
+  const driver=firefoxRepair({sessions:()=>[managed],run:async (bin,args)=>{
+    if (bin==='xprop') return '_NET_WM_STATE(ATOM) =';
+    if (args[0]==='getdisplaygeometry') {
+      if (rejected) throw Object.assign(new Error('connection failed'),{stderr:'Invalid MIT-MAGIC-COOKIE-1 key'});
+      return '1024 768';
+    }
+    if (args[0]==='getactivewindow') return '';
+    if (args[0]==='getwindowfocus') return '11';
+    if (args[0]==='getwindowpid') return args[1]==='11'?'':'777';
+    if (args[0]==='search') return args.includes('--pid')?'':'11\n22';
+    return '';
+  }});
+  assert.deepEqual((await driver.locate()).owned,['11']);
+  assert.equal((await driver.status()).windowManager,'x-focus');
+  assert.equal((await driver.status()).windowPid,'class-fallback');
+  rejected=true;
+  assert.equal((await driver.status()).x11,'authorization-failed');
+  assert.equal((await driver.restore('restart')).reason,'x11-unavailable');
+  assert(!JSON.stringify(await driver.status()).includes('MIT-MAGIC-COOKIE'));
 });
 
 test('recovers verified Firefox chrome and opens a new debugging tab; never toggles blindly', async()=>{
@@ -137,5 +183,9 @@ test('authenticated recovery works while extension or control service is absent,
   assert.equal((await call('/repair-done')).body.ok,true);
   const info=(await call('/admin/status',{token:native,origin:''})).body;
   assert.equal(info.maintenance,false);
+  assert.equal(info.diagnostics.http,'available');
+  assert.equal(info.diagnostics.lastAction.navigation,'dispatched');
+  assert.equal(info.diagnostics.exit,'no-window-change');
+  assert.equal((await call('/admin/health',{token:native,origin:''})).body.http,'available');
   assert.equal(info.addon,undefined);
 });

@@ -3,8 +3,9 @@ const box = element => {
   return {width:Math.round(width),height:Math.round(height),left:Math.round(left),top:Math.round(top)};
 };
 const same = (a,b) => a?.width===b?.width && a?.height===b?.height;
+export const repairDesktop=Object.freeze({width:1024,height:768});
 
-export function viewerGeometry(rfb,surface,report) {
+export function viewerGeometry(rfb,surface,report,{repair=false}={}) {
   const display=rfb._display, canvas=rfb._canvas;
   if (!display || !canvas || !rfb.constructor.messages?.setDesktopSize) throw Error('viewer-version');
   const cover=document.createElement('canvas');
@@ -27,7 +28,7 @@ export function viewerGeometry(rfb,surface,report) {
   }
   function trace(kind,info={}) {
     report(kind,{...info,surface:size,canvas:box(canvas),canvasPixels:{width:canvas.width,height:canvas.height},
-      framebuffer:framebuffer(),scale:display.scale,density:renderDensity,keyboard,desktop});
+      framebuffer:framebuffer(),scale:display.scale,density:renderDensity,keyboard,desktop,repair});
   }
   function fit() {
     const fb=framebuffer();
@@ -67,6 +68,7 @@ export function viewerGeometry(rfb,surface,report) {
     },850);
   }
   function target() {
+    if (repair) return repairDesktop;
     const width=Math.max(floor,Math.round(size.width*renderDensity),desktop?960:0);
     const height=Math.max(size.height,Math.min(desktop?1600:2160,Math.round(size.height*width/size.width)));
     return {width:Math.min(width,2160),height:Math.min(height,2160)};
@@ -157,6 +159,7 @@ export function viewerGeometry(rfb,surface,report) {
       schedule();
     },
     editing(next) {
+      if (repair) return;
       if (keyboard===next) return;
       keyboard=next;fit();trace('keyboard-fit');
       schedule();

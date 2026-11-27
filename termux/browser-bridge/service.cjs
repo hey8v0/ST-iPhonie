@@ -103,8 +103,9 @@ function createService({panel, native, host, origin, inspectInstall, onStop, ser
   async function run(msg) {
     if (!command(msg)) return {ok:false,error:msg?.version === version ? 'invalid-command' : 'version-mismatch'};
     if (status !== 'connected' || !peer) return {ok:false,error:'disconnected'};
-    if (pending || checkingChrome) return {ok:false,error:'busy'};
+    if (pending) return {ok:false,error:'busy'};
     if (msg.action==='browser-fullscreen' && msg.params.enabled) {
+      if (checkingChrome) return {ok:false,error:'busy'};
       const installation=signedStatus();
       if (installation && installation!=='installed') return {ok:false,error:'repair-active'};
       const active=peer;
@@ -116,6 +117,7 @@ function createService({panel, native, host, origin, inspectInstall, onStop, ser
       if (!rescue?.ready) return {ok:false,error:'recovery-unavailable'};
       if (rescue.maintenance || ['preparing','browser','frontend','failed'].includes(rescue.update))
         return {ok:false,error:'repair-active'};
+      if (pending) return {ok:false,error:'busy'};
     }
     return new Promise(resolve => {
       pending = {id:crypto.randomUUID(), resolve, timer:setTimeout(() => finish({ok:false,error:'timeout'}), 3500)};
@@ -154,7 +156,12 @@ function createService({panel, native, host, origin, inspectInstall, onStop, ser
     }
     if (req.headers.origin !== origin || !config.equal(token, panel)) {res.writeHead(403).end(); return;}
     if (req.url === '/status') {json(200, {...diagnostics(), state:state || null}); return;}
-    if (req.url === '/diagnostics') {json(200, diagnostics()); return;}
+    if (req.url === '/diagnostics') {
+      let repair;
+      try {repair=await recovery?.();} catch {}
+      json(200,{...diagnostics(),recovery:repair?.diagnostics || {http:repair?'available':'unavailable'}});
+      return;
+    }
     if (req.url !== '/command') {res.writeHead(404).end(); return;}
     if (req.headers['content-type'] !== 'application/json') {res.writeHead(415).end(); return;}
     try {
@@ -196,7 +203,7 @@ async function daemon() {
   const {server, ipc, shutdown,releaseViewer} = createService({
     panel, native, host:config.host, origin:config.origin, serveGraphics,
     recovery:async()=>{
-      const state=await recovery.request('status');
+      const state=await recovery.request('status') || await recovery.request('health',750);
       return state?.build===build ? state : null;
     },
     signedStatus:()=>{

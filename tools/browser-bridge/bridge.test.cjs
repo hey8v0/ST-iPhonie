@@ -76,9 +76,9 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
   const host = '127.0.0.1:' + port, origin = 'http://' + host;
-  let rescue, installation;
+  let rescue, installation, checkStarted;
   const service = createService({panel,native,host,origin,inspectInstall:() => ({manifestPresent:true}),onStop:() => {},
-    recovery:async()=>rescue,signedStatus:()=>installation});
+    recovery:async()=>{checkStarted?.();return rescue;},signedStatus:()=>installation});
   const children = [];
   t.after(async () => {
     service.shutdown();
@@ -181,6 +181,19 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   assert.equal(fullscreenRequest.action,'browser-fullscreen');
   writeFrame(channel.proc.stdin,{type:'result',version:3,id:fullscreenRequest.id,ok:true});
   assert.equal((await hidePromise).ok,true);
+
+  let finishProbe;
+  rescue=new Promise(resolve=>{finishProbe=resolve;});
+  const started=new Promise(resolve=>{checkStarted=resolve;});
+  const attempt=hide();
+  await started;
+  const navigate=call('/command',{data:command('navigate',{tabId:1,url:'https://example.org/after'})});
+  const navigation=await wait(()=>channel.messages[2]);
+  assert.equal(navigation.action,'navigate');
+  writeFrame(channel.proc.stdin,{type:'result',version:3,id:navigation.id,ok:true});
+  assert.equal((await (await navigate).json()).ok,true);
+  finishProbe({ready:false});
+  assert.equal((await attempt).error,'recovery-unavailable');
 });
 
 test('content script reports focus and measurements without accessing values', async () => {

@@ -22,6 +22,14 @@ const pictureError = {
   timeout:'画面连接超时，请重连。',
   closed:'画面已断开，网页会话仍可继续。',
 };
+const repairWindowErrors = {
+  'firefox-unavailable':'暂时无法识别这次 Firefox 会话。',
+  'x11-unavailable':'自动控制无法访问 Firefox 的私有显示。',
+  'window-not-found':'画面已连接，自动控制找不到 Firefox 窗口。',
+  'window-focus':'未能激活 Firefox 窗口。',
+  'window-recovery':'自动恢复 Firefox 工具栏失败。',
+  'navigation-failed':'自动打开 Firefox 页面失败。',
+};
 function webUrl(value) {
   try {
     const url = new URL(value);
@@ -54,7 +62,7 @@ export function browserPhase2(ctx,parse) {
   let autoHide = stored(keyPrefix+':auto-hide',true) !== false, framebuffer;
   let lastScroll, gesture, lastToggle = 0, touch, passwordPrompt, rotationHint = false;
   let activeDialog, failure, pageKey, feedbackKey, viewerIME=false, geometryKey, layoutKey;
-  let repair=false,repairInfo=null,repairOpened=false,repairPending=false;
+  let repair=false,repairInfo=null,repairOpened=false,repairPending=false,repairSized=false,nativeToolbar=null;
   let fullHeight=0, keyboardShown=false, revealTimer, revealTab, geometryRAF;
   const trace=[];
   root.classList.add('browser-v2');
@@ -64,6 +72,7 @@ export function browserPhase2(ctx,parse) {
     </form></div>
     <div class="browser-progress" aria-hidden="true" hidden><i></i></div>
     <div class="browser-v2-body"><div class="browser-v2-home"></div><div class="browser-v2-screen"></div><div class="browser-v2-feedback" hidden></div></div>
+    <p class="browser-status browser-v2-native" role="status" hidden>Firefox 工具栏可见</p>
     <nav class="browser-v2-bottom" aria-label="浏览网页">
       ${btn('back',icon('back'),'browser-icon','aria-label="后退"')}
       ${btn('forward',icon('next'),'browser-icon','aria-label="前进"')}
@@ -77,6 +86,7 @@ export function browserPhase2(ctx,parse) {
       ${btn('repair-addon','安装签名扩展','secondary')}
       ${btn('repair-restart','打开重启页','secondary','hidden')}
       ${btn('repair-done','回到浏览','secondary')}
+      ${btn('diagnostics','导出诊断','secondary')}
       ${btn('repair-external','外部打开画面','secondary')}
       </div>
     </div>
@@ -151,9 +161,13 @@ export function browserPhase2(ctx,parse) {
     root.toggleAttribute('data-start',home);
     root.toggleAttribute('data-immersive',!home && immerse);
     root.toggleAttribute('data-repair',repair && !home);
+    find('.browser-v2-native').hidden=home || repair || immerse || !shell || !nativeToolbar;
     find('.browser-v2-repair').hidden=home || !repair;
     find('[data-action=repair-open]').disabled=!rfbReady || !!legacy || repairPending;
-    find('[data-action=repair-addon]').disabled=repairInfo?.build!==bridgeBuild || !repairInfo.addon || !rfbReady || repairPending;
+    const installer=find('[data-action=repair-addon]');
+    installer.hidden=repairInfo?.signed==='installed';
+    installer.disabled=repairInfo?.build!==bridgeBuild || !repairInfo.addon || !repairSized || repairPending;
+    find('[data-action=repair-restart]').disabled=!rfbReady || !!legacy || repairPending;
     find('[data-action=repair-done]').disabled=repairPending;
     root.toggleAttribute('data-remote-connected',!home && !!shell && rfbReady);
     find('[data-action=restore]').hidden = home || !immerse;
@@ -327,7 +341,7 @@ export function browserPhase2(ctx,parse) {
       }
       layout();return;
     }
-    if (data.build===bridgeBuild && data.signed!=='installed') {
+    if (data.signed && data.signed!=='installed') {
       state=null;shell=false;keyboard.bind(null,null);progress.hidden=true;
       setImmersive(false);
       const text=data.signed==='restart-required' ? '签名扩展已装入。请通过维修入口正常重启 Firefox。' :
@@ -336,7 +350,9 @@ export function browserPhase2(ctx,parse) {
       feedbackFor(text,[['legacy-browser','维修与更新'],['help','帮助']]);
       layout();return;
     }
+    const previousMode=state?.windowMode;
     state=data.state;
+    if (shell && previousMode!==state.windowMode) nativeToolbar=state.windowMode!=='fullscreen';
     void initialize();
     const tab=active(), nextKey=tab?.id+'|'+tab?.url;
     if (pageKey!==nextKey) {
@@ -422,22 +438,27 @@ export function browserPhase2(ctx,parse) {
   }
   async function initialize() {
     if (!rfbReady || !state || shell || initializing || !surface) return;
+    const current=surface;
+    shell=true;
+    nativeToolbar=state.windowMode!=='fullscreen';
+    feedbackFor('');
+    layout();
+    const entry=queuedNav;queuedNav=null;
+    if (entry) await navigate(entry);
+    // Navigating must not wait on the independent X11 safety check.
+    if (surface===current && shell && rfbReady) await tryHideNative();
+  }
+  async function tryHideNative() {
+    if (!shell || home || !rfbReady || !state || initializing || !surface) return;
     initializing=true;
     const current=surface;
     const result=await selection('browser-fullscreen',{enabled:true});
     if (surface !== current) return;
     initializing=false;
-    if (!result.ok && (result.error!=='fullscreen-owned' || state?.windowMode!=='fullscreen')) {
-      const text=result.error==='recovery-unavailable' ? '独立维修服务不可用，已保留 Firefox 工具栏。' :
-        result.error==='repair-active' ? '浏览器处于维修或更新中。' : '无法切换到浏览视图。';
-      feedbackFor(text,[['legacy-browser','维修与更新'],['retry','重试']]);return;
-    }
-    shell=true;
-    feedbackFor('');
-    if (preferImmersive && !fullscreen) setImmersive(true,true);
+    nativeToolbar=!result.ok && state?.windowMode!=='fullscreen';
+    record('native-toolbar',{mode:nativeToolbar?'visible':'hidden',reason:result.ok?null:result.error});
+    if (result.ok && preferImmersive && !fullscreen) setImmersive(true,true);
     layout();
-    const entry=queuedNav;queuedNav=null;
-    if (entry) await navigate(entry);
   }
   function forgetConnection() {
     passwordPrompt?.close();passwordPrompt=null;
@@ -445,7 +466,7 @@ export function browserPhase2(ctx,parse) {
     legacy?.();legacy=null;
     initializing=false;shell=false;rfbReady=false;state=null;
     mounted=false;failure=null;framebuffer=null;viewerIME=false;geometryKey=null;
-    repair=false;repairInfo=null;repairOpened=false;repairPending=false;
+    repair=false;repairInfo=null;repairOpened=false;repairPending=false;repairSized=false;nativeToolbar=null;
     keyboard.bind(null,null);
   }
   function pair() {
@@ -495,22 +516,32 @@ export function browserPhase2(ctx,parse) {
     if (repairInfo?.signed==='restart-required')
       return '签名扩展已装入。点「打开重启页」，然后在 Firefox 点「正常重启」。';
     if (repairInfo?.signed==='disabled') return '请在 Firefox 附加组件页面启用 iPhonie Browser Bridge。';
+    if (repairInfo?.signed==='installed') return '签名扩展已安装。可以回到浏览。';
     return '点「安装签名扩展」，然后在 Firefox 的权限提示中点「添加」。';
   }
-  async function repairAction(action) {
+  async function repairAction(action,offerPictureKeys=false) {
     const current=surface;
     if (!repair || !current || repairPending) return;
     repairPending=true;layout();
-    const result=await current.command(action);
+    let result=await current.command(action);
+    if (surface!==current) return;
+    if (!result.ok && offerPictureKeys && repairWindowErrors[result.reason]) {
+      const use=await ctx.confirm('从当前画面打开？',repairWindowErrors[result.reason]+
+        ' 请先确认 Firefox 在前台且原生地址栏可见，然后继续。');
+      if (surface!==current) return;
+      if (use) result=await current.command(action,{pictureKeys:true});
+    }
     if (surface!==current) return;
     repairPending=false;layout();
+    record('repair-action',{action,outcome:result.ok?'ok':result.reason || result.error || 'unknown',mode:result.mode || null});
     if (!result.ok) {
       repairNote(result.reason==='update-incomplete' ? '安装未完成。可重新运行同一个测试安装包。' :
         result.reason==='control-start' ? '控制服务未恢复，仍可使用维修画面。' :
         result.reason==='extension-update' ? '正在等待签名扩展。请完成 Firefox 的安装授权，再点「回到浏览」。' :
         result.reason==='extension-restart' ? '签名扩展已装入。点「打开重启页」，然后在 Firefox 点「正常重启」。' :
         result.reason==='frontend-version' ? '前端版本已变动。请使用配套测试安装包，装好后刷新酒馆。' :
-        '无法自动恢复工具栏。可在外部画面使用 Firefox 全屏键。');
+        repairWindowErrors[result.reason] ? repairWindowErrors[result.reason]+' 可在当前画面确认 Firefox 地址栏后重试。' :
+        '维修操作未完成。可以导出诊断或使用外部画面。');
       if (result.reason==='extension-restart') find('[data-action=repair-restart]').hidden=false;
       return;
     }
@@ -521,6 +552,7 @@ export function browserPhase2(ctx,parse) {
   function oldViewer(text) {
     surface?.close();surface=null;
     rfbReady=false;
+    repairSized=false;
     feedbackFor('');
     repairNote(text);
     legacy=connectTermux(ctx,frameHost,message=>{
@@ -544,10 +576,16 @@ export function browserPhase2(ctx,parse) {
         repairInfo=data;layout();
         find('[data-action=repair-restart]').hidden=data.signed!=='restart-required';
       }
+      if (type==='rfb-trace') record(data.kind,data.details);
       if (type!=='rfb-state') return;
       if (data.stage==='ready') {
+        repairSized=true;
         rfbReady=true;layout();
-        if (!repairOpened) {repairOpened=true;void repairAction('repair-open');}
+        if (!repairOpened && repairInfo?.signed!=='installed') {repairOpened=true;void repairAction('repair-open');}
+        else if (!repairOpened) repairNote(repairInstructions());
+      } else if (data.stage==='repair-size-unavailable') {
+        rfbReady=true;layout();
+        repairNote('无法调整维修画面尺寸。可在外部打开画面，启用远程调整大小。');
       } else if (data.stage==='password') stageChanged('password');
       else if (['unavailable','version','pair','closed','timeout','security'].includes(data.stage)) {
         if (data.stage==='security') credentials='';
@@ -631,6 +669,7 @@ export function browserPhase2(ctx,parse) {
       ['mode',tab?.desktop?'切回手机版网页':'请求桌面版网页'],
       ...(state?.viewport && Math.abs(state.viewport.zoom-1)>.02?[['reset-zoom','还原此页缩放']]:[]),
       ['fullscreen','全屏'],
+      ...(nativeToolbar?[['hide-firefox-toolbar','重试隐藏 Firefox 工具栏']]:[]),
       ['immersive','隐藏浏览工具'],['keyboard','打开键盘'],['copy','复制选中文字'],['paste','从剪贴板粘贴'],
       ['settings','浏览器设置'],['help','浏览器帮助'],['legacy-browser','维修与更新'],
       ['diagnostics','导出诊断'],['web-search','Char 搜索设置']];
@@ -646,6 +685,10 @@ export function browserPhase2(ctx,parse) {
     const tab=active();
     switch (action) {
       case 'home-more':case 'more-browser':menu();break;
+      case 'hide-firefox-toolbar':
+        await tryHideNative();
+        if (nativeToolbar) ctx.notify('Firefox 工具栏仍然可见，网页可以继续浏览。');
+        break;
       case 'connect-browser':connect();break;
       case 'home':goHome();break;
       case 'pair-browser':pair();break;
@@ -653,15 +696,15 @@ export function browserPhase2(ctx,parse) {
       case 'tabs':openTabs();break;
       case 'retry':forgetConnection();connect();break;
       case 'legacy-browser':openRepair();break;
-      case 'repair-open':await repairAction('repair-open');break;
-      case 'repair-restart':await repairAction('repair-restart');break;
+      case 'repair-open':await repairAction('repair-open',true);break;
+      case 'repair-restart':await repairAction('repair-restart',true);break;
       case 'repair-done':
         if (surface) await repairAction('repair-done');
         else {forgetConnection();connect();}
         break;
       case 'repair-addon': {
         if (!repairInfo?.addon) break;
-        await repairAction('repair-addon');
+        await repairAction('repair-addon',true);
         break;
       }
       case 'repair-external':
@@ -718,7 +761,9 @@ export function browserPhase2(ctx,parse) {
       case 'diagnostics': {
         const result=await selection('diagnostics');
         const {width,height}=frameHost.getBoundingClientRect();
-        const blob=new win.Blob([JSON.stringify({...(result?.service?result:{}),protocol:bridgeVersion,framebuffer,
+        const diagnostic=result?.service ? result : repair ? {recovery:result?.http ? result :
+          repairInfo?.diagnostics || {http:'unavailable'}} : {};
+        const blob=new win.Blob([JSON.stringify({...diagnostic,protocol:bridgeVersion,framebuffer,
           container:{width:Math.round(width),height:Math.round(height)},events:trace},null,2)],{type:'application/json'});
         const url=win.URL.createObjectURL(blob);
         const a=doc.createElement('a');a.href=url;a.download='iphonie-browser-diagnostics.json';a.click();

@@ -81,6 +81,8 @@
 .browser-v2[data-repair] :is(.browser-toolbar,.browser-v2-bottom,.browser-progress){display:none}
 .browser-v2-repair{flex:none;padding:8px 12px;background:var(--bg);border-top:1px solid var(--line)}
 .browser-v2-repair[hidden]{display:none}
+.browser-v2-native{margin:0;background:var(--bg)}
+.browser-v2-native[hidden]{display:none}
 .browser-v2-repair [hidden]{display:none}
 .browser-v2-repair p{margin:0 0 8px;color:var(--ink2);font-size:13px}
 .browser-v2-repair .browser-card-actions{flex-wrap:wrap}

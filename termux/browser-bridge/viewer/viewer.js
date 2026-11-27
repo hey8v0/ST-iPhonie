@@ -1,14 +1,15 @@
-import {viewerGeometry} from './geometry.js';
+import {repairDesktop,viewerGeometry} from './geometry.js';
 import {browserInput} from './input.js';
 
 const surface = document.getElementById('surface');
 const trusted = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
 const token = /^[a-f0-9]{64}$/;
 const version = 3;
-const supportedServices = new Set(['0.2.2','0.2.3']);
+const supportedServices = new Set(['0.2.2','0.2.3','0.2.4']);
 const recoveryMode=location.pathname==='/repair';
 let parentOrigin, key, rfb, geometry,frame = false, verified = false, telem, desktop = false;
 let stopped = false, pollTimer, connectionTimer, waitingClipboard,lastStatus,planned,planTimer, editing=false,hold=false;
+let repairFrameTimer, repairFrameReady=false, repairSigned;
 
 function announce(type,data={}) {
   if (parentOrigin) parent.postMessage({type,...data},parentOrigin);
@@ -66,7 +67,9 @@ async function connect() {
     const result = await api('/status');
     if (recoveryMode) {
       if (result?.service!=='iphonie-firefox-recovery' || result.revision!==1) {setStage('version');return;}
-      announce('repair-info',{build:result.build,addon:result.addon,update:result.update,signed:result.signed});
+      announce('repair-info',{build:result.build,addon:result.addon,update:result.update,signed:result.signed,
+        diagnostics:result.diagnostics});
+      repairSigned=result.signed;
     } else if (result?.version !== version || !supportedServices.has(result.build)) {
       publish({status:'version-mismatch',version:result?.version,build:result?.build,state:null});
       setStage('version');return;
@@ -85,15 +88,27 @@ async function connect() {
     rfb.background = '#111';
     rfb.focusOnClick = !matchMedia('(pointer: coarse)').matches;
     rfb.qualityLevel=9;
+    function repairDisplay(details) {
+      if (repairFrameReady) return;
+      if (details.framebuffer.width===repairDesktop.width && details.framebuffer.height===repairDesktop.height) {
+        clearTimeout(repairFrameTimer);
+        repairFrameReady=true;
+        setStage('ready');
+      } else if (!repairFrameTimer) {
+        repairFrameTimer=setTimeout(()=>{if (!repairFrameReady) setStage('repair-size-unavailable');},4500);
+      }
+    }
     geometry=viewerGeometry(rfb,surface,(kind,details)=>{
       announce('rfb-trace',{kind,details});
       if (kind==='first-frame') {
-        frame=true;clearTimeout(connectionTimer);setStage('ready');
+        frame=true;clearTimeout(connectionTimer);
+        if (recoveryMode) repairDisplay(details);else setStage('ready');
       }
-    });
+      if (kind==='frame-painted' && recoveryMode) repairDisplay(details);
+    },{repair:recoveryMode});
     geometry.mode(desktop);
     geometry.editing(editing);
-    geometry.hold(hold || recoveryMode);
+    geometry.hold(hold);
     const deadline = () => {
       clearTimeout(connectionTimer);
       connectionTimer = setTimeout(()=>{
@@ -113,6 +128,7 @@ async function connect() {
     });
     rfb.addEventListener('disconnect',()=>{
       frame = false;
+      clearTimeout(repairFrameTimer);
       geometry?.close();
       proxy.release();
       clearTimeout(connectionTimer);
@@ -133,6 +149,28 @@ function textInput(text) {
     rfb.sendKey(character === '\n' ? xkeys.Enter :
       character === '\t' ? xkeys.Tab : point <= 255 ? point : 0x01000000 | point);
   }
+}
+async function repairViaPicture(action) {
+  let address;
+  if (action==='repair-open') address=repairSigned==='restart-required'?'about:profiles':'about:addons';
+  if (action==='repair-restart') address='about:profiles';
+  if (action==='repair-addon' && repairFrameReady) {
+    const result=await api('/repair-link',{});
+    if (!result.ok) return result;
+    address=result.url;
+  }
+  if (!address || !frame) return {ok:false,reason:'navigation-failed'};
+  const pause=()=>new Promise(resolve=>setTimeout(resolve,140));
+  for (const [key,code] of [[116,'KeyT'],[108,'KeyL']]) {
+    rfb.sendKey(0xffe3,'ControlLeft',true);
+    rfb.sendKey(key,code);
+    rfb.sendKey(0xffe3,'ControlLeft',false);
+    await pause();
+    if (stopped || !frame) return {ok:false,reason:'navigation-failed'};
+  }
+  textInput(address);
+  rfb.sendKey(xkeys.Enter,'Enter');
+  return {ok:true,mode:'picture-keys'};
 }
 function sendInput(data) {
   if (!frame || !sameTarget(data)) return false;
@@ -161,7 +199,7 @@ window.addEventListener('message',async ({source,origin,data})=>{
   }
   if (!parentOrigin) return;
   if (data.type === 'rfb-dispose') {
-    stopped=true;proxy.release();clearTimeout(planTimer);rfb?.disconnect();clearTimeout(pollTimer);return;
+    stopped=true;proxy.release();clearTimeout(planTimer);clearTimeout(repairFrameTimer);rfb?.disconnect();clearTimeout(pollTimer);return;
   }
   if (data.type === 'rfb-password' && typeof data.password === 'string' && data.password.length <= 128) {
     rfb?.sendCredentials({password:data.password});
@@ -169,7 +207,7 @@ window.addEventListener('message',async ({source,origin,data})=>{
   }
   if (data.type === 'rfb-geometry') {
     editing=data.editing===true;hold=data.hold===true;
-    geometry?.editing(editing);geometry?.hold(hold || recoveryMode);
+    geometry?.editing(editing);geometry?.hold(hold);
   }
   if (data.type === 'rfb-input') sendInput(data);
   if (data.type === 'rfb-ime-release') {planned=null;clearTimeout(planTimer);proxy.release();}
@@ -177,8 +215,11 @@ window.addEventListener('message',async ({source,origin,data})=>{
     let result = {ok:false};
     try {
       if (recoveryMode) {
-        if (data.action==='repair-done' ||
-          (frame && ['repair-open','repair-restore','repair-addon','repair-restart'].includes(data.action))) result=await api('/'+data.action,{});
+        if (data.action==='diagnostics') result=(await api('/status')).diagnostics;
+        else if (data.params?.pictureKeys===true) result=await repairViaPicture(data.action);
+        else if (data.action==='repair-done' ||
+          (frame && ['repair-open','repair-restore','repair-restart'].includes(data.action)) ||
+          (frame && repairFrameReady && data.action==='repair-addon')) result=await api('/'+data.action,{});
       } else if (data.action === 'diagnostics') result = await api('/diagnostics');
       else if (data.action === 'selection' && frame) result = {text:await selectText()};
       else if (data.action === 'screenshot' && frame) {

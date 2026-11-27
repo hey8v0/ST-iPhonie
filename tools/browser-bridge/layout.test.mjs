@@ -23,12 +23,18 @@ const send=(type,data={})=>parent.postMessage({type,...data},'${app}');
 const state={activeId:1,count:1,tabs:[{id:1,title:'网页测试',url:'https://example.org/start',access:'web',status:'ready',desktop:false,icon:''}],
   focus:null,field:null,hints:[],windowMode:'normal',page:{scroll:0,fullscreen:'none'},viewport:{width:390,height:640,visualWidth:390,visualHeight:640,dpr:1,scale:1,zoom:1}};
 const publish=()=>send('browser-state',{status:'connected',version:3,state});
+let recoveryReady=false;
 addEventListener('message',({data})=>{
   if(data.type==='rfb-init'){publish();send('rfb-state',{stage:'ready'});return;}
   if(data.type==='rfb-input'){send('qa-ime',{data});return;}
   if(data.type!=='rfb-command')return;
   send('qa-command',{data});
-  if(data.action==='browser-fullscreen')state.windowMode='fullscreen';
+  if(data.action==='browser-fullscreen'){
+    if(!recoveryReady){
+      send('rfb-result',{id:data.id,result:{ok:false,error:'recovery-unavailable'}});return;
+    }
+    state.windowMode=data.params.enabled?'fullscreen':'normal';
+  }
   if(data.action==='navigate')state.tabs[0].url=data.params.url;
   if(data.action==='new-tab'){state.tabs.push({id:2,title:'第二张',url:'',status:'ready',desktop:false,icon:''});state.count=2;state.activeId=2;}
   if(data.action==='switch-tab')state.activeId=data.params.tabId;
@@ -40,6 +46,7 @@ window.scrollToTest=(n,d)=>{send('rfb-gesture',{direction:d,edge:false});state.p
 window.focusForTest=(id='test-input')=>{state.focus='input:text';state.field={frame:2,id};publish();};
 window.waitForTest=()=>send('browser-state',{status:'waiting',version:3,state:null});
 window.revealForTest=()=>send('rfb-gesture',{direction:'up',edge:true});
+window.allowRecovery=()=>{recoveryReady=true;};
 `;
 
 const entry = `
@@ -65,13 +72,14 @@ test('Phase 2 home, five tools, true layout release, tabs, desktop command and i
       const send=(type,data)=>parent.postMessage({type,...data},'${app}');
       addEventListener('message',({data})=>{
         if (data.type==='rfb-init') {
-          send('repair-info',{build:'0.2.3',addon:true,update:'extension'});
+          send('repair-info',{build:'0.2.4',addon:true,update:'extension'});
           send('rfb-state',{stage:'ready'});
         }
         if (data.type==='rfb-command') {
           send('qa-repair',{action:data.action});
           send('rfb-result',{id:data.id,result:data.action==='repair-done'?
-            {ok:false,reason:'extension-update'}:{ok:true}});
+            {ok:false,reason:'extension-update'}:data.action==='repair-open' && !data.params?.pictureKeys?
+              {ok:false,reason:'x11-unavailable'}:{ok:true}});
         }
       });
       </script>`}));
@@ -114,6 +122,14 @@ test('Phase 2 home, five tools, true layout release, tabs, desktop command and i
     const oldFrame=await page.locator('.browser-v2-screen').boundingBox();
     const iframe=await page.locator('iframe').elementHandle();
     const frame=await iframe.contentFrame();
+    await page.getByText('Firefox 工具栏可见',{exact:true}).waitFor();
+    assert.equal(await page.locator('.browser-v2-feedback').isVisible(),false);
+    assert.equal(await address.inputValue(),'https://example.org/new');
+    await frame.evaluate(()=>allowRecovery());
+    await page.getByRole('button',{name:'浏览器菜单'}).click();
+    await page.getByRole('button',{name:'重试隐藏 Firefox 工具栏'}).click();
+    await page.getByText('Firefox 工具栏可见',{exact:true}).waitFor({state:'hidden'});
+    assert.equal(await iframe.contentFrame(),frame);
     await frame.evaluate(()=>scrollToTest(135,'down'));
     await page.locator('.browser-v2[data-immersive]').waitFor();
     assert.equal(await address.isVisible(),false);
@@ -181,6 +197,9 @@ test('Phase 2 home, five tools, true layout release, tabs, desktop command and i
     await page.waitForFunction(()=>observed.some(row=>row.type==='qa-repair'&&row.action==='repair-open'));
     assert.match(await page.locator('iframe').getAttribute('src'),/:6092\/repair$/);
     const tools=page.locator('.browser-v2-repair');
+    await tools.getByText(/自动控制无法访问/).waitFor();
+    await tools.getByRole('button',{name:'打开附加组件'}).click();
+    await page.waitForFunction(()=>observed.filter(row=>row.action==='repair-open').length===3);
     for (const width of [320,430]) {
       await page.evaluate(width=>{document.querySelector('.screen').style.width=width+'px';},width);
       assert(await tools.evaluate(el=>el.scrollWidth<=el.clientWidth));
