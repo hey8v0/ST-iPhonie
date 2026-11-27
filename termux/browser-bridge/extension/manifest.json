@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "iPhonie Browser Bridge",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Local Firefox control for the iPhonie browser.",
   "browser_specific_settings": {"gecko":{"id":"browser-bridge@st-iphonie.local","strict_min_version":"92.0","data_collection_permissions":{"required":["none"]}}},
   "incognito": "not_allowed",

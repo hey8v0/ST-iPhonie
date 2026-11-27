@@ -8,6 +8,7 @@ const fallback = path.join(os.homedir(),'.local/share/st-iphonie-browser');
 const viewer = path.join(fallback,'viewer');
 const assets = new Map([
   ['/viewer', ['viewer.html','text/html']],
+  ['/repair', ['viewer.html','text/html']],
   ['/viewer.js', ['viewer.js','text/javascript']],
   ['/viewer.css', ['viewer.css','text/css']],
   ['/geometry.js', ['geometry.js','text/javascript']],

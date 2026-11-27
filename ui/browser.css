@@ -78,6 +78,11 @@
 .browser-v2-bottom .browser-icon{min-width:0;min-height:46px}
 .browser-v2-count{display:grid;min-inline-size:20px;min-block-size:20px;padding-inline:3px;place-items:center;border:1.6px solid currentColor;border-radius:6px;font-size:11px;font-weight:750}
 .browser-v2[data-immersive] :is(.browser-toolbar,.browser-v2-bottom,.browser-progress){display:none}
+.browser-v2[data-repair] :is(.browser-toolbar,.browser-v2-bottom,.browser-progress){display:none}
+.browser-v2-repair{flex:none;padding:8px 12px;background:var(--bg);border-top:1px solid var(--line)}
+.browser-v2-repair[hidden]{display:none}
+.browser-v2-repair p{margin:0 0 8px;color:var(--ink2);font-size:13px}
+.browser-v2-repair .browser-card-actions{flex-wrap:wrap}
 :root[data-browser-immersive] .screen :is(.app-nav,.statusbar,.home-indicator,.island,.pull-tab){display:none!important}
 .browser-v2 .browser-site-icon img,.browser-v2-tab .browser-site-icon img{width:19px;height:19px;object-fit:contain;border-radius:4px}
 .browser-v2-tab{display:grid;grid-template-columns:minmax(0,1fr) 44px;align-items:center;border-bottom:1px solid var(--line)}

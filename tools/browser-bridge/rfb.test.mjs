@@ -9,6 +9,8 @@ const {chromium}=require('playwright');
 const websocket=require('ws');
 const {attachGraphics,serveGraphics}=require('../../termux/browser-bridge/graphics.cjs');
 const {createService}=require('../../termux/browser-bridge/service.cjs');
+const {createRecovery}=require('../../termux/browser-bridge/recovery.cjs');
+const {repairOrigin}=require('../../termux/browser-bridge/config.cjs');
 const {writeFrame}=require('../../termux/browser-bridge/frames.cjs');
 const build=require('../../termux/browser-bridge/extension/manifest.json').version;
 const u16=x=>{const b=Buffer.alloc(2);b.writeUInt16BE(x);return b;};
@@ -61,6 +63,49 @@ function testDesktop(onResize,onPointer) {
     });
   });
 }
+
+test('independent repair viewer paints an authenticated RFB frame without the control service or native host', {
+  skip:!process.env.STIP_TEST_NOVNC && 'set STIP_TEST_NOVNC to a noVNC v1.6.0 checkout',
+},async t=>{
+  const tcp=testDesktop(()=>{},()=>{});
+  await new Promise(resolve=>tcp.listen(0,'127.0.0.1',resolve));
+  t.after(()=>tcp.close());
+  const origin=repairOrigin,host=new URL(origin).host,key='a'.repeat(64);
+  let requested=0;
+  const repair=createRecovery({panel:key,native:'b'.repeat(64),readUpdate:()=> 'extension',
+    driver:{locate:async()=>true,restore:async debug=>{if(debug) requested++;return {ok:true};}},
+    serve:(req,res,origin)=>serveGraphics(req,res,origin,process.env.STIP_TEST_NOVNC)});
+  const stop=attachGraphics(repair,{host,origin,panel:key,onIdle(){},websocket,vncPort:tcp.address().port});
+  t.after(()=>{stop();repair.closeAllConnections();repair.close();});
+  await new Promise(resolve=>repair.listen(6092,'127.0.0.1',resolve));
+  const parent=http.createServer((req,res)=>{
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});
+    res.end(`<style>iframe{border:0;width:320px;height:550px}</style>
+      <iframe src="${origin}/repair"></iframe><script>
+      const frame=document.querySelector('iframe'), origin='${origin}';
+      window.steps=[];
+      addEventListener('message',event=>{
+        if(event.origin!==origin)return;
+        steps.push(event.data);
+        if(event.data.type==='rfb-state' && event.data.stage==='ready')
+          frame.contentWindow.postMessage({type:'rfb-command',id:'test',action:'repair-open'},origin);
+      });
+      frame.addEventListener('load',()=>frame.contentWindow.postMessage({type:'rfb-init',key:'${key}'},origin));
+      </script>`);
+  });
+  await new Promise(resolve=>parent.listen(0,'127.0.0.1',resolve));
+  t.after(()=>{parent.closeAllConnections();parent.close();});
+  const browser=await chromium.launch({executablePath:process.env.STIP_TEST_CHROME || undefined});
+  t.after(()=>browser.close());
+  const page=await browser.newPage();
+  const requests=[];
+  page.on('request',req=>requests.push(req.url()));
+  await page.goto('http://127.0.0.1:'+parent.address().port);
+  await page.waitForFunction(()=>steps.some(step=>step.type==='rfb-result' && step.result.ok));
+  assert.equal(requested,1);
+  assert(!requests.some(url=>url.startsWith('http://127.0.0.1:6091')));
+  assert.equal(await page.locator('iframe').contentFrame().locator('canvas:visible').count(),1);
+});
 
 test('real noVNC core paints and negotiates a CSS-size framebuffer through the authenticated viewer', {
   skip:!process.env.STIP_TEST_NOVNC && 'set STIP_TEST_NOVNC to a noVNC v1.6.0 checkout',

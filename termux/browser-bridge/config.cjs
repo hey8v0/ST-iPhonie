@@ -7,6 +7,7 @@ const base = path.join(os.homedir(), '.local/share/st-iphonie-bridge');
 const port = 6091;
 const host = '127.0.0.1:' + port;
 const origin = 'http://' + host;
+const repairOrigin = 'http://127.0.0.1:6092';
 const extensionId = 'browser-bridge@st-iphonie.local';
 const manifestName = 'st_iphonie_browser_bridge';
 const manifest = path.join(os.homedir(), '.mozilla/native-messaging-hosts', manifestName + '.json');
@@ -26,4 +27,4 @@ function equal(a, b) {
   return typeof a === 'string' && tokenPattern.test(a) && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-module.exports = {base, host, port, origin, manifestName, extensionId, manifest, filename, socket, secrets, equal};
+module.exports = {base, host, port, origin, repairOrigin, manifestName, extensionId, manifest, filename, socket, secrets, equal};

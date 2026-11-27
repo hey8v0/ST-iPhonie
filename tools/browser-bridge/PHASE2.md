@@ -1,6 +1,6 @@
 # 小手机浏览器 Phase 2 测试版
 
-此分支基于安卓真机验收通过的 `browser-bridge-poc`。这一轮扩展和本机控制服务均为 `0.2.1`，协议为 `v3`。请一起更新本分支的插件前端、脚本和 XPI。配套的 Xvnc、Firefox Profile、noVNC 1.6.0 及画面密码继续由原来的 `iphonie-browser` 管理。
+此分支基于安卓真机验收通过的 `browser-bridge-poc`。这一轮插件前端、本机服务和 Firefox 扩展均为 `0.2.2`，控制协议为 `v3`。Xvnc、Firefox Profile、noVNC 1.6.0 和画面密码沿用原来的 `iphonie-browser`。
 
 [产品定稿](../../docs/browser/product-spec.txt) · [界面与交互规范](../../AGENTS.md) · [视觉规格模板](../../docs/browser/visual-spec-template.txt)
 
@@ -12,20 +12,22 @@
 curl -fL https://raw.githubusercontent.com/hey8v0/ST-iPhonie/browser-phase2/tools/browser-bridge/ST-iPhonie-Browser-Phase2.sh -o "$HOME/iphonie-phase2.sh" && bash "$HOME/iphonie-phase2.sh" --plugin
 ```
 
-脚本通过 Git 将干净的插件目录切到实验提交。原分支和提交号记录在 Termux 实验目录。若发现本地修改、未跟踪文件或多个插件目录，脚本保留当前工作区。对于自定义安装位置，可在工作区干净后执行：
+脚本识别 `ST-iPhonie`、旧目录 `ST-TTS` 和旧 GitHub 地址 `hey8v0/ST-TTS`，也会检查酒馆的自定义数据目录。原分支和提交号记录在 Termux 实验目录。若有本地修改、未跟踪文件或找到多个插件目录，脚本保留当前工作区。若需手动指定，请把实际插件目录放在安装命令的 `--plugin` 后面。
 
 ```sh
-iphonie-bridge plugin "/你的插件目录/ST-iPhonie"
+bash "$HOME/iphonie-phase2.sh" --plugin "/你的插件目录/ST-TTS"
 ```
 
-1. 刷新酒馆。在小手机浏览器中用「兼容连接」进入 Firefox，或沿用已经打开的 Firefox。
-2. 在 Firefox 里打开 `about:debugging#/runtime/this-firefox`，移除旧版临时扩展，再临时载入安装器给出的 `0.2.1` XPI。GTK 文件选择器可用 `Ctrl+L` 输入路径。
-3. 回到小手机浏览器重新连接。已有配对沿用，提示时输入原有画面密码。之后执行 `iphonie-bridge` 即可启动或复用画面及控制服务。
-4. 回退执行 `iphonie-bridge rollback`，随后刷新酒馆。脚本通过 Git 恢复原版本。有 Phase 1 安装记录时，控制服务入口会恢复到 Phase 1。原 Firefox 数据和画面服务入口可继续使用。移除 Phase 2 扩展或重新加载匹配的旧扩展即可。
+1. 刷新酒馆，打开「小手机 → 浏览器 → 更多 → 维修与更新」。已有配对沿用，提示时输入原有画面密码。维修画面会恢复 Firefox 原生工具栏并打开调试页。
+2. 在调试页移除旧的临时扩展，再点「临时载入附加组件」。文件窗口打开后，点小手机的「填入 XPI 路径」，在 Firefox 文件窗口确认打开。
+3. 点「回到浏览」。若控制服务已停止，维修服务会尝试恢复它，并等待配套扩展实际连上。以后用原来的 `iphonie-bridge` 命令启动浏览器。若安装中断，重跑同一安装包。
+4. 回退时执行 `iphonie-bridge rollback`，随后刷新酒馆。脚本恢复原插件版本。有 Phase 1 安装记录时，控制服务入口一并恢复到 Phase 1。Firefox 数据和原画面服务可以继续使用。
+
+维修画面独立监听本机回环 `6092`，沿用配对及 VNC 密码。它通过私有 X11 会话恢复 Firefox 工具栏。无法确认原窗口状态时，在同一个 Firefox Profile 中打开正常窗口并保留原窗口的标签页。维修过程中也可用「外部打开画面」进入原 noVNC。如果 Firefox 或 Xvnc 本身已经退出，用平时的启动命令恢复画面。
 
 ## Mozilla 签名和持久安装（后续）
 
-本轮使用 [0.2.1 XPI](./iPhonie-Browser-Bridge-0.2.1.xpi) 做临时验收。临时扩展会在 Firefox 重启时卸载。持久安装和签名安排在真机验收后处理。
+本轮使用 [0.2.2 XPI](./iPhonie-Browser-Bridge-0.2.2.xpi) 做临时验收。临时扩展会在 Firefox 重启时卸载。持久安装和签名安排在真机验收后处理。
 
 1. 在 Mozilla Add-ons Developer Hub 登录或注册，选择 **提交新扩展 → On your own（自行分发）**。选择桌面 Firefox，因为 Termux 运行的是桌面 Gecko。
 2. 上传上述 XPI，扩展 ID 为 `browser-bridge@st-iphonie.local`。从 AMO 下载签名后的文件。后续版本由同一账号上传更新并递增版本号。

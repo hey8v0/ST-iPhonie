@@ -1,24 +1,27 @@
 export const bridgeOrigin = 'http://127.0.0.1:6091';
 export const bridgeVersion = 3;
+export const bridgeBuild = '0.2.2';
+const repairOrigin = 'http://127.0.0.1:6092';
 export const bridgeKey = /^([a-f0-9]{64})$/;
 
-export function browserLink({doc,win},target,key,onEvent) {
+export function browserLink({doc,win},target,key,onEvent,{repair=false}={}) {
+  const origin=repair ? repairOrigin : bridgeOrigin;
   const frame = doc.createElement('iframe');
   frame.title = '网页画面';
   frame.referrerPolicy = 'no-referrer';
   frame.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms');
-  frame.src = bridgeOrigin+'/viewer';
-  const send = (type,payload={}) => frame.contentWindow?.postMessage({type,...payload},bridgeOrigin);
+  frame.src = origin+(repair?'/repair':'/viewer');
+  const send = (type,payload={}) => frame.contentWindow?.postMessage({type,...payload},origin);
   const pending = new Map();
   let closed = false, watchdog = win.setTimeout(()=>onEvent('rfb-state',{stage:'unavailable'}),12000);
   function receive(event) {
-    if (event.source !== frame.contentWindow || event.origin !== bridgeOrigin || closed || !event.data) return;
+    if (event.source !== frame.contentWindow || event.origin !== origin || closed || !event.data) return;
     const {type,id,result} = event.data;
     if (type === 'rfb-result') {
       pending.get(id)?.(result);
       return;
     }
-    if (!['rfb-state','rfb-trace','browser-state','rfb-gesture','rfb-touch','rfb-ime'].includes(type)) return;
+    if (!['rfb-state','rfb-trace','browser-state','rfb-gesture','rfb-touch','rfb-ime',...(repair?['repair-info']:[])].includes(type)) return;
     if (type === 'rfb-state' || type === 'browser-state') win.clearTimeout(watchdog);
     onEvent(type,event.data);
   }
@@ -32,7 +35,7 @@ export function browserLink({doc,win},target,key,onEvent) {
       if (closed) return Promise.resolve({ok:false});
       const id = win.crypto.randomUUID();
       return new Promise(resolve=>{
-        const timer = win.setTimeout(()=>complete({ok:false,error:'timeout'}),5200);
+        const timer = win.setTimeout(()=>complete({ok:false,error:'timeout'}),repair?12000:5200);
         function complete(result) {
           win.clearTimeout(timer);
           pending.delete(id);

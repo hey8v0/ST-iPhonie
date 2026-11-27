@@ -13,11 +13,11 @@ const assets = new Map([
   ['/panel.js',['panel.js','text/javascript']], ['/fixture',['fixture.html','text/html']],
 ]);
 
-function createService({panel, native, host, origin, inspectInstall, onStop, serveGraphics}) {
+function createService({panel, native, host, origin, inspectInstall, onStop, serveGraphics, recovery}) {
   const staticFiles = new Map([...assets].map(([route,[name,mime]]) => [
     route,[fs.readFileSync(path.join(__dirname,'panel',name)),mime],
   ]));
-  let peer, pending, state, browserBuild;
+  let peer, pending, state, browserBuild, extensionBuild, checkingChrome=false;
   let status = 'waiting';
   let connections = 0;
   const peers = new Set();
@@ -32,7 +32,7 @@ function createService({panel, native, host, origin, inspectInstall, onStop, ser
 
   function diagnostics() {
     return {service:'iphonie-browser-bridge', version, build, status, connections,
-      firefox:browserBuild || null, observedTabs:state?.tabs.length ?? null,
+      firefox:browserBuild || null, extension:extensionBuild || null, observedTabs:state?.tabs.length ?? null,
       pageInspectable:state?.viewport != null, viewport:state?.viewport || null,
       focus:state?.focus || null,focusFrame:state?.field?.frame ?? null,ipcReady:ipc.listening, ...inspectInstall()};
   }
@@ -68,6 +68,7 @@ function createService({panel, native, host, origin, inspectInstall, onStop, ser
           stream.destroy();
           return;
         }
+        extensionBuild=typeof msg.build==='string' && /^\d+\.\d+\.\d+$/.test(msg.build) ? msg.build : null;
         if (msg.version !== version || msg.build !== build) {
           status = 'version-mismatch';
           writeFrame(stream, {type:'rejected', version, reason:'version-mismatch'});
@@ -99,7 +100,18 @@ function createService({panel, native, host, origin, inspectInstall, onStop, ser
   async function run(msg) {
     if (!command(msg)) return {ok:false,error:msg?.version === version ? 'invalid-command' : 'version-mismatch'};
     if (status !== 'connected' || !peer) return {ok:false,error:'disconnected'};
-    if (pending) return {ok:false,error:'busy'};
+    if (pending || checkingChrome) return {ok:false,error:'busy'};
+    if (msg.action==='browser-fullscreen' && msg.params.enabled) {
+      const active=peer;
+      checkingChrome=true;
+      let rescue;
+      try {rescue=await recovery?.();} catch {}
+      finally {checkingChrome=false;}
+      if (peer!==active || status!=='connected') return {ok:false,error:'disconnected'};
+      if (!rescue?.ready) return {ok:false,error:'recovery-unavailable'};
+      if (rescue.maintenance || ['preparing','browser','frontend','failed'].includes(rescue.update))
+        return {ok:false,error:'repair-active'};
+    }
     return new Promise(resolve => {
       pending = {id:crypto.randomUUID(), resolve, timer:setTimeout(() => finish({ok:false,error:'timeout'}), 3500)};
       writeFrame(peer, {...msg,id:pending.id});
@@ -174,8 +186,10 @@ async function daemon() {
   process.umask(0o077);
   const {panel,native} = config.secrets();
   const {serveGraphics,attachGraphics} = require('./graphics.cjs');
+  const recovery=require('./recovery.cjs');
   const {server, ipc, shutdown,releaseViewer} = createService({
     panel, native, host:config.host, origin:config.origin, serveGraphics,
+    recovery:()=>recovery.request('status'),
     inspectInstall:() => ({manifestPresent:fs.existsSync(config.manifest),
       hostInvoked:fs.existsSync(config.filename('native-invoked'))}),
     onStop:stop,

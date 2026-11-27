@@ -4,7 +4,8 @@ const os = require('node:os');
 const {execFileSync} = require('node:child_process');
 const {filename} = require('./config.cjs');
 const selectionFile = filename('frontend.json');
-const repository = /^(?:https:\/\/github\.com\/|git@github\.com:)hey8v0\/ST-iPhonie(?:\.git)?\/?$/i;
+const repository = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)hey8v0\/(?:ST-iPhonie|ST-TTS)(?:\.git)?\/?$/i;
+const knownNames=['ST-iPhonie','ST-TTS'];
 const commit = /^[a-f0-9]{40}$/;
 const real = value => fs.realpathSync.native(value);
 const samePath = (a,b) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -17,21 +18,58 @@ function writeSelection(record) {
   fs.renameSync(next,selectionFile);
 }
 
+function option(args,name) {
+  const flag=args.find(value=>value===name || value.startsWith(name+'='));
+  return flag===name ? args[args.indexOf(flag)+1] : flag?.slice(name.length+1);
+}
+function configRoot(file) {
+  try {
+    const line=fs.readFileSync(file,'utf8').match(/^dataRoot[ \t]*:[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^#\r\n]+))/m);
+    return line?.slice(1).find(value=>value!==undefined)?.trim();
+  } catch {return undefined;}
+}
+function runningTaverns() {
+  try {
+    return fs.readdirSync('/proc').filter(pid=>/^\d+$/.test(pid)).flatMap(pid=>{
+      try {
+        const handle='/proc/'+pid;
+        const cwd=real(handle+'/cwd'),args=fs.readFileSync(handle+'/cmdline','utf8').split('\0');
+        if (!/^node(?:js)?$/.test(path.basename(args[0])) || !args.some(arg=>path.basename(arg)==='server.js') ||
+          !fs.existsSync(path.join(cwd,'src/command-line.js'))) return [];
+        const env=fs.readFileSync(handle+'/environ','utf8').split('\0');
+        const data=env.find(row=>row.startsWith('SILLYTAVERN_DATAROOT='))?.split('=').slice(1).join('=');
+        return [{cwd,args,data}];
+      } catch {return [];}
+    });
+  } catch {return [];}
+}
 function pluginDir(given) {
   const rows = [];
+  const at=dir=>{for (const name of knownNames) rows.push(path.join(dir,name));};
+  const inData=users=>{
+    at(path.join(users,'extensions'));
+    try {
+      for (const entry of fs.readdirSync(users,{withFileTypes:true})) {
+        if (entry.isDirectory() || entry.isSymbolicLink()) at(path.join(users,entry.name,'extensions'));
+      }
+    } catch {}
+  };
   if (given) rows.push(path.resolve(given));
   else {
     rows.push(process.cwd());
-    for (const name of ['SillyTavern','sillytavern']) {
-      const root = path.join(os.homedir(),name);
-      const users = path.join(root,'data');
-      rows.push(path.join(root,'public/scripts/extensions/third-party/ST-iPhonie'));
-      if (fs.existsSync(users)) {
-        for (const entry of fs.readdirSync(users,{withFileTypes:true})) {
-          if (entry.isDirectory()) rows.push(path.join(users,entry.name,'extensions/ST-iPhonie'));
-        }
-      }
-      rows.push(path.join(users,'extensions/ST-iPhonie'));
+    try {rows.push(JSON.parse(fs.readFileSync(selectionFile,'utf8')).directory);} catch {}
+    const home=os.homedir();
+    for (const {cwd,args,data} of [...runningTaverns(),{cwd:path.join(home,'SillyTavern'),args:[]},
+      {cwd:path.join(home,'sillytavern'),args:[]}]) {
+      const config=option(args,'--configPath') || option(args,'--config-path') || 'config.yaml';
+      const custom=option(args,'--dataRoot') || option(args,'--data-root') || configRoot(path.resolve(cwd,config));
+      inData(path.resolve(cwd,custom || data || 'data'));
+      at(path.join(cwd,'public/scripts/extensions/third-party'));
+    }
+    if (process.env.SILLYTAVERN_DATAROOT) inData(path.resolve(process.env.SILLYTAVERN_DATAROOT));
+    for (const root of [process.env.XDG_DATA_HOME || path.join(home,'.local/share'),home]) {
+      inData(path.join(root,'SillyTavern','data'));
+      inData(path.join(root,'sillytavern','data'));
     }
   }
   const found = new Set();
@@ -51,20 +89,23 @@ function clean(directory) {
     throw new Error('插件目录中有本地修改或未跟踪文件。已保留这些文件和当前版本。');
 }
 
-function activate(given,expected) {
+function activate(given,expected,build) {
   const directory = pluginDir(given);
   clean(directory);
   if (expected && !commit.test(expected)) throw new Error('测试前端提交号无效。');
-  git(directory,['fetch','--no-tags','origin','refs/heads/browser-phase2']);
+  try {git(directory,['fetch','--no-tags','origin','refs/heads/browser-phase2']);}
+  catch {throw new Error('无法从已配置的 GitHub 地址下载测试前端。请检查网络后重跑同一个安装包。');}
   const target = git(directory,['rev-parse','--verify','FETCH_HEAD^{commit}']);
   if (expected && !git(directory,['rev-parse','--verify',expected+'^{commit}']).startsWith(expected))
     throw new Error('测试包对应的前端版本不可用。');
   const selected = expected || target;
   execFileSync('git',['-C',directory,'merge-base','--is-ancestor',selected,target],{stdio:'ignore'});
+  if (build && JSON.parse(git(directory,['show',selected+':termux/browser-bridge/extension/manifest.json'])).version!==build)
+    throw new Error('下载的安装包与目标前端版本不同，请使用同一批次的测试包。');
   const head = git(directory,['rev-parse','HEAD']);
   if (fs.existsSync(selectionFile)) {
     const previous = JSON.parse(fs.readFileSync(selectionFile,'utf8'));
-    if (previous.directory!==directory || ![previous.target,previous.pending].includes(head))
+    if (previous.directory!==directory || ![previous.head,previous.target,previous.pending].includes(head))
       throw new Error('已有实验前端记录，请先运行 iphonie-bridge restore-plugin。');
     if (head === selected) {writeSelection({...previous,target:selected,pending:undefined});return;}
     const old={...previous,target:head,pending:undefined};
@@ -101,4 +142,4 @@ function restore() {
   }
   fs.unlinkSync(selectionFile);
 }
-module.exports = {activate,restore};
+module.exports = {activate,restore,pluginDir};

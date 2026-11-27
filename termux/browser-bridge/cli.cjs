@@ -6,6 +6,7 @@ const {filename, origin, secrets, manifest, manifestName, extensionId} = require
 const {version:build} = require('./extension/manifest.json');
 const {version} = require('./extension/protocol.js');
 const frontend = require('./frontend.cjs');
+const recovery = require('./recovery.cjs');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const nativeWrapper = filename('native-host');
@@ -73,6 +74,29 @@ async function start() {
   throw new Error('实验控制服务启动失败。请运行 iphonie-bridge diagnose。');
 }
 
+async function startRecovery() {
+  let current=await recovery.request('status',1150);
+  const matches=status=>status?.service==='iphonie-firefox-recovery' &&
+    status.revision===recovery.revision && status.build===build;
+  if (matches(current)) return current;
+  if (current?.service==='iphonie-firefox-recovery') {
+    await recovery.request('stop');
+    for (let i=0;i<12 && await recovery.request('status',350);i++) await delay(100);
+  }
+  const log=fs.openSync(filename('recovery.log'),'w',0o600);
+  try {
+    const child=spawn(process.execPath,[path.join(__dirname,'recovery.cjs')],{detached:true,stdio:['ignore',log,log]});
+    child.on('error',()=>{});
+    child.unref();
+  } finally {fs.closeSync(log);}
+  for (let i=0;i<20;i++) {
+    current=await recovery.request('status',1150);
+    if (matches(current)) return current;
+    await delay(125);
+  }
+  throw new Error('独立维修服务未启动，浏览模式尚未更新。原画面服务仍可使用。');
+}
+
 function marked(file, expected) {
   const stats = fs.lstatSync(file, {throwIfNoEntry:false});
   if (!stats) return false;
@@ -82,7 +106,7 @@ function marked(file, expected) {
   return true;
 }
 
-async function install() {
+async function install({plugin=false,directory,expected}={}) {
   const prefix = process.env.PREFIX;
   if (!prefix || !path.isAbsolute(prefix)) throw new Error('请从 Termux 执行安装。');
   const bin = path.join(prefix,'bin','iphonie-bridge');
@@ -100,34 +124,62 @@ async function install() {
     panel:crypto.randomBytes(32).toString('hex'), native:crypto.randomBytes(32).toString('hex'),
   }));
   secrets();
-  if (!(await admin('status'))?.ipcReady) fs.rmSync(filename('native-invoked'), {force:true});
-  const current = filename('current');
-  const prior = fs.lstatSync(current,{throwIfNoEntry:false});
-  if (prior?.isSymbolicLink()) {
-    const target = fs.readlinkSync(current);
-    if (path.dirname(target) === filename('bundles') &&
-        /^0\.1\./.test(JSON.parse(fs.readFileSync(path.join(target,'extension/manifest.json'),'utf8')).version) &&
-        !fs.existsSync(filename('phase1-bundle'))) {
-      atomic(filename('phase1-bundle'),target);
+  let stage='preparing';
+  const mark=(next,extra={})=>{
+    stage=next;
+    atomic(filename('update.json'),JSON.stringify({build,protocol:version,stage,...extra}));
+  };
+  // Bring up recovery while the previous browser and control service are
+  // still running. It holds no lock on the profile and survives control stop.
+  mark('preparing');
+  try {
+    const rescue=await startRecovery();
+    if (rescue.ready) {
+      const restored=await recovery.request('restore',8500);
+      console.log(restored?.ok ? 'Firefox 原生界面可用于更新扩展。' : '可在小手机打开「维修与更新」恢复 Firefox 界面。');
     }
+    if (!(await admin('status'))?.ipcReady) fs.rmSync(filename('native-invoked'), {force:true});
+    const current = filename('current');
+    const prior = fs.lstatSync(current,{throwIfNoEntry:false});
+    if (prior?.isSymbolicLink()) {
+      const target = fs.readlinkSync(current);
+      if (path.dirname(target) === filename('bundles') &&
+          /^0\.1\./.test(JSON.parse(fs.readFileSync(path.join(target,'extension/manifest.json'),'utf8')).version) &&
+          !fs.existsSync(filename('phase1-bundle'))) {
+        atomic(filename('phase1-bundle'),target);
+      }
+    }
+    const next = filename('current.' + crypto.randomUUID());
+    fs.symlinkSync(__dirname, next);
+    try {fs.renameSync(next, current);}
+    finally {fs.rmSync(next, {force:true});}
+    atomic(launcher, shebang + 'exec ' + quote(process.execPath) + ' ' + quote(path.join(current,'cli.cjs')) + ' "$@"\n', 0o700);
+    atomic(nativeWrapper, shebang + 'exec ' + quote(process.execPath) + ' ' + quote(path.join(current,'native.cjs')) + ' "$@"\n', 0o700);
+    atomic(manifest, manifestBody);
+    if (!oldLink) fs.symlinkSync(launcher, bin);
+    mark('browser');
+    await start();
+    if (plugin) {
+      mark('frontend');
+      frontend.activate(directory,expected,build);
+      console.log('前端已更新。请刷新酒馆，打开「浏览器 → 更多 → 维修与更新」。');
+    }
+    const control=await admin('status');
+    const connected=control?.status==='connected' && control.extension===build;
+    mark(connected?'done':'extension',{frontend:plugin?'ready':'separate'});
+    console.log(connected ? '本机服务和 Firefox 扩展 '+build+' 已连接。' :
+      '本机服务 '+build+' 已启动，等待 Firefox 临时扩展更新。');
+    console.log('配套 XPI：'+path.join(current,'iPhonie-Browser-Bridge.xpi'));
+  } catch (error) {
+    mark('failed',{failedAt:stage});
+    throw error;
   }
-  const next = filename('current.' + crypto.randomUUID());
-  fs.symlinkSync(__dirname, next);
-  try {fs.renameSync(next, current);}
-  finally {fs.rmSync(next, {force:true});}
-  atomic(launcher, shebang + 'exec ' + quote(process.execPath) + ' ' + quote(path.join(current,'cli.cjs')) + ' "$@"\n', 0o700);
-  atomic(nativeWrapper, shebang + 'exec ' + quote(process.execPath) + ' ' + quote(path.join(current,'native.cjs')) + ' "$@"\n', 0o700);
-  atomic(manifest, manifestBody);
-  if (!oldLink) fs.symlinkSync(launcher, bin);
-  await start();
-  console.log('【小手机浏览器 Phase 2 · ' + build + '】');
-  console.log('开发测试 XPI：' + path.join(current,'iPhonie-Browser-Bridge.xpi'));
-  console.log('已取得 Mozilla 签名时，运行 iphonie-bridge signed-addon "/签名文件路径"。');
-  console.log('更新插件后，在小手机浏览器首次连接时使用 iphonie-bridge pair 配对。');
 }
 
 async function rollback() {
   frontend.restore();
+  await recovery.request('restore',8500);
+  await recovery.request('stop');
   await stop();
   const previous = filename('phase1-bundle');
   if (fs.existsSync(previous)) {
@@ -150,13 +202,26 @@ async function rollback() {
 async function main() {
   process.umask(0o077);
   switch (process.argv[2] || 'start') {
-    case 'install': await install(); break;
+    case 'install': await install({plugin:process.argv[3]==='--plugin',directory:process.argv[4],expected:process.argv[5]});break;
     case 'plugin':
-      frontend.activate(process.argv[3],process.argv[4]);
+      frontend.activate(process.argv[3],process.argv[4],build);
       console.log('Phase 2 前端已启用，请刷新酒馆。');
       break;
     case 'restore-plugin': frontend.restore();console.log('已恢复原插件版本，请刷新酒馆。');break;
     case 'pair': await start();console.log(secrets().panel);break;
+    case 'resume-control': {
+      let state=await start();
+      for (let i=0;i<8 && ['waiting','connecting','disconnected'].includes(state?.status);i++) {
+        await delay(250);state=await admin('status');
+      }
+      if (!state) throw new Error('实验控制服务已断开。');
+      if (state.status!=='connected' || state.extension!==build) {process.exitCode=2;break;}
+      let update;
+      try {update=JSON.parse(fs.readFileSync(filename('update.json'),'utf8'));} catch {}
+      if (update?.build===build && update.stage==='extension')
+        atomic(filename('update.json'),JSON.stringify({...update,stage:'done'}));
+      break;
+    }
     case 'signed-addon': {
       const source=process.argv[3];
       if (!source || !/\.xpi$/i.test(source)) throw new Error('请提供 Mozilla 签名的 .xpi 文件。');
@@ -174,6 +239,7 @@ async function main() {
         const graphics=spawnSync('iphonie-browser',[],{stdio:'inherit',timeout:120000});
         if (graphics.status !== 0) throw new Error('本机浏览器启动失败。请查看上方提示或运行 iphonie-browser diagnose。');
       }
+      await startRecovery();
       await start();
       console.log('控制服务已就绪。回到小手机浏览器继续使用。');
       break;
@@ -185,8 +251,11 @@ async function main() {
     }
     case 'url': await start(); console.log(origin + '/#key=' + secrets().panel); break;
     case 'diagnose':
-      console.log(JSON.stringify(await admin('status') || {service:'iphonie-browser-bridge',version,build,status:'offline',
-        manifestPresent:fs.existsSync(manifest), hostInvoked:fs.existsSync(filename('native-invoked'))}, null, 2));
+      console.log(JSON.stringify({
+        control:await admin('status') || {service:'iphonie-browser-bridge',version,build,status:'offline',
+          manifestPresent:fs.existsSync(manifest),hostInvoked:fs.existsSync(filename('native-invoked'))},
+        recovery:await recovery.request('status'),
+      },null,2));
       break;
     case 'stop': await stop(); console.log('已停止实验控制服务。'); break;
     case 'rollback': await rollback(); break;

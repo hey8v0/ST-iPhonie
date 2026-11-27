@@ -76,7 +76,9 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
   const host = '127.0.0.1:' + port, origin = 'http://' + host;
-  const service = createService({panel,native,host,origin,inspectInstall:() => ({manifestPresent:true}),onStop:() => {}});
+  let rescue;
+  const service = createService({panel,native,host,origin,inspectInstall:() => ({manifestPresent:true}),onStop:() => {},
+    recovery:async()=>rescue});
   const children = [];
   t.after(async () => {
     service.shutdown();
@@ -132,6 +134,7 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   let channel = await attach({build:'0.0.0'});
   assert.equal(channel.messages[0].reason,'version-mismatch');
   assert.equal((await status()).status,'version-mismatch');
+  assert.equal((await status()).extension,'0.0.0');
   channel = await attach();
   assert.deepEqual(channel.messages[0],{type:'accepted',version:3});
   assert.equal((await status()).status,'connecting');
@@ -142,6 +145,14 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   assert(!/Private tab|session=fixture|test-field/.test(diagnostic));
   assert.equal(JSON.parse(diagnostic).focus,'input:password');
   assert.equal(JSON.parse(diagnostic).focusFrame,2);
+  const fullscreen=command('browser-fullscreen',{enabled:true});
+  const hide=async()=>(await call('/command',{data:fullscreen})).json();
+  assert.equal((await hide()).error,'recovery-unavailable');
+  rescue={ready:true,maintenance:true};
+  assert.equal((await hide()).error,'repair-active');
+  rescue={ready:true,update:'frontend'};
+  assert.equal((await hide()).error,'repair-active');
+  assert.equal(channel.messages.length,1);
   const req = command();
   const pending = call('/command',{data:req});
   const incoming = await wait(()=>channel.messages[1]);
@@ -159,6 +170,12 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   writeFrame(channel.proc.stdin,{type:'state',version:3,state:page});
   await wait(async ()=>(await status()).status === 'connected');
   assert.equal((await status()).connections,2);
+  rescue={ready:true,update:'done'};
+  const hidePromise=hide();
+  const fullscreenRequest=await wait(()=>channel.messages[1]);
+  assert.equal(fullscreenRequest.action,'browser-fullscreen');
+  writeFrame(channel.proc.stdin,{type:'result',version:3,id:fullscreenRequest.id,ok:true});
+  assert.equal((await hidePromise).ok,true);
 });
 
 test('content script reports focus and measurements without accessing values', async () => {

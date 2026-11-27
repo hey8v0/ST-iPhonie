@@ -62,10 +62,7 @@ if [[ ! -d "$target" ]]; then
     exit 1
   fi
 fi
-node "$target/cli.cjs" install 9>&-
-if [[ "${1:-}" == --plugin ]]; then
-  node "$target/cli.cjs" plugin "${2:-}" "${3:-}" 9>&-
-fi
+node "$target/cli.cjs" install "${1:-}" "${2:-}" "${3:-}" 9>&-
 """
 
 

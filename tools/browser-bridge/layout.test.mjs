@@ -60,6 +60,21 @@ test('Phase 2 home, five tools, true layout release, tabs, desktop command and i
   try {
     const page=await browser.newPage({viewport:{width:640,height:900},userAgent:'Android test',hasTouch:true});
     await page.route(origin+'/**',route=>route.fulfill({contentType:'text/html',body:'<div>网页区域</div><script>'+mockRfb+'</script>'}));
+    await page.route('http://127.0.0.1:6092/repair',route=>route.fulfill({contentType:'text/html',body:`
+      <div>维修画面</div><script>
+      const send=(type,data)=>parent.postMessage({type,...data},'${app}');
+      addEventListener('message',({data})=>{
+        if (data.type==='rfb-init') {
+          send('repair-info',{build:'0.2.2',addon:'/private/bridge.xpi',update:'extension'});
+          send('rfb-state',{stage:'ready'});
+        }
+        if (data.type==='rfb-command') {
+          send('qa-repair',{action:data.action});
+          send('rfb-result',{id:data.id,result:data.action==='repair-done'?
+            {ok:false,reason:'extension-update'}:{ok:true}});
+        }
+      });
+      </script>`}));
     await page.route('http://127.0.0.1:6089/health',route=>route.fulfill({
       headers:{'access-control-allow-origin':app},json:{service:'iphonie-firefox-v2',state:'ready'},
     }));
@@ -162,5 +177,18 @@ test('Phase 2 home, five tools, true layout release, tabs, desktop command and i
     await frame.evaluate(()=>{waitForTest();waitForTest();waitForTest();});
     const same=await card.evaluate(el=>window.firstFeedbackCard===el);
     assert.equal(same,true);
+    await page.getByRole('button',{name:'维修与更新',exact:true}).click();
+    await page.waitForFunction(()=>observed.some(row=>row.type==='qa-repair'&&row.action==='repair-open'));
+    assert.match(await page.locator('iframe').getAttribute('src'),/:6092\/repair$/);
+    const tools=page.locator('.browser-v2-repair');
+    for (const width of [320,430]) {
+      await page.evaluate(width=>{document.querySelector('.screen').style.width=width+'px';},width);
+      assert(await tools.evaluate(el=>el.scrollWidth<=el.clientWidth));
+    }
+    await tools.getByRole('button',{name:'填入 XPI 路径'}).click();
+    await page.waitForFunction(()=>observed.some(row=>row.type==='qa-repair'&&row.action==='repair-addon'));
+    await tools.getByRole('button',{name:'回到浏览'}).click();
+    await tools.getByText(/正在等配套扩展/).waitFor();
+    assert.equal(await tools.getByRole('button',{name:'外部打开画面'}).isVisible(),true);
   } finally {await browser.close();}
 });

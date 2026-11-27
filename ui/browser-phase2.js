@@ -1,9 +1,9 @@
 import {btn,copyText,createView,esc,toggle} from './common.js';
 import {icon} from './icons.js';
-import {connectTermux,knownTermux,termuxCard,termuxHealth} from './termux-connection.js';
+import {connectTermux,knownTermux,termuxCard,termuxHealth,TERMUX_VIEW} from './termux-connection.js';
 import {mountSwipeList,swipeRow} from './swipe-list.js';
 import {shareWebPage,webSearchSettings} from './web-share.js';
-import {bridgeKey,bridgeVersion,browserLink,visibleBrowserArea} from './browser-phase2-link.js';
+import {bridgeBuild,bridgeKey,bridgeVersion,browserLink,visibleBrowserArea} from './browser-phase2-link.js';
 import {browserInput} from '../termux/browser-bridge/viewer/input.js';
 
 const recentLimit = 30;
@@ -17,7 +17,7 @@ const messages = {
 };
 const pictureError = {
   unavailable:'本机连接未响应，请检查 Termux 中的服务。',
-  version:'请安装与小手机匹配的浏览器测试包。',
+  version:'本机服务与当前前端版本不同。可进入维修与更新。',
   security:'画面密码未通过，请确认密码后重连。',
   timeout:'画面连接超时，请重连。',
   closed:'画面已断开，网页会话仍可继续。',
@@ -54,6 +54,7 @@ export function browserPhase2(ctx,parse) {
   let autoHide = stored(keyPrefix+':auto-hide',true) !== false, framebuffer;
   let lastScroll, gesture, lastToggle = 0, touch, passwordPrompt, rotationHint = false;
   let activeDialog, failure, pageKey, feedbackKey, viewerIME=false, geometryKey, layoutKey;
+  let repair=false,repairInfo=null,repairOpened=false,repairPending=false;
   let fullHeight=0, keyboardShown=false, revealTimer, revealTab, geometryRAF;
   const trace=[];
   root.classList.add('browser-v2');
@@ -70,6 +71,14 @@ export function browserPhase2(ctx,parse) {
       ${btn('tabs','<span class="browser-v2-count">0</span>','browser-icon','aria-label="标签页"')}
       ${btn('more-browser',icon('more'),'browser-icon','aria-label="浏览器菜单"')}
     </nav>
+    <div class="browser-v2-repair" hidden>
+      <p role="status"></p><div class="browser-card-actions">
+      ${btn('repair-open','打开扩展更新页','secondary')}
+      ${btn('repair-addon','填入 XPI 路径','secondary')}
+      ${btn('repair-done','回到浏览','secondary')}
+      ${btn('repair-external','外部打开画面','secondary')}
+      </div>
+    </div>
     ${btn('restore','显示浏览工具','browser-v2-assist','aria-label="显示浏览工具" hidden')}`);
   const find = selector => root.querySelector(selector);
   const address = find('input');
@@ -140,6 +149,11 @@ export function browserPhase2(ctx,parse) {
   function layout() {
     root.toggleAttribute('data-start',home);
     root.toggleAttribute('data-immersive',!home && immerse);
+    root.toggleAttribute('data-repair',repair && !home);
+    find('.browser-v2-repair').hidden=home || !repair;
+    find('[data-action=repair-open]').disabled=!rfbReady || !!legacy || repairPending;
+    find('[data-action=repair-addon]').disabled=repairInfo?.build!==bridgeBuild || !repairInfo.addon || !rfbReady || repairPending;
+    find('[data-action=repair-done]').disabled=repairPending;
     root.toggleAttribute('data-remote-connected',!home && !!shell && rfbReady);
     find('[data-action=restore]').hidden = home || !immerse;
     doc.documentElement.toggleAttribute('data-browser-immersive',!home && immerse);
@@ -287,13 +301,15 @@ export function browserPhase2(ctx,parse) {
       keyboard.bind(null,null);
       if (fullscreen) void exitFull();
       setImmersive(false);
-      feedbackFor(pictureError[stage],[['retry','重连'],['help','帮助'],['legacy-browser','兼容连接'],['diagnostics','导出诊断'],
+      feedbackFor(pictureError[stage],[['legacy-browser','维修与更新'],['retry','重连'],['help','帮助'],['diagnostics','导出诊断'],
         ...(queuedNav?[['external','外部打开']]:[])]);
       layout();
     }
   }
   function browserState(data) {
-    if (data.version && data.version !== bridgeVersion) {stageChanged('version');return;}
+    if ((data.version && data.version !== bridgeVersion) || (data.build && data.build!==bridgeBuild)) {
+      stageChanged('version');return;
+    }
     if (data.status !== 'connected' || !data.state) {
       state=null;
       shell=false;
@@ -301,8 +317,12 @@ export function browserPhase2(ctx,parse) {
       progress.hidden=true;
       if (!failure && surface) {
         setImmersive(false);
-        feedbackFor(data.status === 'version-mismatch' ? messages['version-mismatch'] : '正在等待浏览连接。',
-          [['help','帮助'],['legacy-browser','兼容连接']]);
+        const text=data.status==='version-mismatch' ?
+          `Firefox 扩展${data.extension ? ' '+data.extension : ''}需要更新至 ${bridgeBuild}。` :
+          data.status==='offline' ? '控制服务未启动。可进入维修与更新。' :
+          data.status==='disconnected' ? 'Firefox 扩展已断开。可进入维修与更新。' :
+          '正在等待 Firefox 扩展连接。首次使用可进入维修与更新。';
+        feedbackFor(text,[['legacy-browser','维修与更新'],['help','帮助']]);
       }
       layout();return;
     }
@@ -397,8 +417,10 @@ export function browserPhase2(ctx,parse) {
     const result=await selection('browser-fullscreen',{enabled:true});
     if (surface !== current) return;
     initializing=false;
-    if (!result.ok && state?.windowMode !== 'fullscreen') {
-      feedbackFor('无法切换到浏览视图。',[['retry','重试'],['legacy-browser','兼容连接']]);return;
+    if (!result.ok && (result.error!=='fullscreen-owned' || state?.windowMode!=='fullscreen')) {
+      const text=result.error==='recovery-unavailable' ? '独立维修服务不可用，已保留 Firefox 工具栏。' :
+        result.error==='repair-active' ? '浏览器处于维修或更新中。' : '无法切换到浏览视图。';
+      feedbackFor(text,[['legacy-browser','维修与更新'],['retry','重试']]);return;
     }
     shell=true;
     feedbackFor('');
@@ -408,10 +430,12 @@ export function browserPhase2(ctx,parse) {
     if (entry) await navigate(entry);
   }
   function forgetConnection() {
+    passwordPrompt?.close();passwordPrompt=null;
     surface?.close();surface=null;
     legacy?.();legacy=null;
     initializing=false;shell=false;rfbReady=false;state=null;
     mounted=false;failure=null;framebuffer=null;viewerIME=false;geometryKey=null;
+    repair=false;repairInfo=null;repairOpened=false;repairPending=false;
     keyboard.bind(null,null);
   }
   function pair() {
@@ -435,22 +459,84 @@ export function browserPhase2(ctx,parse) {
       return;
     }
     if (!bridgeKey.test(key)) {
-      feedbackFor('首次使用需要配对。',[['pair-browser','配对'],['help','帮助'],['legacy-browser','兼容连接'],
+      feedbackFor('首次使用需要配对。',[['pair-browser','配对'],['help','帮助'],['legacy-browser','维修与更新'],
         ...(queuedNav?[['external','外部打开']]:[])]);
       pair();return;
     }
     forgetConnection();
     mounted=true;
-    feedbackFor('正在连接…',[],'busy');
+    feedbackFor('正在连接…',[['legacy-browser','维修与更新']],'busy');
     surface=browserLink(ctx,frameHost,key,linkEvent);
   }
   function goHome() {
     if (fullscreen) void exitFull();
     keyboard.release();setImmersive(false);
-    if (legacy) forgetConnection();
+    if (legacy || repair) forgetConnection();
     else surface?.send('rfb-ime-release');
     home=true;address.value='';progress.hidden=true;
     drawHome();layout();
+  }
+  function repairNote(text) {find('.browser-v2-repair p').textContent=text;}
+  function repairInstructions() {
+    if (repairInfo?.build && repairInfo.build!==bridgeBuild)
+      return `维修服务为 ${repairInfo.build}，当前插件需要 ${bridgeBuild}。请运行配套测试安装包。`;
+    if (['preparing','browser','frontend','failed'].includes(repairInfo?.update))
+      return '上次安装未完成。可以先使用 Firefox，随后重跑同一个测试安装包。';
+    return '移除旧临时扩展，点「临时载入附加组件」打开文件窗口，再点「填入 XPI 路径」。';
+  }
+  async function repairAction(action) {
+    const current=surface;
+    if (!repair || !current || repairPending) return;
+    repairPending=true;layout();
+    const result=await current.command(action);
+    if (surface!==current) return;
+    repairPending=false;layout();
+    if (!result.ok) {
+      repairNote(result.reason==='update-incomplete' ? '安装未完成。可重新运行同一个测试安装包。' :
+        result.reason==='control-start' ? '控制服务未恢复，仍可使用维修画面。' :
+        result.reason==='extension-update' ? '控制服务已启动，正在等配套扩展。请确认已载入新版 XPI，稍等后再点「回到浏览」。' :
+        '无法自动恢复工具栏。可在外部画面使用 Firefox 全屏键。');
+      return;
+    }
+    if (action==='repair-done') {forgetConnection();connect();return;}
+    repairNote(action==='repair-addon' ? '路径已填入，请在 Firefox 文件窗口确认打开。' : repairInstructions());
+  }
+  function oldViewer(text) {
+    surface?.close();surface=null;
+    rfbReady=false;
+    feedbackFor('');
+    repairNote(text);
+    legacy=connectTermux(ctx,frameHost,message=>{
+      if (message) repairNote(message+'。也可在外部打开画面。');
+    },(state)=>{
+      if (state==='connected') repairNote('旧版画面已连接。可用 Firefox 全屏键恢复工具栏。');
+    },{compatibility:true});
+    layout();
+  }
+  function openRepair() {
+    if (fullscreen) void exitFull();
+    setImmersive(false);
+    forgetConnection();
+    home=false;repair=true;
+    if (!bridgeKey.test(key)) {oldViewer('首次配对前，可先使用原画面连接。');return;}
+    repairNote('正在连接维修画面…');
+    feedbackFor('');
+    surface=browserLink(ctx,frameHost,key,(type,data)=>{
+      if (!repair) return;
+      if (type==='repair-info') {
+        repairInfo=data;layout();
+      }
+      if (type!=='rfb-state') return;
+      if (data.stage==='ready') {
+        rfbReady=true;layout();
+        if (!repairOpened) {repairOpened=true;void repairAction('repair-open');}
+      } else if (data.stage==='password') stageChanged('password');
+      else if (['unavailable','version','pair','closed','timeout','security'].includes(data.stage)) {
+        if (data.stage==='security') credentials='';
+        oldViewer('维修画面不可用，正在尝试原画面连接。');
+      }
+    },{repair:true});
+    layout();
   }
   async function run(action,params) {
     if (busy) return false;
@@ -515,20 +601,20 @@ export function browserPhase2(ctx,parse) {
     };
   }
   function help() {
-    ctx.dialog('浏览器帮助',`<div class="pick-list"><p>在 Termux 运行 <code>iphonie-browser</code> 和 <code>iphonie-bridge</code>。连接后，从画面最上沿向下滑或最下沿向上滑，可恢复浏览工具。</p>
-      <p>首次使用请按测试包说明安装配套扩展。点网页输入框后，也可从更多菜单打开系统键盘。</p></div>`);
+    ctx.dialog('浏览器帮助',`<div class="pick-list"><p>在 Termux 运行 <code>iphonie-bridge</code>。连接后，从画面最上沿向下滑或最下沿向上滑，可恢复浏览工具。</p>
+      <p>首次安装扩展、更新或控制服务断开时，可打开「维修与更新」。点网页输入框后，也可从更多菜单打开系统键盘。</p></div>`);
   }
   function menu() {
     const tab=active();
     const items=home ? [['history','最近打开'],['saved','收藏'],['settings','浏览器设置'],['help','浏览器帮助'],
-      ['pair-browser','配对本机浏览器'],['web-search','Char 搜索设置']] : [
+      ['legacy-browser','维修与更新'],['pair-browser','配对本机浏览器'],['web-search','Char 搜索设置']] : [
       ['reload','刷新'],['share','分享给角色'],['bookmark',bookmarks.some(row=>row.url===tab?.url)?'取消收藏':'收藏此页'],
       ['saved','收藏'],['history','最近打开'],['external','外部打开'],
       ['mode',tab?.desktop?'切回手机版网页':'请求桌面版网页'],
       ...(state?.viewport && Math.abs(state.viewport.zoom-1)>.02?[['reset-zoom','还原此页缩放']]:[]),
       ['fullscreen','全屏'],
       ['immersive','隐藏浏览工具'],['keyboard','打开键盘'],['copy','复制选中文字'],['paste','从剪贴板粘贴'],
-      ['settings','浏览器设置'],['help','浏览器帮助'],
+      ['settings','浏览器设置'],['help','浏览器帮助'],['legacy-browser','维修与更新'],
       ['diagnostics','导出诊断'],['web-search','Char 搜索设置']];
     const d=ctx.dialog('浏览器操作',`<div class="pick-list">${items.map(([id,label])=>btn(id,label,'list-row')).join('')}</div>`);
     d.body.onclick=event=>{
@@ -548,11 +634,20 @@ export function browserPhase2(ctx,parse) {
       case 'help':help();break;
       case 'tabs':openTabs();break;
       case 'retry':forgetConnection();connect();break;
-      case 'legacy-browser':
-        forgetConnection();
-        feedbackFor('');
-        legacy=connectTermux(ctx,frameHost,text=>{if(text && !frameHost.querySelector('iframe'))feedbackFor(text);},
-          (state)=>{if (state==='connected') feedbackFor('');},{compatibility:true});
+      case 'legacy-browser':openRepair();break;
+      case 'repair-open':await repairAction('repair-open');break;
+      case 'repair-done':
+        if (surface) await repairAction('repair-done');
+        else {forgetConnection();connect();}
+        break;
+      case 'repair-addon': {
+        if (!repairInfo?.addon) break;
+        if (!await ctx.confirm('填入扩展文件路径？','请先在 Firefox 点「临时载入附加组件」，让文件窗口保持打开。')) break;
+        await repairAction('repair-addon');
+        break;
+      }
+      case 'repair-external':
+        win.open(TERMUX_VIEW,'_blank','noopener,noreferrer');
         break;
       case 'immersive':
         setImmersive(true,true);
@@ -629,7 +724,7 @@ export function browserPhase2(ctx,parse) {
     if (!entry) {if (address.value.trim())ctx.notify('请输入有效的网址或搜索词。');return;}
     address.blur();void navigate(entry);
   };
-  view.on('click','.browser-toolbar [data-action],.browser-v2-bottom [data-action],.browser-v2-home [data-action],.browser-v2-feedback [data-action],.browser-v2-assist',
+  view.on('click','.browser-toolbar [data-action],.browser-v2-bottom [data-action],.browser-v2-home [data-action],.browser-v2-feedback [data-action],.browser-v2-repair [data-action],.browser-v2-assist',
     el=>void doAction(el.dataset.action));
   view.on('click','.browser-v2-home [data-recent]',el=>{
     const row=recent[Number(el.dataset.recent)];

@@ -5,6 +5,7 @@ const surface = document.getElementById('surface');
 const trusted = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
 const token = /^[a-f0-9]{64}$/;
 const version = 3;
+const recoveryMode=location.pathname==='/repair';
 let parentOrigin, key, rfb, geometry,frame = false, verified = false, telem, desktop = false;
 let stopped = false, pollTimer, connectionTimer, waitingClipboard,lastStatus,planned,planTimer, editing=false,hold=false;
 
@@ -14,7 +15,7 @@ function announce(type,data={}) {
 async function api(route,body) {
   const response = await fetch(route,{method:'POST',redirect:'error',cache:'no-store',
     headers:{Authorization:'Bearer '+key,...(body ? {'Content-Type':'application/json'} : {})},
-    body:body && JSON.stringify(body),signal:AbortSignal.timeout(4500)});
+    body:body && JSON.stringify(body),signal:AbortSignal.timeout(recoveryMode?11000:4500)});
   if (response.status === 403) throw new Error('pair');
   return response.json();
 }
@@ -44,7 +45,7 @@ async function status() {
     const result = await api('/status');
     telem = result.state;
     reconcileInput();
-    publish({status:result.status,version:result.version,state:telem});
+    publish({status:result.status,version:result.version,build:result.build,extension:result.extension,state:telem});
     desktop = telem?.tabs.find(tab=>tab.id === telem.activeId)?.desktop === true;
     geometry?.mode(desktop);
     geometry?.firefox(telem?.viewport);
@@ -62,9 +63,15 @@ function setStage(stage) {
 async function connect() {
   try {
     const result = await api('/status');
-    if (result?.version !== version) {setStage('version');return;}
+    if (recoveryMode) {
+      if (result?.service!=='iphonie-firefox-recovery' || result.revision!==1) {setStage('version');return;}
+      announce('repair-info',{build:result.build,addon:result.addon,update:result.update});
+    } else if (result?.version !== version || result.build!=='0.2.2') {
+      publish({status:'version-mismatch',version:result?.version,build:result?.build,state:null});
+      setStage('version');return;
+    }
     verified = true;
-    void status();
+    if (!recoveryMode) void status();
   } catch (error) {setStage(error.message === 'pair' ? 'pair' : 'unavailable');return;}
   try {
     const module = await Promise.race([import('/core/rfb.js'),
@@ -85,7 +92,7 @@ async function connect() {
     });
     geometry.mode(desktop);
     geometry.editing(editing);
-    geometry.hold(hold);
+    geometry.hold(hold || recoveryMode);
     const deadline = () => {
       clearTimeout(connectionTimer);
       connectionTimer = setTimeout(()=>{
@@ -161,14 +168,17 @@ window.addEventListener('message',async ({source,origin,data})=>{
   }
   if (data.type === 'rfb-geometry') {
     editing=data.editing===true;hold=data.hold===true;
-    geometry?.editing(editing);geometry?.hold(hold);
+    geometry?.editing(editing);geometry?.hold(hold || recoveryMode);
   }
   if (data.type === 'rfb-input') sendInput(data);
   if (data.type === 'rfb-ime-release') {planned=null;clearTimeout(planTimer);proxy.release();}
   if (data.type === 'rfb-command' && verified && typeof data.id === 'string') {
     let result = {ok:false};
     try {
-      if (data.action === 'diagnostics') result = await api('/diagnostics');
+      if (recoveryMode) {
+        if (data.action==='repair-done' ||
+          (frame && ['repair-open','repair-restore','repair-addon'].includes(data.action))) result=await api('/'+data.action,{});
+      } else if (data.action === 'diagnostics') result = await api('/diagnostics');
       else if (data.action === 'selection' && frame) result = {text:await selectText()};
       else if (data.action === 'screenshot' && frame) {
         const canvas = geometry?.canvas;

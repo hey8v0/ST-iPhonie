@@ -66,7 +66,7 @@ const bridgeProtocol = (() => {
     (!!value.focus === !!value.field) && hints(value.hints) && (value.viewport === null || metrics(value.viewport)) &&
     (value.page === null || page(value.page));
   const errors = ['tab-unavailable','last-tab','action-failed','busy','no-window','disconnected','timeout',
-    'version-mismatch','invalid-command','service-unavailable','fullscreen-owned'];
+    'version-mismatch','invalid-command','service-unavailable','fullscreen-owned','recovery-unavailable','repair-active'];
   const statuses = ['waiting','connecting','connected','disconnected','version-mismatch'];
   const error = value => typeof value === 'string' && errors.includes(value);
   return {version, exact, command, webUrl, state, metrics, focus, field, hints, fieldId, page, favicon, error, statuses};
