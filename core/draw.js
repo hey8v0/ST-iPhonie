@@ -14,7 +14,7 @@ import {storyScope} from './story-scope.js';
 //   角色 name｜tags｜sentence; both forms are read.
 //   新外貌 name｜fixed appearance (first appearance of a named character; the plugin saves it to the 角色 App)
 //   位置 Pn (only when pictures are planned after the reply: which paragraph the picture follows)
-// Two ways to get blocks (draw.mode): 'separate' asks the model in its own request after the reply is written and
+// Ways to get blocks (draw.mode): 'separate' asks the model in its own request after the reply is written and
 // inserts the blocks; 'inline' injects the rules into the story request so the reply carries the blocks itself.
 import {promptText, promptTemplate} from './prompt-rules.js';
 import {defaultDrawParams, normalizeDrawParams, guardParams, relayUrl, NAI_MODEL_NAMES} from './novelai.js';
@@ -431,7 +431,7 @@ export function normalizeDraw(value) {
   d.guard = d.guard !== false;
   d.fold = !!d.fold;
   d.strip = d.strip !== false;
-  d.mode = d.mode === 'inline' ? 'inline' : 'separate';
+  d.mode = ['inline', 'separate', 'manual'].includes(d.mode) ? d.mode : 'separate';
   d.engine = DRAW_ENGINES.includes(d.engine) ? d.engine : 'nai';
   d.gpt = normalizeGpt(d.gpt);
   d.comfy = normalizeComfy(d.comfy);

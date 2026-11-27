@@ -218,19 +218,24 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
    */
   async function planPictures(id, {force = false} = {}) {
     const ctx = context(), message = ctx.chat[id];
-    if (!message || message.is_user || message.is_system || planning.has(id)) return false;
+    if (!storyReply(message) || planning.has(id)) return false;
     if (!force && parsePictures(message.mes).length) return false;
     planning.add(id);
     notice('正在给这条回复挑画面……');
     try {
-      const raw = message.mes, swipe = message.swipe_id;
+      const raw = message.mes, swipe = message.swipe_id, priorSwipe = message.swipes?.[swipe ?? 0];
       const source = force ? withoutPictures(raw) : raw;
       const {text, count} = await planOnce(id, source, () => context().chat[id] === message && message.mes === raw && message.swipe_id === swipe);
       if (context().chat[id] !== message || message.mes !== raw || message.swipe_id !== swipe) return false;
       if (!count) throw Error('这次没有挑出画面（试了两次），可以点这层楼右边的小手机工具按钮「给这层楼生图」再试；模型具体回了什么可以在小手机的「日志」App 里看');
       message.mes = text;
       if (Array.isArray(message.swipes)) message.swipes[message.swipe_id ?? 0] = text;
-      await ctx.saveChat();
+      try { await ctx.saveChat(); }
+      catch (error) {
+        if (context().chat[id] === message && message.swipe_id === swipe && message.mes === text) message.mes = raw;
+        if (message.swipes?.[swipe ?? 0] === text) message.swipes[swipe ?? 0] = priorSwipe;
+        throw error;
+      }
       redrawMessage(id, message);
       scheduleRender();
       return true;
@@ -262,6 +267,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     let entry = reusable(id, wantVoice, wantPictures, revoice);
     const voiceSource = (source, scope) => revoice && voice?.has(source) ? mapStory(source, scope, text => voice.strip(text)) : source;
     const skip = () => { stage(id, '未写入：正文、聊天或分支已变化', {}, 'warn'); return {voiced: 0, pictured: 0, skipped: true}; };
+    const picturesAllowed = () => !phoned || settings().draw.mode !== 'manual';
     try {
       if (!entry) {
         const scope = structuredClone(s.narration), format = voice?.format(), key = scopeKey();
@@ -283,9 +289,13 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
         }
         const preset = s.draw.presets.find(p => p.id === s.draw.activePreset) || s.draw.presets[0];
         const pictures = wantPictures ? await pictureRequest(id, source) : null;
+        const phoneRule = phoned && phone?.wanted() ? await phone.rule() : '';
+        if (wantPictures && !picturesAllowed()) {
+          if (!wantVoice) return skip();
+          wantPictures = false;
+        }
         const asked = wantVoice && wantPictures ? combinedRequest({rules: voice.rules(), format, pictures})
           : wantVoice ? voicePlanRequest({rules: voice.rules(), format, body, before: before(id)}) : pictures;
-        const phoneRule = phoned && phone?.wanted() ? await phone.rule() : '';
         const prompt = withPhone(asked, phoneRule);
         const length = (wantVoice ? Math.min(3000, 400 + source.length * 2) : 0) + (wantPictures ? planLength(s, preset.count) : 0) + (phoneRule ? 500 : 0);
         if (!revision?.target()) return skip();
@@ -301,13 +311,13 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const {rest: reply, phone: sent} = entry.phoneRule ? phoneSection(entry.answer,s.general?.shortTags) : {rest: entry.answer, phone: ''};
       const assemble = source => {
         let text = voiceSource(force && wantPictures ? withoutPictures(source) : source, entry.scope), voiced = 0, pictured = 0;
-        if (wantPictures) ({text, count: pictured} = insertPlanned(text, reply, entry.scope));
+        if (wantPictures && picturesAllowed()) ({text, count: pictured} = insertPlanned(text, reply, entry.scope));
         if (wantVoice) ({text, count: voiced} = insertVoiced(text, reply, entry.format, entry.scope));
-        if (wantPictures && !pictured && entry.extraReply) ({text, count: pictured} = insertPlanned(text, entry.extraReply, entry.scope));
+        if (wantPictures && picturesAllowed() && !pictured && entry.extraReply) ({text, count: pictured} = insertPlanned(text, entry.extraReply, entry.scope));
         return {text, voiced, pictured};
       };
       let result = alreadyWritten ? {text: current.mes, ...entry.counts} : assemble(current.mes);
-      if (!alreadyWritten && wantPictures && !result.pictured && !entry.extraReply) {
+      if (!alreadyWritten && wantPictures && picturesAllowed() && !result.pictured && !entry.extraReply) {
         const extra = await planOnce(id, result.text, valid);
         entry.extraReply = extra.reply;
         if (!valid()) return skip();
@@ -317,6 +327,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const quoted=wantVoice ? (storyScope(current.mes,entry.scope).masked.match(/[“「『"][^”」』"\n]+[”」』"]/g) || []).length : 0;
       if (!result.voiced && !result.pictured && !sent) {
         pendingAnswers.delete(id);
+        if (wantPictures && !wantVoice && !picturesAllowed()) return {skipped: true};
         stage(id, wantVoice ? (candidates ? '未匹配到正文台词：配音行有效，但在选定正文范围内找不到原句' : '模型返回中没有符合当前预设的配音行') : '未匹配到正文画面', {quoted,candidates,voiced: 0, pictured: 0}, 'warn');
         throw Error(wantVoice ? '模型已返回，但这次没有匹配上正文台词，可用「给这层楼配音」重试；具体原因见日志' : '这次没有挑出画面，可以用「给这层楼生图」重试');
       }
@@ -347,7 +358,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
         if (voiced) lined(id);
       }
       if (wantVoice && !voiced) notice('画面已写入，台词这次没配上，可用「给这层楼配音」重试');
-      if (wantPictures && !pictured) notice('台词已写入，画面这次没挑出，可用「给这层楼生图」重试');
+      if (wantPictures && picturesAllowed() && !pictured) notice('台词已写入，画面这次没挑出，可用「给这层楼生图」重试');
       return {voiced, pictured, written: true};
     } finally { planning.delete(id); }
   }
@@ -385,7 +396,8 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     task.promise = Promise.resolve().then(async () => {
       if (context().chat[id] !== message || message.mes !== task.raw || message.swipe_id !== task.swipe || (context().getCurrentChatId?.() ?? context().chatId) !== chat) return;
       const wantVoice = !!voice?.wanted() && !voice.has(storyScope(message.mes, s.narration).masked);
-      const wantPictures = canDraw() && s.draw.enabled && s.draw.mode === 'separate' && !parsePictures(message.mes).length;
+      const draw = settings().draw;
+      const wantPictures = canDraw() && draw.enabled && draw.mode === 'separate' && !parsePictures(message.mes).length;
       if (!wantVoice && !storyScope(message.mes, s.narration).masked.replace(/<[^>]+>/g, '').trim()) return;
       const result = wantVoice || wantPictures ? await planReply(id, {voiced: wantVoice, pictured: wantPictures, phoned: true}) : {written: true};
       task.state = result.written ? 'written' : 'skipped';
@@ -406,12 +418,12 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     if (!current()) return;
     if (!s.draw.enabled) return;
     registerAppearances(message);
-    if (!s.draw.auto) return;
+    if (!settings().draw.auto || settings().draw.mode === 'manual') return;
     const tags = parsePictures(message.mes).filter(tag => !stored(message, tag.hash));
     if (!tags.length) return;
     const source = storyDrawSource(s.draw);
     const authorized = () => !!source && settings().draw.storyPaidSource === source && storyDrawSource(settings().draw) === source;
-    const valid = () => current() && canDraw() && settings().draw.enabled && settings().draw.auto && storyDrawSource(settings().draw) === source;
+    const valid = () => current() && canDraw() && settings().draw.enabled && settings().draw.auto && settings().draw.mode !== 'manual' && storyDrawSource(settings().draw) === source;
     // Subscription lookup can be asynchronous. Recheck the exact branch and connection before queueing.
     if (!backend.drawReady()) return;
     if (!valid()) return;
@@ -457,9 +469,9 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const s = settings(), folded = folds.get(id + ':' + tag.hash) ?? s.draw.fold;
     const state = job?.state || (pic ? 'done' : record?.removed ? 'removed' : 'idle');
     const waiting = state === 'generating' ? queueText(key) : '';
-    const quote = state === 'idle' && s.draw.auto && backend.drawReady() ? backend.drawQuote?.(pictureInputs(s,tag,message.mes).params) : null;
-    const reason = state === 'idle' ? (!s.draw.enabled ? '正文出图没有开启' : !backend.drawReady() ? backend.drawMissing() : !s.draw.auto ? '自动出图已关闭' : s.draw.engine === 'gpt' ? 'GPT 生图每张都要花钱' : quote?.free === false || quote?.paid ? '这张图预计会扣点' : quote?.free === null ? '当前连接无法确认免费额度' : '这张图没有自动生成') : '';
-    const paidSource = state === 'idle' && s.draw.enabled && s.draw.auto && backend.drawReady() &&
+    const quote = state === 'idle' && s.draw.mode !== 'manual' && s.draw.auto && backend.drawReady() ? backend.drawQuote?.(pictureInputs(s,tag,message.mes).params) : null;
+    const reason = state === 'idle' ? (!s.draw.enabled ? '正文出图没有开启' : !backend.drawReady() ? backend.drawMissing() : s.draw.mode === 'manual' ? '等待手动配图' : !s.draw.auto ? '自动出图已关闭' : s.draw.engine === 'gpt' ? 'GPT 生图每张都要花钱' : quote?.free === false || quote?.paid ? '这张图预计会扣点' : quote?.free === null ? '当前连接无法确认免费额度' : '这张图没有自动生成') : '';
+    const paidSource = state === 'idle' && s.draw.enabled && s.draw.mode !== 'manual' && s.draw.auto && backend.drawReady() &&
       (s.draw.engine === 'gpt' || quote?.free === false || quote?.free === null) ? storyDrawSource(s.draw) : '';
     const signature = JSON.stringify([paidSource, state, pic?.url, pic?.count, folded, waiting, job?.message, reason]);
     if (el.dataset.stttsRendered === signature) return;
@@ -545,10 +557,10 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const pic = shown(message, tag.hash);
     if (action === 'draw' || action === 'redo') {
       const paidSource = paidButtons.get(source);
-      if (paidSource && paidSource === storyDrawSource(settings().draw)) {
+      if (settings().draw.mode !== 'manual' && paidSource && paidSource === storyDrawSource(settings().draw)) {
         const swipe = message.swipe_id;
         const valid = () => context().chat[id] === message && message.swipe_id === swipe && backend.drawReady() &&
-          storyDrawSource(settings().draw) === paidSource && parsePictures(message.mes).some(t => t.hash === tag.hash);
+          settings().draw.mode !== 'manual' && storyDrawSource(settings().draw) === paidSource && parsePictures(message.mes).some(t => t.hash === tag.hash);
         generate(id, tag, {permission: 'paid', valid});
       } else generate(id, tag, {interactive: true});
     }
@@ -810,6 +822,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     for (let id = chat.length - 1; id >= 0; id--) {
       const m = chat[id];
       if (!m || m.is_user || m.is_system) continue;
+      if (settings().draw.mode === 'manual') return drawMessage(id);
       const done = await planPictures(id, {force: true});
       if (done) { registerAppearances(context().chat[id]); if (settings().draw.auto) await autoPictures(id); }
       return done;
@@ -849,12 +862,20 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const message = context().chat[id];
     if (!storyReply(message)) throw Error('找不到这层楼的回复');
     if (!backend.drawReady()) throw Error('请先在小手机的绘图 App 配好绘图接口');
-    if (!parsePictures(message.mes).length && !await planPictures(id)) return;
-    if (context().chat[id] !== message) return;
-    const tags = parsePictures(message.mes).filter(tag => !shown(message, tag.hash));
-    if (!tags.length) { notice('这层楼的图片已经生成'); return; }
-    const permission = await allowed(true); if (!permission) return;
-    for (const tag of tags) { if (context().chat[id] !== message) break; await generate(id, tag, {permission}); }
+    const swipe = message.swipe_id;
+    if (!parsePictures(message.mes).length && !await planPictures(id)) return false;
+    if (context().chat[id] !== message || message.swipe_id !== swipe) return false;
+    if (settings().draw.mode === 'manual') registerAppearances(message);
+    const raw = message.mes, source = storyDrawSource(settings().draw);
+    const valid = () => context().chat[id] === message && message.swipe_id === swipe && message.mes === raw && storyDrawSource(settings().draw) === source;
+    const tags = parsePictures(raw).filter(tag => !shown(message, tag.hash));
+    if (!tags.length) { notice('这层楼的图片已经生成'); return false; }
+    const permission = await allowed(true); if (!permission || !valid()) return false;
+    for (const tag of tags) {
+      if (!valid()) break;
+      await generate(id, tag, {permission, valid});
+    }
+    return true;
   }
   return {drawFor, tagText, drawSelection, drawMessage, prepareReply, decorate, click, autoPictures, planPictures, planLatest, voiceLatest, voiceMessage, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
 }

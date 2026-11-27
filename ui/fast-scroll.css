@@ -8,7 +8,7 @@
 .fast-scroll[data-visible]{visibility:visible;transition-delay:0s}
 .fast-scroll::before{
   content:"";position:absolute;inset:0;opacity:0;transition:opacity .12s ease-out;
-  -webkit-backdrop-filter:blur(1.25px);backdrop-filter:blur(1.25px)
+  -webkit-backdrop-filter:blur(.6px);backdrop-filter:blur(.6px)
 }
 .fast-scroll.dragging::before{opacity:1}
 .fast-scroll>button{
