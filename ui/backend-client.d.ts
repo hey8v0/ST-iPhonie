@@ -269,7 +269,7 @@ export interface DrawSettings {
     /** Pictures in the chat start folded. */
     fold: boolean;
     /** 'separate': plan pictures in a request of their own after the reply; 'inline': the reply writes them. */
-    mode: 'separate' | 'inline';
+    mode: 'separate' | 'inline' | 'manual';
     /** Leave picture blocks out of the messages sent to the model. */
     strip: boolean;
     queue: DrawQueueSettings;

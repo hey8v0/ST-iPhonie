@@ -24,7 +24,7 @@ export function settingsApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'settings');
   const narrationNote = s => !s.narration.enabled ? '关 · 只读台词' : s.narration.voice === 'role' ? '开 · 旁白用「旁白」角色的配音' : '开 · 旁白用系统朗读';
   const voiceNote = s => s.general.voiceEnabled === false ? '关' : s.general.voiceMode === 'manual' ? '开 · 手动给楼层配音' : s.general.voiceMode === 'separate' ? '开 · 回复后单独配音' : '开 · 正文里顺手写';
-  const drawNote = s => !s.draw.enabled ? '关' : s.draw.auto ? '开 · 新回复自动画' : '开 · 点了才画';
+  const drawNote = s => !s.draw.enabled ? '关' : s.draw.mode === 'manual' ? '开 · 手动给楼层配图' : s.draw.auto ? '开 · 新回复自动画' : '开 · 点了才画';
   /** The page again after a sheet closes. When the phone itself goes, its sheets close before its apps stop: then a
    *  failed read is nobody's business; otherwise it is said. */
   const afterSheet = () => render().catch(error => { if (!v.disposed) ctx.notify(error.message, {error: true}); });
@@ -92,11 +92,11 @@ export function settingsApp(ctx) {
     const paint = () => {
       if (!d.live) return;
       const w = api.getState().draw, on = !!w.enabled, rules = w.presets.find(p => p.id === w.activePreset) || w.presets[0];
-      d.body.innerHTML = `<div class="group pad">${toggle('drawEnabled', '正文出图', on, '开启后，绘图预设会加进聊天请求（或者回复写完再单独配图），让模型写出图块，插件照着画。用哪个引擎、什么画风在绘图 App 里选；免费档守卫在绘图 App 的「参数」里。')}
-        ${on ? `<div class="field"><span>配图方式${help('单独配图：正文模型只管写故事；回复写完后，插件用同一个模型再单独请求一次，读这条回复、挑画面、写出图块，再把图插到对应的段落后面。出图规则不会挤占正文，张数和格式更稳，每条回复多一次请求。正文语音也选了「回复后单独配音」的话，配音和配图合成一次请求。\n\n正文里顺手写：把出图规则加进正文请求，模型写故事时顺手写出图块。只要一次请求，但规则较长，偶尔会影响正文或漏写。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配图']].map(([k, l]) => `<button type="button" data-action="draw-mode" data-value="${k}" aria-pressed="${w.mode === k}">${l}</button>`).join('')}</div>${api.planLatestPictures ? `<div class="actions" style="margin:6px 0 0">${btn('draw-latest', icon('image') + '给最新回复配图', 'text-button')}</div>` : ''}</div>
-          ${toggle('drawAuto', '新回复自动出图', w.auto, '正文写好后开始生成配图。可能扣点的图片按下方的授权设置处理。')}
+      d.body.innerHTML = `<div class="group pad">${toggle('drawEnabled', '正文出图', on, '开启后，按所选方式给正文配图。手动模式在点楼层工具后使用当前配图预设。用哪个引擎、什么画风在绘图 App 里选；免费档守卫在绘图 App 的「参数」里。')}
+        ${on ? `<div class="field"><span>配图方式${help('单独配图：正文模型只管写故事；回复写完后，插件用同一个模型再单独请求一次，读这条回复、挑画面、写出图块，再把图插到对应的段落后面。出图规则不会挤占正文，张数和格式更稳，每条回复多一次请求。正文语音也选了「回复后单独配音」的话，配音和配图合成一次请求。\n\n正文里顺手写：把出图规则加进正文请求，模型写故事时顺手写出图块。只要一次请求，但规则较长，偶尔会影响正文或漏写。\n\n手动给楼层配图：选好要保留的回复后，点楼层的小手机工具 → 给这层楼配图，按当前规则挑画面并生成。')}</span><div class="segmented voice-modes">${[['inline', '正文里顺手写'], ['separate', '回复后单独配图'], ['manual', '手动给楼层配图']].map(([k, l]) => `<button type="button" data-action="draw-mode" data-value="${k}" aria-pressed="${w.mode === k}">${l}</button>`).join('')}</div>${w.mode === 'manual' ? '<small class="hint">选好回复后，点该楼层的小手机工具 → 给这层楼配图。生成或重刷回复时不会自动配图。</small>' : ''}${api.planLatestPictures ? `<div class="actions" style="margin:6px 0 0">${btn('draw-latest', icon('image') + '给最新回复配图', 'text-button')}</div>` : ''}</div>
+          ${w.mode !== 'manual' ? toggle('drawAuto', '新回复自动出图', w.auto, '正文写好后开始生成配图。可能扣点的图片按下方的授权设置处理。') : ''}
           ${w.engine === 'nai' ? toggle('storyNaiRef', '使用 NovelAI 角色参考图', w.storyNaiRef, `从角色 App 取出镜角色的参考图，每张配图最多带一张，额外 ${REFERENCE_ANLAS} Anlas。自动生成沿用当前连接的扣点授权。`) : ''}
-          ${w.auto && storyDrawSource(w) ? toggle('storyPaid', '允许自动扣点出图', w.storyPaidSource === storyDrawSource(w), '仅限当前绘图连接的正文配图，包括中转无法确认免费额度的图片。每张图都可能计费。') : ''}
+          ${w.mode !== 'manual' && w.auto && storyDrawSource(w) ? toggle('storyPaid', '允许自动扣点出图', w.storyPaidSource === storyDrawSource(w), '仅限当前绘图连接的正文配图，包括中转无法确认免费额度的图片。每张图都可能计费。') : ''}
           <button class="list-row" data-action="draw-rules"><span><strong>编辑出图规则</strong><small>每条回复出 ${rules?.count ?? 1} 张图</small></span>${icon('next')}</button>` : ''}</div>
         <div class="group pad">${toggle('selectionDraw', '划选文字生图', w.selectionDraw !== false, '在酒馆正文和书架的文字选择菜单中显示生图入口。')}
           ${toggle('drawFold', '正文图片默认收起', w.fold, '收起后正文里只留一个小缩略图，点开再看，手机上不占地方。每张图也可以单独收起或展开。')}
@@ -122,7 +122,7 @@ export function settingsApp(ctx) {
       paint();
     });
     sheetClicks(d, async (action, el) => {
-      if (action === 'draw-mode') { api.saveDraw({mode: el.dataset.value}); paint(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配图' : '以后模型写正文时顺手写出图块'); }
+      if (action === 'draw-mode') { api.saveDraw({mode: el.dataset.value}); paint(); ctx.notify(el.dataset.value === 'manual' ? '已切换为手动给楼层配图' : el.dataset.value === 'separate' ? '以后回复写完再单独配图' : '以后模型写正文时顺手写出图块'); }
       if (action === 'draw-latest') await v.busy(el, () => api.planLatestPictures());
       // To the rules in 预设 (opening an app closes the sheet).
       if (action === 'draw-rules') { ctx.open('presets'); ctx.showPresetKind?.('draw'); }

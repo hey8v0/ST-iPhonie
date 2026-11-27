@@ -15,6 +15,7 @@ def git(*args):
     return subprocess.check_output(["git", "-c", safe, *args], cwd=root)
 
 base = "7ed20a6cf8ba69d51103e730f98b5a50bd27db79"
+current_formal = "23f891bb1d454b0d925845dc97df67721c2f0383"
 compat_digests = {
     "ui/browser.js": "30460926708365b0fb2385c024498e620addb69b5fbec51e4396b021c8bf7dda",
     "ui/termux-connection.js": "a0b0d4c62f17c559e4d3dcbe9d151e56e5f7f47b324f920f581b0bad6be168d4",
@@ -27,6 +28,7 @@ def digest(data):
 
 new = {}
 base_names = set(git("ls-tree", "-r", "--name-only", base).decode().splitlines())
+formal_names = set(git("ls-tree", "-r", "--name-only", current_formal).decode().splitlines())
 names = git("diff", "--name-only", base).decode().splitlines()
 allowed = ("core/", "ui/", "termux/", "server/")
 rows, applied = [], []
@@ -35,10 +37,11 @@ for rel in sorted(names):
         continue
     content = normalized((root / rel).read_bytes())
     prior = normalized(git("show", base + ":" + rel)) if rel in base_names else None
+    formal = normalized(git("show", current_formal + ":" + rel)) if rel in formal_names else None
     alternate = compat_digests.get(rel, digest(prior))
     if rel in compat_digests and prior is not None:
         new["formal/" + rel] = prior
-    rows.append("\t".join([rel, digest(prior), alternate, digest(content)]))
+    rows.append("\t".join([rel, digest(prior), alternate, digest(content), digest(formal)]))
     applied.append(rel + "\t" + digest(content))
     new["overlay/" + rel] = content
 

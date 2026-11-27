@@ -78,11 +78,11 @@ if [[ -f "$backup/location" ]]; then
     older["$rel"]="${previous:-}"
   done < "$backup/restore.tsv"
 fi
-while IFS=$'\t' read -r rel official alternate applied; do
+while IFS=$'\t' read -r rel official alternate applied current_formal; do
   verify_path "$app" "$rel" || exit 1
   [[ "$(digest "$src/overlay/$rel")" == "$applied" ]] || { echo "安装包文件校验失败：$rel"; exit 1; }
   current="$(digest "$app/$rel")"
-  [[ "$current" == "$official" || "$current" == "$alternate" || "$current" == "$applied" ||
+  [[ "$current" == "$official" || "$current" == "$alternate" || "$current" == "$applied" || "$current" == "$current_formal" ||
      "$current" == "${installed[$rel]-}" || "$current" == "${older[$rel]-}" ]] || {
     echo "发现未识别的版本或自定义改动：$rel。已保留现有文件。"; exit 1;
   }
@@ -94,7 +94,7 @@ done
 mkdir -p "$backup/original"
 replace "$src/install-overlay.sh" "$base/restore-browser-next.sh"
 restore_plan="$(mktemp "$backup/restore.XXXXXX")"
-while IFS=$'\t' read -r rel official alternate applied; do
+while IFS=$'\t' read -r rel official alternate applied current_formal; do
   current="$(digest "$app/$rel")"
   saved="${original[$rel]-}"
   if [[ -z "$saved" ]]; then
@@ -115,7 +115,7 @@ if [[ ! -f "$backup/location" ]]; then
   fi
   printf '%s\n' "$app" > "$backup/location"
 fi
-while IFS=$'\t' read -r rel official alternate applied; do
+while IFS=$'\t' read -r rel official alternate applied current_formal; do
   replace "$src/overlay/$rel" "$app/$rel"
 done < "$src/overlay.tsv"
 # Locate a real SillyTavern root. Search runs as an optional server plugin.

@@ -239,7 +239,7 @@ class DrawSettings {
             if (patch.storyPaidSource !== '' && patch.storyPaidSource !== storyDrawSource(draw)) throw Error('绘图连接已变化，请重新确认');
             draw.storyPaidSource = patch.storyPaidSource;
         }
-        if ('mode' in patch) { if (!['separate', 'inline'].includes(patch.mode)) throw Error('配图方式无效'); draw.mode = patch.mode; }
+        if ('mode' in patch) { if (!['separate', 'inline', 'manual'].includes(patch.mode)) throw Error('配图方式无效'); draw.mode = patch.mode; }
         if ('vibe' in patch) draw.vibe = normalizeVibeSettings({ ...draw.vibe, ...clone(patch.vibe || {}) });
         if ('relay' in patch) {
             const relay = patch.relay && typeof patch.relay === 'object' ? patch.relay : {};
@@ -477,7 +477,7 @@ class DrawSettings {
         // 'separate' mode: the request made after a reply, with a stand-in for the reply.
         // The 名单 of the card open now (who speaks next is not known here: they are added when the request is made).
         const only = this.drawCast();
-        if (draw.mode === 'separate') {
+        if (draw.mode !== 'inline') {
             const lore = activeChatPreset(this.settings.chat).lore === false ? '' : '（这里是酒馆这次会触发的世界书条目，按手机「读哪些世界书」的选择）';
             return planRequest(this.settings, { message: '（这里是刚写好的正文，第一段）\n（第二段……每一段前面会标上 [P1]、[P2]）', preset: used, only, lore })
                 .map(m => `【${m.role}】\n${m.content}`).join('\n\n');
