@@ -13,7 +13,7 @@ const assets = new Map([
   ['/panel.js',['panel.js','text/javascript']], ['/fixture',['fixture.html','text/html']],
 ]);
 
-function createService({panel, native, host, origin, inspectInstall, onStop}) {
+function createService({panel, native, host, origin, inspectInstall, onStop, serveGraphics}) {
   const staticFiles = new Map([...assets].map(([route,[name,mime]]) => [
     route,[fs.readFileSync(path.join(__dirname,'panel',name)),mime],
   ]));
@@ -33,7 +33,7 @@ function createService({panel, native, host, origin, inspectInstall, onStop}) {
   function diagnostics() {
     return {service:'iphonie-browser-bridge', version, build, status, connections,
       firefox:browserBuild || null, observedTabs:state?.tabs.length ?? null,
-      pageInspectable:state?.viewport != null, ipcReady:ipc.listening, ...inspectInstall()};
+      pageInspectable:state?.viewport != null, viewport:state?.viewport || null, ipcReady:ipc.listening, ...inspectInstall()};
   }
 
   const ipc = net.createServer(stream => {
@@ -115,6 +115,7 @@ function createService({panel, native, host, origin, inspectInstall, onStop}) {
       res.end(JSON.stringify(value));
     };
     if (req.headers.host !== host) {res.writeHead(403).end(); return;}
+    if (serveGraphics?.(req,res,origin)) return;
     const asset = req.method === 'GET' && staticFiles.get(req.url);
     if (asset) {
       const [contents, mime] = asset;
@@ -156,7 +157,9 @@ function createService({panel, native, host, origin, inspectInstall, onStop}) {
   server.requestTimeout = 5000;
   server.headersTimeout = 5000;
   server.keepAliveTimeout = 1000;
-  return {server, ipc, shutdown:() => {for (const stream of peers) stream.destroy();}};
+  return {server, ipc, releaseViewer:()=>{
+    if (peer && !peer.destroyed) writeFrame(peer,{version,type:'viewer-detached'});
+  }, shutdown:() => {for (const stream of peers) stream.destroy();}};
 }
 
 function listen(server, ...options) {
@@ -169,16 +172,18 @@ function listen(server, ...options) {
 async function daemon() {
   process.umask(0o077);
   const {panel,native} = config.secrets();
-  const {server, ipc, shutdown} = createService({
-    panel, native, host:config.host, origin:config.origin,
+  const {serveGraphics,attachGraphics} = require('./graphics.cjs');
+  const {server, ipc, shutdown,releaseViewer} = createService({
+    panel, native, host:config.host, origin:config.origin, serveGraphics,
     inspectInstall:() => ({manifestPresent:fs.existsSync(config.manifest),
       hostInvoked:fs.existsSync(config.filename('native-invoked'))}),
     onStop:stop,
   });
-  let ownsSocket = false, stopping = false;
+  let ownsSocket = false, stopping = false, closeGraphics;
   function stop() {
     if (stopping) return;
     stopping = true;
+    closeGraphics?.();
     shutdown();
     // Close the Unix socket before releasing the HTTP port used as the startup lock.
     if (ipc.listening) ipc.close();
@@ -189,6 +194,7 @@ async function daemon() {
   for (const signal of ['SIGTERM','SIGINT']) process.once(signal, stop);
   try {
     await listen(server, config.port, '127.0.0.1');
+    closeGraphics = attachGraphics(server,{host:config.host,origin:config.origin,panel,onIdle:releaseViewer});
     const previous = fs.lstatSync(config.socket, {throwIfNoEntry:false});
     if (previous) {
       if (!previous.isSocket()) throw new Error('unexpected-socket-path');

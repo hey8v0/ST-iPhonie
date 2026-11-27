@@ -1,9 +1,26 @@
 (() => {
-  const {version, command, webUrl, metrics, focus} = bridgeProtocol;
+  const {version, command, webUrl, metrics, focus, page:validPage, favicon} = bridgeProtocol;
   const host = 'st_iphonie_browser_bridge';
   let port, timer, shell, stoppedByVersion = false;
   let accepted = false, retry = 1000, status = 'connecting', running = false;
-  let revision = 0;
+  let revision = 0, managed = false, firefoxMajor;
+  const desktop = new Map(), failed = new Map();
+  const modeKey = 'iphonie-desktop-site';
+  const supported = {urls:['http://*/*','https://*/*']};
+
+  browser.webRequest.onBeforeSendHeaders.addListener(details => {
+    if (!accepted || !managed || details.tabId < 0 || desktop.get(details.tabId) || !firefoxMajor) return undefined;
+    const value = `Mozilla/5.0 (Android 14; Mobile; rv:${firefoxMajor}.0) Gecko/${firefoxMajor}.0 Firefox/${firefoxMajor}.0`;
+    return {requestHeaders:details.requestHeaders.map(header => header.name.toLowerCase() === 'user-agent' ?
+      {...header,value} : header)};
+  },supported,['blocking','requestHeaders']);
+
+  async function restoreModes(tabs) {
+    await Promise.all(tabs.filter(tab=>!desktop.has(tab.id)).map(async tab => {
+      const value = await browser.sessions.getTabValue(tab.id,modeKey).catch(()=>false);
+      if (!desktop.has(tab.id)) desktop.set(tab.id,value === true);
+    }));
+  }
 
   function post(message, target = port) {
     if (target && port === target) target.postMessage({version, ...message});
@@ -32,6 +49,7 @@
     const active = all.find(tab => tab.active);
     const tabs = all.slice(0, 64);
     if (active && !tabs.includes(active)) tabs[tabs.length - 1] = active;
+    await restoreModes(tabs);
     let page = null;
     if (active && webUrl(active.url)) {
       let deadline;
@@ -42,24 +60,30 @@
         ]);
       } catch {} finally {clearTimeout(deadline);}
     }
-    const hasTelemetry = metrics(page?.viewport) && focus(page?.focus);
+    const hasTelemetry = metrics(page?.viewport) && focus(page?.focus) && validPage(page?.page);
     return {
       tabs:tabs.map(tab => ({
         id:tab.id, title:(tab.title || '').slice(0, 256), url:tab.active ? displayUrl(tab.url).slice(0, 4096) : '',
+        status:failed.get(tab.id) === tab.url ? 'error' : tab.status === 'loading' ? 'loading' : 'ready',
+        desktop:desktop.get(tab.id) === true,
+        icon:favicon(tab.favIconUrl) ? tab.favIconUrl : '',
         access:!webUrl(tab.url) ? 'internal' : tab.id === active?.id && hasTelemetry ? 'web' :
           tab.status === 'loading' || tab.id !== active?.id ? 'loading' : 'unavailable',
       })),
+      count:all.length,
       activeId:active?.id ?? null,
       windowMode:win ? (win.state === 'fullscreen' ? 'fullscreen' : 'normal') : 'unknown',
       focus:hasTelemetry ? page.focus : null,
       viewport:hasTelemetry ? page.viewport : null,
+      page:hasTelemetry ? page.page : null,
     };
   }
 
   function sync() {
-    clearTimeout(timer);
-    const requested = ++revision;
+    if (timer) return;
     timer = setTimeout(async () => {
+      timer = null;
+      const requested = ++revision;
       const target = port;
       if (!accepted) return;
       try {
@@ -84,7 +108,9 @@
     if (!win) return 'no-window';
     const p = msg.params;
     if (msg.action === 'browser-fullscreen') {
-      if (!p.enabled) return restoreShell();
+      if (!p.enabled) {managed = false; return restoreShell();}
+      managed = true;
+      if (shell && win.state === 'fullscreen' && shell.id === win.id) return;
       if (shell || win.state === 'fullscreen') return 'fullscreen-owned';
       const saved = {id:win.id, state:win.state === 'maximized' ? 'maximized' : 'normal'};
       await browser.windows.update(win.id, {state:'fullscreen'});
@@ -96,6 +122,14 @@
       await browser.tabs.create({windowId:win.id, ...(p.url ? {url:webUrl(p.url)} : {})});
       return;
     }
+    if (msg.action === 'close-tabs') {
+      const rows = (await browser.tabs.query({windowId:win.id})).filter(tab=>!tab.incognito);
+      if (p.keep !== null && !rows.some(tab=>tab.id === p.keep)) return 'tab-unavailable';
+      if (p.keep === null) await browser.tabs.create({windowId:win.id,url:'about:blank'});
+      const ids = rows.map(tab=>tab.id).filter(id=>id !== p.keep);
+      if (ids.length) await browser.tabs.remove(ids);
+      return;
+    }
     const tab = await browser.tabs.get(p.tabId).catch(() => null);
     if (!tab || tab.incognito || tab.windowId !== win.id) return 'tab-unavailable';
     switch (msg.action) {
@@ -105,9 +139,21 @@
       case 'reload': await browser.tabs.reload(tab.id); break;
       case 'switch-tab': await browser.tabs.update(tab.id, {active:true}); break;
       case 'close-tab':
-        if ((await browser.tabs.query({windowId:win.id})).length <= 1) return 'last-tab';
+        if ((await browser.tabs.query({windowId:win.id})).length <= 1)
+          await browser.tabs.create({windowId:win.id,url:'about:blank'});
         await browser.tabs.remove(tab.id);
         break;
+      case 'view-mode':
+        await browser.sessions.setTabValue(tab.id,modeKey,p.desktop);
+        desktop.set(tab.id,p.desktop);
+        if (webUrl(tab.url)) await browser.tabs.reload(tab.id,{bypassCache:true});
+        break;
+      case 'leave-page-fullscreen': case 'reveal-field': {
+        const message = msg.action === 'reveal-field' ? 'bridge-reveal-field' : 'bridge-leave-fullscreen';
+        const ok = await browser.tabs.sendMessage(tab.id,{type:message},{frameId:0});
+        if (!ok) return 'action-failed';
+        break;
+      }
     }
   }
 
@@ -123,6 +169,12 @@
       accepted = true;
       status = 'connected';
       retry = 1000;
+      sync();
+      return;
+    }
+    if (accepted && msg?.version === version && msg.type === 'viewer-detached') {
+      managed = false;
+      await restoreShell();
       sync();
       return;
     }
@@ -157,12 +209,14 @@
             /permission|access forbidden/i.test(reason) ? 'native-denied' : 'native-disconnected';
         }
         accepted = false;
+        managed = false;
         port = null;
         void restoreShell();
         reconnect();
       });
       void browser.runtime.getBrowserInfo().catch(() => null).then(info => {
         const firefox = /^[a-z0-9.]{1,32}$/i.test(info?.version || '') ? info.version : '';
+        firefoxMajor = parseInt(firefox,10) || null;
         post({type:'hello', build:browser.runtime.getManifest().version, firefox}, target);
       });
     } catch {
@@ -177,6 +231,13 @@
     browser.windows.onFocusChanged, browser.windows.onBoundsChanged]) event?.addListener(sync);
   for (const event of [browser.webNavigation.onCommitted, browser.webNavigation.onCompleted,
     browser.webNavigation.onHistoryStateUpdated, browser.webNavigation.onReferenceFragmentUpdated]) event.addListener(nav);
+  browser.webNavigation.onBeforeNavigate.addListener(details=>{
+    if (details.frameId === 0) {failed.delete(details.tabId);sync();}
+  });
+  browser.webNavigation.onErrorOccurred.addListener(details=>{
+    if (details.frameId === 0 && details.error !== 'NS_BINDING_ABORTED') {failed.set(details.tabId,details.url);sync();}
+  });
+  browser.tabs.onRemoved.addListener(id=>{desktop.delete(id);failed.delete(id);});
   browser.runtime.onMessage.addListener((msg, sender) => {
     if (sender.id !== browser.runtime.id) return undefined;
     if (msg?.type === 'bridge-page-changed' && sender.frameId === 0 && sender.tab && !sender.tab.incognito) sync();

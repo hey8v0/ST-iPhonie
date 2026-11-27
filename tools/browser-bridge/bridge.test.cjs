@@ -16,9 +16,9 @@ const {createService} = require(source + '/service.cjs');
 const {writeFrame,readFrames} = require(source + '/frames.cjs');
 const protocol = require(source + '/extension/protocol.js');
 const build = require(source + '/extension/manifest.json').version;
-const command = (action='reload',params={tabId:1}) => ({version:1,id:crypto.randomUUID(),action,params});
-const page = {tabs:[{id:1,url:'https://example.org/private?session=fixture',title:'Private tab',access:'web'}],
-  activeId:1,focus:'input:password',windowMode:'normal',
+const command = (action='reload',params={tabId:1}) => ({version:2,id:crypto.randomUUID(),action,params});
+const page = {tabs:[{id:1,url:'https://example.org/private?session=fixture',title:'Private tab',access:'web',desktop:false,status:'ready',icon:''}],
+  count:1,page:{scroll:0,fullscreen:'none'},activeId:1,focus:'input:password',windowMode:'normal',
   viewport:{width:400,height:700,visualWidth:400,visualHeight:700,dpr:1,scale:1}};
 
 async function wait(predicate) {
@@ -124,7 +124,7 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
     const proc = child('browser-bridge@st-iphonie.local');
     const messages = [];
     readFrames(proc.stdout,msg=>messages.push(msg),()=>assert.fail('invalid native stdout'));
-    writeFrame(proc.stdin,{type:'hello',version:1,build,firefox:'150.0',...override});
+    writeFrame(proc.stdin,{type:'hello',version:2,build,firefox:'150.0',...override});
     await wait(()=>messages.length);
     return {proc,messages};
   };
@@ -132,9 +132,9 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   assert.equal(channel.messages[0].reason,'version-mismatch');
   assert.equal((await status()).status,'version-mismatch');
   channel = await attach();
-  assert.deepEqual(channel.messages[0],{type:'accepted',version:1});
+  assert.deepEqual(channel.messages[0],{type:'accepted',version:2});
   assert.equal((await status()).status,'connecting');
-  writeFrame(channel.proc.stdin,{type:'state',version:1,state:page});
+  writeFrame(channel.proc.stdin,{type:'state',version:2,state:page});
   await wait(async ()=>(await status()).status === 'connected');
   assert.deepEqual((await status()).state,page);
   const diagnostic = await call('/diagnostics').then(r=>r.text());
@@ -144,8 +144,8 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   const incoming = await wait(()=>channel.messages[1]);
   assert.equal(incoming.action,'reload');
   assert.notEqual(incoming.id,req.id);
-  writeFrame(channel.proc.stdin,{type:'result',version:1,id:incoming.id,ok:true});
-  assert.deepEqual(await (await pending).json(),{ok:true,version:1,id:req.id});
+  writeFrame(channel.proc.stdin,{type:'result',version:2,id:incoming.id,ok:true});
+  assert.deepEqual(await (await pending).json(),{ok:true,version:2,id:req.id});
   assert.equal((await call('/command',{data:command('eval',{})})).status,409);
   const interrupted = call('/command',{data:command()});
   await wait(()=>channel.messages[2]);
@@ -153,7 +153,7 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   assert.equal((await (await interrupted).json()).error,'disconnected');
   assert.equal((await status()).state,null);
   channel = await attach();
-  writeFrame(channel.proc.stdin,{type:'state',version:1,state:page});
+  writeFrame(channel.proc.stdin,{type:'state',version:2,state:page});
   await wait(async ()=>(await status()).status === 'connected');
   assert.equal((await status()).connections,2);
 });

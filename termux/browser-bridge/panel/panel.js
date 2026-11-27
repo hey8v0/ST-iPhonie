@@ -75,7 +75,7 @@ async function check() {
   checking = true;
   try {
     const res = await api('/status');
-    snapshot = res.status === 'connected' && res.version === 1 ? res.state : null;
+    snapshot = res.status === 'connected' && res.version === 2 ? res.state : null;
     get('connection').textContent = statuses[res.status] || '无法识别控制服务';
   } catch (err) {
     snapshot = null;
@@ -95,7 +95,7 @@ async function act(action, params) {
   draw();
   try {
     const id = crypto.randomUUID();
-    const res = await api('/command',{version:1,id,action,params});
+    const res = await api('/command',{version:2,id,action,params});
     get('result').textContent = res.ok && res.id === id ? 'Firefox 已执行' : errors[res.error] || '操作失败';
   } catch {
     get('result').textContent = '没收到 Firefox 的确认，请检查连接。';
