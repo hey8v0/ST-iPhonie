@@ -16,10 +16,11 @@ const {createService} = require(source + '/service.cjs');
 const {writeFrame,readFrames} = require(source + '/frames.cjs');
 const protocol = require(source + '/extension/protocol.js');
 const build = require(source + '/extension/manifest.json').version;
-const command = (action='reload',params={tabId:1}) => ({version:2,id:crypto.randomUUID(),action,params});
+const command = (action='reload',params={tabId:1}) => ({version:3,id:crypto.randomUUID(),action,params});
 const page = {tabs:[{id:1,url:'https://example.org/private?session=fixture',title:'Private tab',access:'web',desktop:false,status:'ready',icon:''}],
-  count:1,page:{scroll:0,fullscreen:'none'},activeId:1,focus:'input:password',windowMode:'normal',
-  viewport:{width:400,height:700,visualWidth:400,visualHeight:700,dpr:1,scale:1}};
+  count:1,page:{scroll:0,fullscreen:'none'},activeId:1,focus:'input:password',field:{frame:2,id:'test-field'},hints:[],windowMode:'normal',
+  viewport:{width:400,height:700,visualWidth:400,visualHeight:700,dpr:1,scale:1,outerWidth:400,screenWidth:400,
+    documentWidth:400,offsetTop:0,offsetLeft:0,zoom:1,touchPoints:0,mobileJS:false,coarse:false}};
 
 async function wait(predicate) {
   for (let i=0;i<120;i++) {
@@ -40,7 +41,7 @@ test('command schema accepts only explicitly modeled, credential-free navigation
   }
   assert(!protocol.command(command('eval',{code:'x'})));
   assert(!protocol.command(command('back',{tabId:1,extra:true})));
-  assert(!protocol.command({...command(),version:3}));
+  assert(!protocol.command({...command(),version:2}));
   assert(!protocol.state({...page,focus:{type:'password',value:'forbidden'}}));
 });
 
@@ -124,7 +125,7 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
     const proc = child('browser-bridge@st-iphonie.local');
     const messages = [];
     readFrames(proc.stdout,msg=>messages.push(msg),()=>assert.fail('invalid native stdout'));
-    writeFrame(proc.stdin,{type:'hello',version:2,build,firefox:'150.0',...override});
+    writeFrame(proc.stdin,{type:'hello',version:3,build,firefox:'150.0',...override});
     await wait(()=>messages.length);
     return {proc,messages};
   };
@@ -132,20 +133,22 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   assert.equal(channel.messages[0].reason,'version-mismatch');
   assert.equal((await status()).status,'version-mismatch');
   channel = await attach();
-  assert.deepEqual(channel.messages[0],{type:'accepted',version:2});
+  assert.deepEqual(channel.messages[0],{type:'accepted',version:3});
   assert.equal((await status()).status,'connecting');
-  writeFrame(channel.proc.stdin,{type:'state',version:2,state:page});
+  writeFrame(channel.proc.stdin,{type:'state',version:3,state:page});
   await wait(async ()=>(await status()).status === 'connected');
   assert.deepEqual((await status()).state,page);
   const diagnostic = await call('/diagnostics').then(r=>r.text());
-  assert(!/Private tab|session=fixture|password/.test(diagnostic));
+  assert(!/Private tab|session=fixture|test-field/.test(diagnostic));
+  assert.equal(JSON.parse(diagnostic).focus,'input:password');
+  assert.equal(JSON.parse(diagnostic).focusFrame,2);
   const req = command();
   const pending = call('/command',{data:req});
   const incoming = await wait(()=>channel.messages[1]);
   assert.equal(incoming.action,'reload');
   assert.notEqual(incoming.id,req.id);
-  writeFrame(channel.proc.stdin,{type:'result',version:2,id:incoming.id,ok:true});
-  assert.deepEqual(await (await pending).json(),{ok:true,version:2,id:req.id});
+  writeFrame(channel.proc.stdin,{type:'result',version:3,id:incoming.id,ok:true});
+  assert.deepEqual(await (await pending).json(),{ok:true,version:3,id:req.id});
   assert.equal((await call('/command',{data:command('eval',{})})).status,409);
   const interrupted = call('/command',{data:command()});
   await wait(()=>channel.messages[2]);
@@ -153,7 +156,7 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   assert.equal((await (await interrupted).json()).error,'disconnected');
   assert.equal((await status()).state,null);
   channel = await attach();
-  writeFrame(channel.proc.stdin,{type:'state',version:2,state:page});
+  writeFrame(channel.proc.stdin,{type:'state',version:3,state:page});
   await wait(async ()=>(await status()).status === 'connected');
   assert.equal((await status()).connections,2);
 });
@@ -163,12 +166,15 @@ test('content script reports focus and measurements without accessing values', a
   const messages = [];
   const element = type => ({localName:'input',type,closest:()=>null,
     matches:query=>query.startsWith('textarea'),get value(){throw new Error('read password');}});
-  const document = {activeElement:element('password'),addEventListener:(event,fn)=>{callbacks[event]=fn;}};
-  const window = {innerWidth:420,innerHeight:760,devicePixelRatio:1.25,
+  const document = {activeElement:element('password'),hasFocus:()=>true,createTreeWalker:()=>({nextNode:()=>null}),
+    addEventListener:(event,fn)=>{callbacks[event]=fn;}};
+  const window = {innerWidth:420,innerHeight:760,devicePixelRatio:1.25,screen:{width:420},top:{},
     visualViewport:{width:410,height:700,scale:1.1,addEventListener(){}},addEventListener(){}};
   const browser = {runtime:{id:'bridge',onMessage:{addListener(fn){callbacks.inspect=fn;}},
     sendMessage:async msg=>messages.push(msg)}};
-  vm.runInNewContext(fs.readFileSync(source+'/extension/content.js','utf8'),{document,window,browser,setTimeout,clearTimeout});
+  vm.runInNewContext(fs.readFileSync(source+'/extension/content.js','utf8'),
+    {document,window,browser,setTimeout,clearTimeout,matchMedia:()=>({matches:false}),navigator:{userAgent:''},
+      NodeFilter:{SHOW_ELEMENT:1},crypto:crypto.webcrypto});
   const snapshot = () => callbacks.inspect({type:'bridge-inspect'},{id:'bridge'});
   assert.equal((await snapshot()).focus,'input:password');
   assert.equal((await snapshot()).viewport.dpr,1.25);

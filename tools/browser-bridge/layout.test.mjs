@@ -2,16 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {createRequire} from 'node:module';
+import {visibleBrowserArea} from '../../ui/browser-phase2-link.js';
 const {chromium}=createRequire(import.meta.url)('playwright');
 const app='http://localhost:8000';
 const origin='http://127.0.0.1:6091';
 const frontend=new URL('../../',import.meta.url);
 
+test('keyboard viewport intersects a phone iframe in its own coordinates even when the top viewport pans',()=>{
+  const host={visualViewport:{offsetTop:160,height:350,width:400,scale:1}};
+  host.parent=host;
+  const win={parent:host,visualViewport:{offsetTop:0,height:800,width:400,scale:1},
+    frameElement:{clientTop:0,clientHeight:800,offsetHeight:800,getBoundingClientRect:()=>({top:80,height:640})}};
+  const content={getBoundingClientRect:()=>({top:60,bottom:740,height:680,width:400})};
+  const {top,height,width}=visibleBrowserArea(win,content);
+  assert.deepEqual({top,height,width},{top:40,height:437,width:400});
+});
+
 const mockRfb = `
 const send=(type,data={})=>parent.postMessage({type,...data},'${app}');
 const state={activeId:1,count:1,tabs:[{id:1,title:'网页测试',url:'https://example.org/start',access:'web',status:'ready',desktop:false,icon:''}],
-  focus:null,windowMode:'normal',page:{scroll:0,fullscreen:'none'},viewport:{width:390,height:640,visualWidth:390,visualHeight:640,dpr:1,scale:1}};
-const publish=()=>send('browser-state',{status:'connected',version:2,state});
+  focus:null,field:null,hints:[],windowMode:'normal',page:{scroll:0,fullscreen:'none'},viewport:{width:390,height:640,visualWidth:390,visualHeight:640,dpr:1,scale:1,zoom:1}};
+const publish=()=>send('browser-state',{status:'connected',version:3,state});
 addEventListener('message',({data})=>{
   if(data.type==='rfb-init'){publish();send('rfb-state',{stage:'ready'});return;}
   if(data.type==='rfb-input'){send('qa-ime',{data});return;}
@@ -26,7 +37,8 @@ addEventListener('message',({data})=>{
   publish();
 });
 window.scrollToTest=(n,d)=>{send('rfb-gesture',{direction:d,edge:false});state.page.scroll=n;publish();};
-window.focusForTest=()=>{state.focus='input:text';publish();};
+window.focusForTest=(id='test-input')=>{state.focus='input:text';state.field={frame:2,id};publish();};
+window.waitForTest=()=>send('browser-state',{status:'waiting',version:3,state:null});
 window.revealForTest=()=>send('rfb-gesture',{direction:'up',edge:true});
 `;
 
@@ -122,5 +134,33 @@ test('Phase 2 home, five tools, true layout release, tabs, desktop command and i
     });
     await page.waitForFunction(()=>observed.some(row=>row.type==='qa-ime'&&row.data.text==='中文🙂'));
     assert.equal(await page.evaluate(()=>observed.filter(row=>row.type==='qa-ime').length),1);
+    await page.locator('.browser-ime-proxy').evaluate(el=>{
+      el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+      el.value='stale';el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));
+    });
+    await frame.evaluate(()=>focusForTest('second-input'));
+    await page.waitForFunction(()=>document.querySelector('.browser-ime-proxy').value==='');
+    await page.locator('.browser-ime-proxy').evaluate(el=>{
+      el.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'Backspace'}));
+      el.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'Enter'}));
+    });
+    await page.waitForFunction(()=>observed.some(row=>row.data?.id==='second-input'&&row.data.key==='Enter'));
+    assert.equal(await page.evaluate(()=>observed.some(row=>row.data?.text==='stale')),false);
+    await page.evaluate(()=>{
+      const visual = new EventTarget();
+      Object.assign(visual,{height:510,width:640,offsetTop:60,scale:1});
+      Object.defineProperty(window,'visualViewport',{value:visual,configurable:true});
+      document.querySelector('.screen').style.height='490px';
+    });
+    await page.waitForFunction(()=>document.querySelector('iframe').getBoundingClientRect().height>250);
+    assert.equal((await page.locator('iframe').boundingBox()).width,oldFrame.width);
+    assert.equal(await page.evaluate(()=>document.querySelector('iframe').style.transform),'');
+    await frame.evaluate(()=>waitForTest());
+    const card=page.locator('.browser-v2-feedback .browser-connect-card');
+    await card.waitFor();
+    await card.evaluate(el=>window.firstFeedbackCard=el);
+    await frame.evaluate(()=>{waitForTest();waitForTest();waitForTest();});
+    const same=await card.evaluate(el=>window.firstFeedbackCard===el);
+    assert.equal(same,true);
   } finally {await browser.close();}
 });

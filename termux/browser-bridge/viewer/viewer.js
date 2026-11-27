@@ -1,9 +1,12 @@
+import {viewerGeometry} from './geometry.js';
+import {browserInput} from './input.js';
+
 const surface = document.getElementById('surface');
 const trusted = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
 const token = /^[a-f0-9]{64}$/;
-const version = 2;
-let parentOrigin, key, rfb, frame = false, verified = false, telem, pause = false, desktop = false;
-let stopped = false, pollTimer, connectionTimer, waitingClipboard;
+const version = 3;
+let parentOrigin, key, rfb, geometry,frame = false, verified = false, telem, desktop = false;
+let stopped = false, pollTimer, connectionTimer, waitingClipboard,lastStatus,planned,planTimer, editing=false,hold=false;
 
 function announce(type,data={}) {
   if (parentOrigin) parent.postMessage({type,...data},parentOrigin);
@@ -15,20 +18,39 @@ async function api(route,body) {
   if (response.status === 403) throw new Error('pair');
   return response.json();
 }
+function publish(payload) {
+  const snapshot=JSON.stringify(payload);
+  if (snapshot!==lastStatus) {lastStatus=snapshot;announce('browser-state',payload);}
+}
+function sameTarget(data,state=telem) {
+  return state?.activeId === data.tabId && state?.focus &&
+    state.field?.frame === data.frame && state.field?.id === data.id;
+}
+const proxy=browserInput({doc:document,win:window},document.body,payload=>{
+  if (!sendInput(payload) && planned && planned.rows.length<12) planned.rows.push(payload);
+},active=>announce('rfb-ime',{active}));
+function reconcileInput() {
+  if (planned && telem?.activeId===planned.tabId && !sameTarget(planned)) return;
+  if (planned) {
+    if (sameTarget(planned)) for (const payload of planned.rows) sendInput(payload);
+    planned=null;clearTimeout(planTimer);
+  }
+  if (proxy.isFocused()) proxy.bind(telem?.activeId,telem?.focus,telem?.field);
+}
 async function status() {
   clearTimeout(pollTimer);
   if (stopped || !verified) return;
   try {
     const result = await api('/status');
     telem = result.state;
-    announce('browser-state',{status:result.status,version:result.version,state:telem});
-    const mode = telem?.tabs.find(tab=>tab.id === telem.activeId)?.desktop === true;
-    if (mode !== desktop) {
-      desktop = mode;
-      if (rfb && !pause) rfb.resizeSession = true;
-    }
+    reconcileInput();
+    publish({status:result.status,version:result.version,state:telem});
+    desktop = telem?.tabs.find(tab=>tab.id === telem.activeId)?.desktop === true;
+    geometry?.mode(desktop);
+    geometry?.firefox(telem?.viewport);
   } catch (error) {
-    announce('browser-state',{status:error.message === 'pair' ? 'pair' : 'offline',state:null});
+    telem=null;reconcileInput();
+    publish({status:error.message === 'pair' ? 'pair' : 'offline',state:null});
   } finally {
     if (!stopped) pollTimer = setTimeout(status,document.hidden ? 1500 : 250);
   }
@@ -54,50 +76,16 @@ async function connect() {
     rfb = new module.default(surface,address.href,{shared:true,wsProtocols:['iphonie.'+key]});
     rfb.background = '#111';
     rfb.focusOnClick = !matchMedia('(pointer: coarse)').matches;
-    rfb.scaleViewport = true;
-    // v1.6.0 private hooks. noVNC still maps physical coordinates using the
-    // actual display scale. Only the requested server dimensions are widened.
-    const requestResize = rfb._requestRemoteResize;
-    const screenSize = rfb._screenSize;
-    const dataRect = rfb._handleDataRect;
-    const update = rfb._framebufferUpdate;
-    if (![requestResize,screenSize,dataRect,update].every(fn=>typeof fn === 'function')) throw Error('viewer-version');
-    rfb._requestRemoteResize = function () {
-      if (pause) return;
-      if (!desktop) return requestResize.call(this);
-      this._screenSize = () => {
-        const {w,h} = screenSize.call(this);
-        const wide = Math.max(w,960);
-        return {w:Math.floor(wide),h:Math.floor(Math.max(h,Math.min(h*wide/w,1600)))};
-      };
-      try {return requestResize.call(this);} finally {delete this._screenSize;}
-    };
-    let pixels = false, painted = false;
-    const resize = rfb._resize;
-    rfb._resize = function (width,height) {
-      const result = resize.call(this,width,height);
-      announce('rfb-size',{width,height});
-      return result;
-    };
-    rfb._handleDataRect = function (...args) {
-      const done = dataRect.apply(this,args);
-      pixels ||= done;
-      return done;
-    };
-    rfb._framebufferUpdate = function (...args) {
-      const done = update.apply(this,args);
-      if (done && pixels && !painted) {
-        painted = true;
-        queueMicrotask(()=>Promise.resolve().then(()=>this._display.flush()).then(()=>{
-          if (stopped) return;
-          frame = true;
-          clearTimeout(connectionTimer);
-          setStage('ready');
-        }).catch(()=>setStage('unavailable')));
+    rfb.qualityLevel=9;
+    geometry=viewerGeometry(rfb,surface,(kind,details)=>{
+      announce('rfb-trace',{kind,details});
+      if (kind==='first-frame') {
+        frame=true;clearTimeout(connectionTimer);setStage('ready');
       }
-      return done;
-    };
-    rfb.resizeSession = true;
+    });
+    geometry.mode(desktop);
+    geometry.editing(editing);
+    geometry.hold(hold);
     const deadline = () => {
       clearTimeout(connectionTimer);
       connectionTimer = setTimeout(()=>{
@@ -117,6 +105,8 @@ async function connect() {
     });
     rfb.addEventListener('disconnect',()=>{
       frame = false;
+      geometry?.close();
+      proxy.release();
       clearTimeout(connectionTimer);
       setStage('closed');
     });
@@ -135,6 +125,12 @@ function textInput(text) {
     rfb.sendKey(character === '\n' ? xkeys.Enter :
       character === '\t' ? xkeys.Tab : point <= 255 ? point : 0x01000000 | point);
   }
+}
+function sendInput(data) {
+  if (!frame || !sameTarget(data)) return false;
+  if (typeof data.text === 'string' && data.text.length <= 4096) textInput(data.text);
+  if (Object.hasOwn(xkeys,data.key)) rfb.sendKey(xkeys[data.key]);
+  return true;
 }
 function selectText() {
   if (waitingClipboard) return Promise.resolve('');
@@ -156,26 +152,26 @@ window.addEventListener('message',async ({source,origin,data})=>{
     return;
   }
   if (!parentOrigin) return;
-  if (data.type === 'rfb-dispose') {stopped=true;rfb?.disconnect();clearTimeout(pollTimer);return;}
+  if (data.type === 'rfb-dispose') {
+    stopped=true;proxy.release();clearTimeout(planTimer);rfb?.disconnect();clearTimeout(pollTimer);return;
+  }
   if (data.type === 'rfb-password' && typeof data.password === 'string' && data.password.length <= 128) {
     rfb?.sendCredentials({password:data.password});
     connectionTimer = setTimeout(()=>{setStage('timeout');rfb?.disconnect();},18000);
   }
-  if (data.type === 'rfb-resize-pause') {
-    pause = data.pause === true;
-    if (rfb) rfb.resizeSession = !pause;
+  if (data.type === 'rfb-geometry') {
+    editing=data.editing===true;hold=data.hold===true;
+    geometry?.editing(editing);geometry?.hold(hold);
   }
-  if (data.type === 'rfb-input' && frame && telem?.activeId === data.tabId && telem?.focus) {
-    if (typeof data.text === 'string' && data.text.length <= 4096) textInput(data.text);
-    if (Object.hasOwn(xkeys,data.key)) rfb.sendKey(xkeys[data.key]);
-  }
+  if (data.type === 'rfb-input') sendInput(data);
+  if (data.type === 'rfb-ime-release') {planned=null;clearTimeout(planTimer);proxy.release();}
   if (data.type === 'rfb-command' && verified && typeof data.id === 'string') {
     let result = {ok:false};
     try {
       if (data.action === 'diagnostics') result = await api('/diagnostics');
       else if (data.action === 'selection' && frame) result = {text:await selectText()};
       else if (data.action === 'screenshot' && frame) {
-        const canvas = surface.querySelector('canvas');
+        const canvas = geometry?.canvas;
         result = {image:canvas?.toDataURL('image/jpeg',.82)};
       } else result = await api('/command',{version,id:data.id,action:data.action,params:data.params});
     } catch {}
@@ -231,7 +227,41 @@ surface.addEventListener('wheel',event=>{
   if (!event.ctrlKey && Math.abs(event.deltaY) >= Math.abs(event.deltaX) && event.deltaY)
     announce('rfb-gesture',{direction:event.deltaY>0 ? 'down' : 'up',edge:false});
 },{capture:true,passive:true});
-surface.addEventListener('pointerdown',()=>announce('rfb-touch'),{capture:true,passive:true});
+surface.addEventListener('touchend',event=>{
+  const first=drag;
+  drag=null;
+  const touch=event.changedTouches[0];
+  if (!frame || !event.isTrusted || !first || !touch || performance.now()-first.at>460 ||
+    Math.hypot(touch.clientX-first.x,touch.clientY-first.y)>12) return;
+  const view=telem?.viewport;
+  let hint;
+  if (view && geometry && !desktop && geometry.interactive()) {
+    const rect=geometry.canvas.getBoundingClientRect();
+    const unit=geometry.display.scale*view.dpr*view.scale;
+    const x=(touch.clientX-rect.left)/unit+view.offsetLeft,y=(touch.clientY-rect.top)/unit+view.offsetTop;
+    hint=telem.hints.find(box=>x>=box.x && x<box.x+box.w && y>=box.y && y<box.y+box.h);
+  }
+  let prepared=false;
+  if (hint && telem.activeId!=null) {
+    const field={frame:hint.frame,id:hint.id};
+    planned={tabId:telem.activeId,...field,rows:[]};
+    proxy.bind(planned.tabId,hint.role,field);
+    prepared=proxy.focus();
+    clearTimeout(planTimer);
+    planTimer=setTimeout(()=>{
+      if (!planned) return;
+      planned=null;
+      proxy.release();
+    },1250);
+  } else if (proxy.isFocused()) {
+    // The last remote focus could belong to an input the tap just left.
+    planned=null;
+    clearTimeout(planTimer);
+    proxy.release();
+  }
+  announce('rfb-touch',{prepared});
+},{capture:true,passive:true});
+surface.addEventListener('touchcancel',()=>{drag=null;},{capture:true,passive:true});
 window.addEventListener('keydown',event=>{
   if(event.key === 'Escape') announce('rfb-gesture',{direction:'escape'});
 },true);

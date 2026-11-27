@@ -33,7 +33,8 @@ function createService({panel, native, host, origin, inspectInstall, onStop, ser
   function diagnostics() {
     return {service:'iphonie-browser-bridge', version, build, status, connections,
       firefox:browserBuild || null, observedTabs:state?.tabs.length ?? null,
-      pageInspectable:state?.viewport != null, viewport:state?.viewport || null, ipcReady:ipc.listening, ...inspectInstall()};
+      pageInspectable:state?.viewport != null, viewport:state?.viewport || null,
+      focus:state?.focus || null,focusFrame:state?.field?.frame ?? null,ipcReady:ipc.listening, ...inspectInstall()};
   }
 
   const ipc = net.createServer(stream => {

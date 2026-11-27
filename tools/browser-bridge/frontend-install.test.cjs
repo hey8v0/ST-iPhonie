@@ -28,10 +28,10 @@ test('real Git activation and rollback preserve a clean repository and protect l
   git(plugin,['remote','set-url','origin',official]);
   const env = {...process.env,HOME:home,USERPROFILE:home,GIT_CONFIG_COUNT:'1',
     GIT_CONFIG_KEY_0:'url.'+pathToFileURL(remote).href+'.insteadOf',GIT_CONFIG_VALUE_0:official};
-  function call(action) {
+  function call(action,revision=target) {
     return execFileSync(process.execPath,['-e',`const api=require(${JSON.stringify(modulePath)});
       try {api[process.argv[1]](process.argv[2],process.argv[3]);}catch(e){console.error(e.message);process.exitCode=1;}`,
-      action,plugin,target],{env,encoding:'utf8',stdio:['ignore','pipe','pipe']});
+      action,plugin,revision],{env,encoding:'utf8',stdio:['ignore','pipe','pipe']});
   }
   const userFile=path.join(plugin,'draft.txt');
   fs.writeFileSync(userFile,'existing data');
@@ -42,6 +42,11 @@ test('real Git activation and rollback preserve a clean repository and protect l
   call('activate');call('activate');
   assert.equal(git(plugin,['rev-parse','HEAD']),target);
   assert.equal(git(plugin,['status','--porcelain']),'');
+  fs.writeFileSync(path.join(remote,'test-ui.js'),'// follow-up');
+  git(remote,['add','test-ui.js']);git(remote,['commit','-m','phase2 update']);
+  const update=git(remote,['rev-parse','HEAD']);
+  call('activate',update);
+  assert.equal(git(plugin,['rev-parse','HEAD']),update);
   fs.writeFileSync(userFile,'test notes');
   assert.throws(()=>call('restore'),/未跟踪文件/);
   assert.equal(fs.readFileSync(userFile,'utf8'),'test notes');

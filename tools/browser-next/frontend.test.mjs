@@ -28,7 +28,10 @@ test('unreachable, health, credentials, authenticated connection, disconnect and
     answer=null;doc.dispatchEvent(new win.Event('visibilitychange'));await tick();assert.equal(status,'服务未启动');
     answer={service:'iphonie-firefox-v2',state:'ready',code:'ready'};
     const timer=win.setTimeout.bind(win);win.setTimeout=(fn,ms)=>timer(fn,ms===25000?15:ms);
-    retry();await new Promise(r=>setTimeout(r,60));assert.match(content.textContent,/超时/);
+    retry();
+    const end=Date.now()+1000;
+    while (!/超时/.test(content.textContent) && Date.now()<end) await tick();
+    assert.match(content.textContent,/超时/);
   }finally{close();dom.window.close();}
 });
 

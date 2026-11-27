@@ -1,12 +1,12 @@
 {
   "manifest_version": 2,
   "name": "iPhonie Browser Bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local Firefox control for the iPhonie browser.",
   "browser_specific_settings": {"gecko":{"id":"browser-bridge@st-iphonie.local","strict_min_version":"92.0","data_collection_permissions":{"required":["none"]}}},
   "incognito": "not_allowed",
   "permissions": ["nativeMessaging", "tabs", "webNavigation", "sessions", "webRequest", "webRequestBlocking", "http://*/*", "https://*/*"],
   "background": {"scripts":["protocol.js","background.js"]},
   "browser_action": {"default_title":"iPhonie Browser Bridge","default_popup":"popup.html"},
-  "content_scripts": [{"matches":["http://*/*","https://*/*"],"js":["content.js"],"run_at":"document_idle","all_frames":false}]
+  "content_scripts": [{"matches":["http://*/*","https://*/*"],"js":["content.js"],"run_at":"document_idle","all_frames":true,"match_about_blank":true}]
 }

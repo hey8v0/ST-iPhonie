@@ -1,4 +1,7 @@
 html,body{margin:0;width:100%;height:100%;overflow:hidden}
 body{background:#111;touch-action:none;overscroll-behavior:none}
-#surface{width:100%;height:100%;overflow:hidden;transform-origin:top left}
+#surface{position:relative;width:100%;height:100%;overflow:hidden;transform-origin:top left}
 #surface canvas{touch-action:none}
+.resize-preview{position:absolute;z-index:2;left:50%;top:50%;transform:translate(-50%,-50%)}
+.resize-preview[data-top=true]{top:0;transform:translateX(-50%)}
+.browser-ime-proxy{position:fixed;left:4px;top:4px;width:1px;height:1px;padding:0;border:0;opacity:0;pointer-events:none;font-size:16px}

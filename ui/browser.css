@@ -68,8 +68,10 @@
 .browser-v2-home{display:none;overflow:auto;overscroll-behavior:contain}
 .browser-v2[data-start] .browser-v2-home{display:block}
 .browser-v2[data-start] .browser-v2-screen,.browser-v2[data-start] .browser-v2-feedback{visibility:hidden;pointer-events:none}
-.browser-v2-screen{overflow:hidden;max-block-size:var(--browser-ime-cut,none)}
-.browser-v2-screen iframe{display:block;border:0;width:100%;height:var(--browser-frame-h,100%)}
+.browser-v2-screen{overflow:hidden}
+.browser-v2-screen iframe{display:block;position:absolute;inset-inline:0;top:var(--browser-visible-top,0px);
+  border:0;width:100%;height:var(--browser-visible-height,100%)}
+.browser-v2 .browser-progress{position:absolute;z-index:2;inset:0 0 auto}
 .browser-v2-feedback{position:absolute;inset:0;display:grid;align-content:center;overflow:auto;background:var(--bg)}
 .browser-v2-feedback[hidden]{display:none}
 .browser-v2-bottom{flex:none;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));padding:2px 10px max(3px,env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}

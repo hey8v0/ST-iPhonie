@@ -11,6 +11,11 @@ const samePath = (a,b) => process.platform === 'win32' ? a.toLowerCase() === b.t
 const git = (directory,args) => execFileSync('git',['-C',directory,...args],{
   encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:60000,
 }).trim();
+function writeSelection(record) {
+  const next=selectionFile+'.next';
+  fs.writeFileSync(next,JSON.stringify(record),{flag:'w',mode:0o600});
+  fs.renameSync(next,selectionFile);
+}
 
 function pluginDir(given) {
   const rows = [];
@@ -59,8 +64,15 @@ function activate(given,expected) {
   const head = git(directory,['rev-parse','HEAD']);
   if (fs.existsSync(selectionFile)) {
     const previous = JSON.parse(fs.readFileSync(selectionFile,'utf8'));
-    if (previous.directory===directory && previous.target===selected && head===selected) return;
-    throw new Error('已有实验前端记录，请先运行 iphonie-bridge restore-plugin。');
+    if (previous.directory!==directory || ![previous.target,previous.pending].includes(head))
+      throw new Error('已有实验前端记录，请先运行 iphonie-bridge restore-plugin。');
+    if (head === selected) {writeSelection({...previous,target:selected,pending:undefined});return;}
+    const old={...previous,target:head,pending:undefined};
+    writeSelection({...old,pending:selected});
+    try {git(directory,['switch','--detach',selected]);}
+    catch {writeSelection(old);throw new Error('Git 无法更新实验前端，现有文件已保留。');}
+    writeSelection({...old,target:selected});
+    return;
   }
   if (head === selected) return;
   const record = {directory,head,target:selected,branch:git(directory,['branch','--show-current'])};
@@ -74,12 +86,13 @@ function activate(given,expected) {
 
 function restore() {
   if (!fs.existsSync(selectionFile)) return;
-  const {directory,head,branch,target} = JSON.parse(fs.readFileSync(selectionFile,'utf8'));
-  if (pluginDir(directory) !== directory || !commit.test(head) || !commit.test(target)) throw new Error('回退记录无效。');
+  const {directory,head,branch,target,pending} = JSON.parse(fs.readFileSync(selectionFile,'utf8'));
+  if (pluginDir(directory) !== directory || !commit.test(head) || !commit.test(target) ||
+    (pending!==undefined && !commit.test(pending))) throw new Error('回退记录无效。');
   clean(directory);
   const current = git(directory,['rev-parse','HEAD']);
-  if (current !== target && current !== head) throw new Error('插件已切换至其他版本。已保留当前版本。');
-  if (current === target) {
+  if (![target,head,pending].includes(current)) throw new Error('插件已切换至其他版本。已保留当前版本。');
+  if (current === target || current === pending) {
     let original = '';
     try {if (branch) original=git(directory,['rev-parse','--verify','refs/heads/'+branch]);} catch {}
     if (original === head)

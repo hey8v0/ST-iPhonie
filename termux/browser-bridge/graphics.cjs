@@ -10,6 +10,8 @@ const assets = new Map([
   ['/viewer', ['viewer.html','text/html']],
   ['/viewer.js', ['viewer.js','text/javascript']],
   ['/viewer.css', ['viewer.css','text/css']],
+  ['/geometry.js', ['geometry.js','text/javascript']],
+  ['/input.js', ['input.js','text/javascript']],
 ]);
 const localAncestors = 'http://localhost:* http://127.0.0.1:* http://[::1]:* https://localhost:* https://127.0.0.1:* https://[::1]:*';
 const browserModule = '/core/util/browser.js';

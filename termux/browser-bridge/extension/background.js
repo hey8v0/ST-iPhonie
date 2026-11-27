@@ -1,10 +1,12 @@
 (() => {
-  const {version, command, webUrl, metrics, focus, page:validPage, favicon} = bridgeProtocol;
+  const {version, command, webUrl, metrics, focus, fieldId, hints:validHints, page:validPage, favicon} = bridgeProtocol;
   const host = 'st_iphonie_browser_bridge';
   let port, timer, shell, stoppedByVersion = false;
   let accepted = false, retry = 1000, status = 'connecting', running = false;
-  let revision = 0, managed = false, firefoxMajor;
+  let inspecting=false, recheck=false, managed = false, firefoxMajor;
   const desktop = new Map(), failed = new Map();
+  const childFocus=new Map(), revealedFrames=new Map();
+  let activeField;
   const modeKey = 'iphonie-desktop-site';
   const supported = {urls:['http://*/*','https://*/*']};
 
@@ -50,17 +52,59 @@
     const tabs = all.slice(0, 64);
     if (active && !tabs.includes(active)) tabs[tabs.length - 1] = active;
     await restoreModes(tabs);
-    let page = null;
+    let page = null, zoom=1, edit=null, hints=[];
     if (active && webUrl(active.url)) {
       let deadline;
       try {
-        page = await Promise.race([
+        [page,zoom] = await Promise.race([Promise.all([
           browser.tabs.sendMessage(active.id, {type:'bridge-inspect'}, {frameId:0}),
-          new Promise(resolve => {deadline = setTimeout(() => resolve(null), 650);}),
+          browser.tabs.getZoom(active.id).catch(()=>1),
+        ]),new Promise(resolve => {deadline = setTimeout(() => resolve([null,1]), 650);}),
         ]);
       } catch {} finally {clearTimeout(deadline);}
     }
-    const hasTelemetry = metrics(page?.viewport) && focus(page?.focus) && validPage(page?.page);
+    const viewport=page?.viewport && {...page.viewport,zoom};
+    const hasTelemetry = metrics(viewport) && focus(page?.focus) && validPage(page?.page);
+    const choose=(value,frame)=>value?.focus && focus(value.focus) && fieldId(value.field) ?
+      {role:value.focus,field:{frame,id:value.field}} : null;
+    if (hasTelemetry) {
+      edit=choose(page,0);
+      hints=validHints(page.hints) ? page.hints : [];
+      if (page.child || page.frames?.length) {
+        const frames=(await browser.webNavigation.getAllFrames({tabId:active.id}).catch(()=>[]) || []);
+        const ids=frames.filter(row=>row.frameId>0 && (page.child || row.parentFrameId===0))
+          .map(row=>row.frameId).slice(0,24);
+        const first=childFocus.get(active.id);
+        if (ids.includes(first)) {
+          ids.splice(ids.indexOf(first),1);
+          ids.unshift(first);
+        }
+        let timeout;
+        const samples=new Map();
+        try {
+          await Promise.race([
+            Promise.all(ids.map(async id=>{
+              const sample=await browser.tabs.sendMessage(active.id,{type:'bridge-inspect'},{frameId:id}).catch(()=>null);
+              if (sample) samples.set(id,sample);
+            })),
+            new Promise(resolve=>{timeout=setTimeout(resolve,145);}),
+          ]);
+        } finally {clearTimeout(timeout);}
+        for (const id of ids) {
+          const sample=samples.get(id);
+          if (!sample) continue;
+          if (!edit && page.child) edit=choose(sample,id);
+          const rect=page.frames?.find(box=>box.index===sample.index);
+          if (!rect || !validHints(sample.hints)) continue;
+          for (const row of sample.hints) {
+            const x=Math.max(0,rect.x+row.x*rect.sx),y=Math.max(0,rect.y+row.y*rect.sy);
+            const w=Math.min(viewport.width,rect.x+rect.w,rect.x+(row.x+row.w)*rect.sx)-x;
+            const h=Math.min(viewport.height,rect.y+rect.h,rect.y+(row.y+row.h)*rect.sy)-y;
+            if (w>=4 && h>=4 && hints.length<40) hints.push({...row,frame:id,x,y,w,h});
+          }
+        }
+      }
+    }
     return {
       tabs:tabs.map(tab => ({
         id:tab.id, title:(tab.title || '').slice(0, 256), url:tab.active ? displayUrl(tab.url).slice(0, 4096) : '',
@@ -73,23 +117,32 @@
       count:all.length,
       activeId:active?.id ?? null,
       windowMode:win ? (win.state === 'fullscreen' ? 'fullscreen' : 'normal') : 'unknown',
-      focus:hasTelemetry ? page.focus : null,
-      viewport:hasTelemetry ? page.viewport : null,
+      focus:edit?.role || null,
+      field:edit?.field || null,
+      hints,
+      viewport:hasTelemetry ? viewport : null,
       page:hasTelemetry ? page.page : null,
     };
   }
 
   function sync() {
+    if (inspecting) {recheck=true;return;}
     if (timer) return;
     timer = setTimeout(async () => {
       timer = null;
-      const requested = ++revision;
       const target = port;
       if (!accepted) return;
+      inspecting=true;
       try {
         const snapshot = await state();
-        if (revision === requested && accepted) post({type:'state', state:snapshot}, target);
-      } catch {}
+        if (target === port && accepted) {
+          activeField=snapshot.field && {tabId:snapshot.activeId,...snapshot.field};
+          post({type:'state', state:snapshot}, target);
+        }
+      } catch {} finally {
+        inspecting=false;
+        if (recheck) {recheck=false;sync();}
+      }
     }, 100);
   }
 
@@ -148,9 +201,27 @@
         desktop.set(tab.id,p.desktop);
         if (webUrl(tab.url)) await browser.tabs.reload(tab.id,{bypassCache:true});
         break;
+      case 'reset-zoom': await browser.tabs.setZoom(tab.id,1);break;
+      case 'restore-field': {
+        const frames=revealedFrames.get(tab.id) || [];
+        revealedFrames.delete(tab.id);
+        for (const frameId of frames) await browser.tabs.sendMessage(tab.id,{type:'bridge-restore-field'},{frameId}).catch(()=>{});
+        break;
+      }
       case 'leave-page-fullscreen': case 'reveal-field': {
-        const message = msg.action === 'reveal-field' ? 'bridge-reveal-field' : 'bridge-leave-fullscreen';
-        const ok = await browser.tabs.sendMessage(tab.id,{type:message},{frameId:0});
+        const field=activeField;
+        const reveal=msg.action==='reveal-field';
+        if (reveal && (!tab.active || field?.tabId!==tab.id)) return 'action-failed';
+        const message = reveal ? 'bridge-reveal-field' : 'bridge-leave-fullscreen';
+        const frameId=reveal ? field.frame : 0;
+        const ok = await browser.tabs.sendMessage(tab.id,{type:message,id:reveal ? field.id : undefined},{frameId});
+        if (reveal && ok) {
+          const frames=revealedFrames.get(tab.id) || new Set();
+          frames.add(frameId);
+          if (frameId>0 && await browser.tabs.sendMessage(tab.id,{type:'bridge-reveal-child'},{frameId:0}).catch(()=>false))
+            frames.add(0);
+          revealedFrames.set(tab.id,frames);
+        }
         if (!ok) return 'action-failed';
         break;
       }
@@ -209,6 +280,7 @@
             /permission|access forbidden/i.test(reason) ? 'native-denied' : 'native-disconnected';
         }
         accepted = false;
+        activeField=null;
         managed = false;
         port = null;
         void restoreShell();
@@ -228,19 +300,26 @@
   const nav = details => {if (details.frameId === 0) sync();};
   for (const event of [browser.tabs.onCreated, browser.tabs.onActivated, browser.tabs.onRemoved,
     browser.tabs.onAttached, browser.tabs.onDetached, browser.tabs.onUpdated,
-    browser.windows.onFocusChanged, browser.windows.onBoundsChanged]) event?.addListener(sync);
+    browser.windows.onFocusChanged, browser.windows.onBoundsChanged,browser.tabs.onZoomChange]) event?.addListener(sync);
   for (const event of [browser.webNavigation.onCommitted, browser.webNavigation.onCompleted,
     browser.webNavigation.onHistoryStateUpdated, browser.webNavigation.onReferenceFragmentUpdated]) event.addListener(nav);
   browser.webNavigation.onBeforeNavigate.addListener(details=>{
-    if (details.frameId === 0) {failed.delete(details.tabId);sync();}
+    if (details.frameId === 0) {
+      if (activeField?.tabId===details.tabId) activeField=null;
+      failed.delete(details.tabId);childFocus.delete(details.tabId);revealedFrames.delete(details.tabId);sync();
+    }
   });
+  browser.tabs.onActivated.addListener(()=>{activeField=null;});
   browser.webNavigation.onErrorOccurred.addListener(details=>{
     if (details.frameId === 0 && details.error !== 'NS_BINDING_ABORTED') {failed.set(details.tabId,details.url);sync();}
   });
-  browser.tabs.onRemoved.addListener(id=>{desktop.delete(id);failed.delete(id);});
+  browser.tabs.onRemoved.addListener(id=>{desktop.delete(id);failed.delete(id);childFocus.delete(id);revealedFrames.delete(id);});
   browser.runtime.onMessage.addListener((msg, sender) => {
     if (sender.id !== browser.runtime.id) return undefined;
-    if (msg?.type === 'bridge-page-changed' && sender.frameId === 0 && sender.tab && !sender.tab.incognito) sync();
+    if (msg?.type === 'bridge-page-changed' && sender.tab && !sender.tab.incognito) {
+      if (sender.frameId>0) childFocus.set(sender.tab.id,sender.frameId);
+      sync();
+    }
     if (msg?.type === 'bridge-extension-status' && sender.url === browser.runtime.getURL('popup.html')) {
       return Promise.resolve(status);
     }

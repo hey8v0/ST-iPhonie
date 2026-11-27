@@ -3,7 +3,8 @@ import {icon} from './icons.js';
 import {connectTermux,knownTermux,termuxCard,termuxHealth} from './termux-connection.js';
 import {mountSwipeList,swipeRow} from './swipe-list.js';
 import {shareWebPage,webSearchSettings} from './web-share.js';
-import {bridgeKey,bridgeVersion,browserInput,browserLink} from './browser-phase2-link.js';
+import {bridgeKey,bridgeVersion,browserLink,visibleBrowserArea} from './browser-phase2-link.js';
+import {browserInput} from '../termux/browser-bridge/viewer/input.js';
 
 const recentLimit = 30;
 const deletion = {key:'delete',label:'删除',icon:'trash',danger:true};
@@ -51,8 +52,10 @@ export function browserPhase2(ctx,parse) {
   let queuedNav, busy = false, immerse = false, manual = false, fullscreen = '', previous = false;
   let preferImmersive = stored(keyPrefix+':immersive',false) === true;
   let autoHide = stored(keyPrefix+':auto-hide',true) !== false, framebuffer;
-  let lastScroll, gesture, lastToggle = 0, lastTouch = 0, passwordPrompt, rotationHint = false;
-  let activeDialog, failure, pageKey, mountedHeight = 0;
+  let lastScroll, gesture, lastToggle = 0, touch, passwordPrompt, rotationHint = false;
+  let activeDialog, failure, pageKey, feedbackKey, viewerIME=false, geometryKey, layoutKey;
+  let fullHeight=0, keyboardShown=false, revealTimer, revealTab, geometryRAF;
+  const trace=[];
   root.classList.add('browser-v2');
   view.draw(`<div class="browser-toolbar"><form class="browser-address">
     <label class="browser-address-field">${icon('search')}<input type="text" enterkeyhint="go" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="网址或搜索词" placeholder="搜索或输入网址"></label>
@@ -74,29 +77,66 @@ export function browserPhase2(ctx,parse) {
   const feedback = find('.browser-v2-feedback'), progress = find('.browser-progress');
   const active = () => state?.tabs.find(row=>row.id === state.activeId);
   const selection = (action,params) => surface?.command(action,params) || Promise.resolve({ok:false,error:'disconnected'});
-
-  const keyboard = browserInput(ctx,root,payload=>surface?.send('rfb-input',payload),(on,height)=>{
-    if (home || !surface) return;
-    if (on && !root.hasAttribute('data-ime')) {
-      root.dataset.ime = '';
-      frameHost.style.setProperty('--browser-ime-cut',Math.max(0,Math.floor(height-frameHost.getBoundingClientRect().top))+'px');
-      frameHost.style.setProperty('--browser-frame-h',mountedHeight+'px');
-      surface.send('rfb-resize-pause',{pause:true});
-      if (active()) void selection('reveal-field',{tabId:active().id});
-    } else if (!on && root.hasAttribute('data-ime')) {
-      root.removeAttribute('data-ime');
-      frameHost.style.removeProperty('--browser-ime-cut');
-      frameHost.style.removeProperty('--browser-frame-h');
-      surface.send('rfb-resize-pause',{pause:doc.activeElement===address});
-    }
-  });
-
-  function pictureSize() {
-    if (home || root.hasAttribute('data-ime') || keyboard.isFocused()) return;
-    if (frameHost.clientHeight) mountedHeight = frameHost.clientHeight;
+  function record(event,details={}) {
+    trace.push({ms:Math.round(win.performance.now()),event,...details});
+    if (trace.length>100) trace.shift();
   }
-  const observer = win.ResizeObserver ? new win.ResizeObserver(pictureSize) : null;
+  const keyboard = browserInput(ctx,root,payload=>surface?.send('rfb-input',payload),queueGeometry);
+  const typing=()=>viewerIME || keyboard.isFocused() || doc.activeElement===address;
+  function revealField() {
+    win.clearTimeout(revealTimer);
+    revealTimer=null;
+    if (!keyboardShown || !state?.field || !active()) return;
+    revealTab=active().id;
+    void selection('reveal-field',{tabId:revealTab});
+  }
+  function queueGeometry() {
+    if (geometryRAF || !alive) return;
+    geometryRAF=win.requestAnimationFrame(()=>{
+      geometryRAF=0;
+      updateGeometry();
+    });
+  }
+  function updateGeometry() {
+    const layout=visibleBrowserArea(win,frameHost);
+    const editing=typing() && !home;
+    const activeKeyboard=editing && fullHeight-layout.height>65;
+    if (!editing && !home && layout.height>80) fullHeight=layout.height;
+    const available=Math.max(0,layout.height);
+    const clip=editing && available>=80 && layout.containerHeight-available>2;
+    const signature=JSON.stringify([layout,editing,clip,home]);
+    if (signature!==layoutKey) {
+      layoutKey=signature;
+      frameHost.style.setProperty('--browser-visible-top',clip ? layout.top+'px' : '0px');
+      frameHost.style.setProperty('--browser-visible-height',clip ? available+'px' : '100%');
+      const canvas=surface?.frame?.getBoundingClientRect();
+      record('host-layout',{area:layout,editing,iframe:canvas && {width:Math.round(canvas.width),height:Math.round(canvas.height)}});
+    }
+    const key=String(editing)+String(home);
+    if (surface && geometryKey!==key) {
+      geometryKey=key;
+      surface.send('rfb-geometry',{editing,hold:home});
+    }
+    if (keyboardShown===activeKeyboard) return;
+    keyboardShown=activeKeyboard;
+    gesture=null;
+    record(activeKeyboard?'keyboard-shown':'keyboard-hidden',{area:layout});
+    win.clearTimeout(revealTimer);
+    revealTimer=null;
+    if (activeKeyboard && doc.activeElement!==address) revealTimer=win.setTimeout(revealField,650);
+    else if (revealTab!=null) {
+      void selection('restore-field',{tabId:revealTab});
+      revealTab=null;
+    }
+  }
+  const observer = win.ResizeObserver ? new win.ResizeObserver(queueGeometry) : null;
   observer?.observe(frameHost);
+  const visual=new Set([win.visualViewport]);
+  try {visual.add(win.top.visualViewport);} catch {}
+  for (const viewport of visual) {
+    viewport?.addEventListener('resize',queueGeometry);
+    viewport?.addEventListener('scroll',queueGeometry);
+  }
   function layout() {
     root.toggleAttribute('data-start',home);
     root.toggleAttribute('data-immersive',!home && immerse);
@@ -108,8 +148,13 @@ export function browserPhase2(ctx,parse) {
     find('[data-action=tabs]').setAttribute('aria-label',count+' 个标签页');
     find('[data-action=back]').disabled = !state?.activeId && state?.activeId !== 0;
     find('[data-action=forward]').disabled = find('[data-action=back]').disabled;
+    queueGeometry();
   }
   function feedbackFor(text,actions=[],tone='notice') {
+    const key=JSON.stringify([text,actions,tone]);
+    if (key===feedbackKey) return;
+    feedbackKey=key;
+    record(text?'connection-message':'connection-message-cleared',{tone});
     feedback.hidden = !text;
     feedback.innerHTML = text ? termuxCard('本机浏览器','',text,
       actions.map(([id,label])=>btn(id,label,id==='retry'?'primary':'secondary')).join(''),tone) : '';
@@ -171,9 +216,10 @@ export function browserPhase2(ctx,parse) {
   }
 
   function setImmersive(on,requested=false) {
-    if (on && (home || !rfbReady || !shell || keyboard.isFocused())) return;
+    if (on && (home || !rfbReady || !shell || typing())) return;
     if (immerse === on) return;
     immerse=on;
+    record(on?'toolbar-hide':'toolbar-show',{manual:requested});
     manual=on && requested;
     lastToggle=Date.now();
     gesture=null;
@@ -230,7 +276,7 @@ export function browserPhase2(ctx,parse) {
       };
       return;
     }
-    if (stage === 'ready') {rfbReady=true;failure=null;void initialize();return;}
+    if (stage === 'ready') {rfbReady=true;failure=null;geometryKey=null;queueGeometry();void initialize();return;}
     if (stage === 'pair') {forgetConnection();feedbackFor('请配对本机浏览器。',[['pair-browser','配对'],['legacy-browser','兼容连接']]);return;}
     if (stage === 'closed' && failure) return;
     if (pictureError[stage]) {
@@ -241,7 +287,7 @@ export function browserPhase2(ctx,parse) {
       keyboard.bind(null,null);
       if (fullscreen) void exitFull();
       setImmersive(false);
-      feedbackFor(pictureError[stage],[['retry','重连'],['help','帮助'],['legacy-browser','兼容连接'],
+      feedbackFor(pictureError[stage],[['retry','重连'],['help','帮助'],['legacy-browser','兼容连接'],['diagnostics','导出诊断'],
         ...(queuedNav?[['external','外部打开']]:[])]);
       layout();
     }
@@ -269,16 +315,29 @@ export function browserPhase2(ctx,parse) {
     if (tab?.status === 'ready' && tab.url && recent[0]?.url !== tab.url) writeRecent(tab);
     if (!home && doc.activeElement !== address) address.value=webUrl(tab?.url)?.href || '';
     progress.hidden=home || tab?.status !== 'loading';
-    keyboard.bind(state.activeId,state.focus);
-    if (!home && state.focus && state.viewport && Date.now()-lastTouch<1300 && win.matchMedia('(pointer: coarse)').matches) {
+    const focusBefore=state.field?.id;
+    keyboard.bind(state.activeId,state.focus,state.field);
+    if (!home && !viewerIME && state.focus && !touch?.prepared && focusBefore!==touch?.field &&
+        touch && Date.now()-touch.at<1000 && win.matchMedia('(pointer: coarse)').matches) {
       keyboard.focus();
-      lastTouch=0;
+      touch=null;
     }
+    const focusMark=[state.focus,state.field?.frame,state.field?.id].join('|');
+    if (focusMark!==lastFocus) {
+      lastFocus=focusMark;
+      record('remote-focus',{focus:state.focus,frame:state.field?.frame ?? null});
+      if (keyboardShown && state.field) {
+        win.clearTimeout(revealTimer);
+        revealTimer=win.setTimeout(revealField,480);
+      }
+    }
+    const metrics=JSON.stringify(state.viewport);
+    if (metrics!==lastMetrics) {lastMetrics=metrics;record('firefox-viewport',{viewport:state.viewport});}
     if (!home && shell && rfbReady && tab?.status === 'error')
       feedbackFor('网页暂时打不开。',[['reload','重试'],['external','在外部打开']]);
     else if (shell && rfbReady && !failure) feedbackFor('');
     const current = state.page?.scroll;
-    if (current != null && lastScroll != null && gesture && Date.now()-gesture.at<1100 && Date.now()-lastToggle>650) {
+    if (!typing() && current != null && lastScroll != null && gesture && Date.now()-gesture.at<1100 && Date.now()-lastToggle>650) {
       const diff = current-gesture.baseline;
       if (autoHide && !manual && gesture.direction === 'down' && diff >= 65) setImmersive(true);
       else if ((!manual || gesture.direction === 'up') && gesture.direction === 'up' && diff <= -35) setImmersive(false);
@@ -293,14 +352,27 @@ export function browserPhase2(ctx,parse) {
     }
     layout();
   }
-  let previousVideo=false;
+  let previousVideo=false,lastFocus,lastMetrics,lastControlStatus;
   function linkEvent(type,data) {
     if (!alive || !mounted) return;
-    if (type === 'rfb-state') stageChanged(data.stage);
-    if (type === 'rfb-size' && [data.width,data.height].every(x=>Number.isInteger(x) && x>0 && x<=10000))
-      framebuffer={width:data.width,height:data.height};
-    if (type === 'browser-state') browserState(data);
-    if (type === 'rfb-touch') lastTouch=Date.now();
+    if (type === 'rfb-state') {
+      record('rfb-status',{stage:data.stage});
+      stageChanged(data.stage);
+    }
+    if (type === 'rfb-trace') {
+      framebuffer=data.details?.framebuffer;
+      record(data.kind,data.details);
+      if (data.kind==='frame-painted' && keyboardShown && revealTimer) revealField();
+    }
+    if (type === 'browser-state') {
+      if (data.status!==lastControlStatus) {
+        lastControlStatus=data.status;
+        record('control-state',{status:data.status});
+      }
+      browserState(data);
+    }
+    if (type === 'rfb-touch') touch={at:Date.now(),prepared:data.prepared,field:state?.field?.id};
+    if (type === 'rfb-ime') {viewerIME=data.active===true;queueGeometry();}
     if (type === 'rfb-gesture' && data.direction === 'escape' && immerse) {
       if (fullscreen) void exitFull(); else setImmersive(false);
       return;
@@ -312,7 +384,8 @@ export function browserPhase2(ctx,parse) {
         else {preferImmersive=false;store(keyPrefix+':immersive',false);setImmersive(false);}
         return;
       }
-      if (!keyboard.isFocused() && (!gesture || gesture.direction!==data.direction || now-gesture.at>1100))
+      if (typing()) return;
+      if (!gesture || gesture.direction!==data.direction || now-gesture.at>1100)
         gesture={at:now,baseline:lastScroll ?? 0,direction:data.direction};
       else if (gesture) gesture.at=now;
     }
@@ -338,7 +411,7 @@ export function browserPhase2(ctx,parse) {
     surface?.close();surface=null;
     legacy?.();legacy=null;
     initializing=false;shell=false;rfbReady=false;state=null;
-    mounted=false;failure=null;framebuffer=null;
+    mounted=false;failure=null;framebuffer=null;viewerIME=false;geometryKey=null;
     keyboard.bind(null,null);
   }
   function pair() {
@@ -355,7 +428,7 @@ export function browserPhase2(ctx,parse) {
   function connect() {
     home=false;address.value='';layout();
     if (surface) {
-      surface.send('rfb-resize-pause',{pause:false});
+      queueGeometry();
       if (preferImmersive && shell) setImmersive(true,true);
       if (shell && queuedNav) {const entry=queuedNav;queuedNav=null;void navigate(entry);}
       else void initialize();
@@ -375,7 +448,7 @@ export function browserPhase2(ctx,parse) {
     if (fullscreen) void exitFull();
     keyboard.release();setImmersive(false);
     if (legacy) forgetConnection();
-    else surface?.send('rfb-resize-pause',{pause:true});
+    else surface?.send('rfb-ime-release');
     home=true;address.value='';progress.hidden=true;
     drawHome();layout();
   }
@@ -451,7 +524,9 @@ export function browserPhase2(ctx,parse) {
       ['pair-browser','配对本机浏览器'],['web-search','Char 搜索设置']] : [
       ['reload','刷新'],['share','分享给角色'],['bookmark',bookmarks.some(row=>row.url===tab?.url)?'取消收藏':'收藏此页'],
       ['saved','收藏'],['history','最近打开'],['external','外部打开'],
-      ['mode',tab?.desktop?'切回手机版网页':'请求桌面版网页'],['fullscreen','全屏'],
+      ['mode',tab?.desktop?'切回手机版网页':'请求桌面版网页'],
+      ...(state?.viewport && Math.abs(state.viewport.zoom-1)>.02?[['reset-zoom','还原此页缩放']]:[]),
+      ['fullscreen','全屏'],
       ['immersive','隐藏浏览工具'],['keyboard','打开键盘'],['copy','复制选中文字'],['paste','从剪贴板粘贴'],
       ['settings','浏览器设置'],['help','浏览器帮助'],
       ['diagnostics','导出诊断'],['web-search','Char 搜索设置']];
@@ -489,6 +564,7 @@ export function browserPhase2(ctx,parse) {
         break;
       case 'fullscreen':if(fullscreen)await exitFull();else if (rfbReady && shell) enterFull('manual');break;
       case 'keyboard':
+        surface?.send('rfb-ime-release');
         if (!keyboard.focus()) ctx.notify('请先点网页上的输入框。');
         break;
       case 'settings': {
@@ -528,16 +604,15 @@ export function browserPhase2(ctx,parse) {
         break;
       case 'diagnostics': {
         const result=await selection('diagnostics');
-        if (!result?.service) {ctx.notify('无法读取诊断，请运行 iphonie-bridge diagnose。');break;}
         const {width,height}=frameHost.getBoundingClientRect();
-        const blob=new win.Blob([JSON.stringify({...result,framebuffer,container:{width:Math.round(width),
-          height:Math.round(height)}},null,2)],{type:'application/json'});
+        const blob=new win.Blob([JSON.stringify({...(result?.service?result:{}),protocol:bridgeVersion,framebuffer,
+          container:{width:Math.round(width),height:Math.round(height)},events:trace},null,2)],{type:'application/json'});
         const url=win.URL.createObjectURL(blob);
         const a=doc.createElement('a');a.href=url;a.download='iphonie-browser-diagnostics.json';a.click();
         win.setTimeout(()=>win.URL.revokeObjectURL(url),1000);
         break;
       }
-      case 'back': case 'forward': case 'reload': case 'mode':
+      case 'back': case 'forward': case 'reload': case 'mode': case 'reset-zoom':
         if (tab) {
           keyboard.release();
           if (action==='mode') await run('view-mode',{tabId:tab.id,desktop:!tab.desktop});
@@ -546,8 +621,8 @@ export function browserPhase2(ctx,parse) {
         break;
     }
   }
-  address.addEventListener('focus',()=>surface?.send('rfb-resize-pause',{pause:true}));
-  address.addEventListener('blur',()=>surface?.send('rfb-resize-pause',{pause:keyboard.isFocused()}));
+  address.addEventListener('focus',queueGeometry);
+  address.addEventListener('blur',queueGeometry);
   address.closest('form').onsubmit=event=>{
     event.preventDefault();
     const entry=parse(address.value);
@@ -567,6 +642,7 @@ export function browserPhase2(ctx,parse) {
   view.openURL=(url,title)=>{if (webUrl(url)) void navigate({url,title});};
   view.back=()=>{
     if (keyboard.isFocused()) {keyboard.release();return true;}
+    if (viewerIME) {surface?.send('rfb-ime-release');return true;}
     if (fullscreen) {void exitFull();return true;}
     if (immerse) {setImmersive(false);return true;}
     if (!home) {goHome();return true;}
@@ -574,6 +650,7 @@ export function browserPhase2(ctx,parse) {
   };
   view.leave=()=>{
     keyboard.release();
+    surface?.send('rfb-ime-release');
     if (fullscreen) void exitFull();
     setImmersive(false);
   };
@@ -586,6 +663,12 @@ export function browserPhase2(ctx,parse) {
     passwordPrompt?.close();
     forgetConnection();
     observer?.disconnect();
+    win.clearTimeout(revealTimer);
+    win.cancelAnimationFrame(geometryRAF);
+    for (const viewport of visual) {
+      viewport?.removeEventListener('resize',queueGeometry);
+      viewport?.removeEventListener('scroll',queueGeometry);
+    }
     keyboard.dispose();
     probe?.abort();
     historyList?.dispose();

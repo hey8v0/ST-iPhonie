@@ -9,6 +9,8 @@ const {chromium}=require('playwright');
 const websocket=require('ws');
 const {attachGraphics,serveGraphics}=require('../../termux/browser-bridge/graphics.cjs');
 const {createService}=require('../../termux/browser-bridge/service.cjs');
+const {writeFrame}=require('../../termux/browser-bridge/frames.cjs');
+const build=require('../../termux/browser-bridge/extension/manifest.json').version;
 const u16=x=>{const b=Buffer.alloc(2);b.writeUInt16BE(x);return b;};
 const i32=x=>{const b=Buffer.alloc(4);b.writeInt32BE(x);return b;};
 const rect=(w,h,encoding,reason=0)=>Buffer.concat([u16(reason),u16(0),u16(w),u16(h),i32(encoding)]);
@@ -49,6 +51,8 @@ function testDesktop(onResize,onPointer) {
           const w=incoming.readUInt16BE(2),h=incoming.readUInt16BE(4);
           onResize(w,h);
           socket.write(Buffer.concat([Buffer.from([0,0,0,1]),size(w,h,1)]));
+          setTimeout(()=>{if(!socket.destroyed) socket.write(Buffer.concat([
+            Buffer.from([0,0,0,1]),rect(16,16,0),Buffer.alloc(16*16*4,200)]));},150);
         }else if(incoming[0]===5 && incoming[1]===1){
           onPointer(incoming.readUInt16BE(2),incoming.readUInt16BE(4));
         }
@@ -69,6 +73,20 @@ test('real noVNC core paints and negotiates a CSS-size framebuffer through the a
     serveGraphics:(req,res,origin)=>serveGraphics(req,res,origin,process.env.STIP_TEST_NOVNC)});
   const stop=attachGraphics(service.server,{host,origin,panel:key,onIdle(){},websocket,vncPort:tcp.address().port});
   await new Promise(resolve=>service.server.listen(6091,'127.0.0.1',resolve));
+  await new Promise(resolve=>service.ipc.listen(0,'127.0.0.1',resolve));
+  const native=net.connect(service.ipc.address().port,'127.0.0.1');
+  await once(native,'connect');
+  native.resume();
+  writeFrame(native,{type:'authenticate',token:'b'.repeat(64)});
+  writeFrame(native,{type:'hello',version:3,build,firefox:'161.0'});
+  writeFrame(native,{type:'state',version:3,state:{
+    tabs:[{id:1,title:'Fixture',url:'https://example.org/',access:'web',status:'ready',desktop:false,icon:''}],
+    count:1,activeId:1,windowMode:'fullscreen',focus:null,field:null,
+    hints:[{id:'field-1',frame:4,role:'input:text',x:100,y:120,w:90,h:40}],
+    viewport:{width:390,height:670,visualWidth:390,visualHeight:670,dpr:1,scale:1,zoom:1,outerWidth:390,
+      screenWidth:390,documentWidth:390,offsetTop:0,offsetLeft:0,touchPoints:0,mobileJS:false,coarse:false},
+    page:{scroll:0,fullscreen:'none'},
+  }});
   const parent=http.createServer((req,res)=>{
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});
     res.end(`<style>iframe{border:0;width:390px;height:670px}</style>
@@ -84,7 +102,7 @@ test('real noVNC core paints and negotiates a CSS-size framebuffer through the a
   try {
     const wrong=new websocket.WebSocket(origin.replace('http:','ws:')+'/rfb',['iphonie.'+'c'.repeat(64)],{origin});
     await once(wrong,'error');
-    const page=await browser.newPage();
+    const page=await browser.newPage({hasTouch:true});
     const failures=[];
     page.on('console',message=>{if (['warning','error'].includes(message.type())) failures.push(message.text());});
     page.on('pageerror',error=>failures.push(error.message));
@@ -97,7 +115,7 @@ test('real noVNC core paints and negotiates a CSS-size framebuffer through the a
     for(let i=0;i<40 && !seen.some(([w,h])=>w===390 && h===670);i++) await new Promise(r=>setTimeout(r,25));
     assert(seen.some(([w,h])=>w===390 && h===670),JSON.stringify(seen));
     const frame=page.frameLocator('iframe');
-    await frame.locator('canvas').evaluate(canvas=>new Promise((resolve,reject)=>{
+    await frame.locator('#surface canvas[tabindex]').evaluate(canvas=>new Promise((resolve,reject)=>{
       const until=Date.now()+2500;
       function check(){
         if (canvas.width===390 && canvas.height===670) resolve();
@@ -106,17 +124,44 @@ test('real noVNC core paints and negotiates a CSS-size framebuffer through the a
       }
       check();
     }));
+    await frame.locator('.resize-preview').waitFor({state:'hidden'});
     const box=await page.locator('iframe').boundingBox();
     await page.mouse.click(box.x+70,box.y+90);
     for(let i=0;i<40 && !points.length;i++) await new Promise(r=>setTimeout(r,25));
     assert.deepEqual(points.at(-1),[70,90]);
+    await frame.locator('.browser-ime-proxy').evaluate(el=>{
+      el.addEventListener('focus',()=>{window.activatedOnFocus=navigator.userActivation.isActive;},{once:true});
+    });
+    await page.touchscreen.tap(box.x+150,box.y+140);
+    try {await page.waitForFunction(()=>steps.some(x=>x.type==='rfb-touch'&&x.prepared===true),null,{timeout:3500});}
+    catch {assert.fail(JSON.stringify({failures,steps:await page.evaluate(()=>steps.map(e=>({
+      type:e.type,kind:e.kind,stage:e.stage,prepared:e.prepared,focus:e.state?.focus,hints:e.state?.hints?.length,
+    })))}));}
+    assert.equal(await frame.locator('.browser-ime-proxy').evaluate(el=>el===document.activeElement && activatedOnFocus),true);
+    await page.touchscreen.tap(box.x+30,box.y+45);
+    await page.waitForFunction(()=>steps.some(x=>x.type==='rfb-touch'&&x.prepared===false));
+    assert.equal(await frame.locator('.browser-ime-proxy').evaluate(el=>el===document.activeElement),false);
+    await page.locator('iframe').evaluate(iframe=>{
+      window.viewerBefore=iframe;
+      iframe.contentWindow.postMessage({type:'rfb-geometry',editing:true},iframe.src);
+      iframe.style.height='550px';
+      requestAnimationFrame(()=>{iframe.style.height='480px';requestAnimationFrame(()=>{iframe.style.height='365px';});});
+    });
+    await page.waitForFunction(()=>steps.some(x=>x.kind==='resize-reply'&&x.details.reported.height===365));
+    await frame.locator('.resize-preview').waitFor({state:'visible'});
+    await frame.locator('.resize-preview').waitFor({state:'hidden'});
+    assert.deepEqual(seen,[[390,670],[390,365]]);
+    assert.equal(await page.evaluate(()=>viewerBefore===document.querySelector('iframe')),true);
     await page.goto('http://localhost:'+parent.address().port+'/');
     await page.waitForFunction(()=>steps.some(x=>x.stage==='ready'),null,{timeout:10000});
   }finally{
     await browser.close();
+    native.destroy();
+    service.shutdown();
     stop();
     service.server.closeAllConnections();
     parent.closeAllConnections();
-    await Promise.all([new Promise(r=>service.server.close(r)),new Promise(r=>tcp.close(r)),new Promise(r=>parent.close(r))]);
+    await Promise.all([new Promise(r=>service.server.close(r)),new Promise(r=>service.ipc.close(r)),
+      new Promise(r=>tcp.close(r)),new Promise(r=>parent.close(r))]);
   }
 });
