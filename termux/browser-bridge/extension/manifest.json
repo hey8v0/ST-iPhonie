@@ -1,0 +1,12 @@
+{
+  "manifest_version": 2,
+  "name": "iPhonie Browser Bridge",
+  "version": "0.1.0",
+  "description": "Local Firefox control for the iPhonie Phase 1 experiment.",
+  "browser_specific_settings": {"gecko":{"id":"browser-bridge@st-iphonie.local","strict_min_version":"92.0","data_collection_permissions":{"required":["none"]}}},
+  "incognito": "not_allowed",
+  "permissions": ["nativeMessaging", "tabs", "webNavigation"],
+  "background": {"scripts":["protocol.js","background.js"]},
+  "browser_action": {"default_title":"iPhonie Browser Bridge","default_popup":"popup.html"},
+  "content_scripts": [{"matches":["http://*/*","https://*/*"],"js":["content.js"],"run_at":"document_idle","all_frames":false}]
+}

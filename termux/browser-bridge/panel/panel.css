@@ -1,0 +1,28 @@
+:root {
+  color-scheme:light dark;
+  --bg:light-dark(#f1f6fc,#151831);
+  --card:light-dark(#fff,#202547);
+  --ink:light-dark(#192942,#edf5fd);
+  --ink2:light-dark(#52657d,#bfcde0);
+  --accent:light-dark(#165faf,#a8d5ff);
+  --line:light-dark(#d6e4f3,#394368);
+  font:16px system-ui,sans-serif;
+  background:var(--bg);
+  color:var(--ink);
+}
+main {max-width:36rem;margin:auto;padding:16px;display:grid;gap:12px}
+h1 {font-size:1.42rem;margin:4px 0}
+section {min-width:0;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;overflow-wrap:anywhere}
+p {margin:6px 0;color:var(--ink2)}
+p:empty {display:none}
+button,input {font:inherit;color:inherit;min-height:44px;box-sizing:border-box}
+button {border-radius:14px;padding:6px 10px;border:1px solid var(--line);background:var(--bg);color:var(--accent)}
+button[aria-current="true"] {border-color:var(--accent);font-weight:bold}
+button:disabled {opacity:.5}
+input {min-width:0;border:1px solid var(--line);border-radius:12px;padding:0 9px;background:var(--card)}
+form {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}
+#actions,#controls,.row {display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.row {justify-content:space-between;margin-top:0}
+ul {list-style:none;padding:0;margin:8px 0 0}
+li {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;margin-top:6px}
+li button:first-child {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:start}

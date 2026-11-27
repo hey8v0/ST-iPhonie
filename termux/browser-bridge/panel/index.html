@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>小手机 · Firefox 控制验证</title>
+  <link rel="stylesheet" href="/panel.css">
+  <script src="/panel.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>Firefox 控制验证</h1>
+    <section aria-label="扩展连接">
+      <strong id="connection" role="status">正在检查连接</strong>
+      <div id="actions">
+        <button id="retry">重新检查</button>
+        <button id="export">导出诊断</button>
+      </div>
+    </section>
+    <section aria-label="当前标签页">
+      <strong id="title">等待 Firefox 标签页</strong>
+      <p id="address"></p>
+      <p id="page"></p>
+      <p id="focus"></p>
+      <p id="viewport"></p>
+    </section>
+    <section aria-label="浏览器控制">
+      <form id="navigate">
+        <input id="url" type="url" inputmode="url" aria-label="网页地址" placeholder="https://example.org" required maxlength="4096">
+        <button disabled>打开</button>
+      </form>
+      <div id="controls">
+        <button data-command="back" disabled>返回</button>
+        <button data-command="forward" disabled>前进</button>
+        <button data-command="reload" disabled>刷新</button>
+        <button id="enter" disabled>隐藏 Firefox 工具栏</button>
+        <button id="exit" disabled>恢复工具栏</button>
+      </div>
+      <p id="result" role="status"></p>
+    </section>
+    <section aria-label="标签页">
+      <div class="row"><strong id="tab-count">标签页</strong><button id="add" disabled>新建标签页</button></div>
+      <ul id="tabs"></ul>
+    </section>
+  </main>
+</body>
+</html>
