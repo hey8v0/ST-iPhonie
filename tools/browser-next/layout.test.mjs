@@ -16,7 +16,7 @@ addEventListener('message',({data})=>{
 });
 send({type:'iphonie-vnc',state:'connected'});`;
 const entryScript=`
-import {browserApp} from './ui/browser.js';
+import {legacyBrowserApp as browserApp} from './ui/browser.js';
 localStorage.setItem('stip-browser-recent:layout',JSON.stringify([{url:'https://example.org/page',title:'A very long saved website title that should not cause horizontal overflow'},'https://example.com/history']));
 window.commands=[];
 window.addEventListener('message',event=>{if(event.data.type==='test-command')window.commands.push(event.data);});

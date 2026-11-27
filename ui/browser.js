@@ -4,6 +4,7 @@ import {connectTermux, knownTermux, termuxCard, termuxHealth, TERMUX_VIEW} from 
 import {btn, copyText, createView, esc} from './common.js';
 import {icon} from './icons.js';
 import {mountSwipeList, swipeRow} from './swipe-list.js';
+import {browserPhase2} from './browser-phase2.js';
 
 function webAddress(value) {
   try {
@@ -64,6 +65,16 @@ function mobileAddress(address) {
   return url.href;
 }
 export function browserApp(ctx) {
+  const {win} = ctx;
+  if (/Android/i.test(win.navigator?.userAgent || '') &&
+      ['localhost','127.0.0.1','[::1]'].includes(win.location.hostname) &&
+      win.location.origin !== new URL(TERMUX_VIEW).origin) {
+    const home=currentTavernHome(win);
+    return browserPhase2(ctx,value=>browserTarget(value,home));
+  }
+  return legacyBrowserApp(ctx);
+}
+export function legacyBrowserApp(ctx) {
   const {win, doc} = ctx, view = createView(ctx, 'browser');
   const tavernHome = currentTavernHome(win);
   const localAndroid = /Android/i.test(win.navigator?.userAgent || '') &&
@@ -80,7 +91,7 @@ export function browserApp(ctx) {
   let disconnectTermux, homeProbe, nativeOverlay=false;
   let index = 0, timer, frame, layers, full = false, landscape = false, generation = 0;
   view.draw(`<div class="browser-toolbar">
-    <form class="browser-address"><label class="browser-address-field">${icon('search')}<input type="text" inputmode="url" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="网址或搜索词" placeholder="输入网址或搜索词"></label><button type="submit" class="browser-icon browser-go" aria-label="前往">${icon('next')}</button></form>
+    <form class="browser-address"><label class="browser-address-field">${icon('search')}<input type="text" enterkeyhint="go" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="网址或搜索词" placeholder="输入网址或搜索词"></label>${btn('home-more',icon('more'),'browser-icon','aria-label="更多浏览器操作" title="更多"')}</form>
     <div class="browser-actions" role="group" aria-label="浏览网页">
       ${btn('back', icon('back'), 'browser-icon', 'aria-label="后退" title="后退"')}
       ${btn('forward', icon('next'), 'browser-icon', 'aria-label="前进" title="前进"')}
@@ -333,7 +344,7 @@ export function browserApp(ctx) {
         if(termuxControls){if(keyboard.isOpen())keyboard.hide();else keyboard.show();}
         break;
       case 'share': await shareCurrent();break;
-      case 'more-browser': {
+      case 'home-more': case 'more-browser': {
         await beforeOverlay();
         const remoteItems=[['home','Firefox 主页'],['tabs','下一个标签页'],['newTab','新建标签页'],['closeTab','关闭标签页'],
           ['mobile','手机宽度'],['desktop','桌面宽度'],['fit','适应画面'],['firefoxFull','切换 Firefox 紧凑模式'],

@@ -33,7 +33,7 @@ export function termuxCard(title, state, text, actions, tone='neutral'){
   </div></section>`;
 }
 
-export function connectTermux(ctx, content, note, onState=()=>{}) {
+export function connectTermux(ctx, content, note, onState=()=>{}, {compatibility=false}={}) {
   const {win,doc}=ctx;
   let active=true, sequence=0, deadline, poll, frame, state, code, detail;
   let seen=knownTermux(win);
@@ -91,7 +91,7 @@ export function connectTermux(ctx, content, note, onState=()=>{}) {
         if(!h) {show('environment','本机端口运行了其他程序或旧版本，请查看启动教程。');return;}
         healthSnapshot={state:h.state,code:h.code,build:h.build,healthCheck:h.healthCheck,vncSecurity:h.vncSecurity};seen=true;
         code=Object.hasOwn(reasons,h.code)?h.code:undefined;
-        if(h.state==='ready'){controls=h.controls===true && h.localKeyboard===true;viewer();return;}
+        if(h.state==='ready'){controls=!compatibility && h.controls===true && h.localKeyboard===true;viewer();return;}
         if(h.state==='starting' && Date.now()<end){
           show('starting',reasons[code]);poll=win.setTimeout(check,1200);return;
         }
