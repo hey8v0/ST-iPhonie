@@ -65,7 +65,7 @@ test('Phase 2 home, five tools, true layout release, tabs, desktop command and i
       const send=(type,data)=>parent.postMessage({type,...data},'${app}');
       addEventListener('message',({data})=>{
         if (data.type==='rfb-init') {
-          send('repair-info',{build:'0.2.2',addon:'/private/bridge.xpi',update:'extension'});
+          send('repair-info',{build:'0.2.3',addon:true,update:'extension'});
           send('rfb-state',{stage:'ready'});
         }
         if (data.type==='rfb-command') {
@@ -185,10 +185,10 @@ test('Phase 2 home, five tools, true layout release, tabs, desktop command and i
       await page.evaluate(width=>{document.querySelector('.screen').style.width=width+'px';},width);
       assert(await tools.evaluate(el=>el.scrollWidth<=el.clientWidth));
     }
-    await tools.getByRole('button',{name:'填入 XPI 路径'}).click();
+    await tools.getByRole('button',{name:'安装签名扩展'}).click();
     await page.waitForFunction(()=>observed.some(row=>row.type==='qa-repair'&&row.action==='repair-addon'));
     await tools.getByRole('button',{name:'回到浏览'}).click();
-    await tools.getByText(/正在等配套扩展/).waitFor();
+    await tools.getByText(/正在等待签名扩展/).waitFor();
     assert.equal(await tools.getByRole('button',{name:'外部打开画面'}).isVisible(),true);
   } finally {await browser.close();}
 });

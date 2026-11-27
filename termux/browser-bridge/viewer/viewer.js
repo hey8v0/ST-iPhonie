@@ -5,6 +5,7 @@ const surface = document.getElementById('surface');
 const trusted = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
 const token = /^[a-f0-9]{64}$/;
 const version = 3;
+const supportedServices = new Set(['0.2.2','0.2.3']);
 const recoveryMode=location.pathname==='/repair';
 let parentOrigin, key, rfb, geometry,frame = false, verified = false, telem, desktop = false;
 let stopped = false, pollTimer, connectionTimer, waitingClipboard,lastStatus,planned,planTimer, editing=false,hold=false;
@@ -45,7 +46,7 @@ async function status() {
     const result = await api('/status');
     telem = result.state;
     reconcileInput();
-    publish({status:result.status,version:result.version,build:result.build,extension:result.extension,state:telem});
+    publish({status:result.status,version:result.version,build:result.build,extension:result.extension,signed:result.signed,state:telem});
     desktop = telem?.tabs.find(tab=>tab.id === telem.activeId)?.desktop === true;
     geometry?.mode(desktop);
     geometry?.firefox(telem?.viewport);
@@ -65,8 +66,8 @@ async function connect() {
     const result = await api('/status');
     if (recoveryMode) {
       if (result?.service!=='iphonie-firefox-recovery' || result.revision!==1) {setStage('version');return;}
-      announce('repair-info',{build:result.build,addon:result.addon,update:result.update});
-    } else if (result?.version !== version || result.build!=='0.2.2') {
+      announce('repair-info',{build:result.build,addon:result.addon,update:result.update,signed:result.signed});
+    } else if (result?.version !== version || !supportedServices.has(result.build)) {
       publish({status:'version-mismatch',version:result?.version,build:result?.build,state:null});
       setStage('version');return;
     }
@@ -177,7 +178,7 @@ window.addEventListener('message',async ({source,origin,data})=>{
     try {
       if (recoveryMode) {
         if (data.action==='repair-done' ||
-          (frame && ['repair-open','repair-restore','repair-addon'].includes(data.action))) result=await api('/'+data.action,{});
+          (frame && ['repair-open','repair-restore','repair-addon','repair-restart'].includes(data.action))) result=await api('/'+data.action,{});
       } else if (data.action === 'diagnostics') result = await api('/diagnostics');
       else if (data.action === 'selection' && frame) result = {text:await selectText()};
       else if (data.action === 'screenshot' && frame) {

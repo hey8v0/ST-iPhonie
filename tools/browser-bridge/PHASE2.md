@@ -1,6 +1,6 @@
 # 小手机浏览器 Phase 2 测试版
 
-此分支基于安卓真机验收通过的 `browser-bridge-poc`。这一轮插件前端、本机服务和 Firefox 扩展均为 `0.2.2`，控制协议为 `v3`。Xvnc、Firefox Profile、noVNC 1.6.0 和画面密码沿用原来的 `iphonie-browser`。
+这次测试包的本机控制服务版本为 `0.2.3`，Mozilla 签名的 Firefox 扩展版本为 `0.2.2`，控制协议为 `v3`。安装包内的 `bundle-release.json` 记录配套前端提交、支持的服务和扩展版本、扩展 ID 与签名文件 SHA-256。Xvnc、Firefox Profile、noVNC 1.6.0 和画面密码沿用原来的 `iphonie-browser`。
 
 [产品定稿](../../docs/browser/product-spec.txt) · [界面与交互规范](../../AGENTS.md) · [视觉规格模板](../../docs/browser/visual-spec-template.txt)
 
@@ -9,7 +9,7 @@
 已装好 Phase 1 或 Phase 2 的手机直接更新。在原来的 Termux 会话执行。
 
 ```sh
-curl -fL https://raw.githubusercontent.com/hey8v0/ST-iPhonie/browser-phase2/tools/browser-bridge/ST-iPhonie-Browser-Phase2.sh -o "$HOME/iphonie-phase2.sh" && bash "$HOME/iphonie-phase2.sh" --plugin
+curl -fL https://raw.githubusercontent.com/hey8v0/ST-iPhonie/browser-phase2/tools/browser-bridge/ST-iPhonie-Browser-Phase2.sh -o "$HOME/iphonie-phase2.sh" && bash "$HOME/iphonie-phase2.sh"
 ```
 
 脚本识别 `ST-iPhonie`、旧目录 `ST-TTS` 和旧 GitHub 地址 `hey8v0/ST-TTS`，也会检查酒馆的自定义数据目录。原分支和提交号记录在 Termux 实验目录。若有本地修改、未跟踪文件或找到多个插件目录，脚本保留当前工作区。若需手动指定，请把实际插件目录放在安装命令的 `--plugin` 后面。
@@ -18,23 +18,25 @@ curl -fL https://raw.githubusercontent.com/hey8v0/ST-iPhonie/browser-phase2/tool
 bash "$HOME/iphonie-phase2.sh" --plugin "/你的插件目录/ST-TTS"
 ```
 
-1. 刷新酒馆，打开「小手机 → 浏览器 → 更多 → 维修与更新」。已有配对沿用，提示时输入原有画面密码。维修画面会恢复 Firefox 原生工具栏并打开调试页。
-2. 在调试页移除旧的临时扩展，再点「临时载入附加组件」。文件窗口打开后，点小手机的「填入 XPI 路径」，在 Firefox 文件窗口确认打开。
-3. 点「回到浏览」。若控制服务已停止，维修服务会尝试恢复它，并等待配套扩展实际连上。以后用原来的 `iphonie-bridge` 命令启动浏览器。若安装中断，重跑同一安装包。
-4. 回退时执行 `iphonie-bridge rollback`，随后刷新酒馆。脚本恢复原插件版本。有 Phase 1 安装记录时，控制服务入口一并恢复到 Phase 1。Firefox 数据和原画面服务可以继续使用。
+1. 刷新酒馆，打开「小手机 → 浏览器 → 更多 → 维修与更新」。已有配对沿用，提示时输入画面密码。
+2. 点「安装签名扩展」，再在 Firefox 的权限提示中点「添加」。扩展会持久安装在 Firefox 当前 Profile，可在附加组件管理页停用或移除。
+3. 点「回到浏览」。如果提示重启，点「打开重启页」，再点 Firefox 的「正常重启 / Restart normally」。重启后回到小手机；如果还留在维修页，再点一次「回到浏览」。
+4. 以后用 `iphonie-bridge` 启动。安装中断时重跑同一包。回退用 `iphonie-bridge rollback`，然后刷新酒馆。回退恢复这次更新之前的前端与本机服务，扩展仍由 Firefox 管理。
 
 维修画面独立监听本机回环 `6092`，沿用配对及 VNC 密码。它通过私有 X11 会话恢复 Firefox 工具栏。无法确认原窗口状态时，在同一个 Firefox Profile 中打开正常窗口并保留原窗口的标签页。维修过程中也可用「外部打开画面」进入原 noVNC。如果 Firefox 或 Xvnc 本身已经退出，用平时的启动命令恢复画面。
 
-## Mozilla 签名和持久安装（后续）
+## Firefox 持久安装
 
-本轮使用 [0.2.2 XPI](./iPhonie-Browser-Bridge-0.2.2.xpi) 做临时验收。临时扩展会在 Firefox 重启时卸载。持久安装和签名安排在真机验收后处理。
+Firefox 维护的 Profile 中必须同时找到原签名字节和相符的启用记录。控制服务还会验证经过身份认证的 Native Messaging 会话及握手版本。旧临时副本与签名版的版本相同。桌面实测，正常安装可以写入签名版，但原临时副本会优先在当前会话运行。Firefox 重启后会从 Profile 加载签名版。
 
-1. 在 Mozilla Add-ons Developer Hub 登录或注册，选择 **提交新扩展 → On your own（自行分发）**。选择桌面 Firefox，因为 Termux 运行的是桌面 Gecko。
-2. 上传上述 XPI，扩展 ID 为 `browser-bridge@st-iphonie.local`。从 AMO 下载签名后的文件。后续版本由同一账号上传更新并递增版本号。
-3. 把签名文件放到手机上，执行 `iphonie-bridge signed-addon "/签名文件的完整路径.xpi"`。命令将文件暂存到 Termux 私有目录并输出完整路径。
-4. 在 Termux Firefox 里移除同 ID 的临时副本，打开 `about:addons`，用齿轮菜单「从文件安装附加组件」选择该文件，由 Firefox 校验签名和请求授权。重启 Firefox 后再检查是否自动连接。
+Mozilla 支持通过 Firefox 应用分发目录下的 `policies.json` 配置 `ExtensionSettings` 及本地 `file:///…xpi`。其中 `normal_installed` 会进行托管安装，并可能随版本或文件更新重新安装。Windows 验证了应用目录中的 `distribution`。Termux 中该路径预计随实际 Firefox 可执行文件定位，尚须用真机的 `about:policies` 确认。本包采用 Firefox 普通安装权限提示，适用于已存在的独立 Profile。若地址栏未弹出提示，可在维修页打开 Firefox 附加组件管理，从齿轮菜单选择「从文件安装附加组件」，文件在 Termux 私有的 `$HOME/.local/share/st-iphonie-bridge/current/iPhonie-Browser-Bridge-signed.xpi`。 [Mozilla ExtensionSettings](https://firefox-admin-docs.mozilla.org/reference/policies/extensionsettings/)
 
-这个测试包安装了前端版本、控制服务和本机宿主注册。签名 XPI 的 Firefox 安装确认仍需完成一次。签名文件和持久安装实测是正式分发的前置条件。 [Mozilla 提交流程](https://extensionworkshop.com/documentation/publish/submitting-an-add-on/)
+## 维护签名与配套版本
+
+- 原始源码在 `termux/browser-bridge/extension`。通过 `python tools/browser-bridge/build.py --unsigned` 生成开发用 XPI。Mozilla 提供的 [签名 XPI](./iPhonie-Browser-Bridge-0.2.2-signed.xpi) 单独保存，打包时按原始字节复制。
+- 签名更新使用同一个 AMO 项目、相同的扩展 ID 和 `unlisted` 渠道。新版扩展必须提高版本号。准备好后，从 [AMO API 凭据页](https://addons.mozilla.org/en-US/developers/addon/api/key/) 生成 JWT 凭据，在 GitHub 仓库 `Settings → Environments → mozilla-amo` 添加 Secrets `AMO_JWT_ISSUER` 和 `AMO_JWT_SECRET`。手动工作流执行 lint、桥接测试、签名和源码校验，只上传签名 XPI 和校验值供维护者确认。 [web-ext sign 官方文档](https://extensionworkshop.com/documentation/develop/web-ext-command-reference/#web-ext-sign)
+- 签名文件通过审核后，更新 `release.json` 的版本兼容范围和 SHA-256，保存原始签名文件，提交配套前端与服务。再执行 `python tools/browser-bridge/build.py --frontend <配套前端的完整提交号>` 生成测试包。首次启用 GitHub 工作流需让该工作流出现在仓库默认分支；本分支仅准备流程和候选版本。
+- 0.2.2 的签名 manifest 不含 `update_url`。后续仍通过匹配测试包协调更新。在未来签名版本中采用自动更新前，需要设计可兼容预先部署服务的更新顺序。
 
 ## 重点验收
 

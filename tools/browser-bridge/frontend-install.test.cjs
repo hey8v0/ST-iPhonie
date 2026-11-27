@@ -51,8 +51,14 @@ test('real Git activation and rollback preserve a clean repository and protect l
   fs.writeFileSync(path.join(remote,'test-ui.js'),'// follow-up');
   git(remote,['add','test-ui.js']);git(remote,['commit','-m','phase2 update']);
   const update=git(remote,['rev-parse','HEAD']);
+  const oldSelection=JSON.parse(fs.readFileSync(journal,'utf8'));
   call('activate',update);
   assert.equal(git(plugin,['rev-parse','HEAD']),update);
+  execFileSync(process.execPath,['-e',`require(${JSON.stringify(modulePath)}).rollbackUpdate(JSON.parse(process.argv[1]))`,
+    JSON.stringify({directory:fs.realpathSync.native(plugin),head:target,target:update,branch:'',previous:oldSelection})],
+    {env,cwd:root,stdio:['ignore','pipe','pipe']});
+  assert.equal(git(plugin,['rev-parse','HEAD']),target);
+  assert.deepEqual(JSON.parse(fs.readFileSync(journal,'utf8')),oldSelection);
   fs.writeFileSync(userFile,'test notes');
   assert.throws(()=>call('restore'),/未跟踪文件/);
   assert.equal(fs.readFileSync(userFile,'utf8'),'test notes');

@@ -4,6 +4,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const base = path.join(os.homedir(), '.local/share/st-iphonie-bridge');
+const browser = path.join(os.homedir(), '.local/share/st-iphonie-browser');
+const profile = path.join(browser,'profile');
 const port = 6091;
 const host = '127.0.0.1:' + port;
 const origin = 'http://' + host;
@@ -27,4 +29,4 @@ function equal(a, b) {
   return typeof a === 'string' && tokenPattern.test(a) && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-module.exports = {base, host, port, origin, repairOrigin, manifestName, extensionId, manifest, filename, socket, secrets, equal};
+module.exports = {base, browser, profile, host, port, origin, repairOrigin, manifestName, extensionId, manifest, filename, socket, secrets, equal};

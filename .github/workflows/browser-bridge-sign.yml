@@ -1,0 +1,65 @@
+name: Sign iPhonie Browser Bridge
+on:
+  workflow_dispatch:
+    inputs:
+      last_signed_version:
+        description: Latest version already signed in the existing AMO project
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  sign:
+    if: github.ref == 'refs/heads/browser-phase2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: mozilla-amo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate extension identity and increasing version
+        env:
+          LAST_SIGNED_VERSION: ${{ inputs.last_signed_version }}
+        run: |
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          root = Path("termux/browser-bridge")
+          manifest = json.loads((root / "extension/manifest.json").read_text())
+          release = json.loads((root / "release.json").read_text())
+          gecko = manifest["browser_specific_settings"]["gecko"]
+          assert gecko["id"] == release["extensionId"] == "browser-bridge@st-iphonie.local"
+          assert "update_url" not in gecko
+          def version(value):
+              assert re.fullmatch(r"\d+\.\d+\.\d+", value)
+              return tuple(map(int, value.split(".")))
+          assert manifest["version"] == release["extension"]
+          assert version(manifest["version"]) > max((0, 2, 2), version(os.environ["LAST_SIGNED_VERSION"]))
+          PY
+      - name: Lint extension
+        run: npx --yes web-ext@10.5.0 lint --self-hosted --source-dir termux/browser-bridge/extension
+      - name: Run bridge and recovery tests
+        run: node --test tools/browser-bridge/bridge.test.cjs tools/browser-bridge/recovery.test.cjs tools/browser-bridge/frontend-install.test.cjs
+      - name: Request unlisted AMO signature
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          test -n "$WEB_EXT_API_KEY" && test -n "$WEB_EXT_API_SECRET"
+          npx --yes web-ext@10.5.0 sign --channel=unlisted --source-dir termux/browser-bridge/extension --artifacts-dir amo-signed
+      - name: Check the signed asset against the submitted source
+        run: |
+          shopt -s nullglob
+          files=(amo-signed/*.xpi)
+          test "${#files[@]}" -eq 1
+          digest="$(python tools/browser-bridge/build.py --verify-signed --signed "${files[0]}")"
+          printf '%s  %s\n' "$digest" "$(basename "${files[0]}")" > amo-signed/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-bridge-amo-signed
+          path: |
+            amo-signed/*.xpi
+            amo-signed/SHA256SUMS
+          if-no-files-found: error

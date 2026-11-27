@@ -3,7 +3,7 @@ import {icon} from './icons.js';
 import {connectTermux,knownTermux,termuxCard,termuxHealth,TERMUX_VIEW} from './termux-connection.js';
 import {mountSwipeList,swipeRow} from './swipe-list.js';
 import {shareWebPage,webSearchSettings} from './web-share.js';
-import {bridgeBuild,bridgeKey,bridgeVersion,browserLink,visibleBrowserArea} from './browser-phase2-link.js';
+import {bridgeBuild,bridgeExtension,compatibleBridgeBuilds,bridgeKey,bridgeVersion,browserLink,visibleBrowserArea} from './browser-phase2-link.js';
 import {browserInput} from '../termux/browser-bridge/viewer/input.js';
 
 const recentLimit = 30;
@@ -73,8 +73,9 @@ export function browserPhase2(ctx,parse) {
     </nav>
     <div class="browser-v2-repair" hidden>
       <p role="status"></p><div class="browser-card-actions">
-      ${btn('repair-open','打开扩展更新页','secondary')}
-      ${btn('repair-addon','填入 XPI 路径','secondary')}
+      ${btn('repair-open','打开附加组件','secondary')}
+      ${btn('repair-addon','安装签名扩展','secondary')}
+      ${btn('repair-restart','打开重启页','secondary','hidden')}
       ${btn('repair-done','回到浏览','secondary')}
       ${btn('repair-external','外部打开画面','secondary')}
       </div>
@@ -307,7 +308,7 @@ export function browserPhase2(ctx,parse) {
     }
   }
   function browserState(data) {
-    if ((data.version && data.version !== bridgeVersion) || (data.build && data.build!==bridgeBuild)) {
+    if ((data.version && data.version !== bridgeVersion) || (data.build && !compatibleBridgeBuilds.has(data.build))) {
       stageChanged('version');return;
     }
     if (data.status !== 'connected' || !data.state) {
@@ -318,12 +319,21 @@ export function browserPhase2(ctx,parse) {
       if (!failure && surface) {
         setImmersive(false);
         const text=data.status==='version-mismatch' ?
-          `Firefox 扩展${data.extension ? ' '+data.extension : ''}需要更新至 ${bridgeBuild}。` :
+          `Firefox 扩展${data.extension ? ' '+data.extension : ''}需要更新至 ${bridgeExtension}。` :
           data.status==='offline' ? '控制服务未启动。可进入维修与更新。' :
           data.status==='disconnected' ? 'Firefox 扩展已断开。可进入维修与更新。' :
           '正在等待 Firefox 扩展连接。首次使用可进入维修与更新。';
         feedbackFor(text,[['legacy-browser','维修与更新'],['help','帮助']]);
       }
+      layout();return;
+    }
+    if (data.build===bridgeBuild && data.signed!=='installed') {
+      state=null;shell=false;keyboard.bind(null,null);progress.hidden=true;
+      setImmersive(false);
+      const text=data.signed==='restart-required' ? '签名扩展已装入。请通过维修入口正常重启 Firefox。' :
+        data.signed==='disabled' ? '签名扩展已停用。可在 Firefox 附加组件页面重新启用。' :
+        '请在维修入口完成签名扩展安装。';
+      feedbackFor(text,[['legacy-browser','维修与更新'],['help','帮助']]);
       layout();return;
     }
     state=data.state;
@@ -482,7 +492,10 @@ export function browserPhase2(ctx,parse) {
       return `维修服务为 ${repairInfo.build}，当前插件需要 ${bridgeBuild}。请运行配套测试安装包。`;
     if (['preparing','browser','frontend','failed'].includes(repairInfo?.update))
       return '上次安装未完成。可以先使用 Firefox，随后重跑同一个测试安装包。';
-    return '移除旧临时扩展，点「临时载入附加组件」打开文件窗口，再点「填入 XPI 路径」。';
+    if (repairInfo?.signed==='restart-required')
+      return '签名扩展已装入。点「打开重启页」，然后在 Firefox 点「正常重启」。';
+    if (repairInfo?.signed==='disabled') return '请在 Firefox 附加组件页面启用 iPhonie Browser Bridge。';
+    return '点「安装签名扩展」，然后在 Firefox 的权限提示中点「添加」。';
   }
   async function repairAction(action) {
     const current=surface;
@@ -494,12 +507,16 @@ export function browserPhase2(ctx,parse) {
     if (!result.ok) {
       repairNote(result.reason==='update-incomplete' ? '安装未完成。可重新运行同一个测试安装包。' :
         result.reason==='control-start' ? '控制服务未恢复，仍可使用维修画面。' :
-        result.reason==='extension-update' ? '控制服务已启动，正在等配套扩展。请确认已载入新版 XPI，稍等后再点「回到浏览」。' :
+        result.reason==='extension-update' ? '正在等待签名扩展。请完成 Firefox 的安装授权，再点「回到浏览」。' :
+        result.reason==='extension-restart' ? '签名扩展已装入。点「打开重启页」，然后在 Firefox 点「正常重启」。' :
+        result.reason==='frontend-version' ? '前端版本已变动。请使用配套测试安装包，装好后刷新酒馆。' :
         '无法自动恢复工具栏。可在外部画面使用 Firefox 全屏键。');
+      if (result.reason==='extension-restart') find('[data-action=repair-restart]').hidden=false;
       return;
     }
     if (action==='repair-done') {forgetConnection();connect();return;}
-    repairNote(action==='repair-addon' ? '路径已填入，请在 Firefox 文件窗口确认打开。' : repairInstructions());
+    repairNote(action==='repair-addon' ? '请在 Firefox 的权限提示中点「添加」，然后点「回到浏览」。' :
+      action==='repair-restart' ? '在 Firefox 点「正常重启」。如画面断开，稍等片刻后重新进入维修。' : repairInstructions());
   }
   function oldViewer(text) {
     surface?.close();surface=null;
@@ -525,6 +542,7 @@ export function browserPhase2(ctx,parse) {
       if (!repair) return;
       if (type==='repair-info') {
         repairInfo=data;layout();
+        find('[data-action=repair-restart]').hidden=data.signed!=='restart-required';
       }
       if (type!=='rfb-state') return;
       if (data.stage==='ready') {
@@ -636,13 +654,13 @@ export function browserPhase2(ctx,parse) {
       case 'retry':forgetConnection();connect();break;
       case 'legacy-browser':openRepair();break;
       case 'repair-open':await repairAction('repair-open');break;
+      case 'repair-restart':await repairAction('repair-restart');break;
       case 'repair-done':
         if (surface) await repairAction('repair-done');
         else {forgetConnection();connect();}
         break;
       case 'repair-addon': {
         if (!repairInfo?.addon) break;
-        if (!await ctx.confirm('填入扩展文件路径？','请先在 Firefox 点「临时载入附加组件」，让文件窗口保持打开。')) break;
         await repairAction('repair-addon');
         break;
       }

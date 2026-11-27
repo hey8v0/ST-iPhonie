@@ -73,7 +73,7 @@ test('independent repair viewer paints an authenticated RFB frame without the co
   const origin=repairOrigin,host=new URL(origin).host,key='a'.repeat(64);
   let requested=0;
   const repair=createRecovery({panel:key,native:'b'.repeat(64),readUpdate:()=> 'extension',
-    driver:{locate:async()=>true,restore:async debug=>{if(debug) requested++;return {ok:true};}},
+    driver:{locate:async()=>true,restore:async page=>{if(page==='addons') requested++;return {ok:true};}},
     serve:(req,res,origin)=>serveGraphics(req,res,origin,process.env.STIP_TEST_NOVNC)});
   const stop=attachGraphics(repair,{host,origin,panel:key,onIdle(){},websocket,vncPort:tcp.address().port});
   t.after(()=>{stop();repair.closeAllConnections();repair.close();});

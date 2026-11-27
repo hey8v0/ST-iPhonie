@@ -58,16 +58,23 @@ test('detects only Firefox processes using the managed profile, session marker a
     fs.writeFileSync(path.join(files,'cmdline'),[exe,'--profile',path.join(source,profile)].join('\0'));
     fs.writeFileSync(path.join(files,'environ'),
       ['DISPLAY=:29','IPHONIE_SESSION='+marker,'XAUTHORITY='+path.join(source,auth)].join('\0'));
+    fs.writeFileSync(path.join(files,'stat'),pid+' (firefox) S '+Array(21).fill('5').join(' '));
   }
-  assert.deepEqual(findSessions(source,proc),[{...session,auth:path.join(source,'Xauthority')}]);
+  const [{runtime,...managed}]=findSessions(source,proc);
+  assert.equal(findSessions(source,proc).length,1);
+  assert.match(runtime,/^[a-f0-9]{64}$/);
+  assert.deepEqual(managed,{...session,auth:path.join(source,'Xauthority')});
 });
 
 test('recovers verified Firefox chrome and opens a new debugging tab; never toggles blindly', async()=>{
   const {driver,keys,typed}=desktop();
-  assert.equal((await driver.restore(true)).ok,true);
+  assert.equal((await driver.restore('addons')).ok,true);
   assert.deepEqual(keys,['Escape','F11','ctrl+t','ctrl+l','Return']);
-  assert.deepEqual(typed,['about:debugging#/runtime/this-firefox']);
-  await driver.restore(true);
+  assert.deepEqual(typed,['about:addons']);
+  await driver.restore('restart');
+  assert.equal(typed.at(-1),'about:profiles');
+  assert.equal((await driver.restore('install',path.resolve('signed addon.xpi'))).ok,true);
+  assert.match(typed.at(-1),/^file:.*signed%20addon\.xpi$/);
   assert.equal(keys.filter(key=>key==='F11').length,1);
 });
 
@@ -75,13 +82,13 @@ test('without xprop uses a separate window in the same session and can return to
   const {driver,keys,focusOther,active}=desktop(false);
   assert.equal((await driver.restore()).mode,'new-window');
   assert.equal(active(),'12');
-  assert.equal((await driver.restore(true)).ok,true);
+  assert.equal((await driver.restore('addons')).ok,true);
   assert.equal(keys.filter(key=>key==='ctrl+n').length,1);
   assert(!keys.includes('F11'));
   await driver.finish();
   assert.equal(active(),'11');
   focusOther();
-  assert.equal((await driver.restore(true)).reason,'window-focus');
+  assert.equal((await driver.restore('addons')).reason,'window-focus');
 });
 
 test('authenticated recovery works while extension or control service is absent, mismatched, or update was interrupted',async t=>{
@@ -112,7 +119,7 @@ test('authenticated recovery works while extension or control service is absent,
   assert.equal((await call('/admin/restore',{token:native})).code,403);
   assert.equal((await call('/eval')).code,404);
   assert.equal((await call('/repair-open',{body:'{"url":"https://ignored.example","shell":"ignored"}'})).body.ok,true);
-  assert.deepEqual(typed,['about:debugging#/runtime/this-firefox']);
+  assert.deepEqual(typed,['about:addons']);
   assert.equal(control,'stopped');
   assert.equal((await call('/repair-done')).body.reason,'update-incomplete');
   assert.equal(resumes,0);

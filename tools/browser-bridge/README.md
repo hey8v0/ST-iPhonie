@@ -1,5 +1,7 @@
 # Firefox 控制实验 · Phase 1
 
+Phase 2 签名版安装和重启验证见 [Phase 2 测试说明](./PHASE2.md)。
+
 实验包为 `0.1.0`，控制协议为 `v1`。源码在 `browser-bridge-poc`，基于 `browser-next` 的 `1f236e6`。实验组件独立运行。手机上的酒馆插件和原有本机 Firefox 服务无需切换分支或重新安装。
 
 ## 安卓验证

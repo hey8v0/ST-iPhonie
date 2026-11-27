@@ -89,7 +89,7 @@ function clean(directory) {
     throw new Error('插件目录中有本地修改或未跟踪文件。已保留这些文件和当前版本。');
 }
 
-function activate(given,expected,build) {
+function prepare(given,expected,expectedRelease) {
   const directory = pluginDir(given);
   clean(directory);
   if (expected && !commit.test(expected)) throw new Error('测试前端提交号无效。');
@@ -100,9 +100,35 @@ function activate(given,expected,build) {
     throw new Error('测试包对应的前端版本不可用。');
   const selected = expected || target;
   execFileSync('git',['-C',directory,'merge-base','--is-ancestor',selected,target],{stdio:'ignore'});
-  if (build && JSON.parse(git(directory,['show',selected+':termux/browser-bridge/extension/manifest.json'])).version!==build)
-    throw new Error('下载的安装包与目标前端版本不同，请使用同一批次的测试包。');
+  if (expectedRelease) {
+    const descriptor=JSON.parse(git(directory,['show',selected+':termux/browser-bridge/release.json']));
+    if (Object.entries(expectedRelease).some(([key,value])=>JSON.stringify(descriptor[key])!==JSON.stringify(value)))
+      throw new Error('下载的安装包与目标前端版本不同，请使用同一批次的测试包。');
+  }
   const head = git(directory,['rev-parse','HEAD']);
+  const previous = fs.existsSync(selectionFile) ? JSON.parse(fs.readFileSync(selectionFile,'utf8')) : null;
+  if (previous && (previous.directory!==directory || ![previous.head,previous.target,previous.pending].includes(head)))
+    throw new Error('插件目录已切换到其他版本。当前文件已保留。');
+  return {directory,head,target:selected,branch:git(directory,['branch','--show-current']),previous};
+}
+
+function activate(given,expected,expectedRelease) {
+  apply(prepare(given,expected,expectedRelease));
+}
+
+function checkCompatibility(given,{protocol,service}) {
+  const directory=pluginDir(given);
+  let descriptor;
+  try {descriptor=JSON.parse(git(directory,['show','HEAD:termux/browser-bridge/release.json']));} catch {}
+  if (descriptor?.protocol!==protocol || !descriptor.compatibleServices?.includes(service) ||
+    git(directory,['status','--porcelain=v1','--','ui/browser.js','ui/browser.css','ui/browser-phase2.js','ui/browser-phase2-link.js']))
+    throw new Error('当前前端未通过服务兼容检查。请使用完整测试安装包。');
+  return {directory,head:git(directory,['rev-parse','HEAD'])};
+}
+
+function apply({directory,head,target:selected,branch}) {
+  clean(directory);
+  if (git(directory,['rev-parse','HEAD'])!==head) throw new Error('插件版本在安装期间已更改，请重跑安装包。');
   if (fs.existsSync(selectionFile)) {
     const previous = JSON.parse(fs.readFileSync(selectionFile,'utf8'));
     if (previous.directory!==directory || ![previous.head,previous.target,previous.pending].includes(head))
@@ -116,13 +142,28 @@ function activate(given,expected,build) {
     return;
   }
   if (head === selected) return;
-  const record = {directory,head,target:selected,branch:git(directory,['branch','--show-current'])};
+  const record = {directory,head,target:selected,branch};
   fs.writeFileSync(selectionFile,JSON.stringify(record),{flag:'wx',mode:0o600});
   try {git(directory,['switch','--detach',selected]);}
   catch {
     if (git(directory,['rev-parse','HEAD']) === head) fs.unlinkSync(selectionFile);
     throw new Error('Git 无法切换到测试提交，现有文件已保留。');
   }
+}
+
+function rollbackUpdate({directory,head,target,branch,previous}) {
+  if (pluginDir(directory)!==directory || !commit.test(head) || !commit.test(target))
+    throw new Error('回退记录无效。');
+  clean(directory);
+  const actual=git(directory,['rev-parse','HEAD']);
+  if (![head,target].includes(actual)) throw new Error('插件已切换至其他版本。已保留当前版本。');
+  if (actual!==head) {
+    let original;
+    try {if (branch) original=git(directory,['rev-parse','--verify','refs/heads/'+branch]);} catch {}
+    git(directory,original===head ? ['switch',branch] : ['switch','--detach',head]);
+  }
+  if (previous) writeSelection(previous);
+  else fs.rmSync(selectionFile,{force:true});
 }
 
 function restore() {
@@ -142,4 +183,4 @@ function restore() {
   }
   fs.unlinkSync(selectionFile);
 }
-module.exports = {activate,restore,pluginDir};
+module.exports = {activate,restore,prepare,apply,rollbackUpdate,checkCompatibility};

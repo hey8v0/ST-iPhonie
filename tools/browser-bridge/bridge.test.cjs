@@ -76,9 +76,9 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
   const host = '127.0.0.1:' + port, origin = 'http://' + host;
-  let rescue;
+  let rescue, installation;
   const service = createService({panel,native,host,origin,inspectInstall:() => ({manifestPresent:true}),onStop:() => {},
-    recovery:async()=>rescue});
+    recovery:async()=>rescue,signedStatus:()=>installation});
   const children = [];
   t.after(async () => {
     service.shutdown();
@@ -148,6 +148,11 @@ test('HTTP auth and origin, native subprocess handshake, state, response, discon
   const fullscreen=command('browser-fullscreen',{enabled:true});
   const hide=async()=>(await call('/command',{data:fullscreen})).json();
   assert.equal((await hide()).error,'recovery-unavailable');
+  installation='restart-required';
+  rescue={ready:true};
+  assert.equal((await hide()).error,'repair-active');
+  assert.equal((await status()).signed,'restart-required');
+  installation='installed';
   rescue={ready:true,maintenance:true};
   assert.equal((await hide()).error,'repair-active');
   rescue={ready:true,update:'frontend'};

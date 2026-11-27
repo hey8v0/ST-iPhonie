@@ -1,6 +1,8 @@
 export const bridgeOrigin = 'http://127.0.0.1:6091';
 export const bridgeVersion = 3;
-export const bridgeBuild = '0.2.2';
+export const bridgeBuild = '0.2.3';
+export const bridgeExtension = '0.2.2';
+export const compatibleBridgeBuilds = new Set(['0.2.2',bridgeBuild]);
 const repairOrigin = 'http://127.0.0.1:6092';
 export const bridgeKey = /^([a-f0-9]{64})$/;
 

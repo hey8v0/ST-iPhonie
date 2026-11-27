@@ -4,7 +4,8 @@ const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
 const {command, error:knownError, exact, state:validState, version} = require('./extension/protocol.js');
-const {version:build} = require('./extension/manifest.json');
+const signed = require('./signed-release.cjs');
+const {service:build,compatibleExtensions} = signed.settings;
 const {readFrames, writeFrame} = require('./frames.cjs');
 const config = require('./config.cjs');
 
@@ -13,7 +14,8 @@ const assets = new Map([
   ['/panel.js',['panel.js','text/javascript']], ['/fixture',['fixture.html','text/html']],
 ]);
 
-function createService({panel, native, host, origin, inspectInstall, onStop, serveGraphics, recovery}) {
+function createService({panel, native, host, origin, inspectInstall, onStop, serveGraphics, recovery,
+  signedStatus=()=>null}) {
   const staticFiles = new Map([...assets].map(([route,[name,mime]]) => [
     route,[fs.readFileSync(path.join(__dirname,'panel',name)),mime],
   ]));
@@ -34,7 +36,8 @@ function createService({panel, native, host, origin, inspectInstall, onStop, ser
     return {service:'iphonie-browser-bridge', version, build, status, connections,
       firefox:browserBuild || null, extension:extensionBuild || null, observedTabs:state?.tabs.length ?? null,
       pageInspectable:state?.viewport != null, viewport:state?.viewport || null,
-      focus:state?.focus || null,focusFrame:state?.field?.frame ?? null,ipcReady:ipc.listening, ...inspectInstall()};
+      focus:state?.focus || null,focusFrame:state?.field?.frame ?? null,ipcReady:ipc.listening,
+      signed:signedStatus(), ...inspectInstall()};
   }
 
   const ipc = net.createServer(stream => {
@@ -69,7 +72,7 @@ function createService({panel, native, host, origin, inspectInstall, onStop, ser
           return;
         }
         extensionBuild=typeof msg.build==='string' && /^\d+\.\d+\.\d+$/.test(msg.build) ? msg.build : null;
-        if (msg.version !== version || msg.build !== build) {
+        if (msg.version !== version || !compatibleExtensions.includes(msg.build)) {
           status = 'version-mismatch';
           writeFrame(stream, {type:'rejected', version, reason:'version-mismatch'});
           stream.end();
@@ -102,6 +105,8 @@ function createService({panel, native, host, origin, inspectInstall, onStop, ser
     if (status !== 'connected' || !peer) return {ok:false,error:'disconnected'};
     if (pending || checkingChrome) return {ok:false,error:'busy'};
     if (msg.action==='browser-fullscreen' && msg.params.enabled) {
+      const installation=signedStatus();
+      if (installation && installation!=='installed') return {ok:false,error:'repair-active'};
       const active=peer;
       checkingChrome=true;
       let rescue;
@@ -187,9 +192,17 @@ async function daemon() {
   const {panel,native} = config.secrets();
   const {serveGraphics,attachGraphics} = require('./graphics.cjs');
   const recovery=require('./recovery.cjs');
+  let checkedAt=0, signedState;
   const {server, ipc, shutdown,releaseViewer} = createService({
     panel, native, host:config.host, origin:config.origin, serveGraphics,
-    recovery:()=>recovery.request('status'),
+    recovery:async()=>{
+      const state=await recovery.request('status');
+      return state?.build===build ? state : null;
+    },
+    signedStatus:()=>{
+      if (Date.now()-checkedAt>900) {signedState=signed.status();checkedAt=Date.now();}
+      return signedState;
+    },
     inspectInstall:() => ({manifestPresent:fs.existsSync(config.manifest),
       hostInvoked:fs.existsSync(config.filename('native-invoked'))}),
     onStop:stop,
